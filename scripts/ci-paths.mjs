@@ -133,6 +133,16 @@ const web = full || workflowOrBuild || runtime || webChange || fallback;
 const modes = full || workflowOrBuild || runtime || modeChange || fallback;
 const engineSmoke = full || workflowOrBuild || engineChange || fallback;
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
+// The limits census (test/limit_sites.py --check, also asserted by
+// test/limits.test.ts) scans lib/, engine/ and src/.  Its own light job runs
+// whenever they, its registry, baseline or tool change, even when the node
+// suites are path-skipped: #155, an engine-only change, merged past the
+// census with node-tests skipped and turned master red (fixed by #156).
+const censusPaths = [
+  /^engine\//, /^lib\//, /^src\//,
+  /^test\/limit-sites\.json$/, /^test\/limit-sites-baseline\.txt$/, /^test\/limit_sites\.py$/,
+];
+const census = full || workflowOrBuild || matches(censusPaths) || fallback;
 
 const outputs = {
   full,
@@ -145,6 +155,7 @@ const outputs = {
   engine_smoke: engineSmoke,
   engine_full: full,
   engine_cpython: engineCpython,
+  census,
   // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
   size_inputs: gateInputs(files).length > 0,
   files: files.length,

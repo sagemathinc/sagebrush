@@ -30,6 +30,7 @@ jobs:
       engine_smoke: ${{ steps.paths.outputs.engine_smoke }}
       engine_full: ${{ steps.paths.outputs.engine_full }}
       engine_cpython: ${{ steps.paths.outputs.engine_cpython }}
+      census: ${{ steps.paths.outputs.census }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +50,24 @@ jobs:
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: node scripts/ci-paths.mjs >> "$GITHUB_OUTPUT"
+
+  # (the limits census alone, in seconds and with no build: it must run on an
+  # engine-only pull request too, whose node suites are path-skipped; #155)
+  census:
+    needs: changes
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.census == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: "limits census: every census-vocabulary site registered, the baseline the seed's (test/limit_sites.py --check)"
+        run: |
+          python3 test/limit_sites.py --check > census.json || { cat census.json; exit 1; }
+          pinned=$(sed -n 's/^const LIMIT_SITES_BASELINE_SHA256 = "\([0-9a-f]*\)";$/\1/p' test/limits.test.ts)
+          python3 -c 'import json, sys; d = json.load(open("census.json")); print(json.dumps({k: d[k] for k in ("sites", "registered", "explained", "problems")})); sys.exit(0 if d["baseline_sha256"] == sys.argv[1] and d["explained"] >= 17 else 1)' "$pinned"
 
   node-tests:
     needs: changes
@@ -951,6 +970,7 @@ jobs:
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
     needs:
       - changes
+      - census
       - node-tests
       - language-node
       - checks
@@ -971,7 +991,8 @@ jobs:
       - name: require every selected job to pass
         env:
           RESULTS: >-
-            ${{ needs.changes.result }} ${{ needs.node-tests.result }}
+            ${{ needs.changes.result }} ${{ needs.census.result }}
+            ${{ needs.node-tests.result }}
             ${{ needs.language-node.result }}
             ${{ needs.checks.result }} ${{ needs.size-gate.result }}
             ${{ needs.web-sync.result }}
