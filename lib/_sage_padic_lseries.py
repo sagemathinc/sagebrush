@@ -925,17 +925,20 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
             [       2 + O(5) 3*5^-1 + O(5^0)]
             [       3 + O(5)        3 + O(5)]
 
-        Large primes and precisions are refused rather than left to run
-        (Sage computes them)::
+        There is no default limit on the work: a large prime or precision
+        runs until it is done or stopped (Stop interrupts it at every stage,
+        and sagebrush.progress shows the stage).  A context that wants a
+        limit sets padic.kedlaya_work, in the units of _kd_cost (about 25
+        microseconds each in the CLI).  Memory is guarded (SagebrushMemoryError):
+        a precision whose working modulus alone can't fit this process is
+        refused at once, and one estimated to need more than a quarter of it
+        before any work::
 
-            sage: EllipticCurve('27a1').padic_lseries(2003).frobenius(2)  # sagebrush only
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: the Frobenius matrix at p = 2003 to precision 2 is beyond sagebrush's limit (estimated work 100300225 > 1048576)
-            sage: EllipticCurve('14a1').padic_lseries(5).frobenius(408)  # sagebrush only
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: the Frobenius matrix at p = 5 to precision 408 is beyond sagebrush's limit (estimated work 4223025 > 1048576)
+            sage: try:  # sagebrush only
+            ....:     EllipticCurve('14a1').padic_lseries(5).frobenius(10^100)
+            ....: except MemoryError as e:
+            ....:     print(type(e).__name__, e.need_bytes > e.limit_bytes)
+            SagebrushMemoryError True
         """
         sa = _sa()
         if algorithm not in ("mw", "approx"):
@@ -948,12 +951,16 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
             raise ValueError("prec (=%s) must be a positive integer" % prec)
         if p == 3:
             raise NotImplementedError("the Frobenius matrix at p = 3 is not available in sagebrush yet (Sage refuses it too)")
-        if _kd_cost(p, prec + 1) > _KD_MAX_WORK:
-            raise NotImplementedError("the Frobenius matrix at p = %d to precision %d is beyond sagebrush's limit (estimated work %d > %d)" % (p, prec, _kd_cost(p, prec + 1), _KD_MAX_WORK))
         a1, a2, a3, a4, a6 = [_F(int(x)) if not isinstance(x, _F) else x for x in self._E.a_invariants()]
         Qc = [(a3 * a3 + 4 * a6) / 4, (2 * a4 + a1 * a3) / 2, (a1 * a1 + 4 * a2) / 4, _F(1)]
         N = prec + 1
-        M = _kd_frobenius_matrix(Qc, p, N)
+        from sagebrush import progress
+        with progress.call("padic_lseries.frobenius") as call:
+            rec = _KdProgress(call)
+            rec.stage(0, 1)
+            K, W = _kd_preflight(p, N, prec, Qc)
+            rec.tick(1)
+            M = _kd_frobenius_matrix(Qc, p, N, K, W, rec)
         tr = M[0][0] + M[1][1]
         det = M[0][0] * M[1][1] - M[0][1] * M[1][0]
         if (tr - self._ap) % p ** N or (det - p) % p ** N:
@@ -977,29 +984,28 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
 # J. Ramanujan Math. Soc. 16 (2001), arXiv math/0105031, sections 3-4;
 # [H] = M. Harrison, arXiv:1006.4206, Lemmas 3.3-3.4 (the corrected forms of
 # [K]'s Lemmas 2 and 3, as in [K]'s 2003 errata).
-
-# The work allowed for frobenius(), in the units of _kd_cost.
-_KD_MAX_WORK = 1 << 20
-
+#
+# No default limit (cliff audit rank 14, plan-kedlaya-optin r6): the opt-in
+# work limit padic.kedlaya_work, and the memory guard, which always applies:
+# _kd_preflight refuses, before the working modulus is made, a call whose
+# modulus alone exceeds this process's memory (_capacity.heap_figure()), and
+# one whose ledger, an upper bound on its peak (_kd_ledger), exceeds a
+# quarter of it.
 
 def _kd_cost(p, N):
     """The estimated work of _kd_frobenius_matrix(Q, p, N) for a dense Q
-    (the worst case: zero coefficients are skipped), in units of about 25
-    microseconds in the CLI: U = p^2 (K + 2)^2 (1 + W log2(p) / 1024), K
-    and W from _kd_plan.  The series has about k p live terms at step k,
-    each combined with about p digits of E, so about p^2 K^2 products of
-    W log2(p)-bit numbers; K + 2 counts the check of the next two terms,
-    and the bit size the cost of one product.  Fitted on 27a1's dense model
-    y^2 + y = x^3 + 3 x^2 + 3 x - 6 at p = 5 ... 197 and prec 3 ... 200
-    (2.2 to 2.6 10^-5 s per unit); it also gives the 88 s of p = 197, prec
-    8 and the 147 s of 14a1 at p = 5, prec 408 measured in review.  With
-    the limit 2^20 a call takes about half a minute at most (and Stop
-    interrupts it).  p^2 (N + 2)^2 <= U (K >= N) is checked first, so an
-    enormous N is refused without planning it."""
-    lower = p * p * (N + 2) ** 2
-    if lower > _KD_MAX_WORK:
-        return lower
-    K, W = _kd_plan(p, N)
+    (the worst case: zero coefficients are skipped), in the units of the
+    limit padic.kedlaya_work, about 25 microseconds each in the CLI:
+    p^2 (K + 2)^2 (1 + W log2(p) / 1024), K and W from _kd_plan_fast.  The
+    series has about k p live terms at step k, each combined with about p
+    digits of E, so about p^2 K^2 products of W log2(p)-bit numbers; K + 2
+    counts the check of the next two terms, and the bit size the cost of one
+    product.  Fitted on 27a1's dense model y^2 + y = x^3 + 3 x^2 + 3 x - 6
+    at p = 5 ... 197 and prec 3 ... 200 (2.2 to 2.6 10^-5 s per unit); it
+    also gives the 88 s of p = 197, prec 8 and the 147 s of 14a1 at p = 5,
+    prec 408 measured in review.  Since K >= N, p^2 (N + 2)^2 is at most
+    this (the preflight's shortcut under a finite limit)."""
+    K, W = _kd_plan_fast(p, N)
     return p * p * (K + 2) ** 2 * (1024 + W * p.bit_length()) // 1024
 
 
@@ -1060,17 +1066,21 @@ def _kd_pdiv(c, d, p, P):
     return (c % P) // p ** v * pow(d, -1, P) % P
 
 
-def _kd_frobenius_matrix(Qc, p, N):
+def _kd_frobenius_matrix(Qc, p, N, K=None, W=None, rec=None):
     """[[a, b], [c, d]] mod p^N: F(dx/y) = a dx/y + c x dx/y and
     F(x dx/y) = b dx/y + d x dx/y (columns are images), for y^2 = Q(x),
-    Qc = [q0, q1, q2, 1] rationals (p-integral).  The next two omitted terms
-    are computed too and must contribute 0 modulo p^N (as _plan's bound
-    says), else an error is raised, never a value."""
-    K, W = _kd_plan(p, N)
-    M = _kd_frobenius(Qc, p, N, K, W)
+    Qc = [q0, q1, q2, 1] rationals (p-integral); K, W from _kd_plan_fast by
+    default.  The next two omitted terms are computed too and must
+    contribute 0 modulo p^N (as the plan's bound says), else an error is
+    raised, never a value.  The two calls run one after the other; only M
+    is kept during the second (the ledger's U)."""
+    if K is None:
+        K, W = _kd_plan_fast(p, N)
+    rec = rec or _KD_NO_PROGRESS
+    M = _kd_frobenius(Qc, p, N, K, W, 0, rec, 1)
     # the next two omitted terms must contribute 0 modulo p^N (the
-    # truncation bound of _plan, checked)
-    T = _kd_frobenius(Qc, p, N, K + 2, W + 3, terms_from=K + 1)
+    # truncation bound of the plan, checked)
+    T = _kd_frobenius(Qc, p, N, K + 2, W + 3, K + 1, rec, 6)
     if any(x % p ** N for row in T for x in row):
         raise ArithmeticError("internal error: the omitted terms of the Frobenius series are not 0 modulo p^%d" % N)
     return M
@@ -1078,7 +1088,8 @@ def _kd_frobenius_matrix(Qc, p, N):
 
 def _kd_plan(p, N):
     """(K, W): the series terms k <= K and the working modulus p^W, for
-    the matrix modulo p^N (p >= 5).
+    the matrix modulo p^N (p >= 5), by the definition (one k at a time:
+    the reference for _kd_plan_fast, which computes the same).
 
     The term k of 1/y^sigma = y^-p sum_k binom(-1/2, k) p^k E^k y^-2pk
     ([K] section 3) is divisible by p^k, and F(x^i dx/y) = p x^(p i + p - 1)
@@ -1103,37 +1114,128 @@ def _kd_plan(p, N):
     return K, W
 
 
-def _kd_frobenius(Qc, p, N, K, W, terms_from=0):
+def _kd_plan_fast(p, N):
+    """_kd_plan(p, N), in O(log N) steps: h(k) = k - 1 - floor(log_p(3k))
+    never decreases, so the first k >= 1 with h(k + 1) >= N is found by
+    doubling and then bisection."""
+    if p < 5:
+        raise NotImplementedError("p >= 5 only")
+
+    def h(k):
+        return k - 1 - _kd_ilog(3 * k, p)
+
+    hi = 1
+    while h(hi + 1) < N:
+        hi *= 2
+    lo = hi // 2          # h(lo + 1) < N when lo >= 1 (lo = 0: none tested)
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if h(mid + 1) < N:
+            lo = mid
+        else:
+            hi = mid
+    K = hi
+    return K, N + 3 + _kd_ilog(3 * K, p)
+
+
+def _kd_modulus(p, W):
+    """(p^W, p^(W + 1)): the working moduli, made here and nowhere else (a
+    test replaces this function to show that a refusal comes before them)."""
+    P = p ** W
+    return P, P * p
+
+
+class _KdProgress:
+    """frobenius()'s progress: 11 stages, each with its own done and total
+    (plan-kedlaya-optin r6 section 4); a stage change is written at once."""
+
+    STAGES = ("plan", "setup: Q^p", "setup: digits", "series", "reduce dx/y", "reduce x dx/y",
+              "check: setup Q^p", "check: setup digits", "check: series", "check: reduce dx/y",
+              "check: reduce x dx/y")
+
+    def __init__(self, call):
+        self._call = call
+
+    def stage(self, index, total):
+        self._call.update(stage=self.STAGES[index], stage_index=index, stage_count=len(self.STAGES),
+                          done=0, total=total)
+        self._call.flush()
+
+    def tick(self, done):
+        self._call.update(done=done)
+
+
+class _KdNoProgress:
+    def stage(self, index, total):
+        pass
+
+    def tick(self, done):
+        pass
+
+
+_KD_NO_PROGRESS = _KdNoProgress()
+
+# tests only: called as _kd_hook(point, values) at the ledger's within-phase
+# peaks ("digits", "series", "reduce", "forms", "exact"), to compare live
+# storage with the ledger's terms
+_kd_hook = None
+
+
+def _kd_frobenius(Qc, p, N, K, W, terms_from=0, rec=_KD_NO_PROGRESS, base=1):
     """The matrix modulo p^N from the series terms terms_from <= k <= K, at
     working modulus p^W (terms_from > 0: the contribution of those terms
-    alone, for the truncation check)."""
-    P = p ** W
+    alone, for the truncation check); its progress in stages base to
+    base + 4.  Four phases, each a function, so each one's temporaries are
+    gone when the next starts (the ledger charges exactly that)."""
+    P, Q, Qd, S, digits = _kd_setup(Qc, p, W, rec, base)
+    B = _kd_series(digits, Q, p, P, K, terms_from, rec, base + 2)
+    del digits
+    c0 = _kd_reduce(B, Q, Qd, S, p, P, N, 0, rec, base + 3)
+    c1 = _kd_reduce(B, Q, Qd, S, p, P, N, 1, rec, base + 4)
+    return [[c0[0], c1[0]], [c0[1], c1[1]]]
+
+
+def _kd_setup(Qc, p, W, rec, base):
+    """(P, Q, Qd, S, digits): the modulus P = p^W, Q and Q' mod P, S with
+    R Q + S Q' = 1, and the Q-adic digits e_l of E = (Q(x^p) - Q(x)^p) / p
+    (degree <= 3p - 1: the x^3p terms cancel), E = sum_l e_l Q^l, deg e_l
+    <= 2."""
+    P, P1 = _kd_modulus(p, W)
     Q = [_kd_mod(c, P) for c in Qc]
     Qd = [Q[1], 2 * Q[2] % P, 3 % P]
-    R, S = _kd_bezout(Q, Qd, p, P)
-    # E = (Q(x^p) - Q(x)^p) / p (degree <= 3p - 1: the x^3p terms cancel),
-    # and its Q-adic digits: E = sum_l e_l Q^l, deg e_l <= 2
-    P1 = p ** (W + 1)
+    S = _kd_bezout(Q, Qd, p, P)[1]
     Q1 = [_kd_mod(c, P1) for c in Qc]
     Qxp = [0] * (3 * p + 1)
     for i, c in enumerate(Q1):
         Qxp[i * p] = c
+    rec.stage(base, p)
     Qp_ = [1]
-    for _ in range(p):
+    for i in range(p):
         Qp_ = _kd_pmul(Qp_, Q1, P1)
+        rec.tick(i + 1)
     diff = [(a - b) % P1 for a, b in zip(Qxp, Qp_)]
     if any(x % p for x in diff):
         raise ArithmeticError("internal error: Q(x^p) - Q(x)^p is not divisible by p")
     E = _kd_trim([x // p % P for x in diff])
+    rec.stage(base + 1, -(-len(E) // 3))
     digits = []
     rest = E
     while rest:
         rest, d = _kd_divmod_Q(rest, Q, P)
         digits.append(d)
         rest = _kd_trim(list(rest))
-    # the series 1/y^sigma = y^-p sum_j B_j(x) T^j, T = y^-2, deg B_j <= 2:
-    # term k = binom(-1/2, k) (p E T^p)^k, built term by term; p E T^p =
-    # sum_l p e_l Q^l T^p = sum_l p e_l T^(p - l) (Q = y^2 = 1/T)
+        rec.tick(len(digits))
+        if _kd_hook:
+            _kd_hook("digits", {"P": P, "Q": Q, "Qd": Qd, "S": S, "digits": digits, "rest": rest})
+    return P, Q, Qd, S, digits
+
+
+def _kd_series(digits, Q, p, P, K, terms_from, rec, stage):
+    """B: the series 1/y^sigma = y^-p sum_j B_j(x) T^j, T = y^-2, deg B_j
+    <= 2, from the terms terms_from <= k <= K: term k = binom(-1/2, k)
+    (p E T^p)^k, built term by term; p E T^p = sum_l p e_l Q^l T^p = sum_l
+    p e_l T^(p - l) (Q = y^2 = 1/T)."""
+    rec.stage(stage, K)
     B = {}
     cur = {0: [1, 0, 0]}
     c = _F(1)
@@ -1150,61 +1252,79 @@ def _kd_frobenius(Qc, p, N, K, W, terms_from=0):
                         nxt[m - 1] = _kd_padd(nxt.get(m - 1, [0, 0, 0]), [p * x % P for x in Rq], P)
             cur = nxt
             c = c * (_F(-1, 2) - (k - 1)) / k
+            rec.tick(k)
+            if _kd_hook:
+                _kd_hook("series", {"k": k, "B": B, "cur": cur, "nxt": nxt, "c": c, "digits": digits})
         if k >= terms_from:
             ck = _kd_mod(c, P)
             for j, A in cur.items():
                 B[j] = _kd_padd(B.get(j, [0, 0, 0]), [ck * x % P for x in A], P)
-    out = []
-    for i in (0, 1):
-        # F(x^i dx/y) = p x^(p i + p - 1) dx / y^sigma
-        #            = sum_j p x^(p i + p - 1) B_j(x) dx / y^(p + 2 j);
-        # by descending s = p + 2j, the x-degree is brought below 3 with
-        # Q = y^2 (the quotient moves to s - 2), down to s = 1 (the G part)
-        shift = p * i + p - 1
-        polys = {}
-        for j, A in B.items():
-            polys[p + 2 * j] = [0] * shift + [p * x % P for x in A]
-        forms = {}
-        G = []
-        top = max(polys) if polys else 1
-        carry = []
-        for s in range(top, 0, -2):
-            poly = _kd_padd(polys.get(s, []), carry, P)
-            if s == 1:
-                G = poly
-                break
-            Rq, Sr = _kd_divmod_Q(poly, Q, P)
-            forms[s] = Sr
-            carry = _kd_trim(list(Rq))
-        # [K] section 3: T dx/y^s, T = A Q + B Q', is cohomologous to
-        # (A + 2 B'/(s - 2)) dx/y^(s - 2)
-        for s in range(top, 2, -2):
-            T = forms.get(s)
-            if T is None or not any(T):
-                continue
-            Bp = _kd_divmod_Q(_kd_pmul(T, S, P), Q, P)[1]           # T S mod Q
-            num = _kd_psub(T, _kd_pmul(Bp, Qd, P), P)               # T - B Q' = A Q
-            A, _ = _kd_divmod_Q(num + [0] * max(0, 4 - len(num)), Q, P)
-            Bd = [Bp[1], 2 * Bp[2] % P]
-            red = _kd_padd(A, [_kd_pdiv(2 * x, s - 2, p, P) for x in Bd], P)
-            if s - 2 == 1:
-                G = _kd_padd(G, red, P)
-            else:
-                forms[s - 2] = _kd_padd(forms.get(s - 2, [0, 0, 0]), red, P)
-        # [K] section 3: (S Q' + 2 S' Q) dx/y is exact; S = x^(m-2) gives
-        # degree m with leading coefficient 2m - 1 (Q monic, g = 1)
-        G = _kd_trim(list(G))
-        while len(G) > 2:
-            m = len(G) - 1
-            lc = G[m]
-            if lc:
-                rel = _kd_padd([0] * (m - 2) + Qd, [0] * (m - 3) + [2 * (m - 2) * x % P for x in Q], P)
-                f = _kd_pdiv(lc, 2 * m - 1, p, P)
-                G = _kd_psub(G, [f * x % P for x in rel], P)
-            G = _kd_trim(G[:m])
-        G = G + [0] * (2 - len(G))
-        out.append([G[0] % p ** N, G[1] % p ** N])
-    return [[out[0][0], out[1][0]], [out[0][1], out[1][1]]]
+    return B
+
+
+def _kd_reduce(B, Q, Qd, S, p, P, N, i, rec, stage):
+    """[G0, G1] mod p^N: F(x^i dx/y) = p x^(p i + p - 1) dx / y^sigma =
+    sum_j p x^(p i + p - 1) B_j(x) dx / y^(p + 2 j) in the basis dx/y,
+    x dx/y.  By descending s = p + 2j, the x-degree is brought below 3 with
+    Q = y^2 (the quotient moves to s - 2), down to s = 1 (the G part); the
+    term of B_j is added at its offset p i + p - 1 into the carried
+    polynomial (no padded copy of each term)."""
+    shift = p * i + p - 1
+    forms = {}
+    G = []
+    top = p + 2 * max(B) if B else 1
+    rec.stage(stage, top - 1)
+    if _kd_hook:
+        _kd_hook("reduce", {"i": i, "B": B})
+    carry = []
+    for s in range(top, 0, -2):
+        A = B.get((s - p) // 2) if s >= p else None
+        if A is not None:
+            n = shift + len(A)
+            poly = carry + [0] * (n - len(carry)) if len(carry) < n else carry
+            for t, x in enumerate(A):
+                poly[shift + t] = (poly[shift + t] + p * x) % P
+        else:
+            poly = carry
+        if s == 1:
+            G = poly
+            break
+        Rq, Sr = _kd_divmod_Q(poly, Q, P)
+        forms[s] = Sr
+        carry = _kd_trim(list(Rq))
+        rec.tick(top - s)
+    # [K] section 3: T dx/y^s, T = A Q + B Q', is cohomologous to
+    # (A + 2 B'/(s - 2)) dx/y^(s - 2)
+    for s in range(top, 2, -2):
+        T = forms.get(s)
+        if T is None or not any(T):
+            continue
+        Bp = _kd_divmod_Q(_kd_pmul(T, S, P), Q, P)[1]           # T S mod Q
+        num = _kd_psub(T, _kd_pmul(Bp, Qd, P), P)               # T - B Q' = A Q
+        A, _ = _kd_divmod_Q(num + [0] * max(0, 4 - len(num)), Q, P)
+        Bd = [Bp[1], 2 * Bp[2] % P]
+        red = _kd_padd(A, [_kd_pdiv(2 * x, s - 2, p, P) for x in Bd], P)
+        if s - 2 == 1:
+            G = _kd_padd(G, red, P)
+        else:
+            forms[s - 2] = _kd_padd(forms.get(s - 2, [0, 0, 0]), red, P)
+    if _kd_hook:
+        _kd_hook("forms", {"i": i, "forms": forms, "G": G})
+    # [K] section 3: (S Q' + 2 S' Q) dx/y is exact; S = x^(m-2) gives
+    # degree m with leading coefficient 2m - 1 (Q monic, g = 1)
+    G = _kd_trim(list(G))
+    while len(G) > 2:
+        m = len(G) - 1
+        lc = G[m]
+        if lc:
+            rel = _kd_padd([0] * (m - 2) + Qd, [0] * (m - 3) + [2 * (m - 2) * x % P for x in Q], P)
+            f = _kd_pdiv(lc, 2 * m - 1, p, P)
+            G = _kd_psub(G, [f * x % P for x in rel], P)
+            if _kd_hook:
+                _kd_hook("exact", {"i": i, "forms": forms, "G": G, "rel": rel})
+        G = _kd_trim(G[:m])
+    G = G + [0] * (2 - len(G))
+    return [G[0] % p ** N, G[1] % p ** N]
 
 
 def _kd_padd(a, b, P):
@@ -1245,3 +1365,242 @@ def _kd_bezout(Q, Qd, p, P):
                 rows[r] = [(x - f * y) % P for x, y in zip(rows[r], rows[col])]
     sol = [rows[r][n] for r in range(n)]
     return sol[:2], sol[2:]
+
+
+# ------------------------------------------------------------------ the preflight and its ledger
+
+def _kd_engine():
+    """The runtime whose object sizes the ledger uses: "cpython", or pyjs's
+    JavaScript engine from the runtime's own detection (_sbengine.js_engine
+    and js_host), as _kd_label names it.  A test replaces it."""
+    try:
+        import _sbengine
+    except ImportError:
+        return "cpython"
+    return _kd_label(str(_sbengine.js_engine()), str(_sbengine.js_host()))
+
+
+def _kd_label(engine, host):
+    """The ledger's name for a JavaScript engine on a host: "v8" (Node, Deno,
+    Chromium), "jsc" for JavaScriptCore under Bun, and "jsc (WebKit)" for
+    JavaScriptCore in a browser, for which no table can be certified
+    (plan-kedlaya-webkit-ci r4), so it is refused, like "spidermonkey" and "unknown"."""
+    if engine == "jsc" and host != "bun":
+        return "jsc (WebKit)"
+    return engine
+
+
+def _kd_r(x, g):
+    return -(-x // g) * g
+
+
+class _KdCPython:
+    """CPython 3.12 to 3.14, 64-bit: getsizeof plus pymalloc's 16-byte
+    granularity, each an upper bound (plan-kedlaya-optin r6 section 2).  No
+    code allowance: CPython compiles the module when it is imported, before
+    any call."""
+
+    CODE = 0
+
+    @staticmethod
+    def I(bits):
+        return _kd_r(32 + 4 * -(-bits // 30), 16)
+
+    @staticmethod
+    def Ls(n):
+        # (list growth n + (n >> 3) + 6, to a multiple of 4: at most n + n/8 + 9 slots; 16 the GC header)
+        return _kd_r(56 + 16 + 8 * (n + n // 8 + 9), 16)
+
+    @staticmethod
+    def D(n):
+        # (a compact dict sized from the power of two at or above 3n/2: at
+        # most 8 bytes an index slot and 24 an entry, the headers, and the
+        # old table during a resize)
+        return _kd_r(104 + 32 * (3 * n + 2), 16)
+
+
+def _kd_pow2(n):
+    c = 1
+    while c < n:
+        c *= 2
+    return c
+
+
+class _KdV8:
+    """pyjs under V8 (Node, Deno, Chromium): an int a BigInt (header, length,
+    64-bit digits), a list a JSArray and its FixedArray (capacity at most
+    1.5 n + 16 after appends), a dict a PyDict and its OrderedHashMap of
+    capacity 2c (and the old table during a rehash)."""
+
+    # the first call in a session compiles the _kd_ functions: their bytecode
+    # and feedback stay in the old space, measured at most 0.97 MiB retained
+    # after a first call (Node 26, p = 5 ... 401), the same at every p and N;
+    # charged on every call (a per-session cost: conservative after the first)
+    CODE = 3 << 19
+
+    @staticmethod
+    def I(bits):
+        return _kd_r(16 + 8 * -(-bits // 64), 8)
+
+    @staticmethod
+    def Ls(n):
+        return _kd_r(32 + 16 + 8 * (3 * n // 2 + 16), 8)
+
+    @staticmethod
+    def D(n):
+        c = _kd_pow2(n)
+        return _kd_r(96 + 2 * (24 + 8 * (3 * 2 * c + c)), 8)
+
+
+class _KdJSC:
+    """pyjs under JavaScriptCore (Bun only; WebKit's is refused): an
+    upper bound over its layouts, as measured under Bun 1.3 at each layout
+    step (test/kedlaya_jsc.mjs): a JSBigInt cell (header, length, 64-bit
+    digits) rounded up to JSC's size classes, which step by at most 1.4
+    (32, 48, ... 80, 112, 160, 224, 256, 320 bytes measured); a JSArray and
+    its butterfly (2n + 16 slots: any growth up to doubling, a size class
+    included); a PyDict's Map, 64 bytes a slot of a capacity growing by
+    powers of 4 from 16 (and the old table, a quarter of it, during a
+    rehash), plus 1.5 KiB."""
+
+    # the first call's code blocks are cells of JSC's heap: 1.9 MB measured
+    # under Bun 1.3.14 at p = 101 (test/kedlaya_jsc.mjs's cold call); charged
+    # on every call, as V8's
+    CODE = 5 << 19
+
+    @staticmethod
+    def I(bits):
+        return _kd_r(7 * (16 + 8 * -(-bits // 64)) // 5 + 16, 16)
+
+    @staticmethod
+    def Ls(n):
+        return _kd_r(16 + 8 + 8 * (2 * n + 16), 8)
+
+    @staticmethod
+    def D(n):
+        c = 16
+        while c < n:
+            c *= 4
+        return 1536 + 64 * (c + c // 4)
+
+
+_KD_TABLES = {"cpython": _KdCPython, "v8": _KdV8, "jsc": _KdJSC}
+
+
+def _kd_sizes(p, K, W):
+    """(b, b1, bb, J, F): the bits of a residue mod P = p^W and mod P1 =
+    p^(W + 1), of a product before its reduction, and the most entries of
+    B, cur and nxt (keys in [0, K p]) and of forms (weights p + 2 K p down
+    to 3)."""
+    bl = p.bit_length()
+    b = W * bl
+    b1 = b + bl
+    return b, b1, 2 * b1 + 4, K * p + 1, K * p + (p - 1) // 2
+
+
+def _kd_phases(p, K, W, L, a, t):
+    """The live set of each phase of one _kd_frobenius(.., K, W) call with L
+    digits and inputs of at most a bits, under the object sizes t, as
+    {phase: [(term, bytes)]}: setup "S", series "T", one reduction "R"
+    (plan-kedlaya-optin r6 section 2).  Each term is an upper bound on the
+    bytes of what it names."""
+    I, Ls, D = t.I, t.Ls, t.D
+    b, b1, bb, J, F = _kd_sizes(p, K, W)
+    T3 = Ls(3) + 3 * I(b)
+    entry = I(64) + T3
+    # (always kept: P, Q, Qd and S, and the inputs and their conversions)
+    C = [("P Q Qd S", I(b) + 3 * Ls(4) + 10 * I(b)), ("inputs", 8 * I(a) + 4 * 64 + 5 * I(a))]
+    dig = ("digits", Ls(L) + L * T3)
+    return {
+        "S": C + [("P1 Q1 R", I(b1) + Ls(4) + 4 * I(b1) + Ls(2) + 2 * I(b)),
+                  ("bezout", 5 * Ls(6) + 30 * I(b) + Ls(5)),
+                  ("Qxp diff E", 3 * (Ls(3 * p + 1) + (3 * p + 1) * I(b1))),
+                  ("Qp_", 3 * (Ls(3 * p + 4) + (3 * p + 4) * I(bb))),
+                  ("digit loop", 3 * (Ls(3 * p) + 3 * p * I(b))),
+                  dig],
+        "T": C + [dig,
+                  ("B cur nxt", 3 * (D(J) + J * entry)),
+                  ("products", 8 * Ls(5) + 24 * I(bb)),
+                  ("c", 2 * I(2 * K * (2 * K).bit_length()) + 64),
+                  ("ck", I(b))],
+        "R": C + [("B", D(J) + J * entry),
+                  ("forms", D(F) + F * entry),
+                  ("carry poly", 4 * (Ls(3 * p + 5) + (3 * p + 5) * I(b))),
+                  ("section 3 step", 6 * Ls(6) + 30 * I(bb)),
+                  ("exact-form loop", 6 * (Ls(3 * p + 5) + (3 * p + 5) * I(bb)))],
+    }
+
+
+def _kd_peak(p, K, W, L, a, t):
+    """An upper bound on the peak bytes of one _kd_frobenius(.., K, W) call:
+    the most of its phases' live sets, plus 2 KiB of frames and small
+    objects."""
+    return max(sum(n for _, n in terms) for terms in _kd_phases(p, K, W, L, a, t).values()) + 2048
+
+
+def _kd_ledger(p, N, K, W, L, a, t):
+    """U: an upper bound on the peak bytes of _kd_frobenius_matrix(.., N, K,
+    W): the two calls one after the other, the second (the check of the
+    next two terms) with M kept, the result's entries, and the runtime's
+    allowance for the code a first call compiles (t.CODE)."""
+    bM = W * p.bit_length()
+    return max(_kd_peak(p, K, W, L, a, t), _kd_peak(p, K + 2, W + 3, L, a, t) + 4 * t.I(bM)) + 4 * (t.I(bM) + 256) + t.CODE
+
+
+def _kd_memory(what, need, limit, allowance_for):
+    """D1's memory refusal; capacity (D0) is only an observation."""
+    import _capacity, _memguard
+    e = _memguard.memory_guard(what, need, limit, allowance_for)
+    e.capacity = _capacity.capacity()
+    return e
+
+
+def _kd_min_bytes(p, N):
+    """The bytes any runtime needs for the working modulus p^W alone, W >=
+    N + 3: it has at least (N + 3) floor(log2 p) + 1 bits."""
+    return -(-(N + 3) * (p.bit_length() - 1) // 8)
+
+
+def _kd_preflight(p, N, prec, Qc):
+    """(K, W) for frobenius() at p and N = prec + 1, after its admission, in
+    order and before the working modulus is made (plan-kedlaya-optin r6
+    section 3): (1) the modulus p^W alone, W >= N + 3, needs at least
+    ceil((N + 3) floor(log2 p) / 8) bytes in any runtime: more than this
+    process's total is impossible; (2) K and W; (3) a finite
+    padic.kedlaya_work; (4) the ledger's U, an upper estimate, against a
+    quarter of the total."""
+    import _capacity
+    total = _capacity.heap_figure()
+    need = _kd_min_bytes(p, N)
+    what = "the Frobenius matrix at p = %d to precision %d" % (p, prec)
+    if need > total:
+        raise _kd_memory("At the least, %s (just its working modulus p^(prec + 4))" % what, need, total,
+                         "this whole process")
+    K, W = _kd_plan_fast(p, N)
+    import _limits
+    limit = _limits.finalize()["padic.kedlaya_work"]
+    if limit != _limits.UNLIMITED:
+        lower = p * p * (N + 2) ** 2
+        work = lower if lower > limit else _kd_cost(p, N)
+        if work > limit:
+            raise NotImplementedError("%s is beyond the limit padic.kedlaya_work (estimated work %d > %d)" % (what, work, limit))
+    a = max(max(abs(c.numerator).bit_length(), c.denominator.bit_length()) for c in map(_F, Qc))
+    _kd_admit(p, N, K, W, a, _kd_engine(), what, total)
+    return K, W
+
+
+def _kd_admit(p, N, K, W, a, engine, what, total):
+    """Step 4 of the preflight: refuse when the ledger's U, with the digit
+    count charged as its proven bound L = p (the digits do not exist yet),
+    exceeds a quarter of the total; and on a JavaScript engine whose object
+    sizes are not established, at once.  Returns U."""
+    t = _KD_TABLES.get(engine)
+    if t is None:
+        # (no need is known: not a memory refusal)
+        raise NotImplementedError("%s: the memory estimate for this computation isn't established for this "
+                                  "JavaScript engine (%s); the native package computes it" % (what, engine))
+    U = _kd_ledger(p, N, K, W, p, a, t)
+    cap = total // 4
+    if U > cap:
+        raise _kd_memory("By an upper estimate, %s" % what, U, cap, "one computation")
+    return U
