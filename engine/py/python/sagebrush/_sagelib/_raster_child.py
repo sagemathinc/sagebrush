@@ -107,8 +107,20 @@ def _ext_path():
     return _native.__file__
 
 
+# The launchers' sha256 as scripts/build-raster-launch.mjs built them (it
+# writes this table; with --check, CI fails if it or a binary differs from
+# what the source builds).
+LAUNCHER_SHA256 = {
+    "x86_64": "850acbe7492feb1f455775a2db8bdec99a79d8d8b4f6a0c0adcde520d689f6c7",
+    "aarch64": "ab3279f1c3041ccc16bbd40ca38155c1d72e1980a962cccff01a337c8f58f568",
+}
+
+_checked = {}
+
+
 def _launcher():
-    """The launcher for this machine, or None (not Linux, or not shipped)."""
+    """The launcher for this machine, or None (not Linux, not shipped, or
+    not the bytes this package was built with: then the contained mode)."""
     if not sys.platform.startswith("linux"):
         return None
     import platform
@@ -116,7 +128,18 @@ def _launcher():
     if arch is None:
         return None
     p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "_bin", "raster-launch-" + arch)
-    return p if os.access(p, os.X_OK) else None
+    if not os.access(p, os.X_OK):
+        return None
+    if p not in _checked:
+        import hashlib
+        try:
+            with open(p, "rb") as f:
+                _checked[p] = hashlib.sha256(f.read()).hexdigest() == LAUNCHER_SHA256.get(arch)
+        except OSError:
+            _checked[p] = False
+        if not _checked[p]:
+            _warn("its launcher, %s, is not the one this package was built with" % p)
+    return p if _checked[p] else None
 
 
 # ------------------------------------------------------------ the footprint

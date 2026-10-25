@@ -171,6 +171,39 @@ def test_a_kill_during_an_unrelated_cgroup_oom_is_not_called_memory():
     assert out.split("\n")[0] == "engine True True", out
 
 
+def test_a_launcher_not_the_one_built_is_never_run():
+    # its sha256 against the package's table, once: a mismatch is the
+    # contained mode with the warning (enforced: refused), never a run of it
+    code = '''
+    rc.LAUNCHER_SHA256 = {k: "0" * 64 for k in rc.LAUNCHER_SHA256}
+    rc._checked.clear()
+    try:
+        png, _ = _sbraster.render(%r, 1.0, 40, 30, None, 72.0, [])
+        print("drawn", _sbraster._child.enforced)
+    except rc.SagebrushEngineError as e:
+        print("refused", "enforced" in str(e))
+    ''' % SVG
+    rc_, out, err = run(code)
+    assert rc_ == 0 and out.split("\n")[0] == "drawn False" and "not the one this package was built with" in err, (out, err)
+    rc_, out, err = run(code, env={"SAGEBRUSH_RASTER_ISOLATION": "enforced"})
+    assert rc_ == 0 and out.split("\n")[0] == "refused True", (out, err)
+
+
+def test_the_in_process_opt_in_draws_and_reads_without_a_child():
+    # SAGEBRUSH_RASTER_ISOLATION=in-process (William, Oct 25: "Yes: separate
+    # process by default (in-process available as an opt-in)"): no child,
+    # the warning once, render and decode inside Python
+    code = '''
+    png, missing = _sbraster.render(%r, 1.0, 40, 30, None, 72.0, [])
+    w, h, ch, raw = _sbraster.decode(png)
+    _sbraster.render(%r, 1.0, 40, 30, None, 72.0, [])
+    print(png[:4] == b"\\x89PNG", (w, h, ch), len(raw), _sbraster._child is None)
+    ''' % (SVG, SVG)
+    rc_, out, err = run(code, env={"SAGEBRUSH_RASTER_ISOLATION": "in-process"})
+    assert rc_ == 0 and out.split("\n")[0] == "True (40, 30, 4) 19200 True", (out, err)
+    assert err.count("inside Python") == 1, err
+
+
 def test_the_idle_loop_allocates_nothing():
     # at a limit of exactly its own VmSize, 10,000 pings are answered
     out = ok('''

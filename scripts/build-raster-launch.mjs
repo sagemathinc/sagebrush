@@ -6,16 +6,26 @@
 // more than maturin.  Each is checked here as the tests check the wheel's:
 // an EXEC ELF with no interpreter, dynamic section, TLS, relocations or
 // writable segment.  Run: node scripts/build-raster-launch.mjs
+//
+// The build is reproducible: the pinned toolchain (TOOLCHAIN), these flags
+// and the source give the same bytes from any checkout path.  With --check
+// (CI) it builds into a temporary directory and fails if a committed binary,
+// or its sha256 in _raster_child.py (LAUNCHER_SHA256, which the package
+// checks before it runs one), differs from what the source builds.
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync, chmodSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync, chmodSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 
+const TOOLCHAIN = "1.99.0";
+const check = process.argv.includes("--check");
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const crate = join(root, "engine", "raster-launch");
-const target = process.env.CARGO_TARGET_DIR ?? join(crate, "target");
+const target = check ? mkdtempSync(join(tmpdir(), "raster-launch-")) : (process.env.CARGO_TARGET_DIR ?? join(crate, "target"));
 const out = join(root, "engine", "py", "python", "sagebrush", "_bin");
+const host = join(root, "engine", "py", "python", "sagebrush", "_sagelib", "_raster_child.py");
 mkdirSync(out, { recursive: true });
 
 // (no libc and no crt: rust-lld links the code alone, at a fixed address,
@@ -31,25 +41,52 @@ const flags = [
   "-C link-arg=--build-id=none",
 ].join(" ");
 
+const sums = {};
+let stale = [];
 for (const arch of ["x86_64", "aarch64"]) {
   const triple = `${arch}-unknown-linux-gnu`;
-  execFileSync("cargo", ["build", "--release", "--target", triple], {
+  execFileSync("cargo", [`+${TOOLCHAIN}`, "build", "--release", "--locked", "--target", triple], {
     cwd: crate,
     stdio: "inherit",
     env: { ...process.env, CARGO_TARGET_DIR: target, RUSTFLAGS: flags },
   });
   const bin = join(target, triple, "release", "sagebrush-raster-launch");
-  check(readFileSync(bin), arch);
+  const built = readFileSync(bin);
+  checkElf(built, arch);
   const dest = join(out, `raster-launch-${arch}`);
-  copyFileSync(bin, dest);
-  chmodSync(dest, 0o755);
-  console.log(`raster-launch-${arch}: ${readFileSync(dest).length} bytes, sha256 ${createHash("sha256").update(readFileSync(dest)).digest("hex")}`);
+  const sha = createHash("sha256").update(built).digest("hex");
+  sums[arch] = sha;
+  if (check) {
+    let committed = null;
+    try {
+      committed = readFileSync(dest);
+    } catch {}
+    if (!committed || !committed.equals(built)) stale.push(`raster-launch-${arch}`);
+  } else {
+    copyFileSync(bin, dest);
+    chmodSync(dest, 0o755);
+  }
+  console.log(`raster-launch-${arch}: ${built.length} bytes, sha256 ${sha}`);
+}
+// the package's table of the launchers' sha256 (between its markers)
+const py = readFileSync(host, "utf8");
+const table = "LAUNCHER_SHA256 = {\n" + Object.entries(sums).map(([a, h]) => `    "${a}": "${h}",\n`).join("") + "}";
+const marked = /LAUNCHER_SHA256 = \{\n[^}]*\}/;
+if (!marked.test(py)) throw new Error("_raster_child.py has no LAUNCHER_SHA256 table");
+if (check) {
+  if (py.match(marked)[0] !== table) stale.push("_raster_child.py's LAUNCHER_SHA256");
+  if (stale.length) {
+    console.error(`out of date: ${stale.join(", ")} (run node scripts/build-raster-launch.mjs)`);
+    process.exit(1);
+  }
+} else {
+  writeFileSync(host, py.replace(marked, table));
 }
 
 // The ELF's program headers: an EXEC with only LOAD (none writable), and
 // GNU_STACK, GNU_EH_FRAME and PHDR, nothing the kernel would hand to a
 // loader (PT_INTERP, PT_DYNAMIC) or set up (PT_TLS).
-function check(b, arch) {
+function checkElf(b, arch) {
   const ok = (c, what) => {
     if (!c) throw new Error(`raster-launch-${arch}: ${what}`);
   };
