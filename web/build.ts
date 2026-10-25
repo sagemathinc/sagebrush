@@ -194,8 +194,9 @@ for (const [mod, file, args] of [["_pyjs_docsearch", "docs-index.json", ["--inde
   writeFileSync(join(here, "dist", file), r.stdout);
 }
 // KaTeX's stylesheet and (woff2) fonts, for math in Markdown cells
+// (sorted: readdir's order depends on the filesystem, and these go into sw.js in this order)
 const katexDir = join(here, "..", "node_modules", "katex", "dist");
-const KATEX = ["katex/katex.min.css", ...readdirSync(join(katexDir, "fonts")).filter((f) => f.endsWith(".woff2")).map((f) => "katex/fonts/" + f)];
+const KATEX = ["katex/katex.min.css", ...readdirSync(join(katexDir, "fonts")).filter((f) => f.endsWith(".woff2")).sort().map((f) => "katex/fonts/" + f)];
 mkdirSync(join(here, "dist", "katex", "fonts"), { recursive: true });
 for (const f of KATEX) copyFileSync(join(katexDir, f.slice("katex/".length)), join(here, "dist", f));
 // The atlas (web/atlas): its page script and engine worker, and llms.txt.
@@ -368,7 +369,8 @@ if (hasSite) mkdirSync(join(siteDir, "public", "katex", "fonts"), { recursive: t
 // the 3D viewer, loaded by the page when a Graphics3d is shown
 // The app (PWA): manifest, icons, and the service worker with the files it
 // keeps for offline use, versioned by their content
-const ICONS = readdirSync(join(here, "icons")).map((f) => "icons/" + f);
+// (sorted, as KATEX: so that sw.js is the same from any checkout)
+const ICONS = readdirSync(join(here, "icons")).sort().map((f) => "icons/" + f);
 mkdirSync(join(here, "dist", "icons"), { recursive: true });
 for (const f of ICONS) copyFileSync(join(here, f), join(here, "dist", f));
 copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.webmanifest"));

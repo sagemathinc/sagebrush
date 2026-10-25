@@ -676,6 +676,10 @@ https://files.pythonhosted.org/packages/94/21/1e5995a1c920cce14e4bffae20c665ec10
   in its directory).
 - `bench/pyperformance/`: from pyperformance (MIT;
   `LICENSE.pyperformance`).
+- `test/vendor/just-bash-3.6.0/`: just-bash 3.6.0's CommonJS bundle,
+  unchanged (Copyright 2025 Vercel Inc., Apache-2.0; its `LICENSE`), with the
+  notices of the npm packages it inlines, all MIT, ISC or BSD-3-Clause
+  (`THIRD-PARTY-NOTICES.txt` there). For `test/bash-oracle.test.ts` only.
 - `engine/hmf/tests/fixtures/lmfdb-*.txt`: numbers (dimensions of spaces and
   of Galois orbits of Hilbert modular newforms over $\mathbb{Q}(\sqrt 5)$,
   Hecke eigenvalues of the rational ones, the exact Hecke eigenvalues (in

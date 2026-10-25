@@ -116,7 +116,19 @@ test("strict JSON: duplicates, prototype keys, depth and size", () => {
   assert.throws(() => t('{"schema":"sagebrush.allowance/1","scope":"cell","source":"instructor","work":{"constructor":1}}'), /forbidden key "constructor"/);
   assert.throws(() => t('{"schema":"sagebrush.allowance/1","scope":"cell","source":"instructor","work":{"f":[[[1]]]}}'), /nested deeper than 4/);
   assert.throws(() => t('{"schema":"sagebrush.allowance/1"'), /not valid JSON/);
-  assert.throws(() => t(" ".repeat(16 * 1024 + 1)), /longer than 16384/);
+  assert.throws(() => t(" ".repeat(16 * 1024 + 1)), /longer than 16384 bytes of UTF-8/);
+  // the cap is UTF-8 bytes, not UTF-16 code units (astra2's #115 note): pad a
+  // valid allowance with whitespace and a string value to the exact limit
+  const head = '{"schema":"sagebrush.allowance/1","scope":"cell","source":"server","steps":1';
+  const at = (bytes: number) => head + " ".repeat(bytes - head.length - 1) + "}";
+  assert.equal(t(at(16 * 1024)).steps, 1, "exactly 16384 bytes");
+  assert.throws(() => t(at(16 * 1024 + 1)), /longer than 16384 bytes/);
+  const wide = (units: number, ch: string) => `${head},"x":"${ch.repeat(units)}"}`;
+  // 5,500 three-byte characters: 5,500 code units but 16,500 bytes
+  assert.throws(() => t(wide(5_500, "\u20ac")), /longer than 16384 bytes/, "\u20ac is 3 bytes: too long in bytes, short in code units");
+  assert.ok(wide(5_500, "\u20ac").length < 16 * 1024);
+  assert.throws(() => t(wide(4_100, "\u{1F600}")), /longer than 16384 bytes/, "an astral character is 4 bytes and 2 code units");
+  assert.throws(() => t(wide(100, "\u20ac")), /unknown field "x"/, "under the cap, it is parsed");
   assert.equal(t('{"schema":"sagebrush.allowance/1","scope":"cell","source":"server","steps":9007199254740991}').steps, 2 ** 53 - 1);
   assert.throws(() => t('{"schema":"sagebrush.allowance/1","scope":"cell","source":"server","steps":9007199254740992}'), /steps must be from 1/);
   assert.throws(() => t('{"schema":"sagebrush.allowance/1","scope":"cell","source":"server","steps":9007199254740993}'), /steps must be from 1/);
