@@ -1905,7 +1905,8 @@ class FiniteFieldElement:
             (3 a + 2, 1)
         """
         from _sage_poly import _latex_univariate
-        return _latex_univariate([(str(c), False, i) for i, c in reversed(list(enumerate(self._c))) if c], self._parent._name)
+        c = self._c
+        return _latex_univariate([(str(c[i]), False, i) for i in range(len(c) - 1, -1, -1) if c[i]], self._parent._name)
 
     def __hash__(self):
         if self.is_in_prime_field():
@@ -3394,6 +3395,17 @@ def _is_ff_base(base):
     return isinstance(base, (IntegerModRing_, FiniteField_ext))
 
 
+def _two_nonzero(cs):
+    """Whether cs has at least two nonzero entries (stopping at the second)."""
+    seen = False
+    for t in cs:
+        if t:
+            if seen:
+                return True
+            seen = True
+    return False
+
+
 class Polynomial_ff:
     """A polynomial over GF(q) or Z/nZ.
 
@@ -3563,8 +3575,9 @@ class Polynomial_ff:
             c = self._c[i]
             if not c:
                 continue
-            # (a coefficient of several terms: an element of GF(q) with more than one)
-            compound = isinstance(c, FiniteFieldElement) and sum(1 for t in c._c if t) > 1
+            # (a coefficient of several terms: an element of GF(q) with more than one,
+            # found by stopping at its second nonzero coefficient)
+            compound = isinstance(c, FiniteFieldElement) and _two_nonzero(c._c)
             terms.append((str(latex(c)), compound, i))
         return _latex_univariate(terms, self._ring._name)
 
