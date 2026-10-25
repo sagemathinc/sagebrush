@@ -509,6 +509,72 @@ test("the native step's error precedence: an open error alone; a write error, wi
   assert.deepEqual(r.afterClose, [["open", "/f", false], ["write", 7, 0, 1], ["close", 7]]);
 });
 
+// The web build's fs (web/shims/fs.ts, run here with its types stripped and
+// its SHA-256 import stubbed) under the site's handles: a handle is on the
+// file, not its path (astra2's CORR-FV-R3-1)
+function shimRun(script: string): any {
+  const d = mkdtempSync(join(tmpdir(), "file-once-shim-"));
+  try {
+    const src = readFileSync(__dirname + "/../../web/shims/fs.ts", "utf8").replace('import { sha256Hex } from "../../src/runtime/sha256";', 'const sha256Hex = (_d: Uint8Array): string => "";');
+    assert.ok(src.includes("const sha256Hex = "), "the shim's import, stubbed");
+    writeFileSync(join(d, "fs.mts"), src);
+    writeFileSync(join(d, "run.mjs"), `
+      import { createRequire } from "module";
+      const require = createRequire(import.meta.url);
+      const shim = await import(${JSON.stringify(join(d, "fs.mts"))});
+      require(${JSON.stringify(__dirname + "/../src/runtime/index.js")});
+      const FO = require(${JSON.stringify(__dirname + "/../src/runtime/file-once.js")});
+      const ops = FO.fileOpsFor(shim);
+      const txt = (p) => new TextDecoder().decode(shim.readFileSync(p));
+      const changed = [];
+      shim.__hooks.changed = (p, d) => changed.push([p, d === null ? null : new TextDecoder().decode(d)]);
+      // (a site: open, S's effects, S, the end; the abort in a finally)
+      const site = (p, m, during, s) => { const h = FO.fileOnceBegin(p, m, ops); try { during(); FO.fileOnceS.v = s; return FO.fileOnceEnd(h); } finally { FO.fileOnceAbort(h); } };
+      ${script}
+    `);
+    return JSON.parse(execFileSync(process.execPath, [join(d, "run.mjs")], { encoding: "utf8" }));
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+}
+
+test("the web build's fs holds the opened file: S renaming it and recreating the path, or unlinking it, leaves the write where a descriptor's goes; ABBB; append; the page told of each change", () => {
+  const r = shimRun(`
+    const out = {};
+    shim.writeFileSync("/old", "old");
+    site("/old", "w", () => { shim.renameSync("/old", "/renamed"); shim.writeFileSync("/old", "new"); }, "X");
+    out.rename = [txt("/old"), txt("/renamed")];
+    shim.writeFileSync("/gone", "g");
+    let err = null;
+    try { site("/gone", "w", () => shim.unlinkSync("/gone"), "X"); } catch (e) { err = String(e); }
+    out.unlink = [err, shim.existsSync("/gone")];
+    site("/abbb", "w", () => site("/abbb", "a", () => {}, "BBBB"), "A");
+    out.abbb = txt("/abbb");
+    shim.writeFileSync("/app", "keep");
+    site("/app", "a", () => {}, "x");
+    out.append = txt("/app");
+    changed.length = 0;
+    site("/n", "w", () => {}, "hi");
+    out.changes = changed;
+    console.log(JSON.stringify(out));
+  `);
+  assert.deepEqual(r.rename, ["new", "X"]);
+  assert.deepEqual(r.unlink, [null, false]);
+  assert.equal(r.abbb, "ABBB");
+  assert.equal(r.append, "keepx");
+  assert.deepEqual(r.changes, [["/n", ""], ["/n", "hi"]]);
+});
+
+test("S may not suspend the frame while the file is held: a yield in a lambda's default (positional or keyword-only) is no site; one in its body is (CORR-FV-R3-2)", () => {
+  const { compile } = require(__dirname + "/../src/compile.js");
+  const site = (line: string) => compile(`def g():\n    ${line}\n`, "t.py", "__main__").code.includes("fileOnceBegin");
+  assert.equal(site('open(F, "w").write(lambda x=(yield "paused"): x)'), false);
+  assert.equal(site('open(F, "w").write(lambda *, k=(yield): k)'), false);
+  assert.equal(site('open(F, "w").write(lambda x=(yield from g()): x)'), false);
+  assert.equal(site('open(F, "w").write(lambda: (yield))'), true);
+  assert.equal(site('open(F, "w").write(lambda x=1: x)'), true);
+});
+
 test("the held descriptor (fileOnceBegin, End, Abort): S written once and closed once; an ineligible S raises with it closed; Abort after End does nothing; Abort closes once and drops its close error", () => {
   const r = native(`
     const B = (m = "w", o = ops()) => FO.fileOnceBegin("/f", m, o);
