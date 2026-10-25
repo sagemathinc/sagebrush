@@ -106,6 +106,8 @@ const closers = new Set();
 const toPage = new Set();
 const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0 };
 const held = [];
+/** the server's own index_changed dropped by the front over the whole run (log.serverNotices is per case: reset) */
+let serverNoticesDropped = 0;
 const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0 });
 
 async function upstream(method, path, headers, body) {
@@ -337,6 +339,7 @@ server.on("upgrade", async (req, socket, head) => {
       log.got.push({ t: m.t, req: m.req, ops: m.t === "ack" ? m.ops : m.t === "index" ? m.ops?.length : undefined, code: m.code });
       if (m.t === "index_changed" && !ctl.serverNotices) {
         log.serverNotices++;
+        serverNoticesDropped++;
         log.got.at(-1).dropped = true;
         return;
       }
@@ -417,6 +420,8 @@ try {
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   // (measurements, printed pass or fail)
   for (const [, what] of results) if (/figures/.test(what)) console.log("  " + what);
+  // (0 against core's server, which sends none; the cloud's sends them: plan-sync-index-changed r1)
+  console.log(`  front: the server's own index_changed notices dropped (ctl.serverNotices off): ${serverNoticesDropped}`);
   for (const e of errors) fails.push("page error: " + e);
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
   else {
