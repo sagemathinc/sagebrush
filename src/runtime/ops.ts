@@ -8,7 +8,7 @@ import {
   dictGet, dictSet, dictDelete, dictKeyOf, dictMeta, DictMeta, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
-import { INTR } from "./interrupt";
+import { consumeCtrlC } from "./interrupt";
 
 const isInt = Number.isInteger;
 const isSafe = Number.isSafeInteger;
@@ -2072,10 +2072,7 @@ export function forEach(x: any, f: (v: any) => void) {
 }
 
 export function pollInterrupt() {
-  if (INTR[0]) {
-    INTR[0] = 0;
-    raise(T.KeyboardInterrupt);
-  }
+  if (consumeCtrlC()) raise(T.KeyboardInterrupt);
 }
 
 export function toArray(x: any): any[] {

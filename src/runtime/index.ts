@@ -1,7 +1,7 @@
 // The runtime object handed to compiled modules, plus function creation and
 // tracebacks.
 
-import { INTR } from "./interrupt";
+import { INTR, consumeCtrlC } from "./interrupt";
 import * as Obj from "./object";
 import * as O from "./ops";
 import * as F from "./format";
@@ -1104,9 +1104,10 @@ const isagepow = (a: any, b: any) => (negIntPow(a, b) ? sagepow(a, b) : O.ipow(a
 
 // ------------------------------------------------------------------ the runtime object
 
-// Ctrl-C in compiled loops: KeyboardInterrupt, and the request is consumed.
+// Ctrl-C in compiled loops (`if (INTR[0] & 1) interrupted();`, emit.ts):
+// KeyboardInterrupt, and bit 0 consumed, the word's other bits left.
 function interrupted(): never {
-  INTR[0] = 0;
+  consumeCtrlC();
   return raise(T.KeyboardInterrupt);
 }
 
