@@ -93,3 +93,31 @@ for n in (198, 199, 200, 201, 202):
 show("int(bytes ' at 199, \" at 200)", lambda: int(b"x" * 198 + b"'\""))
 show("int(bytes ' at 200, \" at 201)", lambda: int(b"x" * 199 + b"'\""))
 show("int(bytes 60 \\xff + x)", lambda: int(b"\xff" * 60 + b"x"))
+
+# memoryviews: CPython's int() takes a C-contiguous one's bytes (a stride of
+# one item, or one item), and refuses any other, or a released one, as not
+# bytes-like (daybreak2 PR134-MEM-1, astra2 CORR-PR134-2)
+def released(m):
+    m.release()
+    return m
+for label, f in [
+    ("memoryview(b'12345')[::2]", lambda: int(memoryview(b"12345")[::2])),
+    ("memoryview(b'12345')[::-1]", lambda: int(memoryview(b"12345")[::-1])),
+    ("memoryview(b'1x2')[::2]", lambda: int(memoryview(b"1x2")[::2])),
+    ("memoryview(b'')[::2]", lambda: int(memoryview(b"")[::2])),
+    ("memoryview(b'')[::-1]", lambda: int(memoryview(b"")[::-1])),
+    ("memoryview(b'12')[5:]", lambda: int(memoryview(b"12")[5:])),
+    ("memoryview(b'7')[::-1]", lambda: int(memoryview(b"7")[::-1])),
+    ("memoryview(b'12345')[::5]", lambda: int(memoryview(b"12345")[::5])),
+    ("memoryview(b'12345')[-2::-3]", lambda: int(memoryview(b"12345")[-2::-3][:1])),
+    ("memoryview(b' 12345 ')[1:4]", lambda: int(memoryview(b" 12345 ")[1:4])),
+    ("memoryview(b' 12345 ')[2:-1]", lambda: int(memoryview(b" 12345 ")[2:-1])),
+    ("memoryview(b'1234').cast('H')", lambda: int(memoryview(b"1234").cast("H"))),
+    ("memoryview(b'12x4').cast('H')", lambda: int(memoryview(b"12x4").cast("H"))),
+    ("memoryview(bytearray(b' 9 '))[::2]", lambda: int(memoryview(bytearray(b" 9 "))[::2])),
+    ("memoryview(array('B', b'99'))[::-1]", lambda: int(memoryview(array("B", b"99"))[::-1])),
+    ("memoryview(b'12345')[::2], 10", lambda: int(memoryview(b"12345")[::2], 10)),
+    ("released memoryview(b'1')", lambda: int(released(memoryview(b"1")))),
+    ("released memoryview(b'12')[::2]", lambda: int(released(memoryview(b"12")[::2]))),
+]:
+    show("int(%s)" % label, f)
