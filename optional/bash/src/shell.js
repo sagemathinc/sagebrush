@@ -84,7 +84,7 @@ const normalize = (p) => {
   }
   return "/" + out.join("/");
 };
-const statOf = (s) => ({ isFile: s.kind === "file", isDirectory: s.kind === "folder", isSymbolicLink: false, mode: s.kind === "folder" ? 0o755 : 0o644, size: s.size, mtime: new Date(s.mtime) });
+const statOf = (s) => ({ isFile: s.kind === "file", isDirectory: s.kind === "folder", isSymbolicLink: false, mode: s.kind === "folder" ? 0o755 : 0o644, size: s.size, mtime: new Date(s.mtime), identity: s.identity });
 
 export function start(port) {
   function hostCall(name, payload) {
@@ -99,7 +99,7 @@ export function start(port) {
   function call(inv, op, args, wording) {
     const req = nextReq++;
     return new Promise((resolve, reject) => {
-      inv.pending.set(req, { resolve, reject, wording });
+      inv.pending.set(req, { resolve, reject, wording, op, path: args[0] });
       hostCall("fs.request", { id: inv.id, run: inv.run, req, op, args });
     });
   }
@@ -108,7 +108,10 @@ export function start(port) {
     if (!p) return;
     inv.pending.delete(m.req);
     if (!m.err) return p.resolve(m.ok);
-    const err = coded(m.err.code, p.wording ? `bash: ${m.err.message}` : m.err.message);
+    // (a missing path in just-bash's own words, which its commands test for ("ENOENT", "no such file"); a
+    // redirection's refusal as bash says it: "bash: <path>: <reason>")
+    const message = p.wording ? `bash: ${m.err.message}` : m.err.code === "ENOENT" ? `ENOENT: no such file or directory, ${p.op} '${p.path}'` : m.err.message;
+    const err = coded(m.err.code, message);
     if (typeof m.err.refusal === "string") {
       err.refusal = m.err.refusal;
       inv.thrown.add(err);
@@ -120,7 +123,7 @@ export function start(port) {
   // keeps nothing; read, it is empty; it never reaches the workspace.
   function fsFor(inv) {
     const isNull = (p) => normalize(p) === "/dev/null";
-    const NULL_STAT = { isFile: true, isDirectory: false, isSymbolicLink: false, mode: 0o666, size: 0, mtime: new Date(0) };
+    const NULL_STAT = { isFile: true, isDirectory: false, isSymbolicLink: false, mode: 0o666, size: 0, mtime: new Date(0), identity: "null" };
     return {
       async readFile(p, options) {
         if (isNull(p)) return "";

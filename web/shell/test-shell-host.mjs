@@ -51,6 +51,7 @@ const stand = `export function start(port) {
     const { id, run, script } = m.exec, c = JSON.parse(script.slice(2, -2));
     const answers = [];
     for (const s of c.steps) answers.push(await new Promise((r) => { const q = req++; waits.set(q, r); port.postMessage({ name: "fs.request", payload: { id, run: c.forge ? "0000000000000000" : run, req: q, op: s.op, args: s.args } }); }));
+    if (c.report === "hang") return;
     const first = answers.find((a) => a.err && a.err.refusal);
     if (c.report === "exit") return port.postMessage({ name: "shell.result", payload: { id, exit: { code: 0, stdout: JSON.stringify(answers.map((a) => a.err ? a.err.code : "ok")), stderr: "" } } });
     const refusal = c.report === "reject-first-refusal" ? (first ? first.err.refusal : null) : c.report.startsWith("reject-id:") ? c.report.slice(10) : null;

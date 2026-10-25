@@ -21,7 +21,7 @@
 //   Rows 1–5 latch the run's terminal state and close its admission in the same step that records them
 //   (the fence); a rejection of the shell's exec() is ordinary only if it names one of this invocation's
 //   own refusals (provenance).
-import { Workspace, WorkspaceError, type AdmitCheck, type Entry } from "../workspace/api";
+import { Workspace, WorkspaceError, identOf, type AdmitCheck, type Entry } from "../workspace/api";
 import { normPath, parentOf, nameOf, join, within, TRASH, PathError } from "../workspace/paths";
 import { ShellUnavailableError, type Shell, type ShellOutcome, type FsRequest, type FsAnswer } from "./loader";
 
@@ -277,6 +277,7 @@ export class ShellRun {
   }
 
   private async read(p: string): Promise<Uint8Array> {
+    if (p === "/") throw refuse("EISDIR", p);
     if (this.pending.has(p)) return EMPTY;
     const e = await this.ws.stat(p, { admit: this.check });
     if (!e) throw refuse("ENOENT", p);
@@ -290,7 +291,8 @@ export class ShellRun {
     return b;
   }
   private async exists(p: string): Promise<boolean> {
-    if (this.pending.has(p)) return true;
+    // (the top is always there; no grant names it, and saying so tells nothing)
+    if (p === "/" || this.pending.has(p)) return true;
     try {
       return !!(await this.ws.stat(p, { admit: this.check }));
     } catch (err) {
@@ -299,11 +301,14 @@ export class ShellRun {
       throw err;
     }
   }
-  private async statOf(p: string): Promise<{ kind: string; size: number; mtime: number }> {
-    if (this.pending.has(p)) return { kind: "file", size: 0, mtime: Date.now() };
+  // (`identity`: the entry's own (a data file's or folder's fid, a document's ref), which just-bash's mv and cp
+  // compare to tell whether two paths are one file)
+  private async statOf(p: string): Promise<{ kind: string; size: number; mtime: number; identity: string }> {
+    if (p === "/") return { kind: "folder", size: 0, mtime: 0, identity: "top" };
+    if (this.pending.has(p)) return { kind: "file", size: 0, mtime: Date.now(), identity: "pending:" + p };
     const e = await this.ws.stat(p, { admit: this.check });
     if (!e) throw refuse("ENOENT", p);
-    return { kind: e.kind === "folder" ? "folder" : "file", size: e.size ?? 0, mtime: e.updated };
+    return { kind: e.kind === "folder" ? "folder" : "file", size: e.size ?? 0, mtime: e.updated, identity: identOf(e) ?? "path:" + e.path };
   }
   private async list(p: string): Promise<{ name: string; kind: string }[]> {
     const e = p === "/" ? undefined : await this.ws.stat(p, { admit: this.check });
@@ -319,6 +324,7 @@ export class ShellRun {
 
   // The target of a redirection's open, observed (§3.2): a data file's (fid, rev), absent, or refused.
   private async target(p: string, withBytes: boolean): Promise<Obs | null> {
+    if (p === "/") throw refuse("EISDIR", p);
     const e = await this.ws.stat(p, { admit: this.check });
     if (e && e.kind === "folder") throw refuse("EISDIR", p);
     if (e && e.kind !== "file") throw refuse("EACCES", p, "a notebook or board: edit it in its editor");
@@ -330,7 +336,9 @@ export class ShellRun {
     }
     if (!withBytes) return { fid: e.fid!, rev: e.rev ?? 0 };
     // (`>>`: the entry and its bytes from one readUpTo, never a stat and then a separate read)
+    // (and it must be the file just stated: changed between the two, it is a conflict, never a mixed observation)
     const r = await this.ws.readUpTo(p, READ_BYTES, { admit: this.check });
+    if (r.entry.fid !== e.fid || (r.entry.rev ?? 0) !== (e.rev ?? 0)) throw refuse("ECONFLICT", p);
     return { fid: r.entry.fid!, rev: r.entry.rev ?? 0, bytes: r.content };
   }
   private hold(p: string, kind: "trunc" | "create") {

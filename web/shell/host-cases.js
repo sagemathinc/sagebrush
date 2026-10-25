@@ -25,14 +25,25 @@ async function fresh(name, { start, wrap, limits } = {}) {
   const host = new ShellHost(wrap ? wrap(ws) : ws, start ?? (() => startShell(D.S, "/").then((x) => x.shell)));
   return { ws, host };
 }
-// A view of `ws` whose `verb` runs `before(args)` first, once per call while `when(args)` holds.
-function hooked(ws, verb, before, when = () => true) {
-  const v = Object.create(ws);
-  v[verb] = async function (...args) {
-    if (when(...args)) await before(...args);
-    return ws[verb].apply(this, args);
+// A view of `ws` for the host whose verbs first run `hooks[verb](...args)` if one is set: only for the host's
+// own call, not for the workspace's calls inside it (depth), so a hook is one concurrent event or one fault.
+const VERBS = ["stat", "list", "readUpTo", "read", "write", "create", "mkdir", "rename", "duplicate", "remove"];
+function hookable(hooks) {
+  return (ws) => {
+    const v = Object.create(ws);
+    let depth = 0;
+    for (const verb of VERBS) v[verb] = async function (...args) {
+      const h = depth === 0 ? hooks[verb] : undefined;
+      depth++;
+      try {
+        if (h) await h(...args);
+        return await ws[verb].apply(this, args);
+      } finally {
+        depth--;
+      }
+    };
+    return v;
   };
-  return v;
 }
 const read = async (ws, p) => {
   try {
@@ -48,7 +59,7 @@ export async function run(only) {
   D = await (await fetch("/data.json")).json();
   const out = [];
   const check = (ok, what) => out.push([!!ok, what]);
-  const groups = { oracle, lexical, basics };
+  const groups = { oracle, lexical, basics, identity, grants, classify, provenance, conformance, pending, stop };
   for (const [name, g] of Object.entries(groups)) {
     if (only && !only.split(",").includes(name)) continue;
     try {
@@ -109,4 +120,286 @@ async function basics(check) {
   check(same(r.ops.map((o) => o.verb + " " + o.path), ["create /n"]), `one op for the redirection: ${JSON.stringify(r.ops)}`);
   r = await host.exec(PERSON, "cat <<EOF\n  indented\nEOF");
   check(r.stdout === "  indented\n", `a here-document keeps its lines' leading whitespace, as bash does (rawScript): ${JSON.stringify(r.stdout)}`);
+}
+
+// ---------------------------------------------------------------- write identity (CORR-BASH-2, §3.2)
+async function identity(check) {
+  const hooks = {};
+  const { ws, host } = await fresh("identity", { wrap: hookable(hooks) });
+  const reset = async (p, content) => {
+    if (await ws.stat(p)) await ws.remove(p);
+    if (content !== undefined) await ws.create(p, { content: enc(content) });
+  };
+  // a buffered write's target removed and made again, at the same rev, before the commit
+  await reset("/f", "old\n");
+  hooks.write = async (p, _b, o) => { if (p === "/f" && o?.fid) { delete hooks.write; await ws.remove("/f"); await ws.create("/f", { content: enc("replacement\n") }); } };
+  let r = await host.exec(PERSON, "echo new > f");
+  check(r.kind === "exit" && r.code === 1 && /\/f: changed elsewhere/.test(r.stderr) && (await read(ws, "/f")) === "replacement\n" && (await ws.stat("/f")).rev === 0, `a replacement at the same rev is ECONFLICT, and left as it is (${JSON.stringify(r)})`);
+  // an append from another tab between the open and the commit
+  await reset("/f", "old\n");
+  hooks.write = async (p, _b, o) => { if (p === "/f" && o?.fid) { delete hooks.write; await ws.write("/f", enc("old\nother tab\n")); } };
+  r = await host.exec(PERSON, "echo more >> f");
+  check(r.code === 1 && /changed elsewhere/.test(r.stderr) && (await read(ws, "/f")) === "old\nother tab\n", `a concurrent append is ECONFLICT, never interleaved (D3) (${JSON.stringify(r)})`);
+  // the one append observation: the file changed between the open's stat and its read
+  await reset("/f", "old\n");
+  hooks.readUpTo = async (p) => { if (p === "/f") { delete hooks.readUpTo; await ws.write("/f", enc("changed\n")); } };
+  r = await host.exec(PERSON, "echo more >> f");
+  check(r.code === 1 && /changed elsewhere/.test(r.stderr) && (await read(ws, "/f")) === "changed\n", `an append's observation is one read: a change between the stat and the read is ECONFLICT, never a mixed observation (${JSON.stringify(r)})`);
+  // two creators of one absent path: exactly one wins, the other's file untouched
+  await reset("/c");
+  hooks.create = async (p) => { if (p === "/c") { delete hooks.create; await ws.create("/c", { content: enc("theirs\n") }); } };
+  r = await host.exec(PERSON, "echo mine > c");
+  check(r.code === 1 && /\/c: changed elsewhere/.test(r.stderr) && (await read(ws, "/c")) === "theirs\n", `of two creators exactly one wins (${JSON.stringify(r)})`);
+  // a notebook or board is never written
+  await ws.create("/nb.ipynb", { content: { cells: [{ cell_type: "code", source: "1" }] } });
+  r = await host.exec(PERSON, "echo x > nb.ipynb; echo after");
+  const nb = await ws.read("/nb.ipynb");
+  check(r.code === 1 && /edit it in its editor/.test(r.stderr) && nb.content.cells.length === 1, `a notebook as a redirection's target is refused (EACCES), unchanged (${JSON.stringify(r)})`);
+  r = await host.exec(PERSON, "grep -c cells nb.ipynb");
+  check(r.code === 0 && r.stdout === "1\n", `a notebook reads as its JSON text (${JSON.stringify(r)})`);
+  // the run's own commits are its observation: appends in a loop pass, one op each; a loop's one redirection, one op
+  await reset("/l");
+  r = await host.exec(PERSON, "for i in 1 2 3; do echo $i >> l; done");
+  check(r.code === 0 && (await read(ws, "/l")) === "1\n2\n3\n" && r.ops.length === 3, `appends in a loop: one op per iteration (${r.ops.length})`);
+  await reset("/l");
+  r = await host.exec(PERSON, "for i in 1 2 3; do echo $i; done >> l");
+  check(r.code === 0 && (await read(ws, "/l")) === "1\n2\n3\n" && r.ops.length === 1, `a loop's one redirection: one op (rule 9) (${r.ops.length})`);
+}
+
+// ---------------------------------------------------------------- the mediator's grants (CORR-BASH-1, §2.2)
+async function grants(check) {
+  const { ws, host } = await fresh("grants");
+  const A = await ws.mkdir("/A"), B = await ws.mkdir("/B");
+  await ws.create("/A/f", { content: enc("a\n") });
+  await ws.create("/B/g", { content: enc("b\n") });
+  const grant = (over = {}) => ({ kind: "grant", folders: new Set([A.fid]), write: true, live: () => "ok", ...over });
+  const g = grant();
+  const ops0 = (await opsOf(ws)).length;
+  const runs = {
+    "cat /B/g": (r) => r.code !== 0 && r.stdout === "",
+    "cat /A/../B/g": (r) => r.code !== 0 && r.stdout === "",
+    "echo x > /B/n": (r) => r.code === 1 && /\/B\/n: Permission denied/.test(r.stderr),
+    "ls /B": (r) => r.code !== 0 && r.stdout === "",
+    "cp /B/g /A/g2": (r) => r.code !== 0,
+    "cp /A/f /B/f2": (r) => r.code !== 0,
+    "mv /A/f /B/f": (r) => r.code !== 0,
+    "mv /B/g /A/g": (r) => r.code !== 0,
+    "cp -r /A /B/A2": (r) => r.code !== 0,
+    "rm /B/g": (r) => r.code !== 0,
+    "mkdir /B/d": (r) => r.code !== 0,
+    "touch /B/t": (r) => r.code !== 0,
+  };
+  for (const [script, ok] of Object.entries(runs)) {
+    const r = await host.exec(g, script);
+    check(r.kind === "exit" && ok(r), `a grant to /A: ${script} is refused (${JSON.stringify(r).slice(0, 300)})`);
+  }
+  check((await opsOf(ws)).length === ops0 && (await read(ws, "/B/g")) === "b\n" && (await read(ws, "/A/f")) === "a\n" && !(await ws.stat("/A/g")) && !(await ws.stat("/A/g2")), "and nothing changed: no op logged, both files as they were");
+  let r = await host.exec(g, "ls /");
+  check(r.code === 0 && r.stdout === "A\n", `ls / shows only what the grant covers (${JSON.stringify(r)})`);
+  r = await host.exec(g, "cat /A/f; echo x > /A/n; cat /A/n");
+  check(r.code === 0 && r.stdout === "a\nx\n", `inside the grant it reads and writes (${JSON.stringify(r)})`);
+  // the grant follows its folder's fid
+  await ws.rename("/A", "/A2");
+  r = await host.exec(g, "cat /A2/f");
+  check(r.code === 0 && r.stdout === "a\n", `the grant follows its folder's rename (${JSON.stringify(r)})`);
+  await ws.rename("/A2", "/A");
+  // read-only: every mutation EROFS before the verb
+  r = await host.exec(grant({ write: false }), "cat /A/f; echo x > /A/ro; echo after");
+  check(r.code === 1 && r.stdout === "a\n" && /Read-only/.test(r.stderr) && !(await ws.stat("/A/ro")), `a read-only grant reads, and can't mutate (${JSON.stringify(r)})`);
+  // revoked or expired during the run: refused at the next use, the run aborted (row 3), nothing after admitted
+  for (const why of ["revoked", "expired"]) {
+    let uses = 0;
+    const gr = grant({ live: () => (++uses > 2 ? why : "ok") });
+    r = await host.exec(gr, `cat /A/f; echo x > /A/${why}1; echo y > /A/${why}2`);
+    check(r.kind === "unavailable" && r.row === 3 && r.reason === "access was revoked" && !(await ws.stat(`/A/${why}1`)) && !(await ws.stat(`/A/${why}2`)), `a grant ${why} during the run: row 3, and nothing more admitted (${JSON.stringify(r)})`);
+  }
+  // the person: the whole workspace; an agent's changes are credited to it
+  r = await host.exec(PERSON, "cat /B/g");
+  check(r.code === 0 && r.stdout === "b\n", "the person reads anywhere");
+  const before = (await opsOf(ws)).length;
+  r = await host.exec(grant({ actor: "agent:tester" }), "echo z > /A/byagent");
+  const mine = (await opsOf(ws)).slice(before);
+  check(r.code === 0 && mine.length === 1 && mine[0].by === "agent:tester", `a grant's actor is the op log's: ${JSON.stringify(mine.map((o) => o.by))}`);
+}
+
+// ---------------------------------------------------------------- D8 point 5: rows 1–5, the fence (D8-3)
+// For each row, an event injected at the open of /A/fault and at its final write, in four positions: the
+// host's group, a subshell, a group, a function, each followed by a write to /A/other.  The outcome is the
+// row's type whatever the shell's status, nothing pending is committed, and /A/other is never admitted.  A
+// refusal (D8) in the same places stays ordinary.
+async function classify(check) {
+  const hooks = {};
+  const { ws, host } = await fresh("classify", { wrap: hookable(hooks) });
+  const A = await ws.mkdir("/A");
+  let live = "ok";
+  const g = { kind: "grant", folders: new Set([A.fid]), write: true, live: () => live };
+  const positions = {
+    host: "true > /A/pend; echo x > /A/fault; echo later > /A/other",
+    subshell: "true > /A/pend; (echo x > /A/fault); echo later > /A/other",
+    group: "true > /A/pend; { echo x > /A/fault; }; echo later > /A/other",
+    function: "true > /A/pend; f() { echo x > /A/fault; }; f; echo later > /A/other",
+  };
+  let run = null;
+  const rows = {
+    1: () => run.stop(),
+    2: () => host.endShell("lost on purpose"),
+    3: () => { live = "revoked"; },
+    5: () => { throw new TypeError("injected fault"); },
+    refusal: () => { throw new W.WorkspaceError("conflict", "/A/fault was changed elsewhere"); },
+  };
+  for (const [row, act] of Object.entries(rows)) {
+    for (const at of ["open", "commit"]) {
+      for (const [pos, script] of Object.entries(positions)) {
+        for (const p of ["/A/fault", "/A/other", "/A/pend"]) if (await ws.stat(p)) await ws.remove(p);
+        await ws.create("/A/pend", { content: enc("kept\n") });
+        live = "ok";
+        let admittedAfter = 0, stats = 0;
+        const fire = async () => { delete hooks.stat; delete hooks.create; await act(); };
+        // (at the open: the redirection's own stat, the second of /A/fault; the first is just-bash's exists probe)
+        hooks.stat = async (p) => { if (p === "/A/other") admittedAfter++; if (at === "open" && p === "/A/fault" && ++stats === 2) await fire(); };
+        hooks.create = async (p) => { if (at === "commit" && p === "/A/fault") await fire(); };
+        run = host.run(g);
+        const r = await run.invoke(script);
+        delete hooks.stat;
+        delete hooks.create;
+        const other = await ws.stat("/A/other"), pend = await read(ws, "/A/pend");
+        const what = `row ${row}, at the ${at}, in the ${pos}: ${JSON.stringify(r).slice(0, 240)}; /A/other ${other ? "written" : "absent"}, /A/pend ${JSON.stringify(pend)}`;
+        if (row === "refusal") {
+          // (ordinary: the refusal ends the innermost block (D8); the host's group, or the block, then the script goes on)
+          const nested = pos !== "host";
+          check(r.kind === "exit" && r.code === (nested ? 0 : 1) && !!other === nested && pend === "" && /\/A\/fault: changed elsewhere/.test(r.stderr), `a refusal stays ordinary: ${what}`);
+        } else {
+          const kind = { 1: "interrupted", 2: "unavailable", 3: "unavailable", 5: "unavailable" }[row];
+          check(r.kind === kind && r.row === Number(row) && !other && admittedAfter === 0 && pend === "kept\n", `typed and fenced: ${what}`);
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------- provenance (D8-3), with a stand-in module
+async function provenance(check) {
+  const hooks = {};
+  const { ws, host } = await fresh("provenance", { wrap: hookable(hooks), start: () => startShell(D.STAND, "/").then((x) => x.shell) });
+  const missing = { op: "read", args: ["/nodir/x"] };
+  const inv = (run, c) => run.invoke(JSON.stringify(c));
+  let r = await inv(host.run(PERSON), { steps: [missing], report: "reject-first-refusal" });
+  check(r.kind === "exit" && r.code === 1 && r.stdout === "" && r.stderr === "stand-in rejection\n", `a genuine refusal that rejects exec(): ordinary status 1, its output lost (${JSON.stringify(r)})`);
+  r = await inv(host.run(PERSON), { steps: [missing], report: "reject-null" });
+  check(r.kind === "unavailable" && r.row === 5, `a handled refusal, then a rejection naming none: row 5 (${JSON.stringify(r)})`);
+  r = await inv(host.run(PERSON), { steps: [missing], report: "reject-id:0123456789abcdef" });
+  check(r.kind === "unavailable" && r.row === 5, `a rejection naming an id that is no refusal of this invocation's: row 5 (${JSON.stringify(r)})`);
+  // another invocation's refusal, in the same run
+  const run = host.run(PERSON);
+  const first = await inv(run, { steps: [missing], report: "exit" });
+  check(first.kind === "exit", `(the run's first invocation: ${JSON.stringify(first)})`);
+  r = await inv(run, { steps: [], report: "reject-first-refusal" });
+  check(r.kind === "unavailable" && r.row === 5, `a rejection with no refusal of its own: row 5 (${JSON.stringify(r)})`);
+  // forged run ids are refused, never executed
+  let seen = 0;
+  hooks.stat = async () => { seen++; };
+  hooks.readUpTo = async () => { seen++; };
+  r = await inv(host.run(PERSON), { steps: [{ op: "stat", args: ["/"] }, { op: "read", args: ["/x"] }], report: "exit", forge: true });
+  delete hooks.stat;
+  delete hooks.readUpTo;
+  check(r.kind === "exit" && r.stdout === '["EBADF","EBADF"]' && seen === 0, `requests under a fabricated run id are refused (EBADF) and never executed (${JSON.stringify(r)}, ${seen} workspace calls)`);
+  // a run that has ended admits nothing
+  const ended = host.run(PERSON);
+  ended.stop();
+  r = await inv(ended, { steps: [{ op: "stat", args: ["/"] }], report: "exit" });
+  check(r.kind === "interrupted", `a run stopped before it starts runs nothing (${JSON.stringify(r)})`);
+  void ws;
+}
+
+// ---------------------------------------------------------------- FS conformance (r3 §3.1, §3.4)
+async function conformance(check) {
+  const hooks = {};
+  const { ws, host } = await fresh("conformance", { wrap: hookable(hooks), limits: { ...W.LIMITS, maxFolderEntries: 40 } });
+  const sh = (s) => host.exec(PERSON, s);
+  let r = await sh("mkdir a/b");
+  check(r.code === 1 && !(await ws.stat("/a")), `mkdir without -p needs the parent (${JSON.stringify(r)})`);
+  r = await sh("mkdir -p a/b && mkdir a; echo rc=$?");
+  check(r.stdout === "rc=1\n" && (await ws.stat("/a/b"))?.kind === "folder", `mkdir -p makes the parents; mkdir of an existing folder is EEXIST (${JSON.stringify(r)})`);
+  await ws.create("/f", { content: enc("f\n") });
+  r = await sh("touch f; touch t; ls t");
+  check(r.code === 0 && (await ws.stat("/f")).rev === 0 && (await read(ws, "/t")) === "" && r.ops.length === 1, `touch: an existing file unchanged, a new one created (${JSON.stringify(r.ops)})`);
+  r = await sh("mv f g; cat g");
+  check(r.code === 0 && r.stdout === "f\n" && same(r.ops.map((o) => o.verb), ["rename"]), `mv: one rename op (${JSON.stringify(r.ops)})`);
+  r = await sh("mv g t; echo rc=$?");
+  check(r.stdout === "rc=1\n" && (await read(ws, "/g")) === "f\n", `mv onto an existing file is refused (mv -f is deferred) (${JSON.stringify(r)})`);
+  r = await sh("cp g h; cat h");
+  check(r.code === 0 && r.stdout === "f\n" && same(r.ops.map((o) => o.verb), ["duplicate"]), `cp: one duplicate (${JSON.stringify(r.ops)})`);
+  await ws.mkdir("/d/e");
+  await ws.create("/d/x", { content: enc("x") });
+  await ws.create("/d/e/y", { content: enc("y") });
+  r = await sh("cp -r d d2; cat d2/e/y");
+  check(r.code === 0 && r.stdout === "y" && r.ops.length === 4, `cp -r: exactly F + D ops (2 files, 2 folders: ${JSON.stringify(r.ops.map((o) => o.verb + " " + (o.to ?? o.path)))})`);
+  await ws.create("/d/nb.ipynb", { content: { cells: [] } });
+  r = await sh("cp -r d d3; echo rc=$?");
+  check(r.stdout === "rc=1\n" && !(await ws.stat("/d3")), `cp -r of a folder holding a notebook copies nothing (${JSON.stringify(r)})`);
+  r = await sh("rm h; ls /Trash");
+  check(r.code !== 0 || true, "(rm)");
+  check(!(await ws.stat("/h")) && (await ws.list("/Trash")).some((e) => e.path.startsWith("/Trash/h")), "rm puts the file in Trash");
+  r = await sh("rm d2; echo rc=$?; rm -r d2; echo rc=$?");
+  check(r.stdout === "rc=1\nrc=0\n" && !(await ws.stat("/d2")), `rm of a folder needs -r; rm -r moves it to Trash, one op (${JSON.stringify(r)})`);
+  r = await sh("cat /Trash/h; echo rc=$?; rm -r /; echo rc=$?");
+  check(r.stdout === "rc=1\nrc=1\n" && (await ws.stat("/a")), `Trash isn't the shell's, and / can't be removed (${JSON.stringify(r)})`);
+  // the workspace's refusals keep their words
+  hooks.rename = async () => { delete hooks.rename; throw new W.WorkspaceError("busy", "a large move is still being applied here: try again in a moment"); };
+  r = await sh("mv g g2");
+  check(r.code === 1 && /large move is still being applied/.test(r.stderr), `busy is EBUSY, said (${JSON.stringify(r)})`);
+  r = await sh("mkdir full; for i in $(seq 40); do echo $i > full/f$i; done; echo 41 > full/f41; echo rc=$?");
+  check(r.stdout === "" && r.code === 1 && /\/full\/f41: a folder holds at most 40 entries: \/full is full/.test(r.stderr) && (await ws.list("/full")).length === 40, `a full folder (maxFolderEntries): the write one past the cap is ENOSPC, said, and ends the group (D8) (${JSON.stringify(r).slice(0, 300)})`);
+  // (touch makes a pending creation, as an open of > does (rule 2): its refusal comes when it is committed, at the end)
+  r = await sh("touch full/late; echo rc=$?");
+  check(r.stdout === "rc=0\n" && r.code === 1 && /\/full\/late: a folder holds at most 40 entries/.test(r.stderr) && !(await ws.stat("/full/late")), `touch in a full folder: refused at the invocation's end, said, status 1 (${JSON.stringify(r).slice(0, 300)})`);
+  // D11: a large folder's mv and rm are one op each, settled before the next request
+  const old = { ...W.D11 };
+  W.configureD11({ chunk: 10, page: 10 });
+  try {
+    await ws.mkdir("/big");
+    for (let i = 0; i < 25; i++) await ws.create(`/big/f${i}`, { content: enc(String(i)) });
+    const n0 = (await opsOf(ws)).length;
+    r = await sh("mv big big2; ls big2 | wc -l; rm -r big2; ls / | grep -c big");
+    const logged = (await opsOf(ws)).slice(n0);
+    check(/^\s*25\n0\n$/.test(r.stdout) && same(logged.map((o) => o.op), ["rename", "remove"]) && same(r.ops.map((o) => o.verb), ["rename", "remove"]), `a large mv and a large rm through D11: one op each, settled before the next command (${JSON.stringify(r).slice(0, 300)}; logged ${logged.map((o) => o.op)})`);
+  } finally {
+    W.configureD11(old);
+  }
+}
+
+// ---------------------------------------------------------------- EMFILE (r3 §3.3 rule 2)
+async function pending(check) {
+  const { ws, host } = await fresh("pending");
+  const r = await host.exec(PERSON, `mkdir pend; for i in $(seq ${MAX_PENDING + 1}); do true > pend/p$i; done`);
+  check(r.code === 1 && /more than 64 redirections are pending/.test(r.stderr) && (await ws.list("/pend")).length === MAX_PENDING, `the 65th pending redirection is EMFILE; the 64 are committed at the end (${JSON.stringify(r).slice(0, 300)})`);
+}
+
+// ---------------------------------------------------------------- Stop (r3 §4.3; D8 "Also found")
+async function stop(check) {
+  const { ws, host } = await fresh("stop");
+  let ac = new AbortController();
+  setTimeout(() => ac.abort(), 300);
+  let t0 = performance.now();
+  let r = await host.exec(PERSON, "while true; do :; done", { signal: ac.signal });
+  let ms = performance.now() - t0;
+  check(r.kind === "interrupted" && ms < 2000 + 3000, `Stop during a CPU-only loop: interrupted (${JSON.stringify(r)}, ${Math.round(ms)} ms)`);
+  r = await host.exec(PERSON, "echo fresh");
+  check(r.kind === "exit" && r.stdout === "fresh\n", `and the next run works (${JSON.stringify(r)})`);
+  ac = new AbortController();
+  setTimeout(() => ac.abort(), 300);
+  r = await host.exec(PERSON, "i=0; while true; do echo $i >> n; i=$((i+1)); done", { signal: ac.signal });
+  const n = (await opsOf(ws)).length;
+  await new Promise((res) => setTimeout(res, 300));
+  check(r.kind === "interrupted" && (await opsOf(ws)).length === n, `Stop during a loop of appends: interrupted, and nothing admitted after it (${JSON.stringify(r).slice(0, 200)})`);
+  // a shell that doesn't unwind (a stand-in that never answers): the worker is ended after the 2 s grace
+  const { host: h2 } = await fresh("stop-grace", { start: () => startShell(D.STAND, "/").then((x) => x.shell) });
+  ac = new AbortController();
+  setTimeout(() => ac.abort(), 300);
+  t0 = performance.now();
+  r = await h2.exec(PERSON, JSON.stringify({ steps: [], report: "hang" }), { signal: ac.signal });
+  ms = performance.now() - t0;
+  check(r.kind === "interrupted" && ms >= 2000 && ms < 4000, `a shell that doesn't unwind within 2 s: its worker ended, interrupted (${JSON.stringify(r)}, ${Math.round(ms)} ms)`);
+  r = await h2.exec(PERSON, JSON.stringify({ steps: [], report: "exit" }));
+  check(r.kind === "exit" && r.stdout === "[]", `and the next run gets a fresh worker (${JSON.stringify(r)})`);
 }

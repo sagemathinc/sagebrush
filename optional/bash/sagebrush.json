@@ -17,7 +17,7 @@
   },
   "files": {
     "THIRD-PARTY-NOTICES.txt": "616a6503fb3691d1e2b80923c5940d2708b4540484b2bf750e7edb2a221ddef0",
-    "src/shell.js": "1454c917ed91227db90630fc0c5d8945ea81248a5c7a84f08d3e095ec5d49d5a",
+    "src/shell.js": "367986856b42279121d3ec3f9786397a4100e4f64df210a778c4ab9b348cf01d",
     "src/zlib-stub.js": "3ceb61b4b2776141cec40e8073fb6e295fe86b821b84652a90dc063e18606fdc",
     "vendor/diff-8.0.4/diff.js": "e4553a1cd7ac8a2e88bb27580afb8df6018a0c6a028eb2b2f5f3a5a36f40f338",
     "vendor/just-bash-3.6.0/browser.js": "38f1ad1e3283980ecdf68cede8a4eed028c6dff6e8c31793dec1e0af529c446e",
