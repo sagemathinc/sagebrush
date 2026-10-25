@@ -59,6 +59,7 @@ import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, ca
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
+import { SyncOwner } from "../workspace/sync-owner";
 import { within } from "./idb-open";
 
 const q = new URLSearchParams(location.search);
@@ -185,6 +186,9 @@ if (ws) {
   void showStaleNotice(ws);
   ws.onStaleStuck(() => void showStaleNotice(ws!));
   void startMigrator(ws);
+  // (sync, step 5: the page's sync owner; it runs a client only while this browser's sync is on, for the account
+  // signed in: nothing at all otherwise)
+  SyncOwner.of(ws).start();
 }
 const PENDING = "sagebrush-workspace-pending:", PENDING_UNREAD = "sagebrush-workspace-pending-unread:";
 /** The largest save journaled as pending (characters of JSON): a larger board is kept by the workspace alone, and a pending value larger than this isn't ours to parse (LIMIT-12C-4). */
