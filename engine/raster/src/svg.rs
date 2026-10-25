@@ -5,11 +5,11 @@
 //! transforms, group opacity, presentation attributes and style="...".
 //! Anything else in a drawing is an error, not left out.
 
-use crate::font;
+use crate::{dash, font, mem, Fail};
 use std::collections::HashMap;
 use tiny_skia::{
-    FillRule, FilterQuality, LineCap, LineJoin, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke,
-    StrokeDash, Transform,
+    FillRule, FilterQuality, LineCap, LineJoin, Mask, Paint, PathBuilder, PathStroker, Pixmap, PixmapPaint, Rect, Stroke,
+    Transform,
 };
 
 // ------------------------------------------------------------------ XML
@@ -909,7 +909,7 @@ fn shape_path(el: &Element) -> Result<Option<tiny_skia::Path>, String> {
     })
 }
 
-fn draw_path(pix: &mut Pixmap, path: &tiny_skia::Path, st: &Style, t: Transform, mask: Option<&Mask>, fill: bool, stroke: bool) {
+fn draw_path(pix: &mut Pixmap, path: &tiny_skia::Path, st: &Style, t: Transform, mask: Option<&Mask>, fill: bool, stroke: bool) -> Result<(), Fail> {
     if fill {
         let c = match st.fill {
             Fill::None => None,
@@ -927,17 +927,26 @@ fn draw_path(pix: &mut Pixmap, path: &tiny_skia::Path, st: &Style, t: Transform,
             Fill::Current => Some(st.color),
         };
         if let (Some(c), true) = (c, st.stroke_width > 0.0) {
-            let mut s = Stroke { width: st.stroke_width, line_cap: st.cap, line_join: st.join, miter_limit: st.miter, ..Stroke::default() };
-            if let Some(d) = &st.dash {
-                s.dash = StrokeDash::new(d.clone(), st.dash_offset);
+            let s = Stroke { width: st.stroke_width, line_cap: st.cap, line_join: st.join, miter_limit: st.miter, ..Stroke::default() };
+            // dashed by our own dasher, which has no limit on the number of
+            // dashes (tiny-skia's draws nothing past 1,000,000); a pattern
+            // SVG can't use draws the stroke solid, as tiny-skia did
+            let pattern = st.dash.as_ref().and_then(|d| dash::Pattern::new(d, st.dash_offset));
+            match pattern {
+                Some(p) => {
+                    if let Some(dashed) = dash::dash(path, &p, PathStroker::compute_resolution_scale(&t))? {
+                        pix.stroke_path(&dashed, &solid(c, st.stroke_opacity), &s, t, mask);
+                    }
+                }
+                None => pix.stroke_path(path, &solid(c, st.stroke_opacity), &s, t, mask),
             }
-            pix.stroke_path(path, &solid(c, st.stroke_opacity), &s, t, mask);
         }
     }
+    Ok(())
 }
 
 /// The mask of el's clip-path (accounted for in ctx: the caller releases it).
-fn clip_mask<'a>(ctx: &mut Ctx<'a>, el: &Element, t: Transform, parent: Option<&Mask>) -> Result<Option<Mask>, String> {
+fn clip_mask<'a>(ctx: &mut Ctx<'a>, el: &Element, t: Transform, parent: Option<&Mask>) -> Result<Option<Mask>, Fail> {
     let Some(v) = properties(el).into_iter().rev().find(|(k, _)| k == "clip-path").map(|(_, v)| v) else {
         return Ok(None);
     };
@@ -955,7 +964,7 @@ fn clip_mask<'a>(ctx: &mut Ctx<'a>, el: &Element, t: Transform, parent: Option<&
         None => t,
     };
     ctx.reserve(ctx.area())?;
-    let mut m = Mask::new(ctx.w, ctx.h).ok_or("a clip mask")?;
+    let mut m = mem::mask(ctx.w, ctx.h, "a clip path's mask")?;
     for c in &cp.children {
         if let Node::El(e) = c {
             if let Some(p) = shape_path(e)? {
@@ -966,7 +975,7 @@ fn clip_mask<'a>(ctx: &mut Ctx<'a>, el: &Element, t: Transform, parent: Option<&
                 let rule = if e.attr("clip-rule") == Some("evenodd") { FillRule::EvenOdd } else { FillRule::Winding };
                 m.fill_path(&p, rule, true, et);
             } else if !matches!(e.name.as_str(), "title" | "desc") {
-                return Err(format!("a <{}> in a clipPath", e.name));
+                return Err(Fail::Input(format!("a <{}> in a clipPath", e.name)));
             }
         }
     }
@@ -1023,7 +1032,7 @@ fn text_runs(el: &Element, st: &Style, out: &mut Vec<Run>) -> Result<(), String>
     Ok(())
 }
 
-fn draw_text(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, st: &Style, t: Transform, mask: Option<&Mask>) -> Result<(), String> {
+fn draw_text(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, st: &Style, t: Transform, mask: Option<&Mask>) -> Result<(), Fail> {
     let mut runs = vec![];
     text_runs(el, st, &mut runs)?;
     // whitespace: newlines and tabs are spaces, runs of spaces one, none at either end
@@ -1102,13 +1111,13 @@ fn draw_text(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, st: &Style, t: Trans
             face.outline(&mut pb, *ch, *px, *py, *scale, skew);
         }
         if let Some(path) = pb.finish() {
-            draw_path(pix, &path, &r.style, tt, mask, true, true);
+            draw_path(pix, &path, &r.style, tt, mask, true, true)?;
         }
     }
     Ok(())
 }
 
-fn data_png(href: &str) -> Result<Vec<u8>, String> {
+fn data_png(href: &str) -> Result<Vec<u8>, Fail> {
     let rest = href.strip_prefix("data:image/png").ok_or("an <image> that is not a PNG data: URL")?;
     let comma = rest.find(',').ok_or("a data: URL without data")?;
     if !rest[..comma].ends_with(";base64") {
@@ -1117,7 +1126,7 @@ fn data_png(href: &str) -> Result<Vec<u8>, String> {
     crate::base64(&rest[comma + 1..])
 }
 
-fn draw_image(pix: &mut Pixmap, el: &Element, st: &Style, t: Transform, mask: Option<&Mask>) -> Result<(), String> {
+fn draw_image(pix: &mut Pixmap, el: &Element, st: &Style, t: Transform, mask: Option<&Mask>) -> Result<(), Fail> {
     let href = el.attr("href").or_else(|| el.attr("xlink:href")).ok_or("an <image> without href")?;
     if let Some(p) = el.attr("preserveAspectRatio") {
         if p.trim() != "none" {
@@ -1143,7 +1152,7 @@ fn draw_image(pix: &mut Pixmap, el: &Element, st: &Style, t: Transform, mask: Op
     Ok(())
 }
 
-fn draw(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, parent: &Style, pt: Transform, pmask: Option<&Mask>) -> Result<(), String> {
+fn draw(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, parent: &Style, pt: Transform, pmask: Option<&Mask>) -> Result<(), Fail> {
     match el.name.as_str() {
         "defs" | "clipPath" | "title" | "desc" | "style" | "metadata" => return Ok(()),
         _ => {}
@@ -1169,7 +1178,7 @@ fn draw(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, parent: &Style, pt: Trans
     if opacity < 1.0 {
         // a group's opacity: drawn apart, then composited
         ctx.reserve(4 * ctx.area())?;
-        let mut layer = Pixmap::new(ctx.w, ctx.h).ok_or("a layer")?;
+        let mut layer = mem::pixmap(ctx.w, ctx.h, "an opacity group's layer")?;
         draw_content(ctx, &mut layer, el, &st, t, mask)?;
         let paint = PixmapPaint { opacity, ..PixmapPaint::default() };
         pix.draw_pixmap(0, 0, layer.as_ref(), &paint, Transform::identity(), None);
@@ -1183,7 +1192,7 @@ fn draw(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, parent: &Style, pt: Trans
     Ok(())
 }
 
-fn draw_content(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, st: &Style, t: Transform, mask: Option<&Mask>) -> Result<(), String> {
+fn draw_content(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, st: &Style, t: Transform, mask: Option<&Mask>) -> Result<(), Fail> {
     match el.name.as_str() {
         "svg" | "g" | "a" | "switch" => {
             for c in &el.children {
@@ -1196,20 +1205,20 @@ fn draw_content(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, st: &Style, t: Tr
         "path" | "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon" => {
             if let Some(p) = shape_path(el)? {
                 let fill = !matches!(el.name.as_str(), "line" | "polyline") || !matches!(st.fill, Fill::None);
-                draw_path(pix, &p, st, t, mask, fill && el.name != "line", true);
+                draw_path(pix, &p, st, t, mask, fill && el.name != "line", true)?;
             }
             Ok(())
         }
         "text" => draw_text(ctx, pix, el, st, t, mask),
         "image" => draw_image(pix, el, st, t, mask),
-        other => Err(format!("the SVG element <{}>", other)),
+        other => Err(Fail::Input(format!("the SVG element <{}>", other))),
     }
 }
 
 /// The drawing at `scale` pixels per SVG unit, on `background` (None:
 /// transparent), in a picture of `size` pixels (None: the drawing's size,
 /// rounded), the drawing's top left at the picture's.
-pub fn render(svg: &str, scale: f32, size: Option<(u32, u32)>, background: Option<Rgba>) -> Result<(Pixmap, Out), String> {
+pub fn render(svg: &str, scale: f32, size: Option<(u32, u32)>, background: Option<Rgba>) -> Result<(Pixmap, Out), Fail> {
     let root = parse(svg)?;
     let (mut vx, mut vy, mut vw, mut vh) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
     if let Some(vb) = root.attr("viewBox") {
@@ -1232,13 +1241,13 @@ pub fn render(svg: &str, scale: f32, size: Option<(u32, u32)>, background: Optio
         None => ((w * scale).round(), (h * scale).round()),
     };
     if pw < 1.0 || ph < 1.0 || pw > crate::MAX_AXIS as f32 || ph > crate::MAX_AXIS as f32 || pw * ph > crate::MAX_PIXELS as f32 {
-        return Err(format!(
+        return Err(Fail::Input(format!(
             "a picture of {} x {} pixels: at most {} on a side and {} in all",
             pw, ph, crate::MAX_AXIS, crate::MAX_PIXELS
-        ));
+        )));
     }
     let (pw, ph) = (pw as u32, ph as u32);
-    let mut pix = Pixmap::new(pw, ph).ok_or("a picture of that size")?;
+    let mut pix = mem::pixmap(pw, ph, "the picture")?;
     if let Some(bg) = background {
         pix.fill(tiny_skia::Color::from_rgba(bg.0, bg.1, bg.2, bg.3).ok_or("the background")?);
     }
@@ -1274,13 +1283,13 @@ mod tests {
         // (HARD-6BC-1) 16 nested opacity groups or clip paths are drawn, 17 refused
         for attr in [r#"opacity="0.5""#, r#"clip-path="url(#c)""#] {
             assert!(render(&nested(16, 8, attr), 1.0, None, None).is_ok(), "{}", attr);
-            let e = render(&nested(17, 8, attr), 1.0, None, None).err().unwrap();
+            let e = render(&nested(17, 8, attr), 1.0, None, None).err().unwrap().to_string();
             assert_eq!(e, "opacity groups and clip paths nested more than 16 deep");
         }
         // at 4096 x 4096 (64 MB the picture and a layer, 16 MB a mask), the
         // 256 MB budget allows 3 nested layers, not 4 (refused before the
         // fourth is allocated)
-        let e = render(&nested(4, 4096, r#"opacity="0.5""#), 1.0, None, None).err().unwrap();
+        let e = render(&nested(4, 4096, r#"opacity="0.5""#), 1.0, None, None).err().unwrap().to_string();
         assert_eq!(e, "a drawing of 4096 x 4096 pixels whose nested opacity groups and clip paths need more than 256 MB at once");
         let mut ctx = Ctx { clips: HashMap::new(), w: 4096, h: 4096, out: Out { missing: vec![] }, frame_drawn: false, live: 64 << 20, nested: 0 };
         ctx.reserve(64 << 20).unwrap();
