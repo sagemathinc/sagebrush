@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Worker } from "node:worker_threads";
 import { engineCall } from "../src/runtime/engine";
 
 // GF(p) echelon admission by shape (plan F4 r4, d5c6c1cd) in pyjs: the
@@ -43,24 +45,48 @@ for (const [c, needsEnvelope, full] of [
   });
 }
 
+// (in a worker of this process, as test/engine-stop-reclaim.test.ts: the
+// CLI takes Ctrl-C only through its launcher's thread; here the test sets
+// the interrupt word's Ctrl-C bit itself, once the request is built)
 test("Ctrl-C during an engine elimination at 1024 x 1024 raises KeyboardInterrupt, not a fallback", async (t) => {
   if (!envelope()) return t.skip("this engine build predates the 1024 x 1024 envelope");
-  if (process.platform === "win32") return t.skip("no SIGINT to a child on Windows");
-  const c = spawn(process.execPath, [...HEAP, CLI, "--sage", CASES, "interrupt"], { stdio: ["ignore", "pipe", "pipe"] });
-  let out = "", err = "";
-  c.stderr.on("data", (d) => (err += d));
-  const done = new Promise<number | null>((res) => c.on("close", res));
-  await new Promise<void>((res) => c.stdout.on("data", (d) => {
-    out += d;
-    // (printed just before the engine call: the request is built)
-    if (out.includes("ready")) {
-      setTimeout(() => c.kill("SIGINT"), 200);
-      res();
-    }
-  }));
-  const code = await done;
-  assert.equal(code, 0, out + err.slice(-1000));
-  assert.match(out, /^interrupted \[\(1024, 1024\)\]$/m, out);
+  const dir = mkdtempSync(join(tmpdir(), "ffmat-intr-"));
+  const w = new Worker(
+    `
+    const { parentPort, workerData } = require("node:worker_threads");
+    const fs = require("node:fs");
+    const c = require(workerData.dist + "/src/compile.js");
+    Promise.resolve(c.initParser && c.initParser()).then(() => {
+      c.R.importModule("sys").path.push(c.libDir());
+      parentPort.postMessage({ intr: c.R.INTR.buffer });
+      try {
+        c.execModule("import sys\\nsys.argv = " + JSON.stringify([workerData.cases, "interrupt", workerData.dir]), "<argv>", "__main__");
+        c.execModule(fs.readFileSync(workerData.cases, "utf8"), workerData.cases, "__main__");
+        parentPort.postMessage({ done: "ok" });
+      } catch (e) {
+        parentPort.postMessage({ done: c.R.formatException(e).trim().split("\\n").pop() });
+      }
+    });
+    `,
+    { eval: true, workerData: { dist: join(__dirname, ".."), cases: CASES, dir } },
+  );
+  const r: any = await new Promise((resolve, reject) => {
+    let intr: Int32Array | null = null;
+    const timer = setTimeout(() => (w.terminate(), resolve({ done: "timed out" })), 600000);
+    const poll = setInterval(() => {
+      if (intr && existsSync(join(dir, "ready"))) {
+        clearInterval(poll);
+        setTimeout(() => Atomics.or(intr!, 0, 1), 200);
+      }
+    }, 20);
+    w.on("message", (m) => {
+      if (m.intr) intr = new Int32Array(m.intr);
+      if (m.done) (clearTimeout(timer), clearInterval(poll), w.terminate(), resolve(m));
+    });
+    w.on("error", (e) => (clearTimeout(timer), clearInterval(poll), reject(e)));
+  });
+  assert.equal(r.done, "ok", JSON.stringify(r));
+  assert.equal(readFileSync(join(dir, "result"), "utf8"), "interrupted [(1024, 1024)]");
 });
 
 // engineCall writes an ASCII request straight into the engine's memory
@@ -86,7 +112,9 @@ test("engineCall: an ASCII request makes no copy outside wasm memory; a non-ASCI
     // (the first call grows the engine's memory to this request's peak;
     // the measured ones then grow nothing in wasm)
     const first = engineCall(ascii);
-    assert.match(first, /^\{"ok":\{"pivots":"0","det":"0"\}\}$/);
+    // (rank 1: pivot 0 only; det is the pivot product, the determinant only
+    // of a full-rank square matrix)
+    assert.match(first, /^\{"ok":\{"pivots":"0","det":"\d+"\}\}$/);
     (globalThis as any).gc?.();
     let before = process.memoryUsage();
     assert.equal(engineCall(ascii), first);
