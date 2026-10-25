@@ -14,7 +14,7 @@
 import type { Workspace } from "./api";
 import { req } from "./db";
 import { switchToIf } from "./sync-outbox";
-import { readLife, syncOffIf, type LifeMark } from "./sync-pins";
+import { readLife, sameLife, syncOffIf, type LifeMark } from "./sync-pins";
 import { SyncOwner } from "./sync-owner";
 import { accountHash } from "../sync-protocol/protocol";
 import type { Refusal } from "./sync-client";
@@ -28,7 +28,9 @@ export const PANEL = {
 };
 
 export type Status = { available: boolean; reason?: string; state: string; generation?: number; retry_after?: number; message?: string; limit_bytes?: number | null; used_bytes?: number };
-export type Answer = { ok: true; status: Status; account: string | null } | { ok: false; why: "network" | "http"; code?: number; retryAfter?: number };
+/** A status answer; `life`, the lifecycle of this browser it was read under (the panel's reads: an answer read across
+ * a lifecycle change is "stale", never applied: astra3's CORR-PR130-3). */
+export type Answer = { ok: true; status: Status; account: string | null; life?: LifeMark } | { ok: false; why: "network" | "http" | "stale"; code?: number; retryAfter?: number };
 
 /** The server's delay as the panel takes it: a finite safe integer of ms, clamped; anything else, none. */
 export function clampDelay(ms: unknown): number | undefined {
@@ -152,10 +154,19 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     const meta = w.ws.transaction("meta").objectStore("meta");
     Promise.all([req(meta.get(`sync:${ns}:listed`)), req(meta.get(`sync:${ns}:refused`))]).then((v) => ok(v as any), no);
   }));
-  const poll = new PanelPoll((s) => askStatus(f, s), (a) => answered(a), opts.random, opts.after);
+  // (every status read bound to the lifecycle it started under: one that a lifecycle change overtook is dropped and
+  // asked again, never applied (astra3's CORR-PR130-3))
+  const boundStatus = async (signal: AbortSignal): Promise<Answer> => {
+    const before = await readLife(w);
+    const a = await askStatus(f, signal);
+    if (!sameLife(await readLife(w), before)) return { ok: false, why: "stale" };
+    return a.ok ? { ...a, life: before } : a;
+  };
+  const poll = new PanelPoll(boundStatus, (a) => answered(a), opts.random, opts.after);
   const unsub = owner.onChange(() => { if (last && !poll.closed) draw(); });
 
   function answered(a: Answer) {
+    if (!a.ok && a.why === "stale") return poll.request();
     if (!a.ok) {
       last = null;
       const signedOut = a.why === "http" && a.code === 401;
@@ -167,7 +178,9 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     poll.good();
     last = { status: a.status, account: a.account };
     const st = a.status;
-    if ("limit_bytes" in st) owner.limit = { limit_bytes: st.limit_bytes ?? null, used_bytes: st.used_bytes ?? 0 };
+    // (the plan's limit is the account's: kept for this browser's sync only if its namespace is that account's, so no
+    // other account's limit is ever published under it)
+    if ("limit_bytes" in st && limitIsOurs(a)) owner.limit = { limit_bytes: st.limit_bytes ?? null, used_bytes: st.used_bytes ?? 0 };
     if (deleting) {
       if (a.account !== deleting.account) {
         deleting = null;
@@ -241,6 +254,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       const life = await owner.durable();
       if (!life || !current()) return;
       const [listed, refused] = await readDetails(life.ns);
+      if (!current()) return;
       const now = await owner.durable();
       if (!current() || !now || now.ns !== life.ns || now.epoch !== life.epoch) return;
       const parts: HTMLElement[] = [];
@@ -361,20 +375,35 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   }
   /** A delete whose answer was lost: one read-only status decides; nothing is POSTed again without a click. */
   async function lost(generation: number, account: string, mark: LifeMark) {
-    const a = await askStatus(f, new AbortController().signal);
+    const a = await boundStatus(new AbortController().signal);
     if (poll.closed) return;
     note = "Couldn't confirm the deletion";
+    // (applied only to the lifecycle the action saw, or to this action's own change of it: when the compare-and-set
+    // refuses (another tab changed it meanwhile), or the read was overtaken, the answer is stale: dropped, and the
+    // status asked afresh (astra3's CORR-PR130-3))
+    const stale = () => {
+      note = "Couldn't confirm the deletion. This browser's sync changed meanwhile (another tab), so it was left as it is";
+      poll.request();
+    };
+    let own = false;
     if (a.ok && a.account === account) {
       if (a.status.state === "deleting") {
-        await offIf(mark, "deleting");
+        if (!(own = await offIf(mark, "deleting"))) return stale();
         deleting = { generation, account };
       } else if (a.status.state === "off") {
         note = "There's no synced data to delete";
-        await offIf(mark, "off");
+        if (!(own = await offIf(mark, "off"))) return stale();
       } else if ((a.status.generation ?? 0) > generation) note = "Sync was turned on again since; confirm again to delete the current data";
       else note = "Couldn't confirm the deletion: Delete again to send it once more";
     }
-    answered(a);
+    if (!own && (!a.ok ? a.why === "stale" : !a.life || !sameLife(a.life, mark))) return stale();
+    if (poll.closed) return;
+    answered(own && a.ok ? { ...a, life: undefined } : a);
+  }
+  /** Whether a status answer's limit may be this browser's: sync off here (shown only), or on for that account. */
+  function limitIsOurs(a: Answer & { ok: true }): boolean {
+    if (!a.life || !a.life.ns || a.life.off) return true;
+    return !!a.account && a.life.ns.startsWith(a.account + ":");
   }
 
   poll.request();

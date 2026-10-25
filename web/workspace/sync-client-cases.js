@@ -1851,11 +1851,17 @@ const caught = async (p) => { try { await p; return null; } catch (e) { return e
 
 /** A fake server for the panel: answers by path, counts POSTs; `next` answers the next delete/enable. */
 function fakeServer(status, account = "acct-x") {
-  const s = { status, posts: [], deletes: [], next: [], me: account };
+  // (statusGates: each status read waits for the next gate, if any; statusReads counts the reads begun)
+  const s = { status, posts: [], deletes: [], next: [], me: account, statusGates: [], statusReads: 0 };
   s.fetch = async (url, init = {}) => {
     const path = String(url).replace(/^https?:\/\/[^/]+/, "");
     if (path === "/api/share/me") return Response.json({ account_id: s.me });
-    if (path === "/api/sync/v1/status") return Response.json(typeof s.status === "function" ? s.status() : s.status);
+    if (path === "/api/sync/v1/status") {
+      s.statusReads++;
+      const g = s.statusGates.shift();
+      if (g) await g;
+      return Response.json(typeof s.status === "function" ? s.status() : s.status);
+    }
     if (init.method === "POST") {
       s.posts.push(path);
       if (path.endsWith("/delete")) s.deletes.push(JSON.parse(init.body));
@@ -2148,6 +2154,112 @@ async function s5Races() {
     if (change) check(l.ns === nsB && !l.off, "races: an enable answered after another tab turned on B (the panel closed): B kept: " + J(l));
     else check(l && /:9:/.test(l.ns) && !l.off, "races: an enable answered with nothing changed meanwhile: applied: " + J(l));
   }
+  // (astra3's CORR-PR130-3, their sequence: A's delete loses its answer; the follow-up status read is held after /me;
+  // another tab switches this browser to B, whose limit is 2,000; A's "off, limit 1,000" status is then released.  It
+  // is never applied: not to the lease, not to the plan's limit (what the holder publishes), not to the panel; the
+  // status is asked afresh and B's applied)
+  {
+    const w = await fresh();
+    const H = await hashOf("acct-x"), nsA = `${H}:3:${w.device}`, nsB = `${H}:4:${w.device}`;
+    await W.switchTo(w, nsA);
+    const owner = W.SyncOwner.of(w);
+    let st = { ...status };
+    const el = document.body.appendChild(document.createElement("div")), srv = fakeServer(() => st);
+    srv.next = [{ throw: true }];
+    const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch });
+    await until(() => /Delete my synced data/.test(buttons(el).join()), 3000);
+    const held = gate(), after = gate();
+    const r0 = srv.statusReads;
+    srv.statusGates.push(held.p, after.p);
+    click(el, /Delete my synced data/);
+    check(await until(() => srv.deletes.length === 1 && srv.statusReads > r0, 3000), "races: the lost delete's status read begun, held");
+    await W.switchTo(w, nsB);
+    owner.limit = { limit_bytes: 2000, used_bytes: 5 };
+    st = { available: true, state: "off", limit_bytes: 1000, used_bytes: 10 };
+    held.open();
+    await sleep(300);
+    const l = await lease(w);
+    check(l.ns === nsB && !l.off && owner.limit?.limit_bytes === 2000 && /Delete my synced data/.test(buttons(el).join()) && !/no synced data/.test(text(el)), "races: A's stale status after the switch to B: B left on, B's limit kept (the publication's source), the panel not drawn from it: " + J({ l, limit: owner.limit, buttons: buttons(el), text: text(el).slice(0, 160) }));
+    st = { available: true, state: "active", generation: 4, limit_bytes: 2000, used_bytes: 5 };
+    after.open();
+    check(await until(() => /changed meanwhile/.test(text(el)) && /Delete my synced data/.test(buttons(el).join()) && owner.limit?.limit_bytes === 2000 && srv.statusReads >= r0 + 2, 3000), "races: …the status asked afresh, B's applied, the change said: " + J({ limit: owner.limit, reads: srv.statusReads - r0, text: text(el).slice(0, 200) }));
+    s.dispose();
+    el.remove();
+  }
+  // (a status is the account's: its limit is never taken for this browser's sync on another account's namespace)
+  {
+    const w = await fresh();
+    await W.switchTo(w, nsFor(w, "c"));
+    const owner = W.SyncOwner.of(w);
+    owner.limit = null;
+    const el = document.createElement("div"), srv = fakeServer({ ...status });
+    const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch });
+    await until(() => /Delete my synced data/.test(buttons(el).join()), 3000);
+    check(!owner.limit, "races: a status of account x while this browser syncs another account's namespace: its limit not taken: " + J(owner.limit));
+    s.dispose();
+  }
+}
+
+async function s5DetailsGap() {
+  // (daybreak3's CORR-PR130-1-R2: the draw's generation checked after every await: a details read completing after its
+  // draw went stale (the panel closed, or redrawn) starts nothing more, not even the second durable read)
+  const w = await fresh();
+  await W.switchTo(w, nsFor(w, "d"));
+  const owner = W.SyncOwner.of(w), durable = owner.durable;
+  let durables = 0;
+  owner.durable = function () { durables++; return durable.call(this); };
+  try {
+    const reads = [];
+    const readDetails = () => { const g = gate(); reads.push(g); return g.p; };
+    const result = (n) => [{ count: n, paths: [["/g" + n, "conflict"]] }, []];
+    const el = document.body.appendChild(document.createElement("div")), srv = fakeServer({ available: true, state: "active", generation: 2 });
+    const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch, readDetails });
+    check(await until(() => reads.length === 1, 3000), "details gap: the draw's read begun");
+    // (stale exactly in the gap: closed while the read is pending)
+    s.dispose();
+    const d0 = durables;
+    reads[0].open(result(1));
+    await sleep(200);
+    check(durables === d0, `details gap: closed between the read and the second durable read: that read never begun (${durables - d0} begun)`);
+    // (redrawn in the gap: the older draw's completion begins nothing; the newer one's runs and renders)
+    const el2 = document.body.appendChild(document.createElement("div"));
+    const s2 = W.syncSection(w, el2, hostOf(w), { fetch: srv.fetch, readDetails });
+    await until(() => reads.length === 2, 3000);
+    s2.refresh();
+    await until(() => reads.length === 3, 3000);
+    const d1 = durables;
+    reads[1].open(result(2));
+    await sleep(200);
+    check(durables === d1, `details gap: redrawn between the read and the second durable read: the older draw began no read (${durables - d1} begun)`);
+    reads[2].open(result(3));
+    check(await until(() => /3 items sync kept aside/.test(text(el2)), 3000) && durables === d1 + 1 && !/2 items/.test(text(el2)), "details gap: …the newest draw's completion reads and renders: " + text(el2).slice(0, 120));
+    s2.dispose();
+    el.remove();
+    el2.remove();
+  } finally {
+    owner.durable = durable;
+  }
+}
+
+async function s5Wire() {
+  // (daybreak3's TEST-PR130-2-R2: a status publication within STATUS_PUB.maxBytes, the whole serialized message
+  // measured, UTF-8: a maximum-width namespace, the largest numbers, every optional field, and long reasons, of ASCII,
+  // of 4-byte characters, mixed and random; the reason cut by code points to the longest that fits)
+  const MAX = Number.MAX_SAFE_INTEGER;
+  const ns = `${"f".repeat(64)}:${"9".repeat(15)}:${"e".repeat(16)}`;
+  const bytes = (m) => new TextEncoder().encode(JSON.stringify(m)).length;
+  const hexr = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n / 2)), (b) => b.toString(16).padStart(2, "0")).join("");
+  const reasons = { ascii: "x".repeat(2000), astral: "\u{1F600}".repeat(600), mixed: Array.from({ length: 900 }, (_, i) => ["a", "\u00e9", "\u6f22", "\u{1F600}"][i % 4]).join(""), random: hexr(1500), quotes: '"\\'.repeat(400) };
+  const out = {};
+  for (const [k, reason] of Object.entries(reasons)) {
+    const m = W.statusMessage(ns, MAX, MAX, MAX, { state: "offline", waiting: MAX, reason, lastSynced: MAX, resumesAt: MAX, full: true, limit: { limit_bytes: MAX, used_bytes: MAX } });
+    const n = bytes(m), r = m.snapshot.reason ?? "";
+    out[k] = n;
+    check(n <= W.STATUS_PUB.maxBytes && n > W.STATUS_PUB.maxBytes - 16 && m.t === "status" && m.ns === ns && m.rev === MAX && reason.startsWith(r) && r.length > 0 && !/[\ud800-\udbff]$/.test(r), `wire: ${k} reason: the whole message ${n} UTF-8 bytes (at most ${W.STATUS_PUB.maxBytes}), its reason cut to ${Array.from(r).length} code points, whole ones`);
+  }
+  // (a short one untouched)
+  const m = W.statusMessage(ns, 1, 2, 3, { state: "synced", reason: "ok" });
+  check(m.snapshot.reason === "ok" && bytes(m) <= W.STATUS_PUB.maxBytes, "wire: a message that fits is sent as it is: " + J(out));
 }
 
 async function s5Takeover() {
@@ -2290,7 +2402,7 @@ async function s5Flood() {
   o2.destroy();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood };
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
