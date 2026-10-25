@@ -1,1 +1,1 @@
-{"v":1,"reason":"board open --edit, step 2 (#153): the hub, its memory ledger, caps, save and server (src/board-edit-*.ts) in the CLI bundle; size-gate's figure on 4684c25f (master 66a76f88, run 40210977687, job 121223501839)","bytes":{"cli/pyjs.cjs":113550}}
+{"v": 1, "reason": "board open --edit, step 2 (#153): the hub, its memory ledger, caps, save and server (src/board-edit-*.ts) in the CLI bundle; size-gate's figure on 9826d394 (master 4d6b3fde, run 40214788488, job 121234674059)", "bytes": {"cli/pyjs.cjs": 113606}}
