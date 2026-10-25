@@ -2241,10 +2241,14 @@ async function t14Large() {
   }
 }
 
+/** The committed planning allowance for a stored ledger row, bytes (daybreak3's storage decision for #128, Oct 25):
+ * A = 64 ceil(1.25 M / 64), floor 960, where M is the largest comparable measurement routed: M = 1037 gives 1344. */
+const ROW_ALLOWANCE = 1344;
+
 async function t14Figures() {
   // (LIMIT-PR128-1-R2: the widest row by construction (a refusal's code is ASCII [a-z0-9_], at most CODE.max); its
   // stored size measured on rows nothing can compress (each with its own random namespace, random seqs, random code);
-  // and a planning allowance from the encodings themselves, not from a measurement)
+  // and that measurement held to the committed allowance ROW_ALLOWANCE)
   const w = await fresh();
   const MAX = Number.MAX_SAFE_INTEGER;
   const hexr = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n / 2)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -2273,15 +2277,14 @@ async function t14Figures() {
   await sleep(1500);
   const u1 = await est();
   const measured = Math.round((u1 - u0) / 10_000);
-  // (the allowance: the value as stored (one byte a character, all ASCII), the primary key [ns, lseq] and the index key
-  // [ns, d, lseq] with its copy of the primary key, keys' strings at two bytes a character, 16 B per number; rounded up)
-  const keyBytes = 2 * ns.length + 2 * 16, idxBytes = 2 * ns.length + 3 * 16;
-  const allowance = Math.ceil((maxChars + keyBytes + idxBytes + keyBytes) / 64) * 64;
-  const plan = Math.max(allowance, measured);
+  // (the committed planning allowance A, bytes per stored row (daybreak3's storage decision for #128): A = 64 ceil(1.25 M
+  // / 64), floor 960, M the largest comparable measurement routed (the controlled runs at the reviewed head included).
+  // A planning envelope, not a physical bound: every measurement must be within it, and one above it reopens the decision)
+  const A = ROW_ALLOWANCE;
   const skips = JSON.stringify(Array.from({ length: 16 }, () => [MAX, MAX, 2]));
   const meta = { ledgerCount: 50_000, ledgerFloor: MAX, ledgerFrom: MAX, ledgerRev: MAX, ledgerSeeded: true, ledgerSeedAt: MAX, ledgerWipe: true };
   const metaChars = Object.entries(meta).reduce((a, [k, v]) => a + `sync:${ns}:${k}`.length + JSON.stringify(v).length, 0) + `sync:${ns}:ledgerSkips`.length + skips.length;
-  check(skips.length <= 609 && plan >= measured, "figures (task #14): " + J({ measuredBytesPerIncompressibleRow: measured, allowanceBytesPerRow: allowance, planningBytesPerRow: plan, perNamespacePlanMiB: +(plan * 70_000 / 2 ** 20).toFixed(1), globalPlanMiB: +(plan * 210_000 / 2 ** 20).toFixed(1), rowJsonCharsMax: maxChars, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
+  check(skips.length <= 609 && measured > 0 && measured <= A, `figures (task #14): measured ${measured} B a stored row, within the committed allowance A = ${A}: ` + J({ measuredBytesPerIncompressibleRow: measured, committedAllowanceBytesPerRow: A, perNamespacePlanMiB: +(A * 70_000 / 2 ** 20).toFixed(1), globalPlanMiB: +(A * 210_000 / 2 ** 20).toFixed(1), rowJsonCharsMax: maxChars, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
 }
 
 async function t14Review() {
