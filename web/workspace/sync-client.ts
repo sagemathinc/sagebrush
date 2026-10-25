@@ -31,7 +31,8 @@
 //   or state, or the person's resume().
 import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
-import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
+import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, wireOf, ownedSeq, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
+import { seedLedger, hubOf, driveObsolete, ledgerKeys } from "./sync-ledger";
 import { bytesFor } from "./sync-pins";
 import { cursorOf, applyOps, genPrefix, drainConfirmed } from "./sync-confirmed";
 import { capture as captureAdoption } from "./sync-adopt";
@@ -156,6 +157,8 @@ type Conn = {
   generation: number;
   ob: Outbox;
   ws: WebSocket;
+  /** (task #14) the lifecycle epoch and the lease generation this connection's in-memory events carry */
+  epoch: number;
   welcomed: boolean;
   /** writes allowed: the account is active and nothing paused them */
   writable: boolean;
@@ -253,6 +256,11 @@ export class SyncClient {
   /** Runs until stop(), or until the server says sync is off for this account, or the session ends. */
   async start(): Promise<void> {
     this.unwatch = this.w.watch(() => this.kick());
+    // (other namespaces' ledgers, queued for deletion, deleted a page at a time while this client runs: task #14)
+    void driveObsolete(this.w, (ms) => new Promise<void>((ok) => {
+      const cancel = this.clock.after(ms, () => { this.cancels.delete(cancel); ok(); });
+      this.cancels.add(cancel);
+    }), () => this.stopped).catch((e) => console.warn("sync: ledger cleanup", e));
     try {
       while (!this.stopped) {
         const ns = await this.namespace();
@@ -401,6 +409,14 @@ export class SyncClient {
     // without it (step 3): the scan starts at the latest op)
     if (this.opts.onIndex) await captureAdoption(this.w, ns);
     else if ((await ob.status()).scanned === undefined) await ob.begin(await this.w.lastSeq());
+    // (task #14: the namespace's ledger seeded once, after the adoption (its boundary then W1) and before anything
+    // is scanned or sent; then this holder announced, with the ledger's revision, before any scan or ack of its own)
+    await seedLedger(this.w, ns, (o, dseq) => wireOf(o, dseq));
+    const epoch = (await this.metaGet<number>("sync:epoch")) ?? 0;
+    // (it answers waits' hellos from now on, even before it sends: a wait on an unknown generation is confirmed by
+    // that answer alone, CORR-PR128-6-R5)
+    hubOf(this.w.ws).holding(ns, epoch, lease.gen);
+    hubOf(this.w.ws).post({ t: "holder", ns, epoch, gen: lease.gen, rev: (await this.metaGet<number>(ledgerKeys(ns).rev)) ?? 0 });
     // (where the log is read from, and to: the records accepted and awaiting their echo, LIMIT-PR58-3)
     const awaiting = await this.awaitingEcho(ob);
     // (with the confirmed index (D5): `request_after` from its durable cursor `apply_after`, lowered to just before
@@ -417,13 +433,15 @@ export class SyncClient {
     return new Promise<End>((done) => {
       let ended = false;
       const c: Conn = {
-        ns, account: ns.split(":")[0], generation: Number(ns.split(":")[1]), ob, ws, welcomed: false, writable: false, resync: false, req: 0, pending: new Map(), pulling: false, target: awaiting?.hi ?? 0, pages: 0,
+        ns, account: ns.split(":")[0], generation: Number(ns.split(":")[1]), ob, ws, epoch, welcomed: false, writable: false, resync: false, req: 0, pending: new Map(), pulling: false, target: awaiting?.hi ?? 0, pages: 0,
         have: new Set(), missing: new Set(), final: new Set(), gone: new Set(), chain: Promise.resolve(),
         end: (why) => {
           if (ended) return;
           ended = true;
           if (this.conn === c) this.conn = null;
           this.unwake();
+          // (what was in flight on it is local again (task #14))
+          hubOf(this.w.ws).reset(c.ns, c.epoch, c.ob.lease.gen);
           try { ws.close(1000, why); } catch {}
           void (async () => {
             if (why === "closed" && !this.stopped) {
@@ -710,6 +728,7 @@ export class SyncClient {
     }
     if (!p || p.kind !== "ops") return;
     c.pending.delete(m.req);
+    hubOf(this.w.ws).answered(c.ns, c.ob.lease.gen, p.recs.map(ownedSeq).filter((x): x is number => x !== undefined));
     if (!Array.isArray(m.ops)) return c.end("closed");
     const results = m.ops as ({ dseq: number; seq: number } | { dseq: number; code: string })[];
     await c.ob.acked(results);
@@ -929,6 +948,8 @@ export class SyncClient {
       this.stats.opsSent += batch.length;
       this.stats.maxOps = Math.max(this.stats.maxOps, batch.length);
       this.ask(c, { t: "ops", ops: batch.map((r) => r.op) }, { kind: "ops", recs: batch });
+      // (sent: in memory only, fenced by this connection's lease generation (task #14))
+      hubOf(this.w.ws).sent(c.ns, c.epoch, c.ob.lease.gen, batch.map(ownedSeq).filter((x): x is number => x !== undefined));
       c.next = batch[batch.length - 1].dseq + 1;
       if (n < recs.length) return;
     }

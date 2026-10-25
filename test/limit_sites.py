@@ -62,6 +62,9 @@ REGISTRY = os.path.join(ROOT, "test", "limit-sites.json")
 BASELINE = os.path.join(ROOT, "test", "limit-sites-baseline.txt")
 VOCAB = re.compile(r"max(?!\s*\()|limit|budget|too large|exceeds|NotImplementedError|\bcap\b|\bthreshold\b|unsupported|resource", re.I)
 CLASSES = {"1", "2", "3", "1+2", "1+3", "2+3", "1+2+3", "coverage", "none"}
+# (web files in the census, one by one: the sync client's ledger, whose shared-resource bounds (the hub's namespaces and
+# tentative epochs, the waits, the ledger's rows) are class 1 (PR #128's LIMIT-PR128-3); the rest of web/ is a follow-up)
+WEB = {"web/workspace/sync-ledger.ts"}
 
 
 def short(key):
@@ -78,7 +81,7 @@ def tracked(rev=None):
     keep = []
     for p in out.split("\n"):
         if re.fullmatch(r"lib/[^/]+\.py", p) or (p.startswith("engine/") and p.endswith(".rs") and "/target/" not in p) \
-                or (p.startswith("src/") and p.endswith(".ts")):
+                or (p.startswith("src/") and p.endswith(".ts")) or p in WEB:
             keep.append(p)
     return sorted(keep)
 
