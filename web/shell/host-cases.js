@@ -119,7 +119,7 @@ async function basics(check) {
   check(r.kind === "exit" && r.stdout === "hi\n" && (await read(ws, "/n")) === "hi\n" && !(await ws.stat("/dev")), `a redirection commits, cat reads it back, and /dev/null never reaches the workspace (${JSON.stringify(r)})`);
   check(same(r.ops.map((o) => o.verb + " " + o.path), ["create /n"]), `one op for the redirection: ${JSON.stringify(r.ops)}`);
   r = await host.exec(PERSON, "cat <<EOF\n  indented\nEOF");
-  check(r.stdout === "  indented\n", `a here-document keeps its lines' leading whitespace, as bash does (rawScript): ${JSON.stringify(r.stdout)}`);
+  check(r.stdout === "  indented\n", `a here-document keeps its lines' leading whitespace, as bash does: ${JSON.stringify(r.stdout)}`);
 }
 
 // ---------------------------------------------------------------- write identity (CORR-BASH-2, §3.2)
@@ -150,6 +150,13 @@ async function identity(check) {
   hooks.create = async (p) => { if (p === "/c") { delete hooks.create; await ws.create("/c", { content: enc("theirs\n") }); } };
   r = await host.exec(PERSON, "echo mine > c");
   check(r.code === 1 && /\/c: changed elsewhere/.test(r.stderr) && (await read(ws, "/c")) === "theirs\n", `of two creators exactly one wins (${JSON.stringify(r)})`);
+  // a re-opened append keeps the run's observation: another tab's change between two iterations is ECONFLICT,
+  // never taken in (between iteration 1's commit and iteration 2's open: the `cat g` in between)
+  await reset("/f", "old\n");
+  await reset("/g", "g\n");
+  hooks.readUpTo = async (p) => { if (p === "/g") { delete hooks.readUpTo; await ws.write("/f", enc("old\nother tab\n")); } };
+  r = await host.exec(PERSON, "for i in 1 2; do echo $i >> f; cat g > /dev/null; done");
+  check(r.code === 1 && /changed elsewhere/.test(r.stderr) && (await read(ws, "/f")) === "old\nother tab\n", `a re-opened append isn't observed again: another tab's change between iterations is ECONFLICT (${JSON.stringify(r)})`);
   // a notebook or board is never written
   await ws.create("/nb.ipynb", { content: { cells: [{ cell_type: "code", source: "1" }] } });
   r = await host.exec(PERSON, "echo x > nb.ipynb; echo after");
@@ -360,7 +367,17 @@ async function conformance(check) {
     await ws.mkdir("/big");
     for (let i = 0; i < 25; i++) await ws.create(`/big/f${i}`, { content: enc(String(i)) });
     const n0 = (await opsOf(ws)).length;
+    // (the first request after each verb: is the large move's rewrite still under way?)
+    const pendingAfter = [];
+    let moved = false;
+    hooks.rename = async () => { moved = true; };
+    hooks.remove = async () => { moved = true; };
+    hooks.stat = async () => { if (moved) { moved = false; pendingAfter.push(!!(await W.rewriting(ws.ws))); } };
     r = await sh("mv big big2; ls big2 | wc -l; rm -r big2; ls / | grep -c big");
+    delete hooks.rename;
+    delete hooks.remove;
+    delete hooks.stat;
+    check(same(pendingAfter, [false, false]), `mv and rm wait for the large move's rewrite to settle before the next request (${JSON.stringify(pendingAfter)})`);
     const logged = (await opsOf(ws)).slice(n0);
     check(/^\s*25\n0\n$/.test(r.stdout) && same(logged.map((o) => o.op), ["rename", "remove"]) && same(r.ops.map((o) => o.verb), ["rename", "remove"]), `a large mv and a large rm through D11: one op each, settled before the next command (${JSON.stringify(r).slice(0, 300)}; logged ${logged.map((o) => o.op)})`);
   } finally {
@@ -388,8 +405,12 @@ async function stop(check) {
   check(r.kind === "exit" && r.stdout === "fresh\n", `and the next run works (${JSON.stringify(r)})`);
   ac = new AbortController();
   setTimeout(() => ac.abort(), 300);
+  t0 = performance.now();
   r = await host.exec(PERSON, "i=0; while true; do echo $i >> n; i=$((i+1)); done", { signal: ac.signal });
+  ms = performance.now() - t0;
   const n = (await opsOf(ws)).length;
+  // (each iteration waits on the page, so the shell sees the abort at the next statement: well before the 2 s grace)
+  check(r.kind === "interrupted" && ms < 1500, `Stop during a loop of appends unwinds at the abort, before the grace (${Math.round(ms)} ms)`);
   await new Promise((res) => setTimeout(res, 300));
   check(r.kind === "interrupted" && (await opsOf(ws)).length === n, `Stop during a loop of appends: interrupted, and nothing admitted after it (${JSON.stringify(r).slice(0, 200)})`);
   // a shell that doesn't unwind (a stand-in that never answers): the worker is ended after the 2 s grace

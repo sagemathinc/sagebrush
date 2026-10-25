@@ -220,8 +220,7 @@ export function start(port) {
     invocations.set(id, inv);
     let r;
     try {
-      // (rawScript: the script as written, each line's leading whitespace kept, as bash keeps it)
-      r = await new Bash({ fs: fsFor(inv), cwd: typeof cwd === "string" ? cwd : "/", commands: COMMANDS }).exec(script, { ...(typeof stdin === "string" ? { stdin } : {}), rawScript: true, signal: inv.ctl.signal });
+      r = await new Bash({ fs: fsFor(inv), cwd: typeof cwd === "string" ? cwd : "/", commands: COMMANDS }).exec(script, { ...(typeof stdin === "string" ? { stdin } : {}), signal: inv.ctl.signal });
     } catch (err) {
       // (a rejection is reported as one, with its refusal only if it is one this invocation threw: D8 point 5)
       hostCall("shell.result", { id, rejected: { message: String((err && err.message) || err), refusal: inv.thrown.has(err) ? err.refusal : null } });

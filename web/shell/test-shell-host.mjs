@@ -14,10 +14,14 @@ import { devtoolsPort } from "../test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const root = join(here, "..", "..");
+let chrome = null;
+// (HOST_TEST_TIMEOUT_S: shorter for mutation runs, where a mutated host may hang an invocation)
+const limitS = Number(process.env.HOST_TEST_TIMEOUT_S) || 600;
 setTimeout(() => {
-  console.log("FAIL the test did not end within 600 s");
+  console.log(`FAIL the test did not end within ${limitS} s`);
+  chrome?.kill();
   process.exit(1);
-}, 600_000).unref();
+}, limitS * 1000).unref();
 const { shellWorkerPolicy, pagePolicy } = await import(join(here, "..", "csp-policy.mts"));
 
 // the set: the shell's, built by the publisher; and sets whose module is a stand-in, for the cases that need
@@ -97,7 +101,7 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 
 const profile = mkdtempSync(join(tmpdir(), "sb-test-shell-host-chrome-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 let code = 1, ws = null;
 try {
   const port = await devtoolsPort(profile);
