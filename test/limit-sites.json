@@ -1119,6 +1119,10 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
+ "lib/_capacity.py ::  :: (\"includes\") and which its `limit` bounds (\"constrains\"); a domain is in #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "lib/_capacity.py ::  :: (cgroup, resource limits, physical memory), from a snapshot at most #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -1128,6 +1132,10 @@
   "owner": "python (@sagebrush-python)"
  },
  "lib/_capacity.py ::  :: _NO_CEILING = 1 << 62 # (a cgroup v1 \"limit\" this large is none) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py ::  :: _PROCESS_MEMORY, _JOB_MEMORY = 0x100, 0x200 # (JOB_OBJECT_LIMIT_*_MEMORY) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -1155,10 +1163,6 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: _CtypesWindows.job_limit :: best = (int(info.ProcessMemoryLimit), self._commit()) #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
  "lib/_capacity.py :: _CtypesWindows.job_limit :: def job_limit(self): #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -1167,7 +1171,7 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: _CtypesWindows.job_limit :: j = (int(info.JobMemoryLimit), int(info.PeakJobMemoryUsed)) #0": {
+ "lib/_capacity.py :: _CtypesWindows.job_limit :: return _job_choice(flags, int(info.ProcessMemoryLimit), commit, int(info.JobMemoryLimit), int(info.PeakJobMemoryUsed)) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -1216,6 +1220,34 @@
   "owner": "python (@sagebrush-python)"
  },
  "lib/_capacity.py :: _cgroups :: n = _int(_read(b[0] + \"/memory.limit_in_bytes\") or \"\") #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _job_choice :: \"\"\"The job limit a Windows process is under: (limit, used, scope).  A #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _job_choice :: best = (process_limit, process_used, \"process\") #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _job_choice :: def _job_choice(flags, process_limit, process_used, job_limit, job_used): #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _job_choice :: j = (job_limit, job_used, \"job\") #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _job_choice :: limit neither counts nor bounds a child's memory, a job's does #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _job_choice :: or one for the whole job (JobMemoryLimit, against PeakJobMemoryUsed); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _job_choice :: per-process limit (ProcessMemoryLimit, against this process's commit) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -1323,23 +1355,35 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: _runtime_parts :: if not hasattr(_sys, \"_sagebrush_heap_limit\"): #0": {
+ "lib/_capacity.py :: _runtime_parts :: domains, (source, limit, used) from an older engine or a test, gets #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: _runtime_parts :: limit, used)]; [] in CPython.\"\"\" #0": {
+ "lib/_capacity.py :: _runtime_parts :: elif not hasattr(_sys, \"_sagebrush_heap_limit\"): #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: _windows :: \"\"\"The Windows sources: (job_limit or None, job_used, total, available), #0": {
+ "lib/_capacity.py :: _runtime_parts :: limit, used, includes, constrains)]; [] in CPython. A part with no #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: _windows :: limit, used = w.job_limit() #0": {
+ "lib/_capacity.py :: _windows :: \"\"\"The Windows sources: (job_limit or None, job_used, total, available, #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: _windows :: return (limit, used, total, available) #0": {
+ "lib/_capacity.py :: _windows :: claimed). scope: which job limit the figures are, \"process\" or \"job\" #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _windows :: got = tuple(w.job_limit()) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _windows :: limit, used, scope = got if len(got) == 3 else got + (None,) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _windows :: return (limit, used, total, available, scope) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -1355,11 +1399,7 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: capacity.add :: basis.append({\"source\": source, \"limit\": int(limit), \"used\": None if used is None else int(used), \"remaining\": rem}) #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "lib/_capacity.py :: capacity.add :: def add(source, limit, used): #0": {
+ "lib/_capacity.py :: capacity.add :: def add(source, limit, used, includes=_ALL, constrains=_ALL, **extra): #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -1368,6 +1408,10 @@
   "owner": "python (@sagebrush-python)"
  },
  "lib/_capacity.py :: capacity.add :: rem = None if used is None else max(0, int(limit) - int(used)) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: capacity.add :: row = {\"source\": source, \"limit\": int(limit), \"used\": None if used is None else int(used), \"remaining\": rem, #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -4030,13 +4074,13 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/engine.ts :: pushShare :: if (e === shareTo && now - shareAt < SHARE_MAX_AGE_MS) return; #0": {
+ "src/runtime/engine.ts :: only :: parts.push(Obj.tuple([\"js heap\", heapLimit(), typeof used === \"number\" && used >= 0 ? Math.floor(used) : null, only(\"js-heap\"), only(\"js-heap\")])); #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/engine.ts :: reclaimEngine :: parts.push(Obj.tuple([\"js heap\", heapLimit(), typeof used === \"number\" && used >= 0 ? Math.floor(used) : null])); #0": {
+ "src/runtime/engine.ts :: pushShare :: if (e === shareTo && now - shareAt < SHARE_MAX_AGE_MS) return; #0": {
   "class": "2",
-  "owner": "memory guards (D0)"
+  "owner": "python (@sagebrush-python)"
  },
  "src/runtime/format.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
   "class": "none",

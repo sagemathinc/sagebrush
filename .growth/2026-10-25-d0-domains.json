@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "D0 domains (#141, plan-d0-domains-r2): capacity()[\"domains\"] and each basis row's includes and constrains (lib/_capacity.py, in Sage and Magma modes' startup bundles), the Windows job row's scope, the runtime's capacity_parts with its domains",
+ "bytes": {
+  "cli/lib.gen.js": 3899,
+  "cli/pyjs.cjs": 3950,
+  "engine/lib/matlab.src": 1,
+  "engine/lib/sage.pre": 10672,
+  "engine/lib/sage.src": 3898,
+  "engine/sagebrush-worker.js": 75
+ }
+}
