@@ -155,7 +155,7 @@ _t2.sleep(0.15)  # (the engine's figure is read again when 100 ms old)
 _snap = _native.ledger_snapshot()
 check("the ledger's total is engine_total's", (_snap["total"], _snap["status"], _snap["joint"]), (16 * GiB, "observed", True))
 check("the ledger's allowance is a quarter", _snap["allowance"], 4 * GiB)
-check("the counting allocator is installed", _snap["live"] > 0, True)
+check("the process's own measure is read (physical row)", _snap["live"] > 0 and _snap["certified"], True)
 check("nothing outstanding between calls", _snap["outstanding"], 0)
 C._set_sources()
 

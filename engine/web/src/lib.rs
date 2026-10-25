@@ -11,12 +11,6 @@
 //! "factor" exposes it; "hmf_*" are Hilbert modular forms over Q(sqrt 5) (hmf.rs), "hmfq_*" over any real quadratic field (hmfq.rs).  Big
 //! integers are decimal strings.
 
-// Every engine heap byte is counted (sagebrush_ledger::live_bytes, no-cliffs
-// C-1): in the WebAssembly artifact only; the CPython module installs its
-// own, and native test binaries keep theirs.
-#[cfg(target_arch = "wasm32")]
-#[global_allocator]
-static ALLOC: sagebrush_ledger::CountingAlloc<std::alloc::System> = sagebrush_ledger::CountingAlloc::new(std::alloc::System);
 
 use sagebrush_bigint::BigInt;
 use sagebrush_modsym::dirichlet::DirichletGroup;
@@ -99,12 +93,12 @@ pub extern "C" fn sb_set_memory_total(bytes: f64, status: u32, joint: u32) {
     sagebrush_ledger::set_total(sagebrush_ledger::total_from_wasm(bytes, status, joint));
 }
 
-/// The engine heap's live bytes (the counting allocator) and its ledger's
-/// gross outstanding reservations: the host's common-domain check reads
-/// them (C-2).
+/// The ledger's live estimate (committed pages, or the baseline plus
+/// residents, whichever is larger: no-cliffs plan C r13) and its gross
+/// outstanding obligations: the host's common-domain check reads them (C-2).
 #[no_mangle]
-pub extern "C" fn sb_live_bytes() -> f64 {
-    sagebrush_ledger::live_bytes() as f64
+pub extern "C" fn sb_live_estimate() -> f64 {
+    sagebrush_ledger::live_estimate() as f64
 }
 
 #[no_mangle]
@@ -112,13 +106,6 @@ pub extern "C" fn sb_outstanding_bytes() -> f64 {
     sagebrush_ledger::outstanding_bytes() as f64
 }
 
-/// Calibration builds only (feature ledger-peak): the peak of live bytes
-/// since the last call, then reset to the current count.
-#[cfg(feature = "ledger-peak")]
-#[no_mangle]
-pub extern "C" fn sb_peak_bytes_reset() -> f64 {
-    sagebrush_ledger::peak_bytes_reset() as f64
-}
 
 /// The engine's typed memory refusal as the reply's "memory" member: the
 /// host turns it into D1's error (SagebrushMemoryError), never a string to

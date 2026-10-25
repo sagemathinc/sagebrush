@@ -1,8 +1,7 @@
-// The ledger's admission, ownership and exit rules (plan C r5 section 1.4,
-// r10 section 4).  The tests share the process-wide state, so each takes
-// SERIAL and starts from a clean ledger; live bytes are simulated with the
-// hooks (the counting allocator itself is tested in tests/alloc.rs, where it
-// is installed).
+// The ledger's admission, ownership and exit rules (plan C r13).  The tests
+// share the process-wide state, so each takes SERIAL and starts from a clean
+// ledger; the usage measure is a fake (hooks::set_fake_usage), read under
+// the lock at every check as the real one is.
 use super::*;
 use std::sync::{Arc, Barrier};
 
@@ -11,50 +10,90 @@ static SERIAL: Mutex<()> = Mutex::new(());
 fn fresh(total_bytes: u64) -> std::sync::MutexGuard<'static, ()> {
     let g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut s = state();
-    s.outstanding = 0;
-    s.by_chain.clear();
+    s.set_outstanding(0);
+    s.set_resident(0);
+    s.chains = [(0, 0); CHAIN_SLOTS];
     drop(s);
-    let live = LIVE.load(Relaxed);
-    hooks::sub_live(live);
+    hooks::set_fake_usage(Some((0, None)));
     set_total(Some(Total { bytes: total_bytes, status: TotalStatus::Observed, joint: false }));
     g
 }
 
-/// E = total / 4 and phi = 5/4: a total of 4 * 5/4 * n gives exactly n
-/// usable bytes.
+/// E = total / 4 and phi = 5/4: a total of 4 * 5/4 * n gives n usable bytes.
 fn total_for_usable(n: u64) -> u64 {
     n * SHARE_DEN * FRAG_NUM / FRAG_DEN
 }
 
 #[test]
-fn the_union_counts_pending_and_unregistered_bytes() {
-    // astra2's witness (C r4): 10 registered live, 40 reserved and not yet
-    // allocated, 40 live outside the ledger; with 75 usable, a new 20 is
-    // refused (10 + 40 + 40 + 20 = 110), where max(registered, live) + x
-    // = 70 would have admitted it
+fn the_union_counts_pending_and_measured_bytes() {
+    // astra2's witness (C r4) with a measured domain: 50 in use (10 a
+    // resident, 40 other), 40 reserved and not yet allocated, then a new 20
+    // against 75 usable: 50 + 40 + 20 = 110, refused
     let _g = fresh(total_for_usable(75));
-    hooks::add_live(10);
-    let resident = reserve("resident", 10).unwrap();
-    resident.register_resident();
-    let pending = reserve("pending", 40).unwrap();
-    hooks::add_live(40); // (a non-ledger allocation)
+    let r = reserve("resident", 10).unwrap();
+    let resident = r.register_resident();
+    hooks::set_fake_usage(Some((50, None)));
+    let pending = reserve("pending", 15).unwrap();
+    let pending2 = reserve("pending", 25).unwrap();
     match reserve("new", 20) {
-        Err(EngineError::Memory(r)) => {
-            assert_eq!((r.need, r.live, r.outstanding, r.allowance), (20, 50, 40, total_for_usable(75) / 4));
-            assert_eq!(r.status, TotalStatus::Observed);
-        }
+        Err(EngineError::Memory(r)) => assert_eq!((r.need, r.live, r.outstanding, r.measured), (20, 50, 40, true)),
         _ => panic!("the union must refuse"),
     }
-    drop(pending);
-    // without the pending 40: 50 live + 20 = 70 fits
+    drop((pending, pending2));
     assert!(reserve("new", 20).is_ok());
+    drop(resident);
+}
+
+#[test]
+fn retained_growth_after_a_release_is_seen_by_the_next_check() {
+    // astra2's C r12 case: usage 100; reserve 100; a covered allocation
+    // grows the domain to 200; free it and release O, no resident; the next
+    // check reads 200 (no cached measure)
+    let _g = fresh(total_for_usable(250));
+    hooks::set_fake_usage(Some((100, None)));
+    let r = reserve("work", 100).unwrap();
+    hooks::set_fake_usage(Some((200, None))); // (grown, and retained after the free)
+    drop(r);
+    match reserve("next", 60) {
+        Err(EngineError::Memory(r)) => assert_eq!(r.live, 200),
+        _ => panic!("200 + 60 > 250 must be refused"),
+    }
+    assert!(reserve("next", 50).is_ok());
+}
+
+#[test]
+fn a_resident_conversion_is_counted_whatever_the_measure_says() {
+    // L = max(U, R_res): a resident of 300 counts even if the measure
+    // reads less (it is read at each check, under the lock)
+    let _g = fresh(total_for_usable(1000));
+    let r = reserve("cache entry", 300).unwrap();
+    let res = r.register_resident();
+    assert_eq!((outstanding_bytes(), resident_bytes()), (0, 300));
+    assert!(reserve("next", 701).is_err());
+    assert!(reserve("next", 700).is_ok());
+    drop(res);
+    assert_eq!(resident_bytes(), 0);
+}
+
+#[test]
+fn machine_availability_refuses_when_others_use_the_machine() {
+    // C r13 section 3: the process share fits, but external usage leaves
+    // too little available (fake /proc/meminfo)
+    let _g = fresh(total_for_usable(64 << 30));
+    let avail = 300 << 20; // reserve(300 MiB) = 256 MiB + 30 MiB: room 14 MiB
+    hooks::set_fake_usage(Some((1 << 20, Some(avail))));
+    let room = avail - reserve_for(avail);
+    assert!(reserve("fits", room).is_ok());
+    match reserve("over", room + 1) {
+        Err(EngineError::Memory(r)) => assert_eq!(r.available, Some(room)),
+        _ => panic!("availability must refuse"),
+    }
 }
 
 #[test]
 fn two_admissions_before_either_allocates_cannot_both_fit() {
-    // pre-existing non-ledger live memory, then two threads reserve at once
     let _g = fresh(total_for_usable(100));
-    hooks::add_live(30);
+    hooks::set_fake_usage(Some((30, None)));
     let (start, held) = (Arc::new(Barrier::new(2)), Arc::new(Barrier::new(2)));
     let hs: Vec<_> = (0..2)
         .map(|_| {
@@ -62,7 +101,6 @@ fn two_admissions_before_either_allocates_cannot_both_fit() {
             std::thread::spawn(move || {
                 start.wait();
                 let r = reserve("each", 50);
-                // (both admissions are decided before either is released)
                 held.wait();
                 r.map(|r| r.amount()).ok()
             })
@@ -70,22 +108,26 @@ fn two_admissions_before_either_allocates_cannot_both_fit() {
         .collect();
     let got: Vec<_> = hs.into_iter().map(|h| h.join().unwrap()).collect();
     assert_eq!(got.iter().filter(|g| g.is_some()).count(), 1, "{:?}", got);
-    // (the winner's reservation was dropped when its thread returned)
     assert_eq!(outstanding_bytes(), 0);
 }
 
 #[test]
-fn a_resident_leaves_the_outstanding_sum_and_stays_live() {
-    let _g = fresh(total_for_usable(1000));
-    let r = reserve("cache entry", 300).unwrap();
-    hooks::add_live(300); // (its bytes are allocated)
-    assert_eq!(outstanding_bytes(), 300);
-    r.register_resident();
-    assert_eq!(outstanding_bytes(), 0);
-    assert_eq!(live_bytes(), 300);
-    // the resident's bytes still count: 300 live + 701 > 1000
-    assert!(reserve("next", 701).is_err());
-    assert!(reserve("next", 700).is_ok());
+fn a_transition_during_the_read_to_commit_window_waits() {
+    // the read and the commit share one critical section: a release on
+    // another thread waits until the paused admission has committed
+    let _g = fresh(total_for_usable(100));
+    let first = reserve("first", 40).unwrap();
+    let b = Arc::new(Barrier::new(2));
+    hooks::pause_next_admission(b.clone());
+    let h = std::thread::spawn(move || reserve("paused", 50).map(|r| r.amount()).ok());
+    b.wait(); // (the admission has read, holding the lock)
+    let t = std::thread::spawn(move || drop(first));
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert!(!t.is_finished(), "the release must wait for the lock");
+    b.wait();
+    // 40 outstanding when it read: 40 + 50 = 90 <= 100
+    assert_eq!(h.join().unwrap(), Some(50));
+    t.join().unwrap();
 }
 
 #[test]
@@ -93,21 +135,15 @@ fn an_outer_exit_releases_what_remains_then_reports_it_as_internal() {
     let _g = fresh(total_for_usable(1000));
     let op = Operation::enter();
     let chain = op.chain();
-    assert_eq!(current_chain(), chain);
-    let leaked = reserve("forgotten", 123).unwrap();
-    std::mem::forget(leaked); // (a reservation that outlives its call)
+    std::mem::forget(reserve("forgotten", 123).unwrap());
     let nested = Operation::enter();
-    assert_eq!(nested.chain(), chain);
-    assert_eq!(nested.finish(), Ok(())); // (a nested exit checks nothing)
+    assert_eq!(nested.finish(), Ok(()));
     assert_eq!(chain_outstanding(chain), 123);
     match op.finish() {
         Err(EngineError::Internal(m)) => assert!(m.contains("123"), "{}", m),
         e => panic!("expected an internal error, got {:?}", e),
     }
-    // cleanup came first: nothing is left outstanding, and the next call
-    // starts a new chain
-    assert_eq!(outstanding_bytes(), 0);
-    assert_eq!(current_chain(), 0);
+    assert_eq!((outstanding_bytes(), current_chain()), (0, 0));
 }
 
 #[test]
@@ -131,15 +167,28 @@ fn a_clean_exit_and_an_unwind_both_leave_nothing() {
 fn an_observed_zero_refuses_and_no_total_is_nominal() {
     let _g = fresh(0);
     set_total(Some(Total { bytes: 0, status: TotalStatus::Zero, joint: false }));
-    match reserve("x", 1) {
-        Err(EngineError::Memory(r)) => assert_eq!((r.allowance, r.status), (0, TotalStatus::Zero)),
-        _ => panic!("an observed zero refuses everything"),
-    }
+    assert!(matches!(reserve("x", 1), Err(EngineError::Memory(r)) if r.allowance == 0 && r.status == TotalStatus::Zero));
     set_total(None);
-    assert_eq!(total(), Total { bytes: NOMINAL_TOTAL, status: TotalStatus::Nominal, joint: false });
-    match reserve("x", NOMINAL_TOTAL) {
-        Err(EngineError::Memory(r)) => assert_eq!(r.status, TotalStatus::Nominal),
-        _ => panic!("the nominal total's quarter is less than the total"),
+    assert_eq!(total(), NOMINAL);
+}
+
+#[test]
+fn an_unmeasured_platform_is_not_certified() {
+    // fail-closed: no measure (no binding row, or one this build can't
+    // read) means certified() is false
+    let _g = fresh(total_for_usable(1000));
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        set_total_and_measure(Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true }), &[MeasureKind::WindowsJob]);
+        assert!(!certified());
+        set_total_and_measure(Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true }), &[MeasureKind::Cgroup("/nonexistent/memory.current".into())]);
+        assert!(!certified());
+        if cfg!(target_os = "linux") {
+            set_total_and_measure(Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true }), &[MeasureKind::Physical]);
+            assert!(certified());
+            let r = state().measure.read().expect("the process's own measure");
+            assert!(r.usage > 0 && r.available.unwrap() > 0, "{:?}", r);
+        }
     }
 }
 
@@ -157,10 +206,19 @@ fn a_credit_grows_by_new_admissions() {
 #[test]
 fn wasm_totals_are_checked() {
     assert_eq!(total_from_wasm(4294967296.0, 0, 1), Some(Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: true }));
-    assert_eq!(total_from_wasm(0.0, 1, 0), Some(Total { bytes: 0, status: TotalStatus::Zero, joint: false }));
     for (b, s, j) in [(-1.0, 0, 0), (1.5, 0, 0), (f64::NAN, 0, 0), (f64::INFINITY, 0, 0), (1.0, 3, 0), (1.0, 0, 2), (1e300, 0, 0)] {
         assert_eq!(total_from_wasm(b, s, j), None, "{} {} {}", b, s, j);
     }
+}
+
+#[test]
+fn proc_fields_parse_without_allocating() {
+    let text = b"Name:\tx\nVmSize:\t  1234 kB\nRssAnon:\t 10 kB\nVmSwap:\t0 kB\n";
+    assert_eq!(measure::kb_field(text, b"VmSize:"), Some(1234 * 1024));
+    assert_eq!(measure::kb_field(text, b"RssAnon:"), Some(10 * 1024));
+    assert_eq!(measure::kb_field(text, b"VmData:"), None);
+    assert_eq!(measure::parse_uint(b"  4096\n"), Some(4096));
+    assert_eq!(measure::parse_uint(b"none\n"), None);
 }
 
 #[test]

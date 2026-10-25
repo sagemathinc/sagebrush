@@ -30,6 +30,3 @@ serde_json = "1"
 # tests/nmod_phases.rs)
 sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host", "test-hooks"] }
 
-[features]
-# Calibration only (no-cliffs C-1): the ledger keeps the peak of live bytes
-ledger-peak = ["sagebrush-ledger/peak-stats"]
