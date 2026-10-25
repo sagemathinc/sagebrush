@@ -627,6 +627,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-ledger"
+version = "0.1.0"
+
+[[package]]
 name = "sagebrush-modsym"
 version = "0.1.0"
 dependencies = [
@@ -697,6 +701,7 @@ dependencies = [
  "sagebrush-ap",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-ledger",
  "sagebrush-modsym",
  "sagebrush-mpoly",
  "sagebrush-raster",
@@ -748,6 +753,7 @@ dependencies = [
  "sagebrush-group",
  "sagebrush-hmf",
  "sagebrush-interrupt",
+ "sagebrush-ledger",
  "sagebrush-modsym",
  "sagebrush-mpoly",
  "sagebrush-poly",
