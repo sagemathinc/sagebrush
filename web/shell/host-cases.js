@@ -400,7 +400,8 @@ async function stop(check) {
   let t0 = performance.now();
   let r = await host.exec(PERSON, "while true; do :; done", { signal: ac.signal });
   let ms = performance.now() - t0;
-  check(r.kind === "interrupted" && ms < 2000 + 3000, `Stop during a CPU-only loop: interrupted (${JSON.stringify(r)}, ${Math.round(ms)} ms)`);
+  // (the abort reaches the shell and it stops at a statement boundary: well before the 2 s grace would end its worker)
+  check(r.kind === "interrupted" && ms < 1800, `Stop during a CPU-only loop: the shell unwinds at the abort, before the grace (${JSON.stringify(r)}, ${Math.round(ms)} ms)`);
   r = await host.exec(PERSON, "echo fresh");
   check(r.kind === "exit" && r.stdout === "fresh\n", `and the next run works (${JSON.stringify(r)})`);
   ac = new AbortController();
@@ -409,8 +410,8 @@ async function stop(check) {
   r = await host.exec(PERSON, "i=0; while true; do echo $i >> n; i=$((i+1)); done", { signal: ac.signal });
   ms = performance.now() - t0;
   const n = (await opsOf(ws)).length;
-  // (each iteration waits on the page, so the shell sees the abort at the next statement: well before the 2 s grace)
-  check(r.kind === "interrupted" && ms < 1500, `Stop during a loop of appends unwinds at the abort, before the grace (${Math.round(ms)} ms)`);
+  // (Stop latches the fence, so the loop's next append is refused: it ends within a request, abort or not)
+  check(r.kind === "interrupted" && ms < 1500, `Stop during a loop of appends ends it at once (${Math.round(ms)} ms)`);
   await new Promise((res) => setTimeout(res, 300));
   check(r.kind === "interrupted" && (await opsOf(ws)).length === n, `Stop during a loop of appends: interrupted, and nothing admitted after it (${JSON.stringify(r).slice(0, 200)})`);
   // a shell that doesn't unwind (a stand-in that never answers): the worker is ended after the 2 s grace
