@@ -530,6 +530,8 @@ jobs:
               node web/test-kernel-start.mjs
               node web/test-pkgset-pin.mjs
               node web/test-pkgset-page.mjs
+              # (the bash shell's loader and its worker's own policy: plan-bash-shell r3 step 1)
+              bun web/test-shell.mjs
               node web/test-worker-limits.mjs
               ;;
             board-a)
