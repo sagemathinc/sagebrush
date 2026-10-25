@@ -2,9 +2,36 @@
 
 import json as _json
 import _sbengine
+import _limits
+
+
+# The engine requests that take an opt-in limit from the session's limits
+# (lib/_limits.py; C0's per-area follow-up): the field is sent only when the
+# limit is finite and the caller didn't pass it, so requests are unchanged by
+# default and explicit arguments win.
+_LIMITED = {
+    "factor": (("work", "poly.work"),),
+    "bnf": (("rounds", "nf.relation_rounds"),),
+    "bnf_relations": (("rounds", "nf.relation_rounds"),),
+    "quadratic_class_group": (("rounds", "nf.relation_rounds"),),
+    "bnf_certify": (("norm_max", "nf.certify_norm_max"), ("index_max", "nf.certify_index_max")),
+}
+
+
+def _with_limits(fn, args):
+    fields = _LIMITED.get(fn)
+    if fields is None:
+        return args
+    L = _limits.finalize()
+    for field, key in fields:
+        v = L[key]
+        if field not in args and v != float("inf"):
+            args[field] = int(v)
+    return args
 
 
 def call(fn, **args):
+    args = _with_limits(fn, args)
     r = _json.loads(_sbengine.call(_json.dumps(dict(fn=fn, **args))))
     if "error" in r:
         raise ValueError(r["error"])
