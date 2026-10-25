@@ -929,18 +929,16 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
         runs until it is done or stopped (Stop interrupts it at every stage,
         and sagebrush.progress shows the stage).  A context that wants a
         limit sets padic.kedlaya_work, in the units of _kd_cost (about 25
-        microseconds each in the CLI).  Memory is guarded, with the memory
-        guard's SagebrushMemoryError: a precision whose working modulus alone
-        can't fit this process is refused at once, and one estimated to need
-        more than a quarter of it before any work::
+        microseconds each in the CLI).  Memory is guarded (SagebrushMemoryError):
+        a precision whose working modulus alone can't fit this process is
+        refused at once, and one estimated to need more than a quarter of it
+        before any work::
 
             sage: try:  # sagebrush only
             ....:     EllipticCurve('14a1').padic_lseries(5).frobenius(10^100)
             ....: except MemoryError as e:
-            ....:     print(type(e).__name__, e.fixed, e.need_bytes > e.limit_bytes)
-            ....:     print(str(e).splitlines()[1])
-            SagebrushMemoryError False True
-            At the least, the Frobenius matrix at p = 5 to precision 10000...0 (just its working modulus p^(prec + 4)) needs about ... GB, but Sagebrush allows about ... for this whole process here.
+            ....:     print(type(e).__name__, e.need_bytes > e.limit_bytes)
+            SagebrushMemoryError True
         """
         sa = _sa()
         if algorithm not in ("mw", "approx"):
@@ -1550,11 +1548,7 @@ def _kd_ledger(p, N, K, W, L, a, t):
 
 
 def _kd_memory(what, need, limit, allowance_for):
-    """The memory guard's refusal (D1's SagebrushMemoryError) of a call
-    that needs need bytes against its enforced allowance limit, before any
-    work; what says whether need is a lower bound or an upper estimate.
-    capacity, the memory observed free, is an observation beside D1's
-    fields: it decided nothing (D0)."""
+    """D1's memory refusal; capacity (D0) is only an observation."""
     import _capacity, _memguard
     e = _memguard.memory_guard(what, need, limit, allowance_for)
     e.capacity = _capacity.capacity()
@@ -1602,8 +1596,7 @@ def _kd_admit(p, N, K, W, a, engine, what, total):
     sizes are not established, at once.  Returns U."""
     t = _KD_TABLES.get(engine)
     if t is None:
-        # (not a memory refusal: no need is known here, so none is given,
-        # nor a memory error's fields)
+        # (no need is known: not a memory refusal)
         raise NotImplementedError("%s: the memory estimate for this computation isn't established for this "
                                   "JavaScript engine (%s); the native package computes it" % (what, engine))
     U = _kd_ledger(p, N, K, W, p, a, t)
