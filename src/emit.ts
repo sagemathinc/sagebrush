@@ -494,7 +494,70 @@ export class Emitter {
     }
     const consumed = this.consumingCall(e);
     if (consumed !== null) return consumed;
+    const once = this.fileOnceCall(e);
+    if (once !== null) return once;
     return this.plainCall(e);
+  }
+  // `open(F, M).write(S)`, each operand a str or bytes literal or a plain
+  // name, outside class bodies: the file is written and closed at the
+  // statement, as CPython's dropped temporary is, where pyjs's file object
+  // would otherwise keep the data until a close, the cell's end or the
+  // program's (plan-pyjs-file-visibility r7 and addendum 1;
+  // runtime/file-once.ts).  In order:
+  // - a global operand's namespace and the builtins must be ones whose reads
+  //   run no user code (fileOnceEnv), decided before any read; else today's
+  //   code, with today's lookups;
+  // - open, F and M are read once each, as today; unless open is the
+  //   builtin, F an exact str and M one of w, a, wb, ab (no Python call
+  //   checks it), today's continuation runs with those values, reading S
+  //   after the open;
+  // - S is peeked: unbound, the open's effects happen, then today's read of
+  //   S raises its scope's error; fitting the mode, the native step writes
+  //   it; else the peek is dropped (its temporary cleared before open runs)
+  //   and today's continuation reads S again.
+  // A peeked S is used only when no Python code ran since the reads, and no
+  // temporary keeps it afterwards.
+  fileOnceCall(e: Extract<A.Expr, { k: "Call" }>): string | null {
+    const f = e.func;
+    if (f.k !== "Attribute" || f.attr !== "write" || e.args.length !== 1 || e.keywords.length !== 0) return null;
+    const o = f.value;
+    if (o.k !== "Call" || o.func.k !== "Name" || o.args.length !== 2 || o.keywords.length !== 0) return null;
+    if (this.fn.scope.kind === "class") return null;
+    const ops = [o.func, o.args[0], o.args[1], e.args[0]];
+    const nss = new Set<string>();
+    for (const x of ops) {
+      if (x.k === "Const") {
+        if (x.value.t !== "str" && x.value.t !== "bytes") return null;
+        continue;
+      }
+      if (x.k !== "Name") return null;
+      const r = resolve(this.fn.scope, x.id);
+      if (r.kind === "global") nss.add(this.gns(x.id) === "$G" ? "$GL" : "$g");
+      else if (r.kind !== "local" && r.kind !== "free") return null;
+    }
+    const sx = e.args[0];
+    const today = this.plainCall(e);
+    const s = this.site("siteCall", "write", 1);
+    const [to, tf, tm, ts] = [this.temp(), this.temp(), this.temp(), this.temp()];
+    // (S peeked into ts alone, which the paths below clear: no other
+    // temporary holds it; unbound: the test is true)
+    const unbound = ((): string => {
+      if (sx.k !== "Name") return `(${ts} = ${this.ex(sx)}) === undefined`;
+      if (resolve(this.fn.scope, sx.id).kind !== "global") return `(${ts} = ${js(sx.id)}) === undefined`;
+      return `(${ts} = ${this.gns(sx.id) === "$G" ? "$GL" : "$g"}${prop(sx.id)}) === undefined && (${ts} = R.fileOncePeekBuiltin(${q(sx.id)})) === undefined`;
+    })();
+    const cont = (): string => `${s}((typeof ${to} === "function" ? ${to}(${tf}, ${tm}) : callObj(${to}, [${tf}, ${tm}])), ${this.ex(sx)})`;
+    const env = [...nss].map((ns) => `R.fileOnceEnv(${ns}, $B)`).join(" && ");
+    // (the eligible path hands the peek over in R.fileOnceS, clearing the
+    // temporary first: an argument would stay in the module frame's
+    // registers, which never return, until the site ran again)
+    const site =
+      `(${to} = ${this.ex(o.func)}, ${tf} = ${this.ex(o.args[0])}, ${tm} = ${this.ex(o.args[1])}, ` +
+      `!R.fileOncePrefix(${to}, ${tf}, ${tm}) ? ${cont()} : ` +
+      `${unbound} ? (R.fileOnceTouch(${tf}, ${tm}), R.fileOnceNever(${this.ex(sx)})) : ` +
+      `R.fileOnceFits(${ts}, ${tm}) ? (R.fileOnceS.v = ${ts}, ${ts} = undefined, R.fileOnceWrite(${tf}, ${tm})) : ` +
+      `(${ts} = undefined, ${cont()}))`;
+    return env === "" ? site : `(${env} ? ${site} : ${today})`;
   }
   // A call of e.func, or of `callee`, the JavaScript holding it
   plainCall(e: Extract<A.Expr, { k: "Call" }>, callee?: string): string {

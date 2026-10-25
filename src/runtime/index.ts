@@ -23,6 +23,7 @@ import "./progress-module";
 import * as Prog from "./progress";
 import "./raster";
 import * as Cx from "./complex";
+import * as FO from "./file-once";
 O.complexHooks.pow = Cx.complexPow;
 
 O.arrayHooks.cls = Arr.PyArray;
@@ -571,6 +572,8 @@ B.builtins.compile = compileBuiltin;
 B.builtins.__pyjs_compile_sage__ = Obj.builtin((src: any, filename: any, mode: any) => compileSource(src, filename, mode, true), "__pyjs_compile_sage__");
 B.builtins.open = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_open"), "open"), a), "open");
 B.builtins.open.$kw = (pos: any[], names: string[], values: any[]) => Obj.callKw(Obj.getattr(M.importModule("_pyjs_open"), "open"), pos, names, values);
+// (open(F, M).write(S) with plain operands checks open by this identity: file-once.ts)
+FO.setCanonicalOpen(B.builtins.open);
 // help(obj), and obj? / obj?? in interactive input: lib/_pyjs_help.py
 B.builtins.help = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_help"), "help"), a), "help");
 // Run interactive input (mode "single": expression values are displayed) in
@@ -1180,6 +1183,14 @@ export const R: any = {
   originalBuiltins,
   builtinsOf: M.builtinsOf,
   builtinName: M.builtinName,
+  fileOnceEnv: FO.fileOnceEnv,
+  fileOncePeekBuiltin: FO.fileOncePeekBuiltin,
+  fileOncePrefix: FO.fileOncePrefix,
+  fileOnceFits: FO.fileOnceFits,
+  fileOnceWrite: FO.fileOnceWrite,
+  fileOnceS: FO.fileOnceS,
+  fileOnceTouch: FO.fileOnceTouch,
+  fileOnceNever: FO.fileOnceNever,
   globalLoads,
   buildClassOf,
   classNamespace,
