@@ -13,9 +13,12 @@ import * as Obj from "./object";
 import { newBuiltinModule, heapLimit } from "./modules";
 import { INTR, INTR_CTRL_C, consumeCtrlC } from "./interrupt";
 import { fullGc } from "./gc";
+import * as P from "./progress";
 
 interface Engine {
   memory: WebAssembly.Memory;
+  /** Optional (engines from before progress lack it): the progress frames. */
+  sb_progress_ptr?(): number;
   sb_alloc(len: number): number;
   sb_free(ptr: number, len: number): void;
   sb_call(ptr: number, len: number): number;
@@ -65,11 +68,38 @@ function engineBytes(): Uint8Array {
   throw new Error("the Sagebrush engine (sagebrush-engine.wasm) is not available here");
 }
 
+/** The engine's progress frames (progress.ts), if this engine has them. */
+let frames: Uint32Array | null = null;
+
 function engine(): Engine {
   // sagebrush.interrupted: Ctrl-C, polled by the engine's long loops
   // (engine/interrupt); an interrupted call traps and the instance is dropped.
-  const imports = { sagebrush: { interrupted: () => INTR[0] & INTR_CTRL_C } };
-  if (E === null) E = new WebAssembly.Instance(new WebAssembly.Module(engineBytes() as any), imports).exports as unknown as Engine;
+  // The same import copies the engine's progress frames into the shared
+  // slots (progress.ts), so progress needs no import of its own.
+  const imports = {
+    sagebrush: {
+      interrupted: () => {
+        if (frames !== null) {
+          // (a view of memory that has since grown is detached: length 0; no
+          // buffer getter is read on this path, which every poll takes)
+          if (frames.length === 0) frames = frameView(E!);
+          P.syncFrames(frames);
+        }
+        return INTR[0] & INTR_CTRL_C;
+      },
+    },
+  };
+  if (E === null) {
+    E = new WebAssembly.Instance(new WebAssembly.Module(engineBytes() as any), imports).exports as unknown as Engine;
+    frames = typeof E.sb_progress_ptr === "function" ? frameView(E) : null;
+    if (frames) {
+      try {
+        P.setEngineTables(JSON.parse(rawCall(E, '{"fn":"progress_tables"}')).ok);
+      } catch {
+        frames = null;
+      }
+    }
+  }
   return E;
 }
 
@@ -126,6 +156,28 @@ function memoryShare(): [number, number] {
   }
 }
 
+/** A view of the engine's frame area (again after its memory grows). */
+function frameView(e: Engine): Uint32Array | null {
+  const p = e.sb_progress_ptr!();
+  return p ? new Uint32Array(e.memory.buffer, p, P.FRAME_WORDS) : null;
+}
+
+function rawCall(e: Engine, request: string): string {
+  const req = new TextEncoder().encode(request);
+  const p = e.sb_alloc(req.length);
+  new Uint8Array(e.memory.buffer, p, req.length).set(req);
+  const r = e.sb_call(p, req.length);
+  e.sb_free(p, req.length);
+  return new TextDecoder().decode(new Uint8Array(e.memory.buffer, r, e.sb_reply_len()));
+}
+
+/** After an engine call: its progress frames' calls end (all of them, and a
+ *  new engine generation, when the call trapped and the instance is gone). */
+function callEnded(trapped: boolean) {
+  if (trapped) frames = null;
+  P.endFrames(trapped);
+}
+
 export function engineCall(request: string): string {
   const e = engine();
   pushShare(e);
@@ -140,6 +192,7 @@ export function engineCall(request: string): string {
     E = null;
     throw err;
   } finally {
+    callEnded(E === null);
     if (E) e.sb_free(p, req.length);
   }
   return new TextDecoder().decode(new Uint8Array(e.memory.buffer, r, e.sb_reply_len()));
@@ -166,9 +219,11 @@ export function symCall(request: string): string {
       // the instance is gone
     }
     E = null;
+    callEnded(true);
     if (msg) return msg;
     throw err;
   }
+  callEnded(false);
   e.sb_free(p, req.length);
   return new TextDecoder().decode(new Uint8Array(e.memory.buffer, r, e.sb_reply_len()));
 }
@@ -186,8 +241,10 @@ export function mpCall(req: Uint8Array): Uint8Array {
   } catch (err) {
     // an interrupt (or a bug) trapped: start afresh
     E = null;
+    callEnded(true);
     throw err;
   }
+  callEnded(false);
   e.sb_free(p, req.length);
   return new Uint8Array(e.memory.buffer, r, e.sb_reply_len()).slice();
 }

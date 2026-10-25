@@ -2019,7 +2019,19 @@ def factor(n, proof=None, **kwds):
         sage: R.<x> = ZZ[]
         sage: factor(x^4 - 1)
         (x - 1) * (x + 1) * (x^2 + 1)
+
+    The agent API's call options (deadline=, work=, checkpoints) are refused
+    before anything runs until this build has them
+    (sagebrush.capabilities())::
+
+        sage: factor(2^64 + 1, deadline=60)
+        Traceback (most recent call last):
+        ...
+        TypeError: factor(): deadline= is not available in this build
     """
+    if kwds:
+        from sagebrush import records as _records
+        _records.refuse_later_options("factor", kwds)
     if isinstance(n, (_Polynomial, _Expr)) or (not isinstance(n, (int, _Fraction)) and hasattr(n, "factor")):
         F = n.factor()
         if proof:

@@ -19,6 +19,8 @@ import "./numpy_random";
 import "./numpy_linalg";
 import "./numpy_fft";
 import "./engine";
+import "./progress-module";
+import * as Prog from "./progress";
 import "./raster";
 import * as Cx from "./complex";
 O.complexHooks.pow = Cx.complexPow;
@@ -1125,6 +1127,9 @@ export const R: any = {
   host: null,
   INTR,
   interrupted,
+  // live progress (design-estimates-progress r4 §6): R.progress.snapshot()
+  // is every call in progress, as progress/1 records; .buffer the shared slots
+  progress: { snapshot: () => Prog.snapshot(), buffer: Prog.PROGRESS },
   mimeBundle,
   displayText,
   ...O,
