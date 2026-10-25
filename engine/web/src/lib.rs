@@ -11,6 +11,13 @@
 //! "factor" exposes it; "hmf_*" are Hilbert modular forms over Q(sqrt 5) (hmf.rs), "hmfq_*" over any real quadratic field (hmfq.rs).  Big
 //! integers are decimal strings.
 
+// Every engine heap byte is counted (sagebrush_ledger::live_bytes, no-cliffs
+// C-1): in the WebAssembly artifact only; the CPython module installs its
+// own, and native test binaries keep theirs.
+#[cfg(target_arch = "wasm32")]
+#[global_allocator]
+static ALLOC: sagebrush_ledger::CountingAlloc<std::alloc::System> = sagebrush_ledger::CountingAlloc::new(std::alloc::System);
+
 use sagebrush_bigint::BigInt;
 use sagebrush_modsym::dirichlet::DirichletGroup;
 use sagebrush_modsym::general::{Character, GeneralSpace};
@@ -80,6 +87,37 @@ pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
 #[no_mangle]
 pub extern "C" fn sb_set_memory_share(v: f64) {
     sagebrush_interrupt::set_memory_share(sagebrush_interrupt::share_from_f64(v));
+}
+
+/// The engine's memory total (no-cliffs plan C r10 section 1, the host's
+/// lib/_capacity.py engine_total), pushed by the host before a dispatch:
+/// bytes (an integer up to 2^53), status (0 observed, 1 zero, 2 nominal) and
+/// joint (1 when the same bytes also bound the host); anything else is none,
+/// and the ledger uses the nominal total.  Optional, as sb_set_memory_share.
+#[no_mangle]
+pub extern "C" fn sb_set_memory_total(bytes: f64, status: u32, joint: u32) {
+    sagebrush_ledger::set_total(sagebrush_ledger::total_from_wasm(bytes, status, joint));
+}
+
+/// The engine heap's live bytes (the counting allocator) and its ledger's
+/// gross outstanding reservations: the host's common-domain check reads
+/// them (C-2).
+#[no_mangle]
+pub extern "C" fn sb_live_bytes() -> f64 {
+    sagebrush_ledger::live_bytes() as f64
+}
+
+#[no_mangle]
+pub extern "C" fn sb_outstanding_bytes() -> f64 {
+    sagebrush_ledger::outstanding_bytes() as f64
+}
+
+/// The engine's typed memory refusal as the reply's "memory" member: the
+/// host turns it into D1's error (SagebrushMemoryError), never a string to
+/// parse (no-cliffs plan C r10; callers adopt it as their caps go).
+pub fn memory_error_value(r: &sagebrush_ledger::Refusal) -> Value {
+    json!({ "what": r.what, "need": r.need, "allowance": r.allowance, "live": r.live, "outstanding": r.outstanding,
+            "total": r.total, "status": r.status.name(), "joint": r.joint })
 }
 
 /// After a trap (an error aborts in WebAssembly): "err\x1fKind\x1fmessage"
