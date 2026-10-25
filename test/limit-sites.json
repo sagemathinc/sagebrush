@@ -1523,9 +1523,9 @@
   "class": "3",
   "owner": "class group/number fields + configuration"
  },
- "lib/_limits.py ::  :: \"nf.certify_index_max\": 10 ** 6, \"nf.certify_norm_max\": 10 ** 6, \"nf.relation_rounds\": 60, \"poly.work\": 2 ** 33} #0": {
+ "lib/_limits.py ::  :: \"nf.certify_index_max\": 10 ** 6, \"nf.certify_norm_max\": 10 ** 6, \"nf.relation_rounds\": 60, \"padic.kedlaya_work\": 2 ** 20, \"poly.work\": 2 ** 33} #0": {
   "class": "3",
-  "owner": "class group/number fields + configuration"
+  "owner": "p-adic/L-series + configuration"
  },
  "lib/_limits.py ::  :: \"nf.certify_norm_max\": (UNLIMITED, 10 ** 3, 2 ** 62), #0": {
   "class": "3",
@@ -1534,6 +1534,10 @@
  "lib/_limits.py ::  :: \"nf.relation_rounds\": (UNLIMITED, 1, 10 ** 4), #0": {
   "class": "3",
   "owner": "class group/number fields + configuration"
+ },
+ "lib/_limits.py ::  :: \"padic.kedlaya_work\": (UNLIMITED, 0, 2 ** 63 - 1), #0": {
+  "class": "3",
+  "owner": "p-adic/L-series + configuration"
  },
  "lib/_limits.py ::  :: \"poly.work\": (UNLIMITED, 2 ** 20, 2 ** 40), #0": {
   "class": "3",
@@ -3351,42 +3355,86 @@
   "owner": "p-adic linear algebra",
   "row": "inv-9"
  },
- "lib/_sage_padic_lseries.py ::  :: _KD_MAX_WORK = 1 << 20 #0": {
-  "class": "3",
-  "owner": "p-adic/L-series",
-  "row": "inv-10"
+ "lib/_sage_padic_lseries.py :: _kd_admit :: cap = total // 4 #0": {
+  "class": "2",
+  "owner": "p-adic/L-series"
  },
- "lib/_sage_padic_lseries.py :: _kd_cost :: if lower > _KD_MAX_WORK: #0": {
-  "class": "3",
-  "owner": "p-adic/L-series",
-  "row": "inv-10"
+ "lib/_sage_padic_lseries.py :: _kd_admit :: exceeds a quarter of the total; and on a JavaScript engine whose object #0": {
+  "class": "2",
+  "owner": "p-adic/L-series"
  },
- "lib/_sage_padic_lseries.py :: _kd_cost :: the limit 2^20 a call takes about half a minute at most (and Stop #0": {
-  "class": "3",
-  "owner": "p-adic/L-series",
-  "row": "inv-10"
+ "lib/_sage_padic_lseries.py :: _kd_admit :: if U > cap: #0": {
+  "class": "2",
+  "owner": "p-adic/L-series"
  },
- "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: NotImplementedError: the Frobenius matrix at p = 2003 to precision 2 is beyond sagebrush's limit (estimated work 100300225 > 1048576) #0": {
-  "class": "3",
-  "owner": "p-adic/L-series",
-  "row": "inv-10"
+ "lib/_sage_padic_lseries.py :: _kd_admit :: raise NotImplementedError(\"%s: the memory estimate for this computation isn't established for this \" #0": {
+  "class": "coverage",
+  "owner": "p-adic/L-series"
  },
- "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: NotImplementedError: the Frobenius matrix at p = 5 to precision 408 is beyond sagebrush's limit (estimated work 4223025 > 1048576) #0": {
-  "class": "3",
-  "owner": "p-adic/L-series",
-  "row": "inv-10"
+ "lib/_sage_padic_lseries.py :: _kd_admit :: raise _kd_memory(\"By an upper estimate, %s\" % what, U, cap, \"one computation\") #0": {
+  "class": "2",
+  "explained": true,
+  "owner": "p-adic/L-series"
  },
- "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: if _kd_cost(p, prec + 1) > _KD_MAX_WORK: #0": {
+ "lib/_sage_padic_lseries.py :: _kd_cost :: limit padic.kedlaya_work, about 25 microseconds each in the CLI: #0": {
   "class": "3",
-  "owner": "p-adic/L-series",
-  "row": "inv-10"
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_cost :: this (the preflight's shortcut under a finite limit).\"\"\" #0": {
+  "class": "3",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_memory :: def _kd_memory(what, need, limit, allowance_for): #0": {
+  "class": "2",
+  "explained": true,
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_memory :: e = _memguard.memory_guard(what, need, limit, allowance_for) #0": {
+  "class": "2",
+  "explained": true,
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_plan_fast :: raise NotImplementedError(\"p >= 5 only\") #0": {
+  "class": "coverage",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_preflight :: if limit != _limits.UNLIMITED: #0": {
+  "class": "3",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_preflight :: if work > limit: #0": {
+  "class": "3",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_preflight :: import _limits #0": {
+  "class": "3",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_preflight :: limit = _limits.finalize()[\"padic.kedlaya_work\"] #0": {
+  "class": "3",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_preflight :: raise NotImplementedError(\"%s is beyond the limit padic.kedlaya_work (estimated work %d > %d)\" % (what, work, limit)) #0": {
+  "class": "3",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_preflight :: work = lower if lower > limit else _kd_cost(p, N) #0": {
+  "class": "3",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: ....: print(type(e).__name__, e.need_bytes > e.limit_bytes) #0": {
+  "class": "2",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: There is no default limit on the work: a large prime or precision #0": {
+  "class": "none",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: limit sets padic.kedlaya_work, in the units of _kd_cost (about 25 #0": {
+  "class": "3",
+  "owner": "p-adic/L-series"
  },
  "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: raise NotImplementedError(\"algorithm='approx' (Bernardi and Perrin-Riou) is not available in sagebrush yet\") #0": {
-  "class": "3",
-  "owner": "p-adic/L-series",
-  "row": "inv-10"
- },
- "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: raise NotImplementedError(\"the Frobenius matrix at p = %d to precision %d is beyond sagebrush's limit (estimated work %d > %d)\" % (p, prec, _kd_cost(p, prec + 1), _KD_MAX_WORK)) #0": {
   "class": "3",
   "owner": "p-adic/L-series",
   "row": "inv-10"
@@ -4004,15 +4052,15 @@
   "owner": "CLI/runtime configuration",
   "row": "src-16"
  },
+ "src/cli.ts ::  :: default: set finite values to opt in to work limits (grading, #0": {
+  "class": "none",
+  "owner": "configuration"
+ },
  "src/cli.ts ::  :: every key (ff.work, ff.conway_work, ff.embed_max, ff.root_bits, #0": {
   "class": "none",
   "owner": "configuration"
  },
- "src/cli.ts ::  :: limits (grading, shared compute); memory guards always apply; #0": {
-  "class": "none",
-  "owner": "CLI/runtime configuration"
- },
- "src/cli.ts ::  :: nf.certify_index_max) is \"unlimited\" by default: set finite #0": {
+ "src/cli.ts ::  :: nf.certify_index_max, padic.kedlaya_work) is \"unlimited\" by #0": {
   "class": "none",
   "owner": "configuration"
  },
