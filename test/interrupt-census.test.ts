@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // The interrupt matrix's census (plan-interrupt-harness r4 §5): every exported engine entry
@@ -49,4 +50,36 @@ test("a cheap exclusion is only an exclusion with its evidence; the counts are r
   }
   // (strict: every name a case or an evidenced exclusion, as the PR must have it at merge)
   if (process.env.INTERRUPT_CENSUS_STRICT) assert.equal((by.planned ?? 0) + (by["cheap-candidate"] ?? 0), 0, "names still planned or without evidence");
+});
+
+test("the compiler's back-edge check is in the census: valid now, and a mutation of it changes the census", () => {
+  assert.equal(census.fingerprints.backedges.valid, true, "src/emit.ts's INTR_CHECK no longer tests Ctrl-C's bit and calls interrupted()");
+  assert.ok(census.fingerprints.backedges.sites >= 1);
+  // (a copy of the tree with src/emit.ts mutated: everything else symlinked, the census pointed at it)
+  const emit = readFileSync(join(root, "src", "emit.ts"), "utf8");
+  const mutated = (text: string) => {
+    const t = mkdtempSync(join(tmpdir(), "intr-census-"));
+    try {
+      for (const d of ["engine", "lib"]) symlinkSync(join(root, d), join(t, d));
+      mkdirSync(join(t, "src"));
+      symlinkSync(join(root, "src", "runtime"), join(t, "src", "runtime"));
+      writeFileSync(join(t, "src", "emit.ts"), text);
+      const r = spawnSync(process.execPath, [join(root, "web", "interrupt-census.mjs")], { encoding: "utf8", env: { ...process.env, INTERRUPT_CENSUS_ROOT: t } });
+      assert.equal(r.status, 0, r.stderr);
+      return JSON.parse(r.stdout).fingerprints.backedges;
+    } finally {
+      rmSync(t, { recursive: true, force: true });
+    }
+  };
+  // the emitted check emptied (astra's isolated mutation, PR #168 review): no longer valid
+  const emptied = mutated(emit.replace(/^const INTR_CHECK = "[^"]*";/m, 'const INTR_CHECK = "";'));
+  assert.equal(emptied.valid, false);
+  assert.notDeepEqual(emptied, census.fingerprints.backedges);
+  // one emitting site dropped (a loop form that no longer polls): the sites change
+  const lines = emit.split("\n");
+  const k = lines.findIndex((l) => /\bINTR_CHECK\b/.test(l) && !/^const INTR_CHECK =/.test(l.trim()));
+  assert.ok(k >= 0);
+  const dropped = mutated(lines.filter((_, i) => i !== k).join("\n"));
+  assert.equal(dropped.sites, census.fingerprints.backedges.sites - 1);
+  assert.notEqual(dropped.sha, census.fingerprints.backedges.sha);
 });

@@ -1,6 +1,12 @@
 {
  "comment": "plan-interrupt-harness r5: one entry per census name; regenerate with web/interrupt-matrix-gen.py",
  "fingerprints": {
+  "backedges": {
+   "check": "if (INTR[0] & 1) interrupted();",
+   "valid": true,
+   "sites": 4,
+   "sha": "57c7557f9fa52a8b"
+  },
   "pollSites": {
    "crmath.ts": 5,
    "engine.ts": 1,
