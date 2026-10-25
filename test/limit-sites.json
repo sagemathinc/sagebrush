@@ -1266,6 +1266,10 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_capacity.py :: _engine_domain :: return \"wasm-engine\" if hasattr(_sys, \"_sagebrush_heap_limit\") else \"cpython-heap\" #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "lib/_capacity.py :: _job_choice :: \"\"\"The job limit a Windows process is under: (limit, used, scope).  A #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -1455,6 +1459,26 @@
   "owner": "python (@sagebrush-python)"
  },
  "lib/_capacity.py :: capacity.add :: row = {\"source\": source, \"limit\": int(limit), \"used\": None if used is None else int(used), \"remaining\": rem, #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: engine_total :: - basis: the sources of the rows at that least limit; #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: engine_total :: - bytes: the least `limit` among the rows that constrain the engine's #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: engine_total :: - status: \"observed\"; \"zero\" when that least limit is 0 (an observed #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: engine_total :: least = [b for b in rows if b[\"limit\"] == m] #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: engine_total :: m = min(b[\"limit\"] for b in rows) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },

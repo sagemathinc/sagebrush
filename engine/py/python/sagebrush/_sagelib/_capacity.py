@@ -18,6 +18,9 @@ plan-d-memory-message-r3 §1d, amended by plan-d0-capacity-r2 §0:
   the set when a row with a finite remainder includes it and none with a
   finite remainder constrains it without including it.  The PNG ledger
   absorbs a resident record only for a domain in it (PNG plan r8 §2.1).
+- engine_total(): the constrained total of the engine's own memory domain
+  (the engine ledger's base, no-cliffs plan C r10 section 1), with its
+  status: observed, zero (kept as 0) or nominal.
 - poly_share(): the one route that does follow free memory: the default
   budget of a polynomial factorization, floor(effective_guard_bytes / 2),
   or a quarter of what is free when that is more (a small session),
@@ -73,13 +76,13 @@ _src = _Sources()
 def _set_sources(**kw):
     """Tests only: replace the sources (keyword names as in _Sources);
     _set_sources() restores the real ones."""
-    global _src, _poly_snap, _total_snap, _cg_dirs
+    global _src, _poly_snap, _total_snap, _engine_snap, _cg_dirs
     _src = _Sources()
     for k, v in kw.items():
         if not hasattr(_Sources, k):
             raise TypeError("no source %r" % k)
         setattr(_src, k, v)
-    _poly_snap = _total_snap = _cg_dirs = None
+    _poly_snap = _total_snap = _engine_snap = _cg_dirs = None
 
 
 try:
@@ -426,6 +429,53 @@ def _machine_total():
         return _NOMINAL, ["nominal"]
     m = min(v for _, v in limits)
     return m, [k for k, v in limits if v == m]
+
+
+# ------------------------------------------------------------------ the engine's total
+
+def _engine_domain():
+    """The domain the Sagebrush engine allocates in: its own WebAssembly
+    Memory in pyjs; natively, this process's heap (the engine is linked
+    into the interpreter)."""
+    return "wasm-engine" if hasattr(_sys, "_sagebrush_heap_limit") else "cpython-heap"
+
+
+def engine_total():
+    """The constrained TOTAL of the engine's memory domain, for the engine
+    ledger (no-cliffs plan C r10 section 1, D0's consumer contract):
+    {"bytes", "status", "basis", "joint"}, from a snapshot at most 100 ms
+    old.
+
+    - bytes: the least `limit` among the rows that constrain the engine's
+      domain (a total, not what is free: the ledger takes its reviewed
+      share of it and counts its own live bytes against it);
+    - status: "observed"; "zero" when that least limit is 0 (an observed
+      zero stays zero); "nominal" when no row constrains the domain (then
+      bytes is the nominal 1 GiB, tagged so, as heap_figure's fallback);
+    - basis: the sources of the rows at that least limit;
+    - joint: whether one of those rows also constrains a host domain (the
+      same bytes bound host and engine: the ledger's joint-row check).
+
+    It leaves heap_figure, capacity and poly_share as they are."""
+    global _engine_snap
+    now = _src.clock()
+    if _engine_snap is not None and now - _engine_snap[0] < _SNAPSHOT_S:
+        return dict(_engine_snap[1])
+    domain = _engine_domain()
+    host = [d for d in _SELF if d not in ("wasm-engine", "wasm-instance")]
+    rows = [b for b in capacity()["basis"] if domain in b["constrains"]]
+    if not rows:
+        out = {"bytes": _NOMINAL, "status": "nominal", "basis": ["nominal"], "joint": False}
+    else:
+        m = min(b["limit"] for b in rows)
+        least = [b for b in rows if b["limit"] == m]
+        out = {"bytes": m, "status": "zero" if m == 0 else "observed", "basis": [b["source"] for b in least],
+               "joint": any(d in host for b in least for d in b["constrains"])}
+    _engine_snap = (now, out)
+    return dict(out)
+
+
+_engine_snap = None
 
 
 # ------------------------------------------------------------------ free now
