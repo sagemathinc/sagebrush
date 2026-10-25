@@ -1763,15 +1763,19 @@ async function rebuildKickAfterHalt() {
   await ctl("set", { set: { fakeOps: [{ code: "invalid", hold: true, detail: { message: "too many refused ops: rebuild from the server's log" } }] } });
   const c = viewClient(w);
   try {
-    // (the handshake, not a timing: the refusal is held by the server until the test has seen the ops sent and the
-    // client's sender idle on that same connection (not running, twice, 100 ms apart); only then is it released)
-    const idle = async () => !c.running && opsMessages(await ctl("log")).length === 1;
+    // (the handshake, not a timing: the server holds the refusal; the test releases it only once it observes, all at
+    // once, (1) the server's log holding exactly that one ops message, (2) the client's current connection still the
+    // one that sent it, with that ops request pending (unanswered: the held refusal), and (3) the sender idle: its loop
+    // not running and no further run queued (running and again both false).  No sleep gates the release: the polling
+    // only waits for that state, and then the state itself is the condition)
+    const conn = await (async () => { for (let i = 0; i < 400; i++) { const k = c.conn; if (k && [...k.pending.values()].some((p) => p.kind === "ops")) return k; await sleep(25); } return null; })();
+    const idle = async () => !!conn && c.conn === conn && [...conn.pending.values()].some((p) => p.kind === "ops") && !c.running && !c.again && opsMessages(await ctl("log")).length === 1;
     let idleSeen = false;
-    for (let i = 0; i < 200 && !idleSeen; i++) { if (await idle()) { await sleep(100); idleSeen = await idle(); } else await sleep(50); }
-    check(idleSeen, "rebuild after an idle refusal: the ops sent and the sender idle before the refusal: " + J({ running: c.running, ops: opsMessages(await ctl("log")).length }));
+    for (let i = 0; i < 400 && !idleSeen; i++) { idleSeen = await idle(); if (!idleSeen) await sleep(25); }
+    check(idleSeen, "rebuild after an idle refusal: before the refusal, its ops request pending on the connection that sent it and the sender idle (not running, nothing queued): " + J({ conn: !!conn, same: c.conn === conn, running: c.running, again: c.again, ops: opsMessages(await ctl("log")).length }));
     const connects = c.stats.connects, wakes = c.stats.wakesFired, passes = c.stats.rebuildPasses;
     check((await ctl("release")).released === 1 && passes === 0, "rebuild after an idle refusal: the held refusal released, no rebuild before it");
-    check(await until(() => c.stats.rebuildPasses >= 1, 6000) && c.stats.connects === connects && c.stats.wakesFired === wakes, "rebuild after an idle refusal: the rebuild starts by itself, on the same connection, with no timer's wake: " + J({ passes: c.stats.rebuildPasses, connects: [connects, c.stats.connects], wakes: [wakes, c.stats.wakesFired], status: c.status }));
+    check(await until(() => c.stats.rebuildPasses >= 1, 6000) && c.conn === conn && c.stats.connects === connects && c.stats.wakesFired === wakes, "rebuild after an idle refusal: the rebuild starts by itself, on the same connection, with no timer's wake: " + J({ passes: c.stats.rebuildPasses, same: c.conn === conn, connects: [connects, c.stats.connects], wakes: [wakes, c.stats.wakesFired], status: c.status }));
     check(await until(() => settled(w, c), 20_000), "rebuild after an idle refusal: …and completes, synced: " + J(c.status));
   } finally {
     await stop(c);
