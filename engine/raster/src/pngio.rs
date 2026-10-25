@@ -3,6 +3,7 @@
 //! modes, as matplotlib.image._pil_png_to_float_array maps them), and
 //! written from a drawing.
 
+use crate::{mem, Fail};
 use png::{BitDepth, ColorType, Decoder, InterlaceInfo, Limits, Transformations};
 use std::io::Cursor;
 use tiny_skia::Pixmap;
@@ -95,7 +96,7 @@ fn channels(c: ColorType) -> usize {
 
 /// Decodes `bytes`, refusing an image wider or taller than `max_axis` or of
 /// more than `max_pixels` pixels before its pixels are allocated.
-pub fn decode(bytes: &[u8], max_axis: u32, max_pixels: u64) -> Result<Image, String> {
+pub fn decode(bytes: &[u8], max_axis: u32, max_pixels: u64) -> Result<Image, Fail> {
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err("not a PNG file".into());
     }
@@ -119,10 +120,10 @@ pub fn decode(bytes: &[u8], max_axis: u32, max_pixels: u64) -> Result<Image, Str
     let info = reader.info();
     let (width, height) = (info.width, info.height);
     if width == 0 || height == 0 || width > max_axis || height > max_axis || width as u64 * height as u64 > max_pixels {
-        return Err(format!(
+        return Err(Fail::Input(format!(
             "a PNG image of {} x {} pixels: Sagebrush reads at most {} on a side and {} in all",
             width, height, max_axis, max_pixels
-        ));
+        )));
     }
     let color = info.color_type;
     let depth = info.bit_depth as u8;
@@ -133,7 +134,8 @@ pub fn decode(bytes: &[u8], max_axis: u32, max_pixels: u64) -> Result<Image, Str
     // image data follows (finish_decoding), which a crafted file can make
     // arbitrarily long.  So the work is bounded by the file and the image.
     let line = reader.output_line_size(width).ok_or("a PNG image too large to read")?;
-    let mut buf = vec![0u8; line * height as usize];
+    let rows_bytes = line.checked_mul(height as usize).ok_or(Fail::Memory { bytes: u64::MAX, what: "a PNG image's rows" })?;
+    let mut buf = mem::zeroed(rows_bytes, "a PNG image's rows")?;
     let bpp = channels(color) as u8 * depth;
     let rows = if info.interlaced { adam7_rows(width, height) } else { height as usize };
     for i in 0..rows {
@@ -148,7 +150,7 @@ pub fn decode(bytes: &[u8], max_axis: u32, max_pixels: u64) -> Result<Image, Str
     }
     let ch = channels(color);
     let per_row = width as usize * ch;
-    let mut samples = Vec::with_capacity(per_row * height as usize);
+    let mut samples = mem::vec_with_capacity(per_row.saturating_mul(height as usize), "a PNG image's samples")?;
     for y in 0..height as usize {
         let row = &buf[y * line..(y + 1) * line];
         match depth {
@@ -176,10 +178,18 @@ pub fn decode(bytes: &[u8], max_axis: u32, max_pixels: u64) -> Result<Image, Str
 /// gray is divided by 65535, 1-bit gray is 0 or 1, 2- and 4-bit gray come
 /// out as matplotlib has them (below), and a palette takes its tRNS alpha
 /// (255 for entries it does not cover).  A tRNS chunk of a gray or RGB image is not applied.
-pub fn to_float(img: &Image) -> (usize, Vec<f32>) {
+pub fn to_float(img: &Image) -> Result<(usize, Vec<f32>), Fail> {
     let s = &img.samples;
     let hi = |v: u16| if img.depth == 16 { (v >> 8) as f32 / 255.0 } else { v as f32 / 255.0 };
-    match img.color {
+    // (the values: as many as the samples, or 4 a pixel for RGBA made from
+    // gray and alpha or a palette)
+    let n = match img.color {
+        ColorType::GrayscaleAlpha => s.len().saturating_mul(2),
+        ColorType::Indexed => s.len().saturating_mul(4),
+        _ => s.len(),
+    };
+    let mut out: Vec<f32> = mem::vec_with_capacity(n, "a PNG image's values")?;
+    Ok(match img.color {
         ColorType::Grayscale => {
             // Pillow scales 2- and 4-bit gray to 8 bits (v * 85, v * 17) and
             // matplotlib then divides by 3 and 15, so their values reach 85
@@ -191,12 +201,18 @@ pub fn to_float(img: &Image) -> (usize, Vec<f32>) {
                 8 => (1.0, 255.0),
                 _ => (1.0, 65535.0),
             };
-            (1, s.iter().map(|&v| (v as f32 * mul) / div).collect())
+            out.extend(s.iter().map(|&v| (v as f32 * mul) / div));
+            (1, out)
         }
-        ColorType::Rgb => (3, s.iter().map(|&v| hi(v)).collect()),
-        ColorType::Rgba => (4, s.iter().map(|&v| hi(v)).collect()),
+        ColorType::Rgb => {
+            out.extend(s.iter().map(|&v| hi(v)));
+            (3, out)
+        }
+        ColorType::Rgba => {
+            out.extend(s.iter().map(|&v| hi(v)));
+            (4, out)
+        }
         ColorType::GrayscaleAlpha => {
-            let mut out = Vec::with_capacity(s.len() * 2);
             for p in s.chunks_exact(2) {
                 let (l, a) = (hi(p[0]), hi(p[1]));
                 out.extend_from_slice(&[l, l, l, a]);
@@ -204,7 +220,6 @@ pub fn to_float(img: &Image) -> (usize, Vec<f32>) {
             (4, out)
         }
         ColorType::Indexed => {
-            let mut out = Vec::with_capacity(s.len() * 4);
             for &i in s {
                 let i = i as usize;
                 let c = |k: usize| *img.palette.get(3 * i + k).unwrap_or(&0) as f32 / 255.0;
@@ -213,13 +228,13 @@ pub fn to_float(img: &Image) -> (usize, Vec<f32>) {
             }
             (4, out)
         }
-    }
+    })
 }
 
 /// The image as a tiny-skia pixmap (premultiplied RGBA), for drawing it.
-pub fn to_pixmap(img: &Image) -> Result<Pixmap, String> {
-    let (ch, v) = to_float(img);
-    let mut pix = Pixmap::new(img.width, img.height).ok_or("an image of that size")?;
+pub fn to_pixmap(img: &Image) -> Result<Pixmap, Fail> {
+    let (ch, v) = to_float(img)?;
+    let mut pix = mem::pixmap(img.width, img.height, "an embedded image")?;
     let data = pix.data_mut();
     let b = |x: f32| (x * 255.0).round().clamp(0.0, 255.0);
     for i in 0..(img.width as usize * img.height as usize) {
@@ -244,10 +259,10 @@ pub fn to_pixmap(img: &Image) -> Result<Pixmap, String> {
 /// alpha as Agg's buffer keeps colors: where nothing is drawn the pixel is
 /// the background's exact color, also a partly transparent one, and with no
 /// background it is (255, 255, 255, 0), Agg's clear color.
-pub fn encode(pix: &Pixmap, background: Option<crate::svg::Rgba>, dpi: f32, text: &[(String, String)]) -> Result<Vec<u8>, String> {
+pub fn encode(pix: &Pixmap, background: Option<crate::svg::Rgba>, dpi: f32, text: &[(String, String)]) -> Result<Vec<u8>, Fail> {
     let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5).floor();
     let bg = background.map(|c| [byte(c.0), byte(c.1), byte(c.2), byte(c.3)]);
-    let mut rgba = Vec::with_capacity(pix.data().len());
+    let mut rgba = mem::vec_with_capacity(pix.data().len(), "the picture's RGBA copy")?;
     for p in pix.pixels() {
         let (pr, pg, pb, pa) = (p.red() as f32, p.green() as f32, p.blue() as f32, p.alpha() as f32);
         let px = match bg {
@@ -267,8 +282,8 @@ pub fn encode(pix: &Pixmap, background: Option<crate::svg::Rgba>, dpi: f32, text
         };
         rgba.extend(px.iter().map(|v| (v + 0.5).floor().clamp(0.0, 255.0) as u8));
     }
-    let mut out = Vec::new();
-    {
+    let mut out = mem::TryVec::new();
+    let written = {
         let mut enc = png::Encoder::new(&mut out, pix.width(), pix.height());
         enc.set_color(ColorType::Rgba);
         enc.set_depth(BitDepth::Eight);
@@ -281,7 +296,7 @@ pub fn encode(pix: &Pixmap, background: Option<crate::svg::Rgba>, dpi: f32, text
         // the keyword must be Latin-1, 1 to 79 characters)
         for (k, v) in text {
             if k.is_empty() || k.chars().count() > 79 || k.chars().any(|c| c as u32 > 0xff) {
-                return Err(format!("the PNG text keyword {:?}: 1 to 79 Latin-1 characters", k));
+                return Err(Fail::Input(format!("the PNG text keyword {:?}: 1 to 79 Latin-1 characters", k)));
             }
             if v.chars().all(|c| c as u32 <= 0xff) {
                 enc.add_text_chunk(k.clone(), v.clone()).map_err(|e| format!("the PNG text {:?} ({})", k, e))?;
@@ -289,10 +304,15 @@ pub fn encode(pix: &Pixmap, background: Option<crate::svg::Rgba>, dpi: f32, text
                 enc.add_itxt_chunk(k.clone(), v.clone()).map_err(|e| format!("the PNG text {:?} ({})", k, e))?;
             }
         }
-        let mut w = enc.write_header().map_err(|e| e.to_string())?;
-        w.write_image_data(&rgba).map_err(|e| e.to_string())?;
+        enc.write_header().and_then(|mut w| w.write_image_data(&rgba).and_then(|_| w.finish()))
+    };
+    // (a refused growth of the output is the memory refusal, whatever the
+    // encoder made of the error)
+    if let Some(bytes) = out.refused {
+        return Err(Fail::Memory { bytes, what: "the PNG output" });
     }
-    Ok(out)
+    written.map_err(|e| Fail::Backend(format!("the PNG encoder: {}", e)))?;
+    Ok(out.buf)
 }
 
 #[cfg(test)]
@@ -388,8 +408,8 @@ mod tests {
         h.update(b"IDAT");
         h.update(&idat);
         png.extend_from_slice(&h.finalize().to_be_bytes());
-        let err = decode(&png, 16384, 1 << 24).err().unwrap();
+        let err = decode(&png, 16384, 1 << 24).err().unwrap().to_string();
         assert!(err.starts_with("a PNG image of 16385 x 1 pixels"), "{}", err);
-        assert_eq!(decode(b"GIF89a", 16384, 1 << 24).err().unwrap(), "not a PNG file");
+        assert_eq!(decode(b"GIF89a", 16384, 1 << 24).err().unwrap(), Fail::Input("not a PNG file".into()));
     }
 }
