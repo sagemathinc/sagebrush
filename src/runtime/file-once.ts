@@ -35,10 +35,17 @@ export function fileOnceEnv(ns: any, b: any): boolean {
 export function fileOncePeekBuiltin(k: string): any {
   return Object.prototype.hasOwnProperty.call(builtins, k) ? builtins[k] : undefined;
 }
-// The canonical open, for the site's prefix (r7 §2.2, inlined by the
-// compiler: open is this object, F an exact str, M one of w, a, wb, ab; no
-// Python call).  null before start-up sets it, which declines every site.
-export function fileOnceOpen(): any {
+// What the site's open must be (r7 §2.2, the prefix inlined by the compiler:
+// open is this object, F an exact str, M one of w, a, wb, ab; no Python
+// call): the canonical open, when the builtins and each namespace a global
+// operand reads (nss, then b, the builtins last) are safe (fileOnceEnv),
+// else NEVER, which no Python value is, so the site declines.  Taken once,
+// at the module's start.
+const NEVER = Object.freeze({});
+export function fileOnceOpen(...nsb: any[]): any {
+  const b = nsb[nsb.length - 1];
+  if (canonicalOpen === null || b !== builtins) return NEVER;
+  for (let i = 0; i < nsb.length - 1; i++) if (!fileOnceEnv(nsb[i], b)) return NEVER;
   return canonicalOpen;
 }
 // S fits the mode: an exact str with no lone surrogate (UTF-8 encodes it),

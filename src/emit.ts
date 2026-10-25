@@ -93,6 +93,7 @@ export class Emitter {
     this.hoisted.push(`const ${name} = ${expr};`);
     return name;
   }
+
   site(kind: string, name: string, n?: number): string {
     return this.hoist(`R.${kind}(${q(name)}${n === undefined ? "" : ", " + n})`);
   }
@@ -552,22 +553,27 @@ export class Emitter {
     // the canonical open is a module constant too: a declined site then pays
     // one comparison before today's continuation, daybreak2's replaced-open
     // gate)
-    const env = [...nss].map((ns) => this.hoist(`R.fileOnceEnv(${ns}, $B)`)).join(" && ");
-    const canon = this.hoist("R.fileOnceOpen()");
+    // (one module constant: the canonical open when every namespace a global
+    // operand reads is safe, else a private object equal to no Python value;
+    // so a declined site pays one comparison)
+    const canon = this.hoist(`R.fileOnceOpen(${[...nss].join(", ")}${nss.size ? ", " : ""}$B)`);
     // (an unsafe environment takes the same path as a failed prefix: open, F
     // and M read by today's loads in today's order, then today's
     // continuation, S never peeked; no second copy of today's code, whose
     // size cost the declined sites 20%)
-    const prefix = `${env === "" ? "" : env + " && "}${to} === ${canon} && typeof ${tf} === "string" && (${tm} === "w" || ${tm} === "a" || ${tm} === "wb" || ${tm} === "ab")`;
+    const prefix = `${to} === ${canon} && typeof ${tf} === "string" && (${tm} === "w" || ${tm} === "a" || ${tm} === "wb" || ${tm} === "ab")`;
     // (the eligible path hands the peek over in R.fileOnceS, clearing the
     // temporary first: an argument would stay in the module frame's
     // registers, which never return, until the site ran again)
+    // (one condition and one copy of today's continuation, which a failed
+    // prefix and an ineligible S share, its temporary cleared first: the
+    // site's code stays small, daybreak2's replaced-open gate.  An unbound S
+    // never reaches the continuation: the open's effects, then today's read
+    // of S raises)
     const site =
       `(${to} = ${this.ex(o.func)}, ${tf} = ${this.ex(o.args[0])}, ${tm} = ${this.ex(o.args[1])}, ` +
-      `!(${prefix}) ? ${cont()} : ` +
-      `${unbound} ? (R.fileOnceTouch(${tf}, ${tm}), R.fileOnceNever(${this.ex(sx)})) : ` +
-      `R.fileOnceFits(${ts}, ${tm}) ? (R.fileOnceS.v = ${ts}, ${ts} = undefined, R.fileOnceWrite(${tf}, ${tm})) : ` +
-      `(${ts} = undefined, ${cont()}))`;
+      `(${prefix}) && ((${unbound}) ? (R.fileOnceTouch(${tf}, ${tm}), R.fileOnceNever(${this.ex(sx)})) : R.fileOnceFits(${ts}, ${tm})) ` +
+      `? (R.fileOnceS.v = ${ts}, ${ts} = undefined, R.fileOnceWrite(${tf}, ${tm})) : (${ts} = undefined, ${cont()}))`;
     return site;
   }
   // A call of e.func, or of `callee`, the JavaScript holding it
