@@ -85,7 +85,9 @@ assert NumberField(xx**2 + 23, "a").class_group(proof=True).order() == 3
 # proven without GRH by the unconditional certificate (nf.bnf_certify) within its limits
 assert NumberField(xx**3 - 11, "a").class_number(proof=True) == 2
 assert abs(float(QuadraticField(10, "a").regulator(proof=True)) - 1.8184464592320668) < 1e-12
-assert "beyond the limits" in raises(NotImplementedError, NumberField(xx**2 + 10**13 + 3, "b").class_number, proof=True)
+# the certificate has no default limit since #113 (a user's own computation is
+# unlimited); with an opt-in norm limit it refuses before any work, saying so
+assert "beyond the limits" in raises(ValueError, nf.bnf_certify, [10**13 + 3, 0, 1], norm_max=10**6)
 assert QuadraticField(-5, "a").class_number() == 2
 assert ZZ(2**61 - 1).is_prime(proof=True) and not ZZ(2**127 - 3).is_prime(proof=True)
 assert "BPSW" in raises(NotImplementedError, ZZ(2**127 - 1).is_prime, proof=True)
