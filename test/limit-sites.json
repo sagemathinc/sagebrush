@@ -934,6 +934,66 @@
   "owner": "raster/image I/O",
   "row": "inv-31"
  },
+ "engine/raster-launch/src/main.rs ::  :: const RLIMIT_AS: usize = 9; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs ::  :: const STAGE_LIMIT: u32 = 1; #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs ::  :: pub const PRLIMIT64: usize = 261; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs ::  :: pub const PRLIMIT64: usize = 302; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: launch :: if limit > old[1] { #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: launch :: let (Some(limit), Some(parent), Some(fd), Some(bound)) = (decimal(arg(1)), decimal(arg(2)), decimal(arg(3)), decimal(arg(4))) else { #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: launch :: let new = [limit, old[1]]; #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: launch :: let r = syscall(nr::PRLIMIT64, 0, RLIMIT_AS, 0, old.as_mut_ptr() as usize); #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: launch :: let r = syscall(nr::PRLIMIT64, 0, RLIMIT_AS, new.as_ptr() as usize, 0); #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: launch :: refuse(fd, STAGE_LIMIT, (-r) as u32, 0); #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: launch :: refuse(fd, STAGE_LIMIT, (-r) as u32, 0); #1": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: launch :: refuse(fd, STAGE_LIMIT, 0, old[1]); #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: vm_peak :: if n == 0 || len == cap { #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: vm_peak :: let cap = 8192usize; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: vm_peak :: let n = syscall(nr::READ, fd as usize, base.add(len) as usize, cap - len, 0); #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
  "engine/raster/src/dash.rs :: compare :: fn compare(path: &Path, array: &[f32], offset: f32, width: f32, cap: LineCap, t: Transform, size: u32) -> (usize, u8) { #0": {
   "class": "none",
   "owner": "raster/image I/O"
@@ -2491,6 +2551,26 @@
  "lib/_memguard.py :: sizes :: return \"%d bytes\" % need_bytes, \"%d bytes\" % limit_bytes #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
+ },
+ "lib/_memledger.py ::  :: - standing: the warm engine process's limit, less what a fresh observation #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "lib/_memledger.py :: Ledger.rebase :: (limit, rss) in bytes now. Returns the headroom F0' - held after #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "lib/_memledger.py :: Ledger.rebase :: limit, rss = child() #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "lib/_memledger.py :: Ledger.rebase :: standing = limit - (rss if \"child\" in domains else 0) #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "lib/_memledger.py :: Ledger.set_standing :: \"\"\"The engine process's standing charge (its whole limit, until an #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
  },
  "lib/_png.py ::  :: MAX_AXIS = 16384 #0": {
   "class": "1+2",
