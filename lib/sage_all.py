@@ -1821,9 +1821,9 @@ _PRIME_HEAP_SHARE = 16
 
 
 def _prime_cells():
-    n = getattr(_sys_limit, "_sagebrush_heap_limit", None)
-    # (CPython, or a host that cannot say: a nominal 1 GiB)
-    return (int(n) if n else 1 << 30) // _PRIME_HEAP_SHARE
+    # (pyjs: its heap limit; CPython: the machine's total; _capacity, D0)
+    import _capacity
+    return _capacity.heap_figure() // _PRIME_HEAP_SHARE
 
 
 def _prime_sieve_admits(start, stop):
@@ -1833,8 +1833,14 @@ def _prime_sieve_admits(start, stop):
 
 def _admit_prime_sieve(start, stop, name):
     if not _prime_sieve_admits(start, stop):
-        raise MemoryError("%s over [%d, %d) is not supported in Sagebrush: at most %d integers, with the square root "
-                          "of the end, fit its heap" % (name, start, stop, _prime_cells()))
+        import _capacity
+        cap = _prime_cells()
+        e = MemoryError("%s over [%d, %d) is not supported in Sagebrush: at most %d integers, with the square root "
+                        "of the end, fit its heap" % (name, start, stop, cap))
+        # (the enforced cap, a byte a cell, and the need; the memory
+        # observed free, which decided nothing: D0)
+        e.need_bytes, e.limit_bytes, e.capacity = (stop - start) + _math.isqrt(max(stop - 1, 0)), cap, _capacity.capacity()
+        raise e
 
 
 def _nth_prime_bound(k):
@@ -1957,8 +1963,6 @@ class Factorization(list):
         sage: F.value()
         360
     """
-    _latex_container = True  # (latex() writes it as a list, as before; not yet as Sage writes it)
-
     def __init__(self, pairs, unit=1):
         super().__init__(pairs)
         self.unit = unit
@@ -1970,6 +1974,20 @@ class Factorization(list):
         return ("-1 * " if self.unit == -1 else "") + s
 
     __str__ = __repr__
+
+    def _latex_(self):
+        """LaTeX, as Sage writes it.
+
+        EXAMPLES::
+
+            sage: latex(factor(2^10*3^15*7)), latex(factor(-12)), latex(factor(-1))
+            (2^{10} \\cdot 3^{15} \\cdot 7, -1 \\cdot 2^{2} \\cdot 3, -1)
+        """
+        from _sage_poly import _latex_factorization
+        if not self:
+            return str(latex(self.unit))
+        return _latex_factorization([(str(latex(p)), e) for p, e in self],
+                                    "-1" if self.unit == -1 else None, bare_unit=True)
 
     def value(self):
         """The product of the factorization.
