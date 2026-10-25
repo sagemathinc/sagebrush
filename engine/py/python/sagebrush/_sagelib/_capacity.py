@@ -150,7 +150,6 @@ def _cgroup_dirs():
                 d = "/sys/fs/cgroup/memory" + path
                 if _read(d + "/memory.limit_in_bytes") is not None:
                     out.append(("v1", "cgroup v1 " + (path or "/"), d))
-                    break
                 if path == "" or seen > 64:
                     break
                 path = path.rsplit("/", 1)[0]
