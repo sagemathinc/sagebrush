@@ -88,7 +88,7 @@ impl std::error::Error for FactorLimit {}
 
 pub type FResult<T> = Result<T, FactorLimit>;
 
-/// The default limits of one public call (plan r3, section 5.1).
+/// The limits of one public call.
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     /// The aggregate work, in limb operations.
@@ -105,16 +105,32 @@ pub struct Limits {
 }
 
 impl Limits {
-    /// The work constant, calibrated on VM 1 (Oct 22, at 01b3343e; tests::
-    /// timings, the wasm comparison in the PR): the slowest sustained
-    /// throughput measured (cases of 0.2 s or more) was 3.3e8 units/s
-    /// natively (S_6, lattice-bound; dense Hensel/modular cases ran at
-    /// 6.6e8 to 3.4e9) and 1.9e8 units/s in wasm (S_6; wasm was 1.4x to
-    /// 2.1x native).  W = 2^33 (the common bound, under the 60 s board and
-    /// MCP default) is then at most about 26 s native and 45 s in wasm at
-    /// the slowest measured rates.  Pinned by
-    /// tests::default_work_is_calibrated.
+    /// The default of every call that makes its own budget: no work, subset,
+    /// division or input-size limit (a computation's own time is the
+    /// user's: interrupting is the control), and the memory guard kept at
+    /// 512 MiB, since running out of memory loses the session.  Finite
+    /// limits are opt-in: Budget::new(Limits::CALIBRATED) or a policy of
+    /// the caller's, also through with_default_limits.  Pinned by
+    /// tests::default_is_unlimited_except_memory.
     pub const DEFAULT: Limits = Limits {
+        work: u64::MAX,
+        memory: 512 << 20,
+        subsets: u64::MAX,
+        divisions: u64::MAX,
+        max_degree: usize::MAX,
+        max_coeff_bits: u64::MAX,
+        max_total_bits: u64::MAX,
+    };
+    /// The finite limits that were the default until C0's follow-up, kept as
+    /// the documented opt-in policy.  The work constant was calibrated on
+    /// VM 1 (Oct 22, at 01b3343e; tests::timings, the wasm comparison in
+    /// the PR): the slowest sustained throughput measured (cases of 0.2 s
+    /// or more) was 3.3e8 units/s natively (S_6, lattice-bound; dense
+    /// Hensel/modular cases ran at 6.6e8 to 3.4e9) and 1.9e8 units/s in
+    /// wasm (S_6; wasm was 1.4x to 2.1x native).  W = 2^33 is then at most
+    /// about 26 s native and 45 s in wasm at the slowest measured rates.
+    /// Pinned by tests::calibrated_work.
+    pub const CALIBRATED: Limits = Limits {
         work: 1 << 33,
         memory: 512 << 20,
         subsets: 1 << 20,
@@ -154,8 +170,8 @@ thread_local! {
 }
 
 impl Default for Budget {
-    /// Limits::DEFAULT, or the limits of an enclosing with_default_limits
-    /// on this thread.
+    /// Limits::DEFAULT (no limit but memory), or the limits of an enclosing
+    /// with_default_limits on this thread.
     fn default() -> Budget {
         Budget::new(DEFAULT_OVERRIDE.with(|o| o.get()).unwrap_or(Limits::DEFAULT))
     }

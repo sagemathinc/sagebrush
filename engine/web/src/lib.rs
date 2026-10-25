@@ -385,6 +385,25 @@ fn exact_json(e: &sagebrush_modsym::exact::Exact) -> Value {
             "status": e.status, "checks": e.checks })
 }
 
+/// An optional nonnegative integer field of a request: None when absent or
+/// null.
+fn opt_u64(v: &Value, k: &str) -> Result<Option<u64>, String> {
+    match v.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(x) => x.as_u64().map(Some).ok_or_else(|| format!("'{}' must be a nonnegative integer", k)),
+    }
+}
+
+/// f within the request's optional "rounds": the session's opt-in
+/// nf.relation_rounds (sent only when finite) for the class-group relation
+/// searches, which are otherwise unlimited (classgroup::limits).
+fn with_rounds<T>(v: &Value, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    match opt_u64(v, "rounds")? {
+        None => f(),
+        Some(n) => sagebrush_classgroup::limits::with_round_limit(usize::try_from(n).unwrap_or(usize::MAX), f),
+    }
+}
+
 fn bigs(v: Option<&Value>) -> Result<Vec<BigInt>, String> {
     // the compact wire format: "c0,c1,..." (sagebrush.linalg and poly send it)
     if let Some(Value::String(s)) = v {
@@ -832,7 +851,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             }).collect::<Vec<_>>()))
         }
         "bnf" => {
-            let b = sagebrush_classgroup::api::bnf(&bigs(v.get("f"))?)?;
+            let f = bigs(v.get("f"))?;
+            let b = with_rounds(&v, || sagebrush_classgroup::api::bnf(&f))?;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
                        "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes_with(b.w_proven, b.certified, &b.assumed_primes) }))
         }
@@ -858,7 +878,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                     .map(|x| x.as_u64().or_else(|| x.as_str().and_then(|s| s.parse().ok())).ok_or_else(bad))
                     .collect::<Result<_, _>>()?,
             };
-            let d = sagebrush_classgroup::api::bnf_relations(&bigs(v.get("f"))?, &extra)?;
+            let f = bigs(v.get("f"))?;
+            let d = with_rounds(&v, || sagebrush_classgroup::api::bnf_relations(&f, &extra))?;
             let b = &d.bnf;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
                        "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes_with(b.w_proven, b.certified, &b.assumed_primes),
@@ -874,7 +895,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                 Some(Value::Bool(b)) => *b,
                 Some(x) => return Err(format!("certify must be true or false, not {}", x)),
             };
-            let (h, cyc, reg, certified) = sagebrush_classgroup::api::quadratic_with(&big1(v.get("d"))?, certify)?;
+            let d = big1(v.get("d"))?;
+            let (h, cyc, reg, certified) = with_rounds(&v, || sagebrush_classgroup::api::quadratic_with(&d, certify))?;
             let status = if certified { "certified (assuming GRH)" } else { "conditional on GRH and the stopping rule's estimate, not certified" };
             Ok(json!({ "h": h.to_string(), "cyc": big(&cyc), "regulator": reg, "certified": certified, "status": status, "assumes": assumes(true, certified) }))
         }
@@ -933,7 +955,13 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             if f.iter().all(|c| c.sign() == sagebrush_bigint::Sign::NoSign) {
                 return Err("factor of the zero polynomial".into());
             }
-            let (c, fs) = sagebrush_poly::try_factor(&f).map_err(|e| e.to_string())?;
+            // "work": the session's opt-in poly.work (sent only when finite);
+            // otherwise the default, which limits only memory
+            let r = match opt_u64(&v, "work")? {
+                None => sagebrush_poly::try_factor(&f),
+                Some(w) => sagebrush_poly::try_factor_with(&f, &sagebrush_poly::Budget::new(sagebrush_poly::Limits { work: w, ..sagebrush_poly::Limits::DEFAULT })),
+            };
+            let (c, fs) = r.map_err(|e| e.to_string())?;
             Ok(json!({ "content": c.to_string(), "factors": fs.iter().map(|(g, e)| json!([big(g), e])).collect::<Vec<_>>() }))
         }
         // ---- polynomials over a number field Q[y]/(T), T monic (poly/src/nf.rs) ----
