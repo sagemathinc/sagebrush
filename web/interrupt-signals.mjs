@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { killTree, procTable, sessionTree, survivors } from "./interrupt-procs.mjs";
+import { killTree, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const LAUNCHER = process.env.SB_LAUNCHER ?? join(ROOT, "packages/sagebrush/bin/sagebrush.cjs"); // (SB_LAUNCHER: another build, for checking the harness)
@@ -21,7 +21,13 @@ const ended130 = (r) => r.code === 130 || r.signal === "SIGINT";
 // launcher's prompt in a pty, \x03 for a press).  schedule: [{ after: "ENTER 1", ms, act }], act
 // one of press | sighup | close.  Returns markers (in order, on the harness clock), the exit, the
 // text, the acts' send times, the survivors of the final kill and the trace lines (if E1 wrote any).
-export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS, probe = null }) {
+// remainingMs: the run's time left (the matrix's deadline, set by runSignals); the guard is clipped
+// to it, and nothing starts past it
+let runRemaining = () => Infinity;
+export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS, probe = null, remainingMs = runRemaining }) {
+  const clipped = remainingMs() < guard_ms;
+  guard_ms = Math.min(guard_ms, remainingMs());
+  if (guard_ms <= 0) return Promise.resolve({ end: "budget", exit: null, marks: [], sends: [], gone_ms: null, text: "", alive_at_end: [], left: [], trace: [], wall_ms: 0 });
   const dir = mkdtempSync(join(tmpdir(), "sb-sig-"));
   const trace = join(dir, "trace.jsonl");
   const env = { ...process.env, SAGEBRUSH_SIGNAL_TRACE: trace };
@@ -39,11 +45,12 @@ export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS,
     const t0 = now();
     const marks = [], sends = [];
     let text = "", buf = "", done = false, exit = null;
-    const known = new Map();
+    // (in the one lifecycle registry from its spawn: killed if the harness is stopped, astra CORR-168-1)
+    const known = track(p.pid);
     const remember = () => { const t = procTable(); for (const q of sessionTree(p.pid, known)) if (t.has(q)) known.set(q, t.get(q).start); };
     remember();
     const watch = setInterval(remember, 250);
-    const guard = setTimeout(() => finish("guard"), guard_ms);
+    const guard = setTimeout(() => finish(clipped ? "budget" : "guard"), guard_ms);
     // the launcher itself: argv[0] is node and argv[1] the launcher (not the `sh -c` that script runs it under)
     const launcher = () => [...known.keys()].find((q) => { const a = safeRead(`/proc/${q}/cmdline`).split("\0"); return /(^|\/)node$/.test(a[0]) && a[1] === LAUNCHER; }) ?? null;
     const act = (a) => {
@@ -79,6 +86,7 @@ export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS,
       const killed = killTree(p.pid, known);
       setTimeout(() => {
         const left = survivors([...tree, ...killed]);
+        if (left.length === 0) untrack(p.pid);
         const tr = existsSync(trace) ? readFileSync(trace, "utf8").split("\n").filter(Boolean) : [];
         rmSync(dir, { recursive: true, force: true });
         resolve({ end: why, exit, marks, sends, gone_ms, text: text.slice(-2000), alive_at_end: aliveAtEnd, left, trace: tr, wall_ms: now() - t0 });
@@ -214,7 +222,8 @@ async function calibrateRegex(host, flags) {
 
 const runS6 = (host, flags, cell) => runProc({ host, flags, src: TRIALS.S6.src(), schedule: TRIALS.S6.schedule(cell), guard_ms: 15_000 });
 
-export async function runSignals({ hosts = ["cli"], mode = "ci", record = () => {}, overBudget = () => false, baseline = { pending: [] }, flags = [], only = null } = {}) {
+export async function runSignals({ hosts = ["cli"], mode = "ci", record = () => {}, overBudget = () => false, remainingMs = () => Infinity, baseline = { pending: [] }, flags = [], only = null } = {}) {
+  runRemaining = remainingMs;
   const rows = [];
   const repeats = mode === "full" ? 5 : 1;
   const ciHosts = { S1: ["cli"], S2: ["cli"], S3: ["cli"], S4: ["cli"] }; // the CI cells (§8.1)
@@ -229,6 +238,7 @@ export async function runSignals({ hosts = ["cli"], mode = "ci", record = () => 
       for (let k = 1; k <= repeats; k++) {
         // (30 s: a correct session ends within about 10 s; a known prompt failure needs no more to show its signature)
         const r = await runProc({ host, flags, src: t.src(regex?.n), schedule: t.schedule(host), probe: t.probe, guard_ms: 30_000 });
+        if (r.end === "budget" && overBudget()) { cells.push({ i: k, outcome: "INVALID", why: "run budget spent" }); break; }
         const j = await t.judge(r, host);
         const leftFail = r.left.length ? { outcome: "FAIL", why: "processes survived the kill: " + r.left.join(",") } : null;
         cells.push({ i: k, ...(leftFail ?? j), exit: r.exit && { code: r.exit.code, signal: r.exit.signal }, trace_lines: r.trace.length, ...(j.outcome !== "PASS" ? { tail: r.text.slice(-600) } : {}) });

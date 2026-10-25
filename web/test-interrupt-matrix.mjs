@@ -17,8 +17,8 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { againstBaseline, classify, classifyXK, leakCheck, xkRowOutcome } from "./interrupt-classify.mjs";
-import { killTree, procTable, sessionTree, survivors } from "./interrupt-procs.mjs";
+import { againstBaseline, classify, classifyXK, cliffOf, leakCheck, xkRowOutcome } from "./interrupt-classify.mjs";
+import { killTracked, killTree, onStop, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -33,10 +33,15 @@ const ROWS = opt("--rows", "");
 const OUT = opt("--out", join(tmpdir(), "interrupt-matrix-pilot.json"));
 // (every row is appended to OUT.jsonl as it finishes, so a stopped run keeps what it measured)
 const ROWS_OUT = OUT.replace(/\.json$/, "") + ".jsonl";
-// the whole run's wall budget (test infrastructure): past it, the rows left are INVALID-budget
+// the whole run's wall budget (test infrastructure), an absolute deadline (daybreak2 LIMIT-INT168-2):
+// work stops RESERVE_MS before it, every session, guard and CDP wait is clipped to the time left,
+// the rows left are INVALID-budget, and the last RESERVE_MS are for cleanup and the final report.  A
+// watchdog at the deadline itself writes the report and exits if anything still runs.
 const RUN_BUDGET_MS = Number(opt("--budget-ms", String(30 * 60_000)));
+const RESERVE_MS = Math.min(30_000, Math.round(RUN_BUDGET_MS / 4));
 const RUN_T0 = Number(process.hrtime.bigint()) / 1e6;
-const overBudget = () => Number(process.hrtime.bigint()) / 1e6 - RUN_T0 > RUN_BUDGET_MS;
+const workLeft = () => RUN_T0 + RUN_BUDGET_MS - RESERVE_MS - Number(process.hrtime.bigint()) / 1e6;
+const overBudget = () => workLeft() <= 0;
 export const record = (row) => { appendFileSync(ROWS_OUT, JSON.stringify(row) + "\n"); console.log(JSON.stringify(row)); };
 // --pilot (default): 5 trials at the middle per row; --ci: the plan's CI set (r4 §8), baseline
 // rows watched 20 s; --full (VM): early/middle/late cells and the 20-repeat leak series
@@ -57,7 +62,7 @@ const CASES = [
   { id: "P2a", mode: "python", s0: 3_000_000, smin: 100_000, smax: 10_000_000, grow: (s, r) => Math.round(s * r), setup: "", target: "_r = sorted(range(S), key=lambda v: -v)", probe: "assert sorted([3, 1, 2]) == [1, 2, 3]" },
   { id: "E2", mode: "sage", s0: 22, smin: 12, smax: 44, grow: (s, r) => s + Math.max(1, Math.round(Math.log(r) / 0.18)) * Math.sign(Math.log(r)), setup: "n = next_prime(10**S) * next_prime(3 * 10**S)", target: "_r = factor(n)", probe: "assert len(factor(2**64 + 1)) == 2" },
   { id: "E3a", mode: "sage", s0: 450, smin: 200, smax: 600, grow: (s, r) => Math.round(s * Math.cbrt(r)), setup: "M = random_matrix(GF(32003), S)", target: "_r = M.rank()", probe: "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1" },
-  { id: "E6a", mode: "sage", s0: 6, smin: 4, smax: 9, grow: (s, r) => s + (r > 1 ? 1 : -1), setup: "R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])", target: "_r = I.groebner_basis()", probe: "R2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2" },
+  { id: "E6a", mode: "sage", s0: 6, smin: 4, smax: 9, grow: (s, r) => s + (r > 1 ? 1 : -1), setup: "R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])", target: "_r = I.groebner_basis()", probe: "assert (X[0] + X[1])**2 - X[0]**2 - X[1]**2 == 2 * X[0] * X[1]\nassert len(I.gens()) == len(X) and I.gens()[0] in R\nR2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2", retained: true },
   { id: "E13g", mode: "sage", s0: 40, smin: 4, smax: 4000, grow: (s, r) => Math.max(1, Math.round(s * r)), xk: { kind: "window", wrap: "_sbraster.render" }, hosts: ["cli"], setup: "import tempfile, os\n_d = tempfile.mkdtemp()\nP = sum(polygon([(0, 0), (1, 0.1 * (j % 10)), (1, 1), (0.1 * (j % 7), 1)], alpha=0.02) for j in range(S))", target: "P.save(os.path.join(_d, 'big.png'), figsize=40, dpi=100)", probe: "line([(0, 0), (1, 1)]).save(os.path.join(_d, 'small.png'), figsize=1, dpi=100)\nassert os.path.getsize(os.path.join(_d, 'small.png')) > 0" },
 ].filter((c) => !ROWS || ROWS.split(",").includes(c.id));
 const FLAGS = { python: [], sage: ["--sage"], magma: ["--magma"], matlab: ["--matlab"] };
@@ -145,16 +150,16 @@ function launcherChild(pid) {
   }
   return pid;
 }
-// sessions still running: killed if the harness itself is stopped (timeout, Ctrl-C)
-const live = new Map(); // root -> known
-for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => { for (const [r, k] of live) killTree(r, k); process.exit(128 + { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }[sig]); });
-process.on("exit", () => { for (const [r, k] of live) killTree(r, k); });
+// (every session is in interrupt-procs.mjs's one registry: killed, tree and all, if the harness is stopped)
 
 // ---- running one session (cli or prompt): delays[i] (ms after ENTER i, or null for none)
 // returns the per-trial evidence, read on the harness's own clock
 function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.length, guard_ms = G_MS) {
   const n = delays.length;
   const src = driver(c, s, n);
+  // (clipped to the run's deadline; nothing starts past it)
+  budget_ms = Math.min(budget_ms, workLeft());
+  if (budget_ms <= 0) return Promise.resolve({ trials: Array.from({ length: n }, (_, k) => ({ i: k + 1, marks: {}, stray: null, probe: null })), samples: [], end: "budget", wall_ms: 0, left: [], tail: "" });
   return new Promise((resolve) => {
     let p;
     if (host === "cli") {
@@ -174,8 +179,8 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
     const t0 = now();
     const overall = setTimeout(() => finish("budget"), budget_ms);
     let tail = "";
-    const known = new Map();
-    live.set(p.pid, known);
+    const known = track(p.pid);
+    const sends = new Set(); // (pending Stop dispatches: cancelled when the session ends)
     const remember = () => { const t = procTable(); for (const q of sessionTree(p.pid, known)) if (t.has(q)) known.set(q, t.get(q).start); };
     const watch = setInterval(remember, 1000);
     let done = false;
@@ -184,11 +189,13 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       done = true;
       clearTimeout(overall);
       if (guard) clearTimeout(guard);
+      for (const h of sends) clearTimeout(h);
+      sends.clear();
       clearInterval(watch);
       const killed = killTree(p.pid, known);
       setTimeout(() => {
         const left = survivors(killed);
-        if (left.length === 0) live.delete(p.pid);
+        if (left.length === 0) untrack(p.pid);
         resolve({ trials, samples, end: why, wall_ms: now() - t0, left, tail: tail.slice(-1500) });
       }, 500);
     };
@@ -204,14 +211,25 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       t.marks[mk] = { t: now(), rest };
       if (mk === "ENTER" && delays[t.i - 1] != null) {
         const id = t.i;
-        setTimeout(() => {
-          // (a send never outlives its trial: no RET/KI yet for this id)
-          if (trials[id - 1].marks.RET || trials[id - 1].marks.KI) return;
+        const h = setTimeout(() => {
+          sends.delete(h);
+          // (a send never outlives its trial or its session (astra CORR-168-4): not after the session
+          // ended, and not once this trial has a RET or KI)
+          if (done || trials[id - 1].marks.RET || trials[id - 1].marks.KI) return;
           trials[id - 1].t_send = now();
-          if (host === "cli") process.kill(p.pid, "SIGINT");
-          else p.stdin.write("\x03");
-          guard = setTimeout(() => finish("guard"), guard_ms);
+          try {
+            if (host === "cli") process.kill(p.pid, "SIGINT");
+            else p.stdin.write("\x03");
+          } catch (e) {
+            // (the process is already gone: evidence for this trial, never a crash of the harness)
+            trials[id - 1].send_error = String(e?.code ?? e?.message ?? e);
+            return;
+          }
+          // (the guard, clipped to the run's deadline: a clipped guard ends the session as "budget")
+          const g = Math.max(1, Math.min(guard_ms, workLeft()));
+          guard = setTimeout(() => finish(g < guard_ms ? "budget" : "guard"), g);
         }, delays[t.i - 1]);
+        sends.add(h);
       }
       if (mk === "KI" && guard) { clearTimeout(guard); guard = null; }
       if (mk === "PROBE") t.probe = rest;
@@ -246,6 +264,7 @@ async function calibrate(host, c) {
   const mid = (x, y) => Math.round((x + y) / 2);
   for (let a = 0; a <= MAX_RESIZE; a++) {
     const r = await session(host, c, s, [null], CAL_CAP_MS);
+    if (overBudget()) return { s, T: null, attempts, error: "run budget spent" };
     const t = r.trials[0];
     const T = t.marks.RET && t.marks.ENTER ? t.marks.RET.t - t.marks.ENTER.t : null;
     const R = t.marks.XSTART && t.marks.XEND ? t.marks.XEND.t - t.marks.XSTART.t : null;
@@ -269,15 +288,10 @@ async function calibrate(host, c) {
     if (next === s || attempts.some((x) => x.s === next)) break; // (a cliff between two adjacent sizes)
     s = next;
   }
-  // a cliff (William, Oct 25: no performance cliffs): two close sizes, over 100x apart in time (or the
-  // larger over the cap), reported as a finding with its sizes and times, not just an uncalibrated row
-  if (lo != null && hi != null) {
-    const tLo = attempts.find((x) => x.s === lo)?.T_ms, hiA = attempts.find((x) => x.s === hi);
-    const ratio = hiA?.T_ms != null && tLo ? hiA.T_ms / tLo : null;
-    if (hi - lo <= 0.1 * hi && tLo != null && (hiA?.T_ms == null || ratio > 100)) {
-      return { s, T: null, attempts, label: "cliff", cliff: { from_s: lo, from_ms: tLo, to_s: hi, to_ms: hiA?.T_ms ?? `over the ${CAL_CAP_MS} ms cap` }, error: `a performance cliff between s = ${lo} (${tLo} ms) and s = ${hi} (${hiA?.T_ms != null ? hiA.T_ms + " ms" : "over the " + CAL_CAP_MS / 1000 + " s cap"}): a finding for the owner` };
-    }
-  }
+  // a cliff (William, Oct 25: no performance cliffs): proven over 100x between two close sizes
+  // (cliffOf), reported as a finding with its sizes and times, not just an uncalibrated row
+  const cliff = lo != null && hi != null ? cliffOf({ lo, tLo: attempts.find((x) => x.s === lo)?.T_ms, hi, tHi: attempts.find((x) => x.s === hi)?.T_ms ?? null, capMs: CAL_CAP_MS }) : null;
+  if (cliff) return { s, T: null, attempts, label: "cliff", cliff, error: `a performance cliff between s = ${cliff.from_s} (${cliff.from_ms} ms) and s = ${cliff.to_s} (${typeof cliff.to_ms === "number" ? cliff.to_ms + " ms" : cliff.to_ms}; at least ${cliff.ratio_at_least}x): a finding for the owner` };
   return { s, T: null, attempts, error: "uncalibrated" + (lo != null && hi != null ? ` (the band lies between s = ${lo} and s = ${hi})` : "") };
 }
 
@@ -309,9 +323,12 @@ async function runHost(host) {
     const sessions = [];
     // an XK case's per-cell context (r5 §6.2): the window's R(s), or the bound's T and f
     const xkOf = (delay) => (!c.xk ? null : c.xk.kind === "window" ? { kind: "window", R_ms: cal.R } : { kind: "bound", T_ms: cal.T, f: delay / cal.T });
-    const cls = (t, delay) => classifyXK(t, xkOf(delay));
+    // (a trial left without RET or KI in a session cut at the run's deadline had a shortened guard:
+    // INVALID-budget, not a failure to stop)
+    const cls = (t, delay) => (t.budget_cut && !t.marks.RET && !t.marks.KI ? { outcome: "INVALID", why: "run budget spent: the session was cut at the deadline" } : classifyXK(t, xkOf(delay)));
     const run = async (label, delays) => {
       const r = await session(host, c, cal.s, delays, CAL_CAP_MS + guard_ms * delays.length, guard_ms);
+      if (r.end === "budget") for (const t of r.trials) t.budget_cut = true;
       sessions.push({ label, end: r.end, wall_ms: Math.round(r.wall_ms), left: r.left, samples: r.samples, ...(r.trials.some((t) => classify(t).outcome !== "PASS") ? { tail: r.tail } : {}) });
       return r;
     };
@@ -338,7 +355,9 @@ async function runHost(host) {
     const left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
     const leak0 = leakCheck(lr.samples);
     const leak = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
-    const { outcome: own, why: rowWhy } = xkRowOutcome(cells, leak && leak.ok, c.xk);
+    let { outcome: own, why: rowWhy } = xkRowOutcome(cells, leak && leak.ok, c.xk);
+    // (a session cut at the run's deadline leaves its cells unresolved: the row is INVALID-budget, unless it already failed)
+    if (overBudget() && sessions.some((x) => x.end === "budget") && own !== "FAIL") { own = "INVALID"; rowWhy = "run budget spent: a session was cut at the deadline"; }
     const outcome = againstBaseline({ case: c.id, host, outcome: own, trials: cells, leak }, BASELINE);
     rows.push({ case: c.id, host, mode: c.mode, run: MODE, outcome, ...(cal.label ? { label: cal.label } : {}), ...(outcome !== own ? { own_outcome: own } : {}), ...(rowWhy ? { why: rowWhy } : {}), ...(c.xk ? { xk: c.xk.kind } : {}), s: cal.s, T_ms: cal.T && Math.round(cal.T), ...(cal.R != null ? { R_ms: Math.round(cal.R) } : {}), calibration: cal, cells, leak, sessions });
     record(rows.at(-1));
@@ -350,17 +369,34 @@ const out = { started: new Date().toISOString(), node: process.version, run: MOD
 // --signals S1,S2,...,pending (default: all; "none" skips them): the signal-state trials (r5 §8.1)
 const SIGNALS = opt("--signals", "all");
 const tRun = now();
+// the final report, also when the run is stopped (a signal) or reaches its deadline (the watchdog):
+// the rows written so far (OUT.jsonl), and how the run ended; a stopped run fails --ci
+const finalReport = (ending) => {
+  let rows = [];
+  try { rows = readFileSync(ROWS_OUT, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch {}
+  writeFileSync(OUT, JSON.stringify({ ...out, ended: ending, wall_ms: Math.round(now() - tRun), rows }, null, 1));
+  console.log("wrote", OUT, "(" + ending + ")");
+};
+onStop((sig) => finalReport("stopped by " + sig));
+const watchdog = setTimeout(() => {
+  record({ case: "*", host: "*", outcome: "INVALID", why: "run budget spent: the deadline was reached with work still running (the watchdog)" });
+  killTracked();
+  finalReport("deadline watchdog");
+  process.exit(1);
+}, RUN_BUDGET_MS);
+watchdog.unref();
 for (const h of HOSTS) {
   if (h === "browser") {
     const { browserPilot } = await import("./test-interrupt-browser.mjs");
     // (a browser that can't start is an uncovered host, reported, not a crash that loses the run)
-    out.hosts[h] = overBudget() ? { skipped: "run budget spent" } : await browserPilot({ record, overBudget, baseline: BASELINE, onChild: (pid) => live.set(pid, new Map()), onChildDone: (pid) => live.delete(pid) }).catch((e) => ({ error: String(e?.stack ?? e).slice(0, 600), rows: [] }));
+    out.hosts[h] = overBudget() ? { skipped: "run budget spent" } : await browserPilot({ record, overBudget, remainingMs: workLeft, mode: MODE, baseline: BASELINE, onChild: (pid) => track(pid), onChildDone: (pid) => untrack(pid) }).catch((e) => ({ error: String(e?.stack ?? e).slice(0, 600), rows: [] }));
   } else out.hosts[h] = await runHost(h);
 }
 if (SIGNALS !== "none") {
   const { runSignals } = await import("./interrupt-signals.mjs");
-  out.signals = await runSignals({ hosts: HOSTS.filter((h) => h !== "browser"), mode: MODE, record, overBudget, baseline: BASELINE, only: SIGNALS === "all" ? null : SIGNALS.split(",") });
+  out.signals = await runSignals({ hosts: HOSTS.filter((h) => h !== "browser"), mode: MODE, record, overBudget, remainingMs: workLeft, baseline: BASELINE, only: SIGNALS === "all" ? null : SIGNALS.split(",") });
 }
+clearTimeout(watchdog);
 out.wall_ms = Math.round(now() - tRun);
 writeFileSync(OUT, JSON.stringify(out, null, 1));
 console.log("wrote", OUT, "in", out.wall_ms, "ms");

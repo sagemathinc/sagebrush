@@ -38,3 +38,40 @@ export function killTree(root, known) {
 }
 // what survived a kill (the cleanup check)
 export const survivors = (pids) => { const t = procTable(); return pids.filter((q) => t.has(q)); };
+
+// The one lifecycle registry (astra CORR-168-1): every session the harness starts, the matrix's,
+// the signal trials' (web/interrupt-signals.mjs) and the browser's Chrome, is tracked here from its
+// spawn until its cleanup is verified, and killed, tree and all, if the harness itself is stopped
+// (SIGTERM, SIGINT, SIGHUP) or exits.  onStop(fn): run before such an exit (the matrix writes its
+// final report).
+const registry = new Map(); // root pid -> known (pid -> start), the tree sampled while it ran
+const stopHooks = [];
+let installed = false;
+export function killTracked() {
+  for (const [root, known] of registry) killTree(root, known);
+}
+function install() {
+  if (installed) return;
+  installed = true;
+  for (const [sig, n] of [["SIGTERM", 15], ["SIGINT", 2], ["SIGHUP", 1]]) {
+    process.on(sig, () => {
+      killTracked();
+      for (const fn of stopHooks) try { fn(sig); } catch {}
+      process.exit(128 + n);
+    });
+  }
+  process.on("exit", killTracked);
+}
+export function track(root, known = new Map()) {
+  install();
+  registry.set(root, known);
+  return known;
+}
+export function untrack(root) {
+  registry.delete(root);
+}
+export function onStop(fn) {
+  install();
+  stopHooks.push(fn);
+}
+export const trackedCount = () => registry.size;

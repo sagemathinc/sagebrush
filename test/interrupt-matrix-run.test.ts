@@ -1,0 +1,144 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// The interrupt matrix's entry point (web/test-interrupt-matrix.mjs) against a fake launcher
+// (SB_LAUNCHER), a stubborn node program that ignores TERM, INT and HUP and starts a detached
+// child of its own, so the harness's lifecycle is tested without an engine (PR #168 review):
+// - SIGTERM during a signal trial or a calibration leaves nothing running (astra CORR-168-1);
+// - a target that exits after ENTER doesn't crash a later session (astra CORR-168-4);
+// - a row begun just before the deadline ends with its budget row, the report and no children
+//   (daybreak2 LIMIT-INT168-2).
+const root = join(__dirname, "..", "..");
+const matrix = join(root, "web", "test-interrupt-matrix.mjs");
+const hasScript = spawnSync("sh", ["-c", "command -v script"]).status === 0;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const alive = (pid: number) => {
+  try {
+    const st = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return st.slice(st.lastIndexOf(")") + 2)[0] !== "Z";
+  } catch {
+    return false;
+  }
+};
+
+// behaviour: "loop" (ENTER, then run on, ignoring signals) or "exit-after-enter" (ENTER, then exit
+// without RET or KI); every pid it starts is appended to PIDS
+function fake(dir: string, behaviour: string) {
+  const f = join(dir, "fake-launcher.cjs");
+  writeFileSync(f, `
+const fs = require("node:fs"), { spawn } = require("node:child_process");
+const PIDS = ${JSON.stringify(join(dir, "pids"))};
+for (const s of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(s, () => {});
+fs.appendFileSync(PIDS, process.pid + "\\n");
+const kid = spawn(process.execPath, ["-e", "for (const s of ['SIGTERM','SIGINT','SIGHUP']) process.on(s, () => {}); setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
+fs.appendFileSync(PIDS, kid.pid + "\\n");
+const say = (s) => process.stdout.write(s + "\\n");
+const go = () => {
+  say("SETUP 1"); say("ENTER 1 0.1");
+  if (${JSON.stringify(behaviour)} === "exit-after-enter") { try { process.kill(kid.pid, "SIGKILL"); } catch {} process.exit(0); }
+  setInterval(() => {}, 1000);
+};
+// (the prompt host types its program on stdin; the CLI host passes a file)
+if (process.argv.length > 2) go(); else process.stdin.once("data", go);
+`);
+  return f;
+}
+function harness(dir: string, args: string[], launcher: string) {
+  return spawn(process.execPath, [matrix, ...args, "--out", join(dir, "out.json")], { env: { ...process.env, SB_LAUNCHER: launcher }, stdio: ["ignore", "pipe", "pipe"] });
+}
+const pidsOf = (dir: string) => (existsSync(join(dir, "pids")) ? readFileSync(join(dir, "pids"), "utf8").split("\n").filter(Boolean).map(Number) : []);
+async function untilPids(dir: string, n: number, ms = 15000) {
+  for (const t = Date.now(); Date.now() - t < ms; ) {
+    if (pidsOf(dir).length >= n) return true;
+    await sleep(100);
+  }
+  return false;
+}
+const exitOf = (p: any) => new Promise<number | null>((r) => p.on("exit", (code: number | null, sig: string | null) => r(code ?? (sig ? 128 : null))));
+
+for (const [label, args, host] of [
+  ["a signal trial (S1)", ["--ci", "--host", "cli", "--rows", "NONE", "--signals", "S1"], "cli"],
+  ["a calibration on the CLI", ["--pilot", "--host", "cli", "--rows", "E2", "--signals", "none"], "cli"],
+  ["a calibration on the prompt", ["--pilot", "--host", "prompt", "--rows", "E2", "--signals", "none"], "prompt"],
+] as const) {
+  test(`SIGTERM to the harness during ${label} leaves nothing running, and the report is written (astra CORR-168-1)`, { skip: host === "prompt" && !hasScript && "no script(1)" }, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
+    try {
+      const h = harness(dir, [...args], fake(dir, "loop"));
+      const ended = exitOf(h);
+      assert.ok(await untilPids(dir, 2), "the fake launcher started");
+      await sleep(1500); // (the harness has sampled the session's tree)
+      h.kill("SIGTERM");
+      assert.equal(await ended, 143);
+      await sleep(500);
+      const left = pidsOf(dir).filter(alive);
+      assert.deepEqual(left, [], "processes left running after the harness's SIGTERM");
+      const out = JSON.parse(readFileSync(join(dir, "out.json"), "utf8"));
+      assert.match(out.ended, /stopped by SIGTERM/);
+    } finally {
+      for (const q of pidsOf(dir)) try { process.kill(q, "SIGKILL"); } catch {}
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("a target that exits after ENTER, with no RET or KI: its pending Stop is cancelled, and the run goes on (astra CORR-168-4)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
+  try {
+    // P1 (a Stop 1 s after ENTER, but the target is gone by then), then P2a's calibration in a new session
+    const h = harness(dir, ["--pilot", "--host", "cli", "--rows", "P1,P2a", "--signals", "none", "--budget-ms", "40000"], fake(dir, "exit-after-enter"));
+    let err = "";
+    h.stderr.on("data", (d: Buffer) => (err += d));
+    assert.equal(await exitOf(h), 0, err.slice(-600));
+    assert.doesNotMatch(err, /ESRCH|Uncaught|unhandled/i);
+    const rows = readFileSync(join(dir, "out.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.ok(rows.some((r) => r.case === "P1"), "P1's row");
+    assert.ok(rows.some((r) => r.case === "P2a"), "P2a's row: the run went on");
+  } finally {
+    for (const q of pidsOf(dir)) try { process.kill(q, "SIGKILL"); } catch {}
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a row begun just before the deadline: a budget row, the report written, no children left (daybreak2 LIMIT-INT168-2)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
+  try {
+    // a 6 s run (work stops 1.5 s before the deadline); P1's five trials never finish here, so its
+    // session is cut at the deadline
+    const t0 = Date.now();
+    const h = harness(dir, ["--pilot", "--host", "cli", "--rows", "P1", "--signals", "none", "--budget-ms", "6000"], fake(dir, "loop"));
+    const code = await exitOf(h);
+    const wall = Date.now() - t0;
+    assert.ok(wall < 15000, `the run ended near its deadline (${wall} ms)`);
+    assert.ok(code === 0 || code === 1, `exit ${code}`);
+    await sleep(500);
+    assert.deepEqual(pidsOf(dir).filter(alive), [], "children left after the deadline");
+    const rows = readFileSync(join(dir, "out.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const p1 = rows.find((r) => r.case === "P1");
+    assert.ok(p1, "P1's row was written");
+    assert.equal(p1.outcome, "INVALID");
+    assert.match(String(p1.why), /run budget spent/);
+    assert.ok(existsSync(join(dir, "out.json")), "the report");
+  } finally {
+    for (const q of pidsOf(dir)) try { process.kill(q, "SIGKILL"); } catch {}
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("E6a (retained: true) probes the ring, generators and ideal built before the interrupt, and a new ring (astra CORR-168-3)", () => {
+  const r = spawnSync(process.execPath, [matrix, "--print-driver", "E6a", "5", "1"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  // the probe block: after the narrow try, between the keep check and PROBE i ok
+  const probe = r.stdout.slice(r.stdout.indexOf("assert keep == 41"), r.stdout.indexOf('_p("PROBE", _i, "ok")'));
+  assert.match(probe, /X\[0\] \+ X\[1\]/, "arithmetic on the pre-interrupt generators");
+  assert.match(probe, /I\.gens\(\)/, "the pre-interrupt ideal");
+  assert.match(probe, /\bin R\b/, "the pre-interrupt ring");
+  assert.match(probe, /R2 = PolynomialRing/, "a new ring as well");
+  // (and the setup builds them before ENTER, outside the narrow try)
+  const setupEnd = r.stdout.indexOf('_p("ENTER"');
+  assert.ok(r.stdout.lastIndexOf("I = R.ideal(", setupEnd) > 0);
+});
