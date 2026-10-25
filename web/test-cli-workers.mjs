@@ -170,6 +170,67 @@ function notebookRuns(r, cmd, args, port, dir, ms = 90_000, stats = {}) {
   });
 }
 
+// ---- `sagebrush notebook`'s Stop wakes a time.sleep at once (src/notebook.ts:
+// requestCtrlC, bit 0 set and the word notified, as Ctrl-C does): a cell
+// sleeping 30 s, Stop sent 2 s in, its KeyboardInterrupt within 5 s of it
+function notebookStopsSleep(r, cmd, args, port, dir, ms = 90_000) {
+  return new Promise((resolve) => {
+    const p = r.spawn(cmd, [...args, "notebook", dir, "--port", String(port), "--no-browser"], { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "", started = false, settled = false, stopAt = 0;
+    const said = () => `${out}${err}`.slice(-300);
+    const done = (v) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(t);
+      resolve(v);
+    };
+    const t = setTimeout(() => done(`no result in ${ms / 1000} s; the server said: ${said()}`), ms);
+    p.stderr.on("data", (b) => { err = keep(err, String(b)); });
+    p.on("exit", (code) => done(`the server exited (${code}): ${said()}`));
+    p.stdout.on("data", async (b) => {
+      out = keep(out, String(b));
+      const m = /http:\/\/127\.0\.0\.1:(\d+)\/\?token=([0-9a-f]+)/.exec(out);
+      if (!m || started) return;
+      started = true;
+      const [, at, token] = m;
+      try {
+        const first = await fetch(`http://127.0.0.1:${at}/?token=${token}`, { redirect: "manual" });
+        const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0];
+        const base = `http://127.0.0.1:${at}/nb/t.ipynb/api/session/s2`;
+        let line = "", text = "";
+        const events = r.request(`${base}/events`, { headers: { cookie } }, (res) => {
+          res.setEncoding("utf8");
+          res.on("data", (d) => {
+            if (settled) return;
+            const lines = (line + d).split("\n");
+            line = lines.pop();
+            if (line.length > KEEP) return done(`an event longer than ${KEEP} characters`);
+            for (const l of lines) {
+              if (!l.startsWith("data: ")) continue;
+              let msg;
+              try { msg = JSON.parse(l.slice(6)); } catch { return done(`an event that isn't JSON: ${l.slice(0, 200)}`); }
+              if (msg.id !== 1) continue;
+              if (msg.stream === "stdout") text = keep(text, msg.text);
+              if (msg.done) {
+                const after = stopAt ? Date.now() - stopAt : -1;
+                done(text === "KI\n" && after >= 0 && after < 5000 ? true : `the cell printed ${JSON.stringify(text.slice(0, 60))}, ${after} ms after Stop`);
+              }
+            }
+          });
+        });
+        events.on("error", (e) => done(`the events: ${e.message}`));
+        events.end();
+        await fetch(`${base}/send`, { method: "POST", headers: { cookie }, body: JSON.stringify({ id: 1, code: "import time\ntry:\n    time.sleep(30)\nexcept KeyboardInterrupt:\n    print('KI')" }) });
+        await sleep(2000);
+        stopAt = Date.now();
+        await fetch(`${base}/interrupt`, { method: "POST", headers: { cookie }, body: JSON.stringify({ upTo: 1 }) });
+      } catch (e) {
+        done(String(e?.message ?? e));
+      }
+    });
+  });
+}
+
 // a worker on the launcher, as the notebook's session and as the kernel: ready
 const ready = (r, workerData) => new Promise((resolve) => {
   const w = r.worker(launcher, { workerData, stdout: true, stderr: true });
@@ -277,6 +338,9 @@ const { error } = await scoped(async (r) => {
     const port = await freePort();
     const { value, error } = await scoped((r2) => notebookRuns(r2, cmd, args, port, dir));
     check(value === true, `${name}: a notebook cell through the launcher runs (2+3 prints 5)`, String(error ?? value));
+    const port2 = await freePort();
+    const stop = await scoped((r2) => notebookStopsSleep(r2, cmd, args, port2, dir));
+    check(stop.value === true, `${name}: the notebook's Stop interrupts a time.sleep at once`, String(stop.error ?? stop.value));
   }
 });
 check(!error, "no unexpected error", String(error?.stack ?? error));
