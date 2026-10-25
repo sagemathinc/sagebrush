@@ -10,7 +10,7 @@ Your synced data stays, read-only, for 90 days.
 - **After 90 days, your synced data is deleted from the server,** in the same way as "Delete my synced data". We email you when your plan stops including sync, and again about two weeks before the deletion.
 - **If your plan includes sync again within the 90 days,** sync starts again where it left off, and nothing is deleted.
 
-This is about a plan without sync. A plan with sync but less storage is different: if your synced data is larger than your plan's storage, new files stop uploading until it fits, and nothing is deleted.
+This is about a plan without sync. A plan with sync but less storage is different: if your synced data is larger than your plan's storage, new files stop uploading until it fits, edits to documents already synced keep syncing, and nothing is deleted.
 
 Shared links are separate: what you have shared stays shared, under the sharing rules.
 
