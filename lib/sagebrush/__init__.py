@@ -14,4 +14,53 @@ accepted and ignored).
 
 from . import modsym, ap, mf, poly, nf, linalg
 
-__all__ = ["modsym", "ap", "mf", "poly", "nf", "linalg"]
+__all__ = ["modsym", "ap", "mf", "poly", "nf", "linalg", "capabilities", "stop_points", "progress_snapshot"]
+
+
+# ---- the agent API (estimates plan r3 §1.1): what this build provides,
+# live progress, and the entry points of the pieces still to come, which
+# refuse before running.
+
+def capabilities():
+    """What this build of the agent API provides: {"progress": True,
+    "estimate": False, ...} (sagebrush.records.capabilities)."""
+    from . import records
+    return records.capabilities()
+
+
+def stop_points(op):
+    """The clean stop points implemented for op ([] in this build)."""
+    from . import records
+    return records.stop_points(op)
+
+
+def progress_snapshot():
+    """Every call in progress now, as sagebrush.progress/1 records
+    (sagebrush.progress.snapshot)."""
+    from . import progress
+    return progress.snapshot()
+
+
+def _unavailable(name):
+    from . import records
+    return records.unavailable("sagebrush." + name)
+
+
+# (their signatures are the designs': design-estimates-progress r4 §3,
+# design-agent-api-library r3 §5 and §6)
+def estimate(f, *args, **kwds):
+    """The time and memory estimate of f(*args, **kwds): not available in
+    this build (sagebrush.capabilities())."""
+    raise _unavailable("estimate")
+
+
+def run(f, *args, **kwds):
+    """f(*args, **kwds) as an outcome/1 record: not available in this build
+    (sagebrush.capabilities())."""
+    raise _unavailable("run")
+
+
+def resume(checkpoint, **kwds):
+    """Resumes a checkpoint: not available in this build
+    (sagebrush.capabilities())."""
+    raise _unavailable("resume")
