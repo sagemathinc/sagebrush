@@ -155,8 +155,9 @@ print(latex(ModularSymbols(11, 2).hecke_operator(2).charpoly().factor()))
 `);
   assert.deepEqual(out.trim().split("\n"), [
     "x^{20} - \\frac{1}{2} x + 3",
-    "\\left(x - 1\\right) \\cdot \\left(x + 1\\right) \\cdot \\left(x^{2} + 1\\right)",
-    "\\left(x - 3\\right) \\cdot \\left(x + 2\\right)^{2}",
+    // (Sage's: a factor of several terms in plain parentheses)
+    "(x - 1) \\cdot (x + 1) \\cdot (x^{2} + 1)",
+    "(x - 3) \\cdot (x + 2)^{2}",
   ]);
 });
 
