@@ -35,10 +35,11 @@ export function fileOnceEnv(ns: any, b: any): boolean {
 export function fileOncePeekBuiltin(k: string): any {
   return Object.prototype.hasOwnProperty.call(builtins, k) ? builtins[k] : undefined;
 }
-// The prefix (r7 §2.2): open is the builtin, F an exact str, M one of the
-// four modes.  No Python call.
-export function fileOncePrefix(o: any, f: any, m: any): boolean {
-  return o === canonicalOpen && o !== null && typeof f === "string" && (m === "w" || m === "a" || m === "wb" || m === "ab");
+// The canonical open, for the site's prefix (r7 §2.2, inlined by the
+// compiler: open is this object, F an exact str, M one of w, a, wb, ab; no
+// Python call).  null before start-up sets it, which declines every site.
+export function fileOnceOpen(): any {
+  return canonicalOpen;
 }
 // S fits the mode: an exact str with no lone surrogate (UTF-8 encodes it),
 // or exact bytes

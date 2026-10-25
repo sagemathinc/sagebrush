@@ -1185,7 +1185,7 @@ export const R: any = {
   builtinName: M.builtinName,
   fileOnceEnv: FO.fileOnceEnv,
   fileOncePeekBuiltin: FO.fileOncePeekBuiltin,
-  fileOncePrefix: FO.fileOncePrefix,
+  fileOnceOpen: FO.fileOnceOpen,
   fileOnceFits: FO.fileOnceFits,
   fileOnceWrite: FO.fileOnceWrite,
   fileOnceS: FO.fileOnceS,
