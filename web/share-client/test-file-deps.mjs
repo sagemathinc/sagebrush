@@ -283,6 +283,39 @@ const said = (r, re) => r.unf.some((u) => re.test(u.why));
   eq(arg.deps, [["/a.csv", { kind: "opened", cell: 0 }]], "an opener's file is its first argument; the mode isn't a file");
 }
 
+// ---- #170 r2's review: astra3's CORR-170-R2-ASTRA-1..3 (CPython's answers in astra3's report)
+{
+  const files = { "/private.csv": "x", "/public.csv": "x" };
+  // R2-1: nonlocal binds in the nearest enclosing function that binds the name, skipping one that doesn't
+  const nl = await run({ files, cells: ['def outer():\n    p = "public.csv"\n    def middle():\n        def change():\n            nonlocal p\n            p = "private.csv"\n        change()\n    middle()\n    open(p)\nouter()\n'] });
+  eq([nl.paths, said(nl, /p is bound more than once/)], [[], true], "R2-1: a nonlocal write two functions down rebinds outer's p: neither pre-checked, reported");
+  const one = await run({ files, cells: ['def outer():\n    p = "public.csv"\n    def change():\n        nonlocal p\n        p = "private.csv"\n    change()\n    open(p)\n'] });
+  eq(one.paths, [], "R2-1: ...and one function down");
+  const read = await run({ files, cells: ['def outer():\n    p = "public.csv"\n    def show():\n        return p\n    open(p)\n'] });
+  eq(read.paths, ["/public.csv"], "a nested function only reading p doesn't rebind it (control)");
+  // R2-2: a class body runs in order
+  const cls = await run({ files, cells: ['p = "private.csv"\nclass C:\n    open(p)\n    p = "public.csv"\n'] });
+  eq(cls.deps, [["/private.csv", { kind: "opened", cell: 0 }]], "R2-2: open(p) before the class's own p = ...: the module's p, as Python reads it");
+  const after = await run({ files, cells: ['p = "private.csv"\nclass C:\n    p = "public.csv"\n    open(p)\n'] });
+  eq(after.paths, ["/public.csv"], "R2-2: after the class's assignment: the class's p (control)");
+  const cond = await run({ files, cells: ['p = "private.csv"\nclass C:\n    if flag:\n        p = "public.csv"\n    open(p)\n'] });
+  eq([cond.paths, said(cond, /bound more than once/)], [[], true], "R2-2: a conditional class binding: either may be seen: neither pre-checked, reported");
+  const method = await run({ files, cells: ['p = "private.csv"\nclass C:\n    p = "public.csv"\n    def m(self):\n        return open(p)\n'] });
+  eq(method.paths, ["/private.csv"], "a method doesn't see the class body's p: the module's (control)");
+  // R2-3: a container that changes or is copied
+  const sub = await run({ files, cells: ['p = ["private.csv"]\np[0] = "public.csv"\nhandle(p)\n'] });
+  eq([sub.paths, said(sub, /a list, dict or set the code changes or copies/)], [[], true], "R2-3: p[0] = ...: the list's old constant isn't pre-checked, reported");
+  for (const [src, what] of [
+    ['d = {"k": "private.csv"}\nd["k"] = "public.csv"\nhandle(d)\n', "a dict's item replaced"],
+    ['d = {"k": "private.csv"}\ndel d["k"]\nhandle(d)\n', "a dict's item deleted"],
+    ['p = ["private.csv"]\np.clear()\nhandle(p)\n', "a mutating method"],
+    ['p = ["private.csv"]\nq = p\nq[0] = "public.csv"\nhandle(p)\n', "changed through an alias"],
+    ['p = ["private.csv"]\ndef f():\n    return p\nhandle(p)\n', "returned, so anyone may change it"],
+  ]) eq((await run({ files, cells: [src] })).paths, [], `R2-3: ${what}: not pre-checked`);
+  const plain = await run({ files, cells: ['fs = ["private.csv"]\nhandle(fs)\nt = ("public.csv",)\nu = t\nhandle(t)\n'] });
+  eq(plain.paths, ["/private.csv", "/public.csv"], "a list left alone, and a tuple even when copied (immutable), still count (control)");
+}
+
 // ---- the calling convention
 {
   const files = { "/a.py": "import b\n", "/b.py": "" };
