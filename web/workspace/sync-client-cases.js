@@ -2241,11 +2241,12 @@ async function t14Large() {
   }
 }
 
-/** The committed planning allowance for a stored ledger row, bytes (daybreak3's storage ruling r3 for #128, Oct 25):
- * A = max(960, 64 ceil(1.25 P / 64)), P the largest peak bytes a row at the global cap (the full-cap experiment at
- * ac860043: P = 303.4, so the floor).  A planning envelope, not a physical bound: a live-invariant measurement above it
- * reopens the decision. */
-const ROW_ALLOWANCE = 960;
+/** The committed planning allowance for a stored ledger row, bytes (daybreak3's storage ruling after the 996.2294
+ * observation, Oct 25): A = max(960, 64 ceil(1.25 M / 64)), M the largest comparable isolated live-invariant peak of
+ * this 10,000-row fixture: 996.2294 at 233aa3b3 (the predeclared ten-run series that followed peaked at 776.6629; 822
+ * at e074d3a1), so 1280.  A planning envelope for this canary, not a physical bound and not the full-cap P (303.4): a
+ * comparable measurement above it reopens the decision. */
+const ROW_ALLOWANCE = 1280;
 
 async function t14Figures() {
   // (LIMIT-PR128-1-R2: the widest row by construction (a refusal's code is ASCII [a-z0-9_], at most CODE.max); its
