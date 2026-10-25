@@ -27,7 +27,7 @@ The runner moves the interpreter somewhere with **no storage, no page and no net
    - the frame copies the bytes, a 4 MB chunk at a time, into a SharedArrayBuffer while the worker waits on `Atomics.wait`. Python's file reads are synchronous.
    - The worker still checks each file's SHA-256.
 5. **Relaying.** Other messages go page ↔ frame ↔ worker.
-6. **Stop.** The interrupt flag stays in the frame, which is cross-origin isolated (`allow="cross-origin-isolated"` and the site's COOP/COEP). The page asks for Stop by message. KeyboardInterrupt keeps the variables.
+6. **Stop.** The interrupt flag stays in the frame, which is cross-origin isolated (`allow="cross-origin-isolated"` and the site's COOP/COEP). The page asks for Stop by message. KeyboardInterrupt keeps the variables. The worker's shared progress slots (its `ready` message's `progress`) stay in the frame too: the frame forwards `ready` without them, since a SharedArrayBuffer can't cross to the page.
 
 **Not a secure context.** The worker in the opaque frame has no `crypto.subtle`, so it checks hashes with the synchronous SHA-256 in src/runtime/sha256.ts.
 
