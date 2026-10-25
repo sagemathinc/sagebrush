@@ -1,9 +1,12 @@
 {
  "v": 1,
- "reason": "F4 (plan r4 d5c6c1cd): GF(p) echelon admission by shape: the transport predicate, the seam between transport and result, and call_text in lib/_sage_ffmat.py and sagebrush._engine",
+ "reason": "F4 (plan r4 d5c6c1cd): GF(p) echelon admission by shape: the transport predicate, the seam between transport and result, and call_text in lib/_sage_ffmat.py and sagebrush._engine; engineCall's encodeInto path in engine.ts; nmod_ops.rs without ECH_MAX_ENTRIES (CI's fresh-wasm-e3199d58, run 40232804944; size-gate job 121294227828's exact figures)",
  "bytes": {
-  "cli/lib.gen.js": 1785,
-  "engine/lib/sage.pre": 8959,
-  "engine/lib/sage.src": 3167
+  "cli/lib.gen.js": 3445,
+  "cli/pyjs.cjs": 3466,
+  "engine/lib/sage.pre": 9285,
+  "engine/lib/sage.src": 3445,
+  "engine/sagebrush-worker.js": 110,
+  "engine/sagebrush-engine.wasm": 1920
  }
 }
