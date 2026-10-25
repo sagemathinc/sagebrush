@@ -9,6 +9,6 @@
   "engine/lib/sage.pre": 70168,
   "engine/lib/sage.src": 20941,
   "engine/sagebrush-engine.wasm": 9977,
-  "engine/sagebrush-worker.js": 1164
+  "engine/sagebrush-worker.js": 1244
  }
 }

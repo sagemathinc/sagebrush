@@ -148,9 +148,13 @@ function memoryShare(): [number, number] {
     return [typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= WASM_CEILING ? v : -1, ageMs];
   } catch (e) {
     // (a Ctrl-C seen by the collector's Python code consumed the flag: set
-    // it again, so the call it came before is interrupted, not this push)
+    // it again, so the call it came before is interrupted, not this push;
+    // notified, as every producer of Ctrl-C is, so a time.sleep wakes: #135)
     try {
-      if (Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt)) Atomics.or(INTR, 0, 1);
+      if (Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt)) {
+        Atomics.or(INTR, 0, 1);
+        Atomics.notify(INTR, 0);
+      }
     } catch {}
     return [-1, 0];
   }
