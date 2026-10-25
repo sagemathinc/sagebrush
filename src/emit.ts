@@ -528,6 +528,13 @@ export class Emitter {
     // is evaluated as for any call of a method in pyjs; looking it up before
     // S, CPython's order, made a bound method per call and cost a near-no-op
     // writer 15 times its time)
+    // (WAIVER, approved by William on 2026-10-25 at 1:20 PM PDT, "Accept
+    // this one documented exception": a declined site whose open is a user
+    // function returning a near-no-op writer, in a tight loop, costs 1.114
+    // times the same code without the site (7 rounds of best-of-5, VM1;
+    // 15.75 against 14.22 ns a call, 1.53 ns more), over the 1.01 gate;
+    // every other gate passes.  /scratch/sagebrush-reviews/fv-gates-r3-vm1/
+    // g6-nosite.json)
     const call = this.site("siteCall", "write", 1);
     const [to, tf, tm, th, tobj, tv] = [this.temp(), this.temp(), this.temp(), this.temp(), this.temp(), this.temp()];
     const eo = this.ex(x.o);
