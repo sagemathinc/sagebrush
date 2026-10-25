@@ -15,11 +15,14 @@ is the one validator for all of them, and the one state:
                                  returns it; later calls return the same
                                  object, and propose then raises RuntimeError
 
-Importing this module has no side effect and locks nothing.  The finite-field
-core (_sage_ffsub, _sage_ff) calls finalize() at its import and reads its
-budgets from the snapshot; the engine hosts (CLI, browser worker) finalize at
-runtime startup, before the first user statement; the CPython package at the
-first layer use.  sys._sagebrush_limits is the finalized snapshot.
+Importing this module has no side effect and locks nothing, unless the host
+locked the defaults at startup (sys._sagebrush_limits_lock, below).  The
+finite-field core (_sage_ffsub, _sage_ff) calls finalize() at its import and
+reads its budgets from the snapshot; the engine hosts (CLI, browser worker)
+finalize at runtime startup, before the first user statement (given no
+limits, the Node hosts only set that lock, and this module finalizes at its
+first import); the CPython package at the first layer use.
+sys._sagebrush_limits is the finalized snapshot.
 
 Every key defaults to unlimited (William, Oct 24: no default work, time or
 input-size limit on a user's own computation; interrupting is the control).
@@ -308,3 +311,10 @@ def finalize():
 def finalized():
     """Whether the limits are locked."""
     return _final is not None
+
+
+# A host that was given no limits locks the defaults at startup without
+# importing this module (src/limits.ts lockDefaults): they lock here, at its
+# first import, before anything can propose.
+if getattr(_sys, "_sagebrush_limits_lock", False):
+    finalize()
