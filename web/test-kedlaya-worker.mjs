@@ -206,9 +206,10 @@ try {
     ok(r.out === "v8 browser v8\n5^-1 + O(5^4)\n", `Chromium's worker: V8 on a browser host, the V8 table, and a value (${JSON.stringify(r)})`);
   }
 
-  // (stage 4 at p = 2003: at p = 1013 the reduction can end, on a fast
-  // runner, before progress's next 250 ms write shows done > 0)
-  for (const [what, p, prec, stage] of [["setup: Q^p", 4001, 2, 1], ["series", 5, 400, 3], ["reduce dx/y", 2003, 1, 4], ["check: setup Q^p", 1013, 1, 6]]) {
+  // (stages 4 and 6 at p = 2003: at p = 1013 either can end, on a fast
+  // runner, before progress's next 250 ms write shows done > 0; stage 6 did
+  // in CI web-browser (notebook), job 121261851557)
+  for (const [what, p, prec, stage] of [["setup: Q^p", 4001, 2, 1], ["series", 5, 400, 3], ["reduce dx/y", 2003, 1, 4], ["check: setup Q^p", 2003, 1, 6]]) {
     const code = override + [
       "import time",
       "from sagebrush import progress",
