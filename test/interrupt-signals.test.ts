@@ -62,5 +62,5 @@ console.log(JSON.stringify(rows.map((r) => [r.trial, r.outcome])));`;
   const p = spawnSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8", env: { ...process.env, SB_LAUNCHER: fake } });
   rmSync(fake, { force: true });
   assert.equal(p.status, 0, p.stderr);
-  assert.deepEqual(JSON.parse(p.stdout.trim().split("\n").at(-1)), [["Y", "PENDING-READY"], ["N", "PENDING"], ["E", "PENDING"]]);
+  assert.deepEqual(JSON.parse(p.stdout.trim().split("\n").at(-1) ?? "null"), [["Y", "PENDING-READY"], ["N", "PENDING"], ["E", "PENDING"]]);
 });
