@@ -408,15 +408,17 @@ def swap_for_link(s, h, files):
 
 def cleanup_then(s, out, files, name):
     """s.cleanup(), then: every file outside the store as it was, and only
-    then any error the cleanup raised (it is a failure too)."""
-    err = None
+    then any error the cleanup raised (it is a failure too); cleanup's
+    list of removed handles."""
+    err, removed = None, None
     try:
-        s.cleanup()
+        removed = s.cleanup()
     except Exception as e:
         err = e
     lost = sorted(n for n, data in files.items() if not (os.path.exists(os.path.join(out, n)) and open(os.path.join(out, n), "rb").read() == data))
     assert not lost, "%s: outside the store, removed or changed: %s" % (name, " ".join(lost))
     assert err is None, (name, err)
+    return removed
 
 
 def t10a_linked_recovery():
@@ -467,7 +469,10 @@ def t10c_linked_remove():
     h3 = run_dir(s3)
     files3 = {"run.json": json.dumps({"handle": h3, "state": "finished", "ended_at": time.time() - 400 * 86400}).encode(), "output.txt": b"P" * 100}
     out3, _ = swap_for_link(s3, h3, files3)
-    cleanup_then(s3, out3, files3, "T10c")
+    removed = cleanup_then(s3, out3, files3, "T10c")
+    # (nothing was removed, so cleanup reports nothing: astra2's C5 case,
+    # a linked run counted as removed though _remove refused it)
+    assert h3 not in removed and removed == [], ("T10c: reported as removed", removed)
     print("T10c: ok")
 
 
@@ -534,6 +539,43 @@ def t12b_reservations_link():
     print("T12b: ok")
 
 
+def t12c_reservations_dir_link():
+    """T12c (astra2 RESOURCE-PR136-R2-1, daybreak2 PR136-ACCOUNT-2): a
+    record-shaped link in reservations/ to a directory outside the store:
+    charged once, as the link (unreadable), never descended into, and the
+    admission boundary exact."""
+    root = fresh_root()
+    s = store(root)
+    base = s.walk_total()
+    out = tempfile.mkdtemp(prefix="sb-out-")
+    open(os.path.join(out, "big"), "wb").write(b"d" * (2 * R.MiB))
+    link = os.path.join(root, "reservations", "linked-dir.json")
+    os.symlink(out, link)
+    real = R._charge
+    charges = []
+    # (a link's charge, nonzero even where the filesystem gives a link no
+    # block, so a second charge shows; every charge of it counted)
+    def charge(p):
+        if os.path.normpath(os.path.abspath(p)) == link:
+            charges.append(p)
+            return 4096
+        return real(p)
+    R._charge = charge
+    try:
+        s.cleanup()
+        charges.clear()
+        got = s.walk_total()
+        assert len(charges) == 1, ("T12c: the link charged %d times" % len(charges), charges)
+        want = base + 4096
+        assert got == want, ("T12c", got, want)
+        assert s.used() == want, ("T12c used", s.used(), want)
+        admits_one_block(s, want, "T12c")
+    finally:
+        R._charge = real
+    assert os.path.islink(link) and os.path.exists(os.path.join(out, "big")), "T12c: removed"
+    print("T12c: ok")
+
+
 if __name__ == "__main__":
     t1_two_stores()
     t2_process()
@@ -549,4 +591,5 @@ if __name__ == "__main__":
     t11_reservations_dir_files()
     t12a_reservations_subdir()
     t12b_reservations_link()
+    t12c_reservations_dir_link()
     print("test_runs_sweep: ok")
