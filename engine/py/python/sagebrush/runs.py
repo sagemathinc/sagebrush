@@ -381,9 +381,13 @@ class Store:
         # PR136-ACCOUNT-1; reservations/ too, its records once, above, and
         # any other file in it at its size, astra2 RESOURCE-PR136-1)
         for dirpath, dirnames, filenames in os.walk(self.root):
+            # (a link to a directory: charged once, as the entry, by the same
+            # rules as a file; one in reservations/ is a record already
+            # charged above, astra2 RESOURCE-PR136-R2-1)
             for name in dirnames:
-                if os.path.islink(os.path.join(dirpath, name)):
-                    total += _charge(os.path.join(dirpath, name))
+                k = _key(os.path.join(dirpath, name))
+                if os.path.islink(k) and k not in records and k not in excluded:
+                    total += _charge(k)
             for name in filenames:
                 k = _key(os.path.join(dirpath, name))
                 if k in records or k in excluded:
