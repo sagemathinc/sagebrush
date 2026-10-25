@@ -84,12 +84,24 @@ export type Msg =
   | { t: "reset"; ns: string; epoch: number; gen: number }
   | { t: "holder"; ns: string; epoch: number; gen: number; rev: number }
   | { t: "seeded"; ns: string; epoch: number; rev: number }
+  | { t: "reread"; ns: string; epoch: number; rev: number }
   | { t: "lifecycle"; ns: string; fromEpoch: number; toEpoch: number; kind: "off" | "switch" }
   | { t: "hello"; ns: string; epoch: number; nonce: string }
   | { t: "inflight"; ns: string; epoch: number; gen: number; nonce: string; seqs: number[] };
 
 export class Hub {
-  private subs = new Set<(m: Msg) => void>();
+  private subs = new Set<(m: Msg, stale: boolean) => void>();
+  /** the highest sender generation seen per (namespace, epoch): one fence for every wait of this Workspace's database
+   * (CORR-PR128-2), raised by every message that carries a generation and by each wait's durable read */
+  private gens = new Map<string, number>();
+  /** `gen` noted for (ns, epoch); returns whether it is older than one already seen (stale) */
+  fence(ns: string, epoch: number, gen: number): boolean {
+    const k = ns + "\u0000" + epoch, max = this.gens.get(k) ?? 0;
+    if (gen > max) this.gens.set(k, gen);
+    return gen < max;
+  }
+  /** the highest generation seen for (ns, epoch) */
+  seen(ns: string, epoch: number): number { return this.gens.get(ns + "\u0000" + epoch) ?? 0; }
   private ch: BroadcastChannel | null = null;
   /** this page's sender's in-flight seqs (the rows each record in flight owns), if this page is the sender */
   inflight: { ns: string; epoch: number; gen: number; seqs: Set<number> } | null = null;
@@ -99,7 +111,7 @@ export class Hub {
       this.ch.onmessage = (ev) => this.deliver(ev.data as Msg);
     }
   }
-  on(f: (m: Msg) => void): () => void {
+  on(f: (m: Msg, stale: boolean) => void): () => void {
     this.subs.add(f);
     return () => this.subs.delete(f);
   }
@@ -115,7 +127,9 @@ export class Hub {
       const f = this.inflight;
       queueMicrotask(() => this.post({ t: "inflight", ns: f.ns, epoch: f.epoch, gen: f.gen, nonce: m.nonce, seqs: [...f.seqs] }));
     }
-    for (const f of this.subs) try { f(m); } catch (e) { console.warn("sync ledger:", e); }
+    // (the generation fence, once per message, before any wait sees it)
+    const stale = "gen" in m && typeof m.gen === "number" && "epoch" in m ? this.fence(m.ns, m.epoch as number, m.gen) : false;
+    for (const f of this.subs) try { f(m, stale); } catch (e) { console.warn("sync ledger:", e); }
   }
   // (the sender's side)
   sent(ns: string, epoch: number, gen: number, seqs: number[]) {
@@ -247,11 +261,17 @@ export async function noteSkip(meta: IDBObjectStore, ns: string, from: number, t
     meta.put(Math.max((await metaGet<number>(meta, keys.floor)) ?? 0, old[1]), keys.floor);
   }
   meta.put(list, keys.skips);
+  // (waits already reading these seqs told to read again once this commits: a skip or a floor changes answers that
+  // no row event carries (CORR-PR128-3))
+  const rev = ((await metaGet<number>(meta, keys.rev)) ?? 0) + 1;
+  meta.put(rev, keys.rev);
+  const epoch = (await metaGet<number>(meta, "sync:epoch")) ?? 0, db = meta.transaction.db;
+  meta.transaction.addEventListener("complete", () => hubOf(db).post({ t: "reread", ns, epoch, rev }));
 }
 
 // ---- reading: one page's view, and a seq's class
 
-export type View = { ns: string; epoch: number; off: boolean; seeded: boolean; floor: number; from: number; scanned: number; skips: Skip[]; rev: number };
+export type View = { ns: string; epoch: number; gen: number; off: boolean; seeded: boolean; floor: number; from: number; scanned: number; skips: Skip[]; rev: number };
 async function viewOf(meta: IDBObjectStore, ns?: string): Promise<View | null> {
   const cur = await metaGet<{ ns: string; gen: number; off?: boolean }>(meta, "sync:current");
   const epoch = (await metaGet<number>(meta, "sync:epoch")) ?? 0;
@@ -259,7 +279,7 @@ async function viewOf(meta: IDBObjectStore, ns?: string): Promise<View | null> {
   if (!n) return null;
   const keys = ledgerKeys(n);
   return {
-    ns: n, epoch, off: !cur || !!cur.off || cur.ns !== n,
+    ns: n, epoch, gen: cur?.gen ?? 0, off: !cur || !!cur.off || cur.ns !== n,
     seeded: (await metaGet(meta, keys.seeded)) !== undefined,
     floor: (await metaGet<number>(meta, keys.floor)) ?? 0,
     from: (await metaGet<number>(meta, keys.from)) ?? 0,
@@ -287,15 +307,21 @@ const needsOp = (seq: number, v: View) => seq > v.floor && (seq > v.scanned || v
 
 // ---- syncState
 
+/** The caller's seqs, validated, as a copy taken now (before anything is awaited): what the caller does with its
+ * array afterwards changes nothing here (CORR-PR128-5). */
 function checkSeqs(seqs: unknown, max: number): number[] {
-  if (!Array.isArray(seqs) || seqs.length === 0) throw new WorkspaceError("invalid", "seqs is a non-empty list of op seqs");
-  if (seqs.length > max) throw Object.assign(new WorkspaceError("limit", `at most ${max} seqs at once`), { max });
-  const seen = new Set<number>();
-  for (const s of seqs) {
+  if (!Array.isArray(seqs)) throw new WorkspaceError("invalid", "seqs is a non-empty list of op seqs");
+  const n = seqs.length;
+  if (n === 0) throw new WorkspaceError("invalid", "seqs is a non-empty list of op seqs");
+  if (n > max) throw Object.assign(new WorkspaceError("limit", `at most ${max} seqs at once`), { max });
+  const copy: number[] = new Array(n), seen = new Set<number>();
+  for (let i = 0; i < n; i++) {
+    const s = seqs[i];
     if (!Number.isSafeInteger(s) || (s as number) < 1 || seen.has(s as number)) throw new WorkspaceError("invalid", "seqs are distinct positive safe integers");
     seen.add(s as number);
+    copy[i] = s as number;
   }
-  return seqs as number[];
+  return copy;
 }
 
 /** Where each of `seqs` (at most STATE.max) is, in one transaction: none/sync-off with sync off; busy ("seeding")
@@ -413,7 +439,7 @@ function endEpoch(x: Waiter, reason: "sync-off" | "switched") {
 export async function waitSync(w: Workspace, seqs: number[], opts: { level?: SyncLevel; signal: AbortSignal; timeoutMs?: number }): Promise<WaitResult> {
   const list = checkSeqs(seqs, WAIT.seqs);
   const level = opts?.level ?? "accepted";
-  if (!(level in LEVEL)) throw new WorkspaceError("invalid", "level is local, sent, accepted or confirmed");
+  if (typeof level !== "string" || !Object.prototype.hasOwnProperty.call(LEVEL, level)) throw new WorkspaceError("invalid", "level is local, sent, accepted or confirmed");
   const signal = opts?.signal;
   if (!signal || typeof (signal as AbortSignal).aborted !== "boolean" || typeof signal.addEventListener !== "function") throw new WorkspaceError("invalid", "waitSync needs an AbortSignal");
   const t = opts.timeoutMs;
@@ -428,6 +454,8 @@ export async function waitSync(w: Workspace, seqs: number[], opts: { level?: Syn
     const tx = w.ws.transaction("meta", "readonly");
     viewOf(tx.objectStore("meta")).then(ok, no);
   });
+  // (an abort while that was read: honoured now, with nothing registered (CORR-PR128-1))
+  if (signal.aborted) throw Object.assign(signal.reason instanceof Error ? signal.reason : new DOMException("aborted", "AbortError"), { counts: { local: list.length, sent: 0, accepted: 0, confirmed: 0, refused: 0, superseded: 0, none: 0 }, sync: "local" });
   if (!v0 || v0.off) {
     const counts: Counts = { local: 0, sent: 0, accepted: 0, confirmed: 0, refused: 0, superseded: 0, none: list.length };
     return { sync: "none", counts };
@@ -441,7 +469,7 @@ export async function waitSync(w: Workspace, seqs: number[], opts: { level?: Syn
     const x: Waiter = {
       ns: v0.ns, epoch: v0.epoch, level: LEVEL[level],
       seqs: sorted, st: new Uint8Array(sorted.length), counts: new Int32Array(9),
-      maxGen: 0, lastRev: v0.rev, nonce: Math.random().toString(36).slice(2), reading: false, again: false, ready: false, done: false,
+      maxGen: Math.max(hub.seen(v0.ns, v0.epoch), v0.gen), lastRev: v0.rev, nonce: Math.random().toString(36).slice(2), reading: false, again: false, ready: false, done: false,
       settle: (how, e) => {
         if (x.done) return;
         x.done = true;
@@ -456,16 +484,19 @@ export async function waitSync(w: Workspace, seqs: number[], opts: { level?: Syn
       },
     };
     set!.add(x);
+    // (the lease's generation noted in the shared fence: a sender older than it is stale for every wait)
+    hub.fence(x.ns, x.epoch, v0.gen);
     signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) return onAbort();
     if (t !== undefined) timer = setTimeout(() => x.settle("reject", Object.assign(new WorkspaceError("busy", "timed out"), { timeout: true })), t);
     // (subscribed before anything is read: nothing committed after the read can be missed)
-    unsub = hub.on((m) => onMsg(x, m, () => reread(w, x)));
+    unsub = hub.on((m, stale) => onMsg(x, m, stale, () => reread(w, x)));
     void reread(w, x);
     hub.post({ t: "hello", ns: x.ns, epoch: x.epoch, nonce: x.nonce });
   });
 }
 
-function onMsg(x: Waiter, m: Msg, again: () => void) {
+function onMsg(x: Waiter, m: Msg, stale: boolean, again: () => void) {
   if (x.done || m.ns !== x.ns) return;
   // (the lifecycle first, by type: the epoch it ends is the wait's)
   if (m.t === "lifecycle") {
@@ -486,7 +517,7 @@ function onMsg(x: Waiter, m: Msg, again: () => void) {
     case "sent":
     case "inflight": {
       if (m.t === "inflight" && m.nonce !== x.nonce) return;
-      if (m.gen < x.maxGen) return;
+      if (stale || m.gen < x.maxGen) return;
       if (m.gen > x.maxGen) {
         x.maxGen = m.gen;
         clearSent(x);
@@ -498,7 +529,7 @@ function onMsg(x: Waiter, m: Msg, again: () => void) {
       break;
     }
     case "reset":
-      if (m.gen < x.maxGen) return;
+      if (stale || m.gen < x.maxGen) return;
       x.maxGen = m.gen;
       clearSent(x);
       break;
@@ -510,6 +541,10 @@ function onMsg(x: Waiter, m: Msg, again: () => void) {
       if (m.rev > x.lastRev) again();
       break;
     case "seeded":
+      again();
+      break;
+    case "reread":
+      x.lastRev = Math.max(x.lastRev, m.rev);
       again();
       break;
   }
