@@ -129,10 +129,11 @@ test("engineCall: an ASCII request makes no copy outside wasm memory; a non-ASCI
     assert.equal(encodes, 1, "the non-ASCII request took the encoder path");
     console.log(`engineCall 1024 x 1024 (${ascii.length} bytes): external growth ${asciiExternal} (ASCII), ${otherExternal} (non-ASCII)`);
     assert.ok(asciiExternal <= 1 << 20, `ASCII: external grew by ${asciiExternal}`);
-    // (the encoder's copy is the request's UTF-8, about ascii.length bytes;
-    // external memory is accounted with a few bytes' jitter, so the test
-    // asks for the copy, at least half of it, against at most 1 MiB above)
-    assert.ok(otherExternal >= ascii.length / 2, `non-ASCII: external grew by ${otherExternal} (the copy unseen?)`);
+    // (the encoder's copy is the request's UTF-8, ascii.length + 5 bytes;
+    // process.memoryUsage().external moves by a few bytes besides (CI saw
+    // 20971623 for a 20971642-byte request, a local run 20971647), so the
+    // copy is asked within 64 KiB of its size: 300x the ASCII bound above)
+    assert.ok(otherExternal >= ascii.length - 65536, `non-ASCII: external grew by ${otherExternal}, less than the ${ascii.length}-byte copy less 64 KiB (the copy unseen?)`);
   } finally {
     TextEncoder.prototype.encode = encode;
   }
