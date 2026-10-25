@@ -10,7 +10,7 @@ import { join } from "node:path";
 const mod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 
 function run(js: string): any {
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, classifyXK, xkRowOutcome, rowOutcome, againstBaseline, leakCheck, cliffOf, browserLeak, browserFailure } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, classifyXK, xkRowOutcome, rowOutcome, againstBaseline, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -180,4 +180,13 @@ test("a Stop that could not be sent: the cell is INVALID with its error kept, an
   const b = `{ entries: [{ case: "P2a", host: "cli", signature: "did not stop" }] }`;
   assert.equal(run(`againstBaseline({ case: "P2a", host: "cli", outcome: "FAIL", trials: [{ outcome: "FAIL", why: "did not stop" }, { outcome: "INVALID", send_error: { error: "EPERM" } }] }, ${b})`), "FAIL");
   assert.equal(run(`rowOutcome([${t.replace(/^\{/, "{ outcome: \"INVALID\", ")}])`), "INCOMPLETE");
+});
+
+test("a calibration with no size in the band takes the attempt closest to it within [min, 1.5 max], else none (E2 on GitHub's runner)", () => {
+  const band = `{ min: 3000, max: 8000 }`;
+  // dispatch 40236353993: s = 22 8231 ms, s = 21 8615 ms, s = 20 372 ms: s = 22 is taken
+  assert.equal(run(`widenedPick([{ s: 22, T_ms: 8231 }, { s: 21, T_ms: 8615 }, { s: 20, T_ms: 372 }], ${band})`).s, 22);
+  // nothing within 1.5 max (12 s), or only below the band: still uncalibrated
+  assert.equal(run(`widenedPick([{ s: 22, T_ms: 13000 }, { s: 20, T_ms: 372 }], ${band})`), null);
+  assert.equal(run(`widenedPick([{ s: 20, T_ms: 2000 }, { s: 19, T_ms: null }], ${band})`), null);
 });

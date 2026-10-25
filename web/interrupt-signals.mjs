@@ -220,6 +220,16 @@ async function calibrateRegex(host, flags) {
   return pick() ?? { n: null, attempts };
 }
 
+// S6's judge: the signal was sent, and the launcher and its whole tree were gone within 2 s, with
+// nothing left for the harness's own kill
+export function judgeS6(r) {
+  if (r.end === "budget") return { outcome: "INVALID", why: "run budget spent" };
+  if (!r.sends.length) return { outcome: "INVALID", why: "no ENTER: the signal was never sent" };
+  if (r.sends[0].error) return { outcome: "INVALID", why: "the signal could not be sent: " + r.sends[0].error };
+  if (r.left.length) return { outcome: "FAIL", why: "processes survived: " + r.left.join(",") };
+  if (r.gone_ms == null) return { outcome: "FAIL", why: "the busy prompt outlived 2 s after the signal" };
+  return r.gone_ms <= 2000 ? { outcome: "PASS", gone_ms: r.gone_ms } : { outcome: "FAIL", why: `gone after ${r.gone_ms} ms`, gone_ms: r.gone_ms };
+}
 const runS6 = (host, flags, cell) => runProc({ host, flags, src: TRIALS.S6.src(), schedule: TRIALS.S6.schedule(cell), guard_ms: 15_000 });
 
 export async function runSignals({ hosts = ["cli"], mode = "ci", record = () => {}, overBudget = () => false, remainingMs = () => Infinity, baseline = { pending: [] }, flags = [], only = null } = {}) {
@@ -249,6 +259,21 @@ export async function runSignals({ hosts = ["cli"], mode = "ci", record = () => 
       rows.push({ trial: id, host, run: mode, outcome: fin, ...(fin !== outcome ? { own_outcome: outcome } : {}), cells, ...(t.needsRegex ? { regex_n: regex.n, regex_T_ms: Math.round(regex.T), ...(regex.label ? { regex_label: regex.label } : {}) } : {}) });
       record(rows.at(-1));
     }
+  }
+  // S6 (required since #123, master 90f7e0df; PENDING-READY on GitHub's runner, dispatch 40236353993):
+  // SIGHUP to a busy prompt's launcher, and its pty closed, each end the whole tree within 2 s
+  if (hosts.includes("prompt") && (!only || only.includes("S6"))) {
+    const cells = [];
+    for (const cell of TRIALS.S6.cells) {
+      for (let k = 1; k <= repeats; k++) {
+        if (overBudget()) { cells.push({ cell, i: k, outcome: "INVALID", why: "run budget spent" }); break; }
+        const r = await runS6("prompt", flags, cell);
+        cells.push({ cell, i: k, ...judgeS6(r) });
+      }
+    }
+    const outcome = cells.some((c) => c.outcome === "FAIL") ? "FAIL" : cells.some((c) => c.outcome !== "PASS") ? "INCOMPLETE" : "PASS";
+    rows.push({ trial: "S6", host: "prompt", run: mode, outcome, cells });
+    record(rows.at(-1));
   }
   if (!only || only.includes("pending")) rows.push(...(await pendingReady({ hosts, flags, baseline, record, rowsSoFar: rows })));
   return rows;
