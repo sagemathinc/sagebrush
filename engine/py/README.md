@@ -181,6 +181,12 @@ On macOS and Windows (and on Linux if the bound can't be set up), the
 process runs without an OS memory limit, with a warning saying so: a crash
 still stays in it.
 
+Where Sagebrush can't see this process's memory and works from
+`SAGEBRUSH_MEMORY_BYTES` alone, writing a PNG is refused with an error
+that says why: a PNG's bytes, once returned, can't be tracked until they
+are freed, so they can't be kept within that figure. Reading PNG files
+still works there, and SVG output is unaffected.
+
 `SAGEBRUSH_RASTER_ISOLATION` chooses how:
 
 - `contained` (the default): as above;

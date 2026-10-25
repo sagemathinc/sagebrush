@@ -2556,6 +2556,14 @@
   "class": "2",
   "owner": "raster/image I/O"
  },
+ "lib/_memledger.py :: Ledger.end_call :: cap = (self.standing.bytes if self.standing is not None else 0) + (engine.bytes if engine is not None else 0) #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "lib/_memledger.py :: Ledger.end_call :: standing = max(0, min(int(standing), cap)) #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
  "lib/_memledger.py :: Ledger.rebase :: (limit, rss) in bytes now. Returns the headroom F0' - held after #0": {
   "class": "2",
   "owner": "raster/image I/O"
@@ -2564,7 +2572,7 @@
   "class": "2",
   "owner": "raster/image I/O"
  },
- "lib/_memledger.py :: Ledger.rebase :: standing = limit - (rss if \"child\" in domains else 0) #0": {
+ "lib/_memledger.py :: Ledger.rebase :: standing = limit - self.child_rss #0": {
   "class": "2",
   "owner": "raster/image I/O"
  },

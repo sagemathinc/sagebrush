@@ -200,11 +200,21 @@ def footprint_bound(launcher, argv, env, path):
 _PAGE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
 
 
+def _small_read(path, n=512):
+    """A small /proc or cgroup file's first n bytes, read with one os.read
+    (no buffered file object: a call's bookkeeping allocates next to nothing,
+    _sbraster.BOOKKEEPING)."""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        return os.read(fd, n)
+    finally:
+        os.close(fd)
+
+
 def _statm(pid):
     """(VmSize, VmRSS) in bytes from /proc/PID/statm (one read), or None."""
     try:
-        with open("/proc/%d/statm" % pid, "rb") as f:
-            v = f.read().split()
+        v = _small_read("/proc/%d/statm" % pid).split()
         return int(v[0]) * _PAGE, int(v[1]) * _PAGE
     except (OSError, ValueError, IndexError):
         return None
@@ -296,11 +306,18 @@ def _set_nonblocking(fd):
 _spawner = None
 
 
-def _from_spawner(f):
+def _from_spawner(f, undo, discard):
     """f() run on the one thread that starts raster children, which lives
     as long as the process: the launcher's parent-death signal follows the
     thread that started the child (prctl(2)), so a child started by a
-    thread that then ends would be killed with it."""
+    thread that then ends would be killed with it.
+
+    The wait is interruptible (Ctrl-C, Stop), and whatever f's outcome,
+    exactly one side cleans it up: undo(result) for a child nobody will
+    take, discard() for the resources f was given when it never ran or
+    failed.  Interrupted before f runs: f never runs (discard here).
+    During f: the spawner thread undoes its result (or discards).  After
+    f, before the handoff: undone here."""
     global _spawner
     import threading
     if _spawner is None:
@@ -309,96 +326,199 @@ def _from_spawner(f):
 
         def loop():
             while True:
-                fn, box, done = q.get()
-                try:
-                    box.append((True, fn()))
-                except BaseException as e:  # (handed back to the caller)
-                    box.append((False, e))
-                done.set()
+                q.get()()
         threading.Thread(target=loop, name="sagebrush-raster-spawner", daemon=True).start()
         _spawner = q
-    box, done = [], threading.Event()
-    _spawner.put((f, box, done))
-    done.wait()
-    good, v = box[0]
+    lock, done = threading.Lock(), threading.Event()
+    task = {"state": "queued"}
+
+    def run():
+        with lock:
+            if task["state"] == "cancelled":
+                done.set()
+                return
+            task["state"] = "running"
+        try:
+            out = (True, f())
+        except BaseException as e:  # (handed back to the caller)
+            out = (False, e)
+        with lock:
+            if task["state"] == "cancelled":
+                # (the caller is gone: this thread cleans up)
+                try:
+                    undo(out[1]) if out[0] else discard()
+                finally:
+                    done.set()
+                return
+            task["state"], task["out"] = "done", out
+        done.set()
+    _spawner.put(run)
+    try:
+        while not done.wait(_WAKE):
+            pass
+    except BaseException:
+        with lock:
+            state = task["state"]
+            if state != "done":
+                task["state"] = "cancelled"
+        if state == "queued":
+            discard()
+        elif state == "done":
+            good, v = task["out"]
+            undo(v) if good else discard()
+        raise
+    good, v = task["out"]
     if good:
         return v
+    discard()
     raise v
 
 
-def spawn(limit, want):
-    """A raster child under `limit` bytes of address space (enforced when
-    the launcher can be used), or under none (contained).  want: the mode
-    asked for.  Raises SagebrushEngineError if it can't be started."""
-    import tempfile
-    ext = _ext_path()
+class Plan:
+    """How the next child starts: the launcher (None: contained), the bound
+    on its pre-limit footprint (r8 section 2.3: computed before admission,
+    for the longest argv this invocation can have), the program and its
+    environment."""
+
+    __slots__ = ("launcher", "bound", "prog", "env")
+
+    def __init__(self, launcher, bound, prog, env):
+        self.launcher, self.bound, self.prog, self.env = launcher, bound, prog, env
+
+
+def _launch_argv(launcher, limit, bound, prog):
+    return [launcher, str(limit), str(os.getpid()), "1", str(bound)] + prog
+
+
+def launch_plan(want):
+    """The plan for starting a child in the mode asked for, or the refusal
+    (want == "enforced" where no limit can be enforced), raised before
+    anything is created."""
+    # (the refusals first, before anything is looked up or made)
+    portable = sys.platform == "win32" or not hasattr(os, "posix_spawn")
+    launcher = None if portable else _launcher()
+    if want == "enforced" and portable:
+        raise SagebrushEngineError("SAGEBRUSH_RASTER_ISOLATION=enforced: Sagebrush can't enforce a memory bound on its PNG engine on this system")
+    if want == "enforced" and launcher is None:
+        raise SagebrushEngineError("SAGEBRUSH_RASTER_ISOLATION=enforced: Sagebrush can't enforce a memory bound on its PNG engine here (no launcher for this system)")
     env = {"LC_ALL": "C"}
     for k in ("SYSTEMROOT", "PATH"):  # (Windows needs SYSTEMROOT to start)
         if k in os.environ and sys.platform == "win32":
             env[k] = os.environ[k]
-    prog = [sys.executable, "-I", "-S", "-c", PRELUDE, ext]
-    err = tempfile.TemporaryFile()
-    launcher = _launcher()
-    if sys.platform == "win32" or not hasattr(os, "posix_spawn"):
-        if want == "enforced":
-            raise SagebrushEngineError("SAGEBRUSH_RASTER_ISOLATION=enforced: Sagebrush can't enforce a memory bound on its PNG engine on this system")
+    prog = [sys.executable, "-I", "-S", "-c", PRELUDE, _ext_path()]
+    if portable:
         _warn("this system has no memory limit Sagebrush can set for a process")
-        import subprocess
-        proc = subprocess.Popen(prog, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, env=env, bufsize=0)
-        wfd, rfd = os.dup(proc.stdin.fileno()), os.dup(proc.stdout.fileno())
-        proc.stdin.close()
-        proc.stdout.close()
-        return Child(proc.pid, wfd, rfd, err, False, proc)
-    r_in, w_in = os.pipe()
-    r_out, w_out = os.pipe()
-    actions = [(os.POSIX_SPAWN_DUP2, r_in, 0), (os.POSIX_SPAWN_DUP2, w_out, 1), (os.POSIX_SPAWN_DUP2, err.fileno(), 2)]
-    enforced = launcher is not None
-    if not enforced:
-        if want == "enforced":
-            raise SagebrushEngineError("SAGEBRUSH_RASTER_ISOLATION=enforced: Sagebrush can't enforce a memory bound on its PNG engine here (no launcher for this system)")
+        return Plan(None, 0, prog, env)
+    if launcher is None:
         _warn("no launcher for this system" if sys.platform.startswith("linux") else "this system enforces no address-space limit")
-        path, argv = sys.executable, prog
-    else:
-        bound = footprint_bound(launcher, [launcher, str(limit), str(os.getpid()), "1", "0"] + prog, env, launcher)
-        path, argv = launcher, [launcher, str(limit), str(os.getpid()), "1", str(bound)] + prog
-    try:
-        pid = _from_spawner(lambda: os.posix_spawn(path, argv, env, file_actions=actions))
-    except OSError as e:
-        for fd in (r_in, w_in, r_out, w_out):
-            os.close(fd)
-        if enforced and want == "enforced":
-            raise SagebrushEngineError("SAGEBRUSH_RASTER_ISOLATION=enforced: the PNG engine's launcher can't be run (%s)" % e) from None
-        if enforced:
-            # (the launcher can't run, a noexec mount: the contained mode)
-            _warn("its launcher can't be run: %s" % e)
-            return spawn_contained(prog, env, err)
-        raise SagebrushEngineError("Sagebrush could not start its PNG engine process (%s). Set "
-                                   "SAGEBRUSH_RASTER_ISOLATION=in-process to run it inside Python, without "
-                                   "protection against crashes and memory exhaustion." % e) from None
-    os.close(r_in)
-    os.close(w_out)
-    _set_nonblocking(w_in)
-    _set_nonblocking(r_out)
-    c = Child(pid, w_in, r_out, err, enforced)
-    c.limit = limit if enforced else None
-    return c
+        return Plan(None, 0, prog, env)
+    # (the limit's and the bound's own digits at their longest: the bound
+    # covers the argv the launch will have)
+    longest = "9" * 20
+    bound = footprint_bound(launcher, _launch_argv(launcher, longest, longest, prog), env, launcher)
+    return Plan(launcher, bound, prog, env)
 
 
-def spawn_contained(prog, env, err):
-    r_in, w_in = os.pipe()
-    r_out, w_out = os.pipe()
-    actions = [(os.POSIX_SPAWN_DUP2, r_in, 0), (os.POSIX_SPAWN_DUP2, w_out, 1), (os.POSIX_SPAWN_DUP2, err.fileno(), 2)]
+def contained(plan):
+    """The same start without the launcher."""
+    return Plan(None, 0, plan.prog, plan.env)
+
+
+def _threads():
+    """Whether the pipes are driven by blocking calls on helper threads
+    (Windows, whose select takes sockets only and has no readv; forced by
+    the tests elsewhere) rather than select and non-blocking calls."""
+    return sys.platform == "win32" or _FORCE_THREADS
+
+
+_FORCE_THREADS = False
+
+
+def spawn(limit, plan):
+    """A raster child under `limit` bytes of address space (enforced when
+    the plan has the launcher), or under none (contained).  Raises
+    SagebrushEngineError if it can't be started.  Every descriptor and file
+    made on the way is closed on every early return, error and
+    cancellation (CORR-157-3)."""
+    import tempfile
+    err = tempfile.TemporaryFile()
+    fds = []
+
+    def close_all():
+        while fds:
+            try:
+                os.close(fds.pop())
+            except OSError:
+                pass
     try:
-        pid = _from_spawner(lambda: os.posix_spawn(sys.executable, prog, env, file_actions=actions))
-    except OSError as e:
-        for fd in (r_in, w_in, r_out, w_out):
-            os.close(fd)
-        raise SagebrushEngineError("Sagebrush could not start its PNG engine process (%s)" % e) from None
-    os.close(r_in)
-    os.close(w_out)
-    _set_nonblocking(w_in)
-    _set_nonblocking(r_out)
-    return Child(pid, w_in, r_out, err, False)
+        if sys.platform == "win32" or not hasattr(os, "posix_spawn"):
+            import subprocess
+            proc = subprocess.Popen(plan.prog, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, env=plan.env, bufsize=0)
+            try:
+                wfd, rfd = os.dup(proc.stdin.fileno()), os.dup(proc.stdout.fileno())
+            except BaseException:
+                proc.kill()
+                proc.wait()
+                raise
+            finally:
+                proc.stdin.close()
+                proc.stdout.close()
+            return Child(proc.pid, wfd, rfd, err, False, proc)
+        r_in, w_in = os.pipe()
+        fds += [r_in, w_in]
+        r_out, w_out = os.pipe()
+        fds += [r_out, w_out]
+        actions = [(os.POSIX_SPAWN_DUP2, r_in, 0), (os.POSIX_SPAWN_DUP2, w_out, 1), (os.POSIX_SPAWN_DUP2, err.fileno(), 2)]
+        if plan.launcher is None:
+            path, argv = sys.executable, plan.prog
+        else:
+            path, argv = plan.launcher, _launch_argv(plan.launcher, limit, plan.bound, plan.prog)
+
+        def undo(pid):
+            # (a child nobody will take: killed, reaped, its pipes closed)
+            import signal
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+            try:
+                os.waitpid(pid, 0)
+            except (ChildProcessError, OSError):
+                pass
+            close_all()
+        mine = list(fds)
+        fds.clear()  # (from here, _from_spawner's: undo or discard closes them)
+        try:
+            pid = _from_spawner(lambda: os.posix_spawn(path, argv, plan.env, file_actions=actions),
+                                lambda pid: (fds.extend(mine), undo(pid)), lambda: (fds.extend(mine), close_all()))
+        except OSError as e:
+            if plan.launcher is not None and mode() == "enforced":
+                raise SagebrushEngineError("SAGEBRUSH_RASTER_ISOLATION=enforced: the PNG engine's launcher can't be run (%s)" % e) from None
+            if plan.launcher is not None:
+                # (the launcher can't run, a noexec mount: the contained mode)
+                _warn("its launcher can't be run: %s" % e)
+                err.close()
+                return spawn(limit, contained(plan))
+            raise SagebrushEngineError("Sagebrush could not start its PNG engine process (%s). Set "
+                                       "SAGEBRUSH_RASTER_ISOLATION=in-process to run it inside Python, without "
+                                       "protection against crashes and memory exhaustion." % e) from None
+        fds.extend(mine)
+        os.close(r_in)
+        os.close(w_out)
+        fds.clear()
+        if not _threads():
+            _set_nonblocking(w_in)
+            _set_nonblocking(r_out)
+        c = Child(pid, w_in, r_out, err, plan.launcher is not None)
+        c.limit = limit if plan.launcher is not None else None
+        return c
+    except BaseException:
+        close_all()
+        try:
+            err.close()
+        except OSError:
+            pass
+        raise
 
 
 # ------------------------------------------------------------ I/O
@@ -412,9 +532,63 @@ def _select(rl, wl):
     return select.select(rl, wl, [], _WAKE)
 
 
+def _blocking(child, fn):
+    """fn() run on a helper thread while this one waits in wakes of _WAKE,
+    seeing Ctrl-C (which propagates: the caller kills the child, which ends
+    fn's blocking call) and the child's exit.  fn's exception is raised
+    here."""
+    import threading
+    out = []
+
+    def run():
+        try:
+            out.append((True, fn()))
+        except BaseException as e:
+            out.append((False, e))
+    t = threading.Thread(target=run, name="sagebrush-raster-io", daemon=True)
+    t.start()
+    while True:
+        t.join(_WAKE)
+        if not t.is_alive():
+            break
+    good, v = out[0]
+    if good:
+        return v
+    raise v
+
+
+def _write_blocking(child, parts):
+    for part in parts:
+        view = memoryview(part).cast("B")
+        while len(view):
+            try:
+                n = os.write(child.wfd, view)
+            except (BrokenPipeError, OSError) as e:
+                if isinstance(e, BrokenPipeError) or getattr(e, "errno", None) in (22, 32):  # (EINVAL: Windows' broken pipe)
+                    raise _Exited() from None
+                raise
+            view = view[n:]
+
+
+def _read_blocking(child, buf):
+    import io
+    f = io.FileIO(child.rfd, "rb", closefd=False)
+    view = memoryview(buf).cast("B")
+    while len(view):
+        try:
+            n = f.readinto(view)
+        except OSError:
+            raise _Exited() from None
+        if not n:
+            raise _Exited()
+        view = view[n:]
+
+
 def write_all(child, parts):
     """The parts written in order, partially as the pipe allows, waking to
     see Ctrl-C (which propagates) and the child's exit."""
+    if _threads():
+        return _blocking(child, lambda: _write_blocking(child, parts))
     for part in parts:
         view = memoryview(part).cast("B")
         while len(view):
@@ -434,6 +608,8 @@ def write_all(child, parts):
 
 def read_into(child, buf):
     """buf filled from the child's output (partial reads, as they come)."""
+    if _threads():
+        return _blocking(child, lambda: _read_blocking(child, buf))
     view = memoryview(buf).cast("B")
     while len(view):
         r, _, _ = _select([child.rfd], [])
@@ -491,10 +667,9 @@ def _oom_kills():
             _events = ("/sys/fs/cgroup" + rel[0] + "/memory.events") if rel else ""
         if not _events:
             return None
-        with open(_events) as f:
-            for line in f:
-                if line.startswith("oom_kill "):
-                    return int(line.split()[1])
+        for line in _small_read(_events, 1024).split(b"\n"):
+            if line.startswith(b"oom_kill "):
+                return int(line.split()[1])
     except (OSError, ValueError, IndexError):
         pass
     return None

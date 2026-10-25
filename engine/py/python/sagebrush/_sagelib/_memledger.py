@@ -31,8 +31,19 @@ A call:
    the memory observed once more (the caller does that, without the ledger
    lock), and with nothing left to reap the ledger is overdrawn and refuses;
 3. reserves its host buffers exactly, then is granted all that remains;
-4. ends: the grant refunded, the engine's standing charge recomputed, the
-   outputs made resident records.
+4. ends, in one step under the ledger lock (end_call), before the call lock
+   is released: the active grant replaced by the engine's new standing
+   charge, the outputs handed to the caller made resident records out of
+   the host reservation, and the rest refunded.
+
+The invariant, held <= F0 while admitting (and no active charge while
+overdrawn), is checked after every change (_check).
+
+A resident record with an owner (an object CPython can reference weakly:
+the bytearray holding a decode's values, the str of a render's missing
+characters) is released by the owner's finalizer, whether or not an
+observation covers its domain; one without is absorbed only by an
+observation that covers its domain.
 """
 
 import sys as _sys
@@ -110,6 +121,7 @@ class Ledger:
         self.last = None         # the last observation (metadata only)
         self.gen = 0             # observations made (metadata only)
         self.standing = None     # the engine process's record, if any
+        self.child_rss = 0       # the engine process's resident bytes, as the last re-base read them
 
     # ------------------------------------------------------------ records
 
@@ -126,6 +138,15 @@ class Ledger:
         if r.state == LIVE:
             r.state = state
             self.records.remove(r)
+
+    def _check(self):
+        """The invariant (r8 section 2.1), after every change: while
+        admitting, held <= F0; while overdrawn, no active charge."""
+        if self.f0 is not None:
+            if self.held() > self.f0:
+                raise RuntimeError("the PNG ledger holds %d bytes, more than F0 = %d (a Sagebrush bug)" % (self.held(), self.f0))
+        elif any(r.kind in ("host", "engine") for r in self.records):
+            raise RuntimeError("the PNG ledger has an active charge without an admission figure (a Sagebrush bug)")
 
     def _sweep(self):
         """Each finalized record accounted once, by its own state: a live
@@ -183,10 +204,12 @@ class Ledger:
                 raise mg.SagebrushMemoryError(UNKNOWN, "A PNG", 0, 0, "PNG work")
             domains = set(rec.get("domains") or ())
             standing = None
+            self.child_rss = 0
             if self.standing is not None:
                 if child is not None:
                     limit, rss = child()
-                    standing = limit - (rss if "child" in domains else 0)
+                    self.child_rss = rss if "child" in domains else 0
+                    standing = limit - self.child_rss
                 else:
                     standing = self.standing.bytes
             survivors = (standing if standing is not None else 0) + sum(
@@ -198,6 +221,7 @@ class Ledger:
                     self.standing.bytes = max(0, standing)
                 self.f0 = f
                 self.overdrawn = False
+                self._check()
                 return f - self.held()
             if self.standing is not None:
                 self.f0 = None
@@ -219,7 +243,9 @@ class Ledger:
             room = self.room()
             if nbytes > room:
                 raise _memguard().memory_guard("A PNG", nbytes, max(0, room), "PNG work")
-            return self._new(kind, domain, nbytes)
+            r = self._new(kind, domain, nbytes)
+            self._check()
+            return r
         finally:
             lock.release()
 
@@ -231,7 +257,9 @@ class Ledger:
         lock = self._lock
         lock.acquire()
         try:
-            return self._new("engine", domain, self.room())
+            r = self._new("engine", domain, self.room())
+            self._check()
+            return r
         finally:
             lock.release()
 
@@ -255,27 +283,76 @@ class Ledger:
                 self.standing = None
             if nbytes is not None:
                 self.standing = self._new("standing", domain, nbytes)
+            # (a standing charge past F0: nothing more admitted until a
+            # re-base, which reaps the process)
+            if self.f0 is not None and self.held() > self.f0:
+                self.f0, self.overdrawn = None, True
+            self._check()
         finally:
             lock.release()
 
+    def _resident(self, nbytes, domain, owner):
+        r = self._new("resident", domain, nbytes)
+        if owner is not None:
+            import weakref
+            # (the finalizer only flags the record, which never references
+            # the owner; an owner that can't be referenced weakly is the
+            # caller's error: TypeError)
+            weakref.finalize(owner, _mark, r)
+            self._watched.append(r)
+        return r
+
     def resident(self, nbytes, domain, owner=None):
         """A resident charge (an output), absorbed by the next observation
-        covering its domain; with owner, released when owner is collected
-        (its finalizer only flags the record, which never references it)."""
+        covering its domain; with owner, released when owner is collected."""
         lock = self._lock
         lock.acquire()
         try:
-            r = self._new("resident", domain, nbytes)
+            r = self._resident(nbytes, domain, owner)
+            if self.f0 is not None and self.held() > self.f0:
+                self.f0, self.overdrawn = None, True
+            self._check()
+            return r
         finally:
             lock.release()
-        if owner is not None:
-            try:
-                import weakref
-                weakref.finalize(owner, _mark, r)
-                self._watched.append(r)
-            except (ImportError, TypeError):
-                pass  # (no weak references: the observation absorbs it)
-        return r
+
+    KEEP = object()
+
+    def end_call(self, host, engine, standing=KEEP, outputs=()):
+        """A call's end, in one step (r8 section 2.1, step 6): the engine's
+        grant (engine, or None) replaced by its standing charge (bytes; None:
+        the process was reaped; KEEP: unchanged), at most the standing record
+        it had plus the grant (more is the contained mode's unenforced use,
+        not charged past what was admitted); each output, (bytes, domain,
+        owner), made a resident record out of the host reservation; the host
+        reservation's rest refunded.  Nothing outside sees a state between.
+        Outputs past what was reserved leave the ledger overdrawn (the host
+        formula short: a Sagebrush bug, refused until a re-base covers it).
+        Returns the resident records."""
+        lock = self._lock
+        lock.acquire()
+        try:
+            self._sweep()
+            if standing is not Ledger.KEEP:
+                if standing is not None:
+                    cap = (self.standing.bytes if self.standing is not None else 0) + (engine.bytes if engine is not None else 0)
+                    standing = max(0, min(int(standing), cap))
+                if self.standing is not None:
+                    self._drop(self.standing, RELEASED)
+                    self.standing = None
+                if standing is not None:
+                    self.standing = self._new("standing", "child", standing)
+            if engine is not None:
+                self._drop(engine, RELEASED)
+            if host is not None:
+                self._drop(host, RELEASED)
+            out = [self._resident(n, d, o) for n, d, o in outputs]
+            if self.f0 is not None and self.held() > self.f0:
+                self.f0, self.overdrawn = None, True
+            self._check()
+            return out
+        finally:
+            lock.release()
 
 
 _ledger = None

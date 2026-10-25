@@ -199,6 +199,105 @@ def test_reservations_past_the_room_are_refused():
     assert led.grant("child").bytes == 0
 
 
+# ---- #157 r2: the call's end as one step (astra2's CORR-157-2, daybreak2's LIMIT-PNG-A2-1/2)
+
+def exact(free, domains=ALL):
+    """A ledger whose F0 is exactly `free` (no reserve)."""
+    def cap():
+        return {"bytes": free, "basis": [], "unknown_parts": [], "observed_at": 0, "reserve_bytes": 0,
+                "domains": [] if free is None else list(domains)}
+    return _memledger.Ledger(capacity=cap, environ={})
+
+
+def test_the_calls_end_replaces_the_grant_with_standing_in_one_step():
+    # astra2's replay: F0 = 1000, host 100, engine 900; a new standing charge
+    # of 200 installed while the grant and the host were still live gave held
+    # = 1200 > F0.  end_call replaces the grant, carves out the outputs and
+    # refunds the rest in one step: held never passes F0
+    led = exact(1000)
+    assert led.rebase() == 1000
+    h = led.reserve("host", "cpython-heap", 100)
+    e = led.grant("child")
+    assert (h.bytes, e.bytes, led.held()) == (100, 900, 1000)
+    out = led.end_call(h, e, 200, [(60, "cpython-heap", None)])
+    assert led.held() == 260 <= led.f0 == 1000, led.records
+    assert led.standing.bytes == 200 and [r.bytes for r in out] == [60]
+    assert not any(r.kind in ("host", "engine") for r in led.records)
+    # (a standing charge is never more than the standing it replaced plus the
+    # grant: the contained mode's unenforced use isn't charged past what was
+    # admitted)
+    assert led.rebase() == 1000 - 200
+    h = led.reserve("host", "cpython-heap", 0)
+    e = led.grant("child")
+    led.end_call(h, e, 1 << 40)
+    assert led.standing.bytes == 200 + e.bytes == 1000 and led.held() == 1000
+
+
+def test_outputs_past_the_host_reservation_leave_the_ledger_overdrawn_not_past_f0():
+    led = exact(1000)
+    led.rebase()
+    h = led.reserve("host", "cpython-heap", 100)
+    e = led.grant("child")
+    # (the host formula short by a byte: a Sagebrush bug, never held > F0 published)
+    led.end_call(h, e, None, [(1001, "cpython-heap", None)])
+    assert led.f0 is None and led.overdrawn and led.room() == 0
+    # (covered by the next observation: admitting again)
+    assert led.rebase() == 1000
+
+
+def test_the_invariant_is_checked_at_every_change():
+    led = exact(1000)
+    led.rebase()
+    h = led.reserve("host", "cpython-heap", 400)
+    # (a state past F0, a grant counted twice say, is caught at the next
+    # change, as a Sagebrush bug)
+    bad = _memledger.Record(999, "engine", "child", 700)
+    led.records.append(bad)
+    try:
+        led.reserve("host", "cpython-heap", 0)
+        raise AssertionError("not checked")
+    except RuntimeError as e:
+        assert "more than F0" in str(e)
+    led.records.remove(bad)
+    led.end_call(h, None, None)
+    assert led.held() == 0, led.records
+
+
+def test_an_unobservable_outputs_charge_follows_its_buffer_through_aliases():
+    # (CORR-157-6, as both reviewers settled it: with D0 blind and the
+    # override, a decode's values stay charged while any view of their buffer
+    # lives, the finalizer being on the buffer; then released, and the next
+    # call admitted.  A render's bytes can't be followed: _sbraster refuses
+    # them there, test_raster_child.py)
+    import numpy as np
+
+    class Buf(bytearray):
+        __slots__ = ("__weakref__",)
+    led = _memledger.Ledger(capacity=lambda: obs(None), environ={"SAGEBRUSH_MEMORY_BYTES": "1000"})
+    assert led.rebase() == 1000
+    h = led.reserve("host", "cpython-heap", 300)
+    e = led.grant("child")
+    buf = Buf(16 + 4 * 6)
+    arr = np.frombuffer(buf, dtype=np.float32, offset=16)
+    led.end_call(h, e, None, [(200, "cpython-heap", buf), (100, "cpython-heap", arr)])
+    del buf
+    view = arr.reshape((2, 3))
+    del arr
+    gc.collect()
+    # (the name is gone, but the view holds the array and its buffer: both
+    # charges stay)
+    assert led.rebase() == 1000 - 300, led.records
+    mv = memoryview(view)
+    del view
+    gc.collect()
+    assert led.rebase() == 1000 - 300, "a memoryview of the view keeps them, and their charges"
+    del mv
+    gc.collect()
+    assert led.rebase() == 1000 and led.held() == 0
+    h = led.reserve("host", "cpython-heap", 1000)
+    led.end_call(h, None, None)
+
+
 if __name__ == "__main__":
     for n in [n for n in list(globals()) if n.startswith("test_")]:
         globals()[n]()
