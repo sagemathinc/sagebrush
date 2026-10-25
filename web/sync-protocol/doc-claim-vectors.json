@@ -29,13 +29,15 @@
       ]
     },
     {
-      "name": "a lost fence answer: resent with the same target, the same terminal answer; a client never claimed is absent",
+      "name": "a lost fence answer: resent with the same target, the same terminal answer; a client never claimed is absent; a target above 2^32 - 1 is invalid and changes nothing",
       "steps": [
         { "from": "a", "send": { "t": "doc_claim", "client": "c1" }, "expect": { "t": "ack" } },
         { "from": "a", "send": { "t": "batch", "epoch": 1, "fgen": { "c1": 0 }, "patches": [{ "n": 1, "client": "c1", "cseq": 1 }] }, "expect": { "t": "ack", "batch": { "seq": 1 } } },
         { "control": "drop", "t": "doc_fence" },
         { "from": "a", "send": { "t": "doc_fence", "clients": [{ "client": "c1", "target": 1 }] }, "expect": { "none": true } },
-        { "from": "a", "send": { "t": "doc_fence", "clients": [{ "client": "c1", "target": 1 }, { "client": "c9", "target": 1 }] }, "expect": { "t": "ack", "fence": { "clients": [{ "client": "c1", "fgen": 1, "next_cseq": 2 }, { "client": "c9", "absent": true }] } } }
+        { "from": "a", "send": { "t": "doc_fence", "clients": [{ "client": "c1", "target": 1 }, { "client": "c9", "target": 1 }] }, "expect": { "t": "ack", "fence": { "clients": [{ "client": "c1", "fgen": 1, "next_cseq": 2 }, { "client": "c9", "absent": true }] } } },
+        { "from": "a", "send": { "t": "doc_fence", "clients": [{ "client": "c1", "target": 4294967296 }] }, "expect": { "t": "error", "code": "invalid" } },
+        { "from": "a", "send": { "t": "doc_fence", "clients": [{ "client": "c1", "target": 1 }] }, "expect": { "t": "ack", "fence": { "clients": [{ "client": "c1", "fgen": 1, "next_cseq": 2 }] } } }
       ]
     },
     {
@@ -61,13 +63,15 @@
       ]
     },
     {
-      "name": "clear: the root bootstraps its client's new-epoch row; other clients are claimed again; a resent clear answers the same",
+      "name": "clear: the root bootstraps its client's new-epoch row; other clients are claimed again; a resent clear answers the same only if it is that root, from its writer",
       "steps": [
         { "from": "a", "send": { "t": "doc_claim", "client": "c1" }, "expect": { "t": "ack" } },
         { "from": "a", "send": { "t": "doc_claim", "client": "c2" }, "expect": { "t": "ack" } },
         { "from": "a", "send": { "t": "batch", "epoch": 1, "fgen": { "c1": 0, "c2": 0 }, "patches": [{ "n": 1, "client": "c1", "cseq": 1 }, { "n": 2, "client": "c2", "cseq": 1 }] }, "expect": { "t": "ack", "batch": { "seq": 1 } } },
         { "from": "a", "send": { "t": "clear", "expect_head": { "epoch": 1, "seq": 1 }, "fgen": { "c1": 0 }, "root": [{ "n": 3, "client": "c1", "cseq": 2 }] }, "expect": { "t": "ack", "batch": { "seq": 2, "new": 1, "head": { "epoch": 2, "seq": 2 } } } },
         { "from": "a", "send": { "t": "clear", "expect_head": { "epoch": 1, "seq": 1 }, "fgen": { "c1": 0 }, "root": [{ "n": 3, "client": "c1", "cseq": 2 }] }, "expect": { "t": "ack", "batch": { "seq": 2, "new": 0, "head": { "epoch": 2, "seq": 2 } } } },
+        { "from": "a", "send": { "t": "clear", "expect_head": { "epoch": 1, "seq": 1 }, "fgen": { "c1": 0 }, "root": [{ "n": 3, "client": "c1", "cseq": 7 }] }, "expect": { "t": "error", "code": "conflict" } },
+        { "from": "b", "send": { "t": "clear", "expect_head": { "epoch": 1, "seq": 1 }, "fgen": { "c1": 0 }, "root": [{ "n": 3, "client": "c1", "cseq": 2 }] }, "expect": { "t": "error", "code": "forbidden" } },
         { "from": "a", "send": { "t": "batch", "epoch": 2, "fgen": { "c2": 0 }, "patches": [{ "n": 4, "client": "c2", "cseq": 2 }] }, "expect": { "t": "error", "code": "unknown_client" } },
         { "from": "a", "send": { "t": "batch", "epoch": 2, "fgen": { "c1": 0 }, "patches": [{ "n": 5, "client": "c1", "cseq": 3, "parents": [[3, "c1"]] }] }, "expect": { "t": "ack", "batch": { "seq": 3, "new": 1 } } }
       ]

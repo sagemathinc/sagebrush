@@ -22,7 +22,7 @@
 //   bun web/sync-protocol/test-reference-server.mjs
 
 import {
-  LIMITS, PERSON_ONLY, SyncError, VERSION, accountHash, checkBatch, checkHead, checkOp, clientOf, fields, has, isDevice,
+  LIMITS, PERSON_ONLY, SyncError, VERSION, accountHash, checkBatch, checkHead, checkOp, clientOf, enc, fields, has, isDevice,
   isDocId, isHash, isNat, isSha, parseMessage, sha256Hex, toB64, type Batch, type Env, type Head, type Op,
 } from "./protocol.ts";
 import { batchHash, chainNext, chainSeed, checkDocClaim, checkDocFence, checkFgen, checkUpto, hex } from "./doc-protocol.ts";
@@ -35,6 +35,7 @@ const MAX_PUT = 95 * 2 ** 20;
 const UNUSED_CLAIMS = 16;
 
 type Json = Record<string, unknown>;
+const J = JSON.stringify;
 
 interface Session { account: string; expires: number }
 interface Client { writer: string; next_cseq: number; last_id: string; fgen: number; claimed_at: number }
@@ -111,6 +112,8 @@ export class RefSocket {
 
 export class ReferenceServer {
   private accounts = new Map<string, Account>();
+  /** an account being made: concurrent first accesses wait for the same one (CORR-173-4) */
+  private making = new Map<string, Promise<Account>>();
   private sessions = new Map<string, Session>();
   private holds = new Map<string, { wait: Promise<void>; release: () => void }>();
   private fakes = new Map<string, Fake[]>();
@@ -167,13 +170,20 @@ export class ReferenceServer {
     if (!m || !s || s.expires <= this.now()) return null;
     return { token: m[1], account: s.account };
   }
-  private async accountOf(id: string): Promise<Account> {
-    let a = this.accounts.get(id);
-    if (!a) {
-      a = { id, hash: await accountHash(id), state: "off", generation: 0, ops: [], devices: new Map(), blobs: new Map(), docs: new Map(), sockets: new Set() };
-      this.accounts.set(id, a);
+  private accountOf(id: string): Promise<Account> {
+    const a = this.accounts.get(id);
+    if (a) return Promise.resolve(a);
+    let p = this.making.get(id);
+    if (!p) {
+      p = accountHash(id).then((hash) => {
+        const made: Account = { id, hash, state: "off", generation: 0, ops: [], devices: new Map(), blobs: new Map(), docs: new Map(), sockets: new Set() };
+        this.accounts.set(id, made);
+        this.making.delete(id);
+        return made;
+      });
+      this.making.set(id, p);
     }
-    return a;
+    return p;
   }
 
   // ---- HTTP (design/sync-server.md §5.1, §5.4)
@@ -245,12 +255,16 @@ export class ReferenceServer {
     const g = p.match(/^\/api\/sync\/v1\/blob\/([0-9a-f]{64})$/);
     if (g && m === "PUT") {
       if (a.state !== "active") return err(409, a.state === "deleting" ? "deleting" : "readonly");
+      // (admitted for this generation: rechecked after the body's await, so a PUT paused across a deletion and a
+      // re-enable can't land in the next generation, CORR-173-3)
+      const gen = a.generation;
       const len = Number(req.headers.get("content-length"));
       if (!Number.isSafeInteger(len) || len < 0) return err(411, "length required");
       if (len > MAX_PUT) return err(413, "limit", { limit: "put_bytes", max: MAX_PUT });
       const bytes = new Uint8Array(await req.arrayBuffer());
       if (bytes.length !== len) return err(400, "invalid", { message: "the body isn't its Content-Length" });
       if ((await sha256Hex(bytes)) !== g[1]) return err(400, "invalid", { message: "the bytes don't have this sha256" });
+      if (a.state !== "active" || a.generation !== gen) return err(409, "conflict", { reason: "generation", message: "this account's sync changed while the bytes came" });
       a.blobs.set(g[1], bytes);
       return json({ sha256: g[1], size: bytes.length });
     }
@@ -280,7 +294,9 @@ export class ReferenceServer {
     try {
       const m = parseMessage(raw);
       req = m.req;
-      if (!this.sessions.has(ws.session)) { ws.deliver({ t: "revoked" }); return ws.close(4401, "session ended"); }
+      // (the session on every message: ended or expired, the socket is told and closed, nothing is done: CORR-173-5)
+      const sess = this.sessions.get(ws.session);
+      if (!sess || sess.expires <= this.now()) { ws.deliver({ t: "revoked" }); return ws.close(4401, "session ended"); }
       if (ws.inflight >= LIMITS.inflight) throw new SyncError("busy", "too many requests unanswered");
       ws.inflight++;
       try {
@@ -445,7 +461,8 @@ export class ReferenceServer {
     const ops: IndexOp[] = [];
     let bytes = 0;
     for (const r of rows.slice(0, LIMITS.indexPage)) {
-      const n = JSON.stringify(r).length;
+      // (UTF-8 bytes, as the protocol's limits are: a path's characters can be 3 bytes each)
+      const n = enc.encode(JSON.stringify(r)).length;
       if (ops.length > 0 && bytes + n > LIMITS.indexPageBytes) return { ops, more: true };
       bytes += n;
       ops.push(r);
@@ -505,15 +522,18 @@ export class ReferenceServer {
     if (b.epoch !== d.epoch) throw new SyncError("epoch", "this document's history was cleared", { epoch: d.epoch, head: { epoch: d.epoch, seq: d.head } });
     if (b.kind && d.kind && b.kind !== d.kind) throw new SyncError("invalid", "this document is another kind");
     // (the forward, held by a test between its checks and its commit: then decided again, as the real object decides in one transaction)
-    this.select(d, writer, b, fgen);
+    this.select(a, d, writer, b, fgen);
     const hold = this.holds.get(`${b.doc}:${clientOf(b.patches[0].id)}`) ?? this.holds.get(`${b.doc}:*`);
     if (hold) {
       this.holds.delete(`${b.doc}:${clientOf(b.patches[0].id)}`);
       this.holds.delete(`${b.doc}:*`);
       await hold.wait;
+      // (after the await: the same account generation and the same document, or nothing commits: CORR-173-3's audit)
+      this.admit(a);
+      if (a.docs.get(b.doc) !== d) throw new SyncError("conflict", "this account's sync changed while the batch waited", { reason: "generation" });
       if (b.epoch !== d.epoch) throw new SyncError("epoch", "this document's history was cleared", { epoch: d.epoch, head: { epoch: d.epoch, seq: d.head } });
     }
-    const sel = this.select(d, writer, b, fgen);
+    const sel = this.select(a, d, writer, b, fgen);
     if (sel.fresh.length === 0) return { new: 0, resent: sel.resent, head: this.headOf(d) };
     if (b.expect_head && (b.expect_head.epoch !== d.epoch || b.expect_head.seq !== d.head)) throw new SyncError("conflict", "the document moved on", { head: this.headOf(d) });
     if (b.kind && !d.kind) d.kind = b.kind;
@@ -526,9 +546,10 @@ export class ReferenceServer {
    * clients: claimed (unknown_client), bound to this writer (forbidden), in
    * order (order), a resend exactly the patch stored (conflict), and the new
    * ones under the client's current fgen (fenced; a resend under an older one
-   * is still answered with its original seq).  Changes nothing.
+   * is still answered with its original seq), their blobs held (missing).
+   * Changes nothing.
    */
-  private select(d: Doc, writer: string, b: Batch, fgen: Map<string, number>) {
+  private select(a: Account, d: Doc, writer: string, b: Batch, fgen: Map<string, number>) {
     const seen = new Map<string, { next: number; last?: Env; fresh: number; lastId: string }>();
     const accepted = new Set<string>(), resent: Record<string, number> = {};
     const fresh: { env: Env; start: number }[] = [];
@@ -558,6 +579,8 @@ export class ReferenceServer {
       const g = fgen.get(client)!;
       if (g < row.fgen) throw new SyncError("fenced", "this client was fenced: send under its new fgen", { client, fgen: row.fgen, next_cseq: row.next_cseq });
       if (g > row.fgen) throw new SyncError("invalid", "an fgen the server never gave", { client, fgen: row.fgen });
+      // (every blob a new patch names is held before it can be stored, §4.3: CORR-173-2)
+      for (const sha of env.blobs ?? []) if (!a.blobs.has(sha)) throw new SyncError("missing", "upload the patch's blob first", { sha256: sha });
       accepted.add(env.id);
       c.fresh++;
       fresh.push({ env, start });
@@ -633,10 +656,16 @@ export class ReferenceServer {
     if (!d) throw new SyncError("unknown_doc", "no such document");
     if (root.patches.length !== 1 || root.patches[0].parents.length !== 0) throw new SyncError("invalid", "the root is one patch, with no parents");
     const env = root.patches[0], client = clientOf(env.id);
-    // (a resend after a lost answer: the root is already this epoch's first batch)
+    // (a resend after a lost answer: the root is already this epoch's first batch.  It must be that root exactly, its
+    // id, cseq, shape and writer, or it's refused and nothing changes (CORR-173-1); its fgen isn't asked again, as an
+    // accepted patch's resend isn't)
     if (expect.epoch === d.epoch - 1) {
-      const first = d.batches[0];
-      if (first && (JSON.parse(first.envs) as Env[])[0]?.id === env.id) return { seq: first.seq, new: 0, resent: { [env.id]: first.seq }, head: this.headOf(d) };
+      const first = d.batches[0], stored = first ? (JSON.parse(first.envs) as Env[])[0] : undefined;
+      if (first && stored && stored.id === env.id) {
+        if (first.writer !== writer) throw new SyncError("forbidden", "this patchflow client belongs to another writer");
+        if (stored.cseq !== env.cseq || J(stored.parents) !== J(env.parents) || stored.size !== env.size) throw new SyncError("conflict", "this root was stored with another cseq or shape", { client, cseq: stored.cseq });
+        return { seq: first.seq, new: 0, resent: { [env.id]: first.seq }, head: this.headOf(d) };
+      }
     }
     if (expect.epoch !== d.epoch || expect.seq !== d.head) throw new SyncError("conflict", "the document moved on", { head: this.headOf(d) });
     const c = d.clients.get(client);
@@ -645,6 +674,7 @@ export class ReferenceServer {
     if (fgen.get(client)! < c.fgen) throw new SyncError("fenced", "this client was fenced: send under its new fgen", { client, fgen: c.fgen, next_cseq: c.next_cseq });
     if (fgen.get(client)! > c.fgen) throw new SyncError("invalid", "an fgen the server never gave", { client, fgen: c.fgen });
     if (env.cseq !== c.next_cseq || !(env.id > c.last_id)) throw new SyncError("order", "the root is its client's next patch", { client, next_cseq: c.next_cseq });
+    for (const sha of env.blobs ?? []) if (!a.blobs.has(sha)) throw new SyncError("missing", "upload the root's blob first", { sha256: sha });
     d.epoch++;
     d.batches = [];
     d.ranges = new Map();

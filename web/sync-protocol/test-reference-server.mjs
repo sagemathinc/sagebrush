@@ -295,6 +295,137 @@ const C1 = "clientA1", C2 = "clientB1";
   check(st.state === "off" && en.generation === 2, "after the deletion: off; enabled again, generation 2: " + J({ st, en }));
 }
 
+  // ---- #173's review: one regression for each finding (astra's CORR-173-1..5, daybreak3's UTF-8 page bytes)
+
+  {
+  // (their own account: the suite's first one was revoked and deleted above)
+  const A = await signedIn(server, "acct-r");
+  await A.call("POST", "/api/sync/v1/enable");
+  const a = await socket(server, A, "devR0001"), b = await socket(server, A, "devR0002");
+  {
+    // CORR-173-1: a resent clear is the stored root exactly; a changed cseq or another writer is refused, nothing changes
+    const D2 = "0123456789cd";
+    await a.ask({ t: "doc_claim", doc: D2, client: "rc1" });
+    await a.ask(batch(D2, 1, { rc1: 0 }, [{ cseq: 1, id: pid(1, "rc1") }]));
+    const root = patches([{ cseq: 2, id: pid(2, "rc1") }]);
+    const cl = await a.ask({ t: "clear", doc: D2, expect_head: { epoch: 1, seq: 1 }, root, fgen: { rc1: 0 } });
+    const before = J(server.controls.doc(A.account, D2)), clientsBefore = J(server.controls.clients(A.account, D2));
+    const changed = await a.ask({ t: "clear", doc: D2, expect_head: { epoch: 1, seq: 1 }, root: patches([{ cseq: 99, id: pid(2, "rc1") }]), fgen: { rc1: 0 } });
+    check(changed.code === "conflict", "CORR-173-1: a resent clear with the root's id and another cseq: conflict: " + J(changed));
+    const foreignRetry = await b.ask({ t: "clear", doc: D2, expect_head: { epoch: 1, seq: 1 }, root, fgen: { rc1: 0 } });
+    check(foreignRetry.code === "forbidden", "CORR-173-1: the same root resent by another writer: forbidden: " + J(foreignRetry));
+    check(J(server.controls.doc(A.account, D2)) === before && J(server.controls.clients(A.account, D2)) === clientsBefore, "CORR-173-1: …head, batches and clients unchanged");
+    // (the accepted resend still answers after a later fence: its old fgen isn't asked again)
+    await a.ask({ t: "doc_fence", doc: D2, clients: [{ client: "rc1", target: 1 }] });
+    const exact = await a.ask({ t: "clear", doc: D2, expect_head: { epoch: 1, seq: 1 }, root, fgen: { rc1: 0 } });
+    check(exact.batch?.seq === cl.batch.seq && exact.batch.new === 0, "CORR-173-1: the exact root resent, after a fence: the same answer: " + J(exact));
+  }
+  {
+    // CORR-173-2: a new patch's blobs must be held; refused whole (missing) with nothing changed, accepted once uploaded
+    const D3 = "0123456789ef";
+    const bytes = new TextEncoder().encode("a patch's blob"), sha = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+    await a.ask({ t: "doc_claim", doc: D3, client: "bc1" });
+    await a.ask(batch(D3, 1, { bc1: 0 }, [{ cseq: 1, id: pid(1, "bc1") }]));
+    const withBlob = (list) => {
+      const m = batch(D3, 1, { bc1: 0 }, list);
+      m.patches = m.patches.map((e, i) => (list[i].blob ? { ...e, blobs: [sha] } : e));
+      return m;
+    };
+    const head0 = J(server.controls.doc(A.account, D3)), cl0 = J(server.controls.clients(A.account, D3));
+    const miss = await a.ask(withBlob([{ cseq: 1, id: pid(1, "bc1") }, { cseq: 2, id: pid(2, "bc1"), parents: [pid(1, "bc1")], blob: true }]));
+    check(miss.code === "missing" && miss.detail.sha256 === sha, "CORR-173-2: an accepted + new batch whose new patch names a blob not held: missing, whole: " + J(miss));
+    check(J(server.controls.doc(A.account, D3)) === head0 && J(server.controls.clients(A.account, D3)) === cl0, "CORR-173-2: …head and clients unchanged");
+    const resendOnly = await a.ask(withBlob([{ cseq: 1, id: pid(1, "bc1") }]));
+    check(resendOnly.batch?.new === 0 && resendOnly.batch.resent[pid(1, "bc1")] === 1, "CORR-173-2: the accepted patch alone still answered with its seq");
+    await A.call("PUT", "/api/sync/v1/blob/" + sha, bytes, { "content-length": String(bytes.length) });
+    const ok = await a.ask(withBlob([{ cseq: 1, id: pid(1, "bc1") }, { cseq: 2, id: pid(2, "bc1"), parents: [pid(1, "bc1")], blob: true }]));
+    check(ok.batch?.new === 1 && ok.batch.seq === 2, "CORR-173-2: after the upload, the same batch is stored: " + J(ok));
+    const rootMiss = await a.ask({ t: "clear", doc: D3, expect_head: { epoch: 1, seq: 2 }, root: (() => { const r = patches([{ cseq: 3, id: pid(3, "bc1") }]); r.patches[0].blobs = ["e".repeat(64)]; return r; })(), fgen: { bc1: 0 } });
+    check(rootMiss.code === "missing", "CORR-173-2: a clear root naming a blob not held: missing");
+  }
+  }
+  {
+    // CORR-173-3: a PUT bound to generation 1, its body paused across a delete and a re-enable, doesn't land in generation 2
+    const P = await signedIn(server, "acct-put");
+    await P.call("POST", "/api/sync/v1/enable");
+    const bytes = new TextEncoder().encode("late bytes"), sha = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+    let push;
+    const body = new ReadableStream({ start(c) { push = () => { c.enqueue(bytes); c.close(); }; } });
+    const put = server.fetch(new Request("https://ref.test/api/sync/v1/blob/" + sha, { method: "PUT", body, duplex: "half", headers: { cookie: P.cookie, "content-length": String(bytes.length), "x-sync-generation": "1" } }));
+    await sleep(20);
+    await P.call("POST", "/api/sync/v1/delete", { confirm: "delete", generation: 1 });
+    const en = await (await P.call("POST", "/api/sync/v1/enable")).json();
+    push();
+    const r = await put;
+    check(en.generation === 2 && r.status === 409 && (await r.json()).reason === "generation", "CORR-173-3: the paused PUT, completed in generation 2: 409, reason generation");
+    const chk = await (await P.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ sha256: sha, size: bytes.length }] })).json();
+    check(J(chk.missing) === J([sha]), "CORR-173-3: …and generation 2 doesn't hold the bytes");
+    // (the held forward's audit: a batch held across a delete and a re-enable doesn't commit into the new generation)
+    const Q = await signedIn(server, "acct-held");
+    await Q.call("POST", "/api/sync/v1/enable");
+    const q = await socket(server, Q, "devQ0001");
+    await q.ask({ t: "doc_claim", doc: DOC, client: "hq1" });
+    const release = server.controls.holdForward(DOC, "hq1");
+    const req = q.tell(batch(DOC, 1, { hq1: 0 }, [{ cseq: 1, id: pid(1, "hq1") }]));
+    await sleep(20);
+    await Q.call("POST", "/api/sync/v1/delete", { confirm: "delete", generation: 1 });
+    await Q.call("POST", "/api/sync/v1/enable");
+    release();
+    await sleep(30);
+    // (what this can show: the new generation holds nothing of it.  The socket is closed by the delete, so its answer is never
+    // seen either way; the server's recheck after the hold is defensive, and its mutation is listed as equivalent)
+    check(server.controls.doc("acct-held", DOC) === null, "CORR-173-3: a forward held across a delete and a re-enable leaves nothing in the new generation");
+  }
+  {
+    // CORR-173-4: concurrent first accesses share one account (a socket made while enable runs sees it active)
+    const C = await signedIn(server, "acct-concurrent");
+    const [sock] = await Promise.all([server.connect(C.cookie), C.call("POST", "/api/sync/v1/enable")]);
+    const got = [];
+    sock.onmessage = (t) => got.push(JSON.parse(t));
+    sock.send(J({ t: "hello", v: 1, device: "devC0001", name: "c", index_after: 0 }));
+    await sleep(30);
+    check(got[0]?.t === "welcome" && got[0].state === "active" && got[0].generation === 1, "CORR-173-4: the socket made concurrently with enable says hello to the one, active account: " + J(got[0]));
+    const other = await socket(server, C, "devC0002");
+    sock.send(J({ t: "ops", req: 1, ops: [{ dseq: 1, t: Date.now(), by: "person", op: "mkdir", path: "/c", kind: "folder" }] }));
+    const n = await other.next((m) => m.t === "index_changed");
+    check(n.head === 1, "CORR-173-4: …and the other socket of the same account sees its op");
+  }
+  {
+    // CORR-173-5: a socket whose session has expired can't write; told revoked, closed 4401, the log unchanged
+    const E = { account: "acct-expiry" };
+    E.cookie = `${SESSION_COOKIE}=${server.signIn("acct-expiry")}`;
+    E.call = (method, path, body) => server.fetch(new Request("https://ref.test" + path, { method, headers: { cookie: E.cookie, "content-type": "application/json" }, body: body === undefined ? undefined : J(body) }));
+    await E.call("POST", "/api/sync/v1/enable");
+    const e = await socket(server, E, "devE0001");
+    server.controls.setNow(Date.now() + 25 * 3600_000);
+    const req = e.tell({ t: "ops", ops: [{ dseq: 1, t: Date.now(), by: "person", op: "mkdir", path: "/late", kind: "folder" }] });
+    const rv = await e.next((m) => m.t === "revoked");
+    await sleep(10);
+    server.controls.setNow(null);
+    const fresh = await signedIn(server, "acct-expiry");
+    const f = await socket(server, fresh, "devE0002");
+    const idx = await f.ask({ t: "pull_index", after: 0 });
+    check(rv && e.closed() === 4401 && !e.got.some((m) => m.req === req) && idx.ops.length === 0, "CORR-173-5: an expired session's socket: revoked, 4401, no answer, the log unchanged: " + J(idx.ops));
+  }
+  {
+    // daybreak3: the index page's 1 MiB is UTF-8 bytes; 500 ops of 3-byte paths page there, and pull_index returns the rest
+    const U = await signedIn(server, "acct-utf8");
+    await U.call("POST", "/api/sync/v1/enable");
+    const u = await socket(server, U, "devU0001");
+    const seg = "中".repeat(250);
+    const ops = Array.from({ length: 500 }, (_, i) => ({ dseq: i + 1, t: Date.now(), by: "person", op: "mkdir", path: `/${seg}/${seg}/${seg}/d${String(i).padStart(4, "0")}`, kind: "folder" }));
+    const utf16 = ops.reduce((n, o) => n + J(o).length, 0);
+    for (let i = 0; i < 500; i += 250) {
+      const r = await u.ask({ t: "ops", ops: ops.slice(i, i + 250) });
+      check(r.ops?.length === 250 && r.ops.every((x) => typeof x.seq === "number"), "UTF-8 pages: 250 ops accepted");
+    }
+    const p1 = await u.ask({ t: "pull_index", after: 0 });
+    const bytes1 = p1.ops.reduce((n, o) => n + new TextEncoder().encode(J(o)).length, 0);
+    check(utf16 < (1 << 20) && p1.more === true && p1.ops.length < 500 && bytes1 <= (1 << 20), `UTF-8 pages: the first page stops at 1 MiB of UTF-8 (${p1.ops.length} ops, ${bytes1} bytes; the 500 are ${utf16} UTF-16 units)`);
+    const p2 = await u.ask({ t: "pull_index", after: p1.ops[p1.ops.length - 1].seq });
+    check(p1.ops.length + p2.ops.length === 500 && p2.more === false && p2.ops[0].seq === p1.ops[p1.ops.length - 1].seq + 1, `UTF-8 pages: pull_index returns the rest (${p2.ops.length})`);
+  }
+
   // ---- the shared claim and fence vectors (doc-claim-vectors.json), each on a fresh account
 
   const V = JSON.parse(readFileSync(new URL("./doc-claim-vectors.json", import.meta.url), "utf8"));
