@@ -2431,11 +2431,15 @@ export const arrayHooks: { cls: any; get: any; set: any } = { cls: null, get: nu
 export const bufferHooks: ((x: any) => Uint8Array | undefined)[] = [];
 // The bytes of a bytes-like object as a view where it has one (a
 // contiguous memoryview's, not a copy of them), else as bufferOf: for a
-// reader that reads them once and keeps nothing (int()).
-export const bufferViewHooks: ((x: any) => Uint8Array | undefined)[] = [];
+// reader that reads them once and keeps nothing (int()).  A hook's null:
+// an object whose bytes have no such view (a non-contiguous or released
+// memoryview), not bytes-like for this reader, never copied (CPython's
+// int() refuses it too, daybreak2 PR134-MEM-1).
+export const bufferViewHooks: ((x: any) => Uint8Array | null | undefined)[] = [];
 export function bufferViewOf(x: any): Uint8Array | undefined {
   for (const h of bufferViewHooks) {
     const r = h(x);
+    if (r === null) return undefined;
     if (r !== undefined) return r;
   }
   return bufferOf(x);

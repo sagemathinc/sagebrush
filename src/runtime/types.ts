@@ -1323,10 +1323,13 @@ const POLL = 65536;
 function scanInt(t: IntText, base: number): IntScan {
   const n = t.length, given = base;
   const r: IntScan = { ok: false, neg: false, base, digits: 0, start: 0, end: 0, plain: true, single: false, double: false };
-  let polled = 0;
-  const poll = (i: number) => {
-    if (i - polled >= POLL) {
-      polled = i;
+  // (Stop tested every POLL characters inspected, counted across all the
+  // passes, leading, trailing and body: never by a position, which the
+  // trailing pass counts from the other end, daybreak2 PR134-INTR-1)
+  let work = 0;
+  const poll = () => {
+    if (++work >= POLL) {
+      work = 0;
       O.pollInterrupt();
     }
   };
@@ -1339,7 +1342,7 @@ function scanInt(t: IntText, base: number): IntScan {
   const fail = (i: number): IntScan => {
     if (typeof t !== "string") return r;
     for (; i < n; i++) {
-      poll(i);
+      poll();
       const c = typeof t === "string" ? t.charCodeAt(i) : t[i];
       quote(c);
     }
@@ -1348,13 +1351,13 @@ function scanInt(t: IntText, base: number): IntScan {
   // the trimmed bounds: ASCII whitespace, and what maps to a space
   let lo = 0, hi = n;
   while (lo < hi) {
-    poll(lo);
+    poll();
     const [c, w] = mappedAt(t, lo);
     if (!isSpace(c)) break;
     lo += w;
   }
   while (hi > lo) {
-    poll(n - hi);
+    poll();
     const last = typeof t === "string" && hi - 2 >= lo && t.charCodeAt(hi - 1) >= 0xdc00 && t.charCodeAt(hi - 1) <= 0xdfff && t.charCodeAt(hi - 2) >= 0xd800 && t.charCodeAt(hi - 2) <= 0xdbff ? hi - 2 : hi - 1;
     const [c] = mappedAt(t, last);
     if (!isSpace(c)) break;
@@ -1392,7 +1395,7 @@ function scanInt(t: IntText, base: number): IntScan {
   // the body: [0-9a-zA-Z]+(_[0-9a-zA-Z]+)*, each a digit of the base
   let prevUnderscore = true, allZero = true, any = false;
   for (; i < hi; ) {
-    poll(i);
+    poll();
     [c, w] = mappedAt(t, i);
     quote(c);
     if (c === 95) {

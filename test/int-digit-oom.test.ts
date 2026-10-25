@@ -73,3 +73,83 @@ test("Stop during int()'s scan of a long literal: KeyboardInterrupt from the sca
   await w.terminate();
   assert.equal(done, "KeyboardInterrupt");
 });
+
+// (a worker with int() under a probe: ops' pollInterrupt counted where the
+// scan calls it, and memoryview's bytes() copy counted; `after`: Ctrl-C set
+// right after that many of the scan's polls)
+function probe(setup: string, expr: string, after = -1): Promise<{ done: string; scanPolls: number; copies: number }> {
+  const w = new Worker(
+    `
+    const { parentPort, workerData: d } = require("node:worker_threads");
+    const c = require(d.dist + "/src/compile.js");
+    const O = require(d.dist + "/src/runtime/ops.js");
+    const MV = require(d.dist + "/src/runtime/memoryview.js").PyMemoryView;
+    Promise.resolve(c.initParser && c.initParser()).then(() => {
+      c.execModule(d.setup, "<setup>", "__main__");
+      let scanPolls = 0, copies = 0;
+      const poll = O.pollInterrupt, bytes = MV.prototype.bytes;
+      O.pollInterrupt = function () {
+        const fromScan = / at (poll|scanInt) /.test(new Error().stack.split("\\n").slice(2, 4).join("\\n"));
+        const r = poll.apply(this, arguments);
+        if (fromScan && ++scanPolls === d.after) Atomics.store(c.R.INTR, 0, 1);
+        return r;
+      };
+      MV.prototype.bytes = function () { copies++; return bytes.apply(this, arguments); };
+      let done;
+      try {
+        c.execModule("import builtins\\nbuiltins._sb_r = " + d.expr, "<test>", "__main__");
+        done = "ok";
+      } catch (e) {
+        done = c.R.formatException(e).trim().split("\\n").pop().slice(0, 200);
+      }
+      const intr = Atomics.load(c.R.INTR, 0);
+      parentPort.postMessage({ done: done + (intr ? " (INTR still set)" : ""), scanPolls, copies });
+    });
+    `,
+    { eval: true, workerData: { dist: DIST, setup, expr, after } },
+  );
+  return new Promise((resolve, reject) => (w.on("message", (m) => (w.terminate(), resolve(m))), w.on("error", reject)));
+}
+
+// (daybreak2 PR134-INTR-1, astra2 CORR-PR134-1: Stop is tested every 65,536
+// characters the scan inspects, across all its passes; positions from the
+// two ends shared one watermark, so a long trailing run of spaces hid the
+// body, or a leading one the trailing run)
+const P = 65536;
+for (const [label, s] of [
+  ["leading spaces, then the body", `' ' * ${4 * P} + '1' * ${4 * P}`],
+  ["the body, then trailing spaces", `'1' * ${4 * P} + ' ' * ${4 * P}`],
+  ["leading and trailing spaces", `' ' * ${4 * P} + '1' + ' ' * ${4 * P}`],
+]) {
+  test(`int()'s scan polls in proportion to its work: ${label}`, async () => {
+    const r = await probe(`import builtins\nbuiltins._sb_s = ${s}`, "int(_sb_s)");
+    assert.ok(r.scanPolls >= 8 && r.scanPolls <= 9, `${r.scanPolls} polls for about ${8 * P} characters (${r.done})`);
+  });
+}
+test("Stop after the leading spaces' polls stops int() in its trailing pass (astra2's case)", async () => {
+  const r = await probe(`import builtins\nbuiltins._sb_s = ' ' * ${4 * P} + '1' + ' ' * ${4 * P}`, "int(_sb_s)", 4);
+  assert.equal(r.done, "KeyboardInterrupt");
+});
+
+// (daybreak2 PR134-MEM-1, astra2 CORR-PR134-2: a memoryview that isn't
+// C-contiguous, or is released, is not bytes for int(), as in CPython, and is
+// refused before any copy of it)
+for (const [label, setup] of [
+  ["a strided memoryview", "import builtins\nbuiltins._sb_m = memoryview(b'1' * 2_000_000)[::2]"],
+  ["a reversed memoryview", "import builtins\nbuiltins._sb_m = memoryview(b'1' * 2_000_000)[::-1]"],
+  ["a released memoryview", "import builtins\nbuiltins._sb_m = memoryview(b'1' * 2_000_000)\n_sb_m.release()"],
+]) {
+  test(`int() of ${label}: CPython's TypeError, nothing copied`, async () => {
+    const r = await probe(setup, "int(_sb_m)");
+    assert.equal(r.done, "TypeError: int() argument must be a string, a bytes-like object or a real number, not 'memoryview'");
+    assert.equal(r.copies, 0, "memoryview.bytes() copied it");
+  });
+}
+test("int() of a contiguous memoryview slice, and of one item reversed: read in place, nothing copied", async () => {
+  const r = await probe(
+    "import builtins\nbuiltins._sb_m = memoryview(b' ' + b'1' * 200_000 + b' ')[1:-1]\nbuiltins._sb_one = memoryview(b'12345')[3:2:-1]",
+    "[int(_sb_m) == int('1' * 200_000), int(_sb_one)]\nassert _sb_r == [True, 4], _sb_r",
+  );
+  assert.equal(r.copies, 0, "memoryview.bytes() copied it");
+  assert.equal(r.done, "ok");
+});
