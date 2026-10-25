@@ -135,6 +135,10 @@ def _message(e):
     if isinstance(e, RecursionError):
         return "Maximum recursion limit of 500 reached."
     if isinstance(e, MemoryError):
+        # (a memory guard's refusal says what needed how much, and where to
+        # run with more: item D; any other is MATLAB's own words)
+        if type(e).__name__ == "SagebrushMemoryError" and type(e).__module__ == "_memguard":
+            return str(e)
         return "Out of memory."
     if isinstance(e, ZeroDivisionError):
         return "Division by zero."
