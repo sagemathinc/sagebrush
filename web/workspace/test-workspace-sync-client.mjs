@@ -340,7 +340,8 @@ server.on("upgrade", async (req, socket, head) => {
       if (m.t === "index_changed" && !ctl.serverNotices) {
         log.serverNotices++;
         serverNoticesDropped++;
-        log.got.at(-1).dropped = true;
+        // (marked as filtered, never as `dropped`: the cases' `g.dropped` means a drop they asked for)
+        log.got.at(-1).filtered = true;
         return;
       }
       if (m.t === "welcome" && ctl.rewriteWelcome) {
