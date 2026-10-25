@@ -2068,13 +2068,14 @@ async function s5Rows() {
   check(await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 2, 5000), "rows: a mkdir and a create waiting (scanned, sent, ack withheld): ↑ on both");
   await ctl("closeAll");
   check(await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 0, 15_000), "rows: after the resend and its ack: cleared");
+  await ctl("log", { reset: true });
   await ctl("set", { set: { dropAcks: 1 } });
   await w.rename("/r1", "/r2");
   check(await until(async () => (await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 5000), "rows: an undecided rename on a folder whose mkdir was accepted: ↑");
   await ctl("closeAll");
   const cleared = await until(async () => !(await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 15_000);
   const ns = (await metaGet(w.ws, "sync:current"))?.ns;
-  const why = cleared ? "" : J({ recs: (await all(w.ws, "outbox")).filter((x) => x.id === d.ident).map((x) => ({ dseq: x.dseq, lseq: x.lseq, op: x.op.op, accepted: x.accepted })), pending: (await all(w.ws, "pending")).find((x) => x.id === d.ident), scanned: await metaGet(w.ws, `sync:${ns}:scanned`), last: await w.lastSeq(), status: owner.view(), refused: await metaGet(w.ws, `sync:${ns}:refused`), rebuild: await metaGet(w.ws, `sync:${ns}:rebuild`) });
+  const why = cleared ? "" : J({ recs: (await all(w.ws, "outbox")).filter((x) => x.id === d.ident).map((x) => ({ dseq: x.dseq, lseq: x.lseq, op: x.op.op, accepted: x.accepted })), pending: (await all(w.ws, "pending")).find((x) => x.id === d.ident), scanned: await metaGet(w.ws, `sync:${ns}:scanned`), last: await w.lastSeq(), status: owner.view(), refused: await metaGet(w.ws, `sync:${ns}:refused`), rebuild: await metaGet(w.ws, `sync:${ns}:rebuild`), client: owner.client?.debug(), stats: owner.client && { connects: owner.client.stats.connects, opsMessages: owner.client.stats.opsMessages }, front: await ctl("log").then((l) => ({ sockets: l.sockets, open: l.open, sent: l.sent.filter((m) => m.t === "ops" || m.t === "hello").map((m) => m.t === "ops" ? "ops:" + m.dseqs.join(",") : "hello"), acks: l.got.filter((g) => g.t === "ack" || g.t === "error").map((g) => g.t + (g.dropped ? "(dropped)" : "") + (g.code ? ":" + g.code : "")) })) });
   check(cleared, "rows: …cleared at its own ack " + why);
   const many = Array.from({ length: 1100 }, (_, i) => "0123456789abcd" + String(i).padStart(4, "0"));
   check((await W.rowIcons(w, many, [])).up.size === 0 && W.ROWICON.max === 1005, "rows: 1,100 identities asked: read at most 1,005, one transaction");
