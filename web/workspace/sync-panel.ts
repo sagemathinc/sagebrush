@@ -117,15 +117,22 @@ function retryOf(r: Response, body: { retry_after?: unknown } | null): number | 
   return v && /^\d+$/.test(v) ? Number(v) * 1000 : undefined;
 }
 /** One status, with the session's account (its hash, from /api/share/me) read with it: the panel's confirmations
- * are bound to both. */
+ * are bound to both.  The account is read before the status and again after it (its body read): a session that
+ * changed across the read (another tab signed in as another account) makes the answer "stale", never applied, and
+ * it is asked again (astra3's CORR-PR130-4). */
 export async function askStatus(f: Fetch, signal: AbortSignal): Promise<Answer> {
   try {
-    const me = await f("/api/share/me", { credentials: "same-origin", signal });
-    const id = me.ok ? ((await me.json()) as { account_id?: unknown }).account_id : null;
+    const who = async () => {
+      const me = await f("/api/share/me", { credentials: "same-origin", signal });
+      const id = me.ok ? ((await me.json()) as { account_id?: unknown }).account_id : null;
+      return typeof id === "string" ? id : null;
+    };
+    const id = await who();
     const r = await f("/api/sync/v1/status", { credentials: "same-origin", signal });
     if (!r.ok) return { ok: false, why: "http", code: r.status, retryAfter: retryOf(r, null) };
     const status = (await r.json()) as Status;
-    return { ok: true, status, account: typeof id === "string" ? await accountHash(id) : null };
+    if ((await who()) !== id) return { ok: false, why: "stale" };
+    return { ok: true, status, account: id !== null ? await accountHash(id) : null };
   } catch {
     return { ok: false, why: "network" };
   }

@@ -1852,15 +1852,25 @@ const caught = async (p) => { try { await p; return null; } catch (e) { return e
 /** A fake server for the panel: answers by path, counts POSTs; `next` answers the next delete/enable. */
 function fakeServer(status, account = "acct-x") {
   // (statusGates: each status read waits for the next gate, if any; statusReads counts the reads begun)
-  const s = { status, posts: [], deletes: [], next: [], me: account, statusGates: [], statusReads: 0 };
+  // (meGates: each /me read takes the session's account first, then waits for the next gate, if any, before answering
+  // (a response held while the session changes); meReads counts them)
+  const s = { status, posts: [], deletes: [], next: [], me: account, statusGates: [], statusReads: 0, meGates: [], meReads: 0 };
   s.fetch = async (url, init = {}) => {
     const path = String(url).replace(/^https?:\/\/[^/]+/, "");
-    if (path === "/api/share/me") return Response.json({ account_id: s.me });
+    if (path === "/api/share/me") {
+      s.meReads++;
+      const id = s.me, g = s.meGates.shift();
+      if (g) await g;
+      return Response.json({ account_id: id });
+    }
     if (path === "/api/sync/v1/status") {
       s.statusReads++;
+      // (statusEarly: the answer computed when asked, then held (an answer already in flight); else when released)
+      const val = () => (typeof s.status === "function" ? s.status() : s.status);
+      const early = s.statusEarly ? val() : undefined;
       const g = s.statusGates.shift();
       if (g) await g;
-      return Response.json(typeof s.status === "function" ? s.status() : s.status);
+      return Response.json(early ?? val());
     }
     if (init.method === "POST") {
       s.posts.push(path);
@@ -2402,7 +2412,45 @@ async function s5Flood() {
   o2.destroy();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire };
+async function s5Account() {
+  // (astra3's CORR-PR130-4: the session's account and the status read together: the local lifecycle unchanged
+  // (namespace A's), another tab signs in as B across the panel's read, (1) after /me answered A but before the status
+  // is asked, (2) while A's status is in flight.  The answer is never taken as A's: B's limit never lands under A's
+  // namespace, the status is asked again and is B's, and a delete then carries B's account with B's generation)
+  const HA = await hashOf("acct-x"), HB = await hashOf("acct-y");
+  for (const when of ["after /me", "status in flight"]) {
+    const w = await fresh();
+    await W.switchTo(w, `${HA}:3:${w.device}`);
+    const owner = W.SyncOwner.of(w);
+    const A = { available: true, state: "active", generation: 3, limit_bytes: 1000, used_bytes: 10 };
+    const B = { available: true, state: "active", generation: 7, limit_bytes: 2000, used_bytes: 20 };
+    const el = document.body.appendChild(document.createElement("div")), srv = fakeServer(() => (srv.me === "acct-x" ? A : B));
+    const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch });
+    check(await until(() => owner.limit?.limit_bytes === 1000 && /Delete my synced data/.test(buttons(el).join()), 3000), `account (${when}): A's status applied first`);
+    const g = gate(), m0 = srv.meReads, r0 = srv.statusReads;
+    if (when === "after /me") srv.meGates.push(g.p);
+    else {
+      srv.statusEarly = true;
+      srv.statusGates.push(g.p);
+    }
+    s.refresh();
+    await until(() => (when === "after /me" ? srv.meReads > m0 : srv.statusReads > r0), 3000);
+    srv.me = "acct-y";
+    g.open();
+    await sleep(300);
+    srv.statusEarly = false;
+    check(owner.limit?.limit_bytes === 1000 && srv.statusReads >= r0 + 2, `account (${when}): the session changed to B across the read: B's limit not taken under A's namespace, the status asked again: ` + J({ limit: owner.limit, statusReads: srv.statusReads - r0, meReads: srv.meReads - m0 }));
+    await until(() => /Delete my synced data/.test(buttons(el).join()), 3000);
+    click(el, /Delete my synced data/);
+    await until(() => srv.deletes.length === 1, 3000);
+    const d = srv.deletes[0];
+    check(d && d.account === HB && d.generation === 7, `account (${when}): a delete then carries B's account with B's generation, never a mix: ` + J({ account: d?.account === HB ? "B" : d?.account === HA ? "A" : d?.account, generation: d?.generation }));
+    s.dispose();
+    el.remove();
+  }
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
