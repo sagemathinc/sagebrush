@@ -1978,9 +1978,9 @@ async function s5Delete() {
   check(r.srv.deletes.length === 1 && /Couldn't confirm the deletion/.test(text(r.el)), "delete: a lost answer: said, no POST again: " + text(r.el).slice(0, 100));
   r.s.dispose();
   // (a lost answer, and status shows a later generation: the stale branch)
-  let st2 = { ...status };
-  r = await run([{ throw: true }], "", { status: () => st2 });
-  st2 = { ...status, generation: 5 };
+  // (the first status read (the panel's draw) at generation 3; every later one (the lost answer's) at 5)
+  let reads = 0;
+  r = await run([{ throw: true }], "", { status: () => (reads++ === 0 ? status : { ...status, generation: 5 }) });
   await sleep(300);
   check(/turned on again since/.test(text(r.el)) && r.srv.deletes.length === 1, "delete: lost, then a later generation active: the stale branch");
   r.s.dispose();
@@ -2002,7 +2002,7 @@ async function s5Lifecycle() {
   await ctl("closeAll");
   check(await until(async () => owner.view().s.state === "synced" && (await metaGet(w.ws, "sync:current")).gen > gen1, 15_000), "lifecycle: a reconnect renews the lease (gen raised), the owner keeps its client");
   check(owner.client === c1, "lifecycle: the same client throughout (eligibility is the lifecycle, not gen)");
-  const epoch = await metaGet(w.ws, "sync:epoch");
+  const epoch = (await metaGet(w.ws, "sync:epoch")) ?? 0;
   await until(() => /Turn off sync here/.test(buttons(el).join()), 5000);
   [...el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
   check(await until(() => owner.client === null, 10_000), "lifecycle: off: the client stopped");
@@ -2035,7 +2035,7 @@ async function s5Tabs() {
   // (a flood of requests: the holder's state is one boolean; publications at most one a slot)
   const p0 = o1.stats.published, t0 = Date.now();
   const ch = new BroadcastChannel(`sagebrush-sync-status:${w1.ws.name}:${(await metaGet(w1.ws, "sync:current")).ns}`);
-  const epoch = await metaGet(w1.ws, "sync:epoch"), ns = (await metaGet(w1.ws, "sync:current")).ns;
+  const epoch = (await metaGet(w1.ws, "sync:epoch")) ?? 0, ns = (await metaGet(w1.ws, "sync:current")).ns;
   for (let i = 0; i < 10_000; i++) ch.postMessage({ t: "status?", ns, epoch });
   await sleep(2000);
   const pubs = o1.stats.published - p0, secs = (Date.now() - t0) / 1000;
@@ -2072,7 +2072,10 @@ async function s5Rows() {
   await w.rename("/r1", "/r2");
   check(await until(async () => (await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 5000), "rows: an undecided rename on a folder whose mkdir was accepted: ↑");
   await ctl("closeAll");
-  check(await until(async () => !(await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 15_000), "rows: …cleared at its own ack");
+  const cleared = await until(async () => !(await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 15_000);
+  const ns = (await metaGet(w.ws, "sync:current"))?.ns;
+  const why = cleared ? "" : J({ recs: (await all(w.ws, "outbox")).filter((x) => x.id === d.ident).map((x) => ({ dseq: x.dseq, lseq: x.lseq, op: x.op.op, accepted: x.accepted })), pending: (await all(w.ws, "pending")).find((x) => x.id === d.ident), scanned: await metaGet(w.ws, `sync:${ns}:scanned`), last: await w.lastSeq(), status: owner.view(), refused: await metaGet(w.ws, `sync:${ns}:refused`), rebuild: await metaGet(w.ws, `sync:${ns}:rebuild`) });
+  check(cleared, "rows: …cleared at its own ack " + why);
   const many = Array.from({ length: 1100 }, (_, i) => "0123456789abcd" + String(i).padStart(4, "0"));
   check((await W.rowIcons(w, many, [])).up.size === 0 && W.ROWICON.max === 1005, "rows: 1,100 identities asked: read at most 1,005, one transaction");
   s.dispose();
