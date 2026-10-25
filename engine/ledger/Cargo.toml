@@ -1,0 +1,14 @@
+[package]
+name = "sagebrush-ledger"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The Sagebrush engine's memory ledger: a counting allocator, a total from the host, reservations and typed refusals (no-cliffs plan C r10)"
+
+# (standard library only: no third-party dependencies)
+[dependencies]
+
+[features]
+# Tests only: allocate outside the ledger, pause an admission after it reads
+# the live count (the union and race tests of plan C r5/r6)
+test-hooks = []

@@ -145,6 +145,20 @@ _t = C.engine_total()
 check("engine total, MemTotal from /proc", (_t["status"], _t["basis"], _t["joint"]), ("observed", ["MemAvailable"], True))
 C._set_sources()
 
+# the engine's ledger takes its total from engine_total (no-cliffs C-1):
+# the registered source answers, and the counting allocator sees the
+# module's own allocations
+from sagebrush import _native
+C._set_sources(root=root, rlimits={}, runtime=lambda: [])
+import time as _t2
+_t2.sleep(0.15)  # (the engine's figure is read again when 100 ms old)
+_snap = _native.ledger_snapshot()
+check("the ledger's total is engine_total's", (_snap["total"], _snap["status"], _snap["joint"]), (16 * GiB, "observed", True))
+check("the ledger's allowance is a quarter", _snap["allowance"], 4 * GiB)
+check("the counting allocator is installed", _snap["live"] > 0, True)
+check("nothing outstanding between calls", _snap["outstanding"], 0)
+C._set_sources()
+
 os.remove(root + "/proc/meminfo")
 os.rmdir(root + "/proc")
 os.rmdir(root)

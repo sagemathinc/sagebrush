@@ -8,6 +8,11 @@ use pyo3::exceptions::{PyKeyboardInterrupt, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+// Every engine heap byte is counted (sagebrush_ledger::live_bytes, no-cliffs
+// C-1): the module's allocator is the system's, counted.
+#[global_allocator]
+static ALLOC: sagebrush_ledger::CountingAlloc<std::alloc::System> = sagebrush_ledger::CountingAlloc::new(std::alloc::System);
+
 /// The thread that imported the module: Python's main thread, the one that
 /// receives Ctrl-C.
 static MAIN: std::sync::OnceLock<std::thread::ThreadId> = std::sync::OnceLock::new();
@@ -484,6 +489,38 @@ fn set_memory_share_source(source: Py<PyAny>) {
     });
 }
 
+/// Register the host's engine memory total (no-cliffs plan C r10 section
+/// 1): `source()` returns lib/_capacity.py engine_total's (bytes, status,
+/// joint), status 0 observed, 1 zero, 2 nominal, or None.  The ledger asks
+/// when its figure is 100 ms old, with the GIL taken for it and its own lock
+/// not held; an exception or a malformed answer is none (the nominal total).
+/// The first registration stands.
+#[pyfunction]
+fn set_memory_total_source(source: Py<PyAny>) {
+    sagebrush_ledger::set_total_host(move || {
+        Python::attach(|py| {
+            let r = source.call0(py).ok()?;
+            let (bytes, status, joint) = r.extract::<Option<(u64, u32, bool)>>(py).ok().flatten()?;
+            Some(sagebrush_ledger::Total { bytes, status: sagebrush_ledger::TotalStatus::from_code(status)?, joint })
+        })
+    });
+}
+
+/// The ledger as the engine sees it now (diagnostics and the package's
+/// tests): {"total", "status", "joint", "allowance", "live", "outstanding"}.
+#[pyfunction]
+fn ledger_snapshot(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
+    let t = sagebrush_ledger::total();
+    let d = PyDict::new(py);
+    d.set_item("total", t.bytes)?;
+    d.set_item("status", t.status.name())?;
+    d.set_item("joint", t.joint)?;
+    d.set_item("allowance", sagebrush_ledger::allowance(t))?;
+    d.set_item("live", sagebrush_ledger::live_bytes())?;
+    d.set_item("outstanding", sagebrush_ledger::outstanding_bytes())?;
+    Ok(d)
+}
+
 // ---- live progress for Python routines (design-estimates-progress r4 §6):
 // the same functions as the browser's builtin _progress
 // (src/runtime/progress-module.ts), over engine/interrupt's native slots.
@@ -618,6 +655,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     raster.add_function(wrap_pyfunction!(raster_decode, &raster)?)?;
     m.add_submodule(&raster)?;
     m.add_function(wrap_pyfunction!(set_memory_share_source, m)?)?;
+    m.add_function(wrap_pyfunction!(set_memory_total_source, m)?)?;
+    m.add_function(wrap_pyfunction!(ledger_snapshot, m)?)?;
     for f in [
         wrap_pyfunction!(progress_begin, m)?,
         wrap_pyfunction!(progress_update, m)?,

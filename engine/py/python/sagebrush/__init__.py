@@ -87,6 +87,17 @@ def _capacity_share():
     return _capacity_module().poly_share()
 
 
+_TOTAL_STATUS = {"observed": 0, "zero": 1, "nominal": 2}
+
+
+def _capacity_total():
+    """The engine's memory total for its ledger (no-cliffs plan C r10
+    section 1): (bytes, status code, joint) from _capacity.engine_total,
+    asked when the engine's figure is 100 ms old."""
+    t = _capacity_module().engine_total()
+    return int(t["bytes"]), _TOTAL_STATUS[t["status"]], bool(t["joint"])
+
+
 def _limits_from_environment():
     """SAGEBRUSH_LIMITS=FILE: a JSON text of at most 4096 bytes, proposed
     (not locked) at import; an unreadable or invalid file is a ValueError
@@ -120,6 +131,11 @@ def _register_capacity():
     except ImportError:
         return  # (an older native build: its factorizations keep their default)
     set_memory_share_source(_capacity_share)
+    try:
+        from ._native import set_memory_total_source
+    except ImportError:
+        return  # (a native build without the ledger: nominal total)
+    set_memory_total_source(_capacity_total)
 
 
 _register_capacity()
