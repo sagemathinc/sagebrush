@@ -1,0 +1,18 @@
+{
+ "about": "diff 8.0.4, vendored unchanged for optional/bash's bundle (plan-bash-shell r3 \u00a71). Each file is the npm tarball's; vendor/verify-from-npm.mjs re-checks them against the tarball, by its integrity.",
+ "package": "diff",
+ "version": "8.0.4",
+ "license": "BSD-3-Clause",
+ "tarball": "https://registry.npmjs.org/diff/-/diff-8.0.4.tgz",
+ "integrity": "sha512-DPi0FmjiSU5EvQV0++GFDOJ9ASQUVFh5kD+OzOnYdi7n3Wpm9hWWGfB/O2blfHcMVTL5WkQXSnRiK9makhrcnw==",
+ "files": {
+  "diff.js": {
+   "from": "package/dist/diff.js",
+   "sha256": "e4553a1cd7ac8a2e88bb27580afb8df6018a0c6a028eb2b2f5f3a5a36f40f338"
+  },
+  "LICENSE": {
+   "from": "package/LICENSE",
+   "sha256": "eda81a415869e67809f6a9f3fd6056062cb83a462118e07eec5e92b2e0c40ce9"
+  }
+ }
+}
