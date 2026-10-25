@@ -43,7 +43,7 @@ test("invalid limits stop the run before its first statement, with status 2 and 
     [file("bom.json", "\ufeff{}"), "is not JSON: Unexpected UTF-8 BOM"],
     [file("array.json", "[1]"), "sagebrush: limits: the limits must be a JSON object, not an array"],
     [file("many.json", JSON.stringify(Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`k${i}`, i])))), "sagebrush: limits: more than 16 entries"],
-    [file("unknown.json", '{"ff.wrok": 1}'), "sagebrush: limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work)"],
+    [file("unknown.json", '{"ff.wrok": 1}'), "sagebrush: limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work, nf.certify_index_max, nf.certify_norm_max, nf.relation_rounds, poly.work)"],
     [file("bool.json", '{"ff.work": true}'), 'sagebrush: limits: ff.work must be an integer or "unlimited", not true'],
     [file("float.json", '{"ff.work": 1e7}'), 'sagebrush: limits: ff.work must be an integer or "unlimited", not 10000000.0'],
     [file("range.json", '{"ff.work": 5}'), "sagebrush: limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]"],
@@ -154,10 +154,10 @@ test("every census-vocabulary refusal site is registered with a class and owner;
 test("unlimited by default, finite values opt in, mixed settings key by key (plan-c0 r2)", () => {
   const show = "import sys, _sage_ffsub as S; print(S.WORK, S.EMBED_MAX, S.ROOT_BITS, sys._sagebrush_limits)";
   const cases: [string, string][] = [
-    ['{"ff.work": 100000}', "100000 1048576 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000})"],
-    ['{"ff.root_bits": 64}', "inf 10000000 64 Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited})"],
-    ['{"ff.embed_max": 4096}', "inf 4096 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': 4096, 'ff.root_bits': unlimited, 'ff.work': unlimited})"],
-    ['{"ff.work": "unlimited", "ff.embed_max": "unlimited"}', "inf 10000000 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited})"],
+    ['{"ff.work": 100000}', "100000 1048576 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited})"],
+    ['{"ff.root_bits": 64}', "inf 10000000 64 Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited})"],
+    ['{"ff.embed_max": 4096}', "inf 4096 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': 4096, 'ff.root_bits': unlimited, 'ff.work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited})"],
+    ['{"ff.work": "unlimited", "ff.embed_max": "unlimited"}', "inf 10000000 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited})"],
   ];
   for (const [text, want] of cases) {
     const r = run(["--limits", file("mixed.json", text), "-c", show]);
@@ -190,6 +190,32 @@ test("unlimited by default, finite values opt in, mixed settings key by key (pla
 // reachable case, GF(7^8) down to GF(7^4) (r = 1201), holds at most 35
 // entries; and over every Conway field of composite degree with at most 10^7
 // elements the largest table is 35, recomputed with the engine's factoring.
+test("the class-group and polynomial keys reach the engine only when finite, and explicit arguments win (C0's per-area follow-up)", () => {
+  // the request fields sagebrush/_engine.py adds: none by default
+  const probe = "import sagebrush._engine as E\nprint(E._with_limits('bnf', {}), E._with_limits('quadratic_class_group', {}), E._with_limits('factor', {}), E._with_limits('bnf_certify', {'norm_max': 5}), E._with_limits('nf_data', {}))\n";
+  let r = run(["-c", probe]);
+  assert.equal(r.stdout, "{} {} {} {'norm_max': 5} {}\n", r.stderr);
+  // finite values are sent; an explicit bnf_certify argument wins
+  const lim = file("nfpoly.json", '{"poly.work": 1048576, "nf.relation_rounds": 7, "nf.certify_norm_max": 1000000, "nf.certify_index_max": 1000}');
+  r = run(["--limits", lim, "-c", probe]);
+  assert.equal(r.stdout, "{'rounds': 7} {'rounds': 7} {'work': 1048576} {'norm_max': 5, 'index_max': 1000} {}\n", r.stderr);
+  // end to end: the certificate's opt-in norm limit refuses as the former
+  // default did, and without it the certificate runs (its time: VM1, 13.6 s)
+  const cert = file("cert.json", '{"nf.certify_norm_max": 1000000}');
+  r = run(["--limits", cert, "--sage", "-c", "x = polygen(QQ, 'x')\ntry:\n    NumberField(x^2 + 3*10^12 + 1, 'a').class_number(proof=True)\nexcept NotImplementedError as e:\n    print(e)\n"]);
+  assert.match(r.stdout, /beyond the limits of the unconditional certificate: the Minkowski bound for the norms of ideal class representatives is 2205315, above the limit 1000000/, r.stderr);
+  // a finite poly.work refuses a factorization that needs more: the
+  // trinomial x^400 + x^3 + 2 (irreducible; a binomial would take the
+  // cyclotomic path, which this limit doesn't meter) has its modular
+  // factorization ask for 425060 limb operations when 26173 of the 2^20 are
+  // left (VM1; unlimited, 3.0 s in all); a small product of three factors fits
+  const pw = file("pw.json", '{"poly.work": 1048576}');
+  const f = (g: string) => `x = polygen(ZZ, 'x')\ntry:\n    print(len(list(factor(${g}))))\nexcept Exception as e:\n    print(type(e).__name__, 'work' in str(e))\n`;
+  assert.equal(run(["--limits", pw, "--sage", "-c", f("(x^4 + x + 1) * (x^3 - 2) * (x^2 + 3)")]).stdout, "3\n");
+  assert.equal(run(["--sage", "-c", f("x^400 + x^3 + 2")]).stdout, "1\n");
+  assert.equal(run(["--limits", pw, "--sage", "-c", f("x^400 + x^3 + 2")]).stdout, "ValueError True\n");
+});
+
 test("a descent's discrete-log table stays at most 35 entries with every limit unlimited (plan-c0 r2)", () => {
   const code = [
     "import math, _sage_ff as F, _sage_ffsub as S",
