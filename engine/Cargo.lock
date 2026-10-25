@@ -702,6 +702,7 @@ dependencies = [
  "sagebrush-raster",
  "sagebrush-sym",
  "sagebrush-web",
+ "serde_json",
 ]
 
 [[package]]
