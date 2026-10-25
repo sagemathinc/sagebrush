@@ -4045,19 +4045,15 @@
   "class": "none",
   "owner": "sync client: a generation tracked, not a cap"
  },
- "web/workspace/sync-ledger.ts :: onMsg :: if (m.gen > x.maxGen && !x.unknown) { #0": {
-  "class": "none",
-  "owner": "sync client: a generation tracked, not a cap"
- },
  "web/workspace/sync-ledger.ts :: onMsg :: if (m.gen > x.maxGen) { #0": {
   "class": "none",
   "owner": "sync client: a generation tracked, not a cap"
  },
- "web/workspace/sync-ledger.ts :: onMsg :: if (stale || m.gen < x.maxGen || x.unknown) return; #0": {
+ "web/workspace/sync-ledger.ts :: onMsg :: if (stale || m.gen < x.maxGen) return; #0": {
   "class": "none",
   "owner": "sync client: a generation tracked, not a cap"
  },
- "web/workspace/sync-ledger.ts :: onMsg :: if (stale || m.gen < x.maxGen) return; #0": {
+ "web/workspace/sync-ledger.ts :: onMsg :: if (stale || m.gen < x.maxGen) return; #1": {
   "class": "none",
   "owner": "sync client: a generation tracked, not a cap"
  },
@@ -4069,13 +4065,17 @@
   "class": "none",
   "owner": "sync client: a generation tracked, not a cap"
  },
- "web/workspace/sync-ledger.ts :: onMsg :: x.maxGen = m.gen; #2": {
-  "class": "none",
-  "owner": "sync client: a generation tracked, not a cap"
- },
  "web/workspace/sync-ledger.ts :: queueObsolete :: if (q.length >= OBSOLETE.max) return false; #0": {
   "class": "1",
   "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: raiseFloor :: if (gen > x.maxGen) { #0": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
+ },
+ "web/workspace/sync-ledger.ts :: raiseFloor :: x.maxGen = gen; #0": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
  },
  "web/workspace/sync-ledger.ts :: readPage :: if (v && v.epoch === x.epoch && v.gen > x.maxGen) { #0": {
   "class": "none",
