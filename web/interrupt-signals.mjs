@@ -85,13 +85,15 @@ export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS,
       }, 300);
     };
     const onLine = (line) => {
-      // a marker, its trial number if any, and the rest of the line (e.g. "PROBE yes": mk PROBE, rest "yes")
-      const m = line.replace(/\r/g, "").match(/^(ENTER|KI|RET|CONT|PROBE|END)\b(?: (\d+)\b)? ?(.*)$/);
-      if (!m) return;
-      const mk = m[1] + (m[2] ? " " + m[2] : "");
-      marks.push({ mk, t: now(), rest: m[3].trim() });
+      // a marker, its trial number if any, and the rest of the line ("PROBE yes": mk PROBE, rest "yes";
+      // "RET 0.25": mk RET, rest "0.25", since a trial number ends at a space or the end, pilot 4)
+      const pm = parseMarker(line);
+      if (!pm) return;
+      const { mk } = pm;
+      const kind = mk.split(" ")[0];
+      marks.push({ mk, t: now(), rest: pm.rest });
       for (const s of schedule) if (s.after === mk && !s.armed) { s.armed = true; setTimeout(() => !done && act(s.act), s.ms); }
-      if (m[1] === "END" || (host === "prompt" && m[1] === "PROBE")) setTimeout(() => finish("end"), host === "cli" ? 2000 : 500);
+      if (kind === "END" || (host === "prompt" && kind === "PROBE")) setTimeout(() => finish("end"), host === "cli" ? 2000 : 500);
     };
     const feed = (d) => {
       buf += d;
@@ -104,6 +106,10 @@ export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS,
     p.on("exit", (code, signal) => { exit = { code, signal, t: now() }; });
     p.on("close", () => setTimeout(() => finish("exit"), 200));
   });
+}
+export function parseMarker(line) {
+  const m = line.replace(/\r/g, "").match(/^(ENTER|KI|RET|CONT|PROBE|END)\b(?: (\d+)(?= |$))? ?(.*)$/);
+  return m ? { mk: m[1] + (m[2] ? " " + m[2] : ""), rest: m[3].trim() } : null;
 }
 const safeRead = (f) => { try { return readFileSync(f, "utf8"); } catch { return ""; } };
 const markT = (r, mk) => r.marks.find((x) => x.mk === mk)?.t;

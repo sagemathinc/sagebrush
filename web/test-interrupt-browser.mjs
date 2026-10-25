@@ -33,14 +33,15 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
     ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
     // (every CDP call has a deadline: one that never answers fails its trial, not the whole run; pilot 3 hung ~20 min)
     const CDP_MS = 30_000;
-    const send = (method, params = {}) => new Promise((r, rej) => {
+    const send = (method, params = {}, ms = CDP_MS) => new Promise((r, rej) => {
       const id = ++n;
-      const tm = setTimeout(() => { waiting.delete(id); rej(new Error(`CDP ${method}: no answer in ${CDP_MS} ms`)); }, CDP_MS);
+      const tm = setTimeout(() => { waiting.delete(id); rej(new Error(`CDP ${method}: no answer in ${ms} ms`)); }, ms);
       waiting.set(id, (v) => { clearTimeout(tm); r(v); });
       ws.send(JSON.stringify({ id, method, params }));
     });
-    const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails)); if (r?.code && r?.message) throw new Error("CDP: " + r.message); return r?.result?.value; };
-    const until = async (expr, ms = 60000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(50); } throw new Error("timeout: " + expr); };
+    const ev = async (expression, ms) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms); if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails)); if (r?.code && r?.message) throw new Error("CDP: " + r.message); return r?.result?.value; };
+    // (callMs: one evaluate's deadline; a mode switch may keep the page's main thread busy far longer than one call)
+    const until = async (expr, ms = 60000, callMs) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr, callMs)) return true; await sleep(50); } throw new Error("timeout: " + expr); };
     // (the last non-empty cell: its output text and whether it still runs)
     const LAST = "[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1)";
     const state = () => ev(`(() => { const c = ${LAST}; return { out: c.querySelector('.out').textContent, running: c.classList.contains('running') || c.classList.contains('queued') }; })()`);
@@ -62,9 +63,21 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
       { id: "E2", mode: "sage", code: (i) => `n = next_prime(10**22) * next_prime(3 * 10**22)\nprint('EN' + 'TER ${i}', flush=True)\ntry:\n    _r = factor(n)\n    print('R' + 'ET ${i}')\nexcept KeyboardInterrupt:\n    print('K' + 'I ${i}', flush=True)\nprint('PRO' + 'BE ${i} ' + ('ok' if keep == 41 and len(factor(2**64 + 1)) == 2 else 'fail'))`, delay: 1500 },
     ];
     // (the Sage cases run in Sage mode: the page's mode selector, then ready again)
+    // the mode switch, measured: how long the page took to be ready, and its longest unanswered
+    // evaluate (pilot 4: no answer for 30 s while switching to Sage mode); 120 s for each call
+    const MODE_MS = 120_000;
+    const modeSwitch = {};
     const setMode = async (mode) => {
-      await ev(`(() => { const m = document.querySelector('#mode'); if (m.value !== ${JSON.stringify(mode)}) { m.value = ${JSON.stringify(mode)}; m.dispatchEvent(new Event('change', {bubbles: true})); } })()`);
-      await until("document.querySelector('#status')?.textContent.startsWith('ready')");
+      const t0 = now();
+      let longest = 0;
+      const probe = async (expr) => { const a = now(); const v = await ev(expr, MODE_MS); longest = Math.max(longest, now() - a); return v; };
+      await probe(`(() => { const m = document.querySelector('#mode'); if (m.value !== ${JSON.stringify(mode)}) { m.value = ${JSON.stringify(mode)}; m.dispatchEvent(new Event('change', {bubbles: true})); } })()`);
+      for (let ok = false; !ok; ) {
+        if (now() - t0 > MODE_MS) throw new Error(`mode ${mode}: not ready in ${MODE_MS} ms (longest unanswered evaluate ${Math.round(longest)} ms)`);
+        ok = await probe("document.querySelector('#status')?.textContent.startsWith('ready')");
+        if (!ok) await sleep(50);
+      }
+      modeSwitch[mode] = { ready_ms: Math.round(now() - t0), longest_evaluate_ms: Math.round(longest) };
       await start("keep = 41");
       await until(`!${LAST}.classList.contains('running')`);
     };
@@ -121,7 +134,7 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
       const leak = { ok: trials.length > 0 && trials.every((t) => t.same_worker !== false), check: "worker identity" };
       const own = rowOutcome(trials, leak.ok);
       const outcome = againstBaseline({ case: c.id, host: "browser", outcome: own, trials, leak }, baseline);
-      result.rows.push({ case: c.id, host: "browser", outcome, ...(outcome !== own ? { own_outcome: own } : {}), trials, leak });
+      result.rows.push({ case: c.id, host: "browser", ...(modeSwitch[c.mode] ? { mode_switch: modeSwitch[c.mode] } : {}), outcome, ...(outcome !== own ? { own_outcome: own } : {}), trials, leak });
       record(result.rows.at(-1));
     }
     result.worker_ids.push(await workers());

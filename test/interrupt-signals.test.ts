@@ -64,3 +64,19 @@ console.log(JSON.stringify(rows.map((r) => [r.trial, r.outcome])));`;
   assert.equal(p.status, 0, p.stderr);
   assert.deepEqual(JSON.parse(p.stdout.trim().split("\n").at(-1) ?? "null"), [["Y", "PENDING-READY"], ["N", "PENDING"], ["E", "PENDING"]]);
 });
+
+test("markers: a trial number ends at a space or the end of the line", () => {
+  const src = `import { parseMarker } from ${JSON.stringify(mod)};
+console.log(JSON.stringify(["RET 0.25", "RET 1", "ENTER 1 1.5", "PROBE yes", "KI 12 3.25", "END", "XRET 1"].map(parseMarker)));`;
+  const p = spawnSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8" });
+  assert.equal(p.status, 0, p.stderr);
+  assert.deepEqual(JSON.parse(p.stdout), [
+    { mk: "RET", rest: "0.25" }, // (pilot 4: was read as trial 0, so the regex calibration never got a T)
+    { mk: "RET 1", rest: "" },
+    { mk: "ENTER 1", rest: "1.5" },
+    { mk: "PROBE", rest: "yes" },
+    { mk: "KI 12", rest: "3.25" },
+    { mk: "END", rest: "" },
+    null,
+  ]);
+});
