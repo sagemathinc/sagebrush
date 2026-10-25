@@ -71,9 +71,8 @@ if (what === "layouts") {
   py(`import sys\nfrom fractions import Fraction as F\nL = sys._kd_L\nQc = ${Q}\nN = ${prec} + 1\nK, W = L._kd_plan_fast(${p}, N)\nsys._kd_args = (Qc, ${p}, N, K, W)\nsys._kd_out = L._kd_ledger(${p}, N, K, W, ${p}, max(max(abs(c.numerator).bit_length(), c.denominator.bit_length()) for c in Qc), L._KdJSC)`);
   const U = Number(sys._kd_out);
   const Obj = require(dist + "/src/runtime/object.js");
-  // (a first call compiles the code: JSC's code blocks are cells of its
-  // heap, which stay, so they are not the call's; the second is measured)
-  py("import sys\nsys._kd_L._kd_frobenius_matrix(*sys._kd_args)");
+  // (the cold first call: JSC's code blocks are cells of its heap, and U
+  // charges them, _KdJSC.CODE)
   let most = 0, hooks = 0;
   const base = heap();
   c.R.setattr(sys, "_kd_heap", Obj.builtin(() => {
