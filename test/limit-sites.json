@@ -727,6 +727,18 @@
   "class": "3",
   "owner": "polynomial factorization"
  },
+ "engine/poly/src/budget.rs :: internal :: FactorLimit { kind: Kind::Internal, phase: self.phase.get(), what, need: 0, remaining: 0, memory_limit: self.limits.memory, memory_source: self.memory_source } #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/budget.rs :: internal :: pub fn internal(&self, what: &'static str) -> FactorLimit { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/budget.rs :: name :: Resource, #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/budget.rs :: name :: pub memory_limit: u64, #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -761,7 +773,7 @@
   "owner": "polynomial factorization",
   "row": "inv-34"
  },
- "engine/poly/src/budget.rs :: refuse :: FactorLimit { phase: self.phase.get(), what, need, remaining, memory_limit: self.limits.memory, memory_source: self.memory_source } #0": {
+ "engine/poly/src/budget.rs :: refuse :: FactorLimit { kind: Kind::Resource, phase: self.phase.get(), what, need, remaining, memory_limit: self.limits.memory, memory_source: self.memory_source } #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -780,7 +792,15 @@
   "owner": "polynomial factorization",
   "row": "inv-34"
  },
- "engine/poly/src/lib.rs ::  :: pub use budget::{with_default_limits, Budget, FactorLimit, Limits, MemorySource, Phase}; #0": {
+ "engine/poly/src/budget.rs :: work_and_memory_are_aggregate :: assert_eq!(e.kind, Kind::Resource); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/budget.rs :: work_and_memory_are_aggregate :: let b2 = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/lib.rs ::  :: pub use budget::{with_default_limits, Budget, FactorLimit, Kind, Limits, MemorySource, Phase, INTERNAL_PREFIX}; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
@@ -887,7 +907,7 @@
   "owner": "polynomial factorization",
   "row": "inv-35"
  },
- "engine/poly/src/vanhoeij.rs :: recombine :: if rest.len() <= ZASSENHAUS_MAX || rest.len() > MAX_R || g[0].is_zero() { #0": {
+ "engine/poly/src/vanhoeij.rs :: recombine :: if rest.len() <= ZASSENHAUS_MAX || rest.len() > MAX_R { #0": {
   "class": "3",
   "owner": "polynomial factorization",
   "row": "inv-35"
@@ -896,6 +916,18 @@
   "class": "3",
   "owner": "polynomial factorization",
   "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: x_dividing_the_residual_is_an_internal_error :: assert!(m.ends_with(\"please report it; not factored\") && !m.contains(\"resource limit\"), \"{}\", m); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: x_dividing_the_residual_is_an_internal_error :: let (_, fs) = crate::try_factor_with(&x_s4(), &Budget::default()).unwrap(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: x_dividing_the_residual_is_an_internal_error :: let e = fault::with(fault::SKIP_PREPASS, || crate::try_factor_with(&x_s4(), &Budget::default())).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/tests/memory_share.rs ::  :: use sagebrush_poly::{try_factor, try_factor_with, with_default_limits, Budget, Limits, MemorySource}; #0": {
   "class": "none",
@@ -1007,6 +1039,10 @@
  "engine/web/src/lib.rs :: dispatch :: Some(w) => sagebrush_poly::try_factor_with(&f, &sagebrush_poly::Budget::new(sagebrush_poly::Limits { work: w, ..sagebrush_poly::Limits::DEFAULT })), #0": {
   "class": "3",
   "owner": "polynomial factorization"
+ },
+ "engine/web/src/lib.rs :: internal_factoring_errors_are_flagged :: assert!(r[\"error\"].as_str().unwrap().contains(\"resource limit exceeded\") && r.get(\"internal\").is_none(), \"{}\", r); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/web/src/lib.rs :: nmod_square :: if n > NMOD_MAX_N { #0": {
   "class": "1+3",

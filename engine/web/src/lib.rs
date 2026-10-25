@@ -154,9 +154,21 @@ pub fn call(req: &str) -> String {
     }
     match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
         Ok(v) => json!({ "ok": v }),
-        Err(e) => json!({ "error": e }),
+        Err(e) => error_json(e),
     }
     .to_string()
+}
+
+/// A call's error reply: {"error": MESSAGE}, with "internal": true when the
+/// message carries a failed proved invariant of the factoring engine (also
+/// inside an op's own message), so the callers raise it as an internal
+/// error, never as a resource limit or a user error.
+fn error_json(e: String) -> Value {
+    if e.contains(sagebrush_poly::INTERNAL_PREFIX) {
+        json!({ "error": e, "internal": true })
+    } else {
+        json!({ "error": e })
+    }
 }
 
 /// The row of [`nmod_ops::OPS`] named exactly by the request's last
@@ -1296,6 +1308,21 @@ mod tests {
     fn err(req: &str) -> String {
         let r: serde_json::Value = serde_json::from_str(&call(req)).unwrap();
         r.get("error").and_then(|e| e.as_str()).unwrap_or_else(|| panic!("{} -> {}", req, r)).to_string()
+    }
+
+    /// A failed proved invariant of the factoring engine is flagged
+    /// "internal" (also inside another op's message); a resource refusal
+    /// and other errors are not (rank-3 plan r3, section 3.5).
+    #[test]
+    fn internal_factoring_errors_are_flagged() {
+        let m = format!("{} (x divides the residual after the pre-pass in small-subset pre-pass); please report it; not factored", sagebrush_poly::INTERNAL_PREFIX);
+        assert_eq!(super::error_json(m.clone()), serde_json::json!({ "error": m, "internal": true }));
+        let wrapped = format!("hmf newspace: {}", m);
+        assert_eq!(super::error_json(wrapped.clone())["internal"], true);
+        assert_eq!(super::error_json("factor of the zero polynomial".into()), serde_json::json!({ "error": "factor of the zero polynomial" }));
+        // a real resource refusal through call(): no flag
+        let r: serde_json::Value = serde_json::from_str(&call(r#"{"fn":"factor","f":["1","1","0","0","1"],"work":1}"#)).unwrap();
+        assert!(r["error"].as_str().unwrap().contains("resource limit exceeded") && r.get("internal").is_none(), "{}", r);
     }
 
     #[test]

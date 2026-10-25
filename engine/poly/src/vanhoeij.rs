@@ -39,7 +39,9 @@ const LEVELS: u32 = 3;
 pub fn recombine<'b>(b: &'b Budget, f: &[BigInt], m: &Modular, lifted: Vec<Held<'b>>) -> FResult<Vec<Held<'b>>> {
     let pk = crate::power(b, m.p, m.k)?;
     // the pre-pass: subsets of sizes 1, then 2 (all singletons first)
-    let z = {
+    let z = if fault(fault::SKIP_PREPASS) {
+        crate::Zassenhaus { found: vec![], residual: Some((Held::copy(b, f)?, lifted)) }
+    } else {
         let _p = b.enter(Phase::Prepass);
         zassenhaus(b, f, lifted, &pk, &m.possible, 2)?
     };
@@ -47,10 +49,16 @@ pub fn recombine<'b>(b: &'b Budget, f: &[BigInt], m: &Modular, lifted: Vec<Held<
     let Some((g, rest)) = z.residual else {
         return Ok(found);
     };
-    if rest.len() <= ZASSENHAUS_MAX || rest.len() > MAX_R || g[0].is_zero() {
+    if g[0].is_zero() {
+        // x divides g: impossible here, since x mod p is a single modular
+        // factor and the pre-pass tests every singleton by reconstruction
+        // and exact division; a violation is an internal error, never a
+        // subset search (rank-3 plan r3, section 3.2)
+        return Err(b.internal("x divides the residual after the pre-pass"));
+    }
+    if rest.len() <= ZASSENHAUS_MAX || rest.len() > MAX_R {
         // few factors left (Zassenhaus is cheap), or too many for the
-        // lattice (the budget bounds the search), or x divides g, which the
-        // pre-pass rules out (kept as a guard)
+        // lattice (the budget bounds the search)
         let _p = b.enter(if rest.len() <= ZASSENHAUS_MAX { Phase::Zassenhaus } else { Phase::Fallback });
         found.extend(zassenhaus(b, &g, rest, &pk, &m.possible, usize::MAX)?.found);
         return Ok(found);
@@ -66,6 +74,46 @@ pub fn recombine<'b>(b: &'b Budget, f: &[BigInt], m: &Modular, lifted: Vec<Held<
     }
     Ok(found)
 }
+
+/// Faults the tests inject (rank-3 plan r3, section 4.3), to reach each
+/// invariant's branch (only the tests can set one).
+pub(crate) mod fault {
+    /// The pre-pass is skipped: its residual is f with every lifted factor.
+    pub const SKIP_PREPASS: u8 = 1;
+
+    #[cfg(test)]
+    thread_local! {
+        static FAULT: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+    }
+
+    #[inline]
+    pub fn is(_f: u8) -> bool {
+        #[cfg(test)]
+        {
+            FAULT.with(|c| c.get() == _f)
+        }
+        #[cfg(not(test))]
+        {
+            false
+        }
+    }
+
+    /// Run `run` with fault `f` injected.
+    #[cfg(test)]
+    pub fn with<T>(f: u8, run: impl FnOnce() -> T) -> T {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                FAULT.with(|c| c.set(0));
+            }
+        }
+        let _r = Reset;
+        FAULT.with(|c| c.set(f));
+        run()
+    }
+}
+
+use fault::is as fault;
 
 /// The lattice phase: Some(irreducible factors of g) when a certificate is
 /// found, None to fall back.
@@ -493,6 +541,30 @@ pub(crate) mod tests {
 
     fn z(v: &[i64]) -> Vec<BigInt> {
         v.iter().map(|&x| BigInt::from(x)).collect()
+    }
+
+    /// x S_4 (S_4 = prod (x +- sqrt 2 +- sqrt 3 +- sqrt 5 +- sqrt 7), 8
+    /// quadratics modulo every good prime): 9 modular factors, so the
+    /// lattice's recombine runs, and x divides the polynomial.
+    fn x_s4() -> Vec<BigInt> {
+        z(&[0, 46225, 0, -5596840, 0, 13950764, 0, -7453176, 0, 1513334, 0, -141912, 0, 6476, 0, -136, 0, 1])
+    }
+
+    #[test]
+    fn x_dividing_the_residual_is_an_internal_error() {
+        // the pre-pass removes x (a singleton): two factors, x and S_4
+        let (_, fs) = crate::try_factor_with(&x_s4(), &Budget::default()).unwrap();
+        let mut degs: Vec<usize> = fs.iter().map(|(h, _)| h.len() - 1).collect();
+        degs.sort();
+        assert_eq!(degs, vec![1, 16]);
+        // without it, x | g reaches the invariant: an internal error, not a
+        // subset search and not a resource refusal
+        let e = fault::with(fault::SKIP_PREPASS, || crate::try_factor_with(&x_s4(), &Budget::default())).unwrap_err();
+        assert_eq!(e.kind, crate::Kind::Internal);
+        assert_eq!(e.what, "x divides the residual after the pre-pass");
+        let m = e.to_string();
+        assert!(m.starts_with(crate::INTERNAL_PREFIX), "{}", m);
+        assert!(m.ends_with("please report it; not factored") && !m.contains("resource limit"), "{}", m);
     }
 
     /// The full c_i = l u_i' prod_{j != i} u_j mod m, for comparison.
