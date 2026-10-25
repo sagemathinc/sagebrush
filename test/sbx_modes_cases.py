@@ -295,12 +295,29 @@ def flat_decode_time():
     return time.process_time() - t
 
 
-base = flat_decode_time()
+# (diagnostics, for CI's record, shard-7 proposal r1: each decode's window on
+# the clock GC performance entries use, time.perf_counter() in pyjs, and its
+# user and system CPU apart (pyjs's private _fs.cpu_times()); test/sbx.test.ts
+# matches GC entries to them)
+import _fs
+windows = []
+
+
+def timed(label, f):
+    w0, c0 = time.perf_counter(), _fs.cpu_times()
+    r = f()
+    w1, c1 = time.perf_counter(), _fs.cpu_times()
+    windows.append({"label": label, "start_ms": w0 * 1000, "end_ms": w1 * 1000, "user_s": c1[0] - c0[0], "system_s": c1[1] - c0[1]})
+    return r
+
+
+base = timed("flat before", flat_decode_time)
 t0 = time.process_time()
-a = _sbx.decode(data, "magma")
+a = timed("nested", lambda: _sbx.decode(data, "magma"))
 took = time.process_time() - t0
 work = _sbx._magma_work
-base = (base + flat_decode_time()) / 2
+base = (base + timed("flat after", flat_decode_time)) / 2
+print("SBXDIAG " + json.dumps({"took_s": took, "base_s": base, "ratio": took / base, "windows": windows}))
 inner = a[0]
 for _ in range(30):
     inner = inner[0]
