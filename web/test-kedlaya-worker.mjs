@@ -150,14 +150,14 @@ try {
     "    EllipticCurve('14a1').padic_lseries(5).frobenius(5)",
     "    print('COMPUTED')",
     "except NotImplementedError as e:",
-    "    print('REFUSED', repr(str(e)), e.need_bytes)",
+    "    print('REFUSED', str(e), e.need_bytes)",
   ].join("\n");
   let override = "";
   if (ENGINE === "webkit") {
     // 1. the production path, first, in a clean worker: no override anywhere yet
     let r = await kd(DETECT + "\n" + REFUSE);
     const want = "the Frobenius matrix at p = 5 to precision 5: the memory estimate for this computation isn't established for this JavaScript engine (jsc (WebKit)); the native package computes it";
-    ok(r.out === `jsc browser jsc (WebKit)\nREFUSED ${JSON.stringify(want).replace(/"/g, "'")} None\n`, `WebKit's worker: JavaScriptCore on a browser host, and the production refusal, exactly (${JSON.stringify(r)})`);
+    ok(r.out === `jsc browser jsc (WebKit)\nREFUSED ${want} None\n`, `WebKit's worker: JavaScriptCore on a browser host, and the production refusal, exactly (${JSON.stringify(r)})`);
     // 2. ... and before the working modulus is made: in a fresh worker whose
     // _kd_modulus raises, the refusal is the same (the modulus never reached)
     r = await kd("import _sage_padic_lseries as L\ndef _sentinel(p, W):\n    raise AssertionError('MODULUS REACHED')\nL._kd_modulus = _sentinel\n" + REFUSE);
