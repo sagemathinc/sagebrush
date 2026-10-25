@@ -252,9 +252,10 @@ for (const [what, p, prec, stage] of [
   // (the plan's p = 401, prec 3 and p = 4001 for stages 4 and 6: the first's
   // reduction lasts 0.2 s in CPython, under progress's 250 ms write
   // interval, and the second reaches stage 6 only after its series, hours
-  // in; at p = 1013, prec 1 both stages last 0.5 s or more, in every host)
-  ["reduce dx/y", 1013, 1, 4],
-  ["check: setup Q^p", 1013, 1, 6],
+  // in; at p = 2003, prec 1, as in CPython and the browser: at p = 1013 a
+  // fast runner can end either stage within one of progress's 250 ms writes)
+  ["reduce dx/y", 2003, 1, 4],
+  ["check: setup Q^p", 2003, 1, 6],
 ] as [string, number, number, number][]) {
   test(`Stop during stage ${stage} (${what}), p = ${p}, prec ${prec}: KeyboardInterrupt within 1 s, the slot released, a later call right`, async () => {
     const r = await stopAt(p, prec, stage);
