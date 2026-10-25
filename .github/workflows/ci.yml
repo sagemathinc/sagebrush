@@ -567,6 +567,8 @@ jobs:
               node web/test-pkgset-page.mjs
               # (the bash shell's loader and its worker's own policy: plan-bash-shell r3 step 1)
               bun web/test-shell.mjs
+              # (ShellHost, the mediator, over a real workspace: step 2)
+              bun web/shell/test-shell-host.mjs
               node web/test-worker-limits.mjs
               node web/test-kedlaya-worker.mjs
               ;;
