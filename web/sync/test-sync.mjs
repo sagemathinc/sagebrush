@@ -123,6 +123,7 @@ fake.limits.set(Z1, plan(true, 100));
 fake.limits.set(P1, sync(1 << 20, 1 << 20));
 fake.limits.set(P2, sync(1 << 20, 1 << 20));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
+for (const t of [TL1, TL2, TL3]) fake.limits.set(t, sync(1 << 20, 1 << 20)); // (the test list's accounts: enable asks for the plan first)
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
