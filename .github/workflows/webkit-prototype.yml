@@ -1,0 +1,74 @@
+# [prototype, do not merge] Kedlaya WebKit follow-up A, plan-kedlaya-webkit-ci
+# r2 section 1: the fail-closed feasibility check (worker heap snapshots
+# through the pinned Playwright's WebKit) and the cache timing (one cold
+# run, then one re-run with the cache warm).  Its own trigger: only a pull
+# request touching these two files runs it.
+name: webkit-prototype
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/webkit-prototype.yml
+      - web/test-webkit-heap-prototype.mjs
+
+concurrency:
+  group: webkit-prototype-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  webkit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PW: "1.57.0"
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "T0=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - name: build (timed)
+        run: |
+          s=$(date +%s)
+          pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
+          echo "build_s=$(( $(date +%s) - s ))" | tee -a "$RUNNER_TEMP/timing.txt"
+      - name: the pinned playwright package (timed)
+        run: |
+          s=$(date +%s)
+          mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw" && echo '{"private": true}' > package.json
+          npm i --no-audit --no-fund "playwright@$PW"
+          echo "npm_s=$(( $(date +%s) - s ))" | tee -a "$RUNNER_TEMP/timing.txt"
+      - id: pwcache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-webkit-${{ runner.os }}-${{ runner.arch }}-${{ env.PW }}
+      - name: WebKit and its system dependencies (timed)
+        run: |
+          s=$(date +%s)
+          cd "$RUNNER_TEMP/pw" && npx playwright install --with-deps webkit
+          echo "install_s=$(( $(date +%s) - s ))" | tee -a "$RUNNER_TEMP/timing.txt"
+          echo "cache_hit=${{ steps.pwcache.outputs.cache-hit }}" | tee -a "$RUNNER_TEMP/timing.txt"
+          echo "cache_dir_bytes=$(du -sb ~/.cache/ms-playwright | cut -f1)" | tee -a "$RUNNER_TEMP/timing.txt"
+          ls ~/.cache/ms-playwright | tee -a "$RUNNER_TEMP/timing.txt"
+      - name: the feasibility check (timed)
+        run: |
+          s=$(date +%s)
+          set +e
+          node web/test-webkit-heap-prototype.mjs "$RUNNER_TEMP/pw" "$RUNNER_TEMP/report.json"
+          rc=$?
+          echo "check_s=$(( $(date +%s) - s ))" | tee -a "$RUNNER_TEMP/timing.txt"
+          echo "job_until_check_s=$(( $(date +%s) - T0 ))" | tee -a "$RUNNER_TEMP/timing.txt"
+          grep -q '"feasible": true' "$RUNNER_TEMP/report.json"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkit-prototype-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/report.json
+            ${{ runner.temp }}/timing.txt
