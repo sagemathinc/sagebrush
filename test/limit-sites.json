@@ -1514,7 +1514,23 @@
   "class": "none",
   "owner": "finite fields + configuration"
  },
+ "lib/_limits.py ::  :: if getattr(_sys, \"_sagebrush_limits_lock\", False): #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
  "lib/_limits.py ::  :: input-size limit on a user's own computation; interrupting is the control). #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: limits, the Node hosts only set that lock, and this module finalizes at its #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: locked the defaults at startup (sys._sagebrush_limits_lock, below). The #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: reads its budgets from the snapshot; the engine hosts (CLI, browser worker) #0": {
   "class": "none",
   "owner": "finite fields + configuration"
  },
@@ -1523,6 +1539,10 @@
   "owner": "finite fields + configuration"
  },
  "lib/_limits.py ::  :: sage: s[\"ff.work\"], s[\"ff.embed_max\"] is L.UNLIMITED #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: sys._sagebrush_limits is the finalized snapshot. #0": {
   "class": "none",
   "owner": "finite fields + configuration"
  },
@@ -3825,6 +3845,26 @@
   "class": "1",
   "owner": "CLI/runtime configuration",
   "row": "src-16"
+ },
+ "src/limits.ts :: lockDefaults :: sys._sagebrush_limits_lock = true; #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "src/limits.ts :: plain :: Object.defineProperty(sys, \"_sagebrush_limits\", { #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "src/limits.ts :: plain :: const plain = (v: any) => Object.defineProperty(sys, \"_sagebrush_limits\", { value: v, writable: true, enumerable: true, configurable: true }); #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "src/limits.ts :: plain :: const v = R.callObj(getattr(R.importModule(\"_limits\"), \"finalize\"), []); #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "src/limits.ts :: startLimits :: if (lim === null && dictGet(R.sysModules, \"_limits\") === undefined) { #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
  },
  "src/limits.ts :: utf8Bytes :: export function utf8Bytes(s: string, max = LIMITS_MAX_BYTES): number { #0": {
   "class": "1",
