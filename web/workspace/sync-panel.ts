@@ -13,8 +13,8 @@
 //   again without a click.
 import type { Workspace } from "./api";
 import { req } from "./db";
-import { switchTo } from "./sync-outbox";
-import { syncOff } from "./sync-pins";
+import { switchToIf } from "./sync-outbox";
+import { readLife, syncOffIf, type LifeMark } from "./sync-pins";
 import { SyncOwner } from "./sync-owner";
 import { accountHash } from "../sync-protocol/protocol";
 import type { Refusal } from "./sync-client";
@@ -132,7 +132,9 @@ export async function askStatus(f: Fetch, signal: AbortSignal): Promise<Answer> 
 export type SectionHost = { say(text: string): void; fail(e: unknown): void; usage(): Promise<{ files: { count: number; bytes: number } }>; confirm?: (text: string) => boolean; prompt?: (text: string) => string | null };
 
 /** The Sync section, drawn into `into`; dispose() (the panel's close) ends its poll and its subscription. */
-export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, opts: { fetch?: Fetch; random?: () => number; after?: (ms: number, f: () => void) => () => void } = {}): { dispose: () => void; poll: PanelPoll; refresh: () => void } {
+/** What the details read gives: the listed paths and the refusals of namespace `ns` (a seam for tests). */
+type DetailsRead = (ns: string) => Promise<[{ count: number; paths: [string, string][] } | undefined, Refusal[] | undefined]>;
+export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, opts: { fetch?: Fetch; random?: () => number; after?: (ms: number, f: () => void) => () => void; readDetails?: DetailsRead } = {}): { dispose: () => void; poll: PanelPoll; refresh: () => void } {
   const f: Fetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const confirmFn = host.confirm ?? ((t: string) => confirm(t)), promptFn = host.prompt ?? ((t: string) => prompt(t));
   const owner = SyncOwner.of(w);
@@ -143,6 +145,13 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   let deleting: { generation: number; account: string } | null = null;
   let note = "";
   let retryAt = 0;
+  // (each draw's generation: a details read started by an older draw, or after close, never touches the panel:
+  // daybreak3's CORR-PR130-1)
+  let renderGen = 0;
+  const readDetails: DetailsRead = opts.readDetails ?? ((ns) => new Promise((ok, no) => {
+    const meta = w.ws.transaction("meta").objectStore("meta");
+    Promise.all([req(meta.get(`sync:${ns}:listed`)), req(meta.get(`sync:${ns}:refused`))]).then((v) => ok(v as any), no);
+  }));
   const poll = new PanelPoll((s) => askStatus(f, s), (a) => answered(a), opts.random, opts.after);
   const unsub = owner.onChange(() => { if (last && !poll.closed) draw(); });
 
@@ -179,6 +188,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   function draw() {
     if (!last) return;
     const st = last.status;
+    renderGen++;
     sec.replaceChildren();
     // (off the allowlist: nothing at all)
     if (!st.available && st.reason === "not_allowlisted") return;
@@ -205,7 +215,12 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     } else sec.append(h("p", { textContent: `Sync is on: ${foot(v.s)}` }), btn("Turn off sync here", () => void off()));
     const lim = owner.limit;
     if (lim && lim.limit_bytes !== null) sec.append(h("p", { className: "note", textContent: `Your plan's storage: ${fmt(lim.used_bytes)} of ${fmt(lim.limit_bytes)} used` }));
-    if (on) void details();
+    if (on) {
+      // (the details' own container, replaced by the read that belongs to this draw, and only by it)
+      const box = h("div", { className: "sync-details" });
+      sec.append(box);
+      void details(renderGen, box);
+    }
     // (delete: only where the server enforces the account precondition (its status carries limit_bytes))
     if (on && "limit_bytes" in st && st.generation) {
       const d = btn("Delete my synced data…", () => void del(), "danger");
@@ -217,20 +232,39 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     }
   }
 
-  async function details() {
-    const ns = (await owner.durable())?.ns;
-    if (!ns || poll.closed) return;
-    const [listed, refused] = await new Promise<[{ count: number; paths: [string, string][] } | undefined, Refusal[] | undefined]>((ok, no) => {
-      const meta = w.ws.transaction("meta").objectStore("meta");
-      Promise.all([req(meta.get(`sync:${ns}:listed`)), req(meta.get(`sync:${ns}:refused`))]).then((v) => ok(v as any), no);
-    });
-    if (listed?.count) sec.append(h("details", {}, h("summary", { textContent: `${listed.count} item${listed.count === 1 ? "" : "s"} sync kept aside` }), ...listed.paths.slice(0, 20).map(([p, why]) => h("div", { textContent: `${p} (${why})` }))));
-    if (refused?.length) sec.append(h("details", {}, h("summary", { textContent: `${refused.length} change${refused.length === 1 ? "" : "s"} the server refused` }), ...refused.slice(-20).map((r) => h("div", { textContent: `${r.path || "(no path)"}: ${r.code}` }))));
+  /** The details of draw `gen`, into its own container: after each await, nothing is done unless that draw is still
+   * the newest, the panel open, and the lifecycle the one it read (no stale, duplicate or late blocks); a failed read
+   * is said in the container, never left unhandled. */
+  async function details(gen: number, box: HTMLElement) {
+    const current = () => gen === renderGen && !poll.closed && box.isConnected;
+    try {
+      const life = await owner.durable();
+      if (!life || !current()) return;
+      const [listed, refused] = await readDetails(life.ns);
+      const now = await owner.durable();
+      if (!current() || !now || now.ns !== life.ns || now.epoch !== life.epoch) return;
+      const parts: HTMLElement[] = [];
+      if (listed?.count) parts.push(h("details", {}, h("summary", { textContent: `${listed.count} item${listed.count === 1 ? "" : "s"} sync kept aside` }), ...listed.paths.slice(0, 20).map(([p, why]) => h("div", { textContent: `${p} (${why})` }))));
+      if (refused?.length) parts.push(h("details", {}, h("summary", { textContent: `${refused.length} change${refused.length === 1 ? "" : "s"} the server refused` }), ...refused.slice(-20).map((r) => h("div", { textContent: `${r.path || "(no path)"}: ${r.code}` }))));
+      box.replaceChildren(...parts);
+    } catch {
+      if (current()) box.replaceChildren(h("p", { className: "note", textContent: "This browser's sync details can't be read now" }));
+    }
+  }
+  /** syncOff as a compare-and-set against the lifecycle the action saw (astra3's CORR-PR130-1): a late answer never
+   * turns off a newer lifecycle.  Returns whether it applied; when it didn't, the note says so. */
+  async function offIf(mark: LifeMark, kind: "off" | "deleting"): Promise<boolean> {
+    const applied = await syncOffIf(w, mark);
+    if (applied) owner.nudge(kind);
+    else note = (note ? note + ". " : "") + "This browser's sync changed meanwhile (another tab), so it was left as it is";
+    return applied;
   }
 
   async function enable() {
     const st = last?.status, bound = last?.account ?? null;
     if (!st) return;
+    // (the lifecycle this action saw: the answer is applied here only if it is still the one)
+    const mark = await readLife(w);
     const use = await host.usage();
     const supported = "limit_bytes" in st;
     const lim = supported && st.limit_bytes !== null && st.limit_bytes !== undefined ? `\nYour plan's storage: ${fmt(st.used_bytes ?? 0)} of ${fmt(st.limit_bytes)} used.` : "";
@@ -260,7 +294,11 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       note = body.message ?? body.error ?? `Sync couldn't be turned on (${r.status})`;
       return poll.request();
     }
-    await switchTo(w, `${bound}:${body.generation}:${w.device}`);
+    const lease = await switchToIf(w, `${bound}:${body.generation}:${w.device}`, mark);
+    if (!lease) {
+      note = "Sync was turned on for your account, but this browser's sync changed meanwhile (another tab), so it was left as it is";
+      return poll.request();
+    }
     note = "";
     owner.nudge("on");
     host.say("Sync turned on");
@@ -268,15 +306,14 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   }
 
   async function off() {
-    await syncOff(w);
-    owner.nudge("off");
-    host.say("Sync turned off here: this browser's copy stays as it is");
+    if (await offIf(await readLife(w), "off")) host.say("Sync turned off here: this browser's copy stays as it is");
     poll.request();
   }
 
   async function del() {
     const st = last?.status, account = last?.account;
     if (!st || !account || !st.generation || Date.now() < retryAt) return;
+    const mark = await readLife(w);
     const typed = promptFn('Delete your synced data? This deletes what sync keeps on the server for your account; this browser\'s copy stays. Type "delete" to confirm.');
     if (typed !== "delete") return;
     const generation = st.generation;
@@ -284,7 +321,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     try {
       r = await f("/api/sync/v1/delete", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: "delete", generation, account }) });
     } catch {
-      return lost(generation, account);
+      return lost(generation, account, mark);
     }
     const body = (await r.json().catch(() => ({}))) as { state?: string; error?: string; message?: string; retry_after?: number };
     if (r.status === 409 && body.error === "account_mismatch") {
@@ -304,10 +341,9 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       return draw();
     }
     if (body.state === "deleting") {
-      await syncOff(w);
-      owner.nudge("deleting");
-      deleting = { generation, account };
       note = "";
+      await offIf(mark, "deleting");
+      deleting = { generation, account };
       draw();
       poll.later(PANEL.minMs);
       return;
@@ -317,27 +353,24 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       return poll.request();
     }
     if (body.state === "none") {
-      await syncOff(w);
-      owner.nudge("off");
       note = "There's no synced data to delete";
+      await offIf(mark, "off");
       return poll.request();
     }
-    return lost(generation, account);
+    return lost(generation, account, mark);
   }
   /** A delete whose answer was lost: one read-only status decides; nothing is POSTed again without a click. */
-  async function lost(generation: number, account: string) {
+  async function lost(generation: number, account: string, mark: LifeMark) {
     const a = await askStatus(f, new AbortController().signal);
     if (poll.closed) return;
     note = "Couldn't confirm the deletion";
     if (a.ok && a.account === account) {
       if (a.status.state === "deleting") {
-        await syncOff(w);
-        owner.nudge("deleting");
+        await offIf(mark, "deleting");
         deleting = { generation, account };
       } else if (a.status.state === "off") {
-        await syncOff(w);
-        owner.nudge("off");
         note = "There's no synced data to delete";
+        await offIf(mark, "off");
       } else if ((a.status.generation ?? 0) > generation) note = "Sync was turned on again since; confirm again to delete the current data";
       else note = "Couldn't confirm the deletion: Delete again to send it once more";
     }
@@ -345,7 +378,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   }
 
   poll.request();
-  return { dispose: () => { poll.close(); unsub(); }, poll, refresh: () => poll.request() };
+  return { dispose: () => { poll.close(); renderGen++; unsub(); }, poll, refresh: () => poll.request() };
 }
 
 /** The foot's words for a snapshot (r2 §2.3). */

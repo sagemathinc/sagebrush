@@ -1860,6 +1860,7 @@ function fakeServer(status, account = "acct-x") {
       s.posts.push(path);
       if (path.endsWith("/delete")) s.deletes.push(JSON.parse(init.body));
       const a = s.next.shift() ?? { status: 202, body: { state: "deleting" } };
+      if (a.gate) await a.gate;
       if (a.throw) throw new TypeError("lost");
       return new Response(JSON.stringify(a.body ?? {}), { status: a.status, headers: { "content-type": "application/json", ...(a.headers ?? {}) } });
     }
@@ -2090,7 +2091,204 @@ async function s5Rows() {
   owner.destroy();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows };
+// ---- step 5, review round 1 (#130): astra3's CORR-PR130-1/2, daybreak3's CORR-PR130-1 and TEST-PR130-2
+
+/** A gate: a promise and the function that opens it. */
+function gate() { let open; const p = new Promise((ok) => (open = ok)); return { p, open }; }
+/** A namespace of this device's shape: `lead` repeated as the account, then the generation. */
+const nsFor = (w, lead, gen = 1) => `${lead.repeat(64)}:${gen}:${w.device}`;
+const click = (el, re) => [...el.querySelectorAll("button")].find((b) => re.test(b.textContent)).click();
+
+async function s5Races() {
+  // (astra3's CORR-PR130-1: a late delete or enable answer is applied here only if this browser's lifecycle is still
+  // the one the action saw; another tab's newer lifecycle is never turned off or replaced)
+  const status = { available: true, state: "active", generation: 3, limit_bytes: 1000, used_bytes: 10 };
+  const lease = (w) => metaGet(w.ws, "sync:current");
+  const delCase = async (answer, what, change) => {
+    const w = await fresh();
+    await W.switchTo(w, nsFor(w, "a"));
+    let st = { ...status };
+    const el = document.createElement("div"), srv = fakeServer(() => st), g = gate();
+    srv.next = [{ ...answer, gate: g.p }];
+    const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch });
+    await until(() => /Delete my synced data/.test(buttons(el).join()), 3000);
+    click(el, /Delete my synced data/);
+    await until(() => srv.deletes.length === 1, 3000);
+    // (meanwhile, another tab of this browser turns on B: a newer lifecycle in the shared workspace)
+    const nsB = nsFor(w, "b");
+    if (change) await W.switchTo(w, nsB);
+    if (answer.throw) st = { ...status, state: "deleting" };
+    g.open();
+    await until(() => /changed meanwhile|Deleting your synced data|no synced data/.test(text(el) + buttons(el).join()), 3000);
+    await sleep(100);
+    const l = await lease(w);
+    if (change) check(l.ns === nsB && !l.off && /changed meanwhile/.test(text(el)), `races: delete answered ${what} after another tab turned on B: B left on, and said: ` + J({ l, note: text(el).slice(0, 160) }));
+    else check(l.off === true, `races: delete answered ${what}, nothing changed meanwhile: sync off here, as before: ` + J(l));
+    s.dispose();
+  };
+  await delCase({ status: 202, body: { state: "deleting" } }, "deleting", true);
+  await delCase({ status: 202, body: { state: "none" } }, "none", true);
+  await delCase({ throw: true }, "lost (status then says deleting)", true);
+  await delCase({ status: 202, body: { state: "deleting" } }, "deleting", false);
+  // (a late enable, the panel closed meanwhile too: never replaces a newer lifecycle; with nothing changed, applied)
+  for (const change of [true, false]) {
+    const w = await fresh();
+    const el = document.createElement("div"), srv = fakeServer({ available: true, state: "off", limit_bytes: null, used_bytes: 0 }), g = gate();
+    srv.next = [{ status: 200, body: { state: "active", generation: 9 }, gate: g.p }];
+    const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch });
+    await until(() => /Turn on sync/.test(buttons(el).join()), 3000);
+    click(el, /Turn on sync/);
+    await until(() => srv.posts.length === 1, 3000);
+    const nsB = nsFor(w, "e");
+    if (change) await W.switchTo(w, nsB);
+    s.dispose();
+    g.open();
+    await sleep(300);
+    const l = await lease(w);
+    if (change) check(l.ns === nsB && !l.off, "races: an enable answered after another tab turned on B (the panel closed): B kept: " + J(l));
+    else check(l && /:9:/.test(l.ns) && !l.off, "races: an enable answered with nothing changed meanwhile: applied: " + J(l));
+  }
+}
+
+async function s5Takeover() {
+  // (astra3's CORR-PR130-2: the holder's connection drops and another tab takes the lock while it rediscovers; the
+  // former holder follows the new holder's foot and publishes nothing, even asked)
+  await account();
+  const nm = names();
+  const w1 = await fresh(nm), w2 = await fresh(nm);
+  const o1 = W.SyncOwner.of(w1, { origin: location.origin });
+  o1.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w1, el, hostOf(w1));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  click(el, /Turn on sync/);
+  check(await until(() => o1.view().s.state === "synced" && o1.isHolder(), 15_000), "takeover: the first tab holds and syncs");
+  const o2 = W.SyncOwner.of(w2, { origin: location.origin });
+  o2.start();
+  check(await until(() => o2.client !== null && !o2.isHolder(), 5000), "takeover: the second tab waits for the lock");
+  await ctl("closeAll");
+  check(await until(() => o2.isHolder() && !o1.isHolder() && o2.view().s.state === "synced", 20_000), "takeover: the second tab took the lock while the first rediscovered; the first no longer holds: " + J({ o1: o1.isHolder(), o2: o2.isHolder() }));
+  check(await until(() => o1.view().from === "holder" && o1.view().s.state === "synced", 5000), "takeover: the former holder's foot follows the new holder: " + J(o1.view()));
+  const p0 = o1.stats.published;
+  const cur = await metaGet(w1.ws, "sync:current"), epoch = (await metaGet(w1.ws, "sync:epoch")) ?? 0;
+  const ch = new BroadcastChannel(`sagebrush-sync-status:${w1.ws.name}:${cur.ns}`);
+  ch.postMessage({ t: "status?", ns: cur.ns, epoch });
+  await sleep(1500);
+  ch.close();
+  check(!o1.isHolder() && o1.stats.published === p0, "takeover: the former holder publishes nothing while it doesn't hold: " + J({ before: p0, after: o1.stats.published }));
+  s.dispose();
+  o2.destroy();
+  o1.destroy();
+}
+
+async function s5Details() {
+  // (daybreak3's CORR-PR130-1: details reads resolved out of order, across a lifecycle switch, after close: only the
+  // newest draw's read renders, once, in its own container; nothing touches the panel after close; a failure is said)
+  const w = await fresh();
+  await W.switchTo(w, nsFor(w, "f"));
+  const reads = [];
+  const readDetails = () => { const g = gate(); reads.push(g); return g.p; };
+  const el = document.createElement("div"), srv = fakeServer({ available: true, state: "active", generation: 2 });
+  const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch, readDetails });
+  const result = (n) => [{ count: n, paths: [["/p" + n, "conflict"]] }, []];
+  const blocks = () => [...el.querySelectorAll("details > summary")].map((d) => d.textContent);
+  await until(() => reads.length >= 1, 3000);
+  const n1 = reads.length;
+  s.refresh();
+  await until(() => reads.length > n1, 3000);
+  // (the newest first, then every older one: the older answers, resolved last, are dropped)
+  reads.at(-1).open(result(2));
+  await sleep(100);
+  for (const r of reads.slice(0, -1)) r.open(result(1));
+  await sleep(150);
+  check(J(blocks()) === J(["2 items sync kept aside"]), "details: older reads resolved last never render; one block, the newest: " + J(blocks()));
+  // (a read across a lifecycle switch: not rendered)
+  const n2 = reads.length;
+  s.refresh();
+  await until(() => reads.length > n2, 3000);
+  const across = reads.at(-1);
+  await W.switchTo(w, nsFor(w, "g"));
+  across.open(result(3));
+  await sleep(150);
+  check(!blocks().includes("3 items sync kept aside"), "details: a read across a lifecycle switch is not rendered: " + J(blocks()));
+  // (a failed read: said in its own container, nothing unhandled)
+  const n3 = reads.length;
+  s.refresh();
+  await until(() => reads.length > n3, 3000);
+  for (const r of reads.slice(n3, -1)) r.open(result(4));
+  reads.at(-1).open(Promise.reject(new Error("read failed")));
+  await sleep(150);
+  check(/sync details can't be read now/.test(text(el)) && blocks().length === 0, "details: a failed read is said in its container: " + text(el).slice(0, 160));
+  // (closed with a read pending: nothing changes after)
+  const n4 = reads.length;
+  s.refresh();
+  await until(() => reads.length > n4, 3000);
+  const before = el.innerHTML;
+  s.dispose();
+  for (const r of reads.slice(n4)) r.open(result(9));
+  await sleep(150);
+  check(el.innerHTML === before, "details: reads resolved after close change nothing");
+}
+
+async function s5Flood() {
+  // (daybreak3's TEST-PR130-2, plan r4 §4: status? at 1,000 a second for 10 s; a follower opened during it answered by
+  // the next slot; the holder killed during it and a waiting tab taking over; every publication within 512 UTF-8
+  // bytes; at most one per STATUS_PUB.minGapMs per holder)
+  await account();
+  const nm = names();
+  const w1 = await fresh(nm), w2 = await fresh(nm);
+  const o1 = W.SyncOwner.of(w1, { origin: location.origin });
+  o1.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w1, el, hostOf(w1));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  click(el, /Turn on sync/);
+  check(await until(() => o1.view().s.state === "synced" && o1.isHolder(), 15_000), "flood: the first tab holds");
+  const o2 = W.SyncOwner.of(w2, { origin: location.origin });
+  o2.start();
+  await until(() => o2.client !== null, 5000);
+  const ns = (await metaGet(w1.ws, "sync:current")).ns, epoch = (await metaGet(w1.ws, "sync:epoch")) ?? 0;
+  const name = `sagebrush-sync-status:${w1.ws.name}:${ns}`;
+  const tap = new BroadcastChannel(name), flood = new BroadcastChannel(name);
+  const pubs = [];
+  tap.onmessage = (ev) => { if (ev.data?.t === "status") pubs.push({ at: performance.now(), gen: ev.data.gen, bytes: new TextEncoder().encode(JSON.stringify(ev.data)).length }); };
+  const t0 = performance.now();
+  let asked = 0, got = 0, o3 = null, killed = false, sent = 0;
+  for (let tick = 0; tick < 100; tick++) {
+    for (let i = 0; i < 100; i++) flood.postMessage({ t: "status?", ns, epoch });
+    sent += 100;
+    const now = performance.now() - t0;
+    // (at 3 s a follower opens; at 6 s the holder dies)
+    if (!o3 && now > 3000) {
+      const w3 = await fresh(nm);
+      o3 = W.SyncOwner.of(w3, { origin: location.origin });
+      asked = performance.now();
+      o3.start();
+    }
+    if (o3 && !got && o3.view().from === "holder") got = performance.now();
+    if (!killed && now > 6000) { killed = true; o1.destroy(); }
+    await sleep(Math.max(0, t0 + (tick + 1) * 100 - performance.now()));
+  }
+  const secs = (performance.now() - t0) / 1000;
+  await sleep(1500);
+  const byGen = {};
+  for (const p of pubs) (byGen[p.gen] ??= []).push(p.at);
+  let gap = Infinity;
+  for (const ats of Object.values(byGen)) for (let i = 1; i < ats.length; i++) gap = Math.min(gap, ats[i] - ats[i - 1]);
+  const maxBytes = Math.max(0, ...pubs.map((p) => p.bytes));
+  check(sent === 10_000 && secs < 12 && pubs.length > 0 && gap >= W.STATUS_PUB.minGapMs - 50 && maxBytes <= 512, `flood: ${sent} status? over ${secs.toFixed(1)} s: ${pubs.length} publications, the least gap per holder ${Math.round(gap)} ms (${W.STATUS_PUB.minGapMs}), each at most ${maxBytes} UTF-8 bytes (512)`);
+  check(got && got - asked <= 2000, `flood: the follower opened during it got the holder's snapshot ${Math.round(got - asked)} ms after starting (the next slot)`);
+  const gens = Object.keys(byGen).map(Number), top = Math.max(...gens);
+  check((o2.isHolder() || o3.isHolder()) && gens.length >= 2, "flood: the holder killed mid-flood: a waiting tab took over and published under a newer gen: " + J(gens));
+  check(await until(() => [o2, o3].filter((o) => !o.isHolder()).every((o) => o.holder?.gen === top && o.view().from === "holder"), 3000), "flood: the followers follow the new holder");
+  tap.close();
+  flood.close();
+  s.dispose();
+  o3.destroy();
+  o2.destroy();
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

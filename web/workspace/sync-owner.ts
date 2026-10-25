@@ -219,6 +219,7 @@ export class SyncOwner {
       ...this.opts,
       lifecycle: { ns: l.ns, epoch: l.epoch, fence: () => this.holds(l) },
       onLease: (lease) => this.becameHolder(l, lease.gen),
+      onRelease: () => this.demote(),
     });
     this.client = c;
     this.unStatus = c.onStatus((s) => {
@@ -305,6 +306,8 @@ export class SyncOwner {
       this.publish(true);
       return;
     }
+    // (a holder newer than this page's own token: this page holds no longer)
+    if ((m.t === "holder" || m.t === "status") && this.isHolder() && m.gen > this.gen) this.demote();
     if (m.t === "holder") {
       if (m.gen > (this.holder?.gen ?? 0) && m.gen !== this.gen) {
         this.holder = { gen: m.gen, rev: 0, snapshot: null };
@@ -321,6 +324,18 @@ export class SyncOwner {
       void this.checkLock();
       this.changed();
     }
+  }
+  /** No longer the holder (the lock let go, or a newer holder announced): its token and pending publication dropped, so
+   * nothing more is published under it, and the foot follows the current holder (astra3's CORR-PR130-2).  The client
+   * stays: it may take the lock again, through its lifecycle fence. */
+  private demote() {
+    if (!this.gen) return;
+    this.gen = 0;
+    this.forced = false;
+    if (this.slot) clearTimeout(this.slot);
+    this.slot = null;
+    void this.checkLock();
+    this.changed();
   }
   /** This page's connection renewed the lease: it is the holder, its token `gen`; announced, then its status. */
   private becameHolder(l: Life, gen: number) {

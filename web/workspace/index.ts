@@ -25,6 +25,8 @@ export { REPLAY, PLAN_STATE, runReplay, replayOf, markerKey, lateKey, SENDER_HOL
 export { crecordKey, setConfirmedCut, drainConfirmed, LARGE_LOG, type CRecord } from "./sync-confirmed";
 export { reduceAll, SyncIndex } from "./sync-reduce";
 export { SyncOwner, startSync, STATUS_PUB, OWNER, type Snapshot } from "./sync-owner";
+export { readLife, syncOffIf, sameLife, type LifeMark } from "./sync-pins";
+export { switchToIf } from "./sync-outbox";
 export { syncSection, PanelPoll, PANEL, clampDelay, askStatus, foot } from "./sync-panel";
 export { renewLease } from "./sync-outbox";
 export { rowIcons, ROWICON } from "./sync-rows";

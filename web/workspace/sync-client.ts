@@ -131,6 +131,8 @@ export type ClientOptions = {
   lifecycle?: { ns: string; epoch: number; fence: () => Promise<boolean> };
   /** (step 5) each lease this client's connection took: the holder's token */
   onLease?: (lease: Lease) => void;
+  /** (step 5) the sender lock let go (the connection ended; the client may ask for it again): no longer the holder */
+  onRelease?: () => void;
 };
 
 const key = (ns: string, what: string) => `sync:${ns}:${what}`;
@@ -362,11 +364,16 @@ export class SyncClient {
     this.say({ state: "waiting", ns });
     try {
       return await sender(ns, async () => {
-        // (holding the lock now: still eligible?)
-        if (this.opts.lifecycle && !(await this.opts.lifecycle.fence())) return "fenced";
-        await this.loadDurable(ns);
-        // (one connection at a time; after one ends, the namespace is asked again, unless it ended for good)
-        return this.connection(ns);
+        try {
+          // (holding the lock now: still eligible?)
+          if (this.opts.lifecycle && !(await this.opts.lifecycle.fence())) return "fenced";
+          await this.loadDurable(ns);
+          // (one connection at a time; after one ends, the namespace is asked again, unless it ended for good)
+          return await this.connection(ns);
+        } finally {
+          // (the lock goes with this callback's return: this page holds it no more, whatever comes next)
+          this.opts.onRelease?.();
+        }
       }, { signal: this.abort.signal });
     } catch (e) {
       if (this.stopped) return "stopped";
