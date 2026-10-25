@@ -143,8 +143,9 @@ print(sm.matrix(ZZ, 2, 2, Odd({(1, 1): 5})).list())
   assert.equal(
     out,
     [
-      "NotImplementedError a 1000000000001 x 1000000000001 matrix exceeds sagebrush's limit of 4194304 entries",
-      "NotImplementedError a 1000000 x 1000000 matrix exceeds sagebrush's limit of 4194304 entries",
+      // (_shape's refusal: the memory guards' error for a fixed limit, item D1)
+      "SagebrushMemoryError This computation is larger than Sagebrush allows.\nA 1000000000001 x 1000000000001 matrix needs about 8000000000016001 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix.\nThis limit is the same whatever memory there is: more memory or a larger\nmachine won't help.",
+      "SagebrushMemoryError This computation is larger than Sagebrush allows.\nA 1000000 x 1000000 matrix needs about 8000 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix.\nThis limit is the same whatever memory there is: more memory or a larger\nmachine won't help.",
       "TypeError 'sage.rings.real_mpfr.RealLiteral' object cannot be interpreted as an integer",
       "[(1000000000001, 1000000000001), (1000000, 1000000)]",
       "ValueError more than 5 entries",
