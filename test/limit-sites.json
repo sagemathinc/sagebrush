@@ -1427,7 +1427,7 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: engine_rows :: rows.append({\"source\": b[\"source\"], \"figure\": b[\"limit\"], \"joint\": any(d in host for d in b[\"constrains\"])}) #0": {
+ "lib/_capacity.py :: engine_rows :: rows.append({\"source\": b[\"source\"], \"figure\": b[\"limit\"], \"joint\": joint}) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
