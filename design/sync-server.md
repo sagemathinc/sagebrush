@@ -498,7 +498,9 @@ where only sync's document batches ever use the ceiling. Sharing, and every file
 
 **Without a known limit** (CoCalc unreachable, nothing cached): writes that fit the claim already held go on; anything needing a raise answers `busy` with `retry_after`, never `storage_full` and never unlimited.
 
-### 6.2 After a membership ends
+### 6.2 After a plan stops including sync
+
+(Oct 25 wording: this section applies when the account's plan no longer includes sync, that is `sync.enabled` is false: a tier without sync, or an admin change. A membership ending to a tier that still includes sync, such as free once its sync is on, doesn't end sync. Over that tier's `storage_bytes`, new files stop uploading and nothing is deleted, §6.1.)
 
 William's decision (Oct 19): read-only, then deleted after a retention period, with email first.
 
