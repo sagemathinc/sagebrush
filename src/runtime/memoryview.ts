@@ -199,3 +199,5 @@ Ty.getset(MV, "released", (m: PyMemoryView) => m.released);
 MV.$dict.set("__class_getitem__", Ty.genericClassGetitem);
 builtins.memoryview = MV;
 O.bufferHooks.push((x) => (x instanceof PyMemoryView ? x.bytes() : undefined));
+// (a contiguous one's bytes as a view, for int(): no copy)
+O.bufferViewHooks.push((x) => (x instanceof PyMemoryView && x.step === 1 ? x.raw().subarray(x.start, x.start + x.n * x.itemsize) : undefined));

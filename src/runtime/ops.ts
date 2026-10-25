@@ -581,6 +581,29 @@ export function bitLength(x: bigint, max?: number): number {
 // down by 1/64 at a time, a shift past x's bits being 0 at once, until one is
 // not; its result has fewer bits than the step, and x's length is the shift
 // plus that result's.
+// The bit length of |x| within one, [lo, hi], with small copies only: a
+// negative x is not negated (its limbs are not copied).  Its shifts round
+// towards minus infinity, so -(x >> t) is ceil(|x| / 2^t), whose length is
+// that of floor(|x| / 2^t) or one more.
+export function bitLengthSmallCopiesSigned(x: bigint): [number, number] {
+  if (x >= 0n || x > -BIG) {
+    const b = bitLengthSmallCopies(x);
+    return [b, b];
+  }
+  for (let s = 2 ** 30; s > 1024; ) {
+    const t = s - Math.max(1, s >> 6);
+    const r = x >> BigInt(t);
+    // (r is -1 while |x| <= 2^t)
+    if (r < -1n) {
+      const b = t + bitLength(-r);
+      return [b - 1, b];
+    }
+    s = t;
+  }
+  const b = bitLength(x);
+  return [b, b];
+}
+
 export function bitLengthSmallCopies(x: bigint): number {
   x = absBig(x);
   if (x < BIG) return x === 0n ? 0 : x.toString(2).length;
@@ -2409,6 +2432,18 @@ export const arrayHooks: { cls: any; get: any; set: any } = { cls: null, get: nu
 // The bytes of an object supporting the buffer protocol (bytes, bytearray,
 // array.array, memoryview), or undefined.
 export const bufferHooks: ((x: any) => Uint8Array | undefined)[] = [];
+// The bytes of a bytes-like object as a view where it has one (a
+// contiguous memoryview's, not a copy of them), else as bufferOf: for a
+// reader that reads them once and keeps nothing (int()).
+export const bufferViewHooks: ((x: any) => Uint8Array | undefined)[] = [];
+export function bufferViewOf(x: any): Uint8Array | undefined {
+  for (const h of bufferViewHooks) {
+    const r = h(x);
+    if (r !== undefined) return r;
+  }
+  return bufferOf(x);
+}
+
 export function bufferOf(x: any): Uint8Array | undefined {
   if (x instanceof PyBytes) return x.a.subarray(0, x.n);
   if (arrayHooks.cls !== null && x instanceof arrayHooks.cls) return x.bytes();
