@@ -30,7 +30,20 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
     await new Promise((r) => (ws.onopen = r));
     let n = 0;
     const waiting = new Map();
-    ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
+    // (a JavaScript dialog blocks the page until it is answered: the notebook's own confirm() on a
+    // language change, which pilots 3-5 misread as a frozen page; each one is accepted and recorded)
+    result.dialogs = [];
+    let dialogOpen = null;
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); return; }
+      if (m.method === "Page.javascriptDialogOpening") {
+        dialogOpen = { type: m.params.type, message: String(m.params.message).slice(0, 200) };
+        result.dialogs.push({ ...dialogOpen, accepted: true });
+        ws.send(JSON.stringify({ id: ++n, method: "Page.handleJavaScriptDialog", params: { accept: true } }));
+      }
+      if (m.method === "Page.javascriptDialogClosed") dialogOpen = null;
+    };
     // (every CDP call has a deadline: one that never answers fails its trial, not the whole run; pilot 3 hung ~20 min)
     const CDP_MS = 30_000;
     const send = (method, params = {}, ms = CDP_MS) => new Promise((r, rej) => {
@@ -48,6 +61,7 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
     const start = (code) => ev(`(() => { const cs = [...document.querySelectorAll('.cell')]; let c = cs.at(-1); if (c.querySelector('textarea').value.trim()) { document.querySelector('#add').click(); c = [...document.querySelectorAll('.cell')].at(-1); } const ta = c.querySelector('textarea'); ta.value = ${JSON.stringify(code)}; ta.dispatchEvent(new Event('input', {bubbles: true})); c.querySelector('[data-a=run]').click(); })()`);
     const workers = async () => ((await send("Target.getTargets"))?.targetInfos ?? []).filter((t) => t.type === "worker").map((t) => ({ id: t.targetId, url: t.url }));
     const memory = async () => { try { return await ev("Promise.race([performance.measureUserAgentSpecificMemory().then(m => m.bytes), new Promise(r => setTimeout(() => r(null), 15000))])"); } catch { return null; } };
+    await send("Page.enable");
     await send("Page.navigate", { url });
     await until("document.querySelector('#status')?.textContent.startsWith('ready')");
     result.isolated = await ev("crossOriginIsolated");
@@ -87,10 +101,13 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
       try {
         await setMode(c.mode);
       } catch (e) {
-        // the page itself stopped answering after the mode switch (slot 5: over 200 s with no answer to
-        // a trivial evaluate): a product failure, not an unobservable harness, so FAIL, matched against
-        // the baseline like any other failure
-        const row = { case: c.id, host: "browser", outcome: "FAIL", why: "mode " + c.mode + ": the page did not answer after the switch: " + String(e?.message ?? e).slice(0, 200), out: (await state().catch(() => ({ out: "" }))).out.slice(-600) };
+        // the page stopped answering after the mode switch: with a JavaScript dialog still open, that is
+        // the harness's setup (INVALID, the dialog named); with none, the page itself is stuck (FAIL,
+        // matched against the baseline like any other failure)
+        const why = dialogOpen
+          ? `mode ${c.mode}: a ${dialogOpen.type} dialog is open ("${dialogOpen.message}"), so the page can't answer`
+          : "mode " + c.mode + ": the page did not answer after the switch, with no dialog open: " + String(e?.message ?? e).slice(0, 200);
+        const row = { case: c.id, host: "browser", outcome: dialogOpen ? "INVALID" : "FAIL", why, out: (await state().catch(() => ({ out: "" }))).out.slice(-600) };
         row.own_outcome = row.outcome;
         row.outcome = againstBaseline({ ...row, trials: [{ outcome: "FAIL", why: row.why }] }, baseline);
         invalid(row);
