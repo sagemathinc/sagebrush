@@ -26,7 +26,7 @@ import { inTx, req } from "./db";
 import { entriesOf } from "./sync-rewrite";
 import { jsonTextSize } from "../notebook/stores.js";
 import { genKey, genPrefix } from "./sync-confirmed";
-import { RELEASE_STORES, afterReleases, metaWrite, newEpoch, epochOf, pendingOf, stateOf, putPending, release, pinPresent, pinOfCurrent, type NsState, type Pin } from "./sync-pins";
+import { RELEASE_STORES, afterReleases, metaWrite, newEpoch, epochOf, lifeMarkOf, sameLife, type LifeMark, pendingOf, stateOf, putPending, release, pinPresent, pinOfCurrent, type NsState, type Pin } from "./sync-pins";
 import { LedgerTx, isWire, queueObsolete, cleanObsoleteStep, hubOf } from "./sync-ledger";
 
 export const OUTBOX = {
@@ -127,12 +127,21 @@ export function wireOf(o: Op, dseq: number): WireOp | null {
 /** The sync state's current lease: the namespace in use and its generation; a new lease for `ns` (`switchTo`)
  * starts the next generation, in one transaction, so every lease taken before is fenced. */
 export async function switchTo(w: Workspace, ns: string): Promise<Lease> {
+  return (await switchToIf(w, ns))!;
+}
+/** switchTo, and with `expect` only as a compare-and-set (step 5, astra3's CORR-PR130-1): if this browser's lifecycle is
+ * still the one the action saw, in the same transaction; otherwise nothing is written and null is returned (a late
+ * enable never replaces a newer lifecycle). */
+export async function switchToIf(w: Workspace, ns: string, expect?: LifeMark): Promise<Lease | null> {
   checkNs(ns);
   for (;;) {
     const r = await inTx(w.ws, "meta", "readwrite", async (tx) => {
       const meta = tx.objectStore("meta"), cur = (await req(meta.get(CURRENT))) as (Lease & { off?: boolean }) | undefined;
+      // (step 5: the lifecycle the action saw, checked first in this transaction: a late enable writes nothing, not
+      // even the ledger's queue)
+      if (expect && !sameLife(await lifeMarkOf(meta), expect)) return { stale: true as const };
       // (task #14: the namespace left queued for its ledger's deletion, the one taken out of the queue; a full queue:
-      // nothing done, one cleanup step, and again)
+      // nothing done, one cleanup step, and again (the compare-and-set read again in the next transaction))
       if (!(await queueObsolete(meta, cur?.ns, ns))) return null;
       const lease = { ns, gen: (cur?.gen ?? 0) + 1 };
       metaWrite(meta, CURRENT, lease);
@@ -150,12 +159,28 @@ export async function switchTo(w: Workspace, ns: string): Promise<Lease> {
       await cleanObsoleteStep(w);
       continue;
     }
+    if ("stale" in r) return null;
     // (the waits of the namespace left told their epoch ended, by type (task #14))
     if (r.ended) hubOf(w.ws).post({ t: "lifecycle", ns: r.ended.ns, fromEpoch: r.ended.fromEpoch, toEpoch: r.ended.fromEpoch + 1, kind: "switch" });
     // (another namespace: the old one's purge, begun)
     afterReleases(w);
     return r.lease;
   }
+}
+/** A connection's renewal of its lease (step 5, plan r4 §2.1): a compare-and-set in one transaction.  The lease must
+ * still be `ns`'s, not off, and the lifecycle epoch still `epoch`: then its generation is raised (the new holder's
+ * token, which fences what an older one took), else Fenced and nothing written.  It never clears `off` and never
+ * moves the epoch: only the enable flow (switchTo) does that. */
+export async function renewLease(w: Workspace, ns: string, epoch: number): Promise<Lease> {
+  checkNs(ns);
+  return inTx(w.ws, "meta", "readwrite", async (tx) => {
+    const meta = tx.objectStore("meta"), cur = (await req(meta.get(CURRENT))) as (Lease & { off?: boolean }) | undefined;
+    const e = ((await req(meta.get("sync:epoch"))) as number | undefined) ?? 0;
+    if (!cur || cur.off || cur.ns !== ns || e !== epoch) throw new Fenced({ ns, gen: cur?.gen ?? 0 });
+    const lease = { ns, gen: cur.gen + 1 };
+    metaWrite(meta, CURRENT, lease);
+    return lease;
+  });
 }
 /** The current lease, if any. */
 export async function currentLease(w: Workspace): Promise<Lease | undefined> {

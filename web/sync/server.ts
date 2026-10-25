@@ -147,8 +147,12 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   // registers anything.  Off the allowlist it is answered here, before any object is asked (the page
   // hides its switch then: the reason is for the page's logic, not to show)
   if (p === "/api/sync/v1/status" && m === "GET") {
-    if (!allowed(env, who.id)) return json({ available: false, reason: "not_allowlisted", state: "off" });
-    return json(await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + (await accountHash(who.id)))).status({ account: who.id }));
+    // (the account the answer is for, as its hash: from this same request's session, never from anything the caller
+    // sends; the page checks it against /api/share/me's, so an answer computed for another session is never taken as
+    // its own (PR #130, astra3's CORR-PR130-4))
+    const account = await accountHash(who.id);
+    if (!allowed(env, who.id)) return json({ available: false, reason: "not_allowlisted", state: "off", account });
+    return json({ ...(await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + account)).status({ account: who.id })), account });
   }
   if (!allowed(env, who.id)) return err(403, "sync isn't enabled for this account");
   const hash = await accountHash(who.id);
