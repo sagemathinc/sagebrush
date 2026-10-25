@@ -2188,11 +2188,12 @@ async function s5Details() {
   await W.switchTo(w, nsFor(w, "f"));
   const reads = [];
   const readDetails = () => { const g = gate(); reads.push(g); return g.p; };
-  const el = document.createElement("div"), srv = fakeServer({ available: true, state: "active", generation: 2 });
+  // (attached, as the panel is: a details box out of the document is never rendered into)
+  const el = document.body.appendChild(document.createElement("div")), srv = fakeServer({ available: true, state: "active", generation: 2 });
   const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch, readDetails });
   const result = (n) => [{ count: n, paths: [["/p" + n, "conflict"]] }, []];
   const blocks = () => [...el.querySelectorAll("details > summary")].map((d) => d.textContent);
-  await until(() => reads.length >= 1, 3000);
+  check(await until(() => reads.length >= 1, 3000), "details: the draw reads the details");
   const n1 = reads.length;
   s.refresh();
   await until(() => reads.length > n1, 3000);
@@ -2228,6 +2229,7 @@ async function s5Details() {
   for (const r of reads.slice(n4)) r.open(result(9));
   await sleep(150);
   check(el.innerHTML === before, "details: reads resolved after close change nothing");
+  el.remove();
 }
 
 async function s5Flood() {
