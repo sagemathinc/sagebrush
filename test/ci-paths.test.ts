@@ -153,3 +153,27 @@ test("a rename is classified by both of its names, from a real git history", () 
   assert.equal(o.engine_cpython, "false");
 });
 
+
+// The WebKit job (plan-kedlaya-webkit-ci r4): its conservative inputs on a
+// pull request (astra2's classes: the compiler, capacity and limits, an
+// arithmetic dependency and anything Kedlaya imports, the build and its
+// dependency inputs, the test and its helpers, the classifier and the
+// workflow), a path outside every known one (the fallback), never a master
+// push, and always the nightly schedule and a dispatch, which have no file list.
+test("the WebKit job: its inputs on pull requests, never master pushes, always nightly and dispatch", () => {
+  const wk = (files: string[]) => classify(files).webkit;
+  for (const f of ["src/compile.ts", "src/runtime/object.ts", "src/runtime/js-engine.ts", "lib/_sage_padic_lseries.py", "lib/_capacity.py", "lib/_limits.py", "lib/fractions.py", "lib/sage_all.py", "lib/sagebrush/progress.py", "lib/json/__init__.py", "wasm/sagebrush-engine.wasm", "web/worker.ts", "web/build.ts", "web/lib-lazy.ts", "web/lib-chunks.mts", "web/runner/index.html", "web/test-kedlaya-worker.mjs", "web/test-port.mjs", "test/kedlaya.test.ts", "scripts/build-cli.mjs", "scripts/ci-paths.mjs", "package.json", "pnpm-lock.yaml", "tsconfig.json", ".github/workflows/ci.yml", "an/unknown/path.txt"])
+    assert.equal(wk([f]), "true", f);
+  for (const f of ["README.md", "design/runner.md", "web/board/test-merge.mjs", "engine/classgroup/src/api.rs", "app/src/main.ts", "sage-tests/test_numberfield.sage", ".github/workflows/optional.yml"])
+    assert.equal(wk([f]), "false", f);
+  const run = (event: string, ref: string, files: string) => {
+    const list = join(dir, "files.txt");
+    writeFileSync(list, files);
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: event, GITHUB_REF: ref } });
+    assert.equal(r.status, 0, r.stderr);
+    return /^webkit=(\w+)$/m.exec(r.stdout)?.[1];
+  };
+  assert.equal(run("push", "refs/heads/master", "lib/_sage_padic_lseries.py\n"), "false");
+  assert.equal(run("schedule", "refs/heads/master", ""), "true");
+  assert.equal(run("workflow_dispatch", "refs/heads/master", ""), "true");
+});
