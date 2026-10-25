@@ -4038,5 +4038,153 @@
   "class": "1+2",
   "owner": "file formats/raster",
   "row": "src-13"
+ },
+ "web/workspace/sync-ledger.ts ::  :: export const CODE = { max: 32 }; #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts ::  :: export const STATE = { max: 1000 }; #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts ::  :: max: 16, #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts ::  :: maxDecided: 50_000, #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts ::  :: maxSeqs: 10_000, #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts ::  :: maxSkips: 16, #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts ::  :: timeoutMax: 2 ** 31 - 1, #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: checkSeqs :: function checkSeqs(seqs: unknown, max: number): number[] { #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: checkSeqs :: if (n > max) throw Object.assign(new WorkspaceError(\"limit\", `at most ${max} seqs at once`), { max }); #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: codeOk :: const codeOk = (c: string) => c.length <= CODE.max && /^[a-z0-9_]+$/.test(c); #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: codeOk :: max: 2, #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: codeOk :: maxNamespaces: 3, #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: codeOk :: maxTentative: 4, #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: fence :: if (cur.tent.size > HUB.maxTentative) { #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: fence :: while (this.gens.size > HUB.maxNamespaces) { #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: finish :: const r = await pruneOldest(this.rows, this.ns, count - LEDGER.maxDecided, this.decidedHere); #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: finish :: if (count > LEDGER.maxDecided) { #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: merge :: maxGen: number; lastRev: number; nonce: string; #0": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
+ },
+ "web/workspace/sync-ledger.ts :: noteSkip :: while (list.length > LEDGER.maxSkips) { #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: obsoleteFull :: r.onsuccess = () => ok(((r.result as string[] | undefined) ?? []).length >= OBSOLETE.max); #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: onAbort :: maxGen: Math.max(hub.seen(v0.ns, v0.epoch), v0.gen), lastRev: v0.rev, nonce: Math.random().toString(36).slice(2), reading: false, again: false, ready: false, done: false, unknown: false, #0": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
+ },
+ "web/workspace/sync-ledger.ts :: onMsg :: if (m.gen > x.maxGen) { #0": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
+ },
+ "web/workspace/sync-ledger.ts :: onMsg :: if (stale || m.gen < x.maxGen) return; #0": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
+ },
+ "web/workspace/sync-ledger.ts :: onMsg :: if (stale || m.gen < x.maxGen) return; #1": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
+ },
+ "web/workspace/sync-ledger.ts :: onMsg :: x.maxGen = m.gen; #0": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
+ },
+ "web/workspace/sync-ledger.ts :: onMsg :: x.maxGen = m.gen; #1": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
+ },
+ "web/workspace/sync-ledger.ts :: queueObsolete :: if (q.length >= OBSOLETE.max) return false; #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: raiseFloor :: if (gen > x.maxGen) { #0": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
+ },
+ "web/workspace/sync-ledger.ts :: raiseFloor :: x.maxGen = gen; #0": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
+ },
+ "web/workspace/sync-ledger.ts :: readPage :: if (v && v.epoch === x.epoch && v.gen > x.maxGen) { #0": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
+ },
+ "web/workspace/sync-ledger.ts :: readPage :: x.maxGen = v.gen; #0": {
+  "class": "none",
+  "owner": "sync client: a generation tracked, not a cap"
+ },
+ "web/workspace/sync-ledger.ts :: skipsOf :: if (!Array.isArray(v) || v.length > LEDGER.maxSkips) return []; #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: syncState :: const list = checkSeqs(seqs, STATE.max); #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: waitSync :: const list = checkSeqs(seqs, WAIT.maxSeqs); #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: waitSync :: if (set.size >= WAIT.max) throw Object.assign(new WorkspaceError(\"busy\", `at most ${WAIT.max} waits at once`), { max: WAIT.max }); #0": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: waitSync :: if (set.size >= WAIT.max) throw Object.assign(new WorkspaceError(\"busy\", `at most ${WAIT.max} waits at once`), { max: WAIT.max }); #1": {
+  "class": "1",
+  "owner": "sync client"
+ },
+ "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
+  "class": "1",
+  "owner": "sync client"
  }
 }
