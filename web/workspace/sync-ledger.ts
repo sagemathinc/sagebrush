@@ -102,19 +102,30 @@ export class Hub {
    * (CORR-PR128-2), raised by every message that carries a generation and by each wait's durable read */
   // (LIMIT-PR128-2: one current {epoch, gen} per namespace, at most HUB.namespaces of them, the least recently used
   // dropped; a newer epoch replaces an older one, and a message of an older epoch is stale)
-  private gens = new Map<string, { epoch: number; gen: number }>();
+  // (CORR-PR128-6: an entry an ordinary message made is tentative (`sure` false): it fences generations only within its
+  // own epoch and never makes another epoch stale; a durable read or a lifecycle change always replaces it with a sure
+  // entry at the durable epoch, keeping its generation only for that same epoch)
+  private gens = new Map<string, { epoch: number; gen: number; sure: boolean }>();
   /** `gen` noted for (ns, epoch); returns whether it is stale (an older epoch, or an older generation of this one).
-   * Only a durable read (a wait's registration) or a lifecycle change may `advance` the namespace to a newer epoch: a
-   * message claiming one is neither applied here nor allowed to fence the current epoch's messages (waits drop it by
-   * its epoch anyway).  Nor may it create the namespace's entry (a fresh hub, or after eviction: astra3's
-   * CORR-PR128-6): an unanchored claim is not fenced here, and each wait still fences by its own generation. */
+   * Only a durable read (a wait's registration) or a lifecycle change (`advance`) establishes a namespace's epoch.  A
+   * message claiming a newer epoch than a sure one is neither applied here nor allowed to fence the current epoch's
+   * messages (waits drop it by its epoch anyway); with no sure entry (a fresh hub, or after eviction) its claim is only
+   * tentative, so it can't hold a later durable registration at an older epoch (astra3's CORR-PR128-6). */
   fence(ns: string, epoch: number, gen: number, advance = false): boolean {
     const cur = this.gens.get(ns);
-    if (!advance && (!cur || epoch > cur.epoch)) return false;
     let stale = false, next = cur;
-    if (!cur || epoch > cur.epoch) next = { epoch, gen };
-    else if (epoch < cur.epoch) stale = true;
-    else if (gen > cur.gen) next = { epoch, gen };
+    if (!cur || (!cur.sure && epoch !== cur.epoch)) {
+      // (nothing known, or a tentative entry of another epoch: replaced, never stale)
+      if (advance || !cur || epoch > cur.epoch) next = { epoch, gen, sure: advance };
+    } else if (!cur.sure) {
+      // (a tentative entry of this epoch: its generation fences; a durable read confirms it)
+      next = { epoch, gen: Math.max(gen, cur.gen), sure: advance };
+      stale = gen < cur.gen;
+    } else if (epoch > cur.epoch) {
+      if (!advance) return false;
+      next = { epoch, gen, sure: true };
+    } else if (epoch < cur.epoch) stale = true;
+    else if (gen > cur.gen) next = { epoch, gen, sure: true };
     else stale = gen < cur.gen;
     this.gens.delete(ns);
     this.gens.set(ns, next!);
