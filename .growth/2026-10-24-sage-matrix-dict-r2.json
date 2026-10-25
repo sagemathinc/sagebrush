@@ -1,0 +1,1 @@
+{"v":1, "reason":"#107 revision (astra2's CORR-PR107-1/2/3): the dict's ring inferred from every value (finite fields too), Sage's overwrite and zero rules, sequence-protocol keys", "bytes":{"cli/lib.gen.js": 2479, "cli/pyjs.cjs": 2322, "engine/lib/sage.pre": 7928, "engine/lib/sage.src": 2479}}
