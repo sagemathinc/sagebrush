@@ -1,6 +1,6 @@
 // The ledger's admission, ownership and exit rules (plan C r13).  The tests
 // share the process-wide state, so each takes SERIAL and starts from a clean
-// ledger; the usage measure is a fake (hooks::set_fake_usage), read under
+// ledger; the usage measures are fakes (hooks::set_fake_usage, set_fake_rows), read under
 // the lock at every check as the real one is.
 use super::*;
 use std::sync::{Arc, Barrier};
@@ -15,7 +15,7 @@ fn fresh(total_bytes: u64) -> std::sync::MutexGuard<'static, ()> {
     s.chains = [(0, 0); CHAIN_SLOTS];
     drop(s);
     hooks::set_fake_usage(Some((0, None)));
-    set_total(Some(Total { bytes: total_bytes, status: TotalStatus::Observed, joint: false }));
+    set_total(Some(Total { bytes: total_bytes, status: TotalStatus::Observed, joint: false, uncertified: false }));
     g
 }
 
@@ -165,7 +165,7 @@ fn a_clean_exit_and_an_unwind_both_leave_nothing() {
 #[test]
 fn an_observed_zero_refuses_and_no_total_is_nominal() {
     let _g = fresh(0);
-    set_total(Some(Total { bytes: 0, status: TotalStatus::Zero, joint: false }));
+    set_total(Some(Total { bytes: 0, status: TotalStatus::Zero, joint: false, uncertified: false }));
     assert!(matches!(reserve("x", 1), Err(EngineError::Memory(r)) if r.allowance == 0 && r.status == TotalStatus::Zero));
     set_total(None);
     assert_eq!(total(), NOMINAL);
@@ -178,15 +178,27 @@ fn an_unmeasured_platform_is_not_certified() {
     let _g = fresh(total_for_usable(1000));
     #[cfg(not(target_arch = "wasm32"))]
     {
-        set_total_and_measure(Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true }), &[MeasureKind::WindowsJob]);
+        let t = Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true, uncertified: false });
+        let row = |kind| Row { kind, figure: 1 << 30 };
+        set_total_and_measure(t, &[row(MeasureKind::WindowsJob)]);
         assert!(!certified());
-        set_total_and_measure(Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true }), &[MeasureKind::Cgroup("/nonexistent/memory.current".into())]);
+        set_total_and_measure(t, &[row(MeasureKind::Cgroup("/nonexistent/memory.current".into()))]);
         assert!(!certified());
         if cfg!(target_os = "linux") {
-            set_total_and_measure(Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true }), &[MeasureKind::Physical]);
+            set_total_and_measure(t, &[row(MeasureKind::Physical)]);
             assert!(certified());
-            let r = state().measure.read().expect("the process's own measure");
-            assert!(r.usage > 0 && r.available.unwrap() > 0, "{:?}", r);
+            let mut seen = vec![];
+            assert!(state().measure.read_each(|r| seen.push(r)), "the process's own measure");
+            assert!(seen.len() == 1 && seen[0].usage > 0 && seen[0].available.unwrap() > 0, "{:?}", seen);
+            // (C r17 section 1.2: one unknown row among measured ones is
+            // enough to fail closed)
+            set_total_and_measure(t, &[row(MeasureKind::Physical), row(MeasureKind::Unknown)]);
+            assert!(!certified());
+            set_total_and_measure(t, &[row(MeasureKind::Physical), Row { kind: MeasureKind::AddressSpace, figure: 1 << 40 }]);
+            assert!(certified());
+            let mut n = 0;
+            assert!(state().measure.read_each(|r| n += (r.figure == 1 << 40) as u32));
+            assert_eq!(n, 1, "each row is read with its own figure");
         }
     }
 }
@@ -204,7 +216,10 @@ fn a_credit_grows_by_new_admissions() {
 
 #[test]
 fn wasm_totals_are_checked() {
-    assert_eq!(total_from_wasm(4294967296.0, 0, 1), Some(Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: true }));
+    // (the third number is now the host's classification, C r17 section
+    // 1.3: 1 when some applicable row is joint or unknown)
+    assert_eq!(total_from_wasm(4294967296.0, 0, 1), Some(Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: true, uncertified: true }));
+    assert_eq!(total_from_wasm(4294967296.0, 0, 0).map(|t| t.uncertified), Some(false));
     for (b, s, j) in [(-1.0, 0, 0), (1.5, 0, 0), (f64::NAN, 0, 0), (f64::INFINITY, 0, 0), (1.0, 3, 0), (1.0, 0, 2), (1e300, 0, 0)] {
         assert_eq!(total_from_wasm(b, s, j), None, "{} {} {}", b, s, j);
     }
@@ -225,4 +240,40 @@ fn internal_errors_are_not_memory_errors() {
     let m = EngineError::Internal("x".into());
     assert!(!matches!(m, EngineError::Memory(_)));
     assert!(m.to_string().starts_with("internal error"));
+}
+
+#[test]
+fn every_applicable_row_is_checked_not_only_the_least() {
+    // astra2's probe (C r17 section 1.1), natively: the least figure is 4 GiB
+    // (768 MiB used), a larger joint row is 8 GiB (2304 MiB used).  With
+    // phi = 5/4, 32 MiB fits the least row (5/4 (768 + 32) = 1000 <= 1024
+    // MiB) but not the joint one (5/4 (2304 + 32) > 2048 MiB): refused, on
+    // the joint row's figures.
+    const MIB: u64 = 1 << 20;
+    let _g = fresh(4096 * MIB);
+    hooks::set_fake_rows(Some(vec![(4096 * MIB, 768 * MIB, None), (8192 * MIB, 2304 * MIB, None)]));
+    match reserve("probe", 32 * MIB) {
+        Err(EngineError::Memory(r)) => assert_eq!((r.total, r.allowance, r.live), (8192 * MIB, 2048 * MIB, 2304 * MIB)),
+        other => panic!("the joint row must refuse: {:?}", other.map(|r| r.amount())),
+    }
+    assert_eq!(outstanding_bytes(), 0);
+    // the least row alone (what a check of the least rows only would see)
+    // admits it: the difference this test pins
+    hooks::set_fake_rows(Some(vec![(4096 * MIB, 768 * MIB, None)]));
+    let r = reserve("probe", 32 * MIB).unwrap();
+    drop(r);
+    // the order of the rows doesn't matter; the first refusing row is reported
+    hooks::set_fake_rows(Some(vec![(8192 * MIB, 2304 * MIB, None), (4096 * MIB, 768 * MIB, None)]));
+    assert!(matches!(reserve("probe", 32 * MIB), Err(EngineError::Memory(r)) if r.total == 8192 * MIB));
+}
+
+#[test]
+fn a_physical_row_among_others_keeps_its_availability_check() {
+    const MIB: u64 = 1 << 20;
+    let _g = fresh(1 << 40);
+    let avail = 1024 * MIB; // reserve 256 + 103 MiB: room about 665 MiB
+    hooks::set_fake_rows(Some(vec![(1 << 40, 0, None), (1 << 40, 0, Some(avail))]));
+    assert!(matches!(reserve("big", 700 * MIB), Err(EngineError::Memory(r)) if r.available.is_some()));
+    let r = reserve("ok", 600 * MIB).unwrap();
+    drop(r);
 }

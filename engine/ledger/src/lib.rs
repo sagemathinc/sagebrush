@@ -36,7 +36,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::Mutex;
 
 mod measure;
-pub use measure::{Measure, MeasureKind};
+pub use measure::{Measure, MeasureKind, Reading, Row, ROW_SLOTS};
 
 #[cfg(feature = "ledger-audit")]
 pub mod audit;
@@ -87,9 +87,13 @@ pub struct Total {
     pub bytes: u64,
     pub status: TotalStatus,
     pub joint: bool,
+    /// WebAssembly: the host found an applicable row that is joint or
+    /// unknown (C r17 section 1.3), so the ledger is not certified there
+    /// (natively each row is measured instead: always false)
+    pub uncertified: bool,
 }
 
-const NOMINAL: Total = Total { bytes: NOMINAL_TOTAL, status: TotalStatus::Nominal, joint: false };
+const NOMINAL: Total = Total { bytes: NOMINAL_TOTAL, status: TotalStatus::Nominal, joint: false, uncertified: false };
 
 /// E: the bytes the ledger may hold for this total.
 pub fn allowance(t: Total) -> u64 {
@@ -97,11 +101,14 @@ pub fn allowance(t: Total) -> u64 {
 }
 
 /// The total pushed as WebAssembly numbers: bytes an integer from 0 to
-/// 2^53, status 0, 1 or 2, joint 0 or 1; anything else is none.
-pub fn total_from_wasm(bytes: f64, status: u32, joint: u32) -> Option<Total> {
+/// 2^53, status 0, 1 or 2, and `uncertified` 0 or 1 (C r17 section 1.3:
+/// 1 when some applicable row is joint or unknown, from lib/_capacity.py
+/// engine_rows; it was the least rows' joint flag before); anything else
+/// is none.
+pub fn total_from_wasm(bytes: f64, status: u32, uncertified: u32) -> Option<Total> {
     let ok = bytes.is_finite() && bytes >= 0.0 && bytes.fract() == 0.0 && bytes <= 9007199254740992.0;
     let status = TotalStatus::from_code(status)?;
-    (ok && joint <= 1).then_some(Total { bytes: bytes as u64, status, joint: joint == 1 })
+    (ok && uncertified <= 1).then_some(Total { bytes: bytes as u64, status, joint: uncertified == 1, uncertified: uncertified == 1 })
 }
 
 /// Set the total (the WebAssembly host pushes it before a dispatch; tests).
@@ -115,11 +122,12 @@ pub fn set_total(total: Option<Total>) {
     }
 }
 
-/// Set the total and the binding rows' usage measures (the native host;
-/// tests).  The measures' files are opened here, outside the lock.
+/// Set the total and every applicable row with its usage measure (the
+/// native host; tests).  The measures' files are opened here, outside the
+/// lock.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn set_total_and_measure(total: Option<Total>, kinds: &[MeasureKind]) {
-    let m = Measure::open(kinds);
+pub fn set_total_and_measure(total: Option<Total>, rows: &[Row]) {
+    let m = Measure::open(rows);
     let mut s = state();
     s.total = total;
     s.total_at = total.map(|_| std::time::Instant::now());
@@ -127,7 +135,7 @@ pub fn set_total_and_measure(total: Option<Total>, kinds: &[MeasureKind]) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-type TotalHost = Box<dyn Fn() -> Option<(Total, Vec<MeasureKind>)> + Send + Sync>;
+type TotalHost = Box<dyn Fn() -> Option<(Total, Vec<Row>)> + Send + Sync>;
 #[cfg(not(target_arch = "wasm32"))]
 static TOTAL_HOST: std::sync::OnceLock<TotalHost> = std::sync::OnceLock::new();
 /// (the native host's TOTAL, a limit, not a usage, is asked again when 100
@@ -135,10 +143,10 @@ static TOTAL_HOST: std::sync::OnceLock<TotalHost> = std::sync::OnceLock::new();
 #[cfg(not(target_arch = "wasm32"))]
 const TOTAL_REFRESH: std::time::Duration = std::time::Duration::from_millis(100);
 
-/// Register the native host's total and binding measures (the first
+/// Register the native host's total and applicable rows (the first
 /// registration stands): asked outside the ledger's lock.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn set_total_host(f: impl Fn() -> Option<(Total, Vec<MeasureKind>)> + Send + Sync + 'static) {
+pub fn set_total_host(f: impl Fn() -> Option<(Total, Vec<Row>)> + Send + Sync + 'static) {
     let _ = TOTAL_HOST.set(Box::new(f));
 }
 
@@ -150,7 +158,7 @@ pub fn total() -> Total {
         let stale = state().total_at.is_none_or(|t| t.elapsed() >= TOTAL_REFRESH);
         if stale {
             match host() {
-                Some((t, kinds)) => set_total_and_measure(Some(t), &kinds),
+                Some((t, rows)) => set_total_and_measure(Some(t), &rows),
                 None => set_total_and_measure(None, &[]),
             }
         }
@@ -158,14 +166,17 @@ pub fn total() -> Total {
     state().total.unwrap_or(NOMINAL)
 }
 
-/// Whether the live estimate is measured on this platform with this total
-/// (fail-closed: a cap may be removed on the ledger's strength only where
-/// this is true).
+/// Whether every applicable row is checked on this platform with this
+/// total (fail-closed: a cap may be removed on the ledger's strength only
+/// where this is true).  Natively: every row has a fresh measure.  In
+/// WebAssembly: an observed total whose rows are all engine-only (the host's
+/// classification, C r17 section 1.3; a joint row has no fresh measure in
+/// the instance yet).
 pub fn certified() -> bool {
     let _ = total();
     #[cfg(target_arch = "wasm32")]
     {
-        true
+        state().total.is_some_and(|t| t.status == TotalStatus::Observed && !t.uncertified)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -347,9 +358,16 @@ fn live_locked(s: &mut State) -> (u64, Option<u64>, bool) {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        match s.measure.read() {
-            Some(r) => (r.usage.max(s.resident), r.available, true),
-            None => (s.resident, None, false),
+        // (diagnostics: the largest row usage; admissions check each row)
+        let (mut usage, mut available) = (0u64, None);
+        let measured = s.measure.read_each(|r| {
+            usage = usage.max(r.usage);
+            available = available.or(r.available);
+        });
+        if measured {
+            (usage.max(s.resident), available, true)
+        } else {
+            (s.resident, None, false)
         }
     }
 }
@@ -542,16 +560,25 @@ impl Drop for Scope {
 
 #[cfg(any(test, feature = "test-hooks"))]
 pub mod hooks {
-    //! Tests only: a fake usage source (the measure as read under the lock)
-    //! and a pause between the read and the commit.
+    //! Tests only: fake rows (the measures as read under the lock) and a
+    //! pause between the read and the commit.
     use super::*;
 
-    pub(crate) static FAKE: Mutex<Option<(u64, Option<u64>)>> = Mutex::new(None);
+    /// (limit, None: the total's bytes; usage; machine availability)
+    pub(crate) type FakeRow = (Option<u64>, u64, Option<u64>);
+    pub(crate) static FAKE: Mutex<Option<Vec<FakeRow>>> = Mutex::new(None);
     pub(crate) static PAUSE: Mutex<Option<std::sync::Arc<std::sync::Barrier>>> = Mutex::new(None);
 
-    /// The usage (and availability) every check reads until cleared.
+    /// One row at the total's limit with this usage (and availability),
+    /// read by every check until cleared.
     pub fn set_fake_usage(usage: Option<(u64, Option<u64>)>) {
-        *FAKE.lock().unwrap() = usage;
+        *FAKE.lock().unwrap() = usage.map(|(u, a)| vec![(None, u, a)]);
+    }
+
+    /// Several rows, each (limit, usage, availability), read by every check
+    /// until cleared (C r17 section 1.4).
+    pub fn set_fake_rows(rows: Option<Vec<(u64, u64, Option<u64>)>>) {
+        *FAKE.lock().unwrap() = rows.map(|v| v.into_iter().map(|(l, u, a)| (Some(l), u, a)).collect());
     }
 
     /// The next admission waits on `b` twice between its read and its
@@ -562,63 +589,106 @@ pub mod hooks {
     }
 }
 
+/// One row's check (C r13; C r17 section 1.3): phi (L_r + O + x) <= E_r,
+/// E_r = figure / 4, L_r = max(the row's usage, R_res); and for the physical
+/// row, O + x <= available - reserve.  In u128: no overflow for any u64
+/// inputs.  Some((allowance, room)) when it refuses (room: Some for the
+/// availability check).
+fn row_refuses(figure: u64, live: u64, available: Option<u64>, outstanding: u64, x: u64) -> Option<(u64, Option<u64>)> {
+    let e = figure / SHARE_DEN;
+    if FRAG_NUM as u128 * (live as u128 + outstanding as u128 + x as u128) > FRAG_DEN as u128 * e as u128 {
+        return Some((e, None));
+    }
+    if let Some(a) = available {
+        let room = a.saturating_sub(reserve_for(a));
+        if outstanding as u128 + x as u128 > room as u128 {
+            return Some((e, Some(room)));
+        }
+    }
+    None
+}
+
 fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     let t = total();
-    let e = allowance(t);
     #[cfg(not(target_arch = "wasm32"))]
     measure::prepare();
     let mut s = state();
+    let outstanding = s.outstanding;
+    let resident = s.resident;
+    #[cfg(target_arch = "wasm32")]
+    let wasm_live = {
+        let committed = (core::arch::wasm32::memory_size::<0>() as u64) << 16;
+        let b = *s.baseline.get_or_insert(committed);
+        committed.max(b + resident)
+    };
+    // every row is checked (C r17 section 1.3); the first that refuses is
+    // reported: (figure, live, allowance, room).  The decision is made under
+    // the lock, the error (which allocates) built after it is released.
+    let mut first: Option<(u64, u64, u64, Option<u64>)> = None;
+    let mut live_seen = resident;
+    let mut on_row = |figure: u64, usage: u64, available: Option<u64>| {
+        let live = usage.max(resident);
+        live_seen = live_seen.max(live);
+        if first.is_none() {
+            if let Some((e, room)) = row_refuses(figure, live, available, outstanding, x) {
+                first = Some((figure, live, e, room));
+            }
+        }
+    };
     #[allow(unused_mut)]
-    let (mut live, mut avail, mut measured) = live_locked(&mut s);
+    let mut faked = false;
     #[cfg(any(test, feature = "test-hooks"))]
     {
-        if let Some((u, a)) = *hooks::FAKE.lock().unwrap() {
-            live = u.max(s.resident);
-            avail = a;
-            measured = true;
+        let g = hooks::FAKE.lock().unwrap();
+        if let Some(rows) = g.as_ref() {
+            faked = true;
+            for &(figure, usage, available) in rows {
+                on_row(figure.unwrap_or(t.bytes), usage, available);
+            }
         }
+        drop(g);
         let b = hooks::PAUSE.lock().unwrap().take();
         if let Some(b) = b {
             b.wait();
             b.wait();
         }
     }
-    // phi (L + O + x) <= E, in u128: no overflow for any u64 inputs; the
-    // decision is made under the lock, the error (which allocates) built
-    // after it is released
-    let outstanding = s.outstanding;
-    let lhs = FRAG_NUM as u128 * (live as u128 + outstanding as u128 + x as u128);
-    let mut refused: Option<Option<u64>> = None;
-    if lhs > FRAG_DEN as u128 * e as u128 {
-        refused = Some(None);
-    } else if let Some(a) = avail {
-        // the machine-availability check, where the physical row binds (C r13
-        // section 3)
-        let room = a.saturating_sub(reserve_for(a));
-        if outstanding as u128 + x as u128 > room as u128 {
-            refused = Some(Some(room));
+    #[allow(unused_mut)]
+    let mut measured = true;
+    #[cfg(target_arch = "wasm32")]
+    if !faked {
+        on_row(t.bytes, wasm_live, None);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if !faked {
+        measured = s.measure.read_each(|r| on_row(r.figure, r.usage, r.available));
+        if !measured {
+            // (unmeasured, fail-closed for certification: the residents
+            // against the total, as before)
+            on_row(t.bytes, 0, None);
         }
     }
-    let slots_full = refused.is_none() && s.chain_add(chain, x).is_err();
-    if refused.is_none() && !slots_full {
-        let o = outstanding + x;
-        s.set_outstanding(o);
+    let (first, live_seen) = (first, live_seen);
+    let slots_full = first.is_none() && s.chain_add(chain, x).is_err();
+    if first.is_none() && !slots_full {
+        s.set_outstanding(outstanding + x);
         return Ok(());
     }
     drop(s);
     if slots_full {
         return Err(EngineError::Internal(format!("more than {} chains hold reservations at once", CHAIN_SLOTS)));
     }
+    let (figure, live, allowance, room) = first.unwrap_or((t.bytes, live_seen, allowance(t), None));
     Err(EngineError::Memory(Refusal {
         what: what.to_string(),
         need: x,
-        allowance: e,
+        allowance,
         live,
         outstanding,
-        total: t.bytes,
+        total: figure,
         status: t.status,
         joint: t.joint,
-        available: refused.flatten(),
+        available: room,
         measured,
     }))
 }
