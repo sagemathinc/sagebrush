@@ -312,6 +312,17 @@ const said = (r, re) => r.unf.some((u) => re.test(u.why));
     ['p = ["private.csv"]\nq = p\nq[0] = "public.csv"\nhandle(p)\n', "changed through an alias"],
     ['p = ["private.csv"]\ndef f():\n    return p\nhandle(p)\n', "returned, so anyone may change it"],
   ]) eq((await run({ files, cells: [src] })).paths, [], `R2-3: ${what}: not pre-checked`);
+  // r3's review: a change nested inside the container
+  for (const [src, what] of [
+    ['p = [["private.csv"]]\np[0][0] = "public.csv"\nhandle(p)\n', "p[0][0] = ..."],
+    ['p = {"k": {"item": "private.csv"}}\ndel p["k"]["item"]\nhandle(p)\n', 'del p["k"]["item"]'],
+    ['p = [["private.csv"]]\np[0].clear()\nhandle(p)\n', "p[0].clear()"],
+  ]) {
+    const r = await run({ files, cells: [src] });
+    eq([r.paths, said(r, /a list, dict or set the code changes or copies/)], [[], true], `R2-3 (r3): a nested change, ${what}: not pre-checked, reported`);
+  }
+  const nested = await run({ files, cells: ['p = [["private.csv"]]\nx = p[0][0]\nhandle(p)\n'] });
+  eq(nested.paths, ["/private.csv"], "a nested container only read still counts (control)");
   const plain = await run({ files, cells: ['fs = ["private.csv"]\nhandle(fs)\nt = ("public.csv",)\nu = t\nhandle(t)\n'] });
   eq(plain.paths, ["/private.csv", "/public.csv"], "a list left alone, and a tuple even when copied (immutable), still count (control)");
 }
