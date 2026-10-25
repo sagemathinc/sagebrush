@@ -303,20 +303,32 @@ import _fs
 windows = []
 
 
-def timed(label, f):
-    w0, c0 = time.perf_counter(), _fs.cpu_times()
-    r = f()
+# (each window encloses its bounded interval, sampled before it starts and
+# after it ends: the bound's took and base are timed as before these
+# diagnostics, daybreak2's MEAS-PR151-1; test/sbx.test.ts pins it)
+def mark():
+    return time.perf_counter(), _fs.cpu_times()
+
+
+def record(label, m):
     w1, c1 = time.perf_counter(), _fs.cpu_times()
+    (w0, c0) = m
     windows.append({"label": label, "start_ms": w0 * 1000, "end_ms": w1 * 1000, "user_s": c1[0] - c0[0], "system_s": c1[1] - c0[1]})
-    return r
 
 
-base = timed("flat before", flat_decode_time)
+m = mark()
+base = flat_decode_time()
+record("flat before", m)
+m = mark()
 t0 = time.process_time()
-a = timed("nested", lambda: _sbx.decode(data, "magma"))
+a = _sbx.decode(data, "magma")
 took = time.process_time() - t0
+record("nested", m)
 work = _sbx._magma_work
-base = (base + timed("flat after", flat_decode_time)) / 2
+m = mark()
+base2 = flat_decode_time()
+record("flat after", m)
+base = (base + base2) / 2
 print("SBXDIAG " + json.dumps({"took_s": took, "base_s": base, "ratio": took / base, "windows": windows}))
 inner = a[0]
 for _ in range(30):
