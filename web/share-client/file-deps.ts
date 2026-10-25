@@ -31,11 +31,12 @@
 // when the code runs, and a file it might name is reported, not pre-checked.
 // As in Python (#170 r2's review, CORR-170-R2-ASTRA-1..3): a nonlocal write binds in the nearest
 // enclosing function that binds the name itself; a class body runs in order, so a use there sees the
-// class's own bindings made before it, else the outer name (and both, where one is conditional); and a
-// list, dict or set the code changes (an item stored or deleted, a mutating method) or copies anywhere
-// (assigned, put in a container, returned...) no longer stands for the constants it was made with.
-// (Not modelled: names a star import binds, exec/globals() tricks, and a function that changes a
-// list passed to it.)
+// class's own bindings made before it, else the outer name (and both, where one is conditional).
+// Containers (#170 r4's review): a name stands for a container's constants only if the value is immutable
+// all the way down (strings in tuples, nested or not); one holding a list, dict or set anywhere, directly
+// or through another name, is reported, never pre-checked, since any alias of any part of it can change
+// it before the call.  A container written out in the call itself still counts.
+// (Not modelled: names a star import binds, and exec/globals() tricks.)
 //
 // The working directory (PY-170-1/2): a relative path, or an import through
 // one of sys.path's relative entries (which pyjs resolves against the working
@@ -128,9 +129,7 @@ const isBuiltinName = (id: string) => BUILTINS.has(id) || /^[A-Z]\w*(Error|Excep
 
 // ---- scopes: what a name is bound to, where it is used
 
-// (uncertain: a list, dict or set the code changes or copies, so the constants it was made with may
-// not be what a call gets: CORR-170-R2-ASTRA-3)
-type Binding = { kind: "import"; q: string } | { kind: "value"; e: Node; s: Scope; uncertain?: boolean } | { kind: "other" };
+type Binding = { kind: "import"; q: string } | { kind: "value"; e: Node; s: Scope } | { kind: "other" };
 const OTHER: Binding = { kind: "other" };
 
 class Scope {
@@ -192,8 +191,6 @@ class Scope {
 }
 
 const COMPREHENSIONS = new Set(["ListComp", "SetComp", "DictComp", "GeneratorExp"]);
-// methods that change a list, dict or set in place
-const MUTATORS = new Set(["append", "extend", "insert", "remove", "pop", "popitem", "clear", "update", "setdefault", "add", "discard", "sort", "reverse", "__setitem__", "__delitem__", "__iadd__", "__ior__"]);
 
 /** The names a class body's statement binds itself, unconditionally (its targets, imports, def or class). */
 function directNames(st: Node): string[] {
@@ -228,9 +225,9 @@ function directNames(st: Node): string[] {
   return out;
 }
 
-/** What a unit's scopes still need once all of it is read: its nonlocal writes, and its containers' changes and copies. */
-type Pending = { nonlocal: { s: Scope; name: string; b: Binding }[]; changed: { s: Scope; name: string }[] };
-const newPending = (): Pending => ({ nonlocal: [], changed: [] });
+/** What a unit's scopes still need once all of it is read: its nonlocal writes. */
+type Pending = { nonlocal: { s: Scope; name: string; b: Binding }[] };
+const newPending = (): Pending => ({ nonlocal: [] });
 
 function finishScopes(p: Pending): void {
   // a nonlocal write binds the name where Python puts it: the nearest enclosing function that binds it itself
@@ -239,8 +236,6 @@ function finishScopes(p: Pending): void {
     const owner = s.nonlocalOwner(name);
     if (owner) owner.names.get(name)!.push(b);
   }
-  // a list, dict or set the code changes or copies: its constant contents are no longer certain
-  for (const { s, name } of p.changed) for (const b of s.lookup(name) ?? []) if (b.kind === "value" && ["List", "Dict", "Set"].includes(b.e?._type)) b.uncertain = true;
 }
 
 /** Record the bindings of a unit's statements in `mod` and the scopes nested in it (by their node); finishScopes(pending) once the unit is read. */
@@ -251,17 +246,6 @@ function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>, pending: 
     const l = t.names.get(name);
     if (l) l.push(b);
     else t.names.set(name, [b]);
-  };
-  // (a name copied somewhere: assigned to another, put in a container, returned or yielded, a lambda's or a
-  // conditional expression's value; if it is a list, dict or set, the copy can change it)
-  const copied = (e: Node, s: Scope) => {
-    if (e?._type === "Name" && e.ctx?._type === "Load") pending.changed.push({ s, name: e.id });
-  };
-  // (a change through p[...], p.x, p[0][1]...: down the receivers to the name that holds it all,
-  // CORR-170-R2-ASTRA-3 in r3's review)
-  const changedAt = (e: Node, s: Scope) => {
-    while (e?._type === "Subscript" || e?._type === "Attribute") e = e.value;
-    if (e?._type === "Name") pending.changed.push({ s, name: e.id });
   };
   // global/nonlocal declarations of a scope's own body (not its nested scopes')
   const scopeDeclarations = (b: Node, s: Scope) =>
@@ -291,7 +275,6 @@ function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>, pending: 
         scopes.set(n, f);
         if (n._type !== "Lambda") scopeDeclarations(n.body, f);
         params(n.args, f);
-        if (n._type === "Lambda") copied(n.body, f);
         go(n.body, f);
         return;
       }
@@ -333,44 +316,13 @@ function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>, pending: 
           if (t._type === "Name") bind(s, t.id, { kind: "value", e: n.value, s });
           else go(t, s); // (a tuple's names bind its parts: other; an attribute or subscript binds none)
         }
-        copied(n.value, s);
         go(n.value, s);
         return;
       case "AnnAssign":
         if (n.value && n.target._type === "Name") bind(s, n.target.id, { kind: "value", e: n.value, s });
         else if (n.value) go(n.target, s);
-        copied(n.value, s);
         go(n.value, s);
         return;
-      case "Subscript":
-      case "Attribute":
-        // p[k] = ..., del p[k], and nested: p[0][k] = ..., p.x[k] = ...: the container holding them changes
-        if (n.ctx?._type === "Store" || n.ctx?._type === "Del") changedAt(n.value, s);
-        break;
-      case "Call":
-        // p.append(...) and the like, and nested: p[0].clear(): the container changes in place
-        if (n.func?._type === "Attribute" && MUTATORS.has(n.func.attr)) changedAt(n.func.value, s);
-        break;
-      case "List":
-      case "Tuple":
-      case "Set":
-        n.elts.forEach((x: Node) => copied(x, s));
-        break;
-      case "Dict":
-        [...n.keys, ...n.values].forEach((x: Node) => copied(x, s));
-        break;
-      case "Return":
-      case "Yield":
-      case "YieldFrom":
-        copied(n.value, s);
-        break;
-      case "IfExp":
-        copied(n.body, s);
-        copied(n.orelse, s);
-        break;
-      case "BoolOp":
-        n.values.forEach((x: Node) => copied(x, s));
-        break;
       case "Import":
         for (const a of n.names) bind(s, a.asname ?? a.name.split(".")[0], { kind: "import", q: a.asname ? a.name : a.name.split(".")[0] });
         return;
@@ -381,7 +333,6 @@ function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>, pending: 
         let t = s;
         while (t.kind === "comprehension" && t.parent) t = t.parent; // (a walrus binds outside its comprehension)
         if (n.target?._type === "Name") bind(t, n.target.id, OTHER);
-        copied(n.value, s);
         go(n.value, s);
         return;
       }
@@ -456,11 +407,16 @@ function constValues(e: Node, s: Scope, seen = new Set<Node>()): Val {
     case "Tuple":
     case "Set":
     case "Dict": {
-      const out: string[] = [];
+      // (written out in the call itself, its constants are what the call gets; but a part that is itself
+      // uncertain makes the whole uncertain)
+      const out: string[] = [], doubt: string[] = [];
+      let why = "";
       for (const x of e._type === "Dict" ? e.values : e.elts) {
         const v = constValues(x, s, seen);
         if (v && "values" in v) out.push(...v.values);
+        else if (v) (doubt.push(...v.candidates), (why = v.why));
       }
+      if (doubt.length) return { candidates: [...new Set([...out, ...doubt])], why };
       return out.length ? { values: out } : null;
     }
     case "Name": {
@@ -471,9 +427,10 @@ function constValues(e: Node, s: Scope, seen = new Set<Node>()): Val {
       const vs = bs.map((b) => (b.kind === "value" ? constValues(b.e, b.s, seen) : null));
       seen.delete(e);
       const candidates = () => [...new Set(vs.flatMap((v) => (v === null ? [] : "values" in v ? v.values : v.candidates)))];
-      if (bs.some((b) => b.kind === "value" && b.uncertain)) {
+      // a name stands for a container's constants only if it is immutable all the way down (CORR-170-R4-ASTRA-1)
+      if (bs.some((b) => b.kind === "value" && holdsMutable(b.e, b.s))) {
         const c = candidates();
-        return c.length ? { candidates: c, why: "is a list, dict or set the code changes or copies" } : null;
+        return c.length ? { candidates: c, why: "holds a list, dict or set, whose contents may change before it is used" } : null;
       }
       const known = vs.filter((v): v is { values: string[] } => !!v && "values" in v);
       if (known.length === vs.length && known.every((v) => JSON.stringify(v.values) === JSON.stringify(known[0].values))) return known[0];
@@ -482,6 +439,32 @@ function constValues(e: Node, s: Scope, seen = new Set<Node>()): Val {
     }
   }
   return null;
+}
+/**
+ * Whether a value holds a list, dict or set anywhere in it (directly, inside a tuple, or through a name).
+ * Its contents can change in place, through any alias of any part of it, before a call gets it; rather
+ * than follow every such change, a name bound to one stands for no constants (#170 r4's review).
+ */
+function holdsMutable(e: Node, s: Scope, seen = new Set<Node>()): boolean {
+  if (!e || seen.has(e)) return false;
+  switch (e._type) {
+    case "List":
+    case "Dict":
+    case "Set":
+    case "ListComp":
+    case "DictComp":
+    case "SetComp":
+      return true;
+    case "Tuple":
+      return e.elts.some((x: Node) => holdsMutable(x, s, seen));
+    case "Starred":
+      return holdsMutable(e.value, s, seen);
+    case "Name": {
+      seen.add(e);
+      return (s.lookup(e.id) ?? []).some((b) => b.kind === "value" && holdsMutable(b.e, b.s, seen));
+    }
+  }
+  return false;
 }
 const single = (v: Val): string | null => (v && "values" in v && v.values.length === 1 ? v.values[0] : null);
 const isPathish = (e: Node, s: Scope): boolean => (e?._type === "Call" && isPathBuilder(qualified(e.func, s))) || (e?._type === "BinOp" && isPathish(e.left, s));
