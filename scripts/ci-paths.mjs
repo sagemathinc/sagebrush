@@ -21,28 +21,32 @@ function hasCommit(commit) {
   }
 }
 
+// (--no-renames: a rename is its deletion and its addition, so both names
+// are classified; git's rename detection would report only the new one, and
+// a file moved out of a selecting path, engine/py/x.py -> web/x.py, would
+// select nothing)
 function changedFiles() {
   if (event === "workflow_dispatch" || event === "schedule") return [];
   if (event === "pull_request") {
     const base = `origin/${process.env.GITHUB_BASE_REF}`;
     const mergeBase = git("merge-base", base, head);
-    return git("diff", "--name-only", `${mergeBase}...${head}`).split("\n").filter(Boolean);
+    return git("diff", "--name-only", "--no-renames", `${mergeBase}...${head}`).split("\n").filter(Boolean);
   }
   if (event === "push") {
     const before = process.env.GITHUB_EVENT_BEFORE ?? "";
     if (/^[0]+$/.test(before) || !before) {
-      return git("show", "--pretty=", "--name-only", head).split("\n").filter(Boolean);
+      return git("show", "--pretty=", "--name-only", "--no-renames", head).split("\n").filter(Boolean);
     }
     // A rebased/force-pushed branch can name an unreachable old SHA in
     // `before`.  Compare the whole branch with master rather than failing or
     // accidentally certifying a partial path set.
     if (!hasCommit(before)) {
       const mergeBase = git("merge-base", "origin/master", head);
-      return git("diff", "--name-only", `${mergeBase}...${head}`).split("\n").filter(Boolean);
+      return git("diff", "--name-only", "--no-renames", `${mergeBase}...${head}`).split("\n").filter(Boolean);
     }
-    return git("diff", "--name-only", before, head).split("\n").filter(Boolean);
+    return git("diff", "--name-only", "--no-renames", before, head).split("\n").filter(Boolean);
   }
-  return git("show", "--pretty=", "--name-only", head).split("\n").filter(Boolean);
+  return git("show", "--pretty=", "--name-only", "--no-renames", head).split("\n").filter(Boolean);
 }
 
 // (tests replay a file list through the classifier: one path a line)
@@ -89,15 +93,20 @@ const enginePaths = [
   /^engine\//, /^wasm\//, /^Cargo(?:\.lock|\.toml)$/,
   /^scripts\/build-engine\.mjs$/,
 ];
-// The CPython package's inputs: what its wheel builds (engine/), what it
-// ships (lib/, through scripts/sync-python-package.sh into engine/py/python),
-// what its tests read (engine/py/test_*.py, sage-tests/), and the limits
-// registry the defaults are classified in.  engine-cpython is the one job
-// that runs the package's own tests, so a pull request touching these runs it
-// (#113 changed a default, passed pull-request CI, and failed master's).
+// The CPython package's inputs: what its wheel builds (engine/, and a root
+// Cargo manifest if one is ever added), what it ships (lib/, through
+// scripts/sync-python-package.sh into engine/py/python), what the job runs
+// (scripts/ci-cpus.sh) and what its tests read (engine/py/test_*.py and
+// engine/modsym/examples, sage-tests/, and test_workspace_tools.py's
+// web/workspace/schema.json and paths.ts), and the limits registry the
+// defaults are classified in.  engine-cpython is the one job that runs the
+// package's own tests, so a pull request touching these runs it (#113
+// changed a default, passed pull-request CI, and failed master's).  A new
+// file the job reads belongs here, with a case in test/ci-paths.test.ts.
 const cpythonPaths = [
   /^engine\//, /^lib\//, /^sage-tests\//, /^Cargo(?:\.lock|\.toml)$/,
-  /^scripts\/sync-python-package\.sh$/, /^test\/limit-sites\.json$/,
+  /^scripts\/sync-python-package\.sh$/, /^scripts\/ci-cpus\.sh$/, /^test\/limit-sites\.json$/,
+  /^web\/workspace\/schema\.json$/, /^web\/workspace\/paths\.ts$/,
 ];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
 // Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their
