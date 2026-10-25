@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
-import { againstBaseline, browserFailure, browserLeak, rowOutcome } from "./interrupt-classify.mjs";
+import { againstBaseline, browserFailure, browserLeak, rowOutcome, workerRoles } from "./interrupt-classify.mjs";
 
 const now = () => Number(process.hrtime.bigint()) / 1e6;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -45,13 +45,17 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
         ws.send(JSON.stringify({ id: ++n, method: "Page.handleJavaScriptDialog", params: { accept: true } }));
       }
       if (m.method === "Page.javascriptDialogClosed") dialogOpen = null;
-      // the page's own workers (the interpreter's), auto-attached under the page's session itself: a
-      // worker of the /runner/ iframe arrives through the iframe's session (m.sessionId set) and its
-      // heap can't be read from here (GitHub's runner, dispatch 40236353993), so it isn't counted
-      if (m.method === "Target.attachedToTarget" && !m.sessionId && m.params.targetInfo.type === "worker" && !pageWorkers.has(m.params.targetInfo.targetId)) pageWorkers.set(m.params.targetInfo.targetId, m.params.sessionId);
-      if (m.method === "Target.detachedFromTarget" && !m.sessionId) for (const [t, sid] of pageWorkers) if (sid === m.params.sessionId) pageWorkers.delete(t);
+      // every attached target, the page's own and, through each iframe's session (auto-attached in turn),
+      // the iframe's workers: the interpreter is the /runner/ iframe's worker (or a top-level
+      // sagebrush-worker.js), never the top-level analyzer (workerRoles; astra CORR-168-R4-1)
+      if (m.method === "Target.attachedToTarget") {
+        const ti = m.params.targetInfo;
+        if (!attached.has(ti.targetId)) attached.set(ti.targetId, { targetId: ti.targetId, type: ti.type, url: ti.url, sessionId: m.params.sessionId, parent: m.sessionId ?? null });
+        if (ti.type === "iframe") ws.send(JSON.stringify({ id: ++n, method: "Target.setAutoAttach", params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, sessionId: m.params.sessionId }));
+      }
+      if (m.method === "Target.detachedFromTarget") for (const [t, x] of attached) if (x.sessionId === m.params.sessionId) attached.delete(t);
     };
-    const pageWorkers = new Map(); // targetId -> sessionId
+    const attached = new Map(); // targetId -> { targetId, type, url, sessionId, parent }
     // every CDP call has a deadline (pilot 3 hung about 20 min), clipped to the run's remaining time
     // (daybreak2 LIMIT-INT168-2): past the deadline a call fails at once with "run budget spent"
     const CDP_MS = 30_000;
@@ -72,17 +76,19 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
     const state = () => ev(`(() => { const c = ${LAST}; return { out: c.querySelector('.out').textContent, running: c.classList.contains('running') || c.classList.contains('queued') }; })()`);
     const start = (code) => ev(`(() => { const cs = [...document.querySelectorAll('.cell')]; let c = cs.at(-1); if (c.querySelector('textarea').value.trim()) { document.querySelector('#add').click(); c = [...document.querySelectorAll('.cell')].at(-1); } const ta = c.querySelector('textarea'); ta.value = ${JSON.stringify(code)}; ta.dispatchEvent(new Event('input', {bubbles: true})); c.querySelector('[data-a=run]').click(); })()`);
     const workers = async () => ((await send("Target.getTargets"))?.targetInfos ?? []).filter((t) => t.type === "worker").map((t) => ({ id: t.targetId, url: t.url }));
-    // the page's own workers' JS heap (Runtime.getHeapUsage on each auto-attached page worker, summed);
-    // null when there is none or any of them doesn't answer: unmeasured, never a guess
+    // the interpreter worker's JS heap: its role found from the attached targets (urls refreshed), then
+    // Runtime.getHeapUsage on its own session.  No single interpreter, or no answer: unmeasured (null),
+    // never another worker's heap.  The targets and their roles are recorded with every measurement.
     const workerHeap = async () => {
-      if (pageWorkers.size === 0) return null;
-      let total = 0;
-      for (const sid of pageWorkers.values()) {
-        const h = await send("Runtime.getHeapUsage", {}, CDP_MS, sid);
-        if (!Number.isFinite(h?.usedSize)) return null;
-        total += h.usedSize;
-      }
-      return total;
+      const urls = new Map(((await send("Target.getTargets"))?.targetInfos ?? []).map((t) => [t.targetId, t.url]));
+      for (const x of attached.values()) if (urls.has(x.targetId)) x.url = urls.get(x.targetId);
+      const iframes = Object.fromEntries([...attached.values()].filter((x) => x.type === "iframe").map((x) => [x.sessionId, x.url]));
+      const roles = workerRoles([...attached.values()].filter((x) => x.type === "worker").map(({ targetId, url, parent }) => ({ targetId, url, parent })), iframes);
+      const targets = roles.workers.map((w) => ({ id: w.targetId, url: String(w.url).slice(0, 120), role: w.role, via: w.parent == null ? "page" : "iframe" }));
+      if (!roles.interpreter) return { heap: null, targets, why: roles.why };
+      const sid = attached.get(roles.interpreter.targetId)?.sessionId;
+      const h = sid ? await send("Runtime.getHeapUsage", {}, CDP_MS, sid) : null;
+      return { heap: Number.isFinite(h?.usedSize) ? h.usedSize : null, targets, interpreter: roles.interpreter.targetId, ...(Number.isFinite(h?.usedSize) ? {} : { why: "the interpreter worker's heap didn't answer" }) };
     };
     // the page's total, wasm and ArrayBuffer backing included; Chrome resolves the measurement at a
     // garbage collection, so one is forced
@@ -205,13 +211,15 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
           else outcome = t_recog - t_send > 10000 ? "SLOW" : "PASS";
           // the leak metrics, on the repeat series: the workers' heap every repeat, the page's total at
           // repeat 3 and at the last (it forces a garbage collection)
-          let worker_heap, page_total;
+          let worker_heap, page_total, heap_targets;
           if (cell === "repeat") {
-            worker_heap = await workerHeap().catch(() => null);
+            const wh = await workerHeap().catch((e) => ({ heap: null, why: String(e?.message ?? e) }));
+            worker_heap = wh.heap;
+            heap_targets = wh;
             if (rep === 3 || rep === reps) page_total = await pageTotal();
             samples.push({ i: rep, worker_heap, page_total, same_worker: sameWorker });
           }
-          trials.push({ i, cell, delay_ms: delay, outcome, why, ...(outcome === "PASS" ? {} : { out: out.slice(-600) }), latency_ms: t_recog && Math.round(t_recog - t_send), poll_ms: 20, same_worker: sameWorker, ...(worker_heap !== undefined ? { worker_heap } : {}), ...(page_total !== undefined ? { page_total } : {}) });
+          trials.push({ i, cell, delay_ms: delay, outcome, why, ...(outcome === "PASS" ? {} : { out: out.slice(-600) }), latency_ms: t_recog && Math.round(t_recog - t_send), poll_ms: 20, same_worker: sameWorker, ...(worker_heap !== undefined ? { worker_heap } : {}), ...(heap_targets ? { heap_targets } : {}), ...(page_total !== undefined ? { page_total } : {}) });
         } catch (e) {
           // a trial that threw: classified (decision 4, astra CORR-168-6), and the case's other trials skipped
           const f = browserFailure(e?.message ?? e, dialogOpen);

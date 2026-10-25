@@ -10,7 +10,7 @@ import { join } from "node:path";
 const mod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 
 function run(js: string): any {
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, classifyXK, xkRowOutcome, rowOutcome, againstBaseline, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, classifyXK, xkRowOutcome, rowOutcome, againstBaseline, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -189,4 +189,25 @@ test("a calibration with no size in the band takes the attempt closest to it wit
   // nothing within 1.5 max (12 s), or only below the band: still uncalibrated
   assert.equal(run(`widenedPick([{ s: 22, T_ms: 13000 }, { s: 20, T_ms: 372 }], ${band})`), null);
   assert.equal(run(`widenedPick([{ s: 20, T_ms: 2000 }, { s: 19, T_ms: null }], ${band})`), null);
+});
+
+test("the interpreter's worker: the /runner/ iframe's (or a top-level sagebrush-worker.js), never the analyzer (astra CORR-168-R4-1)", () => {
+  const analyzer = { targetId: "A", url: "http://h/sagebrush-analyze.js", parent: null };
+  const runnerW = { targetId: "R", url: "blob:http://h:1/84ed", parent: "S-iframe" };
+  // the analyzer alone (astra's event-filter probe): no interpreter, so the heap is unmeasured
+  const a = run(`workerRoles(${JSON.stringify([analyzer])}, {})`);
+  assert.equal(a.interpreter, null);
+  assert.equal(a.workers[0].role, "analyzer");
+  assert.match(a.why, /no interpreter/);
+  // the cross-origin-isolated notebook: the runner iframe's worker is the interpreter
+  const b = run(`workerRoles(${JSON.stringify([analyzer, runnerW])}, { "S-iframe": "http://h/runner/" })`);
+  assert.equal(b.interpreter.targetId, "R");
+  // a worker of some other iframe is not the interpreter
+  assert.equal(run(`workerRoles(${JSON.stringify([analyzer, runnerW])}, { "S-iframe": "http://h/other.html" })`).interpreter, null);
+  // without the runner: the top-level sagebrush-worker.js
+  assert.equal(run(`workerRoles(${JSON.stringify([analyzer, { targetId: "W", url: "http://h/sagebrush-worker.js", parent: null }])}, {})`).interpreter.targetId, "W");
+  // two candidates: ambiguous, unmeasured
+  const c = run(`workerRoles(${JSON.stringify([runnerW, { targetId: "W", url: "http://h/sagebrush-worker.js", parent: null }])}, { "S-iframe": "http://h/runner/" })`);
+  assert.equal(c.interpreter, null);
+  assert.match(c.why, /2 interpreter candidates/);
 });

@@ -157,3 +157,19 @@ export function widenedPick(attempts, band) {
   const dist = (a) => (a.T_ms > band.max ? a.T_ms - band.max : 0);
   return ok.reduce((b, a) => (dist(a) < dist(b) ? a : b));
 }
+
+// the interpreter's worker among the page's (astra CORR-168-R4-1): in the cross-origin-isolated
+// notebook, Python runs in a worker of the /runner/ iframe (RunnerWorker, a blob: URL), reached
+// through that iframe's own session; without the runner, a top-level sagebrush-worker.js.  The page's
+// top-level sagebrush-analyze.js is the analyzer, never the interpreter.  workers: [{ targetId, url,
+// parent }] (parent: the session a worker was attached through, null for the page's own);
+// iframes: { sessionId: url }.  Exactly one interpreter, or none (then the heap is unmeasured).
+export function workerRoles(workers, iframes) {
+  const role = (w) => {
+    if (w.parent == null) return /(^|\/)sagebrush-worker\.js(\?|$)/.test(w.url) ? "interpreter" : /(^|\/)sagebrush-analyze\.js(\?|$)/.test(w.url) ? "analyzer" : "other";
+    return /\/runner\/(index\.html)?(\?|#|$)/.test(iframes[w.parent] ?? "") ? "interpreter" : "other";
+  };
+  const out = workers.map((w) => ({ ...w, role: role(w) }));
+  const interp = out.filter((w) => w.role === "interpreter");
+  return { workers: out, interpreter: interp.length === 1 ? interp[0] : null, why: interp.length === 1 ? null : interp.length === 0 ? "no interpreter worker found" : `${interp.length} interpreter candidates` };
+}
