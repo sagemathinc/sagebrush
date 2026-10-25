@@ -265,6 +265,10 @@
   "owner": "HMF engine",
   "row": "inv-37"
  },
+ "engine/hmf/src/eigen.rs :: orbit_eigenspace_core :: if f.krylov.is_some() && krylov_used(&c) + n * n > budget { #0": {
+  "class": "2",
+  "owner": "HMF engine"
+ },
  "engine/hmf/src/field.rs :: factor_u64_steps :: let d = pollard_brent(m, &mut budget).ok_or_else(|| format!(\"could not factor {} within the work limit (unsupported)\", n))?; #0": {
   "class": "2+3",
   "owner": "HMF engine",
@@ -314,6 +318,10 @@
   "class": "2+3",
   "owner": "HMF engine",
   "row": "inv-39"
+ },
+ "engine/hmf/tests/eigen_stop.rs :: stop_anywhere_in_an_orbit_eigenspace_then_the_same_cache_works :: let k = (0..orbits.orbits.len()).max_by_key(|&k| orbits.orbits[k].len()).unwrap(); #0": {
+  "class": "none",
+  "owner": "HMF engine"
  },
  "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n - last, Relaxed); #0": {
   "class": "none",
@@ -3323,14 +3331,6 @@
   "owner": "p-adic linear algebra",
   "row": "inv-9"
  },
- "lib/_sage_padic_lseries.py :: _kd_admit :: \"computation (1/4 of this process's %d MiB)\" % (what, _kd_mib(U), cap >> 20, total >> 20), #0": {
-  "class": "2",
-  "owner": "p-adic/L-series"
- },
- "lib/_sage_padic_lseries.py :: _kd_admit :: U, cap) #0": {
-  "class": "2",
-  "owner": "p-adic/L-series"
- },
  "lib/_sage_padic_lseries.py :: _kd_admit :: cap = total // 4 #0": {
   "class": "2",
   "owner": "p-adic/L-series"
@@ -3343,8 +3343,13 @@
   "class": "2",
   "owner": "p-adic/L-series"
  },
- "lib/_sage_padic_lseries.py :: _kd_admit :: raise _kd_refusal(\"%s is estimated to need about %d MiB, more than sagebrush's budget of %d MiB for one \" #0": {
+ "lib/_sage_padic_lseries.py :: _kd_admit :: raise NotImplementedError(\"%s: the memory estimate for this computation isn't established for this \" #0": {
+  "class": "coverage",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_admit :: raise _kd_memory(\"By an upper estimate, %s\" % what, U, cap, \"one computation\") #0": {
   "class": "2",
+  "explained": true,
   "owner": "p-adic/L-series"
  },
  "lib/_sage_padic_lseries.py :: _kd_cost :: limit padic.kedlaya_work, about 25 microseconds each in the CLI: #0": {
@@ -3353,6 +3358,16 @@
  },
  "lib/_sage_padic_lseries.py :: _kd_cost :: this (the preflight's shortcut under a finite limit).\"\"\" #0": {
   "class": "3",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_memory :: def _kd_memory(what, need, limit, allowance_for): #0": {
+  "class": "2",
+  "explained": true,
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_memory :: e = _memguard.memory_guard(what, need, limit, allowance_for) #0": {
+  "class": "2",
+  "explained": true,
   "owner": "p-adic/L-series"
  },
  "lib/_sage_padic_lseries.py :: _kd_plan_fast :: raise NotImplementedError(\"p >= 5 only\") #0": {
@@ -3383,15 +3398,7 @@
   "class": "3",
   "owner": "p-adic/L-series"
  },
- "lib/_sage_padic_lseries.py :: _kd_refusal :: def _kd_refusal(text, need, cap): #0": {
-  "class": "2",
-  "owner": "p-adic/L-series"
- },
- "lib/_sage_padic_lseries.py :: _kd_refusal :: return _sage_ffmat._refusal(text, need, cap) #0": {
-  "class": "2",
-  "owner": "p-adic/L-series"
- },
- "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: NotImplementedError: the Frobenius matrix at p = 5 to precision 10000...0 needs at least ... MiB just for its working modulus p^(prec + 4), more than this process's ... MiB #0": {
+ "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: ....: print(type(e).__name__, e.need_bytes > e.limit_bytes) #0": {
   "class": "2",
   "owner": "p-adic/L-series"
  },
