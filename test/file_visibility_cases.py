@@ -1,5 +1,5 @@
-# open(F, M).write(S) with plain operands: the file is written and closed at
-# the statement, as CPython's dropped temporary is; python3 and Sagebrush
+# open(F, M).write(S) as a statement (any F, M and S): the file is written and
+# closed at the statement, as CPython's dropped temporary is; python3 and Sagebrush
 # print the same lines (test/file-once.test.ts).  Held files and the
 # same-path cases: a held file's data is visible at its close, as CPython's
 # buffer is.  (plan-pyjs-file-visibility r5 to r7)
@@ -20,16 +20,21 @@ except ImportError:
 
 # --- the eligible forms, module scope: names and literals, each mode
 p = P("t"); S = "héllo 😀"; M = "w"
-print("1 names, text:", open(p, M).write(S), sz(p), repr(rd(p)))
+n = open(p, M).write(S)
+print("1 names, text:", n, sz(p), repr(rd(p)))
 L = P("lit")
-print("2 literals:", open(L, "w").write("X = 5\n"), sz(L))
+n = open(L, "w").write("X = 5\n")
+print("2 literals:", n, sz(L))
 B = b"\x00\x01\x02"
-print("3 binary:", open(p, "wb").write(B), rd(p))
+n = open(p, "wb").write(B)
+print("3 binary:", n, rd(p))
 open(p, "a").write("A"); open(p, "a").write("B")
 print("4 append:", rd(p))
-print("5 append bytes:", open(p, "ab").write(b"C"), rd(p))
+n = open(p, "ab").write(b"C")
+print("5 append bytes:", n, rd(p))
 E = ""
-print("6 empty str truncates:", open(p, "w").write(E), sz(p))
+n = open(p, "w").write(E)
+print("6 empty str truncates:", n, sz(p))
 
 # --- function scope: locals, a closure cell, a parameter
 def local_site(q, s):
@@ -72,9 +77,11 @@ print("16 with block:", sz(P("wb")))
 f = None
 
 # --- the return value and truncation
-print("17 the return value, non-BMP:", open(P("n"), "w").write("😀😀abcde"))
+n = open(P("n"), "w").write("😀😀abcde")
+print("17 the return value, non-BMP:", n)
 p = P("tr"); open(p, "w").write("0123456789"); E2 = "0"
-print("18 truncation:", open(p, "w").write(E2), repr(open(p).read()))
+n = open(p, "w").write(E2)
+print("18 truncation:", n, repr(open(p).read()))
 
 # --- the open's errors, before S is read
 def err(label, f):
@@ -89,7 +96,9 @@ def dir_write():
     s = "x"
     return open(DIR, "w").write(s)
 err("20 a directory:", dir_write)
-err("21 a missing dir, append:", lambda: open(MISSING, "a").write("x"))
+def append_missing():
+    open(MISSING, "a").write("x")
+err("21 a missing dir, append:", append_missing)
 
 # --- an unbound S: the open's effects, then the scope's own error
 p = P("u1")
@@ -129,7 +138,8 @@ except Exception as e:
 class Sub(str):
     pass
 SUB = Sub("sub")
-print("27 a str subclass:", open(P("d1"), "w").write(SUB)); settle(); print("27b settled:", sz(P("d1")))
+n = open(P("d1"), "w").write(SUB)
+print("27 a str subclass:", n, sz(P("d1")))
 err("28 bytes to a text file:", lambda: open(P("d2"), "w").write(b"x"))
 err("29 str to a binary file:", lambda: open(P("d3"), "wb").write("x"))
 Q = "x"
@@ -137,7 +147,8 @@ err("30 mode x, then again:", lambda: (open(P("d4"), "x").write(Q), open(P("d4")
 # (31, a lone surrogate, declines too; today's write takes it, and its
 # encoding fails at the flush, a pyjs divergence: test/file-once.test.ts)
 BA = bytearray(b"ba")
-print("32 a bytearray:", open(P("d6"), "wb").write(BA))
+n = open(P("d6"), "wb").write(BA)
+print("32 a bytearray:", n, rd(P("d6")))
 
 # --- the canonical open running user code (astra2's CORR-IO-R6-1 probes)
 class FsRebind:
@@ -194,3 +205,87 @@ open(P("u5"), "w").write(S3)
 open = real_open
 held.pop().close()
 print("37 a user open that rebinds S:", repr(open(P("u5")).read()))
+
+# --- c1 + c2: computed operands; S evaluated with the file already open
+import json
+os.makedirs(D2 := P("cat") + "/python")
+open(D2 + "/one.json", "w").write(json.dumps({"name": "f"}))
+print("38 the catalog form, then read:", repr(open(D2 + "/one.json").read()))
+F = P("abbb")
+def other():
+    open(F, "a").write("BBBB")
+    return "A"
+open(F, "w").write(other())
+print("39 S writes BBBB through another handle, returns A:", repr(open(F).read()))
+G = P("ren")
+open(G, "w").write("old")
+def rename():
+    os.rename(G, G + ".moved")
+    open(G, "w").write("new")
+    return "X"
+open(G, "w").write(rename())
+print("40 S renames the file and recreates it:", repr(open(G).read()), repr(open(G + ".moved").read()))
+H = P("raise")
+open(H, "w").write("before")
+def boom():
+    raise ValueError("boom")
+try:
+    open(H, "w").write(boom())
+except ValueError as e:
+    print("41 S raises after the open:", e, sz(H))
+def fails(label, f, path):
+    try:
+        print(label, "returned", f())
+    except Exception as e:
+        print(label, type(e).__name__, str(e).replace(d, "<d>"), "| size", sz(path) if os.path.exists(path) else None)
+def w1():
+    return open(P("e1"), "w").write(b"x")
+def w2():
+    return open(P("e2"), "wb").write("x")
+def w3():
+    return open(P("e3"), "w").write(5)
+def w4():
+    return open(P("e4"), "wb").write(None)
+def w5():
+    return open(P("e5"), "w").write("ab\ud800")
+def w6():
+    return open(MISSING, "w").write(UNDEFINED_NAME)
+def w7():
+    return open(os.path.join(DIR, "no", "such"), "a").write(str(1))
+fails("42 bytes to a text file:", w1, P("e1"))
+fails("43 str to a binary file:", w2, P("e2"))
+fails("44 an int to a text file:", w3, P("e3"))
+fails("45 None to a binary file:", w4, P("e4"))
+fails("46 a lone surrogate:", w5, P("e5"))
+fails("47 the open fails before S is evaluated:", w6, MISSING)
+fails("48 a computed missing path, append:", w7, P("no"))
+n = open(P("mv"), "wb").write(memoryview(b"abcd")[1:3])
+print("49 a memoryview slice:", n, rd(P("mv")))
+class Sub2(str):
+    def __str__(self):
+        return "not this"
+n = open(P("s2"), "w").write(Sub2("this"))
+print("50 a str subclass's own text, not its __str__:", n, repr(open(P("s2")).read()))
+MODES = ["w", "b"]
+n = open(P("cm"), MODES[0] + MODES[1]).write(bytes([1, 2]))
+print("51 a computed mode:", n, rd(P("cm")))
+class Writer:
+    def write(self, s):
+        return "the method bound before S"
+def other_write(self, s):
+    return "the method S installed"
+def install():
+    Writer.write = other_write
+    return "s"
+def writer_open(f, m):
+    return Writer()
+REAL = open
+open = writer_open
+r = open(P("bw"), "w").write(install())
+open = REAL
+del REAL
+print("52 a user open's write, bound before S:", r)
+def nested():
+    x = open(P("nest"), "w").write("in a function: " + "joined")
+    return x
+print("53 a function's site:", nested(), repr(open(P("nest")).read()))
