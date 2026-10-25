@@ -230,7 +230,7 @@ test("comprehensions by bounded work: at most 10^6 elements (fewer in a small he
   // (a 96 MiB heap admits what its free part allows, less after the modules
   // are loaded: about 37000 elements in October 2026, never more than the
   // earlier 96 MiB / 2048 = 49152; one bound in all the refusals of a run)
-  const refusal = /a comprehension of more than (\d+) elements is not supported yet/g;
+  const refusal = /A collection of more than (\d+) elements needs about/g;
   // above the limit: #S^2 refused at once without a condition (each kind of
   // collection); with one, or several clauses, by the collector at 10^6 + 1
   const t0 = Date.now();
@@ -271,7 +271,7 @@ test("at the comprehension bound, with its costliest elements built, a clean ref
   });
   assert.equal(r.signal, null, r.stderr);
   assert.doesNotMatch(r.stdout + r.stderr, /heap out of memory|FATAL ERROR/);
-  const m = /a comprehension of more than (\d+) elements is not supported yet/.exec(r.stdout.replace(/\s+/g, " "));
+  const m = /A collection of more than (\d+) elements needs about/.exec(r.stdout.replace(/\s+/g, " "));
   assert.ok(m && Number(m[1]) >= 16384 && Number(m[1]) <= 49152, r.stdout + r.stderr);
   assert.match(r.stdout, /\nend\n$/);
 });

@@ -30,7 +30,8 @@ opt-in through lib/_limits.py or a trusted host capability, such as an
 allowance armed by grading, an instructor's bundle or a server: item G),
 their mixtures as the inventories write them ("2+3"), "coverage" (an
 unsupported feature, not a cap), "none" (matched
-text that refuses nothing).  The sites present at the seed and not yet
+text that refuses nothing); a class-2 site whose guard raises the memory
+guards' error (lib/_memguard.py, item D) also has "explained": true.  The sites present at the seed and not yet
 classified are the baseline: grandfathered, certifying nothing, and kept out
 of the registry, as the first 16 hex digits of each fingerprint's sha256 in
 test/limit-sites-baseline.txt (sorted; `--list-baseline REV` prints them
@@ -212,9 +213,13 @@ def check():
     bad = {
         "unregistered": sorted(k for k in now if k not in reg and short(k) not in base),
         "stale": sorted(set(reg) - now),
-        "invalid": sorted(k for k, v in reg.items() if v.get("class") not in CLASSES or not v.get("owner")),
+        # (explained: a class-2 site whose guard says it in the memory
+        # guards' message, item D; true or absent)
+        "invalid": sorted(k for k, v in reg.items() if v.get("class") not in CLASSES or not v.get("owner")
+                          or v.get("explained", True) is not True or ("explained" in v and "2" not in v["class"])),
     }
-    return {"baseline_sha256": baseline_sha256(), "sites": len(now), "registered": len(reg), "problems": bad}
+    return {"baseline_sha256": baseline_sha256(), "sites": len(now), "registered": len(reg),
+            "explained": sum(1 for v in reg.values() if v.get("explained")), "problems": bad}
 
 
 def seed(rev, seedfile):
