@@ -382,6 +382,9 @@ export class SyncClient {
     // is scanned or sent; then this holder announced, with the ledger's revision, before any scan or ack of its own)
     await seedLedger(this.w, ns, (o, dseq) => wireOf(o, dseq));
     const epoch = (await this.metaGet<number>("sync:epoch")) ?? 0;
+    // (it answers waits' hellos from now on, even before it sends: a wait on an unknown generation is confirmed by
+    // that answer alone, CORR-PR128-6-R5)
+    hubOf(this.w.ws).holding(ns, epoch, lease.gen);
     hubOf(this.w.ws).post({ t: "holder", ns, epoch, gen: lease.gen, rev: (await this.metaGet<number>(ledgerKeys(ns).rev)) ?? 0 });
     // (where the log is read from, and to: the records accepted and awaiting their echo, LIMIT-PR58-3)
     const awaiting = await this.awaitingEcho(ob);

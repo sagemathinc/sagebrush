@@ -2119,12 +2119,12 @@ async function t14Cap() {
   await ob.scan();
   const recs = await ob.records();
   await ob.acked(recs.map((r, i) => ({ dseq: r.dseq, seq: 100 + i })));
-  const was = W.LEDGER.decided;
-  W.LEDGER.decided = 5;
+  const was = W.LEDGER.maxDecided;
+  W.LEDGER.maxDecided = 5;
   try {
     for (const r of recs) await ob.confirmed([r.dseq]);
   } finally {
-    W.LEDGER.decided = was;
+    W.LEDGER.maxDecided = was;
   }
   const count = await metaGet(w.ws, `sync:${ns}:ledgerCount`), floor = await metaGet(w.ws, `sync:${ns}:ledgerFloor`);
   const st = await w.syncState(col);
@@ -2382,7 +2382,7 @@ async function t14Review2() {
     hub.post({ t: "holder", ns: `${String(i).padStart(16, "0")}:1:${w.device}`, epoch: i, gen: 5, rev: 0 });
     hub.post({ t: "lifecycle", ns, fromEpoch: 100 + i, toEpoch: 101 + i, kind: "off" });
   }
-  check(hub.fences <= W.HUB.namespaces, `review2: 50 namespaces and 50 epochs cycled: the fence holds ${hub.fences} (at most ${W.HUB.namespaces})`);
+  check(hub.fences <= W.HUB.maxNamespaces, `review2: 50 namespaces and 50 epochs cycled: the fence holds ${hub.fences} (at most ${W.HUB.maxNamespaces})`);
   // (still a fence: the namespace moved to epoch 200 by a lifecycle change; its holder 10 seen, a delayed sent from 9
   // is stale)
   const epoch = 200;
@@ -2430,8 +2430,11 @@ async function t14Review3() {
   // (after eviction: three other namespaces moved by lifecycle changes push this one out; a future claim again; a new
   // real wait re-anchors at the durable epoch and takes its progress)
   for (const lead of ["b", "c", "d"]) hub.post({ t: "lifecycle", ns: `${lead.repeat(16)}:1:${w.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
-  check(hub.fences === W.HUB.namespaces && hub.seen(ns, epoch) === 0, `review3: three other namespaces evicted this one (the fence holds ${hub.fences})`);
+  check(hub.fences === W.HUB.maxNamespaces && hub.seen(ns, epoch) === 0, `review3: three other namespaces evicted this one (the fence holds ${hub.fences})`);
   hub.post({ t: "sent", ns, epoch: epoch + 1, gen: 999, seqs: [] });
+  // (after an eviction a registration's generation is unknown (CORR-PR128-6-R5): the live sender's answer to the wait's
+  // hello confirms it, as the real sender gives from the moment it holds)
+  hub.holding(ns, epoch, lease.gen);
   const b = [];
   await w.mkdir("/fe", { collect: b });
   const pb = w.waitSync(b, { level: "sent", signal: signalOf(), timeoutMs: 5000 });
@@ -2443,6 +2446,7 @@ async function t14Review3() {
   // after eviction): tentative, then confirmed by the wait's durable read)
   for (const lead of ["b", "c", "d"]) hub.post({ t: "lifecycle", ns: `${lead.repeat(16)}:2:${w.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
   hub.post({ t: "holder", ns, epoch, gen: lease.gen + 5, rev: 0 });
+  hub.holding(ns, epoch, lease.gen + 5);
   const d = [];
   await w.mkdir("/ft", { collect: d });
   const pd = w.waitSync(d, { level: "sent", signal: new AbortController().signal });
@@ -2459,7 +2463,7 @@ async function t14Review3() {
   await sleep(50);
   hub.post({ t: "holder", ns, epoch, gen: lease.gen + 6, rev: 0 });
   hub.post({ t: "sent", ns, epoch, gen: lease.gen + 5, seqs: c });
-  check(!(await settledYet(pc)) && hub.fences <= W.HUB.namespaces, "review3: re-anchored, an older generation's sent after a newer holder is dropped; the bound kept");
+  check(!(await settledYet(pc)) && hub.fences <= W.HUB.maxNamespaces, "review3: re-anchored, an older generation's sent after a newer holder is dropped; the bound kept");
   hub.post({ t: "sent", ns, epoch, gen: lease.gen + 6, seqs: c });
   check((await pc).sync === "sent", "review3: …and the newer generation's sent counts");
   // (astra3's CORR-PR128-6-R4: the announced holder and a future-epoch claim together, in both orders, on a fresh hub and
@@ -2475,10 +2479,11 @@ async function t14Review3() {
       if (evicted) {
         hub2.fence(n2, e2, l2.gen, true);
         for (const lead of ["b", "c", "d"]) hub2.post({ t: "lifecycle", ns: `${lead.repeat(16)}:3:${w2.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
-        check(hub2.seen(n2, e2) === 0 && hub2.fences === W.HUB.namespaces, `review3: ${what}: evicted`);
+        check(hub2.seen(n2, e2) === 0 && hub2.fences === W.HUB.maxNamespaces, `review3: ${what}: evicted`);
       } else check(hub2.fences === 0, `review3: ${what}: a fresh hub`);
       const msgs = [{ t: "holder", ns: n2, epoch: e2, gen: l2.gen + 5, rev: 0 }, { t: "holder", ns: n2, epoch: e2 + 1, gen: 999, rev: 0 }];
       for (const m of order === "holder first" ? msgs : msgs.reverse()) hub2.post(m);
+      if (evicted) hub2.holding(n2, e2, l2.gen + 5);
       const c2 = [];
       await w2.mkdir("/r4", { collect: c2 });
       const p2 = w2.waitSync(c2, { level: "sent", signal: new AbortController().signal });
@@ -2487,7 +2492,47 @@ async function t14Review3() {
       check(!(await settledYet(p2)), `review3: ${what}: holder ${l2.gen + 5} announced, a claim of epoch ${e2 + 1}: a new wait drops generation ${l2.gen + 4}'s sent`);
       hub2.post({ t: "sent", ns: n2, epoch: e2, gen: l2.gen + 5, seqs: c2 });
       const r2 = await Promise.race([p2, sleep(3000).then(() => null)]);
-      check(r2?.sync === "sent" && hub2.fences <= W.HUB.namespaces, `review3: ${what}: …and takes generation ${l2.gen + 5}'s: ` + J(r2?.sync ?? null));
+      check(r2?.sync === "sent" && hub2.fences <= W.HUB.maxNamespaces, `review3: ${what}: …and takes generation ${l2.gen + 5}'s: ` + J(r2?.sync ?? null));
+    }
+  // (astra3's and daybreak3's CORR-PR128-6-R5: the tentative bound overflowed (the current epoch's announced holder,
+  // then HUB.maxTentative other epochs, or those first and the holder last), on a fresh hub and after eviction: no
+  // overflow can let an older generation's sent resolve a real wait; the wait takes nothing until the live sender's own
+  // answer to its hello, then that generation's sent)
+  const orders = { "holder, then 4 older epochs": (cur, older) => [cur, ...older], "4 older epochs, then the holder": (cur, older) => [...older, cur], "holder, then 4 future epochs": (cur, older, future) => [cur, ...future], "4 future epochs, then the holder": (cur, older, future) => [...future, cur] };
+  for (const evicted of [false, true])
+    for (const [order, seqOf] of Object.entries(orders)) {
+      const w3 = await fresh();
+      const { ns: n3, lease: l3 } = await localNs(w3, evicted ? "e7" : "e8");
+      // (the current epoch made 5, so four older ones exist)
+      await rawTx(w3.ws, ["meta"], (tx) => { tx.objectStore("meta").put(5, "sync:epoch"); });
+      const e3 = 5, hub3 = W.hubOf(w3.ws), what = `${evicted ? "after eviction" : "fresh hub"}, ${order}`;
+      if (evicted) for (const lead of ["b", "c", "d"]) hub3.post({ t: "lifecycle", ns: `${lead.repeat(16)}:4:${w3.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
+      const cur = { t: "holder", ns: n3, epoch: e3, gen: l3.gen + 5, rev: 0 };
+      const older = [1, 2, 3, 4].map((e) => ({ t: "holder", ns: n3, epoch: e, gen: 1, rev: 0 }));
+      const future = [6, 7, 8, 9].map((e) => ({ t: "holder", ns: n3, epoch: e, gen: 999, rev: 0 }));
+      for (const m of seqOf(cur, older, future)) hub3.post(m);
+      const c3 = [];
+      await w3.mkdir("/r5", { collect: c3 });
+      let nonce = null;
+      const off = hub3.on((m) => { if (m.t === "hello" && m.ns === n3) nonce = m.nonce; });
+      const p3 = w3.waitSync(c3, { level: "sent", signal: new AbortController().signal });
+      await sleep(50);
+      hub3.post({ t: "sent", ns: n3, epoch: e3, gen: l3.gen + 4, seqs: c3 });
+      check(!(await settledYet(p3)), `review3 R5: ${what}: generation ${l3.gen + 4}'s sent after holder ${l3.gen + 5} and the overflow: the wait stays pending`);
+      // (fail closed: without the live sender's answer, not even the announced generation's sent counts)
+      hub3.post({ t: "sent", ns: n3, epoch: e3, gen: l3.gen + 5, seqs: c3 });
+      const early = await settledYet(p3);
+      // (the live sender answers this wait's hello (its own nonce): the generation confirmed, then its sent counts; an
+      // older one never)
+      off();
+      hub3.holding(n3, e3, l3.gen + 5);
+      hub3.post({ t: "hello", ns: n3, epoch: e3, nonce });
+      await sleep(20);
+      hub3.post({ t: "sent", ns: n3, epoch: e3, gen: l3.gen + 4, seqs: c3 });
+      const still = !(await settledYet(p3));
+      hub3.post({ t: "sent", ns: n3, epoch: e3, gen: l3.gen + 5, seqs: c3 });
+      const r3 = await Promise.race([p3, sleep(3000).then(() => null)]);
+      check(nonce !== null && !early && still && r3?.sync === "sent" && hub3.unknown(n3, e3) === false && hub3.fences <= W.HUB.maxNamespaces, `review3 R5: ${what}: nothing counted before the live sender's answer, an older generation never, the answered one's sent counted: ` + J({ settledBeforeAnswer: early, olderStillPendingAfter: still, final: r3?.sync ?? null }));
     }
 }
 
