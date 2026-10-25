@@ -52,7 +52,13 @@ import { answerChannel, type AnswerChannel } from "./channel";
 import { EditChannel, EDIT_BOUNDS, inlinePictures, utf8Length, type Kept } from "./edit-channel";
 import { PictureChannel, byReference } from "./edit-pictures";
 import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistoryRefused } from "../notebook/stores.js";
-import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, type Entry } from "../workspace/index";
+// (each from its own module, never the workspace barrel: the barrel re-exports the sync client by value, which
+// would keep it in the frame's and exports' build without sync)
+import { Workspace, LIMITS, type Entry } from "../workspace/api";
+import { migrate } from "../workspace/migrate";
+import { freePath, nameOf, splitExt, safeName } from "../workspace/paths";
+import { startMigrator } from "../workspace/migrator";
+import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice } from "../workspace/notice";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
 onHistoryRefused((m: string) => showBusyNotice(m));
 import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
@@ -60,6 +66,10 @@ import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
 import { SyncOwner } from "../workspace/sync-owner";
+// (the frame other sites embed and exported boards: built with __SB_NO_SYNC__, so no sync owner, and with it no
+// client, is in that copy of the page: web/build.ts)
+declare const __SB_NO_SYNC__: boolean | undefined;
+const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
 import { within } from "./idb-open";
 
 const q = new URLSearchParams(location.search);
@@ -188,7 +198,7 @@ if (ws) {
   void startMigrator(ws);
   // (sync, step 5: the page's sync owner; it runs a client only while this browser's sync is on, for the account
   // signed in: nothing at all otherwise)
-  SyncOwner.of(ws).start();
+  if (!NO_SYNC) SyncOwner.of(ws).start();
 }
 const PENDING = "sagebrush-workspace-pending:", PENDING_UNREAD = "sagebrush-workspace-pending-unread:";
 /** The largest save journaled as pending (characters of JSON): a larger board is kept by the workspace alone, and a pending value larger than this isn't ours to parse (LIMIT-12C-4). */

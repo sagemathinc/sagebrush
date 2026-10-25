@@ -15,8 +15,10 @@
 // Also out: {fsChanged: path, data}   Python wrote (data) or deleted (null) a file
 //           {initFailed: message}      the limits are invalid: this worker is done
 //                                       (each run then answers with the message)
-//           {ready, version, interrupt, seeded, startup}  started (interrupt: the
-//                                       shared flag, if any; seeded, startup: web/replay-env.ts)
+//           {ready, version, interrupt, progress, seeded, startup}  started (interrupt: the
+//                                       shared flag, if any; progress: the shared progress
+//                                       slots, src/runtime/progress.ts, if any; seeded,
+//                                       startup: web/replay-env.ts)
 // The Worker's name carries TimeTravel replay's parameters (web/replay-env.ts).
 // first: the clock and entropy, before anything reads them (TimeTravel replay)
 import { replayEnv } from "./replay-env";
@@ -217,13 +219,16 @@ self.onmessage = async (ev: MessageEvent) => {
 // The interrupt flag, shared with the page when it is cross-origin isolated
 // (Stop then raises KeyboardInterrupt here instead of restarting the worker).
 const interrupt = typeof SharedArrayBuffer === "function" && R.INTR.buffer instanceof SharedArrayBuffer ? R.INTR.buffer : null;
+// and the progress slots, which the page can read while a run holds this
+// thread (R.progress.snapshot()'s layout, src/runtime/progress.ts)
+const progressSlots = interrupt && R.progress.buffer.buffer instanceof SharedArrayBuffer ? R.progress.buffer.buffer : null;
 // ready once the interpreter is: `startup` is the clock values read until
 // then (recorded, or replayed), `seeded` whether the entropy is reproducible
 session.ready.then(
   () => {
     if (gate === "failed") return;
     gate = "ready";
-    postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt, seeded: replayEnv.seeded, startup: replayEnv.endStartup() });
+    postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt, progress: progressSlots, seeded: replayEnv.seeded, startup: replayEnv.endStartup() });
   },
   (e) => gate !== "failed" && failed(String(e?.message ?? e).slice(0, 1024)),
 );
