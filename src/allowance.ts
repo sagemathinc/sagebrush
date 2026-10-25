@@ -106,9 +106,27 @@ export function checkAllowance(v: unknown, opts: AllowanceOptions = {}): Allowan
   return Object.freeze(out);
 }
 
+// The text's UTF-8 length, counted without encoding it (a lone surrogate
+// counts 3, as TextEncoder writes U+FFFD for it).
+function utf8Length(s: string): number {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+      n += 4;
+      i++;
+    } else n += 3;
+  }
+  return n;
+}
+
 /** Parses allowance/1 from JSON text: strict JSON (no duplicate or prototype keys), then checkAllowance. */
 export function parseAllowance(text: string, opts: AllowanceOptions = {}): Allowance {
-  if (text.length > ALLOWANCE_LIMITS.textBytes) fail(`longer than ${ALLOWANCE_LIMITS.textBytes} characters`);
+  // (a UTF-16 code unit is at least one UTF-8 byte, so the length check
+  // first refuses a huge text without scanning it)
+  if (text.length > ALLOWANCE_LIMITS.textBytes || utf8Length(text) > ALLOWANCE_LIMITS.textBytes) fail(`longer than ${ALLOWANCE_LIMITS.textBytes} bytes of UTF-8`);
   let v: unknown;
   try {
     v = strictJson(text, ALLOWANCE_LIMITS.jsonDepth);
