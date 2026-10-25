@@ -237,6 +237,113 @@ def claims(c):
     return base64.b64encode(out).decode()
 
 
+# ---- LRE, the lossless record encoding (plan-sync-slice2-client-r4 §1b), written again here
+
+NUL, SIDECAR = "\u0000", "\u0000n:"
+SCHEMAS = {"notebook": (["type", "id"], ["input"]), "board": (["type", "page", "id"], ["title", "text", "code", "detail", "label", "intro"])}
+
+
+class Refused(Exception):
+    def __init__(self, field):
+        self.field = field
+
+
+def lre_key(k):
+    return NUL + k if k.startswith(NUL) else k
+
+
+def lre_value(v, field):
+    if v is None:
+        return {NUL: "n"}
+    if isinstance(v, bool) or isinstance(v, str) or isinstance(v, (int, float)):
+        return v
+    if isinstance(v, list):
+        return [lre_value(x, field) for x in v]
+    if isinstance(v, dict):
+        return {lre_key(k): lre_value(x, field) for k, x in v.items()}
+    raise Refused(field)
+
+
+def lre_encode(kind, rec):
+    pks, cols = SCHEMAS[kind]
+    for k in pks:
+        if k in rec and not isinstance(rec[k], str):
+            raise Refused(k)
+    out = {}
+    for k, v in rec.items():
+        if k in cols:
+            if v is None:
+                out[SIDECAR + k] = True
+            elif isinstance(v, str):
+                out[k] = v
+            else:
+                raise Refused(k)
+        else:
+            out[lre_key(k)] = lre_value(v, k)
+    return out
+
+
+def lre_decode_value(v, field):
+    if v is None:
+        raise Refused(field)
+    if isinstance(v, bool) or isinstance(v, str) or isinstance(v, (int, float)):
+        return v
+    if isinstance(v, list):
+        return [lre_decode_value(x, field) for x in v]
+    if NUL in v:
+        if v[NUL] != "n":
+            raise Refused(field)
+        if len(v) == 1:
+            return None
+    out = {}
+    for k, x in v.items():
+        if k == NUL:
+            continue
+        if k.startswith(NUL):
+            if not k.startswith(NUL + NUL):
+                raise Refused(field)
+            out[k[1:]] = lre_decode_value(x, field)
+        else:
+            out[k] = lre_decode_value(x, field)
+    return out
+
+
+def lre_decode(kind, enc):
+    pks, cols = SCHEMAS[kind]
+    out, sidecars = {}, []
+    for k, v in enc.items():
+        if k.startswith(SIDECAR):
+            f = k[len(SIDECAR):]
+            if f not in cols or v is not True:
+                raise Refused(f)
+            sidecars.append(f)
+        elif k.startswith(NUL):
+            if not k.startswith(NUL + NUL):
+                raise Refused(k)
+            out[k[1:]] = lre_decode_value(v, k[1:])
+        elif k in cols:
+            if not isinstance(v, str):
+                raise Refused(k)
+            out[k] = v
+        else:
+            out[k] = lre_decode_value(v, k)
+    for f in sidecars:
+        if f not in out:
+            out[f] = None
+    for k in pks:
+        if k in out and not isinstance(out[k], str):
+            raise Refused(k)
+    return out
+
+
+def refused(f, *a):
+    try:
+        f(*a)
+    except Refused as e:
+        return e.field
+    raise AssertionError("not refused: " + repr(a))
+
+
 def main():
     v = {"comment": "made by gen-doc-vectors.py; do not edit by hand", "version": 1}
     v["sha256"] = [{"hex_in": b.hex(), "out": sha(b).hex()} for b in [b"", b"abc", b"a" * 55, b"a" * 56, b"a" * 64, bytes(range(256)) * 5]]
@@ -323,6 +430,62 @@ def main():
     v["outputs_digest"] = [{"entries": entries, "out": digest(entries)}, {"entries": [], "out": digest([])}]
     c = {"cells_total": 12, "cells_run": 7, "cells_error": 1, "tests_passed": 3, "tests_total": 5, "outbox_waiting": 70000, "device_t": 1792720000123, "recovery_copy": True}
     v["claims"] = [{"in": c, "out": claims(c)}]
+    # (LRE: each record as stored and back; the forms a concurrent merge makes, as decoded; and every refusal, with its field)
+    encs = [
+        ("notebook", {"type": "settings", "kernel": "python3"}),
+        ("notebook", {"type": "cell", "id": "c1", "pos": 0, "input": None, "cell_type": "code", "execution_count": None}),
+        ("notebook", {"type": "cell", "id": "c2", "input": "x = 1", "meta": {"a": None, "b": {"c": None, "d": [None, 1, "s"]}, NUL + "k": 1, NUL: 2}}),
+        ("notebook", {"type": "file", "id": "s1:1", "sid": "s1", "n": 1, "t": 5, "path": "/a", "hash": None}),
+        ("notebook", {"type": "cell", "id": "c3", NUL + "top": None, "e": [], "o": {}}),
+        ("board", {"type": "item", "page": "", "id": "i1", "text": None, "x": None, "title": "T", "tags": [None]}),
+        ("board", {"type": "doc", "page": "", "id": "", "title": "é😀", "intro": None}),
+    ]
+    v["lre_encode"] = []
+    for kind, r in encs:
+        e = lre_encode(kind, r)
+        assert lre_decode(kind, e) == r, r
+        v["lre_encode"].append({"schema": kind, "in": r, "out": e})
+    decs = [
+        ("notebook", {"type": "cell", "id": "c1", "x": {NUL: "n", "q": 2}}, {"type": "cell", "id": "c1", "x": {"q": 2}}),
+        ("notebook", {"type": "cell", "id": "c1", "input": "abc", SIDECAR + "input": True}, {"type": "cell", "id": "c1", "input": "abc"}),
+        ("notebook", {"type": "cell", "id": "c1", SIDECAR + "input": True}, {"type": "cell", "id": "c1", "input": None}),
+        ("notebook", {"type": "cell", "id": "c1", "m": {NUL + NUL: {NUL: "n"}, "z": [{NUL: "n", "p": 3}]}}, {"type": "cell", "id": "c1", "m": {NUL: None, "z": [{"p": 3}]}}),
+        ("board", {"type": "edge", "page": "p", "id": "e", "label": "L", SIDECAR + "label": True, "w": {NUL: "n"}}, {"type": "edge", "page": "p", "id": "e", "label": "L", "w": None}),
+    ]
+    v["lre_decode"] = []
+    for kind, e, want in decs:
+        assert lre_decode(kind, e) == want, e
+        v["lre_decode"].append({"schema": kind, "in": e, "out": want})
+    v["lre_refused_encode"] = [
+        {"schema": kind, "in": r, "field": refused(lre_encode, kind, r)}
+        for kind, r in [
+            ("notebook", {"type": "cell", "id": None}),
+            ("notebook", {"type": "cell", "id": 5}),
+            ("notebook", {"type": "cell", "id": "c", "input": 5}),
+            ("notebook", {"type": "cell", "id": "c", "input": {}}),
+            ("board", {"type": "item", "page": None, "id": "i"}),
+            ("board", {"type": "item", "page": "", "id": "i", "text": ["a"]}),
+        ]
+    ]
+    v["lre_refused_decode"] = [
+        {"schema": kind, "in": e, "field": refused(lre_decode, kind, e)}
+        for kind, e in [
+            ("notebook", {"type": "cell", "id": None}),
+            ("notebook", {"type": "cell", "id": {NUL: "n"}}),
+            ("notebook", {"type": "cell", "id": 5}),
+            ("notebook", {"type": "cell", "id": "c", "input": 5}),
+            ("notebook", {"type": "cell", "id": "c", "input": 5, SIDECAR + "input": True}),
+            ("notebook", {"type": "cell", "id": "c", "input": None}),
+            ("notebook", {"type": "cell", "id": "c", "x": None}),
+            ("notebook", {"type": "cell", "id": "c", "x": {"y": [1, None]}}),
+            ("notebook", {"type": "cell", "id": "c", "x": {NUL: "x"}}),
+            ("notebook", {"type": "cell", "id": "c", "x": {NUL + "k": 1}}),
+            ("notebook", {"type": "cell", "id": "c", NUL + "k": 1}),
+            ("notebook", {"type": "cell", "id": "c", SIDECAR + "x": True}),
+            ("notebook", {"type": "cell", "id": "c", SIDECAR + "input": False}),
+            ("board", {"type": "item", "page": "", "id": "i", "text": {NUL: "n"}}),
+        ]
+    ]
     json.dump(v, sys.stdout, ensure_ascii=False, indent=1)
     sys.stdout.write("\n")
 

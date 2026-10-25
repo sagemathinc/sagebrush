@@ -285,6 +285,70 @@ throwsCode(() => P.jcs("\u0001".repeat(1 << 20), 6 << 20), "limit", "jcs: 1 MiB 
 check(P.jcs("\u0001".repeat(1000), 6002).length === 6002, "jcs: escaped length exactly at the budget");
 throwsCode(() => P.jcs("\u0001".repeat(1000), 6001), "limit", "jcs: escaped length one over the budget");
 throwsCode(() => P.jcs("é".repeat(10), 21), "limit", "jcs: two-byte characters counted as two");
+// LRE, the lossless record encoding (plan-sync-slice2-client-r4 §1b): the vectors, then through patchflow's own codec
+{
+  const S = { notebook: P.NOTEBOOK_SCHEMA, board: P.BOARD_SCHEMA };
+  const J = JSON.stringify;
+  // (a record is a map: decoded values compared with their keys sorted, at every level; arrays keep their order)
+  const canon = (x) => J(x, (_, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v));
+  for (const t of V.lre_encode) {
+    const e = P.lreEncode(S[t.schema], t.in);
+    check(J(e) === J(t.out), `lre encode: ${J(t.in)} -> ${J(e)}`);
+    check(canon(P.lreDecode(S[t.schema], t.out)) === canon(t.in), `lre decode of an encoded record: ${J(t.out)}`);
+  }
+  for (const t of V.lre_decode) check(canon(P.lreDecode(S[t.schema], t.in)) === canon(t.out), `lre decode, a merge's form: ${J(t.in)}`);
+  const refused = (f, field, what) => {
+    try {
+      f();
+      check(false, `${what}: not refused`);
+    } catch (e) {
+      check(e instanceof P.DocError && e.code === "invalid_value" && e.detail?.field === field, `${what}: ${e?.code} ${J(e?.detail)} (wanted invalid_value, field ${J(field)})`);
+    }
+  };
+  for (const t of V.lre_refused_encode) refused(() => P.lreEncode(S[t.schema], t.in), t.field, `lre encode refuses ${J(t.in)}`);
+  for (const t of V.lre_refused_decode) {
+    refused(() => P.lreDecode(S[t.schema], t.in), t.field, `lre decode refuses ${J(t.in)}`);
+    refused(() => P.lreCheckRecord(S[t.schema], t.in), t.field, `lreCheckRecord refuses ${J(t.in)}`);
+  }
+  // (depth: refused before any recursion past it, as JCS is)
+  let deep = 1;
+  for (let i = 0; i < P.DOC_LIMITS.jcsDepth + 2; i++) deep = [deep];
+  throwsCode(() => P.lreEncode(S.notebook, { type: "cell", id: "c", x: deep }), "limit", "lre encode: too deep");
+
+  // (the reason it exists: through the pinned patchflow codec, a null set, kept, removed and made from nothing survives;
+  // raw records lose it.  And board's MUST-1 merges: a field set null on one device while another adds a key)
+  const { createImmerDbCodec } = await import("patchflow");
+  for (const [kind, schema] of [["notebook", P.NOTEBOOK_SCHEMA], ["board", P.BOARD_SCHEMA]]) {
+    const c = createImmerDbCodec(schema);
+    const key = kind === "board" ? { type: "item", page: "", id: "i" } : { type: "cell", id: "c" };
+    const col = schema.stringCols[0];
+    const doc = (rs, enc) => c.fromString(rs.map((r) => J(enc ? P.lreEncode(schema, r) : r)).join("\n"));
+    const read = (d) => c.toString(d).trim().split("\n").filter(Boolean).map((l) => P.lreDecode(schema, JSON.parse(l)));
+    const via = (a, b) => read(c.applyPatch(doc(a, true), c.makePatch(doc(a, true), doc(b, true))));
+    const cases = [
+      ["value -> null", [{ ...key, x: 1 }], [{ ...key, x: null }]],
+      ["null -> absent", [{ ...key, x: null }], [{ ...key }]],
+      ["null -> value", [{ ...key, x: null }], [{ ...key, x: 2 }]],
+      ["initially null, from nothing", [], [{ ...key, x: null }]],
+      ["a nested null set", [{ ...key, m: { p: 1, q: 2 } }], [{ ...key, m: { p: null, q: 2 } }]],
+      ["a nested null kept while a sibling changes", [{ ...key, m: { p: null, q: 1 } }], [{ ...key, m: { p: null, q: 3 } }]],
+      ["a string column: text -> null", [{ ...key, [col]: "abc" }], [{ ...key, [col]: null }]],
+      ["a string column: null -> text", [{ ...key, [col]: null }], [{ ...key, [col]: "abc" }]],
+      ["a string column: null from nothing", [], [{ ...key, [col]: null }]],
+      ["a string column: an ordinary edit", [{ ...key, [col]: "hello world" }], [{ ...key, [col]: "hello there world" }]],
+    ];
+    for (const [name, a, b] of cases) check(canon(via(a, b)) === canon(b), `lre through patchflow (${kind}): ${name}: ${J(via(a, b))}`);
+    // (raw records, the control: the codec loses the null)
+    const raw = (a, b) => c.toString(c.applyPatch(doc(a, false), c.makePatch(doc(a, false), doc(b, false)))).trim();
+    check(!raw([{ ...key, x: 1 }], [{ ...key, x: null }]).includes("null"), `the control (${kind}): raw records lose value -> null`);
+    // (MUST-1: device A sets x null, device B adds x.q; both orders decode to the same value, and none is refused)
+    const base = doc([{ ...key, x: { p: 1 } }], true);
+    const pa = c.makePatch(base, doc([{ ...key, x: null }], true)), pb = c.makePatch(base, doc([{ ...key, x: { p: 1, q: 2 } }], true));
+    const ab = read(c.applyPatch(c.applyPatch(base, pa), pb)), ba = read(c.applyPatch(c.applyPatch(base, pb), pa));
+    check(canon(ab) === canon(ba), `lre through patchflow (${kind}): a concurrent null and added key converge: ${J(ab)} / ${J(ba)}`);
+  }
+}
+
 console.log(`${checks - fails.length}/${checks} checks passed`);
 if (fails.length) {
   for (const f of fails.slice(0, 40)) console.log("FAIL", f);
