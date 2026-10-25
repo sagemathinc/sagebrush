@@ -294,7 +294,11 @@ async function runHost(host) {
     }
     const cal = await calibrate(host, c);
     if (c.calibration !== "nonterminating" && cal.T == null) {
-      rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: cal.error, ...(cal.cliff ? { finding: "cliff", cliff: cal.cliff } : {}), calibration: cal });
+      // a cliff is a product defect (William, Oct 25), so FAIL, matched against the baseline; any
+      // other calibration failure leaves the row uncovered (INVALID)
+      const own = cal.cliff ? "FAIL" : "INVALID";
+      const outcome = cal.cliff ? againstBaseline({ case: c.id, host, outcome: own, trials: [{ outcome: "FAIL", why: cal.error }] }, BASELINE) : own;
+      rows.push({ case: c.id, host, mode: c.mode, outcome, ...(outcome !== own ? { own_outcome: own } : {}), why: cal.error, ...(cal.cliff ? { finding: "cliff", cliff: cal.cliff } : {}), calibration: cal });
       record(rows.at(-1));
       continue;
     }

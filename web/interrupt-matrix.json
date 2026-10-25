@@ -2,9 +2,8 @@
  "comment": "plan-interrupt-harness r5: one entry per census name; regenerate with web/interrupt-matrix-gen.py",
  "fingerprints": {
   "pollSites": {
-   "builtins.ts": 2,
    "crmath.ts": 5,
-   "engine.ts": 7,
+   "engine.ts": 1,
    "format.ts": 4,
    "index.ts": 1,
    "interrupt.ts": 2,
@@ -12,10 +11,11 @@
    "modules.ts": 7,
    "numpy.ts": 2,
    "numpy_linalg.ts": 4,
-   "ops.ts": 5,
+   "ops.ts": 3,
+   "raster.ts": 2,
    "re.ts": 2,
-   "strpos.ts": 2,
-   "types.ts": 12
+   "strpos.ts": 1,
+   "types.ts": 14
   },
   "registries": {
    "magma": {
@@ -32,8 +32,8 @@
    }
   },
   "libModules": {
-   "count": 122,
-   "sha": "c65a1782f5b08f9b"
+   "count": 124,
+   "sha": "34df6629e28412c3"
   }
  },
  "entries": [
@@ -709,6 +709,20 @@
    "status": "planned",
    "family": "E7 number fields",
    "owner": "number fields"
+  },
+  {
+   "id": "engineCall:progress_selftest",
+   "transport": "engineCall:progress_selftest",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:progress_tables",
+   "transport": "engineCall:progress_tables",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
   },
   {
    "id": "engineCall:psl2",
