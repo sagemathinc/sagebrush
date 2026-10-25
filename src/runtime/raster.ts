@@ -25,6 +25,10 @@ interface Raster {
   rs_decode(png: number, len: number): number;
   rs_reply_ptr(): number;
   rs_reply_len(): number;
+  // the heap's page bound (engine/raster/src/wasm.rs)
+  rs_begin(pages: number): void;
+  rs_last_refusal(): number;
+  rs_heap_base(): number;
 }
 
 let R: Raster | null = null;
@@ -72,8 +76,11 @@ function raster(): Raster {
   return R;
 }
 
-/** Runs f on a fresh instance's view of the inputs; returns the reply, or
- *  throws its error message.  A trap (a Rust panic) drops the instance. */
+/** Runs f on the instance's view of the inputs; returns the reply, or throws
+ *  the call's outcome (engine/raster/src/lib.rs's codes): RasterError (1,
+ *  the input refused), RasterMemoryError (2, an allocation refused, or a
+ *  trap with a refused growth recorded) or Error (3, the engine failing).
+ *  A trap (a Rust panic) drops the instance. */
 function call(inputs: Uint8Array[], f: (r: Raster, ptrs: number[]) => number): Uint8Array {
   const r = raster();
   const ptrs = inputs.map((a) => {
@@ -86,15 +93,42 @@ function call(inputs: Uint8Array[], f: (r: Raster, ptrs: number[]) => number): U
     code = f(r, ptrs);
   } catch (err) {
     R = null;
+    // (an allocation that could not fail cleanly traps; the page bound
+    // recorded what it refused, readable from the trapped instance)
+    const refused = lastRefusal(r);
+    if (refused !== null) throw new RasterMemoryError(refused.need, "the PNG engine's working memory");
     throw err;
   }
   inputs.forEach((a, i) => r.rs_free(ptrs[i], a.length));
   const out = new Uint8Array(r.memory.buffer, r.rs_reply_ptr(), r.rs_reply_len()).slice();
-  if (code !== 0) throw new RasterError(new TextDecoder().decode(out));
-  return out;
+  if (code === 0) return out;
+  if (code === 2) {
+    const v = new DataView(out.buffer, out.byteOffset);
+    throw new RasterMemoryError(Number(v.getBigUint64(0, true)), new TextDecoder().decode(out.subarray(8)));
+  }
+  const message = new TextDecoder().decode(out);
+  if (code === 1) throw new RasterError(message);
+  throw new Error(message);
+}
+
+/** The growth the page bound refused in this call: the bytes asked for, or
+ *  null (none, or a module that can't say). */
+function lastRefusal(r: Raster): { need: number } | null {
+  try {
+    const p = r.rs_last_refusal();
+    const need = new DataView(r.memory.buffer, p, 12).getUint32(0, true);
+    return need === 0 ? null : { need: need * 65536 };
+  } catch {
+    return null;
+  }
 }
 
 class RasterError extends Error {}
+class RasterMemoryError extends Error {
+  constructor(public bytes: number, public what: string) {
+    super(`${what} needs ${bytes} bytes, which the PNG engine could not allocate`);
+  }
+}
 
 // a Python int or float as a JS number (1.0 is boxed, to stay a float)
 function num(v: any): number {
@@ -112,6 +146,7 @@ function bytesOf(x: any): Uint8Array {
 // ValueError; anything else is the module failing.
 function failed(err: any): never {
   if (err instanceof RasterError) return Obj.raise(Obj.T.ValueError, err.message);
+  if (err instanceof RasterMemoryError) return Obj.raise(Obj.T.MemoryError, err.message);
   return Obj.raise(Obj.T.RuntimeError, `Sagebrush's PNG module: ${err?.message ?? err}`);
 }
 
