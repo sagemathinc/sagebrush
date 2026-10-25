@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 // The publisher's AST checks of a js package's module (scripts/js-module-check.mjs;
 // r4 addendum A1.3, A1.4): real imports are refused wherever they are in the
@@ -69,9 +70,9 @@ test("a module that doesn't parse is an error, not accepted", () => {
 test("host_req: the highest level of the literal hostCall names; bad names and stray postMessage fail the build (A1.4)", () => {
   const table = { "fs.read": 1, "fs.write": 1, "run.result": 2 };
   const helper = "function hostCall(name, payload) { return port.postMessage({ name, payload }); }\n";
-  assert.deepEqual(C.hostRequirement(helper + 'hostCall("fs.read", 1); hostCall("run.result", {});', table), { host_req: 2, names: ["fs.read", "run.result"], errors: [] });
+  assert.deepEqual(C.hostRequirement(helper + 'hostCall("fs.read", 1); hostCall("run.result", {});', table), { host_req: 2, names: ["fs.read", "run.result"], fields: [], errors: [] });
   assert.deepEqual(C.hostRequirement(helper + 'hostCall("fs.write");', table).host_req, 1);
-  assert.deepEqual(C.hostRequirement("const x = 1;", table), { host_req: 0, names: [], errors: [] });
+  assert.deepEqual(C.hostRequirement("const x = 1;", table), { host_req: 0, names: [], fields: [], errors: [] });
   // (an arrow helper counts as the helper too)
   assert.deepEqual(C.hostRequirement('const hostCall = (n, p) => port.postMessage([n, p]); hostCall("fs.read");', table).errors, []);
   const errors = (code: string) => C.hostRequirement(helper + code, table).errors.join("; ");
@@ -81,6 +82,26 @@ test("host_req: the highest level of the literal hostCall names; bad names and s
   assert.match(errors("port.postMessage(1);"), /postMessage outside the hostCall helper/);
   assert.match(errors('self["postMessage"](1);'), /postMessage outside the hostCall helper/);
   assert.match(errors("const { postMessage } = self;"), /postMessage outside the hostCall helper/);
+});
+
+test("host_req: a widened field sent raises it to the widening's level; a widened message's payload must be an object literal (A1.4, F13)", () => {
+  const table = { "shell.result": 1, "fs.request": 2 }, fields = { "shell.result.rejected.refusal": 2 };
+  const helper = "function hostCall(name, payload) { return port.postMessage({ name, payload }); }\n";
+  const req = (code: string) => C.hostRequirement(helper + code, { "shell.result": 1 }, fields);
+  // (the field sent, nested: level 2; not sent: the message's own level 1)
+  assert.deepEqual(req('hostCall("shell.result", { id, rejected: { message: m, refusal: r } });'), { host_req: 2, names: ["shell.result"], fields: ["shell.result.rejected.refusal"], errors: [] });
+  assert.deepEqual(req('hostCall("shell.result", { id, rejected: { message: m } });'), { host_req: 1, names: ["shell.result"], fields: [], errors: [] });
+  assert.deepEqual(req('hostCall("shell.result", { id, exit: { code: 0, refusal: 1 } });').host_req, 1, "only the widened path counts");
+  assert.deepEqual(req('hostCall("shell.result", { id, "rejected": { "refusal": r } });').host_req, 2, "string keys too");
+  // (what it sends can't be read: the build fails)
+  for (const bad of ['hostCall("shell.result", payload);', 'hostCall("shell.result", { ...p });', 'hostCall("shell.result", { [k]: 1 });', 'hostCall("shell.result", { rejected: x });'])
+    assert.match(req(bad).errors.join("; "), /isn't an object literal: its fields have levels/, bad);
+  // (a message with no widenings may send anything)
+  assert.deepEqual(C.hostRequirement(helper + 'hostCall("fs.request", payload);', table, fields).errors, []);
+  // (the committed table: the shipped module's protocol)
+  const levels = JSON.parse(readFileSync(join(__dirname, "..", "..", "web", "shell", "host-levels.json"), "utf8"));
+  assert.deepEqual(levels.fields, { "shell.result.rejected.refusal": 2 });
+  assert.equal(levels.names["shell.result"], 1, "the message keeps the level that introduced it");
 });
 
 test("the notices checks (A1.1a, A1.3): the module's banner, an entry per package, the bundle's own banner", () => {

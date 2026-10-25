@@ -1,8 +1,11 @@
 {
-  "about": "The shell host protocol's messages (plan-modular-packages r4 addendum A1.4): each name the shell module may pass to hostCall, with the SHELL_HOST_LEVEL that introduced it. Append-only: a new message, or a compatible widening of one (a new optional field), adds a row at the next level; removing or narrowing one needs a new major and is refused in review unless planned. SHELL_HOST_LEVEL (web/shell/loader.ts) is the highest level here; scripts/optional-packages.mjs computes each js package's host_req from it.",
+  "about": "The shell host protocol's messages (plan-modular-packages r4 addendum A1.4): each name the shell module may pass to hostCall, with the SHELL_HOST_LEVEL that introduced it. Append-only: a new message, or a compatible widening of one (a new optional field), adds a row at the next level; removing or narrowing one needs a new major and is refused in review unless planned. \"fields\" lists the widenings: \"name.field.path\" with the level that added the field, the message keeping the level that introduced it; a module that sends a widened message must send it as an object literal, so the fields it sends are read from its code. SHELL_HOST_LEVEL (web/shell/loader.ts) is the highest level here, names and fields; scripts/optional-packages.mjs computes each js package's host_req from it.",
   "names": {
     "shell.ready": 1,
     "shell.result": 1,
     "fs.request": 2
+  },
+  "fields": {
+    "shell.result.rejected.refusal": 2
   }
 }
