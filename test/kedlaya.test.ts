@@ -41,11 +41,11 @@ test("the offset-add reduction gives the padded one's forms, G and matrix (pytho
   assert.match(out, /^equivalence: \d+ reductions compared$/m);
 });
 
-test("the preflight: the necessary minimum, the finite limit, the budget at 4U, the engines without a table (python3 = Sagebrush)", () => {
+test("the preflight: the necessary minimum, the finite limit, the budget at 4U, the engines without a table, D1's memory error at the smallest totals (python3 = Sagebrush)", () => {
   const want = readFileSync(TEST + "kedlaya_guard_cases.out", "utf8");
   const limits = ["5136128", "5136127", "5000000", "4695888", "unlimited", "0"];
   let a = "", b = "";
-  for (const s of ["min", "budget", "engines"]) {
+  for (const s of ["min", "budget", "engines", "tiny"]) {
     a += py3(TEST + "kedlaya_guard_cases.py", s);
     b += sb(TEST + "kedlaya_guard_cases.py", s);
   }
@@ -79,8 +79,13 @@ test("frobenius() itself: no default limit, a finite one refuses as the old defa
       "",
     ].join("\n"),
   );
-  const big = sb("--sage", "-c", refused("14a1", 5, 10 ** 100 as any).replace("1e+100", "10^100"));
-  assert.match(big, /^the Frobenius matrix at p = 5 to precision 10{100} needs at least \d+ MiB just for its working modulus p\^\(prec \+ 4\), more than this process's \d+ MiB\n$/);
+  // the memory refusals are D1's memory error, with the CLI's routes
+  const big = sb("--sage", "-c", "try:\n    EllipticCurve('14a1').padic_lseries(5).frobenius(10^100)\nexcept MemoryError as e:\n    print(type(e).__name__, e.fixed, e.need_bytes > e.limit_bytes > 0)\n    print(e)\n");
+  const lines = big.split("\n");
+  assert.equal(lines[0], "SagebrushMemoryError False True", big);
+  assert.equal(lines[1], "Not enough memory for this computation.", big);
+  assert.match(lines[2], /^At the least, the Frobenius matrix at p = 5 to precision 10{100} \(just its working modulus p\^\(prec \+ 4\)\) needs about \d+(\.\d+)? GB, but Sagebrush allows about \d+(\.\d+)? [MG]B for this whole process here\.$/, big);
+  assert.match(big, /NODE_OPTIONS=--max-old-space-size/, big);
 });
 
 test("the CPython object sizes: high-water, per-term and lifetime checks with their mutants, layout steps (python3)", () => {

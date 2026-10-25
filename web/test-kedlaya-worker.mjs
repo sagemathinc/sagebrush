@@ -97,36 +97,73 @@ if (ENGINE === "chromium") {
 
 try {
   ok(await ev("crossOriginIsolated"), `${ENGINE}: the page is cross-origin isolated`);
+  // a consistent copy of slot i (24 words), as src/runtime/progress.ts's
+  // read(): an even sequence (word 0) the same before and after the words,
+  // else null after 4 torn reads; `load` reads word k (Atomics.load, or a
+  // test's forced torn state).  Decoded: word 1 bit 0 in use, words 2-3 the
+  // call's id, word 7 the op, word 9's low 16 bits the stage index, words
+  // 10-11 done.  (astra2's CORR-PR147-2: separate loads could pair a new
+  // stage index with the previous stage's done)
+  await ev(`window.kdSlot = (load, i) => {
+    const b = i * 24;
+    for (let tries = 0; tries < 4; tries++) {
+      const s1 = load(b);
+      if (s1 & 1) continue;
+      const w = [];
+      for (let k = 0; k < 24; k++) w.push(load(b + k) >>> 0);
+      if (load(b) !== s1) continue;
+      return { inUse: !!(w[1] & 1), callId: w[2] + w[3] * 2 ** 32, op: w[7], stage: w[9] & 0xffff, done: w[10] + w[11] * 2 ** 32 };
+    }
+    return null;
+  }`);
+  // the forced torn reads: a writer moving stage 3 (done 5) to stage 4 has
+  // published its odd sequence and the new stage, not yet done = 0; and a
+  // sequence that moves on (a write completed) between every two reads
+  const torn = await ev(`(() => {
+    const words = new Int32Array(24);
+    words[0] = 7; words[1] = 1; words[2] = 9; words[9] = 4; words[10] = 5;
+    const raw = (Atomics.load(words, 1) & 1) && (Atomics.load(words, 9) & 0xffff) === 4 && Atomics.load(words, 10) > 0;
+    const odd = kdSlot((k) => Atomics.load(words, k), 0);
+    words[0] = 8;
+    let n = 0;
+    const moving = kdSlot((k) => (k === 0 ? 8 + 2 * n++ : Atomics.load(words, k)), 0);
+    const stable = kdSlot((k) => Atomics.load(words, k), 0);
+    return { raw: !!raw, odd, moving, stable };
+  })()`);
+  ok(torn.raw === true && torn.odd === null && torn.moving === null && torn.stable?.stage === 4 && torn.stable.done === 5,
+     `a torn progress slot is never read as a stage with done > 0, which the separate loads were (${JSON.stringify(torn)})`);
+
   // a fresh worker runs `code` (Sage) as run 2; with `stage` set, the page
-  // watches the shared progress slots (word 1 bit 0: in use; words 2-3: the
-  // call id; word 9's low 16 bits: the stage index; words 10-11: done),
-  // remembers the ids in use before the run, and sends Stop only once a call
-  // id that is new since then shows that stage with done > 0
+  // reads consistent copies of the shared progress slots (kdSlot), remembers
+  // the call ids in use before the run, and sends Stop only once a copy shows
+  // a call id new since then in that stage with done > 0 (stopSlot: that copy)
   await ev(`window.kd = (code, stage, wait = 600000) => new Promise((resolve) => {
     const w = new Worker("/sagebrush-worker.js", { type: "module" });
-    let out = "", sent = 0, seen = [], timer, before = null, callId = null, stopCall = null;
-    const end = (r) => { clearInterval(timer); w.terminate(); resolve({ out, sent, seen: seen.slice(-6), callId, stopCall, before, ...r }); };
+    let out = "", sent = 0, seen = [], timer, before = null, callId = null, stopCall = null, stopSlot = null;
+    const end = (r) => { clearInterval(timer); w.terminate(); resolve({ out, sent, seen: seen.slice(-6), callId, stopCall, stopSlot, before, ...r }); };
     w.onmessage = (e) => {
       const m = e.data;
       if (m.ready) {
         if (stage !== null) {
           if (!m.interrupt || !m.progress) return end({ error: "no shared interrupt flag or progress slots" });
           const intr = new Int32Array(m.interrupt), slots = new Int32Array(m.progress);
-          const id = (b) => (Atomics.load(slots, b + 2) >>> 0) + (Atomics.load(slots, b + 3) >>> 0) * 2 ** 32;
+          const load = (k) => Atomics.load(slots, k);
           before = [];
-          for (let i = 0; i < 32; i++) if (Atomics.load(slots, i * 24 + 1) & 1) before.push(id(i * 24));
+          for (let i = 0; i < 32; i++) {
+            const c = kdSlot(load, i);
+            if (c === null) return end({ error: "a torn progress slot before the run" });
+            if (c.inUse) before.push(c.callId);
+          }
           timer = setInterval(() => {
             for (let i = 0; i < 32 && !sent; i++) {
-              const b = i * 24;
-              if (!(Atomics.load(slots, b + 1) & 1)) continue;
-              const cid = id(b);
-              if (before.includes(cid)) continue;
-              if (callId === null) callId = cid;
-              const index = Atomics.load(slots, b + 9) & 0xffff, done = (Atomics.load(slots, b + 10) >>> 0) + (Atomics.load(slots, b + 11) >>> 0) * 2 ** 32;
-              const s = cid + ":" + index + ":" + done;
+              const c = kdSlot(load, i);
+              if (!c || !c.inUse || before.includes(c.callId)) continue;
+              if (callId === null) callId = c.callId;
+              const s = c.callId + ":" + c.stage + ":" + c.done;
               if (seen[seen.length - 1] !== s) seen.push(s);
-              if (index === stage && done > 0) {
-                stopCall = cid;
+              if (c.stage === stage && c.done > 0) {
+                stopCall = c.callId;
+                stopSlot = c;
                 sent = Date.now();
                 Atomics.or(intr, 0, 1);
                 Atomics.notify(intr, 0);
@@ -150,14 +187,14 @@ try {
     "    EllipticCurve('14a1').padic_lseries(5).frobenius(5)",
     "    print('COMPUTED')",
     "except NotImplementedError as e:",
-    "    print('REFUSED', str(e), e.need_bytes)",
+    "    print('REFUSED', type(e).__name__, str(e), hasattr(e, 'need_bytes'))",
   ].join("\n");
   let override = "";
   if (ENGINE === "webkit") {
     // 1. the production path, first, in a clean worker: no override anywhere yet
     let r = await kd(DETECT + "\n" + REFUSE);
     const want = "the Frobenius matrix at p = 5 to precision 5: the memory estimate for this computation isn't established for this JavaScript engine (jsc (WebKit)); the native package computes it";
-    ok(r.out === `jsc browser jsc (WebKit)\nREFUSED ${want} None\n`, `WebKit's worker: JavaScriptCore on a browser host, and the production refusal, exactly (${JSON.stringify(r)})`);
+    ok(r.out === `jsc browser jsc (WebKit)\nREFUSED NotImplementedError ${want} False\n`, `WebKit's worker: JavaScriptCore on a browser host, and the production refusal, exactly (${JSON.stringify(r)})`);
     // 2. ... and before the working modulus is made: in a fresh worker whose
     // _kd_modulus raises, the refusal is the same (the modulus never reached)
     r = await kd("import _sage_padic_lseries as L\ndef _sentinel(p, W):\n    raise AssertionError('MODULUS REACHED')\nL._kd_modulus = _sentinel\n" + REFUSE);
@@ -194,7 +231,8 @@ try {
     // done > 0 when Stop went out, KeyboardInterrupt, not a finished or
     // refused call or the harness's timeout, within 1 s, the slot released,
     // and a later call right)
-    const active = r.sent > 0 && r.stopCall !== null && r.stopCall === r.callId && Array.isArray(r.before) && !r.before.includes(r.stopCall);
+    const active = r.sent > 0 && r.stopCall !== null && r.stopCall === r.callId && Array.isArray(r.before) && !r.before.includes(r.stopCall) &&
+      !!r.stopSlot && r.stopSlot.inUse && r.stopSlot.callId === r.stopCall && r.stopSlot.stage === stage && r.stopSlot.done > 0;
     ok(active && !r.timeout && !!m && !/FINISHED|RAISED/.test(r.out) && ms < 1000 && m[2] === "0" && m[3] === "5^-1 + O(5^4)", `Stop in stage ${stage}: this call active in that stage, KeyboardInterrupt within 1 s, the slot released, a later call right (${JSON.stringify(r)})`);
   }
 } finally {
