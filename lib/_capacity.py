@@ -360,7 +360,10 @@ def _runtime_parts():
     """pyjs's own parts, from the runtime (never guessed here): [(source,
     limit, used, includes, constrains)]; [] in CPython.  A part with no
     domains, (source, limit, used) from an older engine or a test, gets
-    none: it can never widen capacity()["domains"]."""
+    none: it can never widen capacity()["domains"].  Each tuple carries a
+    sixth item, True when the part named a constrained domain this module
+    doesn't know: it is dropped from the list, but engine_rows must not
+    read the rest as engine-only."""
     if _src.runtime is not None:
         parts = list(_src.runtime())
     elif not hasattr(_sys, "_sagebrush_heap_limit"):
@@ -375,9 +378,10 @@ def _runtime_parts():
     for p in parts:
         p = tuple(p)
         if len(p) >= 5:
-            out.append((p[0], p[1], p[2], [d for d in DOMAINS if d in p[3]], [d for d in DOMAINS if d in p[4]]))
+            out.append((p[0], p[1], p[2], [d for d in DOMAINS if d in p[3]], [d for d in DOMAINS if d in p[4]],
+                        any(d not in DOMAINS for d in p[4])))
         else:
-            out.append((p[0], p[1], p[2], [], []))
+            out.append((p[0], p[1], p[2], [], [], False))
     return out
 
 
@@ -484,7 +488,9 @@ def engine_rows():
     "figure", "joint"}], "complete"}, from a snapshot at most 100 ms old.
 
     - rows: each applicable row (its `constrains` includes the engine's
-      domain), joint when it also constrains a host domain;
+      domain), joint unless it constrains EXACTLY the engine's domain (any
+      other domain, a known one or one this module doesn't know, makes it
+      joint: C r17 section 1.2, astra2's CORR-C2A-2);
     - complete: False when a constraint's figure could not be read
       (capacity's unknown parts, other than a row's unread usage) or a
       row's domains are unknown (an older part with none): then the
@@ -497,7 +503,6 @@ def engine_rows():
     now = _src.clock()
     if _rows_snap is None or now - _rows_snap[0] >= _SNAPSHOT_S:
         domain = _engine_domain()
-        host = [d for d in _SELF if d not in ("wasm-engine", "wasm-instance")]
         rec = capacity()
         complete = all(u.endswith(" usage") for u in rec["unknown_parts"])
         rows = []
@@ -505,7 +510,8 @@ def engine_rows():
             if not b["constrains"]:
                 complete = False  # (its domains unknown: it may constrain the engine)
             elif domain in b["constrains"]:
-                rows.append({"source": b["source"], "figure": b["limit"], "joint": any(d in host for d in b["constrains"])})
+                joint = bool(b.get("unknown_domains")) or any(d != domain for d in b["constrains"])
+                rows.append({"source": b["source"], "figure": b["limit"], "joint": joint})
         _rows_snap = (now, {"rows": rows, "complete": complete})
     out = _rows_snap[1]
     return {"rows": [dict(r) for r in out["rows"]], "complete": out["complete"]}
@@ -584,8 +590,11 @@ def capacity():
     if parts is None:
         unknown.append("runtime")
     else:
-        for source, lim, used, inc, con in parts:
-            add(source, lim, used, inc, con)
+        for source, lim, used, inc, con, unnamed in parts:
+            if unnamed:
+                add(source, lim, used, inc, con, unknown_domains=True)
+            else:
+                add(source, lim, used, inc, con)
     return _record(basis, unknown)
 
 

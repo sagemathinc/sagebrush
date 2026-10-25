@@ -168,11 +168,18 @@ function memoryTotal(): [number, number, number] {
   }
 }
 /** 0 only when _capacity.engine_uncertified() is exactly False
- * (fail-closed: anything else, an error included, is 1). */
+ * (fail-closed: any other error is 1).  A KeyboardInterrupt is rethrown, so
+ * memoryTotal's catch sets the Ctrl-C again, as for the other collectors
+ * (astra2's CORR-C2A-3: a Ctrl-C the helper consumed is not lost). */
 function rowsUncertified(m: any): number {
   try {
     return Obj.unbox(Obj.callObj(Obj.getattr(m, "engine_uncertified"), [])) === false ? 0 : 1;
-  } catch {
+  } catch (e) {
+    let ki = false;
+    try {
+      ki = Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt);
+    } catch {}
+    if (ki) throw e;
     return 1;
   }
 }
