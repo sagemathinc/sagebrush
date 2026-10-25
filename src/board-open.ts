@@ -273,10 +273,12 @@ export async function boardOpen(argv: string[]): Promise<number> {
       if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return forbidden(res, "forbidden host\n");
       const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
       const editRequest = !!editing && url.pathname === "/edit";
+      // (--edit's kept reports and alternatives, GET /changes: by the key, as the rest; CORR-153-R2-1)
+      const changesRequest = !!editing && url.pathname === "/changes";
       if (req.method !== "GET" && req.method !== "HEAD" && !editRequest) return res.writeHead(405, { Allow: "GET, HEAD" }).end();
       // the page's two requests, from its opaque origin: by the key, readable from there (CORS), never cached
       const api = { "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Sagebrush-Revision", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
-      if (url.pathname === "/board" || url.pathname === "/events" || editRequest) {
+      if (url.pathname === "/board" || url.pathname === "/events" || editRequest || changesRequest) {
         // (by the key, which only the page has; and from the page only: its opaque origin, "null", or no Origin
         // at all, never another site's or another port's page)
         const origin = req.headers.origin;
@@ -284,6 +286,8 @@ export async function boardOpen(argv: string[]): Promise<number> {
         if (url.searchParams.get("key") !== key) return forbidden(res, "forbidden\n");
         // (--edit's own: a tab's events, heads and submissions)
         if (editing && editing.server.handle(req, res, url)) return;
+        // (a /changes the edit server didn't take, one without its tab: never the read-only page's stream below)
+        if (changesRequest) return res.writeHead(400, { ...api, "Content-Type": "text/plain; charset=utf-8" }).end("bad parameters\n");
         if (url.pathname === "/board") {
           const c = editing ? { error: null, bytes: editing.hub.H.bytes, revision: editing.hub.H.hash } : current;
           if (c.error || !c.bytes) return res.writeHead(c.error?.startsWith("too large") ? 413 : 409, { ...api, "Content-Type": "text/plain; charset=utf-8", "X-Sagebrush-Revision": c.revision }).end(c.error ?? "unreadable");
