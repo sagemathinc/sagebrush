@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, copyFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
+import { consumeCtrlC } from "../src/runtime/interrupt";
 
 // INTR[0] is a word of named bits (src/runtime/interrupt.ts): bit 0 Ctrl-C,
 // bit 1 a CLI frame request, bit 2 a soft stop, bit 3 an armed grading
@@ -20,13 +23,86 @@ test("no source stores to INTR[0]: producers or, consumers and (the census)", ()
     .split("\n")
     .filter((f) => /\.(ts|mts|cjs|mjs|js|html)$/.test(f) && !/(^|\/)test-[^/]*$|\.test\.[^/]*$/.test(f)); // (tests produce on purpose)
   assert.ok(files.length > 100, String(files.length));
+  const text = new Map(files.map((f) => [f, readFileSync(join(ROOT, f), "utf8")]));
+  // The word's names: the runtime's, and every alias an embedding binds to
+  // the buffer it is handed (`x = new Int32Array(m.interrupt)`), found, not
+  // listed, so a new alias cannot slip past.
+  const names = new Set(["INTR", "R.INTR", "c.R.INTR"]);
+  for (const t of text.values())
+    for (const m of t.matchAll(/([\w$.]+)\s*=\s*[^;\n]*?new Int32Array\(\s*[\w$.]*\binterrupt\s*\)/g)) names.add(m[1]);
+  for (const n of ["intr", "flag", "this.interruptFlag"]) assert.ok(names.has(n), `alias ${n} not found: ${[...names]}`);
+  const esc = [...names].map((n) => n.replace(/[.$]/g, "\\$&")).join("|");
+  const plain = new RegExp(`(?<![\\w$.])(?:${esc})\\[0\\]\\s*(?:=(?!=)|[-+*/%&|^]=|<<=|>>>?=)`);
+  // Any atomic write of index 0 but or/and, whatever the receiver is called;
+  // the one other word-0 user is the fetch broker's channel, \`ctrl\`.
+  const atomic = /Atomics\.(?:store|exchange|compareExchange|add|sub|xor)\(\s*([^,()]+?)\s*,\s*0\s*,/;
+  const OTHER = new Set(["web/worker.ts ctrl", "web/runner/index.html ctrl"]);
   const bad: string[] = [];
-  const store = /\b(?:R\.)?(?:INTR|intr|s\.intr|flag)\[0\]\s*=(?!=)|Atomics\.store\(\s*(?:R\.)?(?:INTR|intr|s\.intr|flag)\s*,\s*0\s*,/;
-  for (const f of files)
-    readFileSync(join(ROOT, f), "utf8").split("\n").forEach((line, i) => {
-      if (store.test(line) && !/^\s*\/\//.test(line)) bad.push(`${f}:${i + 1}: ${line.trim().slice(0, 160)}`);
+  for (const [f, t] of text)
+    t.split("\n").forEach((line, i) => {
+      if (/^\s*\/\//.test(line)) return;
+      const a = atomic.exec(line);
+      if (plain.test(line) || (a && !OTHER.has(`${f} ${a[1]}`))) bad.push(`${f}:${i + 1}: ${line.trim().slice(0, 160)}`);
     });
   assert.deepEqual(bad, []);
+});
+
+// (the notebook page's producer, web/notebook/worker-kernel.js, for real: an
+// ES module, copied to .mjs for node)
+test("the notebook's Stop sets bit 0, keeps the others and word 1, and wakes a sleep", async () => {
+  const copy = join(mkdtempSync(join(tmpdir(), "sb-intr-")), "worker-kernel.mjs");
+  copyFileSync(join(ROOT, "web/notebook/worker-kernel.js"), copy);
+  const { WorkerKernel } = await new Function("u", "return import(u)")(pathToFileURL(copy).href);
+  const k = new WorkerKernel({ createWorker: () => null });
+  const flag = new Int32Array(new SharedArrayBuffer(8));
+  Atomics.store(flag, 0, 14);
+  k.worker = { terminate() {}, postMessage() {} };
+  k.interruptFlag = flag;
+  k.pending.set(1, { stopped() {} });
+  k.nextId = 2;
+  // (a thread waiting on the word, as time.sleep does)
+  const w = new Worker(
+    `const { parentPort, workerData } = require("node:worker_threads");
+    const f = new Int32Array(workerData);
+    parentPort.postMessage("waiting");
+    const t0 = Date.now();
+    parentPort.postMessage({ r: Atomics.wait(f, 0, 14, 20000), ms: Date.now() - t0 });`,
+    { eval: true, workerData: flag.buffer },
+  );
+  const woke: Promise<any> = new Promise((resolve) => w.on("message", (m) => m !== "waiting" && resolve(m)));
+  await new Promise((r) => w.once("message", r));
+  await new Promise((r) => setTimeout(r, 200));
+  k.interrupt();
+  k.pending.clear(); // (its run "stopped": the 2 s restart timer does nothing)
+  assert.equal(Atomics.load(flag, 0), 15);
+  assert.equal(Atomics.load(flag, 1), 1);
+  const m = await woke;
+  await w.terminate();
+  assert.equal(m.r, "ok", JSON.stringify(m));
+  assert.ok(m.ms < 5000, JSON.stringify(m));
+  assert.equal(consumeCtrlC(flag), true);
+  assert.equal(Atomics.load(flag, 0), 14);
+});
+
+// (an ordinary poll is one load: no read-modify-write while bit 0 is clear)
+test("consumeCtrlC writes only when bit 0 is set", () => {
+  const flag = new Int32Array(new SharedArrayBuffer(8));
+  const and = Atomics.and;
+  let calls = 0;
+  (Atomics as any).and = (...a: any[]) => (calls++, (and as any)(...a));
+  try {
+    Atomics.store(flag, 0, 14);
+    assert.equal(consumeCtrlC(flag), false);
+    assert.equal(consumeCtrlC(flag), false);
+    assert.equal(calls, 0);
+    assert.equal(Atomics.load(flag, 0), 14);
+    Atomics.or(flag, 0, 1);
+    assert.equal(consumeCtrlC(flag), true);
+    assert.equal(calls, 1);
+    assert.equal(Atomics.load(flag, 0), 14);
+  } finally {
+    (Atomics as any).and = and;
+  }
 });
 
 // (a worker running code with the word's other bits set first; Ctrl-C

@@ -36,7 +36,10 @@ export function ctrlCPending(intr: Int32Array = INTR): boolean {
 }
 
 /** Take a pending Ctrl-C: bit 0 cleared, atomically, the others left; true
- * if it was set. */
+ * if it was set.  (A plain read first: an ordinary poll, bit 0 clear, stays
+ * one load, not a read-modify-write; a Ctrl-C landing just after it is taken
+ * at the next poll.) */
 export function consumeCtrlC(intr: Int32Array = INTR): boolean {
+  if ((intr[0] & INTR_CTRL_C) === 0) return false;
   return (Atomics.and(intr, 0, ~INTR_CTRL_C) & INTR_CTRL_C) !== 0;
 }
