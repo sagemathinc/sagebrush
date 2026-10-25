@@ -495,86 +495,60 @@ export class Emitter {
     }
     const consumed = this.consumingCall(e);
     if (consumed !== null) return consumed;
-    const once = this.fileOnceCall(e);
-    if (once !== null) return once;
     return this.plainCall(e);
   }
-  // `open(F, M).write(S)`, each operand a str or bytes literal or a plain
-  // name, outside class bodies: the file is written and closed at the
-  // statement, as CPython's dropped temporary is, where pyjs's file object
-  // would otherwise keep the data until a close, the cell's end or the
-  // program's (plan-pyjs-file-visibility r7 and addendum 1;
-  // runtime/file-once.ts).  In order:
-  // - a global operand's namespace and the builtins must be ones whose reads
-  //   run no user code (fileOnceEnv), decided once at the module's start,
-  //   before any read; else, as for a failed prefix, today's lookups and
-  //   today's continuation;
-  // - open, F and M are read once each, as today; unless open is the
-  //   builtin, F an exact str and M one of w, a, wb, ab (no Python call
-  //   checks it), today's continuation runs with those values, reading S
-  //   after the open;
-  // - S is peeked: unbound, the open's effects happen, then today's read of
-  //   S raises its scope's error; fitting the mode, the native step writes
-  //   it; else the peek is dropped (its temporary cleared before open runs)
-  //   and today's continuation reads S again.
-  // A peeked S is used only when no Python code ran since the reads, and no
-  // temporary keeps it afterwards.
-  fileOnceCall(e: Extract<A.Expr, { k: "Call" }>): string | null {
-    const f = e.func;
-    if (f.k !== "Attribute" || f.attr !== "write" || e.args.length !== 1 || e.keywords.length !== 0) return null;
-    const o = f.value;
-    if (o.k !== "Call" || o.func.k !== "Name" || o.args.length !== 2 || o.keywords.length !== 0) return null;
-    if (this.fn.scope.kind === "class") return null;
-    const ops = [o.func, o.args[0], o.args[1], e.args[0]];
-    const nss = new Set<string>();
-    for (const x of ops) {
-      if (x.k === "Const") {
-        if (x.value.t !== "str" && x.value.t !== "bytes") return null;
-        continue;
-      }
-      if (x.k !== "Name") return null;
-      const r = resolve(this.fn.scope, x.id);
-      if (r.kind === "global") nss.add(this.gns(x.id) === "$G" ? "$GL" : "$g");
-      else if (r.kind !== "local" && r.kind !== "free") return null;
-    }
-    const sx = e.args[0];
-    const s = this.site("siteCall", "write", 1);
-    const [to, tf, tm, ts] = [this.temp(), this.temp(), this.temp(), this.temp()];
-    // (S peeked into ts alone, which the paths below clear: no other
-    // temporary holds it; unbound: the test is true)
-    const unbound = ((): string => {
-      if (sx.k !== "Name") return `(${ts} = ${this.ex(sx)}) === undefined`;
-      if (resolve(this.fn.scope, sx.id).kind !== "global") return `(${ts} = ${js(sx.id)}) === undefined`;
-      return `(${ts} = ${this.gns(sx.id) === "$G" ? "$GL" : "$g"}${prop(sx.id)}) === undefined && (${ts} = R.fileOncePeekBuiltin(${q(sx.id)})) === undefined`;
-    })();
-    const cont = (): string => `${s}((typeof ${to} === "function" ? ${to}(${tf}, ${tm}) : callObj(${to}, [${tf}, ${tm}])), ${this.ex(sx)})`;
-    // (the environment can't change while the module runs, $g, $GL and $B
-    // being its constants, so it is decided once, at the module's start; and
-    // the canonical open is a module constant too: a declined site then pays
-    // one comparison before today's continuation, daybreak2's replaced-open
-    // gate)
-    // (one module constant: the canonical open when every namespace a global
-    // operand reads is safe, else a private object equal to no Python value;
-    // so a declined site pays one comparison)
-    const canon = this.hoist(`R.fileOnceOpen(${[...nss].join(", ")}${nss.size ? ", " : ""}$B)`);
-    // (an unsafe environment takes the same path as a failed prefix: open, F
-    // and M read by today's loads in today's order, then today's
-    // continuation, S never peeked; no second copy of today's code, whose
-    // size cost the declined sites 20%)
-    const prefix = `${to} === ${canon} && typeof ${tf} === "string" && (${tm} === "w" || ${tm} === "a" || ${tm} === "wb" || ${tm} === "ab")`;
-    // (the eligible path hands the peek over in R.fileOnceS, clearing the
-    // temporary first: an argument would stay in the module frame's
-    // registers, which never return, until the site ran again)
-    // (one condition and one copy of today's continuation, which a failed
-    // prefix and an ineligible S share, its temporary cleared first: the
-    // site's code stays small, daybreak2's replaced-open gate.  An unbound S
-    // never reaches the continuation: the open's effects, then today's read
-    // of S raises)
-    const site =
-      `(${to} = ${this.ex(o.func)}, ${tf} = ${this.ex(o.args[0])}, ${tm} = ${this.ex(o.args[1])}, ` +
-      `(${prefix}) && ((${unbound}) ? (R.fileOnceTouch(${tf}, ${tm}), R.fileOnceNever(${this.ex(sx)})) : R.fileOnceFits(${ts}, ${tm})) ` +
-      `? (R.fileOnceS.v = ${ts}, ${ts} = undefined, R.fileOnceWrite(${tf}, ${tm})) : (${ts} = undefined, ${cont()}))`;
-    return site;
+  // `open(F, M).write(S)` as a statement (an expression statement, a cell's
+  // displayed last one, one assignment's value, a return's): the file is opened at
+  // the open call's position, written and closed at the statement, as
+  // CPython's temporary is when its last reference goes, where pyjs's file
+  // object would keep the data until a close, the cell's end or the
+  // program's (plan-pyjs-file-visibility r7, addendum 1, then c1 + c2:
+  // runtime/file-once.ts has the protocol).  F, M and S are any expressions,
+  // each evaluated once, where today's code evaluates it: open, F and M
+  // first; then, when open is the builtin, F an exact str and M one of w, a,
+  // wb, ab (identity, typeof and ===, no Python call), the native open, else
+  // today's call of open and its write method's lookup (bound before S, as
+  // CPython's); then S, in a try whose finally closes the native descriptor
+  // once, on an exception or Stop too; then the write.  Nothing is read
+  // ahead of its place, so no namespace needs checking.  S with yield or
+  // await isn't a site (the descriptor isn't held across a suspension).
+  fileOnceShape(e: A.Expr): { o: A.Expr; f: A.Expr; m: A.Expr; s: A.Expr } | null {
+    if (e.k !== "Call" || e.func.k !== "Attribute" || e.func.attr !== "write" || e.args.length !== 1 || e.keywords.length !== 0 || e.args[0].k === "Starred") return null;
+    const c = e.func.value;
+    if (c.k !== "Call" || c.args.length !== 2 || c.keywords.length !== 0 || c.args.some((a) => a.k === "Starred")) return null;
+    // (the calls the compiler gives its caller's namespaces stay as they are)
+    if (c.func.k === "Name" && ["globals", "locals", "vars", "dir", "eval", "exec", "super"].includes(c.func.id)) return null;
+    if (suspends(e.args[0])) return null;
+    return { o: c.func, f: c.args[0], m: c.args[1], s: e.args[0] };
+  }
+  fileOnceStmt(value: A.Expr, after: ((v: string) => void) | null): boolean {
+    const x = this.fileOnceShape(value);
+    if (x === null) return false;
+    const canon = this.hoist("R.fileOnceOpen()");
+    const get = this.site("siteGet", "write");
+    const [to, tf, tm, th, tobj, tw, tv] = [this.temp(), this.temp(), this.temp(), this.temp(), this.temp(), this.temp(), this.temp()];
+    const eo = this.ex(x.o);
+    this.w(`${to} = ${eo};`);
+    const ef = this.ex(x.f);
+    this.w(`${tf} = ${ef};`);
+    const em = this.ex(x.m);
+    this.w(`${tm} = ${em}; ${th} = null;`);
+    this.w(`if (${to} === ${canon} && typeof ${tf} === "string" && (${tm} === "w" || ${tm} === "a" || ${tm} === "wb" || ${tm} === "ab")) ${th} = R.fileOnceBegin(${tf}, ${tm});`);
+    this.w(`else { ${tobj} = typeof ${to} === "function" ? ${to}(${tf}, ${tm}) : callObj(${to}, [${tf}, ${tm}]); ${tw} = ${get}(${tobj}); }`);
+    this.w("try {");
+    this.indent++;
+    // (S handed over in R.fileOnceS, not held by a temporary or an argument:
+    // addendum 1)
+    const es = this.ex(x.s);
+    this.w(`R.fileOnceS.v = ${es};`);
+    this.w(`${tv} = ${th} !== null ? R.fileOnceEnd(${th}) : typeof ${tw} === "function" ? ${tw}(R.fileOnceTake()) : callObj(${tw}, [R.fileOnceTake()]);`);
+    this.indent--;
+    this.w(`} finally {`);
+    this.w(`  if (${th} !== null) { R.fileOnceAbort(${th}); ${th} = null; }`);
+    this.w(`  ${tobj} = ${tw} = undefined;`);
+    this.w("}");
+    if (after !== null) after(tv);
+    return true;
   }
   // A call of e.func, or of `callee`, the JavaScript holding it
   plainCall(e: Extract<A.Expr, { k: "Call" }>, callee?: string): string {
@@ -872,9 +846,20 @@ export class Emitter {
   stmtInner(st: A.Stmt) {
     this.line = st.line;
     switch (st.k) {
-      case "Expr":
+      case "Expr": {
         if (st.value.k === "Const") return;
+        if (this.fileOnceStmt(st.value, null)) return;
+        // (a cell's last expression, displayed: its value through the hook)
+        const v = st.value;
+        if (v.k === "Call" && v.func.k === "Name" && (v.func.id === "__pyjs_displayhook__" || v.func.id === "__pyjs_sage_displayhook__") && v.args.length === 1 && v.keywords.length === 0) {
+          const hook = v.func.id;
+          if (this.fileOnceStmt(v.args[0], (r) => {
+            const h = this.temp();
+            this.w(`${h} = ${this.load(hook)}; typeof ${h} === "function" ? ${h}(${r}) : callObj(${h}, [${r}]);`);
+          })) return;
+        }
         return this.w(`${this.ex(st.value)};`);
+      }
       case "Assign": {
         if (st.targets.length === 1 && st.targets[0].k === "Tuple" && st.value.k === "Tuple" && st.targets[0].elts.length === st.value.elts.length && ![...st.targets[0].elts, ...st.value.elts].some((x) => x.k === "Starred")) {
           // a, b = b, a: evaluate every right-hand side first.
@@ -886,6 +871,7 @@ export class Emitter {
           st.targets[0].elts.forEach((t, i) => this.w(this.assignCode(t, ts[i])));
           return;
         }
+        if (st.targets.length === 1 && this.fileOnceStmt(st.value, (r) => this.w(this.assignCode(st.targets[0], r)))) return;
         if (st.targets.length === 1) return this.w(this.assignCode(st.targets[0], this.valueFirst(st.targets[0], st.value)));
         const v = this.ex(st.value);
         const t = this.temp();
@@ -910,6 +896,7 @@ export class Emitter {
         return;
       case "Return":
         if (this.fn.scope.kind !== "function") this.fail("'return' outside function");
+        if (st.value !== null && this.fileOnceStmt(st.value, (r) => this.w(`return ${r};`))) return;
         return this.w(`return ${st.value === null ? "null" : this.ex(st.value)};`);
       case "If": {
         this.w(`if (${this.bool(st.test)}) {`);
@@ -1434,3 +1421,14 @@ const RUNTIME_NAMES = [
   "importModule", "importTop", "importAs", "importFromStmt", "importFrom", "importStar", "resolveRelative", "delattr", "Ellipsis", "T", "typeOf",
   "sortedKeys", "INTR", "interrupted",
 ];
+
+// Whether evaluating e can suspend its frame (yield, yield from, await),
+// outside a lambda's body, which is its own frame
+function suspends(e: any): boolean {
+  if (e === null || typeof e !== "object") return false;
+  if (Array.isArray(e)) return e.some(suspends);
+  if (e.k === "Yield" || e.k === "YieldFrom" || e.k === "Await") return true;
+  if (e.k === "Lambda") return false;
+  for (const k of Object.keys(e)) if (k !== "k" && k !== "line" && suspends(e[k])) return true;
+  return false;
+}

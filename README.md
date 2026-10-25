@@ -189,17 +189,20 @@ memory, refused at once with a `MemoryError` that says how much it needs.
 
 Files: pyjs has no reference counting, so a file object isn't closed when
 its last reference goes. `with open(...)` or `.close()` is the portable form.
-`open(f, m).write(s)`, with `f`, `m` and `s` each a name or a literal, is
-written and closed at the statement, as in CPython. Any other unclosed file is
-written when a notebook cell or the program ends. That includes one released
-by `del`, by rebinding or by a function's return, and one with a computed
-operand, such as `open(os.path.join(d, f), "w").write(s)`. Opening the same
-path again doesn't write it first, as CPython doesn't. A held file writes its
-whole contents when flushed, not from its position. At an
-`open(f, m).write(s)` statement, a write error such as a full disk raises
-there, where CPython's small buffered write reports it only when the file is
-finalized. pyjs writes UTF-8 with `"\n"`
-newlines, CPython's POSIX defaults.
+`open(f, m).write(s)` as a statement, its value assigned or returned, with
+any expressions for `f`, `m` and `s`, is written and closed at the statement,
+as in CPython. The file is opened where CPython opens it, before `s` is
+evaluated, and closed even if `s` raises or Stop arrives. That holds for text
+modes `w` and `a` and binary `wb` and `ab`, with a `str` path. Any other
+unclosed file is written when a notebook cell or the program ends. That
+includes one released by `del`, by rebinding or by a function's return, and a
+write inside a larger expression, such as `print(open(f, "w").write(s))`, or
+in a lambda. Opening the same path again doesn't write it first, as CPython
+doesn't. A held file writes its whole contents when flushed, not from its
+position. At an `open(f, m).write(s)` statement, a write error such as a full
+disk raises there, where CPython's small buffered write reports it only when
+the file is finalized. pyjs writes UTF-8 with `"\n"` newlines, CPython's
+POSIX defaults.
 
 - **Browser:** [sagebrush.space](https://sagebrush.space) is a notebook and a
   console running in the page, and nothing is sent to a server. See
