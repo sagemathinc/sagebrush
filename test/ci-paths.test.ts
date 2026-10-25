@@ -161,9 +161,35 @@ test("the limits census runs on engine-only, lib and src changes even when the n
   const o = classify(pr155);
   assert.equal(o.node, "false");
   assert.equal(o.census, "true");
-  for (const f of ["lib/_magma.py", "src/runtime/ops.ts", "test/limit-sites.json", "test/limit-sites-baseline.txt", "test/limit_sites.py"])
+  for (const f of ["lib/_magma.py", "src/runtime/ops.ts", "web/workspace/sync-ledger.ts", "test/limit-sites.json", "test/limit-sites-baseline.txt", "test/limit_sites.py", "test/limits.test.ts"])
     assert.equal(classify([f]).census, "true", f);
   // and not for files the census does not read
   for (const f of ["design/plan.md", "app/src/main.ts", "optional/x/README.md"])
     assert.equal(classify([f]).census, "false", f);
+});
+
+test("every file the limits census scans selects the census job (scripts/ci-paths.mjs's censusPaths and test/limit_sites.py agree)", () => {
+  // the census's own file list (limit_sites.tracked(): lib/*.py, engine/**/*.rs,
+  // src/**/*.ts and its WEB set), so a file added to the scanner cannot be
+  // skipped by a pull request's path filter (astra2 and daybreak2, #160)
+  const root = join(__dirname, "..", "..");
+  const r = spawnSync("python3", ["-c", "import sys; sys.path.insert(0, 'test'); import limit_sites as L; print(chr(10).join(L.tracked())); print('WEB=' + ','.join(sorted(L.WEB)))"], { cwd: root, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const lines = r.stdout.trim().split("\n");
+  const web = lines.pop()!.slice(4).split(",").filter(Boolean);
+  const scanned = lines.filter(Boolean);
+  assert.ok(scanned.length > 100, `${scanned.length} scanned files`);
+  // each kind of scanned file by one representative, and every file outside the three
+  // directory rules (the WEB set, and anything a future rule adds) one by one
+  const kinds = new Map<string, string>();
+  const others: string[] = [];
+  for (const f of scanned) {
+    const k = /^lib\/[^/]+\.py$/.test(f) ? "lib" : f.startsWith("engine/") && f.endsWith(".rs") ? "engine" : f.startsWith("src/") && f.endsWith(".ts") ? "src" : null;
+    if (k) {
+      if (!kinds.has(k)) kinds.set(k, f);
+    } else others.push(f);
+  }
+  assert.deepEqual([...kinds.keys()].sort(), ["engine", "lib", "src"]);
+  for (const f of [...kinds.values(), ...others, ...web]) assert.equal(classify([f]).census, "true", f);
+  assert.ok(web.includes("web/workspace/sync-ledger.ts"), web.join(","));
 });
