@@ -4002,6 +4002,26 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
+ "src/runtime/format.ts :: bytesReprPrefix :: export function bytesReprPrefix(a: ArrayLike<number>, max: number): string { #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: bytesReprPrefix :: for (let i = 0; i < Math.min(a.length, max); i++) { #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: bytesReprPrefix :: if (out.length + r.length > max) return out + r.slice(0, max - out.length); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: bytesReprPrefix :: return i >= a.length && out.length < max ? out + q : out; #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: bytesReprPrefix :: while (i < a.length && out.length < max) { #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "src/runtime/format.ts :: decimalOf :: const m = intDigits.max; #0": {
   "class": "3",
   "owner": "python (@sagebrush-python)",
@@ -4037,6 +4057,22 @@
   "owner": "python (@sagebrush-python)"
  },
  "src/runtime/format.ts :: mb :: raise(T.MemoryError, `converting an int of about ${digits} digits needs about ${mb(need)} MiB, more than this session's ${mb(limit)} MiB`); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: strReprPrefix :: export function strReprPrefix(s: string, max: number, single: boolean, double: boolean): string { #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: strReprPrefix :: if (n + len > max) return out + r.slice(0, max - n); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: strReprPrefix :: return i >= s.length && n < max ? out + q : out; #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: strReprPrefix :: while (i < s.length && n < max) { #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -4405,20 +4441,18 @@
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
  },
+ "src/runtime/types.ts :: intOfScan :: const m = intDigits.max; #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/types.ts :: intOfScan :: raise(T.ValueError, `Exceeds the limit (${m} digits) for integer string conversion: value has ${r.digits} digits; use sys.set_int_max_str_digits() to increase the limit`); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "src/runtime/types.ts :: intOrStr :: const MAX_STR = 2 ** 29 - 24; #0": {
   "class": "2",
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
- },
- "src/runtime/types.ts :: parseIntLiteral :: const m = intDigits.max; #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-1"
- },
- "src/runtime/types.ts :: parseIntLiteral :: raise(T.ValueError, `Exceeds the limit (${m} digits) for integer string conversion: value has ${t.length} digits; use sys.set_int_max_str_digits() to increase the limit`); #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-1"
  },
  "src/runtime/zlib.ts :: compress :: m.MAX_WBITS = 15; #0": {
   "class": "1+2",
