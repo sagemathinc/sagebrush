@@ -35,7 +35,12 @@ const cases: [string, number, string, string, string][] = [
   ["invalid", 64, "s = 'x' + '1' * 40_000_000", "int(s)", "ValueError invalid literal for int() with base 10: 'x" + "1".repeat(198)],
   ["invalid bytes", 48, "s = b'1' * 40_000_000 + b'x'", "int(s)", "ValueError invalid literal for int() with base 10: b'" + "1".repeat(198)],
   ["a power-of-two base", 80, "s = '1' * 22_000_000", "int(s, 16)", MSG(22000000, 84, 80)],
-  ["a negative int's decimal digits", 32, "s = -(1 << 100_000_000)", "str(s)", MSG(30103000, 106, 32)],
+  // ((-1) << N: the negative int made in one allocation, not 1 << N and its
+  // negation, two at once.  36 MiB from VM2's margins (shard-7 proposal r1,
+  // run 7): the fixed code gives this MemoryError from 30 MiB up, the code
+  // before #134 runs out of heap through 40 MiB, idle and with 4 copies on 4
+  // CPUs; at 32 MiB with the old setup CI once ran out, PR #144)
+  ["a negative int's decimal digits", 36, "s = -1 << 130_000_000", "str(s)", MSG(39133900, 137, 36)],
 ];
 for (const [label, heap, input, op, want] of cases) {
   test(`in a ${heap} MiB heap, ${label}: ${want.split(" ")[0]}, never V8's out-of-memory`, () => {
