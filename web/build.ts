@@ -44,7 +44,10 @@ mkdirSync(join(here, "dist"), { recursive: true });
 // (each mode's start, recorded apart: the library's chunks are made from
 // them, web/lib-chunks.mts)
 const STARTS: Record<string, string[]> = {
-  py: ["-c", "import json, re, math, fractions, collections, random, itertools, functools"],
+  // (_limits: no start imports it when no limits are given, src/limits.ts,
+  // but a python session given limits does at its start, and the sage
+  // group's fetch would cost it ~0.3 s: kept in core, plan-coldstart-limits)
+  py: ["-c", "import json, re, math, fractions, collections, random, itertools, functools, _limits"],
   sci: ["-c", "import numpy, matplotlib.pyplot, scipy.io, k3d, ipywidgets"],
   sage: ["--sage", "-c", "pass"],
   matlab: ["--matlab", "-c", "1;"],
