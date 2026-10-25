@@ -672,8 +672,9 @@ impl Drop for Call {
 /// the slot layout, the innermost at `depth - 1`; then [`OVERFLOW`] pairs
 /// (serial, op) for the calls nested deeper than [`FRAMES`], which have no
 /// counts: the host reports each of them untracked, under its own id.  A
-/// call deeper still is counted in the depth only (the host reports it
-/// untracked with no op).  In a frame, `call_id` holds the frame's serial
+/// call deeper still is counted in the depth only and has no identity, so
+/// the host doesn't list it (it couldn't tell a replaced one from the call
+/// it replaced).  In a frame, `call_id` holds the frame's serial
 /// number (the host's own call ids and parents replace it), and `seq` is
 /// unused: the host reads the frames only while the engine waits in its
 /// import.
