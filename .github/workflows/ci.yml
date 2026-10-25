@@ -71,6 +71,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+      # (test/kedlaya.test.ts checks the JavaScript engine detection under Deno too)
+      - uses: denoland/setup-deno@v2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
@@ -565,6 +567,7 @@ jobs:
               # (the bash shell's loader and its worker's own policy: plan-bash-shell r3 step 1)
               bun web/test-shell.mjs
               node web/test-worker-limits.mjs
+              node web/test-kedlaya-worker.mjs
               ;;
             board-a)
               node web/board/bench.mjs
@@ -945,6 +948,7 @@ jobs:
           python3 engine/py/test_memguard.py
           python3 engine/py/test_capacity.py
           python3 engine/py/test_progress.py
+          python3 engine/py/test_kedlaya.py
           python3 sage-tests/run_cpython.py -v
 
   ci:
