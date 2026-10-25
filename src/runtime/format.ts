@@ -1,7 +1,7 @@
 // repr(), str(), format() and `str % args`.
 
 import { T, markRaised, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, PyByteArray, StrLayout, PrimBox, typeName, isinstance, toPyExc } from "./object";
-import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt, bitLengthSmallCopies } from "./ops";
+import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt, bitLengthSmallCopies, bitLengthSmallCopiesSigned } from "./ops";
 import { heapLimit } from "./heap";
 import * as FD from "./fdlibm";
 import * as SP from "./strpos";
@@ -144,14 +144,14 @@ export function parseDigits(t: string, base: number, local: bigint[] = []): bigi
 // a program has set one.
 export function decimalOf(a: bigint): string {
   const m = intDigits.max;
-  const abs = a < 0n ? -a : a;
-  // (its bits found with small copies, and from them a lower bound on its
-  // digits: a value past the limit or the memory is refused without being
-  // converted)
-  const bits = bitLengthSmallCopies(abs);
-  const atLeast = bits <= 1 ? 1 : Math.floor((bits - 1) * Math.log10(2)) + 1;
+  // (its bits found with small copies, a negative one's within one, without
+  // negating it, and from them a lower bound on its digits: a value past the
+  // limit or the memory is refused before it is negated or converted)
+  const [lo, bits] = bitLengthSmallCopiesSigned(a);
+  const atLeast = lo <= 1 ? 1 : Math.floor((lo - 1) * Math.log10(2)) + 1;
   if (m > 0 && atLeast > m) tooManyDigits();
   admitDigits(atLeast, bits / 8);
+  const abs = a < 0n ? -a : a;
   const s = decimalDigits(abs, bits);
   if (m > 0 && s.length > m) tooManyDigits();
   return a < 0n ? "-" + s : s;
@@ -239,24 +239,59 @@ function formatGeneral(x: number, p: number, upper: boolean, alt: boolean, noneT
 
 const NONPRINT = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}]/u;
 
+// The repr of one character of a str, in quotes q.
+function strChunk(ch: string, c: number, q: string): string {
+  if (ch === q || ch === "\\") return "\\" + ch;
+  if (ch === "\n") return "\\n";
+  if (ch === "\r") return "\\r";
+  if (ch === "\t") return "\\t";
+  if (c < 0x20 || c === 0x7f) return "\\x" + c.toString(16).padStart(2, "0");
+  if (c < 0x7f || ch === " ") return ch;
+  if (NONPRINT.test(ch)) {
+    if (c <= 0xff) return "\\x" + c.toString(16).padStart(2, "0");
+    if (c <= 0xffff) return "\\u" + c.toString(16).padStart(4, "0");
+    return "\\U" + c.toString(16).padStart(8, "0");
+  }
+  return ch;
+}
+
 export function strRepr(s: string): string {
   const q = s.includes("'") && !s.includes('"') ? '"' : "'";
   let out = q;
-  for (const ch of s) {
-    const c = ch.codePointAt(0)!;
-    if (ch === q || ch === "\\") out += "\\" + ch;
-    else if (ch === "\n") out += "\\n";
-    else if (ch === "\r") out += "\\r";
-    else if (ch === "\t") out += "\\t";
-    else if (c < 0x20 || c === 0x7f) out += "\\x" + c.toString(16).padStart(2, "0");
-    else if (c < 0x7f || ch === " ") out += ch;
-    else if (NONPRINT.test(ch)) {
-      if (c <= 0xff) out += "\\x" + c.toString(16).padStart(2, "0");
-      else if (c <= 0xffff) out += "\\u" + c.toString(16).padStart(4, "0");
-      else out += "\\U" + c.toString(16).padStart(8, "0");
-    } else out += ch;
-  }
+  for (const ch of s) out += strChunk(ch, ch.codePointAt(0)!, q);
   return out + q;
+}
+
+// The first max code points of a str's repr, as CPython's %.<max>R, without
+// making the whole repr: its quotes chosen from the whole str (single,
+// double: whether it has a ' and a "), then its characters' reprs while
+// they fit, a printable character one code point, an escape its characters
+// (cut where the whole repr would be cut), and the closing quote if the
+// whole str's repr fits.  At most max code points of s are read.
+export function strReprPrefix(s: string, max: number, single: boolean, double: boolean): string {
+  const q = single && !double ? '"' : "'";
+  let out = q, n = 1, i = 0;
+  while (i < s.length && n < max) {
+    const c = s.codePointAt(i)!, w = c > 0xffff ? 2 : 1;
+    const ch = s.slice(i, i + w), r = strChunk(ch, c, q);
+    // (an escape is ASCII: its length is its code points; else one character)
+    const len = r === ch ? 1 : r.length;
+    if (n + len > max) return out + r.slice(0, max - n);
+    out += r;
+    n += len;
+    i += w;
+  }
+  return i >= s.length && n < max ? out + q : out;
+}
+
+// The repr of one byte, in quotes q (a char code).
+function byteChunk(c: number, q: number): string {
+  if (c === q || c === 92) return "\\" + String.fromCharCode(c);
+  if (c === 10) return "\\n";
+  if (c === 13) return "\\r";
+  if (c === 9) return "\\t";
+  if (c < 0x20 || c >= 0x7f) return "\\x" + c.toString(16).padStart(2, "0");
+  return String.fromCharCode(c);
 }
 
 export function bytesRepr(a: ArrayLike<number>): string {
@@ -267,16 +302,28 @@ export function bytesRepr(a: ArrayLike<number>): string {
   }
   const q = hasSingle && !hasDouble ? '"' : "'";
   let out = "b" + q;
-  for (let i = 0; i < a.length; i++) {
-    const c = a[i];
-    if (c === q.charCodeAt(0) || c === 92) out += "\\" + String.fromCharCode(c);
-    else if (c === 10) out += "\\n";
-    else if (c === 13) out += "\\r";
-    else if (c === 9) out += "\\t";
-    else if (c < 0x20 || c >= 0x7f) out += "\\x" + c.toString(16).padStart(2, "0");
-    else out += String.fromCharCode(c);
-  }
+  for (let i = 0; i < a.length; i++) out += byteChunk(a[i], q.charCodeAt(0));
   return out + q;
+}
+
+// The first max characters of the repr of bytes' first max bytes, as
+// CPython's int() error (it reprs PyBytes_FromStringAndSize(s, min(n, 200))
+// cut at 200): the quotes chosen from those bytes only.
+export function bytesReprPrefix(a: ArrayLike<number>, max: number): string {
+  let single = false, double = false;
+  for (let i = 0; i < Math.min(a.length, max); i++) {
+    if (a[i] === 39) single = true;
+    else if (a[i] === 34) double = true;
+  }
+  const q = single && !double ? '"' : "'";
+  let out = "b" + q, i = 0;
+  while (i < a.length && out.length < max) {
+    const r = byteChunk(a[i], q.charCodeAt(0));
+    if (out.length + r.length > max) return out + r.slice(0, max - out.length);
+    out += r;
+    i++;
+  }
+  return i >= a.length && out.length < max ? out + q : out;
 }
 
 export const hex = (n: number) => "0x" + n.toString(16);
@@ -522,20 +569,22 @@ function formatInt(v: bigint, s: Spec): string {
   if (s.precision >= 0) raise(T.ValueError, "Precision not allowed in integer format specifier");
   if (s.z) raise(T.ValueError, "Negative zero coercion (z) not allowed in integer format specifier");
   const neg = v < 0n;
-  const a = neg ? -v : v;
+  // (|v| only for the non-decimal types: a decimal one is admitted before
+  // anything is negated, in decimalOf)
   let digits: string, prefix = "";
   switch (s.type) {
-    case "b": digits = a.toString(2); prefix = "0b"; break;
-    case "o": digits = a.toString(8); prefix = "0o"; break;
-    case "x": digits = a.toString(16); prefix = "0x"; break;
-    case "X": digits = a.toString(16).toUpperCase(); prefix = "0X"; break;
+    case "b": digits = (neg ? -v : v).toString(2); prefix = "0b"; break;
+    case "o": digits = (neg ? -v : v).toString(8); prefix = "0o"; break;
+    case "x": digits = (neg ? -v : v).toString(16); prefix = "0x"; break;
+    case "X": digits = (neg ? -v : v).toString(16).toUpperCase(); prefix = "0X"; break;
     case "c":
       if (s.sign !== "-" || s.alt) raise(T.ValueError, `${s.alt && s.sign === "-" ? "Alternate form (#)" : "Sign"} not allowed with integer format specifier 'c'`);
       if (v > LONG_MAX || v < -LONG_MAX - 1n) raise(T.OverflowError, "Python int too large to convert to C long");
       if (neg || v >= 0x110000n) raise(T.OverflowError, "%c arg not in range(0x110000)");
       return pad(String.fromCodePoint(Number(v)), "", s, ">");
     default:
-      digits = decimalOf(a);
+      digits = decimalOf(v);
+      if (neg) digits = digits.slice(1);
   }
   const sign = signOf(neg, s) + (s.alt ? prefix : "");
   const gn = s.type === "" || s.type === "d" || s.type === "n" ? 3 : 4;
@@ -834,8 +883,15 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
       case "d": case "i": case "u": case "o": case "x": case "X": {
         const v = intOf(nextArg(), type, "oxX".includes(type));
         const neg = v < 0n;
-        const a = neg ? -v : v;
-        let digits = type === "o" ? a.toString(8) : type === "x" ? a.toString(16) : type === "X" ? a.toString(16).toUpperCase() : decimalOf(a);
+        // (a decimal one admitted before anything is negated, in decimalOf)
+        let digits: string;
+        if ("oxX".includes(type)) {
+          const a = neg ? -v : v;
+          digits = type === "o" ? a.toString(8) : type === "x" ? a.toString(16) : a.toString(16).toUpperCase();
+        } else {
+          digits = decimalOf(v);
+          if (neg) digits = digits.slice(1);
+        }
         if (precision > digits.length) digits = "0".repeat(precision - digits.length) + digits;
         const prefix = flags.includes("#") && "oxX".includes(type) ? "0" + type : "";
         body = padW(digits, true, (neg ? "-" : sign) + prefix);
