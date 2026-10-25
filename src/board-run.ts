@@ -330,7 +330,7 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
       // over its time: interrupted (KeyboardInterrupt), and if it does not stop, the interpreter stopped
       const over = () => {
         timedOut = true;
-        if (intr) { Atomics.store(intr, 1, id); Atomics.store(intr, 0, 1); }
+        if (intr) { Atomics.store(intr, 1, id); Atomics.or(intr, 0, 1); }
         kill = setTimeout(() => { dead = `the interpreter was stopped: ${label(msg.cell)} did not stop when interrupted`; worker?.terminate(); }, 2000);
       };
       // (until it starts, START_GRACE_MS at most: an interpreter that never begins it is still stopped)

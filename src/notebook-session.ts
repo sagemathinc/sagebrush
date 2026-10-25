@@ -350,7 +350,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       post({ id, skipped: true });
       return;
     }
-    R.INTR[0] = 0; // a request that came after the previous run had finished
+    Atomics.and(R.INTR, 0, ~1); // a Ctrl-C that came after the previous run had finished (bit 0 only)
     current = id;
     target = null;
     used.item = 0;
