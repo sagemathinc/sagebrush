@@ -43,7 +43,7 @@ test("invalid limits stop the run before its first statement, with status 2 and 
     [file("bom.json", "\ufeff{}"), "is not JSON: Unexpected UTF-8 BOM"],
     [file("array.json", "[1]"), "sagebrush: limits: the limits must be a JSON object, not an array"],
     [file("many.json", JSON.stringify(Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`k${i}`, i])))), "sagebrush: limits: more than 16 entries"],
-    [file("unknown.json", '{"ff.wrok": 1}'), "sagebrush: limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work, nf.certify_index_max, nf.certify_norm_max, nf.relation_rounds, poly.work)"],
+    [file("unknown.json", '{"ff.wrok": 1}'), "sagebrush: limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work, nf.certify_index_max, nf.certify_norm_max, nf.relation_rounds, padic.kedlaya_work, poly.work)"],
     [file("bool.json", '{"ff.work": true}'), 'sagebrush: limits: ff.work must be an integer or "unlimited", not true'],
     [file("float.json", '{"ff.work": 1e7}'), 'sagebrush: limits: ff.work must be an integer or "unlimited", not 10000000.0'],
     [file("range.json", '{"ff.work": 5}'), "sagebrush: limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]"],
@@ -154,10 +154,10 @@ test("every census-vocabulary refusal site is registered with a class and owner;
 test("unlimited by default, finite values opt in, mixed settings key by key (plan-c0 r2)", () => {
   const show = "import sys, _sage_ffsub as S; print(S.WORK, S.EMBED_MAX, S.ROOT_BITS, sys._sagebrush_limits)";
   const cases: [string, string][] = [
-    ['{"ff.work": 100000}', "100000 1048576 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited})"],
-    ['{"ff.root_bits": 64}', "inf 10000000 64 Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited})"],
-    ['{"ff.embed_max": 4096}', "inf 4096 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': 4096, 'ff.root_bits': unlimited, 'ff.work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited})"],
-    ['{"ff.work": "unlimited", "ff.embed_max": "unlimited"}', "inf 10000000 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited})"],
+    ['{"ff.work": 100000}', "100000 1048576 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'padic.kedlaya_work': unlimited, 'poly.work': unlimited})"],
+    ['{"ff.root_bits": 64}', "inf 10000000 64 Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'padic.kedlaya_work': unlimited, 'poly.work': unlimited})"],
+    ['{"ff.embed_max": 4096}', "inf 4096 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': 4096, 'ff.root_bits': unlimited, 'ff.work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'padic.kedlaya_work': unlimited, 'poly.work': unlimited})"],
+    ['{"ff.work": "unlimited", "ff.embed_max": "unlimited"}', "inf 10000000 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'padic.kedlaya_work': unlimited, 'poly.work': unlimited})"],
   ];
   for (const [text, want] of cases) {
     const r = run(["--limits", file("mixed.json", text), "-c", show]);

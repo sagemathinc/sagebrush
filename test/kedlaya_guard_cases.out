@@ -1,0 +1,30 @@
+min: N = 10^100: refused: the Frobenius matrix at p = 5 to precision ; step 1: True; under 10 ms: True
+min: at most the bytes of P, p in (5, 97, 1009), N <= 30: True
+min: real bound 7 < heap 2335 < J figure 4664
+min: real: not impossible
+min: mutant: impossible
+budget cpython p = 97 N = 11: U = 1798384; 4U: admitted (11, 14); 4U - 4: refused: the Frobenius matrix at p = 97 to precision 10 is estimated to need about 2 MiB, more than sagebrush's budget of 1 MiB for one computation (1/4 of this process's 6 MiB) [need 1798384, cap 1798383]
+budget cpython p = 5 N = 51: U = 444128; 4U: admitted (54, 57); 4U - 4: refused: the Frobenius matrix at p = 5 to precision 50 is estimated to need about 1 MiB, more than sagebrush's budget of 0 MiB for one computation (1/4 of this process's 1 MiB) [need 444128, cap 444127]
+budget cpython p = 401 N = 3: U = 2933632; 4U: admitted (3, 6); 4U - 4: refused: the Frobenius matrix at p = 401 to precision 2 is estimated to need about 3 MiB, more than sagebrush's budget of 2 MiB for one computation (1/4 of this process's 11 MiB) [need 2933632, cap 2933631]
+budget v8 p = 97 N = 11: U = 1969296; 4U: admitted (11, 14); 4U - 4: refused: the Frobenius matrix at p = 97 to precision 10 is estimated to need about 2 MiB, more than sagebrush's budget of 1 MiB for one computation (1/4 of this process's 7 MiB) [need 1969296, cap 1969295]
+budget v8 p = 5 N = 51: U = 479880; 4U: admitted (54, 57); 4U - 4: refused: the Frobenius matrix at p = 5 to precision 50 is estimated to need about 1 MiB, more than sagebrush's budget of 0 MiB for one computation (1/4 of this process's 1 MiB) [need 479880, cap 479879]
+budget v8 p = 401 N = 3: U = 2797168; 4U: admitted (3, 6); 4U - 4: refused: the Frobenius matrix at p = 401 to precision 2 is estimated to need about 3 MiB, more than sagebrush's budget of 2 MiB for one computation (1/4 of this process's 10 MiB) [need 2797168, cap 2797167]
+budget jsc p = 97 N = 11: U = 2764264; 4U: admitted (11, 14); 4U - 4: refused: the Frobenius matrix at p = 97 to precision 10 is estimated to need about 3 MiB, more than sagebrush's budget of 2 MiB for one computation (1/4 of this process's 10 MiB) [need 2764264, cap 2764263]
+budget jsc p = 5 N = 51: U = 689072; 4U: admitted (54, 57); 4U - 4: refused: the Frobenius matrix at p = 5 to precision 50 is estimated to need about 1 MiB, more than sagebrush's budget of 0 MiB for one computation (1/4 of this process's 2 MiB) [need 689072, cap 689071]
+budget jsc p = 401 N = 3: U = 3905672; 4U: admitted (3, 6); 4U - 4: refused: the Frobenius matrix at p = 401 to precision 2 is estimated to need about 4 MiB, more than sagebrush's budget of 3 MiB for one computation (1/4 of this process's 14 MiB) [need 3905672, cap 3905671]
+engine jsc (WebKit): refused: the Frobenius matrix at p = 97 to precision 2: the memory estimate for this computation isn't established for this JavaScript engine (jsc (WebKit)); the native package computes it [need None, cap 274877906944]
+engine spidermonkey: refused: the Frobenius matrix at p = 97 to precision 2: the memory estimate for this computation isn't established for this JavaScript engine (spidermonkey); the native package computes it [need None, cap 274877906944]
+engine unknown: refused: the Frobenius matrix at p = 97 to precision 2: the memory estimate for this computation isn't established for this JavaScript engine (unknown); the native package computes it [need None, cap 274877906944]
+label v8 on node: v8
+label v8 on deno: v8
+label v8 on browser: v8
+label jsc on bun: jsc
+label jsc on browser: jsc (WebKit)
+label spidermonkey on browser: spidermonkey
+label unknown on browser: unknown
+finite 5136128: lower 4695889, full 5136128: admitted (9, 12)
+finite 5136127: lower 4695889, full 5136128: refused: the Frobenius matrix at p = 197 to precision 8 is beyond the limit padic.kedlaya_work (estimated work 5136128 > 5136127)
+finite 5000000: lower 4695889, full 5136128: refused: the Frobenius matrix at p = 197 to precision 8 is beyond the limit padic.kedlaya_work (estimated work 5136128 > 5000000)
+finite 4695888: lower 4695889, full 5136128: refused: the Frobenius matrix at p = 197 to precision 8 is beyond the limit padic.kedlaya_work (estimated work 4695889 > 4695888)
+finite unlimited: lower 4695889, full 5136128: admitted (9, 12)
+finite 0: lower 4695889, full 5136128: refused: the Frobenius matrix at p = 197 to precision 8 is beyond the limit padic.kedlaya_work (estimated work 4695889 > 0)
