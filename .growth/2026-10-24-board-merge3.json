@@ -1,0 +1,1 @@
+{"v":1,"reason":"#121 board open --edit step 1: web/board/doc.ts's boardText (canonical()'s layout without cleaning, own extension keys kept whatever their names), now exported, in the CLI bundle's board code","bytes":{"cli/pyjs.cjs":156}}
