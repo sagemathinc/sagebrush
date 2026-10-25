@@ -41,8 +41,10 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --limits FILE
            this run's engine limits (also SAGEBRUSH_LIMITS=FILE): a JSON
            object of at most 4096 bytes, such as {"ff.work": 100000000};
-           every key (ff.work, ff.conway_work, ff.embed_max, ff.root_bits)
-           is "unlimited" by default: set finite values to opt in to work
+           every key (ff.work, ff.conway_work, ff.embed_max, ff.root_bits,
+           poly.work, nf.relation_rounds, nf.certify_norm_max,
+           nf.certify_index_max) is "unlimited" by default: set finite
+           values to opt in to work
            limits (grading, shared compute); memory guards always apply;
            invalid limits end the run with status 2 before it starts
   --pkgset ID|FILE

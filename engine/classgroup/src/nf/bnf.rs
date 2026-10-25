@@ -44,7 +44,6 @@ pub(super) use unit_lattice::{inverse_f64, solve_rows};
 use unit_lattice::{in_lattice_f64, unit_lattice_with_diagnostics};
 
 // Search budgets are heuristics, not mathematical certification thresholds.
-const MAX_RELATION_ROUNDS: usize = 60;
 const MAX_UNIT_ATTEMPTS: usize = 12;
 const MAX_CERTIFICATE_RETRIES: usize = 2;
 // Fixed xorshift seed keeps the candidate search reproducible.
@@ -449,7 +448,8 @@ pub fn bnfinit_configured(f: &[BigInt], extra: &[u64], config: &BnfConfig) -> Re
     let log_weight_spread: f64 = config.log_weight_spread.unwrap_or(if r == 0 { 0.0 } else { (class_number_regulator_estimate.max(1.0).ln() / r as f64).clamp(2.0, 30.0) });
     let mut want = (1.4 * factor_base_size as f64) as usize + 20 + 2 * r;
     let mut cache: Option<(u32, Vec<Vec<BigInt>>)> = None;
-    for round in 0..MAX_RELATION_ROUNDS {
+    // (unlimited unless the caller set crate::limits::with_round_limit)
+    for round in 0..crate::limits::round_limit() {
         sagebrush_interrupt::check();
         tm.rounds = round + 1;
         let t = crate::clock::Instant::now();

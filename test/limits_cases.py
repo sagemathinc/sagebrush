@@ -58,6 +58,23 @@ TEXTS = [
     '{"ff.work": "inf"}',
     '{"ff.work": Infinity}',
     '{"ff.work": "unlimited", "ff.work": 100000}',
+    # C0's per-area follow-up: the class-group and polynomial keys, each at
+    # min - 1, min, max and max + 1, "unlimited", and all finite at once
+    '{"poly.work": 1048575}',
+    '{"poly.work": 1048576}',
+    '{"poly.work": 1099511627776}',
+    '{"poly.work": 1099511627777}',
+    '{"nf.relation_rounds": 0}',
+    '{"nf.relation_rounds": 1}',
+    '{"nf.relation_rounds": 10000}',
+    '{"nf.relation_rounds": 10001}',
+    '{"nf.certify_norm_max": 999}',
+    '{"nf.certify_norm_max": 1000}',
+    '{"nf.certify_norm_max": 4611686018427387904}',
+    '{"nf.certify_norm_max": 4611686018427387905}',
+    '{"nf.certify_index_max": 999}',
+    '{"nf.certify_index_max": "unlimited"}',
+    '{"poly.work": 8589934592, "nf.relation_rounds": 60, "nf.certify_norm_max": 1000000, "nf.certify_index_max": 1000000}',
 ]
 
 class Sly(str):
