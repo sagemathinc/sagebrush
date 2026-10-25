@@ -315,6 +315,8 @@ def finalized():
 
 # A host that was given no limits locks the defaults at startup without
 # importing this module (src/limits.ts lockDefaults): they lock here, at its
-# first import, before anything can propose.
+# first import, before anything can propose.  sys._sagebrush_limits is the
+# host's already (an accessor for this snapshot, or whatever the program
+# has made of it since, as after a finalize at startup), so it's left alone.
 if getattr(_sys, "_sagebrush_limits_lock", False):
-    finalize()
+    _final = DEFAULTS
