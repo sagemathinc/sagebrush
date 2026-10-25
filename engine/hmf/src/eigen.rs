@@ -153,12 +153,21 @@ pub(crate) fn orbit_eigenspace_core<K: std::hash::Hash + Eq + Clone>(t: &[Vec<i6
             let tm = Mat::from_rows(&rows, md);
             sagebrush_interrupt::check();
             let key = (key.clone(), p);
-            let cached = cache.lock().unwrap().get(&key).cloned();
+            // (the cache's lock is never held while computing: the
+            // characteristic polynomial polls Stop, and an interrupt
+            // unwinding through a held lock poisoned it, so every later use
+            // of this cache panicked; astra2's report.  An entry is inserted
+            // only once complete, so a lock poisoned elsewhere still guards
+            // whole entries, and is taken over)
+            let lock = || cache.lock().unwrap_or_else(|e| e.into_inner());
+            let krylov_used = |c: &std::collections::HashMap<(K, u64), std::sync::Arc<ModData>>| -> usize {
+                c.values().map(|e| e.krylov.as_ref().map_or(0, |k| k.len() * n)).sum()
+            };
+            let cached = lock().get(&key).cloned();
             let data = match cached {
                 Some(f) => f,
                 None => {
-                    let mut cache = cache.lock().unwrap();
-                    let used: usize = cache.values().map(|e| e.krylov.as_ref().map_or(0, |k| k.len() * n)).sum();
+                    let used = krylov_used(&lock());
                     let krylov = if used + n * n <= budget {
                         let mut k = vec![u.clone()];
                         for _ in 1..n {
@@ -169,9 +178,21 @@ pub(crate) fn orbit_eigenspace_core<K: std::hash::Hash + Eq + Clone>(t: &[Vec<i6
                     } else {
                         None
                     };
-                    let f = std::sync::Arc::new(ModData { charpoly: tm.charpoly(), krylov });
+                    let mut f = std::sync::Arc::new(ModData { charpoly: tm.charpoly(), krylov });
                     if budget > 0 {
-                        cache.insert(key, f.clone());
+                        let mut c = lock();
+                        if let Some(g) = c.get(&key) {
+                            // (computed meanwhile by another orbit's thread)
+                            f = g.clone();
+                        } else {
+                            // (the budget again, as the cache is now: an
+                            // optional Krylov table is dropped, never kept
+                            // beyond the budget)
+                            if f.krylov.is_some() && krylov_used(&c) + n * n > budget {
+                                f = std::sync::Arc::new(ModData { charpoly: f.charpoly.clone(), krylov: None });
+                            }
+                            c.insert(key, f.clone());
+                        }
                     }
                     f
                 }
