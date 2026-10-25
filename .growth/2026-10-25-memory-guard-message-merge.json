@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "#114 after master a6390a5b: D0's capacity record on D1's refusals (_sage_ffmat _admit_size, Magma's collect), the rest of D1's growth measured on the merge (size-gate's shortfalls: run 40203844584, and cli/pyjs.cjs +12 more on master a86e2605, run 40206915787)",
+ "bytes": {
+  "cli/lib.gen.js": 12,
+  "cli/pyjs.cjs": 82,
+  "engine/lib/sage.pre": 66,
+  "engine/lib/sage.src": 143
+ }
+}

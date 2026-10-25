@@ -1067,10 +1067,11 @@ class Matrix:
             Traceback (most recent call last):
             ...
             IndexError: matrix index out of range
-            sage: A[[0] * 10^5, [0] * 10^5]
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: a 100000 x 100000 matrix exceeds sagebrush's limit of 4194304 entries (and rows, columns)
+            sage: try:
+            ....:     A[[0] * 10^5, [0] * 10^5]
+            ....: except MemoryError as e:
+            ....:     print(str(e).splitlines()[1])
+            A 100000 x 100000 matrix needs about 80 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix.
         """
         if isinstance(ij, tuple):
             if len(ij) != 2:
@@ -2549,14 +2550,24 @@ def _vector_dim(n):
 
 def _shape(m, n, limit=None):
     """(m, n) checked before anything is allocated: exact non-negative
-    integers, each and their product at most limit (NotImplementedError
-    beyond; a 65537 x 0 matrix still allocates 65537 rows)."""
+    integers, each and their product at most limit (beyond, the memory
+    guard's SagebrushMemoryError, item D; a 65537 x 0 matrix still allocates
+    65537 rows).  The need and the allowance are said in bytes at
+    _SLOT_BYTES a slot (an entry's, a row's or a column's reference alone,
+    a lower bound), so that the need exceeds the allowance exactly when the
+    count does."""
     if limit is None:
         limit = _MAX_ENTRIES
     m, n = _dim(m, "rows"), _dim(n, "columns")
     if m > limit or n > limit or m * n > limit:
-        raise NotImplementedError("a %d x %d matrix exceeds sagebrush's limit of %d entries (and rows, columns)" % (m, n, limit))
+        import _memguard
+        # (a fixed limit, not the heap's: more memory wouldn't help)
+        raise _memguard.memory_guard("A %d x %d matrix" % (m, n), max(m, n, m * n) * _SLOT_BYTES, limit * _SLOT_BYTES, "one matrix",
+                                     fixed=True)
     return m, n
+
+
+_SLOT_BYTES = 8  # (a reference: _shape's sizes, in bytes)
 
 
 def _read_rows(rows, limit=None):
