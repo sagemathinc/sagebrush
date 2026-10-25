@@ -517,7 +517,7 @@ def test_admission_boundaries():
     s.reserve_floor = lambda: R.GiB
     h = s.new_handle()
     used = s.used()
-    rec_size = s.physical(len(json.dumps({"bytes": 0, "target": "x" * 300, "owner": s.owner})))
+    rec_size = s.physical(len(json.dumps({"bytes": 0, "target": "x" * 300, "temp": "x" * 320, "owner": dict(s.owner, host="x" * 255)})))
     # exactly at the data limit: admitted; one byte more: refused
     s.admit(limit - used, "data")
     try:
@@ -527,13 +527,14 @@ def test_admission_boundaries():
         pass
     # a reservation charges its record too: nbytes alone fitting isn't enough
     target = os.path.join(s.run_dir(h), "value.json")
+    temp = target + ".0123456789ab.tmp"
     try:
-        s.reserve(h, target, limit - used)
+        s.reserve(h, target, limit - used, temp)
         raise AssertionError("the reservation record's charge was not admitted")
     except R.StorageError:
         pass
     assert s.used() == s.walk_total() and not os.listdir(os.path.join(s.root, "reservations"))
-    p = s.reserve(h, target, limit - used - 2 * rec_size)
+    p = s.reserve(h, target, limit - used - 2 * rec_size, temp)
     assert s.used() <= limit and s.used() == s.walk_total(), (s.used(), limit)
     s.release(p)
     # records may use the whole budget, data may not
@@ -607,7 +608,7 @@ def test_admission_boundaries():
         assert not [n for n in os.listdir(s.run_dir(h)) if n.endswith(".tmp")], (what, os.listdir(s.run_dir(h)))
         assert s.used() == s.walk_total(), what
     # (and a temporary a crash left in a run's directory is removed by cleanup)
-    open(os.path.join(s.run_dir(h), "run.json.abc.tmp"), "wb").write(b"x")
+    open(os.path.join(s.run_dir(h), "run.json.0123456789ab.tmp"), "wb").write(b"x")
     s.cleanup()
     assert not [n for n in os.listdir(s.run_dir(h)) if n.endswith(".tmp")]
     free_total[0] = R.GiB
@@ -894,7 +895,11 @@ def test_cancel_contract():
         # gone
         r.made[0].stubborn = False
         g, _ = r.start("auto:1", "sage")
-        r.store._remove(r.store.load(g.record["handle"]), "count", time.time())
+        # (under the store lock, as cleanup removes a run: the run's own
+        # post-settle cleanup may be sweeping temporaries at this moment,
+        # plan-runs-tmp-sweep r4)
+        with r.store.lock:
+            r.store._remove(r.store.load(g.record["handle"]), "count", time.time())
         for mode in ("soft", "hard"):
             c = r.cancel(g.record["handle"], mode)
             assert c["result"] == "not_running" and c["state"] == "gone", c
