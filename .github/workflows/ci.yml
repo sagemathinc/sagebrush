@@ -518,7 +518,11 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.webkit == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    # (from the runs: build 14-26 s, install 28-64 s, test 32-58 s; one
+    # install stalled on the apt mirror past the old 15-minute job limit,
+    # so the install and the test each have their own, and a stall names
+    # its step)
+    timeout-minutes: 18
     env:
       PLAYWRIGHT_VERSION: "1.57.0"
     steps:
@@ -535,10 +539,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
       - name: "Playwright's WebKit, pinned (no cache: its apt dependencies dominate the install)"
+        timeout-minutes: 10
         run: |
           mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw" && echo '{"private": true}' > package.json
           npm i --no-audit --no-fund "playwright@$PLAYWRIGHT_VERSION" && npx playwright install --with-deps webkit
       - name: detection, the production refusal and Stop in WebKit's worker
+        timeout-minutes: 5
         run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/test-kedlaya-worker.mjs
 
   web-browser:
