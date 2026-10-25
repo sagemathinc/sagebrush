@@ -594,6 +594,13 @@ export async function waitSync(w: Workspace, seqs: number[], opts: { level?: Syn
   });
 }
 
+/** The wait's generation floor raised (never lowered): what is sent below it from now on is an older sender's. */
+function raiseFloor(x: Waiter, gen: number) {
+  if (gen > x.maxGen) {
+    x.maxGen = gen;
+    clearSent(x);
+  }
+}
 function onMsg(x: Waiter, m: Msg, stale: boolean, again: () => void) {
   if (x.done || m.ns !== x.ns) return;
   // (the lifecycle first, by type: the epoch it ends is the wait's)
@@ -616,9 +623,14 @@ function onMsg(x: Waiter, m: Msg, stale: boolean, again: () => void) {
     case "inflight": {
       if (m.t === "inflight" && m.nonce !== x.nonce) return;
       if (stale || m.gen < x.maxGen) return;
-      // (unknown: only the live sender's own answer to this wait's hello counts, and confirms the generation)
+      // (unknown: only the live sender's own answer to this wait's hello counts, and confirms the generation; any
+      // other generation it hears still raises its floor, never confirms (CORR-PR128-6-R6: a delayed answer from an
+      // older sender, after an eviction, is below the floor the wait saw and is dropped))
       if (x.unknown) {
-        if (m.t !== "inflight") return;
+        if (m.t !== "inflight") {
+          raiseFloor(x, m.gen);
+          return;
+        }
         x.unknown = false;
         x.hub.confirm(x.ns, x.epoch, m.gen);
       }
@@ -633,15 +645,18 @@ function onMsg(x: Waiter, m: Msg, stale: boolean, again: () => void) {
       break;
     }
     case "reset":
-      if (stale || m.gen < x.maxGen || x.unknown) return;
+      if (stale || m.gen < x.maxGen) return;
+      if (x.unknown) {
+        raiseFloor(x, m.gen);
+        return;
+      }
       x.maxGen = m.gen;
       clearSent(x);
       break;
     case "holder":
-      if (m.gen > x.maxGen && !x.unknown) {
-        x.maxGen = m.gen;
-        clearSent(x);
-      }
+      // (the floor raised whether or not the wait is unknown: a holder's generation is never confirmation, but an
+      // answer below it is never taken (CORR-PR128-6-R6))
+      if (!stale) raiseFloor(x, m.gen);
       if (m.rev > x.lastRev) again();
       break;
     case "seeded":

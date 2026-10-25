@@ -2534,6 +2534,40 @@ async function t14Review3() {
       const r3 = await Promise.race([p3, sleep(3000).then(() => null)]);
       check(nonce !== null && !early && still && r3?.sync === "sent" && hub3.unknown(n3, e3) === false && hub3.fences <= W.HUB.maxNamespaces, `review3 R5: ${what}: nothing counted before the live sender's answer, an older generation never, the answered one's sent counted: ` + J({ settledBeforeAnswer: early, olderStillPendingAfter: still, final: r3?.sync ?? null }));
     }
+  // (astra3's CORR-PR128-6-R6: a registered unknown wait hears a newer generation (a holder, a sent or a reset of 6),
+  // the namespace is then evicted (or not: the control), and a delayed answer to its own hello from an older sender
+  // (5, its nonce) arrives: it never counts; the newer generation's own answer does.  Every generation-bearing hint
+  // raises the wait's floor even while unknown, and none confirms it)
+  for (const kind of ["holder", "sent", "reset"])
+    for (const evicted of [false, true]) {
+      const w4 = await fresh();
+      const { ns: n4, lease: l4 } = await localNs(w4, evicted ? "e9" : "ea");
+      await rawTx(w4.ws, ["meta"], (tx) => { tx.objectStore("meta").put(5, "sync:epoch"); });
+      const e4 = 5, hub4 = W.hubOf(w4.ws), what = `${kind}, ${evicted ? "then evicted" : "no eviction (control)"}`;
+      // (lossy before the wait: five other epochs' claims overflow the tentative map)
+      for (const e of [1, 2, 3, 4, 6]) hub4.post({ t: "holder", ns: n4, epoch: e, gen: 1, rev: 0 });
+      const c4 = [];
+      await w4.mkdir("/r6", { collect: c4 });
+      let nonce4 = null;
+      const off4 = hub4.on((m) => { if (m.t === "hello" && m.ns === n4) nonce4 = m.nonce; });
+      const p4 = w4.waitSync(c4, { level: "sent", signal: new AbortController().signal });
+      await sleep(50);
+      off4();
+      const unknown = hub4.unknown(n4, e4);
+      const newer = l4.gen + 5, older = l4.gen + 4;
+      if (kind === "holder") hub4.post({ t: "holder", ns: n4, epoch: e4, gen: newer, rev: 0 });
+      else if (kind === "sent") hub4.post({ t: "sent", ns: n4, epoch: e4, gen: newer, seqs: [] });
+      else hub4.post({ t: "reset", ns: n4, epoch: e4, gen: newer });
+      if (evicted) for (const lead of ["b", "c", "d"]) hub4.post({ t: "lifecycle", ns: `${lead.repeat(16)}:5:${w4.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
+      const gone = evicted ? hub4.seen(n4, e4) === 0 : true;
+      // (the delayed answer from the older sender, to this wait's own hello)
+      hub4.post({ t: "inflight", ns: n4, epoch: e4, gen: older, nonce: nonce4, seqs: c4 });
+      const pendingAfterOlder = !(await settledYet(p4));
+      // (the newer generation's own answer)
+      hub4.post({ t: "inflight", ns: n4, epoch: e4, gen: newer, nonce: nonce4, seqs: c4 });
+      const r4 = await Promise.race([p4, sleep(3000).then(() => null)]);
+      check(unknown && gone && nonce4 !== null && pendingAfterOlder && r4?.sync === "sent", `review3 R6: ${what}: a ${kind} of ${newer} heard while unknown, then the older sender's delayed answer (${older}, the wait's nonce): not counted; the ${newer} answer counts: ` + J({ unknown, evictedFromHub: evicted ? gone : null, pendingAfterOlder, final: r4?.sync ?? null }));
+    }
 }
 
 const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3 };
