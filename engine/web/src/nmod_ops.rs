@@ -20,7 +20,7 @@
 //! rows cols, la and lb the coefficient counts, N <= 2^16 the transform
 //! length, phase by phase (parse / compute / reply), is bounded by the
 //! constants below (checked at compile time):
-//! - nmod_echelon: R + 28 E + 33 KiB             <= ECH_PEAK = 8 MiB;
+//! - nmod_echelon: R + 28 E + 33 KiB             <= ECH_PEAK < 49 MiB;
 //! - nmod_poly_mul: R + 8 (la + lb) + 128 N      <= MUL_PEAK = 12 MiB;
 //! - nmod_poly_divrem: R + 16 (la + lb) + 32 ql + 128 N <= DIV_PEAK = 14 MiB;
 //! - nmod_poly_gcd: R + 28 (la + lb)             <= GCD_PEAK = 2 MiB.
@@ -66,19 +66,20 @@ const FIELDS: usize = 4096;
 /// The longest transform of the polynomial ops, 2^16 points.
 const NTT_N: usize = 1 << 16;
 
-/// nmod_echelon: 1 <= rows, cols <= ECH_MAX_DIM, rows cols <= ECH_MAX_ENTRIES
-/// (a 400 x 400 system with one right-hand side; an inverse [A | I] up to
-/// n = 283).
+/// nmod_echelon: 1 <= rows, cols <= ECH_MAX_DIM, so E = rows cols <=
+/// 2^20 (a 1023 x 1023 system with one right-hand side; an inverse
+/// [A | I] up to n = 512).  The library sends a matrix only when its
+/// transport fits the process's budget (lib/_sage_ffmat.py,
+/// _engine_echelon_transport_fits).
 pub const ECH_MAX_DIM: usize = 1024;
-pub const ECH_MAX_ENTRIES: usize = 400 * 401;
-pub const ECH_MAX_TEXT: usize = mul(ENTRY_TEXT, ECH_MAX_ENTRIES);
+pub const ECH_MAX_TEXT: usize = mul(ENTRY_TEXT, mul(ECH_MAX_DIM, ECH_MAX_DIM));
 pub const ECH_MAX_REQUEST: usize = add(ECH_MAX_TEXT, FIELDS);
 /// parse: R + 20 E (serde's "m") + 8 E; compute: R + 8 E + 28 KiB (the
 /// accumulator, a partial sum and the pivots); reply: R + 8 E + 20 E +
 /// 8 KiB.
-pub const ECH_PEAK: usize = add(add(ECH_MAX_REQUEST, mul(28, ECH_MAX_ENTRIES)), 33 * 1024);
+pub const ECH_PEAK: usize = add(add(ECH_MAX_REQUEST, mul(28, mul(ECH_MAX_DIM, ECH_MAX_DIM))), 33 * 1024);
 /// Elimination and back substitution: at most 2 E min(rows, cols).
-pub const ECH_WORK: u64 = 2 * ECH_MAX_ENTRIES as u64 * 400;
+pub const ECH_WORK: u64 = 2 * (ECH_MAX_DIM * ECH_MAX_DIM) as u64 * ECH_MAX_DIM as u64;
 
 /// nmod_poly_mul: 1 <= la, lb <= MUL_MAX_LEN, so N <= 2^16.
 pub const MUL_MAX_LEN: usize = 1 << 15;
@@ -108,7 +109,7 @@ pub const GCD_PEAK: usize = add(GCD_MAX_REQUEST, mul(28, 2 * GCD_MAX_LEN));
 /// per step and the final normalization.
 pub const GCD_WORK: u64 = (GCD_MAX_LEN as u64) * (2 * GCD_MAX_LEN as u64) + 129 * GCD_MAX_LEN as u64 + 128;
 
-const _: () = assert!(ECH_PEAK <= 8 * MIB);
+const _: () = assert!(ECH_PEAK <= 49 * MIB);
 const _: () = assert!(MUL_PEAK <= 12 * MIB);
 const _: () = assert!(DIV_PEAK <= 14 * MIB);
 const _: () = assert!(GCD_PEAK <= 2 * MIB);
@@ -254,9 +255,6 @@ fn echelon(mut o: Map<String, Value>) -> Result<String, String> {
     let (Some(rows), Some(cols)) = (dim(&o, "rows"), dim(&o, "cols")) else {
         return Err(format!("{}: rows and cols must be integers in [1, {}]", OP, ECH_MAX_DIM));
     };
-    if rows * cols > ECH_MAX_ENTRIES {
-        return Err(format!("{}: {} x {} entries, more than {}", OP, rows, cols, ECH_MAX_ENTRIES));
-    }
     let flag = |o: &Map<String, Value>, k: &str| o.get(k).and_then(Value::as_bool).unwrap_or(false);
     let (reduced, want_rows) = (flag(&o, "reduced"), flag(&o, "want_rows"));
     let s = take_str(&mut o, "m", OP)?;

@@ -872,27 +872,22 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
- "engine/web/src/nmod_ops.rs :: add :: pub const ECH_MAX_ENTRIES: usize = 400 * 401; #0": {
-  "class": "1+3",
-  "owner": "engine web + finite-field matrices",
-  "row": "inv-7"
- },
  "engine/web/src/nmod_ops.rs :: add :: pub const ECH_MAX_REQUEST: usize = add(ECH_MAX_TEXT, FIELDS); #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
- "engine/web/src/nmod_ops.rs :: add :: pub const ECH_MAX_TEXT: usize = mul(ENTRY_TEXT, ECH_MAX_ENTRIES); #0": {
+ "engine/web/src/nmod_ops.rs :: add :: pub const ECH_MAX_TEXT: usize = mul(ENTRY_TEXT, mul(ECH_MAX_DIM, ECH_MAX_DIM)); #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
- "engine/web/src/nmod_ops.rs :: add :: pub const ECH_PEAK: usize = add(add(ECH_MAX_REQUEST, mul(28, ECH_MAX_ENTRIES)), 33 * 1024); #0": {
+ "engine/web/src/nmod_ops.rs :: add :: pub const ECH_PEAK: usize = add(add(ECH_MAX_REQUEST, mul(28, mul(ECH_MAX_DIM, ECH_MAX_DIM))), 33 * 1024); #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
- "engine/web/src/nmod_ops.rs :: add :: pub const ECH_WORK: u64 = 2 * ECH_MAX_ENTRIES as u64 * 400; #0": {
+ "engine/web/src/nmod_ops.rs :: add :: pub const ECH_WORK: u64 = 2 * (ECH_MAX_DIM * ECH_MAX_DIM) as u64 * ECH_MAX_DIM as u64; #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
@@ -931,6 +926,46 @@
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
+ },
+ "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: assert!(req.len() > ECH_MAX_TEXT - ECH_MAX_DIM * ECH_MAX_DIM); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: for (r, c) in [(ECH_MAX_DIM + 1, 1), (1, ECH_MAX_DIM + 1), (ECH_MAX_DIM + 1, ECH_MAX_DIM + 1)] { #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: let req = format!(r#\"{{\"fn\":\"nmod_echelon\",\"p\":\"{}\",\"rows\":{n},\"cols\":{n},\"m\":\"{}\",\"reduced\":true,\"want_rows\":true}}\"#, P, text, n = ECH_MAX_DIM); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: let row: Vec<u64> = (0..ECH_MAX_DIM).map(|_| P - 1 - rng(&mut s) % 1000).collect(); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: let text = vec![csv(&row); ECH_MAX_DIM].join(\";\"); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_ops.rs :: caps_and_refusals :: assert!(err(&short(1, ECH_MAX_DIM + 1)).contains(\"rows and cols\")); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_ops.rs :: caps_and_refusals :: assert!(err(&short(ECH_MAX_DIM + 1, 1)).contains(\"rows and cols\")); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_ops.rs :: caps_and_refusals :: assert_eq!(ok(&ech(ECH_MAX_DIM, ECH_MAX_DIM))[\"pivots\"], \"\"); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_ops.rs :: echelon_envelope_constants :: assert_eq!(ECH_MAX_REQUEST, 20_975_616); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_ops.rs :: echelon_envelope_constants :: assert_eq!(ECH_MAX_TEXT, 20 * 1024 * 1024); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
  },
  "lib/_display_budget.py ::  :: LIMITS = {\"steps\": 1 << 23, \"chars\": 1 << 26} #0": {
   "class": "1",
@@ -1863,11 +1898,6 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
- "lib/_sage_ffmat.py ::  :: _ENGINE_ECHELON_MAX_ENTRIES = 400 * 401 #0": {
-  "class": "1+3",
-  "owner": "engine web + finite-field matrices",
-  "row": "inv-7"
- },
  "lib/_sage_ffmat.py :: _AlgCharge :: against the budget for one matrix. A charge per entry alone admitted #0": {
   "class": "2",
   "owner": "linear algebra/runtime memory",
@@ -2014,6 +2044,36 @@
   "row": "inv-6"
  },
  "lib/_sage_ffmat.py :: _admitted_entries :: the budget as the limit (the entries as read and the vector converted #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _engine_echelon_prime :: if not isinstance(base, _ff.IntegerModRing_) or not (0 < nrows <= _ENGINE_ECHELON_MAX_DIM and 0 < ncols <= _ENGINE_ECHELON_MAX_DIM): #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "lib/_sage_ffmat.py :: _engine_echelon_transport_fits :: return need <= (_echelon_transport_figure or _heap_budget)() // _HEAP_SHARE #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _engine_echelon_transport_fits :: the reply) fits this process's budget for one matrix: decided before #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _heap_budget :: (lib/_capacity.py) where there is one, else _heap_limit().\"\"\" #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _heap_budget :: def _heap_budget(): #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _heap_budget :: return _heap_limit() #0": {
   "class": "2",
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
@@ -3130,28 +3190,28 @@
  },
  "src/allowance-host.ts :: stepRefused :: const spent = x.leaf.chain().filter((s) => s.steps && s.steps.charged >= s.steps.budget); #0": {
   "class": "3",
-  "owner": "opt-in limits, item G (@sagebrush-grader)",
-  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py"
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
  },
  "src/allowance-host.ts :: stepRefused :: for (const s of spent) this.latch(x, s, \"steps\", s.steps!.budget, at); #0": {
   "class": "3",
-  "owner": "opt-in limits, item G (@sagebrush-grader)",
-  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py"
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
  },
  "src/allowance-host.ts :: stepRefused :: return l.charged + bound > l.budget; #0": {
   "class": "3",
-  "owner": "opt-in limits, item G (@sagebrush-grader)",
-  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py"
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
  },
  "src/allowance-host.ts :: stepRefused :: this.latch(x, failing, \"work\", failing.work.get(family)!.budget, now, family); #0": {
   "class": "3",
-  "owner": "opt-in limits, item G (@sagebrush-grader)",
-  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py"
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
  },
  "src/allowance-host.ts :: steps :: for (const s of x.leaf.chain()) if (s.steps && s.steps.charged > s.steps.budget) this.latch(x, s, \"steps\", s.steps.budget, at); #0": {
   "class": "3",
-  "owner": "opt-in limits, item G (@sagebrush-grader)",
-  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py"
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
  },
  "src/allowance-host.ts :: stepsRemaining :: for (const s of x.leaf.chain()) if (s.steps) least = Math.min(least ?? Infinity, Math.max(0, s.steps.budget - s.steps.charged)); #0": {
   "class": "3",
