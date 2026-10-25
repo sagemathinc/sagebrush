@@ -91,7 +91,9 @@ export async function exportHtml(doc: BoardDoc, o: { python?: boolean; outputs?:
   const math = /\$|\\\(|\\\[/.test(JSON.stringify(doc));
   const ex = !!embedded();
   const template = ex ? unescapeInline(own("sb-template")!) : await text(new URL("index.html", here));
-  const board = ex ? own("sb-board")! : await text(new URL("board.js", here));
+  // (the page without sync: board-nosync.js, built beside board.js with the frame's inlined copy, never the site's own
+  // board.js, which carries the sync owner; fetched as itself, smaller than board.js, not out of the frame page)
+  const board = ex ? own("sb-board")! : await text(new URL("board-nosync.js", here));
   const mathJs = !math ? null : ex && own("sb-math") ? own("sb-math")! : await text(new URL("sagebrush-math.js", site));
   const mathCss = !math ? null : ex && own("sb-katex") ? own("sb-katex")! : await katexCss(site);
   // the engine: where it comes from (this site, or the file's), and with

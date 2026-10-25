@@ -10,6 +10,10 @@ import { migrationState, type MigrationState } from "./migrator";
 import { WorkspaceError, type Entry, type Version, type Workspace } from "./api";
 import { nameOf, splitExt } from "./paths";
 import { syncSection } from "./sync-panel";
+// (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
+// copy; elsewhere the define is absent or false, and everything is as before)
+declare const __SB_NO_SYNC__: boolean | undefined;
+const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
 
 /** At most this much of a text is shown; of a table, this much read and these many rows and columns.
  * A file is read for its preview only if it is at most readBytes (a text
@@ -384,7 +388,7 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
   };
   // (sync, step 5: its own section, drawn by its own poll, ended with the panel)
   const syncBox = h("div");
-  const sync = syncSection(w, syncBox, { say: host.say, fail: host.fail, usage: () => w.usage() });
+  const sync = NO_SYNC ? { dispose() {} } : syncSection(w, syncBox, { say: host.say, fail: host.fail, usage: () => w.usage() });
   onClose(() => sync.dispose());
   await draw();
 }
