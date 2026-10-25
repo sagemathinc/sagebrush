@@ -146,7 +146,8 @@ try {
   // 2. the checkpoint pause protocol, on PR 147's Kedlaya code (vendored)
   setPhase("checkpoints");
   const src = readFileSync(join(here, "proto2", "kd147_sage_padic_lseries.py"), "utf8");
-  await run(`import os, sys\nos.makedirs('/tmp/kd147', exist_ok=True)\nopen('/tmp/kd147/kd147.py', 'w').write(${JSON.stringify(src)})\nsys.path.insert(0, '/tmp/kd147')\nimport kd147\nprint('ok')`);
+  // (a directory named as the module would be a namespace package: kdfix/kd147.py)
+  await run(`import os, sys\nos.makedirs('/tmp/kdfix', exist_ok=True)\nopen('/tmp/kdfix/kd147.py', 'w').write(${JSON.stringify(src)})\nsys.path.insert(0, '/tmp/kdfix')\nimport kd147\nassert hasattr(kd147, '_kd_plan_fast'), kd147\nprint('ok')`);
   const ledger = JSON.parse(await run([
     "import json, kd147 as L",
     "from fractions import Fraction as F",
