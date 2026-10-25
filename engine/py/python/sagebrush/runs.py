@@ -22,7 +22,9 @@ process (an earlier server, now gone, or another one running) is shown with
 
 import json
 import os
+import re
 import secrets
+import stat
 import sys
 import time
 
@@ -119,7 +121,6 @@ def _mkdir_private(path):
     except FileExistsError:
         pass
     st = os.lstat(path)
-    import stat
     if not stat.S_ISDIR(st.st_mode):
         raise OSError("%s is not a directory" % path)
     if hasattr(os, "getuid") and st.st_uid != os.getuid():
@@ -138,11 +139,68 @@ def _charge(path):
     return blocks * 512 if blocks is not None else st.st_size
 
 
-def _write_atomic(path, data, durable=False):
+def _key(path):
+    """A path's identity in the store: absolute and normalized, lexically
+    (never resolving a link: a link is an entry of its own)."""
+    return os.path.normpath(os.path.abspath(path))
+
+
+def _real_dir(path):
+    """path is a directory itself, not a link to one."""
+    try:
+        return stat.S_ISDIR(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def _unlink_in(d, name):
+    """The file name removed from directory d, never through a link
+    (daybreak2 PR136-RECOVERY-1): d opened without following a link, and
+    name removed relative to it; where the platform can't, d checked by
+    lstat first.  False, removing nothing, when d is a link or not a
+    directory; a missing name or d is no error."""
+    assert name and os.sep not in name and name not in (".", "..")
+    nofollow, odir = getattr(os, "O_NOFOLLOW", 0), getattr(os, "O_DIRECTORY", 0)
+    if nofollow and odir and os.unlink in os.supports_dir_fd:
+        try:
+            fd = os.open(d, os.O_RDONLY | odir | nofollow)
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False  # (ELOOP, ENOTDIR: a link, or not a directory)
+        try:
+            os.unlink(name, dir_fd=fd)
+        except FileNotFoundError:
+            pass
+        finally:
+            os.close(fd)
+        return True
+    if not _real_dir(d):
+        return not os.path.lexists(d)
+    try:
+        os.unlink(os.path.join(d, name))
+    except FileNotFoundError:
+        pass
+    return True
+
+
+def _temp_name(path):
+    """A writer's own temporary for path: path.<12 hex>.tmp (_TEMP_RE)."""
+    return "%s.%s.tmp" % (path, secrets.token_hex(6))
+
+
+# (a temporary _write_atomic made: its target, then the writer's token)
+_TEMP_RE = re.compile(r"^(?P<target>.+)\.[0-9a-f]{12}\.tmp$")
+# (a reservation's file name: the run's handle, then a token)
+_RESERVATION_RE = re.compile(r"^(?P<handle>run_[a-z2-7]{26})-[0-9a-f]{8}\.json$")
+
+
+def _write_atomic(path, data, durable=False, tmp=None):
     """data (bytes) to path: a temporary file created exclusively (never
     following a link), then renamed over it; fsynced, file and directory,
-    when durable."""
-    tmp = "%s.%s.tmp" % (path, secrets.token_hex(6))
+    when durable.  tmp: the temporary's name, when the writer has recorded
+    it (a value write's reservation names it, so a cleanup keeps it)."""
+    tmp = tmp or _temp_name(path)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     fd = os.open(tmp, flags, 0o600)
     try:
@@ -169,6 +227,11 @@ def _write_atomic(path, data, durable=False):
             os.fsync(d)
         finally:
             os.close(d)
+
+
+def _bytes_ok(b):
+    """A reservation's declared bytes: a non-negative int, not a bool."""
+    return isinstance(b, int) and not isinstance(b, bool) and b >= 0
 
 
 def _read_json(path, default=None):
@@ -293,27 +356,99 @@ class Store:
     def walk_total(self):
         """The store's charge, walked: every committed file at its physical
         size; a live reservation at its declared bytes plus its record's
-        own size, with its target file not charged."""
-        reserved_targets = set()
+        own size, with its target and its recorded temporary not charged
+        (a reserved write is charged once, at its declared bytes, for its
+        whole life: plan-runs-tmp-sweep r4).  Each record is validated
+        first: only a valid one's paths are excluded (a legacy one, without
+        a recorded temporary: its target's temporaries too); an invalid one
+        is charged at its record plus its declared bytes when those are a
+        non-negative int, never less, and excludes nothing."""
+        excluded, legacy_targets, records = set(), set(), set()
         total = 0
-        rdir = os.path.join(self.root, "reservations")
-        for name in os.listdir(rdir):
-            p = os.path.join(rdir, name)
-            r = _read_json(p)
-            if not isinstance(r, dict) or not isinstance(r.get("bytes"), int):
-                total += _charge(p)
-                continue
-            total += r["bytes"] + _charge(p)
-            reserved_targets.add(os.path.realpath(r.get("target", "")))
+        for p, r, kind in self._reservations():
+            total += _charge(p)
+            records.add(_key(p))
+            if kind in ("valid", "legacy", "invalid") and _bytes_ok(r.get("bytes")):
+                total += r["bytes"]
+            if kind == "valid":
+                excluded.add(_key(r["target"]))
+                excluded.add(_key(r["temp"]))
+            elif kind == "legacy":
+                excluded.add(_key(r["target"]))
+                legacy_targets.add(_key(r["target"]))
+        # (every entry at its own physical size, lstat: a link is charged as
+        # the link, never its target, and never descended into, daybreak2
+        # PR136-ACCOUNT-1; reservations/ too, its records once, above, and
+        # any other file in it at its size, astra2 RESOURCE-PR136-1)
         for dirpath, dirnames, filenames in os.walk(self.root):
-            if os.path.abspath(dirpath) == os.path.abspath(rdir):
-                continue
+            # (a link to a directory: charged once, as the entry, by the same
+            # rules as a file; one in reservations/ is a record already
+            # charged above, astra2 RESOURCE-PR136-R2-1)
+            for name in dirnames:
+                k = _key(os.path.join(dirpath, name))
+                if os.path.islink(k) and k not in records and k not in excluded:
+                    total += _charge(k)
             for name in filenames:
-                p = os.path.join(dirpath, name)
-                if os.path.realpath(p) in reserved_targets:
+                k = _key(os.path.join(dirpath, name))
+                if k in records or k in excluded:
                     continue
-                total += _charge(p)
+                m = _TEMP_RE.match(name)
+                if m and _key(os.path.join(dirpath, m.group("target"))) in legacy_targets:
+                    continue
+                total += _charge(k)
         return total
+
+    def _reservations(self):
+        """[(path, record, kind)] for every file in reservations/, each
+        validated before any use: "valid" (a value write's: its file name
+        <handle>-<8 hex>.json, its target exactly that run's value.json, the
+        run's directory a directory, not a link, or absent, its temporary
+        exactly target.<12 hex>.tmp, its bytes a non-negative int and not a
+        bool), "legacy" (the same, without a temporary: written before r4),
+        "invalid" (readable, but not those), "unreadable" (also anything not
+        a regular file).  A record's own temporaries (*.tmp, being written
+        under the lock) aren't records: walk_total charges them as files."""
+        rdir = os.path.join(self.root, "reservations")
+        out = []
+        for name in sorted(os.listdir(rdir)):
+            p = os.path.join(rdir, name)
+            if name.endswith(".tmp"):
+                continue  # (a reservation being written: its writer holds the lock)
+            try:
+                regular = stat.S_ISREG(os.lstat(p).st_mode)
+            except OSError:
+                regular = False
+            r = _read_json(p) if regular else None
+            if not isinstance(r, dict):
+                out.append((p, r, "unreadable"))
+                continue
+            out.append((p, r, self._reservation_kind(name, r)))
+        return out
+
+    def _reservation_kind(self, name, r):
+        m = _RESERVATION_RE.match(name)
+        if not m or not _bytes_ok(r.get("bytes")) or not isinstance(r.get("target"), str):
+            return "invalid"
+        try:
+            want = os.path.join(self.run_dir(m.group("handle")), "value.json")
+        except KeyError:
+            return "invalid"
+        if _key(r["target"]) != _key(want):
+            return "invalid"
+        # (the run's directory itself, not a link out of the store: its
+        # paths are then the store's, daybreak2 PR136-RECOVERY-1)
+        d = os.path.dirname(want)
+        if os.path.lexists(d) and not _real_dir(d):
+            return "invalid"
+        if "temp" not in r:
+            return "legacy"
+        t = r["temp"]
+        if not isinstance(t, str) or os.path.dirname(_key(t)) != _key(d):
+            return "invalid"
+        tm = _TEMP_RE.match(os.path.basename(t))
+        if not tm or tm.group("target") != "value.json":
+            return "invalid"
+        return "valid"
 
     def _total(self):
         s = _read_json(os.path.join(self.root, "store.json"), {})
@@ -340,13 +475,22 @@ class Store:
                 self._set_total(t)
             return t
 
-    def reserve(self, handle, target, nbytes):
-        """Admit a write of nbytes to target (a value or checkpoint of the
-        run), under the store lock, with a durable reservation; a
-        StorageError if it doesn't fit.  Returns the reservation's path."""
+    def reserve(self, handle, target, nbytes, temp):
+        """Admit a write of nbytes to target (the run's value) through the
+        temporary `temp`, under the store lock, with a durable reservation
+        naming both (a cleanup keeps that temporary while the reservation
+        lives, plan-runs-tmp-sweep r4); a StorageError if it doesn't fit, or
+        if target already has a reservation (one per target).  Returns the
+        reservation's path."""
         with self.lock:
+            want = _key(target)
+            for _, r, kind in self._reservations():
+                if kind in ("valid", "legacy") and _key(r["target"]) == want:
+                    raise StorageError("a value of this run is already being written")
             p = os.path.join(self.root, "reservations", "%s-%s.json" % (handle, secrets.token_hex(4)))
-            rec = json.dumps({"bytes": nbytes, "target": target, "owner": self.owner}).encode()
+            # (the owner with its host: a dead one's reservation can then be
+            # recovered, _owner_gone)
+            rec = json.dumps({"bytes": nbytes, "target": target, "temp": temp, "owner": dict(self.owner, host=_HOST)}).encode()
             # (the formula's whole charge: the declared bytes and the
             # reservation record's own physical size, daybreak2 PR120-1)
             self.admit(nbytes + self.physical(len(rec)), "data")
@@ -365,12 +509,20 @@ class Store:
             os.unlink(reservation)
 
     def release(self, reservation):
+        """The reservation given back: its target and its temporary, which
+        were never charged, removed with it (used: less its bytes and its
+        record).  Only for a valid record: a writer's own, or a recovered one.
+        Both are unlinked in the run's directory, never through a link (one
+        put there since: nothing outside the store is removed)."""
         with self.lock:
             r = _read_json(reservation, {})
             target = r.get("target")
             used = self.used() - int(r.get("bytes", 0)) - _charge(reservation)
-            if target and os.path.exists(target):
-                os.unlink(target)
+            if isinstance(target, str):
+                d = os.path.dirname(_key(target))
+                for f in (target, r.get("temp")):
+                    if isinstance(f, str) and os.path.dirname(_key(f)) == d:
+                        _unlink_in(d, os.path.basename(_key(f)))
             self._set_total(max(0, used))
             os.unlink(reservation)
 
@@ -415,12 +567,13 @@ class Store:
         """A run that was never admitted after all: its directory removed."""
         with self.lock:
             d = self.run_dir(handle)
-            try:
-                for n in os.listdir(d):
-                    os.unlink(os.path.join(d, n))
-                os.rmdir(d)
-            except FileNotFoundError:
-                pass
+            if _real_dir(d):
+                try:
+                    for n in os.listdir(d):
+                        _unlink_in(d, n)
+                    os.rmdir(d)
+                except FileNotFoundError:
+                    pass
             self._set_total(self.walk_total())
 
     def write_value(self, handle, data):
@@ -428,12 +581,15 @@ class Store:
         (None, reason)."""
         d = self.run_dir(handle)
         target = os.path.join(d, "value.json")
+        # (the temporary named first, and recorded in the reservation: it is
+        # this write's while the reservation lives, whatever its age)
+        temp = _temp_name(target)
         try:
-            res = self.reserve(handle, target, self.physical(len(data)))
+            res = self.reserve(handle, target, self.physical(len(data)), temp)
         except (StorageError, OSError) as e:
             return None, str(e)
         try:
-            _write_atomic(target, data, durable=True)
+            _write_atomic(target, data, durable=True, tmp=temp)
         except OSError as e:
             self.release(res)
             return None, "the value couldn't be written: %s" % e
@@ -650,22 +806,44 @@ class Store:
         recomputed by the walk, under the lock."""
         now = time.time() if now is None else now
         with self.lock:
+            # (a crashed value write's reservation, its owner proved dead
+            # and its record valid: given back, its target and temporary
+            # with it, plan-runs-tmp-sweep r4)
+            for p, r, kind in self._reservations():
+                if kind == "valid" and self._owner_gone(r.get("owner")):
+                    self.release(p)
             # (temporaries a crash left, in the store and in its runs: under
-            # the lock no write of ours is in progress)
-            for d in [self.root, os.path.join(self.root, "gone")] + [os.path.join(self.root, n) for n in os.listdir(self.root) if n.startswith("run_")]:
+            # the lock no lock-held write is in progress, and a value write's
+            # own temporary, named by its live reservation, is kept however
+            # old; a legacy reservation keeps its target's temporaries)
+            live, legacy_targets = set(), set()
+            for p, r, kind in self._reservations():
+                if kind == "valid":
+                    live.add(_key(r["temp"]))
+                elif kind == "legacy":
+                    legacy_targets.add(_key(r["target"]))
+            # (the store's own directories only: never one a link leads to)
+            for d in [self.root, os.path.join(self.root, "gone"), os.path.join(self.root, "reservations")] + [os.path.join(self.root, n) for n in os.listdir(self.root) if n.startswith("run_")]:
+                if not _real_dir(d):
+                    continue
                 try:
                     names = os.listdir(d)
                 except OSError:
                     continue
                 for name in names:
-                    if name.endswith(".tmp"):
-                        try:
-                            os.unlink(os.path.join(d, name))
-                        except OSError:
-                            pass
+                    m = _TEMP_RE.match(name)
+                    if not m:
+                        continue
+                    p = os.path.join(d, name)
+                    if _key(p) in live or _key(os.path.join(d, m.group("target"))) in legacy_targets:
+                        continue
+                    try:
+                        _unlink_in(d, name)
+                    except OSError:
+                        pass
             done = []
             for name in os.listdir(self.root):
-                if not name.startswith("run_"):
+                if not name.startswith("run_") or not _real_dir(os.path.join(self.root, name)):
                     continue
                 r = _read_json(os.path.join(self.root, name, "run.json"))
                 if isinstance(r, dict) and r.get("state") in ("finished", "killed", "lost"):
@@ -701,13 +879,18 @@ class Store:
             return sorted(removed)
 
     def _remove(self, record, reason, now):
+        """A finished run removed, leaving a tombstone.  Under the store lock
+        (cleanup's): a cleanup sweeping temporaries at the same time could
+        otherwise take the tombstone's (plan-runs-tmp-sweep r4)."""
         h = record["handle"]
         d = os.path.join(self.root, h)
+        if not _real_dir(d):
+            return  # (a link, or gone: nothing of the store's to remove)
         tomb = {"handle": h, "state": "gone", "ended_at": record.get("ended_at"), "removed_at": now, "reason": reason}
         # (the run's files go first, so the tombstone, one block, is written
         # into room they freed; a crash between leaves no tombstone: not_found)
         for name in os.listdir(d):
-            os.unlink(os.path.join(d, name))
+            _unlink_in(d, name)
         os.rmdir(d)
         try:
             _write_atomic(os.path.join(self.root, "gone", h + ".json"), json.dumps(tomb).encode())
