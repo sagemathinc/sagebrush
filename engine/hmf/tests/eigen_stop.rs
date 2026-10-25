@@ -45,6 +45,8 @@ fn stop_anywhere_in_an_orbit_eigenspace_then_the_same_cache_works() {
             Err(_) => panic!("check {} of {}: the next call on the same Newspaces panicked (a poisoned cache lock)", at, total),
         }
     }
-    assert!(interrupted > 0, "no check interrupted the eigenspace");
+    // (every check armed must stop it: a sweep that silently skipped
+    // interruption points would otherwise still pass, astra2's note on #155)
+    assert_eq!(interrupted, total, "{} of {} checks interrupted the eigenspace", interrupted, total);
     println!("STOP orbit_eigenspace: {} checks, {} interrupted, the same cache worked after each", total, interrupted);
 }
