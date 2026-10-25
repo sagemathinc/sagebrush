@@ -93,6 +93,9 @@ def peak(p, prec, curve):
     K, W = L._kd_plan_fast(p, N)
     a = max(max(abs(c.numerator).bit_length(), c.denominator.bit_length()) for c in Qc)
     U = L._kd_ledger(p, N, K, W, p, a, T)
+    # (a first call compiles the code: V8 keeps its bytecode and feedback in
+    # the old space, which is not the call's; the second call is measured)
+    L._kd_frobenius_matrix(Qc, p, N, K, W)
     base = used()
     print("baseline %d U %d" % (base, U), flush=True)
     L._kd_frobenius_matrix(Qc, p, N, K, W)
