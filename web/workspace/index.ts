@@ -24,7 +24,7 @@ export { D11, D11_CEILING, configureD11, RW, MAPS, STAGE, FENCE_READ, entriesOf,
 export { REPLAY, PLAN_STATE, runReplay, replayOf, markerKey, lateKey, SENDER_HOLD, ReplayHalted, type Marker } from "./sync-replay";
 export { crecordKey, setConfirmedCut, drainConfirmed, LARGE_LOG, type CRecord } from "./sync-confirmed";
 export { reduceAll, SyncIndex } from "./sync-reduce";
-export { SyncOwner, startSync, STATUS_PUB, OWNER, type Snapshot } from "./sync-owner";
+export { SyncOwner, startSync, STATUS_PUB, OWNER, statusMessage, type Snapshot, type StatusMsg } from "./sync-owner";
 export { readLife, syncOffIf, sameLife, type LifeMark } from "./sync-pins";
 export { switchToIf } from "./sync-outbox";
 export { syncSection, PanelPoll, PANEL, clampDelay, askStatus, foot } from "./sync-panel";

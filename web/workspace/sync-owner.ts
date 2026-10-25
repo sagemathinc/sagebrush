@@ -25,7 +25,7 @@ import { accountHash } from "../sync-protocol/protocol";
 export const STATUS_PUB = {
   /** status messages at most this often (one slot) */
   minGapMs: 500,
-  /** a snapshot's serialized size at most (its reason shortened to fit) */
+  /** a status message's serialized size at most, UTF-8, its envelope included (its reason shortened to fit) */
   maxBytes: 512,
 };
 export const OWNER = {
@@ -41,7 +41,7 @@ export function startSync(w: Workspace, opts: ClientOptions = {}): SyncClient {
 
 /** What the foot shows: the holder's snapshot, or this page's own client's status. */
 export type Snapshot = { state: SyncStatus["state"]; waiting?: number; reason?: string; lastSynced?: number; resumesAt?: number; full?: boolean; limit?: { limit_bytes: number | null; used_bytes: number } };
-type StatusMsg = { t: "status"; ns: string; epoch: number; gen: number; rev: number; snapshot: Snapshot };
+export type StatusMsg = { t: "status"; ns: string; epoch: number; gen: number; rev: number; snapshot: Snapshot };
 type HolderMsg = { t: "holder"; ns: string; epoch: number; gen: number };
 type AskMsg = { t: "status?"; ns: string; epoch: number };
 export type LifeKind = "on" | "off" | "deleting" | "signout";
@@ -357,8 +357,8 @@ export class SyncOwner {
       return;
     }
     void now;
-    const snapshot = fit({ ...this.own, ...(this.limit ? { limit: this.limit } : {}) });
-    const json = JSON.stringify(snapshot);
+    const msg = statusMessage(this.life.ns, this.life.epoch, this.gen, this.rev + 1, { ...this.own, ...(this.limit ? { limit: this.limit } : {}) });
+    const json = JSON.stringify(msg.snapshot);
     if (json === this.lastJson && !this.forced) {
       this.stats.suppressed++;
       return;
@@ -368,7 +368,7 @@ export class SyncOwner {
     this.lastAt = Date.now();
     this.rev++;
     this.stats.published++;
-    this.post({ t: "status", ns: this.life.ns, epoch: this.life.epoch, gen: this.gen, rev: this.rev, snapshot });
+    this.post(msg);
   }
   /** Whether the namespace's sender lock is held by any tab (asked when something changes; never on a timer). */
   private async checkLock() {
@@ -386,9 +386,21 @@ export class SyncOwner {
 }
 
 const snap = (s: SyncStatus, limit: SyncOwner["limit"]): Snapshot => ({ state: s.state, ...(s.waiting !== undefined ? { waiting: s.waiting } : {}), ...(s.reason ? { reason: s.reason } : {}), ...(s.lastSynced ? { lastSynced: s.lastSynced } : {}), ...(s.resumesAt ? { resumesAt: s.resumesAt } : {}), ...(s.full ? { full: true } : {}), ...(limit ? { limit } : {}) });
-/** A snapshot within STATUS_PUB.maxBytes serialized: its reason shortened if need be. */
-function fit(s: Snapshot): Snapshot {
-  let out = s;
-  while (new TextEncoder().encode(JSON.stringify(out)).length > STATUS_PUB.maxBytes && out.reason) out = { ...out, reason: out.reason.slice(0, Math.max(0, out.reason.length - 32)) || undefined };
-  return out;
+const utf8 = (m: unknown) => new TextEncoder().encode(JSON.stringify(m)).length;
+/** The status message as published: within STATUS_PUB.maxBytes serialized, UTF-8, the whole message measured, its
+ * envelope included (daybreak3's TEST-PR130-2-R2).  The snapshot's reason is shortened by code points (never a half
+ * surrogate pair) to the longest that fits; without it every field is bounded, and the message fits. */
+export function statusMessage(ns: string, epoch: number, gen: number, rev: number, s: Snapshot): StatusMsg {
+  const msg = (snapshot: Snapshot): StatusMsg => ({ t: "status", ns, epoch, gen, rev, snapshot });
+  const whole = msg(s);
+  if (utf8(whole) <= STATUS_PUB.maxBytes || !s.reason) return whole;
+  const { reason, ...rest } = s, cps = Array.from(reason);
+  const at = (n: number) => msg(n ? { ...rest, reason: cps.slice(0, n).join("") } : rest);
+  let lo = 0, hi = cps.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (utf8(at(mid)) <= STATUS_PUB.maxBytes) lo = mid;
+    else hi = mid - 1;
+  }
+  return at(lo);
 }
