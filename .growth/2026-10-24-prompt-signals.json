@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The prompt: SIGTERM and SIGHUP end it while it computes (#123): promptSignals takes the prompt's figure-cleanup handlers off during an evaluation and puts them back after",
+ "bytes": {
+  "cli/pyjs.cjs": 382
+ }
+}
