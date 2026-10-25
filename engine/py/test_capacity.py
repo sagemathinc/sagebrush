@@ -117,6 +117,17 @@ check("small headroom", C.poly_share(), 100000)
 check("x^2 - 1 under it", P.factor([-1, 0, 1]), (1, [([-1, 1], 1), ([1, 1], 1)]))
 C._set_sources()
 
+# capacity()["domains"] on this machine's real basis, with the package's own
+# _capacity (plan-d0-domains-r2 §2.1): the checker shared with the pyjs
+# test, test/capacity_domains_real.py
+import importlib.util
+_spec = importlib.util.spec_from_file_location("capacity_domains_real", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "test", "capacity_domains_real.py"))
+_real = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_real)
+_rec, _problems = _real.check(C)
+check("domains on the real basis", _problems, [])
+check("the package's DOMAINS", C.DOMAINS, ("child", "cpython-heap", "js-arraybuffer", "js-heap", "wasm-engine", "wasm-instance"))
+
 os.remove(root + "/proc/meminfo")
 os.rmdir(root + "/proc")
 os.rmdir(root)
