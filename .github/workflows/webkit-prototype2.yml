@@ -1,0 +1,66 @@
+# [prototype, do not merge] Kedlaya WebKit follow-up A, prototype 2
+# (plan-kedlaya-webkit-ci r3; cleared by both for this prototype): the
+# accounting experiments, the checkpoint pause protocol and daybreak2's
+# measurements on the pinned Playwright's WebKit; one run, then one re-run.
+# Its own trigger: only a pull request touching these files runs it.  No
+# browser cache (prototype 1: a hit saved about 1 s).
+name: webkit-prototype2
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/webkit-prototype2.yml
+      - web/test-webkit-heap-prototype2.mjs
+      - web/proto2/**
+
+concurrency:
+  group: webkit-prototype2-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  webkit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PW: "1.57.0"
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "T0=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - name: build (timed)
+        run: |
+          s=$(date +%s)
+          pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
+          echo "build_s=$(( $(date +%s) - s ))" | tee -a "$RUNNER_TEMP/timing.txt"
+      - name: the pinned playwright and WebKit (timed)
+        run: |
+          s=$(date +%s)
+          mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw" && echo '{"private": true}' > package.json
+          npm i --no-audit --no-fund "playwright@$PW" && npx playwright install --with-deps webkit
+          echo "playwright_s=$(( $(date +%s) - s ))" | tee -a "$RUNNER_TEMP/timing.txt"
+      - name: the reduced matrix (timed)
+        run: |
+          s=$(date +%s)
+          node --expose-gc web/test-webkit-heap-prototype2.mjs "$RUNNER_TEMP/pw" "$RUNNER_TEMP/reduced.json" || true
+          echo "reduced_s=$(( $(date +%s) - s ))" | tee -a "$RUNNER_TEMP/timing.txt"
+      - name: the full matrix (timed)
+        run: |
+          s=$(date +%s)
+          node --expose-gc web/test-webkit-heap-prototype2.mjs "$RUNNER_TEMP/pw" "$RUNNER_TEMP/full.json" full || true
+          echo "full_s=$(( $(date +%s) - s ))" | tee -a "$RUNNER_TEMP/timing.txt"
+          echo "job_s=$(( $(date +%s) - T0 ))" | tee -a "$RUNNER_TEMP/timing.txt"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkit-prototype2-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/reduced.json
+            ${{ runner.temp }}/full.json
+            ${{ runner.temp }}/timing.txt
