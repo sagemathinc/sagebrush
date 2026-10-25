@@ -125,9 +125,11 @@ test("board open --edit hub: an outside version merged against P, with a tab's e
 });
 
 test("board open --edit hub: an outside version that is already the board is adopted, nothing written", async () => {
-  const { hub, clock, cleanup } = await setup(B([{ id: "n", text: "hello" }]));
+  const { hub, file, clock, cleanup } = await setup(B([{ id: "n", text: "hello" }]));
   try {
-    await hub.observe(Buffer.from(text(B([{ id: "n", text: "changed outside" }]))));
+    // (at FILE: adopting it fsyncs FILE and its directory, which are what it reads first, CORR-153-3)
+    fs.writeFileSync(file, text(B([{ id: "n", text: "changed outside" }])));
+    await hub.observe(fs.readFileSync(file));
     assert.equal(hub.P.seq, hub.H.seq);
     assert.equal(hub.persistedSeq, hub.H.seq);
     clock.advance(hub.limits.SAVE_MAX_DELAY_MS);

@@ -4021,6 +4021,10 @@
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
+ "src/board-edit-hub.ts :: count :: while (this.changes.length > 1 && (count(\"reports\") > max || count(\"alternatives\") > max)) this.dropChange(); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
  "src/board-edit-hub.ts :: due :: if (now - this.lastWrite < this.limits.WRITE_MIN_MS) return false; #0": {
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
@@ -4029,8 +4033,56 @@
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
+ "src/board-edit-hub.ts :: failing :: const budget = this.budget(); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: const changed = this.outsideChanges(this.H.records, r.records, budget); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: const made = this.nextHead(r.records, budget); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: const r = this.merge(base.records, this.H.records, C.records, budget); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: if (!budget.charge(4 * bytes.length)) return { why: `can't merge (${budget.why()})`, held: \"unmergeable\" }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: if (!budget.charge(before.length + after.length)) return { why: `can't merge (${budget.why()})` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: if (!this.ledger.admissible(R)) return { why: \"it needs more memory than MEMORY_MAX allows\", held: \"invalid\" }; #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: if (now - this.failingSince >= this.limits.WRITE_RETRY_MS) this.hold(\"error\", message); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: private outsideChanges(before: Rec[], after: Rec[], budget: Budget): { reports: HubReport[]; alternatives: MergeAlternative[] } | { why: string } { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: keepChanges :: const max = this.limits.CONFLICTS_MAX; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
  "src/board-edit-hub.ts :: merge :: budget.used += r.used; #0": {
   "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: merge :: const e: HeadEvent = { seq, persistedSeq: this.persistedSeq, reports: reports.slice(0, max), alternatives: alternatives.slice(0, max), source }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: merge :: const max = this.limits.CONFLICTS_MAX; #0": {
+  "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
  "src/board-edit-hub.ts :: merge :: const r = boardMerge3(base, a, b, { mergeStrings3: this.deps.mergeStrings3, work: budget.left(), deadline: budget.deadline, now: this.deps.now }); #0": {
@@ -4049,43 +4101,23 @@
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
+ "src/board-edit-hub.ts :: merge :: let omitted = Math.max(0, reports.length - max) + Math.max(0, alternatives.length - max); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
  "src/board-edit-hub.ts :: merge :: private merge(base: Rec[], a: Rec[], b: Rec[], budget = this.budget()) { #0": {
   "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
  },
- "src/board-edit-hub.ts :: merge :: private nextHead(records: Rec[], budget: Budget): { json: any; bytes: Buffer } | { why: string } { #0": {
+ "src/board-edit-hub.ts :: merge :: private nextHead(records: Rec[], budget: Budget): Made | { why: string } { #0": {
   "class": "none",
-  "owner": "board open --edit (@sagebrush-board)"
- },
- "src/board-edit-hub.ts :: merge :: this.events.push({ seq: v.seq, persistedSeq: this.persistedSeq, reports: reports.slice(0, this.limits.CONFLICTS_MAX), alternatives: alternatives.slice(0, this.limits.CONFLICTS_MAX), source }); #0": {
-  "class": "1",
-  "owner": "board open --edit (@sagebrush-board)"
- },
- "src/board-edit-hub.ts :: observe :: const budget = this.budget(); #0": {
-  "class": "none",
-  "owner": "board open --edit (@sagebrush-board)"
- },
- "src/board-edit-hub.ts :: observe :: const made = this.nextHead(r.records, budget); #0": {
-  "class": "none",
-  "owner": "board open --edit (@sagebrush-board)"
- },
- "src/board-edit-hub.ts :: observe :: const r = this.merge(base.records, this.H.records, C.records, budget); #0": {
-  "class": "none",
-  "owner": "board open --edit (@sagebrush-board)"
- },
- "src/board-edit-hub.ts :: observe :: if (!budget.charge(4 * bytes.length)) return { why: `can't merge (${budget.why()})`, held: \"unmergeable\" }; #0": {
-  "class": "1",
-  "owner": "board open --edit (@sagebrush-board)"
- },
- "src/board-edit-hub.ts :: observe :: if (!this.ledger.admissible(R)) return { why: \"it needs more memory than MEMORY_MAX allows\", held: \"invalid\" }; #0": {
-  "class": "1+2",
   "owner": "board open --edit (@sagebrush-board)"
  },
  "src/board-edit-hub.ts :: release :: const half = this.ledger.max / 2; #0": {
   "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
  },
- "src/board-edit-hub.ts :: release :: while (this.tombstones.size > this.limits.TAB_TOMBSTONES) this.tombstones.delete(this.tombstones.keys().next().value!); #0": {
+ "src/board-edit-hub.ts :: release :: while (this.tombstones.size > this.limits.TAB_TOMBSTONES) { #0": {
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
@@ -4094,10 +4126,6 @@
   "owner": "board open --edit (@sagebrush-board)"
  },
  "src/board-edit-hub.ts :: retainSave :: while (this.saves.length > this.limits.SAVES_KEPT) this.saves.shift(); #0": {
-  "class": "1",
-  "owner": "board open --edit (@sagebrush-board)"
- },
- "src/board-edit-hub.ts :: saveTuple :: if (now - this.failingSince >= this.limits.WRITE_RETRY_MS) this.state = { state: \"held\", why: \"error\", detail: r.message }; #0": {
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
@@ -4134,6 +4162,10 @@
   "owner": "board open --edit (@sagebrush-board)"
  },
  "src/board-edit-hub.ts :: submitWithin :: while (t.acks.length > this.limits.ACKS_KEPT) t.acks.shift(); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: val :: if (!budget.charge(fields.size)) return { why: `can't merge (${budget.why()})` }; #0": {
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
@@ -4261,6 +4293,10 @@
   "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
  },
+ "src/board-edit-limits.ts :: bound :: if (limits.MAX_CLIENTS * limits.PENDING_MAX > limits.MEMORY_MAX / 4) return { error: `MAX_CLIENTS x PENDING_MAX (${limits.MAX_CLIENTS * limits.PENDING_MAX}) must be at most MEMORY_MAX / 4 (${Math.floor(limits.MEMORY_MAX / 4)}), the event backlogs' share of the ledger` }; #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
  "src/board-edit-limits.ts :: bound :: if (limits.MEMORY_MAX < 36 * limits.BODY_MAX) return { error: `MEMORY_MAX=${limits.MEMORY_MAX} must be at least 36 x BODY_MAX (${36 * limits.BODY_MAX})` }; #0": {
   "class": "1+2",
   "owner": "board open --edit (@sagebrush-board)"
@@ -4341,6 +4377,10 @@
   "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
  },
+ "src/board-edit-serve.ts :: boardEvent :: if (Buffer.byteLength(text) <= this.limits.PENDING_MAX / 4) return text; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
  "src/board-edit-serve.ts :: constructor :: constructor(readonly hub: EditHub, readonly limits: Limits, private api: Record<string, string>, private now: () => number) { #0": {
   "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
@@ -4361,20 +4401,16 @@
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
- "src/board-edit-serve.ts :: flush :: const reports = events.flatMap((e) => e.reports).slice(0, this.limits.CONFLICTS_MAX); #0": {
-  "class": "1",
-  "owner": "board open --edit (@sagebrush-board)"
- },
  "src/board-edit-serve.ts :: flush :: constructor(private hub: EditHub, private server: EditServer, private file: string, private fileMax: number, private quietMs: number, private stat: (p: string) => string | null) {} #0": {
   "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
  },
- "src/board-edit-serve.ts :: int :: const int = (s: string | undefined) => (s !== undefined && INT.test(s) && Number(s) <= Number.MAX_SAFE_INTEGER ? Number(s) : null); #0": {
-  "class": "none",
+ "src/board-edit-serve.ts :: free :: if (this.sending >= this.limits.RESP_CONCURRENCY && this.waiting.length >= this.limits.QUEUE_MAX) { #0": {
+  "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
- "src/board-edit-serve.ts :: json :: if (this.sending >= this.limits.RESP_CONCURRENCY && this.waiting.length >= this.limits.QUEUE_MAX) { #0": {
-  "class": "1",
+ "src/board-edit-serve.ts :: int :: const int = (s: string | undefined) => (s !== undefined && INT.test(s) && Number(s) <= Number.MAX_SAFE_INTEGER ? Number(s) : null); #0": {
+  "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
  },
  "src/board-edit-serve.ts :: json :: if (this.streams.has(p.tab) || this.streams.size >= this.limits.MAX_CLIENTS) { #0": {
@@ -4389,8 +4425,8 @@
   "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
  },
- "src/board-edit-serve.ts :: send :: if (c.writableLength + Buffer.byteLength(text) > this.limits.PENDING_MAX) { this.streams.delete(tab); c.destroy(); return; } #0": {
-  "class": "1",
+ "src/board-edit-serve.ts :: send :: if (Math.max(s.c.writableLength, s.charged) + n > this.limits.PENDING_MAX || !this.hub.ledger.admit(n)) { this.drop(tab, s.c, \"destroy\"); return; } #0": {
+  "class": "1+2",
   "owner": "board open --edit (@sagebrush-board)"
  },
  "src/board-edit-serve.ts :: startEdit :: const hub = new EditHub(path, limits, deps); #0": {
@@ -4413,7 +4449,7 @@
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
- "src/board-edit-serve.ts :: tick :: if (st !== null && bytes === null) this.hub.state = { state: \"held\", why: \"invalid\", detail: `FILE is larger than FILE_MAX (${this.fileMax} bytes)` }; #0": {
+ "src/board-edit-serve.ts :: tick :: if (st !== null && bytes === null) this.hub.holdFile(\"invalid\", `FILE is larger than FILE_MAX (${this.fileMax} bytes)`); #0": {
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },

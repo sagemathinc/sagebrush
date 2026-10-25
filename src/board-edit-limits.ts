@@ -10,7 +10,9 @@
 // MERGE_WORK >= 8 x EDIT_MAX, so that a submission's per-byte phases fit (daybreak3, Oct 24: with MERGE_WORK's
 // default 2.5e8 and MERGE_MS's 10 s; MERGE_WORK's range [8 x 64 KiB, 8 x 128 MiB], so that both its
 // range and EDIT_MAX's stay reachable); MEMORY_MAX >= 36 x BODY_MAX, so that a body of BODY_MAX bytes is never too
-// large for the ledger as such, addendum 2; QUEUE_BYTES <= MEMORY_MAX / 2).
+// large for the ledger as such, addendum 2; QUEUE_BYTES <= MEMORY_MAX / 2; MAX_CLIENTS x PENDING_MAX <=
+// MEMORY_MAX / 4, so that the event backlogs, charged on the ledger as they are written, can never take more
+// than a quarter of it, daybreak3 SSE-LEDGER-2).
 // MEMORY_MAX's default is 1 GiB (addendum 2: 512 MiB in r7's table).
 
 const KiB = 1024, MiB = 1024 * KiB, GiB = 1024 * MiB;
@@ -90,6 +92,7 @@ export function resolveLimits(flags: string[], env: Record<string, string | unde
   if (limits.MEMORY_MAX < 8 * limits.EDIT_MAX) return { error: `MEMORY_MAX=${limits.MEMORY_MAX} must be at least 8 x EDIT_MAX (${8 * limits.EDIT_MAX})` };
   if (limits.MERGE_WORK < 8 * limits.EDIT_MAX) return { error: `MERGE_WORK=${limits.MERGE_WORK} must be at least 8 x EDIT_MAX (${8 * limits.EDIT_MAX}), so that an edit of a board EDIT_MAX allows fits its work` };
   if (limits.MEMORY_MAX < 36 * limits.BODY_MAX) return { error: `MEMORY_MAX=${limits.MEMORY_MAX} must be at least 36 x BODY_MAX (${36 * limits.BODY_MAX})` };
+  if (limits.MAX_CLIENTS * limits.PENDING_MAX > limits.MEMORY_MAX / 4) return { error: `MAX_CLIENTS x PENDING_MAX (${limits.MAX_CLIENTS * limits.PENDING_MAX}) must be at most MEMORY_MAX / 4 (${Math.floor(limits.MEMORY_MAX / 4)}), the event backlogs' share of the ledger` };
   return { limits };
 }
 

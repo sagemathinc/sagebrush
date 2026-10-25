@@ -18,7 +18,8 @@
 //   tuple (§5.1, src/board-edit-write.ts); only its own completion advances P,
 //   persistedSeq and each tab's persistedGen.
 import { createHash } from "crypto";
-import { boardMerge3, keyOf, canon, type Rec, type MergeReport, type MergeAlternative } from "../web/board/merge";
+import { dirname } from "path";
+import { boardMerge3, keyOf, canon, ABSENT, type Rec, type MergeReport, type MergeAlternative } from "../web/board/merge";
 import { editRecords, fromEditRecords, roundTrips, givePageIds, serialize, bytesAre, recordsAre } from "../web/board/lossless";
 import { writeOnce, Slots, hashOf, realFs, type WriteFs, type WriteOutcome } from "./board-edit-write";
 import type { Limits } from "./board-edit-limits";
@@ -28,9 +29,16 @@ import { Ledger, Reservation, submitCharge, keptCharge } from "./board-edit-memo
 export interface Version { seq: number; records: Rec[]; json: any; bytes: Buffer; hash: string; charge: number }
 export type HubReport =
   | MergeReport
-  | { kind: "older-copy"; key: string; field: string; value: unknown; board: unknown }
+  /** §4.3: C's value (ABSENT: absent) equals a retained save's where that save differed from P; no `field`: the whole record */
+  | { kind: "older-copy"; key: string; field?: string; value: unknown; board: unknown }
+  /** §4.3: an outside change as merged into the head, `was` the board's value before it (ABSENT: absent); no
+   * `field`: the whole record added or removed.  Its restore is the alternative with the same key (and field). */
+  | { kind: "outside"; key: string; field?: string; was: unknown; now: unknown }
   | { kind: "prev-kept"; path: string; why: string };
-export interface HeadEvent { seq: number; persistedSeq: number; reports: HubReport[]; alternatives: MergeAlternative[]; source: "outside" | "tab" | "save" }
+/** A head's reports and their one-click alternatives, bound to its seq; `omitted`: how many past CONFLICTS_MAX weren't kept */
+export interface HeadEvent { seq: number; persistedSeq: number; reports: HubReport[]; alternatives: MergeAlternative[]; source: "outside" | "tab" | "save"; omitted?: number }
+/** A save's outcome: one write's (§5.2), or only the directory fsync a failed one left, retried and done. */
+export type SaveOutcome = WriteOutcome | { saved: true; resynced: true; prev?: undefined };
 export type SubmitAnswer =
   | { op: string; accepted: true; seq: number }
   | { op: string; included: number; seq: number }
@@ -43,9 +51,12 @@ export type HubState =
   | { state: "ok" }
   | { state: "held"; why: "invalid" | "deleted" | "unmergeable" | "not-editable" | "slots" | "stuck" | "error"; detail: string };
 
+/** A merged head made, ready to install. */
+interface Made { json: any; bytes: Buffer; hash: string; charge: number }
+
 interface Budget { used: number; deadline: number; charge: (n: number) => boolean; left: () => number; why: () => "work" | "time" }
 
-interface TabRecord { watermark: number; acks: { gen: number; seq: number; hash: string }[]; persistedGen: number; lastSeen: number; pin?: number }
+interface TabRecord { watermark: number; acks: { gen: number; seq: number; hash: string }[]; lastSeen: number; pin?: number }
 
 export interface HubDeps {
   mergeStrings3: (o: { base: string; a: string; b: string }) => string;
@@ -55,6 +66,8 @@ export interface HubDeps {
 
 const sha = (s: string | Buffer) => createHash("sha256").update(s).digest("hex");
 const lines = (rs: Rec[]) => rs.map((r) => JSON.stringify(r)).join("\n");
+/** An exception as a short reason (a RangeError from a value nested too deeply, say). */
+const failure = (e: unknown) => (e instanceof RangeError ? "nested too deeply" : String((e as any)?.message ?? e).slice(0, 200));
 
 export class EditHub {
   P!: Version;
@@ -67,8 +80,22 @@ export class EditHub {
   private tabs = new Map<string, TabRecord>();
   private tombstones = new Map<string, number>();
   private includedGens = new Map<string, number>(); // (per tab, the highest gen whose op is in H)
+  /** per tab, the highest gen of its ops in a completed (durable) save: kept across a tombstone, as includedGens is */
+  private persistedGens = new Map<string, number>();
   readonly slots: Slots;
   state: HubState = { state: "ok" };
+  /** whether the hold in `state` is FILE's own (invalid, deleted, unmergeable): cleared once FILE is P again */
+  private fileHold = false;
+  /** a tuple whose bytes are at FILE (`at`: their hash) but whose directory fsync failed: not saved (CORR-153-1) */
+  private unsynced: { T: Version; included: Map<string, number>; at: string } | null = null;
+  /** sidecars whose names a save couldn't unlink, each holding its slot: unlinked again with the prevs */
+  strays: string[] = [];
+  /** the latest heads' reports and alternatives, for a tab that (re)connects: at most CONFLICTS_MAX reports and
+   * CONFLICTS_MAX alternatives in all, oldest dropped first, each batch charged on the ledger while kept */
+  changes: HeadEvent[] = [];
+  private changeCharge = new Map<HeadEvent, number>();
+  /** the seq of the latest batch dropped from `changes` */
+  private droppedThrough = 0;
   private dirtySince: number | null = null;
   private lastWrite = -Infinity;
   /** retained prev files: path, last content hash ingested, the seq whose save includes it */
@@ -112,14 +139,19 @@ export class EditHub {
     if (bytes.length > this.limits.EDIT_MAX) return { why: `larger than EDIT_MAX (${this.limits.EDIT_MAX} bytes)` };
     let json: any;
     try { json = JSON.parse(bytes.toString("utf8")); } catch { return { why: "not a .board.json (not JSON)" }; }
-    const rt = roundTrips(json);
-    if (!rt.ok) return { why: `the board can't be edited without losing something (at ${rt.at})` };
-    const g = await givePageIds(json, hashOf(bytes));
-    const records = editRecords(g.doc);
-    if (records.length > this.limits.RECORDS_MAX) return { why: `more than RECORDS_MAX (${this.limits.RECORDS_MAX}) records` };
-    const out = Buffer.from(serialize(g.doc), "utf8");
-    const kept = g.given.length ? out : bytes;
-    return { version: { seq: ++this.seq, records, json: g.doc, bytes: kept, hash: hashOf(kept), charge: keptCharge(records) }, given: g.given.length > 0 };
+    // (any failure past the parse, such as a value nested too deeply to walk, is the bytes' not being editable:
+    // a reason, never an exception out of the watcher, CORR-153-7)
+    try {
+      const rt = roundTrips(json);
+      if (!rt.ok) return { why: `the board can't be edited without losing something (at ${rt.at})` };
+      const g = await givePageIds(json, hashOf(bytes));
+      const records = editRecords(g.doc);
+      if (records.length > this.limits.RECORDS_MAX) return { why: `more than RECORDS_MAX (${this.limits.RECORDS_MAX}) records` };
+      const out = Buffer.from(serialize(g.doc), "utf8");
+      const kept = g.given.length ? out : bytes;
+      const charge = keptCharge(records);
+      return { version: { seq: ++this.seq, records, json: g.doc, bytes: kept, hash: hashOf(kept), charge }, given: g.given.length > 0 };
+    } catch (e) { return { why: `the board can't be read (${failure(e)})` }; }
   }
 
   /** an outside version waits for memory (§8.2: deferred, it waits in the watcher) */
@@ -174,6 +206,8 @@ export class EditHub {
     const half = this.ledger.max / 2;
     // (the window first, oldest first; then the retained saves other than P, oldest first; then the stalest tab's pin)
     while (this.ledger.used > half && this.window.length) { this.window.shift(); release(); }
+    // (then the kept reports, oldest first: a tab that connects later is told they are incomplete)
+    while (this.ledger.used > half && this.changes.length) this.dropChange();
     while (this.ledger.used > half && this.saves.some((v) => v !== this.P)) { this.saves.splice(this.saves.findIndex((v) => v !== this.P), 1); release(); }
     while (this.ledger.used > half) {
       const pinned = [...this.tabs].filter(([, t]) => t.pin !== undefined && t.pin !== this.H.seq && t.pin !== this.P.seq).sort(([, a], [, b]) => a.lastSeen - b.lastSeen);
@@ -206,46 +240,151 @@ export class EditHub {
   }
 
   /** The merged records as the next head, or why not (a head is bounded as FILE is: EDIT_MAX, RECORDS_MAX; its serialization charged). */
-  private nextHead(records: Rec[], budget: Budget): { json: any; bytes: Buffer } | { why: string } {
+  private nextHead(records: Rec[], budget: Budget): Made | { why: string } {
     if (records.length > this.limits.RECORDS_MAX) return { why: `the merged board has more than RECORDS_MAX (${this.limits.RECORDS_MAX}) records` };
     const json = fromEditRecords(records);
     const bytes = Buffer.from(serialize(json), "utf8");
     if (bytes.length > this.limits.EDIT_MAX) return { why: `the merged board is larger than EDIT_MAX (${this.limits.EDIT_MAX} bytes)` };
     if (!budget.charge(2 * bytes.length + records.length)) return { why: `can't merge (${budget.why()})` };
-    return { json, bytes };
+    // (everything that can fail made before anything changes: newHead only installs it)
+    return { json, bytes, hash: hashOf(bytes), charge: keptCharge(records) };
   }
 
-  private newHead(records: Rec[], source: HeadEvent["source"], reports: HubReport[], alternatives: MergeAlternative[], made?: { json: any; bytes: Buffer }): Version {
-    const json = made?.json ?? fromEditRecords(records);
-    const bytes = made?.bytes ?? Buffer.from(serialize(json), "utf8");
-    const v: Version = { seq: ++this.seq, records, json, bytes, hash: hashOf(bytes), charge: keptCharge(records) };
+  /**
+   * A batch of reports and alternatives, as kept and sent: each list at most CONFLICTS_MAX, what is cut counted;
+   * and its charge while kept.  One that can't be serialized (a value nested too deeply) is kept as its count only.
+   */
+  private batch(seq: number, source: HeadEvent["source"], reports: HubReport[], alternatives: MergeAlternative[]): { e: HeadEvent; charge: number } {
+    const max = this.limits.CONFLICTS_MAX;
+    let omitted = Math.max(0, reports.length - max) + Math.max(0, alternatives.length - max);
+    const e: HeadEvent = { seq, persistedSeq: this.persistedSeq, reports: reports.slice(0, max), alternatives: alternatives.slice(0, max), source };
+    let charge = 0;
+    try { charge = keptCharge([{ changes: [e] }]); } catch { omitted += e.reports.length + e.alternatives.length; e.reports = []; e.alternatives = []; }
+    if (omitted) e.omitted = omitted;
+    return { e, charge };
+  }
+
+  private newHead(records: Rec[], source: HeadEvent["source"], reports: HubReport[], alternatives: MergeAlternative[], made: Made): Version {
+    const v: Version = { seq: ++this.seq, records, json: made.json, bytes: made.bytes, hash: made.hash, charge: made.charge };
     this.H = v;
+    const { e, charge } = this.batch(v.seq, source, reports, alternatives);
+    this.events.push(e);
+    this.keepChanges(e, charge);
     this.remember(v);
-    this.events.push({ seq: v.seq, persistedSeq: this.persistedSeq, reports: reports.slice(0, this.limits.CONFLICTS_MAX), alternatives: alternatives.slice(0, this.limits.CONFLICTS_MAX), source });
     return v;
+  }
+
+  /**
+   * A head's reports and alternatives kept for the tabs that (re)connect later (CORR-153-4): the latest batches,
+   * at most CONFLICTS_MAX reports and CONFLICTS_MAX alternatives in all, oldest dropped first; each charged on
+   * the ledger while it is kept.
+   */
+  private keepChanges(e: HeadEvent, n: number) {
+    if (!e.reports.length && !e.alternatives.length && !e.omitted) return;
+    // (admitted on top of what the operation reserved, as an outside version's own Rv is: without the room now,
+    // only its count is kept, and a tab that connects later is told how many it missed)
+    if (!this.ledger.admit(n)) { e = { ...e, reports: [], alternatives: [], omitted: (e.omitted ?? 0) + e.reports.length + e.alternatives.length }; n = 0; }
+    this.changeCharge.set(e, n);
+    this.changes.push(e);
+    const max = this.limits.CONFLICTS_MAX;
+    const count = (k: "reports" | "alternatives") => this.changes.reduce((s, c) => s + c[k].length, 0);
+    while (this.changes.length > 1 && (count("reports") > max || count("alternatives") > max)) this.dropChange();
+  }
+  private dropChange() {
+    const old = this.changes.shift()!;
+    this.droppedThrough = Math.max(this.droppedThrough, old.seq);
+    this.ledger.release(this.changeCharge.get(old) ?? 0);
+    this.changeCharge.delete(old);
+  }
+
+  /** The kept batches after `seq` (and whether any after it were dropped), for /changes and a tab's first event. */
+  changesAfter(seq: number): { changes: HeadEvent[]; complete: boolean; charge: number } {
+    const out = this.changes.filter((c) => c.seq > seq);
+    // (complete: no batch after seq was dropped)
+    return { changes: out, complete: this.droppedThrough <= seq, charge: out.reduce((s, c) => s + (this.changeCharge.get(c) ?? 0), 0) };
   }
 
   private dirty() { if (this.dirtySince === null) this.dirtySince = this.deps.now(); }
 
   /** An outside version seen at FILE (null: FILE absent). */
   async observe(bytes: Buffer | null, base: Version = this.P): Promise<Version | undefined> {
-    if (bytes === null) { this.state = { state: "held", why: "deleted", detail: "FILE was deleted or moved" }; return; }
+    // (absent: no bytes observed, so FILE's coming back, as anything, is a change, CORR-153-2)
+    if (bytes === null) { this.O = ""; this.holdFile("deleted", "FILE was deleted or moved"); return; }
     const h = hashOf(bytes);
-    if (h === this.O || h === this.P.hash) { this.O = h; return; }
+    if (h === this.P.hash) {
+      // (FILE is P again: a hold FILE caused (invalid, deleted, unmergeable) is over, and what H has beyond P is due
+      // to be saved, CORR-153-2; a hold of another cause stays)
+      this.O = h;
+      this.deferred = false;
+      if (this.unsynced && this.unsynced.at !== h) this.unsynced = null;
+      if (this.fileHold) { this.fileHold = false; this.state = { state: "ok" }; }
+      if (this.H.seq !== this.P.seq) this.dirty();
+      return;
+    }
+    if (h === this.O) return;
     const v = await this.ingest(bytes, base);
     // (no memory for it now: not taken as observed, so the next read tries again; the save's W2 check sees it too)
     if ("deferred" in v) { this.deferred = true; return; }
     this.deferred = false;
     this.O = h;
-    if ("why" in v) { this.state = { state: "held", why: v.held, detail: v.why }; return; }
+    // (FILE isn't the bytes a failed fsync left any more: nothing to sync, the next save writes)
+    if (this.unsynced && this.unsynced.at !== h) this.unsynced = null;
+    if ("why" in v) { this.holdFile(v.held, v.why); return; }
+    // (FILE valid and merged: whatever held saving is over)
+    this.ok();
     this.observed = { raw: h, version: v };
-    if (canon(this.H.records) === canon(v.records)) {
-      // (the file already holds the board's state: adopted as the latest save, nothing written)
-      this.P = this.H;
-      this.persistedSeq = this.H.seq;
-      this.retainSave(this.H);
-    }
+    // (the file already holds the board's state: adopted as the latest save, nothing written)
+    if (canon(this.H.records) === canon(v.records)) this.adopt(h);
     return v;
+  }
+
+  /** A hold FILE caused: cleared when FILE is P again (or a version of it is merged). */
+  holdFile(why: "invalid" | "deleted" | "unmergeable", detail: string) { this.state = { state: "held", why, detail }; this.fileHold = true; }
+  /** A hold of another cause (slots, stuck, error, a prev's version): FILE's coming back doesn't clear it. */
+  private hold(why: Exclude<HubState, { state: "ok" }>["why"], detail: string) { this.state = { state: "held", why, detail }; this.fileHold = false; }
+  private ok() { this.state = { state: "ok" }; this.fileHold = false; }
+
+  /**
+   * FILE, whose bytes (hash `at`) are exactly H, adopted as the latest save (§4.1), and so as saved for each
+   * tab whose ops H includes (CORR-153-3): durable as a save of ours is, so FILE and its directory are fsynced
+   * first; if that fails, nothing is advanced, and the sync is retried as a save (CORR-153-1).
+   */
+  private adopt(at: string) {
+    const T = this.H, included = new Map(this.includedGens);
+    const m = this.sync(at);
+    if (m !== null) { this.unsynced = { T, included, at }; this.dirty(); this.failing(m); return; }
+    this.completed(T, included);
+  }
+
+  /** FILE (still the bytes `at`) and its directory fsynced: null, or why not. */
+  private sync(at: string): string | null {
+    const f = this.deps.fs ?? realFs;
+    try {
+      if (hashOf(f.readFile(this.file)) !== at) return "FILE changed";
+      f.fsync(this.file);
+      f.fsyncDir(dirname(this.file));
+      return null;
+    } catch (e: any) { return String(e?.code ?? e?.message ?? e); }
+  }
+
+  /** A tuple durable at FILE: P, persistedSeq and each tab's persistedGen advanced from it (§5.1). */
+  private completed(T: Version, included: Map<string, number>) {
+    this.failingSince = null;
+    this.unsynced = null;
+    this.P = T;
+    this.persistedSeq = T.seq;
+    this.retainSave(T);
+    for (const [tab, gen] of included) this.persistedGens.set(tab, Math.max(this.persistedGens.get(tab) ?? 0, gen));
+    if (this.H.seq === T.seq) this.dirtySince = null;
+    this.ok();
+    this.events.push({ seq: this.H.seq, persistedSeq: this.persistedSeq, reports: [], alternatives: [], source: "save" });
+  }
+
+  /** A save that didn't complete: retried as the write queue paces it; after WRITE_RETRY_MS, shown as not saved. */
+  private failing(message: string) {
+    const now = this.deps.now();
+    this.failingSince ??= now;
+    if (now - this.failingSince >= this.limits.WRITE_RETRY_MS) this.hold("error", message);
   }
 
   /** Bytes read at FILE or from a prev, merged against `base` into H (§4.2): the version they are, or why not. */
@@ -256,7 +395,8 @@ export class EditHub {
     const res = this.ledger.reserve(R);
     if (!res) return { deferred: true };
     this.res = res;
-    try { return await this.ingestWithin(bytes, base); } finally { this.res = null; res.close(); this.account(); }
+    // (a failure no check foresaw, a value nested too deeply say: the version can't be merged, H unchanged, CORR-153-7)
+    try { return await this.ingestWithin(bytes, base); } catch (e) { return { why: `can't merge (${failure(e)})`, held: "unmergeable" }; } finally { this.res = null; res.close(); this.account(); }
   }
 
   private async ingestWithin(bytes: Buffer, base: Version): Promise<Version | { why: string; held: "invalid" | "unmergeable" } | { deferred: true }> {
@@ -276,11 +416,41 @@ export class EditHub {
     if ("refused" in r) return { why: `can't merge (${r.refused})`, held: "unmergeable" };
     const made = this.nextHead(r.records, budget);
     if ("why" in made) return { why: made.why, held: "unmergeable" };
-    this.state = { state: "ok" };
-    const reports: HubReport[] = [...r.reports, ...this.olderCopy(C.records)];
-    const head = this.newHead(r.records, "outside", reports, r.alternatives, made);
-    if (canon(head.records) !== canon(C.records)) this.dirty();
+    // (§4.3: the merge's reports, then the older-copy flags, then every change the version made to the head, each
+    // with the board's previous value as its restore, CORR-153-8)
+    const changed = this.outsideChanges(this.H.records, r.records, budget);
+    if ("why" in changed) return { why: changed.why, held: "unmergeable" };
+    const reports: HubReport[] = [...r.reports, ...this.olderCopy(C.records), ...changed.reports];
+    const alternatives = [...r.alternatives, ...changed.alternatives];
+    const adopted = canon(r.records) === canon(C.records);
+    this.newHead(r.records, "outside", reports, alternatives, made);
+    if (!adopted) this.dirty();
     return C;
+  }
+
+  /**
+   * What merging an outside version changed in the head, field by field (a record added or removed whole), with
+   * the head's value before it as each one's restore (§4.3); charged a unit per record and per field compared.
+   */
+  private outsideChanges(before: Rec[], after: Rec[], budget: Budget): { reports: HubReport[]; alternatives: MergeAlternative[] } | { why: string } {
+    const reports: HubReport[] = [], alternatives: MergeAlternative[] = [];
+    if (!budget.charge(before.length + after.length)) return { why: `can't merge (${budget.why()})` };
+    const old = new Map(before.map((r) => [keyOf(r), r])), now = new Map(after.map((r) => [keyOf(r), r]));
+    const val = (r: Rec, f: string) => (Object.prototype.hasOwnProperty.call(r, f) && r[f] !== undefined ? r[f] : ABSENT);
+    for (const [k, a] of now) {
+      const b = old.get(k);
+      if (!b) { reports.push({ kind: "outside", key: k, was: ABSENT, now: a }); alternatives.push({ key: k, record: null }); continue; }
+      const fields = new Set([...Object.keys(b), ...Object.keys(a)]);
+      if (!budget.charge(fields.size)) return { why: `can't merge (${budget.why()})` };
+      for (const f of fields) {
+        const was = val(b, f), is = val(a, f);
+        if (was === is || (was !== ABSENT && is !== ABSENT && canon(was) === canon(is))) continue;
+        reports.push({ kind: "outside", key: k, field: f, was, now: is });
+        alternatives.push({ key: k, field: f, value: was });
+      }
+    }
+    for (const [k, b] of old) if (!now.has(k)) { reports.push({ kind: "outside", key: k, was: b, now: ABSENT }); alternatives.push({ key: k, record: b }); }
+    return { reports, alternatives };
   }
 
   // ---- prev files (§5.3)
@@ -311,39 +481,54 @@ export class EditHub {
 
   async tickPrevs(quietMs: number): Promise<void> {
     const f = this.deps.fs ?? realFs;
-    for (const p of [...this.prevs]) {
-      let bytes: Buffer;
-      try { bytes = f.readFile(p.path); } catch {
-        // (gone: removed by someone else; its name no longer beside FILE)
-        this.prevs.splice(this.prevs.indexOf(p), 1);
-        this.slots.release(1);
-        continue;
+    // (a sidecar a save couldn't unlink: tried again, its slot released once its name is gone)
+    for (const s of [...this.strays]) {
+      try { f.unlink(s); } catch (e: any) { if (e?.code !== "ENOENT") continue; }
+      this.strays.splice(this.strays.indexOf(s), 1);
+      this.slots.release(1);
+    }
+    for (const p of [...this.prevs]) await this.readPrev(p, quietMs);
+  }
+
+  /** One retained prev read again: a new content ingested against the last; unlinked once quiet, ingested and saved. */
+  private async readPrev(p: EditHub["prevs"][number], quietMs = Infinity): Promise<void> {
+    const f = this.deps.fs ?? realFs;
+    let bytes: Buffer;
+    try { bytes = f.readFile(p.path); } catch {
+      // (gone: removed by someone else; its name no longer beside FILE)
+      this.prevs.splice(this.prevs.indexOf(p), 1);
+      this.slots.release(1);
+      return;
+    }
+    const h = hashOf(bytes), now = this.deps.now();
+    if (h !== p.hash) {
+      if (h === p.base.hash) { p.hash = h; p.quietSince = now; p.ingestedSeq = Math.min(p.ingestedSeq, this.H.seq); return; }
+      const v = await this.ingest(bytes, p.base);
+      // (no memory for it now: read again next time)
+      if ("deferred" in v) return;
+      p.hash = h;
+      p.quietSince = now;
+      if ("why" in v) {
+        if (v.held === "unmergeable") this.hold("unmergeable", v.why);
+        p.ingestedSeq = Infinity;
+        p.invalid = v.why;
+        const { e, charge } = this.batch(this.H.seq, "outside", [{ kind: "prev-kept", path: p.path, why: v.why }], []);
+        this.events.push(e);
+        this.keepChanges(e, charge);
+        this.account();
+        return;
       }
-      const h = hashOf(bytes), now = this.deps.now();
-      if (h !== p.hash) {
-        if (h === p.base.hash) { p.hash = h; p.quietSince = now; p.ingestedSeq = Math.min(p.ingestedSeq, this.H.seq); continue; }
-        const v = await this.ingest(bytes, p.base);
-        // (no memory for it now: read again next time)
-        if ("deferred" in v) continue;
-        p.hash = h;
-        p.quietSince = now;
-        if ("why" in v) {
-          if (v.held === "unmergeable") this.state = { state: "held", why: "unmergeable", detail: v.why };
-          p.ingestedSeq = Infinity;
-          p.invalid = v.why;
-          this.events.push({ seq: this.H.seq, persistedSeq: this.persistedSeq, reports: [{ kind: "prev-kept", path: p.path, why: v.why }], alternatives: [], source: "outside" });
-          continue;
-        }
-        p.base = v;
-        p.invalid = undefined;
-        p.ingestedSeq = this.H.seq;
-        continue;
-      }
-      if (p.invalid === undefined && now - p.quietSince >= quietMs && p.ingestedSeq <= this.persistedSeq) {
-        try { f.unlink(p.path); } catch (e: any) { if (e?.code !== "ENOENT") continue; }
-        this.prevs.splice(this.prevs.indexOf(p), 1);
-        this.slots.release(1);
-      }
+      // (merged: a prev's own hold is over; a hold FILE caused isn't, FILE being what it is)
+      if (!this.fileHold && this.state.state === "held" && this.state.why === "unmergeable") this.ok();
+      p.base = v;
+      p.invalid = undefined;
+      p.ingestedSeq = this.H.seq;
+      return;
+    }
+    if (p.invalid === undefined && now - p.quietSince >= quietMs && p.ingestedSeq <= this.persistedSeq) {
+      try { f.unlink(p.path); } catch (e: any) { if (e?.code !== "ENOENT") return; }
+      this.prevs.splice(this.prevs.indexOf(p), 1);
+      this.slots.release(1);
     }
   }
 
@@ -352,17 +537,26 @@ export class EditHub {
     const out: HubReport[] = [];
     const P = new Map(this.P.records.map((r) => [keyOf(r), r]));
     const olds = this.saves.filter((s) => s.seq !== this.P.seq).map((s) => new Map(s.records.map((r) => [keyOf(r), r])));
-    for (const c of C) {
-      const k = keyOf(c), p = P.get(k);
-      if (!p) continue;
+    const Cs = new Map(C.map((r) => [keyOf(r), r]));
+    const show = (r: Rec | undefined, f: string) => (r && r[f] !== undefined ? r[f] : ABSENT);
+    for (const [k, c] of Cs) {
+      const p = P.get(k);
+      // (a record C has and P doesn't: from an older copy if a retained save had it, as C has it)
+      if (!p) {
+        if (olds.some((o) => { const r = o.get(k); return r !== undefined && canon(r) === canon(c); })) out.push({ kind: "older-copy", key: k, value: c, board: ABSENT });
+        continue;
+      }
       for (const f of new Set([...Object.keys(c), ...Object.keys(p)])) {
         const cv = canon(c[f]), pv = canon(p[f]);
         if (cv === pv) continue;
-        if (olds.some((o) => { const r = o.get(k); return r && canon(r[f]) === cv && canon(r[f]) !== pv; })) {
-          out.push({ kind: "older-copy", key: k, field: f, value: c[f], board: p[f] });
+        // (absent included: a save that had the record without the field, as C has it)
+        if (olds.some((o) => { const r = o.get(k); return r !== undefined && canon(r[f]) === cv && canon(r[f]) !== pv; })) {
+          out.push({ kind: "older-copy", key: k, field: f, value: show(c, f), board: show(p, f) });
         }
       }
     }
+    // (a record P has and C doesn't: from an older copy if a retained save didn't have it)
+    for (const [k, p] of P) if (!Cs.has(k) && olds.some((o) => !o.has(k))) out.push({ kind: "older-copy", key: k, value: ABSENT, board: p });
     return out;
   }
 
@@ -385,7 +579,7 @@ export class EditHub {
       if (w === undefined) return { op, unknownTab: true };
       // (reactivated from its tombstone: its watermark, no acks; this submission not applied)
       this.tombstones.delete(tab);
-      t = { watermark: w, acks: [], persistedGen: 0, lastSeen: this.deps.now() };
+      t = { watermark: w, acks: [], lastSeen: this.deps.now() };
       this.tabs.set(tab, t);
       return { op, included: w, seq: this.H.seq };
     }
@@ -418,7 +612,11 @@ export class EditHub {
     const res = this.ledger.reserve(R);
     if (!res) return { op, busy: "memory" };
     this.res = res;
-    try { return this.submitWithin(this.tabs.get(tab)!, op, gen, this.heads.get(baseSeq)!, bytes, hash); } finally { this.res = null; res.close(); this.account(); }
+    // (a failure no check foresaw, a value nested too deeply say: refused, nothing changed, CORR-153-7; every
+    // change submitWithin makes comes after its last step that can fail)
+    try { return this.submitWithin(this.tabs.get(tab)!, op, gen, this.heads.get(baseSeq)!, bytes, hash); }
+    catch (e) { return { op, refused: `the snapshot can't be taken (${failure(e)})` }; }
+    finally { this.res = null; res.close(); this.account(); }
   }
 
   private submitWithin(t: TabRecord, op: string, gen: number, base: Version, bytes: Buffer, hash: string): SubmitAnswer {
@@ -441,8 +639,8 @@ export class EditHub {
     const made = this.nextHead(r.records, budget);
     if ("why" in made) return { op, refused: made.why };
     const tab = op.slice(0, op.lastIndexOf(":"));
-    this.includedGens.set(tab, gen);
     this.newHead(r.records, "tab", r.reports, r.alternatives, made);
+    this.includedGens.set(tab, gen);
     t.watermark = gen;
     t.pin = base.seq;
     t.acks.push({ gen, seq: this.H.seq, hash });
@@ -456,7 +654,7 @@ export class EditHub {
 
 
   /** A tab connected (its record made, if new). */
-  connect(tab: string) { if (!this.tabs.has(tab) && !this.tombstones.has(tab)) this.tabs.set(tab, { watermark: 0, acks: [], persistedGen: 0, lastSeen: this.deps.now(), pin: this.H.seq }); }
+  connect(tab: string) { if (!this.tabs.has(tab) && !this.tombstones.has(tab)) this.tabs.set(tab, { watermark: 0, acks: [], lastSeen: this.deps.now(), pin: this.H.seq }); }
 
   /** A tab released (disconnected): its accounting released, a tombstone of its watermark kept. */
   release(tab: string) {
@@ -464,14 +662,19 @@ export class EditHub {
     if (!t) return;
     this.tabs.delete(tab);
     this.tombstones.set(tab, t.watermark);
-    while (this.tombstones.size > this.limits.TAB_TOMBSTONES) this.tombstones.delete(this.tombstones.keys().next().value!);
+    while (this.tombstones.size > this.limits.TAB_TOMBSTONES) {
+      // (a tab forgotten: what is included and saved of its ops too)
+      const old = this.tombstones.keys().next().value!;
+      this.tombstones.delete(old);
+      this.includedGens.delete(old);
+      this.persistedGens.delete(old);
+    }
     this.account(); // (its pinned head released)
   }
 
   /** What a tab is told with each head: the highest gen of its ops in it, and its persistedGen. */
   tabView(tab: string) {
-    const t = this.tabs.get(tab);
-    return { includes: this.includedGens.get(tab) ?? 0, persistedGen: t?.persistedGen ?? 0 };
+    return { includes: this.includedGens.get(tab) ?? 0, persistedGen: this.persistedGens.get(tab) ?? 0 };
   }
 
   head(seq: number): Version | undefined { return this.heads.get(seq); }
@@ -486,7 +689,7 @@ export class EditHub {
   }
 
   /** One save of the frozen head, now. */
-  async save(): Promise<WriteOutcome> {
+  async save(): Promise<SaveOutcome> {
     // (one write queue: a save asked for while one runs follows it, r7 §5.6)
     const run = (this.saving ?? Promise.resolve()).catch(() => {}).then(async () => {
       const T = this.H; // (the frozen tuple: its value, seq and bytes)
@@ -496,7 +699,7 @@ export class EditHub {
     this.saving = run;
     try { return await run; } finally { if (this.saving === run) this.saving = null; }
   }
-  private saving: Promise<WriteOutcome> | null = null;
+  private saving: Promise<SaveOutcome> | null = null;
   /** since when saves have been failing (an error outcome), or null */
   private failingSince: number | null = null;
 
@@ -506,29 +709,37 @@ export class EditHub {
     return !(this.state.state === "held" && this.state.why !== "error" && this.state.why !== "slots");
   }
 
-  private async saveTuple(T: Version): Promise<WriteOutcome> {
+  private async saveTuple(T: Version): Promise<SaveOutcome> {
     const included = new Map(this.includedGens);
     this.lastWrite = this.deps.now();
-    const before = this.P;
-    const r = writeOnce(this.file, T.bytes, this.O, this.slots, { fs: this.deps.fs });
+    const before = this.P, O = this.O;
+    // (a tuple already at FILE whose directory fsync failed: only the sync again, CORR-153-1)
+    const u = this.unsynced;
+    if (u && u.T === T && u.at === O) {
+      const m = this.sync(O);
+      if (m === null) { this.completed(T, u.included); return { saved: true, resynced: true }; }
+      this.failing(m);
+      return { saved: false, why: "unsynced", message: m };
+    }
+    // (the version at FILE as last observed: what the inode a save sets aside as prev holds)
+    const atO = this.observed?.raw === O ? this.observed.version : u?.at === O ? u.T : before;
+    const r = writeOnce(this.file, T.bytes, O, this.slots, { fs: this.deps.fs });
+    if (r.stray) this.strays.push(...r.stray);
+    const now = this.deps.now();
+    // (a retained name a program may still write through an old handle: watched (§5.3, CORR-153-5); `hash` its
+    // content as last read ("": not read yet, so read at once), `base` that content's version)
+    const watch = (path: string, hash: string, base: Version, ingestedSeq: number) => this.prevs.push({ path, hash, base, ingestedSeq, quietSince: now });
     if (r.saved) {
-      this.failingSince = null;
-      this.P = T;
       this.O = T.hash;
-      this.persistedSeq = T.seq;
-      this.retainSave(T);
-      for (const [tab, gen] of included) { const t = this.tabs.get(tab); if (t) t.persistedGen = Math.max(t.persistedGen, gen); }
-      this.prevs.push({ path: r.prev, hash: hashOf(before.bytes), base: before, ingestedSeq: T.seq, quietSince: this.deps.now() });
-      if (this.H.seq === T.seq) this.dirtySince = null;
-      this.state = { state: "ok" };
-      this.events.push({ seq: this.H.seq, persistedSeq: this.persistedSeq, reports: [], alternatives: [], source: "save" });
+      watch(r.prev, O, atO, T.seq);
+      this.completed(T, included);
       return r;
     }
     switch (r.why) {
       case "changed": await this.observe(r.bytes); break;
       case "classified": {
         // (C, the bytes W4 read, is an observed version made from the P current at W2; prev retained, C its base)
-        const p = { path: r.prev, hash: hashOf(r.bytes), base: before, ingestedSeq: Infinity, quietSince: this.deps.now() };
+        const p = { path: r.prev, hash: hashOf(r.bytes), base: before, ingestedSeq: Infinity, quietSince: now };
         this.prevs.push(p);
         const v = await this.observe(r.bytes, before);
         // (or, already seen at FILE: the version it was then)
@@ -536,21 +747,37 @@ export class EditHub {
         if (seen && this.state.state === "ok") { p.base = seen; p.ingestedSeq = this.H.seq; }
         break;
       }
-      case "replaced":
-        this.prevs.push({ path: r.prev, hash: before.hash, base: before, ingestedSeq: T.seq, quietSince: this.deps.now() });
+      case "replaced": watch(r.prev, O, atO, T.seq); break;
+      case "unsynced":
+        // (FILE holds T's bytes, not durably: observed as such, P not advanced; the sync retried as a save)
+        this.O = T.hash;
+        this.unsynced = { T, included, at: T.hash };
+        if (r.prev) watch(r.prev, O, atO, T.seq);
+        this.failing(r.message);
         break;
-      case "deleted": this.state = { state: "held", why: "deleted", detail: "FILE was deleted or moved" }; break;
-      case "slots": this.state = { state: "held", why: "slots", detail: "too many copies kept beside FILE, waiting for them to settle" }; break;
-      case "stuck": this.state = { state: "held", why: "stuck", detail: `FILE is missing: kept at ${r.kept.join(", ")}` }; break;
-      case "eexist": this.state = { state: "held", why: "error", detail: `a new FILE appeared during the save; kept ${r.kept.join(", ")}` }; break;
-      case "error": {
-        // (a failing write retried, as the write queue paces it, for WRITE_RETRY_MS (Windows: FILE open in another
-        // program), then reported as not saved; still retried after that)
-        const now = this.deps.now();
-        this.failingSince ??= now;
-        if (now - this.failingSince >= this.limits.WRITE_RETRY_MS) this.state = { state: "held", why: "error", detail: r.message };
+      case "deleted":
+        this.O = "";
+        if (r.prev) watch(r.prev, O, atO, T.seq);
+        this.holdFile("deleted", "FILE was deleted or moved");
+        break;
+      case "slots": this.hold("slots", "too many copies kept beside FILE, waiting for them to settle"); break;
+      case "stuck":
+      case "eexist": {
+        // (prev, the classified inode; prev2, a version not read yet, read now, before the new FILE is: in the
+        // order they were seen; tmp, T's own bytes, kept with the rest)
+        watch(r.prev, O, atO, T.seq);
+        if (r.why === "stuck" && r.tmp) watch(r.tmp, T.hash, T, T.seq);
+        if (r.outside) watch(r.outside, "", before, Infinity);
+        if (r.why === "stuck") { this.O = ""; this.hold("stuck", `FILE is missing: kept at ${r.kept.join(", ")}`); }
+        else this.hold("error", `a new FILE appeared during the save; kept ${r.kept.join(", ")}`);
+        if (r.outside) await this.readPrev(this.prevs[this.prevs.length - 1]);
         break;
       }
+      case "error":
+        // (a failing write retried, as the write queue paces it, for WRITE_RETRY_MS (Windows: FILE open in another
+        // program), then reported as not saved; still retried after that)
+        this.failing(r.message);
+        break;
     }
     return r;
   }

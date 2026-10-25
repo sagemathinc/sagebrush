@@ -36,6 +36,8 @@ export class Gate {
   private global: TokenBucket;
   private tabs = new Map<string, TokenBucket>();
   private inFlight = new Set<string>();
+  /** tabs gone while a submission of theirs was in flight: their buckets forgotten when it is released */
+  private gone = new Set<string>();
   queued = 0;
   queuedBytes = 0;
   constructor(private limits: Limits, private now: () => number) { this.global = new TokenBucket(limits.GLOBAL_RATE, now); }
@@ -69,6 +71,7 @@ export class Gate {
           if (done) return;
           done = true;
           this.inFlight.delete(tab);
+          if (this.gone.delete(tab)) this.tabs.delete(tab);
           this.queued--;
           this.queuedBytes -= bytes;
         },
@@ -76,6 +79,10 @@ export class Gate {
     };
   }
 
-  /** A tab gone: its bucket forgotten (a new connection starts full, as a new tab would). */
-  forget(tab: string) { if (!this.inFlight.has(tab)) this.tabs.delete(tab); }
+  /** A tab gone: its bucket forgotten (a new connection starts full, as a new tab would); with a submission in
+   * flight, once that is released (daybreak3 SLOW-DROP-1). */
+  forget(tab: string) { if (this.inFlight.has(tab)) this.gone.add(tab); else this.tabs.delete(tab); }
+
+  /** How many tabs have a bucket (for the tests: at most the connected tabs and those with a submission in flight). */
+  get buckets() { return this.tabs.size; }
 }
