@@ -88,9 +88,10 @@ export function startLimits(R: any, lim: LimitsText, lock = true): string | null
  * finalize as it is first imported (by the finite-field core, the engine or
  * user code: propose then raises, as when it was locked here), and
  * sys._sagebrush_limits is there from the start as before: reading it
- * imports _limits, whose finalize replaces this accessor with the snapshot
- * itself.  (An accessor, not a module __getattr__: sys gets no new
- * attribute that CPython's lacks, and a missing name costs what it did.)
+ * imports _limits and replaces this accessor with the snapshot itself;
+ * assigning or deleting it is a plain attribute's, and stays (_limits leaves
+ * it alone).  (An accessor, not a module __getattr__: sys gets no
+ * __getattr__, which CPython's lacks, and a missing name costs what it did.)
  */
 function lockDefaults(R: any): void {
   const sys = R.importModule("sys");

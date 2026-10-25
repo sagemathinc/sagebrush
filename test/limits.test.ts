@@ -257,6 +257,13 @@ test("no limits: _limits is not imported at startup, and locks at its first impo
     assert.equal(first.stdout, "False True False\nTrue True\nrefused True\n", first.stderr);
     const read = run(["-c", "import sys\nv = sys._sagebrush_limits\nimport _limits as L\nprint(v is L.DEFAULTS, L.finalized(), sys._sagebrush_limits is v)\n" + LOCKED_TRY], env);
     assert.equal(read.stdout, "True True True\nrefused True\n", read.stderr);
+    // assigned or deleted before _limits is imported, it stays so, as after a finalize at startup
+    const set = run(["-c", "import sys\nsys._sagebrush_limits = 5\nimport _limits as L\nprint(sys._sagebrush_limits, L.finalized())\ndel sys._sagebrush_limits\nprint(hasattr(sys, '_sagebrush_limits'))\n" + LOCKED_TRY], env);
+    assert.equal(set.stdout, "5 True\nFalse\nrefused True\n", set.stderr);
+    const gone = run(["-c", "import sys\ndel sys._sagebrush_limits\nimport _limits as L\nprint(hasattr(sys, '_sagebrush_limits'), L.finalized(), L.finalize() is L.DEFAULTS)\n"], env);
+    assert.equal(gone.stdout, "False True True\n", gone.stderr);
+    const seen = run(["-c", "import sys\nprint('_sagebrush_limits' in dir(sys), '_limits' in sys.modules)\nv = vars(sys)['_sagebrush_limits']\nimport _limits as L\nprint(v is L.DEFAULTS, sys._sagebrush_limits is v)\n"], env);
+    assert.equal(seen.stdout, "True False\nTrue True\n", seen.stderr);
     const other = run(["-c", "import sys\nprint(getattr(sys, 'nope', 7))\nsys.nope"], env);
     assert.equal(other.stdout, "7\n");
     assert.ok(other.stderr.includes("AttributeError: module 'sys' has no attribute 'nope'"), other.stderr);
