@@ -128,6 +128,23 @@ _rec, _problems = _real.check(C)
 check("domains on the real basis", _problems, [])
 check("the package's DOMAINS", C.DOMAINS, ("child", "cpython-heap", "js-arraybuffer", "js-heap", "wasm-engine", "wasm-instance"))
 
+# the engine's constrained total (no-cliffs plan C r10 section 1): the
+# least limit among the rows that constrain the engine's domain (natively,
+# this process's heap), with its status; joint when such a row also bounds a
+# host domain (natively the same heap, so always)
+C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [])
+check("engine total, nothing readable", C.engine_total(), {"bytes": 1 << 30, "status": "nominal", "basis": ["nominal"], "joint": False})
+C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [("a", 700 * MiB, 10 * MiB, ["cpython-heap"], ["cpython-heap"]), ("b", 300 * MiB, None, ["cpython-heap"], ["cpython-heap"])])
+check("engine total, the least limit (an unread usage still bounds)", C.engine_total(), {"bytes": 300 * MiB, "status": "observed", "basis": ["b"], "joint": True})
+C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [("w", 4 * GiB, 0, ["wasm-engine"], ["wasm-engine"])])
+check("engine total, another domain's row does not count", C.engine_total()["status"], "nominal")
+C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [("z", 0, 0, ["cpython-heap"], ["cpython-heap"]), ("a", 9 * MiB, 0, ["cpython-heap"], ["cpython-heap"])])
+check("engine total, an observed zero stays zero", C.engine_total(), {"bytes": 0, "status": "zero", "basis": ["z"], "joint": True})
+C._set_sources(root=root, rlimits={}, runtime=lambda: [])
+_t = C.engine_total()
+check("engine total, MemTotal from /proc", (_t["status"], _t["basis"], _t["joint"]), ("observed", ["MemAvailable"], True))
+C._set_sources()
+
 os.remove(root + "/proc/meminfo")
 os.rmdir(root + "/proc")
 os.rmdir(root)
