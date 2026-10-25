@@ -1,11 +1,11 @@
 {
  "v": 1,
- "reason": "#144 (plan-coldstart-limits r2): no runtime start imports lib/_limits.py any more when no limits are given, so the browser library puts it in the sage group (the finite-field core imports it) instead of core: core.pre -53488 and core.src -12952 for sage.pre +53924 and sage.src +13598, a move; plus the lazy lock in src/limits.ts",
+ "reason": "#144 (plan-coldstart-limits r2): no runtime start imports lib/_limits.py when no limits are given (the lazy lock in src/limits.ts and _limits.py); the browser library keeps _limits in core (web/build.ts records it in the py start), so a python session given limits doesn't fetch the sage group",
  "bytes": {
   "cli/lib.gen.js": 646,
   "cli/pyjs.cjs": 1099,
-  "engine/lib/sage.pre": 53924,
-  "engine/lib/sage.src": 13598,
+  "engine/lib/core.pre": 436,
+  "engine/lib/core.src": 646,
   "engine/sagebrush-worker.js": 420
  }
 }
