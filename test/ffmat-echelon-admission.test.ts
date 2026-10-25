@@ -31,7 +31,11 @@ function envelope(): boolean {
 }
 
 for (const [c, needsEnvelope, full] of [
-  ["bridge", false, false], ["correct", false, false], ["route", true, false], ["preflight", true, false],
+  ["bridge", false, false], ["correct", false, false],
+  // (route in four parts: each crosses into pyjs's Python elimination, about
+  // ten minutes together on CI's runners, so one process each)
+  ["route-ech", true, false], ["route-solve", true, false], ["route-solvek", true, false], ["route-inv", true, false],
+  ["preflight", true, false],
   ["integration", true, false], ["mem-T", true, true], ["mem-Tp", true, true], ["mem-W", true, true], ["negctl", false, true],
 ] as const) {
   test(`GF(p) echelon admission in pyjs: ${c}`, (t) => {

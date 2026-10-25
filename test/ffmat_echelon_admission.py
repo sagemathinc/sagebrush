@@ -125,7 +125,7 @@ def rank_r(F, m, n, r, seed=2):
 
 # ------------------------------------------------------------------ cases
 
-def case_route():
+def case_route_ech():
     F = GF(7)
     for n in (401, 1024):
         A = identity_matrix(F, n)
@@ -136,6 +136,10 @@ def case_route():
     A = identity_matrix(F, 1025)
     assert sent(A.rank) == (1025, [])
     ok("rank/det/echelon: engine at 401 and 1024, Python at 1025")
+
+
+def case_route_solve():
+    F = GF(7)
     # one right-hand side: [A | b] has m + 1 columns
     for m, want in ((1023, [(1023, 1024)]), (1024, [])):
         A = identity_matrix(F, m)
@@ -143,21 +147,40 @@ def case_route():
         x, s = sent(lambda: A.solve_right(b))
         assert x == b and s == want, (m, s)
     ok("solve_right, one RHS: engine at 1023, Python at 1024")
+
+
+def case_route_solvek():
+    F = GF(7)
     # k right-hand sides: [A | B] of m + k columns; past 1024 each column
     # goes alone (m + 1 columns), as for any [A | B] the engine doesn't take
-    m = 1000
+    # (m = 1022: k = 2 is m + k = 1024, one call; k = 3 is 1025, three
+    # columns alone: the same boundary as any m, at the fewest columns)
+    m = 1022
     A = identity_matrix(F, m)
-    for k, want in ((24, [(m, m + 24)]), (25, [(m, m + 1)] * 25)):
+    for k, want in ((2, [(m, m + 2)]), (3, [(m, m + 1)] * 3)):
         B = matrix(F, m, k, [(i + j) % 7 for i in range(m) for j in range(k)])
         X, s = sent(lambda: A.solve_right(B))
         assert X == B and s == want, (k, s[:3], len(s))
     ok("solve_right, k RHS: [A | B] at m + k = 1024, column by column at 1025")
+
+
+def case_route_inv():
+    F = GF(7)
     for n, want in ((512, [(512, 1024)]), (513, [])):
         A = identity_matrix(F, n)
         admits_operand(F, n, n, 3)
         X, s = sent(A.inverse)
         assert X == A and s == want, (n, s)
     ok("inverse: engine at 512, Python at 513")
+
+
+def case_route():
+    # (all four; pyjs runs them as separate cases: each crosses into the
+    # Python elimination, too slow there to share one process's time limit)
+    case_route_ech()
+    case_route_solve()
+    case_route_solvek()
+    case_route_inv()
 
 
 def preflight_shapes(F):
@@ -504,7 +527,8 @@ def case_interrupt():
 
 
 CASES = {
-    "route": case_route, "preflight": case_preflight, "integration": case_integration, "correct": case_correct,
+    "route": case_route, "route-ech": case_route_ech, "route-solve": case_route_solve, "route-solvek": case_route_solvek,
+    "route-inv": case_route_inv, "preflight": case_preflight, "integration": case_integration, "correct": case_correct,
     "bridge": case_bridge, "mem-T": case_mem_T, "mem-Tp": case_mem_Tp, "mem-W": case_mem_W, "negctl": case_negctl,
     "interrupt": case_interrupt,
 }
