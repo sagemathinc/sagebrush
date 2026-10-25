@@ -469,6 +469,107 @@ fn raster_decode<'py>(py: Python<'py>, png: &[u8]) -> PyResult<(u32, u32, u32, B
     }
 }
 
+// ---- live progress for Python routines (design-estimates-progress r4 §6):
+// the same functions as the browser's builtin _progress
+// (src/runtime/progress-module.ts), over engine/interrupt's native slots.
+
+static PROGRESS_CALLS: std::sync::Mutex<Vec<sagebrush_interrupt::progress::Call>> = std::sync::Mutex::new(Vec::new());
+
+fn with_call<T>(id: u64, f: impl FnOnce(&mut sagebrush_interrupt::progress::Call) -> T) -> Option<T> {
+    let mut calls = PROGRESS_CALLS.lock().unwrap_or_else(|e| e.into_inner());
+    calls.iter_mut().find(|c| c.id() == id).map(f)
+}
+
+/// A Python routine's call starts: its id (its parent: the innermost call
+/// running on this thread).
+#[pyfunction]
+fn progress_begin(op: &str) -> u64 {
+    use sagebrush_interrupt::progress;
+    let c = progress::begin(progress::name_index(op));
+    let id = c.id();
+    PROGRESS_CALLS.lock().unwrap_or_else(|e| e.into_inner()).push(c);
+    id
+}
+
+/// Its counts, from a JSON object (done, total, unit, stage, stage_index,
+/// stage_count, work, fraction, beyond_forecast, memory_now_bytes,
+/// memory_peak_bytes; null total, stage_count or fraction: unknown or
+/// absent), written at most every 0.5 s.
+#[pyfunction]
+fn progress_update(id: u64, update: &str) -> PyResult<()> {
+    use sagebrush_interrupt::progress;
+    let u: serde_json::Value = serde_json::from_str(update).map_err(|e| err(format!("progress_update: {e}")))?;
+    let num = |k: &str| u.get(k).and_then(|v| v.as_f64().map(|x| x.max(0.0) as u64));
+    with_call(id, |c| {
+        let r = c.report();
+        if let Some(v) = u.get("stage").and_then(|v| v.as_str()) {
+            r.stage = progress::name_index(v);
+        }
+        if let Some(v) = u.get("unit").and_then(|v| v.as_str()) {
+            r.unit = progress::name_index(v);
+        }
+        if let Some(v) = num("stage_index") {
+            r.stage_index = v;
+        }
+        if u.get("stage_count").is_some() {
+            r.stage_count = num("stage_count");
+        }
+        if let Some(v) = num("done") {
+            r.done = v;
+        }
+        if u.get("total").is_some() {
+            r.total = num("total");
+        }
+        if let Some(v) = num("work") {
+            r.work = v;
+        }
+        if u.get("fraction").is_some() {
+            r.fraction = u.get("fraction").and_then(|v| v.as_f64());
+        }
+        if let Some(v) = u.get("beyond_forecast").and_then(|v| v.as_bool()) {
+            r.beyond_forecast = v;
+        }
+        if let Some(v) = num("memory_now_bytes") {
+            r.memory_now_bytes = v;
+        }
+        if let Some(v) = num("memory_peak_bytes") {
+            r.memory_peak_bytes = v;
+        }
+        c.publish();
+    });
+    Ok(())
+}
+
+/// Its counts, written now.
+#[pyfunction]
+fn progress_flush(id: u64) {
+    with_call(id, |c| c.flush());
+}
+
+/// It ended (on success, an error or an interrupt alike): its slot is free.
+#[pyfunction]
+fn progress_end(id: u64) {
+    let c = {
+        let mut calls = PROGRESS_CALLS.lock().unwrap_or_else(|e| e.into_inner());
+        calls.iter().position(|c| c.id() == id).map(|k| calls.remove(k))
+    };
+    drop(c);
+}
+
+/// Every call in progress (Python routines' and the engines'), as a JSON
+/// array of progress/1 records; read without the GIL, so it never waits on
+/// a computation and any thread may call it.
+#[pyfunction]
+fn progress_snapshot(py: Python<'_>) -> String {
+    py.detach(sagebrush_interrupt::progress::snapshot_json)
+}
+
+/// The names behind the slots' indices, as JSON.
+#[pyfunction]
+fn progress_tables() -> String {
+    sagebrush_interrupt::progress::tables_json()
+}
+
 /// The native extension, `sagebrush._native`; each engine is a submodule,
 /// re-exported by the pure-Python package (python/sagebrush).
 #[pymodule]
@@ -501,6 +602,16 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     raster.add_function(wrap_pyfunction!(raster_render, &raster)?)?;
     raster.add_function(wrap_pyfunction!(raster_decode, &raster)?)?;
     m.add_submodule(&raster)?;
+    for f in [
+        wrap_pyfunction!(progress_begin, m)?,
+        wrap_pyfunction!(progress_update, m)?,
+        wrap_pyfunction!(progress_flush, m)?,
+        wrap_pyfunction!(progress_end, m)?,
+        wrap_pyfunction!(progress_snapshot, m)?,
+        wrap_pyfunction!(progress_tables, m)?,
+    ] {
+        m.add_function(f)?;
+    }
     m.add_function(wrap_pyfunction!(sym_call, m)?)?;
     m.add_function(wrap_pyfunction!(mpoly_call, m)?)?;
     m.add_function(wrap_pyfunction!(call, m)?)

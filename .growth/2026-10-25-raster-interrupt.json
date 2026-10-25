@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "E13g (#131): _sbraster.render and decode poll the interrupt flag on return, so a Stop during a PNG render raises KeyboardInterrupt from the call",
+ "bytes": {
+  "cli/pyjs.cjs": 72,
+  "engine/sagebrush-worker.js": 10
+ }
+}
