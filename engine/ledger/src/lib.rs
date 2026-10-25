@@ -189,7 +189,7 @@ pub fn set_total(total: Option<Total>) {
 pub fn total_from_wasm(bytes: f64, status: u32, joint: u32) -> Option<Total> {
     let ok = bytes.is_finite() && bytes >= 0.0 && bytes.fract() == 0.0 && bytes <= 9007199254740992.0;
     let status = TotalStatus::from_code(status)?;
-    (ok && joint <= 1).then(|| Total { bytes: bytes as u64, status, joint: joint == 1 })
+    (ok && joint <= 1).then_some(Total { bytes: bytes as u64, status, joint: joint == 1 })
 }
 
 /// Register the native host's total (the first registration stands): asked
@@ -206,7 +206,7 @@ pub fn total() -> Total {
     if let Some(host) = TOTAL_HOST.get() {
         let stale = {
             let s = state();
-            s.total_at.map_or(true, |t| t.elapsed() >= TOTAL_REFRESH)
+            s.total_at.is_none_or(|t| t.elapsed() >= TOTAL_REFRESH)
         };
         if stale {
             // (the host is asked without the lock: it may take the GIL)
