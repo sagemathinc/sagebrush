@@ -69,3 +69,36 @@ ok v1 all unlimited (12884901888, 17179869184)
 ok age fresh 0.0
 ok age reused (348966092, 0.249)
 ok age resampled 0.0
+ok vocabulary ('child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance')
+ok contradicted ['js-heap']
+ok contradicted rows [('sees', ['js-arraybuffer', 'js-heap'], ['js-arraybuffer', 'js-heap']), ('blind', [], ['js-arraybuffer'])]
+ok unknown row takes no part (['js-arraybuffer'], ('blind', [], ['js-arraybuffer']))
+ok browser ['wasm-engine']
+ok browser rows [('wasm engine', ['wasm-engine'], ['wasm-engine']), ('js heap', [], ['js-heap'])]
+ok three-tuple (1073741824, [], [('old', [], [])])
+ok nothing readable (None, [])
+ok cgroup and RLIMIT_AS ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']
+ok cgroup and RLIMIT_AS rows [('cgroup /user.slice/job', ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']), ('RLIMIT_AS', ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']), ('MemAvailable', ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'])]
+ok rlimits only (['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], [('RLIMIT_AS', ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']), ('RLIMIT_DATA', ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'])])
+ok poly's record (['js-heap', 'wasm-engine'], ['wasm-engine'])
+ok choice process only (2147483648, 536870912, 'process')
+ok choice job only (3221225472, 1073741824, 'job')
+ok choice both, process smaller (2147483648, 1887436800, 'process')
+ok choice both, job smaller (3221225472, 2936012800, 'job')
+ok choice both, a tie (2147483648, 1073741824, 'process')
+ok choice neither (None, None, None)
+ok windows process only row [('physical available', ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']), ('windows job', ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], 'process')]
+ok windows process only alone ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']
+ok windows process only with physical ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']
+ok windows job only row [('physical available', ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']), ('windows job', ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], 'job')]
+ok windows job only alone ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']
+ok windows job only with physical ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']
+ok windows both, process smaller row [('physical available', ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']), ('windows job', ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], 'process')]
+ok windows both, process smaller alone ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']
+ok windows both, process smaller with physical ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']
+ok windows both, job smaller row [('physical available', ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']), ('windows job', ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], 'job')]
+ok windows both, job smaller alone ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']
+ok windows both, job smaller with physical ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance']
+ok windows no scope row ('windows job', ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], None)
+ok windows no scope (['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'])
+ok windows totals unchanged [(17179869184, ['physical']), (2147483648, ['windows job']), (3221225472, ['windows job'])]

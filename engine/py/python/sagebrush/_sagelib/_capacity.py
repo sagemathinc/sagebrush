@@ -12,6 +12,12 @@ plan-d-memory-message-r3 §1d, amended by plan-d0-capacity-r2 §0:
   basis and what could not be read.  It decides no admission: it goes in a
   refusal's record and in estimates' `fits`.  An observation, not a
   reservation or a promise that an allocation succeeds.
+- capacity()["domains"]: the kinds of memory this observation vouches for
+  (plan-d0-domains-r2): each basis row says which DOMAINS its `used` counts
+  ("includes") and which its `limit` bounds ("constrains"); a domain is in
+  the set when a row with a finite remainder includes it and none with a
+  finite remainder constrains it without including it.  The PNG ledger
+  absorbs a resident record only for a domain in it (PNG plan r8 §2.1).
 - poly_share(): the one route that does follow free memory: the default
   budget of a polynomial factorization, floor(effective_guard_bytes / 2),
   or a quarter of what is free when that is more (a small session),
@@ -35,6 +41,15 @@ _RESERVE_BASE = 256 << 20
 _NO_CEILING = 1 << 62              # (a cgroup v1 "limit" this large is none)
 _SNAPSHOT_S = 0.1          # (the CPython total's snapshot)
 _POLY_SNAPSHOT_S = 0.25    # (poly's share: daybreak2's 250 ms, D0)
+
+# The kinds of memory a basis row may count or bound (plan-d0-domains-r2):
+# CPython's heap; descendant processes; the JS heap's objects; ArrayBuffer
+# backing stores; the Sagebrush engine instance's own Memory; any other
+# WebAssembly Memory (a raster instance).  One per kind, whatever the
+# runtime: a kind that can't occur in one is simply never charged there.
+DOMAINS = ("child", "cpython-heap", "js-arraybuffer", "js-heap", "wasm-engine", "wasm-instance")
+_ALL = list(DOMAINS)
+_SELF = [d for d in DOMAINS if d != "child"]   # (this process's memory)
 
 
 # ------------------------------------------------------------------ sources
@@ -215,8 +230,10 @@ def _rlimit(name):
 
 
 def _windows():
-    """The Windows sources: (job_limit or None, job_used, total, available),
-    or None when they can't be read (and then nothing finite is claimed)."""
+    """The Windows sources: (job_limit or None, job_used, total, available,
+    scope), or None when they can't be read (and then nothing finite is
+    claimed).  scope: which job limit the figures are, "process" or "job"
+    (_job_choice), None when not in a job or the source doesn't say."""
     w = _src.windows
     if w is None:
         try:
@@ -227,11 +244,44 @@ def _windows():
         total, available = w.physical()
         in_job = w.in_job()
         if not in_job:
-            return (None, None, total, available)
-        limit, used = w.job_limit()
-        return (limit, used, total, available)
+            return (None, None, total, available, None)
+        got = tuple(w.job_limit())
+        # (a source with no scope, as an older one: unknown, read
+        # conservatively by _job_domains)
+        limit, used, scope = got if len(got) == 3 else got + (None,)
+        return (limit, used, total, available, scope)
     except Exception:
         return None
+
+
+_PROCESS_MEMORY, _JOB_MEMORY = 0x100, 0x200   # (JOB_OBJECT_LIMIT_*_MEMORY)
+
+
+def _job_choice(flags, process_limit, process_used, job_limit, job_used):
+    """The job limit a Windows process is under: (limit, used, scope).  A
+    per-process limit (ProcessMemoryLimit, against this process's commit)
+    or one for the whole job (JobMemoryLimit, against PeakJobMemoryUsed);
+    with both, the one with the smaller remainder, the per-process one on a
+    tie; (None, None, None) with neither.  scope says which: a per-process
+    limit neither counts nor bounds a child's memory, a job's does
+    (plan-d0-domains-r2 §1.2a)."""
+    best = None
+    if flags & _PROCESS_MEMORY:
+        best = (process_limit, process_used, "process")
+    if flags & _JOB_MEMORY:
+        j = (job_limit, job_used, "job")
+        if best is None or j[0] - j[1] < best[0] - best[1]:
+            best = j
+    return best if best is not None else (None, None, None)
+
+
+def _job_domains(scope):
+    """(includes, constrains) of the Windows job row by its scope."""
+    if scope == "job":
+        return _ALL, _ALL
+    if scope == "process":
+        return _SELF, _SELF
+    return _SELF, _ALL   # (unknown: bounds the child, never seen counting it)
 
 
 class _CtypesWindows:
@@ -285,15 +335,8 @@ class _CtypesWindows:
         if not self.k32.QueryInformationJobObject(None, 9, c.byref(info), c.sizeof(info), None):
             raise OSError("QueryInformationJobObject")
         flags = info.BasicLimitInformation.LimitFlags
-        PROCESS_MEMORY, JOB_MEMORY = 0x100, 0x200
-        best = None
-        if flags & PROCESS_MEMORY:
-            best = (int(info.ProcessMemoryLimit), self._commit())
-        if flags & JOB_MEMORY:
-            j = (int(info.JobMemoryLimit), int(info.PeakJobMemoryUsed))
-            if best is None or j[0] - j[1] < best[0] - best[1]:
-                best = j
-        return best if best is not None else (None, None)
+        commit = self._commit() if flags & _PROCESS_MEMORY else None
+        return _job_choice(flags, int(info.ProcessMemoryLimit), commit, int(info.JobMemoryLimit), int(info.PeakJobMemoryUsed))
 
     def _commit(self):
         c, w = self.c, self.w
@@ -312,16 +355,27 @@ class _CtypesWindows:
 
 def _runtime_parts():
     """pyjs's own parts, from the runtime (never guessed here): [(source,
-    limit, used)]; [] in CPython."""
+    limit, used, includes, constrains)]; [] in CPython.  A part with no
+    domains, (source, limit, used) from an older engine or a test, gets
+    none: it can never widen capacity()["domains"]."""
     if _src.runtime is not None:
-        return list(_src.runtime())
-    if not hasattr(_sys, "_sagebrush_heap_limit"):
+        parts = list(_src.runtime())
+    elif not hasattr(_sys, "_sagebrush_heap_limit"):
         return []
-    try:
-        import _sbengine
-        return [tuple(p) for p in _sbengine.capacity_parts()]
-    except Exception:
-        return None
+    else:
+        try:
+            import _sbengine
+            parts = list(_sbengine.capacity_parts())
+        except Exception:
+            return None
+    out = []
+    for p in parts:
+        p = tuple(p)
+        if len(p) >= 5:
+            out.append((p[0], p[1], p[2], [d for d in DOMAINS if d in p[3]], [d for d in DOMAINS if d in p[4]]))
+        else:
+            out.append((p[0], p[1], p[2], [], []))
+    return out
 
 
 # ------------------------------------------------------------------ the total
@@ -353,7 +407,7 @@ def _machine_total():
         w = _windows()
         if w is None:
             return _NOMINAL, ["nominal"]
-        job, _, total, _ = w
+        job, _, total, _, _ = w
         limits.append(("physical", total))
         if job is not None:
             limits.append(("windows job", job))
@@ -384,11 +438,15 @@ def capacity():
     read); reserve_bytes is 256 MiB + ceil(bytes / 10)."""
     basis, unknown = [], []
 
-    def add(source, limit, used):
+    def add(source, limit, used, includes=_ALL, constrains=_ALL, **extra):
         if limit is None:
             return
         rem = None if used is None else max(0, int(limit) - int(used))
-        basis.append({"source": source, "limit": int(limit), "used": None if used is None else int(used), "remaining": rem})
+        # (a usage not read counts nothing)
+        row = {"source": source, "limit": int(limit), "used": None if used is None else int(used), "remaining": rem,
+               "includes": [] if used is None else list(includes), "constrains": list(constrains)}
+        row.update(extra)
+        basis.append(row)
         if rem is None:
             unknown.append(source + " usage")
 
@@ -398,10 +456,11 @@ def capacity():
             # (then the figure is unknown, whatever the other parts say: _record)
             unknown.append("windows-job")
         else:
-            job, job_used, total, available = w
+            job, job_used, total, available, scope = w
             add("physical available", total, total - available)
             if job is not None:
-                add("windows job", job, job_used)
+                inc, con = _job_domains(scope)
+                add("windows job", job, job_used, inc, con, scope=scope)
     else:
         groups = _cgroups()
         if groups is None:
@@ -418,7 +477,8 @@ def capacity():
                 if status is None:
                     status = _read("/proc/self/status") or ""
                 used = _kib_field(status, field)
-                add(r, v, used)
+                # (this process's address space: not a child's)
+                add(r, v, used, _SELF, _SELF)
         meminfo = _read("/proc/meminfo")
         avail, total = _kib_field(meminfo, "MemAvailable"), _kib_field(meminfo, "MemTotal")
         if avail is None or total is None:
@@ -429,8 +489,8 @@ def capacity():
     if parts is None:
         unknown.append("runtime")
     else:
-        for source, lim, used in parts:
-            add(source, lim, used)
+        for source, lim, used, inc, con in parts:
+            add(source, lim, used, inc, con)
     return _record(basis, unknown)
 
 
@@ -440,7 +500,17 @@ def _record(basis, unknown):
     # the others)
     n = None if ("windows-job" in unknown or not rems) else min(rems)
     return {"bytes": n, "basis": basis, "unknown_parts": unknown, "observed_at": _time.time(),
-            "reserve_bytes": reserve_bytes(n)}
+            "reserve_bytes": reserve_bytes(n), "domains": [] if n is None else _domains(basis)}
+
+
+def _domains(basis):
+    """The domains the rows with a finite remainder vouch for: included by
+    one of them (observed), and constrained by none that doesn't include
+    it (not contradicted) (plan-d0-domains-r2 §1.3)."""
+    rows = [b for b in basis if b["remaining"] is not None]
+    seen = {d for b in rows for d in b.get("includes", ())}
+    blind = {d for b in rows for d in b.get("constrains", ()) if d not in b.get("includes", ())}
+    return [d for d in DOMAINS if d in seen and d not in blind]
 
 
 def reserve_bytes(n):
