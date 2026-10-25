@@ -42,6 +42,13 @@ export const WAIT = {
 };
 /** seqs in one syncState call */
 export const STATE = { max: 1000 };
+/** (LIMIT-PR128-1-R2) a refusal's code as a row keeps it: the server's protocol vocabulary, ASCII [a-z0-9_], at most
+ * this many characters; anything else is kept as "other", so a row's width is bounded by construction */
+export const CODE = { max: 32 };
+const codeOk = (c: string) => c.length <= CODE.max && /^[a-z0-9_]+$/.test(c);
+/** (LIMIT-PR128-2) namespaces whose sender generation the hub remembers at most: the current one and the two the
+ * obsolete queue may hold */
+export const HUB = { namespaces: 3 };
 export const OBSOLETE = {
   /** namespaces whose ledgers wait to be deleted, at most (a switch waits for room) */
   max: 2,
@@ -93,15 +100,26 @@ export class Hub {
   private subs = new Set<(m: Msg, stale: boolean) => void>();
   /** the highest sender generation seen per (namespace, epoch): one fence for every wait of this Workspace's database
    * (CORR-PR128-2), raised by every message that carries a generation and by each wait's durable read */
-  private gens = new Map<string, number>();
-  /** `gen` noted for (ns, epoch); returns whether it is older than one already seen (stale) */
+  // (LIMIT-PR128-2: one current {epoch, gen} per namespace, at most HUB.namespaces of them, the least recently used
+  // dropped; a newer epoch replaces an older one, and a message of an older epoch is stale)
+  private gens = new Map<string, { epoch: number; gen: number }>();
+  /** `gen` noted for (ns, epoch); returns whether it is stale (an older epoch, or an older generation of this one) */
   fence(ns: string, epoch: number, gen: number): boolean {
-    const k = ns + "\u0000" + epoch, max = this.gens.get(k) ?? 0;
-    if (gen > max) this.gens.set(k, gen);
-    return gen < max;
+    const cur = this.gens.get(ns);
+    let stale = false, next = cur;
+    if (!cur || epoch > cur.epoch) next = { epoch, gen };
+    else if (epoch < cur.epoch) stale = true;
+    else if (gen > cur.gen) next = { epoch, gen };
+    else stale = gen < cur.gen;
+    this.gens.delete(ns);
+    this.gens.set(ns, next!);
+    while (this.gens.size > HUB.namespaces) this.gens.delete(this.gens.keys().next().value!);
+    return stale;
   }
   /** the highest generation seen for (ns, epoch) */
-  seen(ns: string, epoch: number): number { return this.gens.get(ns + "\u0000" + epoch) ?? 0; }
+  seen(ns: string, epoch: number): number { const cur = this.gens.get(ns); return cur && cur.epoch === epoch ? cur.gen : 0; }
+  /** (tests) how many namespaces the fence holds */
+  get fences() { return this.gens.size; }
   private ch: BroadcastChannel | null = null;
   /** this page's sender's in-flight seqs (the rows each record in flight owns), if this page is the sender */
   inflight: { ns: string; epoch: number; gen: number; seqs: Set<number> } | null = null;
@@ -127,6 +145,8 @@ export class Hub {
       const f = this.inflight;
       queueMicrotask(() => this.post({ t: "inflight", ns: f.ns, epoch: f.epoch, gen: f.gen, nonce: m.nonce, seqs: [...f.seqs] }));
     }
+    // (a lifecycle change: the namespace's fence moves to the new epoch, the old one's state dropped)
+    if (m.t === "lifecycle") this.fence(m.ns, m.toEpoch, 0);
     // (the generation fence, once per message, before any wait sees it)
     const stale = "gen" in m && typeof m.gen === "number" && "epoch" in m ? this.fence(m.ns, m.epoch as number, m.gen) : false;
     for (const f of this.subs) try { f(m, stale); } catch (e) { console.warn("sync ledger:", e); }
@@ -195,7 +215,8 @@ export class LedgerTx {
     if (!was || was.dseq !== dseq || isTerminalRow(was)) return;
     if (s === "accepted" && was.s !== "local") return;
     const { code: _c, reason: _r, ...base } = was;
-    this.write({ ...base, s, d: s === "accepted" ? 0 : 1, ...(more.code !== undefined ? { code: more.code } : {}), ...(more.reason !== undefined ? { reason: more.reason } : {}) }, was);
+    const code = more.code === undefined ? undefined : codeOk(more.code) ? more.code : "other";
+    this.write({ ...base, s, d: s === "accepted" ? 0 : 1, ...(code !== undefined ? { code } : {}), ...(more.reason !== undefined ? { reason: more.reason } : {}) }, was);
   }
   /** An undecided row superseded whoever owns it (a later held write, its identity gone, a rebuild). */
   async supersede(lseq: number, reason: string, by?: number) {
