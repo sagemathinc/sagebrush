@@ -2405,7 +2405,7 @@ async function t14Review3() {
   await w.mkdir("/fh", { collect: a });
   hub.post({ t: "sent", ns, epoch: epoch + 1, gen: 999, seqs: [] });
   hub.post({ t: "holder", ns, epoch: epoch + 1, gen: 999, rev: 0 });
-  check(hub.fences === 0, "review3: ordinary messages, of a future epoch, create no fence entry");
+  check(hub.fences <= 1 && hub.seen(ns, epoch) === 0, "review3: ordinary messages of a future epoch set nothing for the current epoch (at most a tentative entry)");
   const pa = w.waitSync(a, { level: "sent", signal: signalOf(), timeoutMs: 5000 });
   await sleep(50);
   hub.post({ t: "sent", ns, epoch, gen: lease.gen, seqs: a });
@@ -2423,16 +2423,28 @@ async function t14Review3() {
   hub.post({ t: "sent", ns, epoch, gen: lease.gen, seqs: b });
   const rb = await caught(pb) ?? await pb;
   check(rb.sync === "sent", "review3: after eviction, a future-epoch claim first: a real wait at the durable epoch takes its sent: " + J(rb.sync ?? String(rb)));
+  // (an ordinary message's generation, before any wait, is still kept for the next wait of its epoch (CORR-PR128-2,
+  // after eviction): tentative, then confirmed by the wait's durable read)
+  for (const lead of ["b", "c", "d"]) hub.post({ t: "lifecycle", ns: `${lead.repeat(16)}:2:${w.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
+  hub.post({ t: "holder", ns, epoch, gen: lease.gen + 5, rev: 0 });
+  const d = [];
+  await w.mkdir("/ft", { collect: d });
+  const pd = w.waitSync(d, { level: "sent", signal: new AbortController().signal });
+  await sleep(50);
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen + 4, seqs: d });
+  check(!(await settledYet(pd)) && hub.seen(ns, epoch) === lease.gen + 5, "review3: after eviction, a holder announced before the wait: its older generation's sent is dropped by a new wait");
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen + 5, seqs: d });
+  check((await pd).sync === "sent", "review3: …and the announced generation's sent counts");
   // (and still a fence: re-anchored, an older generation's sent after a newer holder is dropped by a real wait)
   const c = [];
   await w.mkdir("/fg", { collect: c });
   const ab = new AbortController();
   const pc = w.waitSync(c, { level: "sent", signal: ab.signal });
   await sleep(50);
-  hub.post({ t: "holder", ns, epoch, gen: lease.gen + 1, rev: 0 });
-  hub.post({ t: "sent", ns, epoch, gen: lease.gen, seqs: c });
+  hub.post({ t: "holder", ns, epoch, gen: lease.gen + 6, rev: 0 });
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen + 5, seqs: c });
   check(!(await settledYet(pc)) && hub.fences <= W.HUB.namespaces, "review3: re-anchored, an older generation's sent after a newer holder is dropped; the bound kept");
-  hub.post({ t: "sent", ns, epoch, gen: lease.gen + 1, seqs: c });
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen + 6, seqs: c });
   check((await pc).sync === "sent", "review3: …and the newer generation's sent counts");
 }
 
