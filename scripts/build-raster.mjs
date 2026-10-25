@@ -10,7 +10,9 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const target = process.env.CARGO_TARGET_DIR ?? join(root, "engine", "target");
-execFileSync("cargo", ["build", "--release", "-p", "sagebrush-raster", "--target", "wasm32-unknown-unknown"], {
+// (the allocator built for speed, as std builds its own: the heap is the
+// engine's hottest code, and at opt-level z it costs some 2.6% of a render)
+execFileSync("cargo", ["build", "--release", "-p", "sagebrush-raster", "--target", "wasm32-unknown-unknown", "--config", "profile.release.package.dlmalloc.opt-level=3"], {
   cwd: join(root, "engine"),
   stdio: "inherit",
   env: { ...process.env, CARGO_TARGET_DIR: target, CARGO_PROFILE_RELEASE_OPT_LEVEL: "z" },
