@@ -984,7 +984,8 @@ fn admit(b: &Budget, f: &[BigInt]) -> FResult<()> {
 /// g_i irreducible over Q, primitive, with positive leading coefficients;
 /// the content carries the sign of f's leading coefficient.  Returns
 /// (content, [(g_i, e_i)]) with the g_i sorted by degree, then coefficients
-/// from the top.  Within the default limits; a refusal is an error.
+/// from the top.  Within the default limits (Limits::DEFAULT: only the
+/// memory guard); a refusal is an error.
 pub fn try_factor(f: &[BigInt]) -> Result<(BigInt, Vec<(ZPoly, u32)>), FactorLimit> {
     try_factor_with(f, &Budget::default())
 }

@@ -31,8 +31,12 @@ test("proof=True: a disagreeing cross-check is a RuntimeError", () => {
 });
 
 test("proof=True: refusals and failures of the certificate are NotImplementedError", () => {
-  assert.equal(err("NumberField(x^2 + 3*10^12 + 1, 'a').class_number(proof=True)"),
-    "NotImplementedError: class_number with proof=True: beyond the limits of the unconditional certificate: the Minkowski bound for the norms of ideal class representatives is 2205315, above the limit 1000000 (2.205 times it)");
+  // (C0's follow-up: the certificate's limits are opt-in, so the refusal
+  // needs an explicit norm_max; the default attempts the certificate)
+  assert.equal(err("import sagebrush.nf; sagebrush.nf.bnf_certify([3*10^12 + 1, 0, 1], norm_max=10^6)"),
+    "ValueError: beyond the limits of the unconditional certificate: the Minkowski bound for the norms of ideal class representatives is 2205315, above the limit 1000000 (2.205 times it)");
+  assert.equal(err("K = NumberField(x^2 + 3*10^12 + 1, 'a'); K._bnf_proof = 'beyond the limits of the unconditional certificate: for this test'; K.class_number(proof=True)"),
+    "NotImplementedError: class_number with proof=True: beyond the limits of the unconditional certificate: for this test");
   assert.equal(err("K = NumberField(x^2 - 7, 'a'); K._bnf_proof = 'the certificate failed at l = 2: for this test'; K.regulator(proof=True)"),
     "NotImplementedError: regulator with proof=True: the certificate failed at l = 2: for this test");
   // the GRH answers stay available
