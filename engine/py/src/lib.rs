@@ -484,34 +484,43 @@ fn set_memory_share_source(source: Py<PyAny>) {
     });
 }
 
-/// Register the host's engine memory total (no-cliffs plan C r13): `source()`
-/// returns (bytes, status, joint, measures) or None, status 0 observed, 1
-/// zero, 2 nominal; measures, the binding rows' usage measures, a list of
-/// (kind, path) with kind "cgroup" (path: its usage file), "address_space",
-/// "data_segment", "physical", "windows_job" or "windows_physical".  The
-/// ledger asks when the total is 100 ms old, with the GIL taken for it and
-/// its own lock not held; an exception or a malformed answer is none (the
-/// nominal total, uncertified).  The first registration stands.
+/// Register the host's engine memory total (no-cliffs plan C r13, r17):
+/// `source()` returns (bytes, status, joint, rows) or None, status 0
+/// observed, 1 zero, 2 nominal; rows, EVERY row that constrains the
+/// engine's domain (not only those at the least figure), a list of (kind,
+/// path, figure) with kind "cgroup" (path: its usage file), "address_space",
+/// "data_segment", "physical", "windows_job", "windows_physical", or
+/// anything else for a row that can't be measured (then the ledger is not
+/// certified).  The ledger asks when the total is 100 ms old, with the GIL
+/// taken for it and its own lock not held; an exception or a malformed
+/// answer is none (the nominal total, uncertified).  The first
+/// registration stands.
 #[pyfunction]
 fn set_memory_total_source(source: Py<PyAny>) {
     sagebrush_ledger::set_total_host(move || {
         Python::attach(|py| {
             let r = source.call0(py).ok()?;
-            let (bytes, status, joint, measures) = r.extract::<Option<(u64, u32, bool, Vec<(String, Option<String>)>)>>(py).ok().flatten()?;
-            let total = sagebrush_ledger::Total { bytes, status: sagebrush_ledger::TotalStatus::from_code(status)?, joint };
-            let kinds = measures
+            // (bytes, status, joint, [(kind, path, figure)]): every applicable
+            // row (no-cliffs plan C r17 section 1.3), an unknown kind kept as
+            // Unknown so that the ledger fails closed rather than drops it
+            let (bytes, status, joint, rows) = r.extract::<Option<(u64, u32, bool, Vec<(String, Option<String>, u64)>)>>(py).ok().flatten()?;
+            let total = sagebrush_ledger::Total { bytes, status: sagebrush_ledger::TotalStatus::from_code(status)?, joint, uncertified: false };
+            let rows = rows
                 .into_iter()
-                .map(|(k, p)| match (k.as_str(), p) {
-                    ("cgroup", Some(p)) => Some(sagebrush_ledger::MeasureKind::Cgroup(p)),
-                    ("address_space", _) => Some(sagebrush_ledger::MeasureKind::AddressSpace),
-                    ("data_segment", _) => Some(sagebrush_ledger::MeasureKind::DataSegment),
-                    ("physical", _) => Some(sagebrush_ledger::MeasureKind::Physical),
-                    ("windows_job", _) => Some(sagebrush_ledger::MeasureKind::WindowsJob),
-                    ("windows_physical", _) => Some(sagebrush_ledger::MeasureKind::WindowsPhysical),
-                    _ => None,
+                .map(|(k, p, figure)| {
+                    let kind = match (k.as_str(), p) {
+                        ("cgroup", Some(p)) => sagebrush_ledger::MeasureKind::Cgroup(p),
+                        ("address_space", _) => sagebrush_ledger::MeasureKind::AddressSpace,
+                        ("data_segment", _) => sagebrush_ledger::MeasureKind::DataSegment,
+                        ("physical", _) => sagebrush_ledger::MeasureKind::Physical,
+                        ("windows_job", _) => sagebrush_ledger::MeasureKind::WindowsJob,
+                        ("windows_physical", _) => sagebrush_ledger::MeasureKind::WindowsPhysical,
+                        _ => sagebrush_ledger::MeasureKind::Unknown,
+                    };
+                    sagebrush_ledger::Row { kind, figure }
                 })
-                .collect::<Option<Vec<_>>>()?;
-            Some((total, kinds))
+                .collect();
+            Some((total, rows))
         })
     });
 }

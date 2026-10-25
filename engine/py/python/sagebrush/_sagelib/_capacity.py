@@ -76,13 +76,13 @@ _src = _Sources()
 def _set_sources(**kw):
     """Tests only: replace the sources (keyword names as in _Sources);
     _set_sources() restores the real ones."""
-    global _src, _poly_snap, _total_snap, _engine_snap, _cg_dirs
+    global _src, _poly_snap, _total_snap, _engine_snap, _rows_snap, _cg_dirs
     _src = _Sources()
     for k, v in kw.items():
         if not hasattr(_Sources, k):
             raise TypeError("no source %r" % k)
         setattr(_src, k, v)
-    _poly_snap = _total_snap = _engine_snap = _cg_dirs = None
+    _poly_snap = _total_snap = _engine_snap = _rows_snap = _cg_dirs = None
 
 
 try:
@@ -476,6 +476,51 @@ def engine_total():
 
 
 _engine_snap = None
+
+
+def engine_rows():
+    """Every row that constrains the engine's domain, for the ledger's
+    certification (no-cliffs plan C r17 section 1.2): {"rows": [{"source",
+    "figure", "joint"}], "complete"}, from a snapshot at most 100 ms old.
+
+    - rows: each applicable row (its `constrains` includes the engine's
+      domain), joint when it also constrains a host domain;
+    - complete: False when a constraint's figure could not be read
+      (capacity's unknown parts, other than a row's unread usage) or a
+      row's domains are unknown (an older part with none): then the
+      ledger is not certified.
+
+    engine_total keeps its contract (the rows at the least figure only);
+    this is the view of all of them, which certification needs: a larger
+    joint row can bind through its usage."""
+    global _rows_snap
+    now = _src.clock()
+    if _rows_snap is None or now - _rows_snap[0] >= _SNAPSHOT_S:
+        domain = _engine_domain()
+        host = [d for d in _SELF if d not in ("wasm-engine", "wasm-instance")]
+        rec = capacity()
+        complete = all(u.endswith(" usage") for u in rec["unknown_parts"])
+        rows = []
+        for b in rec["basis"]:
+            if not b["constrains"]:
+                complete = False  # (its domains unknown: it may constrain the engine)
+            elif domain in b["constrains"]:
+                rows.append({"source": b["source"], "figure": b["limit"], "joint": any(d in host for d in b["constrains"])})
+        _rows_snap = (now, {"rows": rows, "complete": complete})
+    out = _rows_snap[1]
+    return {"rows": [dict(r) for r in out["rows"]], "complete": out["complete"]}
+
+
+_rows_snap = None
+
+
+def engine_uncertified():
+    """For the WebAssembly ledger (no-cliffs plan C r17 section 1.3): True
+    when some applicable row is joint (the instance has no fresh measure of
+    a row that also bounds a host domain) or the classification is
+    incomplete; False only when every applicable row is engine-only."""
+    r = engine_rows()
+    return (not r["complete"]) or any(row["joint"] for row in r["rows"])
 
 
 # ------------------------------------------------------------------ free now

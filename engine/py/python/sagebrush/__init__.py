@@ -91,24 +91,31 @@ _TOTAL_STATUS = {"observed": 0, "zero": 1, "nominal": 2}
 
 
 def _capacity_total():
-    """The engine's memory total for its ledger (no-cliffs plan C r13):
-    (bytes, status code, joint, measures) from _capacity.engine_total, the
-    measures naming each binding row's own usage measure (a cgroup's usage
-    file, RLIMIT_AS, RLIMIT_DATA, the physical row, Windows's rows); asked
-    when the engine's total is 100 ms old."""
+    """The engine's memory total for its ledger (no-cliffs plan C r13, r17):
+    (bytes, status code, joint, rows) from _capacity.engine_total and
+    engine_rows, the rows being EVERY row that constrains the engine's
+    domain as (kind, path, figure), the kind naming the row's own usage
+    measure (a cgroup's usage file, RLIMIT_AS, RLIMIT_DATA, the physical
+    row, Windows's rows); a row with no measure, or an incomplete
+    classification, is an "unknown" row (the ledger is then not
+    certified).  Asked when the engine's total is 100 ms old."""
     C = _capacity_module()
     t = C.engine_total()
+    r = C.engine_rows()
     dirs = {name: (kind, d) for kind, name, d in (C._cgroup_dirs() or [])}
-    measures = []
-    for src in t["basis"]:
+    rows = []
+    for row in r["rows"]:
+        src, figure = row["source"], int(row["figure"])
         if src in dirs:
             kind, d = dirs[src]
-            measures.append(("cgroup", d + ("/memory.current" if kind == "v2" else "/memory.usage_in_bytes")))
+            rows.append(("cgroup", d + ("/memory.current" if kind == "v2" else "/memory.usage_in_bytes"), figure))
         elif src in _MEASURES:
-            measures.append((_MEASURES[src], None))
-        elif src != "nominal":
-            measures.append(("unknown", None))
-    return int(t["bytes"]), _TOTAL_STATUS[t["status"]], bool(t["joint"]), measures
+            rows.append((_MEASURES[src], None, figure))
+        else:
+            rows.append(("unknown", None, figure))
+    if not r["complete"]:
+        rows.append(("unknown", None, 0))
+    return int(t["bytes"]), _TOTAL_STATUS[t["status"]], bool(t["joint"]), rows
 
 
 # (D0's row names -> the binding row's usage measure)
