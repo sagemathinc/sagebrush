@@ -11,7 +11,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { hasSite, siteDir } from "./site-dir.mts";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { framePolicy, pagePolicy, runnerPolicy } from "./csp-policy.mts";
+import { framePolicy, pagePolicy, runnerPolicy, shellWorkerPolicy } from "./csp-policy.mts";
 import { FILES_RUNNER_SCRIPT } from "./notebook/files-runner.js";
 
 const here = dirname(new URL(import.meta.url).pathname);
@@ -72,6 +72,8 @@ export function headersFor(dir: string): string {
   // policy would refuse anyway, and which a frame in others' pages shouldn't
   // have; the frame may be embedded by any page, even a cross-origin isolated
   // one: CORP)
+  // the shell worker's script: a worker's policy is its own response's (plan-bash-shell r3 §6)
+  if (existsSync(join(dir, "shell", "worker-boot.js"))) rules.push(["/shell/worker-boot.js", shellWorkerPolicy()]);
   const extra = (pattern: string) => (pattern === "/runner/*" || pattern === "/frame/*" ? "\n  Cache-Control: public, max-age=0, must-revalidate, no-transform" : "") + (pattern === "/frame/*" ? "\n  Cross-Origin-Resource-Policy: cross-origin" : "");
   // web/_headers, but a rule for a path a policy is written for goes into
   // that one rule: Cloudflare keeps only the last rule given for a path, so
