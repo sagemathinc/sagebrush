@@ -135,9 +135,9 @@ if (!runsProgram(argv)) {
     const now = Date.now();
     // (before the worker has handed over its flag, or a second Ctrl-C the
     // program has not seen yet: SIGINT's default action)
-    if (intr === null || (Atomics.load(intr, 0) !== 0 && now - last < 2000)) return die();
+    if (intr === null || ((Atomics.load(intr, 0) & 1) !== 0 && now - last < 2000)) return die();
     last = now;
-    Atomics.store(intr, 0, 1);
+    Atomics.or(intr, 0, 1); // (bit 0, Ctrl-C: the word's other bits left, src/runtime/interrupt.ts)
     Atomics.notify(intr, 0); // (a time.sleep waits on the flag)
   });
   // (the worker turns on the compile cache before it loads the bundle, as

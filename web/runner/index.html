@@ -77,7 +77,7 @@ Stop by message.
         if (d && typeof d.runnerInterrupt === "number") {
           if (flag) {
             Atomics.store(flag, 1, d.runnerInterrupt);
-            Atomics.store(flag, 0, 1);
+            Atomics.or(flag, 0, 1);
           }
           return;
         }
