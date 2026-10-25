@@ -1844,7 +1844,733 @@ async function scanAtomic() {
   await stop(c);
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision };
+// ---- task #14: each op's sync state (plan-task14-is-op-confirmed r6, delta 1 r2): the ledger, syncState, waitSync,
+// and the verbs' collectors
+
+const signalOf = () => new AbortController().signal;
+const caught = async (p) => { try { await p; return null; } catch (e) { return e; } };
+const settledYet = async (p, ms = 300) => Promise.race([p.then(() => true, () => true), sleep(ms).then(() => false)]);
+const rawTx = (db, stores, f) => new Promise((ok, no) => { const tx = db.transaction(stores, "readwrite"); let out; Promise.resolve(f(tx)).then((v) => { out = v; }, (e) => { try { tx.abort(); } catch {} no(e); }); tx.oncomplete = () => ok(out); tx.onerror = () => no(tx.error); });
+const rawPut = (db, store, v, k) => rawTx(db, [store], (tx) => { tx.objectStore(store).put(v, k); });
+/** A namespace of this device's (the form welcome's has), its lease taken, its ledger seeded: no server needed. */
+async function localNs(w, lead = "ab") {
+  const ns = `${lead.padEnd(16, "0")}:1:${w.device}`;
+  const lease = await W.switchTo(w, ns);
+  const ob = new W.Outbox(w, lease);
+  await ob.begin(await w.lastSeq());
+  await W.seedLedger(w, ns, W.wireOf);
+  return { ns, lease, ob };
+}
+
+async function t14Collect() {
+  // (the six verbs' collectors: exactly the call's own commits, once, before it returns; sync on or off)
+  const nm = names();
+  const w = await fresh(nm);
+  const seqsOf = async (col) => (await w.ops()).filter((o) => col.includes(o.seq)).map((o) => o.op + " " + o.path);
+  const a = [], b = [], other = [];
+  await Promise.all([w.create("/c1.txt", { content: "one", collect: a }), w.mkdir("/cm/x/y", { collect: b }), w.create("/c3.txt", { content: "three" }).then(() => w.mkdir("/c4")).then(() => other.push(1))]);
+  check(J(await seqsOf(a)) === J(["create /c1.txt"]) && a.length === 1, "collect: a create collects its one op, while other calls run: " + J(await seqsOf(a)));
+  check(J(await seqsOf(b)) === J(["mkdir /cm", "mkdir /cm/x", "mkdir /cm/x/y"]) && b.length === 3, "collect: a nested mkdir collects each folder it made, in order: " + J(await seqsOf(b)));
+  const r = [], wr = [], d = [], rm = [];
+  await w.rename("/c1.txt", "/c1b.txt", { collect: r });
+  await w.write("/c1b.txt", "one again", { collect: wr });
+  await w.duplicate("/c1b.txt", undefined, { collect: d });
+  await w.remove("/c3.txt", undefined, undefined, { collect: rm });
+  check(J(await seqsOf(r)) === J(["rename /c1.txt"]) && J(await seqsOf(wr)) === J(["write /c1b.txt"]) && d.length === 1 && J(await seqsOf(rm)) === J(["mkdir /Trash", "remove /c3.txt"]), "collect: rename, write, duplicate and remove each collect their own ops (remove's first Trash folder with it): " + J({ r: await seqsOf(r), wr: await seqsOf(wr), d: await seqsOf(d), rm: await seqsOf(rm) }));
+  const all = [...a, ...b, ...r, ...wr, ...d, ...rm];
+  check(new Set(all).size === all.length, "collect: no seq collected twice, nor by two calls");
+  // (a call refused before it commits collects nothing; one refused after an earlier commit keeps that commit's)
+  const none = [];
+  check((await caught(w.create("/c1b.txt", { content: "taken", collect: none })))?.code === "exists" && none.length === 0, "collect: a refused create collects nothing");
+  const bad = await caught(w.mkdir("/z", { collect: "no" }));
+  check(bad?.code === "invalid", "collect: a collector that isn't a list is refused: " + bad?.code);
+  // (an agent's verbs never take a collector)
+  const g = [], ag = w.forAgent("agent:t14");
+  await ag.mkdir("/ag", { collect: g });
+  await ag.create("/ag/f.txt", { content: "a", collect: g });
+  check(g.length === 0 && !!(await w.stat("/ag/f.txt")), "collect: forAgent's verbs drop it (the host's only): " + J(g));
+  // (another tab's changes, told here by the channel, are never this call's)
+  const w2 = await fresh(nm);
+  const mine = [];
+  await Promise.all([w.mkdir("/t1", { collect: mine }), w2.mkdir("/t2"), w2.mkdir("/t3")]);
+  check(J(await seqsOf(mine)) === J(["mkdir /t1"]), "collect: another tab's commits, told here meanwhile, not collected: " + J(await seqsOf(mine)));
+}
+
+async function t14Typed() {
+  // (refusals immediate and typed, before anything is allocated; sync off answers none at once)
+  const w = await fresh();
+  const s = signalOf();
+  const big = Array.from({ length: 10_001 }, (_, i) => i + 1);
+  const e1 = await caught(w.waitSync(big, { signal: s }));
+  check(e1?.code === "limit" && e1.max === 10_000, "typed: 10,001 seqs is limit {max: 10000}: " + J({ code: e1?.code, max: e1?.max }));
+  const e2 = await caught(w.syncState(big.slice(0, 1001)));
+  check(e2?.code === "limit" && e2.max === 1000, "typed: syncState with 1,001 seqs is limit {max: 1000}");
+  for (const [what, seqs] of [["empty", []], ["duplicate", [1, 1]], ["fractional", [1.5]], ["zero", [0]], ["not a list", "1"]]) {
+    const e = await caught(w.waitSync(seqs, { signal: s }));
+    check(e?.code === "invalid", `typed: ${what} seqs is invalid: ${e?.code}`);
+  }
+  for (const t of [0, -1, 1.5, NaN, Infinity, 2 ** 31, "5"]) {
+    const e = await caught(w.waitSync([1], { signal: s, timeoutMs: t }));
+    check(e?.code === "invalid", `typed: timeoutMs ${String(t)} is invalid: ${e?.code}`);
+  }
+  check((await caught(w.waitSync([1], {})))?.code === "invalid" && (await caught(w.waitSync([1], { level: "done", signal: s })))?.code === "invalid", "typed: no signal, or an unknown level, is invalid");
+  const ab = new AbortController();
+  ab.abort();
+  check((await caught(w.waitSync([1], { signal: ab.signal })))?.name === "AbortError", "typed: an already aborted signal rejects at once");
+  const off = await w.waitSync([1, 2], { signal: s });
+  const offState = await w.syncState([1, 2]);
+  check(off.sync === "none" && off.counts.none === 2 && offState.every((x) => x.sync === "none" && x.reason === "sync-off"), "typed: sync off: none at once, sync-off: " + J({ off, offState }));
+  check(W.waitCount(w) === 0, "typed: nothing registered by any of these");
+  // (sync on, the ops unsent: waits stay pending; the 17th is busy; abort and timeout release everything)
+  const { ns } = await localNs(w, "a1");
+  const col = [];
+  await w.mkdir("/pending", { collect: col });
+  const l0 = W.hubOf(w.ws).listeners;
+  const acs = Array.from({ length: 16 }, () => new AbortController());
+  const ps = acs.map((a, i) => w.waitSync(col, { signal: a.signal, ...(i === 0 ? { timeoutMs: 2 ** 31 - 1 } : {}) }).catch((e) => e));
+  await sleep(100);
+  const e17 = await caught(w.waitSync(col, { signal: s }));
+  check(W.waitCount(w) === 16 && e17?.code === "busy" && e17.max === 16, "typed: 16 waits pending, the 17th busy {max: 16}: " + J({ n: W.waitCount(w), code: e17?.code }));
+  for (const a of acs) a.abort();
+  const outs = await Promise.all(ps);
+  check(outs.every((e) => e?.name === "AbortError" && e.counts?.local === 1), "typed: aborted, each with its counts");
+  const t1 = await caught(w.waitSync(col, { signal: s, timeoutMs: 1 }));
+  check(t1?.timeout === true && t1.counts.local === 1, "typed: timeoutMs 1 times out, with the counts");
+  check(W.waitCount(w) === 0 && W.hubOf(w.ws).listeners === l0, "typed: every exit released its slot and listener: " + J({ n: W.waitCount(w), l: W.hubOf(w.ws).listeners, l0 }));
+  const st = await w.syncState(col);
+  check(st[0].sync === "local" && !st[0].reason, "typed: an unscanned local op is local: " + J(st));
+  void ns;
+}
+
+async function t14Ladder() {
+  // (local, sent, accepted, confirmed against the real server; sent with its ack held back; a disconnect)
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => c.status.state === "synced"), "ladder: synced");
+  const l0 = W.hubOf(w.ws).listeners;
+  const col = [];
+  await w.create("/l1.txt", { content: "one", collect: col });
+  await w.mkdir("/ld", { collect: col });
+  const r = await w.waitSync(col, { level: "confirmed", signal: signalOf(), timeoutMs: 20_000 });
+  const st = await w.syncState(col);
+  check(r.sync === "confirmed" && r.counts.confirmed === 2 && st.every((x) => x.sync === "confirmed"), "ladder: confirmed (the echo read back): " + J({ r, st }));
+  // (sent: its ack dropped, the socket kept: it stays sent, never accepted, until the reconnect)
+  await ctl("set", { set: { dropAcks: 1 } });
+  const s1 = [];
+  await w.mkdir("/s1", { collect: s1 });
+  const sent = await w.waitSync(s1, { level: "sent", signal: signalOf(), timeoutMs: 15_000 });
+  check(sent.sync === "sent" && sent.counts.sent === 1, "ladder: a sent wait resolves on the send, its ack held back: " + J(sent));
+  check((await w.syncState(s1))[0].sync === "sent", "ladder: syncState says sent (this page sends)");
+  const tm = await caught(w.waitSync(s1, { level: "accepted", signal: signalOf(), timeoutMs: 1500 }));
+  check(tm?.timeout === true && tm.counts.sent === 1, "ladder: accepted not reached without its ack: " + J(tm?.counts));
+  const p = w.waitSync(s1, { level: "accepted", signal: signalOf(), timeoutMs: 20_000 });
+  await ctl("closeAll");
+  const after = await p;
+  check(after.sync === "accepted" || after.sync === "confirmed", "ladder: after a disconnect, resent, then accepted: " + J(after));
+  check(W.waitCount(w) === 0 && W.hubOf(w.ws).listeners === l0, "ladder: nothing left registered");
+  await stop(c);
+}
+
+async function t14Refused() {
+  // (a refusal: refused with its code, ranked worst; the op after it accepted)
+  await account();
+  const w = await fresh();
+  const c0 = client(w);
+  check(await until(() => c0.status.state === "synced"), "refused: synced");
+  await stop(c0);
+  const fc = [], ac = [];
+  const f = await w.create("/rf.txt", { content: "bytes gone", collect: fc });
+  await w.mkdir("/rafter", { collect: ac });
+  await rawTx(w.ws, ["fileBytes"], (tx) => tx.objectStore("fileBytes").delete(f.fid));
+  const c = client(w);
+  const r = await w.waitSync([...fc, ...ac], { signal: signalOf(), timeoutMs: 20_000 });
+  const st = await w.syncState(fc);
+  check(r.sync === "refused" && r.counts.refused === 1 && r.counts.accepted + r.counts.confirmed === 1, "refused: the wait resolves, refused ranked worst: " + J(r));
+  check(st[0].sync === "refused" && st[0].code === "missing", "refused: its code kept: " + J(st));
+  await stop(c);
+}
+
+async function t14Rebuild() {
+  // (a refusal, then the rebuild: a refused or confirmed row is never relabelled)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "rebuild: synced");
+  const kept = [];
+  await w.mkdir("/kept", { collect: kept });
+  check(await until(() => settled(w, c0)), "rebuild: an op confirmed first");
+  await stop(c0);
+  const gone = [];
+  const f = await w.create("/rgone.txt", { content: "bytes gone", collect: gone });
+  await rawTx(w.ws, ["fileBytes"], (tx) => tx.objectStore("fileBytes").delete(f.fid));
+  const c = viewClient(w);
+  try {
+    check(await until(() => c.stats.rebuildPasses >= 1 && !c.debug().halted && c.status.state === "synced", 20_000), "rebuild: refused, rebuilt, resumed");
+    const st = await w.syncState([...kept, ...gone]);
+    check(st[0].sync === "confirmed" && st[1].sync === "refused", "rebuild: the confirmed and the refused rows unchanged by the rebuild: " + J(st));
+  } finally {
+    await stop(c);
+  }
+}
+
+async function t14Lifecycle() {
+  // (off ends the epoch's waits as none; a delayed lifecycle message of an older epoch ends no newer wait)
+  const w = await fresh();
+  const { ns } = await localNs(w, "a2");
+  const col = [];
+  await w.mkdir("/lc", { collect: col });
+  const p = w.waitSync(col, { signal: signalOf() });
+  check(!(await settledYet(p)), "lifecycle: pending while the op is unsent");
+  await W.syncOff(w);
+  const r = await p;
+  check(r.sync === "none" && r.counts.none === 1, "lifecycle: sync off ends the wait, none: " + J(r));
+  // (on again, same namespace: a new epoch; an old message for the epoch before is ignored)
+  await W.switchTo(w, ns);
+  const epoch = await metaGet(w.ws, "sync:epoch");
+  const ab = new AbortController();
+  const p2 = w.waitSync(col, { signal: ab.signal });
+  W.hubOf(w.ws).post({ t: "lifecycle", ns, fromEpoch: epoch - 1, toEpoch: epoch, kind: "off" });
+  check(!(await settledYet(p2)), "lifecycle: a delayed message for the epoch before ends no newer wait");
+  W.hubOf(w.ws).post({ t: "lifecycle", ns, fromEpoch: epoch, toEpoch: epoch + 1, kind: "switch" });
+  const r2 = await p2;
+  check(r2.sync === "none", "lifecycle: …its own epoch's does: " + J(r2));
+}
+
+async function t14Fencing() {
+  // (in-memory events fenced by the lease generation; durable ones only hints: a rev gap re-reads the rows)
+  const w = await fresh();
+  const { ns } = await localNs(w, "a3");
+  const epoch = (await metaGet(w.ws, "sync:epoch")) ?? 0;
+  const hub = W.hubOf(w.ws);
+  const a = [], b = [];
+  await w.mkdir("/fa", { collect: a });
+  await w.mkdir("/fb", { collect: b });
+  const pa = w.waitSync(a, { level: "sent", signal: signalOf(), timeoutMs: 5000 });
+  await sleep(50);
+  hub.post({ t: "sent", ns, epoch, gen: 50, seqs: a });
+  check((await pa).sync === "sent", "fencing: a sent event of the current generation counts");
+  const ab = new AbortController();
+  const pb = w.waitSync(b, { level: "sent", signal: ab.signal });
+  await sleep(50);
+  hub.post({ t: "reset", ns, epoch, gen: 51 });
+  hub.post({ t: "sent", ns, epoch, gen: 50, seqs: b });
+  check(!(await settledYet(pb)), "fencing: an old holder's sent, after the new generation's reset, dropped");
+  hub.post({ t: "sent", ns, epoch: epoch + 7, gen: 99, seqs: b });
+  check(!(await settledYet(pb)), "fencing: a message of another epoch dropped");
+  hub.post({ t: "inflight", ns, epoch, gen: 51, nonce: "not-mine", seqs: b });
+  check(!(await settledYet(pb)), "fencing: a hello reply for another wait's nonce ignored");
+  hub.post({ t: "sent", ns, epoch, gen: 51, seqs: b });
+  check((await pb).sync === "sent", "fencing: the new generation's sent counts");
+  // (a hint: the rows read again; what they say is the answer, whatever the event carried)
+  const pc = w.waitSync(a, { level: "confirmed", signal: signalOf(), timeoutMs: 5000 });
+  await sleep(50);
+  const rev = (await metaGet(w.ws, `sync:${ns}:ledgerRev`)) ?? 0;
+  await rawPut(w.ws, "syncLedger", { ns, lseq: a[0], s: "confirmed", d: 1, dseq: 1 });
+  await rawPut(w.ws, "meta", rev + 2, `sync:${ns}:ledgerRev`);
+  hub.post({ t: "rows", ns, epoch, rev: rev + 2, items: [] });
+  check((await pc).sync === "confirmed", "fencing: a rev gap re-reads the rows, which answer");
+}
+
+async function t14Seed() {
+  // (the upgrade's seeding: gated until done; a record owns its op only as its sole claimant with every field but
+  // base the same; what can't be proven is before-ledger, never a guessed accepted)
+  const w = await fresh();
+  const ns = `${"a4".padEnd(16, "0")}:1:${w.device}`;
+  const lease = await W.switchTo(w, ns);
+  const ob = new W.Outbox(w, lease);
+  await ob.begin(await w.lastSeq());
+  await w.create("/s1.txt", { content: "one" });
+  await w.mkdir("/s2");
+  await w.create("/s3.txt", { content: "three" });
+  await ob.scan();
+  // (the state before the upgrade: records, no ledger)
+  const recs = await ob.records();
+  await rawTx(w.ws, ["syncLedger", "meta"], (tx) => {
+    tx.objectStore("syncLedger").clear();
+    for (const k of ["ledgerCount", "ledgerFloor", "ledgerFrom", "ledgerSeeded", "ledgerSkips", "ledgerRev"]) tx.objectStore("meta").delete(`sync:${ns}:${k}`);
+  });
+  const [r1, r2, r3] = recs;
+  // (r1 accepted; r2's lseq claimed twice, by a successor-like record; r3's base not its op's: still its own)
+  await rawTx(w.ws, ["outbox"], (tx) => {
+    const out = tx.objectStore("outbox");
+    out.put({ ...r1, accepted: 77 });
+    out.put({ ns, dseq: 900, lseq: r2.lseq, id: r2.id, op: { ...r2.op, dseq: 900, op: "write", t: r2.op.t + 1 } });
+    out.put({ ...r3, op: { ...r3.op, base: "f".repeat(64) } });
+  });
+  const busy = await caught(w.syncState([r1.lseq]));
+  check(busy?.code === "busy" && busy.reason === "seeding", "seed: syncState is busy until the seed is done: " + J({ code: busy?.code, reason: busy?.reason }));
+  const p = w.waitSync([r1.lseq], { signal: signalOf(), timeoutMs: 10_000 });
+  check(!(await settledYet(p)), "seed: a wait makes no synthetic answer before the seed");
+  await W.seedLedger(w, ns, W.wireOf);
+  const r = await p;
+  const st = await w.syncState([r1.lseq, r2.lseq, r3.lseq]);
+  check(r.sync === "accepted" && st[0].sync === "accepted", "seed: the proven accepted record answers accepted, the waiting wait too: " + J({ r, st: st[0] }));
+  check(st[1].sync === "none" && st[1].reason === "before-ledger", "seed: two claimants of one lseq: neither seeded, before-ledger: " + J(st[1]));
+  check(st[2].sync === "local", "seed: a record whose base the scan set differently is still its op's (delta 1 r2, D3): " + J(st[2]));
+}
+
+async function t14Cap() {
+  // (the decided rows' cap, exact: pruned in the deciding transaction, its own rows kept; the floor; expired)
+  const w = await fresh();
+  const { ns, ob } = await localNs(w, "a5");
+  const col = [];
+  for (let i = 0; i < 8; i++) await w.mkdir("/cap" + i, { collect: col });
+  await ob.scan();
+  const recs = await ob.records();
+  await ob.acked(recs.map((r, i) => ({ dseq: r.dseq, seq: 100 + i })));
+  const was = W.LEDGER.maxDecided;
+  W.LEDGER.maxDecided = 5;
+  try {
+    for (const r of recs) await ob.confirmed([r.dseq]);
+  } finally {
+    W.LEDGER.maxDecided = was;
+  }
+  const count = await metaGet(w.ws, `sync:${ns}:ledgerCount`), floor = await metaGet(w.ws, `sync:${ns}:ledgerFloor`);
+  const st = await w.syncState(col);
+  check(count === 5 && floor === col[2], "cap: the count exact at the cap, the floor at the highest pruned: " + J({ count, floor, col }));
+  check(st.slice(0, 3).every((x) => x.sync === "none" && x.reason === "expired") && st.slice(3).every((x) => x.sync === "confirmed"), "cap: the pruned answer expired, the rest confirmed: " + J(st.map((x) => x.sync + (x.reason ? "/" + x.reason : ""))));
+  const r = await w.waitSync(col, { signal: signalOf() });
+  check(r.counts.none === 3 && r.counts.confirmed === 5, "cap: a fresh wait over them resolves from the rows alone: " + J(r));
+}
+
+async function t14Skips() {
+  // (delta 1 r2: a rebuild's watermark jump; only a retained local wire op is superseded; the floor first)
+  const w = await fresh();
+  const { ns } = await localNs(w, "a6");
+  const s0 = await w.lastSeq();
+  const lw = [];
+  await w.create("/sk.txt", { content: "x", collect: lw });
+  const srv = await rawTx(w.ws, ["ops"], (tx) => new Promise((ok) => { const q = tx.objectStore("ops").add({ t: Date.now(), device: "0f0f0f0f0f0f0f0f", by: "person", op: "mkdir", path: "/srv", kind: "folder", origin: "server" }); q.onsuccess = () => ok(q.result); }));
+  const nw = await rawTx(w.ws, ["ops"], (tx) => new Promise((ok) => { const q = tx.objectStore("ops").add({ t: Date.now(), device: w.device, by: "person", op: "dropVersions", path: "/sk.txt", kind: "file" }); q.onsuccess = () => ok(q.result); }));
+  const s1 = await w.lastSeq();
+  await rawTx(w.ws, ["meta"], async (tx) => { tx.objectStore("meta").put(s1, `sync:${ns}:scanned`); await W.noteSkip(tx.objectStore("meta"), ns, s0, s1, "refused"); });
+  const st = await w.syncState([lw[0], srv, nw]);
+  check(st[0].sync === "superseded" && st[0].reason === "refused" && st[1].reason === "not-local" && st[2].reason === "not-synced", "skips: a local wire op superseded/refused; a server op not-local; a non-wire op not-synced: " + J(st));
+  // (16 more jumps: the oldest goes, the floor over it: expired)
+  await rawTx(w.ws, ["meta"], async (tx) => { for (let i = 0; i < 16; i++) await W.noteSkip(tx.objectStore("meta"), ns, s1 + 1000 + 2 * i, s1 + 1001 + 2 * i, "invalid"); });
+  const skips = await metaGet(w.ws, `sync:${ns}:ledgerSkips`);
+  const st2 = await w.syncState([lw[0]]);
+  check(skips.length === 16 && skips.every((t) => Array.isArray(t) && t.length === 3) && st2[0].reason === "expired" && (await metaGet(w.ws, `sync:${ns}:ledgerFloor`)) >= s1, "skips: at most 16 triples; the oldest's range expired: " + J({ n: skips.length, st2 }));
+  check(JSON.stringify(skips).length <= 609, "skips: within 609 JSON characters (delta 1 r2): " + JSON.stringify(skips).length);
+  await rawPut(w.ws, "meta", [["bad"]], `sync:${ns}:ledgerSkips`);
+  await rawPut(w.ws, "meta", 0, `sync:${ns}:ledgerFloor`);
+  const st3 = await w.syncState([lw[0]]);
+  check(st3[0].sync === "none" && st3[0].reason === "not-local", "skips: a malformed value read as none: " + J(st3));
+}
+
+async function t14TwoTabs() {
+  // (a wait in a tab that doesn't send: answered by the sender's events, and its rows)
+  await account();
+  const nm = names();
+  const w1 = await fresh(nm), w2 = await fresh(nm);
+  const c1 = client(w1);
+  check(await until(() => c1.status.state === "synced"), "two tabs (t14): synced");
+  const col = [];
+  await w2.mkdir("/tt", { collect: col });
+  const r = await w2.waitSync(col, { level: "confirmed", signal: signalOf(), timeoutMs: 20_000 });
+  check(r.sync === "confirmed", "two tabs (t14): the other tab's wait resolves: " + J(r));
+  await stop(c1);
+}
+
+async function t14Obsolete() {
+  // (other namespaces' ledgers: queued, at most two, deleted a page at a time; a namespace taken again is wiped)
+  const w = await fresh();
+  const n1 = await localNs(w, "b1");
+  await w.mkdir("/o1");
+  await n1.ob.scan();
+  await localNs(w, "b2");
+  await localNs(w, "b3");
+  check(J(await metaGet(w.ws, W.OBSOLETE_KEY)) === J([n1.ns, `${"b2".padEnd(16, "0")}:1:${w.device}`]), "obsolete: two namespaces queued");
+  await localNs(w, "b4");
+  const q = await metaGet(w.ws, W.OBSOLETE_KEY);
+  const left = (await all(w.ws, "syncLedger")).filter((r) => r.ns === n1.ns).length;
+  check(q.length === 2 && !q.includes(n1.ns) && left === 0, "obsolete: a third switch cleaned the oldest first (the queue full): " + J({ q, left }));
+  while (await W.cleanObsoleteStep(w));
+  check(J(await metaGet(w.ws, W.OBSOLETE_KEY)) === "[]", "obsolete: drained");
+}
+
+async function t14HeldOnce(lead, renameOk, echoFirst) {
+  const w = await fresh();
+  const { ns, ob } = await localNs(w, lead);
+  const f = await w.create("/h.txt", { content: "v1" });
+  await ob.scan();
+  const [r1] = await ob.records();
+  // (its record unpinned: a write now is held, its state to go as a successor once that record is decided: C2)
+  await rawTx(w.ws, ["pending"], (tx) => new Promise((ok) => { const ps = tx.objectStore("pending"), q = ps.get(f.fid); q.onsuccess = () => { const p = q.result; p.byNs[ns].allocated.pinned = false; ps.put(p); ok(); }; }));
+  const b = [], r = [];
+  await w.write("/h.txt", "v2", { collect: b });
+  await w.rename("/h.txt", "/h2.txt", { collect: r });
+  await ob.scan();
+  const held = await w.syncState(b);
+  const r2 = (await ob.records()).find((x) => x.lseq === r[0]);
+  await ob.acked([{ dseq: r1.dseq, seq: 1 }]);
+  await ob.scan();
+  const r3 = (await ob.records()).find((x) => x.heldSeq === b[0]);
+  const tag = `held (${renameOk ? "rename accepted, successor refused" : "rename refused, successor accepted"}${echoFirst ? ", echo first" : ""})`;
+  check(held[0].sync === "local" && r2 && r3 && r3.lseq === r[0] && r3.dseq !== r2.dseq, `${tag}: the successor carries the held write (heldSeq), its bookkeeping lseq the rename's: ` + J({ held, r2: r2?.dseq, r3: r3 && { lseq: r3.lseq, heldSeq: r3.heldSeq } }));
+  const okRec = renameOk ? r2 : r3, noRec = renameOk ? r3 : r2;
+  if (echoFirst) await ob.confirmed([okRec.dseq]);
+  await ob.acked([{ dseq: okRec.dseq, seq: 2 }, { dseq: noRec.dseq, code: "invalid" }]);
+  const st = await w.syncState([b[0], r[0]]);
+  const want = echoFirst ? "confirmed" : "accepted";
+  const [wantB, wantR] = renameOk ? ["refused", want] : [want, "refused"];
+  check(st[0].sync === wantB && st[1].sync === wantR, `${tag}: each record decides only the row it owns: ` + J(st));
+}
+async function t14Held() {
+  await t14HeldOnce("a7", true, false);
+  await t14HeldOnce("a8", false, false);
+  await t14HeldOnce("a9", false, true);
+}
+
+async function t14Large() {
+  // (a D11 large move collects its one publication op, not its rewrite's pages)
+  const was = { ...W.D11 };
+  W.configureD11({ ...W.D11, chunk: 10, page: 10, planPage: 100, validatePage: 10 });
+  try {
+    const w = await fresh();
+    await w.mkdir("/lg");
+    for (let i = 0; i < 14; i++) await w.create(`/lg/f${i}.txt`, { content: "x" + i });
+    const col = [];
+    const top = await w.rename("/lg", "/lg2", { collect: col });
+    const ops = (await w.ops()).filter((o) => col.includes(o.seq));
+    check(top.path === "/lg2" && col.length === 1 && ops[0]?.op === "rename" && ops[0].path === "/lg", "large move: one op collected, the top's rename: " + J(ops.map((o) => o.op + " " + o.path)));
+    await w.rewriteSettled(60_000);
+  } finally {
+    W.configureD11(was);
+  }
+}
+
+/** The committed planning allowance for a stored ledger row, bytes (daybreak3's storage ruling after the 996.2294
+ * observation, Oct 25): A = max(960, 64 ceil(1.25 M / 64)), M the largest comparable isolated live-invariant peak of
+ * this 10,000-row fixture: 996.2294 at 233aa3b3 (the predeclared ten-run series that followed peaked at 776.6629; 822
+ * at e074d3a1), so 1280.  A planning envelope for this canary, not a physical bound and not the full-cap P (303.4): a
+ * comparable measurement above it reopens the decision. */
+const ROW_ALLOWANCE = 1280;
+
+async function t14Figures() {
+  // (LIMIT-PR128-1-R2: the widest row by construction (a refusal's code is ASCII [a-z0-9_], at most CODE.max); its
+  // stored size measured in the live invariant's shape (daybreak3's ruling r3, option (i)): exactly three legal
+  // maximum-width namespaces, each constant across its rows, every other field maximum-width and random; the peak of
+  // the usage sampled right after each commit and once settled, held to the committed allowance ROW_ALLOWANCE)
+  const w = await fresh();
+  const MAX = Number.MAX_SAFE_INTEGER;
+  const hexr = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n / 2)), (b) => b.toString(16).padStart(2, "0")).join("");
+  const digits = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => String(b % 10)).join("");
+  const alnum = "abcdefghijklmnopqrstuvwxyz0123456789_";
+  const coder = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => alnum[b % alnum.length]).join("");
+  const nsOf = () => `${hexr(64)}:${digits(15)}:${w.device}`;
+  const nss = [nsOf(), nsOf(), nsOf()], ns = nss[0];
+  await W.switchTo(w, ns);
+  const kinds = {
+    refused: { ns, lseq: MAX, s: "refused", d: 1, dseq: MAX, code: "z".repeat(W.CODE.max) },
+    // (a rebuild's supersession carries its reason, never `by`; a local one carries `by`, its reason "local")
+    supersededRebuild: { ns, lseq: MAX, s: "superseded", d: 1, dseq: MAX, reason: "diverged" },
+    supersededLocal: { ns, lseq: MAX, s: "superseded", d: 1, dseq: MAX, reason: "local", by: MAX },
+    none: { ns, lseq: MAX, s: "none", d: 1, reason: "before-ledger" },
+    accepted: { ns, lseq: MAX, s: "accepted", d: 0, dseq: MAX },
+  };
+  const widths = Object.fromEntries(Object.entries(kinds).map(([k, v]) => [k, JSON.stringify(v).length]));
+  const [widest, maxChars] = Object.entries(widths).sort((a, b) => b[1] - a[1])[0];
+  check(nss.every((x) => x.length === 97) && maxChars === 216 && widths.refused === 216, "figures: the widest valid rows by construction (a refused one, a local supersession) are 216 JSON characters, ASCII only: " + J({ widths, widest }));
+  const est = async () => (await navigator.storage.estimate()).usage ?? 0;
+  await sleep(500);
+  const u0 = await est();
+  // (10,000 rows over the three namespaces, 3,334 / 3,333 / 3,333, in commits of at most 1,000; lseq distinct within a
+  // namespace, every seq 16 digits)
+  const N = 10_000, per = [3334, 3333, 3333];
+  const rnd = (n) => crypto.getRandomValues(new Uint32Array(1))[0] % n;
+  const samples = [];
+  for (let k = 0; k < 3; k++)
+    for (let i0 = 0; i0 < per[k]; i0 += 1000)
+      await rawTx(w.ws, ["syncLedger"], (tx) => {
+        const st = tx.objectStore("syncLedger");
+        for (let i = i0; i < Math.min(i0 + 1000, per[k]); i++) st.put({ ns: nss[k], lseq: MAX - i * 2 ** 20 - rnd(2 ** 20), s: "refused", d: 1, dseq: MAX - rnd(2 ** 30) * 2 ** 10 - rnd(2 ** 10), code: coder(W.CODE.max) });
+      }).then(async () => samples.push((await est()) - u0));
+  await sleep(1500);
+  samples.push((await est()) - u0);
+  const rows = await all(w.ws, "syncLedger");
+  const dist = nss.map((x) => rows.filter((r) => r.ns === x).length);
+  check(rows.length === N && J(dist) === J(per), `figures: exactly three namespaces, each constant within its rows: ${J(dist)} of ${rows.length}`);
+  const measured = Math.round(Math.max(...samples) / N);
+  const A = ROW_ALLOWANCE;
+  const skips = JSON.stringify(Array.from({ length: 16 }, () => [MAX, MAX, 2]));
+  const meta = { ledgerCount: 50_000, ledgerFloor: MAX, ledgerFrom: MAX, ledgerRev: MAX, ledgerSeeded: true, ledgerSeedAt: MAX, ledgerWipe: true };
+  const metaChars = Object.entries(meta).reduce((a, [k, v]) => a + `sync:${ns}:${k}`.length + JSON.stringify(v).length, 0) + `sync:${ns}:ledgerSkips`.length + skips.length;
+  check(skips.length <= 609 && measured > 0 && measured <= A, `figures (task #14): measured a peak of ${measured} B a stored row, ${measured > A ? "EXCEEDS" : "within"} the committed allowance A = ${A}: ` + J({ peakBytesPerRow: measured, samplesBytes: samples, namespaces: dist, committedAllowanceBytesPerRow: A, perNamespacePlanMiB: +(A * 70_000 / 2 ** 20).toFixed(1), globalPlanMiB: +(A * 210_000 / 2 ** 20).toFixed(1), rowJsonCharsMax: maxChars, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
+}
+
+async function t14Review() {
+  // (regressions for astra3's review of #128)
+  const w = await fresh();
+  const { ns } = await localNs(w, "d1");
+  const hub = W.hubOf(w.ws), epoch = (await metaGet(w.ws, "sync:epoch")) ?? 0, gen = (await metaGet(w.ws, "sync:current")).gen;
+  const col = [];
+  await w.mkdir("/rv1", { collect: col });
+  // (CORR-PR128-1: an abort while the wait reads its first view: rejected, with its counts, nothing left registered)
+  const ac = new AbortController();
+  const p1 = w.waitSync(col, { signal: ac.signal });
+  ac.abort();
+  const e1 = await caught(p1);
+  check(e1?.name === "AbortError" && e1.counts?.local === 1 && W.waitCount(w) === 0, "review 1: aborted during registration: rejected with counts, no wait left: " + J({ name: e1?.name, counts: e1?.counts, n: W.waitCount(w) }));
+  // (CORR-PR128-2: a new wait knows the newest generation already seen; a delayed older sender's sent is dropped)
+  hub.post({ t: "holder", ns, epoch, gen: gen + 10, rev: 0 });
+  const ab2 = new AbortController();
+  const p2 = w.waitSync(col, { level: "sent", signal: ab2.signal });
+  await sleep(50);
+  hub.post({ t: "sent", ns, epoch, gen: gen + 9, seqs: col });
+  check(!(await settledYet(p2)), "review 2: a new wait drops a delayed sent from generation 9 after holder 10");
+  hub.post({ t: "sent", ns, epoch, gen: gen + 10, seqs: col });
+  check((await p2).sync === "sent", "review 2: …and takes generation 10's");
+  // (CORR-PR128-3: a rebuild's skip, and a skip overflow's floor, wake waits that were already reading)
+  const s0 = await w.lastSeq();
+  const a = [];
+  await w.create("/rv3.txt", { content: "x", collect: a });
+  const s1 = await w.lastSeq();
+  const pa = w.waitSync(a, { signal: new AbortController().signal });
+  await sleep(100);
+  check(!(await settledYet(pa)), "review 3: the wait reads local");
+  await rawTx(w.ws, ["meta"], async (tx) => { tx.objectStore("meta").put(s1, `sync:${ns}:scanned`); await W.noteSkip(tx.objectStore("meta"), ns, s0, s1, "invalid"); });
+  const ra = await Promise.race([pa, sleep(3000).then(() => null)]);
+  check(ra?.sync === "superseded", "review 3: a skip committed: the waiting wait settles superseded, no other event: " + J(ra));
+  // (its floor: a skip pushed out by 16 more; a wait over a seq in that range, local until then, settles expired)
+  await rawTx(w.ws, ["meta"], (tx) => { tx.objectStore("meta").put([], `sync:${ns}:ledgerSkips`); });
+  const b = [];
+  await w.create("/rv4.txt", { content: "y", collect: b });
+  const s2 = await w.lastSeq();
+  const pb = w.waitSync(b, { level: "confirmed", signal: new AbortController().signal });
+  await sleep(100);
+  check(!(await settledYet(pb)), "review 3: the second wait reads local (past the watermark)");
+  await rawTx(w.ws, ["meta"], async (tx) => { const m = tx.objectStore("meta"); m.put(s2, `sync:${ns}:scanned`); await W.noteSkip(m, ns, s1, s2, "invalid"); for (let i = 0; i < 16; i++) await W.noteSkip(m, ns, s2 + 100 + 2 * i, s2 + 101 + 2 * i, "invalid"); });
+  const rb = await Promise.race([pb, sleep(3000).then(() => null)]);
+  check(rb?.sync === "none" && rb.counts.none === 1 && (await w.syncState(b))[0].reason === "expired", "review 3: a skip pushed out raises the floor: the waiting wait settles, expired: " + J(rb));
+  // (CORR-PR128-4: names inherited by every object are not levels)
+  for (const lv of ["toString", "constructor", "__proto__", "hasOwnProperty", "valueOf"]) {
+    const e = await caught(w.waitSync(col, { level: lv, signal: new AbortController().signal }));
+    check(e?.code === "invalid", `review 4: level "${lv}" is invalid: ${e?.code}`);
+  }
+  // (CORR-PR128-5: the caller's array changed after the call: the wait and syncState keep the set they were given)
+  const arr = [col[0]];
+  const ab5 = new AbortController();
+  const p5 = w.waitSync(arr, { level: "local", signal: ab5.signal });
+  for (let i = 0; i < 10_000; i++) arr.push(1e9 + i);
+  const r5 = await p5;
+  const total = Object.values(r5.counts).reduce((x, y) => x + y, 0);
+  const arr2 = [col[0]];
+  const p6 = w.syncState(arr2);
+  for (let i = 0; i < 2000; i++) arr2.push(1e9 + i);
+  const r6 = await p6;
+  check(total === 1 && r6.length === 1, "review 5: the caller's array grown after the call changes nothing (one slot, one answer): " + J({ total, answers: r6.length }));
+  check(W.waitCount(w) <= 1, "review: nothing else left registered");
+  ab2.abort();
+}
+
+async function t14Review2() {
+  // (daybreak3's round 2: the refusal code bounded where a row takes it; the generation fence bounded and still a fence)
+  const w = await fresh();
+  const { ns, ob } = await localNs(w, "e1");
+  const col = [];
+  await w.mkdir("/rc1", { collect: col });
+  await w.mkdir("/rc2", { collect: col });
+  await ob.scan();
+  const recs = await ob.records();
+  await ob.acked([{ dseq: recs[0].dseq, code: "\u0000".repeat(64) }, { dseq: recs[1].dseq, code: "missing" }]);
+  const st = await w.syncState(col);
+  check(st[0].code === "other" && st[1].code === "missing", "review2: a code outside the protocol's vocabulary kept as other; a protocol code kept: " + J(st));
+  const hub = W.hubOf(w.ws);
+  for (let i = 0; i < 50; i++) {
+    hub.post({ t: "holder", ns: `${String(i).padStart(16, "0")}:1:${w.device}`, epoch: i, gen: 5, rev: 0 });
+    hub.post({ t: "lifecycle", ns, fromEpoch: 100 + i, toEpoch: 101 + i, kind: "off" });
+  }
+  check(hub.fences <= W.HUB.maxNamespaces, `review2: 50 namespaces and 50 epochs cycled: the fence holds ${hub.fences} (at most ${W.HUB.maxNamespaces})`);
+  // (still a fence: the namespace moved to epoch 200 by a lifecycle change; its holder 10 seen, a delayed sent from 9
+  // is stale)
+  const epoch = 200;
+  hub.post({ t: "lifecycle", ns, fromEpoch: epoch - 1, toEpoch: epoch, kind: "off" });
+  hub.post({ t: "holder", ns, epoch, gen: 10, rev: 0 });
+  let staleSeen = null;
+  const off = hub.on((m, stale) => { if (m.t === "sent" && m.gen === 9) staleSeen = stale; });
+  hub.post({ t: "sent", ns, epoch, gen: 9, seqs: [] });
+  off();
+  check(staleSeen === true, "review2: …and a delayed generation 9 after holder 10 is still stale");
+  // (an older epoch's message is stale too)
+  let olderStale = null;
+  const off2 = hub.on((m, stale) => { if (m.t === "sent" && m.epoch === epoch - 1) olderStale = stale; });
+  hub.post({ t: "sent", ns, epoch: epoch - 1, gen: 99, seqs: [] });
+  off2();
+  check(olderStale === true, "review2: a message of an older epoch is stale whatever its generation");
+  // (a message claiming a newer epoch moves nothing: the current epoch's messages are not fenced by it (the hang found
+  // in the full suite at 61872ea7))
+  let fut = null, cur = null;
+  const off3 = hub.on((m, stale) => { if (m.t === "sent" && m.epoch === epoch + 5) fut = stale; if (m.t === "sent" && m.epoch === epoch && m.gen === 10) cur = stale; });
+  hub.post({ t: "sent", ns, epoch: epoch + 5, gen: 999, seqs: [] });
+  hub.post({ t: "sent", ns, epoch, gen: 10, seqs: [] });
+  off3();
+  check(fut === false && cur === false, "review2: a future epoch's message neither applies nor fences the current epoch: " + J({ fut, cur }));
+}
+
+async function t14Review3() {
+  // (astra3's CORR-PR128-6: a message claiming a future epoch can't anchor the fence of a namespace it has no entry for
+  // (a fresh hub, or after eviction), so a real wait registered at the durable epoch still takes that epoch's progress)
+  const w = await fresh();
+  const { ns, lease } = await localNs(w, "e3");
+  const epoch = (await metaGet(w.ws, "sync:epoch")) ?? 0;
+  const hub = W.hubOf(w.ws);
+  check(hub.fences === 0, "review3: a fresh hub: no fence yet");
+  const a = [];
+  await w.mkdir("/fh", { collect: a });
+  hub.post({ t: "sent", ns, epoch: epoch + 1, gen: 999, seqs: [] });
+  hub.post({ t: "holder", ns, epoch: epoch + 1, gen: 999, rev: 0 });
+  check(hub.fences <= 1 && hub.seen(ns, epoch) === 0, "review3: ordinary messages of a future epoch set nothing for the current epoch (at most a tentative entry)");
+  const pa = w.waitSync(a, { level: "sent", signal: signalOf(), timeoutMs: 5000 });
+  await sleep(50);
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen, seqs: a });
+  const ra = await caught(pa) ?? await pa;
+  check(ra.sync === "sent", "review3: fresh hub, a future-epoch claim first: a real wait at the durable epoch takes its sent: " + J(ra.sync ?? String(ra)));
+  // (after eviction: three other namespaces moved by lifecycle changes push this one out; a future claim again; a new
+  // real wait re-anchors at the durable epoch and takes its progress)
+  for (const lead of ["b", "c", "d"]) hub.post({ t: "lifecycle", ns: `${lead.repeat(16)}:1:${w.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
+  check(hub.fences === W.HUB.maxNamespaces && hub.seen(ns, epoch) === 0, `review3: three other namespaces evicted this one (the fence holds ${hub.fences})`);
+  hub.post({ t: "sent", ns, epoch: epoch + 1, gen: 999, seqs: [] });
+  // (after an eviction a registration's generation is unknown (CORR-PR128-6-R5): the live sender's answer to the wait's
+  // hello confirms it, as the real sender gives from the moment it holds)
+  hub.holding(ns, epoch, lease.gen);
+  const b = [];
+  await w.mkdir("/fe", { collect: b });
+  const pb = w.waitSync(b, { level: "sent", signal: signalOf(), timeoutMs: 5000 });
+  await sleep(50);
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen, seqs: b });
+  const rb = await caught(pb) ?? await pb;
+  check(rb.sync === "sent", "review3: after eviction, a future-epoch claim first: a real wait at the durable epoch takes its sent: " + J(rb.sync ?? String(rb)));
+  // (an ordinary message's generation, before any wait, is still kept for the next wait of its epoch (CORR-PR128-2,
+  // after eviction): tentative, then confirmed by the wait's durable read)
+  for (const lead of ["b", "c", "d"]) hub.post({ t: "lifecycle", ns: `${lead.repeat(16)}:2:${w.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
+  hub.post({ t: "holder", ns, epoch, gen: lease.gen + 5, rev: 0 });
+  hub.holding(ns, epoch, lease.gen + 5);
+  const d = [];
+  await w.mkdir("/ft", { collect: d });
+  const pd = w.waitSync(d, { level: "sent", signal: new AbortController().signal });
+  await sleep(50);
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen + 4, seqs: d });
+  check(!(await settledYet(pd)) && hub.seen(ns, epoch) === lease.gen + 5, "review3: after eviction, a holder announced before the wait: its older generation's sent is dropped by a new wait");
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen + 5, seqs: d });
+  check((await pd).sync === "sent", "review3: …and the announced generation's sent counts");
+  // (and still a fence: re-anchored, an older generation's sent after a newer holder is dropped by a real wait)
+  const c = [];
+  await w.mkdir("/fg", { collect: c });
+  const ab = new AbortController();
+  const pc = w.waitSync(c, { level: "sent", signal: ab.signal });
+  await sleep(50);
+  hub.post({ t: "holder", ns, epoch, gen: lease.gen + 6, rev: 0 });
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen + 5, seqs: c });
+  check(!(await settledYet(pc)) && hub.fences <= W.HUB.maxNamespaces, "review3: re-anchored, an older generation's sent after a newer holder is dropped; the bound kept");
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen + 6, seqs: c });
+  check((await pc).sync === "sent", "review3: …and the newer generation's sent counts");
+  // (astra3's CORR-PR128-6-R4: the announced holder and a future-epoch claim together, in both orders, on a fresh hub and
+  // after eviction: the claim neither erases nor hides the durable epoch's announced generation; a real wait registered
+  // after both drops the older generation's sent and takes the announced one's)
+  for (const evicted of [false, true])
+    for (const order of ["holder first", "claim first"]) {
+      const w2 = await fresh();
+      const { ns: n2, lease: l2 } = await localNs(w2, evicted ? "e5" : "e6");
+      const e2 = (await metaGet(w2.ws, "sync:epoch")) ?? 0;
+      const hub2 = W.hubOf(w2.ws);
+      const what = `${evicted ? "after eviction" : "fresh hub"}, ${order}`;
+      if (evicted) {
+        hub2.fence(n2, e2, l2.gen, true);
+        for (const lead of ["b", "c", "d"]) hub2.post({ t: "lifecycle", ns: `${lead.repeat(16)}:3:${w2.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
+        check(hub2.seen(n2, e2) === 0 && hub2.fences === W.HUB.maxNamespaces, `review3: ${what}: evicted`);
+      } else check(hub2.fences === 0, `review3: ${what}: a fresh hub`);
+      const msgs = [{ t: "holder", ns: n2, epoch: e2, gen: l2.gen + 5, rev: 0 }, { t: "holder", ns: n2, epoch: e2 + 1, gen: 999, rev: 0 }];
+      for (const m of order === "holder first" ? msgs : msgs.reverse()) hub2.post(m);
+      if (evicted) hub2.holding(n2, e2, l2.gen + 5);
+      const c2 = [];
+      await w2.mkdir("/r4", { collect: c2 });
+      const p2 = w2.waitSync(c2, { level: "sent", signal: new AbortController().signal });
+      await sleep(50);
+      hub2.post({ t: "sent", ns: n2, epoch: e2, gen: l2.gen + 4, seqs: c2 });
+      check(!(await settledYet(p2)), `review3: ${what}: holder ${l2.gen + 5} announced, a claim of epoch ${e2 + 1}: a new wait drops generation ${l2.gen + 4}'s sent`);
+      hub2.post({ t: "sent", ns: n2, epoch: e2, gen: l2.gen + 5, seqs: c2 });
+      const r2 = await Promise.race([p2, sleep(3000).then(() => null)]);
+      check(r2?.sync === "sent" && hub2.fences <= W.HUB.maxNamespaces, `review3: ${what}: …and takes generation ${l2.gen + 5}'s: ` + J(r2?.sync ?? null));
+    }
+  // (astra3's and daybreak3's CORR-PR128-6-R5: the tentative bound overflowed (the current epoch's announced holder,
+  // then HUB.maxTentative other epochs, or those first and the holder last), on a fresh hub and after eviction: no
+  // overflow can let an older generation's sent resolve a real wait; the wait takes nothing until the live sender's own
+  // answer to its hello, then that generation's sent)
+  const orders = { "holder, then 4 older epochs": (cur, older) => [cur, ...older], "4 older epochs, then the holder": (cur, older) => [...older, cur], "holder, then 4 future epochs": (cur, older, future) => [cur, ...future], "4 future epochs, then the holder": (cur, older, future) => [...future, cur] };
+  for (const evicted of [false, true])
+    for (const [order, seqOf] of Object.entries(orders)) {
+      const w3 = await fresh();
+      const { ns: n3, lease: l3 } = await localNs(w3, evicted ? "e7" : "e8");
+      // (the current epoch made 5, so four older ones exist)
+      await rawTx(w3.ws, ["meta"], (tx) => { tx.objectStore("meta").put(5, "sync:epoch"); });
+      const e3 = 5, hub3 = W.hubOf(w3.ws), what = `${evicted ? "after eviction" : "fresh hub"}, ${order}`;
+      if (evicted) for (const lead of ["b", "c", "d"]) hub3.post({ t: "lifecycle", ns: `${lead.repeat(16)}:4:${w3.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
+      const cur = { t: "holder", ns: n3, epoch: e3, gen: l3.gen + 5, rev: 0 };
+      const older = [1, 2, 3, 4].map((e) => ({ t: "holder", ns: n3, epoch: e, gen: 1, rev: 0 }));
+      const future = [6, 7, 8, 9].map((e) => ({ t: "holder", ns: n3, epoch: e, gen: 999, rev: 0 }));
+      for (const m of seqOf(cur, older, future)) hub3.post(m);
+      const c3 = [];
+      await w3.mkdir("/r5", { collect: c3 });
+      let nonce = null;
+      const off = hub3.on((m) => { if (m.t === "hello" && m.ns === n3) nonce = m.nonce; });
+      const p3 = w3.waitSync(c3, { level: "sent", signal: new AbortController().signal });
+      await sleep(50);
+      hub3.post({ t: "sent", ns: n3, epoch: e3, gen: l3.gen + 4, seqs: c3 });
+      check(!(await settledYet(p3)), `review3 R5: ${what}: generation ${l3.gen + 4}'s sent after holder ${l3.gen + 5} and the overflow: the wait stays pending`);
+      // (fail closed: without the live sender's answer, not even the announced generation's sent counts)
+      hub3.post({ t: "sent", ns: n3, epoch: e3, gen: l3.gen + 5, seqs: c3 });
+      const early = await settledYet(p3);
+      // (the live sender answers this wait's hello (its own nonce): the generation confirmed, then its sent counts; an
+      // older one never)
+      off();
+      hub3.holding(n3, e3, l3.gen + 5);
+      hub3.post({ t: "hello", ns: n3, epoch: e3, nonce });
+      await sleep(20);
+      hub3.post({ t: "sent", ns: n3, epoch: e3, gen: l3.gen + 4, seqs: c3 });
+      const still = !(await settledYet(p3));
+      hub3.post({ t: "sent", ns: n3, epoch: e3, gen: l3.gen + 5, seqs: c3 });
+      const r3 = await Promise.race([p3, sleep(3000).then(() => null)]);
+      check(nonce !== null && !early && still && r3?.sync === "sent" && hub3.unknown(n3, e3) === false && hub3.fences <= W.HUB.maxNamespaces, `review3 R5: ${what}: nothing counted before the live sender's answer, an older generation never, the answered one's sent counted: ` + J({ settledBeforeAnswer: early, olderStillPendingAfter: still, final: r3?.sync ?? null }));
+    }
+  // (astra3's CORR-PR128-6-R6: a registered unknown wait hears a newer generation (a holder, a sent or a reset of 6),
+  // the namespace is then evicted (or not: the control), and a delayed answer to its own hello from an older sender
+  // (5, its nonce) arrives: it never counts; the newer generation's own answer does.  Every generation-bearing hint
+  // raises the wait's floor even while unknown, and none confirms it)
+  for (const kind of ["holder", "sent", "reset"])
+    for (const evicted of [false, true]) {
+      const w4 = await fresh();
+      const { ns: n4, lease: l4 } = await localNs(w4, evicted ? "e9" : "ea");
+      await rawTx(w4.ws, ["meta"], (tx) => { tx.objectStore("meta").put(5, "sync:epoch"); });
+      const e4 = 5, hub4 = W.hubOf(w4.ws), what = `${kind}, ${evicted ? "then evicted" : "no eviction (control)"}`;
+      // (lossy before the wait: five other epochs' claims overflow the tentative map)
+      for (const e of [1, 2, 3, 4, 6]) hub4.post({ t: "holder", ns: n4, epoch: e, gen: 1, rev: 0 });
+      const c4 = [];
+      await w4.mkdir("/r6", { collect: c4 });
+      let nonce4 = null;
+      const off4 = hub4.on((m) => { if (m.t === "hello" && m.ns === n4) nonce4 = m.nonce; });
+      const p4 = w4.waitSync(c4, { level: "sent", signal: new AbortController().signal });
+      await sleep(50);
+      off4();
+      const unknown = hub4.unknown(n4, e4);
+      const newer = l4.gen + 5, older = l4.gen + 4;
+      if (kind === "holder") hub4.post({ t: "holder", ns: n4, epoch: e4, gen: newer, rev: 0 });
+      else if (kind === "sent") hub4.post({ t: "sent", ns: n4, epoch: e4, gen: newer, seqs: [] });
+      else hub4.post({ t: "reset", ns: n4, epoch: e4, gen: newer });
+      if (evicted) for (const lead of ["b", "c", "d"]) hub4.post({ t: "lifecycle", ns: `${lead.repeat(16)}:5:${w4.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
+      const gone = evicted ? hub4.seen(n4, e4) === 0 : true;
+      // (the delayed answer from the older sender, to this wait's own hello)
+      hub4.post({ t: "inflight", ns: n4, epoch: e4, gen: older, nonce: nonce4, seqs: c4 });
+      const pendingAfterOlder = !(await settledYet(p4));
+      // (the newer generation's own answer)
+      hub4.post({ t: "inflight", ns: n4, epoch: e4, gen: newer, nonce: nonce4, seqs: c4 });
+      const r4 = await Promise.race([p4, sleep(3000).then(() => null)]);
+      check(unknown && gone && nonce4 !== null && pendingAfterOlder && r4?.sync === "sent", `review3 R6: ${what}: a ${kind} of ${newer} heard while unknown, then the older sender's delayed answer (${older}, the wait's nonce): not counted; the ${newer} answer counts: ` + J({ unknown, evictedFromHub: evicted ? gone : null, pendingAfterOlder, final: r4?.sync ?? null }));
+    }
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3 };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

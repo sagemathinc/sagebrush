@@ -651,8 +651,8 @@ async function upgrade() {
   // the upgrade itself: only stores and indexes added, and the migration's state dropped
   const db = await W.openWorkspaceDb(name);
   const up = await dump(db), ix = indexes(db);
-  const { meta: m0, ...rest0 } = before, { meta: m1, outbox, syncIndex, adoptJournal, pins, pending, prunable, ...rest1 } = up;
-  check(db.version === W.WS_VERSION && same(rest0, rest1) && same(prunable, []), "the current version (4 added these stores, 5 the pins' index and the empty store prunable, 6 syncIndex's indexes and entries' byFetch): entries, boards, trash, ops, versions, versionBytes, fileBytes and grants the same, byte for byte");
+  const { meta: m0, ...rest0 } = before, { meta: m1, outbox, syncIndex, adoptJournal, pins, pending, prunable, syncLedger, ...rest1 } = up;
+  check(db.version === W.WS_VERSION && same(rest0, rest1) && same(prunable, []) && same(syncLedger, []) && same(ix.syncLedger, ["byDecided"]), "the current version (4 added these stores, 5 the pins' index and the empty store prunable, 6 syncIndex's indexes and entries' byFetch, 7 the empty store syncLedger with its index byDecided): entries, boards, trash, ops, versions, versionBytes, fileBytes and grants the same, byte for byte");
   check(same(m1.filter(([k]) => k !== "versions:backfill"), m0.filter(([k]) => k !== "migration")) && same(m1.find(([k]) => k === "versions:backfill")?.[1], { after: 0 }), "…meta the same but for the migration's state, dropped (so the migrator gives older entries their identity), and the versions' backfill marker, set: " + J(m1.map(([k]) => k)));
   check([outbox, syncIndex, adoptJournal, pins, pending].every((s) => Array.isArray(s) && s.length === 0) && same(ix.entries, ["byFetch", "byIdent", "byNfc", "byRef"]) && same(ix.outbox, ["byIdent"]) && same(ix.adoptJournal, ["byParent"]) && same(ix.syncIndex ?? ["byKey", "byParent"], ["byKey", "byParent"]), "…the new stores there and empty, and the new indexes: " + J(ix));
   db.close();
