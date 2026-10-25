@@ -174,6 +174,18 @@ try {
     else ok(!got.includes("MARKER") && got.includes("This engine's settings are invalid: limits: ") && status.startsWith("error: This engine's settings are invalid"), `WorkerKernel, limits ${label}: refused, nothing runs (${JSON.stringify([got, status])})`);
   }
 
+  // python mode, where _limits is no longer in the start's group (plan-coldstart-limits
+  // r2): without limits it's fetched at the first import and locked then; with
+  // them, at init, locked; and a finite limit refuses in python mode as in Sage's
+  const LOCKED = "try:\n    _limits.propose(_limits.validate('{\"ff.work\": 100000}'))\n    print('open')\nexcept RuntimeError as e:\n    print('locked', str(e) == _limits.LOCKED)\n";
+  r = await sbw([init(null), { id: 2, code: "import sys\nprint('_limits' in sys.modules)\nimport _limits\nprint(_limits.finalized(), sys._sagebrush_limits is _limits.DEFAULTS)\n" + LOCKED }]);
+  ok(r.out === "False\nTrue True\nlocked True\n", `python mode, no limits: _limits not loaded at start, locked at its first import (${JSON.stringify(r)})`);
+  r = await sbw([init('{"ff.work": 123456}'), { id: 2, code: "import sys\nprint('_limits' in sys.modules, sys._sagebrush_limits['ff.work'])\nimport _limits\n" + LOCKED }]);
+  ok(r.out === "True 123456\nlocked True\n", `python mode, limits given: loaded and locked at init (${JSON.stringify(r)})`);
+  const pyBig = "from sage_all import GF, PolynomialRing\nR = PolynomialRing(GF(2), 'x')\nx = R.gen()\nK = GF(2**79, 'a', modulus=x**79 + x**9 + 1)\nprint((K.gen()**3 + K.gen()).minpoly().degree())\n";
+  r = await sbw([init('{"ff.work": 10000000}'), { id: 2, code: pyBig }], 180000);
+  ok(r.out.includes("is not supported yet (work)") && !r.out.includes("79\n"), `python mode, ff.work = 10^7: refused (${r.out.slice(-200)})`);
+
   // the measurement: the largest call admitted at the ceiling, in this worker
   const big = { id: 2, sage: true, code: 'import time\nR.<x> = GF(2)[]\nK = GF(2^79, "a", modulus=x^79 + x^9 + 1)\nt = time.time()\nf = (K.gen()^3 + K.gen()).minpoly()\nprint(f.degree(), round(time.time() - t, 2))' };
   r = await sbw([init('{"ff.work": 100000000}'), big], 180000);
