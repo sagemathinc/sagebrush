@@ -190,7 +190,7 @@
      "id": "sync",
      "kind": "group",
      "title": "Sync (backup and devices)",
-     "layout": "grid",
+     "layout": "graph",
      "color": "#fbf6dc",
      "children": [
       {
@@ -221,8 +221,7 @@
        "detail": "Since the server never reads document contents, the merge happens on devices, with patchflow, the patch-merge library also used by CoCalc. Writes reach it through its owner's account object, which authenticates and admits them; a live document socket attaches to it directly, with a one-time ticket from that account object.",
        "ref": "https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/design/sync-server.md?plain=1#L174-L194"
       }
-     ],
-     "columns": 2
+     ]
     },
     {
      "id": "share",
