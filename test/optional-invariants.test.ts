@@ -41,7 +41,7 @@ test("no optional package is in the bundled registry", async () => {
   assert.ok(pkgs.length >= 1, "optional/hello exists");
   for (const p of pkgs) {
     assert.ok(!reg.includes(p.id), `${p.id} is not in packages/registry.json`);
-    for (const m of p.manifest.python.modules) assert.ok(!reg.includes(`"${m}"`), `${m} is not a bundled module`);
+    for (const m of p.manifest.python?.modules ?? []) assert.ok(!reg.includes(`"${m}"`), `${m} is not a bundled module`);
   }
 });
 
