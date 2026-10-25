@@ -18,14 +18,15 @@ fn live_bytes_follow_allocations() {
     let mut v: Vec<u8> = black_box(Vec::with_capacity(1 << 20));
     let after_alloc = live_bytes();
     assert!(after_alloc >= before + (1 << 20), "{} -> {}", before, after_alloc);
-    v.reserve_exact(3 << 20); // a growing reallocation to 4 MiB
+    // a growing reallocation: capacity at least len + 3 MiB, len being 0
+    v.reserve_exact(3 << 20);
     black_box(&mut v);
     let grown = live_bytes();
-    assert!(grown >= before + (4 << 20), "{} -> {}", before, grown);
+    assert!(grown >= before + (3 << 20), "{} -> {}", before, grown);
     v.shrink_to(1 << 16);
     black_box(&mut v);
     let shrunk = live_bytes();
-    assert!(shrunk < grown - (3 << 20), "{} -> {}", grown, shrunk);
+    assert!(shrunk < grown - (2 << 20), "{} -> {}", grown, shrunk);
     drop(v);
     let z = black_box(vec![0u8; 2 << 20]); // alloc_zeroed
     assert!(live_bytes() >= before + (2 << 20));
