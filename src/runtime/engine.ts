@@ -10,12 +10,16 @@
 
 import { sha256Hex } from "./sha256";
 import * as Obj from "./object";
-import { newBuiltinModule } from "./modules";
-import { INTR } from "./interrupt";
+import { newBuiltinModule, heapLimit } from "./modules";
+import { JS_ENGINE, JS_HOST } from "./js-engine";
+import { INTR, INTR_CTRL_C, consumeCtrlC, requestCtrlC } from "./interrupt";
 import { fullGc } from "./gc";
+import * as P from "./progress";
 
 interface Engine {
   memory: WebAssembly.Memory;
+  /** Optional (engines from before progress lack it): the progress frames. */
+  sb_progress_ptr?(): number;
   sb_alloc(len: number): number;
   sb_free(ptr: number, len: number): void;
   sb_call(ptr: number, len: number): number;
@@ -23,6 +27,8 @@ interface Engine {
   sb_mp_call(ptr: number, len: number): number;
   sb_last_error(): number;
   sb_reply_len(): number;
+  // (optional: engines built before item D0 lack it)
+  sb_set_memory_share?(v: number): void;
 }
 
 let E: Engine | null = null;
@@ -63,16 +69,121 @@ function engineBytes(): Uint8Array {
   throw new Error("the Sagebrush engine (sagebrush-engine.wasm) is not available here");
 }
 
+/** The engine's progress frames (progress.ts), if this engine has them. */
+let frames: Uint32Array | null = null;
+
 function engine(): Engine {
   // sagebrush.interrupted: Ctrl-C, polled by the engine's long loops
   // (engine/interrupt); an interrupted call traps and the instance is dropped.
-  const imports = { sagebrush: { interrupted: () => INTR[0] } };
-  if (E === null) E = new WebAssembly.Instance(new WebAssembly.Module(engineBytes() as any), imports).exports as unknown as Engine;
+  // The same import copies the engine's progress frames into the shared
+  // slots (progress.ts), so progress needs no import of its own.
+  const imports = {
+    sagebrush: {
+      interrupted: () => {
+        if (frames !== null) {
+          // (a view of memory that has since grown is detached: length 0; no
+          // buffer getter is read on this path, which every poll takes)
+          if (frames.length === 0) frames = frameView(E!);
+          P.syncFrames(frames);
+        }
+        return INTR[0] & INTR_CTRL_C;
+      },
+    },
+  };
+  if (E === null) {
+    E = new WebAssembly.Instance(new WebAssembly.Module(engineBytes() as any), imports).exports as unknown as Engine;
+    frames = typeof E.sb_progress_ptr === "function" ? frameView(E) : null;
+    if (frames) {
+      try {
+        P.setEngineTables(JSON.parse(rawCall(E, '{"fn":"progress_tables"}')).ok);
+      } catch {
+        frames = null;
+      }
+    }
+  }
   return E;
+}
+
+// The memory share of a default polynomial factorization (item D0,
+// plan-d0-capacity-r2 §3): lib/_capacity.py's poly_share, pushed into the
+// instance before a dispatch when the observation last pushed to it is
+// 250 ms old or more (one clock comparison per call otherwise), so a
+// factorization sees the share of its call's entry, and a long call keeps
+// it.  The age is the observation's, not the push's: poly_share may hand
+// over its own snapshot, up to 250 ms old, and the two caches share the one
+// 250 ms budget (CORR-PR122-3).  An instance's
+// dispatches are serialized.  The push is optional both ways: an engine
+// without sb_set_memory_share is left alone, and a share that can't be had
+// is pushed as -1 (none: the factorization keeps its 512 MiB).
+let shareTo: Engine | null = null, shareAt = 0;
+const SHARE_MAX_AGE_MS = 250, WASM_CEILING = 2 ** 32;
+// (the clock, monotonic; replaced by tests)
+let shareClock = () => performance.now();
+export function setShareClock(f: (() => number) | null) {
+  shareClock = f ?? (() => performance.now());
+  shareTo = null;
+}
+export function pushShare(e: Engine) {
+  if (typeof e.sb_set_memory_share !== "function") return;
+  const now = shareClock();
+  if (e === shareTo && now - shareAt < SHARE_MAX_AGE_MS) return;
+  shareTo = e;
+  shareAt = now;
+  const [share, ageMs] = memoryShare();
+  shareAt = now - ageMs;
+  e.sb_set_memory_share(share);
+}
+/** [poly_share() as an integer from 0 to 4 GiB, or -1; the age of its
+ * observation in ms, from 0 to 250]. */
+function memoryShare(): [number, number] {
+  try {
+    const m = Obj.hooks.importModule("_capacity");
+    // (0 unless poly_share says otherwise: a replacement for it, in a test,
+    // has no snapshot)
+    Obj.setattr(m, "_poly_age", 0);
+    let v: any = Obj.callObj(Obj.getattr(m, "poly_share"), []);
+    if (typeof v === "bigint") v = v <= BigInt(WASM_CEILING) && v >= 0n ? Number(v) : -1;
+    let age: any = Obj.getattr(m, "_poly_age");
+    age = age instanceof Obj.FloatBox ? age.v : Number(Obj.unbox(age));
+    const ageMs = Number.isFinite(age) ? Math.min(SHARE_MAX_AGE_MS, Math.max(0, age * 1000)) : SHARE_MAX_AGE_MS;
+    return [typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= WASM_CEILING ? v : -1, ageMs];
+  } catch (e) {
+    // (a Ctrl-C seen by the collector's Python code consumed the flag: set
+    // it again, so the call it came before is interrupted, not this push;
+    // requestCtrlC also wakes a time.sleep waiting on the word, as every
+    // producer of Ctrl-C does: #135)
+    try {
+      if (Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt)) requestCtrlC();
+    } catch {}
+    return [-1, 0];
+  }
+}
+
+/** A view of the engine's frame area (again after its memory grows). */
+function frameView(e: Engine): Uint32Array | null {
+  const p = e.sb_progress_ptr!();
+  return p ? new Uint32Array(e.memory.buffer, p, P.FRAME_WORDS) : null;
+}
+
+function rawCall(e: Engine, request: string): string {
+  const req = new TextEncoder().encode(request);
+  const p = e.sb_alloc(req.length);
+  new Uint8Array(e.memory.buffer, p, req.length).set(req);
+  const r = e.sb_call(p, req.length);
+  e.sb_free(p, req.length);
+  return new TextDecoder().decode(new Uint8Array(e.memory.buffer, r, e.sb_reply_len()));
+}
+
+/** After an engine call: its progress frames' calls end (all of them, and a
+ *  new engine generation, when the call trapped and the instance is gone). */
+function callEnded(trapped: boolean) {
+  if (trapped) frames = null;
+  P.endFrames(trapped);
 }
 
 export function engineCall(request: string): string {
   const e = engine();
+  pushShare(e);
   // an ASCII request (every engine request so far) is written straight
   // into the engine's memory: no request-sized copy outside it (plan F4
   // r4 §2a: a 1024 x 1024 echelon request is 20 MiB); otherwise as before
@@ -93,6 +204,7 @@ export function engineCall(request: string): string {
     E = null;
     throw err;
   } finally {
+    callEnded(E === null);
     if (E) e.sb_free(p, n);
   }
   return new TextDecoder().decode(new Uint8Array(e.memory.buffer, r, e.sb_reply_len()));
@@ -102,6 +214,7 @@ export function engineCall(request: string): string {
  *  band ("err\x1fKind\x1fmessage"), also when they abort the instance. */
 export function symCall(request: string): string {
   const e = engine();
+  pushShare(e);
   const req = new TextEncoder().encode(request);
   const p = e.sb_alloc(req.length);
   new Uint8Array(e.memory.buffer, p, req.length).set(req);
@@ -118,9 +231,11 @@ export function symCall(request: string): string {
       // the instance is gone
     }
     E = null;
+    callEnded(true);
     if (msg) return msg;
     throw err;
   }
+  callEnded(false);
   e.sb_free(p, req.length);
   return new TextDecoder().decode(new Uint8Array(e.memory.buffer, r, e.sb_reply_len()));
 }
@@ -129,6 +244,7 @@ export function symCall(request: string): string {
  *  (sagebrush_mpoly::call_framed); errors come back in band ("er..."). */
 export function mpCall(req: Uint8Array): Uint8Array {
   const e = engine();
+  pushShare(e);
   const p = e.sb_alloc(req.length);
   new Uint8Array(e.memory.buffer, p, req.length).set(req);
   let r: number;
@@ -137,8 +253,10 @@ export function mpCall(req: Uint8Array): Uint8Array {
   } catch (err) {
     // an interrupt (or a bug) trapped: start afresh
     E = null;
+    callEnded(true);
     throw err;
   }
+  callEnded(false);
   e.sb_free(p, req.length);
   return new Uint8Array(e.memory.buffer, r, e.sb_reply_len()).slice();
 }
@@ -161,8 +279,7 @@ newBuiltinModule("_sbengine", (m) => {
       const a = req instanceof Obj.PyBytes ? req.a.subarray(0, req.n) : new TextEncoder().encode(String(req));
       return new Obj.PyBytes(mpCall(a));
     } catch (err: any) {
-      if (INTR[0]) {
-        INTR[0] = 0;
+      if (consumeCtrlC()) {
         reclaimEngine();
         return Obj.raise(Obj.T.KeyboardInterrupt);
       }
@@ -173,8 +290,7 @@ newBuiltinModule("_sbengine", (m) => {
     try {
       return symCall(String(req));
     } catch (err: any) {
-      if (INTR[0]) {
-        INTR[0] = 0;
+      if (consumeCtrlC()) {
         reclaimEngine();
         return Obj.raise(Obj.T.KeyboardInterrupt);
       }
@@ -185,14 +301,40 @@ newBuiltinModule("_sbengine", (m) => {
     try {
       return engineCall(String(req));
     } catch (err: any) {
-      if (INTR[0]) {
-        INTR[0] = 0;
+      if (consumeCtrlC()) {
         reclaimEngine();
         return Obj.raise(Obj.T.KeyboardInterrupt);
       }
       return Obj.raise(Obj.T.RuntimeError, `Sagebrush engine: ${err?.message ?? err}`);
     }
   }, "call");
+  // The runtime's parts of the memory capacity (lib/_capacity.py, item D0):
+  // (source, limit, used, includes, constrains), bytes, used None when
+  // unknown; never guessed in Python, and nothing here calls the engine.
+  // The domains (plan-d0-domains-r2): the engine row counts and bounds only
+  // the engine instance's own Memory; the JS heap's used_heap_size and
+  // usedJSHeapSize count neither ArrayBuffer backing stores nor any wasm
+  // Memory, and its limit bounds only the heap.  The engine's instance has at
+  // most 4 GiB (wasm32); the JS heap is V8's (or the browser's) limit and
+  // use, without a collection.
+  m.capacity_parts = Obj.builtin(() => {
+    const only = (d: string) => Obj.tuple([d]);
+    const parts: any[] = [Obj.tuple(["wasm engine", WASM_CEILING, E ? E.memory.buffer.byteLength : 0, only("wasm-engine"), only("wasm-engine")])];
+    let used: number | null = null;
+    try {
+      const p = (globalThis as any).process;
+      if (p?.versions?.v8 && !p.versions.bun && !p.versions.deno) used = p.getBuiltinModule?.("node:v8")?.getHeapStatistics?.().used_heap_size ?? null;
+      else used = (globalThis as any).performance?.memory?.usedJSHeapSize ?? null;
+    } catch {
+      used = null;
+    }
+    parts.push(Obj.tuple(["js heap", heapLimit(), typeof used === "number" && used >= 0 ? Math.floor(used) : null, only("js-heap"), only("js-heap")]));
+    return Obj.tuple(parts);
+  }, "capacity_parts");
+  // The JavaScript engine, for the estimates whose object sizes are its own
+  // (./js-engine.ts: decided once, before any user code).
+  m.js_engine = Obj.builtin(() => JS_ENGINE, "js_engine");
+  m.js_host = Obj.builtin(() => JS_HOST, "js_host");
   // Sage mode gives Python ints Sage's Integer methods ((12).factor()), and
   // builtin types refuse new attributes from Python code (as in CPython).
   m.extend_type = Obj.builtin((cls: any, name: any, value: any) => {

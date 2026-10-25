@@ -11,6 +11,13 @@
 import { Workspace, WorkspaceError, LIMITS, type Entry } from "./api";
 import { TRASH, freePath, join, nameOf, openableAs, parentOf, splitExt, within, type DocKind } from "./paths";
 import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from "./preview";
+import { SyncOwner } from "./sync-owner";
+import { foot as footText } from "./sync-panel";
+import { rowIcons, ROWICON } from "./sync-rows";
+// (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
+// copy; elsewhere the define is absent or false, and everything is as before)
+declare const __SB_NO_SYNC__: boolean | undefined;
+const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
 
 export type BrowserHost = {
   ws: Workspace;
@@ -83,6 +90,8 @@ const STYLE = `
 .sbfiles .frow .chev { width: 10px; color: #8a8f8b; font-size: 10px; flex: none; }
 .sbfiles .frow .n { overflow: hidden; text-overflow: ellipsis; flex: 1; }
 .sbfiles .frow .m { color: #5d645f; font-size: 11.5px; }
+.sbfiles .frow .si { color: #5d645f; font-size: 11.5px; }
+.sbfiles .fsync { font-size: 12px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sbfiles .frow .more { visibility: hidden; }
 .sbfiles .frow:hover .more, .sbfiles .frow:focus-within .more, .sbfiles .frow.cur .more { visibility: visible; }
 .sbfiles .frow input { flex: 1; font: inherit; padding: 1px 4px; border: 1px solid #4a6b49; border-radius: 4px; min-width: 0; }
@@ -200,6 +209,39 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   };
   const fail = (e: unknown) => say(e instanceof WorkspaceError ? e.message : String((e as Error)?.message ?? e));
 
+  // (sync, step 5: the foot's line, "Synced · 2 min ago", … (role=status); hidden with sync off and nothing to say)
+  const syncEl = h("button", { className: "ib fsync", title: "Sync: opens the Storage panel" });
+  syncEl.setAttribute("role", "status");
+  syncEl.onclick = () => storage();
+  function showSync() {
+    if (!NO_SYNC) {
+      const v = SyncOwner.of(w).view().s;
+      syncEl.hidden = v.state === "off" && !v.reason;
+      syncEl.textContent = v.state === "off" ? (v.reason ? `Sync off: ${v.reason}` : "") : footText(v);
+    } else syncEl.hidden = true;
+  }
+  // (the rows drawn by the last render, and that render's icons: an older read never paints a newer render's rows)
+  let drawnRows: { e: Entry; si: HTMLElement }[] = [], iconGen = 0;
+  function paintIcons() {
+    if (!NO_SYNC) {
+      const rows = drawnRows, gen = ++iconGen;
+      const ids = rows.map((r) => r.e.ident).filter((x): x is string => !!x).slice(0, ROWICON.max);
+      if (!rows.length) return;
+      rowIcons(w, ids, rows.map((r) => r.e.path)).then((ic) => {
+        if (gen !== iconGen) return;
+        for (const { e, si } of rows) {
+          const marks: string[] = [];
+          if (e.ident && ic.up.has(e.ident)) marks.push("↑");
+          if (ic.conflict.has(e.path) || (e.ident && ic.tooLarge.has(e.ident))) marks.push("⚠");
+          si.textContent = marks.join(" ");
+          const why = [e.ident && ic.up.has(e.ident) ? "waiting to go up" : "", ic.conflict.has(e.path) ? "conflict copy" : "", e.ident && ic.tooLarge.has(e.ident) ? "too large to sync yet" : ""].filter(Boolean).join(", ");
+          si.title = why;
+          si.setAttribute("aria-label", why);
+        }
+      }, () => {});
+    }
+  }
+
   // (each folder's entries, sorted, built once per refresh: LIMIT-0B0-2)
   let byParent = new Map<string, Entry[]>();
   async function refresh() {
@@ -243,7 +285,10 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const meta = h("span", { className: "m", textContent: opts.recent ? fmtWhen(e.updated) : metaOf(e) });
     const more = h("button", { className: "ib more", textContent: "⋯", title: "More" });
     more.setAttribute("aria-label", `More: ${nameOf(e.path)}`);
-    r.append(chev, ic, name, meta, more);
+    // (its sync icon, painted after the render (sync-rows.ts), as text a screen reader says too)
+    const si = h("span", { className: "si" });
+    r.append(chev, ic, name, si, meta, more);
+    if (!trashView) drawnRows.push({ e, si });
     r.onclick = (ev) => {
       if ((ev.target as HTMLElement).closest("input")) return;
       if (e.kind === "folder") { toggle(e.path); return; }
@@ -283,6 +328,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   let renamingNow = false;
   function render() {
     if (renamingNow) return;
+    drawnRows = [];
     tree.replaceChildren();
     const q = query.toLowerCase();
     if (trashView) {
@@ -319,7 +365,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     foot.replaceChildren();
     const trashLink = h("button", { className: "ib", textContent: trashView ? "← All files" : "Trash", style: "font-size:12px" });
     trashLink.onclick = () => { trashView = !trashView; refresh(); };
-    foot.append(trashLink, h("span", { className: "sp" }));
+    foot.append(trashLink, syncEl, h("span", { className: "sp" }));
+    paintIcons();
     if (trashView && children(TRASH).length) {
       const empty = h("button", { className: "ib", textContent: "Empty Trash…", style: "font-size:12px;color:#b3261e" });
       empty.onclick = emptyAll;
@@ -521,11 +568,20 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // (changes from this tab, other tabs and agents: shown, at most a few times a second)
   let pending: ReturnType<typeof setTimeout> | null = null;
   const unwatch = w.watch(() => { if (!pending) pending = setTimeout(() => { pending = null; refresh(); }, 150); });
+  // (sync, step 5: the foot's line, from the page's sync owner; the rows' icons on its transitions too, at most every
+  // ROWICON.minGapMs)
+  const owner = NO_SYNC ? null : SyncOwner.of(w);
+  let iconTimer: ReturnType<typeof setTimeout> | null = null;
+  const unowner = owner ? owner.onChange(() => {
+    showSync();
+    if (!iconTimer) iconTimer = setTimeout(() => { iconTimer = null; paintIcons(); }, ROWICON.minGapMs);
+  }) : () => {};
+  showSync();
   refresh();
   return {
     el: root,
     refresh,
-    destroy() { unwatch(); root.remove(); },
+    destroy() { unwatch(); unowner(); if (iconTimer) clearTimeout(iconTimer); root.remove(); },
     say: (text: string, sticky?: boolean) => say(text, undefined, !!sticky),
   };
 }

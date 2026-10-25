@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig } from "./object";
+import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig, raiseExc } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, DONE, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
@@ -82,6 +82,18 @@ function halted(name: string): never {
   const e = T.ModuleNotFoundError(`import of ${name} halted; None in sys.modules`);
   e.name = name;
   throw e;
+}
+
+// A memory guard's refusal (item D): lib's _memguard.memory_guard builds it,
+// so a runtime guard raises the same class (SagebrushMemoryError, a
+// MemoryError) with the same text and fields as a lib guard: the wording
+// lives there once.  Called before anything is allocated; the sizes are
+// exact (a bigint past 2^53).
+// (fixed: a limit that is the same whatever memory there is)
+export function memoryGuard(what: string, needBytes: number | bigint, limitBytes: number | bigint, allowanceFor: string, fixed = false): never {
+  const norm = (x: number | bigint) => (typeof x === "bigint" ? O.normBig(x) : x);
+  const e = callKw(getattr(importModule("_memguard"), "memory_guard"), [what, norm(needBytes), norm(limitBytes), allowanceFor], ["fixed"], [fixed]);
+  throw raiseExc(e);
 }
 
 export function importModule(name: string): any {
@@ -733,7 +745,10 @@ newBuiltinModule("_time", (m) => {
         O.pollInterrupt();
         const left = end - Date.now();
         if (left <= 0) break;
-        Atomics.wait(flag, 0, 0, left);
+        // (on the word's present value: another bit set, a frame request or
+        // a persistent armed allowance, must not turn the wait into a spin;
+        // a producer's notify wakes it, and only bit 0 ends it)
+        Atomics.wait(flag, 0, Atomics.load(flag, 0) & ~1, left);
       }
     }
     return null;
@@ -1817,6 +1832,13 @@ newBuiltinModule("_fs", (m) => {
   fn(m, "isfile", (path: string) => quiet(() => fs.statSync(at(path)).isFile()));
   fn(m, "islink", (path: string) => quiet(() => fs.lstatSync(at(path)).isSymbolicLink()));
   fn(m, "lexists", (path: string) => quiet(() => (fs.lstatSync(at(path)), true)));
+  // (this process's CPU time, all its threads, user and system apart, in
+  // seconds: for tests' diagnostics, sbx's CPU ratio, shard-7 proposal r1;
+  // time.process_time() is their sum)
+  fn(m, "cpu_times", () => {
+    const u = process.cpuUsage();
+    return tuple([O.mkfloat(u.user / 1e6), O.mkfloat(u.system / 1e6)]);
+  });
 });
 
 // ------------------------------------------------------------------ os

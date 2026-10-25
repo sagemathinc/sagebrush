@@ -73,6 +73,15 @@ pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
     r.as_ptr()
 }
 
+/// The memory share of a default polynomial factorization (item D0), pushed
+/// by the host before a dispatch: bytes, an integer from 0 to 4 GiB, or -1
+/// for none (anything else is none too).  Optional: a host that never calls
+/// it leaves the factorizations their default.
+#[no_mangle]
+pub extern "C" fn sb_set_memory_share(v: f64) {
+    sagebrush_interrupt::set_memory_share(sagebrush_interrupt::share_from_f64(v));
+}
+
 /// After a trap (an error aborts in WebAssembly): "err\x1fKind\x1fmessage"
 /// for the last symbolic error, or "" (an interrupt or a bug).
 #[no_mangle]
@@ -85,6 +94,49 @@ pub unsafe extern "C" fn sb_last_error() -> *const u8 {
     }
     .into_bytes();
     r.as_ptr()
+}
+
+/// The progress frame area (sagebrush_interrupt::progress, design-estimates-
+/// progress r4 §6): the host copies it inside its `sagebrush.interrupted`
+/// import.  An optional export: a host that doesn't look for it reads no
+/// progress, and the engine needs no import for it.
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn sb_progress_ptr() -> *const u32 {
+    sagebrush_interrupt::progress::frames_ptr()
+}
+
+/// The hosts' progress self-test: `depth` nested calls of op `op`, the
+/// innermost counting `steps` steps (each a coarse interrupt check, so the
+/// host copies the frames), then an in-band error if `fail`.  It computes
+/// nothing; the hosts' tests use it (test/progress.test.ts).
+fn progress_selftest(v: &Value) -> Result<Value, String> {
+    use sagebrush_interrupt::progress;
+    let depth = v.get("depth").and_then(Value::as_u64).unwrap_or(1).clamp(1, 40) as usize;
+    let steps = v.get("steps").and_then(Value::as_u64).unwrap_or(1).min(1 << 32);
+    let op = v.get("op").and_then(Value::as_u64).unwrap_or(1) as u32;
+    let mut calls: Vec<progress::Call> = (0..depth).map(|_| progress::begin(op)).collect();
+    let last = calls.last_mut().expect("depth >= 1");
+    for k in 1..=steps {
+        let r = last.report();
+        r.stage = 1;
+        r.stage_index = 1;
+        r.stage_count = Some(2);
+        r.done = k;
+        r.total = Some(steps);
+        r.unit = 8;
+        r.work = k;
+        last.publish();
+        sagebrush_interrupt::check_coarse();
+    }
+    // (innermost first, as nested calls end)
+    while let Some(c) = calls.pop() {
+        drop(c);
+    }
+    if v.get("fail").and_then(Value::as_bool).unwrap_or(false) {
+        return Err("progress_selftest: the requested failure".into());
+    }
+    Ok(json!({ "steps": steps, "calls": depth }))
 }
 
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
@@ -704,6 +756,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         // ---- Hilbert modular forms over Q(sqrt 5): engine/hmf (hmf.rs) ----
         f if f.starts_with("hmf_") => hmf::dispatch(f, v),
         f if f.starts_with("hmfq_") => hmfq::dispatch(f, v),
+        "progress_tables" => serde_json::from_str(&sagebrush_interrupt::progress::tables_json()).map_err(|e| e.to_string()),
+        "progress_selftest" => progress_selftest(v),
         "perm_group" => perm_group(v),
         "perm_group_named" => perm_group_named(v),
         "characters" => {
