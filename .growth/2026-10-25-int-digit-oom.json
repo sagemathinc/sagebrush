@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "int-digit OOM (#134): int() scans its str or bytes-like input once, with no copy, before memory admission (every base); the invalid-literal operand is cut at 200 code points without the whole repr; decimalOf admits before negating",
+ "bytes": {
+  "cli/pyjs.cjs": 3253,
+  "engine/sagebrush-worker.js": 2494
+ }
+}
