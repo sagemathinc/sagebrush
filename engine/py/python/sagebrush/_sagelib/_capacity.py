@@ -67,8 +67,19 @@ def _set_sources(**kw):
     _poly_snap = _total_snap = _cg_dirs = None
 
 
+try:
+    # (pyjs: the runtime's own file read; open() would bring _pyjs_open and
+    # io into the start of every mode whose start dispatches to the engine,
+    # since each dispatch asks for poly's share, D0)
+    import _fs
+except ImportError:  # (CPython)
+    _fs = None
+
+
 def _read(path):
     try:
+        if _fs is not None:
+            return _fs.read(_src.root + path).decode("utf-8", "replace")
         with open(_src.root + path) as f:
             return f.read()
     except Exception:
