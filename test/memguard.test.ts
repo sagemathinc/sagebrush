@@ -162,6 +162,8 @@ test("Magma reports a memory guard's refusal as a runtime error in the guard's w
     "import _magma, _memguard",
     "e = _magma._collect_refusal()",
     "print(type(e).__name__, e.what, e.need_bytes == (_magma._COLLECT_MAX + 1) * 1024, e.limit_bytes == _magma._COLLECT_MAX * 1024, e.allowance_for, e.record, e.partial, e.checkpoint, e.fixed)",
+    // (D0's record beside them: the memory observed free, which decided nothing)
+    "import _capacity; print(type(e.capacity) is dict and sorted(e.capacity) == sorted(_capacity.capacity()))",
     // (below the ceiling, a bound the heap sets: the routes to more memory)
     "_magma._COLLECT_MAX = 37000; e = _magma._collect_refusal()",
     "print(e.fixed, str(e).splitlines()[0], 'To run it with more memory:' in str(e))",
@@ -173,7 +175,7 @@ test("Magma reports a memory guard's refusal as a runtime error in the guard's w
     "_magma._report(_memguard.memory_guard('A 100000 x 100000 matrix', 8 * 10**10, 2**25, 'one matrix'), 0, 0)",
   ].join("\n") + "\n", ".sage");
   assert.equal(f.stderr, "");
-  assert.match(f.stdout, /^MagmaError A collection of more than 1000000 elements True True one collection None None None True\nFalse Not enough memory for this computation\. True\nTrue True\n\n>> \n  \^\nRuntime error: Not enough memory for this computation\.\nA 100000 x 100000 matrix needs about 80 GB, but Sagebrush allows about 33 MB for\s+one\s+matrix here\.\nTo run it with more memory:\n/);
+  assert.match(f.stdout, /^MagmaError A collection of more than 1000000 elements True True one collection None None None True\nTrue\nFalse Not enough memory for this computation\. True\nTrue True\n\n>> \n  \^\nRuntime error: Not enough memory for this computation\.\nA 100000 x 100000 matrix needs about 80 GB, but Sagebrush allows about 33 MB for\s+one\s+matrix here\.\nTo run it with more memory:\n/);
   assert.doesNotMatch(f.stdout, /not supported yet/);
 });
 
