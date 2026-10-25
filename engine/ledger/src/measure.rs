@@ -49,7 +49,7 @@ pub struct Measure {
     data_segment: bool,
     physical: bool,
     /// a row this build cannot measure (fail-closed)
-    unsupported: bool,
+    unmeasured: bool,
     /// no binding row at all (the nominal total)
     none: bool,
 }
@@ -61,7 +61,7 @@ impl Measure {
         address_space: false,
         data_segment: false,
         physical: false,
-        unsupported: false,
+        unmeasured: false,
         none: true,
     };
 
@@ -69,27 +69,27 @@ impl Measure {
     /// ledger's lock).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open(kinds: &[MeasureKind]) -> Measure {
-        let mut m = Measure { cgroups: Vec::new(), address_space: false, data_segment: false, physical: false, unsupported: false, none: kinds.is_empty() };
+        let mut m = Measure { cgroups: Vec::new(), address_space: false, data_segment: false, physical: false, unmeasured: false, none: kinds.is_empty() };
         for k in kinds {
             match k {
                 MeasureKind::Cgroup(path) if cfg!(target_os = "linux") => match File::open(path) {
                     Ok(f) => m.cgroups.push(f),
-                    Err(_) => m.unsupported = true,
+                    Err(_) => m.unmeasured = true,
                 },
                 MeasureKind::AddressSpace if cfg!(target_os = "linux") => m.address_space = true,
                 MeasureKind::DataSegment if cfg!(target_os = "linux") => m.data_segment = true,
                 MeasureKind::Physical if cfg!(target_os = "linux") => m.physical = true,
-                _ => m.unsupported = true,
+                _ => m.unmeasured = true,
             }
         }
         if (m.address_space || m.data_segment || m.physical) && !proc_files_ready() {
-            m.unsupported = true;
+            m.unmeasured = true;
         }
         m
     }
 
     pub fn available(&self) -> bool {
-        !self.none && !self.unsupported
+        !self.none && !self.unmeasured
     }
 
     /// A fresh reading, or None when unavailable or unreadable.  No
