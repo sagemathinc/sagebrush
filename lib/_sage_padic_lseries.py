@@ -1394,7 +1394,11 @@ def _kd_r(x, g):
 
 class _KdCPython:
     """CPython 3.12 to 3.14, 64-bit: getsizeof plus pymalloc's 16-byte
-    granularity, each an upper bound (plan-kedlaya-optin r6 section 2)."""
+    granularity, each an upper bound (plan-kedlaya-optin r6 section 2).  No
+    code allowance: CPython compiles the module when it is imported, before
+    any call."""
+
+    CODE = 0
 
     @staticmethod
     def I(bits):
@@ -1426,6 +1430,12 @@ class _KdV8:
     1.5 n + 16 after appends), a dict a PyDict and its OrderedHashMap of
     capacity 2c (and the old table during a rehash)."""
 
+    # the first call in a session compiles the _kd_ functions: their bytecode
+    # and feedback stay in the old space, measured at most 0.97 MiB retained
+    # after a first call (Node 26, p = 5 ... 401), the same at every p and N;
+    # charged on every call (a per-session cost: conservative after the first)
+    CODE = 3 << 19
+
     @staticmethod
     def I(bits):
         return _kd_r(16 + 8 * -(-bits // 64), 8)
@@ -1450,6 +1460,11 @@ class _KdJSC:
     included); a PyDict's Map, 64 bytes a slot of a capacity growing by
     powers of 4 from 16 (and the old table, a quarter of it, during a
     rehash), plus 1.5 KiB."""
+
+    # the first call's code blocks are cells of JSC's heap: 1.9 MB measured
+    # under Bun 1.3.14 at p = 101 (test/kedlaya_jsc.mjs's cold call); charged
+    # on every call, as V8's
+    CODE = 5 << 19
 
     @staticmethod
     def I(bits):
@@ -1524,9 +1539,10 @@ def _kd_peak(p, K, W, L, a, t):
 def _kd_ledger(p, N, K, W, L, a, t):
     """U: an upper bound on the peak bytes of _kd_frobenius_matrix(.., N, K,
     W): the two calls one after the other, the second (the check of the
-    next two terms) with M kept, and the result's entries."""
+    next two terms) with M kept, the result's entries, and the runtime's
+    allowance for the code a first call compiles (t.CODE)."""
     bM = W * p.bit_length()
-    return max(_kd_peak(p, K, W, L, a, t), _kd_peak(p, K + 2, W + 3, L, a, t) + 4 * t.I(bM)) + 4 * (t.I(bM) + 256)
+    return max(_kd_peak(p, K, W, L, a, t), _kd_peak(p, K + 2, W + 3, L, a, t) + 4 * t.I(bM)) + 4 * (t.I(bM) + 256) + t.CODE
 
 
 def _kd_mib(n):
