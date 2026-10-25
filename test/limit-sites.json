@@ -4082,6 +4082,10 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "src/runtime/file-once.ts :: nodeOps :: EFBIG: [27, \"File too large\"], #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
  "src/runtime/format.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
