@@ -187,6 +187,20 @@ and saves without a setting. A program that calls
 other bound on a conversion, or on `math.log` of a huge int, is the session's
 memory, refused at once with a `MemoryError` that says how much it needs.
 
+Files: pyjs has no reference counting, so a file object isn't closed when
+its last reference goes. `with open(...)` or `.close()` is the portable form.
+`open(f, m).write(s)`, with `f`, `m` and `s` each a name or a literal, is
+written and closed at the statement, as in CPython. Any other unclosed file is
+written when a notebook cell or the program ends. That includes one released
+by `del`, by rebinding or by a function's return, and one with a computed
+operand, such as `open(os.path.join(d, f), "w").write(s)`. Opening the same
+path again doesn't write it first, as CPython doesn't. A held file writes its
+whole contents when flushed, not from its position. At an
+`open(f, m).write(s)` statement, a write error such as a full disk raises
+there, where CPython's small buffered write reports it only when the file is
+finalized. pyjs writes UTF-8 with `"\n"`
+newlines, CPython's POSIX defaults.
+
 - **Browser:** [sagebrush.space](https://sagebrush.space) is a notebook and a
   console running in the page, and nothing is sent to a server. See
   [web/README.md](web/README.md).
