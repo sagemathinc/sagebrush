@@ -110,3 +110,10 @@ test("XK rows: exercised EXCEPTION; a window never entered is INCOMPLETE; all PA
   assert.equal(run(`xkRowOutcome([{ outcome: "EXCEPTION", xk_inside: true }, { outcome: "FAIL" }], true, ${w})`).outcome, "FAIL");
   assert.equal(run(`xkRowOutcome([{ outcome: "PASS" }], true, null)`).outcome, "PASS");
 });
+
+test("a return after the Stop with the KI later in the probe is still 'did not stop', and says where the KI went (E13g, pilot 4)", () => {
+  const r = run(`classify({ t_send: 1000, marks: { ENTER: { t: 500, rest: "1" }, RET: { t: 4200 } }, stray: "probe", probe: null })`);
+  assert.equal(r.outcome, "FAIL");
+  assert.match(r.why, /did not stop .*deferred to the probe/);
+  assert.equal(r.deferred_to, "probe");
+});

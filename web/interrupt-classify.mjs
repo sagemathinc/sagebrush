@@ -48,7 +48,7 @@ export function classify(t) {
   if (t.marks.RET) {
     // a return after the Stop, the target running at the send: the route did not stop
     return t.marks.RET.t >= t.t_send
-      ? { outcome: "FAIL", why: `did not stop (returned ${Math.round(t.marks.RET.t - t.t_send)} ms after the Stop)` }
+      ? { outcome: "FAIL", why: `did not stop (returned ${Math.round(t.marks.RET.t - t.t_send)} ms after the Stop${t.stray ? `; the KeyboardInterrupt came later, deferred to the ${String(t.stray).split(" ")[0]}` : ""})`, ...(t.stray ? { deferred_to: String(t.stray).split(" ")[0] } : {}) }
       : { outcome: "INVALID", why: "returned before the Stop" };
   }
   if (t.stray && !String(t.stray).startsWith("late")) return { outcome: "INVALID", why: "stray " + t.stray };
