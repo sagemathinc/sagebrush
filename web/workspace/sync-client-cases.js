@@ -2242,32 +2242,46 @@ async function t14Large() {
 }
 
 async function t14Figures() {
-  // (measured, for the PR (LIMIT-PR128-1): rows of the largest valid width as stored (the browser's estimate over
-  // 10,000 of them, in a namespace of the longest form), the largest row's JSON, and the fixed per-namespace meta values)
+  // (LIMIT-PR128-1-R2: the widest row by construction (a refusal's code is ASCII [a-z0-9_], at most CODE.max); its
+  // stored size measured on rows nothing can compress (each with its own random namespace, random seqs, random code);
+  // and a planning allowance from the encodings themselves, not from a measurement)
   const w = await fresh();
   const MAX = Number.MAX_SAFE_INTEGER;
-  const ns = `${"f".repeat(64)}:${"9".repeat(15)}:${w.device}`;
+  const hexr = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n / 2)), (b) => b.toString(16).padStart(2, "0")).join("");
+  const digits = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => String(b % 10)).join("");
+  const alnum = "abcdefghijklmnopqrstuvwxyz0123456789_";
+  const coder = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => alnum[b % alnum.length]).join("");
+  const nsOf = () => `${hexr(64)}:${digits(15)}:${w.device}`;
+  const ns = nsOf();
   await W.switchTo(w, ns);
   const kinds = {
-    refused: { ns, lseq: MAX, s: "refused", d: 1, dseq: MAX, code: "x".repeat(64) },
-    superseded: { ns, lseq: MAX, s: "superseded", d: 1, dseq: MAX, reason: "diverged", by: MAX },
-    none: { ns, lseq: MAX, s: "none", d: 1, reason: "not-synced" },
+    refused: { ns, lseq: MAX, s: "refused", d: 1, dseq: MAX, code: "z".repeat(W.CODE.max) },
+    // (a rebuild's supersession carries its reason, never `by`; a local one carries `by`, its reason "local")
+    supersededRebuild: { ns, lseq: MAX, s: "superseded", d: 1, dseq: MAX, reason: "diverged" },
+    supersededLocal: { ns, lseq: MAX, s: "superseded", d: 1, dseq: MAX, reason: "local", by: MAX },
+    none: { ns, lseq: MAX, s: "none", d: 1, reason: "before-ledger" },
     accepted: { ns, lseq: MAX, s: "accepted", d: 0, dseq: MAX },
   };
   const widths = Object.fromEntries(Object.entries(kinds).map(([k, v]) => [k, JSON.stringify(v).length]));
   const [widest, maxChars] = Object.entries(widths).sort((a, b) => b[1] - a[1])[0];
-  check(ns.length === 97 && maxChars === 248 && widest === "refused", "figures: the widest valid row is a refused one, 248 JSON characters, in a 97-character namespace: " + J(widths));
+  check(ns.length === 97 && maxChars === 216 && widths.refused === 216, "figures: the widest valid rows by construction (a refused one, a local supersession) are 216 JSON characters, ASCII only: " + J({ widths, widest }));
   const est = async () => (await navigator.storage.estimate()).usage ?? 0;
   await sleep(500);
   const u0 = await est();
-  for (let p = 0; p < 10; p++) await rawTx(w.ws, ["syncLedger"], (tx) => { const st = tx.objectStore("syncLedger"); for (let i = 0; i < 1000; i++) { const lseq = MAX - (p * 1000 + i); st.put({ ...kinds.refused, lseq, dseq: lseq }); } });
+  const rnd = () => MAX - Math.floor(Math.random() * 2 ** 40);
+  for (let p = 0; p < 10; p++) await rawTx(w.ws, ["syncLedger"], (tx) => { const st = tx.objectStore("syncLedger"); for (let i = 0; i < 1000; i++) { const lseq = rnd(); st.put({ ns: nsOf(), lseq, s: "refused", d: 1, dseq: rnd(), code: coder(W.CODE.max) }); } });
   await sleep(1500);
   const u1 = await est();
-  const perRow = Math.round((u1 - u0) / 10_000);
+  const measured = Math.round((u1 - u0) / 10_000);
+  // (the allowance: the value as stored (one byte a character, all ASCII), the primary key [ns, lseq] and the index key
+  // [ns, d, lseq] with its copy of the primary key, keys' strings at two bytes a character, 16 B per number; rounded up)
+  const keyBytes = 2 * ns.length + 2 * 16, idxBytes = 2 * ns.length + 3 * 16;
+  const allowance = Math.ceil((maxChars + keyBytes + idxBytes + keyBytes) / 64) * 64;
+  const plan = Math.max(allowance, measured);
   const skips = JSON.stringify(Array.from({ length: 16 }, () => [MAX, MAX, 2]));
   const meta = { ledgerCount: 50_000, ledgerFloor: MAX, ledgerFrom: MAX, ledgerRev: MAX, ledgerSeeded: true, ledgerSeedAt: MAX, ledgerWipe: true };
   const metaChars = Object.entries(meta).reduce((a, [k, v]) => a + `sync:${ns}:${k}`.length + JSON.stringify(v).length, 0) + `sync:${ns}:ledgerSkips`.length + skips.length;
-  check(skips.length <= 609, "figures (task #14): " + J({ storedBytesPerMaxRowEstimate: perRow, perNamespaceMaxMB: +(perRow * 70_000 / 2 ** 20).toFixed(1), globalMaxMB: +(perRow * 210_000 / 2 ** 20).toFixed(1), rowJsonCharsMax: maxChars, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
+  check(skips.length <= 609 && plan >= measured, "figures (task #14): " + J({ measuredBytesPerIncompressibleRow: measured, allowanceBytesPerRow: allowance, planningBytesPerRow: plan, perNamespacePlanMiB: +(plan * 70_000 / 2 ** 20).toFixed(1), globalPlanMiB: +(plan * 210_000 / 2 ** 20).toFixed(1), rowJsonCharsMax: maxChars, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
 }
 
 async function t14Review() {
@@ -2335,7 +2349,41 @@ async function t14Review() {
   ab2.abort();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review };
+async function t14Review2() {
+  // (daybreak3's round 2: the refusal code bounded where a row takes it; the generation fence bounded and still a fence)
+  const w = await fresh();
+  const { ns, ob } = await localNs(w, "e1");
+  const col = [];
+  await w.mkdir("/rc1", { collect: col });
+  await w.mkdir("/rc2", { collect: col });
+  await ob.scan();
+  const recs = await ob.records();
+  await ob.acked([{ dseq: recs[0].dseq, code: "\u0000".repeat(64) }, { dseq: recs[1].dseq, code: "missing" }]);
+  const st = await w.syncState(col);
+  check(st[0].code === "other" && st[1].code === "missing", "review2: a code outside the protocol's vocabulary kept as other; a protocol code kept: " + J(st));
+  const hub = W.hubOf(w.ws);
+  for (let i = 0; i < 50; i++) {
+    hub.post({ t: "holder", ns: `${String(i).padStart(16, "0")}:1:${w.device}`, epoch: i, gen: 5, rev: 0 });
+    hub.post({ t: "lifecycle", ns, fromEpoch: 100 + i, toEpoch: 101 + i, kind: "off" });
+  }
+  check(hub.fences <= W.HUB.namespaces, `review2: 50 namespaces and 50 epochs cycled: the fence holds ${hub.fences} (at most ${W.HUB.namespaces})`);
+  // (still a fence: the current epoch's holder 10 seen, a delayed sent from 9 is stale)
+  const epoch = 200;
+  hub.post({ t: "holder", ns, epoch, gen: 10, rev: 0 });
+  let staleSeen = null;
+  const off = hub.on((m, stale) => { if (m.t === "sent" && m.gen === 9) staleSeen = stale; });
+  hub.post({ t: "sent", ns, epoch, gen: 9, seqs: [] });
+  off();
+  check(staleSeen === true, "review2: …and a delayed generation 9 after holder 10 is still stale");
+  // (an older epoch's message is stale too)
+  let olderStale = null;
+  const off2 = hub.on((m, stale) => { if (m.t === "sent" && m.epoch === epoch - 1) olderStale = stale; });
+  hub.post({ t: "sent", ns, epoch: epoch - 1, gen: 99, seqs: [] });
+  off2();
+  check(olderStale === true, "review2: a message of an older epoch is stale whatever its generation");
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2 };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
