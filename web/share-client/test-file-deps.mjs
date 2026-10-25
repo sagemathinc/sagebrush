@@ -304,7 +304,7 @@ const said = (r, re) => r.unf.some((u) => re.test(u.why));
   eq(method.paths, ["/private.csv"], "a method doesn't see the class body's p: the module's (control)");
   // R2-3: a container that changes or is copied
   const sub = await run({ files, cells: ['p = ["private.csv"]\np[0] = "public.csv"\nhandle(p)\n'] });
-  eq([sub.paths, said(sub, /a list, dict or set the code changes or copies/)], [[], true], "R2-3: p[0] = ...: the list's old constant isn't pre-checked, reported");
+  eq([sub.paths, said(sub, /holds a list, dict or set/)], [[], true], "R2-3: p[0] = ...: the list's old constant isn't pre-checked, reported");
   for (const [src, what] of [
     ['d = {"k": "private.csv"}\nd["k"] = "public.csv"\nhandle(d)\n', "a dict's item replaced"],
     ['d = {"k": "private.csv"}\ndel d["k"]\nhandle(d)\n', "a dict's item deleted"],
@@ -319,12 +319,26 @@ const said = (r, re) => r.unf.some((u) => re.test(u.why));
     ['p = [["private.csv"]]\np[0].clear()\nhandle(p)\n', "p[0].clear()"],
   ]) {
     const r = await run({ files, cells: [src] });
-    eq([r.paths, said(r, /a list, dict or set the code changes or copies/)], [[], true], `R2-3 (r3): a nested change, ${what}: not pre-checked, reported`);
+    eq([r.paths, said(r, /holds a list, dict or set/)], [[], true], `R2-3 (r3): a nested change, ${what}: not pre-checked, reported`);
   }
-  const nested = await run({ files, cells: ['p = [["private.csv"]]\nx = p[0][0]\nhandle(p)\n'] });
-  eq(nested.paths, ["/private.csv"], "a nested container only read still counts (control)");
-  const plain = await run({ files, cells: ['fs = ["private.csv"]\nhandle(fs)\nt = ("public.csv",)\nu = t\nhandle(t)\n'] });
-  eq(plain.paths, ["/private.csv", "/public.csv"], "a list left alone, and a tuple even when copied (immutable), still count (control)");
+  // r4's review, and the rule that closes the class: a name stands for a container's constants only if it is
+  // immutable all the way down; one holding a list, dict or set anywhere is reported, never pre-checked
+  for (const [src, what] of [
+    ['p = (["private.csv"],)\np[0].clear()\nhandle(p)\n', "a list inside a tuple, cleared"],
+    ['p = [["private.csv"]]\nq = p[0]\nq.clear()\nhandle(p)\n', "an inner list taken out and cleared"],
+    ['p = [["private.csv"]]\nx = p[0][0]\nhandle(p)\n', "a nested list only read (still a list)"],
+    ['fs = ["private.csv"]\nhandle(fs)\n', "a list left alone (still a list)"],
+    ['a = ["private.csv"]\np = (a,)\nhandle(p)\n', "a tuple holding a list through a name"],
+  ]) {
+    const r = await run({ files, cells: [src] });
+    eq([r.paths, said(r, /holds a list, dict or set/)], [[], true], `R4: ${what}: not pre-checked, reported`);
+  }
+  const imm = await run({ files, cells: ['t = ("public.csv", ("private.csv",))\nu = t\nfor x in t: pass\nhandle(t)\n'] });
+  eq(imm.paths, ["/public.csv", "/private.csv"], "a tuple of strings, nested, copied and iterated: immutable all the way down, still counts (control)");
+  const lit = await run({ files, cells: ['handle(["private.csv", {"k": "public.csv"}])\n'] });
+  eq(lit.paths, ["/private.csv", "/public.csv"], "a list or dict written out in the call itself: nothing can change it first (control)");
+  const inner = await run({ files, cells: ['a = ["private.csv"]\nhandle([a, "public.csv"])\n'] });
+  eq([inner.paths, said(inner, /holds a list, dict or set/)], [[], true], "...but one holding a list name: the whole is reported");
 }
 
 // ---- the calling convention
