@@ -73,18 +73,27 @@ function engine(): Engine {
 
 export function engineCall(request: string): string {
   const e = engine();
-  const req = new TextEncoder().encode(request);
-  const p = e.sb_alloc(req.length);
-  new Uint8Array(e.memory.buffer, p, req.length).set(req);
+  // an ASCII request (every engine request so far) is written straight
+  // into the engine's memory: no request-sized copy outside it (plan F4
+  // r4 §2a: a 1024 x 1024 echelon request is 20 MiB); otherwise as before
+  let n = request.length;
+  let p = e.sb_alloc(n);
+  if (new TextEncoder().encodeInto(request, new Uint8Array(e.memory.buffer, p, n)).read !== n) {
+    e.sb_free(p, n);
+    const req = new TextEncoder().encode(request);
+    n = req.length;
+    p = e.sb_alloc(n);
+    new Uint8Array(e.memory.buffer, p, n).set(req);
+  }
   let r: number;
   try {
-    r = e.sb_call(p, req.length);
+    r = e.sb_call(p, n);
   } catch (err) {
     // a Rust panic (wasm unreachable) leaves the instance unusable
     E = null;
     throw err;
   } finally {
-    if (E) e.sb_free(p, req.length);
+    if (E) e.sb_free(p, n);
   }
   return new TextDecoder().decode(new Uint8Array(e.memory.buffer, r, e.sb_reply_len()));
 }
