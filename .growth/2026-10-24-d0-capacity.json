@@ -3,12 +3,12 @@
  "reason": "D0 (#122): the capacity collector (lib/_capacity.py, in Sage and Magma modes' startup bundles), CPython's heap figure, the guards' heap_figure(), and poly's memory share (engine export sb_set_memory_share, pyjs pushShare)",
  "bytes": {
   "cli/lib.gen.js": 21368,
-  "cli/pyjs.cjs": 34862,
+  "cli/pyjs.cjs": 35300,
   "engine/lib/magma.pre": 243,
   "engine/lib/magma.src": 427,
   "engine/lib/sage.pre": 70168,
   "engine/lib/sage.src": 20941,
-  "engine/sagebrush-engine.wasm": 9679,
+  "engine/sagebrush-engine.wasm": 9977,
   "engine/sagebrush-worker.js": 1164
  }
 }
