@@ -2051,6 +2051,9 @@ async function s5Tabs() {
   o1.destroy();
 }
 
+/** The front has dropped an ack since its log was last reset: the op was sent and its answer withheld. */
+const ackDropped = async () => (await ctl("log")).got.some((g) => g.t === "ack" && g.dropped);
+
 async function s5Rows() {
   // (↑ for every op kind until its own ack; one transaction; at most ROWICON.max identities)
   await account();
@@ -2062,15 +2065,19 @@ async function s5Rows() {
   await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
   [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
   check(await until(() => owner.view().s.state === "synced", 15_000), "rows: synced");
+  await ctl("log", { reset: true });
   await ctl("set", { set: { dropAcks: 1 } });
   const d = await w.mkdir("/r1");
   const f = await w.create("/r1/f.txt", { content: "x" });
+  // (closed only once the ack was really dropped: an ↑ shows as soon as the op is logged, before it is sent)
+  check(await until(ackDropped, 10_000), "rows: the ack withheld by the front");
   check(await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 2, 5000), "rows: a mkdir and a create waiting (scanned, sent, ack withheld): ↑ on both");
   await ctl("closeAll");
   check(await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 0, 15_000), "rows: after the resend and its ack: cleared");
   await ctl("log", { reset: true });
   await ctl("set", { set: { dropAcks: 1 } });
   await w.rename("/r1", "/r2");
+  check(await until(ackDropped, 10_000), "rows: the rename sent, its ack withheld by the front");
   check(await until(async () => (await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 5000), "rows: an undecided rename on a folder whose mkdir was accepted: ↑");
   await ctl("closeAll");
   const cleared = await until(async () => !(await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 15_000);
