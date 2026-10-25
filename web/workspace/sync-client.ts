@@ -31,7 +31,7 @@
 //   or state, or the person's resume().
 import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
-import { Outbox, Fenced, switchTo, sender, obligate, rebuildKey, wireOf, ownedSeq, type OutboxRecord, type WireOp } from "./sync-outbox";
+import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, wireOf, ownedSeq, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
 import { seedLedger, hubOf, driveObsolete, ledgerKeys } from "./sync-ledger";
 import { bytesFor } from "./sync-pins";
 import { cursorOf, applyOps, genPrefix, drainConfirmed } from "./sync-confirmed";
@@ -106,6 +106,8 @@ export type SyncStatus = {
   /** when a timer or pause ends */
   resumesAt?: number;
   lastSynced?: number;
+  /** (step 5) the outbox stopped at its bound: "too many changes waiting to sync" (C1) */
+  full?: boolean;
 };
 /** An op of the server's log, as an `index` message carries it. */
 export type IndexOp = WireOp & { seq: number; device: string };
@@ -123,6 +125,15 @@ export type ClientOptions = {
   WebSocket?: typeof WebSocket;
   /** each page of the server's log, in order (step 4) */
   onIndex?: (page: IndexPage) => Promise<void>;
+  /** (step 5) the page's sync owner's lifecycle: the namespace and epoch it is eligible for.  With it, the client
+   * runs only for that namespace, checks `fence()` before asking for the lock, once it holds it, after discovering
+   * the namespace and before each connection, and renews its lease by compare-and-set (renewLease), never by
+   * switchTo: an off, a sign-out or another namespace in any tab stops it */
+  lifecycle?: { ns: string; epoch: number; fence: () => Promise<boolean> };
+  /** (step 5) each lease this client's connection took: the holder's token */
+  onLease?: (lease: Lease) => void;
+  /** (step 5) the sender lock let go (the connection ended; the client may ask for it again): no longer the holder */
+  onRelease?: () => void;
 };
 
 const key = (ns: string, what: string) => `sync:${ns}:${what}`;
@@ -153,6 +164,8 @@ type Conn = {
   writable: boolean;
   /** sending stopped until the rebuild (step 4): the server's `invalid` "rebuild", or this device's log diverged */
   halted?: string;
+  /** (step 5) the outbox stopped at its bound when last looked at */
+  full?: boolean;
   /** the next dseq to send; undefined: from the lowest record not accepted */
   next?: number;
   /** send again from the lowest, once nothing is in flight */
@@ -252,6 +265,12 @@ export class SyncClient {
       while (!this.stopped) {
         const ns = await this.namespace();
         if (!ns) return;
+        // (an owner's lifecycle: only its namespace, and only while it still holds (before the lock is asked for))
+        const lc = this.opts.lifecycle;
+        if (lc && (ns !== lc.ns || !(await lc.fence()))) {
+          this.offWith(ns !== lc.ns ? "sync was turned on again elsewhere: turn it on here to follow" : "sync is off here");
+          return;
+        }
         const end = await this.locked(ns);
         if (end === "revoked" || end === "fenced" || end === "stopped") return;
       }
@@ -353,9 +372,16 @@ export class SyncClient {
     this.say({ state: "waiting", ns });
     try {
       return await sender(ns, async () => {
-        await this.loadDurable(ns);
-        // (one connection at a time; after one ends, the namespace is asked again, unless it ended for good)
-        return this.connection(ns);
+        try {
+          // (holding the lock now: still eligible?)
+          if (this.opts.lifecycle && !(await this.opts.lifecycle.fence())) return "fenced";
+          await this.loadDurable(ns);
+          // (one connection at a time; after one ends, the namespace is asked again, unless it ended for good)
+          return await this.connection(ns);
+        } finally {
+          // (the lock goes with this callback's return: this page holds it no more, whatever comes next)
+          this.opts.onRelease?.();
+        }
       }, { signal: this.abort.signal });
     } catch (e) {
       if (this.stopped) return "stopped";
@@ -368,11 +394,16 @@ export class SyncClient {
     if (this.stopped) return "stopped";
     let lease;
     try {
-      lease = await switchTo(this.w, ns);
+      // (with an owner: a renewal by compare-and-set, which an off or another epoch refuses; without one (tests, step 3
+      // and 4's direct use): the lease taken as before)
+      const lc = this.opts.lifecycle;
+      if (lc && !(await lc.fence())) return "fenced";
+      lease = lc ? await renewLease(this.w, ns, lc.epoch) : await switchTo(this.w, ns);
     } catch (e) {
       if (e instanceof Fenced) return "fenced";
       throw e;
     }
+    this.opts.onLease?.(lease);
     const ob = new Outbox(this.w, lease);
     // (with the confirmed index: the first sync's adoption captured (the tree as of W1) before the socket opens (C3);
     // without it (step 3): the scan starts at the latest op)
@@ -858,6 +889,7 @@ export class SyncClient {
       return;
     }
     const st0 = await c.ob.status();
+    c.full = !!st0.full;
     if (!c.writable || c.halted) {
       this.showWaiting(c, st0.count);
       return;
@@ -943,7 +975,7 @@ export class SyncClient {
     if (c.largeHalt) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.largeHalt });
     if (c.halted) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.halted === "diverged" ? "this device's changes need a rebuild" : "the server asks for a rebuild" });
     if (this.paused) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "storage full", ...(this.paused.until ? { resumesAt: this.paused.until } : {}) });
-    this.say({ state: count ? "syncing" : "synced", ns: c.ns, waiting: count, ...(resumesAt ? { resumesAt } : {}), ...(count ? {} : { lastSynced: this.clock.now() }) });
+    this.say({ state: count ? "syncing" : "synced", ns: c.ns, waiting: count, ...(resumesAt ? { resumesAt } : {}), ...(count ? {} : { lastSynced: this.clock.now() }), ...(c.full ? { full: true } : {}) });
   }
 
   // ---- blobs (§5.4, L2, L4)

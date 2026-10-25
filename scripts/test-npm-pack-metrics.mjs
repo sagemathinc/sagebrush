@@ -84,8 +84,10 @@ esac
 `);
   chmodSync(join(bin, "npm"), 0o755);
   const fakeEnv = (mode, extra = {}) => ({ ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_DIR: fake, FAKE_NPM: mode, ...extra });
+  // (the fake npm's own controls; npm's environment is otherwise an allowlist)
+  const FAKE_PASS = ["FAKE_DIR", "FAKE_NPM"];
   {
-    const r = packDir(pkg, { env: fakeEnv("good") });
+    const r = packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("good") });
     check("wrapper: a good pack", r.size === 100 && r.entryCount === 3 && r.key.npm === "11.0.0-fake" && /^[0-9a-f]{64}$/.test(r.key.script_sha256), JSON.stringify(r));
     check("wrapper: the exact arguments", readFileSync(join(fake, "args"), "utf8").trim() === ARGS.join(" "));
     const rec = makeRecord({ commit: "c".repeat(40), tree: "t".repeat(40), run: { id: "1", attempt: "1", job: "checks" }, m: r });
@@ -94,12 +96,12 @@ esac
     const back = readRecord(join(tmp, "rec.json"));
     check("wrapper: the record round-trips", JSON.stringify(back) === JSON.stringify(rec), JSON.stringify(back).slice(0, 200));
   }
-  reason("wrapper: npm exits non-zero", packDir(pkg, { env: fakeEnv("exit") }), "npm exited 3: the last line");
-  reason("wrapper: npm prints non-JSON", packDir(pkg, { env: fakeEnv("notjson") }), "npm output is not JSON");
-  reason("wrapper: JSON with trailing garbage", packDir(pkg, { env: fakeEnv("trailing") }), "npm output is not JSON");
+  reason("wrapper: npm exits non-zero", packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("exit") }), "npm exited 3: the last line");
+  reason("wrapper: npm prints non-JSON", packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("notjson") }), "npm output is not JSON");
+  reason("wrapper: JSON with trailing garbage", packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("trailing") }), "npm output is not JSON");
   {
     const t0 = Date.now();
-    const r = packDir(pkg, { env: fakeEnv("hang"), timeoutMs: 200 });
+    const r = packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("hang"), timeoutMs: 200 });
     reason("wrapper: a hang times out", r, "npm timed out after 200 ms");
     check("wrapper: the timeout is the injected one", Date.now() - t0 < 10_000, `${Date.now() - t0} ms`);
     const pid = Number(readFileSync(join(fake, "pid"), "utf8"));
@@ -113,25 +115,25 @@ esac
   }
   {
     // (NPM-PACK-138-3: only spawnSync's own timeout is a timeout; a SIGKILL from elsewhere is a failure)
-    const r = packDir(pkg, { env: fakeEnv("selfkill"), timeoutMs: 60_000 });
+    const r = packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("selfkill"), timeoutMs: 60_000 });
     reason("wrapper: a SIGKILL that isn't the timeout", r, "npm exited SIGKILL");
   }
-  reason("wrapper: npm missing from PATH", packDir(pkg, { env: { ...fakeEnv("good"), PATH: join(tmp, "empty-path") } }), "npm not found");
+  reason("wrapper: npm missing from PATH", packDir(pkg, { pass: FAKE_PASS, env: { ...fakeEnv("good"), PATH: join(tmp, "empty-path") } }), "npm not found");
   {
     // (NPM-PACK-138-1: refused before any npm invocation, even npm --version)
     writeFileSync(join(pkg, ".npmrc"), "this is = [not valid\n");
     rmSync(join(fake, "calls"), { force: true });
-    reason("wrapper: a project npmrc", packDir(pkg, { env: fakeEnv("good") }), "project npmrc present");
+    reason("wrapper: a project npmrc", packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("good") }), "project npmrc present");
     check("wrapper: a project npmrc means npm is never invoked", !existsSync(join(fake, "calls")), existsSync(join(fake, "calls")) ? readFileSync(join(fake, "calls"), "utf8") : "");
     rmSync(join(pkg, ".npmrc"));
   }
   {
     writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "sagebrush", version: "0.0.1", files: ["a.txt", "dist"] }));
-    reason("wrapper: a directory files entry", packDir(pkg, { env: fakeEnv("good") }), "package.json files entry is not a literal file path: dist");
+    reason("wrapper: a directory files entry", packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("good") }), "package.json files entry is not a literal file path: dist");
     writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "sagebrush", version: "0.0.1", files: FILES }));
   }
   {
-    packDir(pkg, { env: fakeEnv("good", { npm_config_foo: "1", NPM_CONFIG_BAR: "2", Npm_Config_Baz: "3", npm_config_userconfig: "/nonexistent", npm_config_globalconfig: "/nonexistent" }) });
+    packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("good", { npm_config_foo: "1", NPM_CONFIG_BAR: "2", Npm_Config_Baz: "3", npm_config_userconfig: "/nonexistent", npm_config_globalconfig: "/nonexistent" }) });
     const env = readFileSync(join(fake, "env"), "utf8").split("\n").filter((l) => /^npm_config_/i.test(l));
     const names = env.map((l) => l.split("=")[0]).sort();
     check("wrapper: no inherited npm_config_* reaches npm", names.join() === "npm_config_globalconfig,npm_config_userconfig", names.join());
@@ -140,15 +142,25 @@ esac
     check("wrapper: the config files are removed afterwards", u && !existsSync(u) && !existsSync(g));
   }
   {
+    // (the allowlist: under a hostile parent, npm sees exactly these names, and HOME is fresh)
+    packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("good", { NODE_OPTIONS: "--require /nonexistent.cjs", NODE_DISABLE_COMPILE_CACHE: "1", NODE_COMPILE_CACHE: "/nonexistent", NODE_V8_COVERAGE: join(tmp, "cov"), NODE_PATH: "/x", SAGEBRUSH_LIMITS: "/x", SOME_SECRET_LIKE_VAR: "x" }) });
+    const lines = readFileSync(join(fake, "env"), "utf8").split("\n").filter(Boolean);
+    const all = Object.fromEntries(lines.map((l) => [l.split("=")[0], l.slice(l.indexOf("=") + 1)]));
+    const got = Object.keys(all).filter((k) => !["PWD", "SHLVL", "_", "OLDPWD"].includes(k)).sort();
+    check("allowlist: exactly the names npm is given", got.join() === "FAKE_DIR,FAKE_NPM,HOME,LANG,NODE_V8_COVERAGE,PATH,TMPDIR,npm_config_globalconfig,npm_config_userconfig", `${got.length} names; unexpected (names only, first 10): ${got.filter((k) => !["FAKE_DIR", "FAKE_NPM", "HOME", "LANG", "NODE_V8_COVERAGE", "PATH", "TMPDIR", "npm_config_globalconfig", "npm_config_userconfig"].includes(k)).slice(0, 10).join(",")}`);
+    check("allowlist: NODE_V8_COVERAGE is set empty", all.NODE_V8_COVERAGE === "");
+    check("allowlist: HOME is a fresh directory, not the parent's", all.HOME !== process.env.HOME && /npm-pack-metrics-/.test(all.HOME), all.HOME);
+  }
+  {
     const a = join(tmp, "cfg-a"), b = join(tmp, "cfg-b"), l = join(tmp, "cfg-l"), full = join(tmp, "cfg-full");
     writeFileSync(a, "");
     writeFileSync(b, "");
     writeFileSync(full, "x=1\n");
     symlinkSync(a, l);
     check("isolation: two empty files pass", isolationProblem(a, b) === null);
-    reason("isolation: the same path", runNpm(["--version"], { cwd: pkg, env: fakeEnv("good"), configs: [a, a] }), "npm config isolation failed: the same path");
-    reason("isolation: a symlink to the other", runNpm(["--version"], { cwd: pkg, env: fakeEnv("good"), configs: [a, l] }), "npm config isolation failed: the same file");
-    reason("isolation: a non-empty file", runNpm(["--version"], { cwd: pkg, env: fakeEnv("good"), configs: [a, full] }), "npm config isolation failed: " + full + " is not an empty regular file");
+    reason("isolation: the same path", runNpm(["--version"], { cwd: pkg, pass: FAKE_PASS, env: fakeEnv("good"), configs: [a, a] }), "npm config isolation failed: the same path");
+    reason("isolation: a symlink to the other", runNpm(["--version"], { cwd: pkg, pass: FAKE_PASS, env: fakeEnv("good"), configs: [a, l] }), "npm config isolation failed: the same file");
+    reason("isolation: a non-empty file", runNpm(["--version"], { cwd: pkg, pass: FAKE_PASS, env: fakeEnv("good"), configs: [a, full] }), "npm config isolation failed: " + full + " is not an empty regular file");
   }
   // ---- the real npm (smoke): the wrapper's own spawn, the exact flags, a hostile parent environment
   {
@@ -157,7 +169,10 @@ esac
     writeFileSync(join(real, "a.txt"), "0123456789");
     writeFileSync(join(real, "lib", "b.js"), "module.exports = 1;\n");
     writeFileSync(join(real, "package.json"), JSON.stringify({ name: "sagebrush", version: "0.0.1", files: ["a.txt", "lib/b.js"], scripts: { prepack: "node -e \"require('fs').writeFileSync('ran','')\"" } }) + "\n");
-    const hostile = { ...process.env, npm_config_ignore_scripts: "false", NPM_CONFIG_DRY_RUN: "false", npm_config_userconfig: "/nonexistent" };
+    // (a NODE_OPTIONS preload that would print into npm's JSON, and coverage that would be written)
+    const marker = join(tmp, "marker.cjs");
+    writeFileSync(marker, 'process.stdout.write("HOSTILE-MARKER\\n");\n');
+    const hostile = { ...process.env, npm_config_ignore_scripts: "false", NPM_CONFIG_DRY_RUN: "false", npm_config_userconfig: "/nonexistent", NODE_OPTIONS: `--require ${marker}`, NODE_V8_COVERAGE: join(tmp, "real-cov"), NODE_DISABLE_COMPILE_CACHE: "1" };
     delete hostile.FAKE_NPM;
     const r = packDir(real, { env: hostile });
     check("real npm: packs", !r.reason && /^\d+\.\d+\.\d+/.test(r.key.npm ?? ""), JSON.stringify(r).slice(0, 400));
@@ -170,6 +185,7 @@ esac
     }
     check("real npm: no tarball written (--dry-run held)", !readdirSync(real).some((f) => f.endsWith(".tgz")));
     check("real npm: no script ran (--ignore-scripts held)", !existsSync(join(real, "ran")));
+    check("real npm: no coverage written (NODE_V8_COVERAGE kept out)", !existsSync(join(tmp, "real-cov")));
   }
   // ---- the base binding
   {

@@ -40,6 +40,9 @@ const CASES: [string, string, string][] = [
   ["R.<x> = QQ[]\nshow(x^2 - 3/4*x + 1)", "x^{2} - \\frac{3}{4} x + 1", "x^2 - 3/4*x + 1"],
   ["show(matrix(QQ, [[1, 2], [3, 4/5]]))", "\\left(\\begin{array}{rr}\n1 & 2 \\\\\n3 & \\frac{4}{5}\n\\end{array}\\right)", "[  1   2]\n[  3 4/5]"],
   ["K.<a> = NumberField(x^2 + 1)\nshow(a + 3/2)", "a + \\frac{3}{2}", "a + 3/2"],
+  // (William's report, Oct 25: over GF(7) the exponents were unbraced, x^10, typeset x^1 0)
+  ["k.<x> = GF(7)[]\nshow(x^10)", "x^{10}", "x^10"],
+  ["show(matrix(GF(7), 15, 15, lambda i, j: (i*j + i + 1) % 7).charpoly())", "x^{15} + 6 x^{14}", "x^15 + 6*x^14"],
   ["class Foo:\n    def __repr__(self): return 'Foo<1>'\nshow(Foo())", "\\text{\\texttt{Foo<1>}}", "Foo<1>"],
   ["show({1: 2/3, 'k': 7})", "\\left\\{1 : \\frac{2}{3}, \\text{\\texttt{k}} : 7\\right\\}", "{1: 2/3, 'k': 7}"],
   ["show(None)", "\\mathrm{None}", "None"],
