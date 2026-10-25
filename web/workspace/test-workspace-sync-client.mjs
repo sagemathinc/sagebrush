@@ -22,9 +22,9 @@ const { WebSocketServer } = require("ws");
 
 const SITE = "https://sagebrush.test";
 // (each case signs in its own account, so none sees another's log)
-const ACCOUNTS = Array.from({ length: 88 }, (_, i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`);
+const ACCOUNTS = Array.from({ length: 89 }, (_, i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`);
 // (the limits each has, from the fake CoCalc: most roomy; FULL's storage is small; SMALL's files are)
-const FULL = ACCOUNTS[86], SMALL = ACCOUNTS[87];
+const FULL = ACCOUNTS[87], SMALL = ACCOUNTS[88];
 const limitsOf = (a) => a === FULL ? { storage_bytes: 10_000, max_file_bytes: 50_000, sync: { enabled: true, version_bytes: 1000, read_bytes_per_day: 1 << 20 } }
   : a === SMALL ? { storage_bytes: 1 << 20, max_file_bytes: 5_000, sync: { enabled: true, version_bytes: 1000, read_bytes_per_day: 1 << 20 } }
   : { storage_bytes: 64 << 20, max_file_bytes: 50 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 64 << 20 } };
@@ -317,7 +317,10 @@ server.on("upgrade", async (req, socket, head) => {
       }
       if (m.t === "ops" && ctl.fakeOps.length) {
         const f = ctl.fakeOps.shift();
-        client.send(JSON.stringify({ t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
+        // (delayMs: answered that much later, so the answer comes after the client's sender has gone idle)
+        const answer = () => client.send(JSON.stringify({ t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
+        if (f.delayMs) setTimeout(answer, f.delayMs);
+        else answer();
         return;
       }
       try { up.send(text); } catch {}

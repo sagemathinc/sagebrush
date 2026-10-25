@@ -1750,6 +1750,27 @@ async function firstSyncCollision() {
   }
 }
 
+async function rebuildKickAfterHalt() {
+  // (web-sync's "cap, no reset" flake: the server's invalid "rebuild" refusal answered after the sender went idle, so
+  // nothing but that answer can start the rebuild: it must start by itself, at once, not wait for a reconnect)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "rebuild after an idle refusal: synced");
+  await stop(c0);
+  await w.mkdir("/kicked");
+  await ctl("log", { reset: true });
+  await ctl("set", { set: { fakeOps: [{ code: "invalid", delayMs: 1500, detail: { message: "too many refused ops: rebuild from the server's log" } }] } });
+  const c = viewClient(w);
+  try {
+    // (the refusal arrives 1.5 s after the ops were sent: by then the sender has nothing left to do)
+    check(await until(() => c.stats.rebuildPasses >= 1, 6000), "rebuild after an idle refusal: the rebuild starts by itself, with no other event: " + J({ passes: c.stats.rebuildPasses, status: c.status }));
+    check(await until(() => settled(w, c), 20_000), "rebuild after an idle refusal: …and completes, synced: " + J(c.status));
+  } finally {
+    await stop(c);
+  }
+}
+
 async function rebuildCapUnsupported() {
   // (astra's CORR-PR65-IMPL-2: the server's refusal limit (its exact answer, `invalid` "too many refused ops"), then
   // the rebuild's announce to core's real server, which has no `rebuilt` ("unknown message"): no reset, so a stable,
@@ -3266,7 +3287,7 @@ async function t14Review3() {
     }
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified };
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
