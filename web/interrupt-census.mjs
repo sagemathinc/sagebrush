@@ -2,7 +2,8 @@
 // - every exported engine entry point: engineCall's dispatch (engine/web/src/lib.rs), symCall's
 //   ops (engine/sym/src/api.rs), mpCall's ops (engine/mpoly/src/lib.rs `call`), and the
 //   WebAssembly modules the runtime instantiates, with whether each reads the interrupt flag;
-// - fingerprints the matrix must be updated for: the runtime's poll sites per file, the
+// - fingerprints the matrix must be updated for: the compiler's loop back-edge check (src/emit.ts:
+//   the emitted INTR_CHECK and every site that emits it), the runtime's poll sites per file, the
 //   library route registries (Magma's top-level intrinsics, MATLAB's @_bs/@_bi builtins,
 //   sage_all's __all__), and the list of lib/ modules.
 // test/interrupt-census.test.ts checks every name against web/interrupt-matrix.json;
@@ -11,7 +12,8 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+// (INTERRUPT_CENSUS_ROOT: another tree, for the census's own mutation tests)
+const ROOT = process.env.INTERRUPT_CENSUS_ROOT ?? new URL("..", import.meta.url).pathname;
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 const uniq = (xs) => [...new Set(xs)].sort();
 const sha = (xs) => createHash("sha256").update(xs.join("\n")).digest("hex").slice(0, 16);
@@ -52,9 +54,16 @@ export function census() {
   const allBlock = sageAll.slice(sageAll.indexOf("__all__ = ["), sageAll.indexOf("]", sageAll.indexOf("__all__ = [")));
   const sage = uniq([...allBlock.matchAll(/"([A-Za-z_][A-Za-z0-9_]*)"/g)].map((m) => m[1]));
   const libModules = readdirSync(join(ROOT, "lib")).filter((f) => f.endsWith(".py")).sort();
+  // the compiler's back-edge polling (r5 §5): the emitted check itself, which must test Ctrl-C's
+  // bit and call interrupted(), and the lines that emit it (a dropped or bypassed site changes them)
+  const emit = read("src/emit.ts");
+  const check = (emit.match(/^const INTR_CHECK = "([^"]*)";/m) ?? [])[1] ?? null;
+  const emitSites = emit.split("\n").map((l) => l.trim()).filter((l) => /\bINTR_CHECK\b/.test(l) && !/^const INTR_CHECK =/.test(l));
+  const backedges = { check, valid: check != null && /INTR\[0\]\s*&\s*1\b/.test(check) && /\binterrupted\(\)/.test(check), sites: emitSites.length, sha: sha(emitSites) };
   return {
     transports: { engineCall, symCall, mpCall, wasmModules },
     fingerprints: {
+      backedges,
       pollSites,
       registries: { magma: { count: magma.length, sha: sha(magma) }, matlab: { count: matlab.length, sha: sha(matlab) }, sage: { count: sage.length, sha: sha(sage) } },
       libModules: { count: libModules.length, sha: sha(libModules) },
