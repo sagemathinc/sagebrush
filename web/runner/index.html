@@ -69,6 +69,9 @@ Stop by message.
           flag = new Int32Array(d.interrupt);
           d = { ...d, interrupt: null, interruptible: true };
         }
+        // (the shared progress slots stay here too: a SharedArrayBuffer can't
+        // cross to the page, and this frame doesn't relay them)
+        if (d && d.ready && d.progress) d = { ...d, progress: null };
         port.postMessage(d);
       };
       w.onerror = (ev) => port.postMessage({ runnerError: String(ev.message || "an error in the interpreter") });
