@@ -115,7 +115,7 @@ _cg_dirs = None
 
 
 def _cgroup_dirs():
-    """[("v2", source, dir) or ("v1", dirs)] from /proc/self/cgroup, or
+    """[("v2" or "v1", source, dir)] from /proc/self/cgroup, or
     None when it can't be read."""
     global _cg_dirs
     if _cg_dirs is not None:
@@ -141,14 +141,27 @@ def _cgroup_dirs():
                 path = path.rsplit("/", 1)[0]
                 seen += 1
         elif "memory" in parts[1].split(","):
-            out.append(("v1", ("/sys/fs/cgroup/memory" + parts[2].strip().rstrip("/"), "/sys/fs/cgroup/memory")))
+            # (v1 too: the group and each ancestor up to the hierarchy's
+            # root, each limit against its own usage; a leaf unlimited, or
+            # larger, leaves a tighter ancestor in force)
+            path = parts[2].strip().rstrip("/")
+            seen = 0
+            while True:
+                d = "/sys/fs/cgroup/memory" + path
+                if _read(d + "/memory.limit_in_bytes") is not None:
+                    out.append(("v1", "cgroup v1 " + (path or "/"), d))
+                    break
+                if path == "" or seen > 64:
+                    break
+                path = path.rsplit("/", 1)[0]
+                seen += 1
     _cg_dirs = out
     return out
 
 
 def _cgroups():
-    """[(source, limit, used)] for this process's memory cgroup, v2 and its
-    ancestors, or v1; [] when it has none; None when it can't be read."""
+    """[(source, limit, used)] for this process's memory cgroup and its
+    ancestors, v2 or v1; [] when it has none; None when it can't be read."""
     dirs = _cgroup_dirs()
     if dirs is None:
         return None
@@ -161,12 +174,9 @@ def _cgroups():
                 if n is not None:
                     out.append((a, n, used))
         else:
-            for d in a:
-                n = _int(_read(d + "/memory.limit_in_bytes") or "")
-                if n is not None:
-                    if n < _NO_CEILING:
-                        out.append(("cgroup v1", n, _int(_read(d + "/memory.usage_in_bytes") or "")))
-                    break
+            n = _int(_read(b[0] + "/memory.limit_in_bytes") or "")
+            if n is not None and n < _NO_CEILING:
+                out.append((a, n, _int(_read(b[0] + "/memory.usage_in_bytes") or "")))
     return out
 
 
@@ -353,7 +363,8 @@ def _machine_total():
             limits.append((name, lim))
         for r in ("RLIMIT_AS", "RLIMIT_DATA"):
             v = _rlimit(r)
-            if v:
+            # (0 is a limit: only none, None, and unreadable, False, are not)
+            if v is not None and v is not False:
                 limits.append((r, v))
         t = _kib_field(_read("/proc/meminfo"), "MemTotal")
         if t:
@@ -447,6 +458,10 @@ def effective_guard_bytes(record):
 # ------------------------------------------------------------------ poly
 
 _poly_snap = None
+# (the age in seconds of the observation poly_share last returned: the
+# host's engine.ts reuses a pushed share only until that observation is
+# 250 ms old, one freshness budget for both caches, D0)
+_poly_age = 0.0
 
 
 def poly_share():
@@ -460,15 +475,17 @@ def poly_share():
     cap, not an aggregate one: concurrent native top-level factorizations
     would each get it, and would need their own aggregate admission
     review, daybreak2's D0 r2 condition.)"""
-    global _poly_snap
+    global _poly_snap, _poly_age
     now = _src.clock()
     if _poly_snap is not None and now - _poly_snap[0] < _POLY_SNAPSHOT_S:
+        _poly_age = now - _poly_snap[0]
         return _poly_snap[1]
     # (the engine's memory is its own: the JS heap does not bound it)
     rec = capacity()
     rec = _record([b for b in rec["basis"] if b["source"] != "js heap"], [u for u in rec["unknown_parts"] if u != "js heap usage"])
     share = share_of(rec["bytes"])
     _poly_snap = (now, share)
+    _poly_age = 0.0
     return share
 
 

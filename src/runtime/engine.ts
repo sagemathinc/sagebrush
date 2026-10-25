@@ -75,9 +75,12 @@ function engine(): Engine {
 
 // The memory share of a default polynomial factorization (item D0,
 // plan-d0-capacity-r2 §3): lib/_capacity.py's poly_share, pushed into the
-// instance before a dispatch when the last push to it is 250 ms old or more
-// (one clock comparison per call otherwise), so a factorization sees the
-// share of its call's entry, and a long call keeps it.  An instance's
+// instance before a dispatch when the observation last pushed to it is
+// 250 ms old or more (one clock comparison per call otherwise), so a
+// factorization sees the share of its call's entry, and a long call keeps
+// it.  The age is the observation's, not the push's: poly_share may hand
+// over its own snapshot, up to 250 ms old, and the two caches share the one
+// 250 ms budget (CORR-PR122-3).  An instance's
 // dispatches are serialized.  The push is optional both ways: an engine
 // without sb_set_memory_share is left alone, and a share that can't be had
 // is pushed as -1 (none: the factorization keeps its 512 MiB).
@@ -95,22 +98,31 @@ export function pushShare(e: Engine) {
   if (e === shareTo && now - shareAt < SHARE_MAX_AGE_MS) return;
   shareTo = e;
   shareAt = now;
-  e.sb_set_memory_share(memoryShare());
+  const [share, ageMs] = memoryShare();
+  shareAt = now - ageMs;
+  e.sb_set_memory_share(share);
 }
-/** poly_share() as an integer from 0 to 4 GiB, or -1. */
-function memoryShare(): number {
+/** [poly_share() as an integer from 0 to 4 GiB, or -1; the age of its
+ * observation in ms, from 0 to 250]. */
+function memoryShare(): [number, number] {
   try {
     const m = Obj.hooks.importModule("_capacity");
+    // (0 unless poly_share says otherwise: a replacement for it, in a test,
+    // has no snapshot)
+    Obj.setattr(m, "_poly_age", 0);
     let v: any = Obj.callObj(Obj.getattr(m, "poly_share"), []);
     if (typeof v === "bigint") v = v <= BigInt(WASM_CEILING) && v >= 0n ? Number(v) : -1;
-    return typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= WASM_CEILING ? v : -1;
+    let age: any = Obj.getattr(m, "_poly_age");
+    age = age instanceof Obj.FloatBox ? age.v : Number(Obj.unbox(age));
+    const ageMs = Number.isFinite(age) ? Math.min(SHARE_MAX_AGE_MS, Math.max(0, age * 1000)) : SHARE_MAX_AGE_MS;
+    return [typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= WASM_CEILING ? v : -1, ageMs];
   } catch (e) {
     // (a Ctrl-C seen by the collector's Python code consumed the flag: set
     // it again, so the call it came before is interrupted, not this push)
     try {
       if (Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt)) Atomics.or(INTR, 0, 1);
     } catch {}
-    return -1;
+    return [-1, 0];
   }
 }
 

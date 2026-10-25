@@ -4,7 +4,7 @@ rlimit | bytes 184549376 | reserve 286890394 | effective 0 | cgroup /user.slice/
 total 1073741824
 low | bytes 209715200 | reserve 289406976 | effective 0 | MemAvailable 4294967296/4085252096 rem 209715200 | unknown []
 v1 absurd | bytes 6442450944 | reserve 912680551 | effective 5529770393 | MemAvailable 8589934592/2147483648 rem 6442450944 | unknown []
-v1 | bytes 1073741824 | reserve 375809639 | effective 697932185 | cgroup v1 2147483648/1073741824 rem 1073741824, MemAvailable 8589934592/2147483648 rem 6442450944 | unknown []
+v1 | bytes 1073741824 | reserve 375809639 | effective 697932185 | cgroup v1 /docker/abc 2147483648/1073741824 rem 1073741824, MemAvailable 8589934592/2147483648 rem 6442450944 | unknown []
 shrinks 759169024 130023424
 rlimit shrinks 130023424 52428800
 reserve None 268435456 None
@@ -55,3 +55,17 @@ windows fail job_limit | bytes None | reserve 268435456 | effective None | wasm 
 windows total fail job_limit 1073741824
 total snapshot 1073741824 1073741824 536870912
 pyjs figure 100663296
+ok zero RLIMIT_AS (0, (0, ['RLIMIT_AS']), 0)
+ok one byte RLIMIT_AS (1, ['RLIMIT_AS'])
+ok zero RLIMIT_DATA (0, (0, ['RLIMIT_DATA']), 0)
+ok one byte RLIMIT_DATA (1, ['RLIMIT_DATA'])
+ok unreadable limits (17179869184, ['MemTotal'])
+ok no limits (17179869184, ['MemTotal'])
+ok v1 unlimited leaf, finite root (968884224, 1073741824)
+ok v1 unlimited leaf, finite parent (968884224, 1073741824)
+ok v1 larger leaf, tighter grandparent (155189248, 2147483648)
+ok v1 tighter leaf (524288000, 536870912)
+ok v1 all unlimited (12884901888, 17179869184)
+ok age fresh 0.0
+ok age reused (348966092, 0.249)
+ok age resampled 0.0

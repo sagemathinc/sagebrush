@@ -73,6 +73,22 @@ C._set_sources(root=root, rlimits={}, runtime=lambda: [])
 check("16 GiB", C.heap_figure(), 16 * GiB)
 check("admitted under 16 GiB", M._admit_size(F, 1450, 1450), (1450, 1450))
 
+# a zero resource limit is a limit (CORR-PR122-1): the guards' total is 0,
+# a matrix of one entry refused and an empty one admitted; a real limit of
+# exactly the cap's total admits, one byte less refuses
+for name in ("RLIMIT_AS", "RLIMIT_DATA"):
+    for lim, label, want in ((0, "zero", None), (4 * need, "at the cap", (10, 10)), (4 * need - 1, "one under", ("refused", need, need - 1))):
+        rl = {"RLIMIT_AS": (-1, -1), "RLIMIT_DATA": (-1, -1)}
+        rl[name] = (lim, -1)
+        C._set_sources(root=root, rlimits=rl, runtime=lambda: [])
+        check(name + " total " + label, C.heap_figure(), lim)
+        if want is None:
+            check(name + " zero: one entry", with_total(C.heap_figure(), lambda: M._admit_size(F, 1, 1))[:3], ("refused", M._entry_cost(F), 0))
+            check(name + " zero: empty", M._admit_size(F, 0, 0), (0, 0))
+        else:
+            got = M._admit_size(F, 10, 10) if want == (10, 10) else with_total(C.heap_figure(), lambda: M._admit_size(F, 10, 10))[:3]
+            check(name + " " + label, got, want)
+
 # cap and headroom crossing (the headroom from a made-up runtime part)
 C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [("made-up", 700 * MiB, 0)])
 check("cap below headroom", with_total(GiB, lambda: M._admit_size(F, 1450, 1450)), ("refused", 317477500, 256 * MiB, 700 * MiB))

@@ -201,6 +201,61 @@ print("total snapshot", a, b, C.heap_figure())
 sys._sagebrush_heap_limit = 96 * MiB
 print("pyjs figure", C.heap_figure())
 del sys._sagebrush_heap_limit
+
+def check(label, got, want):
+    print("ok" if got == want else "WRONG", label, got if got == want else "got %r want %r" % (got, want))
+
+
+# 12. a zero resource limit is a limit: the total is 0, not the next one
+# (CORR-PR122-1); an unreadable one (False) and none (None) are left out
+r12 = tree("zero", {"/proc/meminfo": meminfo(16 * GiB, 12 * GiB), "/proc/self/status": status(0, 0)})
+for name in ("RLIMIT_AS", "RLIMIT_DATA"):
+    lim = dict(NOLIM)
+    lim[name] = (0, -1)
+    C._set_sources(root=r12, platform="linux", rlimits=lim, runtime=NO_RUNTIME)
+    check("zero " + name, (C.capacity()["bytes"], C._machine_total(), C.heap_figure()), (0, (0, [name]), 0))
+    lim[name] = (1, -1)
+    C._set_sources(root=r12, platform="linux", rlimits=lim, runtime=NO_RUNTIME)
+    check("one byte " + name, C._machine_total(), (1, [name]))
+C._set_sources(root=r12, platform="linux", rlimits={}, runtime=NO_RUNTIME)
+check("unreadable limits", C._machine_total(), (16 * GiB, ["MemTotal"]))
+C._set_sources(root=r12, platform="linux", rlimits=NOLIM, runtime=NO_RUNTIME)
+check("no limits", C._machine_total(), (16 * GiB, ["MemTotal"]))
+
+# 13. cgroup v1: every ancestor's limit counts, with its own usage, the
+# leaf's unlimited or larger (CORR-PR122-2)
+U = 2 ** 63 - 4096
+
+
+def v1(name, groups):
+    files = {"/proc/self/cgroup": "12:memory:/a/b/c\n", "/proc/meminfo": meminfo(16 * GiB, 12 * GiB)}
+    for path, (lim, used) in groups.items():
+        d = "/sys/fs/cgroup/memory" + path
+        files[d + "/memory.limit_in_bytes"] = "%d\n" % lim
+        files[d + "/memory.usage_in_bytes"] = "%d\n" % used
+    C._set_sources(root=tree(name, files), platform="linux", rlimits=NOLIM, runtime=NO_RUNTIME)
+    return C.capacity()["bytes"], C._machine_total()[0]
+
+
+check("v1 unlimited leaf, finite root", v1("v1a", {"/a/b/c": (U, 10 * MiB), "/a/b": (U, 50 * MiB), "/a": (U, 60 * MiB), "": (GiB, 100 * MiB)}), (924 * MiB, GiB))
+check("v1 unlimited leaf, finite parent", v1("v1b", {"/a/b/c": (U, 10 * MiB), "/a/b": (GiB, 100 * MiB), "": (U, 900 * MiB)}), (924 * MiB, GiB))
+check("v1 larger leaf, tighter grandparent", v1("v1c", {"/a/b/c": (4 * GiB, 10 * MiB), "/a/b": (U, 0), "/a": (2 * GiB, 1900 * MiB)}), (148 * MiB, 2 * GiB))
+check("v1 tighter leaf", v1("v1d", {"/a/b/c": (512 * MiB, 12 * MiB), "/a": (2 * GiB, 1500 * MiB)}), (500 * MiB, 512 * MiB))
+check("v1 all unlimited", v1("v1e", {"/a/b/c": (U, 0), "": (U, 0)}), (12 * GiB, 16 * GiB))
+
+# 14. the poly share's age: 0 when sampled now, its snapshot's age when
+# reused, so the host's own reuse ends with the observation (CORR-PR122-3)
+t = [10.0]
+C._set_sources(root=os.path.join(BASE, "none"), platform="linux", rlimits={}, runtime=lambda: [("made-up", GiB, 0)], clock=lambda: t[0])
+C._poly_age = None
+a = C.poly_share()
+check("age fresh", C._poly_age, 0.0)
+t[0] = 10.249
+check("age reused", (C.poly_share(), round(C._poly_age, 6)), (a, 0.249))
+t[0] = 10.25
+C.poly_share()
+check("age resampled", C._poly_age, 0.0)
+
 C._set_sources()
 if had_limit is not None:
     sys._sagebrush_heap_limit = had_limit
