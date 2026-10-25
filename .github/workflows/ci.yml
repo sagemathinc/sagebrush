@@ -818,6 +818,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+      # (test/kedlaya.test.ts checks the JavaScript engine detection under Deno too)
+      - uses: denoland/setup-deno@v2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
