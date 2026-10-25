@@ -100,15 +100,19 @@ pub fn crt_bytes(k: usize, prime_bits: u64) -> Option<CrtBytes> {
     let vec_of = |n: u64, size: u64| n.checked_mul(size)?.checked_add(VEC);
     let times = |n: u64, x: u64| n.checked_mul(x);
     let modulus = std::mem::size_of::<Modulus>() as u64;
-    // qj is resized to lp + 1 words; its capacity is at most twice that
-    let grown = times(2, lp.checked_add(1)?)?;
-    let q = vec_of(k, VEC)?.checked_add(times(k, vec_of(grown, 8)?)?)?;
+    // (a Vec grown by pushes has capacity at most max(4, 2 n): Rust's
+    // smallest nonzero capacity for these element sizes is 4)
+    let grown = |n: u64| Some(times(2, n)?.max(4));
+    // qj is pushed to about lp words, then resized to lp + 1
+    let q_row = grown(lp.checked_add(1)?)?;
+    let q = vec_of(k, VEC)?.checked_add(times(k, vec_of(q_row, 8)?)?)?;
     let triangle = times(k, k.saturating_sub(1))? / 2;
     let pm = vec_of(k, VEC)?.checked_add(times(k, VEC)?)?.checked_add(times(triangle, 8)?)?;
-    let small = vec_of(k, modulus)?.checked_add(times(3, vec_of(k, 8)?)?)?; // mods; w, finv, c
-    let prod_half = times(2, vec_of(grown, 8)?)?;
+    // mods, finv and c have exact capacities; w is pushed
+    let small = vec_of(k, modulus)?.checked_add(times(2, vec_of(k, 8)?)?)?.checked_add(vec_of(grown(k)?, 8)?)?;
+    let prod_half = times(2, vec_of(q_row, 8)?)?;
     let resident = q.checked_add(pm)?.checked_add(small)?.checked_add(prod_half)?;
-    let construction = vec_of(grown, 8)?.checked_add(vec_of(times(2, lp)?, 8)?)?;
+    let construction = vec_of(q_row, 8)?.checked_add(vec_of(grown(lp)?, 8)?)?;
     // lo, hi (u128); x, t, sub's output; to_big's bytes; the result (a
     // BigInt of lp + 1 words with dashu's default capacity n + n/8 + 2)
     let n2 = lp.checked_add(2)?;
