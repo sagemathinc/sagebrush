@@ -1,7 +1,7 @@
 // The runtime object handed to compiled modules, plus function creation and
 // tracebacks.
 
-import { INTR } from "./interrupt";
+import { INTR, consumeCtrlC } from "./interrupt";
 import * as Obj from "./object";
 import * as O from "./ops";
 import * as F from "./format";
@@ -19,6 +19,8 @@ import "./numpy_random";
 import "./numpy_linalg";
 import "./numpy_fft";
 import "./engine";
+import "./progress-module";
+import * as Prog from "./progress";
 import "./raster";
 import * as Cx from "./complex";
 O.complexHooks.pow = Cx.complexPow;
@@ -1104,9 +1106,10 @@ const isagepow = (a: any, b: any) => (negIntPow(a, b) ? sagepow(a, b) : O.ipow(a
 
 // ------------------------------------------------------------------ the runtime object
 
-// Ctrl-C in compiled loops: KeyboardInterrupt, and the request is consumed.
+// Ctrl-C in compiled loops (`if (INTR[0] & 1) interrupted();`, emit.ts):
+// KeyboardInterrupt, and bit 0 consumed, the word's other bits left.
 function interrupted(): never {
-  INTR[0] = 0;
+  consumeCtrlC();
   return raise(T.KeyboardInterrupt);
 }
 
@@ -1124,6 +1127,9 @@ export const R: any = {
   host: null,
   INTR,
   interrupted,
+  // live progress (design-estimates-progress r4 §6): R.progress.snapshot()
+  // is every call in progress, as progress/1 records; .buffer the shared slots
+  progress: { snapshot: () => Prog.snapshot(), buffer: Prog.PROGRESS },
   mimeBundle,
   displayText,
   ...O,

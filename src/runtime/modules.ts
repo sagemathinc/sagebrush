@@ -733,7 +733,10 @@ newBuiltinModule("_time", (m) => {
         O.pollInterrupt();
         const left = end - Date.now();
         if (left <= 0) break;
-        Atomics.wait(flag, 0, 0, left);
+        // (on the word's present value: another bit set, a frame request or
+        // a persistent armed allowance, must not turn the wait into a spin;
+        // a producer's notify wakes it, and only bit 0 ends it)
+        Atomics.wait(flag, 0, Atomics.load(flag, 0) & ~1, left);
       }
     }
     return null;
