@@ -1,5 +1,5 @@
 """End-to-end checks of the MCP server (sagebrush.mcp_server) over stdio:
-the raw protocol, a time limit that interrupts the computation, every
+the raw protocol, runs (a ticket, a run deadline, a cancel), every
 tool's structuredContent checked against its outputSchema (with what each
 result rests on), and, when the official MCP SDK is installed (pip install
 mcp), its client.
@@ -10,7 +10,11 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
+
+# (the runs of these servers: a store of their own)
+os.environ["SAGEBRUSH_RUNS_DIR"] = tempfile.mkdtemp(prefix="sb-mcp-runs-")
 
 
 def start():
@@ -48,12 +52,27 @@ def raw():
     assert "discriminant: -3267" in t and "class number: 2" in t, t
     assert "23.2.a.a" in text(call(9, "newforms", {"level": 23}))
     t0 = time.time()
-    r = call(10, "sage", {"code": "while True: pass", "timeout": 2})
-    assert r["result"]["isError"] and "time limit" in text(r) and time.time() - t0 < 10
+    r = call(10, "sage", {"code": "while True: pass", "wait": 30, "run_deadline": 2})
+    assert r["result"]["isError"] and "interrupted" in text(r) and time.time() - t0 < 10, r
     if os.name == "posix":  # (on Windows the session may be restarted instead)
         assert text(call(11, "sage", {"code": "f.degree()"})) == "4"  # kept after the interrupt
     r = call(12, "sage", {"code": "x = var('x'); plot(sin(x), (x, 0, 3))"})
     assert any(c["type"] == "resource" and c["resource"]["mimeType"] == "image/svg+xml" for c in r["result"]["content"])
+    # a ticket: the call returns, the computation goes on, run_result waits for it
+    r = call(30, "sage", {"code": "import time\ntime.sleep(2)\n7", "wait": 0.2})
+    t = text(r)
+    assert not r["result"]["isError"] and t.startswith("Running as run_") and "[runs: 1 running here" in t, t
+    h = t.split()[2]
+    assert text(call(31, "run_result", {"handle": h, "wait": 30})) == "7"
+    # the old timeout no longer stops anything: a ticket, then a hard cancel
+    r = call(32, "sage", {"code": "while True: pass", "timeout": 1})
+    h = text(r).split()[2]
+    assert text(call(33, "run_status", {"handle": h})).startswith(h + ": running")
+    assert text(call(34, "run_cancel", {"handle": h, "mode": "hard"})).startswith(h + ": delivered")
+    r = call(35, "run_result", {"handle": h, "wait": 30})
+    assert r["result"]["isError"] and "interrupted" in text(r), r
+    if os.name == "posix":
+        assert text(call(36, "sage", {"code": "f.degree()"})) == "4"  # (kept after the cancel)
     assert "Number fields" in rpc(p, 13, "resources/read", {"uri": "sagebrush://guide"})["result"]["contents"][0]["text"]
     assert rpc(p, 14, "nonexistent/method")["error"]["code"] == -32601
     t = text(rpc(p, 15, "tools/call", {"name": "search_docs", "arguments": {"query": "two descent"}}))
@@ -150,8 +169,20 @@ def structured():
     assert call("sage", {"code": "1 +"}, "syntax")["error"]["exception"] == "SyntaxError"
     sc = call("sage", {"code": "is_prime(2^127 - 1, proof=True)"}, "unimplemented")
     assert sc["error"]["exception"] == "NotImplementedError" and "not implemented" in sc["error"]["message"], sc
-    sc = call("sage", {"code": "while True: pass", "timeout": 2}, "timeout")
-    assert "time limit" in sc["error"]["message"], sc
+    sc = call("sage", {"code": "while True: pass", "run_deadline": 2}, "interrupted")
+    assert sc["run"]["ended_by"] == "run_deadline" and sc["run"]["attribution"] == "correlated" and sc["runs"]["running"] == 0, sc
+    sc = call("sage", {"code": "import time; time.sleep(1); 5", "wait": 0})
+    assert sc["run"]["state"] == "running" and sc["result"] is None and sc["runs"]["running"] == 1, sc
+    h = sc["run"]["handle"]
+    sc = call("run_result", {"handle": h, "wait": 30})
+    assert sc["content_of_result"] and sc["result"]["state"] == "finished" and sc["result"]["value"] == {"text": "5"}, sc
+    sc = call("run_list", {})
+    assert any(e["handle"] == h for e in sc["result"]["runs"]) and "collaborators" in sc["result"]["note"], sc
+    assert call("run_status", {"handle": "run_" + "a" * 26}, "not_found")["result"] is None
+    # (a cancel's answer carries its request id, made by the server when none is given; a finished run is not_running)
+    sc = call("run_cancel", {"handle": h, "mode": "soft"})
+    assert sc["result"]["result"] == "not_running" and sc["result"]["request_id"].startswith("cancel_") and sc["result"]["request_id"] in sc["text"], sc
+    assert call("run_cancel", {"handle": h, "mode": "soft", "request_id": sc["result"]["request_id"]})["result"] == sc["result"]
     sc = call("sage", {"code": "x = var('x'); plot(sin(x), (x, 0, 3))"})
     assert sc["result"] is None and len(sc["plots"]) == 1 and sc["plots"][0] in sc["text"], sc
     assert call("sage", {}, "invalid_arguments")["error"]["exception"] is None
@@ -252,8 +283,9 @@ def structured():
 
 def cancelling():
     """notifications/cancelled interrupts the computation of that request
-    only; one still waiting for the session never starts (daybreak2's
-    CANCEL-479-1)."""
+    only (daybreak2's CANCEL-479-1).  A call for a session that is running
+    another run doesn't wait for it: it is refused, busy, naming that run
+    (design-hprime-host-r5 §7), so it can never start late."""
     p = start()
     rpc(p, 1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}})
     rpc(p, 2, "tools/call", {"name": "sage", "arguments": {"code": "1"}})  # (the session started)
@@ -270,18 +302,18 @@ def cancelling():
                 got[m["id"]] = m["result"]
         return got
 
-    # A runs, B waits for the session; cancelling B leaves A alone
+    # A runs; B, for the same session, is refused (busy, naming A's run), and
+    # cancelling B afterwards leaves A alone
     t0 = time.time()
     send({"id": 10, "method": "tools/call", "params": {"name": "sage", "arguments": {"code": "import time\ntime.sleep(3)\n'A done'"}}})
     time.sleep(0.5)
     send({"id": 11, "method": "tools/call", "params": {"name": "sage", "arguments": {"code": "'B ran'"}}})
-    time.sleep(0.2)
+    b = replies([11])[11]
     send({"method": "notifications/cancelled", "params": {"requestId": 11}})
-    got = replies([10, 11])
-    a, b = got[10], got[11]
+    a = replies([10])[10]
     assert not a["isError"] and a["structuredContent"]["result"] == "'A done'", a
-    assert b["isError"] and b["structuredContent"]["error"]["type"] == "interrupted" and "before it started" in b["structuredContent"]["error"]["message"], b
-    assert time.time() - t0 >= 2.5
+    assert b["isError"] and b["structuredContent"]["error"]["type"] == "busy" and b["structuredContent"]["run"]["handle"] == a["structuredContent"]["run"]["handle"], b
+    assert b["structuredContent"]["run"]["state"] == "running" and time.time() - t0 >= 2.5
     # cancelling the running one interrupts it
     t0 = time.time()
     send({"id": 12, "method": "tools/call", "params": {"name": "sage", "arguments": {"code": "import time\ntime.sleep(30)"}}})
