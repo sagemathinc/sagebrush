@@ -26,39 +26,38 @@ fn total_for_usable(n: u64) -> u64 {
 
 #[test]
 fn the_union_counts_pending_and_measured_bytes() {
-    // astra2's witness (C r4) with a measured domain: 50 in use (10 a
-    // resident, 40 other), 40 reserved and not yet allocated, then a new 20
-    // against 75 usable: 50 + 40 + 20 = 110, refused
-    let _g = fresh(total_for_usable(75));
-    let r = reserve("resident", 10).unwrap();
-    let resident = r.register_resident();
+    // astra2's witness (C r4) with a measured domain: 10 in use, then 40
+    // reserved (not yet allocated), then the domain grows by 40 outside the
+    // ledger (50 in use); a new 20 against 80 usable: 50 + 40 + 20 = 110,
+    // refused; without the pending 40, 50 + 20 = 70 fits
+    let _g = fresh(total_for_usable(80));
+    hooks::set_fake_usage(Some((10, None)));
+    let pending = reserve("pending", 40).unwrap();
     hooks::set_fake_usage(Some((50, None)));
-    let pending = reserve("pending", 15).unwrap();
-    let pending2 = reserve("pending", 25).unwrap();
     match reserve("new", 20) {
         Err(EngineError::Memory(r)) => assert_eq!((r.need, r.live, r.outstanding, r.measured), (20, 50, 40, true)),
         _ => panic!("the union must refuse"),
     }
-    drop((pending, pending2));
+    drop(pending);
     assert!(reserve("new", 20).is_ok());
-    drop(resident);
 }
 
 #[test]
 fn retained_growth_after_a_release_is_seen_by_the_next_check() {
     // astra2's C r12 case: usage 100; reserve 100; a covered allocation
     // grows the domain to 200; free it and release O, no resident; the next
-    // check reads 200 (no cached measure)
-    let _g = fresh(total_for_usable(250));
+    // check reads 200 (no cached measure).  (Usable figures are multiples of
+    // 4 so that E = total / 4 is exact.)
+    let _g = fresh(total_for_usable(252));
     hooks::set_fake_usage(Some((100, None)));
     let r = reserve("work", 100).unwrap();
     hooks::set_fake_usage(Some((200, None))); // (grown, and retained after the free)
     drop(r);
-    match reserve("next", 60) {
+    match reserve("next", 53) {
         Err(EngineError::Memory(r)) => assert_eq!(r.live, 200),
-        _ => panic!("200 + 60 > 250 must be refused"),
+        _ => panic!("200 + 53 > 252 must be refused"),
     }
-    assert!(reserve("next", 50).is_ok());
+    assert!(reserve("next", 52).is_ok());
 }
 
 #[test]
