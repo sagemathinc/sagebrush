@@ -112,6 +112,14 @@ pub extern "C" fn sb_outstanding_bytes() -> f64 {
     sagebrush_ledger::outstanding_bytes() as f64
 }
 
+/// Calibration builds only (feature ledger-peak): the peak of live bytes
+/// since the last call, then reset to the current count.
+#[cfg(feature = "ledger-peak")]
+#[no_mangle]
+pub extern "C" fn sb_peak_bytes_reset() -> f64 {
+    sagebrush_ledger::peak_bytes_reset() as f64
+}
+
 /// The engine's typed memory refusal as the reply's "memory" member: the
 /// host turns it into D1's error (SagebrushMemoryError), never a string to
 /// parse (no-cliffs plan C r10; callers adopt it as their caps go).

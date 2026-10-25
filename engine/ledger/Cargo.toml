@@ -12,3 +12,6 @@ description = "The Sagebrush engine's memory ledger: a counting allocator, a tot
 # Tests only: allocate outside the ledger, pause an admission after it reads
 # the live count (the union and race tests of plan C r5/r6)
 test-hooks = []
+# Calibration only: also keep the peak of live bytes (one more atomic per
+# allocation), for the allocator-overhead factor phi (plan C r4 1.2)
+peak-stats = []
