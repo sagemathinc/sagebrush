@@ -3323,14 +3323,6 @@
   "owner": "p-adic linear algebra",
   "row": "inv-9"
  },
- "lib/_sage_padic_lseries.py :: _kd_admit :: \"computation (1/4 of this process's %d MiB)\" % (what, _kd_mib(U), cap >> 20, total >> 20), #0": {
-  "class": "2",
-  "owner": "p-adic/L-series"
- },
- "lib/_sage_padic_lseries.py :: _kd_admit :: U, cap) #0": {
-  "class": "2",
-  "owner": "p-adic/L-series"
- },
  "lib/_sage_padic_lseries.py :: _kd_admit :: cap = total // 4 #0": {
   "class": "2",
   "owner": "p-adic/L-series"
@@ -3343,8 +3335,13 @@
   "class": "2",
   "owner": "p-adic/L-series"
  },
- "lib/_sage_padic_lseries.py :: _kd_admit :: raise _kd_refusal(\"%s is estimated to need about %d MiB, more than sagebrush's budget of %d MiB for one \" #0": {
+ "lib/_sage_padic_lseries.py :: _kd_admit :: raise NotImplementedError(\"%s: the memory estimate for this computation isn't established for this \" #0": {
+  "class": "coverage",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_admit :: raise _kd_memory(\"By an upper estimate, %s\" % what, U, cap, \"one computation\") #0": {
   "class": "2",
+  "explained": true,
   "owner": "p-adic/L-series"
  },
  "lib/_sage_padic_lseries.py :: _kd_cost :: limit padic.kedlaya_work, about 25 microseconds each in the CLI: #0": {
@@ -3353,6 +3350,16 @@
  },
  "lib/_sage_padic_lseries.py :: _kd_cost :: this (the preflight's shortcut under a finite limit).\"\"\" #0": {
   "class": "3",
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_memory :: def _kd_memory(what, need, limit, allowance_for): #0": {
+  "class": "2",
+  "explained": true,
+  "owner": "p-adic/L-series"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_memory :: e = _memguard.memory_guard(what, need, limit, allowance_for) #0": {
+  "class": "2",
+  "explained": true,
   "owner": "p-adic/L-series"
  },
  "lib/_sage_padic_lseries.py :: _kd_plan_fast :: raise NotImplementedError(\"p >= 5 only\") #0": {
@@ -3383,15 +3390,7 @@
   "class": "3",
   "owner": "p-adic/L-series"
  },
- "lib/_sage_padic_lseries.py :: _kd_refusal :: def _kd_refusal(text, need, cap): #0": {
-  "class": "2",
-  "owner": "p-adic/L-series"
- },
- "lib/_sage_padic_lseries.py :: _kd_refusal :: return _sage_ffmat._refusal(text, need, cap) #0": {
-  "class": "2",
-  "owner": "p-adic/L-series"
- },
- "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: NotImplementedError: the Frobenius matrix at p = 5 to precision 10000...0 needs at least ... MiB just for its working modulus p^(prec + 4), more than this process's ... MiB #0": {
+ "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: ....: print(type(e).__name__, e.need_bytes > e.limit_bytes) #0": {
   "class": "2",
   "owner": "p-adic/L-series"
  },
