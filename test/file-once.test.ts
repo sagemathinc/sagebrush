@@ -237,7 +237,7 @@ test("the generated code clears the peek on both of its paths: the eligible call
   const { compile } = require(__dirname + "/../src/compile.js");
   for (const src of ["open(F, M).write(S)\n", "def f(F, M, S):\n    open(F, M).write(S)\n"]) {
     const code: string = compile(src, "t.py", "__main__").code;
-    const m = /: R\.fileOnceFits\((\$\d+), \$\d+\) \? \(R\.fileOnceS\.v = \1, \1 = undefined, R\.fileOnceWrite\(\$\d+, \$\d+\)\) : \(\1 = undefined, \$K\d+\(/.exec(code);
+    const m = /: R\.fileOnceFits\((\$\d+), \$\d+\)\) \? \(R\.fileOnceS\.v = \1, \1 = undefined, R\.fileOnceWrite\(\$\d+, \$\d+\)\) : \(\1 = undefined, \$K\d+\(/.exec(code);
     assert.ok(m, code);
   }
 });
