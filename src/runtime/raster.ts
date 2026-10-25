@@ -140,6 +140,10 @@ newBuiltinModule("_sbraster", (m) => {
     } catch (err) {
       return failed(err);
     }
+    // (the WebAssembly cannot see a Stop while it draws: one that came during
+    // it is taken here, a KeyboardInterrupt from the call, not at some later
+    // loop; outside the try, so it is not the module failing)
+    O.pollInterrupt();
     const n = new DataView(out.buffer, out.byteOffset).getUint32(0, true);
     return Obj.tuple([new Obj.PyBytes(out.slice(4, 4 + n)), new TextDecoder().decode(out.subarray(4 + n))]);
   }, "render");
@@ -154,6 +158,7 @@ newBuiltinModule("_sbraster", (m) => {
     } catch (err) {
       return failed(err);
     }
+    O.pollInterrupt(); // (as render's)
     const v = new DataView(out.buffer, out.byteOffset);
     return Obj.tuple([v.getUint32(0, true), v.getUint32(4, true), v.getUint32(8, true), new Obj.PyBytes(out.slice(12))]);
   }, "decode");

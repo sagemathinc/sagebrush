@@ -1,13 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Worker } from "node:worker_threads";
+import * as zlib from "node:zlib";
 
 // Stop (the shared interrupt flag, INTR[0]) reaches a builtin that consumes
 // a long iterable: math.fsum(range(10**12)) and math.prod(...) stop with a
 // KeyboardInterrupt (ops.forEach polls it), as the notebook's Stop needs.
 const DIST = __dirname + "/..";
 
-function interruptAfter(code: string, ms: number): Promise<string> {
+// (ms null: the request is there before the program starts)
+function interruptAfter(code: string, ms: number | null, wait = 2000): Promise<string> {
   const w = new Worker(
     `
     const { parentPort, workerData } = require("node:worker_threads");
@@ -16,6 +18,7 @@ function interruptAfter(code: string, ms: number): Promise<string> {
       // (lib on the path, as the CLI has it, for numpy)
       c.R.importModule("sys").path.push(c.libDir());
       parentPort.postMessage({ intr: c.R.INTR.buffer });
+      if (workerData.preset) Atomics.store(c.R.INTR, 0, 1);
       try {
         c.execModule(workerData.code, "<test>", "__main__");
         parentPort.postMessage({ done: "finished" });
@@ -24,13 +27,14 @@ function interruptAfter(code: string, ms: number): Promise<string> {
       }
     });
     `,
-    { eval: true, workerData: { dist: DIST, code } },
+    { eval: true, workerData: { dist: DIST, code, preset: ms === null } },
   );
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => (w.terminate(), resolve("not interrupted")), ms + 2000);
+    let stop: ReturnType<typeof setTimeout> | undefined;
+    const timer = setTimeout(() => (w.terminate(), resolve("not interrupted")), (ms ?? 0) + wait);
     w.on("message", (m) => {
-      if (m.intr) setTimeout(() => Atomics.store(new Int32Array(m.intr), 0, 1), ms);
-      if (m.done) (clearTimeout(timer), w.terminate(), resolve(m.done));
+      if (m.intr && ms !== null) stop = setTimeout(() => Atomics.store(new Int32Array(m.intr), 0, 1), ms);
+      if (m.done) (clearTimeout(timer), clearTimeout(stop), w.terminate(), resolve(m.done));
     });
     w.on("error", reject);
   });
@@ -75,4 +79,37 @@ test("Stop interrupts a numpy ufunc over a large array, contiguous or strided (H
   assert.equal(await interruptAfter(big + "np.sin(x)", 300), "KeyboardInterrupt");
   assert.equal(await interruptAfter(big + "np.sin(x[::2])", 300), "KeyboardInterrupt");
   assert.equal(await interruptAfter(big + "np.sin(x.reshape(1000, -1).T)", 300), "KeyboardInterrupt");
+});
+
+// The PNG module (src/runtime/raster.ts) runs its WebAssembly without a look
+// at the flag, and nothing after it may poll before the program goes on: a
+// Stop during a render must raise KeyboardInterrupt at the render's return,
+// not at some later loop (matlab's interrupt pilot 4, E13g).
+test("Stop during a PNG render raises KeyboardInterrupt from the render (E13g)", async () => {
+  const polys = Array.from({ length: 80 }, (_, j) => `<polygon points="0,0 1000,${100 * (j % 10)} 1000,1000 ${143 * (j % 7)},1000" fill="blue" fill-opacity="0.02"/>`).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">${polys}</svg>`;
+  const render = `import _sbraster\npng, missing = _sbraster.render(${JSON.stringify(svg)}, 1.0, 0, 0, "", 100.0, [])\nraise ValueError("the render returned")`;
+  // (mid-render, in time)
+  assert.equal(await interruptAfter(render, 300, 30000), "KeyboardInterrupt");
+  // (a request already there when it starts: nothing polls before it, so
+  // only the render's own return can raise)
+  const tiny = `import _sbraster\n_sbraster.render('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>', 1.0, 0, 0, "", 100.0, [])\nraise ValueError("the render returned")`;
+  assert.equal(await interruptAfter(tiny, null), "KeyboardInterrupt");
+  // (decode too: a 1 x 1 gray PNG, made here)
+  const chunk = (type: string, data: Buffer) => {
+    const td = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const len = Buffer.alloc(4), crc = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    crc.writeUInt32BE(zlib.crc32(td));
+    return Buffer.concat([len, td, crc]);
+  };
+  const png = Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk("IHDR", Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0])),
+    chunk("IDAT", zlib.deflateSync(Buffer.from([0, 128]))),
+    chunk("IEND", Buffer.alloc(0)),
+  ]).toString("hex");
+  const decode = `import _sbraster\nw, h, ch, raw = _sbraster.decode(bytes.fromhex("${png}"))\nraise ValueError("the decode returned %d %d %d" % (w, h, ch))`;
+  assert.equal(await interruptAfter(decode, 30000, 0), "ValueError: the decode returned 1 1 1");
+  assert.equal(await interruptAfter(decode, null), "KeyboardInterrupt");
 });
