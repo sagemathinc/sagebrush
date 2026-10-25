@@ -269,6 +269,15 @@ async function calibrate(host, c) {
     if (next === s || attempts.some((x) => x.s === next)) break; // (a cliff between two adjacent sizes)
     s = next;
   }
+  // a cliff (William, Oct 25: no performance cliffs): two close sizes, over 100x apart in time (or the
+  // larger over the cap), reported as a finding with its sizes and times, not just an uncalibrated row
+  if (lo != null && hi != null) {
+    const tLo = attempts.find((x) => x.s === lo)?.T_ms, hiA = attempts.find((x) => x.s === hi);
+    const ratio = hiA?.T_ms != null && tLo ? hiA.T_ms / tLo : null;
+    if (hi - lo <= 0.1 * hi && tLo != null && (hiA?.T_ms == null || ratio > 100)) {
+      return { s, T: null, attempts, label: "cliff", cliff: { from_s: lo, from_ms: tLo, to_s: hi, to_ms: hiA?.T_ms ?? `over the ${CAL_CAP_MS} ms cap` }, error: `a performance cliff between s = ${lo} (${tLo} ms) and s = ${hi} (${hiA?.T_ms != null ? hiA.T_ms + " ms" : "over the " + CAL_CAP_MS / 1000 + " s cap"}): a finding for the owner` };
+    }
+  }
   return { s, T: null, attempts, error: "uncalibrated" + (lo != null && hi != null ? ` (the band lies between s = ${lo} and s = ${hi})` : "") };
 }
 
@@ -285,7 +294,7 @@ async function runHost(host) {
     }
     const cal = await calibrate(host, c);
     if (c.calibration !== "nonterminating" && cal.T == null) {
-      rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: cal.error, calibration: cal });
+      rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: cal.error, ...(cal.cliff ? { finding: "cliff", cliff: cal.cliff } : {}), calibration: cal });
       record(rows.at(-1));
       continue;
     }
