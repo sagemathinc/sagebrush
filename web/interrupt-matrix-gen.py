@@ -25,7 +25,7 @@ CASES = [
          grow=dict(kind="step", step=1), retained=True,
          setup="R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])",
          target="_r = I.groebner_basis()",
-         probe="R2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2"),
+         probe="assert (X[0] + X[1])**2 - X[0]**2 - X[1]**2 == 2 * X[0] * X[1]\nassert len(I.gens()) == len(X) and I.gens()[0] in R\nR2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2"),
     # r5 §6.2: XK with the window signature; s_max at lib/_png.py's pixel cap (4000 x 4000 < 2^24)
     dict(id="E13g", transport="wasm:raster.ts", owner="board/plot", mode="sage", s0=40, smin=4, smax=4000,
          grow=dict(kind="scale", p=1), exception="XK", xk=dict(kind="window", wrap="_sbraster.render"), hosts=["cli"],

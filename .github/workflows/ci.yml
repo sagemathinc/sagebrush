@@ -506,14 +506,16 @@ jobs:
 
   # The interrupt matrix's CI set (plan-interrupt-harness r5 section 8): Ctrl-C on the CLI, the
   # interactive prompt and the notebook page's Stop, with the signal trials S1-S4 and the
-  # PENDING-READY probes, against web/interrupt-baseline.json.  Its own job, budgeted at about 2x
-  # pilot 4's measurement (401 s + 33 s); the harness's internal budget (13 min) ends first, so
-  # an overrun is reported as INVALID-budget rows, never a silent kill.
+  # PENDING-READY probes, against web/interrupt-baseline.json.  Its own job.  The harness has an
+  # absolute 15-min deadline (about 2x pilot 4's 401 s + 33 s): every session, guard and CDP wait is
+  # clipped to it, its last 30 s are for cleanup and the report, and a watchdog at the deadline writes
+  # the report and exits.  The job's 30 min covers checkout, install and builds (up to about 14 min)
+  # on top, so the job timeout never cuts the harness's report.
   interrupt-matrix:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.web == 'true' || needs.changes.outputs.engine_smoke == 'true')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 16
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: detect CI CPU quota
@@ -531,6 +533,7 @@ jobs:
           python-version: "3.14"
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
       - name: interrupt matrix (CI set)
+        timeout-minutes: 16
         run: |
           python3 web/serve.py 8765 &
           server_pid=$!
@@ -543,7 +546,7 @@ jobs:
           trap 'exit 143' TERM
           sleep 1
           kill -0 "$server_pid"
-          SB_URL=http://127.0.0.1:8765/ CHROME=google-chrome node web/test-interrupt-matrix.mjs --ci --budget-ms 780000 --out "$RUNNER_TEMP/interrupt-matrix.json"
+          SB_URL=http://127.0.0.1:8765/ CHROME=google-chrome node web/test-interrupt-matrix.mjs --ci --budget-ms 900000 --out "$RUNNER_TEMP/interrupt-matrix.json"
       - name: keep the rows
         if: always()
         uses: actions/upload-artifact@v4

@@ -10,7 +10,7 @@ import { join } from "node:path";
 const mod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 
 function run(js: string): any {
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, classifyXK, xkRowOutcome, rowOutcome, againstBaseline, leakCheck } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, classifyXK, xkRowOutcome, rowOutcome, againstBaseline, leakCheck, cliffOf, browserLeak, browserFailure } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -123,4 +123,50 @@ test("baseline: several entries for one (case, host) each count (E3a on the prom
   assert.equal(run(`againstBaseline({ case: "E3a", host: "prompt", outcome: "FAIL", trials: [{ outcome: "FAIL", why: "a performance cliff between s = 388 and s = 409" }] }, ${b})`), "KNOWN");
   assert.equal(run(`againstBaseline({ case: "E3a", host: "prompt", outcome: "FAIL", trials: [{ outcome: "FAIL", why: "no KeyboardInterrupt" }] }, ${b})`), "KNOWN");
   assert.equal(run(`againstBaseline({ case: "E3a", host: "prompt", outcome: "FAIL", trials: [{ outcome: "FAIL", why: "probe fail" }] }, ${b})`), "FAIL");
+});
+
+test("a cliff is proven over 100x: two samples, or cap / T(lo) for a timed-out larger size (daybreak2 LIMIT-INT168-1)", () => {
+  const c = (o: object) => run(`cliffOf(${JSON.stringify(o)})`);
+  assert.ok(c({ lo: 388, tLo: 243, hi: 409, tHi: null, capMs: 60000 })); // E3a: 60000 / 243 > 100
+  assert.ok(c({ lo: 390, tLo: 500, hi: 400, tHi: null, capMs: 60000 })); // 0.5 s vs a timeout: 120x
+  assert.equal(c({ lo: 390, tLo: 5000, hi: 400, tHi: null, capMs: 60000 }), null); // 5 s vs a timeout: only 12x proven
+  assert.ok(c({ lo: 390, tLo: 100, hi: 400, tHi: 20000, capMs: 60000 })); // 200x, both completed
+  assert.equal(c({ lo: 390, tLo: 100, hi: 400, tHi: 5000, capMs: 60000 }), null); // 50x
+  assert.equal(c({ lo: 300, tLo: 100, hi: 400, tHi: null, capMs: 60000 }), null); // not close sizes
+});
+
+test("browser leak criterion: worker heap and page total from repeat 3; a missing metric is unmeasured, never PASS (astra CORR-168-2)", () => {
+  const MiB = 1024 * 1024;
+  const ser = (heap: (number | null)[], page: (number | null)[], same = true) =>
+    JSON.stringify(heap.map((h, k) => ({ i: k + 1, worker_heap: h, page_total: page[k], same_worker: same || k < 3 })));
+  const flat = run(`browserLeak(${ser([10 * MiB, 30 * MiB, 30 * MiB, 31 * MiB, 32 * MiB], [null, null, 200 * MiB, null, 210 * MiB])})`);
+  assert.equal(flat.ok, true);
+  assert.equal(flat.check, "short");
+  // the worker's heap grows by 300 MiB from repeat 3: a leak, though the worker is the same one
+  assert.equal(run(`browserLeak(${ser([10 * MiB, 30 * MiB, 30 * MiB, 200 * MiB, 330 * MiB], [null, null, 200 * MiB, null, 210 * MiB])})`).ok, false);
+  // the page's total (wasm and ArrayBuffers) grows past max(64 MiB, 10%)
+  assert.equal(run(`browserLeak(${ser([1, 1, 1, 1, 1].map((x) => x * MiB), [null, null, 1000 * MiB, null, 1200 * MiB])})`).ok, false);
+  // a required metric missing at an end: unmeasured (null), so the row can't PASS
+  assert.equal(run(`browserLeak(${ser([10, 10, 10, 10, 10].map((x) => x * MiB), [null, null, null, null, 210 * MiB])})`), null);
+  assert.equal(run(`browserLeak(${ser([10 * MiB, 10 * MiB, null, 10 * MiB, 10 * MiB], [null, null, 200 * MiB, null, 210 * MiB])})`), null);
+  assert.equal(run(`rowOutcome([{ outcome: "PASS" }], null)`), "INCOMPLETE");
+  // a replaced worker fails, whatever the memory
+  assert.equal(run(`browserLeak(${ser([1, 1, 1, 1, 1].map((x) => x * MiB), [null, null, 1 * MiB, null, 1 * MiB], false)})`).ok, false);
+  // the full series: 20 repeats is labelled full
+  const twenty = JSON.stringify(Array.from({ length: 20 }, (_, k) => ({ i: k + 1, worker_heap: 10 * MiB, page_total: k === 2 || k === 19 ? 200 * MiB : null, same_worker: true })));
+  assert.equal(run(`browserLeak(${twenty})`).check, "full");
+});
+
+test("browser failures: an open dialog or the budget is INVALID and named; no answer with no dialog is FAIL (astra CORR-168-6)", () => {
+  const dialog = `{ type: "confirm", message: "Change this notebook's language from Python to Sage?" }`;
+  const a = run(`browserFailure("CDP Runtime.evaluate: no answer in 30000 ms", ${dialog})`);
+  assert.equal(a.outcome, "INVALID");
+  assert.match(a.why, /confirm dialog is open .*Change this notebook/);
+  const b = run(`browserFailure("CDP Runtime.evaluate: no answer in 30000 ms", null)`);
+  assert.equal(b.outcome, "FAIL");
+  assert.match(b.why, /stopped answering, with no dialog open/);
+  assert.deepEqual(run(`browserFailure("run budget spent", null)`), { outcome: "INVALID", why: "run budget spent" });
+  const c = run(`browserFailure("WebSocket is not open", null)`);
+  assert.equal(c.outcome, "INVALID");
+  assert.match(c.why, /^browser transport/);
 });

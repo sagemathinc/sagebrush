@@ -98,3 +98,46 @@ export function againstBaseline(row, baseline) {
   const whys = (row.trials ?? []).filter((t) => t.outcome === "FAIL").map((t) => t.why ?? "");
   return row.outcome === "FAIL" && whys.length > 0 && whys.every((w) => res.some((re) => re.test(w))) ? "KNOWN" : row.outcome;
 }
+
+// a performance cliff between two close calibration sizes (r5 §3; William, Oct 25), proven over
+// 100x: two completed samples with T(hi) / T(lo) > 100, or a larger sample past the cap with
+// cap / T(lo) > 100 (a timeout proves only cap / T(lo); daybreak2 LIMIT-INT168-1).  Sizes within
+// 10% of each other.  Returns the cliff, or null (then the row is uncalibrated, not a finding).
+export function cliffOf({ lo, tLo, hi, tHi, capMs }) {
+  if (lo == null || hi == null || !(tLo > 0) || hi - lo > 0.1 * hi) return null;
+  const ratio = tHi != null ? tHi / tLo : capMs / tLo;
+  if (!(ratio > 100)) return null;
+  return { from_s: lo, from_ms: tLo, to_s: hi, to_ms: tHi ?? `over the ${capMs} ms cap`, ratio_at_least: Math.floor(ratio) };
+}
+
+// the browser's leak criterion (r5 §6.1; astra CORR-168-2): the interpreter worker's identity never
+// changes, and both labelled metrics, the workers' JS heap (Runtime.getHeapUsage) and the page's
+// total including wasm and ArrayBuffer backing (measureUserAgentSpecificMemory), grow at most
+// max(64 MiB, 10%) from repeat 3 to the last.  A required metric missing at either end leaves the
+// row unmeasured (null: INCOMPLETE), never PASS.  samples: [{ i, worker_heap, page_total,
+// same_worker }] over the repeat series.
+export function browserLeak(samples, full = 20) {
+  const first = samples.find((x) => x.i === 3), last = samples.at(-1);
+  if (!first || !last || last.i <= 3) return null;
+  if (samples.some((x) => x.same_worker === false)) return { ok: false, check: "worker identity", why: "the interpreter worker was replaced" };
+  const metric = (k) => {
+    const a = first[k], b = last[k];
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+    const allowed = Math.max(64 * 1024 * 1024, 0.1 * a);
+    return { from: a, to: b, growth: b - a, allowed: Math.round(allowed), ok: b - a <= allowed };
+  };
+  const worker_heap = metric("worker_heap"), page_total = metric("page_total");
+  if (!worker_heap || !page_total) return null;
+  return { ok: worker_heap.ok && page_total.ok, check: last.i >= full ? "full" : "short", from: 3, to: last.i, worker_heap, page_total };
+}
+
+// a browser trial or setup step that threw (astra CORR-168-6, decision 4): the run budget spent and
+// an open dialog are the harness's (INVALID, named); the page not answering with no dialog open is the
+// page's (FAIL); anything else is a transport or setup failure (INVALID, its message kept).
+export function browserFailure(message, dialogOpen) {
+  const m = String(message ?? "");
+  if (/run budget spent/.test(m)) return { outcome: "INVALID", why: "run budget spent" };
+  if (dialogOpen) return { outcome: "INVALID", why: `a ${dialogOpen.type} dialog is open ("${dialogOpen.message}"), so the page can't answer` };
+  if (/no answer in \d+ ms/.test(m)) return { outcome: "FAIL", why: "the page stopped answering, with no dialog open: " + m.slice(0, 200) };
+  return { outcome: "INVALID", why: "browser transport: " + m.slice(0, 200) };
+}
