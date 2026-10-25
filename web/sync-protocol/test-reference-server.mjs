@@ -370,11 +370,12 @@ const C1 = "clientA1", C2 = "clientB1";
     await sleep(20);
     await Q.call("POST", "/api/sync/v1/delete", { confirm: "delete", generation: 1 });
     await Q.call("POST", "/api/sync/v1/enable");
+    // (a socket of the new generation, there before the release: it must hear nothing of the old forward (astra's r2 probe))
+    const q2 = await socket(server, Q, "devQ0002");
     release();
     await sleep(30);
-    // (what this can show: the new generation holds nothing of it.  The socket is closed by the delete, so its answer is never
-    // seen either way; the server's recheck after the hold is defensive, and its mutation is listed as equivalent)
     check(server.controls.doc("acct-held", DOC) === null, "CORR-173-3: a forward held across a delete and a re-enable leaves nothing in the new generation");
+    check(!q2.got.some((m) => m.t === "changed"), "CORR-173-3: …and a socket of the new generation hears no changed from it: " + J(q2.got.map((m) => m.t)));
   }
   {
     // CORR-173-4: concurrent first accesses share one account (a socket made while enable runs sees it active)
