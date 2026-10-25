@@ -80,11 +80,17 @@
 //            with 50,000 versions as with none (daybreak2's LIMIT-563-2).  The versions kept before are put here
 //            afterwards, a bounded slice at a time, by the cleanup (sync-pins.ts, from the marker
 //            `versions:backfill`); until then they are in none, so kept, never wrongly dropped (none was pinned)
+//
+// Version 7 (task #14, plan-task14-is-op-confirmed r6; schema only):
+//
+//   syncLedger  each local op's sync state, by [ns, lseq] (sync-ledger.ts), with an index byDecided on
+//            [ns, d, lseq] (the oldest decided rows, pruned past the cap).  Made empty: a namespace's existing
+//            records are seeded after the open, by its sender, before anything is scanned or sent
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
 
-export const WS_VERSION = 6;
+export const WS_VERSION = 7;
 /** How an open went, for detecting a lost workspace (design/workspace-durability.md A.2): whether it made
  * the database (none was there), and Chrome's report that it deleted a damaged one (`dataLoss: "total"` on
  * the upgradeneeded event: non-standard, in Blink's IDL). */
@@ -152,6 +158,7 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
       // carries `fetch`, the SHA-256 to fetch; a sparse index, so queuing one costs no write of its own)
       tx.objectStore("entries").createIndex("byFetch", "fetch");
     }
+    if (old < 7) db.createObjectStore("syncLedger", { keyPath: ["ns", "lseq"] }).createIndex("byDecided", ["ns", "d", "lseq"]);
   }, onClose, ms);
 }
 
