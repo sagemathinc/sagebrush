@@ -89,9 +89,22 @@ Its tools:
 - `python`: the same session, as plain Python.
 - `factor`, `number_field`, `newforms`: shortcuts.
 - `guide`: what is implemented. `reset`: clear the session.
+- `run_status`, `run_result`, `run_cancel`, `run_list`, `run_keep`: runs.
 
-Each call has a time limit. When it expires the computation is interrupted
-and the session keeps its variables. The session also works on its own
+A `sage` or `python` call is a run. The call waits up to `wait` seconds (60
+by default). If the computation hasn't ended by then, the call returns a
+ticket, the run's handle, and the computation keeps running: `run_result`
+waits for it, and `run_cancel` interrupts it (the session keeps its
+variables). Only a `run_deadline` you give, or a cancel, stops a run.
+`timeout` is the old name of `wait`. Every result says how many runs are
+running. The shortcut tools still have time limits.
+
+Runs are kept in `~/.cache/sagebrush/runs/` (or `$SAGEBRUSH_RUNS_DIR`), which
+is bounded: by default 2 GiB, 200 runs and 7 days. Only your Unix user can
+read the directory. Collaborators who share that user, as in a shared
+cocalc.ai project, can list, read and cancel your runs. A run started by another server, or
+by one that has exited, is listed with liveness "unknown". The session also
+works on its own
 (`sagebrush.session.Session`), and `sagebrush.preparse.preparse` turns Sage
 syntax into Python.
 
