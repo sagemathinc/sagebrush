@@ -257,6 +257,12 @@ function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>, pending: 
   const copied = (e: Node, s: Scope) => {
     if (e?._type === "Name" && e.ctx?._type === "Load") pending.changed.push({ s, name: e.id });
   };
+  // (a change through p[...], p.x, p[0][1]...: down the receivers to the name that holds it all,
+  // CORR-170-R2-ASTRA-3 in r3's review)
+  const changedAt = (e: Node, s: Scope) => {
+    while (e?._type === "Subscript" || e?._type === "Attribute") e = e.value;
+    if (e?._type === "Name") pending.changed.push({ s, name: e.id });
+  };
   // global/nonlocal declarations of a scope's own body (not its nested scopes')
   const scopeDeclarations = (b: Node, s: Scope) =>
     walk(b, (n) => {
@@ -337,12 +343,13 @@ function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>, pending: 
         go(n.value, s);
         return;
       case "Subscript":
-        // p[k] = ..., del p[k]: the container changes
-        if ((n.ctx?._type === "Store" || n.ctx?._type === "Del") && n.value?._type === "Name") pending.changed.push({ s, name: n.value.id });
+      case "Attribute":
+        // p[k] = ..., del p[k], and nested: p[0][k] = ..., p.x[k] = ...: the container holding them changes
+        if (n.ctx?._type === "Store" || n.ctx?._type === "Del") changedAt(n.value, s);
         break;
       case "Call":
-        // p.append(...) and the like: the container changes in place
-        if (n.func?._type === "Attribute" && n.func.value?._type === "Name" && MUTATORS.has(n.func.attr)) pending.changed.push({ s, name: n.func.value.id });
+        // p.append(...) and the like, and nested: p[0].clear(): the container changes in place
+        if (n.func?._type === "Attribute" && MUTATORS.has(n.func.attr)) changedAt(n.func.value, s);
         break;
       case "List":
       case "Tuple":
