@@ -48,7 +48,11 @@ export const CODE = { max: 32 };
 const codeOk = (c: string) => c.length <= CODE.max && /^[a-z0-9_]+$/.test(c);
 /** (LIMIT-PR128-2) namespaces whose sender generation the hub remembers at most: the current one and the two the
  * obsolete queue may hold */
-export const HUB = { namespaces: 3 };
+export const HUB = {
+  namespaces: 3,
+  /** a namespace's tentative epochs (generations announced before any durable read) kept, at most */
+  tentative: 4,
+};
 export const OBSOLETE = {
   /** namespaces whose ledgers wait to be deleted, at most (a switch waits for room) */
   max: 2,
@@ -102,38 +106,56 @@ export class Hub {
    * (CORR-PR128-2), raised by every message that carries a generation and by each wait's durable read */
   // (LIMIT-PR128-2: one current {epoch, gen} per namespace, at most HUB.namespaces of them, the least recently used
   // dropped; a newer epoch replaces an older one, and a message of an older epoch is stale)
-  // (CORR-PR128-6: an entry an ordinary message made is tentative (`sure` false): it fences generations only within its
-  // own epoch and never makes another epoch stale; a durable read or a lifecycle change always replaces it with a sure
-  // entry at the durable epoch, keeping its generation only for that same epoch)
-  private gens = new Map<string, { epoch: number; gen: number; sure: boolean }>();
+  // (CORR-PR128-6, -R4: before a durable read (a fresh hub, or after eviction) generations are only tentative, kept per
+  // epoch, at most HUB.tentative epochs (the highest, the least trusted, dropped first): a claim of one epoch never
+  // erases or hides another epoch's.  A durable read or a lifecycle change makes the entry sure at its own epoch, with
+  // the generation announced for that same epoch if higher, never one of another epoch; once sure, a newer epoch's
+  // ordinary claim is ignored)
+  private gens = new Map<string, { sure: { epoch: number; gen: number } | null; tent: Map<number, number> }>();
   /** `gen` noted for (ns, epoch); returns whether it is stale (an older epoch, or an older generation of this one).
    * Only a durable read (a wait's registration) or a lifecycle change (`advance`) establishes a namespace's epoch.  A
    * message claiming a newer epoch than a sure one is neither applied here nor allowed to fence the current epoch's
-   * messages (waits drop it by its epoch anyway); with no sure entry (a fresh hub, or after eviction) its claim is only
-   * tentative, so it can't hold a later durable registration at an older epoch (astra3's CORR-PR128-6). */
+   * messages (waits drop it by its epoch anyway); with no sure entry its claim is only tentative, for its own epoch, so
+   * it neither holds a later durable registration at an older epoch nor discards that epoch's announced generation
+   * (astra3's CORR-PR128-6 and -R4). */
   fence(ns: string, epoch: number, gen: number, advance = false): boolean {
-    const cur = this.gens.get(ns);
-    let stale = false, next = cur;
-    if (!cur || (!cur.sure && epoch !== cur.epoch)) {
-      // (nothing known, or a tentative entry of another epoch: replaced, never stale)
-      if (advance || !cur || epoch > cur.epoch) next = { epoch, gen, sure: advance };
-    } else if (!cur.sure) {
-      // (a tentative entry of this epoch: its generation fences; a durable read confirms it)
-      next = { epoch, gen: Math.max(gen, cur.gen), sure: advance };
-      stale = gen < cur.gen;
-    } else if (epoch > cur.epoch) {
-      if (!advance) return false;
-      next = { epoch, gen, sure: true };
-    } else if (epoch < cur.epoch) stale = true;
-    else if (gen > cur.gen) next = { epoch, gen, sure: true };
-    else stale = gen < cur.gen;
+    const cur = this.gens.get(ns) ?? { sure: null, tent: new Map<number, number>() };
+    let stale = false;
+    const sure = cur.sure;
+    if (advance) {
+      if (sure && epoch < sure.epoch) stale = true;
+      else if (sure && epoch === sure.epoch) {
+        stale = gen < sure.gen;
+        sure.gen = Math.max(gen, sure.gen);
+      } else {
+        // (established at this epoch: its own announced generation kept; tentative epochs up to it no longer needed)
+        cur.sure = { epoch, gen: Math.max(gen, cur.tent.get(epoch) ?? 0) };
+        for (const e of [...cur.tent.keys()]) if (e <= epoch) cur.tent.delete(e);
+      }
+    } else if (sure) {
+      if (epoch > sure.epoch) return false;
+      if (epoch < sure.epoch) stale = true;
+      else {
+        stale = gen < sure.gen;
+        sure.gen = Math.max(gen, sure.gen);
+      }
+    } else {
+      const was = cur.tent.get(epoch);
+      stale = was !== undefined && gen < was;
+      cur.tent.set(epoch, Math.max(gen, was ?? 0));
+      while (cur.tent.size > HUB.tentative) cur.tent.delete(Math.max(...cur.tent.keys()));
+    }
     this.gens.delete(ns);
-    this.gens.set(ns, next!);
+    this.gens.set(ns, cur);
     while (this.gens.size > HUB.namespaces) this.gens.delete(this.gens.keys().next().value!);
     return stale;
   }
   /** the highest generation seen for (ns, epoch) */
-  seen(ns: string, epoch: number): number { const cur = this.gens.get(ns); return cur && cur.epoch === epoch ? cur.gen : 0; }
+  seen(ns: string, epoch: number): number {
+    const cur = this.gens.get(ns);
+    if (!cur) return 0;
+    return cur.sure ? (cur.sure.epoch === epoch ? cur.sure.gen : 0) : cur.tent.get(epoch) ?? 0;
+  }
   /** (tests) how many namespaces the fence holds */
   get fences() { return this.gens.size; }
   private ch: BroadcastChannel | null = null;

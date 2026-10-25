@@ -2461,6 +2461,33 @@ async function t14Review3() {
   check(!(await settledYet(pc)) && hub.fences <= W.HUB.namespaces, "review3: re-anchored, an older generation's sent after a newer holder is dropped; the bound kept");
   hub.post({ t: "sent", ns, epoch, gen: lease.gen + 6, seqs: c });
   check((await pc).sync === "sent", "review3: …and the newer generation's sent counts");
+  // (astra3's CORR-PR128-6-R4: the announced holder and a future-epoch claim together, in both orders, on a fresh hub and
+  // after eviction: the claim neither erases nor hides the durable epoch's announced generation; a real wait registered
+  // after both drops the older generation's sent and takes the announced one's)
+  for (const evicted of [false, true])
+    for (const order of ["holder first", "claim first"]) {
+      const w2 = await fresh();
+      const { ns: n2, lease: l2 } = await localNs(w2, evicted ? "e5" : "e6");
+      const e2 = (await metaGet(w2.ws, "sync:epoch")) ?? 0;
+      const hub2 = W.hubOf(w2.ws);
+      const what = `${evicted ? "after eviction" : "fresh hub"}, ${order}`;
+      if (evicted) {
+        hub2.fence(n2, e2, l2.gen, true);
+        for (const lead of ["b", "c", "d"]) hub2.post({ t: "lifecycle", ns: `${lead.repeat(16)}:3:${w2.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
+        check(hub2.seen(n2, e2) === 0 && hub2.fences === W.HUB.namespaces, `review3: ${what}: evicted`);
+      } else check(hub2.fences === 0, `review3: ${what}: a fresh hub`);
+      const msgs = [{ t: "holder", ns: n2, epoch: e2, gen: l2.gen + 5, rev: 0 }, { t: "holder", ns: n2, epoch: e2 + 1, gen: 999, rev: 0 }];
+      for (const m of order === "holder first" ? msgs : msgs.reverse()) hub2.post(m);
+      const c2 = [];
+      await w2.mkdir("/r4", { collect: c2 });
+      const p2 = w2.waitSync(c2, { level: "sent", signal: new AbortController().signal });
+      await sleep(50);
+      hub2.post({ t: "sent", ns: n2, epoch: e2, gen: l2.gen + 4, seqs: c2 });
+      check(!(await settledYet(p2)), `review3: ${what}: holder ${l2.gen + 5} announced, a claim of epoch ${e2 + 1}: a new wait drops generation ${l2.gen + 4}'s sent`);
+      hub2.post({ t: "sent", ns: n2, epoch: e2, gen: l2.gen + 5, seqs: c2 });
+      const r2 = await Promise.race([p2, sleep(3000).then(() => null)]);
+      check(r2?.sync === "sent" && hub2.fences <= W.HUB.namespaces, `review3: ${what}: …and takes generation ${l2.gen + 5}'s: ` + J(r2?.sync ?? null));
+    }
 }
 
 const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3 };
