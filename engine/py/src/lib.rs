@@ -8,11 +8,6 @@ use pyo3::exceptions::{PyKeyboardInterrupt, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-// Every engine heap byte is counted (sagebrush_ledger::live_bytes, no-cliffs
-// C-1): the module's allocator is the system's, counted.
-#[global_allocator]
-static ALLOC: sagebrush_ledger::CountingAlloc<std::alloc::System> = sagebrush_ledger::CountingAlloc::new(std::alloc::System);
-
 /// The thread that imported the module: Python's main thread, the one that
 /// receives Ctrl-C.
 static MAIN: std::sync::OnceLock<std::thread::ThreadId> = std::sync::OnceLock::new();
@@ -489,19 +484,34 @@ fn set_memory_share_source(source: Py<PyAny>) {
     });
 }
 
-/// Register the host's engine memory total (no-cliffs plan C r10 section
-/// 1): `source()` returns lib/_capacity.py engine_total's (bytes, status,
-/// joint), status 0 observed, 1 zero, 2 nominal, or None.  The ledger asks
-/// when its figure is 100 ms old, with the GIL taken for it and its own lock
-/// not held; an exception or a malformed answer is none (the nominal total).
-/// The first registration stands.
+/// Register the host's engine memory total (no-cliffs plan C r13): `source()`
+/// returns (bytes, status, joint, measures) or None, status 0 observed, 1
+/// zero, 2 nominal; measures, the binding rows' usage measures, a list of
+/// (kind, path) with kind "cgroup" (path: its usage file), "address_space",
+/// "data_segment", "physical", "windows_job" or "windows_physical".  The
+/// ledger asks when the total is 100 ms old, with the GIL taken for it and
+/// its own lock not held; an exception or a malformed answer is none (the
+/// nominal total, uncertified).  The first registration stands.
 #[pyfunction]
 fn set_memory_total_source(source: Py<PyAny>) {
     sagebrush_ledger::set_total_host(move || {
         Python::attach(|py| {
             let r = source.call0(py).ok()?;
-            let (bytes, status, joint) = r.extract::<Option<(u64, u32, bool)>>(py).ok().flatten()?;
-            Some(sagebrush_ledger::Total { bytes, status: sagebrush_ledger::TotalStatus::from_code(status)?, joint })
+            let (bytes, status, joint, measures) = r.extract::<Option<(u64, u32, bool, Vec<(String, Option<String>)>)>>(py).ok().flatten()?;
+            let total = sagebrush_ledger::Total { bytes, status: sagebrush_ledger::TotalStatus::from_code(status)?, joint };
+            let kinds = measures
+                .into_iter()
+                .map(|(k, p)| match (k.as_str(), p) {
+                    ("cgroup", Some(p)) => Some(sagebrush_ledger::MeasureKind::Cgroup(p)),
+                    ("address_space", _) => Some(sagebrush_ledger::MeasureKind::AddressSpace),
+                    ("data_segment", _) => Some(sagebrush_ledger::MeasureKind::DataSegment),
+                    ("physical", _) => Some(sagebrush_ledger::MeasureKind::Physical),
+                    ("windows_job", _) => Some(sagebrush_ledger::MeasureKind::WindowsJob),
+                    ("windows_physical", _) => Some(sagebrush_ledger::MeasureKind::WindowsPhysical),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some((total, kinds))
         })
     });
 }
@@ -516,7 +526,9 @@ fn ledger_snapshot(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     d.set_item("status", t.status.name())?;
     d.set_item("joint", t.joint)?;
     d.set_item("allowance", sagebrush_ledger::allowance(t))?;
-    d.set_item("live", sagebrush_ledger::live_bytes())?;
+    d.set_item("live", sagebrush_ledger::live_estimate())?;
+    d.set_item("resident", sagebrush_ledger::resident_bytes())?;
+    d.set_item("certified", sagebrush_ledger::certified())?;
     d.set_item("outstanding", sagebrush_ledger::outstanding_bytes())?;
     Ok(d)
 }

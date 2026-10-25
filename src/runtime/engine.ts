@@ -29,7 +29,7 @@ interface Engine {
   // (optional: engines built before item D0 lack it)
   sb_set_memory_share?(v: number): void;
   sb_set_memory_total?(bytes: number, status: number, joint: number): void;
-  sb_live_bytes?(): number;
+  sb_live_estimate?(): number;
   sb_outstanding_bytes?(): number;
 }
 

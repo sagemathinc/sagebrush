@@ -1,124 +1,53 @@
-//! The Sagebrush engine's memory ledger (no-cliffs plan C r10, C-1).
+//! The Sagebrush engine's memory ledger (no-cliffs plan C r13, C-1).
 //!
-//! - A counting global allocator ([`CountingAlloc`]): every live engine heap
-//!   byte, ledger-backed or not, in one atomic counter ([`live_bytes`]).
-//! - The engine's total, pushed or pulled from the host (lib/_capacity.py
-//!   `engine_total`, D0's consumer contract), and its reviewed share
-//!   E = total / 4 ([`SHARE_DEN`]).
-//! - Reservations: an admission checks, under one lock,
+//! - The engine's total from the host (lib/_capacity.py `engine_total`, D0's
+//!   consumer contract) with the binding rows' usage measures, and its
+//!   reviewed share E = total / 4 ([`SHARE_DEN`]).
+//! - An admission reads the binding rows' usage measure FRESH, holding the
+//!   ledger's lock, and commits in the same critical section (C r13 §1: no
+//!   cached measure), checking
 //!
-//!   phi * (live + O + x) <= E,
+//!   phi * (L + O + x) <= E,
 //!
-//!   where O is the GROSS outstanding reservations (not reduced as they
-//!   materialise: their materialised bytes are counted twice while they
-//!   are outstanding, which is conservative), so a pending reservation and
-//!   unregistered live memory are both counted (plan C r5 section 1).
-//!   phi is the allocator's overhead factor, [`FRAG_NUM`] / [`FRAG_DEN`].
-//! - A reservation is released on drop, or becomes resident
-//!   ([`Reservation::register_resident`]): its bytes stay in `live`, and it
-//!   leaves O.
-//! - Chains: each outer engine entry ([`Operation::enter`]) gets a chain id;
-//!   O is kept per chain, and an outer entry's exit requires its chain's O to
-//!   be zero (plan C r10 section 1): what remains is released first, then
-//!   reported as an internal error, never a memory refusal.
-//! - Typed errors: [`EngineError::Memory`] (a refusal, D1's error on the host)
-//!   and [`EngineError::Internal`] (a guard that found a bug).
+//!   with O the gross outstanding obligations and L the live estimate:
+//!   natively max(U, R_res), U the binding rows' own usage (cgroup
+//!   memory.current, VmSize, VmData; for the physical row the process's
+//!   RssAnon + VmSwap, plus the machine-availability check
+//!   O + x <= MemAvailable - reserve); in WebAssembly
+//!   max(committed pages, B_w + R_res) (C r12 §3).
+//! - The reader does no allocation under the lock: files are opened when the
+//!   total is set (outside the lock) and read with pread into a stack buffer;
+//!   the chains' sums live in a fixed slot table.
+//! - What the ledger promises (C r13 §2): governed admissions never take the
+//!   measured domain beyond E as measured at admission, and every later check
+//!   re-reads; it does NOT prevent ungoverned growth (other code, other
+//!   processes) or OS out-of-memory conditions.
+//! - An unreadable measure (and, for now, macOS and Windows) is fail-closed:
+//!   [`certified`] is false, and no cap may be removed on the ledger's
+//!   strength there.
+//! - Chains, the outer exit's O_chain = 0 rule (released first, then reported
+//!   as an internal error) and typed errors as in C r10.
 //!
 //! No cap is removed by this crate: callers adopt it path by path.
 
-use std::alloc::{GlobalAlloc, Layout};
 use std::cell::Cell;
-use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::Mutex;
 
-// ------------------------------------------------------------------ allocator
+mod measure;
+pub use measure::{Measure, MeasureKind};
 
-static LIVE: AtomicU64 = AtomicU64::new(0);
-#[cfg(feature = "peak-stats")]
-static PEAK: AtomicU64 = AtomicU64::new(0);
-
-#[inline]
-fn added(n: u64) {
-    let _now = LIVE.fetch_add(n, Relaxed) + n;
-    #[cfg(feature = "peak-stats")]
-    PEAK.fetch_max(_now, Relaxed);
-}
-
-/// The peak of live bytes since the last reset (calibration builds only).
-#[cfg(feature = "peak-stats")]
-pub fn peak_bytes_reset() -> u64 {
-    PEAK.swap(LIVE.load(Relaxed), Relaxed)
-}
-
-/// A global allocator that counts the bytes it has live: one relaxed atomic
-/// add or subtract per allocation, free or reallocation.  Installed in the
-/// final artifacts (the engine's wasm cdylib and the CPython module):
-///
-/// ```ignore
-/// #[global_allocator]
-/// static ALLOC: sagebrush_ledger::CountingAlloc<std::alloc::System> =
-///     sagebrush_ledger::CountingAlloc::new(std::alloc::System);
-/// ```
-pub struct CountingAlloc<A>(A);
-
-impl<A> CountingAlloc<A> {
-    pub const fn new(inner: A) -> Self {
-        CountingAlloc(inner)
-    }
-}
-
-unsafe impl<A: GlobalAlloc> GlobalAlloc for CountingAlloc<A> {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let p = self.0.alloc(layout);
-        if !p.is_null() {
-            added(layout.size() as u64);
-        }
-        p
-    }
-
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        let p = self.0.alloc_zeroed(layout);
-        if !p.is_null() {
-            added(layout.size() as u64);
-        }
-        p
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        self.0.dealloc(ptr, layout);
-        LIVE.fetch_sub(layout.size() as u64, Relaxed);
-    }
-
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let q = self.0.realloc(ptr, layout, new_size);
-        if !q.is_null() {
-            let (old, new) = (layout.size() as u64, new_size as u64);
-            if new >= old {
-                added(new - old);
-            } else {
-                LIVE.fetch_sub(old - new, Relaxed);
-            }
-        }
-        q
-    }
-}
-
-/// The engine heap's live bytes, as the counting allocator sees them (0 in
-/// an artifact that did not install it).
-pub fn live_bytes() -> u64 {
-    LIVE.load(Relaxed)
-}
+#[cfg(feature = "ledger-audit")]
+pub mod audit;
 
 // ------------------------------------------------------------------ the total
 
 /// The share of the engine's total the ledger may hold: E = total / 4
 /// (plan C r4 section 1.1, a reviewed constant).
 pub const SHARE_DEN: u64 = 4;
-/// The allocator's overhead/fragmentation factor phi = FRAG_NUM / FRAG_DEN:
-/// a calibrated envelope (plan C r4 section 1.2), committed pages over live
-/// bytes at the calibration workloads' high-water marks, times 1.5.
+/// The allocator-overhead factor phi = FRAG_NUM / FRAG_DEN (calibrated in
+/// C-1's VM slot against committed pages at the workloads' peaks).
 pub const FRAG_NUM: u64 = 5;
 pub const FRAG_DEN: u64 = 4;
 /// The nominal total when the host gives none: D0's fallback (1 GiB).
@@ -127,16 +56,13 @@ pub const NOMINAL_TOTAL: u64 = 1 << 30;
 /// Where the total came from (lib/_capacity.py engine_total's status).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TotalStatus {
-    /// read from a row that constrains the engine's domain
     Observed,
-    /// an observed limit of 0 (kept as 0: every reservation is refused)
     Zero,
-    /// no row: the nominal total, tagged
     Nominal,
 }
 
 impl TotalStatus {
-    /// The status as the hosts push it: 0 observed, 1 zero, 2 nominal.
+    /// As the hosts push it: 0 observed, 1 zero, 2 nominal.
     pub fn from_code(c: u32) -> Option<TotalStatus> {
         match c {
             0 => Some(TotalStatus::Observed),
@@ -155,8 +81,7 @@ impl TotalStatus {
     }
 }
 
-/// The engine's total: bytes, status, and whether it also bounds the host
-/// (a joint row: the host's common-domain check, C-2).
+/// The engine's total: bytes, status, and whether it also bounds the host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Total {
     pub bytes: u64,
@@ -166,22 +91,9 @@ pub struct Total {
 
 const NOMINAL: Total = Total { bytes: NOMINAL_TOTAL, status: TotalStatus::Nominal, joint: false };
 
-#[cfg(not(target_arch = "wasm32"))]
-type TotalHost = Box<dyn Fn() -> Option<Total> + Send + Sync>;
-#[cfg(not(target_arch = "wasm32"))]
-static TOTAL_HOST: std::sync::OnceLock<TotalHost> = std::sync::OnceLock::new();
-/// (the native host's figure is read again when 100 ms old)
-#[cfg(not(target_arch = "wasm32"))]
-const TOTAL_REFRESH: std::time::Duration = std::time::Duration::from_millis(100);
-
-/// Set the total (the WebAssembly host pushes it before a dispatch; tests).
-pub fn set_total(total: Option<Total>) {
-    let mut s = state();
-    s.total = total;
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        s.total_at = total.map(|_| std::time::Instant::now());
-    }
+/// E: the bytes the ledger may hold for this total.
+pub fn allowance(t: Total) -> u64 {
+    t.bytes / SHARE_DEN
 }
 
 /// The total pushed as WebAssembly numbers: bytes an integer from 0 to
@@ -192,36 +104,74 @@ pub fn total_from_wasm(bytes: f64, status: u32, joint: u32) -> Option<Total> {
     (ok && joint <= 1).then_some(Total { bytes: bytes as u64, status, joint: joint == 1 })
 }
 
-/// Register the native host's total (the first registration stands): asked
-/// when the figure held is 100 ms old, outside the ledger's lock.
+/// Set the total (the WebAssembly host pushes it before a dispatch; tests).
+/// The measures stay as they are (WebAssembly measures committed pages).
+pub fn set_total(total: Option<Total>) {
+    let mut s = state();
+    s.total = total;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        s.total_at = total.map(|_| std::time::Instant::now());
+    }
+}
+
+/// Set the total and the binding rows' usage measures (the native host;
+/// tests).  The measures' files are opened here, outside the lock.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn set_total_host(f: impl Fn() -> Option<Total> + Send + Sync + 'static) {
+pub fn set_total_and_measure(total: Option<Total>, kinds: &[MeasureKind]) {
+    let m = Measure::open(kinds);
+    let mut s = state();
+    s.total = total;
+    s.total_at = total.map(|_| std::time::Instant::now());
+    s.measure = m;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type TotalHost = Box<dyn Fn() -> Option<(Total, Vec<MeasureKind>)> + Send + Sync>;
+#[cfg(not(target_arch = "wasm32"))]
+static TOTAL_HOST: std::sync::OnceLock<TotalHost> = std::sync::OnceLock::new();
+/// (the native host's TOTAL, a limit, not a usage, is asked again when 100
+/// ms old; the usage measure itself is never cached: C r13 section 1)
+#[cfg(not(target_arch = "wasm32"))]
+const TOTAL_REFRESH: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Register the native host's total and binding measures (the first
+/// registration stands): asked outside the ledger's lock.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn set_total_host(f: impl Fn() -> Option<(Total, Vec<MeasureKind>)> + Send + Sync + 'static) {
     let _ = TOTAL_HOST.set(Box::new(f));
 }
 
-/// The total in force (refreshed from the native host when stale), or the
-/// nominal one.
+/// The total in force (refreshed from the native host when 100 ms old,
+/// outside the lock), or the nominal one.
 pub fn total() -> Total {
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(host) = TOTAL_HOST.get() {
-        let stale = {
-            let s = state();
-            s.total_at.is_none_or(|t| t.elapsed() >= TOTAL_REFRESH)
-        };
+        let stale = state().total_at.is_none_or(|t| t.elapsed() >= TOTAL_REFRESH);
         if stale {
-            // (the host is asked without the lock: it may take the GIL)
-            let t = host();
-            let mut s = state();
-            s.total = t;
-            s.total_at = Some(std::time::Instant::now());
+            match host() {
+                Some((t, kinds)) => set_total_and_measure(Some(t), &kinds),
+                None => set_total_and_measure(None, &[]),
+            }
         }
     }
     state().total.unwrap_or(NOMINAL)
 }
 
-/// E: the bytes the ledger may hold for this total.
-pub fn allowance(t: Total) -> u64 {
-    t.bytes / SHARE_DEN
+/// Whether the live estimate is measured on this platform with this total
+/// (fail-closed: a cap may be removed on the ledger's strength only where
+/// this is true).
+pub fn certified() -> bool {
+    let _ = total();
+    #[cfg(target_arch = "wasm32")]
+    {
+        true
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let s = state();
+        s.total.is_some() && s.measure.available()
+    }
 }
 
 // ------------------------------------------------------------------ errors
@@ -230,17 +180,20 @@ pub fn allowance(t: Total) -> u64 {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refusal {
     pub what: String,
-    /// the bytes asked for
     pub need: u64,
     /// E, the ledger's allowance
     pub allowance: u64,
-    /// the live bytes and gross outstanding reservations at the check
+    /// the live estimate L and gross outstanding obligations O at the check
     pub live: u64,
     pub outstanding: u64,
-    /// the total E is the share of, and where it came from
     pub total: u64,
     pub status: TotalStatus,
     pub joint: bool,
+    /// Some(available minus reserve) when the machine-availability check
+    /// refused
+    pub available: Option<u64>,
+    /// whether L was measured (false: fail-closed platform or unreadable)
+    pub measured: bool,
 }
 
 /// The engine's typed errors: a memory refusal (D1's error on the host), or
@@ -254,11 +207,14 @@ pub enum EngineError {
 impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            EngineError::Memory(r) => write!(
-                f,
-                "{}: {} more bytes do not fit: {} live and {} reserved, against {} (a quarter of the engine's {} total of {} bytes)",
-                r.what, r.need, r.live, r.outstanding, r.allowance, r.status.name(), r.total
-            ),
+            EngineError::Memory(r) => match r.available {
+                Some(a) => write!(f, "{}: {} more bytes do not fit in the {} bytes this machine has available (beyond its reserve)", r.what, r.need, a),
+                None => write!(
+                    f,
+                    "{}: {} more bytes do not fit: {} in use and {} reserved, against {} (a quarter of the engine's {} total of {} bytes)",
+                    r.what, r.need, r.live, r.outstanding, r.allowance, r.status.name(), r.total
+                ),
+            },
             EngineError::Internal(m) => write!(f, "internal error in the engine's memory ledger: {}", m),
         }
     }
@@ -268,36 +224,139 @@ impl std::error::Error for EngineError {}
 
 // ------------------------------------------------------------------ the state
 
+/// The chains' outstanding sums: a fixed slot table (no allocation under the
+/// lock).  More concurrent chains than slots is an internal error.
+const CHAIN_SLOTS: usize = 256;
+
 struct State {
     total: Option<Total>,
     #[cfg(not(target_arch = "wasm32"))]
     total_at: Option<std::time::Instant>,
+    #[cfg(not(target_arch = "wasm32"))]
+    measure: Measure,
+    /// WebAssembly: the committed bytes at the first check (B_w)
+    #[cfg(target_arch = "wasm32")]
+    baseline: Option<u64>,
     outstanding: u64,
-    by_chain: BTreeMap<u64, u64>,
+    resident: u64,
+    /// bytes ever converted to residents (C r12 section 2's C)
+    converted: u64,
+    chains: [(u64, u64); CHAIN_SLOTS],
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
     total: None,
     #[cfg(not(target_arch = "wasm32"))]
     total_at: None,
+    #[cfg(not(target_arch = "wasm32"))]
+    measure: Measure::NONE,
+    #[cfg(target_arch = "wasm32")]
+    baseline: None,
     outstanding: 0,
-    by_chain: BTreeMap::new(),
+    resident: 0,
+    converted: 0,
+    chains: [(0, 0); CHAIN_SLOTS],
 });
 
+/// Mirrors of O and R_res for the test-only audit allocator, which must not
+/// take the lock.
+pub(crate) static O_MIRROR: AtomicU64 = AtomicU64::new(0);
+pub(crate) static RES_MIRROR: AtomicU64 = AtomicU64::new(0);
+
 fn state() -> std::sync::MutexGuard<'static, State> {
-    // (every update is a few integer operations that cannot panic halfway,
-    // so a lock poisoned by a panic elsewhere is taken over)
+    // (every update is a few integer operations that cannot panic halfway)
     STATE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The gross outstanding reservations, all chains.
+impl State {
+    /// Err(()) when every slot is taken (the caller reports it after the
+    /// lock is released: no allocation under the lock).
+    fn chain_add(&mut self, chain: u64, x: u64) -> Result<(), ()> {
+        if let Some(slot) = self.chains.iter_mut().find(|s| s.0 == chain && s.1 > 0) {
+            slot.1 += x;
+            return Ok(());
+        }
+        match self.chains.iter_mut().find(|s| s.1 == 0) {
+            Some(slot) => {
+                *slot = (chain, x);
+                Ok(())
+            }
+            None => Err(()),
+        }
+    }
+
+    fn chain_take(&mut self, chain: u64, x: u64) -> u64 {
+        match self.chains.iter_mut().find(|s| s.0 == chain && s.1 > 0) {
+            Some(slot) => {
+                let t = x.min(slot.1);
+                slot.1 -= t;
+                t
+            }
+            None => 0,
+        }
+    }
+
+    fn chain_sum(&self, chain: u64) -> u64 {
+        self.chains.iter().filter(|s| s.0 == chain).map(|s| s.1).sum()
+    }
+
+    fn set_outstanding(&mut self, v: u64) {
+        self.outstanding = v;
+        O_MIRROR.store(v, Relaxed);
+    }
+
+    fn set_resident(&mut self, v: u64) {
+        self.resident = v;
+        RES_MIRROR.store(v, Relaxed);
+    }
+}
+
+/// The gross outstanding obligations, all chains.
 pub fn outstanding_bytes() -> u64 {
     state().outstanding
 }
 
-/// The gross outstanding reservations of one chain.
+/// The registered residents.
+pub fn resident_bytes() -> u64 {
+    state().resident
+}
+
+/// The gross outstanding obligations of one chain.
 pub fn chain_outstanding(chain: u64) -> u64 {
-    state().by_chain.get(&chain).copied().unwrap_or(0)
+    state().chain_sum(chain)
+}
+
+/// The live estimate L now (a fresh read; diagnostics and the host's joint
+/// check).
+pub fn live_estimate() -> u64 {
+    #[cfg(not(target_arch = "wasm32"))]
+    measure::prepare();
+    let mut s = state();
+    let (l, _, _) = live_locked(&mut s);
+    l
+}
+
+/// L (and the availability bound, natively) under the lock, from a fresh
+/// read; the third value is whether it was measured.
+fn live_locked(s: &mut State) -> (u64, Option<u64>, bool) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let committed = (core::arch::wasm32::memory_size::<0>() as u64) << 16;
+        let b = *s.baseline.get_or_insert(committed);
+        (committed.max(b + s.resident), None, true)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        match s.measure.read() {
+            Some(r) => (r.usage.max(s.resident), r.available, true),
+            None => (s.resident, None, false),
+        }
+    }
+}
+
+/// D0's reserve for an availability figure: 256 MiB + ceil(a / 10).
+pub fn reserve_for(available: u64) -> u64 {
+    (256 << 20) + available.div_ceil(10)
 }
 
 // ------------------------------------------------------------------ chains
@@ -327,9 +386,9 @@ pub fn with_chain<T>(chain: u64, f: impl FnOnce() -> T) -> T {
 
 /// An engine entry: the outer one on a thread starts a chain, nested ones
 /// join it.  The outer entry's exit requires the chain's outstanding
-/// reservations to be zero: [`Operation::finish`] releases what remained,
-/// then reports it as an internal error; a drop (an unwind) only releases
-/// it, as the reservations' own guards normally have already.
+/// obligations to be zero: [`Operation::finish`] releases what remained
+/// (cleanup first, under the lock), then reports it as an internal error; a
+/// drop (an unwind) only releases it.
 pub struct Operation {
     chain: u64,
     outer: bool,
@@ -351,8 +410,6 @@ impl Operation {
         self.chain
     }
 
-    /// Close the entry: for the outer one, release whatever the chain still
-    /// has outstanding (cleanup first), then report it if there was any.
     pub fn finish(mut self) -> Result<(), EngineError> {
         self.done = true;
         let left = self.close();
@@ -369,8 +426,9 @@ impl Operation {
         }
         CHAIN.with(|c| c.set(0));
         let mut s = state();
-        let left = s.by_chain.remove(&self.chain).unwrap_or(0);
-        s.outstanding -= left;
+        let left = s.chain_take(self.chain, !0u64);
+        let o = s.outstanding - left;
+        s.set_outstanding(o);
         left
     }
 }
@@ -392,6 +450,27 @@ pub struct Reservation {
     chain: u64,
 }
 
+/// Registered resident bytes (a cache entry, a result), released when the
+/// owner drops this.
+#[must_use = "a resident is unregistered as soon as it is dropped"]
+pub struct Resident {
+    amount: u64,
+}
+
+impl Resident {
+    pub fn amount(&self) -> u64 {
+        self.amount
+    }
+}
+
+impl Drop for Resident {
+    fn drop(&mut self) {
+        let mut s = state();
+        let r = s.resident - self.amount.min(s.resident);
+        s.set_resident(r);
+    }
+}
+
 impl Reservation {
     pub fn amount(&self) -> u64 {
         self.amount
@@ -406,55 +485,78 @@ impl Reservation {
     }
 
     /// The reserved bytes now live in an object that outlives the
-    /// reservation (a cache entry, a result): they leave the outstanding
-    /// sum and stay counted as live bytes.
-    pub fn register_resident(mut self) {
-        release(self.chain, self.amount);
-        self.amount = 0;
+    /// reservation: they leave O and become a registered resident, in one
+    /// critical section (C r10 section 1).
+    pub fn register_resident(mut self) -> Resident {
+        let amount = std::mem::take(&mut self.amount);
+        let mut s = state();
+        let t = s.chain_take(self.chain, amount);
+        let o = s.outstanding - t;
+        s.set_outstanding(o);
+        let r = s.resident + amount;
+        s.set_resident(r);
+        s.converted += amount;
+        Resident { amount }
+    }
+
+    /// The allocations made while the returned guard lives are this
+    /// reservation's (the test-only audit attributes them; a no-op
+    /// otherwise).
+    pub fn scope(&self) -> Scope {
+        Scope::enter()
     }
 }
 
 impl Drop for Reservation {
     fn drop(&mut self) {
         if self.amount > 0 {
-            release(self.chain, self.amount);
+            let mut s = state();
+            let t = s.chain_take(self.chain, self.amount);
+            let o = s.outstanding - t;
+            s.set_outstanding(o);
         }
     }
 }
 
-fn release(chain: u64, amount: u64) {
-    let mut s = state();
-    // (a chain closed at its outer exit already took its sum away)
-    if let Some(v) = s.by_chain.get_mut(&chain) {
-        let take = amount.min(*v);
-        *v -= take;
-        if *v == 0 {
-            s.by_chain.remove(&chain);
-        }
-        s.outstanding -= take;
+thread_local! {
+    pub(crate) static COVER: Cell<u32> = const { Cell::new(0) };
+}
+
+/// A coverage scope: allocations made on this thread while it lives belong
+/// to a governing reservation, span, fence or resident under construction
+/// (C r12 section 4).  Only the test-only audit reads it.
+pub struct Scope(());
+
+impl Scope {
+    pub fn enter() -> Scope {
+        COVER.with(|c| c.set(c.get() + 1));
+        Scope(())
+    }
+}
+
+impl Drop for Scope {
+    fn drop(&mut self) {
+        COVER.with(|c| c.set(c.get() - 1));
     }
 }
 
 #[cfg(any(test, feature = "test-hooks"))]
 pub mod hooks {
-    //! Tests only: live bytes that no allocation made (a non-ledger
-    //! allocation, without allocating), and a pause inside an admission
-    //! after it reads the live count.
+    //! Tests only: a fake usage source (the measure as read under the lock)
+    //! and a pause between the read and the commit.
     use super::*;
 
-    pub fn add_live(n: u64) {
-        LIVE.fetch_add(n, Relaxed);
-    }
-
-    pub fn sub_live(n: u64) {
-        LIVE.fetch_sub(n, Relaxed);
-    }
-
+    pub(crate) static FAKE: Mutex<Option<(u64, Option<u64>)>> = Mutex::new(None);
     pub(crate) static PAUSE: Mutex<Option<std::sync::Arc<std::sync::Barrier>>> = Mutex::new(None);
 
-    /// The next admission waits on `b` twice, after reading the live count
-    /// and before deciding, with the ledger's lock released in between, so a
-    /// test can act there.
+    /// The usage (and availability) every check reads until cleared.
+    pub fn set_fake_usage(usage: Option<(u64, Option<u64>)>) {
+        *FAKE.lock().unwrap() = usage;
+    }
+
+    /// The next admission waits on `b` twice between its read and its
+    /// commit, still holding the ledger's lock (a concurrent ledger
+    /// transition must wait).
     pub fn pause_next_admission(b: std::sync::Arc<std::sync::Barrier>) {
         *PAUSE.lock().unwrap() = Some(b);
     }
@@ -463,38 +565,62 @@ pub mod hooks {
 fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     let t = total();
     let e = allowance(t);
+    #[cfg(not(target_arch = "wasm32"))]
+    measure::prepare();
     let mut s = state();
     #[allow(unused_mut)]
-    let mut live = LIVE.load(Relaxed);
+    let (mut live, mut avail, mut measured) = live_locked(&mut s);
     #[cfg(any(test, feature = "test-hooks"))]
     {
+        if let Some((u, a)) = *hooks::FAKE.lock().unwrap() {
+            live = u.max(s.resident);
+            avail = a;
+            measured = true;
+        }
         let b = hooks::PAUSE.lock().unwrap().take();
         if let Some(b) = b {
-            drop(s);
             b.wait();
             b.wait();
-            s = state();
-            // (the test's point: the live count read before the pause is
-            // the one decided on, as a race would have it)
         }
     }
-    // phi (live + O + x) <= E, in u128: no overflow for any u64 inputs
-    let lhs = FRAG_NUM as u128 * (live as u128 + s.outstanding as u128 + x as u128);
+    // phi (L + O + x) <= E, in u128: no overflow for any u64 inputs; the
+    // decision is made under the lock, the error (which allocates) built
+    // after it is released
+    let outstanding = s.outstanding;
+    let lhs = FRAG_NUM as u128 * (live as u128 + outstanding as u128 + x as u128);
+    let mut refused: Option<Option<u64>> = None;
     if lhs > FRAG_DEN as u128 * e as u128 {
-        return Err(EngineError::Memory(Refusal {
-            what: what.to_string(),
-            need: x,
-            allowance: e,
-            live,
-            outstanding: s.outstanding,
-            total: t.bytes,
-            status: t.status,
-            joint: t.joint,
-        }));
+        refused = Some(None);
+    } else if let Some(a) = avail {
+        // the machine-availability check, where the physical row binds (C r13
+        // section 3)
+        let room = a.saturating_sub(reserve_for(a));
+        if outstanding as u128 + x as u128 > room as u128 {
+            refused = Some(Some(room));
+        }
     }
-    s.outstanding += x;
-    *s.by_chain.entry(chain).or_insert(0) += x;
-    Ok(())
+    let slots_full = refused.is_none() && s.chain_add(chain, x).is_err();
+    if refused.is_none() && !slots_full {
+        let o = outstanding + x;
+        s.set_outstanding(o);
+        return Ok(());
+    }
+    drop(s);
+    if slots_full {
+        return Err(EngineError::Internal(format!("more than {} chains hold reservations at once", CHAIN_SLOTS)));
+    }
+    Err(EngineError::Memory(Refusal {
+        what: what.to_string(),
+        need: x,
+        allowance: e,
+        live,
+        outstanding,
+        total: t.bytes,
+        status: t.status,
+        joint: t.joint,
+        available: refused.flatten(),
+        measured,
+    }))
 }
 
 /// Reserve `x` bytes for `what` on the current chain, before allocating
