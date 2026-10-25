@@ -1,6 +1,8 @@
 // ShellHost's cases (plan-bash-shell r3 §9 step 2, addendum D8 r3's step-2 tests), run in the page by
 // test-shell-host.mjs: the real shell module in its worker, a real Workspace, and ShellHost between them.
-import { startShell, ShellHost, MAX_PENDING, STOP_GRACE_MS, boundedJson, TooLarge, W } from "/host-bundle.js";
+import { startShell, ShellHost, MAX_PENDING, STOP_GRACE_MS as HOST_GRACE, boundedJson, TooLarge, W } from "/host-bundle.js";
+// (r3 §4.3's grace, as the plan says it: the host's constant is checked against it, never taken as the truth)
+const STOP_GRACE_MS = 2000;
 
 const enc = (s) => new TextEncoder().encode(s);
 const dec = (b) => new TextDecoder().decode(b);
@@ -448,6 +450,7 @@ function counted(delay) {
   return c;
 }
 async function startup(check) {
+  check(HOST_GRACE === STOP_GRACE_MS, `the host's Stop grace is r3 §4.3's 2 s (${HOST_GRACE} ms)`);
   const stopAt = (ms) => { const ac = new AbortController(); setTimeout(() => ac.abort(), ms); return ac.signal; };
   // a start that never answers: settled at the grace, nothing dispatched
   {
@@ -506,6 +509,11 @@ async function fence(check) {
   run = host.run(PERSON);
   let r = await run.invoke("true > a; true > b");
   check(r.kind === "interrupted" && (await ws.stat("/a")) && !(await ws.stat("/b")) && same(r.ops.map((x) => x.path), ["/a"]), `Stop in the first pending commit: /a (admitted) committed, /b not, typed (${JSON.stringify(r)})`);
+  // Stop during the last pending commit: it finishes, and the outcome is still typed, never ordinary
+  hooks.create = (p, o) => { if (p === "/c") { delete hooks.create; afterAdmit(o, () => run.stop()); } };
+  run = host.run(PERSON);
+  r = await run.invoke("true > c");
+  check(r.kind === "interrupted" && (await ws.stat("/c")), `Stop during the last pending commit: committed, and typed (${JSON.stringify(r)})`);
   // cp -r stopped in its mkdir: the mkdir finishes, no duplicate follows
   await ws.mkdir("/src");
   await ws.create("/src/x", { content: enc("x") });
@@ -594,6 +602,13 @@ async function liveness(check) {
   live = "revoked";
   let r = await host.exec(g, "test -d / && echo y");
   check(r.kind === "unavailable" && r.row === 3, `stat of the top with a revoked grant: row 3 (${JSON.stringify(r)})`);
+  // (one request at a time, through the stand-in: stat of the top, and exists of the top)
+  for (const op of ["stat", "exists"]) {
+    const { host: hs } = await fresh("liveness-" + op, { start: () => startShell(D.STAND, "/").then((x) => x.shell) });
+    const gr = { kind: "grant", actor: "agent:test", folders: new Set([A.fid]), write: true, live: () => "revoked" };
+    const q = await hs.run(gr).invoke(JSON.stringify({ steps: [{ op, args: ["/"] }], report: "exit" }));
+    check(q.kind === "unavailable" && q.row === 3, `${op} of the top alone, with a revoked grant: row 3 (${JSON.stringify(q)})`);
+  }
   // a pending path's fast path: revoked after the open, the next probe of it is row 3
   live = "ok";
   hooks.stat = (p, o) => { if (p === "/A/p") { delete hooks.stat; afterAdmit(o, () => (live = "revoked")); } };
