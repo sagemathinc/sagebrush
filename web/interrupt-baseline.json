@@ -9,8 +9,8 @@
   { "case": "E6a", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" },
   { "case": "S1", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "no KeyboardInterrupt|did not take the next input" },
   { "case": "S3", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "no escalation" },
-  { "case": "S4", "host": "cli", "finding": "slot 5: a pending Ctrl-C is never raised after a non-polling call when no loop follows (pyjs polls only at back-edges; same root as E13g)", "owner": "python", "fix": "a poll at host-call returns or statement boundaries", "signature": "returned without a KeyboardInterrupt" },
-  { "case": "E2", "host": "browser", "finding": "slot 5: the notebook page answers nothing for over 200 s after switching to Sage mode", "owner": "the notebook page (routed by @sagebrush)", "fix": "Sage-mode loading off the main thread, or unblocked", "signature": "the page did not answer after the switch" }
+  { "case": "S4", "host": "cli", "finding": "slot 5: a pending Ctrl-C is never raised after a non-polling call when no loop follows (pyjs polls only at back-edges; same root as E13g)", "owner": "python", "fix": "a poll at host-call returns or statement boundaries", "signature": "returned without a KeyboardInterrupt", "routed": "python, with magma's S plan (@sagebrush, Oct 25)" },
+  { "case": "E2", "host": "browser", "finding": "slot 5: the notebook page answers nothing for over 200 s after switching to Sage mode", "owner": "sage (routed by @sagebrush, Oct 25)", "fix": "Sage-mode loading off the main thread, or unblocked", "signature": "the page did not answer after the switch" }
  ],
  "pending": [
   { "trial": "S1-S4 trace assertions", "waits_for": "E1 (SAGEBRUSH_SIGNAL_TRACE emitter)", "owner": "python" },
