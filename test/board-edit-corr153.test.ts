@@ -51,7 +51,7 @@ const altsOf = (hub: EditHub) => hub.events.flatMap((e) => e.alternatives);
 
 test("CORR-153-1: a directory fsync that fails at W7 isn't a save; the sync retried completes it", async () => {
   let failing = true;
-  const fsx: W.WriteFs = { ...W.realFs, fsyncDir: (d) => { if (failing) throw EIO(); W.realFs.fsyncDir(d); } };
+  const fsx: W.WriteFs = { ...W.realFs, fsyncDir: (d) => { if (failing) throw EIO(); return W.realFs.fsyncDir(d); } };
   const t = await setup(B([{ id: "n", x: 0 }]), {}, fsx);
   try {
     t.hub.connect(TAB);
@@ -170,7 +170,7 @@ test("CORR-153-3: FILE adopted as the head advances persistedGen, kept across a 
   } finally { t.cleanup(); }
   // (FILE's fsync failing when it is adopted: nothing advanced, the sync retried as a save)
   let failing = true;
-  const u = await setup(B([{ id: "n", x: 0 }]), {}, { ...W.realFs, fsyncDir: (d) => { if (failing) throw EIO(); W.realFs.fsyncDir(d); } });
+  const u = await setup(B([{ id: "n", x: 0 }]), {}, { ...W.realFs, fsyncDir: (d) => { if (failing) throw EIO(); return W.realFs.fsyncDir(d); } });
   try {
     u.hub.connect(TAB);
     submit(u.hub, TAB, 1, B([{ id: "n", x: 1 }]));
@@ -469,7 +469,7 @@ test("CORR-153-7: a snapshot nested too deeply is refused, nothing changed; the 
     assert.ok("refused" in r, JSON.stringify(r));
     assert.equal(t.hub.H, H);
     assert.equal(t.hub.ledger.used, used);
-    assert.deepEqual(t.hub.tabView(TAB), { includes: 0, persistedGen: 0 });
+    assert.deepEqual(t.hub.tabView(TAB), { includes: 0, persistedGen: 0, writtenGen: 0 });
     assert.ok("accepted" in submit(t.hub, TAB, 1, B([{ id: "n", x: 1 }])));
     // (the same at FILE: held as invalid, never an exception out of the watcher)
     const deep = text(B([{ id: "n", x: 0 }])).replace('"x": 0', '"x": 0, "deep": ' + "[".repeat(20000) + "0" + "]".repeat(20000));

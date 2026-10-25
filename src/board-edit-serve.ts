@@ -3,10 +3,13 @@
 // checked the host, the key and the origin.  Loaded only with --edit.
 //
 //   GET  /events?key&tab=T        the tab registers (MAX_CLIENTS); its events:
-//                                 `board` {seq, persistedSeq, includes, persistedGen, state, changes, more},
+//                                 `board` {seq, persistedSeq, writtenSeq, includes, persistedGen, writtenGen,
+//                                 state, changes, more}: persisted is Saved; written, at FILE but its directory
+//                                 not confirmed durable (Windows), a state of its own, never Saved;
 //                                 changes: the heads' reports and alternatives since the last event, each
 //                                 batch bound to its head's seq (the first event: those the hub keeps);
-//                                 more: some weren't sent inline (too large), GET /changes for them;
+//                                 more: some weren't sent inline (too large), or (a tab's first event)
+//                                 some were dropped before it connected: GET /changes for them;
 //                                 `stale` (compaction released its base: resync)
 //   GET  /changes?key&tab=T&after=S   the kept batches after head S, and whether none since was dropped
 //   GET  /board?key&tab=T[&at=S]  head S (default: the latest), its seq in X-Sagebrush-Seq;
@@ -84,8 +87,11 @@ export class EditServer {
       // (registered before anything is sent: a stream dropped by its first event is released by the one path)
       req.on("close", () => this.drop(p.tab, res));
       res.writeHead(200, { ...this.api, "Content-Type": "text/event-stream" });
-      // (the first event: the reports and alternatives the hub keeps, CORR-153-4)
-      this.send(p.tab, `retry: 2000\n\n` + this.boardEvent(p.tab, this.hub.changesAfter(0).changes));
+      // (the first event: the reports and alternatives the hub keeps, CORR-153-4; and, if any batch was dropped
+      // before this tab connected, `more`, so that it fetches /changes and is told it is incomplete, daybreak2's
+      // CORR-153-R2-2)
+      const kept = this.hub.changesAfter(0);
+      this.send(p.tab, `retry: 2000\n\n` + this.boardEvent(p.tab, kept.changes, kept.complete));
       return true;
     }
     if (url.pathname === "/changes" && url.searchParams.has("tab")) {
@@ -189,19 +195,20 @@ export class EditServer {
   }
 
   /** A tab's board event: the head, what of its own it includes, and its persistedGen (§6.3, §6.5); the reports
-   * and alternatives of `changes`, inline if they fit in a quarter of PENDING_MAX, else `more` (GET /changes). */
-  private boardEvent(tab: string, changes: HeadEvent[] = []): string {
+   * and alternatives of `changes`, inline if they fit in a quarter of PENDING_MAX, else `more` (GET /changes);
+   * `more` too when `complete` is false (batches before these were dropped: /changes says so). */
+  private boardEvent(tab: string, changes: HeadEvent[] = [], complete = true): string {
     const v = this.hub.tabView(tab), s = this.hub.state;
-    const head = { seq: this.hub.H.seq, persistedSeq: this.hub.persistedSeq, includes: v.includes, persistedGen: v.persistedGen, state: s };
+    const head = { seq: this.hub.H.seq, persistedSeq: this.hub.persistedSeq, writtenSeq: this.hub.writtenSeq, includes: v.includes, persistedGen: v.persistedGen, writtenGen: v.writtenGen, state: s };
     const sent = changes.filter((c) => c.reports.length || c.alternatives.length || c.omitted);
     if (sent.length) {
       try {
-        const text = `event: board\ndata: ${JSON.stringify({ ...head, changes: sent, more: false })}\n\n`;
+        const text = `event: board\ndata: ${JSON.stringify({ ...head, changes: sent, more: !complete })}\n\n`;
         if (Buffer.byteLength(text) <= this.limits.PENDING_MAX / 4) return text;
       } catch {}
       return `event: board\ndata: ${JSON.stringify({ ...head, changes: [], more: true })}\n\n`;
     }
-    return `event: board\ndata: ${JSON.stringify({ ...head, changes: [], more: false })}\n\n`;
+    return `event: board\ndata: ${JSON.stringify({ ...head, changes: [], more: !complete })}\n\n`;
   }
 
   /**

@@ -24,7 +24,9 @@ export interface WriteFs {
   readFile(p: string): Buffer;
   writeFile(p: string, data: Buffer, mode: number): void;
   fsync(p: string): void;
-  fsyncDir(dir: string): void;
+  /** The directory fsynced: true; false where this platform can't (Windows: a directory can't be fsynced), so the
+   * directory entries written aren't confirmed durable; an error, which is the caller's (not saved), thrown. */
+  fsyncDir(dir: string): boolean;
   link(from: string, to: string): void;
   rename(from: string, to: string): void;
   unlink(p: string): void;
@@ -42,13 +44,21 @@ export function makeRealFs(n: typeof fs = fs, platform: string = process.platfor
       n.chmodSync(p, mode & 0o7777); // (as FILE's, whatever the umask)
     },
     fsync: (p) => { const fd = n.openSync(p, "r"); try { n.fsyncSync(fd); } finally { n.closeSync(fd); } },
-    // (every error is the caller's: a directory that wasn't fsynced isn't saved, CORR-153-1.  Windows has no
-    // directory fsync (a directory can't be opened as a file): there a save is durable as far as the file's own
-    // fsync, W1's, and NTFS's journal of the link make it, an explicit platform case for the docs' page step to state)
+    // (every error is the caller's: a directory that wasn't fsynced isn't saved, CORR-153-1.  On Windows a
+    // directory can't be flushed from Node (FlushFileBuffers needs a handle with write access, which opening a
+    // directory doesn't give): tried, and where it can't be done, false: the save is written but not confirmed
+    // durable, and is never shown as Saved, astra's CORR-153-1 on r2)
     fsyncDir: (dir) => {
-      if (platform === "win32") return;
+      if (platform === "win32") {
+        try {
+          const fd = n.openSync(dir, "r");
+          try { n.fsyncSync(fd); } finally { n.closeSync(fd); }
+          return true;
+        } catch { return false; }
+      }
       const fd = n.openSync(dir, "r");
       try { n.fsyncSync(fd); } finally { n.closeSync(fd); }
+      return true;
     },
     link: (a, b) => n.linkSync(a, b),
     rename: (a, b) => n.renameSync(a, b),
@@ -85,8 +95,9 @@ export const isSidecar = (file: string, name: string) => {
 /** What one save came to (§5.2's table).  `stray`: sidecars whose names couldn't be unlinked, each still holding
  * its slot (§5.7), for the caller to unlink later. */
 export type WriteOutcome = (
-  /** W7: saved; `prev` (P's old bytes) is retained, holding a slot */
-  | { saved: true; prev: string }
+  /** W7: saved; `prev` (P's old bytes) is retained, holding a slot.  durable false: written, its directory entry
+   * not confirmed durable (a platform with no directory sync): never Saved */
+  | { saved: true; prev: string; durable?: false }
   /** W2: FILE isn't O any more: its bytes, to ingest; nothing written */
   | { saved: false; why: "changed"; bytes: Buffer }
   /** W2/W3/W5: FILE is gone: hold as deleted (after W4, `prev`, the inode classified, is retained) */
@@ -192,11 +203,11 @@ export function writeOnce(file: string, bytes: Buffer, observed: string, slots: 
   }
   // W7: the directory fsynced, or this isn't a save (CORR-153-1): FILE holds the bytes, not durably
   step("W7");
-  let synced: unknown = null;
-  try { f.fsyncDir(dirname(file)); } catch (e) { synced = e; }
+  let synced: unknown = null, durable = true;
+  try { durable = f.fsyncDir(dirname(file)); } catch (e) { synced = e; }
   drop(tmp); // (tmp's; prev's slot held until it is unlinked, §5.3)
   if (synced !== null) return out({ saved: false, why: "unsynced", prev, message: msg(synced) });
-  return out({ saved: true, prev });
+  return out(durable ? { saved: true, prev } : { saved: true, prev, durable: false });
 }
 
 /** At start: the sidecars an interrupted save left beside FILE, counted against BACKUPS_MAX before anything

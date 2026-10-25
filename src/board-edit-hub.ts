@@ -36,9 +36,9 @@ export type HubReport =
   | { kind: "outside"; key: string; field?: string; was: unknown; now: unknown }
   | { kind: "prev-kept"; path: string; why: string };
 /** A head's reports and their one-click alternatives, bound to its seq; `omitted`: how many past CONFLICTS_MAX weren't kept */
-export interface HeadEvent { seq: number; persistedSeq: number; reports: HubReport[]; alternatives: MergeAlternative[]; source: "outside" | "tab" | "save"; omitted?: number }
+export interface HeadEvent { seq: number; persistedSeq: number; writtenSeq?: number; reports: HubReport[]; alternatives: MergeAlternative[]; source: "outside" | "tab" | "save"; omitted?: number }
 /** A save's outcome: one write's (§5.2), or only the directory fsync a failed one left, retried and done. */
-export type SaveOutcome = WriteOutcome | { saved: true; resynced: true; prev?: undefined };
+export type SaveOutcome = WriteOutcome | { saved: true; resynced: true; prev?: undefined; durable?: false };
 export type SubmitAnswer =
   | { op: string; accepted: true; seq: number }
   | { op: string; included: number; seq: number }
@@ -74,6 +74,9 @@ export class EditHub {
   H!: Version;
   O = "";
   persistedSeq = 0;
+  /** the latest seq whose bytes are at FILE through a completed write, durable or not: persistedSeq where every
+   * write is confirmed durable; ahead of it where the directory can't be synced (Windows) */
+  writtenSeq = 0;
   private seq = 0;
   private saves: Version[] = [];
   private heads = new Map<number, Version>();
@@ -82,6 +85,8 @@ export class EditHub {
   private includedGens = new Map<string, number>(); // (per tab, the highest gen whose op is in H)
   /** per tab, the highest gen of its ops in a completed (durable) save: kept across a tombstone, as includedGens is */
   private persistedGens = new Map<string, number>();
+  /** per tab, the highest gen of its ops in a completed write, durable or not (persistedGens' counterpart) */
+  private writtenGens = new Map<string, number>();
   readonly slots: Slots;
   state: HubState = { state: "ok" };
   /** whether the hold in `state` is FILE's own (invalid, deleted, unmergeable): cleared once FILE is P again */
@@ -126,7 +131,7 @@ export class EditHub {
     if ("why" in v) return { ok: false, why: v.why };
     this.P = this.H = v.version;
     this.O = hashOf(bytes);
-    this.persistedSeq = v.version.seq;
+    this.persistedSeq = this.writtenSeq = v.version.seq;
     this.remember(v.version);
     this.retainSave(v.version); // (P₀ among the retained saves while it lasts, §4.1)
     // (page ids given: written with the first save)
@@ -352,32 +357,40 @@ export class EditHub {
   private adopt(at: string) {
     const T = this.H, included = new Map(this.includedGens);
     const m = this.sync(at);
-    if (m !== null) { this.unsynced = { T, included, at }; this.dirty(); this.failing(m); return; }
-    this.completed(T, included);
+    if (typeof m === "string") { this.unsynced = { T, included, at }; this.dirty(); this.failing(m); return; }
+    this.completed(T, included, m.durable);
   }
 
-  /** FILE (still the bytes `at`) and its directory fsynced: null, or why not. */
-  private sync(at: string): string | null {
+  /** FILE (still the bytes `at`) and its directory fsynced: {durable} (false: the directory couldn't be on this
+   * platform), or why not. */
+  private sync(at: string): { durable: boolean } | string {
     const f = this.deps.fs ?? realFs;
     try {
       if (hashOf(f.readFile(this.file)) !== at) return "FILE changed";
       f.fsync(this.file);
-      f.fsyncDir(dirname(this.file));
-      return null;
+      return { durable: f.fsyncDir(dirname(this.file)) };
     } catch (e: any) { return String(e?.code ?? e?.message ?? e); }
   }
 
-  /** A tuple durable at FILE: P, persistedSeq and each tab's persistedGen advanced from it (§5.1). */
-  private completed(T: Version, included: Map<string, number>) {
+  /**
+   * A tuple at FILE: P and writtenSeq and each tab's writtenGen advanced from it; and, if durable (its directory
+   * fsynced), persistedSeq and each tab's persistedGen too, what Saved means (§5.1, §6.5).  Not durable: written,
+   * on a platform that can't sync a directory, and never shown as Saved; not retried (it can't be done there).
+   */
+  private completed(T: Version, included: Map<string, number>, durable = true) {
     this.failingSince = null;
     this.unsynced = null;
     this.P = T;
-    this.persistedSeq = T.seq;
+    this.writtenSeq = T.seq;
+    for (const [tab, gen] of included) this.writtenGens.set(tab, Math.max(this.writtenGens.get(tab) ?? 0, gen));
+    if (durable) {
+      this.persistedSeq = T.seq;
+      for (const [tab, gen] of included) this.persistedGens.set(tab, Math.max(this.persistedGens.get(tab) ?? 0, gen));
+    }
     this.retainSave(T);
-    for (const [tab, gen] of included) this.persistedGens.set(tab, Math.max(this.persistedGens.get(tab) ?? 0, gen));
     if (this.H.seq === T.seq) this.dirtySince = null;
     this.ok();
-    this.events.push({ seq: this.H.seq, persistedSeq: this.persistedSeq, reports: [], alternatives: [], source: "save" });
+    this.events.push({ seq: this.H.seq, persistedSeq: this.persistedSeq, writtenSeq: this.writtenSeq, reports: [], alternatives: [], source: "save" });
   }
 
   /** A save that didn't complete: retried as the write queue paces it; after WRITE_RETRY_MS, shown as not saved. */
@@ -471,7 +484,7 @@ export class EditHub {
     for (const p of [...this.prevs]) {
       let bytes: Buffer | null = null;
       try { bytes = f.readFile(p.path); } catch { bytes = null; }
-      if (bytes !== null && (hashOf(bytes) !== p.hash || p.invalid !== undefined || p.ingestedSeq > this.persistedSeq)) { kept.push(p.path); continue; }
+      if (bytes !== null && (hashOf(bytes) !== p.hash || p.invalid !== undefined || p.ingestedSeq > this.writtenSeq)) { kept.push(p.path); continue; }
       if (bytes !== null) { try { f.unlink(p.path); } catch { kept.push(p.path); continue; } }
       this.prevs.splice(this.prevs.indexOf(p), 1);
       this.slots.release(1);
@@ -525,7 +538,9 @@ export class EditHub {
       p.ingestedSeq = this.H.seq;
       return;
     }
-    if (p.invalid === undefined && now - p.quietSince >= quietMs && p.ingestedSeq <= this.persistedSeq) {
+    // (written, durable or not: where the directory can't be synced, nothing would ever confirm more, and a prev
+    // held for it would only fill BACKUPS_MAX and stop saving)
+    if (p.invalid === undefined && now - p.quietSince >= quietMs && p.ingestedSeq <= this.writtenSeq) {
       try { f.unlink(p.path); } catch (e: any) { if (e?.code !== "ENOENT") return; }
       this.prevs.splice(this.prevs.indexOf(p), 1);
       this.slots.release(1);
@@ -568,8 +583,9 @@ export class EditHub {
   // ---- tabs (§6.2)
   /**
    * What a submission is answered without its body, from its URL alone (CORR-BOARD-A1-1), or null when its body
-   * is to be read: an unknown tab; a tombstoned one (reactivated, told what is included); a gen at or below the
-   * watermark (replayed by its hash, a mismatch, or included); a base the hub doesn't hold (stale).
+   * is to be read: an unknown tab; a tombstoned one (told what is included: it isn't made live here, since only a
+   * tab's event stream owns a live record, connect(); CORR-153-R2-2); a gen at or below the watermark (replayed by
+   * its hash, a mismatch, or included); a base the hub doesn't hold (stale).
    */
   before(tab: string, gen: number, baseSeq: number, hash: string): SubmitAnswer | null {
     const op = `${tab}:${gen}`;
@@ -577,10 +593,8 @@ export class EditHub {
     if (!t) {
       const w = this.tombstones.get(tab);
       if (w === undefined) return { op, unknownTab: true };
-      // (reactivated from its tombstone: its watermark, no acks; this submission not applied)
-      this.tombstones.delete(tab);
-      t = { watermark: w, acks: [], lastSeen: this.deps.now() };
-      this.tabs.set(tab, t);
+      // (known only by its tombstone: told its watermark, nothing applied, the tombstone kept; it is reactivated
+      // when it connects its events again, so no live record, nor a rate bucket, exists without a stream)
       return { op, included: w, seq: this.H.seq };
     }
     t.lastSeen = this.deps.now();
@@ -654,7 +668,14 @@ export class EditHub {
 
 
   /** A tab connected (its record made, if new). */
-  connect(tab: string) { if (!this.tabs.has(tab) && !this.tombstones.has(tab)) this.tabs.set(tab, { watermark: 0, acks: [], lastSeen: this.deps.now(), pin: this.H.seq }); }
+  connect(tab: string) {
+    if (this.tabs.has(tab)) return;
+    // (a released tab reconnecting: reactivated from its tombstone, its watermark kept, no acks; its first event
+    // tells it what is included, CORR-153-R2-2)
+    const w = this.tombstones.get(tab);
+    this.tombstones.delete(tab);
+    this.tabs.set(tab, { watermark: w ?? 0, acks: [], lastSeen: this.deps.now(), pin: this.H.seq });
+  }
 
   /** A tab released (disconnected): its accounting released, a tombstone of its watermark kept. */
   release(tab: string) {
@@ -668,13 +689,14 @@ export class EditHub {
       this.tombstones.delete(old);
       this.includedGens.delete(old);
       this.persistedGens.delete(old);
+      this.writtenGens.delete(old);
     }
     this.account(); // (its pinned head released)
   }
 
   /** What a tab is told with each head: the highest gen of its ops in it, and its persistedGen. */
   tabView(tab: string) {
-    return { includes: this.includedGens.get(tab) ?? 0, persistedGen: this.persistedGens.get(tab) ?? 0 };
+    return { includes: this.includedGens.get(tab) ?? 0, persistedGen: this.persistedGens.get(tab) ?? 0, writtenGen: this.writtenGens.get(tab) ?? 0 };
   }
 
   head(seq: number): Version | undefined { return this.heads.get(seq); }
@@ -717,7 +739,7 @@ export class EditHub {
     const u = this.unsynced;
     if (u && u.T === T && u.at === O) {
       const m = this.sync(O);
-      if (m === null) { this.completed(T, u.included); return { saved: true, resynced: true }; }
+      if (typeof m !== "string") { this.completed(T, u.included, m.durable); return m.durable ? { saved: true, resynced: true } : { saved: true, resynced: true, durable: false }; }
       this.failing(m);
       return { saved: false, why: "unsynced", message: m };
     }
@@ -732,7 +754,7 @@ export class EditHub {
     if (r.saved) {
       this.O = T.hash;
       watch(r.prev, O, atO, T.seq);
-      this.completed(T, included);
+      this.completed(T, included, r.durable !== false);
       return r;
     }
     switch (r.why) {

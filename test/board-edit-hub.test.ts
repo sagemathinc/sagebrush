@@ -64,7 +64,7 @@ test("board open --edit hub: a tab's submission accepted, replayed once, a misma
     assert.ok("refused" in hub.submit("t1", 2, hub.H.seq, s2, sha("x")));
     // (a base the hub doesn't hold: stale)
     assert.ok("stale" in hub.submit("t1", 2, 9999, s2, sha(s2)));
-    assert.deepEqual(hub.tabView("t1"), { includes: 1, persistedGen: 0 });
+    assert.deepEqual(hub.tabView("t1"), { includes: 1, persistedGen: 0, writtenGen: 0 });
   } finally { cleanup(); }
 });
 
@@ -77,12 +77,17 @@ test("board open --edit hub: an unknown tab; a released tab reactivated from its
     const s1 = snap(B([{ id: "n", text: "hello!" }]));
     assert.ok("accepted" in hub.submit("t1", 1, hub.H.seq, s1, sha(s1)));
     hub.release("t1");
-    // (known only by its tombstone: told what is included, reactivated, nothing applied)
+    // (known only by its tombstone: told what is included, nothing applied; not made live by a POST, again and
+    // again, as long as no stream of its own connects: CORR-153-R2-2)
     const s2 = snap(B([{ id: "n", text: "hello!?" }]));
-    const r = hub.submit("t1", 2, hub.H.seq, s2, sha(s2));
-    assert.ok("included" in r && r.included === 1);
+    for (let i = 0; i < 2; i++) {
+      const r = hub.submit("t1", 2, hub.H.seq, s2, sha(s2));
+      assert.ok("included" in r && r.included === 1, JSON.stringify(r));
+    }
     assert.equal(node(hub, "n").text, "hello!");
-    // (then its next gen is accepted)
+    // (its events reconnected: reactivated from its tombstone, its watermark kept; its next gen accepted)
+    hub.connect("t1");
+    assert.ok("included" in hub.submit("t1", 1, hub.H.seq, s1, sha(s1)), "at or below the watermark: included");
     assert.ok("accepted" in hub.submit("t1", 2, hub.H.seq, s2, sha(s2)));
     assert.equal(node(hub, "n").text, "hello!?");
   } finally { cleanup(); }
@@ -323,7 +328,7 @@ test("board open --edit hub: CORR-BOARD-A1-2, a snapshot's records must be exact
       assert.ok("refused" in r, `${what}: ${JSON.stringify(r)}`);
       assert.equal(hub.H.seq, seq, what);
       assert.equal(JSON.stringify(hub.H.json), before, what);
-      assert.deepEqual(hub.tabView("t1"), { includes: 0, persistedGen: 0 }, what);
+      assert.deepEqual(hub.tabView("t1"), { includes: 0, persistedGen: 0, writtenGen: 0 }, what);
     }
     // (the same records, in another order, with keys reordered: the board's)
     const shuffled = [...good].reverse().map((r: any) => Object.fromEntries(Object.entries(r).reverse()));
@@ -363,7 +368,7 @@ test("board open --edit hub: LIMIT-BOARD-ADD2-1, a submission whose R exactly fi
         assert.deepEqual(r, { op: "t1:1", busy: "memory" });
         assert.equal(hub.ledger.used, before);
         assert.equal(hub.H.seq, seq);
-        assert.deepEqual(hub.tabView("t1"), { includes: 0, persistedGen: 0 });
+        assert.deepEqual(hub.tabView("t1"), { includes: 0, persistedGen: 0, writtenGen: 0 });
       }
     } finally { cleanup(); }
   }
@@ -411,7 +416,7 @@ test("board open --edit hub: R released on every refusal path, the head, waterma
       assert.ok("refused" in r, `${what}: ${JSON.stringify(r)}`);
       assert.equal(hub.ledger.used, before, what);
       assert.equal(hub.H.seq, seq, what);
-      assert.deepEqual(hub.tabView("t1"), { includes: 0, persistedGen: 0 }, what);
+      assert.deepEqual(hub.tabView("t1"), { includes: 0, persistedGen: 0, writtenGen: 0 }, what);
     }
   } finally { cleanup(); }
 });
