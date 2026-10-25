@@ -141,6 +141,39 @@ except KeyboardInterrupt:
   assert.equal(out[9], "KeyboardInterrupt");
 });
 
+// The engine total's certification bit (no-cliffs C r17 section 1.3): a
+// Ctrl-C that _capacity.engine_uncertified sees, on the push before a
+// dispatch, is the program's: delivered once, not lost (astra2's
+// CORR-C2A-3) and not delivered again to a later call
+test("a Ctrl-C engine_uncertified sees is delivered once, not lost or repeated", () => {
+  const code = String.raw`
+import json, time, _sbengine, _capacity as C
+req = json.dumps({"fn": "factor", "f": ["-1", "0", "1"]})
+def ctrl_c():
+    raise KeyboardInterrupt
+time.sleep(0.26)
+C.engine_uncertified = ctrl_c
+try:
+    _sbengine.call(req)
+    for i in range(10 ** 6):
+        pass
+    print("first: not interrupted")
+except KeyboardInterrupt:
+    print("first: KeyboardInterrupt")
+C.engine_uncertified = lambda: True
+time.sleep(0.26)
+try:
+    _sbengine.call(req)
+    for i in range(10 ** 6):
+        pass
+    print("second: not interrupted")
+except KeyboardInterrupt:
+    print("second: KeyboardInterrupt")
+`;
+  const out = sage(code).trim().split("\n");
+  assert.deepEqual(out.slice(-2), ["first: KeyboardInterrupt", "second: not interrupted"]);
+});
+
 // The push is optional both ways: an engine without the export (one built
 // before D0, or another module) is left alone; a share is pushed once per
 // 250 ms per instance (just before expiry: not; at it: again), and at once

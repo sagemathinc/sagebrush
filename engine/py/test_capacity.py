@@ -179,6 +179,30 @@ try:
     check("a machine row is joint for the WebAssembly engine", C.engine_uncertified(), True)
 finally:
     del _sys2._sagebrush_heap_limit
+# engine-only means EXACTLY the engine's domain (astra2's CORR-C2A-2): any
+# other domain, wasm-instance and child included, makes a row joint, and so
+# does a domain this module doesn't know (dropped from the list, flagged)
+_real_capacity = C.capacity
+def _classify(con):
+    C._set_sources()
+    C.capacity = lambda: {"basis": [{"source": "r", "limit": 4 * GiB, "used": 0, "remaining": 4 * GiB, "includes": con, "constrains": con}],
+                          "unknown_parts": []}
+    _sys2._sagebrush_heap_limit = 1
+    try:
+        return C.engine_uncertified()
+    finally:
+        del _sys2._sagebrush_heap_limit
+        C.capacity = _real_capacity
+for _con, _want in ((["wasm-engine"], False), (["wasm-engine", "js-heap"], True), (["wasm-engine", "wasm-instance"], True),
+                    (["wasm-engine", "child"], True)):
+    check("exact engine-only: %s" % "+".join(_con), _classify(_con), _want)
+C._set_sources(root=root, rlimits=_NOLIM, runtime=lambda: [("p", 4 * GiB, 0, ["wasm-engine"], ["wasm-engine", "made-up-domain"])])
+_sys2._sagebrush_heap_limit = 1
+try:
+    check("an unknown constrained domain makes the row joint", [r["joint"] for r in C.engine_rows()["rows"] if r["source"] == "p"], [True])
+finally:
+    del _sys2._sagebrush_heap_limit
+check("engine_total's least-rows joint flag is unchanged", C.engine_total()["joint"], True)
 C._set_sources(root=root, rlimits=_NOLIM, runtime=lambda: [("old", 2 * GiB, 0)])
 check("a part whose domains are unknown makes the classification incomplete", C.engine_rows()["complete"], False)
 C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [])
