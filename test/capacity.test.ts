@@ -178,3 +178,47 @@ test("pushShare: an engine without sb_set_memory_share is left alone; once per 2
     E.setShareClock(null);
   }
 });
+
+// One freshness budget across the two caches (CORR-PR122-3): the
+// collector's 250 ms snapshot and the host's 250 ms between pushes.  The
+// host's window starts at the observation, not at its push: a replacement
+// engine handed a 249 ms old share gets a fresh one at 250 ms, never one
+// up to 498 ms old.  Both clocks on one injected timeline.
+test("pushShare and poly_share: a share applied is never more than 250 ms old, a replacement engine within the collector's window too", async () => {
+  const c = require("../src/compile");
+  await (c.initParser && c.initParser());
+  const E = require("../src/runtime/engine");
+  c.R.importModule("sys").path.push(c.libDir());
+  const run = (code: string) => c.execModule(code, "<capacity>", "__capacity__");
+  let t = 0;
+  E.setShareClock(() => t);
+  try {
+    run(`import _capacity as C, builtins
+builtins._sb_t = [0.0]
+builtins._sb_free = [1 << 30]
+C._set_sources(root="/nonexistent", platform="linux", rlimits={}, runtime=lambda: [("made-up", builtins._sb_free[0], 0)], clock=lambda: builtins._sb_t[0])`);
+    const at = (ms: number, free?: number) => {
+      t = ms;
+      run(`import builtins\nbuiltins._sb_t[0] = ${ms / 1000}` + (free === undefined ? "" : `\nbuiltins._sb_free[0] = ${free}`));
+    };
+    const got: [string, number, number][] = [];
+    const engine = (name: string): any => ({ sb_set_memory_share: (v: number) => got.push([name, t, v]) });
+    const a = engine("a"), b = engine("b");
+    at(0);
+    E.pushShare(a);
+    const full = got[0][2];
+    assert.ok(full > 0, String(full));
+    at(249, 0); // (free memory gone; the collector's snapshot is 249 ms old)
+    E.pushShare(b); // (a replacement engine: pushed at once, the snapshot's share)
+    at(249.999);
+    E.pushShare(b); // (the observation is 249.999 ms old: kept)
+    at(250);
+    E.pushShare(b); // (250 ms: a fresh observation, zero)
+    at(498);
+    E.pushShare(b);
+    assert.deepEqual(got, [["a", 0, full], ["b", 249, full], ["b", 250, 0]]);
+  } finally {
+    E.setShareClock(null);
+    run("import _capacity as C\nC._set_sources()");
+  }
+});

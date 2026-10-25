@@ -980,7 +980,11 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: _cgroups :: \"\"\"[(source, limit, used)] for this process's memory cgroup, v2 and its #0": {
+ "lib/_capacity.py :: _cgroup_dirs :: if _read(d + \"/memory.limit_in_bytes\") is not None: #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _cgroups :: \"\"\"[(source, limit, used)] for this process's memory cgroup and its #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -992,7 +996,7 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: _cgroups :: n = _int(_read(d + \"/memory.limit_in_bytes\") or \"\") #0": {
+ "lib/_capacity.py :: _cgroups :: n = _int(_read(b[0] + \"/memory.limit_in_bytes\") or \"\") #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -3718,6 +3722,10 @@
   "owner": "python (@sagebrush-python)"
  },
  "src/runtime/engine.ts :: engine :: const SHARE_MAX_AGE_MS = 250, WASM_CEILING = 2 ** 32; #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/engine.ts :: memoryShare :: const ageMs = Number.isFinite(age) ? Math.min(SHARE_MAX_AGE_MS, Math.max(0, age * 1000)) : SHARE_MAX_AGE_MS; #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
