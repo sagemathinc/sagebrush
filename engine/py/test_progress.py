@@ -102,6 +102,11 @@ def test_33rd_call():
 def test_threads_and_a_reader():
     stop = threading.Event()
     seen = []
+    # (each worker keeps its call open until the reader has seen it: under
+    # load the reader could otherwise be scheduled only after every worker
+    # had finished, and see none; the dispatch at e4e09807 did)
+    saw = [threading.Event() for _ in range(4)]
+    readers = []
 
     def reader():
         if INJECT == "reader":
@@ -117,6 +122,7 @@ def test_threads_and_a_reader():
                     else:
                         check(n["done"] == 0, r)
                     seen.append(r["op"])
+                    saw[int(r["op"].split()[1])].set()
 
     def worker(k):
         if INJECT == "worker" and k == 2:
@@ -125,11 +131,16 @@ def test_threads_and_a_reader():
             for j in range(2000):
                 c.update(done=j, total=j)
                 c.flush()
+            # (while the reader runs: a failed reader ends the wait, and
+            # its error is the run's)
+            while not saw[k].wait(0.05) and readers[0].is_alive():
+                pass
             with progress.call("thread %d inner" % k) as d:
                 s = {r["call_id"]: r for r in progress.snapshot()}
                 check(s[d.id]["parent_id"] == c.id, s)
 
     (rt,), rerr = run_threads([(reader, ())])
+    readers.append(rt)
     ws, werr = run_threads([(worker, (k,)) for k in range(4)])
     for w in ws:
         w.join()
@@ -137,7 +148,7 @@ def test_threads_and_a_reader():
     rt.join()
     for e in rerr + werr:
         raise e
-    check(len(set(seen)) >= 1, "the reader saw the threads: %r" % sorted(set(seen)))
+    check(sorted(set(seen)) == ["thread %d" % k for k in range(4)], "the reader saw the threads: %r" % sorted(set(seen)))
     check(progress.snapshot() == [], "all released")
     print("ok test_threads_and_a_reader")
 
