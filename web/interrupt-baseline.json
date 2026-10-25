@@ -9,6 +9,8 @@
   { "case": "E6a", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" },
   { "case": "S1", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "no KeyboardInterrupt|did not take the next input" },
   { "case": "S3", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "no escalation" },
+  { "case": "E3a", "host": "cli", "finding": "F4: the GF(32003) rank cliff (pilot 4: s = 388 in 0.243 s, s = 409 over 60 s; the 400x401 nmod_echelon boundary)", "owner": "sage2 / sage (F5)", "fix": "F5: no echelon cap", "signature": "a performance cliff" },
+  { "case": "E3a", "host": "prompt", "finding": "F4, as on the CLI", "owner": "sage2 / sage (F5)", "fix": "F5", "signature": "a performance cliff" },
   { "case": "S4", "host": "cli", "finding": "slot 5: a pending Ctrl-C is never raised after a non-polling call when no loop follows (pyjs polls only at back-edges; same root as E13g)", "owner": "python", "fix": "a poll at host-call returns or statement boundaries", "signature": "returned without a KeyboardInterrupt", "routed": "python, with magma's S plan (@sagebrush, Oct 25)" },
   { "case": "E2", "host": "browser", "finding": "slot 5: the notebook page answers nothing for over 200 s after switching to Sage mode", "owner": "sage (routed by @sagebrush, Oct 25)", "fix": "Sage-mode loading off the main thread, or unblocked", "signature": "the page did not answer after the switch" }
  ],
