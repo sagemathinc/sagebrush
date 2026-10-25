@@ -77,7 +77,9 @@ Stop by message.
         if (d && typeof d.runnerInterrupt === "number") {
           if (flag) {
             Atomics.store(flag, 1, d.runnerInterrupt);
+            // (bit 0, and the word notified: a time.sleep waits on it, src/runtime/interrupt.ts requestCtrlC)
             Atomics.or(flag, 0, 1);
+            Atomics.notify(flag, 0);
           }
           return;
         }
