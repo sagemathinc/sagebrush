@@ -19,9 +19,11 @@ from sagebrush.sage import EllipticCurve
 CASES = [("setup: Q^p", 4001, 2, 1), ("series", 5, 400, 3),
          # (the plan's p = 401, prec 3 for stage 4 reduces in 0.2 s here, under
          # progress's 250 ms write interval, and its p = 4001 reaches stage 6
-         # only after its series, hours in; at p = 1013, prec 1 both stages
-         # last 0.5 s or more)
-         ("reduce dx/y", 1013, 1, 4), ("check: setup Q^p", 1013, 1, 6)]
+         # only after its series, hours in; at p = 1013, prec 1 stage 6 lasts
+         # 0.35 s, and on CI ended once before a write showed done > 0; at
+         # p = 2003, prec 1 stage 4 lasts 2.2 s and stage 6 1.4 s, reached at
+         # 21 s)
+         ("reduce dx/y", 2003, 1, 4), ("check: setup Q^p", 2003, 1, 6)]
 
 failed = 0
 for what, p, prec, stage in CASES:
