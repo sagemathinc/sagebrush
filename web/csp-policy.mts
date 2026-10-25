@@ -26,6 +26,24 @@ export function pagePolicy(scriptHashes: string[] = []): string {
   ].join("; ");
 }
 
+// The shell worker's (web/shell/worker-boot.js; plan-bash-shell r3 §6): a
+// dedicated worker gets the policy of its own script's response, so this one
+// is the shell's, not the page's.  Its scripts: the bootstrap, from this
+// site, and the shell's module, which the bootstrap imports from a blob: URL
+// made of bytes the page checked against their package set's pins.  No eval
+// (the module needs none: a test runs every command under this policy), no
+// network of any kind, no further workers, no forms.
+export function shellWorkerPolicy(): string {
+  return [
+    "default-src 'none'",
+    "script-src 'self' blob:",
+    "connect-src 'none'",
+    "worker-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join("; ");
+}
+
 // The runner's (web/runner/index.html; design/runner.md): Python's
 // interpreter in an opaque-origin sandboxed frame, whose worker (a blob:)
 // inherits this policy.  It may run compiled Python (eval) and WebAssembly;
