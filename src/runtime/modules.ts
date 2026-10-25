@@ -1820,6 +1820,13 @@ newBuiltinModule("_fs", (m) => {
   fn(m, "isfile", (path: string) => quiet(() => fs.statSync(at(path)).isFile()));
   fn(m, "islink", (path: string) => quiet(() => fs.lstatSync(at(path)).isSymbolicLink()));
   fn(m, "lexists", (path: string) => quiet(() => (fs.lstatSync(at(path)), true)));
+  // (this process's CPU time, all its threads, user and system apart, in
+  // seconds: for tests' diagnostics, sbx's CPU ratio, shard-7 proposal r1;
+  // time.process_time() is their sum)
+  fn(m, "cpu_times", () => {
+    const u = process.cpuUsage();
+    return tuple([O.mkfloat(u.user / 1e6), O.mkfloat(u.system / 1e6)]);
+  });
 });
 
 // ------------------------------------------------------------------ os
