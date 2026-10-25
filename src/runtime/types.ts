@@ -12,7 +12,7 @@ import {
 import * as O from "./ops";
 import * as UC from "./unicodecs";
 import * as AC from "./argconv";
-import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, admitDigits, parseDigits } from "./format";
+import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, admitDigits, parseDigits, strReprPrefix, bytesReprPrefix } from "./format";
 
 // Store a builtin method (a JS function taking self first) in a type's dict.
 export function method(cls: PyType, name: string, f: any, s: Signature | null = null) {
@@ -1280,58 +1280,199 @@ export function asciiNumeral(s: string): string {
 }
 export const stripAscii = (s: string): string => s.replace(/^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g, "");
 
-function parseIntLiteral(s: string, base: number): number | bigint | undefined {
-  let t = stripAscii(s);
-  let neg = false;
-  if (t[0] === "+" || t[0] === "-") {
-    neg = t[0] === "-";
-    t = t.slice(1);
+// int() from text (plan-int-digit-oom r4): one pass over the input as it is,
+// a str or a bytes-like view, that checks CPython's grammar, counts the
+// digits and notes the quotes, with no copy of the text; then the configured
+// digit limit, then memory admission (every base); and only then the digits
+// the conversion needs, made once.  A copy made before admission was as
+// large as the input: int() of a 40,000,000-digit string held it twice and
+// could exhaust a small heap before refusing (int-digit-limits, Oct 25).
+type IntText = string | Uint8Array;
+const isSpace = (c: number) => c === 32 || (c >= 9 && c <= 13);
+// the character at i as asciiNumeral maps it: [code, its width in units];
+// a non-ASCII Unicode digit is 48 + its value, a non-ASCII space 32, any
+// other non-ASCII character 63 ("?": never in a literal); bytes are only
+// ASCII
+function mappedAt(t: IntText, i: number): [number, number] {
+  if (typeof t !== "string") {
+    const c = t[i];
+    return [c < 128 ? c : 63, 1];
   }
-  const prefixes: Record<string, number> = { "0x": 16, "0o": 8, "0b": 2 };
-  const pre = t.slice(0, 2).toLowerCase();
-  let prefixed = false;
-  if (base === 0) {
-    if (pre in prefixes) {
-      base = prefixes[pre];
-      t = t.slice(2);
-      prefixed = true;
-    } else {
-      base = 10;
-      // (a leading 0 only in a zero: 0_0 and 00 are 0, 01 and 00_1 invalid)
-      if (t[0] === "0" && !/^0+(_0+)*$/.test(t)) return undefined;
+  const c = t.charCodeAt(i);
+  if (c < 128) return [c, 1];
+  const cp = t.codePointAt(i)!;
+  const w = cp > 0xffff ? 2 : 1;
+  const ch = t.slice(i, i + w);
+  if (NON_ASCII_SPACE.test(ch)) return [32, w];
+  const d = ndValue(ch);
+  return [d < 0 ? 63 : 48 + d, w];
+}
+const digitOf = (c: number) => (c >= 48 && c <= 57 ? c - 48 : c >= 97 && c <= 122 ? c - 87 : c >= 65 && c <= 90 ? c - 55 : -1);
+interface IntScan {
+  ok: boolean;
+  neg: boolean;
+  base: number;
+  digits: number; // (without the underscores)
+  start: number; // the body, in units: after the sign, prefix and an underscore after it
+  end: number;
+  plain: boolean; // the body is only ASCII digits and letters: a slice of the input is the digits
+  single: boolean; // the whole input has a ' / a " (for the error's quotes)
+  double: boolean;
+}
+const POLL = 65536;
+function scanInt(t: IntText, base: number): IntScan {
+  const n = t.length, given = base;
+  const r: IntScan = { ok: false, neg: false, base, digits: 0, start: 0, end: 0, plain: true, single: false, double: false };
+  // (Stop tested every POLL characters inspected, counted across all the
+  // passes, leading, trailing and body: never by a position, which the
+  // trailing pass counts from the other end, daybreak2 PR134-INTR-1)
+  let work = 0;
+  const poll = () => {
+    if (++work >= POLL) {
+      work = 0;
+      O.pollInterrupt();
     }
-  } else if (pre in prefixes && prefixes[pre] === base) {
-    t = t.slice(2);
-    prefixed = true;
+  };
+  const quote = (c: number) => {
+    if (c === 39) r.single = true;
+    else if (c === 34) r.double = true;
+  };
+  // (the rest of an invalid str: only its quotes, for the error, still
+  // polled; bytes' error takes its quotes from its first 200 bytes)
+  const fail = (i: number): IntScan => {
+    if (typeof t !== "string") return r;
+    for (; i < n; i++) {
+      poll();
+      const c = typeof t === "string" ? t.charCodeAt(i) : t[i];
+      quote(c);
+    }
+    return r;
+  };
+  // the trimmed bounds: ASCII whitespace, and what maps to a space
+  let lo = 0, hi = n;
+  while (lo < hi) {
+    poll();
+    const [c, w] = mappedAt(t, lo);
+    if (!isSpace(c)) break;
+    lo += w;
   }
-  // (an underscore may follow a base prefix, as in 0x_1f: not start a number)
-  if (prefixed && t.startsWith("_")) t = t.slice(1);
-  const pow2 = (base & (base - 1)) === 0;
-  if (!/^[0-9a-zA-Z]+(_[0-9a-zA-Z]+)*$/.test(t)) return undefined;
-  t = t.replace(/_/g, "").toLowerCase();
-  for (let i = 0; i < t.length; i++) {
-    const c = t.charCodeAt(i);
-    const d = c <= 57 ? c - 48 : c - 87;
-    if (d >= base) return undefined;
+  while (hi > lo) {
+    poll();
+    const last = typeof t === "string" && hi - 2 >= lo && t.charCodeAt(hi - 1) >= 0xdc00 && t.charCodeAt(hi - 1) <= 0xdfff && t.charCodeAt(hi - 2) >= 0xd800 && t.charCodeAt(hi - 2) <= 0xdbff ? hi - 2 : hi - 1;
+    const [c] = mappedAt(t, last);
+    if (!isSpace(c)) break;
+    hi = last;
   }
-  // (CPython's limit on decimal conversions: every base but the powers of 2)
+  let i = lo;
+  const at = (k: number) => (k < hi ? mappedAt(t, k) : ([-1, 0] as [number, number]));
+  let [c, w] = at(i);
+  if (c === 43 || c === 45) {
+    r.neg = c === 45;
+    quote(c);
+    i += w;
+    [c, w] = at(i);
+  }
+  // a prefix: 0x 0o 0b in either case, choosing the base (0) or matching it
+  let prefixed = false;
+  if (c === 48) {
+    const [c2, w2] = at(i + w);
+    const p = c2 === 120 || c2 === 88 ? 16 : c2 === 111 || c2 === 79 ? 8 : c2 === 98 || c2 === 66 ? 2 : 0;
+    if (p !== 0 && (base === 0 || base === p)) {
+      r.base = base = p;
+      prefixed = true;
+      i += w + w2;
+      [c, w] = at(i);
+      // (an underscore may follow a base prefix, as in 0x_1f: not start a number)
+      if (c === 95) {
+        i += w;
+        [c, w] = at(i);
+      }
+    }
+  }
+  if (base === 0) r.base = base = 10;
+  const zeroRule = !prefixed && given === 0;
+  r.start = i;
+  // the body: [0-9a-zA-Z]+(_[0-9a-zA-Z]+)*, each a digit of the base
+  let prevUnderscore = true, allZero = true, any = false;
+  for (; i < hi; ) {
+    poll();
+    [c, w] = mappedAt(t, i);
+    quote(c);
+    if (c === 95) {
+      if (prevUnderscore) return fail(i + w);
+      prevUnderscore = true;
+      r.plain = false;
+      i += w;
+      continue;
+    }
+    const d = digitOf(c);
+    if (d < 0 || d >= base) return fail(i + w);
+    if (w !== 1 || (typeof t === "string" && t.charCodeAt(i) >= 128)) r.plain = false;
+    if (d !== 0) allZero = false;
+    any = true;
+    prevUnderscore = false;
+    r.digits++;
+    i += w;
+  }
+  if (!any || prevUnderscore) return fail(hi);
+  // (base 0: a leading 0 only in a zero: 0_0 and 00 are 0, 01 and 00_1 invalid)
+  if (zeroRule && !allZero && mappedAt(t, r.start)[0] === 48) return fail(hi);
+  r.end = hi;
+  r.ok = true;
+  return r;
+}
+
+// The digits of a scanned literal as the conversion takes them: ASCII, no
+// underscores (either case: BigInt and parseInt read both).  A slice of the
+// input where it is that already (V8 shares a str slice's characters);
+// otherwise made in pieces, after admission, which counts them.
+function digitsOf(t: IntText, r: IntScan): string {
+  if (r.plain) {
+    if (typeof t === "string") return t.slice(r.start, r.end);
+    return Buffer.from(t.buffer, t.byteOffset + r.start, r.end - r.start).toString("latin1");
+  }
+  const pieces: string[] = [];
+  let piece = "";
+  for (let i = r.start; i < r.end; ) {
+    const [c, w] = mappedAt(t, i);
+    if (c !== 95) piece += String.fromCharCode(c);
+    i += w;
+    if (piece.length >= POLL) {
+      pieces.push(piece);
+      piece = "";
+      O.pollInterrupt();
+    }
+  }
+  pieces.push(piece);
+  return pieces.join("");
+}
+
+// The int of a valid scanned literal: the configured digit limit (CPython's,
+// every base but the powers of 2), then memory admission (every base: the
+// digits, the value and its powers of the base, before any is made), then
+// the digits and the value.
+function intOfScan(t: IntText, r: IntScan): number | bigint {
+  const base = r.base, pow2 = (base & (base - 1)) === 0;
   const m = intDigits.max;
-  if (m > 0 && !pow2 && t.length > m)
-    raise(T.ValueError, `Exceeds the limit (${m} digits) for integer string conversion: value has ${t.length} digits; use sys.set_int_max_str_digits() to increase the limit`);
-  // (the memory the value and its powers of the base take, before any is
-  // made: the text itself is already in memory)
-  if (!pow2) admitDigits(t.length, (t.length * Math.log2(base)) / 8);
-  // (powers of 2 natively, in linear time; the others by halves, with Stop
-  // tested between the pieces)
-  let v: bigint;
-  if (base === 16 || base === 8 || base === 2) v = BigInt((base === 16 ? "0x" : base === 8 ? "0o" : "0b") + t);
-  else if (pow2) {
-    const bits = Math.log2(base);
-    let b = "";
-    for (let i = 0; i < t.length; i++) b += parseInt(t[i], base).toString(2).padStart(bits, "0");
-    v = BigInt("0b" + b);
-  } else v = parseDigits(t, base);
-  return O.normBig(neg ? -v : v);
+  if (m > 0 && !pow2 && r.digits > m)
+    raise(T.ValueError, `Exceeds the limit (${m} digits) for integer string conversion: value has ${r.digits} digits; use sys.set_int_max_str_digits() to increase the limit`);
+  admitDigits(r.digits, (r.digits * Math.log2(base)) / 8);
+  const d = digitsOf(t, r);
+  // (bases 2, 8 and 16 natively, in linear time; the others, 4 and 32 too,
+  // by halves, with Stop tested between the pieces)
+  const v = base === 16 || base === 8 || base === 2 ? BigInt((base === 16 ? "0x" : base === 8 ? "0o" : "0b") + d) : parseDigits(d, base);
+  return O.normBig(r.neg ? -v : v);
+}
+
+// int(x, base) of a str or a bytes-like view; an invalid literal's error
+// shows it cut at 200 code points, as CPython's %.200R: a str with the
+// quotes the scan saw in the whole of it; bytes-like in b'' form, from its
+// first 200 bytes, as CPython's
+function intFromText(x: IntText, base: number): number | bigint {
+  const r = scanInt(x, base);
+  if (r.ok) return intOfScan(x, r);
+  const op = typeof x === "string" ? strReprPrefix(x, 200, r.single, r.double) : bytesReprPrefix(x, 200);
+  return raise(T.ValueError, `invalid literal for int() with base ${base}: ${op}`);
 }
 
 export function intCall(x: any = 0, base: any = undefined): any {
@@ -1339,11 +1480,7 @@ export function intCall(x: any = 0, base: any = undefined): any {
     if (typeof x !== "string" && !(x instanceof PyBytes)) raise(T.TypeError, "int() can't convert non-string with explicit base");
     const b = Number(base);
     if (b !== 0 && (b < 2 || b > 36)) raise(T.ValueError, "int() base must be >= 2 and <= 36, or 0");
-    const s = typeof x === "string" ? asciiNumeral(x) : Buffer.from(x.a.subarray(0, x.n)).toString("latin1");
-    const v = parseIntLiteral(s, b);
-    // (the repr cut at 200 characters, as CPython's %.200R)
-    if (v === undefined) raise(T.ValueError, `invalid literal for int() with base ${b}: ${repr(x).slice(0, 200)}`);
-    return v;
+    return intFromText(typeof x === "string" ? x : x.a.subarray(0, x.n), b);
   }
   if (typeof x === "number") {
     if (isInt(x)) return Number.isSafeInteger(x) ? x + 0 : O.normBig(BigInt(x));
@@ -1356,7 +1493,10 @@ export function intCall(x: any = 0, base: any = undefined): any {
   if (typeof x === "boolean") return +x;
   if (x instanceof FloatBox) return intCall(x.v === 0 ? 0 : x.v);
   if (typeof x === "string" || x instanceof PyBytes) return intCall(x, 10);
-  if (O.bufferOf(x) !== undefined) return intCall(new PyBytes(O.bufferOf(x)!.slice()), 10);
+  // (a view of its bytes, not a copy; the error shows them as bytes, as
+  // CPython's)
+  const view = O.bufferViewOf(x);
+  if (view !== undefined) return intFromText(view, 10);
   for (const name of ["__int__", "__index__", "__trunc__"]) {
     const f = lookupType(typeOf(x), name);
     if (f !== undefined) {

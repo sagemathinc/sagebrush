@@ -199,3 +199,11 @@ Ty.getset(MV, "released", (m: PyMemoryView) => m.released);
 MV.$dict.set("__class_getitem__", Ty.genericClassGetitem);
 builtins.memoryview = MV;
 O.bufferHooks.push((x) => (x instanceof PyMemoryView ? x.bytes() : undefined));
+// (a C-contiguous one's bytes as a view, for int(): no copy; one item, or
+// a stride of one item, as CPython's c_contiguous.  Any other, or a
+// released one: null, no bytes for int(), as CPython's TypeError)
+O.bufferViewHooks.push((x) => {
+  if (!(x instanceof PyMemoryView)) return undefined;
+  if (x.released || !(x.step === 1 || x.n === 1)) return null;
+  return x.raw().subarray(x.start, x.start + x.n * x.itemsize);
+});
