@@ -25,9 +25,14 @@ export interface SyncEnv {
    * their answer (§4.3).  Never set in a deployment's config.
    */
   SYNC_TEST_PIN_MS?: string;
+  /** the fence overflow's skew margin, ms (LIMIT-PR13-1): an admin-configurable default of 5 s */
+  SYNC_FENCE_SKEW_MS?: string;
   SYNC_TEST_LOSE?: string;
   /** comma-separated account ids that may sync; unset means nobody (§11) */
   SYNC_ACCOUNTS?: string;
+  /** DEV only, a text binding in the reviewed config: comma-separated synthetic account ids that may sync too (the
+   * DEV end-to-end check's accounts); never bound in production, and unset means none */
+  SYNC_TEST_ACCOUNTS?: string;
   /** signs blob URLs (§5.4); tickets are nonces, signed by nothing */
   SYNC_URL_KEY?: string;
   COCALC_ORIGIN?: string;
@@ -61,7 +66,8 @@ export function setGate(env: SyncEnv, name: string, on: boolean): void {
   else gates.delete(name);
 }
 
-/** Whether `account` may sync here (§11): only those listed. */
+/** Whether `account` may sync here (§11): only those listed, in SYNC_ACCOUNTS or (DEV) SYNC_TEST_ACCOUNTS. */
 export function allowed(env: SyncEnv, account: string): boolean {
-  return (env.SYNC_ACCOUNTS ?? "").split(",").map((s) => s.trim()).filter(Boolean).includes(account);
+  const listed = (v: string | undefined) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean).includes(account);
+  return listed(env.SYNC_ACCOUNTS) || listed(env.SYNC_TEST_ACCOUNTS);
 }

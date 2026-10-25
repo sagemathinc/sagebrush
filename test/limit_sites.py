@@ -7,7 +7,8 @@ checks the list against a reviewed registry, test/limit-sites.json.  So a new
 or changed site matching the census vocabulary needs a reviewed class and
 owner in the diff; a class-3 site among those registered or matched is to be
 reached only through lib/_limits.py (checked in review, recorded in the
-registry).  It is NOT a proof that every hidden cap is caught: a line outside
+registry; or, for item G's allowance sites, only through the host's allowance
+capability).  It is NOT a proof that every hidden cap is caught: a line outside
 the vocabulary slips past (`if n > 1000: raise ValueError("no")`), and the
 baseline lines are not coverage.  No AST or control-flow analysis is
 attempted; code review remains the backstop.
@@ -25,8 +26,10 @@ doesn't change its key; editing it, its message included, does.
 The registry maps fingerprint -> {"class", "owner"}; class 1 (shared-resource,
 editor, protocol, display or parser protection), 2 (memory guard), 3 (a
 work/time/input-size limit of a user's computation: unlimited by default,
-opt-in through lib/_limits.py), their mixtures as the inventories write them
-("2+3"), "coverage" (an unsupported feature, not a cap), "none" (matched
+opt-in through lib/_limits.py or a trusted host capability, such as an
+allowance armed by grading, an instructor's bundle or a server: item G),
+their mixtures as the inventories write them ("2+3"), "coverage" (an
+unsupported feature, not a cap), "none" (matched
 text that refuses nothing); a class-2 site whose guard raises the memory
 guards' error (lib/_memguard.py, item D) also has "explained": true.  The sites present at the seed and not yet
 classified are the baseline: grandfathered, certifying nothing, and kept out
@@ -60,6 +63,9 @@ REGISTRY = os.path.join(ROOT, "test", "limit-sites.json")
 BASELINE = os.path.join(ROOT, "test", "limit-sites-baseline.txt")
 VOCAB = re.compile(r"max(?!\s*\()|limit|budget|too large|exceeds|NotImplementedError|\bcap\b|\bthreshold\b|unsupported|resource", re.I)
 CLASSES = {"1", "2", "3", "1+2", "1+3", "2+3", "1+2+3", "coverage", "none"}
+# (web files in the census, one by one: the sync client's ledger, whose shared-resource bounds (the hub's namespaces and
+# tentative epochs, the waits, the ledger's rows) are class 1 (PR #128's LIMIT-PR128-3); the rest of web/ is a follow-up)
+WEB = {"web/workspace/sync-ledger.ts"}
 
 
 def short(key):
@@ -76,7 +82,7 @@ def tracked(rev=None):
     keep = []
     for p in out.split("\n"):
         if re.fullmatch(r"lib/[^/]+\.py", p) or (p.startswith("engine/") and p.endswith(".rs") and "/target/" not in p) \
-                or (p.startswith("src/") and p.endswith(".ts")):
+                or (p.startswith("src/") and p.endswith(".ts")) or p in WEB:
             keep.append(p)
     return sorted(keep)
 

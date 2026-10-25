@@ -89,9 +89,22 @@ Its tools:
 - `python`: the same session, as plain Python.
 - `factor`, `number_field`, `newforms`: shortcuts.
 - `guide`: what is implemented. `reset`: clear the session.
+- `run_status`, `run_result`, `run_cancel`, `run_list`, `run_keep`: runs.
 
-Each call has a time limit. When it expires the computation is interrupted
-and the session keeps its variables. The session also works on its own
+A `sage` or `python` call is a run. The call waits up to `wait` seconds (60
+by default). If the computation hasn't ended by then, the call returns a
+ticket, the run's handle, and the computation keeps running: `run_result`
+waits for it, and `run_cancel` interrupts it (the session keeps its
+variables). Only a `run_deadline` you give, or a cancel, stops a run.
+`timeout` is the old name of `wait`. Every result says how many runs are
+running. The shortcut tools still have time limits.
+
+Runs are kept in `~/.cache/sagebrush/runs/` (or `$SAGEBRUSH_RUNS_DIR`), which
+is bounded: by default 2 GiB, 200 runs and 7 days. Only your Unix user can
+read the directory. Collaborators who share that user, as in a shared
+cocalc.ai project, can list, read and cancel your runs. A run started by another server, or
+by one that has exited, is listed with liveness "unknown". The session also
+works on its own
 (`sagebrush.session.Session`), and `sagebrush.preparse.preparse` turns Sage
 syntax into Python.
 
@@ -134,6 +147,19 @@ versions, the load average, and the median and range of each case;
 
 Results are checked against independent systems: PARI for class groups,
 Sage and Magma for the rest, and LMFDB for modular forms.
+
+## Memory
+
+There are no time limits on a computation. A few operations check, before
+they start, that their memory fits a share of this machine's memory as the
+process sees it: the smallest of the cgroup limit, `RLIMIT_AS` and
+`RLIMIT_DATA`, a Windows job's limit, and physical memory. One matrix may
+use at most a quarter of that figure, for example. When none of these can
+be read, the figure is a nominal 1 GiB. A factorization of a polynomial
+over Z, unless given its own limits, may use half of the memory observed
+free, less a reserve, or a quarter of what is free when that is more.
+These figures are observations, not reservations: another process can
+still take the memory.
 
 ## License
 

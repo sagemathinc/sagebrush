@@ -48,11 +48,24 @@ test("board run: what fails, says why, and what reads it is not run; the others 
 
 test("board run: an item that does not stop when interrupted: the interpreter is stopped, and what was left is not run", () => {
   const t0 = Date.now();
-  const { status, report } = json(["-", "--timeout", "1"], board([{ id: "s", code: "import time\ntime.sleep(100)" }, { id: "t", code: "print(1)" }]));
+  // (a catastrophic regular expression: the engine's own matching, which never polls Stop)
+  const { status, report } = json(["-", "--timeout", "1"], board([{ id: "s", code: "import re\nre.match('(a+)+$', 'a' * 40 + 'b')" }, { id: "t", code: "print(1)" }]));
   assert.equal(status, 1);
   assert.deepEqual(report.items.map((i: any) => i.status), ["timeout", "not run"]);
   assert.match(report.items[1].error, /the interpreter was stopped/);
   assert.ok(Date.now() - t0 < 20_000);
+});
+
+// (the time limit's Stop wakes a time.sleep at once, as Ctrl-C does: a
+// KeyboardInterrupt, the interpreter kept, and the next item run)
+test("board run: an item sleeping past its time is interrupted at once, and the next item runs", () => {
+  const t0 = Date.now();
+  const { status, report } = json(["-", "--timeout", "1"], board([{ id: "s", code: "import time\ntime.sleep(100)" }, { id: "t", code: "print(1)" }]));
+  assert.equal(status, 1);
+  assert.deepEqual(report.items.map((i: any) => i.status), ["timeout", "ok"], JSON.stringify(report.items));
+  assert.match(report.items[0].error, /KeyboardInterrupt/);
+  assert.equal(report.items[1].stdout, "1\n");
+  assert.ok(Date.now() - t0 < 15_000, String(Date.now() - t0));
 });
 
 test("board run: each language, as its board runs it", () => {

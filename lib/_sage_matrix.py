@@ -3000,9 +3000,111 @@ def _int_dims(args):
     return tuple(int(a) if k < 3 and type(a).__name__ == "Rational" and a.denominator == 1 else a for k, a in enumerate(args))
 
 
+def _dict_index(v):
+    """A row or column index of a matrix's dict of entries, as Sage converts
+    it: an integer (an integral rational too), else Sage's TypeError."""
+    import operator
+    if isinstance(v, float):
+        raise TypeError("'sage.rings.real_mpfr.RealLiteral' object cannot be interpreted as an integer")
+    if type(v).__name__ == "Rational" or isinstance(v, _F):
+        if v.denominator != 1:
+            raise TypeError("unable to convert rational %s to an integer" % v)
+        return int(v.numerator)
+    try:
+        return operator.index(v)
+    except TypeError:
+        raise TypeError("'%s' object cannot be interpreted as an integer" % type(v).__name__)
+
+
+def _dict_key(k):
+    """The (row, column) of a key of a matrix's dict of entries: a pair,
+    each an integer, with Sage's errors for another key."""
+    import itertools
+    # (Python's iterator protocol: __iter__, or a sequence's __getitem__,
+    # astra2's CORR-PR107-3; at most three items are taken)
+    try:
+        it = iter(k)
+    except TypeError:
+        raise TypeError("'%s' object is not iterable" % ("sage.rings.integer.Integer" if type(k) is int else type(k).__name__)) from None
+    ij = list(itertools.islice(it, 3))
+    if len(ij) < 2:
+        raise ValueError("need more than %d value%s to unpack" % (len(ij), "" if len(ij) == 1 else "s"))
+    if len(ij) > 2:
+        raise ValueError("too many values to unpack (expected 2)")
+    return _dict_index(ij[0]), _dict_index(ij[1])
+
+
+def _dict_entries(d, dims):
+    """matrix(..., {(i, j): x, ...}): the dimensions and the row-major
+    entries (zeros elsewhere), as Sage (black-box against Sage 10.9).
+    dims is () (the dimensions from the largest indices), (n,) (n x n) or
+    (r, c).  Every key is read, and checked, before any entry is placed or
+    converted: given dimensions, all are made integers first, then each is
+    range-checked (row first; a negative index counts from the end, as in
+    Python); without them, each key in turn (no negative index).  A later
+    key for the same position wins.  The size is admitted (_shape) after
+    the keys and before the entries are allocated.  A dict of more keys than
+    any admitted matrix has positions is refused before it is read, and a
+    dict subclass is read as a dict (its own items() not called).
+    Returns r, c, the (position, value) pairs in the dict's order, the
+    overwritten ones too (Sage infers the ring from all of them, and its
+    default, sparse constructor converts all of them), and whether a
+    position was given twice (only possible with negative indices); the
+    caller places them."""
+    if dict.__len__(d) > _MAX_ENTRIES:
+        raise ValueError("more than %d entries" % _MAX_ENTRIES)
+    items = dict.items(d)
+    if dims:
+        r, c = _dim(dims[0]), _dim(dims[-1], "columns")
+        keys = [(_dict_key(k), v) for k, v in items]
+        placed = []
+        for (i, j), v in keys:
+            if not -r <= i < r:
+                raise IndexError("invalid row index %d" % i)
+            if not -c <= j < c:
+                raise IndexError("invalid column index %d" % j)
+            placed.append((i % r, j % c, v))
+    else:
+        placed = []
+        for k, v in items:
+            i, j = _dict_key(k)
+            if i < 0:
+                raise IndexError("invalid row index %d" % i)
+            if j < 0:
+                raise IndexError("invalid column index %d" % j)
+            placed.append((i, j, v))
+        r = max((i for i, _, _ in placed), default=-1) + 1
+        c = max((j for _, j, _ in placed), default=-1) + 1
+    r, c = _shape(r, c)
+    placed = [(i * c + j, v) for i, j, v in placed]
+    return r, c, placed, len({p for p, _ in placed}) < len(placed)
+
+
+def _dict_base(vals):
+    """The ring of matrix(..., D) without one: inferred from every value
+    of the dict, the overwritten ones too, as Sage infers it (astra2's
+    CORR-PR107-2), by the rules of matrix(rows): a finite field, the
+    p-adics, else ZZ, QQ or SR (astra2's CORR-PR107-1: finite-field values
+    gave a symbolic matrix)."""
+    sa = _sa()
+    ff = _ff_base_of([vals]) if vals else None
+    if ff is not None:
+        return ff
+    pb = _padic_base_of([vals]) if vals else None
+    if pb is not None:
+        return pb
+
+    def kind(x):
+        try:
+            return 0 if _F(x).denominator == 1 else 1
+        except (TypeError, ValueError):
+            return 2
+    return (sa.ZZ, sa.QQ, sa.SR)[max([kind(x) for x in vals] or [0])]
+
+
 def matrix(*args, **kwds):
     """matrix([[1, 2], [3, 4]]), matrix(ZZ, rows), matrix(QQ, 2, 2, entries),
-    matrix(ZZ, 3, 3, range(9)).
+    matrix(ZZ, 3, 3, range(9)); entries may be a dict {(i, j): x}.
 
     EXAMPLES::
 
@@ -3027,6 +3129,42 @@ def matrix(*args, **kwds):
     # dispatch (matrix(QQ, 4/2, 4/2, 1) failed once 4/2 was a Rational;
     # over Qp the column count became the scalar entry)
     args = _int_dims(args)
+    if args and isinstance(args[-1], dict) and 1 <= len(args) <= 4:
+        # matrix(D), matrix(R, D), matrix([R,] n, D), matrix([R,] r, c, D):
+        # the entries of a dict of positions (its keys were read as a list
+        # of entries: matrix(ZZ, 2, 2, {(0, 1): 3}) was [0 1] / [0 1])
+        head = list(args[:-1])
+        ring = head[:1] if head and not isinstance(head[0], int) else []
+        dims = head[len(ring):]
+        if len(dims) <= 2:
+            r, c, placed, aliased = _dict_entries(args[-1], tuple(dims))
+            vals = [v for _, v in placed]
+            base = ring[0] if ring else _dict_base(vals)
+            ent = [0] * (r * c)
+            # (Sage's flag by truth value: None, or no flag, is a dict's
+            # default, sparse; 0 is False; astra2's CORR-PR107-2)
+            sparse = kwds.get("sparse")
+            if aliased and (sparse is None or bool(sparse)):
+                # a position given twice: Sage's default constructor for a
+                # dict (sparse) converts every value in the dict's order,
+                # the overwritten ones too (one that doesn't convert is its
+                # error), and a value that is zero in the ring does not
+                # overwrite; sparse=False places the values as given, the
+                # last one winning, and converts the result (astra2's
+                # CORR-PR107-2).  (The values are no more than the dict's
+                # keys, converted as one row, which admits them.)
+                conv = vals if base is sa.SR else matrix(base, 1, len(vals), [vals]).list()
+                for (p, _), x in zip(placed, conv):
+                    if x != 0:
+                        ent[p] = x
+            else:
+                for p, v in placed:
+                    ent[p] = v
+            # (as rows, so that an entry that is a list stays one entry)
+            rows = [ent[i * c:(i + 1) * c] for i in range(r)] if c else ent
+            if base is sa.SR:
+                return Matrix(base, rows, c)
+            return matrix(base, r, c, rows, **kwds)
     base = None
     is_graph = lambda a: any(c.__name__ == "GenericGraph" for c in type(a).__mro__)
     if any(is_graph(a) for a in args):

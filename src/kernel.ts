@@ -26,6 +26,7 @@ import { needsMore, complete, ipythonSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mimeBundle } from "./runtime/index";
+import { requestCtrlC } from "./runtime/interrupt";
 import { typeName } from "./runtime/object";
 import { exitStatus } from "./notebook-session";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
@@ -280,7 +281,7 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
     const id = nextId++;
     current = { id, msg, count, silent, error: false };
     const done = new Promise<any>((res) => pending.set(id, res));
-    if (intr) intr[0] = 0;
+    if (intr) Atomics.and(intr, 0, ~1); // (a Ctrl-C before this run: not for it; the other bits left)
     worker.postMessage({ id, code: ct.code });
     const r = await done;
     if (killTimer !== null) {
@@ -314,10 +315,7 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
   // a new one started, the run reported stopped, as the notebook page does)
   let killTimer: ReturnType<typeof setTimeout> | null = null;
   const interrupt = () => {
-    if (intr) {
-      intr[0] = 1;
-      Atomics.notify(intr, 0);
-    }
+    if (intr) requestCtrlC(intr);
     if (current === null || killTimer !== null) return;
     const id = current.id;
     killTimer = setTimeout(() => {
@@ -560,7 +558,7 @@ export function kernelWorker(mode: Mode) {
     line = "";
     lineLength = 0;
     magmaError = null;
-    R.INTR[0] = 0;
+    Atomics.and(R.INTR, 0, ~1);
     if (mode === "magma") {
       let py: string | null = null;
       try {

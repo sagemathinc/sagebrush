@@ -73,6 +73,15 @@ pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
     r.as_ptr()
 }
 
+/// The memory share of a default polynomial factorization (item D0), pushed
+/// by the host before a dispatch: bytes, an integer from 0 to 4 GiB, or -1
+/// for none (anything else is none too).  Optional: a host that never calls
+/// it leaves the factorizations their default.
+#[no_mangle]
+pub extern "C" fn sb_set_memory_share(v: f64) {
+    sagebrush_interrupt::set_memory_share(sagebrush_interrupt::share_from_f64(v));
+}
+
 /// After a trap (an error aborts in WebAssembly): "err\x1fKind\x1fmessage"
 /// for the last symbolic error, or "" (an interrupt or a bug).
 #[no_mangle]
@@ -85,6 +94,49 @@ pub unsafe extern "C" fn sb_last_error() -> *const u8 {
     }
     .into_bytes();
     r.as_ptr()
+}
+
+/// The progress frame area (sagebrush_interrupt::progress, design-estimates-
+/// progress r4 §6): the host copies it inside its `sagebrush.interrupted`
+/// import.  An optional export: a host that doesn't look for it reads no
+/// progress, and the engine needs no import for it.
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn sb_progress_ptr() -> *const u32 {
+    sagebrush_interrupt::progress::frames_ptr()
+}
+
+/// The hosts' progress self-test: `depth` nested calls of op `op`, the
+/// innermost counting `steps` steps (each a coarse interrupt check, so the
+/// host copies the frames), then an in-band error if `fail`.  It computes
+/// nothing; the hosts' tests use it (test/progress.test.ts).
+fn progress_selftest(v: &Value) -> Result<Value, String> {
+    use sagebrush_interrupt::progress;
+    let depth = v.get("depth").and_then(Value::as_u64).unwrap_or(1).clamp(1, 40) as usize;
+    let steps = v.get("steps").and_then(Value::as_u64).unwrap_or(1).min(1 << 32);
+    let op = v.get("op").and_then(Value::as_u64).unwrap_or(1) as u32;
+    let mut calls: Vec<progress::Call> = (0..depth).map(|_| progress::begin(op)).collect();
+    let last = calls.last_mut().expect("depth >= 1");
+    for k in 1..=steps {
+        let r = last.report();
+        r.stage = 1;
+        r.stage_index = 1;
+        r.stage_count = Some(2);
+        r.done = k;
+        r.total = Some(steps);
+        r.unit = 8;
+        r.work = k;
+        last.publish();
+        sagebrush_interrupt::check_coarse();
+    }
+    // (innermost first, as nested calls end)
+    while let Some(c) = calls.pop() {
+        drop(c);
+    }
+    if v.get("fail").and_then(Value::as_bool).unwrap_or(false) {
+        return Err("progress_selftest: the requested failure".into());
+    }
+    Ok(json!({ "steps": steps, "calls": depth }))
 }
 
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
@@ -383,6 +435,25 @@ fn exact_json(e: &sagebrush_modsym::exact::Exact) -> Value {
     json!({ "n": e.n, "q": e.q, "genus": e.genus, "cusps": e.cusps, "eisenstein": e.eis, "dim": e.dim,
             "charpoly": big(&e.coeffs), "primes_used": e.primes_used.len(), "bound_bits": e.bound_bits,
             "status": e.status, "checks": e.checks })
+}
+
+/// An optional nonnegative integer field of a request: None when absent or
+/// null.
+fn opt_u64(v: &Value, k: &str) -> Result<Option<u64>, String> {
+    match v.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(x) => x.as_u64().map(Some).ok_or_else(|| format!("'{}' must be a nonnegative integer", k)),
+    }
+}
+
+/// f within the request's optional "rounds": the session's opt-in
+/// nf.relation_rounds (sent only when finite) for the class-group relation
+/// searches, which are otherwise unlimited (classgroup::limits).
+fn with_rounds<T>(v: &Value, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    match opt_u64(v, "rounds")? {
+        None => f(),
+        Some(n) => sagebrush_classgroup::limits::with_round_limit(usize::try_from(n).unwrap_or(usize::MAX), f),
+    }
 }
 
 fn bigs(v: Option<&Value>) -> Result<Vec<BigInt>, String> {
@@ -685,6 +756,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         // ---- Hilbert modular forms over Q(sqrt 5): engine/hmf (hmf.rs) ----
         f if f.starts_with("hmf_") => hmf::dispatch(f, v),
         f if f.starts_with("hmfq_") => hmfq::dispatch(f, v),
+        "progress_tables" => serde_json::from_str(&sagebrush_interrupt::progress::tables_json()).map_err(|e| e.to_string()),
+        "progress_selftest" => progress_selftest(v),
         "perm_group" => perm_group(v),
         "perm_group_named" => perm_group_named(v),
         "characters" => {
@@ -832,7 +905,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             }).collect::<Vec<_>>()))
         }
         "bnf" => {
-            let b = sagebrush_classgroup::api::bnf(&bigs(v.get("f"))?)?;
+            let f = bigs(v.get("f"))?;
+            let b = with_rounds(&v, || sagebrush_classgroup::api::bnf(&f))?;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
                        "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes_with(b.w_proven, b.certified, &b.assumed_primes) }))
         }
@@ -858,7 +932,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                     .map(|x| x.as_u64().or_else(|| x.as_str().and_then(|s| s.parse().ok())).ok_or_else(bad))
                     .collect::<Result<_, _>>()?,
             };
-            let d = sagebrush_classgroup::api::bnf_relations(&bigs(v.get("f"))?, &extra)?;
+            let f = bigs(v.get("f"))?;
+            let d = with_rounds(&v, || sagebrush_classgroup::api::bnf_relations(&f, &extra))?;
             let b = &d.bnf;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
                        "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes_with(b.w_proven, b.certified, &b.assumed_primes),
@@ -874,7 +949,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                 Some(Value::Bool(b)) => *b,
                 Some(x) => return Err(format!("certify must be true or false, not {}", x)),
             };
-            let (h, cyc, reg, certified) = sagebrush_classgroup::api::quadratic_with(&big1(v.get("d"))?, certify)?;
+            let d = big1(v.get("d"))?;
+            let (h, cyc, reg, certified) = with_rounds(&v, || sagebrush_classgroup::api::quadratic_with(&d, certify))?;
             let status = if certified { "certified (assuming GRH)" } else { "conditional on GRH and the stopping rule's estimate, not certified" };
             Ok(json!({ "h": h.to_string(), "cyc": big(&cyc), "regulator": reg, "certified": certified, "status": status, "assumes": assumes(true, certified) }))
         }
@@ -933,7 +1009,13 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             if f.iter().all(|c| c.sign() == sagebrush_bigint::Sign::NoSign) {
                 return Err("factor of the zero polynomial".into());
             }
-            let (c, fs) = sagebrush_poly::try_factor(&f).map_err(|e| e.to_string())?;
+            // "work": the session's opt-in poly.work (sent only when finite);
+            // otherwise the default, which limits only memory
+            let r = match opt_u64(&v, "work")? {
+                None => sagebrush_poly::try_factor(&f),
+                Some(w) => sagebrush_poly::try_factor_with(&f, &sagebrush_poly::Budget::new(sagebrush_poly::Limits { work: w, ..sagebrush_poly::Limits::DEFAULT })),
+            };
+            let (c, fs) = r.map_err(|e| e.to_string())?;
             Ok(json!({ "content": c.to_string(), "factors": fs.iter().map(|(g, e)| json!([big(g), e])).collect::<Vec<_>>() }))
         }
         // ---- polynomials over a number field Q[y]/(T), T monic (poly/src/nf.rs) ----

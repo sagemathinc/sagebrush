@@ -44,7 +44,10 @@ mkdirSync(join(here, "dist"), { recursive: true });
 // (each mode's start, recorded apart: the library's chunks are made from
 // them, web/lib-chunks.mts)
 const STARTS: Record<string, string[]> = {
-  py: ["-c", "import json, re, math, fractions, collections, random, itertools, functools"],
+  // (_limits: no start imports it when no limits are given, src/limits.ts,
+  // but a python session given limits does at its start, and the sage
+  // group's fetch would cost it ~0.3 s: kept in core, plan-coldstart-limits)
+  py: ["-c", "import json, re, math, fractions, collections, random, itertools, functools, _limits"],
   sci: ["-c", "import numpy, matplotlib.pyplot, scipy.io, k3d, ipywidgets"],
   sage: ["--sage", "-c", "pass"],
   matlab: ["--matlab", "-c", "1;"],
@@ -194,8 +197,9 @@ for (const [mod, file, args] of [["_pyjs_docsearch", "docs-index.json", ["--inde
   writeFileSync(join(here, "dist", file), r.stdout);
 }
 // KaTeX's stylesheet and (woff2) fonts, for math in Markdown cells
+// (sorted: readdir's order depends on the filesystem, and these go into sw.js in this order)
 const katexDir = join(here, "..", "node_modules", "katex", "dist");
-const KATEX = ["katex/katex.min.css", ...readdirSync(join(katexDir, "fonts")).filter((f) => f.endsWith(".woff2")).map((f) => "katex/fonts/" + f)];
+const KATEX = ["katex/katex.min.css", ...readdirSync(join(katexDir, "fonts")).filter((f) => f.endsWith(".woff2")).sort().map((f) => "katex/fonts/" + f)];
 mkdirSync(join(here, "dist", "katex", "fonts"), { recursive: true });
 for (const f of KATEX) copyFileSync(join(katexDir, f.slice("katex/".length)), join(here, "dist", f));
 // The atlas (web/atlas): its page script and engine worker, and llms.txt.
@@ -368,7 +372,8 @@ if (hasSite) mkdirSync(join(siteDir, "public", "katex", "fonts"), { recursive: t
 // the 3D viewer, loaded by the page when a Graphics3d is shown
 // The app (PWA): manifest, icons, and the service worker with the files it
 // keeps for offline use, versioned by their content
-const ICONS = readdirSync(join(here, "icons")).map((f) => "icons/" + f);
+// (sorted, as KATEX: so that sw.js is the same from any checkout)
+const ICONS = readdirSync(join(here, "icons")).sort().map((f) => "icons/" + f);
 mkdirSync(join(here, "dist", "icons"), { recursive: true });
 for (const f of ICONS) copyFileSync(join(here, f), join(here, "dist", f));
 copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.webmanifest"));
@@ -402,6 +407,15 @@ const DIGESTS = Object.fromEntries([...SHELL, ...LAZY].map((p) => {
 }));
 writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__LAZY__", JSON.stringify(LAZY)).replace("__DIGESTS__", JSON.stringify(DIGESTS)));
 if (hasSite) mkdirSync(join(siteDir, "public", "icons"), { recursive: true });
+// the shell worker's bootstrap (web/shell/worker-boot.js; plan-bash-shell r3
+// §6), served with its own policy (web/csp.ts); the shell's module comes from a
+// package set, never from this build
+mkdirSync(join(here, "dist", "shell"), { recursive: true });
+copyFileSync(join(here, "shell", "worker-boot.js"), join(here, "dist", "shell", "worker-boot.js"));
+if (hasSite) {
+  mkdirSync(join(siteDir, "public", "shell"), { recursive: true });
+  copyFileSync(join(here, "shell", "worker-boot.js"), join(siteDir, "public", "shell", "worker-boot.js"));
+}
 // the notebook component's demo page (web/embed)
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
 copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));

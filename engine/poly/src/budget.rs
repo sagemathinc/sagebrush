@@ -62,6 +62,18 @@ impl Phase {
     }
 }
 
+/// Where a budget's memory limit came from (item D0).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemorySource {
+    /// The caller's limits (Budget::new, or an enclosing with_default_limits).
+    Policy,
+    /// The default budget, with the host's share of the memory it observed
+    /// free (sagebrush_interrupt::memory_share).
+    HostShare,
+    /// The default budget without a figure from the host: Limits::DEFAULT.
+    NoHostFigure,
+}
+
 /// A refusal: a resource limit was reached; nothing was factored.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FactorLimit {
@@ -69,18 +81,30 @@ pub struct FactorLimit {
     pub what: &'static str,
     pub need: u64,
     pub remaining: u64,
+    /// The budget's memory limit, as applied (copied when the budget was
+    /// made), and where it came from.
+    pub memory_limit: u64,
+    pub memory_source: MemorySource,
 }
 
 impl fmt::Display for FactorLimit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "factor: resource limit exceeded ({} in {}: {} > {}); not factored",
+            "factor: resource limit exceeded ({} in {}: {} > {}",
             self.what,
             self.phase.name(),
             self.need,
             self.remaining
-        )
+        )?;
+        if self.what.starts_with("memory") {
+            match self.memory_source {
+                MemorySource::Policy => {}
+                MemorySource::HostShare => write!(f, "; the limit, {} bytes, is this factorization's share of the memory observed free", self.memory_limit)?,
+                MemorySource::NoHostFigure => write!(f, "; the limit, {} bytes, is the default: no memory figure from the host", self.memory_limit)?,
+            }
+        }
+        write!(f, "); not factored")
     }
 }
 
@@ -88,7 +112,7 @@ impl std::error::Error for FactorLimit {}
 
 pub type FResult<T> = Result<T, FactorLimit>;
 
-/// The default limits of one public call (plan r3, section 5.1).
+/// The limits of one public call.
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     /// The aggregate work, in limb operations.
@@ -105,16 +129,32 @@ pub struct Limits {
 }
 
 impl Limits {
-    /// The work constant, calibrated on VM 1 (Oct 22, at 01b3343e; tests::
-    /// timings, the wasm comparison in the PR): the slowest sustained
-    /// throughput measured (cases of 0.2 s or more) was 3.3e8 units/s
-    /// natively (S_6, lattice-bound; dense Hensel/modular cases ran at
-    /// 6.6e8 to 3.4e9) and 1.9e8 units/s in wasm (S_6; wasm was 1.4x to
-    /// 2.1x native).  W = 2^33 (the common bound, under the 60 s board and
-    /// MCP default) is then at most about 26 s native and 45 s in wasm at
-    /// the slowest measured rates.  Pinned by
-    /// tests::default_work_is_calibrated.
+    /// The default of every call that makes its own budget: no work, subset,
+    /// division or input-size limit (a computation's own time is the
+    /// user's: interrupting is the control), and the memory guard kept at
+    /// 512 MiB, since running out of memory loses the session.  Finite
+    /// limits are opt-in: Budget::new(Limits::CALIBRATED) or a policy of
+    /// the caller's, also through with_default_limits.  Pinned by
+    /// tests::default_is_unlimited_except_memory.
     pub const DEFAULT: Limits = Limits {
+        work: u64::MAX,
+        memory: 512 << 20,
+        subsets: u64::MAX,
+        divisions: u64::MAX,
+        max_degree: usize::MAX,
+        max_coeff_bits: u64::MAX,
+        max_total_bits: u64::MAX,
+    };
+    /// The finite limits that were the default until C0's follow-up, kept as
+    /// the documented opt-in policy.  The work constant was calibrated on
+    /// VM 1 (Oct 22, at 01b3343e; tests::timings, the wasm comparison in
+    /// the PR): the slowest sustained throughput measured (cases of 0.2 s
+    /// or more) was 3.3e8 units/s natively (S_6, lattice-bound; dense
+    /// Hensel/modular cases ran at 6.6e8 to 3.4e9) and 1.9e8 units/s in
+    /// wasm (S_6; wasm was 1.4x to 2.1x native).  W = 2^33 is then at most
+    /// about 26 s native and 45 s in wasm at the slowest measured rates.
+    /// Pinned by tests::calibrated_work.
+    pub const CALIBRATED: Limits = Limits {
         work: 1 << 33,
         memory: 512 << 20,
         subsets: 1 << 20,
@@ -139,6 +179,7 @@ impl Limits {
 /// reservation guards can live alongside other borrows.
 pub struct Budget {
     limits: Limits,
+    memory_source: MemorySource,
     work: Cell<u64>,
     live: Cell<u64>,
     subsets: Cell<u64>,
@@ -154,10 +195,17 @@ thread_local! {
 }
 
 impl Default for Budget {
-    /// Limits::DEFAULT, or the limits of an enclosing with_default_limits
-    /// on this thread.
+    /// The limits of an enclosing with_default_limits on this thread,
+    /// unchanged (an explicit policy is never widened, and the host is not
+    /// asked); else Limits::DEFAULT (no limit but memory) with the memory of
+    /// the host's share, asked once here and copied into the budget, so that
+    /// a later share never changes a budget already made (item D0); without
+    /// a share, Limits::DEFAULT.
     fn default() -> Budget {
-        Budget::new(DEFAULT_OVERRIDE.with(|o| o.get()).unwrap_or(Limits::DEFAULT))
+        if let Some(l) = DEFAULT_OVERRIDE.with(|o| o.get()) {
+            return Budget::new(l);
+        }
+        Budget::default_with(sagebrush_interrupt::memory_share())
     }
 }
 
@@ -181,6 +229,7 @@ impl Budget {
     pub fn new(limits: Limits) -> Budget {
         Budget {
             limits,
+            memory_source: MemorySource::Policy,
             work: Cell::new(limits.work),
             live: Cell::new(0),
             subsets: Cell::new(limits.subsets),
@@ -197,6 +246,19 @@ impl Budget {
 
     pub fn limits(&self) -> &Limits {
         &self.limits
+    }
+
+    pub fn memory_source(&self) -> MemorySource {
+        self.memory_source
+    }
+
+    /// The default budget (no explicit policy) for a host share: its memory,
+    /// copied into the budget, or Limits::DEFAULT's without one.
+    fn default_with(share: Option<u64>) -> Budget {
+        match share {
+            Some(share) => Budget { memory_source: MemorySource::HostShare, ..Budget::new(Limits { memory: share, ..Limits::DEFAULT }) },
+            None => Budget { memory_source: MemorySource::NoHostFigure, ..Budget::new(Limits::DEFAULT) },
+        }
     }
 
     pub fn phase(&self) -> Phase {
@@ -235,7 +297,7 @@ impl Budget {
     }
 
     pub fn refuse(&self, what: &'static str, need: u64, remaining: u64) -> FactorLimit {
-        FactorLimit { phase: self.phase.get(), what, need, remaining }
+        FactorLimit { phase: self.phase.get(), what, need, remaining, memory_limit: self.limits.memory, memory_source: self.memory_source }
     }
 
     /// Debit `units` limb operations (computed by the caller with checked
@@ -386,6 +448,37 @@ mod tests {
         assert!(b.debit(None).is_err());
         assert!(b.reserve(None).is_err());
         assert!(e.to_string().starts_with("factor: resource limit exceeded (work in LLL: 60 > 40)"));
+    }
+
+    #[test]
+    fn default_memory_from_the_host_share() {
+        // (default_with, the default budget for a given share: the
+        // process-wide share itself is left alone, as other tests make
+        // default budgets in parallel; item D0)
+        let b = Budget::default_with(None);
+        assert_eq!((b.limits().memory, b.memory_source()), (512 << 20, MemorySource::NoHostFigure));
+        let e = b.reserve(Some(1 << 40)).err().unwrap();
+        assert_eq!((e.memory_limit, e.memory_source), (512 << 20, MemorySource::NoHostFigure));
+        assert!(e.to_string().contains("; the limit, 536870912 bytes, is the default: no memory figure from the host); not factored"), "{}", e);
+        // a share applies, exactly; the budget keeps its copy
+        let b = Budget::default_with(Some(3000));
+        assert_eq!((b.limits().memory, b.memory_source()), (3000, MemorySource::HostShare));
+        assert!(b.reserve(Some(3000)).is_ok());
+        let e = b.reserve(Some(3001)).err().unwrap();
+        assert_eq!((e.what, e.need, e.remaining, e.memory_limit), ("memory", 3001, 3000, 3000));
+        assert!(e.to_string().ends_with("; the limit, 3000 bytes, is this factorization's share of the memory observed free); not factored"), "{}", e);
+        // a share of 0 refuses every reservation
+        assert!(Budget::default_with(Some(0)).reserve(Some(1)).is_err());
+        // the other limits are the default's
+        let l = Budget::default_with(Some(3000)).limits().to_owned();
+        assert_eq!((l.work, l.subsets, l.divisions, l.max_degree), (Limits::DEFAULT.work, Limits::DEFAULT.subsets, Limits::DEFAULT.divisions, Limits::DEFAULT.max_degree));
+        // an explicit policy is used as given (never widened, nor narrowed)
+        let tight = Limits { memory: 1000, ..Limits::DEFAULT };
+        let b = with_default_limits(tight, Budget::default);
+        assert_eq!((b.limits().memory, b.memory_source()), (1000, MemorySource::Policy));
+        let e = b.reserve(Some(1001)).err().unwrap();
+        assert!(e.to_string().ends_with("(memory in admission: 1001 > 1000); not factored"), "{}", e);
+        assert_eq!(Budget::new(Limits::DEFAULT).memory_source(), MemorySource::Policy);
     }
 
     #[test]

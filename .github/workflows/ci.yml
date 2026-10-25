@@ -29,6 +29,7 @@ jobs:
       modes: ${{ steps.paths.outputs.modes }}
       engine_smoke: ${{ steps.paths.outputs.engine_smoke }}
       engine_full: ${{ steps.paths.outputs.engine_full }}
+      engine_cpython: ${{ steps.paths.outputs.engine_cpython }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
     steps:
       - uses: actions/checkout@v4
@@ -152,6 +153,7 @@ jobs:
           SAGEBRUSH_HARDENED=0 node --test --test-concurrency="$SAGEBRUSH_CPUS" dist/test/security.test.js
           node scripts/build-cli.mjs
           node web/test-cli-sigint.mjs
+          node web/test-cli-prompt-signals.mjs
           node web/test-cli-limits.mjs
           node scripts/bench-ff-limits.mjs
           bun web/build.ts
@@ -170,6 +172,8 @@ jobs:
           node scripts/core-api-surface.mjs --check
           node scripts/size-budget.mjs --check
           node scripts/test-size-measure.mjs
+          node scripts/test-npm-pack-metrics.mjs
+          node scripts/test-install-timing.mjs
           node --test scripts/test-heap-budget.mjs
           node scripts/heap-budget.mjs --check
           node scripts/pypi-import.mjs --check
@@ -184,10 +188,17 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/size-record"
           node scripts/size-measure.mjs --record --out "$RUNNER_TEMP/size-record/sizes.json"
+      # The npm package's packed and unpacked bytes, beside the record and never
+      # part of the gate (plan-npm-pack-metrics-r3): report-only, so a failure
+      # here is a reason in the summary, not a failed job
+      - name: the npm package metrics
+        continue-on-error: true
+        timeout-minutes: 2
+        run: node scripts/npm-pack-metrics.mjs --record --out "$RUNNER_TEMP/size-record/npm-pack.json"
       - uses: actions/upload-artifact@v4
         with:
           name: sizes-${{ github.sha }}
-          path: ${{ runner.temp }}/size-record/sizes.json
+          path: ${{ runner.temp }}/size-record/
           retention-days: 90
           if-no-files-found: error
       - name: Mermaid flowcharts against Mermaid's parser
@@ -208,10 +219,10 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (the worst sequential path, resolve 2 + install 5 + build 8 + the
-    # old-key base 10 = 25, plus 15 for checkout, setup, records, cleanup and
-    # upload: scripts/test-size-measure.mjs checks this sum)
-    timeout-minutes: 40
+    # (the worst sequential path, resolve 2 + install 5 + build 8 + the npm
+    # metrics 2 + the old-key base 10 = 27, plus 15 for checkout, setup,
+    # records, cleanup and upload: scripts/test-size-measure.mjs checks this sum)
+    timeout-minutes: 42
     permissions:
       contents: read
       actions: read
@@ -260,6 +271,20 @@ jobs:
           node scripts/size-measure.mjs --record --root "$RUNNER_TEMP/size-base" --out "$RUNNER_TEMP/size-records/base-record.json"
           if [ "${{ steps.resolve.outputs.bootstrap }}" = true ]; then
             node scripts/size-measure.mjs --legacy --root "$RUNNER_TEMP/size-base" --out "$RUNNER_TEMP/size-records/legacy.json"
+          fi
+      # (the base's npm package metrics, report-only: here, before any old-key
+      # toolchain, so under this run's pinned Node and its bundled npm, as the
+      # merge's are; the rebuilt base when there is one, else the companion of
+      # the fetched push record, bound to it; plan-npm-pack-metrics-r3 §2)
+      - name: the base's npm package metrics
+        if: always() && steps.resolve.outputs.mode != 'absolute'
+        continue-on-error: true
+        timeout-minutes: 2
+        run: |
+          if [ "${{ steps.resolve.outputs.need_new }}" = true ]; then
+            node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records" --root "$RUNNER_TEMP/size-base"
+          else
+            node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records"
           fi
       # (the old-key base, O: the base's own measurement and pins)
       - uses: oven-sh/setup-bun@v2
@@ -338,6 +363,14 @@ jobs:
             cp "$RUNNER_TEMP/size-merge/sizes.json" "$RUNNER_TEMP/size-records/merge-record.json"
             node scripts/size-measure.mjs --gate --records "$RUNNER_TEMP/size-records" --out "$RUNNER_TEMP/size-records/size-gate.json"
           fi
+      # (report-only: it reads the two npm-pack records and appends a table to
+      # the summary; the gate's result stays the gate step's own)
+      - name: the npm package metrics
+        if: always()
+        continue-on-error: true
+        env:
+          MODE: ${{ needs.size-base.outputs.mode }}
+        run: node scripts/npm-pack-metrics.mjs --report --merge "$RUNNER_TEMP/size-merge/npm-pack.json" --base "$RUNNER_TEMP/size-records/base-npm-pack.json" --mode "$MODE"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -529,6 +562,8 @@ jobs:
               node web/test-kernel-start.mjs
               node web/test-pkgset-pin.mjs
               node web/test-pkgset-page.mjs
+              # (the bash shell's loader and its worker's own policy: plan-bash-shell r3 step 1)
+              bun web/test-shell.mjs
               node web/test-worker-limits.mjs
               ;;
             board-a)
@@ -585,6 +620,8 @@ jobs:
               bun web/board/test-cached-store.mjs
               bun web/board/test-complete.mjs
               bun web/board/test-syncdb.mjs
+              bun web/board/test-board-merge3.mjs
+              bun web/board/test-lossless.mjs
               bun web/board/test-mermaid-export.mjs
               bun web/board/test-fromhtml.mjs
               bun web/board/test-svg.mjs
@@ -873,7 +910,7 @@ jobs:
 
   engine-cpython:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_cpython == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
@@ -899,11 +936,15 @@ jobs:
           python3 engine/py/test_certify.py
           python3 engine/py/test_bench.py
           python3 engine/py/test_mcp.py
+          python3 engine/py/test_runs.py
+          python3 engine/py/test_runs_sweep.py
           python3 engine/py/test_workspace_tools.py
           python3 engine/py/test_pairing.py
           python3 engine/py/test_chat.py
           python3 engine/py/test_limits.py
           python3 engine/py/test_memguard.py
+          python3 engine/py/test_capacity.py
+          python3 engine/py/test_progress.py
           python3 sage-tests/run_cpython.py -v
 
   ci:

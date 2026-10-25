@@ -29,6 +29,8 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
+pub mod progress;
+
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// The panic payload of an interruption.
@@ -58,12 +60,20 @@ pub fn requested() -> bool {
     REQUESTED.load(Relaxed)
 }
 
+/// Whether the caller asked the current call to stop at its next clean stop
+/// point (a soft stop, design-agent-api-library r3 §5).  Always false in this
+/// build: soft stops come with the stop protocol (estimates plan r3, PR 5a).
+#[inline]
+pub fn stop_requested() -> bool {
+    false
+}
+
 /// Stop here (by unwinding) if an interrupt has been requested.
 #[inline]
 pub fn check() {
     poll_host();
     #[cfg(feature = "test-hooks")]
-    hooks::count();
+    hooks::count(false);
     if REQUESTED.load(Relaxed) {
         interrupt()
     }
@@ -75,7 +85,7 @@ pub fn check() {
 pub fn check_coarse() {
     poll_host_now();
     #[cfg(feature = "test-hooks")]
-    hooks::count();
+    hooks::count(true);
     if REQUESTED.load(Relaxed) {
         interrupt()
     }
@@ -137,13 +147,18 @@ pub mod hooks {
     static TRACE: Mutex<Vec<u8>> = Mutex::new(Vec::new());
     static LAST_NS: AtomicU64 = AtomicU64::new(0);
     static MAX_GAP_NS: AtomicU64 = AtomicU64::new(0);
+    // the WebAssembly host's polls, simulated: every check_coarse, and
+    // every 1024th check (poll_host's rule)
+    static FINE: AtomicU64 = AtomicU64::new(0);
+    static LAST_POLL_NS: AtomicU64 = AtomicU64::new(0);
+    static MAX_POLL_GAP_NS: AtomicU64 = AtomicU64::new(0);
 
     fn now_ns() -> u64 {
         static START: OnceLock<Instant> = OnceLock::new();
         START.get_or_init(Instant::now).elapsed().as_nanos() as u64
     }
 
-    pub(crate) fn count() {
+    pub(crate) fn count(coarse: bool) {
         let cur = CURRENT.load(Relaxed);
         COUNTS[cur].fetch_add(1, Relaxed);
         let t = TOTAL.fetch_add(1, Relaxed) + 1;
@@ -153,6 +168,12 @@ pub mod hooks {
             let last = LAST_NS.swap(n, Relaxed);
             if last != 0 {
                 MAX_GAP_NS.fetch_max(n - last, Relaxed);
+            }
+            if coarse || FINE.fetch_add(1, Relaxed) % 1024 == 0 {
+                let last = LAST_POLL_NS.swap(n, Relaxed);
+                if last != 0 {
+                    MAX_POLL_GAP_NS.fetch_max(n - last, Relaxed);
+                }
             }
         }
         let a = ARMED.load(Relaxed);
@@ -168,6 +189,9 @@ pub mod hooks {
         TRACE.lock().unwrap_or_else(|e| e.into_inner()).clear();
         LAST_NS.store(0, Relaxed);
         MAX_GAP_NS.store(0, Relaxed);
+        FINE.store(0, Relaxed);
+        LAST_POLL_NS.store(0, Relaxed);
+        MAX_POLL_GAP_NS.store(0, Relaxed);
         TRACING.store(true, Relaxed);
     }
 
@@ -182,6 +206,14 @@ pub mod hooks {
     /// The longest wall time between two traced checks, in nanoseconds.
     pub fn max_gap_ns() -> u64 {
         MAX_GAP_NS.load(Relaxed)
+    }
+
+    /// The longest wall time between two traced polls of the WebAssembly
+    /// host, in nanoseconds, as poll_host and poll_host_now would make them
+    /// (every check_coarse, every 1024th check): how long a Stop in the
+    /// browser could go unnoticed.
+    pub fn max_poll_gap_ns() -> u64 {
+        MAX_POLL_GAP_NS.load(Relaxed)
     }
 
     /// The phase that was current when an armed Stop was requested.
@@ -313,6 +345,84 @@ fn poll_host_now() {
     }
 }
 
+// ---- the host's memory share (item D0, plan-d0-capacity-r2 §3)
+//
+// The memory of one polynomial factorization made with the default budget
+// (sagebrush-poly's Budget::default): the host's share of the memory it
+// observes free (lib/_capacity.py poly_share), or none, and then that
+// budget keeps its own default (512 MiB).
+// - WebAssembly: the host pushes it before a dispatch (engine/web's export
+//   sb_set_memory_share, which hosts may leave alone: then there is none).
+//   The static belongs to the instance, and dispatches within one instance
+//   are serialized, so a factorization sees the share pushed at its call's
+//   entry, and a long call keeps it.
+// - native: a callback the host registers (the CPython module's), asked
+//   once per default budget.  Top-level factorizations are serialized in
+//   one host worker; concurrent native top-level factorizations would each
+//   get the share, which is per factorization, not aggregate: they would
+//   need their own aggregate admission review (daybreak2, D0 r2).
+
+/// No share: u64::MAX.
+static MEMORY_SHARE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+
+#[cfg(not(target_arch = "wasm32"))]
+type ShareHost = Box<dyn Fn() -> Option<u64> + Send + Sync>;
+#[cfg(not(target_arch = "wasm32"))]
+static SHARE_HOST: std::sync::OnceLock<ShareHost> = std::sync::OnceLock::new();
+
+/// Set (or, with None, clear) the pushed share.
+pub fn set_memory_share(share: Option<u64>) {
+    MEMORY_SHARE.store(share.unwrap_or(u64::MAX), Relaxed);
+}
+
+/// The share pushed as a WebAssembly f64 (engine/web's sb_set_memory_share):
+/// an integer from 0 to 4 GiB (an instance's ceiling bounds it), else none;
+/// -1 is the host's "no figure".
+pub fn share_from_f64(v: f64) -> Option<u64> {
+    if v.is_finite() && v >= 0.0 && v.fract() == 0.0 && v <= 4294967296.0 {
+        Some(v as u64)
+    } else {
+        None
+    }
+}
+
+/// Register the native host's share (the first registration stands).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn set_memory_share_host(f: impl Fn() -> Option<u64> + Send + Sync + 'static) {
+    let _ = SHARE_HOST.set(Box::new(f));
+}
+
+/// The share for a default budget made now, or None.
+pub fn memory_share() -> Option<u64> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(f) = SHARE_HOST.get() {
+        return f();
+    }
+    let v = MEMORY_SHARE.load(Relaxed);
+    (v != u64::MAX).then_some(v)
+}
+
+#[cfg(test)]
+mod memory_share_tests {
+    use super::*;
+
+    #[test]
+    fn pushed_share_and_its_range() {
+        // (the one test that touches the process-wide static)
+        assert_eq!(memory_share(), None);
+        set_memory_share(Some(123 << 20));
+        assert_eq!(memory_share(), Some(123 << 20));
+        set_memory_share(None);
+        assert_eq!(memory_share(), None);
+        assert_eq!(share_from_f64(0.0), Some(0));
+        assert_eq!(share_from_f64(4294967296.0), Some(1 << 32));
+        assert_eq!(share_from_f64(-1.0), None);
+        for bad in [4294967297.0, 1.5, -0.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -2.0] {
+            assert_eq!(share_from_f64(bad), None, "{}", bad);
+        }
+    }
+}
+
 // ---- Ctrl-C during a native call
 
 static PRESSES: AtomicU32 = AtomicU32::new(0);
@@ -397,11 +507,15 @@ impl Drop for SigintGuard {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// Held by every test that touches the process's interrupt flag.
+    pub(crate) static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn check_unwinds_and_catch_reports() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         clear();
         assert_eq!(catch(|| 7), Ok(7));
         let mut dropped = false;

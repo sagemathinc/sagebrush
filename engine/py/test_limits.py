@@ -49,7 +49,7 @@ def test_environment_invalid_prevents_marker():
     big = file("big.json", '{"ff.work": 100000' + " " * 5000 + "}")
     cases = [
         (file("range.json", '{"ff.work": 5}'), "ValueError: limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]"),
-        (file("unknown.json", '{"ff.wrok": 5}'), "ValueError: limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work)"),
+        (file("unknown.json", '{"ff.wrok": 5}'), "ValueError: limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work, nf.certify_index_max, nf.certify_norm_max, nf.relation_rounds, poly.work)"),
         (file("array.json", "[1]"), "ValueError: limits: the limits must be a JSON object, not an array"),
         (file("bool.json", '{"ff.work": true}'), 'ValueError: limits: ff.work must be an integer or "unlimited", not true'),
         (file("float.json", '{"ff.work": 1e7}'), 'ValueError: limits: ff.work must be an integer or "unlimited", not 10000000.0'),
@@ -127,14 +127,26 @@ def test_unlimited_by_default_and_mixed():
     # unlimited, the fields' bound is the Conway search's cutoff, 10^7
     show = "import _sage_ffsub as S, sys; print(S.WORK, S.EMBED_MAX, S.ROOT_BITS, sys._sagebrush_limits)"
     cases = [
-        ("", "inf 10000000 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited})"),
-        ('sagebrush.set_limits({"ff.work": 100000})', "100000 1048576 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000})"),
-        ('sagebrush.set_limits({"ff.work": "unlimited", "ff.root_bits": 64})', "inf 10000000 64 Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited})"),
-        ('sagebrush.set_limits({"ff.embed_max": 4096})', "inf 4096 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': 4096, 'ff.root_bits': unlimited, 'ff.work': unlimited})"),
+        ("", "inf 10000000 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited})"),
+        ('sagebrush.set_limits({"ff.work": 100000})', "100000 1048576 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited})"),
+        ('sagebrush.set_limits({"ff.work": "unlimited", "ff.root_bits": 64})', "inf 10000000 64 Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited})"),
+        ('sagebrush.set_limits({"ff.embed_max": 4096})', "inf 4096 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': 4096, 'ff.root_bits': unlimited, 'ff.work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited})"),
     ]
     for setup, want in cases:
         rc, out, err = run("import sagebrush\n%s\nfrom sagebrush.sage import *\n%s" % (setup, show))
         assert rc == 0 and out == want + "\n", (setup, rc, out, err[-500:])
+
+
+def test_nf_poly_keys_reach_the_engine_only_when_finite():
+    # C0's per-area follow-up: sagebrush/_engine.py adds the field only when
+    # the session's limit is finite, and an explicit argument wins
+    probe = ("import sagebrush\n%s\nimport sagebrush._engine as E\n"
+             "print(E._with_limits('bnf', {}), E._with_limits('factor', {}), E._with_limits('bnf_certify', {'norm_max': 5}), E._with_limits('nf_data', {}))")
+    rc, out, err = run(probe % "")
+    assert rc == 0 and out == "{} {} {'norm_max': 5} {}\n", (rc, out, err[-500:])
+    setup = 'sagebrush.set_limits({"poly.work": 1048576, "nf.relation_rounds": 7, "nf.certify_index_max": 1000})'
+    rc, out, err = run(probe % setup)
+    assert rc == 0 and out == "{'rounds': 7} {'work': 1048576} {'norm_max': 5, 'index_max': 1000} {}\n", (rc, out, err[-500:])
 
 
 def test_descent_table_memory():

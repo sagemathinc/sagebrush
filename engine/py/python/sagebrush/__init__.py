@@ -27,7 +27,7 @@ import importlib.util as _util
 import os as _os
 import sys as _sys
 
-__all__ = ["ap", "linalg", "mf", "modsym", "nf", "poly", "set_limits"]
+__all__ = ["ap", "capabilities", "linalg", "mf", "modsym", "nf", "poly", "progress_snapshot", "set_limits", "stop_points"]
 
 
 def _limits_module():
@@ -64,6 +64,29 @@ def set_limits(limits):
     L.propose(L.validate(limits))
 
 
+def _capacity_module():
+    """_sagelib/_capacity.py as the top-level module _capacity, the name the
+    Sage layer's guards import it by (as _limits_module does for _limits)."""
+    m = _sys.modules.get("_capacity")
+    if m is None:
+        path = _os.path.join(_os.path.dirname(__file__), "_sagelib", "_capacity.py")
+        spec = _util.spec_from_file_location("_capacity", path)
+        m = _util.module_from_spec(spec)
+        _sys.modules["_capacity"] = m
+        try:
+            spec.loader.exec_module(m)
+        except BaseException:
+            del _sys.modules["_capacity"]
+            raise
+    return m
+
+
+def _capacity_share():
+    """The memory of one default polynomial factorization (item D0), for the
+    native engines, which ask once per factorization."""
+    return _capacity_module().poly_share()
+
+
 def _limits_from_environment():
     """SAGEBRUSH_LIMITS=FILE: a JSON text of at most 4096 bytes, proposed
     (not locked) at import; an unreadable or invalid file is a ValueError
@@ -89,3 +112,63 @@ def _limits_from_environment():
 _limits_from_environment()
 
 from . import ap, linalg, mf, modsym, nf, poly  # noqa: E402
+
+
+def _register_capacity():
+    try:
+        from ._native import set_memory_share_source
+    except ImportError:
+        return  # (an older native build: its factorizations keep their default)
+    set_memory_share_source(_capacity_share)
+
+
+_register_capacity()
+
+
+# ---- the agent API (estimates plan r3 §1.1): what this build provides,
+# live progress, and the entry points of the pieces still to come, which
+# refuse before running.
+
+def capabilities():
+    """What this build of the agent API provides: {"progress": True,
+    "estimate": False, ...} (sagebrush.records.capabilities)."""
+    from . import records
+    return records.capabilities()
+
+
+def stop_points(op):
+    """The clean stop points implemented for op ([] in this build)."""
+    from . import records
+    return records.stop_points(op)
+
+
+def progress_snapshot():
+    """Every call in progress now, as sagebrush.progress/1 records
+    (sagebrush.progress.snapshot)."""
+    from . import progress
+    return progress.snapshot()
+
+
+def _unavailable(name):
+    from . import records
+    return records.unavailable("sagebrush." + name)
+
+
+# (their signatures are the designs': design-estimates-progress r4 §3,
+# design-agent-api-library r3 §5 and §6)
+def estimate(f, *args, **kwds):
+    """The time and memory estimate of f(*args, **kwds): not available in
+    this build (sagebrush.capabilities())."""
+    raise _unavailable("estimate")
+
+
+def run(f, *args, **kwds):
+    """f(*args, **kwds) as an outcome/1 record: not available in this build
+    (sagebrush.capabilities())."""
+    raise _unavailable("run")
+
+
+def resume(checkpoint, **kwds):
+    """Resumes a checkpoint: not available in this build
+    (sagebrush.capabilities())."""
+    raise _unavailable("resume")
