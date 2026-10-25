@@ -17,10 +17,11 @@ export interface WorkerLike {
   terminate(): void;
   onmessage: ((ev: { data: any }) => void) | null;
 }
-export type DepsInput = Omit<FileDepsInput, "files" | "builtinModules" | "externalModules" | "readFile" | "onDep" | "onUnfollowed" | "onProgress" | "signal"> & {
+export type DepsInput = Omit<FileDepsInput, "files" | "builtinModules" | "externalModules" | "packageModules" | "readFile" | "onDep" | "onUnfollowed" | "onProgress" | "signal"> & {
   files: [string, { size?: number }][];
   builtinModules: string[];
   externalModules: string[];
+  packageModules: string[];
 };
 export interface DepsHandlers {
   onDep(path: string, reason: Reason): void;

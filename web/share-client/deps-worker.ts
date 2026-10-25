@@ -31,6 +31,7 @@ async function run(s: any) {
       importPath: s.importPath,
       builtinModules: new Set(s.builtinModules),
       externalModules: new Set(s.externalModules),
+      packageModules: new Set(s.packageModules),
       readFile: (path) =>
         new Promise((ok, no) => {
           waiting.set(path, { ok, no });
