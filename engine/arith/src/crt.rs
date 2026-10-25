@@ -105,7 +105,8 @@ pub fn crt_bytes(k: usize, prime_bits: u64) -> Option<CrtBytes> {
     let grown = |n: u64| Some(times(2, n)?.max(4));
     // qj is pushed to about lp words, then resized to lp + 1
     let q_row = grown(lp.checked_add(1)?)?;
-    let q = vec_of(k, VEC)?.checked_add(times(k, vec_of(q_row, 8)?)?)?;
+    // (q itself is pushed, k rows)
+    let q = vec_of(grown(k)?, VEC)?.checked_add(times(k, vec_of(q_row, 8)?)?)?;
     let triangle = times(k, k.saturating_sub(1))? / 2;
     let pm = vec_of(k, VEC)?.checked_add(times(k, VEC)?)?.checked_add(times(triangle, 8)?)?;
     // mods, finv and c have exact capacities; w is pushed
