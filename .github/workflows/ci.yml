@@ -504,6 +504,54 @@ jobs:
           CHROME=google-chrome node web/board/test-idb-stall.mjs
           node web/board/test-idb-within.mjs
 
+  # The interrupt matrix's CI set (plan-interrupt-harness r5 section 8): Ctrl-C on the CLI, the
+  # interactive prompt and the notebook page's Stop, with the signal trials S1-S4 and the
+  # PENDING-READY probes, against web/interrupt-baseline.json.  Its own job, budgeted at about 2x
+  # pilot 4's measurement (401 s + 33 s); the harness's internal budget (13 min) ends first, so
+  # an overrun is reported as INVALID-budget rows, never a silent kill.
+  interrupt-matrix:
+    needs: changes
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.web == 'true' || needs.changes.outputs.engine_smoke == 'true')
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - name: detect CI CPU quota
+        run: scripts/ci-cpus.sh
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
+      - name: interrupt matrix (CI set)
+        run: |
+          python3 web/serve.py 8765 &
+          server_pid=$!
+          cleanup_server() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup_server EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          sleep 1
+          kill -0 "$server_pid"
+          SB_URL=http://127.0.0.1:8765/ CHROME=google-chrome node web/test-interrupt-matrix.mjs --ci --budget-ms 780000 --out "$RUNNER_TEMP/interrupt-matrix.json"
+      - name: keep the rows
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interrupt-matrix
+          path: ${{ runner.temp }}/interrupt-matrix.json*
+          if-no-files-found: ignore
+
   web-browser:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
@@ -964,6 +1012,7 @@ jobs:
       - web-sync
       - web-runner
       - web-browser
+      - interrupt-matrix
       - conformance
       - modes
       - engine-rust
@@ -982,6 +1031,7 @@ jobs:
             ${{ needs.checks.result }} ${{ needs.size-gate.result }}
             ${{ needs.web-sync.result }}
             ${{ needs.web-runner.result }} ${{ needs.web-browser.result }}
+            ${{ needs.interrupt-matrix.result }}
             ${{ needs.conformance.result }} ${{ needs.modes.result }}
             ${{ needs.engine-rust.result }} ${{ needs.engine-wasm.result }}
             ${{ needs.engine-node.result }} ${{ needs.engine-language.result }}
