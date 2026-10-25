@@ -51,6 +51,16 @@ export const PKGSET_LIMITS = Object.freeze({
   jsonHeapPerByte: 3,
   jsonHeapSlack: 1 * MiB,
   errorChars: 1024,
+  // js packages (addendum A1.2: a set of format v2): at most 4, one module
+  // each of at most 4 MiB of UTF-8 text, and their chunks at most 8 MiB
+  // together (each chunk is at most chunkBytes, the one-chunk cap).  Not in
+  // the Python closure or residentBytes: js never enters an engine worker.
+  jsPackages: 4,
+  jsModuleBytes: 4 * MiB,
+  jsBytes: 8 * MiB,
+  // (a js chunk's "notices", the license texts of what its module bundles
+  // (A1.1a): plain text, at most this much UTF-8, inside the chunk's own cap)
+  jsNoticesBytes: 256 * KiB,
 });
 
 export class PkgsetError extends Error {
@@ -268,9 +278,18 @@ export interface PackagePlan {
   pre: Record<string, ChunkRef>; // core build id -> chunk
   cost: Record<string, { src: Cost; pre?: Cost }>; // core build id -> measured costs
 }
+/** A js package (addendum A1.1): one self-contained module, run only in its own worker by a host that loads it. */
+export interface JsPlan {
+  id: string;
+  dir: string;
+  js: ChunkRef & { host_req: number };
+}
 export interface SetPlan {
   S: string;
+  /** the Python packages */
   packages: Map<string, PackagePlan>;
+  /** the js packages (format v2); never mounted in an engine */
+  js: Map<string, JsPlan>;
   /** module name -> package id */
   modules: Map<string, string>;
   /** each package's dependency closure, dependencies first, itself last */
@@ -314,12 +333,14 @@ export function admitIndex(S: string, bytes: Uint8Array, build: string, reserved
   const ix = strictJson(utf8(bytes, "the index"));
   if (!isObj(ix)) fail("the index must be an object");
   exactKeys(ix, ["format", "v", "core_api", "packages"], [], "the index");
-  if (ix.format !== "sagebrush-pkgset" || ix.v !== 1) fail("not a v1 package set index");
+  // (v 2: a set with js packages, A1.1; a host before A1 refuses it whole)
+  if (ix.format !== "sagebrush-pkgset" || (ix.v !== 1 && ix.v !== 2)) fail("this package set needs a newer Sagebrush (not a v1 or v2 package set index)");
   if (ix.core_api !== CORE_API) fail(`package set ${S.slice(0, 12)} is for Sagebrush core API ${String(ix.core_api).slice(0, 8)}; this is core API ${CORE_API}`);
   if (!isObj(ix.packages)) fail("the index's packages must be an object");
   const ids = Object.keys(ix.packages);
   if (ids.length > L.packages) fail(`a package set has at most ${L.packages} packages`);
   const packages = new Map<string, PackagePlan>();
+  const js = new Map<string, JsPlan>();
   const modules = new Map<string, string>();
   const dirs = new Set<string>();
   const names = new Set<string>();
@@ -330,6 +351,23 @@ export function admitIndex(S: string, bytes: Uint8Array, build: string, reserved
     if (!m) fail(`${what}: an id is @sagebrush/<dir>@MAJOR.MINOR.PATCH`);
     const p = ix.packages[id];
     if (!isObj(p)) fail(`${what} must be an object`);
+    if (Object.hasOwn(p, "js")) {
+      // a js package: {dir, js: {sha256, size, host_req}} and nothing of a
+      // Python package's (a package that is both is refused: A1.1)
+      exactKeys(p, ["dir", "js"], [], what);
+      if (p.dir !== m![1] || !DIR.test(p.dir)) fail(`${what}: dir must be its id's name`);
+      const name = id.slice(0, id.lastIndexOf("@"));
+      if (names.has(name)) fail(`${what}: a set has one version of a package`);
+      names.add(name);
+      if (dirs.has(p.dir)) fail(`${what}: two packages share the directory ${p.dir}`);
+      dirs.add(p.dir);
+      if (reserved.bundledDirs.has(p.dir)) fail(`${what}: ${p.dir} is a bundled package's directory`);
+      if (!isObj(p.js)) fail(`${what}: js must be {sha256, size, host_req}`);
+      exactKeys(p.js, ["sha256", "size", "host_req"], [], `${what}.js`);
+      const ref = chunkRef({ sha256: p.js.sha256, size: p.js.size }, `${what}.js`);
+      js.set(id, { id, dir: p.dir, js: { ...ref, host_req: nat(p.js.host_req, `${what}.js.host_req`, 1_000_000) } });
+      continue;
+    }
     exactKeys(p, ["dir", "root", "files", "modules", "requires", "core_req", "src", "pre", "cost"], ["provides"], what);
     // (one version per package name, distinct directories: rule 5)
     if (p.dir !== m![1] || !DIR.test(p.dir)) fail(`${what}: dir must be its id's name`);
@@ -414,6 +452,14 @@ export function admitIndex(S: string, bytes: Uint8Array, build: string, reserved
     });
   }
   if (edges > L.requiresEdges) fail(`a package set has at most ${L.requiresEdges} requires edges`);
+  // js packages: only in v2, and every v2 set has one (A1.1); bounded (A1.2)
+  if (ix.v === 1 && js.size) fail(`package set ${S.slice(0, 12)}: a v1 index has no js packages`);
+  if (ix.v === 2 && !js.size) fail(`package set ${S.slice(0, 12)}: a v2 index has js packages`);
+  if (js.size > L.jsPackages) fail(`a package set has at most ${L.jsPackages} js packages`);
+  let jsBytes = 0;
+  for (const j of js.values()) jsBytes += j.js.size;
+  if (jsBytes > L.jsBytes) fail(`a package set's js chunks total at most ${L.jsBytes} bytes`);
+  for (const p of packages.values()) for (const r of p.requires) if (js.has(r)) fail(`${p.id} requires ${r}, a js package: Python packages require Python packages`);
   // the dependency closure: exact ids in this set, acyclic, bounded depth (rule 6)
   // (the depth is each package's height, its longest requires path, kept with
   // its closure: a closure reused from the cache still counts its whole
@@ -461,7 +507,7 @@ export function admitIndex(S: string, bytes: Uint8Array, build: string, reserved
   if (preBytes > L.preBytes) fail(`a package set's precompiled code for one build totals at most ${L.preBytes} bytes`);
   const resident = 2 * (srcBytes + preBytes) + (1 + 2 + L.jsonHeapPerByte) * largest + L.jsonHeapSlack;
   if (resident > L.residentBytes) fail(`package set ${S.slice(0, 12)} would hold about ${resident} bytes in memory; at most ${L.residentBytes}`);
-  return { S, packages, modules, closure };
+  return { S, packages, js, modules, closure };
 }
 
 // ---------------------------------------------------------------------------
@@ -538,6 +584,48 @@ export function checkChunk(plan: SetPlan, id: string, kind: "src" | "pre", build
     entries.push({ key, module: m![2], sage: m![1] === "sage", path: ee.path, code: ee.code, lineMap: ee.lineMap });
   }
   return { kind: "pre", entries };
+}
+
+/** A js chunk's one module and its notices (A1.1, A1.1a). */
+export interface JsChunk {
+  kind: "js";
+  entry: string;
+  text: string;
+  notices: string;
+}
+const JS_ENTRY = /^[a-z0-9][a-z0-9._-]{0,63}\.js$/;
+
+/**
+ * Check a js package's chunk (addendum A1.1, A1.1a, A1.2): the bytes the index
+ * pins, its header naming this package and kind, exactly one module, which is
+ * its entry, that module's text at most jsModuleBytes of UTF-8, and its
+ * notices, plain text of at most jsNoticesBytes.  Throws a PkgsetError;
+ * returns the module's text and the notices.  The host runs it only in its own
+ * worker (bash plan §6), never in the page's realm.
+ */
+export function checkJsChunk(plan: SetPlan, id: string, bytes: Uint8Array): JsChunk {
+  const j = plan.js.get(id);
+  if (!j) return fail(`package set ${plan.S.slice(0, 12)} has no js package ${id}`);
+  if (!(bytes instanceof Uint8Array) || bytes.length !== j.js.size) fail(`${id}: its js chunk is not the size the index pins`);
+  if (sha256Hex(bytes) !== j.js.sha256) fail(`${id}: its js chunk is not the one the index pins`);
+  const c = strictJson(utf8(bytes, `${id}'s js chunk`));
+  if (!isObj(c)) fail(`${id}: a chunk is an object`);
+  exactKeys(c, ["format", "v", "kind", "package", "entry", "modules", "notices"], [], `${id}'s js chunk`);
+  if (c.format !== "sagebrush-pkg-chunk" || c.v !== 1) fail(`${id}: not a v1 package chunk`);
+  if (c.kind !== "js" || c.package !== id) fail(`${id}: the chunk says it is ${String(c.package).slice(0, 80)}'s ${String(c.kind).slice(0, 8)}, not ${id}'s js`);
+  if (typeof c.entry !== "string" || !JS_ENTRY.test(c.entry)) fail(`${id}: a js chunk's entry is a file name like shell.js`);
+  if (!isObj(c.modules)) fail(`${id}: a js chunk's modules is an object`);
+  const keys = Object.keys(c.modules);
+  if (keys.length !== 1 || keys[0] !== c.entry) fail(`${id}: a js chunk has exactly one module, its entry`);
+  const text = c.modules[c.entry];
+  if (typeof text !== "string") fail(`${id}: ${c.entry} is not text`);
+  if (utf8Bytes(text).length > PKGSET_LIMITS.jsModuleBytes) fail(`${id}: ${c.entry} is over ${PKGSET_LIMITS.jsModuleBytes} bytes`);
+  // (the notices: required, plain text: no control characters but \n and \t)
+  const notices = c.notices;
+  if (typeof notices !== "string" || notices === "") fail(`${id}: a js chunk carries its notices (the license texts of what it bundles)`);
+  if (utf8Bytes(notices).length > PKGSET_LIMITS.jsNoticesBytes) fail(`${id}: its notices are over ${PKGSET_LIMITS.jsNoticesBytes} bytes`);
+  if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(notices)) fail(`${id}: its notices are plain text (no control characters but newline and tab)`);
+  return { kind: "js", entry: c.entry, text, notices };
 }
 
 // ---------------------------------------------------------------------------
