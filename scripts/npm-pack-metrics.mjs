@@ -7,7 +7,7 @@
 //   node scripts/npm-pack-metrics.mjs --base --records DIR [--root B]   size-base: base-npm-pack.json (B: the rebuilt base)
 //   node scripts/npm-pack-metrics.mjs --report --merge F --base F [--mode M]   size-gate: the summary table
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,15 +94,27 @@ export function isolationProblem(a, b) {
   return null;
 }
 
+// npm's whole environment, an allowlist: the caller's PATH, a fresh HOME and
+// TMPDIR, LANG, and NODE_V8_COVERAGE set empty (child_process copies the
+// parent's value into an explicit env that lacks the name); nothing else, so no
+// NODE_OPTIONS, NODE_* or SAGEBRUSH_* (`pass` names more, for tests only)
+export function packEnv(env, home, tmp, pass = []) {
+  const out = { PATH: env.PATH ?? "", HOME: home, TMPDIR: tmp, LANG: "C.UTF-8", NODE_V8_COVERAGE: "" };
+  for (const k of pass) if (env[k] !== undefined) out[k] = env[k];
+  return out;
+}
+
 // Run npm with the exact arguments in `cwd`: {stdout} or {reason}
-export function runNpm(args, { cwd, env = process.env, npm = "npm", timeoutMs = TIMEOUT_MS, configs } = {}) {
-  const tmp = configs ? null : mkdtempSync(join(tmpdir(), "npm-pack-metrics-"));
+export function runNpm(args, { cwd, env = process.env, npm = "npm", timeoutMs = TIMEOUT_MS, configs, pass = [] } = {}) {
+  const tmp = mkdtempSync(join(tmpdir(), "npm-pack-metrics-"));
   try {
     const [u, g] = configs ?? [join(tmp, "userconfig"), join(tmp, "globalconfig")];
     if (!configs) for (const f of [u, g]) writeFileSync(f, "");
     const iso = isolationProblem(u, g);
     if (iso) return why("npm config isolation failed", iso);
-    const r = spawnSync(npm, args, { cwd, env: npmEnv(env, u, g), encoding: "utf8", timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: CAPS.output_bytes, stdio: ["ignore", "pipe", "pipe"] });
+    const home = join(tmp, "home"), ptmp = join(tmp, "tmp");
+    for (const d of [home, ptmp]) mkdirSync(d);
+    const r = spawnSync(npm, args, { cwd, env: npmEnv(packEnv(env, home, ptmp, pass), u, g), encoding: "utf8", timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: CAPS.output_bytes, stdio: ["ignore", "pipe", "pipe"] });
     if (r.error?.code === "ENOENT") return why("npm not found");
     // (only spawnSync's own deadline is a timeout; a signal from anywhere else is npm failing)
     if (r.error?.code === "ETIMEDOUT") return why(`npm timed out after ${timeoutMs} ms`);
@@ -111,7 +123,7 @@ export function runNpm(args, { cwd, env = process.env, npm = "npm", timeoutMs = 
     if (r.status !== 0) return why(`npm exited ${r.status ?? r.signal}`, (r.stderr || "").trim().split("\n").pop());
     return { stdout: r.stdout };
   } finally {
-    if (tmp) rmSync(tmp, { recursive: true, force: true });
+    rmSync(tmp, { recursive: true, force: true });
   }
 }
 

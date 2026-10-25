@@ -2699,7 +2699,19 @@ class MPolyFactorization(list):
         return " * ".join(parts)
 
     def _latex_(self):
-        return repr(self)
+        """LaTeX, as Sage writes it.
+
+        EXAMPLES::
+
+            sage: R.<u,v> = GF(7)[]; latex((u^10*v^15).factor()), latex((3*(u + v)^2*u).factor())
+            (u^{10} \\cdot v^{15}, \\left(3\\right) \\cdot u \\cdot (u + v)^{2})
+        """
+        from _sage_poly import _latex_factorization
+        from _sage_expr import latex
+        if not list.__len__(self):
+            return str(latex(self._unit))
+        return _latex_factorization([(str(latex(f)), e) for f, e in self],
+                                    None if self._unit == 1 else str(latex(self._unit)))
 
 
 def _factor(f):
@@ -3231,6 +3243,19 @@ class MFraction:
         if any(c in d for c in "+-*/"):
             d = "(" + d + ")"
         return n + "/" + d
+
+    def _latex_(self):
+        """LaTeX, as Sage writes it: \\frac{numerator}{denominator}.
+
+        EXAMPLES::
+
+            sage: R.<u,v> = QQ[]; latex(u^10/v^15), latex((u + 1)/(u*v^10)), latex(-u/v)
+            (\\frac{u^{10}}{v^{15}}, \\frac{u + 1}{u v^{10}}, \\frac{-u}{v})
+        """
+        from _sage_expr import latex
+        if self._den == 1:
+            return str(latex(self._num))
+        return "\\frac{%s}{%s}" % (latex(self._num), latex(self._den))
 
     def _coerce(self, o):
         if isinstance(o, MFraction):
