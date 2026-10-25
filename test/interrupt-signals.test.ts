@@ -80,3 +80,20 @@ console.log(JSON.stringify(["RET 0.25", "RET 1", "ENTER 1 1.5", "PROBE yes", "KI
     null,
   ]);
 });
+
+test("S6: the busy prompt and its tree gone within 2 s passes; slower, survivors or no signal sent does not (required since #123)", () => {
+  const j = (r: object) => {
+    const src = `import { judgeS6 } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(judgeS6(${JSON.stringify(r)})));`;
+    const p = spawnSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8" });
+    assert.equal(p.status, 0, p.stderr);
+    return JSON.parse(p.stdout);
+  };
+  const base = { end: "gone", sends: [{ act: "sighup", t: 1 }], left: [], gone_ms: 55 };
+  assert.equal(j(base).outcome, "PASS");
+  assert.equal(j({ ...base, gone_ms: 2500 }).outcome, "FAIL");
+  assert.match(j({ ...base, gone_ms: null, end: "not gone" }).why, /outlived 2 s/);
+  assert.match(j({ ...base, left: [4242] }).why, /survived/);
+  assert.equal(j({ ...base, sends: [] }).outcome, "INVALID");
+  assert.equal(j({ ...base, sends: [{ act: "sighup", error: "the launcher process was not found under script" }] }).outcome, "INVALID");
+  assert.equal(j({ ...base, end: "budget" }).outcome, "INVALID");
+});

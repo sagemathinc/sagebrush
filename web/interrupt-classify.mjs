@@ -145,3 +145,15 @@ export function browserFailure(message, dialogOpen) {
   if (/no answer in \d+ ms/.test(m)) return { outcome: "FAIL", why: "the page stopped answering, with no dialog open: " + m.slice(0, 200) };
   return { outcome: "INVALID", why: "browser transport: " + m.slice(0, 200) };
 }
+
+// a calibration with no size inside the band (r5 §3): the attempt closest to the band within
+// [min, 1.5 max], labelled widened, as the regex calibration's doubling step was (astra and
+// daybreak2 accepted that one; this one is for them to rule on, PR #168).  On GitHub's runner E2's
+// factoring time is 0.37 s at s = 20, 8.6 s at s = 21 and 8.2 s at s = 22 (dispatch 40236353993): no
+// integer size lands in [3, 8] s, and a 23x step is not a proven cliff.  null: still uncalibrated.
+export function widenedPick(attempts, band) {
+  const ok = attempts.filter((a) => Number.isFinite(a.T_ms) && a.T_ms >= band.min && a.T_ms <= 1.5 * band.max);
+  if (!ok.length) return null;
+  const dist = (a) => (a.T_ms > band.max ? a.T_ms - band.max : 0);
+  return ok.reduce((b, a) => (dist(a) < dist(b) ? a : b));
+}

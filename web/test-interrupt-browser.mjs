@@ -45,7 +45,13 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
         ws.send(JSON.stringify({ id: ++n, method: "Page.handleJavaScriptDialog", params: { accept: true } }));
       }
       if (m.method === "Page.javascriptDialogClosed") dialogOpen = null;
+      // the page's own workers (the interpreter's), auto-attached under the page's session itself: a
+      // worker of the /runner/ iframe arrives through the iframe's session (m.sessionId set) and its
+      // heap can't be read from here (GitHub's runner, dispatch 40236353993), so it isn't counted
+      if (m.method === "Target.attachedToTarget" && !m.sessionId && m.params.targetInfo.type === "worker" && !pageWorkers.has(m.params.targetInfo.targetId)) pageWorkers.set(m.params.targetInfo.targetId, m.params.sessionId);
+      if (m.method === "Target.detachedFromTarget" && !m.sessionId) for (const [t, sid] of pageWorkers) if (sid === m.params.sessionId) pageWorkers.delete(t);
     };
+    const pageWorkers = new Map(); // targetId -> sessionId
     // every CDP call has a deadline (pilot 3 hung about 20 min), clipped to the run's remaining time
     // (daybreak2 LIMIT-INT168-2): past the deadline a call fails at once with "run budget spent"
     const CDP_MS = 30_000;
@@ -66,17 +72,13 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
     const state = () => ev(`(() => { const c = ${LAST}; return { out: c.querySelector('.out').textContent, running: c.classList.contains('running') || c.classList.contains('queued') }; })()`);
     const start = (code) => ev(`(() => { const cs = [...document.querySelectorAll('.cell')]; let c = cs.at(-1); if (c.querySelector('textarea').value.trim()) { document.querySelector('#add').click(); c = [...document.querySelectorAll('.cell')].at(-1); } const ta = c.querySelector('textarea'); ta.value = ${JSON.stringify(code)}; ta.dispatchEvent(new Event('input', {bubbles: true})); c.querySelector('[data-a=run]').click(); })()`);
     const workers = async () => ((await send("Target.getTargets"))?.targetInfos ?? []).filter((t) => t.type === "worker").map((t) => ({ id: t.targetId, url: t.url }));
-    // the workers' JS heap: each worker attached once (a flattened session), Runtime.getHeapUsage summed
-    const sessions = new Map();
+    // the page's own workers' JS heap (Runtime.getHeapUsage on each auto-attached page worker, summed);
+    // null when there is none or any of them doesn't answer: unmeasured, never a guess
     const workerHeap = async () => {
+      if (pageWorkers.size === 0) return null;
       let total = 0;
-      for (const w of await workers()) {
-        if (!sessions.has(w.id)) {
-          const a = await send("Target.attachToTarget", { targetId: w.id, flatten: true });
-          if (!a?.sessionId) return null;
-          sessions.set(w.id, a.sessionId);
-        }
-        const h = await send("Runtime.getHeapUsage", {}, CDP_MS, sessions.get(w.id));
+      for (const sid of pageWorkers.values()) {
+        const h = await send("Runtime.getHeapUsage", {}, CDP_MS, sid);
         if (!Number.isFinite(h?.usedSize)) return null;
         total += h.usedSize;
       }
@@ -92,6 +94,7 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
       } catch { return null; }
     };
     await send("Page.enable");
+    await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
     await send("Page.navigate", { url });
     await until("document.querySelector('#status')?.textContent.startsWith('ready')");
     result.isolated = await ev("crossOriginIsolated");

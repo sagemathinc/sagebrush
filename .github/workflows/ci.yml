@@ -546,13 +546,14 @@ jobs:
           trap 'exit 143' TERM
           sleep 1
           kill -0 "$server_pid"
-          SB_URL=http://127.0.0.1:8765/ CHROME=google-chrome node web/test-interrupt-matrix.mjs --ci --budget-ms 900000 --out "$RUNNER_TEMP/interrupt-matrix.json"
+          mkdir -p interrupt-out
+          SB_URL=http://127.0.0.1:8765/ CHROME=google-chrome node web/test-interrupt-matrix.mjs --ci --budget-ms 900000 --out interrupt-out/interrupt-matrix.json
       - name: keep the rows
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: interrupt-matrix
-          path: ${{ runner.temp }}/interrupt-matrix.json*
+          path: interrupt-out/
           if-no-files-found: ignore
 
   web-browser:

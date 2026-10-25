@@ -17,7 +17,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { againstBaseline, classify, classifyXK, cliffOf, leakCheck, xkRowOutcome } from "./interrupt-classify.mjs";
+import { againstBaseline, classify, classifyXK, cliffOf, leakCheck, widenedPick, xkRowOutcome } from "./interrupt-classify.mjs";
 import { killTracked, killTree, onStop, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 
@@ -292,6 +292,9 @@ async function calibrate(host, c) {
   // (cliffOf), reported as a finding with its sizes and times, not just an uncalibrated row
   const cliff = lo != null && hi != null ? cliffOf({ lo, tLo: attempts.find((x) => x.s === lo)?.T_ms, hi, tHi: attempts.find((x) => x.s === hi)?.T_ms ?? null, capMs: CAL_CAP_MS }) : null;
   if (cliff) return { s, T: null, attempts, label: "cliff", cliff, error: `a performance cliff between s = ${cliff.from_s} (${cliff.from_ms} ms) and s = ${cliff.to_s} (${typeof cliff.to_ms === "number" ? cliff.to_ms + " ms" : cliff.to_ms}; at least ${cliff.ratio_at_least}x): a finding for the owner` };
+  // (no size in the band and no proven cliff: the closest attempt within [min, 1.5 max], labelled widened)
+  const w = widenedPick(attempts, BAND);
+  if (w) return { s: w.s, T: w.T_ms, R: w.R_ms ?? null, attempts, label: "widened (no size in the band)" };
   return { s, T: null, attempts, error: "uncalibrated" + (lo != null && hi != null ? ` (the band lies between s = ${lo} and s = ${hi})` : "") };
 }
 
