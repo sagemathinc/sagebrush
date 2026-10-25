@@ -29,7 +29,13 @@
 // in any order.  A name stands for a constant, or for an import, only when
 // every one of its bindings agrees; otherwise what it names is only known
 // when the code runs, and a file it might name is reported, not pre-checked.
-// (Not modelled: names a star import binds, and exec/globals() tricks.)
+// As in Python (#170 r2's review, CORR-170-R2-ASTRA-1..3): a nonlocal write binds in the nearest
+// enclosing function that binds the name itself; a class body runs in order, so a use there sees the
+// class's own bindings made before it, else the outer name (and both, where one is conditional); and a
+// list, dict or set the code changes (an item stored or deleted, a mutating method) or copies anywhere
+// (assigned, put in a container, returned...) no longer stands for the constants it was made with.
+// (Not modelled: names a star import binds, exec/globals() tricks, and a function that changes a
+// list passed to it.)
 //
 // The working directory (PY-170-1/2): a relative path, or an import through
 // one of sys.path's relative entries (which pyjs resolves against the working
@@ -122,13 +128,18 @@ const isBuiltinName = (id: string) => BUILTINS.has(id) || /^[A-Z]\w*(Error|Excep
 
 // ---- scopes: what a name is bound to, where it is used
 
-type Binding = { kind: "import"; q: string } | { kind: "value"; e: Node; s: Scope } | { kind: "other" };
+// (uncertain: a list, dict or set the code changes or copies, so the constants it was made with may
+// not be what a call gets: CORR-170-R2-ASTRA-3)
+type Binding = { kind: "import"; q: string } | { kind: "value"; e: Node; s: Scope; uncertain?: boolean } | { kind: "other" };
 const OTHER: Binding = { kind: "other" };
 
 class Scope {
   names = new Map<string, Binding[]>();
   globals = new Set<string>();
   nonlocals = new Set<string>();
+  /** a class body's bindings that are its own statements (unconditional): for each name, the indexes of
+   * the body statements binding it, in order, or null when some binding of it is conditional */
+  order: Map<string, number[] | null> | null = null;
   constructor(
     readonly kind: "module" | "function" | "class" | "comprehension",
     readonly parent: Scope | null,
@@ -138,22 +149,41 @@ class Scope {
     while (s.parent) s = s.parent;
     return s;
   }
-  enclosingFunction(): Scope | null {
-    for (let s = this.parent; s; s = s.parent) if (s.kind === "function") return s;
-    return null;
+  /** Where a write of `name` here goes; null for a nonlocal one (resolved once the unit is read: finishScopes). */
+  target(name: string): Scope | null {
+    return this.globals.has(name) ? this.module : this.nonlocals.has(name) ? null : this;
   }
-  bind(name: string, b: Binding) {
-    const s = this.globals.has(name) ? this.module : this.nonlocals.has(name) ? (this.enclosingFunction() ?? this) : this;
-    const l = s.names.get(name);
-    if (l) l.push(b);
-    else s.names.set(name, [b]);
+  /** The function scope a `nonlocal name` here refers to: the nearest enclosing one that binds it itself, as in Python. */
+  nonlocalOwner(name: string): Scope | null {
+    for (let s = this.parent; s && s.kind !== "module"; s = s.parent) if (s.kind === "function" && !s.nonlocals.has(name) && !s.globals.has(name) && s.names.has(name)) return s;
+    return null;
   }
   /** The bindings a use of `name` here sees (Python's LEGB), or null: bound nowhere, a builtin. */
   lookup(name: string): Binding[] | null {
     if (this.globals.has(name)) return this.module.names.get(name) ?? null;
-    let s: Scope | null = this.nonlocals.has(name) ? this.enclosingFunction() : this;
-    for (let first = true; s; s = s.parent, first = false) {
-      if (!first && s.kind === "class") continue; // (a class body's names aren't seen from its functions)
+    if (this.nonlocals.has(name)) return this.nonlocalOwner(name)?.names.get(name) ?? null;
+    const own = this.names.get(name);
+    // (a class body runs in order: without knowing where in it, both its own and the outer binding may be seen)
+    if (this.kind === "class") return own ? [...own, ...(this.outer(name) ?? [OTHER])] : this.outer(name);
+    return own ?? this.outer(name);
+  }
+  /** A use of `name` in the class body's statement i (CORR-170-R2-ASTRA-2). */
+  lookupAt(name: string, i: number): Binding[] | null {
+    if (this.globals.has(name) || this.nonlocals.has(name)) return this.lookup(name);
+    const own = this.names.get(name);
+    if (!own) return this.outer(name);
+    const at = this.order?.get(name);
+    if (!at) return this.lookup(name); // (a conditional binding: either may be seen)
+    // the class namespace has what the statements before this one bound: the last of them; else the outer name
+    const before = own.filter((_, k) => at[k] < i);
+    return before.length ? [before[before.length - 1]] : this.outer(name);
+  }
+  /** The enclosing scopes' bindings (class bodies aren't seen from inside them). */
+  outer(name: string): Binding[] | null {
+    for (let s = this.parent; s; s = s.parent) {
+      if (s.kind === "class") continue;
+      if (s.globals.has(name)) return s.module.names.get(name) ?? null;
+      if (s.nonlocals.has(name)) return s.nonlocalOwner(name)?.names.get(name) ?? null;
       const b = s.names.get(name);
       if (b) return b;
     }
@@ -162,9 +192,71 @@ class Scope {
 }
 
 const COMPREHENSIONS = new Set(["ListComp", "SetComp", "DictComp", "GeneratorExp"]);
+// methods that change a list, dict or set in place
+const MUTATORS = new Set(["append", "extend", "insert", "remove", "pop", "popitem", "clear", "update", "setdefault", "add", "discard", "sort", "reverse", "__setitem__", "__delitem__", "__iadd__", "__ior__"]);
 
-/** Record the bindings of a unit's statements in `mod` and the scopes nested in it (by their node). */
-function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>): void {
+/** The names a class body's statement binds itself, unconditionally (its targets, imports, def or class). */
+function directNames(st: Node): string[] {
+  const out: string[] = [];
+  const target = (t: Node) => {
+    if (t?._type === "Name") out.push(t.id);
+    else if (t?._type === "Tuple" || t?._type === "List") t.elts.forEach(target);
+    else if (t?._type === "Starred") target(t.value);
+  };
+  switch (st?._type) {
+    case "Assign":
+      st.targets.forEach(target);
+      break;
+    case "AnnAssign":
+      if (st.value) target(st.target);
+      break;
+    case "AugAssign":
+      target(st.target);
+      break;
+    case "Import":
+      for (const a of st.names) out.push(a.asname ?? a.name.split(".")[0]);
+      break;
+    case "ImportFrom":
+      for (const a of st.names) if (a.name !== "*") out.push(a.asname ?? a.name);
+      break;
+    case "FunctionDef":
+    case "AsyncFunctionDef":
+    case "ClassDef":
+      out.push(st.name);
+      break;
+  }
+  return out;
+}
+
+/** What a unit's scopes still need once all of it is read: its nonlocal writes, and its containers' changes and copies. */
+type Pending = { nonlocal: { s: Scope; name: string; b: Binding }[]; changed: { s: Scope; name: string }[] };
+const newPending = (): Pending => ({ nonlocal: [], changed: [] });
+
+function finishScopes(p: Pending): void {
+  // a nonlocal write binds the name where Python puts it: the nearest enclosing function that binds it itself
+  // (CORR-170-R2-ASTRA-1); resolved now, when every binding of the unit is known
+  for (const { s, name, b } of p.nonlocal) {
+    const owner = s.nonlocalOwner(name);
+    if (owner) owner.names.get(name)!.push(b);
+  }
+  // a list, dict or set the code changes or copies: its constant contents are no longer certain
+  for (const { s, name } of p.changed) for (const b of s.lookup(name) ?? []) if (b.kind === "value" && ["List", "Dict", "Set"].includes(b.e?._type)) b.uncertain = true;
+}
+
+/** Record the bindings of a unit's statements in `mod` and the scopes nested in it (by their node); finishScopes(pending) once the unit is read. */
+function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>, pending: Pending): void {
+  const bind = (s: Scope, name: string, b: Binding) => {
+    const t = s.target(name);
+    if (t === null) return void pending.nonlocal.push({ s, name, b });
+    const l = t.names.get(name);
+    if (l) l.push(b);
+    else t.names.set(name, [b]);
+  };
+  // (a name copied somewhere: assigned to another, put in a container, returned or yielded, a lambda's or a
+  // conditional expression's value; if it is a list, dict or set, the copy can change it)
+  const copied = (e: Node, s: Scope) => {
+    if (e?._type === "Name" && e.ctx?._type === "Load") pending.changed.push({ s, name: e.id });
+  };
   // global/nonlocal declarations of a scope's own body (not its nested scopes')
   const scopeDeclarations = (b: Node, s: Scope) =>
     walk(b, (n) => {
@@ -173,7 +265,7 @@ function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>): void {
       return !(n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "ClassDef" || n._type === "Lambda" || COMPREHENSIONS.has(n._type));
     });
   const params = (a: Node, f: Scope) => {
-    for (const x of [...(a?.posonlyargs ?? []), ...(a?.args ?? []), ...(a?.kwonlyargs ?? []), a?.vararg, a?.kwarg]) if (x?.arg) f.bind(x.arg, OTHER);
+    for (const x of [...(a?.posonlyargs ?? []), ...(a?.args ?? []), ...(a?.kwonlyargs ?? []), a?.vararg, a?.kwarg]) if (x?.arg) bind(f, x.arg, OTHER);
   };
   const go = (n: Node, s: Scope): void => {
     if (n === null || typeof n !== "object") return;
@@ -185,7 +277,7 @@ function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>): void {
       case "FunctionDef":
       case "AsyncFunctionDef":
       case "Lambda": {
-        if (n._type !== "Lambda") s.bind(n.name, OTHER);
+        if (n._type !== "Lambda") bind(s, n.name, OTHER);
         go(n.decorator_list, s);
         go(n.args?.defaults, s);
         go(n.args?.kw_defaults, s);
@@ -193,11 +285,12 @@ function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>): void {
         scopes.set(n, f);
         if (n._type !== "Lambda") scopeDeclarations(n.body, f);
         params(n.args, f);
+        if (n._type === "Lambda") copied(n.body, f);
         go(n.body, f);
         return;
       }
       case "ClassDef": {
-        s.bind(n.name, OTHER);
+        bind(s, n.name, OTHER);
         go(n.decorator_list, s);
         go(n.bases, s);
         go(n.keywords, s);
@@ -205,6 +298,12 @@ function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>): void {
         scopes.set(n, c);
         scopeDeclarations(n.body, c);
         go(n.body, c);
+        // which of its bindings are its own statements, in order (the rest are conditional)
+        const direct = new Map<string, number[]>();
+        n.body.forEach((st: Node, i: number) => {
+          for (const x of directNames(st)) direct.set(x, [...(direct.get(x) ?? []), i]);
+        });
+        c.order = new Map([...c.names].map(([x, bs]) => [x, direct.get(x)?.length === bs.length ? direct.get(x)! : null]));
         return;
       }
       case "ListComp":
@@ -225,46 +324,77 @@ function buildScopes(body: Node, mod: Scope, scopes: Map<Node, Scope>): void {
       }
       case "Assign":
         for (const t of n.targets) {
-          if (t._type === "Name") s.bind(t.id, { kind: "value", e: n.value, s });
+          if (t._type === "Name") bind(s, t.id, { kind: "value", e: n.value, s });
           else go(t, s); // (a tuple's names bind its parts: other; an attribute or subscript binds none)
         }
+        copied(n.value, s);
         go(n.value, s);
         return;
       case "AnnAssign":
-        if (n.value && n.target._type === "Name") s.bind(n.target.id, { kind: "value", e: n.value, s });
+        if (n.value && n.target._type === "Name") bind(s, n.target.id, { kind: "value", e: n.value, s });
         else if (n.value) go(n.target, s);
+        copied(n.value, s);
         go(n.value, s);
         return;
+      case "Subscript":
+        // p[k] = ..., del p[k]: the container changes
+        if ((n.ctx?._type === "Store" || n.ctx?._type === "Del") && n.value?._type === "Name") pending.changed.push({ s, name: n.value.id });
+        break;
+      case "Call":
+        // p.append(...) and the like: the container changes in place
+        if (n.func?._type === "Attribute" && n.func.value?._type === "Name" && MUTATORS.has(n.func.attr)) pending.changed.push({ s, name: n.func.value.id });
+        break;
+      case "List":
+      case "Tuple":
+      case "Set":
+        n.elts.forEach((x: Node) => copied(x, s));
+        break;
+      case "Dict":
+        [...n.keys, ...n.values].forEach((x: Node) => copied(x, s));
+        break;
+      case "Return":
+      case "Yield":
+      case "YieldFrom":
+        copied(n.value, s);
+        break;
+      case "IfExp":
+        copied(n.body, s);
+        copied(n.orelse, s);
+        break;
+      case "BoolOp":
+        n.values.forEach((x: Node) => copied(x, s));
+        break;
       case "Import":
-        for (const a of n.names) s.bind(a.asname ?? a.name.split(".")[0], { kind: "import", q: a.asname ? a.name : a.name.split(".")[0] });
+        for (const a of n.names) bind(s, a.asname ?? a.name.split(".")[0], { kind: "import", q: a.asname ? a.name : a.name.split(".")[0] });
         return;
       case "ImportFrom":
-        for (const a of n.names) if (a.name !== "*") s.bind(a.asname ?? a.name, n.module && !n.level ? { kind: "import", q: `${n.module}.${a.name}` } : OTHER);
+        for (const a of n.names) if (a.name !== "*") bind(s, a.asname ?? a.name, n.module && !n.level ? { kind: "import", q: `${n.module}.${a.name}` } : OTHER);
         return;
       case "NamedExpr": {
         let t = s;
         while (t.kind === "comprehension" && t.parent) t = t.parent; // (a walrus binds outside its comprehension)
-        if (n.target?._type === "Name") t.bind(n.target.id, OTHER);
+        if (n.target?._type === "Name") bind(t, n.target.id, OTHER);
+        copied(n.value, s);
         go(n.value, s);
         return;
       }
       case "ExceptHandler":
-        if (typeof n.name === "string") s.bind(n.name, OTHER);
+        if (typeof n.name === "string") bind(s, n.name, OTHER);
         go(n.type, s);
         go(n.body, s);
         return;
       case "MatchAs":
       case "MatchStar":
-        if (typeof n.name === "string") s.bind(n.name, OTHER);
+        if (typeof n.name === "string") bind(s, n.name, OTHER);
         go(n.pattern, s);
         return;
       case "MatchMapping":
-        if (typeof n.rest === "string") s.bind(n.rest, OTHER);
+        if (typeof n.rest === "string") bind(s, n.rest, OTHER);
         go(n.keys, s);
         go(n.patterns, s);
         return;
       case "Name":
-        if (n.ctx?._type === "Store" || n.ctx?._type === "Del") s.bind(n.id, OTHER);
+        if (n.ctx?._type === "Store" || n.ctx?._type === "Del") bind(s, n.id, OTHER);
         return;
     }
     for (const k in n) if (k !== "_type" && typeof n[k] === "object") go(n[k], s);
@@ -297,7 +427,7 @@ function qualified(e: Node, s: Scope, seen = new Set<Node>()): string | null {
 
 // What an expression names: constant paths, or (a name bound more than once,
 // to different things) the candidates, or null: only known when it runs.
-type Val = { values: string[] } | { candidates: string[] } | null;
+type Val = { values: string[] } | { candidates: string[]; why: string } | null;
 
 function constValues(e: Node, s: Scope, seen = new Set<Node>()): Val {
   if (!e) return null;
@@ -333,10 +463,15 @@ function constValues(e: Node, s: Scope, seen = new Set<Node>()): Val {
       seen.add(e);
       const vs = bs.map((b) => (b.kind === "value" ? constValues(b.e, b.s, seen) : null));
       seen.delete(e);
+      const candidates = () => [...new Set(vs.flatMap((v) => (v === null ? [] : "values" in v ? v.values : v.candidates)))];
+      if (bs.some((b) => b.kind === "value" && b.uncertain)) {
+        const c = candidates();
+        return c.length ? { candidates: c, why: "is a list, dict or set the code changes or copies" } : null;
+      }
       const known = vs.filter((v): v is { values: string[] } => !!v && "values" in v);
       if (known.length === vs.length && known.every((v) => JSON.stringify(v.values) === JSON.stringify(known[0].values))) return known[0];
-      const candidates = [...new Set(vs.flatMap((v) => (v === null ? [] : "values" in v ? v.values : v.candidates)))];
-      return candidates.length ? { candidates } : null;
+      const c = candidates();
+      return c.length ? { candidates: c, why: vs.length > 1 ? "is bound more than once" : "may not hold what it was bound to" } : null;
     }
   }
   return null;
@@ -634,7 +769,7 @@ export async function fileDeps(input: FileDepsInput): Promise<{ complete: boolea
       const v = constValues(e, c.s);
       if (v && "values" in v) for (const p of v.values) pathFound(p, kind, line, moved(c));
       else if (v && v.candidates.some((p) => (p.startsWith("/") ? files.has(p) : couldBeFile(p)))) {
-        unfollowed(w, line, `${e._type === "Name" ? e.id : "a name"} is bound more than once (${v.candidates.map((p) => JSON.stringify(p)).join(", ")}): which file it names is only known when the code runs`);
+        unfollowed(w, line, `${e._type === "Name" ? e.id : "a name"} ${v.why} (${v.candidates.map((p) => JSON.stringify(p)).join(", ")}): which file it names is only known when the code runs`);
       } else if (file) unfollowed(w, line, "a file name computed when the code runs");
     };
     // visit an argument for the calls inside it, but never a recognized path's own parts (CORR-170-ASTRA-1)
@@ -670,7 +805,15 @@ export async function fileDeps(input: FileDepsInput): Promise<{ complete: boolea
           visit(n.decorator_list, c);
           visit(n.bases, c);
           visit(n.keywords, c);
-          visit(n.body, { s: scopes.get(n) ?? c.s, fn: c.fn });
+          {
+            // (each statement of the body sees the class's bindings made before it: Scope.lookupAt)
+            const cs = scopes.get(n) ?? c.s;
+            n.body.forEach((st: Node, i: number) => {
+              const at: Scope = Object.create(cs);
+              at.lookup = (name: string) => cs.lookupAt(name, i);
+              visit(st, { s: at, fn: c.fn });
+            });
+          }
           return;
         case "ListComp":
         case "SetComp":
@@ -805,6 +948,7 @@ export async function fileDeps(input: FileDepsInput): Promise<{ complete: boolea
     const cellTrees: { index: number; kind: CellKind; tree: Node }[] = [];
     const nb = new Scope("module", null);
     const nbScopes = new Map<Node, Scope>();
+    const nbPending = newPending();
     for (const c of input.cells) {
       if (aborted()) return { complete: false };
       if (c.kind === "markdown") {
@@ -821,7 +965,7 @@ export async function fileDeps(input: FileDepsInput): Promise<{ complete: boolea
         const tree = parse(src, "exec");
         if (ipython) expandMagics(tree, codeParser(c.kind === "sage"));
         parsed++;
-        buildScopes(tree.body, nb, nbScopes);
+        buildScopes(tree.body, nb, nbScopes, nbPending);
         cellTrees.push({ index: c.index, kind: c.kind, tree });
       } catch {
         complete = false;
@@ -829,6 +973,7 @@ export async function fileDeps(input: FileDepsInput): Promise<{ complete: boolea
       }
       progress();
     }
+    finishScopes(nbPending);
     const imports = (k: CellKind) => k === "python" || k === "sage";
 
     // ---- first: the first cell from which the directory may have changed
@@ -878,7 +1023,9 @@ export async function fileDeps(input: FileDepsInput): Promise<{ complete: boolea
         }
         const mod = new Scope("module", null);
         const scopes = new Map<Node, Scope>();
-        buildScopes(tree.body, mod, scopes);
+        const pend = newPending();
+        buildScopes(tree.body, mod, scopes, pend);
+        finishScopes(pend);
         // (its top level runs at its first import; throughout, if it changes directory itself)
         await scan(tree, { where: { by: item.file }, file: item.file, module: item.module ?? undefined, isPackage: item.isPackage }, mod, scopes, { imports: true, moved: item.moved || changesDirectory(tree), anyMove: anyMove || changesDirectory(tree) });
         progress();
