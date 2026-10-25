@@ -91,9 +91,11 @@ def bnf_certify(f, norm_max=None, index_max=None):
     dict with h, cyc, regulator, w, r1, r2, disc and what the proof used
     (norm_bound and norm_bound_kind, Minkowski's or Zimmert's; fb_bound,
     primes_shown, reg_lower, index_bound, unit_primes, class_primes).
-    Beyond the limits on norm_bound and index_bound (None: the engine's
-    defaults) it raises ValueError starting "beyond the limits of the
-    unconditional certificate", saying which bound and by how much."""
+    norm_max and index_max are opt-in limits on norm_bound and index_bound
+    (None: no limit; 10**6 each were the former defaults). Beyond them, or
+    beyond the certificate's arithmetic range (primes below 2^24), it raises
+    ValueError starting "beyond the limits of the unconditional
+    certificate", saying which bound and by how much."""
     args = {"f": _ints(f)}
     if norm_max is not None:
         args["norm_max"] = int(norm_max)
