@@ -1895,7 +1895,28 @@ class FiniteFieldElement:
         return " + ".join(terms) if terms else "0"
 
     def _latex_(self):
-        return repr(self).replace("*", "")
+        """LaTeX, as Sage writes it: every exponent braced.
+
+        EXAMPLES::
+
+            sage: F.<b> = GF(2^12); latex(b^11 + b^10)
+            b^{11} + b^{10}
+            sage: K.<a> = GF(49); latex(3*a + 2), latex(a^0)
+            (3 a + 2, 1)
+        """
+        from _sage_poly import _latex_univariate
+        return _latex_univariate(self._latex_terms(), self._parent._name)
+
+    def _latex_terms(self):
+        """The (LaTeX, False, exponent) of each nonzero term, highest first, in
+        one pass over the coefficients (none for 0)."""
+        c = self._c
+        out = []
+        for i in range(len(c) - 1, -1, -1):
+            t = c[i]
+            if t:
+                out.append((str(t), False, i))
+        return out
 
     def __hash__(self):
         if self.is_in_prime_field():
@@ -3536,7 +3557,30 @@ class Polynomial_ff:
         return out.replace("+ -", "- ")
 
     def _latex_(self):
-        return repr(self).replace("*", "")
+        """LaTeX, as Sage writes it: every exponent braced (x^{10}, not
+        x^10), a coefficient of several terms in \\left( \\right).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(7)[]; latex(x^15 + 3*x^10 + 1)
+            x^{15} + 3 x^{10} + 1
+            sage: K.<a> = GF(49); S.<y> = K[]; latex(3*a*y^2 + (a + 1)*y + a)
+            3 a y^{2} + \\left(a + 1\\right) y + a
+        """
+        from _sage_poly import _latex_univariate
+        from _sage_expr import latex
+        terms = []
+        for i in range(len(self._c) - 1, -1, -1):
+            c = self._c[i]
+            if isinstance(c, FiniteFieldElement):
+                # (one pass over an element of GF(q) gives its terms: none for 0, and a
+                # coefficient of several terms goes in \left( \right))
+                t = c._latex_terms()
+                if t:
+                    terms.append((_latex_univariate(t, c._parent._name), len(t) > 1, i))
+            elif c:
+                terms.append((str(latex(c)), False, i))
+        return _latex_univariate(terms, self._ring._name)
 
     def __hash__(self):
         # the canonical polynomial hash, as for a multivariate polynomial it
@@ -4103,7 +4147,6 @@ def _sort_key(c):
 class _FFFactorization(list):
     """A factorization of a polynomial over a finite field: (factor,
     exponent) pairs and a unit, printed as Sage prints it."""
-    _latex_container = True  # (latex() writes it as a list, as before; not yet as Sage writes it)
 
     def __init__(self, items, unit, ring):
         list.__init__(self, items)
@@ -4132,6 +4175,23 @@ class _FFFactorization(list):
         if not self._unit.is_one():
             out = "(%r) * " % (self._unit,) + out if parts else repr(self._unit)
         return out
+
+    def _latex_(self):
+        """LaTeX, as Sage writes it.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(7)[]; latex((x^10*(x + 1)^15).factor()), latex((-x^2).factor())
+            (x^{10} \\cdot (x + 1)^{15}, \\left(6\\right) \\cdot x^{2})
+            sage: latex((x + 1).factor()), latex(R(5).factor())
+            ((x + 1), 5)
+        """
+        from _sage_poly import _latex_factorization
+        from _sage_expr import latex
+        if not self:
+            return str(latex(self._unit))
+        return _latex_factorization([(str(latex(g)), e) for g, e in self],
+                                    None if self._unit.is_one() else str(latex(self._unit)))
 
     def value(self):
         """The product.

@@ -469,6 +469,21 @@ fn raster_decode<'py>(py: Python<'py>, png: &[u8]) -> PyResult<(u32, u32, u32, B
     }
 }
 
+/// Register the host's memory share for default polynomial factorizations
+/// (item D0): `source()` returns bytes or None (lib/_capacity.py
+/// poly_share, through sagebrush._capacity_share).  It is called once per
+/// default budget, with the GIL taken for it (engine calls run without it);
+/// an exception or anything but a non-negative int is "no figure", and the
+/// factorization keeps its default.  The first registration stands.
+/// (Top-level factorizations are serialized in one host worker: see
+/// sagebrush_interrupt::memory_share.)
+#[pyfunction]
+fn set_memory_share_source(source: Py<PyAny>) {
+    sagebrush_interrupt::set_memory_share_host(move || {
+        Python::attach(|py| source.call0(py).ok().and_then(|r| r.extract::<Option<u64>>(py).ok()).flatten())
+    });
+}
+
 // ---- live progress for Python routines (design-estimates-progress r4 §6):
 // the same functions as the browser's builtin _progress
 // (src/runtime/progress-module.ts), over engine/interrupt's native slots.
@@ -602,6 +617,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     raster.add_function(wrap_pyfunction!(raster_render, &raster)?)?;
     raster.add_function(wrap_pyfunction!(raster_decode, &raster)?)?;
     m.add_submodule(&raster)?;
+    m.add_function(wrap_pyfunction!(set_memory_share_source, m)?)?;
     for f in [
         wrap_pyfunction!(progress_begin, m)?,
         wrap_pyfunction!(progress_update, m)?,

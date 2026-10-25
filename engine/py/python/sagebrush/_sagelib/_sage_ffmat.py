@@ -69,10 +69,20 @@ _HEAP_SHARE = 4
 
 
 def _heap_limit():
-    import sys
-    n = getattr(sys, "_sagebrush_heap_limit", None)
-    # (CPython, or a host that cannot say: a nominal 1 GiB)
-    return int(n) if n else 1 << 30
+    # (pyjs: its heap limit; CPython: the machine's total; _capacity, D0)
+    import _capacity
+    return _capacity.heap_figure()
+
+
+def _refusal(text, need, cap):
+    """A guard's refusal: its text, with the enforced cap of this operation
+    (limit_bytes), the need when known (need_bytes, else None) and the
+    memory observed free (capacity: an observation, which decided
+    nothing).  Item D0; D1 gives it its type and wording."""
+    import _capacity
+    e = NotImplementedError(text)
+    e.need_bytes, e.limit_bytes, e.capacity = need, cap, _capacity.capacity()
+    return e
 
 
 def _entry_cost(base):
@@ -136,8 +146,8 @@ def _admit_size(base, m, n, factor=1):
     limit = _heap_limit()
     if need > limit // _HEAP_SHARE:
         mib = 1 << 20
-        raise NotImplementedError("a %d x %d matrix over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)" % (
-            m, n, base, -(-need // mib), " with its working space" if factor > 1 else "", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+        raise _refusal("a %d x %d matrix over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)" % (
+            m, n, base, -(-need // mib), " with its working space" if factor > 1 else "", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib), need, limit // _HEAP_SHARE)
     return m, n
 
 
@@ -165,8 +175,8 @@ class _AlgCharge:
             self.total += qb._heap_units(x, self.seen)
         if self.total > self.limit:
             mib = 1 << 20
-            raise NotImplementedError("a matrix over %r of these algebraic numbers needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap): each entry, and each of their number fields, counts" % (
-                self.base, self.limit // mib, _HEAP_SHARE, _heap_limit() // mib))
+            raise _refusal("a matrix over %r of these algebraic numbers needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap): each entry, and each of their number fields, counts" % (
+                self.base, self.limit // mib, _HEAP_SHARE, _heap_limit() // mib), None, self.limit)
         return r
 
 
@@ -180,8 +190,8 @@ def _admit_vector(base, n, factor=1):
     limit = _heap_limit()
     if need > limit // _HEAP_SHARE:
         mib = 1 << 20
-        raise NotImplementedError("a vector of %d entries over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix or vector (1/%d of this process's %d MiB heap)" % (
-            n, base, -(-need // mib), " with its working space" if factor > 1 else "", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+        raise _refusal("a vector of %d entries over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix or vector (1/%d of this process's %d MiB heap)" % (
+            n, base, -(-need // mib), " with its working space" if factor > 1 else "", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib), need, limit // _HEAP_SHARE)
     return n
 
 
@@ -206,8 +216,8 @@ def _admitted_entries(base, entries):
         if not str(e).startswith("more than %d " % cap):
             raise
     mib, limit = 1 << 20, _heap_limit()
-    raise NotImplementedError("a vector over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix or vector (1/%d of this process's %d MiB heap)" % (
-        base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+    raise _refusal("a vector over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix or vector (1/%d of this process's %d MiB heap)" % (
+        base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib), None, limit // _HEAP_SHARE)
 
 
 def _admitted_rows(base, rows, ncols=None, loose=False, structural=True):
@@ -243,8 +253,8 @@ def _admitted_rows(base, rows, ncols=None, loose=False, structural=True):
         raise TypeError("%r is not a list of rows" % (rows,))
     def refuse():
         mib, limit = 1 << 20, _heap_limit()
-        return NotImplementedError("a matrix over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)" % (
-            base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+        return _refusal("a matrix over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)" % (
+            base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib), None, limit // _HEAP_SHARE)
     out, used = [], 0
     for r in iter(rows):
         if loose and not (isinstance(r, (list, tuple)) or (hasattr(r, "__iter__") and not isinstance(r, str)) or type(r).__name__ in ("Vector", "FFVector")):
