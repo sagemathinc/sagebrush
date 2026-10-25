@@ -89,6 +89,16 @@ const enginePaths = [
   /^engine\//, /^wasm\//, /^Cargo(?:\.lock|\.toml)$/,
   /^scripts\/build-engine\.mjs$/,
 ];
+// The CPython package's inputs: what its wheel builds (engine/), what it
+// ships (lib/, through scripts/sync-python-package.sh into engine/py/python),
+// what its tests read (engine/py/test_*.py, sage-tests/), and the limits
+// registry the defaults are classified in.  engine-cpython is the one job
+// that runs the package's own tests, so a pull request touching these runs it
+// (#113 changed a default, passed pull-request CI, and failed master's).
+const cpythonPaths = [
+  /^engine\//, /^lib\//, /^sage-tests\//, /^Cargo(?:\.lock|\.toml)$/,
+  /^scripts\/sync-python-package\.sh$/, /^test\/limit-sites\.json$/,
+];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
 // Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their
 // own tier, .github/workflows/optional.yml; a change to them alone runs no
@@ -113,6 +123,7 @@ const node = full || workflowOrBuild || runtime || webChange || fallback;
 const web = full || workflowOrBuild || runtime || webChange || fallback;
 const modes = full || workflowOrBuild || runtime || modeChange || fallback;
 const engineSmoke = full || workflowOrBuild || engineChange || fallback;
+const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
 
 const outputs = {
   full,
@@ -124,6 +135,7 @@ const outputs = {
   modes,
   engine_smoke: engineSmoke,
   engine_full: full,
+  engine_cpython: engineCpython,
   // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
   size_inputs: gateInputs(files).length > 0,
   files: files.length,

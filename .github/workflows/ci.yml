@@ -29,6 +29,7 @@ jobs:
       modes: ${{ steps.paths.outputs.modes }}
       engine_smoke: ${{ steps.paths.outputs.engine_smoke }}
       engine_full: ${{ steps.paths.outputs.engine_full }}
+      engine_cpython: ${{ steps.paths.outputs.engine_cpython }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
     steps:
       - uses: actions/checkout@v4
@@ -878,7 +879,7 @@ jobs:
 
   engine-cpython:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_cpython == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
