@@ -87,7 +87,13 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
       try {
         await setMode(c.mode);
       } catch (e) {
-        invalid({ case: c.id, host: "browser", outcome: "INVALID", why: "mode " + c.mode + " not ready: " + String(e).slice(0, 200), out: (await state().catch(() => ({ out: "" }))).out.slice(-600) });
+        // the page itself stopped answering after the mode switch (slot 5: over 200 s with no answer to
+        // a trivial evaluate): a product failure, not an unobservable harness, so FAIL, matched against
+        // the baseline like any other failure
+        const row = { case: c.id, host: "browser", outcome: "FAIL", why: "mode " + c.mode + ": the page did not answer after the switch: " + String(e?.message ?? e).slice(0, 200), out: (await state().catch(() => ({ out: "" }))).out.slice(-600) };
+        row.own_outcome = row.outcome;
+        row.outcome = againstBaseline({ ...row, trials: [{ outcome: "FAIL", why: row.why }] }, baseline);
+        invalid(row);
         continue;
       }
       const trials = [];
