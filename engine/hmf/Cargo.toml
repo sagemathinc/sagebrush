@@ -23,3 +23,5 @@ num-traits = "0.2"
 
 [dev-dependencies]
 sagebrush-classgroup = { path = "../classgroup" }
+# (tests only: Stop at a chosen check, sagebrush_interrupt::hooks)
+sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
