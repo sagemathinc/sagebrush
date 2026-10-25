@@ -195,7 +195,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     // (the plan's limit is the account's: kept for this browser's sync only if its namespace is that account's, so no
     // other account's limit is ever published under it)
     if ("limit_bytes" in st && limitIsOurs(a)) owner.limit = { limit_bytes: st.limit_bytes ?? null, used_bytes: st.used_bytes ?? 0 };
-    if (deleting) {
+    // (a deletion followed to its end only on verified answers: an unverified one never completes or drops it)
+    if (deleting && a.verified) {
       if (a.account !== deleting.account) {
         deleting = null;
         note = "Signed in as another account: this deletion isn't followed here any more";
@@ -401,7 +402,10 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       poll.request();
     };
     let own = false;
-    if (a.ok && a.account === account) {
+    // (only a verified answer (its echo the session's account) may turn sync off here or follow the deletion: an
+    // answer without an echo (an old, mixed or rolled-back server) is shown, nothing done (astra3's CORR-PR130-5))
+    if (a.ok && !a.verified && a.account === account) note = "Couldn't confirm the deletion: the server didn't say which account its status is for; Delete again to send it once more";
+    if (a.ok && a.verified && a.account === account) {
       if (a.status.state === "deleting") {
         if (!(own = await offIf(mark, "deleting"))) return stale();
         deleting = { generation, account };
