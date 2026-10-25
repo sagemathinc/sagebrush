@@ -14,7 +14,7 @@
 // fallback to the other source or to the defaults.  (Reading a file is
 // src/limits-file.ts's, which only the Node hosts load: this file is the
 // browser worker's too.)
-import { getattr } from "./runtime/object";
+import { dictGet, getattr } from "./runtime/object";
 
 export const LIMITS_MAX_BYTES = 4096;
 
@@ -59,6 +59,12 @@ export function launcherLimits(): LimitsText | undefined {
  * ("limits: ..."), or null.
  */
 export function startLimits(R: any, lim: LimitsText, lock = true): string | null {
+  // (no limits and _limits not imported yet: a lazy lock; an imported one,
+  // pending snapshot or not, is finalized below as it always was)
+  if (lim === null && dictGet(R.sysModules, "_limits") === undefined) {
+    if (lock) lockDefaults(R);
+    return null;
+  }
   const L = R.importModule("_limits");
   try {
     if (lim !== null) {
@@ -72,6 +78,34 @@ export function startLimits(R: any, lim: LimitsText, lock = true): string | null
     if (!R.typeOf(exc).$mro.includes(R.T.ValueError)) throw e;
     return String(R.str(exc));
   }
+}
+
+/**
+ * No limits given: lock the defaults without importing lib/_limits.py at
+ * startup.  A fresh per-user compile cache (a new install, a new HOME)
+ * would compile it on every first run, ~90 ms of CPU, for a session that
+ * may never read a limit.  sys._sagebrush_limits_lock tells _limits to
+ * finalize as it is first imported (by the finite-field core, the engine or
+ * user code: propose then raises, as when it was locked here), and
+ * sys._sagebrush_limits is there from the start as before: reading it
+ * imports _limits, whose finalize replaces this accessor with the snapshot
+ * itself.  (An accessor, not a module __getattr__: sys gets no new
+ * attribute that CPython's lacks, and a missing name costs what it did.)
+ */
+function lockDefaults(R: any): void {
+  const sys = R.importModule("sys");
+  sys._sagebrush_limits_lock = true;
+  const plain = (v: any) => Object.defineProperty(sys, "_sagebrush_limits", { value: v, writable: true, enumerable: true, configurable: true });
+  Object.defineProperty(sys, "_sagebrush_limits", {
+    get: () => {
+      const v = R.callObj(getattr(R.importModule("_limits"), "finalize"), []);
+      plain(v);
+      return v;
+    },
+    set: plain,
+    enumerable: true,
+    configurable: true,
+  });
 }
 
 /** The UTF-8 length of s (a lone surrogate counted as 3 bytes, as Python's
