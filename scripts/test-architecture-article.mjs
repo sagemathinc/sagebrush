@@ -44,6 +44,18 @@ bad(board(["https://github.com/sagemathinc/sagebrush-cloud-private/blob/" + A + 
 bad(board(["https://github.com/sagemathinc/sagebrush/blob/master/README.md"]), /not a permalink/, "a branch, not a commit");
 bad(board([url("src/x.ts")], { extra: " See https://github.com/sagemathinc/sagebrush-cloud-private/blob/main/x." }), /text: .*not a permalink/, "a GitHub link written in a note's text");
 ok(board([url("src/x.ts")], { extra: " See https://sagebrush.space/articles/." }), "a link elsewhere is prose");
+// (astra's CORR-ARCH-1 probes: a ref is always checked, whatever it starts with)
+bad(board(["https://example.com/unpinned"]), /note n0: https:\/\/example\.com\/unpinned is not a permalink/, "a ref to another site");
+bad(board(["javascript:alert(1)"]), /note n0: javascript:alert\(1\) is not a permalink/, "a javascript: ref");
+bad(board(["http://github.com/sagemathinc/sagebrush-cloud-private/blob/main/README.md"]), /note n0: http:\/\/github\.com\/sagemathinc\/sagebrush-cloud-private/, "an http: ref into the private repository");
+bad(board(["http://github.com/sagemathinc/sagebrush/blob/" + A + "/src/x.ts"]), /not a permalink/, "an http: permalink");
+bad(board(["#p2"]), /note n0: #p2 is not a permalink/, "a ref to a place on the board");
+bad(board([url("src/x.ts")], { extra: " See HTTP://GitHub.com/sagemathinc/sagebrush-cloud-private." }), /text: HTTP:\/\/GitHub\.com\/sagemathinc\/sagebrush-cloud-private\. is not a permalink/, "a GitHub link in text, any case and scheme");
+bad(board([url("src/x.ts")], { extra: " See https://raw.githubusercontent.com/sagemathinc/sagebrush/master/README.md" }), /text: https:\/\/raw\.githubusercontent\.com/, "a raw GitHub link in text");
+bad(board([url("src/x.ts")], { extra: " [click](javascript:alert(1))" }), /javascript:/, "a javascript: link in text");
+bad(board([url("src/x.ts")], { extra: " [x](data:text/html,hi)" }), /a link to data:text\/html,hi/, "a data: link in text");
+ok(board([url("src/x.ts")], { extra: " [the viewer](/board/?doc=/a.board.json), [here](#top)" }), "site-relative and in-page links");
+{ const r = checkLinks(board([url("src/x.ts"), url("README.md")]), git); assert.equal(r.links, 2, "every ref counted"); n++; }
 
 // the pages: every note of a titled region, its detail and its code link, and the stamp
 const doc = board([url("src/x.ts#L2-L3")]);

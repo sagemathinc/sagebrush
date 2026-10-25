@@ -64,16 +64,27 @@ export function checkLinks(doc, git) {
   const start = items(doc).find((n) => n.id === "start");
   const updated = start && UPDATED.exec(start.text ?? "");
   if (!updated) problems.push('the start note must say "Last updated YYYY-MM-DD, at sagebrush `<8 hex>`."');
+  // Every note's ref is a permalink, whatever it starts with.  In text, a link to GitHub (by its
+  // parsed host, any scheme or case) must be one too; other web links are prose's business, and a
+  // Markdown link target may only be a web, site-relative or in-page address (no javascript:, data:, ...).
   const links = [];
-  for (const n of items(doc)) if (n.ref !== undefined) links.push({ where: `note ${n.id}`, url: n.ref });
-  for (const s of strings(doc)) for (const m of s.matchAll(/https?:\/\/[^\s)"'>\]]+/g)) if (!links.some((l) => l.url === m[0])) links.push({ where: "text", url: m[0] });
+  for (const n of items(doc)) if (n.ref !== undefined) links.push({ where: `note ${n.id}`, url: String(n.ref) });
+  const githubHost = (h) => /(^|\.)github\.com$|(^|\.)githubusercontent\.com$/.test(h);
+  for (const s of strings(doc)) {
+    for (const m of s.matchAll(/\]\(\s*<?([^)\s>]+)/g)) if (!/^(https?:\/\/|\/|#)/i.test(m[1]) && /^[a-z][a-z0-9+.-]*:/i.test(m[1])) problems.push(`text: a link to ${m[1]}: only web, site-relative or in-page links`);
+    for (const m of s.matchAll(/\bjavascript:/gi)) problems.push(`text: "${m[0]}" in a note's text`);
+    for (const m of s.matchAll(/\bhttps?:\/\/[^\s)"'<>\]]+/gi)) {
+      let host = "";
+      try { host = new URL(m[0]).hostname.toLowerCase(); } catch { problems.push(`text: ${m[0]} isn't a valid address`); continue; }
+      if (githubHost(host) && !links.some((l) => l.url === m[0])) links.push({ where: "text", url: m[0] });
+    }
+  }
   const commits = new Set();
   const parsed = [];
   for (const l of links) {
-    if (!/^https:\/\/github\.com\//.test(l.url)) continue; // (links elsewhere are prose's business)
     const m = PERMALINK.exec(l.url);
     if (!m) {
-      problems.push(`${l.where}: ${l.url} is not a permalink into ${REPO} (blob/<40-hex commit>/<path>)`);
+      problems.push(`${l.where}: ${l.url} is not a permalink into ${REPO} (https://github.com/sagemathinc/sagebrush/blob/<40-hex commit>/<path>)`);
       continue;
     }
     commits.add(m[1]);
