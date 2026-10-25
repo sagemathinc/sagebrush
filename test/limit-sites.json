@@ -2700,6 +2700,14 @@
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
+ "lib/_sage_matrix.py :: _dict_entries :: if dict.__len__(d) > _MAX_ENTRIES: #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory"
+ },
+ "lib/_sage_matrix.py :: _dict_entries :: raise ValueError(\"more than %d entries\" % _MAX_ENTRIES) #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory"
+ },
  "lib/_sage_matrix.py :: _read_rows :: \"\"\"The rows of a matrix, each a list: read boundedly (at most limit #0": {
   "class": "2",
   "owner": "matrices/runtime memory",
