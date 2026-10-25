@@ -930,9 +930,9 @@ _COLLECT_RESERVE = 64 << 20
 def _collect_max():
     """The bound, and the heap in use it was taken from, in bytes (None
     where the host can't say), which scripts/heap-budget.mjs checks."""
-    n = getattr(_sys, "_sagebrush_heap_limit", None)
-    # (CPython, or a host that cannot say: a nominal 1 GiB)
-    limit = int(n) if n else 1 << 30
+    # (pyjs: its heap limit; CPython: the machine's total; _capacity, D0)
+    import _capacity
+    limit = _capacity.heap_figure()
     raw = None
     f = getattr(_sys, "_sagebrush_heap_used", None)
     if callable(f):
@@ -946,7 +946,12 @@ def _collect_max():
 
 
 def _collect_refusal():
-    return MagmaError("a comprehension of more than %d elements is not supported yet" % _COLLECT_MAX)
+    import _capacity
+    e = MagmaError("a comprehension of more than %d elements is not supported yet" % _COLLECT_MAX)
+    # (the enforced cap, at _COLLECT_COST bytes an element; the need is not
+    # known; the memory observed free, which decided nothing: D0)
+    e.need_bytes, e.limit_bytes, e.capacity = None, _COLLECT_MAX * _COLLECT_COST, _capacity.capacity()
+    return e
 
 
 def _collect(gen):
@@ -955,6 +960,9 @@ def _collect(gen):
     v = []
     for x in gen:
         if len(v) == _COLLECT_MAX:
+            # (the elements let go first: the refusal reads the capacity,
+            # D0, in what is left of the heap, never on top of them)
+            del v[:]
             raise _collect_refusal()
         v.append(x)
     return v

@@ -64,6 +64,29 @@ def set_limits(limits):
     L.propose(L.validate(limits))
 
 
+def _capacity_module():
+    """_sagelib/_capacity.py as the top-level module _capacity, the name the
+    Sage layer's guards import it by (as _limits_module does for _limits)."""
+    m = _sys.modules.get("_capacity")
+    if m is None:
+        path = _os.path.join(_os.path.dirname(__file__), "_sagelib", "_capacity.py")
+        spec = _util.spec_from_file_location("_capacity", path)
+        m = _util.module_from_spec(spec)
+        _sys.modules["_capacity"] = m
+        try:
+            spec.loader.exec_module(m)
+        except BaseException:
+            del _sys.modules["_capacity"]
+            raise
+    return m
+
+
+def _capacity_share():
+    """The memory of one default polynomial factorization (item D0), for the
+    native engines, which ask once per factorization."""
+    return _capacity_module().poly_share()
+
+
 def _limits_from_environment():
     """SAGEBRUSH_LIMITS=FILE: a JSON text of at most 4096 bytes, proposed
     (not locked) at import; an unreadable or invalid file is a ValueError
@@ -89,6 +112,17 @@ def _limits_from_environment():
 _limits_from_environment()
 
 from . import ap, linalg, mf, modsym, nf, poly  # noqa: E402
+
+
+def _register_capacity():
+    try:
+        from ._native import set_memory_share_source
+    except ImportError:
+        return  # (an older native build: its factorizations keep their default)
+    set_memory_share_source(_capacity_share)
+
+
+_register_capacity()
 
 
 # ---- the agent API (estimates plan r3 §1.1): what this build provides,
