@@ -17,6 +17,8 @@ use sagebrush_modsym::dirichlet::DirichletGroup;
 use sagebrush_modsym::general::{Character, GeneralSpace};
 use serde_json::{json, Value};
 
+#[cfg(feature = "phi-probe")]
+mod phi_probe;
 mod hmf;
 mod hmfq;
 pub mod nmod_ops;
