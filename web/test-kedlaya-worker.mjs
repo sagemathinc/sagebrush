@@ -68,9 +68,45 @@ try {
     if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 500));
     return r.result.value;
   };
+  // a consistent copy of slot i (24 words), as src/runtime/progress.ts's
+  // read(): an even sequence (word 0) the same before and after the words,
+  // else null after 4 torn reads; `load` reads word k (Atomics.load, or a
+  // test's forced torn state).  Decoded: word 1 bit 0 in use, words 2-3 the
+  // call's id, word 7 the op, word 9's low 16 bits the stage index, words
+  // 10-11 done.  (astra2's CORR-PR147-2: separate loads could pair a new
+  // stage index with the previous stage's done)
+  await ev(`window.kdSlot = (load, i) => {
+    const b = i * 24;
+    for (let tries = 0; tries < 4; tries++) {
+      const s1 = load(b);
+      if (s1 & 1) continue;
+      const w = [];
+      for (let k = 0; k < 24; k++) w.push(load(b + k) >>> 0);
+      if (load(b) !== s1) continue;
+      return { inUse: !!(w[1] & 1), callId: w[2] + w[3] * 2 ** 32, op: w[7], stage: w[9] & 0xffff, done: w[10] + w[11] * 2 ** 32 };
+    }
+    return null;
+  }`);
+  // the forced torn reads: a writer moving stage 3 (done 5) to stage 4 has
+  // published its odd sequence and the new stage, not yet done = 0; and a
+  // sequence that moves on (a write completed) between every two reads
+  const torn = await ev(`(() => {
+    const words = new Int32Array(24);
+    words[0] = 7; words[1] = 1; words[2] = 9; words[9] = 4; words[10] = 5;
+    const raw = (Atomics.load(words, 1) & 1) && (Atomics.load(words, 9) & 0xffff) === 4 && Atomics.load(words, 10) > 0;
+    const odd = kdSlot((k) => Atomics.load(words, k), 0);
+    words[0] = 8;
+    let n = 0;
+    const moving = kdSlot((k) => (k === 0 ? 8 + 2 * n++ : Atomics.load(words, k)), 0);
+    const stable = kdSlot((k) => Atomics.load(words, k), 0);
+    return { raw: !!raw, odd, moving, stable };
+  })()`);
+  ok(torn.raw === true && torn.odd === null && torn.moving === null && torn.stable?.stage === 4 && torn.stable.done === 5,
+     `a torn progress slot is never read as a stage with done > 0, which the separate loads were (${JSON.stringify(torn)})`);
+
   // a fresh worker: run `code` (Sage) as run 2; if `stage` is set, Stop once
-  // the progress slots show that stage with done > 0 (word 1 bit 0: in use;
-  // word 9's low 16 bits: the stage index; words 10-11: done)
+  // a consistent copy of a progress slot shows that call in that stage with
+  // done > 0 (seen: the copy Stop was sent on)
   await ev(`window.kd = (code, stage, wait = 600000) => new Promise((resolve) => {
     const w = new Worker("/sagebrush-worker.js", { type: "module" });
     let out = "", sent = 0, seen = "", timer;
@@ -83,11 +119,10 @@ try {
           const intr = new Int32Array(m.interrupt), slots = new Int32Array(m.progress);
           timer = setInterval(() => {
             for (let i = 0; i < 32 && !sent; i++) {
-              const b = i * 24;
-              if (!(Atomics.load(slots, b + 1) & 1)) continue;
-              const index = Atomics.load(slots, b + 9) & 0xffff, done = (Atomics.load(slots, b + 10) >>> 0) + (Atomics.load(slots, b + 11) >>> 0) * 2 ** 32;
-              seen = index + ":" + done;
-              if (index === stage && done > 0) {
+              const s = kdSlot((k) => Atomics.load(slots, k), i);
+              if (!s || !s.inUse) continue;
+              if (s.stage === stage && s.done > 0) {
+                seen = s;
                 sent = Date.now();
                 Atomics.or(intr, 0, 1);
                 Atomics.notify(intr, 0);
@@ -126,7 +161,8 @@ try {
     const m = /^interrupted (\S+) (\d+) (.*)$/m.exec(r.out);
     const ms = m ? Number(m[1]) - r.sent : NaN;
     console.log(`Stop in stage ${stage} (${what}) at p = ${p}, prec ${prec}, in Chromium's worker: KeyboardInterrupt ${ms.toFixed(0)} ms after Stop`);
-    ok(!!m && ms < 1000 && m[2] === "0" && m[3] === "5^-1 + O(5^4)", `Stop in stage ${stage}: within 1 s, the slot released, a later call right (${JSON.stringify(r)})`);
+    ok(!!m && r.seen.inUse && r.seen.callId > 0 && r.seen.stage === stage && r.seen.done > 0 && ms < 1000 && m[2] === "0" && m[3] === "5^-1 + O(5^4)",
+       `Stop in stage ${stage}: sent on a consistent copy of the call's slot in that stage with done > 0; within 1 s, the slot released, a later call right (${JSON.stringify(r)})`);
   }
 } finally {
   chrome.kill();
