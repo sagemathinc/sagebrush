@@ -256,6 +256,102 @@ t[0] = 10.25
 C.poly_share()
 check("age resampled", C._poly_age, 0.0)
 
+# 15. the domains each row counts and bounds, and the set derived from the
+# rows with a finite remainder (plan-d0-domains-r2): observed by one, and
+# contradicted by none (a row bounding a domain it doesn't count)
+ALL, SELF = list(C.DOMAINS), [d for d in C.DOMAINS if d != "child"]
+NONE_ROOT = os.path.join(BASE, "none")
+
+
+def rows(rec):
+    return [(b["source"], b["includes"], b["constrains"]) + ((b["scope"],) if "scope" in b else ()) for b in rec["basis"]]
+
+
+def runtime_only(parts):
+    C._set_sources(root=NONE_ROOT, platform="linux", rlimits={}, runtime=lambda: parts)
+    return C.capacity()
+
+
+check("vocabulary", C.DOMAINS, ("child", "cpython-heap", "js-arraybuffer", "js-heap", "wasm-engine", "wasm-instance"))
+# (1) board's case: one row counts and bounds js-arraybuffer, another bounds
+# it without counting it: out, though the first includes it
+rec = runtime_only([("sees", GiB, 0, ["js-arraybuffer", "js-heap"], ["js-arraybuffer", "js-heap"]), ("blind", GiB, 0, [], ["js-arraybuffer"])])
+check("contradicted", rec["domains"], ["js-heap"])
+check("contradicted rows", rows(rec), [("sees", ["js-arraybuffer", "js-heap"], ["js-arraybuffer", "js-heap"]), ("blind", [], ["js-arraybuffer"])])
+# (4) a contradicting row whose usage isn't known takes no part
+rec = runtime_only([("sees", GiB, 0, ["js-arraybuffer"], ["js-arraybuffer"]), ("blind", GiB, None, [], ["js-arraybuffer"])])
+check("unknown row takes no part", (rec["domains"], rows(rec)[1]), (["js-arraybuffer"], ("blind", [], ["js-arraybuffer"])))
+# (5) a browser: the engine's row, and a JS heap whose use can't be read
+rec = runtime_only([("wasm engine", 4 * GiB, 0, ("wasm-engine",), ("wasm-engine",)), ("js heap", 2 * GiB, None, ("js-heap",), ("js-heap",))])
+check("browser", rec["domains"], ["wasm-engine"])
+check("browser rows", rows(rec), [("wasm engine", ["wasm-engine"], ["wasm-engine"]), ("js heap", [], ["js-heap"])])
+# (6) a part without domains (an older engine) adds nothing; (7) no bytes, no domains
+rec = runtime_only([("old", GiB, 0)])
+check("three-tuple", (rec["bytes"], rec["domains"], rows(rec)), (GiB, [], [("old", [], [])]))
+C._set_sources(root=NONE_ROOT, platform="linux", rlimits={}, runtime=NO_RUNTIME)
+check("nothing readable", (C.capacity()["bytes"], C.capacity()["domains"]), (None, []))
+# (2) a cgroup counts the child, and RLIMIT_AS doesn't bound it: all six
+C._set_sources(root=r, platform="linux", rlimits={"RLIMIT_AS": (3 * GiB, -1), "RLIMIT_DATA": (-1, -1)}, runtime=NO_RUNTIME)
+rec = C.capacity()
+check("cgroup and RLIMIT_AS", rec["domains"], ALL)
+check("cgroup and RLIMIT_AS rows", rows(rec), [("cgroup /user.slice/job", ALL, ALL), ("RLIMIT_AS", SELF, SELF), ("MemAvailable", ALL, ALL)])
+# (3) only the resource limits readable: nothing observes the child
+r15 = tree("rlimits-only", {"/proc/self/status": status(GiB, 512 * MiB)})
+C._set_sources(root=r15, platform="linux", rlimits={"RLIMIT_AS": (4 * GiB, -1), "RLIMIT_DATA": (2 * GiB, -1)}, runtime=NO_RUNTIME)
+rec = C.capacity()
+check("rlimits only", (rec["domains"], rows(rec)), (SELF, [("RLIMIT_AS", SELF, SELF), ("RLIMIT_DATA", SELF, SELF)]))
+# (8) poly's record, the JS heap left out: its own set, without js-heap
+C._set_sources(root=NONE_ROOT, platform="linux", rlimits={}, runtime=lambda: [("wasm engine", 4 * GiB, 0, ["wasm-engine"], ["wasm-engine"]), ("js heap", 2 * GiB, 0, ["js-heap"], ["js-heap"])])
+rec = C.capacity()
+f = C._record([b for b in rec["basis"] if b["source"] != "js heap"], [])
+check("poly's record", (rec["domains"], f["domains"]), (["js-heap", "wasm-engine"], ["wasm-engine"]))
+
+# 16. Windows: the job row's scope, kept from the limit that was chosen
+# (DOMAINS-R1-1, CORR-DOMAINS-R1-1); the selector itself, ties included
+P, J = 0x100, 0x200
+check("choice process only", C._job_choice(P, 2 * GiB, 512 * MiB, 0, 0), (2 * GiB, 512 * MiB, "process"))
+check("choice job only", C._job_choice(J, 0, None, 3 * GiB, GiB), (3 * GiB, GiB, "job"))
+check("choice both, process smaller", C._job_choice(P | J, 2 * GiB, 1800 * MiB, 3 * GiB, GiB), (2 * GiB, 1800 * MiB, "process"))
+check("choice both, job smaller", C._job_choice(P | J, 2 * GiB, 512 * MiB, 3 * GiB, 2800 * MiB), (3 * GiB, 2800 * MiB, "job"))
+check("choice both, a tie", C._job_choice(P | J, 2 * GiB, GiB, 3 * GiB, 2 * GiB), (2 * GiB, GiB, "process"))
+check("choice neither", C._job_choice(0, 2 * GiB, 0, 3 * GiB, 0), (None, None, None))
+
+
+class Win2(Win):
+    """A job whose limit is chosen by the real selector."""
+    def __init__(self, *query):
+        Win.__init__(self, job=True)
+        self.query = query
+    def job_limit(self):
+        return C._job_choice(*self.query)
+
+
+def win(w):
+    C._set_sources(platform="win32", windows=w, runtime=NO_RUNTIME)
+    rec = C.capacity()
+    job = [b for b in rec["basis"] if b["source"] == "windows job"]
+    return rec, C._record(job, [])
+
+
+for label, w, scope, inc, alone in (
+        ("process only", Win2(P, 2 * GiB, 512 * MiB, 0, 0), "process", SELF, SELF),
+        ("job only", Win2(J, 0, None, 3 * GiB, GiB), "job", ALL, ALL),
+        ("both, process smaller", Win2(P | J, 2 * GiB, 1800 * MiB, 3 * GiB, GiB), "process", SELF, SELF),
+        ("both, job smaller", Win2(P | J, 2 * GiB, 512 * MiB, 3 * GiB, 2800 * MiB), "job", ALL, ALL)):
+    rec, job = win(w)
+    check("windows " + label + " row", rows(rec), [("physical available", ALL, ALL), ("windows job", inc, inc, scope)])
+    # (the job row alone; with physical, which observes the child itself,
+    # every domain, the process row bounding no child)
+    check("windows " + label + " alone", job["domains"], alone)
+    check("windows " + label + " with physical", rec["domains"], ALL)
+# (an older source, no scope: unknown, bounding the child without counting it)
+rec, job = win(Win(job=(2 * GiB, 512 * MiB)))
+check("windows no scope row", rows(rec)[1], ("windows job", SELF, ALL, None))
+check("windows no scope", (rec["domains"], job["domains"]), (SELF, SELF))
+check("windows totals unchanged", [(lambda w: (C._set_sources(platform="win32", windows=w, runtime=NO_RUNTIME), C._machine_total())[1])(w)
+                                    for w in (Win(), Win(job=(2 * GiB, 512 * MiB)), Win2(P | J, 2 * GiB, 512 * MiB, 3 * GiB, 2800 * MiB))],
+      [(16 * GiB, ["physical"]), (2 * GiB, ["windows job"]), (3 * GiB, ["windows job"])])
+
 C._set_sources()
 if had_limit is not None:
     sys._sagebrush_heap_limit = had_limit

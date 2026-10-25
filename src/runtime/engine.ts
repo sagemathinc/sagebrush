@@ -300,12 +300,17 @@ newBuiltinModule("_sbengine", (m) => {
     }
   }, "call");
   // The runtime's parts of the memory capacity (lib/_capacity.py, item D0):
-  // (source, limit, used) in bytes, used None when unknown; never guessed in
-  // Python, and nothing here calls the engine.  The engine's instance has at
+  // (source, limit, used, includes, constrains), bytes, used None when
+  // unknown; never guessed in Python, and nothing here calls the engine.
+  // The domains (plan-d0-domains-r2): the engine row counts and bounds only
+  // the engine instance's own Memory; the JS heap's used_heap_size and
+  // usedJSHeapSize count neither ArrayBuffer backing stores nor any wasm
+  // Memory, and its limit bounds only the heap.  The engine's instance has at
   // most 4 GiB (wasm32); the JS heap is V8's (or the browser's) limit and
   // use, without a collection.
   m.capacity_parts = Obj.builtin(() => {
-    const parts: any[] = [Obj.tuple(["wasm engine", WASM_CEILING, E ? E.memory.buffer.byteLength : 0])];
+    const only = (d: string) => Obj.tuple([d]);
+    const parts: any[] = [Obj.tuple(["wasm engine", WASM_CEILING, E ? E.memory.buffer.byteLength : 0, only("wasm-engine"), only("wasm-engine")])];
     let used: number | null = null;
     try {
       const p = (globalThis as any).process;
@@ -314,7 +319,7 @@ newBuiltinModule("_sbengine", (m) => {
     } catch {
       used = null;
     }
-    parts.push(Obj.tuple(["js heap", heapLimit(), typeof used === "number" && used >= 0 ? Math.floor(used) : null]));
+    parts.push(Obj.tuple(["js heap", heapLimit(), typeof used === "number" && used >= 0 ? Math.floor(used) : null, only("js-heap"), only("js-heap")]));
     return Obj.tuple(parts);
   }, "capacity_parts");
   // The JavaScript engine, for the estimates whose object sizes are its own
