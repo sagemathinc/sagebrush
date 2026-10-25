@@ -345,6 +345,21 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       post({ id, matches, prefix });
       return;
     }
+    if (m.importInfo !== undefined) {
+      // Where imports resolve here, for the Share dialog's pre-selection
+      // (web/share-client/file-deps.ts, share-ux-plan r2 §2.3): the cwd,
+      // sys.path in order, the native modules (which always win), and the
+      // library's top-level modules (found under its sys.path entry).
+      const sys = R.importModule("sys");
+      const path = (R.toArray(sys.path) as unknown[]).filter((d): d is string => typeof d === "string");
+      let cwd = "/";
+      try {
+        cwd = String(R.importModule("os").getcwd());
+      } catch {}
+      const lib = [...new Set(Object.keys((globalThis as any).__PYJS_LIB__ ?? {}).map((k) => k.split("/")[0].replace(/\.py$/, "")))];
+      post({ id, cwd, path, builtins: R.builtinModuleNames(), lib });
+      return;
+    }
     // Interrupt (the page wrote INTR[1]): runs queued before it are skipped
     if (id <= R.INTR[1] && (m.code !== undefined || m.interact !== undefined)) {
       post({ id, skipped: true });

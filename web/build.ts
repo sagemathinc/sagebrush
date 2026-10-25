@@ -140,8 +140,11 @@ const analyzeResult = await Bun.build(<any>{
 });
 // A shared collection's page, /s/<id> (web/share-client/view.ts; design/sharing.md)
 const shareResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-share.js", target: "browser", format: "esm", minify: true });
-const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult]];
-for (const r of [result, consoleResult, mathResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult]) {
+// the Share dialog's analysis worker (web/share-client/deps-worker.ts, share-ux-plan r2 §3): its own
+// chunk with the parser, loaded only when Share opens
+const shareDepsResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "deps-worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-share-deps.js", target: "browser", format: "iife", minify: true });
+const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult]];
+for (const r of [result, consoleResult, mathResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);
@@ -439,7 +442,7 @@ if (hasSite) mkdirSync(join(siteDir, "public", "runner"), { recursive: true });
 mkdirSync(join(here, "dist", "s"), { recursive: true });
 copyFileSync(join(here, "share-client", "view.html"), join(here, "dist", "s", "index.html"));
 if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
-for (const f of ["index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
+for (const f of ["index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "sagebrush-share-deps.js", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
   if (hasSite) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the library's chunks)
 if (hasSite) rmSync(join(siteDir, "public", "lib"), { recursive: true, force: true });
