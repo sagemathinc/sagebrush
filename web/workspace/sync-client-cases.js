@@ -2242,25 +2242,100 @@ async function t14Large() {
 }
 
 async function t14Figures() {
-  // (measured, for the PR: a ledger row's size as stored (the browser's estimate, 10,000 decided rows of a real-length
-  // namespace), and the fixed per-namespace meta values at their largest)
+  // (measured, for the PR (LIMIT-PR128-1): rows of the largest valid width as stored (the browser's estimate over
+  // 10,000 of them, in a namespace of the longest form), the largest row's JSON, and the fixed per-namespace meta values)
   const w = await fresh();
-  const ns = `${"c".repeat(64)}:123456789:${w.device}`;
+  const MAX = Number.MAX_SAFE_INTEGER;
+  const ns = `${"f".repeat(64)}:${"9".repeat(15)}:${w.device}`;
   await W.switchTo(w, ns);
+  const kinds = {
+    refused: { ns, lseq: MAX, s: "refused", d: 1, dseq: MAX, code: "x".repeat(64) },
+    superseded: { ns, lseq: MAX, s: "superseded", d: 1, dseq: MAX, reason: "diverged", by: MAX },
+    none: { ns, lseq: MAX, s: "none", d: 1, reason: "not-synced" },
+    accepted: { ns, lseq: MAX, s: "accepted", d: 0, dseq: MAX },
+  };
+  const widths = Object.fromEntries(Object.entries(kinds).map(([k, v]) => [k, JSON.stringify(v).length]));
+  const [widest, maxChars] = Object.entries(widths).sort((a, b) => b[1] - a[1])[0];
+  check(ns.length === 97 && maxChars === 248 && widest === "refused", "figures: the widest valid row is a refused one, 248 JSON characters, in a 97-character namespace: " + J(widths));
   const est = async () => (await navigator.storage.estimate()).usage ?? 0;
   await sleep(500);
   const u0 = await est();
-  for (let p = 0; p < 10; p++) await rawTx(w.ws, ["syncLedger"], (tx) => { const st = tx.objectStore("syncLedger"); for (let i = 0; i < 1000; i++) st.put({ ns, lseq: 1e9 + p * 1000 + i, s: "confirmed", d: 1, dseq: 1e9 + p * 1000 + i }); });
+  for (let p = 0; p < 10; p++) await rawTx(w.ws, ["syncLedger"], (tx) => { const st = tx.objectStore("syncLedger"); for (let i = 0; i < 1000; i++) { const lseq = MAX - (p * 1000 + i); st.put({ ...kinds.refused, lseq, dseq: lseq }); } });
   await sleep(1500);
   const u1 = await est();
-  const row = JSON.stringify({ ns, lseq: 1e9, s: "superseded", d: 1, dseq: 1e9, reason: "diverged", by: 1e9 });
-  const skips = JSON.stringify(Array.from({ length: 16 }, () => [2 ** 53 - 1, 2 ** 53 - 1, 2]));
-  const meta = { ledgerCount: 50_000, ledgerFloor: 2 ** 53 - 1, ledgerFrom: 2 ** 53 - 1, ledgerRev: 2 ** 53 - 1, ledgerSeeded: true, ledgerSeedAt: 2 ** 53 - 1, ledgerWipe: true };
+  const perRow = Math.round((u1 - u0) / 10_000);
+  const skips = JSON.stringify(Array.from({ length: 16 }, () => [MAX, MAX, 2]));
+  const meta = { ledgerCount: 50_000, ledgerFloor: MAX, ledgerFrom: MAX, ledgerRev: MAX, ledgerSeeded: true, ledgerSeedAt: MAX, ledgerWipe: true };
   const metaChars = Object.entries(meta).reduce((a, [k, v]) => a + `sync:${ns}:${k}`.length + JSON.stringify(v).length, 0) + `sync:${ns}:ledgerSkips`.length + skips.length;
-  check(skips.length <= 609, "figures (task #14): " + J({ storedBytesPerRowEstimate: Math.round((u1 - u0) / 10_000), rowJsonCharsMax: row.length, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
+  check(skips.length <= 609, "figures (task #14): " + J({ storedBytesPerMaxRowEstimate: perRow, perNamespaceMaxMB: +(perRow * 70_000 / 2 ** 20).toFixed(1), globalMaxMB: +(perRow * 210_000 / 2 ** 20).toFixed(1), rowJsonCharsMax: maxChars, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures };
+async function t14Review() {
+  // (regressions for astra3's review of #128)
+  const w = await fresh();
+  const { ns } = await localNs(w, "d1");
+  const hub = W.hubOf(w.ws), epoch = (await metaGet(w.ws, "sync:epoch")) ?? 0, gen = (await metaGet(w.ws, "sync:current")).gen;
+  const col = [];
+  await w.mkdir("/rv1", { collect: col });
+  // (CORR-PR128-1: an abort while the wait reads its first view: rejected, with its counts, nothing left registered)
+  const ac = new AbortController();
+  const p1 = w.waitSync(col, { signal: ac.signal });
+  ac.abort();
+  const e1 = await caught(p1);
+  check(e1?.name === "AbortError" && e1.counts?.local === 1 && W.waitCount(w) === 0, "review 1: aborted during registration: rejected with counts, no wait left: " + J({ name: e1?.name, counts: e1?.counts, n: W.waitCount(w) }));
+  // (CORR-PR128-2: a new wait knows the newest generation already seen; a delayed older sender's sent is dropped)
+  hub.post({ t: "holder", ns, epoch, gen: gen + 10, rev: 0 });
+  const ab2 = new AbortController();
+  const p2 = w.waitSync(col, { level: "sent", signal: ab2.signal });
+  await sleep(50);
+  hub.post({ t: "sent", ns, epoch, gen: gen + 9, seqs: col });
+  check(!(await settledYet(p2)), "review 2: a new wait drops a delayed sent from generation 9 after holder 10");
+  hub.post({ t: "sent", ns, epoch, gen: gen + 10, seqs: col });
+  check((await p2).sync === "sent", "review 2: …and takes generation 10's");
+  // (CORR-PR128-3: a rebuild's skip, and a skip overflow's floor, wake waits that were already reading)
+  const s0 = await w.lastSeq();
+  const a = [];
+  await w.create("/rv3.txt", { content: "x", collect: a });
+  const s1 = await w.lastSeq();
+  const pa = w.waitSync(a, { signal: new AbortController().signal });
+  await sleep(100);
+  check(!(await settledYet(pa)), "review 3: the wait reads local");
+  await rawTx(w.ws, ["meta"], async (tx) => { tx.objectStore("meta").put(s1, `sync:${ns}:scanned`); await W.noteSkip(tx.objectStore("meta"), ns, s0, s1, "invalid"); });
+  const ra = await Promise.race([pa, sleep(3000).then(() => null)]);
+  check(ra?.sync === "superseded", "review 3: a skip committed: the waiting wait settles superseded, no other event: " + J(ra));
+  // (its floor: a skip pushed out by 16 more; a wait over a seq in that range, local until then, settles expired)
+  await rawTx(w.ws, ["meta"], (tx) => { tx.objectStore("meta").put([], `sync:${ns}:ledgerSkips`); });
+  const b = [];
+  await w.create("/rv4.txt", { content: "y", collect: b });
+  const s2 = await w.lastSeq();
+  const pb = w.waitSync(b, { level: "confirmed", signal: new AbortController().signal });
+  await sleep(100);
+  check(!(await settledYet(pb)), "review 3: the second wait reads local (past the watermark)");
+  await rawTx(w.ws, ["meta"], async (tx) => { const m = tx.objectStore("meta"); m.put(s2, `sync:${ns}:scanned`); await W.noteSkip(m, ns, s1, s2, "invalid"); for (let i = 0; i < 16; i++) await W.noteSkip(m, ns, s2 + 100 + 2 * i, s2 + 101 + 2 * i, "invalid"); });
+  const rb = await Promise.race([pb, sleep(3000).then(() => null)]);
+  check(rb?.sync === "none" && rb.counts.none === 1 && (await w.syncState(b))[0].reason === "expired", "review 3: a skip pushed out raises the floor: the waiting wait settles, expired: " + J(rb));
+  // (CORR-PR128-4: names inherited by every object are not levels)
+  for (const lv of ["toString", "constructor", "__proto__", "hasOwnProperty", "valueOf"]) {
+    const e = await caught(w.waitSync(col, { level: lv, signal: new AbortController().signal }));
+    check(e?.code === "invalid", `review 4: level "${lv}" is invalid: ${e?.code}`);
+  }
+  // (CORR-PR128-5: the caller's array changed after the call: the wait and syncState keep the set they were given)
+  const arr = [col[0]];
+  const ab5 = new AbortController();
+  const p5 = w.waitSync(arr, { level: "local", signal: ab5.signal });
+  for (let i = 0; i < 10_000; i++) arr.push(1e9 + i);
+  const r5 = await p5;
+  const total = Object.values(r5.counts).reduce((x, y) => x + y, 0);
+  const arr2 = [col[0]];
+  const p6 = w.syncState(arr2);
+  for (let i = 0; i < 2000; i++) arr2.push(1e9 + i);
+  const r6 = await p6;
+  check(total === 1 && r6.length === 1, "review 5: the caller's array grown after the call changes nothing (one slot, one answer): " + J({ total, answers: r6.length }));
+  check(W.waitCount(w) <= 1, "review: nothing else left registered");
+  ab2.abort();
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
