@@ -2491,7 +2491,57 @@ async function s5Echo() {
   s2.dispose();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo };
+async function s5Verified() {
+  // (astra3's CORR-PR130-5: a verified delete of A whose answer is lost; the fallback status has no echo (an old,
+  // mixed or rolled-back server), /me says A both times: nothing durable is done from it (A stays on, its epoch kept);
+  // with A's echo it applies (the controls: off, and deleting followed); a followed deletion completes only on a
+  // verified answer)
+  const HA = await hashOf("acct-x");
+  const A = { available: true, state: "active", generation: 3, limit_bytes: 1000, used_bytes: 10 };
+  const one = async (echo, state) => {
+    const w = await fresh();
+    await W.switchTo(w, `${HA}:3:${w.device}`);
+    let st = { ...A };
+    const el = document.body.appendChild(document.createElement("div")), srv = fakeServer(() => st);
+    const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch });
+    await until(() => /Delete my synced data/.test(buttons(el).join()), 3000);
+    const e0 = (await metaGet(w.ws, "sync:epoch")) ?? 0;
+    srv.next = [{ throw: true }];
+    srv.echo = echo;
+    st = { available: true, state, generation: 3 };
+    click(el, /Delete my synced data/);
+    await until(() => srv.deletes.length === 1, 3000);
+    await sleep(500);
+    const l = await metaGet(w.ws, "sync:current"), e1 = (await metaGet(w.ws, "sync:epoch")) ?? 0;
+    return { w, el, s, srv, l, e0, e1, set: (v) => (st = v) };
+  };
+  for (const state of ["off", "deleting"]) {
+    const r = await one(false, state);
+    check(r.l && !r.l.off && r.e1 === r.e0 && /didn't say which account/.test(text(r.el)), `verified: a lost delete answer, the fallback status ${state} WITHOUT an echo (/me A twice): A left on, its epoch kept, said: ` + J({ off: r.l?.off, epoch: [r.e0, r.e1], text: text(r.el).slice(0, 160) }));
+    r.s.dispose();
+    r.el.remove();
+  }
+  for (const state of ["off", "deleting"]) {
+    const r = await one(true, state);
+    check(r.l?.off === true && r.e1 === r.e0 + 1 && (state === "off" || /Deleting your synced data/.test(buttons(r.el).join())), `verified: the control, the fallback status ${state} with A's echo: applied (sync off here, the epoch moved${state === "deleting" ? ", the deletion followed" : ""}): ` + J({ off: r.l?.off, epoch: [r.e0, r.e1], buttons: buttons(r.el) }));
+    if (state === "deleting") {
+      // (the followed deletion: an unverified "off" never completes it; a verified one does)
+      const n0 = r.srv.statusReads;
+      r.srv.echo = false;
+      r.set({ available: true, state: "off" });
+      await until(() => r.srv.statusReads > n0, 8000);
+      await sleep(200);
+      const notDone = !/was deleted/.test(text(r.el)) && /Deleting your synced data/.test(buttons(r.el).join());
+      r.srv.echo = true;
+      const done = await until(() => /was deleted/.test(text(r.el)), 10000);
+      check(notDone && done, "verified: a followed deletion is not declared done on an unverified off, and is on a verified one: " + J({ notDone, done }));
+    }
+    r.s.dispose();
+    r.el.remove();
+  }
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
