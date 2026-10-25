@@ -269,22 +269,8 @@ print("50 a str subclass's own text, not its __str__:", n, repr(open(P("s2")).re
 MODES = ["w", "b"]
 n = open(P("cm"), MODES[0] + MODES[1]).write(bytes([1, 2]))
 print("51 a computed mode:", n, rd(P("cm")))
-class Writer:
-    def write(self, s):
-        return "the method bound before S"
-def other_write(self, s):
-    return "the method S installed"
-def install():
-    Writer.write = other_write
-    return "s"
-def writer_open(f, m):
-    return Writer()
-REAL = open
-open = writer_open
-r = open(P("bw"), "w").write(install())
-open = REAL
-del REAL
-print("52 a user open's write, bound before S:", r)
+# (52, a user open's write method rebound while S is evaluated, is a
+# divergence: pyjs looks up a method after its arguments: test/file-once.test.ts)
 def nested():
     x = open(P("nest"), "w").write("in a function: " + "joined")
     return x

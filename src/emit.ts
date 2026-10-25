@@ -507,8 +507,7 @@ export class Emitter {
   // each evaluated once, where today's code evaluates it: open, F and M
   // first; then, when open is the builtin, F an exact str and M one of w, a,
   // wb, ab (identity, typeof and ===, no Python call), the native open, else
-  // today's call of open and its write method's lookup (bound before S, as
-  // CPython's); then S, in a try whose finally closes the native descriptor
+  // today's call of open; then S, in a try whose finally closes the native descriptor
   // once, on an exception or Stop too; then the write.  Nothing is read
   // ahead of its place, so no namespace needs checking.  S with yield or
   // await isn't a site (the descriptor isn't held across a suspension).
@@ -525,8 +524,12 @@ export class Emitter {
     const x = this.fileOnceShape(value);
     if (x === null) return false;
     const canon = this.hoist("R.fileOnceOpen()");
-    const get = this.site("siteGet", "write");
-    const [to, tf, tm, th, tobj, tw, tv] = [this.temp(), this.temp(), this.temp(), this.temp(), this.temp(), this.temp(), this.temp()];
+    // (the declined path: today's write call, its method looked up after S
+    // is evaluated as for any call of a method in pyjs; looking it up before
+    // S, CPython's order, made a bound method per call and cost a near-no-op
+    // writer 15 times its time)
+    const call = this.site("siteCall", "write", 1);
+    const [to, tf, tm, th, tobj, tv] = [this.temp(), this.temp(), this.temp(), this.temp(), this.temp(), this.temp()];
     const eo = this.ex(x.o);
     this.w(`${to} = ${eo};`);
     const ef = this.ex(x.f);
@@ -534,18 +537,19 @@ export class Emitter {
     const em = this.ex(x.m);
     this.w(`${tm} = ${em}; ${th} = null;`);
     this.w(`if (${to} === ${canon} && typeof ${tf} === "string" && (${tm} === "w" || ${tm} === "a" || ${tm} === "wb" || ${tm} === "ab")) ${th} = R.fileOnceBegin(${tf}, ${tm});`);
-    this.w(`else { ${tobj} = typeof ${to} === "function" ? ${to}(${tf}, ${tm}) : callObj(${to}, [${tf}, ${tm}]); ${tw} = ${get}(${tobj}); }`);
+    this.w(`else ${tobj} = typeof ${to} === "function" ? ${to}(${tf}, ${tm}) : callObj(${to}, [${tf}, ${tm}]);`);
     this.w("try {");
     this.indent++;
-    // (S handed over in R.fileOnceS, not held by a temporary or an argument:
-    // addendum 1)
+    // (S, evaluated once, on either branch: handed over in R.fileOnceS on the
+    // native one, so that no temporary, argument or register of the frame
+    // keeps it (addendum 1); passed as today's code passes it on the
+    // declined one, where a slot round trip cost the near-no-op writer)
     const es = this.ex(x.s);
-    this.w(`R.fileOnceS.v = ${es};`);
-    this.w(`${tv} = ${th} !== null ? R.fileOnceEnd(${th}) : typeof ${tw} === "function" ? ${tw}(R.fileOnceTake()) : callObj(${tw}, [R.fileOnceTake()]);`);
+    this.w(`${tv} = ${th} !== null ? (R.fileOnceS.v = ${es}, R.fileOnceEnd(${th})) : ${call}(${tobj}, ${es});`);
     this.indent--;
     this.w(`} finally {`);
     this.w(`  if (${th} !== null) { R.fileOnceAbort(${th}); ${th} = null; }`);
-    this.w(`  ${tobj} = ${tw} = undefined;`);
+    this.w(`  ${tobj} = undefined;`);
     this.w("}");
     if (after !== null) after(tv);
     return true;
