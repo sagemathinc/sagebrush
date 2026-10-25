@@ -19,40 +19,131 @@
   "owner": "bigint",
   "row": "inv-46"
  },
- "engine/classgroup/src/nf/bnf.rs ::  :: const MAX_CERTIFICATE_RETRIES: usize = 2; #0": {
+ "engine/classgroup/src/imag.rs :: class_group_with :: for round in 0..crate::limits::round_limit() { #0": {
   "class": "3",
-  "owner": "class group/number fields",
-  "row": "inv-41"
+  "owner": "class group/number fields"
  },
- "engine/classgroup/src/nf/bnf.rs ::  :: const MAX_RELATION_ROUNDS: usize = 60; #0": {
+ "engine/classgroup/src/lib.rs ::  :: pub mod limits; #0": {
   "class": "3",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: round_limit :: ROUNDS.with(|r| r.get()).unwrap_or(usize::MAX) #0": {
+  "class": "3",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: round_limit :: pub fn round_limit() -> usize { #0": {
+  "class": "3",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: searches_honour_an_explicit_limit_and_converge_without_one :: fn searches_honour_an_explicit_limit_and_converge_without_one() { #0": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: searches_honour_an_explicit_limit_and_converge_without_one :: let e = with_round_limit(0, || crate::api::bnf(&poly(&[-5, 0, 0, 1])).map(|_| ())).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: searches_honour_an_explicit_limit_and_converge_without_one :: let e = with_round_limit(0, || crate::api::quadratic(&BigInt::from(-1000003)).map(|_| ())).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: searches_honour_an_explicit_limit_and_converge_without_one :: let e = with_round_limit(0, || crate::api::quadratic(&BigInt::from(1004)).map(|_| ())).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: unlimited_by_default_and_opt_in :: assert_eq!(round_limit(), usize::MAX); #0": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: unlimited_by_default_and_opt_in :: assert_eq!(round_limit(), usize::MAX); #1": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: unlimited_by_default_and_opt_in :: assert_eq!(round_limit(), usize::MAX); #2": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: unlimited_by_default_and_opt_in :: assert_eq!(with_round_limit(7, round_limit), 7); #0": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: unlimited_by_default_and_opt_in :: fn unlimited_by_default_and_opt_in() { #0": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: unlimited_by_default_and_opt_in :: let _ = std::panic::catch_unwind(|| with_round_limit(3, || panic!(\"x\"))); #0": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/limits.rs :: with_round_limit :: pub fn with_round_limit<T>(rounds: usize, f: impl FnOnce() -> T) -> T { #0": {
+  "class": "3",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/nf/bnf.rs ::  :: const MAX_CERTIFICATE_RETRIES: usize = 2; #0": {
+  "class": "none",
   "owner": "class group/number fields",
   "row": "inv-41"
  },
  "engine/classgroup/src/nf/bnf.rs ::  :: const MAX_UNIT_ATTEMPTS: usize = 12; #0": {
-  "class": "3",
+  "class": "none",
   "owner": "class group/number fields",
   "row": "inv-41"
  },
  "engine/classgroup/src/nf/bnf.rs ::  :: const RESIDUE_WINDOW_MAX: u64 = 1 << 15; #0": {
-  "class": "3",
+  "class": "none",
   "owner": "class group/number fields",
   "row": "inv-41"
+ },
+ "engine/classgroup/src/nf/bnf.rs :: bnfinit_configured :: for round in 0..crate::limits::round_limit() { #0": {
+  "class": "3",
+  "owner": "class group/number fields"
  },
  "engine/classgroup/src/nf/ecm.rs ::  :: const MAXL: usize = 16; #0": {
-  "class": "3",
+  "class": "coverage",
   "owner": "class group/number fields",
   "row": "inv-41"
  },
- "engine/classgroup/src/nf/proof.rs :: default :: const CHAR_PRIME_MAX: u64 = 1 << 32; #0": {
+ "engine/classgroup/src/nf/proof.rs ::  :: impl Limits { #0": {
   "class": "3",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/nf/proof.rs ::  :: pub const CALIBRATED: Limits = Limits { norm_max: 1_000_000, index_max: 1_000_000 }; #0": {
+  "class": "3",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/nf/proof.rs :: default :: Limits { norm_max: u64::MAX, index_max: u64::MAX } #0": {
+  "class": "3",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/nf/proof.rs :: default :: const CHAR_PRIME_MAX: u64 = 1 << 32; #0": {
+  "class": "coverage",
   "owner": "class group/number fields",
   "row": "inv-41"
  },
  "engine/classgroup/src/nf/proof.rs :: default :: pub const PRIME_MAX: u64 = 1 << 24; #0": {
-  "class": "3",
+  "class": "coverage",
   "owner": "class group/number fields",
   "row": "inv-41"
+ },
+ "engine/classgroup/src/nf/proof.rs :: limits_are_opt_in :: assert_eq!((d.norm_max, d.index_max), (u64::MAX, u64::MAX)); #0": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/nf/proof.rs :: limits_are_opt_in :: fn limits_are_opt_in() { #0": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/nf/proof.rs :: limits_are_opt_in :: let d = Limits::default(); #0": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/nf/proof.rs :: limits_are_opt_in :: let e = certify(&poly(&[3_000_000_000_001, 0, 1]), &Limits::CALIBRATED).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/realq.rs :: class_group_real_with :: for round in 0..crate::limits::round_limit() { #0": {
+  "class": "3",
+  "owner": "class group/number fields"
  },
  "engine/galois/src/tables.rs ::  :: pub const MAX_DEGREE: usize = 23; #0": {
   "class": "3",
@@ -407,6 +498,10 @@
   "owner": "polynomial factorization",
   "row": "inv-34"
  },
+ "engine/poly/src/budget.rs :: fmt :: divisions: u64::MAX, #1": {
+  "class": "3",
+  "owner": "polynomial factorization"
+ },
  "engine/poly/src/budget.rs :: fmt :: impl Limits { #0": {
   "class": "2+3",
   "owner": "polynomial factorization",
@@ -417,15 +512,31 @@
   "owner": "polynomial factorization",
   "row": "inv-34"
  },
+ "engine/poly/src/budget.rs :: fmt :: max_coeff_bits: u64::MAX, #1": {
+  "class": "3",
+  "owner": "polynomial factorization"
+ },
  "engine/poly/src/budget.rs :: fmt :: max_degree: 10_000, #0": {
   "class": "2+3",
   "owner": "polynomial factorization",
   "row": "inv-34"
  },
+ "engine/poly/src/budget.rs :: fmt :: max_degree: usize::MAX, #1": {
+  "class": "3",
+  "owner": "polynomial factorization"
+ },
  "engine/poly/src/budget.rs :: fmt :: max_total_bits: 1 << 24, #0": {
   "class": "2+3",
   "owner": "polynomial factorization",
   "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: max_total_bits: u64::MAX, #1": {
+  "class": "3",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/budget.rs :: fmt :: pub const CALIBRATED: Limits = Limits { #0": {
+  "class": "3",
+  "owner": "polynomial factorization"
  },
  "engine/poly/src/budget.rs :: fmt :: pub const DEFAULT: Limits = Limits { #0": {
   "class": "2+3",
@@ -456,6 +567,14 @@
   "class": "2+3",
   "owner": "polynomial factorization",
   "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: subsets: u64::MAX, #1": {
+  "class": "3",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/budget.rs :: fmt :: work: u64::MAX, #1": {
+  "class": "3",
+  "owner": "polynomial factorization"
  },
  "engine/poly/src/budget.rs :: new :: Budget { #0": {
   "class": "2+3",
@@ -501,6 +620,54 @@
   "class": "2+3",
   "owner": "polynomial factorization",
   "row": "inv-34"
+ },
+ "engine/poly/src/tests.rs :: calibrated_work :: assert!(Limits::CALIBRATED.work - b.work_left() < Limits::CALIBRATED.work / 100); #0": {
+  "class": "none",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/tests.rs :: calibrated_work :: assert_eq!(Limits::CALIBRATED.work, 1 << 33); #0": {
+  "class": "none",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/tests.rs :: calibrated_work :: let b = Budget::new(Limits::CALIBRATED); #0": {
+  "class": "none",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/tests.rs :: default_is_unlimited_except_memory :: assert!(crate::with_default_limits(tight, || try_factor(&xn(11, -1))).is_err()); #0": {
+  "class": "none",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/tests.rs :: default_is_unlimited_except_memory :: assert_eq!((d.max_degree, d.max_coeff_bits, d.max_total_bits), (usize::MAX, u64::MAX, u64::MAX)); #0": {
+  "class": "none",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/tests.rs :: default_is_unlimited_except_memory :: assert_eq!((d.work, d.subsets, d.divisions), (u64::MAX, u64::MAX, u64::MAX)); #0": {
+  "class": "none",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/tests.rs :: default_is_unlimited_except_memory :: assert_eq!(Budget::default().limits().memory, 512 << 20); #0": {
+  "class": "none",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/tests.rs :: default_is_unlimited_except_memory :: fn default_is_unlimited_except_memory() { #0": {
+  "class": "none",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/tests.rs :: default_is_unlimited_except_memory :: let (c, fs) = try_factor_with(&f, &Budget::default()).unwrap(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/tests.rs :: default_is_unlimited_except_memory :: let d = Limits::DEFAULT; #0": {
+  "class": "none",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/tests.rs :: default_is_unlimited_except_memory :: let e = try_factor_with(&f, &Budget::new(Limits::CALIBRATED)).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization"
+ },
+ "engine/poly/src/tests.rs :: default_is_unlimited_except_memory :: let tight = Limits { max_degree: 10, ..Limits::CALIBRATED }; #0": {
+  "class": "none",
+  "owner": "polynomial factorization"
  },
  "engine/poly/src/vanhoeij.rs ::  :: pub const MAX_COLS: usize = 32; #0": {
   "class": "3",
@@ -642,6 +809,10 @@
   "owner": "HMF/web",
   "row": "inv-40"
  },
+ "engine/web/src/lib.rs :: dispatch :: Some(w) => sagebrush_poly::try_factor_with(&f, &sagebrush_poly::Budget::new(sagebrush_poly::Limits { work: w, ..sagebrush_poly::Limits::DEFAULT })), #0": {
+  "class": "3",
+  "owner": "polynomial factorization"
+ },
  "engine/web/src/lib.rs :: nmod_square :: if n > NMOD_MAX_N { #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
@@ -661,6 +832,10 @@
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
+ },
+ "engine/web/src/lib.rs :: with_rounds :: Some(n) => sagebrush_classgroup::limits::with_round_limit(usize::try_from(n).unwrap_or(usize::MAX), f), #0": {
+  "class": "3",
+  "owner": "class group/number fields"
  },
  "engine/web/src/lib.rs :: zvec :: pub const NMOD_MAX_BYTES: usize = NMOD_MAX_N * NMOD_MAX_N * 20 + NMOD_MAX_N; #0": {
   "class": "1+3",
@@ -813,6 +988,26 @@
   "class": "3",
   "owner": "finite fields + configuration"
  },
+ "lib/_limits.py ::  :: \"nf.certify_index_max\": (UNLIMITED, 10 ** 3, 2 ** 62), #0": {
+  "class": "3",
+  "owner": "class group/number fields + configuration"
+ },
+ "lib/_limits.py ::  :: \"nf.certify_index_max\": 10 ** 6, \"nf.certify_norm_max\": 10 ** 6, \"nf.relation_rounds\": 60, \"poly.work\": 2 ** 33} #0": {
+  "class": "3",
+  "owner": "class group/number fields + configuration"
+ },
+ "lib/_limits.py ::  :: \"nf.certify_norm_max\": (UNLIMITED, 10 ** 3, 2 ** 62), #0": {
+  "class": "3",
+  "owner": "class group/number fields + configuration"
+ },
+ "lib/_limits.py ::  :: \"nf.relation_rounds\": (UNLIMITED, 1, 10 ** 4), #0": {
+  "class": "3",
+  "owner": "class group/number fields + configuration"
+ },
+ "lib/_limits.py ::  :: \"poly.work\": (UNLIMITED, 2 ** 20, 2 ** 40), #0": {
+  "class": "3",
+  "owner": "polynomial factorization + configuration"
+ },
  "lib/_limits.py ::  :: \"unlimited\" may also be given explicitly. An unlimited value resolves to #0": {
   "class": "none",
   "owner": "finite fields + configuration"
@@ -829,9 +1024,9 @@
   "class": "none",
   "owner": "finite fields + configuration"
  },
- "lib/_limits.py ::  :: FINITE = {\"ff.conway_work\": 653528895, \"ff.embed_max\": 2 ** 20, \"ff.root_bits\": 1024, \"ff.work\": 10 ** 7} #0": {
+ "lib/_limits.py ::  :: FINITE = {\"ff.conway_work\": 653528895, \"ff.embed_max\": 2 ** 20, \"ff.root_bits\": 1024, \"ff.work\": 10 ** 7, #0": {
   "class": "3",
-  "owner": "finite fields + configuration"
+  "owner": "configuration"
  },
  "lib/_limits.py ::  :: MAX_BYTES = 4096 # the serialized text, in UTF-8 bytes #0": {
   "class": "1",
@@ -2385,15 +2580,13 @@
   "owner": "number fields",
   "row": "inv-28"
  },
- "lib/_sage_nf.py :: NumberField_absolute.class_group :: It refuses when M or that index bound exceeds 10^6, saying which #0": {
+ "lib/_sage_nf.py :: NumberField_absolute.class_group :: By default it has no limit on M or that index bound; the opt-in #0": {
   "class": "3",
-  "owner": "number fields",
-  "row": "inv-28"
+  "owner": "number fields"
  },
- "lib/_sage_nf.py :: NumberField_absolute.class_group :: NotImplementedError: class_group with proof=True: beyond the limits of the unconditional certificate: the Minkowski bound for the norms of ideal class representatives is 2205315, above the limit 1000000 (2.205 times it) #0": {
+ "lib/_sage_nf.py :: NumberField_absolute.class_group :: session limits nf.certify_norm_max and nf.certify_index_max make it #0": {
   "class": "3",
-  "owner": "number fields",
-  "row": "inv-28"
+  "owner": "number fields"
  },
  "lib/_sage_padic.py ::  :: _PADIC_MATRIX_MAX_ENTRIES = 1 << 16 #0": {
   "class": "2+3",
@@ -3083,17 +3276,21 @@
   "owner": "CLI/runtime configuration",
   "row": "src-16"
  },
- "src/cli.ts ::  :: every key (ff.work, ff.conway_work, ff.embed_max, ff.root_bits) #0": {
+ "src/cli.ts ::  :: every key (ff.work, ff.conway_work, ff.embed_max, ff.root_bits, #0": {
   "class": "none",
-  "owner": "CLI/runtime configuration"
- },
- "src/cli.ts ::  :: is \"unlimited\" by default: set finite values to opt in to work #0": {
-  "class": "none",
-  "owner": "CLI/runtime configuration"
+  "owner": "configuration"
  },
  "src/cli.ts ::  :: limits (grading, shared compute); memory guards always apply; #0": {
   "class": "none",
   "owner": "CLI/runtime configuration"
+ },
+ "src/cli.ts ::  :: nf.certify_index_max) is \"unlimited\" by default: set finite #0": {
+  "class": "none",
+  "owner": "configuration"
+ },
+ "src/cli.ts ::  :: poly.work, nf.relation_rounds, nf.certify_norm_max, #0": {
+  "class": "none",
+  "owner": "configuration"
  },
  "src/cli.ts :: readStdin :: if (total + n > STDIN_SOURCE_MAX) { #0": {
   "class": "1",
