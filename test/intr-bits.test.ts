@@ -105,6 +105,32 @@ test("consumeCtrlC writes only when bit 0 is set", () => {
   }
 });
 
+// (a census: every producer of bit 0 wakes a time.sleep too.  A sleep waits
+// on the word with Atomics.wait, which only a notify ends: a producer that
+// or's bit 0 without one leaves the sleep to run out, PR #135.  So each
+// Atomics.or of index 0 notifies the same word on its line or the next two,
+// or goes through requestCtrlC, which does both)
+test("every producer of Ctrl-C notifies the word (the census)", () => {
+  const files = execFileSync("git", ["ls-files", "src", "packages/sagebrush/bin", "web"], { cwd: ROOT, encoding: "utf8" })
+    .split("\n")
+    .filter((f) => /\.(ts|mts|cjs|mjs|js|html)$/.test(f) && !/(^|\/)test-[^/]*$|\.test\.[^/]*$/.test(f));
+  const producers: string[] = [], silent: string[] = [];
+  for (const f of files) {
+    const lines = readFileSync(join(ROOT, f), "utf8").split("\n");
+    lines.forEach((line, i) => {
+      if (/^\s*\/\//.test(line)) return;
+      const m = /Atomics\.or\(\s*([^,()]+?)\s*,\s*0\s*,/.exec(line);
+      if (!m) return;
+      const near = lines.slice(i, i + 3).join("\n");
+      const who = m[1].replace(/[.$]/g, "\\$&");
+      producers.push(`${f}:${i + 1}`);
+      if (!new RegExp(`Atomics\\.notify\\(\\s*${who}\\s*,\\s*0\\s*[,)]`).test(near)) silent.push(`${f}:${i + 1}: ${line.trim().slice(0, 160)}`);
+    });
+  }
+  assert.ok(producers.length >= 3, producers.join(" "));
+  assert.deepEqual(silent, []);
+});
+
 // (a worker running code with the word's other bits set first; Ctrl-C
 // requested after `ms`, or never)
 function run(code: string, preset: number, ms: number | null): Promise<{ done: string; word: number; seconds: number }> {
