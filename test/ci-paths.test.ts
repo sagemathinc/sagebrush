@@ -153,3 +153,17 @@ test("a rename is classified by both of its names, from a real git history", () 
   assert.equal(o.engine_cpython, "false");
 });
 
+
+test("the limits census runs on engine-only, lib and src changes even when the node suites are skipped (#155 -> #156)", () => {
+  // #155's files: an engine-only change, whose node suites (which hold
+  // test/limits.test.ts) were path-skipped; it merged and turned master red
+  const pr155 = ["engine/hmf/Cargo.toml", "engine/hmf/src/eigen.rs", "engine/hmf/tests/eigen_stop.rs"];
+  const o = classify(pr155);
+  assert.equal(o.node, "false");
+  assert.equal(o.census, "true");
+  for (const f of ["lib/_magma.py", "src/runtime/ops.ts", "test/limit-sites.json", "test/limit-sites-baseline.txt", "test/limit_sites.py"])
+    assert.equal(classify([f]).census, "true", f);
+  // and not for files the census does not read
+  for (const f of ["design/plan.md", "app/src/main.ts", "optional/x/README.md"])
+    assert.equal(classify([f]).census, "false", f);
+});
