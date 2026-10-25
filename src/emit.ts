@@ -1434,12 +1434,13 @@ const RUNTIME_NAMES = [
 ];
 
 // Whether evaluating e can suspend its frame (yield, yield from, await),
-// outside a lambda's body, which is its own frame
+// outside a lambda's body, which is its own frame; a lambda's defaults are
+// evaluated in this one, so they count (astra2's CORR-FV-R3-2)
 function suspends(e: any): boolean {
   if (e === null || typeof e !== "object") return false;
   if (Array.isArray(e)) return e.some(suspends);
   if (e.k === "Yield" || e.k === "YieldFrom" || e.k === "Await") return true;
-  if (e.k === "Lambda") return false;
+  if (e.k === "Lambda") return [...e.args.args, ...e.args.kwonly].some((p: any) => suspends(p.default));
   for (const k of Object.keys(e)) if (k !== "k" && k !== "line" && suspends(e[k])) return true;
   return false;
 }

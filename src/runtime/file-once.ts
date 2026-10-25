@@ -21,8 +21,8 @@
 //
 // The dependency inventory (test/file-once.test.ts checks it against this
 // file's imports and names): the canonical open, by identity only; Node's fs
-// (openSync, writeSync, closeSync) or the web build's shim (readFileSync,
-// writeFileSync, appendFileSync); TextEncoder; the exception types,
+// (openSync, writeSync, closeSync) or the web build's shim (onceOpen,
+// onceWrite: a handle on the file, not its path); TextEncoder; the exception types,
 // callObj/markRaised/isinstance/typeName/unbox, to raise and to read a str
 // subclass's text; memoryview and bufferOf, for a bytes-like S; hostPath,
 // the path as _fs reads it.  Nothing here is reached through a Python module
@@ -56,32 +56,21 @@ const nodeOps = (fs: any): FileOps => ({
   write: (fd, data, off, len) => fs.writeSync(fd, data, off, len),
   close: (fd) => fs.closeSync(fd),
 });
-// The web build's in-memory fs has no descriptors: a "descriptor" there is
-// the path and a position, each write rewriting the file with the bytes at
-// that position (so a write after another handle's lands where CPython's
-// would), an append appending.
+// The web build's in-memory fs has no descriptors: its onceOpen returns a
+// handle on the file itself (web/shims/fs.ts), not its path, so a rename, an
+// unlink or a new file at the path while S is evaluated leaves the write
+// where a descriptor's would go (astra2's CORR-FV-R3-1); onceWrite writes at
+// the handle's position, or at the end when appending
 const shimOps = (fs: any): FileOps => {
-  const open = new Map<number, { p: string; append: boolean; pos: number }>();
+  const open = new Map<number, any>();
   let next = 1;
   return {
     open: (p, append) => {
-      if (append) fs.appendFileSync(p, new Uint8Array(0));
-      else fs.writeFileSync(p, new Uint8Array(0));
-      open.set(next, { p, append, pos: 0 });
+      open.set(next, fs.onceOpen(p, append));
       return next++;
     },
     write: (fd, data, off, len) => {
-      const h = open.get(fd)!;
-      const part = data.subarray(off, off + len);
-      if (h.append) fs.appendFileSync(h.p, part);
-      else {
-        const old: Uint8Array = fs.readFileSync(h.p);
-        const out = new Uint8Array(Math.max(old.length, h.pos + part.length));
-        out.set(old);
-        out.set(part, h.pos);
-        fs.writeFileSync(h.p, out);
-        h.pos += part.length;
-      }
+      fs.onceWrite(open.get(fd), data.subarray(off, off + len));
       return len;
     },
     close: (fd) => {
@@ -89,6 +78,11 @@ const shimOps = (fs: any): FileOps => {
     },
   };
 };
+// (the descriptor calls for an fs: Node's, or the web build's shim; the
+// tests use it with the shim itself)
+export function fileOpsFor(fs: any): FileOps {
+  return typeof fs.openSync === "function" ? nodeOps(fs) : shimOps(fs);
+}
 
 // errno, strerror and the OSError subclass CPython makes of that errno
 const STRERROR: Record<string, [number, string]> = {
@@ -181,8 +175,7 @@ export function writeWhole(path: string, append: boolean, data: Uint8Array | nul
 let defaultOps: FileOps | null = null;
 function fsOps(): FileOps {
   if (defaultOps === null) {
-    const fs = require("fs");
-    defaultOps = typeof fs.openSync === "function" ? nodeOps(fs) : shimOps(fs);
+    defaultOps = fileOpsFor(require("fs"));
   }
   return defaultOps;
 }
