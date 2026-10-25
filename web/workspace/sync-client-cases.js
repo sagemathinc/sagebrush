@@ -2285,7 +2285,7 @@ async function t14Figures() {
   const skips = JSON.stringify(Array.from({ length: 16 }, () => [MAX, MAX, 2]));
   const meta = { ledgerCount: 50_000, ledgerFloor: MAX, ledgerFrom: MAX, ledgerRev: MAX, ledgerSeeded: true, ledgerSeedAt: MAX, ledgerWipe: true };
   const metaChars = Object.entries(meta).reduce((a, [k, v]) => a + `sync:${ns}:${k}`.length + JSON.stringify(v).length, 0) + `sync:${ns}:ledgerSkips`.length + skips.length;
-  check(skips.length <= 609 && measured > 0 && measured <= A, `figures (task #14): measured ${measured} B a stored row, within the committed allowance A = ${A}: ` + J({ measuredBytesPerIncompressibleRow: measured, committedAllowanceBytesPerRow: A, perNamespacePlanMiB: +(A * 70_000 / 2 ** 20).toFixed(1), globalPlanMiB: +(A * 210_000 / 2 ** 20).toFixed(1), rowJsonCharsMax: maxChars, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
+  check(skips.length <= 609 && measured > 0 && measured <= A, `figures (task #14): measured ${measured} B a stored row, ${measured > A ? "EXCEEDS" : "within"} the committed allowance A = ${A}: ` + J({ measuredBytesPerIncompressibleRow: measured, committedAllowanceBytesPerRow: A, perNamespacePlanMiB: +(A * 70_000 / 2 ** 20).toFixed(1), globalPlanMiB: +(A * 210_000 / 2 ** 20).toFixed(1), rowJsonCharsMax: maxChars, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
 }
 
 async function t14Review() {
