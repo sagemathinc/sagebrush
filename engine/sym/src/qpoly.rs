@@ -217,6 +217,17 @@ impl QPoly {
             .map(|(g, e)| (QPoly::new(g.into_iter().map(Q::from_integer).collect()).monic(), e))
             .collect())
     }
+    /// [`QPoly::try_factor`] for a caller that can do without the
+    /// factorization: None on a resource refusal; an internal error (a
+    /// failed proved invariant) panics, as [`QPoly::factor`] does, so it is
+    /// reported, never silently taken as "not factored".
+    pub fn try_factor_or_none(&self) -> Option<Vec<(QPoly, u32)>> {
+        match self.try_factor() {
+            Ok(fs) => Some(fs),
+            Err(e) if e.kind == sagebrush_poly::Kind::Internal => panic!("{e}"),
+            Err(_) => None,
+        }
+    }
     /// [`QPoly::try_factor`] where there is no error channel: a refusal
     /// panics (the bindings report it as an error, never as a result).
     pub fn factor(&self) -> Vec<(QPoly, u32)> {
