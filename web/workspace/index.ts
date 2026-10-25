@@ -24,3 +24,4 @@ export { D11, D11_CEILING, configureD11, RW, MAPS, STAGE, FENCE_READ, entriesOf,
 export { REPLAY, PLAN_STATE, runReplay, replayOf, markerKey, lateKey, SENDER_HOLD, ReplayHalted, type Marker } from "./sync-replay";
 export { crecordKey, setConfirmedCut, drainConfirmed, LARGE_LOG, type CRecord } from "./sync-confirmed";
 export { reduceAll, SyncIndex } from "./sync-reduce";
+export { LEDGER, WAIT, STATE, CODE, HUB, OBSOLETE, OBSOLETE_KEY, hubOf, waitCount, noteSkip, queueObsolete, cleanObsoleteStep, seedLedger, ledgerKeys, classOf as ledgerClass, isWire, type SyncAnswer, type WaitResult } from "./sync-ledger";
