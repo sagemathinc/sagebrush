@@ -36,6 +36,21 @@ use std::sync::Mutex;
 // ------------------------------------------------------------------ allocator
 
 static LIVE: AtomicU64 = AtomicU64::new(0);
+#[cfg(feature = "peak-stats")]
+static PEAK: AtomicU64 = AtomicU64::new(0);
+
+#[inline]
+fn added(n: u64) {
+    let _now = LIVE.fetch_add(n, Relaxed) + n;
+    #[cfg(feature = "peak-stats")]
+    PEAK.fetch_max(_now, Relaxed);
+}
+
+/// The peak of live bytes since the last reset (calibration builds only).
+#[cfg(feature = "peak-stats")]
+pub fn peak_bytes_reset() -> u64 {
+    PEAK.swap(LIVE.load(Relaxed), Relaxed)
+}
 
 /// A global allocator that counts the bytes it has live: one relaxed atomic
 /// add or subtract per allocation, free or reallocation.  Installed in the
@@ -58,7 +73,7 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for CountingAlloc<A> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let p = self.0.alloc(layout);
         if !p.is_null() {
-            LIVE.fetch_add(layout.size() as u64, Relaxed);
+            added(layout.size() as u64);
         }
         p
     }
@@ -66,7 +81,7 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for CountingAlloc<A> {
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         let p = self.0.alloc_zeroed(layout);
         if !p.is_null() {
-            LIVE.fetch_add(layout.size() as u64, Relaxed);
+            added(layout.size() as u64);
         }
         p
     }
@@ -81,7 +96,7 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for CountingAlloc<A> {
         if !q.is_null() {
             let (old, new) = (layout.size() as u64, new_size as u64);
             if new >= old {
-                LIVE.fetch_add(new - old, Relaxed);
+                added(new - old);
             } else {
                 LIVE.fetch_sub(old - new, Relaxed);
             }
