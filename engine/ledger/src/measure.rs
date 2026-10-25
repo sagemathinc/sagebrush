@@ -124,41 +124,35 @@ impl Measure {
 
     /// Each row's fresh reading, in order, passed to `f`; false when
     /// unavailable or unreadable (then nothing was measured).  No
-    /// allocation: two stack buffers, /proc read once per call.
+    /// allocation, and one stack buffer as before (no-cliffs C r17's perf
+    /// gate): /proc/self/status is read once and its fields kept, then the
+    /// buffer is reused for /proc/meminfo and each cgroup file.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn read_each(&self, mut f: impl FnMut(Reading)) -> bool {
-        if !self.available() {
+        if !self.available() || self.rows.len() > ROW_SLOTS {
             return false;
         }
         let mut buf = [0u8; 8192];
-        let mut status_buf = [0u8; 8192];
-        let mut meminfo_buf = [0u8; 8192];
-        let need_proc = self.rows.iter().any(|(s, _)| !matches!(s, Src::Cgroup(_)));
-        let mut status: &[u8] = &[];
-        let mut meminfo: &[u8] = &[];
-        if need_proc {
+        let (mut vm_size, mut vm_data, mut anon, mut mem_available) = (None, None, None, None);
+        if self.rows.iter().any(|(s, _)| !matches!(s, Src::Cgroup(_))) {
             let Some((sf, mf)) = proc_files() else { return false };
-            let Some(t) = pread(sf, &mut status_buf) else { return false };
-            status = t;
+            let Some(status) = pread(sf, &mut buf) else { return false };
+            vm_size = kb_field(status, b"VmSize:");
+            vm_data = kb_field(status, b"VmData:");
+            anon = kb_field(status, b"RssAnon:").and_then(|a| a.checked_add(kb_field(status, b"VmSwap:").unwrap_or(0)));
             if self.rows.iter().any(|(s, _)| *s == Src::Physical) {
-                let Some(t) = pread(mf, &mut meminfo_buf) else { return false };
-                meminfo = t;
+                let Some(meminfo) = pread(mf, &mut buf) else { return false };
+                mem_available = kb_field(meminfo, b"MemAvailable:");
             }
         }
         // (read everything first: a row unreadable midway measures nothing)
         let mut out = [(0u64, 0u64, None::<u64>); ROW_SLOTS];
-        if self.rows.len() > ROW_SLOTS {
-            return false;
-        }
         for (i, &(src, figure)) in self.rows.iter().enumerate() {
             let r = match src {
                 Src::Cgroup(j) => pread(&self.cgroups[j], &mut buf).and_then(parse_uint).map(|u| (u, None)),
-                Src::AddressSpace => kb_field(status, b"VmSize:").map(|u| (u, None)),
-                Src::DataSegment => kb_field(status, b"VmData:").map(|u| (u, None)),
-                Src::Physical => (|| {
-                    let u = kb_field(status, b"RssAnon:")?.checked_add(kb_field(status, b"VmSwap:").unwrap_or(0))?;
-                    Some((u, Some(kb_field(meminfo, b"MemAvailable:")?)))
-                })(),
+                Src::AddressSpace => vm_size.map(|u| (u, None)),
+                Src::DataSegment => vm_data.map(|u| (u, None)),
+                Src::Physical => anon.zip(mem_available).map(|(u, a)| (u, Some(a))),
             };
             let Some((usage, available)) = r else { return false };
             out[i] = (figure, usage, available);
