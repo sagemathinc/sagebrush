@@ -315,12 +315,12 @@ except KeyboardInterrupt:
   }
 });
 
-test("the generated code: S handed over in R.fileOnceS (no temporary holds it), the descriptor closed in a finally, the declined path's file object and method cleared", () => {
+test("the generated code: S handed over in R.fileOnceS on the native path (no temporary holds it), the descriptor closed in a finally, the declined path's file object cleared", () => {
   const { compile } = require(__dirname + "/../src/compile.js");
   for (const src of ["open(F, M).write(S)\n", "def f(F, M, S):\n    return open(F, M).write(S)\n", "n = open(f(), g()).write(h())\n"]) {
     const code: string = compile(src, "t.py", "__main__").code;
-    assert.match(code, /R\.fileOnceS\.v = [^;]+;\n\s*\$\d+ = \$\d+ !== null \? R\.fileOnceEnd\(\$\d+\) : typeof \$\d+ === "function" \? \$\d+\(R\.fileOnceTake\(\)\) : callObj\(\$\d+, \[R\.fileOnceTake\(\)\]\);/, code);
-    assert.match(code, /\} finally \{\n\s*if \((\$\d+) !== null\) \{ R\.fileOnceAbort\(\1\); \1 = null; \}\n\s*\$\d+ = \$\d+ = undefined;\n\s*\}/, code);
+    assert.match(code, /\$\d+ = (\$\d+) !== null \? \(R\.fileOnceS\.v = [^;]+, R\.fileOnceEnd\(\1\)\) : \$K\d+\(\$\d+, [^;]+\);/, code);
+    assert.match(code, /\} finally \{\n\s*if \((\$\d+) !== null\) \{ R\.fileOnceAbort\(\1\); \1 = null; \}\n\s*\$\d+ = undefined;\n\s*\}/, code);
   }
 });
 
@@ -589,6 +589,23 @@ print(3, open(P("nested"), "w").write("x"), repr(open(P("nested")).read()))
 print(4, repr(open(P("lam")).read()))
 _pyjs_open._flush_all()
 print(5, repr(open(P("nested")).read()), repr(open(P("lam")).read()))
+# a declined site's write method is looked up after S is evaluated, as any
+# method call's in pyjs (CPython: the method bound before S)
+class Writer:
+    def write(self, s):
+        return "bound before S"
+def other_write(self, s):
+    return "installed by S"
+def install():
+    Writer.write = other_write
+    return "s"
+def writer_open(f, m):
+    return Writer()
+REAL = open
+open = writer_open
+r = open(P("bw"), "w").write(install())
+open = REAL
+print(7, r)
 # today's open() in append mode does not refuse a missing directory until its flush (CPython: FileNotFoundError at open)
 try:
     g = (lambda: open("/nonexistent-dir/x", "a"))()
@@ -596,5 +613,5 @@ try:
 except FileNotFoundError:
     print(6, "refused")
 `);
-  assert.deepEqual(out.split("\n"), ["1 'A'", "2 'BA'", "3 1 ''", "4 ''", "5 'x' 'x'", "6 opened"]);
+  assert.deepEqual(out.split("\n"), ["1 'A'", "2 'BA'", "3 1 ''", "4 ''", "5 'x' 'x'", "7 installed by S", "6 opened"]);
 });
