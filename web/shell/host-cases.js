@@ -59,7 +59,7 @@ export async function run(only) {
   D = await (await fetch("/data.json")).json();
   const out = [];
   const check = (ok, what) => out.push([!!ok, what]);
-  const groups = { oracle, lexical, basics, identity, grants, classify, provenance, conformance, pending, stop, startup, fence, documents, liveness, listing, actors, boundary, oldShell };
+  const groups = { oracle, lexical, basics, identity, grants, classify, provenance, conformance, pending, stop, startup, fence, documents, liveness, listing, actors, boundary, oldShell, frozen, census };
   for (const [name, g] of Object.entries(groups)) {
     if (only && !only.split(",").includes(name)) continue;
     try {
@@ -552,8 +552,17 @@ async function documents(check) {
   // a document over the shell's read cap is refused (EFBIG), never read out whole
   const { ws, host } = await fresh("documents", { readBytes: 2000 });
   await ws.create("/nb.ipynb", { content: big });
-  let r = await host.exec(PERSON, "wc -c < nb.ipynb");
-  check(r.kind === "exit" && r.code === 1 && r.stdout === "", `a notebook over the read cap isn't read (${JSON.stringify(r).slice(0, 200)})`);
+  // (and its whole text is never made: no JSON.stringify in the page produces more than a cell's worth meanwhile)
+  const stringify = JSON.stringify;
+  let longest = 0;
+  JSON.stringify = function (...a) { const t = stringify.apply(this, a); if (typeof t === "string") longest = Math.max(longest, t.length); return t; };
+  let r;
+  try {
+    r = await host.exec(PERSON, "wc -c < nb.ipynb");
+  } finally {
+    JSON.stringify = stringify;
+  }
+  check(r.kind === "exit" && r.code === 1 && r.stdout === "" && longest < 2000, `a notebook over the read cap isn't read, nor serialized whole (the longest JSON text made meanwhile: ${longest} chars) (${JSON.stringify(r).slice(0, 200)})`);
   // (just-bash words every input error as missing; the host's own answer, through the stand-in, is EFBIG)
   const { ws: w1, host: h1 } = await fresh("documents-cap", { readBytes: 2000, start: () => startShell(D.STAND, "/").then((x) => x.shell) });
   await w1.create("/nb.ipynb", { content: big });
@@ -702,4 +711,57 @@ async function oldShell(check) {
   const { shell: cur } = await startShell(D.S, "/");
   check(cur.hostReq === 2, `the current shell's verified host_req is 2 (${cur.hostReq})`);
   cur.terminate();
+}
+
+// ---------------------------------------------------------------- grader's G-S2-1: the host's own accepted differences, exactly
+// Each row of test/bash-step2-known.json's "host", run through ShellHost and compared on exit, stdout and stderr.
+// A row with no "frozen" yet is reported with what the host gives, to freeze.
+async function frozen(check) {
+  for (const row of D.step2.host) {
+    const { ws, host } = await fresh("frozen-" + row.id, row.id === "touch-full-and" ? { limits: { ...W.LIMITS, maxFolderEntries: 40 } } : {});
+    await ws.create("/g", { content: enc("g\n") });
+    await ws.create("/t", { content: enc("t\n") });
+    let principal = PERSON;
+    if (row.id === "touch-full-and") {
+      await ws.mkdir("/full");
+      for (let i = 1; i <= 40; i++) await ws.create(`/full/f${i}`, { content: enc("") });
+    }
+    if (row.principal === "grant-A") {
+      const A = await ws.mkdir("/A");
+      await ws.mkdir("/B");
+      await ws.create("/B/g", { content: enc("secret\n") });
+      principal = { kind: "grant", actor: "agent:test", folders: new Set([A.fid]), write: true, live: () => "ok" };
+    }
+    const r = await host.exec(principal, row.script);
+    const got = { exit: r.kind === "exit" ? r.code : r.kind, stdout: r.stdout, stderr: r.stderr };
+    if (!row.frozen) check(false, `RECORD host ${row.id}: ${JSON.stringify(got)}`);
+    else check(same(got, row.frozen), `host ${row.id} (${row.script}): ${same(got, row.frozen) ? "as frozen" : `got ${JSON.stringify(got)}, frozen ${JSON.stringify(row.frozen)}`} [${row.plan}]`);
+  }
+}
+
+// ---------------------------------------------------------------- grader's G-S2-2: a missing-path and refused-path census per command
+async function census(check) {
+  const { ws, host } = await fresh("census");
+  await ws.mkdir("/cen");
+  await ws.create("/cen/f", { content: enc("f\n") });
+  const A = await ws.mkdir("/A");
+  await ws.create("/A/f", { content: enc("f\n") });
+  await ws.mkdir("/B");
+  await ws.create("/B/secret", { content: enc("secret\n") });
+  const g = { kind: "grant", actor: "agent:test", folders: new Set([A.fid]), write: true, live: () => "ok" };
+  const recorded = new Map((D.step2.census.refused ?? []).map((x) => [x.command, x]));
+  for (const b of D.step2.census.baseline) {
+    // missing, as the person: what step 1 showed on InMemoryFs (grader's baseline), exactly
+    const r = await host.exec(PERSON, b.script, { cwd: "/cen" });
+    const got = { stderr: r.stderr, exit: r.code };
+    if (b.stderr === null) check(!!b.frozen && same(got, b.frozen), `census missing ${b.command}: ${JSON.stringify(got)}${b.frozen ? ` (frozen ${JSON.stringify(b.frozen)})` : " RECORD"}`);
+    else check(same(got, { stderr: b.stderr, exit: b.exit }), `census missing ${b.command} (${b.script}): ${same(got, { stderr: b.stderr, exit: b.exit }) ? "as in step 1" : `got ${JSON.stringify(got)}, step 1 ${JSON.stringify({ stderr: b.stderr, exit: b.exit })}`}`);
+    // refused: the same command on a path outside a grant, recorded
+    const script = b.script.replace(/\bmissing\b/, "/B/secret").replace(/ f$/, " /A/f");
+    const q = await host.exec(g, script, { cwd: "/A" });
+    const gotR = { script, stderr: q.stderr, exit: q.code };
+    const want = recorded.get(b.command);
+    if (!want) check(false, `RECORD census refused ${b.command}: ${JSON.stringify(gotR)}`);
+    else check(same(gotR, { script: want.script, stderr: want.stderr, exit: want.exit }), `census refused ${b.command} (${script}): ${same(gotR, { script: want.script, stderr: want.stderr, exit: want.exit }) ? "as recorded" : `got ${JSON.stringify(gotR)}, recorded ${JSON.stringify(want)}`}`);
+  }
 }

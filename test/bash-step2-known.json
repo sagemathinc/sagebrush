@@ -1,5 +1,5 @@
 {
-  "about": "What the shell host (web/shell/host.ts, plan-bash-shell r3 step 2) does differently from test/bash-known.json's just-bash-over-InMemoryFs results, with why; web/shell/test-shell-host.mjs holds the host to it, on the built chunk. redirections: cases of test/bash-oracle-cases.json. lexical: the wrapper's two lexical cases (plan-bash-step2-wrapper-lexical-r1, N-119-3), frozen as accepted differences: 'bash' is GNU bash 5.3.9's result as that note records it, 'host' what the host gives.",
+  "about": "What the shell host (web/shell/host.ts, plan-bash-shell r3 step 2) does differently from test/bash-known.json's just-bash-over-InMemoryFs results, with why; web/shell/test-shell-host.mjs holds the host to it, on the built chunk. redirections: cases of test/bash-oracle-cases.json. lexical: the wrapper's two lexical cases (plan-bash-step2-wrapper-lexical-r1, N-119-3), frozen as accepted differences: 'bash' is GNU bash 5.3.9's result as that note records it, 'host' what the host gives. host: the host's own accepted differences from bash (grader's G-S2-1), each run exactly through ShellHost and compared on exit, stdout and stderr. census (G-S2-2): every command's stderr and status for a missing path, which must equal step 1's on InMemoryFs (baseline, grader's table, unchanged by the adapter's ENOENT wording), and for a path outside a grant (refused), recorded.",
   "redirections": {
     "pipeline-tee": {
       "plan": "§8 (tee is deferred)",
@@ -45,5 +45,243 @@
         "stderr": "bash: syntax error: Parse error at 2:2: Expected RBRACE, got EOF\n"
       }
     }
-  ]
+  ],
+  "host": [
+    {
+      "id": "mv-onto-existing",
+      "plan": "r3 §8 (mv -f deferred)",
+      "bash": "mv replaces t, status 0",
+      "script": "mv g t",
+      "frozen": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot move 'g': /t: File exists\n"
+      }
+    },
+    {
+      "id": "cp-onto-existing",
+      "plan": "r3 §8 (cp over existing files deferred)",
+      "bash": "cp replaces t, status 0",
+      "script": "cp g t",
+      "frozen": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot copy 'g': /t: File exists\n"
+      }
+    },
+    {
+      "id": "touch-full-and",
+      "plan": "F7 (a new touch is a pending creation, committed at the invocation's end)",
+      "bash": "touch fails at once (no ok), status 1",
+      "script": "touch full/x && echo ok",
+      "frozen": {
+        "exit": 1,
+        "stdout": "ok\n",
+        "stderr": "bash: /full/x: a folder holds at most 40 entries: /full is full\n"
+      }
+    },
+    {
+      "id": "cat-refused",
+      "plan": "F8/F17 (a path outside the grant is \"not there\" to just-bash's exists() probe, so its commands word it as missing; the census shows every command but rm does)",
+      "bash": "cat: /B/g: Permission denied, status 1",
+      "script": "cat /B/g",
+      "principal": "grant-A",
+      "frozen": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /B/g: No such file or directory\n"
+      }
+    },
+    {
+      "id": "mv-same",
+      "plan": "just-bash's mv (by probe, a same-path mv is silent)",
+      "bash": "mv: 'g' and 'g' are the same file, status 1",
+      "script": "mv g g",
+      "frozen": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ],
+  "census": {
+    "baseline": [
+      {
+        "command": "cat",
+        "script": "cat missing",
+        "stderr": "cat: missing: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "head",
+        "script": "head missing",
+        "stderr": "head: missing: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "tail",
+        "script": "tail missing",
+        "stderr": "tail: missing: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "wc",
+        "script": "wc missing",
+        "stderr": "wc: missing: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "grep",
+        "script": "grep x missing",
+        "stderr": "grep: missing: No such file or directory\n",
+        "exit": 2
+      },
+      {
+        "command": "sort",
+        "script": "sort missing",
+        "stderr": "sort: missing: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "cut",
+        "script": "cut -c1 missing",
+        "stderr": "cut: missing: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "stat",
+        "script": "stat missing",
+        "stderr": "stat: cannot stat 'missing': No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "ls",
+        "script": "ls missing",
+        "stderr": "ls: missing: No such file or directory\n",
+        "exit": 2
+      },
+      {
+        "command": "rm",
+        "script": "rm missing",
+        "stderr": "rm: cannot remove 'missing': No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "uniq",
+        "script": "uniq missing",
+        "stderr": "uniq: missing: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "sed",
+        "script": "sed p missing",
+        "stderr": "sed: missing: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "tr",
+        "script": "tr a b < missing",
+        "stderr": "bash: missing: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "diff",
+        "script": "diff missing f",
+        "stderr": null,
+        "exit": null,
+        "note": "the step-0 CommonJS copy can't load diff; recorded on the shipped chunk",
+        "frozen": {
+          "stderr": "diff: missing: No such file or directory\n",
+          "exit": 2
+        }
+      }
+    ],
+    "refused": [
+      {
+        "command": "cat",
+        "script": "cat /B/secret",
+        "stderr": "cat: /B/secret: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "head",
+        "script": "head /B/secret",
+        "stderr": "head: /B/secret: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "tail",
+        "script": "tail /B/secret",
+        "stderr": "tail: /B/secret: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "wc",
+        "script": "wc /B/secret",
+        "stderr": "wc: /B/secret: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "grep",
+        "script": "grep x /B/secret",
+        "stderr": "grep: /B/secret: No such file or directory\n",
+        "exit": 2
+      },
+      {
+        "command": "sort",
+        "script": "sort /B/secret",
+        "stderr": "sort: /B/secret: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "cut",
+        "script": "cut -c1 /B/secret",
+        "stderr": "cut: /B/secret: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "stat",
+        "script": "stat /B/secret",
+        "stderr": "stat: cannot stat '/B/secret': No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "ls",
+        "script": "ls /B/secret",
+        "stderr": "ls: /B/secret: No such file or directory\n",
+        "exit": 2
+      },
+      {
+        "command": "rm",
+        "script": "rm /B/secret",
+        "stderr": "rm: cannot remove '/B/secret': /B/secret: Permission denied (outside this shell's access)\n",
+        "exit": 1
+      },
+      {
+        "command": "uniq",
+        "script": "uniq /B/secret",
+        "stderr": "uniq: /B/secret: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "sed",
+        "script": "sed p /B/secret",
+        "stderr": "sed: /B/secret: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "tr",
+        "script": "tr a b < /B/secret",
+        "stderr": "bash: /B/secret: No such file or directory\n",
+        "exit": 1
+      },
+      {
+        "command": "diff",
+        "script": "diff /B/secret /A/f",
+        "stderr": "diff: /B/secret: No such file or directory\n",
+        "exit": 2
+      }
+    ],
+    "note": "Missing paths: all 13 rows of grader's step-1 baseline hold exactly through ShellHost; diff, which the step-0 copy can't load, is frozen from the shipped chunk. Refused paths: every command but rm words a path outside the grant as missing, because exists() answers false outside the grant (F17); rm alone stats it and prints the host's refusal."
+  }
 }
