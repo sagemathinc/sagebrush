@@ -91,3 +91,16 @@ test("the growth gate's own inputs are never docs-only (plan-growth-budget-r5 §
   // (a change to optional.yml alone selects no suite, but the checks job runs for it)
   assert.equal(classify([".github/workflows/optional.yml"]).node, "false");
 });
+
+test("engine-cpython runs on pull requests that touch the CPython package's inputs (#113 -> #132)", () => {
+  const cp = (files: string[]) => classify(files).engine_cpython;
+  for (const f of ["lib/_sage_nf.py", "engine/py/test_audit.py", "engine/classgroup/src/proof.rs", "engine/py/python/sagebrush/nf.py", "sage-tests/test_numberfield.sage", "test/limit-sites.json", "scripts/sync-python-package.sh", "engine/Cargo.lock", ".github/workflows/ci.yml", "somewhere/new.txt"])
+    assert.equal(cp([f]), "true", f);
+  for (const f of ["web/board/test-merge.mjs", "design/notes.md", "README.md", "app/src/main.ts", "src/runtime/progress.ts", "test/progress.test.ts", "wasm/sagebrush-engine.wasm", "cdn/sagebrush-engine.mjs"])
+    assert.equal(cp([f]), "false", f);
+  // the full tier always runs it
+  const list = join(dir, "files.txt");
+  writeFileSync(list, "README.md\n");
+  const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/x" } });
+  assert.match(r.stdout, /^engine_cpython=true$/m);
+});
