@@ -19,8 +19,11 @@ fn fresh(total_bytes: u64) -> std::sync::MutexGuard<'static, ()> {
     g
 }
 
-/// E = total / 4 and phi = 5/4: a total of 4 * 5/4 * n gives n usable bytes.
+/// E = total / 4 and phi = FRAG_NUM / FRAG_DEN (21/8): a total of 4 phi n
+/// gives exactly n usable bytes when n is a multiple of FRAG_DEN (then E is
+/// exact), which every test's figure is.
 fn total_for_usable(n: u64) -> u64 {
+    assert_eq!(n % FRAG_DEN, 0, "usable figures are multiples of FRAG_DEN");
     n * SHARE_DEN * FRAG_NUM / FRAG_DEN
 }
 
@@ -46,18 +49,17 @@ fn the_union_counts_pending_and_measured_bytes() {
 fn retained_growth_after_a_release_is_seen_by_the_next_check() {
     // astra2's C r12 case: usage 100; reserve 100; a covered allocation
     // grows the domain to 200; free it and release O, no resident; the next
-    // check reads 200 (no cached measure).  (Usable figures are multiples of
-    // 4 so that E = total / 4 is exact.)
-    let _g = fresh(total_for_usable(252));
+    // check reads 200 (no cached measure).
+    let _g = fresh(total_for_usable(256));
     hooks::set_fake_usage(Some((100, None)));
     let r = reserve("work", 100).unwrap();
     hooks::set_fake_usage(Some((200, None))); // (grown, and retained after the free)
     drop(r);
-    match reserve("next", 53) {
+    match reserve("next", 57) {
         Err(EngineError::Memory(r)) => assert_eq!(r.live, 200),
-        _ => panic!("200 + 53 > 252 must be refused"),
+        _ => panic!("200 + 57 > 256 must be refused"),
     }
-    assert!(reserve("next", 52).is_ok());
+    assert!(reserve("next", 56).is_ok());
 }
 
 #[test]
@@ -91,7 +93,8 @@ fn machine_availability_refuses_when_others_use_the_machine() {
 
 #[test]
 fn two_admissions_before_either_allocates_cannot_both_fit() {
-    let _g = fresh(total_for_usable(100));
+    // 30 in use: one 50 fits (80 <= 104), both don't (130 > 104)
+    let _g = fresh(total_for_usable(104));
     hooks::set_fake_usage(Some((30, None)));
     let (start, held) = (Arc::new(Barrier::new(2)), Arc::new(Barrier::new(2)));
     let hs: Vec<_> = (0..2)
@@ -114,7 +117,7 @@ fn two_admissions_before_either_allocates_cannot_both_fit() {
 fn a_transition_during_the_read_to_commit_window_waits() {
     // the read and the commit share one critical section: a release on
     // another thread waits until the paused admission has committed
-    let _g = fresh(total_for_usable(100));
+    let _g = fresh(total_for_usable(96));
     let first = reserve("first", 40).unwrap();
     let b = Arc::new(Barrier::new(2));
     hooks::pause_next_admission(b.clone());
@@ -124,7 +127,7 @@ fn a_transition_during_the_read_to_commit_window_waits() {
     std::thread::sleep(std::time::Duration::from_millis(50));
     assert!(!t.is_finished(), "the release must wait for the lock");
     b.wait();
-    // 40 outstanding when it read: 40 + 50 = 90 <= 100
+    // 40 outstanding when it read: 40 + 50 = 90 <= 96
     assert_eq!(h.join().unwrap(), Some(50));
     t.join().unwrap();
 }
@@ -205,10 +208,10 @@ fn an_unmeasured_platform_is_not_certified() {
 
 #[test]
 fn a_credit_grows_by_new_admissions() {
-    let _g = fresh(total_for_usable(100));
-    let mut c = reserve("credit", 60).unwrap();
+    let _g = fresh(total_for_usable(104));
+    let mut c = reserve("credit", 64).unwrap();
     assert!(c.grow("credit", 40).is_ok());
-    assert_eq!((c.amount(), outstanding_bytes()), (100, 100));
+    assert_eq!((c.amount(), outstanding_bytes()), (104, 104));
     assert!(c.grow("credit", 1).is_err());
     drop(c);
     assert_eq!(outstanding_bytes(), 0);
@@ -245,13 +248,13 @@ fn internal_errors_are_not_memory_errors() {
 #[test]
 fn every_applicable_row_is_checked_not_only_the_least() {
     // astra2's probe (C r17 section 1.1), natively: the least figure is 4 GiB
-    // (768 MiB used), a larger joint row is 8 GiB (2304 MiB used).  With
-    // phi = 5/4, 32 MiB fits the least row (5/4 (768 + 32) = 1000 <= 1024
-    // MiB) but not the joint one (5/4 (2304 + 32) > 2048 MiB): refused, on
+    // (here 256 MiB used), a larger joint row is 8 GiB (2304 MiB used).  With
+    // phi = 21/8, 32 MiB fits the least row (21/8 (256 + 32) = 756 <= 1024
+    // MiB) but not the joint one (21/8 (2304 + 32) > 2048 MiB): refused, on
     // the joint row's figures.
     const MIB: u64 = 1 << 20;
     let _g = fresh(4096 * MIB);
-    hooks::set_fake_rows(Some(vec![(4096 * MIB, 768 * MIB, None), (8192 * MIB, 2304 * MIB, None)]));
+    hooks::set_fake_rows(Some(vec![(4096 * MIB, 256 * MIB, None), (8192 * MIB, 2304 * MIB, None)]));
     match reserve("probe", 32 * MIB) {
         Err(EngineError::Memory(r)) => assert_eq!((r.total, r.allowance, r.live), (8192 * MIB, 2048 * MIB, 2304 * MIB)),
         other => panic!("the joint row must refuse: {:?}", other.map(|r| r.amount())),
@@ -259,11 +262,11 @@ fn every_applicable_row_is_checked_not_only_the_least() {
     assert_eq!(outstanding_bytes(), 0);
     // the least row alone (what a check of the least rows only would see)
     // admits it: the difference this test pins
-    hooks::set_fake_rows(Some(vec![(4096 * MIB, 768 * MIB, None)]));
+    hooks::set_fake_rows(Some(vec![(4096 * MIB, 256 * MIB, None)]));
     let r = reserve("probe", 32 * MIB).unwrap();
     drop(r);
     // the order of the rows doesn't matter; the first refusing row is reported
-    hooks::set_fake_rows(Some(vec![(8192 * MIB, 2304 * MIB, None), (4096 * MIB, 768 * MIB, None)]));
+    hooks::set_fake_rows(Some(vec![(8192 * MIB, 2304 * MIB, None), (4096 * MIB, 256 * MIB, None)]));
     assert!(matches!(reserve("probe", 32 * MIB), Err(EngineError::Memory(r)) if r.total == 8192 * MIB));
 }
 

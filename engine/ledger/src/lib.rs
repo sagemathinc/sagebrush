@@ -46,10 +46,15 @@ pub mod audit;
 /// The share of the engine's total the ledger may hold: E = total / 4
 /// (plan C r4 section 1.1, a reviewed constant).
 pub const SHARE_DEN: u64 = 4;
-/// The allocator-overhead factor phi = FRAG_NUM / FRAG_DEN (calibrated in
-/// C-1's VM slot against committed pages at the workloads' peaks).
-pub const FRAG_NUM: u64 = 5;
-pub const FRAG_DEN: u64 = 4;
+/// The allocator-overhead factor phi = FRAG_NUM / FRAG_DEN = 21/8, calibrated
+/// (no-cliffs C r4 section 1.2) against the committed pages a fresh
+/// WebAssembly instance grows by per byte requested at the peak: the worst
+/// first call of the five workloads is 1.677431 (bnf6), times the plan's 1.5
+/// margin = 2.516 <= 2.625 (VM3, Oct 25; the phi-probe build on
+/// nocliffs/phi-probe).  A finite sample, not a general bound: the page
+/// growth itself stays bounded by the growth envelope and its permits.
+pub const FRAG_NUM: u64 = 21;
+pub const FRAG_DEN: u64 = 8;
 /// The nominal total when the host gives none: D0's fallback (1 GiB).
 pub const NOMINAL_TOTAL: u64 = 1 << 30;
 
