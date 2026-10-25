@@ -14,6 +14,10 @@
 //! unavailable: fail-closed (`crate::certified` is false).  macOS's
 //! phys_footprint and Windows's job/private-commit queries are follow-ups.
 
+// (WebAssembly measures committed pages in lib.rs: the readers here are
+// native only)
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
+
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
 
