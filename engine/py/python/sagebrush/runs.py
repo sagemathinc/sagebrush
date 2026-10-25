@@ -24,6 +24,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import sys
 import time
 
@@ -120,7 +121,6 @@ def _mkdir_private(path):
     except FileExistsError:
         pass
     st = os.lstat(path)
-    import stat
     if not stat.S_ISDIR(st.st_mode):
         raise OSError("%s is not a directory" % path)
     if hasattr(os, "getuid") and st.st_uid != os.getuid():
@@ -137,6 +137,51 @@ def _charge(path):
         return 0
     blocks = getattr(st, "st_blocks", None)
     return blocks * 512 if blocks is not None else st.st_size
+
+
+def _key(path):
+    """A path's identity in the store: absolute and normalized, lexically
+    (never resolving a link: a link is an entry of its own)."""
+    return os.path.normpath(os.path.abspath(path))
+
+
+def _real_dir(path):
+    """path is a directory itself, not a link to one."""
+    try:
+        return stat.S_ISDIR(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def _unlink_in(d, name):
+    """The file name removed from directory d, never through a link
+    (daybreak2 PR136-RECOVERY-1): d opened without following a link, and
+    name removed relative to it; where the platform can't, d checked by
+    lstat first.  False, removing nothing, when d is a link or not a
+    directory; a missing name or d is no error."""
+    assert name and os.sep not in name and name not in (".", "..")
+    nofollow, odir = getattr(os, "O_NOFOLLOW", 0), getattr(os, "O_DIRECTORY", 0)
+    if nofollow and odir and os.unlink in os.supports_dir_fd:
+        try:
+            fd = os.open(d, os.O_RDONLY | odir | nofollow)
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False  # (ELOOP, ENOTDIR: a link, or not a directory)
+        try:
+            os.unlink(name, dir_fd=fd)
+        except FileNotFoundError:
+            pass
+        finally:
+            os.close(fd)
+        return True
+    if not _real_dir(d):
+        return not os.path.lexists(d)
+    try:
+        os.unlink(os.path.join(d, name))
+    except FileNotFoundError:
+        pass
+    return True
 
 
 def _temp_name(path):
@@ -318,46 +363,58 @@ class Store:
         a recorded temporary: its target's temporaries too); an invalid one
         is charged at its record plus its declared bytes when those are a
         non-negative int, never less, and excludes nothing."""
-        excluded, legacy_targets = set(), set()
+        excluded, legacy_targets, records = set(), set(), set()
         total = 0
-        rdir = os.path.join(self.root, "reservations")
         for p, r, kind in self._reservations():
             total += _charge(p)
+            records.add(_key(p))
             if kind in ("valid", "legacy", "invalid") and _bytes_ok(r.get("bytes")):
                 total += r["bytes"]
             if kind == "valid":
-                excluded.add(os.path.realpath(r["target"]))
-                excluded.add(os.path.realpath(r["temp"]))
+                excluded.add(_key(r["target"]))
+                excluded.add(_key(r["temp"]))
             elif kind == "legacy":
-                excluded.add(os.path.realpath(r["target"]))
-                legacy_targets.add(os.path.realpath(r["target"]))
+                excluded.add(_key(r["target"]))
+                legacy_targets.add(_key(r["target"]))
+        # (every entry at its own physical size, lstat: a link is charged as
+        # the link, never its target, and never descended into, daybreak2
+        # PR136-ACCOUNT-1; reservations/ too, its records once, above, and
+        # any other file in it at its size, astra2 RESOURCE-PR136-1)
         for dirpath, dirnames, filenames in os.walk(self.root):
-            if os.path.abspath(dirpath) == os.path.abspath(rdir):
-                continue
+            for name in dirnames:
+                if os.path.islink(os.path.join(dirpath, name)):
+                    total += _charge(os.path.join(dirpath, name))
             for name in filenames:
-                p = os.path.realpath(os.path.join(dirpath, name))
-                if p in excluded:
+                k = _key(os.path.join(dirpath, name))
+                if k in records or k in excluded:
                     continue
                 m = _TEMP_RE.match(name)
-                if m and os.path.realpath(os.path.join(dirpath, m.group("target"))) in legacy_targets:
+                if m and _key(os.path.join(dirpath, m.group("target"))) in legacy_targets:
                     continue
-                total += _charge(p)
+                total += _charge(k)
         return total
 
     def _reservations(self):
         """[(path, record, kind)] for every file in reservations/, each
         validated before any use: "valid" (a value write's: its file name
-        <handle>-<8 hex>.json, its target exactly that run's value.json, its
-        temporary exactly target.<12 hex>.tmp, its bytes a non-negative int
-        and not a bool), "legacy" (the same, without a temporary: written
-        before r4), "invalid" (readable, but not those), "unreadable"."""
+        <handle>-<8 hex>.json, its target exactly that run's value.json, the
+        run's directory a directory, not a link, or absent, its temporary
+        exactly target.<12 hex>.tmp, its bytes a non-negative int and not a
+        bool), "legacy" (the same, without a temporary: written before r4),
+        "invalid" (readable, but not those), "unreadable" (also anything not
+        a regular file).  A record's own temporaries (*.tmp, being written
+        under the lock) aren't records: walk_total charges them as files."""
         rdir = os.path.join(self.root, "reservations")
         out = []
         for name in sorted(os.listdir(rdir)):
             p = os.path.join(rdir, name)
             if name.endswith(".tmp"):
                 continue  # (a reservation being written: its writer holds the lock)
-            r = _read_json(p)
+            try:
+                regular = stat.S_ISREG(os.lstat(p).st_mode)
+            except OSError:
+                regular = False
+            r = _read_json(p) if regular else None
             if not isinstance(r, dict):
                 out.append((p, r, "unreadable"))
                 continue
@@ -372,12 +429,17 @@ class Store:
             want = os.path.join(self.run_dir(m.group("handle")), "value.json")
         except KeyError:
             return "invalid"
-        if os.path.normpath(os.path.abspath(r["target"])) != os.path.normpath(os.path.abspath(want)):
+        if _key(r["target"]) != _key(want):
+            return "invalid"
+        # (the run's directory itself, not a link out of the store: its
+        # paths are then the store's, daybreak2 PR136-RECOVERY-1)
+        d = os.path.dirname(want)
+        if os.path.lexists(d) and not _real_dir(d):
             return "invalid"
         if "temp" not in r:
             return "legacy"
         t = r["temp"]
-        if not isinstance(t, str) or os.path.dirname(os.path.abspath(t)) != os.path.dirname(os.path.abspath(want)):
+        if not isinstance(t, str) or os.path.dirname(_key(t)) != _key(d):
             return "invalid"
         tm = _TEMP_RE.match(os.path.basename(t))
         if not tm or tm.group("target") != "value.json":
@@ -417,9 +479,9 @@ class Store:
         if target already has a reservation (one per target).  Returns the
         reservation's path."""
         with self.lock:
-            want = os.path.realpath(target)
+            want = _key(target)
             for _, r, kind in self._reservations():
-                if kind in ("valid", "legacy") and os.path.realpath(r["target"]) == want:
+                if kind in ("valid", "legacy") and _key(r["target"]) == want:
                     raise StorageError("a value of this run is already being written")
             p = os.path.join(self.root, "reservations", "%s-%s.json" % (handle, secrets.token_hex(4)))
             # (the owner with its host: a dead one's reservation can then be
@@ -445,14 +507,18 @@ class Store:
     def release(self, reservation):
         """The reservation given back: its target and its temporary, which
         were never charged, removed with it (used: less its bytes and its
-        record).  Only for a valid record: a writer's own, or a recovered one."""
+        record).  Only for a valid record: a writer's own, or a recovered one.
+        Both are unlinked in the run's directory, never through a link (one
+        put there since: nothing outside the store is removed)."""
         with self.lock:
             r = _read_json(reservation, {})
             target = r.get("target")
             used = self.used() - int(r.get("bytes", 0)) - _charge(reservation)
-            for f in (target, r.get("temp")):
-                if f and os.path.exists(f):
-                    os.unlink(f)
+            if isinstance(target, str):
+                d = os.path.dirname(_key(target))
+                for f in (target, r.get("temp")):
+                    if isinstance(f, str) and os.path.dirname(_key(f)) == d:
+                        _unlink_in(d, os.path.basename(_key(f)))
             self._set_total(max(0, used))
             os.unlink(reservation)
 
@@ -497,12 +563,13 @@ class Store:
         """A run that was never admitted after all: its directory removed."""
         with self.lock:
             d = self.run_dir(handle)
-            try:
-                for n in os.listdir(d):
-                    os.unlink(os.path.join(d, n))
-                os.rmdir(d)
-            except FileNotFoundError:
-                pass
+            if _real_dir(d):
+                try:
+                    for n in os.listdir(d):
+                        _unlink_in(d, n)
+                    os.rmdir(d)
+                except FileNotFoundError:
+                    pass
             self._set_total(self.walk_total())
 
     def write_value(self, handle, data):
@@ -748,10 +815,13 @@ class Store:
             live, legacy_targets = set(), set()
             for p, r, kind in self._reservations():
                 if kind == "valid":
-                    live.add(os.path.realpath(r["temp"]))
+                    live.add(_key(r["temp"]))
                 elif kind == "legacy":
-                    legacy_targets.add(os.path.realpath(r["target"]))
+                    legacy_targets.add(_key(r["target"]))
+            # (the store's own directories only: never one a link leads to)
             for d in [self.root, os.path.join(self.root, "gone"), os.path.join(self.root, "reservations")] + [os.path.join(self.root, n) for n in os.listdir(self.root) if n.startswith("run_")]:
+                if not _real_dir(d):
+                    continue
                 try:
                     names = os.listdir(d)
                 except OSError:
@@ -761,15 +831,15 @@ class Store:
                     if not m:
                         continue
                     p = os.path.join(d, name)
-                    if os.path.realpath(p) in live or os.path.realpath(os.path.join(d, m.group("target"))) in legacy_targets:
+                    if _key(p) in live or _key(os.path.join(d, m.group("target"))) in legacy_targets:
                         continue
                     try:
-                        os.unlink(p)
+                        _unlink_in(d, name)
                     except OSError:
                         pass
             done = []
             for name in os.listdir(self.root):
-                if not name.startswith("run_"):
+                if not name.startswith("run_") or not _real_dir(os.path.join(self.root, name)):
                     continue
                 r = _read_json(os.path.join(self.root, name, "run.json"))
                 if isinstance(r, dict) and r.get("state") in ("finished", "killed", "lost"):
@@ -810,11 +880,13 @@ class Store:
         otherwise take the tombstone's (plan-runs-tmp-sweep r4)."""
         h = record["handle"]
         d = os.path.join(self.root, h)
+        if not _real_dir(d):
+            return  # (a link, or gone: nothing of the store's to remove)
         tomb = {"handle": h, "state": "gone", "ended_at": record.get("ended_at"), "removed_at": now, "reason": reason}
         # (the run's files go first, so the tombstone, one block, is written
         # into room they freed; a crash between leaves no tombstone: not_found)
         for name in os.listdir(d):
-            os.unlink(os.path.join(d, name))
+            _unlink_in(d, name)
         os.rmdir(d)
         try:
             _write_atomic(os.path.join(self.root, "gone", h + ".json"), json.dumps(tomb).encode())
