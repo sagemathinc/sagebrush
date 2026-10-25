@@ -1760,11 +1760,18 @@ async function rebuildKickAfterHalt() {
   await stop(c0);
   await w.mkdir("/kicked");
   await ctl("log", { reset: true });
-  await ctl("set", { set: { fakeOps: [{ code: "invalid", delayMs: 1500, detail: { message: "too many refused ops: rebuild from the server's log" } }] } });
+  await ctl("set", { set: { fakeOps: [{ code: "invalid", hold: true, detail: { message: "too many refused ops: rebuild from the server's log" } }] } });
   const c = viewClient(w);
   try {
-    // (the refusal arrives 1.5 s after the ops were sent: by then the sender has nothing left to do)
-    check(await until(() => c.stats.rebuildPasses >= 1, 6000), "rebuild after an idle refusal: the rebuild starts by itself, with no other event: " + J({ passes: c.stats.rebuildPasses, status: c.status }));
+    // (the handshake, not a timing: the refusal is held by the server until the test has seen the ops sent and the
+    // client's sender idle on that same connection (not running, twice, 100 ms apart); only then is it released)
+    const idle = async () => !c.running && opsMessages(await ctl("log")).length === 1;
+    let idleSeen = false;
+    for (let i = 0; i < 200 && !idleSeen; i++) { if (await idle()) { await sleep(100); idleSeen = await idle(); } else await sleep(50); }
+    check(idleSeen, "rebuild after an idle refusal: the ops sent and the sender idle before the refusal: " + J({ running: c.running, ops: opsMessages(await ctl("log")).length }));
+    const connects = c.stats.connects, wakes = c.stats.wakesFired, passes = c.stats.rebuildPasses;
+    check((await ctl("release")).released === 1 && passes === 0, "rebuild after an idle refusal: the held refusal released, no rebuild before it");
+    check(await until(() => c.stats.rebuildPasses >= 1, 6000) && c.stats.connects === connects && c.stats.wakesFired === wakes, "rebuild after an idle refusal: the rebuild starts by itself, on the same connection, with no timer's wake: " + J({ passes: c.stats.rebuildPasses, connects: [connects, c.stats.connects], wakes: [wakes, c.stats.wakesFired], status: c.status }));
     check(await until(() => settled(w, c), 20_000), "rebuild after an idle refusal: …and completes, synced: " + J(c.status));
   } finally {
     await stop(c);

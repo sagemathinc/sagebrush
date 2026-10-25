@@ -317,9 +317,9 @@ server.on("upgrade", async (req, socket, head) => {
       }
       if (m.t === "ops" && ctl.fakeOps.length) {
         const f = ctl.fakeOps.shift();
-        // (delayMs: answered that much later, so the answer comes after the client's sender has gone idle)
+        // (hold: answered only when the test releases it, after it has seen the client's sender idle)
         const answer = () => client.send(JSON.stringify({ t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
-        if (f.delayMs) setTimeout(answer, f.delayMs);
+        if (f.hold) held.push(answer);
         else answer();
         return;
       }
