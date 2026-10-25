@@ -406,7 +406,8 @@ export function record(s: Slot, now: number = Date.now()): any {
 /** The engine's frame area, as the engine laid it out (progress.rs): word 0
  *  the layout version, 1 an epoch, 2 the depth (every call running, however
  *  deep), then 32 frames of 24 words, then 96 (serial, op) pairs for the
- *  calls nested deeper than the frames. */
+ *  calls nested deeper than the frames (the calls deeper still are only
+ *  counted in the depth, and this host doesn't list them). */
 const FRAME_HEADER = 4;
 const FRAMES = 32;
 const OVERFLOW = 96;
@@ -415,9 +416,12 @@ const OVERFLOW_AT = FRAME_HEADER + FRAMES * WORDS;
 export const FRAME_WORDS = OVERFLOW_AT + 2 * OVERFLOW;
 /** The reason an engine call nested deeper than the frames is untracked. */
 export const DEEP_REASON = "nested deeper than 32 engine calls: no counts";
-/** How many nested engine calls this host lists, one record each; a deeper
- *  one (a runaway recursion) is not listed. */
-const DEPTH_LISTED = 1024;
+/** How many nested engine calls this host lists, one record each: those
+ *  the engine gives an identity (a frame's or an overflow pair's serial).
+ *  A call deeper than that has none, so a replaced one could not be told
+ *  from the call it replaced: it is counted in the engine's depth and not
+ *  listed (astra2's CORR-PR124-2). */
+const DEPTH_LISTED = FRAMES + OVERFLOW;
 let engineCalls: { serial: number; call: Call }[] = [];
 let lastEpoch = -1;
 let lastCopy = 0;
@@ -436,8 +440,8 @@ export function syncFrames(area: Uint32Array | null) {
     lastEpoch = epoch;
     lastCopy = now;
     const depth = Math.min(area[2], DEPTH_LISTED);
-    // a call's serial at depth d (0 below the overflow pairs: no identity)
-    const serialAt = (d: number) => (d < FRAMES ? area[FRAME_HEADER + d * WORDS + 2] : d < FRAMES + OVERFLOW ? area[OVERFLOW_AT + 2 * (d - FRAMES)] : 0);
+    // a listed call's serial at depth d (d < DEPTH_LISTED)
+    const serialAt = (d: number) => (d < FRAMES ? area[FRAME_HEADER + d * WORDS + 2] : area[OVERFLOW_AT + 2 * (d - FRAMES)]);
     // calls that ended, or were replaced at the same depth
     let keep = 0;
     while (keep < engineCalls.length && keep < depth && engineCalls[keep].serial === serialAt(keep)) keep++;
@@ -448,7 +452,7 @@ export function syncFrames(area: Uint32Array | null) {
       if (d >= FRAMES) {
         // nested deeper than the frames: untracked, under its own id and parent
         if (d >= engineCalls.length) {
-          const op = d < FRAMES + OVERFLOW ? area[OVERFLOW_AT + 2 * (d - FRAMES) + 1] : 0;
+          const op = area[OVERFLOW_AT + 2 * (d - FRAMES) + 1];
           engineCalls.push({ serial: serialAt(d), call: begin(op, parent, DEEP_REASON) });
         }
         continue;

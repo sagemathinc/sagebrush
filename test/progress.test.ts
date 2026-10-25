@@ -350,3 +350,57 @@ test("the real engine with every slot taken: its calls run untracked, then are t
   assert.ok(late.every((r) => r.call_id !== was.call_id || r.parent_id === was.parent_id));
   assert.deepEqual(P.snapshot(), []);
 });
+
+test("past the engine's serial envelope (depth 128) no call is listed, so a replaced one can't inherit an ended call's id (CORR-PR124-2)", () => {
+  const FR = 32, OV = 96, OVAT = 4 + FR * P.WORDS;
+  const area = new Uint32Array(P.FRAME_WORDS);
+  area[0] = 1;
+  let serial = 1000;
+  for (let d = 0; d < FR; d++) {
+    const w = P.encode({ ...P.emptySlot(), op: 1, stageCount: 0, total: 0 });
+    w[2] = serial++;
+    area.set(w, 4 + d * P.WORDS);
+  }
+  for (let k = 0; k < OV; k++) {
+    area[OVAT + 2 * k] = serial++;
+    area[OVAT + 2 * k + 1] = 1;
+  }
+  P.setCopyInterval(0);
+  try {
+    area[2] = 130; // two calls deeper than the 128 with an identity
+    area[1] = 1;
+    P.syncFrames(area);
+    const first = P.snapshot();
+    assert.equal(first.length, 128, "only the calls with an identity are listed");
+    const ids = new Set(first.map((r) => r.call_id));
+    // the depth-129 call ends and a sibling begins between two imports: the
+    // epoch moves by 2, the depth and all 128 serials stay; nothing listed
+    // changes, and no record stands for the replaced call
+    area[1] += 2;
+    P.syncFrames(area);
+    const second = P.snapshot();
+    assert.deepEqual(new Set(second.map((r) => r.call_id)), ids);
+    assert.equal(second.length, 128);
+    // within the envelope a replacement is a new call: the depth-127 one (the
+    // last overflow pair) gets a new id under the same parent
+    const byParent = (rs: any[], d: number) => {
+      // the chain from the root: depth d's record
+      let r = rs.find((x) => !rs.some((y) => y.call_id === x.parent_id));
+      for (let i = 0; i < d; i++) r = rs.find((x) => x.parent_id === r.call_id);
+      return r;
+    };
+    const before = byParent(second, 127);
+    area[OVAT + 2 * (OV - 1)] = serial++;
+    area[1] += 2;
+    P.syncFrames(area);
+    const third = P.snapshot();
+    const after = byParent(third, 127);
+    assert.notEqual(after.call_id, before.call_id);
+    assert.equal(after.parent_id, before.parent_id);
+    assert.equal(third.length, 128);
+  } finally {
+    P.endFrames(false);
+    P.setCopyInterval(250);
+  }
+  assert.deepEqual(P.snapshot(), []);
+});
