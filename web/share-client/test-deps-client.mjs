@@ -39,6 +39,7 @@ function fakeWorker({ silent = false, genOverride } = {}) {
         files: new Map(s.files),
         builtinModules: new Set(s.builtinModules),
         externalModules: new Set(s.externalModules),
+        packageModules: new Set(s.packageModules),
         readFile: (path) => new Promise((ok, no) => (waiting.set(path, { ok, no }), send({ gen, need: path }))),
         onDep: (path, reason) => send({ gen, dep: path, reason }),
         onUnfollowed: (u) => send({ gen, unfollowed: u }),
@@ -57,6 +58,7 @@ const input = (cells = ["import a\n"]) => ({
   importPath: [{ dir: "/", workspace: true }],
   builtinModules: [],
   externalModules: [],
+  packageModules: [],
 });
 function collect() {
   const c = { deps: [], done: null, progress: 0, unf: [] };

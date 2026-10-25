@@ -1524,7 +1524,7 @@ const shareDialog = createShareDialog({
     if (!kernel) return null;
     const m = await Promise.race([kernel.ask({ importInfo: true }, nb.mode, null), new Promise((r) => setTimeout(() => r(null), 5000))]);
     if (!m || !Array.isArray(m.path)) return null;
-    return { cwd: String(m.cwd ?? "/"), importPath: m.path.map((dir) => ({ dir: String(dir), workspace: !String(dir).startsWith("/$pyjs") })), builtinModules: m.builtins ?? [], externalModules: m.lib ?? [] };
+    return { cwd: String(m.cwd ?? "/"), importPath: m.path.map((dir) => ({ dir: String(dir), workspace: !String(dir).startsWith("/$pyjs") })), builtinModules: m.builtins ?? [], externalModules: m.lib ?? [], packageModules: m.packages ?? [] };
   },
   createWorker: () => shareTest.createWorker?.() ?? new Worker("/sagebrush-share-deps.js"),
   failsafe: () => shareTest.failsafe,

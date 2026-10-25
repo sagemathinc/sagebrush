@@ -396,6 +396,42 @@ try {
     await ev("(() => { const t = window.sagebrush.shareTest; t.onRead = null; delete t.listFiles; })()");
     await closeDialog();
   }
+
+  // ---- the caller's import facts (python's #170 review, carried to PR B): builtinModules is exactly
+  // pyjs's native factories (the runtime's own too, never the library's); packageModules is the
+  // registry's and the optional set's names.  (Last: it adds workspace files the counts above don't expect.)
+  {
+    const info = await ev("window.sagebrush.kernel.ask({ importInfo: true }, 'python', null)");
+    const b = new Set(info.builtins), lib = new Set(info.lib);
+    ok(b.has("math") && b.has("_fs"), `the natives, the runtime's own (_fs) too: ${b.size} names`);
+    ok(![...b].some((n) => lib.has(n)), `no library module among the natives (${lib.size} library modules)`);
+    ok(lib.has("textwrap") && !b.has("textwrap"), "textwrap is the library's (on sys.path), not native");
+    ok(Array.isArray(info.packages) && info.packages.includes("sortedcontainers") && !info.packages.some((n) => b.has(n)), `the registry's packages, none native: ${JSON.stringify(info.packages)}`);
+    await runFirst("open('textwrap.py', 'w').write('X = 1\\n')\nopen('math.py', 'w').write('X = 1\\n')\nprint('shadows')");
+    await setFirst("import textwrap\nimport math\nimport sortedcontainers");
+    await openDialog();
+    // (the list draws only the rows in view, and the files written above sort first: scroll to find these)
+    const find = async (name) => {
+      const h = await ev("document.querySelector('#sharelist').scrollHeight");
+      for (let top = 0; top <= h; top += 40 * 10) { // (about 20 rows are drawn at a time)
+        await ev(`document.querySelector('#sharelist').scrollTop = ${top}`);
+        await sleep(60);
+        const r = (await rows()).find((x) => x.name === name);
+        if (r) return r;
+      }
+      return undefined;
+    };
+    const by = { "textwrap.py": await find("textwrap.py"), "math.py": await find("math.py") };
+    ok(by["textwrap.py"]?.checked && /imported in the 1st cell/.test(by["textwrap.py"].why), `a workspace textwrap.py ahead of the library on sys.path is what pyjs imports: pre-checked (${by["textwrap.py"]?.why})`);
+    ok(by["math.py"] && !by["math.py"].checked, "a workspace math.py isn't (math is native): unchecked");
+    ok(!/couldn't be followed/.test(await status()), `a registry package (sortedcontainers) isn't reported as found nowhere: ${await status()}`);
+    await closeDialog();
+    await setFirst("import nosuchmodule_x");
+    await openDialog();
+    ok(/1 name in the code couldn't be followed/.test(await status()), `...while a module found nowhere is: ${await status()}`);
+    await closeDialog();
+    await setFirst(CODE);
+  }
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);

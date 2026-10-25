@@ -28,6 +28,11 @@ export function builtinModuleNames(): string[] {
   return Object.keys(factories).filter((n) => !n.startsWith("_"));
 }
 
+/** Every builtin (JavaScript) module's name, the runtime's own (_fs, ...) too: these always win over sys.path. */
+export function nativeModuleNames(): string[] {
+  return Object.keys(factories);
+}
+
 /** Is `name` a builtin (JavaScript) module, public or the runtime's own? (src/pkgset.ts reserves these names.) */
 export function isBuiltinModule(name: string): boolean {
   return Object.hasOwn(factories, name);

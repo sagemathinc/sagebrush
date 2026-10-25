@@ -23,7 +23,7 @@ export interface ShareDialogHost {
   /** what each cell's last run read (cell index -> workspace paths) */
   fileReads: () => Map<number, string[]>;
   /** where the notebook's interpreter resolves imports, or null if it can't be asked */
-  importInfo: () => Promise<{ cwd: string; importPath: { dir: string; workspace: boolean }[]; builtinModules: string[]; externalModules: string[] } | null>;
+  importInfo: () => Promise<{ cwd: string; importPath: { dir: string; workspace: boolean }[]; builtinModules: string[]; externalModules: string[]; packageModules: string[] } | null>;
   createWorker: () => WorkerLike;
   /** (tests: shorter fail-safes) */
   failsafe?: () => { silenceMs: number; sourceBytes: number } | undefined;
@@ -145,7 +145,7 @@ export function createShareDialog(h: ShareDialogHost) {
   });
   const say = () => {
     if (!sel) return;
-    const notes = unfollowed ? ` ${unfollowed.toLocaleString("en-US")} file name${unfollowed === 1 ? "" : "s"} computed when the code runs weren't followed.` : "";
+    const notes = unfollowed ? ` ${unfollowed.toLocaleString("en-US")} name${unfollowed === 1 ? "" : "s"} in the code couldn't be followed (known only when it runs, or not found), so ${unfollowed === 1 ? "it isn't" : "they aren't"} pre-checked.` : "";
     if (sel.state === "analyzing") status.textContent = `Finding the files this notebook uses: ${found.toLocaleString("en-US")} checked…`;
     else if (sel.state === "not-analyzed") status.textContent = `Stopped finding files: the rest are unchecked, not analyzed. ${found ? `Checked ${found} file${found === 1 ? "" : "s"} it uses.` : ""}${notes}`;
     else status.textContent = `${found ? `Checked ${found.toLocaleString("en-US")} file${found === 1 ? "" : "s"} this notebook uses` : "Found no other files this notebook uses"} (from its code${ranPartial ? "" : " and from what ran"}; check the list).${notes}`;
@@ -186,6 +186,7 @@ export function createShareDialog(h: ShareDialogHost) {
         importPath: info?.importPath ?? [],
         builtinModules: info?.builtinModules ?? [],
         externalModules: info?.externalModules ?? [],
+        packageModules: info?.packageModules ?? [],
       },
       readText: h.readText,
       createWorker: h.createWorker,
