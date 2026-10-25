@@ -27,10 +27,13 @@ export const PANEL = {
   backoff: { first: 2000, max: 60_000, jitter: 0.2 },
 };
 
-export type Status = { available: boolean; reason?: string; state: string; generation?: number; retry_after?: number; message?: string; limit_bytes?: number | null; used_bytes?: number };
+export type Status = { available: boolean; reason?: string; state: string; generation?: number; retry_after?: number; message?: string; limit_bytes?: number | null; used_bytes?: number; account?: string };
 /** A status answer; `life`, the lifecycle of this browser it was read under (the panel's reads: an answer read across
  * a lifecycle change is "stale", never applied: astra3's CORR-PR130-3). */
-export type Answer = { ok: true; status: Status; account: string | null; life?: LifeMark } | { ok: false; why: "network" | "http" | "stale"; code?: number; retryAfter?: number };
+/** `verified`: the server named the account it computed the answer for (its echo) and it is the session's; an old
+ * server names none: the answer is shown, but its limit is not taken and no delete is offered from it.  "mismatch":
+ * the echo names another account: never applied, asked again after the poll's backoff (no immediate retry). */
+export type Answer = { ok: true; status: Status; account: string | null; life?: LifeMark; verified: boolean } | { ok: false; why: "network" | "http" | "stale" | "mismatch"; code?: number; retryAfter?: number };
 
 /** The server's delay as the panel takes it: a finite safe integer of ms, clamped; anything else, none. */
 export function clampDelay(ms: unknown): number | undefined {
@@ -132,7 +135,11 @@ export async function askStatus(f: Fetch, signal: AbortSignal): Promise<Answer> 
     if (!r.ok) return { ok: false, why: "http", code: r.status, retryAfter: retryOf(r, null) };
     const status = (await r.json()) as Status;
     if ((await who()) !== id) return { ok: false, why: "stale" };
-    return { ok: true, status, account: id !== null ? await accountHash(id) : null };
+    const account = id !== null ? await accountHash(id) : null;
+    // (the server's echo: the account it computed this answer for, from the same request's session; a session that
+    // went to another account and back across the read (A, B, A) is caught here, astra3's CORR-PR130-4)
+    if (typeof status.account === "string" && status.account !== account) return { ok: false, why: "mismatch" };
+    return { ok: true, status, account, verified: typeof status.account === "string" && account !== null };
   } catch {
     return { ok: false, why: "network" };
   }
@@ -149,7 +156,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   const owner = SyncOwner.of(w);
   const sec = h("div", { className: "sync" });
   into.append(sec);
-  let last: { status: Status; account: string | null } | null = null;
+  let last: { status: Status; account: string | null; verified: boolean } | null = null;
   // (a deletion being followed: its account and generation, until status says off)
   let deleting: { generation: number; account: string } | null = null;
   let note = "";
@@ -183,7 +190,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       return;
     }
     poll.good();
-    last = { status: a.status, account: a.account };
+    last = { status: a.status, account: a.account, verified: a.verified };
     const st = a.status;
     // (the plan's limit is the account's: kept for this browser's sync only if its namespace is that account's, so no
     // other account's limit is ever published under it)
@@ -242,7 +249,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       void details(renderGen, box);
     }
     // (delete: only where the server enforces the account precondition (its status carries limit_bytes))
-    if (on && "limit_bytes" in st && st.generation) {
+    // (and only from an answer whose account the server named and the session confirmed: never from an old server's)
+    if (on && "limit_bytes" in st && st.generation && last.verified) {
       const d = btn("Delete my synced data…", () => void del(), "danger");
       if (Date.now() < retryAt) {
         d.disabled = true;
@@ -409,6 +417,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   }
   /** Whether a status answer's limit may be this browser's: sync off here (shown only), or on for that account. */
   function limitIsOurs(a: Answer & { ok: true }): boolean {
+    // (an answer whose account the server didn't name (an old server) is shown, its limit not taken)
+    if (!a.verified) return false;
     if (!a.life || !a.life.ns || a.life.off) return true;
     return !!a.account && a.life.ns.startsWith(a.account + ":");
   }
