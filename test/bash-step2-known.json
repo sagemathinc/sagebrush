@@ -1,0 +1,49 @@
+{
+  "about": "What the shell host (web/shell/host.ts, plan-bash-shell r3 step 2) does differently from test/bash-known.json's just-bash-over-InMemoryFs results, with why; web/shell/test-shell-host.mjs holds the host to it, on the built chunk. redirections: cases of test/bash-oracle-cases.json. lexical: the wrapper's two lexical cases (plan-bash-step2-wrapper-lexical-r1, N-119-3), frozen as accepted differences: 'bash' is GNU bash 5.3.9's result as that note records it, 'host' what the host gives.",
+  "redirections": {
+    "pipeline-tee": {
+      "plan": "§8 (tee is deferred)",
+      "reason": "the shipped shell registers only §8's commands; tee isn't one, so it answers 127 'command not found', and f is created empty by its redirection",
+      "differs": {
+        "exit": 127,
+        "files": {
+          "f": "",
+          "n": null,
+          "g": null,
+          "t": null,
+          "c": null,
+          "e": null
+        }
+      }
+    }
+  },
+  "lexical": [
+    {
+      "script": "cat <<EOF",
+      "bash": "status 0, a warning",
+      "host": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "bash: syntax error: Parse error at 2:2: Expected RBRACE, got EOF\n"
+      }
+    },
+    {
+      "script": "cat <<EOF\nx",
+      "bash": "prints x, status 0, a warning",
+      "host": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "bash: syntax error: Parse error at 3:2: Expected RBRACE, got EOF\n"
+      }
+    },
+    {
+      "script": "echo a \\",
+      "bash": "prints 'a \\\\', status 0",
+      "host": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "bash: syntax error: Parse error at 2:2: Expected RBRACE, got EOF\n"
+      }
+    }
+  ]
+}
