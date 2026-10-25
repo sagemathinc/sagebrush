@@ -6,7 +6,7 @@ import {
   isinstance, getattr, setattr, delattr, callObj, callKw, bindArgs, dictSet, dictGet, hasInstanceDict, PyBytes, builtinType, checkArity, unbox,
 } from "./object";
 import * as O from "./ops";
-import { INTR } from "./interrupt";
+import { consumeCtrlC } from "./interrupt";
 import { repr, str, format, formatFixed } from "./format";
 import * as Ty from "./types";
 import { glibcPow } from "./libm";
@@ -232,10 +232,7 @@ function sum(it: any, start: any = 0): any {
       else for (let j = 0; j < c; j++, x += step) acc += BigInt(x);
       acc += BigInt(small);
       k -= c;
-      if (INTR[0]) {
-        INTR[0] = 0;
-        raise(T.KeyboardInterrupt);
-      }
+      if (consumeCtrlC()) raise(T.KeyboardInterrupt);
     }
     return O.normBig(acc);
   }
