@@ -14,6 +14,10 @@ import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from
 import { SyncOwner } from "./sync-owner";
 import { foot as footText } from "./sync-panel";
 import { rowIcons, ROWICON } from "./sync-rows";
+// (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
+// copy; elsewhere the define is absent or false, and everything is as before)
+declare const __SB_NO_SYNC__: boolean | undefined;
+const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
 
 export type BrowserHost = {
   ws: Workspace;
@@ -210,28 +214,32 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   syncEl.setAttribute("role", "status");
   syncEl.onclick = () => storage();
   function showSync() {
-    const v = SyncOwner.of(w).view().s;
-    syncEl.hidden = v.state === "off" && !v.reason;
-    syncEl.textContent = v.state === "off" ? (v.reason ? `Sync off: ${v.reason}` : "") : footText(v);
+    if (!NO_SYNC) {
+      const v = SyncOwner.of(w).view().s;
+      syncEl.hidden = v.state === "off" && !v.reason;
+      syncEl.textContent = v.state === "off" ? (v.reason ? `Sync off: ${v.reason}` : "") : footText(v);
+    } else syncEl.hidden = true;
   }
   // (the rows drawn by the last render, and that render's icons: an older read never paints a newer render's rows)
   let drawnRows: { e: Entry; si: HTMLElement }[] = [], iconGen = 0;
   function paintIcons() {
-    const rows = drawnRows, gen = ++iconGen;
-    const ids = rows.map((r) => r.e.ident).filter((x): x is string => !!x).slice(0, ROWICON.max);
-    if (!rows.length) return;
-    rowIcons(w, ids, rows.map((r) => r.e.path)).then((ic) => {
-      if (gen !== iconGen) return;
-      for (const { e, si } of rows) {
-        const marks: string[] = [];
-        if (e.ident && ic.up.has(e.ident)) marks.push("↑");
-        if (ic.conflict.has(e.path) || (e.ident && ic.tooLarge.has(e.ident))) marks.push("⚠");
-        si.textContent = marks.join(" ");
-        const why = [e.ident && ic.up.has(e.ident) ? "waiting to go up" : "", ic.conflict.has(e.path) ? "conflict copy" : "", e.ident && ic.tooLarge.has(e.ident) ? "too large to sync yet" : ""].filter(Boolean).join(", ");
-        si.title = why;
-        si.setAttribute("aria-label", why);
-      }
-    }, () => {});
+    if (!NO_SYNC) {
+      const rows = drawnRows, gen = ++iconGen;
+      const ids = rows.map((r) => r.e.ident).filter((x): x is string => !!x).slice(0, ROWICON.max);
+      if (!rows.length) return;
+      rowIcons(w, ids, rows.map((r) => r.e.path)).then((ic) => {
+        if (gen !== iconGen) return;
+        for (const { e, si } of rows) {
+          const marks: string[] = [];
+          if (e.ident && ic.up.has(e.ident)) marks.push("↑");
+          if (ic.conflict.has(e.path) || (e.ident && ic.tooLarge.has(e.ident))) marks.push("⚠");
+          si.textContent = marks.join(" ");
+          const why = [e.ident && ic.up.has(e.ident) ? "waiting to go up" : "", ic.conflict.has(e.path) ? "conflict copy" : "", e.ident && ic.tooLarge.has(e.ident) ? "too large to sync yet" : ""].filter(Boolean).join(", ");
+          si.title = why;
+          si.setAttribute("aria-label", why);
+        }
+      }, () => {});
+    }
   }
 
   // (each folder's entries, sorted, built once per refresh: LIMIT-0B0-2)
@@ -562,12 +570,12 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const unwatch = w.watch(() => { if (!pending) pending = setTimeout(() => { pending = null; refresh(); }, 150); });
   // (sync, step 5: the foot's line, from the page's sync owner; the rows' icons on its transitions too, at most every
   // ROWICON.minGapMs)
-  const owner = SyncOwner.of(w);
+  const owner = NO_SYNC ? null : SyncOwner.of(w);
   let iconTimer: ReturnType<typeof setTimeout> | null = null;
-  const unowner = owner.onChange(() => {
+  const unowner = owner ? owner.onChange(() => {
     showSync();
     if (!iconTimer) iconTimer = setTimeout(() => { iconTimer = null; paintIcons(); }, ROWICON.minGapMs);
-  });
+  }) : () => {};
   showSync();
   refresh();
   return {
