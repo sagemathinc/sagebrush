@@ -416,6 +416,7 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-sync-view.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-d11.mjs
           bun web/sync-protocol/test-doc-protocol.mjs
+          bun web/sync-protocol/test-reference-server.mjs
           python3 -I web/sync-protocol/gen-doc-vectors.py | diff - web/sync-protocol/doc-vectors.json
           node web/test-engines.mjs
           CHROME=google-chrome node web/test-pwa-update.mjs
