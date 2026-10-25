@@ -382,7 +382,11 @@ export class WorkerKernel {
     for (const id of waiting) if (this.runs.has(id)) this.interrupted.add(id); // (the journal: not exactly replayable)
     if (this.interruptFlag) {
       Atomics.store(this.interruptFlag, 1, this.nextId - 1);
-      Atomics.store(this.interruptFlag, 0, 1);
+      // (bit 0 of a word of bits, src/runtime/interrupt.ts: or'd, so a frame
+      // request, a soft stop or an armed allowance stays; the notify wakes a
+      // time.sleep)
+      Atomics.or(this.interruptFlag, 0, 1);
+      Atomics.notify(this.interruptFlag, 0);
     } else this.worker.interrupt(this.nextId - 1);
     const gen = this.generation;
     setTimeout(() => {
