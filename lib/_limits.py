@@ -67,9 +67,18 @@ TABLE = {
     "ff.embed_max": (UNLIMITED, 2 ** 8, 2 ** 20),
     "ff.root_bits": (UNLIMITED, 64, 1024),
     "ff.work": (UNLIMITED, 10 ** 5, 10 ** 8),
+    # C0's per-area follow-up (engine/classgroup, engine/poly): opt-in
+    # limits of the class-group searches, the unconditional certificate and
+    # integer-polynomial factorization, sent to the engine only when finite
+    # (sagebrush/_engine.py); the finite values are the former defaults
+    "nf.certify_index_max": (UNLIMITED, 10 ** 3, 2 ** 62),
+    "nf.certify_norm_max": (UNLIMITED, 10 ** 3, 2 ** 62),
+    "nf.relation_rounds": (UNLIMITED, 1, 10 ** 4),
+    "poly.work": (UNLIMITED, 2 ** 20, 2 ** 40),
 }
 # the defaults before plan-c0 (a policy's finite values, and the tests')
-FINITE = {"ff.conway_work": 653528895, "ff.embed_max": 2 ** 20, "ff.root_bits": 1024, "ff.work": 10 ** 7}
+FINITE = {"ff.conway_work": 653528895, "ff.embed_max": 2 ** 20, "ff.root_bits": 1024, "ff.work": 10 ** 7,
+          "nf.certify_index_max": 10 ** 6, "nf.certify_norm_max": 10 ** 6, "nf.relation_rounds": 60, "poly.work": 2 ** 33}
 MAX_BYTES = 4096   # the serialized text, in UTF-8 bytes
 MAX_ENTRIES = 16
 MAX_KEY = 64       # characters of a key (CPython mappings)

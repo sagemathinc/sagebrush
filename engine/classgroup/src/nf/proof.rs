@@ -63,16 +63,25 @@ use sagebrush_bigint::BigInt;
 use std::collections::{HashMap, HashSet};
 
 /// The largest certificate attempted: M (the norm bound of step 1) and B
-/// (the bound on the unit index of step 2).
+/// (the bound on the unit index of step 2).  By default neither is limited
+/// (C0's per-area follow-up): a large certificate takes its time, and
+/// interrupting is the control.  The arithmetic's own range still applies
+/// (PRIME_MAX below).  Finite limits are opt-in: Limits::CALIBRATED, the
+/// former default, or the caller's own.
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     pub norm_max: u64,
     pub index_max: u64,
 }
 
+impl Limits {
+    /// The former default limits, kept as the documented opt-in choice.
+    pub const CALIBRATED: Limits = Limits { norm_max: 1_000_000, index_max: 1_000_000 };
+}
+
 impl Default for Limits {
     fn default() -> Limits {
-        Limits { norm_max: 1_000_000, index_max: 1_000_000 }
+        Limits { norm_max: u64::MAX, index_max: u64::MAX }
     }
 }
 
@@ -1017,6 +1026,17 @@ mod tests {
 
     fn poly(c: &[i64]) -> Vec<BigInt> {
         c.iter().map(|&x| BigInt::from(x)).collect()
+    }
+
+    #[test]
+    fn limits_are_opt_in() {
+        // C0's follow-up: no default limit on M or B; the former defaults
+        // are Limits::CALIBRATED, which still refuses (before any work) the
+        // field whose Minkowski bound is 2205315
+        let d = Limits::default();
+        assert_eq!((d.norm_max, d.index_max), (u64::MAX, u64::MAX));
+        let e = certify(&poly(&[3_000_000_000_001, 0, 1]), &Limits::CALIBRATED).unwrap_err();
+        assert!(e.starts_with(REFUSED) && e.contains("2205315") && e.contains("1000000"), "{}", e);
     }
 
     #[test]

@@ -278,15 +278,39 @@ fn live_memory_stays_within_the_budget() {
 }
 
 #[test]
-fn default_work_is_calibrated() {
+fn calibrated_work() {
     // the constant of the VM 1 calibration (budget.rs), and what it admits:
     // S_6 (about 1/126 of it) and x^120 - 1 (about 1/209) fit far below it
-    assert_eq!(Limits::DEFAULT.work, 1 << 33);
+    assert_eq!(Limits::CALIBRATED.work, 1 << 33);
     for f in [swinnerton_dyer(6), xn(120, -1)] {
-        let b = Budget::default();
+        let b = Budget::new(Limits::CALIBRATED);
         try_factor_with(&f, &b).unwrap();
-        assert!(Limits::DEFAULT.work - b.work_left() < Limits::DEFAULT.work / 100);
+        assert!(Limits::CALIBRATED.work - b.work_left() < Limits::CALIBRATED.work / 100);
     }
+}
+
+#[test]
+fn default_is_unlimited_except_memory() {
+    // C0's follow-up: no default work, subset, division or input-size
+    // limit; the memory guard stays
+    let d = Limits::DEFAULT;
+    assert_eq!((d.work, d.subsets, d.divisions), (u64::MAX, u64::MAX, u64::MAX));
+    assert_eq!((d.max_degree, d.max_coeff_bits, d.max_total_bits), (usize::MAX, u64::MAX, u64::MAX));
+    assert_eq!(d.memory, 512 << 20);
+    assert_eq!(Budget::default().limits().memory, 512 << 20);
+    // degree 10001: refused at admission by the old finite default, and
+    // factored by the new one (x^10001 - 1 = Phi_1 Phi_73 Phi_137 Phi_10001)
+    let f = xn(10001, -1);
+    let e = try_factor_with(&f, &Budget::new(Limits::CALIBRATED)).unwrap_err();
+    assert!(e.to_string().contains("degree"), "{}", e);
+    let (c, fs) = try_factor_with(&f, &Budget::default()).unwrap();
+    check(&f, &c, &fs);
+    assert_eq!(fs.iter().map(|(g, _)| g.len() - 1).collect::<Vec<_>>(), vec![1, 72, 136, 9792]);
+    // an explicit finite policy still refuses exactly as before, also as
+    // the thread's default
+    let tight = Limits { max_degree: 10, ..Limits::CALIBRATED };
+    assert!(crate::with_default_limits(tight, || try_factor(&xn(11, -1))).is_err());
+    assert!(try_factor(&xn(11, -1)).is_ok());
 }
 
 #[test]

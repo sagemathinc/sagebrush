@@ -332,7 +332,8 @@ pub struct BnfProofData {
 }
 
 /// The unconditional certificate for Q[x]/(f), within the limits (None:
-/// the defaults); an error starting with nf::proof::REFUSED is a refusal
+/// no limit; Limits::CALIBRATED gives the former ones); an error starting
+/// with nf::proof::REFUSED is a refusal
 /// (a bound beyond the limits, said by how much), not a failure.
 pub fn bnf_certify(f: &[BigInt], norm_max: Option<u64>, index_max: Option<u64>) -> Result<BnfProofData, String> {
     monic(f)?;
