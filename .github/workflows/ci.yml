@@ -927,7 +927,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-      - run: python3 -m pip install maturin
+      # (numpy: the PNG engine's decode returns its values as an array)
+      - run: python3 -m pip install maturin numpy
       - name: CPython extension, audit regressions, MCP and Sage
         run: |
           (cd engine/py && maturin build --release --out dist)
@@ -944,6 +945,8 @@ jobs:
           python3 engine/py/test_limits.py
           python3 engine/py/test_memguard.py
           python3 engine/py/test_capacity.py
+          python3 engine/py/test_memledger.py
+          python3 engine/py/test_raster_child.py
           python3 engine/py/test_progress.py
           python3 sage-tests/run_cpython.py -v
 
