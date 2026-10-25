@@ -37,6 +37,17 @@ checkpoint, format: sagebrush.checkpoint/1: format is "pickle", not "sagebrush-c
 checkpoint, version 2: sagebrush.checkpoint/1: version is 2, not 1
 checkpoint, version True: sagebrush.checkpoint/1: version is true, not 1
 checkpoint, no payload_length: sagebrush.checkpoint/1: "payload_length" is missing
+running, call_id 3.0: ok
+running, done 410.0: ok
+running, stage_index 2.0: ok
+running, stage_index 2.5: sagebrush.progress/1: stage_index is number, not integer
+running, done 410.5: sagebrush.progress/1: count.done is number, not integer
+running, done inf: sagebrush.progress/1: count.done is number, not integer
+checkpoint, version 1.0: ok
+checkpoint, version 1.5: sagebrush.checkpoint/1: version is 1.5, not 1
+checkpoint, state_version 1.0: ok
+checkpoint, state_version 0.5: sagebrush.checkpoint/1: state_version is number, not integer
+outcome, peak memory 1024.0: ok
 not an object: a record is a JSON object, not array
 no schema: not a Sagebrush record: schema is null
 estimate/2: not a Sagebrush record: schema is "sagebrush.estimate/2"

@@ -282,3 +282,71 @@ test("capabilities(): progress only in this build; the later pieces refuse befor
     ].join("\n"),
   );
 });
+
+test("the real engine nested 40 deep: 32 frames reported, the 8 below them untracked under their own ids and parents", () => {
+  const { engineCall } = require("../src/runtime/engine");
+  let last: any[] = [];
+  P.setCopyInterval(0);
+  P.setSyncHookForTests(() => {
+    last = P.snapshot();
+  });
+  try {
+    assert.deepEqual(JSON.parse(engineCall(JSON.stringify({ fn: "progress_selftest", depth: 40, steps: 3 }))), { ok: { steps: 3, calls: 40 } });
+  } finally {
+    P.setSyncHookForTests(null);
+    P.setCopyInterval(250);
+  }
+  assert.equal(last.length, 40, JSON.stringify(last.map((r) => r.status)));
+  const running = last.filter((r) => r.status === "running");
+  const deep = last.filter((r) => r.status === "untracked");
+  assert.equal(running.length, 32);
+  assert.equal(deep.length, 8);
+  assert.ok(deep.every((r) => r.reason === P.DEEP_REASON && r.count === undefined && r.op === "factor"), JSON.stringify(deep[0]));
+  // one chain: every call's parent is the call above it, and every id is its own
+  const byId = new Map(last.map((r) => [r.call_id, r]));
+  assert.equal(byId.size, 40);
+  const roots = last.filter((r) => !byId.has(r.parent_id));
+  assert.equal(roots.length, 1);
+  let r = roots[0];
+  const chain = [r];
+  for (;;) {
+    const child = last.find((x) => x.parent_id === r.call_id);
+    if (!child) break;
+    chain.push((r = child));
+  }
+  assert.equal(chain.length, 40);
+  assert.deepEqual(chain.map((x) => x.status), [...Array(32).fill("running"), ...Array(8).fill("untracked")]);
+  assert.deepEqual(P.snapshot(), [], "every call ended with the engine call");
+});
+
+test("the real engine with every slot taken: its calls run untracked, then are tracked once a slot frees, with early_part_untracked", () => {
+  const { engineCall } = require("../src/runtime/engine");
+  const held = Array.from({ length: 31 }, () => P.begin(3));
+  const seen: any[][] = [];
+  let freed = false;
+  P.setCopyInterval(0);
+  P.setSyncHookForTests(() => {
+    const s = P.snapshot().filter((r) => r.op === "factor");
+    seen.push(s);
+    if (!freed && s.some((r) => r.status === "untracked")) {
+      freed = true;
+      held.pop()!.end(); // capacity returns while the engine call still runs
+    }
+  });
+  try {
+    engineCall(JSON.stringify({ fn: "progress_selftest", depth: 2, steps: 5 }));
+  } finally {
+    P.setSyncHookForTests(null);
+    P.setCopyInterval(250);
+    for (const c of held) c.end();
+  }
+  const first = seen[0];
+  assert.deepEqual(first.map((r) => r.status).sort(), ["running", "untracked"], JSON.stringify(first));
+  const late = seen[seen.length - 1];
+  assert.deepEqual(late.map((r) => r.status), ["running", "running"]);
+  const was = first.find((r) => r.status === "untracked");
+  const now = late.find((r) => r.call_id === was.call_id);
+  assert.equal(now.early_part_untracked, true);
+  assert.ok(late.every((r) => r.call_id !== was.call_id || r.parent_id === was.parent_id));
+  assert.deepEqual(P.snapshot(), []);
+});

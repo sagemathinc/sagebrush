@@ -7,7 +7,11 @@
   untracked under its own call_id and tracked after a slot is freed, with
   early_part_untracked;
 - 4 threads, each with its own slot and its own parent chain, while a
-  reader thread takes snapshots (without the GIL) at full rate;
+  reader thread takes snapshots (without the GIL) at full rate; every
+  thread's exception is re-raised, and an injected reader or worker
+  failure makes the run exit nonzero (the mutation check);
+- a call begun on one thread and ended on another leaves the first
+  thread's next call top-level;
 - every record a valid sagebrush.progress/1 record;
 - capabilities(): progress only; estimate, run and resume (request_stop comes with PR 5a),
   and factor's deadline= work= resume= checkpoint_every= checkpoint_path=,
@@ -15,10 +19,34 @@
 
     python engine/py/test_progress.py
 """
+import os
+import subprocess
+import sys
 import threading
 
 import sagebrush
 from sagebrush import progress, records
+
+# a failure to inject (the mutation check of test_thread_failures_fail_the_run):
+# "reader" or "worker" makes that thread raise
+INJECT = os.environ.get("SAGEBRUSH_TEST_PROGRESS_INJECT", "")
+
+
+def run_threads(targets):
+    """Runs each (function, args) on its own thread and re-raises the first
+    exception any of them raised (Thread.join alone would swallow it)."""
+    errors = []
+
+    def wrap(f, args):
+        try:
+            f(*args)
+        except BaseException as e:  # (an AssertionError, or anything)
+            errors.append(e)
+
+    ts = [threading.Thread(target=wrap, args=(f, args)) for f, args in targets]
+    for t in ts:
+        t.start()
+    return ts, errors
 
 
 def check(cond, what):
@@ -76,14 +104,23 @@ def test_threads_and_a_reader():
     seen = []
 
     def reader():
+        if INJECT == "reader":
+            raise AssertionError("injected reader failure")
         while not stop.is_set():
             for r in progress.snapshot():
-                if r["op"].startswith("thread "):
-                    d = r["count"]["done"]
-                    check(r["count"].get("total") == d, r)  # never torn
+                if r["op"].startswith("thread ") and not r["op"].endswith(" inner"):
+                    n = r["count"]
+                    # a call's first record has no total yet (unknown) and done 0;
+                    # after that, total == done always (never torn)
+                    if "total" in n:
+                        check(n["total"] == n["done"], r)
+                    else:
+                        check(n["done"] == 0, r)
                     seen.append(r["op"])
 
     def worker(k):
+        if INJECT == "worker" and k == 2:
+            raise AssertionError("injected worker failure")
         with progress.call("thread %d" % k) as c:
             for j in range(2000):
                 c.update(done=j, total=j)
@@ -92,18 +129,52 @@ def test_threads_and_a_reader():
                 s = {r["call_id"]: r for r in progress.snapshot()}
                 check(s[d.id]["parent_id"] == c.id, s)
 
-    t = threading.Thread(target=reader)
-    t.start()
-    ws = [threading.Thread(target=worker, args=(k,)) for k in range(4)]
-    for w in ws:
-        w.start()
+    (rt,), rerr = run_threads([(reader, ())])
+    ws, werr = run_threads([(worker, (k,)) for k in range(4)])
     for w in ws:
         w.join()
     stop.set()
-    t.join()
-    check(len(set(seen)) >= 1, "the reader saw the threads")
+    rt.join()
+    for e in rerr + werr:
+        raise e
+    check(len(set(seen)) >= 1, "the reader saw the threads: %r" % sorted(set(seen)))
     check(progress.snapshot() == [], "all released")
     print("ok test_threads_and_a_reader")
+
+
+def test_thread_failures_fail_the_run():
+    # the mutation check: an injected reader or worker failure makes this
+    # file's run exit nonzero (a thread's exception is never swallowed)
+    for what in ("reader", "worker"):
+        env = dict(os.environ, SAGEBRUSH_TEST_PROGRESS_INJECT=what)
+        r = subprocess.run([sys.executable, __file__, "--threads-only"], env=env, capture_output=True, text=True)
+        check(r.returncode != 0, "an injected %s failure exits %d" % (what, r.returncode))
+        check("injected %s failure" % what in r.stderr, r.stderr[-500:])
+    print("ok test_thread_failures_fail_the_run")
+
+
+def test_call_ended_on_another_thread():
+    # a call begun on thread A and ended on thread B: A's next call is
+    # top-level, not a child of the ended one (CORR-PR124-3)
+    box, go, out = [], threading.Event(), []
+
+    def a():
+        box.append(progress.call("begun on A"))
+        go.wait()
+        with progress.call("A's next") as n:
+            out.append([r for r in progress.snapshot() if r["call_id"] == n.id][0]["parent_id"])
+
+    (t,), errs = run_threads([(a, ())])
+    while not box:
+        pass
+    box[0].end()  # here, on another thread
+    go.set()
+    t.join()
+    for e in errs:
+        raise e
+    check(out == [0], "A's next call's parent: %r" % out)
+    check(progress.snapshot() == [], "all released")
+    print("ok test_call_ended_on_another_thread")
 
 
 def test_capabilities():
@@ -130,8 +201,13 @@ def test_capabilities():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--threads-only"]:
+        test_threads_and_a_reader()
+        sys.exit(0)
     test_counts_nesting_and_release()
     test_33rd_call()
     test_threads_and_a_reader()
+    test_thread_failures_fail_the_run()
+    test_call_ended_on_another_thread()
     test_capabilities()
     print("all progress tests passed")
