@@ -14,6 +14,7 @@ from fractions import Fraction as _Fraction
 
 import sage_all as _sa
 from sage_all import Rational as _Rational, _intdiv
+import _memguard
 import _sage_poly as _sp
 import _sage_ff as _sff
 import _sage_ffsub as _ffsub
@@ -22,6 +23,15 @@ import _sage_frac as _sfrac
 __all__ = []  # filled at the end: every intrinsic
 
 WIDTH = 80
+
+
+def _memory_error(e):
+    """A memory guard's refusal (a SagebrushMemoryError) as Magma's runtime
+    error: its text, and its fields on the MagmaError (the same objects)."""
+    m = MagmaError(str(e))
+    for k in ("what", "need_bytes", "limit_bytes", "allowance_for", "record", "partial", "checkpoint", "fixed"):
+        setattr(m, k, getattr(e, k))
+    return m
 
 
 class MagmaError(Exception):
@@ -94,6 +104,8 @@ def _unsupported_call(e):
     not a Python TypeError; so is a NotImplementedError, and the
     curve-table LookupError.  (Python's message names the function: this
     runtime has no traceback to tell a call's boundary.)"""
+    if isinstance(e, _memguard.SagebrushMemoryError):
+        return str(e)  # a memory guard's refusal is not a missing feature (item D)
     if isinstance(e, NotImplementedError):
         return "not supported yet: %s" % e if str(e) else "not supported yet"
     if type(e) is LookupError:
@@ -946,11 +958,16 @@ def _collect_max():
 
 
 def _collect_refusal():
+    """The bound's refusal (item D): the memory guards' message, the
+    allowance _COLLECT_COST bytes for each of _COLLECT_MAX elements.  At
+    the 10^6 ceiling the bound is fixed (a larger heap doesn't raise it),
+    and the message says so (astra's PR114-SEM-1).  With D0's record: the
+    memory observed free (capacity), which decided nothing."""
     import _capacity
-    e = MagmaError("a comprehension of more than %d elements is not supported yet" % _COLLECT_MAX)
-    # (the enforced cap, at _COLLECT_COST bytes an element; the need is not
-    # known; the memory observed free, which decided nothing: D0)
-    e.need_bytes, e.limit_bytes, e.capacity = None, _COLLECT_MAX * _COLLECT_COST, _capacity.capacity()
+    e = _memory_error(_memguard.memory_guard("A collection of more than %d elements" % _COLLECT_MAX,
+                                             (_COLLECT_MAX + 1) * _COLLECT_COST, _COLLECT_MAX * _COLLECT_COST,
+                                             "one collection", fixed=_COLLECT_MAX == 10 ** 6))
+    e.capacity = _capacity.capacity()
     return e
 
 
