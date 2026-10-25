@@ -36,7 +36,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::Mutex;
 
 mod measure;
-pub use measure::{Measure, MeasureKind, Reading, Row, ROW_SLOTS};
+pub use measure::{Measure, MeasureKind, Reading, Row};
 
 #[cfg(feature = "ledger-audit")]
 pub mod audit;
@@ -185,8 +185,16 @@ pub fn certified() -> bool {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let s = state();
-        s.total.is_some() && s.measure.available()
+        // every row must have opened AND read freshly now (astra2's
+        // CORR-C2A-1: an opened file whose contents are unreadable or
+        // invalid doesn't certify; admissions re-check at their own read)
+        #[cfg(any(test, feature = "test-hooks"))]
+        if hooks::UNREADABLE.load(Relaxed) {
+            return false;
+        }
+        measure::prepare();
+        let mut s = state();
+        s.total.is_some() && s.measure.available() && s.measure.read_each(|_| {})
     }
 }
 
@@ -573,6 +581,14 @@ pub mod hooks {
     pub(crate) type FakeRow = (Option<u64>, u64, Option<u64>);
     pub(crate) static FAKE: Mutex<Option<Vec<FakeRow>>> = Mutex::new(None);
     pub(crate) static PAUSE: Mutex<Option<std::sync::Arc<std::sync::Barrier>>> = Mutex::new(None);
+    pub(crate) static UNREADABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    /// Every check's fresh read fails (an opened measure whose contents
+    /// became unreadable), until cleared: certified() is false and an
+    /// admission refuses.
+    pub fn set_fake_unreadable(on: bool) {
+        UNREADABLE.store(on, Relaxed);
+    }
 
     /// One row at the total's limit with this usage (and availability),
     /// read by every check until cleared.
@@ -664,14 +680,31 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     if !faked {
         on_row(t.bytes, wasm_live, None);
     }
+    // a measure that opened but can't be read now fails closed at this
+    // admission (astra2's CORR-C2A-1): no residents-only fallback that
+    // would admit past an unmeasured row
+    #[allow(unused_mut)]
+    let mut unreadable = false;
+    #[cfg(any(test, feature = "test-hooks"))]
+    if faked && hooks::UNREADABLE.load(Relaxed) {
+        unreadable = true;
+        measured = false;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     if !faked {
-        measured = s.measure.read_each(|r| on_row(r.figure, r.usage, r.available));
-        if !measured {
-            // (unmeasured, fail-closed for certification: the residents
-            // against the total, as before)
+        if s.measure.available() {
+            measured = s.measure.read_each(|r| on_row(r.figure, r.usage, r.available));
+            unreadable = !measured;
+        } else {
+            // (a platform or row that was never measurable: not certified,
+            // so no caller has lifted a cap on it; the residents against the
+            // total, as in C-1)
+            measured = false;
             on_row(t.bytes, 0, None);
         }
+    }
+    if unreadable && first.is_none() {
+        first = Some((t.bytes, live_seen, allowance(t), None));
     }
     let (first, live_seen) = (first, live_seen);
     let slots_full = first.is_none() && s.chain_add(chain, x).is_err();
