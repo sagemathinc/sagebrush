@@ -568,10 +568,11 @@ class PolynomialRing_:
             sage: R.<x> = QQ[]
             sage: R([1, 2, 3]), R(5), R(x^2 + 1)
             (3*x^2 + 2*x + 1, 5, x^2 + 1)
-            sage: ZZ['x'](PolynomialRing(ZZ, 2, 'x,y')({(2000000, 0): 1}))  # sagebrush only
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: a polynomial of degree 2000000 exceeds sagebrush's limit of 1048576 coefficients for this conversion
+            sage: try:  # sagebrush only
+            ....:     ZZ['x'](PolynomialRing(ZZ, 2, 'x,y')({(2000000, 0): 1}))
+            ....: except MemoryError as e:
+            ....:     print(str(e).splitlines()[1])
+            Converting this polynomial of degree 2000000 to a dense one needs about 17 MB, but Sagebrush has a fixed limit of about 8.3 MB for this conversion.
         """
         if isinstance(x, Polynomial):
             # (Sage converts between univariate rings by coefficients, so
@@ -591,7 +592,11 @@ class PolynomialRing_:
             # it is made (one term of degree 2000000 made 2000001
             # coefficients, the review's HARD-0FE-1)
             if cs and max(cs) >= _MAX_DENSE_COEFFS:
-                raise NotImplementedError("a polynomial of degree %d exceeds sagebrush's limit of %d coefficients for this conversion" % (max(cs), _MAX_DENSE_COEFFS))
+                # (the memory guard's error, item D: d + 1 coefficients
+                # against the limit's, at 8 bytes a slot, a lower bound)
+                import _memguard
+                raise _memguard.memory_guard("Converting this polynomial of degree %d to a dense one" % max(cs),
+                                             (max(cs) + 1) * 8, _MAX_DENSE_COEFFS * 8, "this conversion", fixed=True)
             return Polynomial(self, [cs.get(i, 0) for i in range(max(cs) + 1)] if cs else [])
         if isinstance(x, (list, tuple)):
             return Polynomial(self, list(x))
@@ -1484,6 +1489,55 @@ class Polynomial:
         return out if multiplicities else [r for r, _ in out]
 
 
+def _latex_factorization(factors, unit=None, bare_unit=False):
+    """latex() of a factorization, as Sage writes it: the factors joined by
+    \\cdot, a factor of several terms in plain parentheses (even alone), an
+    exponent other than 1 braced, and a unit other than 1 first, in
+    \\left( \\right) (bare_unit: as is, for integers' -1).  factors are
+    (LaTeX, exponent) pairs; unit is the unit's LaTeX, or None for 1.
+
+    EXAMPLES::
+
+        sage: from _sage_poly import _latex_factorization  # sagebrush only
+        sage: _latex_factorization([("x", 10), ("x + 1", 15)], "6")
+        '\\\\left(6\\\\right) \\\\cdot x^{10} \\\\cdot (x + 1)^{15}'
+    """
+    parts = []
+    for s, e in factors:
+        if " + " in s or " - " in s:
+            s = "(%s)" % s
+        parts.append(s if e == 1 else "%s^{%d}" % (s, e))
+    if unit is not None:
+        parts.insert(0, unit if bare_unit else "\\left(%s\\right)" % unit)
+    return " \\cdot ".join(parts)
+
+
+def _latex_univariate(terms, name):
+    """latex() of a univariate polynomial from its (coefficient LaTeX,
+    coefficient has several terms, exponent) terms, highest first, as Sage
+    writes it: x^{10} + 3 x^{2} + \\left(a + 1\\right) x + 5, every exponent
+    braced, a coefficient of several terms in \\left( \\right).
+
+    EXAMPLES::
+
+        sage: from _sage_poly import _latex_univariate  # sagebrush only
+        sage: _latex_univariate([("1", False, 10), ("a + 1", True, 1), ("5", False, 0)], "x")
+        'x^{10} + \\\\left(a + 1\\\\right) x + 5'
+    """
+    v = _latex_variable_name(name)
+    out = []
+    for s, compound, i in terms:
+        if i == 0:
+            out.append(s)
+            continue
+        mono = v if i == 1 else "%s^{%d}" % (v, i)
+        if s == "1":
+            out.append(mono)
+        else:
+            out.append("%s %s" % ("\\left(%s\\right)" % s if compound else s, mono))
+    return " + ".join(out).replace("+ -", "- ") if out else "0"
+
+
 class PolyFactorization(list):
     """[(factor, exponent)] with a unit, printed as Sage prints the
     factorization of a polynomial.
@@ -1565,23 +1619,22 @@ class PolyFactorization(list):
     __str__ = __repr__
 
     def _latex_(self):
+        """LaTeX, as Sage writes it.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]; latex((-2*x^10*(x + 1)^15).factor())
+            \\left(-2\\right) \\cdot x^{10} \\cdot (x + 1)^{15}
+            sage: S.<s> = ZZ[]; latex((-s^2 + 1).factor()), latex((s + 1).factor())
+            (\\left(-1\\right) \\cdot (s - 1) \\cdot (s + 1), (s + 1))
+        """
         from _sage_expr import latex
         if self._constant is not None or (self._cv is not None and not self):
             return str(latex(self._constant)) if self._constant is not None else ("-1" if self._unit == -1 else "1")
-        paren = len(self) > 1 or self._unit != 1
-
-        def term(f, e):
-            s = str(latex(f))
-            if (e != 1 or paren) and any(c in repr(f) for c in "*+- "):
-                s = "\\left(%s\\right)" % s
-            return s if e == 1 else "%s^{%d}" % (s, e)
-
-        parts = [term(f, e) for f, e in self]
-        if self._unit == -1 and not self._field:
-            parts.insert(0, "-1")
-        elif self._field and self._unit != 1:
-            parts.insert(0, "\\left(%s\\right)" % latex(self._unit))
-        return " \\cdot ".join(parts) if parts else str(latex(self._unit))
+        if not self:
+            return str(latex(self._unit))
+        return _latex_factorization([(str(latex(f)), e) for f, e in self],
+                                    None if self._unit == 1 else str(latex(self._unit)))
 
 
 import _sage_frac as _frac

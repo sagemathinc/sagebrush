@@ -35,7 +35,7 @@ mod lll;
 pub mod nf;
 mod vanhoeij;
 
-pub use budget::{with_default_limits, Budget, FactorLimit, Limits, Phase};
+pub use budget::{with_default_limits, Budget, FactorLimit, Limits, MemorySource, Phase};
 use budget::{big_bytes, div_work, limbs, mul_work, poly_bytes, words_bytes, FResult, Reservation};
 
 pub type ZPoly = Vec<BigInt>;

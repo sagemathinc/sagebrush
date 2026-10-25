@@ -27,6 +27,7 @@ import type { Entry, Op, OpAfter, Version, Workspace } from "./api";
 import { inTx, req } from "./db";
 import { bytesHash } from "../notebook/stores.js";
 import type { Release } from "./reserve";
+import { hubOf } from "./sync-ledger";
 
 export const PINS = {
   /** the cap on bytes pins keep of their own; less where the browser's quota is smaller: half its estimated
@@ -72,6 +73,8 @@ export type NsState = {
   held?: boolean;
   /** the current state to send once there is room, based on `base` (a held identity's, once its record was decided) */
   successor?: { base?: string };
+  /** (task #14) the newest held write's seq: its ledger row goes to the successor that carries it */
+  heldSeq?: number;
 };
 /** `latest.movedAt`: the seq of the identity's last op that placed it (made, moved, put in Trash or out, removed for
  * good).  Past the scan watermark, the view (C3) takes its placement from `after`; a write alone leaves the placement
@@ -336,14 +339,39 @@ async function releaseUnowned(tx: IDBTransaction, list: Pin[]) {
  * purge of every pin of an older epoch is recorded, which cleanPins does a page at a time.  The namespace's
  * own state is kept: re-enabling (switchTo the same namespace) resumes it. */
 export async function syncOff(w: Workspace): Promise<void> {
-  await inTx(w.ws, ["meta"], "readwrite", async (tx) => {
+  await syncOffIf(w);
+}
+/** This browser's sync lifecycle as an action saw it (step 5, astra3's CORR-PR130-1): the namespace (null: none), off,
+ * and the lifecycle epoch.  Renewals raise the lease's generation only, so they leave it unchanged. */
+export type LifeMark = { ns: string | null; off: boolean; epoch: number };
+export const sameLife = (a: LifeMark, b: LifeMark) => a.ns === b.ns && a.off === b.off && a.epoch === b.epoch;
+/** The lifecycle now, read in `meta`'s transaction. */
+export async function lifeMarkOf(meta: IDBObjectStore): Promise<LifeMark> {
+  const cur = (await req(meta.get("sync:current"))) as Lease | undefined;
+  return { ns: cur?.ns ?? null, off: !cur || !!cur.off, epoch: ((await req(meta.get("sync:epoch"))) as number | undefined) ?? 0 };
+}
+/** The lifecycle now (its own transaction). */
+export function readLife(w: Workspace): Promise<LifeMark> {
+  return inTx(w.ws, "meta", "readonly", (tx) => lifeMarkOf(tx.objectStore("meta")));
+}
+/** syncOff, and with `expect` only as a compare-and-set: if this browser's lifecycle is still the one the action saw,
+ * in the same transaction; otherwise nothing is written (a late answer never turns off a newer lifecycle).  Returns
+ * whether it applied (true too when sync was already off and that was expected). */
+export async function syncOffIf(w: Workspace, expect?: LifeMark): Promise<boolean> {
+  const r = await inTx(w.ws, ["meta"], "readwrite", async (tx) => {
     const meta = tx.objectStore("meta");
+    if (expect && !sameLife(await lifeMarkOf(meta), expect)) return { applied: false, ended: null };
     const cur = (await req(meta.get("sync:current"))) as Lease | undefined;
-    if (!cur || cur.off) return;
+    if (!cur || cur.off) return { applied: true, ended: null };
     metaWrite(meta, "sync:current", { ns: cur.ns, gen: cur.gen + 1, off: true });
+    const fromEpoch = await epochOf(meta);
     await newEpoch(meta);
+    return { applied: true, ended: { ns: cur.ns, fromEpoch } };
   });
+  // (the waits of that epoch told it ended (task #14): by type, past their epoch filter)
+  if (r.ended) hubOf(w.ws).post({ t: "lifecycle", ns: r.ended.ns, fromEpoch: r.ended.fromEpoch, toEpoch: r.ended.fromEpoch + 1, kind: "off" });
   afterReleases(w);
+  return r.applied;
 }
 /** The lifecycle epoch moved on (off, sign-out, a namespace switch), in `meta`'s transaction, and the purge of
  * every pin of an older one recorded. */

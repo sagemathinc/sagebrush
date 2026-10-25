@@ -25,7 +25,7 @@ A board is a JSON file (`*.board.json`) of notes with Markdown and math, live co
 - [The board format](https://sagebrush.space/board-format.md): the header `{"format": "sagebrush-board", "version": 1}`, a complete small example, the fields with their defaults, pages, slides and templates, `mode`, pictures, how to check a board, and a dated "What's new" list. Read it before writing a board; the format grows.
 - To ask your user things (decisions, preferences), give the board a page of questions: items of `"kind": "ask"` with checkboxes, radio buttons, a list, a text, a number or a scale (see "Asking the reader" in the board format). Every question can also be answered in the user's own words (`note`), which counts as an answer: read it whenever it is there. The answers are kept in the board; `sagebrush board answers FILE --json` (from the next release) reads them.
 - To teach, give a question a `check` (Python or Sage code; its last line is True, False or a message, with the reader's answer as `answer`; it sees the board's names, and the board's code runs again after it), `hints` shown one by one after wrong attempts, and `next` (`{"right": id, "wrong": id}`) naming the item to go to. Give it an `example` answer and run `sagebrush board try FILE --json` (from the next release) to see each check's verdict and hints before you publish it.
-- Before you hand a board over, run each code item with the command line below in the board's language. An unimplemented function raises an error, so code that runs is supported. Then open the board to see its layout: at https://sagebrush.space/board/, or on the user's computer with `npx sagebrush@0.6.1 board open FILE`, which shows it in their browser, read only, and again each time you rewrite FILE.
+- Before you hand a board over, run each code item with the command line below in the board's language. An unimplemented function raises an error, so code that runs is supported. Then open the board to see its layout: at https://sagebrush.space/board/, or on the user's computer with `npx sagebrush@0.6.4 board open FILE`, which shows it in their browser, read only, and again each time you rewrite FILE.
 
 ## Languages
 
@@ -43,10 +43,10 @@ Each board, notebook or command uses ONE language. Each language is a SUBSET of 
 
 ## Command line
 
-- `npx sagebrush@0.6.1` (Node 22+, installs in seconds) runs Python, `--sage`, `--magma`, `--matlab`, and `--search "words"`.
-- `npx sagebrush@0.6.1 --sage -c 'print(factor(2^32+1))'` runs one command; `npx sagebrush@0.6.1 --search "elliptic curve rank" --json` searches the documentation.
-- `npx sagebrush@0.6.1 board check FILE` checks a `.board.json` before anyone opens it (the format, ids, edges, pictures, questions) and runs its code items, reporting every problem at once; `board render FILE -o board.svg` draws it.
-- `npx sagebrush@0.6.1 board open FILE` shows a board in the browser on this computer, as https://sagebrush.space/board/ does, read only, and shows it again in place each time FILE changes (a version that isn't a board leaves the last good one shown, with what is wrong). It listens on 127.0.0.1 only, and nothing of the board is uploaded.
+- `npx sagebrush@0.6.4` (Node 22+, installs in seconds) runs Python, `--sage`, `--magma`, `--matlab`, and `--search "words"`.
+- `npx sagebrush@0.6.4 --sage -c 'print(factor(2^32+1))'` runs one command; `npx sagebrush@0.6.4 --search "elliptic curve rank" --json` searches the documentation.
+- `npx sagebrush@0.6.4 board check FILE` checks a `.board.json` before anyone opens it (the format, ids, edges, pictures, questions) and runs its code items, reporting every problem at once; `board render FILE -o board.svg` draws it.
+- `npx sagebrush@0.6.4 board open FILE` shows a board in the browser on this computer, as https://sagebrush.space/board/ does, read only, and shows it again in place each time FILE changes (a version that isn't a board leaves the last good one shown, with what is wrong). It listens on 127.0.0.1 only, and nothing of the board is uploaded.
 
 ## Elsewhere
 

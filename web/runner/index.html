@@ -69,6 +69,9 @@ Stop by message.
           flag = new Int32Array(d.interrupt);
           d = { ...d, interrupt: null, interruptible: true };
         }
+        // (the shared progress slots stay here too: a SharedArrayBuffer can't
+        // cross to the page, and this frame doesn't relay them)
+        if (d && d.ready && d.progress) d = { ...d, progress: null };
         port.postMessage(d);
       };
       w.onerror = (ev) => port.postMessage({ runnerError: String(ev.message || "an error in the interpreter") });
@@ -77,7 +80,9 @@ Stop by message.
         if (d && typeof d.runnerInterrupt === "number") {
           if (flag) {
             Atomics.store(flag, 1, d.runnerInterrupt);
-            Atomics.store(flag, 0, 1);
+            // (bit 0, and the word notified: a time.sleep waits on it, src/runtime/interrupt.ts requestCtrlC)
+            Atomics.or(flag, 0, 1);
+            Atomics.notify(flag, 0);
           }
           return;
         }

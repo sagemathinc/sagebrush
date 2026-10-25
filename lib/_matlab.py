@@ -26,7 +26,7 @@ import math as _math
 import sys as _sys
 
 # (MATLAB has no limit on an integer's digits: CPython's 4300 is lifted;
-# Sagebrush's own ceiling of 4,000,000, src/runtime/format.ts, remains)
+# the only other bound is memory, admitted first: src/runtime/format.ts)
 _sys.set_int_max_str_digits(0)
 
 import numpy as np
@@ -135,6 +135,10 @@ def _message(e):
     if isinstance(e, RecursionError):
         return "Maximum recursion limit of 500 reached."
     if isinstance(e, MemoryError):
+        # (a memory guard's refusal says what needed how much, and where to
+        # run with more: item D; any other is MATLAB's own words)
+        if type(e).__name__ == "SagebrushMemoryError" and type(e).__module__ == "_memguard":
+            return str(e)
         return "Out of memory."
     if isinstance(e, ZeroDivisionError):
         return "Division by zero."

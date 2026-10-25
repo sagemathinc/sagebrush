@@ -29,6 +29,8 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
+pub mod progress;
+
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// The panic payload of an interruption.
@@ -56,6 +58,14 @@ pub fn clear() {
 pub fn requested() -> bool {
     poll_host();
     REQUESTED.load(Relaxed)
+}
+
+/// Whether the caller asked the current call to stop at its next clean stop
+/// point (a soft stop, design-agent-api-library r3 §5).  Always false in this
+/// build: soft stops come with the stop protocol (estimates plan r3, PR 5a).
+#[inline]
+pub fn stop_requested() -> bool {
+    false
 }
 
 /// Stop here (by unwinding) if an interrupt has been requested.
@@ -335,6 +345,84 @@ fn poll_host_now() {
     }
 }
 
+// ---- the host's memory share (item D0, plan-d0-capacity-r2 §3)
+//
+// The memory of one polynomial factorization made with the default budget
+// (sagebrush-poly's Budget::default): the host's share of the memory it
+// observes free (lib/_capacity.py poly_share), or none, and then that
+// budget keeps its own default (512 MiB).
+// - WebAssembly: the host pushes it before a dispatch (engine/web's export
+//   sb_set_memory_share, which hosts may leave alone: then there is none).
+//   The static belongs to the instance, and dispatches within one instance
+//   are serialized, so a factorization sees the share pushed at its call's
+//   entry, and a long call keeps it.
+// - native: a callback the host registers (the CPython module's), asked
+//   once per default budget.  Top-level factorizations are serialized in
+//   one host worker; concurrent native top-level factorizations would each
+//   get the share, which is per factorization, not aggregate: they would
+//   need their own aggregate admission review (daybreak2, D0 r2).
+
+/// No share: u64::MAX.
+static MEMORY_SHARE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+
+#[cfg(not(target_arch = "wasm32"))]
+type ShareHost = Box<dyn Fn() -> Option<u64> + Send + Sync>;
+#[cfg(not(target_arch = "wasm32"))]
+static SHARE_HOST: std::sync::OnceLock<ShareHost> = std::sync::OnceLock::new();
+
+/// Set (or, with None, clear) the pushed share.
+pub fn set_memory_share(share: Option<u64>) {
+    MEMORY_SHARE.store(share.unwrap_or(u64::MAX), Relaxed);
+}
+
+/// The share pushed as a WebAssembly f64 (engine/web's sb_set_memory_share):
+/// an integer from 0 to 4 GiB (an instance's ceiling bounds it), else none;
+/// -1 is the host's "no figure".
+pub fn share_from_f64(v: f64) -> Option<u64> {
+    if v.is_finite() && v >= 0.0 && v.fract() == 0.0 && v <= 4294967296.0 {
+        Some(v as u64)
+    } else {
+        None
+    }
+}
+
+/// Register the native host's share (the first registration stands).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn set_memory_share_host(f: impl Fn() -> Option<u64> + Send + Sync + 'static) {
+    let _ = SHARE_HOST.set(Box::new(f));
+}
+
+/// The share for a default budget made now, or None.
+pub fn memory_share() -> Option<u64> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(f) = SHARE_HOST.get() {
+        return f();
+    }
+    let v = MEMORY_SHARE.load(Relaxed);
+    (v != u64::MAX).then_some(v)
+}
+
+#[cfg(test)]
+mod memory_share_tests {
+    use super::*;
+
+    #[test]
+    fn pushed_share_and_its_range() {
+        // (the one test that touches the process-wide static)
+        assert_eq!(memory_share(), None);
+        set_memory_share(Some(123 << 20));
+        assert_eq!(memory_share(), Some(123 << 20));
+        set_memory_share(None);
+        assert_eq!(memory_share(), None);
+        assert_eq!(share_from_f64(0.0), Some(0));
+        assert_eq!(share_from_f64(4294967296.0), Some(1 << 32));
+        assert_eq!(share_from_f64(-1.0), None);
+        for bad in [4294967297.0, 1.5, -0.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -2.0] {
+            assert_eq!(share_from_f64(bad), None, "{}", bad);
+        }
+    }
+}
+
 // ---- Ctrl-C during a native call
 
 static PRESSES: AtomicU32 = AtomicU32::new(0);
@@ -419,11 +507,15 @@ impl Drop for SigintGuard {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// Held by every test that touches the process's interrupt flag.
+    pub(crate) static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn check_unwinds_and_catch_reports() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         clear();
         assert_eq!(catch(|| 7), Ok(7));
         let mut dropped = false;

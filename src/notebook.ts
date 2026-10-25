@@ -12,6 +12,7 @@ import * as http from "http";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync, renameSync } from "fs";
 import { join, resolve, relative, dirname, basename, sep } from "path";
 import { randomBytes } from "crypto";
+import { requestCtrlC } from "./runtime/interrupt";
 import { Worker, parentPort, workerData } from "worker_threads";
 import { sessionLimits } from "./limits";
 import { spawn } from "child_process";
@@ -223,7 +224,8 @@ const p=${htmlJson(rel)}?${htmlJson(rel)}+"/"+n:n;location.href="/nb/"+encodeURI
         if (what === "send") s.worker.postMessage(JSON.parse((await body(req)).toString("utf8")));
         else if (what === "interrupt") {
           const { upTo } = JSON.parse((await body(req)).toString("utf8"));
-          if (s.intr) { Atomics.store(s.intr, 1, Number(upTo)); Atomics.store(s.intr, 0, 1); }
+          // (bit 0 set, and a time.sleep waiting on the word woken: requestCtrlC)
+          if (s.intr) { Atomics.store(s.intr, 1, Number(upTo)); requestCtrlC(s.intr); }
         } else endSession(sid);
         res.writeHead(200).end("ok");
         return;

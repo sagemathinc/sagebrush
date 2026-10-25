@@ -17,6 +17,9 @@ const SITE = "https://sagebrush.test";
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
 const C = "33333333-3333-4333-8333-333333333333"; // signed in, never allowlisted
+// (the DEV test list, SYNC_TEST_ACCOUNTS: on testlist.test, TL1 is in SYNC_ACCOUNTS, TL2 in SYNC_TEST_ACCOUNTS, TL3 in
+// neither; on testonly.test only SYNC_TEST_ACCOUNTS is bound, with TL3)
+const TL1 = "7a7a7a7a-0001-4a7a-8a7a-7a7a7a7a7a01", TL2 = "7a7a7a7a-0002-4a7a-8a7a-7a7a7a7a7a02", TL3 = "7a7a7a7a-0003-4a7a-8a7a-7a7a7a7a7a03";
 const D = "44444444-4444-4444-8444-444444444444"; // allowlisted; its limits are first asked for while CoCalc is down
 const E = "55555555-5555-4555-8555-555555555555"; // allowlisted; nothing pending but what a test makes (alarms)
 const F = "66666666-6666-4666-8666-666666666666"; // allowlisted; a fetch of its limits held while a notice lands
@@ -120,6 +123,7 @@ fake.limits.set(Z1, plan(true, 100));
 fake.limits.set(P1, sync(1 << 20, 1 << 20));
 fake.limits.set(P2, sync(1 << 20, 1 << 20));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
+for (const t of [TL1, TL2, TL3]) fake.limits.set(t, sync(1 << 20, 1 << 20)); // (the test list's accounts: enable asks for the plan first)
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
@@ -180,6 +184,25 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["tight.test/*"],
       ratelimits: { SYNC_PREAUTH: { namespace_id: "1002", simple: { limit: 3, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "1006", simple: { limit: 2, period: 60 } } },
+    },
+    // the DEV test list (SYNC_TEST_ACCOUNTS), beside the secret list; and the test list alone
+    {
+      ...base,
+      name: "testlist",
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: TL1, SYNC_TEST_ACCOUNTS: ` ${TL2} ,` },
+      durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
+      routes: ["testlist.test/*"],
+      outboundService: cocalc,
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1011", simple: { limit: 100000, period: 60 } } },
+    },
+    {
+      ...base,
+      name: "testonly",
+      bindings: { ...shareBindings, SYNC_TEST_ACCOUNTS: TL3 },
+      durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
+      routes: ["testonly.test/*"],
+      outboundService: cocalc,
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1012", simple: { limit: 100000, period: 60 } } },
     },
     // the same code with no sync bindings, as production is today
     { ...base, name: "prod", bindings: shareBindings, routes: ["prod.test/*"] },
@@ -297,6 +320,24 @@ const payloads = (item) => {
   ok(e.status === 200 && JSON.stringify(await e.json()) === JSON.stringify({ state: "active", generation: 1 }), "turning sync on: generation 1");
   ok((await post(sa, "/api/sync/v1/enable", {})).status === 200, "again is a no-op");
   ok((await socket(sa, "https://evil.test")).status === 403, "a socket upgrade from another origin is refused (cross-site WebSocket hijacking)");
+}
+
+// ---- the DEV test list (SYNC_TEST_ACCOUNTS): allowed() takes an id in either list, nothing else changes
+{
+  const at = async (origin, id) => {
+    const s = await signIn(id, origin);
+    const st = await (await fetchAt(origin, "/api/sync/v1/status", { headers: { cookie: s, origin } })).json();
+    const en = (await fetchAt(origin, "/api/sync/v1/enable", { method: "POST", headers: { cookie: s, origin, "content-type": "application/json" }, body: "{}" })).status;
+    return { allowlisted: st.reason !== "not_allowlisted", available: st.available !== false, enable: en };
+  };
+  const tl = "https://testlist.test", to = "https://testonly.test";
+  const r1 = await at(tl, TL1), r2 = await at(tl, TL2), r3 = await at(tl, TL3);
+  ok(r1.allowlisted && r1.enable === 200, "an id in SYNC_ACCOUNTS syncs as before, with the test list bound beside it: " + JSON.stringify(r1));
+  ok(r2.allowlisted && r2.enable === 200, "an id only in SYNC_TEST_ACCOUNTS syncs (the list's spaces and empty entries ignored): " + JSON.stringify(r2));
+  ok(!r3.allowlisted && !r3.available && r3.enable === 403, "an id in neither list is refused: not_allowlisted, enable 403: " + JSON.stringify(r3));
+  const o3 = await at(to, TL3), o1 = await at(to, TL1);
+  ok(o3.allowlisted && o3.enable === 200, "the test list alone (no SYNC_ACCOUNTS) allows its own id: " + JSON.stringify(o3));
+  ok(!o1.allowlisted && o1.enable === 403, "…and only that id: another environment's SYNC_ACCOUNTS id is refused there: " + JSON.stringify(o1));
 }
 
 const sa = await signIn(A);
@@ -2209,13 +2250,20 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   const s1 = await signIn(ST1);
   let [c, b] = await status(s1);
   ok(c === 200 && b.available === true && b.state === "off" && b.generation === undefined && b.reason === undefined && (await nothing(ST1)), "status of an account never synced, whose plan has sync: available, off, and nothing is made: " + JSON.stringify(b));
+  // (the account echo, PR #130: the hash of this request's own session, whatever the caller sends)
+  ok(b.account === hashOf(ST1), "status says which account it was computed for: this session's account hash: " + JSON.stringify(b.account));
+  {
+    const r = await fetchAt(SITE, "/api/sync/v1/status?account=" + hashOf(ST2), { headers: { cookie: s1, "sec-fetch-site": "same-origin", "x-account": hashOf(ST2) } });
+    const bb = await r.json();
+    ok(bb.account === hashOf(ST1), "…from the session alone: an account named in the query or a header changes nothing: " + JSON.stringify(bb.account));
+  }
   for (let i = 0; i < 5; i++) await status(s1);
   await new Promise((r) => setTimeout(r, 1100)); // (past the object's minute, a second in tests: it asks CoCalc again)
   [c, b] = await status(s1);
   ok(b.available === true && (await nothing(ST1)), "asked again and again, before and after the plan it remembers grows old: still nothing is made");
   const s2 = await signIn(ST2);
   [c, b] = await status(s2);
-  ok(c === 200 && b.available === false && b.reason === "not_allowlisted" && b.state === "off" && (await nothing(ST2)), "off the allowlist: not available, not_allowlisted (for the page's logic: it hides the switch)");
+  ok(c === 200 && b.available === false && b.reason === "not_allowlisted" && b.state === "off" && b.account === hashOf(ST2) && (await nothing(ST2)), "off the allowlist: not available, not_allowlisted (for the page's logic: it hides the switch), its account echoed");
   const sx = await signIn(X1);
   [c, b] = await status(sx);
   ok(b.available === false && b.reason === "plan_has_no_sync" && b.state === "off" && (await nothing(X1)), "a plan without sync: plan_has_no_sync, nothing made: " + JSON.stringify(b));
@@ -2228,7 +2276,7 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   [c, b] = await status(s4);
   ok(b.available === true, "and once CoCalc answers, after the moment it isn't asked: available");
   [c, b] = await status(sa);
-  ok(b.available === true && b.state === "active" && b.generation === (await genOf(A)), "an account on: its state and generation: " + JSON.stringify(b));
+  ok(b.available === true && b.state === "active" && b.generation === (await genOf(A)) && b.account === hashOf(A), "an account on: its state and generation, its account echoed: " + JSON.stringify(b));
   // beside an enable: the statuses are answered from whatever is so, and the one enable registers once
   const s3 = await signIn(ST3);
   const [en, ...st] = await Promise.all([post(s3, "/api/sync/v1/enable", {}), status(s3), status(s3), status(s3), status(s3)]);
