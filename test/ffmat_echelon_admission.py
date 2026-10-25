@@ -17,18 +17,23 @@ prints "ok CASE ..." lines and raises on a failure.
                  the measured memory (Linux): the transport at the seam,
                  rank()/det() whole, the whole row-returning call with its
                  result, and today's bridge exceeding the transport bound
-    interrupt    prints "ready", then a long engine elimination for the
-                 harness to interrupt with SIGINT
+    interrupt [DIR]
+                 prints "ready" (and creates DIR/ready) just before a long
+                 engine elimination for the harness to interrupt, then its
+                 outcome (and writes it to DIR/result)
 """
 import os
 import sys
 
 try:
     GF
-except NameError:  # (CPython: the package)
-    sys._sagebrush_heap_limit = 1 << 30  # (a figure that admits the envelope's operands)
-    import sagebrush
-    from sagebrush.sage import *
+except NameError:
+    try:  # (pyjs, run as plain Python: test/ffmat-echelon-admission.test.ts's worker)
+        from sage_all import *
+    except ImportError:  # (CPython: the package)
+        sys._sagebrush_heap_limit = 1 << 30  # (a figure that admits the envelope's operands)
+        import sagebrush
+        from sagebrush.sage import *
 
 import _sage_ffmat as FM
 import sagebrush._engine as EN
@@ -315,12 +320,15 @@ def wasm_bound(e):
 
 
 class Peak:
-    """The interval's peaks: VmHWM - VmRSS (reset by clear_refs), and in
-    CPython tracemalloc's, started after the operands exist (astra2's note:
-    the prebuilt operands are not in the baseline)."""
+    """One interval's peaks: VmHWM - VmRSS (reset by clear_refs), and in
+    CPython, if traced, tracemalloc's, started after the operands exist
+    (astra2's note: the prebuilt operands are not in the baseline)."""
+
+    def __init__(self, traced=False):
+        self.tracing = traced and not PYJS
 
     def __enter__(self):
-        if not PYJS:
+        if self.tracing:
             import tracemalloc
             tracemalloc.start()
             tracemalloc.reset_peak()
@@ -332,11 +340,33 @@ class Peak:
     def __exit__(self, *exc):
         self.hwm = status("VmHWM") - self.rss
         self.traced = None
-        if not PYJS:
+        if self.tracing:
             import tracemalloc
             self.traced = tracemalloc.get_traced_memory()[1]
             tracemalloc.stop()
         return False
+
+
+class Measured:
+    pass
+
+
+def measure(f):
+    """f's peaks: in CPython two runs of f, one under tracemalloc (its
+    traced peak) and one without (VmHWM: tracemalloc's own bookkeeping,
+    tens of bytes for each block it traces, is resident memory, 40 MB for a
+    2^20-element result); in pyjs one.  The value is the untraced run's."""
+    pk = Measured()
+    pk.traced = None
+    if not PYJS:
+        with Peak(traced=True) as t:
+            v = f()
+        del v
+        pk.traced = t.traced
+    with Peak() as h:
+        pk.value = f()
+    pk.hwm = h.hwm
+    return pk
 
 
 def report(label, e, pk, extra=""):
@@ -348,10 +378,9 @@ def case_mem_T():
     p = int(F.order())
     for label, rows, c in mem_shapes(F):
         e = len(rows) * c
-        with Peak() as pk:
-            out = FM._engine_echelon_transport(rows, c, p, True)
-        assert out[2] is not None
-        del out
+        pk = measure(lambda: FM._engine_echelon_transport(rows, c, p, True))
+        assert pk.value[2] is not None
+        del pk.value
         report(label, e, pk)
         if pk.traced is not None:
             assert pk.traced <= 40 * e + 256 * KIB, (label, pk.traced)
@@ -363,9 +392,9 @@ def case_mem_Tp():
     A = rand_matrix(F, 1024, 1024, 11, big=True)
     e = 1024 * 1024
     for op in ("rank", "det"):
-        with Peak() as pk:
-            v, s = sent(getattr(A, op))
-        assert s == [(1024, 1024)]
+        pk = measure(lambda: sent(getattr(A, op)))
+        assert pk.value[1] == [(1024, 1024)]
+        del pk.value
         report(op + "()", e, pk)
         if pk.traced is not None:
             assert pk.traced <= 40 * e + 256 * KIB, (op, pk.traced)
@@ -401,10 +430,9 @@ def case_mem_W():
         e = r * c
         if PYJS:
             base = sys._sagebrush_heap_used()
-        with Peak() as pk:
-            out = FM._engine_echelon(rows, F, c, p, True)
-        m = out[0]
-        del out  # (only the rows stay alive: astra2's note)
+        pk = measure(lambda: FM._engine_echelon(rows, F, c, p, True))
+        m = pk.value[0]
+        del pk.value  # (only the rows stay alive: astra2's note)
         if PYJS:
             held = sys._sagebrush_heap_used()
             del m
@@ -443,12 +471,10 @@ def case_negctl():
     e = 1024 * 1024
     text = sum(len(str(int(x))) + 1 for x in A._rows[0]) * 1024
     assert text > 19 * e, text
-    with Peak() as pk:
-        old_engine_echelon(A._rows, F, 1024, int(F.order()), False)
+    pk = measure(lambda: old_engine_echelon(A._rows, F, 1024, int(F.order()), False))
     report("old bridge rank", e, pk)
     assert pk.traced > 40 * e + 256 * KIB, pk.traced
-    with Peak() as pk:
-        FM._engine_echelon_transport(A._rows, 1024, int(F.order()), False)
+    pk = measure(lambda: FM._engine_echelon_transport(A._rows, 1024, int(F.order()), False))
     report("new bridge rank", e, pk)
     assert pk.traced <= 40 * e + 256 * KIB, pk.traced
 
@@ -457,16 +483,24 @@ def case_interrupt():
     F = GF(P63)
     A = rand_matrix(F, 1024, 1024, 21, big=True)
 
+    d = sys.argv[2] if len(sys.argv) > 2 else None
+
     def ready_then_call(request):
         print("ready", flush=True)  # (the request is built: the engine runs next)
+        if d:
+            open(os.path.join(d, "ready"), "w").close()
         return _counting_call_text(request)
     EN.call_text = ready_then_call
     try:
         r = A.echelon_form().rank()
-        print("not interrupted", r, SENT, flush=True)
+        out = "not interrupted %s %s" % (r, SENT)
     except KeyboardInterrupt:
         # the engine call was interrupted, and no Python elimination followed
-        print("interrupted", SENT, flush=True)
+        out = "interrupted %s" % (SENT,)
+    print(out, flush=True)
+    if d:
+        with open(os.path.join(d, "result"), "w") as f:
+            f.write(out)
 
 
 CASES = {

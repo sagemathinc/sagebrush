@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "F4 (plan r4 d5c6c1cd): GF(p) echelon admission by shape: the transport predicate, the seam between transport and result, and call_text in lib/_sage_ffmat.py and sagebrush._engine",
+ "bytes": {
+  "cli/lib.gen.js": 1785,
+  "engine/lib/sage.pre": 8959,
+  "engine/lib/sage.src": 3167
+ }
+}
