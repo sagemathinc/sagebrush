@@ -934,6 +934,54 @@
   "owner": "raster/image I/O",
   "row": "inv-31"
  },
+ "engine/raster/src/dash.rs :: compare :: fn compare(path: &Path, array: &[f32], offset: f32, width: f32, cap: LineCap, t: Transform, size: u32) -> (usize, u8) { #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/dash.rs :: compare :: let s = Stroke { width, line_cap: cap, ..Stroke::default() }; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/dash.rs :: compare :: let s = Stroke { width, line_cap: cap, dash: StrokeDash::new(array.to_vec(), offset), ..Stroke::default() }; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/dash.rs :: curves_match_tiny_skias_dashing_closely :: assert!(n <= 4 && max <= 32, \"{:?}: {} bytes differ, by up to {}\", array, n, max); #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/dash.rs :: curves_match_tiny_skias_dashing_closely :: let (n, max) = compare(&path, array, offset, 2.0, LineCap::Round, Transform::identity(), 128); #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/dash.rs :: lines_match_tiny_skias_dashing :: assert!(n <= 8 && max <= 1, \"closed: {} bytes differ, by up to {}\", n, max); #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/dash.rs :: lines_match_tiny_skias_dashing :: assert!(n <= 8 && max <= 1, \"{:?} {} {:?}: {} bytes differ, by up to {}\", array, offset, cap, n, max); #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/dash.rs :: lines_match_tiny_skias_dashing :: for (array, offset, cap) in [ #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/dash.rs :: lines_match_tiny_skias_dashing :: let (n, max) = compare(&path, array, offset, 1.5, cap, Transform::identity(), 128); #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/dash.rs :: lines_match_tiny_skias_dashing :: let (n, max) = compare(&square, &[30.0, 7.0], 11.0, 3.0, LineCap::Butt, Transform::from_scale(1.2, 1.2), 128); #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/dash.rs :: zero_length_dashes_are_zero_length_lines :: assert!(n == 0 || max <= 1, \"{} {}\", n, max); #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/dash.rs :: zero_length_dashes_are_zero_length_lines :: let (n, max) = compare(&path, &[0.0, 2.0], 0.0, 1.0, LineCap::Round, Transform::from_translate(2.0, 5.0), 16); #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
  "engine/raster/src/lib.rs ::  :: pub const MAX_AXIS: u32 = 16384; #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
@@ -944,6 +992,34 @@
   "owner": "raster/image I/O",
   "row": "inv-31"
  },
+ "engine/raster/src/mem.rs :: a_size_past_the_address_space_is_a_memory_refusal :: assert!(matches!(vec_with_capacity::<f32>(usize::MAX / 2, \"values\"), Err(Fail::Memory { .. }))); #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/mem.rs :: a_size_past_the_address_space_is_a_memory_refusal :: assert_eq!(bytes, u64::MAX); #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/mem.rs :: a_size_past_the_address_space_is_a_memory_refusal :: match pixmap(u32::MAX, u32::MAX, \"the picture\") { #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/mem.rs :: raster_bytes :: None => Err(Fail::Memory { bytes: n.unwrap_or(u64::MAX), what }), #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/pngio.rs :: decode :: let rows_bytes = line.checked_mul(height as usize).ok_or(Fail::Memory { bytes: u64::MAX, what: \"a PNG image's rows\" })?; #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/pngio.rs :: decode :: pub fn decode(bytes: &[u8], max_axis: u32, max_pixels: u64) -> Result<Image, Fail> { #0": {
+  "class": "1+2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/svg.rs :: draw_path :: let s = Stroke { width: st.stroke_width, line_cap: st.cap, line_join: st.join, miter_limit: st.miter, ..Stroke::default() }; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
  "engine/raster/src/svg.rs :: solid :: pub const MAX_LIVE_RASTER_BYTES: u64 = 256 << 20; #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
@@ -953,6 +1029,30 @@
   "class": "1+2",
   "owner": "raster/image I/O",
   "row": "inv-31"
+ },
+ "engine/raster/src/wasm.rs ::  :: pub limit_pages: u32, #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/wasm.rs ::  :: static mut LIMIT_PAGES: usize = usize::MAX; #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/wasm.rs ::  :: static mut REFUSAL: Refusal = Refusal { need_pages: 0, size_pages: 0, limit_pages: 0 }; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/wasm.rs :: alloc :: if now.saturating_add(pages) > limit { #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/wasm.rs :: alloc :: if prev == usize::MAX { #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/wasm.rs :: alloc :: let limit = *addr_of!(LIMIT_PAGES); #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
  },
  "engine/sym/src/num.rs ::  :: pub const MAX_INT_BITS: u64 = 1 << 21; #0": {
   "class": "2+3",
