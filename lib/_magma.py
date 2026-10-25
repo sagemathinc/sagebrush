@@ -930,14 +930,9 @@ _COLLECT_RESERVE = 64 << 20
 def _collect_max():
     """The bound, and the heap in use it was taken from, in bytes (None
     where the host can't say), which scripts/heap-budget.mjs checks."""
-    # (pyjs: its heap limit, read here: this runs at import, so _capacity
-    # stays off Magma mode's start; CPython: the machine's total, D0)
-    n = getattr(_sys, "_sagebrush_heap_limit", None)
-    if n:
-        limit = int(n)
-    else:
-        import _capacity
-        limit = _capacity.heap_figure()
+    # (pyjs: its heap limit; CPython: the machine's total; _capacity, D0)
+    import _capacity
+    limit = _capacity.heap_figure()
     raw = None
     f = getattr(_sys, "_sagebrush_heap_used", None)
     if callable(f):

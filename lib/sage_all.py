@@ -1821,11 +1821,7 @@ _PRIME_HEAP_SHARE = 16
 
 
 def _prime_cells():
-    # (pyjs: its heap limit, read here so that no mode's start imports
-    # _capacity; CPython: the machine's total, _capacity's, D0)
-    n = getattr(_sys_limit, "_sagebrush_heap_limit", None)
-    if n:
-        return int(n) // _PRIME_HEAP_SHARE
+    # (pyjs: its heap limit; CPython: the machine's total; _capacity, D0)
     import _capacity
     return _capacity.heap_figure() // _PRIME_HEAP_SHARE
 

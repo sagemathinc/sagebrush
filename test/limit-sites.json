@@ -1509,15 +1509,6 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_magma.py :: _collect_max :: limit = int(n) #0": {
-  "class": "2",
-  "owner": "memory guards (D0)"
- },
- "lib/_magma.py :: _collect_max :: n = getattr(_sys, \"_sagebrush_heap_limit\", None) #0": {
-  "class": "1+2",
-  "owner": "Magma compatibility/runtime memory",
-  "row": "inv-26"
- },
  "lib/_magma.py :: _collect_max :: return min(10 ** 6, limit // 2048, max(0, limit - used) // _COLLECT_COST), (None if raw is None else int(raw)) #0": {
   "class": "1+2",
   "owner": "Magma compatibility/runtime memory",
@@ -2240,10 +2231,6 @@
   "class": "2",
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
- },
- "lib/_sage_ffmat.py :: _heap_limit :: n = getattr(_sys, \"_sagebrush_heap_limit\", None) #0": {
-  "class": "2",
-  "owner": "memory guards (D0)"
  },
  "lib/_sage_ffmat.py :: _refusal :: \"\"\"A guard's refusal: its text, with the enforced cap of this operation #0": {
   "class": "2",
