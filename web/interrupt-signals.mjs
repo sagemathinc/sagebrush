@@ -183,24 +183,35 @@ export const TRIALS = {
   },
 };
 
-// the bounded regex (§8.1): the size whose uninterrupted run takes 6-8 s, found by doubling steps
+// the bounded regex (§8.1): its time doubles with each step of n (pilot 4b, VM3: n = 26 took about 5.1 s,
+// n = 27 about 10.4 s), so a 6-8 s band can fall between two sizes.  Taken: a size in [6, 8] s if
+// one is seen, else the smallest seen size in [6, 12] s; S4 only needs the call to outlast its
+// second press at 3.5 s with margin.  A size is never run twice.
+export const REGEX_BAND = { min: 6000, max: 8000, ceiling: 12000 };
 async function calibrateRegex(host, flags) {
   const attempts = [];
+  const pick = () => {
+    const ok = attempts.filter((x) => x.T_ms != null && x.T_ms >= REGEX_BAND.min);
+    const inBand = ok.find((x) => x.T_ms <= REGEX_BAND.max);
+    const widened = ok.filter((x) => x.T_ms <= REGEX_BAND.ceiling).sort((x, y) => x.n - y.n)[0];
+    const c = inBand ?? widened;
+    return c ? { n: c.n, T: c.T_ms, attempts, ...(inBand ? {} : { label: "widened (doubling step)" }) } : null;
+  };
   let n = 24;
   for (let a = 0; a < 8; a++) {
     const r = await runProc({ host: "cli", flags, src: REGEX(n) + `import time\n_t = time.monotonic()\nre.match(r"(a+)+$", _s)\nprint("RET", time.monotonic() - _t, flush=True)\nprint("END", flush=True)\n`, guard_ms: 60_000 });
     const T = Number(r.marks.find((x) => x.mk === "RET")?.rest) * 1000;
     attempts.push({ n, T_ms: Number.isFinite(T) ? Math.round(T) : null, end: r.end });
-    if (!Number.isFinite(T)) { if (r.end === "guard") { n -= 2; continue; } return { n: null, attempts }; }
-    if (T >= 6000 && T <= 8000) return { n, T, attempts };
+    if (!Number.isFinite(T) && r.end !== "guard") return { n: null, attempts };
+    if (Number.isFinite(T) && T >= REGEX_BAND.min && T <= REGEX_BAND.max) return pick();
     // each step of n doubles the work (one more way to split the a's)
-    n += Math.max(-4, Math.min(4, Math.round(Math.log2(7000 / T)))) || (T < 6000 ? 1 : -1);
-    if (n < 16 || n > 40) break;
+    const next = !Number.isFinite(T) ? n - 2 : n + (Math.max(-4, Math.min(4, Math.round(Math.log2(7000 / T)))) || (T < REGEX_BAND.min ? 1 : -1));
+    if (next < 16 || next > 40 || attempts.some((x) => x.n === next)) break;
+    n = next;
   }
-  return { n: null, attempts };
+  return pick() ?? { n: null, attempts };
 }
 
-// S6 measures how long the launcher outlives the signal, before any kill of ours
 const runS6 = (host, flags, cell) => runProc({ host, flags, src: TRIALS.S6.src(), schedule: TRIALS.S6.schedule(cell), guard_ms: 15_000 });
 
 export async function runSignals({ hosts = ["cli"], mode = "ci", record = () => {}, overBudget = () => false, baseline = { pending: [] }, flags = [], only = null } = {}) {
@@ -225,7 +236,7 @@ export async function runSignals({ hosts = ["cli"], mode = "ci", record = () => 
       const outcome = cells.some((c) => c.outcome === "FAIL") ? "FAIL" : cells.some((c) => c.outcome !== "PASS") ? "INCOMPLETE" : "PASS";
       const b = (baseline.entries ?? []).find((e) => e.case === id && e.host === host);
       const fin = !b ? outcome : outcome === "PASS" ? "FIXED" : outcome === "FAIL" && cells.filter((c) => c.outcome === "FAIL").every((c) => new RegExp(b.signature).test(c.why)) ? "KNOWN" : outcome;
-      rows.push({ trial: id, host, run: mode, outcome: fin, ...(fin !== outcome ? { own_outcome: outcome } : {}), cells, ...(t.needsRegex ? { regex_n: regex.n, regex_T_ms: Math.round(regex.T) } : {}) });
+      rows.push({ trial: id, host, run: mode, outcome: fin, ...(fin !== outcome ? { own_outcome: outcome } : {}), cells, ...(t.needsRegex ? { regex_n: regex.n, regex_T_ms: Math.round(regex.T), ...(regex.label ? { regex_label: regex.label } : {}) } : {}) });
       record(rows.at(-1));
     }
   }
