@@ -2208,7 +2208,7 @@ async function s5Details() {
   s.refresh();
   await until(() => reads.length > n2, 3000);
   const across = reads.at(-1);
-  await W.switchTo(w, nsFor(w, "g"));
+  await W.switchTo(w, nsFor(w, "9"));
   across.open(result(3));
   await sleep(150);
   check(!blocks().includes("3 items sync kept aside"), "details: a read across a lifecycle switch is not rendered: " + J(blocks()));
