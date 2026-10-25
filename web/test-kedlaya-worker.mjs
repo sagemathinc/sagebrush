@@ -108,7 +108,9 @@ try {
   let r = await kd("import _sbengine, _sage_padic_lseries as L\nprint(_sbengine.js_engine(), _sbengine.js_host(), L._kd_engine())\nprint(EllipticCurve('14a1').padic_lseries(5).frobenius(5).det())");
   ok(r.out === "v8 browser v8\n5^-1 + O(5^4)\n", `Chromium's worker: V8 on a browser host, the V8 table, and a value (${JSON.stringify(r)})`);
 
-  for (const [what, p, prec, stage] of [["setup: Q^p", 4001, 2, 1], ["series", 5, 400, 3], ["reduce dx/y", 1013, 1, 4], ["check: setup Q^p", 1013, 1, 6]]) {
+  // (stage 4 at p = 2003: at p = 1013 the reduction can end, on a fast
+  // runner, before progress's next 250 ms write shows done > 0)
+  for (const [what, p, prec, stage] of [["setup: Q^p", 4001, 2, 1], ["series", 5, 400, 3], ["reduce dx/y", 2003, 1, 4], ["check: setup Q^p", 1013, 1, 6]]) {
     const code = [
       "import time",
       "from sagebrush import progress",
