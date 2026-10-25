@@ -11,7 +11,7 @@
 import { sha256Hex } from "./sha256";
 import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
-import { INTR } from "./interrupt";
+import { INTR, INTR_CTRL_C, consumeCtrlC } from "./interrupt";
 import { fullGc } from "./gc";
 import * as P from "./progress";
 
@@ -83,7 +83,7 @@ function engine(): Engine {
           if (frames.length === 0) frames = frameView(E!);
           P.syncFrames(frames);
         }
-        return INTR[0];
+        return INTR[0] & INTR_CTRL_C;
       },
     },
   };
@@ -209,8 +209,7 @@ newBuiltinModule("_sbengine", (m) => {
       const a = req instanceof Obj.PyBytes ? req.a.subarray(0, req.n) : new TextEncoder().encode(String(req));
       return new Obj.PyBytes(mpCall(a));
     } catch (err: any) {
-      if (INTR[0]) {
-        INTR[0] = 0;
+      if (consumeCtrlC()) {
         reclaimEngine();
         return Obj.raise(Obj.T.KeyboardInterrupt);
       }
@@ -221,8 +220,7 @@ newBuiltinModule("_sbengine", (m) => {
     try {
       return symCall(String(req));
     } catch (err: any) {
-      if (INTR[0]) {
-        INTR[0] = 0;
+      if (consumeCtrlC()) {
         reclaimEngine();
         return Obj.raise(Obj.T.KeyboardInterrupt);
       }
@@ -233,8 +231,7 @@ newBuiltinModule("_sbengine", (m) => {
     try {
       return engineCall(String(req));
     } catch (err: any) {
-      if (INTR[0]) {
-        INTR[0] = 0;
+      if (consumeCtrlC()) {
         reclaimEngine();
         return Obj.raise(Obj.T.KeyboardInterrupt);
       }

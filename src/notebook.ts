@@ -223,7 +223,7 @@ const p=${htmlJson(rel)}?${htmlJson(rel)}+"/"+n:n;location.href="/nb/"+encodeURI
         if (what === "send") s.worker.postMessage(JSON.parse((await body(req)).toString("utf8")));
         else if (what === "interrupt") {
           const { upTo } = JSON.parse((await body(req)).toString("utf8"));
-          if (s.intr) { Atomics.store(s.intr, 1, Number(upTo)); Atomics.store(s.intr, 0, 1); }
+          if (s.intr) { Atomics.store(s.intr, 1, Number(upTo)); Atomics.or(s.intr, 0, 1); }
         } else endSession(sid);
         res.writeHead(200).end("ok");
         return;
