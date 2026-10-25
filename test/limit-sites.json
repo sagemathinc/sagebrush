@@ -936,6 +936,18 @@
   "owner": "raster/image I/O",
   "row": "inv-31"
  },
+ "engine/raster/src/pngio.rs :: decode :: let rows_bytes = line.checked_mul(height as usize).ok_or(Fail::Memory { bytes: u64::MAX, what: \"a PNG image's rows\" })?; #0": {
+  "class": "2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/pngio.rs :: decode :: pub fn decode(bytes: &[u8], max_axis: u32, max_pixels: u64) -> Result<Image, Fail> { #0": {
+  "class": "1+2",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/svg.rs :: draw_path :: let s = Stroke { width: st.stroke_width, line_cap: st.cap, line_join: st.join, miter_limit: st.miter, ..Stroke::default() }; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
  "engine/raster/src/svg.rs :: solid :: pub const MAX_LIVE_RASTER_BYTES: u64 = 256 << 20; #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
