@@ -266,7 +266,7 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
 {
   const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: join(here, "dist", "board"), naming: "board.js", target: "browser", format: "esm", minify: true,
     // (the engine it was built with, by its files' SHA-256s: an exported board pins it, design/engines.md)
-    define: { __SB_ENGINE__: JSON.stringify(ENGINE) } });
+    define: { __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "false" } });
   if (!r.success) {
     for (const l of r.logs) console.error(l);
     process.exit(1);
@@ -295,7 +295,21 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   const { frameHtml, katexFontsInline } = await import("./board/export.ts");
   const css = katexFontsInline(readFileSync(join(here, "dist", "katex", "katex.min.css"), "utf8"), (f) => "data:font/woff2;base64," + readFileSync(join(here, "dist", "katex", f)).toString("base64"));
   mkdirSync(join(here, "dist", "frame", "board"), { recursive: true });
-  writeFileSync(join(here, "dist", "frame", "board", "index.html"), frameHtml(readFileSync(join(here, "board", "index.html"), "utf8"), readFileSync(join(here, "dist", "board", "board.js"), "utf8"), readFileSync(join(here, "dist", "sagebrush-math.js"), "utf8"), css));
+  // (the page without sync, for the frame (inlined) and for exports: dist/board/board-nosync.js, which the site's
+  // "Download as HTML" fetches beside board.js (export.ts), so an export click fetches less than board.js, never the
+  // frame page)
+  const nosyncDir = join(here, "dist", ".board-nosync");
+  // (the owner, the panel's sync section and the rows' icons resolved to a stub: their every use is behind
+  // __SB_NO_SYNC__, never reached, and the stub keeps the modules themselves, and the client behind them, out of
+  // this copy)
+  const noSync = { name: "no-sync", setup(b: any) { b.onResolve({ filter: /(^|\/)sync-(owner|panel|rows)(\.ts)?$/ }, () => ({ path: join(here, "board", "no-sync-stub.ts") })); } };
+  const ns = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: nosyncDir, naming: "board.js", target: "browser", format: "esm", minify: true, plugins: [noSync], define: { __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "true" } });
+  if (!ns.success) { for (const l of ns.logs) console.error(l); process.exit(1); }
+  // (its packages are the board build's: a subset, already listed in js-dependencies.json)
+  const nosync = readFileSync(join(nosyncDir, "board.js"), "utf8");
+  writeFileSync(join(here, "dist", "board", "board-nosync.js"), nosync);
+  rmSync(nosyncDir, { recursive: true, force: true });
+  writeFileSync(join(here, "dist", "frame", "board", "index.html"), frameHtml(readFileSync(join(here, "board", "index.html"), "utf8"), nosync, readFileSync(join(here, "dist", "sagebrush-math.js"), "utf8"), css));
 }
 // The npm packages the bundles above contain (their metafiles' inputs) and
 // KaTeX (its stylesheet and fonts, copied): web/js-dependencies.json, from

@@ -1,5 +1,6 @@
 // Download as HTML (web/board/export.ts): each board exported from the
-// site opens from a file, offline (the network off), with its pages, math
+// site (its board script fetched as board-nosync.js, the frame's own, never
+// board.js or the frame page) opens from a file, offline (the network off), with its pages, math
 // (KaTeX's fonts inline) and printing; exported again from that file, it is
 // the same file.  A board with code, offline and without Python in it,
 // asks the network only for its engine, and says why its code can't run
@@ -62,7 +63,15 @@ try {
     await send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
     await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent(doc)}` });
     await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+    requests = [];
     const html = await ev("window.sagebrush.board.exportHtml()");
+    // (the board script the export fetched: board-nosync.js, never board.js (which carries the sync owner) nor the
+    // frame page; and the file's board script is the frame's, byte for byte)
+    const fetched = requests.map((u) => new URL(u).pathname).filter((p) => /^\/(board|frame)\//.test(p));
+    check(fetched.includes("/board/board-nosync.js") && !fetched.includes("/board/board.js") && !fetched.some((p) => p.startsWith("/frame/")), `${doc}: the export fetched ${fetched.join(", ") || "nothing"} for its board script, not board-nosync.js`);
+    const inline = (h) => h.match(/<script type="module" id="sb-board">([\s\S]*?)<\/script>/)?.[1];
+    const frameBoard = inline(await (await fetch(`${base}frame/board/`)).text());
+    check(!!frameBoard && inline(html) === frameBoard, `${doc}: the file's board script isn't the frame's (${inline(html)?.length} B against ${frameBoard?.length} B)`);
     shown.set(doc, await ev("JSON.stringify(window.sagebrush.board.snapshot().doc)"));
     const s0 = await ev("(() => { const s = window.sagebrush.board.snapshot(); return { pages: s.pages, items: s.items.length, math: JSON.stringify(s.doc).includes('$'), code: JSON.stringify(s.doc).includes('\"code\":') }; })()");
     check(!/offline/i.test(await ev("document.querySelector('[data-sbb=html]').textContent")), `${doc}: the menu says the file works offline`);
