@@ -20,7 +20,7 @@ export const FILES_RUNNER_SCRIPT = `
       for (const name of Object.keys(f)) if (name !== "sagebrush-worker.js") files[name] = url(name, name.endsWith(".wasm") ? "application/wasm" : "application/json");
       const script = new Blob(["self.__SB_FILES__ = " + JSON.stringify(files) + ";\\n", f["sagebrush-worker.js"]], { type: "text/javascript" });
       const w = new Worker(URL.createObjectURL(script), { name: String(e.data.name || "") });
-      w.onmessage = (m) => { let d = m.data; if (d && d.ready) d = { ...d, interrupt: null }; port.postMessage(d); };
+      w.onmessage = (m) => { let d = m.data; if (d && d.ready) d = { ...d, interrupt: null, progress: null }; port.postMessage(d); };
       w.onerror = (ev) => port.postMessage({ runnerError: String(ev.message || "an error in the interpreter") });
       port.onmessage = (m) => w.postMessage(m.data);
       port.postMessage({ runnerReady: true });
