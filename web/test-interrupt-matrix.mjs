@@ -58,7 +58,7 @@ const CASES = [
   { id: "E2", mode: "sage", s0: 22, smin: 12, smax: 44, grow: (s, r) => s + Math.max(1, Math.round(Math.log(r) / 0.18)) * Math.sign(Math.log(r)), setup: "n = next_prime(10**S) * next_prime(3 * 10**S)", target: "_r = factor(n)", probe: "assert len(factor(2**64 + 1)) == 2" },
   { id: "E3a", mode: "sage", s0: 450, smin: 200, smax: 600, grow: (s, r) => Math.round(s * Math.cbrt(r)), setup: "M = random_matrix(GF(32003), S)", target: "_r = M.rank()", probe: "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1" },
   { id: "E6a", mode: "sage", s0: 6, smin: 4, smax: 9, grow: (s, r) => s + (r > 1 ? 1 : -1), setup: "R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])", target: "_r = I.groebner_basis()", probe: "R2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2" },
-  { id: "E13g", mode: "sage", s0: 40, smin: 4, smax: 4000, grow: (s, r) => Math.max(1, Math.round(s * r)), xk: { kind: "window", wrap: "_sbraster.render" }, setup: "import tempfile, os\n_d = tempfile.mkdtemp()\nP = sum(polygon([(0, 0), (1, 0.1 * (j % 10)), (1, 1), (0.1 * (j % 7), 1)], alpha=0.02) for j in range(S))", target: "P.save(os.path.join(_d, 'big.png'), figsize=40, dpi=100)", probe: "line([(0, 0), (1, 1)]).save(os.path.join(_d, 'small.png'), figsize=1, dpi=100)\nassert os.path.getsize(os.path.join(_d, 'small.png')) > 0" },
+  { id: "E13g", mode: "sage", s0: 40, smin: 4, smax: 4000, grow: (s, r) => Math.max(1, Math.round(s * r)), xk: { kind: "window", wrap: "_sbraster.render" }, hosts: ["cli"], setup: "import tempfile, os\n_d = tempfile.mkdtemp()\nP = sum(polygon([(0, 0), (1, 0.1 * (j % 10)), (1, 1), (0.1 * (j % 7), 1)], alpha=0.02) for j in range(S))", target: "P.save(os.path.join(_d, 'big.png'), figsize=40, dpi=100)", probe: "line([(0, 0), (1, 1)]).save(os.path.join(_d, 'small.png'), figsize=1, dpi=100)\nassert os.path.getsize(os.path.join(_d, 'small.png')) > 0" },
 ].filter((c) => !ROWS || ROWS.split(",").includes(c.id));
 const FLAGS = { python: [], sage: ["--sage"], magma: ["--magma"], matlab: ["--matlab"] };
 
@@ -233,31 +233,49 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
   });
 }
 
+// calibration (r5 §3): uninterrupted runs, capped, at most MAX_RESIZE resizes within [s_min, s_max].
+// Geometric steps from the measured T until the band is bracketed (a size too fast and one too
+// slow or over the cap), then bisection: a cliff like E3a's GF(p) rank (pilot 3: s = 378 took
+// 0.23 s, s = 450 over 60 s) is narrowed, not stepped across.  If even s_max runs below the band,
+// the case is short (1 s <= T: its trials at 0.5 T, labelled short) or too fast (T < 1 s: no trial;
+// covered only by a census exclusion, §5).
 async function calibrate(host, c) {
   if (c.calibration === "nonterminating") return { s: null, T: null, attempts: [] };
-  let s = c.s0;
+  let s = c.s0, lo = null, hi = null;
   const attempts = [];
+  const mid = (x, y) => Math.round((x + y) / 2);
   for (let a = 0; a <= MAX_RESIZE; a++) {
     const r = await session(host, c, s, [null], CAL_CAP_MS);
     const t = r.trials[0];
     const T = t.marks.RET && t.marks.ENTER ? t.marks.RET.t - t.marks.ENTER.t : null;
     const R = t.marks.XSTART && t.marks.XEND ? t.marks.XEND.t - t.marks.XSTART.t : null;
     attempts.push({ s, T_ms: T && Math.round(T), ...(c.xk?.kind === "window" ? { R_ms: R && Math.round(R) } : {}), end: r.end, left: r.left, rss_kb: r.samples[0]?.rss_kb, ...(T == null ? { tail: r.tail } : {}) });
+    let next;
     if (T == null) {
-      if (r.end === "budget" || r.end === "guard") s = c.grow(s, 0.25);
-      else return { s, T: null, attempts, error: "no RET (" + r.end + ")" };
+      if (r.end !== "budget" && r.end !== "guard") return { s, T: null, attempts, error: "no RET (" + r.end + ")" };
+      hi = hi == null ? s : Math.min(hi, s); // over the cap: too slow
+      next = lo != null ? mid(lo, hi) : c.grow(s, 0.25);
     } else if (c.xk?.kind === "window" && R == null) return { s, T: null, attempts, error: "the wrapped call " + c.xk.wrap + " never ran" };
     else if (T >= BAND.min && T <= BAND.max) return { s, T, R, attempts };
-    else s = c.grow(s, ((BAND.min + BAND.max) / 2) / T);
-    s = Math.max(c.smin, Math.min(c.smax, s));
-    if (attempts.some((x) => x.s === s)) break;
+    else if (T < BAND.min) {
+      if (s === c.smax) return T >= 1000 ? { s, T, R, attempts, label: "short" } : { s, T: null, attempts, label: "too fast", error: `too fast: T(s_max) = ${Math.round(T)} ms, under 1 s (covered only by a census exclusion, r5 §5)` };
+      lo = lo == null ? s : Math.max(lo, s);
+      next = hi != null ? mid(lo, hi) : c.grow(s, ((BAND.min + BAND.max) / 2) / T);
+    } else {
+      hi = hi == null ? s : Math.min(hi, s);
+      next = lo != null ? mid(lo, hi) : c.grow(s, ((BAND.min + BAND.max) / 2) / T);
+    }
+    next = Math.max(c.smin, Math.min(c.smax, next));
+    if (next === s || attempts.some((x) => x.s === next)) break; // (a cliff between two adjacent sizes)
+    s = next;
   }
-  return { s, T: null, attempts, error: "uncalibrated" };
+  return { s, T: null, attempts, error: "uncalibrated" + (lo != null && hi != null ? ` (the band lies between s = ${lo} and s = ${hi})` : "") };
 }
 
 async function runHost(host) {
   const rows = [];
   for (const c of CASES) {
+    if (c.hosts && !c.hosts.includes(host)) continue; // (a case's own hosts, e.g. E13g: the CLI)
     // the CI set (r5 §8): the CLI's five rows, the prompt's two; everything else is VM-only
     if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a"]).includes(c.id)) continue;
     if (overBudget()) {
@@ -309,7 +327,7 @@ async function runHost(host) {
     const leak = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
     const { outcome: own, why: rowWhy } = xkRowOutcome(cells, leak && leak.ok, c.xk);
     const outcome = againstBaseline({ case: c.id, host, outcome: own, trials: cells, leak }, BASELINE);
-    rows.push({ case: c.id, host, mode: c.mode, run: MODE, outcome, ...(outcome !== own ? { own_outcome: own } : {}), ...(rowWhy ? { why: rowWhy } : {}), ...(c.xk ? { xk: c.xk.kind } : {}), s: cal.s, T_ms: cal.T && Math.round(cal.T), ...(cal.R != null ? { R_ms: Math.round(cal.R) } : {}), calibration: cal, cells, leak, sessions });
+    rows.push({ case: c.id, host, mode: c.mode, run: MODE, outcome, ...(cal.label ? { label: cal.label } : {}), ...(outcome !== own ? { own_outcome: own } : {}), ...(rowWhy ? { why: rowWhy } : {}), ...(c.xk ? { xk: c.xk.kind } : {}), s: cal.s, T_ms: cal.T && Math.round(cal.T), ...(cal.R != null ? { R_ms: Math.round(cal.R) } : {}), calibration: cal, cells, leak, sessions });
     record(rows.at(-1));
   }
   return rows;
@@ -323,7 +341,7 @@ for (const h of HOSTS) {
   if (h === "browser") {
     const { browserPilot } = await import("./test-interrupt-browser.mjs");
     // (a browser that can't start is an uncovered host, reported, not a crash that loses the run)
-    out.hosts[h] = overBudget() ? { skipped: "run budget spent" } : await browserPilot({ record, overBudget, baseline: BASELINE }).catch((e) => ({ error: String(e?.stack ?? e).slice(0, 600), rows: [] }));
+    out.hosts[h] = overBudget() ? { skipped: "run budget spent" } : await browserPilot({ record, overBudget, baseline: BASELINE, onChild: (pid) => live.set(pid, new Map()), onChildDone: (pid) => live.delete(pid) }).catch((e) => ({ error: String(e?.stack ?? e).slice(0, 600), rows: [] }));
   } else out.hosts[h] = await runHost(h);
 }
 if (SIGNALS !== "none") {

@@ -13,11 +13,13 @@ import { againstBaseline, rowOutcome } from "./interrupt-classify.mjs";
 const now = () => Number(process.hrtime.bigint()) / 1e6;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function browserPilot({ record = (r) => console.log(JSON.stringify(r)), overBudget = () => false, baseline = { entries: [] } } = {}) {
+// onChild(pid) / onChildDone(pid): Chrome's process, so the matrix kills its tree if the harness itself is stopped
+export async function browserPilot({ record = (r) => console.log(JSON.stringify(r)), overBudget = () => false, baseline = { entries: [] }, onChild = () => {}, onChildDone = () => {} } = {}) {
   const url = process.env.SB_URL ?? "http://127.0.0.1:8765/";
   const profile = mkdtempSync(join(tmpdir(), "sb-intr-browser-"));
   let cdpPort = Number(process.env.CDP_PORT) || 0;
   const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
+  onChild(chrome.pid);
   const result = { streaming: null, rows: [], worker_ids: [] };
   let ws;
   try {
@@ -29,8 +31,15 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
     let n = 0;
     const waiting = new Map();
     ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
-    const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-    const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails)); return r.result?.value; };
+    // (every CDP call has a deadline: one that never answers fails its trial, not the whole run; pilot 3 hung ~20 min)
+    const CDP_MS = 30_000;
+    const send = (method, params = {}) => new Promise((r, rej) => {
+      const id = ++n;
+      const tm = setTimeout(() => { waiting.delete(id); rej(new Error(`CDP ${method}: no answer in ${CDP_MS} ms`)); }, CDP_MS);
+      waiting.set(id, (v) => { clearTimeout(tm); r(v); });
+      ws.send(JSON.stringify({ id, method, params }));
+    });
+    const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails)); if (r?.code && r?.message) throw new Error("CDP: " + r.message); return r?.result?.value; };
     const until = async (expr, ms = 60000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(50); } throw new Error("timeout: " + expr); };
     // (the last non-empty cell: its output text and whether it still runs)
     const LAST = "[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1)";
@@ -70,35 +79,43 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
       }
       const trials = [];
       for (let i = 1; i <= 5; i++) {
-        const w0 = await workers();
-        await start(c.code(i));
-        let enter = null;
-        for (const t = now(); now() - t < 30000; ) { if (new RegExp(`(^|\\n)ENTER ${i}\\b`).test((await state()).out)) { enter = now(); break; } await sleep(20); }
-        if (enter == null) {
-          trials.push({ i, outcome: "INVALID", why: "no ENTER seen", out: (await state()).out.slice(-600) });
-          await ev("document.querySelector('#stop').click()").catch(() => {});
-          await until(`!${LAST}.classList.contains('running')`, 20000).catch(() => {});
-          break; // (the case never starts: its other trials would only repeat this)
+        // (the run budget is checked before each trial too, not only between cases)
+        if (overBudget()) { trials.push({ i, outcome: "INVALID", why: "run budget spent" }); break; }
+        try {
+          const w0 = await workers();
+          await start(c.code(i));
+          let enter = null;
+          for (const t = now(); now() - t < 30000; ) { if (new RegExp(`(^|\\n)ENTER ${i}\\b`).test((await state()).out)) { enter = now(); break; } await sleep(20); }
+          if (enter == null) {
+            trials.push({ i, outcome: "INVALID", why: "no ENTER seen", out: (await state()).out.slice(-600) });
+            await ev("document.querySelector('#stop').click()").catch(() => {});
+            await until(`!${LAST}.classList.contains('running')`, 20000).catch(() => {});
+            break; // (the case never starts: its other trials would only repeat this)
+          }
+          await sleep(Math.max(0, c.delay - (now() - enter)));
+          const s0 = await state();
+          if (/(^|\n)RET /.test(s0.out)) { trials.push({ i, outcome: "INVALID", why: "returned before Stop" }); continue; }
+          const t_send = now();
+          await ev("document.querySelector('#stop').click()");
+          let t_recog = null, out = "";
+          for (const t = now(); now() - t < 120000; ) { out = (await state()).out; if (new RegExp(`(^|\\n)KI ${i}\\b`).test(out)) { t_recog = now(); break; } if (/did not stop when interrupted/.test(out)) break; await sleep(20); }
+          await until(`!${LAST}.classList.contains('running')`, 130000).catch(() => {});
+          out = (await state()).out;
+          const w1 = await workers();
+          const sameWorker = JSON.stringify(w0.map((w) => w.id)) === JSON.stringify(w1.map((w) => w.id));
+          const probe = (out.match(new RegExp(`PROBE ${i} (\\w+)`)) ?? [])[1];
+          let outcome = "FAIL", why = "";
+          if (/(^|\n)RET /.test(out)) why = "did not stop (returned after the Stop)";
+          else if (t_recog == null) why = /did not stop/.test(out) ? "interpreter restarted" : "no KeyboardInterrupt within the guard";
+          else if (!sameWorker) why = "worker replaced";
+          else if (probe !== "ok") why = "probe " + probe;
+          else outcome = t_recog - t_send > 10000 ? "SLOW" : "PASS";
+          trials.push({ i, outcome, why, ...(outcome === "PASS" ? {} : { out: out.slice(-600) }), latency_ms: t_recog && Math.round(t_recog - t_send), poll_ms: 20, same_worker: sameWorker, memory_bytes: i === 1 || i === 5 ? await memory() : undefined });
+        } catch (e) {
+          // a trial whose page stopped answering: INVALID, and the case's other trials are skipped
+          trials.push({ i, outcome: "INVALID", why: "browser: " + String(e?.message ?? e).slice(0, 200) });
+          break;
         }
-        await sleep(Math.max(0, c.delay - (now() - enter)));
-        const s0 = await state();
-        if (/(^|\n)RET /.test(s0.out)) { trials.push({ i, outcome: "INVALID", why: "returned before Stop" }); continue; }
-        const t_send = now();
-        await ev("document.querySelector('#stop').click()");
-        let t_recog = null, out = "";
-        for (const t = now(); now() - t < 120000; ) { out = (await state()).out; if (new RegExp(`(^|\\n)KI ${i}\\b`).test(out)) { t_recog = now(); break; } if (/did not stop when interrupted/.test(out)) break; await sleep(20); }
-        await until(`!${LAST}.classList.contains('running')`, 130000).catch(() => {});
-        out = (await state()).out;
-        const w1 = await workers();
-        const sameWorker = JSON.stringify(w0.map((w) => w.id)) === JSON.stringify(w1.map((w) => w.id));
-        const probe = (out.match(new RegExp(`PROBE ${i} (\\w+)`)) ?? [])[1];
-        let outcome = "FAIL", why = "";
-        if (/(^|\n)RET /.test(out)) why = "did not stop (returned after the Stop)";
-        else if (t_recog == null) why = /did not stop/.test(out) ? "interpreter restarted" : "no KeyboardInterrupt within the guard";
-        else if (!sameWorker) why = "worker replaced";
-        else if (probe !== "ok") why = "probe " + probe;
-        else outcome = t_recog - t_send > 10000 ? "SLOW" : "PASS";
-        trials.push({ i, outcome, why, ...(outcome === "PASS" ? {} : { out: out.slice(-600) }), latency_ms: t_recog && Math.round(t_recog - t_send), poll_ms: 20, same_worker: sameWorker, memory_bytes: i === 1 || i === 5 ? await memory() : undefined });
       }
       // the browser's leak criterion here: the interpreter worker's identity never changes (r4 §6.1)
       const leak = { ok: trials.length > 0 && trials.every((t) => t.same_worker !== false), check: "worker identity" };
@@ -111,6 +128,7 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
   } finally {
     try { ws?.close(); } catch {}
     try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
+    onChildDone(chrome.pid);
     rmSync(profile, { recursive: true, force: true });
   }
   return result;
