@@ -179,88 +179,119 @@ export function timed(cmd, args, { cwd, env, cpu = null, timeoutMs = SPAWN_TIMEO
 const ok = (r) => r.status === 0 && !r.error;
 const fail = (what, r) => new Error(`${what}: ${r.error ? r.error : `exit ${r.status ?? r.signal}`}: ${(r.stderr || r.stdout || "").trim().split("\n").pop()?.slice(0, 200) ?? ""}`);
 
-// One tree's block for one round (§3): {values, raw, cache}; the warm-up
-// (§4) is one install and one cold --version, discarded
-export function measureTree(tree, { work, cpu = null, npm = "npm", warmup = false }) {
-  const mk = (name) => {
-    const d = join(work, name);
-    mkdirSync(d, { recursive: true });
-    return d;
+// The names of a measured child's environment, sorted (recorded per measure, §3)
+export const envNames = (env) => Object.keys(env).sort();
+
+// One tree's block for one round (§3).  The block is filled as samples arrive
+// and handed to onSample after each one, so a failure loses nothing already
+// measured: on a failure the block is marked incomplete, its reason recorded,
+// and the error (with the block as .block) thrown.  Values are computed only
+// for a complete block, and a measure whose cache check failed has none.  The
+// warm-up (§4) is one install and one cold --version, discarded.
+export function measureTree(tree, { work, cpu = null, npm = "npm", npx = "npx", warmup = false, onSample = () => {} }) {
+  const block = { incomplete: true, failed: null, raw: { install: [], npx: [], versionCold: [], versionWarm: [], evalCold: [], evalWarm: [] }, cache: {}, env: {}, values: null };
+  const { raw, cache } = block;
+  const sample = (key, r) => {
+    raw[key].push(r.ms);
+    onSample(block);
   };
-  const cfgDir = mk("cfg");
-  const u = join(cfgDir, "userconfig"), g = join(cfgDir, "globalconfig");
-  writeFileSync(u, "");
-  writeFileSync(g, "");
-  const iso = isolationProblem(u, g);
-  if (iso) throw new Error(`npm config isolation failed: ${iso}`);
-  const home = mk("home"), tmp = mk("tmp");
-  const npmChildEnv = (cc) => npmEnv(measuredEnv({ home, tmp, compileCache: cc }), u, g);
-  const raw = { install: [], npx: [], versionCold: [], versionWarm: [], evalCold: [], evalWarm: [] };
-  const cache = {};
-  // 1. install, k = 3, each into a fresh prefix and cache
-  let prefix = null;
-  for (let i = 0; i < (warmup ? 1 : K.install); i++) {
-    prefix = mk(`prefix-${i}`);
-    const npmCache = mk(`npm-cache-${i}`);
-    const r = timed(npm, ["install", "-g", "--prefix", prefix, "--cache", npmCache, "--offline", "--ignore-scripts", "--no-audit", "--no-fund", tree.tgz], { cwd: tmp, env: npmChildEnv(null), cpu });
-    if (!ok(r)) throw fail("npm install", r);
-    raw.install.push(r.ms);
-  }
-  const bin = join(prefix, "bin", "sagebrush");
-  if (warmup) {
-    const r = timed(process.execPath, [bin, "--version"], { cwd: tmp, env: measuredEnv({ home, tmp, compileCache: mk("cc-warmup") }), cpu });
-    if (!ok(r)) throw fail("warm-up --version", r);
-    return { warmup: true, version: r.stdout.trim() };
-  }
-  // 2. npx first run, its own npm cache, cwd and compile cache
-  {
-    const npxCache = mk("npx-cache"), npxCwd = mk("npx-cwd"), C = mk("cc-npx");
-    const r = timed("npx", ["--yes", "--offline", "--cache", npxCache, "--package", tree.tgz, "sagebrush", "--version"], { cwd: npxCwd, env: npmChildEnv(C), cpu });
-    if (!ok(r) || !r.stdout.startsWith(`sagebrush ${tree.version}`)) throw fail("npx --version", r);
-    raw.npx.push(r.ms);
-    raw.npxStdout = r.stdout.trim().slice(0, 300);
-    cache.npx = { dir: C, entries: listing(C).length, verified: listing(C).length > 0 ? "non-empty after the run" : null };
-  }
-  // 3-6. cold, then warm x5, for --version (A) and -c (B)
-  for (const [key, args, check] of [
-    ["version", ["--version"], (s) => s.startsWith(`sagebrush ${tree.version}`)],
-    ["eval", ["-c", "print(2+2)"], (s) => s.trim().split(/\s+/)[0] === "4"],
-  ]) {
-    const dir = mk(`cc-${key}`);
-    const env = measuredEnv({ home, tmp, compileCache: dir });
-    const before = listing(dir);
-    const c = { dir, emptyBefore: before.length === 0, problems: [] };
-    if (!c.emptyBefore) c.problems.push("not empty before the cold sample");
-    const cold = timed(process.execPath, [bin, ...args], { cwd: tmp, env, cpu });
-    if (!ok(cold) || !check(cold.stdout)) throw fail(`${key} (cold)`, cold);
-    raw[`${key}Cold`].push(cold.ms);
-    raw[`${key}ColdStdout`] = cold.stdout.trim().slice(0, 300);
-    const afterCold = listing(dir);
-    c.afterCold = afterCold.length;
-    if (!afterCold.length) c.problems.push("empty after the cold sample");
-    for (let i = 0; i < K.warm; i++) {
-      const w = timed(process.execPath, [bin, ...args], { cwd: tmp, env, cpu });
-      if (!ok(w) || !check(w.stdout)) throw fail(`${key} (warm)`, w);
-      raw[`${key}Warm`].push(w.ms);
-      raw[`${key}WarmStdout`] = w.stdout.trim().slice(0, 300);
-      if (!sameListing(listing(dir), afterCold)) c.problems.push(`the entry list changed after warm sample ${i + 1}`);
+  try {
+    const mk = (name) => {
+      const d = join(work, name);
+      mkdirSync(d, { recursive: true });
+      return d;
+    };
+    const cfgDir = mk("cfg");
+    const u = join(cfgDir, "userconfig"), g = join(cfgDir, "globalconfig");
+    writeFileSync(u, "");
+    writeFileSync(g, "");
+    const iso = isolationProblem(u, g);
+    if (iso) throw new Error(`npm config isolation failed: ${iso}`);
+    const home = mk("home"), tmp = mk("tmp");
+    const npmChildEnv = (cc) => npmEnv(measuredEnv({ home, tmp, compileCache: cc }), u, g);
+    // 1. install, k = 3, each into a fresh prefix and cache
+    let prefix = null;
+    block.env.install = envNames(npmChildEnv(null));
+    for (let i = 0; i < (warmup ? 1 : K.install); i++) {
+      prefix = mk(`prefix-${i}`);
+      const npmCache = mk(`npm-cache-${i}`);
+      const r = timed(npm, ["install", "-g", "--prefix", prefix, "--cache", npmCache, "--offline", "--ignore-scripts", "--no-audit", "--no-fund", tree.tgz], { cwd: tmp, env: npmChildEnv(null), cpu });
+      if (!ok(r)) throw fail("npm install", r);
+      sample("install", r);
     }
-    c.verified = c.problems.length === 0;
-    cache[key] = c;
+    // (the installed executable itself, as a user runs it: its shebang finds node on PATH)
+    const bin = join(prefix, "bin", "sagebrush");
+    block.bin = bin;
+    if (warmup) {
+      const r = timed(bin, ["--version"], { cwd: tmp, env: measuredEnv({ home, tmp, compileCache: mk("cc-warmup") }), cpu });
+      if (!ok(r)) throw fail("warm-up --version", r);
+      block.incomplete = false;
+      return { warmup: true, version: r.stdout.trim() };
+    }
+    // 2. npx first run, its own npm cache, cwd and compile cache
+    {
+      const npxCache = mk("npx-cache"), npxCwd = mk("npx-cwd"), C = mk("cc-npx");
+      const env = npmChildEnv(C);
+      block.env.npx = envNames(env);
+      const c = { dir: C, emptyBefore: listing(C).length === 0, problems: [] };
+      if (!c.emptyBefore) c.problems.push("not empty before the run");
+      cache.npx = c;
+      const r = timed(npx, ["--yes", "--offline", "--cache", npxCache, "--package", tree.tgz, "sagebrush", "--version"], { cwd: npxCwd, env, cpu });
+      if (!ok(r) || !r.stdout.startsWith(`sagebrush ${tree.version}`)) throw fail("npx --version", r);
+      raw.npxStdout = r.stdout.trim().slice(0, 300);
+      c.entries = listing(C).length;
+      if (!c.entries) c.problems.push("empty after the run");
+      c.verified = c.problems.length === 0;
+      sample("npx", r);
+    }
+    // 3-6. cold, then warm x5, for --version (A) and -c (B)
+    for (const [key, args, check] of [
+      ["version", ["--version"], (s) => s.startsWith(`sagebrush ${tree.version}`)],
+      ["eval", ["-c", "print(2+2)"], (s) => s.trim().split(/\s+/)[0] === "4"],
+    ]) {
+      const dir = mk(`cc-${key}`);
+      const env = measuredEnv({ home, tmp, compileCache: dir });
+      block.env[key] = envNames(env);
+      const c = { dir, emptyBefore: listing(dir).length === 0, problems: [] };
+      if (!c.emptyBefore) c.problems.push("not empty before the cold sample");
+      cache[key] = c;
+      const cold = timed(bin, args, { cwd: tmp, env, cpu });
+      if (!ok(cold) || !check(cold.stdout)) throw fail(`${key} (cold)`, cold);
+      raw[`${key}ColdStdout`] = cold.stdout.trim().slice(0, 300);
+      const afterCold = listing(dir);
+      c.afterCold = afterCold.length;
+      if (!afterCold.length) c.problems.push("empty after the cold sample");
+      sample(`${key}Cold`, cold);
+      for (let i = 0; i < K.warm; i++) {
+        const w = timed(bin, args, { cwd: tmp, env, cpu });
+        if (!ok(w) || !check(w.stdout)) throw fail(`${key} (warm)`, w);
+        raw[`${key}WarmStdout`] = w.stdout.trim().slice(0, 300);
+        if (!sameListing(listing(dir), afterCold)) c.problems.push(`the entry list changed after warm sample ${i + 1}`);
+        sample(`${key}Warm`, w);
+      }
+      c.verified = c.problems.length === 0;
+    }
+  } catch (e) {
+    block.failed = e.message;
+    onSample(block);
+    e.block = block;
+    throw e;
   }
-  const values = {
+  const v = (key) => cache[key].verified;
+  block.values = {
     install: median(raw.install),
-    npx: raw.npx[0],
-    versionCold: raw.versionCold[0],
-    versionWarm: cache.version.verified ? Math.min(...raw.versionWarm) : null,
-    evalCold: raw.evalCold[0],
-    evalWarm: cache.eval.verified ? Math.min(...raw.evalWarm) : null,
-    versionWarmMedian: median(raw.versionWarm),
-    evalWarmMedian: median(raw.evalWarm),
+    npx: v("npx") ? raw.npx[0] : null,
+    versionCold: v("version") ? raw.versionCold[0] : null,
+    versionWarm: v("version") ? Math.min(...raw.versionWarm) : null,
+    evalCold: v("eval") ? raw.evalCold[0] : null,
+    evalWarm: v("eval") ? Math.min(...raw.evalWarm) : null,
   };
-  if (!cache.version.verified) values.versionCold = null;
-  if (!cache.eval.verified) values.evalCold = null;
-  return { values, raw, cache };
+  // (diagnostics only, never in the paired estimator: the warm median of 5, and max/min per measure)
+  const spread = (xs) => (xs.length ? Math.max(...xs) / Math.min(...xs) : null);
+  block.diagnostics = { versionWarmMedian: median(raw.versionWarm), evalWarmMedian: median(raw.evalWarm), installSpread: spread(raw.install), versionWarmSpread: spread(raw.versionWarm), evalWarmSpread: spread(raw.evalWarm) };
+  block.incomplete = false;
+  onSample(block);
+  return block;
 }
 
 // ---------------------------------------------------------------------------
@@ -295,9 +326,11 @@ export function summary(rec) {
   const rounds = rec.rounds ?? [];
   if (!rounds.length) return [...L, "no rounds measured", ""];
   const two = !!rec.trees?.A && !!rec.trees?.B && rounds.some((r) => r.A);
+  // (aggregates only from complete rounds and complete blocks; the rest is shown below, never pooled)
+  const val = (r, side, k) => (r.incomplete || !r[side] || r[side].incomplete || !r[side].values ? null : r[side].values[k]);
   L.push(two ? "| ms | base (median of rounds) | head | median paired Δ | median ratio | Δ min … max |" : "| ms | head (median of rounds) |", two ? "|---|---:|---:|---:|---:|---:|" : "|---|---:|");
   for (const [k, label] of MEASURES) {
-    const a = rounds.map((r) => r.A?.values[k] ?? null), b = rounds.map((r) => r.B?.values[k] ?? null);
+    const a = rounds.map((r) => val(r, "A", k)), b = rounds.map((r) => val(r, "B", k));
     if (!two) {
       L.push(`| ${label} | ${f1(median(b.filter((x) => x != null)))} |`);
       continue;
@@ -307,14 +340,31 @@ export function summary(rec) {
   }
   L.push("");
   const unverified = [];
-  for (const r of rounds) for (const side of ["A", "B"]) for (const k of ["version", "eval"]) if (r[side] && !r[side].cache[k].verified) unverified.push(`round ${r.round} ${side} ${k}: ${r[side].cache[k].problems.join("; ")}`);
-  for (const u of unverified) L.push(`- compile cache not verified: ${md(u)}`);
+  for (const r of rounds) for (const side of ["A", "B"]) for (const k of ["npx", "version", "eval"]) {
+    const c = r[side]?.cache?.[k];
+    if (c && c.verified === false) unverified.push(`round ${r.round} ${side} ${k}: ${c.problems.join("; ")}`);
+  }
+  for (const u of unverified) L.push(`- compile cache not verified (no time reported): ${md(u)}`);
+  for (const r of rounds) {
+    if (r.incomplete) L.push(`- round ${r.round} is incomplete: excluded from the aggregates, its samples kept below`);
+    for (const side of ["A", "B"]) if (r[side]?.failed) L.push(`- round ${r.round} ${side === "A" ? "base" : "head"} failed: ${md(r[side].failed)}`);
+  }
   if (s.aa) L.push("- an A/A run: its Δ column is this runner's noise for this run");
   L.push(`- ${rounds.length} rounds; odd rounds base first, even rounds head first; each round's value is one per tree (install: median of 3; warm: best of 5; cold and npx: the single sample). Δ and ratio are medians of the per-round paired values. No threshold: report-only.`);
+  L.push("", "<details><summary>diagnostics per round (not in the estimator): warm median of 5, and max/min spread</summary>", "", "| round | side | `--version` warm best / median / spread | `-c` warm best / median / spread | install spread |", "|---:|---|---|---|---:|");
+  const sp = (x) => (x == null ? "" : `×${x.toFixed(3)}`);
+  for (const r of rounds) for (const side of ["A", "B"]) {
+    const b = r[side];
+    if (!b || !b.diagnostics) continue;
+    const d = b.diagnostics;
+    L.push(`| ${r.round} | ${side} | ${f1(Math.min(...b.raw.versionWarm))} / ${f1(d.versionWarmMedian)} / ${sp(d.versionWarmSpread)} | ${f1(Math.min(...b.raw.evalWarm))} / ${f1(d.evalWarmMedian)} / ${sp(d.evalWarmSpread)} | ${sp(d.installSpread)} |`);
+  }
+  L.push("", "</details>", "");
   L.push("", "<details><summary>every sample (ms)</summary>", "", "| round | first | side | measure | samples |", "|---:|---|---|---|---|");
   for (const r of rounds) for (const side of ["A", "B"]) {
     if (!r[side]) continue;
-    for (const k of ["install", "npx", "versionCold", "versionWarm", "evalCold", "evalWarm"]) L.push(`| ${r.round} | ${r.first} | ${side} | ${k} | ${r[side].raw[k].map((x) => x.toFixed(1)).join(", ")} |`);
+    const mark = r[side].incomplete ? " (incomplete)" : "";
+    for (const k of ["install", "npx", "versionCold", "versionWarm", "evalCold", "evalWarm"]) L.push(`| ${r.round} | ${r.first} | ${side}${mark} | ${k} | ${r[side].raw[k].map((x) => x.toFixed(1)).join(", ")} |`);
   }
   L.push("", "</details>", "");
   return L;
@@ -367,7 +417,7 @@ function prepare(dir, side) {
   console.log(`${side}: ${version} at ${sha}, ${p.size} B packed`);
 }
 
-function measure(dir) {
+export function measure(dir, { rounds = ROUNDS, npm = "npm", npx = "npx" } = {}) {
   const sides = readJson(join(dir, "sides.json"));
   const A = readJson(join(dir, "tree-A.json"));
   let B = readJson(join(dir, "tree-B.json"));
@@ -376,27 +426,35 @@ function measure(dir) {
   const trees = { A, B };
   const affinity = cpuChoice();
   const npmV = spawnSync("npm", ["--version"], { encoding: "utf8" }).stdout?.trim() ?? null;
-  const rec = { format: FORMAT, v: 1, script_sha256: sha256(readFileSync(SELF)), sides, trees, env: { os: `${platform()} ${release()}`, cpu: cpus()[0]?.model ?? "?", cpus: cpus().length, node: process.versions.node, npm: npmV, affinity }, rounds: [] };
+  // (the measured children's environment names: the allowlist, plus npm's two config files; each block records its own per measure)
+  const measuredEnvNames = { cli: envNames(measuredEnv({ home: "", tmp: "", compileCache: "." })), npm: envNames(npmEnv(measuredEnv({ home: "", tmp: "" }), "", "")), npx: envNames(npmEnv(measuredEnv({ home: "", tmp: "", compileCache: "." }), "", "")) };
+  const rec = { format: FORMAT, v: 1, script_sha256: sha256(readFileSync(SELF)), sides, trees, env: { os: `${platform()} ${release()}`, cpu: cpus()[0]?.model ?? "?", cpus: cpus().length, node: process.versions.node, npm: npmV, affinity, measuredEnvNames }, rounds: [] };
   const save = () => writeJson(join(dir, "install-timing.json"), rec);
   const work = mkdtempSync(join(dir, "work-"));
   try {
     // one discarded warm-up per tree: an install and a --version
     for (const side of ["A", "B"]) if (trees[side]) {
       const w = join(work, `warmup-${side}`);
-      const r = measureTree(trees[side], { work: w, cpu: affinity.cpu, warmup: true });
+      const r = measureTree(trees[side], { work: w, cpu: affinity.cpu, warmup: true, npm, npx });
       if (!r.version.startsWith(`sagebrush ${trees[side].version}`)) throw new Error(`${side} answers ${r.version.slice(0, 80)}, not ${trees[side].version}`);
       rmSync(w, { recursive: true, force: true });
     }
-    for (let round = 1; round <= ROUNDS; round++) {
+    // (each round is recorded as it starts, and each block after every sample: a failure keeps everything measured)
+    for (let round = 1; round <= rounds; round++) {
       const first = order(round)[0];
-      const entry = { round, first: first === "A" ? "base" : "head" };
+      const entry = { round, first: first === "A" ? "base" : "head", incomplete: true };
+      rec.rounds.push(entry);
+      save();
       for (const side of order(round)) {
         if (!trees[side]) continue;
         const w = join(work, `r${round}-${side}`);
-        entry[side] = measureTree(trees[side], { work: w, cpu: affinity.cpu });
+        measureTree(trees[side], { work: w, cpu: affinity.cpu, npm, npx, onSample: (b) => {
+          entry[side] = b;
+          save();
+        } });
         rmSync(w, { recursive: true, force: true });
       }
-      rec.rounds.push(entry);
+      entry.incomplete = false;
       save();
       console.log(`round ${round} done`);
     }
