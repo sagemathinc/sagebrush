@@ -1905,8 +1905,18 @@ class FiniteFieldElement:
             (3 a + 2, 1)
         """
         from _sage_poly import _latex_univariate
+        return _latex_univariate(self._latex_terms(), self._parent._name)
+
+    def _latex_terms(self):
+        """The (LaTeX, False, exponent) of each nonzero term, highest first, in
+        one pass over the coefficients (none for 0)."""
         c = self._c
-        return _latex_univariate([(str(c[i]), False, i) for i in range(len(c) - 1, -1, -1) if c[i]], self._parent._name)
+        out = []
+        for i in range(len(c) - 1, -1, -1):
+            t = c[i]
+            if t:
+                out.append((str(t), False, i))
+        return out
 
     def __hash__(self):
         if self.is_in_prime_field():
@@ -3395,17 +3405,6 @@ def _is_ff_base(base):
     return isinstance(base, (IntegerModRing_, FiniteField_ext))
 
 
-def _two_nonzero(cs):
-    """Whether cs has at least two nonzero entries (stopping at the second)."""
-    seen = False
-    for t in cs:
-        if t:
-            if seen:
-                return True
-            seen = True
-    return False
-
-
 class Polynomial_ff:
     """A polynomial over GF(q) or Z/nZ.
 
@@ -3573,12 +3572,14 @@ class Polynomial_ff:
         terms = []
         for i in range(len(self._c) - 1, -1, -1):
             c = self._c[i]
-            if not c:
-                continue
-            # (a coefficient of several terms: an element of GF(q) with more than one,
-            # found by stopping at its second nonzero coefficient)
-            compound = isinstance(c, FiniteFieldElement) and _two_nonzero(c._c)
-            terms.append((str(latex(c)), compound, i))
+            if isinstance(c, FiniteFieldElement):
+                # (one pass over an element of GF(q) gives its terms: none for 0, and a
+                # coefficient of several terms goes in \left( \right))
+                t = c._latex_terms()
+                if t:
+                    terms.append((_latex_univariate(t, c._parent._name), len(t) > 1, i))
+            elif c:
+                terms.append((str(latex(c)), False, i))
         return _latex_univariate(terms, self._ring._name)
 
     def __hash__(self):

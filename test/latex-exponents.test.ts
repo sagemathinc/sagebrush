@@ -111,3 +111,48 @@ test("latex() of a value with no _latex_ writes its text, so a ^ in it is never 
   assert.equal(r.err, "");
   assert.equal(r.out, "\\text{\\texttt{x{\\char`\\^}10{ }+{ }y{\\char`\\^}123}}\n");
 });
+
+// PERF-137-1: latex() of a GF(q)[x] polynomial looks at each coefficient of each GF(q)
+// coefficient once: one pass finds whether it is zero, its terms and whether it has several
+// (so needs \left( \right)).  Each coefficient's vector counts its visits; 1000 slots, with
+// zero, one and two nonzero entries (two at the top, where a test that stops at the second
+// nonzero would stop at once, and that rendering still has to pass over in full).
+test("latex() of GF(q) coefficients is one pass over each coefficient's vector", async () => {
+  const run = await session();
+  const code = [
+    "from _sage_ff import FiniteFieldElement",
+    "class Counted:",
+    "    def __init__(self, v):",
+    "        self.v = v",
+    "        self.visits = 0",
+    "    def __len__(self):",
+    "        return len(self.v)",
+    "    def __getitem__(self, i):",
+    "        self.visits += 1",
+    "        return self.v[i]",
+    "    def __iter__(self):",
+    "        for t in self.v:",
+    "            self.visits += 1",
+    "            yield t",
+    "F.<a> = GF(7^2); R.<x> = F[]",
+    "n = 1000",
+    "zero = [0]*n",
+    "one = [0]*n; one[500] = 3",
+    "two = [0]*n; two[n - 1] = 1; two[n - 2] = 2",
+    "cs = [Counted(zero), Counted(one), Counted(two), Counted(one)]",
+    "p = x^3 + x^2 + x + 1",
+    "p._c = [FiniteFieldElement(F, c) for c in cs]",
+    "print(latex(p))",
+    "print([c.visits for c in cs])",
+    "e = Counted(one)",
+    "print(latex(FiniteFieldElement(F, e)), e.visits)",
+  ].join("\n");
+  const r = await run(code);
+  assert.equal(r.err, "");
+  assert.equal(
+    r.out,
+    "3 a^{500} x^{3} + \\left(a^{999} + 2 a^{998}\\right) x^{2} + 3 a^{500} x\n" +
+      "[1000, 1000, 1000, 1000]\n" +
+      "3 a^{500} 1000\n",
+  );
+});
