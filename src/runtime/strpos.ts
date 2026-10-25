@@ -10,7 +10,7 @@
 // conversion.)
 
 import { T, raise } from "./object";
-import { INTR } from "./interrupt";
+import { INTR, INTR_CTRL_C, consumeCtrlC } from "./interrupt";
 
 const SURROGATE = /[\uD800-\uDFFF]/;
 const B = 32;
@@ -54,10 +54,7 @@ function scan(s: string): Pos | null {
     if (i % B === 0) {
       c[i / B] = n;
       // (Stop reaches a long scan)
-      if ((i & 0xfffff) === 0 && INTR[0]) {
-        INTR[0] = 0;
-        raise(T.KeyboardInterrupt);
-      }
+      if ((i & 0xfffff) === 0 && INTR[0] & INTR_CTRL_C && consumeCtrlC()) raise(T.KeyboardInterrupt);
     }
     if (isHigh(s.charCodeAt(i)) && i + 1 < len && isLow(s.charCodeAt(i + 1))) {
       n++;

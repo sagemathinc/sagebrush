@@ -9,6 +9,7 @@ pub mod form;
 pub mod relations;
 pub mod linalg;
 pub mod imag;
+pub mod limits;
 pub mod real;
 pub mod realq;
 pub mod nf;

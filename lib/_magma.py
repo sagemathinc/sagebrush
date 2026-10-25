@@ -942,9 +942,9 @@ _COLLECT_RESERVE = 64 << 20
 def _collect_max():
     """The bound, and the heap in use it was taken from, in bytes (None
     where the host can't say), which scripts/heap-budget.mjs checks."""
-    n = getattr(_sys, "_sagebrush_heap_limit", None)
-    # (CPython, or a host that cannot say: a nominal 1 GiB)
-    limit = int(n) if n else 1 << 30
+    # (pyjs: its heap limit; CPython: the machine's total; _capacity, D0)
+    import _capacity
+    limit = _capacity.heap_figure()
     raw = None
     f = getattr(_sys, "_sagebrush_heap_used", None)
     if callable(f):
@@ -961,10 +961,14 @@ def _collect_refusal():
     """The bound's refusal (item D): the memory guards' message, the
     allowance _COLLECT_COST bytes for each of _COLLECT_MAX elements.  At
     the 10^6 ceiling the bound is fixed (a larger heap doesn't raise it),
-    and the message says so (astra's PR114-SEM-1)."""
-    return _memory_error(_memguard.memory_guard("A collection of more than %d elements" % _COLLECT_MAX,
-                                                (_COLLECT_MAX + 1) * _COLLECT_COST, _COLLECT_MAX * _COLLECT_COST,
-                                                "one collection", fixed=_COLLECT_MAX == 10 ** 6))
+    and the message says so (astra's PR114-SEM-1).  With D0's record: the
+    memory observed free (capacity), which decided nothing."""
+    import _capacity
+    e = _memory_error(_memguard.memory_guard("A collection of more than %d elements" % _COLLECT_MAX,
+                                             (_COLLECT_MAX + 1) * _COLLECT_COST, _COLLECT_MAX * _COLLECT_COST,
+                                             "one collection", fixed=_COLLECT_MAX == 10 ** 6))
+    e.capacity = _capacity.capacity()
+    return e
 
 
 def _collect(gen):
@@ -973,6 +977,9 @@ def _collect(gen):
     v = []
     for x in gen:
         if len(v) == _COLLECT_MAX:
+            # (the elements let go first: the refusal reads the capacity,
+            # D0, in what is left of the heap, never on top of them)
+            del v[:]
             raise _collect_refusal()
         v.append(x)
     return v

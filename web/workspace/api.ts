@@ -31,6 +31,7 @@ import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHist
 import { isBoard } from "../board/doc";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
+import { syncState as ledgerState, waitSync as ledgerWait, type SyncAnswer, type SyncLevel, type WaitResult } from "./sync-ledger";
 import { entriesOf, fenceCheck, physicalOf, busyError, dropView, rewriting, under, D11, RW, FENCE_READ, STAGE, type ERecord } from "./sync-rewrite";
 import { VDUE, VOVER, PINS, SYNC_STORES, RELEASE_STORES, noteChange, pinOfCurrent, charge, release, collapse, scheduleClean, capNow, liveLease, pinTotal, epochOf, finishBackfillFor, afterReleases, GONE, filePage, type Pin } from "./sync-pins";
 
@@ -218,7 +219,14 @@ export type Identity = { workspace: string; generation: number };
 const isIdentity = (x: any): x is Identity => !!x && typeof x.workspace === "string" && /^[0-9a-f]{16}$/.test(x.workspace) && Number.isSafeInteger(x.generation) && x.generation >= 1;
 // (the stores a reset to a new workspace empties, a page at a time, those holding files' bytes first; and meta's
 // keys it keeps)
-const RESET_STORES = ["fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending", "prunable"];
+const RESET_STORES = ["fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending", "prunable", "syncLedger"];
+/** A verb's `collect` (task #14): the list each op the call commits is appended to; anything else refused. */
+type Collect = { collect?: number[] };
+function sinkOf(c: unknown): number[] | undefined {
+  if (c === undefined) return undefined;
+  if (!Array.isArray(c)) throw new WorkspaceError("invalid", "collect is a list the call appends its op seqs to");
+  return c;
+}
 const BYTE_STORES = new Set(["fileBytes", "versionBytes", "trash", "files"]);
 const META_KEPT = new Set(["device", "identity", "resetting", "opsFloor", "purgeMain", "purgeLocal", "fenceStep", "fenceBlocked"]);
 /** Records deleted per transaction by a reset's cleanup (daybreak2's L2 on 2a4e53a8: never one transaction
@@ -1003,8 +1011,8 @@ export class Workspace {
   // ------------------------------------------------------------ changing
 
   /** A folder, and any folders above it that aren't there. */
-  async mkdir(p: string): Promise<Entry> {
-    const q = path(p);
+  async mkdir(p: string, opts: Collect = {}): Promise<Entry> {
+    const q = path(p), collect = sinkOf(opts?.collect);
     if (q === "/") throw new WorkspaceError("invalid", "the top folder is always there");
     if (within(q, TRASH)) throw new WorkspaceError("invalid", "Trash holds only what was deleted");
     return this.locked(async () => {
@@ -1016,30 +1024,30 @@ export class Workspace {
       });
       this.tell({ ops });
       return e;
-    });
+    }, undefined, { collect });
   }
 
   /** A new notebook, board or data file at `p`, its kind said by its name;
    * `content` its document or bytes (else a blank one), `mode` a document's
    * language.  A path that's taken is refused, never written over. */
   /** Its provenance: "elsewhere" (`made` given here is not read: only the host's createByPerson says "person"). */
-  async create(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } = {}): Promise<Entry> {
+  async create(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect = {}): Promise<Entry> {
     return this.createAs(p, opts, "elsewhere");
   }
   /** create(), made by the person in this site's own UI: provenance "person" (design/capabilities.md §6).
    * For the pages' own New only: not offered to agents (forAgent), and no option of create() reaches it. */
-  async createByPerson(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } = {}): Promise<Entry> {
+  async createByPerson(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect = {}): Promise<Entry> {
     return this.createAs(p, opts, "person");
   }
   /** create(), a copy of `source` (a page's copy of a board: a conflict's, a closed page's changes,
    * Duplicate): the source's provenance, whatever it is (unknown stays unknown).  Not offered to agents. */
-  async createCopyOf(source: Pick<Entry, "made">, p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } = {}): Promise<Entry> {
+  async createCopyOf(source: Pick<Entry, "made">, p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect = {}): Promise<Entry> {
     return this.createAs(p, opts, source.made);
   }
-  private async createAs(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal }, made: Entry["made"]): Promise<Entry> {
-    const q = path(p), kind = kindOf(q), content = owned(opts.content, this.limits.maxFileBytes);
+  private async createAs(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect, made: Entry["made"]): Promise<Entry> {
+    const q = path(p), kind = kindOf(q), content = owned(opts.content, this.limits.maxFileBytes), collect = sinkOf(opts.collect);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't make ${q}`);
-    return this.locked(() => this.make(q, kind, content, opts.mode, undefined, made), opts.signal).then((e) => { this.askToKeep(); return e; });
+    return this.locked(() => this.make(q, kind, content, opts.mode, undefined, made), opts.signal, { collect }).then((e) => { this.askToKeep(); return e; });
   }
 
   /** New contents for a notebook, board or data file; with `base` (the
@@ -1047,10 +1055,11 @@ export class Workspace {
    * WorkspaceError("conflict") with the current contents, nothing written. */
   /** `tag` (a board): who wrote it, kept on the record (a page's session, so that page can tell its own writes from others'). `keepEmpty: false` (a data file): no version of empty bytes (Python's open("w") empties a file before writing it); a version of an empty file is kept otherwise. */
   /** `fid` (a data file): only if the file at `p` is still that one, its own id, not another put at its path since (a WorkspaceError("conflict")). */
-  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } = {}): Promise<{ entry: Entry; rev: number }> {
+  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect = {}): Promise<{ entry: Entry; rev: number }> {
     return this.writeLocked(p, owned(content, this.limits.maxFileBytes), opts).then((out) => { this.askToKeep(); return out; });
   }
-  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string }): Promise<{ entry: Entry; rev: number }> {
+  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect): Promise<{ entry: Entry; rev: number }> {
+    const collect = sinkOf(opts.collect);
     return this.lockedFor(p, async () => {
       let e = await this.mustStat(p);
       if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
@@ -1092,7 +1101,7 @@ export class Workspace {
       });
       this.tell({ ops });
       return { entry, rev };
-    });
+    }, undefined, collect);
   }
 
   /** A data file's new bytes (its entry migrated first, holding the lock):
@@ -1193,10 +1202,10 @@ export class Workspace {
    * (a document's ref, a data file's fid, and when it was made): checked
    * holding the lock, a WorkspaceError("conflict") if what is at `from` now
    * is another (moved away meanwhile, something else put there: CORR-4B2-1). */
-  async rename(from: string, to: string, opts?: { retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> }): Promise<Entry>;
-  async rename(from: string, to: string, opts: { still: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> }): Promise<Entry | undefined>;
-  async rename(from: string, to: string, opts: { still?: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } = {}): Promise<Entry | undefined> {
-    const a = path(from), b = path(to);
+  async rename(from: string, to: string, opts?: { retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect): Promise<Entry>;
+  async rename(from: string, to: string, opts: { still: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect): Promise<Entry | undefined>;
+  async rename(from: string, to: string, opts: { still?: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect = {}): Promise<Entry | undefined> {
+    const a = path(from), b = path(to), collect = sinkOf(opts.collect);
     if (a === "/" || b === "/") throw new WorkspaceError("invalid", "the top folder can't be moved");
     if (within(a, TRASH) || within(b, TRASH)) throw new WorkspaceError("invalid", "use remove and restore for Trash");
     if (within(b, a)) throw new WorkspaceError("invalid", "a folder can't go inside itself");
@@ -1210,11 +1219,12 @@ export class Workspace {
       const moved = await this.move(a, b, "rename");
       if (opts.retitle !== false) await this.retitle(moved[0], a);
       return moved[0];
-    });
+    }, undefined, collect);
   }
 
   /** A copy of a notebook, board or data file, at `to` (else the first free `name (2)`, … beside it). */
-  async duplicate(p: string, to?: string): Promise<Entry> {
+  async duplicate(p: string, to?: string, opts: Collect = {}): Promise<Entry> {
+    const collect = sinkOf(opts?.collect);
     return this.locked(async () => {
       const e = await this.mustStat(p);
       if (e.kind === "folder") throw new WorkspaceError("invalid", "a folder can't be duplicated yet");
@@ -1236,14 +1246,14 @@ export class Workspace {
       // (a copy has its source's provenance: a copy of something from elsewhere is still from elsewhere)
       if (e.kind === "board") return this.make(dest, "board", structuredClone((c as BoardRecord).doc), e.mode, (c as BoardRecord).origin, e.made);
       return this.make(dest, "file", c);
-    });
+    }, undefined, { collect });
   }
 
   /** `p` (and what's in it) put in Trash, as `/Trash/<its name>` (or the
    * first free `name (2)`, …); nothing of its contents removed. */
   /** `expect`: the entry asked for, by its identity (as rename's): another at `q` now, a WorkspaceError("conflict"), nothing moved. */
-  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">, signal?: AbortSignal): Promise<Entry> {
-    const q = path(p);
+  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">, signal?: AbortSignal, opts: Collect = {}): Promise<Entry> {
+    const q = path(p), collect = sinkOf(opts?.collect);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't put ${q} in Trash`);
     return this.lockedFor(q, async () => {
       const cur = await this.mustStat(q);
@@ -1253,7 +1263,7 @@ export class Workspace {
       const dest = freePath(TRASH, base, ext, (x) => taken.has(x));
       if (!dest) throw new WorkspaceError("limit", "Trash is full: empty it first");
       return (await this.move(q, dest, "remove", { from: q, at: this.now(), id: hex(8) }))[0];
-    }, signal);
+    }, signal, collect);
   }
 
   /** What `p` in Trash was, put back where it was (or, if that's taken now,
@@ -1279,6 +1289,19 @@ export class Workspace {
   watch(f: (c: Change) => void): () => void {
     this.subs.add(f);
     return () => this.subs.delete(f);
+  }
+
+  /** Where each of these local ops is in sync (task #14; at most 1,000 seqs): local, sent, accepted (the server
+   * has it, durably), confirmed (its echo read back), refused (with its code), superseded (with why) or none (with
+   * why).  Not offered to agents: the host's (a shell's own ops, as a verb's `collect` gave them). */
+  syncState(seqs: number[]): Promise<SyncAnswer[]> {
+    return ledgerState(this, seqs);
+  }
+  /** Resolves once every one of `seqs` (at most 10,000: a call's `collect`) has reached `level` (accepted unless
+   * said) or a final state: {sync: the worst state among them, counts}.  `signal` is required; `timeoutMs` is
+   * optional, with no default.  Offline is a long wait, not an error.  Not offered to agents. */
+  waitSync(seqs: number[], opts: { level?: SyncLevel; signal: AbortSignal; timeoutMs?: number }): Promise<WaitResult> {
+    return ledgerWait(this, seqs, opts);
   }
 
   /** The operation log, oldest first, from `after` (a seq). */
@@ -1786,6 +1809,13 @@ export class Workspace {
     const bound: Record<string, unknown> = Object.fromEntries(verbs.map((v) => [v, (as as any)[v].bind(as)]));
     // (an agent writes with base only: a board's tag says which page session wrote it, and isn't an agent's to claim)
     bound.write = (p: string, content: unknown, opts: { base?: number } = {}) => as.write(p, content, opts?.base !== undefined ? { base: opts.base } : {});
+    // (a call's collector is the host's (task #14): never an agent's)
+    const bare = <O,>(o: O): O => { if (o && typeof o === "object" && "collect" in o) { const { collect: _c, ...rest } = o as Record<string, unknown>; return rest as O; } return o; };
+    bound.mkdir = (p: string) => as.mkdir(p);
+    bound.create = (p: string, opts?: Parameters<Workspace["create"]>[1]) => as.create(p, bare(opts));
+    bound.rename = (from: string, to: string, opts?: Parameters<Workspace["rename"]>[2]) => as.rename(from, to, bare(opts) as any);
+    bound.duplicate = (p: string, to?: string) => as.duplicate(p, to);
+    bound.remove = (p: string, expect?: Parameters<Workspace["remove"]>[1], signal?: AbortSignal) => as.remove(p, expect, signal);
     return Object.freeze(bound) as Pick<Workspace, (typeof verbs)[number]>;
   }
 
@@ -1944,6 +1974,8 @@ export class Workspace {
   pinsQueued?: Set<string>;
   /** (the reservation the change now holding the lock took before it, lockedFor's; null if none) */
   private lockToken: Release | null = null;
+  /** the collector of the call holding the lock, if it asked for one (task #14) */
+  private sink: number[] | null = null;
   /** The reservation to read bytes whole in (LEGACY_MAX × COPIES): `t`, the caller's (else the lock holder's),
    * which must be live and that large, or an Error, loudly (daybreak2: whose reservation it is, not the page's
    * total); with none, one of its own taken now without waiting (the lock's holder never waits for one,
@@ -1960,7 +1992,7 @@ export class Workspace {
     return { t: own, mine: true };
   }
 
-  private async lockedFor<T>(p: string, f: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  private async lockedFor<T>(p: string, f: () => Promise<T>, signal?: AbortSignal, collect?: number[]): Promise<T> {
     let release: Release | null = null, held = 0;
     try {
       for (;;) {
@@ -1975,7 +2007,7 @@ export class Workspace {
           } finally {
             this.lockToken = null;
           }
-        }, signal);
+        }, signal, { collect });
         if (need <= held) return out;
         release?.();
         release = await reserve(need);
@@ -2020,7 +2052,7 @@ export class Workspace {
    * With `signal`: aborted before the lock is held, `f` never runs, now or
    * later, and this rejects (an AbortError); once held, it runs to its end
    * (daybreak2's LIMIT-59D-1). */
-  async locked<T>(f: () => Promise<T>, signal?: AbortSignal, how: { internal?: boolean; publish?: boolean; ifAvailable?: boolean; quiet?: boolean } = {}): Promise<T> {
+  async locked<T>(f: () => Promise<T>, signal?: AbortSignal, how: { internal?: boolean; publish?: boolean; ifAvailable?: boolean; quiet?: boolean; collect?: number[] } = {}): Promise<T> {
     const locks = (globalThis.navigator as any)?.locks;
     if (!locks || typeof locks.request !== "function") throw new WorkspaceError("storage", "this browser has no Web Locks, which changes to the workspace need: nothing was changed");
     this.open();
@@ -2031,7 +2063,17 @@ export class Workspace {
         this.unquarantined();
         await this.sameIdentity(true);
       }
-      const out = await f();
+      // (a call's collector (task #14), installed only once the lock is held and cleared before it is released: the
+      // lock is exclusive across tabs, and every op-logging transaction runs under it, so what tell() is given
+      // meanwhile is this call's alone (delta 1 r2, D2))
+      const prev = this.sink;
+      this.sink = how.collect ?? null;
+      let out: T;
+      try {
+        out = await f();
+      } finally {
+        this.sink = prev;
+      }
       // (the witness brought up to the commit, in the same hold: design/workspace-durability.md A.1)
       // (`quiet`: a long series of changes (a large move's view, D11) publishes once at its end, not each time)
       if ((!how.internal && !how.quiet) || how.publish) await this.publish().catch(() => {});
@@ -2961,6 +3003,8 @@ export class Workspace {
   /** Changes told to this tab's watchers, and (made here) to the other tabs. */
   tell(c: Change, broadcast = true) {
     if (!c.ops.length) return;
+    // (this page's own commits, during a call that collects: each local op's seq, once, before the call returns)
+    if (broadcast && this.sink) for (const o of c.ops) if (o.origin !== "server" && o.seq !== undefined) this.sink.push(o.seq);
     if (broadcast) try { this.channel?.postMessage({ from: this.tab, ops: c.ops }); } catch {}
     for (const f of this.subs) try { f(c); } catch (e) { console.warn("workspace watcher:", e); }
   }

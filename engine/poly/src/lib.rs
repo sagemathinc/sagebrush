@@ -35,7 +35,7 @@ mod lll;
 pub mod nf;
 mod vanhoeij;
 
-pub use budget::{with_default_limits, Budget, FactorLimit, Limits, Phase};
+pub use budget::{with_default_limits, Budget, FactorLimit, Limits, MemorySource, Phase};
 use budget::{big_bytes, div_work, limbs, mul_work, poly_bytes, words_bytes, FResult, Reservation};
 
 pub type ZPoly = Vec<BigInt>;
@@ -984,7 +984,8 @@ fn admit(b: &Budget, f: &[BigInt]) -> FResult<()> {
 /// g_i irreducible over Q, primitive, with positive leading coefficients;
 /// the content carries the sign of f's leading coefficient.  Returns
 /// (content, [(g_i, e_i)]) with the g_i sorted by degree, then coefficients
-/// from the top.  Within the default limits; a refusal is an error.
+/// from the top.  Within the default limits (Limits::DEFAULT: only the
+/// memory guard); a refusal is an error.
 pub fn try_factor(f: &[BigInt]) -> Result<(BigInt, Vec<(ZPoly, u32)>), FactorLimit> {
     try_factor_with(f, &Budget::default())
 }

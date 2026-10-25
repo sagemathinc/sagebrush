@@ -41,8 +41,10 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --limits FILE
            this run's engine limits (also SAGEBRUSH_LIMITS=FILE): a JSON
            object of at most 4096 bytes, such as {"ff.work": 100000000};
-           every key (ff.work, ff.conway_work, ff.embed_max, ff.root_bits)
-           is "unlimited" by default: set finite values to opt in to work
+           every key (ff.work, ff.conway_work, ff.embed_max, ff.root_bits,
+           poly.work, nf.relation_rounds, nf.certify_norm_max,
+           nf.certify_index_max) is "unlimited" by default: set finite
+           values to opt in to work
            limits (grading, shared compute); memory guards always apply;
            invalid limits end the run with status 2 before it starts
   --pkgset ID|FILE
@@ -180,8 +182,8 @@ function endByInterrupt() {
 // A process ended by a signal emits no "exit" (HARD-191-1): its directory is
 // removed by the next sagebrush that makes one, but only a directory it can
 // tell is one of ours, whose process is gone (sweepFigures, HARD-B98-1); the
-// prompt, which waits for input, removes its own on SIGINT, SIGTERM and
-// SIGHUP too (removeFiguresOnSignal).  A program run by the launcher runs in
+// prompt removes its own on SIGINT, and on SIGTERM and SIGHUP while it waits
+// for input (removeFiguresOnSignal, promptSignals).  A program run by the launcher runs in
 // a worker thread and gets Ctrl-C as KeyboardInterrupt (cliWorker); its
 // other signals, and all of a program run here on the main thread, keep their
 // default action: a handler here would wait for the computation to end.
@@ -244,9 +246,29 @@ function sweepFigures() {
     try { dir.closeSync(); } catch {}
   }
 }
+// (the prompt's handlers, by signal: a handler runs only when the main thread
+// is idle, so while the prompt evaluates, SIGTERM and SIGHUP have none and
+// keep their default action, ending a computation that never returns, a
+// closed terminal's included; the figures it leaves are sweepFigures'.
+// SIGINT's stays: it is the prompt's Ctrl-C)
+const figureHandlers = new Map<NodeJS.Signals, () => void>();
 function removeFiguresOnSignal() {
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
-    if (process.listenerCount(sig) === 0) process.once(sig, () => { removeFigures(); process.kill(process.pid, sig); });
+    if (process.listenerCount(sig) === 0) {
+      const h = () => { removeFigures(); process.kill(process.pid, sig); };
+      figureHandlers.set(sig, h);
+      process.once(sig, h);
+    }
+}
+/** While the prompt evaluates (busy): SIGTERM's and SIGHUP's handlers off,
+ * their default action back; on again when it waits for input. */
+function promptSignals(busy: boolean) {
+  for (const sig of ["SIGTERM", "SIGHUP"] as const) {
+    const h = figureHandlers.get(sig);
+    if (h === undefined) continue;
+    if (busy) process.removeListener(sig, h);
+    else if (!process.listeners(sig).includes(h)) process.once(sig, h);
+  }
 }
 function figurePath(): string {
   if (figuresDir === null) {
@@ -424,12 +446,20 @@ function repl(main: any, quiet: boolean): Promise<number> {
             // read-only home: no history
           }
         }
-        guarded(() => R.loader.exec(MAGIC_PRE, host, "exec", "<autoreload>"));
-        const code = guarded(() => R.loader.exec(ipythonSyntax(src) + "\n", main, "single", "<stdin>", { ...opts(), transform: magicTransform(sage) }));
-        guarded(() => R.loader.exec("import sys as _s\n" + MAGIC_POST, host, "exec", "<autoreload>"));
-        flushFiles();
-        R.stdout.flush();
-        R.stderr.flush();
+        promptSignals(true);
+        let code: number | null = null;
+        try {
+          guarded(() => R.loader.exec(MAGIC_PRE, host, "exec", "<autoreload>"));
+          code = guarded(() => R.loader.exec(ipythonSyntax(src) + "\n", main, "single", "<stdin>", { ...opts(), transform: magicTransform(sage) }));
+          guarded(() => R.loader.exec("import sys as _s\n" + MAGIC_POST, host, "exec", "<autoreload>"));
+          // (Python's file flushes are Python code too, and may not return:
+          // still busy, astra2 CORR-PR123-1)
+          flushFiles();
+          R.stdout.flush();
+          R.stderr.flush();
+        } finally {
+          promptSignals(false);
+        }
         if (code !== null && code !== 1) return finish(code);
       }
       rl.setPrompt(ps1());

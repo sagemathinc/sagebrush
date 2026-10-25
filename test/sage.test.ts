@@ -4,6 +4,9 @@ import { execFileSync } from "node:child_process";
 import { parse } from "../src/parse";
 
 const cli = (...args: string[]) => execFileSync(process.execPath, [__dirname + "/../src/cli.js", ...args], { encoding: "utf8" });
+// (a child's wall-clock bound, scaled by SAGEBRUSH_TIME_SCALE where the
+// machine is slower or shared, as test/magma.test.ts's WALL; ci.yml sets 2)
+const WALL = (ms: number) => ms * (Number(process.env.SAGEBRUSH_TIME_SCALE) || 1);
 
 test("sage mode lexes ^ as ** and ^^ as xor", () => {
   const op = (src: string, sage: boolean) => (parse(src, "t.sage", "exec", { sage }).body[0] as any);
@@ -62,7 +65,7 @@ test("ideal conversion is linear in the arity; sqrt(prec) is admitted first", ()
   const src = "import time\nS = PolynomialRing(QQ, 24000, 'x'); T = PolynomialRing(QQ, 24000, 'y')\nt = time.time(); K = S.ideal(S(0)) + T.ideal(T(0)); print(len(K.gens()), time.time() - t < 2)\n" +
     "try: QQ(2).sqrt(prec=100000000)\nexcept NotImplementedError as e: print('refused', 'limit' in str(e))\nprint((2/1).sqrt(prec=60000) > 1)";
   assert.equal(cli("--sage", "-c", src), "2 True\nrefused True\nTrue\n");
-  assert.ok(Date.now() - t < 30000, `took ${Date.now() - t} ms`);
+  assert.ok(Date.now() - t < WALL(30000), `took ${Date.now() - t} ms`);
 });
 
 test("divmod with a real number above 16384 bits is refused first, integral or not (HARD-F2B-1)", () => {
@@ -72,7 +75,7 @@ test("divmod with a real number above 16384 bits is refused first, integral or n
   const t = Date.now();
   const line = "divmod with a real number of more than 16384 bits of precision is not implemented\n";
   assert.equal(cli("--sage", "-c", src), line.repeat(3));
-  assert.ok(Date.now() - t < 20000);
+  assert.ok(Date.now() - t < WALL(20000));
 });
 
 test("a matrix index list subclass whose len() lies is refused after len() + 1 items (HARD-552-1)", () => {
@@ -83,7 +86,7 @@ test("a matrix index list subclass whose len() lies is refused after len() + 1 i
   const t = Date.now();
   const line = "an index list yielded more items but has length 1\n";
   assert.equal(cli("--sage", "-c", src), line.repeat(5) + "[0]\n");
-  assert.ok(Date.now() - t < 20000);
+  assert.ok(Date.now() - t < WALL(20000));
 });
 
 test("QQ[a] refuses a field of degree above 16 before building it (HARD-EC1-1)", () => {
@@ -93,7 +96,7 @@ test("QQ[a] refuses a field of degree above 16 before building it (HARD-EC1-1)",
     "a = QQbar(sqrt(2) + sqrt(3) + sqrt(5) + sqrt(7) + sqrt(11))\ntry:\n QQ[a]\nexcept NotImplementedError as e:\n print('refused qqbar')\nprint(QQ[sqrt(2 + sqrt(3 + sqrt(5)))].degree())\n";
   const t = Date.now();
   assert.equal(cli("--sage", "-c", src), "refused 4\nrefused 5\nrefused 7\nrefused qqbar\n8\n");
-  assert.ok(Date.now() - t < 30000);
+  assert.ok(Date.now() - t < WALL(30000));
 });
 
 test("delete_edge reads at most 4 items of an edge that claims a length of 3 (HARD-658-1)", () => {
@@ -102,7 +105,7 @@ test("delete_edge reads at most 4 items of an edge that claims a length of 3 (HA
     "g = Graph([(0, 1), (1, 2)])\nfor f in (lambda e: g.delete_edge(e), lambda e: g.delete_edges([e])):\n e = E()\n try:\n  f(e)\n except ValueError as err:\n  print(type(err).__name__, e.n, g.size())\n";
   const t = Date.now();
   assert.equal(cli("--sage", "-c", src), "ValueError 4 2\nValueError 4 2\n");
-  assert.ok(Date.now() - t < 20000);
+  assert.ok(Date.now() - t < WALL(20000));
 });
 
 test("variety refuses large point counts and precisions before the work (HARD-11A-1/2)", () => {
@@ -112,7 +115,7 @@ test("variety refuses large point counts and precisions before the work (HARD-11
     "try:\n R.ideal([x - 1, y]).variety(RealField(10^9))\nexcept NotImplementedError as e:\n print('refused')\nprint(len(R.ideal([x^100 - 1, y]).variety(CC)))\n";
   const t = Date.now();
   assert.equal(cli("--sage", "-c", src), "refused\nrefused\nrefused\n100\n");
-  assert.ok(Date.now() - t < 60000);
+  assert.ok(Date.now() - t < WALL(60000));
 });
 
 test("a large graph's adjacency matrices are refused before their n^2 entries exist (HARD-6B4-1)", () => {
@@ -120,7 +123,7 @@ test("a large graph's adjacency matrices are refused before their n^2 entries ex
   const src = "G = Graph(10000)\nfor f in (G.adjacency_matrix, G.weighted_adjacency_matrix, G.laplacian_matrix, lambda: matrix(G), lambda: matrix(QQ, G), lambda: matrix(1, 1, G)):\n try:\n  f()\n except (MemoryError, ValueError) as err:\n  print(type(err).__name__)\nprint(matrix(Graph(3)).dimensions())\n";
   const t = Date.now();
   assert.equal(cli("--sage", "-c", src), "SagebrushMemoryError\n".repeat(5) + "ValueError\n(3, 3)\n");
-  assert.ok(Date.now() - t < 30000);
+  assert.ok(Date.now() - t < WALL(30000));
 });
 
 test("an algebraic number converts to RR, RealField(p), float, CC and n() correctly rounded", () => {
@@ -152,7 +155,7 @@ test("an algebraic number's conversion checks its digit cap before asking the ro
   assert.equal(cli("--sage", "-c", src),
     "NotImplementedError RealField(10000000): a precision past the limit of 1048576 bits is not available in sagebrush yet\n" +
     "ArithmeticError the approximation did not converge within 99995 digits\n" + "1.4142135623 0.333333\n");
-  assert.ok(Date.now() - t < 30000);
+  assert.ok(Date.now() - t < WALL(30000));
 });
 
 test("a quotient ring keeps at most a few sum quotients for reuse (HARD-ACE-1)", () => {
@@ -161,7 +164,7 @@ test("a quotient ring keeps at most a few sum quotients for reuse (HARD-ACE-1)",
   const src = "R.<x,y> = QQ[]\nA = R.quo([x^2]); a = A(x)\nfor i in range(200):\n B = R.quo([y^2])\n z = a + B(y)\nprint(len(A._pushouts), z, z.parent() == (a + R.quo([y^2])(y)).parent() or True)\n";
   const t = Date.now();
   assert.equal(cli("--sage", "-c", src), "8 xbar + ybar True\n");
-  assert.ok(Date.now() - t < 60000);
+  assert.ok(Date.now() - t < WALL(60000));
 });
 
 test("matrix() over a number field is built by elimination over K; a ring of integers is refused before anything is read (HARD-541-1)", () => {
@@ -171,7 +174,7 @@ test("matrix() over a number field is built by elimination over K; a ring of int
   const src = "P.<t> = QQ[]\nK = NumberField(t^2 - 2, 'a')\nprint(matrix(K, 0, 0, []).dimensions(), matrix(K, [[K.gen()]]).det(), matrix(QuadraticField(-3, 'b'), 1, 1, [1]).rank())\ntry:\n matrix(K.maximal_order(), 0, 0, [])\nexcept NotImplementedError as e:\n print(type(e).__name__)\nprint(matrix(QQbar, 2, 2, [1, 2, 3, 4]).det())\n";
   const t = Date.now();
   assert.equal(cli("--sage", "-c", src), "(0, 0) a 1\nNotImplementedError\n-2\n");
-  assert.ok(Date.now() - t < 30000);
+  assert.ok(Date.now() - t < WALL(30000));
 });
 
 test("matrix() keeps callable row iterables as rows, and takes an entry function (CORR-260-1)", () => {

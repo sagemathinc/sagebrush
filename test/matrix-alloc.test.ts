@@ -98,3 +98,59 @@ for f in [lambda: sm.Matrix(object(), [[x, x], [x]]), lambda: sm.Matrix(object()
     ].join("\n"),
   );
 });
+
+// matrix(..., {(i, j): x}) (the dict-of-positions forms): every key is read
+// and checked before the size is admitted (_shape), and the size before the
+// entries are allocated; a dict of more keys than any admitted matrix has
+// positions is refused before any key is read; a dict subclass is read as a
+// dict, its own items() not called.
+test("matrix() from a dict admits its keys, then its size, before allocating", () => {
+  const src = `
+import _sage_matrix as sm
+def run(f):
+    try:
+        M = f()
+        print("ok", M.dimensions())
+    except Exception as e:
+        print(type(e).__name__, str(e).split(" (")[0])
+shapes = []
+real_shape = sm._shape
+def spy_shape(m, n, limit=None):
+    shapes.append((m, n))
+    return real_shape(m, n, limit)
+sm._shape = spy_shape
+run(lambda: sm.matrix({(10**12, 10**12): 1}))
+run(lambda: sm.matrix(ZZ, 10**6, 10**6, {(0, 0): 1}))
+run(lambda: sm.matrix(ZZ, 10**6, 10**6, {(0, 0.5): 1}))
+print(shapes)
+sm._shape = real_shape
+class Key(tuple):
+    reads = 0
+    def __iter__(self):
+        Key.reads += 1
+        return tuple.__iter__(self)
+saved = sm._MAX_ENTRIES
+sm._MAX_ENTRIES = 5
+run(lambda: sm.matrix(ZZ, 3, 3, {Key((i, 0)): 1 for i in range(6)}))
+print("keys read", Key.reads)
+sm._MAX_ENTRIES = saved
+class Odd(dict):
+    def items(self):
+        return [((0, 0), 99)]
+print(sm.matrix(ZZ, 2, 2, Odd({(1, 1): 5})).list())
+`;
+  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "--sage", "-c", src], { encoding: "utf8" });
+  assert.equal(
+    out,
+    [
+      "NotImplementedError a 1000000000001 x 1000000000001 matrix exceeds sagebrush's limit of 4194304 entries",
+      "NotImplementedError a 1000000 x 1000000 matrix exceeds sagebrush's limit of 4194304 entries",
+      "TypeError 'sage.rings.real_mpfr.RealLiteral' object cannot be interpreted as an integer",
+      "[(1000000000001, 1000000000001), (1000000, 1000000)]",
+      "ValueError more than 5 entries",
+      "keys read 0",
+      "[0, 0, 0, 5]",
+      "",
+    ].join("\n"),
+  );
+});

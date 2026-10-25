@@ -1,0 +1,18 @@
+{
+ "about": "turndown 7.2.4, vendored unchanged for optional/bash's bundle (plan-bash-shell r3 \u00a71). Each file is the npm tarball's; vendor/verify-from-npm.mjs re-checks them against the tarball, by its integrity.",
+ "package": "turndown",
+ "version": "7.2.4",
+ "license": "MIT",
+ "tarball": "https://registry.npmjs.org/turndown/-/turndown-7.2.4.tgz",
+ "integrity": "sha512-I8yFsfRzmzK0WV1pNNOA4A7y4RDfFxPRxb3t+e3ui14qSGOxGtiSP6GjeX+Y6CHb7HYaFj7ECUD7VE5kQMZWGQ==",
+ "files": {
+  "turndown.browser.es.js": {
+   "from": "package/lib/turndown.browser.es.js",
+   "sha256": "3bcd2dd53d6eb3f7a8ed2363404c8869d92cfcaae7a76dca2d556e7ec4cb1f42"
+  },
+  "LICENSE": {
+   "from": "package/LICENSE",
+   "sha256": "a055e3a15db4b4cbb5af381230eba085603126d7d5d8c4dae45ee85b877a9729"
+  }
+ }
+}

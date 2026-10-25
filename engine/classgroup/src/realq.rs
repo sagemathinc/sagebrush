@@ -203,7 +203,8 @@ pub fn class_group_real_with(d: &BigInt, certify: bool) -> Result<(RealQuadratic
     }
     rels.extend(neg);
     elems.extend(neg_el);
-    for round in 0..200 {
+    // (unlimited unless the caller set crate::limits::with_round_limit)
+    for round in 0..crate::limits::round_limit() {
         sagebrush_interrupt::check();
         tm.rounds = round + 1;
         let t = crate::clock::Instant::now();

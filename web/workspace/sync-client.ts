@@ -31,7 +31,8 @@
 //   or state, or the person's resume().
 import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
-import { Outbox, Fenced, switchTo, sender, obligate, rebuildKey, type OutboxRecord, type WireOp } from "./sync-outbox";
+import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, wireOf, ownedSeq, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
+import { seedLedger, hubOf, driveObsolete, ledgerKeys } from "./sync-ledger";
 import { bytesFor } from "./sync-pins";
 import { cursorOf, applyOps, genPrefix, drainConfirmed } from "./sync-confirmed";
 import { capture as captureAdoption } from "./sync-adopt";
@@ -105,6 +106,8 @@ export type SyncStatus = {
   /** when a timer or pause ends */
   resumesAt?: number;
   lastSynced?: number;
+  /** (step 5) the outbox stopped at its bound: "too many changes waiting to sync" (C1) */
+  full?: boolean;
 };
 /** An op of the server's log, as an `index` message carries it. */
 export type IndexOp = WireOp & { seq: number; device: string };
@@ -122,6 +125,15 @@ export type ClientOptions = {
   WebSocket?: typeof WebSocket;
   /** each page of the server's log, in order (step 4) */
   onIndex?: (page: IndexPage) => Promise<void>;
+  /** (step 5) the page's sync owner's lifecycle: the namespace and epoch it is eligible for.  With it, the client
+   * runs only for that namespace, checks `fence()` before asking for the lock, once it holds it, after discovering
+   * the namespace and before each connection, and renews its lease by compare-and-set (renewLease), never by
+   * switchTo: an off, a sign-out or another namespace in any tab stops it */
+  lifecycle?: { ns: string; epoch: number; fence: () => Promise<boolean> };
+  /** (step 5) each lease this client's connection took: the holder's token */
+  onLease?: (lease: Lease) => void;
+  /** (step 5) the sender lock let go (the connection ended; the client may ask for it again): no longer the holder */
+  onRelease?: () => void;
 };
 
 const key = (ns: string, what: string) => `sync:${ns}:${what}`;
@@ -145,11 +157,15 @@ type Conn = {
   generation: number;
   ob: Outbox;
   ws: WebSocket;
+  /** (task #14) the lifecycle epoch and the lease generation this connection's in-memory events carry */
+  epoch: number;
   welcomed: boolean;
   /** writes allowed: the account is active and nothing paused them */
   writable: boolean;
   /** sending stopped until the rebuild (step 4): the server's `invalid` "rebuild", or this device's log diverged */
   halted?: string;
+  /** (step 5) the outbox stopped at its bound when last looked at */
+  full?: boolean;
   /** the next dseq to send; undefined: from the lowest record not accepted */
   next?: number;
   /** send again from the lowest, once nothing is in flight */
@@ -240,10 +256,21 @@ export class SyncClient {
   /** Runs until stop(), or until the server says sync is off for this account, or the session ends. */
   async start(): Promise<void> {
     this.unwatch = this.w.watch(() => this.kick());
+    // (other namespaces' ledgers, queued for deletion, deleted a page at a time while this client runs: task #14)
+    void driveObsolete(this.w, (ms) => new Promise<void>((ok) => {
+      const cancel = this.clock.after(ms, () => { this.cancels.delete(cancel); ok(); });
+      this.cancels.add(cancel);
+    }), () => this.stopped).catch((e) => console.warn("sync: ledger cleanup", e));
     try {
       while (!this.stopped) {
         const ns = await this.namespace();
         if (!ns) return;
+        // (an owner's lifecycle: only its namespace, and only while it still holds (before the lock is asked for))
+        const lc = this.opts.lifecycle;
+        if (lc && (ns !== lc.ns || !(await lc.fence()))) {
+          this.offWith(ns !== lc.ns ? "sync was turned on again elsewhere: turn it on here to follow" : "sync is off here");
+          return;
+        }
         const end = await this.locked(ns);
         if (end === "revoked" || end === "fenced" || end === "stopped") return;
       }
@@ -345,9 +372,16 @@ export class SyncClient {
     this.say({ state: "waiting", ns });
     try {
       return await sender(ns, async () => {
-        await this.loadDurable(ns);
-        // (one connection at a time; after one ends, the namespace is asked again, unless it ended for good)
-        return this.connection(ns);
+        try {
+          // (holding the lock now: still eligible?)
+          if (this.opts.lifecycle && !(await this.opts.lifecycle.fence())) return "fenced";
+          await this.loadDurable(ns);
+          // (one connection at a time; after one ends, the namespace is asked again, unless it ended for good)
+          return await this.connection(ns);
+        } finally {
+          // (the lock goes with this callback's return: this page holds it no more, whatever comes next)
+          this.opts.onRelease?.();
+        }
       }, { signal: this.abort.signal });
     } catch (e) {
       if (this.stopped) return "stopped";
@@ -360,16 +394,29 @@ export class SyncClient {
     if (this.stopped) return "stopped";
     let lease;
     try {
-      lease = await switchTo(this.w, ns);
+      // (with an owner: a renewal by compare-and-set, which an off or another epoch refuses; without one (tests, step 3
+      // and 4's direct use): the lease taken as before)
+      const lc = this.opts.lifecycle;
+      if (lc && !(await lc.fence())) return "fenced";
+      lease = lc ? await renewLease(this.w, ns, lc.epoch) : await switchTo(this.w, ns);
     } catch (e) {
       if (e instanceof Fenced) return "fenced";
       throw e;
     }
+    this.opts.onLease?.(lease);
     const ob = new Outbox(this.w, lease);
     // (with the confirmed index: the first sync's adoption captured (the tree as of W1) before the socket opens (C3);
     // without it (step 3): the scan starts at the latest op)
     if (this.opts.onIndex) await captureAdoption(this.w, ns);
     else if ((await ob.status()).scanned === undefined) await ob.begin(await this.w.lastSeq());
+    // (task #14: the namespace's ledger seeded once, after the adoption (its boundary then W1) and before anything
+    // is scanned or sent; then this holder announced, with the ledger's revision, before any scan or ack of its own)
+    await seedLedger(this.w, ns, (o, dseq) => wireOf(o, dseq));
+    const epoch = (await this.metaGet<number>("sync:epoch")) ?? 0;
+    // (it answers waits' hellos from now on, even before it sends: a wait on an unknown generation is confirmed by
+    // that answer alone, CORR-PR128-6-R5)
+    hubOf(this.w.ws).holding(ns, epoch, lease.gen);
+    hubOf(this.w.ws).post({ t: "holder", ns, epoch, gen: lease.gen, rev: (await this.metaGet<number>(ledgerKeys(ns).rev)) ?? 0 });
     // (where the log is read from, and to: the records accepted and awaiting their echo, LIMIT-PR58-3)
     const awaiting = await this.awaitingEcho(ob);
     // (with the confirmed index (D5): `request_after` from its durable cursor `apply_after`, lowered to just before
@@ -386,13 +433,15 @@ export class SyncClient {
     return new Promise<End>((done) => {
       let ended = false;
       const c: Conn = {
-        ns, account: ns.split(":")[0], generation: Number(ns.split(":")[1]), ob, ws, welcomed: false, writable: false, resync: false, req: 0, pending: new Map(), pulling: false, target: awaiting?.hi ?? 0, pages: 0,
+        ns, account: ns.split(":")[0], generation: Number(ns.split(":")[1]), ob, ws, epoch, welcomed: false, writable: false, resync: false, req: 0, pending: new Map(), pulling: false, target: awaiting?.hi ?? 0, pages: 0,
         have: new Set(), missing: new Set(), final: new Set(), gone: new Set(), chain: Promise.resolve(),
         end: (why) => {
           if (ended) return;
           ended = true;
           if (this.conn === c) this.conn = null;
           this.unwake();
+          // (what was in flight on it is local again (task #14))
+          hubOf(this.w.ws).reset(c.ns, c.epoch, c.ob.lease.gen);
           try { ws.close(1000, why); } catch {}
           void (async () => {
             if (why === "closed" && !this.stopped) {
@@ -679,6 +728,7 @@ export class SyncClient {
     }
     if (!p || p.kind !== "ops") return;
     c.pending.delete(m.req);
+    hubOf(this.w.ws).answered(c.ns, c.ob.lease.gen, p.recs.map(ownedSeq).filter((x): x is number => x !== undefined));
     if (!Array.isArray(m.ops)) return c.end("closed");
     const results = m.ops as ({ dseq: number; seq: number } | { dseq: number; code: string })[];
     await c.ob.acked(results);
@@ -839,6 +889,7 @@ export class SyncClient {
       return;
     }
     const st0 = await c.ob.status();
+    c.full = !!st0.full;
     if (!c.writable || c.halted) {
       this.showWaiting(c, st0.count);
       return;
@@ -897,6 +948,8 @@ export class SyncClient {
       this.stats.opsSent += batch.length;
       this.stats.maxOps = Math.max(this.stats.maxOps, batch.length);
       this.ask(c, { t: "ops", ops: batch.map((r) => r.op) }, { kind: "ops", recs: batch });
+      // (sent: in memory only, fenced by this connection's lease generation (task #14))
+      hubOf(this.w.ws).sent(c.ns, c.epoch, c.ob.lease.gen, batch.map(ownedSeq).filter((x): x is number => x !== undefined));
       c.next = batch[batch.length - 1].dseq + 1;
       if (n < recs.length) return;
     }
@@ -922,7 +975,7 @@ export class SyncClient {
     if (c.largeHalt) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.largeHalt });
     if (c.halted) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.halted === "diverged" ? "this device's changes need a rebuild" : "the server asks for a rebuild" });
     if (this.paused) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "storage full", ...(this.paused.until ? { resumesAt: this.paused.until } : {}) });
-    this.say({ state: count ? "syncing" : "synced", ns: c.ns, waiting: count, ...(resumesAt ? { resumesAt } : {}), ...(count ? {} : { lastSynced: this.clock.now() }) });
+    this.say({ state: count ? "syncing" : "synced", ns: c.ns, waiting: count, ...(resumesAt ? { resumesAt } : {}), ...(count ? {} : { lastSynced: this.clock.now() }), ...(c.full ? { full: true } : {}) });
   }
 
   // ---- blobs (§5.4, L2, L4)
