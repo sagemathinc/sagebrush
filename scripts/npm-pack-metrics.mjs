@@ -104,7 +104,8 @@ export function runNpm(args, { cwd, env = process.env, npm = "npm", timeoutMs = 
     if (iso) return why("npm config isolation failed", iso);
     const r = spawnSync(npm, args, { cwd, env: npmEnv(env, u, g), encoding: "utf8", timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: CAPS.output_bytes, stdio: ["ignore", "pipe", "pipe"] });
     if (r.error?.code === "ENOENT") return why("npm not found");
-    if (r.error?.code === "ETIMEDOUT" || (r.signal === "SIGKILL" && r.status === null)) return why(`npm timed out after ${timeoutMs} ms`);
+    // (only spawnSync's own deadline is a timeout; a signal from anywhere else is npm failing)
+    if (r.error?.code === "ETIMEDOUT") return why(`npm timed out after ${timeoutMs} ms`);
     if (r.error?.code === "ENOBUFS") return why(`npm output over ${CAPS.output_bytes} bytes`);
     if (r.error) return why("npm failed to run", r.error.message);
     if (r.status !== 0) return why(`npm exited ${r.status ?? r.signal}`, (r.stderr || "").trim().split("\n").pop());
@@ -116,10 +117,12 @@ export function runNpm(args, { cwd, env = process.env, npm = "npm", timeoutMs = 
 
 // Pack `pkgDir`: the measurement, or {reason}; and the key it was made under
 export function packDir(pkgDir, opts = {}) {
-  const v = runNpm(["--version"], { ...opts, cwd: pkgDir });
-  const key = { npm: v.stdout ? v.stdout.trim() : null, node: process.version.replace(/^v/, ""), script_sha256: sha256(readFileSync(SELF)) };
-  if (v.reason) return { key, ...v };
+  const key = { npm: null, node: process.version.replace(/^v/, ""), script_sha256: sha256(readFileSync(SELF)) };
+  // (before any npm invocation: npm would load it from this directory even for --version)
   if (existsSync(join(pkgDir, ".npmrc"))) return { key, ...why("project npmrc present") };
+  const v = runNpm(["--version"], { ...opts, cwd: pkgDir });
+  if (v.reason) return { key, ...v };
+  key.npm = v.stdout.trim();
   let pkg;
   try {
     pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
@@ -178,7 +181,9 @@ export function readRecord(path) {
     if (n > CAPS.record_bytes) return { unavailable: `the npm-pack record is ${n} bytes, over ${CAPS.record_bytes}` };
     const rec = strictParse(readFileSync(path, "utf8"));
     const p = recordProblems(rec);
-    return p.length ? { unavailable: clip(`a malformed npm-pack record: ${p.join("; ")}`) } : rec;
+    if (p.length) return { unavailable: clip(`a malformed npm-pack record: ${p.join("; ")}`) };
+    // (a record-supplied reason is held to the wrapper's own envelope)
+    return rec.unavailable === undefined ? rec : { ...rec, unavailable: clip(rec.unavailable) };
   } catch (e) {
     return { unavailable: clip(`a malformed npm-pack record: ${e.message}`) };
   }

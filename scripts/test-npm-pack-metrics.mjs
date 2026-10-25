@@ -69,6 +69,7 @@ try {
   writeFileSync(join(fake, "good.json"), pkgOut());
   writeFileSync(join(bin, "npm"), `#!/bin/sh
 echo "$$" > "$FAKE_DIR/pid"
+echo "$*" >> "$FAKE_DIR/calls"
 env > "$FAKE_DIR/env"
 if [ "$1" = "--version" ]; then echo 11.0.0-fake; exit 0; fi
 printf '%s\\n' "$*" > "$FAKE_DIR/args"
@@ -77,6 +78,7 @@ case "$FAKE_NPM" in
   notjson) echo "npm notice something" ;;
   trailing) cat "$FAKE_DIR/good.json"; echo garbage ;;
   hang) exec sleep 30 ;;
+  selfkill) kill -9 $$ ;;
   *) cat "$FAKE_DIR/good.json" ;;
 esac
 `);
@@ -109,10 +111,18 @@ esac
     }
     check("wrapper: the timed-out child was killed", pid > 0 && !alive, `pid ${pid}`);
   }
+  {
+    // (NPM-PACK-138-3: only spawnSync's own timeout is a timeout; a SIGKILL from elsewhere is a failure)
+    const r = packDir(pkg, { env: fakeEnv("selfkill"), timeoutMs: 60_000 });
+    reason("wrapper: a SIGKILL that isn't the timeout", r, "npm exited SIGKILL");
+  }
   reason("wrapper: npm missing from PATH", packDir(pkg, { env: { ...fakeEnv("good"), PATH: join(tmp, "empty-path") } }), "npm not found");
   {
-    writeFileSync(join(pkg, ".npmrc"), "");
+    // (NPM-PACK-138-1: refused before any npm invocation, even npm --version)
+    writeFileSync(join(pkg, ".npmrc"), "this is = [not valid\n");
+    rmSync(join(fake, "calls"), { force: true });
     reason("wrapper: a project npmrc", packDir(pkg, { env: fakeEnv("good") }), "project npmrc present");
+    check("wrapper: a project npmrc means npm is never invoked", !existsSync(join(fake, "calls")), existsSync(join(fake, "calls")) ? readFileSync(join(fake, "calls"), "utf8") : "");
     rmSync(join(pkg, ".npmrc"));
   }
   {
@@ -177,6 +187,12 @@ esac
     writeFileSync(join(tmp, "bad3.json"), JSON.stringify({ ...good, files: [["a", 1], ["a", 0]], entryCount: 2 }));
     check("read: a duplicate path in a record", /a duplicate path/.test(readRecord(join(tmp, "bad3.json")).unavailable));
     check("read: a missing record", readRecord(join(tmp, "none.json")).unavailable === "no npm-pack record");
+    // (NPM-PACK-138-2: a record-supplied reason is held to the same envelope as the wrapper's own)
+    writeFileSync(join(tmp, "long.json"), JSON.stringify({ format: FORMAT, v: 1, commit: "c", tree: "t", run: {}, key: null, unavailable: "r".repeat(1000) + "\u0001\u001b[31m\nx" }));
+    const lr = readRecord(join(tmp, "long.json"));
+    check("read: a long record-supplied reason is clipped", typeof lr.unavailable === "string" && lr.unavailable.length <= CAPS.reason_chars && !/[\u0000-\u001f\u007f]/.test(lr.unavailable), JSON.stringify(lr.unavailable?.length));
+    const lrep = report(lr, lr, "transition").join("\n");
+    check("report: a long record-supplied reason stays within the cap", lrep.split("\n").every((l) => l.length <= CAPS.reason_chars + 100) && !/[\u0000-\u0009\u000b-\u001f]/.test(lrep), String(Math.max(...lrep.split("\n").map((l) => l.length))));
   }
   // ---- the report
   {
