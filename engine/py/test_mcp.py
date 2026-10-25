@@ -250,10 +250,14 @@ def structured():
     assert r["class_group"]["value"] == {"order": 327924 * 16, "invariants": [327924, 2, 2, 2, 2]}, r
     assert not r["class_group"]["certified"] and any("estimate" in a for a in r["class_group"]["assumes"]), r
     assert sc["status"] == "heuristic", sc
+    # the unconditional certificate has no default limit since #113 (a user's
+    # own computation is unlimited): this field (Minkowski bound 2205315, once
+    # refused by default) is now certified, with the class group proof=false gives
     sc = call("number_field", {"polynomial": "x^2 + 3*10^12 + 1"})
     r = sc["result"]
-    assert r["not_certified_because"].startswith("class_group with proof=True: beyond the limits"), r
-    assert not r["class_group"]["certified"] and "GRH" in r["class_group"]["assumes"] and sc["status"] != "proven", sc
+    assert not r.get("not_certified_because") and r["class_group"]["certified"], r
+    h = call("number_field", {"polynomial": "x^2 + 3*10^12 + 1", "proof": False})["result"]["class_group"]["value"]
+    assert r["class_group"]["value"] == h, (r["class_group"], h)
     assert r["regulator"] == {"value": "1", "certified": True, "assumes": []}, r  # (no units of infinite order)
     call("number_field", {"polynomial": "x^2 - 1"}, "exception")
     call("number_field", {"polynomial": "x^2 + 1", "proof": "yes"}, "invalid_arguments")
