@@ -2209,13 +2209,20 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   const s1 = await signIn(ST1);
   let [c, b] = await status(s1);
   ok(c === 200 && b.available === true && b.state === "off" && b.generation === undefined && b.reason === undefined && (await nothing(ST1)), "status of an account never synced, whose plan has sync: available, off, and nothing is made: " + JSON.stringify(b));
+  // (the account echo, PR #130: the hash of this request's own session, whatever the caller sends)
+  ok(b.account === hashOf(ST1), "status says which account it was computed for: this session's account hash: " + JSON.stringify(b.account));
+  {
+    const r = await fetchAt(SITE, "/api/sync/v1/status?account=" + hashOf(ST2), { headers: { cookie: s1, "sec-fetch-site": "same-origin", "x-account": hashOf(ST2) } });
+    const bb = await r.json();
+    ok(bb.account === hashOf(ST1), "…from the session alone: an account named in the query or a header changes nothing: " + JSON.stringify(bb.account));
+  }
   for (let i = 0; i < 5; i++) await status(s1);
   await new Promise((r) => setTimeout(r, 1100)); // (past the object's minute, a second in tests: it asks CoCalc again)
   [c, b] = await status(s1);
   ok(b.available === true && (await nothing(ST1)), "asked again and again, before and after the plan it remembers grows old: still nothing is made");
   const s2 = await signIn(ST2);
   [c, b] = await status(s2);
-  ok(c === 200 && b.available === false && b.reason === "not_allowlisted" && b.state === "off" && (await nothing(ST2)), "off the allowlist: not available, not_allowlisted (for the page's logic: it hides the switch)");
+  ok(c === 200 && b.available === false && b.reason === "not_allowlisted" && b.state === "off" && b.account === hashOf(ST2) && (await nothing(ST2)), "off the allowlist: not available, not_allowlisted (for the page's logic: it hides the switch), its account echoed");
   const sx = await signIn(X1);
   [c, b] = await status(sx);
   ok(b.available === false && b.reason === "plan_has_no_sync" && b.state === "off" && (await nothing(X1)), "a plan without sync: plan_has_no_sync, nothing made: " + JSON.stringify(b));
@@ -2228,7 +2235,7 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   [c, b] = await status(s4);
   ok(b.available === true, "and once CoCalc answers, after the moment it isn't asked: available");
   [c, b] = await status(sa);
-  ok(b.available === true && b.state === "active" && b.generation === (await genOf(A)), "an account on: its state and generation: " + JSON.stringify(b));
+  ok(b.available === true && b.state === "active" && b.generation === (await genOf(A)) && b.account === hashOf(A), "an account on: its state and generation, its account echoed: " + JSON.stringify(b));
   // beside an enable: the statuses are answered from whatever is so, and the one enable registers once
   const s3 = await signIn(ST3);
   const [en, ...st] = await Promise.all([post(s3, "/api/sync/v1/enable", {}), status(s3), status(s3), status(s3), status(s3)]);
