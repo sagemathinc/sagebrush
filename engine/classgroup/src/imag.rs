@@ -166,7 +166,8 @@ pub fn class_group_with(d: &BigInt, certify: bool) -> Result<(ClassGroup, Timing
     let mut stats = Stats { polys: 0, candidates: 0, full: 0, partial_pairs: 0 };
     let mut want = (tu.excess * n as f64) as usize + 20;
     let mut counts = vec![0u32; n];
-    for round in 0..200 {
+    // (unlimited unless the caller set crate::limits::with_round_limit)
+    for round in 0..crate::limits::round_limit() {
         sagebrush_interrupt::check();
         tm.rounds = round + 1;
         let t = crate::clock::Instant::now();
