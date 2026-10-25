@@ -2241,15 +2241,17 @@ async function t14Large() {
   }
 }
 
-/** The committed planning allowance for a stored ledger row, bytes (daybreak3's storage decision for #128, Oct 25):
- * A = 64 ceil(1.25 M / 64), floor 960, where M is the largest comparable measurement routed: M = 1444 (one of the ten
- * controlled runs at 612fe1c7: 875 874 876 874 873 874 1444 874 874 874) gives 1856. */
-const ROW_ALLOWANCE = 1856;
+/** The committed planning allowance for a stored ledger row, bytes (daybreak3's storage ruling r3 for #128, Oct 25):
+ * A = max(960, 64 ceil(1.25 P / 64)), P the largest peak bytes a row at the global cap (the full-cap experiment at
+ * ac860043: P = 303.4, so the floor).  A planning envelope, not a physical bound: a live-invariant measurement above it
+ * reopens the decision. */
+const ROW_ALLOWANCE = 960;
 
 async function t14Figures() {
   // (LIMIT-PR128-1-R2: the widest row by construction (a refusal's code is ASCII [a-z0-9_], at most CODE.max); its
-  // stored size measured on rows nothing can compress (each with its own random namespace, random seqs, random code);
-  // and that measurement held to the committed allowance ROW_ALLOWANCE)
+  // stored size measured in the live invariant's shape (daybreak3's ruling r3, option (i)): exactly three legal
+  // maximum-width namespaces, each constant across its rows, every other field maximum-width and random; the peak of
+  // the usage sampled right after each commit and once settled, held to the committed allowance ROW_ALLOWANCE)
   const w = await fresh();
   const MAX = Number.MAX_SAFE_INTEGER;
   const hexr = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n / 2)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -2257,7 +2259,7 @@ async function t14Figures() {
   const alnum = "abcdefghijklmnopqrstuvwxyz0123456789_";
   const coder = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => alnum[b % alnum.length]).join("");
   const nsOf = () => `${hexr(64)}:${digits(15)}:${w.device}`;
-  const ns = nsOf();
+  const nss = [nsOf(), nsOf(), nsOf()], ns = nss[0];
   await W.switchTo(w, ns);
   const kinds = {
     refused: { ns, lseq: MAX, s: "refused", d: 1, dseq: MAX, code: "z".repeat(W.CODE.max) },
@@ -2269,23 +2271,32 @@ async function t14Figures() {
   };
   const widths = Object.fromEntries(Object.entries(kinds).map(([k, v]) => [k, JSON.stringify(v).length]));
   const [widest, maxChars] = Object.entries(widths).sort((a, b) => b[1] - a[1])[0];
-  check(ns.length === 97 && maxChars === 216 && widths.refused === 216, "figures: the widest valid rows by construction (a refused one, a local supersession) are 216 JSON characters, ASCII only: " + J({ widths, widest }));
+  check(nss.every((x) => x.length === 97) && maxChars === 216 && widths.refused === 216, "figures: the widest valid rows by construction (a refused one, a local supersession) are 216 JSON characters, ASCII only: " + J({ widths, widest }));
   const est = async () => (await navigator.storage.estimate()).usage ?? 0;
   await sleep(500);
   const u0 = await est();
-  const rnd = () => MAX - Math.floor(Math.random() * 2 ** 40);
-  for (let p = 0; p < 10; p++) await rawTx(w.ws, ["syncLedger"], (tx) => { const st = tx.objectStore("syncLedger"); for (let i = 0; i < 1000; i++) { const lseq = rnd(); st.put({ ns: nsOf(), lseq, s: "refused", d: 1, dseq: rnd(), code: coder(W.CODE.max) }); } });
+  // (10,000 rows over the three namespaces, 3,334 / 3,333 / 3,333, in commits of at most 1,000; lseq distinct within a
+  // namespace, every seq 16 digits)
+  const N = 10_000, per = [3334, 3333, 3333];
+  const rnd = (n) => crypto.getRandomValues(new Uint32Array(1))[0] % n;
+  const samples = [];
+  for (let k = 0; k < 3; k++)
+    for (let i0 = 0; i0 < per[k]; i0 += 1000)
+      await rawTx(w.ws, ["syncLedger"], (tx) => {
+        const st = tx.objectStore("syncLedger");
+        for (let i = i0; i < Math.min(i0 + 1000, per[k]); i++) st.put({ ns: nss[k], lseq: MAX - i * 2 ** 20 - rnd(2 ** 20), s: "refused", d: 1, dseq: MAX - rnd(2 ** 30) * 2 ** 10 - rnd(2 ** 10), code: coder(W.CODE.max) });
+      }).then(async () => samples.push((await est()) - u0));
   await sleep(1500);
-  const u1 = await est();
-  const measured = Math.round((u1 - u0) / 10_000);
-  // (the committed planning allowance A, bytes per stored row (daybreak3's storage decision for #128): A = 64 ceil(1.25 M
-  // / 64), floor 960, M the largest comparable measurement routed (the controlled runs at the reviewed head included).
-  // A planning envelope, not a physical bound: every measurement must be within it, and one above it reopens the decision)
+  samples.push((await est()) - u0);
+  const rows = await all(w.ws, "syncLedger");
+  const dist = nss.map((x) => rows.filter((r) => r.ns === x).length);
+  check(rows.length === N && J(dist) === J(per), `figures: exactly three namespaces, each constant within its rows: ${J(dist)} of ${rows.length}`);
+  const measured = Math.round(Math.max(...samples) / N);
   const A = ROW_ALLOWANCE;
   const skips = JSON.stringify(Array.from({ length: 16 }, () => [MAX, MAX, 2]));
   const meta = { ledgerCount: 50_000, ledgerFloor: MAX, ledgerFrom: MAX, ledgerRev: MAX, ledgerSeeded: true, ledgerSeedAt: MAX, ledgerWipe: true };
   const metaChars = Object.entries(meta).reduce((a, [k, v]) => a + `sync:${ns}:${k}`.length + JSON.stringify(v).length, 0) + `sync:${ns}:ledgerSkips`.length + skips.length;
-  check(skips.length <= 609 && measured > 0 && measured <= A, `figures (task #14): measured ${measured} B a stored row, ${measured > A ? "EXCEEDS" : "within"} the committed allowance A = ${A}: ` + J({ measuredBytesPerIncompressibleRow: measured, committedAllowanceBytesPerRow: A, perNamespacePlanMiB: +(A * 70_000 / 2 ** 20).toFixed(1), globalPlanMiB: +(A * 210_000 / 2 ** 20).toFixed(1), rowJsonCharsMax: maxChars, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
+  check(skips.length <= 609 && measured > 0 && measured <= A, `figures (task #14): measured a peak of ${measured} B a stored row, ${measured > A ? "EXCEEDS" : "within"} the committed allowance A = ${A}: ` + J({ peakBytesPerRow: measured, samplesBytes: samples, namespaces: dist, committedAllowanceBytesPerRow: A, perNamespacePlanMiB: +(A * 70_000 / 2 ** 20).toFixed(1), globalPlanMiB: +(A * 210_000 / 2 ** 20).toFixed(1), rowJsonCharsMax: maxChars, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
 }
 
 async function t14Review() {
