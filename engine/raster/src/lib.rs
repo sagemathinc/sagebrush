@@ -146,8 +146,9 @@ pub unsafe extern "C" fn rs_render(svg: *const u8, svg_len: usize, scale: f32, w
     reply(render(svg, scale, size, background, dpi, text))
 }
 
-fn render(svg: &[u8], scale: f32, size: Option<(u32, u32)>, background: &[u8], dpi: f32, text: &[u8]) -> Result<Vec<u8>, Fail> {
-    let svg = std::str::from_utf8(svg).map_err(|_| "an SVG that is not UTF-8".to_string())?;
+/// The PNG text chunks from their wire form: key, value, key, value, ...,
+/// each UTF-8 after its byte length (u32, little-endian).
+pub fn text_pairs(text: &[u8]) -> Result<Vec<(String, String)>, Fail> {
     let mut strings = vec![];
     let mut i = 0;
     while i < text.len() {
@@ -159,7 +160,19 @@ fn render(svg: &[u8], scale: f32, size: Option<(u32, u32)>, background: &[u8], d
     if strings.len() % 2 != 0 {
         return Err("a PNG text key without its value".into());
     }
-    let pairs: Vec<(String, String)> = strings.chunks(2).map(|kv| (kv[0].clone(), kv[1].clone())).collect();
+    Ok(strings.chunks(2).map(|kv| (kv[0].clone(), kv[1].clone())).collect())
+}
+
+/// Everything the engine initializes once, done now (the PNG engine's
+/// process, before it says it is ready: its fonts, both faces).
+pub fn warm() -> Result<(), Fail> {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><text>a</text><text font-weight="bold">a</text></svg>"#;
+    render_png(svg, 1.0, None, "", 72.0, &[]).map(|_| ())
+}
+
+fn render(svg: &[u8], scale: f32, size: Option<(u32, u32)>, background: &[u8], dpi: f32, text: &[u8]) -> Result<Vec<u8>, Fail> {
+    let svg = std::str::from_utf8(svg).map_err(|_| "an SVG that is not UTF-8".to_string())?;
+    let pairs = text_pairs(text)?;
     let background = std::str::from_utf8(background).map_err(|_| "a background color that is not UTF-8".to_string())?;
     let (png, missing) = render_png(svg, scale, size, background, dpi, &pairs)?;
     let mut r = mem::vec_with_capacity(png.len() + 4 + missing.len(), "the PNG output")?;
