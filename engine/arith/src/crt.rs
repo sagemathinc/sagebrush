@@ -281,16 +281,26 @@ impl MultiCrt {
             x[i] = t as u64;
             carry = t >> 64;
         }
-        // subtract q P.  The estimate is within (k + 3) k 2^-53 of the true
-        // quotient (both u64 -> f64 casts, the reciprocal, the product and
-        // the sum each round once): below one for every k under ~9.5e7, but
-        // correctness does not rest on that.  q P is decreased by P while it
-        // exceeds x (q too large, by any amount), then x is decreased by P
-        // while it is at least P (q too small): exact for any estimate, and
-        // one product-sized buffer t, reused in place, instead of a second
-        // clone.  f < k + 1 < 2^53, so the cast is exact.
+        // (each temporary is freed when it is dead, so the result is built
+        // without them)
+        drop(lo);
+        drop(hi);
+        // subtract q P.  x = s P for s = sum_j y_j / p_j, 0 <= s < k.  f is
+        // s with |f - s| <= gamma_(k+3) s < k gamma_(k+3), where gamma_n =
+        // n u / (1 - n u) and u = 2^-53: each term rounds four times (y_j
+        // and p_j converted to f64, the reciprocal, the product: gamma_4)
+        // and the k positive terms are summed with k - 1 roundings.  That
+        // error is far below one, yet floor(f) can still differ from
+        // floor(s) when s is close to an integer; correctness rests on
+        // neither.  q P is decreased by P while it exceeds x (q too large, by
+        // any amount), then x is decreased by P while it is at least P (q
+        // too small): exact for any estimate, and one product-sized buffer
+        // t, reused in place, instead of a second clone.  f < k + 1 < 2^53,
+        // so the cast of floor(f) is exact.  (t has room for the one limb
+        // the multiplication can add, so it is never reallocated.)
         let q = q_estimate.unwrap_or(f.floor() as u64);
-        let mut t = self.prod.clone();
+        let mut t = Vec::with_capacity(self.prod.len() + 1);
+        t.extend_from_slice(&self.prod);
         mul_small_add(&mut t, q, 0);
         let mut steps = 0u64;
         while cmp(&x, &t) == std::cmp::Ordering::Less {
@@ -301,8 +311,10 @@ impl MultiCrt {
                 sagebrush_interrupt::check();
             }
         }
-        let mut x = sub(&x, &t);
+        let d = sub(&x, &t);
         drop(t);
+        drop(x);
+        let mut x = d;
         while cmp(&x, &self.prod) != std::cmp::Ordering::Less {
             x = sub(&x, &self.prod);
             steps += 1;
@@ -433,5 +445,150 @@ mod tests {
             assert!(crt_bytes(k, 62 * k as u64).unwrap().resident >= b.resident);
         }
         assert_eq!(crt_bytes(!0usize, !0u64), None);
+    }
+
+    /// The allocation spy (plan C r5 section 2.3): the bytes this thread
+    /// allocates while measuring, with a realloc counted as the new block
+    /// before the old one is freed (both live while the copy runs).
+    mod spy {
+        use std::alloc::{GlobalAlloc, Layout, System};
+        use std::cell::Cell;
+
+        pub struct Spy;
+
+        thread_local! {
+            static ON: Cell<bool> = const { Cell::new(false) };
+            static LIVE: Cell<i64> = const { Cell::new(0) };
+            static PEAK: Cell<i64> = const { Cell::new(0) };
+            static COUNT: Cell<u64> = const { Cell::new(0) };
+        }
+
+        fn note(bytes: i64, allocation: bool) {
+            let _ = ON.try_with(|on| {
+                if on.get() {
+                    let live = LIVE.get() + bytes;
+                    LIVE.set(live);
+                    PEAK.set(PEAK.get().max(live));
+                    COUNT.set(COUNT.get() + allocation as u64);
+                }
+            });
+        }
+
+        unsafe impl GlobalAlloc for Spy {
+            unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+                let p = System.alloc(layout);
+                if !p.is_null() {
+                    note(layout.size() as i64, true);
+                }
+                p
+            }
+            unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+                let p = System.alloc_zeroed(layout);
+                if !p.is_null() {
+                    note(layout.size() as i64, true);
+                }
+                p
+            }
+            unsafe fn dealloc(&self, p: *mut u8, layout: Layout) {
+                System.dealloc(p, layout);
+                note(-(layout.size() as i64), false);
+            }
+            unsafe fn realloc(&self, p: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+                let q = System.realloc(p, layout, new_size);
+                if !q.is_null() {
+                    note(new_size as i64, true);
+                    note(-(layout.size() as i64), false);
+                }
+                q
+            }
+        }
+
+        /// f's value, the peak bytes above the start, the bytes still live
+        /// at the end (f's value included) and the number of allocations.
+        pub fn measure<T>(f: impl FnOnce() -> T) -> (T, u64, i64, u64) {
+            LIVE.set(0);
+            PEAK.set(0);
+            COUNT.set(0);
+            ON.set(true);
+            let v = f();
+            ON.set(false);
+            (v, PEAK.get() as u64, LIVE.get(), COUNT.get())
+        }
+    }
+
+    #[global_allocator]
+    static SPY: spy::Spy = spy::Spy;
+
+    /// The exact quotient q: x = sum_j y_j Q_j and x - q P is the value's
+    /// representative in [0, P).
+    fn true_quotient(crt: &MultiCrt, r: &[u64], value: &BigInt) -> u64 {
+        let mut x = BigInt::from(0);
+        for (j, m) in crt.mods.iter().enumerate() {
+            x += to_big(&crt.q[j], false) * BigInt::from(m.mul(m.reduce(r[j]), crt.w[j]));
+        }
+        let p = to_big(&crt.prod, false);
+        let rep = ((value.clone() % p.clone()) + p.clone()) % p.clone();
+        let (_, digits) = ((x - rep) / p).to_u64_digits();
+        assert!(digits.len() <= 1);
+        digits.first().copied().unwrap_or(0)
+    }
+
+    #[test]
+    fn crt_bytes_bounds_the_measured_peaks() {
+        // all three figures, from the actual prime bits and from the 62 k
+        // envelope, against the bytes actually allocated: new's peak and
+        // what it keeps, then each reconstruct's peak with its result alive;
+        // an estimate too large by 2 or 5 takes the correction loop, which
+        // must allocate nothing more than the exact estimate does (the old
+        // code cloned a second product there)
+        for k in [1usize, 2, 3, 4, 5, 8, 33, 65, 120, 257] {
+            let primes: Vec<u64> = Primes::ntt().take(k).collect();
+            let bits: u64 = primes.iter().map(|&p| 64 - p.leading_zeros() as u64).sum();
+            let figures = [crt_bytes(k, bits).unwrap(), crt_bytes(k, 62 * k as u64).unwrap()];
+            let (crt, peak, kept, _) = spy::measure(|| MultiCrt::new(&primes));
+            for b in figures {
+                assert!(peak <= b.resident + b.construction, "k = {}: new's peak {} > {} + {}", k, peak, b.resident, b.construction);
+                assert!(kept as u64 <= b.resident, "k = {}: new keeps {} > {}", k, kept, b.resident);
+            }
+            let p_minus_1: Vec<u64> = primes.iter().map(|&p| p - 1).collect();
+            let mut values = vec![BigInt::from(0), BigInt::from(1), BigInt::from(-1)];
+            let mut x = BigInt::from(7);
+            while x.bits() < bits - 2 {
+                values.push(x.clone());
+                values.push(-x.clone());
+                x = &x * &x + BigInt::from(3);
+            }
+            let mut columns: Vec<Vec<u64>> = values.iter().map(|v| crt.residues(v)).collect();
+            columns.push(p_minus_1);
+            for r in &columns {
+                let want = crt.reconstruct_garner(r);
+                // the exact quotient is the baseline: floor(f) may be one
+                // below it (s just above an integer, e.g. for 1 and -1)
+                let q0 = true_quotient(&crt, r, &want);
+                assert!(estimate(&crt, r).abs_diff(q0) <= 1, "k = {}: estimate off by more than one", k);
+                let (exact, peak0, _, count0) = spy::measure(|| crt.reconstruct_with(r, Some(q0)));
+                for b in figures {
+                    assert!(peak0 <= b.reconstruct, "k = {}: reconstruct's peak {} > {}", k, peak0, b.reconstruct);
+                }
+                assert_eq!(exact, want);
+                let (plain, peak, _, _) = spy::measure(|| crt.reconstruct(r));
+                assert!(peak <= figures[0].reconstruct, "k = {}: reconstruct's peak {} > {}", k, peak, figures[0].reconstruct);
+                assert_eq!(plain, want);
+                for d in [2u64, 5] {
+                    let (v, peak, _, count) = spy::measure(|| crt.reconstruct_with(r, Some(q0 + d)));
+                    assert!(
+                        peak <= peak0 && count == count0,
+                        "spy: k = {}, estimate +{}: the correction allocated (peak {} vs {}, {} vs {} allocations)",
+                        k, d, peak, peak0, count, count0
+                    );
+                    assert_eq!(v, want, "estimate +{}", d);
+                }
+                for d in [1u64, 3] {
+                    let (v, peak, _, _) = spy::measure(|| crt.reconstruct_with(r, Some(q0.saturating_sub(d))));
+                    assert!(peak <= figures[0].reconstruct, "k = {}, estimate -{}: peak {} > {}", k, d, peak, figures[0].reconstruct);
+                    assert_eq!(v, want, "estimate -{}", d);
+                }
+            }
+        }
     }
 }
