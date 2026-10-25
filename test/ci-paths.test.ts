@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -91,3 +91,65 @@ test("the growth gate's own inputs are never docs-only (plan-growth-budget-r5 §
   // (a change to optional.yml alone selects no suite, but the checks job runs for it)
   assert.equal(classify([".github/workflows/optional.yml"]).node, "false");
 });
+
+test("engine-cpython runs on pull requests that touch the CPython package's inputs (#113 -> #132)", () => {
+  const cp = (files: string[]) => classify(files).engine_cpython;
+  for (const f of ["lib/_sage_nf.py", "engine/py/test_audit.py", "engine/classgroup/src/proof.rs", "engine/py/python/sagebrush/nf.py", "sage-tests/test_numberfield.sage", "test/limit-sites.json", "scripts/sync-python-package.sh", "engine/Cargo.lock", ".github/workflows/ci.yml", "somewhere/new.txt"])
+    assert.equal(cp([f]), "true", f);
+  // every other file the job runs or its tests read, each of which is a
+  // known path that would otherwise select false (#133's review: astra2
+  // CORR-PR133-1, daybreak2 CI-PATH-PR133-1, TEST-PR133-1): the job's setup
+  // script, test_workspace_tools.py's schema and normPath, test_audit.py's
+  // modsym fixture, and a root Cargo manifest (none today; the rule is
+  // tested here, since engine/Cargo.lock is engine/'s)
+  for (const f of ["scripts/ci-cpus.sh", "web/workspace/schema.json", "web/workspace/paths.ts", "engine/modsym/examples/sage/eisenstein_new_dims.jsonl", "Cargo.lock", "Cargo.toml"])
+    assert.equal(cp([f]), "true", f);
+  for (const f of ["web/board/test-merge.mjs", "web/workspace/api.ts", "scripts/build-cli.mjs", "design/notes.md", "README.md", "app/src/main.ts", "src/runtime/progress.ts", "test/progress.test.ts", "wasm/sagebrush-engine.wasm", "cdn/sagebrush-engine.mjs"])
+    assert.equal(cp([f]), "false", f);
+  // the full tier always runs it
+  const list = join(dir, "files.txt");
+  writeFileSync(list, "README.md\n");
+  const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/x" } });
+  assert.match(r.stdout, /^engine_cpython=true$/m);
+});
+
+// CORR-PR133-2 (astra2): with git's rename detection, diff --name-only names
+// only a rename's destination, so a file moved out of a selecting path
+// selected nothing.  A real repository: engine/py/needed.py moved to
+// web/needed.py, classified from git itself (a push event).
+test("a rename is classified by both of its names, from a real git history", () => {
+  const repo = mkdtempSync(join(tmpdir(), "ci-paths-git-"));
+  const git = (...a: string[]) => {
+    const r = spawnSync("git", a, { cwd: repo, encoding: "utf8", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  git("init", "-q");
+  mkdirSync(join(repo, "engine", "py"), { recursive: true });
+  mkdirSync(join(repo, "web"));
+  writeFileSync(join(repo, "engine", "py", "needed.py"), "x = 1\n".repeat(50));
+  writeFileSync(join(repo, "web", "page.ts"), "export const a = 1;\n".repeat(50));
+  git("add", "-A");
+  git("commit", "-q", "-m", "one");
+  const before = git("rev-parse", "HEAD");
+  const classifyGit = () => {
+    const r = spawnSync(process.execPath, [script], { cwd: repo, encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: "", GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/x", GITHUB_SHA: git("rev-parse", "HEAD"), GITHUB_EVENT_BEFORE: before } });
+    assert.equal(r.status, 0, r.stderr);
+    return Object.fromEntries(r.stdout.trim().split("\n").map((l) => l.split("=") as [string, string]));
+  };
+  git("mv", "engine/py/needed.py", "web/needed.py");
+  git("commit", "-q", "-m", "two");
+  // (git itself sees a rename here)
+  assert.match(git("diff", "--name-status", "-M", before, "HEAD"), /^R\d+\s+engine\/py\/needed\.py\s+web\/needed\.py$/m);
+  let o = classifyGit();
+  assert.equal(o.files, "2");
+  assert.equal(o.engine_cpython, "true");
+  // a rename within web/ selects no CPython run (both names are web's)
+  git("reset", "-q", "--hard", before);
+  git("mv", "web/page.ts", "web/page2.ts");
+  git("commit", "-q", "-m", "three");
+  o = classifyGit();
+  assert.equal(o.files, "2");
+  assert.equal(o.engine_cpython, "false");
+});
+
