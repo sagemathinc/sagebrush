@@ -982,6 +982,7 @@ jobs:
           python3 engine/py/test_pairing.py
           python3 engine/py/test_chat.py
           python3 engine/py/test_limits.py
+          python3 engine/py/test_memguard.py
           python3 engine/py/test_capacity.py
           python3 engine/py/test_progress.py
           python3 engine/py/test_kedlaya.py

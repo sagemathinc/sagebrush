@@ -37,10 +37,10 @@ test("a matrix over AA whose entries each have their own field is refused, not c
   // has room, but in a loaded full CI run it took over 120 s, so the time
   // limit is generous; the margin was measured Oct 19, see the commit)
   const c = "A = matrix(AA, 128, 128, lambda i, j: AA(128*i + j + 2).sqrt())";
-  const r = run(["--max-old-space-size=96"], `try:\n ${c}\n print('built')\nexcept NotImplementedError as e:\n print('refused', str(e)[:24])\nprint(matrix(AA, [[1, 2]]) + matrix(AA, [[3, 4]]))\n`, 600000);
+  const r = run(["--max-old-space-size=96"], `try:\n ${c}\n print('built')\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, ' '.join(str(e).split())[:40])\nprint(matrix(AA, [[1, 2]]) + matrix(AA, [[3, 4]]))\n`, 600000);
   assert.ifError(r.error);
   assert.equal(r.status, 0, r.stderr.slice(-400));
   const lines = r.stdout.trim().split("\n");
-  assert.match(lines[0], /^refused a /);
+  assert.match(lines[0], /^refused (NotImplementedError a |SagebrushMemoryError Not enough memory for th)/);
   assert.equal(lines[1], "[4 6]");
 });

@@ -1,0 +1,1 @@
+{"v":1, "reason":"#114 revision (astra PR114-SEM-1): the fixed-limit wording and the fixed field, size-gate run 40138021215", "bytes":{"cli/lib.gen.js": 1915, "cli/pyjs.cjs": 1840, "engine/lib/magma.pre": 2263, "engine/lib/magma.src": 1765, "engine/lib/sage.pre": 72, "engine/lib/sage.src": 150}}
