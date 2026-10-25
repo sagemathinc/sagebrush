@@ -26,7 +26,7 @@ import { inTx, req } from "./db";
 import { entriesOf } from "./sync-rewrite";
 import { jsonTextSize } from "../notebook/stores.js";
 import { genKey, genPrefix } from "./sync-confirmed";
-import { RELEASE_STORES, afterReleases, metaWrite, newEpoch, pendingOf, stateOf, putPending, release, pinPresent, pinOfCurrent, type NsState, type Pin } from "./sync-pins";
+import { RELEASE_STORES, afterReleases, metaWrite, newEpoch, lifeMarkOf, sameLife, type LifeMark, pendingOf, stateOf, putPending, release, pinPresent, pinOfCurrent, type NsState, type Pin } from "./sync-pins";
 
 export const OUTBOX = {
   /** ops read per scan page */
@@ -122,9 +122,16 @@ export function wireOf(o: Op, dseq: number): WireOp | null {
 /** The sync state's current lease: the namespace in use and its generation; a new lease for `ns` (`switchTo`)
  * starts the next generation, in one transaction, so every lease taken before is fenced. */
 export async function switchTo(w: Workspace, ns: string): Promise<Lease> {
+  return (await switchToIf(w, ns))!;
+}
+/** switchTo, and with `expect` only as a compare-and-set (step 5, astra3's CORR-PR130-1): if this browser's lifecycle is
+ * still the one the action saw, in the same transaction; otherwise nothing is written and null is returned (a late
+ * enable never replaces a newer lifecycle). */
+export async function switchToIf(w: Workspace, ns: string, expect?: LifeMark): Promise<Lease | null> {
   checkNs(ns);
   const lease = await inTx(w.ws, "meta", "readwrite", async (tx) => {
     const meta = tx.objectStore("meta"), cur = (await req(meta.get(CURRENT))) as (Lease & { off?: boolean }) | undefined;
+    if (expect && !sameLife(await lifeMarkOf(meta), expect)) return null;
     const lease = { ns, gen: (cur?.gen ?? 0) + 1 };
     metaWrite(meta, CURRENT, lease);
     // (another namespace: a lifecycle change, the previous one's pins purged (sync-pins: newEpoch); a reconnect,
@@ -133,7 +140,7 @@ export async function switchTo(w: Workspace, ns: string): Promise<Lease> {
     return lease;
   });
   // (another namespace: the old one's purge, begun)
-  afterReleases(w);
+  if (lease) afterReleases(w);
   return lease;
 }
 /** A connection's renewal of its lease (step 5, plan r4 §2.1): a compare-and-set in one transaction.  The lease must

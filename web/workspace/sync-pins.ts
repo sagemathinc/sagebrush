@@ -336,14 +336,36 @@ async function releaseUnowned(tx: IDBTransaction, list: Pin[]) {
  * purge of every pin of an older epoch is recorded, which cleanPins does a page at a time.  The namespace's
  * own state is kept: re-enabling (switchTo the same namespace) resumes it. */
 export async function syncOff(w: Workspace): Promise<void> {
-  await inTx(w.ws, ["meta"], "readwrite", async (tx) => {
+  await syncOffIf(w);
+}
+/** This browser's sync lifecycle as an action saw it (step 5, astra3's CORR-PR130-1): the namespace (null: none), off,
+ * and the lifecycle epoch.  Renewals raise the lease's generation only, so they leave it unchanged. */
+export type LifeMark = { ns: string | null; off: boolean; epoch: number };
+export const sameLife = (a: LifeMark, b: LifeMark) => a.ns === b.ns && a.off === b.off && a.epoch === b.epoch;
+/** The lifecycle now, read in `meta`'s transaction. */
+export async function lifeMarkOf(meta: IDBObjectStore): Promise<LifeMark> {
+  const cur = (await req(meta.get("sync:current"))) as Lease | undefined;
+  return { ns: cur?.ns ?? null, off: !cur || !!cur.off, epoch: ((await req(meta.get("sync:epoch"))) as number | undefined) ?? 0 };
+}
+/** The lifecycle now (its own transaction). */
+export function readLife(w: Workspace): Promise<LifeMark> {
+  return inTx(w.ws, "meta", "readonly", (tx) => lifeMarkOf(tx.objectStore("meta")));
+}
+/** syncOff, and with `expect` only as a compare-and-set: if this browser's lifecycle is still the one the action saw,
+ * in the same transaction; otherwise nothing is written (a late answer never turns off a newer lifecycle).  Returns
+ * whether it applied (true too when sync was already off and that was expected). */
+export async function syncOffIf(w: Workspace, expect?: LifeMark): Promise<boolean> {
+  const done = await inTx(w.ws, ["meta"], "readwrite", async (tx) => {
     const meta = tx.objectStore("meta");
+    if (expect && !sameLife(await lifeMarkOf(meta), expect)) return false;
     const cur = (await req(meta.get("sync:current"))) as Lease | undefined;
-    if (!cur || cur.off) return;
+    if (!cur || cur.off) return true;
     metaWrite(meta, "sync:current", { ns: cur.ns, gen: cur.gen + 1, off: true });
     await newEpoch(meta);
+    return true;
   });
   afterReleases(w);
+  return done;
 }
 /** The lifecycle epoch moved on (off, sign-out, a namespace switch), in `meta`'s transaction, and the purge of
  * every pin of an older one recorded. */
