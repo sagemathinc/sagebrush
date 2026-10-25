@@ -222,3 +222,36 @@ C._set_sources(root="/nonexistent", platform="linux", rlimits={}, runtime=lambda
     run("import _capacity as C\nC._set_sources()");
   }
 });
+
+// capacity()["domains"] on each runtime's real basis (plan-d0-domains-r2
+// §2.1, astra2's check): every row's domains as the source table says, the
+// set as the rule gives it, all six on a Linux host whose OS rows are
+// readable; in Sagebrush the engine's and the JS heap's rows come from the
+// runtime (capacity_parts), not from Python
+test("the domains on the real basis: python3 and Sagebrush, each row by the source table, the set by the rule", () => {
+  for (const [who, cmd, args] of [["python3", "python3", ["-I"]], ["sagebrush", process.execPath, [CLI]], ["sagebrush --sage", process.execPath, [CLI, "--sage"]]] as [string, string, string[]][]) {
+    const out = execFileSync(cmd, [...args, TEST + "capacity_domains_real.py"], { encoding: "utf8" }).trim();
+    assert.ok(out.startsWith("domains ok"), `${who}: ${out}`);
+    if (who !== "python3") assert.ok(out.includes("'wasm engine', 'js heap'"), `${who}: ${out}`);
+  }
+});
+
+// (the fact the RLIMIT_DATA row rests on: on Node, an ArrayBuffer's backing
+// store and a WebAssembly Memory's pages are in this process's VmData, so
+// the row counts js-arraybuffer and wasm-*; Linux only)
+test("VmData counts an ArrayBuffer and a wasm Memory's growth (Node, Linux)", { skip: process.platform !== "linux" }, () => {
+  const vmData = () => Number(/VmData:\s+(\d+) kB/.exec(readFileSync("/proc/self/status", "utf8"))![1]) * 1024;
+  const MiB = 1 << 20;
+  const a0 = vmData();
+  const buf = new ArrayBuffer(64 * MiB);
+  new Uint8Array(buf).fill(1);
+  const a1 = vmData();
+  const mem = new WebAssembly.Memory({ initial: 1, maximum: 2048 });
+  const m0 = vmData();
+  mem.grow(1024);
+  new Uint8Array(mem.buffer).fill(1);
+  const m1 = vmData();
+  assert.ok(a1 - a0 >= 60 * MiB, `ArrayBuffer: VmData +${(a1 - a0) / MiB} MiB`);
+  assert.ok(m1 - m0 >= 60 * MiB, `wasm Memory: VmData +${(m1 - m0) / MiB} MiB`);
+  assert.ok(buf.byteLength > 0 && mem.buffer.byteLength > 0);
+});

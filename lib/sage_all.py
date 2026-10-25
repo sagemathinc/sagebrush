@@ -11,8 +11,8 @@ import operator as _operator
 import sys as _sys_limit
 
 # (as Sage: not CPython's 4300-digit limit on an int's decimal conversions;
-# Magma mode, through this module, the same.  Sagebrush's own ceiling of
-# 4,000,000 digits, src/runtime/format.ts, remains)
+# Magma mode, through this module, the same.  The only other bound is the
+# session's memory, admitted before any copy: src/runtime/format.ts)
 _sys_limit.set_int_max_str_digits(0)
 from fractions import Fraction as _Fraction
 
