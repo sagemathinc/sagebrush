@@ -37,6 +37,10 @@ def call(fn, **args):
     args = _with_limits(fn, args)
     r = _json.loads(_native.call(_json.dumps(dict(fn=fn, **args))))
     if "error" in r:
+        if r.get("internal"):
+            # a failed proved invariant (an engine bug), never a resource
+            # limit or a user error
+            raise RuntimeError(r["error"])
         raise ValueError(r["error"])
     return r["ok"]
 
