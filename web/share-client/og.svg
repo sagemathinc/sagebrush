@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <!-- Sagebrush's share card (og:image, twitter:image): static, 1200 x 630. Everything that matters stays
+       inside the central 1200 x 600 (X's 2:1 crop) with 60 px margins; the wordmark is legible at 300 px wide. -->
+  <rect width="1200" height="630" fill="#fbfaf7"/>
+  <!-- the mark: the app icon's sprig, on its green -->
+  <rect x="60" y="75" width="480" height="480" rx="56" fill="#668a5b"/>
+  <g stroke="#f4f1e6" stroke-width="21" stroke-linecap="round" fill="none" transform="translate(60 75) scale(1.548)">
+    <path d="M155 113 V253"/>
+    <path d="M155 166 L203 104"/>
+    <path d="M155 168 L106 128"/>
+    <path d="M155 206 L198 166"/>
+    <path d="M155 206 L116 181"/>
+  </g>
+  <!-- the words -->
+  <g font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" fill="#1f2421">
+    <text x="610" y="258" font-size="86" font-weight="700" letter-spacing="-1.5">Sagebrush</text>
+    <text x="612" y="338" font-size="46" font-weight="600" fill="#4a6b49">A shared notebook</text>
+    <text x="612" y="398" font-size="32" fill="#5d645f">Open it to run it in your browser.</text>
+    <text x="612" y="500" font-size="28" fill="#5d645f" letter-spacing="0.5">sagebrush.space</text>
+  </g>
+  <rect x="612" y="438" width="120" height="6" rx="3" fill="#8aa37b"/>
+</svg>
