@@ -29,6 +29,9 @@ interface Engine {
   sb_reply_len(): number;
   // (optional: engines built before item D0 lack it)
   sb_set_memory_share?(v: number): void;
+  sb_set_memory_total?(bytes: number, status: number, joint: number): void;
+  sb_live_estimate?(): number;
+  sb_outstanding_bytes?(): number;
 }
 
 let E: Engine | null = null;
@@ -132,6 +135,34 @@ export function pushShare(e: Engine) {
   const [share, ageMs] = memoryShare();
   shareAt = now - ageMs;
   e.sb_set_memory_share(share);
+  // the engine ledger's total (no-cliffs plan C r10 section 1), on the same
+  // cadence; an engine without the export is left alone
+  if (typeof e.sb_set_memory_total === "function") {
+    const [bytes, status, joint] = memoryTotal();
+    e.sb_set_memory_total(bytes, status, joint);
+  }
+}
+const TOTAL_STATUS: Record<string, number> = { observed: 0, zero: 1, nominal: 2 };
+/** lib/_capacity.py engine_total as [bytes, status code, joint]: none
+ * (status -1, which the engine reads as the nominal total) when it can't
+ * be had. */
+function memoryTotal(): [number, number, number] {
+  try {
+    const m = Obj.hooks.importModule("_capacity");
+    const t: any = Obj.callObj(Obj.getattr(m, "engine_total"), []);
+    const get = (k: string) => Obj.unbox(Obj.callObj(Obj.getattr(t, "get"), [k]));
+    let bytes: any = get("bytes");
+    if (typeof bytes === "bigint") bytes = bytes <= 9007199254740991n && bytes >= 0n ? Number(bytes) : -1;
+    const status = TOTAL_STATUS[String(get("status"))] ?? -1;
+    const joint = get("joint") === true ? 1 : 0;
+    return [typeof bytes === "number" && Number.isInteger(bytes) && bytes >= 0 ? bytes : -1, status, joint];
+  } catch (e) {
+    // (as memoryShare: a Ctrl-C seen by the collector is set again)
+    try {
+      if (Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt)) requestCtrlC();
+    } catch {}
+    return [-1, -1, 0];
+  }
 }
 /** [poly_share() as an integer from 0 to 4 GiB, or -1; the age of its
  * observation in ms, from 0 to 250]. */
