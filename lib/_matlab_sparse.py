@@ -22,6 +22,7 @@ import math as _math
 
 import numpy as np
 
+import _capacity
 import _matlab as _m
 from _matlab import Sparse, COLON, NOVAL, _err
 
@@ -1370,6 +1371,18 @@ def _legacy_lu(S):
     return F
 
 
+def unmeasured_reason(rec=None):
+    """why this host's capacity record can't admit the LU's memory, or None:
+    no figure, or one that doesn't cover the js-heap and js-arraybuffer
+    domains (Ledger's refusal; _matlab_sparse._sparse_lu then keeps master's
+    LU, @sagebrush's interim ruling (d))"""
+    rec = rec if rec is not None else _capacity.capacity()
+    if rec.get("bytes") is None:
+        return "no memory figure"
+    missing = [d for d in ("js-heap", "js-arraybuffer") if d not in (rec.get("domains") or [])]
+    return "the figure doesn't cover %s" % " or ".join(missing) if missing else None
+
+
 def _sparse_lu(S, q=None):
     """the LU factorization of a square sparse S, never its full form:
     left-looking, each column by a sparse triangular solve over the steps it
@@ -1381,11 +1394,13 @@ def _sparse_lu(S, q=None):
     matlab.lu_work bounds its work (lib/_matlab_lu.py).  A zero pivot is
     kept (the solves then give Inf or NaN, as MATLAB's do, with its
     warning).  q: a column order to use instead (a test seam)"""
+    if q is None and unmeasured_reason() is not None:
+        # (no figure for the JS memory here: master's LU and its caps, _legacy_lu;
+        # checked before _matlab_lu is imported, so the browser doesn't fetch
+        # its chunk, matlab-lu, for a solve that doesn't use it)
+        return _legacy_lu(S)
     import _matlab_lu
 
-    if q is None and _matlab_lu.unmeasured_reason() is not None:
-        # (no figure for the JS memory here: master's LU and its caps, _legacy_lu)
-        return _legacy_lu(S)
     return _matlab_lu.factor(S, "Solving with this %d-by-%d sparse matrix" % (S.n, S.n), q=q)
 
 

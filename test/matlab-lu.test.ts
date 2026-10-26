@@ -23,6 +23,15 @@ test("the sparse LU's ordering, permutation, admission, work limit and chunked p
   assert.equal(lines.length, 20, r.stdout);
 });
 
+test("the LU's own chunk: the interim imports no _matlab_lu, a measured solve does (test/matlab_lu_lazy_cases.py)", () => {
+  const r = spawnSync(process.execPath, [CLI, TEST + "matlab_lu_lazy_cases.py"], { encoding: "utf8", timeout: WALL(120000) });
+  assert.equal(r.stderr, "");
+  assert.equal(r.status, 0);
+  const lines = r.stdout.trim().split("\n");
+  assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
+  assert.equal(lines.length, 3, r.stdout);
+});
+
 test("the browser interim (ruling d): master's LU caps are registered to D0, and only master's lines are", () => {
   const reg = JSON.parse(readFileSync(TEST + "limit-sites.json", "utf8"));
   const caps = Object.entries(reg).filter(([k]) => k.startsWith("lib/_matlab_sparse.py") && /MAX_LU_(FILL|WORK)/.test(k));

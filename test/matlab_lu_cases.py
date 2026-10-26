@@ -240,8 +240,10 @@ try:
         assert e.unmeasured is None and "allows almost no memory" in str(e)
     ok("admission: no figure, or one without js-arraybuffer, refuses as unmeasured with the record; zero, as almost no memory")
     # (the interim, @sagebrush's ruling (d): where the record lacks the JS domains, as the
-    # browser worker's does today, _sparse_lu keeps master's LU and its caps)
-    L._capacity = FakeCap(4 << 30, ["wasm-engine"], 3 << 30)
+    # browser worker's does today, _sparse_lu keeps master's LU and its caps;
+    # _matlab_sparse holds the check, unmeasured_reason, and _matlab_lu imports it)
+    assert L.unmeasured_reason is sp.unmeasured_reason
+    L._capacity = sp._capacity = FakeCap(4 << 30, ["wasm-engine"], 3 << 30)
     F = sp._sparse_lu(S)
     assert isinstance(F, sp._LU) and not isinstance(F, L.LU)
     B = np.ones((60, 1))
@@ -268,9 +270,23 @@ try:
     for rec, legacy in (({"bytes": None, "domains": []}, True), ({"bytes": 1, "domains": ["wasm-engine", "js-heap"]}, True),
                         ({"bytes": 1, "domains": ["js-heap", "js-arraybuffer"]}, False)):
         assert (L.unmeasured_reason(rec) is not None) == legacy, rec
-    L._capacity = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], 10 ** 12)
+    # (an explicit q is a test seam: the new LU even there, refusing as unmeasured)
+    try:
+        sp._sparse_lu(S, q=list(range(60)))
+        raise AssertionError("no refusal")
+    except MemoryError as e:
+        assert e.unmeasured == "the figure doesn't cover js-heap or js-arraybuffer", e.unmeasured
+    # (a measured zero is not unmeasured: the new LU's ordinary refusal)
+    L._capacity = sp._capacity = FakeCap(10 ** 9, ["js-heap", "js-arraybuffer"], 0)
+    try:
+        sp._sparse_lu(S)
+        raise AssertionError("no refusal")
+    except MemoryError as e:
+        assert e.unmeasured is None and "allows almost no memory" in str(e)
+    L._capacity = sp._capacity = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], 10 ** 12)
     assert isinstance(sp._sparse_lu(S), L.LU)
-    ok("interim: a browser-like record (wasm-engine only) keeps master's LU, its solves and its refusal; a measured one gets the new LU")
+    sp._capacity = real
+    ok("interim: a browser-like record (wasm-engine only) keeps master's LU, its solves and its refusal; an explicit q, a measured zero and a measured figure get the new LU")
     big = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], 10 ** 12)
     L._capacity = big
     F = L.factor(S, "t")
@@ -336,7 +352,7 @@ try:
             setattr(L, name, keep)
     ok("admission: each column's arrays fit their type's part of its reservation; mutants dropping c_idx, c_val or c_bool do not")
 finally:
-    L._capacity = real
+    L._capacity = sp._capacity = real
     L._recorder = None
     L.E, L.A_SAFE = min(L.E_TIME, (1 << 31) // 32), 1 << 31
 

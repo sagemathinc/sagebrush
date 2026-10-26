@@ -30,6 +30,9 @@ import _capacity
 import _limits
 from _memguard import memory_guard
 from _matlab import _err
+# (the one definition is _matlab_sparse's, which checks it before importing
+# this module: the browser then fetches this group only when it runs)
+from _matlab_sparse import unmeasured_reason
 
 # (class-1 runtime protection, r6 section 2.8: the largest uninterrupted
 # NumPy element kernel and the largest single allocation; E = min(E_TIME,
@@ -67,18 +70,6 @@ def _phase(name):
 
 def _cval(dt):
     return C_CPLX if np.dtype(dt).kind == "c" else C_RE
-
-
-def unmeasured_reason(rec=None):
-    """why this host's capacity record can't admit the LU's memory, or None:
-    no figure, or one that doesn't cover the js-heap and js-arraybuffer
-    domains (Ledger's refusal; _matlab_sparse._sparse_lu then keeps master's
-    LU, @sagebrush's interim ruling (d))"""
-    rec = rec if rec is not None else _capacity.capacity()
-    if rec.get("bytes") is None:
-        return "no memory figure"
-    missing = [d for d in ("js-heap", "js-arraybuffer") if d not in (rec.get("domains") or [])]
-    return "the figure doesn't cover %s" % " or ".join(missing) if missing else None
 
 
 class Ledger:
