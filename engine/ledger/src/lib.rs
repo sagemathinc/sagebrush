@@ -67,6 +67,9 @@ pub enum TotalStatus {
     Observed,
     Zero,
     Nominal,
+    /// WebAssembly only (C r16b section 3.2): no shared row applies, so
+    /// there is no shared check (never from a native host)
+    Absent,
 }
 
 impl TotalStatus {
@@ -85,6 +88,7 @@ impl TotalStatus {
             TotalStatus::Observed => "observed",
             TotalStatus::Zero => "zero",
             TotalStatus::Nominal => "nominal",
+            TotalStatus::Absent => "absent",
         }
     }
 }
@@ -109,14 +113,69 @@ pub fn allowance(t: Total) -> u64 {
 }
 
 /// The total pushed as WebAssembly numbers: bytes an integer from 0 to
-/// 2^53, status 0, 1 or 2, and `uncertified` 0 or 1 (C r17 section 1.3:
+/// 2^53, status 0, 1, 2 or 3 (absent: no shared row applies, C r16b
+/// section 3.2), and `uncertified` 0 or 1 (C r17 section 1.3:
 /// 1 when some applicable row is joint or unknown, from lib/_capacity.py
 /// engine_rows; it was the least rows' joint flag before); anything else
 /// is none.
 pub fn total_from_wasm(bytes: f64, status: u32, uncertified: u32) -> Option<Total> {
     let ok = bytes.is_finite() && bytes >= 0.0 && bytes.fract() == 0.0 && bytes <= 9007199254740992.0;
-    let status = TotalStatus::from_code(status)?;
+    // (3: no shared row applies, C r16b section 3.2; WebAssembly hosts only)
+    let status = if status == 3 { TotalStatus::Absent } else { TotalStatus::from_code(status)? };
     (ok && uncertified <= 1).then_some(Total { bytes: bytes as u64, status, joint: uncertified == 1, uncertified: uncertified == 1 })
+}
+
+/// The instance-local total (C r16b sections 1-3: a row bounding this one
+/// WebAssembly memory's address space, the wasm32 ceiling), checked without
+/// R_ret: retired siblings are outside its scope.  None: no instance row
+/// (no instance check, as before C r16b).  The WebAssembly host pushes it
+/// with the shared total; tests.
+pub fn set_instance_total(total: Option<Total>) {
+    state().instance = total;
+}
+
+/// Set the sticky fault (an invalid figure from the host, C r16b section
+/// 3.2: never certified from then on).
+pub fn set_fault() {
+    state().fault = true;
+}
+
+/// Whether the sticky fault is set.
+pub fn faulted() -> bool {
+    state().fault
+}
+
+/// The instance-local total in force, if any.
+pub fn instance_total() -> Option<Total> {
+    state().instance
+}
+
+/// The instance-local total pushed as WebAssembly numbers: bytes as in
+/// total_from_wasm, status 0, 1 or 2, or 3 for none; Err for anything else.
+pub fn instance_total_from_wasm(bytes: f64, status: u32) -> Result<Option<Total>, ()> {
+    if status == 3 {
+        return Ok(None);
+    }
+    match total_from_wasm(bytes, status, 0) {
+        Some(t) if t.status != TotalStatus::Absent => Ok(Some(t)),
+        _ => Err(()),
+    }
+}
+
+/// Whether the pushed totals certify (WebAssembly; C r17 section 1.3, C
+/// r16b section 3.2): no fault, no joint or unknown applicable row, every
+/// total present observed, and an observed instance total when the shared
+/// one is absent.
+fn wasm_totals_certified(fault: bool, t: Total, instance: Option<Total>) -> bool {
+    let inst_ok = instance.is_none_or(|i| i.status == TotalStatus::Observed);
+    !fault
+        && !t.uncertified
+        && inst_ok
+        && match t.status {
+            TotalStatus::Observed => true,
+            TotalStatus::Absent => instance.is_some(),
+            _ => false,
+        }
 }
 
 /// Set the total (the WebAssembly host pushes it before a dispatch; tests).
@@ -239,7 +298,7 @@ pub fn certified() -> bool {
     #[cfg(target_arch = "wasm32")]
     {
         let s = state();
-        !s.fault && s.total.is_some_and(|t| t.status == TotalStatus::Observed && !t.uncertified)
+        s.total.is_some_and(|t| wasm_totals_certified(s.fault, t, s.instance))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -262,6 +321,9 @@ pub fn certified() -> bool {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refusal {
     pub what: String,
+    /// the scope of the row that refused (C r16b): "shared", "instance" or
+    /// "native"
+    pub row: &'static str,
     pub need: u64,
     /// E, the ledger's allowance
     pub allowance: u64,
@@ -294,6 +356,11 @@ impl fmt::Display for EngineError {
         match self {
             EngineError::Memory(r) => match r.available {
                 Some(a) => write!(f, "{}: {} more bytes do not fit in the {} bytes this machine has available (beyond its reserve)", r.what, r.need, a),
+                None if r.row == "instance" => write!(
+                    f,
+                    "{}: {} more bytes do not fit in this engine instance: {} in use and {} reserved, against {} (a quarter of its {} bytes of address space)",
+                    r.what, r.need, r.live, r.outstanding, r.allowance, r.total
+                ),
                 None if r.retired > 0 => write!(
                     f,
                     "{}: {} more bytes do not fit: {} in use, {} held by retired engine instances and {} reserved, against {} (a quarter of the engine's {} total of {} bytes)",
@@ -320,6 +387,8 @@ const CHAIN_SLOTS: usize = 256;
 
 struct State {
     total: Option<Total>,
+    /// WebAssembly: the instance-local total (C r16b), checked without R_ret
+    instance: Option<Total>,
     #[cfg(not(target_arch = "wasm32"))]
     total_at: Option<std::time::Instant>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -351,6 +420,7 @@ struct State {
 
 static STATE: Mutex<State> = Mutex::new(State {
     total: None,
+    instance: None,
     #[cfg(not(target_arch = "wasm32"))]
     total_at: None,
     #[cfg(not(target_arch = "wasm32"))]
@@ -827,6 +897,10 @@ fn row_refuses(figure: u64, live: u64, retired: u64, available: Option<u64>, out
     None
 }
 
+/// The row a refusal names when no row check refused (an unmeasured or
+/// unreadable check): the shared total in WebAssembly, natively the rows.
+const DEFAULT_ROW: &str = if cfg!(target_arch = "wasm32") { "shared" } else { "native" };
+
 fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     let t = total();
     #[cfg(not(target_arch = "wasm32"))]
@@ -838,6 +912,12 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     // never on native rows (their measures don't involve instances)
     let retired = s.retired;
     let fault = s.fault;
+    // the instance-local row (C r16b): its own pages, never R_ret
+    let instance = s.instance;
+    let inst_live = match (instance, growth::paged_committed()) {
+        (Some(_), Some(committed)) => Some(growth::paged_live(&mut s, committed)),
+        _ => None,
+    };
     // a certification-dependent chain never takes an unmeasured check
     let protected = s.is_certified_chain(chain);
     #[cfg(target_arch = "wasm32")]
@@ -849,14 +929,14 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     // every row is checked (C r17 section 1.3); the first that refuses is
     // reported: (figure, live, allowance, room).  The decision is made under
     // the lock, the error (which allocates) built after it is released.
-    let mut first: Option<(u64, u64, u64, Option<u64>)> = None;
+    let mut first: Option<(u64, u64, u64, Option<u64>, &'static str)> = None;
     let mut live_seen = resident;
-    let mut on_row = |figure: u64, usage: u64, rr: u64, available: Option<u64>| {
+    let mut on_row = |figure: u64, usage: u64, rr: u64, available: Option<u64>, row: &'static str| {
         let live = usage.max(resident);
         live_seen = live_seen.max(live);
         if first.is_none() {
             if let Some((e, room)) = row_refuses(figure, live, rr, available, outstanding, x) {
-                first = Some((figure, live, e, room));
+                first = Some((figure, live, e, room, row));
             }
         }
     };
@@ -869,7 +949,7 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
             faked = true;
             // (the fake rows stand for the watermark row too: R_ret counts)
             for &(figure, usage, available) in rows {
-                on_row(figure.unwrap_or(t.bytes), usage, retired, available);
+                on_row(figure.unwrap_or(t.bytes), usage, retired, available, "shared");
             }
         }
         drop(g);
@@ -881,14 +961,18 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     }
     #[allow(unused_mut)]
     let mut measured = true;
+    // (the shared total, unless no shared row applies: C r16b section 3.2)
     #[cfg(target_arch = "wasm32")]
-    if !faked {
-        on_row(t.bytes, wasm_live, retired, None);
+    if !faked && t.status != TotalStatus::Absent {
+        on_row(t.bytes, wasm_live, retired, None, "shared");
+    }
+    if let (Some(i), Some(l)) = (instance, inst_live) {
+        on_row(i.bytes, l, 0, None, "instance");
     }
     // (WebAssembly: a certification-dependent chain needs the total still
     // certified: observed, every applicable row engine-only)
     #[cfg(target_arch = "wasm32")]
-    let unmeasurable = protected && (fault || !(t.status == TotalStatus::Observed && !t.uncertified));
+    let unmeasurable = protected && !wasm_totals_certified(fault, t, instance);
     // (natively: a certification-dependent chain needs a fresh total, not one
     // left stale by a read that could not ask, HostAnswer::NotAsked)
     #[cfg(not(target_arch = "wasm32"))]
@@ -907,7 +991,7 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     #[cfg(not(target_arch = "wasm32"))]
     if !faked {
         if s.measure.available() {
-            measured = s.measure.read_each(|r| on_row(r.figure, r.usage, 0, r.available));
+            measured = s.measure.read_each(|r| on_row(r.figure, r.usage, 0, r.available, "native"));
             unreadable = !measured;
         } else if protected {
             // a certification-dependent operation whose rows became
@@ -920,11 +1004,13 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
             // with no measure: no cap was lifted for it; the residents
             // against the total, as in C-1)
             measured = false;
-            on_row(t.bytes, 0, 0, None);
+            if t.status != TotalStatus::Absent {
+                on_row(t.bytes, 0, 0, None, "native");
+            }
         }
     }
     if (unreadable || unmeasurable) && first.is_none() {
-        first = Some((t.bytes, live_seen, allowance(t), None));
+        first = Some((t.bytes, live_seen, allowance(t), None, DEFAULT_ROW));
     }
     let (first, live_seen) = (first, live_seen);
     let slots_full = first.is_none() && s.chain_add(chain, x).is_err();
@@ -936,9 +1022,10 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     if slots_full {
         return Err(EngineError::Internal(format!("more than {} chains hold reservations at once", CHAIN_SLOTS)));
     }
-    let (figure, live, allowance, room) = first.unwrap_or((t.bytes, live_seen, allowance(t), None));
+    let (figure, live, allowance, room, row) = first.unwrap_or((t.bytes, live_seen, allowance(t), None, DEFAULT_ROW));
     Err(EngineError::Memory(Refusal {
         what: what.to_string(),
+        row,
         need: x,
         allowance,
         live,

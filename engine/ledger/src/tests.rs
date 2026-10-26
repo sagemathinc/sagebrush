@@ -17,6 +17,7 @@ fn fresh(total_bytes: u64) -> std::sync::MutexGuard<'static, ()> {
     s.baseline = None;
     s.retired = 0;
     s.fault = false;
+    s.instance = None;
     s.permit_in_flight = 0;
     s.last_growth_delta = 0;
     #[cfg(not(target_arch = "wasm32"))]
@@ -729,4 +730,104 @@ fn the_failed_creation_fault_is_sticky_and_refuses_protected_growth() {
     assert!(matches!(reserve_growth("block", 100), Err(EngineError::Memory(_))));
     state().unmark_certified_chain(op.chain());
     assert_eq!(op.finish(), Ok(()));
+}
+
+// ---- C r16b: the instance-local row takes no R_ret; both scopes are checked
+
+/// Pages with no shared row (absent) and an instance total of `usable`
+/// usable bytes; the fake usage rows (which stand for the shared watermark
+/// row) are cleared.
+fn instance_only(committed: u64, usable: u64) -> std::sync::MutexGuard<'static, ()> {
+    let g = fresh(total_for_usable(usable));
+    hooks::set_fake_usage(None);
+    hooks::set_fake_committed(Some(committed));
+    set_total(Some(Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false }));
+    set_instance_total(Some(Total { bytes: total_for_usable(usable), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    g
+}
+
+#[test]
+fn the_instance_row_takes_no_retired_pages_by_one_byte_and_at_equality() {
+    // phi (L + O + x) <= E_inst: 80 usable, L 16: x = 64 fits exactly, one
+    // FRAG_DEN more doesn't; R_ret (far over the room) is not a term
+    let _g = instance_only(16 * P, 80 * P);
+    set_retired((1000 * P) as f64, 0).unwrap();
+    match reserve("x", 64 * P + FRAG_DEN) {
+        Err(EngineError::Memory(r)) => {
+            assert_eq!((r.row, r.live), ("instance", 16 * P));
+            let m = EngineError::Memory(r).to_string();
+            assert!(m.contains("this engine instance") && !m.contains("retired"), "{}", m);
+        }
+        _ => panic!("one step over must refuse"),
+    }
+    assert!(reserve("x", 64 * P).is_ok());
+}
+
+#[test]
+fn both_scopes_are_checked_and_the_shared_row_still_takes_retired_pages() {
+    // shared 100 usable with R_ret 30 (fake row: usage 10), instance 80
+    // usable (L 10): the shared row binds at 60, the instance one at 70
+    let _g = fresh(total_for_usable(100 * P));
+    hooks::set_fake_usage(Some((10 * P, None)));
+    hooks::set_fake_committed(Some(10 * P));
+    set_instance_total(Some(Total { bytes: total_for_usable(80 * P), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    set_retired((30 * P) as f64, 0).unwrap();
+    match reserve("x", 60 * P + FRAG_DEN) {
+        Err(EngineError::Memory(r)) => assert_eq!((r.row, r.retired), ("shared", 30 * P)),
+        _ => panic!("the shared row must refuse"),
+    }
+    let r = reserve("x", 60 * P).unwrap();
+    drop(r);
+    // without R_ret the shared row would admit 90: the instance row (70) binds
+    set_retired(0.0, 0).unwrap();
+    match reserve("x", 70 * P + FRAG_DEN) {
+        Err(EngineError::Memory(r)) => assert_eq!(r.row, "instance"),
+        _ => panic!("the instance row must refuse"),
+    }
+    assert!(reserve("x", 70 * P).is_ok());
+}
+
+#[test]
+fn the_growth_room_is_the_least_over_the_rows_present() {
+    // shared 100 usable, R_ret 30, instance 50 usable, L 10: rooms 60 and 40
+    let _g = paged(10 * P, 100 * P);
+    set_instance_total(Some(Total { bytes: total_for_usable(50 * P), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    set_retired((30 * P) as f64, 0).unwrap();
+    assert_eq!(reserve_growth("block", 69 * P).unwrap().granted(), 40 * P);
+    // the instance row alone (shared absent): 40, R_ret not a term
+    set_total(Some(Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false }));
+    assert_eq!(reserve_growth("block", 69 * P).unwrap().granted(), 40 * P);
+    set_instance_total(Some(Total { bytes: total_for_usable(100 * P), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    assert_eq!(reserve_growth("block", 69 * P).unwrap().granted(), 71 * P, "W(b) within an instance room of 90");
+    // no row at all: the envelope
+    set_instance_total(None);
+    assert_eq!(reserve_growth("block", 69 * P).unwrap().granted(), 71 * P);
+}
+
+#[test]
+fn certification_with_an_absent_shared_total_needs_an_observed_instance_total() {
+    let obs = Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: false, uncertified: false };
+    let absent = Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false };
+    let nominal = Total { status: TotalStatus::Nominal, ..obs };
+    assert!(wasm_totals_certified(false, obs, None));
+    assert!(wasm_totals_certified(false, obs, Some(obs)));
+    assert!(wasm_totals_certified(false, absent, Some(obs)));
+    assert!(!wasm_totals_certified(false, absent, None), "absent and no instance total");
+    assert!(!wasm_totals_certified(false, obs, Some(nominal)), "an instance total present but not observed");
+    assert!(!wasm_totals_certified(false, Total { uncertified: true, ..absent }, Some(obs)), "a joint or unknown row anywhere");
+    assert!(!wasm_totals_certified(true, absent, Some(obs)), "the fault");
+    assert!(!wasm_totals_certified(false, nominal, Some(obs)));
+}
+
+#[test]
+fn the_pushed_totals_parse_absent_and_refuse_anything_else() {
+    // (absent is a status, never zero: a zero total stays a zero total)
+    assert_eq!(total_from_wasm(0.0, 3, 1).map(|t| (t.status, t.uncertified)), Some((TotalStatus::Absent, true)));
+    assert_eq!(total_from_wasm(0.0, 1, 0).map(|t| t.status), Some(TotalStatus::Zero));
+    assert_eq!(TotalStatus::from_code(3), None, "a native host never sends absent");
+    assert_eq!(instance_total_from_wasm(4294967296.0, 0), Ok(Some(Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: false, uncertified: false })));
+    assert_eq!(instance_total_from_wasm(0.0, 3), Ok(None));
+    for (b, st) in [(f64::NAN, 0), (-1.0, 0), (0.5, 0), (1e17, 0), (65536.0, 7), (65536.0, 4)] {
+        assert_eq!(instance_total_from_wasm(b, st), Err(()), "{} {}", b, st);
+    }
 }

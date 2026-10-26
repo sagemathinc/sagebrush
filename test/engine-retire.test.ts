@@ -77,6 +77,7 @@ function module(o: ModOpts): Uint8Array {
     ["sb_set_memory_total", 4, [...i32c(8), 0x20, 0, 0x39, 3, 0, ...i32c(16), 0x20, 1, 0x36, 2, 0, ...i32c(20), 0x20, 2, 0x36, 2, 0]],
     ["sb_set_retired_bytes", 5, [...i32c(32), 0x20, 0, 0x39, 3, 0, ...i32c(40), 0x20, 1, 0x36, 2, 0, ...i32c(0)]],
     ["sb_set_memory_share", 6, []],
+    ["sb_set_instance_total", 5, [...i32c(48), 0x20, 0, 0x39, 3, 0, ...i32c(56), 0x20, 1, 0x36, 2, 0, ...i32c(0)]],
   ];
   if (o.trapStart) funcs.push(["start", 7, [0x00]]);
   const bytes = [
@@ -90,6 +91,16 @@ function module(o: ModOpts): Uint8Array {
     ...section(10, vec(funcs.map(([, , b]) => { const body = [0, ...b, 0x0b]; return [...uleb(body.length), ...body]; }))),
   ];
   return new Uint8Array(bytes);
+}
+
+/** The totals the live test instance was pushed (C r16b): instance
+ * [bytes, status] and shared [bytes, status, uncertified]. */
+function pushedTotals(): { instance: [number, number]; shared: [number, number, number] } {
+  const m = H.live().memory.buffer;
+  return {
+    instance: [new Float64Array(m, 48, 1)[0], new Int32Array(m, 56, 1)[0]],
+    shared: [new Float64Array(m, 8, 1)[0], new Int32Array(m, 16, 1)[0], new Int32Array(m, 20, 1)[0]],
+  };
 }
 
 /** What the live test instance was pushed: [R_ret, faulted]. */
@@ -379,4 +390,206 @@ test("only retire() and the creation transaction assign the live instance E (and
     if (/(^|[^\w.])E\s*=(?!=)/.test(line.replace(/\/\/.*$/, ""))) owners.push(fn);
   });
   assert.deepEqual(owners.sort(), ["createAsync", "createInstance", "reset", "retire"]);
+});
+
+// ---- C r16b: retirement is charged by row scope ----------------------------
+
+const GiB = 2 ** 30;
+const instanceOnly = (bytes: number) => ({ instance: [bytes, 0] as [number, number], shared: null, uncertified: 0 });
+
+test("C r16b 1: 20 trap/retire/full-GC cycles in one synchronous job on the instance row alone: no refusal while the callbacks are deferred", () => {
+  const { fullGc } = require("../src/runtime/gc");
+  H.reset();
+  H.setModule(module({ pages: 1024 })); // 64 MiB each
+  H.setTotals(instanceOnly(4 * GiB));
+  for (let i = 0; i < 20; i++) {
+    assert.equal(E.engineCall("x"), "", `cycle ${i}`);
+    try {
+      E.engineCall("T");
+    } catch {}
+    fullGc();
+  }
+  // (one job: no finalizer could run, so all 20 are still pending)
+  assert.equal(H.state().retired, 20 * 64 * MiB);
+  assert.equal(E.engineCall("x"), "");
+  // the pushes: the instance total, the shared one absent (3), never zero
+  const p = pushedTotals();
+  assert.deepEqual(p.instance, [4 * GiB, 0]);
+  assert.deepEqual(p.shared.slice(1), [3, 0]);
+  assert.deepEqual(pushedRetired(), [21 * 64 * MiB - 64 * MiB, 0], "the raw R_ret is still pushed");
+});
+
+test("C r16b 1: the instance row refuses by its own address space only: phi (M0 + O_host) <= E_inst, by one byte and at equality", () => {
+  const m0 = 16 * PAGE;
+  H.reset();
+  H.setModule(module({ pages: 16 }));
+  H.setRegister(() => {});
+  H.setTotals(instanceOnly(equalityTotal(m0)));
+  E.engineCall("x");
+  trap.engineCall();
+  // R_ret (16 pages pending) is no term: admitted at equality
+  assert.equal(E.engineCall("x"), "");
+  trap.engineCall();
+  H.setTotals(instanceOnly(equalityTotal(m0) - 4));
+  assert.throws(() => E.engineCall("x"), (e: any) => e.constructor.name === "CreationRefused" && e.row === "instance" && e.retired === 0);
+});
+
+test("C r16b 2: retention by kind on a shared row: the old Memory, its buffer or a view each keep the entry charged; releasing all frees it after the callbacks, not within the job", async () => {
+  const { fullGc } = require("../src/runtime/gc");
+  if (!fullGc()) return;
+  const m0 = 16 * PAGE;
+  for (const kind of ["memory", "buffer", "view"]) {
+    H.reset();
+    H.setModule(module({ pages: 16 }));
+    // the shared row admits M0 + one retired sibling, not two
+    H.setTotals({ instance: [4 * GiB, 0], shared: [equalityTotal(2 * m0), 0], uncertified: 0 });
+    let held: any = null;
+    (() => {
+      E.engineCall("x");
+      const mem = H.live().memory;
+      held = kind === "memory" ? mem : kind === "buffer" ? mem.buffer : new Uint8Array(mem.buffer, 0, 8);
+      try {
+        E.engineCall("T");
+      } catch {}
+    })();
+    for (let i = 0; i < 10; i++) {
+      fullGc();
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.equal(H.state().pending.length, 1, `${kind}: retained, still charged`);
+    // a second sibling would exceed the shared row
+    E.engineCall("x");
+    try {
+      E.engineCall("T");
+    } catch {}
+    assert.throws(() => E.engineCall("x"), (e: any) => e.constructor.name === "CreationRefused" && e.row === "shared", kind);
+    // release everything: within this job, still charged (the raw lag)
+    held = null;
+    fullGc();
+    assert.throws(() => E.engineCall("x"), (e: any) => e.row === "shared", `${kind}: the bookkeeping lags within the job`);
+    for (let i = 0; i < 30 && H.state().pending.length; i++) {
+      await new Promise((r) => setImmediate(r));
+      fullGc();
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.equal(H.state().pending.length, 0, `${kind}: freed once the callbacks ran`);
+    assert.equal(E.engineCall("x"), "");
+    assert.equal(held, null);
+  }
+});
+
+/** The runtime (compile.js) with _capacity's sources replaced, then reset. */
+async function withSources(src: string, body: (c: any) => void) {
+  const c = require("../src/compile.js");
+  await Promise.resolve(c.initParser && c.initParser());
+  c.execModule(`import sys\nif ${JSON.stringify(c.libDir())} not in sys.path: sys.path.append(${JSON.stringify(c.libDir())})\n`, "<t>", "__main__");
+  // (no state from an earlier test: the real totals path)
+  H.reset();
+  try {
+    c.execModule(`import _capacity as C\n${src}\n`, "<t>", "__main__");
+    body(c);
+  } finally {
+    c.execModule("import _capacity as C\nC._set_sources()\n", "<t>", "__main__");
+    H.reset();
+  }
+}
+
+const INSTANCE_PART = `("wasm engine", 1 << 32, 0, ("wasm-engine",), ("wasm-engine",), "instance")`;
+
+test("C r16b 3: the real MemAvailable case is a SHARED row: with the instance row present it still refuses astra2's numbers (no exemption)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "retire-"));
+  try {
+    mkdirSync(join(dir, "proc"));
+    writeFileSync(join(dir, "proc/meminfo"), "MemTotal:       1048576 kB\nMemAvailable:    943718 kB\n");
+    await withSources(`C._set_sources(root=${JSON.stringify(dir)}, rlimits={}, runtime=lambda: [${INSTANCE_PART}])\nt = C.engine_totals()\nassert t["instance"]["bytes"] == 1 << 32 and t["shared"]["bytes"] == 1 << 30 and t["shared"]["basis"] == ["MemAvailable"], t`, () => {
+      H.setModule(module({ pages: 1024 }));
+      H.setRegister(() => {});
+      E.engineCall("x");
+      const kept = H.live().memory;
+      trap.engineCall();
+      assert.throws(() => E.engineCall("x"), (e: any) => e.constructor.name === "CreationRefused" && e.row === "shared" && e.limit === 256n * BigInt(MiB));
+      assert.ok(kept);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C r16b 3: C r17's non-minimum joint row: the least row is the instance one, the joint 8 GiB row is shared: pushed as such, and the domain uncertified", async () => {
+  await withSources(
+    `C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [("wasm engine", 4 << 30, 768 << 20, ("wasm-engine",), ("wasm-engine",), "instance"), ("process joint", 8 << 30, 2304 << 20, ("wasm-engine", "js-heap"), ("wasm-engine", "js-heap"))])\nt = C.engine_totals()\nassert (t["instance"]["bytes"], t["shared"]["bytes"], t["shared"]["joint"]) == (4 << 30, 8 << 30, True), t\nassert C.engine_uncertified() is True`,
+    () => {
+      H.setModule(module({ pages: 16 }));
+      E.engineCall("x");
+      const p = pushedTotals();
+      assert.deepEqual(p.instance, [4 * GiB, 0]);
+      assert.deepEqual(p.shared, [8 * GiB, 0, 1], "the shared joint row and the uncertified bit");
+    },
+  );
+});
+
+test("C r16b 3: the extent is declared, never inferred: an aggregate engine budget named \"wasm engine\" without the instance field is shared", async () => {
+  await withSources(
+    `C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [${INSTANCE_PART}, ("wasm engine", 1 << 30, 0, ("wasm-engine",), ("wasm-engine",))])\nt = C.engine_totals()\nassert (t["instance"]["bytes"], t["shared"]["bytes"]) == (1 << 32, 1 << 30), t`,
+    () => {
+      H.setModule(module({ pages: 16 }));
+      E.engineCall("x");
+      assert.deepEqual(pushedTotals().shared.slice(0, 2), [GiB, 0]);
+    },
+  );
+});
+
+test("C r16b 4: a true shared boundary counts live pages, retained siblings and failed-creation debts once; equality admits", () => {
+  const m0 = 8 * PAGE;
+  H.reset();
+  H.setRegister(() => {});
+  // one retired sibling (M0) and one failed creation's debt (M0): the next
+  // creation needs M0 + 2 M0 on the shared row
+  H.setModule(module({ pages: 8 }));
+  H.setTotals({ instance: [4 * GiB, 0], shared: [equalityTotal(3 * m0), 0], uncertified: 0 });
+  E.engineCall("x");
+  trap.engineCall();
+  H.setModule(module({ pages: 8, trapStart: true }));
+  assert.throws(() => E.engineCall("x"), (e: any) => e instanceof WebAssembly.RuntimeError);
+  assert.equal(H.state().retired, 2 * m0);
+  H.setModule(module({ pages: 8 }));
+  assert.equal(E.engineCall("x"), "", "equality admits");
+  trap.engineCall();
+  assert.throws(() => E.engineCall("x"), (e: any) => e.constructor.name === "CreationRefused" && e.row === "shared" && e.retired === 3 * m0);
+});
+
+test("C r16b: absent is not zero, unreadable or malformed: no shared row pushes 3, a zero row 1, a broken collector the nominal total", async () => {
+  await withSources(`C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [${INSTANCE_PART}])\nassert C.engine_totals()["shared"] is None`, () => {
+    H.setModule(module({ pages: 16 }));
+    E.engineCall("x");
+    assert.deepEqual(pushedTotals().shared.slice(1, 2), [3]);
+  });
+  await withSources(`C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [${INSTANCE_PART}, ("budget", 0, 0, ("wasm-engine",), ("wasm-engine",))])`, () => {
+    H.setModule(module({ pages: 16 }));
+    // (a zero shared total refuses every creation: an observed zero stays zero)
+    assert.throws(() => E.engineCall("x"), (e: any) => e.constructor.name === "CreationRefused" && e.row === "shared" && e.limit === 0n);
+  });
+  await withSources(`C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [${INSTANCE_PART}])\nC.engine_totals = lambda: 42`, () => {
+    H.setModule(module({ pages: 16 }));
+    E.engineCall("x");
+    assert.deepEqual(pushedTotals().shared.slice(1, 2), [-1], "unknown: the ledger reads it as the nominal total, never as absent");
+  });
+});
+
+test("C r16b 5: no ArrayBuffer/external counter: creation and admission read no process.memoryUsage", () => {
+  const p = (globalThis as any).process;
+  const real = p.memoryUsage;
+  p.memoryUsage = () => {
+    throw new Error("memoryUsage read");
+  };
+  try {
+    H.reset();
+    H.setModule(module({ pages: 16 }));
+    H.setTotals({ instance: [4 * GiB, 0], shared: [4 * GiB, 0], uncertified: 0 });
+    assert.equal(E.engineCall("x"), "");
+    trap.engineCall();
+    assert.equal(E.engineCall("x"), "");
+  } finally {
+    p.memoryUsage = real;
+  }
 });
