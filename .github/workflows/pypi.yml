@@ -62,6 +62,7 @@ jobs:
           python engine/py/test_interrupt.py
           python engine/py/test_audit.py
           python engine/py/test_mcp.py
+          python engine/py/test_session_ctrl.py
           cd engine/py && python -m doctest README.md && echo doctests ok
       - uses: actions/upload-artifact@v5
         with:

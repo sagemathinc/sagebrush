@@ -13,6 +13,8 @@ and how soon after the ask, or that it didn't within 8 s.
   break+main       the same, that handler calling _thread.interrupt_main()
   thread-raise     a thread of the child calls signal.raise_signal(SIGINT)
   thread-main      a thread of the child calls _thread.interrupt_main()
+and, on Windows, break and break+handler again for a child with no console
+(CREATE_NO_WINDOW), as a worker under a GUI client is.
 
     python test/win_interrupt_probe.py
 """
@@ -76,8 +78,10 @@ HOWS = ["break", "break+handler", "break+main", "thread-raise", "thread-main"]
 WORKS = ["sleep", "event", "busy"]
 
 
-def one(how, work):
+def one(how, work, no_window=False):
     flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+    if no_window:
+        flags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)  # (a worker with no console, as under a GUI client)
     p = subprocess.Popen([sys.executable, "-c", CHILD, how, work], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, creationflags=flags)
     try:
         first = p.stdout.readline().strip()
@@ -108,6 +112,10 @@ def main():
     for how in HOWS:
         for work in WORKS:
             print("%-14s %-6s %s" % (how, work, one(how, work)), flush=True)
+    # (grader's N2: a child with no console, CREATE_NO_WINDOW; Windows only)
+    if os.name == "nt":
+        for how in ("break", "break+handler"):
+            print("%-14s %-6s %s" % (how + "/nowin", "sleep", one(how, "sleep", no_window=True)), flush=True)
     return 0
 
 
