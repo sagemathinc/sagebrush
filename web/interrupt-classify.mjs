@@ -36,9 +36,14 @@ export function classifyXK(t, xk) {
 // a session cell (the matrix's cls): a trial left without RET or KI in a session cut at the run's
 // deadline had a shortened guard, so it is INVALID-budget, not a failure to stop; but a Stop that
 // could not be sent keeps classify's send_error (and so no baseline allowance), whatever the budget
-export function classifyCell(t, xk) {
+export function classifyCell(t, xk, phase = null) {
   if (t.budget_cut && !t.send_error && !t.marks.RET && !t.marks.KI) return { outcome: "INVALID", why: "run budget spent: the session was cut at the deadline" };
-  return classifyXK(t, xk);
+  const base = classifyXK(t, xk);
+  // (a phase case, rank-13 r6 section 3: a Stop counts only once the target's PHASE marker is out;
+  // a pass before it tested something else, so it is INVALID; a failure stays one)
+  if (phase && t.t_send != null && !t.send_error && !(t.marks.PHASE && t.marks.PHASE.t <= t.t_send) && base.outcome !== "FAIL")
+    return { ...base, outcome: "INVALID", why: `the Stop came before the ${phase} phase` };
+  return base;
 }
 
 export function xkRowOutcome(cells, leakOk, xk) {

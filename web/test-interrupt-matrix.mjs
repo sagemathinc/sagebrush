@@ -63,6 +63,10 @@ const CASES = [
   { id: "E2", mode: "sage", s0: 22, smin: 12, smax: 44, grow: (s, r) => s + Math.max(1, Math.round(Math.log(r) / 0.18)) * Math.sign(Math.log(r)), setup: "n = next_prime(10**S) * next_prime(3 * 10**S)", target: "_r = factor(n)", probe: "assert len(factor(2**64 + 1)) == 2" },
   { id: "E3a", mode: "sage", s0: 450, smin: 200, smax: 600, grow: (s, r) => Math.round(s * Math.cbrt(r)), setup: "M = random_matrix(GF(32003), S)", target: "_r = M.rank()", probe: "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1" },
   { id: "E6a", mode: "sage", s0: 6, smin: 4, smax: 9, grow: (s, r) => s + (r > 1 ? 1 : -1), setup: "R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])", target: "_r = I.groebner_basis()", probe: "assert (X[0] + X[1])**2 - X[0]**2 - X[1]**2 == 2 * X[0] * X[1]\nassert len(I.gens()) == len(X) and I.gens()[0] in R\nR2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2", retained: true },
+  // rank-13 PR 1 (plan-matlab-nocliffs r6 section 3): the column ordering and the sparse LU, each the
+  // whole target, Stop counted only after its PHASE marker (pyjs Python loops, polled at back-edges)
+  { id: "M1o", mode: "python", s0: 250, smin: 40, smax: 600, grow: (s, r) => Math.round(s * Math.sqrt(r)), phase: "ordering", hosts: ["cli"], setup: "import numpy as np\nimport _matlab_sparse as _sp, _matlab_colamd as _C, _matlab_lu as _L\n_L._phase_hook = lambda name: _p(\"PHASE\", _i, name)\nk = S\nn = k * k\n_pm = [(i * 1999) % n for i in range(n)]\n_r, _c, _v = [], [], []\nfor _x in range(k):\n    for _y in range(k):\n        _t = _x * k + _y\n        for _dx, _dy, _w in ((0, 0, 4.0), (1, 0, -1.0), (-1, 0, -1.0), (0, 1, -1.0), (0, -1, -1.0)):\n            _a, _b = _x + _dx, _y + _dy\n            if 0 <= _a < k and 0 <= _b < k:\n                _r.append(_pm[_a * k + _b]); _c.append(_pm[_t]); _v.append(_w)\nA = _sp.make(n, n, np.array(_r), np.array(_c), np.array(_v))", target: "_L._phase(\"ordering\")\n_q = _C.order_columns(A.m, A.n, A.jc, A.ir)", probe: "assert _L.factor(_sp.make(2, 2, np.array([0, 1]), np.array([0, 1]), np.array([2.0, 4.0])), \"p\").solve(np.ones((2, 1)))[1, 0] == 0.25" },
+  { id: "M1l", mode: "python", s0: 70, smin: 20, smax: 160, grow: (s, r) => Math.round(s * Math.cbrt(r)), phase: "lu", hosts: ["cli"], setup: "import numpy as np\nimport _matlab_sparse as _sp, _matlab_colamd as _C, _matlab_lu as _L\n_L._phase_hook = lambda name: _p(\"PHASE\", _i, name)\nk = S\nn = k * k\n_pm = [(i * 1999) % n for i in range(n)]\n_r, _c, _v = [], [], []\nfor _x in range(k):\n    for _y in range(k):\n        _t = _x * k + _y\n        for _dx, _dy, _w in ((0, 0, 4.0), (1, 0, -1.0), (-1, 0, -1.0), (0, 1, -1.0), (0, -1, -1.0)):\n            _a, _b = _x + _dx, _y + _dy\n            if 0 <= _a < k and 0 <= _b < k:\n                _r.append(_pm[_a * k + _b]); _c.append(_pm[_t]); _v.append(_w)\nA = _sp.make(n, n, np.array(_r), np.array(_c), np.array(_v))\n_q = _C.order_columns(A.m, A.n, A.jc, A.ir)", target: "_F = _L.factor(A, \"m1l\", q=_q)", probe: "assert _L.factor(_sp.make(2, 2, np.array([0, 1]), np.array([0, 1]), np.array([2.0, 4.0])), \"p\").solve(np.ones((2, 1)))[1, 0] == 0.25" },
   { id: "E13g", mode: "sage", s0: 40, smin: 4, smax: 4000, grow: (s, r) => Math.max(1, Math.round(s * r)), xk: { kind: "window", wrap: "_sbraster.render" }, hosts: ["cli"], setup: "import tempfile, os\n_d = tempfile.mkdtemp()\nP = sum(polygon([(0, 0), (1, 0.1 * (j % 10)), (1, 1), (0.1 * (j % 7), 1)], alpha=0.02) for j in range(S))", target: "P.save(os.path.join(_d, 'big.png'), figsize=40, dpi=100)", probe: "line([(0, 0), (1, 1)]).save(os.path.join(_d, 'small.png'), figsize=1, dpi=100)\nassert os.path.getsize(os.path.join(_d, 'small.png')) > 0" },
 ].filter((c) => !ROWS || ROWS.split(",").includes(c.id));
 const FLAGS = { python: [], sage: ["--sage"], magma: ["--magma"], matlab: ["--matlab"] };
@@ -200,7 +204,7 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       }, 500);
     };
     const onLine = (line) => {
-      const m = line.replace(/\r/g, "").match(/^(SETUP|ENTER|RET|KI|PROBE|STRAY|DONE|END|XSTART|XEND)\b ?(\d+)? ?(.*)$/);
+      const m = line.replace(/\r/g, "").match(/^(SETUP|ENTER|RET|KI|PROBE|STRAY|DONE|END|XSTART|XEND|PHASE)\b ?(\d+)? ?(.*)$/);
       if (!m) return;
       const [, mk, si, rest] = m;
       if (mk === "END") return finish("end");
@@ -303,7 +307,7 @@ async function runHost(host) {
   for (const c of CASES) {
     if (c.hosts && !c.hosts.includes(host)) continue; // (a case's own hosts, e.g. E13g: the CLI)
     // the CI set (r5 §8): the CLI's five rows, the prompt's two; everything else is VM-only
-    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a"]).includes(c.id)) continue;
+    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l"]).includes(c.id)) continue;
     if (overBudget()) {
       rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: "run budget spent" });
       record(rows.at(-1));
@@ -327,7 +331,7 @@ async function runHost(host) {
     // an XK case's per-cell context (r5 §6.2): the window's R(s), or the bound's T and f
     const xkOf = (delay) => (!c.xk ? null : c.xk.kind === "window" ? { kind: "window", R_ms: cal.R } : { kind: "bound", T_ms: cal.T, f: delay / cal.T });
     // (a cell of a session cut at the run's deadline: classifyCell)
-    const cls = (t, delay) => classifyCell(t, xkOf(delay));
+    const cls = (t, delay) => classifyCell(t, xkOf(delay), c.phase);
     const run = async (label, delays) => {
       const r = await session(host, c, cal.s, delays, CAL_CAP_MS + guard_ms * delays.length, guard_ms);
       if (r.end === "budget") for (const t of r.trials) t.budget_cut = true;
