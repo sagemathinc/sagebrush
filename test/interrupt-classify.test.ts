@@ -10,7 +10,7 @@ import { join } from "node:path";
 const mod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 
 function run(js: string): any {
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, classifyXK, xkRowOutcome, rowOutcome, againstBaseline, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -180,6 +180,22 @@ test("a Stop that could not be sent: the cell is INVALID with its error kept, an
   const b = `{ entries: [{ case: "P2a", host: "cli", signature: "did not stop" }] }`;
   assert.equal(run(`againstBaseline({ case: "P2a", host: "cli", outcome: "FAIL", trials: [{ outcome: "FAIL", why: "did not stop" }, { outcome: "INVALID", send_error: { error: "EPERM" } }] }, ${b})`), "FAIL");
   assert.equal(run(`rowOutcome([${t.replace(/^\{/, "{ outcome: \"INVALID\", ")}])`), "INCOMPLETE");
+});
+
+test("a cell of a session cut at the run's deadline: INVALID-budget, but a Stop that could not be sent keeps its send_error", () => {
+  const cut = run(`classifyCell({ budget_cut: true, t_send: 1000, marks: { ENTER: { t: 500, rest: "1" } }, probe: "ok" }, null)`);
+  assert.equal(cut.outcome, "INVALID");
+  assert.match(cut.why, /run budget spent/);
+  const t = `{ budget_cut: true, t_send: 1000, marks: { ENTER: { t: 500, rest: "1" } }, probe: "ok", send_error: { error: "EPERM", t: 1000.5 } }`;
+  const r = run(`classifyCell(${t}, null)`);
+  assert.equal(r.outcome, "INVALID");
+  assert.match(r.why, /could not be sent: EPERM/);
+  assert.deepEqual(r.send_error, { error: "EPERM", t: 1000.5 });
+  // (so the row never matches a baseline: the send_error reaches againstBaseline)
+  const b = `{ entries: [{ case: "P2a", host: "cli", signature: "did not stop" }] }`;
+  assert.equal(run(`againstBaseline({ case: "P2a", host: "cli", outcome: "FAIL", trials: [{ outcome: "FAIL", why: "did not stop" }, classifyCell(${t}, null)] }, ${b})`), "FAIL");
+  // (a trial that returned or was interrupted is classified as usual, cut or not)
+  assert.equal(run(`classifyCell({ budget_cut: true, t_send: 1000, marks: { ENTER: { t: 500, rest: "1" }, KI: { t: 1012, rest: "1.6" } }, probe: "ok" }, null)`).outcome, "PASS");
 });
 
 test("a calibration with no size in the band takes the attempt closest to it within [min, 1.5 max], else none (E2 on GitHub's runner)", () => {

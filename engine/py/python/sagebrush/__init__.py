@@ -87,6 +87,35 @@ def _capacity_share():
     return _capacity_module().poly_share()
 
 
+_TOTAL_STATUS = {"observed": 0, "zero": 1, "nominal": 2}
+
+
+def _capacity_total():
+    """The engine's memory total for its ledger (no-cliffs plan C r13):
+    (bytes, status code, joint, measures) from _capacity.engine_total, the
+    measures naming each binding row's own usage measure (a cgroup's usage
+    file, RLIMIT_AS, RLIMIT_DATA, the physical row, Windows's rows); asked
+    when the engine's total is 100 ms old."""
+    C = _capacity_module()
+    t = C.engine_total()
+    dirs = {name: (kind, d) for kind, name, d in (C._cgroup_dirs() or [])}
+    measures = []
+    for src in t["basis"]:
+        if src in dirs:
+            kind, d = dirs[src]
+            measures.append(("cgroup", d + ("/memory.current" if kind == "v2" else "/memory.usage_in_bytes")))
+        elif src in _MEASURES:
+            measures.append((_MEASURES[src], None))
+        elif src != "nominal":
+            measures.append(("unknown", None))
+    return int(t["bytes"]), _TOTAL_STATUS[t["status"]], bool(t["joint"]), measures
+
+
+# (D0's row names -> the binding row's usage measure)
+_MEASURES = {"RLIMIT_AS": "address_space", "RLIMIT_DATA": "data_segment", "MemAvailable": "physical",
+             "windows job": "windows_job", "physical available": "windows_physical"}
+
+
 def _limits_from_environment():
     """SAGEBRUSH_LIMITS=FILE: a JSON text of at most 4096 bytes, proposed
     (not locked) at import; an unreadable or invalid file is a ValueError
@@ -120,6 +149,12 @@ def _register_capacity():
     except ImportError:
         return  # (an older native build: its factorizations keep their default)
     set_memory_share_source(_capacity_share)
+    try:
+        from ._native import set_memory_total_source
+    except ImportError:
+        return  # (a native build without the ledger: nominal total)
+    # (looked up at each read, so that a test can stand in a source)
+    set_memory_total_source(lambda: _capacity_total())
 
 
 _register_capacity()
