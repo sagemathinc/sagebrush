@@ -59,7 +59,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // setup and target are Python source with S for the size; grow(s, ratio) gives the next size.
 const CASES = [
   { id: "P1", mode: "python", calibration: "nonterminating", setup: "k = 0", target: "while True:\n    k += 1", probe: "assert sum(range(10)) == 45" },
-  { id: "P2a", mode: "python", s0: 3_000_000, smin: 100_000, smax: 25_000_000, leak_s: 3_000_000, grow: (s, r) => Math.round(s * r), setup: "", target: "_r = sorted(range(S), key=lambda v: -v)", probe: "assert sorted([3, 1, 2]) == [1, 2, 3]" },
+  { id: "P2a", mode: "python", s0: 3_000_000, smin: 100_000, smax: 25_000_000, leak_s: 3_000_000, leak_measure: "heap+external", grow: (s, r) => Math.round(s * r), setup: "", target: "_r = sorted(range(S), key=lambda v: -v)", probe: "assert sorted([3, 1, 2]) == [1, 2, 3]" },
   { id: "E2", mode: "sage", s0: 22, smin: 12, smax: 44, grow: (s, r) => s + Math.max(1, Math.round(Math.log(r) / 0.18)) * Math.sign(Math.log(r)), setup: "n = next_prime(10**S) * next_prime(3 * 10**S)", target: "_r = factor(n)", probe: "assert len(factor(2**64 + 1)) == 2" },
   { id: "E3a", mode: "sage", s0: 450, smin: 200, smax: 600, grow: (s, r) => Math.round(s * Math.cbrt(r)), setup: "M = random_matrix(GF(32003), S)", target: "_r = M.rank()", probe: "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1" },
   { id: "E6a", mode: "sage", s0: 6, smin: 4, smax: 9, grow: (s, r) => s + (r > 1 ? 1 : -1), setup: "R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])", target: "_r = I.groebner_basis()", probe: "assert (X[0] + X[1])**2 - X[0]**2 - X[1]**2 == 2 * X[0] * X[1]\nassert len(I.gens()) == len(X) and I.gens()[0] in R\nR2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2", retained: true },
@@ -84,9 +84,26 @@ def _xwrap(*a, **k):
 _xm.${wf} = _xwrap
 `
     : "";
+  // (a case with leak_measure "heap+external": after each trial's probe, between trials and outside
+  // every timed window, a full collection and then the live JS heap plus its external memory,
+  // in the DONE marker; nothing where the host has no such figure)
+  const measure = c.leak_measure === "heap+external"
+    ? `    _m = ""
+    try:
+        _a = _hu() if _hu else None
+        _b = _he() if (_he and _a is not None) else None
+        _m = "%d" % (_a + _b) if _a is not None and _b is not None else ""
+    except Exception:
+        _m = ""
+`
+    : `    _m = ""
+`;
   return `import time
+import sys as _sys
 keep = 41
 _i = 0
+_hu = getattr(_sys, "_sagebrush_heap_used", None)
+_he = getattr(_sys, "_sagebrush_heap_external", None)
 def _p(*a):
     print(*a, flush=True)
 ${wrap}for _i in range(1, ${n} + 1):
@@ -111,7 +128,7 @@ ${indent(c.probe, 8)}
         _p("STRAY", _i, "probe")
     except Exception as _e:
         _p("PROBE", _i, "fail", repr(_e)[:200])
-    _p("DONE", _i)
+${measure}    _p("DONE", _i, _m)
     try:
         time.sleep(0.3)
     except KeyboardInterrupt:
@@ -234,7 +251,7 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       if (mk === "KI" && guard) { clearTimeout(guard); guard = null; }
       if (mk === "PROBE") t.probe = rest;
       if (mk === "STRAY") t.stray = rest;
-      if (mk === "DONE") samples.push({ i: t.i, ...(procStatus(host === "cli" ? p.pid : launcherChild(p.pid)) ?? {}) });
+      if (mk === "DONE") samples.push({ i: t.i, ...(procStatus(host === "cli" ? p.pid : launcherChild(p.pid)) ?? {}), ...(/^\d+$/.test(rest.trim()) ? { mem_kb: Number(rest.trim()) / 1024 } : {}) });
     };
     const feed = (d) => {
       buf += d;
@@ -360,7 +377,7 @@ async function runHost(host) {
     }
     // a process that outlived its session's kill is a leaked worker: the row fails (r4 §1)
     const left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
-    const leak0 = leakCheck(lr.samples);
+    const leak0 = leakCheck(lr.samples, 20, c.leak_measure ?? "rss");
     const leak = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
     let { outcome: own, why: rowWhy } = xkRowOutcome(cells, leak && leak.ok, c.xk);
     // (a session cut at the run's deadline leaves its cells unresolved: the row is INVALID-budget, unless it already failed)

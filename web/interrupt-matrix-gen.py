@@ -12,7 +12,7 @@ T = census["transports"]
 CASES = [
     dict(id="P1", transport="pyloop:while", owner="python", mode="python", calibration="nonterminating",
          setup="k = 0", target="while True:\n    k += 1", probe="assert sum(range(10)) == 45"),
-    dict(id="P2a", transport="runtime:sorted-key", owner="python", mode="python", s0=3_000_000, smin=100_000, smax=25_000_000, leak_s=3_000_000,
+    dict(id="P2a", transport="runtime:sorted-key", owner="python", mode="python", s0=3_000_000, smin=100_000, smax=25_000_000, leak_s=3_000_000, leak_measure="heap+external",
          grow=dict(kind="scale", p=1), setup="", target="_r = sorted(range(S), key=lambda v: -v)",
          probe="assert sorted([3, 1, 2]) == [1, 2, 3]"),
     dict(id="E2", transport="engineCall:factor_integer", owner="number theory", mode="sage", s0=22, smin=12, smax=44,
