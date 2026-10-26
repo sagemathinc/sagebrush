@@ -1,9 +1,10 @@
 """open() for the pyjs runtime: whole-file reads, writes on flush/close.
 
 Without reference counting a file object is not closed when the last
-reference goes (`open(f, "w").write(s)`), so files with unwritten data are
-remembered and _flush_all() writes them: after each notebook cell and when a
-program ends."""
+reference goes, so files with unwritten data are remembered and _flush_all()
+writes them: after each notebook cell and when a program ends.
+(`open(f, "w").write(s)` with plain operands makes no file object: the
+compiler writes and closes it at the statement, src/runtime/file-once.ts)"""
 
 import io
 import _fs
@@ -241,14 +242,10 @@ def open(file, mode="r", buffering=-1, encoding=None, errors=None, newline=None,
     if not isinstance(mode, str) or not set(mode) <= set("rwxabt+"):
         raise ValueError("invalid mode: %r" % (mode,))
     binary = "b" in mode
-    # unwritten data of an unclosed file object of the same path is written
-    # first, so open(f, "w").write(s) followed by a read sees s (as in CPython)
-    for f in list(_unwritten.values()):
-        if getattr(f, "name", None) == file:
-            try:
-                f.flush()
-            except Exception:
-                pass
+    # (an unclosed file of the same path is not written first: a held file's
+    # data is CPython's buffer, not yet on disk; open(f, "w").write(s) with
+    # plain operands writes and closes at once instead, src/emit.ts's
+    # fileOnceCall)
     if "x" in mode and _fs.exists(file):
         raise FileExistsError(17, "File exists", file)
     if "r" in mode:

@@ -7,7 +7,7 @@
 // web/build-articles.ts`); writes into web/site/public.
 import { Marked, type Tokens } from "marked";
 import katex from "katex";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 
@@ -210,7 +210,7 @@ const seriesList: { slug: string; title: string; description: string; count: num
 rmSync(join(out, "articles"), { recursive: true, force: true });
 const adir = join(root, "articles");
 // the series in this order, then any others alphabetically
-const ORDER = ["notebook", "sage", "matlab", "groebner", "number-theory", "foundations"];
+const ORDER = ["architecture", "notebook", "sage", "matlab", "groebner", "number-theory", "foundations"];
 const rank = (s: string) => (ORDER.indexOf(s) < 0 ? ORDER.length : ORDER.indexOf(s));
 for (const series of existsSync(adir) ? readdirSync(adir).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)) : []) {
   const sdir = join(adir, series);
@@ -246,6 +246,8 @@ for (const series of existsSync(adir) ? readdirSync(adir).sort((a, b) => rank(a)
     p.next = arts[i + 1];
   });
   mkdirSync(join(out, "articles", series), { recursive: true });
+  // (a series' boards, *.board.json, beside its pages, for /board/?doc=/articles/<series>/<name>.board.json)
+  for (const f of readdirSync(sdir).filter((f) => f.endsWith(".board.json"))) copyFileSync(join(sdir, f), join(out, "articles", series, f));
   for (const p of pages) {
     const file = p.index ? join(out, "articles", series, "index.html") : join(out, "articles", series, p.url.split("/").pop() + ".html");
     writeFileSync(file, page(p));
