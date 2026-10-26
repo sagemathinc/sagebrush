@@ -399,7 +399,7 @@
   "class": "none",
   "owner": "estimates and progress (encoding)"
  },
- "engine/ledger/src/growth.rs :: reserve_growth :: need: w.unwrap_or(u64::MAX), #0": {
+ "engine/ledger/src/growth.rs :: reserve_growth :: Err(refusal(what, bind, w.unwrap_or(u64::MAX), live, outstanding, retired)) #0": {
   "class": "none",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
@@ -416,6 +416,14 @@
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
  "engine/ledger/src/lib.rs :: set_fake_committed :: FAKE_COMMITTED.store(bytes.unwrap_or(u64::MAX), Relaxed); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/tests.rs :: growth_refusals_name_the_binding_row_with_its_own_figures :: match reserve_growth(\"block\", u64::MAX) { #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/tests.rs :: no_usable_row_is_never_permission_the_nominal_total_is_checked :: match reserve_growth(\"block\", u64::MAX) { #0": {
   "class": "none",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
@@ -5350,11 +5358,11 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/engine.ts :: refuse :: const limit = allowanceOf(t.instance); #0": {
+ "src/runtime/engine.ts :: refuse :: const limit = allowanceOf(shared ?? [-1, -1]); #0": {
   "class": "2",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
- "src/runtime/engine.ts :: refuse :: const limit = allowanceOf(t.shared ?? [-1, -1]); #0": {
+ "src/runtime/engine.ts :: refuse :: const limit = allowanceOf(t.instance); #0": {
   "class": "2",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },

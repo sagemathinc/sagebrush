@@ -133,6 +133,46 @@ fn host_handles_and_retired_bytes_through_the_abi() {
     assert_eq!(sb_set_instance_total(4294967296.0, 0), 0);
     assert!(sagebrush_ledger::faulted(), "and stays");
 
+    // no usable row is no permission (astra2's LIMIT-C2BII-1 witness): with
+    // no instance total and an absent shared total the nominal total is
+    // checked, so 1 TiB is refused, typed, and nothing is held
+    assert_eq!(sb_set_instance_total(0.0, 3), 0);
+    sb_set_memory_total(0.0, 3, 0);
+    let held = sb_outstanding_bytes();
+    assert_eq!(reserve("no rows", (1u64 << 40) as f64), 0.0, "{}", reply());
+    let r = reply();
+    assert!(r.contains("\"memory\"") && r.contains("\"status\":\"nominal\"") && r.contains("\"total\":1073741824"), "{}", r);
+    assert_eq!(sb_outstanding_bytes(), held, "the refused call holds nothing");
+    sb_set_memory_total((4u64 << 20) as f64, 0, 0);
+
+    // the web JSON carries every typed field of the binding row
+    // (LIMIT-C2BII-2): an instance refusal its own total and status, no R_ret
+    let inst = sagebrush_ledger::Refusal {
+        what: "x".into(),
+        row: "instance",
+        need: 1,
+        allowance: 2,
+        live: 3,
+        outstanding: 4,
+        total: 8,
+        status: sagebrush_ledger::TotalStatus::Observed,
+        joint: false,
+        available: None,
+        measured: true,
+        retired: 0,
+    };
+    let v = memory_error_value(&inst);
+    assert_eq!(
+        (v["row"].as_str(), v["status"].as_str(), v["total"].as_u64(), v["allowance"].as_u64(), v["retired"].as_u64(), v["joint"].as_bool()),
+        (Some("instance"), Some("observed"), Some(8), Some(2), Some(0), Some(false))
+    );
+    let shared = sagebrush_ledger::Refusal { row: "shared", status: sagebrush_ledger::TotalStatus::Nominal, total: 1 << 30, retired: 65536, ..inst };
+    let v = memory_error_value(&shared);
+    assert_eq!(
+        (v["row"].as_str(), v["status"].as_str(), v["total"].as_u64(), v["retired"].as_u64()),
+        (Some("shared"), Some("nominal"), Some(1 << 30), Some(65536))
+    );
+
     // retired bytes: valid figures set, invalid ones are -1 (and a sticky
     // fault, which the ledger's own tests check)
     assert_eq!(sb_set_retired_bytes(65536.0 * 3.0, 0), 0);
