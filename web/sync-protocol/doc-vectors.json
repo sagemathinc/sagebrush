@@ -673,6 +673,62 @@
     "title": "é😀",
     "\u0000n:intro": true
    }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "__proto__": {
+     "kept": 7,
+     "n": null
+    },
+    "x": {
+     "__proto__": {
+      "kept": 7
+     },
+     "other": 2
+    }
+   },
+   "out": {
+    "type": "cell",
+    "id": "c",
+    "__proto__": {
+     "kept": 7,
+     "n": {
+      "\u0000": "n"
+     }
+    },
+    "x": {
+     "__proto__": {
+      "kept": 7
+     },
+     "other": 2
+    }
+   }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "constructor": 1,
+    "prototype": {
+     "a": null
+    },
+    "toString": "s"
+   },
+   "out": {
+    "type": "cell",
+    "id": "c",
+    "constructor": 1,
+    "prototype": {
+     "a": {
+      "\u0000": "n"
+     }
+    },
+    "toString": "s"
+   }
   }
  ],
  "lre_decode": [
@@ -769,6 +825,31 @@
     "id": "e",
     "label": "L",
     "w": null
+   }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "__proto__": {
+     "inherited": true
+    },
+    "x": {
+     "__proto__": {
+      "\u0000": "n"
+     }
+    }
+   },
+   "out": {
+    "type": "cell",
+    "id": "c",
+    "__proto__": {
+     "inherited": true
+    },
+    "x": {
+     "__proto__": null
+    }
    }
   }
  ],

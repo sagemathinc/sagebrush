@@ -439,6 +439,9 @@ def main():
         ("notebook", {"type": "cell", "id": "c3", NUL + "top": None, "e": [], "o": {}}),
         ("board", {"type": "item", "page": "", "id": "i1", "text": None, "x": None, "title": "T", "tags": [None]}),
         ("board", {"type": "doc", "page": "", "id": "", "title": "é😀", "intro": None}),
+        # (astra's CORR-175-1: "__proto__" is an ordinary JSON key, at the record and nested; constructor and prototype the controls)
+        ("notebook", {"type": "cell", "id": "c", "__proto__": {"kept": 7, "n": None}, "x": {"__proto__": {"kept": 7}, "other": 2}}),
+        ("notebook", {"type": "cell", "id": "c", "constructor": 1, "prototype": {"a": None}, "toString": "s"}),
     ]
     v["lre_encode"] = []
     for kind, r in encs:
@@ -451,6 +454,8 @@ def main():
         ("notebook", {"type": "cell", "id": "c1", SIDECAR + "input": True}, {"type": "cell", "id": "c1", "input": None}),
         ("notebook", {"type": "cell", "id": "c1", "m": {NUL + NUL: {NUL: "n"}, "z": [{NUL: "n", "p": 3}]}}, {"type": "cell", "id": "c1", "m": {NUL: None, "z": [{"p": 3}]}}),
         ("board", {"type": "edge", "page": "p", "id": "e", "label": "L", SIDECAR + "label": True, "w": {NUL: "n"}}, {"type": "edge", "page": "p", "id": "e", "label": "L", "w": None}),
+        # (incoming: an encoded record with "__proto__" keys decodes to own keys, never to a prototype)
+        ("notebook", {"type": "cell", "id": "c", "__proto__": {"inherited": True}, "x": {"__proto__": {NUL: "n"}}}, {"type": "cell", "id": "c", "__proto__": {"inherited": True}, "x": {"__proto__": None}}),
     ]
     v["lre_decode"] = []
     for kind, e, want in decs:

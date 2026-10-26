@@ -671,6 +671,21 @@ const lreRefused = (field: string, m: string) => new DocError("invalid_value", `
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v) && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
 const lreKey = (k: string) => (k.startsWith(NUL) ? NUL + k : k);
+/** A key set as an own, enumerable data property: "__proto__" included, which `o[k] = v` would take as the
+ * prototype setter, losing the key (astra's CORR-175-1).  Every object LRE makes is built this way. */
+function putOwn(o: Record<string, unknown>, k: string, v: unknown): void {
+  Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+}
+/** An array's items, by index: a hole (a sparse array, which no JSON value is) refused, never skipped as map
+ * would skip it (daybreak3's LIMIT-2C1-2). */
+function lreItems(v: unknown[], field: string, each: (x: unknown) => unknown): unknown[] {
+  const out: unknown[] = [];
+  for (let i = 0; i < v.length; i++) {
+    if (!Object.prototype.hasOwnProperty.call(v, i)) throw lreRefused(field, `a sparse array (a hole at ${i})`);
+    out.push(each(v[i]));
+  }
+  return out;
+}
 function lreValue(v: unknown, field: string, depth: number): unknown {
   if (depth > DOC_LIMITS.jcsDepth) throw tooBig("lre_depth", DOC_LIMITS.jcsDepth, "LRE: nested too deep");
   if (v === null) return { [NUL]: "n" };
@@ -679,8 +694,12 @@ function lreValue(v: unknown, field: string, depth: number): unknown {
     if (!Number.isFinite(v)) throw lreRefused(field, "a number that isn't finite");
     return v;
   }
-  if (Array.isArray(v)) return v.map((x) => lreValue(x, field, depth + 1));
-  if (isPlainObject(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [lreKey(k), lreValue(x, field, depth + 1)]));
+  if (Array.isArray(v)) return lreItems(v, field, (x) => lreValue(x, field, depth + 1));
+  if (isPlainObject(v)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) putOwn(out, lreKey(k), lreValue(x, field, depth + 1));
+    return out;
+  }
   throw lreRefused(field, "a value that isn't JSON");
 }
 /**
@@ -697,10 +716,10 @@ export function lreEncode(schema: RecordSchema, rec: Record<string, unknown>): R
   for (const [k, v] of Object.entries(rec)) {
     if (v === undefined) continue;
     if (schema.stringCols.includes(k)) {
-      if (v === null) out[SIDECAR + k] = true;
-      else if (typeof v === "string") out[k] = v;
+      if (v === null) putOwn(out, SIDECAR + k, true);
+      else if (typeof v === "string") putOwn(out, k, v);
       else throw lreRefused(k, "a string column holds a string or null");
-    } else out[lreKey(k)] = lreValue(v, k, 1);
+    } else putOwn(out, lreKey(k), lreValue(v, k, 1));
   }
   return out;
 }
@@ -712,7 +731,7 @@ function lreDecodeValue(v: unknown, field: string, depth: number): unknown {
     if (!Number.isFinite(v)) throw lreRefused(field, "a number that isn't finite");
     return v;
   }
-  if (Array.isArray(v)) return v.map((x) => lreDecodeValue(x, field, depth + 1));
+  if (Array.isArray(v)) return lreItems(v, field, (x) => lreDecodeValue(x, field, depth + 1));
   if (!isPlainObject(v)) throw lreRefused(field, "a value that isn't JSON");
   const keys = Object.keys(v);
   if (Object.prototype.hasOwnProperty.call(v, NUL)) {
@@ -725,8 +744,8 @@ function lreDecodeValue(v: unknown, field: string, depth: number): unknown {
     if (k === NUL) continue;
     if (k.startsWith(NUL)) {
       if (!k.startsWith(NUL + NUL)) throw lreRefused(field, "a key starting with \\u0000 that isn't escaped");
-      out[k.slice(1)] = lreDecodeValue(v[k], field, depth + 1);
-    } else out[k] = lreDecodeValue(v[k], field, depth + 1);
+      putOwn(out, k.slice(1), lreDecodeValue(v[k], field, depth + 1));
+    } else putOwn(out, k, lreDecodeValue(v[k], field, depth + 1));
   }
   return out;
 }
@@ -749,16 +768,22 @@ export function lreDecode(schema: RecordSchema, enc: unknown): Record<string, un
       sidecars.push(f);
     } else if (k.startsWith(NUL)) {
       if (!k.startsWith(NUL + NUL)) throw lreRefused(k, "a key starting with \\u0000 that isn't escaped");
-      out[k.slice(1)] = lreDecodeValue(v, k.slice(1), 1);
+      putOwn(out, k.slice(1), lreDecodeValue(v, k.slice(1), 1));
     } else if (schema.stringCols.includes(k)) {
       if (typeof v !== "string") throw lreRefused(k, "a string column present as anything but a string");
-      out[k] = v;
-    } else out[k] = lreDecodeValue(v, k, 1);
+      putOwn(out, k, v);
+    } else putOwn(out, k, lreDecodeValue(v, k, 1));
   }
   // (a sidecar beside its present string: a concurrent merge's string, the sidecar dropped)
-  for (const f of sidecars) if (!Object.prototype.hasOwnProperty.call(out, f)) out[f] = null;
+  for (const f of sidecars) if (!Object.prototype.hasOwnProperty.call(out, f)) putOwn(out, f, null);
   for (const k of schema.primaryKeys) if (Object.prototype.hasOwnProperty.call(out, k) && typeof out[k] !== "string") throw lreRefused(k, "a primary key is absent or a string");
   return out;
+}
+/** A record's size as a synced history stores and sends it: the UTF-8 bytes of its encoded JSON.  What a patch's
+ * 256 KiB inline bound, a batch's 1 MiB and the client's charges (plan-sync-slice2-client-r4 F8) count is this,
+ * never the record's own JSON: LRE's markers, sidecars and escaped keys take bytes (LIMIT-2C1-1). */
+export function lreEncodedBytes(schema: RecordSchema, rec: Record<string, unknown>): number {
+  return utf8(JSON.stringify(lreEncode(schema, rec))).length;
 }
 /** Whether a stored record is one LRE accepts (the applied state, never a patch's instructions): throws invalid_value if not. */
 export function lreCheckRecord(schema: RecordSchema, enc: unknown): void {
