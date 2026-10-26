@@ -901,6 +901,32 @@ fn row_refuses(figure: u64, live: u64, retired: u64, available: Option<u64>, out
 /// unreadable check): the shared total in WebAssembly, natively the rows.
 const DEFAULT_ROW: &str = if cfg!(target_arch = "wasm32") { "shared" } else { "native" };
 
+/// The shared row in force (C r16b section 3.2, fail closed): the total as
+/// pushed; none when it is absent and an instance row is checked; and the
+/// nominal total when it is absent and no instance row applies (absence is
+/// never an empty set of checks).
+pub(crate) fn shared_row(t: Total, instance_checked: bool) -> Option<Total> {
+    match t.status {
+        TotalStatus::Absent if instance_checked => None,
+        TotalStatus::Absent => Some(Total { bytes: NOMINAL_TOTAL, status: TotalStatus::Nominal, ..t }),
+        _ => Some(t),
+    }
+}
+
+/// A row that refused, with its own figures (C r16b: a refusal names the
+/// binding row; R_ret only on the shared one).
+#[derive(Clone, Copy)]
+struct Hit {
+    figure: u64,
+    live: u64,
+    allowance: u64,
+    room: Option<u64>,
+    row: &'static str,
+    status: TotalStatus,
+    joint: bool,
+    retired: u64,
+}
+
 fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     let t = total();
     #[cfg(not(target_arch = "wasm32"))]
@@ -927,19 +953,21 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
         committed.max(b + resident)
     };
     // every row is checked (C r17 section 1.3); the first that refuses is
-    // reported: (figure, live, allowance, room).  The decision is made under
+    // reported, with its own figures (Hit).  The decision is made under
     // the lock, the error (which allocates) built after it is released.
-    let mut first: Option<(u64, u64, u64, Option<u64>, &'static str)> = None;
+    let mut first: Option<Hit> = None;
     let mut live_seen = resident;
-    let mut on_row = |figure: u64, usage: u64, rr: u64, available: Option<u64>, row: &'static str| {
+    let mut on_row = |figure: u64, meta: Total, usage: u64, rr: u64, available: Option<u64>, row: &'static str| {
         let live = usage.max(resident);
         live_seen = live_seen.max(live);
         if first.is_none() {
             if let Some((e, room)) = row_refuses(figure, live, rr, available, outstanding, x) {
-                first = Some((figure, live, e, room, row));
+                first = Some(Hit { figure, live, allowance: e, room, row, status: meta.status, joint: meta.joint, retired: rr });
             }
         }
     };
+    // (the shared row in force: none only beside a checked instance row)
+    let shared = shared_row(t, inst_live.is_some());
     #[allow(unused_mut)]
     let mut faked = false;
     #[cfg(any(test, feature = "test-hooks"))]
@@ -947,9 +975,11 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
         let g = hooks::FAKE.lock().unwrap();
         if let Some(rows) = g.as_ref() {
             faked = true;
-            // (the fake rows stand for the watermark row too: R_ret counts)
-            for &(figure, usage, available) in rows {
-                on_row(figure.unwrap_or(t.bytes), usage, retired, available, "shared");
+            // (the fake rows stand for the watermark row too: R_ret counts;
+            // none when no shared row is in force)
+            for &(figure, usage, available) in rows.iter().filter(|_| shared.is_some()) {
+                let sh = shared.unwrap_or(t);
+                on_row(figure.unwrap_or(sh.bytes), sh, usage, retired, available, "shared");
             }
         }
         drop(g);
@@ -963,11 +993,11 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     let mut measured = true;
     // (the shared total, unless no shared row applies: C r16b section 3.2)
     #[cfg(target_arch = "wasm32")]
-    if !faked && t.status != TotalStatus::Absent {
-        on_row(t.bytes, wasm_live, retired, None, "shared");
+    if let (false, Some(sh)) = (faked, shared) {
+        on_row(sh.bytes, sh, wasm_live, retired, None, "shared");
     }
     if let (Some(i), Some(l)) = (instance, inst_live) {
-        on_row(i.bytes, l, 0, None, "instance");
+        on_row(i.bytes, i, l, 0, None, "instance");
     }
     // (WebAssembly: a certification-dependent chain needs the total still
     // certified: observed, every applicable row engine-only)
@@ -991,7 +1021,8 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     #[cfg(not(target_arch = "wasm32"))]
     if !faked {
         if s.measure.available() {
-            measured = s.measure.read_each(|r| on_row(r.figure, r.usage, 0, r.available, "native"));
+            let meta = shared.unwrap_or(t);
+            measured = s.measure.read_each(|r| on_row(r.figure, meta, r.usage, 0, r.available, "native"));
             unreadable = !measured;
         } else if protected {
             // a certification-dependent operation whose rows became
@@ -1004,15 +1035,25 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
             // with no measure: no cap was lifted for it; the residents
             // against the total, as in C-1)
             measured = false;
-            if t.status != TotalStatus::Absent {
-                on_row(t.bytes, 0, 0, None, "native");
+            if let Some(sh) = shared {
+                on_row(sh.bytes, sh, 0, 0, None, "native");
             }
         }
     }
+    // (an unmeasured or unreadable check names the shared row in force,
+    // else the instance row, with that row's own figures)
+    let fallback = match (shared, instance, inst_live) {
+        (None, Some(i), Some(l)) => Hit { figure: i.bytes, live: l, allowance: allowance(i), room: None, row: "instance", status: i.status, joint: i.joint, retired: 0 },
+        (sh, _, _) => {
+            let sh = sh.unwrap_or(t);
+            let rr = if DEFAULT_ROW == "shared" { retired } else { 0 };
+            Hit { figure: sh.bytes, live: live_seen, allowance: allowance(sh), room: None, row: DEFAULT_ROW, status: sh.status, joint: sh.joint, retired: rr }
+        }
+    };
     if (unreadable || unmeasurable) && first.is_none() {
-        first = Some((t.bytes, live_seen, allowance(t), None, DEFAULT_ROW));
+        first = Some(fallback);
     }
-    let (first, live_seen) = (first, live_seen);
+    let first = first;
     let slots_full = first.is_none() && s.chain_add(chain, x).is_err();
     if first.is_none() && !slots_full {
         s.set_outstanding(outstanding + x);
@@ -1022,20 +1063,20 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     if slots_full {
         return Err(EngineError::Internal(format!("more than {} chains hold reservations at once", CHAIN_SLOTS)));
     }
-    let (figure, live, allowance, room, row) = first.unwrap_or((t.bytes, live_seen, allowance(t), None, DEFAULT_ROW));
+    let h = first.unwrap_or(fallback);
     Err(EngineError::Memory(Refusal {
         what: what.to_string(),
-        row,
+        row: h.row,
         need: x,
-        allowance,
-        live,
+        allowance: h.allowance,
+        live: h.live,
         outstanding,
-        total: figure,
-        status: t.status,
-        joint: t.joint,
-        available: room,
+        total: h.figure,
+        status: h.status,
+        joint: h.joint,
+        available: h.room,
         measured,
-        retired,
+        retired: h.retired,
     }))
 }
 

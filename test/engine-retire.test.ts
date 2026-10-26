@@ -583,6 +583,67 @@ test("C r16b: absent is not zero, unreadable or malformed: no shared row pushes 
   });
 });
 
+// LIMIT-C2BII-1 (astra2, daybreak2): absence comes only from an explicit
+// None shared record beside a VALID instance record; anything else is the
+// nominal shared total, refused before allocation beyond its boundary.  A
+// 1600-page module (100 MiB) needs ceil(21/8 * 100 MiB) > 256 MiB, a quarter
+// of the nominal 1 GiB: refused before any instance memory exists.
+const NOMINAL_E = 256n * BigInt(MiB);
+const OBS = `{"bytes": 1 << 32, "status": "observed"}`;
+for (const [what, totals] of [
+  ["a malformed instance record beside shared None", `{"instance": {"bytes": -1, "status": "observed"}, "shared": None}`],
+  ["an instance record with an unknown status beside shared None", `{"instance": {"bytes": 1 << 32, "status": "bogus"}, "shared": None}`],
+  ["an instance record that is not a dict beside shared None", `{"instance": 42, "shared": None}`],
+  ["no instance row beside shared None", `{"instance": None, "shared": None}`],
+  ["a valid instance record with the shared key missing", `{"instance": ${OBS}}`],
+  ["a valid instance record with a malformed shared record", `{"instance": ${OBS}, "shared": {"bytes": "x", "status": "observed"}}`],
+  ["a valid instance record with a shared record missing its status", `{"instance": ${OBS}, "shared": {"bytes": 1 << 32}}`],
+  ["the instance key missing beside shared None", `{"shared": None}`],
+] as const) {
+  test(`LIMIT-C2BII-1: ${what} is the nominal shared total, never absence: pushed as unknown, and refused before allocation`, async () => {
+    await withSources(`C.engine_totals = lambda: ${totals}`, () => {
+      // (the parser itself, before the creation's own fallback)
+      assert.deepEqual(H.parsed().shared, [-1, -1], "parsed as the nominal total");
+      H.setModule(module({ pages: 16 }));
+      E.engineCall("x");
+      assert.deepEqual(pushedTotals().shared.slice(1, 2), [-1], "the nominal total, never status 3");
+      trap.engineCall();
+      H.setModule(module({ pages: 1600 }));
+      const before = H.state().retired;
+      assert.throws(() => E.engineCall("x"), (e: any) => e.constructor.name === "CreationRefused" && e.row === "shared" && e.limit === NOMINAL_E);
+      assert.equal(H.live(), null, "no instance was created");
+      assert.equal(H.state().retired, before, "no debt: nothing was allocated");
+    });
+  });
+}
+
+test("LIMIT-C2BII-1: the explicit None shared record beside a valid instance record is absence (3), checked on the instance row", async () => {
+  await withSources(`C.engine_totals = lambda: {"instance": {"bytes": 1 << 30, "status": "observed"}, "shared": None}`, () => {
+    assert.deepEqual(H.parsed(), { instance: [GiB, 0], shared: null, uncertified: H.parsed().uncertified });
+    H.setModule(module({ pages: 16 }));
+    E.engineCall("x");
+    const p = pushedTotals();
+    assert.deepEqual(p.instance, [GiB, 0]);
+    assert.deepEqual(p.shared.slice(1, 2), [3]);
+    trap.engineCall();
+    H.setModule(module({ pages: 1600 }));
+    assert.throws(() => E.engineCall("x"), (e: any) => e.constructor.name === "CreationRefused" && e.row === "instance" && e.limit === NOMINAL_E && e.retired === 0);
+  });
+});
+
+test("LIMIT-C2BII-1: with neither row (a host bypassing the parser) creation checks the nominal shared total and pushes it, never two absences", () => {
+  H.reset();
+  H.setModule(module({ pages: 16 }));
+  H.setTotals({ instance: null, shared: null, uncertified: 0 });
+  E.engineCall("x");
+  const p = pushedTotals();
+  assert.deepEqual([p.instance[1], p.shared[1]], [3, -1]);
+  trap.engineCall();
+  H.setModule(module({ pages: 1600 }));
+  assert.throws(() => E.engineCall("x"), (e: any) => e.constructor.name === "CreationRefused" && e.row === "shared" && e.limit === NOMINAL_E);
+  assert.equal(H.live(), null);
+});
+
 test("C r16b 5: no ArrayBuffer/external counter: creation and admission read no process.memoryUsage", () => {
   const p = (globalThis as any).process;
   const real = p.memoryUsage;

@@ -313,8 +313,9 @@ function creationCheck(m0: number, t: Totals): CreationRefused | null {
     const need = BigInt(m0) + BigInt(oHostBytes);
     if (PHI_NUM * need > PHI_DEN * limit) return refuse("instance", need, limit);
   }
-  if (t.shared || overflow) {
-    const limit = allowanceOf(t.shared ?? [-1, -1]);
+  const shared = sharedOf(t);
+  if (shared || overflow) {
+    const limit = allowanceOf(shared ?? [-1, -1]);
     const need = BigInt(m0) + BigInt(retiredSum) + BigInt(oHostBytes);
     if (overflow || PHI_NUM * need > PHI_DEN * limit) return refuse("shared", need, limit);
   }
@@ -422,13 +423,21 @@ interface Totals {
    * (C r17 section 1.3: engine_uncertified), else 0 */
   uncertified: number;
 }
+/** The shared row in force (C r16b section 3.2, fail closed): none only
+ * beside an instance row; with neither, the nominal total (absence is
+ * never an empty set of checks). */
+function sharedOf(t: Totals): [number, number] | null {
+  return t.shared ?? (t.instance ? null : [-1, -1]);
+}
 /** Push both totals; an engine without sb_set_instance_total (before C
  * r16b) gets the one total of before. */
 function pushTotals(e: Engine, t: Totals) {
   if (typeof e.sb_set_instance_total === "function") {
     e.sb_set_instance_total(t.instance ? t.instance[0] : 0, t.instance ? t.instance[1] : 3);
-    // (absent: no shared row; uncertified still comes with it)
-    e.sb_set_memory_total!(t.shared ? t.shared[0] : 0, t.shared ? t.shared[1] : 3, t.uncertified);
+    // (absent: no shared row, only beside an instance row; uncertified
+    // still comes with it)
+    const shared = sharedOf(t);
+    e.sb_set_memory_total!(shared ? shared[0] : 0, shared ? shared[1] : 3, t.uncertified);
   } else {
     const [bytes, status, uncertified] = memoryTotal();
     e.sb_set_memory_total!(bytes, status, uncertified);
@@ -461,24 +470,38 @@ function memoryTotal(): [number, number, number] {
 }
 /** lib/_capacity.py engine_totals (no-cliffs C r16b section 3.1): each
  * extent's least row as [bytes, status code], or null for an extent with
- * no row; the shared one is the nominal total when it can't be had (as
- * memoryTotal), and so is anything malformed: never "absent" by mistake. */
+ * no row.  The shape is validated: a dict with both keys, each None or a
+ * dict with a valid bytes and status.  The shared one is absent only when
+ * it is an explicit None beside a VALID instance record; missing,
+ * malformed, or None with no valid instance row, it is the nominal total
+ * (as memoryTotal): never "absent" by mistake.  A malformed instance record
+ * is no instance row. */
 function memoryTotals(): Totals {
   try {
     const m = Obj.hooks.importModule("_capacity");
     const t: any = Obj.callObj(Obj.getattr(m, "engine_totals"), []);
+    const isDict = (o: any) => o != null && typeof o === "object" && Obj.isinstance(o, Obj.T.dict);
+    const has = (o: any, k: string) => Obj.unbox(Obj.callObj(Obj.getattr(o, "__contains__"), [k])) === true;
     const get = (o: any, k: string) => Obj.unbox(Obj.callObj(Obj.getattr(o, "get"), [k]));
-    const one = (r: any): [number, number] | null => {
+    // a record: null for an explicit None, the tuple when valid, else
+    // "malformed" (a missing key is malformed, never None)
+    const one = (o: any, k: string): [number, number] | null | "malformed" => {
+      if (!has(o, k)) return "malformed";
+      const r = get(o, k);
       if (r === null || r === undefined) return null;
+      if (!isDict(r) || !has(r, "bytes") || !has(r, "status")) return "malformed";
       let bytes: any = get(r, "bytes");
       if (typeof bytes === "bigint") bytes = bytes <= 9007199254740991n && bytes >= 0n ? Number(bytes) : -1;
-      const status = TOTAL_STATUS[String(get(r, "status"))] ?? -1;
-      return [typeof bytes === "number" && Number.isInteger(bytes) && bytes >= 0 ? bytes : -1, status];
+      const status = TOTAL_STATUS[String(get(r, "status"))];
+      if (status === undefined || typeof bytes !== "number" || !Number.isInteger(bytes) || bytes < 0) return "malformed";
+      return [bytes, status];
     };
-    const inst = one(get(t, "instance"));
-    const shared = one(get(t, "shared"));
-    // (a malformed instance record is no instance row; never a shared absent)
-    return { instance: inst && inst[0] >= 0 && inst[1] >= 0 ? inst : null, shared: shared ?? (inst ? null : [-1, -1]), uncertified: rowsUncertified(m) };
+    if (!isDict(t)) throw new Error("engine_totals: not a dict");
+    const i = one(t, "instance");
+    const sh = one(t, "shared");
+    const instance = Array.isArray(i) ? i : null;
+    const shared = Array.isArray(sh) ? sh : sh === null && instance ? null : ([-1, -1] as [number, number]);
+    return { instance, shared, uncertified: rowsUncertified(m) };
   } catch (e) {
     try {
       if (Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt)) requestCtrlC();
@@ -772,6 +795,8 @@ export const retireTest = {
     if (E) retire(E);
   },
   live: () => E,
+  /** The totals as memoryTotals parses them (before sharedOf). */
+  parsed: () => memoryTotals(),
   state: () => ({
     retired: retiredSum,
     fault,
