@@ -438,8 +438,10 @@ if (hasSite) mkdirSync(join(siteDir, "public", "runner"), { recursive: true });
 // the shared collection page, served for /s/<id> by the site's Worker
 mkdirSync(join(here, "dist", "s"), { recursive: true });
 copyFileSync(join(here, "share-client", "view.html"), join(here, "dist", "s", "index.html"));
+// (its link preview's image, board's design: committed as rendered, never generated here; og.svg is its source)
+copyFileSync(join(here, "share-client", "og.png"), join(here, "dist", "s", "og.png"));
 if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
-for (const f of ["index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
+for (const f of ["index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
   if (hasSite) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the library's chunks)
 if (hasSite) rmSync(join(siteDir, "public", "lib"), { recursive: true, force: true });
