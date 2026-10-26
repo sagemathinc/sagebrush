@@ -154,6 +154,10 @@ fn set_reply(v: Value) {
 /// what_ptr, what_len).  > 0: the handle; 0: refused, the reply holds
 /// {"memory": {...}}; -1: an invalid argument or an internal error, the
 /// reply holds {"error": ...}.
+///
+/// # Safety
+/// `what_ptr` must point to `what_len` readable bytes (or `what_len` be 0),
+/// as the host writes them into this instance's memory.
 #[no_mangle]
 pub unsafe extern "C" fn sb_reserve(what_ptr: *const u8, what_len: usize, bytes: f64) -> i32 {
     let what = if what_len == 0 { "host" } else { std::str::from_utf8(std::slice::from_raw_parts(what_ptr, what_len)).unwrap_or("host") };

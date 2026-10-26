@@ -137,7 +137,7 @@ pub fn set_total(total: Option<Total>) {
 /// (fail closed: the ledger is not certified from then on).  A fault, once
 /// set, stays: neither this nor a total refresh clears it.
 pub fn set_retired(bytes: f64, faulted: u32) -> Result<(), EngineError> {
-    let ok = bytes.is_finite() && bytes >= 0.0 && bytes.fract() == 0.0 && bytes <= 9007199254740991.0 && (bytes as u64) % PAGE == 0 && faulted <= 1;
+    let ok = bytes.is_finite() && bytes >= 0.0 && bytes.fract() == 0.0 && bytes <= 9007199254740991.0 && (bytes as u64).is_multiple_of(PAGE) && faulted <= 1;
     let mut s = state();
     if !ok {
         s.fault = true;
