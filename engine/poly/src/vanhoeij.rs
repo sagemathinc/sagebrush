@@ -99,6 +99,9 @@ pub mod fault {
     /// Stage 2 takes a certificate only after a level's last pass (so its
     /// reach in columns shows).
     pub const S2_LAST_PASS: u8 = 64;
+    /// A Stop is requested when Stage 2's second pass ends (the interrupt
+    /// between passes of delta 2 r2).
+    pub const INTERRUPT_AFTER_PASS2: u8 = 128;
 
     /// What ran: the reach counters (plan r3, section 4.2) and the branches
     /// taken (section 4.3).
@@ -111,6 +114,8 @@ pub mod fault {
         pub s2_entries: u64,
         pub s2_levels: u64,
         pub s2_cols: u64,
+        /// Stage-2 passes run (every chunk of the column order).
+        pub s2_passes: u64,
         /// The precision of the Stage-2 level that certified (0: none).
         pub s2_cert_a: u64,
         pub s2_a_star: u64,
@@ -127,7 +132,7 @@ pub mod fault {
         static A0: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
         static A0_AT_STAR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         static REACH: std::cell::Cell<Reach> = const { std::cell::Cell::new(Reach {
-            s1_cols: 0, s1_levels: 0, s1_exit_cols: 0, s1_exit_levels: 0, s2_entries: 0, s2_levels: 0, s2_cols: 0,
+            s1_cols: 0, s1_levels: 0, s1_exit_cols: 0, s1_exit_levels: 0, s2_entries: 0, s2_levels: 0, s2_cols: 0, s2_passes: 0,
             s2_cert_a: 0, s2_a_star: 0, internal_s0: 0, internal_no_cert: 0, internal_x: 0, full_subsets_large: 0,
         }) };
     }
@@ -736,6 +741,7 @@ fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_la
         let pb = BigInt::from(p);
         let passes = order.len().div_ceil(COLS_PER_PASS);
         for (pass, want) in order.chunks(COLS_PER_PASS).enumerate() {
+            fault::count(|x| x.s2_passes += 1);
             // the c_ij of these columns (values below p^a), reserved first
             let _cld = b.reserve_as("cld", rows_bytes(want.len(), r, pa.bits()))?;
             #[cfg(test)]
@@ -893,6 +899,9 @@ fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_la
                     fault::count(|x| x.s2_cert_a = a);
                     return Ok(fs);
                 }
+            }
+            if fault(fault::INTERRUPT_AFTER_PASS2) && pass == 1 {
+                sagebrush_interrupt::request();
             }
         }
         if a >= star.a {
@@ -1463,6 +1472,7 @@ pub(crate) mod tests {
         assert_eq!(r.unwrap(), 1);
         assert_eq!(reach.s2_entries, 1, "{reach:?}");
         assert!(reach.s2_cols >= 33, "{reach:?}");
+        assert_eq!((reach.s2_levels, reach.s2_passes), (1, 16), "{reach:?}");
         assert!(reach.s2_cert_a > 0 && reach.full_subsets_large == 0, "{reach:?}");
         assert_eq!((reach.s1_cols, reach.s1_levels), (0, 0), "{reach:?}");
     }
@@ -1495,6 +1505,10 @@ pub(crate) mod tests {
             let (r, reach, _) = stage2_direct(&f, fault::S2_LAST_PASS, None, true);
             assert_eq!(r.unwrap(), t, "{name}");
             assert_eq!((reach.s2_levels, reach.s2_cert_a), (1, reach.s2_a_star), "{name}: {reach:?}");
+            // all n columns, in ceil(n / COLS_PER_PASS) passes (at a* every
+            // index passes the information and modulus tests)
+            let n = deg(&f) as u64;
+            assert_eq!((reach.s2_cols, reach.s2_passes), (n, n.div_ceil(COLS_PER_PASS as u64)), "{name}: {reach:?}");
             assert_eq!(reach.internal_no_cert, 0, "{name}");
         }
     }
@@ -1605,5 +1619,88 @@ pub(crate) mod tests {
         assert!(m.contains("no recombination certificate at the proved precision"), "{m}");
         assert_eq!((reach.internal_no_cert, reach.internal_s0, reach.internal_x), (1, 0, 0), "{reach:?}");
         assert_eq!(reach.s2_cert_a, 0, "{reach:?}");
+    }
+
+    #[test]
+    #[ignore]
+    fn probe_all_passes() {
+        for k in [5usize, 6] {
+            let f = sd(k);
+            for (name, hooks) in [("stage1", 0u8), ("s2 first", fault::STAGE1_EXIT), ("s2 all passes", fault::STAGE1_EXIT | fault::S2_LAST_PASS)] {
+                let mut best = f64::MAX;
+                let mut reach = fault::Reach::default();
+                for _ in 0..3 {
+                    let t = std::time::Instant::now();
+                    let (r, re) = factored(&f, hooks, None, false);
+                    best = best.min(t.elapsed().as_secs_f64());
+                    assert_eq!(r.unwrap(), 1);
+                    reach = re;
+                }
+                eprintln!("PROBE S_{k} {name}: best {:.4}s s2_cols {} s2_levels {}", best, reach.s2_cols, reach.s2_levels);
+            }
+        }
+    }
+
+    /// S_5's Stage 2 as recombine enters it after Stage 1 (a_last = k, so
+    /// a0 = 2k), with every pass forced (early certificates declined), under
+    /// `b` with `limit` for the Stage-2 call; the counters too.
+    fn s5_stage2(b: &Budget, limit: Option<u64>) -> (FResult<usize>, crate::alloc_spy::Report, fault::Reach) {
+        let f = sd(5);
+        let m = crate::modular(b, &f).unwrap().unwrap();
+        let lifted = crate::lift(b, &f, &m, m.k).unwrap();
+        let k = m.k;
+        b.set_memory_limit(limit.unwrap_or(1 << 30));
+        ledger_log::reset();
+        let (r, rep) = fault::with_hooks(fault::S2_LAST_PASS, None, false, || crate::alloc_spy::audit(|| stage2(b, &f, &m, &lifted, k).map(|fs| fs.len())));
+        (r, rep, fault::reach())
+    }
+
+    #[test]
+    fn the_stage2_ledger_holds_on_every_pass() {
+        // delta 2 r2 (LIMIT-R3-D2-2): the equality checkpoints on every pass of
+        // a forced all-pass S_5, the size tags, the global net, and the
+        // predicted peak (hand-offs counted, every pass and level) equal to
+        // the observed one
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (r, rep, reach) = s5_stage2(&b, None);
+        assert_eq!(r.unwrap(), 1);
+        assert_eq!((reach.s2_levels, reach.s2_passes, reach.s2_cols), (1, 8, 32), "{reach:?}");
+        let (reached, peak, _) = ledger_log::get();
+        for at in ["stage 2 entry", "stage 2 pw loop"] {
+            assert!(reached.get(at).copied().unwrap_or(0) >= 1, "{at}: {reached:?}");
+        }
+        for at in ["stage 2 before LLL", "stage 2 certify"] {
+            assert_eq!(reached.get(at).copied().unwrap_or(0), 8, "{at} on every pass: {reached:?}");
+        }
+        assert!(reached.get("stage 2 cut").copied().unwrap_or(0) >= 8, "{reached:?}");
+        assert_eq!(rep.tag_breaches, 0, "{:?}", rep.first_breach);
+        assert!(rep.excess <= 64 << 10, "{rep:?}");
+        assert_eq!(b.peak(), peak, "predicted at line {}", ledger_log::peak_line());
+        eprintln!("S_5 stage 2 (8 passes): predicted peak {peak} at line {}", ledger_log::peak_line());
+        assert_eq!(b.live(), 0);
+    }
+
+    #[test]
+    fn stage2_tight_memory_over_all_passes() {
+        // delta 2 r2: the multi-pass exact-admit / peak - 1 row
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (r, _, _) = s5_stage2(&b, None);
+        assert_eq!(r.unwrap(), 1);
+        let (_, peak, _) = ledger_log::get();
+        drop(b);
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (r, _, reach) = s5_stage2(&b, Some(peak));
+        assert_eq!(r.unwrap(), 1, "at the predicted peak {peak}");
+        assert_eq!(reach.s2_passes, 8);
+        assert_eq!(b.live(), 0);
+        drop(b);
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (r, _, _) = s5_stage2(&b, Some(peak - 1));
+        let after = crate::alloc_spy::allocated();
+        let e = r.unwrap_err();
+        assert_eq!((e.what, e.kind), ("memory", crate::Kind::Resource), "{e}");
+        assert_eq!(e.need - e.remaining, 1, "{e}");
+        assert_eq!(after, crate::alloc_spy::refused_at(), "allocations after the refusal");
+        assert_eq!(b.live(), 0);
     }
 }
