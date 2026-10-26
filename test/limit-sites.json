@@ -1231,13 +1231,17 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py ::  :: (cgroup, resource limits, physical memory), from a snapshot at most #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
+ "lib/_capacity.py ::  :: (cgroup, resource limits, physical memory: /proc on Linux, sysctl on #0": {
+  "class": "none",
+  "owner": "python"
  },
  "lib/_capacity.py ::  :: (sys._sagebrush_heap_limit: the old space the session can grow to), exactly #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py ::  :: Windows, physical available and the job's limit.  A source that can't be #0": {
+  "class": "none",
+  "owner": "python"
  },
  "lib/_capacity.py ::  :: _NO_CEILING = 1 << 62 # (a cgroup v1 \"limit\" this large is none) #0": {
   "class": "2",
@@ -1367,6 +1371,10 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_capacity.py :: _machine_total :: for r in (\"RLIMIT_AS\", \"RLIMIT_DATA\"): #1": {
+  "class": "none",
+  "owner": "python"
+ },
  "lib/_capacity.py :: _machine_total :: if not limits: #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -1378,6 +1386,10 @@
  "lib/_capacity.py :: _machine_total :: limits.append((\"MemTotal\", t)) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: limits.append((\"hw.memsize\", m[0])) #0": {
+  "class": "none",
+  "owner": "python"
  },
  "lib/_capacity.py :: _machine_total :: limits.append((\"physical\", total)) #0": {
   "class": "2",
@@ -1395,6 +1407,10 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_capacity.py :: _machine_total :: limits.append((r, v)) #1": {
+  "class": "none",
+  "owner": "python"
+ },
  "lib/_capacity.py :: _machine_total :: m = min(v for _, v in limits) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -1406,6 +1422,10 @@
  "lib/_capacity.py :: _machine_total :: v = _rlimit(r) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: v = _rlimit(r) #1": {
+  "class": "none",
+  "owner": "python"
  },
  "lib/_capacity.py :: _resource :: \"\"\"The resource module, imported once (pyjs has none).\"\"\" #0": {
   "class": "2",
@@ -1499,6 +1519,14 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_capacity.py :: _windows :: step = \"job_limit\" #0": {
+  "class": "none",
+  "owner": "python"
+ },
+ "lib/_capacity.py :: capacity :: for r in (\"RLIMIT_AS\", \"RLIMIT_DATA\"): #0": {
+  "class": "none",
+  "owner": "python"
+ },
  "lib/_capacity.py :: capacity :: for r, field in ((\"RLIMIT_AS\", \"VmSize\"), (\"RLIMIT_DATA\", \"VmData\")): #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -1510,6 +1538,10 @@
  "lib/_capacity.py :: capacity :: v = _rlimit(r) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: capacity :: v = _rlimit(r) #1": {
+  "class": "none",
+  "owner": "python"
  },
  "lib/_capacity.py :: capacity.add :: def add(source, limit, used, includes=_ALL, constrains=_ALL, **extra): #0": {
   "class": "2",

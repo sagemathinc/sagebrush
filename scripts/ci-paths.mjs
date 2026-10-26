@@ -108,6 +108,23 @@ const cpythonPaths = [
   /^scripts\/sync-python-package\.sh$/, /^scripts\/ci-cpus\.sh$/, /^test\/limit-sites\.json$/,
   /^web\/workspace\/schema\.json$/, /^web\/workspace\/paths\.ts$/,
 ];
+// The WebKit job's inputs (plan-kedlaya-webkit-ci r4: detection, the
+// production refusal and Stop of Kedlaya's Frobenius matrix in Playwright's
+// WebKit worker), conservatively: the compiler and runtime (src/), the whole
+// Python library (lib/: _sage_padic_lseries's imports reach sage_all, which
+// imports the library), the engine artifacts it loads, the worker and how it
+// is built (its library chunks, shims, runner frames), the build and its
+// dependency inputs, the test and its helpers, and this classifier and the
+// workflow themselves.  Pull requests only: master pushes don't run it; the
+// nightly schedule and a dispatch always do.  A file outside every known
+// path selects it too (the fallback below).
+const webkitPaths = [
+  /^src\//, /^lib\//, /^wasm\//, /^cdn\//,
+  /^web\/worker\.ts$/, /^web\/build\.ts$/, /^web\/lib-[^/]+$/, /^web\/shims\//, /^web\/runner\//, /^web\/replay-env\.ts$/,
+  /^web\/test-kedlaya-worker\.mjs$/, /^web\/test-port\.mjs$/, /^test\/kedlaya[^/]*$/,
+  /^scripts\/build-cli\.mjs$/, /^scripts\/ci-paths\.mjs$/, /^package\.json$/, /^pnpm-lock\.yaml$/, /^tsconfig(?:\.[^/]*)?\.json$/,
+  /^\.github\/workflows\/ci\.yml$/,
+];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
 // Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their
 // own tier, .github/workflows/optional.yml; a change to them alone runs no
@@ -133,6 +150,8 @@ const web = full || workflowOrBuild || runtime || webChange || fallback;
 const modes = full || workflowOrBuild || runtime || modeChange || fallback;
 const engineSmoke = full || workflowOrBuild || engineChange || fallback;
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
+const webkit = event === "workflow_dispatch" || event === "schedule" ||
+  (event === "pull_request" && (matches(webkitPaths) || fallback));
 // The limits census (test/limit_sites.py --check, also asserted by
 // test/limits.test.ts) scans lib/, engine/ and src/.  Its own light job runs
 // whenever they, its registry, baseline or tool change, even when the node
@@ -159,6 +178,7 @@ const outputs = {
   engine_smoke: engineSmoke,
   engine_full: full,
   engine_cpython: engineCpython,
+  webkit,
   census,
   // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
   size_inputs: gateInputs(files).length > 0,
