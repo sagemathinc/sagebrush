@@ -69,6 +69,18 @@ def _cval(dt):
     return C_CPLX if np.dtype(dt).kind == "c" else C_RE
 
 
+def unmeasured_reason(rec=None):
+    """why this host's capacity record can't admit the LU's memory, or None:
+    no figure, or one that doesn't cover the js-heap and js-arraybuffer
+    domains (Ledger's refusal; _matlab_sparse._sparse_lu then keeps master's
+    LU, @sagebrush's interim ruling (d))"""
+    rec = rec if rec is not None else _capacity.capacity()
+    if rec.get("bytes") is None:
+        return "no memory figure"
+    missing = [d for d in ("js-heap", "js-arraybuffer") if d not in (rec.get("domains") or [])]
+    return "the figure doesn't cover %s" % " or ".join(missing) if missing else None
+
+
 class Ledger:
     """one operation's memory: the fresh capacity record, the allowance G,
     and the bytes it owns (reserve before each growth, release after)"""
@@ -77,13 +89,7 @@ class Ledger:
         self.what, self.allowance_for = what, allowance_for
         rec = _capacity.capacity()
         self.rec = rec
-        missing = [d for d in ("js-heap", "js-arraybuffer") if d not in (rec.get("domains") or [])]
-        if rec.get("bytes") is None:
-            self.unmeasured = "no memory figure"
-        elif missing:
-            self.unmeasured = "the figure doesn't cover %s" % " or ".join(missing)
-        else:
-            self.unmeasured = None
+        self.unmeasured = unmeasured_reason(rec)
         g = None if self.unmeasured else _capacity.effective_guard_bytes(rec)
         self.G = int(g) if g is not None else 0
         self.owned = 0

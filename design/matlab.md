@@ -227,6 +227,12 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
     its work, for a context that wants one. `condest` and `eigs` (with a
     shift) of a large sparse matrix use the same LU.
 
+    In the browser, for now, the session's JavaScript memory can't be
+    measured (its capacity figure covers only the engine's), so there the
+    LU is still the one before this change: no column ordering, refused with
+    `MATLAB:nomem` past its fixed fill and work caps. That stays until the
+    browser reports a figure for its JavaScript memory.
+
     With several GB of arrays in memory, Stop can lag about 0.1 s per GB:
     that is the JavaScript engine's own garbage collection, which can't be
     interrupted ("with several GB of arrays in memory, Stop can lag about

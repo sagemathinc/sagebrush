@@ -239,6 +239,25 @@ try:
     except MemoryError as e:
         assert e.unmeasured is None and "allows almost no memory" in str(e)
     ok("admission: no figure, or one without js-arraybuffer, refuses as unmeasured with the record; zero, as almost no memory")
+    # (the interim, @sagebrush's ruling (d): where the record lacks the JS domains, as the
+    # browser worker's does today, _sparse_lu keeps master's LU and its caps)
+    L._capacity = FakeCap(4 << 30, ["wasm-engine"], 3 << 30)
+    F = sp._sparse_lu(S)
+    assert isinstance(F, sp._LU) and not isinstance(F, L.LU)
+    B = np.ones((60, 1))
+    assert eta(S, F.solve(B), B) <= 64 * 60 * EPS
+    keep = sp.MAX_LU_FILL
+    sp.MAX_LU_FILL = 10
+    try:
+        sp._sparse_lu(S)
+        raise AssertionError("no refusal")
+    except Exception as e:
+        assert getattr(e, "identifier", "") == "MATLAB:nomem" and "fill in too far" in str(e), e
+    finally:
+        sp.MAX_LU_FILL = keep
+    L._capacity = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], 10 ** 12)
+    assert isinstance(sp._sparse_lu(S), L.LU)
+    ok("interim: a browser-like record (wasm-engine only) keeps master's LU, its solves and its refusal; a measured one gets the new LU")
     big = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], 10 ** 12)
     L._capacity = big
     F = L.factor(S, "t")
