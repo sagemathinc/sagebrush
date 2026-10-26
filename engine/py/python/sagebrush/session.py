@@ -118,6 +118,42 @@ class _Hold:
 
 
 _HOLD = _Hold()
+_CTRL = []  # (the worker's console control routine, kept alive as long as it is installed)
+
+
+def _break_as_sigint():
+    """On Windows, the worker's Ctrl-Break (what Session.interrupt sends: the worker
+    has its own process group, where Ctrl-C is off) becomes a SIGINT, raised from
+    the console's control thread, so that a computation blocked in a wait
+    (time.sleep, an Event's wait) is woken as Ctrl-C would wake it, not only at
+    its next bytecode.  A busy computation is interrupted either way.  Whether a
+    SIGINT does wake those waits there, and Ctrl-Break doesn't, is measured by
+    test/win_interrupt_probe.py.  Elsewhere, and if it can't be installed, it
+    does nothing (False); interrupt() still sends Ctrl-Break, handled as before."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        ROUTINE = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+
+        def routine(event):
+            if event != 1:  # (CTRL_BREAK_EVENT; anything else goes on to the next handler)
+                return False
+            signal.raise_signal(signal.SIGINT)
+            return True
+
+        r = ROUTINE(routine)
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.SetConsoleCtrlHandler.argtypes = (ROUTINE, wintypes.BOOL)
+        k.SetConsoleCtrlHandler.restype = wintypes.BOOL
+        if not k.SetConsoleCtrlHandler(r, True):
+            return False
+        _CTRL.append(r)
+        return True
+    except (OSError, AttributeError, ValueError):
+        return False
 
 
 class _Sender:
@@ -305,6 +341,7 @@ def _worker():
     from sagebrush.preparse import preparse
 
     _HOLD.install()  # (the main thread: the only one that handles signals)
+    _break_as_sigint()
     sender = _Sender(proto)
     shared = {"__name__": "__main__"}
     exec("from sagebrush.sage import *", shared)
