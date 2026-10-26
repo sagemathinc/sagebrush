@@ -518,6 +518,7 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_l
                     held_want = lll::lattice_bytes(d, w, cap).unwrap();
                 }
                 drop(std::mem::replace(&mut held, l));
+                let _site = sagebrush_interrupt::enter("recombination stage 1 LLL");
                 lll::lll(b, std::mem::take(&mut rows), cap)?
             };
             // the reduced rows and the d + 1 Gram determinants, at most `cap`
@@ -839,6 +840,7 @@ fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_la
                     held_want = lll::lattice_bytes(d, w, cap).unwrap();
                 }
                 drop(std::mem::replace(&mut held, l));
+                let _site = sagebrush_interrupt::enter("recombination stage 2 LLL");
                 lll::lll(b, std::mem::take(&mut rows), cap)?
             };
             let lll::Reduced { basis, d: dets } = reduced;
