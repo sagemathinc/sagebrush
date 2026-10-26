@@ -119,6 +119,20 @@ fn host_handles_and_retired_bytes_through_the_abi() {
     }
     assert_eq!(sb_outstanding_bytes(), before);
 
+    // the instance-local total (C r16b section 3.2): observed, none (3: not
+    // zero), and anything else refused with the sticky fault
+    assert_eq!(sb_set_instance_total(4294967296.0, 0), 0);
+    assert_eq!(sagebrush_ledger::instance_total().map(|t| t.bytes), Some(1 << 32));
+    assert_eq!(sb_set_instance_total(0.0, 3), 0);
+    assert_eq!(sagebrush_ledger::instance_total(), None);
+    assert_eq!(sb_set_instance_total(0.0, 1), 0);
+    assert_eq!(sagebrush_ledger::instance_total().map(|t| t.status), Some(sagebrush_ledger::TotalStatus::Zero), "zero is not none");
+    assert!(!sagebrush_ledger::faulted());
+    assert_eq!(sb_set_instance_total(f64::NAN, 0), -1);
+    assert!(sagebrush_ledger::faulted(), "an invalid instance total is a sticky fault");
+    assert_eq!(sb_set_instance_total(4294967296.0, 0), 0);
+    assert!(sagebrush_ledger::faulted(), "and stays");
+
     // retired bytes: valid figures set, invalid ones are -1 (and a sticky
     // fault, which the ledger's own tests check)
     assert_eq!(sb_set_retired_bytes(65536.0 * 3.0, 0), 0);
@@ -161,4 +175,5 @@ fn host_handles_and_retired_bytes_through_the_abi() {
     assert_eq!(sb_release(h4), 0);
     assert_eq!(sagebrush_ledger::resident_bytes(), res0 + full);
     assert_eq!(sb_outstanding_bytes(), base);
+
 }

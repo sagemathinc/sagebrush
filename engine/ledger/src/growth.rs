@@ -48,16 +48,28 @@ pub(crate) fn paged_committed() -> Option<u64> {
 }
 
 /// L on pages: max(committed, B_w + R_res) (C r12 section 3).
-fn paged_live(s: &mut State, committed: u64) -> u64 {
+pub(crate) fn paged_live(s: &mut State, committed: u64) -> u64 {
     let b = *s.baseline.get_or_insert(committed);
     committed.max(b.saturating_add(s.resident))
 }
 
-/// floor(E / phi) - L - R_ret - O, at least 0.
-fn room_locked(s: &mut State, t: Total, committed: u64) -> u64 {
+/// The room under every row present (C r16b section 3.2), at least 0:
+/// the shared total's floor(E / phi) - L - R_ret - O and the instance
+/// total's floor(E / phi) - L - O, the least of them; None when no row
+/// applies (an absent shared total and no instance total).
+fn room_locked(s: &mut State, t: Total, committed: u64) -> Option<u64> {
     let l = paged_live(s, committed);
-    let e_over_phi = (allowance(t) as u128 * FRAG_DEN as u128 / FRAG_NUM as u128) as u64;
-    e_over_phi.saturating_sub(l).saturating_sub(s.retired).saturating_sub(s.outstanding)
+    let (outstanding, retired) = (s.outstanding, s.retired);
+    let room = |e: u64, ret: u64| {
+        let e_over_phi = (e as u128 * FRAG_DEN as u128 / FRAG_NUM as u128) as u64;
+        e_over_phi.saturating_sub(l).saturating_sub(ret).saturating_sub(outstanding)
+    };
+    let shared = (t.status != TotalStatus::Absent).then(|| room(allowance(t), retired));
+    let inst = s.instance.map(|i| room(allowance(i), 0));
+    match (shared, inst) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
 }
 
 /// A growth reservation: natively a reservation of the whole block; in
@@ -88,11 +100,11 @@ pub fn reserve_growth(what: &str, block: u64) -> Result<Growth, EngineError> {
     let mut s = state();
     let committed = paged_committed().unwrap_or(0);
     let protected = s.is_certified_chain(chain);
-    let uncertified = s.fault || !(t.status == TotalStatus::Observed && !t.uncertified);
+    let uncertified = !wasm_totals_certified(s.fault, t, s.instance);
     let live = paged_live(&mut s, committed);
     let (outstanding, retired) = (s.outstanding, s.retired);
     if let (Some(w), false) = (w, protected && uncertified) {
-        let g = w.min(room_locked(&mut s, t, committed));
+        let g = room_locked(&mut s, t, committed).map_or(w, |r| w.min(r));
         if g > 0 {
             if s.chain_add(chain, g).is_err() {
                 drop(s);
@@ -105,6 +117,7 @@ pub fn reserve_growth(what: &str, block: u64) -> Result<Growth, EngineError> {
     drop(s);
     Err(EngineError::Memory(Refusal {
         what: what.to_string(),
+        row: "shared",
         need: w.unwrap_or(u64::MAX),
         allowance: allowance(t),
         live,
@@ -166,6 +179,7 @@ impl Growth {
             drop(s);
             return Err(EngineError::Memory(Refusal {
                 what: "memory growth".into(),
+                row: "shared",
                 need: k,
                 allowance: allowance(t),
                 live,
