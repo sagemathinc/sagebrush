@@ -86,11 +86,21 @@
 //   syncLedger  each local op's sync state, by [ns, lseq] (sync-ledger.ts), with an index byDecided on
 //            [ns, d, lseq] (the oldest decided rows, pruned past the cap).  Made empty: a namespace's existing
 //            records are seeded after the open, by its sender, before anything is scanned or sent
+//
+// Version 8 (plan-sync-slice2-client r4 §1a, the journal's activation; schema only):
+//
+//   meta's `journal`, {v: 1, active: false}: whether this device's notebooks and boards are written through the
+//   journal (sync 2c).  Activation is one way (Workspace.activateJournal); the version itself is half its
+//   barrier: an open page of an earlier build is closed by this upgrade (versionchange), and an earlier build
+//   opening fresh asks for version 7 and gets a VersionError, so no earlier code writes the workspace again
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
 
-export const WS_VERSION = 7;
+export const WS_VERSION = 8;
+/** meta's `journal` record (version 8): `activating` from activation's first write until every fence says
+ * "journal", then `active` (plan-sync-slice2-client r4 §1a). */
+export type JournalState = { v: 1; active: boolean; activating?: true };
 /** How an open went, for detecting a lost workspace (design/workspace-durability.md A.2): whether it made
  * the database (none was there), and Chrome's report that it deleted a damaged one (`dataLoss: "total"` on
  * the upgradeneeded event: non-standard, in Blink's IDL). */
@@ -159,6 +169,8 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
       tx.objectStore("entries").createIndex("byFetch", "fetch");
     }
     if (old < 7) db.createObjectStore("syncLedger", { keyPath: ["ns", "lseq"] }).createIndex("byDecided", ["ns", "d", "lseq"]);
+    // (not activated: one write, whatever is in the workspace)
+    if (old < 8) tx.objectStore("meta").put({ v: 1, active: false } satisfies JournalState, "journal");
   }, onClose, ms);
 }
 
