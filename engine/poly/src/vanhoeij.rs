@@ -96,8 +96,10 @@ pub mod fault {
     pub const CORRUPT_CLD: u8 = 16;
     /// The cut keeps no row.
     pub const FORCE_S0: u8 = 32;
-    /// Stage 2 takes a certificate only after a level's last pass (so its
-    /// reach in columns shows).
+    /// Stage 2 takes a certificate only after the last pass of a level that
+    /// appended every index (so the forced rows run all n columns of a
+    /// level, then certify; a level that skipped an index declines and the
+    /// precision doubles, as in the real loop).
     pub const S2_LAST_PASS: u8 = 64;
     /// A Stop is requested when Stage 2's second pass ends (the interrupt
     /// between passes of delta 2 r2).
@@ -116,6 +118,8 @@ pub mod fault {
         pub s2_cols: u64,
         /// Stage-2 passes run (every chunk of the column order).
         pub s2_passes: u64,
+        /// The columns appended at the Stage-2 level that certified.
+        pub s2_cert_cols: u64,
         /// The precision of the Stage-2 level that certified (0: none).
         pub s2_cert_a: u64,
         pub s2_a_star: u64,
@@ -132,7 +136,7 @@ pub mod fault {
         static A0: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
         static A0_AT_STAR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         static REACH: std::cell::Cell<Reach> = const { std::cell::Cell::new(Reach {
-            s1_cols: 0, s1_levels: 0, s1_exit_cols: 0, s1_exit_levels: 0, s2_entries: 0, s2_levels: 0, s2_cols: 0, s2_passes: 0,
+            s1_cols: 0, s1_levels: 0, s1_exit_cols: 0, s1_exit_levels: 0, s2_entries: 0, s2_levels: 0, s2_cols: 0, s2_passes: 0, s2_cert_cols: 0,
             s2_cert_a: 0, s2_a_star: 0, internal_s0: 0, internal_no_cert: 0, internal_x: 0, full_subsets_large: 0,
         }) };
     }
@@ -819,6 +823,16 @@ fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_la
                     added += 1;
                     fault::count(|x| x.s2_cols += 1);
                 }
+                // the retained shape: an index the information or modulus test
+                // skipped is not charged (LIMIT-R3-D2-2)
+                if added < want.len() {
+                    let retained = rows_bytes(rows.len(), rows.first().map_or(r, |x| x.len()), ebits);
+                    held.shrink(retained.unwrap_or(0));
+                    #[cfg(test)]
+                    {
+                        held_want = retained.unwrap();
+                    }
+                }
             }
             // the columns are in the rows: their values go now, before LLL
             drop(cld);
@@ -897,8 +911,11 @@ fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_la
                 certify(b, g, rest0, &pk, &rows, r)?
             };
             if let Some(fs) = found {
-                if !fault(fault::S2_LAST_PASS) || pass + 1 == passes {
-                    fault::count(|x| x.s2_cert_a = a);
+                if !fault(fault::S2_LAST_PASS) || (pass + 1 == passes && c == n) {
+                    fault::count(|x| {
+                        x.s2_cert_a = a;
+                        x.s2_cert_cols = c as u64;
+                    });
                     return Ok(fs);
                 }
             }
@@ -1627,13 +1644,19 @@ pub(crate) mod tests {
     /// a0 = 2k), with every pass forced (early certificates declined), under
     /// `b` with `limit` for the Stage-2 call; the counters too.
     fn s5_stage2(b: &Budget, limit: Option<u64>) -> (FResult<usize>, crate::alloc_spy::Report, fault::Reach) {
+        s5_stage2_from(b, limit, None)
+    }
+
+    /// The same from Stage 2's start `a0` (None: the production 2k).
+    fn s5_stage2_from(b: &Budget, limit: Option<u64>, a0: Option<u64>) -> (FResult<usize>, crate::alloc_spy::Report, fault::Reach) {
         let f = sd(5);
         let m = crate::modular(b, &f).unwrap().unwrap();
         let lifted = crate::lift(b, &f, &m, m.k).unwrap();
         let k = m.k;
         b.set_memory_limit(limit.unwrap_or(1 << 30));
         ledger_log::reset();
-        let (r, rep) = fault::with_hooks(fault::S2_LAST_PASS, None, false, || crate::alloc_spy::audit(|| stage2(b, &f, &m, &lifted, k).map(|fs| fs.len())));
+        let a0 = a0.map(|x| if x == 0 { k } else { x });
+        let (r, rep) = fault::with_hooks(fault::S2_LAST_PASS, a0, false, || crate::alloc_spy::audit(|| stage2(b, &f, &m, &lifted, k).map(|fs| fs.len())));
         (r, rep, fault::reach())
     }
 
@@ -1751,5 +1774,42 @@ pub(crate) mod tests {
             assert_eq!(reach.full_subsets_large, 0, "{name}: {reach:?}");
             eprintln!("VM {name} at 1 GiB: {t} factor(s) in {:.1} s, peak reservation {} B; {reach:?}", t0.elapsed().as_secs_f64(), b.peak());
         }
+    }
+
+    #[test]
+    fn the_stage2_ledger_charges_the_retained_shape() {
+        // LIMIT-R3-D2-2: S_5's Stage 2 from a0 = k (Some(0) here), where some
+        // indices carry no information and are skipped: the charge shrinks to
+        // the rows and width actually kept, before LLL (equality checkpoints
+        // on every pass); that level declines (not every index appended), the
+        // next (2k) appends all 32 and certifies. Predicted peak = observed
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (r, rep, reach) = s5_stage2_from(&b, None, Some(0));
+        assert_eq!(r.unwrap(), 1);
+        assert_eq!((reach.s2_levels, reach.s2_passes, reach.s2_cert_cols), (2, 16, 32), "{reach:?}");
+        assert!(reach.s2_cols < 64, "an index was skipped: {reach:?}");
+        let (reached, peak, _) = ledger_log::get();
+        for at in ["stage 2 before LLL", "stage 2 cut", "stage 2 certify"] {
+            assert!(reached.get(at).copied().unwrap_or(0) >= 9, "{at}: {reached:?}");
+        }
+        assert_eq!(rep.tag_breaches, 0, "{:?}", rep.first_breach);
+        assert!(rep.excess <= 64 << 10, "{rep:?}");
+        assert_eq!(b.peak(), peak, "predicted at line {}", ledger_log::peak_line());
+        assert_eq!(b.live(), 0);
+        // exact admit, peak - 1 refuses at that reservation before
+        // allocating, nothing left live either way
+        drop(b);
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (r, _, _) = s5_stage2_from(&b, Some(peak), Some(0));
+        assert_eq!(r.unwrap(), 1);
+        assert_eq!(b.live(), 0);
+        drop(b);
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (r, _, _) = s5_stage2_from(&b, Some(peak - 1), Some(0));
+        let after = crate::alloc_spy::allocated();
+        let e = r.unwrap_err();
+        assert_eq!((e.what, e.need - e.remaining), ("memory", 1), "{e}");
+        assert_eq!(after, crate::alloc_spy::refused_at());
+        assert_eq!(b.live(), 0);
     }
 }
