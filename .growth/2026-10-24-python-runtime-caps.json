@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "Runtime caps (#110): no default limit on an int's decimal digits or math.log's size; the memory guards that replace them (admitDigits, the log copy guard, bitLengthSmallCopies, heapLimit moved to heap.ts and read once a session)",
- "bytes": {
-  "cli/pyjs.cjs": 486,
-  "engine/sagebrush-worker.js": 378
- }
-}
