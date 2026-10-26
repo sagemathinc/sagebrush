@@ -26,24 +26,39 @@
 // read in pieces, never past FILE_MAX (what the board opens).  The page reads
 // it again only when its revision (SHA-256 of its bytes) changed.
 import * as http from "http";
-import { createReadStream, existsSync, readFileSync, statSync, watchFile, unwatchFile, type Stats } from "fs";
+import { createReadStream, existsSync, readFileSync, realpathSync, statSync, watchFile, unwatchFile, type Stats } from "fs";
 import { basename, join, resolve } from "path";
 import { createHash, randomBytes } from "crypto";
 import { gunzipSync } from "zlib";
 import { spawn } from "child_process";
 import { FILE_MAX, readBounded } from "./board-check";
 import { oneLine } from "./terminal-text";
+import { limitsHelp, resolveLimits, type Limits } from "./board-edit-limits";
 
-const USAGE = `usage: sagebrush board open FILE [--port N] [--no-browser]
+// (William, Oct 24 2026, about 11:27 AM PDT, verbatim: the help's and the page's words; the docs give it with the
+// full statement of plan r7 §0.1 (b) directly under it)
+const SENTENCE_OUTSIDE = "Outside edits (best effort): if another program changes the file starting from the board's last save, the board merges that change exactly. Otherwise it does its best but can't guarantee the result, and a program that opens the file during a save may need to retry.";
+const SENTENCE_DURABLE = "Durability: an edit is safe once the page shows 'Saved'. Anything typed before that can be lost, for example if the tab closes. There's deliberately no recovery store, but Save now and Download are always available.";
+
+const USAGE = `usage: sagebrush board open FILE [--port N] [--no-browser] [--edit [--limit NAME=VALUE]...]
   show the board FILE (its .board.json, a Mermaid flowchart, Markdown with
   some, a JSON Canvas, a CoCalc whiteboard) in your browser, as
   sagebrush.space/board does, and again each time FILE changes: write it,
   check it (sagebrush board check FILE), and watch it here.  Its code runs in
   the page; nothing of the board is uploaded.  A version that isn't a board
   (half written, or wrong) leaves the last good one shown, with what is wrong.
-  The page is a read-only view of FILE: to change the board, change the file.
+  Without --edit, the page is a read-only view of FILE: to change the board,
+  change the file.
   --port N        the first port to try (default 8890)
   --no-browser    print the URL, don't open a browser
+  --edit          edit the board in the page, saved back to FILE (a native
+                  .board.json only; the first save rewrites it in the board's
+                  own layout, every field kept).
+                  ${SENTENCE_OUTSIDE}
+                  ${SENTENCE_DURABLE}
+  --limit NAME=VALUE   one of --edit's limits (or SAGEBRUSH_BOARD_OPEN_NAME in
+                  the environment; the flag wins), all checked before it starts:
+${limitsHelp()}
 `;
 
 /** How often FILE's stat is checked, and how long it must be quiet before it is read (ms). */
@@ -118,12 +133,12 @@ export function framePolicyOf(headers: string): string | null {
 
 /** The frame's page as this command serves it: its document this computer's, the key and name its requests
  * use, and the site its engine comes from; null if the page isn't one this command knows how to change. */
-export function localPage(frame: string, o: { key: string; name: string; engineSite: string }): string | null {
+export function localPage(frame: string, o: { key: string; name: string; engineSite: string; edit?: boolean }): string | null {
   const marks = frame.split('id="sb-doc" data-sb-from="parent"').length - 1;
   if (marks !== 1) return null;
   // (HTML-safe JSON: no "<", ">" or "&", so no "</script>" or "<!--", and no U+2028 or U+2029, each \uXXXX)
   const json = (v: unknown) => JSON.stringify(v).replace(/[<>&\u2028\u2029]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
-  const parts = `<script type="application/json" id="sb-local">${json({ key: o.key, name: o.name, engineSite: o.engineSite })}</script>`;
+  const parts = `<script type="application/json" id="sb-local">${json({ key: o.key, name: o.name, engineSite: o.engineSite, ...(o.edit ? { edit: true } : {}) })}</script>`;
   const page = frame.replace('id="sb-doc" data-sb-from="parent"', 'id="sb-doc" data-sb-from="local"');
   const at = page.indexOf("</head>");
   return at < 0 ? null : page.slice(0, at) + parts + page.slice(at);
@@ -149,7 +164,8 @@ function localEngine(frame: string): { id: string; dir: string; files: Record<st
 const sameStat = (a: Stats | null, b: Stats | null) => !!a && !!b && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ino === b.ino && a.ctimeMs === b.ctimeMs;
 
 export async function boardOpen(argv: string[]): Promise<number> {
-  let file: string | null = null, port = 8890, browser = true;
+  let file: string | null = null, port = 8890, browser = true, edit = false;
+  const limitFlags: string[] = [];
   const say = (m: string) => process.stderr.write(`sagebrush board open: ${oneLine(m)}\n`);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -158,18 +174,47 @@ export async function boardOpen(argv: string[]): Promise<number> {
       port = Number(a === "--port" ? argv[++i] : a.slice(7));
       if (!Number.isInteger(port) || port < 1 || port > 65535) { say("--port takes a port number, from 1 to 65535"); return 2; }
     } else if (a === "--no-browser") browser = false;
+    else if (a === "--edit") edit = true;
+    else if (a === "--limit" || a.startsWith("--limit=")) {
+      const v = a === "--limit" ? argv[++i] : a.slice(8);
+      if (v === undefined) { say("--limit takes NAME=VALUE"); return 2; }
+      limitFlags.push(v);
+    }
     else if (a.startsWith("-")) { say(`unknown option ${a}`); process.stderr.write(USAGE); return 2; }
     else if (file === null) file = a;
     else { process.stderr.write(USAGE); return 2; }
   }
   if (file === null) { process.stderr.write(USAGE); return 2; }
-  const path = resolve(file), name = basename(path);
-  if (!existsSync(path)) { say(`${file}: no such file`); return 1; }
+  if (limitFlags.length && !edit) { say("--limit is for --edit"); return 2; }
+  let limits: Limits | null = null;
+  if (edit) {
+    const r = resolveLimits(limitFlags, process.env);
+    if ("error" in r) { say(r.error); return 2; }
+    limits = r.limits;
+  }
+  if (!existsSync(file)) { say(`${file}: no such file`); return 1; }
+  // (with --edit, a symlink's target is what is written: FILE resolved to its real path, §5.4)
+  const path = edit ? realpathSync(file) : resolve(file), name = basename(path);
   if (!statSync(path).isFile()) { say(`${file}: not a file`); return 1; }
   const frame = framePage(), headers = asset("_headers");
   const policy = headers ? framePolicyOf(headers.toString("utf8")) : null;
   if (!frame || !policy) { say("this build of sagebrush has no board page (build it with `bun web/build.ts`, then `node scripts/build-cli.mjs`)"); return 1; }
   const served = localEngine(frame.toString("utf8"));
+
+  // ---- --edit: the hub on FILE as found, or the reason it is shown read only (r7 §9)
+  let editing: { hub: import("./board-edit-hub").EditHub; server: import("./board-edit-serve").EditServer; watch: import("./board-edit-serve").EditWatch } | null = null;
+  if (edit && limits) {
+    const { startEdit, EditServer, EditWatch } = await import("./board-edit-serve");
+    const { mergeStrings3 } = await import("patchflow");
+    const started = await startEdit(path, limits, { mergeStrings3: mergeStrings3 as any, now: Date.now });
+    if ("why" in started) say(`not editing: ${started.why} (shown read only)`);
+    else {
+      const editApi = { "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Sagebrush-Seq, Retry-After", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
+      const server = new EditServer(started.hub, limits, editApi, Date.now);
+      const statOf = (p: string) => { try { const s = statSync(p); return `${s.size}:${s.mtimeMs}:${s.ino}:${s.ctimeMs}`; } catch { return null; } };
+      editing = { hub: started.hub, server, watch: new EditWatch(started.hub, server, path, limits.FILE_MAX, QUIET_MS, statOf) };
+    }
+  }
 
   const token = randomBytes(24).toString("hex"), key = randomBytes(24).toString("hex");
   // (named for its port, set once it listens: another server on 127.0.0.1, `sagebrush notebook`'s, keeps its own)
@@ -208,8 +253,16 @@ export async function boardOpen(argv: string[]): Promise<number> {
       read();
     }, QUIET_MS);
   };
-  read();
-  watchFile(path, { interval: WATCH_MS, persistent: true }, (now, before) => { if (!sameStat(now, before)) changed(); });
+  let ticks: NodeJS.Timeout | null = null;
+  if (editing) {
+    // (FILE followed by the hub: read, merged and saved by its watch, every WATCH_MS)
+    const e = editing;
+    ticks = setInterval(() => { e.watch.tick(Date.now()).catch((err) => say(`while editing: ${err?.message ?? err}`)); }, WATCH_MS);
+    current = { stat: null, bytes: e.hub.H.bytes, revision: e.hub.H.hash, error: null };
+  } else {
+    read();
+    watchFile(path, { interval: WATCH_MS, persistent: true }, (now, before) => { if (!sameStat(now, before)) changed(); });
+  }
 
   const forbidden = (res: http.ServerResponse, why: string) => res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }).end(why);
   // (the timeouts below are checked every second: by default only every 30 s, so a connection could outlive them)
@@ -218,18 +271,25 @@ export async function boardOpen(argv: string[]): Promise<number> {
       // (its own host and port only: no DNS rebinding)
       const host = req.headers.host ?? "";
       if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return forbidden(res, "forbidden host\n");
-      if (req.method !== "GET" && req.method !== "HEAD") return res.writeHead(405, { Allow: "GET, HEAD" }).end();
       const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+      const editRequest = !!editing && url.pathname === "/edit";
+      // (--edit's kept reports and alternatives, GET /changes: by the key, as the rest; CORR-153-R2-1)
+      const changesRequest = !!editing && url.pathname === "/changes";
+      if (req.method !== "GET" && req.method !== "HEAD" && !editRequest) return res.writeHead(405, { Allow: "GET, HEAD" }).end();
       // the page's two requests, from its opaque origin: by the key, readable from there (CORS), never cached
       const api = { "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Sagebrush-Revision", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
-      if (url.pathname === "/board" || url.pathname === "/events") {
+      if (url.pathname === "/board" || url.pathname === "/events" || editRequest || changesRequest) {
         // (by the key, which only the page has; and from the page only: its opaque origin, "null", or no Origin
         // at all, never another site's or another port's page)
         const origin = req.headers.origin;
         if (origin !== undefined && origin !== "null") return forbidden(res, "forbidden origin\n");
         if (url.searchParams.get("key") !== key) return forbidden(res, "forbidden\n");
+        // (--edit's own: a tab's events, heads and submissions)
+        if (editing && editing.server.handle(req, res, url)) return;
+        // (a /changes the edit server didn't take, one without its tab: never the read-only page's stream below)
+        if (changesRequest) return res.writeHead(400, { ...api, "Content-Type": "text/plain; charset=utf-8" }).end("bad parameters\n");
         if (url.pathname === "/board") {
-          const c = current;
+          const c = editing ? { error: null, bytes: editing.hub.H.bytes, revision: editing.hub.H.hash } : current;
           if (c.error || !c.bytes) return res.writeHead(c.error?.startsWith("too large") ? 413 : 409, { ...api, "Content-Type": "text/plain; charset=utf-8", "X-Sagebrush-Revision": c.revision }).end(c.error ?? "unreadable");
           return res.writeHead(200, { ...api, "Content-Type": "text/plain; charset=utf-8", "Content-Length": String(c.bytes.length), "X-Sagebrush-Revision": c.revision }).end(req.method === "HEAD" ? undefined : c.bytes);
         }
@@ -273,7 +333,7 @@ export async function boardOpen(argv: string[]): Promise<number> {
   server.requestTimeout = REQUEST_MS;
   server.keepAliveTimeout = KEEP_ALIVE_MS;
   // (event streams kept open: a comment now and then, through any idle timeout)
-  const beat = setInterval(() => clients.broadcast(": .\n\n"), 25_000);
+  const beat = setInterval(() => { clients.broadcast(": .\n\n"); editing?.server.beat(); }, 25_000);
   beat.unref();
 
   // the first free port from the one asked for
@@ -287,13 +347,27 @@ export async function boardOpen(argv: string[]): Promise<number> {
   }
   cookieName = `sagebrush_board_${port}`;
   // (the page, made once: the same for every request)
-  const made = localPage(frame.toString("utf8"), { key, name, engineSite: served ? `http://127.0.0.1:${port}/` : ENGINE_SITE });
+  const made = localPage(frame.toString("utf8"), { key, name, engineSite: served ? `http://127.0.0.1:${port}/` : ENGINE_SITE, ...(editing ? { edit: true } : {}) });
   page = made === null ? null : Buffer.from(made, "utf8");
   const open = `http://127.0.0.1:${port}/?token=${token}`;
-  process.stdout.write(`Sagebrush board: showing ${path} (a read-only view: it follows changes to the file)\n  ${open}\n(Ctrl-C stops it)\n`);
+  process.stdout.write(editing
+    ? `Sagebrush board: editing ${path} (saved back to the file; it follows changes to the file)\n  ${open}\n(Ctrl-C stops it, after a last save)\n`
+    : `Sagebrush board: showing ${path} (a read-only view: it follows changes to the file)\n  ${open}\n(Ctrl-C stops it)\n`);
   if (browser) openBrowser(open);
   await new Promise<void>((done) => {
-    const stop = () => { unwatchFile(path); clearInterval(beat); clients.close(); server.close(); server.closeAllConnections(); done(); };
+    const stop = async () => {
+      if (ticks) clearInterval(ticks);
+      // (the exit flush, r7 §5.6: one last save of what is unsaved, the same steps, within EXIT_FLUSH_MS)
+      if (editing && limits && limits.EXIT_FLUSH_MS > 0 && editing.hub.unsaved()) {
+        try {
+          const r = await Promise.race([editing.hub.save(), new Promise<null>((ok) => setTimeout(() => ok(null), limits!.EXIT_FLUSH_MS).unref())]);
+          if (!r || !r.saved) say("stopped with edits not saved to the file");
+        } catch (e: any) { say(`stopped with edits not saved to the file: ${e?.message ?? e}`); }
+      }
+      // (the copies kept beside FILE removed, unless one holds a change the board never took in)
+      if (editing) for (const p of editing.hub.closePrevs()) say(`kept ${p}: it changed after the board last read it`);
+      unwatchFile(path); clearInterval(beat); clients.close(); editing?.server.close(); server.close(); server.closeAllConnections(); done();
+    };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   });

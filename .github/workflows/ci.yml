@@ -30,6 +30,7 @@ jobs:
       engine_smoke: ${{ steps.paths.outputs.engine_smoke }}
       engine_full: ${{ steps.paths.outputs.engine_full }}
       engine_cpython: ${{ steps.paths.outputs.engine_cpython }}
+      census: ${{ steps.paths.outputs.census }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +50,24 @@ jobs:
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: node scripts/ci-paths.mjs >> "$GITHUB_OUTPUT"
+
+  # (the limits census alone, in seconds and with no build: it must run on an
+  # engine-only pull request too, whose node suites are path-skipped; #155)
+  census:
+    needs: changes
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.census == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: "limits census: every census-vocabulary site registered, the baseline the seed's (test/limit_sites.py --check)"
+        run: |
+          python3 test/limit_sites.py --check > census.json || { cat census.json; exit 1; }
+          pinned=$(sed -n 's/^const LIMIT_SITES_BASELINE_SHA256 = "\([0-9a-f]*\)";$/\1/p' test/limits.test.ts)
+          python3 -c 'import json, sys; d = json.load(open("census.json")); print(json.dumps({k: d[k] for k in ("sites", "registered", "explained", "problems")})); sys.exit(0 if d["baseline_sha256"] == sys.argv[1] and d["explained"] >= 17 else 1)' "$pinned"
 
   node-tests:
     needs: changes
@@ -184,6 +203,9 @@ jobs:
           node scripts/gen-viewer3d.mjs --check
           node cdn/build.mjs --check
           node scripts/board-format-schema.mjs --check
+          # (the architecture article: its links pinned and present at their commit, its pages current, its board on the built site)
+          node scripts/architecture-article.mjs --check
+          node scripts/test-architecture-article.mjs --built
       # The merge's size record, for size-gate (plan-growth-budget-r5 §1.1,
       # §1.5): measured from the build above; it builds nothing
       - name: the size record
@@ -416,6 +438,7 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-sync-view.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-d11.mjs
           bun web/sync-protocol/test-doc-protocol.mjs
+          bun web/sync-protocol/test-reference-server.mjs
           python3 -I web/sync-protocol/gen-doc-vectors.py | diff - web/sync-protocol/doc-vectors.json
           node web/test-engines.mjs
           CHROME=google-chrome node web/test-pwa-update.mjs
@@ -508,6 +531,58 @@ jobs:
           bun web/board/test-edit-pictures.mjs
           CHROME=google-chrome node web/board/test-idb-stall.mjs
           node web/board/test-idb-within.mjs
+
+  # The interrupt matrix's CI set (plan-interrupt-harness r5 section 8): Ctrl-C on the CLI, the
+  # interactive prompt and the notebook page's Stop, with the signal trials S1-S4 and the
+  # PENDING-READY probes, against web/interrupt-baseline.json.  Its own job.  The harness has an
+  # absolute 15-min deadline (about 2x pilot 4's 401 s + 33 s): every session, guard and CDP wait is
+  # clipped to it, its last 30 s are for cleanup and the report, and a watchdog at the deadline writes
+  # the report and exits.  The job's 30 min covers checkout, install and builds (up to about 14 min)
+  # on top, so the job timeout never cuts the harness's report.
+  interrupt-matrix:
+    needs: changes
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.web == 'true' || needs.changes.outputs.engine_smoke == 'true')
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: detect CI CPU quota
+        run: scripts/ci-cpus.sh
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
+      - name: interrupt matrix (CI set)
+        timeout-minutes: 16
+        run: |
+          python3 web/serve.py 8765 &
+          server_pid=$!
+          cleanup_server() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup_server EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          sleep 1
+          kill -0 "$server_pid"
+          mkdir -p interrupt-out
+          SB_URL=http://127.0.0.1:8765/ CHROME=google-chrome node web/test-interrupt-matrix.mjs --ci --budget-ms 900000 --out interrupt-out/interrupt-matrix.json
+      - name: keep the rows
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interrupt-matrix
+          path: interrupt-out/
+          if-no-files-found: ignore
 
   web-browser:
     needs: changes
@@ -962,6 +1037,7 @@ jobs:
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
     needs:
       - changes
+      - census
       - node-tests
       - language-node
       - checks
@@ -969,6 +1045,7 @@ jobs:
       - web-sync
       - web-runner
       - web-browser
+      - interrupt-matrix
       - conformance
       - modes
       - engine-rust
@@ -982,11 +1059,13 @@ jobs:
       - name: require every selected job to pass
         env:
           RESULTS: >-
-            ${{ needs.changes.result }} ${{ needs.node-tests.result }}
+            ${{ needs.changes.result }} ${{ needs.census.result }}
+            ${{ needs.node-tests.result }}
             ${{ needs.language-node.result }}
             ${{ needs.checks.result }} ${{ needs.size-gate.result }}
             ${{ needs.web-sync.result }}
             ${{ needs.web-runner.result }} ${{ needs.web-browser.result }}
+            ${{ needs.interrupt-matrix.result }}
             ${{ needs.conformance.result }} ${{ needs.modes.result }}
             ${{ needs.engine-rust.result }} ${{ needs.engine-wasm.result }}
             ${{ needs.engine-node.result }} ${{ needs.engine-language.result }}
