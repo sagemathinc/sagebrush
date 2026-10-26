@@ -163,7 +163,11 @@ function realRegister(): Register | null {
   const buf = new FR((id: number) => collected(id, "buffer"));
   return (target, id, kind) => (kind === "memory" ? mem : buf).register(target, id);
 }
-let register: Register | null = realRegister();
+// (the one real pair, kept for the process: the test hooks restore it rather
+// than building another, so a registry never becomes garbage while it still
+// has targets)
+const REAL_REGISTER: Register | null = realRegister();
+let register: Register | null = REAL_REGISTER;
 
 /** A finalizer fired: the entry goes once both have; repeats, and ids that
  * are a debt or gone, are no-ops. */
@@ -783,7 +787,7 @@ export const retireTest = {
   },
   /** Replace the finalizers (null: the real ones). */
   setRegister(r: Register | null) {
-    register = r ?? realRegister();
+    register = r ?? REAL_REGISTER;
   },
   collected,
   /** A pending debt of `bytes` (the overflow test: sums near 2^53). */
@@ -820,7 +824,7 @@ export const retireTest = {
     fault = overflow = false;
     creating = inCall = oHost = oHostBytes = 0;
     testModule = testImports = testTotals = null;
-    register = realRegister();
+    register = REAL_REGISTER;
   },
   /** The test-only async creation (r15 section 3.3's pause hook): the same
    * transaction, with WebAssembly.instantiate and a hook awaited while the
