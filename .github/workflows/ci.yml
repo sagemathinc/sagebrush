@@ -645,6 +645,7 @@ jobs:
               bun web/test-shell.mjs
               # (ShellHost, the mediator, over a real workspace: step 2)
               bun web/shell/test-shell-host.mjs
+              bun web/shell/test-bounded-json.mjs
               node web/test-worker-limits.mjs
               node web/test-kedlaya-worker.mjs
               ;;

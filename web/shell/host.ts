@@ -616,31 +616,46 @@ function bytes(x: unknown): Uint8Array {
 export class ShellHost {
   private shell: Shell | null = null;
   private starting: Promise<Shell> | null = null;
+  // (the current start's own cancellation: one per start, shared by the runs waiting on it, aborted by endShell)
+  private startCtl: AbortController | null = null;
   private views = new Map<string, Workspace>();
   /** the bytes one read may return (READ_BYTES; step 3's bash.read_bytes sets it) */
   readonly readBytes: number;
 
-  constructor(private ws: Workspace, private start: () => Promise<Shell>, opts: { readBytes?: number } = {}) {
+  /**
+   * `start(signal)` starts a shell worker (startShell(S, at, { signal })); an abort of `signal` must end what
+   * it has started (its fetches, its worker), ready or not (CORR-BASH-S2-R2-1).
+   */
+  constructor(private ws: Workspace, private start: (signal: AbortSignal) => Promise<Shell>, opts: { readBytes?: number } = {}) {
     this.readBytes = opts.readBytes ?? READ_BYTES;
   }
 
   /**
    * The shell, started (again) if there is none or it has closed.  Only a shell whose verified package
    * reaches files through this mediator is used (F12): an older one is ended and refused, never run on its
-   * own in-memory files in the workspace's name.  A start abandoned by endShell (Stop) ends its worker when it
-   * comes, and is never installed.
+   * own in-memory files in the workspace's name.  Each start has its own signal: endShell (Stop's grace) aborts
+   * it, so a start that never gets ready is ended (its fetch or its worker), and a start that comes anyway is
+   * ended when it comes and never installed.  Runs that wait at once share one start; a later start is another,
+   * with its own signal, which no earlier abort reaches.
    */
   shellFor(): Promise<Shell> {
     if (this.shell && this.shell.state === "open") return Promise.resolve(this.shell);
     this.shell = null;
     if (!this.starting) {
-      const p: Promise<Shell> = this.start().then(
+      const ctl = new AbortController();
+      let started: Promise<Shell>;
+      try {
+        started = Promise.resolve(this.start(ctl.signal));
+      } catch (err) {
+        started = Promise.reject(err);
+      }
+      const p: Promise<Shell> = started.then(
         (s) => {
           if (this.starting !== p) {
             s.terminate();
             throw new ShellUnavailableError("its start was abandoned");
           }
-          this.starting = null;
+          this.starting = this.startCtl = null;
           if (!(s.hostReq >= MEDIATED_FS_LEVEL)) {
             s.terminate();
             throw new ShellUnavailableError("this document's package set has an older shell; update the set");
@@ -649,19 +664,22 @@ export class ShellHost {
           return s;
         },
         (err) => {
-          if (this.starting === p) this.starting = null;
+          if (this.starting === p) this.starting = this.startCtl = null;
           throw err;
         },
       );
       this.starting = p;
+      this.startCtl = ctl;
     }
     return this.starting;
   }
-  /** Ends the shell worker, or abandons its start (Stop's grace, r3 §4.3): what it was running fails, and the next run starts a fresh one. */
-  endShell(_why: string) {
+  /** Ends the shell worker, or cancels its start (Stop's grace, r3 §4.3): what it was running fails, and the next run starts a fresh one. */
+  endShell(why: string) {
     this.shell?.terminate();
     this.shell = null;
     this.starting = null;
+    this.startCtl?.abort(new ShellUnavailableError(`its start was cancelled: ${why}`));
+    this.startCtl = null;
   }
   /** The workspace as the principal changes it: its actor in the op log (r3 §2.1); never handed out. */
   workspaceFor(p: Principal): Workspace {

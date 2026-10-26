@@ -24,7 +24,7 @@ let nth = 0;
 async function fresh(name, { start, wrap, limits, readBytes } = {}) {
   localStorage.clear();
   const ws = await W.Workspace.open({ name: `host-${name}-${++nth}`, mainName: `host-${name}-main-${nth}`, ...(limits ? { limits } : {}) });
-  const host = new ShellHost(wrap ? wrap(ws) : ws, start ?? (() => startShell(D.S, "/").then((x) => x.shell)), readBytes ? { readBytes } : {});
+  const host = new ShellHost(wrap ? wrap(ws) : ws, start ?? ((signal) => startShell(D.S, "/", { signal }).then((x) => x.shell)), readBytes ? { readBytes } : {});
   return { ws, host };
 }
 // A view of `ws` for the host whose verbs first run `hooks[verb](...args)` if one is set: only for the host's
@@ -289,7 +289,7 @@ async function classify(check) {
 // ---------------------------------------------------------------- provenance (D8-3), with a stand-in module
 async function provenance(check) {
   const hooks = {};
-  const { ws, host } = await fresh("provenance", { wrap: hookable(hooks), start: () => startShell(D.STAND, "/").then((x) => x.shell) });
+  const { ws, host } = await fresh("provenance", { wrap: hookable(hooks), start: (signal) => startShell(D.STAND, "/", { signal }).then((x) => x.shell) });
   const missing = { op: "read", args: ["/nodir/x"] };
   const inv = (run, c) => run.invoke(JSON.stringify(c));
   let r = await inv(host.run(PERSON), { steps: [missing], report: "reject-first-refusal" });
@@ -417,7 +417,7 @@ async function stop(check) {
   await new Promise((res) => setTimeout(res, 300));
   check(r.kind === "interrupted" && (await opsOf(ws)).length === n, `Stop during a loop of appends: interrupted, and nothing admitted after it (${JSON.stringify(r).slice(0, 200)})`);
   // a shell that doesn't unwind (a stand-in that never answers): the worker is ended after the 2 s grace
-  const { host: h2 } = await fresh("stop-grace", { start: () => startShell(D.STAND, "/").then((x) => x.shell) });
+  const { host: h2 } = await fresh("stop-grace", { start: (signal) => startShell(D.STAND, "/", { signal }).then((x) => x.shell) });
   ac = new AbortController();
   setTimeout(() => ac.abort(), 300);
   t0 = performance.now();
@@ -432,9 +432,11 @@ async function stop(check) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // A start of the real shell after `delay` ms (or never), each shell counted: its exec calls and its end.
 function counted(delay) {
-  const c = { starts: 0, dispatched: 0, ended: 0, shells: [] };
-  c.start = async () => {
+  const c = { starts: 0, dispatched: 0, ended: 0, shells: [], signals: [] };
+  // (this start ignores its signal, as a start that can't be cancelled would: the host must still end what comes)
+  c.start = async (signal) => {
     c.starts++;
+    c.signals.push(signal);
     if (delay === Infinity) await new Promise(() => {});
     await sleep(delay);
     const { shell } = await startShell(D.S, "/");
@@ -460,6 +462,39 @@ async function startup(check) {
     const r = await host.exec(PERSON, "echo never", { signal: stopAt(300) });
     const ms = performance.now() - t0;
     check(r.kind === "interrupted" && c.dispatched === 0 && ms >= 300 + STOP_GRACE_MS - 50 && ms < 300 + STOP_GRACE_MS + 600, `Stop during a start that never answers: interrupted at the grace, nothing dispatched (${JSON.stringify(r)}, ${Math.round(ms)} ms, ${c.dispatched} dispatched)`);
+    check(c.signals.length === 1 && c.signals[0].aborted, `...and its start's signal is aborted at the grace (${c.signals.map((x) => x.aborted)})`);
+  }
+  // a real start whose worker never says ready: the grace cancels it, and its worker is ended (the page's
+  // count of live workers); the next run's start is another, with its own signal, and runs
+  {
+    const signals = [];
+    const start = (signal) => (signals.push(signal), startShell(signals.length === 1 ? D.NEVER : D.S, "/", { signal }).then((x) => x.shell));
+    const { host } = await fresh("start-never-real", { start });
+    const before = { ...window.workers };
+    let r = await host.exec(PERSON, "echo never", { signal: stopAt(300) });
+    await sleep(100);
+    const after = { ...window.workers };
+    check(r.kind === "interrupted" && signals[0].aborted && after.made === before.made + 1 && after.live === before.live,
+      `Stop during a real start that never gets ready: interrupted at the grace, its signal aborted, its worker ended (${JSON.stringify(r)}, workers ${JSON.stringify(before)} -> ${JSON.stringify(after)})`);
+    r = await host.exec(PERSON, "echo next");
+    check(r.kind === "exit" && r.stdout === "next\n" && signals.length === 2 && !signals[1].aborted && window.workers.live === after.live + 1,
+      `the next run starts a fresh worker, its own signal untouched by the first's abort (${JSON.stringify(r)}, ${signals.map((x) => x.aborted)})`);
+    host.endShell("the case is over");
+    check(window.workers.live === after.live, `and ending it ends that worker (${window.workers.live} live)`);
+  }
+  // a real start whose fetch never answers: the grace cancels it, and the fetch is closed (the server's count)
+  {
+    const { host } = await fresh("start-hang", { start: (signal) => startShell(D.HANG, "/", { signal }).then((x) => x.shell) });
+    const before = { ...window.workers };
+    const r = await host.exec(PERSON, "echo hang", { signal: stopAt(300) });
+    let h = null;
+    for (let i = 0; i < 40; i++) {
+      h = await (await fetch("/hang-state")).json();
+      if (h.open === 0) break;
+      await sleep(50);
+    }
+    check(r.kind === "interrupted" && h.total === 1 && h.open === 0 && window.workers.made === before.made,
+      `Stop during a start whose fetch never answers: interrupted, the fetch closed, no worker made (${JSON.stringify(r)}, ${JSON.stringify(h)})`);
   }
   // a start that answers after the grace: settled at the grace; the late worker is ended when it comes, never installed
   {
@@ -572,7 +607,7 @@ async function documents(check) {
   }
   check(r.kind === "exit" && r.code === 1 && r.stdout === "" && longest < 2000, `a notebook over the read cap isn't read, nor serialized whole (the longest JSON text made meanwhile: ${longest} chars) (${JSON.stringify(r).slice(0, 200)})`);
   // (just-bash words every input error as missing; the host's own answer, through the stand-in, is EFBIG)
-  const { ws: w1, host: h1 } = await fresh("documents-cap", { readBytes: 2000, start: () => startShell(D.STAND, "/").then((x) => x.shell) });
+  const { ws: w1, host: h1 } = await fresh("documents-cap", { readBytes: 2000, start: (signal) => startShell(D.STAND, "/", { signal }).then((x) => x.shell) });
   await w1.create("/nb.ipynb", { content: big });
   r = await h1.run(PERSON).invoke(JSON.stringify({ steps: [{ op: "read", args: ["/nb.ipynb"] }], report: "exit" }));
   check(r.kind === "exit" && r.stdout === '["EFBIG"]', `the host answers a read of it EFBIG (${JSON.stringify(r)})`);
@@ -604,7 +639,7 @@ async function liveness(check) {
   check(r.kind === "unavailable" && r.row === 3, `stat of the top with a revoked grant: row 3 (${JSON.stringify(r)})`);
   // (one request at a time, through the stand-in: stat of the top, and exists of the top)
   for (const op of ["stat", "exists"]) {
-    const { host: hs } = await fresh("liveness-" + op, { start: () => startShell(D.STAND, "/").then((x) => x.shell) });
+    const { host: hs } = await fresh("liveness-" + op, { start: (signal) => startShell(D.STAND, "/", { signal }).then((x) => x.shell) });
     const gr = { kind: "grant", actor: "agent:test", folders: new Set([A.fid]), write: true, live: () => "revoked" };
     const q = await hs.run(gr).invoke(JSON.stringify({ steps: [{ op, args: ["/"] }], report: "exit" }));
     check(q.kind === "unavailable" && q.row === 3, `${op} of the top alone, with a revoked grant: row 3 (${JSON.stringify(q)})`);
@@ -716,7 +751,7 @@ async function boundary(check) {
 // ---------------------------------------------------------------- r2: an old shell is refused on the workspace (F12; CORR-BASH-S2-5)
 async function oldShell(check) {
   let dispatched = 0;
-  const { ws, host } = await fresh("old-shell", { start: () => startShell(D.OLD, "/").then(({ shell }) => ({ S: shell.S, version: shell.version, hostReq: shell.hostReq, get state() { return shell.state; }, exec: (...a) => { dispatched++; return shell.exec(...a); }, terminate: () => shell.terminate() })) });
+  const { ws, host } = await fresh("old-shell", { start: (signal) => startShell(D.OLD, "/", { signal }).then(({ shell }) => ({ S: shell.S, version: shell.version, hostReq: shell.hostReq, get state() { return shell.state; }, exec: (...a) => { dispatched++; return shell.exec(...a); }, terminate: () => shell.terminate() })) });
   const r = await host.exec(PERSON, "echo x > n");
   check(r.kind === "unavailable" && r.row === 2 && /older shell; update the set/.test(r.reason) && dispatched === 0 && !(await ws.stat("/n")), `a 0.1.0 shell (host_req 1) is refused before dispatch on the workspace (${JSON.stringify(r)})`);
   // (the loader alone still starts it: the refusal is the workspace surface's, not the loader's)
@@ -764,7 +799,9 @@ async function census(check) {
   await ws.mkdir("/B");
   await ws.create("/B/secret", { content: enc("secret\n") });
   const g = { kind: "grant", actor: "agent:test", folders: new Set([A.fid]), write: true, live: () => "ok" };
-  const recorded = new Map((D.step2.census.refused ?? []).map((x) => [x.command, x]));
+  // (by script: a command may have more than one refused row, as rm has for a path that exists and one that doesn't)
+  const recorded = new Map((D.step2.census.refused ?? []).map((x) => [x.script, x]));
+  const exercised = new Set();
   for (const b of D.step2.census.baseline) {
     // missing, as the person: what step 1 showed on InMemoryFs (grader's baseline), exactly
     const r = await host.exec(PERSON, b.script, { cwd: "/cen" });
@@ -775,8 +812,20 @@ async function census(check) {
     const script = b.script.replace(/\bmissing\b/, "/B/secret").replace(/ f$/, " /A/f");
     const q = await host.exec(g, script, { cwd: "/A" });
     const gotR = { script, stderr: q.stderr, exit: q.code };
-    const want = recorded.get(b.command);
-    if (!want) check(false, `RECORD census refused ${b.command}: ${JSON.stringify(gotR)}`);
+    const want = recorded.get(script);
+    exercised.add(script);
+    if (!want || want.command !== b.command) check(false, `RECORD census refused ${b.command}: ${JSON.stringify(gotR)}`);
     else check(same(gotR, { script: want.script, stderr: want.stderr, exit: want.exit }), `census refused ${b.command} (${script}): ${same(gotR, { script: want.script, stderr: want.stderr, exit: want.exit }) ? "as recorded" : `got ${JSON.stringify(gotR)}, recorded ${JSON.stringify(want)}`}`);
   }
+  // the other recorded rows (rm of an absent path outside the grant), each run as recorded
+  for (const [script, want] of recorded) {
+    if (exercised.has(script)) continue;
+    const q = await host.exec(g, script, { cwd: "/A" });
+    const gotR = { script, stderr: q.stderr, exit: q.code };
+    check(same(gotR, { script: want.script, stderr: want.stderr, exit: want.exit }), `census refused ${want.command} (${script}): ${same(gotR, { script, stderr: want.stderr, exit: want.exit }) ? "as recorded" : `got ${JSON.stringify(gotR)}, recorded ${JSON.stringify(want)}`}`);
+  }
+  // rm tells nothing about what exists outside the grant: an absent path's refusal is an existing one's, its name aside
+  const gone = recorded.get("rm /B/nosuch"), there = recorded.get("rm /B/secret");
+  check(!!gone && !!there && gone.exit === there.exit && gone.stderr === there.stderr.replaceAll("/B/secret", "/B/nosuch"),
+    `rm of an absent and an existing path outside the grant: the same words and status (${JSON.stringify(gone)}, ${JSON.stringify(there)})`);
 }
