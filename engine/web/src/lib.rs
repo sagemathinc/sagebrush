@@ -192,6 +192,37 @@ pub fn call(req: &str) -> String {
     .to_string()
 }
 
+/// The polynomials' factorization as modsym's factor callback (`run` gets
+/// it): a refusal gives no factors, which checked_factor rejects as an
+/// error (never a successful unfactored answer); an internal error is kept
+/// and returned in place of checked_factor's generic message, so the reply
+/// carries it as internal (rank-3 plan r3 section 3.5).
+type Factored = Vec<(Vec<BigInt>, u32)>;
+fn keeping_internal<T>(
+    factor: &(dyn Fn(&[BigInt]) -> Result<Factored, sagebrush_poly::FactorLimit> + Sync),
+    run: impl FnOnce(&(dyn Fn(&[BigInt]) -> Factored + Sync)) -> Result<T, String>,
+) -> Result<T, String> {
+    let internal: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    let fac = |f: &[BigInt]| match factor(f) {
+        Ok(fs) => fs,
+        Err(e) => {
+            if e.kind == sagebrush_poly::Kind::Internal {
+                let mut kept = internal.lock().unwrap_or_else(|p| p.into_inner());
+                if kept.is_none() {
+                    *kept = Some(e.to_string());
+                }
+            }
+            Vec::new()
+        }
+    };
+    let r = run(&fac);
+    let kept = internal.lock().unwrap_or_else(|p| p.into_inner()).take();
+    match kept {
+        Some(m) => Err(m),
+        None => r,
+    }
+}
+
 /// A call's error reply: {"error": MESSAGE}, with "internal": true when the
 /// message carries a failed proved invariant of the factoring engine (also
 /// inside an op's own message), so the callers raise it as an internal
@@ -1167,10 +1198,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "newspace" | "newforms" => {
             let (n, k) = (level(v)?, weight(v)?);
             let eps = character(n, v)?;
-            // (a refusal gives no factors, which checked_factor rejects as
-            // an error: never a successful unfactored answer)
-            let fac = |f: &[BigInt]| sagebrush_poly::try_factor(f).map(|r| r.1).unwrap_or_default();
-            let r = sagebrush_modsym::newspace::newspace_orbits(n, k, &eps, &fac)?;
+            let factor = |f: &[BigInt]| sagebrush_poly::try_factor(f).map(|r| r.1);
+            let r = keeping_internal(&factor, |fac| sagebrush_modsym::newspace::newspace_orbits(n, k, &eps, fac))?;
             let mut out = json!({ "dim": r.dim, "order": r.m, "orbit_dims": r.dims, "orbit_charpolys": r.orbits.iter().map(|o| big(o)).collect::<Vec<_>>(),
                                   "T": r.ops, "status": r.status, "checks": r.checks });
             if f == "newforms" {
@@ -1341,6 +1370,35 @@ mod tests {
     fn err(req: &str) -> String {
         let r: serde_json::Value = serde_json::from_str(&call(req)).unwrap();
         r.get("error").and_then(|e| e.as_str()).unwrap_or_else(|| panic!("{} -> {}", req, r)).to_string()
+    }
+
+    /// newspace/newforms: an internal error from the factor callback is the
+    /// reply's error, flagged internal; a resource refusal keeps
+    /// checked_factor's message (CORR-RANK3-INTERNAL-1, astra2)
+    #[test]
+    fn newspace_keeps_an_internal_factor_error() {
+        use sagebrush_bigint::BigInt;
+        let eps = super::character(23, &serde_json::json!({"fn": "newspace", "n": 23, "k": 2})).unwrap();
+        let called = std::sync::atomic::AtomicUsize::new(0);
+        let internal = |_: &[BigInt]| -> Result<super::Factored, sagebrush_poly::FactorLimit> {
+            called.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Err(sagebrush_poly::Budget::unlimited().internal("an injected invariant"))
+        };
+        let e = super::keeping_internal(&internal, |fac| sagebrush_modsym::newspace::newspace_orbits(23, 2, &eps, fac)).map(|_| ()).unwrap_err();
+        assert!(called.load(std::sync::atomic::Ordering::Relaxed) > 0, "the factor callback was never asked");
+        assert!(e.starts_with(sagebrush_poly::INTERNAL_PREFIX) && e.contains("an injected invariant") && e.contains("please report it"), "{}", e);
+        assert_eq!(super::error_json(e)["internal"], true);
+        // a resource refusal: no factors, checked_factor's own error, unflagged
+        let refusing = |_: &[BigInt]| -> Result<super::Factored, sagebrush_poly::FactorLimit> {
+            Err(sagebrush_poly::Budget::unlimited().refuse("work", 2, 1))
+        };
+        let e = super::keeping_internal(&refusing, |fac| sagebrush_modsym::newspace::newspace_orbits(23, 2, &eps, fac)).map(|_| ()).unwrap_err();
+        assert!(!e.contains(sagebrush_poly::INTERNAL_PREFIX), "{}", e);
+        assert!(super::error_json(e).get("internal").is_none());
+        // and the real factorization still answers
+        let real = |f: &[BigInt]| sagebrush_poly::try_factor(f).map(|r| r.1);
+        let r = super::keeping_internal(&real, |fac| sagebrush_modsym::newspace::newspace_orbits(23, 2, &eps, fac)).unwrap();
+        assert_eq!(r.dim, 2);
     }
 
     /// A failed proved invariant of the factoring engine is flagged

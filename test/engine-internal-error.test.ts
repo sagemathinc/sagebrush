@@ -32,3 +32,24 @@ test("pyjs: an internal factoring error is a RuntimeError, a resource refusal a 
   const out = execFileSync(process.execPath, [CLI, "-c", src], { encoding: "utf8", timeout: 120000 }).trim().split("\n");
   assert.deepEqual(out, ["RuntimeError internal", "ValueError internal", "ValueError resource"]);
 });
+
+// the symbolic route (CORR-RANK3-INTERNAL-2): an internal error reaches the
+// host as "err\x1fRuntimeError\x1fMESSAGE", in band natively or from the
+// engine's last-error record after a WebAssembly trap (engine.ts symCall);
+// _sage_expr raises it as RuntimeError with the engine's message
+test("pyjs: a symbolic call's internal error is a RuntimeError with the engine's message", () => {
+  const src = [
+    "import _sage_expr as X",
+    "M = 'factor: internal error (x divides the residual after the pre-pass in lattice); please report it; not factored'",
+    "real = X._raw",
+    "X._raw = lambda req: '\\x1f'.join(['err', 'RuntimeError', M])",
+    "try:",
+    "    X._call('integrate', 'x', 'x')",
+    "except Exception as e:",
+    "    print(type(e).__name__, str(e) == M)",
+    "finally:",
+    "    X._raw = real",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [CLI, "--sage", "-c", src], { encoding: "utf8", timeout: 120000 }).trim().split("\n");
+  assert.deepEqual(out.slice(-1), ["RuntimeError True"]);
+});

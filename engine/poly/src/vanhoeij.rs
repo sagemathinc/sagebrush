@@ -77,29 +77,29 @@ pub fn recombine<'b>(b: &'b Budget, f: &[BigInt], m: &Modular, lifted: Vec<Held<
 
 /// Faults the tests inject (rank-3 plan r3, section 4.3), to reach each
 /// invariant's branch (only the tests can set one).
-pub(crate) mod fault {
+pub mod fault {
     /// The pre-pass is skipped: its residual is f with every lifted factor.
     pub const SKIP_PREPASS: u8 = 1;
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-faults"))]
     thread_local! {
         static FAULT: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
     }
 
     #[inline]
     pub fn is(_f: u8) -> bool {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-faults"))]
         {
             FAULT.with(|c| c.get() == _f)
         }
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "test-faults")))]
         {
             false
         }
     }
 
     /// Run `run` with fault `f` injected.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-faults"))]
     pub fn with<T>(f: u8, run: impl FnOnce() -> T) -> T {
         struct Reset;
         impl Drop for Reset {

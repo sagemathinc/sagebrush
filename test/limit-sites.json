@@ -1144,6 +1144,26 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/web/src/lib.rs :: keeping_internal :: factor: &(dyn Fn(&[BigInt]) -> Result<Factored, sagebrush_poly::FactorLimit> + Sync), #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/web/src/lib.rs :: newspace_keeps_an_internal_factor_error :: Err(sagebrush_poly::Budget::unlimited().internal(\"an injected invariant\")) #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/web/src/lib.rs :: newspace_keeps_an_internal_factor_error :: Err(sagebrush_poly::Budget::unlimited().refuse(\"work\", 2, 1)) #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/web/src/lib.rs :: newspace_keeps_an_internal_factor_error :: let internal = |_: &[BigInt]| -> Result<super::Factored, sagebrush_poly::FactorLimit> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/web/src/lib.rs :: newspace_keeps_an_internal_factor_error :: let refusing = |_: &[BigInt]| -> Result<super::Factored, sagebrush_poly::FactorLimit> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/web/src/lib.rs :: nmod_square :: if n > NMOD_MAX_N { #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
