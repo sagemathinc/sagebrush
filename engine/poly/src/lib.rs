@@ -38,7 +38,7 @@ pub mod nf;
 /// only; rank-3 plan r3 section 4.3).
 #[cfg(feature = "test-faults")]
 pub mod test_faults {
-    pub use crate::vanhoeij::fault::{with, SKIP_PREPASS};
+    pub use crate::vanhoeij::fault::{reach, with, with_hooks, Reach, CORRUPT_CLD, FORCE_S0, SKIP_PREPASS, STAGE1_EXIT, STAGE1_LOW_PREC, STAGE1_NO_CERT};
 }
 mod vanhoeij;
 
@@ -914,6 +914,11 @@ pub(crate) fn zassenhaus<'b>(
     possible: &[bool],
     max_size: usize,
 ) -> FResult<Zassenhaus<'b>> {
+    // the no-subset audit (rank-3 plan r3, section 4.2): a full search on a
+    // residual with more than ZASSENHAUS_MAX factors must never run
+    if max_size == usize::MAX && lifted.len() > vanhoeij::ZASSENHAUS_MAX {
+        vanhoeij::fault::count(|c| c.full_subsets_large += 1);
+    }
     let mut f = Held::copy(b, f)?;
     let mut rest: Vec<Held<'b>> = lifted;
     let mut found = vec![];
