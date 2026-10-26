@@ -399,6 +399,26 @@
   "class": "none",
   "owner": "estimates and progress (encoding)"
  },
+ "engine/ledger/src/growth.rs :: reserve_growth :: need: w.unwrap_or(u64::MAX), #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/lib.rs :: drop :: pub(crate) static FAKE_COMMITTED: AtomicU64 = AtomicU64::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/lib.rs :: fake_committed :: c if c == u64::MAX => None, #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/lib.rs :: fake_grow :: assert_ne!(c, u64::MAX, \"no fake pages\"); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/lib.rs :: set_fake_committed :: FAKE_COMMITTED.store(bytes.unwrap_or(u64::MAX), Relaxed); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
  "engine/modsym/src/linalg.rs :: sparse_echelon :: pub const MAX_HECKE_PRIME: u64 = 1 << 30; #0": {
   "class": "3",
   "owner": "modular symbols",
@@ -1258,6 +1278,18 @@
  "engine/web/src/lib.rs :: dispatch :: Some(w) => sagebrush_poly::try_factor_with(&f, &sagebrush_poly::Budget::new(sagebrush_poly::Limits { work: w, ..sagebrush_poly::Limits::DEFAULT })), #0": {
   "class": "3",
   "owner": "polynomial factorization"
+ },
+ "engine/web/src/lib.rs :: host_map_room :: h.reserve_exact((new - cap) as usize); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/web/src/lib.rs :: host_map_room :: let cap = h.capacity() as u64; #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/web/src/lib.rs :: host_map_room :: let new = (cap * 2).max(4); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
  "engine/web/src/lib.rs :: internal_factoring_errors_are_flagged :: assert!(r[\"error\"].as_str().unwrap().contains(\"resource limit exceeded\") && r.get(\"internal\").is_none(), \"{}\", r); #0": {
   "class": "none",
