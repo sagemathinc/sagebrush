@@ -30,6 +30,8 @@ interface Engine {
   // (optional: engines built before item D0 lack it)
   sb_set_memory_share?(v: number): void;
   sb_set_memory_total?(bytes: number, status: number, uncertified: number): void;
+  // (optional: engines built before C r16b lack it; status 3 is none)
+  sb_set_instance_total?(bytes: number, status: number): number;
   sb_live_estimate?(): number;
   sb_outstanding_bytes?(): number;
   // (optional: engines built before C-2b lack them)
@@ -263,13 +265,19 @@ export function initialMemory(bytes: Uint8Array): number | null {
  * refusal (lib/_memguard.py), with the retired bytes shown. */
 class CreationRefused extends Error {
   constructor(
+    /** the scope of the row that refused (C r16b): "instance" or "shared" */
+    readonly row: "instance" | "shared",
     readonly need: bigint,
     readonly limit: bigint,
     readonly initial: number,
     readonly retired: number,
     readonly inexact: boolean,
   ) {
-    super(`a new engine instance needs ${need} bytes with what retired instances still hold (${retired}), but the engine is allowed ${limit} here`);
+    super(
+      row === "instance"
+        ? `a new engine instance needs ${need} bytes of its own address space, but an instance is allowed ${limit} here`
+        : `a new engine instance needs ${need} bytes with what retired instances still hold (${retired}), but the engine is allowed ${limit} here`,
+    );
   }
 }
 
@@ -278,18 +286,39 @@ class CreationRefused extends Error {
 // (not our frozen one: likewise), a total, and the finalizers.
 let testModule: Uint8Array | null = null;
 let testImports: object | null = null;
-let testTotal: [number, number, number] | null = null;
+let testTotals: Totals | null = null;
 
-/** The total for the admission: [bytes, status, uncertified], nominal when
- * the host has none (the ledger's own reading of the push). */
-function admissionTotal(): [number, number, number] {
-  return testTotal ?? memoryTotal();
+/** The totals for the admission (memoryTotals; the ledger reads the same
+ * push the same way). */
+function admissionTotals(): Totals {
+  return testTotals ?? memoryTotals();
 }
 
 /** E for a total as pushed: total / 4 (the nominal total when none). */
-function allowanceOf([bytes, status]: [number, number, number]): bigint {
+function allowanceOf([bytes, status]: [number, number]): bigint {
   const b = status >= 0 && status <= 2 && bytes >= 0 ? BigInt(bytes) : BigInt(NOMINAL_TOTAL);
   return b / SHARE_DEN;
+}
+
+/** The creation admission (C r15 section 3.2 with C r16b's scopes): on the
+ * instance row phi (M0 + O_host) <= E_inst, retired instances being
+ * outside its scope; on the shared row, when one applies, phi (M0 + R_ret
+ * + O_host) <= E_shared.  The refusal, or null; an inexact R_ret refuses
+ * (fail closed). */
+function creationCheck(m0: number, t: Totals): CreationRefused | null {
+  const refuse = (row: "instance" | "shared", need: bigint, limit: bigint) =>
+    new CreationRefused(row, (PHI_NUM * need + PHI_DEN - 1n) / PHI_DEN, limit, m0, row === "shared" ? retiredSum : 0, overflow);
+  if (t.instance) {
+    const limit = allowanceOf(t.instance);
+    const need = BigInt(m0) + BigInt(oHostBytes);
+    if (PHI_NUM * need > PHI_DEN * limit) return refuse("instance", need, limit);
+  }
+  if (t.shared || overflow) {
+    const limit = allowanceOf(t.shared ?? [-1, -1]);
+    const need = BigInt(m0) + BigInt(retiredSum) + BigInt(oHostBytes);
+    if (overflow || PHI_NUM * need > PHI_DEN * limit) return refuse("shared", need, limit);
+  }
+  return null;
 }
 
 /** The creation transaction: the only way E gets a new instance. */
@@ -306,10 +335,9 @@ function createInstance(): Engine {
   // there being nothing to refund)
   const module = new WebAssembly.Module(bytes as any);
   // the admission, with the full state
-  const total = admissionTotal();
-  const limit = allowanceOf(total);
-  const need = BigInt(m0) + BigInt(retiredSum) + BigInt(oHostBytes);
-  if (overflow || PHI_NUM * need > PHI_DEN * limit) throw new CreationRefused((PHI_NUM * need + PHI_DEN - 1n) / PHI_DEN, limit, m0, retiredSum, overflow);
+  const totals = admissionTotals();
+  const refused = creationCheck(m0, totals);
+  if (refused) throw refused;
   const id = nextId++;
   creating = m0;
   try {
@@ -337,8 +365,8 @@ function createInstance(): Engine {
     creating = 0;
   }
   const e = E;
-  // the total and R_ret, before anything runs on it
-  if (typeof e.sb_set_memory_total === "function") e.sb_set_memory_total(total[0], total[1], total[2]);
+  // the totals and R_ret, before anything runs on it
+  if (typeof e.sb_set_memory_total === "function") pushTotals(e, totals);
   pushRetired();
   frames = typeof e.sb_progress_ptr === "function" ? frameView(e) : null;
   if (frames) {
@@ -381,9 +409,29 @@ export function pushShare(e: Engine) {
   e.sb_set_memory_share(share);
   // the engine ledger's total (no-cliffs plan C r10 section 1), on the same
   // cadence; an engine without the export is left alone
-  if (typeof e.sb_set_memory_total === "function") {
+  if (typeof e.sb_set_memory_total === "function") pushTotals(e, admissionTotals());
+}
+/** The totals by row extent (no-cliffs C r16b): the instance-local one
+ * (one memory's address space: retired instances are outside it), or null;
+ * the shared one, or null when no shared row applies (pushed as status 3,
+ * absent, never as zero). */
+interface Totals {
+  instance: [number, number] | null;
+  shared: [number, number] | null;
+  /** 1 when some applicable row of either extent is joint or unknown
+   * (C r17 section 1.3: engine_uncertified), else 0 */
+  uncertified: number;
+}
+/** Push both totals; an engine without sb_set_instance_total (before C
+ * r16b) gets the one total of before. */
+function pushTotals(e: Engine, t: Totals) {
+  if (typeof e.sb_set_instance_total === "function") {
+    e.sb_set_instance_total(t.instance ? t.instance[0] : 0, t.instance ? t.instance[1] : 3);
+    // (absent: no shared row; uncertified still comes with it)
+    e.sb_set_memory_total!(t.shared ? t.shared[0] : 0, t.shared ? t.shared[1] : 3, t.uncertified);
+  } else {
     const [bytes, status, uncertified] = memoryTotal();
-    e.sb_set_memory_total(bytes, status, uncertified);
+    e.sb_set_memory_total!(bytes, status, uncertified);
   }
 }
 const TOTAL_STATUS: Record<string, number> = { observed: 0, zero: 1, nominal: 2 };
@@ -409,6 +457,33 @@ function memoryTotal(): [number, number, number] {
       if (Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt)) requestCtrlC();
     } catch {}
     return [-1, -1, 0];
+  }
+}
+/** lib/_capacity.py engine_totals (no-cliffs C r16b section 3.1): each
+ * extent's least row as [bytes, status code], or null for an extent with
+ * no row; the shared one is the nominal total when it can't be had (as
+ * memoryTotal), and so is anything malformed: never "absent" by mistake. */
+function memoryTotals(): Totals {
+  try {
+    const m = Obj.hooks.importModule("_capacity");
+    const t: any = Obj.callObj(Obj.getattr(m, "engine_totals"), []);
+    const get = (o: any, k: string) => Obj.unbox(Obj.callObj(Obj.getattr(o, "get"), [k]));
+    const one = (r: any): [number, number] | null => {
+      if (r === null || r === undefined) return null;
+      let bytes: any = get(r, "bytes");
+      if (typeof bytes === "bigint") bytes = bytes <= 9007199254740991n && bytes >= 0n ? Number(bytes) : -1;
+      const status = TOTAL_STATUS[String(get(r, "status"))] ?? -1;
+      return [typeof bytes === "number" && Number.isInteger(bytes) && bytes >= 0 ? bytes : -1, status];
+    };
+    const inst = one(get(t, "instance"));
+    const shared = one(get(t, "shared"));
+    // (a malformed instance record is no instance row; never a shared absent)
+    return { instance: inst && inst[0] >= 0 && inst[1] >= 0 ? inst : null, shared: shared ?? (inst ? null : [-1, -1]), uncertified: rowsUncertified(m) };
+  } catch (e) {
+    try {
+      if (Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt)) requestCtrlC();
+    } catch {}
+    return { instance: null, shared: [-1, -1], uncertified: 0 };
   }
 }
 /** 0 only when _capacity.engine_uncertified() is exactly False
@@ -647,13 +722,14 @@ export function hostRelease(t: HostHandle): void {
 function creationRefusal(err: CreationRefused): any {
   const g = Obj.hooks.importModule("_memguard");
   const mb = (n: number) => `${Math.round(n / 1048576)} MB`;
-  const what = err.retired > 0 ? `A new engine instance (with ${mb(err.retired)} still held by retired engine instances)` : "A new engine instance";
+  const what = err.row === "shared" && err.retired > 0 ? `A new engine instance (with ${mb(err.retired)} still held by retired engine instances)` : "A new engine instance";
   const record = Obj.newDict();
+  Obj.dictSet(record, "row", err.row);
   Obj.dictSet(record, "initial", err.initial);
   Obj.dictSet(record, "retired", err.retired);
   if (err.inexact) Obj.dictSet(record, "inexact", true);
   const int = (n: bigint) => (n <= BigInt(MAX_SAFE) ? Number(n) : n);
-  return Obj.callObj(Obj.getattr(g, "memory_guard"), [what, int(err.need), int(err.limit), "the engine", record]);
+  return Obj.callObj(Obj.getattr(g, "memory_guard"), [what, int(err.need), int(err.limit), err.row === "instance" ? "one engine instance" : "the engine", record]);
 }
 
 /** The builtins' catch: a Ctrl-C, a refused creation, or another error. */
@@ -674,8 +750,13 @@ export const retireTest = {
   setImports(imports: object | null) {
     testImports = imports;
   },
+  /** A shared total alone ([bytes, status, uncertified]; null: the real ones). */
   setTotal(t: [number, number, number] | null) {
-    testTotal = t;
+    testTotals = t ? { instance: null, shared: [t[0], t[1]], uncertified: t[2] } : null;
+  },
+  /** Both totals (C r16b). */
+  setTotals(t: Totals | null) {
+    testTotals = t;
   },
   /** Replace the finalizers (null: the real ones). */
   setRegister(r: Register | null) {
@@ -713,7 +794,7 @@ export const retireTest = {
     retiredSum = 0;
     fault = overflow = false;
     creating = inCall = oHost = oHostBytes = 0;
-    testModule = testImports = testTotal = null;
+    testModule = testImports = testTotals = null;
     register = realRegister();
   },
   /** The test-only async creation (r15 section 3.3's pause hook): the same
@@ -724,10 +805,8 @@ export const retireTest = {
     const bytes = testModule ?? engineBytes();
     const m0 = initialMemory(bytes);
     if (m0 === null) throw new Error("internal error: the engine module's initial memory can't be read");
-    const total = admissionTotal();
-    const limit = allowanceOf(total);
-    const need = BigInt(m0) + BigInt(retiredSum) + BigInt(oHostBytes);
-    if (overflow || PHI_NUM * need > PHI_DEN * limit) throw new CreationRefused((PHI_NUM * need + PHI_DEN - 1n) / PHI_DEN, limit, m0, retiredSum, overflow);
+    const refused = creationCheck(m0, admissionTotals());
+    if (refused) throw refused;
     creating = m0;
     try {
       await pause();
@@ -775,7 +854,9 @@ newBuiltinModule("_sbengine", (m) => {
   // use, without a collection.
   m.capacity_parts = Obj.builtin(() => {
     const only = (d: string) => Obj.tuple([d]);
-    const parts: any[] = [Obj.tuple(["wasm engine", WASM_CEILING, E ? E.memory.buffer.byteLength : 0, only("wasm-engine"), only("wasm-engine")])];
+    // (its extent, C r16b: this one instance's address space, the wasm32
+    // ceiling of one Memory; a retired instance occupies none of it)
+    const parts: any[] = [Obj.tuple(["wasm engine", WASM_CEILING, E ? E.memory.buffer.byteLength : 0, only("wasm-engine"), only("wasm-engine"), "instance"])];
     let used: number | null = null;
     try {
       const p = (globalThis as any).process;
