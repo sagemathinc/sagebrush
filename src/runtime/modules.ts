@@ -408,6 +408,19 @@ newBuiltinModule("sys", (m) => {
       return null;
     }
   }, "_sagebrush_heap_used");
+  // the external memory now (ArrayBuffer backing stores: bytes, typed arrays), in bytes, read
+  // without a collection of its own: right after _sagebrush_heap_used() (its full collection),
+  // the two are the live total (the interrupt matrix's leak measure, web/test-interrupt-matrix.mjs).
+  // None where the host has neither figure (the browser, Bun, Deno)
+  m._sagebrush_heap_external = builtin(() => {
+    try {
+      const v8 = (globalThis as any).process.getBuiltinModule("node:v8");
+      const n = v8.getHeapStatistics().external_memory;
+      return typeof n === "number" && n >= 0 ? Math.floor(n) : null;
+    } catch {
+      return null;
+    }
+  }, "_sagebrush_heap_external");
   // the function catalog the CLI bundle carries (scripts/build-cli.mjs,
   // catalog.gen.js: JSON text), for lib/_catalog.py away from a source tree;
   // None in the browser, whose search reads the built indexes

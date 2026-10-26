@@ -33,7 +33,7 @@ fn cyclotomic(n: usize) -> ZPoly {
 /// The Swinnerton-Dyer polynomial S_k: prod (x +- sqrt2 +- sqrt3 +- ...),
 /// built as a resultant-free product: S_1 = x^2 - 2, S_{k}(x) =
 /// S_{k-1}(x + sqrt(p)) S_{k-1}(x - sqrt(p)) = Res_y(S_{k-1}(x - y), y^2 - p).
-fn swinnerton_dyer(k: usize) -> ZPoly {
+pub(crate) fn swinnerton_dyer(k: usize) -> ZPoly {
     let primes = [2i64, 3, 5, 7, 11, 13];
     // represent elements of Z[x][sqrt p] as (a, b) = a + b sqrt p
     let b = Budget::unlimited();
@@ -406,3 +406,56 @@ fn timings() {
     }
 }
 
+
+#[test]
+fn the_global_ledger_net_holds() {
+    // rank-3 plan r3, section 4.5 (A): at every debit and reservation of a
+    // whole factoring, the live bytes allocated stay within the live
+    // reservation plus 64 KiB, and no tagged object of the ledger outgrows
+    // its own reservation (delta 1 r2 (B))
+    for k in [5usize, 6] {
+        let f = swinnerton_dyer(k);
+        let b = Budget::default();
+        let (r, rep) = crate::alloc_spy::audit(|| try_factor_with(&f, &b).map(|x| x.1.len()));
+        assert_eq!(r.unwrap(), 1, "S_{k}");
+        assert!(rep.excess <= 64 << 10, "S_{k}: {rep:?}");
+        assert_eq!(rep.tag_breaches, 0, "S_{k}: {rep:?}");
+    }
+}
+
+#[test]
+fn power_takes_a_u64_exponent() {
+    // rank-3 plan r3, section 3.6: x^k with k split at 2^s agrees with
+    // BigInt::pow (s small here, so the split path runs: s = 32 in power)
+    for x in [2i64, 3, 13, -7] {
+        let x = BigInt::from(x);
+        for k in (0u64..70).chain([127, 128, 129, 1000]) {
+            for s in [1u32, 3, 5] {
+                assert_eq!(pow_u64(&x, k, s), x.pow(k as u32), "{x}^{k} split at 2^{s}");
+            }
+        }
+    }
+    assert_eq!(power(&Budget::unlimited(), 13, 40).unwrap().v, BigInt::from(13).pow(40));
+}
+
+#[test]
+fn a_huge_exponent_is_refused_by_its_reservation() {
+    // section 3.6: an exponent whose p^k can't be counted in bytes is
+    // refused by the reservation even with no memory limit, and one that
+    // can is refused by the memory guard; both before anything is built
+    let b = Budget::unlimited();
+    for k in [u64::MAX, u64::MAX / 2, u64::MAX / 4, 1 << 61] {
+        let (r, used) = allocated_by(|| power(&b, 13, k).map(|x| x.bits()));
+        // (refused by the byte count, or, when that fits, by the work count)
+        let e = r.unwrap_err();
+        assert!(e.what == "memory (overflow)" || e.what == "work (overflow)", "k {k}: {e}");
+        assert!(used < 1024, "k {k}: {used} bytes before refusing");
+    }
+    let b = Budget::new(Limits::DEFAULT);
+    for k in [1u64 << 32, (1 << 32) + 1, 1 << 40] {
+        let (r, used) = allocated_by(|| power(&b, 13, k).map(|x| x.bits()));
+        assert_eq!(r.unwrap_err().what, "memory", "k {k}");
+        assert!(used < 1024, "k {k}: {used} bytes before refusing");
+    }
+    assert_eq!(b.live(), 0);
+}

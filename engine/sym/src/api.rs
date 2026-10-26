@@ -303,6 +303,7 @@ fn kind_name(e: &SymError) -> &'static str {
         SymError::DivisionByZero => "ZeroDivisionError",
         SymError::Value(_) => "ValueError",
         SymError::NotImplemented(_) => "NotImplementedError",
+        SymError::Internal(_) => "RuntimeError",
     }
 }
 
