@@ -1,0 +1,22 @@
+{
+ "comment": "Known interrupt-matrix failures, each pinned to its expected signature (plan-interrupt-harness r4 §6.3). A row whose failure matches is KNOWN, not FAIL; a different failure is still FAIL; a row here that now passes is FIXED, and the run fails until this entry is removed in the same change as the fix (they flip together). Each entry names its finding and the owner who is fixing it.",
+ "entries": [
+  { "case": "P2a", "host": "cli", "finding": "F1 (interrupt-harness-pilot-1)", "owner": "python", "fix": "poll in the sort/key path", "signature": "did not stop" },
+  { "case": "P2a", "host": "prompt", "finding": "F1 + F3", "owner": "python", "fix": "sort polling; E3 prompt worker", "signature": "did not stop|no KeyboardInterrupt" },
+  { "case": "P1", "host": "prompt", "finding": "F3 (Ctrl-C not delivered during a prompt input)", "owner": "python (E3)", "fix": "E3: prompt inputs in a worker", "signature": "no KeyboardInterrupt" },
+  { "case": "E2", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" },
+  { "case": "E3a", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" },
+  { "case": "E6a", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" },
+  { "case": "S1", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "no KeyboardInterrupt|did not take the next input" },
+  { "case": "S3", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "no escalation" },
+  { "case": "E3a", "host": "cli", "finding": "F4: the GF(32003) rank cliff (pilot 4: s = 388 in 0.243 s, s = 409 over 60 s; the 400x401 nmod_echelon boundary)", "owner": "sage2 / sage (F5)", "fix": "F5: no echelon cap", "signature": "a performance cliff" },
+  { "case": "E3a", "host": "prompt", "finding": "F4, as on the CLI", "owner": "sage2 / sage (F5)", "fix": "F5", "signature": "a performance cliff" },
+  { "case": "S4", "host": "cli", "finding": "slot 5: a pending Ctrl-C is never raised after a non-polling call when no loop follows (pyjs polls only at back-edges; same root as E13g)", "owner": "python", "fix": "a poll at host-call returns or statement boundaries", "signature": "returned without a KeyboardInterrupt", "routed": "python, with magma's S plan (@sagebrush, Oct 25)" }
+ ],
+ "pending": [
+  { "trial": "S1-S4 trace assertions", "waits_for": "E1 (SAGEBRUSH_SIGNAL_TRACE emitter)", "owner": "python" },
+  { "trial": "S5a", "waits_for": "E1 (frame requests, INTR bit 1)", "owner": "python" },
+  { "trial": "S5b", "waits_for": "PR 5a (soft stop, INTR bit 2)", "owner": "sage2", "capability": { "mode": "python", "expr": "getattr(__import__(\"sagebrush\"), \"capabilities\", lambda: {})().get(\"request_stop\") is True", "source": "sage2, /scratch/sagebrush-reviews/interrupt-harness-capability-probes.md (b5ab6cc9): False until PR 5a flips request_stop, also after #124 adds capabilities()" } },
+  { "trial": "S5c", "waits_for": "G-3 (grading allowance scope, INTR bit 3; G-1 and G-2 have no Python surface)", "owner": "grader", "capability": { "mode": "python", "expr": "hasattr(__import__(\"sagebrush\"), \"AllowanceExceeded\")", "source": "grader, /scratch/sagebrush-reviews/interrupt-harness-capability-probes.md (b5ab6cc9): False until G-3, the first runtime surface" } }
+ ]
+}
