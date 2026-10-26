@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "no-cliffs C-2b-ii (#194), a top-up of 2026-10-26-nocliffs-c2b-retire-r2.json: its cli/pyjs.cjs row (935) was the base64 formula plus one quantum; PR ci run 40396839771's size-gate (merge bf744053 of head 2b2e3b7e, with the fresh wasm d3c83c56 embedded) measured +12051 (28819225 -> 28831276) against 11108 + 935 = 12043",
+ "bytes": {
+  "cli/pyjs.cjs": 8
+ }
+}
