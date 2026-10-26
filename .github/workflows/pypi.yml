@@ -50,6 +50,14 @@ jobs:
           python engine/py/test_audit.py
           python engine/py/test_mcp.py
           cd engine/py && python -m doctest README.md && echo doctests ok
+      - name: the memory this machine shows (lib/_capacity.py), named by its source
+        shell: bash
+        run: |
+          # (the collector's own sources, for the log: a normal runner must give a number, never None)
+          python -c "import json, sagebrush; C = sagebrush._capacity_module(); r = C.capacity(); print(json.dumps({'bytes': r['bytes'], 'sources': [b['source'] for b in r['basis']], 'unknown': r['unknown_parts'], 'diagnosis': C.diagnosis(), 'total': C._machine_total()})); assert r['bytes'] and r['bytes'] > 0, 'capacity() has no figure here: %r' % (C.diagnosis(),)"
+          python -I test/capacity_ctypes_cases.py
+          # (on Windows, each kernel32/psapi call typed and untyped: board's probe, which changes nothing)
+          if [ "$RUNNER_OS" = Windows ]; then python test/win_capacity_probe.py engine/py/python/sagebrush/_sagelib || true; fi
       - uses: actions/upload-artifact@v5
         with:
           name: wheel-${{ matrix.os }}-${{ matrix.target }}

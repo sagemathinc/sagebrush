@@ -102,3 +102,26 @@ ok windows both, job smaller with physical ['child', 'cpython-heap', 'js-arraybu
 ok windows no scope row ('windows job', ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['child', 'cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], None)
 ok windows no scope (['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'], ['cpython-heap', 'js-arraybuffer', 'js-heap', 'wasm-engine', 'wasm-instance'])
 ok windows totals unchanged [(17179869184, ['physical']), (2147483648, ['windows job']), (3221225472, ['windows job'])]
+macos host | bytes 6442450944 | reserve 912680551 | effective 5529770393 | macos-host 17179869184/10737418240 rem 6442450944 | unknown []
+macos diagnosis host []
+macos total host (17179869184, ['hw.memsize'])
+macos rlimits | bytes 6442450944 | reserve 912680551 | effective 5529770393 | macos-host 17179869184/10737418240 rem 6442450944, RLIMIT_AS 4294967296/None rem None, RLIMIT_DATA 2147483648/None rem None | unknown ['RLIMIT_AS usage', 'RLIMIT_DATA usage']
+macos diagnosis rlimits []
+macos total rlimits (2147483648, ['RLIMIT_DATA'])
+macos fail physical | bytes None | reserve 268435456 | effective None |  | unknown ['macos-host']
+macos diagnosis fail physical [('macos-host', 'physical: sysctlbyname hw.memsize')]
+macos total fail physical (1073741824, ['nominal'])
+macos fail available | bytes None | reserve 268435456 | effective None |  | unknown ['macos-host']
+macos diagnosis fail available [('macos-host', 'available: host_statistics64: kern_return 5')]
+macos total fail available (1073741824, ['nominal'])
+macos available past total | bytes 17179869184 | reserve 1986422375 | effective 15193446809 | macos-host 17179869184/0 rem 17179869184 | unknown []
+macos diagnosis available past total []
+macos total available past total (17179869184, ['hw.memsize'])
+macos zero total | bytes None | reserve 268435456 | effective None |  | unknown ['macos-host']
+macos diagnosis zero total [('macos-host', 'physical: a total of 0 bytes')]
+macos total zero total (1073741824, ['nominal'])
+macos fail, runtime parts | bytes 4294967296 | reserve 697932186 | effective 3597035110 | wasm engine 4294967296/0 rem 4294967296 | unknown ['macos-host']
+windows diagnosis fail physical None [('windows-job', 'physical: GlobalMemoryStatusEx')]
+windows diagnosis fail in_job None [('windows-job', 'in_job: IsProcessInJob')]
+windows diagnosis fail job_limit None [('windows-job', 'job_limit: QueryInformationJobObject')]
+windows diagnosis job without memory limit 10737418240 []
