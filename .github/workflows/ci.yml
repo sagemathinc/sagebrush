@@ -30,6 +30,7 @@ jobs:
       engine_smoke: ${{ steps.paths.outputs.engine_smoke }}
       engine_full: ${{ steps.paths.outputs.engine_full }}
       engine_cpython: ${{ steps.paths.outputs.engine_cpython }}
+      webkit: ${{ steps.paths.outputs.webkit }}
       census: ${{ steps.paths.outputs.census }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
     steps:
@@ -444,6 +445,7 @@ jobs:
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
+          bun web/site/test-preview.mjs
           bun web/share-client/test-file-deps.mjs
           bun web/test-no-site-build.mjs
           bun web/test-reproducible-build.mjs
@@ -579,6 +581,48 @@ jobs:
           name: interrupt-matrix
           path: interrupt-out/
           if-no-files-found: ignore
+
+  # Kedlaya's Frobenius matrix in Playwright's WebKit worker (plan-kedlaya-
+  # webkit-ci r4): detection (JavaScriptCore on a browser host), the exact
+  # production refusal (its JSC table is established for Bun only), and Stop
+  # at four stages under a test-only override.  No heap snapshots and no
+  # browser cache: certification of the table on WebKit is unavailable (r4),
+  # and this job certifies nothing about memory.  Selected by its own paths
+  # on pull requests (scripts/ci-paths.mjs webkitPaths), and always by the
+  # nightly schedule and a dispatch; the workflow's concurrency group is per
+  # pull request, so a new revision cancels only its own obsolete run.
+  webkit:
+    needs: changes
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.webkit == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (from the runs: build 14-26 s, install 28-64 s, test 32-58 s; one
+    # install stalled on the apt mirror past the old 15-minute job limit,
+    # so the install and the test each have their own, and a stall names
+    # its step)
+    timeout-minutes: 18
+    env:
+      PLAYWRIGHT_VERSION: "1.57.0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: detect CI CPU quota
+        run: scripts/ci-cpus.sh
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
+      - name: "Playwright's WebKit, pinned (no cache: its apt dependencies dominate the install)"
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw" && echo '{"private": true}' > package.json
+          npm i --no-audit --no-fund "playwright@$PLAYWRIGHT_VERSION" && npx playwright install --with-deps webkit
+      - name: detection, the production refusal and Stop in WebKit's worker
+        timeout-minutes: 5
+        run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/test-kedlaya-worker.mjs
 
   web-browser:
     needs: changes
@@ -1050,6 +1094,7 @@ jobs:
       - engine-language
       - engine-modes
       - engine-cpython
+      - webkit
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     steps:
       - name: require every selected job to pass
@@ -1067,6 +1112,7 @@ jobs:
             ${{ needs.engine-node.result }} ${{ needs.engine-language.result }}
             ${{ needs.engine-modes.result }}
             ${{ needs.engine-cpython.result }}
+            ${{ needs.webkit.result }}
         run: |
           echo "$RESULTS"
           case " $RESULTS " in

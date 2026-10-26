@@ -30,6 +30,12 @@ test("the collector on made-up systems: the same from python3 and from Sagebrush
   }
 });
 
+// (the ctypes sources themselves, against fake system libraries: every call typed, what each reads, a
+// failing call said; CPython only, pyjs has no ctypes; the pypi workflow runs it on macOS and Windows too)
+test("the macOS and Windows sources through ctypes: typed calls, free + inactive pages, a job without a memory limit, failures named", () => {
+  assert.match(execFileSync("python3", ["-I", TEST + "capacity_ctypes_cases.py"], { encoding: "utf8" }), /^ok: the ctypes sources/m);
+});
+
 const sage = (code: string, heap = 256) =>
   execFileSync(process.execPath, [`--max-old-space-size=${heap}`, CLI, "--sage", "-c", code], { encoding: "utf8", timeout: 120000 });
 
