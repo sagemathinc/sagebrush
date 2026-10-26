@@ -113,7 +113,8 @@ export class Selection {
       if (r.size === undefined) sizesKnown = false;
       else {
         bytes += r.size;
-        if (!r.notebook && (!biggest || r.size > (biggest.size ?? 0))) biggest = r;
+        // (the notebook too: the share API's per-file limit applies to it, CORR-172-ASTRA-3)
+        if (!biggest || r.size > (biggest.size ?? 0)) biggest = r;
       }
     }
     let over: string | null = null;

@@ -1216,7 +1216,7 @@ export const R: any = {
   stderr: B.stderr,
   importModule: M.importModule,
   builtinModuleNames: M.builtinModuleNames,
-  nativeModuleNames: M.nativeModuleNames,
+  resolvedModuleNames: M.resolvedModuleNames,
   PyComplex: Cx.PyComplex,
   importAs: M.importAs,
   importFromStmt: M.importFromStmt,

@@ -67,6 +67,17 @@ async function runFirst(code) {
   return ev("document.querySelector('.cell .out').textContent");
 }
 const rows = () => ev("[...document.querySelectorAll('#sharelist .sharerow')].sort((a, b) => a.dataset.i - b.dataset.i).map((r) => ({ i: +r.dataset.i, name: r.querySelector('.name').title, checked: r.querySelector('input').checked, why: r.querySelector('.why').textContent, top: r.style.top }))");
+// (a row by name, wherever it is: the list draws only the rows in view, about 20 at a time)
+async function findRow(name) {
+  const h = await ev("document.querySelector('#sharelist').scrollHeight");
+  for (let top = 0; top <= h; top += 40 * 10) {
+    await ev(`document.querySelector('#sharelist').scrollTop = ${top}`);
+    await sleep(60);
+    const r = (await rows()).find((x) => x.name === name);
+    if (r) return r;
+  }
+  return undefined;
+}
 const checkedNames = async () => (await rows()).filter((r) => r.checked).map((r) => r.name);
 const status = () => ev("document.querySelector('#sharestatus').textContent");
 async function openDialog({ wait = true } = {}) {
@@ -107,6 +118,15 @@ try {
   await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
   await ev("document.querySelector('#filemenu [data-f=new]').click()");
   await until("document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value");
+  // (#172 r2's review, PY-172-1: every module a fresh session already has in sys.modules is one the dialog
+  // treats as resolved without sys.path: builtinModules holds them all)
+  {
+    // (only sys imported, so the list is the session's own; printed as Python's repr of a list of str)
+    const fresh = JSON.parse((await runFirst("import sys\nprint(sorted(sys.modules))")).trim().split("\n").pop().replace(/'/g, '"'));
+    const info = await ev("window.sagebrush.kernel.ask({ importInfo: true }, 'python', null)");
+    const b = new Set(info.builtins);
+    ok(fresh.length > 0 && fresh.every((n) => b.has(n)) && b.has("builtins") && b.has("__main__"), `a fresh session's sys.modules (${fresh.join(", ")}) all in builtinModules, builtins and __main__ included`);
+  }
   // the workspace: a helper module that opens a data file, files the code opens, and unrelated ones
   await runFirst([
     "import os",
@@ -302,6 +322,55 @@ try {
     await closeDialog();
   }
 
+  // ---- #172 r2's review: closing mid-upload (board's UI-B1, astra3's CORR-172-ASTRA-4)
+  {
+    await openDialog();
+    await ev("(() => { const t = window.sagebrush.shareTest; t.gate = new Promise((r) => (t.open = r)); t.onRead = () => t.gate; })()");
+    await ev("document.querySelector('#shareupload').click()");
+    await until("document.querySelector('#shareupload').getAttribute('aria-busy') === 'true'");
+    ok(await ev("document.querySelector('#sharelink').disabled"), "Copy link is disabled while uploading");
+    await ev("document.querySelector('#sharelink').onclick()");
+    await sleep(200);
+    ok(await ev("document.querySelector('#sharedlg').open"), "...and its handler, called anyway, doesn't close the dialog");
+    await ev("document.querySelector('#sharelist input').focus()");
+    await p.key("Escape");
+    await sleep(150);
+    await p.key("Escape");
+    await sleep(300);
+    ok(await ev("document.querySelector('#sharedlg').open"), "two Esc presses while uploading: the dialog is open (shown again if the second closed it)");
+    await ev("document.querySelector('#sharedlg').close()");
+    await sleep(200);
+    ok(await ev("document.querySelector('#sharedlg').open"), "a programmatic close while uploading: shown again");
+    const g = await ev("window.sagebrush.share.generation");
+    await ev("document.querySelector('#sharemenu').click()");
+    await sleep(300);
+    ok((await ev("window.sagebrush.share.generation")) === g && (await ev("window.sagebrush.share.busy")), "Share clicked mid-upload: no new open, the upload's own state kept");
+    ok(await ev("[...document.querySelectorAll('#sharelist input')].every((b) => b.disabled)"), "...its rows still disabled");
+    await ev("(() => { const t = window.sagebrush.shareTest; t.onRead = null; t.open(); })()");
+    await until("document.querySelector('#shareresult a')", 60000);
+    ok(await ev("document.querySelector('#sharedlg').open && /^(Shared at|A new version is at)/.test(document.querySelector('#shareresult').textContent)"), "...and the link is shown in the open dialog");
+    ok(await ev("!document.querySelector('#sharelink').disabled"), "Copy link enabled again after");
+    await closeDialog();
+  }
+
+  // ---- #172 r2's review: an early upload that fails never says it was uploaded (board's UI-B3); the
+  // progress line counts what was parsed (UI-B5)
+  {
+    await ev(HOLD);
+    await openDialog({ wait: false });
+    ok(/^Finding the files this notebook uses: \d+ parsed, \d+ checked…$/.test(await status()), `while analyzing: parsed and checked (${await status()})`);
+    await clickRow("c.html");
+    await ev("window.sagebrush.shareTest.onRead = () => Promise.reject(new Error('gone'))");
+    await ev("document.querySelector('#shareupload').click()");
+    await until("/failed/.test(document.querySelector('#shareresult').textContent)", 30000);
+    const st = await status();
+    ok(!/was uploaded/.test(st) && /^Finding the files stopped: nothing was shared/.test(st), `an early upload whose read fails: never "was uploaded" (${st})`);
+    await ev("window.sagebrush.shareTest.onRead = null");
+    await release();
+    await unhold();
+    await closeDialog();
+  }
+
   // ---- reads: opening and selecting read no data file; upload reads exactly the checked ones, once each
   {
     await ev("(() => { const t = window.sagebrush.shareTest; t.reads = []; t.onRead = (p) => { t.reads.push(p); }; })()");
@@ -333,7 +402,9 @@ try {
 
   // ---- a pathological source: the dialog stays responsive, the fail-safe stops the analysis (§3)
   {
-    await runFirst("open('deep.py', 'w').write('x = ' + '(' * 400000 + '1' + ')' * 400000 + '\\n')\nprint('deep')");
+    // (400,000 lines take pyparse seconds, past the 2 s silence fail-safe; a deeply nested source would
+    // fail at once, "too many nested parentheses", and be a parse note, not a stop: #172 r2's review)
+    await runFirst("open('deep.py', 'w').write('x = 1\\n' * 400000)\nprint('deep')");
     await setFirst(CODE + "\nimport deep");
     await ev("(() => { const t = window.sagebrush.shareTest; t.failsafe = { silenceMs: 2000, sourceBytes: 1e9 }; t.terminated = 0; const real = () => new Worker('/sagebrush-share-deps.js'); t.createWorker = () => { const w = real(); const o = { onmessage: null, postMessage: (m) => w.postMessage(m), terminate: () => { t.terminated++; w.terminate(); } }; w.onmessage = (e) => o.onmessage?.(e); return o; }; })()");
     await openDialog({ wait: false });
@@ -431,6 +502,129 @@ try {
     ok(/1 name in the code couldn't be followed/.test(await status()), `...while a module found nowhere is: ${await status()}`);
     await closeDialog();
     await setFirst(CODE);
+  }
+
+  // ---- #172 r2's review: python's PY-172-1, a workspace file named like a module the runtime seeds isn't pre-checked
+  {
+    await runFirst("open('builtins.py', 'w').write('X = 1\\n')\nopen('__main__.py', 'w').write('X = 1\\n')\nprint('seeded')");
+    await setFirst("import builtins\nimport __main__");
+    await openDialog();
+    const find = async (name) => {
+      const h = await ev("document.querySelector('#sharelist').scrollHeight");
+      for (let top = 0; top <= h; top += 40 * 10) {
+        await ev(`document.querySelector('#sharelist').scrollTop = ${top}`);
+        await sleep(60);
+        const r = (await rows()).find((x) => x.name === name);
+        if (r) return r;
+      }
+      return undefined;
+    };
+    const b = await find("builtins.py"), m = await find("__main__.py");
+    ok(b && !b.checked && m && !m.checked, `import builtins / import __main__ with workspace builtins.py and __main__.py: neither pre-checked (${JSON.stringify([b?.checked, m?.checked])})`);
+    await closeDialog();
+  }
+
+  // ---- #172 r2's review: one cell that can't be parsed doesn't stop the analysis (board's UI-B2, UI-B5)
+  {
+    await setFirst("x = (");
+    await ev("window.sagebrush.notebook.addCell('y = open(\"a.csv\").read()')");
+    await openDialog();
+    const st = await status();
+    const a = await findRow("a.csv");
+    const k = await ev("window.sagebrush.notebook.snapshot().cells.length"); // (the added cell is the last)
+    const nth = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th");
+    ok(a?.checked && a.why.includes(`opened in the ${nth(k)} cell`), `the parseable cell's a.csv is pre-checked (${a?.why})`);
+    ok(/^Checked \d+ files? this notebook uses/.test(st) && /The 1st cell couldn't be parsed, so the files it names aren't pre-checked\./.test(st), `done, with the parse note: ${st}`);
+    ok(!(await rows()).some((r) => r.why === "not analyzed") && !/Stopped/.test(st), "...not 'Stopped', and no row says 'not analyzed'");
+    ok(!/  /.test(st), "no double space in the status line");
+    await closeDialog();
+    await setFirst(CODE);
+  }
+
+  // ---- #172 r2's review: an interpreter that doesn't answer (astra3's CORR-172-ASTRA-1, board's UI-B4); a worker
+  // that can't start (daybreak3's CORR-SHAREB-3)
+  {
+    await runFirst("import os\nos.makedirs('nb', exist_ok=True)\nopen('nb/a.csv', 'w').write('x\\n')\nprint('decoy')");
+    await setFirst("y = open('a.csv').read()");
+    await ev("window.sagebrush.shareTest.importInfo = async () => null");
+    await ev("(() => { const t = window.sagebrush.shareTest; t.reads = []; t.onRead = (p) => { t.reads.push(p); }; })()");
+    await ev("document.querySelector('#sharedlg').open && document.querySelector('#sharedlg').close()");
+    await ev("document.querySelector('#sharemenu').click()");
+    await until("/interpreter didn't answer/.test(document.querySelector('#sharestatus').textContent)", 30000);
+    const by = { "a.csv": await findRow("a.csv"), "nb/a.csv": await findRow("nb/a.csv") };
+    ok(by["a.csv"] && by["nb/a.csv"] && !by["a.csv"].checked && !by["nb/a.csv"].checked, `the interpreter didn't answer, so its cwd is unknown: neither a.csv nor nb/a.csv is guessed (${JSON.stringify([by["a.csv"]?.checked, by["nb/a.csv"]?.checked])})`);
+    ok(/may be busy running a cell/.test(await status()) && !/^Stopped/.test(await status()), `...said honestly: ${await status()}`);
+    ok(!(await ev("document.querySelector('#shareupload').disabled")), "...and Upload works");
+    await closeDialog();
+    await ev("(() => { const t = window.sagebrush.shareTest; delete t.importInfo; t.onRead = null; t.createWorker = () => { throw new Error('blocked'); }; })()");
+    await openDialog();
+    ok(/^Stopped finding files/.test(await status()) && !(await ev("window.sagebrush.share.analyzing")), `a worker that can't be constructed: stopped, not stuck analyzing (${await status()})`);
+    ok(!(await ev("document.querySelector('#shareupload').disabled")) && (await rows()).some((r) => r.why === "not analyzed"), "...Upload usable, unchecked rows 'not analyzed'");
+    await ev("delete window.sagebrush.shareTest.createWorker");
+    await closeDialog();
+  }
+
+  // ---- #172 r2's review: the notebook has the per-file bound too, checked again at Upload (astra3's CORR-172-ASTRA-3)
+  {
+    await setFirst(CODE);
+    await openDialog();
+    await setFirst("x = '" + "a".repeat(2100000) + "'");
+    const before = (await ev("(async () => (await fetch('/api/share/mine')).json())()")).collections.length;
+    await ev("document.querySelector('#shareupload').click()");
+    await until("/larger than your plan's largest file/.test(document.querySelector('#shareresult').textContent)", 10000);
+    const after = (await ev("(async () => (await fetch('/api/share/mine')).json())()")).collections.length;
+    ok(after === before && !(await ev("window.sagebrush.share.busy")), `a notebook grown past the largest file since Share opened: Upload refuses it, nothing uploaded (${await ev("document.querySelector('#shareresult').textContent")})`);
+    await closeDialog();
+    await openDialog();
+    ok(/Untitled\.ipynb is larger than your plan's largest file/.test(await ev("document.querySelector('#sharesummary').textContent")) && (await ev("document.querySelector('#shareupload').disabled")), `opened with it: the summary says so and Upload is disabled (${await ev("document.querySelector('#sharesummary').textContent")})`);
+    await closeDialog();
+    await setFirst(CODE);
+  }
+
+  // ---- #172 r2's review: one open, and its upload, belong to one notebook (astra3's CORR-172-ASTRA-2)
+  {
+    // the identity changes between open and Upload: refused, nothing uploaded
+    await openDialog();
+    const n0 = (await ev("(async () => (await fetch('/api/share/mine')).json())()")).collections.length;
+    await ev("window.sagebrush.shareTest.notebookId = () => 'another notebook'");
+    await ev("document.querySelector('#shareupload').click()");
+    await sleep(300);
+    const n1 = (await ev("(async () => (await fetch('/api/share/mine')).json())()")).collections.length;
+    ok(n1 === n0 && /The notebook changed since Share was opened/.test(await ev("document.querySelector('#shareresult').textContent")), "the notebook changed since the dialog opened: Upload refused, nothing uploaded");
+    await ev("delete window.sagebrush.shareTest.notebookId");
+    await closeDialog();
+    // a held analysis whose notebook changed: its results are dropped
+    await ev(HOLD);
+    await openDialog({ wait: false });
+    await until("window.sagebrush.shareTest.held.length > 0");
+    await ev("window.sagebrush.shareTest.notebookId = () => 'another notebook'");
+    await release();
+    await sleep(800);
+    ok(!(await rows()).some((r) => r.name === "a.csv" && r.checked), "a held analysis released after the notebook changed: nothing pre-checked from it");
+    await ev("delete window.sagebrush.shareTest.notebookId");
+    await unhold();
+    await closeDialog();
+    // a real switch of notebooks while uploading: the switch waits; the collection is the first notebook's
+    const first = await ev("localStorage.getItem('sagebrush-current')");
+    await openDialog();
+    await ev("(() => { const t = window.sagebrush.shareTest; t.gate = new Promise((r) => (t.open = r)); t.onRead = () => t.gate; })()");
+    ok(!!(await findRow("a.csv")), "(a.csv found in the list)");
+    if (!(await findRow("a.csv"))?.checked) await clickRow("a.csv");
+    ok((await findRow("a.csv"))?.checked, "(a.csv checked, so the upload reads a file and waits at the gate)");
+    await ev("document.querySelector('#shareupload').click()");
+    await until("window.sagebrush.share.busy");
+    await ev("document.querySelector('#filemenu [data-f=new]').click()");
+    await sleep(800);
+    ok((await ev("localStorage.getItem('sagebrush-current')")) === first && (await ev("window.sagebrush.share.busy")), "New notebook while uploading: the switch waits for the upload");
+    await ev("(() => { const t = window.sagebrush.shareTest; t.onRead = null; t.open(); })()");
+    await until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(first)}`, 60000);
+    const second = await ev("localStorage.getItem('sagebrush-current')");
+    ok(!(await ev("window.sagebrush.notebook.snapshot().share_id")) && !(await ev("document.querySelector('#sharedlg').open")), "...then the new notebook opens, with no share_id, and the dialog closed");
+    await ev(`window.sagebrush.open(${JSON.stringify(first)})`);
+    await until(`localStorage.getItem('sagebrush-current') === ${JSON.stringify(first)}`, 30000);
+    const sid = await ev("window.sagebrush.notebook.snapshot().share_id");
+    const mine = (await ev("(async () => (await fetch('/api/share/mine')).json())()")).collections.map((c) => c.id);
+    ok(!!sid && mine.includes(sid) && second !== first, `...and the collection's id is on the notebook it was uploaded from (${sid})`);
   }
 } catch (e) {
   failures++;

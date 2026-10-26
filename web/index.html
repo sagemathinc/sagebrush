@@ -1351,7 +1351,10 @@ class TextFileStore {
 
 // Open a document in the notebook, from a store (and remember it for next time).
 let current = { id: null, kind: "browser" };
+// (before the notebook changes: the Share dialog's upload ends first, and its open is closed, CORR-172-ASTRA-2)
+const beforeSwitch = [];
 async function open(store, id, kind = "browser") {
+  for (const f of beforeSwitch) await f();
   await nb.mayLeave(); // (LIMIT-900-2)
   nb.detach();
   ttShow(false);
@@ -1404,7 +1407,7 @@ async function bindDiskFile(path, doc = null) {
   const { dir, sep, name } = splitPath(path);
   diskFile = { path, dir, sep, name };
   const store = new TextFileStore(name, () => TAURI.fs.readTextFile(path), (text) => TAURI.fs.writeTextFile(path, text), name);
-  if (doc) { await nb.mayLeave(); nb.detach(); current = { id: "file:" + path, kind: "file" }; await store.save({ ...nb.snapshot(), name: name.replace(/\.ipynb$/i, "") }); }
+  if (doc) { for (const f of beforeSwitch) await f(); await nb.mayLeave(); nb.detach(); current = { id: "file:" + path, kind: "file" }; await store.save({ ...nb.snapshot(), name: name.replace(/\.ipynb$/i, "") }); }
   await open(store, "file:" + path, "file");
   try { await TAURI.window.getCurrentWindow().setTitle(name + " — Sagebrush"); } catch {}
 }
@@ -1463,8 +1466,10 @@ const shareDlg = $("#sharedlg");
 const shareReady = (LOCAL ? Promise.resolve(sharing) : shareStatus()).then((s) => {
   sharing = s;
 });
-$("#sharelink").onclick = async () => { await copyShareLink(); shareDlg.close(); };
+$("#sharelink").onclick = async () => { if (shareDialog.busy) return; await copyShareLink(); shareDlg.close(); };
 async function openShare() {
+  // (while uploading, Share only shows the dialog again, with the upload's own state: UI-B1)
+  if (shareDialog.busy) return void shareDialog.open();
   await shareReady;
   if (!LOCAL) sharing = await shareStatus();
   const me = sharing.enabled ? sharing.me : null;
@@ -1487,7 +1492,7 @@ async function storedFileMeta() {
   return keys.map((k) => ({ path: "/" + String(k).replace(/^\/+/, "") }));
 }
 // (tests: the Share dialog's seams, read at the moment they're used: a stand-in worker, shorter
-// fail-safes, and a counter of the files the dialog reads)
+// fail-safes, a counter of the files the dialog reads, the interpreter's answer and the notebook's identity)
 const shareTest = { workspace: () => wsNow() };
 // One file's bytes, as it is now; if it is no longer the file that was listed (another fid), it changed
 async function storedFileBytes(f) {
@@ -1509,9 +1514,10 @@ async function storedFileBytes(f) {
 const shareDialog = createShareDialog({
   dlg: shareDlg,
   notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
+  notebookId: () => shareTest.notebookId?.() ?? String(current.id),
   listFiles: () => shareTest.listFiles?.() ?? storedFileMeta(),
   readFile: storedFileBytes,
-  readText: async (path) => new TextDecoder().decode(await storedFileBytes({ path })),
+  readBytes: (path) => storedFileBytes({ path }),
   cells: () => nb.snapshot().cells.map((c, index) => ({ index, kind: c.type === "markdown" ? "markdown" : ["sage", "magma", "matlab"].includes(nb.mode) ? nb.mode : "python", source: String(c.code ?? "") })),
   // (what each cell's last run read: the reactive notebook's own record)
   fileReads: () => {
@@ -1521,21 +1527,29 @@ const shareDialog = createShareDialog({
   },
   // (where this notebook's interpreter resolves imports: its own answer, src/notebook-session.ts)
   importInfo: async () => {
+    if (shareTest.importInfo) return shareTest.importInfo();
     if (!kernel) return null;
     const m = await Promise.race([kernel.ask({ importInfo: true }, nb.mode, null), new Promise((r) => setTimeout(() => r(null), 5000))]);
-    if (!m || !Array.isArray(m.path)) return null;
-    return { cwd: String(m.cwd ?? "/"), importPath: m.path.map((dir) => ({ dir: String(dir), workspace: !String(dir).startsWith("/$pyjs") })), builtinModules: m.builtins ?? [], externalModules: m.lib ?? [], packageModules: m.packages ?? [] };
+    // (no answer, or no working directory: null, and nothing in the code is resolved, CORR-172-ASTRA-1)
+    if (!m || !Array.isArray(m.path) || typeof m.cwd !== "string") return null;
+    return { cwd: m.cwd, importPath: m.path.map((dir) => ({ dir: String(dir), workspace: !String(dir).startsWith("/$pyjs") })), builtinModules: m.builtins ?? [], externalModules: m.lib ?? [], packageModules: m.packages ?? [] };
   },
   createWorker: () => shareTest.createWorker?.() ?? new Worker("/sagebrush-share-deps.js"),
   failsafe: () => shareTest.failsafe,
   bounds: () => ({ maxFiles: 10000, maxFileBytes: sharing.me?.limits?.max_file_bytes, bytesLeft: sharing.me?.limits ? sharing.me.limits.storage_bytes - sharing.me.usage : undefined }),
   upload: async ({ files, title, license }, progress) => {
+    const origin = current.id;
     const prev = nb.snapshot().share_id ?? null;
     const r = await uploadCollection({ id: prev, title: title.trim() || docName(), license, files }, progress);
-    nb.setMeta({ share_id: r.id });
+    // (its collection is its notebook's: never written onto another one attached meanwhile, CORR-172-ASTRA-2)
+    if (current.id === origin) nb.setMeta({ share_id: r.id });
     return { url: r.url, again: !!prev };
   },
   fmtSize: (n) => fmtSize(n),
+});
+beforeSwitch.push(async () => {
+  await shareDialog.idle();
+  shareDialog.invalidate();
 });
 
 async function fromLink(hash) {

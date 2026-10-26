@@ -2,8 +2,8 @@
 // (file-deps.ts) off the page's thread, so that a long parse never blocks the
 // dialog, and the page can stop it at any moment with terminate().  It asks
 // the page for one .py file at a time ({need: path}) and is given its text
-// ({file: {path, text}}), so nothing is cloned; it reports each finding as it
-// goes.  Built as its own chunk (web/build.ts), loaded only when Share opens.
+// ({file: {path, bytes}}, the buffer transferred, decoded here), so nothing is
+// cloned; it reports each finding as it goes.  Built as its own chunk (web/build.ts), loaded only when Share opens.
 import { fileDeps } from "./file-deps";
 
 const waiting = new Map<string, { ok: (t: string) => void; no: (e: Error) => void }>();
@@ -13,7 +13,7 @@ self.onmessage = (ev: MessageEvent) => {
   if (m?.file) {
     const w = waiting.get(m.file.path);
     waiting.delete(m.file.path);
-    if (typeof m.file.text === "string") w?.ok(m.file.text);
+    if (m.file.bytes instanceof ArrayBuffer) w?.ok(new TextDecoder().decode(m.file.bytes));
     else w?.no(new Error("unreadable"));
     return;
   }

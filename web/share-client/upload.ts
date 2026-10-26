@@ -50,8 +50,12 @@ export const UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
  * Upload files as a new version of a collection (a new collection if `id`
  * is null).  Each file is read once, in order; a batch of at most
  * `batchBytes` (or one larger file) is hashed, the server says which of it
- * it is missing, those are uploaded, and the batch's bytes are dropped, so
- * at most max(batchBytes, the largest file) is held at a time.  The version
+ * it is missing, those are uploaded, and the batch's bytes are dropped.  The
+ * batch is sent *before* the next file is read whenever that file, by its
+ * listed size, would take the batch over `batchBytes`, or its size isn't
+ * known (#172 r2's review, LIMIT-SHAREB-1): so at most max(batchBytes, the
+ * largest file) is held at a time, by listed sizes (a file that grew since it
+ * was listed counts as read).  The version
  * is created only after every file was read and uploaded: a file that can't
  * be read stops the upload with no version.  `progress(done, total)` counts
  * bytes read (total: the files' known sizes).
@@ -83,6 +87,7 @@ export async function uploadCollection(
     held = 0;
   };
   for (const f of o.files) {
+    if (held && (f.size === undefined || held + f.size > limit)) await flush();
     const data = await f.read();
     const sha256 = hex(await crypto.subtle.digest("SHA-256", data as BufferSource));
     manifest.push({ path: f.path, sha256, size: data.length });

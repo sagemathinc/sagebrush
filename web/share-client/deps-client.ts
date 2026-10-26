@@ -8,12 +8,17 @@
 //     single parse), or more than sourceBytes of source fed.  A fail-safe
 //     stops the analysis only: nothing is refused, every box still works.
 // No fixed caps otherwise (@sagebrush's decision on python's flag).
+// A .py file goes to the worker as bytes, transferred, never cloned: the page
+// reads it, copies it into a buffer of its own (the workspace's may be cached),
+// and moves that buffer; sourceBytes counts those bytes (#172 r2's review,
+// LIMIT-SHAREB-2).  A worker that can't even be started ends the run as failed
+// (CORR-SHAREB-3).
 import type { FileDepsInput, Reason, Unfollowed } from "./file-deps";
 
 export const FAILSAFE = { silenceMs: 30_000, sourceBytes: 256 * 1024 * 1024 };
 
 export interface WorkerLike {
-  postMessage(m: unknown): void;
+  postMessage(m: unknown, transfer?: Transferable[]): void;
   terminate(): void;
   onmessage: ((ev: { data: any }) => void) | null;
 }
@@ -34,7 +39,7 @@ export interface DepsHandlers {
 export function startDeps(o: {
   gen: number;
   input: DepsInput;
-  readText: (path: string) => Promise<string>;
+  readBytes: (path: string) => Promise<Uint8Array>;
   createWorker: () => WorkerLike;
   handlers: DepsHandlers;
   failsafe?: { silenceMs: number; sourceBytes: number };
@@ -44,7 +49,19 @@ export function startDeps(o: {
   const fs = o.failsafe ?? FAILSAFE;
   const setT = o.setTimer ?? ((f, ms) => setTimeout(f, ms));
   const clearT = o.clearTimer ?? ((t) => clearTimeout(t as any));
-  const w = o.createWorker();
+  let w: WorkerLike;
+  try {
+    w = o.createWorker();
+  } catch {
+    let stopped = false;
+    queueMicrotask(() => stopped || o.handlers.onDone({ complete: false, stopped: "failed" }));
+    return {
+      stop: () => void (stopped = true),
+      get running() {
+        return false;
+      },
+    };
+  }
   let running = true, fed = 0, timer: unknown = null;
   const end = (r: { complete: boolean; stopped?: "failsafe" | "failed" }) => {
     if (!running) return;
@@ -67,19 +84,24 @@ export function startDeps(o: {
     else if (m.progress !== undefined) o.handlers.onProgress(m.progress);
     else if (m.need !== undefined) {
       const path = String(m.need);
-      o.readText(path).then(
-        (text) => {
+      o.readBytes(path).then(
+        (data) => {
           if (!running) return;
-          fed += text.length;
+          fed += data.byteLength;
           if (fed > fs.sourceBytes) return end({ complete: false, stopped: "failsafe" });
-          w.postMessage({ file: { path, text } });
+          const bytes = data.slice().buffer; // (its own buffer, moved to the worker)
+          w.postMessage({ file: { path, bytes } }, [bytes]);
         },
-        () => running && w.postMessage({ file: { path, text: null } }),
+        () => running && w.postMessage({ file: { path, bytes: null } }),
       );
     } else if (m.done) end(m.failed ? { complete: false, stopped: "failed" } : { complete: !!m.complete });
   };
   arm();
-  w.postMessage({ start: { gen: o.gen, ...o.input } });
+  try {
+    w.postMessage({ start: { gen: o.gen, ...o.input } });
+  } catch {
+    end({ complete: false, stopped: "failed" });
+  }
   return {
     stop: () => {
       if (!running) return;
