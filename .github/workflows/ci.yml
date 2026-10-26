@@ -203,6 +203,9 @@ jobs:
           node scripts/gen-viewer3d.mjs --check
           node cdn/build.mjs --check
           node scripts/board-format-schema.mjs --check
+          # (the architecture article: its links pinned and present at their commit, its pages current, its board on the built site)
+          node scripts/architecture-article.mjs --check
+          node scripts/test-architecture-article.mjs --built
       # The merge's size record, for size-gate (plan-growth-budget-r5 §1.1,
       # §1.5): measured from the build above; it builds nothing
       - name: the size record
