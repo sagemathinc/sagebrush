@@ -19,9 +19,11 @@ export function procTable() {
 // a session's processes: its group and every descendant.  The prompt's launcher runs under
 // `script` in a session (and group) of its own, so the group alone misses it, and killing
 // `script` orphans it, still computing (VM1, Oct 24): the tree is collected before any kill.
-// known: pid -> start, sampled while the session ran (a process orphaned before the kill)
-export function sessionTree(root, known = new Map()) {
-  const t = procTable(), pids = new Set([root]);
+// known: pid -> start, sampled while the session ran (a process orphaned before the kill);
+// t: the process table to read (a caller that looks the pids up afterwards passes its own, so
+// that a process started between two snapshots is never in the tree but missing from the table)
+export function sessionTree(root, known = new Map(), t = procTable()) {
+  const pids = new Set([root]);
   for (const [q, st] of known) if (t.get(q)?.start === st) pids.add(q);
   for (const [q, x] of t) if (x.pgid === root) pids.add(q);
   for (let grew = true; grew; ) {
