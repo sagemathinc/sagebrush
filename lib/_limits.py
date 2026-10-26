@@ -82,10 +82,15 @@ TABLE = {
     # in the units of _sage_padic_lseries._kd_cost, about 25 us each in the
     # CLI; 0 refuses every call (cliff audit rank 14, plan-kedlaya-optin r6)
     "padic.kedlaya_work": (UNLIMITED, 0, 2 ** 63 - 1),
+    # the work of a MATLAB sparse solve (ordering, factorization, band and
+    # triangular solves), in elementary steps (_matlab_sparse, plan-matlab-
+    # nocliffs r6 section 2.3); the finite value is the former MAX_LU_WORK
+    "matlab.lu_work": (UNLIMITED, 10 ** 5, 2 ** 62),
 }
 # the defaults before plan-c0 (a policy's finite values, and the tests')
 FINITE = {"ff.conway_work": 653528895, "ff.embed_max": 2 ** 20, "ff.root_bits": 1024, "ff.work": 10 ** 7,
-          "nf.certify_index_max": 10 ** 6, "nf.certify_norm_max": 10 ** 6, "nf.relation_rounds": 60, "padic.kedlaya_work": 2 ** 20, "poly.work": 2 ** 33}
+          "nf.certify_index_max": 10 ** 6, "nf.certify_norm_max": 10 ** 6, "nf.relation_rounds": 60, "padic.kedlaya_work": 2 ** 20, "poly.work": 2 ** 33,
+          "matlab.lu_work": 2 ** 24}
 MAX_BYTES = 4096   # the serialized text, in UTF-8 bytes
 MAX_ENTRIES = 16
 MAX_KEY = 64       # characters of a key (CPython mappings)
