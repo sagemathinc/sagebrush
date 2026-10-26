@@ -1,1 +1,0 @@
-{"v":1, "reason":"#94 Sage mode: show(obj, *more, **options) typesets several objects together (lib/sage_all.py)", "bytes":{"cli/lib.gen.js": 187, "cli/pyjs.cjs": 455, "engine/lib/sage.pre": 169, "engine/lib/sage.src": 187}}

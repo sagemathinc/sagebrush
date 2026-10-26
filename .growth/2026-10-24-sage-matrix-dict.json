@@ -1,1 +1,0 @@
-{"v":1, "reason":"#107 Sage mode: matrix() from a dict of positions {(i, j): x}, as Sage (lib/_sage_matrix.py; was a wrong answer)", "bytes":{"cli/lib.gen.js": 4100, "cli/pyjs.cjs": 4044, "engine/lib/sage.pre": 18908, "engine/lib/sage.src": 4100}}

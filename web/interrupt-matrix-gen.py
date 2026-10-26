@@ -18,7 +18,7 @@ CASES = [
     dict(id="E2", transport="engineCall:factor_integer", owner="number theory", mode="sage", s0=22, smin=12, smax=44,
          grow=dict(kind="log", c=0.18), setup="n = next_prime(10**S) * next_prime(3 * 10**S)", target="_r = factor(n)",
          probe="assert len(factor(2**64 + 1)) == 2"),
-    dict(id="E3a", transport="engineCall:mat_rank", owner="linear algebra (ff matrices)", mode="sage", s0=450, smin=200, smax=600,
+    dict(id="E3a", transport="engineCall:mat_rank", owner="linear algebra (ff matrices)", mode="sage", s0=600, smin=200, smax=1024,
          grow=dict(kind="scale", p=3), setup="M = random_matrix(GF(32003), S)", target="_r = M.rank()",
          probe="assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1"),
     dict(id="E6a", transport="mpCall:groebner", owner="multivariate (sage)", mode="sage", s0=6, smin=4, smax=9,

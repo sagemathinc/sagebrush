@@ -82,7 +82,7 @@ pub(crate) fn factor<'b>(b: &'b Budget, f: &[BigInt]) -> FResult<Option<Vec<(Hel
 
 /// A failed verification: an internal error, refused (never a result).
 fn failed(b: &Budget, what: &'static str) -> FactorLimit {
-    b.refuse(what, 1, 0)
+    b.internal(what)
 }
 
 // ------------------------------------------------------------------ test faults

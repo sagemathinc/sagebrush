@@ -399,6 +399,26 @@
   "class": "none",
   "owner": "estimates and progress (encoding)"
  },
+ "engine/ledger/src/growth.rs :: reserve_growth :: need: w.unwrap_or(u64::MAX), #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/lib.rs :: drop :: pub(crate) static FAKE_COMMITTED: AtomicU64 = AtomicU64::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/lib.rs :: fake_committed :: c if c == u64::MAX => None, #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/lib.rs :: fake_grow :: assert_ne!(c, u64::MAX, \"no fake pages\"); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/lib.rs :: set_fake_committed :: FAKE_COMMITTED.store(bytes.unwrap_or(u64::MAX), Relaxed); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
  "engine/modsym/src/linalg.rs :: sparse_echelon :: pub const MAX_HECKE_PRIME: u64 = 1 << 30; #0": {
   "class": "3",
   "owner": "modular symbols",
@@ -627,6 +647,10 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "engine/poly/src/budget.rs :: drop :: b: &'a Budget, #1": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/budget.rs :: drop :: impl Budget { #0": {
   "class": "2+3",
   "owner": "polynomial factorization",
@@ -727,6 +751,18 @@
   "class": "3",
   "owner": "polynomial factorization"
  },
+ "engine/poly/src/budget.rs :: internal :: FactorLimit { kind: Kind::Internal, phase: self.phase.get(), what, need: 0, remaining: 0, memory_limit: self.limits.memory, memory_source: self.memory_source } #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/budget.rs :: internal :: pub fn internal(&self, what: &'static str) -> FactorLimit { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/budget.rs :: name :: Resource, #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/budget.rs :: name :: pub memory_limit: u64, #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -761,9 +797,25 @@
   "owner": "polynomial factorization",
   "row": "inv-34"
  },
- "engine/poly/src/budget.rs :: refuse :: FactorLimit { phase: self.phase.get(), what, need, remaining, memory_limit: self.limits.memory, memory_source: self.memory_source } #0": {
+ "engine/poly/src/budget.rs :: refuse :: FactorLimit { kind: Kind::Resource, phase: self.phase.get(), what, need, remaining, memory_limit: self.limits.memory, memory_source: self.memory_source } #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: reserve :: let limit = self.limits.memory; #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/budget.rs :: reserve :: let limit = self.memory_override.get().unwrap_or(limit); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/budget.rs :: reserve :: let room = limit.saturating_sub(live); #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/budget.rs :: set_memory_limit :: pub fn set_memory_limit(&self, m: u64) { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/budget.rs :: unlimited :: pub fn unlimited() -> Budget { #0": {
   "class": "2+3",
@@ -780,7 +832,15 @@
   "owner": "polynomial factorization",
   "row": "inv-34"
  },
- "engine/poly/src/lib.rs ::  :: pub use budget::{with_default_limits, Budget, FactorLimit, Limits, MemorySource, Phase}; #0": {
+ "engine/poly/src/budget.rs :: work_and_memory_are_aggregate :: assert_eq!(e.kind, Kind::Resource); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/budget.rs :: work_and_memory_are_aggregate :: let b2 = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/lib.rs ::  :: pub use budget::{with_default_limits, Budget, FactorLimit, Kind, Limits, MemorySource, Phase, INTERNAL_PREFIX}; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
@@ -832,6 +892,10 @@
   "class": "none",
   "owner": "polynomial factorization"
  },
+ "engine/poly/src/tests.rs :: the_global_ledger_net_holds :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/vanhoeij.rs ::  :: pub const MAX_COLS: usize = 32; #0": {
   "class": "3",
   "owner": "polynomial factorization",
@@ -847,20 +911,71 @@
   "owner": "polynomial factorization",
   "row": "inv-35"
  },
+ "engine/poly/src/vanhoeij.rs ::  :: use crate::budget::{big_bytes, limbs, mul_work, poly_bytes, tag, words_bytes, Budget, FResult, Phase, Reservation}; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: bounds_bytes :: let ebits = (t.unsigned_abs() + tr.unsigned_abs()).checked_mul(n as u64 + 1)?.checked_add(maxbits(g) + clog2(n as u64 + 2) + 2 * clog2(n as u64 + 2) + 2)?; #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: cld_bounds :: fn cld_bounds<'b>(b: &'b Budget, g: &[BigInt]) -> FResult<(Vec<BigInt>, Reservation<'b>)> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: cld_columns :: use crate::budget::Limits; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: cld_columns_bytes :: let nmax = low_n.max(high_n) as u64; #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: cld_columns_bytes :: poly_bytes((4 * (r as u64 + 1) + 2) * nmax.max(1) + (r * want.len()) as u64, 2 * pabits + 64) #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: Vec::with_capacity(MAX_COLS) #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: assert!(dets.iter().all(|x| x.bits() <= cap), \"a Gram determinant above cap bits\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/vanhoeij.rs :: lattice :: fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> FResult<Option<Vec<Held<'b>>>> { #0": {
   "class": "3",
   "owner": "polynomial factorization",
   "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: handoff!(whole, level_bytes, held_want, lll::lattice_bytes(d, w, cap).unwrap()); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: held.shrink(rows_bytes(d, w, cap).unwrap_or(0)); #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: held_want = lll::lattice_bytes(d, w, cap).unwrap(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: lattice :: if cols.len() >= MAX_COLS { #0": {
   "class": "3",
   "owner": "polynomial factorization",
   "row": "inv-35"
  },
- "engine/poly/src/vanhoeij.rs :: lattice :: let _modfs = b.reserve(crate::budget::words_bytes(2 * (n as u64 + r as u64 + 1)))?; #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+ "engine/poly/src/vanhoeij.rs :: lattice :: let (entry, modfs_b, bounds_b, cols_b) = (b.live(), words_bytes(2 * (n as u64 + r as u64 + 1)).unwrap(), bounds_bytes(g).unwrap(), words_bytes(MAX_COLS as u64).unwrap()); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: let (rows_b, dets_b) = (rows_bytes(d, w, cap).unwrap(), big_bytes(cap).unwrap() * (d as u64 + 1)); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: let _cols = b.reserve_as(\"cols\", words_bytes(MAX_COLS as u64))?; #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: lattice :: let _w = b.reserve(crate::budget::words_bytes((4 * (clog2(r as u64) + 1) + 8) * (n as u64 + 1)))?; #0": {
   "class": "3",
@@ -871,6 +986,14 @@
   "class": "3",
   "owner": "polynomial factorization",
   "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: let dets_bytes = big_bytes(cap).and_then(|x| x.checked_mul(d as u64 + 1)); #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: let kept = b.reserve(rows_bytes(d, w, cap).zip(dets_bytes).and_then(|(x, y)| x.checked_add(y)))?; #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: lattice :: while want.len() < COLS_PER_PASS && cols.len() + want.len() < MAX_COLS && (used_low + used_high) < n { #0": {
   "class": "3",
@@ -887,7 +1010,7 @@
   "owner": "polynomial factorization",
   "row": "inv-35"
  },
- "engine/poly/src/vanhoeij.rs :: recombine :: if rest.len() <= ZASSENHAUS_MAX || rest.len() > MAX_R || g[0].is_zero() { #0": {
+ "engine/poly/src/vanhoeij.rs :: recombine :: if rest.len() <= ZASSENHAUS_MAX || rest.len() > MAX_R { #0": {
   "class": "3",
   "owner": "polynomial factorization",
   "row": "inv-35"
@@ -896,6 +1019,54 @@
   "class": "3",
   "owner": "polynomial factorization",
   "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: s6_lattice :: assert!(lifted.len() > ZASSENHAUS_MAX); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: s6_lattice :: b.set_memory_limit(limit.unwrap_or(1 << 30)); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: s6_lattice :: fn s6_lattice(b: &Budget, limit: Option<u64>) -> (Vec<BigInt>, FResult<Option<usize>>, crate::alloc_spy::Report) { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: s6_tight_memory :: assert_eq!((e.what, e.kind, e.phase), (\"memory\", crate::Kind::Resource, Phase::Lattice), \"{e}\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: s6_tight_memory :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: s6_tight_memory :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #1": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: s6_tight_memory :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #2": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_ledger_holds_on_s6 :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_size_tags_hold_on_s6 :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: x_dividing_the_residual_is_an_internal_error :: assert!(m.ends_with(\"please report it; not factored\") && !m.contains(\"resource limit\"), \"{}\", m); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: x_dividing_the_residual_is_an_internal_error :: let (_, fs) = crate::try_factor_with(&x_s4(), &Budget::default()).unwrap(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: x_dividing_the_residual_is_an_internal_error :: let e = fault::with(fault::SKIP_PREPASS, || crate::try_factor_with(&x_s4(), &Budget::default())).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/tests/memory_share.rs ::  :: use sagebrush_poly::{try_factor, try_factor_with, with_default_limits, Budget, Limits, MemorySource}; #0": {
   "class": "none",
@@ -1108,6 +1279,42 @@
   "class": "3",
   "owner": "polynomial factorization"
  },
+ "engine/web/src/lib.rs :: host_map_room :: h.reserve_exact((new - cap) as usize); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/web/src/lib.rs :: host_map_room :: let cap = h.capacity() as u64; #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/web/src/lib.rs :: host_map_room :: let new = (cap * 2).max(4); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/web/src/lib.rs :: internal_factoring_errors_are_flagged :: assert!(r[\"error\"].as_str().unwrap().contains(\"resource limit exceeded\") && r.get(\"internal\").is_none(), \"{}\", r); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/web/src/lib.rs :: keeping_internal :: factor: &(dyn Fn(&[BigInt]) -> Result<Factored, sagebrush_poly::FactorLimit> + Sync), #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/web/src/lib.rs :: newspace_keeps_an_internal_factor_error :: Err(sagebrush_poly::Budget::unlimited().internal(\"an injected invariant\")) #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/web/src/lib.rs :: newspace_keeps_an_internal_factor_error :: Err(sagebrush_poly::Budget::unlimited().refuse(\"work\", 2, 1)) #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/web/src/lib.rs :: newspace_keeps_an_internal_factor_error :: let internal = |_: &[BigInt]| -> Result<super::Factored, sagebrush_poly::FactorLimit> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/web/src/lib.rs :: newspace_keeps_an_internal_factor_error :: let refusing = |_: &[BigInt]| -> Result<super::Factored, sagebrush_poly::FactorLimit> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/web/src/lib.rs :: nmod_square :: if n > NMOD_MAX_N { #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
@@ -1167,27 +1374,22 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
- "engine/web/src/nmod_ops.rs :: add :: pub const ECH_MAX_ENTRIES: usize = 400 * 401; #0": {
-  "class": "1+3",
-  "owner": "engine web + finite-field matrices",
-  "row": "inv-7"
- },
  "engine/web/src/nmod_ops.rs :: add :: pub const ECH_MAX_REQUEST: usize = add(ECH_MAX_TEXT, FIELDS); #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
- "engine/web/src/nmod_ops.rs :: add :: pub const ECH_MAX_TEXT: usize = mul(ENTRY_TEXT, ECH_MAX_ENTRIES); #0": {
+ "engine/web/src/nmod_ops.rs :: add :: pub const ECH_MAX_TEXT: usize = mul(ENTRY_TEXT, mul(ECH_MAX_DIM, ECH_MAX_DIM)); #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
- "engine/web/src/nmod_ops.rs :: add :: pub const ECH_PEAK: usize = add(add(ECH_MAX_REQUEST, mul(28, ECH_MAX_ENTRIES)), 33 * 1024); #0": {
+ "engine/web/src/nmod_ops.rs :: add :: pub const ECH_PEAK: usize = add(add(ECH_MAX_REQUEST, mul(28, mul(ECH_MAX_DIM, ECH_MAX_DIM))), 33 * 1024); #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
- "engine/web/src/nmod_ops.rs :: add :: pub const ECH_WORK: u64 = 2 * ECH_MAX_ENTRIES as u64 * 400; #0": {
+ "engine/web/src/nmod_ops.rs :: add :: pub const ECH_WORK: u64 = 2 * (ECH_MAX_DIM * ECH_MAX_DIM) as u64 * ECH_MAX_DIM as u64; #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
@@ -1226,6 +1428,46 @@
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
+ },
+ "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: assert!(req.len() > ECH_MAX_TEXT - ECH_MAX_DIM * ECH_MAX_DIM); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: for (r, c) in [(ECH_MAX_DIM + 1, 1), (1, ECH_MAX_DIM + 1), (ECH_MAX_DIM + 1, ECH_MAX_DIM + 1)] { #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: let req = format!(r#\"{{\"fn\":\"nmod_echelon\",\"p\":\"{}\",\"rows\":{n},\"cols\":{n},\"m\":\"{}\",\"reduced\":true,\"want_rows\":true}}\"#, P, text, n = ECH_MAX_DIM); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: let row: Vec<u64> = (0..ECH_MAX_DIM).map(|_| P - 1 - rng(&mut s) % 1000).collect(); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: let text = vec![csv(&row); ECH_MAX_DIM].join(\";\"); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_ops.rs :: caps_and_refusals :: assert!(err(&short(1, ECH_MAX_DIM + 1)).contains(\"rows and cols\")); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_ops.rs :: caps_and_refusals :: assert!(err(&short(ECH_MAX_DIM + 1, 1)).contains(\"rows and cols\")); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_ops.rs :: caps_and_refusals :: assert_eq!(ok(&ech(ECH_MAX_DIM, ECH_MAX_DIM))[\"pivots\"], \"\"); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_ops.rs :: echelon_envelope_constants :: assert_eq!(ECH_MAX_REQUEST, 20_975_616); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/nmod_ops.rs :: echelon_envelope_constants :: assert_eq!(ECH_MAX_TEXT, 20 * 1024 * 1024); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices"
  },
  "lib/_capacity.py ::  :: (\"includes\") and which its `limit` bounds (\"constrains\"); a domain is in #0": {
   "class": "2",
@@ -1556,6 +1798,10 @@
   "owner": "python (@sagebrush-python)"
  },
  "lib/_capacity.py :: capacity.add :: row = {\"source\": source, \"limit\": int(limit), \"used\": None if used is None else int(used), \"remaining\": rem, #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: engine_rows :: rows.append({\"source\": b[\"source\"], \"figure\": b[\"limit\"], \"joint\": joint}) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -2723,11 +2969,6 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
- "lib/_sage_ffmat.py ::  :: _ENGINE_ECHELON_MAX_ENTRIES = 400 * 401 #0": {
-  "class": "1+3",
-  "owner": "engine web + finite-field matrices",
-  "row": "inv-7"
- },
  "lib/_sage_ffmat.py :: _AlgCharge :: against the budget for one matrix. A charge per entry alone admitted #0": {
   "class": "2",
   "owner": "linear algebra/runtime memory",
@@ -2879,6 +3120,36 @@
  "lib/_sage_ffmat.py :: _admitted_rows.refuse :: return _refusal(\"a matrix over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)\" % ( #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "lib/_sage_ffmat.py :: _engine_echelon_prime :: if not isinstance(base, _ff.IntegerModRing_) or not (0 < nrows <= _ENGINE_ECHELON_MAX_DIM and 0 < ncols <= _ENGINE_ECHELON_MAX_DIM): #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "lib/_sage_ffmat.py :: _engine_echelon_transport_fits :: return need <= (_echelon_transport_figure or _heap_budget)() // _HEAP_SHARE #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _engine_echelon_transport_fits :: the reply) fits this process's budget for one matrix: decided before #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _heap_budget :: (lib/_capacity.py) where there is one, else _heap_limit().\"\"\" #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _heap_budget :: def _heap_budget(): #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _heap_budget :: return _heap_limit() #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
  },
  "lib/_sage_ffmat.py :: _heap_limit :: def _heap_limit(): #0": {
   "class": "2",

@@ -72,8 +72,9 @@ fn csv(v: &[u64]) -> String {
 }
 
 const P: u64 = 9223372036854775783;
-/// The longest nmod_echelon reply text could be (20 bytes an entry).
-const ENTRY_TEXT_BOUND: usize = 20 * ECH_MAX_ENTRIES;
+/// The longest reply text of the requests abi_frees_the_old_reply_first
+/// makes (20 bytes an entry of its 400 x 401 echelon request).
+const ENTRY_TEXT_BOUND: usize = 20 * 400 * 401;
 const NTT_P: u64 = 4601552919265804289;
 
 fn rand_poly(s: &mut u64, n: usize, p: u64) -> Vec<u64> {
@@ -99,6 +100,19 @@ fn peaks_within_bounds() {
     let (g, r) = growth(&req);
     assert!(r.starts_with("{\"ok\":{\"pivots\":\"0,1,2,"), "{}", &r[..100]);
     eprintln!("nmod_echelon: request {} + growth {} <= {}", req.len(), g, peak_of("nmod_echelon"));
+    assert!(req.len() + g <= peak_of("nmod_echelon"));
+    drop((req, r));
+    // ... and at the 1024 x 1024 envelope (F4): every entry 19 digits, of
+    // rank 1 (equal rows), so the elimination is short; the parse holds
+    // R + 20 E + 8 E and the reply reserves its 20 E bound whatever its rows
+    let row: Vec<u64> = (0..ECH_MAX_DIM).map(|_| P - 1 - rng(&mut s) % 1000).collect();
+    let text = vec![csv(&row); ECH_MAX_DIM].join(";");
+    let req = format!(r#"{{"fn":"nmod_echelon","p":"{}","rows":{n},"cols":{n},"m":"{}","reduced":true,"want_rows":true}}"#, P, text, n = ECH_MAX_DIM);
+    drop((row, text));
+    assert!(req.len() > ECH_MAX_TEXT - ECH_MAX_DIM * ECH_MAX_DIM);
+    let (g, r) = growth(&req);
+    assert!(r.starts_with("{\"ok\":{\"pivots\":\"0\","), "{}", &r[..100]);
+    eprintln!("nmod_echelon 1024 x 1024: request {} + growth {} <= {}", req.len(), g, peak_of("nmod_echelon"));
     assert!(req.len() + g <= peak_of("nmod_echelon"));
     drop((req, r));
     // nmod_poly_mul at the cap: three primes, and an NTT prime's own table
@@ -146,10 +160,14 @@ fn peaks_within_bounds() {
         let (g, r) = growth(&req);
         assert!(r.contains("more than") && g < req.len() + 16 * 1024, "{f}: {g}");
     }
-    let zeros = vec![vec!["0"; 401].join(","); 401].join(";");
-    let req = format!(r#"{{"fn":"nmod_echelon","p":"7","rows":401,"cols":401,"m":"{}"}}"#, zeros);
-    let (g, r) = growth(&req);
-    assert!(r.contains("more than") && g < req.len() + 16 * 1024, "{g}");
+    // a short request claiming 1025 rows (or columns) is refused after
+    // serde and before any entry is parsed: nothing of the claimed size
+    // (the entries' 8 E vector) is allocated
+    for (r, c) in [(ECH_MAX_DIM + 1, 1), (1, ECH_MAX_DIM + 1), (ECH_MAX_DIM + 1, ECH_MAX_DIM + 1)] {
+        let req = format!(r#"{{"fn":"nmod_echelon","p":"7","rows":{},"cols":{},"m":"0"}}"#, r, c);
+        let (g, r) = growth(&req);
+        assert!(r.contains("rows and cols") && g < req.len() + 16 * 1024, "{g}");
+    }
 }
 
 fn stats() -> (u64, u64, u64) {
