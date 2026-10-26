@@ -10,8 +10,9 @@
 //!   normal  Stage 1 certifies (no hook);
 //!   a       column exhaustion: Stage 1's certificates are declined
 //!           (STAGE1_NO_CERT), so it ends by its 32 columns;
-//!   a+all   (a), and every Stage-2 pass before a level's last declines its
-//!           certificate (S2_LAST_PASS): every level runs all its passes;
+//!   a+all   (a), and Stage 2 takes a certificate only after the last pass of a
+//!           level that appended all n indices (S2_LAST_PASS): every level
+//!           runs all its passes, the certifying one with all n columns;
 //!   b       level exhaustion: Stage 1 starts at precision 1 (STAGE1_LOW_PREC),
 //!           its columns carry no information, it ends by its 3 levels;
 //!   b+all   (b) with every pass, as above.
@@ -120,11 +121,13 @@ fn main() {
                     // still not certify, and the precision doubles)
                     assert!(reach.s2_levels >= 1, "{case} {name}: {reach:?}");
                     assert_eq!(reach.s2_passes, reach.s2_levels * n.div_ceil(4), "{case} {name}: all passes: {reach:?}");
+                    // the certifying level appended every index (all n columns)
+                    assert_eq!(reach.s2_cert_cols, n, "{case} {name}: all n columns at the certifying level: {reach:?}");
                 }
             }
             println!(
-                "case {case} round {round} mode {name} seconds {secs:.6} factors {factors} s1_levels {} s1_cols {} s2_levels {} s2_passes {} s2_cols {} n {n} s2_cert_a {} a_star {}",
-                reach.s1_levels, reach.s1_cols, reach.s2_levels, reach.s2_passes, reach.s2_cols, reach.s2_cert_a, reach.s2_a_star
+                "case {case} round {round} mode {name} seconds {secs:.6} factors {factors} s1_levels {} s1_cols {} s2_levels {} s2_passes {} s2_cols {} s2_cert_cols {} n {n} s2_cert_a {} a_star {}",
+                reach.s1_levels, reach.s1_cols, reach.s2_levels, reach.s2_passes, reach.s2_cols, reach.s2_cert_cols, reach.s2_cert_a, reach.s2_a_star
             );
         }
     }

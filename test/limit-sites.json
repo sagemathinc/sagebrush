@@ -552,6 +552,14 @@
   "class": "none",
   "owner": "sage"
  },
+ "engine/poly/examples/transition_bench.rs ::  :: use sagebrush_poly::Budget; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/examples/transition_bench.rs :: main :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/binomial.rs ::  :: pub(crate) const BINOMIAL_MAX_BITS: u64 = 4096; #0": {
   "class": "3",
   "owner": "polynomial factorization",
@@ -1069,11 +1077,19 @@
   "note": "selector by measurement (plan r3 3.1), never a refusal",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/vanhoeij.rs :: s5_stage2 :: b.set_memory_limit(limit.unwrap_or(1 << 30)); #0": {
+ "engine/poly/src/vanhoeij.rs :: s5_stage2 :: fn s5_stage2(b: &Budget, limit: Option<u64>) -> (FResult<usize>, crate::alloc_spy::Report, fault::Reach) { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/vanhoeij.rs :: s5_stage2 :: fn s5_stage2(b: &Budget, limit: Option<u64>) -> (FResult<usize>, crate::alloc_spy::Report, fault::Reach) { #0": {
+ "engine/poly/src/vanhoeij.rs :: s5_stage2 :: s5_stage2_from(b, limit, None) #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: s5_stage2_from :: b.set_memory_limit(limit.unwrap_or(1 << 30)); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: s5_stage2_from :: fn s5_stage2_from(b: &Budget, limit: Option<u64>, a0: Option<u64>) -> (FResult<usize>, crate::alloc_spy::Report, fault::Reach) { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
@@ -1230,6 +1246,18 @@
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: the_size_tags_hold_on_s6 :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_stage2_ledger_charges_the_retained_shape :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_stage2_ledger_charges_the_retained_shape :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #1": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_stage2_ledger_charges_the_retained_shape :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #2": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
