@@ -1,0 +1,44 @@
+Refreshing the architecture article (articles/architecture/)
+
+architecture.board.json is the one source: README.md and 01-the-map.md are
+written from it by scripts/architecture-article.mjs. Refresh when a change to
+the architecture merges, and at least every couple of weeks.
+
+1. Pick the commit: current master, C (full 40 hex digits).
+
+2. In architecture.board.json:
+   - re-pin every link to C: replace the old commit with C in every
+     https://github.com/sagemathinc/sagebrush/blob/<commit>/... ;
+   - update the start note's line to
+     "Last updated <YYYY-MM-DD>, at sagebrush `<first 8 hex of C>`."
+
+3. Re-check each note against the code at C, not against memory:
+   - every claim in its text and detail (names, numbers, what calls what);
+   - that its link is still the one file that best shows its idea, and that
+     a line range (#La-Lb) still covers the passage it means: files move
+     and lines shift, and the check below only proves the range exists;
+   - new parts of the system that deserve a note, and notes for parts that
+     are gone;
+   - public safety: links only into github.com/sagemathinc/sagebrush; the
+     servers in prose only (no internal hostnames, resource names, secret
+     names, account names, security findings or process internals); other
+     systems named only as outside oracles and comparisons, with no speed
+     claims.
+
+4. Write the pages and check:
+     node scripts/architecture-article.mjs --write
+     node scripts/architecture-article.mjs --check
+     node scripts/test-architecture-article.mjs
+   --check fails if a link isn't a permalink into this repository at one
+   commit, if a path doesn't exist at that commit, if a line range is past
+   the end of its file, if "Last updated" names another commit, or if a page
+   differs from the board. (CI runs it in the checks job, with --built after
+   the site's build: the board must be on the site, beside the pages.)
+
+5. Look at it: `npx sagebrush board open articles/architecture/architecture.board.json`
+   (the board), and the built pages, web/site/public/articles/architecture/,
+   after `bun web/build-articles.ts`.
+
+6. Ask each region's owner to check their notes, and open the PR. The page's
+   own "Updated" date comes from git; the "Last updated" line says which code
+   it describes.
