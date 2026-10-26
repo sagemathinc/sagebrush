@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "P2a's leak measure (the interrupt matrix, the master-red follow-up): src/runtime/modules.ts's sys._sagebrush_heap_external(), V8's external_memory, in the CLI bundle and the worker. Measured at master 0ce1121e vs the PR head with CI's toolchain (bun 1.4.4, Node 24.21.0) on VM1",
- "bytes": {
-  "cli/pyjs.cjs": 233,
-  "engine/sagebrush-worker.js": 228
- }
-}

@@ -33,7 +33,7 @@ fn cyclotomic(n: usize) -> ZPoly {
 /// The Swinnerton-Dyer polynomial S_k: prod (x +- sqrt2 +- sqrt3 +- ...),
 /// built as a resultant-free product: S_1 = x^2 - 2, S_{k}(x) =
 /// S_{k-1}(x + sqrt(p)) S_{k-1}(x - sqrt(p)) = Res_y(S_{k-1}(x - y), y^2 - p).
-fn swinnerton_dyer(k: usize) -> ZPoly {
+pub(crate) fn swinnerton_dyer(k: usize) -> ZPoly {
     let primes = [2i64, 3, 5, 7, 11, 13];
     // represent elements of Z[x][sqrt p] as (a, b) = a + b sqrt p
     let b = Budget::unlimited();
@@ -406,3 +406,19 @@ fn timings() {
     }
 }
 
+
+#[test]
+fn the_global_ledger_net_holds() {
+    // rank-3 plan r3, section 4.5 (A): at every debit and reservation of a
+    // whole factoring, the live bytes allocated stay within the live
+    // reservation plus 64 KiB, and no tagged object of the ledger outgrows
+    // its own reservation (delta 1 r2 (B))
+    for k in [5usize, 6] {
+        let f = swinnerton_dyer(k);
+        let b = Budget::default();
+        let (r, rep) = crate::alloc_spy::audit(|| try_factor_with(&f, &b).map(|x| x.1.len()));
+        assert_eq!(r.unwrap(), 1, "S_{k}");
+        assert!(rep.excess <= 64 << 10, "S_{k}: {rep:?}");
+        assert_eq!(rep.tag_breaches, 0, "S_{k}: {rep:?}");
+    }
+}

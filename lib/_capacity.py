@@ -81,14 +81,14 @@ _src = _Sources()
 def _set_sources(**kw):
     """Tests only: replace the sources (keyword names as in _Sources);
     _set_sources() restores the real ones."""
-    global _src, _poly_snap, _total_snap, _engine_snap, _cg_dirs, _api
+    global _src, _poly_snap, _total_snap, _engine_snap, _rows_snap, _cg_dirs, _api
     _src = _Sources()
     _api = {}
     for k, v in kw.items():
         if not hasattr(_Sources, k):
             raise TypeError("no source %r" % k)
         setattr(_src, k, v)
-    _poly_snap = _total_snap = _engine_snap = _cg_dirs = None
+    _poly_snap = _total_snap = _engine_snap = _rows_snap = _cg_dirs = None
 
 
 try:
@@ -495,7 +495,10 @@ def _runtime_parts():
     """pyjs's own parts, from the runtime (never guessed here): [(source,
     limit, used, includes, constrains)]; [] in CPython.  A part with no
     domains, (source, limit, used) from an older engine or a test, gets
-    none: it can never widen capacity()["domains"]."""
+    none: it can never widen capacity()["domains"].  Each tuple carries a
+    sixth item, True when the part named a constrained domain this module
+    doesn't know: it is dropped from the list, but engine_rows must not
+    read the rest as engine-only."""
     if _src.runtime is not None:
         parts = list(_src.runtime())
     elif not hasattr(_sys, "_sagebrush_heap_limit"):
@@ -510,9 +513,10 @@ def _runtime_parts():
     for p in parts:
         p = tuple(p)
         if len(p) >= 5:
-            out.append((p[0], p[1], p[2], [d for d in DOMAINS if d in p[3]], [d for d in DOMAINS if d in p[4]]))
+            out.append((p[0], p[1], p[2], [d for d in DOMAINS if d in p[3]], [d for d in DOMAINS if d in p[4]],
+                        any(d not in DOMAINS for d in p[4])))
         else:
-            out.append((p[0], p[1], p[2], [], []))
+            out.append((p[0], p[1], p[2], [], [], False))
     return out
 
 
@@ -621,6 +625,53 @@ def engine_total():
 _engine_snap = None
 
 
+def engine_rows():
+    """Every row that constrains the engine's domain, for the ledger's
+    certification (no-cliffs plan C r17 section 1.2): {"rows": [{"source",
+    "figure", "joint"}], "complete"}, from a snapshot at most 100 ms old.
+
+    - rows: each applicable row (its `constrains` includes the engine's
+      domain), joint unless it constrains EXACTLY the engine's domain (any
+      other domain, a known one or one this module doesn't know, makes it
+      joint: C r17 section 1.2, astra2's CORR-C2A-2);
+    - complete: False when a constraint's figure could not be read
+      (capacity's unknown parts, other than a row's unread usage) or a
+      row's domains are unknown (an older part with none): then the
+      ledger is not certified.
+
+    engine_total keeps its contract (the rows at the least figure only);
+    this is the view of all of them, which certification needs: a larger
+    joint row can bind through its usage."""
+    global _rows_snap
+    now = _src.clock()
+    if _rows_snap is None or now - _rows_snap[0] >= _SNAPSHOT_S:
+        domain = _engine_domain()
+        rec = capacity()
+        complete = all(u.endswith(" usage") for u in rec["unknown_parts"])
+        rows = []
+        for b in rec["basis"]:
+            if not b["constrains"]:
+                complete = False  # (its domains unknown: it may constrain the engine)
+            elif domain in b["constrains"]:
+                joint = bool(b.get("unknown_domains")) or any(d != domain for d in b["constrains"])
+                rows.append({"source": b["source"], "figure": b["limit"], "joint": joint})
+        _rows_snap = (now, {"rows": rows, "complete": complete})
+    out = _rows_snap[1]
+    return {"rows": [dict(r) for r in out["rows"]], "complete": out["complete"]}
+
+
+_rows_snap = None
+
+
+def engine_uncertified():
+    """For the WebAssembly ledger (no-cliffs plan C r17 section 1.3): True
+    when some applicable row is joint (the instance has no fresh measure of
+    a row that also bounds a host domain) or the classification is
+    incomplete; False only when every applicable row is engine-only."""
+    r = engine_rows()
+    return (not r["complete"]) or any(row["joint"] for row in r["rows"])
+
+
 # ------------------------------------------------------------------ free now
 
 def capacity():
@@ -699,8 +750,11 @@ def capacity():
     if parts is None:
         unknown.append("runtime")
     else:
-        for source, lim, used, inc, con in parts:
-            add(source, lim, used, inc, con)
+        for source, lim, used, inc, con, unnamed in parts:
+            if unnamed:
+                add(source, lim, used, inc, con, unknown_domains=True)
+            else:
+                add(source, lim, used, inc, con)
     return _record(basis, unknown)
 
 
