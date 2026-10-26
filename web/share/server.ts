@@ -565,7 +565,7 @@ async function commit(req: Request, env: ShareEnv, who: Who, cid: string): Promi
   const stmts: D1Stmt[] = [
     // (the same version committed twice: this copy of its manifest is not needed)
     db.prepare("INSERT INTO r2_deletes (key, created) SELECT ?2, ?3 WHERE EXISTS (SELECT 1 FROM versions WHERE hash = ?1)").bind(hash, key, t),
-    db.prepare("INSERT INTO versions (hash, collection, owner, created, size, manifest_key, manifest_bytes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(hash) DO NOTHING").bind(hash, cid, id, t, size, key, bytes),
+    db.prepare("INSERT INTO versions (hash, collection, owner, created, size, manifest_key, manifest_bytes, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(hash) DO NOTHING").bind(hash, cid, id, t, size, key, bytes, title),
   ];
   for (let i = 0; i < shas.length; i += 500) {
     const part = shas.slice(i, i + 500);
@@ -592,6 +592,31 @@ async function commit(req: Request, env: ShareEnv, who: Who, cid: string): Promi
 }
 
 // ---- reading
+
+/**
+ * A share's title for its page's link preview (share-ux-plan r2 §6): what
+ * the page itself shows as its title.  D1 only (two reads), never the R2
+ * manifest; the version resolved as getCollection does, the latest or a
+ * unique prefix.  Null for anything but a live, unambiguous version with a
+ * stored title (an unknown, deleted or purged share, a pre-migration old
+ * version), for a deployment without D1, and on any error: the caller then
+ * serves the generic page.  Nothing is cached, so a deletion or a purge is
+ * seen by the next request everywhere.
+ */
+export async function sharePreview(env: ShareEnv, cid: string, at: string | null): Promise<{ title: string; version: string } | null> {
+  try {
+    const db = env.SHARE_DB;
+    if (!db || !/^[a-z2-7]{12}$/.test(cid) || (at !== null && !/^[0-9a-f]{8,64}$/.test(at))) return null;
+    const col = await db.prepare("SELECT latest FROM collections WHERE id = ?1").bind(cid).first<{ latest: string | null }>();
+    if (!col?.latest) return null;
+    const v = await db.prepare("SELECT hash, title FROM versions WHERE collection = ?1 AND substr(hash, 1, length(?2)) = ?2 LIMIT 2").bind(cid, at ?? col.latest).all<{ hash: string; title: string | null }>();
+    if (v.results.length !== 1) return null;
+    const title = `${v.results[0].title ?? ""}`.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 200);
+    return title ? { title, version: v.results[0].hash } : null;
+  } catch {
+    return null;
+  }
+}
 
 async function getCollection(env: ShareEnv, cid: string, at: string | null): Promise<Response> {
   const db = env.SHARE_DB!;
