@@ -132,6 +132,45 @@ try:
 finally:
     S._raise_sigint = real_raise
 
+# astra2's real-conversion control (CORR-WIN-EXIT-2, grader WIN-EXIT-G1): the worker's own _HOLD handler on SIGINT,
+# a callback paused inside its conversion until exit has closed the routine, then released to deliver a REAL SIGINT
+# during the drain, with remove() running on the main thread as atexit does: the cleanup still completes
+fresh()
+k, exits, reports = Kernel(), [], []
+S._break_as_sigint(nt=True, boundary=(lambda f: f, k), at_exit=exits.append, report=reports.append)
+r = k.calls[0][0]
+saved = (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGBREAK) if hasattr(signal, "SIGBREAK") else None)
+S._HOLD.install()
+state = exits[0].state
+
+
+def real_after_closing():
+    deadline = time.monotonic() + 5
+    while not state.closing and time.monotonic() < deadline:
+        time.sleep(0.01)
+    time.sleep(0.05)  # (inside the drain)
+    real_raise()  # (signal.raise_signal(SIGINT): the worker's handler would raise KeyboardInterrupt in the main thread)
+
+
+S._raise_sigint = real_after_closing
+escaped = None
+try:
+    cb = threading.Thread(target=lambda: r(1))
+    cb.start()
+    try:
+        ok = exits[0]()
+        time.sleep(0.1)  # (any pending signal handled here, at a bytecode boundary, still inside the try)
+    except KeyboardInterrupt as e:
+        ok, escaped = None, e
+    cb.join(5)
+finally:
+    S._raise_sigint = real_raise
+    signal.signal(signal.SIGINT, saved[0])
+    if saved[1] is not None:
+        signal.signal(signal.SIGBREAK, saved[1])
+check(escaped is None and ok is True and k.calls[-1] == (r, False) and S._CTRL == [] and S._RETIRED == [r] and reports == [],
+      "a real SIGINT delivered during the drain under the worker's handler: no KeyboardInterrupt out of the exit, unregistered and retired (%r, %s, %s)" % (escaped, k.calls[-1][1], reports))
+
 # a drain that times out is reported, and the routine is still unregistered and kept alive
 fresh()
 k, exits, reports = Kernel(), [], []
