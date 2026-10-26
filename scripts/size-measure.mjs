@@ -725,8 +725,10 @@ const arg = (name) => {
 const event = () => (process.env.GITHUB_EVENT_PATH && existsSync(process.env.GITHUB_EVENT_PATH) ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")) : {});
 const ZERO = /^0{40}$/;
 
-// The tested commit and its base, by event (r5 §1.1)
-export function testedTransition({ cwd = root, name = process.env.GITHUB_EVENT_NAME ?? "local", ev = event() } = {}) {
+// The tested commit and its base, by event (r5 §1.1).  `master`, for a dispatch: origin/master as
+// size-base saw it at the start of the run (its output, passed to the gate job), so master moving during
+// the run changes nothing; checked to be a commit of origin/master, never taken on trust.
+export function testedTransition({ cwd = root, name = process.env.GITHUB_EVENT_NAME ?? "local", ev = event(), master = process.env.SIZE_DISPATCH_MASTER || undefined } = {}) {
   const git = (...a) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
   const gitOr = (fallback, ...a) => {
     try {
@@ -754,7 +756,36 @@ export function testedTransition({ cwd = root, name = process.env.GITHUB_EVENT_N
     const k = Number(git("rev-list", "--first-parent", "--count", `${before}..${head}`));
     return { mode: "range", merge: head, base: before, k };
   }
+  if (name === "workflow_dispatch") return dispatchTransition({ git, gitOr, head, master });
   return { mode: "absolute", merge: head };
+}
+
+// A dispatch (plan-size-gate-dispatch-range r2): master itself is absolute; any other head must contain
+// origin/master (else refused: merge master and re-dispatch), and is checked against it: one PR (at most
+// one first-parent merge of a PR head) as one transition, a train (more) as a range of k = its PR merges.
+function dispatchTransition({ git, gitOr, head, master }) {
+  const ref = "refs/remotes/origin/master";
+  const tip = gitOr("", "rev-parse", "--verify", "-q", `${ref}^{commit}`);
+  if (!tip) throw new Error(`${ref} is missing: the size gate can't find the base (the checkout must fetch master)`);
+  let m = tip;
+  if (master !== undefined) {
+    if (!/^[0-9a-f]{40}$/.test(master) || gitOr("no", "merge-base", "--is-ancestor", master, tip) === "no") throw new Error(`the run's master ${master} isn't a commit of ${ref} (${tip})`);
+    m = master;
+  }
+  if (head === m) return { mode: "absolute", merge: head, master: m };
+  if (gitOr("no", "merge-base", "--is-ancestor", m, head) === "no") {
+    const n = git("rev-list", "--count", `${head}..${m}`);
+    throw new Error(`HEAD is ${n} behind origin/master ${m}: merge master and re-dispatch`);
+  }
+  const bases = git("merge-base", "--all", head, m).split("\n").filter(Boolean);
+  if (bases.length !== 1) throw new Error(`HEAD and origin/master have ${bases.length} merge bases (${bases.join(", ")}): no one base to measure against`);
+  const base = bases[0];
+  if (base === head) return { mode: "absolute", merge: head, master: m };
+  // (the first-parent merges of a PR head: a merge whose second parent isn't in master; a merge of master into a branch isn't one)
+  const chain = git("rev-list", "--first-parent", "--parents", `${base}..${head}`).split("\n").filter(Boolean).map((l) => l.split(" "));
+  const prs = chain.filter((c) => c.length > 2 && gitOr("no", "merge-base", "--is-ancestor", c[2], m) === "no").length;
+  if (prs <= 1) return { mode: "transition", merge: head, base, head, master: m };
+  return { mode: "range", merge: head, base, k: prs, master: m };
 }
 
 const show = (commit, path) => gitOr(null, "show", `${commit}:${path}`);
@@ -874,6 +905,7 @@ async function resolveBase() {
   mkdirSync(recDir, { recursive: true });
   const t = testedTransition();
   out("mode", t.mode);
+  if (t.master) out("master", t.master);
   if (t.mode === "absolute") return out("need_new", "false"), out("need_old", "false");
   out("base", t.base);
   const key = currentKey();
@@ -1010,7 +1042,12 @@ async function gateInputsAndEvaluate(recDir) {
     ].filter((x) => x !== null);
     if (t.mode === "range") input.range = { k: t.k, epochChanged: epochChangedInRange(t.base, t.merge) };
   }
-  return { ...evaluate(input), tested: t };
+  const r = evaluate(input);
+  if (t.master !== undefined && t.mode !== "absolute") {
+    r.notes.push(`a dispatch: the figures are relative to the merge-base ${t.base} with origin/master ${t.master} (${t.mode === "range" ? `a train of ${t.k} PR merges, the range rule` : "one PR, one transition"})`);
+    r.notes.push(input.base.record.event === "push" ? `the base's record: its push run ${input.base.record.run?.id}` : "the base's record: rebuilt in this run (no usable push record for the base)");
+  }
+  return { ...r, tested: t };
 }
 
 // Write an epoch reset into budgets.json (r5 §1.3 rule 5): epoch.sizes from
