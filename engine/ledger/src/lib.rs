@@ -389,21 +389,46 @@ pub fn with_chain<T>(chain: u64, f: impl FnOnce() -> T) -> T {
 /// obligations to be zero: [`Operation::finish`] releases what remained
 /// (cleanup first, under the lock), then reports it as an internal error; a
 /// drop (an unwind) only releases it.
+///
+/// An operation installs and clears its own thread's chain, so it is bound to
+/// that thread: it is neither Send nor Sync (a worker joins the chain with
+/// [`with_chain`], it does not take the guard).
+///
+/// ```compile_fail
+/// fn send<T: Send>(_: T) {}
+/// send(sagebrush_ledger::Operation::enter());
+/// ```
+///
+/// ```compile_fail
+/// fn sync<T: Sync>() {}
+/// sync::<sagebrush_ledger::Operation>();
+/// ```
+///
+/// (the same check compiles for a type that may move, a reservation)
+///
+/// ```
+/// fn send<T: Send>() {}
+/// send::<sagebrush_ledger::Reservation>();
+/// ```
 pub struct Operation {
     chain: u64,
     outer: bool,
     done: bool,
+    _thread: ThreadBound,
 }
+
+/// (a marker that makes a guard of thread-local state neither Send nor Sync)
+type ThreadBound = std::marker::PhantomData<*const ()>;
 
 impl Operation {
     pub fn enter() -> Operation {
         let cur = current_chain();
         if cur != 0 {
-            return Operation { chain: cur, outer: false, done: false };
+            return Operation { chain: cur, outer: false, done: false, _thread: ThreadBound::default() };
         }
         let chain = NEXT_CHAIN.fetch_add(1, Relaxed);
         CHAIN.with(|c| c.set(chain));
-        Operation { chain, outer: true, done: false }
+        Operation { chain, outer: true, done: false, _thread: ThreadBound::default() }
     }
 
     pub fn chain(&self) -> u64 {
@@ -524,13 +549,24 @@ thread_local! {
 
 /// A coverage scope: allocations made on this thread while it lives belong
 /// to a governing reservation, span, fence or resident under construction
-/// (C r12 section 4).  Only the test-only audit reads it.
-pub struct Scope(());
+/// (C r12 section 4).  Only the test-only audit reads it.  Bound to its
+/// thread like [`Operation`]:
+///
+/// ```compile_fail
+/// fn send<T: Send>(_: T) {}
+/// send(sagebrush_ledger::Scope::enter());
+/// ```
+///
+/// ```compile_fail
+/// fn sync<T: Sync>() {}
+/// sync::<sagebrush_ledger::Scope>();
+/// ```
+pub struct Scope(ThreadBound);
 
 impl Scope {
     pub fn enter() -> Scope {
         COVER.with(|c| c.set(c.get() + 1));
-        Scope(())
+        Scope(ThreadBound::default())
     }
 }
 
