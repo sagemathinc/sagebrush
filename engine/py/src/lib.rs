@@ -32,6 +32,8 @@ fn guarded<T: Send>(py: Python<'_>, f: impl FnOnce() -> T + Send) -> PyResult<T>
 /// is requested (a running computation stops at its next check), and the
 /// call that asked raises it (`guarded`, `ledger_snapshot`).
 static HOST_RAISED: std::sync::Mutex<Option<PyErr>> = std::sync::Mutex::new(None);
+/// (whether HOST_RAISED holds one: every guarded call looks, without the lock)
+static HOST_RAISED_SET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// A host source's error: an ordinary Exception means "unreadable" (the
 /// caller answers none); anything else is kept for the asking call.
@@ -41,6 +43,7 @@ fn host_error(py: Python<'_>, e: PyErr) {
         if slot.is_none() {
             *slot = Some(e);
         }
+        HOST_RAISED_SET.store(true, std::sync::atomic::Ordering::Release);
         sagebrush_interrupt::request();
     }
 }
@@ -48,7 +51,12 @@ fn host_error(py: Python<'_>, e: PyErr) {
 /// Raise what a host source raised during this call (and forget the
 /// interrupt requested for it).
 fn host_raised() -> PyResult<()> {
-    match HOST_RAISED.lock().unwrap_or_else(|p| p.into_inner()).take() {
+    if !HOST_RAISED_SET.load(std::sync::atomic::Ordering::Acquire) {
+        return Ok(());
+    }
+    let mut slot = HOST_RAISED.lock().unwrap_or_else(|p| p.into_inner());
+    HOST_RAISED_SET.store(false, std::sync::atomic::Ordering::Release);
+    match slot.take() {
         Some(e) => {
             sagebrush_interrupt::clear();
             Err(e)
