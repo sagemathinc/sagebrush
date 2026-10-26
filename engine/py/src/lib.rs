@@ -425,6 +425,22 @@ fn mpoly_call<'py>(py: Python<'py>, request: Vec<u8>) -> PyResult<Bound<'py, pyo
     Ok(pyo3::types::PyBytes::new(py, &r))
 }
 
+/// A PNG call's failure as the browser's _sbraster raises it
+/// (src/runtime/raster.ts): the input refused (a limit, an unsupported
+/// drawing, not a PNG) a ValueError; memory the engine could not allocate a
+/// MemoryError (args: the message, the bytes, what they were for); the
+/// engine failing a RuntimeError.
+fn raster_fail(e: sagebrush_raster::Fail) -> PyErr {
+    use sagebrush_raster::Fail;
+    match e {
+        Fail::Input(s) => pyo3::exceptions::PyValueError::new_err(s),
+        Fail::Memory { bytes, what } => {
+            pyo3::exceptions::PyMemoryError::new_err((Fail::Memory { bytes, what }.to_string(), bytes, what))
+        }
+        Fail::Backend(s) => pyo3::exceptions::PyRuntimeError::new_err(format!("Sagebrush's PNG module: {}", s)),
+    }
+}
+
 /// Sagebrush's PNG module (engine/raster), as the browser's _sbraster
 /// (src/runtime/raster.ts): `svg` drawn at `scale` pixels per SVG unit on
 /// a `width` x `height` picture (0 x 0: the drawing's size), on
@@ -437,8 +453,7 @@ fn raster_render<'py>(py: Python<'py>, svg: String, scale: f32, width: u32, heig
     let r = py.detach(|| sagebrush_raster::render_png(&svg, scale, size, &background, dpi, &text));
     match r {
         Ok((png, missing)) => Ok((pyo3::types::PyBytes::new(py, &png), missing)),
-        // (a refusal: a limit, an unsupported drawing, not a PNG, as in the browser)
-        Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e)),
+        Err(e) => Err(raster_fail(e)),
     }
 }
 
@@ -458,14 +473,17 @@ fn raster_decode<'py>(py: Python<'py>, png: &[u8]) -> PyResult<(u32, u32, u32, B
     let r = py.detach(|| sagebrush_raster::decode_png(png));
     match r {
         Ok((w, h, ch, v)) => {
-            let mut b = Vec::with_capacity(4 * v.len());
+            let mut b = Vec::new();
+            let n = v.len().saturating_mul(4);
+            if b.try_reserve_exact(n).is_err() {
+                return Err(raster_fail(sagebrush_raster::Fail::Memory { bytes: n as u64, what: "the decoded image's values" }));
+            }
             for x in v {
                 b.extend_from_slice(&x.to_le_bytes());
             }
             Ok((w, h, ch, pyo3::types::PyBytes::new(py, &b)))
         }
-        // (a refusal: a limit, an unsupported drawing, not a PNG, as in the browser)
-        Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e)),
+        Err(e) => Err(raster_fail(e)),
     }
 }
 
@@ -482,6 +500,147 @@ fn set_memory_share_source(source: Py<PyAny>) {
     sagebrush_interrupt::set_memory_share_host(move || {
         Python::attach(|py| source.call0(py).ok().and_then(|r| r.extract::<Option<u64>>(py).ok()).flatten())
     });
+}
+
+// ---- what the memory total source raises (CORR-C1-1, astra2): a
+// KeyboardInterrupt, SystemExit or any other BaseException beyond an ordinary
+// Exception is not an unreadable answer.  It belongs to the call that asked
+// for the total: the source runs only on a thread where such a call is active
+// (ledger_snapshot), what it raises is kept in that thread's slot, and that
+// call raises it.  A read on any other thread (an engine worker) runs no
+// source: the total in force stays (HostAnswer::NotAsked).  (A governed
+// computation that reads the total, C-2b, must carry its asking call to its
+// workers before it adopts this.)
+
+thread_local! {
+    /// asking calls active on this thread
+    static ASKING: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// the first control exception the source raised during them
+    static RAISED: std::cell::RefCell<Option<PyErr>> = const { std::cell::RefCell::new(None) };
+}
+
+/// An asking call on this thread: what the source raises while it lives is
+/// its own.  Thread-bound (neither Send nor Sync).
+struct Asking(std::marker::PhantomData<*const ()>);
+
+impl Asking {
+    fn enter() -> Asking {
+        ASKING.with(|a| a.set(a.get() + 1));
+        Asking(std::marker::PhantomData)
+    }
+
+    /// End the call: the outermost one raises what the source raised.
+    fn finish(self) -> PyResult<()> {
+        let raised = if ASKING.with(|a| a.get()) == 1 { RAISED.with(|r| r.borrow_mut().take()) } else { None };
+        drop(self);
+        raised.map_or(Ok(()), Err)
+    }
+}
+
+impl Drop for Asking {
+    fn drop(&mut self) {
+        let left = ASKING.with(|a| {
+            a.set(a.get() - 1);
+            a.get()
+        });
+        if left == 0 {
+            // (an asking call that ended without finish, by an error of its
+            // own: what the source raised is not left for the next call)
+            RAISED.with(|r| r.borrow_mut().take());
+        }
+    }
+}
+
+/// The source's (or its answer's conversion's) error: an ordinary Exception
+/// is an unreadable answer; anything else is kept for this thread's asking
+/// call (the first one kept).
+fn host_error(py: Python<'_>, e: PyErr) {
+    if !e.is_instance_of::<pyo3::exceptions::PyException>(py) {
+        RAISED.with(|r| {
+            let mut r = r.borrow_mut();
+            if r.is_none() {
+                *r = Some(e);
+            }
+        });
+    }
+}
+
+/// Register the host's engine memory total (no-cliffs plan C r13): `source()`
+/// returns (bytes, status, joint, measures) or None, status 0 observed, 1
+/// zero, 2 nominal; measures, the binding rows' usage measures, a list of
+/// (kind, path) with kind "cgroup" (path: its usage file), "address_space",
+/// "data_segment", "physical", "windows_job" or "windows_physical".  The
+/// ledger asks when the total is 100 ms old, with the GIL taken for it and
+/// its own lock not held, and only on a thread with an asking call (see
+/// `Asking`); an ordinary exception or a malformed answer is unreadable (the
+/// nominal total, uncertified), while KeyboardInterrupt and any other
+/// BaseException, from the call or from converting its answer, go to the
+/// asking call.  The first registration stands.
+#[pyfunction]
+fn set_memory_total_source(source: Py<PyAny>) {
+    use sagebrush_ledger::HostAnswer;
+    sagebrush_ledger::set_total_host(move || {
+        if ASKING.with(|a| a.get()) == 0 {
+            return HostAnswer::NotAsked;
+        }
+        Python::attach(|py| {
+            let r = match source.call0(py) {
+                Ok(r) => r,
+                Err(e) => {
+                    host_error(py, e);
+                    return HostAnswer::Unreadable;
+                }
+            };
+            let answer = match r.extract::<Option<(u64, u32, bool, Vec<(String, Option<String>)>)>>(py) {
+                Ok(a) => a,
+                Err(e) => {
+                    host_error(py, e);
+                    return HostAnswer::Unreadable;
+                }
+            };
+            let Some((bytes, status, joint, measures)) = answer else {
+                return HostAnswer::Unreadable;
+            };
+            let Some(status) = sagebrush_ledger::TotalStatus::from_code(status) else {
+                return HostAnswer::Unreadable;
+            };
+            let kinds = measures
+                .into_iter()
+                .map(|(k, p)| match (k.as_str(), p) {
+                    ("cgroup", Some(p)) => Some(sagebrush_ledger::MeasureKind::Cgroup(p)),
+                    ("address_space", _) => Some(sagebrush_ledger::MeasureKind::AddressSpace),
+                    ("data_segment", _) => Some(sagebrush_ledger::MeasureKind::DataSegment),
+                    ("physical", _) => Some(sagebrush_ledger::MeasureKind::Physical),
+                    ("windows_job", _) => Some(sagebrush_ledger::MeasureKind::WindowsJob),
+                    ("windows_physical", _) => Some(sagebrush_ledger::MeasureKind::WindowsPhysical),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>();
+            match kinds {
+                Some(kinds) => HostAnswer::Total(sagebrush_ledger::Total { bytes, status, joint }, kinds),
+                None => HostAnswer::Unreadable,
+            }
+        })
+    });
+}
+
+/// The ledger as the engine sees it now (diagnostics and the package's
+/// tests): {"total", "status", "joint", "allowance", "live", "outstanding"}.
+#[pyfunction]
+fn ledger_snapshot(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
+    let asking = Asking::enter();
+    let t = sagebrush_ledger::total();
+    let d = PyDict::new(py);
+    d.set_item("total", t.bytes)?;
+    d.set_item("status", t.status.name())?;
+    d.set_item("joint", t.joint)?;
+    d.set_item("allowance", sagebrush_ledger::allowance(t))?;
+    d.set_item("live", sagebrush_ledger::live_estimate())?;
+    d.set_item("resident", sagebrush_ledger::resident_bytes())?;
+    d.set_item("certified", sagebrush_ledger::certified())?;
+    d.set_item("outstanding", sagebrush_ledger::outstanding_bytes())?;
+    asking.finish()?;
+    Ok(d)
 }
 
 // ---- live progress for Python routines (design-estimates-progress r4 §6):
@@ -618,6 +777,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     raster.add_function(wrap_pyfunction!(raster_decode, &raster)?)?;
     m.add_submodule(&raster)?;
     m.add_function(wrap_pyfunction!(set_memory_share_source, m)?)?;
+    m.add_function(wrap_pyfunction!(set_memory_total_source, m)?)?;
+    m.add_function(wrap_pyfunction!(ledger_snapshot, m)?)?;
     for f in [
         wrap_pyfunction!(progress_begin, m)?,
         wrap_pyfunction!(progress_update, m)?,

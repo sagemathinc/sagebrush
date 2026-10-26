@@ -4,6 +4,7 @@ import { handleShare, scheduled, type ShareEnv } from "../../share/server.ts";
 import { handleEngines, handleLibChunk, handlePkg, type EnginesEnv } from "../../engines.ts";
 import { syncScheduled, type Env as SyncSiteEnv } from "../../sync/server.ts";
 import { BUILD } from "./build-id.ts";
+import { handleSharePage } from "./preview.ts";
 
 // Static assets are served before this runs.  The atlas's pages are
 // rendered here from its static data (web/atlas), and kept in the edge
@@ -27,8 +28,9 @@ export default {
     // an optional package set's index or chunk, by its content, from R2 (web/engines.ts)
     const pkg = await handlePkg(request, env as EnginesEnv, ctx);
     if (pkg) return pkg;
-    // a shared collection's page (web/share-client/view.html, at /s/)
-    if (/^\/s\/[a-z2-7]{12}(@[0-9a-f]{8,64})?\/?$/.test(url.pathname)) return env.ASSETS.fetch(new Request(new URL("/s/", url), request));
+    // a shared collection's page (web/share-client/view.html, at /s/), with its link preview (./preview.ts)
+    const share = await handleSharePage(request, url, env as any);
+    if (share) return share;
     if (url.pathname === "/atlas" || url.pathname.startsWith("/atlas/")) {
       const cache = caches.default;
       // JSON and HTML differ by Accept for the same URL

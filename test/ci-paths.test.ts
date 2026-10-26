@@ -153,3 +153,67 @@ test("a rename is classified by both of its names, from a real git history", () 
   assert.equal(o.engine_cpython, "false");
 });
 
+
+// The WebKit job (plan-kedlaya-webkit-ci r4): its conservative inputs on a
+// pull request (astra2's classes: the compiler, capacity and limits, an
+// arithmetic dependency and anything Kedlaya imports, the build and its
+// dependency inputs, the test and its helpers, the classifier and the
+// workflow), a path outside every known one (the fallback), never a master
+// push, and always the nightly schedule and a dispatch, which have no file list.
+test("the WebKit job: its inputs on pull requests, never master pushes, always nightly and dispatch", () => {
+  const wk = (files: string[]) => classify(files).webkit;
+  for (const f of ["src/compile.ts", "src/runtime/object.ts", "src/runtime/js-engine.ts", "lib/_sage_padic_lseries.py", "lib/_capacity.py", "lib/_limits.py", "lib/fractions.py", "lib/sage_all.py", "lib/sagebrush/progress.py", "lib/json/__init__.py", "wasm/sagebrush-engine.wasm", "web/worker.ts", "web/build.ts", "web/lib-lazy.ts", "web/lib-chunks.mts", "web/runner/index.html", "web/test-kedlaya-worker.mjs", "web/test-port.mjs", "test/kedlaya.test.ts", "scripts/build-cli.mjs", "scripts/ci-paths.mjs", "package.json", "pnpm-lock.yaml", "tsconfig.json", ".github/workflows/ci.yml", "an/unknown/path.txt"])
+    assert.equal(wk([f]), "true", f);
+  for (const f of ["README.md", "design/runner.md", "web/board/test-merge.mjs", "engine/classgroup/src/api.rs", "app/src/main.ts", "sage-tests/test_numberfield.sage", ".github/workflows/optional.yml"])
+    assert.equal(wk([f]), "false", f);
+  const run = (event: string, ref: string, files: string) => {
+    const list = join(dir, "files.txt");
+    writeFileSync(list, files);
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: event, GITHUB_REF: ref } });
+    assert.equal(r.status, 0, r.stderr);
+    return /^webkit=(\w+)$/m.exec(r.stdout)?.[1];
+  };
+  assert.equal(run("push", "refs/heads/master", "lib/_sage_padic_lseries.py\n"), "false");
+  assert.equal(run("schedule", "refs/heads/master", ""), "true");
+  assert.equal(run("workflow_dispatch", "refs/heads/master", ""), "true");
+});
+
+test("the limits census runs on engine-only, lib and src changes even when the node suites are skipped (#155 -> #156)", () => {
+  // #155's files: an engine-only change, whose node suites (which hold
+  // test/limits.test.ts) were path-skipped; it merged and turned master red
+  const pr155 = ["engine/hmf/Cargo.toml", "engine/hmf/src/eigen.rs", "engine/hmf/tests/eigen_stop.rs"];
+  const o = classify(pr155);
+  assert.equal(o.node, "false");
+  assert.equal(o.census, "true");
+  for (const f of ["lib/_magma.py", "src/runtime/ops.ts", "web/workspace/sync-ledger.ts", "test/limit-sites.json", "test/limit-sites-baseline.txt", "test/limit_sites.py", "test/limits.test.ts"])
+    assert.equal(classify([f]).census, "true", f);
+  // and not for files the census does not read
+  for (const f of ["design/plan.md", "app/src/main.ts", "optional/x/README.md"])
+    assert.equal(classify([f]).census, "false", f);
+});
+
+test("every file the limits census scans selects the census job (scripts/ci-paths.mjs's censusPaths and test/limit_sites.py agree)", () => {
+  // the census's own file list (limit_sites.tracked(): lib/*.py, engine/**/*.rs,
+  // src/**/*.ts and its WEB set), so a file added to the scanner cannot be
+  // skipped by a pull request's path filter (astra2 and daybreak2, #160)
+  const root = join(__dirname, "..", "..");
+  const r = spawnSync("python3", ["-c", "import sys; sys.path.insert(0, 'test'); import limit_sites as L; print(chr(10).join(L.tracked())); print('WEB=' + ','.join(sorted(L.WEB)))"], { cwd: root, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const lines = r.stdout.trim().split("\n");
+  const web = lines.pop()!.slice(4).split(",").filter(Boolean);
+  const scanned = lines.filter(Boolean);
+  assert.ok(scanned.length > 100, `${scanned.length} scanned files`);
+  // each kind of scanned file by one representative, and every file outside the three
+  // directory rules (the WEB set, and anything a future rule adds) one by one
+  const kinds = new Map<string, string>();
+  const others: string[] = [];
+  for (const f of scanned) {
+    const k = /^lib\/[^/]+\.py$/.test(f) ? "lib" : f.startsWith("engine/") && f.endsWith(".rs") ? "engine" : f.startsWith("src/") && f.endsWith(".ts") ? "src" : null;
+    if (k) {
+      if (!kinds.has(k)) kinds.set(k, f);
+    } else others.push(f);
+  }
+  assert.deepEqual([...kinds.keys()].sort(), ["engine", "lib", "src"]);
+  for (const f of [...kinds.values(), ...others, ...web]) assert.equal(classify([f]).census, "true", f);
+  assert.ok(web.includes("web/workspace/sync-ledger.ts"), web.join(","));
+});
