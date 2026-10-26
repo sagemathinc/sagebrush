@@ -1410,14 +1410,159 @@ pub(crate) mod tests {
         }
     }
 
+    // ---------------------------------------------------------------- Stage 2 (rank-3 plan r3, sections 3.3, 3.4 and 4; delta 2)
+
+    use crate::tests::swinnerton_dyer as sd;
+
+    /// f(x + t).
+    fn shift(f: &[BigInt], t: i64) -> Vec<BigInt> {
+        let b = Budget::unlimited();
+        // Horner: out = out (x + t) + c, from the leading coefficient
+        let mut out: Vec<BigInt> = vec![];
+        for c in f.iter().rev() {
+            out = if out.is_empty() { vec![] } else { zmul(&b, &out, &[BigInt::from(t), BigInt::one()]).unwrap().into_vec() };
+            if out.is_empty() {
+                out.push(BigInt::zero());
+            }
+            out[0] += c;
+        }
+        out
+    }
+
+    fn product(fs: &[Vec<BigInt>]) -> Vec<BigInt> {
+        let b = Budget::unlimited();
+        fs.iter().fold(vec![BigInt::one()], |acc, f| zmul(&b, &acc, f).unwrap().into_vec())
+    }
+
+    /// The factors of f from try_factor under the hooks, with the counters.
+    fn factored(f: &[BigInt], hooks: u8, a0: Option<u64>, at_star: bool) -> (FResult<usize>, fault::Reach) {
+        let r = fault::with_hooks(hooks, a0, at_star, || crate::try_factor_with(f, &Budget::unlimited()).map(|x| x.1.len()));
+        (r, fault::reach())
+    }
+
+    /// Stage 2 called on f directly (whatever its r), as recombine would after
+    /// Stage 1, with the hooks; the factor count and the counters.
+    fn stage2_direct(f: &[BigInt], hooks: u8, a0: Option<u64>, at_star: bool) -> (FResult<usize>, fault::Reach, u64) {
+        let b = Budget::unlimited();
+        let m = crate::modular(&b, f).unwrap().unwrap();
+        let lifted = crate::lift(&b, f, &m, m.k).unwrap();
+        let k = m.k;
+        let r = fault::with_hooks(hooks, a0, at_star, || stage2(&b, f, &m, &lifted, k).map(|fs| fs.len()));
+        (r, fault::reach(), k)
+    }
+
     #[test]
-    #[ignore]
-    fn probe_stage2() {
-        for k in [5usize, 6, 7] {
-            let f = crate::tests::swinnerton_dyer(k);
-            let t = std::time::Instant::now();
-            let r = fault::with_hooks(fault::STAGE1_EXIT, None, false, || crate::try_factor_with(&f, &Budget::unlimited()).map(|x| x.1.len()));
-            eprintln!("S_{k}: {:?} {:?} in {:?}", r, fault::reach(), t.elapsed());
+    fn stage2_appends_more_than_32_columns() {
+        // section 4.2: Stage 1 ends at once on S_6 (n = 64); Stage 2 takes a
+        // certificate only after its level's last pass, so the real loop
+        // appends past Stage 1's 32 columns before the certificate
+        let (r, reach) = factored(&sd(6), fault::STAGE1_EXIT | fault::S2_LAST_PASS, None, false);
+        assert_eq!(r.unwrap(), 1);
+        assert_eq!(reach.s2_entries, 1, "{reach:?}");
+        assert!(reach.s2_cols >= 33, "{reach:?}");
+        assert!(reach.s2_cert_a > 0 && reach.full_subsets_large == 0, "{reach:?}");
+        assert_eq!((reach.s1_cols, reach.s1_levels), (0, 0), "{reach:?}");
+    }
+
+    #[test]
+    fn stage2_reaches_a_fourth_level() {
+        // section 4.2: discovery starts at a0 = ceil(k / 16) on S_5, below the
+        // reconstruction precision; the doubling enters at least 4 levels
+        // before the certificate (reconstructed at k), and the answer holds
+        let f = sd(5);
+        let b = Budget::unlimited();
+        let k = crate::modular(&b, &f).unwrap().unwrap().k;
+        let (r, reach) = factored(&f, fault::STAGE1_EXIT, Some(k.div_ceil(16)), false);
+        assert_eq!(r.unwrap(), 1);
+        assert!(reach.s2_levels >= 4, "{reach:?}");
+        assert!(reach.s2_cert_a > 0 && reach.s2_cert_a <= reach.s2_a_star, "{reach:?}");
+    }
+
+    /// The small fixtures of Theorem 1's tests (section 4.4): S_3, S_4 and a
+    /// product of shifted S_3 (two factors).
+    fn theorem_fixtures() -> Vec<(&'static str, Vec<BigInt>, usize)> {
+        vec![("S_3", sd(3), 1), ("S_4", sd(4), 1), ("S_3 S_3(x+1)", product(&[sd(3), shift(&sd(3), 1)]), 2)]
+    }
+
+    #[test]
+    fn theorem1_certifies_at_the_proved_precision() {
+        // Stage 2 started AT a*: it certifies on that first level, after its
+        // last pass (the full lattice of Theorem 1)
+        for (name, f, t) in theorem_fixtures() {
+            let (r, reach, _) = stage2_direct(&f, fault::S2_LAST_PASS, None, true);
+            assert_eq!(r.unwrap(), t, "{name}");
+            assert_eq!((reach.s2_levels, reach.s2_cert_a), (1, reach.s2_a_star), "{name}: {reach:?}");
+            assert_eq!(reach.internal_no_cert, 0, "{name}");
+        }
+    }
+
+    #[test]
+    fn theorem1_from_below_and_above() {
+        for (name, f, t) in theorem_fixtures() {
+            // from a0 < a*: certified at a sampled a <= a* (clipping samples a*)
+            let (_, reach0, k) = stage2_direct(&f, 0, None, true);
+            let star = reach0.s2_a_star;
+            let (r, reach, _) = stage2_direct(&f, fault::S2_LAST_PASS, Some((star / 5).max(k)), false);
+            assert_eq!(r.unwrap(), t, "{name}");
+            assert!(reach.s2_cert_a <= star, "{name}: {reach:?}");
+            // from a0 >= a*: one level, at a0
+            let (r, reach, _) = stage2_direct(&f, fault::S2_LAST_PASS, Some(star + 5), false);
+            assert_eq!(r.unwrap(), t, "{name}");
+            assert_eq!((reach.s2_levels, reach.s2_cert_a), (1, star + 5), "{name}: {reach:?}");
+        }
+    }
+
+    #[test]
+    fn the_proved_precision_bounds_hold_exactly() {
+        // section 3.4's rounding audit: each integer term is at least the exact
+        // quantity it bounds, checked with exact integer arithmetic (squares
+        // cleared of the roots, alpha = 100/74 cleared of its denominator)
+        let pow2 = |e: u64| BigInt::one() << e;
+        for f in [sd(3), sd(4), sd(5), product(&[sd(3), shift(&sd(3), 1)])] {
+            let b = Budget::unlimited();
+            let m = crate::modular(&b, &f).unwrap().unwrap();
+            let lifted = crate::lift(&b, &f, &m, m.k).unwrap();
+            let (r, n, p) = (lifted.len() as u64, deg(&f) as u64, m.p);
+            let (bounds, _rb) = cld_bounds(&b, &f).unwrap();
+            let st = a_star(&f, r as usize, n as usize, p, &bounds).unwrap();
+            let big = |x: u64| BigInt::from(x);
+            // |g|^2 < 2^(2 gamma)
+            let g2: BigInt = f.iter().map(|c| c * c).sum();
+            assert!(g2 < pow2(2 * st.gamma));
+            // max B_j < 2^beta_b
+            let bmax = bounds.iter().max().unwrap().clone();
+            assert!(bmax < pow2(st.beta_b));
+            // B'^2 = 2 (100/74)^(d-1) B^2 < 2^(2 beta_p)
+            let d = r + n;
+            let bb2 = big(r) + big(n) * big(r + 1) * big(r + 1);
+            let num_bp2 = big(2) * big(100).pow((d - 1) as u32) * &bb2; // B'^2 74^(d-1)
+            let den = big(74).pow((d - 1) as u32);
+            assert!(num_bp2 < pow2(2 * st.beta_p) * &den);
+            // |H|^2 <= n (p Bmax (1 + sqrt r) B')^2 < 2^(2 eta), with
+            // (1 + sqrt r)^2 <= 1 + 2 ceil(sqrt r) + r
+            let s = isqrt_ceil(r);
+            let lhs = big(n) * big(p) * big(p) * &bmax * &bmax * big(1 + 2 * s + r) * &num_bp2;
+            assert!(lhs < pow2(2 * st.eta) * &den);
+            // (p Bmax B' (1 + r (r + 1)))^2 < 2^(2 mu)
+            let q = big(1 + r * (r + 1));
+            assert!(big(p) * big(p) * &bmax * &bmax * &num_bp2 * &q * &q < pow2(2 * st.mu) * &den);
+            // kappa: 2^eta + 2^(beta_p + clog2 n + gamma) <= 2^kappa
+            assert!(pow2(st.eta) + pow2(st.beta_p + clog2(n) + st.gamma) <= pow2(st.kappa));
+            // rho: (n - 1)(n + gamma) + n kappa, as the composition of the bounds
+            assert_eq!(st.rho, (n - 1) * (n + st.gamma) + n * st.kappa);
+            // p^a* > 2^(max(rho, mu) + 1)
+            assert!(BigInt::from(p).pow(st.a as u32) > pow2(st.rho.max(st.mu) + 1));
+        }
+    }
+
+    #[test]
+    fn no_full_subset_search_on_large_residuals() {
+        // section 4.2's audit: with r > ZASSENHAUS_MAX no full enumeration runs,
+        // through Stage 1 (S_5, S_6) or Stage 2 (Stage 1 ended at once)
+        for (f, hooks) in [(sd(5), 0), (sd(6), 0), (sd(5), fault::STAGE1_EXIT), (sd(6), fault::STAGE1_EXIT)] {
+            let (r, reach) = factored(&f, hooks, None, false);
+            assert_eq!(r.unwrap(), 1);
+            assert_eq!(reach.full_subsets_large, 0, "{reach:?}");
         }
     }
 }
