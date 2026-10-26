@@ -45,8 +45,8 @@ assert A_SAFE >= 32 * E
 # their itemsizes; the JS-heap objects' are the worst measured on the CLI
 # (sys._sagebrush_heap_used after a full collection; provisional: the
 # project's host, until M1b's VM run) times 1.25, rounded up: an ndarray
-# 427 bytes, a list pointer 8.02, a large Python int 10.4
-C_IDX, C_BOOL, C_RE, C_CPLX, C_PTR, C_PYINT = 8, 1, 8, 16, 11, 14
+# 427 bytes, a list pointer 9.62 (Node 24), a large Python int 10.4
+C_IDX, C_BOOL, C_RE, C_CPLX, C_PTR, C_PYINT = 8, 1, 8, 16, 13, 14
 C_HDR, C_LIST = 534, 53
 # (Python lists' entries, float 34.6 and complex 50.6 bytes, and a 2-tuple 114)
 C_ENT, C_TUPLE = 64, 143
