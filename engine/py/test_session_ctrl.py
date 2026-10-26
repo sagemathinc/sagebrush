@@ -32,9 +32,25 @@ class Kernel:
         return self.ok
 
 
+_OUTER_SIGINT = signal.getsignal(signal.SIGINT)
+
+
 def fresh():
     S._CTRL.clear()
     S._RETIRED.clear()
+    # (the seam's remove() runs in this ordinary process, not at exit: put back the handler its step (0) replaced)
+    signal.signal(signal.SIGINT, _OUTER_SIGINT)
+
+
+def exit_now(remove):
+    """remove() on the main thread, as atexit runs it; step (0) pinned (SIGINT ignored right after), then the
+    process's own SIGINT handler restored."""
+    try:
+        out = remove()
+        check(signal.getsignal(signal.SIGINT) is signal.SIG_IGN, "step (0): SIGINT is ignored right after the exit cleanup")
+        return out
+    finally:
+        signal.signal(signal.SIGINT, _OUTER_SIGINT)
 
 
 # not Windows: nothing installed
@@ -60,10 +76,10 @@ finally:
     signal.signal(signal.SIGINT, old)
 
 # at exit: removed (SetConsoleCtrlHandler(r, FALSE)) once, and again is nothing
-exits[0]()
+exit_now(exits[0])
 check(k.calls[-1] == (routine, False) and S._CTRL == [] and S._RETIRED[-1] is routine, "at exit: removed with FALSE, out of _CTRL, and kept alive in _RETIRED (a break already under way may still run it)")
 n = len(k.calls)
-exits[0]()
+exits[0]()  # (already retired: it returns before step (0), so nothing is ignored)
 check(len(k.calls) == n, "a second removal does nothing")
 
 # astra2's failed-removal witness (CORR-WIN-EXIT-1): installation succeeds, removal returns 0. The routine
@@ -84,14 +100,14 @@ class Flaky(Kernel):
 k, exits, reports = Flaky(), [], []
 check(S._break_as_sigint(nt=True, boundary=(lambda f: f, k, lambda: 87), at_exit=exits.append, report=reports.append) is True, "installed (for the failed removal)")
 r = k.calls[0][0]
-check(exits[0]() is False and S._CTRL == [r] and S._RETIRED == [] and len(reports) == 1 and "87" in reports[0], "a failed removal: still recorded as installed, reported with its Windows error: %s" % reports)
+check(exit_now(exits[0]) is False and S._CTRL == [r] and S._RETIRED == [] and len(reports) == 1 and "87" in reports[0], "a failed removal: still recorded as installed, reported with its Windows error: %s" % reports)
 seen = []
 old = signal.signal(signal.SIGINT, lambda signum, frame: seen.append(signum))
 try:
     check(r(1) is True and seen == [], "after a failed removal the routine is inert (closing): a Ctrl-Break converts nothing")
 finally:
     signal.signal(signal.SIGINT, old)
-check(exits[0]() is True and k.calls[-1] == (r, False) and k.calls.count((r, False)) == 2 and S._CTRL == [] and S._RETIRED == [r], "a retry really retries, and then retires it")
+check(exit_now(exits[0]) is True and k.calls[-1] == (r, False) and k.calls.count((r, False)) == 2 and S._CTRL == [] and S._RETIRED == [r], "a retry really retries, and then retires it")
 
 # astra2's paused-callback/exit control (CORR-WIN-EXIT-2): a callback paused inside its conversion; exit closes,
 # waits for it, and only then unregisters; a callback entering after closing converts nothing
@@ -158,7 +174,7 @@ try:
     cb = threading.Thread(target=lambda: r(1))
     cb.start()
     try:
-        ok = exits[0]()
+        ok = exit_now(exits[0])
         time.sleep(0.1)  # (any pending signal handled here, at a bytecode boundary, still inside the try)
     except KeyboardInterrupt as e:
         ok, escaped = None, e
@@ -171,6 +187,34 @@ finally:
 check(escaped is None and ok is True and k.calls[-1] == (r, False) and S._CTRL == [] and S._RETIRED == [r] and reports == [],
       "a real SIGINT delivered during the drain under the worker's handler: no KeyboardInterrupt out of the exit, unregistered and retired (%r, %s, %s)" % (escaped, k.calls[-1][1], reports))
 
+# astra2's setter shim: a real SIGINT arrives just before step (0) takes effect (the setter raises KeyboardInterrupt
+# once): the cleanup still completes, from (0) again, and nothing escapes
+fresh()
+k, exits, reports = Kernel(), [], []
+S._break_as_sigint(nt=True, boundary=(lambda f: f, k), at_exit=exits.append, report=reports.append)
+r = k.calls[0][0]
+real_ignore, hits = S._ignore_sigint, []
+
+
+def interrupted_once():
+    hits.append(1)
+    if len(hits) == 1:
+        raise KeyboardInterrupt
+    real_ignore()
+
+
+S._ignore_sigint = interrupted_once
+escaped = None
+try:
+    try:
+        ok = exit_now(exits[0])
+    except KeyboardInterrupt as e:
+        ok, escaped = None, e
+finally:
+    S._ignore_sigint = real_ignore
+check(escaped is None and ok is True and len(hits) == 2 and k.calls[-1] == (r, False) and S._RETIRED == [r] and exits[0].state.closing and reports == [],
+      "a KeyboardInterrupt at step (0): the cleanup starts again and completes, unregistered and retired, nothing escapes (%r, %s)" % (escaped, hits))
+
 # a drain that times out is reported, and the routine is still unregistered and kept alive
 fresh()
 k, exits, reports = Kernel(), [], []
@@ -182,7 +226,7 @@ try:
     t = threading.Thread(target=lambda: r(1))
     t.start()
     stuck.wait(5)
-    check(exits[0]() is True and any("still converting" in m for m in reports) and S._RETIRED == [r], "a drain past drain_s is reported, then the routine is unregistered and kept alive")
+    check(exit_now(exits[0]) is True and any("still converting" in m for m in reports) and S._RETIRED == [r], "a drain past drain_s is reported, then the routine is unregistered and kept alive")
     hold.set()
     t.join(5)
 finally:
@@ -208,6 +252,6 @@ if os.name == "nt":
     fresh()
     exits = []
     check(S._break_as_sigint(at_exit=exits.append) is True and len(S._CTRL) == 1 and len(exits) == 1, "Windows: the real routine is installed")
-    check(exits[0]() is True and S._CTRL == [] and len(S._RETIRED) == 1, "Windows: and removed, still alive")
+    check(exit_now(exits[0]) is True and S._CTRL == [] and len(S._RETIRED) == 1, "Windows: and removed, still alive")
 
 print("session console routine: ok (%d checks)" % checks)

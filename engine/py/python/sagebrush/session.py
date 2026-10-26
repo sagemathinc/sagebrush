@@ -122,6 +122,15 @@ _CTRL = []  # (the worker's console control routine, kept alive as long as it is
 _RETIRED = []  # (and after: a break already on the control thread when it was removed may still run it, grader)
 
 
+def _ignore_sigint():
+    # (step (0) of the console routine's exit: SIGINT ignored; off the main thread signal.signal can't be called, and
+    # remove()'s KeyboardInterrupt catch covers it.  Its own name, so a test can make a SIGINT arrive at this point)
+    try:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except ValueError:
+        pass
+
+
 def _raise_sigint():
     # (the conversion itself; its own name, so a test can pause a callback inside it)
     signal.raise_signal(signal.SIGINT)
@@ -233,14 +242,16 @@ def _break_as_sigint(nt=None, boundary=None, at_exit=None, report=None, drain_s=
             # (first, SIGINT ignored: a conversion still in flight may deliver its SIGINT during the drain, and the
             # worker's handler would otherwise raise KeyboardInterrupt out of this cleanup; at exit nothing restores
             # it.  Off the main thread signal.signal can't be called, and the KeyboardInterrupt catch below does it)
-            try:
-                signal.signal(signal.SIGINT, signal.SIG_IGN)
-            except ValueError:
-                pass
-            try:
-                return _retire()
-            except KeyboardInterrupt:
-                return _retire()
+            # (each KeyboardInterrupt below is a real SIGINT delivered before (0) took effect, astra2: the
+            # cleanup starts again from (0), which is idempotent like the rest; once (0) holds, none can arrive)
+            for _ in range(64):
+                try:
+                    _ignore_sigint()
+                    return _retire()
+                except KeyboardInterrupt:
+                    continue
+            _ignore_sigint()
+            return _retire()
 
         def _retire():
             if r not in _CTRL:
