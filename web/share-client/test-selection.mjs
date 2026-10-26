@@ -84,5 +84,13 @@ ok(reasonText({ kind: "read", cell: 2 }) === "read when the 3rd cell last ran", 
 ok(reasonText({ kind: "opened", cell: 0 }) === "opened in the 1st cell" && reasonText({ kind: "named", cell: 10 }) === "named in the 11th cell", "reasons: opened, named, ordinals");
 ok(reasonText({ kind: "imported", by: "/a.py" }) === "imported by a.py" && reasonText({ kind: "opened", by: "/b.py" }) === "opened in b.py", "reasons by a module");
 
+// ---- #172 r2's review, CORR-172-ASTRA-3: the notebook has the per-file bound too
+{
+  const s = new Selection(1, { path: "/big.ipynb", size: 200 }, []);
+  ok(/big\.ipynb is larger than your plan's largest file/.test(s.summary({ maxFiles: 10, maxFileBytes: 100 }).over ?? ""), `a notebook over the largest file, alone: over (${JSON.stringify(s.summary({ maxFiles: 10, maxFileBytes: 100 }).over)})`);
+  ok(s.summary({ maxFiles: 10, maxFileBytes: 200 }).over === null, "...and at the limit, not (control)");
+  ok(s.summary({ maxFiles: 1 }).over === null && s.rows[0].checked, "the file count and the notebook's mandatory check unchanged");
+}
+
 console.log(`${checks - fails.length}/${checks} passed`);
 process.exit(fails.length ? 1 : 0);
