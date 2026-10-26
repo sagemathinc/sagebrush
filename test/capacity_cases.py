@@ -352,6 +352,40 @@ check("windows totals unchanged", [(lambda w: (C._set_sources(platform="win32", 
                                     for w in (Win(), Win(job=(2 * GiB, 512 * MiB)), Win2(P | J, 2 * GiB, 512 * MiB, 3 * GiB, 2800 * MiB))],
       [(16 * GiB, ["physical"]), (2 * GiB, ["windows job"]), (3 * GiB, ["windows job"])])
 
+# 17. macOS (sysctl hw.memsize; host_statistics64's free and inactive pages):
+# the host row; the resource limits shown, their usage unknown (no
+# /proc/self/status there), never the binding figure; a source that can't be
+# read leaves the figure unknown (fail-closed) and says why; pyjs's own
+# runtime parts still count when the host can't be read
+class Mac:
+    def __init__(self, fail=None, total=16 * GiB, avail=6 * GiB):
+        self.fail, self.total, self.avail = fail, total, avail
+    def physical(self):
+        if self.fail == "physical":
+            raise OSError("sysctlbyname hw.memsize")
+        return self.total
+    def available(self):
+        if self.fail == "available":
+            raise OSError("host_statistics64: kern_return 5")
+        return self.avail
+
+for label, m, lim in (("host", Mac(), NOLIM), ("rlimits", Mac(), {"RLIMIT_AS": (4 * GiB, -1), "RLIMIT_DATA": (2 * GiB, -1)}),
+                      ("fail physical", Mac(fail="physical"), NOLIM), ("fail available", Mac(fail="available"), NOLIM),
+                      ("available past total", Mac(avail=20 * GiB), NOLIM), ("zero total", Mac(total=0), NOLIM)):
+    C._set_sources(platform="darwin", mac=m, rlimits=lim, runtime=NO_RUNTIME)
+    show("macos " + label, C.capacity())
+    print("macos diagnosis", label, sorted(C.diagnosis().items()))
+    print("macos total", label, C._machine_total())
+C._set_sources(platform="darwin", mac=Mac(fail="physical"), rlimits=NOLIM, runtime=lambda: [("wasm engine", 4 * GiB, 0)])
+show("macos fail, runtime parts", C.capacity())
+
+# 18. Windows: which step failed is said (diagnosis); none, after a read that worked
+for label, w in (("fail physical", Win(fail="physical")), ("fail in_job", Win(fail="in_job")), ("fail job_limit", Win(job=(GiB, 0), fail="job_limit")),
+                 ("job without memory limit", Win(job=(None, None)))):
+    C._set_sources(platform="win32", windows=w, runtime=NO_RUNTIME)
+    rec = C.capacity()
+    print("windows diagnosis", label, rec["bytes"], sorted(C.diagnosis().items()))
+
 C._set_sources()
 if had_limit is not None:
     sys._sagebrush_heap_limit = had_limit
