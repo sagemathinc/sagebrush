@@ -366,21 +366,25 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
     qa = _seg_from_list(q)
     _phase("lu")
     # the workspace and the kept state, before the first column (r6 section 2.2's B_0)
-    kmax = max(3 * E * (C_IDX + C_BOOL), E * C_IDX + 2 * E * C_BOOL, 3 * E * cv, 3 * E * C_IDX)
-    B0 = 3 * n * C_IDX + 2 * n * C_BOOL + 2 * n * cv + 5 * n * C_PTR + n * C_PYINT + 2 * E * C_IDX + kmax + 5 * C_HDR
+    kpeak = _kpeak(cv)
+    B0 = 3 * n * C_IDX + n * C_BOOL + 2 * n * cv + 5 * n * C_PTR + n * C_PYINT + 2 * E * C_IDX + kpeak + 5 * C_HDR
     led.reserve(B0)
     pinv = alloc(n, _I)
     for a, b in chunks(n):
         pinv[a:b] = -1
-    reached = alloc(n, bool)
     mark = alloc(n, bool)
     queue = alloc(n, _I)
     rbuf = alloc(n, _I)
     udiag = alloc(n, dt)
     x = alloc(n, dt)
     mbuf = np.zeros(2 * E, dtype=_I)
+    # (whole-array fast paths when nothing is segmented and a piece fits E)
+    flat = not isinstance(pinv, Seg)
     prow = [0] * n
     lrow, lval = [None] * n, [None] * n
+    # (L's columns also as Python lists, for the small columns' scalar path;
+    # empty lists past SMALL entries, which that path never scans)
+    lrow_l, lval_l = [None] * n, [None] * n
     ustep, uval = [None] * n, [None] * n
     free = 0
     for j in range(n):
@@ -391,64 +395,83 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
         work.charge(na, "input")
         for a, b in chunks(na):
             x[ir[a0 + a:a0 + b]] = pr[a0 + a:a0 + b]
-        # a. the reach: the steps this column reaches through L, into queue, unsorted
-        r = 0
+        # a and b. the reach and the touched rows' union, in one pass: a row
+        # touched for the first time (marked, into rbuf) is the one event that
+        # reaches a new step, its pivot step (into queue, unsorted); the lists
+        # are scanned in batches of at most E entries (one list, or several
+        # concatenated and made distinct)
         work.charge(na, "reach")
-        for a, b in chunks(na):
-            g = pinv[ir[a0 + a:a0 + b]]
-            g = g[g >= 0]
-            if g.size:
-                g = g[~reached[g]]
-                if g.size:
-                    reached[g] = True
-                    queue[r:r + g.size] = g
-                    r += g.size
-        h = 0
-        while h < r:
-            k = int(queue[h])
-            h += 1
-            lk = lrow[k]
-            if not lk.size:
-                continue
-            work.charge(lk.size, "reach")
-            for a, b in chunks(lk.size):
-                g = pinv[lk[a:b]]
-                g = g[g >= 0]
-                if g.size:
-                    g = g[~reached[g]]
-                    if g.size:
-                        reached[g] = True
-                        queue[r:r + g.size] = g
-                        r += g.size
-        # b. the touched rows' union, over the unsorted queue, into rbuf
-        t = 0
         work.charge(na, "union")
-        for a, b in chunks(na):
-            rc = ir[a0 + a:a0 + b]
-            new = rc[~mark[rc]]
-            if new.size:
-                mark[new] = True
-                rbuf[t:t + new.size] = new
-                t += new.size
-        for h in range(r):
-            lk = lrow[int(queue[h])]
-            if not lk.size:
+        r = t = h = 0
+        if flat and na <= SMALL:
+            # (a small column, first in Python scalars, which cost about a
+            # tenth of a NumPy call each in pyjs: the same reach, while the
+            # lists scanned total at most SMALL entries)
+            touched = ir[a0:a1].tolist()
+            seen = set(touched)
+            steps = [v for v in (int(pinv[i]) for i in touched) if v >= 0]
+            budget = SMALL - na
+            while h < len(steps):
+                lk = lrow_l[steps[h]]
+                if len(lk) > budget:
+                    break
+                budget -= len(lk)
+                h += 1
+                if lk:
+                    work.charge(len(lk), "reach")
+                    work.charge(len(lk), "union")
+                    for i in lk:
+                        if i not in seen:
+                            seen.add(i)
+                            touched.append(i)
+                            v = int(pinv[i])
+                            if v >= 0:
+                                steps.append(v)
+            if h == len(steps):
+                free = _small_column(j, c, steps, touched, x, pinv, prow, udiag, lrow, lval, lrow_l, lval_l, ustep, uval,
+                                     dt, cv, led, work, free)
                 continue
-            work.charge(lk.size, "union")
-            for a, b in chunks(lk.size):
-                rc = lk[a:b]
-                new = rc[~mark[rc]]
-                if new.size:
-                    mark[new] = True
-                    rbuf[t:t + new.size] = new
-                    t += new.size
+            # (past SMALL: the state so far into the arrays, and on with NumPy)
+            r, t = len(steps), len(touched)
+            ta = np.array(touched, dtype=_I)
+            mark[ta] = True
+            rbuf[:t] = ta
+            queue[:r] = np.array(steps, dtype=_I)
+        else:
+            for a, b in chunks(na):
+                r, t = _visit(ir[a0 + a:a0 + b], pinv, mark, rbuf, t, queue, r)
+        while h < r:
+            parts, tot = [], 0
+            while h < r:
+                lk = lrow[int(queue[h])]
+                s = lk.size
+                if not s:
+                    h += 1
+                elif s > E:
+                    if parts:
+                        break
+                    h += 1
+                    work.charge(s, "reach")
+                    work.charge(s, "union")
+                    for a, b in chunks(s):
+                        rc = lk[a:b]
+                        r, t = _visit(rc, pinv, mark, rbuf, t, queue, r)
+                elif tot + s > E and parts:
+                    break
+                else:
+                    parts.append(lk)
+                    tot += s
+                    h += 1
+            if parts:
+                work.charge(tot, "reach")
+                work.charge(tot, "union")
+                u = parts[0] if len(parts) == 1 else np.unique(np.concatenate(parts))
+                r, t = _visit(u, pinv, mark, rbuf, t, queue, r)
         # c. the column's peak, reserved before anything of it is built
-        Bj = C_IDX * (3 * r + 3 * t) + cv * (r + 2 * t) + C_RE * t + C_BOOL * t + 6 * C_HDR
+        Bj = C_IDX * (3 * r + 3 * t) + cv * (r + 2 * t) + C_RE * t + C_BOOL * t + C_PTR * r + 6 * C_HDR
         try:
             led.reserve(Bj)
         except BaseException:
-            for a, b in chunks(r):
-                reached[queue[a:b]] = False
             for a, b in chunks(t):
                 mark[rbuf[a:b]] = False
                 x[rbuf[a:b]] = 0
@@ -456,55 +479,71 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
         # d. the order: increasing step numbers (topological, as each row of
         # L's column k is pivoted after step k)
         work.charge(r * max(0, (r - 1).bit_length()), "sort")
-        srt = alloc(r, _I)
-        for a, b in chunks(r):
-            srt[a:b] = queue[a:b]
-        us = alloc(r, _I)
-        _sort_into(srt, r, us, mbuf)
-        del srt
-        for a, b in chunks(r):
-            reached[us[a:b]] = False
+        if flat and r <= E:
+            us = np.sort(queue[:r])
+        else:
+            srt = alloc(r, _I)
+            for a, b in chunks(r):
+                srt[a:b] = queue[a:b]
+            us = alloc(r, _I)
+            _sort_into(srt, r, us, mbuf)
+            del srt
         # e. the numeric updates, in that order
         uv = alloc(r, dt)
+        steps = us.tolist() if flat else None
         for s in range(r):
-            k = int(us[s])
+            k = steps[s] if flat else int(us[s])
             xk = x[prow[k]]
             uv[s] = xk
-            lk = lrow[k]
-            if xk != 0 and lk.size:
-                work.charge(lk.size, "numeric")
-                lv = lval[k]
-                for a, b in chunks(lk.size):
-                    x[lk[a:b]] = x[lk[a:b]] - lv[a:b] * xk
+            if xk != 0:
+                lk = lrow[k]
+                sz = lk.size
+                if sz:
+                    work.charge(sz, "numeric")
+                    if sz <= E and flat:
+                        x[lk] -= lval[k] * xk
+                    else:
+                        lv = lval[k]
+                        for a, b in chunks(sz):
+                            x[lk[a:b]] = x[lk[a:b]] - lv[a:b] * xk
         ustep[j], uval[j] = us, uv
         # the candidates (the touched rows not yet pivoted), and the pivot:
         # row q[j], A's diagonal, while within a factor of 10 of the largest;
         # else the largest, the smallest row among equals
         work.charge(t, "pivot")
-        cand = alloc(t, _I)
-        nc = 0
-        for a, b in chunks(t):
-            rc = rbuf[a:b]
-            cc = rc[pinv[rc] < 0]
-            if cc.size:
-                cand[nc:nc + cc.size] = cc
-                nc += cc.size
-        cvals = alloc(nc, dt)
-        amax, best = 0.0, -1
-        for a, b in chunks(nc):
-            cc = cand[a:b]
-            vv = x[cc]
-            cvals[a:b] = vv
-            av = np.abs(vv)
-            mx = float(np.max(av)) if av.size else 0.0
-            if mx > 0:
-                rmin = int(np.min(cc[av == mx]))
-                if mx > amax:
-                    amax, best = mx, rmin
-                elif mx == amax and rmin < best:
-                    best = rmin
-        if amax > 0:
-            p = c if int(pinv[c]) < 0 and abs(x[c]) >= 0.1 * amax else best
+        if flat and t <= E:
+            allr = rbuf[:t]
+            cand = allr[pinv[allr] < 0]
+            nc = cand.size
+            cvals = x[cand]
+            av = np.abs(cvals)
+            pmag = float(np.max(av)) if nc else 0.0
+            best = int(np.min(cand[av == pmag])) if pmag > 0 else -1
+        else:
+            cand = alloc(t, _I)
+            nc = 0
+            for a, b in chunks(t):
+                rc = rbuf[a:b]
+                cc = rc[pinv[rc] < 0]
+                if cc.size:
+                    cand[nc:nc + cc.size] = cc
+                    nc += cc.size
+            cvals = alloc(nc, dt)
+            pmag, best = 0.0, -1
+            for a, b in chunks(nc):
+                cc = cand[a:b]
+                vv = x[cc]
+                cvals[a:b] = vv
+                av = np.abs(vv)
+                mx = float(np.max(av)) if av.size else 0.0
+                if mx > 0:
+                    rmin = int(np.min(cc[av == mx]))
+                    if mx > pmag:
+                        pmag, best = mx, rmin
+                    elif mx == pmag and rmin < best:
+                        best = rmin
+        if pmag > 0:
+            p = c if int(pinv[c]) < 0 and abs(x[c]) >= 0.1 * pmag else best
         else:
             while int(pinv[free]) >= 0:
                 free += 1
@@ -514,37 +553,54 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
         xp = x[p]
         udiag[j] = xp
         # L's column: the other candidates with a nonzero, over the pivot
-        keep = alloc(nc, bool)
-        cnt = 0
-        for a, b in chunks(nc):
-            kk = (cand[a:b] != p) & (cvals[a:b] != 0)
-            keep[a:b] = kk
-            cnt += int(np.count_nonzero(kk))
-        lr = alloc(cnt, _I)
-        lvj = alloc(cnt, dt)
-        o = 0
-        for a, b in chunks(nc):
-            kk = keep[a:b]
-            cc = cand[a:b][kk]
-            if cc.size:
-                lr[o:o + cc.size] = cc
-                lvj[o:o + cc.size] = cvals[a:b][kk] / xp if amax > 0 else cvals[a:b][kk]
-                o += cc.size
+        if flat and t <= E:
+            keep = (cand != p) & (cvals != 0)
+            lr = cand[keep]
+            lvj = cvals[keep] / xp if pmag > 0 else cvals[keep]
+            cnt = lr.size
+        else:
+            keep = alloc(nc, bool)
+            cnt = 0
+            for a, b in chunks(nc):
+                kk = (cand[a:b] != p) & (cvals[a:b] != 0)
+                keep[a:b] = kk
+                cnt += int(np.count_nonzero(kk))
+            lr = alloc(cnt, _I)
+            lvj = alloc(cnt, dt)
+            o = 0
+            for a, b in chunks(nc):
+                kk = keep[a:b]
+                cc = cand[a:b][kk]
+                if cc.size:
+                    lr[o:o + cc.size] = cc
+                    lvj[o:o + cc.size] = cvals[a:b][kk] / xp if pmag > 0 else cvals[a:b][kk]
+                    o += cc.size
         lrow[j], lval[j] = lr, lvj
+        if flat and cnt <= SMALL:
+            lrow_l[j], lval_l[j] = lr.tolist(), lvj.tolist()
+        else:
+            lrow_l[j], lval_l[j] = _BIG, _BIG
         del cand, cvals, keep
         # f. reset the workspace; the column's transients leave the ledger
-        for a, b in chunks(t):
-            mark[rbuf[a:b]] = False
-            x[rbuf[a:b]] = 0
+        if flat and t <= E:
+            mark[allr] = False
+            x[allr] = 0
+        else:
+            for a, b in chunks(t):
+                mark[rbuf[a:b]] = False
+                x[rbuf[a:b]] = 0
         x[p] = 0
         led.release(Bj)
-        led.reserve(C_IDX * (r + cnt) + cv * (r + cnt) + 4 * C_HDR)
+        led.reserve(C_IDX * (r + cnt) + cv * (r + cnt) + 4 * C_HDR + (2 * C_ENT * cnt if cnt <= SMALL else 0))
     # lstep: the steps L's rows are pivoted at, for the transposed solve
     nl = sum(int(v.size) for v in lrow)
     led.reserve(C_IDX * nl + n * C_PTR + n * C_HDR)
     lstep = [None] * n
     for k in range(n):
         lk = lrow[k]
+        if flat and lk.size <= E:
+            lstep[k] = pinv[lk]
+            continue
         out = alloc(lk.size, _I)
         for a, b in chunks(lk.size):
             out[a:b] = pinv[lk[a:b]]
@@ -562,6 +618,102 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
     F.singular = sing
     F.ledger, F.work = led, work
     return F
+
+
+# a small column's scanned entries (the scalar path) and the marker of an L
+# column too long for it
+SMALL = 64
+_BIG = [0] * (SMALL + 1)
+
+
+def _small_column(j, c, steps, touched, x, pinv, prow, udiag, lrow, lval, lrow_l, lval_l, ustep, uval, dt, cv, led, work, free):
+    """column j's steps c to f in Python scalars (its reach and touched rows
+    already found, at most SMALL entries scanned): the same order, updates and
+    pivot rule as the NumPy path; returns the free-row pointer"""
+    r, t = len(steps), len(touched)
+    Bj = C_IDX * (3 * r + 3 * t) + cv * (r + 2 * t) + C_RE * t + C_BOOL * t + C_PTR * r + 6 * C_HDR + 4 * C_ENT * (r + t)
+    try:
+        led.reserve(Bj)
+    except BaseException:
+        for i in touched:
+            x[i] = 0
+        raise
+    work.charge(r * max(0, (r - 1).bit_length()), "sort")
+    steps.sort()
+    uvl = []
+    for k in steps:
+        xk = x[prow[k]]
+        uvl.append(xk)
+        if xk != 0:
+            lk = lrow_l[k]
+            if lk:
+                work.charge(len(lk), "numeric")
+                for i, v in zip(lk, lval_l[k]):
+                    x[i] = x[i] - v * xk
+    work.charge(t, "pivot")
+    cand = [i for i in touched if int(pinv[i]) < 0]
+    cvals = [x[i] for i in cand]
+    mags = [abs(v) for v in cvals]
+    pmag = float(max(mags)) if mags else 0.0
+    if pmag > 0:
+        if int(pinv[c]) < 0 and abs(x[c]) >= 0.1 * pmag:
+            p = c
+        else:
+            p = min(i for i, m in zip(cand, mags) if m == pmag)
+    else:
+        while int(pinv[free]) >= 0:
+            free += 1
+        p = c if int(pinv[c]) < 0 else int(free)
+    pinv[p] = j
+    prow[j] = p
+    xp = x[p]
+    udiag[j] = xp
+    lr = [i for i, v in zip(cand, cvals) if i != p and v != 0]
+    lv = [v / xp if pmag > 0 else v for i, v in zip(cand, cvals) if i != p and v != 0]
+    lrow[j] = np.array(lr, dtype=_I)
+    lval[j] = np.array(lv, dtype=dt)
+    lrow_l[j], lval_l[j] = lr, lv
+    ustep[j] = np.array(steps, dtype=_I)
+    uval[j] = np.array(uvl, dtype=dt)
+    for i in touched:
+        x[i] = 0
+    x[p] = 0
+    cnt = len(lr)
+    led.release(Bj)
+    led.reserve(C_IDX * (r + cnt) + cv * (r + cnt) + 4 * C_HDR + 2 * C_ENT * cnt)
+    return free
+
+
+def _kpeak(cv):
+    """the per-chunk allowance, in bytes: the largest simultaneous mix of a
+    column's kernels at E entries (r6 section 2.2's K_max; the reach and the
+    union include their batch's concatenation and np.unique's sort copy)"""
+    # (a batch: its concatenation and np.unique's sort copy and result, the
+    # mark gather, its negation, the new rows, their steps, the mask, the
+    # pivoted steps)
+    reach = 7 * E * C_IDX + 3 * E * C_BOOL
+    union = 0
+    numeric = 3 * E * cv + E * C_IDX
+    merge = 0
+    route = (5 * E * C_IDX + E * C_BOOL + E * cv) if A_SAFE < (1 << 62) else 0
+    return max(reach, union, numeric, merge) + route
+
+
+def _visit(rows, pinv, mark, rbuf, t, queue, r):
+    """distinct rows (at most E): those not marked yet are marked and appended
+    to rbuf, and the steps of the pivoted ones among them to queue (a step's
+    row is touched at most once, so each step is queued at most once)"""
+    new = rows[~mark[rows]]
+    if new.size:
+        mark[new] = True
+        rbuf[t:t + new.size] = new
+        t += new.size
+        g = pinv[new]
+        g = g[g >= 0]
+        if g.size:
+            queue[r:r + g.size] = g
+            r += g.size
+    return r, t
 
 
 def _seg_from_list(v):
