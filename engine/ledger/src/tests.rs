@@ -283,7 +283,9 @@ fn wasm_totals_are_checked() {
     // 1.3: 1 when some applicable row is joint or unknown)
     assert_eq!(total_from_wasm(4294967296.0, 0, 1), Some(Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: true, uncertified: true }));
     assert_eq!(total_from_wasm(4294967296.0, 0, 0).map(|t| t.uncertified), Some(false));
-    for (b, s, j) in [(-1.0, 0, 0), (1.5, 0, 0), (f64::NAN, 0, 0), (f64::INFINITY, 0, 0), (1.0, 3, 0), (1.0, 0, 2), (1e300, 0, 0)] {
+    // (3 is absent since C r16b: no shared row applies; 4 and up are none)
+    assert_eq!(total_from_wasm(1.0, 3, 0).map(|t| t.status), Some(TotalStatus::Absent));
+    for (b, s, j) in [(-1.0, 0, 0), (1.5, 0, 0), (f64::NAN, 0, 0), (f64::INFINITY, 0, 0), (1.0, 4, 0), (1.0, 0, 2), (1e300, 0, 0)] {
         assert_eq!(total_from_wasm(b, s, j), None, "{} {} {}", b, s, j);
     }
 }
