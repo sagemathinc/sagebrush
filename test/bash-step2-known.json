@@ -258,6 +258,12 @@
         "exit": 1
       },
       {
+        "command": "rm",
+        "script": "rm /B/nosuch",
+        "stderr": "rm: cannot remove '/B/nosuch': /B/nosuch: Permission denied (outside this shell's access)\n",
+        "exit": 1
+      },
+      {
         "command": "uniq",
         "script": "uniq /B/secret",
         "stderr": "uniq: /B/secret: No such file or directory\n",
@@ -282,6 +288,6 @@
         "exit": 2
       }
     ],
-    "note": "Missing paths: all 13 rows of grader's step-1 baseline hold exactly through ShellHost; diff, which the step-0 copy can't load, is frozen from the shipped chunk. Refused paths: every command but rm words a path outside the grant as missing, because exists() answers false outside the grant (F17); rm alone stats it and prints the host's refusal."
+    "note": "Missing paths: all 13 rows of grader's step-1 baseline hold exactly through ShellHost; diff, which the step-0 copy can't load, is frozen from the shipped chunk. Refused paths: every command but rm words a path outside the grant as missing, because exists() answers false outside the grant (F17); rm alone stats it and prints the host's refusal. An absent path outside the grant (rm /B/nosuch) gets rm's same refusal and status as an existing one, so rm tells nothing about what exists there (grader)."
   }
 }

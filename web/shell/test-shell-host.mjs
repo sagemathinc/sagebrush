@@ -64,6 +64,12 @@ const stand = `export function start(port) {
   port.postMessage({ name: "shell.ready", payload: { version: "stand-in" } });
 }`;
 const STAND = withModule(stand);
+// a module that never says ready (its worker runs until its start is cancelled), and a set whose index is
+// never answered (its fetch hangs until cancelled; the server counts the open ones): the starts Stop's grace
+// must end, not merely abandon (CORR-BASH-S2-R2-1)
+const NEVER = withModule("export function start(port) { port.onmessage = () => {}; }");
+const HANG = "f".repeat(64);
+const hang = { open: 0, total: 0 };
 // A real old shell: step 1's module (web/shell/fixtures/bash-shell-0.1.0.js, the 0.1.0 source as pinned then),
 // built by the publisher itself from a copy of the package, so its host_req (1) is computed, not declared
 const OP = await import(join(root, "scripts", "optional-packages.mjs"));
@@ -93,14 +99,21 @@ export * as W from ${JSON.stringify(join(here, "..", "workspace", "index.ts"))};
 `);
 execFileSync("bun", ["build", entry, "--target=browser", "--format=esm", `--outfile=${join(dir, "host-bundle.js")}`], { stdio: ["ignore", "ignore", "inherit"] });
 const data = {
-  S, STAND, OLD,
+  S, STAND, OLD, NEVER, HANG,
   cases: JSON.parse(readFileSync(join(root, "test", "bash-oracle-cases.json"), "utf8")),
   oracle: JSON.parse(readFileSync(join(root, "test", "bash-oracle.json"), "utf8")),
   known: JSON.parse(readFileSync(join(root, "test", "bash-known.json"), "utf8")),
   step2: JSON.parse(readFileSync(join(root, "test", "bash-step2-known.json"), "utf8")),
 };
 const page = `<!doctype html><meta charset="utf-8"><script type="module" src="/page.js"></script>`;
-const pageJs = `import { run } from "/host-cases.js"; window.run = run; window.ready = true;`;
+// (the page counts its live workers: a seam for the cases that must see a worker ended)
+const pageJs = `window.workers = { made: 0, live: 0 };
+const Real = Worker;
+window.Worker = class extends Real {
+  constructor(...a) { super(...a); workers.made++; workers.live++; }
+  terminate() { if (!this.ended) { this.ended = true; workers.live--; } super.terminate(); }
+};
+const { run } = await import("/host-cases.js"); window.run = run; window.ready = true;`;
 mkdirSync(join(dir, "shell"), { recursive: true });
 cpSync(join(here, "worker-boot.js"), join(dir, "shell", "worker-boot.js"));
 
@@ -113,6 +126,12 @@ const server = createServer((req, res) => {
   if (path === "/host-cases.js") return send("text/javascript", readFileSync(join(here, "host-cases.js")));
   if (path === "/host-bundle.js") return send("text/javascript", readFileSync(join(dir, "host-bundle.js")));
   if (path === "/data.json") return send("application/json", JSON.stringify(data));
+  if (path === "/hang-state") return send("application/json", JSON.stringify(hang));
+  if (path === `/pkgset/${HANG}.json`) {
+    hang.open++, hang.total++;
+    res.on("close", () => hang.open--);
+    return res.writeHead(200, { "Content-Type": "application/json", ...iso }).flushHeaders();
+  }
   if (path === "/shell/worker-boot.js") return send("text/javascript", readFileSync(join(dir, "shell", "worker-boot.js")), { "Content-Security-Policy": shellWorkerPolicy() });
   const m = /^\/(pkgset|pkg)\/([0-9a-f]{64})\.json$/.exec(path);
   if (m && existsSync(join(dir, m[1], m[2] + ".json"))) return send("application/json", readFileSync(join(dir, m[1], m[2] + ".json")));
