@@ -109,7 +109,7 @@
    "mode": "sage",
    "s0": 600,
    "smin": 200,
-   "smax": 1000,
+   "smax": 1024,
    "grow": {
     "kind": "scale",
     "p": 3
