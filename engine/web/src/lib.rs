@@ -123,21 +123,38 @@ pub extern "C" fn sb_set_retired_bytes(bytes: f64, faulted: u32) -> i32 {
     }
 }
 
+/// One slot of the host map: a live reservation (or none) and the slot's
+/// generation, which every handle to it carries (astra2 CORR-C2B-HANDLE-1:
+/// a stale handle never reaches the slot's next reservation).
+struct HostSlot {
+    gen: u32,
+    r: Option<sagebrush_ledger::Reservation>,
+}
+
 thread_local! {
-    /// The host participants' reservations (C r15 section 3.1), by handle
-    /// (index + 1); a released slot is reused.  Bounded by memory, not by a
-    /// count: the map's own capacity is a ledger obligation (HOST_MAP),
-    /// admitted before each growth, and grown outside the ledger's lock.
-    static HOST: std::cell::RefCell<Vec<Option<sagebrush_ledger::Reservation>>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The host participants' reservations (C r15 section 3.1), by slot; a
+    /// released slot is reused under its next generation.  Bounded by memory,
+    /// not by a count: the map's own capacity is a ledger obligation
+    /// (HOST_MAP), admitted before each growth, and grown outside the
+    /// ledger's lock.
+    static HOST: std::cell::RefCell<Vec<HostSlot>> = const { std::cell::RefCell::new(Vec::new()) };
     /// The map's capacity in bytes, held in the ledger (daybreak2
     /// LIMIT-C2BI-1): a zero-byte handle still costs its slot.
     static HOST_MAP: std::cell::RefCell<Option<sagebrush_ledger::Reservation>> = const { std::cell::RefCell::new(None) };
-    /// The released slots in HOST (a reservation reuses one before growing).
+    /// The reusable released slots in HOST (a reservation takes one before
+    /// growing the map).
     static HOST_FREE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// One slot of the host map, in bytes.
-const HOST_SLOT: u64 = std::mem::size_of::<Option<sagebrush_ledger::Reservation>>() as u64;
+const HOST_SLOT: u64 = std::mem::size_of::<HostSlot>() as u64;
+
+/// A handle is gen * 2^32 + slot + 1, an integer below 2^53 (exact in the
+/// host's numbers); a slot whose generation reaches GEN_END is retired, never
+/// reused, so no handle value ever repeats (no generation wraps).  Its
+/// storage stays charged in HOST_MAP.
+const SLOT_SPAN: u64 = 1 << 32;
+const GEN_END: u32 = 1 << 21;
 
 /// The bytes the host map's capacity holds in the ledger.
 pub fn host_map_bytes() -> u64 {
@@ -148,7 +165,7 @@ pub fn host_map_bytes() -> u64 {
 /// admitted first (held from then on), with the old buffer's bytes for the
 /// move (a reallocation holds both until the copy is done), and only then
 /// allocated, outside the ledger's lock.
-fn host_map_room(h: &mut Vec<Option<sagebrush_ledger::Reservation>>) -> Result<(), sagebrush_ledger::EngineError> {
+fn host_map_room(h: &mut Vec<HostSlot>) -> Result<(), sagebrush_ledger::EngineError> {
     if h.len() < h.capacity() {
         return Ok(());
     }
@@ -173,6 +190,15 @@ fn host_bytes(b: f64) -> Option<u64> {
     (b.is_finite() && b >= 0.0 && b.fract() == 0.0 && b <= 9007199254740992.0).then_some(b as u64)
 }
 
+/// A handle's slot and generation, if it is one in form (a positive integer
+/// below 2^53 with a slot part); whether it is live is the slot's to say.
+fn host_handle(handle: f64) -> Option<(usize, u32)> {
+    let v = host_bytes(handle)?;
+    let slot = (v % SLOT_SPAN).checked_sub(1)?;
+    let gen = u32::try_from(v / SLOT_SPAN).ok().filter(|&g| g < GEN_END)?;
+    Some((usize::try_from(slot).ok()?, gen))
+}
+
 /// The reply buffer's address (sb_reserve and sb_grow leave a refusal there,
 /// sb_reply_len bytes of JSON).
 #[no_mangle]
@@ -188,27 +214,29 @@ fn set_reply(v: Value) {
 
 /// A host participant's common-domain obligation in this instance's ledger
 /// (no-cliffs C r7 section 4, r15 section 3.1): `bytes` for `what` (UTF-8 at
-/// what_ptr, what_len).  > 0: the handle; 0: refused, the reply holds
-/// {"memory": {...}}; -1: an invalid argument or an internal error, the
-/// reply holds {"error": ...}.
+/// what_ptr, what_len).  > 0: the handle (an integer below 2^53, valid until
+/// released: never reissued); 0: refused, the reply holds {"memory": {...}};
+/// -1: an invalid argument or an internal error, the reply holds
+/// {"error": ...}.
 ///
 /// # Safety
 /// `what_ptr` must point to `what_len` readable bytes (or `what_len` be 0),
 /// as the host writes them into this instance's memory.
 #[no_mangle]
-pub unsafe extern "C" fn sb_reserve(what_ptr: *const u8, what_len: usize, bytes: f64) -> i32 {
+pub unsafe extern "C" fn sb_reserve(what_ptr: *const u8, what_len: usize, bytes: f64) -> f64 {
     let what = if what_len == 0 { "host" } else { std::str::from_utf8(std::slice::from_raw_parts(what_ptr, what_len)).unwrap_or("host") };
     let Some(x) = host_bytes(bytes) else {
         set_reply(json!({ "error": format!("sb_reserve: {} is not a byte count", bytes) }));
-        return -1;
+        return -1.0;
     };
     let placed = sagebrush_ledger::reserve(what, x).and_then(|r| {
         HOST.with(|h| {
             let mut h = h.borrow_mut();
             let free = HOST_FREE.with(|f| f.get());
-            let i = match (free > 0).then(|| h.iter().position(Option::is_none)).flatten() {
+            let reuse = if free > 0 { h.iter().position(|s| s.r.is_none() && s.gen < GEN_END) } else { None };
+            let i = match reuse {
                 Some(i) => {
-                    h[i] = Some(r);
+                    h[i].r = Some(r);
                     HOST_FREE.with(|f| f.set(free - 1));
                     i
                 }
@@ -216,44 +244,46 @@ pub unsafe extern "C" fn sb_reserve(what_ptr: *const u8, what_len: usize, bytes:
                     // (a refused map growth drops r: the reservation is
                     // released, never held without a handle)
                     host_map_room(&mut h)?;
-                    h.push(Some(r));
+                    h.push(HostSlot { gen: 0, r: Some(r) });
                     h.len() - 1
                 }
             };
-            // (a memory bound comes first: 2^31 slots exceed WebAssembly's
+            // (a memory bound comes first: 2^32 slots exceed WebAssembly's
             // 4 GiB address space, so this fails closed only natively)
-            i32::try_from(i + 1).map_err(|_| {
-                h[i] = None;
-                HOST_FREE.with(|f| f.set(f.get() + 1));
-                sagebrush_ledger::EngineError::Internal("sb_reserve: no handle number left".into())
-            })
+            match u64::try_from(i).ok().filter(|&s| s < SLOT_SPAN - 1) {
+                Some(s) => Ok((h[i].gen as u64 * SLOT_SPAN + s + 1) as f64),
+                None => {
+                    h[i].r = None;
+                    Err(sagebrush_ledger::EngineError::Internal("sb_reserve: no handle number left".into()))
+                }
+            }
         })
     });
     match placed {
         Ok(handle) => handle,
         Err(sagebrush_ledger::EngineError::Memory(r)) => {
             set_reply(json!({ "memory": memory_error_value(&r) }));
-            0
+            0.0
         }
         Err(e) => {
             set_reply(json!({ "error": e.to_string() }));
-            -1
+            -1.0
         }
     }
 }
 
 /// Grow a host handle's obligation by `bytes` (a growing result, C r15
 /// section 3.1): 0 ok; 1 refused, the reply holds {"memory": {...}}; -1 an
-/// unknown handle, an invalid argument or an internal error.
+/// unknown or released handle, an invalid argument or an internal error.
 #[no_mangle]
-pub extern "C" fn sb_grow(handle: i32, bytes: f64) -> i32 {
+pub extern "C" fn sb_grow(handle: f64, bytes: f64) -> i32 {
     let Some(x) = host_bytes(bytes) else {
         set_reply(json!({ "error": format!("sb_grow: {} is not a byte count", bytes) }));
         return -1;
     };
     // (the reservation is taken out for the admission, so no borrow is held
-    // across the ledger's lock, then put back)
-    let Some(mut r) = slot_take(handle) else {
+    // across the ledger's lock, then put back in the same slot)
+    let Some((i, mut r)) = slot_take(handle) else {
         set_reply(json!({ "error": format!("sb_grow: no host handle {}", handle) }));
         return -1;
     };
@@ -268,28 +298,44 @@ pub extern "C" fn sb_grow(handle: i32, bytes: f64) -> i32 {
             -1
         }
     };
-    HOST.with(|h| h.borrow_mut()[(handle - 1) as usize] = Some(r));
+    HOST.with(|h| h.borrow_mut()[i].r = Some(r));
     out
 }
 
-/// Release a host handle: 0, or -1 for an unknown handle.
+/// Release a host handle: 0, or -1 for an unknown or released handle.  The
+/// slot's generation advances, so this handle is stale from then on.
 #[no_mangle]
-pub extern "C" fn sb_release(handle: i32) -> i32 {
+pub extern "C" fn sb_release(handle: f64) -> i32 {
     match slot_take(handle) {
-        Some(r) => {
+        Some((i, r)) => {
             drop(r);
-            HOST_FREE.with(|f| f.set(f.get() + 1));
+            let reusable = HOST.with(|h| {
+                let mut h = h.borrow_mut();
+                h[i].gen += 1;
+                h[i].gen < GEN_END
+            });
+            if reusable {
+                HOST_FREE.with(|f| f.set(f.get() + 1));
+            }
             0
         }
         None => -1,
     }
 }
 
-/// A live handle's reservation, taken out of its slot (sb_grow puts it back;
-/// sb_release counts the slot free).
-fn slot_take(handle: i32) -> Option<sagebrush_ledger::Reservation> {
-    let i = usize::try_from(handle).ok()?.checked_sub(1)?;
-    HOST.with(|h| h.borrow_mut().get_mut(i).and_then(Option::take))
+/// A live handle's slot and reservation, taken out of the slot (sb_grow
+/// puts it back; sb_release advances the generation): only when the handle's
+/// generation is the slot's.
+fn slot_take(handle: f64) -> Option<(usize, sagebrush_ledger::Reservation)> {
+    let (i, gen) = host_handle(handle)?;
+    HOST.with(|h| {
+        let mut h = h.borrow_mut();
+        let s = h.get_mut(i)?;
+        if s.gen != gen {
+            return None;
+        }
+        s.r.take().map(|r| (i, r))
+    })
 }
 
 
