@@ -105,7 +105,7 @@ pub fn reserve_growth(what: &str, block: u64) -> Result<Growth, EngineError> {
     drop(s);
     Err(EngineError::Memory(Refusal {
         what: what.to_string(),
-        need: w.unwrap_or(u64::MAX),
+        need: w.unwrap_or(!0),
         allowance: allowance(t),
         live,
         outstanding,
