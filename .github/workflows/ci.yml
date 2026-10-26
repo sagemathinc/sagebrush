@@ -67,7 +67,12 @@ jobs:
         run: |
           python3 test/limit_sites.py --check > census.json || { cat census.json; exit 1; }
           pinned=$(sed -n 's/^const LIMIT_SITES_BASELINE_SHA256 = "\([0-9a-f]*\)";$/\1/p' test/limits.test.ts)
-          python3 -c 'import json, sys; d = json.load(open("census.json")); print(json.dumps({k: d[k] for k in ("sites", "registered", "explained", "problems")})); sys.exit(0 if d["baseline_sha256"] == sys.argv[1] and d["explained"] >= 17 else 1)' "$pinned"
+          python3 -c 'import json, sys; d = json.load(open("census.json")); print(json.dumps({k: d[k] for k in ("sites", "registered", "explained", "active_baseline", "problems")})); sys.exit(0 if d["baseline_sha256"] == sys.argv[1] and d["explained"] >= 17 else 1)' "$pinned"
+      # (the baseline sweep: its manifest rebuilt from the commit it names, fetched if this shallow checkout lacks it, and its tooling's fixture cases)
+      - name: "limits sweep: the manifest is the one rebuilt from its revision, and the tooling's fixture cases pass (test/limit_sweep.py)"
+        run: |
+          python3 test/limit_sweep.py verify
+          python3 test/limit_sweep_cases.py
 
   node-tests:
     needs: changes
