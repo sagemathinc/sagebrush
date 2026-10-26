@@ -86,11 +86,13 @@ pub extern "C" fn sb_set_memory_share(v: f64) {
 /// The engine's memory total (no-cliffs plan C r10 section 1, the host's
 /// lib/_capacity.py engine_total), pushed by the host before a dispatch:
 /// bytes (an integer up to 2^53), status (0 observed, 1 zero, 2 nominal) and
-/// joint (1 when the same bytes also bound the host); anything else is none,
+/// uncertified (C r17 section 1.3: 1 when some row that constrains the
+/// engine's domain is joint or unknown, the host's engine_uncertified; then
+/// the ledger still admits but is not certified); anything else is none,
 /// and the ledger uses the nominal total.  Optional, as sb_set_memory_share.
 #[no_mangle]
-pub extern "C" fn sb_set_memory_total(bytes: f64, status: u32, joint: u32) {
-    sagebrush_ledger::set_total(sagebrush_ledger::total_from_wasm(bytes, status, joint));
+pub extern "C" fn sb_set_memory_total(bytes: f64, status: u32, uncertified: u32) {
+    sagebrush_ledger::set_total(sagebrush_ledger::total_from_wasm(bytes, status, uncertified));
 }
 
 /// The ledger's live estimate (committed pages, or the baseline plus
