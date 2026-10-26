@@ -163,6 +163,30 @@ fn a_clean_exit_and_an_unwind_both_leave_nothing() {
 }
 
 #[test]
+fn a_worker_joins_the_chain_without_taking_the_guard() {
+    // (the guard is thread-bound, CORR-C1-2: compile_fail doctests on
+    // Operation and Scope; a worker runs under the chain with with_chain)
+    let _g = fresh(total_for_usable(1000));
+    let op = Operation::enter();
+    let chain = op.chain();
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            assert_eq!(current_chain(), 0);
+            with_chain(chain, || {
+                assert_eq!(current_chain(), chain);
+                let r = reserve("worker", 300).unwrap();
+                assert_eq!(chain_outstanding(chain), 300);
+                drop(r);
+            });
+            assert_eq!(current_chain(), 0);
+        });
+    });
+    assert_eq!(current_chain(), chain);
+    assert_eq!(op.finish(), Ok(()));
+    assert_eq!((outstanding_bytes(), current_chain()), (0, 0));
+}
+
+#[test]
 fn an_observed_zero_refuses_and_no_total_is_nominal() {
     let _g = fresh(0);
     set_total(Some(Total { bytes: 0, status: TotalStatus::Zero, joint: false }));
