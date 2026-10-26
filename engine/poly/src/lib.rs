@@ -33,9 +33,16 @@ mod binomial;
 pub mod budget;
 mod lll;
 pub mod nf;
+/// The recombination faults, for other crates' tests of how an internal
+/// error reaches their surfaces (feature `test-faults`, dev-dependencies
+/// only; rank-3 plan r3 section 4.3).
+#[cfg(feature = "test-faults")]
+pub mod test_faults {
+    pub use crate::vanhoeij::fault::{with, SKIP_PREPASS};
+}
 mod vanhoeij;
 
-pub use budget::{with_default_limits, Budget, FactorLimit, Limits, MemorySource, Phase};
+pub use budget::{with_default_limits, Budget, FactorLimit, Kind, Limits, MemorySource, Phase, INTERNAL_PREFIX};
 use budget::{big_bytes, div_work, limbs, mul_work, poly_bytes, words_bytes, FResult, Reservation};
 
 pub type ZPoly = Vec<BigInt>;
