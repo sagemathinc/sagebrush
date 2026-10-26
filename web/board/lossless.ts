@@ -115,6 +115,49 @@ export function roundTrips(input: any, given: { pos: number; id: string }[] = []
   return wat === null ? { ok: true } : { ok: false, at: wat };
 }
 
+const TYPES = new Set(["doc", "page", "item", "edge"]);
+const isObj = (x: unknown): x is Rec => typeof x === "object" && x !== null && !Array.isArray(x);
+const isPos = (x: unknown) => Number.isSafeInteger(x) && (x as number) >= 0;
+
+/**
+ * Whether records sent as an edit (a tab's snapshot) are exactly the records of the board they decode to, or
+ * the first thing wrong: each a record of a known type, with its key's fields; every key once and one doc
+ * record; and decoding them, then making the records again, gives back every record and field as sent (so
+ * nothing the decoder drops or chooses between, such as a record no page reaches, a duplicate, or a field
+ * it doesn't carry, passes).  No transformation is allowed: a tab's records come from a head, already given
+ * page ids.  The board they decode to, when they are.
+ */
+export function recordsAre(rs: unknown[]): { ok: true; doc: any } | { ok: false; at: string } {
+  const sent = new Map<string, string>();
+  let docs = 0;
+  for (let i = 0; i < rs.length; i++) {
+    const r = rs[i];
+    if (!isObj(r)) return { ok: false, at: `record ${i}: not an object` };
+    if (typeof r.type !== "string" || !TYPES.has(r.type)) return { ok: false, at: `record ${i}: type` };
+    if (typeof r.page !== "string" || typeof r.id !== "string") return { ok: false, at: `record ${i}: page or id` };
+    if (r.type === "doc") { docs++; if (r.page !== "" || r.id !== "") return { ok: false, at: `record ${i}: the doc's key` }; }
+    if (r.type === "page" && r.id !== "") return { ok: false, at: `record ${i}: a page's key` };
+    if ((r.type === "page" || r.type === "item" || r.type === "edge") && !isPos(r.pos)) return { ok: false, at: `record ${i}: pos` };
+    if (r.type === "item" && typeof r.parent !== "string") return { ok: false, at: `record ${i}: parent` };
+    const k = keyOf(r);
+    if (sent.has(k)) return { ok: false, at: `record ${i}: key ${k} twice` };
+    // (a value nested too deeply to walk is a wrong record, not an exception: CORR-153-7)
+    try { sent.set(k, canon(r)); } catch { return { ok: false, at: `record ${i}: a value nested too deeply` }; }
+  }
+  if (docs !== 1) return { ok: false, at: `${docs} doc records` };
+  let doc: any, again: Rec[];
+  try { doc = fromEditRecords(rs as Rec[]); again = editRecords(doc); } catch { return { ok: false, at: "the records aren't a board" }; }
+  if (again.length !== sent.size) return { ok: false, at: `${sent.size} records sent, ${again.length} in the board` };
+  try {
+    for (const r of again) {
+      const k = keyOf(r), s = sent.get(k);
+      if (s === undefined) return { ok: false, at: `key ${k} not sent as the board has it` };
+      if (s !== canon(r)) return { ok: false, at: `key ${k}: ${firstDifference(JSON.parse(s), r, "") ?? "/"}` };
+    }
+  } catch { return { ok: false, at: "a value nested too deeply" }; }
+  return { ok: true, doc };
+}
+
 /** Whether `bytes` are exactly the board `d` (equal JSON values): the check before a write. */
 export function bytesAre(bytes: string, d: any): { ok: true } | { ok: false; at: string } {
   let parsed: any;
