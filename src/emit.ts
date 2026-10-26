@@ -93,6 +93,7 @@ export class Emitter {
     this.hoisted.push(`const ${name} = ${expr};`);
     return name;
   }
+
   site(kind: string, name: string, n?: number): string {
     return this.hoist(`R.${kind}(${q(name)}${n === undefined ? "" : ", " + n})`);
   }
@@ -496,6 +497,70 @@ export class Emitter {
     if (consumed !== null) return consumed;
     return this.plainCall(e);
   }
+  // `open(F, M).write(S)` as a statement (an expression statement, a cell's
+  // displayed last one, one assignment's value, a return's): the file is opened at
+  // the open call's position, written and closed at the statement, as
+  // CPython's temporary is when its last reference goes, where pyjs's file
+  // object would keep the data until a close, the cell's end or the
+  // program's (plan-pyjs-file-visibility r7, addendum 1, then c1 + c2:
+  // runtime/file-once.ts has the protocol).  F, M and S are any expressions,
+  // each evaluated once, where today's code evaluates it: open, F and M
+  // first; then, when open is the builtin, F an exact str and M one of w, a,
+  // wb, ab (identity, typeof and ===, no Python call), the native open, else
+  // today's call of open; then S, in a try whose finally closes the native descriptor
+  // once, on an exception or Stop too; then the write.  Nothing is read
+  // ahead of its place, so no namespace needs checking.  S with yield or
+  // await isn't a site (the descriptor isn't held across a suspension).
+  fileOnceShape(e: A.Expr): { o: A.Expr; f: A.Expr; m: A.Expr; s: A.Expr } | null {
+    if (e.k !== "Call" || e.func.k !== "Attribute" || e.func.attr !== "write" || e.args.length !== 1 || e.keywords.length !== 0 || e.args[0].k === "Starred") return null;
+    const c = e.func.value;
+    if (c.k !== "Call" || c.args.length !== 2 || c.keywords.length !== 0 || c.args.some((a) => a.k === "Starred")) return null;
+    // (the calls the compiler gives its caller's namespaces stay as they are)
+    if (c.func.k === "Name" && ["globals", "locals", "vars", "dir", "eval", "exec", "super"].includes(c.func.id)) return null;
+    if (suspends(e.args[0])) return null;
+    return { o: c.func, f: c.args[0], m: c.args[1], s: e.args[0] };
+  }
+  fileOnceStmt(value: A.Expr, after: ((v: string) => void) | null): boolean {
+    const x = this.fileOnceShape(value);
+    if (x === null) return false;
+    const canon = this.hoist("R.fileOnceOpen()");
+    // (the declined path: today's write call, its method looked up after S
+    // is evaluated as for any call of a method in pyjs; looking it up before
+    // S, CPython's order, made a bound method per call and cost a near-no-op
+    // writer 15 times its time)
+    // (WAIVER, approved by William on 2026-10-25 at 1:20 PM PDT, "Accept
+    // this one documented exception": a declined site whose open is a user
+    // function returning a near-no-op writer, in a tight loop, costs 1.114
+    // times the same code without the site (7 rounds of best-of-5, VM1;
+    // 15.75 against 14.22 ns a call, 1.53 ns more), over the 1.01 gate;
+    // every other gate passes.  /scratch/sagebrush-reviews/fv-gates-r3-vm1/
+    // g6-nosite.json)
+    const call = this.site("siteCall", "write", 1);
+    const [to, tf, tm, th, tobj, tv] = [this.temp(), this.temp(), this.temp(), this.temp(), this.temp(), this.temp()];
+    const eo = this.ex(x.o);
+    this.w(`${to} = ${eo};`);
+    const ef = this.ex(x.f);
+    this.w(`${tf} = ${ef};`);
+    const em = this.ex(x.m);
+    this.w(`${tm} = ${em}; ${th} = null;`);
+    this.w(`if (${to} === ${canon} && typeof ${tf} === "string" && (${tm} === "w" || ${tm} === "a" || ${tm} === "wb" || ${tm} === "ab")) ${th} = R.fileOnceBegin(${tf}, ${tm});`);
+    this.w(`else ${tobj} = typeof ${to} === "function" ? ${to}(${tf}, ${tm}) : callObj(${to}, [${tf}, ${tm}]);`);
+    this.w("try {");
+    this.indent++;
+    // (S, evaluated once, on either branch: handed over in R.fileOnceS on the
+    // native one, so that no temporary, argument or register of the frame
+    // keeps it (addendum 1); passed as today's code passes it on the
+    // declined one, where a slot round trip cost the near-no-op writer)
+    const es = this.ex(x.s);
+    this.w(`${tv} = ${th} !== null ? (R.fileOnceS.v = ${es}, R.fileOnceEnd(${th})) : ${call}(${tobj}, ${es});`);
+    this.indent--;
+    this.w(`} finally {`);
+    this.w(`  if (${th} !== null) { R.fileOnceAbort(${th}); ${th} = null; }`);
+    this.w(`  ${tobj} = undefined;`);
+    this.w("}");
+    if (after !== null) after(tv);
+    return true;
+  }
   // A call of e.func, or of `callee`, the JavaScript holding it
   plainCall(e: Extract<A.Expr, { k: "Call" }>, callee?: string): string {
     const f = e.func;
@@ -792,9 +857,20 @@ export class Emitter {
   stmtInner(st: A.Stmt) {
     this.line = st.line;
     switch (st.k) {
-      case "Expr":
+      case "Expr": {
         if (st.value.k === "Const") return;
+        if (this.fileOnceStmt(st.value, null)) return;
+        // (a cell's last expression, displayed: its value through the hook)
+        const v = st.value;
+        if (v.k === "Call" && v.func.k === "Name" && (v.func.id === "__pyjs_displayhook__" || v.func.id === "__pyjs_sage_displayhook__") && v.args.length === 1 && v.keywords.length === 0) {
+          const hook = v.func.id;
+          if (this.fileOnceStmt(v.args[0], (r) => {
+            const h = this.temp();
+            this.w(`${h} = ${this.load(hook)}; typeof ${h} === "function" ? ${h}(${r}) : callObj(${h}, [${r}]);`);
+          })) return;
+        }
         return this.w(`${this.ex(st.value)};`);
+      }
       case "Assign": {
         if (st.targets.length === 1 && st.targets[0].k === "Tuple" && st.value.k === "Tuple" && st.targets[0].elts.length === st.value.elts.length && ![...st.targets[0].elts, ...st.value.elts].some((x) => x.k === "Starred")) {
           // a, b = b, a: evaluate every right-hand side first.
@@ -806,6 +882,7 @@ export class Emitter {
           st.targets[0].elts.forEach((t, i) => this.w(this.assignCode(t, ts[i])));
           return;
         }
+        if (st.targets.length === 1 && this.fileOnceStmt(st.value, (r) => this.w(this.assignCode(st.targets[0], r)))) return;
         if (st.targets.length === 1) return this.w(this.assignCode(st.targets[0], this.valueFirst(st.targets[0], st.value)));
         const v = this.ex(st.value);
         const t = this.temp();
@@ -830,6 +907,7 @@ export class Emitter {
         return;
       case "Return":
         if (this.fn.scope.kind !== "function") this.fail("'return' outside function");
+        if (st.value !== null && this.fileOnceStmt(st.value, (r) => this.w(`return ${r};`))) return;
         return this.w(`return ${st.value === null ? "null" : this.ex(st.value)};`);
       case "If": {
         this.w(`if (${this.bool(st.test)}) {`);
@@ -1354,3 +1432,15 @@ const RUNTIME_NAMES = [
   "importModule", "importTop", "importAs", "importFromStmt", "importFrom", "importStar", "resolveRelative", "delattr", "Ellipsis", "T", "typeOf",
   "sortedKeys", "INTR", "interrupted",
 ];
+
+// Whether evaluating e can suspend its frame (yield, yield from, await),
+// outside a lambda's body, which is its own frame; a lambda's defaults are
+// evaluated in this one, so they count (astra2's CORR-FV-R3-2)
+function suspends(e: any): boolean {
+  if (e === null || typeof e !== "object") return false;
+  if (Array.isArray(e)) return e.some(suspends);
+  if (e.k === "Yield" || e.k === "YieldFrom" || e.k === "Await") return true;
+  if (e.k === "Lambda") return [...e.args.args, ...e.args.kwonly].some((p: any) => suspends(p.default));
+  for (const k of Object.keys(e)) if (k !== "k" && k !== "line" && suspends(e[k])) return true;
+  return false;
+}

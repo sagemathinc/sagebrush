@@ -27,8 +27,23 @@ interface Entry {
   mtime: number;
   /** not fetched yet */
   remote?: Remote;
+  /** the path that names it now, null once it is unlinked (an open file
+   * keeps the entry, as a descriptor keeps an inode: onceOpen) */
+  path: string | null;
 }
 const files = new Map<string, Entry>();
+// (an entry named r; one that r named before is unlinked)
+function place(r: string, f: Entry): void {
+  const old = files.get(r);
+  if (old !== undefined && old !== f) old.path = null;
+  files.set(r, f);
+  f.path = r;
+}
+function drop(r: string): void {
+  const f = files.get(r);
+  if (f !== undefined) f.path = null;
+  files.delete(r);
+}
 const dirs = new Map<string, number>([["/", Date.now()]]); // path -> mtime
 let cwd = "/";
 
@@ -73,7 +88,7 @@ export function load(entries: [string, Uint8Array][]) {
   for (const [p, data] of entries) {
     const r = resolve(p);
     ensureDirs(r);
-    files.set(r, { data: new Uint8Array(data), mtime: Date.now() });
+    place(r, { data: new Uint8Array(data), mtime: Date.now(), path: r });
   }
 }
 // A shared collection's files: [path, {url, sha256, size}], fetched when read.
@@ -81,7 +96,7 @@ export function mount(entries: [string, Remote][]) {
   for (const [p, remote] of entries) {
     const r = resolve(p);
     ensureDirs(r);
-    files.set(r, { data: new Uint8Array(0), mtime: Date.now(), remote: { url: String(remote.url), sha256: String(remote.sha256), size: Number(remote.size) } });
+    place(r, { data: new Uint8Array(0), mtime: Date.now(), remote: { url: String(remote.url), sha256: String(remote.sha256), size: Number(remote.size) }, path: r });
   }
 }
 // (synchronously: Python's open() is synchronous, and a worker may block)
@@ -122,18 +137,70 @@ function contents(r: string, f: Entry): Uint8Array {
 // Changes the page makes (an upload, a delete in the files panel).
 export function put(p: string, data: Uint8Array | null) {
   const r = resolve(p);
-  if (data === null) files.delete(r);
+  if (data === null) drop(r);
   else {
     ensureDirs(r);
-    files.set(r, { data: new Uint8Array(data), mtime: Date.now() });
+    rewrite(r, new Uint8Array(data));
+  }
+}
+// (a file's new contents: the same entry if there is one, as a write to an
+// existing file is the same file to every descriptor open on it)
+function rewrite(r: string, data: Uint8Array): void {
+  const f = files.get(r);
+  if (f === undefined) place(r, { data, mtime: Date.now(), path: r });
+  else {
+    delete f.remote;
+    f.data = data;
+    f.mtime = Date.now();
   }
 }
 
 function setFile(r: string, data: Uint8Array) {
   if (dirs.has(r)) fail("EISDIR", -21, "open", r);
   if (!dirs.has(parent(r))) fail("ENOENT", -2, "open", r);
-  files.set(r, { data, mtime: Date.now() });
+  rewrite(r, data);
   hooks.changed(r, data);
+}
+
+// A file held open (open(F, M).write(S)'s, src/runtime/file-once.ts): its
+// entry, not its path, so that a rename, an unlink or a new file at the path
+// while S is evaluated leaves the write where a descriptor's would go
+export interface OpenFile {
+  entry: Entry;
+  append: boolean;
+  pos: number;
+}
+// open for writing: create, or truncate ("w"), or keep ("a")
+export function onceOpen(p: string, append: boolean): OpenFile {
+  const r = resolve(p);
+  if (dirs.has(r)) fail("EISDIR", -21, "open", p);
+  if (!dirs.has(parent(r))) fail("ENOENT", -2, "open", p);
+  let f = files.get(r);
+  if (f === undefined) {
+    f = { data: new Uint8Array(0), mtime: Date.now(), path: r };
+    place(r, f);
+    hooks.changed(r, f.data);
+  } else if (!append) {
+    delete f.remote;
+    f.data = new Uint8Array(0);
+    f.mtime = Date.now();
+    hooks.changed(r, f.data);
+  }
+  return { entry: f, append, pos: 0 };
+}
+// bytes at the handle's position, or at the end when appending; the page
+// told of the change while a path names the file
+export function onceWrite(h: OpenFile, data: Uint8Array): void {
+  const f = h.entry;
+  const old = contents(f.path ?? "", f);
+  const at = h.append ? old.length : h.pos;
+  const out = new Uint8Array(Math.max(old.length, at + data.length));
+  out.set(old);
+  out.set(data, at);
+  f.data = out;
+  f.mtime = Date.now();
+  h.pos = at + data.length;
+  if (f.path !== null) hooks.changed(f.path, out);
 }
 
 export function writeSync(fd: number, data: any) {
@@ -216,7 +283,7 @@ export function statSync(p: string) {
 export function unlinkSync(p: string) {
   const r = resolve(p);
   if (!files.has(r)) dirs.has(r) ? fail("EISDIR", -21, "unlink", p) : fail("ENOENT", -2, "unlink", p);
-  files.delete(r);
+  drop(r);
   hooks.changed(r, null);
 }
 export function rmdirSync(p: string) {
@@ -230,20 +297,26 @@ export function renameSync(a: string, b: string) {
   if (!dirs.has(parent(rb))) fail("ENOENT", -2, "rename", b);
   const f = files.get(ra);
   if (f) {
-    files.delete(ra);
+    // (the same entry under its new name: a file held open follows it)
+    if (dirs.has(rb)) fail("EISDIR", -21, "rename", b);
+    const data = contents(ra, f);
+    if (ra === rb) return;
+    drop(ra);
     hooks.changed(ra, null);
-    setFile(rb, contents(ra, f));
+    place(rb, f);
+    f.mtime = Date.now();
+    hooks.changed(rb, data);
     return;
   }
   if (!dirs.has(ra)) fail("ENOENT", -2, "rename", a);
   const pre = ra + "/";
   for (const [k, v] of [...files]) {
     if (k.startsWith(pre)) {
+      const data = contents(k, v);
       files.delete(k);
       hooks.changed(k, null);
       const nk = rb + k.slice(ra.length);
-      const data = contents(k, v);
-      files.set(nk, v);
+      place(nk, v);
       hooks.changed(nk, data);
     }
   }
@@ -262,4 +335,4 @@ export function rmSync(p: string, opts?: { recursive?: boolean; force?: boolean 
   for (const f of readdirSync(r)) rmSync(r + "/" + f, opts);
   rmdirSync(r);
 }
-export default { writeSync, readSync, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, rmdirSync, rmSync, renameSync };
+export default { onceOpen, onceWrite, writeSync, readSync, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, rmdirSync, rmSync, renameSync };
