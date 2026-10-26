@@ -1353,13 +1353,33 @@ class TextFileStore {
 let current = { id: null, kind: "browser" };
 // (before the notebook changes: the Share dialog's upload ends first, and its open is closed, CORR-172-ASTRA-2)
 const beforeSwitch = [];
+// (while the notebook is changing, from the first wait to the new one attached, there is no notebook
+// identity, and Share waits for the switch to end: #172 r3's review, CORR-172-R3-ASTRA-1; nested switches
+// end with the outermost)
+let switches = 0, switched = null, switchDone = null;
+function beginSwitch() {
+  if (switches++ === 0) switched = new Promise((r) => (switchDone = r));
+  let ended = false;
+  return () => {
+    if (ended) return;
+    ended = true;
+    if (--switches === 0) {
+      switched = null;
+      switchDone();
+    }
+  };
+}
 async function open(store, id, kind = "browser") {
+  const endSwitch = beginSwitch();
+  try {
   for (const f of beforeSwitch) await f();
+  await shareTest.beforeLeave?.();
   await nb.mayLeave(); // (LIMIT-900-2)
   nb.detach();
   ttShow(false);
   current = { id, kind };
   useKernel(id); // (before the document: the outputs its interpreter computed are not stale)
+  await shareTest.beforeAttach?.();
   const doc = await nb.attach(store);
   showName(doc.name);
   modeEl.value = nb.mode;
@@ -1372,6 +1392,9 @@ async function open(store, id, kind = "browser") {
   startHistory(id);
   presence.open(id);
   return doc;
+  } finally {
+    endSwitch();
+  }
 }
 // cells: code strings, or {md: text} for Markdown (examples, share links)
 const asCell = (c) => ({ id: cellId(), ...(typeof c === "string" ? { code: c } : c.md !== undefined ? { type: "markdown", code: c.md } : c) });
@@ -1407,8 +1430,13 @@ async function bindDiskFile(path, doc = null) {
   const { dir, sep, name } = splitPath(path);
   diskFile = { path, dir, sep, name };
   const store = new TextFileStore(name, () => TAURI.fs.readTextFile(path), (text) => TAURI.fs.writeTextFile(path, text), name);
-  if (doc) { for (const f of beforeSwitch) await f(); await nb.mayLeave(); nb.detach(); current = { id: "file:" + path, kind: "file" }; await store.save({ ...nb.snapshot(), name: name.replace(/\.ipynb$/i, "") }); }
-  await open(store, "file:" + path, "file");
+  const endSwitch = beginSwitch();
+  try {
+    if (doc) { for (const f of beforeSwitch) await f(); await nb.mayLeave(); nb.detach(); current = { id: "file:" + path, kind: "file" }; await store.save({ ...nb.snapshot(), name: name.replace(/\.ipynb$/i, "") }); }
+    await open(store, "file:" + path, "file");
+  } finally {
+    endSwitch();
+  }
   try { await TAURI.window.getCurrentWindow().setTitle(name + " — Sagebrush"); } catch {}
 }
 async function openDiskFile(path) {
@@ -1470,6 +1498,7 @@ $("#sharelink").onclick = async () => { if (shareDialog.busy) return; await copy
 async function openShare() {
   // (while uploading, Share only shows the dialog again, with the upload's own state: UI-B1)
   if (shareDialog.busy) return void shareDialog.open();
+  while (switched) await switched;
   await shareReady;
   if (!LOCAL) sharing = await shareStatus();
   const me = sharing.enabled ? sharing.me : null;
@@ -1514,7 +1543,7 @@ async function storedFileBytes(f) {
 const shareDialog = createShareDialog({
   dlg: shareDlg,
   notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
-  notebookId: () => shareTest.notebookId?.() ?? String(current.id),
+  notebookId: () => (switched ? null : (shareTest.notebookId?.() ?? String(current.id))),
   listFiles: () => shareTest.listFiles?.() ?? storedFileMeta(),
   readFile: storedFileBytes,
   readBytes: (path) => storedFileBytes({ path }),

@@ -553,7 +553,7 @@ try {
     await until("/interpreter didn't answer/.test(document.querySelector('#sharestatus').textContent)", 30000);
     const by = { "a.csv": await findRow("a.csv"), "nb/a.csv": await findRow("nb/a.csv") };
     ok(by["a.csv"] && by["nb/a.csv"] && !by["a.csv"].checked && !by["nb/a.csv"].checked, `the interpreter didn't answer, so its cwd is unknown: neither a.csv nor nb/a.csv is guessed (${JSON.stringify([by["a.csv"]?.checked, by["nb/a.csv"]?.checked])})`);
-    ok(/may be busy running a cell/.test(await status()) && !/^Stopped/.test(await status()), `...said honestly: ${await status()}`);
+    ok(/isn't running, or is busy running a cell/.test(await status()) && !/^Stopped/.test(await status()), `...said honestly: ${await status()}`);
     ok(!(await ev("document.querySelector('#shareupload').disabled")), "...and Upload works");
     await closeDialog();
     await ev("(() => { const t = window.sagebrush.shareTest; delete t.importInfo; t.onRead = null; t.createWorker = () => { throw new Error('blocked'); }; })()");
@@ -625,6 +625,42 @@ try {
     const sid = await ev("window.sagebrush.notebook.snapshot().share_id");
     const mine = (await ev("(async () => (await fetch('/api/share/mine')).json())()")).collections.map((c) => c.id);
     ok(!!sid && mine.includes(sid) && second !== first, `...and the collection's id is on the notebook it was uploaded from (${sid})`);
+  }
+
+  // ---- #172 r3's review: no notebook identity mid-switch, so Share waits for it (astra3's CORR-172-R3-ASTRA-1)
+  {
+    const from = await ev("localStorage.getItem('sagebrush-current')");
+    await ev("document.querySelector('#sharedlg').open && document.querySelector('#sharedlg').close()");
+    // the new notebook's load held (attach): Share clicked meanwhile waits, and opens only once it's attached
+    await ev("(() => { const t = window.sagebrush.shareTest; t.attachGate = new Promise((r) => (t.attachOpen = r)); t.beforeAttach = () => t.attachGate; })()");
+    const g0 = await ev("window.sagebrush.share.generation");
+    await ev("document.querySelector('#filemenu [data-f=new]').click()");
+    await sleep(400);
+    await ev("document.querySelector('#sharemenu').click()");
+    await sleep(600);
+    ok(!(await ev("document.querySelector('#sharedlg').open")) && (await ev("window.sagebrush.share.generation")) === g0, "Share clicked while the new notebook loads: it waits (no dialog, no new open)");
+    await ev("window.sagebrush.share.open()");
+    ok((await ev("window.sagebrush.share.generation")) === g0 && /The notebook is changing/.test(await status()), `...and an open called mid-switch is refused (${await status()})`);
+    await ev("(() => { const t = window.sagebrush.shareTest; delete t.beforeAttach; t.attachOpen(); })()");
+    await until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(from)}`, 30000);
+    await until("document.querySelector('#sharedlg').open && !!window.sagebrush.share.selection && window.sagebrush.share.generation > " + g0, 30000);
+    const to = await ev("localStorage.getItem('sagebrush-current')");
+    ok((await ev("window.sagebrush.share.notebook")) === to && to !== from, `...then it opens, bound to the new notebook only (${to})`);
+    ok(JSON.stringify(await checkedNames()) === '["Untitled.ipynb"]', `...with nothing of the old notebook's checked (${JSON.stringify(await checkedNames())})`);
+    await closeDialog();
+    // leaving held (mayLeave): likewise
+    await ev("(() => { const t = window.sagebrush.shareTest; t.leaveGate = new Promise((r) => (t.leaveOpen = r)); t.beforeLeave = () => t.leaveGate; })()");
+    const g1 = await ev("window.sagebrush.share.generation");
+    await ev(`void window.sagebrush.open(${JSON.stringify(from)})`);
+    await sleep(400);
+    await ev("document.querySelector('#sharemenu').click()");
+    await sleep(600);
+    ok(!(await ev("document.querySelector('#sharedlg').open")) && (await ev("window.sagebrush.share.generation")) === g1, "Share clicked while the notebook is being left: it waits");
+    await ev("(() => { const t = window.sagebrush.shareTest; delete t.beforeLeave; t.leaveOpen(); })()");
+    await until(`localStorage.getItem('sagebrush-current') === ${JSON.stringify(from)}`, 30000);
+    await until("document.querySelector('#sharedlg').open && !!window.sagebrush.share.selection && window.sagebrush.share.generation > " + g1, 30000);
+    ok((await ev("window.sagebrush.share.notebook")) === from, "...then opens for the notebook switched to");
+    await closeDialog();
   }
 } catch (e) {
   failures++;

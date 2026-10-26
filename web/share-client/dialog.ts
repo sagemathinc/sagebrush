@@ -19,8 +19,9 @@ export interface ShareDialogHost {
   dlg: HTMLDialogElement;
   /** the notebook: its file name in the share, and its bytes */
   notebook: () => { path: string; data: Uint8Array };
-  /** which notebook is attached now (an open, and its upload, belong to the one it started with) */
-  notebookId: () => string;
+  /** which notebook is attached now (an open, and its upload, belong to the one it started with); null
+   * while the notebook is changing (until the new one is attached, nothing is bound to it) */
+  notebookId: () => string | null;
   /** the workspace's data files, metadata only (no bodies) */
   listFiles: () => Promise<{ path: string; size?: number; fid?: string; rev?: number }[]>;
   /** one file's bytes at upload; throws if it is no longer the file listed (fid) */
@@ -67,7 +68,7 @@ export function createShareDialog(h: ShareDialogHost) {
   // open still waiting for the file list or the interpreter never starts its analysis)
   let token = 0, analyzing = false;
   // (the notebook the current selection was made for)
-  let selNotebook = "";
+  let selNotebook: string | null = null;
   let found = 0, parsed = 0, unfollowed = 0, ranPartial = false, noInterpreter = false;
   let unparsed: string[] = [];
   let idleWaiters: (() => void)[] = [];
@@ -174,7 +175,7 @@ export function createShareDialog(h: ShareDialogHost) {
     const parts: string[] = [];
     const checked = `Checked ${num(found)} file${found === 1 ? "" : "s"} this notebook uses`;
     if (sel.state === "analyzing") parts.push(`Finding the files this notebook uses: ${num(parsed)} parsed, ${num(found)} checked…`);
-    else if (noInterpreter) parts.push("The notebook's interpreter didn't answer (it may be busy running a cell), so its code wasn't analyzed.", found ? `${checked}, from what ran; the rest are unchecked.` : "The rest are unchecked.");
+    else if (noInterpreter) parts.push("The notebook's interpreter didn't answer (it isn't running, or is busy running a cell), so its code wasn't analyzed.", found ? `${checked}, from what ran; the rest are unchecked.` : "The rest are unchecked.");
     else if (sel.state === "not-analyzed") parts.push("Stopped finding files: the rest are unchecked, not analyzed.", ...(found ? [`${checked}.`] : []));
     else parts.push(`${found ? checked : "Found no other files this notebook uses"} (from its code${ranPartial ? "" : " and from what ran"}; check the list).`);
     if (unparsed.length) {
@@ -192,10 +193,15 @@ export function createShareDialog(h: ShareDialogHost) {
       if (!d.open) d.showModal();
       return;
     }
+    const nbId = h.notebookId();
+    // (mid-switch there's no notebook to share: the page waits for the switch before opening Share)
+    if (nbId === null) {
+      status.textContent = "The notebook is changing: open Share again in a moment.";
+      return;
+    }
     run?.stop();
     run = null;
     const my = ++gen, mine = ++token;
-    const nbId = h.notebookId();
     // (this open is still the current one, for the notebook it began with)
     const alive = () => mine === token && h.notebookId() === nbId;
     analyzing = true;
@@ -287,7 +293,7 @@ export function createShareDialog(h: ShareDialogHost) {
   btn.addEventListener("click", async () => {
     if (!sel || busy) return;
     // (the selection is this notebook's: never another's bytes with its files, CORR-172-ASTRA-2)
-    if (h.notebookId() !== selNotebook) {
+    if (selNotebook === null || h.notebookId() !== selNotebook) {
       out.textContent = "The notebook changed since Share was opened: open Share again.";
       return;
     }
@@ -353,6 +359,10 @@ export function createShareDialog(h: ShareDialogHost) {
     },
     get busy() {
       return busy;
+    },
+    /** the notebook the current selection was made for */
+    get notebook() {
+      return selNotebook;
     },
     get selection() {
       return sel;
