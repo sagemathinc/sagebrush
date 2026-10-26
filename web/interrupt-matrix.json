@@ -68,6 +68,7 @@
    "smin": 100000,
    "smax": 25000000,
    "leak_s": 3000000,
+   "leak_measure": "heap+external",
    "grow": {
     "kind": "scale",
     "p": 1
