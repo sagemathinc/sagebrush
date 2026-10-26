@@ -1,9 +1,10 @@
-//! The binding rows' usage measures (no-cliffs plan C r12 section 1, r13
-//! section 3), read under the ledger's lock without allocating: the files
-//! are opened beforehand (`Measure::open`, `prepare`) and read with pread
-//! into a stack buffer.
+//! Every applicable row's usage measure (no-cliffs plan C r12 section 1,
+//! r13 section 3; r17 section 1.3: every row that constrains the engine's
+//! domain, not only those at the least figure), read under the ledger's
+//! lock without allocating: the files are opened beforehand
+//! (`Measure::open`, `prepare`) and read with pread into stack buffers.
 //!
-//! | binding row         | measure                                         |
+//! | row                 | measure                                         |
 //! |---------------------|-------------------------------------------------|
 //! | cgroup              | the cgroup's memory.current / usage_in_bytes     |
 //! | RLIMIT_AS / _DATA   | VmSize / VmData (/proc/self/status)              |
@@ -21,7 +22,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
 
-/// A binding row's kind, as the host names it (the native total source).
+/// A row's kind, as the host names it (the native total source).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MeasureKind {
     /// the cgroup's usage file (memory.current, or memory.usage_in_bytes)
@@ -31,26 +32,50 @@ pub enum MeasureKind {
     Physical,
     WindowsJob,
     WindowsPhysical,
+    /// a row the host could not classify or measure (fail-closed)
+    Unknown,
 }
 
-/// One fresh reading: the usage the binding rows measure (their maximum),
-/// and the machine's available bytes where the physical row binds.
+/// One applicable row (no-cliffs plan C r17 section 1.3): its kind and its
+/// figure (the row's total).  Every applicable row is checked, each against
+/// its own usage measure, not only the rows at the least figure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Row {
+    pub kind: MeasureKind,
+    pub figure: u64,
+}
+
+/// One row's fresh reading: its usage, and the machine's available bytes
+/// for the physical row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Reading {
+    pub figure: u64,
     pub usage: u64,
     pub available: Option<u64>,
 }
 
-/// The measures of the binding rows in force.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Src {
+    /// index into `cgroups`
+    Cgroup(usize),
+    AddressSpace,
+    DataSegment,
+    Physical,
+}
+
+/// The rows in force, with their measures (files opened beforehand).
 pub struct Measure {
     #[cfg(not(target_arch = "wasm32"))]
     cgroups: Vec<File>,
-    address_space: bool,
-    data_segment: bool,
-    physical: bool,
+    rows: Vec<(Src, u64)>,
+    /// each check's readings, reused: allocated with one slot per row when
+    /// the rows are set (outside the ledger's lock), filled under it without
+    /// growing (no fixed row table, no cutoff on the number of rows:
+    /// daybreak2's LIMIT-C2A-1)
+    scratch: Vec<(u64, u64, Option<u64>)>,
     /// a row this build cannot measure (fail-closed)
     unmeasured: bool,
-    /// no binding row at all (the nominal total)
+    /// no row at all (the nominal total)
     none: bool,
 }
 
@@ -58,9 +83,8 @@ impl Measure {
     pub const NONE: Measure = Measure {
         #[cfg(not(target_arch = "wasm32"))]
         cgroups: Vec::new(),
-        address_space: false,
-        data_segment: false,
-        physical: false,
+        rows: Vec::new(),
+        scratch: Vec::new(),
         unmeasured: false,
         none: true,
     };
@@ -68,60 +92,85 @@ impl Measure {
     /// The measures for these rows, their files opened now (outside the
     /// ledger's lock).
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn open(kinds: &[MeasureKind]) -> Measure {
-        let mut m = Measure { cgroups: Vec::new(), address_space: false, data_segment: false, physical: false, unmeasured: false, none: kinds.is_empty() };
-        for k in kinds {
-            match k {
+    pub fn open(rows: &[Row]) -> Measure {
+        let mut m = Measure { cgroups: Vec::new(), rows: Vec::with_capacity(rows.len()), scratch: Vec::with_capacity(rows.len()), unmeasured: false, none: rows.is_empty() };
+        let mut proc = false;
+        for r in rows {
+            let src = match &r.kind {
                 MeasureKind::Cgroup(path) if cfg!(target_os = "linux") => match File::open(path) {
-                    Ok(f) => m.cgroups.push(f),
-                    Err(_) => m.unmeasured = true,
+                    Ok(f) => {
+                        m.cgroups.push(f);
+                        Src::Cgroup(m.cgroups.len() - 1)
+                    }
+                    Err(_) => {
+                        m.unmeasured = true;
+                        continue;
+                    }
                 },
-                MeasureKind::AddressSpace if cfg!(target_os = "linux") => m.address_space = true,
-                MeasureKind::DataSegment if cfg!(target_os = "linux") => m.data_segment = true,
-                MeasureKind::Physical if cfg!(target_os = "linux") => m.physical = true,
-                _ => m.unmeasured = true,
-            }
+                MeasureKind::AddressSpace if cfg!(target_os = "linux") => Src::AddressSpace,
+                MeasureKind::DataSegment if cfg!(target_os = "linux") => Src::DataSegment,
+                MeasureKind::Physical if cfg!(target_os = "linux") => Src::Physical,
+                _ => {
+                    m.unmeasured = true;
+                    continue;
+                }
+            };
+            proc |= !matches!(src, Src::Cgroup(_));
+            m.rows.push((src, r.figure));
         }
-        if (m.address_space || m.data_segment || m.physical) && !proc_files_ready() {
+        if proc && !proc_files_ready() {
             m.unmeasured = true;
         }
         m
     }
 
+    /// Whether every row has a measure that OPENED (structure only: a
+    /// fresh read can still fail, so certification also needs
+    /// `read_each` to succeed: astra2's CORR-C2A-1).
     pub fn available(&self) -> bool {
         !self.none && !self.unmeasured
     }
 
-    /// A fresh reading, or None when unavailable or unreadable.  No
-    /// allocation.
+    /// Each row's fresh reading, in order, passed to `f`; false when
+    /// unavailable or unreadable (then nothing was measured).  No
+    /// allocation, and one stack buffer as before (no-cliffs C r17's perf
+    /// gate): /proc/self/status is read once and its fields kept, then the
+    /// buffer is reused for /proc/meminfo and each cgroup file.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn read(&self) -> Option<Reading> {
+    pub fn read_each(&mut self, mut f: impl FnMut(Reading)) -> bool {
         if !self.available() {
-            return None;
+            return false;
         }
-        let mut usage = 0u64;
-        let mut available = None;
         let mut buf = [0u8; 8192];
-        for f in &self.cgroups {
-            let text = pread(f, &mut buf)?;
-            usage = usage.max(parse_uint(text)?);
-        }
-        if self.address_space || self.data_segment || self.physical {
-            let (status, meminfo) = proc_files()?;
-            let text = pread(status, &mut buf)?;
-            if self.address_space {
-                usage = usage.max(kb_field(text, b"VmSize:")?);
-            }
-            if self.data_segment {
-                usage = usage.max(kb_field(text, b"VmData:")?);
-            }
-            if self.physical {
-                usage = usage.max(kb_field(text, b"RssAnon:")?.checked_add(kb_field(text, b"VmSwap:").unwrap_or(0))?);
-                let text = pread(meminfo, &mut buf)?;
-                available = Some(kb_field(text, b"MemAvailable:")?);
+        let (mut vm_size, mut vm_data, mut anon, mut mem_available) = (None, None, None, None);
+        if self.rows.iter().any(|(s, _)| !matches!(s, Src::Cgroup(_))) {
+            let Some((sf, mf)) = proc_files() else { return false };
+            let Some(status) = pread(sf, &mut buf) else { return false };
+            vm_size = kb_field(status, b"VmSize:");
+            vm_data = kb_field(status, b"VmData:");
+            anon = kb_field(status, b"RssAnon:").and_then(|a| a.checked_add(kb_field(status, b"VmSwap:").unwrap_or(0)));
+            if self.rows.iter().any(|(s, _)| *s == Src::Physical) {
+                let Some(meminfo) = pread(mf, &mut buf) else { return false };
+                mem_available = kb_field(meminfo, b"MemAvailable:");
             }
         }
-        Some(Reading { usage, available })
+        // (read everything first: a row unreadable midway measures nothing;
+        // the scratch has one slot per row, so it never grows here)
+        self.scratch.clear();
+        for &(src, figure) in self.rows.iter() {
+            let r = match src {
+                Src::Cgroup(j) => pread(&self.cgroups[j], &mut buf).and_then(parse_uint).map(|u| (u, None)),
+                Src::AddressSpace => vm_size.map(|u| (u, None)),
+                Src::DataSegment => vm_data.map(|u| (u, None)),
+                Src::Physical => anon.zip(mem_available).map(|(u, a)| (u, Some(a))),
+            };
+            let Some((usage, available)) = r else { return false };
+            self.scratch.push((figure, usage, available));
+        }
+        for &(figure, usage, available) in &self.scratch {
+            f(Reading { figure, usage, available });
+        }
+        true
     }
 }
 

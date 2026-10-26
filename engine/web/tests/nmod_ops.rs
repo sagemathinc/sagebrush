@@ -264,6 +264,16 @@ fn polys_match_schoolbook() {
 }
 
 #[test]
+fn echelon_envelope_constants() {
+    // (plan F4 r4 §1) the closed forms at E = 1024^2, exactly
+    assert_eq!(ECH_MAX_TEXT, 20 * 1024 * 1024);
+    assert_eq!(ECH_MAX_REQUEST, 20_975_616);
+    assert_eq!(ECH_PEAK, 50_369_536);
+    assert!(ECH_PEAK <= 49 << 20);
+    assert_eq!(ECH_WORK, 1 << 31);
+}
+
+#[test]
 fn caps_and_refusals() {
     // dimensions: cap - 1, cap, cap + 1 (no work: zero matrices)
     let zeros = |r: usize, c: usize| vec![vec!["0"; c].join(","); r].join(";");
@@ -272,8 +282,16 @@ fn caps_and_refusals() {
     assert_eq!(ok(&ech(1, ECH_MAX_DIM))["pivots"], "");
     assert!(err(&ech(1, ECH_MAX_DIM + 1)).contains("rows and cols"));
     assert!(err(&ech(ECH_MAX_DIM + 1, 1)).contains("rows and cols"));
+    // no entry-count cap below the dimensions' (F4): 401 x 401 (the old
+    // cap's first refusal) and the 1024 x 1024 envelope are admitted
     assert_eq!(ok(&ech(400, 401))["det"], "1");
-    assert!(err(&ech(401, 401)).contains("entries, more than"));
+    assert_eq!(ok(&ech(401, 401))["pivots"], "");
+    assert_eq!(ok(&ech(ECH_MAX_DIM, ECH_MAX_DIM))["pivots"], "");
+    // a short request claiming 1025 rows passes the byte cap and is
+    // refused by the dimension check (nmod_alloc.rs: before any entry)
+    let short = |r: usize, c: usize| format!(r#"{{"fn":"nmod_echelon","p":"7","rows":{},"cols":{},"m":"0"}}"#, r, c);
+    assert!(err(&short(ECH_MAX_DIM + 1, 1)).contains("rows and cols"));
+    assert!(err(&short(1, ECH_MAX_DIM + 1)).contains("rows and cols"));
     assert!(err(&format!(r#"{{"fn":"nmod_echelon","p":"7","rows":0,"cols":1,"m":""}}"#)).contains("rows and cols"));
     // declared shape and text disagree; entries out of range
     for bad in [

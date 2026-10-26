@@ -9,7 +9,8 @@
 // What it speaks:
 // - the account socket, slice 1: hello/welcome (with the client's binding),
 //   index and pull_index, ops (decided in dseq order, once each), index_changed;
-// - the account socket, slice 2's documents: doc_claim, doc_fence, batch (with
+// - the account socket, slice 2's documents: doc_claim and doc_fence (for the document's current epoch, else
+//   stale_epoch), batch (with
 //   fgen), pull (with upto, recv and chain), clear (its root bootstraps the
 //   clearing client's new-epoch row), changed;
 // - HTTP: the test sign-in, status, enable, delete, blobs/check, blob PUT/GET.
@@ -341,11 +342,11 @@ export class ReferenceServer {
     } else if (t === "doc_claim") {
       const c = attemptDoc(() => checkDocClaim(m));
       this.owner(a, c.owner);
-      this.answer(ws, "doc_claim", req, { t: "ack", req, claim: this.claim(a, `session:${ws.device}`, c.doc, c.client) });
+      this.answer(ws, "doc_claim", req, { t: "ack", req, claim: this.claim(a, `session:${ws.device}`, c.doc, c.epoch, c.client) });
     } else if (t === "doc_fence") {
       const f = attemptDoc(() => checkDocFence(m));
       this.owner(a, f.owner);
-      this.answer(ws, "doc_fence", req, { t: "ack", req, fence: { clients: this.fence(a, `session:${ws.device}`, f.doc, f.clients) } });
+      this.answer(ws, "doc_fence", req, { t: "ack", req, fence: { clients: this.fence(a, `session:${ws.device}`, f.doc, f.epoch, f.clients) } });
     } else if (t === "batch") {
       fields(m, ["t", "req", "owner", "doc", "epoch", "kind", "expect_head", "patches", "body", "fgen"], "batch");
       const b = checkBatch(m);
@@ -484,8 +485,16 @@ export class ReferenceServer {
     return { epoch: d.epoch, seq: d.head, chain: hex(d.chain) };
   }
 
+  /** The epoch a claim or fence names must be the document's (a document not made yet is in epoch 1): else
+   * stale_epoch, with the current epoch and head, and nothing changes (plan-sync-slice2-2b-r4 §2.4). */
+  private sameEpoch(a: Account, doc: string, epoch: number) {
+    const d = this.docOf(a, doc, false), cur = d?.epoch ?? 1;
+    if (epoch !== cur) throw new SyncError("stale_epoch", "this claim or fence is for another epoch of the document", { epoch: cur, head: { epoch: cur, seq: d?.head ?? 0 } });
+  }
+
   /** doc_claim (§5.8): binds a client to its writer before any batch of it; idempotent for the same writer. */
-  private claim(a: Account, writer: string, doc: string, client: string): { client: string; fgen: number; next_cseq: number } {
+  private claim(a: Account, writer: string, doc: string, epoch: number, client: string): { client: string; fgen: number; next_cseq: number } {
+    this.sameEpoch(a, doc, epoch);
     const d = this.docOf(a, doc, true)!;
     const c = d.clients.get(client);
     if (c) {
@@ -499,7 +508,8 @@ export class ReferenceServer {
   }
 
   /** doc_fence (§5.8): each client's fgen raised to its target, answered with its final next_cseq; terminal. */
-  private fence(a: Account, writer: string, doc: string, list: { client: string; target: number }[]) {
+  private fence(a: Account, writer: string, doc: string, epoch: number, list: { client: string; target: number }[]) {
+    this.sameEpoch(a, doc, epoch);
     const d = this.docOf(a, doc, false);
     // (all checked before any changes: a foreign writer refuses the whole message)
     for (const { client } of list) {
