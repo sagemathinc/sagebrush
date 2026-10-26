@@ -34,7 +34,7 @@ fn cyclotomic(n: usize) -> ZPoly {
 /// built as a resultant-free product: S_1 = x^2 - 2, S_{k}(x) =
 /// S_{k-1}(x + sqrt(p)) S_{k-1}(x - sqrt(p)) = Res_y(S_{k-1}(x - y), y^2 - p).
 pub(crate) fn swinnerton_dyer(k: usize) -> ZPoly {
-    let primes = [2i64, 3, 5, 7, 11, 13];
+    let primes = [2i64, 3, 5, 7, 11, 13, 17, 19];
     // represent elements of Z[x][sqrt p] as (a, b) = a + b sqrt p
     let b = Budget::unlimited();
     let mut s = z(&[-2, 0, 1]);
