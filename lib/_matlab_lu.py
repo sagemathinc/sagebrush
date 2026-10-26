@@ -531,12 +531,12 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
             touched = ir[a0:a1].tolist()
             seen = set(touched)
             steps = [v for v in (int(pinv[i]) for i in touched) if v >= 0]
-            budget = SMALL - na
+            room = SMALL - na
             while h < len(steps):
                 lk = lrow_l[steps[h]]
-                if len(lk) > budget:
+                if len(lk) > room:
                     break
-                budget -= len(lk)
+                room -= len(lk)
                 h += 1
                 if lk:
                     work.charge(len(lk), "reach")
