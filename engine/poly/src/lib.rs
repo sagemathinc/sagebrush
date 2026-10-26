@@ -1183,14 +1183,20 @@ pub(crate) mod alloc_spy {
         let _ = BUSY.try_with(|b| b.set(false));
     }
 
+    // (the allocator's paths use try_with: they also run while the
+    // thread's locals are being destroyed)
     fn tag_live(t: &'static str, n: i64) {
-        TAGS.with(|m| m.borrow_mut().entry(t).or_insert((0, 0)).0 += n);
+        let _ = TAGS.try_with(|m| m.borrow_mut().entry(t).or_insert((0, 0)).0 += n);
+    }
+
+    fn current_tag() -> Option<&'static str> {
+        TAG.try_with(|t| t.get()).ok().flatten()
     }
 
     fn on_alloc(p: *mut u8, size: usize) {
         book(|| {
-            if let Some(t) = TAG.with(|t| t.get()) {
-                BLOCKS.with(|m| m.borrow_mut().insert(p as usize, (t, size as i64)));
+            if let Some(t) = current_tag() {
+                let _ = BLOCKS.try_with(|m| m.borrow_mut().insert(p as usize, (t, size as i64)));
                 tag_live(t, size as i64);
             }
         });
@@ -1199,7 +1205,7 @@ pub(crate) mod alloc_spy {
     fn on_free(p: *mut u8) -> Option<&'static str> {
         let mut out = None;
         book(|| {
-            if let Some((t, n)) = BLOCKS.with(|m| m.borrow_mut().remove(&(p as usize))) {
+            if let Some((t, n)) = BLOCKS.try_with(|m| m.borrow_mut().remove(&(p as usize))).ok().flatten() {
                 tag_live(t, -n);
                 out = Some(t);
             }
@@ -1229,8 +1235,8 @@ pub(crate) mod alloc_spy {
             let was = on_free(p);
             let q = System.realloc(p, l, n);
             book(|| {
-                if let Some(t) = was.or(TAG.with(|t| t.get())) {
-                    BLOCKS.with(|m| m.borrow_mut().insert(q as usize, (t, n as i64)));
+                if let Some(t) = was.or(current_tag()) {
+                    let _ = BLOCKS.try_with(|m| m.borrow_mut().insert(q as usize, (t, n as i64)));
                     tag_live(t, n as i64);
                 }
             });
@@ -1271,14 +1277,23 @@ pub(crate) mod alloc_spy {
         });
     }
 
-    /// Run f under the audit (only this thread's allocations count).
+    /// Run f under the audit (only this thread's allocations count).  The
+    /// audit ends when f returns or unwinds (a failed assertion inside it).
     pub fn audit<T>(f: impl FnOnce() -> T) -> (T, Report) {
+        struct End;
+        impl Drop for End {
+            fn drop(&mut self) {
+                let _ = AUDIT.try_with(|a| a.set(None));
+                let _ = TAG.try_with(|t| t.set(None));
+            }
+        }
         BLOCKS.with(|m| m.borrow_mut().clear());
         TAGS.with(|m| m.borrow_mut().clear());
         REPORT.with(|r| r.set(Report::new()));
         AUDIT.with(|a| a.set(Some(LIVE.with(|l| l.get()))));
+        let end = End;
         let r = f();
-        AUDIT.with(|a| a.set(None));
+        drop(end);
         (r, REPORT.with(|r| r.get()))
     }
 
