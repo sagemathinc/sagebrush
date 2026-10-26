@@ -18,51 +18,11 @@ static MAIN: std::sync::OnceLock<std::thread::ThreadId> = std::sync::OnceLock::n
 /// own handler is back in place when this returns.
 fn guarded<T: Send>(py: Python<'_>, f: impl FnOnce() -> T + Send) -> PyResult<T> {
     let main = MAIN.get() == Some(&std::thread::current().id());
-    let r = py.detach(|| {
+    py.detach(|| {
         let _sigint = main.then(sagebrush_interrupt::SigintGuard::new);
         sagebrush_interrupt::catch(f)
-    });
-    host_raised()?;
-    r.map_err(|_| PyKeyboardInterrupt::new_err(()))
-}
-
-/// A KeyboardInterrupt, SystemExit or other BaseException that is not an
-/// ordinary Exception, raised by a host source the engine asked (the memory
-/// total): it is not an unreadable answer, so it is kept here, an interrupt
-/// is requested (a running computation stops at its next check), and the
-/// call that asked raises it (`guarded`, `ledger_snapshot`).
-static HOST_RAISED: std::sync::Mutex<Option<PyErr>> = std::sync::Mutex::new(None);
-/// (whether HOST_RAISED holds one: every guarded call looks, without the lock)
-static HOST_RAISED_SET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// A host source's error: an ordinary Exception means "unreadable" (the
-/// caller answers none); anything else is kept for the asking call.
-fn host_error(py: Python<'_>, e: PyErr) {
-    if !e.is_instance_of::<pyo3::exceptions::PyException>(py) {
-        let mut slot = HOST_RAISED.lock().unwrap_or_else(|p| p.into_inner());
-        if slot.is_none() {
-            *slot = Some(e);
-        }
-        HOST_RAISED_SET.store(true, std::sync::atomic::Ordering::Release);
-        sagebrush_interrupt::request();
-    }
-}
-
-/// Raise what a host source raised during this call (and forget the
-/// interrupt requested for it).
-fn host_raised() -> PyResult<()> {
-    if !HOST_RAISED_SET.load(std::sync::atomic::Ordering::Acquire) {
-        return Ok(());
-    }
-    let mut slot = HOST_RAISED.lock().unwrap_or_else(|p| p.into_inner());
-    HOST_RAISED_SET.store(false, std::sync::atomic::Ordering::Release);
-    match slot.take() {
-        Some(e) => {
-            sagebrush_interrupt::clear();
-            Err(e)
-        }
-        None => Ok(()),
-    }
+    })
+    .map_err(|_| PyKeyboardInterrupt::new_err(()))
 }
 
 fn run<T: Send>(py: Python<'_>, threads: usize, f: impl FnOnce() -> T + Send) -> PyResult<T> {
@@ -542,23 +502,108 @@ fn set_memory_share_source(source: Py<PyAny>) {
     });
 }
 
+// ---- what the memory total source raises (CORR-C1-1, astra2): a
+// KeyboardInterrupt, SystemExit or any other BaseException beyond an ordinary
+// Exception is not an unreadable answer.  It belongs to the call that asked
+// for the total: the source runs only on a thread where such a call is active
+// (ledger_snapshot), what it raises is kept in that thread's slot, and that
+// call raises it.  A read on any other thread (an engine worker) runs no
+// source: the total in force stays (HostAnswer::NotAsked).  (A governed
+// computation that reads the total, C-2b, must carry its asking call to its
+// workers before it adopts this.)
+
+thread_local! {
+    /// asking calls active on this thread
+    static ASKING: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// the first control exception the source raised during them
+    static RAISED: std::cell::RefCell<Option<PyErr>> = const { std::cell::RefCell::new(None) };
+}
+
+/// An asking call on this thread: what the source raises while it lives is
+/// its own.  Thread-bound (neither Send nor Sync).
+struct Asking(std::marker::PhantomData<*const ()>);
+
+impl Asking {
+    fn enter() -> Asking {
+        ASKING.with(|a| a.set(a.get() + 1));
+        Asking(std::marker::PhantomData)
+    }
+
+    /// End the call: the outermost one raises what the source raised.
+    fn finish(self) -> PyResult<()> {
+        let raised = if ASKING.with(|a| a.get()) == 1 { RAISED.with(|r| r.borrow_mut().take()) } else { None };
+        drop(self);
+        raised.map_or(Ok(()), Err)
+    }
+}
+
+impl Drop for Asking {
+    fn drop(&mut self) {
+        let left = ASKING.with(|a| {
+            a.set(a.get() - 1);
+            a.get()
+        });
+        if left == 0 {
+            // (an asking call that ended without finish, by an error of its
+            // own: what the source raised is not left for the next call)
+            RAISED.with(|r| r.borrow_mut().take());
+        }
+    }
+}
+
+/// The source's (or its answer's conversion's) error: an ordinary Exception
+/// is an unreadable answer; anything else is kept for this thread's asking
+/// call (the first one kept).
+fn host_error(py: Python<'_>, e: PyErr) {
+    if !e.is_instance_of::<pyo3::exceptions::PyException>(py) {
+        RAISED.with(|r| {
+            let mut r = r.borrow_mut();
+            if r.is_none() {
+                *r = Some(e);
+            }
+        });
+    }
+}
+
 /// Register the host's engine memory total (no-cliffs plan C r13): `source()`
 /// returns (bytes, status, joint, measures) or None, status 0 observed, 1
 /// zero, 2 nominal; measures, the binding rows' usage measures, a list of
 /// (kind, path) with kind "cgroup" (path: its usage file), "address_space",
 /// "data_segment", "physical", "windows_job" or "windows_physical".  The
 /// ledger asks when the total is 100 ms old, with the GIL taken for it and
-/// its own lock not held; an ordinary exception or a malformed answer is
-/// none (the nominal total, uncertified), while KeyboardInterrupt and any
-/// other BaseException propagate to the call that asked (`host_error`).  The
-/// first registration stands.
+/// its own lock not held, and only on a thread with an asking call (see
+/// `Asking`); an ordinary exception or a malformed answer is unreadable (the
+/// nominal total, uncertified), while KeyboardInterrupt and any other
+/// BaseException, from the call or from converting its answer, go to the
+/// asking call.  The first registration stands.
 #[pyfunction]
 fn set_memory_total_source(source: Py<PyAny>) {
+    use sagebrush_ledger::HostAnswer;
     sagebrush_ledger::set_total_host(move || {
+        if ASKING.with(|a| a.get()) == 0 {
+            return HostAnswer::NotAsked;
+        }
         Python::attach(|py| {
-            let r = source.call0(py).map_err(|e| host_error(py, e)).ok()?;
-            let (bytes, status, joint, measures) = r.extract::<Option<(u64, u32, bool, Vec<(String, Option<String>)>)>>(py).ok().flatten()?;
-            let total = sagebrush_ledger::Total { bytes, status: sagebrush_ledger::TotalStatus::from_code(status)?, joint };
+            let r = match source.call0(py) {
+                Ok(r) => r,
+                Err(e) => {
+                    host_error(py, e);
+                    return HostAnswer::Unreadable;
+                }
+            };
+            let answer = match r.extract::<Option<(u64, u32, bool, Vec<(String, Option<String>)>)>>(py) {
+                Ok(a) => a,
+                Err(e) => {
+                    host_error(py, e);
+                    return HostAnswer::Unreadable;
+                }
+            };
+            let Some((bytes, status, joint, measures)) = answer else {
+                return HostAnswer::Unreadable;
+            };
+            let Some(status) = sagebrush_ledger::TotalStatus::from_code(status) else {
+                return HostAnswer::Unreadable;
+            };
             let kinds = measures
                 .into_iter()
                 .map(|(k, p)| match (k.as_str(), p) {
@@ -570,8 +615,11 @@ fn set_memory_total_source(source: Py<PyAny>) {
                     ("windows_physical", _) => Some(sagebrush_ledger::MeasureKind::WindowsPhysical),
                     _ => None,
                 })
-                .collect::<Option<Vec<_>>>()?;
-            Some((total, kinds))
+                .collect::<Option<Vec<_>>>();
+            match kinds {
+                Some(kinds) => HostAnswer::Total(sagebrush_ledger::Total { bytes, status, joint }, kinds),
+                None => HostAnswer::Unreadable,
+            }
         })
     });
 }
@@ -580,6 +628,7 @@ fn set_memory_total_source(source: Py<PyAny>) {
 /// tests): {"total", "status", "joint", "allowance", "live", "outstanding"}.
 #[pyfunction]
 fn ledger_snapshot(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
+    let asking = Asking::enter();
     let t = sagebrush_ledger::total();
     let d = PyDict::new(py);
     d.set_item("total", t.bytes)?;
@@ -590,7 +639,7 @@ fn ledger_snapshot(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     d.set_item("resident", sagebrush_ledger::resident_bytes())?;
     d.set_item("certified", sagebrush_ledger::certified())?;
     d.set_item("outstanding", sagebrush_ledger::outstanding_bytes())?;
-    host_raised()?;
+    asking.finish()?;
     Ok(d)
 }
 

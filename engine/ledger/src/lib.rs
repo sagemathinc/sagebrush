@@ -126,8 +126,21 @@ pub fn set_total_and_measure(total: Option<Total>, kinds: &[MeasureKind]) {
     s.measure = m;
 }
 
+/// The native host's answer when the ledger asks for its total.
 #[cfg(not(target_arch = "wasm32"))]
-type TotalHost = Box<dyn Fn() -> Option<(Total, Vec<MeasureKind>)> + Send + Sync>;
+pub enum HostAnswer {
+    /// the total and the binding rows' usage measures
+    Total(Total, Vec<MeasureKind>),
+    /// no usable answer: the nominal total, uncertified (and asked again)
+    Unreadable,
+    /// the host did not ask its source on this thread (no caller there to
+    /// receive what the source might raise): the total in force stays, still
+    /// due for its refresh
+    NotAsked,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type TotalHost = Box<dyn Fn() -> HostAnswer + Send + Sync>;
 #[cfg(not(target_arch = "wasm32"))]
 static TOTAL_HOST: std::sync::OnceLock<TotalHost> = std::sync::OnceLock::new();
 /// (the native host's TOTAL, a limit, not a usage, is asked again when 100
@@ -138,8 +151,18 @@ const TOTAL_REFRESH: std::time::Duration = std::time::Duration::from_millis(100)
 /// Register the native host's total and binding measures (the first
 /// registration stands): asked outside the ledger's lock.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn set_total_host(f: impl Fn() -> Option<(Total, Vec<MeasureKind>)> + Send + Sync + 'static) {
+pub fn set_total_host(f: impl Fn() -> HostAnswer + Send + Sync + 'static) {
     let _ = TOTAL_HOST.set(Box::new(f));
+}
+
+/// Take the native host's answer.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn apply_host_answer(a: HostAnswer) {
+    match a {
+        HostAnswer::Total(t, kinds) => set_total_and_measure(Some(t), &kinds),
+        HostAnswer::Unreadable => set_total_and_measure(None, &[]),
+        HostAnswer::NotAsked => {}
+    }
 }
 
 /// The total in force (refreshed from the native host when 100 ms old,
@@ -149,10 +172,7 @@ pub fn total() -> Total {
     if let Some(host) = TOTAL_HOST.get() {
         let stale = state().total_at.is_none_or(|t| t.elapsed() >= TOTAL_REFRESH);
         if stale {
-            match host() {
-                Some((t, kinds)) => set_total_and_measure(Some(t), &kinds),
-                None => set_total_and_measure(None, &[]),
-            }
+            apply_host_answer(host());
         }
     }
     state().total.unwrap_or(NOMINAL)
