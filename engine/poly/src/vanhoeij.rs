@@ -139,7 +139,7 @@ macro_rules! ledger {
 macro_rules! handoff {
     ($($term:expr),+ $(,)?) => {
         #[cfg(test)]
-        ledger_log::handoff(0 $(+ $term)+, line!());
+        ledger_log::handoff(0u64 $(.saturating_add($term))+, line!());
     };
 }
 
@@ -248,8 +248,13 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
     let mut rows: Vec<Vec<BigInt>> = (0..r).map(|i| (0..r).map(|j| BigInt::from((i == j) as u32)).collect()).collect();
     let mut used_low = 0usize; // next low index
     let mut used_high = 0usize; // next high offset
+    // the level's precision: k, doubled per level by checked doubling (a
+    // precision past u64::MAX is refused; its p^a is refused before that)
+    let mut a = m.k;
     for level in 0..LEVELS {
-        let a = m.k.checked_mul(1 << level).ok_or_else(|| b.refuse("precision", u64::MAX, m.k as u64))?;
+        if level > 0 {
+            a = a.checked_mul(2).ok_or_else(|| b.refuse("precision", u64::MAX, a))?;
+        }
         let lifted_here;
         let us: &[Held<'b>] = if level == 0 {
             rest0
@@ -274,13 +279,17 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
         // factor is a Held, which owns its reservation)
         #[cfg(test)]
         let relifted_b = if level == 0 { 0 } else { us.iter().map(|u| u.reserved()).sum::<u64>() };
-        handoff!(whole, held_want, relifted_b, crate::power_bytes(p, a).unwrap());
+        // (a request that can't be counted in bytes is refused: no peak)
+        #[cfg(test)]
+        if let Some(pa_b) = crate::power_bytes(p, a) {
+            handoff!(whole, held_want, relifted_b, pa_b);
+        }
         let pa = crate::power(b, p, a)?;
         #[cfg(test)]
         let level_bytes = crate::power_bytes(p, a).unwrap() + relifted_b;
         // the retained p-adic digits per entry: e = floor(E / ceil(log2 p)), E = 2r + 64
         let ebits = 2 * r as u64 + 64;
-        let edig = (ebits / pbits) as u32;
+        let edig = ebits / pbits;
         loop {
             if cols.len() >= MAX_COLS {
                 break;
@@ -337,7 +346,7 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
                         let _pw = b.reserve_as("pw", big_bytes(bounds[j].bits() + pbits))?;
                         handoff!(whole, level_bytes, held_want, cld_b, big_bytes(bounds[j].bits() + pbits).unwrap());
                         let _t = tag("pw");
-                        let mut bmin = 0u32;
+                        let mut bmin = 0u64;
                         let mut pw = BigInt::one();
                         while pw < bounds[j] {
                             ledger!(b, "the pw loop", whole, level_bytes, held_want, cld_b, big_bytes(bounds[j].bits() + pbits).unwrap());
@@ -950,5 +959,22 @@ pub(crate) mod tests {
         assert_eq!(after, crate::alloc_spy::refused_at(), "allocations after the refusal");
         assert_eq!(b.live(), 0);
         eprintln!("S_6 tight: peak {peak} (line {line}) admits; {} refuses in {} (need {})", peak - 1, e.phase.name(), e.need);
+    }
+
+    #[test]
+    fn a_huge_precision_is_refused_before_it_wraps() {
+        // section 3.6, the order at the boundary: with a precision k whose
+        // doubling would pass u64::MAX, the lattice is refused by the
+        // reservation of p^k at its first level (no width cutoff, no wrap,
+        // no doubling refusal, nothing allocated for it)
+        let f = crate::tests::swinnerton_dyer(5);
+        let b = Budget::unlimited();
+        let mut m = crate::modular(&b, &f).unwrap().unwrap();
+        let lifted = crate::lift(&b, &f, &m, m.k).unwrap();
+        for k in [u64::MAX / 2 + 1, u64::MAX] {
+            m.k = k;
+            let e = lattice(&b, &f, &m, &lifted).map(|o| o.map(|fs| fs.len())).unwrap_err();
+            assert_eq!((e.what, e.kind), ("memory (overflow)", crate::Kind::Resource), "k {k}: {e}");
+        }
     }
 }
