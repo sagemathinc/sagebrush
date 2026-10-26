@@ -38,6 +38,9 @@ use std::sync::Mutex;
 mod measure;
 pub use measure::{Measure, MeasureKind, Reading, Row};
 
+mod growth;
+pub use growth::{growth_envelope, last_growth_delta, reserve_growth, GrowPermit, Growth, PAGE};
+
 #[cfg(feature = "ledger-audit")]
 pub mod audit;
 
@@ -127,6 +130,30 @@ pub fn set_total(total: Option<Total>) {
     }
 }
 
+/// R_ret and the failed-creation fault, pushed by the WebAssembly host (C r14
+/// section 2, r15 section 4, r17 section 2): `bytes` must be finite, >= 0,
+/// an integer, at most 2^53 - 1 and a multiple of the 64 KiB page;
+/// `faulted` 0 or 1.  Anything else is an internal error and a sticky fault
+/// (fail closed: the ledger is not certified from then on).  A fault, once
+/// set, stays: neither this nor a total refresh clears it.
+pub fn set_retired(bytes: f64, faulted: u32) -> Result<(), EngineError> {
+    let ok = bytes.is_finite() && bytes >= 0.0 && bytes.fract() == 0.0 && bytes <= 9007199254740991.0 && (bytes as u64) % PAGE == 0 && faulted <= 1;
+    let mut s = state();
+    if !ok {
+        s.fault = true;
+        drop(s);
+        return Err(EngineError::Internal(format!("an invalid retired-bytes figure ({}, fault {})", bytes, faulted)));
+    }
+    s.retired = bytes as u64;
+    s.fault |= faulted == 1;
+    Ok(())
+}
+
+/// R_ret as the ledger holds it (diagnostics, tests).
+pub fn retired_bytes() -> u64 {
+    state().retired
+}
+
 /// Set the total and every applicable row with its usage measure (the
 /// native host; tests).  The measures' files are opened here, outside the
 /// lock.
@@ -211,7 +238,8 @@ pub fn certified() -> bool {
     let _ = total();
     #[cfg(target_arch = "wasm32")]
     {
-        state().total.is_some_and(|t| t.status == TotalStatus::Observed && !t.uncertified)
+        let s = state();
+        !s.fault && s.total.is_some_and(|t| t.status == TotalStatus::Observed && !t.uncertified)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -224,7 +252,7 @@ pub fn certified() -> bool {
         }
         measure::prepare();
         let mut s = state();
-        total_fresh(&s) && s.total.is_some() && s.measure.available() && s.measure.read_each(|_| {})
+        !s.fault && total_fresh(&s) && s.total.is_some() && s.measure.available() && s.measure.read_each(|_| {})
     }
 }
 
@@ -248,6 +276,9 @@ pub struct Refusal {
     pub available: Option<u64>,
     /// whether L was measured (false: fail-closed platform or unreadable)
     pub measured: bool,
+    /// R_ret, the retired WebAssembly instances' pages counted as live in
+    /// this domain (C r14 section 2; 0 natively)
+    pub retired: u64,
 }
 
 /// The engine's typed errors: a memory refusal (D1's error on the host), or
@@ -263,6 +294,11 @@ impl fmt::Display for EngineError {
         match self {
             EngineError::Memory(r) => match r.available {
                 Some(a) => write!(f, "{}: {} more bytes do not fit in the {} bytes this machine has available (beyond its reserve)", r.what, r.need, a),
+                None if r.retired > 0 => write!(
+                    f,
+                    "{}: {} more bytes do not fit: {} in use, {} held by retired engine instances and {} reserved, against {} (a quarter of the engine's {} total of {} bytes)",
+                    r.what, r.need, r.live, r.retired, r.outstanding, r.allowance, r.status.name(), r.total
+                ),
                 None => write!(
                     f,
                     "{}: {} more bytes do not fit: {} in use and {} reserved, against {} (a quarter of the engine's {} total of {} bytes)",
@@ -289,8 +325,19 @@ struct State {
     #[cfg(not(target_arch = "wasm32"))]
     measure: Measure,
     /// WebAssembly: the committed bytes at the first check (B_w)
-    #[cfg(target_arch = "wasm32")]
     baseline: Option<u64>,
+    /// WebAssembly: R_ret, the pages of retired instances of this domain
+    /// still pending their finalizers (C r14 section 2), set by the host
+    retired: u64,
+    /// WebAssembly: a sticky fault (an invalid retired figure, or the
+    /// host's failed-creation debt, C r15 section 4 and r17 section 2): not
+    /// certified from then on; an ordinary total refresh doesn't clear it
+    fault: bool,
+    /// WebAssembly: the bytes of the growth permit in flight on this
+    /// instance (C r15 section 2: at most one), 0 for none
+    permit_in_flight: u64,
+    /// the last committed growth's Delta-L (audit only)
+    last_growth_delta: u64,
     outstanding: u64,
     resident: u64,
     /// bytes ever converted to residents (C r12 section 2's C)
@@ -308,8 +355,11 @@ static STATE: Mutex<State> = Mutex::new(State {
     total_at: None,
     #[cfg(not(target_arch = "wasm32"))]
     measure: Measure::NONE,
-    #[cfg(target_arch = "wasm32")]
     baseline: None,
+    retired: 0,
+    fault: false,
+    permit_in_flight: 0,
+    last_growth_delta: 0,
     outstanding: 0,
     resident: 0,
     converted: 0,
@@ -705,6 +755,29 @@ pub mod hooks {
     pub(crate) static FAKE: Mutex<Option<Vec<FakeRow>>> = Mutex::new(None);
     pub(crate) static PAUSE: Mutex<Option<std::sync::Arc<std::sync::Barrier>>> = Mutex::new(None);
     pub(crate) static UNREADABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    /// the fake instance's committed bytes (all ones, !0: none, the native
+    /// ledger); with one set, growth runs on pages as in WebAssembly
+    pub(crate) static FAKE_COMMITTED: AtomicU64 = AtomicU64::new(!0);
+
+    /// Run growth on fake pages (WebAssembly's model) with this many
+    /// committed bytes, or none (the native ledger).
+    pub fn set_fake_committed(bytes: Option<u64>) {
+        FAKE_COMMITTED.store(bytes.unwrap_or(!0), Relaxed);
+    }
+
+    /// A fake `memory.grow` of `bytes` (after a permit).
+    pub fn fake_grow(bytes: u64) {
+        let c = FAKE_COMMITTED.load(Relaxed);
+        assert_ne!(c, !0, "no fake pages");
+        FAKE_COMMITTED.store(c + bytes, Relaxed);
+    }
+
+    pub(crate) fn fake_committed() -> Option<u64> {
+        match FAKE_COMMITTED.load(Relaxed) {
+            c if c == !0 => None,
+            c => Some(c),
+        }
+    }
 
     /// Every check's fresh read fails (an opened measure whose contents
     /// became unreadable), until cleared: certified() is false and an
@@ -733,14 +806,16 @@ pub mod hooks {
     }
 }
 
-/// One row's check (C r13; C r17 section 1.3): phi (L_r + O + x) <= E_r,
+/// One row's check (C r13; C r17 section 1.3; C r16 section 1's per-row
+/// measure rule): phi (L_r + R_ret + O + x) <= E_r, R_ret only on the
+/// WebAssembly watermark row (0 on native rows),
 /// E_r = figure / 4, L_r = max(the row's usage, R_res); and for the physical
 /// row, O + x <= available - reserve.  In u128: no overflow for any u64
 /// inputs.  Some((allowance, room)) when it refuses (room: Some for the
 /// availability check).
-fn row_refuses(figure: u64, live: u64, available: Option<u64>, outstanding: u64, x: u64) -> Option<(u64, Option<u64>)> {
+fn row_refuses(figure: u64, live: u64, retired: u64, available: Option<u64>, outstanding: u64, x: u64) -> Option<(u64, Option<u64>)> {
     let e = figure / SHARE_DEN;
-    if FRAG_NUM as u128 * (live as u128 + outstanding as u128 + x as u128) > FRAG_DEN as u128 * e as u128 {
+    if FRAG_NUM as u128 * (live as u128 + retired as u128 + outstanding as u128 + x as u128) > FRAG_DEN as u128 * e as u128 {
         return Some((e, None));
     }
     if let Some(a) = available {
@@ -759,6 +834,10 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     let mut s = state();
     let outstanding = s.outstanding;
     let resident = s.resident;
+    // R_ret: always a term on the WebAssembly watermark row (C r16 section 1),
+    // never on native rows (their measures don't involve instances)
+    let retired = s.retired;
+    let fault = s.fault;
     // a certification-dependent chain never takes an unmeasured check
     let protected = s.is_certified_chain(chain);
     #[cfg(target_arch = "wasm32")]
@@ -772,11 +851,11 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     // the lock, the error (which allocates) built after it is released.
     let mut first: Option<(u64, u64, u64, Option<u64>)> = None;
     let mut live_seen = resident;
-    let mut on_row = |figure: u64, usage: u64, available: Option<u64>| {
+    let mut on_row = |figure: u64, usage: u64, rr: u64, available: Option<u64>| {
         let live = usage.max(resident);
         live_seen = live_seen.max(live);
         if first.is_none() {
-            if let Some((e, room)) = row_refuses(figure, live, available, outstanding, x) {
+            if let Some((e, room)) = row_refuses(figure, live, rr, available, outstanding, x) {
                 first = Some((figure, live, e, room));
             }
         }
@@ -788,8 +867,9 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
         let g = hooks::FAKE.lock().unwrap();
         if let Some(rows) = g.as_ref() {
             faked = true;
+            // (the fake rows stand for the watermark row too: R_ret counts)
             for &(figure, usage, available) in rows {
-                on_row(figure.unwrap_or(t.bytes), usage, available);
+                on_row(figure.unwrap_or(t.bytes), usage, retired, available);
             }
         }
         drop(g);
@@ -803,17 +883,17 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     let mut measured = true;
     #[cfg(target_arch = "wasm32")]
     if !faked {
-        on_row(t.bytes, wasm_live, None);
+        on_row(t.bytes, wasm_live, retired, None);
     }
     // (WebAssembly: a certification-dependent chain needs the total still
     // certified: observed, every applicable row engine-only)
     #[cfg(target_arch = "wasm32")]
-    let unmeasurable = protected && !(t.status == TotalStatus::Observed && !t.uncertified);
+    let unmeasurable = protected && (fault || !(t.status == TotalStatus::Observed && !t.uncertified));
     // (natively: a certification-dependent chain needs a fresh total, not one
     // left stale by a read that could not ask, HostAnswer::NotAsked)
     #[cfg(not(target_arch = "wasm32"))]
     #[allow(unused_mut)]
-    let mut unmeasurable = protected && !total_fresh(&s);
+    let mut unmeasurable = protected && (fault || !total_fresh(&s));
     // a measure that opened but can't be read now fails closed at this
     // admission (astra2's CORR-C2A-1): no residents-only fallback that
     // would admit past an unmeasured row
@@ -827,7 +907,7 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     #[cfg(not(target_arch = "wasm32"))]
     if !faked {
         if s.measure.available() {
-            measured = s.measure.read_each(|r| on_row(r.figure, r.usage, r.available));
+            measured = s.measure.read_each(|r| on_row(r.figure, r.usage, 0, r.available));
             unreadable = !measured;
         } else if protected {
             // a certification-dependent operation whose rows became
@@ -840,7 +920,7 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
             // with no measure: no cap was lifted for it; the residents
             // against the total, as in C-1)
             measured = false;
-            on_row(t.bytes, 0, None);
+            on_row(t.bytes, 0, 0, None);
         }
     }
     if (unreadable || unmeasurable) && first.is_none() {
@@ -868,6 +948,7 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
         joint: t.joint,
         available: room,
         measured,
+        retired,
     }))
 }
 
