@@ -187,6 +187,29 @@ fn a_worker_joins_the_chain_without_taking_the_guard() {
 }
 
 #[test]
+fn a_host_that_did_not_ask_leaves_the_total_in_force() {
+    // (CORR-C1-1: a read on a thread with no asking call runs no source; the
+    // total stays, still due for its refresh, and an unreadable answer is
+    // the nominal total, uncertified)
+    let _g = fresh(total_for_usable(1000));
+    let now = || {
+        let s = state();
+        (s.total, s.total_at)
+    };
+    let before = now();
+    assert!(before.0.is_some());
+    apply_host_answer(HostAnswer::NotAsked);
+    assert_eq!(now(), before);
+    apply_host_answer(HostAnswer::Unreadable);
+    assert_eq!(now(), (None, None));
+    let t = Total { bytes: 8000, status: TotalStatus::Observed, joint: false };
+    apply_host_answer(HostAnswer::Total(t, vec![]));
+    let (total, at) = now();
+    assert_eq!(total, Some(t));
+    assert!(at.is_some());
+}
+
+#[test]
 fn an_observed_zero_refuses_and_no_total_is_nominal() {
     let _g = fresh(0);
     set_total(Some(Total { bytes: 0, status: TotalStatus::Zero, joint: false }));
