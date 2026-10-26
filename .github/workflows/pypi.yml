@@ -38,18 +38,10 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
           args: --release --out dist
-      - name: test the wheel
+      - name: install the wheel
         shell: bash
-        run: |
-          python -m pip install engine/py/dist/*.whl
-          python -c "import glob, zipfile; names = zipfile.ZipFile(glob.glob('engine/py/dist/*.whl')[0]).namelist(); need = ['LICENSE-MIT', 'LICENSE-APACHE', 'LICENSE-Artistic-2.0.txt', 'THIRD-PARTY-NOTICES.txt']; missing = [n for n in need if not any(x.endswith('/' + n) for x in names)]; assert not missing, missing; print('license files in the wheel: ok')"
-          python sage-tests/run_cpython.py -v
-          python sage-tests/run_cpython.py --own -v
-          python sage-tests/run_calculus.py
-          python engine/py/test_interrupt.py
-          python engine/py/test_audit.py
-          python engine/py/test_mcp.py
-          cd engine/py && python -m doctest README.md && echo doctests ok
+        run: python -m pip install engine/py/dist/*.whl
+      # (first, before the wheel tests, so an unrelated failure there can't keep it from running)
       - name: the memory this machine shows (lib/_capacity.py), named by its source
         shell: bash
         run: |
@@ -58,6 +50,17 @@ jobs:
           python -I test/capacity_ctypes_cases.py
           # (on Windows, each kernel32/psapi call typed and untyped: board's probe, which changes nothing)
           if [ "$RUNNER_OS" = Windows ]; then python test/win_capacity_probe.py engine/py/python/sagebrush/_sagelib || true; fi
+      - name: test the wheel
+        shell: bash
+        run: |
+          python -c "import glob, zipfile; names = zipfile.ZipFile(glob.glob('engine/py/dist/*.whl')[0]).namelist(); need = ['LICENSE-MIT', 'LICENSE-APACHE', 'LICENSE-Artistic-2.0.txt', 'THIRD-PARTY-NOTICES.txt']; missing = [n for n in need if not any(x.endswith('/' + n) for x in names)]; assert not missing, missing; print('license files in the wheel: ok')"
+          python sage-tests/run_cpython.py -v
+          python sage-tests/run_cpython.py --own -v
+          python sage-tests/run_calculus.py
+          python engine/py/test_interrupt.py
+          python engine/py/test_audit.py
+          python engine/py/test_mcp.py
+          cd engine/py && python -m doctest README.md && echo doctests ok
       - uses: actions/upload-artifact@v5
         with:
           name: wheel-${{ matrix.os }}-${{ matrix.target }}
