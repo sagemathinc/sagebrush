@@ -1594,6 +1594,10 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_capacity.py :: engine_rows :: rows.append({\"source\": b[\"source\"], \"figure\": b[\"limit\"], \"joint\": joint}) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "lib/_capacity.py :: engine_total :: - basis: the sources of the rows at that least limit; #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
