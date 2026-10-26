@@ -152,6 +152,8 @@ pub fn instance_total() -> Option<Total> {
 
 /// The instance-local total pushed as WebAssembly numbers: bytes as in
 /// total_from_wasm, status 0, 1 or 2, or 3 for none; Err for anything else.
+// (the one error is "invalid": the web export sets the sticky fault for it)
+#[allow(clippy::result_unit_err)]
 pub fn instance_total_from_wasm(bytes: f64, status: u32) -> Result<Option<Total>, ()> {
     if status == 3 {
         return Ok(None);

@@ -761,6 +761,7 @@ fn the_instance_row_takes_no_retired_pages_by_one_byte_and_at_equality() {
             // absent shared record's, and no R_ret)
             let inst = total_for_usable(80 * P);
             assert_eq!((r.status, r.total, r.allowance, r.joint, r.retired), (TotalStatus::Observed, inst, inst / SHARE_DEN, false, 0));
+            let m = EngineError::Memory(r).to_string();
             assert!(m.contains("this engine instance") && !m.contains("retired"), "{}", m);
         }
         _ => panic!("one step over must refuse"),
@@ -895,6 +896,7 @@ fn growth_refusals_name_the_binding_row_with_its_own_figures() {
         }
         _ => panic!("a permit over the grant must refuse"),
     }
+    drop(g);
 }
 
 #[test]
