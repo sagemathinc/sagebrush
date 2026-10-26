@@ -49,6 +49,12 @@ pin is stable).
                                                   REV, classified by SEEDFILE's inventory rows
     python3 test/limit_sites.py --list-baseline REV
                                                   the baseline's sites, readably, from the files at REV
+
+The baseline sweep (plan-limit-sites-sweep-r3) registers the baseline's sites
+batch by batch: test/limit_sweep.py, its manifest and its checks, which
+check() runs too ("sweep").  Its readers take a revision, so a manifest is
+built from one commit's files, registry and baseline together (`load(rev)`,
+`baseline_keys(rev)`), never from the working tree.
 """
 import ast
 import hashlib
@@ -185,7 +191,18 @@ def sites(rev=None):
     return out
 
 
-def load():
+def use_root(root):
+    """Point the census at another checkout (the sweep's fixture repositories)."""
+    global ROOT, REGISTRY, BASELINE
+    ROOT = root
+    REGISTRY = os.path.join(ROOT, "test", "limit-sites.json")
+    BASELINE = os.path.join(ROOT, "test", "limit-sites-baseline.txt")
+
+
+def load(rev=None):
+    """The registry, in the working tree or at REV."""
+    if rev is not None:
+        return json.loads(read("test/limit-sites.json", rev))
     with open(REGISTRY, encoding="utf-8") as f:
         return json.load(f)
 
@@ -196,9 +213,19 @@ def save(reg):
         f.write("\n")
 
 
-def baseline_keys():
+def baseline_keys(rev=None):
+    """The baseline's hashes, in the working tree or at REV."""
+    if rev is not None:
+        return set(l for l in read("test/limit-sites-baseline.txt", rev).split("\n") if l)
     with open(BASELINE, encoding="utf-8") as f:
         return set(l for l in f.read().split("\n") if l)
+
+
+def active_baseline(now, reg, base):
+    """The sites the baseline still excuses: present, unregistered, their hash
+    in the baseline.  The one definition, for check(), the sweep's checks and
+    its transition (B18 asserts it is empty, derived, never a constant)."""
+    return sorted(k for k in now if k not in reg and short(k) in base)
 
 
 def baseline_sha256():
@@ -207,9 +234,15 @@ def baseline_sha256():
 
 
 def check():
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import limit_sweep
     reg = load()
-    now = {k for k, _, _ in sites()}
+    found = sites()
+    now = {k for k, _, _ in found}
     base = baseline_keys()
+    active = active_baseline(now, reg, base)
     bad = {
         "unregistered": sorted(k for k in now if k not in reg and short(k) not in base),
         "stale": sorted(set(reg) - now),
@@ -217,9 +250,12 @@ def check():
         # guards' message, item D; true or absent)
         "invalid": sorted(k for k, v in reg.items() if v.get("class") not in CLASSES or not v.get("owner")
                           or v.get("explained", True) is not True or ("explained" in v and "2" not in v["class"])),
+        # (the sweep's: entries' dispositions, follow-ups, the manifest's membership and done batches; each names its key)
+        "sweep": limit_sweep.problems(found, reg, base, active),
     }
     return {"baseline_sha256": baseline_sha256(), "sites": len(now), "registered": len(reg),
-            "explained": sum(1 for v in reg.values() if v.get("explained")), "problems": bad}
+            "explained": sum(1 for v in reg.values() if v.get("explained")), "active_baseline": len(active),
+            "problems": bad}
 
 
 def seed(rev, seedfile):
@@ -279,6 +315,7 @@ def main(argv):
         now = {k for k, _, _ in sites()}
         base = baseline_keys()
         todo = keys if keys is not None else sorted(k for k in now if k not in reg and short(k) not in base)
+        # (a batch's baseline sites are registered by test/limit_sweep.py's apply, with their dispositions)
         for k in todo:
             if k not in now:
                 print("not a current site: %s" % k)
@@ -292,4 +329,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    sys.modules["limit_sites"] = sys.modules["__main__"]  # (one module, for test/limit_sweep.py's import of it)
     sys.exit(main(sys.argv[1:]))

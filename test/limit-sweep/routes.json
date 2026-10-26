@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "note": "The routes a disposition may name (plan-limit-sites-sweep-r3 section 1): kind memory, a memory guard that bounds a class-2 site; kind host, a trusted host capability bounding a class-3 site, unarmed by default (its default route). where and default are path::qualified name, resolved in the current source. Adding a row is a reviewed change (daybreak2's lane).",
+ "routes": [
+  {"id": "memguard", "kind": "memory", "where": "lib/_memguard.py::memory_guard"}
+ ]
+}

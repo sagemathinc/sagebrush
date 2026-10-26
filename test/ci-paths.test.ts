@@ -161,7 +161,8 @@ test("the limits census runs on engine-only, lib and src changes even when the n
   const o = classify(pr155);
   assert.equal(o.node, "false");
   assert.equal(o.census, "true");
-  for (const f of ["lib/_magma.py", "src/runtime/ops.ts", "web/workspace/sync-ledger.ts", "test/limit-sites.json", "test/limit-sites-baseline.txt", "test/limit_sites.py", "test/limits.test.ts"])
+  for (const f of ["lib/_magma.py", "src/runtime/ops.ts", "web/workspace/sync-ledger.ts", "test/limit-sites.json", "test/limit-sites-baseline.txt", "test/limit_sites.py", "test/limits.test.ts",
+    "test/limit-sweep/manifest.json", "test/limit-sweep/batches.json", "test/limit_sweep.py", "test/limit_sweep_cases.py"])
     assert.equal(classify([f]).census, "true", f);
   // and not for files the census does not read
   for (const f of ["design/plan.md", "app/src/main.ts", "optional/x/README.md"])

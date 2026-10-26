@@ -143,6 +143,8 @@ const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallba
 const censusPaths = [
   /^engine\//, /^lib\//, /^src\//, /^web\/workspace\/sync-ledger\.ts$/,
   /^test\/limit-sites\.json$/, /^test\/limit-sites-baseline\.txt$/, /^test\/limit_sites\.py$/, /^test\/limits\.test\.ts$/,
+  // (the baseline sweep's files and tooling, which the census's check reads: plan-limit-sites-sweep-r3)
+  /^test\/limit-sweep\//, /^test\/limit_sweep\.py$/, /^test\/limit_sweep_cases\.py$/,
 ];
 const census = full || workflowOrBuild || matches(censusPaths) || fallback;
 
