@@ -211,7 +211,8 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       const t = trials[Number(si) - 1];
       if (!t) return;
       // (the window's markers: the target's call is the first; a probe on the same route repeats them)
-      if ((mk === "XSTART" || mk === "XEND") && t.marks[mk]) return;
+      // (and a phase case's: the target's PHASE is the first; the probe's own call repeats it, later)
+      if ((mk === "XSTART" || mk === "XEND" || mk === "PHASE") && t.marks[mk]) return;
       t.marks[mk] = { t: now(), rest };
       if (mk === "ENTER" && delays[t.i - 1] != null) {
         const id = t.i;
