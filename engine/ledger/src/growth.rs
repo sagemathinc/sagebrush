@@ -48,16 +48,64 @@ pub(crate) fn paged_committed() -> Option<u64> {
 }
 
 /// L on pages: max(committed, B_w + R_res) (C r12 section 3).
-fn paged_live(s: &mut State, committed: u64) -> u64 {
+pub(crate) fn paged_live(s: &mut State, committed: u64) -> u64 {
     let b = *s.baseline.get_or_insert(committed);
     committed.max(b.saturating_add(s.resident))
 }
 
-/// floor(E / phi) - L - R_ret - O, at least 0.
-fn room_locked(s: &mut State, t: Total, committed: u64) -> u64 {
+/// The row that binds a growth room (C r16b): its scope and its own total;
+/// R_ret is its term only on the shared row.
+#[derive(Clone, Copy)]
+struct Bind {
+    row: &'static str,
+    total: Total,
+}
+
+impl Bind {
+    fn retired(self, s: &State) -> u64 {
+        if self.row == "shared" { s.retired } else { 0 }
+    }
+}
+
+/// The room under every row in force (C r16b section 3.2), at least 0, and
+/// the row that binds it: the shared total's floor(E / phi) - L - R_ret - O
+/// and the instance total's floor(E / phi) - L - O, the least of them.
+/// There is always a row: an absent shared total with no instance total is
+/// the nominal one (shared_row; never the whole envelope).
+fn room_locked(s: &mut State, t: Total, committed: u64) -> (u64, Bind) {
     let l = paged_live(s, committed);
-    let e_over_phi = (allowance(t) as u128 * FRAG_DEN as u128 / FRAG_NUM as u128) as u64;
-    e_over_phi.saturating_sub(l).saturating_sub(s.retired).saturating_sub(s.outstanding)
+    let (outstanding, retired) = (s.outstanding, s.retired);
+    let room = |e: u64, ret: u64| {
+        let e_over_phi = (e as u128 * FRAG_DEN as u128 / FRAG_NUM as u128) as u64;
+        e_over_phi.saturating_sub(l).saturating_sub(ret).saturating_sub(outstanding)
+    };
+    let shared = shared_row(t, s.instance.is_some()).map(|sh| (room(allowance(sh), retired), Bind { row: "shared", total: sh }));
+    let inst = s.instance.map(|i| (room(allowance(i), 0), Bind { row: "instance", total: i }));
+    match (shared, inst) {
+        (Some(a), Some(b)) => if b.0 < a.0 { b } else { a },
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        // (unreachable: shared_row is none only beside an instance total)
+        (None, None) => (0, Bind { row: "shared", total: NOMINAL }),
+    }
+}
+
+/// A growth refusal on the row `b`, with that row's own figures.
+fn refusal(what: &str, b: Bind, need: u64, live: u64, outstanding: u64, retired: u64) -> EngineError {
+    EngineError::Memory(Refusal {
+        what: what.to_string(),
+        row: b.row,
+        need,
+        allowance: allowance(b.total),
+        live,
+        outstanding,
+        total: b.total.bytes,
+        status: b.total.status,
+        joint: b.total.joint,
+        available: None,
+        measured: true,
+        retired,
+    })
 }
 
 /// A growth reservation: natively a reservation of the whole block; in
@@ -70,7 +118,7 @@ pub struct Growth {
 
 enum Kind {
     Native(Reservation),
-    Paged { chain: u64, granted: u64, held: u64 },
+    Paged { chain: u64, granted: u64, held: u64, bind: Bind },
 }
 
 /// Reserve the page growth of a block of `block` bytes (C r15 section 1).
@@ -88,11 +136,12 @@ pub fn reserve_growth(what: &str, block: u64) -> Result<Growth, EngineError> {
     let mut s = state();
     let committed = paged_committed().unwrap_or(0);
     let protected = s.is_certified_chain(chain);
-    let uncertified = s.fault || !(t.status == TotalStatus::Observed && !t.uncertified);
+    let uncertified = !wasm_totals_certified(s.fault, t, s.instance);
     let live = paged_live(&mut s, committed);
-    let (outstanding, retired) = (s.outstanding, s.retired);
+    let outstanding = s.outstanding;
+    let (room, bind) = room_locked(&mut s, t, committed);
     if let (Some(w), false) = (w, protected && uncertified) {
-        let g = w.min(room_locked(&mut s, t, committed));
+        let g = w.min(room);
         if g > 0 {
             if s.chain_add(chain, g).is_err() {
                 drop(s);
@@ -100,22 +149,11 @@ pub fn reserve_growth(what: &str, block: u64) -> Result<Growth, EngineError> {
             }
             s.set_outstanding(outstanding + g);
         }
-        return Ok(Growth { kind: Kind::Paged { chain, granted: g, held: g } });
+        return Ok(Growth { kind: Kind::Paged { chain, granted: g, held: g, bind } });
     }
+    let retired = bind.retired(&s);
     drop(s);
-    Err(EngineError::Memory(Refusal {
-        what: what.to_string(),
-        need: w.unwrap_or(u64::MAX),
-        allowance: allowance(t),
-        live,
-        outstanding,
-        total: t.bytes,
-        status: t.status,
-        joint: t.joint,
-        available: None,
-        measured: true,
-        retired,
-    }))
+    Err(refusal(what, bind, w.unwrap_or(u64::MAX), live, outstanding, retired))
 }
 
 impl Growth {
@@ -146,14 +184,13 @@ impl Growth {
     /// permit is in flight on the instance.  WebAssembly only (a native
     /// block is reserved in full and never grows pages).
     pub fn permit(&mut self, k: u64) -> Result<GrowPermit<'_>, EngineError> {
-        let held = match &self.kind {
+        let (held, bind) = match &self.kind {
             Kind::Native(_) => return Err(EngineError::Internal("a growth permit is for WebAssembly pages; a native block is reserved in full".into())),
-            Kind::Paged { held, .. } => *held,
+            Kind::Paged { held, bind, .. } => (*held, *bind),
         };
         if !k.is_multiple_of(PAGE) {
             return Err(EngineError::Internal(format!("a growth permit of {} bytes is not a whole number of pages", k)));
         }
-        let t = total();
         let mut s = state();
         if s.permit_in_flight != 0 {
             drop(s);
@@ -162,21 +199,10 @@ impl Growth {
         let committed = paged_committed().unwrap_or(0);
         let live = paged_live(&mut s, committed);
         if k > held {
-            let (outstanding, retired) = (s.outstanding, s.retired);
+            // (the row that bound the grant, with its own figures)
+            let (outstanding, retired) = (s.outstanding, bind.retired(&s));
             drop(s);
-            return Err(EngineError::Memory(Refusal {
-                what: "memory growth".into(),
-                need: k,
-                allowance: allowance(t),
-                live,
-                outstanding,
-                total: t.bytes,
-                status: t.status,
-                joint: t.joint,
-                available: None,
-                measured: true,
-                retired,
-            }));
+            return Err(refusal("memory growth", bind, k, live, outstanding, retired));
         }
         // (a zero-byte permit still occupies the one slot)
         s.permit_in_flight = k.max(1);

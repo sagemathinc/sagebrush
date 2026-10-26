@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "no-cliffs C-2b-ii (#194) after #192 (master b340cd2b), a top-up of 2026-10-26-nocliffs-c2b-retire.json: the wasm is CI's fresh-wasm artifact of bfd07acb (PR ci run 40395673267, merge 9e8df649 with the head's tree, sha256 d3c83c56), 7199449 against master's 7197313 (+2136, marker 1847: +289); that run's size-gate (master's wasm still embedded) measured engine/sagebrush-worker.js +4662 (marker 4250: +412) and cli/pyjs.cjs +9191; pyjs adds the wasm's base64 growth (+2848) and one quantum (+4): 12043 against 11108 (+935) until a size-gate measures it with this wasm",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 289,
+  "engine/sagebrush-worker.js": 412,
+  "cli/pyjs.cjs": 935
+ }
+}

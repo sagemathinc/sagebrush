@@ -16,7 +16,8 @@
 //   matlab  MATLAB mode's start
 //   magma   Magma mode's start
 // that it is in; files no start uses are grouped by family (sage-more,
-// matlab-more, magma-more) or are a group of their own (mod-<name>: a
+// matlab-more, magma-more; MATLAB's sparse LU, _matlab_lu and _matlab_colamd,
+// is matlab-lu) or are a group of their own (mod-<name>: a
 // top-level module or package, its name in lowercase letters, digits and
 // "-").  Each package (packages/<name>/, scripts/packages.mjs) is a group too,
 // pkg-<name>, its files by "<name>/<path>", with its compiled code too if a
@@ -51,6 +52,9 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
   for (const g of ["sci", "sage", "matlab", "magma"]) if (sets[g]?.has(path)) return g;
   const top = path.split("/")[0].replace(/\.py$/, "");
   if (/^_?sage/.test(top)) return "sage-more";
+  // (MATLAB mode's sparse LU, imported only by a measured sparse solve: its
+  // own group, so the other MATLAB extras' users don't fetch it)
+  if (/^_matlab_(lu|colamd)$/.test(top)) return "matlab-lu";
   if (/^_matlab/.test(top)) return "matlab-more";
   if (/^_magma/.test(top)) return "magma-more";
   // (lowercase letters, digits and "-": an engine file's name has nothing
