@@ -54,9 +54,9 @@ problem naming its key or item:
     python3 test/limit_sweep.py worksheet BATCH [OUT]
                                                     a batch's worksheet (default test/limit-sweep/work/BATCH.json)
     python3 test/limit_sweep.py apply WORKSHEET     validate the whole worksheet, then write its rows (or nothing)
-    python3 test/limit_sweep.py merge KIND BASE OURS THEIRS
-                                                    a three-way merge of a registry, followups or batches file
-                                                    (KIND), into OURS; exit 1 naming each conflict
+    python3 test/limit_sweep.py merge THEIRS        during a git merge of THEIRS (a branch or commit): the
+                                                    registry, follow-ups and batches merged three-way, all at
+                                                    once, the count recounted; exit 1 naming each conflict
     python3 test/limit_sweep.py recount             write the tree's active-baseline count to batches.json
 """
 import ast
@@ -121,21 +121,48 @@ def load_json(name, default=None):
 
 
 def write_all(files):
-    """Write {path: text} so that a failure leaves every file as it was: all
-    written aside first, then each moved into place."""
-    tmp = []
+    """Write {path: text} all or nothing (astra2, #181): every new text and every old one is staged beside
+    its file first; then each new one is moved into place, and if any step fails, the files already
+    replaced are put back from their staged old texts (a file that didn't exist is removed), so the old
+    state is left whole.  The staged copies are removed either way."""
+    staged, done = [], []
     try:
         for p, text in files.items():
-            t = p + ".sweep-tmp"
+            old = None
+            if os.path.exists(p):
+                with open(p, encoding="utf-8") as f:
+                    old = f.read()
+            t, b = p + ".sweep-new", p + ".sweep-old"
             with open(t, "w", encoding="utf-8") as f:
                 f.write(text)
-            tmp.append((t, p))
-        for t, p in tmp:
+            if old is not None:
+                with open(b, "w", encoding="utf-8") as f:
+                    f.write(old)
+            staged.append((p, t, b if old is not None else None))
+        for p, t, b in staged:
             os.replace(t, p)
+            done.append((p, b))
+    except BaseException:
+        for p, b in reversed(done):
+            if b is None:
+                os.remove(p)
+            else:
+                with open(b, encoding="utf-8") as f:
+                    old = f.read()
+                with open(p + ".sweep-back", "w", encoding="utf-8") as f:
+                    f.write(old)
+                _put_back(p + ".sweep-back", p)
+        raise
     finally:
-        for t, _ in tmp:
-            if os.path.exists(t):
-                os.remove(t)
+        for _, t, b in staged:
+            for x in (t, b):
+                if x and os.path.exists(x):
+                    os.remove(x)
+
+
+def _put_back(src, dst):
+    # (the rollback's own move: not os.replace's name, so a test can fail every forward move and still roll back)
+    os.rename(src, dst) if os.name != "nt" else os.replace(src, dst)
 
 
 def git(*args, text=True):
@@ -170,7 +197,8 @@ def partition(work, rules):
             cur.append(f)
             n += f[1]
         if cur:
-            if n < rules["tail"] and out and out[-1][0] == o:
+            # (a tail never joins an oversize batch, a single file over the target, which keeps its own: astra2, #181)
+            if n < rules["tail"] and out and out[-1][0] == o and not (len(out[-1][1]) == 1 and out[-1][2] > rules["target"]):
                 _, f0, n0 = out.pop()
                 out.append((o, f0 + cur, n0 + n))
             else:
@@ -603,31 +631,40 @@ def merge3(base, ours, theirs):
     return out, conflicts
 
 
-def merge(kind, base, ours, theirs):
-    load = lambda p: json.load(open(p, encoding="utf-8"))
-    B, O, T = load(base), load(ours), load(theirs)
-    if kind == "registry":
-        out, c = merge3(B, O, T)
-        text = json.dumps(out, indent=1, sort_keys=True, ensure_ascii=False) + "\n"
-    elif kind == "followups":
-        by = lambda d: {f["id"]: f for f in d.get("items", [])}
-        items, c = merge3(by(B), by(O), by(T))
-        text = dump(dict(O, items=[items[k] for k in sorted(items)]))
-    elif kind == "batches":
-        by = lambda d: {b: True for b in d.get("done", [])}
-        done, c = merge3(by(B), by(O), by(T))
-        # (the count is the merged tree's, recounted after the merge, never one side's)
-        text = dump(dict(O, done=sorted(done, key=lambda b: int(b[1:])), active_baseline=None))
-    else:
-        raise SystemExit("merge KIND: registry, followups or batches")
-    if c:
-        return c
-    write_all({ours: text})
-    if kind == "registry" and os.path.exists(ours) and os.path.samefile(ours, L.REGISTRY):
-        recount()
-        bad = L.check()["problems"]
-        return ["after the merge: %s: %s" % (name, k) for name, ks in bad.items() for k in ks]
-    return []
+SWEPT = {"registry": "test/limit-sites.json", "followups": "test/limit-sweep/followups.json", "batches": "test/limit-sweep/batches.json"}
+
+
+def merge(theirs):
+    """Merge THEIRS's registry, follow-ups and batches into this tree's, all three at once (astra2, #181):
+    each three-way against the merge base, OURS being HEAD's (the working tree may hold git's conflict
+    markers), the count recounted on the merged tree (its census files as they now are), then all three
+    written in one all-or-nothing write and the census checked.  So no order of files, and no merge of
+    one file alone, can publish a count that isn't the tree's.  Conflicts: nothing written, each named."""
+    base = git("merge-base", "HEAD", theirs).strip()
+
+    def at(rev, name, default):
+        try:
+            return json.loads(git("show", "%s:%s" % (rev, SWEPT[name])))
+        except subprocess.CalledProcessError:
+            return default
+
+    side = lambda rev: (at(rev, "registry", {}), at(rev, "followups", {"v": 1, "items": []}), at(rev, "batches", {"v": 1, "done": []}))
+    (rb, fb, bb), (ro, fo, bo), (rt, ft, bt) = side(base), side("HEAD"), side(theirs)
+    reg, c1 = merge3(rb, ro, rt)
+    by = lambda d: {f["id"]: f for f in d.get("items", [])}
+    fus, c2 = merge3(by(fb), by(fo), by(ft))
+    dn = lambda d: {b: True for b in d.get("done", [])}
+    done, c3 = merge3(dn(bb), dn(bo), dn(bt))
+    conflicts = ["%s: %s" % (SWEPT[n], x) for n, cs in (("registry", c1), ("followups", c2), ("batches", c3)) for x in cs]
+    if conflicts:
+        return conflicts
+    now = {k for k, _, _ in L.sites()}
+    state = dict(bo, done=sorted(done, key=lambda b: int(b[1:])), active_baseline=len(L.active_baseline(now, reg, L.baseline_keys())))
+    write_all({L.REGISTRY: json.dumps(reg, indent=1, sort_keys=True, ensure_ascii=False) + "\n",
+               here("followups.json"): dump(dict(fo, items=[fus[k] for k in sorted(fus)])),
+               here("batches.json"): dump(state)})
+    bad = L.check()["problems"]
+    return ["after the merge: %s: %s" % (name, k) for name, ks in bad.items() for k in ks]
 
 
 def main(argv):
@@ -650,8 +687,8 @@ def main(argv):
         errs = apply(argv[1])
         print("\n".join(errs) or "applied")
         return 1 if errs else 0
-    if cmd == ["merge"] and len(argv) == 5:
-        errs = merge(*argv[1:])
+    if cmd == ["merge"] and len(argv) == 2:
+        errs = merge(argv[1])
         print("\n".join(errs) or "merged")
         return 1 if errs else 0
     if cmd == ["recount"]:
