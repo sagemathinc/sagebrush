@@ -399,7 +399,7 @@
   "class": "none",
   "owner": "estimates and progress (encoding)"
  },
- "engine/ledger/src/growth.rs :: reserve_growth :: need: w.unwrap_or(u64::MAX), #0": {
+ "engine/ledger/src/growth.rs :: reserve_growth :: Err(refusal(what, bind, w.unwrap_or(u64::MAX), live, outstanding, retired)) #0": {
   "class": "none",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
@@ -416,6 +416,14 @@
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
  "engine/ledger/src/lib.rs :: set_fake_committed :: FAKE_COMMITTED.store(bytes.unwrap_or(u64::MAX), Relaxed); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/tests.rs :: growth_refusals_name_the_binding_row_with_its_own_figures :: match reserve_growth(\"block\", u64::MAX) { #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/tests.rs :: no_usable_row_is_never_permission_the_nominal_total_is_checked :: match reserve_growth(\"block\", u64::MAX) { #0": {
   "class": "none",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
@@ -1867,6 +1875,18 @@
  "lib/_capacity.py :: engine_total :: m = min(b[\"limit\"] for b in rows) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: engine_totals :: configured total, any aggregate engine budget, any row whose extent #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "lib/_capacity.py :: engine_totals.least :: at = [b for b in sel if b[\"limit\"] == m] #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "lib/_capacity.py :: engine_totals.least :: m = min(b[\"limit\"] for b in sel) #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
  "lib/_capacity.py :: heap_figure :: RLIMIT_DATA, the Windows job limit and physical memory, read now; a #0": {
   "class": "2",
@@ -5393,9 +5413,25 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/engine.ts :: engine :: const SHARE_MAX_AGE_MS = 250, WASM_CEILING = 2 ** 32; #0": {
+ "src/runtime/engine.ts :: addPending :: if (retiredSum + p.bytes > MAX_SAFE) overflow = fault = true; #0": {
+  "class": "2",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: createInstance :: const SHARE_MAX_AGE_MS = 250, WASM_CEILING = 2 ** 32; #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/engine.ts :: engine :: const PAGE = 65536, MAX_SAFE = 2 ** 53 - 1; #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: int :: const int = (n: bigint) => (n <= BigInt(MAX_SAFE) ? Number(n) : n); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: int :: return Obj.callObj(Obj.getattr(g, \"memory_guard\"), [what, int(err.need), int(err.limit), err.row === \"instance\" ? \"one engine instance\" : \"the engine\", record]); #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
  "src/runtime/engine.ts :: memoryShare :: const ageMs = Number.isFinite(age) ? Math.min(SHARE_MAX_AGE_MS, Math.max(0, age * 1000)) : SHARE_MAX_AGE_MS; #0": {
   "class": "2",
@@ -5405,9 +5441,49 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "src/runtime/engine.ts :: pushRetired :: const bytes = overflow ? Math.floor(MAX_SAFE / PAGE) * PAGE : retiredSum; #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
  "src/runtime/engine.ts :: pushShare :: if (e === shareTo && now - shareAt < SHARE_MAX_AGE_MS) return; #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/engine.ts :: refuse :: const limit = allowanceOf(shared ?? [-1, -1]); #0": {
+  "class": "2",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: refuse :: const limit = allowanceOf(t.instance); #0": {
+  "class": "2",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: refuse :: const refuse = (row: \"instance\" | \"shared\", need: bigint, limit: bigint) => #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: refuse :: if (PHI_NUM * need > PHI_DEN * limit) return refuse(\"instance\", need, limit); #0": {
+  "class": "2",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: refuse :: if (overflow || PHI_NUM * need > PHI_DEN * limit) return refuse(\"shared\", need, limit); #0": {
+  "class": "2",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: refuse :: new CreationRefused(row, (PHI_NUM * need + PHI_DEN - 1n) / PHI_DEN, limit, m0, row === \"shared\" ? retiredSum : 0, overflow); #0": {
+  "class": "2",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: uleb :: : `a new engine instance needs ${need} bytes with what retired instances still hold (${retired}), but the engine is allowed ${limit} here`, #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: uleb :: ? `a new engine instance needs ${need} bytes of its own address space, but an instance is allowed ${limit} here` #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: uleb :: readonly limit: bigint, #0": {
+  "class": "none",
+  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
  "src/runtime/file-once.ts :: fileOpsFor :: EFBIG: [27, \"File too large\"], #0": {
   "class": "none",
