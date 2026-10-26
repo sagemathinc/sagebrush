@@ -1940,11 +1940,15 @@
   "class": "3",
   "owner": "finite fields + configuration"
  },
+ "lib/_limits.py ::  :: \"matlab.lu_work\": (UNLIMITED, 10 ** 5, 2 ** 62), #0": {
+  "class": "3",
+  "owner": "MATLAB sparse linear algebra + configuration"
+ },
  "lib/_limits.py ::  :: \"nf.certify_index_max\": (UNLIMITED, 10 ** 3, 2 ** 62), #0": {
   "class": "3",
   "owner": "class group/number fields + configuration"
  },
- "lib/_limits.py ::  :: \"nf.certify_index_max\": 10 ** 6, \"nf.certify_norm_max\": 10 ** 6, \"nf.relation_rounds\": 60, \"padic.kedlaya_work\": 2 ** 20, \"poly.work\": 2 ** 33} #0": {
+ "lib/_limits.py ::  :: \"nf.certify_index_max\": 10 ** 6, \"nf.certify_norm_max\": 10 ** 6, \"nf.relation_rounds\": 60, \"padic.kedlaya_work\": 2 ** 20, \"poly.work\": 2 ** 33, #0": {
   "class": "3",
   "owner": "p-adic/L-series + configuration"
  },
@@ -2529,6 +2533,38 @@
   "owner": "MATLAB numerical methods",
   "row": "inv-23"
  },
+ "lib/_matlab_lu.py ::  :: - Work: matlab.lu_work (unlimited by default) is charged before each chunk #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
+ },
+ "lib/_matlab_lu.py ::  :: import _limits #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
+ },
+ "lib/_matlab_lu.py ::  :: limit matlab.lu_work, and bounded uninterrupted host calls. #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
+ },
+ "lib/_matlab_lu.py :: Work :: first when it would pass the limit\"\"\" #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
+ },
+ "lib/_matlab_lu.py :: Work.__init__ :: self.limit = _limits.finalize()[\"matlab.lu_work\"] #0": {
+  "class": "3",
+  "owner": "MATLAB sparse linear algebra"
+ },
+ "lib/_matlab_lu.py :: Work.charge :: if self.used + units > self.limit: #0": {
+  "class": "3",
+  "owner": "MATLAB sparse linear algebra"
+ },
+ "lib/_matlab_lu.py :: Work.charge :: raise _err(\"%s is beyond the limit matlab.lu_work (work %d > %d).\" % (self.what, self.used + units, self.limit), #0": {
+  "class": "3",
+  "owner": "MATLAB sparse linear algebra"
+ },
+ "lib/_matlab_lu.py :: _kpeak :: column's kernels at E entries (r6 section 2.2's K_max; the reach and the #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
+ },
  "lib/_matlab_mat.py ::  :: MAX_INFLATED = 1 << 28 #0": {
   "class": "1",
   "owner": "file formats/runtime",
@@ -2671,48 +2707,48 @@
  },
  "lib/_matlab_sparse.py ::  :: MAX_LU_FILL = 1 << 22 #0": {
   "class": "2+3",
-  "owner": "MATLAB sparse linear algebra",
-  "row": "inv-20"
+  "owner": "D0 browser interim: master's sparse LU caps (until the browser's capacity covers js-heap and js-arraybuffer)"
  },
  "lib/_matlab_sparse.py ::  :: MAX_LU_WORK = 1 << 24 #0": {
   "class": "2+3",
-  "owner": "MATLAB sparse linear algebra",
-  "row": "inv-20"
+  "owner": "D0 browser interim: master's sparse LU caps (until the browser's capacity covers js-heap and js-arraybuffer)"
  },
  "lib/_matlab_sparse.py :: _condest_b :: if type(A) is Sparse and n > MAX_DENSE_SOLVE: #0": {
   "class": "2+3",
   "owner": "MATLAB sparse linear algebra",
   "row": "inv-20"
  },
- "lib/_matlab_sparse.py :: _sparse_lu :: amax = float(np.max(np.abs(cv))) if cand.size else 0.0 #0": {
-  "class": "2+3",
-  "owner": "MATLAB sparse linear algebra",
-  "row": "inv-20"
+ "lib/_matlab_sparse.py :: _legacy_lu :: amax = float(np.max(np.abs(cv))) if cand.size else 0.0 #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
  },
- "lib/_matlab_sparse.py :: _sparse_lu :: if amax > 0: #0": {
-  "class": "2+3",
-  "owner": "MATLAB sparse linear algebra",
-  "row": "inv-20"
+ "lib/_matlab_sparse.py :: _legacy_lu :: if amax > 0: #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
  },
- "lib/_matlab_sparse.py :: _sparse_lu :: if fill > MAX_LU_FILL: #0": {
+ "lib/_matlab_sparse.py :: _legacy_lu :: if fill > MAX_LU_FILL: #0": {
   "class": "2+3",
-  "owner": "MATLAB sparse linear algebra",
-  "row": "inv-20"
+  "owner": "D0 browser interim: master's sparse LU caps (until the browser's capacity covers js-heap and js-arraybuffer)"
  },
- "lib/_matlab_sparse.py :: _sparse_lu :: if pinv[j] < 0 and abs(x[j]) >= 0.1 * amax: #0": {
-  "class": "2+3",
-  "owner": "MATLAB sparse linear algebra",
-  "row": "inv-20"
+ "lib/_matlab_sparse.py :: _legacy_lu :: if pinv[j] < 0 and abs(x[j]) >= 0.1 * amax: #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
  },
- "lib/_matlab_sparse.py :: _sparse_lu :: if work > MAX_LU_WORK: #0": {
+ "lib/_matlab_sparse.py :: _legacy_lu :: if work > MAX_LU_WORK: #0": {
   "class": "2+3",
-  "owner": "MATLAB sparse linear algebra",
-  "row": "inv-20"
+  "owner": "D0 browser interim: master's sparse LU caps (until the browser's capacity covers js-heap and js-arraybuffer)"
  },
- "lib/_matlab_sparse.py :: _sparse_lu :: lval[j] = cv[keep] / x[p] if amax > 0 else cv[keep] #0": {
-  "class": "2+3",
-  "owner": "MATLAB sparse linear algebra",
-  "row": "inv-20"
+ "lib/_matlab_sparse.py :: _legacy_lu :: lval[j] = cv[keep] / x[p] if amax > 0 else cv[keep] #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
+ },
+ "lib/_matlab_sparse.py :: _sparse_lu :: before each step, Stop interrupts it, and the opt-in limit #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
+ },
+ "lib/_matlab_sparse.py :: _sparse_lu :: the largest candidate. No size or work cap: it reserves its memory #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
  },
  "lib/_matlab_sparse.py :: mldivide :: if (2 * kl + ku + 1) * A.n <= MAX_FULL and A.n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK: #0": {
   "class": "2+3",
@@ -2753,7 +2789,7 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
- "lib/_memguard.py ::  :: them, PR 5b / GB-6), and fixed (whether the limit is fixed). A guard computes its need before anything is #0": {
+ "lib/_memguard.py ::  :: them, PR 5b / GB-6), fixed (whether the limit is fixed), and unmeasured #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
@@ -2773,15 +2809,15 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
- "lib/_memguard.py :: memory_guard :: def memory_guard(what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None, fixed=False): #0": {
+ "lib/_memguard.py :: memory_guard :: def memory_guard(what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None, fixed=False, #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
- "lib/_memguard.py :: memory_guard :: limit that is the same whatever memory there is. #0": {
+ "lib/_memguard.py :: memory_guard :: limit that is the same whatever memory there is; unmeasured (a reason, #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
- "lib/_memguard.py :: memory_guard :: limit_bytes, allowance_for, record, partial, checkpoint, fixed) #0": {
+ "lib/_memguard.py :: memory_guard :: measured, so there is no allowance (limit_bytes is then 0). #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
@@ -2789,11 +2825,19 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
- "lib/_memguard.py :: memory_guard :: return SagebrushMemoryError(message(what, need_bytes, limit_bytes, allowance_for, fixed=fixed), what, need_bytes, #0": {
+ "lib/_memguard.py :: memory_guard :: need_bytes, limit_bytes, allowance_for, record, partial, checkpoint, fixed, unmeasured) #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: memory_guard :: return SagebrushMemoryError(message(what, need_bytes, limit_bytes, allowance_for, fixed=fixed, unmeasured=unmeasured), what, #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
  "lib/_memguard.py :: memory_guard :: sage: e.what, e.need_bytes, e.limit_bytes, e.allowance_for, e.record, e.partial, e.checkpoint #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: memory_guard :: sage: u.unmeasured, u.limit_bytes, u.record, e.unmeasured #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
@@ -2805,7 +2849,7 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
- "lib/_memguard.py :: message :: def message(what, need_bytes, limit_bytes, allowance_for, host=None, fixed=False): #0": {
+ "lib/_memguard.py :: message :: def message(what, need_bytes, limit_bytes, allowance_for, host=None, fixed=False, unmeasured=None): #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
@@ -2813,7 +2857,7 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
- "lib/_memguard.py :: message :: fixed limit (fixed), that limit, and that more memory won't help. #0": {
+ "lib/_memguard.py :: message :: fixed limit (fixed), that limit, and that more memory won't help; when #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
@@ -5093,20 +5137,24 @@
   "owner": "board",
   "row": "src-18"
  },
+ "src/cli.ts ::  :: \"unlimited\" by default: set finite values to opt in to work #0": {
+  "class": "none",
+  "owner": "configuration"
+ },
  "src/cli.ts ::  :: const STDIN_SOURCE_MAX = 8 << 20; #0": {
   "class": "1",
   "owner": "CLI/runtime configuration",
   "row": "src-16"
  },
- "src/cli.ts ::  :: default: set finite values to opt in to work limits (grading, #0": {
-  "class": "none",
-  "owner": "configuration"
- },
  "src/cli.ts ::  :: every key (ff.work, ff.conway_work, ff.embed_max, ff.root_bits, #0": {
   "class": "none",
   "owner": "configuration"
  },
- "src/cli.ts ::  :: nf.certify_index_max, padic.kedlaya_work) is \"unlimited\" by #0": {
+ "src/cli.ts ::  :: limits (grading, shared compute); memory guards always apply; #0": {
+  "class": "none",
+  "owner": "configuration"
+ },
+ "src/cli.ts ::  :: nf.certify_index_max, padic.kedlaya_work, matlab.lu_work) is #0": {
   "class": "none",
   "owner": "configuration"
  },
