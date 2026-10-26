@@ -107,9 +107,9 @@
    "transport": "engineCall:mat_rank",
    "owner": "linear algebra (ff matrices)",
    "mode": "sage",
-   "s0": 450,
+   "s0": 600,
    "smin": 200,
-   "smax": 600,
+   "smax": 1000,
    "grow": {
     "kind": "scale",
     "p": 3
