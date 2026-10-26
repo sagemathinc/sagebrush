@@ -84,9 +84,11 @@ async function openDialog({ wait = true } = {}) {
   await ev("document.querySelector('#sharedlg').open && document.querySelector('#sharedlg').close()");
   const g = await ev("window.sagebrush.share.generation");
   await ev("document.querySelector('#sharemenu').click()");
-  // (this open's own list: a new generation, its rows drawn)
-  await until(`window.sagebrush.share.generation > ${g} && !!window.sagebrush.share.selection && document.querySelectorAll('#sharelist .sharerow').length > 0`);
-  if (wait) await until("/^(Checked|Found no|Stopped)/.test(document.querySelector('#sharestatus').textContent)", 60000);
+  // (this open's own list: a new generation, its rows drawn; on a timeout, which part of it didn't happen)
+  // (on a timeout, the dialog's state: which part of the open didn't happen)
+  const why = (e) => ev(`JSON.stringify({ g: ${g}, generation: window.sagebrush.share.generation, selection: !!window.sagebrush.share.selection, analyzing: window.sagebrush.share.analyzing, rows: document.querySelectorAll('#sharelist .sharerow').length, busy: window.sagebrush.share.busy, open: document.querySelector('#sharedlg').open, signin: !document.querySelector('#sharesignin').hidden, form: !document.querySelector('#shareform').hidden, status: document.querySelector('#sharestatus').textContent, progress: document.querySelector('#shareprogress')?.textContent, result: document.querySelector('#shareresult').textContent })`).catch((x) => String(x)).then((state) => { throw new Error(`${e.message} ${state}`); });
+  await until(`window.sagebrush.share.generation > ${g} && !!window.sagebrush.share.selection && document.querySelectorAll('#sharelist .sharerow').length > 0`).catch(why);
+  if (wait) await until("/^(Checked|Found no|Stopped)/.test(document.querySelector('#sharestatus').textContent)", 60000).catch(why);
 }
 const closeDialog = () => ev("document.querySelector('#sharedlg').close()");
 // A held stand-in for the analysis worker: messages to the page wait until released.
@@ -319,6 +321,20 @@ try {
     await until("/failed/.test(document.querySelector('#shareresult').textContent)", 30000);
     ok(await ev("!document.querySelector('#shareupload').disabled && !document.querySelector('#shareall').disabled && document.querySelector('#sharelist .sharerow input').disabled"), "after a failed upload, the same");
     await ev("window.sagebrush.shareTest.onRead = null");
+    await closeDialog();
+  }
+
+  // ---- a close's event that arrives after the next open (the browser queues it): stale, the new
+  // open's selection kept (train 4's web-sync: the open after a failed upload lost its list)
+  {
+    await openDialog();
+    const g = await ev("window.sagebrush.share.generation");
+    // (closed and opened again in one task: the close event comes after the open has begun)
+    await ev("(() => { const d = document.querySelector('#sharedlg'); d.close(); d.showModal(); void window.sagebrush.share.open(); })()");
+    await until(`window.sagebrush.share.generation > ${g}`);
+    await until("/^(Checked|Found no|Stopped)/.test(document.querySelector('#sharestatus').textContent)", 60000).catch(() => {});
+    await sleep(300);
+    ok(await ev("!!window.sagebrush.share.selection && document.querySelectorAll('#sharelist .sharerow').length > 0 && /^(Checked|Found no|Stopped)/.test(document.querySelector('#sharestatus').textContent)"), `a close's event after the next open: ignored, the open's list and status kept (${await status()})`);
     await closeDialog();
   }
 
