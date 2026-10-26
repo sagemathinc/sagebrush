@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "rank-13 PR 1 (plan-matlab-nocliffs r6): MATLAB mode's sparse LU without fixed caps, lib/_matlab_colamd.py (the internal column ordering) and lib/_matlab_lu.py (admission, matlab.lu_work, chunked and segmented kernels) in matlab-more, with master's LU kept as the browser interim (ruling d); _limits.py's matlab.lu_work and _memguard.py's unmeasured path in core, magma and matlab. Measured at master 0ce1121e vs the PR head with CI's toolchain (bun 1.4.4, Node 24.21.0) on VM1; engine/sagebrush-worker.js +64 is its build noise",
+ "reason": "rank-13 PR 1 (plan-matlab-nocliffs r6): MATLAB mode's sparse LU without fixed caps, lib/_matlab_colamd.py (the internal column ordering) and lib/_matlab_lu.py (admission, matlab.lu_work, chunked and segmented kernels) (both in the browser's own chunk, engine/lib/matlab-lu.src, a new bundle authorized by its budgets.json entry, so no marker here; matlab-more.src is unchanged), with master's LU kept as the browser interim (ruling d); _limits.py's matlab.lu_work and _memguard.py's unmeasured path in core, magma and matlab. Measured at master 0ce1121e vs the PR head with CI's toolchain (bun 1.4.4, Node 24.21.0) on VM1; engine/sagebrush-worker.js +64 is its build noise",
  "bytes": {
   "cli/lib.gen.js": 48060,
   "cli/pyjs.cjs": 46615,
@@ -8,7 +8,6 @@
   "engine/lib/core.src": 325,
   "engine/lib/magma.pre": 2277,
   "engine/lib/magma.src": 1670,
-  "engine/lib/matlab-more.src": 44358,
   "engine/lib/matlab.pre": 2351,
   "engine/lib/matlab.src": 1707,
   "engine/sagebrush-worker.js": 64
