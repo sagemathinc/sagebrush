@@ -35,8 +35,11 @@ const ASSETS = {
 const ID = "abcdefghijk2";
 const V = "a".repeat(64);
 const shares = new Map([[ID, { title: "My notebook", version: V, owner: "OWNER-1234-SECRET", files: ["data.csv"] }]]);
+// (shares whose version predates migration 0004: no stored title, so sharePreview answers null)
+const premigration = new Set();
 const preview = async (_env, id, at) => {
   if (id === "boom2boom2bo") throw new Error("D1 down");
+  if (premigration.has(id)) return null;
   const s = shares.get(id);
   if (!s || (at !== null && !s.version.startsWith(at))) return null;
   return s;
@@ -110,25 +113,38 @@ ok(generic.meta["og:title"] === "A shared notebook on Sagebrush", "the generic c
   ok(!text.includes("OWNER-1234-SECRET") && !text.includes("data.csv"), "nothing but the title from the share (no owner, no file list)");
 }
 
-// ---- everything else: the static page exactly as the asset serves it
-{
-  const never = await page("/s/zzzzzzzzzzzz");
-  const unknownPin = await page(`/s/${ID}@ffffffff`);
-  const failing = await page("/s/boom2boom2bo");
-  const base = await ASSETS.fetch(new Request("https://sagebrush.test/s/"));
-  const want = [base.status, headersOf(base), await bodyOf(base)];
-  for (const [what, r] of [["a never-existing id", never], ["an unknown pinned version", unknownPin], ["a lookup that fails", failing]]) {
-    ok(JSON.stringify([r.status, headersOf(r), await bodyOf(r)]) === JSON.stringify(want), `${what}: the static page, byte for byte, headers and all`);
-  }
-}
+// ---- everything else: the generic card, the same bytes for every id that isn't live (#171's review,
+// board's UI-D1): with SITE_ORIGIN, its image absolute and no og:url; without, the static page as served
 {
   // a deletion: live, then gone, with nothing kept between requests
   shares.set("gone2gone2go", { title: "Soon deleted", version: V });
   const before = await parsed(await (await page("/s/gone2gone2go")).text());
   shares.delete("gone2gone2go");
-  const after = await page("/s/gone2gone2go");
+  ok(before.meta["og:title"] === "Soon deleted", "(live before the deletion)");
+  // (a pre-migration version: sharePreview has no title for it, so null, like the rest)
+  premigration.add("oldv2oldv2ol");
+  const cases = [
+    ["a never-existing id", await page("/s/zzzzzzzzzzzz")],
+    ["an unknown pinned version", await page(`/s/${ID}@ffffffff`)],
+    ["a lookup that fails", await page("/s/boom2boom2bo")],
+    ["a deleted share", await page("/s/gone2gone2go")],
+    ["a pre-migration version", await page("/s/oldv2oldv2ol")],
+  ];
+  const seen = [];
+  for (const [what, r] of cases) {
+    const body = await bodyOf(r), h = await parsed(body);
+    ok(r.status === 200 && h.meta["og:image"] === "https://sagebrush.test/s/og.png" && h.meta["twitter:image"] === "https://sagebrush.test/s/og.png" && h.count["og:url"] === undefined && h.meta["og:title"] === generic.meta["og:title"], `${what}: the generic card, its image absolute and no og:url`);
+    ok(r.headers.get("cache-control") === "no-store" && !r.headers.get("etag"), `${what}: no-store`);
+    seen.push(JSON.stringify([r.status, headersOf(r), body]));
+  }
+  ok(seen.every((x) => x === seen[0]), "...and the five are byte-identical, headers and all: nothing tells them apart");
+  const noOrigin = { ASSETS };
   const base = await ASSETS.fetch(new Request("https://sagebrush.test/s/"));
-  ok(before.meta["og:title"] === "Soon deleted" && (await bodyOf(after)) === (await bodyOf(base)) && headersOf(after) === headersOf(base), "after a deletion, the next request is the static page (no cache)");
+  const want = JSON.stringify([base.status, headersOf(base), await bodyOf(base)]);
+  for (const path of ["/s/zzzzzzzzzzzz", "/s/gone2gone2go", "/s/oldv2oldv2ol"]) {
+    const r = await page(path, {}, noOrigin);
+    ok(JSON.stringify([r.status, headersOf(r), await bodyOf(r)]) === want, `without SITE_ORIGIN, ${path}: the static page, byte for byte, headers and all`);
+  }
 }
 
 // ---- HTTP
@@ -144,7 +160,9 @@ ok(generic.meta["og:title"] === "A shared notebook on Sagebrush", "the generic c
   ok(r.status === 200 && !r.headers.get("etag") && (await r.text()).includes("My notebook"), "If-None-Match on a live share's page: never the static page's 304");
   ok(assetFetches.every((f) => f.inm === null), "...the static page is fetched without the request's conditional headers");
   const g = await page("/s/zzzzzzzzzzzz", { headers: { "if-none-match": ETAG } });
-  ok(g.status === 304, "a generic page's conditional request works as today (the asset's 304)");
+  ok(g.status === 200 && !g.headers.get("etag"), "with SITE_ORIGIN the generic card is rewritten too: never the static page's 304");
+  const g2 = await page("/s/zzzzzzzzzzzz", { headers: { "if-none-match": ETAG } }, { ASSETS });
+  ok(g2.status === 304, "...without it, a generic page's conditional request works as before (the asset's 304)");
 }
 {
   const r = await page(`/s/${ID}`, { method: "POST", body: "x" });
