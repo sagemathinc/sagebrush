@@ -211,30 +211,91 @@ def membership_cases():
         ok(names(errs, KA, "B1, which is done"), "a done batch's key reactivated while B2 lowered the count: named: %s" % errs)
     finally:
         r.close()
-    # two concurrent, independent registrations, merged: both kept, the count the merged tree's
-    r = Repo()
-    try:
-        base = r.read("test/limit-sites.json")
-        bstate = r.read("test/limit-sweep/batches.json")
-        ok(S.apply(r.worksheet("B1", [reg_row(KA, "coverage"), reg_row(KB, "coverage")])) == [], "branch 1: B1")
-        ours, ostate = r.read("test/limit-sites.json"), r.read("test/limit-sweep/batches.json")
-        r.write("test/limit-sites.json", base)
-        r.write("test/limit-sweep/batches.json", bstate)
-        ok(S.apply(r.worksheet("B2", [reg_row(KC, "none"), reg_row(KD, "none"),
-                                      {"key": KE, "kind": "disposition", "disposition": {"2": {"route": "memguard"}}}])) == [], "branch 2: B2")
-        for name, a, b in [("base", base, bstate), ("theirs", r.read("test/limit-sites.json"), r.read("test/limit-sweep/batches.json"))]:
-            r.write(name + ".json", a)
-            r.write(name + "-batches.json", b)
-        r.write("test/limit-sites.json", ours)
-        r.write("test/limit-sweep/batches.json", ostate)
-        e1 = S.merge("batches", r.path("base-batches.json"), r.path("test/limit-sweep/batches.json"), r.path("theirs-batches.json"))
-        e2 = S.merge("registry", r.path("base.json"), r.path("test/limit-sites.json"), r.path("theirs.json"))
-        c = L.check()
-        ok(e1 == [] and e2 == [] and all(k in r.reg() for k in (KA, KB, KC, KD)) and c["active_baseline"] == 0 and c["problems"]["sweep"] == []
-           and json.loads(r.read("test/limit-sweep/batches.json"))["done"] == ["B1", "B2"],
-           "concurrent registrations merge: all kept, both done, the count recounted (0): %s %s %s" % (e1, e2, c["problems"]))
-    finally:
-        r.close()
+    # two concurrent, independent registrations on two branches, merged either way round: both kept, the
+    # count the merged tree's, the same files; a no-op merge keeps a real count; a conflict writes nothing
+    results = []
+    for into, other in (("b1", "b2"), ("b2", "b1")):
+        r = Repo()
+        try:
+            commit = lambda m: (r.git("add", "-A"), r.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", m))
+            commit("B0")
+            r.git("branch", "b2")
+            r.git("checkout", "-q", "-b", "b1")
+            ok(S.apply(r.worksheet("B1", [reg_row(KA, "coverage"), reg_row(KB, "coverage")])) == [], "branch 1: B1")
+            os.remove(r.path("ws-B1.json"))
+            commit("B1")
+            r.git("checkout", "-q", "b2")
+            ok(S.apply(r.worksheet("B2", [reg_row(KC, "none"), reg_row(KD, "none"),
+                                          {"key": KE, "kind": "disposition", "disposition": {"2": {"route": "memguard"}}}])) == [], "branch 2: B2")
+            os.remove(r.path("ws-B2.json"))
+            commit("B2")
+            r.git("checkout", "-q", into)
+            # (git's own text merge of the files, conflicted or not, then the sweep's)
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-commit", other], cwd=r.root, capture_output=True)
+            errs = S.merge(other)
+            c = L.check()
+            st = json.loads(r.read("test/limit-sweep/batches.json"))
+            ok(errs == [] and all(k in r.reg() for k in (KA, KB, KC, KD)) and c["active_baseline"] == 0 and c["problems"]["sweep"] == [] and st["done"] == ["B1", "B2"] and st["active_baseline"] == 0,
+               "concurrent registrations merged into %s: all kept, both done, the count recounted (0): %s %s" % (into, errs, c["problems"]))
+            results.append((r.read("test/limit-sites.json"), r.read("test/limit-sweep/batches.json"), r.read("test/limit-sweep/followups.json")))
+            commit("merged")
+            before = (r.read("test/limit-sites.json"), r.read("test/limit-sweep/batches.json"))
+            ok(S.merge("HEAD") == [] and (r.read("test/limit-sites.json"), r.read("test/limit-sweep/batches.json")) == before and json.loads(before[1])["active_baseline"] == 0,
+               "a no-op merge (of HEAD itself) changes nothing and keeps a real count")
+            if into == "b1":
+                # a conflict: the same key classified differently on two branches: refused, nothing written
+                r.git("checkout", "-q", "-b", "x1", "b2")
+                r.reg(lambda g: g.__setitem__(KC, dict(g[KC], reason="one")))
+                commit("x1")
+                r.git("checkout", "-q", "-b", "x2", "b2")
+                r.reg(lambda g: g.__setitem__(KC, dict(g[KC], reason="two")))
+                commit("x2")
+                before = (r.read("test/limit-sites.json"), r.read("test/limit-sweep/batches.json"), r.read("test/limit-sweep/followups.json"))
+                errs = S.merge("x1")
+                ok(names(errs, KC, "changed differently") and (r.read("test/limit-sites.json"), r.read("test/limit-sweep/batches.json"), r.read("test/limit-sweep/followups.json")) == before,
+                   "a conflicting merge is refused, naming the key, with nothing written: %s" % errs)
+        finally:
+            r.close()
+    ok(len(results) == 2 and results[0] == results[1], "merged either way round, the three files are the same")
+
+
+def write_cases():
+    # apply's write is all or nothing: a failure at each move in turn leaves the old registry and batches whole
+    for k in (1, 2):
+        r = Repo()
+        try:
+            before = (r.read("test/limit-sites.json"), r.read("test/limit-sweep/batches.json"))
+            real, n = os.replace, [0]
+
+            def failing(a, b):
+                n[0] += 1
+                if n[0] == k:
+                    raise OSError("injected at move %d" % k)
+                return real(a, b)
+            S.os.replace = failing
+            try:
+                S.apply(r.worksheet("B1", [reg_row(KA, "coverage"), reg_row(KB, "coverage")]))
+                raised = None
+            except OSError as e:
+                raised = e
+            finally:
+                S.os.replace = real
+            left = sorted(f for d, _, fs in os.walk(r.root) if ".git" not in d for f in fs if ".sweep-" in f)
+            ok(raised is not None and (r.read("test/limit-sites.json"), r.read("test/limit-sweep/batches.json")) == before and not left,
+               "apply failing at move %d of 2: the old registry and batches, whole, and no staged file left (%s, %s)" % (k, raised, left))
+        finally:
+            r.close()
+
+
+def partition_cases():
+    rules = dict(RULES, target=400, tail=50)
+    got = S.partition({"lib/large.py": [500, 500, 0], "lib/tail.py": [20, 0, 0]}, rules)
+    ok(got == [("python", ["lib/large.py"], 500), ("python", ["lib/tail.py"], 20)],
+       "an oversize single file keeps its own batch: a tail doesn't join it (astra2, #181): %s" % got)
+    got = S.partition({"lib/a.py": [300, 300, 0], "lib/tail.py": [20, 0, 0]}, rules)
+    ok(got == [("python", ["lib/a.py", "lib/tail.py"], 320)], "a tail under 50 still joins a batch under the target: %s" % got)
+    got = S.partition({"lib/a.py": [300, 300, 0], "lib/b.py": [200, 0, 0], "lib/tail.py": [20, 0, 0]}, rules)
+    ok(got == [("python", ["lib/a.py"], 300), ("python", ["lib/b.py", "lib/tail.py"], 220)], "files whole, cut at the target: %s" % got)
 
 
 FU = {"id": "FU-B2-1", "status": "open", "what": "c's cutoff", "owner": "python"}
@@ -344,18 +405,21 @@ def apply_cases():
 
 def after_m_cases():
     # an entry registered after M is no batch's item: its disposition is needed at once (daybreak2, #181)
+    import contextlib
+    import io
     r = Repo()
     try:
-        new = "lib/one.py :: f :: n2 = LIMIT_NEW #0"
-        r.write("lib/one.py", ONE + "    n2 = LIMIT_NEW\n")
-        ok(L.main(["--register", "2", "python", "--key", new]) == 0, "--register a new class-2 site without a disposition writes it")
-        ok(names(r.sweep(), new, "needs a disposition for 2"), "a class-2 entry registered after M without its disposition is named: %s" % r.sweep())
-        ok(L.main(["--register", "2", "python", "--key", new, "--disposition", '{"2": {"route": "memguard"}}']) == 0 and r.sweep() == [],
-           "...and registered with its disposition (--disposition): clean: %s" % r.sweep())
-        ok(r.reg()[new] == {"class": "2", "owner": "python", "disposition": {"2": {"route": "memguard"}}}, "--register writes the disposition: %s" % r.reg()[new])
-        ok(L.main(["--register", "none", "python", "--key", new, "--reason", "a name"]) == 0 and r.reg()[new] == {"class": "none", "owner": "python", "reason": "a name"} and r.sweep() == [],
-           "--reason is written; a none entry after M needs no disposition")
-        ok(L.main(["--register", "2", "python", "--key", new, "--disposition", "{"]) == 2, "--disposition must be JSON")
+        with contextlib.redirect_stdout(io.StringIO()):
+            new = "lib/one.py :: f :: n2 = LIMIT_NEW #0"
+            r.write("lib/one.py", ONE + "    n2 = LIMIT_NEW\n")
+            ok(L.main(["--register", "2", "python", "--key", new]) == 0, "--register a new class-2 site without a disposition writes it")
+            ok(names(r.sweep(), new, "needs a disposition for 2"), "a class-2 entry registered after M without its disposition is named: %s" % r.sweep())
+            ok(L.main(["--register", "2", "python", "--key", new, "--disposition", '{"2": {"route": "memguard"}}']) == 0 and r.sweep() == [],
+               "...and registered with its disposition (--disposition): clean: %s" % r.sweep())
+            ok(r.reg()[new] == {"class": "2", "owner": "python", "disposition": {"2": {"route": "memguard"}}}, "--register writes the disposition: %s" % r.reg()[new])
+            ok(L.main(["--register", "none", "python", "--key", new, "--reason", "a name"]) == 0 and r.reg()[new] == {"class": "none", "owner": "python", "reason": "a name"} and r.sweep() == [],
+               "--reason is written; a none entry after M needs no disposition")
+            ok(L.main(["--register", "2", "python", "--key", new, "--disposition", "{"]) == 2, "--disposition must be JSON")
     finally:
         r.close()
 
@@ -397,7 +461,7 @@ def merge_cases():
         ok(len(c) == 1 and word in c[0] and (c[0].startswith("y:") or c[0].startswith("n:")), "merge: %s is a conflict naming the key: %s" % (what, c))
 
 
-for case in (manifest_cases, membership_cases, followup_cases, apply_cases, after_m_cases, route_cases, merge_cases):
+for case in (manifest_cases, membership_cases, followup_cases, apply_cases, after_m_cases, route_cases, merge_cases, write_cases, partition_cases):
     try:
         case()
     except Exception as exc:  # (a case that crashes is a failure, named)
