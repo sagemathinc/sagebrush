@@ -121,22 +121,38 @@ _HOLD = _Hold()
 _CTRL = []  # (the worker's console control routine, kept alive as long as it is installed)
 
 
-def _break_as_sigint():
-    """On Windows, the worker's Ctrl-Break (what Session.interrupt sends: the worker
-    has its own process group, where Ctrl-C is off) becomes a SIGINT, raised from
-    the console's control thread, so that a computation blocked in a wait
-    (time.sleep, an Event's wait) is woken as Ctrl-C would wake it, not only at
-    its next bytecode.  A busy computation is interrupted either way.  Whether a
-    SIGINT does wake those waits there, and Ctrl-Break doesn't, is measured by
-    test/win_interrupt_probe.py.  Elsewhere, and if it can't be installed, it
-    does nothing (False); interrupt() still sends Ctrl-Break, handled as before."""
-    if os.name != "nt":
+def _break_as_sigint(nt=None, boundary=None, at_exit=None):
+    """On Windows, the worker's Ctrl-Break (what Session.interrupt sends: the
+    worker has its own process group, where Ctrl-C is off) becomes a SIGINT,
+    raised from the console's control thread, so that a computation blocked in
+    time.sleep is woken as Ctrl-C would wake it, not only at its next bytecode.
+    A busy computation is interrupted either way.  test/win_interrupt_probe.py
+    measures it (pypi run 40265331788): Ctrl-Break doesn't wake time.sleep, the
+    SIGINT does; neither wakes threading.Event().wait() (measured), and lock
+    waits weren't probed, so a run blocked there is still ended by the grace's
+    restart, as before.
+    The routine is removed again at exit (atexit), so a break arriving while
+    the interpreter finalizes never calls into it.
+    A worker with no console (an MCP server started by a GUI client without
+    one) gets no console event at all, before or after this: its cancel always
+    falls back to the restart after the grace.
+    Elsewhere, and if it can't be installed, it does nothing (False);
+    interrupt() still sends Ctrl-Break, handled as before.
+    (nt, boundary, at_exit: the test's seams, defaulting to os.name == "nt",
+    kernel32 through ctypes, and atexit.register.)"""
+    if not (os.name == "nt" if nt is None else nt):
         return False
     try:
-        import ctypes
-        from ctypes import wintypes
+        if boundary is None:
+            import ctypes
+            from ctypes import wintypes
 
-        ROUTINE = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+            ROUTINE = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+            k = ctypes.WinDLL("kernel32", use_last_error=True)
+            k.SetConsoleCtrlHandler.argtypes = (ROUTINE, wintypes.BOOL)
+            k.SetConsoleCtrlHandler.restype = wintypes.BOOL
+            boundary = (ROUTINE, k.SetConsoleCtrlHandler)
+        ROUTINE, set_handler = boundary
 
         def routine(event):
             if event != 1:  # (CTRL_BREAK_EVENT; anything else goes on to the next handler)
@@ -145,12 +161,19 @@ def _break_as_sigint():
             return True
 
         r = ROUTINE(routine)
-        k = ctypes.WinDLL("kernel32", use_last_error=True)
-        k.SetConsoleCtrlHandler.argtypes = (ROUTINE, wintypes.BOOL)
-        k.SetConsoleCtrlHandler.restype = wintypes.BOOL
-        if not k.SetConsoleCtrlHandler(r, True):
+        if not set_handler(r, True):
             return False
         _CTRL.append(r)
+
+        def remove():
+            # (at exit: before finalization, so no break reaches a finalizing interpreter)
+            if r in _CTRL:
+                set_handler(r, False)
+                _CTRL.remove(r)
+        if at_exit is None:
+            import atexit
+            at_exit = atexit.register
+        at_exit(remove)
         return True
     except (OSError, AttributeError, ValueError):
         return False
