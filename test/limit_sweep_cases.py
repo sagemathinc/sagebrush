@@ -137,7 +137,8 @@ def manifest_cases():
         # the working tree changes (a registration, an edited line): the rebuild from M is the same bytes
         r.reg(lambda g: g.__setitem__(KA, {"class": "none", "owner": "python"}))
         r.write("lib/one.py", ONE + "    q = LIMIT_Q\n")
-        ok(S.verify() == [], "the rebuild from M ignores the working tree: %s" % S.verify())
+        r.write("test/limit-sites-baseline.txt", "".join(h + "\n" for h in sorted(L.short(k) for k in (KA, KB, KK, KC, KG))))
+        ok(S.verify() == [], "the rebuild from M ignores the working tree (its registry, a file, its baseline): %s" % S.verify())
         text = r.read("test/limit-sweep/manifest.json")
         r.git("add", "-A")
         r.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "N")
@@ -316,15 +317,38 @@ def apply_cases():
            and g[KB]["reason"] == "a message, not a cap", "apply writes class, owner, batch, disposition and reason: %s" % g.get(KA))
         ok(json.loads(r.read("test/limit-sweep/batches.json")) == {"v": 1, "done": ["B1"], "active_baseline": 2}, "B1 done, the count 2")
         # a partial worksheet applies its rows and leaves the batch open
-        ok(S.apply(r.worksheet("B2", [reg_row(KC, "none"), reg_row(KD, "")])) == [] and json.loads(r.read("test/limit-sweep/batches.json"))["done"] == ["B1"],
-           "a partial worksheet: its rows applied, the batch not done")
+        ok(S.apply(r.worksheet("B2", [reg_row(KC, "3", disposition={"3": {"limits": "ff.work"}}), reg_row(KD, "")])) == [] and json.loads(r.read("test/limit-sweep/batches.json"))["done"] == ["B1"]
+           and r.reg()[KC]["disposition"] == {"3": {"limits": "ff.work"}},
+           "a partial worksheet: its rows applied (a _limits key read from lib/_limits.py's TABLE), the batch not done")
         # a disposition-only entry left without one in a done batch is named
         ok(S.apply(r.worksheet("B2", [reg_row(KD, "none"), {"key": KE, "kind": "disposition", "disposition": {"2": {"route": "memguard"}}}])) == [], "B2 completes")
         r.reg(lambda g: g[KE].pop("disposition"))
         ok(names(r.sweep(), KE, "needs a disposition for 2"), "a done batch's entry losing its disposition is named")
+        r.reg(lambda g: g[KE].pop("batch"))
+        ok(names(r.sweep(), KE, "needs a disposition for 2"), "...and losing its batch too: still named, as the done batch's item")
         out, n = S.worksheet("B2", r.path("w.json"))
         rows = json.load(open(out))["rows"]
         ok(n == 3 and {x["key"] for x in rows} == {KC, KD, KE} and all(x["line"] for x in rows), "worksheet B2 lists its three items with their lines")
+    finally:
+        r.close()
+
+
+def route_cases():
+    r = Repo()
+    try:
+        for what, rows, want in [
+            ("a memory route naming no function", [{"id": "memguard", "kind": "memory", "where": "lib/_memguard.py::nope"}], "names no function"),
+            ("a route in a file that doesn't exist", [{"id": "memguard", "kind": "memory", "where": "lib/nope.py::memory_guard"}], "names no function"),
+            ("a host route without its unarmed default", [{"id": "memguard", "kind": "memory", "where": "lib/_memguard.py::memory_guard"}, {"id": "grading", "kind": "host", "where": "lib/_memguard.py::memory_guard"}], "default-unarmed"),
+            ("a repeated id", [{"id": "memguard", "kind": "memory", "where": "lib/_memguard.py::memory_guard"}] * 2, "repeated"),
+            ("an unknown kind", [{"id": "memguard", "kind": "cpu", "where": "lib/_memguard.py::memory_guard"}], "kind must be"),
+        ]:
+            r.write("test/limit-sweep/routes.json", json.dumps({"v": 1, "routes": rows}))
+            errs = r.sweep()
+            ok(any(want in e for e in errs), "routes.json: %s is named: %s" % (what, errs))
+        r.write("test/limit-sweep/routes.json", json.dumps({"v": 1, "routes": [{"id": "memguard", "kind": "memory", "where": "lib/_memguard.py::memory_guard"},
+                                                                              {"id": "grading", "kind": "host", "where": "lib/_memguard.py::memory_guard", "default": "lib/_memguard.py::memory_guard"}]}))
+        ok(r.sweep() == [], "lawful memory and host routes resolve: %s" % r.sweep())
     finally:
         r.close()
 
@@ -346,7 +370,7 @@ def merge_cases():
         ok(len(c) == 1 and word in c[0] and (c[0].startswith("y:") or c[0].startswith("n:")), "merge: %s is a conflict naming the key: %s" % (what, c))
 
 
-for case in (manifest_cases, membership_cases, followup_cases, apply_cases, merge_cases):
+for case in (manifest_cases, membership_cases, followup_cases, apply_cases, route_cases, merge_cases):
     try:
         case()
     except Exception as exc:  # (a case that crashes is a failure, named)
