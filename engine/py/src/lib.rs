@@ -18,11 +18,43 @@ static MAIN: std::sync::OnceLock<std::thread::ThreadId> = std::sync::OnceLock::n
 /// own handler is back in place when this returns.
 fn guarded<T: Send>(py: Python<'_>, f: impl FnOnce() -> T + Send) -> PyResult<T> {
     let main = MAIN.get() == Some(&std::thread::current().id());
-    py.detach(|| {
+    let r = py.detach(|| {
         let _sigint = main.then(sagebrush_interrupt::SigintGuard::new);
         sagebrush_interrupt::catch(f)
-    })
-    .map_err(|_| PyKeyboardInterrupt::new_err(()))
+    });
+    host_raised()?;
+    r.map_err(|_| PyKeyboardInterrupt::new_err(()))
+}
+
+/// A KeyboardInterrupt, SystemExit or other BaseException that is not an
+/// ordinary Exception, raised by a host source the engine asked (the memory
+/// total): it is not an unreadable answer, so it is kept here, an interrupt
+/// is requested (a running computation stops at its next check), and the
+/// call that asked raises it (`guarded`, `ledger_snapshot`).
+static HOST_RAISED: std::sync::Mutex<Option<PyErr>> = std::sync::Mutex::new(None);
+
+/// A host source's error: an ordinary Exception means "unreadable" (the
+/// caller answers none); anything else is kept for the asking call.
+fn host_error(py: Python<'_>, e: PyErr) {
+    if !e.is_instance_of::<pyo3::exceptions::PyException>(py) {
+        let mut slot = HOST_RAISED.lock().unwrap_or_else(|p| p.into_inner());
+        if slot.is_none() {
+            *slot = Some(e);
+        }
+        sagebrush_interrupt::request();
+    }
+}
+
+/// Raise what a host source raised during this call (and forget the
+/// interrupt requested for it).
+fn host_raised() -> PyResult<()> {
+    match HOST_RAISED.lock().unwrap_or_else(|p| p.into_inner()).take() {
+        Some(e) => {
+            sagebrush_interrupt::clear();
+            Err(e)
+        }
+        None => Ok(()),
+    }
 }
 
 fn run<T: Send>(py: Python<'_>, threads: usize, f: impl FnOnce() -> T + Send) -> PyResult<T> {
@@ -508,13 +540,15 @@ fn set_memory_share_source(source: Py<PyAny>) {
 /// (kind, path) with kind "cgroup" (path: its usage file), "address_space",
 /// "data_segment", "physical", "windows_job" or "windows_physical".  The
 /// ledger asks when the total is 100 ms old, with the GIL taken for it and
-/// its own lock not held; an exception or a malformed answer is none (the
-/// nominal total, uncertified).  The first registration stands.
+/// its own lock not held; an ordinary exception or a malformed answer is
+/// none (the nominal total, uncertified), while KeyboardInterrupt and any
+/// other BaseException propagate to the call that asked (`host_error`).  The
+/// first registration stands.
 #[pyfunction]
 fn set_memory_total_source(source: Py<PyAny>) {
     sagebrush_ledger::set_total_host(move || {
         Python::attach(|py| {
-            let r = source.call0(py).ok()?;
+            let r = source.call0(py).map_err(|e| host_error(py, e)).ok()?;
             let (bytes, status, joint, measures) = r.extract::<Option<(u64, u32, bool, Vec<(String, Option<String>)>)>>(py).ok().flatten()?;
             let total = sagebrush_ledger::Total { bytes, status: sagebrush_ledger::TotalStatus::from_code(status)?, joint };
             let kinds = measures
@@ -548,6 +582,7 @@ fn ledger_snapshot(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     d.set_item("resident", sagebrush_ledger::resident_bytes())?;
     d.set_item("certified", sagebrush_ledger::certified())?;
     d.set_item("outstanding", sagebrush_ledger::outstanding_bytes())?;
+    host_raised()?;
     Ok(d)
 }
 
