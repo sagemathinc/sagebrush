@@ -79,6 +79,11 @@ impl<'b> Held<'b> {
     pub fn into_vec(self) -> ZPoly {
         self.v
     }
+    /// The bytes reserved for it (the tests' ledger).
+    #[cfg(test)]
+    pub fn reserved(&self) -> u64 {
+        self._r.bytes()
+    }
 }
 
 /// A big integer whose memory is reserved in the call's budget for as long
@@ -102,10 +107,15 @@ impl Deref for HeldInt<'_> {
 /// inverse).
 pub(crate) fn power<'b>(b: &'b Budget, p: u64, k: u32) -> FResult<HeldInt<'b>> {
     let bits = (k as u64).checked_mul(64 - p.leading_zeros() as u64);
-    let r = b.reserve(bits.and_then(big_bytes).and_then(|x| x.checked_mul(5)))?;
+    let r = b.reserve(power_bytes(p, k))?;
     let l = limbs(bits.unwrap_or(u64::MAX));
     b.debit(l.checked_mul(l).and_then(|x| x.checked_mul(clog2(k as u64) + 1)))?;
     Ok(HeldInt { v: BigInt::from(p).pow(k), _r: r })
+}
+
+/// Bytes reserved by `power(p, k)`.
+pub(crate) fn power_bytes(p: u64, k: u32) -> Option<u64> {
+    (k as u64).checked_mul(64 - p.leading_zeros() as u64).and_then(big_bytes).and_then(|x| x.checked_mul(5))
 }
 
 /// Room for `count` transient integers of `bits` bits (an operation's
@@ -1112,12 +1122,43 @@ mod tests;
 #[cfg(test)]
 pub(crate) mod alloc_spy {
     use std::alloc::{GlobalAlloc, Layout, System};
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
+    use std::collections::HashMap;
 
     thread_local! {
         static BYTES: Cell<u64> = const { Cell::new(0) };
         static LIVE: Cell<i64> = const { Cell::new(0) };
         static PEAK: Cell<i64> = const { Cell::new(0) };
+        // the ledger audit (rank-3 plan r3, section 4.5, delta 1 r2): this
+        // thread's live bytes at its start (None: no audit running)
+        static AUDIT: Cell<Option<i64>> = const { Cell::new(None) };
+        static REPORT: Cell<Report> = const { Cell::new(Report::new()) };
+        // the attribution: the current tag, every live tagged block, and
+        // the live and reserved bytes of each tag
+        static TAG: Cell<Option<&'static str>> = const { Cell::new(None) };
+        static BLOCKS: RefCell<HashMap<usize, (&'static str, i64)>> = RefCell::new(HashMap::new());
+        static TAGS: RefCell<HashMap<&'static str, (i64, i64)>> = RefCell::new(HashMap::new());
+        // set while the spy's own bookkeeping runs (its maps allocate)
+        static BUSY: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// What an audit found.
+    #[derive(Clone, Copy, Debug)]
+    pub struct Report {
+        /// The largest excess of live bytes over the whole reservation at a
+        /// debit or a reservation, and the phase it was in.
+        pub excess: i64,
+        pub excess_phase: &'static str,
+        /// Checks where a tag's live bytes exceeded its reservation, and the
+        /// first one: (tag, live, reserved, phase).
+        pub tag_breaches: u64,
+        pub first_breach: Option<(&'static str, i64, i64, &'static str)>,
+    }
+
+    impl Report {
+        const fn new() -> Report {
+            Report { excess: i64::MIN, excess_phase: "", tag_breaches: 0, first_breach: None }
+        }
     }
 
     fn grow(n: i64) {
@@ -1132,23 +1173,127 @@ pub(crate) mod alloc_spy {
         });
     }
 
+    /// The spy's bookkeeping, while an audit runs, and not re-entered.
+    fn book(f: impl FnOnce()) {
+        if AUDIT.try_with(|a| a.get().is_none()).unwrap_or(true) {
+            return;
+        }
+        let Ok(false) = BUSY.try_with(|b| b.replace(true)) else { return };
+        f();
+        let _ = BUSY.try_with(|b| b.set(false));
+    }
+
+    fn tag_live(t: &'static str, n: i64) {
+        TAGS.with(|m| m.borrow_mut().entry(t).or_insert((0, 0)).0 += n);
+    }
+
+    fn on_alloc(p: *mut u8, size: usize) {
+        book(|| {
+            if let Some(t) = TAG.with(|t| t.get()) {
+                BLOCKS.with(|m| m.borrow_mut().insert(p as usize, (t, size as i64)));
+                tag_live(t, size as i64);
+            }
+        });
+    }
+
+    fn on_free(p: *mut u8) -> Option<&'static str> {
+        let mut out = None;
+        book(|| {
+            if let Some((t, n)) = BLOCKS.with(|m| m.borrow_mut().remove(&(p as usize))) {
+                tag_live(t, -n);
+                out = Some(t);
+            }
+        });
+        out
+    }
+
     pub struct Spy;
 
     unsafe impl GlobalAlloc for Spy {
         unsafe fn alloc(&self, l: Layout) -> *mut u8 {
             let _ = BYTES.try_with(|b| b.set(b.get() + l.size() as u64));
             grow(l.size() as i64);
-            System.alloc(l)
+            let p = System.alloc(l);
+            on_alloc(p, l.size());
+            p
         }
         unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
             grow(-(l.size() as i64));
+            on_free(p);
             System.dealloc(p, l)
         }
         unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
             let _ = BYTES.try_with(|b| b.set(b.get() + n as u64));
             grow(n as i64 - l.size() as i64);
-            System.realloc(p, l, n)
+            // a tagged block keeps its tag; an untagged one takes the current
+            let was = on_free(p);
+            let q = System.realloc(p, l, n);
+            book(|| {
+                if let Some(t) = was.or(TAG.with(|t| t.get())) {
+                    BLOCKS.with(|m| m.borrow_mut().insert(q as usize, (t, n as i64)));
+                    tag_live(t, n as i64);
+                }
+            });
+            q
         }
+    }
+
+    /// The current tag (Budget's `tag` guard); returns the previous one.
+    pub fn set_tag(t: Option<&'static str>) -> Option<&'static str> {
+        TAG.with(|c| c.replace(t))
+    }
+
+    /// A reservation of a tagged object made (n > 0) or released.
+    pub fn tag_reserved(t: &'static str, n: i64) {
+        book(|| TAGS.with(|m| m.borrow_mut().entry(t).or_insert((0, 0)).1 += n));
+    }
+
+    /// A debit or a reservation (`reserved`: the budget's live reservation),
+    /// checked while an audit runs.
+    pub fn audit_point(reserved: u64, phase: &'static str) {
+        book(|| {
+            let Some(base) = AUDIT.with(|a| a.get()) else { return };
+            let mut r = REPORT.with(|r| r.get());
+            let excess = LIVE.with(|l| l.get()) - base - reserved as i64;
+            if excess > r.excess {
+                r.excess = excess;
+                r.excess_phase = phase;
+            }
+            TAGS.with(|m| {
+                for (&t, &(live, res)) in m.borrow().iter() {
+                    if live > res {
+                        r.tag_breaches += 1;
+                        r.first_breach.get_or_insert((t, live, res, phase));
+                    }
+                }
+            });
+            REPORT.with(|c| c.set(r));
+        });
+    }
+
+    /// Run f under the audit (only this thread's allocations count).
+    pub fn audit<T>(f: impl FnOnce() -> T) -> (T, Report) {
+        BLOCKS.with(|m| m.borrow_mut().clear());
+        TAGS.with(|m| m.borrow_mut().clear());
+        REPORT.with(|r| r.set(Report::new()));
+        AUDIT.with(|a| a.set(Some(LIVE.with(|l| l.get()))));
+        let r = f();
+        AUDIT.with(|a| a.set(None));
+        (r, REPORT.with(|r| r.get()))
+    }
+
+    thread_local! {
+        static REFUSED_AT: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// A memory refusal: this thread's allocated bytes at that moment.
+    pub fn note_refusal() {
+        let _ = REFUSED_AT.try_with(|r| r.set(allocated()));
+    }
+
+    /// The allocated bytes at the last memory refusal.
+    pub fn refused_at() -> u64 {
+        REFUSED_AT.with(|r| r.get())
     }
 
     /// Bytes allocated by this thread so far.
