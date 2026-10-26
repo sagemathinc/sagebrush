@@ -83,15 +83,18 @@ class Ledger:
         g = None if self.unmeasured else _capacity.effective_guard_bytes(rec)
         self.G = int(g) if g is not None else 0
         self.owned = 0
+        self.peak = 0
 
-    def reserve(self, nbytes):
+    def reserve(self, nbytes, tag=None, parts=None):
         nbytes = max(0, int(nbytes))
         need = self.owned + nbytes
+        _record("reserve", need, nbytes, tag, parts)
         if self.unmeasured is not None:
             raise memory_guard(self.what, need, 0, self.allowance_for, record=self.rec, unmeasured=self.unmeasured)
         if need > self.G:
             raise memory_guard(self.what, need, self.G, self.allowance_for, record=self.rec)
         self.owned = need
+        self.peak = max(self.peak, need)
 
     def release(self, nbytes):
         self.owned = max(0, self.owned - max(0, int(nbytes)))
@@ -116,9 +119,9 @@ class Work:
             _categories[cat] = _categories.get(cat, 0) + units
 
 
-def _record(kind, n, nbytes=0):
+def _record(kind, n, nbytes=0, tag=None, extra=None):
     if _recorder is not None:
-        _recorder.append((kind, int(n), int(nbytes)))
+        _recorder.append((kind, int(n), int(nbytes), tag, extra))
 
 
 def chunks(n, step=None):
@@ -147,7 +150,7 @@ class Seg:
         self.blocks = []
         for a in range(0, n, self.L):
             m = min(self.L, n - a)
-            _record("alloc", m * row // self.dtype.itemsize, m * row)
+            _record("alloc", m * row // self.dtype.itemsize, m * row, None, _kind(self.dtype))
             self.blocks.append(np.zeros((m,) + shape[1:], dtype=self.dtype))
 
     @property
@@ -206,8 +209,14 @@ def alloc(shape, dtype):
     nbytes = count * np.dtype(dtype).itemsize
     if nbytes > A_SAFE:
         return Seg(shape, dtype)
-    _record("alloc", count, nbytes)
+    _record("alloc", count, nbytes, None, _kind(dtype))
     return np.zeros(shape, dtype=dtype)
+
+
+def _kind(dt):
+    """an allocation's type, as the column formula's parts name them"""
+    k = np.dtype(dt).kind
+    return "bool" if k == "b" else "idx" if k in "iu" else "val"
 
 
 def _sort_into(src, r, out, mbuf):
@@ -475,7 +484,7 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
     # the workspace and the kept state, before the first column (r6 section 2.2's B_0)
     kpeak = _kpeak(cv)
     B0 = 3 * n * C_IDX + n * C_BOOL + 2 * n * cv + 5 * n * C_PTR + n * C_PYINT + 2 * E * C_IDX + kpeak + 5 * C_HDR
-    led.reserve(B0)
+    led.reserve(B0, "workspace")
     pinv = alloc(n, _I)
     for a, b in chunks(n):
         pinv[a:b] = -1
@@ -576,9 +585,11 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
                 u = parts[0] if len(parts) == 1 else np.unique(np.concatenate(parts))
                 r, t = _visit(u, pinv, mark, rbuf, t, queue, r)
         # c. the column's peak, reserved before anything of it is built
-        Bj = C_IDX * (3 * r + 3 * t) + cv * (r + 2 * t) + C_RE * t + C_BOOL * t + C_PTR * r + 6 * C_HDR
+        parts = {"idx": C_IDX * (3 * r + 3 * t), "val": cv * (r + 2 * t), "re": C_RE * t, "bool": C_BOOL * t,
+                 "ptr": C_PTR * r, "hdr": 6 * C_HDR}
+        Bj = sum(parts.values())
         try:
-            led.reserve(Bj)
+            led.reserve(Bj, "column", parts)
         except BaseException:
             for a, b in chunks(t):
                 mark[rbuf[a:b]] = False
@@ -704,7 +715,7 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
         x[p] = 0
         led.release(Bj)
         led.reserve(C_IDX * (r + cnt) + cv * (r + cnt) + 4 * C_HDR + (2 * C_ENT * cnt if cnt <= SMALL else 0)
-                    + (2 * C_ENT * r if r <= SMALL else 0))
+                    + (2 * C_ENT * r if r <= SMALL else 0), "retain")
     # lstep: the steps L's rows are pivoted at, for the transposed solve
     nl = sum(int(v.size) for v in lrow)
     led.reserve(C_IDX * nl + n * C_PTR + n * C_HDR)
@@ -754,7 +765,7 @@ def _small_column(j, c, steps, touched, x, pinv, prow, udiag, lrow, lval, lrow_l
     r, t = len(steps), len(touched)
     Bj = C_IDX * (3 * r + 3 * t) + cv * (r + 2 * t) + C_RE * t + C_BOOL * t + C_PTR * r + 6 * C_HDR + 4 * C_ENT * (r + t)
     try:
-        led.reserve(Bj)
+        led.reserve(Bj, "column")
     except BaseException:
         for i in touched:
             x[i] = 0
@@ -802,7 +813,7 @@ def _small_column(j, c, steps, touched, x, pinv, prow, udiag, lrow, lval, lrow_l
     x[p] = 0
     cnt = len(lr)
     led.release(Bj)
-    led.reserve(C_IDX * (r + cnt) + cv * (r + cnt) + 4 * C_HDR + 2 * C_ENT * (cnt + r))
+    led.reserve(C_IDX * (r + cnt) + cv * (r + cnt) + 4 * C_HDR + 2 * C_ENT * (cnt + r), "retain")
     return free
 
 
