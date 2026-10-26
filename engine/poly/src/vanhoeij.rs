@@ -125,7 +125,9 @@ macro_rules! ledger {
         #[cfg(test)]
         {
             let want: u64 = 0 $(+ $term)+;
-            assert_eq!($b.live(), want, "the ledger at {}", $at);
+            if ledger_log::checking() {
+                assert_eq!($b.live(), want, "the ledger at {}", $at);
+            }
             ledger_log::reached($at);
         }
     };
@@ -154,6 +156,24 @@ pub(crate) mod ledger_log {
         // a level above 0 ran: its relifting's own reservations are not in
         // the predicted peak (the relift coexistence rows are PR 4's)
         static RELIFT: Cell<bool> = const { Cell::new(false) };
+        // the equality checkpoints are asserted (off: the size tags alone)
+        static CHECKING: Cell<bool> = const { Cell::new(true) };
+    }
+
+    pub fn checking() -> bool {
+        CHECKING.with(|c| c.get())
+    }
+    /// Run f with the equality checkpoints off (they still count as reached).
+    pub fn without_checkpoints<T>(f: impl FnOnce() -> T) -> T {
+        struct On;
+        impl Drop for On {
+            fn drop(&mut self) {
+                CHECKING.with(|c| c.set(true));
+            }
+        }
+        let _on = On;
+        CHECKING.with(|c| c.set(false));
+        f()
     }
 
     pub fn reset() {
@@ -891,6 +911,17 @@ pub(crate) mod tests {
         assert_eq!(b.peak(), peak, "predicted at line {}", ledger_log::peak_line());
         eprintln!("S_6 lattice: predicted peak {peak} at line {}", ledger_log::peak_line());
         assert_eq!(b.live(), 0);
+    }
+
+    #[test]
+    fn the_size_tags_hold_on_s6() {
+        // delta 1 r2 (B) on its own, without the equality checkpoints: the
+        // bounds, the column indices, pw and the CLD values stay within
+        // their own reservations, whatever the over-charge elsewhere
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (_f, r, rep) = ledger_log::without_checkpoints(|| s6_lattice(&b, None));
+        assert_eq!(r.unwrap(), Some(1));
+        assert_eq!(rep.tag_breaches, 0, "{:?}", rep.first_breach);
     }
 
     #[test]
