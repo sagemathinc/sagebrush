@@ -215,6 +215,62 @@ finally:
 check(escaped is None and ok is True and len(hits) == 2 and k.calls[-1] == (r, False) and S._RETIRED == [r] and exits[0].state.closing and reports == [],
       "a KeyboardInterrupt at step (0): the cleanup starts again and completes, unregistered and retired, nothing escapes (%r, %s)" % (escaped, hits))
 
+# astra2's exhaustion control: _RETRIES + 1 KeyboardInterrupts at step (0): nothing escapes, the exhaustion is reported,
+# and the routine is left installed (in _CTRL, so alive), not unregistered, not retired
+fresh()
+k, exits, reports = Kernel(), [], []
+S._break_as_sigint(nt=True, boundary=(lambda f: f, k), at_exit=exits.append, report=reports.append)
+r = k.calls[0][0]
+hits = []
+
+
+def always():
+    hits.append(1)
+    raise KeyboardInterrupt
+
+
+S._ignore_sigint = always
+escaped = None
+try:
+    try:
+        ok = exits[0]()
+    except KeyboardInterrupt as e:
+        ok, escaped = None, e
+finally:
+    S._ignore_sigint = real_ignore
+    signal.signal(signal.SIGINT, _OUTER_SIGINT)
+check(escaped is None and ok is False and len(hits) == S._RETRIES and S._CTRL == [r] and S._RETIRED == [] and k.calls == [(r, True)]
+      and len(reports) == 1 and "gave up" in reports[0], "retries exhausted (%d interruptions): nothing escapes, reported, the routine left installed and alive (%r, %s)" % (S._RETRIES + 1, escaped, reports))
+
+# grader's G-R6-1: a KeyboardInterrupt between leaving _CTRL and joining _RETIRED (a _CTRL whose remove raises once):
+# the retry finishes, and the routine is in _RETIRED (kept alive), never in neither list
+fresh()
+
+
+class Twitchy(list):
+    def __init__(self):
+        super().__init__()
+        self.raised = False
+
+    def remove(self, x):
+        super().remove(x)
+        if not self.raised:  # (removed, then interrupted: the window between leaving _CTRL and the next step)
+            self.raised = True
+            raise KeyboardInterrupt
+
+
+real_ctrl = S._CTRL
+S._CTRL = Twitchy()
+try:
+    k, exits = Kernel(), []
+    S._break_as_sigint(nt=True, boundary=(lambda f: f, k), at_exit=exits.append, report=lambda m: None)
+    r = k.calls[0][0]
+    ok = exit_now(exits[0])
+    check(ok is True and S._CTRL.raised and r not in S._CTRL and S._RETIRED == [r] and k.calls.count((r, False)) == 1,
+          "an interruption between leaving _CTRL and joining _RETIRED: retried, kept alive in _RETIRED, unregistered once")
+finally:
+    S._CTRL = real_ctrl
+
 # a drain that times out is reported, and the routine is still unregistered and kept alive
 fresh()
 k, exits, reports = Kernel(), [], []
