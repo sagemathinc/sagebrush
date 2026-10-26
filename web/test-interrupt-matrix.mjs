@@ -181,7 +181,7 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
     let tail = "";
     const known = track(p.pid);
     const sends = new Set(); // (pending Stop dispatches: cancelled when the session ends)
-    const remember = () => { const t = procTable(); for (const q of sessionTree(p.pid, known)) if (t.has(q)) known.set(q, t.get(q).start); };
+    const remember = () => { const t = procTable(); for (const q of sessionTree(p.pid, known, t)) known.set(q, t.get(q).start); };
     const watch = setInterval(remember, 1000);
     let done = false;
     const finish = (why) => {
