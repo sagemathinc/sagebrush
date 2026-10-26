@@ -10,8 +10,8 @@
 //!   normal  Stage 1 certifies (no hook);
 //!   a       column exhaustion: Stage 1's certificates are declined
 //!           (STAGE1_NO_CERT), so it ends by its 32 columns;
-//!   a+all   (a), and every Stage-2 pass before the level's last declines its
-//!           certificate (S2_LAST_PASS): all passes run;
+//!   a+all   (a), and every Stage-2 pass before a level's last declines its
+//!           certificate (S2_LAST_PASS): every level runs all its passes;
 //!   b       level exhaustion: Stage 1 starts at precision 1 (STAGE1_LOW_PREC),
 //!           its columns carry no information, it ends by its 3 levels;
 //!   b+all   (b) with every pass, as above.
@@ -115,8 +115,11 @@ fn main() {
                     assert_eq!((reach.s1_exit_cols, reach.s1_exit_levels), (0, 1), "{case} {name}: {reach:?}");
                 }
                 if name.ends_with("all") {
-                    assert_eq!(reach.s2_levels, 1, "{case} {name}: {reach:?}");
-                    assert_eq!(reach.s2_passes, n.div_ceil(4), "{case} {name}: all passes: {reach:?}");
+                    // every level runs all its passes (a certificate is taken
+                    // only after a level's last pass; a level below a* may
+                    // still not certify, and the precision doubles)
+                    assert!(reach.s2_levels >= 1, "{case} {name}: {reach:?}");
+                    assert_eq!(reach.s2_passes, reach.s2_levels * n.div_ceil(4), "{case} {name}: all passes: {reach:?}");
                 }
             }
             println!(
