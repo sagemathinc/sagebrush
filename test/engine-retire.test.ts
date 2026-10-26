@@ -457,17 +457,16 @@ test("C r16b 2: retention by kind on a shared row: the old Memory, its buffer or
       await new Promise((r) => setTimeout(r, 10));
     }
     assert.equal(H.state().pending.length, 1, `${kind}: retained, still charged`);
-    // a second sibling would exceed the shared row
-    E.engineCall("x");
-    try {
-      E.engineCall("T");
-    } catch {}
+    // a second sibling would exceed the shared row (created and trapped in a
+    // synchronous helper: a suspended async frame may keep the trap's error,
+    // whose stack names the instance)
+    createAndTrap();
     assert.throws(() => E.engineCall("x"), (e: any) => e.constructor.name === "CreationRefused" && e.row === "shared", kind);
     // release everything: within this job, still charged (the raw lag)
     held = null;
     fullGc();
     assert.throws(() => E.engineCall("x"), (e: any) => e.row === "shared", `${kind}: the bookkeeping lags within the job`);
-    for (let i = 0; i < 30 && H.state().pending.length; i++) {
+    for (let i = 0; i < 100 && H.state().pending.length; i++) {
       await new Promise((r) => setImmediate(r));
       fullGc();
       await new Promise((r) => setTimeout(r, 10));
@@ -477,6 +476,14 @@ test("C r16b 2: retention by kind on a shared row: the old Memory, its buffer or
     assert.equal(held, null);
   }
 });
+
+/** Create an instance and trap it, keeping nothing (see the retention test). */
+function createAndTrap() {
+  E.engineCall("x");
+  try {
+    E.engineCall("T");
+  } catch {}
+}
 
 /** The runtime (compile.js) with _capacity's sources replaced, then reset. */
 async function withSources(src: string, body: (c: any) => void) {
