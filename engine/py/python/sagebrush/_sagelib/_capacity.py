@@ -322,8 +322,9 @@ class _CtypesMac:
     subprocess): physical memory from sysctlbyname("hw.memsize"); what is
     available from host_statistics64(HOST_VM_INFO64) as the free and the
     inactive pages times host_page_size.  Inactive pages are the ones the
-    system reclaims first; speculative and purgeable pages are left out,
-    so the figure errs low.  The host port is taken once."""
+    system reclaims first.  free_count already includes the speculative
+    pages, so they aren't added twice; purgeable pages aren't added, so the
+    figure errs low.  The host port is taken once."""
 
     _HOST_VM_INFO64 = 4
 
