@@ -107,11 +107,42 @@ def one(how, work, no_window=False):
             p.wait()
 
 
+EXIT_CHILD = r'''
+import atexit, sys, time
+from sagebrush import session as S
+print("INSTALLED", S._break_as_sigint(), flush=True)
+# (registered after the routine's own removal, so it runs first: the parent's break arrives during exit)
+atexit.register(lambda: (print("EXITING", flush=True), time.sleep(1.0)))
+'''
+
+
+def at_exit():
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    p = subprocess.Popen([sys.executable, "-c", EXIT_CHILD], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=flags)
+    try:
+        lines = []
+        while True:
+            line = p.stdout.readline()
+            if not line:
+                break
+            lines.append(line.strip())
+            if line.startswith("EXITING"):
+                p.send_signal(signal.CTRL_BREAK_EVENT)
+        out, err = p.communicate(timeout=15)
+        return "exit %s, %s%s" % (p.returncode, " ".join(lines), (" stderr: " + err.strip()[:200]) if err.strip() else "")
+    except subprocess.TimeoutExpired:
+        p.kill()
+        return "HUNG at exit"
+
+
 def main():
     print("python %s on %s (%s)" % (sys.version.split()[0], sys.platform, os.name))
     for how in HOWS:
         for work in WORKS:
             print("%-14s %-6s %s" % (how, work, one(how, work)), flush=True)
+    # (astra2: a Ctrl-Break during the child's own exit, with sagebrush's routine installed: it must exit 0)
+    if os.name == "nt":
+        print("%-14s %-6s %s" % ("break@exit", "-", at_exit()), flush=True)
     # (grader's N2: a child with no console, CREATE_NO_WINDOW; Windows only)
     if os.name == "nt":
         for how in ("break", "break+handler"):

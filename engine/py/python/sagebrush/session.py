@@ -122,7 +122,26 @@ _CTRL = []  # (the worker's console control routine, kept alive as long as it is
 _RETIRED = []  # (and after: a break already on the control thread when it was removed may still run it, grader)
 
 
-def _break_as_sigint(nt=None, boundary=None, at_exit=None):
+def _raise_sigint():
+    # (the conversion itself; its own name, so a test can pause a callback inside it)
+    signal.raise_signal(signal.SIGINT)
+
+
+class _CtrlState:
+    """One installed routine's shutdown state (astra2, #186 r2): `closing`, set
+    under the lock before the routine is removed, makes every later entry a
+    no-op; `inflight` counts the entries running past that check, and exit
+    waits for it to reach 0 before it unregisters."""
+
+    def __init__(self):
+        import threading
+
+        self.cond = threading.Condition()
+        self.closing = False
+        self.inflight = 0
+
+
+def _break_as_sigint(nt=None, boundary=None, at_exit=None, report=None, drain_s=5.0):
     """On Windows, the worker's Ctrl-Break (what Session.interrupt sends: the
     worker has its own process group, where Ctrl-C is off) becomes a SIGINT,
     raised from the console's control thread, so that a computation blocked in
@@ -132,17 +151,42 @@ def _break_as_sigint(nt=None, boundary=None, at_exit=None):
     SIGINT does; neither wakes threading.Event().wait() (measured), and lock
     waits weren't probed, so a run blocked there is still ended by the grace's
     restart, as before.
-    The routine is removed again at exit (atexit), so a break arriving while
-    the interpreter finalizes never calls into it.
+
+    At exit (atexit) the routine is retired, in this order: (1) under its lock,
+    `closing` is set, so a callback that enters from then on converts nothing
+    and returns TRUE (handled: it isn't passed on to the C runtime's SIGBREAK
+    path either); (2) exit waits, up to `drain_s`, for the callbacks that had
+    already entered to finish (each holds `inflight` while it converts);
+    (3) SetConsoleCtrlHandler(r, FALSE).  If (3) fails, the routine stays
+    recorded as installed (a retry really retries), inert because closing, and
+    the failure is reported with its Windows error; if (2) times out, that is
+    reported too.  The routine is never freed (_RETIRED).
+    What this guarantees: no signal is converted after (1), and every callback
+    that had entered the routine before (1) has finished before the
+    interpreter's teardown proceeds (unless the drain is reported as timed out).
+    What it can't: a callback the system has dispatched but that hasn't yet
+    entered Python can't be counted from Python; if it enters during (2) it is
+    inert, and if it would enter only after finalization has begun, it is
+    blocked from running Python by the interpreter itself (CPython's
+    documented behaviour for threads that ask for the GIL during finalization),
+    and ends with the process.  test/win_interrupt_probe.py's "exit" row sends
+    a Ctrl-Break during a child's exit, as platform evidence.
+
     A worker with no console (an MCP server started by a GUI client without
     one) gets no console event at all, before or after this: its cancel always
     falls back to the restart after the grace.
     Elsewhere, and if it can't be installed, it does nothing (False);
     interrupt() still sends Ctrl-Break, handled as before.
-    (nt, boundary, at_exit: the test's seams, defaulting to os.name == "nt",
-    kernel32 through ctypes, and atexit.register.)"""
+    (nt, boundary, at_exit, report, drain_s: the test's seams, defaulting to
+    os.name == "nt", kernel32 through ctypes, atexit.register and stderr.)"""
     if not (os.name == "nt" if nt is None else nt):
         return False
+    if report is None:
+        def report(msg):
+            try:
+                sys.stderr.write("sagebrush: %s\n" % msg)
+            except Exception:
+                pass
     try:
         if boundary is None:
             import ctypes
@@ -152,13 +196,23 @@ def _break_as_sigint(nt=None, boundary=None, at_exit=None):
             k = ctypes.WinDLL("kernel32", use_last_error=True)
             k.SetConsoleCtrlHandler.argtypes = (ROUTINE, wintypes.BOOL)
             k.SetConsoleCtrlHandler.restype = wintypes.BOOL
-            boundary = (ROUTINE, k.SetConsoleCtrlHandler)
-        ROUTINE, set_handler = boundary
+            boundary = (ROUTINE, k.SetConsoleCtrlHandler, ctypes.get_last_error)
+        ROUTINE, set_handler, last_error = (tuple(boundary) + (lambda: 0,))[:3]
+        state = _CtrlState()
 
         def routine(event):
             if event != 1:  # (CTRL_BREAK_EVENT; anything else goes on to the next handler)
                 return False
-            signal.raise_signal(signal.SIGINT)
+            with state.cond:
+                if state.closing:
+                    return True  # (retired: handled, nothing converted)
+                state.inflight += 1
+            try:
+                _raise_sigint()
+            finally:
+                with state.cond:
+                    state.inflight -= 1
+                    state.cond.notify_all()
             return True
 
         r = ROUTINE(routine)
@@ -167,11 +221,21 @@ def _break_as_sigint(nt=None, boundary=None, at_exit=None):
         _CTRL.append(r)
 
         def remove():
-            # (at exit: before finalization, so no break reaches a finalizing interpreter)
-            if r in _CTRL:
-                set_handler(r, False)
-                _CTRL.remove(r)
-                _RETIRED.append(r)  # (never freed: the thunk outlives any call already under way)
+            """Retire the routine (see above): True once it is unregistered."""
+            if r not in _CTRL:
+                return True
+            with state.cond:
+                state.closing = True
+                drained = state.cond.wait_for(lambda: state.inflight == 0, timeout=drain_s)
+            if not drained:
+                report("a console callback was still converting a Ctrl-Break after %.1f s at exit" % drain_s)
+            if not set_handler(r, False):
+                report("the console routine couldn't be removed at exit (Windows error %s): it stays registered, and inert" % last_error())
+                return False
+            _CTRL.remove(r)
+            _RETIRED.append(r)  # (never freed: the thunk outlives any call already under way)
+            return True
+        remove.state = state
         if at_exit is None:
             import atexit
             at_exit = atexit.register

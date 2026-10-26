@@ -66,6 +66,89 @@ n = len(k.calls)
 exits[0]()
 check(len(k.calls) == n, "a second removal does nothing")
 
+# astra2's failed-removal witness (CORR-WIN-EXIT-1): installation succeeds, removal returns 0. The routine
+# stays recorded as installed, the failure is reported with its error, and a retry really retries
+fresh()
+
+
+class Flaky(Kernel):
+    def __init__(self):
+        super().__init__()
+        self.removals_ok = [False, True]
+
+    def __call__(self, routine, add):
+        self.calls.append((routine, add))
+        return True if add else self.removals_ok.pop(0)
+
+
+k, exits, reports = Flaky(), [], []
+check(S._break_as_sigint(nt=True, boundary=(lambda f: f, k, lambda: 87), at_exit=exits.append, report=reports.append) is True, "installed (for the failed removal)")
+r = k.calls[0][0]
+check(exits[0]() is False and S._CTRL == [r] and S._RETIRED == [] and len(reports) == 1 and "87" in reports[0], "a failed removal: still recorded as installed, reported with its Windows error: %s" % reports)
+seen = []
+old = signal.signal(signal.SIGINT, lambda signum, frame: seen.append(signum))
+try:
+    check(r(1) is True and seen == [], "after a failed removal the routine is inert (closing): a Ctrl-Break converts nothing")
+finally:
+    signal.signal(signal.SIGINT, old)
+check(exits[0]() is True and k.calls[-1] == (r, False) and k.calls.count((r, False)) == 2 and S._CTRL == [] and S._RETIRED == [r], "a retry really retries, and then retires it")
+
+# astra2's paused-callback/exit control (CORR-WIN-EXIT-2): a callback paused inside its conversion; exit closes,
+# waits for it, and only then unregisters; a callback entering after closing converts nothing
+import threading
+import time
+
+fresh()
+k, exits = Kernel(), []
+check(S._break_as_sigint(nt=True, boundary=(lambda f: f, k), at_exit=exits.append, report=lambda m: None) is True, "installed (for the drain)")
+r = k.calls[0][0]
+entered, release, order = threading.Event(), threading.Event(), []
+real_raise = S._raise_sigint
+
+
+def paused():
+    entered.set()
+    release.wait(5)
+    order.append("callback done")
+
+
+S._raise_sigint = paused
+try:
+    cb = threading.Thread(target=lambda: order.append(("cb", r(1))))
+    cb.start()
+    check(entered.wait(5), "the callback is inside its conversion")
+    done = []
+    ex = threading.Thread(target=lambda: done.append(exits[0]()))
+    ex.start()
+    time.sleep(0.3)
+    check(not done and (r, False) not in k.calls and exits[0].state.closing, "exit has closed the routine and is waiting for the in-flight callback, not yet unregistered")
+    # a second callback entering now, while closing: inert, not counted, nothing converted
+    calls_before = len(order)
+    check(r(1) is True and len(order) == calls_before, "a callback entering after closing converts nothing")
+    release.set()
+    cb.join(5)
+    ex.join(5)
+    check(done == [True] and order[0] == "callback done" and k.calls[-1] == (r, False) and exits[0].state.inflight == 0, "exit unregistered only after the in-flight callback finished: %s" % order)
+finally:
+    S._raise_sigint = real_raise
+
+# a drain that times out is reported, and the routine is still unregistered and kept alive
+fresh()
+k, exits, reports = Kernel(), [], []
+S._break_as_sigint(nt=True, boundary=(lambda f: f, k), at_exit=exits.append, report=reports.append, drain_s=0.2)
+r = k.calls[0][0]
+stuck, hold = threading.Event(), threading.Event()
+S._raise_sigint = lambda: (stuck.set(), hold.wait(5))
+try:
+    t = threading.Thread(target=lambda: r(1))
+    t.start()
+    stuck.wait(5)
+    check(exits[0]() is True and any("still converting" in m for m in reports) and S._RETIRED == [r], "a drain past drain_s is reported, then the routine is unregistered and kept alive")
+    hold.set()
+    t.join(5)
+finally:
+    S._raise_sigint = real_raise
+
 # a failed registration: nothing kept, no exit hook
 fresh()
 k, exits = Kernel(ok=False), []
@@ -86,7 +169,6 @@ if os.name == "nt":
     fresh()
     exits = []
     check(S._break_as_sigint(at_exit=exits.append) is True and len(S._CTRL) == 1 and len(exits) == 1, "Windows: the real routine is installed")
-    exits[0]()
-    check(S._CTRL == [] and len(S._RETIRED) == 1, "Windows: and removed, still alive")
+    check(exits[0]() is True and S._CTRL == [] and len(S._RETIRED) == 1, "Windows: and removed, still alive")
 
 print("session console routine: ok (%d checks)" % checks)
