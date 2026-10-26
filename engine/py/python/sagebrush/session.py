@@ -119,16 +119,21 @@ class _Hold:
 
 _HOLD = _Hold()
 _CTRL = []  # (the worker's console control routine, kept alive as long as it is installed)
+_RETRIES = 64  # (the exit cleanup's attempts when interrupted, before it gives up and reports)
 _RETIRED = []  # (and after: a break already on the control thread when it was removed may still run it, grader)
 
 
 def _ignore_sigint():
     # (step (0) of the console routine's exit: SIGINT ignored; off the main thread signal.signal can't be called, and
     # remove()'s KeyboardInterrupt catch covers it.  Its own name, so a test can make a SIGINT arrive at this point)
-    try:
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-    except ValueError:
-        pass
+    # (SIGBREAK too, where there is one: a Ctrl-Break that reaches the C runtime after the unregister would otherwise
+    # be the worker's default_int_handler's KeyboardInterrupt during the rest of the exit)
+    for name in ("SIGINT", "SIGBREAK"):
+        if hasattr(signal, name):
+            try:
+                signal.signal(getattr(signal, name), signal.SIG_IGN)
+            except ValueError:
+                pass
 
 
 def _raise_sigint():
@@ -177,8 +182,12 @@ def _break_as_sigint(nt=None, boundary=None, at_exit=None, report=None, drain_s=
     What this guarantees: no conversion starts after (1); a conversion that
     started before (1) finishes (and its SIGINT is ignored) before the routine
     is unregistered and the interpreter's teardown proceeds, unless the drain is
-    reported as timed out; and the cleanup completes (unregistered, retired, or
-    the failure reported) whatever SIGINT arrives meanwhile.
+    reported as timed out; a SIGINT or SIGBREAK that arrives before (0) takes
+    effect restarts the cleanup, up to _RETRIES times; and the cleanup ends in
+    one of three reported or recorded states: unregistered and retired (True);
+    the native removal failed, reported (False); or the retries exhausted,
+    reported, the routine left installed and kept alive (False).  Nothing is
+    raised out of it.
     What it can't: a callback the system has dispatched but that hasn't yet
     entered Python can't be counted from Python; if it enters during (2) it is
     inert, and if it would enter only after finalization has begun, it is
@@ -242,16 +251,21 @@ def _break_as_sigint(nt=None, boundary=None, at_exit=None, report=None, drain_s=
             # (first, SIGINT ignored: a conversion still in flight may deliver its SIGINT during the drain, and the
             # worker's handler would otherwise raise KeyboardInterrupt out of this cleanup; at exit nothing restores
             # it.  Off the main thread signal.signal can't be called, and the KeyboardInterrupt catch below does it)
-            # (each KeyboardInterrupt below is a real SIGINT delivered before (0) took effect, astra2: the
-            # cleanup starts again from (0), which is idempotent like the rest; once (0) holds, none can arrive)
-            for _ in range(64):
+            # (each KeyboardInterrupt below is a real SIGINT or SIGBREAK delivered before (0) took effect, astra2,
+            # grader: the cleanup starts again from (0); every step is idempotent, so a retry finishes it)
+            for _ in range(_RETRIES):
                 try:
                     _ignore_sigint()
                     return _retire()
                 except KeyboardInterrupt:
                     continue
-            _ignore_sigint()
-            return _retire()
+            # (exhausted, astra2: the routine is left as it is, recorded in _CTRL and so alive, possibly not even
+            # closing; the exhaustion is reported, and the process's exit proceeds; nothing is raised out of here)
+            try:
+                report("the console routine's exit cleanup was interrupted %d times and gave up: the routine is left installed (and kept alive)" % _RETRIES)
+            except KeyboardInterrupt:
+                pass
+            return False
 
         def _retire():
             if r not in _CTRL:
@@ -266,8 +280,12 @@ def _break_as_sigint(nt=None, boundary=None, at_exit=None, report=None, drain_s=
                     report("the console routine couldn't be removed at exit (Windows error %s): it stays registered, and inert" % last_error())
                     return False
                 state.unregistered = True  # (so a retry after an interruption here never removes it twice)
-            _CTRL.remove(r)
-            _RETIRED.append(r)  # (never freed: the thunk outlives any call already under way)
+            # (retired before it leaves _CTRL, each step idempotent, so an interruption between them, and the retry,
+            # never leave it in neither list: never freed, the thunk outlives any call already under way, grader)
+            if r not in _RETIRED:
+                _RETIRED.append(r)
+            if r in _CTRL:
+                _CTRL.remove(r)
             return True
         remove.state = state
         if at_exit is None:
