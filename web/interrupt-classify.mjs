@@ -100,7 +100,7 @@ export function leakCheck(samples, full = 20, measure = "rss") {
   if (measure === "heap+external" && tail.every((x) => Number.isFinite(x.mem_kb))) {
     const growth_kb = last.mem_kb - from.mem_kb;
     const allowed_kb = Math.max(16 * 1024, 0.1 * from.mem_kb);
-    return { ok: growth_kb <= allowed_kb && threadsSame, measure: "heap+external after gc", ...base, growth_kb: Math.round(growth_kb), allowed_kb: Math.round(allowed_kb) };
+    return { ok: growth_kb <= allowed_kb && threadsSame, measure: "heap+external after gc", ...base, growth_kb: Math.round(growth_kb), allowed_kb: Math.round(allowed_kb), series_kb: tail.map((x) => Math.round(x.mem_kb)) };
   }
   if (!Number.isFinite(from.rss_kb) || !Number.isFinite(last.rss_kb)) return null;
   const growth_kb = last.rss_kb - from.rss_kb;

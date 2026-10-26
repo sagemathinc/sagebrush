@@ -389,7 +389,9 @@ async function runHost(host) {
   return rows;
 }
 
-const out = { started: new Date().toISOString(), node: process.version, run: MODE, hosts: {}, cases: CASES.map((c) => c.id) };
+// (the runner's CPU, so a measure's modes can be told apart later: P2a's RSS was bimodal by runner)
+const cpu = (() => { try { const t = readFileSync("/proc/cpuinfo", "utf8"); return { model: (t.match(/^model name\s*:\s*(.*)$/m) ?? [])[1] ?? null, cpus: (t.match(/^processor\s*:/gm) ?? []).length }; } catch { return null; } })();
+const out = { started: new Date().toISOString(), node: process.version, run: MODE, cpu, hosts: {}, cases: CASES.map((c) => c.id) };
 // --signals S1,S2,...,pending (default: all; "none" skips them): the signal-state trials (r5 §8.1)
 const SIGNALS = opt("--signals", "all");
 const tRun = now();
