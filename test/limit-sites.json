@@ -1055,10 +1055,6 @@
   "note": "stage length (Stage 1) and batching width (COLS_PER_PASS)",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/vanhoeij.rs :: probe_all_passes :: let mut best = f64::MAX; #0": {
-  "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)"
- },
  "engine/poly/src/vanhoeij.rs :: product :: let b = Budget::unlimited(); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"

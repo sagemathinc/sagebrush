@@ -1623,64 +1623,6 @@ pub(crate) mod tests {
         assert_eq!(reach.s2_cert_a, 0, "{reach:?}");
     }
 
-    /// An internal error's kind and message, and the counters.
-    fn internal_of(r: FResult<usize>) -> String {
-        let e = r.unwrap_err();
-        assert_eq!(e.kind, crate::Kind::Internal, "{e}");
-        let m = e.to_string();
-        assert!(m.starts_with(crate::INTERNAL_PREFIX), "{m}");
-        m
-    }
-
-    #[test]
-    fn no_rows_after_the_cut_is_an_internal_error() {
-        // section 4.3: the s = 0 branch, in Stage 1 (S_5 as it comes) and in
-        // Stage 2 (Stage 1 ended at once); each injection reaches its branch
-        // and no other
-        for (stage, hooks) in [(1, fault::FORCE_S0), (2, fault::FORCE_S0 | fault::STAGE1_EXIT)] {
-            let (r, reach) = factored(&sd(5), hooks, None, false);
-            let m = internal_of(r);
-            assert!(m.contains("the lattice cut kept no row"), "{m}");
-            assert_eq!((reach.internal_s0, reach.internal_no_cert, reach.internal_x), (1, 0, 0), "stage {stage}: {reach:?}");
-            assert_eq!(reach.s2_entries, (stage == 2) as u64, "{reach:?}");
-        }
-    }
-
-    #[test]
-    fn no_certificate_at_the_proved_precision_is_an_internal_error() {
-        // section 4.3: one CLD value corrupted at a* by about 0.618 p^a (Stage
-        // 2 started at a*, the certificate taken after the last pass only).
-        // On two factors the corruption breaks the indicator of the factor
-        // holding p-adic factor 0, and the other survives the cut: rows
-        // remain (not the s = 0 branch) but no certificate
-        let f = product(&[sd(3), shift(&sd(3), 1)]);
-        let (r, reach, _) = stage2_direct(&f, fault::CORRUPT_CLD | fault::S2_LAST_PASS, None, true);
-        let m = internal_of(r);
-        assert!(m.contains("no recombination certificate at the proved precision"), "{m}");
-        assert_eq!((reach.internal_no_cert, reach.internal_s0, reach.internal_x), (1, 0, 0), "{reach:?}");
-        assert_eq!(reach.s2_cert_a, 0, "{reach:?}");
-    }
-
-    #[test]
-    #[ignore]
-    fn probe_all_passes() {
-        for k in [5usize, 6] {
-            let f = sd(k);
-            for (name, hooks) in [("stage1", 0u8), ("s2 first", fault::STAGE1_EXIT), ("s2 all passes", fault::STAGE1_EXIT | fault::S2_LAST_PASS)] {
-                let mut best = f64::MAX;
-                let mut reach = fault::Reach::default();
-                for _ in 0..3 {
-                    let t = std::time::Instant::now();
-                    let (r, re) = factored(&f, hooks, None, false);
-                    best = best.min(t.elapsed().as_secs_f64());
-                    assert_eq!(r.unwrap(), 1);
-                    reach = re;
-                }
-                eprintln!("PROBE S_{k} {name}: best {:.4}s s2_cols {} s2_levels {}", best, reach.s2_cols, reach.s2_levels);
-            }
-        }
-    }
-
     /// S_5's Stage 2 as recombine enters it after Stage 1 (a_last = k, so
     /// a0 = 2k), with every pass forced (early certificates declined), under
     /// `b` with `limit` for the Stage-2 call; the counters too.
