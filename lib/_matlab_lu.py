@@ -287,24 +287,39 @@ class LU:
                 for a, c in chunks(n, rows):
                     b[a:c] = Bm[a:c]
             with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                if k == 1 and self.flat:
+                    return _solve1(self, b, trans, dt)
+                flat = self.flat and not isinstance(b, Seg)
                 if not trans:
                     y = alloc((n, k), dt)
+                    flat = flat and not isinstance(y, Seg)
+                    prow = self.prow_l if flat else None
                     for s in range(n):
-                        y[s] = b[int(self.prow[s])]
+                        ys = b[prow[s]] if flat else b[int(self.prow[s])]
+                        y[s] = ys
                         lr, lv = self.lrow[s], self.lval[s]
-                        if lr.size:
-                            work.charge(lr.size * k, "solve")
-                            ys = np.asarray(y[s]).reshape((1, -1))
-                            for a, c in chunks(lr.size, rows):
-                                b[lr[a:c]] = b[lr[a:c]] - lv[a:c].reshape((-1, 1)) * ys
+                        sz = lr.size
+                        if sz:
+                            work.charge(sz * k, "solve")
+                            if flat and sz <= rows:
+                                b[lr] -= lv.reshape((-1, 1)) * ys
+                            else:
+                                ys = np.asarray(ys).reshape((1, -1))
+                                for a, c in chunks(sz, rows):
+                                    b[lr[a:c]] = b[lr[a:c]] - lv[a:c].reshape((-1, 1)) * ys
                     for j in range(n - 1, -1, -1):
-                        y[j] = y[j] / self.udiag[j]
+                        yj = y[j] / self.udiag[j]
+                        y[j] = yj
                         us, uv = self.ustep[j], self.uval[j]
-                        if us.size:
-                            work.charge(us.size * k, "solve")
-                            yj = np.asarray(y[j]).reshape((1, -1))
-                            for a, c in chunks(us.size, rows):
-                                y[us[a:c]] = y[us[a:c]] - uv[a:c].reshape((-1, 1)) * yj
+                        sz = us.size
+                        if sz:
+                            work.charge(sz * k, "solve")
+                            if flat and sz <= rows:
+                                y[us] -= uv.reshape((-1, 1)) * yj
+                            else:
+                                yj = np.asarray(yj).reshape((1, -1))
+                                for a, c in chunks(sz, rows):
+                                    y[us[a:c]] = y[us[a:c]] - uv[a:c].reshape((-1, 1)) * yj
                     # (the result is MATLAB's full matrix: one array, admitted
                     # by the caller with the rest of the solve)
                     x = np.zeros((n, k), dtype=dt)
@@ -314,27 +329,119 @@ class LU:
                 w = b
                 for j in range(n):
                     us, uv = self.ustep[j], self.uval[j]
-                    if us.size:
-                        work.charge(us.size * k, "solve")
-                        acc = np.zeros(k, dtype=dt)
-                        for a, c in chunks(us.size, rows):
-                            acc = acc + (np.conj(uv[a:c]).reshape((-1, 1)) * w[us[a:c]]).sum(axis=0)
-                        w[j] = w[j] - acc
+                    sz = us.size
+                    if sz:
+                        work.charge(sz * k, "solve")
+                        if flat and sz <= rows:
+                            w[j] -= (np.conj(uv).reshape((-1, 1)) * w[us]).sum(axis=0)
+                        else:
+                            acc = np.zeros(k, dtype=dt)
+                            for a, c in chunks(sz, rows):
+                                acc = acc + (np.conj(uv[a:c]).reshape((-1, 1)) * w[us[a:c]]).sum(axis=0)
+                            w[j] = w[j] - acc
                     w[j] = w[j] / np.conj(self.udiag[j])
                 for s in range(n - 1, -1, -1):
                     ls, lv = self.lstep[s], self.lval[s]
-                    if ls.size:
-                        work.charge(ls.size * k, "solve")
-                        acc = np.zeros(k, dtype=dt)
-                        for a, c in chunks(ls.size, rows):
-                            acc = acc + (np.conj(lv[a:c]).reshape((-1, 1)) * w[ls[a:c]]).sum(axis=0)
-                        w[s] = w[s] - acc
+                    sz = ls.size
+                    if sz:
+                        work.charge(sz * k, "solve")
+                        if flat and sz <= rows:
+                            w[s] -= (np.conj(lv).reshape((-1, 1)) * w[ls]).sum(axis=0)
+                        else:
+                            acc = np.zeros(k, dtype=dt)
+                            for a, c in chunks(sz, rows):
+                                acc = acc + (np.conj(lv[a:c]).reshape((-1, 1)) * w[ls[a:c]]).sum(axis=0)
+                            w[s] = w[s] - acc
                 x = np.zeros((n, k), dtype=dt)
                 for a, c in chunks(n, rows):
                     x[np.asarray(self.prow[a:c])] = w[a:c]
                 return x
         finally:
             led.release(need)
+
+
+def _conj(v):
+    return v.conjugate() if isinstance(v, complex) else v
+
+
+def _solve1(F, b, trans, dt):
+    """one right-hand side, b an n-by-1 array (overwritten): the short
+    columns in Python scalars, the long ones by NumPy in chunks of E (the same
+    operations, in the same order, as solve's)"""
+    n, work = F.n, F.work
+    b1 = b.reshape(n)
+    ud = F.udiag
+    if not trans:
+        y = np.zeros(n, dtype=dt)
+        for s in range(n):
+            ys = b1[F.prow_l[s]]
+            y[s] = ys
+            lr = F.lrow_l[s]
+            if lr is _BIG:
+                lk, lv = F.lrow[s], F.lval[s]
+                work.charge(lk.size, "solve")
+                for a, c in chunks(lk.size):
+                    b1[lk[a:c]] = b1[lk[a:c]] - lv[a:c] * ys
+            elif lr:
+                work.charge(len(lr), "solve")
+                for i, v in zip(lr, F.lval_l[s]):
+                    b1[i] = b1[i] - v * ys
+        for j in range(n - 1, -1, -1):
+            yj = y[j] / ud[j]
+            y[j] = yj
+            us = F.ustep_l[j]
+            if us is _BIG:
+                uk, uv = F.ustep[j], F.uval[j]
+                work.charge(uk.size, "solve")
+                for a, c in chunks(uk.size):
+                    y[uk[a:c]] = y[uk[a:c]] - uv[a:c] * yj
+            elif us:
+                work.charge(len(us), "solve")
+                for i, v in zip(us, F.uval_l[j]):
+                    y[i] = y[i] - v * yj
+        x = np.zeros((n, 1), dtype=dt)
+        q = F.q
+        for a, c in chunks(n):
+            x[np.asarray(q[a:c]), 0] = y[a:c]
+        return x
+    # (A' = Q C', C' = U' L' P: U' w = b[q], then L' v = w, then x = P' v)
+    w = b1
+    for j in range(n):
+        us = F.ustep_l[j]
+        if us is _BIG:
+            uk, uv = F.ustep[j], F.uval[j]
+            work.charge(uk.size, "solve")
+            acc = 0
+            for a, c in chunks(uk.size):
+                acc = acc + (np.conj(uv[a:c]) * w[uk[a:c]]).sum()
+            w[j] = w[j] - acc
+        elif us:
+            work.charge(len(us), "solve")
+            acc = 0
+            for i, v in zip(us, F.uval_l[j]):
+                acc = acc + _conj(v) * w[i]
+            w[j] = w[j] - acc
+        w[j] = w[j] / _conj(ud[j]) if dt == np.complex128 else w[j] / ud[j]
+    for s in range(n - 1, -1, -1):
+        ls = F.lstep_l[s]
+        if ls is _BIG:
+            lk, lv = F.lstep[s], F.lval[s]
+            work.charge(lk.size, "solve")
+            acc = 0
+            for a, c in chunks(lk.size):
+                acc = acc + (np.conj(lv[a:c]) * w[lk[a:c]]).sum()
+            w[s] = w[s] - acc
+        elif ls:
+            work.charge(len(ls), "solve")
+            acc = 0
+            for i, v in zip(ls, F.lval_l[s]):
+                acc = acc + _conj(v) * w[i]
+            w[s] = w[s] - acc
+    x = np.zeros((n, 1), dtype=dt)
+    pr = F.prow
+    for a, c in chunks(n):
+        x[np.asarray(pr[a:c]), 0] = w[a:c]
+    return x
 
 
 def factor(S, what, q=None, ledger=None, work=None, order=True):
@@ -386,6 +493,7 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
     # empty lists past SMALL entries, which that path never scans)
     lrow_l, lval_l = [None] * n, [None] * n
     ustep, uval = [None] * n, [None] * n
+    ustep_l, uval_l = [None] * n, [None] * n
     free = 0
     for j in range(n):
         c = int(qa[j])
@@ -429,7 +537,7 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
                                 steps.append(v)
             if h == len(steps):
                 free = _small_column(j, c, steps, touched, x, pinv, prow, udiag, lrow, lval, lrow_l, lval_l, ustep, uval,
-                                     dt, cv, led, work, free)
+                                     ustep_l, uval_l, dt, cv, led, work, free)
                 continue
             # (past SMALL: the state so far into the arrays, and on with NumPy)
             r, t = len(steps), len(touched)
@@ -507,6 +615,10 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
                         for a, b in chunks(sz):
                             x[lk[a:b]] = x[lk[a:b]] - lv[a:b] * xk
         ustep[j], uval[j] = us, uv
+        if flat and r <= SMALL:
+            ustep_l[j], uval_l[j] = steps, uv.tolist()
+        else:
+            ustep_l[j], uval_l[j] = _BIG, _BIG
         # the candidates (the touched rows not yet pivoted), and the pivot:
         # row q[j], A's diagonal, while within a factor of 10 of the largest;
         # else the largest, the smallest row among equals
@@ -591,7 +703,8 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
                 x[rbuf[a:b]] = 0
         x[p] = 0
         led.release(Bj)
-        led.reserve(C_IDX * (r + cnt) + cv * (r + cnt) + 4 * C_HDR + (2 * C_ENT * cnt if cnt <= SMALL else 0))
+        led.reserve(C_IDX * (r + cnt) + cv * (r + cnt) + 4 * C_HDR + (2 * C_ENT * cnt if cnt <= SMALL else 0)
+                    + (2 * C_ENT * r if r <= SMALL else 0))
     # lstep: the steps L's rows are pivoted at, for the transposed solve
     nl = sum(int(v.size) for v in lrow)
     led.reserve(C_IDX * nl + n * C_PTR + n * C_HDR)
@@ -610,6 +723,13 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
     F.q = qa
     F.prow = _seg_from_list(prow)
     F.lrow, F.lval, F.ustep, F.uval, F.udiag, F.lstep = lrow, lval, ustep, uval, udiag, lstep
+    # (the scalar solves' lists: the short columns', _BIG for the others)
+    F.flat = flat
+    if flat:
+        led.reserve(C_ENT * (2 * n + nl))
+        F.prow_l = prow
+        F.lrow_l, F.lval_l, F.ustep_l, F.uval_l = lrow_l, lval_l, ustep_l, uval_l
+        F.lstep_l = [v if v is _BIG else [int(pinv[i]) for i in v] for v in lrow_l]
     sing = False
     for a, b in chunks(n):
         if bool(np.any(np.asarray(udiag[a:b]) == 0)):
@@ -626,7 +746,8 @@ SMALL = 64
 _BIG = [0] * (SMALL + 1)
 
 
-def _small_column(j, c, steps, touched, x, pinv, prow, udiag, lrow, lval, lrow_l, lval_l, ustep, uval, dt, cv, led, work, free):
+def _small_column(j, c, steps, touched, x, pinv, prow, udiag, lrow, lval, lrow_l, lval_l, ustep, uval, ustep_l, uval_l, dt, cv,
+                  led, work, free):
     """column j's steps c to f in Python scalars (its reach and touched rows
     already found, at most SMALL entries scanned): the same order, updates and
     pivot rule as the NumPy path; returns the free-row pointer"""
@@ -675,12 +796,13 @@ def _small_column(j, c, steps, touched, x, pinv, prow, udiag, lrow, lval, lrow_l
     lrow_l[j], lval_l[j] = lr, lv
     ustep[j] = np.array(steps, dtype=_I)
     uval[j] = np.array(uvl, dtype=dt)
+    ustep_l[j], uval_l[j] = steps, uvl
     for i in touched:
         x[i] = 0
     x[p] = 0
     cnt = len(lr)
     led.release(Bj)
-    led.reserve(C_IDX * (r + cnt) + cv * (r + cnt) + 4 * C_HDR + 2 * C_ENT * cnt)
+    led.reserve(C_IDX * (r + cnt) + cv * (r + cnt) + 4 * C_HDR + 2 * C_ENT * (cnt + r))
     return free
 
 
