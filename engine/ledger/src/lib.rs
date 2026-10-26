@@ -191,6 +191,16 @@ pub fn total() -> Total {
     state().total.unwrap_or(NOMINAL)
 }
 
+/// Whether the total is fresh enough to certify: always without a native
+/// host (tests; a total set directly); with one, answered within
+/// TOTAL_REFRESH.  A read on a thread that could not ask its source
+/// (HostAnswer::NotAsked) leaves it stale: then nothing is certified on it,
+/// and a certification-dependent chain refuses (astra2's #164 r3 gate).
+#[cfg(not(target_arch = "wasm32"))]
+fn total_fresh(s: &State) -> bool {
+    TOTAL_HOST.get().is_none() || s.total_at.is_some_and(|t| t.elapsed() < TOTAL_REFRESH)
+}
+
 /// Whether every applicable row is checked on this platform with this
 /// total (fail-closed: a cap may be removed on the ledger's strength only
 /// where this is true).  Natively: every row has a fresh measure.  In
@@ -214,10 +224,7 @@ pub fn certified() -> bool {
         }
         measure::prepare();
         let mut s = state();
-        // (a registered host's total must be fresh too: a read that could
-        // not ask, HostAnswer::NotAsked, leaves it stale and uncertified)
-        let fresh = TOTAL_HOST.get().is_none() || s.total_at.is_some_and(|t| t.elapsed() < TOTAL_REFRESH);
-        fresh && s.total.is_some() && s.measure.available() && s.measure.read_each(|_| {})
+        total_fresh(&s) && s.total.is_some() && s.measure.available() && s.measure.read_each(|_| {})
     }
 }
 
@@ -802,9 +809,11 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     // certified: observed, every applicable row engine-only)
     #[cfg(target_arch = "wasm32")]
     let unmeasurable = protected && !(t.status == TotalStatus::Observed && !t.uncertified);
+    // (natively: a certification-dependent chain needs a fresh total, not one
+    // left stale by a read that could not ask, HostAnswer::NotAsked)
     #[cfg(not(target_arch = "wasm32"))]
     #[allow(unused_mut)]
-    let mut unmeasurable = false;
+    let mut unmeasurable = protected && !total_fresh(&s);
     // a measure that opened but can't be read now fails closed at this
     // admission (astra2's CORR-C2A-1): no residents-only fallback that
     // would admit past an unmeasured row
