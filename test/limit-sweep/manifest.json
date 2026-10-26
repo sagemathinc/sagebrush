@@ -2,15 +2,15 @@
  "format": "sagebrush-limit-sweep-manifest",
  "inputs": {
   "test/limit-sites-baseline.txt": "b0d463cb97ced28f8d3331c4a1dc3401cfd419d011ab37152227a11e498029e4",
-  "test/limit-sites.json": "e7362164320fd895d1c2397932e8e43c4a5ef3a56bc2b52105f6939733dd4626",
+  "test/limit-sites.json": "a1d838b54c8d69a8fb9e9f10ee8db7f53cee3558a69ec1242720c0155edb8cdc",
   "test/limit_sites.py": "cb95443bc04d082af918c68856577108f72c9bc4145f885577f5a7dd967bfaeb"
  },
- "rev": "dbb4a0e1b92d64747a1d525482b497ab0ddb21b1",
+ "rev": "0ce1121eda27d515c8f53a4960ca4faecf4a6e58",
  "rules_sha256": "63d064d128ea11143509fae96743c0a7d32612ae031748053c6c18719ff88936",
  "v": 1
 ,
  "batches": [
-  {"dispositions": 197, "files": ["lib/_capacity.py", "lib/_compat_pickle.py", "lib/_pyjs_doctest.py", "lib/_pyjs_open.py", "lib/_python_docsearch.py", "lib/_strptime.py", "lib/_thread.py", "lib/_viewer3d.py", "lib/ctypes.py", "lib/io.py", "lib/posixpath.py", "src/runtime/argconv.ts", "src/runtime/complex.ts", "src/runtime/engine.ts", "src/runtime/format.ts", "src/runtime/heap.ts", "src/runtime/memoryview.ts", "src/runtime/strpos.ts", "src/runtime/struct.ts", "web/workspace/sync-ledger.ts", "lib/numbers.py", "lib/_tzrules.py", "lib/board_checks.py", "lib/itertools.py", "lib/_special.py", "src/runtime/modules.ts"], "id": "B1", "oversize": false, "owner": "python", "register": 203, "work": 400},
+  {"dispositions": 196, "files": ["lib/_capacity.py", "lib/_compat_pickle.py", "lib/_pyjs_doctest.py", "lib/_pyjs_open.py", "lib/_python_docsearch.py", "lib/_strptime.py", "lib/_thread.py", "lib/_viewer3d.py", "lib/ctypes.py", "lib/io.py", "lib/posixpath.py", "src/runtime/argconv.ts", "src/runtime/complex.ts", "src/runtime/engine.ts", "src/runtime/format.ts", "src/runtime/heap.ts", "src/runtime/memoryview.ts", "src/runtime/strpos.ts", "src/runtime/struct.ts", "web/workspace/sync-ledger.ts", "lib/numbers.py", "lib/_tzrules.py", "lib/board_checks.py", "lib/itertools.py", "lib/_special.py", "src/runtime/modules.ts"], "id": "B1", "oversize": false, "owner": "python", "register": 203, "work": 399},
   {"dispositions": 69, "files": ["src/runtime/zlib.ts", "lib/_collections_abc.py", "lib/_pytime.py", "src/runtime/ops.ts", "lib/_limits.py", "src/runtime/re.ts", "src/runtime/json.ts", "src/runtime/types.ts", "lib/_png.py", "src/runtime/unicodecs.ts", "engine/web/src/lib.rs", "engine/interrupt/src/lib.rs", "engine/oracle/examples/integral.rs", "engine/web/src/hmfq.rs", "lib/_catalog.py", "lib/_graph_spring.py", "lib/_string.py", "lib/_sbx.py", "lib/_display_budget.py"], "id": "B2", "oversize": false, "owner": "python", "register": 308, "work": 377},
   {"dispositions": 11, "files": ["lib/_pydatetime.py", "engine/py/src/lib.rs", "lib/_capability_map.py", "lib/pickle.py", "lib/fractions.py", "lib/textwrap.py", "lib/_zoneinfo.py", "src/runtime/index.ts", "src/runtime/numpy.ts", "lib/_python_examples.py", "src/runtime/numpy_random.ts", "lib/_pyjs_pretty.py", "engine/node/src/lib.rs", "src/runtime/object.ts", "lib/_pyjs_docsearch.py", "src/runtime/re-shape.ts", "lib/pprint.py", "src/runtime/fdlibm.ts"], "id": "B3", "oversize": false, "owner": "python", "register": 373, "work": 384},
   {"dispositions": 0, "files": ["lib/_graphics.py", "lib/functools.py", "src/runtime/builtins.ts", "lib/reprlib.py", "engine/oracle/examples/newspaces_vs_lmfdb.rs", "engine/oracle/examples/orbits_vs_lmfdb.rs", "engine/oracle/examples/traces_vs_lmfdb.rs", "engine/web/tests/dispatch_fuzz.rs", "lib/_interact.py", "lib/colorsys.py", "lib/contextlib.py", "lib/datetime.py", "lib/heapq.py", "lib/warnings.py", "src/runtime/array.ts", "src/runtime/crmath.ts", "src/runtime/numpy_fft.ts", "src/runtime/numpy_linalg.ts"], "id": "B4", "oversize": false, "owner": "python", "register": 193, "work": 193},
@@ -30,7 +30,6 @@
  ],
  "items": [
   ["lib/_capacity.py ::  :: (\"includes\") and which its `limit` bounds (\"constrains\"); a domain is in #0", "disposition", "B1", "other"],
-  ["lib/_capacity.py ::  :: (cgroup, resource limits, physical memory), from a snapshot at most #0", "disposition", "B1", "other"],
   ["lib/_capacity.py ::  :: (sys._sagebrush_heap_limit: the old space the session can grow to), exactly #0", "disposition", "B1", "other"],
   ["lib/_capacity.py ::  :: _NO_CEILING = 1 << 62 # (a cgroup v1 \"limit\" this large is none) #0", "disposition", "B1", "constant"],
   ["lib/_capacity.py ::  :: _PROCESS_MEMORY, _JOB_MEMORY = 0x100, 0x200 # (JOB_OBJECT_LIMIT_*_MEMORY) #0", "disposition", "B1", "other"],
