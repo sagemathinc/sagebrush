@@ -755,26 +755,26 @@ pub mod hooks {
     pub(crate) static FAKE: Mutex<Option<Vec<FakeRow>>> = Mutex::new(None);
     pub(crate) static PAUSE: Mutex<Option<std::sync::Arc<std::sync::Barrier>>> = Mutex::new(None);
     pub(crate) static UNREADABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    /// the fake instance's committed bytes (all ones, !0: none, the native
+    /// the fake instance's committed bytes (u64::MAX: none, the native
     /// ledger); with one set, growth runs on pages as in WebAssembly
-    pub(crate) static FAKE_COMMITTED: AtomicU64 = AtomicU64::new(!0);
+    pub(crate) static FAKE_COMMITTED: AtomicU64 = AtomicU64::new(u64::MAX);
 
     /// Run growth on fake pages (WebAssembly's model) with this many
     /// committed bytes, or none (the native ledger).
     pub fn set_fake_committed(bytes: Option<u64>) {
-        FAKE_COMMITTED.store(bytes.unwrap_or(!0), Relaxed);
+        FAKE_COMMITTED.store(bytes.unwrap_or(u64::MAX), Relaxed);
     }
 
     /// A fake `memory.grow` of `bytes` (after a permit).
     pub fn fake_grow(bytes: u64) {
         let c = FAKE_COMMITTED.load(Relaxed);
-        assert_ne!(c, !0, "no fake pages");
+        assert_ne!(c, u64::MAX, "no fake pages");
         FAKE_COMMITTED.store(c + bytes, Relaxed);
     }
 
     pub(crate) fn fake_committed() -> Option<u64> {
         match FAKE_COMMITTED.load(Relaxed) {
-            c if c == !0 => None,
+            c if c == u64::MAX => None,
             c => Some(c),
         }
     }
