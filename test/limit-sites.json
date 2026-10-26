@@ -1160,20 +1160,12 @@
   "class": "3",
   "owner": "polynomial factorization"
  },
- "engine/web/src/lib.rs :: host_map_room :: Some(r) => r.grow(\"host handle map\", (new - cap) * HOST_SLOT), #0": {
-  "class": "2",
-  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
- },
  "engine/web/src/lib.rs :: host_map_room :: h.reserve_exact((new - cap) as usize); #0": {
   "class": "none",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
  "engine/web/src/lib.rs :: host_map_room :: let cap = h.capacity() as u64; #0": {
   "class": "none",
-  "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
- },
- "engine/web/src/lib.rs :: host_map_room :: let moving = sagebrush_ledger::reserve(\"host handle map (moving)\", cap * HOST_SLOT)?; #0": {
-  "class": "2",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
  "engine/web/src/lib.rs :: host_map_room :: let new = (cap * 2).max(4); #0": {

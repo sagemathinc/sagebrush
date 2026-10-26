@@ -23,14 +23,26 @@ fn host_handles_and_retired_bytes_through_the_abi() {
     // without a measure checks the residents against it)
     sb_set_memory_total((4u64 << 20) as f64, 0, 0);
     let base = sb_outstanding_bytes();
+    let res0 = sagebrush_ledger::resident_bytes();
+
+    // the map's first use inside an operation (astra2 CORR-C2B-MAP-OWNER-1):
+    // its slots are admitted there but charged as the instance's resident,
+    // so the operation ends clean and the map stays charged after it
+    let op = sagebrush_ledger::Operation::enter();
+    let z = reserve("first use", 0.0);
+    assert!(z > 0.0, "{}", reply());
+    assert_eq!(sb_release(z), 0);
+    op.finish().expect("the map's charge belongs to the instance, not to the operation");
+    let map = host_map_bytes();
+    assert!(map > 0);
+    assert_eq!(sagebrush_ledger::resident_bytes(), res0 + map, "the map stays charged after the operation");
+    assert_eq!(sb_outstanding_bytes(), base);
 
     // reserve, grow, release
     let h = reserve("host transient", 1000.0);
     assert!(h > 0.0, "{}", reply());
-    // (the map's first slots are an obligation too, held from then on)
-    let map = host_map_bytes();
-    assert!(map > 0);
-    let before = base + map as f64;
+    assert_eq!(host_map_bytes(), map);
+    let before = base;
     assert_eq!(sb_outstanding_bytes(), before + 1000.0);
     assert_eq!(sb_grow(h, 24.0), 0);
     assert_eq!(sb_outstanding_bytes(), before + 1024.0);
@@ -117,8 +129,10 @@ fn host_handles_and_retired_bytes_through_the_abi() {
 
     // zero-byte handles still cost their slots (daybreak2 LIMIT-C2BI-1):
     // they fill the map until its next growth is refused, a typed memory
-    // refusal, with every byte of the map in the ledger
+    // refusal, with every byte of the map charged; grown inside an
+    // operation, the map's charge outlives it (CORR-C2B-MAP-OWNER-1)
     assert_eq!(host_map_bytes(), map, "at most two live handles so far");
+    let op = sagebrush_ledger::Operation::enter();
     let mut live = Vec::new();
     let refused = loop {
         let h = reserve("zero", 0.0);
@@ -133,14 +147,18 @@ fn host_handles_and_retired_bytes_through_the_abi() {
     assert!(r.contains("\"memory\"") && r.contains("host handle map"), "{}", r);
     let full = host_map_bytes();
     assert!(full > map && full >= live.len() as u64 * 16, "{} for {} handles", full, live.len());
-    assert_eq!(sb_outstanding_bytes(), base + full as f64, "the refused call holds nothing");
-    // released, the slots stay (the capacity is held) and are reused
+    assert_eq!(sagebrush_ledger::resident_bytes(), res0 + full, "every byte of the map is charged");
+    assert_eq!(sb_outstanding_bytes(), base, "the refused call holds nothing");
     for h in live.drain(..) {
         assert_eq!(sb_release(h), 0);
     }
-    assert_eq!(sb_outstanding_bytes(), base + full as f64);
+    op.finish().expect("the map grown inside the operation is the instance's");
+    assert_eq!(sagebrush_ledger::resident_bytes(), res0 + full, "the grown map stays charged after the operation");
+    // released, the slots stay (the capacity is held) and are reused
     let h4 = reserve("zero again", 0.0);
     assert!(h4 > 0.0, "{}", reply());
     assert_eq!(host_map_bytes(), full, "a free slot is reused, the map doesn't grow");
     assert_eq!(sb_release(h4), 0);
+    assert_eq!(sagebrush_ledger::resident_bytes(), res0 + full);
+    assert_eq!(sb_outstanding_bytes(), base);
 }
