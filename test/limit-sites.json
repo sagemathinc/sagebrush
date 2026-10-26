@@ -4177,6 +4177,530 @@
   "owner": "board",
   "row": "src-18"
  },
+ "src/board-edit-gate.ts ::  :: constructor(private limits: Limits, private now: () => number) { this.global = new TokenBucket(limits.GLOBAL_RATE, now); } #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-gate.ts ::  :: import type { Limits } from \"./board-edit-limits\"; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-gate.ts :: edit :: const bytes = length ?? this.limits.BODY_MAX; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-gate.ts :: edit :: if (!bucket) { bucket = new TokenBucket(this.limits.TAB_RATE, this.now); this.tabs.set(tab, bucket); } #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-gate.ts :: edit :: if (this.queued + 1 > this.limits.QUEUE_MAX || this.queuedBytes + bytes > this.limits.QUEUE_BYTES) return { ok: false, busy: \"queue\", retryMs: 1000 }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts ::  :: import type { Limits } from \"./board-edit-limits\"; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts ::  :: interface Budget { used: number; deadline: number; charge: (n: number) => boolean; left: () => number; why: () => \"work\" | \"time\" } #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: budget :: charge: (n) => { b.used += n; return b.used <= max && this.deps.now() <= deadline; }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: budget :: const b: Budget = { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: budget :: const deadline = this.deps.now() + this.limits.MERGE_MS, max = this.limits.MERGE_WORK; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: budget :: left: () => max - b.used, #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: budget :: private budget(): Budget { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: budget :: why: () => (b.used > max ? \"work\" : \"time\"), #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: constructor :: constructor(readonly file: string, readonly limits: Limits, private deps: HubDeps) { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: constructor :: if (!res) return { ok: false, why: \"it needs more memory than MEMORY_MAX allows\" }; #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: constructor :: if (bytes.length > this.limits.EDIT_MAX) return { why: `larger than EDIT_MAX (${this.limits.EDIT_MAX} bytes)` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: constructor :: if (records.length > this.limits.RECORDS_MAX) return { why: `more than RECORDS_MAX (${this.limits.RECORDS_MAX}) records` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: constructor :: this.ledger = new Ledger(limits.MEMORY_MAX); #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: constructor :: this.slots = new Slots(limits.BACKUPS_MAX); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: count :: while (this.changes.length > 1 && (count(\"reports\") > max || count(\"alternatives\") > max)) this.dropChange(); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: due :: if (now - this.lastWrite < this.limits.WRITE_MIN_MS) return false; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: due :: return immediate || now - this.dirtySince >= this.limits.SAVE_QUIET_MS || now - this.dirtySince >= this.limits.SAVE_MAX_DELAY_MS; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: const budget = this.budget(); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: const changed = this.outsideChanges(this.H.records, r.records, budget); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: const made = this.nextHead(r.records, budget); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: const r = this.merge(base.records, this.H.records, C.records, budget); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: if (!budget.charge(4 * bytes.length)) return { why: `can't merge (${budget.why()})`, held: \"unmergeable\" }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: if (!budget.charge(before.length + after.length)) return { why: `can't merge (${budget.why()})` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: if (!this.ledger.admissible(R)) return { why: \"it needs more memory than MEMORY_MAX allows\", held: \"invalid\" }; #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: if (now - this.failingSince >= this.limits.WRITE_RETRY_MS) this.hold(\"error\", message); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: failing :: private outsideChanges(before: Rec[], after: Rec[], budget: Budget): { reports: HubReport[]; alternatives: MergeAlternative[] } | { why: string } { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: keepChanges :: const max = this.limits.CONFLICTS_MAX; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: merge :: budget.used += r.used; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: merge :: const e: HeadEvent = { seq, persistedSeq: this.persistedSeq, reports: reports.slice(0, max), alternatives: alternatives.slice(0, max), source }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: merge :: const max = this.limits.CONFLICTS_MAX; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: merge :: const r = boardMerge3(base, a, b, { mergeStrings3: this.deps.mergeStrings3, work: budget.left(), deadline: budget.deadline, now: this.deps.now }); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: merge :: if (!budget.charge(2 * bytes.length + records.length)) return { why: `can't merge (${budget.why()})` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: merge :: if (bytes.length > this.limits.EDIT_MAX) return { why: `the merged board is larger than EDIT_MAX (${this.limits.EDIT_MAX} bytes)` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: merge :: if (records.length > this.limits.RECORDS_MAX) return { why: `the merged board has more than RECORDS_MAX (${this.limits.RECORDS_MAX}) records` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: merge :: let omitted = Math.max(0, reports.length - max) + Math.max(0, alternatives.length - max); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: merge :: private merge(base: Rec[], a: Rec[], b: Rec[], budget = this.budget()) { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: merge :: private nextHead(records: Rec[], budget: Budget): Made | { why: string } { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: release :: const half = this.ledger.max / 2; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: release :: while (this.tombstones.size > this.limits.TAB_TOMBSTONES) { #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: remember :: while (this.window.length > this.limits.HISTORY_PATCHES) this.window.shift(); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: retainSave :: while (this.saves.length > this.limits.SAVES_KEPT) this.saves.shift(); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: submit :: if (!this.ledger.admissible(R)) return { op, refused: `the snapshot needs more memory than MEMORY_MAX allows (${R} bytes, at most ${Math.floor(this.ledger.max / 2)})` }; #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: submitWithin :: const budget = this.budget(), size = bytes.length; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: submitWithin :: const made = this.nextHead(r.records, budget); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: submitWithin :: const r = this.merge(base.records, this.H.records, records, budget); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: submitWithin :: if (!budget.charge(2 * size + records.length)) return { op, refused: `can't merge (${budget.why()})` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: submitWithin :: if (!budget.charge(size)) return { op, refused: `can't merge (${budget.why()})` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: submitWithin :: if (!budget.charge(size)) return { op, refused: `can't merge (${budget.why()})` }; #1": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: submitWithin :: if (records.length > this.limits.RECORDS_MAX) return { op, refused: `more than RECORDS_MAX (${this.limits.RECORDS_MAX}) records` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: submitWithin :: while (t.acks.length > this.limits.ACKS_KEPT) t.acks.shift(); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-hub.ts :: val :: if (!budget.charge(fields.size)) return { why: `can't merge (${budget.why()})` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: export const CAPS: readonly Cap[] = [ #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: export interface Cap { name: string; unit: string; def: number; min: number | string; max: number | string; at: string } #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: export type Limits = Record<string, number>; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"ACKS_KEPT\", unit: \"ops per tab\", def: 64, min: 8, max: 1_024, at: \"the accepted-op records\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"BACKUPS_MAX\", unit: \"files\", def: 8, min: 1, max: 64, at: \"prev, .bak and leftover files beside FILE\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"BODY_MAX\", unit: \"bytes\", def: 16 * MiB, min: 64 * KiB, max: \"EDIT_MAX\", at: \"/edit, streamed\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"CONFLICTS_MAX\", unit: \"alternatives\", def: 200, min: 10, max: 10_000, at: \"per tab, and per report batch\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"EDIT_MAX\", unit: \"bytes\", def: 16 * MiB, min: KiB, max: \"FILE_MAX\", at: \"Edit offered; each outside version; each head\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"EXIT_FLUSH_MS\", unit: \"ms\", def: 3_000, min: 0, max: 60_000, at: \"the exit flush\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"FILE_MAX\", unit: \"bytes\", def: 128 * MiB, min: KiB, max: 128 * MiB, at: \"reading FILE\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"GLOBAL_RATE\", unit: \"requests/s\", def: 200, min: 1, max: 10_000, at: \"all /edit and /board requests, a token bucket\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"HISTORY_PATCHES\", unit: \"patches\", def: 2_000, min: 100, max: 100_000, at: \"the hub's history window; compaction\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"INVALID_HOLD_MS\", unit: \"ms\", def: 30_000, min: 1_000, max: 3_600_000, at: \"an invalid FILE, before it may be saved over\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"MAX_CLIENTS\", unit: \"tabs\", def: 16, min: 1, max: 256, at: \"/events\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"MEMORY_MAX\", unit: \"bytes\", def: GiB, min: 64 * MiB, max: 8 * GiB, at: \"the ledger, before every admission\" }, #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"MERGE_MS\", unit: \"ms\", def: 10_000, min: 100, max: 60_000, at: \"one merge, all its phases\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"MERGE_WORK\", unit: \"work units\", def: 250_000_000, min: 524_288, max: 1_073_741_824, at: \"the cumulative ledger of one merge\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"PENDING_MAX\", unit: \"bytes\", def: 64 * KiB, min: 4 * KiB, max: 16 * MiB, at: \"each tab's event backlog\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"QUEUE_BYTES\", unit: \"bytes\", def: 64 * MiB, min: MiB, max: \"MEMORY_MAX/2\", at: \"the merge queue's bodies\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"QUEUE_MAX\", unit: \"requests\", def: 64, min: 1, max: 1_024, at: \"the merge queue\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"RECORDS_MAX\", unit: \"records\", def: 50_000, min: 100, max: 500_000, at: \"as EDIT_MAX\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"RESP_CONCURRENCY\", unit: \"responses\", def: 4, min: 1, max: 64, at: \"concurrent /board?at= bodies\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"SAVES_KEPT\", unit: \"saves\", def: 16, min: 1, max: 256, at: \"the retained saves\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"SAVE_MAX_DELAY_MS\", unit: \"ms\", def: 5_000, min: \"SAVE_QUIET_MS\", max: 300_000, at: \"as SAVE_QUIET_MS\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"SAVE_QUIET_MS\", unit: \"ms\", def: 1_000, min: 100, max: 60_000, at: \"the page's autosave; the server's coalescing\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"TAB_RATE\", unit: \"requests/s\", def: 20, min: 1, max: 1_000, at: \"per tab, a token bucket\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"TAB_TOMBSTONES\", unit: \"tombstones\", def: 1_024, min: 16, max: 65_536, at: \"released tabs' watermarks\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"WRITE_MIN_MS\", unit: \"ms\", def: 500, min: 50, max: 60_000, at: \"the write queue\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts ::  :: { name: \"WRITE_RETRY_MS\", unit: \"ms\", def: 10_000, min: 0, max: 60_000, at: \"a failing rename or link\" }, #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: bound :: const bound = (b: number | string) => (typeof b === \"number\" ? b : b.endsWith(\"/2\") ? Math.floor(limits[b.slice(0, -2)] / 2) : limits[b]); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: bound :: const v = limits[c.name], lo = bound(c.min), hi = bound(c.max); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: bound :: if (limits.MAX_CLIENTS * limits.PENDING_MAX > limits.MEMORY_MAX / 4) return { error: `MAX_CLIENTS x PENDING_MAX (${limits.MAX_CLIENTS * limits.PENDING_MAX}) must be at most MEMORY_MAX / 4 (${Math.floor(limits.MEMORY_MAX / 4)}), the event backlogs' share of the ledger` }; #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: bound :: if (limits.MEMORY_MAX < 36 * limits.BODY_MAX) return { error: `MEMORY_MAX=${limits.MEMORY_MAX} must be at least 36 x BODY_MAX (${36 * limits.BODY_MAX})` }; #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: bound :: if (limits.MEMORY_MAX < 8 * limits.EDIT_MAX) return { error: `MEMORY_MAX=${limits.MEMORY_MAX} must be at least 8 x EDIT_MAX (${8 * limits.EDIT_MAX})` }; #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: bound :: if (limits.MERGE_WORK < 8 * limits.EDIT_MAX) return { error: `MERGE_WORK=${limits.MERGE_WORK} must be at least 8 x EDIT_MAX (${8 * limits.EDIT_MAX}), so that an edit of a board EDIT_MAX allows fits its work` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: bound :: if (v < lo || v > hi) return { error: `${c.name}=${v} is out of its range [${typeof c.min === \"string\" ? c.min + \" = \" + lo : lo}, ${typeof c.max === \"string\" ? c.max + \" = \" + hi : hi}] (${c.unit})` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: bound :: return { limits }; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: defaultLimits :: export const defaultLimits = (): Limits => Object.fromEntries(CAPS.map((c) => [c.name, c.def])); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: limitsHelp :: export function limitsHelp(): string { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: parse :: const fromFlags = parse(\"--limit\", flagEntries); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: parse :: const limits = defaultLimits(); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: parse :: for (const [k, v] of fromEnv) limits[k] = v; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: parse :: for (const [k, v] of fromFlags) limits[k] = v; // (the flag wins) #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: parse :: if (!Number.isSafeInteger(v)) return `${source}: ${name}=${text} is too large`; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: parse :: if (!byName.has(name)) return `${source}: unknown limit ${name} (known: ${CAPS.map((c) => c.name).join(\", \")})`; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: parse :: if (!m) return { error: `--limit ${f}: expected NAME=VALUE` }; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: resolveLimits :: export function resolveLimits(flags: string[], env: Record<string, string | undefined>): { limits: Limits } | { error: string } { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: show :: return CAPS.map((c) => `    ${c.name.padEnd(18)} ${show(c.def).padStart(9)}  [${show(c.min)}, ${show(c.max)}] ${c.unit}`).join(\"\\n\"); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-memory.ts :: admit :: if (n < 0 || this.used + n > this.max) return false; #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-memory.ts :: keptCharge :: admissible(n: number) { return n <= this.max / 2; } #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-memory.ts :: keptCharge :: constructor(readonly max: number) {} #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts ::  :: import type { Limits } from \"./board-edit-limits\"; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: boardEvent :: if (Buffer.byteLength(text) <= this.limits.PENDING_MAX / 4) return text; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: constructor :: constructor(readonly hub: EditHub, readonly limits: Limits, private api: Record<string, string>, private now: () => number) { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: constructor :: this.gate = new Gate(limits, now); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: early :: if (declared !== null && declared > this.limits.BODY_MAX) return early(413, { error: `the body is larger than BODY_MAX (${this.limits.BODY_MAX} bytes)` }); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: fail :: if (got > this.limits.BODY_MAX) { over = \"body\"; return fail(413, { error: `the body is larger than BODY_MAX (${this.limits.BODY_MAX} bytes)` }); } #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: finish :: if (this.sending < this.limits.RESP_CONCURRENCY) go(); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: flush :: constructor(private hub: EditHub, private server: EditServer, private file: string, private fileMax: number, private quietMs: number, private stat: (p: string) => string | null) {} #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: free :: if (this.sending >= this.limits.RESP_CONCURRENCY && this.waiting.length >= this.limits.QUEUE_MAX) { #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: int :: const int = (s: string | undefined) => (s !== undefined && INT.test(s) && Number(s) <= Number.MAX_SAFE_INTEGER ? Number(s) : null); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: json :: if (this.streams.has(p.tab) || this.streams.size >= this.limits.MAX_CLIENTS) { #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: json :: json(503, { error: `at most ${this.limits.MAX_CLIENTS} tabs edit a board at once, each with its own id` }); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: json :: res.writeHead(204, { ...this.api, \"Access-Control-Allow-Methods\": \"POST\", \"Access-Control-Allow-Headers\": \"Content-Type\", \"Access-Control-Max-Age\": \"600\" }).end(); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: send :: if (Math.max(s.c.writableLength, s.charged) + n > this.limits.PENDING_MAX || !this.hub.ledger.admit(n)) { this.drop(tab, s.c, \"destroy\"); return; } #0": {
+  "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: startEdit :: const hub = new EditHub(path, limits, deps); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: startEdit :: export async function startEdit(path: string, limits: Limits, deps: { mergeStrings3: (o: { base: string; a: string; b: string }) => string; now: () => number }): Promise<{ hub: EditHub } | { why: string }> { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: startEdit :: if (bytes === null) return { why: `FILE is larger than FILE_MAX (${limits.FILE_MAX} bytes)` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: startEdit :: if (rec.over) return { why: `more than BACKUPS_MAX (${limits.BACKUPS_MAX}) files a save left beside FILE: ${rec.leftovers.join(\", \")}` }; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: startEdit :: try { bytes = readBounded(path, limits.FILE_MAX); } catch (e: any) { return { why: String(e?.message ?? e) }; } #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: tick :: if (st !== null && bytes === null) this.hub.holdFile(\"invalid\", `FILE is larger than FILE_MAX (${this.fileMax} bytes)`); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-serve.ts :: tick :: try { bytes = st === null ? null : readBounded(this.file, this.fileMax); } catch { bytes = null; } #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-write.ts :: hashOf :: constructor(readonly max: number) {} #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-write.ts :: recoverAtStart :: const over = slots.used > slots.max; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-write.ts :: reserve :: if (this.used + n > this.max) return false; #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
  "src/board-math.ts ::  :: export const TEX_MAX = 4000; #0": {
   "class": "1",
   "owner": "board",
@@ -4191,6 +4715,82 @@
   "class": "1",
   "owner": "board",
   "row": "src-18"
+ },
+ "src/board-open.ts ::  :: ${limitsHelp()} #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts ::  :: --limit NAME=VALUE one of --edit's limits (or SAGEBRUSH_BOARD_OPEN_NAME in #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts ::  :: const USAGE = `usage: sagebrush board open FILE [--port N] [--no-browser] [--edit [--limit NAME=VALUE]...] #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts ::  :: import { limitsHelp, resolveLimits, type Limits } from \"./board-edit-limits\"; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: boardOpen :: const limitFlags: string[] = []; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: say :: const r = resolveLimits(limitFlags, process.env); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: say :: const server = new EditServer(started.hub, limits, editApi, Date.now); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: say :: const started = await startEdit(path, limits, { mergeStrings3: mergeStrings3 as any, now: Date.now }); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: say :: const v = a === \"--limit\" ? argv[++i] : a.slice(8); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: say :: else if (a === \"--limit\" || a.startsWith(\"--limit=\")) { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: say :: if (edit && limits) { #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: say :: if (limitFlags.length && !edit) { say(\"--limit is for --edit\"); return 2; } #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: say :: if (v === undefined) { say(\"--limit takes NAME=VALUE\"); return 2; } #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: say :: let limits: Limits | null = null; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: say :: limitFlags.push(v); #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: say :: limits = r.limits; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: statOf :: editing = { hub: started.hub, server, watch: new EditWatch(started.hub, server, path, limits.FILE_MAX, QUIET_MS, statOf) }; #0": {
+  "class": "none",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: stop :: const r = await Promise.race([editing.hub.save(), new Promise<null>((ok) => setTimeout(() => ok(null), limits!.EXIT_FLUSH_MS).unref())]); #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-open.ts :: stop :: if (editing && limits && limits.EXIT_FLUSH_MS > 0 && editing.hub.unsaved()) { #0": {
+  "class": "1",
+  "owner": "board open --edit (@sagebrush-board)"
  },
  "src/board-try.ts :: isObj :: export const CASES_MAX = 10_000; #0": {
   "class": "1",
@@ -4473,6 +5073,10 @@
  },
  "src/runtime/engine.ts :: pushShare :: if (e === shareTo && now - shareAt < SHARE_MAX_AGE_MS) return; #0": {
   "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/file-once.ts :: fileOpsFor :: EFBIG: [27, \"File too large\"], #0": {
+  "class": "none",
   "owner": "python (@sagebrush-python)"
  },
  "src/runtime/format.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
