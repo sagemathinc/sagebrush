@@ -45,7 +45,7 @@ pub(crate) fn swinnerton_dyer(k: usize) -> ZPoly {
             // (a + c sqrt p)(x + sqrt p) + coef
             let na = zsub(&b, &zmul(&b, &a, &z(&[0, 1])).unwrap(), &zmul(&b, &c, &z(&[-p])).unwrap()).unwrap().into_vec();
             let nc = zsub(&b, &zmul(&b, &c, &z(&[0, 1])).unwrap(), &zmul(&b, &a, &z(&[-1])).unwrap()).unwrap().into_vec();
-            a = zsub(&b, &na, &z(&[-coef.to_i64().unwrap()])).unwrap().into_vec();
+            a = zsub(&b, &na, &[-coef.clone()]).unwrap().into_vec();
             c = nc;
         }
         // S(x + sqrt p) S(x - sqrt p) = A^2 - p B^2
@@ -123,6 +123,15 @@ fn small() {
     assert_eq!(factor(&z(&[1, 0, 0, 0, 1])), (BigInt::one(), vec![(z(&[1, 0, 0, 0, 1]), 1)]));
     assert_eq!(factor(&z(&[-12, -12])), (BigInt::from(-12), vec![(z(&[1, 1]), 1)]));
     assert_eq!(factor(&z(&[5])), (BigInt::from(5), vec![]));
+}
+
+#[test]
+fn swinnerton_dyer_8_builds() {
+    // S_7's coefficients overflow i64: the helper keeps them as BigInt
+    let f = swinnerton_dyer(8);
+    assert_eq!(f.len(), 257);
+    assert!(f[256].is_one());
+    assert!(f.iter().any(|c| c.to_i64().is_none()));
 }
 
 #[test]
