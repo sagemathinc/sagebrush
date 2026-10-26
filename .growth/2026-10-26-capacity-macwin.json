@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "#178: lib/_capacity.py gains the macOS source (sysctl hw.memsize, host_statistics64 free + inactive pages) and typed Windows ctypes calls with diagnosis(), in Sage mode's startup bundle. Measured at the merge with dbb4a0e1 with CI's toolchain (bun 1.4.4, Node 24.21.0), whose master record matches CI's sizes-dbb4a0e1 exactly; cli/pyjs.cjs +7057 plus its 64-byte noise",
+ "bytes": {
+  "cli/lib.gen.js": 7371,
+  "cli/pyjs.cjs": 7121,
+  "engine/lib/sage.pre": 26873,
+  "engine/lib/sage.src": 7371
+ }
+}

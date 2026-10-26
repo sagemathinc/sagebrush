@@ -17,7 +17,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { againstBaseline, classify, classifyXK, cliffOf, leakCheck, widenedPick, xkRowOutcome } from "./interrupt-classify.mjs";
+import { againstBaseline, classify, classifyCell, cliffOf, leakCheck, widenedPick, xkRowOutcome } from "./interrupt-classify.mjs";
 import { killTracked, killTree, onStop, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 
@@ -59,7 +59,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // setup and target are Python source with S for the size; grow(s, ratio) gives the next size.
 const CASES = [
   { id: "P1", mode: "python", calibration: "nonterminating", setup: "k = 0", target: "while True:\n    k += 1", probe: "assert sum(range(10)) == 45" },
-  { id: "P2a", mode: "python", s0: 3_000_000, smin: 100_000, smax: 10_000_000, grow: (s, r) => Math.round(s * r), setup: "", target: "_r = sorted(range(S), key=lambda v: -v)", probe: "assert sorted([3, 1, 2]) == [1, 2, 3]" },
+  { id: "P2a", mode: "python", s0: 3_000_000, smin: 100_000, smax: 25_000_000, grow: (s, r) => Math.round(s * r), setup: "", target: "_r = sorted(range(S), key=lambda v: -v)", probe: "assert sorted([3, 1, 2]) == [1, 2, 3]" },
   { id: "E2", mode: "sage", s0: 22, smin: 12, smax: 44, grow: (s, r) => s + Math.max(1, Math.round(Math.log(r) / 0.18)) * Math.sign(Math.log(r)), setup: "n = next_prime(10**S) * next_prime(3 * 10**S)", target: "_r = factor(n)", probe: "assert len(factor(2**64 + 1)) == 2" },
   { id: "E3a", mode: "sage", s0: 600, smin: 200, smax: 1024, grow: (s, r) => Math.round(s * Math.cbrt(r)), setup: "M = random_matrix(GF(32003), S)", target: "_r = M.rank()", probe: "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1" },
   { id: "E6a", mode: "sage", s0: 6, smin: 4, smax: 9, grow: (s, r) => s + (r > 1 ? 1 : -1), setup: "R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])", target: "_r = I.groebner_basis()", probe: "assert (X[0] + X[1])**2 - X[0]**2 - X[1]**2 == 2 * X[0] * X[1]\nassert len(I.gens()) == len(X) and I.gens()[0] in R\nR2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2", retained: true },
@@ -326,9 +326,8 @@ async function runHost(host) {
     const sessions = [];
     // an XK case's per-cell context (r5 §6.2): the window's R(s), or the bound's T and f
     const xkOf = (delay) => (!c.xk ? null : c.xk.kind === "window" ? { kind: "window", R_ms: cal.R } : { kind: "bound", T_ms: cal.T, f: delay / cal.T });
-    // (a trial left without RET or KI in a session cut at the run's deadline had a shortened guard:
-    // INVALID-budget, not a failure to stop)
-    const cls = (t, delay) => (t.budget_cut && !t.marks.RET && !t.marks.KI ? { outcome: "INVALID", why: "run budget spent: the session was cut at the deadline" } : classifyXK(t, xkOf(delay)));
+    // (a cell of a session cut at the run's deadline: classifyCell)
+    const cls = (t, delay) => classifyCell(t, xkOf(delay));
     const run = async (label, delays) => {
       const r = await session(host, c, cal.s, delays, CAL_CAP_MS + guard_ms * delays.length, guard_ms);
       if (r.end === "budget") for (const t of r.trials) t.budget_cut = true;
