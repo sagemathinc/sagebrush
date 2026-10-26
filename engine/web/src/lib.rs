@@ -108,13 +108,145 @@ pub extern "C" fn sb_outstanding_bytes() -> f64 {
     sagebrush_ledger::outstanding_bytes() as f64
 }
 
+/// R_ret, the pages of this domain's retired instances still pending their
+/// finalizers, and the host's failed-creation fault (no-cliffs C r14
+/// section 2, r15 section 4, r17 section 2), pushed by the host on creation
+/// and when an instance's finalizers have both fired: bytes finite, >= 0, an
+/// integer up to 2^53 - 1 and a multiple of 64 KiB; faulted 0 or 1.  0 when
+/// set; -1 for anything else, which is also a sticky fault (the ledger is
+/// not certified from then on).
+#[no_mangle]
+pub extern "C" fn sb_set_retired_bytes(bytes: f64, faulted: u32) -> i32 {
+    match sagebrush_ledger::set_retired(bytes, faulted) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
+}
+
+thread_local! {
+    /// The host participants' reservations (C r15 section 3.1), by handle
+    /// (index + 1); a released slot is reused.  Grown outside the ledger's
+    /// lock (the reservation is admitted first), and only as far as there
+    /// are live handles: no count bound.
+    static HOST: std::cell::RefCell<Vec<Option<sagebrush_ledger::Reservation>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The host's bytes argument: an integer from 0 to 2^53, or None.
+fn host_bytes(b: f64) -> Option<u64> {
+    (b.is_finite() && b >= 0.0 && b.fract() == 0.0 && b <= 9007199254740992.0).then_some(b as u64)
+}
+
+/// The reply buffer's address (sb_reserve and sb_grow leave a refusal there,
+/// sb_reply_len bytes of JSON).
+#[no_mangle]
+pub extern "C" fn sb_reply_ptr() -> *const u8 {
+    unsafe { (*std::ptr::addr_of!(REPLY)).as_ptr() }
+}
+
+fn set_reply(v: Value) {
+    let r = unsafe { &mut *std::ptr::addr_of_mut!(REPLY) };
+    drop(std::mem::take(r));
+    *r = v.to_string().into_bytes();
+}
+
+/// A host participant's common-domain obligation in this instance's ledger
+/// (no-cliffs C r7 section 4, r15 section 3.1): `bytes` for `what` (UTF-8 at
+/// what_ptr, what_len).  > 0: the handle; 0: refused, the reply holds
+/// {"memory": {...}}; -1: an invalid argument or an internal error, the
+/// reply holds {"error": ...}.
+#[no_mangle]
+pub unsafe extern "C" fn sb_reserve(what_ptr: *const u8, what_len: usize, bytes: f64) -> i32 {
+    let what = if what_len == 0 { "host" } else { std::str::from_utf8(std::slice::from_raw_parts(what_ptr, what_len)).unwrap_or("host") };
+    let Some(x) = host_bytes(bytes) else {
+        set_reply(json!({ "error": format!("sb_reserve: {} is not a byte count", bytes) }));
+        return -1;
+    };
+    match sagebrush_ledger::reserve(what, x) {
+        Ok(r) => HOST.with(|h| {
+            let mut h = h.borrow_mut();
+            let i = match h.iter().position(Option::is_none) {
+                Some(i) => {
+                    h[i] = Some(r);
+                    i
+                }
+                None => {
+                    h.push(Some(r));
+                    h.len() - 1
+                }
+            };
+            match i32::try_from(i + 1) {
+                Ok(handle) => handle,
+                Err(_) => {
+                    h[i] = None; // (released, not leaked)
+                    -1
+                }
+            }
+        }),
+        Err(sagebrush_ledger::EngineError::Memory(r)) => {
+            set_reply(json!({ "memory": memory_error_value(&r) }));
+            0
+        }
+        Err(e) => {
+            set_reply(json!({ "error": e.to_string() }));
+            -1
+        }
+    }
+}
+
+/// Grow a host handle's obligation by `bytes` (a growing result, C r15
+/// section 3.1): 0 ok; 1 refused, the reply holds {"memory": {...}}; -1 an
+/// unknown handle, an invalid argument or an internal error.
+#[no_mangle]
+pub extern "C" fn sb_grow(handle: i32, bytes: f64) -> i32 {
+    let Some(x) = host_bytes(bytes) else {
+        set_reply(json!({ "error": format!("sb_grow: {} is not a byte count", bytes) }));
+        return -1;
+    };
+    // (the reservation is taken out for the admission, so no borrow is held
+    // across the ledger's lock, then put back)
+    let Some(mut r) = host_take(handle) else {
+        set_reply(json!({ "error": format!("sb_grow: no host handle {}", handle) }));
+        return -1;
+    };
+    let out = match r.grow("host result", x) {
+        Ok(()) => 0,
+        Err(sagebrush_ledger::EngineError::Memory(m)) => {
+            set_reply(json!({ "memory": memory_error_value(&m) }));
+            1
+        }
+        Err(e) => {
+            set_reply(json!({ "error": e.to_string() }));
+            -1
+        }
+    };
+    HOST.with(|h| h.borrow_mut()[(handle - 1) as usize] = Some(r));
+    out
+}
+
+/// Release a host handle: 0, or -1 for an unknown handle.
+#[no_mangle]
+pub extern "C" fn sb_release(handle: i32) -> i32 {
+    match host_take(handle) {
+        Some(r) => {
+            drop(r);
+            0
+        }
+        None => -1,
+    }
+}
+
+fn host_take(handle: i32) -> Option<sagebrush_ledger::Reservation> {
+    let i = usize::try_from(handle).ok()?.checked_sub(1)?;
+    HOST.with(|h| h.borrow_mut().get_mut(i).and_then(Option::take))
+}
+
 
 /// The engine's typed memory refusal as the reply's "memory" member: the
 /// host turns it into D1's error (SagebrushMemoryError), never a string to
 /// parse (no-cliffs plan C r10; callers adopt it as their caps go).
 pub fn memory_error_value(r: &sagebrush_ledger::Refusal) -> Value {
     json!({ "what": r.what, "need": r.need, "allowance": r.allowance, "live": r.live, "outstanding": r.outstanding,
-            "total": r.total, "status": r.status.name(), "joint": r.joint })
+            "total": r.total, "status": r.status.name(), "joint": r.joint, "retired": r.retired })
 }
 
 /// After a trap (an error aborts in WebAssembly): "err\x1fKind\x1fmessage"
