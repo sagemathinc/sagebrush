@@ -255,6 +255,19 @@ try:
         assert getattr(e, "identifier", "") == "MATLAB:nomem" and "fill in too far" in str(e), e
     finally:
         sp.MAX_LU_FILL = keep
+    keep = sp.MAX_LU_WORK
+    sp.MAX_LU_WORK = 10
+    try:
+        sp._sparse_lu(S)
+        raise AssertionError("no refusal")
+    except Exception as e:
+        assert getattr(e, "identifier", "") == "MATLAB:nomem" and str(e) == ("Out of memory: the LU factors of this 60x60 sparse matrix fill in too far "
+                                                                             "to solve with it (Sagebrush orders no columns to reduce fill)."), str(e)
+    finally:
+        sp.MAX_LU_WORK = keep
+    for rec, legacy in (({"bytes": None, "domains": []}, True), ({"bytes": 1, "domains": ["wasm-engine", "js-heap"]}, True),
+                        ({"bytes": 1, "domains": ["js-heap", "js-arraybuffer"]}, False)):
+        assert (L.unmeasured_reason(rec) is not None) == legacy, rec
     L._capacity = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], 10 ** 12)
     assert isinstance(sp._sparse_lu(S), L.LU)
     ok("interim: a browser-like record (wasm-engine only) keeps master's LU, its solves and its refusal; a measured one gets the new LU")
