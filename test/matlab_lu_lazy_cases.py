@@ -10,7 +10,11 @@ import numpy as np
 import _matlab_sparse as sp
 
 assert "_matlab_lu" not in sys.modules and "_matlab_colamd" not in sys.modules, "imported before the test"
-print("ok importing _matlab_sparse imports neither _matlab_lu nor _matlab_colamd")
+# (nor _capacity: MATLAB mode's start imports _matlab_sparse, and the
+# capacity record is read only at a sparse solve; its import at module scope
+# cost 1.5% of the start, the perf gate on 7b166c98)
+assert "_capacity" not in sys.modules and sp._capacity is None, "_capacity imported at _matlab_sparse's import"
+print("ok importing _matlab_sparse imports neither _matlab_lu, _matlab_colamd nor _capacity")
 
 
 class FakeCap:

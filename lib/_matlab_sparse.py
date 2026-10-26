@@ -22,7 +22,6 @@ import math as _math
 
 import numpy as np
 
-import _capacity
 import _matlab as _m
 from _matlab import Sparse, COLON, NOVAL, _err
 
@@ -1371,11 +1370,20 @@ def _legacy_lu(S):
     return F
 
 
+# the capacity module, imported by unmeasured_reason when it first needs it
+# (a test seam: a stand-in may be put here)
+_capacity = None
+
+
 def unmeasured_reason(rec=None):
     """why this host's capacity record can't admit the LU's memory, or None:
     no figure, or one that doesn't cover the js-heap and js-arraybuffer
     domains (Ledger's refusal; _matlab_sparse._sparse_lu then keeps master's
     LU, @sagebrush's interim ruling (d))"""
+    global _capacity
+    if rec is None and _capacity is None:
+        # (imported at the first solve, not at MATLAB mode's start)
+        import _capacity
     rec = rec if rec is not None else _capacity.capacity()
     if rec.get("bytes") is None:
         return "no memory figure"
