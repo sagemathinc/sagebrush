@@ -2272,6 +2272,10 @@
   "class": "3",
   "owner": "MATLAB sparse linear algebra"
  },
+ "lib/_matlab_lu.py :: _kpeak :: column's kernels at E entries (r6 section 2.2's K_max; the reach and the #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
+ },
  "lib/_matlab_mat.py ::  :: MAX_INFLATED = 1 << 28 #0": {
   "class": "1",
   "owner": "file formats/runtime",
