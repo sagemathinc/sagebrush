@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "rank-13 PR 1 (#193): unmeasured_reason imports _capacity at the first sparse solve instead of at _matlab_sparse's import (the perf/startup gate on 7b166c98 measured MATLAB mode's start 1.5% slower), over the r1, r2 and r3 markers. Measured at master b340cd2b vs 60659943 with CI's toolchain (bun 1.4.4, Node 24.21.0) on VM3: the four markers sum to each listed bundle's growth exactly, but engine/sagebrush-worker.js, 7 B under its markers (build noise)",
+ "bytes": {
+  "cli/lib.gen.js": 286,
+  "cli/pyjs.cjs": 234,
+  "engine/lib/matlab.pre": 170,
+  "engine/lib/matlab.src": 286
+ }
+}
