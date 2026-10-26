@@ -16,17 +16,34 @@ static MAIN: std::sync::OnceLock<std::thread::ThreadId> = std::sync::OnceLock::n
 /// Ctrl-C during it stops it at its next check (sagebrush-interrupt) and
 /// raises KeyboardInterrupt, with the interpreter's state intact; Python's
 /// own handler is back in place when this returns.
+///
+/// It is also the call that asks the host's memory total source (no-cliffs
+/// C-2c scope r2 section 2): the asking call is entered here, on the calling
+/// thread with the GIL held, before the work is handed off, and finished
+/// here after it.  Only this thread may run the source (a worker gets
+/// NotAsked: the total in force, its age unchanged), and a stale total is
+/// refreshed here first.  A control exception the source raised during the
+/// call (KeyboardInterrupt, SystemExit, ...) is raised by this call, the
+/// original object, once, in preference to the computation's own result or
+/// error; an ordinary Exception from the source is an unreadable answer.
 fn guarded<T: Send>(py: Python<'_>, f: impl FnOnce() -> T + Send) -> PyResult<T> {
+    let asking = Asking::enter();
+    sagebrush_ledger::refresh_if_owner();
     let main = MAIN.get() == Some(&std::thread::current().id());
-    py.detach(|| {
-        let _sigint = main.then(sagebrush_interrupt::SigintGuard::new);
-        sagebrush_interrupt::catch(f)
-    })
-    .map_err(|_| PyKeyboardInterrupt::new_err(()))
+    let r = py
+        .detach(|| {
+            let _sigint = main.then(sagebrush_interrupt::SigintGuard::new);
+            sagebrush_interrupt::catch(f)
+        })
+        .map_err(|_| PyKeyboardInterrupt::new_err(()));
+    asking.finish()?;
+    r
 }
 
+/// guarded, on a pool of `threads` worker threads (sagebrush-par's install:
+/// the workers run under the caller's ledger context, never its asking call).
 fn run<T: Send>(py: Python<'_>, threads: usize, f: impl FnOnce() -> T + Send) -> PyResult<T> {
-    guarded(py, || rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap().install(f))
+    guarded(py, || sagebrush_par::install(threads, f))
 }
 
 // Big integers cross into Python as num-bigint's (PyO3's conversion), from

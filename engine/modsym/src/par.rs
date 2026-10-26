@@ -1,34 +1,6 @@
-//! Parallel map when the `parallel` feature is on, sequential otherwise.
+//! Parallel map when the `parallel` feature is on, sequential otherwise: the
+//! engine's one wrapper (sagebrush-par; every closure runs under its caller's
+//! ledger context, sequentially in exclusive mode).
 
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
-
-pub fn map_range<T: Send, F: Fn(usize) -> T + Sync + Send>(n: usize, f: F) -> Vec<T> {
-    #[cfg(feature = "parallel")]
-    return (0..n).into_par_iter().map(f).collect();
-    #[cfg(not(feature = "parallel"))]
-    return (0..n).map(f).collect();
-}
-
-pub fn map_slice<A: Sync, T: Send, F: Fn(&A) -> T + Sync + Send>(xs: &[A], f: F) -> Vec<T> {
-    #[cfg(feature = "parallel")]
-    return xs.par_iter().map(f).collect();
-    #[cfg(not(feature = "parallel"))]
-    return xs.iter().map(f).collect();
-}
-
-#[allow(dead_code)]
-pub fn for_each_mut<A: Send, F: Fn(usize, &mut A) + Sync + Send>(xs: &mut [A], f: F) {
-    #[cfg(feature = "parallel")]
-    xs.par_iter_mut().enumerate().for_each(|(i, x)| f(i, x));
-    #[cfg(not(feature = "parallel"))]
-    xs.iter_mut().enumerate().for_each(|(i, x)| f(i, x));
-}
-
-/// f(chunk index, chunk) over consecutive chunks of `size` elements.
-pub fn for_each_chunk_mut<A: Send, F: Fn(usize, &mut [A]) + Sync + Send>(xs: &mut [A], size: usize, f: F) {
-    #[cfg(feature = "parallel")]
-    xs.par_chunks_mut(size).enumerate().for_each(|(i, x)| f(i, x));
-    #[cfg(not(feature = "parallel"))]
-    xs.chunks_mut(size).enumerate().for_each(|(i, x)| f(i, x));
-}
+#[allow(unused_imports)]
+pub use sagebrush_par::{for_each_chunk_mut, for_each_mut, map_range, map_slice};

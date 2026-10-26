@@ -189,14 +189,10 @@ pub fn aplist_many(curves: &[EllipticCurve], n: u64) -> Vec<Vec<(u64, Option<i64
     map(curves, |e| primes.iter().map(|&p| (p, e.ap(p))).collect())
 }
 
+/// (parallel with the `parallel` feature: the engine's one wrapper,
+/// sagebrush-par, under the caller's ledger context)
 fn map<A: Sync, T: Send, F: Fn(&A) -> T + Sync + Send>(xs: &[A], f: F) -> Vec<T> {
-    #[cfg(feature = "parallel")]
-    {
-        use rayon::prelude::*;
-        xs.par_iter().map(f).collect()
-    }
-    #[cfg(not(feature = "parallel"))]
-    xs.iter().map(f).collect()
+    sagebrush_par::map_slice(xs, f)
 }
 
 /// Sato-Tate statistics without storing every a_p: the number of good
