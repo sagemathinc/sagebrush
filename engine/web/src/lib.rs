@@ -134,13 +134,14 @@ struct HostSlot {
 thread_local! {
     /// The host participants' reservations (C r15 section 3.1), by slot; a
     /// released slot is reused under its next generation.  Bounded by memory,
-    /// not by a count: the map's own capacity is a ledger obligation
-    /// (HOST_MAP), admitted before each growth, and grown outside the
+    /// not by a count: the map's own capacity is admitted before each growth
+    /// and held as the instance's resident (HOST_MAP); grown outside the
     /// ledger's lock.
     static HOST: std::cell::RefCell<Vec<HostSlot>> = const { std::cell::RefCell::new(Vec::new()) };
-    /// The map's capacity in bytes, held in the ledger (daybreak2
-    /// LIMIT-C2BI-1): a zero-byte handle still costs its slot.
-    static HOST_MAP: std::cell::RefCell<Option<sagebrush_ledger::Reservation>> = const { std::cell::RefCell::new(None) };
+    /// The map's capacity in bytes, a registered resident of the instance
+    /// (daybreak2 LIMIT-C2BI-1: a zero-byte handle still costs its slot;
+    /// astra2 CORR-C2B-MAP-OWNER-1: not any operation's chain).
+    static HOST_MAP: std::cell::RefCell<Option<sagebrush_ledger::Resident>> = const { std::cell::RefCell::new(None) };
     /// The reusable released slots in HOST (a reservation takes one before
     /// growing the map).
     static HOST_FREE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -161,27 +162,23 @@ pub fn host_map_bytes() -> u64 {
     HOST_MAP.with(|m| m.borrow().as_ref().map_or(0, |r| r.amount()))
 }
 
-/// Room for one more slot in a full host map: the doubled capacity is
-/// admitted first (held from then on), with the old buffer's bytes for the
-/// move (a reallocation holds both until the copy is done), and only then
-/// allocated, outside the ledger's lock.
+/// Room for one more slot in a full host map.  The doubled capacity is
+/// admitted on the current chain (under its rules) and at once becomes a
+/// registered resident: the map outlives the operation that grew it, so its
+/// charge has the instance's lifetime, not the chain's (astra2
+/// CORR-C2B-MAP-OWNER-1).  The old capacity's resident stays until the
+/// reallocation has moved the slots (it holds both), then is dropped with
+/// the old buffer.  Allocation is outside the ledger's lock.
 fn host_map_room(h: &mut Vec<HostSlot>) -> Result<(), sagebrush_ledger::EngineError> {
     if h.len() < h.capacity() {
         return Ok(());
     }
     let cap = h.capacity() as u64;
     let new = (cap * 2).max(4);
-    let moving = sagebrush_ledger::reserve("host handle map (moving)", cap * HOST_SLOT)?;
-    HOST_MAP.with(|m| {
-        let mut m = m.borrow_mut();
-        match m.as_mut() {
-            Some(r) => r.grow("host handle map", (new - cap) * HOST_SLOT),
-            None => sagebrush_ledger::reserve("host handle map", new * HOST_SLOT).map(|r| *m = Some(r)),
-        }
-    })?;
+    let next = sagebrush_ledger::reserve("host handle map", new * HOST_SLOT)?.register_resident();
     h.reserve_exact((new - cap) as usize);
     debug_assert_eq!(h.capacity() as u64, new);
-    drop(moving);
+    HOST_MAP.with(|m| drop(m.borrow_mut().replace(next)));
     Ok(())
 }
 
