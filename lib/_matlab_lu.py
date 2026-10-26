@@ -35,17 +35,21 @@ from _matlab import _err
 # NumPy element kernel and the largest single allocation; E = min(E_TIME,
 # A_SAFE / 32) so that every block holds whole chunks of every dtype and
 # every kernel's output, at most 2E elements of 16 bytes, fits one call)
-E_TIME = 1 << 16
+E_TIME = 1 << 14
 A_SAFE = 1 << 31
 E = min(E_TIME, A_SAFE // 32)
 assert A_SAFE >= 32 * E
 
-# bytes per entry (provisional; r6 section 2.2's c_idx, c_bool, c_val, c_re,
-# c_ptr, c_pyint, and the per-array and per-list objects)
-C_IDX, C_BOOL, C_RE, C_CPLX, C_PTR, C_PYINT = 8, 1, 8, 16, 8, 16
-C_HDR, C_LIST = 256, 64
-# (the ordering's Python lists: an entry, a list object, a heap tuple)
-C_ENT, C_TUPLE = 16, 64
+# bytes per entry (r6 section 2.2's c_idx, c_bool, c_val, c_re, c_ptr,
+# c_pyint, and the per-array and per-list objects): the typed arrays' are
+# their itemsizes; the JS-heap objects' are the worst measured on the CLI
+# (sys._sagebrush_heap_used after a full collection; provisional: the
+# project's host, until M1b's VM run) times 1.25, rounded up: an ndarray
+# 427 bytes, a list pointer 8.02, a large Python int 10.4
+C_IDX, C_BOOL, C_RE, C_CPLX, C_PTR, C_PYINT = 8, 1, 8, 16, 11, 14
+C_HDR, C_LIST = 534, 53
+# (Python lists' entries, float 34.6 and complex 50.6 bytes, and a 2-tuple 114)
+C_ENT, C_TUPLE = 64, 143
 
 _I = np.int64
 
