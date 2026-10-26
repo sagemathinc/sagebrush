@@ -475,10 +475,10 @@ It is made of objects that each serve one account or one document, so it grows b
   - **"Delete my synced data"** removes everything of the account's from the server, by the same path as the purge in design/sharing.md "Deleting".
   - Turning sync off on one device leaves the server copy and the device's copy each in place.
   - Signing out on a shared computer offers to remove this device's local copy, as a separate choice.
-- **When the account may no longer sync** (the membership ended; decided Oct 19):
+- **When the account may no longer sync** (its plan no longer includes sync; decided Oct 19, wording Oct 25: a membership ending to a tier that still includes sync, such as free, doesn't end sync):
   - sync pauses and the server copy becomes **read-only for 90 days**. It can still be opened and downloaded: Download all, and the export (§7.11);
   - after the 90 days, the server copy is **deleted**, by the same path as "Delete my synced data";
-  - the person gets an email when the membership ends, and another about 14 days before the deletion. Renewing within the 90 days turns sync back on, with nothing lost;
+  - the person gets an email when the plan stops including sync, and another about 14 days before the deletion. A plan with sync again within the 90 days turns sync back on, with nothing lost;
   - **each device's own copy is never touched:** it stays in that browser, as a workspace that doesn't sync;
   - the timer and the emails are the server's (auth's). The FAQ's wording is on the Sagebrush site, and business terms aren't in this repo.
 - **Limits** come from the account's limits, as sharing's do (`storage_bytes`).
