@@ -157,6 +157,37 @@ check("the ledger's total is engine_total's", (_snap["total"], _snap["status"], 
 check("the ledger's allowance is a quarter", _snap["allowance"], 4 * GiB)
 check("the process's own measure is read (physical row)", _snap["live"] > 0 and _snap["certified"], True)
 check("nothing outstanding between calls", _snap["outstanding"], 0)
+
+# a KeyboardInterrupt (or any BaseException beyond an ordinary Exception) in
+# the total source propagates to the call that asked; an ordinary failure is
+# an unreadable total: nominal and uncertified (CORR-C1-1)
+_engine_total = C.engine_total
+
+
+def _raising(exc):
+    def f(*args, **kwargs):
+        raise exc
+    return f
+
+
+for _exc in (KeyboardInterrupt, SystemExit):
+    C.engine_total = _raising(_exc())
+    _t2.sleep(0.15)
+    try:
+        _native.ledger_snapshot()
+        _got = "returned"
+    except BaseException as e:  # noqa: B902  (the point of the test)
+        _got = type(e).__name__
+    check("a %s in the total source propagates" % _exc.__name__, _got, _exc.__name__)
+C.engine_total = _raising(OSError("unreadable"))
+_t2.sleep(0.15)
+_snap = _native.ledger_snapshot()
+check("an ordinary failure is an unreadable total", (_snap["status"], _snap["certified"]), ("nominal", False))
+C.engine_total = _engine_total
+_t2.sleep(0.15)
+_snap = _native.ledger_snapshot()
+check("the next read answers again", (_snap["total"], _snap["status"], _snap["certified"]), (16 * GiB, "observed", True))
+check("no interrupt is left behind", P.factor([-1, 0, 1]), (1, [([-1, 1], 1), ([1, 1], 1)]))
 C._set_sources()
 
 os.remove(root + "/proc/meminfo")
