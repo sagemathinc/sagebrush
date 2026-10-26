@@ -18,7 +18,7 @@
 //! division of f by every class's reconstruction, ending in 1, proves each
 //! is a true irreducible factor.
 
-use crate::budget::{big_bytes, limbs, mul_work, poly_bytes, Budget, FResult, Phase, Reservation};
+use crate::budget::{big_bytes, limbs, mul_work, poly_bytes, tag, words_bytes, Budget, FResult, Phase, Reservation};
 use crate::lll;
 use crate::{clog2, deg, divexact, hensel, maxbits, mreduce, prim, reconstruct, zassenhaus, FPoly, Held, Modular};
 use num_integer::Integer;
@@ -115,6 +115,97 @@ pub mod fault {
 
 use fault::is as fault;
 
+/// The tests' executable ledger (rank-3 plan r3, section 3.7; delta 1 r2
+/// (C)): at a checkpoint, the live reservation equals the sum of the
+/// table's entries that are live there, each computed from dimensions and
+/// bit bounds (never read back from a guard), so a reservation that is
+/// missing, released early or held too long fails it.
+macro_rules! ledger {
+    ($b:expr, $at:expr, $($term:expr),+ $(,)?) => {
+        #[cfg(test)]
+        {
+            let want: u64 = 0 $(+ $term)+;
+            if ledger_log::checking() {
+                assert_eq!($b.live(), want, "the ledger at {}", $at);
+            }
+            ledger_log::reached($at);
+        }
+    };
+}
+
+/// A reservation of the ledger, made while the entries `$live` are live:
+/// a candidate for the peak (the old guard of a hand-off is still live
+/// when its successor is reserved, so both count).
+macro_rules! handoff {
+    ($($term:expr),+ $(,)?) => {
+        #[cfg(test)]
+        ledger_log::handoff(0 $(+ $term)+, line!());
+    };
+}
+
+/// The tests' record of the ledger's checkpoints and of the peak it
+/// predicts.
+#[cfg(test)]
+pub(crate) mod ledger_log {
+    use std::cell::{Cell, RefCell};
+    use std::collections::BTreeMap;
+
+    thread_local! {
+        static REACHED: RefCell<BTreeMap<&'static str, u64>> = const { RefCell::new(BTreeMap::new()) };
+        static PEAK: Cell<(u64, u32)> = const { Cell::new((0, 0)) };
+        // a level above 0 ran: its relifting's own reservations are not in
+        // the predicted peak (the relift coexistence rows are PR 4's)
+        static RELIFT: Cell<bool> = const { Cell::new(false) };
+        // the equality checkpoints are asserted (off: the size tags alone)
+        static CHECKING: Cell<bool> = const { Cell::new(true) };
+    }
+
+    pub fn checking() -> bool {
+        CHECKING.with(|c| c.get())
+    }
+    /// Run f with the equality checkpoints off (they still count as reached).
+    pub fn without_checkpoints<T>(f: impl FnOnce() -> T) -> T {
+        struct On;
+        impl Drop for On {
+            fn drop(&mut self) {
+                CHECKING.with(|c| c.set(true));
+            }
+        }
+        let _on = On;
+        CHECKING.with(|c| c.set(false));
+        f()
+    }
+
+    pub fn reset() {
+        REACHED.with(|r| r.borrow_mut().clear());
+        PEAK.with(|p| p.set((0, 0)));
+        RELIFT.with(|r| r.set(false));
+    }
+    pub fn reached(at: &'static str) {
+        REACHED.with(|r| *r.borrow_mut().entry(at).or_insert(0) += 1);
+    }
+    /// A peak candidate, and the source line of its reservation.
+    pub fn handoff(v: u64, line: u32) {
+        PEAK.with(|p| {
+            if v > p.get().0 {
+                p.set((v, line))
+            }
+        });
+    }
+    pub fn relift() {
+        RELIFT.with(|r| r.set(true));
+    }
+    /// (the checkpoints reached and how often, the predicted peak, whether a
+    /// level above 0 ran)
+    pub fn get() -> (BTreeMap<&'static str, u64>, u64, bool) {
+        (REACHED.with(|r| r.borrow().clone()), PEAK.with(|p| p.get().0), RELIFT.with(|r| r.get()))
+    }
+    /// The source line of the predicted peak's reservation.
+    pub fn peak_line() -> u32 {
+        PEAK.with(|p| p.get().1)
+    }
+}
+
 /// The lattice phase: Some(irreducible factors of g) when a certificate is
 /// found, None to fall back.
 #[allow(unused_assignments)] // `held` is a reservation guard, read by its Drop
@@ -123,16 +214,38 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
     let n = deg(g);
     let p = m.p;
     let pbits = 64 - (p - 1).leading_zeros() as u64; // ceil(log2 p) for p >= 3
+    // the lattice's own reservations and refusals belong to its phase (the
+    // steps below enter their own)
+    let _p = b.enter(Phase::Lattice);
+    // (the ledger's entries that live through the whole call: the caller's
+    // reservations, the modular factors, the bounds and the column indices)
+    #[cfg(test)]
+    let (entry, modfs_b, bounds_b, cols_b) = (b.live(), words_bytes(2 * (n as u64 + r as u64 + 1)).unwrap(), bounds_bytes(g).unwrap(), words_bytes(MAX_COLS as u64).unwrap());
+    #[cfg(test)]
+    let whole = entry + modfs_b + bounds_b + cols_b;
+    handoff!(entry, modfs_b, bounds_b, cols_b);
     // the modular factors of g mod p, in the order of rest0 (for relifting):
     // n words and r headers, reserved first
-    let _modfs = b.reserve(crate::budget::words_bytes(2 * (n as u64 + r as u64 + 1)))?;
+    let _modfs = b.reserve(words_bytes(2 * (n as u64 + r as u64 + 1)))?;
     let modfs: Vec<FPoly> = rest0.iter().map(|u| u.iter().map(|c| c.mod_floor(&BigInt::from(p)).to_u64().unwrap()).collect()).collect();
-    let bounds = cld_bounds(b, g)?;
+    // the bounds, with their reservation (gap 1)
+    let (bounds, _bounds) = cld_bounds(b, g)?;
+    // the coefficient index of every column: at most MAX_COLS, reserved for
+    // that many before the first (gap 2)
+    let _cols = b.reserve_as("cols", words_bytes(MAX_COLS as u64))?;
+    let mut cols: Vec<usize> = {
+        let _t = tag("cols");
+        Vec::with_capacity(MAX_COLS)
+    };
+    ledger!(b, "entry", whole);
     // the basis: rows (indicator part | auxiliary columns); starts as I_r
     // (the rows' memory is reserved for as long as they live: `held`)
     let mut held: Reservation<'b> = b.reserve(rows_bytes(r, r, 1))?;
+    // (what `held` should charge, from the rows' dimensions and bits)
+    #[cfg(test)]
+    let mut held_want = rows_bytes(r, r, 1).unwrap();
+    handoff!(whole, held_want);
     let mut rows: Vec<Vec<BigInt>> = (0..r).map(|i| (0..r).map(|j| BigInt::from((i == j) as u32)).collect()).collect();
-    let mut cols: Vec<usize> = vec![]; // the coefficient index of every column
     let mut used_low = 0usize; // next low index
     let mut used_high = 0usize; // next high offset
     for level in 0..LEVELS {
@@ -141,6 +254,8 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
         let us: &[Held<'b>] = if level == 0 {
             rest0
         } else {
+            #[cfg(test)]
+            ledger_log::relift();
             let pa = crate::power(b, p, a)?;
             // g = lc(g) prod u_i (mod p): relift the same factors to p^a
             let gl = {
@@ -155,7 +270,14 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
             };
             &lifted_here
         };
+        // (the level's entries: p^a and the relifted factors; each relifted
+        // factor is a Held, which owns its reservation)
+        #[cfg(test)]
+        let relifted_b = if level == 0 { 0 } else { us.iter().map(|u| u.reserved()).sum::<u64>() };
+        handoff!(whole, held_want, relifted_b, crate::power_bytes(p, a).unwrap());
         let pa = crate::power(b, p, a)?;
+        #[cfg(test)]
+        let level_bytes = crate::power_bytes(p, a).unwrap() + relifted_b;
         // the retained p-adic digits per entry: e = floor(E / ceil(log2 p)), E = 2r + 64
         let ebits = 2 * r as u64 + 64;
         let edig = (ebits / pbits) as u32;
@@ -181,9 +303,13 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
             }
             // the c_ij of these columns (values below p^a), reserved before
             // cld_columns builds them, held until the pass ends
-            let _cld = b.reserve(rows_bytes(want.len(), r, pa.bits()))?;
+            let _cld = b.reserve_as("cld", rows_bytes(want.len(), r, pa.bits()))?;
+            #[cfg(test)]
+            let cld_b = rows_bytes(want.len(), r, pa.bits()).unwrap();
+            handoff!(whole, level_bytes, held_want, cld_b, cld_columns_bytes(n, r, &want, pa.bits()).unwrap());
             let cld = {
                 let _p = b.enter(Phase::Cld);
+                let _t = tag("cld");
                 cld_columns(b, g, us, &pa, &want)?
             };
             let mut added = 0;
@@ -194,22 +320,40 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
                 let ubits = rows.iter().map(|x| maxbits(&x[..r])).max().unwrap_or(0);
                 let ebits = rows.iter().map(|x| maxbits(x)).max().unwrap_or(0).max(ubits + pa.bits() + clog2(r as u64) + 1);
                 let grown = b.reserve(rows_bytes(rows.len() + want.len(), rows.first().map_or(r, |x| x.len()) + want.len(), ebits))?;
+                #[cfg(test)]
+                {
+                    // the hand-off: the old rows' charge is live until `grown` replaces it
+                    let g_b = rows_bytes(rows.len() + want.len(), rows.first().map_or(r, |x| x.len()) + want.len(), ebits).unwrap();
+                    handoff!(whole, level_bytes, held_want, cld_b, g_b);
+                    held_want = g_b;
+                }
                 held = grown;
                 for (t, &j) in want.iter().enumerate() {
-                    // b_j: the least b with p^b >= B_j, raised to keep e digits
-                    let mut bmin = 0u32;
+                    // b_j: the least b with p^b >= B_j, raised to keep e
+                    // digits; p^b < B_j p has at most bits(B_j) + bits(p)
+                    // bits, reserved before the loop (gap 3)
                     let pb = BigInt::from(p);
-                    let mut pw = BigInt::one();
-                    while pw < bounds[j] {
-                        b.debit(Some(limbs(pw.bits())))?;
-                        pw *= &pb;
-                        bmin += 1;
-                    }
+                    let bmin = {
+                        let _pw = b.reserve_as("pw", big_bytes(bounds[j].bits() + pbits))?;
+                        handoff!(whole, level_bytes, held_want, cld_b, big_bytes(bounds[j].bits() + pbits).unwrap());
+                        let _t = tag("pw");
+                        let mut bmin = 0u32;
+                        let mut pw = BigInt::one();
+                        while pw < bounds[j] {
+                            ledger!(b, "the pw loop", whole, level_bytes, held_want, cld_b, big_bytes(bounds[j].bits() + pbits).unwrap());
+                            b.debit(Some(limbs(pw.bits())))?;
+                            pw *= &pb;
+                            bmin += 1;
+                        }
+                        bmin
+                    };
                     let bj = bmin.max(a.saturating_sub(edig));
                     if bj >= a {
                         continue; // no information at this precision
                     }
+                    handoff!(whole, level_bytes, held_want, cld_b, crate::power_bytes(p, bj).unwrap());
                     let scale = crate::power(b, p, bj)?;
+                    handoff!(whole, level_bytes, held_want, cld_b, crate::power_bytes(p, bj).unwrap(), crate::power_bytes(p, a - bj).unwrap());
                     let modulus = crate::power(b, p, a - bj)?;
                     // a column whose modulus is not above the cut bound B
                     // (counting it) carries too little information: its
@@ -219,6 +363,7 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
                         continue;
                     }
                     let _q = b.reserve(rows_bytes(1, r, pa.bits()))?;
+                    handoff!(whole, level_bytes, held_want, cld_b, crate::power_bytes(p, bj).unwrap(), crate::power_bytes(p, a - bj).unwrap(), rows_bytes(1, r, pa.bits()).unwrap());
                     let q: Vec<BigInt> = cld[t].iter().map(|c| c.div_floor(&scale)).collect();
                     // append: each row (u | aux) gets sum u_i q_i; then the modulus row
                     b.debit(mul_work(rows.len() as u64, maxbits(&q), r as u64, 64))?;
@@ -234,6 +379,10 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
                     added += 1;
                 }
             }
+            // the columns are in the rows: their values go now, before LLL
+            // (plan r3, section 3.7)
+            drop(cld);
+            drop(_cld);
             if added == 0 {
                 continue;
             }
@@ -244,29 +393,57 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
             let cap = lll::cap_bits(d, e).ok_or_else(|| b.refuse("lll bits (overflow)", u64::MAX, 0))?;
             let reduced = {
                 let _p = b.enter(Phase::Lll);
+                ledger!(b, "before LLL", whole, level_bytes, held_want);
                 let l = b.reserve(lll::lattice_bytes(d, w, cap))?;
+                #[cfg(test)]
+                {
+                    // the hand-off: the rows' charge is live until the LLL's replaces it
+                    handoff!(whole, level_bytes, held_want, lll::lattice_bytes(d, w, cap).unwrap());
+                    held_want = lll::lattice_bytes(d, w, cap).unwrap();
+                }
                 drop(std::mem::replace(&mut held, l));
                 lll::lll(b, std::mem::take(&mut rows), cap)?
             };
-            // the reduced rows: at most `cap` bits each, held from now on
-            let kept = b.reserve(rows_bytes(d, w, cap))?;
+            // the reduced rows and the d + 1 Gram determinants, at most `cap`
+            // bits each: both held until the cut ends, then the rows (gap 4)
+            let lll::Reduced { basis, d: dets } = reduced;
+            let dets_bytes = big_bytes(cap).and_then(|x| x.checked_mul(d as u64 + 1));
+            let kept = b.reserve(rows_bytes(d, w, cap).zip(dets_bytes).and_then(|(x, y)| x.checked_add(y)))?;
+            #[cfg(test)]
+            let (rows_b, dets_b) = (rows_bytes(d, w, cap).unwrap(), big_bytes(cap).unwrap() * (d as u64 + 1));
+            #[cfg(test)]
+            {
+                // the hand-off: the LLL's charge is live until `kept` replaces it
+                handoff!(whole, level_bytes, held_want, rows_b + dets_b);
+                held_want = rows_b + dets_b;
+            }
             held = kept;
+            #[cfg(test)]
+            assert!(dets.iter().all(|x| x.bits() <= cap), "a Gram determinant above cap bits");
             // the cut: drop the last row while |b_s*|^2 = d_s / d_{s-1} > B^2 (strictly)
             let bb = BigInt::from(r as u64) + BigInt::from(cols.len() as u64) * BigInt::from(r as u64 + 1).pow(2);
-            let mut s = reduced.basis.len();
+            let mut s = basis.len();
             {
                 let _p = b.enter(Phase::Lattice);
                 while s > 0 {
-                    b.debit(Some(limbs(reduced.d[s].bits()) * limbs(reduced.d[s - 1].bits()) + 1))?;
-                    if reduced.d[s] > &bb * &reduced.d[s - 1] {
+                    ledger!(b, "the cut", whole, level_bytes, rows_b + dets_b);
+                    b.debit(Some(limbs(dets[s].bits()) * limbs(dets[s - 1].bits()) + 1))?;
+                    if dets[s] > &bb * &dets[s - 1] {
                         s -= 1;
                     } else {
                         break;
                     }
                 }
             }
-            rows = reduced.basis;
+            drop(dets);
+            held.shrink(rows_bytes(d, w, cap).unwrap_or(0));
+            #[cfg(test)]
+            {
+                held_want = rows_b;
+            }
+            rows = basis;
             rows.truncate(s);
+            ledger!(b, "certify", whole, level_bytes, rows_b);
             if s == 0 {
                 return Ok(None); // impossible for a valid lattice: fall back
             }
@@ -425,16 +602,26 @@ fn root_exp_rev(a: &[BigInt]) -> i64 {
 /// The bounds B_j (section 3.1): n min(sum_{k>j} |a_k| R^(k-j-1),
 /// sum_{k<=j} |a_k| rho^(k-j-1)), R = 2^(t+1) above every root, rho =
 /// 2^-(t'+1) below every root (t' from the reverse; a_0 != 0).
-fn cld_bounds(b: &Budget, g: &[BigInt]) -> FResult<Vec<BigInt>> {
+/// Bytes for cld_bounds' two vectors (absolute values, bounds): a bound is
+/// a sum of n + 1 terms |a_k| 2^(e) with e <= (|t| + |tr|) n.
+fn bounds_bytes(g: &[BigInt]) -> Option<u64> {
+    let n = g.len() - 1;
+    let t = root_exp(g) + 1;
+    let tr = root_exp_rev(g) + 1;
+    let ebits = (t.unsigned_abs() + tr.unsigned_abs()).checked_mul(n as u64 + 1)?.checked_add(maxbits(g) + clog2(n as u64 + 2) + 2 * clog2(n as u64 + 2) + 2)?;
+    poly_bytes(2 * (n as u64 + 1), ebits)
+}
+
+/// The bounds, with the reservation that covers them for as long as the
+/// caller keeps it (gap 1 of plan r3, section 3.7).
+fn cld_bounds<'b>(b: &'b Budget, g: &[BigInt]) -> FResult<(Vec<BigInt>, Reservation<'b>)> {
     let _p = b.enter(Phase::Cld);
     let n = g.len() - 1;
     b.debit((n as u64 + 1).checked_mul(n as u64 + 1).and_then(|x| x.checked_mul(limbs(maxbits(g) + 2 * n as u64))))?;
     let t = root_exp(g) + 1;
     let tr = root_exp_rev(g) + 1;
-    // the two vectors (absolute values, bounds): a bound is a
-    // sum of n + 1 terms |a_k| 2^(e) with e <= (|t| + |tr|) n
-    let ebits = (t.unsigned_abs() + tr.unsigned_abs()).checked_mul(n as u64 + 1).and_then(|e| e.checked_add(maxbits(g) + clog2(n as u64 + 2) + 2 * clog2(n as u64 + 2) + 2));
-    let _r = b.reserve(ebits.and_then(|e| poly_bytes(2 * (n as u64 + 1), e)))?;
+    let r = b.reserve_as("bounds", bounds_bytes(g))?;
+    let _t = tag("bounds");
     let abs: Vec<BigInt> = g.iter().map(|c| c.abs()).collect();
     let nn = BigInt::from(n as u64);
     let mut out = vec![];
@@ -449,7 +636,7 @@ fn cld_bounds(b: &Budget, g: &[BigInt]) -> FResult<Vec<BigInt>> {
         }
         out.push(&nn * s1.min(s2));
     }
-    Ok(out)
+    Ok((out, r))
 }
 
 /// x * y mod (x^N, m), coefficients in [0, m).
@@ -476,6 +663,15 @@ fn tmul(b: &Budget, x: &[BigInt], y: &[BigInt], nn: usize, m: &BigInt) -> FResul
 /// from the reversals at fixed formal degrees,
 ///   rev_{n-1}(c_i) = l rev_{d_i - 1}(u_i') rev(P_{<i}) rev(P_{>i}),
 /// so coefficient n - 1 - t of c_i is coefficient t of the right side.
+/// Bytes for cld_columns' prefix and suffix tables (2 (r + 1) truncated
+/// polynomials per side) and its output.
+fn cld_columns_bytes(n: usize, r: usize, want: &[usize], pabits: u64) -> Option<u64> {
+    let low_n = want.iter().filter(|&&j| 2 * j < n).map(|&j| j + 1).max().unwrap_or(0);
+    let high_n = want.iter().filter(|&&j| 2 * j >= n).map(|&j| n - j).max().unwrap_or(0);
+    let nmax = low_n.max(high_n) as u64;
+    poly_bytes((4 * (r as u64 + 1) + 2) * nmax.max(1) + (r * want.len()) as u64, 2 * pabits + 64)
+}
+
 fn cld_columns(b: &Budget, g: &[BigInt], us: &[Held<'_>], pa: &BigInt, want: &[usize]) -> FResult<Vec<Vec<BigInt>>> {
     let n = deg(g);
     let r = us.len();
@@ -483,8 +679,7 @@ fn cld_columns(b: &Budget, g: &[BigInt], us: &[Held<'_>], pa: &BigInt, want: &[u
     let low_n = want.iter().filter(|&&j| 2 * j < n).map(|&j| j + 1).max().unwrap_or(0);
     let high_n = want.iter().filter(|&&j| 2 * j >= n).map(|&j| n - j).max().unwrap_or(0);
     // prefix/suffix tables: 2 (r + 1) truncated polynomials per side
-    let nmax = low_n.max(high_n) as u64;
-    let _r = b.reserve(poly_bytes((4 * (r as u64 + 1) + 2) * nmax.max(1) + (r * want.len()) as u64, 2 * pa.bits() + 64))?;
+    let _r = b.reserve_as("cld", cld_columns_bytes(n, r, want, pa.bits()))?;
     let mut out = vec![vec![BigInt::zero(); r]; want.len()];
     for (side, nn) in [(0, low_n), (1, high_n)] {
         if nn == 0 {
@@ -537,6 +732,7 @@ fn cld_columns(b: &Budget, g: &[BigInt], us: &[Held<'_>], pa: &BigInt, want: &[u
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::budget::Limits;
     use crate::{zmul, Budget};
 
     fn z(v: &[i64]) -> Vec<BigInt> {
@@ -662,7 +858,7 @@ pub(crate) mod tests {
         for u in &fs {
             f = zmul(&b, &f, u).unwrap().into_vec();
         }
-        let bounds = cld_bounds(&b, &f).unwrap();
+        let (bounds, _r) = cld_bounds(&b, &f).unwrap();
         for mask in 1u32..16 {
             let mut gp = z(&[1]);
             for (i, u) in fs.iter().enumerate() {
@@ -678,5 +874,81 @@ pub(crate) mod tests {
             }
         }
     }
-}
 
+    // ---------------------------------------------------------------- the ledger (plan r3, sections 3.7 and 4.5; delta 1 r2)
+
+    /// S_6's lattice call as recombine makes it (S_6 is irreducible: the
+    /// pre-pass leaves g = S_6 with every lifted factor), under `b`.
+    /// With `limit`, that is the memory limit of the lattice call (after the
+    /// setup, which has room).
+    fn s6_lattice(b: &Budget, limit: Option<u64>) -> (Vec<BigInt>, FResult<Option<usize>>, crate::alloc_spy::Report) {
+        let f = crate::tests::swinnerton_dyer(6);
+        let m = crate::modular(b, &f).unwrap().unwrap();
+        let lifted = crate::lift(b, &f, &m, m.k).unwrap();
+        assert!(lifted.len() > ZASSENHAUS_MAX);
+        b.set_memory_limit(limit.unwrap_or(1 << 30));
+        ledger_log::reset();
+        let (r, rep) = crate::alloc_spy::audit(|| lattice(b, &f, &m, &lifted).map(|o| o.map(|fs| fs.len())));
+        (f, r, rep)
+    }
+
+    #[test]
+    fn the_ledger_holds_on_s6() {
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (_f, r, rep) = s6_lattice(&b, None);
+        // S_6 is irreducible: one factor, certified
+        assert_eq!(r.unwrap(), Some(1));
+        let (reached, peak, relift) = ledger_log::get();
+        // every checkpoint ran (each one asserted b.live() = the formula)
+        for at in ["entry", "the pw loop", "before LLL", "the cut", "certify"] {
+            assert!(reached.get(at).copied().unwrap_or(0) >= 1, "checkpoint {at} not reached: {reached:?}");
+        }
+        assert!(!relift, "S_6 certifies at level 0");
+        // sizes: no tagged object outgrows its reservation; the global net
+        assert_eq!(rep.tag_breaches, 0, "{:?}", rep.first_breach);
+        assert!(rep.excess <= 64 << 10, "{rep:?}");
+        // the predicted peak (hand-offs counted) is the observed one
+        assert_eq!(b.peak(), peak, "predicted at line {}", ledger_log::peak_line());
+        eprintln!("S_6 lattice: predicted peak {peak} at line {}", ledger_log::peak_line());
+        assert_eq!(b.live(), 0);
+    }
+
+    #[test]
+    fn the_size_tags_hold_on_s6() {
+        // delta 1 r2 (B) on its own, without the equality checkpoints: the
+        // bounds, the column indices, pw and the CLD values stay within
+        // their own reservations, whatever the over-charge elsewhere
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (_f, r, rep) = ledger_log::without_checkpoints(|| s6_lattice(&b, None));
+        assert_eq!(r.unwrap(), Some(1));
+        assert_eq!(rep.tag_breaches, 0, "{:?}", rep.first_breach);
+    }
+
+    #[test]
+    fn s6_tight_memory() {
+        // the predicted peak (the formula, not an observed Budget::peak)
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (_, r, _) = s6_lattice(&b, None);
+        assert_eq!(r.unwrap(), Some(1));
+        let (_, peak, _) = ledger_log::get();
+        let line = ledger_log::peak_line();
+        drop(b);
+        // exactly the peak admits: certified, and nothing left reserved
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (_, r, _) = s6_lattice(&b, Some(peak));
+        assert_eq!(r.unwrap(), Some(1), "at the predicted peak {peak}");
+        assert_eq!(b.live(), 0);
+        drop(b);
+        // one byte less refuses at that reservation, by one byte, before
+        // anything of it is allocated, and unwinds to no reservation
+        let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let (_, r, _) = s6_lattice(&b, Some(peak - 1));
+        let after = crate::alloc_spy::allocated();
+        let e = r.unwrap_err();
+        assert_eq!((e.what, e.kind, e.phase), ("memory", crate::Kind::Resource, Phase::Lattice), "{e}");
+        assert_eq!(e.need - e.remaining, 1, "{e}");
+        assert_eq!(after, crate::alloc_spy::refused_at(), "allocations after the refusal");
+        assert_eq!(b.live(), 0);
+        eprintln!("S_6 tight: peak {peak} (line {line}) admits; {} refuses in {} (need {})", peak - 1, e.phase.name(), e.need);
+    }
+}

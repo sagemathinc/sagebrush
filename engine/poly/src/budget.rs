@@ -207,6 +207,9 @@ pub struct Budget {
     /// Debits per phase (for the tests' coverage log; also cheap).
     debits: [Cell<u64>; PHASES],
     peak: Cell<u64>,
+    /// The tests' memory limit, replacing the policy's after setup.
+    #[cfg(test)]
+    memory_override: Cell<Option<u64>>,
 }
 
 thread_local! {
@@ -256,6 +259,8 @@ impl Budget {
             phase: Cell::new(Phase::Admission),
             debits: Default::default(),
             peak: Cell::new(0),
+            #[cfg(test)]
+            memory_override: Cell::new(None),
         }
     }
 
@@ -297,6 +302,14 @@ impl Budget {
         self.peak.get()
     }
 
+    /// Tests: a new memory limit from now on, and the peak restarted at the
+    /// live reservation.
+    #[cfg(test)]
+    pub fn set_memory_limit(&self, m: u64) {
+        self.memory_override.set(Some(m));
+        self.peak.set(self.live.get());
+    }
+
     /// How many debits each phase made (the tests' coverage log).
     pub fn debit_counts(&self) -> [u64; PHASES] {
         let mut out = [0; PHASES];
@@ -330,6 +343,8 @@ impl Budget {
         sagebrush_interrupt::check();
         let left = self.work.get();
         let units = units.ok_or_else(|| self.refuse("work (overflow)", u64::MAX, left))?;
+        #[cfg(test)]
+        crate::alloc_spy::audit_point(self.live.get(), self.phase.get().name());
         let c = &self.debits[self.phase.get().index()];
         c.set(c.get().saturating_add(1));
         if units > left {
@@ -363,16 +378,64 @@ impl Budget {
     /// the guard drops.
     pub fn reserve(&self, bytes: Option<u64>) -> FResult<Reservation<'_>> {
         let live = self.live.get();
-        let room = self.limits.memory.saturating_sub(live);
+        let limit = self.limits.memory;
+        #[cfg(test)]
+        let limit = self.memory_override.get().unwrap_or(limit);
+        let room = limit.saturating_sub(live);
         let bytes = bytes.ok_or_else(|| self.refuse("memory (overflow)", u64::MAX, room))?;
         if bytes > room {
+            #[cfg(test)]
+            crate::alloc_spy::note_refusal();
             return Err(self.refuse("memory", bytes, room));
         }
+        #[cfg(test)]
+        crate::alloc_spy::audit_point(live, self.phase.get().name());
         self.live.set(live + bytes);
         if live + bytes > self.peak.get() {
             self.peak.set(live + bytes);
         }
-        Ok(Reservation { b: self, bytes })
+        Ok(Reservation {
+            b: self,
+            bytes,
+            #[cfg(test)]
+            tag: None,
+        })
+    }
+
+    /// A reservation for one named object of the ledger (rank-3 plan r3,
+    /// section 3.7): the same as `reserve`; the tests' audit also checks
+    /// that the allocations made under `tag(name)` stay within it.
+    pub fn reserve_as(&self, _name: &'static str, bytes: Option<u64>) -> FResult<Reservation<'_>> {
+        #[allow(unused_mut)]
+        let mut r = self.reserve(bytes)?;
+        #[cfg(test)]
+        {
+            crate::alloc_spy::tag_reserved(_name, r.bytes as i64);
+            r.tag = Some(_name);
+        }
+        Ok(r)
+    }
+}
+
+/// The tests' attribution of allocations to a named object of the ledger
+/// (see `Budget::reserve_as`): until the guard drops, this thread's
+/// allocations belong to `name`.  Nothing outside the tests.
+pub(crate) fn tag(_name: &'static str) -> TagGuard {
+    TagGuard {
+        #[cfg(test)]
+        prev: crate::alloc_spy::set_tag(Some(_name)),
+    }
+}
+
+pub(crate) struct TagGuard {
+    #[cfg(test)]
+    prev: Option<&'static str>,
+}
+
+impl Drop for TagGuard {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        crate::alloc_spy::set_tag(self.prev);
     }
 }
 
@@ -392,17 +455,34 @@ impl Drop for PhaseGuard<'_> {
 pub struct Reservation<'a> {
     b: &'a Budget,
     bytes: u64,
+    #[cfg(test)]
+    tag: Option<&'static str>,
 }
 
 impl Reservation<'_> {
     pub fn bytes(&self) -> u64 {
         self.bytes
     }
+
+    /// Release all but `bytes` of it (at most what it holds).
+    pub fn shrink(&mut self, bytes: u64) {
+        let less = self.bytes.saturating_sub(bytes);
+        self.b.live.set(self.b.live.get() - less);
+        self.bytes -= less;
+        #[cfg(test)]
+        if let Some(t) = self.tag {
+            crate::alloc_spy::tag_reserved(t, -(less as i64));
+        }
+    }
 }
 
 impl Drop for Reservation<'_> {
     fn drop(&mut self) {
         self.b.live.set(self.b.live.get() - self.bytes);
+        #[cfg(test)]
+        if let Some(t) = self.tag {
+            crate::alloc_spy::tag_reserved(t, -(self.bytes as i64));
+        }
     }
 }
 
