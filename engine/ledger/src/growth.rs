@@ -150,7 +150,7 @@ impl Growth {
             Kind::Native(_) => return Err(EngineError::Internal("a growth permit is for WebAssembly pages; a native block is reserved in full".into())),
             Kind::Paged { held, .. } => *held,
         };
-        if k % PAGE != 0 {
+        if !k.is_multiple_of(PAGE) {
             return Err(EngineError::Internal(format!("a growth permit of {} bytes is not a whole number of pages", k)));
         }
         let t = total();
