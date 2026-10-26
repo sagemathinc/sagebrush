@@ -747,7 +747,10 @@ fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_la
                 cld_columns(b, g, us, &pa, want)?
             };
             if fault(fault::CORRUPT_CLD) && a >= star.a && c == 0 {
-                cld[0][0] = (&cld[0][0] + BigInt::one()).mod_floor(&pa.v);
+                // about 0.618 of the modulus (no small multiple of it is near 0
+                // mod p^a): no multiple of the true indicator's lift is short
+                let phi = (&pa.v * BigInt::from(618_033_988_749u64)) / BigInt::from(1_000_000_000_000u64);
+                cld[0][0] = (&cld[0][0] + phi).mod_floor(&pa.v);
             }
             let mut added = 0;
             {
@@ -1564,5 +1567,43 @@ pub(crate) mod tests {
             assert_eq!(r.unwrap(), 1);
             assert_eq!(reach.full_subsets_large, 0, "{reach:?}");
         }
+    }
+
+    /// An internal error's kind and message, and the counters.
+    fn internal_of(r: FResult<usize>) -> String {
+        let e = r.unwrap_err();
+        assert_eq!(e.kind, crate::Kind::Internal, "{e}");
+        let m = e.to_string();
+        assert!(m.starts_with(crate::INTERNAL_PREFIX), "{m}");
+        m
+    }
+
+    #[test]
+    fn no_rows_after_the_cut_is_an_internal_error() {
+        // section 4.3: the s = 0 branch, in Stage 1 (S_5 as it comes) and in
+        // Stage 2 (Stage 1 ended at once); each injection reaches its branch
+        // and no other
+        for (stage, hooks) in [(1, fault::FORCE_S0), (2, fault::FORCE_S0 | fault::STAGE1_EXIT)] {
+            let (r, reach) = factored(&sd(5), hooks, None, false);
+            let m = internal_of(r);
+            assert!(m.contains("the lattice cut kept no row"), "{m}");
+            assert_eq!((reach.internal_s0, reach.internal_no_cert, reach.internal_x), (1, 0, 0), "stage {stage}: {reach:?}");
+            assert_eq!(reach.s2_entries, (stage == 2) as u64, "{reach:?}");
+        }
+    }
+
+    #[test]
+    fn no_certificate_at_the_proved_precision_is_an_internal_error() {
+        // section 4.3: one CLD value corrupted at a* by about 0.618 p^a (Stage
+        // 2 started at a*, the certificate taken after the last pass only).
+        // On two factors the corruption breaks the indicator of the factor
+        // holding p-adic factor 0, and the other survives the cut: rows
+        // remain (not the s = 0 branch) but no certificate
+        let f = product(&[sd(3), shift(&sd(3), 1)]);
+        let (r, reach, _) = stage2_direct(&f, fault::CORRUPT_CLD | fault::S2_LAST_PASS, None, true);
+        let m = internal_of(r);
+        assert!(m.contains("no recombination certificate at the proved precision"), "{m}");
+        assert_eq!((reach.internal_no_cert, reach.internal_s0, reach.internal_x), (1, 0, 0), "{reach:?}");
+        assert_eq!(reach.s2_cert_a, 0, "{reach:?}");
     }
 }
