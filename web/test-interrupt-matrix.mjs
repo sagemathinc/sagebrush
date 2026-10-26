@@ -17,7 +17,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { againstBaseline, classify, classifyXK, cliffOf, leakCheck, widenedPick, xkRowOutcome } from "./interrupt-classify.mjs";
+import { againstBaseline, classify, classifyCell, cliffOf, leakCheck, widenedPick, xkRowOutcome } from "./interrupt-classify.mjs";
 import { killTracked, killTree, onStop, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 
@@ -326,9 +326,8 @@ async function runHost(host) {
     const sessions = [];
     // an XK case's per-cell context (r5 §6.2): the window's R(s), or the bound's T and f
     const xkOf = (delay) => (!c.xk ? null : c.xk.kind === "window" ? { kind: "window", R_ms: cal.R } : { kind: "bound", T_ms: cal.T, f: delay / cal.T });
-    // (a trial left without RET or KI in a session cut at the run's deadline had a shortened guard:
-    // INVALID-budget, not a failure to stop)
-    const cls = (t, delay) => (t.budget_cut && !t.marks.RET && !t.marks.KI ? { outcome: "INVALID", why: "run budget spent: the session was cut at the deadline" } : classifyXK(t, xkOf(delay)));
+    // (a cell of a session cut at the run's deadline: classifyCell)
+    const cls = (t, delay) => classifyCell(t, xkOf(delay));
     const run = async (label, delays) => {
       const r = await session(host, c, cal.s, delays, CAL_CAP_MS + guard_ms * delays.length, guard_ms);
       if (r.end === "budget") for (const t of r.trials) t.budget_cut = true;
