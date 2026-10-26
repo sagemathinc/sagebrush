@@ -402,8 +402,17 @@ async function stop(check) {
   let t0 = performance.now();
   let r = await host.exec(PERSON, "while true; do :; done", { signal: ac.signal });
   let ms = performance.now() - t0;
-  // (the abort reaches the shell and it stops at a statement boundary: well before the 2 s grace would end its worker)
-  check(r.kind === "interrupted" && ms < 1800, `Stop during a CPU-only loop: the shell unwinds at the abort, before the grace (${JSON.stringify(r)}, ${Math.round(ms)} ms)`);
+  // (the module sees the abort only when its worker takes a message, between macrotasks: in a run, only while it waits
+  // for a file call's answer, which the fence refuses after a Stop anyway.  The pinned just-bash itself checks its signal
+  // only there.  So a CPU-only loop is ended by just-bash's own default of 100,000 commands in this step, and by the
+  // 2 s grace once step 3 passes +Infinity for every own-computation key that is off, plan r3 §5 A; probe in packet r3)
+  check(r.kind === "interrupted" && ms < 300 + STOP_GRACE_MS + 600, `Stop during a CPU-only loop: interrupted, by the cap or the grace (${JSON.stringify(r)}, ${Math.round(ms)} ms)`);
+  {
+    const { host: hc } = await fresh("stop-control");
+    const rc = await hc.exec(PERSON, "while true; do :; done");
+    check(rc.kind === "exit" && rc.code === 126 && /too many commands executed \(>100000\)/.test(rc.stderr),
+      `known until step 3: an unstopped CPU-only loop ends at just-bash's default 100,000 commands (${JSON.stringify(rc).slice(0, 200)})`);
+  }
   r = await host.exec(PERSON, "echo fresh");
   check(r.kind === "exit" && r.stdout === "fresh\n", `and the next run works (${JSON.stringify(r)})`);
   ac = new AbortController();
