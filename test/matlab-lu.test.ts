@@ -20,7 +20,7 @@ test("the sparse LU's ordering, permutation, admission, work limit and chunked p
   assert.equal(r.status, 0);
   const lines = r.stdout.trim().split("\n");
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 17, r.stdout);
+  assert.equal(lines.length, 20, r.stdout);
 });
 
 test("the browser interim (ruling d): master's LU caps are registered to D0, and only master's lines are", () => {

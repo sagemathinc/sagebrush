@@ -283,100 +283,156 @@ class LU:
     def solve(self, B, trans=False):
         """A \\ B, or A' \\ B (the conjugate transpose); B an n-by-k full
         matrix (r6 section 2.1: forward, C y = b then x[q] = y; transposed,
-        C' x = b[q])"""
+        C' x = b[q]), in blocks of at most E columns, each with row chunks
+        of at most E // kc rows, so no kernel takes more than E elements"""
         n = self.n
         Bm = np.asarray(B)
         Bm = Bm.reshape((n, -1))
         k = Bm.shape[1]
         dt = np.complex128 if self.udiag.dtype.kind == "c" or Bm.dtype.kind == "c" else np.float64
-        led, work = self.ledger, self.work
-        rows = max(1, E // max(1, k))
+        led = self.ledger
+        kc = _col_block(k)
         cv = _cval(dt)
-        # (b, y or w, and x: n-by-k each; the step transients, at most E values three times)
-        need = 3 * n * k * cv + 3 * E * cv + 2 * E * C_IDX
+        # (x: n-by-k; b and y (or w): n-by-kc each; the step transients, at most E values three times)
+        need = (n * k + 2 * n * kc) * cv + 3 * E * cv + 2 * E * C_IDX
         led.reserve(need)
         try:
-            b = alloc((n, k), dt)
-            q = self.q
-            if trans:
-                # (A' = Q C': C' x = Q' b, so b is gathered by q)
-                for a, c in chunks(n, rows):
-                    b[a:c] = Bm[np.asarray(q[a:c])]
-            else:
-                for a, c in chunks(n, rows):
-                    b[a:c] = Bm[a:c]
             with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-                if k == 1 and self.flat:
-                    return _solve1(self, b, trans, dt)
-                flat = self.flat and not isinstance(b, Seg)
-                if not trans:
-                    y = alloc((n, k), dt)
-                    flat = flat and not isinstance(y, Seg)
-                    prow = self.prow_l if flat else None
-                    for s in range(n):
-                        ys = b[prow[s]] if flat else b[int(self.prow[s])]
-                        y[s] = ys
-                        lr, lv = self.lrow[s], self.lval[s]
-                        sz = lr.size
-                        if sz:
-                            work.charge(sz * k, "solve")
-                            if flat and sz <= rows:
-                                b[lr] -= lv.reshape((-1, 1)) * ys
-                            else:
-                                ys = np.asarray(ys).reshape((1, -1))
-                                for a, c in chunks(sz, rows):
-                                    b[lr[a:c]] = b[lr[a:c]] - lv[a:c].reshape((-1, 1)) * ys
-                    for j in range(n - 1, -1, -1):
-                        yj = y[j] / self.udiag[j]
-                        y[j] = yj
-                        us, uv = self.ustep[j], self.uval[j]
-                        sz = us.size
-                        if sz:
-                            work.charge(sz * k, "solve")
-                            if flat and sz <= rows:
-                                y[us] -= uv.reshape((-1, 1)) * yj
-                            else:
-                                yj = np.asarray(yj).reshape((1, -1))
-                                for a, c in chunks(sz, rows):
-                                    y[us[a:c]] = y[us[a:c]] - uv[a:c].reshape((-1, 1)) * yj
-                    # (the result is MATLAB's full matrix: one array, admitted
-                    # by the caller with the rest of the solve)
-                    x = np.zeros((n, k), dtype=dt)
-                    for a, c in chunks(n, rows):
-                        x[np.asarray(q[a:c])] = y[a:c]
+                if k == 1:
+                    b = alloc((n, 1), dt)
+                    self._gather(b, Bm, 0, 1, trans)
+                    if _scalar_ok(self, b):
+                        return _solve1(self, b, trans, dt)
+                    x = np.zeros((n, 1), dtype=dt)
+                    self._block(b, x, 0, 1, trans, dt)
                     return x
-                w = b
-                for j in range(n):
-                    us, uv = self.ustep[j], self.uval[j]
-                    sz = us.size
-                    if sz:
-                        work.charge(sz * k, "solve")
-                        if flat and sz <= rows:
-                            w[j] -= (np.conj(uv).reshape((-1, 1)) * w[us]).sum(axis=0)
-                        else:
-                            acc = np.zeros(k, dtype=dt)
-                            for a, c in chunks(sz, rows):
-                                acc = acc + (np.conj(uv[a:c]).reshape((-1, 1)) * w[us[a:c]]).sum(axis=0)
-                            w[j] = w[j] - acc
-                    w[j] = w[j] / np.conj(self.udiag[j])
-                for s in range(n - 1, -1, -1):
-                    ls, lv = self.lstep[s], self.lval[s]
-                    sz = ls.size
-                    if sz:
-                        work.charge(sz * k, "solve")
-                        if flat and sz <= rows:
-                            w[s] -= (np.conj(lv).reshape((-1, 1)) * w[ls]).sum(axis=0)
-                        else:
-                            acc = np.zeros(k, dtype=dt)
-                            for a, c in chunks(sz, rows):
-                                acc = acc + (np.conj(lv[a:c]).reshape((-1, 1)) * w[ls[a:c]]).sum(axis=0)
-                            w[s] = w[s] - acc
+                # (the result is MATLAB's full matrix: one array, admitted
+                # by the caller with the rest of the solve)
                 x = np.zeros((n, k), dtype=dt)
-                for a, c in chunks(n, rows):
-                    x[np.asarray(self.prow[a:c])] = w[a:c]
+                for c0, c1 in chunks(k, kc):
+                    b = alloc((n, c1 - c0), dt)
+                    self._gather(b, Bm, c0, c1, trans)
+                    self._block(b, x, c0, c1, trans, dt)
+                    del b
                 return x
         finally:
             led.release(need)
+
+    def _gather(self, b, Bm, c0, c1, trans):
+        """b = B(:, c0:c1), its rows gathered by q when transposed (A' = Q C':
+        C' x = Q' b), in chunks of at most E elements"""
+        n, kc, whole = self.n, c1 - c0, c1 - c0 == Bm.shape[1]
+        # (a block of a wider B is taken a row at a time: its kc <= E elements)
+        rows = max(1, E // kc) if whole else 1
+        q = self.q
+        for a, c in chunks(n, rows):
+            self.work.charge((c - a) * kc, "solve")
+            _record("kernel", (c - a) * kc)
+            if whole:
+                b[a:c] = Bm[np.asarray(q[a:c])] if trans else Bm[a:c]
+            else:
+                b[a] = Bm[int(q[a]) if trans else a, c0:c1]
+
+    def _block(self, b, x, c0, c1, trans, dt):
+        """x(:, c0:c1) from the gathered block b (overwritten), at most E
+        columns: every copy, update, reduction and scatter in chunks of at
+        most rows = E // kc rows, and charged per chunk"""
+        n, work = self.n, self.work
+        kc = c1 - c0
+        whole = kc == x.shape[1]
+        rows = max(1, E // kc)
+        flat = self.flat and not isinstance(b, Seg)
+        if not trans:
+            y = alloc((n, kc), dt)
+            flat = flat and not isinstance(y, Seg)
+            prow = self.prow_l if flat else None
+            for s in range(n):
+                ys = b[prow[s]] if flat else b[int(self.prow[s])]
+                y[s] = ys
+                lr, lv = self.lrow[s], self.lval[s]
+                sz = lr.size
+                if sz:
+                    if flat and sz <= rows:
+                        work.charge(sz * kc, "solve")
+                        _record("kernel", sz * kc)
+                        b[lr] -= lv.reshape((-1, 1)) * ys
+                    else:
+                        ys = np.asarray(ys).reshape((1, -1))
+                        for a, c in chunks(sz, rows):
+                            work.charge((c - a) * kc, "solve")
+                            _record("kernel", (c - a) * kc)
+                            b[lr[a:c]] = b[lr[a:c]] - lv[a:c].reshape((-1, 1)) * ys
+            for j in range(n - 1, -1, -1):
+                yj = y[j] / self.udiag[j]
+                y[j] = yj
+                us, uv = self.ustep[j], self.uval[j]
+                sz = us.size
+                if sz:
+                    if flat and sz <= rows:
+                        work.charge(sz * kc, "solve")
+                        _record("kernel", sz * kc)
+                        y[us] -= uv.reshape((-1, 1)) * yj
+                    else:
+                        yj = np.asarray(yj).reshape((1, -1))
+                        for a, c in chunks(sz, rows):
+                            work.charge((c - a) * kc, "solve")
+                            _record("kernel", (c - a) * kc)
+                            y[us[a:c]] = y[us[a:c]] - uv[a:c].reshape((-1, 1)) * yj
+            dst, src = self.q, y
+        else:
+            w = b
+            for j in range(n):
+                us, uv = self.ustep[j], self.uval[j]
+                sz = us.size
+                if sz:
+                    if flat and sz <= rows:
+                        work.charge(sz * kc, "solve")
+                        _record("kernel", sz * kc)
+                        w[j] -= (np.conj(uv).reshape((-1, 1)) * w[us]).sum(axis=0)
+                    else:
+                        acc = np.zeros(kc, dtype=dt)
+                        for a, c in chunks(sz, rows):
+                            work.charge((c - a) * kc, "solve")
+                            _record("kernel", (c - a) * kc)
+                            acc = acc + (np.conj(uv[a:c]).reshape((-1, 1)) * w[us[a:c]]).sum(axis=0)
+                        w[j] = w[j] - acc
+                w[j] = w[j] / np.conj(self.udiag[j])
+            for s in range(n - 1, -1, -1):
+                ls, lv = self.lstep[s], self.lval[s]
+                sz = ls.size
+                if sz:
+                    if flat and sz <= rows:
+                        work.charge(sz * kc, "solve")
+                        _record("kernel", sz * kc)
+                        w[s] -= (np.conj(lv).reshape((-1, 1)) * w[ls]).sum(axis=0)
+                    else:
+                        acc = np.zeros(kc, dtype=dt)
+                        for a, c in chunks(sz, rows):
+                            work.charge((c - a) * kc, "solve")
+                            _record("kernel", (c - a) * kc)
+                            acc = acc + (np.conj(lv[a:c]).reshape((-1, 1)) * w[ls[a:c]]).sum(axis=0)
+                        w[s] = w[s] - acc
+            dst, src = self.prow, w
+        # (the scatter: x[q] = y forward, x[prow] = w transposed; a row at a
+        # time into a wider x, as _gather)
+        for a, c in chunks(n, rows if whole else 1):
+            work.charge((c - a) * kc, "solve")
+            _record("kernel", (c - a) * kc)
+            if whole:
+                x[np.asarray(dst[a:c])] = src[a:c]
+            else:
+                x[int(dst[a]), c0:c1] = src[a]
+
+
+def _col_block(k):
+    """the solve's column block: at most E columns (a test seam)"""
+    return min(k, E)
+
+
+def _scalar_ok(F, b):
+    """whether _solve1's scalar path may take b: a flat factor, and b itself
+    one array (a real factor with a complex right-hand side can segment b)"""
+    return F.flat and not isinstance(b, Seg)
 
 
 def _conj(v):
@@ -398,8 +454,8 @@ def _solve1(F, b, trans, dt):
             lr = F.lrow_l[s]
             if lr is _BIG:
                 lk, lv = F.lrow[s], F.lval[s]
-                work.charge(lk.size, "solve")
                 for a, c in chunks(lk.size):
+                    work.charge(c - a, "solve")
                     b1[lk[a:c]] = b1[lk[a:c]] - lv[a:c] * ys
             elif lr:
                 work.charge(len(lr), "solve")
@@ -411,8 +467,8 @@ def _solve1(F, b, trans, dt):
             us = F.ustep_l[j]
             if us is _BIG:
                 uk, uv = F.ustep[j], F.uval[j]
-                work.charge(uk.size, "solve")
                 for a, c in chunks(uk.size):
+                    work.charge(c - a, "solve")
                     y[uk[a:c]] = y[uk[a:c]] - uv[a:c] * yj
             elif us:
                 work.charge(len(us), "solve")
@@ -421,6 +477,7 @@ def _solve1(F, b, trans, dt):
         x = np.zeros((n, 1), dtype=dt)
         q = F.q
         for a, c in chunks(n):
+            work.charge(c - a, "solve")
             x[np.asarray(q[a:c]), 0] = y[a:c]
         return x
     # (A' = Q C', C' = U' L' P: U' w = b[q], then L' v = w, then x = P' v)
@@ -429,9 +486,9 @@ def _solve1(F, b, trans, dt):
         us = F.ustep_l[j]
         if us is _BIG:
             uk, uv = F.ustep[j], F.uval[j]
-            work.charge(uk.size, "solve")
             acc = 0
             for a, c in chunks(uk.size):
+                work.charge(c - a, "solve")
                 acc = acc + (np.conj(uv[a:c]) * w[uk[a:c]]).sum()
             w[j] = w[j] - acc
         elif us:
@@ -445,9 +502,9 @@ def _solve1(F, b, trans, dt):
         ls = F.lstep_l[s]
         if ls is _BIG:
             lk, lv = F.lstep[s], F.lval[s]
-            work.charge(lk.size, "solve")
             acc = 0
             for a, c in chunks(lk.size):
+                work.charge(c - a, "solve")
                 acc = acc + (np.conj(lv[a:c]) * w[lk[a:c]]).sum()
             w[s] = w[s] - acc
         elif ls:
@@ -459,6 +516,7 @@ def _solve1(F, b, trans, dt):
     x = np.zeros((n, 1), dtype=dt)
     pr = F.prow
     for a, c in chunks(n):
+        work.charge(c - a, "solve")
         x[np.asarray(pr[a:c]), 0] = w[a:c]
     return x
 
@@ -481,20 +539,38 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
         m = S.m
         Nn = n + m
         ord_bytes = C_ENT * (3 * nnz + 10 * Nn + 6 * n) + C_LIST * (m + 3 * n) + C_TUPLE * (2 * n + 16)
-        led.reserve(ord_bytes)
+        # (the ordering's result, a Python list: held from before the ordering
+        # until its typed copy qa replaces it)
+        qheld = C_LIST + n * C_ENT
+        led.reserve(ord_bytes + qheld, "ordering")
         try:
             q = _matlab_colamd.order_columns(m, n, jc, ir, lambda u: work.charge(u, "ordering"))
+        except BaseException:
+            led.release(qheld)
+            raise
         finally:
             led.release(ord_bytes)
-    elif q is None:
-        q = list(range(n))
+        _record("list", n, led.owned, "q")
+    else:
+        # (a given q is the caller's; the identity is built as qa directly)
+        qheld = 0
     led.reserve(n * C_IDX + C_HDR)
-    qa = _seg_from_list(q)
+    if q is None:
+        qa = alloc(n, _I)
+        for a, b in chunks(n):
+            qa[a:b] = np.arange(a, b, dtype=_I)
+    else:
+        qa = _seg_from_list(q)
+    _record("held", n, led.owned, "q")
+    q = None
+    led.release(qheld)
     _phase("lu")
     # the workspace and the kept state, before the first column (r6 section 2.2's B_0)
     kpeak = _kpeak(cv)
-    B0 = 3 * n * C_IDX + n * C_BOOL + 2 * n * cv + 5 * n * C_PTR + n * C_PYINT + 2 * E * C_IDX + kpeak + 5 * C_HDR
-    led.reserve(B0, "workspace")
+    # (pinv, queue, rbuf; mark; udiag, x; the _OUTER lists of n pointers; prow's ints; mbuf)
+    parts = {"idx": 3 * n * C_IDX + 2 * E * C_IDX, "bool": n * C_BOOL, "val": 2 * n * cv, "ptr": _OUTER * n * C_PTR,
+             "pyint": n * C_PYINT, "kpeak": kpeak, "hdr": 5 * C_HDR}
+    led.reserve(sum(parts.values()), "workspace", parts)
     pinv = alloc(n, _I)
     for a, b in chunks(n):
         pinv[a:b] = -1
@@ -506,13 +582,13 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
     mbuf = np.zeros(2 * E, dtype=_I)
     # (whole-array fast paths when nothing is segmented and a piece fits E)
     flat = not isinstance(pinv, Seg)
-    prow = [0] * n
-    lrow, lval = [None] * n, [None] * n
-    # (L's columns also as Python lists, for the small columns' scalar path;
-    # empty lists past SMALL entries, which that path never scans)
-    lrow_l, lval_l = [None] * n, [None] * n
-    ustep, uval = [None] * n, [None] * n
-    ustep_l, uval_l = [None] * n, [None] * n
+    prow = _plist(n, 0)
+    lrow, lval = _plist(n), _plist(n)
+    # (L's and U's columns also as Python lists, for the small columns' scalar
+    # path; _BIG past SMALL entries, which that path never scans)
+    lrow_l, lval_l = _plist(n), _plist(n)
+    ustep, uval = _plist(n), _plist(n)
+    ustep_l, uval_l = _plist(n), _plist(n)
     free = 0
     for j in range(n):
         c = int(qa[j])
@@ -742,6 +818,7 @@ def factor(S, what, q=None, ledger=None, work=None, order=True):
     F = LU()
     F.n = n
     F.q = qa
+    led.reserve(n * C_IDX + C_HDR)
     F.prow = _seg_from_list(prow)
     F.lrow, F.lval, F.ustep, F.uval, F.udiag, F.lstep = lrow, lval, ustep, uval, udiag, lstep
     # (the scalar solves' lists: the short columns', _BIG for the others)
@@ -825,6 +902,17 @@ def _small_column(j, c, steps, touched, x, pinv, prow, udiag, lrow, lval, lrow_l
     led.release(Bj)
     led.reserve(C_IDX * (r + cnt) + cv * (r + cnt) + 4 * C_HDR + 2 * C_ENT * (cnt + r), "retain")
     return free
+
+
+# the outer lists of n pointers factor keeps (B_0's ptr part): prow, lrow,
+# lval, ustep, uval and the scalar path's lrow_l, lval_l, ustep_l, uval_l
+_OUTER = 9
+
+
+def _plist(n, fill=None):
+    """one of factor's outer lists of n pointers (reserved in B_0's ptr part)"""
+    _record("list", n, 0, "outer")
+    return [fill] * n
 
 
 def _kpeak(cv):

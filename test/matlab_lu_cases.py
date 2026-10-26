@@ -340,6 +340,149 @@ finally:
     L._recorder = None
     L.E, L.A_SAFE = min(L.E_TIME, (1 << 31) // 32), 1 << 31
 
+# -- the solve's two-axis chunks (daybreak2, LIMIT-MATLAB-PR1-1): k = E and
+# E + 1 right-hand sides, both directions, no kernel over E elements and no
+# work charge over E units; a mutant taking all k columns as one block fails
+class LogWork(L.Work):
+    def __init__(self, what):
+        L.Work.__init__(self, what)
+        self.log = []
+
+    def charge(self, units, cat=None):
+        self.log.append(int(units))
+        L.Work.charge(self, units, cat)
+
+
+def solve_bounded(F, B, trans):
+    W = LogWork("t")
+    F.work = W
+    L._recorder = []
+    try:
+        X = F.solve(B, trans=trans)
+        kern = [e[1] for e in L._recorder if e[0] == "kernel"]
+    finally:
+        L._recorder = None
+    return X, max(kern), max(W.log), W.used
+
+
+big = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], 10 ** 12)
+keep_blk = L._col_block
+try:
+    L._capacity = big
+    L.E, L.A_SAFE = 8, 256
+    for cplx in (False, True):
+        S = rand_matrix(20, 3, cplx, diag=0.05)
+        F = L.factor(S, "t")
+        for k in (L.E, L.E + 1, 2 * L.E + 1):
+            B = np.array([[complex(rnd(), rnd()) if cplx else rnd() for _ in range(k)] for _ in range(20)])
+            for trans in (False, True):
+                X, kmax, cmax, used = solve_bounded(F, B, trans)
+                assert kmax <= L.E and cmax <= L.E, (k, trans, kmax, cmax)
+                assert eta(S, X, B, trans) <= 64 * 20 * EPS, (k, trans)
+                for c in (0, k - 1):
+                    Xc = F.solve(B[:, c:c + 1], trans=trans)
+                    assert float(np.max(np.abs(X[:, c:c + 1] - Xc))) <= 1e-12 * max(1.0, float(np.max(np.abs(Xc))))
+                # (charged before the work: a limit of exactly its work runs, one less refuses)
+                W = L.Work("t")
+                W.limit = used
+                F.work = W
+                F.solve(B, trans=trans)
+                W = L.Work("t")
+                W.limit = used - 1
+                F.work = W
+                try:
+                    F.solve(B, trans=trans)
+                    raise AssertionError("no refusal")
+                except Exception as e:
+                    assert getattr(e, "identifier", "") == "sagebrush:lu_work" and W.used <= used - 1, e
+                L._col_block = lambda k: k
+                try:
+                    X, kmax, cmax, used = solve_bounded(F, B, trans)
+                finally:
+                    L._col_block = keep_blk
+                assert (kmax > L.E) == (k > L.E), ("the mutant", k, trans, kmax)
+finally:
+    L._col_block = keep_blk
+    L._capacity = real
+    L.E, L.A_SAFE = min(L.E_TIME, (1 << 31) // 32), 1 << 31
+ok("solve: k = E, E + 1 and 2E + 1 in blocks of E columns, both directions, no kernel or charge over E; the one-block mutant fails")
+
+# (astra2, CORR-MATLAB-SEG-RHS-1: a real flat factor with a complex
+# right-hand side segments b; the scalar path is taken only when b is one
+# array; the old condition, the factor's flatness alone, fails)
+keep_ok = L._scalar_ok
+try:
+    L._capacity = big
+    L.E, L.A_SAFE = 8, 256
+    n = 17
+    I = make(n, [(i, i, 1.0) for i in range(n)])
+    F = L.factor(I, "t", q=list(range(1, n)) + [0])
+    assert F.flat
+    for k in (1, 2):
+        B = np.array([[complex(rnd(), rnd()) for _ in range(k)] for _ in range(n)])
+        for trans in (False, True):
+            X = F.solve(B, trans=trans)
+            assert X.dtype.kind == "c" and float(np.max(np.abs(X - B))) == 0.0, (k, trans)
+            Br = np.array([[rnd()] for _ in range(n)])
+            assert float(np.max(np.abs(F.solve(Br, trans=trans) - Br))) == 0.0
+    L._scalar_ok = lambda F, b: F.flat
+    for trans in (False, True):
+        try:
+            F.solve(np.array([[complex(rnd(), rnd())] for _ in range(n)]), trans=trans)
+            raise AssertionError("the mutant ran")
+        except AttributeError:
+            pass
+finally:
+    L._scalar_ok = keep_ok
+    L._capacity = real
+    L.E, L.A_SAFE = min(L.E_TIME, (1 << 31) // 32), 1 << 31
+ok("solve: a real factor, a segmented complex right-hand side, both directions; the mutant guarding on the factor alone fails")
+
+# -- factor's Python lists, reserved before they exist (daybreak2,
+# LIMIT-MATLAB-PR1-2): the ordering's q until its typed copy replaces it,
+# and the nine outer lists of n pointers in B_0's ptr part, exactly
+C_PTR0, C_ENT0, C_LIST0, C_IDX0, C_HDR0 = 13, 64, 53, 8, 534
+assert (L.C_PTR, L.C_ENT, L.C_LIST, L.C_IDX, L.C_HDR) == (C_PTR0, C_ENT0, C_LIST0, C_IDX0, C_HDR0)
+
+
+def lists_ok(S, **kw):
+    L._recorder = []
+    try:
+        L.factor(S, "t", **kw)
+        ev = L._recorder
+    finally:
+        L._recorder = None
+    n = S.n
+    q_list = [e for e in ev if e[0] == "list" and e[3] == "q"]
+    held = [e for e in ev if e[0] == "held" and e[3] == "q"]
+    qa = n * C_IDX0 + C_HDR0
+    if kw:
+        good = not q_list and held[0][2] == qa
+    else:
+        good = len(q_list) == 1 and q_list[0][2] == C_LIST0 + n * C_ENT0 and held[0][2] == C_LIST0 + n * C_ENT0 + qa
+    ws = [i for i, e in enumerate(ev) if e[0] == "reserve" and e[3] == "workspace"]
+    first = min(i for i, e in enumerate(ev) if e[0] == "reserve" and e[3] in ("column", "retain"))
+    outer = [i for i, e in enumerate(ev) if e[0] == "list" and e[3] == "outer"]
+    good = good and len(ws) == 1 and len(outer) == 9 and all(ws[0] < i < first for i in outer)
+    return good and ev[ws[0]][4]["ptr"] == C_PTR0 * sum(ev[i][1] for i in outer)
+
+
+try:
+    L._capacity = big
+    S = rand_matrix(40, 3)
+    for kw in ({}, {"q": list(range(40))}, {"order": False}):
+        assert lists_ok(S, **kw), kw
+    for name, value in (("C_ENT", 0), ("C_LIST", 0), ("C_PTR", 0), ("_OUTER", 5)):
+        keep = getattr(L, name)
+        setattr(L, name, value)
+        try:
+            assert not lists_ok(S), "the mutant (%s = %d) still passed" % (name, value)
+        finally:
+            setattr(L, name, keep)
+finally:
+    L._capacity = real
+ok("admission: q's list held from before the ordering until qa, the nine outer lists in B_0 exactly; mutants of each charge fail")
+
 # -- segmented and chunked results agree with the default path
 S = rand_matrix(90, 3, True)
 B = np.array([[complex(rnd(), rnd())] for _ in range(90)])
