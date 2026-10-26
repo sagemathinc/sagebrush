@@ -15,6 +15,11 @@
   Access-Control-Allow-Origin: *
 # the Python library's chunks (web/lib-chunks.mts): named by their content's
 # hash, so never changed in place
+# a shared collection page's link-preview image (web/share-client/og.png): fetched by preview
+# services, cross-origin; a redesign gets a new name, as crawlers keep cards for days
+/s/og.png
+  Cross-Origin-Resource-Policy: cross-origin
+  Cache-Control: public, max-age=86400
 /lib/*
   Access-Control-Allow-Origin: *
   Cache-Control: public, max-age=31536000, immutable
