@@ -96,6 +96,9 @@ pub mod fault {
     pub const CORRUPT_CLD: u8 = 16;
     /// The cut keeps no row.
     pub const FORCE_S0: u8 = 32;
+    /// Stage 2 takes a certificate only after a level's last pass (so its
+    /// reach in columns shows).
+    pub const S2_LAST_PASS: u8 = 64;
 
     /// What ran: the reach counters (plan r3, section 4.2) and the branches
     /// taken (section 4.3).
@@ -642,14 +645,17 @@ pub(crate) fn a_star(g: &[BigInt], r: usize, n: usize, p: u64, bounds: &[BigInt]
     Some(AStar { gamma, beta_b, beta_p, eta, kappa, rho, mu, a })
 }
 
-/// Stage 2 (rank-3 plan r3, sections 3.3 and 3.4): per level a fresh lattice
-/// of I_r and every coefficient index j < n as an untruncated column
-/// (b_j = b_min,j), one LLL, the cut and the certificate.  The precision
-/// starts at a0 = max(k, 2 a_last) and doubles, the last step clipped to
-/// the proved a*; at a >= a* (and a >= k) Theorem 1 says the certificate
-/// holds, so a failure there is an internal error, never a search.  Each
-/// level relifts the same modular factors to p^a; nothing carries over from
-/// Stage 1 or an earlier level.
+/// Stage 2 (rank-3 plan r3, sections 3.3 and 3.4, with delta 2): per level a
+/// fresh lattice of I_r to which every coefficient index j < n is appended
+/// as an untruncated column (b_j = b_min,j), COLS_PER_PASS at a time (low
+/// and high indices alternately), each pass followed by LLL, the cut and
+/// the certificate.  The precision starts at a0 = max(k, 2 a_last) and
+/// doubles, the last step clipped to the proved a*.  After the last pass
+/// at a >= a* (and a >= k), Theorem 1 holds for the lattice built (its
+/// retained rows lie in the full lattice of all n columns, W survives every
+/// cut by Lemma 1, and the dimension is at most r + n), so no certificate
+/// there is an internal error, never a search.  Each level relifts the same
+/// modular factors to p^a; nothing carries over between levels.
 #[allow(unused_assignments)] // `held` is a reservation guard, read by its Drop
 fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_last: u64) -> FResult<Vec<Held<'b>>> {
     let r = rest0.len();
@@ -658,7 +664,7 @@ fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_la
     let pbits = 64 - (p - 1).leading_zeros() as u64; // ceil(log2 p) for p >= 3
     let _p = b.enter(Phase::Lattice);
     // (the ledger's entries that live through Stage 2: the caller's
-    // reservations, the modular factors, the bounds and the column indices)
+    // reservations, the modular factors, the bounds and the column order)
     #[cfg(test)]
     let (entry, modfs_b, bounds_b, cols_b) = (b.live(), words_bytes(2 * (n as u64 + r as u64 + 1)).unwrap(), bounds_bytes(g).unwrap(), words_bytes(n as u64).unwrap());
     #[cfg(test)]
@@ -667,11 +673,21 @@ fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_la
     let _modfs = b.reserve(words_bytes(2 * (n as u64 + r as u64 + 1)))?;
     let modfs: Vec<FPoly> = rest0.iter().map(|u| u.iter().map(|c| c.mod_floor(&BigInt::from(p)).to_u64().unwrap()).collect()).collect();
     let (bounds, _bounds) = cld_bounds(b, g)?;
-    // every coefficient index is a column: n of them, reserved first
+    // every coefficient index, low and high alternately: n of them, reserved first
     let _cols = b.reserve_as("cols", words_bytes(n as u64))?;
-    let all: Vec<usize> = {
+    let order: Vec<usize> = {
         let _t = tag("cols");
-        (0..n).collect()
+        let mut v = Vec::with_capacity(n);
+        let (mut lo, mut hi) = (0usize, n);
+        while lo < hi {
+            v.push(lo);
+            lo += 1;
+            if lo < hi {
+                hi -= 1;
+                v.push(hi);
+            }
+        }
+        v
     };
     ledger!(b, "stage 2 entry", whole);
     let star = a_star(g, r, n, p, &bounds).ok_or_else(|| b.internal("the proved precision overflows"))?;
@@ -710,82 +726,96 @@ fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_la
         let pa = crate::power(b, p, a)?;
         #[cfg(test)]
         let level_bytes = crate::power_bytes(p, a).unwrap() + relifted_b;
-        // the c_ij of every index (values below p^a), reserved first
-        let _cld = b.reserve_as("cld", rows_bytes(n, r, pa.bits()))?;
+        // the basis: I_r, held for as long as it lives
+        let mut held: Reservation<'b> = b.reserve(rows_bytes(r, r, 1))?;
         #[cfg(test)]
-        let cld_b = rows_bytes(n, r, pa.bits()).unwrap();
-        handoff!(whole, level_bytes, cld_b, cld_columns_bytes(n, r, &all, pa.bits()).unwrap());
-        let mut cld = {
-            let _p = b.enter(Phase::Cld);
-            let _t = tag("cld");
-            cld_columns(b, g, us, &pa, &all)?
-        };
-        if fault(fault::CORRUPT_CLD) && a >= star.a {
-            cld[0][0] = (&cld[0][0] + BigInt::one()).mod_floor(&pa.v);
-        }
-        // the basis I_r with every column: room for all of it first (an entry
-        // is a sum of r terms u_i q_ij with u_i in {0, 1} and q_ij < p^a, or
-        // a modulus below p^a)
-        let ebits = pa.bits() + clog2(r as u64) + 1;
-        let mut held: Reservation<'b> = b.reserve(rows_bytes(r + n, r + n, ebits))?;
-        #[cfg(test)]
-        let mut held_want = rows_bytes(r + n, r + n, ebits).unwrap();
-        handoff!(whole, level_bytes, cld_b, held_want);
+        let mut held_want = rows_bytes(r, r, 1).unwrap();
+        handoff!(whole, level_bytes, held_want);
         let mut rows: Vec<Vec<BigInt>> = (0..r).map(|i| (0..r).map(|j| BigInt::from((i == j) as u32)).collect()).collect();
-        let mut c = 0usize; // columns appended
-        {
-            let _p = b.enter(Phase::Lattice);
-            let pb = BigInt::from(p);
-            for &j in &all {
-                // b_j = b_min,j: the least b with p^b >= B_j (untruncated);
-                // p^b < B_j p has at most bits(B_j) + bits(p) bits
-                let bmin = {
-                    let _pw = b.reserve_as("pw", big_bytes(bounds[j].bits() + pbits))?;
-                    handoff!(whole, level_bytes, cld_b, held_want, big_bytes(bounds[j].bits() + pbits).unwrap());
-                    let _t = tag("pw");
-                    let mut bmin = 0u64;
-                    let mut pw = BigInt::one();
-                    while pw < bounds[j] {
-                        ledger!(b, "stage 2 pw loop", whole, level_bytes, cld_b, held_want, big_bytes(bounds[j].bits() + pbits).unwrap());
-                        b.debit(Some(limbs(pw.bits())))?;
-                        pw *= &pb;
-                        bmin += 1;
-                    }
-                    bmin
-                };
-                if bmin >= a {
-                    continue; // no information at this precision
-                }
-                handoff!(whole, level_bytes, cld_b, held_want, crate::power_bytes(p, bmin).unwrap());
-                let scale = crate::power(b, p, bmin)?;
-                handoff!(whole, level_bytes, cld_b, held_want, crate::power_bytes(p, bmin).unwrap(), crate::power_bytes(p, a - bmin).unwrap());
-                let modulus = crate::power(b, p, a - bmin)?;
-                // the modulus-row test (as in Stage 1); at a >= a* it always
-                // passes (plan r3, section 3.4)
-                let nb = BigInt::from(r as u64) + BigInt::from((c + 1) as u64) * BigInt::from(r as u64 + 1).pow(2);
-                if &modulus.v * &modulus.v <= nb {
-                    continue;
-                }
-                let _q = b.reserve(rows_bytes(1, r, pa.bits()))?;
-                handoff!(whole, level_bytes, cld_b, held_want, crate::power_bytes(p, bmin).unwrap(), crate::power_bytes(p, a - bmin).unwrap(), rows_bytes(1, r, pa.bits()).unwrap());
-                let q: Vec<BigInt> = cld[j].iter().map(|x| x.div_floor(&scale)).collect();
-                b.debit(mul_work(rows.len() as u64, maxbits(&q), r as u64, 64))?;
-                for row in rows.iter_mut() {
-                    let s: BigInt = row[..r].iter().zip(&q).map(|(u, x)| u * x).sum();
-                    row.push(s);
-                }
-                let w = rows.first().map_or(r + 1, |x| x.len());
-                let mut mrow = vec![BigInt::zero(); w];
-                mrow[w - 1] = modulus.v.clone();
-                rows.push(mrow);
-                c += 1;
-                fault::count(|x| x.s2_cols += 1);
+        let mut c = 0usize; // columns appended at this level
+        let pb = BigInt::from(p);
+        let passes = order.len().div_ceil(COLS_PER_PASS);
+        for (pass, want) in order.chunks(COLS_PER_PASS).enumerate() {
+            // the c_ij of these columns (values below p^a), reserved first
+            let _cld = b.reserve_as("cld", rows_bytes(want.len(), r, pa.bits()))?;
+            #[cfg(test)]
+            let cld_b = rows_bytes(want.len(), r, pa.bits()).unwrap();
+            handoff!(whole, level_bytes, held_want, cld_b, cld_columns_bytes(n, r, want, pa.bits()).unwrap());
+            let mut cld = {
+                let _p = b.enter(Phase::Cld);
+                let _t = tag("cld");
+                cld_columns(b, g, us, &pa, want)?
+            };
+            if fault(fault::CORRUPT_CLD) && a >= star.a && c == 0 {
+                cld[0][0] = (&cld[0][0] + BigInt::one()).mod_floor(&pa.v);
             }
-        }
-        // the columns are in the rows: their values go now, before LLL
-        drop(cld);
-        drop(_cld);
-        if c > 0 {
+            let mut added = 0;
+            {
+                let _p = b.enter(Phase::Lattice);
+                // room for the rows with every new column, before appending
+                let ubits = rows.iter().map(|x| maxbits(&x[..r])).max().unwrap_or(0);
+                let ebits = rows.iter().map(|x| maxbits(x)).max().unwrap_or(0).max(ubits + pa.bits() + clog2(r as u64) + 1);
+                let grown = b.reserve(rows_bytes(rows.len() + want.len(), rows.first().map_or(r, |x| x.len()) + want.len(), ebits))?;
+                #[cfg(test)]
+                {
+                    let g_b = rows_bytes(rows.len() + want.len(), rows.first().map_or(r, |x| x.len()) + want.len(), ebits).unwrap();
+                    handoff!(whole, level_bytes, held_want, cld_b, g_b);
+                    held_want = g_b;
+                }
+                held = grown;
+                for (t, &j) in want.iter().enumerate() {
+                    // b_j = b_min,j: the least b with p^b >= B_j (untruncated);
+                    // p^b < B_j p has at most bits(B_j) + bits(p) bits
+                    let bmin = {
+                        let _pw = b.reserve_as("pw", big_bytes(bounds[j].bits() + pbits))?;
+                        handoff!(whole, level_bytes, held_want, cld_b, big_bytes(bounds[j].bits() + pbits).unwrap());
+                        let _t = tag("pw");
+                        let mut bmin = 0u64;
+                        let mut pw = BigInt::one();
+                        while pw < bounds[j] {
+                            ledger!(b, "stage 2 pw loop", whole, level_bytes, held_want, cld_b, big_bytes(bounds[j].bits() + pbits).unwrap());
+                            b.debit(Some(limbs(pw.bits())))?;
+                            pw *= &pb;
+                            bmin += 1;
+                        }
+                        bmin
+                    };
+                    if bmin >= a {
+                        continue; // no information at this precision
+                    }
+                    handoff!(whole, level_bytes, held_want, cld_b, crate::power_bytes(p, bmin).unwrap());
+                    let scale = crate::power(b, p, bmin)?;
+                    handoff!(whole, level_bytes, held_want, cld_b, crate::power_bytes(p, bmin).unwrap(), crate::power_bytes(p, a - bmin).unwrap());
+                    let modulus = crate::power(b, p, a - bmin)?;
+                    // the modulus-row test (as in Stage 1); at a >= a* it always
+                    // passes (plan r3, section 3.4)
+                    let nb = BigInt::from(r as u64) + BigInt::from((c + 1) as u64) * BigInt::from(r as u64 + 1).pow(2);
+                    if &modulus.v * &modulus.v <= nb {
+                        continue;
+                    }
+                    let _q = b.reserve(rows_bytes(1, r, pa.bits()))?;
+                    handoff!(whole, level_bytes, held_want, cld_b, crate::power_bytes(p, bmin).unwrap(), crate::power_bytes(p, a - bmin).unwrap(), rows_bytes(1, r, pa.bits()).unwrap());
+                    let q: Vec<BigInt> = cld[t].iter().map(|x| x.div_floor(&scale)).collect();
+                    b.debit(mul_work(rows.len() as u64, maxbits(&q), r as u64, 64))?;
+                    for row in rows.iter_mut() {
+                        let s: BigInt = row[..r].iter().zip(&q).map(|(u, x)| u * x).sum();
+                        row.push(s);
+                    }
+                    let w = rows.first().map_or(r + 1, |x| x.len());
+                    let mut mrow = vec![BigInt::zero(); w];
+                    mrow[w - 1] = modulus.v.clone();
+                    rows.push(mrow);
+                    c += 1;
+                    added += 1;
+                    fault::count(|x| x.s2_cols += 1);
+                }
+            }
+            // the columns are in the rows: their values go now, before LLL
+            drop(cld);
+            drop(_cld);
+            if added == 0 {
+                continue;
+            }
             let d = rows.len();
             let w = rows[0].len();
             let e = rows.iter().map(|x| maxbits(x)).max().unwrap_or(0);
@@ -815,7 +845,7 @@ fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_la
             held = kept;
             #[cfg(test)]
             assert!(dets.iter().all(|x| x.bits() <= cap), "a Gram determinant above cap bits");
-            // the cut, with B^2 = r + c (r + 1)^2
+            // the cut, with B^2 = r + c (r + 1)^2 (c: the columns so far)
             let bb = BigInt::from(r as u64) + BigInt::from(c as u64) * BigInt::from(r as u64 + 1).pow(2);
             let mut s = basis.len();
             {
@@ -856,12 +886,14 @@ fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_la
                 certify(b, g, rest0, &pk, &rows, r)?
             };
             if let Some(fs) = found {
-                fault::count(|x| x.s2_cert_a = a);
-                return Ok(fs);
+                if !fault(fault::S2_LAST_PASS) || pass + 1 == passes {
+                    fault::count(|x| x.s2_cert_a = a);
+                    return Ok(fs);
+                }
             }
         }
         if a >= star.a {
-            // Theorem 1: at a >= a* the certificate holds
+            // Theorem 1: after every column at a >= a* the certificate holds
             fault::count(|x| x.internal_no_cert += 1);
             return Err(b.internal("no recombination certificate at the proved precision"));
         }
@@ -1375,6 +1407,17 @@ pub(crate) mod tests {
             m.k = k;
             let e = lattice(&b, &f, &m, &lifted, &mut 0).map(|o| o.map(|fs| fs.len())).unwrap_err();
             assert_eq!((e.what, e.kind), ("memory (overflow)", crate::Kind::Resource), "k {k}: {e}");
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn probe_stage2() {
+        for k in [5usize, 6, 7] {
+            let f = crate::tests::swinnerton_dyer(k);
+            let t = std::time::Instant::now();
+            let r = fault::with_hooks(fault::STAGE1_EXIT, None, false, || crate::try_factor_with(&f, &Budget::unlimited()).map(|x| x.1.len()));
+            eprintln!("S_{k}: {:?} {:?} in {:?}", r, fault::reach(), t.elapsed());
         }
     }
 }
