@@ -29,7 +29,7 @@ interface Engine {
   sb_reply_len(): number;
   // (optional: engines built before item D0 lack it)
   sb_set_memory_share?(v: number): void;
-  sb_set_memory_total?(bytes: number, status: number, joint: number): void;
+  sb_set_memory_total?(bytes: number, status: number, uncertified: number): void;
   sb_live_estimate?(): number;
   sb_outstanding_bytes?(): number;
 }
@@ -138,30 +138,49 @@ export function pushShare(e: Engine) {
   // the engine ledger's total (no-cliffs plan C r10 section 1), on the same
   // cadence; an engine without the export is left alone
   if (typeof e.sb_set_memory_total === "function") {
-    const [bytes, status, joint] = memoryTotal();
-    e.sb_set_memory_total(bytes, status, joint);
+    const [bytes, status, uncertified] = memoryTotal();
+    e.sb_set_memory_total(bytes, status, uncertified);
   }
 }
 const TOTAL_STATUS: Record<string, number> = { observed: 0, zero: 1, nominal: 2 };
-/** lib/_capacity.py engine_total as [bytes, status code, joint]: none
+/** lib/_capacity.py engine_total as [bytes, status code, uncertified]: none
  * (status -1, which the engine reads as the nominal total) when it can't
- * be had. */
+ * be had.  uncertified (no-cliffs plan C r17 section 1.3) is 1 when
+ * engine_rows finds an applicable row that is joint (it also bounds a host
+ * domain: the instance has no fresh measure of it) or an incomplete
+ * classification; engine_total's own joint flag covers only the rows at
+ * the least limit, so it is not used for this. */
 function memoryTotal(): [number, number, number] {
   try {
     const m = Obj.hooks.importModule("_capacity");
     const t: any = Obj.callObj(Obj.getattr(m, "engine_total"), []);
-    const get = (k: string) => Obj.unbox(Obj.callObj(Obj.getattr(t, "get"), [k]));
-    let bytes: any = get("bytes");
+    const get = (o: any, k: string) => Obj.unbox(Obj.callObj(Obj.getattr(o, "get"), [k]));
+    let bytes: any = get(t, "bytes");
     if (typeof bytes === "bigint") bytes = bytes <= 9007199254740991n && bytes >= 0n ? Number(bytes) : -1;
-    const status = TOTAL_STATUS[String(get("status"))] ?? -1;
-    const joint = get("joint") === true ? 1 : 0;
-    return [typeof bytes === "number" && Number.isInteger(bytes) && bytes >= 0 ? bytes : -1, status, joint];
+    const status = TOTAL_STATUS[String(get(t, "status"))] ?? -1;
+    return [typeof bytes === "number" && Number.isInteger(bytes) && bytes >= 0 ? bytes : -1, status, rowsUncertified(m)];
   } catch (e) {
     // (as memoryShare: a Ctrl-C seen by the collector is set again)
     try {
       if (Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt)) requestCtrlC();
     } catch {}
     return [-1, -1, 0];
+  }
+}
+/** 0 only when _capacity.engine_uncertified() is exactly False
+ * (fail-closed: any other error is 1).  A KeyboardInterrupt is rethrown, so
+ * memoryTotal's catch sets the Ctrl-C again, as for the other collectors
+ * (astra2's CORR-C2A-3: a Ctrl-C the helper consumed is not lost). */
+function rowsUncertified(m: any): number {
+  try {
+    return Obj.unbox(Obj.callObj(Obj.getattr(m, "engine_uncertified"), [])) === false ? 0 : 1;
+  } catch (e) {
+    let ki = false;
+    try {
+      ki = Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt);
+    } catch {}
+    if (ki) throw e;
+    return 1;
   }
 }
 /** [poly_share() as an integer from 0 to 4 GiB, or -1; the age of its
