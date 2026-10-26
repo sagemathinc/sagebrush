@@ -260,29 +260,74 @@ def membership_cases():
 
 
 def write_cases():
-    # apply's write is all or nothing: a failure at each move in turn leaves the old registry and batches whole
+    """apply's write is all or nothing (astra2, #181): a failure at any staging step or forward move leaves the
+    old registry and batches whole with no stray file; a failed rollback keeps every saved old text and says so."""
+    import errno
+
+    def stray(r):
+        return sorted(f for d, _, fs in os.walk(r.root) if ".git" not in d for f in fs if ".sweep-" in f)
+
+    def attempt(r, fail):
+        """apply B1 with `fail` = {name: set of call numbers to fail with ENOSPC}; (error, stray files)"""
+        real = {"stage": S._stage, "move": os.replace, "back": S._put_back}
+        n = {k: 0 for k in real}
+
+        def wrap(name):
+            def f(*a):
+                n[name] += 1
+                if n[name] in fail.get(name, ()) or "all" in fail.get(name, ()):
+                    raise OSError(errno.ENOSPC, "No space left on device (injected, %s %d)" % (name, n[name]))
+                return real[name](*a)
+            return f
+        S._stage, S.os.replace, S._put_back = wrap("stage"), wrap("move"), wrap("back")
+        try:
+            S.apply(r.worksheet("B1", [reg_row(KA, "coverage"), reg_row(KB, "coverage")]))
+            err = None
+        except OSError as e:
+            err = e
+        finally:
+            S._stage, S.os.replace, S._put_back = real["stage"], real["move"], real["back"]
+        return err
+
+    def state(r):
+        return r.read("test/limit-sites.json"), r.read("test/limit-sweep/batches.json")
+
+    # a failure at each staging step (the registry's new and old texts, then batches.json's): nothing replaced, nothing left
+    for k in (1, 2, 3, 4):
+        r = Repo()
+        try:
+            before = state(r)
+            os.remove(r.path("ws-B1.json")) if os.path.exists(r.path("ws-B1.json")) else None
+            err = attempt(r, {"stage": {k}})
+            ok(err is not None and state(r) == before and stray(r) == [], "a failure at staging step %d of 4: the old state whole, no stray file (%s, %s)" % (k, err, stray(r)))
+        finally:
+            r.close()
+    # ENOSPC at forward move k, the rollback working: the old state whole, no stray file
     for k in (1, 2):
         r = Repo()
         try:
-            before = (r.read("test/limit-sites.json"), r.read("test/limit-sweep/batches.json"))
-            real, n = os.replace, [0]
-
-            def failing(a, b):
-                n[0] += 1
-                if n[0] == k:
-                    raise OSError("injected at move %d" % k)
-                return real(a, b)
-            S.os.replace = failing
-            try:
-                S.apply(r.worksheet("B1", [reg_row(KA, "coverage"), reg_row(KB, "coverage")]))
-                raised = None
-            except OSError as e:
-                raised = e
-            finally:
-                S.os.replace = real
-            left = sorted(f for d, _, fs in os.walk(r.root) if ".git" not in d for f in fs if ".sweep-" in f)
-            ok(raised is not None and (r.read("test/limit-sites.json"), r.read("test/limit-sweep/batches.json")) == before and not left,
-               "apply failing at move %d of 2: the old registry and batches, whole, and no staged file left (%s, %s)" % (k, raised, left))
+            before = state(r)
+            err = attempt(r, {"move": {k}})
+            ok(err is not None and not isinstance(err, S.WriteIncomplete) and state(r) == before and stray(r) == [],
+               "ENOSPC at move %d of 2: rolled back, the old state whole, no stray file (%s, %s)" % (k, err, stray(r)))
+        finally:
+            r.close()
+    # ENOSPC at forward move k AND at every rollback step: k = 1 has nothing to roll back; k = 2 can't put the
+    # registry back, so its saved old text is kept, named, and never deleted
+    for k in (1, 2):
+        r = Repo()
+        try:
+            before = state(r)
+            err = attempt(r, {"move": {k}, "back": {"all"}})
+            if k == 1:
+                ok(err is not None and not isinstance(err, S.WriteIncomplete) and state(r) == before and stray(r) == [],
+                   "ENOSPC at move 1 and at any rollback: nothing was replaced, the old state whole (%s, %s)" % (err, stray(r)))
+            else:
+                kept = getattr(err, "kept", [])
+                saved = r.path("test/limit-sites.json.sweep-old")
+                ok(isinstance(err, S.WriteIncomplete) and kept == [(L.REGISTRY, L.REGISTRY + ".sweep-old")] and os.path.exists(saved)
+                   and open(saved).read() == before[0] and r.read("test/limit-sweep/batches.json") == before[1] and stray(r) == ["limit-sites.json.sweep-old"],
+                   "ENOSPC at move 2 and at the rollback: WriteIncomplete, the registry's old text kept and named, batches.json unchanged (%s, %s)" % (err, stray(r)))
         finally:
             r.close()
 
