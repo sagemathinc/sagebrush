@@ -38,6 +38,14 @@ def call(fn, **args):
     return r["ok"]
 
 
+def call_text(request):
+    """The engine's reply text for one JSON request text, unparsed (for a
+    caller that builds the request itself and drops each text as soon as
+    the next exists: lib/_sage_ffmat.py's echelon transport).  No session
+    limit is added: only for fns without a _LIMITED entry."""
+    return _sbengine.call(request)
+
+
 def chi_arg(chi):
     """A character as (order, gens, vals), the engine's form, or None."""
     if chi is None:
