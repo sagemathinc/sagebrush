@@ -537,8 +537,10 @@ const isDocId = (s: unknown): s is string =>
   typeof s === "string" && (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s) || /^[0-9a-f]{12}$/.test(s));
 const U32 = 0xffffffff;
 
-export interface DocClaim { t: "doc_claim"; req: number; doc: string; client: string; owner?: string }
-export interface DocFence { t: "doc_fence"; req: number; doc: string; clients: { client: string; target: number }[]; owner?: string }
+/** A claim and a fence name the document's epoch they are for (plan-sync-slice2-2b-r4 §2.4): one for another epoch
+ * than the document's is refused (stale_epoch) and changes nothing, so a delayed one can't land in a later epoch. */
+export interface DocClaim { t: "doc_claim"; req: number; doc: string; epoch: number; client: string; owner?: string }
+export interface DocFence { t: "doc_fence"; req: number; doc: string; epoch: number; clients: { client: string; target: number }[]; owner?: string }
 export interface OutputSet { cell: string; full?: { sha256: string; size: number }; preview?: { sha256: string; size: number; kind: "text" | "png" } }
 export interface Outputs { t: "outputs"; req: number; doc: string; oreq: { client: string; n: number }; set: OutputSet[]; owner?: string }
 export interface Snapshot { t: "snapshot"; req: number; doc: string; at_seq: number; sha256: string; bytes: number; owner?: string }
@@ -567,13 +569,15 @@ function docFields(v: unknown, own: readonly string[], via: Via, what: string): 
 }
 const withDoc = <T extends object>(m: T, d: { doc: string; owner?: string }) => ({ ...m, doc: d.doc, ...(d.owner !== undefined ? { owner: d.owner } : {}) });
 export function checkDocClaim(v: unknown, via: Via = ACCOUNT): DocClaim {
-  const d = docFields(v, ["t", "req", "client"], via, "doc_claim"), o = d.o;
+  const d = docFields(v, ["t", "req", "epoch", "client"], via, "doc_claim"), o = d.o;
   if (o.t !== "doc_claim" || !isNat(o.req) || !isClient(o.client)) throw invalid("doc_claim: t, req and client");
-  return withDoc({ t: "doc_claim" as const, req: o.req, client: o.client }, d);
+  if (!isNat(o.epoch) || o.epoch < 1) throw invalid("doc_claim: epoch, the document's (from 1)");
+  return withDoc({ t: "doc_claim" as const, req: o.req, epoch: o.epoch, client: o.client }, d);
 }
 export function checkDocFence(v: unknown, via: Via = ACCOUNT): DocFence {
-  const d = docFields(v, ["t", "req", "clients"], via, "doc_fence"), o = d.o;
+  const d = docFields(v, ["t", "req", "epoch", "clients"], via, "doc_fence"), o = d.o;
   if (o.t !== "doc_fence" || !isNat(o.req)) throw invalid("doc_fence: t and req");
+  if (!isNat(o.epoch) || o.epoch < 1) throw invalid("doc_fence: epoch, the document's (from 1)");
   if (!Array.isArray(o.clients) || o.clients.length === 0) throw invalid("doc_fence: clients");
   if (o.clients.length > DOC_LIMITS.fenceClients) throw tooBig("fence_clients", DOC_LIMITS.fenceClients, "doc_fence: too many clients");
   const clients = o.clients.map((c) => {
@@ -582,7 +586,7 @@ export function checkDocFence(v: unknown, via: Via = ACCOUNT): DocFence {
     return { client: x.client, target: x.target };
   });
   if (new Set(clients.map((c) => c.client)).size !== clients.length) throw invalid("doc_fence: a client named twice");
-  return withDoc({ t: "doc_fence" as const, req: o.req, clients }, d);
+  return withDoc({ t: "doc_fence" as const, req: o.req, epoch: o.epoch, clients }, d);
 }
 /** A batch's `fgen` (§5.8): the fence generation each client in the batch was sent under, every one of them and no other. */
 export function checkFgen(v: unknown, clientsInBatch: ReadonlySet<string>): Map<string, number> {
