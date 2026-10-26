@@ -74,9 +74,25 @@ pub enum MemorySource {
     NoHostFigure,
 }
 
-/// A refusal: a resource limit was reached; nothing was factored.
+/// What a refusal is (rank-3 plan r3, section 3.5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// A resource limit was reached (work, memory, a representable size).
+    Resource,
+    /// A proved invariant failed: a bug, never an expected outcome for a
+    /// valid input, and never reported as a resource limit.
+    Internal,
+}
+
+/// The start of every internal error's message: how the JSON surface
+/// (engine/web) and the Python callers recognize one in a string.
+pub const INTERNAL_PREFIX: &str = "factor: internal error";
+
+/// A refusal: a resource limit was reached, or (kind Internal) a proved
+/// invariant failed; nothing was factored.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FactorLimit {
+    pub kind: Kind,
     pub phase: Phase,
     pub what: &'static str,
     pub need: u64,
@@ -89,6 +105,9 @@ pub struct FactorLimit {
 
 impl fmt::Display for FactorLimit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.kind == Kind::Internal {
+            return write!(f, "{} ({} in {}); please report it; not factored", INTERNAL_PREFIX, self.what, self.phase.name());
+        }
         write!(
             f,
             "factor: resource limit exceeded ({} in {}: {} > {}",
@@ -297,7 +316,12 @@ impl Budget {
     }
 
     pub fn refuse(&self, what: &'static str, need: u64, remaining: u64) -> FactorLimit {
-        FactorLimit { phase: self.phase.get(), what, need, remaining, memory_limit: self.limits.memory, memory_source: self.memory_source }
+        FactorLimit { kind: Kind::Resource, phase: self.phase.get(), what, need, remaining, memory_limit: self.limits.memory, memory_source: self.memory_source }
+    }
+
+    /// A failed proved invariant (an internal error, never a result).
+    pub fn internal(&self, what: &'static str) -> FactorLimit {
+        FactorLimit { kind: Kind::Internal, phase: self.phase.get(), what, need: 0, remaining: 0, memory_limit: self.limits.memory, memory_source: self.memory_source }
     }
 
     /// Debit `units` limb operations (computed by the caller with checked
@@ -448,6 +472,15 @@ mod tests {
         assert!(b.debit(None).is_err());
         assert!(b.reserve(None).is_err());
         assert!(e.to_string().starts_with("factor: resource limit exceeded (work in LLL: 60 > 40)"));
+        assert_eq!(e.kind, Kind::Resource);
+        // an internal error says so, and never reads as a resource limit
+        let b2 = Budget::unlimited();
+        let i = {
+            let _p = b2.enter(Phase::Lll);
+            b2.internal("an invariant")
+        };
+        assert_eq!(i.kind, Kind::Internal);
+        assert_eq!(i.to_string(), format!("{} (an invariant in LLL); please report it; not factored", INTERNAL_PREFIX));
     }
 
     #[test]
