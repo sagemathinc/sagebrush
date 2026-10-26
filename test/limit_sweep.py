@@ -29,7 +29,9 @@ reason?, ...}.  A disposition has one field per class component:
   "2": {"route": ROUTE} (a memory route), or {"followup": ID}
   "3": {"limits": KEY} (a key of lib/_limits.py's TABLE), {"host": ROUTE} (a host route), or {"followup": ID}
 It is required for the entries a batch wrote (with "batch"), the done
-batches' items, and, once rules.json says so (B18), every entry.  A `none`
+batches' items, every entry registered after M (no batch's item: whichever
+change registers it gives it, `limit_sites.py --register ... --disposition`),
+and, once rules.json says so (B18), every entry.  A `none`
 entry a batch wrote whose line has the refusal signal needs a one-line
 reason.
 
@@ -236,6 +238,27 @@ def manifest():
     return {"rev": m["rev"], "batches": batches, "items": items, "raw": m}, errs
 
 
+def coverage(m):
+    """[problem]: at M, every active baseline site is exactly one register item and every class-1/2/3 entry
+    exactly one disposition item, read from M's files again, not through build_manifest (daybreak2, #181)."""
+    errs, rev = [], m["rev"]
+    found = L.sites(rev)
+    reg, base = L.load(rev), L.baseline_keys(rev)
+    now = {k for k, _, _ in found}
+    want = {k: "register" for k in now if k not in reg and L.short(k) in base}
+    want.update({k: "disposition" for k, v in reg.items() if any(c in v.get("class", "") for c in "123")})
+    counts = {}
+    for k, kind, _, _ in m["raw"]["items"]:
+        counts[(k, kind)] = counts.get((k, kind), 0) + 1
+    for k, kind in sorted(want.items()):
+        if counts.get((k, kind), 0) != 1:
+            errs.append("%s: a %s item at %s, in the manifest %d times" % (k, kind, rev[:8], counts.get((k, kind), 0)))
+    for (k, kind), n in sorted(counts.items()):
+        if want.get(k) != kind:
+            errs.append("%s: a %s item in the manifest, which isn't one at %s" % (k, kind, rev[:8]))
+    return errs
+
+
 def verify():
     """[problem]: the committed manifest against the one rebuilt from its REV, each difference by key."""
     with open(here("manifest.json"), encoding="utf-8") as f:
@@ -248,6 +271,7 @@ def verify():
         git("cat-file", "-e", m["rev"] + "^{commit}")
     except subprocess.CalledProcessError:
         git("fetch", "--quiet", "--no-tags", "--depth=1", "origin", m["rev"])
+    errs += coverage(m)
     again = build_manifest(m["rev"], rb)
     if again == text:
         return errs
@@ -319,8 +343,10 @@ def route_problems(ctx):
     return errs
 
 
-def entry_problems(key, v, ctx, require):
-    """[problem] of one registry entry's disposition and reason."""
+def entry_problems(key, v, ctx, require, reason=None):
+    """[problem] of one registry entry's disposition (required if `require`) and reason (if `reason`, which
+    defaults to `require`)."""
+    reason = require if reason is None else reason
     errs, cls = [], v.get("class")
     cs, d = components(cls), v.get("disposition")
     if d is None:
@@ -350,7 +376,7 @@ def entry_problems(key, v, ctx, require):
     r = v.get("reason")
     if r is not None and (not isinstance(r, str) or not r.strip() or "\n" in r or len(r) > 300):
         errs.append("%s: its reason must be one line of text" % key)
-    if require and cls == "none" and refusal(key) and r is None:
+    if reason and cls == "none" and refusal(key) and r is None:
         errs.append("%s: a none site whose line has the refusal signal needs a one-line reason" % key)
     return errs
 
@@ -417,7 +443,10 @@ def problems(found, reg, base, active):
         if "batch" in v and v["batch"] not in m["batches"]:
             errs.append("%s: its batch %r isn't the manifest's" % (k, v["batch"]))
         item = m["items"].get(k)
-        errs += entry_problems(k, v, ctx, every or "batch" in v or (item is not None and item[1] in done))
+        # (a class-1/2/3 entry the manifest doesn't know was registered, or reclassified, after M: it is no
+        # batch's, so it needs its disposition now, from whichever change registers it (daybreak2, #181))
+        swept = every or "batch" in v or (item is not None and item[1] in done)
+        errs += entry_problems(k, v, ctx, swept or item is None, swept)
     errs += followup_problems(reg, now, ctx)
     for k in active:
         if m["items"].get(k, ("",))[0] != "register":

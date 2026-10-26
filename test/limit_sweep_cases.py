@@ -153,6 +153,15 @@ def manifest_cases():
             r.write("test/limit-sweep/manifest.json", json.dumps(dict(doc, items=edit(doc["items"]))))
             errs = S.verify()
             ok(names(errs, KB, *words), "a manifest item %s: verify names it: %s" % (what, errs))
+        # a builder that leaves an item out (both its manifest and its rebuild): the independent coverage check names it
+        real = S.build_manifest
+        try:
+            S.build_manifest = lambda rev, rb: "\n".join(l for l in real(rev, rb).split("\n") if "budget_e" not in l).replace("],\n ]", "]\n ]")
+            r.write("test/limit-sweep/manifest.json", S.build_manifest(r.M, S.rules_bytes()))
+            errs = S.verify()
+            ok(names(errs, KE, "a disposition item at", "0 times"), "a builder that drops e: coverage names e: %s" % errs)
+        finally:
+            S.build_manifest = real
         r.write("test/limit-sweep/manifest.json", text)
         r.write("test/limit-sweep/rules.json", json.dumps(dict(RULES, target=4), indent=1) + "\n")
         ok(any("reviewed migration" in e for e in S.verify()), "rules.json changed: verify asks for a migration")
@@ -333,6 +342,24 @@ def apply_cases():
         r.close()
 
 
+def after_m_cases():
+    # an entry registered after M is no batch's item: its disposition is needed at once (daybreak2, #181)
+    r = Repo()
+    try:
+        new = "lib/one.py :: f :: n2 = LIMIT_NEW #0"
+        r.write("lib/one.py", ONE + "    n2 = LIMIT_NEW\n")
+        ok(L.main(["--register", "2", "python", "--key", new]) == 0, "--register a new class-2 site without a disposition writes it")
+        ok(names(r.sweep(), new, "needs a disposition for 2"), "a class-2 entry registered after M without its disposition is named: %s" % r.sweep())
+        ok(L.main(["--register", "2", "python", "--key", new, "--disposition", '{"2": {"route": "memguard"}}']) == 0 and r.sweep() == [],
+           "...and registered with its disposition (--disposition): clean: %s" % r.sweep())
+        ok(r.reg()[new] == {"class": "2", "owner": "python", "disposition": {"2": {"route": "memguard"}}}, "--register writes the disposition: %s" % r.reg()[new])
+        ok(L.main(["--register", "none", "python", "--key", new, "--reason", "a name"]) == 0 and r.reg()[new] == {"class": "none", "owner": "python", "reason": "a name"} and r.sweep() == [],
+           "--reason is written; a none entry after M needs no disposition")
+        ok(L.main(["--register", "2", "python", "--key", new, "--disposition", "{"]) == 2, "--disposition must be JSON")
+    finally:
+        r.close()
+
+
 def route_cases():
     r = Repo()
     try:
@@ -370,7 +397,7 @@ def merge_cases():
         ok(len(c) == 1 and word in c[0] and (c[0].startswith("y:") or c[0].startswith("n:")), "merge: %s is a conflict naming the key: %s" % (what, c))
 
 
-for case in (manifest_cases, membership_cases, followup_cases, apply_cases, route_cases, merge_cases):
+for case in (manifest_cases, membership_cases, followup_cases, apply_cases, after_m_cases, route_cases, merge_cases):
     try:
         case()
     except Exception as exc:  # (a case that crashes is a failure, named)

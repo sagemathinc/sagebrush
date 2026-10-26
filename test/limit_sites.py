@@ -41,8 +41,9 @@ registered.  A baseline hash whose line is gone is harmless and stays (the
 pin is stable).
 
     python3 test/limit_sites.py --check           the differences (JSON); exit 1 if any
-    python3 test/limit_sites.py --register CLASS OWNER [--key K ...]
-                                                  register the unregistered sites (or the keys given)
+    python3 test/limit_sites.py --register CLASS OWNER [--key K ...] [--disposition JSON] [--reason TEXT]
+                                                  register the unregistered sites (or the keys given); a class
+                                                  with a 1, 2 or 3 needs its disposition (test/limit_sweep.py)
     python3 test/limit_sites.py --prune           drop the registry entries that match no site
     python3 test/limit_sites.py --seed REV SEEDFILE
                                                   write the registry and the baseline from the files at
@@ -307,7 +308,22 @@ def main(argv):
         print("%d pruned" % len(drop))
         return 0
     if argv[:1] == ["--register"] and len(argv) >= 3:
-        cls, owner, keys = argv[1], argv[2], argv[4::2] if "--key" in argv else None
+        cls, owner, keys, extra, rest = argv[1], argv[2], None, {}, argv[3:]
+        while rest:
+            if len(rest) < 2 or rest[0] not in ("--key", "--disposition", "--reason"):
+                print(__doc__)
+                return 2
+            if rest[0] == "--key":
+                keys = (keys or []) + [rest[1]]
+            elif rest[0] == "--disposition":
+                try:
+                    extra["disposition"] = json.loads(rest[1])
+                except ValueError as e:
+                    print("--disposition is JSON: %s" % e)
+                    return 2
+            else:
+                extra["reason"] = rest[1]
+            rest = rest[2:]
         if cls not in CLASSES:
             print("class must be one of %s" % ", ".join(sorted(CLASSES)))
             return 2
@@ -320,7 +336,7 @@ def main(argv):
             if k not in now:
                 print("not a current site: %s" % k)
                 return 2
-            reg[k] = {"class": cls, "owner": owner}
+            reg[k] = dict({"class": cls, "owner": owner}, **extra)
         save(reg)
         print("%d registered" % len(todo))
         return 0
