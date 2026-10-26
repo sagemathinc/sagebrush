@@ -27,11 +27,11 @@ use sagebrush_bigint::BigInt;
 
 /// At most this many modular factors: Zassenhaus' subsets directly.
 pub const ZASSENHAUS_MAX: usize = 8;
-/// At most this many modular factors after the pre-pass for the lattice.
-pub const MAX_R: usize = 96;
-/// At most this many auxiliary columns in all, over every precision level.
+/// Stage 1's length in auxiliary columns, over all its levels; past it the
+/// recombination continues in Stage 2 (rank-3 plan r3, section 3.3).
 pub const MAX_COLS: usize = 32;
 const COLS_PER_PASS: usize = 4;
+/// Stage 1's length in precision levels (it continues in Stage 2).
 const LEVELS: u32 = 3;
 
 /// The irreducible factors of f (primitive, square-free, degree >= 2), from
@@ -54,43 +54,86 @@ pub fn recombine<'b>(b: &'b Budget, f: &[BigInt], m: &Modular, lifted: Vec<Held<
         // factor and the pre-pass tests every singleton by reconstruction
         // and exact division; a violation is an internal error, never a
         // subset search (rank-3 plan r3, section 3.2)
+        fault::count(|c| c.internal_x += 1);
         return Err(b.internal("x divides the residual after the pre-pass"));
     }
-    if rest.len() <= ZASSENHAUS_MAX || rest.len() > MAX_R {
-        // few factors left (Zassenhaus is cheap), or too many for the
-        // lattice (the budget bounds the search)
-        let _p = b.enter(if rest.len() <= ZASSENHAUS_MAX { Phase::Zassenhaus } else { Phase::Fallback });
+    if rest.len() <= ZASSENHAUS_MAX {
+        // few factors left: Zassenhaus' subsets are cheap (a selector by
+        // measurement, never a refusal: plan r3, section 3.1)
+        let _p = b.enter(Phase::Zassenhaus);
         found.extend(zassenhaus(b, &g, rest, &pk, &m.possible, usize::MAX)?.found);
         return Ok(found);
     }
-    match lattice(b, &g, m, &rest)? {
+    // Stage 1, then (its lengths used up) Stage 2; no subset search for
+    // r > ZASSENHAUS_MAX (plan r3, sections 3.2 and 3.3)
+    let mut a_last = m.k;
+    match lattice(b, &g, m, &rest, &mut a_last)? {
         Some(fs) => found.extend(fs),
         None => {
-            // the full original modular list of the residual, at the
-            // original (Mignotte) precision
-            let _p = b.enter(Phase::Fallback);
-            found.extend(zassenhaus(b, &g, rest, &pk, &m.possible, usize::MAX)?.found);
+            fault::count(|c| c.s2_entries += 1);
+            found.extend(stage2(b, &g, m, &rest, a_last)?);
         }
     }
     Ok(found)
 }
 
-/// Faults the tests inject (rank-3 plan r3, section 4.3), to reach each
-/// invariant's branch (only the tests can set one).
+/// Faults and hooks the tests inject (rank-3 plan r3, sections 4.2, 4.3 and
+/// 5), to reach each branch, and the counters that show which ran (only
+/// the tests, and the test-faults feature of the transition gate's bench,
+/// can set or read them; elsewhere they compile to nothing).
 pub mod fault {
     /// The pre-pass is skipped: its residual is f with every lifted factor.
     pub const SKIP_PREPASS: u8 = 1;
+    /// Stage 1 ends at once: Stage 2 starts from its doubled precision.
+    pub const STAGE1_EXIT: u8 = 2;
+    /// Stage 1's certificates are not taken, so it runs to its real exit
+    /// by columns (the transition gate's shape (a)).
+    pub const STAGE1_NO_CERT: u8 = 4;
+    /// Stage 1 starts at precision 1, so its columns carry no information
+    /// (the real `continue`) and it exits by levels (shape (b)).
+    pub const STAGE1_LOW_PREC: u8 = 8;
+    /// One CLD value is corrupted at Stage 2's proved precision.
+    pub const CORRUPT_CLD: u8 = 16;
+    /// The cut keeps no row.
+    pub const FORCE_S0: u8 = 32;
+
+    /// What ran: the reach counters (plan r3, section 4.2) and the branches
+    /// taken (section 4.3).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct Reach {
+        pub s1_cols: u64,
+        pub s1_levels: u64,
+        pub s1_exit_cols: u64,
+        pub s1_exit_levels: u64,
+        pub s2_entries: u64,
+        pub s2_levels: u64,
+        pub s2_cols: u64,
+        /// The precision of the Stage-2 level that certified (0: none).
+        pub s2_cert_a: u64,
+        pub s2_a_star: u64,
+        pub internal_s0: u64,
+        pub internal_no_cert: u64,
+        pub internal_x: u64,
+        /// Full subset searches on a residual with r > ZASSENHAUS_MAX.
+        pub full_subsets_large: u64,
+    }
 
     #[cfg(any(test, feature = "test-faults"))]
     thread_local! {
         static FAULT: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+        static A0: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+        static A0_AT_STAR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        static REACH: std::cell::Cell<Reach> = const { std::cell::Cell::new(Reach {
+            s1_cols: 0, s1_levels: 0, s1_exit_cols: 0, s1_exit_levels: 0, s2_entries: 0, s2_levels: 0, s2_cols: 0,
+            s2_cert_a: 0, s2_a_star: 0, internal_s0: 0, internal_no_cert: 0, internal_x: 0, full_subsets_large: 0,
+        }) };
     }
 
     #[inline]
     pub fn is(_f: u8) -> bool {
         #[cfg(any(test, feature = "test-faults"))]
         {
-            FAULT.with(|c| c.get() == _f)
+            FAULT.with(|c| c.get() & _f != 0)
         }
         #[cfg(not(any(test, feature = "test-faults")))]
         {
@@ -98,18 +141,65 @@ pub mod fault {
         }
     }
 
-    /// Run `run` with fault `f` injected.
+    /// Stage 2's starting precision, when a test sets it (None: the
+    /// production a0 = max(k, 2 a_last)); `at_star`: start at a* itself.
+    #[inline]
+    pub fn a0(_a_star: u64) -> Option<u64> {
+        #[cfg(any(test, feature = "test-faults"))]
+        {
+            if A0_AT_STAR.with(|c| c.get()) {
+                return Some(_a_star);
+            }
+            A0.with(|c| c.get())
+        }
+        #[cfg(not(any(test, feature = "test-faults")))]
+        {
+            None
+        }
+    }
+
+    /// Count a branch or a reach (the counters are incremented by the real
+    /// code only, never by a hook).
+    #[inline]
+    pub fn count(_f: impl FnOnce(&mut Reach)) {
+        #[cfg(any(test, feature = "test-faults"))]
+        REACH.with(|c| {
+            let mut r = c.get();
+            _f(&mut r);
+            c.set(r)
+        });
+    }
+
+    /// The counters since the last `with`.
     #[cfg(any(test, feature = "test-faults"))]
-    pub fn with<T>(f: u8, run: impl FnOnce() -> T) -> T {
+    pub fn reach() -> Reach {
+        REACH.with(|c| c.get())
+    }
+
+    /// Run `run` with the faults `f` (a mask) injected, Stage 2's start set
+    /// to `a0` (or to a* with `at_star`), and the counters cleared.
+    #[cfg(any(test, feature = "test-faults"))]
+    pub fn with_hooks<T>(f: u8, a0: Option<u64>, at_star: bool, run: impl FnOnce() -> T) -> T {
         struct Reset;
         impl Drop for Reset {
             fn drop(&mut self) {
                 FAULT.with(|c| c.set(0));
+                A0.with(|c| c.set(None));
+                A0_AT_STAR.with(|c| c.set(false));
             }
         }
         let _r = Reset;
         FAULT.with(|c| c.set(f));
+        A0.with(|c| c.set(a0));
+        A0_AT_STAR.with(|c| c.set(at_star));
+        REACH.with(|c| c.set(Reach::default()));
         run()
+    }
+
+    /// Run `run` with fault `f` injected.
+    #[cfg(any(test, feature = "test-faults"))]
+    pub fn with<T>(f: u8, run: impl FnOnce() -> T) -> T {
+        with_hooks(f, None, false, run)
     }
 }
 
@@ -206,10 +296,12 @@ pub(crate) mod ledger_log {
     }
 }
 
-/// The lattice phase: Some(irreducible factors of g) when a certificate is
-/// found, None to fall back.
+/// Stage 1 (rank-3 plan r3, section 3.3): Some(irreducible factors of g)
+/// when a certificate is found; None when its lengths (MAX_COLS columns,
+/// LEVELS levels) are used up, with the last level's precision in `a_last`,
+/// for Stage 2.
 #[allow(unused_assignments)] // `held` is a reservation guard, read by its Drop
-fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> FResult<Option<Vec<Held<'b>>>> {
+fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_last: &mut u64) -> FResult<Option<Vec<Held<'b>>>> {
     let r = rest0.len();
     let n = deg(g);
     let p = m.p;
@@ -217,6 +309,10 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
     // the lattice's own reservations and refusals belong to its phase (the
     // steps below enter their own)
     let _p = b.enter(Phase::Lattice);
+    if fault(fault::STAGE1_EXIT) {
+        *a_last = m.k;
+        return Ok(None);
+    }
     // (the ledger's entries that live through the whole call: the caller's
     // reservations, the modular factors, the bounds and the column indices)
     #[cfg(test)]
@@ -250,11 +346,13 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
     let mut used_high = 0usize; // next high offset
     // the level's precision: k, doubled per level by checked doubling (a
     // precision past u64::MAX is refused; its p^a is refused before that)
-    let mut a = m.k;
+    let mut a = if fault(fault::STAGE1_LOW_PREC) { 1 } else { m.k };
     for level in 0..LEVELS {
         if level > 0 {
             a = a.checked_mul(2).ok_or_else(|| b.refuse("precision", u64::MAX, a))?;
         }
+        fault::count(|c| c.s1_levels += 1);
+        *a_last = a;
         let lifted_here;
         let us: &[Held<'b>] = if level == 0 {
             rest0
@@ -386,6 +484,7 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
                     rows.push(mrow);
                     cols.push(j);
                     added += 1;
+                    fault::count(|c| c.s1_cols += 1);
                 }
             }
             // the columns are in the rows: their values go now, before LLL
@@ -453,11 +552,19 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
             rows = basis;
             rows.truncate(s);
             ledger!(b, "certify", whole, level_bytes, rows_b);
+            if fault(fault::FORCE_S0) {
+                s = 0;
+            }
             if s == 0 {
-                return Ok(None); // impossible for a valid lattice: fall back
+                // every true factor's lifted indicator survives the cut
+                // (plan r3, Lemma 1): no row left is an internal error
+                fault::count(|c| c.internal_s0 += 1);
+                return Err(b.internal("the lattice cut kept no row"));
             }
             if let Some(fs) = certify(b, g, us, &pa, &rows, r)? {
-                return Ok(Some(fs));
+                if !fault(fault::STAGE1_NO_CERT) {
+                    return Ok(Some(fs));
+                }
             }
         }
         if cols.len() >= MAX_COLS {
@@ -467,7 +574,300 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
         used_low = 0;
         used_high = 0;
     }
+    // Stage 1's lengths are used up: by columns or by levels
+    if cols.len() >= MAX_COLS {
+        fault::count(|c| c.s1_exit_cols += 1);
+    } else {
+        fault::count(|c| c.s1_exit_levels += 1);
+    }
     Ok(None)
+}
+
+/// The proved precision a* of Theorem 1 (rank-3 plan r3, section 3.4) and
+/// its terms, every one an upper bound computed in checked u64 integer
+/// arithmetic from bit lengths, rounded up (never a floor, except the
+/// divisor floor(log2 p), which makes a* larger).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AStar {
+    /// |g| < 2^gamma.
+    pub gamma: u64,
+    /// max_j B_j < 2^beta_b.
+    pub beta_b: u64,
+    /// B' <= 2^beta_p, B'^2 = 2 alpha^(d-1) B^2.
+    pub beta_p: u64,
+    /// |H| < 2^eta.
+    pub eta: u64,
+    pub kappa: u64,
+    /// Delta < 2^rho (the resultant bound of Lemma 2).
+    pub rho: u64,
+    /// p B_max B' (1 + r (r + 1)) < 2^mu (the rank-equality step).
+    pub mu: u64,
+    /// p^a* > 2^(max(rho, mu) + 1).
+    pub a: u64,
+}
+
+/// The least s with s^2 >= x.
+fn isqrt_ceil(x: u64) -> u64 {
+    let mut s = (x as f64).sqrt() as u64;
+    while s.checked_mul(s).is_some_and(|q| q > x) {
+        s -= 1;
+    }
+    while s.checked_mul(s).is_none_or(|q| q < x) {
+        s += 1;
+    }
+    s
+}
+
+/// a* for g (degree n, r p-adic factors) at the prime p with the CLD
+/// bounds B_j; None when a term overflows u64 (an internal error: the
+/// inputs' own admission refuses long before, plan r3 section 3.4).
+pub(crate) fn a_star(g: &[BigInt], r: usize, n: usize, p: u64, bounds: &[BigInt]) -> Option<AStar> {
+    let (r, n) = (r as u64, n as u64);
+    let cl = clog2;
+    let gamma = maxbits(g).checked_add(cl(n.checked_add(1)?).div_ceil(2))?;
+    let beta_b = bounds.iter().map(|x| x.bits()).max().unwrap_or(0);
+    let d = r.checked_add(n)?;
+    // B^2 = r + n (r + 1)^2, the cut with every index a column
+    let bb2 = r.checked_add(n.checked_mul(r.checked_add(1)?.checked_mul(r.checked_add(1)?)?)?)?;
+    // (d - 1) lambda, lambda = 4345/10000 >= log2(100/74), rounded up
+    let lam = d.checked_sub(1)?.checked_mul(4345)?.div_ceil(10000);
+    let beta_p = 1u64.checked_add(lam)?.checked_add(cl(bb2))?.div_ceil(2);
+    let eta = cl(n).div_ceil(2).checked_add(cl(p))?.checked_add(beta_b)?.checked_add(beta_p)?.checked_add(cl(isqrt_ceil(r).checked_add(1)?))?;
+    let kappa = eta.max(beta_p.checked_add(cl(n))?.checked_add(gamma)?).checked_add(1)?;
+    let rho = n.checked_sub(1)?.checked_mul(n.checked_add(gamma)?)?.checked_add(n.checked_mul(kappa)?)?;
+    let mu = cl(p).checked_add(beta_b)?.checked_add(beta_p)?.checked_add(cl(r.checked_mul(r.checked_add(1)?)?.checked_add(1)?))?;
+    let rho_star = rho.max(mu).checked_add(1)?;
+    let lp = 63 - p.leading_zeros() as u64; // floor(log2 p) >= 1 for p >= 3
+    let a = (rho_star / lp).checked_add(1)?;
+    Some(AStar { gamma, beta_b, beta_p, eta, kappa, rho, mu, a })
+}
+
+/// Stage 2 (rank-3 plan r3, sections 3.3 and 3.4): per level a fresh lattice
+/// of I_r and every coefficient index j < n as an untruncated column
+/// (b_j = b_min,j), one LLL, the cut and the certificate.  The precision
+/// starts at a0 = max(k, 2 a_last) and doubles, the last step clipped to
+/// the proved a*; at a >= a* (and a >= k) Theorem 1 says the certificate
+/// holds, so a failure there is an internal error, never a search.  Each
+/// level relifts the same modular factors to p^a; nothing carries over from
+/// Stage 1 or an earlier level.
+#[allow(unused_assignments)] // `held` is a reservation guard, read by its Drop
+fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_last: u64) -> FResult<Vec<Held<'b>>> {
+    let r = rest0.len();
+    let n = deg(g);
+    let p = m.p;
+    let pbits = 64 - (p - 1).leading_zeros() as u64; // ceil(log2 p) for p >= 3
+    let _p = b.enter(Phase::Lattice);
+    // (the ledger's entries that live through Stage 2: the caller's
+    // reservations, the modular factors, the bounds and the column indices)
+    #[cfg(test)]
+    let (entry, modfs_b, bounds_b, cols_b) = (b.live(), words_bytes(2 * (n as u64 + r as u64 + 1)).unwrap(), bounds_bytes(g).unwrap(), words_bytes(n as u64).unwrap());
+    #[cfg(test)]
+    let whole = entry + modfs_b + bounds_b + cols_b;
+    handoff!(entry, modfs_b, bounds_b, cols_b);
+    let _modfs = b.reserve(words_bytes(2 * (n as u64 + r as u64 + 1)))?;
+    let modfs: Vec<FPoly> = rest0.iter().map(|u| u.iter().map(|c| c.mod_floor(&BigInt::from(p)).to_u64().unwrap()).collect()).collect();
+    let (bounds, _bounds) = cld_bounds(b, g)?;
+    // every coefficient index is a column: n of them, reserved first
+    let _cols = b.reserve_as("cols", words_bytes(n as u64))?;
+    let all: Vec<usize> = {
+        let _t = tag("cols");
+        (0..n).collect()
+    };
+    ledger!(b, "stage 2 entry", whole);
+    let star = a_star(g, r, n, p, &bounds).ok_or_else(|| b.internal("the proved precision overflows"))?;
+    fault::count(|c| c.s2_a_star = star.a);
+    let a0 = match fault::a0(star.a) {
+        Some(a) => a,
+        None => a_last.checked_mul(2).ok_or_else(|| b.refuse("precision", u64::MAX, a_last))?.max(m.k),
+    };
+    let mut a = a0;
+    loop {
+        fault::count(|c| c.s2_levels += 1);
+        // the factors at p^a: the caller's at k, else relifted
+        let lifted_here;
+        let us: &[Held<'b>] = if a == m.k {
+            rest0
+        } else {
+            let pa = crate::power(b, p, a)?;
+            let gl = {
+                let _p = b.enter(Phase::Hensel);
+                mreduce(b, g, &pa)?
+            };
+            lifted_here = {
+                let _p = b.enter(Phase::Hensel);
+                // the F_p[x] temporaries of the factor tree, as in lift()
+                let _w = b.reserve(words_bytes((4 * (clog2(r as u64) + 1) + 8) * (n as u64 + 1)))?;
+                hensel(b, &gl, &modfs, p, a)?
+            };
+            &lifted_here
+        };
+        #[cfg(test)]
+        let relifted_b = if a == m.k { 0 } else { us.iter().map(|u| u.reserved()).sum::<u64>() };
+        #[cfg(test)]
+        if let Some(pa_b) = crate::power_bytes(p, a) {
+            handoff!(whole, relifted_b, pa_b);
+        }
+        let pa = crate::power(b, p, a)?;
+        #[cfg(test)]
+        let level_bytes = crate::power_bytes(p, a).unwrap() + relifted_b;
+        // the c_ij of every index (values below p^a), reserved first
+        let _cld = b.reserve_as("cld", rows_bytes(n, r, pa.bits()))?;
+        #[cfg(test)]
+        let cld_b = rows_bytes(n, r, pa.bits()).unwrap();
+        handoff!(whole, level_bytes, cld_b, cld_columns_bytes(n, r, &all, pa.bits()).unwrap());
+        let mut cld = {
+            let _p = b.enter(Phase::Cld);
+            let _t = tag("cld");
+            cld_columns(b, g, us, &pa, &all)?
+        };
+        if fault(fault::CORRUPT_CLD) && a >= star.a {
+            cld[0][0] = (&cld[0][0] + BigInt::one()).mod_floor(&pa.v);
+        }
+        // the basis I_r with every column: room for all of it first (an entry
+        // is a sum of r terms u_i q_ij with u_i in {0, 1} and q_ij < p^a, or
+        // a modulus below p^a)
+        let ebits = pa.bits() + clog2(r as u64) + 1;
+        let mut held: Reservation<'b> = b.reserve(rows_bytes(r + n, r + n, ebits))?;
+        #[cfg(test)]
+        let mut held_want = rows_bytes(r + n, r + n, ebits).unwrap();
+        handoff!(whole, level_bytes, cld_b, held_want);
+        let mut rows: Vec<Vec<BigInt>> = (0..r).map(|i| (0..r).map(|j| BigInt::from((i == j) as u32)).collect()).collect();
+        let mut c = 0usize; // columns appended
+        {
+            let _p = b.enter(Phase::Lattice);
+            let pb = BigInt::from(p);
+            for &j in &all {
+                // b_j = b_min,j: the least b with p^b >= B_j (untruncated);
+                // p^b < B_j p has at most bits(B_j) + bits(p) bits
+                let bmin = {
+                    let _pw = b.reserve_as("pw", big_bytes(bounds[j].bits() + pbits))?;
+                    handoff!(whole, level_bytes, cld_b, held_want, big_bytes(bounds[j].bits() + pbits).unwrap());
+                    let _t = tag("pw");
+                    let mut bmin = 0u64;
+                    let mut pw = BigInt::one();
+                    while pw < bounds[j] {
+                        ledger!(b, "stage 2 pw loop", whole, level_bytes, cld_b, held_want, big_bytes(bounds[j].bits() + pbits).unwrap());
+                        b.debit(Some(limbs(pw.bits())))?;
+                        pw *= &pb;
+                        bmin += 1;
+                    }
+                    bmin
+                };
+                if bmin >= a {
+                    continue; // no information at this precision
+                }
+                handoff!(whole, level_bytes, cld_b, held_want, crate::power_bytes(p, bmin).unwrap());
+                let scale = crate::power(b, p, bmin)?;
+                handoff!(whole, level_bytes, cld_b, held_want, crate::power_bytes(p, bmin).unwrap(), crate::power_bytes(p, a - bmin).unwrap());
+                let modulus = crate::power(b, p, a - bmin)?;
+                // the modulus-row test (as in Stage 1); at a >= a* it always
+                // passes (plan r3, section 3.4)
+                let nb = BigInt::from(r as u64) + BigInt::from((c + 1) as u64) * BigInt::from(r as u64 + 1).pow(2);
+                if &modulus.v * &modulus.v <= nb {
+                    continue;
+                }
+                let _q = b.reserve(rows_bytes(1, r, pa.bits()))?;
+                handoff!(whole, level_bytes, cld_b, held_want, crate::power_bytes(p, bmin).unwrap(), crate::power_bytes(p, a - bmin).unwrap(), rows_bytes(1, r, pa.bits()).unwrap());
+                let q: Vec<BigInt> = cld[j].iter().map(|x| x.div_floor(&scale)).collect();
+                b.debit(mul_work(rows.len() as u64, maxbits(&q), r as u64, 64))?;
+                for row in rows.iter_mut() {
+                    let s: BigInt = row[..r].iter().zip(&q).map(|(u, x)| u * x).sum();
+                    row.push(s);
+                }
+                let w = rows.first().map_or(r + 1, |x| x.len());
+                let mut mrow = vec![BigInt::zero(); w];
+                mrow[w - 1] = modulus.v.clone();
+                rows.push(mrow);
+                c += 1;
+                fault::count(|x| x.s2_cols += 1);
+            }
+        }
+        // the columns are in the rows: their values go now, before LLL
+        drop(cld);
+        drop(_cld);
+        if c > 0 {
+            let d = rows.len();
+            let w = rows[0].len();
+            let e = rows.iter().map(|x| maxbits(x)).max().unwrap_or(0);
+            let cap = lll::cap_bits(d, e).ok_or_else(|| b.refuse("lll bits (overflow)", u64::MAX, 0))?;
+            let reduced = {
+                let _p = b.enter(Phase::Lll);
+                ledger!(b, "stage 2 before LLL", whole, level_bytes, held_want);
+                let l = b.reserve(lll::lattice_bytes(d, w, cap))?;
+                #[cfg(test)]
+                {
+                    handoff!(whole, level_bytes, held_want, lll::lattice_bytes(d, w, cap).unwrap());
+                    held_want = lll::lattice_bytes(d, w, cap).unwrap();
+                }
+                drop(std::mem::replace(&mut held, l));
+                lll::lll(b, std::mem::take(&mut rows), cap)?
+            };
+            let lll::Reduced { basis, d: dets } = reduced;
+            let dets_bytes = big_bytes(cap).and_then(|x| x.checked_mul(d as u64 + 1));
+            let kept = b.reserve(rows_bytes(d, w, cap).zip(dets_bytes).and_then(|(x, y)| x.checked_add(y)))?;
+            #[cfg(test)]
+            let (rows_b, dets_b) = (rows_bytes(d, w, cap).unwrap(), big_bytes(cap).unwrap() * (d as u64 + 1));
+            #[cfg(test)]
+            {
+                handoff!(whole, level_bytes, held_want, rows_b + dets_b);
+                held_want = rows_b + dets_b;
+            }
+            held = kept;
+            #[cfg(test)]
+            assert!(dets.iter().all(|x| x.bits() <= cap), "a Gram determinant above cap bits");
+            // the cut, with B^2 = r + c (r + 1)^2
+            let bb = BigInt::from(r as u64) + BigInt::from(c as u64) * BigInt::from(r as u64 + 1).pow(2);
+            let mut s = basis.len();
+            {
+                let _p = b.enter(Phase::Lattice);
+                while s > 0 {
+                    ledger!(b, "stage 2 cut", whole, level_bytes, rows_b + dets_b);
+                    b.debit(Some(limbs(dets[s].bits()) * limbs(dets[s - 1].bits()) + 1))?;
+                    if dets[s] > &bb * &dets[s - 1] {
+                        s -= 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            drop(dets);
+            held.shrink(rows_bytes(d, w, cap).unwrap_or(0));
+            #[cfg(test)]
+            {
+                held_want = rows_b;
+            }
+            rows = basis;
+            rows.truncate(s);
+            ledger!(b, "stage 2 certify", whole, level_bytes, rows_b);
+            if fault(fault::FORCE_S0) {
+                s = 0;
+            }
+            if s == 0 {
+                fault::count(|x| x.internal_s0 += 1);
+                return Err(b.internal("the lattice cut kept no row"));
+            }
+            // reconstruction at max(a, k): the factors at p^a, or the
+            // caller's at k when a test starts discovery below it
+            let found = if a >= m.k {
+                certify(b, g, us, &pa, &rows, r)?
+            } else {
+                handoff!(whole, level_bytes, rows_b, crate::power_bytes(p, m.k).unwrap());
+                let pk = crate::power(b, p, m.k)?;
+                certify(b, g, rest0, &pk, &rows, r)?
+            };
+            if let Some(fs) = found {
+                fault::count(|x| x.s2_cert_a = a);
+                return Ok(fs);
+            }
+        }
+        if a >= star.a {
+            // Theorem 1: at a >= a* the certificate holds
+            fault::count(|x| x.internal_no_cert += 1);
+            return Err(b.internal("no recombination certificate at the proved precision"));
+        }
+        // the next level: doubled, the last step clipped to a*
+        a = a.checked_mul(2).map_or(star.a, |x| x.min(star.a));
+    }
 }
 
 /// Bytes for `d` rows of `w` integers of at most `bits` bits.
@@ -897,7 +1297,7 @@ pub(crate) mod tests {
         assert!(lifted.len() > ZASSENHAUS_MAX);
         b.set_memory_limit(limit.unwrap_or(1 << 30));
         ledger_log::reset();
-        let (r, rep) = crate::alloc_spy::audit(|| lattice(b, &f, &m, &lifted).map(|o| o.map(|fs| fs.len())));
+        let (r, rep) = crate::alloc_spy::audit(|| lattice(b, &f, &m, &lifted, &mut 0).map(|o| o.map(|fs| fs.len())));
         (f, r, rep)
     }
 
@@ -973,7 +1373,7 @@ pub(crate) mod tests {
         let lifted = crate::lift(&b, &f, &m, m.k).unwrap();
         for k in [u64::MAX / 2 + 1, u64::MAX] {
             m.k = k;
-            let e = lattice(&b, &f, &m, &lifted).map(|o| o.map(|fs| fs.len())).unwrap_err();
+            let e = lattice(&b, &f, &m, &lifted, &mut 0).map(|o| o.map(|fs| fs.len())).unwrap_err();
             assert_eq!((e.what, e.kind), ("memory (overflow)", crate::Kind::Resource), "k {k}: {e}");
         }
     }
