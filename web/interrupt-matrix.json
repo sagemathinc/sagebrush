@@ -67,6 +67,8 @@
    "s0": 3000000,
    "smin": 100000,
    "smax": 25000000,
+   "leak_s": 3000000,
+   "leak_measure": "heap+external",
    "grow": {
     "kind": "scale",
     "p": 1
@@ -158,6 +160,7 @@
     "p": 2
    },
    "phase": "ordering",
+   "leak_measure": "heap+external",
    "hosts": [
     "cli"
    ],
@@ -179,6 +182,7 @@
     "p": 3
    },
    "phase": "lu",
+   "leak_measure": "heap+external",
    "hosts": [
     "cli"
    ],

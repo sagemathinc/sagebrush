@@ -78,6 +78,26 @@ test("leak check: growth past max(64 MiB, 10%) from repeat 3, or a thread change
   assert.equal(run(`againstBaseline({ case: "P1", host: "prompt", outcome: "FAIL", leak: { ok: false }, trials: [{ outcome: "FAIL", why: "no KeyboardInterrupt" }] }, { entries: [{ case: "P1", host: "prompt", signature: "no KeyboardInterrupt" }] })`), "FAIL");
 });
 
+test("leak check, heap+external (P2a): the post-GC JS heap plus external memory from repeat 3 against max(16 MiB, 10%), named in the row; RSS where the host has no figure", () => {
+  const ser = (mem: (number | null)[], rss: number[]) => JSON.stringify(mem.map((m, k) => ({ i: k + 1, rss_kb: rss[k], threads: 9, ...(m == null ? {} : { mem_kb: m }) })));
+  const rssNoise = [380e3, 351e3, 465e3, 579e3, 694e3]; // (VM1: the same series for the control and the mutation)
+  const control = run(`leakCheck(${ser([112.4e3, 112.4e3, 112.4e3, 112.4e3, 112.4e3], rssNoise)}, 20, "heap+external")`);
+  assert.equal(control.ok, true);
+  assert.equal(control.measure, "heap+external after gc");
+  assert.equal(control.allowed_kb, 16384);
+  const listLeak = run(`leakCheck(${ser([112.4e3, 146.8e3, 181.2e3, 215.6e3, 250e3], rssNoise)}, 20, "heap+external")`);
+  assert.equal(listLeak.ok, false);
+  assert.equal(listLeak.growth_kb, Math.round(250e3 - 181.2e3));
+  // (the allowance is fixed from repeat 3: 10% of a large repeat-3 figure)
+  assert.equal(run(`leakCheck(${ser([1e6, 1e6, 1e6, 1.05e6, 1.09e6], rssNoise)}, 20, "heap+external")`).ok, true);
+  assert.equal(run(`leakCheck(${ser([1e6, 1e6, 1e6, 1.06e6, 1.11e6], rssNoise)}, 20, "heap+external")`).ok, false);
+  // (no figure, the browser: RSS, and said so)
+  const browser = run(`leakCheck(${ser([null, null, null, null, null], [300e3, 300e3, 300e3, 300e3, 310e3])}, 20, "heap+external")`);
+  assert.equal(browser.ok, true);
+  assert.equal(browser.measure, "rss (no heap+external figure on this host)");
+  assert.equal(run(`leakCheck(${ser([null, null, null, null, null], [300e3, 300e3, 300e3, 300e3, 400e3])})`).measure, "rss");
+});
+
 test("XK window (E13g): inside the call, a KI within R + max(1 s, R/4) is EXCEPTION; past it, or a return, FAILs", () => {
   const w = `{ kind: "window", R_ms: 4000 }`;
   const tr = (ki: number | null, extra = "") => `{ t_send: 1000, marks: { ENTER: { t: 500, rest: "1" }, XSTART: { t: 600, rest: "1.1" }${ki == null ? "" : `, KI: { t: ${ki}, rest: "5" }`}${extra} }, probe: "ok" }`;
