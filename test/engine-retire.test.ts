@@ -599,6 +599,11 @@ for (const [what, totals] of [
   ["a valid instance record with a malformed shared record", `{"instance": ${OBS}, "shared": {"bytes": "x", "status": "observed"}}`],
   ["a valid instance record with a shared record missing its status", `{"instance": ${OBS}, "shared": {"bytes": 1 << 32}}`],
   ["the instance key missing beside shared None", `{"shared": None}`],
+  // (inherited names of a plain object are no status: astra2's r2 finding)
+  ...["toString", "constructor", "__proto__", "hasOwnProperty", "valueOf"].map(
+    (st) => [`an instance status "${st}" beside shared None`, `{"instance": {"bytes": 1 << 32, "status": "${st}"}, "shared": None}`] as const,
+  ),
+  ["a valid instance record with a shared status \"toString\"", `{"instance": ${OBS}, "shared": {"bytes": 1 << 32, "status": "toString"}}`],
 ] as const) {
   test(`LIMIT-C2BII-1: ${what} is the nominal shared total, never absence: pushed as unknown, and refused before allocation`, async () => {
     await withSources(`C.engine_totals = lambda: ${totals}`, () => {
@@ -616,6 +621,17 @@ for (const [what, totals] of [
     });
   });
 }
+
+test("LIMIT-C2BII-1 (astra2 r2 witness): an instance status \"toString\" beside shared None: after a retired 64 MiB instance, a second 64 MiB creation is refused by the nominal shared total (21/8 x 128 MiB = 336 MiB > 256 MiB)", async () => {
+  await withSources(`C.engine_totals = lambda: {"instance": {"bytes": 1 << 32, "status": "toString"}, "shared": None}`, () => {
+    H.setRegister(() => {}); // (no finalizer fires: the retired instance stays charged)
+    H.setModule(module({ pages: 1024 }));
+    createAndTrap();
+    assert.equal(H.state().retired, 64 * MiB);
+    assert.throws(() => E.engineCall("x"), (e: any) => e.constructor.name === "CreationRefused" && e.row === "shared" && e.limit === NOMINAL_E && e.retired === 64 * MiB);
+    assert.equal(H.live(), null, "no instance was created");
+  });
+});
 
 test("LIMIT-C2BII-1: the explicit None shared record beside a valid instance record is absence (3), checked on the instance row", async () => {
   await withSources(`C.engine_totals = lambda: {"instance": {"bytes": 1 << 30, "status": "observed"}, "shared": None}`, () => {

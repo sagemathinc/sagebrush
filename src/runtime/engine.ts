@@ -447,7 +447,18 @@ function pushTotals(e: Engine, t: Totals) {
     e.sb_set_memory_total!(bytes, status, uncertified);
   }
 }
-const TOTAL_STATUS: Record<string, number> = { observed: 0, zero: 1, nominal: 2 };
+// (a Map, not a plain object: an inherited name such as "toString" or
+// "__proto__" is no status; astra2's LIMIT-C2BII-1 r2 finding)
+const TOTAL_STATUS: ReadonlyMap<string, number> = new Map([
+  ["observed", 0],
+  ["zero", 1],
+  ["nominal", 2],
+]);
+/** A status name's code: only one of the known names, as a string; else
+ * undefined (malformed). */
+function statusCode(s: unknown): number | undefined {
+  return typeof s === "string" ? TOTAL_STATUS.get(s) : undefined;
+}
 /** lib/_capacity.py engine_total as [bytes, status code, uncertified]: none
  * (status -1, which the engine reads as the nominal total) when it can't
  * be had.  uncertified (no-cliffs plan C r17 section 1.3) is 1 when
@@ -462,7 +473,7 @@ function memoryTotal(): [number, number, number] {
     const get = (o: any, k: string) => Obj.unbox(Obj.callObj(Obj.getattr(o, "get"), [k]));
     let bytes: any = get(t, "bytes");
     if (typeof bytes === "bigint") bytes = bytes <= 9007199254740991n && bytes >= 0n ? Number(bytes) : -1;
-    const status = TOTAL_STATUS[String(get(t, "status"))] ?? -1;
+    const status = statusCode(get(t, "status")) ?? -1;
     return [typeof bytes === "number" && Number.isInteger(bytes) && bytes >= 0 ? bytes : -1, status, rowsUncertified(m)];
   } catch (e) {
     // (as memoryShare: a Ctrl-C seen by the collector is set again)
@@ -496,7 +507,7 @@ function memoryTotals(): Totals {
       if (!isDict(r) || !has(r, "bytes") || !has(r, "status")) return "malformed";
       let bytes: any = get(r, "bytes");
       if (typeof bytes === "bigint") bytes = bytes <= 9007199254740991n && bytes >= 0n ? Number(bytes) : -1;
-      const status = TOTAL_STATUS[String(get(r, "status"))];
+      const status = statusCode(get(r, "status"));
       if (status === undefined || typeof bytes !== "number" || !Number.isInteger(bytes) || bytes < 0) return "malformed";
       return [bytes, status];
     };
