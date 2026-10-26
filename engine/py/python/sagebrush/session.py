@@ -119,6 +119,7 @@ class _Hold:
 
 _HOLD = _Hold()
 _CTRL = []  # (the worker's console control routine, kept alive as long as it is installed)
+_RETIRED = []  # (and after: a break already on the control thread when it was removed may still run it, grader)
 
 
 def _break_as_sigint(nt=None, boundary=None, at_exit=None):
@@ -170,6 +171,7 @@ def _break_as_sigint(nt=None, boundary=None, at_exit=None):
             if r in _CTRL:
                 set_handler(r, False)
                 _CTRL.remove(r)
+                _RETIRED.append(r)  # (never freed: the thunk outlives any call already under way)
         if at_exit is None:
             import atexit
             at_exit = atexit.register

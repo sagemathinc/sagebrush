@@ -34,6 +34,7 @@ class Kernel:
 
 def fresh():
     S._CTRL.clear()
+    S._RETIRED.clear()
 
 
 # not Windows: nothing installed
@@ -60,7 +61,7 @@ finally:
 
 # at exit: removed (SetConsoleCtrlHandler(r, FALSE)) once, and again is nothing
 exits[0]()
-check(k.calls[-1] == (routine, False) and S._CTRL == [], "at exit: removed with FALSE, and dropped from _CTRL")
+check(k.calls[-1] == (routine, False) and S._CTRL == [] and S._RETIRED[-1] is routine, "at exit: removed with FALSE, out of _CTRL, and kept alive in _RETIRED (a break already under way may still run it)")
 n = len(k.calls)
 exits[0]()
 check(len(k.calls) == n, "a second removal does nothing")
@@ -86,6 +87,6 @@ if os.name == "nt":
     exits = []
     check(S._break_as_sigint(at_exit=exits.append) is True and len(S._CTRL) == 1 and len(exits) == 1, "Windows: the real routine is installed")
     exits[0]()
-    check(S._CTRL == [], "Windows: and removed")
+    check(S._CTRL == [] and len(S._RETIRED) == 1, "Windows: and removed, still alive")
 
 print("session console routine: ok (%d checks)" % checks)
