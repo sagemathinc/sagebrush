@@ -198,6 +198,21 @@ test("a cell of a session cut at the run's deadline: INVALID-budget, but a Stop 
   assert.equal(run(`classifyCell({ budget_cut: true, t_send: 1000, marks: { ENTER: { t: 500, rest: "1" }, KI: { t: 1012, rest: "1.6" } }, probe: "ok" }, null)`).outcome, "PASS");
 });
 
+test("a phase case: a Stop before the target's PHASE marker is INVALID, never a pass; after it, as usual (rank-13 r6 section 3)", () => {
+  const before = `{ t_send: 1000, marks: { ENTER: { t: 500, rest: "1" }, PHASE: { t: 1500, rest: "lu" }, KI: { t: 1600, rest: "1" } }, probe: "ok" }`;
+  const after = `{ t_send: 1000, marks: { ENTER: { t: 500, rest: "1" }, PHASE: { t: 600, rest: "lu" }, KI: { t: 1012, rest: "1.6" } }, probe: "ok" }`;
+  const none = `{ t_send: 1000, marks: { ENTER: { t: 500, rest: "1" }, KI: { t: 1012, rest: "1.6" } }, probe: "ok" }`;
+  const r = run(`classifyCell(${before}, null, "lu")`);
+  assert.equal(r.outcome, "INVALID");
+  assert.match(r.why, /before the lu phase/);
+  assert.equal(run(`classifyCell(${none}, null, "lu")`).outcome, "INVALID");
+  assert.equal(run(`classifyCell(${after}, null, "lu")`).outcome, "PASS");
+  assert.equal(run(`classifyCell(${none}, null)`).outcome, "PASS");
+  // (a failure to stop stays a failure, phase or not)
+  const ret = `{ t_send: 1000, marks: { ENTER: { t: 500, rest: "1" }, RET: { t: 4200 } }, probe: "ok" }`;
+  assert.equal(run(`classifyCell(${ret}, null, "lu")`).outcome, run(`classify(${ret})`).outcome);
+});
+
 test("a calibration with no size in the band takes the attempt closest to it within [min, 1.5 max], else none (E2 on GitHub's runner)", () => {
   const band = `{ min: 3000, max: 8000 }`;
   // dispatch 40236353993: s = 22 8231 ms, s = 21 8615 ms, s = 20 372 ms: s = 22 is taken

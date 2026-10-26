@@ -26,6 +26,17 @@ CASES = [
          setup="R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])",
          target="_r = I.groebner_basis()",
          probe="assert (X[0] + X[1])**2 - X[0]**2 - X[1]**2 == 2 * X[0] * X[1]\nassert len(I.gens()) == len(X) and I.gens()[0] in R\nR2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2"),
+    # rank-13 PR 1 (plan-matlab-nocliffs r6 section 3): the ordering and the sparse LU, Stop after their PHASE
+    dict(id="M1o", transport="pyloop:matlab-colamd", owner="MATLAB sparse linear algebra", mode="python", s0=250, smin=40, smax=600,
+         grow=dict(kind="scale", p=2), phase="ordering", hosts=["cli"],
+         setup='import numpy as np\nimport _matlab_sparse as _sp, _matlab_colamd as _C, _matlab_lu as _L\n_L._phase_hook = lambda name: _p("PHASE", _i, name)\nk = S\nn = k * k\n_pm = [(i * 1999) % n for i in range(n)]\n_r, _c, _v = [], [], []\nfor _x in range(k):\n    for _y in range(k):\n        _t = _x * k + _y\n        for _dx, _dy, _w in ((0, 0, 4.0), (1, 0, -1.0), (-1, 0, -1.0), (0, 1, -1.0), (0, -1, -1.0)):\n            _a, _b = _x + _dx, _y + _dy\n            if 0 <= _a < k and 0 <= _b < k:\n                _r.append(_pm[_a * k + _b]); _c.append(_pm[_t]); _v.append(_w)\nA = _sp.make(n, n, np.array(_r), np.array(_c), np.array(_v))',
+         target='_L._phase("ordering")\n_q = _C.order_columns(A.m, A.n, A.jc, A.ir)',
+         probe='assert _L.factor(_sp.make(2, 2, np.array([0, 1]), np.array([0, 1]), np.array([2.0, 4.0])), "p").solve(np.ones((2, 1)))[1, 0] == 0.25'),
+    dict(id="M1l", transport="pyloop:matlab-lu", owner="MATLAB sparse linear algebra", mode="python", s0=70, smin=20, smax=160,
+         grow=dict(kind="scale", p=3), phase="lu", hosts=["cli"],
+         setup='import numpy as np\nimport _matlab_sparse as _sp, _matlab_colamd as _C, _matlab_lu as _L\n_L._phase_hook = lambda name: _p("PHASE", _i, name)\nk = S\nn = k * k\n_pm = [(i * 1999) % n for i in range(n)]\n_r, _c, _v = [], [], []\nfor _x in range(k):\n    for _y in range(k):\n        _t = _x * k + _y\n        for _dx, _dy, _w in ((0, 0, 4.0), (1, 0, -1.0), (-1, 0, -1.0), (0, 1, -1.0), (0, -1, -1.0)):\n            _a, _b = _x + _dx, _y + _dy\n            if 0 <= _a < k and 0 <= _b < k:\n                _r.append(_pm[_a * k + _b]); _c.append(_pm[_t]); _v.append(_w)\nA = _sp.make(n, n, np.array(_r), np.array(_c), np.array(_v))\n_q = _C.order_columns(A.m, A.n, A.jc, A.ir)',
+         target='_F = _L.factor(A, "m1l", q=_q)',
+         probe='assert _L.factor(_sp.make(2, 2, np.array([0, 1]), np.array([0, 1]), np.array([2.0, 4.0])), "p").solve(np.ones((2, 1)))[1, 0] == 0.25'),
     # r5 §6.2: XK with the window signature; s_max at lib/_png.py's pixel cap (4000 x 4000 < 2^24)
     dict(id="E13g", transport="wasm:raster.ts", owner="board/plot", mode="sage", s0=40, smin=4, smax=4000,
          grow=dict(kind="scale", p=1), exception="XK", xk=dict(kind="window", wrap="_sbraster.render"), hosts=["cli"],
