@@ -136,7 +136,9 @@ test("engineCall: an ASCII request makes no copy outside wasm memory; a non-ASCI
     // (the encoder's copy is the request's UTF-8, ascii.length + 5 bytes;
     // process.memoryUsage().external moves by a few bytes besides (CI saw
     // 20971623 for a 20971642-byte request, a local run 20971647), so the
-    // copy is asked within 64 KiB of its size: 300x the ASCII bound above)
+    // copy is asked within 64 KiB of its size: the copy is about 320x that
+    // tolerance, and the bound it proves, about 20 MB, is about 20x the 1 MiB
+    // ASCII ceiling above)
     assert.ok(otherExternal >= ascii.length - 65536, `non-ASCII: external grew by ${otherExternal}, less than the ${ascii.length}-byte copy less 64 KiB (the copy unseen?)`);
   } finally {
     TextEncoder.prototype.encode = encode;
