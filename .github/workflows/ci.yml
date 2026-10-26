@@ -253,10 +253,16 @@ jobs:
       actions: read
     outputs:
       mode: ${{ steps.resolve.outputs.mode }}
+      # (a dispatch: origin/master as this job saw it, for the gate job's check of the same base)
+      master: ${{ steps.resolve.outputs.master }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: "a dispatch needs origin/master (plan-size-gate-dispatch-range r2)"
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git rev-parse --verify refs/remotes/origin/master || { echo "refs/remotes/origin/master is missing: the size gate can't find the base"; exit 1; }
       - name: detect CI CPU quota
         run: scripts/ci-cpus.sh
       - uses: dtolnay/rust-toolchain@stable
@@ -377,6 +383,7 @@ jobs:
           SIZE_GATE_NODE: ${{ needs.changes.outputs.node }}
           SIZE_GATE_WEB: ${{ needs.changes.outputs.web }}
           SIZE_INPUTS: ${{ needs.changes.outputs.size_inputs }}
+          SIZE_DISPATCH_MASTER: ${{ needs.size-base.outputs.master }}
         run: |
           mkdir -p "$RUNNER_TEMP/size-records"
           if [ "$CHANGES" = success ] && [ "$CHECKS" = skipped ] && [ "$BASE" = skipped ] && [ "$SIZE_GATE_NODE" != true ] && [ "$SIZE_GATE_WEB" != true ] && [ "$SIZE_INPUTS" != true ]; then
@@ -1072,6 +1079,7 @@ jobs:
           python3 engine/py/test_capacity.py
           python3 engine/py/test_progress.py
           python3 engine/py/test_kedlaya.py
+          python3 engine/py/test_ffmat_echelon.py
           python3 sage-tests/run_cpython.py -v
 
   ci:

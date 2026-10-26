@@ -5,6 +5,7 @@ inverse, kernels (left: kernel(), and right), solving, characteristic
 polynomials, multiplicative orders, subspaces.  Gaussian elimination over
 the field; printed as Sage prints them."""
 
+import json as _json
 import random as _random
 
 import _sage_ff as _ff
@@ -1206,7 +1207,7 @@ def _echelon(rows, base, ncols, want_rows=True):
     """(reduced row echelon form, pivot columns, determinant factor) by
     Gauss-Jordan elimination over the field; the form is None when
     want_rows is false and the engine computed the rest."""
-    p = _engine_echelon_prime(base, len(rows), ncols)
+    p = _engine_echelon_route(base, len(rows), ncols)
     if p:
         return _engine_echelon(rows, base, ncols, p, want_rows)
     m = [list(r) for r in rows]
@@ -1919,7 +1920,7 @@ class FFMatrix:
         if isinstance(b, FFMatrix):
             _admit_size(self._base, self._ncols, b.ncols())
             n, k = self._ncols, b.ncols()
-            if k and _engine_echelon_prime(self._base, self.nrows(), n + k):
+            if k and _engine_echelon_route(self._base, self.nrows(), n + k):
                 # all right-hand sides in one [A | B] (in Rust): a pivot in
                 # any of B's columns means that column has no solution
                 aug = [list(r) + [self._base(x) for x in br] for r, br in zip(self._rows, b._rows)]
@@ -2143,37 +2144,113 @@ class FFMatrix:
 # the Python path
 _ENGINE_CHARPOLY_MAX_N = 512
 
-# engine/web nmod_echelon's admission (nmod_ops.rs ECH_MAX_DIM,
-# ECH_MAX_ENTRIES), for the matrix actually eliminated ([A | B] when
-# solving, [A | I] when inverting); empty and larger ones keep the Python
-# path
+# engine/web nmod_echelon's admission (nmod_ops.rs ECH_MAX_DIM), for the
+# matrix actually eliminated ([A | B] when solving, [A | I] when
+# inverting); empty and larger ones keep the Python path
 _ENGINE_ECHELON_MAX_DIM = 1024
-_ENGINE_ECHELON_MAX_ENTRIES = 400 * 401
+
+# The engine call's transport for an nrows x ncols matrix, E = nrows ncols
+# (plan F4 r4 §2a): the request, the bridge's copies, the reply and its
+# parse.  CPython's is the larger: the Python request (20 E), the Rust
+# String copy of it (20 E) and the engine's working memory beyond it
+# (28 E + 33 KiB), all in the process's memory; pyjs's heap holds at most
+# 40 E (its engine memory is the wasm instance's, outside the heap: at most
+# nmod_ops.rs ECH_PEAK).  Plus at most 256 KiB independent of E, per phase.
+_ECH_TRANSPORT_PER_ENTRY = 68
+_ECH_TRANSPORT_FIXED = 256 * 1024
+# (tests: a figure for this predicate alone; None: _heap_budget)
+_echelon_transport_figure = None
 
 _engine_prime = _ff._engine_prime
+
+
+def _heap_budget():
+    """The total a memory guard takes its share of: D0's capacity figure
+    (lib/_capacity.py) where there is one, else _heap_limit()."""
+    try:
+        from _capacity import heap_figure
+    except ImportError:
+        return _heap_limit()
+    return heap_figure()
 
 
 def _engine_echelon_prime(base, nrows, ncols):
     """p when the engine's nmod_echelon admits an nrows x ncols matrix over
     base, else None."""
-    if not isinstance(base, _ff.IntegerModRing_) or not (0 < nrows <= _ENGINE_ECHELON_MAX_DIM and 0 < ncols <= _ENGINE_ECHELON_MAX_DIM
-            and nrows * ncols <= _ENGINE_ECHELON_MAX_ENTRIES):
+    if not isinstance(base, _ff.IntegerModRing_) or not (0 < nrows <= _ENGINE_ECHELON_MAX_DIM and 0 < ncols <= _ENGINE_ECHELON_MAX_DIM):
         return None
     return _engine_prime(base)
+
+
+def _engine_echelon_transport_fits(nrows, ncols):
+    """Whether the engine call's transport for an nrows x ncols matrix (the
+    request, the bridge's copies, the engine's working memory in CPython,
+    the reply) fits this process's budget for one matrix: decided before
+    any text is built.  Never raises."""
+    need = _ECH_TRANSPORT_PER_ENTRY * nrows * ncols + _ECH_TRANSPORT_FIXED
+    return need <= (_echelon_transport_figure or _heap_budget)() // _HEAP_SHARE
+
+
+def _engine_echelon_route(base, nrows, ncols):
+    """p when an nrows x ncols matrix over base goes to the engine: its
+    shape and field admitted, then its transport (else the Python path,
+    with the rows untouched)."""
+    p = _engine_echelon_prime(base, nrows, ncols)
+    if p and _engine_echelon_transport_fits(nrows, ncols):
+        return p
+    return None
+
+
+def _engine_echelon_transport(rows, ncols, p, want_rows):
+    """The engine call (plan F4 r4 §2a, phases P1-P4): (pivots, the
+    determinant factor as an int, the reply's rows text or None).  No
+    field element is made here; each text is dropped as soon as the next
+    one exists."""
+    from sagebrush._engine import call_text
+    flag = "true" if want_rows else "false"
+    # one join: parts is [prefix, row 0, ";", row 1, ..., suffix], so the
+    # matrix text is never a separate string (digits only: nothing to
+    # escape)
+    parts = ['{"fn":"nmod_echelon","p":"%d","rows":%d,"cols":%d,"reduced":%s,"want_rows":%s,"m":"' % (p, len(rows), ncols, flag, flag)]
+    for i, r in enumerate(rows):
+        if i:
+            parts.append(";")
+        parts.append(",".join([str(int(x)) for x in r]))
+    parts.append('"}')
+    req = "".join(parts)
+    del parts
+    reply = call_text(req)
+    del req
+    r = _json.loads(reply)
+    del reply
+    if "error" in r:
+        raise ValueError(r["error"])
+    r = r["ok"]
+    piv = [int(t) for t in r["pivots"].split(",")] if r["pivots"] else []
+    return piv, int(r["det"]), (r.pop("rows") if want_rows else None)
+
+
+def _echelon_rows(text, base):
+    """The reply's rows text ("a,b;c,d") as rows of elements of base, one
+    row's substring at a time (phase P5)."""
+    m = []
+    a = 0
+    while True:
+        b = text.find(";", a)
+        row = text[a:] if b < 0 else text[a:b]
+        m.append([_ff._elt(base, int(t)) for t in row.split(",")])
+        if b < 0:
+            return m
+        a = b + 1
 
 
 def _engine_echelon(rows, base, ncols, p, want_rows):
     """_echelon in Rust (engine/arith nmod_mat: the same pivots, the first
     nonzero entry of each column from the current row down)."""
-    from sagebrush._engine import call
-    text = ";".join(",".join(str(int(x)) for x in r) for r in rows)
-    r = call("nmod_echelon", p=str(p), rows=len(rows), cols=ncols, m=text, reduced=bool(want_rows), want_rows=bool(want_rows))
-    piv = [int(t) for t in r["pivots"].split(",")] if r["pivots"] else []
-    det = _ff._elt(base, int(r["det"]))
-    m = None
-    if want_rows:
-        m = [[_ff._elt(base, int(t)) for t in row.split(",")] for row in r["rows"].split(";")]
-    return m, piv, det
+    piv, d, text = _engine_echelon_transport(rows, ncols, p, want_rows)
+    m = _echelon_rows(text, base) if want_rows else None
+    del text
+    return m, piv, _ff._elt(base, d)
 
 
 def _hessenberg(a, base):

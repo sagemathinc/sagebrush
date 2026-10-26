@@ -67,6 +67,8 @@
    "s0": 3000000,
    "smin": 100000,
    "smax": 25000000,
+   "leak_s": 3000000,
+   "leak_measure": "heap+external",
    "grow": {
     "kind": "scale",
     "p": 1
@@ -107,9 +109,9 @@
    "transport": "engineCall:mat_rank",
    "owner": "linear algebra (ff matrices)",
    "mode": "sage",
-   "s0": 450,
+   "s0": 600,
    "smin": 200,
-   "smax": 600,
+   "smax": 1024,
    "grow": {
     "kind": "scale",
     "p": 3
