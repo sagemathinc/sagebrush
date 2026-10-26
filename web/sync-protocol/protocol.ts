@@ -73,7 +73,7 @@ export const URL_MS = 5 * 60_000;
 export type Code =
   | "invalid" | "exists" | "missing" | "conflict" | "order" | "epoch" | "unknown_doc" | "forbidden"
   | "limit" | "storage_full" | "rate" | "readonly" | "deleting" | "busy"
-  | "unknown_client" | "fenced";
+  | "unknown_client" | "fenced" | "stale_epoch";
 
 export class SyncError extends Error {
   constructor(public code: Code, message: string, public detail?: Record<string, unknown>) { super(message); }
