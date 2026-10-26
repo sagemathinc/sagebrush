@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "rank-13 PR 1 r2 (#193): LU.solve's two-axis chunks (blocks of at most E columns), the ledger's reservations for q and the outer lists, and the scalar solve's guard on b, over the r1 marker 2026-10-26-matlab-nocliffs-pr1.json. Measured at master b4dd49df vs efa904a1 with CI's toolchain (bun 1.4.4, Node 24.21.0) on VM3: the two markers sum to each bundle's growth exactly",
+ "bytes": {
+  "cli/lib.gen.js": 3621,
+  "cli/pyjs.cjs": 3443,
+  "engine/lib/matlab-more.src": 3621
+ }
+}
