@@ -33,6 +33,14 @@ export function classifyXK(t, xk) {
 // exercised (a cell inside the window; for bound, a cell past the poll gap); every cell PASS is a
 // stale exception (FIXED: remove the case's xk field with the owner's fix); a window row with no
 // cell inside is INCOMPLETE ("XK not exercised").
+// a session cell (the matrix's cls): a trial left without RET or KI in a session cut at the run's
+// deadline had a shortened guard, so it is INVALID-budget, not a failure to stop; but a Stop that
+// could not be sent keeps classify's send_error (and so no baseline allowance), whatever the budget
+export function classifyCell(t, xk) {
+  if (t.budget_cut && !t.send_error && !t.marks.RET && !t.marks.KI) return { outcome: "INVALID", why: "run budget spent: the session was cut at the deadline" };
+  return classifyXK(t, xk);
+}
+
 export function xkRowOutcome(cells, leakOk, xk) {
   const own = rowOutcome(cells, leakOk);
   if (!xk || own === "FAIL" || own === "INCOMPLETE") return { outcome: own };
