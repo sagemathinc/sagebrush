@@ -8,6 +8,7 @@ description = "Exact arithmetic for the Sagebrush engines: word-size moduli, num
 [dependencies]
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-interrupt = { path = "../interrupt" }
+sagebrush-par = { path = "../par" }
 num-integer = "0.1"
 num-traits = "0.2"
 dashu-int = "0.6"

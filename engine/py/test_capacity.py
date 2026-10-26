@@ -336,6 +336,71 @@ _a, _b = _two_callers(_exc_a, [_exc_b, None])
 check("two failing calls: B raises its own", _raised(_b or ("missing",), _exc_b), True)
 check("two failing calls: A raises its own", _raised(_a or ("missing",), _exc_a), True)
 
+# every native computation is an asking call (no-cliffs C-2c scope r2
+# section 2): guarded/run enter it on the calling thread before the handoff
+# and finish it there; a stale total is refreshed on that thread first, the
+# source never runs on a worker, and what it raises reaches that call
+_EC = [[0, 0, 1, -1, 0]]  # (an elliptic curve: aplist_many runs on a pool)
+
+
+def _native_calls():
+    return {
+        "call (guarded)": lambda: _native.call('{"fn": "progress_tables"}'),
+        "aplist_many (run, a pool)": lambda: _native.aplist_many(_EC, 200, 4),
+    }
+
+
+def _outcome(f):
+    try:
+        return ("returned", f())
+    except BaseException as e:  # noqa: B902  (the point of the test)
+        return ("raised", e)
+
+
+for _name, _f in _native_calls().items():
+    _ran_on = []
+
+    def _recording(ran_on=_ran_on):
+        ran_on.append(threading.get_ident())
+        return _good
+    _stand_in(_recording)
+    _got = _outcome(_f)
+    check("%s: the source ran on the calling thread only" % _name, (_got[0], set(_ran_on)), ("returned", {threading.get_ident()}))
+    for _kind in (KeyboardInterrupt, SystemExit):
+        _exc = _kind()
+        _stand_in(_raising(_exc))
+        check("%s: a %s from the source reaches that call, the same object" % (_name, _kind.__name__), _raised(_outcome(_f), _exc), True)
+    _stand_in(_raising(OSError("unreadable")))
+    check("%s: an ordinary failure of the source is an unreadable total, not an error" % _name, _outcome(_f)[0], "returned")
+
+
+def _two_native_callers(f):
+    """Two threads run the same native call at once, each with its own
+    control exception from the source: each raises its own."""
+    excs = {"A": KeyboardInterrupt(), "B": SystemExit()}
+    both_in = threading.Barrier(2)
+
+    def source():
+        who = threading.current_thread().name
+        try:
+            both_in.wait(5)
+        except threading.BrokenBarrierError:
+            pass
+        raise excs[who]
+
+    _stand_in(source)
+    out = {}
+    ts = [threading.Thread(target=lambda w=w: out.__setitem__(w, _outcome(f)), name=w) for w in ("A", "B")]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(20)
+    return all(_raised(out.get(w, ("missing",)), excs[w]) for w in ("A", "B"))
+
+
+for _name, _f in _native_calls().items():
+    check("%s: two simultaneous callers each get their own exception" % _name, _two_native_callers(_f), True)
+
 _stand_in(_source)
 _snap = _native.ledger_snapshot()
 check("the next read answers again", (_snap["total"], _snap["status"], _snap["certified"]), (16 * GiB, "observed", True))

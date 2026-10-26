@@ -573,11 +573,72 @@ static NEXT_CHAIN: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
     static CHAIN: Cell<u64> = const { Cell::new(0) };
+    /// exclusive mode (no-cliffs C r8 section 2): every parallel entry runs
+    /// sequentially on its calling thread while it is set
+    static EXCLUSIVE: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The current thread's chain (0: no outer entry).
 pub fn current_chain() -> u64 {
     CHAIN.with(|c| c.get())
+}
+
+/// Whether this thread runs in exclusive mode (C r8 section 2: the wrapper
+/// in sagebrush-par then runs every parallel entry sequentially here).
+pub fn is_exclusive() -> bool {
+    EXCLUSIVE.with(|e| e.get())
+}
+
+/// What a parallel closure inherits from the thread that spawned it
+/// (no-cliffs C-2c scope r2 section 1.2): its chain and the exclusive flag.
+/// Identity only: never an asking call or an operation, whose thread-bound
+/// guards stay on the owner thread.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Context {
+    pub chain: u64,
+    pub exclusive: bool,
+}
+
+impl Context {
+    /// This thread's context.
+    pub fn current() -> Context {
+        Context { chain: current_chain(), exclusive: is_exclusive() }
+    }
+
+    /// Install this context on the current thread until the guard drops;
+    /// the thread's previous context then comes back, on success, error,
+    /// panic or Stop alike (a reused pool thread keeps nothing).
+    pub fn enter(self) -> ContextGuard {
+        let prev = Context::current();
+        CHAIN.with(|c| c.set(self.chain));
+        EXCLUSIVE.with(|e| e.set(self.exclusive));
+        ContextGuard { prev, _thread: ThreadBound::default() }
+    }
+}
+
+/// The guard of [`Context::enter`]: restores the previous context when
+/// dropped.  Thread-bound (neither Send nor Sync).
+#[must_use = "the context is restored as soon as the guard is dropped"]
+pub struct ContextGuard {
+    prev: Context,
+    _thread: ThreadBound,
+}
+
+impl Drop for ContextGuard {
+    fn drop(&mut self) {
+        CHAIN.with(|c| c.set(self.prev.chain));
+        EXCLUSIVE.with(|e| e.set(self.prev.exclusive));
+    }
+}
+
+/// Refresh a stale total where this thread may ask the host's source (C-2c
+/// scope r2 section 2.3): the parallel wrapper calls it before handing work
+/// out.  The host alone decides whether this thread is the asking owner (the
+/// Python host answers NotAsked on any other thread, so a worker refreshes
+/// nothing and never moves the total's age); the source runs outside the
+/// ledger's lock, as for any admission.
+pub fn refresh_if_owner() {
+    let _ = total();
 }
 
 /// Run f under a given chain (a parallel closure runs under its parent's).

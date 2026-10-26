@@ -230,7 +230,7 @@ impl Pivots<'_> {
             use std::sync::atomic::{AtomicUsize, Ordering};
             let next = AtomicUsize::new(0);
             let out: Vec<std::sync::Mutex<Vec<Row>>> = (0..blocks.len()).map(|_| std::sync::Mutex::new(vec![])).collect();
-            std::thread::scope(|sc| {
+            sagebrush_par::thread_scope(|sc| {
                 for _ in 0..threads {
                     sc.spawn(|| {
                         let mut acc = Acc { d: vec![0; ncols] };
@@ -278,7 +278,7 @@ impl Pivots<'_> {
             use std::sync::atomic::{AtomicUsize, Ordering};
             let next = AtomicUsize::new(0);
             let out: Vec<std::sync::Mutex<Row>> = (0..rows.len()).map(|_| std::sync::Mutex::new(Row::default())).collect();
-            std::thread::scope(|sc| {
+            sagebrush_par::thread_scope(|sc| {
                 for _ in 0..threads {
                     sc.spawn(|| {
                         let mut acc = Acc { d: vec![0; ncols] };
@@ -523,7 +523,7 @@ pub fn reduce_fl(piv: &Pivots, rows: &[Row], ncols: usize, threads: usize) -> Ve
     #[cfg(not(target_arch = "wasm32"))]
     {
         let bounds: Vec<(usize, usize)> = (0..t).map(|k| (k * nb / t, (k + 1) * nb / t)).collect();
-        let parts: Vec<Vec<Row>> = std::thread::scope(|sc| {
+        let parts: Vec<Vec<Row>> = sagebrush_par::thread_scope(|sc| {
             let hs: Vec<_> = bounds.iter().map(|&(lo, hi)| {
                 let f = &slice;
                 sc.spawn(move || f(lo, hi))

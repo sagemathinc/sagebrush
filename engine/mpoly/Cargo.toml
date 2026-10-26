@@ -10,6 +10,7 @@ sagebrush-bigint = { path = "../bigint" }
 sagebrush-arith = { path = "../arith" }
 sagebrush-poly = { path = "../poly" }
 sagebrush-interrupt = { path = "../interrupt" }
+sagebrush-par = { path = "../par" }
 num-traits = "0.2"
 num-integer = "0.1"
 

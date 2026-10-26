@@ -1016,7 +1016,7 @@ pub(crate) fn run_parallel<T: Sync, R: Send>(threads: usize, items: &[T], f: imp
         let next = AtomicUsize::new(0);
         let mut slots: Vec<Option<R>> = (0..items.len()).map(|_| None).collect();
         let results = std::sync::Mutex::new(&mut slots);
-        std::thread::scope(|sc| {
+        sagebrush_par::thread_scope(|sc| {
             for _ in 0..threads.min(items.len()) {
                 sc.spawn(|| loop {
                     let i = next.fetch_add(1, AO::Relaxed);
