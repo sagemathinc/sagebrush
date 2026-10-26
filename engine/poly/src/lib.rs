@@ -38,7 +38,7 @@ pub mod nf;
 /// only; rank-3 plan r3 section 4.3).
 #[cfg(feature = "test-faults")]
 pub mod test_faults {
-    pub use crate::vanhoeij::fault::{reach, with, with_hooks, Reach, CORRUPT_CLD, FORCE_S0, S2_LAST_PASS, SKIP_PREPASS, STAGE1_EXIT, STAGE1_LOW_PREC, STAGE1_NO_CERT};
+    pub use crate::vanhoeij::fault::{reach, with, with_hooks, Reach, CORRUPT_CLD, FORCE_S0, INTERRUPT_AFTER_PASS2, S2_LAST_PASS, SKIP_PREPASS, STAGE1_EXIT, STAGE1_LOW_PREC, STAGE1_NO_CERT};
 }
 mod vanhoeij;
 
