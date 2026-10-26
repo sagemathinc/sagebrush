@@ -422,3 +422,40 @@ fn the_global_ledger_net_holds() {
         assert_eq!(rep.tag_breaches, 0, "S_{k}: {rep:?}");
     }
 }
+
+#[test]
+fn power_takes_a_u64_exponent() {
+    // rank-3 plan r3, section 3.6: x^k with k split at 2^s agrees with
+    // BigInt::pow (s small here, so the split path runs: s = 32 in power)
+    for x in [2i64, 3, 13, -7] {
+        let x = BigInt::from(x);
+        for k in (0u64..70).chain([127, 128, 129, 1000]) {
+            for s in [1u32, 3, 5] {
+                assert_eq!(pow_u64(&x, k, s), x.pow(k as u32), "{x}^{k} split at 2^{s}");
+            }
+        }
+    }
+    assert_eq!(power(&Budget::unlimited(), 13, 40).unwrap().v, BigInt::from(13).pow(40));
+}
+
+#[test]
+fn a_huge_exponent_is_refused_by_its_reservation() {
+    // section 3.6: an exponent whose p^k can't be counted in bytes is
+    // refused by the reservation even with no memory limit, and one that
+    // can is refused by the memory guard; both before anything is built
+    let b = Budget::unlimited();
+    for k in [u64::MAX, u64::MAX / 2, u64::MAX / 4, 1 << 61] {
+        let (r, used) = allocated_by(|| power(&b, 13, k).map(|x| x.bits()));
+        // (refused by the byte count, or, when that fits, by the work count)
+        let e = r.unwrap_err();
+        assert!(e.what == "memory (overflow)" || e.what == "work (overflow)", "k {k}: {e}");
+        assert!(used < 1024, "k {k}: {used} bytes before refusing");
+    }
+    let b = Budget::new(Limits::DEFAULT);
+    for k in [1u64 << 32, (1 << 32) + 1, 1 << 40] {
+        let (r, used) = allocated_by(|| power(&b, 13, k).map(|x| x.bits()));
+        assert_eq!(r.unwrap_err().what, "memory", "k {k}");
+        assert!(used < 1024, "k {k}: {used} bytes before refusing");
+    }
+    assert_eq!(b.live(), 0);
+}
