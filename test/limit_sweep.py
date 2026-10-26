@@ -120,11 +120,37 @@ def load_json(name, default=None):
         return json.load(f)
 
 
+class WriteIncomplete(OSError):
+    """A write that failed and couldn't be undone: `kept` lists each file's saved old text, kept for recovery."""
+
+    def __init__(self, cause, kept):
+        super().__init__("the sweep's files were left partly written (%s); their old texts are kept: %s"
+                         % (cause, ", ".join("%s (the old %s)" % (k, p) for p, k in kept)))
+        self.kept = kept
+
+
+def _stage(path, text):
+    # (a staged file's creation: its own name, so a test can fail any staging step)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def _put_back(src, dst):
+    # (the rollback's move of a saved old text back into place: a rename, which needs no new space; its own
+    # name, so a test can fail it apart from the forward moves)
+    os.replace(src, dst)
+
+
 def write_all(files):
-    """Write {path: text} all or nothing (astra2, #181): every new text and every old one is staged beside
-    its file first; then each new one is moved into place, and if any step fails, the files already
-    replaced are put back from their staged old texts (a file that didn't exist is removed), so the old
-    state is left whole.  The staged copies are removed either way."""
+    """Write {path: text} all or nothing (astra2, #181).
+    - Staged first: each file's new text, and its old text if it has one, beside it (path.sweep-new,
+      path.sweep-old).  Each staged name is recorded before the file is made, so a staging failure removes
+      every one, and nothing is replaced.
+    - Then each new text is moved into place.  If a move fails, the files already replaced get their old
+      texts back by renaming the saved ones (no new space needed), a file that didn't exist is removed, and
+      the failure is raised: the old state, whole.
+    - If that recovery itself fails, nothing saved is deleted: WriteIncomplete names every old text kept.
+    On success the saved old texts are removed."""
     staged, done = [], []
     try:
         for p, text in files.items():
@@ -132,37 +158,47 @@ def write_all(files):
             if os.path.exists(p):
                 with open(p, encoding="utf-8") as f:
                     old = f.read()
-            t, b = p + ".sweep-new", p + ".sweep-old"
-            with open(t, "w", encoding="utf-8") as f:
-                f.write(text)
+            entry = [p, p + ".sweep-new", p + ".sweep-old" if old is not None else None]
+            staged.append(entry)
+            _stage(entry[1], text)
             if old is not None:
-                with open(b, "w", encoding="utf-8") as f:
-                    f.write(old)
-            staged.append((p, t, b if old is not None else None))
-        for p, t, b in staged:
-            os.replace(t, p)
-            done.append((p, b))
+                _stage(entry[2], old)
     except BaseException:
-        for p, b in reversed(done):
-            if b is None:
-                os.remove(p)
-            else:
-                with open(b, encoding="utf-8") as f:
-                    old = f.read()
-                with open(p + ".sweep-back", "w", encoding="utf-8") as f:
-                    f.write(old)
-                _put_back(p + ".sweep-back", p)
-        raise
-    finally:
         for _, t, b in staged:
             for x in (t, b):
                 if x and os.path.exists(x):
                     os.remove(x)
-
-
-def _put_back(src, dst):
-    # (the rollback's own move: not os.replace's name, so a test can fail every forward move and still roll back)
-    os.rename(src, dst) if os.name != "nt" else os.replace(src, dst)
+        raise
+    try:
+        for p, t, b in staged:
+            os.replace(t, p)
+            done.append((p, b))
+    except BaseException as cause:
+        undone = []
+        try:
+            for p, b in reversed(done):
+                if b is None:
+                    os.remove(p)
+                else:
+                    _put_back(b, p)
+                undone.append(p)
+        except BaseException as err:
+            kept = [(p, b) for p, b in done if p not in undone and b is not None]
+            replaced = {p for p, _ in done}
+            for p, t, b in staged:
+                # (the new texts not moved, and the old texts of files never replaced, which are still in place)
+                for x in (t, b if p not in replaced else None):
+                    if x and os.path.exists(x):
+                        os.remove(x)
+            raise WriteIncomplete("%s; then, putting the old texts back: %s" % (cause, err), kept) from cause
+        for _, t, b in staged:
+            for x in (t, b):
+                if x and os.path.exists(x) and x not in [d[1] for d in done if d[0] not in undone]:
+                    os.remove(x)
+        raise
+    for _, _, b in staged:
+        if b and os.path.exists(b):
+            os.remove(b)
 
 
 def git(*args, text=True):
