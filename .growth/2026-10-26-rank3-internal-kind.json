@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "Rank-3 plan r3 PR 1 (#188): FactorLimit's kind (Resource, Internal), its message and the JSON 'internal' flag (engine wasm); sagebrush._engine raises RuntimeError for an internal error (lib bundles). Figures: size-gate transition mode against master 6871eb1a (dispatch 40277069977) for the lib rows; the engine wasm is CI's fresh-wasm-9c226594 (7177339 B) against master's committed 7172688 B",
+ "bytes": {
+  "cli/lib.gen.js": 191,
+  "cli/pyjs.cjs": 183,
+  "engine/lib/sage.pre": 349,
+  "engine/lib/sage.src": 191,
+  "engine/sagebrush-engine.wasm": 4651
+ }
+}
