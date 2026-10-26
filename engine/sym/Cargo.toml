@@ -15,3 +15,5 @@ num-traits = "0.2"
 
 [dev-dependencies]
 serde_json = "1"
+# (tests only: an injected recombination fault, tests/internal_error.rs)
+sagebrush-poly = { path = "../poly", features = ["test-faults"] }
