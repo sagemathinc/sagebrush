@@ -824,6 +824,34 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
+ "engine/poly/src/lib.rs :: hensel :: pub(crate) fn hensel<'b>(b: &'b Budget, f: &[BigInt], fs: &[FPoly], p: u64, k: u64) -> FResult<Vec<Held<'b>>> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/lib.rs :: hensel_pair :: fn hensel_pair<'b>(b: &'b Budget, f: &[BigInt], g: &[u64], h: &[u64], p: u64, k: u64) -> FResult<(Held<'b>, Held<'b>)> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/lib.rs :: lift :: pub(crate) fn lift<'b>(b: &'b Budget, f: &[BigInt], m: &Modular, k: u64) -> FResult<Vec<Held<'b>>> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/lib.rs :: power :: pub(crate) fn power<'b>(b: &'b Budget, p: u64, k: u64) -> FResult<HeldInt<'b>> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/tests.rs :: a_huge_exponent_is_refused_by_its_reservation :: for k in [u64::MAX, u64::MAX / 2, u64::MAX / 4, 1 << 61] { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/tests.rs :: a_huge_exponent_is_refused_by_its_reservation :: let b = Budget::new(Limits::DEFAULT); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/tests.rs :: a_huge_exponent_is_refused_by_its_reservation :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/tests.rs :: calibrated_work :: assert!(Limits::CALIBRATED.work - b.work_left() < Limits::CALIBRATED.work / 100); #0": {
   "class": "none",
   "owner": "polynomial factorization"
@@ -872,6 +900,10 @@
   "class": "none",
   "owner": "polynomial factorization"
  },
+ "engine/poly/src/tests.rs :: power_takes_a_u64_exponent :: assert_eq!(power(&Budget::unlimited(), 13, 40).unwrap().v, BigInt::from(13).pow(40)); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/tests.rs :: the_global_ledger_net_holds :: let b = Budget::default(); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -892,6 +924,18 @@
   "row": "inv-35"
  },
  "engine/poly/src/vanhoeij.rs ::  :: use crate::budget::{big_bytes, limbs, mul_work, poly_bytes, tag, words_bytes, Budget, FResult, Phase, Reservation}; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: a_huge_precision_is_refused_before_it_wraps :: assert_eq!((e.what, e.kind), (\"memory (overflow)\", crate::Kind::Resource), \"k {k}: {e}\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: a_huge_precision_is_refused_before_it_wraps :: for k in [u64::MAX / 2 + 1, u64::MAX] { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: a_huge_precision_is_refused_before_it_wraps :: let b = Budget::unlimited(); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
@@ -917,6 +961,10 @@
  },
  "engine/poly/src/vanhoeij.rs :: lattice :: Vec::with_capacity(MAX_COLS) #0": {
   "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: a = a.checked_mul(2).ok_or_else(|| b.refuse(\"precision\", u64::MAX, a))?; #0": {
+  "class": "2",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: lattice :: assert!(dets.iter().all(|x| x.bits() <= cap), \"a Gram determinant above cap bits\"); #0": {
@@ -958,11 +1006,6 @@
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: lattice :: let _w = b.reserve(crate::budget::words_bytes((4 * (clog2(r as u64) + 1) + 8) * (n as u64 + 1)))?; #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
- },
- "engine/poly/src/vanhoeij.rs :: lattice :: let a = m.k.checked_mul(1 << level).ok_or_else(|| b.refuse(\"precision\", u64::MAX, m.k as u64))?; #0": {
   "class": "3",
   "owner": "polynomial factorization",
   "row": "inv-35"
