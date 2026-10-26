@@ -160,7 +160,8 @@ def _register_capacity():
         from ._native import set_memory_total_source
     except ImportError:
         return  # (a native build without the ledger: nominal total)
-    set_memory_total_source(_capacity_total)
+    # (looked up at each read, so that a test can stand in a source)
+    set_memory_total_source(lambda: _capacity_total())
 
 
 _register_capacity()

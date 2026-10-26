@@ -231,6 +231,115 @@ check("the ledger's total is engine_total's", (_snap["total"], _snap["status"], 
 check("the ledger's allowance is a quarter", _snap["allowance"], 4 * GiB)
 check("the process's own measure is read (physical row)", _snap["live"] > 0 and _snap["certified"], True)
 check("nothing outstanding between calls", _snap["outstanding"], 0)
+
+# what the total source raises (CORR-C1-1): a KeyboardInterrupt, SystemExit or
+# any other BaseException, from the call or from converting its answer,
+# reaches the call that asked, as the same object, and no other call; an
+# ordinary failure or a malformed answer is an unreadable total
+import threading
+
+_source = sagebrush._capacity_total
+_good = _source()
+
+
+def _stand_in(f):
+    sagebrush._capacity_total = f
+    _t2.sleep(0.15)  # (read again when 100 ms old)
+
+
+def _raising(exc):
+    def f():
+        raise exc
+    return f
+
+
+class _BadInt:
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __index__(self):
+        raise self.exc
+
+
+def _snapshot():
+    try:
+        return ("returned", _native.ledger_snapshot())
+    except BaseException as e:  # noqa: B902  (the point of the test)
+        return ("raised", e)
+
+
+def _raised(got, exc):
+    return got[0] == "raised" and got[1] is exc
+
+
+for _kind in (KeyboardInterrupt, SystemExit):
+    _exc = _kind()
+    _stand_in(_raising(_exc))
+    check("a %s from the source reaches the asking call, the same object" % _kind.__name__, _raised(_snapshot(), _exc), True)
+    _exc = _kind()
+    _stand_in(lambda e=_exc: (_BadInt(e), _good[1], _good[2], _good[3]))
+    check("a %s converting its answer reaches the asking call, the same object" % _kind.__name__, _raised(_snapshot(), _exc), True)
+for _f, _label in ((_raising(OSError("unreadable")), "an ordinary failure of the source"),
+                   (lambda: (_BadInt(ValueError("bad")), _good[1], _good[2], _good[3]), "an ordinary failure converting its answer"),
+                   (lambda: ("x", 0, False, []), "a malformed answer")):
+    _stand_in(_f)
+    _got = _snapshot()
+    check(_label + " is an unreadable total", (_got[0],) + ((_got[1]["status"], _got[1]["certified"]) if _got[0] == "returned" else ()), ("returned", "nominal", False))
+
+
+def _two_callers(a_first, b_answers):
+    """Thread A asks; its source raises a_first, then (on the same call's
+    next read) waits while thread B asks with sources b_answers (one per
+    read: an exception to raise, or None for the good answer).  Returns
+    (A's result, B's result)."""
+    a_waiting, go = threading.Event(), threading.Event()
+    reads = {"A": 0, "B": 0}
+
+    def source():
+        who = threading.current_thread().name
+        n = reads[who]
+        reads[who] = n + 1
+        if who == "A":
+            if n == 0:
+                raise a_first
+            a_waiting.set()
+            go.wait(10)
+            return _good
+        e = b_answers[min(n, len(b_answers) - 1)]
+        if e is not None:
+            raise e
+        return _good
+
+    out = {}
+
+    def ask(who):
+        out[who] = _snapshot()
+
+    _stand_in(source)
+    a = threading.Thread(target=ask, args=("A",), name="A")
+    a.start()
+    if a_waiting.wait(10):
+        b = threading.Thread(target=ask, args=("B",), name="B")
+        b.start()
+        b.join(10)
+    go.set()
+    a.join(10)
+    return out.get("A"), out.get("B")
+
+
+_exc_a = SystemExit()
+_a, _b = _two_callers(_exc_a, [None])
+check("another call's successful read does not take A's exception", (_b[0] if _b else None, _b[1]["status"] if _b and _b[0] == "returned" else None), ("returned", "observed"))
+check("A raises its own exception, the same object", _raised(_a or ("missing",), _exc_a), True)
+_exc_a, _exc_b = KeyboardInterrupt(), KeyboardInterrupt()
+_a, _b = _two_callers(_exc_a, [_exc_b, None])
+check("two failing calls: B raises its own", _raised(_b or ("missing",), _exc_b), True)
+check("two failing calls: A raises its own", _raised(_a or ("missing",), _exc_a), True)
+
+_stand_in(_source)
+_snap = _native.ledger_snapshot()
+check("the next read answers again", (_snap["total"], _snap["status"], _snap["certified"]), (16 * GiB, "observed", True))
+check("a native call still runs", P.factor([-1, 0, 1]), (1, [([-1, 1], 1), ([1, 1], 1)]))
 C._set_sources()
 
 os.remove(root + "/proc/meminfo")
