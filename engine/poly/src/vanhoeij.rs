@@ -1623,6 +1623,44 @@ pub(crate) mod tests {
         assert_eq!(reach.s2_cert_a, 0, "{reach:?}");
     }
 
+    /// An internal error's kind and message, and the counters.
+    fn internal_of(r: FResult<usize>) -> String {
+        let e = r.unwrap_err();
+        assert_eq!(e.kind, crate::Kind::Internal, "{e}");
+        let m = e.to_string();
+        assert!(m.starts_with(crate::INTERNAL_PREFIX), "{m}");
+        m
+    }
+
+    #[test]
+    fn no_rows_after_the_cut_is_an_internal_error() {
+        // section 4.3: the s = 0 branch, in Stage 1 (S_5 as it comes) and in
+        // Stage 2 (Stage 1 ended at once); each injection reaches its branch
+        // and no other
+        for (stage, hooks) in [(1, fault::FORCE_S0), (2, fault::FORCE_S0 | fault::STAGE1_EXIT)] {
+            let (r, reach) = factored(&sd(5), hooks, None, false);
+            let m = internal_of(r);
+            assert!(m.contains("the lattice cut kept no row"), "{m}");
+            assert_eq!((reach.internal_s0, reach.internal_no_cert, reach.internal_x), (1, 0, 0), "stage {stage}: {reach:?}");
+            assert_eq!(reach.s2_entries, (stage == 2) as u64, "{reach:?}");
+        }
+    }
+
+    #[test]
+    fn no_certificate_at_the_proved_precision_is_an_internal_error() {
+        // section 4.3: one CLD value corrupted at a* by about 0.618 p^a (Stage
+        // 2 started at a*, the certificate taken after the last pass only).
+        // On two factors the corruption breaks the indicator of the factor
+        // holding p-adic factor 0, and the other survives the cut: rows
+        // remain (not the s = 0 branch) but no certificate
+        let f = product(&[sd(3), shift(&sd(3), 1)]);
+        let (r, reach, _) = stage2_direct(&f, fault::CORRUPT_CLD | fault::S2_LAST_PASS, None, true);
+        let m = internal_of(r);
+        assert!(m.contains("no recombination certificate at the proved precision"), "{m}");
+        assert_eq!((reach.internal_no_cert, reach.internal_s0, reach.internal_x), (1, 0, 0), "{reach:?}");
+        assert_eq!(reach.s2_cert_a, 0, "{reach:?}");
+    }
+
     #[test]
     #[ignore]
     fn probe_all_passes() {
@@ -1704,5 +1742,72 @@ pub(crate) mod tests {
         assert_eq!(e.need - e.remaining, 1, "{e}");
         assert_eq!(after, crate::alloc_spy::refused_at(), "allocations after the refusal");
         assert_eq!(b.live(), 0);
+    }
+
+    /// A lattice (Stage 1) call on f's modular data under `b`, with `limit`
+    /// for the call; the factor count.
+    fn stage1_call(b: &Budget, f: &[BigInt], limit: Option<u64>) -> FResult<Option<usize>> {
+        let m = crate::modular(b, f).unwrap().unwrap();
+        let lifted = crate::lift(b, f, &m, m.k).unwrap();
+        b.set_memory_limit(limit.unwrap_or(u64::MAX));
+        ledger_log::reset();
+        lattice(b, f, &m, &lifted, &mut 0).map(|o| o.map(|fs| fs.len()))
+    }
+
+    /// The VM rows deferred from rank-3 PR 2 to PR 4 (delta 1 r2; astra2's
+    /// requirement 4): `cargo test --release -p sagebrush-poly --lib --
+    /// --ignored vm_` on the VM.
+    #[test]
+    #[ignore]
+    fn vm_s7s6_tight_memory() {
+        // S_7 S_6 (degree 192, r = 96): Stage 1's predicted peak (hand-offs
+        // counted) is the observed one; exactly it admits, one byte less
+        // refuses at that reservation before allocating, nothing left live
+        let f = product(&[sd(7), shift(&sd(6), 1)]);
+        let b = Budget::new(Limits::UNLIMITED);
+        assert_eq!(stage1_call(&b, &f, None).unwrap(), Some(2));
+        let (_, peak, relift) = ledger_log::get();
+        assert!(!relift, "certified at level 0");
+        assert_eq!(b.peak(), peak, "predicted at line {}", ledger_log::peak_line());
+        drop(b);
+        let b = Budget::new(Limits::UNLIMITED);
+        assert_eq!(stage1_call(&b, &f, Some(peak)).unwrap(), Some(2));
+        assert_eq!(b.live(), 0);
+        drop(b);
+        let b = Budget::new(Limits::UNLIMITED);
+        let r = stage1_call(&b, &f, Some(peak - 1));
+        let after = crate::alloc_spy::allocated();
+        let e = r.unwrap_err();
+        assert_eq!((e.what, e.need - e.remaining), ("memory", 1), "{e}");
+        assert_eq!(after, crate::alloc_spy::refused_at());
+        assert_eq!(b.live(), 0);
+        eprintln!("VM S_7 S_6: peak {peak} (line {}) admits; one byte less refuses (need {})", ledger_log::peak_line(), e.need);
+    }
+
+    #[test]
+    #[ignore]
+    fn vm_guard_rows() {
+        // S_8 and S_7 S_7(x+1), formerly the r > MAX_R subset search: under
+        // the 512 MiB default guard they refuse cleanly, before allocating,
+        // with nothing left live; with a 1 GiB share they factor (the peak
+        // reservation reported)
+        for (name, f, t) in [("S_8", sd(8), 1usize), ("S_7 S_7(x+1)", product(&[sd(7), shift(&sd(7), 1)]), 2)] {
+            let b = Budget::new(Limits::DEFAULT);
+            let t0 = std::time::Instant::now();
+            let r = crate::try_factor_with(&f, &b).map(|x| x.1.len());
+            let after = crate::alloc_spy::allocated();
+            let e = r.unwrap_err();
+            assert_eq!((e.what, e.kind), ("memory", crate::Kind::Resource), "{name}: {e}");
+            assert_eq!(after, crate::alloc_spy::refused_at(), "{name}: allocations after the refusal");
+            assert_eq!(b.live(), 0);
+            eprintln!("VM {name} at 512 MiB: refused in {} ({e}) after {:.1} s", e.phase.name(), t0.elapsed().as_secs_f64());
+            let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+            let t0 = std::time::Instant::now();
+            let r = fault::with_hooks(0, None, false, || crate::try_factor_with(&f, &b).map(|x| x.1.len()));
+            assert_eq!(r.unwrap(), t, "{name} at 1 GiB");
+            let reach = fault::reach();
+            assert_eq!(reach.full_subsets_large, 0, "{name}: {reach:?}");
+            eprintln!("VM {name} at 1 GiB: {t} factor(s) in {:.1} s, peak reservation {} B; {reach:?}", t0.elapsed().as_secs_f64(), b.peak());
+        }
     }
 }
