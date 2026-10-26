@@ -203,6 +203,9 @@ jobs:
           scripts/sync-python-package.sh --check
           node scripts/gen-viewer3d.mjs --check
           node cdn/build.mjs --check
+          node scripts/check-engine-module.mjs --self-test
+          # (the committed, shipped module; engine-wasm checks its fresh build, which overwrites it there)
+          node scripts/check-engine-module.mjs wasm/sagebrush-engine.wasm
           node scripts/board-format-schema.mjs --check
           # (the architecture article: its links pinned and present at their commit, its pages current, its board on the built site)
           node scripts/architecture-article.mjs --check
@@ -963,6 +966,11 @@ jobs:
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           node scripts/build-engine.mjs
+          # (no-cliffs C r16 section 3.2: no start section, every active segment within the initial memory and table)
+          node scripts/check-engine-module.mjs wasm/sagebrush-engine.wasm
+          # (no-cliffs C r15 section 1: the growth envelope against the engine's own allocator, a never-shipped probe module)
+          (cd engine && cargo build --release -p sagebrush-growth-probe --target wasm32-unknown-unknown)
+          node engine/growth-probe/sweep.mjs engine/target/wasm32-unknown-unknown/release/sagebrush_growth_probe.wasm
           node engine/web/tests/wasm_designated.mjs
           git diff --quiet wasm/ || echo "::warning::wasm/sagebrush-engine.wasm differs from a fresh build of engine/"
           node scripts/third-party-notices.mjs --check

@@ -14,12 +14,18 @@ fn fresh(total_bytes: u64) -> std::sync::MutexGuard<'static, ()> {
     s.set_resident(0);
     s.chains = [(0, 0); CHAIN_SLOTS];
     s.certified_chains = [0; CHAIN_SLOTS];
+    s.baseline = None;
+    s.retired = 0;
+    s.fault = false;
+    s.permit_in_flight = 0;
+    s.last_growth_delta = 0;
     #[cfg(not(target_arch = "wasm32"))]
     {
         s.measure = Measure::NONE;
     }
     drop(s);
     hooks::set_fake_unreadable(false);
+    hooks::set_fake_committed(None);
     hooks::set_fake_usage(Some((0, None)));
     set_total(Some(Total { bytes: total_bytes, status: TotalStatus::Observed, joint: false, uncertified: false }));
     g
@@ -481,4 +487,246 @@ fn a_nested_certified_entry_keeps_the_outer_mark() {
     assert_eq!(outer.finish(), Ok(()));
     assert!(!state().is_certified_chain(chain));
     std::fs::remove_dir_all(&d).unwrap();
+}
+
+// ------------------------------------------------------------------ C-2b-i: page growth (C r15 sections 1-2), R_ret (r14 section 2, r15 section 4, r16 section 1)
+
+const P: u64 = PAGE;
+
+/// Fake pages: `committed` bytes, and a total whose floor(E / phi) is
+/// `usable` (a multiple of FRAG_DEN).
+fn paged(committed: u64, usable: u64) -> std::sync::MutexGuard<'static, ()> {
+    let g = fresh(total_for_usable(usable));
+    hooks::set_fake_committed(Some(committed));
+    g
+}
+
+#[test]
+fn the_envelope_covers_header_rounding_and_one_slack_page() {
+    assert_eq!(growth_envelope(0), Some(2 * P));
+    assert_eq!(growth_envelope(1), Some(2 * P));
+    assert_eq!(growth_envelope(P - 64), Some(2 * P));
+    assert_eq!(growth_envelope(P - 63), Some(3 * P));
+    for k in [1u64, 2, 16] {
+        assert_eq!(growth_envelope(k * P - 1), Some((k + 2) * P));
+        assert_eq!(growth_envelope(k * P), Some((k + 2) * P));
+        assert_eq!(growth_envelope(k * P + 1), Some((k + 2) * P));
+    }
+    // checked: no wrap
+    assert_eq!(growth_envelope(!0u64), None);
+    assert_eq!(growth_envelope(!0u64 - 64), None);
+}
+
+#[test]
+fn natively_a_growth_is_a_whole_block_reservation_without_permits() {
+    let _g = fresh(total_for_usable(1 << 20));
+    let mut g = reserve_growth("block", 4096).unwrap();
+    assert_eq!((g.granted(), g.held(), outstanding_bytes()), (4096, 4096, 4096));
+    assert!(matches!(g.permit(P), Err(EngineError::Internal(_))));
+    drop(g);
+    assert_eq!(outstanding_bytes(), 0);
+}
+
+#[test]
+fn g_is_the_envelope_or_the_room_and_zero_room_is_reuse_only() {
+    // floor(E/phi) = 100 pages, L = 10 pages: room 90 pages
+    let _g = paged(10 * P, 100 * P);
+    let g = reserve_growth("block", 100).unwrap();
+    assert_eq!((g.granted(), outstanding_bytes()), (2 * P, 2 * P));
+    drop(g);
+    assert_eq!(outstanding_bytes(), 0);
+    // room exactly 0 (L = floor(E/phi)): success, nothing granted
+    hooks::set_fake_committed(Some(100 * P));
+    let mut z = reserve_growth("block", 100).unwrap();
+    assert_eq!((z.granted(), z.held(), outstanding_bytes()), (0, 0, 0));
+    assert!(matches!(z.permit(P), Err(EngineError::Memory(r)) if r.need == P));
+}
+
+#[test]
+fn a_permit_beyond_what_the_room_granted_refuses_with_need_k() {
+    // room one page, a block whose envelope is two pages: g = 1 page; a
+    // grow of two pages refuses at the permit (need = k), one page is fine
+    let _g = paged(10 * P, 11 * P);
+    let mut g = reserve_growth("block", 100).unwrap();
+    assert_eq!(g.granted(), P);
+    match g.permit(2 * P) {
+        Err(EngineError::Memory(r)) => assert_eq!((r.need, r.what.as_str()), (2 * P, "memory growth")),
+        _ => panic!("two pages against one held must refuse"),
+    }
+    let p = g.permit(P).unwrap();
+    hooks::fake_grow(P);
+    p.commit();
+    assert_eq!((g.held(), outstanding_bytes()), (0, 0));
+}
+
+#[test]
+fn commit_releases_the_full_k_so_the_boundary_admission_fits() {
+    // daybreak2's case (C r15 section 2.3): baseline + resident dominate L,
+    // so a grow raises M but not L (Delta-L = 0); the full k still leaves O,
+    // and a host admission at the exact boundary fits.  (Mutation: release
+    // Delta-L instead of k; then O keeps 2 pages and the boundary refuses.)
+    let _g = paged(10 * P, 64 * P);
+    let keep = reserve("result", 20 * P).unwrap().register_resident();
+    hooks::set_fake_usage(Some((30 * P, None))); // L = max(M, B_w + R_res) = 30 pages, as admit reads it
+    let mut g = reserve_growth("block", 3 * P).unwrap();
+    for _ in 0..2 {
+        let p = g.permit(P).unwrap();
+        hooks::fake_grow(P);
+        p.commit();
+    }
+    assert_eq!(last_growth_delta(), 0, "M grew under the B_w + R_res watermark");
+    // during the call: g = 5 pages granted, 2 committed, so O = 3 pages; the
+    // boundary is 64 - 30 - 3 = 31 pages (with Delta-L released, O would
+    // still be 5 pages and 31 would refuse)
+    assert_eq!((g.granted(), g.held(), outstanding_bytes()), (5 * P, 3 * P, 3 * P));
+    let edge = reserve("host result", 31 * P).unwrap();
+    assert!(reserve("one more", FRAG_DEN).is_err());
+    drop(edge);
+    drop(g);
+    assert_eq!(outstanding_bytes(), 0);
+    drop(keep);
+}
+
+#[test]
+fn a_failed_grow_changes_nothing_and_a_new_permit_follows() {
+    let _g = paged(10 * P, 100 * P);
+    let mut g = reserve_growth("block", 100).unwrap();
+    let (held, o) = (g.held(), outstanding_bytes());
+    {
+        let _p = g.permit(P).unwrap();
+        // (memory.grow returned -1: no fake_grow, no commit)
+    }
+    assert_eq!((g.held(), outstanding_bytes(), hooks::fake_committed()), (held, o, Some(10 * P)));
+    let p = g.permit(P).unwrap();
+    hooks::fake_grow(P);
+    p.commit();
+    assert_eq!(g.held(), held - P);
+}
+
+#[test]
+fn one_permit_in_flight_per_instance_across_handles() {
+    let _g = paged(10 * P, 100 * P);
+    let mut a = reserve_growth("a", 100).unwrap();
+    let mut b = reserve_growth("b", 100).unwrap();
+    let pa = a.permit(P).unwrap();
+    assert!(matches!(b.permit(P), Err(EngineError::Internal(m)) if m.contains("in flight")));
+    drop(pa);
+    assert!(b.permit(P).is_ok());
+}
+
+#[test]
+fn nested_handles_keep_their_own_held_and_drop_releases_only_it() {
+    let _g = paged(10 * P, 100 * P);
+    let before = outstanding_bytes();
+    let op = Operation::enter();
+    let a = reserve_growth("outer", 100).unwrap();
+    let inner = Operation::enter();
+    let mut b = reserve_growth("inner", P + 1).unwrap();
+    assert_eq!((a.held(), b.held()), (2 * P, 3 * P));
+    let p = b.permit(P).unwrap();
+    hooks::fake_grow(P);
+    p.commit();
+    drop(b);
+    assert_eq!(outstanding_bytes(), before + 2 * P);
+    assert_eq!(inner.finish(), Ok(()));
+    drop(a);
+    assert_eq!(op.finish(), Ok(()));
+    assert_eq!(outstanding_bytes(), before);
+}
+
+#[test]
+fn success_then_a_refusal_or_panic_keeps_m_and_returns_o() {
+    let _g = paged(10 * P, 100 * P);
+    let o0 = outstanding_bytes();
+    let r = std::panic::catch_unwind(|| {
+        let mut g = reserve_growth("block", 3 * P).unwrap();
+        let p = g.permit(P).unwrap();
+        hooks::fake_grow(P);
+        p.commit();
+        panic!("Stop");
+    });
+    assert!(r.is_err());
+    assert_eq!((outstanding_bytes(), hooks::fake_committed()), (o0, Some(11 * P)));
+}
+
+#[test]
+fn f5a_call_shape_charges_g_plus_t_never_the_block_twice() {
+    // C r14 section 1.5 / 4.3: reserve(T) for the host, reserve_growth(B)
+    // for the block; O peaks at g + T (+ R).  (Mutation: add reserve(B)
+    // back, and the peak is B + g + T.)
+    let _g = paged(10 * P, 1000 * P);
+    let block = 8 * P;
+    let mut h = reserve("nmod host", 3 * P).unwrap();
+    let g = reserve_growth("nmod block", block).unwrap();
+    h.grow("nmod result", P).unwrap();
+    assert_eq!(outstanding_bytes(), g.granted() + 3 * P + P);
+    assert_eq!(g.granted(), growth_envelope(block).unwrap());
+    drop(g);
+    drop(h);
+    assert_eq!(outstanding_bytes(), 0);
+}
+
+#[test]
+fn a_permit_must_be_whole_pages() {
+    let _g = paged(10 * P, 100 * P);
+    let mut g = reserve_growth("block", 100).unwrap();
+    assert!(matches!(g.permit(P + 1), Err(EngineError::Internal(_))));
+}
+
+#[test]
+fn retired_pages_count_as_live_by_one_byte_and_at_equality() {
+    // phi (L + R_ret + O + x) <= E: 80 usable, R_ret 24 (fake rows stand
+    // for the watermark row), live 16: x = 40 fits exactly, 48 doesn't
+    let _g = fresh(total_for_usable(80 * P));
+    hooks::set_fake_usage(Some((16 * P, None)));
+    set_retired((24 * P) as f64, 0).unwrap();
+    assert_eq!(retired_bytes(), 24 * P);
+    match reserve("x", 40 * P + FRAG_DEN) {
+        Err(EngineError::Memory(r)) => {
+            assert_eq!((r.retired, r.live), (24 * P, 16 * P));
+            assert!(EngineError::Memory(r).to_string().contains("retired engine instances"));
+        }
+        _ => panic!("one step over must refuse"),
+    }
+    assert!(reserve("x", 40 * P).is_ok());
+}
+
+#[test]
+fn the_room_counts_retired_pages() {
+    let _g = paged(10 * P, 100 * P);
+    set_retired((89 * P) as f64, 0).unwrap();
+    let g = reserve_growth("block", 100).unwrap();
+    assert_eq!(g.granted(), P); // 100 - 10 - 89
+}
+
+#[test]
+fn an_invalid_retired_figure_is_internal_and_a_sticky_fault() {
+    for (b, f) in [(f64::NAN, 0), (-65536.0, 0), (65536.5, 0), (9007199254740992.0, 0), (1000.0, 0), (65536.0, 2)] {
+        let _g = fresh(total_for_usable(1 << 20));
+        assert!(!state().fault);
+        assert!(matches!(set_retired(b, f), Err(EngineError::Internal(_))), "{} {}", b, f);
+        assert!(state().fault && !certified());
+        // an ordinary refresh doesn't clear it, nor does a valid figure
+        set_total(Some(Total { bytes: total_for_usable(1 << 20), status: TotalStatus::Observed, joint: false, uncertified: false }));
+        assert!(set_retired(0.0, 0).is_ok());
+        assert!(state().fault && !certified(), "a fault stays");
+    }
+}
+
+#[test]
+fn the_failed_creation_fault_is_sticky_and_refuses_protected_growth() {
+    let _g = paged(10 * P, 100 * P);
+    let op = Operation::enter();
+    {
+        let mut s = state();
+        s.mark_certified_chain(op.chain()).unwrap();
+    }
+    // control: certified (observed, no fault), a protected growth is granted
+    drop(reserve_growth("block", 100).unwrap());
+    set_retired(0.0, 1).unwrap();
+    set_retired(0.0, 0).unwrap();
+    assert!(state().fault);
+    assert!(matches!(reserve_growth("block", 100), Err(EngineError::Memory(_))));
+    state().unmark_certified_chain(op.chain());
+    assert_eq!(op.finish(), Ok(()));
 }
