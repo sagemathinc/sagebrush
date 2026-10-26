@@ -85,17 +85,18 @@ fn an_interrupt_between_stage2_passes_leaves_no_reservation() {
 /// section 4.6): Stage 1's (the input as it comes) and Stage 2's (Stage 1
 /// ended at once).  Each run is traced in full, then Stop is armed at the
 /// middle check of the site: the call unwinds at that check, in that site,
-/// and leaves no live reservation.
-fn stop_in_each_lll(f: &[BigInt], memory: u64) {
+/// and leaves no live reservation.  `memory` is each site's share: Stage
+/// 2's lattice keeps its columns untruncated, so it needs more.
+fn stop_in_each_lll(f: &[BigInt], memory: [u64; 2]) {
     use sagebrush_interrupt::hooks;
     let _serial = serial();
     sagebrush_interrupt::clear();
-    for (site, faults) in [("recombination stage 1 LLL", 0u8), ("recombination stage 2 LLL", tf::STAGE1_EXIT)] {
+    for (site, faults, memory) in [("recombination stage 1 LLL", 0u8, memory[0]), ("recombination stage 2 LLL", tf::STAGE1_EXIT, memory[1])] {
         hooks::reset();
         hooks::trace();
         let b = Budget::new(Limits { memory, ..Limits::DEFAULT });
         let r = tf::with_hooks(faults, None, false, || sagebrush_poly::try_factor_with(f, &b).map(|x| x.1.len()));
-        assert_eq!(r.unwrap(), 1, "{site}");
+        assert_eq!(r.unwrap_or_else(|e| panic!("{site}: {e:?}")), 1, "{site}");
         let at = hooks::traced(site);
         assert!(!at.is_empty(), "{site} never checked");
         let mid = at[at.len() / 2];
@@ -115,14 +116,15 @@ fn stop_in_each_lll(f: &[BigInt], memory: u64) {
 
 #[test]
 fn a_stop_in_either_stage_lll_unwinds_there() {
-    stop_in_each_lll(&sk(6), 1 << 30);
+    stop_in_each_lll(&sk(6), [1 << 30, 1 << 30]);
 }
 
-/// S_8 (degree 256, r = 128 at its prime): the VM row of section 4.6, with a
-/// 1 GiB share (S_8's lattice needs about 0.9 GB); `cargo test --release --
-/// --ignored` on the VM.
+/// S_8 (degree 256, r = 128 at its prime): the VM row of section 4.6.  Stage
+/// 1's lattice needs about 0.9 GB (a 1 GiB share), Stage 2's about 3.5 GB (4
+/// GiB, measured: a 1 GiB share refuses it cleanly in Lll); `cargo test
+/// --release -- --ignored` on the VM.
 #[test]
 #[ignore]
 fn a_stop_in_either_stage_lll_unwinds_there_s8() {
-    stop_in_each_lll(&sk(8), 1 << 30);
+    stop_in_each_lll(&sk(8), [1 << 30, 4 << 30]);
 }
