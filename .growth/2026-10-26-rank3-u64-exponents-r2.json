@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Rank-3 plan r3 PR 3 (#192), a top-up of 2026-10-26-rank3-u64-exponents.json: its cli/pyjs.cjs row (668) was the base64 formula's 664 plus one quantum; dispatch 40376715350's transition-mode size-gate (base b4dd49df, head 90bba77c) measured +672 (28818553 -> 28819225)",
+ "bytes": {
+  "cli/pyjs.cjs": 4
+ }
+}
