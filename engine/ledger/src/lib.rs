@@ -139,8 +139,21 @@ pub fn set_total_and_measure(total: Option<Total>, rows: &[Row]) {
     s.measure = m;
 }
 
+/// The native host's answer when the ledger asks for its total.
 #[cfg(not(target_arch = "wasm32"))]
-type TotalHost = Box<dyn Fn() -> Option<(Total, Vec<Row>)> + Send + Sync>;
+pub enum HostAnswer {
+    /// the total and every applicable row
+    Total(Total, Vec<Row>),
+    /// no usable answer: the nominal total, uncertified (and asked again)
+    Unreadable,
+    /// the host did not ask its source on this thread (no caller there to
+    /// receive what the source might raise): the total in force stays, still
+    /// due for its refresh, and `certified` is false until a fresh answer
+    NotAsked,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type TotalHost = Box<dyn Fn() -> HostAnswer + Send + Sync>;
 #[cfg(not(target_arch = "wasm32"))]
 static TOTAL_HOST: std::sync::OnceLock<TotalHost> = std::sync::OnceLock::new();
 /// (the native host's TOTAL, a limit, not a usage, is asked again when 100
@@ -151,8 +164,18 @@ const TOTAL_REFRESH: std::time::Duration = std::time::Duration::from_millis(100)
 /// Register the native host's total and applicable rows (the first
 /// registration stands): asked outside the ledger's lock.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn set_total_host(f: impl Fn() -> Option<(Total, Vec<Row>)> + Send + Sync + 'static) {
+pub fn set_total_host(f: impl Fn() -> HostAnswer + Send + Sync + 'static) {
     let _ = TOTAL_HOST.set(Box::new(f));
+}
+
+/// Take the native host's answer.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn apply_host_answer(a: HostAnswer) {
+    match a {
+        HostAnswer::Total(t, rows) => set_total_and_measure(Some(t), &rows),
+        HostAnswer::Unreadable => set_total_and_measure(None, &[]),
+        HostAnswer::NotAsked => {}
+    }
 }
 
 /// The total in force (refreshed from the native host when 100 ms old,
@@ -162,10 +185,7 @@ pub fn total() -> Total {
     if let Some(host) = TOTAL_HOST.get() {
         let stale = state().total_at.is_none_or(|t| t.elapsed() >= TOTAL_REFRESH);
         if stale {
-            match host() {
-                Some((t, rows)) => set_total_and_measure(Some(t), &rows),
-                None => set_total_and_measure(None, &[]),
-            }
+            apply_host_answer(host());
         }
     }
     state().total.unwrap_or(NOMINAL)
@@ -194,7 +214,10 @@ pub fn certified() -> bool {
         }
         measure::prepare();
         let mut s = state();
-        s.total.is_some() && s.measure.available() && s.measure.read_each(|_| {})
+        // (a registered host's total must be fresh too: a read that could
+        // not ask, HostAnswer::NotAsked, leaves it stale and uncertified)
+        let fresh = TOTAL_HOST.get().is_none() || s.total_at.is_some_and(|t| t.elapsed() < TOTAL_REFRESH);
+        fresh && s.total.is_some() && s.measure.available() && s.measure.read_each(|_| {})
     }
 }
 
@@ -445,6 +468,27 @@ pub fn with_chain<T>(chain: u64, f: impl FnOnce() -> T) -> T {
 /// obligations to be zero: [`Operation::finish`] releases what remained
 /// (cleanup first, under the lock), then reports it as an internal error; a
 /// drop (an unwind) only releases it.
+///
+/// An operation installs and clears its own thread's chain, so it is bound to
+/// that thread: it is neither Send nor Sync (a worker joins the chain with
+/// [`with_chain`], it does not take the guard).
+///
+/// ```compile_fail
+/// fn send<T: Send>(_: T) {}
+/// send(sagebrush_ledger::Operation::enter());
+/// ```
+///
+/// ```compile_fail
+/// fn sync<T: Sync>() {}
+/// sync::<sagebrush_ledger::Operation>();
+/// ```
+///
+/// (the same check compiles for a type that may move, a reservation)
+///
+/// ```
+/// fn send<T: Send>() {}
+/// send::<sagebrush_ledger::Reservation>();
+/// ```
 pub struct Operation {
     chain: u64,
     outer: bool,
@@ -452,17 +496,21 @@ pub struct Operation {
     /// this operation marked its chain certification-dependent (and unmarks
     /// it when it ends)
     protected: bool,
+    _thread: ThreadBound,
 }
+
+/// (a marker that makes a guard of thread-local state neither Send nor Sync)
+type ThreadBound = std::marker::PhantomData<*const ()>;
 
 impl Operation {
     pub fn enter() -> Operation {
         let cur = current_chain();
         if cur != 0 {
-            return Operation { chain: cur, outer: false, done: false, protected: false };
+            return Operation { chain: cur, outer: false, done: false, protected: false, _thread: ThreadBound::default() };
         }
         let chain = NEXT_CHAIN.fetch_add(1, Relaxed);
         CHAIN.with(|c| c.set(chain));
-        Operation { chain, outer: true, done: false, protected: false }
+        Operation { chain, outer: true, done: false, protected: false, _thread: ThreadBound::default() }
     }
 
     /// Enter an operation that DEPENDS on certification: a caller that
@@ -612,13 +660,24 @@ thread_local! {
 
 /// A coverage scope: allocations made on this thread while it lives belong
 /// to a governing reservation, span, fence or resident under construction
-/// (C r12 section 4).  Only the test-only audit reads it.
-pub struct Scope(());
+/// (C r12 section 4).  Only the test-only audit reads it.  Bound to its
+/// thread like [`Operation`]:
+///
+/// ```compile_fail
+/// fn send<T: Send>(_: T) {}
+/// send(sagebrush_ledger::Scope::enter());
+/// ```
+///
+/// ```compile_fail
+/// fn sync<T: Sync>() {}
+/// sync::<sagebrush_ledger::Scope>();
+/// ```
+pub struct Scope(ThreadBound);
 
 impl Scope {
     pub fn enter() -> Scope {
         COVER.with(|c| c.set(c.get() + 1));
-        Scope(())
+        Scope(ThreadBound::default())
     }
 }
 

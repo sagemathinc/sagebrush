@@ -95,14 +95,20 @@ const ctl = {
   switchOnUpgrade: null, switchOnPut: null,
   /** the next PUT answered with this, after `ms`: {ms, status, body} (a late answer) */
   delayFakePut: null,
+  /** the server's own index_changed passed on to the page.  The cloud's account object sends them (plan-sync-index-
+   * changed r1); core's server doesn't.  Off by default, so each case decides when the page hears of a change (it
+   * injects notices with `notice`): the server's are dropped and counted (log.serverNotices) */
+  serverNotices: false,
 };
 /** every open proxied socket's closer */
 const closers = new Set();
 /** every open proxied socket's sender to the page (a notice injected as the server would send it, D8) */
 const toPage = new Set();
-const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [] };
+const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0 };
 const held = [];
-const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [] });
+/** the server's own index_changed dropped by the front over the whole run (log.serverNotices is per case: reset) */
+let serverNoticesDropped = 0;
+const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0 });
 
 async function upstream(method, path, headers, body) {
   const h = { origin: SITE, ...headers };
@@ -163,9 +169,10 @@ async function control(body) {
     case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
     case "probe": return probe(body);
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
-    // open socket: the core server doesn't send them, so the client's side is tested by injecting them here)
+    // open socket: the client's side is tested by injecting them here; the server's own are dropped unless
+    // ctl.serverNotices)
     case "notice": { let sent = 0; for (let i = 0; i < (body.times ?? 1); i++) for (const f of toPage) { f(JSON.stringify({ t: "index_changed", head: body.head })); sent++; } return { sent }; }
-    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], rebuiltReal: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], rebuiltReal: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null, serverNotices: false }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
     default: return { error: "unknown" };
   }
 }
@@ -330,6 +337,13 @@ server.on("upgrade", async (req, socket, head) => {
       let m;
       try { m = JSON.parse(e.data); } catch { m = {}; }
       log.got.push({ t: m.t, req: m.req, ops: m.t === "ack" ? m.ops : m.t === "index" ? m.ops?.length : undefined, code: m.code });
+      if (m.t === "index_changed" && !ctl.serverNotices) {
+        log.serverNotices++;
+        serverNoticesDropped++;
+        // (marked as filtered, never as `dropped`: the cases' `g.dropped` means a drop they asked for)
+        log.got.at(-1).filtered = true;
+        return;
+      }
       if (m.t === "welcome" && ctl.rewriteWelcome) {
         Object.assign(m, ctl.rewriteWelcome);
         ctl.rewriteWelcome = null;
@@ -407,6 +421,8 @@ try {
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   // (measurements, printed pass or fail)
   for (const [, what] of results) if (/figures/.test(what)) console.log("  " + what);
+  // (0 against core's server, which sends none; the cloud's sends them: plan-sync-index-changed r1)
+  console.log(`  front: the server's own index_changed notices dropped (ctl.serverNotices off): ${serverNoticesDropped}`);
   for (const e of errors) fails.push("page error: " + e);
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
   else {
