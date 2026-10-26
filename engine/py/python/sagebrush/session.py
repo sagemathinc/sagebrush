@@ -139,6 +139,7 @@ class _CtrlState:
         self.cond = threading.Condition()
         self.closing = False
         self.inflight = 0
+        self.unregistered = False
 
 
 def _break_as_sigint(nt=None, boundary=None, at_exit=None, report=None, drain_s=5.0):
@@ -152,18 +153,23 @@ def _break_as_sigint(nt=None, boundary=None, at_exit=None, report=None, drain_s=
     waits weren't probed, so a run blocked there is still ended by the grace's
     restart, as before.
 
-    At exit (atexit) the routine is retired, in this order: (1) under its lock,
+    At exit (atexit) the routine is retired, in this order: (0) SIGINT is set
+    to SIG_IGN, so nothing can interrupt the cleanup; (1) under its lock,
     `closing` is set, so a callback that enters from then on converts nothing
     and returns TRUE (handled: it isn't passed on to the C runtime's SIGBREAK
     path either); (2) exit waits, up to `drain_s`, for the callbacks that had
-    already entered to finish (each holds `inflight` while it converts);
+    already entered to finish (each holds `inflight` while it converts): a
+    conversion already in flight at (1) may still deliver its SIGINT here,
+    which (0) makes harmless;
     (3) SetConsoleCtrlHandler(r, FALSE).  If (3) fails, the routine stays
     recorded as installed (a retry really retries), inert because closing, and
     the failure is reported with its Windows error; if (2) times out, that is
     reported too.  The routine is never freed (_RETIRED).
-    What this guarantees: no signal is converted after (1), and every callback
-    that had entered the routine before (1) has finished before the
-    interpreter's teardown proceeds (unless the drain is reported as timed out).
+    What this guarantees: no conversion starts after (1); a conversion that
+    started before (1) finishes (and its SIGINT is ignored) before the routine
+    is unregistered and the interpreter's teardown proceeds, unless the drain is
+    reported as timed out; and the cleanup completes (unregistered, retired, or
+    the failure reported) whatever SIGINT arrives meanwhile.
     What it can't: a callback the system has dispatched but that hasn't yet
     entered Python can't be counted from Python; if it enters during (2) it is
     inert, and if it would enter only after finalization has begun, it is
@@ -224,14 +230,31 @@ def _break_as_sigint(nt=None, boundary=None, at_exit=None, report=None, drain_s=
             """Retire the routine (see above): True once it is unregistered."""
             if r not in _CTRL:
                 return True
+            # (first, SIGINT ignored: a conversion still in flight may deliver its SIGINT during the drain, and the
+            # worker's handler would otherwise raise KeyboardInterrupt out of this cleanup; at exit nothing restores
+            # it.  Off the main thread signal.signal can't be called, and the KeyboardInterrupt catch below does it)
+            try:
+                signal.signal(signal.SIGINT, signal.SIG_IGN)
+            except ValueError:
+                pass
+            try:
+                return _retire()
+            except KeyboardInterrupt:
+                return _retire()
+
+        def _retire():
+            if r not in _CTRL:
+                return True
             with state.cond:
                 state.closing = True
                 drained = state.cond.wait_for(lambda: state.inflight == 0, timeout=drain_s)
             if not drained:
                 report("a console callback was still converting a Ctrl-Break after %.1f s at exit" % drain_s)
-            if not set_handler(r, False):
-                report("the console routine couldn't be removed at exit (Windows error %s): it stays registered, and inert" % last_error())
-                return False
+            if not state.unregistered:
+                if not set_handler(r, False):
+                    report("the console routine couldn't be removed at exit (Windows error %s): it stays registered, and inert" % last_error())
+                    return False
+                state.unregistered = True  # (so a retry after an interruption here never removes it twice)
             _CTRL.remove(r)
             _RETIRED.append(r)  # (never freed: the thunk outlives any call already under way)
             return True
