@@ -624,34 +624,50 @@ jobs:
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
       # (WebKit's apt dependencies, about 180 packages and 117 MB, dominate the install, and the Azure apt
       # mirror has stalled their download past this step's 10 minutes: #189's dispatch, twice, Oct 26.
-      # Their .debs are cached per runner image and Playwright version. apt checks a cached .deb against
-      # the signed index's hash before it uses it, so the cache saves downloads and never changes what is
-      # installed. A run that downloads a .deb the cache lacked, even one cut short by the timeout, saves
-      # what it has under a new key, so a slow mirror's progress carries over to the next run; a run that
-      # downloads nothing saves nothing.)
+      # On GitHub's hosted runners (ephemeral VMs: the apt.conf.d line below dies with the job) their .debs
+      # are cached per runner image and Playwright version; a CI_RUNNER installs as before, uncached.
+      # apt takes an archive already in its cache on its size alone, so every restored .deb is first
+      # checked against the SHA256 in the signed Packages index, and one that fails is deleted and
+      # downloaded again (scripts/ci-verify-debs.sh, astra #191 r1).  A run that adds a .deb the cache
+      # lacked, even one cut short by the timeout, saves the whole set under a new key, so a slow mirror's
+      # progress carries over; a run that adds none saves nothing.  Entries aren't capped here: about one
+      # per run that adds a .deb (a new image or Playwright version, a superseded package), each the full
+      # set (about 120 MB), until GitHub's cache eviction (least recently used, 10 GB per repository, and
+      # after 7 days unused).)
       - name: WebKit's apt packages, the cache key
         id: debs-key
-        run: echo "prefix=webkit-debs-${ImageOS:-self}-${ImageVersion:-self}-pw$PLAYWRIGHT_VERSION-" >> "$GITHUB_OUTPUT"
+        if: ${{ vars.CI_RUNNER == '' }}
+        run: echo "prefix=webkit-debs-${ImageOS:-unknown}-${ImageVersion:-unknown}-pw$PLAYWRIGHT_VERSION-" >> "$GITHUB_OUTPUT"
       - name: WebKit's apt packages, restored
+        if: ${{ steps.debs-key.outcome == 'success' }}
         uses: actions/cache/restore@v4
         with:
           path: ~/sb-webkit-debs
           key: ${{ steps.debs-key.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ${{ steps.debs-key.outputs.prefix }}
+      - name: WebKit's apt packages, verified against the signed index
+        if: ${{ steps.debs-key.outcome == 'success' }}
+        timeout-minutes: 3
+        run: |
+          scripts/ci-verify-debs.sh --self-test
+          mkdir -p ~/sb-webkit-debs/partial
+          restored=$(cd ~/sb-webkit-debs && ls | grep -c '\.deb$' || true)
+          sudo apt-get -o Acquire::Retries=5 update -qq
+          out=$(scripts/ci-verify-debs.sh ~/sb-webkit-debs)
+          echo "$restored .debs restored; $out"
+          if [ "$restored" -gt 0 ] && echo "$out" | grep -q '^kept 0,'; then echo "::warning::no restored .deb matched the apt index: the cache is doing nothing"; fi
+          (cd ~/sb-webkit-debs && ls | grep '\.deb$' || true) > "$RUNNER_TEMP/debs-restored"
+          printf 'Dir::Cache::Archives "%s/";\nAcquire::Retries "5";\n' ~/sb-webkit-debs | sudo tee /etc/apt/apt.conf.d/99sb-webkit-debs > /dev/null
       - name: "Playwright's WebKit, pinned"
         timeout-minutes: 10
         run: |
-          mkdir -p ~/sb-webkit-debs/partial
-          (cd ~/sb-webkit-debs && ls | grep '\.deb$' || true) > "$RUNNER_TEMP/debs-restored"
-          echo "$(wc -l < "$RUNNER_TEMP/debs-restored") .debs restored"
-          printf 'Dir::Cache::Archives "%s/";\nAcquire::Retries "5";\n' ~/sb-webkit-debs | sudo tee /etc/apt/apt.conf.d/99sb-webkit-debs > /dev/null
           mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw" && echo '{"private": true}' > package.json
           npm i --no-audit --no-fund "playwright@$PLAYWRIGHT_VERSION" && npx playwright install --with-deps webkit
       - name: WebKit's apt packages, saved if this run downloaded one the cache lacked
         id: debs-new
         if: ${{ !cancelled() && steps.debs-key.outcome == 'success' }}
         run: |
-          # (superseded versions dropped first, so the cache doesn't grow with every image)
+          # (superseded versions dropped first, so a saved set holds only what apt can still use)
           sudo apt-get -o Dir::Cache::Archives="$HOME/sb-webkit-debs/" autoclean > /dev/null || true
           sudo rm -rf ~/sb-webkit-debs/partial ~/sb-webkit-debs/lock
           sudo chown -R "$(id -u):$(id -g)" ~/sb-webkit-debs
