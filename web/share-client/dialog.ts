@@ -149,6 +149,10 @@ export function createShareDialog(h: ShareDialogHost) {
     if (busy) e.preventDefault();
   });
   d.addEventListener("close", () => {
+    // (the browser fires close as a queued task: one that arrives once the dialog is open again
+    // belongs to a close before this open, which has already reset everything for itself; acting
+    // on it would drop the new open's list, train 4's web-sync)
+    if (d.open) return;
     // (a close that got through anyway, a second Esc whose cancel can't be refused, or a
     // programmatic close: shown again, the upload's state as it is, UI-B1)
     if (busy) {
