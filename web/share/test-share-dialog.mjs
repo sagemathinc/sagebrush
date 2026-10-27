@@ -354,6 +354,47 @@ try {
     await ev("window.fetch = window.__fetch");
   }
 
+  // ---- #207 board's notes: the dialog opens at once while the check runs, and a close meanwhile ends that open
+  {
+    const slow = (ms) => ev(`(() => { const f = window.__fetch ?? window.fetch; window.__fetch = f; window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? new Promise((r) => setTimeout(r, ${ms})).then(() => f(u, o)) : f(u, o)); })()`);
+    await slow(1500);
+    const t0 = Date.now();
+    await ev("document.querySelector('#sharemenu').click()");
+    await until("document.querySelector('#sharedlg').open", 1000).catch(() => {});
+    const early = await ev("({ open: document.querySelector('#sharedlg').open, checking: !document.querySelector('#sharechecking').hidden, form: !document.querySelector('#shareform').hidden, signin: !document.querySelector('#sharesignin').hidden, link: !document.querySelector('#sharelink').disabled && !document.querySelector('#shareup').contains(document.querySelector('#sharelink')) })");
+    ok(Date.now() - t0 < 1000 && early.open && early.checking && !early.form && !early.signin && early.link, "a slow sign-in check: the dialog is open at once, saying it's checking, its link usable: " + JSON.stringify(early));
+    await until("!document.querySelector('#shareform').hidden", 10000).catch(() => {});
+    ok(await ev("!document.querySelector('#shareform').hidden && document.querySelector('#sharechecking').hidden"), "...then the form, the 'checking' note gone");
+    await until("/^(Checked|Found no|Stopped)/.test(document.querySelector('#sharestatus').textContent)", 60000).catch(() => {});
+    await closeDialog();
+    const g = await ev("window.sagebrush.share.generation");
+    await ev("document.querySelector('#sharemenu').click()");
+    await until("document.querySelector('#sharedlg').open", 1000).catch(() => {});
+    await sleep(200);
+    await closeDialog();
+    await sleep(2500);
+    ok(await ev(`!document.querySelector('#sharedlg').open && window.sagebrush.share.generation === ${g}`), "closed while checking: the check's end opens nothing, and no file list is made");
+    await ev("window.fetch = window.__fetch");
+  }
+  // ---- nothing known (a fresh page whose every check fails), then a 404: board's untested row, and note 2
+  {
+    const { browserContextId } = await raw("Target.createBrowserContext");
+    const q = await newPage(browserContextId);
+    await q.send("Page.addScriptToEvaluateOnNewDocument", { source: "(() => { const f = window.fetch; window.__me = 503; window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? Promise.resolve(new Response('x', { status: window.__me })) : f(u, o)); })()" });
+    await q.send("Page.navigate", { url: dev.site + "/" });
+    await q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+    await q.ev("document.querySelector('#sharemenu').click()");
+    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden", 10000).catch(() => {});
+    ok(await q.ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareup').hidden && !document.querySelector('#shareunreachable').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "nothing known and the check fails again: the dialog says why, with neither 'Sign in' nor the form");
+    await q.ev("document.querySelector('#sharedlg').close()");
+    await q.ev("window.__me = 404");
+    await q.ev("document.querySelector('#sharemenu').click()");
+    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden", 10000).catch(() => {});
+    ok(await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#shareup').hidden && !document.querySelector('#sharelink').hidden"), "then a 404 (this site has no sharing): no Upload section at all, the link still there");
+    await raw("Target.closeTarget", { targetId: q.targetId });
+    await raw("Target.disposeBrowserContext", { browserContextId });
+  }
+
   // ---- #172 r2's review: closing mid-upload (board's UI-B1, astra3's CORR-172-ASTRA-4)
   {
     await openDialog();
