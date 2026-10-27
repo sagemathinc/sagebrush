@@ -242,7 +242,7 @@ fn a_4200_bit_binomial_takes_stage_b() {
 /// q = 2^(bits/2) - 1 for even bits, 2^((bits-1)/2) + 1 for odd (7 divides
 /// neither at these sizes: the content is 1).
 fn square_binomial(bits: u64) -> (Vec<BigInt>, BigInt) {
-    let q: BigInt = if bits % 2 == 0 { (BigInt::one() << (bits / 2) as u32) - 1 } else { (BigInt::one() << ((bits - 1) / 2) as u32) + 1 };
+    let q: BigInt = if bits.is_multiple_of(2) { (BigInt::one() << (bits / 2) as u32) - 1 } else { (BigInt::one() << ((bits - 1) / 2) as u32) + 1 };
     let a: BigInt = &q * &q;
     assert_eq!(a.bits(), bits);
     (vec![BigInt::from(-49), BigInt::zero(), a], q)
