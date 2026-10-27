@@ -425,7 +425,8 @@ try {
     const added = await q.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const f = window.fetch; window.__me = ${code}; window.__served = []; window.__pending = 0;
       window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? (window.__pending++, new Promise((r) => setTimeout(r, 6000)).then(() => (window.__pending--, window.__served.push(window.__me), new Response('x', { status: window.__me })))) : f(u, o)); })()` });
     await q.send("Page.navigate", { url: dev.site + "/" });
-    await q.until("!!document.querySelector('#sharemenu') && !!window.sagebrush", 30000);
+    // (the page has opened its notebook, and its first check is still pending: the slow-server case)
+    await q.until("!!document.querySelector('#sharemenu') && !!window.sagebrush && !document.body.classList.contains('opening')", 30000);
     const before = await q.ev("({ pending: window.__pending, served: window.__served.length, hash: location.hash, status: document.querySelector('#status').textContent })");
     const t0 = Date.now();
     await q.ev("document.querySelector('#sharemenu').click()");
