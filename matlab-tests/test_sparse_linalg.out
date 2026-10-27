@@ -93,3 +93,11 @@ logical 1x1 true
 logical 1x1 true
 logical 1x1 false
 logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+double 1x1 20
+double 1x1 20
+logical 1x1 false
+logical 1x1 true

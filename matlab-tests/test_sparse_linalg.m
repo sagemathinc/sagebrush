@@ -100,6 +100,20 @@ C = spdiags([-e 4 * e -e], -1:1, n, n) + 0.5 * sparse(1:n, n:-1:1, 1, n, n);
 x = C \ e; show(be(C, x, e) < 64 * n * eps);
 Z = sparse([1:n, n * ones(1, n - 1), 1:n - 1], [1:n, 1:n - 1, n * ones(1, n - 1)], [(4 + 1i) * ones(1, n), ones(1, n - 1), 1i * ones(1, n - 1)], n, n);
 x = Z \ e; show(isreal(x)); show(be(Z, x, e) < 64 * n * eps);
+% just past the dense route (n = 4001: the sparse route by cost, band or LU;
+% the n = 4000 side is a dense solve, too slow here, timed by M2's boundary
+% probe), a 41-diagonal band, a complex band and a zero right-hand side
+% (exactly zero); logicals only
+n = 4001; e = ones(n, 1);
+T = spdiags([-e 3 * e -e], -1:1, n, n);
+x = T \ e; show(be(T, x, e) < 64 * n * eps);
+R = T + sparse([n * ones(1, n - 1), 1:n - 1], [1:n - 1, n * ones(1, n - 1)], 0.25, n, n);
+x = R \ e; show(be(R, x, e) < 64 * n * eps);
+show(all(T \ zeros(n, 1) == 0));
+W = spdiags([ones(n, 20), 50 * e, ones(n, 20)] ./ (1:41), -20:20, n, n);
+x = W \ e; show(be(W, x, e) < 64 * n * eps); show(bandwidth(W, 'lower')); show(bandwidth(W, 'upper'));
+Wc = spdiags([1i * e, (4 + 1i) * e, e], -1:1, n, n);
+x = Wc \ (2 * e); show(isreal(x)); show(be(Wc, x, 2 * e) < 64 * n * eps);
 function sp(x)
 fprintf('sparse=%d ', issparse(x));
 show(full(x));
