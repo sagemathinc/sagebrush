@@ -27,7 +27,7 @@ test("S1: the traceback then SIGINT's default action (signal or 130) passes; a c
   assert.equal(judge("S1", { ...base, text: "KeyboardInterrupt", ki_text_t: 1250, marks: [m("PROBE", 3000)] }, "prompt").outcome, "PASS");
   const pl = judge("S1", { ...base, text: "KeyboardInterrupt", ki_text_t: 1251, marks: [m("PROBE", 3000)] }, "prompt");
   assert.deepEqual([pl.outcome, pl.late], ["FAIL", true]);
-  assert.match(judge("S1", { ...base, text: "KeyboardInterrupt", marks: [m("PROBE", 3000)] }, "prompt").why, /^invalid evidence: no valid time for the KeyboardInterrupt/);
+  assert.match(judge("S1", { ...base, text: "KeyboardInterrupt", marks: [m("PROBE", 3000)] }, "prompt").why, /^invalid evidence: the KeyboardInterrupt text was seen but its line was never stamped/);
   assert.match(judge("S1", { ...base, marks: [] }, "prompt").why, /no KeyboardInterrupt/);
 });
 
@@ -257,6 +257,68 @@ test("r3 S3: S3's escalation is gated at 250 ms on press 2's endpoint (raw), lat
   assert.deepEqual(chain("S3", { ...base, sends: [{ t: 1000 }, { t: 1500 }], exit: { code: null, signal: "SIGINT", t: 1508 } }), ["FAIL", "KNOWN", false]);
   assert.deepEqual(chain("S3", { ...base, sends: [{ t: 1000 }, { t: 1500 }], exit: { code: null, signal: "SIGINT", t: 1751 } }), ["FAIL", "FAIL", true]);
   assert.deepEqual(chain("S3", { ...base, sends: [{ t: 1000 }, { t: 1500 }], exit: { code: null, signal: "SIGINT", t: 1751 } }, "prompt"), ["FAIL", "FAIL", true]);
+});
+
+// ---- #225 r4 (astra2 r3 N1, N2)
+test("r4 N1: S3's press 2 cancelled by the run's end is runProc's own record; only after press 1's exit 130 is it the honoured path", () => {
+  const two = (s1: object, extra: object = {}, host = "cli") => judge("S3", { ...base, sends: [{ act: "press", t: 1000 }, s1], exit: { code: null, signal: "SIGINT", t: 1010 }, ...extra }, host);
+  const ok1 = two({ act: "press", cancelled: "the run finished before it was due", due: 1500, at: 1220 });
+  assert.deepEqual([ok1.outcome, ok1.first_stop, ok1.escalation], ["PASS", "honoured", "not exercised (press 1 ended it)"]);
+  // (cancelled but no exit 130 first, or the exit after the due time or after the cancel, or bad times: malformed)
+  const noExit = two({ act: "press", cancelled: "x", due: 1500, at: 1220 }, { exit: { code: 0, signal: null, t: 1010 } });
+  assert.equal(noExit.outcome, "INVALID");
+  assert.match(noExit.why, /press 2 was cancelled without press 1's exit before it was due/); // (the specific check, not a later fallback)
+  // (press 2 failed EPERM while the program ran, the exit after it: rejected by the pre-check, before any early endpoint)
+  const eperm = two({ act: "press", t: 1500, error: "Error: kill EPERM" }, { exit: { code: null, signal: "SIGINT", t: 1520 } });
+  assert.equal(eperm.outcome, "INVALID");
+  assert.match(eperm.why, /press 2 failed while the program ran/);
+  assert.equal(two({ act: "press", cancelled: "x", due: 1500, at: 1220 }, { exit: { code: null, signal: "SIGINT", t: 1600 } }).outcome, "INVALID");
+  assert.equal(two({ act: "press", cancelled: "x", due: 1500, at: 1000 }).outcome, "INVALID");
+  assert.equal(two({ act: "press", cancelled: "x", due: "1500", at: 1220 }).outcome, "INVALID");
+  // (the prompt's press 2 is never cancelled legitimately: the prompt survives a KI)
+  assert.equal(two({ act: "press", cancelled: "x", due: 1500, at: 1220 }, { exit: null, ki_text_t: 1100 }, "prompt").outcome, "INVALID");
+  // (S4: a press 2 cancelled after the program had ended is fine; cancelled while it ran is malformed)
+  const s4 = (s1: object, endT: number) => judge("S4", { ...base, sends: [{ t: 1000 }, s1], marks: [m("ENTER 1", 500), m("KI 1", 1100), m("END", 1101)], exit: { code: 0, signal: null, t: endT } });
+  assert.equal(s4({ act: "press", cancelled: "x", due: 4000, at: 3300 }, 1200).outcome, "PASS");
+  assert.equal(s4({ act: "press", cancelled: "x", due: 4000, at: 4500 }, 4400).outcome, "INVALID");
+  // (pressBad names a cancelled press: S1 with press 1 cancelled)
+  assert.match(judge("S1", { ...base, sends: [{ act: "press", cancelled: "x", due: 1500, at: 900 }], marks: [m("ENTER 1", 500)], text: "", exit: { code: 1, signal: null, t: 800 } }).why, /press 1 was cancelled/);
+});
+
+test("r4 N1 integration: through the REAL runProc and its scheduling (a fake launcher): the honoured exit's record, and an exit just before press 2", () => {
+  const fake = join(__dirname, "..", "..", "test", "fake-launcher-signals.cjs");
+  const play = (scenario: string) => {
+    const src = `import { runProc, TRIALS } from ${JSON.stringify(mod)};
+const r = await runProc({ host: "cli", src: "pass", schedule: TRIALS.S3.schedule(), guard_ms: 10000 });
+const j = await TRIALS.S3.judge(r, "cli");
+console.log(JSON.stringify({ sends: r.sends, exit: r.exit, end: r.end, j }));`;
+    const p = spawnSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8", env: { ...process.env, SB_LAUNCHER: fake, SCENARIO: scenario }, timeout: 30000 });
+    assert.equal(p.status, 0, p.stderr);
+    return JSON.parse(p.stdout.trim().split("\n").at(-1));
+  };
+  // (honoured: press 1's exit, then finish 200 ms after close, before press 2's due time: runProc records it cancelled)
+  const h = play("honoured");
+  assert.equal(h.sends.length, 2, JSON.stringify(h.sends));
+  assert.ok(h.sends[0].act === "press" && h.sends[0].t > 0 && !h.sends[0].error, JSON.stringify(h.sends[0]));
+  assert.ok(h.sends[1].cancelled && h.sends[1].due > h.exit.t && h.sends[1].at >= h.exit.t && h.sends[1].t === undefined, JSON.stringify(h.sends[1]));
+  assert.ok(h.exit.signal === "SIGINT" || h.exit.code === 130, JSON.stringify(h.exit));
+  assert.deepEqual([h.j.outcome, h.j.first_stop], ["PASS", "honoured"], JSON.stringify(h.j));
+  // (an exit ~440 ms after press 1, just before press 2 is due: press 2 fires at the gone process (ESRCH, after the exit))
+  const l = play("late-exit");
+  assert.ok(l.sends.length === 2 && /ESRCH/.test(String(l.sends[1].error)) && l.sends[1].t >= l.exit.t, JSON.stringify(l));
+  assert.deepEqual([l.j.outcome, l.j.late, l.j.first_stop], ["FAIL", true, "honoured late"], JSON.stringify(l.j));
+});
+
+test("r4 N2: the prompt's S1 gates its KeyboardInterrupt endpoint before the probe failure, through the ACTUAL prompt baseline", () => {
+  const eps = 2 ** -42;
+  const pr = (ki: number | null, probe: boolean) => ({ ...base, sends: [{ act: "press", t: 1000 }], marks: [m("ENTER 1", 500), ...(probe ? [m("PROBE", 3000)] : [])], text: "Traceback\nKeyboardInterrupt", ...(ki == null ? {} : { ki_text_t: ki }) });
+  assert.deepEqual(chain("S1", pr(1249, true), "prompt"), ["PASS", "FIXED", true]); // (in bound with the probe: the F3 pin is stale)
+  assert.deepEqual(chain("S1", pr(1250, false), "prompt"), ["FAIL", "KNOWN", false]); // in bound, no probe: the pinned functional failure
+  assert.deepEqual(chain("S1", pr(1251, false), "prompt"), ["FAIL", "FAIL", true]); // late, no probe: never hidden under KNOWN
+  assert.deepEqual(chain("S1", pr(1250 + eps, false), "prompt"), ["FAIL", "FAIL", true]);
+  assert.deepEqual(chain("S1", pr(1251, true), "prompt"), ["FAIL", "FAIL", true]);
+  assert.deepEqual(chain("S1", pr(null, false), "prompt"), ["INVALID", "INCOMPLETE", true]); // KI text, no stamp: malformed
+  assert.equal(judge("S1", pr(1300, false), "prompt").late, true);
 });
 
 test("baseline: S3 cli's entry pins only 'first Stop not honoured' (anchored); S4 cli's stays 'returned without a KeyboardInterrupt'", () => {
