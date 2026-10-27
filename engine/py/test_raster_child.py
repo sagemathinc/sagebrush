@@ -753,15 +753,36 @@ def test_r2_CORR_157_4_the_thread_transport_portable():
         latency = time.monotonic() - fired[0]
         print("interrupted", latency <= 0.100)
     c.kill()
+    # (reported, not checked: on POSIX, a SIGALRM measured from its
+    # scheduled time, which includes the system's delivery: beside the
+    # Timer's, it tells a late signal from a slow wake)
+    alarm = None
+    if hasattr(signal, "SIGALRM"):
+        c = rc.spawn(1 << 30, rc.Plan(None, 0, still, dict(os.environ)))
+        prev = signal.signal(signal.SIGALRM, lambda *a: (_ for _ in ()).throw(KeyboardInterrupt()))
+        due = time.monotonic() + 0.3
+        signal.setitimer(signal.ITIMER_REAL, 0.3)
+        try:
+            rc.write_all(c, [bytes(16 << 20)])
+        except KeyboardInterrupt:
+            alarm = time.monotonic() - due
+        except Exception:
+            pass
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, prev)
+        c.kill()
     c = rc.spawn(1 << 30, rc.Plan(None, 0, echo(5), dict(os.environ)))
     rc.write_all(c, [b"again"])
     back = bytearray(5)
     rc.read_into(c, back)
     print("retry", bytes(back) == b"again")
     c.kill()
-    print("latency %.4f" % latency)
+    print("latency timer %.4f (checked: <= 0.100)" % latency)
+    print("latency alarm " + ("%.4f (reported only)" % alarm if alarm is not None else "n/a (no SIGALRM here)"))
     """)
     assert out.split("\n")[:3] == ["echo True", "interrupted True", "retry True"], out
+    # (the latencies, in every run's log: both bases, on every system)
+    print("  " + "; ".join(out.split("\n")[3:5]))
 
 
 def test_r2_CORR_157_4_render_and_decode_over_the_thread_transport_portable():
