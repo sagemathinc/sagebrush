@@ -383,9 +383,10 @@ fn the_fold_residues_are_exact() {
     for bits in [1u32, 63, 64, 65, 127, 128, 129, 1000, 4097] {
         for n in [(BigInt::one() << bits) - 1, (BigInt::one() << bits) + 12345, BigInt::from(3).pow(bits / 2 + 1)] {
             for n in [n.clone(), -n] {
-                let (rm, rp) = fold_residues(&n);
+                let (rm, rp) = (fold_minus(&n), fold_plus(&n));
+                assert!(rm < u64::MAX, "{bits} bits: 2^64 - 1 is folded to 0");
                 for &p in FOLD_MINUS.iter() {
-                    assert_eq!((rm % p as u128) as u64, n.abs().mod_floor(&BigInt::from(p)).to_u64().unwrap(), "{bits} bits mod {p}");
+                    assert_eq!(rm % p, n.abs().mod_floor(&BigInt::from(p)).to_u64().unwrap(), "{bits} bits mod {p}");
                 }
                 for &p in FOLD_PLUS.iter() {
                     assert_eq!((rp % p as u128) as u64, n.abs().mod_floor(&BigInt::from(p)).to_u64().unwrap(), "{bits} bits mod {p}");

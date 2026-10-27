@@ -568,6 +568,10 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/binomial.rs :: fold_minus :: if s == u64::MAX { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/binomial.rs :: not_a_power :: fn not_a_power(b: &Budget, n: &BigInt, l: u64) -> FResult<bool> { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -641,6 +645,10 @@
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/binomial_tests.rs :: the_early_proof_allocates_nothing_coefficient_sized :: let b = Budget::unlimited(); #1": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_fold_residues_are_exact :: assert!(rm < u64::MAX, \"{bits} bits: 2^64 - 1 is folded to 0\"); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },

@@ -629,15 +629,36 @@ fn powmod_w(x: u64, mut e: u64, p: u64) -> u64 {
     r as u64
 }
 
-/// |n| mod 2^64 - 1 and |n| mod 2^64 + 1, from one pass over its borrowed
-/// limbs (no allocation; a poll every 256 limbs).
-fn fold_residues(n: &BigInt) -> (u128, u128) {
-    let (mut s, mut e, mut o, mut i) = (0u128, 0u128, 0u128, 0u64);
+/// |n| mod 2^64 - 1, from one pass over its borrowed limbs: u64 additions
+/// with end-around carry (2^64 = 1); no allocation, no division; a poll every
+/// 256 limbs.
+fn fold_minus(n: &BigInt) -> u64 {
+    let (mut s, mut i) = (0u64, 0u64);
     sagebrush_bigint::for_each_u64_limb(n, |x| {
         if i & 255 == 0 {
             check();
         }
-        s += x as u128;
+        let (t, c) = s.overflowing_add(x);
+        // on a wrap t < x <= 2^64 - 1, so t + 1 cannot overflow
+        s = t + c as u64;
+        i += 1;
+    });
+    if s == u64::MAX {
+        0
+    } else {
+        s
+    }
+}
+
+/// |n| mod 2^64 + 1, from one more pass (2^64 = -1: the alternating sum);
+/// only when a 2^64 + 1 witness is still needed.  No allocation; a poll
+/// every 256 limbs.
+fn fold_plus(n: &BigInt) -> u128 {
+    let (mut e, mut o, mut i) = (0u128, 0u128, 0u64);
+    sagebrush_bigint::for_each_u64_limb(n, |x| {
+        if i & 255 == 0 {
+            check();
+        }
         if i % 2 == 0 {
             e += x as u128;
         } else {
@@ -645,49 +666,68 @@ fn fold_residues(n: &BigInt) -> (u128, u128) {
         }
         i += 1;
     });
-    let (mm, mp) = ((1u128 << 64) - 1, (1u128 << 64) + 1);
-    (s % mm, (e % mp + mp - o % mp) % mp)
+    let mp = (1u128 << 64) + 1;
+    (e % mp + mp - o % mp) % mp
 }
 
 /// Whether the witness p proves r = n mod p is not an l-th power residue
 /// (p = 1 mod l): r != 0 and r^((p-1)/l) != 1 mod p.  Sound: n = t^l with p
-/// not dividing t gives r^((p-1)/l) = t^(p-1) = 1 (Fermat).
+/// not dividing t gives r^((p-1)/l) = t^(p-1) = 1 (Fermat).  u64 arithmetic
+/// for p < 2^32 (powmod_u), u128 products only above.
 fn witness_rejects(r: u64, p: u64, l: u64) -> bool {
-    r != 0 && powmod_w(r, (p - 1) / l, p) != 1
+    let e = (p - 1) / l;
+    r != 0 && (if p < 1 << 32 { powmod_u(r, e, p) } else { powmod_w(r, e, p) }) != 1
 }
 
 /// The work one not_a_power call may debit for an n of `bits` bits and the
-/// prime l, checked (None: overflow): the fold, tier 1's 9 powerings, tier
+/// prime l, checked (None: overflow): the two folds, tier 1's 9 powerings, tier
 /// 2's WITNESS_K trial divisions (p <= WITNESS_K l + 1: sqrt(p) + 1 each) and
 /// WITNESSES reductions.
 fn prefilter_plan(bits: u64, l: u64) -> Option<u64> {
     let lb = limbs(bits);
     let pmax = WITNESS_K.checked_mul(l).and_then(|x| x.checked_add(1)).map_or(1 << 32, |p| p.min(1 << 32));
     let trial = WITNESS_K.checked_mul(pmax.sqrt() + 1)?;
-    lb.checked_add(1)?.checked_add(9 * 130)?.checked_add(trial)?.checked_add(WITNESSES.checked_mul(lb.checked_add(66)?)?)
+    lb.checked_add(1)?.checked_mul(2)?.checked_add(9 * 130)?.checked_add(trial)?.checked_add(WITNESSES.checked_mul(lb.checked_add(66)?)?)
 }
 
 /// Whether n >= 1 is PROVED not an l-th power (false: not proved, and the
-/// exact search decides).  Polled; every step debited: the fold (limbs(n) +
-/// 1), each witness's powering (130), each tier-2 candidate's trial division
-/// (sqrt(p) + 1) and reduction (limbs(n) + 66).
+/// exact search decides).  Tier 1 cheapest first: the 2^64 - 1 witnesses
+/// (one u64 fold), then, only if none rejected, the 2^64 + 1 ones (a second
+/// fold; the 46-bit witness last).  Polled; every step debited: each fold
+/// (limbs(n) + 1), each witness's powering (130), each tier-2 candidate's
+/// trial division (sqrt(p) + 1) and reduction (limbs(n) + 66).
 fn not_a_power(b: &Budget, n: &BigInt, l: u64) -> FResult<bool> {
     check();
     b.debit(limbs(n.bits()).checked_add(1))?;
     #[cfg(test)]
     audit::set(|a| a.prefilter_calls += 1);
-    let (rm, rp) = fold_residues(n);
+    let rm = fold_minus(n);
     let mut tried = 0u64;
-    let tier1 = FOLD_MINUS.iter().map(|&p| (p, (rm % p as u128) as u64)).chain(FOLD_PLUS.iter().map(|&p| (p, (rp % p as u128) as u64)));
-    for (p, r) in tier1.filter(|&(p, _)| p % l == 1) {
+    for &p in FOLD_MINUS.iter().filter(|&&p| p % l == 1) {
         b.debit(Some(130))?;
         tried += 1;
         #[cfg(test)]
         audit::set(|a| a.prefilter_evals += 1);
-        if witness_rejects(r, p, l) {
+        if witness_rejects(rm % p, p, l) {
             #[cfg(test)]
             audit::set(|a| a.prefilter_rejects += 1);
             return Ok(true);
+        }
+    }
+    if FOLD_PLUS.iter().any(|&p| p % l == 1) {
+        check();
+        b.debit(limbs(n.bits()).checked_add(1))?;
+        let rp = fold_plus(n);
+        for &p in FOLD_PLUS.iter().filter(|&&p| p % l == 1) {
+            b.debit(Some(130))?;
+            tried += 1;
+            #[cfg(test)]
+            audit::set(|a| a.prefilter_evals += 1);
+            if witness_rejects((rp % p as u128) as u64, p, l) {
+                #[cfg(test)]
+                audit::set(|a| a.prefilter_rejects += 1);
+                return Ok(true);
+            }
         }
     }
     for k in 1..=WITNESS_K {
