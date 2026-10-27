@@ -335,6 +335,10 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     // CORR-215-5); the page then lets the lock go)
     this.recovering = true; this.ready = false;
     this.loading = (async () => {
+      // (not while a clear or a drop runs (astra's CORR-229-2): recovery's T2 would unmark the record it marked before
+      // deleting; not ready now, so its turn refuses it if it hasn't deleted yet, and the mark stays until the proof
+      // below.  The load's own saves wait for nothing else: nothing can be running here when a store first loads)
+      while (this.mutating) await this.mutating;
       if (this.viewed) { this.viewed = false; await this.history.init(); } else await this.open();
       for (let i = 0; ; i++) {
         const out = await this.recover(await super.loadRecord());
