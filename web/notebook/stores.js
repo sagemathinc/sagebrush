@@ -740,6 +740,9 @@ export class IdbPatchStore {
   // while still queued behind appends waiting for the lock, and its turn then does nothing, so it can never
   // delete afterwards: daybreak2's LIMIT-9D7-1)
   deleteQueued(opts, tell, dropping = false) {
+    // (a journal store's history is cleared or dropped only by the notebook's writer here (daybreak3): a read-only tab's
+    // never, whatever its page does)
+    if (this.journal && this.writerOK?.() === false) return Promise.reject(new Error("not done: this notebook is open for editing in another tab of this browser"));
     const timed = !(opts.lockHeld || !this.owned) && typeof globalThis.navigator?.locks?.request === "function";
     const d = timed ? deadlineOf() : null;
     const turn = this.queue(async () => {

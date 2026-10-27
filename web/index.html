@@ -47,7 +47,7 @@
      function search, Run all, the File and ⋯ menus always a press away; cells scrolled to stop below it */
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; padding: 6px 0; position: sticky; top: 0; z-index: 9; background: var(--bg); }
   .bar.stuck { box-shadow: 0 8px 8px -8px rgba(0, 0, 0, .22); }
-  html { scroll-padding-top: calc(var(--bar-h, 0px) + 8px); }
+  html { scroll-padding-top: calc(var(--bar-h, 0px) + var(--writerbar-h, 0px) + 8px); }
   /* (the search takes what the line leaves, down to 7em, so that the toolbar stays one line where it can) */
   .bar #docsearchbox { margin-top: 0; flex: 1 1 8em; min-width: 7em; max-width: 20em; }
   .bar #docsearch { width: 100%; max-width: none; box-sizing: border-box; }
@@ -67,7 +67,7 @@
   body.opening .about, body.opening footer { display: none; }
   #nbline { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
   /* (a notebook another tab is editing: read-only here, and why: web/notebook/journal.js's writer lock) */
-  #writerbar { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--fg); background: var(--cell); position: sticky; top: 0; z-index: 5; }
+  #writerbar { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--fg); background: var(--cell); position: sticky; top: var(--bar-h, 0px); z-index: 8; }
   #nbname { field-sizing: content; font: 600 16px system-ui, sans-serif; color: var(--fg); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; min-width: 8em; max-width: 100%; }
   #nbname:hover, #nbname:focus { border-color: var(--line); background: var(--cell); }
   #saved { color: var(--muted); font-size: 12px; }
@@ -901,7 +901,7 @@ async function startHistory(id) {
   // (the journal's store let go only if the page now shows another: the same store reattached (a takeover's reload)
   // keeps its lock and its history (astra's CORR-215-1); notebook/journal.js switchJournal)
   if (!nbJournal) nbHistory?.close();
-  nbJournal = switchJournal(nbJournal, nb.store);
+  nbJournal = journalPage.switchJournal(nbJournal, nb.store);
   nbHistoryOff?.();
   nbHistoryOff = null;
   nbHistory = null;
@@ -955,7 +955,7 @@ function ttRefresh(toEnd) {
 }
 function ttShowVersion() {
   const vs = nbHistory?.versions() ?? [], v = vs[+ttSlider.value];
-  $("#ttrevert").disabled = !v || v.index === vs.length - 1;
+  $("#ttrevert").disabled = !v || v.index === vs.length - 1 || !pageMay().history;
   $("#ttprev").disabled = !v || v.index === 0;
   $("#ttnext").disabled = !v || v.index === vs.length - 1;
   if (!v) { $("#ttinfo").textContent = ttUnavailable || (nbHistory ? "No versions yet." : "Loading the history…"); ttView?.load({ mode: nb.mode, cells: [] }); return; }
@@ -1089,6 +1089,7 @@ ttSlider.oninput = ttShowVersion;
 $("#ttprev").onclick = () => { ttSlider.value = +ttSlider.value - 1; ttShowVersion(); };
 $("#ttnext").onclick = () => { ttSlider.value = +ttSlider.value + 1; ttShowVersion(); };
 $("#ttrevert").onclick = async () => {
+  if (!pageMay().history) { statusEl.textContent = "not reverted: this notebook is open for editing in another tab of this browser"; return; }
   const vs = nbHistory.versions(), v = vs[+ttSlider.value];
   const old = nbHistory.docAt(v.time);
   let plan = null;
@@ -1132,6 +1133,7 @@ async function recompute(plan, what) {
   return report;
 }
 $("#ttclear").onclick = async () => {
+  if (!pageMay().history) { statusEl.textContent = "history not cleared: this notebook is open for editing in another tab of this browser"; return; }
   if (!nbHistory || !confirm(`Forget every past version of "${docName()}"? The notebook itself stays as it is.`)) return;
   await nbHistory.clear(nb.snapshot());
   journal.historyCleared(current.id);
@@ -2421,14 +2423,22 @@ const wsReady = (async () => {
 // notebook's writer (another tab is: notebook/journal.js's lock) shows it read-only, says why in the bar, and takes
 // over, reloaded as the writer, when that tab lets go)
 const writerBar = $("#writerbar");
+let writerBarTimer = null;
+// (the bar's height, for the page's scroll padding while it shows: it sticks under the toolbar (board's R3))
+function writerBarHeight() { document.documentElement.style.setProperty("--writerbar-h", writerBar.hidden ? "0px" : `${writerBar.offsetHeight}px`); }
 // (the journal's page helpers (notebook/journal.js pageControls, switchJournal, TAKEOVER), from the history bundle
 // once a journal's store is made; plain stores never need them)
-let journalPage = { pageControls: () => ({ readOnly: false, bar: null, name: true, mode: true, repro: true, rename: true, trash: true }), switchJournal: (p, n) => (n?.journaled ? n : null), TAKEOVER: "" };
+let journalPage = { pageControls: () => ({ readOnly: false, bar: null, name: true, mode: true, repro: true, rename: true, trash: true, history: true }), switchJournal: (p, n) => (n?.journaled ? n : null), TAKEOVER: "", TAKEOVER_FAILED: "" };
 const pageMay = () => journalPage.pageControls(nb.store);
 function showWriter(store, id) {
   const c = journalPage.pageControls(store);
+  clearTimeout(writerBarTimer);
   writerBar.hidden = !c.bar;
   writerBar.textContent = c.bar ?? "";
+  writerBarHeight();
+  // (TimeTravel's own changes too: Revert and Clear history (daybreak3))
+  $("#ttclear").disabled = !c.history;
+  if (!c.history) $("#ttrevert").disabled = true;
   nb.setReadOnly(c.readOnly || !!ws?.quarantined);
   // (the page's own controls too: the name (and with it the workspace file's), the language, reproducibility (board's 1))
   nbName.readOnly = !c.name;
@@ -2441,10 +2451,23 @@ function showWriter(store, id) {
 async function takeOver(store, id) {
   if (current.id !== id || nb.store !== store) return;
   const at = anchorOf(nb), focused = document.activeElement?.closest?.("#cells .cell")?.cell?.id ?? null;
-  try { await open(store, id); } catch (e) { console.warn("notebook:", e); return; }
+  try { await open(store, id); } catch (e) {
+    // (it couldn't be reopened as the writer here: the lock let go at once, so another tab (or this one, reloaded) can
+    // take it, rather than held by a tab that never writes; and said (board's C))
+    console.warn("notebook:", e);
+    await store.release();
+    writerBar.hidden = false;
+    writerBar.textContent = journalPage.TAKEOVER_FAILED;
+    writerBarHeight();
+    return;
+  }
   restoreAnchor(nb, at);
   if (focused) [...document.querySelectorAll("#cells .cell")].find((el) => el.cell?.id === focused)?.cell?.ta?.focus({ preventScroll: true });
-  statusEl.textContent = journalPage.TAKEOVER;
+  // (said in the bar itself for a few seconds, where the reason was (the status line is also the interpreter's))
+  writerBar.hidden = false;
+  writerBar.textContent = journalPage.TAKEOVER;
+  writerBarHeight();
+  writerBarTimer = setTimeout(() => { if (!nb.store?.viewOnly) { writerBar.hidden = true; writerBar.textContent = ""; writerBarHeight(); } }, 6000);
 }
 let journalKit = null;
 async function storeFor(id, initial) {
@@ -2453,7 +2476,7 @@ async function storeFor(id, initial) {
   const [hdb, mod] = await Promise.all([historyDbReady, loadHistory()]);
   if (!hdb) throw new Error("this browser saves notebooks through sync's journal, which needs its storage: it isn't available here");
   journalKit ??= mod.journalClasses({ IdbStore, IdbPatchStore });
-  journalPage = { pageControls: mod.pageControls, switchJournal: mod.switchJournal, TAKEOVER: mod.TAKEOVER };
+  journalPage = { pageControls: mod.pageControls, switchJournal: mod.switchJournal, TAKEOVER: mod.TAKEOVER, TAKEOVER_FAILED: mod.TAKEOVER_FAILED };
   return new journalKit.JournalStore(db, hdb, id, initial, mod);
 }
 // (the workspace, or null if it isn't open within a few seconds)
