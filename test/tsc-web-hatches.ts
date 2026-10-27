@@ -13,18 +13,38 @@ export type Kind = "ts-nocheck" | "ts-ignore" | "ts-expect-error" | "jsdoc-any";
 export type Finding = { kind: Kind; line: number; reasoned: boolean; permitted: boolean; why?: string };
 export type Scan = { findings: Finding[]; problems: string[]; counts: Record<Kind, { permitted: number; refused: number }> };
 
-// (a "/" starts a regex after these, or at the start: otherwise it's division)
-const REGEX_AFTER = /[(,=:[!&|?{};+\-*%<>~^]$|^$|\b(?:return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)$/;
+// The slash: a regex starts where an operand can't end, so the lexer tracks the last significant token as an operand
+// (an identifier, a number, a literal, a postfix ++ or --, a ] or a ) that closes an expression) or an operator (any
+// other punctuator, a prefix ++ or --, an operator keyword, a ) closing if/while/for/with's head).  A } stays
+// ambiguous (a block's end or an object's): there the slash is read as a regex unless its candidate span can't close
+// on its line (then division), and if the candidate's closing slash runs straight into * or / (a comment could hide
+// either way) the scan fails closed (astra2 #232 r2 T1-LEX).
+const OPERATOR_WORDS = new Set(["return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else", "yield", "await"]);
+const CONTROL_WORDS = new Set(["if", "while", "for", "with"]);
 
-/** Every comment in a JS/TS text, with its 1-based lines; problems for anything left unterminated. */
+/** Every comment in a JS/TS text, with its 1-based lines; problems for anything left unterminated or ambiguous. */
 export function comments(src: string): { list: Comment[]; problems: string[] } {
   const list: Comment[] = [];
   const problems: string[] = [];
-  let i = 0, line = 1, last = ""; // last: the code just before, trimmed, for the regex heuristic
+  let i = 0, line = 1;
+  let prev: "start" | "operand" | "operator" | "brace" = "start";
+  let control = false; // the last word was if/while/for/with: the next ( opens a control head
+  const parens: boolean[] = []; // per open (, whether it is a control head
   const braces: number[] = []; // template nesting: the brace depth at each `${`
   let depth = 0;
   const n = src.length;
   const lineAt = (from: number, to: number) => { for (let k = from; k < to; k++) if (src[k] === "\n") line++; };
+  /** a regex body from the slash at i: the index of its closing slash, or -1 if it doesn't close on its line */
+  const regexEnd = (from: number) => {
+    let k = from + 1, cls = false;
+    while (k < n && src[k] !== "\n" && (cls || src[k] !== "/")) {
+      if (src[k] === "\\") k++;
+      else if (src[k] === "[") cls = true;
+      else if (src[k] === "]") cls = false;
+      k++;
+    }
+    return k < n && src[k] === "/" ? k : -1;
+  };
   while (i < n) {
     const c = src[i], d = src[i + 1];
     if (c === "/" && d === "/") {
@@ -49,39 +69,63 @@ export function comments(src: string): { list: Comment[]; problems: string[] } {
       while (k < n && src[k] !== c && src[k] !== "\n") k += src[k] === "\\" ? 2 : 1;
       if (src[k] !== c) { problems.push(`line ${line}: an unterminated string`); break; }
       i = k + 1;
-      last = "x";
+      prev = "operand";
       continue;
     }
     if (c === "`" || (c === "}" && braces.length && depth === braces[braces.length - 1])) {
       if (c === "}") braces.pop();
-      let k = i + 1;
+      let k = i + 1, closed = false;
       for (;;) {
         if (k >= n) { problems.push(`line ${line}: an unterminated template literal`); i = n; break; }
         if (src[k] === "\\") { k += 2; continue; }
-        if (src[k] === "`") { lineAt(i, k + 1); i = k + 1; last = "x"; break; }
-        if (src[k] === "$" && src[k + 1] === "{") { lineAt(i, k + 2); braces.push(depth); i = k + 2; last = "{"; break; }
+        if (src[k] === "`") { lineAt(i, k + 1); i = k + 1; prev = "operand"; closed = true; break; }
+        if (src[k] === "$" && src[k + 1] === "{") { lineAt(i, k + 2); braces.push(depth); i = k + 2; prev = "operator"; closed = true; break; }
         k++;
       }
+      if (!closed) break;
       continue;
     }
-    if (c === "/" && REGEX_AFTER.test(last)) {
-      let k = i + 1, cls = false;
-      while (k < n && src[k] !== "\n" && (cls || src[k] !== "/")) {
-        if (src[k] === "\\") k++;
-        else if (src[k] === "[") cls = true;
-        else if (src[k] === "]") cls = false;
-        k++;
+    if (c === "/") {
+      // (a regex where an operand can't end; division after one; at a }, the ambiguous case)
+      if (prev === "operand") { i++; prev = "operator"; continue; }
+      const e = regexEnd(i);
+      if (prev === "brace") {
+        if (e < 0) { i++; prev = "operator"; continue; } // (can't be a regex on this line: division)
+        if (src[e + 1] === "*" || src[e + 1] === "/") { problems.push(`line ${line}: an ambiguous slash after } (a regex or a division; a comment could start at column ${e + 2})`); break; }
       }
-      if (src[k] !== "/") { problems.push(`line ${line}: an unterminated regular expression`); break; }
-      i = k + 1;
+      if (e < 0) { problems.push(`line ${line}: an unterminated regular expression`); break; }
+      i = e + 1;
       while (/[a-z]/i.test(src[i] ?? "")) i++;
-      last = "x";
+      prev = "operand";
       continue;
     }
-    if (c === "{") depth++;
-    if (c === "}") depth--;
+    if (/[A-Za-z_$]/.test(c)) {
+      let k = i + 1;
+      while (k < n && /[A-Za-z0-9_$]/.test(src[k])) k++;
+      const w = src.slice(i, k);
+      prev = OPERATOR_WORDS.has(w) ? "operator" : "operand";
+      control = CONTROL_WORDS.has(w);
+      i = k;
+      continue;
+    }
+    if (/[0-9]/.test(c) || (c === "." && /[0-9]/.test(d ?? ""))) {
+      let k = i + 1;
+      while (k < n && /[0-9A-Za-z_.]/.test(src[k])) k++;
+      i = k;
+      prev = "operand";
+      control = false;
+      continue;
+    }
+    if ((c === "+" || c === "-") && d === c) { prev = prev === "operand" ? "operand" : "operator"; i += 2; control = false; continue; } // (postfix after an operand)
     if (c === "\n") line++;
-    if (!/\s/.test(c)) last = /[A-Za-z0-9_$]/.test(c) ? (/[A-Za-z0-9_$]/.test(last.slice(-1)) ? last + c : c).slice(-12) : c;
+    if (/\s/.test(c)) { i++; continue; }
+    if (c === "(") { parens.push(control); prev = "operator"; }
+    else if (c === ")") prev = parens.pop() ? "operator" : "operand";
+    else if (c === "]") prev = "operand";
+    else if (c === "{") { depth++; prev = "operator"; }
+    else if (c === "}") { depth--; prev = "brace"; }
+    else prev = "operator";
+    control = false;
     i++;
   }
   return { list, problems };

@@ -87,6 +87,27 @@ test("the escape-hatch policy against the compiler: tsc ACCEPTS the fixture, the
   assert.equal(h.findings.find((f) => !f.permitted)?.line, 2, "the refused any is reported at its comment's line");
 });
 
+test("the lexer's slash context against the compiler (T1-LEX): divisions after postfix ++, -- and (a) never hide the comments after them; regexes after a control head and nested templates make no false finding", () => {
+  const r = tsc(join("test", "fixtures", "tsc-web-hatches"));
+  assert.equal(r.status, 0, "tsc accepts lex.mjs:\n" + r.out.slice(0, 2000));
+  const h = hatches(readFileSync(join(ROOT, "test", "fixtures", "tsc-web-hatches", "lex.mjs"), "utf8"));
+  assert.deepEqual(h.problems, []);
+  assert.deepEqual(h.counts["jsdoc-any"], { permitted: 0, refused: 2 }, "the multiline any after a++ / b and the any after (a) / b: " + JSON.stringify(h.findings));
+  assert.deepEqual(h.counts["ts-ignore"], { permitted: 0, refused: 1 }, "the ignore after a-- / b");
+  assert.deepEqual(h.counts["ts-nocheck"], { permitted: 0, refused: 0 }, "a regex after if (...) and nested templates hold no comment");
+});
+
+test("the lexer fails closed at the ambiguous } slash; division after } off its line is fine", () => {
+  assert.match(hatches("x = {} / 2 /* @ts-ignore */;\n").problems.join(), /ambiguous slash after \}/);
+  assert.deepEqual(hatches("if (x) {}\ny = {} / 2;\n").problems, []);
+  assert.deepEqual(hatches("function f() {}\n/ab/.test('x');\n").problems, []);
+  assert.equal(hatches("a++ / b; // @ts-ignore\n").counts["ts-ignore"].refused, 1);
+  assert.equal(hatches("a-- / b; /* @ts-nocheck */\n").counts["ts-nocheck"].refused, 1);
+  assert.equal(hatches("x = ++a / b; // @ts-ignore\n").counts["ts-ignore"].refused, 1, "a prefix ++ operand: division after a");
+  assert.equal(hatches("x = a + /re\\/*/.source; // @ts-ignore\n").counts["ts-ignore"].refused, 1, "a regex after + still lexes as a regex");
+  assert.equal(hatches("while (go) /x\\/* y/.exec(s);\n").problems.length, 0);
+});
+
 test("the escape-hatch policy's own controls: each refused kind, multiline forms, reasons, and the lexer failing closed", () => {
   const k = (src: string) => hatches(src).counts;
   assert.equal(k("// @ts-nocheck\n")["ts-nocheck"].refused, 1);

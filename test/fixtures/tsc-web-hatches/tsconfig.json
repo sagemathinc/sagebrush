@@ -1,5 +1,8 @@
 {
   "//": "The escape-hatch policy's compiler-backed control (test/tsc-web.test.ts): with the real options tsc ACCEPTS this file, and the policy refuses its unexplained multiline any while permitting and counting the reasoned any and the reasoned expect-error.",
   "extends": "../../../tsconfig.web.json",
-  "files": ["multi.mjs"]
+  "files": [
+    "multi.mjs",
+    "lex.mjs"
+  ]
 }
