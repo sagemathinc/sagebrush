@@ -464,6 +464,18 @@ export function strings(a: string): string { return \`\${a}\` + a; }
   assert.deepEqual(r, want);
 });
 
+test("JSON.stringify runs toJSON: an edge to every scanned toJSON, apart from coercion (astra2 C2)", () => {
+  const r = mayAlloc({
+    "src/runtime/js.ts": `
+export class J { toJSON(): any { return new Uint8Array(2); } }
+export class V { valueOf(): number { return 1; } }
+export function json(x: object): string { return JSON.stringify(x); }
+export function plain(x: object): string { return String(x); }
+`,
+  }, ["json", "plain"]);
+  assert.deepEqual(r, { json: true, plain: false });
+});
+
 test("for await awaits each value: an edge to every scanned then, apart from iteration (astra2 C2)", () => {
   const r = mayAlloc({
     "src/runtime/fa.ts": `
