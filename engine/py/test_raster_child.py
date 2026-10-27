@@ -891,6 +891,97 @@ def test_r2_CORR_157_4_wait_timeline_diagnostic_portable():
             print("  timeline: " + l)
 
 
+def test_r2_CORR_157_4_kqueue_5ms_prereg_diagnostic_portable():
+    # DIAGNOSTICS ONLY, PRE-REGISTERED (#157 Stop): the terms are frozen in
+    # /scratch/sagebrush-reviews/pr157-kqueue-5ms-preregistration.md
+    # (sha256 289894d182c1fe9140cc2b89c8e634255c4b8bb13b8860967d65e74e1b0579a8)
+    # before this code.  Candidate: kqueue EVFILT_TIMER NOTE_CRITICAL one-shot
+    # 5 ms slices, no QoS change, wakeup fd untouched; rows CANDIDATE 5 ms
+    # (1000 slices), REFERENCE 20 ms (300), DIAGNOSTIC 10 ms (500), each with
+    # 10 synthetic (interrupt_main), 10 helper-targeted (pthread_kill to a
+    # helper thread) and 10 real SIGINTs from another process.  Every slice
+    # is timed check to check.  Verdict on the candidate row only: zero
+    # slices over 0.025 s and 30/30 catches within 0.100 s.  macOS only (the
+    # others print n/a).  This test itself always passes.
+    if sys.platform != "darwin":
+        print("  prereg: n/a (no kqueue timer here)")
+        return
+    out = ok(diag("""
+    import ctypes, select, statistics
+    libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    libc.qos_class_self.restype = ctypes.c_uint
+    print("prereg qos_class_self 0x%x (never changed here)" % libc.qos_class_self())
+    kq = select.kqueue()
+    def slicer(ms):
+        ev = select.kevent(1, filter=select.KQ_FILTER_TIMER, flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT, fflags=0x20, data=ms)
+        def f():
+            kq.control([ev], 1, None)
+        return f
+    SEND = "import os, signal, sys, time\\ntime.sleep(0.15)\\nt = time.monotonic()\\nos.kill(int(sys.argv[1]), signal.SIGINT)\\nprint(repr(t), flush=True)"
+    def row(label, ms, n):
+        f = slicer(ms)
+        widths = []
+        def timed():
+            a = time.monotonic()
+            try:
+                f()
+            finally:
+                widths.append(time.monotonic() - a)
+        for _ in range(n):
+            timed()
+        lat = {"synthetic": [], "helper": [], "real": []}
+        caught = 0
+        for kind in ("synthetic", "helper", "real"):
+            for _ in range(10):
+                sent = []
+                sender = None
+                if kind == "synthetic":
+                    def fire():
+                        sent.append(time.monotonic())
+                        _thread.interrupt_main()
+                    threading.Timer(0.15, fire).start()
+                elif kind == "helper":
+                    def helper():
+                        time.sleep(0.15)
+                        sent.append(time.monotonic())
+                        signal.pthread_kill(threading.get_ident(), signal.SIGINT)
+                    threading.Thread(target=helper, daemon=True).start()
+                else:
+                    sender = subprocess.Popen([sys.executable, "-I", "-c", SEND, str(os.getpid())], stdout=subprocess.PIPE, text=True)
+                try:
+                    while True:
+                        timed()
+                except KeyboardInterrupt:
+                    at = time.monotonic()
+                    if sender is not None:
+                        sent.append(float(sender.communicate()[0].strip()))
+                    lat[kind].append(at - sent[0])
+                    caught += 1
+        w = sorted(widths)
+        over = sum(1 for x in w if x > 0.025)
+        late = sum(1 for k in lat for x in lat[k] if x > 0.100)
+        print("prereg %-22s slices %5d: min %.4f median %.4f p99 %.4f MAX %.4f over25ms %d | %s | caught %d/30, over 0.100 s: %d" % (
+            label, len(w), w[0], statistics.median(w), w[int(len(w) * 0.99) - 1], w[-1], over,
+            " ".join("%s worst %.4f median %.4f" % (k, max(v), statistics.median(v)) for k, v in lat.items()), caught, late))
+        return over, caught, late
+    c = row("CANDIDATE 5 ms", 5, 1000)
+    row("REFERENCE 20 ms", 20, 300)
+    row("DIAGNOSTIC 10 ms", 10, 500)
+    over, caught, late = c
+    reasons = []
+    if over:
+        reasons.append("%d candidate slice(s) over 0.025 s" % over)
+    if caught != 30:
+        reasons.append("caught %d of 30" % caught)
+    if late:
+        reasons.append("%d catch(es) over 0.100 s" % late)
+    print("prereg verdict " + ("PREREG CANDIDATE PASS" if not reasons else "PREREG CANDIDATE HOLD: " + "; ".join(reasons)))
+    """))
+    for l in out.split("\n"):
+        if l.startswith("prereg "):
+            print("  " + l)
+
+
 def test_r2_CORR_157_4_precise_wait_diagnostic_portable():
     # DIAGNOSTICS ONLY (#157 Stop, design r4's review: "a different wait
     # strategy first"): can a timed wait keep 25 ms slices on macOS, where
