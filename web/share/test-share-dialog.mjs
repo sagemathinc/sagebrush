@@ -461,6 +461,9 @@ try {
     const crt = Date.now() - c0;
     ok(crt >= 1000, `(control) the same measurement sees a page blocked for 1.5 s: ${crt} ms round trip`);
     await closeDialog();
+    // (closing stops the still-running parse: its worker terminated, once; the close event is a queued task)
+    await until("window.sagebrush.shareTest.terminated === 1", 10000).catch(() => {});
+    ok((await ev("window.sagebrush.shareTest.terminated")) === 1, "closing the dialog mid-parse terminates the worker, once");
     await unwrap();
     // (long.py removed again: the later checks count the workspace's files)
     await runFirst("import os\nos.remove('long.py')\nprint('removed')");
