@@ -20,7 +20,6 @@ import { editRecords } from "../web/board/lossless";
 // - CORR-153-R2-1 (astra): GET /changes is routed by the production server, src/board-open.ts;
 // - daybreak2's CORR-153-R2-2: a tab that connects after batches were dropped is told so in its first event;
 // - CORR-153-1 on Windows (astra): a save whose directory can't be synced is written, never Saved.
-const { mergeStrings3 } = require("patchflow");
 const sha = (s: string | Buffer) => createHash("sha256").update(s).digest("hex");
 const B = (nodes: any[]) => ({ format: "sagebrush-board", version: 1, title: "t", nodes, edges: [] });
 const text = (d: any) => JSON.stringify(d, null, 2) + "\n";
@@ -32,7 +31,7 @@ async function serve(d: any, limits: Record<string, number> = {}) {
   const file = join(dir, "b.board.json");
   fs.writeFileSync(file, text(d));
   const L = { ...defaultLimits(), ...limits };
-  const started = await startEdit(file, L, { mergeStrings3, now: Date.now });
+  const started = await startEdit(file, L, { now: Date.now });
   assert.ok("hub" in started, "why" in started ? started.why : "");
   const hub = (started as { hub: EditHub }).hub;
   const es = new EditServer(hub, L, {}, Date.now);
@@ -217,7 +216,7 @@ test("CORR-153-1 on Windows: a save whose directory can't be synced is written, 
     const file = join(dir, "b.board.json");
     fs.writeFileSync(file, text(B([{ id: "n", x: 0 }])));
     let now = 1_000_000;
-    const hub = new EditHub(file, defaultLimits(), { mergeStrings3, now: () => now, fs: win });
+    const hub = new EditHub(file, defaultLimits(), { now: () => now, fs: win });
     assert.ok((await hub.start(fs.readFileSync(file))).ok);
     hub.connect("tab-aaaaaaaaaaaaaaaa");
     const s = snap(B([{ id: "n", x: 1 }]));

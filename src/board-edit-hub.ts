@@ -59,7 +59,6 @@ interface Budget { used: number; deadline: number; charge: (n: number) => boolea
 interface TabRecord { watermark: number; acks: { gen: number; seq: number; hash: string }[]; lastSeen: number; pin?: number }
 
 export interface HubDeps {
-  mergeStrings3: (o: { base: string; a: string; b: string }) => string;
   now: () => number;
   fs?: WriteFs;
 }
@@ -239,7 +238,7 @@ export class EditHub {
   }
 
   private merge(base: Rec[], a: Rec[], b: Rec[], budget = this.budget()) {
-    const r = boardMerge3(base, a, b, { mergeStrings3: this.deps.mergeStrings3, work: budget.left(), deadline: budget.deadline, now: this.deps.now });
+    const r = boardMerge3(base, a, b, { work: budget.left(), deadline: budget.deadline, now: this.deps.now });
     budget.used += r.used;
     return r;
   }
