@@ -55,10 +55,13 @@ fn counts() -> (usize, usize) {
     (SOURCE.lock().unwrap().len(), NOT_ASKED.load(SeqCst))
 }
 
+/// (asked, reached the host)
+type Probe = (bool, bool);
+
 /// One refresh on a stale (None) total, here: whether it asked, and whether
 /// it touched the host at all.  (may_ask and the answer must agree: asked
 /// iff owner, and a non-owner never reaches the host from a refresh.)
-fn probe() -> (bool, bool) {
+fn probe() -> Probe {
     set_total(None);
     let (s0, n0) = counts();
     refresh_if_owner();
@@ -78,16 +81,16 @@ fn may_ask_and_the_answer_agree_at_every_depth_after_unwind_and_on_reused_worker
     // depth 1 and deeper, on pool workers; then after an unwind on them; then
     // on a reused pool
     for round in 0..2 {
-        let got: Vec<((bool, bool), (bool, bool), (bool, bool))> = install(4, || {
+        let got: Vec<[Probe; 3]> = install(4, || {
             map_range(4, |_| {
                 let d1 = probe();
                 let d2 = map_range(2, |_| probe())[0];
                 let unwound = std::panic::catch_unwind(|| map_range(2, |_| -> u8 { panic!("a worker failure") }));
                 assert!(unwound.is_err());
-                (d1, d2, probe())
+                [d1, d2, probe()]
             })
         });
-        assert!(got.iter().all(|&(a, b, c)| a == (false, false) && b == (false, false) && c == (false, false)), "round {}: {:?}", round, got);
+        assert!(got.iter().flatten().all(|&p| p == (false, false)), "round {}: {:?}", round, got);
     }
     // no worker refresh reached the host: every wrapper entry on a worker
     // returned before it (the old code asked and got NotAsked ~10^4 times)
