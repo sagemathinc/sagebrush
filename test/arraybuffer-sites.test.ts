@@ -615,6 +615,15 @@ test("X1 and X2, isolated: a constructor returning a function, and an array-cons
   assert.deepEqual(mayAlloc({ "src/runtime/x1.ts": "export class Factory { constructor() { return (() => new Uint8Array(8)) as any; } }\nexport function install(o: any): void { o.toJSON = new Factory(); }\nexport function json(o: object): string { return JSON.stringify(o); }\n" }, ["json"]), { json: true });
 });
 
+test("an array literal copied by Object.assign or spread installs no protocol member, even holding a function: its own keys are indexes, never protocol names", () => {
+  const c = fixture({ "src/runtime/al.ts": "export function f(): any { return new Uint8Array(1); }\nexport function a1(o: any): void { Object.assign(o, [f]); }\nexport function a2(o: any, g: () => any): void { Object.assign(o, [g, () => 1]); }\nexport function s1(): any { return { ...[f] }; }\nexport function json(o: object): string { return JSON.stringify(o); }\n" });
+  assert.deepEqual(c.obligations, [], "no obligation");
+  for (const k of Object.keys(c.protocol)) assert.deepEqual([...c.protocol[k]].map((fp: string) => c.decls.get(fp)?.name), [], `no ${k} member`);
+  // the twin: an object literal copied with a function under a protocol name does install it
+  const t = fixture({ "src/runtime/ol.ts": "export function f(): any { return new Uint8Array(1); }\nexport function a1(o: any): void { Object.assign(o, { toJSON: f }); }\n" });
+  assert.deepEqual([...t.protocol.json].map((fp: string) => t.decls.get(fp)?.name), ["f"]);
+});
+
 test("E1.1: typescript-api is named only by the gate's script and its test; it has no install scripts", () => {
   const out = execFileSync("git", ["grep", "-l", "typescript-api", "--", ":!pnpm-lock.yaml", ":!package.json"], { cwd: ROOT, encoding: "utf8" }).trim().split("\n").sort();
   assert.deepEqual(out, ["scripts/arraybuffer-sites.mjs", "test/arraybuffer-sites.test.ts"]);
