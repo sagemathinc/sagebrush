@@ -173,13 +173,14 @@ fn every_spawn_takes_the_spawning_threads_context_at_the_spawn() {
     drop(held);
     // rayon scope, changed chain and mode, nested spawns
     let out = Mutex::new(Vec::new());
+    let out_ref = &out;
     scope(|s| {
         let body = std::thread::current().id();
         let _inner = Context { chain: 939, exclusive: true }.enter();
-        s.spawn(|s| {
-            out.lock().unwrap().push((current_chain(), is_exclusive(), std::thread::current().id() == body));
+        s.spawn(move |s| {
+            out_ref.lock().unwrap().push((current_chain(), is_exclusive(), std::thread::current().id() == body));
             let _deeper = Context { chain: 949, exclusive: false }.enter();
-            s.spawn(|_| out.lock().unwrap().push((current_chain(), is_exclusive(), true)));
+            s.spawn(move |_| out_ref.lock().unwrap().push((current_chain(), is_exclusive(), true)));
         });
     });
     let out = out.into_inner().unwrap();
