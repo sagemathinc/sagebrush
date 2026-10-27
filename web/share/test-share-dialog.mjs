@@ -875,15 +875,24 @@ try {
 
     // D7 (astra3's L1): a remote update merged during the awaited save, or while uploading, decides what is sent
     const B = "b".repeat(32), C = "c".repeat(32);
-    // (the real merge of a store conflict, notebook.js applyRemote, with another writer's metadata)
-    const remote = (patch) => `window.sagebrush.notebook.applyRemote({ ...window.sagebrush.notebook.snapshot(), ...${JSON.stringify(patch)} }, true, true)`;
+    // (a real second writer: another tab's store saving this notebook, a newer revision of its record in the
+    // browser's store, optionally posted to the other tabs as that store does; the page meets it through its
+    // own code: a save that conflicts (applyRemote from the conflict), or its subscription)
+    const secondWriter = (patch, post = false) => `(async () => {
+      const id = localStorage.getItem('sagebrush-current');
+      const db = await new Promise((ok, no) => { const r = indexedDB.open('sagebrush'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+      const rec = await new Promise((ok, no) => { const tx = db.transaction('notebooks', 'readwrite'), st = tx.objectStore('notebooks'); let out; const g = st.get(id); g.onsuccess = () => { out = { ...g.result, ...${JSON.stringify(patch)}, rev: (g.result.rev ?? 0) + 1, updated: Date.now() }; st.put(out); }; tx.oncomplete = () => ok(out); tx.onerror = () => no(tx.error); });
+      db.close();
+      if (${post}) { const ch = new BroadcastChannel('sagebrush-notebooks'); ch.postMessage({ from: 'other-tab', id, doc: rec }); ch.close(); }
+      return rec.rev;
+    })()`;
     const recordSent = () => ev(`(() => { const f = window.__realFetch ?? window.fetch; window.__realFetch = f; window.__attempts = []; window.fetch = async (u, o) => { if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") window.__attempts.push(JSON.parse(o.body).attempt); return f(u, o); }; })()`);
     await block("D7a", async () => {
       await fresh("D7a");
       const n = await mine();
       await openDialog();
       await recordSent();
-      await ev(`window.sagebrush.shareTest.saved = async () => { await window.sagebrush.notebook.saved(); ${remote({ share_attempt: B })}; }`);
+      await ev(`window.sagebrush.shareTest.saved = async () => { await ${secondWriter({ share_attempt: B })}; await window.sagebrush.notebook.saved(); }`);
       const l = await shareNow("D7a");
       await ev("delete window.sagebrush.shareTest.saved");
       await restore();
@@ -891,12 +900,26 @@ try {
       ok(/\/s\//.test(l) && sent.length === 1 && sent[0] === B && (await mine()) === n + 1 && !(await snap("share_attempt")), `D7a another writer's attempt merged by the awaited save: the kept attempt is the one sent (${JSON.stringify(sent)}), one share`);
       await closeDialog();
     });
+    await block("D7d", async () => {
+      // (the other writer's save AFTER the page's own: that save had nothing new to write, so it met no conflict)
+      await fresh("D7d");
+      const n = await mine();
+      await openDialog();
+      await recordSent();
+      await ev(`window.sagebrush.shareTest.saved = async () => { await window.sagebrush.notebook.saved(); await ${secondWriter({ share_attempt: "e".repeat(32) })}; }`);
+      const l = await shareNow("D7d");
+      await ev("delete window.sagebrush.shareTest.saved");
+      await restore();
+      const sent = await ev("window.__attempts");
+      ok(/\/s\//.test(l) && sent.length === 1 && sent[0] === "e".repeat(32) && (await mine()) === n + 1, `D7d another writer's attempt saved after the page's own save: the stored attempt is the one sent (${JSON.stringify(sent)}), one share`);
+      await closeDialog();
+    });
     await block("D7b", async () => {
       await fresh("D7b");
       const n = await mine();
       await openDialog();
       await recordSent();
-      await ev(`window.sagebrush.shareTest.saved = async () => { await window.sagebrush.notebook.saved(); ${remote({ share_id: "zzzzzzzzzzzz", share_attempt: null })}; }`);
+      await ev(`window.sagebrush.shareTest.saved = async () => { await ${secondWriter({ share_id: "zzzzzzzzzzzz", share_attempt: null })}; await window.sagebrush.notebook.saved(); }`);
       const f7 = await shareNow("D7b");
       await ev("delete window.sagebrush.shareTest.saved");
       await restore();
@@ -909,9 +932,8 @@ try {
       const n = await mine();
       await openDialog();
       await recordSent();
-      await ev(`(() => { const t = window.sagebrush.shareTest; let once = false; t.onRead = () => { if (!once) { once = true; ${remote({ share_attempt: C })}; } }; })()`);
+      await ev(`(() => { const f = window.fetch; let once = false; window.fetch = async (u, o) => { if (!once && String(u).endsWith("/api/share/check")) { once = true; await ${secondWriter({ share_attempt: C }, true)}; await new Promise((r) => setTimeout(r, 200)); } return f(u, o); }; })()`);
       const f7 = await shareNow("D7c");
-      await ev("window.sagebrush.shareTest.onRead = null");
       const none = await ev("window.__attempts.length");
       const l = await shareNow("D7c");
       await restore();
@@ -932,7 +954,11 @@ try {
     await ev(`(() => { const f = window.fetch; window.__made = null; window.fetch = async (u, o) => {
       if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") { const r = await f(u, o); window.__made = { ...(await r.json()), sent: JSON.parse(o.body).attempt }; return new Promise(() => {}); }
       return f(u, o); }; })()`);
-    await ev(`window.sagebrush.shareTest.saved = async () => { await window.sagebrush.notebook.saved(); window.sagebrush.notebook.applyRemote({ ...window.sagebrush.notebook.snapshot(), share_attempt: "${"d".repeat(32)}" }, true, true); await window.sagebrush.notebook.saved(); }`);
+    {
+      const D = "d".repeat(32);
+      const sw = `(async () => { const id = localStorage.getItem('sagebrush-current'); const db = await new Promise((ok, no) => { const r = indexedDB.open('sagebrush'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }); await new Promise((ok, no) => { const tx = db.transaction('notebooks', 'readwrite'), st = tx.objectStore('notebooks'); const g = st.get(id); g.onsuccess = () => st.put({ ...g.result, share_attempt: '${D}', rev: (g.result.rev ?? 0) + 1, updated: Date.now() }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); }); db.close(); })()`;
+      await ev(`window.sagebrush.shareTest.saved = async () => { await ${sw}; await window.sagebrush.notebook.saved(); }`);
+    }
     await ev("document.querySelector('#sharetitlein').value = 'D2'; document.querySelector('#shareupload').click()");
     await until("!!window.__made", 60000);
     const made2 = await ev("window.__made");

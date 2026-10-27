@@ -1576,6 +1576,15 @@ const shareDialog = createShareDialog({
   failsafe: () => shareTest.failsafe,
   bounds: () => ({ maxFiles: 10000, maxFileBytes: sharing.me?.limits?.max_file_bytes, bytesLeft: sharing.me?.limits ? sharing.me.limits.storage_bytes - sharing.me.usage : undefined }),
   upload: async ({ files, title, license }, progress) => {
+    // (the notebook's share and pending attempt as its store holds them now; null where there's no store)
+    const storedShare = async () => {
+      try {
+        const d = await nb.store?.load?.();
+        return d ? { share_id: d.share_id ?? null, share_attempt: d.share_attempt ?? null } : null;
+      } catch {
+        return null;
+      }
+    };
     const origin = current.id;
     const prev = nb.snapshot().share_id ?? null;
     // (a new share's attempt (plan-upload-leak r3 §3c): kept with the notebook, and saved, before
@@ -1591,17 +1600,19 @@ const shareDialog = createShareDialog({
         throw new Error("this notebook couldn't be saved, so it isn't uploaded (a retry could otherwise share it twice)");
       }
       if (current.id !== origin) throw new Error("the notebook changed; upload again");
-      // (what the save kept is what this upload uses: a remote update merged by that save may have replaced the
-      // attempt, or brought a share made elsewhere, astra3's L1; the kept attempt is adopted, a kept share stops it)
-      const kept = nb.snapshot();
+      // (what the store keeps is what this upload uses: another writer's save, merged by this one or made after it,
+      // may have replaced the attempt, or brought a share made elsewhere, astra3's L1; read from the store itself,
+      // as a save with nothing new to write meets no conflict; the kept attempt is adopted, a kept share stops it)
+      const kept = (await storedShare()) ?? nb.snapshot();
       if (kept.share_id) throw new Error("this notebook was shared from elsewhere meanwhile. Upload again to make a new version of that share.");
       if (!/^[0-9a-f]{32}$/.test(kept.share_attempt ?? "")) throw new Error("this notebook's upload changed elsewhere meanwhile; upload again");
       attempt = kept.share_attempt;
+      if (nb.snapshot().share_attempt !== attempt) nb.setMeta({ share_attempt: attempt });
     }
     // (just before the request that makes the share: the notebook still holds this attempt, and no share)
     let committing = false;
-    const beforeCommit = () => {
-      const now = nb.snapshot();
+    const beforeCommit = async () => {
+      const now = (await storedShare()) ?? nb.snapshot();
       if (current.id !== origin || now.share_id || now.share_attempt !== attempt) throw new Error("this notebook's share changed elsewhere while uploading; nothing was shared. Upload again.");
       committing = true;
     };
