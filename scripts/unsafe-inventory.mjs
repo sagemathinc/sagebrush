@@ -363,10 +363,15 @@ export function compilerSites(jsonTexts, found, root = ROOT) {
       let m;
       try { m = JSON.parse(line); } catch { continue; }
       if (m.reason !== "compiler-message" || (m.message?.code?.code) !== "unsafe_code") continue;
+      // a dependency compiling its own code (cargo's package_id: registry+… or git+…) is outside the boundary;
+      // any report emitted while compiling a LOCAL package is ours, wherever its span points (an absolute
+      // registry path there would be an external macro's expansion landing in our code: never ignored)
+      const dep = /^(registry|git|sparse)\+/.test(m.package_id ?? "");
       const sp = m.message.spans.find((s) => s.is_primary) ?? m.message.spans[0];
-      if (!sp) { errors.push(`an unsafe_code report without a span (${m.message.message})`); continue; }
+      if (dep) continue;
+      if (!sp || !sp.file_name || !(sp.line_start > 0)) { errors.push(`an unsafe_code report in ${m.package_id ?? "a local package"} with no usable location (${m.message.message})`); continue; }
       let p = sp.file_name;
-      if (external(p)) continue;
+      if (external(p)) { errors.push(`${p}:${sp.line_start}: an unsafe_code site in a local package (${m.package_id}) whose span lies in dependency or toolchain source: an external expansion into our code, not modelled`); continue; }
       if (p.startsWith(root)) p = p.slice(root.length);
       else if (!p.startsWith("/")) p = "engine/" + p;
       sites.push(`${p}:${sp.line_start}`);

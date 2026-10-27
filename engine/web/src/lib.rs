@@ -50,6 +50,7 @@ pub unsafe extern "C" fn sb_free(ptr: *mut u8, len: usize) {
 // the symbol unique);
 // REPLY's length is read on one thread with no other reference to REPLY live
 // (wasm is single-threaded; natively only one-test ABI binaries call this).
+// That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub extern "C" fn sb_reply_len() -> usize {
     unsafe { (*std::ptr::addr_of!(REPLY)).len() }
@@ -61,7 +62,7 @@ pub extern "C" fn sb_reply_len() -> usize {
 // the host wrote `len` request bytes at `ptr` (a block from sb_alloc), so the
 // slice is readable; REPLY is replaced on one thread with no other reference
 // to it live (wasm is single-threaded; natively only one-test ABI binaries call
-// this).
+// this).  That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
@@ -81,7 +82,7 @@ pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
 // the host wrote `len` request bytes at `ptr` (a block from sb_alloc), so the
 // slice is readable; REPLY is replaced on one thread with no other reference
 // to it live (wasm is single-threaded; natively only one-test ABI binaries call
-// this).
+// this).  That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
@@ -99,7 +100,7 @@ pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
 // the host wrote `len` request bytes at `ptr` (a block from sb_alloc), so the
 // slice is readable; REPLY is replaced on one thread with no other reference
 // to it live (wasm is single-threaded; natively only one-test ABI binaries call
-// this).
+// this).  That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::slice::from_raw_parts(ptr, len);
@@ -275,6 +276,7 @@ fn host_handle(handle: f64) -> Option<(usize, u32)> {
 // the symbol unique);
 // REPLY's address is read on one thread with no other reference to REPLY live
 // (wasm is single-threaded; natively only one-test ABI binaries call this).
+// That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub extern "C" fn sb_reply_ptr() -> *const u8 {
     unsafe { (*std::ptr::addr_of!(REPLY)).as_ptr() }
@@ -282,6 +284,7 @@ pub extern "C" fn sb_reply_ptr() -> *const u8 {
 
 // SAFETY: REPLY is replaced on one thread with no other reference to it live
 // (wasm is single-threaded; natively only the one-test ABI binaries reach it).
+// That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 fn set_reply(v: Value) {
     let r = unsafe { &mut *std::ptr::addr_of_mut!(REPLY) };
@@ -441,7 +444,8 @@ pub fn memory_error_value(r: &sagebrush_ledger::Refusal) -> Value {
 // SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
 // the symbol unique);
 // REPLY is replaced on one thread with no other reference to it live (wasm is
-// single-threaded; natively only one-test ABI binaries call this).
+// single-threaded; natively only one-test ABI binaries call this).  That is the
+// supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_last_error() -> *const u8 {
     let r = &mut *std::ptr::addr_of_mut!(REPLY);

@@ -38,211 +38,211 @@
    "file": "engine/arith/src/crt.rs",
    "item": "mod tests > mod spy > impl GlobalAlloc for Spy",
    "hash": "4389ee1fd532f0cae6cf031dd79b92022576a0681d0e74701967d2344b23b06e",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/arith/src/spelim.rs",
    "item": "fn dense_axpy",
    "hash": "29f1da413f5072001e6a33c69c0ad5e47da678884d98dbbc15fc8c24a753be60",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it reinterprets an i64 slice as u64 / calls an AVX2-compiled copy of a safe kernel, on its own numeric slices."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it reinterprets an i64 slice as u64 / calls an AVX2-compiled copy of a safe kernel, on its own numeric slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/arith/src/spelim.rs",
    "item": "fn dense_axpy_avx2",
    "hash": "9bd049ea46105e1f52d61639a1999441b753031269a3e42ee611903003b7b20c",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it reinterprets an i64 slice as u64 / calls an AVX2-compiled copy of a safe kernel, on its own numeric slices."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it reinterprets an i64 slice as u64 / calls an AVX2-compiled copy of a safe kernel, on its own numeric slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "fn fmpz_big",
    "hash": "b43c2696269aeaccbec6f410ef31de0cdcbcdc5e2a483744ac2d56617356c11b",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl Fmpz > fn new",
    "hash": "97a89f6aa0c2a05f537c04f122cc2a67b55c02ab1af13f097945cd48faec699a",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl Drop for Fmpz > fn drop",
    "hash": "1e343ba6ed2cb640bafc007d43fe3e84691d2d6eefd151a3e714ddce0b91d1dd",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FMat > fn zero",
    "hash": "d3499e66fd0b8519f61e24228b807f0850330853d86ed6ed7697826bb05e913b",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FMat > fn new",
    "hash": "f50e48313e2aa380fa4262424638e6f8ca311093fbf5083af5e511104444341c",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FMat > fn entries",
    "hash": "c5480825be279b3c165bbc88048c1b0717628b0f4f8eea4f799705a271f16e42",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FMat > fn det_raw",
    "hash": "027ebcc42919ac9d086681dc547a04f36599946bf1d941f2896519d5440354a7",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FMat > fn rref_raw",
    "hash": "1e8373b35230da68b15c38648b37db30182157802f38c529279f4ce7958d297e",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FMat > fn inv_raw",
    "hash": "bcb059d8a3c007ef02798a85b1648e800a4d43ccd1e6e26eea421aea719489eb",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FMat > fn solve_raw",
    "hash": "61e756430efe00220b151556a32b5cd378b10655425fb2c08ba4c5a08621303b",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FMat > fn rank",
    "hash": "320fffa07f0691606aa6ed76617e85a2d80c8c13db2d303bfdc7ff43e1056d8f",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FMat > fn mul",
    "hash": "75e14d22fbcadd49d9846cacd09f0364cb85fe9c72f269fa23449459ffc8a5ee",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FMat > fn charpoly_poly",
    "hash": "48bc33b6eb7f9e27a0b1937878682d82d56ccb0b308ad226175ae3a80bc6927c",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl Drop for FMat > fn drop",
    "hash": "eafd61aa5b9852d672f3bfa1cfc413672f029e0bf7ddeb86654e9027385c8aca",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FPoly > fn new",
    "hash": "c4f2fbd0d782030f804e6d49cfadba8596ff6a5703237a1dd650e5a6c1a2bce4",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FPoly > fn empty",
    "hash": "efe8fa1e911ca861a2f264b1ea0b576a120ace409dc1e4916bbeec6e5e9b5c96",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FPoly > fn coeffs",
    "hash": "425e126716d27393726ead5b064be4509d0f8aedd70bc22eae59099c2e5c479e",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FPoly > fn mul",
    "hash": "4de4d5e4c1d71d582d1220cc3aff755bbe46b541169d8dca1a34ff85f8775ef2",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl FPoly > fn gcd",
    "hash": "0643c6275e311b0422525794556b7c254f3e98414e11cc9c3b69caa9584fae5e",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "impl Drop for FPoly > fn drop",
    "hash": "ffca5d180aaa80e65b5e0cf43db929e87921e2039dbc18365cc61b57876af2bd",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "fn take_string",
    "hash": "9e43111a6d0201c2587f0867c7a1a45693b9a48446302487c419fb76652d6388",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/flint/src/lib.rs",
    "item": "fn factor",
    "hash": "7af3079bcd0ac6b6206c1ca5e4d20ca8c9e470dd933d1c2071b4749d78e967ee",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-flint (deps: bigint; test-only, never distributed) does not depend on sagebrush-ledger, so it cannot name those types, and its unsafe blocks call FLINT on FLINT objects this crate owns (fmpz, fmpz_mat, fmpz_poly) and C strings. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/growth-probe/src/lib.rs",
    "item": "fn probe_alloc",
    "hash": "ef2311456071016d29847426d8ec57fe4ab5e25b396f7ee62eb97765c0bb726b",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-growth-probe (no workspace deps; tests only) does not depend on sagebrush-ledger, so it cannot name those types, and it allocates/frees byte blocks for the host's growth sweep, or reads memory.size."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-growth-probe (no workspace deps; tests only) does not depend on sagebrush-ledger, so it cannot name those types, and it allocates/frees byte blocks for the host's growth sweep, or reads memory.size. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/growth-probe/src/lib.rs",
    "item": "fn probe_free",
    "hash": "1bd9fb2adaf04e2fc00b5025f4a28a96204353eb0f7ed7399cc5b3bfb33ee561",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-growth-probe (no workspace deps; tests only) does not depend on sagebrush-ledger, so it cannot name those types, and it allocates/frees byte blocks for the host's growth sweep, or reads memory.size."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-growth-probe (no workspace deps; tests only) does not depend on sagebrush-ledger, so it cannot name those types, and it allocates/frees byte blocks for the host's growth sweep, or reads memory.size. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/growth-probe/src/lib.rs",
    "item": "fn probe_pages",
    "hash": "934d8c5bcab9750bc51e9111dc0662d069534755c794e403169e045a24a03a28",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-growth-probe (no workspace deps; tests only) does not depend on sagebrush-ledger, so it cannot name those types, and it allocates/frees byte blocks for the host's growth sweep, or reads memory.size."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-growth-probe (no workspace deps; tests only) does not depend on sagebrush-ledger, so it cannot name those types, and it allocates/frees byte blocks for the host's growth sweep, or reads memory.size. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/interrupt/src/lib.rs",
    "item": "fn poll_host",
    "hash": "498e2ae89c8735cb0ba87f3c274698ef0f748a095577f198acee075133618a4f",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it calls the host import `interrupted()` (no arguments, returns a flag)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it calls the host import `interrupted()` (no arguments, returns a flag). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/interrupt/src/lib.rs",
    "item": "fn poll_host_now",
    "hash": "fc43602639521464e069f88364562e709fc4f43255a65b31f6467e1149f4c10a",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it calls the host import `interrupted()` (no arguments, returns a flag)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it calls the host import `interrupted()` (no arguments, returns a flag). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/interrupt/src/lib.rs",
    "item": "fn on_sigint",
    "hash": "6e4b155348bb7dc26d7ffee9e167ca417957b1d5679b28d3e37c9520c47ae5c8",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it installs/restores OS signal or console handlers that only touch atomics."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it installs/restores OS signal or console handlers that only touch atomics. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/interrupt/src/lib.rs",
    "item": "fn on_ctrl",
    "hash": "a39226073d6210fde182a7c5a5817ee0dbe3485f38f4511c75cf0480bf6f6c94",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it installs/restores OS signal or console handlers that only touch atomics."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it installs/restores OS signal or console handlers that only touch atomics. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/interrupt/src/lib.rs",
    "item": "impl SigintGuard > fn new",
    "hash": "b0b359810b3606c9bb7d2f848416021b74e32e6329c24c1801b70b34578e285f",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it installs/restores OS signal or console handlers that only touch atomics."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it installs/restores OS signal or console handlers that only touch atomics. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/interrupt/src/lib.rs",
    "item": "impl Drop for SigintGuard > fn drop",
    "hash": "97cba7d0100f7f19e2b5306465645167a0b5c8623d34cab1b43d85885103a494",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it installs/restores OS signal or console handlers that only touch atomics."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it installs/restores OS signal or console handlers that only touch atomics. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/interrupt/src/progress.rs",
    "item": "mod wasm > fn area",
    "hash": "3144f91a3673d9b4c430e8ce5c543c43866a4502a0cd7013d8f48d2707be759e",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it borrows the static progress-frame array (u32 words)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it borrows the static progress-frame array (u32 words). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/ledger/src/audit.rs",
@@ -254,133 +254,133 @@
    "file": "engine/modsym/src/linalg.rs",
    "item": "macro_rules ! dispatch > fn $name",
    "hash": "60cf42edb4a6385320d344e304843375918ddd488ce9a5ccc444c35c7210ad62",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-modsym (deps: bigint, interrupt, par, poly, ap) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it reinterprets an i64 slice as u64 / calls an AVX2-compiled copy of a safe kernel, on its own numeric slices."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-modsym (deps: bigint, interrupt, par, poly, ap) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it reinterprets an i64 slice as u64 / calls an AVX2-compiled copy of a safe kernel, on its own numeric slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/mpoly/examples/kern.rs",
    "item": "fn run_i64",
    "hash": "a709747922f8cc686d9803422a2980f418e8394016883713ca0cc0e9fa53b800",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/mpoly/examples/kern.rs",
    "item": "fn run_i128",
    "hash": "7d1e14ea6a9933d8116eecfc344f8a6d36cfa9423100a40a84f6e843783056fc",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/mpoly/examples/kern.rs",
    "item": "fn run_split",
    "hash": "877e029447fff72b714c6693937981ebbd63650aaad986ef40aa57d39f96978c",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/mpoly/examples/kern.rs",
    "item": "fn run_f64",
    "hash": "ad4ec7d323a17310df7fc9cc970a85d27579f51bbafe93cb3edae12a0e7d290f",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/mpoly/src/lib.rs",
    "item": "impl W3 > fn addmul",
    "hash": "ae8665ed4ed5275c90772013b452e43c423cee629dc4c12475274be606a399af",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/mpoly/src/lib.rs",
    "item": "impl<'a, F : Fn ( u64) -> u64 + Sync> DenseJob<'a, F> > fn run_with",
    "hash": "a6f37fec84df5806997a27c6f49028b1e6f280ae964bd43ba6cd7fdc5aa6bf03",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/poly/src/lib.rs",
    "item": "mod alloc_spy > impl GlobalAlloc for Spy",
    "hash": "5324744e1018309d37f89870d24af343ed9d4964301eac742994ee7bbfe7cc76",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-poly (deps: bigint, interrupt) does not depend on sagebrush-ledger, so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-poly (deps: bigint, interrupt) does not depend on sagebrush-ledger, so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/lib.rs",
    "item": "fn rs_alloc",
    "hash": "141546c7e7c5158568365f8f3e6f5e2af4baad9c494ab70cc719379c44c1b1be",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/lib.rs",
    "item": "fn rs_free",
    "hash": "0a84f9d7df470b9e8ffaa842d6483e020d62932a30154e631510cc303afc26e6",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/lib.rs",
    "item": "fn rs_reply_ptr",
    "hash": "f65b4ea1315dbf28d419a5024b29abec570757e53ed8463c83eb8bdc4956bbed",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/lib.rs",
    "item": "fn rs_reply_len",
    "hash": "35ffcfbab356408260610e40214e1eb576870ba40d3cf3d6249d79f10126b9f5",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/lib.rs",
    "item": "fn reply",
    "hash": "23fd41fc30a6dc62ba0834f16fdeea6b6c257e34b71447a7d1a3d2e184369ccc",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/lib.rs",
    "item": "fn rs_render",
    "hash": "01edfd59ca7530402d6f59965a3b6c52fee32525f7596245735b9892c2cda929",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/lib.rs",
    "item": "fn rs_decode",
    "hash": "e19f2b86f3fabb859f620f6f4a1a7e8c7b7e6bc278ef6a5932c97e4578b421dc",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/mem.rs",
    "item": "fn zeroed",
    "hash": "9b120d03796e658b73c505a476dc5124f70263b1e122cf40b8d627be593a29f6",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/wasm.rs",
    "item": "impl Allocator for Bounded",
    "hash": "c665a778cfe3202e2bb606722c84b25380fafa91bd495429e54756c10089208b",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/wasm.rs",
    "item": "impl GlobalAlloc for Heap",
    "hash": "acde7c633e586ff68a939d6e673900483359d7366c4cb314036663c9b35ac6e1",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/wasm.rs",
    "item": "fn rs_begin",
    "hash": "c032d2d8382428e17232589bc248a199898f8afd604f77702041a357c075aaca",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/wasm.rs",
    "item": "fn rs_last_refusal",
    "hash": "6044932ad3b1617263cc9ac1a2a534d0a18d729fd661c5a694cb9711e3801b10",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/wasm.rs",
    "item": "fn rs_heap_base",
    "hash": "42005cf04469820d3a10bf4d4b2cd9e70ed645103db28f0f61efa19fb0528ebb",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/raster/src/wasm.rs",
    "item": "fn clear_refusal",
    "hash": "0a02c5c9e3777770199fafe9ca7e586b594fe15c9f25ccf992170478e4f6e3a9",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics)."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/web/src/lib.rs",
@@ -398,25 +398,25 @@
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_reply_len",
    "hash": "83df5b2cd08d4c1e6d3d0438cd2cd10b2b48a917a659366751ca956258deabad",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_call",
    "hash": "ccb657ef5cc34d857fcd6269347e43377c02d872617bc9c09af14a5b1546b90b",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_sym_call",
    "hash": "e5362b04bab0bf5d907b7c3fccb4c0fdd6f49003de5c916190f049cf72e134f6",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_mp_call",
    "hash": "5733f186f73275cd07e9acd18d56533634a381469fad273ce40d71ed2758960b",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
   },
   {
    "file": "engine/web/src/lib.rs",
@@ -458,13 +458,13 @@
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_reply_ptr",
    "hash": "92520c376d8372031d20f1cb38c1fbc2c5259fbb3bff573ffca76e2e91e3d4a2",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn set_reply",
    "hash": "17dd7fe57e862fe4adfb7ed1b915725f6a1efca29a4355394d947bac8dd58a3d",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
   },
   {
    "file": "engine/web/src/lib.rs",
@@ -488,7 +488,7 @@
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_last_error",
    "hash": "c7a91f1544dc2cfb74d7d23c595270fbc39aa9a4b79293b83072c08c0ea7dc11",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer."
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
   },
   {
    "file": "engine/web/src/lib.rs",

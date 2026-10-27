@@ -113,13 +113,17 @@ ok(scan(files, tree({ "engine/Cargo.toml": ws, "engine/a/Cargo.toml": member, "s
 // ---- #234 r2 U1: compiler sites against the pinned items (synthetic cargo JSON)
 {
   const found = [{ file: "engine/x/src/lib.rs", item: "fn f", hash: "h", from: 10, to: 20 }];
-  const msg = (file, line, code = "unsafe_code") => JSON.stringify({ reason: "compiler-message", message: { code: { code }, message: "usage of an `unsafe` block", spans: [{ is_primary: true, file_name: file, line_start: line }] } });
+  const LOCAL = "path+file:///repo/engine/x#sagebrush-x@0.1.0", REG = "registry+https://github.com/rust-lang/crates.io-index#pyo3@0.27.2";
+  const msg = (file, line, code = "unsafe_code", pkg = LOCAL) => JSON.stringify({ reason: "compiler-message", package_id: pkg, message: { code: { code }, message: "usage of an `unsafe` block", spans: file == null ? [] : [{ is_primary: true, file_name: file, line_start: line }] } });
   const run = (...lines) => compilerSites([lines.join("\n")], found, "/repo/");
   ok(run(msg("x/src/lib.rs", 15)).errors.length === 0, "U1: a site inside a pinned item passes");
   ok(run(msg("x/src/lib.rs", 25)).errors.length === 1, "U1 refused: a site outside every pinned item");
   ok(run(msg("/repo/engine/target/debug/build/x-1/out/gen.rs", 3)).errors.some((e) => /generated code/.test(e)), "U1 refused: a site in a build script's OUT_DIR (in-tree target)");
   ok(run(msg("/tmp/t/debug/build/x-1/out/gen.rs", 3)).errors.some((e) => /generated code/.test(e)), "U1 refused: a site in an out-of-tree OUT_DIR");
-  ok(run(msg("/home/u/.cargo/registry/src/x/lib.rs", 3)).errors.length === 0, "U1: a registry source site is the dependency's (outside the boundary)");
+  ok(run(msg("/home/u/.cargo/registry/src/pyo3/lib.rs", 3, "unsafe_code", REG)).errors.length === 0, "U1: a registry crate compiling its own code is outside the boundary");
+  ok(run(msg("/home/u/.cargo/registry/src/pyo3/lib.rs", 3)).errors.some((e) => /external expansion into our code/.test(e)), "U1 refused: a local package's site whose span lies in dependency source (an external expansion landing in our code)");
+  ok(run(msg(null, 0)).errors.some((e) => /no usable location/.test(e)), "U1 refused: a local site with no usable location (never assumed safe)");
+  ok(run(msg("x/src/lib.rs", 0)).errors.some((e) => /no usable location/.test(e)), "U1 refused: a zero-line span");
   ok(run(msg("x/src/lib.rs", 25, "dead_code")).errors.length === 0, "U1: other lints are ignored");
 }
 
