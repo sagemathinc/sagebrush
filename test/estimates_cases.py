@@ -1,4 +1,4 @@
-# Estimates (lib/sagebrush/estimates.py; estimates plan r3 PR 2a), the parts
+# Estimates (lib/sagebrush/_estimates.py; estimates plan r3 PR 2a), the parts
 # that need no engine: the fit outcomes at their thresholds, calibration
 # (probes, throttling, a stale cache, censored samples, the few-samples
 # rule), and the record of a factorization estimate from a fixed engine
@@ -14,7 +14,7 @@ import tempfile
 import types
 
 try:
-    import sagebrush.estimates as E
+    import sagebrush._estimates as E
     import sagebrush.records as R
 except ImportError:  # CPython, outside the package: the two modules alone
     import importlib.util
@@ -30,7 +30,7 @@ except ImportError:  # CPython, outside the package: the two modules alone
         spec.loader.exec_module(m)
         return m
     R = load("records")
-    E = load("estimates")
+    E = load("_estimates")
 
 # ---- the fit outcomes (E4 §4): exactly one branch for every case
 print("fits")
@@ -122,9 +122,11 @@ REPLY = {
 E.calibration = lambda: E.Calibration("native", "cpython", clock=lambda: now[0])
 E._call = lambda fn, **kw: REPLY
 E.host_capacity = lambda: ({"bytes": 10 ** 9, "basis": ["MemAvailable"], "unknown_parts": []}, None)
-state = random.getstate()
+random.seed(12345)
+expected = [random.random() for _ in range(3)]
+random.seed(12345)
 rec = E._factor_record(2 ** 299 + 1, "factor_integer")
-print("  the user's random state unchanged:", random.getstate() == state)
+print("  the user's random stream unchanged:", [random.random() for _ in range(3)] == expected)
 print("  valid estimate/1:", R.validate(rec) is rec)
 print("  total time:", rec["total_time"], "| peak memory:", rec["peak_memory"]["high_bytes"], rec["peak_memory"]["label"],
       "|", rec["fits"]["outcome"])

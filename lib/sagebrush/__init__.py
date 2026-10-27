@@ -50,8 +50,8 @@ def _unavailable(name):
 # design-agent-api-library r3 §5 and §6)
 def estimate(f, *args, **kwds):
     """The time and memory estimate of f(*args, **kwds), a
-    sagebrush.estimate/1 record; f is never called (sagebrush.estimates)."""
-    from . import estimates as _e
+    sagebrush.estimate/1 record; f is never called (sagebrush._estimates)."""
+    from . import _estimates as _e
     return _e.estimate(f, *args, **kwds)
 
 

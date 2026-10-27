@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-// Estimates (lib/sagebrush/estimates.py, engine/classgroup/src/nf/cost.rs;
+// Estimates (lib/sagebrush/_estimates.py, engine/classgroup/src/nf/cost.rs;
 // estimates plan r3 PR 2a): the engine prints what CPython prints for the
 // parts that need no engine (test/estimates_cases.out), and the real engine's
 // factorization estimates are valid records with the ruled milestone form.
@@ -23,13 +23,13 @@ test("estimate(factor, n) from the real engine: valid, milestones q = p_typical 
     "import sagebrush",
     "from sagebrush import records",
     "sagebrush.estimate(factor, 2^64 + 1)  # (the first call calibrates)",
-    "state = random.getstate()",
+    "random.seed(7); expected = [random.random() for _ in range(3)]; random.seed(7)",
     "t = time.perf_counter()",
     "e = sagebrush.estimate(factor, 2^300 + 1)",
     "dt = time.perf_counter() - t",
     "records.validate(dict(e))",
     "print('ms below 10:', dt < 0.010)",
-    "print('random state unchanged:', random.getstate() == state)",
+    "print('random stream unchanged:', [random.random() for _ in range(3)] == expected)",
     "print('total:', e['total_time'])",
     "ms = [s for s in e['stages'] if s['success']]",
     "print('milestones:', len(ms) > 0, all(s['success']['p_typical'] == s['success']['p_high'] for s in ms))",
@@ -49,7 +49,7 @@ test("estimate(factor, n) from the real engine: valid, milestones q = p_typical 
     r.stdout,
     [
       "ms below 10: True",
-      "random state unchanged: True",
+      "random stream unchanged: True",
       "total: None",
       "milestones: True True",
       "conditions: True",

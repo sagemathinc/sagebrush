@@ -33,6 +33,10 @@ _REGISTRY = {}
 
 
 def _key(f):
+    # (a wrapper names what it wraps: Magma's intrinsics are wrapped by
+    # lib/_magma.py's _guarded)
+    while not isinstance(f, str) and getattr(f, "__wrapped__", None) is not None:
+        f = f.__wrapped__
     if isinstance(f, str):
         mod, _, name = f.rpartition(".")
     else:
