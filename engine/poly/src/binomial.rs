@@ -601,13 +601,23 @@ fn pow_cmp(b: &Budget, c: &BigInt, l: u64, n: &BigInt) -> FResult<Option<bool>> 
 }
 
 /// The residue prefilter before the bisection (rank-3 PR 5 perf ruling,
-/// daybreak2 option (ii)).  Tier 1: the prime factors of 2^64 - 1 and
-/// 2^64 + 1, whose residues come from one pass of additions over the limbs
-/// (2^64 = 1, resp. -1); tier 2: primes p = k l + 1 < 2^32 (k <= WITNESS_K)
+/// daybreak2 option (ii)).  Tier 1: the prime factors of 2^48 - 1 and 2^64 -
+/// 1 (one pass of additions over the limbs: 2^48 = 1 on 48-bit chunks, 2^64 =
+/// 1 on limbs; a power of 2 plus a small number is not stuck at one residue
+/// for both), then of 2^64 + 1 (a second pass, only if needed); tier 2:
+/// primes p = k l + 1 < 2^32 (k <= WITNESS_K)
 /// outside tier 1, by rem_u64, until WITNESSES witnesses were tried.  A
 /// witness serves l when p = 1 mod l; fewer witnesses only weaken the filter:
 /// the exact search still runs, never a refusal.
+#[cfg(test)]
 const FOLD_MINUS: [u64; 7] = [3, 5, 17, 257, 641, 65537, 6700417];
+/// The distinct prime factors of 2^48 - 1 = 3^2 5 7 13 17 97 241 257 673
+/// (residues from the same pass, re-cut into 48-bit chunks).
+#[cfg(test)]
+const FOLD_48: [u64; 9] = [3, 5, 7, 13, 17, 97, 241, 257, 673];
+/// Tier 1's witnesses in increasing size, each with the fold it is read from
+/// (false: 2^48 - 1, true: 2^64 - 1); all below 2^32 (u64 arithmetic).
+const TIER1: [(u64, bool); 12] = [(3, false), (5, false), (7, false), (13, false), (17, false), (97, false), (241, false), (257, false), (641, true), (673, false), (65537, true), (6700417, true)];
 const FOLD_PLUS: [u64; 2] = [274177, 67280421310721];
 const WITNESSES: u64 = 8;
 const WITNESS_K: u64 = 64;
@@ -629,11 +639,13 @@ fn powmod_w(x: u64, mut e: u64, p: u64) -> u64 {
     r as u64
 }
 
-/// |n| mod 2^64 - 1, from one pass over its borrowed limbs: u64 additions
-/// with end-around carry (2^64 = 1); no allocation, no division; a poll every
-/// 256 limbs.
-fn fold_minus(n: &BigInt) -> u64 {
-    let (mut s, mut i) = (0u64, 0u64);
+/// |n| mod 2^64 - 1 and |n| mod 2^48 - 1, from one pass over its borrowed
+/// limbs: u64 additions with end-around carry (2^64 = 1, resp. 2^48 = 1 on
+/// the limbs re-cut into 48-bit chunks); no allocation, no division; a poll
+/// every 256 limbs.
+fn fold_minus(n: &BigInt) -> (u64, u64) {
+    const M48: u64 = (1 << 48) - 1;
+    let (mut s, mut s48, mut buf, mut nb, mut i) = (0u64, 0u64, 0u128, 0u32, 0u64);
     sagebrush_bigint::for_each_u64_limb(n, |x| {
         if i & 255 == 0 {
             check();
@@ -641,13 +653,21 @@ fn fold_minus(n: &BigInt) -> u64 {
         let (t, c) = s.overflowing_add(x);
         // on a wrap t < x <= 2^64 - 1, so t + 1 cannot overflow
         s = t + c as u64;
+        buf |= (x as u128) << nb;
+        nb += 64;
+        while nb >= 48 {
+            // s48 < 2^48 + 1 before, < 2^49 + 1 after the add: no overflow
+            s48 += (buf as u64) & M48;
+            s48 = (s48 & M48) + (s48 >> 48);
+            buf >>= 48;
+            nb -= 48;
+        }
         i += 1;
     });
-    if s == u64::MAX {
-        0
-    } else {
-        s
-    }
+    s48 += buf as u64;
+    s48 = (s48 & M48) + (s48 >> 48);
+    s48 = (s48 & M48) + (s48 >> 48);
+    (if s == u64::MAX { 0 } else { s }, if s48 == M48 { 0 } else { s48 })
 }
 
 /// |n| mod 2^64 + 1, from one more pass (2^64 = -1: the alternating sum);
@@ -680,14 +700,14 @@ fn witness_rejects(r: u64, p: u64, l: u64) -> bool {
 }
 
 /// The work one not_a_power call may debit for an n of `bits` bits and the
-/// prime l, checked (None: overflow): the two folds, tier 1's 9 powerings, tier
+/// prime l, checked (None: overflow): the two folds, tier 1's 14 powerings, tier
 /// 2's WITNESS_K trial divisions (p <= WITNESS_K l + 1: sqrt(p) + 1 each) and
 /// WITNESSES reductions.
 fn prefilter_plan(bits: u64, l: u64) -> Option<u64> {
     let lb = limbs(bits);
     let pmax = WITNESS_K.checked_mul(l).and_then(|x| x.checked_add(1)).map_or(1 << 32, |p| p.min(1 << 32));
     let trial = WITNESS_K.checked_mul(pmax.sqrt() + 1)?;
-    lb.checked_add(1)?.checked_mul(2)?.checked_add(9 * 130)?.checked_add(trial)?.checked_add(WITNESSES.checked_mul(lb.checked_add(66)?)?)
+    lb.checked_add(1)?.checked_mul(2)?.checked_add(14 * 130)?.checked_add(trial)?.checked_add(WITNESSES.checked_mul(lb.checked_add(66)?)?)
 }
 
 /// Whether n >= 1 is PROVED not an l-th power (false: not proved, and the
@@ -701,14 +721,14 @@ fn not_a_power(b: &Budget, n: &BigInt, l: u64) -> FResult<bool> {
     b.debit(limbs(n.bits()).checked_add(1))?;
     #[cfg(test)]
     audit::set(|a| a.prefilter_calls += 1);
-    let rm = fold_minus(n);
+    let (rm, r48) = fold_minus(n);
     let mut tried = 0u64;
-    for &p in FOLD_MINUS.iter().filter(|&&p| p % l == 1) {
+    for &(p, wide) in TIER1.iter().filter(|&&(p, _)| p % l == 1) {
         b.debit(Some(130))?;
         tried += 1;
         #[cfg(test)]
         audit::set(|a| a.prefilter_evals += 1);
-        if witness_rejects(rm % p, p, l) {
+        if witness_rejects(if wide { rm % p } else { r48 % p }, p, l) {
             #[cfg(test)]
             audit::set(|a| a.prefilter_rejects += 1);
             return Ok(true);
@@ -735,7 +755,7 @@ fn not_a_power(b: &Budget, n: &BigInt, l: u64) -> FResult<bool> {
             break;
         }
         let Some(p) = l.checked_mul(k).and_then(|x| x.checked_add(1)).filter(|&p| p < 1 << 32) else { break };
-        if FOLD_MINUS.contains(&p) || FOLD_PLUS.contains(&p) {
+        if TIER1.iter().any(|&(q, _)| q == p) || FOLD_PLUS.contains(&p) {
             continue;
         }
         check();

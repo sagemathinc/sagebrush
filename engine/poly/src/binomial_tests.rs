@@ -379,15 +379,25 @@ fn the_piece_costs_are_charged_for_their_whole_life() {
 fn the_fold_residues_are_exact() {
     assert_eq!(FOLD_MINUS.iter().map(|&p| p as u128).product::<u128>(), (1u128 << 64) - 1);
     assert_eq!(FOLD_PLUS.iter().map(|&p| p as u128).product::<u128>(), (1u128 << 64) + 1);
-    assert!(FOLD_MINUS.iter().chain(FOLD_PLUS.iter()).all(|&p| is_prime_trial(p)));
-    for bits in [1u32, 63, 64, 65, 127, 128, 129, 1000, 4097] {
+    assert_eq!(FOLD_48.iter().map(|&p| p as u128).product::<u128>() * 3, (1u128 << 48) - 1);
+    assert!(FOLD_MINUS.iter().chain(FOLD_PLUS.iter()).chain(FOLD_48.iter()).all(|&p| is_prime_trial(p)));
+    // each tier-1 witness divides the fold it is read from
+    for &(p, wide) in TIER1.iter() {
+        assert_eq!(if wide { FOLD_MINUS.contains(&p) } else { FOLD_48.contains(&p) }, true, "{p}");
+    }
+    assert!(TIER1.windows(2).all(|w| w[0].0 < w[1].0));
+    for bits in [1u32, 47, 48, 49, 63, 64, 65, 95, 96, 97, 127, 128, 129, 191, 192, 193, 1000, 4097] {
         for n in [(BigInt::one() << bits) - 1, (BigInt::one() << bits) + 12345, BigInt::from(3).pow(bits / 2 + 1)] {
             for n in [n.clone(), -n] {
-                let (rm, rp) = (fold_minus(&n), fold_plus(&n));
-                assert!(rm < u64::MAX, "{bits} bits: 2^64 - 1 is folded to 0");
+                let ((rm, r48), rp) = (fold_minus(&n), fold_plus(&n));
+                assert!(rm < u64::MAX && r48 < (1 << 48) - 1, "{bits} bits: 2^k - 1 is folded to 0");
                 for &p in FOLD_MINUS.iter() {
                     assert_eq!(rm % p, n.abs().mod_floor(&BigInt::from(p)).to_u64().unwrap(), "{bits} bits mod {p}");
                 }
+                for &p in FOLD_48.iter() {
+                    assert_eq!(r48 % p, n.abs().mod_floor(&BigInt::from(p)).to_u64().unwrap(), "{bits} bits mod {p} (48)");
+                }
+                assert_eq!(r48, n.abs().mod_floor(&BigInt::from((1u64 << 48) - 1)).to_u64().unwrap(), "{bits} bits mod 2^48 - 1");
                 for &p in FOLD_PLUS.iter() {
                     assert_eq!((rp % p as u128) as u64, n.abs().mod_floor(&BigInt::from(p)).to_u64().unwrap(), "{bits} bits mod {p}");
                 }
