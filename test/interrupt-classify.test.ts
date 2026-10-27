@@ -10,7 +10,7 @@ import { join } from "node:path";
 const mod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 
 function run(js: string): any {
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { leakControlOutcome, classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -96,6 +96,93 @@ test("leak check, heap+external (P2a): the post-GC JS heap plus external memory 
   assert.equal(browser.ok, true);
   assert.equal(browser.measure, "rss (no heap+external figure on this host)");
   assert.equal(run(`leakCheck(${ser([null, null, null, null, null], [300e3, 300e3, 300e3, 300e3, 400e3])})`).measure, "rss");
+});
+
+test("the heap+external sample settles: the least of a few collected readings, so unswept ArrayBuffers can't read as a leak, and a real leak still fails", () => {
+  const sample = spawnSync(process.execPath, ["--input-type=module", "-e", `import { HEAP_EXTERNAL_SAMPLE } from ${JSON.stringify(mod)}; process.stdout.write(HEAP_EXTERNAL_SAMPLE)`], { encoding: "utf8" }).stdout;
+  assert.match(sample, /_m = "%d" % min\(_v\)/);
+  // a fake session: per trial, the totals (MB) successive collections see; _hu() is a collection
+  // (its heap part), _he() the external memory read right after it.  Returns the DONE figures in KB.
+  const done = (trials: number[][]): (number | null)[] => {
+    const py = [
+      "import json, time",
+      "time.sleep = lambda s: None",
+      `trials = ${JSON.stringify(trials)}`,
+      "out = []",
+      "for seq in trials:",
+      "    it = iter(seq)",
+      "    last = [seq[-1]]",
+      "    def _hu():",
+      "        last[0] = next(it, seq[-1])",
+      "        return int(last[0] * 1048576) - 4096",
+      "    def _he():",
+      "        return 4096",
+      sample.replace(/\n$/, ""),
+      "    out.append(int(_m) / 1024 if _m else None)",
+      "print(json.dumps(out))",
+    ].join("\n");
+    const r = spawnSync("python3", ["-c", py], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  };
+  const leak = (mem: (number | null)[]) => run(`leakCheck(${JSON.stringify(mem.map((m, k) => ({ i: k + 1, rss_kb: 5e5, threads: 8, mem_kb: m })))}, 20, "heap+external")`);
+  // master d1af1141's M1o: live 145.5-146 MB every repeat; repeats 1 and 5's first collection still
+  // counted ~25 MB of the trial's ArrayBuffers, gone by the next one
+  const noisy = [[166.5, 145.6], [145.5, 145.5], [145.8, 145.7], [146.0, 146.0], [171.7, 145.9]];
+  const first = noisy.map((t) => t[0] * 1024); // (the old single reading)
+  assert.equal(leak(first).ok, false, "the old single reading fails on noise alone (the CI failure)");
+  const settled = done(noisy);
+  assert.ok(settled.every((m, k) => Math.abs((m as number) - Math.min(...noisy[k]) * 1024) < 1), JSON.stringify(settled));
+  assert.equal(leak(settled).ok, true, "settled: no leak");
+  // (#196's series, the same shape)
+  assert.equal(leak(done([[166.7, 144.0], [171.1, 144.2], [143.4, 143.4], [146.1, 144.1], [171.8, 144.3]])).ok, true);
+  // the control: a real leak of 34.4 MB a repeat (the listLeak series), with the same unswept noise on
+  // top of the first readings, still fails: no collection reads live memory lower than it is
+  const live = [112.4, 146.8, 181.2, 215.6, 250];
+  const leaking = done(live.map((m, k) => [m + (k % 2 ? 25 : 0), m]));
+  assert.ok(leaking.every((m, k) => Math.abs((m as number) - live[k] * 1024) < 1), JSON.stringify(leaking));
+  const l = leak(leaking);
+  assert.equal(l.ok, false);
+  assert.equal(l.growth_kb, Math.round((250 - 181.2) * 1024));
+  // readings that never agree: the least of the 5 collections
+  assert.equal(done([[160, 150, 140, 130, 120, 110]])[0], 120 * 1024);
+  // no figure on the host: nothing
+  const none = spawnSync("python3", ["-c", ["import time", "_hu = None", "_he = None", "for _x in [1]:", sample.replace(/\n$/, ""), "    print(repr(_m))"].join("\n")], { encoding: "utf8" });
+  assert.equal(none.stdout.trim(), "''", none.stderr);
+});
+
+test("the leak control (L1c): PASS only on measured heap+external growth over its allowance; a thread-only failure, the RSS fallback or a malformed result FAIL", () => {
+  const pass = `[{ outcome: "PASS" }, { outcome: "PASS" }]`;
+  const ser = (mem: (number | null)[], threads: number[]) => JSON.stringify(mem.map((m, k) => ({ i: k + 1, rss_kb: 5e5 + k * 30e3, threads: threads[k], ...(m == null ? {} : { mem_kb: m * 1024 }) })));
+  // the series the control produces (+24 MB a repeat): leakCheck fails it on growth, and the control PASSes
+  const grown = run(`leakCheck(${ser([150, 174, 198, 222, 246], [8, 8, 8, 8, 8])}, 20, "heap+external")`);
+  assert.equal(grown.ok, false);
+  assert.ok(grown.growth_kb > grown.allowed_kb);
+  const ok = run(`leakControlOutcome(${pass}, ${JSON.stringify(grown)}, undefined)`);
+  assert.equal(ok.outcome, "PASS");
+  assert.match(ok.why, /caught \(growth \d+ KB > allowed \d+ KB\)/);
+  // astra2's negative: no growth, a thread change only -> leakCheck ok:false, but NOT the control's leak
+  const threadOnly = run(`leakCheck(${ser([150, 150, 150, 150, 150], [8, 8, 8, 8, 9])}, 20, "heap+external")`);
+  assert.equal(threadOnly.ok, false);
+  assert.equal(threadOnly.growth_kb, 0);
+  const t = run(`leakControlOutcome(${pass}, ${JSON.stringify(threadOnly)}, undefined)`);
+  assert.equal(t.outcome, "FAIL");
+  assert.match(t.why, /thread count changed/);
+  // growth AND a thread change: still not a clean catch
+  const both = run(`leakCheck(${ser([150, 174, 198, 222, 246], [8, 8, 8, 8, 9])}, 20, "heap+external")`);
+  assert.equal(run(`leakControlOutcome(${pass}, ${JSON.stringify(both)}, undefined)`).outcome, "FAIL");
+  // the host had no heap figure: the RSS fallback, even with RSS growth over its bound, is not the control
+  const rss = run(`leakCheck(${JSON.stringify([1, 2, 3, 4, 5].map((i) => ({ i, rss_kb: 3e5 + i * 50e3, threads: 8 })))}, 20, "heap+external")`);
+  assert.equal(rss.ok, false);
+  assert.match(rss.measure, /^rss/);
+  assert.equal(run(`leakControlOutcome(${pass}, ${JSON.stringify(rss)}, undefined)`).outcome, "FAIL");
+  // the leak not caught (flat), a malformed result, no series, a surviving worker, a failed cell
+  const flat = run(`leakCheck(${ser([150, 150, 150, 150, 150], [8, 8, 8, 8, 8])}, 20, "heap+external")`);
+  assert.equal(run(`leakControlOutcome(${pass}, ${JSON.stringify(flat)}, undefined)`).outcome, "FAIL");
+  assert.equal(run(`leakControlOutcome(${pass}, { ok: false, measure: "heap+external after gc" }, undefined)`).outcome, "FAIL");
+  assert.equal(run(`leakControlOutcome(${pass}, null, undefined)`).outcome, "INCOMPLETE");
+  assert.equal(run(`leakControlOutcome(${pass}, ${JSON.stringify({ ...grown, ok: false, survived_kill: [123] })}, undefined)`).outcome, "FAIL");
+  assert.equal(run(`leakControlOutcome([{ outcome: "FAIL" }], ${JSON.stringify(grown)}, undefined)`).outcome, "FAIL");
 });
 
 test("XK window (E13g): inside the call, a KI within R + max(1 s, R/4) is EXCEPTION; past it, or a return, FAILs", () => {
