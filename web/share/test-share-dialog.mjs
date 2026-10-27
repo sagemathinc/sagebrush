@@ -389,8 +389,11 @@ try {
     ok((await q.ev("window.__me ?? null")) === 503, "(...and in place in the page, before its first check)");
     // (on a failure, the dialog's state: which part of it is shown)
     const st = () => q.ev("JSON.stringify({ open: document.querySelector('#sharedlg').open, checking: !document.querySelector('#sharechecking').hidden, up: !document.querySelector('#shareup').hidden, unreachable: !document.querySelector('#shareunreachable').hidden, signin: !document.querySelector('#sharesignin').hidden, form: !document.querySelector('#shareform').hidden, menu: document.querySelector('#sharemenu').textContent, stubbed: window.__me, status: document.querySelector('#status')?.textContent })");
+    const t0 = Date.now();
     await q.ev("document.querySelector('#sharemenu').click()");
-    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden", 10000).catch(() => {});
+    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden", 12000).catch(() => {});
+    // (the end state, apart from the stub: the stubbed 503's check ends within its 10 s bound)
+    ok(Date.now() - t0 < 11000 && (await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden")), `(the check ends: ${Date.now() - t0} ms) ` + (await st()));
     ok(await q.ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareup').hidden && !document.querySelector('#shareunreachable').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "nothing known and the check fails again: the dialog says why, with neither 'Sign in' nor the form: " + (await st()));
     await q.ev("document.querySelector('#sharedlg').close()");
     await q.ev("window.__me = 404");
