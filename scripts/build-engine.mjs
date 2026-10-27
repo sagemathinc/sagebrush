@@ -2,7 +2,7 @@
 // wasm32 and write wasm/sagebrush-engine.wasm, which is committed so that
 // building sagebrush does not need Rust.  Run: node scripts/build-engine.mjs
 import { execFileSync } from "node:child_process";
-import { copyFileSync } from "node:fs";
+import { installWasm } from "./install-engine-wasm.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
@@ -16,5 +16,5 @@ execFileSync("cargo", ["build", "--release", "-p", "sagebrush-web", "--target", 
 });
 const src = join(target, "wasm32-unknown-unknown", "release", "sagebrush_web.wasm");
 new WebAssembly.Module(readFileSync(src)); // validate
-copyFileSync(src, join(root, "wasm", "sagebrush-engine.wasm"));
+installWasm(src, join(root, "wasm", "sagebrush-engine.wasm"));
 console.log(`engine: ${readFileSync(src).length} bytes`);

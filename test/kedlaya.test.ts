@@ -210,7 +210,11 @@ function stopAt(p: number, prec: number, stage: number): Promise<any> {
           "    t = time.time() * 1000",
           "    left = progress.snapshot()",
           "    phi = sage_all.EllipticCurve('14a1').padic_lseries(5).frobenius(5)",
-          "    sys._kd_r = ['interrupted', t, len(left), str(phi.det())]",
+          // (each as Python's str: a float with an integral value reaches JS as
+          // a FloatBox, whose String() is "[object Object]"; t, a double near
+          // 1.8e12 with 12 bits below the point, is integral about once in
+          // 4096 runs, and then read as NaN)
+          "    sys._kd_r = ['interrupted', repr(t), str(len(left)), str(phi.det())]",
         ].join("\\n"), "<run>", "__main__");
         const r = c.R.importModule("sys")._kd_r;
         parentPort.postMessage({ done: [...r].map(String) });
@@ -260,9 +264,12 @@ for (const [what, p, prec, stage] of [
   test(`Stop during stage ${stage} (${what}), p = ${p}, prec ${prec}: KeyboardInterrupt within 1 s, the slot released, a later call right`, async () => {
     const r = await stopAt(p, prec, stage);
     assert.equal(r.done[0], "interrupted", JSON.stringify(r));
-    const ms = Number(r.done[1]) - r.sent;
+    assert.ok(r.sent > 0, `interrupted, but Stop was never sent: ${JSON.stringify(r)}`);
+    const t = Number(r.done[1]);
+    assert.ok(Number.isFinite(t), `the KeyboardInterrupt's time isn't a number: ${JSON.stringify(r)}`);
+    const ms = t - r.sent;
     console.log(`Stop in stage ${stage} (${what}) at p = ${p}, prec ${prec}: KeyboardInterrupt ${ms.toFixed(0)} ms after Stop`);
-    assert.ok(ms < 1000, `${ms} ms`);
+    assert.ok(ms < 1000, `${ms} ms: ${JSON.stringify(r)}`);
     assert.equal(r.done[2], "0", "progress slots left in use");
     assert.equal(r.done[3], "5^-1 + O(5^4)");
   });
