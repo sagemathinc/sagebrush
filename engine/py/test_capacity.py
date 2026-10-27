@@ -460,15 +460,16 @@ if hasattr(_native, "_test_guarded"):
         _out["A"] = _outcome(lambda: _native._test_guarded("nested_gated"))
 
     def _owner_b():
-        while _trace2[:1] != ["A"]:  # A has refreshed at entry
+        _deadline = _t2.time() + 10
+        while _trace2[:1] != ["A"] and _t2.time() < _deadline:  # A has refreshed at entry
             _t2.sleep(0.001)
         _t2.sleep(0.11)  # (so that B's own entry finds the total stale and asks)
         _out["B"] = _outcome(lambda: _native._test_guarded("ok"))
         _out["trace_at_release"] = list(_trace2)
         _native._test_gate(True)  # only now may A make its nested entry
 
-    _ta = threading.Thread(target=_owner_a, name="A")
-    _tb = threading.Thread(target=_owner_b, name="B")
+    _ta = threading.Thread(target=_owner_a, name="A", daemon=True)
+    _tb = threading.Thread(target=_owner_b, name="B", daemon=True)
     _ta.start()
     _tb.start()
     _ta.join(30)
