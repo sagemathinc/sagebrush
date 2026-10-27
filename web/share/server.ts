@@ -780,9 +780,22 @@ async function startPurge(env: ShareEnv, ctx: Ctx, account: string, rid: string,
   return "accepted";
 }
 
+/**
+ * An admin purge's Content-Length, checked before its body is read: 411 for none, an empty one,
+ * anything but ASCII digits (no sign, space or other character), or 0, which is what a POST with no
+ * body arrives with; 413 for any decimal over 4096, however many digits (a huge one parses to a
+ * large number or to Infinity, both > 4096; leading zeros are allowed: "0010" is 10); else null.
+ */
+export function adminLength(len: string | null): 411 | 413 | null {
+  if (!len || !/^[0-9]+$/.test(len) || Number(len) === 0) return 411;
+  if (Number(len) > 4096) return 413;
+  return null;
+}
+
 async function adminPurge(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response> {
-  const cl = Number(req.headers.get("content-length") ?? "0");
-  if (!(cl > 0 && cl <= 4096)) return err(413, "bad request");
+  const bad = adminLength(req.headers.get("content-length"));
+  if (bad === 411) return err(411, "a body with its content-length is required");
+  if (bad === 413) return err(413, "too large");
   const body = await req.text();
   if (body.length > 4096 || !(await signed(req, env, body))) return err(401, "bad signature");
   let v: { account_id?: unknown; request_id?: unknown };
