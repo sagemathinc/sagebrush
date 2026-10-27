@@ -256,6 +256,8 @@ try {
     await openDialog({ wait: false });
     const before = (await ev("window.sagebrush.shareTest.terminated")) ?? 0;
     await closeDialog();
+    // (the close event, which stops the analysis, is a queued task: waited for, not read at once)
+    await until(`window.sagebrush.shareTest.terminated === ${before + 1}`, 10000).catch(() => {});
     ok((await ev("window.sagebrush.shareTest.terminated")) === before + 1, "closing the dialog terminates its analysis");
     await unhold();
     await openDialog();
@@ -419,10 +421,12 @@ try {
   // ---- a pathological source: the dialog stays responsive, the fail-safe stops the analysis (§3)
   {
     // (400,000 lines take pyparse seconds, past the 2 s silence fail-safe; a deeply nested source would
-    // fail at once, "too many nested parentheses", and be a parse note, not a stop: #172 r2's review)
+    // fail at once, "too many nested parentheses", and be a parse note, not a stop: #172 r2's review.
+    // The worker really parses deep.py, but what it says after deep.py is held back from the page, so
+    // the silence is 2 s on any machine: a fast runner's parse can't finish first, train-9b's web-sync)
     await runFirst("open('deep.py', 'w').write('x = 1\\n' * 400000)\nprint('deep')");
     await setFirst(CODE + "\nimport deep");
-    await ev("(() => { const t = window.sagebrush.shareTest; t.failsafe = { silenceMs: 2000, sourceBytes: 1e9 }; t.terminated = 0; const real = () => new Worker('/sagebrush-share-deps.js'); t.createWorker = () => { const w = real(); const o = { onmessage: null, postMessage: (m) => w.postMessage(m), terminate: () => { t.terminated++; w.terminate(); } }; w.onmessage = (e) => o.onmessage?.(e); return o; }; })()");
+    await ev("(() => { const t = window.sagebrush.shareTest; t.failsafe = { silenceMs: 2000, sourceBytes: 1e9 }; t.terminated = 0; const real = () => new Worker('/sagebrush-share-deps.js'); t.createWorker = () => { const w = real(); let quiet = false; const o = { onmessage: null, postMessage: (m) => { if (String(m?.file?.path ?? '').endsWith('deep.py')) quiet = true; w.postMessage(m); }, terminate: () => { t.terminated++; w.terminate(); } }; w.onmessage = (e) => !quiet && o.onmessage?.(e); return o; }; })()");
     await openDialog({ wait: false });
     await sleep(500);
     const ms = await ev("(() => { const t0 = performance.now(); document.querySelector('#shareall').click(); document.querySelector('#sharenone').click(); return performance.now() - t0; })()");
