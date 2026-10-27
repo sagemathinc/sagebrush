@@ -386,6 +386,20 @@ bun web/build.ts                      # the site in web/dist (about 1 s)
 pnpm test                             # about 30 s
 ```
 
+The engine's Rust toolchain is pinned (`engine/rust-toolchain.toml`, 1.99.1;
+rustup installs it on the first `cargo` command under `engine/`), so that
+the committed `wasm/sagebrush-engine.wasm` is exactly what a fresh build
+gives: CI rebuilds it and fails on master pushes, dispatches and the
+schedule if they differ. Bumping the toolchain is a deliberate pull request
+that commits the rebuilt `wasm/` and `cdn/` files with their size marker.
+The module embeds the crate registry's paths, so a local build reproduces
+the committed bytes only with CI's path:
+
+```sh
+RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/home/runner/.cargo" node scripts/build-engine.mjs
+cmp wasm/sagebrush-engine.wasm <(git show HEAD:wasm/sagebrush-engine.wasm) && echo identical
+```
+
 ### The notebook on your computer
 
 ```sh
