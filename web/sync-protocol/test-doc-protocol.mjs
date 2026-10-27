@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import * as P from "./doc-protocol.ts";
+import * as R from "./protocol.ts";
 
 let checks = 0;
 const fails = [];
@@ -36,6 +37,44 @@ check(res.code === "limit", `jcs: 16 MiB of U+0001 refused (${res.code})`);
 //  The string itself is 16 MiB; its escaped copy would be 96 MiB more, and the old path peaked near 177 MiB.)
 check(res.maxRSS > 0 && res.maxRSS < 96 * 1024, `jcs: 16 MiB of U+0001 refused below the escaped copy's peak (max RSS ${res.maxRSS} KiB)`);
 
+
+// ---- the refusals' vectors: each code one of protocol.ts's CODES, and each shape exactly as agreed (sync-docs, Oct 27)
+{
+  const J = JSON.stringify;
+  const codes = new Set(R.CODES);
+  check(codes.has("unavailable") && codes.size >= 18, "protocol.ts's Code has unavailable: " + [...codes].join(" "));
+  check(Array.isArray(V.refusals) && V.refusals.length >= 3, "the refusals' vectors");
+  for (const r of V.refusals ?? []) check(codes.has(r.error?.code), `refusal ${r.for}, ${r.when}: its code ${r.error?.code} is one of Code's`);
+  const off = V.refusals?.find((r) => r.error?.code === "unavailable");
+  check(off && off.error.detail?.why === "snapshots_off" && !("retry_after" in (off.error.detail ?? {})) && off.again === "never in this session", "snapshots off: unavailable, {why: snapshots_off}, no retry_after");
+  const nat = (x) => Number.isSafeInteger(x) && x >= 0;
+  const cads = (V.refusals ?? []).filter((r) => r.error?.detail?.limit === "snapshot_cadence");
+  const fields = ["limit", "retry_after_batches", "retry_after_bytes", "retry_after_ms"];
+  // (the rule: the server refuses unless (batches = 0 or bytes = 0) and ms = 0, so every refusal's fields break it)
+  const allowed = (d) => (d.retry_after_batches === 0 || d.retry_after_bytes === 0) && d.retry_after_ms === 0;
+  check(cads.length === 2 && cads.every((r) => r.error.code === "limit" && J(Object.keys(r.error.detail).sort()) === J(fields) && fields.slice(1).every((f) => nat(r.error.detail[f])) && !allowed(r.error.detail)), "the cadence: limit, snapshot_cadence, exactly retry_after_batches, retry_after_bytes and retry_after_ms, each refusal breaking the rule");
+  check(cads.some((r) => r.error.detail.retry_after_batches === 0 && r.error.detail.retry_after_ms > 0), "…and one with only the hour left (history met): the rule is AND, not any");
+  const conf = (V.refusals ?? []).filter((r) => r.error?.code === "conflict");
+  check(conf.length === 2 && conf.some((r) => !("detail" in r.error)) && conf.some((r) => J(Object.keys(r.error.detail ?? {})) === J(["latest_at_seq"]) && nat(r.error.detail.latest_at_seq)), "conflict: bare for another digest at a taken at_seq; {latest_at_seq} for one at or before the latest");
+  check(V.refusals.length === 5, "the five snapshot refusals");
+  check(J(Object.keys(off.error.detail)) === J(["why"]), "snapshots off: exactly {why}");
+  // (every vector's refusal is what a client of this build reads: its code kept, as is)
+  for (const r of V.refusals ?? []) { const e = R.refusalOf({ ...r.error, message: "m" }); check(e.code === r.error.code && J(e.detail ?? null) === J(r.error.detail ?? null), `refusal ${r.error.code}: read as itself`); }
+}
+// ---- a refusal with a code this build doesn't know fails closed: "invalid", final, its code kept (daybreak3's U2)
+{
+  const J = JSON.stringify;
+  check(J([...R.CODES].sort()) === J([...new Set(R.CODES)].sort()) && R.CODES.length === 18 && R.isCode("unavailable") && !R.isCode("brand_new") && !R.isCode(5), "protocol.ts's CODES at runtime, and isCode");
+  let got = null;
+  try { R.unwrap({ error: { code: "brand_new", message: "from a newer server", detail: { retry_after: 5 } } }); } catch (e) { got = e; }
+  check(got instanceof R.SyncError && got.code === "invalid" && got.detail?.unknown_code === "brand_new" && got.detail?.final === true && !("retry_after" in got.detail), "an unknown code: invalid, final, no retry_after kept: " + J(got?.detail));
+  let got2 = null;
+  try { R.unwrap({ error: { code: 7 } }); } catch (e) { got2 = e; }
+  check(got2?.code === "invalid" && got2.detail?.unknown_code === null, "a code that isn't a string: invalid too");
+  let got3 = null;
+  try { R.unwrap({ error: { code: "limit", message: "x", detail: { limit: "snapshot_cadence" } } }); } catch (e) { got3 = e; }
+  check(got3?.code === "limit" && got3.detail?.limit === "snapshot_cadence", "a known code: as it was");
+}
 
 // ---- the encodings, against the vectors
 
