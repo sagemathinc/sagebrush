@@ -352,6 +352,7 @@
   <h4>Upload, with its files</h4>
   <p class="note">A page at sagebrush.space/s/… with this notebook, its outputs and the files you choose, for anyone with the link. You can delete it at any time. Needs a CoCalc account.</p>
   <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
+  <p class="note" id="shareunreachable" hidden>Sagebrush couldn't reach its server to check your sign-in. Open Share again in a moment.</p>
   <div id="shareform" hidden>
     <label>Title <input type="text" id="sharetitlein" maxlength="200"></label>
     <label>License <select id="sharelicense"><option value="CC-BY-4.0">CC BY 4.0</option><option value="CC0-1.0">CC0 (public domain)</option><option value="MIT">MIT</option><option value="Apache-2.0">Apache 2.0</option><option value="">None given</option></select></label>
@@ -1500,9 +1501,16 @@ async function openShare() {
   if (shareDialog.busy) return void shareDialog.open();
   while (switched) await switched;
   await shareReady;
-  if (!LOCAL) sharing = await shareStatus();
+  if (!LOCAL) {
+    // (a check that failed keeps what was known: a passing network error is neither "signed out"
+    // nor "no sharing", and doesn't turn Share into Copy share link for the rest of the visit)
+    const s = await shareStatus();
+    if (!(s.enabled === false && s.error && sharing.enabled)) sharing = s;
+  }
   const me = sharing.enabled ? sharing.me : null;
-  $("#sharesignin").hidden = !!me;
+  // (no answer at all, and nothing known: neither "sign in" nor the form, but why)
+  $("#shareunreachable").hidden = !(sharing.enabled === false && sharing.error);
+  $("#sharesignin").hidden = !!me || !sharing.enabled;
   $("#shareform").hidden = !me;
   $("#signin").href = signInUrl(location.pathname + "?share" + location.hash);
   $("#shareresult").textContent = "";
@@ -1742,7 +1750,8 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "print": window.print(); break;
     case "share": {
-      if (sharing.enabled) { openShare(); break; }
+      // (a page whose first check failed asks again: Share, not Copy share link, if it can)
+      if (sharing.enabled || sharing.error) { openShare(); break; }
       await copyShareLink();
       break;
     }
