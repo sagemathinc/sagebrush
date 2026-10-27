@@ -372,21 +372,43 @@ fn the_piece_costs_are_charged_for_their_whole_life() {
     }
 }
 
-/// The residue prefilter never rejects a true l-th power: r^l for r up to
-/// 3000 (multiples of every witness included) and a few large r, for each
-/// small prime l; and the witnesses are primes p = 1 mod l.
+/// The tier-1 witnesses are exactly the prime factors of 2^64 - 1 and
+/// 2^64 + 1, and the one-pass fold gives |n| mod each of them (against an
+/// independent reduction), for signs and sizes around limb boundaries.
+#[test]
+fn the_fold_residues_are_exact() {
+    assert_eq!(FOLD_MINUS.iter().map(|&p| p as u128).product::<u128>(), (1u128 << 64) - 1);
+    assert_eq!(FOLD_PLUS.iter().map(|&p| p as u128).product::<u128>(), (1u128 << 64) + 1);
+    assert!(FOLD_MINUS.iter().chain(FOLD_PLUS.iter()).all(|&p| is_prime_trial(p)));
+    for bits in [1u32, 63, 64, 65, 127, 128, 129, 1000, 4097] {
+        for n in [(BigInt::one() << bits) - 1, (BigInt::one() << bits) + 12345, BigInt::from(3).pow(bits / 2 + 1)] {
+            for n in [n.clone(), -n] {
+                let (rm, rp) = fold_residues(&n);
+                for &p in FOLD_MINUS.iter() {
+                    assert_eq!((rm % p as u128) as u64, n.abs().mod_floor(&BigInt::from(p)).to_u64().unwrap(), "{bits} bits mod {p}");
+                }
+                for &p in FOLD_PLUS.iter() {
+                    assert_eq!((rp % p as u128) as u64, n.abs().mod_floor(&BigInt::from(p)).to_u64().unwrap(), "{bits} bits mod {p}");
+                }
+            }
+        }
+    }
+}
+
+/// The residue prefilter never rejects a true l-th power: r^l (and -r^l for
+/// odd l) for r up to 3000 (multiples of every witness included) and a few
+/// large r, for each small prime l, through both tiers.
 #[test]
 fn the_residue_prefilter_never_rejects_a_power() {
     let b = Budget::unlimited();
     for l in [2u64, 3, 5, 7, 11, 13] {
-        let (w, nw) = residue_witnesses(&b, l).unwrap();
-        let w = &w[..nw];
-        assert_eq!(nw, WITNESSES, "l {l}");
-        assert!(w.iter().all(|&p| is_prime_trial(p) && p % l == 1 && p < 1 << 32), "l {l}: {w:?}");
-        let big = [BigInt::from(12345u32), (BigInt::one() << 300u32) + 7, (BigInt::one() << 2100u32) - 1];
+        let big = [BigInt::from(12345u32), (BigInt::one() << 300u32) + 7, (BigInt::one() << 2100u32) - 1, BigInt::from(6700417u32), BigInt::from(274177u32)];
         for r in (1u32..3000).map(BigInt::from).chain(big) {
             let n = r.pow(l as u32);
-            assert!(!not_a_power(&b, &n, l, w).unwrap(), "{r}^{l} rejected");
+            assert!(!not_a_power(&b, &n, l).unwrap(), "{r}^{l} rejected");
+            if l % 2 == 1 {
+                assert!(!not_a_power(&b, &-n, l).unwrap(), "-{r}^{l} rejected");
+            }
         }
     }
 }
@@ -396,13 +418,12 @@ fn the_residue_prefilter_never_rejects_a_power() {
 #[test]
 fn the_residue_prefilter_agrees_with_exact_root() {
     let b = Budget::unlimited();
-    for l in [2u64, 3, 5] {
-        let (w, nw) = residue_witnesses(&b, l).unwrap();
+    for l in [2u64, 3, 5, 7] {
         let (mut rejected, mut non_powers) = (0, 0);
         for n in 1u32..20000 {
             let n = BigInt::from(n);
             let is_power = exact_root(&b, &n, l).unwrap().is_some();
-            let rej = not_a_power(&b, &n, l, &w[..nw]).unwrap();
+            let rej = not_a_power(&b, &n, l).unwrap();
             assert!(!(rej && is_power), "{n} is an {l}-th power but was rejected");
             non_powers += !is_power as u32;
             rejected += rej as u32;
@@ -435,7 +456,8 @@ fn a_generic_binomial_is_rejected_before_any_bisection() {
         assert_eq!(expand(&c, &fs), f, "{bits} bits");
         assert_eq!(a.bisections, 0, "{bits} bits: {a:?}");
         assert!(a.prefilter_rejects >= 1 && a.prefilter_evals >= a.prefilter_rejects, "{bits} bits: {a:?}");
-        assert!(a.pp_used >= a.prefilter_evals * limbs(bits as u64), "{bits} bits: the prefilter's work not debited: {a:?}");
+        // each call debits its fold (limbs + 1), each witness at least 130
+        assert!(a.pp_used >= a.prefilter_calls * (limbs(bits as u64) + 1) + a.prefilter_evals * 130, "{bits} bits: the prefilter's work not debited: {a:?}");
         assert!(a.pp_preflight >= a.pp_used, "{bits} bits: {a:?}");
         assert_eq!(b.live(), 0);
     }

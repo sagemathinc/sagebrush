@@ -568,15 +568,11 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/binomial.rs :: not_a_power :: fn not_a_power(b: &Budget, n: &BigInt, l: u64, w: &[u64]) -> FResult<bool> { #0": {
+ "engine/poly/src/binomial.rs :: not_a_power :: fn not_a_power(b: &Budget, n: &BigInt, l: u64) -> FResult<bool> { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/binomial.rs :: phis_certify :: fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q: &BigInt, h: usize, costs: &[PieceCost]) -> FResult<()> { #0": {
-  "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)"
- },
- "engine/poly/src/binomial.rs :: residue_witnesses :: fn residue_witnesses(b: &Budget, l: u64) -> FResult<([u64; WITNESSES], usize)> { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
