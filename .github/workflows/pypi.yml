@@ -1,6 +1,6 @@
 name: pypi
 
-# Wheels (abi3: one per platform for every Python >= 3.9) and the sdist of
+# Wheels (abi3: one per platform for every Python >= 3.10) and the sdist of
 # the `sagebrush` Python package (engine/py).  A manual run only builds and
 # tests; a `py-v*` tag also publishes to PyPI by trusted publishing (OIDC: no
 # token is stored), which needs a PyPI trusted publisher for this repository,
@@ -63,6 +63,7 @@ jobs:
           python engine/py/test_audit.py
           python engine/py/test_mcp.py
           python engine/py/test_session_ctrl.py
+          python engine/py/test_python_floor.py
           cd engine/py && python -m doctest README.md && echo doctests ok
       - uses: actions/upload-artifact@v5
         with:
