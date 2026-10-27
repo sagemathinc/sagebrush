@@ -88,7 +88,8 @@ async function openDialog({ wait = true } = {}) {
   // (on a timeout, the dialog's state: which part of the open didn't happen)
   const why = (e) => ev(`JSON.stringify({ g: ${g}, generation: window.sagebrush.share.generation, selection: !!window.sagebrush.share.selection, analyzing: window.sagebrush.share.analyzing, rows: document.querySelectorAll('#sharelist .sharerow').length, busy: window.sagebrush.share.busy, open: document.querySelector('#sharedlg').open, signin: !document.querySelector('#sharesignin').hidden, form: !document.querySelector('#shareform').hidden, status: document.querySelector('#sharestatus').textContent, progress: document.querySelector('#shareprogress')?.textContent, result: document.querySelector('#shareresult').textContent })`).catch((x) => String(x)).then((state) => { throw new Error(`${e.message} ${state}`); });
   await until(`window.sagebrush.share.generation > ${g} && !!window.sagebrush.share.selection && document.querySelectorAll('#sharelist .sharerow').length > 0`).catch(why);
-  if (wait) await until("/^(Checked|Found no|Stopped)/.test(document.querySelector('#sharestatus').textContent)", 60000).catch(why);
+  // (this open's own result: no analysis running, so an earlier open's "Checked…" isn't taken for it)
+  if (wait) await until("!window.sagebrush.share.analyzing && /^(Checked|Found no|Stopped)/.test(document.querySelector('#sharestatus').textContent)", 60000).catch(why);
 }
 const closeDialog = () => ev("document.querySelector('#sharedlg').close()");
 // A held stand-in for the analysis worker: messages to the page wait until released.
