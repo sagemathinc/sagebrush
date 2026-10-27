@@ -198,7 +198,7 @@ export function parseToml(texts) {
 }
 
 const isConfig = (f) => /(^|\/)\.cargo\/config(\.toml)?$/.test(f);
-export function workspaceModel(files, read) {
+export function workspaceModel(files, read, verifiedToolchain) {
   const errors = [];
   const manifests = files.filter((f) => f.startsWith("engine/") && /(^|\/)Cargo\.toml$/.test(f));
   const configs = files.filter(isConfig);
@@ -264,6 +264,9 @@ export function workspaceModel(files, read) {
     if (!doc || doc.__error__) continue;
     for (const k of ["source", "patch", "paths"]) if (doc[k] !== undefined) errors.push(`${f}: cargo config ${k} (source replacement / patching) is not modelled`);
   }
+  // the toolchain the compiler sweep's coverage was verified on (#234 r3): a bump re-runs the coverage controls first
+  const chan = t["engine/rust-toolchain.toml"]?.toolchain?.channel;
+  if (verifiedToolchain !== undefined && chan !== verifiedToolchain) errors.push(`engine/rust-toolchain.toml: channel ${JSON.stringify(chan)}, but the compiler sweep's coverage was verified on ${JSON.stringify(verifiedToolchain)}: re-run its coverage controls (K0-K4) on the new compiler, then update premises.verified_toolchain`);
   // the test-only crates stay out of shipped graphs: only another test-only crate may depend on them
   for (const [m, ds] of Object.entries(deps)) for (const x of TEST_ONLY) if (!TEST_ONLY.includes(m) && ds.has(`sagebrush-${x}`)) errors.push(`engine/${m}/Cargo.toml: depends on test-only sagebrush-${x}`);
   return { errors, members, deps, toml: t };
@@ -277,7 +280,7 @@ export const SWEEP_FLAGS = 'RUSTFLAGS: "--force-warn unsafe-code"';
 const OVERRIDE = /unsafe[-_]code|cap-lints|force-warn/i;
 export function overrideErrors(files, read) {
   const errors = [];
-  const own = new Set(["scripts/unsafe-inventory.mjs", "scripts/test-unsafe-inventory.mjs", "scripts/build-inputs.mjs", INVENTORY]);
+  const own = new Set(["scripts/unsafe-inventory.mjs", "scripts/test-unsafe-inventory.mjs", "scripts/build-inputs.mjs", "scripts/toml-json.py", INVENTORY]);
   for (const f of files) {
     if (own.has(f) || !isBuildInput(f)) continue;
     if (f.startsWith("engine/") && f.endsWith(".rs")) continue; // (the token scanner's)
@@ -327,7 +330,7 @@ export function scan(files = tracked(), read = (f) => readFileSync(join(ROOT, f)
     for (const it of r.items) found.push({ file: f, item: it.item, hash: it.hash, from: it.from, to: it.to, bFrom: it.bFrom, bTo: it.bTo });
   }
   if (!files.includes("engine/Cargo.toml")) return { errors: [...errors, "engine/Cargo.toml missing"], found };
-  const model = workspaceModel(files, read);
+  const model = workspaceModel(files, read, premises?.verified_toolchain);
   errors.push(...model.errors);
   errors.push(...overrideErrors(files, read));
   // build scripts: exactly the pinned ones, byte for byte (a build script can generate code: #234 r2 U1)
@@ -422,28 +425,65 @@ export function compilerSites(jsonTexts, found, root = ROOT) {
 }
 
 // `--metadata FILE`: `cargo metadata --format-version 1 --locked` run in engine/ (the sweep's own root, config and
-// lockfile).  Its workspace members must equal the model's; no member may be a proc-macro crate; the external
-// proc-macro crates (whose expansions the compiler sweep can't see, rustc treating them as external) must be
-// exactly the pinned name/version set; the build scripts must be exactly the pinned ones
-export function metadataErrors(metaText, model, premises, root = ROOT) {
+// lockfile; a failed run rejects).  Checked against it (#234 r2 U2, r3 U1-SOURCE):
+// - its workspace members equal the model's;
+// - every package outside the workspace comes from crates.io (a path, git or other-registry package outside the
+//   workspace is treated as local and isn't modelled: that also refuses [patch]/[replace] and path overrides);
+// - no member is an unpinned local proc-macro crate;
+// - the compile-time closure (the external proc-macro crates, the members' build dependencies, and everything
+//   they depend on: the code that generates or shapes our crates' code at build time) is exactly the pinned set,
+//   each by name, version, source and Cargo.lock checksum;
+// - the audits' no_ledger_dep premise, on cargo's resolved dependency edges (renames resolved, every kind and
+//   target), and every path dependency of a member is a member.
+export const CRATES_IO = "registry+https://github.com/rust-lang/crates.io-index";
+export function compileClosure(meta, lockPackages) {
+  const ws = new Set(meta.workspace_members);
+  const nodes = new Map((meta.resolve?.nodes ?? []).map((n) => [n.id, n]));
+  const pkg = new Map(meta.packages.map((p) => [p.id, p]));
+  const seeds = [];
+  for (const p of meta.packages) if (!ws.has(p.id) && p.targets.some((t) => t.kind.includes("proc-macro"))) seeds.push(p.id);
+  for (const id of ws) for (const d of nodes.get(id)?.deps ?? []) if (d.dep_kinds.some((k) => k.kind === "build")) seeds.push(d.pkg);
+  const closure = new Set();
+  for (const q = [...seeds]; q.length; ) {
+    const id = q.pop();
+    if (closure.has(id) || ws.has(id)) continue;
+    closure.add(id);
+    for (const d of nodes.get(id)?.deps ?? []) if (d.dep_kinds.some((k) => k.kind === null || k.kind === "build")) q.push(d.pkg);
+  }
+  const sum = new Map((lockPackages ?? []).map((l) => [`${l.name} ${l.version} ${l.source ?? ""}`, l.checksum ?? "none"]));
+  return [...closure].map((id) => pkg.get(id)).map((p) => `${p.name} ${p.version} ${p.source ?? "local"} ${sum.get(`${p.name} ${p.version} ${p.source ?? ""}`) ?? "no-checksum"}`).sort();
+}
+export function metadataErrors(metaText, model, premises, lockPackages, root = ROOT) {
   const errors = [];
   let meta;
   try { meta = JSON.parse(metaText); } catch { return ["cargo metadata output isn't JSON (a failed metadata run rejects)"]; }
-  if (!Array.isArray(meta.workspace_members) || !Array.isArray(meta.packages)) return ["cargo metadata output has no workspace_members/packages"];
+  if (!Array.isArray(meta.workspace_members) || !Array.isArray(meta.packages) || !meta.resolve) return ["cargo metadata output has no workspace_members/packages/resolve (run it with dependencies, --locked)"];
   const ws = new Set(meta.workspace_members);
   const rel = (p) => p.replace(root, "").replace(/\/Cargo\.toml$/, "").replace(/^engine\//, "");
   const dirs = meta.packages.filter((p) => ws.has(p.id)).map((p) => rel(p.manifest_path));
   const a = [...dirs].sort().join(","), b = [...model.members].sort().join(",");
   if (a !== b) errors.push(`cargo metadata's workspace members (${a}) differ from the model's (${b})`);
   const kinds = (p) => p.targets.flatMap((t) => t.kind);
+  for (const p of meta.packages) if (!ws.has(p.id) && p.source !== CRATES_IO) errors.push(`${p.name} ${p.version}: a package from ${p.source ?? "a local path"} outside the workspace (path, git, other-registry, patch or replace: treated as local, not modelled)`);
   const pinnedPm = premises?.local_proc_macros ?? {};
   for (const p of meta.packages) if (ws.has(p.id) && kinds(p).includes("proc-macro") && !pinnedPm[`engine/${rel(p.manifest_path)}`]) errors.push(`engine/${rel(p.manifest_path)}: a local proc-macro crate not pinned (its expansions are invisible to the compiler sweep)`);
   const ext = meta.packages.filter((p) => !ws.has(p.id) && kinds(p).includes("proc-macro")).map((p) => `${p.name} ${p.version}`).sort();
   const want = [...(premises?.external_proc_macros ?? [])].sort();
   if (ext.join(",") !== want.join(",")) errors.push(`the external proc-macro crates (${ext.join(", ")}) differ from the pinned set (${want.join(", ")}): review the new or changed ones`);
+  const closure = compileClosure(meta, lockPackages);
+  const wantC = [...(premises?.compile_time_closure ?? [])].sort();
+  const missing = closure.filter((x) => !wantC.includes(x)), extra = wantC.filter((x) => !closure.includes(x));
+  if (missing.length || extra.length) errors.push(`the compile-time closure differs from the pinned one: new or changed ${JSON.stringify(missing)}, gone ${JSON.stringify(extra)} (review them, then pin)`);
   const builds = meta.packages.filter((p) => ws.has(p.id)).flatMap((p) => p.targets.filter((t) => t.kind.includes("custom-build")).map((t) => t.src_path.replace(root, ""))).sort();
   const wantB = Object.keys(premises?.build_scripts ?? {}).sort();
   if (builds.join(",") !== wantB.join(",")) errors.push(`cargo's build scripts (${builds.join(", ")}) differ from the pinned ones (${wantB.join(", ")})`);
+  for (const p of meta.packages.filter((p) => ws.has(p.id))) {
+    const me = rel(p.manifest_path);
+    for (const d of p.dependencies ?? []) {
+      if (d.path !== undefined && !model.members.includes(rel(d.path + "/Cargo.toml"))) errors.push(`engine/${me}: path dependency ${d.name} at ${d.path} is not a workspace member`);
+      if ((premises?.no_ledger_dep ?? []).includes(me) && d.name === "sagebrush-ledger") errors.push(`engine/${me}: cargo resolves a sagebrush-ledger dependency (${d.kind ?? "normal"}${d.rename ? ", as " + d.rename : ""}), against the audits' premise`);
+    }
+  }
   return errors;
 }
 
@@ -476,7 +516,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`compiler sweep: ${r.sites.length} distinct sites, each checked against the pinned items`);
   }
   const meta = arg("--metadata");
-  if (meta.length && model) all.push(...metadataErrors(readFileSync(meta[0], "utf8"), model, inv.premises, ROOT));
+  if (process.argv.includes("--print-closure") && meta.length) {
+    const lock = parseToml({ "engine/Cargo.lock": readFileSync(join(ROOT, "engine/Cargo.lock"), "utf8") })["engine/Cargo.lock"];
+    console.log(JSON.stringify(compileClosure(JSON.parse(readFileSync(meta[0], "utf8")), lock?.package ?? []), null, 1));
+  }
+  if (meta.length && model) {
+    const lock = parseToml({ "engine/Cargo.lock": readFileSync(join(ROOT, "engine/Cargo.lock"), "utf8") })["engine/Cargo.lock"];
+    all.push(...metadataErrors(readFileSync(meta[0], "utf8"), model, inv.premises, lock?.package ?? [], ROOT));
+  }
   for (const e of all) console.log("FAIL", e);
   console.log(all.length ? `${all.length} problems` : `unsafe inventory: ${found.length} allowed items, all pinned and audited`);
   process.exit(all.length ? 1 : 0);

@@ -31,7 +31,40 @@
    }
   },
   "no_ledger_dep_audit": "Checked per crate from its manifest (any dependency section, any name); with no re-export of sagebrush_ledger anywhere (also checked), a crate on this list cannot name a ledger type.",
-  "local_proc_macros": {}
+  "local_proc_macros": {},
+  "compile_time_closure": [
+   "aho-corasick 1.1.5 registry+https://github.com/rust-lang/crates.io-index c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba",
+   "cfg-if 1.0.5 registry+https://github.com/rust-lang/crates.io-index 4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600",
+   "convert_case 0.6.0 registry+https://github.com/rust-lang/crates.io-index ec182b0ca2f35d8fc196cf3404988fd8b8c739a4d270ff118a398feb0cbec1ca",
+   "ctor 0.2.9 registry+https://github.com/rust-lang/crates.io-index 32a2785755761f3ddc1492979ce1e48d2c00d09311c39e4466429188f3dd6501",
+   "heck 0.5.0 registry+https://github.com/rust-lang/crates.io-index 2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea",
+   "indoc 2.0.7 registry+https://github.com/rust-lang/crates.io-index 79cf5c93f93228cf8efb3ba362535fb11199ac548a09ce117c9b1adc3030d706",
+   "memchr 2.8.3 registry+https://github.com/rust-lang/crates.io-index cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98",
+   "napi-build 2.6.0 registry+https://github.com/rust-lang/crates.io-index b899b545d3aa6dca985939059f258c5488d34e4ecf39c274e20009748f4b846d",
+   "napi-derive 2.16.13 registry+https://github.com/rust-lang/crates.io-index 7cbe2585d8ac223f7d34f13701434b9d5f4eb9c332cccce8dee57ea18ab8ab0c",
+   "napi-derive-backend 1.0.75 registry+https://github.com/rust-lang/crates.io-index 1639aaa9eeb76e91c6ae66da8ce3e89e921cd3885e99ec85f4abacae72fc91bf",
+   "once_cell 1.21.4 registry+https://github.com/rust-lang/crates.io-index 9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50",
+   "proc-macro2 1.0.107 registry+https://github.com/rust-lang/crates.io-index 985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9",
+   "pyo3-build-config 0.27.2 registry+https://github.com/rust-lang/crates.io-index b455933107de8642b4487ed26d912c2d899dec6114884214a0b3bb3be9261ea6",
+   "pyo3-macros 0.27.2 registry+https://github.com/rust-lang/crates.io-index 0a5b10c9bf9888125d917fb4d2ca2d25c8df94c7ab5a52e13313a07e050a3b02",
+   "pyo3-macros-backend 0.27.2 registry+https://github.com/rust-lang/crates.io-index 03b51720d314836e53327f5871d4c0cfb4fb37cc2c4a11cc71907a86342c40f9",
+   "quote 1.0.47 registry+https://github.com/rust-lang/crates.io-index 1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001",
+   "regex 1.13.1 registry+https://github.com/rust-lang/crates.io-index f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d",
+   "regex-automata 0.4.18 registry+https://github.com/rust-lang/crates.io-index ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2",
+   "regex-syntax 0.8.11 registry+https://github.com/rust-lang/crates.io-index d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4",
+   "rustversion 1.0.23 registry+https://github.com/rust-lang/crates.io-index cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f",
+   "semver 1.0.28 registry+https://github.com/rust-lang/crates.io-index 8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd",
+   "serde_derive 1.0.229 registry+https://github.com/rust-lang/crates.io-index e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348",
+   "syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index 872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297",
+   "syn 3.0.6 registry+https://github.com/rust-lang/crates.io-index 8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee",
+   "target-lexicon 0.13.5 registry+https://github.com/rust-lang/crates.io-index adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca",
+   "unicode-ident 1.0.26 registry+https://github.com/rust-lang/crates.io-index d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954",
+   "unicode-segmentation 1.13.3 registry+https://github.com/rust-lang/crates.io-index c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
+  ],
+  "compile_time_closure_audit": "The trusted external-macro boundary (scope r4): code that generates or shapes our crates' code at build time, i.e. the external proc-macro crates, the members' build dependencies, and everything they depend on, pinned by name, version, source (crates.io only) and Cargo.lock checksum. Their expansions into our crates (pyo3/napi glue) are excluded from item enumeration only inside this pinned set; a new crate, a version, source or checksum change fails until reviewed.",
+  "verified_toolchain": "1.99.1",
+  "verified_toolchain_audit": "The compiler sweep's coverage (force-warn reports local macro_rules, local proc-macro and include! expansions, but not external proc-macro glue) was verified on this compiler (VM1 controls K0-K4). A toolchain bump fails this check until those controls are re-run on the new compiler.",
+  "compile_views": "host --workspace --all-targets (minus the test-only FLINT crates); --all-features for ledger, interrupt, poly, py; wasm32 web, raster, growth-probe; x86_64-pc-windows-msvc interrupt. A declared set: a new cfg or target with unsafe-relevant code must be added to scripts/unsafe-sweep.sh."
  },
  "items": [
   {
