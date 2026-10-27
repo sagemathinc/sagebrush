@@ -35,10 +35,20 @@ A **collection** is a directory of notebooks, boards and data files that someone
 2. It uploads those (`PUT /api/share/blob/<sha256>`, with its length).
    - The bytes are first **reserved** by one conditional INSERT that counts the account's files, manifests and running uploads. Concurrent uploads can't all pass one check.
    - R2 refuses bytes that don't hash to the SHA-256, and the stored size must equal the declared one.
-3. It commits the version (`POST /api/share/collections/<id>/versions`).
+3. It commits the version: a new version of a share (`POST /api/share/collections/<id>/versions`), or, for a new share, the request that makes its collection too (`POST /api/share/collections` with `{title, license, files, attempt}`).
    - Every file must be one the account uploaded, at its stated size, and every path a plain relative path.
    - The manifest's bytes count against the quota too.
    - Limits: 1,000 collections per account, 1,000 versions per collection, 10,000 files per version.
+
+**A new share's collection exists only with its first version** (plan-upload-leak r3).
+
+- **One transaction:** the collection, its first version and the attempt's *receipt* are written in a single D1 transaction, so an upload that fails anywhere leaves no empty collection.
+- **The attempt:** 128 random bits the page keeps with the notebook, saved before anything is read or sent, until the share is made.
+- **The receipt** (`upload_receipts`) records the attempt's hash, the digest of what the request asked for (title, license, files) and the exact version it made. A retry of the attempt (its answer lost, the page reloaded) is answered from it:
+  - the same contents: that version, never a second share;
+  - other contents: 409 `attempt_used`, naming the share. It is never a success; the page then treats that share as the notebook's.
+  - the share deleted meanwhile: 410 `attempt_retired`. A deletion retires the receipt in its own transaction, and a retired receipt is kept 30 days.
+- **An older page** may still create an empty collection first (`{title}` alone). That form is kept only for pages loaded before this change, and will be removed.
 
 **Each step that depends on an earlier check ends in one D1 transaction** whose guard re-checks it: the account isn't being deleted, the collection is still its own, every file is still held. An R2 write whose D1 write then fails is found from its expired reservation and deleted by the scheduled job.
 
