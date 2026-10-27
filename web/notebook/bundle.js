@@ -4,7 +4,7 @@
 // pages read it (the notebook's openBundle, and Upload… on either page,
 // design/workspace-files.md §3), so a .sbreplay becomes a notebook with its
 // history wherever it is uploaded.
-import { bytesHash, putBlob, idb } from "./stores.js";
+import { bytesHash, putBlob, idb, docIdProblem } from "./stores.js";
 
 export const BUNDLE = "sagebrush-notebook-history";
 /** What a bundle may hold, checked before anything of it is kept (daybreak2's LIMIT-4B3-1): its
@@ -60,6 +60,9 @@ export async function readBundle(bytes, limits = BUNDLE_LIMITS) {
 /** Its history kept as notebook `id`'s (the cells keep their ids: the journal
  * refers to them), and the files' bytes, each checked against its hash. */
 export async function keepBundle(b, id, { hdb, bdb }) {
+  // (an id sync's reserved keys could take is refused before anything is kept: F1's admission)
+  const why = docIdProblem(id);
+  if (why) throw new TypeError(`bundle: ${why}`);
   if (bdb) for (const [h, data64] of Object.entries(b.blobs)) {
     const data = dec64(data64);
     if ((await bytesHash(data)) === h || h.startsWith("c53:")) await putBlob(bdb, data);
