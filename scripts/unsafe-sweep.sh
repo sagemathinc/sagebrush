@@ -14,7 +14,7 @@ mkdir -p "$OUT"
 cd "$(dirname "$0")/../engine"
 t() { local n=$1; shift; local s=$(date +%s.%N) rc=0; "$@" > "$OUT/$n.json" 2> "$OUT/$n.err" || rc=$?; echo "$n rc=$rc seconds=$(echo "$(date +%s.%N) - $s" | bc)" | tee -a "$OUT/timings.txt"; }
 s=$(date +%s.%N); rustup target add x86_64-pc-windows-msvc > "$OUT/rustup.log" 2>&1; echo "msvc-std-install rc=$? seconds=$(echo "$(date +%s.%N) - $s" | bc)" | tee -a "$OUT/timings.txt"
-cargo metadata --no-deps --format-version 1 > "$OUT/metadata.json"
+cargo metadata --format-version 1 --locked > "$OUT/metadata.json" 2> "$OUT/metadata.err" || { echo "cargo metadata failed (rejects)" >&2; cat "$OUT/metadata.err" >&2; exit 3; }
 t host-default  cargo check --message-format=json --workspace --all-targets --exclude sagebrush-flint --exclude sagebrush-oracle
 t host-features cargo check --message-format=json --all-targets --all-features -p sagebrush-ledger -p sagebrush-interrupt -p sagebrush-poly -p sagebrush-py
 t wasm          cargo check --message-format=json --target wasm32-unknown-unknown -p sagebrush-web -p sagebrush-raster -p sagebrush-growth-probe --lib
