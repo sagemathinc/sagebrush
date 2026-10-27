@@ -357,7 +357,6 @@
   <h4>Upload, with its files</h4>
   <p class="note">A page at sagebrush.space/s/… with this notebook, its outputs and the files you choose, for anyone with the link. You can delete it at any time. Needs a CoCalc account.</p>
   <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
-  <p class="note" id="sharechecking" aria-live="polite"></p>
   <p class="note" id="shareunreachable" hidden>Sagebrush couldn't reach its server to check your sign-in. Open Share again in a moment.</p>
   <div id="shareform" hidden>
     <label>Title <input type="text" id="sharetitlein" maxlength="200"></label>
@@ -370,6 +369,8 @@
     <p class="result" id="shareresult"></p>
   </div>
   </div>
+  <!-- (outside #shareup, which a site without sharing hides: its outcome is announced too) -->
+  <p class="note" id="sharechecking" aria-live="polite"></p>
 </dialog>
 <input id="importinput" type="file" accept=".ipynb,.py,.sage,.m,.mag,.sbreplay" hidden>
 <dialog id="docdlg" aria-labelledby="doctitle">
@@ -1508,6 +1509,15 @@ const shareReady = (LOCAL ? Promise.resolve(sharing) : shareStatus()).then((s) =
 $("#sharelink").onclick = async () => { if (shareDialog.busy) return; await copyShareLink(); shareDlg.close(); };
 // (each open's number: an open whose check ends after the dialog was closed, or opened again, stops there)
 let shareOpens = 0;
+// (fn once the dialog has rendered at least one frame since it opened: two frames, as one frame's callback runs
+// before that frame is drawn, or 50 ms where no frame runs at all, as in a hidden tab; text written earlier
+// reaches the accessibility tree with the dialog itself, and isn't announced, board's r4b HOLD 1)
+function afterRendered(fn) {
+  let done = false, framed = false;
+  const go = () => { if (!done) { done = true; fn(); } };
+  requestAnimationFrame(() => { framed = true; requestAnimationFrame(go); });
+  setTimeout(() => { if (!framed) go(); }, 50);
+}
 // (the page's first document, opened: until then Share waits, as that open closes the dialog of no document)
 let booted, isBooted = false;
 const bootDone = new Promise((r) => (booted = () => { isBooted = true; r(); }));
@@ -1515,6 +1525,7 @@ async function openShare() {
   // (while uploading, Share only shows the dialog again, with the upload's own state: UI-B1)
   if (shareDialog.busy) return void shareDialog.open();
   const t = ++shareOpens;
+  const view = { rendered: false };
   // (the page's first document still opening: said in the status line, bounded at 10 s)
   if (!isBooted) {
     const note = "Share opens once this notebook has loaded…";
@@ -1533,10 +1544,10 @@ async function openShare() {
     checking.dataset.state = "checking";
     for (const id of ["#sharesignin", "#shareunreachable", "#shareform"]) $(id).hidden = true;
     if (!shareDlg.open) shareDlg.showModal();
-    // (the next frame, or 50 ms where frames don't run, as in a hidden tab: once)
-    const say = () => { if (t === shareOpens && checking.dataset.state === "checking" && !checking.textContent) checking.textContent = "Checking your sign-in…"; };
-    requestAnimationFrame(say);
-    setTimeout(say, 50);
+    afterRendered(() => {
+      view.rendered = true;
+      if (t === shareOpens && checking.dataset.state === "checking" && !checking.textContent) checking.textContent = "Checking your sign-in…";
+    });
     // (the page's first check, still running when this open began, is this open's answer: not asked twice)
     const first = !shareKnown;
     await shareReady;
@@ -1550,7 +1561,8 @@ async function openShare() {
   // (the check's outcome, announced: a removed text isn't)
   const live = $("#sharechecking");
   live.dataset.state = "done";
-  live.textContent = me ? "Signed in: choose what to upload." : sharing.enabled ? "Sign in with CoCalc to upload." : sharing.error ? "Couldn't reach the server to check your sign-in." : "Uploading isn't available on this site.";
+  const outcome = me ? "Signed in: choose what to upload." : sharing.enabled ? "Sign in with CoCalc to upload." : sharing.error ? "Couldn't reach the server to check your sign-in." : "Uploading isn't available on this site.";
+  const sayOutcome = () => { if (t === shareOpens) live.textContent = outcome; };
   // (a site without the share API, known for sure: no Upload section at all, #207 board's note 2)
   $("#shareup").hidden = sharing.enabled === false && !sharing.error;
   // (no answer at all, and nothing known: neither "sign in" nor the form, but why)
@@ -1562,6 +1574,9 @@ async function openShare() {
   $("#shareprogress").textContent = "";
   if (me) $("#sharetitlein").value = docName();
   if (!shareDlg.open) shareDlg.showModal();
+  // (the outcome once the dialog has been drawn: at once if it has, else after its first frame)
+  if (view.rendered) sayOutcome();
+  else afterRendered(() => { view.rendered = true; sayOutcome(); });
   if (me) void shareDialog.open();
 }
 // The workspace's data files, metadata only: opening the dialog reads no file (share-ux-plan r2 §1)
