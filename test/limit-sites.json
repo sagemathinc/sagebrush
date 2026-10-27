@@ -4707,6 +4707,30 @@
   "owner": "real/rational arithmetic",
   "row": "inv-15"
  },
+ "lib/sage_plot3d.py ::  :: GC_BUDGET_S = 0.05 # (a pass's work, at most; the next pass goes on from its cursor) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
+ },
+ "lib/sage_plot3d.py :: gc_temps :: def gc_temps(root=\".sagebrush\", budget_s=GC_BUDGET_S, clock=None, alive=None): #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
+ },
+ "lib/sage_plot3d.py :: gc_temps :: if clock() - t0 > budget_s: #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
+ },
  "src/allowance-host.ts ::  :: budget: number; #0": {
   "class": "3",
   "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
