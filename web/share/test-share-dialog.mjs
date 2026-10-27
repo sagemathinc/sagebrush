@@ -380,9 +380,13 @@ try {
   {
     const { browserContextId } = await raw("Target.createBrowserContext");
     const q = await newPage(browserContextId);
-    await q.send("Page.addScriptToEvaluateOnNewDocument", { source: "(() => { const f = window.fetch; window.__me = 503; window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? Promise.resolve(new Response('x', { status: window.__me })) : f(u, o)); })()" });
+    // (the stub before the page's own scripts: Page enabled first, and the call's answer checked, as raw() hides CDP errors)
+    await q.send("Page.enable");
+    const added = await q.send("Page.addScriptToEvaluateOnNewDocument", { source: "(() => { const f = window.fetch; window.__me = 503; window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? Promise.resolve(new Response('x', { status: window.__me })) : f(u, o)); })()" });
+    ok(!!added?.identifier, "(the fresh page's /api/share/me stub is registered: " + JSON.stringify(added) + ")");
     await q.send("Page.navigate", { url: dev.site + "/" });
     await q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+    ok((await q.ev("window.__me ?? null")) === 503, "(...and in place in the page, before its first check)");
     // (on a failure, the dialog's state: which part of it is shown)
     const st = () => q.ev("JSON.stringify({ open: document.querySelector('#sharedlg').open, checking: !document.querySelector('#sharechecking').hidden, up: !document.querySelector('#shareup').hidden, unreachable: !document.querySelector('#shareunreachable').hidden, signin: !document.querySelector('#sharesignin').hidden, form: !document.querySelector('#shareform').hidden, menu: document.querySelector('#sharemenu').textContent, stubbed: window.__me, status: document.querySelector('#status')?.textContent })");
     await q.ev("document.querySelector('#sharemenu').click()");
