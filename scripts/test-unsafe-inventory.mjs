@@ -108,6 +108,13 @@ ok(scan(files, tree({ "engine/Cargo.toml": ws, "engine/a/Cargo.toml": member, "s
   ok(scan(files, tree({ ...base, "engine/a/Cargo.toml": member + '\n[dependencies]\nsagebrush-ledger = { path = "../ledger" }\n' }), { no_ledger_dep: ["a"] }).errors.some((e) => /against the audits' premise/.test(e)), "refused: a premise crate gaining a ledger dependency");
 }
 
+{
+  const files = ["engine/Cargo.toml", "engine/a/Cargo.toml", "engine/rust-toolchain.toml"];
+  const base = { "engine/Cargo.toml": ws, "engine/a/Cargo.toml": member, "engine/rust-toolchain.toml": '[toolchain]\nchannel = "1.99.1"\n' };
+  ok(scan(files, tree(base), { verified_toolchain: "1.99.1" }).errors.length === 0, "the verified toolchain passes");
+  ok(scan(files, tree({ ...base, "engine/rust-toolchain.toml": '[toolchain]\nchannel = "1.100.0"\n' }), { verified_toolchain: "1.99.1" }).errors.some((e) => /re-run its coverage controls/.test(e)), "refused: a toolchain bump before the sweep's coverage is re-verified");
+}
+
 // ---- #234 r2 U3a: override spellings, normalized, in every build input
 {
   const files = ["engine/Cargo.toml", "engine/a/Cargo.toml", ".cargo/config.toml", ".github/workflows/x.yml", "web/x.rs", ".github/workflows/ci.yml"];
@@ -164,17 +171,36 @@ ok(errs("macro_rules! m { () => { #[allow(unsafe_code)] fn g() { unsafe { h() } 
   ok(scan(files, tree(base), pinned).errors.length === 0, "U1: a pinned build script passes");
   ok(scan(files, tree({ ...base, "engine/a/build.rs": 'fn main() { std::fs::write(std::env::var("OUT_DIR").unwrap() + "/gen.rs", "unsafe {}").unwrap(); }\n' }), pinned).errors.some((e) => /build script changed/.test(e)), "U1 refused: a pinned build script that changes (now generating code)");
   ok(scan(files, tree(base), {}).errors.some((e) => /not pinned/.test(e)), "U1 refused: a new build script");
+  // (synthetic cargo metadata with a resolve graph: workspace member a, optional external packages)
+  const CRATES = "registry+https://github.com/rust-lang/crates.io-index";
   const model = { members: ["a"] };
-  const meta = (extra) => JSON.stringify({ workspace_members: ["a 0.1"], packages: [{ id: "a 0.1", name: "a", version: "0.1.0", manifest_path: "/r/engine/a/Cargo.toml", targets: [{ kind: ["lib"], src_path: "/r/engine/a/src/lib.rs" }] }, ...extra] });
-  const pm = (name, v, ws) => ({ id: `${name} ${v}`, name, version: v, manifest_path: `/r/x/${name}/Cargo.toml`, targets: [{ kind: ["proc-macro"], src_path: "/r/x/lib.rs" }] });
-  ok(metadataErrors(meta([pm("serde_derive", "1.0.0")]), model, { external_proc_macros: ["serde_derive 1.0.0"] }, "/r/").length === 0, "U1: the pinned external proc-macro set passes");
-  ok(metadataErrors(meta([pm("serde_derive", "1.0.1")]), model, { external_proc_macros: ["serde_derive 1.0.0"] }, "/r/").some((e) => /proc-macro crates/.test(e)), "U1 refused: an external proc-macro version change");
-  ok(metadataErrors(meta([pm("paste", "1.0.0")]), model, { external_proc_macros: [] }, "/r/").some((e) => /proc-macro crates/.test(e)), "U1 refused: a new external proc macro (e.g. paste)");
-  const local = JSON.stringify({ workspace_members: ["a 0.1", "m 0.1"], packages: [{ id: "a 0.1", name: "a", version: "0.1.0", manifest_path: "/r/engine/a/Cargo.toml", targets: [] }, { id: "m 0.1", name: "m", version: "0.1.0", manifest_path: "/r/engine/m/Cargo.toml", targets: [{ kind: ["proc-macro"], src_path: "/r/engine/m/src/lib.rs" }] }] });
-  ok(metadataErrors(local, { members: ["a", "m"] }, {}, "/r/").some((e) => /local proc-macro crate not pinned/.test(e)), "U1 refused: an unpinned local proc-macro crate");
-  ok(metadataErrors(local, { members: ["a", "m"] }, { local_proc_macros: { "engine/m": { sha256: "x" } } }, "/r/").length === 0, "U1: a pinned local proc-macro crate passes the metadata check");
-  ok(metadataErrors(meta([]), { members: ["a", "b"] }, {}, "/r/").some((e) => /differ from the model/.test(e)), "U2 refused: cargo's members differ from the model's");
-  ok(metadataErrors("not json", model, {}, "/r/").length > 0, "U2 refused: a failed metadata run");
+  const wsPkg = (name, deps = [], kind = "lib") => ({ id: `${name} ws`, name, version: "0.1.0", source: null, manifest_path: `/r/engine/${name}/Cargo.toml`, targets: [{ kind: [kind], src_path: `/r/engine/${name}/src/lib.rs` }], dependencies: deps });
+  const ext = (name, v, src = CRATES, kind = "lib") => ({ id: `${name} ${v} ${src}`, name, version: v, source: src, manifest_path: `/x/${name}/Cargo.toml`, targets: [{ kind: [kind], src_path: "/x/lib.rs" }], dependencies: [] });
+  const meta = (extra, opts = {}) => {
+    const pk = [wsPkg("a", opts.adeps ?? []), ...extra];
+    const nodes = pk.map((p) => ({ id: p.id, deps: p.id === "a ws" ? extra.filter((e) => e.targets[0].kind.includes("proc-macro")).map((e) => ({ pkg: e.id, dep_kinds: [{ kind: null }] })) : (opts.edges?.[p.id] ?? []).map((d) => ({ pkg: d, dep_kinds: [{ kind: null }] })) }));
+    return JSON.stringify({ workspace_members: ["a ws"], packages: pk, resolve: { nodes } });
+  };
+  const pmSd = ext("serde_derive", "1.0.0", CRATES, "proc-macro");
+  const lock = [{ name: "serde_derive", version: "1.0.0", source: CRATES, checksum: "aa" }];
+  const pinnedOk = { external_proc_macros: ["serde_derive 1.0.0"], compile_time_closure: [`serde_derive 1.0.0 ${CRATES} aa`] };
+  ok(metadataErrors(meta([pmSd]), model, pinnedOk, lock, "/r/").length === 0, "U1: the pinned external proc-macro set and compile-time closure pass");
+  ok(metadataErrors(meta([ext("serde_derive", "1.0.1", CRATES, "proc-macro")]), model, pinnedOk, [{ ...lock[0], version: "1.0.1" }], "/r/").some((e) => /proc-macro crates/.test(e)), "U1 refused: an external proc-macro version change");
+  ok(metadataErrors(meta([pmSd, ext("paste", "1.0.0", CRATES, "proc-macro")]), model, pinnedOk, lock, "/r/").some((e) => /proc-macro crates/.test(e)), "U1 refused: a new external proc macro (e.g. paste)");
+  // #234 r3 U1-SOURCE: same name and version, another source or content
+  ok(metadataErrors(meta([ext("serde_derive", "1.0.0", null, "proc-macro")]), model, pinnedOk, lock, "/r/").some((e) => /outside the workspace/.test(e)), "U1-SOURCE refused: a same-name/version proc macro from a local path (a [patch] or path override), the callers unchanged");
+  ok(metadataErrors(meta([ext("serde_derive", "1.0.0", "git+https://example.com/x#abc", "proc-macro")]), model, pinnedOk, lock, "/r/").some((e) => /outside the workspace/.test(e)), "U1-SOURCE refused: a same-name/version proc macro from git");
+  ok(metadataErrors(meta([pmSd]), model, pinnedOk, [{ ...lock[0], checksum: "bb" }], "/r/").some((e) => /compile-time closure differs/.test(e)), "U1-SOURCE refused: the same crate with another Cargo.lock checksum (content)");
+  const syn = ext("syn", "2.0.0");
+  ok(metadataErrors(meta([pmSd, syn], { edges: { [pmSd.id]: [syn.id] } }), model, pinnedOk, [...lock, { name: "syn", version: "2.0.0", source: CRATES, checksum: "cc" }], "/r/").some((e) => /compile-time closure differs/.test(e)), "U1-SOURCE refused: a new crate in a proc macro's dependency closure");
+  ok(metadataErrors(meta([pmSd], { adeps: [{ name: "sagebrush-ledger", rename: "l", kind: null }] }), model, { ...pinnedOk, no_ledger_dep: ["a"] }, lock, "/r/").some((e) => /against the audits' premise/.test(e)), "U2: cargo's resolved edges catch a renamed ledger dependency (premise)");
+  ok(metadataErrors(meta([pmSd], { adeps: [{ name: "w", path: "/r/web/w", kind: null }] }), model, pinnedOk, lock, "/r/").some((e) => /not a workspace member/.test(e)), "U2: a path dependency outside the members, from cargo's edges");
+  ok(metadataErrors(JSON.stringify({ workspace_members: ["a ws"], packages: [wsPkg("a")] }), model, {}, [], "/r/").some((e) => /no workspace_members\/packages\/resolve/.test(e)), "U2 refused: metadata without the resolve graph (--no-deps)");
+  const local = JSON.stringify({ workspace_members: ["a ws", "m ws"], packages: [wsPkg("a"), wsPkg("m", [], "proc-macro")], resolve: { nodes: [{ id: "a ws", deps: [] }, { id: "m ws", deps: [] }] } });
+  ok(metadataErrors(local, { members: ["a", "m"] }, {}, [], "/r/").some((e) => /local proc-macro crate not pinned/.test(e)), "U1 refused: an unpinned local proc-macro crate");
+  ok(metadataErrors(local, { members: ["a", "m"] }, { local_proc_macros: { "engine/m": { sha256: "x" } } }, [], "/r/").length === 0, "U1: a pinned local proc-macro crate passes the metadata check");
+  ok(metadataErrors(meta([]), { members: ["a", "b"] }, {}, [], "/r/").some((e) => /differ from the model/.test(e)), "U2 refused: cargo's members differ from the model's");
+  ok(metadataErrors("not json", model, {}, [], "/r/").length > 0, "U2 refused: a failed metadata run");
 }
 
 {

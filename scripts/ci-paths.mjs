@@ -176,7 +176,7 @@ const census = full || workflowOrBuild || matches(censusPaths) || fallback;
 // lockfile, build scripts and the data they may read), cargo configs and toolchain files anywhere.
 const unsafeSweepPaths = [
   /^engine\//, /(^|\/)\.cargo\//, /(^|\/)rust-toolchain(\.toml)?$/,
-  /^scripts\/unsafe-sweep\.sh$/, /^scripts\/unsafe-inventory\.mjs$/, /^scripts\/build-inputs\.mjs$/, /^test\/unsafe-allow-inventory\.json$/,
+  /^scripts\/unsafe-sweep\.sh$/, /^scripts\/unsafe-inventory\.mjs$/, /^scripts\/build-inputs\.mjs$/, /^scripts\/toml-json\.py$/, /^test\/unsafe-allow-inventory\.json$/,
   /^\.github\/workflows\/ci\.yml$/,
 ];
 const unsafeSweep = full || matches(unsafeSweepPaths);
