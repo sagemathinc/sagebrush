@@ -1,0 +1,14 @@
+{
+ "v": 1,
+ "reason": "estimates plan r3 PR 2a (#233): estimate(factor, n) with time, memory, fits and calibration. As measured by the size-gate of PR ci 40597422169 at b96518ff (rule 2's figures): the engine's cost model nf/cost.rs and its factor_estimate/cost_probe ops in the wasm (+23025, and cli/pyjs.cjs, which embeds the wasm and lib, +60209); lib/sagebrush/_estimates.py in sage-more.src (+28277) and cli/lib.gen.js (+31250); the %estimate magic and its own parser (the runtime has no ast) in mod-pyjs-magic.src (+2896); sagebrush/__init__.py's estimate() and records' capability in sage.src (+77) and sage.pre (+63); sagebrush-worker.js (+38). The ceilings of sage-more.src and mod-pyjs-magic.src are raised in the same commit to the measured sizes + 1024 (@sagebrush's option (i), Oct 27)",
+ "bytes": {
+  "cli/lib.gen.js": 31250,
+  "cli/pyjs.cjs": 60209,
+  "engine/lib/mod-pyjs-magic.src": 2896,
+  "engine/lib/sage-more.src": 28277,
+  "engine/lib/sage.pre": 63,
+  "engine/lib/sage.src": 77,
+  "engine/sagebrush-engine.wasm": 23025,
+  "engine/sagebrush-worker.js": 38
+ }
+}
