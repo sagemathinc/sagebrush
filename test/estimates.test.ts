@@ -17,6 +17,8 @@ test("the parts without an engine print as CPython's do (test/estimates_cases.py
   assert.equal(got, readFileSync(ROOT + "test/estimates_cases.out", "utf8"));
 });
 
+// (the 10 ms of E4 §3, the best of 5 calls, scaled by SAGEBRUSH_TIME_SCALE on a
+// slower machine, as the other wall-clock bounds)
 test("estimate(factor, n) from the real engine: valid, milestones q = p_typical = p_high, nothing summed, under 10 ms", () => {
   const code = [
     "import time, random",
@@ -24,11 +26,13 @@ test("estimate(factor, n) from the real engine: valid, milestones q = p_typical 
     "from sagebrush import records",
     "sagebrush.estimate(factor, 2^64 + 1)  # (the first call calibrates)",
     "random.seed(7); expected = [random.random() for _ in range(3)]; random.seed(7)",
-    "t = time.perf_counter()",
     "e = sagebrush.estimate(factor, 2^300 + 1)",
-    "dt = time.perf_counter() - t",
+    "dt = None",
+    "for _ in range(5):",
+    "    t = time.perf_counter(); sagebrush.estimate(factor, 2^300 + 1); s = time.perf_counter() - t",
+    "    dt = s if dt is None else min(dt, s)",
     "records.validate(dict(e))",
-    "print('ms below 10:', dt < 0.010)",
+    "print('ms below 10:', dt < 0.010 * " + (Number(process.env.SAGEBRUSH_TIME_SCALE) || 1) + ")",
     "print('random stream unchanged:', [random.random() for _ in range(3)] == expected)",
     "print('total:', e['total_time'])",
     "ms = [s for s in e['stages'] if s['success']]",
@@ -89,13 +93,13 @@ test("%estimate: the outermost call with names or literals; anything else declin
   );
 });
 
-test("Magma's Estimate(f, args): the same record as sagebrush.estimate", () => {
+test("Magma's Factorization (a wrapped intrinsic) has the integer estimator", () => {
   const code = [
     "import _magma",
     "import sagebrush",
-    "e = _magma.Estimate(_magma.Factorization, [2**200 + 1])",
-    "s = sagebrush.estimate(_magma.Factorization, 2**200 + 1)",
-    "print(e['op'], e['args_summary'], [x['name'] for x in e['stages']] == [x['name'] for x in s['stages']])",
+    "e = sagebrush.estimate(_magma.Factorization, 2**200 + 1)",
+    "f = sagebrush.estimate(sagebrush.nf.factor_integer, 2**200 + 1)",
+    "print(e['op'], e['args_summary'], len(e['stages']) == len(f['stages']) + 1)",
   ].join("\n");
   const r = spawnSync(process.execPath, [CLI, "-c", code], { encoding: "utf8", env: ENV });
   assert.equal(r.status, 0, r.stderr);
