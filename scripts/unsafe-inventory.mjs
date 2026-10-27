@@ -190,54 +190,83 @@ function tracked() {
 // model can't account for is an error, never skipped.  (`--metadata` cross-checks it against cargo's.)
 // The test-only crates linking LGPL FLINT, kept out of every shipped graph (and of the compiler sweep)
 export const TEST_ONLY = ["flint", "oracle"];
+// TOML through a real parser (Python's tomllib, scripts/toml-json.py), never regular expressions (#234 r3 U2-TOML)
+export function parseToml(texts) {
+  if (!Object.keys(texts).length) return {};
+  const out = execFileSync("python3", ["-I", join(ROOT, "scripts/toml-json.py")], { input: JSON.stringify(texts), encoding: "utf8", maxBuffer: 64 << 20 });
+  return JSON.parse(out);
+}
+
+const isConfig = (f) => /(^|\/)\.cargo\/config(\.toml)?$/.test(f);
 export function workspaceModel(files, read) {
   const errors = [];
-  const ws = read("engine/Cargo.toml");
-  const membersText = /\n\[workspace\]\n(?:[^\[]*?\n)?members\s*=\s*\[([^\]]*)\]/.exec("\n" + ws);
-  if (!membersText) return { errors: ["engine/Cargo.toml: no literal [workspace] members = [...] list"], members: [] };
-  const members = [...membersText[1].matchAll(/"([^"]*)"/g)].map((m) => m[1]);
-  for (const m of members) if (/[*?\[\]{}]/.test(m) || m.includes("..") || m.includes("/") || !m) errors.push(`engine/Cargo.toml: member "${m}" is a glob, a nested path or a path out of engine/ (the model takes only plain names)`);
-  for (const k of ["exclude", "default-members"]) if (new RegExp(`\\n${k}\\s*=`).test(ws)) errors.push(`engine/Cargo.toml: workspace ${k} is not modelled (review it, then extend the model)`);
   const manifests = files.filter((f) => f.startsWith("engine/") && /(^|\/)Cargo\.toml$/.test(f));
+  const configs = files.filter(isConfig);
+  const texts = {};
+  for (const f of [...manifests, ...configs, "engine/rust-toolchain.toml"]) if (files.includes(f)) texts[f] = read(f);
+  const t = parseToml(texts);
+  for (const [f, v] of Object.entries(t)) if (v && v.__error__) errors.push(`${f}: not valid TOML (${v.__error__}): the model can't account for it`);
+  const root = t["engine/Cargo.toml"];
+  const ws = root?.workspace;
+  if (!ws || !Array.isArray(ws.members)) return { errors: [...errors, "engine/Cargo.toml: no [workspace] members array"], members: [], deps: {}, toml: t };
+  const members = ws.members;
+  for (const m of members) if (typeof m !== "string" || !/^[A-Za-z0-9_-]+$/.test(m)) errors.push(`engine/Cargo.toml: member ${JSON.stringify(m)} is a glob, a nested path or not a plain name (not modelled)`);
+  for (const k of Object.keys(ws)) if (!["members", "resolver", "lints", "package", "dependencies"].includes(k)) errors.push(`engine/Cargo.toml: workspace.${k} is not modelled (review it, then extend the model)`);
+  for (const k of ["patch", "replace"]) if (root[k] !== undefined) errors.push(`engine/Cargo.toml: [${k}] is not modelled`);
+  // the lints: exactly the workspace deny of unsafe_code
+  if (JSON.stringify(ws.lints) !== JSON.stringify({ rust: { unsafe_code: "deny" } })) errors.push(`engine/Cargo.toml: [workspace.lints] must be exactly rust.unsafe_code = "deny"`);
   for (const f of manifests) {
     if (f === "engine/Cargo.toml") continue;
     const m = /^engine\/([^/]+)\/Cargo\.toml$/.exec(f);
     if (!m || !members.includes(m[1])) errors.push(`${f}: a manifest under engine/ that isn't a listed workspace member (implicit, nested or another workspace)`);
   }
   for (const m of members) if (!files.includes(`engine/${m}/Cargo.toml`)) errors.push(`engine/Cargo.toml: member "${m}" has no tracked manifest`);
+  // dependency edges from the parsed tables: every kind, every target, renames (package = ...), workspace = true
+  const wsDeps = ws.dependencies ?? {};
   const deps = {};
-  for (const f of ["engine/Cargo.toml", ...members.map((m) => `engine/${m}/Cargo.toml`)].filter((f) => files.includes(f))) {
-    const t = read(f);
-    const dir = f.slice(0, f.lastIndexOf("/"));
-    if (/^\s*\[(patch|replace)\b/m.test(t)) errors.push(`${f}: [patch]/[replace] is not modelled`);
-    if (f !== "engine/Cargo.toml") {
-      if (!/\n\[lints\]\nworkspace = true\n/.test(t)) errors.push(`${f}: [lints] workspace = true missing`);
-      if (/\[lints\./.test(t) || /\[lints\][^\[]*\n(?!workspace = true)[a-z]/.test(t)) errors.push(`${f}: its own lint table`);
-    }
-    // path dependencies: every one must be a listed member (a path elsewhere would be built without the lints)
-    let section = "";
-    const own = f === "engine/Cargo.toml" ? null : dir.slice("engine/".length);
-    deps[own] = new Set();
-    for (const line of t.split("\n")) {
-      const h = /^\s*\[\[?([^\]]+)\]\]?\s*$/.exec(line);
-      if (h) { section = h[1].trim(); continue; }
-      if (!/dependencies/.test(section)) continue;
-      const name = /^\s*([A-Za-z0-9_-]+)\s*=/.exec(line)?.[1] ?? (/dependencies\.([A-Za-z0-9_-]+)$/.exec(section)?.[1]);
-      const pkg = /package\s*=\s*"([^"]+)"/.exec(line)?.[1];
-      if (own && (pkg ?? name)) deps[own].add(pkg ?? name);
-      for (const p of line.matchAll(/\bpath\s*=\s*"([^"]+)"/g)) {
-        const parts = (dir + "/" + p[1]).split("/");
-        const norm = [];
-        for (const x of parts) { if (x === "..") norm.pop(); else if (x !== "." && x !== "") norm.push(x); }
-        const target = norm.join("/");
-        const tm = /^engine\/([^/]+)$/.exec(target);
-        if (!tm || !members.includes(tm[1])) errors.push(`${f}: path dependency "${p[1]}" -> ${target} is not a listed workspace member`);
+  const tables = (doc) => {
+    const out = [];
+    for (const k of ["dependencies", "dev-dependencies", "build-dependencies"]) if (doc[k]) out.push([k, doc[k]]);
+    for (const [cfg, tt] of Object.entries(doc.target ?? {})) for (const k of ["dependencies", "dev-dependencies", "build-dependencies"]) if (tt?.[k]) out.push([`target.${cfg}.${k}`, tt[k]]);
+    return out;
+  };
+  const resolvePath = (dir, p) => {
+    const norm = [];
+    for (const x of (dir + "/" + p).split("/")) { if (x === "..") norm.pop(); else if (x !== "." && x !== "") norm.push(x); }
+    return norm.join("/");
+  };
+  for (const m of members) {
+    const f = `engine/${m}/Cargo.toml`;
+    const doc = t[f];
+    if (!doc || doc.__error__) continue;
+    if (JSON.stringify(doc.lints) !== JSON.stringify({ workspace: true })) errors.push(`${f}: [lints] must be exactly workspace = true`);
+    for (const k of ["patch", "replace"]) if (doc[k] !== undefined) errors.push(`${f}: [${k}] is not modelled`);
+    if (doc.package?.build !== undefined) errors.push(`${f}: a custom build = key is not modelled`);
+    deps[m] = new Set();
+    for (const [where, table] of tables(doc)) {
+      for (const [key, raw] of Object.entries(table)) {
+        let spec = typeof raw === "string" ? { version: raw } : raw ?? {};
+        if (spec.workspace === true) spec = { ...(typeof wsDeps[key] === "string" ? { version: wsDeps[key] } : wsDeps[key] ?? {}), ...spec, fromWorkspace: true };
+        const name = spec.package ?? key;
+        deps[m].add(name);
+        if (spec.git !== undefined || spec.registry !== undefined || spec["registry-index"] !== undefined) errors.push(`${f}: ${where}.${key} comes from a git or alternative registry source (not modelled)`);
+        if (spec.path !== undefined) {
+          const target = resolvePath(spec.fromWorkspace ? "engine" : `engine/${m}`, spec.path);
+          const tm = /^engine\/([^/]+)$/.exec(target);
+          if (!tm || !members.includes(tm[1])) errors.push(`${f}: ${where}.${key} path "${spec.path}" -> ${target} is not a listed workspace member`);
+        }
       }
     }
   }
+  // cargo configs: no source replacement, patch or path overrides anywhere in the tree
+  for (const f of configs) {
+    const doc = t[f];
+    if (!doc || doc.__error__) continue;
+    for (const k of ["source", "patch", "paths"]) if (doc[k] !== undefined) errors.push(`${f}: cargo config ${k} (source replacement / patching) is not modelled`);
+  }
   // the test-only crates stay out of shipped graphs: only another test-only crate may depend on them
-  for (const [m, ds] of Object.entries(deps)) for (const t of TEST_ONLY) if (m !== "null" && !TEST_ONLY.includes(m) && ds.has(`sagebrush-${t}`)) errors.push(`engine/${m}/Cargo.toml: depends on test-only sagebrush-${t}`);
-  return { errors, members, deps };
+  for (const [m, ds] of Object.entries(deps)) for (const x of TEST_ONLY) if (!TEST_ONLY.includes(m) && ds.has(`sagebrush-${x}`)) errors.push(`engine/${m}/Cargo.toml: depends on test-only sagebrush-${x}`);
+  return { errors, members, deps, toml: t };
 }
 
 // ---- overrides in build inputs (#234 r2 U3a): the lint name in either spelling (rustc takes unsafe-code too),
