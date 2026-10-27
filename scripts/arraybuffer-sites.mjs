@@ -223,10 +223,6 @@ export const PROTOCOL = {
   json: /^toJSON$/,
 };
 
-// lib calls whose result is never a function (an `any` result included): a protocol member
-// they're stored under can't be installed by them
-const NOT_A_FUNCTION = /^(ObjectConstructor\.(create|fromEntries|entries|keys|values|getOwnPropertyNames|getOwnPropertyDescriptors)|JSON\.parse|structuredClone|ArrayConstructor\.(from|of|new|call)|(Map|Set|WeakMap|WeakSet|Error|Date|RegExp|ArrayBuffer|SharedArrayBuffer|DataView|Promise)Constructor\.new|Array\.(map|filter|slice|concat|flat|flatMap|splice)|String\..*|Number\..*)(\.new)?$/;
-
 // the host's own modules (Node's builtins), which require() may name
 const HOST_MODULE = /^(node:)?(fs|os|path|crypto|zlib|util|url|child_process|worker_threads|v8|perf_hooks|module|process|buffer|events|stream|tty|readline|assert)$/;
 
@@ -454,9 +450,11 @@ export function census(root = ROOT, { commit = null } = {}) {
   // anything else, which may be callable (an obligation, fail closed).
   const PRIM = ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike | ts.TypeFlags.BigIntLike | ts.TypeFlags.BooleanLike | ts.TypeFlags.EnumLike | ts.TypeFlags.ESSymbolLike |
     ts.TypeFlags.Null | ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Never;
-  const isArrayish = (t) => !!(t.flags & ts.TypeFlags.Object) && ((checker.isArrayType?.(t) || checker.isTupleType?.(t)) ||
-    (/^(Array|ReadonlyArray)$/.test(t.getSymbol?.()?.getName() ?? "") && isLibSymbol(t.getSymbol())));
-  // a type no function can have: primitives, literals, arrays and tuples (and unions of them)
+  // a type no function can have, a closed set (astra2 X1, X2): primitives only (string, number,
+  // bigint, boolean, symbol, undefined, null, void, their literal and enum types), unions of these,
+  // and a type parameter constrained to one.  Every object-capable type (arrays and tuples,
+  // structural and class-instance types, intersections) may be a function: Object.assign(fn, [])
+  // is an array, and a constructor can return a function
   const notCallableType = (t, depth = 0) => {
     if (!t || depth > 8) return false;
     if (t.flags & PRIM) return true;
@@ -466,7 +464,7 @@ export function census(root = ROOT, { commit = null } = {}) {
       const c = checker.getBaseConstraintOfType(t);
       return !!c && c !== t && notCallableType(c, depth + 1);
     }
-    return isArrayish(t);
+    return false;
   };
   const unwrap = (v) => {
     for (;;) {
@@ -481,22 +479,14 @@ export function census(root = ROOT, { commit = null } = {}) {
     v = unwrap(v);
     if (depth > 8) return ((out.obligation = "too deep to resolve"), out);
     if (isFunctionLike(v)) return (out.fns.push(v), out);
-    // provably not callable by its syntax
+    // provably not callable by its syntax, a closed set: object, array, template, string, numeric,
+    // bigint, boolean, null and regular-expression literals (a literal makes a new non-function)
     if (ts.isObjectLiteralExpression(v) || ts.isArrayLiteralExpression(v) || ts.isTemplateExpression(v) || ts.isNoSubstitutionTemplateLiteral(v) || ts.isStringLiteralLike(v) ||
-      ts.isNumericLiteral(v) || ts.isBigIntLiteral(v) || ts.isRegularExpressionLiteral(v) || ts.isClassExpression(v) || ts.isTypeOfExpression(v) || ts.isVoidExpression(v) ||
+      ts.isNumericLiteral(v) || ts.isBigIntLiteral(v) || ts.isRegularExpressionLiteral(v) ||
       v.kind === ts.SyntaxKind.TrueKeyword || v.kind === ts.SyntaxKind.FalseKeyword || v.kind === ts.SyntaxKind.NullKeyword) return out;
     if (ts.isConditionalExpression(v)) return merge(classify(v.whenTrue, depth + 1), classify(v.whenFalse, depth + 1));
     if (ts.isBinaryExpression(v) && [ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.CommaToken].includes(v.operatorToken.kind)) {
       return v.operatorToken.kind === ts.SyntaxKind.CommaToken ? classify(v.right, depth + 1) : merge(classify(v.left, depth + 1), classify(v.right, depth + 1));
-    }
-    if (ts.isNewExpression(v)) {
-      // a new of a class is an instance, not a function (a class whose chain reaches Function aside)
-      const t = checker.getTypeAtLocation(v);
-      if (!t.getCallSignatures().length && !(t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown))) return out;
-    }
-    if (ts.isCallExpression(v) || ts.isNewExpression(v)) {
-      const d = checker.getResolvedSignature(v)?.getDeclaration?.();
-      if (d && libFile(d.getSourceFile().fileName) && NOT_A_FUNCTION.test(libMemberName(d) + (ts.isNewExpression(v) ? ".new" : ""))) return out;
     }
     if (ts.isIdentifier(v) || ts.isPropertyAccessExpression(v) || ts.isShorthandPropertyAssignment(v)) {
       // (a shorthand property's value is the variable it names)
@@ -507,7 +497,7 @@ export function census(root = ROOT, { commit = null } = {}) {
       const vd = sy?.valueDeclaration;
       // a const binding: its initializer decides
       if (vd && ts.isVariableDeclaration(vd) && vd.initializer && isConstBinding(vd) && ts.isIdentifier(vd.name)) return classify(vd.initializer, depth + 1);
-      if (vd && (ts.isFunctionDeclaration(vd) || ts.isClassDeclaration(vd)) && isSourceFile(vd.getSourceFile())) return ts.isClassDeclaration(vd) ? ((out.fns.push(vd), out)) : ((out.fns.push(vd), out));
+      if (vd && (ts.isFunctionDeclaration(vd) || ts.isClassDeclaration(vd)) && isSourceFile(vd.getSourceFile())) return (out.fns.push(vd), out);
     }
     if (notCallableType(ts.isShorthandPropertyAssignment(v) ? checker.getTypeAtLocation(v.name) : checker.getTypeAtLocation(v))) return out;
     out.obligation = "its value may be callable and can't be resolved";
@@ -625,7 +615,7 @@ export function census(root = ROOT, { commit = null } = {}) {
     if ((ts.isShorthandPropertyAssignment(n) || ts.isSpreadAssignment(n)) && isPatternTarget(n.name ?? n.expression)) return;
     if (ts.isShorthandPropertyAssignment(n)) return install(kindsOf(n.name.text), n, n, `the property ${n.name.text}`);
     // object spread copies another object's own properties: any name, any value
-    if (ts.isSpreadAssignment(n)) return ts.isObjectLiteralExpression(unwrap(n.expression)) ? undefined : install(Object.keys(PROTOCOL), UNKNOWN, n, `a spread of ${text(n.expression)}`);
+    if (ts.isSpreadAssignment(n)) return ts.isObjectLiteralExpression(unwrap(n.expression)) || ts.isArrayLiteralExpression(unwrap(n.expression)) ? undefined : install(Object.keys(PROTOCOL), UNKNOWN, n, `a spread of ${text(n.expression)}`);
     // an assignment to a property
     if (ts.isBinaryExpression(n) && ASSIGN.has(n.operatorToken.kind) && (ts.isPropertyAccessExpression(n.left) || ts.isElementAccessExpression(n.left))) {
       return install(kindsOfTarget(n.left), n.right, n, `the assignment to ${text(n.left)}`);
@@ -650,7 +640,8 @@ export function census(root = ROOT, { commit = null } = {}) {
       if (m === "ObjectConstructor.defineProperties" || m === "ObjectConstructor.create" && a.length >= 2) return installDescriptors(a[1], n, m === "ObjectConstructor.create" ? "Object.create's descriptors" : "defineProperties");
       if (m === "set" && lib.includes("reflect") && a.length >= 3) return install(kindsOfKey(a[1]), a[2], n, `Reflect.set of ${text(a[1])}`);
       if (m === "ObjectConstructor.assign") {
-        for (const src of a.slice(1)) if (!ts.isObjectLiteralExpression(unwrap(src))) install(Object.keys(PROTOCOL), UNKNOWN, n, `Object.assign from ${text(src)}`);
+        // (a literal source's own properties are registered where it's written; an array literal's are indexes)
+        for (const src of a.slice(1)) if (!ts.isObjectLiteralExpression(unwrap(src)) && !ts.isArrayLiteralExpression(unwrap(src))) install(Object.keys(PROTOCOL), UNKNOWN, n, `Object.assign from ${text(src)}`);
         return;
       }
       if (m === "ProxyConstructor.new") {
