@@ -6,6 +6,10 @@
 
 /// Allocate `len` bytes (aligned to 8, as the engine's Vec<u64> blocks).
 #[no_mangle]
+// SAFETY: an export of the growth probe's wasm module (no_mangle; the probe_ prefix keeps the
+// symbol unique); `alloc` gets a valid nonzero-size layout (len.max(1), align 8).
+// Tests only, never shipped.
+#[allow(unsafe_code)]
 pub extern "C" fn probe_alloc(len: usize) -> *mut u8 {
     let layout = std::alloc::Layout::from_size_align(len.max(1), 8).unwrap();
     unsafe { std::alloc::alloc(layout) }
@@ -16,6 +20,10 @@ pub extern "C" fn probe_alloc(len: usize) -> *mut u8 {
 /// # Safety
 /// `ptr` and `len` must come from one probe_alloc call.
 #[no_mangle]
+// SAFETY: an export of the growth probe's wasm module (no_mangle; the probe_ prefix keeps the
+// symbol unique); per `# Safety` the block came from probe_alloc(len), so it is
+// freed with the layout it was allocated with.  Tests only, never shipped.
+#[allow(unsafe_code)]
 pub unsafe extern "C" fn probe_free(ptr: *mut u8, len: usize) {
     let layout = std::alloc::Layout::from_size_align(len.max(1), 8).unwrap();
     std::alloc::dealloc(ptr, layout)
@@ -23,6 +31,9 @@ pub unsafe extern "C" fn probe_free(ptr: *mut u8, len: usize) {
 
 /// The memory's size in 64 KiB pages.
 #[no_mangle]
+// SAFETY: an export of the growth probe's wasm module (no_mangle; the probe_ prefix keeps the
+// symbol unique); no unsafe operation.  Tests only, never shipped.
+#[allow(unsafe_code)]
 pub extern "C" fn probe_pages() -> u32 {
     #[cfg(target_arch = "wasm32")]
     {
