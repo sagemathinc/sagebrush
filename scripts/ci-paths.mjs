@@ -164,6 +164,9 @@ const censusPaths = [
   /^test\/limit-sites\.json$/, /^test\/limit-sites-baseline\.txt$/, /^test\/limit_sites\.py$/, /^test\/limits\.test\.ts$/,
   // (the baseline sweep's files and tooling, which the census's check reads: plan-limit-sites-sweep-r3)
   /^test\/limit-sweep\//, /^test\/limit_sweep\.py$/, /^test\/limit_sweep_cases\.py$/,
+  // (the unsafe-code boundary's check, C-2c-ii scope r4 section 1.3: the engine's sources and manifests
+  // above, and every build input a lint override could hide in)
+  /^scripts\//, /(^|\/)\.cargo\//, /^\.github\/workflows\//, /(^|\/)package\.json$/, /^test\/unsafe-allow-inventory\.json$/,
 ];
 const census = full || workflowOrBuild || matches(censusPaths) || fallback;
 

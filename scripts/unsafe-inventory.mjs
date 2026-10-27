@@ -188,8 +188,11 @@ export function scan(files = tracked(), read = (f) => readFileSync(join(ROOT, f)
   }
   // unsafe_code / --cap-lints anywhere else
   const own = new Set(["engine/Cargo.toml", "scripts/unsafe-inventory.mjs", "scripts/test-unsafe-inventory.mjs", INVENTORY]);
+  // (the build configuration a lint override could hide in: cargo configs, manifests, workflows, scripts;
+  // prose that merely mentions the lint is not a build input)
+  const config = (f) => /(^|\/)\.cargo\//.test(f) || /(^|\/)Cargo\.toml$/.test(f) || /^\.github\/workflows\//.test(f) || /^scripts\//.test(f) || /(^|\/)package\.json$/.test(f) || /\.sh$/.test(f) || /(^|\/)rust-toolchain(\.toml)?$/.test(f);
   for (const f of files) {
-    if (own.has(f) || (f.startsWith("engine/") && f.endsWith(".rs")) || /\.(wasm|png|gz|jpg|ico|woff2?)$/.test(f)) continue;
+    if (own.has(f) || !config(f)) continue;
     if (/^engine\/[^/]+\/Cargo\.toml$/.test(f)) continue;
     let t;
     try { t = read(f); } catch { continue; }

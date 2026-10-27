@@ -201,6 +201,9 @@ test("the limits census runs on engine-only, lib and src changes even when the n
   for (const f of ["lib/_magma.py", "src/runtime/ops.ts", "web/workspace/sync-ledger.ts", "test/limit-sites.json", "test/limit-sites-baseline.txt", "test/limit_sites.py", "test/limits.test.ts",
     "test/limit-sweep/manifest.json", "test/limit-sweep/batches.json", "test/limit_sweep.py", "test/limit_sweep_cases.py"])
     assert.equal(classify([f]).census, "true", f);
+  // the unsafe-code boundary's inputs select it too (scripts/unsafe-inventory.mjs runs in the census job)
+  for (const f of ["scripts/unsafe-inventory.mjs", "test/unsafe-allow-inventory.json", ".cargo/config.toml", "engine/.cargo/config.toml", ".github/workflows/pypi.yml", "web/package.json"])
+    assert.equal(classify([f]).census, "true", f);
   // and not for files the census does not read
   for (const f of ["design/plan.md", "app/src/main.ts", "optional/x/README.md"])
     assert.equal(classify([f]).census, "false", f);
