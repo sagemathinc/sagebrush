@@ -395,23 +395,46 @@ async function pending(check) {
 }
 
 // ---------------------------------------------------------------- Stop (r3 §4.3; D8 "Also found")
+// The CPU-only loop's Stop comes LOOP_STOP_MS after the loop starts, not at a wall-clock time from exec: the script's
+// first command is a file call (`[ -e /m ]`, ws.stat through the host), whose hook marks the loop's start.  The hook
+// only schedules the abort: an abort while the worker waits on that answer would test the file-call path instead.
+const LOOP_STOP_MS = 20;
+const LOOP = "[ -e /m ]; while true; do :; done";
+const loopStart = (hooks, then) => {
+  let t = null;
+  hooks.stat = async (p) => {
+    if (p !== "/m" || t !== null) return;
+    t = performance.now();
+    then?.();
+  };
+  return () => t;
+};
 async function stop(check) {
-  const { ws, host } = await fresh("stop");
+  const hooks = {};
+  const { ws, host } = await fresh("stop", { wrap: hookable(hooks) });
   let ac = new AbortController();
-  setTimeout(() => ac.abort(), 300);
-  let t0 = performance.now();
-  let r = await host.exec(PERSON, "while true; do :; done", { signal: ac.signal });
-  let ms = performance.now() - t0;
+  let tAbort = null;
+  const tLoop = loopStart(hooks, () => setTimeout(() => ((tAbort = performance.now()), ac.abort()), LOOP_STOP_MS));
+  let r = await host.exec(PERSON, LOOP, { signal: ac.signal });
+  let t0 = tAbort;
+  let ms = performance.now() - (t0 ?? NaN);
   // (the module sees the abort only when its worker takes a message, between macrotasks: in a run, only while it waits
   // for a file call's answer, which the fence refuses after a Stop anyway.  The pinned just-bash itself checks its signal
   // only there.  So a CPU-only loop is ended by just-bash's own default of 100,000 commands in this step, and by the
   // 2 s grace once step 3 passes +Infinity for every own-computation key that is off, plan r3 §5 A; probe in packet r3)
-  check(r.kind === "interrupted" && ms < 300 + STOP_GRACE_MS + 600, `Stop during a CPU-only loop: interrupted, by the cap or the grace (${JSON.stringify(r)}, ${Math.round(ms)} ms)`);
+  check(tLoop() !== null && tAbort !== null && r.kind === "interrupted" && ms < STOP_GRACE_MS + 600,
+    `Stop during a CPU-only loop, ${LOOP_STOP_MS} ms into it: interrupted, by the cap or the grace (${JSON.stringify(r)}, ${Math.round(ms)} ms after the Stop)`);
   {
-    const { host: hc } = await fresh("stop-control");
-    const rc = await hc.exec(PERSON, "while true; do :; done");
+    const hcHooks = {};
+    const { host: hc } = await fresh("stop-control", { wrap: hookable(hcHooks) });
+    const tc = loopStart(hcHooks);
+    const rc = await hc.exec(PERSON, LOOP);
+    const loopMs = performance.now() - (tc() ?? NaN);
     check(rc.kind === "exit" && rc.code === 126 && /too many commands executed \(>100000\)/.test(rc.stderr),
       `known until step 3: an unstopped CPU-only loop ends at just-bash's default 100,000 commands (${JSON.stringify(rc).slice(0, 200)})`);
+    // (the margin the case above needs: the loop must outlast its Stop by far, or the cap could end it first)
+    check(loopMs >= 5 * LOOP_STOP_MS,
+      `the runner is too fast for the CPU-only Stop case's margin: the loop reached the cap ${Math.round(loopMs)} ms after it started, under ${5 * LOOP_STOP_MS} ms (5x its Stop at ${LOOP_STOP_MS} ms)`);
   }
   r = await host.exec(PERSON, "echo fresh");
   check(r.kind === "exit" && r.stdout === "fresh\n", `and the next run works (${JSON.stringify(r)})`);
