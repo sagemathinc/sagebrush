@@ -4877,7 +4877,7 @@
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
- "src/board-edit-hub.ts :: merge :: const r = boardMerge3(base, a, b, { mergeStrings3: this.deps.mergeStrings3, work: budget.left(), deadline: budget.deadline, now: this.deps.now }); #0": {
+ "src/board-edit-hub.ts :: merge :: const r = boardMerge3(base, a, b, { work: budget.left(), deadline: budget.deadline, now: this.deps.now }); #0": {
   "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
  },
@@ -5225,7 +5225,7 @@
   "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
  },
- "src/board-edit-serve.ts :: startEdit :: export async function startEdit(path: string, limits: Limits, deps: { mergeStrings3: (o: { base: string; a: string; b: string }) => string; now: () => number }): Promise<{ hub: EditHub } | { why: string }> { #0": {
+ "src/board-edit-serve.ts :: startEdit :: export async function startEdit(path: string, limits: Limits, deps: { now: () => number }): Promise<{ hub: EditHub } | { why: string }> { #0": {
   "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
  },
@@ -5304,7 +5304,7 @@
   "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
  },
- "src/board-open.ts :: say :: const started = await startEdit(path, limits, { mergeStrings3: mergeStrings3 as any, now: Date.now }); #0": {
+ "src/board-open.ts :: say :: const started = await startEdit(path, limits, { now: Date.now }); #0": {
   "class": "none",
   "owner": "board open --edit (@sagebrush-board)"
  },

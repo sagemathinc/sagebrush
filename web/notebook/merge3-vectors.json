@@ -208,5 +208,80 @@
       "merged": "def f():\n    return 10\n\ndef g():\n    return 20\n",
       "minUnits": 2
     }
+  ],
+  "board": [
+    {
+      "name": "different lines: merged by lines",
+      "base": "one\ntwo\nthree\n",
+      "a": "ONE\ntwo\nthree\n",
+      "b": "one\ntwo\nTHREE\n",
+      "text": "ONE\ntwo\nTHREE\n",
+      "overlap": false,
+      "minUnits": 23
+    },
+    {
+      "name": "the same line: a text-overlap, one whole text kept by the tie-break, the other its alternative",
+      "base": "hello world",
+      "a": "hello brave world",
+      "b": "hello world!",
+      "text": "hello brave world",
+      "overlap": true,
+      "kept": "hello brave world",
+      "other": "hello world!",
+      "minUnits": 23
+    },
+    {
+      "name": "the same line, sides swapped: the same result (symmetric)",
+      "base": "hello world",
+      "a": "hello world!",
+      "b": "hello brave world",
+      "text": "hello brave world",
+      "overlap": true,
+      "kept": "hello brave world",
+      "other": "hello world!",
+      "minUnits": 23
+    },
+    {
+      "name": "two different insertions at the same gap: a text-overlap",
+      "base": "a\nb\n",
+      "a": "a\nX\nb\n",
+      "b": "a\nY\nb\n",
+      "text": "a\nX\nb\n",
+      "overlap": true,
+      "kept": "a\nX\nb\n",
+      "other": "a\nY\nb\n",
+      "minUnits": 21
+    },
+    {
+      "name": "an insertion touching the other side's replaced line: a text-overlap (conservative)",
+      "base": "a\nb\nc\n",
+      "a": "a\nB\nc\n",
+      "b": "a\nb\nNEW\nc\n",
+      "text": "a\nB\nc\n",
+      "overlap": true,
+      "kept": "a\nB\nc\n",
+      "other": "a\nb\nNEW\nc\n",
+      "minUnits": 22
+    },
+    {
+      "name": "the same edit on both sides: taken once, no report",
+      "base": "x\ny\n",
+      "a": "x\nY\n",
+      "b": "x\nY\n",
+      "text": "x\nY\n",
+      "overlap": false,
+      "minUnits": 15
+    },
+    {
+      "name": "x = 0 against x = 1 and x = 2: never the hybrid x = 1 2",
+      "base": "x = 0",
+      "a": "x = 1",
+      "b": "x = 2",
+      "text": "x = 1",
+      "overlap": true,
+      "kept": "x = 1",
+      "other": "x = 2",
+      "minUnits": 23
+    }
   ]
 }
