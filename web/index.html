@@ -1506,10 +1506,15 @@ const shareReady = (LOCAL ? Promise.resolve(sharing) : shareStatus()).then((s) =
 $("#sharelink").onclick = async () => { if (shareDialog.busy) return; await copyShareLink(); shareDlg.close(); };
 // (each open's number: an open whose check ends after the dialog was closed, or opened again, stops there)
 let shareOpens = 0;
+// (the page's first document, opened: until then Share waits, as that open closes the dialog of no document)
+let booted;
+const bootDone = new Promise((r) => (booted = r));
 async function openShare() {
   // (while uploading, Share only shows the dialog again, with the upload's own state: UI-B1)
   if (shareDialog.busy) return void shareDialog.open();
   const t = ++shareOpens;
+  // (bounded: a first open that failed doesn't keep Share from opening)
+  await Promise.race([bootDone, new Promise((r) => setTimeout(r, 10_000))]);
   while (switched) await switched;
   if (t !== shareOpens) return;
   if (!LOCAL) {
@@ -2657,6 +2662,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   else if (opened) {}
   else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : /m=matlab/.test(location.hash) ? "matlab" : "python", shared);
   else if (!(last && (await openId(last)))) await openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
+  booted();
   // back from signing in to share (?share): the dialog again
   if (qs.has("share")) {
     history.replaceState(null, "", location.pathname + flagQuery + location.hash);
