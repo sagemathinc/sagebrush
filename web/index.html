@@ -1531,7 +1531,58 @@ async function storedFileMeta() {
 }
 // (tests: the Share dialog's seams, read at the moment they're used: a stand-in worker, shorter
 // fail-safes, a counter of the files the dialog reads, the interpreter's answer and the notebook's identity)
-const shareTest = { workspace: () => wsNow(), exports: async () => ({ ipynb: toIpynb({ ...nb.snapshot(), name: docName() }), link: await shareLink() }) };
+// This device's records of first uploads whose share request it sent, by account and notebook: one bounded
+// localStorage entry (astra3's r2 note 1, daybreak3's r3 notes 2 and 3).  A record goes once its outcome is durably
+// the notebook's; a deleted notebook's, and a browser notebook's no longer here, are dropped; at most SHARE_SENT_MAX
+// are kept, the newest.
+const SHARE_SENT_KEY = "sagebrush-share-sent", SHARE_SENT_MAX = 100;
+const shareSent = {
+  all() {
+    try {
+      const v = JSON.parse(localStorage.getItem(SHARE_SENT_KEY) ?? "{}");
+      return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+    } catch {
+      return {};
+    }
+  },
+  key: (account, notebook) => account + "|" + notebook,
+  get(account, notebook) {
+    const r = this.all()[this.key(account, notebook)];
+    return r && /^[0-9a-f]{32}$/.test(r.attempt ?? "") ? r.attempt : null;
+  },
+  /** Record it, or throw (then the share request isn't sent). */
+  async put(account, notebook, attempt) {
+    const all = await this.pruned(this.all());
+    all[this.key(account, notebook)] = { attempt, at: Date.now() };
+    for (const k of Object.keys(all).sort((a, b) => (all[b].at ?? 0) - (all[a].at ?? 0)).slice(SHARE_SENT_MAX)) delete all[k];
+    localStorage.setItem(SHARE_SENT_KEY, JSON.stringify(all));
+    if (this.get(account, notebook) !== attempt) throw new Error("not recorded");
+  },
+  write(f) {
+    try {
+      const all = this.all();
+      f(all);
+      localStorage.setItem(SHARE_SENT_KEY, JSON.stringify(all));
+    } catch {}
+  },
+  drop(account, notebook) { this.write((all) => delete all[this.key(account, notebook)]); },
+  /** A notebook deleted for good: its records, every account's. */
+  forget(notebook) { this.write((all) => { for (const k of Object.keys(all)) if (k.endsWith("|" + notebook)) delete all[k]; }); },
+  /** Without the records of browser notebooks no longer in this browser (others, a workspace's files, are kept). */
+  async pruned(all) {
+    db ??= await dbReady;
+    if (!db) return all;
+    const keys = await idb(db, "notebooks", "readonly", (st) => st.getAllKeys()).catch(() => null);
+    if (!Array.isArray(keys)) return all;
+    const ids = new Set(keys.map(String));
+    for (const k of Object.keys(all)) {
+      const id = k.slice(k.indexOf("|") + 1);
+      if (!/^[a-z]+:/.test(id) && !ids.has(id)) delete all[k];
+    }
+    return all;
+  },
+};
+const shareTest = { workspace: () => wsNow(), sent: () => shareSent.all(), exports: async () => ({ ipynb: toIpynb({ ...nb.snapshot(), name: docName() }), link: await shareLink() }) };
 // One file's bytes, as it is now; if it is no longer the file that was listed (another fid), it changed
 async function storedFileBytes(f) {
   await shareTest.onRead?.(f.path);
@@ -1592,26 +1643,30 @@ const shareDialog = createShareDialog({
       return { share_id: d.share_id ?? null, share_attempt: d.share_attempt ?? null };
     };
     const origin = current.id;
-    // (this device's record of the attempt whose share request it sent, by notebook: another writer's save, from
-    // another device, can replace the notebook's attempt, but not this; a retry after a lost answer or a crash
-    // sends it again, so the share that request may have made is found, never a second one, astra3's r2 note 1)
-    const sentKey = "sagebrush-share-sent:" + origin;
-    const sentAttempt = () => {
+    // (this device's record of the attempt whose share request it sent, by account and notebook: another writer's
+    // save, from another device, can replace the notebook's attempt, but not this; a retry after a lost answer or a
+    // crash sends it again, so the share that request may have made is found, never a second one, astra3's r2 note 1;
+    // another account's record is never used, daybreak3's r3 note 3)
+    const account = sharing.enabled ? sharing.me?.account_id ?? null : null;
+    if (!account) throw new Error("sign in to upload");
+    const sentAttempt = () => shareSent.get(account, origin);
+    const sentDone = () => shareSent.drop(account, origin);
+    // (the record goes only once share `id` is durably the notebook's: a save that fails, or a crash before it ends,
+    // keeps it, so a retry recovers that share through its receipt, astra3's and daybreak3's r3 note 1)
+    const settle = async (id) => {
       try {
-        const v = localStorage.getItem(sentKey);
-        return /^[0-9a-f]{32}$/.test(v ?? "") ? v : null;
-      } catch {
-        return null;
-      }
+        await nb.saved();
+        const s = await storedShare();
+        if (s === null || s.share_id === id) sentDone();
+      } catch {}
     };
-    const sentDone = () => { try { localStorage.removeItem(sentKey); } catch {} };
     const prev = nb.snapshot().share_id ?? null;
     // (a new share's attempt (plan-upload-leak r3 §3c): kept with the notebook, and saved, before
     // anything is read or sent, so a retry, even after a lost answer and a reload, gets that same
     // share back, never a second one; a notebook that can't be saved isn't uploaded)
     let attempt = null;
-    // (a notebook with its share: any record of a sent first upload is settled)
-    if (prev) sentDone();
+    // (a notebook with its share, durably: any record of a sent first upload is settled)
+    if (prev) void settle(prev);
     if (!prev) {
       attempt = sentAttempt() ?? nb.snapshot().share_attempt ?? [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
       nb.setMeta({ share_attempt: attempt });
@@ -1651,11 +1706,10 @@ const shareDialog = createShareDialog({
       if (current.id !== origin || now.share_id || now.share_attempt !== attempt) throw new Error("this notebook's share changed elsewhere while uploading; nothing was shared. Upload again.");
       // (recorded on this device before the request goes: unrecordable, it isn't sent)
       try {
-        localStorage.setItem(sentKey, attempt);
+        await shareSent.put(account, origin, attempt);
       } catch {
         throw new Error("this browser couldn't record the upload, so nothing was shared; upload again");
       }
-      if (localStorage.getItem(sentKey) !== attempt) throw new Error("this browser couldn't record the upload, so nothing was shared; upload again");
       committing = true;
     };
     let r;
@@ -1669,18 +1723,26 @@ const shareDialog = createShareDialog({
       }
       // (the attempt made a share with other files, or its share was deleted: never a success, and the attempt is done)
       if (!(e instanceof AttemptError)) throw e;
-      sentDone();
-      if (current.id === origin) nb.setMeta(e.kind === "used" ? { share_id: e.share.id, share_attempt: null } : { share_attempt: null });
+      if (e.kind === "used") {
+        // (that share, adopted as the notebook's: the record stays until it is durably so)
+        if (current.id === origin) {
+          nb.setMeta({ share_id: e.share.id, share_attempt: null });
+          void settle(e.share.id);
+        }
+      } else {
+        sentDone();
+        if (current.id === origin) nb.setMeta({ share_attempt: null });
+      }
       throw new Error(e.kind === "used"
         ? `an earlier upload of this notebook was shared with different files: ${e.share.url}. Nothing new was uploaded. Delete that share, or upload again to make a new version with your current selection.`
         : "this notebook's earlier share was deleted. Upload again to make a new one.");
     }
     // (its collection is its notebook's: never written onto another one attached meanwhile, CORR-172-ASTRA-2)
-    if (attempt) sentDone();
     if (current.id === origin) {
       nb.setMeta({ share_id: r.id, share_attempt: null });
-      // (if this save fails, a retry carries the same attempt and files, and gets this share back)
-      void nb.saved().catch(() => {});
+      // (the record goes once this is durably saved; if the save fails, a retry sends the recorded attempt and gets
+      // this share back through its receipt)
+      void settle(r.id);
     }
     return { url: r.url, again: !!prev };
   },
@@ -1894,6 +1956,7 @@ fileMenu.addEventListener("click", async (e) => {
       await nb.mayLeave();
       nb.detach();
       await idb(db, "notebooks", "readwrite", (st) => st.delete(current.id));
+      shareSent.forget(current.id);
       await wsForgetNotebook(current.id);
       const hdb = await historyDbReady;
       if (hdb) await new IdbPatchStore(hdb, current.id).drop();
@@ -1969,6 +2032,7 @@ async function showOpen() {
     del.onclick = async () => {
       if (d.id === current.id || !confirm(`Delete "${d.name}"?`)) return;
       await idb(db, "notebooks", "readwrite", (st) => st.delete(d.id));
+      shareSent.forget(d.id);
       await wsForgetNotebook(d.id);
       const hdb = await historyDbReady;
       if (hdb) await new IdbPatchStore(hdb, d.id).drop();
