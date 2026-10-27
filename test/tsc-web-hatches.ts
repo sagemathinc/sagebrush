@@ -13,6 +13,13 @@ export type Kind = "ts-nocheck" | "ts-ignore" | "ts-expect-error" | "jsdoc-any";
 export type Finding = { kind: Kind; line: number; reasoned: boolean; permitted: boolean; why?: string };
 export type Scan = { findings: Finding[]; problems: string[]; counts: Record<Kind, { permitted: number; refused: number }> };
 
+// ENFORCEMENT DOESN'T DEPEND ON THE CONTEXT RULES BELOW (astra2 #232 r2-r4 T1-LEX; @sagebrush r5): every slash read
+// as a regex has its WHOLE candidate span checked, in every context: if its body holds /*, */ or //, or its closing
+// slash runs straight into * or /, the scan fails closed ("an ambiguous slash").  A division misread as a regex can
+// only swallow a comment by spanning one of those, so a context error can't hide a comment; a genuine regex that
+// trips it is rewritten (\/ and \* escapes) or exempted by review.  A non-ASCII character outside strings, templates
+// and comments fails closed too (the lexer doesn't tokenize Unicode identifiers).  The context rules then only pick
+// which reading to check:
 // The slash: a regex starts where an operand can't end, so the lexer tracks the last significant token as an operand
 // (an identifier, a number, a literal, a postfix ++ or --, a ] or a ) that closes an expression) or an operator (any
 // other punctuator, a prefix ++ or --, an operator keyword, a ) closing if/while/for/with's head).  A word after
@@ -25,7 +32,9 @@ const OPERATOR_WORDS = new Set(["return", "typeof", "instanceof", "in", "of", "n
 const CONTROL_WORDS = new Set(["if", "while", "for", "with"]);
 
 /** Every comment in a JS/TS text, with its 1-based lines; problems for anything left unterminated or ambiguous. */
-export function comments(src: string): { list: Comment[]; problems: string[] } {
+/** opts.everySlashRegex: a control that discards the context rules, reading every slash as a regex candidate, so the
+ * tests can show the span safeguard alone refuses every shape (a division misread can't hide a comment) */
+export function comments(src: string, opts: { everySlashRegex?: boolean } = {}): { list: Comment[]; problems: string[] } {
   const list: Comment[] = [];
   const problems: string[] = [];
   let i = 0, line = 1;
@@ -89,14 +98,14 @@ export function comments(src: string): { list: Comment[]; problems: string[] } {
     }
     if (c === "/") {
       // (a regex where an operand can't end; division after one; at a }, the ambiguous case)
-      if (prev === "operand") { i++; prev = "operator"; continue; }
+      if (prev === "operand" && !opts.everySlashRegex) { i++; prev = "operator"; continue; }
       const e = regexEnd(i);
-      if (prev === "brace") {
-        if (e < 0) { i++; prev = "operator"; continue; } // (can't be a regex on this line: division)
-        const span = src.slice(i, e + 2); // (the candidate regex and the character after its closing slash)
-        if (/\/\*|\*\/|\/\//.test(span.slice(1))) { problems.push(`line ${line}: an ambiguous slash after } (a regex or a division, and a comment could start or end inside ${JSON.stringify(span.slice(0, 60))})`); break; }
-      }
+      if (prev === "brace" && e < 0 && !opts.everySlashRegex) { i++; prev = "operator"; continue; } // (after }, no regex can close on this line: division)
       if (e < 0) { problems.push(`line ${line}: an unterminated regular expression`); break; }
+      // (the safeguard, in EVERY context: the candidate's body and the character after its closing slash)
+      // (its body with escapes masked, so \/ and \* never count; then the character right after its closing slash)
+      const span = src.slice(i, e + 2), body = src.slice(i + 1, e).replace(/\\./g, "__");
+      if (/\/\*|\*\/|\/\//.test(body) || src[e + 1] === "*" || src[e + 1] === "/") { problems.push(`line ${line}: an ambiguous slash (read as a regex, its span ${JSON.stringify(span.slice(0, 60))} could hide a comment: escape the regex's / and *, or review it)`); break; }
       i = e + 1;
       while (/[a-z]/i.test(src[i] ?? "")) i++;
       prev = "operand";
@@ -124,6 +133,8 @@ export function comments(src: string): { list: Comment[]; problems: string[] } {
     if ((c === "+" || c === "-") && d === c) { prev = prev === "operand" ? "operand" : "operator"; i += 2; control = false; continue; } // (postfix after an operand)
     if (c === "\n") line++;
     if (/\s/.test(c)) { i++; continue; }
+    // (a non-ASCII character in code: an identifier this lexer doesn't tokenize, so it can't judge a slash after it)
+    if (c.charCodeAt(0) > 0x7f) { problems.push(`line ${line}: a non-ASCII character in code (${JSON.stringify(c)}): not tokenized, so the scan fails closed`); break; }
     if (c === "(") { parens.push(control); prev = "operator"; }
     else if (c === ")") prev = parens.pop() ? "operator" : "operand";
     else if (c === "]") prev = "operand";
@@ -151,8 +162,8 @@ function jsdocTypes(text: string): string[] {
 }
 const reasonOf = (s: string) => /[A-Za-z]{3,}/.test(s.replace(/\*\/\s*$/, "").replace(/^[\s*]*$/gm, ""));
 
-export function hatches(src: string): Scan {
-  const { list, problems } = comments(src);
+export function hatches(src: string, opts: { everySlashRegex?: boolean } = {}): Scan {
+  const { list, problems } = comments(src, opts);
   const findings: Finding[] = [];
   for (const c of list) {
     for (const [kind, re] of [["ts-nocheck", /@ts-nocheck\b/], ["ts-ignore", /@ts-ignore\b/]] as [Kind, RegExp][])
