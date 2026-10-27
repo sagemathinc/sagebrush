@@ -149,8 +149,10 @@
   #sharedlg .sharebar button { font-size: 12px; }
   #shareupload.busy::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sbspin .8s linear infinite; vertical-align: -1px; }
   @keyframes sbspin { to { transform: rotate(360deg); } }
-  /* (an always-present live region: its text is the check's state, so both its start and its end are announced) */
+  /* (an always-present live region: "Checking…" once the dialog is open, then the check's outcome, which the
+     notes around it already show, so it is kept for screen readers only) */
   #sharechecking:empty { margin: 0; }
+  #sharechecking[data-state="done"] { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   @media (prefers-reduced-motion: reduce) { #shareupload.busy::before { animation: none; border: 0; border-radius: 0; width: auto; height: auto; content: "…"; } }
   #sharedlg .result { overflow-wrap: anywhere; font-size: 13px; }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
@@ -1507,22 +1509,31 @@ $("#sharelink").onclick = async () => { if (shareDialog.busy) return; await copy
 // (each open's number: an open whose check ends after the dialog was closed, or opened again, stops there)
 let shareOpens = 0;
 // (the page's first document, opened: until then Share waits, as that open closes the dialog of no document)
-let booted;
-const bootDone = new Promise((r) => (booted = r));
+let booted, isBooted = false;
+const bootDone = new Promise((r) => (booted = () => { isBooted = true; r(); }));
 async function openShare() {
   // (while uploading, Share only shows the dialog again, with the upload's own state: UI-B1)
   if (shareDialog.busy) return void shareDialog.open();
   const t = ++shareOpens;
-  // (bounded: a first open that failed doesn't keep Share from opening)
-  await Promise.race([bootDone, new Promise((r) => setTimeout(r, 10_000))]);
+  // (the page's first document still opening: said in the status line, bounded at 10 s)
+  if (!isBooted) {
+    const note = "Share opens once this notebook has loaded…";
+    statusEl.textContent = note;
+    await Promise.race([bootDone, new Promise((r) => setTimeout(r, 10_000))]);
+    if (statusEl.textContent === note) statusEl.textContent = "";
+  }
   while (switched) await switched;
   if (t !== shareOpens) return;
   if (!LOCAL) {
     // (the dialog at once, its link usable, while the check runs: up to 10 s, #207 board's note 1)
     $("#shareup").hidden = false;
-    $("#sharechecking").textContent = "Checking your sign-in…";
+    // (empty while the dialog opens; "Checking…" on the next frame, once it is shown, so it is announced)
+    const checking = $("#sharechecking");
+    checking.textContent = "";
+    checking.dataset.state = "checking";
     for (const id of ["#sharesignin", "#shareunreachable", "#shareform"]) $(id).hidden = true;
     if (!shareDlg.open) shareDlg.showModal();
+    requestAnimationFrame(() => { if (t === shareOpens && checking.dataset.state === "checking") checking.textContent = "Checking your sign-in…"; });
     // (the page's first check, still running when this open began, is this open's answer: not asked twice)
     const first = !shareKnown;
     await shareReady;
@@ -1531,9 +1542,12 @@ async function openShare() {
     const s = first ? sharing : await shareStatus();
     if (t !== shareOpens || !shareDlg.open) return;
     if (!(s.enabled === false && s.error && sharing.enabled)) sharing = s;
-    $("#sharechecking").textContent = "";
   }
   const me = sharing.enabled ? sharing.me : null;
+  // (the check's outcome, announced: a removed text isn't)
+  const live = $("#sharechecking");
+  live.dataset.state = "done";
+  live.textContent = me ? "Signed in: choose what to upload." : sharing.enabled ? "Sign in with CoCalc to upload." : sharing.error ? "Couldn't reach the server to check your sign-in." : "Uploading isn't available on this site.";
   // (a site without the share API, known for sure: no Upload section at all, #207 board's note 2)
   $("#shareup").hidden = sharing.enabled === false && !sharing.error;
   // (no answer at all, and nothing known: neither "sign in" nor the form, but why)
@@ -2698,7 +2712,8 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     const st = await TAURI.core.invoke("selftest_file");
     if (st) selftest(st);
   }
-})();
+  // (however the start ends, an error included, Share stops waiting for it)
+})().finally(() => booted());
 
 </script>
 </body>
