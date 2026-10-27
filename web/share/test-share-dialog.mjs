@@ -94,13 +94,16 @@ async function openDialog({ wait = true } = {}) {
 const closeDialog = () => ev("document.querySelector('#sharedlg').close()");
 // (the "checking" live region's every change, with whether the dialog was open then: what a screen reader would hear)
 // (recorded as each text is set, synchronously: a MutationObserver would see the dialog as it is a task later)
-const RECORD_LIVE = "(() => { const el = document.querySelector('#sharechecking'), d = document.querySelector('#sharedlg'); const desc = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent'); window.__live = []; Object.defineProperty(el, 'textContent', { configurable: true, get() { return desc.get.call(this); }, set(v) { window.__live.push({ text: String(v), open: d.open }); desc.set.call(this, v); } }); })()";
+// (and how many frames the dialog had rendered since showModal: a frame counter started by showModal itself, its
+// first callback running before the first frame's drawing, so `rendered` is the callbacks seen minus one)
+const RECORD_LIVE = "(() => { const el = document.querySelector('#sharechecking'), d = document.querySelector('#sharedlg'); const desc = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent'); window.__live = []; let frames = 0, gen = 0; const sm = HTMLDialogElement.prototype.showModal; HTMLDialogElement.prototype.showModal = function () { const r = sm.call(this); if (this === d) { frames = 0; const g = ++gen; const tick = () => { if (g !== gen) return; frames++; if (d.open) requestAnimationFrame(tick); }; requestAnimationFrame(tick); } return r; }; Object.defineProperty(el, 'textContent', { configurable: true, get() { return desc.get.call(this); }, set(v) { window.__live.push({ text: String(v), open: d.open, rendered: Math.max(0, frames - 1) }); desc.set.call(this, v); } }); })()";
 // (said in order: "Checking…" only once the dialog is shown, then the outcome, which is never removed; a check
 // that answers before the next frame may go straight to the outcome, so "Checking…" is required only for slow ones)
 const liveOrder = (seq, outcome, slow = true) => {
   const said = seq.filter((x) => x.text).map((x) => x.text);
   const order = slow ? said.length === 2 && said[0] === "Checking your sign-in…" : said.length === 1 || (said.length === 2 && said[0] === "Checking your sign-in…");
-  return seq.every((x) => !/Checking/.test(x.text) || x.open) && order && said.at(-1) === outcome && seq.at(-1)?.text === outcome;
+  // (and nothing said before the dialog has been drawn at least once: board's r4b HOLD 1)
+  return seq.every((x) => !/Checking/.test(x.text) || x.open) && seq.every((x) => !x.text || x.rendered >= 1) && order && said.at(-1) === outcome && seq.at(-1)?.text === outcome;
 };
 // A held stand-in for the analysis worker: messages to the page wait until released.
 const HOLD = `(() => {
