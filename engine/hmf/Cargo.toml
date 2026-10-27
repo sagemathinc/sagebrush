@@ -10,10 +10,10 @@ exclude = ["tests/lmfdb*", "tests/fixtures/lmfdb*"]
 
 [features]
 default = ["parallel"]
-parallel = ["dep:rayon"]
+parallel = ["sagebrush-par/parallel"]
 
 [dependencies]
-rayon = { version = "1.10", optional = true }
+sagebrush-par = { path = "../par" }
 sagebrush-arith = { path = "../arith" }
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-poly = { path = "../poly" }
