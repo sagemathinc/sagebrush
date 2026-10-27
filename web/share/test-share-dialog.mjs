@@ -419,12 +419,26 @@ try {
     await q.ev(RECORD_LIVE);
     const t0 = Date.now();
     await q.ev("document.querySelector('#sharemenu').click()");
-    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking'", 12000).catch(() => {});
+    // (until the outcome is said, not only decided: an answer before the dialog's first frame sets the state at once
+    // and says the outcome once the dialog has been drawn, up to two frames or 50 ms later)
+    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking' && !!document.querySelector('#sharechecking').textContent", 12000).catch(() => {});
     const seq503 = await q.ev("window.__live");
     ok(liveOrder(seq503, "Couldn't reach the server to check your sign-in.", false), "the live region, no answer (at once): 'Checking…' (the dialog open), then 'Couldn't reach the server…', kept: " + JSON.stringify(seq503));
     // (the end state, apart from the stub: the stubbed 503's check ends within its 10 s bound)
     ok(Date.now() - t0 < 11000 && (await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking'")), `(the check ends: ${Date.now() - t0} ms) ` + (await st()));
     ok(await q.ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareup').hidden && !document.querySelector('#shareunreachable').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "nothing known and the check fails again: the dialog says why, with neither 'Sign in' nor the form: " + (await st()));
+    await q.ev("document.querySelector('#sharedlg').close()");
+    // (frames that stop after the first one, as in a tab hidden just then: the outcome is still said, within the
+    // page's 1 s fallback; at 91556f97 the first frame turned that fallback off and nothing was ever said)
+    await q.ev("(() => { const r = window.requestAnimationFrame; window.__raf = r; let armed = false, stopped = false; window.requestAnimationFrame = (cb) => r((ts) => { if (stopped) return; if (!armed) { armed = true; setTimeout(() => (stopped = true), 0); } cb(ts); }); })()");
+    await q.ev(RECORD_LIVE);
+    const t1 = Date.now();
+    await q.ev("document.querySelector('#sharemenu').click()");
+    await q.until("document.querySelector('#sharedlg').open && !!document.querySelector('#sharechecking').textContent", 5000).catch(() => {});
+    const seqStop = await q.ev("window.__live");
+    const saidStop = seqStop.filter((x) => x.text).map((x) => x.text);
+    ok(saidStop.at(-1) === "Couldn't reach the server to check your sign-in." && seqStop.every((x) => !x.text || x.open) && Date.now() - t1 < 3000, `the live region, frames stopped after the first: the outcome still said, within ${Date.now() - t1} ms: ` + JSON.stringify(seqStop));
+    await q.ev("window.requestAnimationFrame = window.__raf");
     await q.ev("document.querySelector('#sharedlg').close()");
     // (set before this open's own check, which reads it when it asks)
     await q.ev("window.__me = 404");
