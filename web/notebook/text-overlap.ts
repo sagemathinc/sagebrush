@@ -13,11 +13,11 @@
 // The same hunk on both sides (the same edit) doesn't overlap.  The decision is symmetric in `a` and `b`.
 //
 // The work is counted in (base lines × side lines) of each diff's middle, and charged to the caller's ledger
-// before the diff's table is made; a diff past TEXT_DIFF_PRODUCT, or past what the ledger has left, isn't made:
+// before the diff's table is made; a diff past TEXT_DIFF_PRODUCT_LIMIT, or past what the ledger has left, isn't made:
 // "exhausted", which the caller takes as a clash (or a refused merge), never as a guess.
 
 /** One diff's largest table, in (base lines × side lines): patchflow's MAX_DIFF_PRODUCT. */
-export const TEXT_DIFF_PRODUCT = 4_000_000;
+export const TEXT_DIFF_PRODUCT_LIMIT = 4_000_000;
 
 export type Ledger = { left: number };
 type Hunk = { from: number; to: number; ins: string };
@@ -29,16 +29,20 @@ export function textOverlap(base: string, a: string, b: string, ledger: Ledger):
   return c === "exhausted" ? c : c.overlap;
 }
 
-/** `a` and `b` merged against `base` when their edits don't overlap: both sides' hunks applied to the base's
- * lines (the same hunk once), so nothing of either is lost; false when they overlap; "exhausted" past the work
- * bound. */
-export function lineMerge3(base: string, a: string, b: string, ledger: Ledger): string | false | "exhausted" {
-  if (a === b) return a;
-  if (a === base) return b;
-  if (b === base) return a;
+/** lineMerge3's answer, tagged: a merged text can be any string, "exhausted" included, so it is never confused
+ * with a refusal (astra's HOLD on #197). */
+export type LineMerge = { text: string } | { overlap: true } | { exhausted: true };
+
+/** `a` and `b` merged against `base` when their edits don't overlap: {text}, both sides' hunks applied to the
+ * base's lines (the same hunk once), so nothing of either is lost; {overlap: true} when they overlap;
+ * {exhausted: true} past the work bound. */
+export function lineMerge3(base: string, a: string, b: string, ledger: Ledger): LineMerge {
+  if (a === b) return { text: a };
+  if (a === base) return { text: b };
+  if (b === base) return { text: a };
   const c = changes(base, a, b, ledger);
-  if (c === "exhausted") return c;
-  if (c.overlap) return false;
+  if (c === "exhausted") return { exhausted: true };
+  if (c.overlap) return { overlap: true };
   const L0 = lines(base);
   const all = [...c.ha, ...c.hb.filter((y) => !c.ha.some((x) => sameHunk(x, y)))].sort((x, y) => x.from - y.from || x.to - y.to);
   let out = "", at = 0;
@@ -46,7 +50,7 @@ export function lineMerge3(base: string, a: string, b: string, ledger: Ledger): 
     out += L0.slice(at, h.from).join("") + h.ins;
     at = h.to;
   }
-  return out + L0.slice(at).join("");
+  return { text: out + L0.slice(at).join("") };
 }
 
 function changes(base: string, a: string, b: string, ledger: Ledger): { overlap: boolean; ha: Hunk[]; hb: Hunk[] } | "exhausted" {
@@ -74,7 +78,7 @@ function lines(t: string): string[] {
   return t === "" ? [] : (t.match(/[^\n]*\n|[^\n]+$/g) as string[]);
 }
 
-// The changes from `L0` to `L1` as hunks, in order; "exhausted" if the middle's table is past TEXT_DIFF_PRODUCT
+// The changes from `L0` to `L1` as hunks, in order; "exhausted" if the middle's table is past TEXT_DIFF_PRODUCT_LIMIT
 // or past what the ledger has left (charged before it is made).
 function hunks(L0: string[], L1: string[], ledger: Ledger): Hunk[] | "exhausted" {
   let p = 0;
@@ -87,7 +91,7 @@ function hunks(L0: string[], L1: string[], ledger: Ledger): Hunk[] | "exhausted"
   // (one side empty: the whole middle replaced, no table)
   if (n === 0 || m === 0) return [{ from: p, to: p + n, ins: Y.join("") }];
   const work = n * m;
-  if (work > TEXT_DIFF_PRODUCT || work > ledger.left) return "exhausted";
+  if (work > TEXT_DIFF_PRODUCT_LIMIT || work > ledger.left) return "exhausted";
   ledger.left -= work;
   // (lcs[i][j]: the longest common subsequence of X[i..] and Y[j..])
   const lcs = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
