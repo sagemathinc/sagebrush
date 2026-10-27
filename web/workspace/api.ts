@@ -24,7 +24,7 @@
 //
 // There is no verb that empties Trash or removes contents for good: only a
 // person does that, from the file browser (§2.4, §8.2).
-import { inTx, req, hex, openWorkspaceDb, WS_DB, type OpenInfo } from "./db";
+import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInfo } from "./db";
 import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeLocal, writeOpfs, type Held, type Place, type ResetKind, type State, type Witness } from "./witness";
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
 import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE } from "../notebook/stores.js";
@@ -253,7 +253,15 @@ function foldersAbove(p: string): string[] {
   return out;
 }
 const BYTE_STORES = new Set(["fileBytes", "versionBytes", "trash", "files"]);
-const META_KEPT = new Set(["device", "identity", "resetting", "opsFloor", "purgeMain", "purgeLocal", "fenceStep", "fenceBlocked"]);
+// (`journal`: a reset keeps the journal's activation, which is one way (plan-sync-slice2-client r4 §1a))
+const META_KEPT = new Set(["device", "identity", "resetting", "opsFloor", "purgeMain", "purgeLocal", "fenceStep", "fenceBlocked", "journal"]);
+/** The notebooks' fence record's counters of their unjournaled entries (plan-sync-slice2-client r4 §2.1, 2c-1d):
+ * kept by every write of the fence. */
+export const FENCE_COUNTERS = ["unjournaledBytes", "unjournaledCount"] as const;
+/** Tests' hooks: `afterFence`, called after each store's fence is written, stops the write of the fences there if
+ * it throws, as a tab closed at that point would; `unopened` takes a store's database as one that couldn't be
+ * opened. */
+export const JOURNAL_HOOK: { afterFence?: (db: string) => void; unopened?: (db: string) => boolean } = {};
 /** Records deleted per transaction by a reset's cleanup (daybreak2's L2 on 2a4e53a8: never one transaction
  * over the whole workspace). */
 export const RESET_PAGE = 500;
@@ -407,8 +415,10 @@ export class Workspace {
   }
   /** The workspace's fence in the notebooks' store and their history's (notebook/stores.js FENCE): its identity,
    * and whether it is quarantined or being reset, which every notebook and history write checks in its own
-   * transaction.  Written at every open and every change of state, so it always says what meta says. */
-  async writeFence() {
+   * transaction.  Written at every open and every change of state, so it always says what meta says.
+   * Once the journal's activation has begun (meta's `journal`), each says "journal" where it would say "ok"
+   * (plan-sync-slice2-client r4 §1a). */
+  async writeFence(again = false) {
     // (called holding the lock, which orders writes within a generation; a fence is never replaced by an earlier
     // generation's, compared in the same transaction, so a stale tab can't put an older one back; one that can't
     // be written is never deleted (its absence would read as a database the workspace never had): its database is
@@ -417,9 +427,11 @@ export class Workspace {
     const s = this.durability.state;
     const phase = s === "confirmed" || s === "suspected" ? "quarantined" : s === "resetting" ? "resetting" : s === "purging" ? "purging" : "ok";
     // (a tab whose identity meta no longer holds (a reset elsewhere, carried on here or not) writes nothing)
+    let jm: JournalState | undefined;
     const step = await inTx(this.ws, "meta", "readwrite", async (tx) => {
       const st = tx.objectStore("meta"), id = (await req(st.get("identity"))) as Identity | undefined;
       if (id && (id.workspace !== this.identity.workspace || id.generation !== this.identity.generation)) return null;
+      jm = (await req(st.get("journal"))) as JournalState | undefined;
       const n = (((await req(st.get("fenceStep"))) as number | undefined) ?? 0) + 1;
       st.put(n, "fenceStep");
       return n;
@@ -427,7 +439,15 @@ export class Workspace {
     if (step === null) return;
     // (the workspace's database named in it: the authority each write confirms, notebook/stores.js)
     const fence = { workspace: this.identity.workspace, generation: this.identity.generation, step, phase, primary: this.ws.name };
-    const put = (db: IDBDatabase, store: string, key: IDBValidKey, rec: unknown, cur: (v: any) => any) => new Promise<void>((ok, no) => {
+    // (the journal's activation (§1a), one way: from its first write on, a store's fence says "journal" where it
+    // would say "ok", which every writer of before the journal refuses, and carries the mark `journal: 1`, which
+    // no later write takes off, a reset's, a quarantine's or an ordinary refresh's alike.  A store's counters of
+    // its unjournaled entries (2c-1d) are kept as they are: only the journal's writes change them)
+    const journaling = jm?.active === true || jm?.activating === true;
+    const fenceFor = (was: any) => (journaling || was?.journal === 1 ? { ...fence, phase: phase === "ok" ? "journal" : phase, journal: 1 } : fence);
+    const kept = (was: any) => Object.fromEntries(FENCE_COUNTERS.filter((k) => was && typeof was === "object" && k in was).map((k) => [k, was[k]]));
+    let marked = false, written = 0;
+    const put = (db: IDBDatabase, store: string, key: IDBValidKey, rec: (f: object, was: any) => unknown, cur: (v: any) => any) => new Promise<void>((ok, no) => {
       const tx = db.transaction(store, "readwrite"), st = tx.objectStore(store), g = st.get(key);
       // (never replaced by an earlier generation's: a tab left over from before a reset can't put its fence back;
       // within a generation every write holds the workspace's lock, which orders them.  One of a later generation
@@ -437,7 +457,8 @@ export class Workspace {
       g.onsuccess = () => {
         const c = cur(g.result);
         if (typeof c?.generation === "number" && c.generation > fence.generation) { skipped = c; return; }
-        try { st.put(rec); } catch (e) { tx.abort(); no(e); }
+        if (c?.journal === 1) marked = true;
+        try { st.put(rec(fenceFor(c), g.result)); } catch (e) { tx.abort(); no(e); }
       };
       tx.oncomplete = () => (skipped ? no(new Error(`a fence of a later generation is there: ${JSON.stringify(skipped)}`)) : ok());
       tx.onerror = () => no(tx.error);
@@ -448,22 +469,58 @@ export class Workspace {
     // write to it reads first (notebook/stores.js), so its writes are refused until a later write succeeds; a
     // fence is never deleted.  meta itself refusing the mark fails the open)
     const blocked: string[] = [];
-    const fenceIn = async (db: IDBDatabase | null, store: string, key: IDBValidKey, rec: unknown, cur: (v: any) => any) => {
-      if (!db) return;
+    const fenceIn = async (db: IDBDatabase | null, store: string, key: IDBValidKey, rec: (f: object, was: any) => unknown, cur: (v: any) => any) => {
+      if (!db || JOURNAL_HOOK.unopened?.(db.name)) return;
       try {
         await put(db, store, key, rec, cur);
       } catch (e) {
         console.warn(`workspace fence (${db.name}):`, e);
         blocked.push(db.name);
+        return;
       }
+      written++;
+      JOURNAL_HOOK.afterFence?.(db.name);
     };
-    await fenceIn(this.main, "notebooks", FENCE, { id: FENCE, ...fence }, (v) => v);
+    await fenceIn(this.main, "notebooks", FENCE, (f, was) => ({ ...kept(was), id: FENCE, ...f }), (v) => v);
     try { this.hdb ??= await openHistoryDb(); } catch {}
-    await fenceIn(this.hdb, "history", [FENCE, ""], { nb: FENCE, time: "", fence }, (v) => v?.fence);
+    await fenceIn(this.hdb, "history", [FENCE, ""], (f, was) => ({ ...kept(was), nb: FENCE, time: "", fence: f }), (v) => v?.fence);
     try { this.bhdb ??= await openBoardHistoryDb(); } catch {}
-    await fenceIn(this.bhdb, "history", [FENCE, ""], { nb: FENCE, time: "", fence }, (v) => v?.fence);
+    await fenceIn(this.bhdb, "history", [FENCE, ""], (f, was) => ({ ...kept(was), nb: FENCE, time: "", fence: f }), (v) => v?.fence);
     this.fenceBlocked = blocked;
-    await inTx(this.ws, "meta", "readwrite", async (tx) => { if (blocked.length) tx.objectStore("meta").put(blocked, "fenceBlocked"); else tx.objectStore("meta").delete("fenceBlocked"); });
+    // (activation's last barrier, `active`, only once all three fences say "journal": none missing or blocked, the
+    // workspace neither quarantined nor being reset; until then it stays begun, and the next write of the fences,
+    // at the next open if this tab is gone, carries it on.  A store's mark where meta records no activation (meta's
+    // is activation's first write, and a reset keeps it, so only a workspace database lost while the editors'
+    // stores were kept) is an activation begun, as it can't go back: recorded, and one more pass makes it whole)
+    const done = journaling && phase === "ok" && !blocked.length && written === 3;
+    const adopt = !journaling && marked;
+    await inTx(this.ws, "meta", "readwrite", async (tx) => {
+      const st = tx.objectStore("meta");
+      if (blocked.length) st.put(blocked, "fenceBlocked"); else st.delete("fenceBlocked");
+      if (done && jm?.active !== true) st.put({ v: 1, active: true } satisfies JournalState, "journal");
+      if (adopt) st.put({ v: 1, active: false, activating: true } satisfies JournalState, "journal");
+    });
+    if (adopt && !again) await this.writeFence(true);
+  }
+  /** The journal's activation on this device (plan-sync-slice2-client r4 §1a): begun in meta, then every fence
+   * written to say "journal", then `active`, all under the workspace's lock.  One way: nothing turns it off.  A
+   * stop at any step (the tab closed, a fence that can't be written) leaves it begun, and the next write of the
+   * fences carries it on.  Refused while the workspace is quarantined.  Resolves whether it is active. */
+  async activateJournal(): Promise<boolean> {
+    return this.locked(async () => {
+      await inTx(this.ws, "meta", "readwrite", async (tx) => {
+        const st = tx.objectStore("meta"), j = (await req(st.get("journal"))) as JournalState | undefined;
+        if (j?.active !== true) st.put({ v: 1, active: false, activating: true } satisfies JournalState, "journal");
+      });
+      await this.writeFence();
+      return this.journalActive();
+    }, undefined, { quiet: true });
+  }
+  /** Whether this device's journal is active: every fence says "journal" (§1a).  Neither the journal's writers
+   * nor its sender start before. */
+  async journalActive(): Promise<boolean> {
+    const j = await inTx(this.ws, "meta", "readonly", async (tx) => (await req(tx.objectStore("meta").get("journal"))) as JournalState | undefined);
+    return j?.active === true;
   }
   /** The latest generation any of the editors' stores' fences names (0 if none). */
   private async fencesUpTo(): Promise<number> {

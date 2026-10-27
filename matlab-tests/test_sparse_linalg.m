@@ -80,6 +80,26 @@ show(r(full(R \ C)));
 A = [1 2; 3 4; 5 6];
 [Q, R] = qr(A, 0); show(size(Q)); show(size(R)); show(r(abs(R)));
 [Q, R] = qr(A, 'econ'); show(size(Q)); show(size(R));
+% the sparse LU in a fill-reducing column order (n > 4000, neither diagonal nor
+% banded): a permuted 2-D Laplacian, the cross (tridiagonal plus the
+% antidiagonal) and a complex arrow; logicals only: the backward error
+% norm(A*x - b, 1) / (norm(A, 1) norm(x, 1) + norm(b, 1)) under 64 n eps
+be = @(A, x, b) norm(A * x - b, 1) / (norm(A, 1) * norm(x, 1) + norm(b, 1));
+k = 70; n = k * k; e = ones(k, 1);
+T = spdiags([-e 2 * e -e], -1:1, k, k);
+L2 = kron(speye(k), T) + kron(T, speye(k));
+p = mod((0:n - 1) * 1999, n) + 1;
+A = L2(p, p); b = (1:n)' / n;
+x = A \ b;
+show(issparse(x)); show(size(x)); show(be(A, x, b) < 64 * n * eps);
+B = [b, 2 * b, ones(n, 1)]; X = A \ B;
+show(size(X)); show(be(A, X(:, 1), B(:, 1)) < 64 * n * eps); show(be(A, X(:, 3), B(:, 3)) < 64 * n * eps);
+y = A' \ b; show(be(A', y, b) < 64 * n * eps);
+n = 5000; e = ones(n, 1);
+C = spdiags([-e 4 * e -e], -1:1, n, n) + 0.5 * sparse(1:n, n:-1:1, 1, n, n);
+x = C \ e; show(be(C, x, e) < 64 * n * eps);
+Z = sparse([1:n, n * ones(1, n - 1), 1:n - 1], [1:n, 1:n - 1, n * ones(1, n - 1)], [(4 + 1i) * ones(1, n), ones(1, n - 1), 1i * ones(1, n - 1)], n, n);
+x = Z \ e; show(isreal(x)); show(be(Z, x, e) < 64 * n * eps);
 function sp(x)
 fprintf('sparse=%d ', issparse(x));
 show(full(x));

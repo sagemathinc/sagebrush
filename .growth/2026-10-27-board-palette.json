@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Board dark mode step 1 (#203, plan-board-dark r2): board.css's colors as custom properties and the canvas palette (palette.ts); cli/pyjs.cjs carries the board page. The size-gate's measured row on the exact head ff75e798 (ci 40491075040, job 122146769769): cli/pyjs.cjs 28900944 -> 28903819, +2875; nothing else grew",
+ "bytes": {
+  "cli/pyjs.cjs": 2875
+ }
+}

@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Stop wakes a time.sleep (#135): the web runner's Stop notifies the interrupt word after setting bit 0, as Ctrl-C does",
- "bytes": {
-  "engine/runner/index.html": 148
- }
-}

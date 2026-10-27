@@ -18,7 +18,10 @@ every guard's refusal, whose attributes stay stable: what, need_bytes and
 limit_bytes (exact; limit_bytes is the guard's enforced allowance for this
 operation, never the process's free memory), allowance_for, and record,
 partial and checkpoint (None unless given; the estimates' memory stops set
-them, PR 5b / GB-6), and fixed (whether the limit is fixed).  A guard computes its need before anything is
+them, PR 5b / GB-6), fixed (whether the limit is fixed), and unmeasured
+(None, or why the memory available could not be measured: then there is no
+allowance to compare against, and the guard refuses rather than guess;
+plan-matlab-nocliffs r6 section 2.2).  A guard computes its need before anything is
 allocated and keeps its own admission predicate: this module only words
 the refusal.
 
@@ -47,7 +50,7 @@ class SagebrushMemoryError(MemoryError):
     """
 
     def __init__(self, text, what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None,
-                 fixed=False):
+                 fixed=False, unmeasured=None):
         MemoryError.__init__(self, text)
         self.what = what
         self.need_bytes = need_bytes
@@ -57,6 +60,7 @@ class SagebrushMemoryError(MemoryError):
         self.partial = partial
         self.checkpoint = checkpoint
         self.fixed = fixed
+        self.unmeasured = unmeasured
 
 
 # The wording (William, Oct 24 2026; plan-d-memory-message r3 section 1c,
@@ -67,6 +71,9 @@ TEXT = {
     "need": "%(what)s needs about %(need)s, but Sagebrush allows about %(limit)s for %(allowance_for)s here.",
     # (an allowance of nothing: D0's reserve can leave a guard none)
     "need_none": "%(what)s needs about %(need)s, but Sagebrush allows almost no memory for %(allowance_for)s here.",
+    # (no allowance at all: the memory available could not be measured, so
+    # the guard refuses rather than guess; plan-matlab-nocliffs r6 section 2.2)
+    "need_unmeasured": "%(what)s needs about %(need)s, but Sagebrush can't measure the memory available here (%(reason)s), so it doesn't start it.",
     # (a fixed limit, the same with any memory: no route to more memory,
     # which wouldn't help; astra's PR114-SEM-1)
     "fixed_title": "This computation is larger than Sagebrush allows.",
@@ -109,7 +116,14 @@ def where():
     """
     if getattr(getattr(_sys, "implementation", None), "name", "") == "cpython":
         return "package"
-    return "cli" if hasattr(_sys, "_sagebrush_heap_used") else "browser"
+    # (the engine's own host, decided once at its start: an attribute such
+    # as sys._sagebrush_heap_used exists on every pyjs host)
+    try:
+        import _sbengine
+        host = _sbengine.js_host()
+    except Exception:
+        host = None
+    return "browser" if host == "browser" else "cli"
 
 
 _UNITS = ((10 ** 9, "GB"), (10 ** 6, "MB"), (10 ** 3, "kB"), (1, "bytes"))
@@ -166,10 +180,12 @@ def sizes(need_bytes, limit_bytes):
     return "%d bytes" % need_bytes, "%d bytes" % limit_bytes
 
 
-def message(what, need_bytes, limit_bytes, allowance_for, host=None, fixed=False):
+def message(what, need_bytes, limit_bytes, allowance_for, host=None, fixed=False, unmeasured=None):
     """The guard's text (TEXT): the title, what needs how much against the
     allowance, and the routes to more memory where Sagebrush runs; for a
-    fixed limit (fixed), that limit, and that more memory won't help.
+    fixed limit (fixed), that limit, and that more memory won't help; when
+    the memory available could not be measured (unmeasured, the reason),
+    that, in place of the allowance.
 
     EXAMPLES::
 
@@ -188,8 +204,13 @@ def message(what, need_bytes, limit_bytes, allowance_for, host=None, fixed=False
         A 100000 x 100000 matrix needs about 80 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix.
         This limit is the same whatever memory there is: more memory or a larger
         machine won't help.
+        sage: print(message("A sparse LU factorization", 10**6, 0, "one solve", "cli", unmeasured="no memory figure").splitlines()[1])
+        A sparse LU factorization needs about 1.0 MB, but Sagebrush can't measure the memory available here (no memory figure), so it doesn't start it.
     """
     need, limit = sizes(need_bytes, limit_bytes)
+    if unmeasured is not None:
+        fill = {"what": what, "need": need, "reason": unmeasured}
+        return "\n".join([TEXT["title"], TEXT["need_unmeasured"] % fill, TEXT[host or where()]])
     fill = {"what": what, "need": need, "limit": limit, "allowance_for": allowance_for}
     if fixed:
         return "\n".join([TEXT["fixed_title"], TEXT["fixed_need"] % fill, TEXT["fixed"]])
@@ -197,12 +218,15 @@ def message(what, need_bytes, limit_bytes, allowance_for, host=None, fixed=False
     return "\n".join([TEXT["title"], line % fill, TEXT[host or where()]])
 
 
-def memory_guard(what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None, fixed=False):
+def memory_guard(what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None, fixed=False,
+                 unmeasured=None):
     """The refusal of a memory guard, to raise: a SagebrushMemoryError with
     the message and the exact figures.  what is the operation in the
     user's words (capitalized: "A 20000 x 20000 matrix over GF(7)"),
     allowance_for what the allowance is for ("one matrix"); fixed for a
-    limit that is the same whatever memory there is.
+    limit that is the same whatever memory there is; unmeasured (a reason,
+    such as "no memory figure") when the memory available could not be
+    measured, so there is no allowance (limit_bytes is then 0).
 
     EXAMPLES::
 
@@ -218,8 +242,11 @@ def memory_guard(what, need_bytes, limit_bytes, allowance_for, record=None, part
         True
         sage: e.fixed, memory_guard("X", 2, 1, "y", fixed=True).fixed
         (False, True)
+        sage: u = memory_guard("X", 2, 0, "y", record={"bytes": None}, unmeasured="no memory figure")
+        sage: u.unmeasured, u.limit_bytes, u.record, e.unmeasured
+        ('no memory figure', 0, {'bytes': None}, None)
     """
     need_bytes, limit_bytes = int(need_bytes), int(limit_bytes)
     fixed = bool(fixed)
-    return SagebrushMemoryError(message(what, need_bytes, limit_bytes, allowance_for, fixed=fixed), what, need_bytes,
-                                limit_bytes, allowance_for, record, partial, checkpoint, fixed)
+    return SagebrushMemoryError(message(what, need_bytes, limit_bytes, allowance_for, fixed=fixed, unmeasured=unmeasured), what,
+                                need_bytes, limit_bytes, allowance_for, record, partial, checkpoint, fixed, unmeasured)

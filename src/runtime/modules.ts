@@ -28,6 +28,18 @@ export function builtinModuleNames(): string[] {
   return Object.keys(factories).filter((n) => !n.startsWith("_"));
 }
 
+// The modules the runtime puts in sys.modules itself, never found on sys.path: builtins (below) and
+// __main__ (the namespace code runs in, its driver's).  importModule answers from sys.modules first.
+export const SEEDED_MODULES: readonly string[] = ["builtins", "__main__"];
+/**
+ * Every name an import resolves to without sys.path: the builtin (JavaScript) modules, the runtime's
+ * own (_fs, ...) too, and the ones it seeds in sys.modules (#172 r2's review, PY-172-1).  Not the live
+ * sys.modules, which also holds the workspace modules a session has imported.
+ */
+export function resolvedModuleNames(): string[] {
+  return [...new Set([...Object.keys(factories), ...SEEDED_MODULES])];
+}
+
 /** Is `name` a builtin (JavaScript) module, public or the runtime's own? (src/pkgset.ts reserves these names.) */
 export function isBuiltinModule(name: string): boolean {
   return Object.hasOwn(factories, name);
@@ -396,6 +408,19 @@ newBuiltinModule("sys", (m) => {
       return null;
     }
   }, "_sagebrush_heap_used");
+  // the external memory now (ArrayBuffer backing stores: bytes, typed arrays), in bytes, read
+  // without a collection of its own: right after _sagebrush_heap_used() (its full collection),
+  // the two are the live total (the interrupt matrix's leak measure, web/test-interrupt-matrix.mjs).
+  // None where the host has neither figure (the browser, Bun, Deno)
+  m._sagebrush_heap_external = builtin(() => {
+    try {
+      const v8 = (globalThis as any).process.getBuiltinModule("node:v8");
+      const n = v8.getHeapStatistics().external_memory;
+      return typeof n === "number" && n >= 0 ? Math.floor(n) : null;
+    } catch {
+      return null;
+    }
+  }, "_sagebrush_heap_external");
   // the function catalog the CLI bundle carries (scripts/build-cli.mjs,
   // catalog.gen.js: JSON text), for lib/_catalog.py away from a source tree;
   // None in the browser, whose search reads the built indexes

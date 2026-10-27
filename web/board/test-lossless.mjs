@@ -4,7 +4,6 @@
 // that collides; the bytes written are exactly the board; and a board that can't come back is said so.
 //   bun web/board/test-lossless.mjs
 import { readFileSync, readdirSync } from "node:fs";
-import { mergeStrings3 } from "patchflow";
 import { editRecords, fromEditRecords, roundTrips, givePageIds, serialize, bytesAre, firstDifference } from "./lossless.ts";
 import { boardMerge3, keyOf } from "./merge.ts";
 
@@ -34,7 +33,7 @@ for (const name of ["__proto__", "constructor", "toString"]) {
   const d = JSON.parse(`{"format":"sagebrush-board","version":1,"nodes":[{"id":"n","text":"old","x":0,${JSON.stringify(name)}:{"keep":true}}],"edges":[]}`);
   const base = editRecords(d);
   const a = base.map((r) => (r.type === "item" ? { ...r, x: 1 } : r)), b = base.map((r) => (r.type === "item" ? { ...r, text: "new" } : r));
-  const r = boardMerge3(base, a, b, { mergeStrings3, work: 1e9 });
+  const r = boardMerge3(base, a, b, { work: 1e9 });
   const back = JSON.parse(serialize(fromEditRecords(r.records)));
   const n = back.nodes[0];
   check(Object.hasOwn(n, name) && JSON.stringify(n[name]) === '{"keep":true}' && n.x === 1 && n.text === "new" && r.reports.length === 0, `${name} in a node: kept through a merge and the bytes written`);
@@ -92,12 +91,12 @@ check(roundTrips(B({ nodes: [{ id: "g", kind: "group", children: [{ id: "c", tex
 
 // ---- a merge's result, through the file
 {
-  const base = B({ nodes: [{ id: "n", text: "hello world", custom: 1 }], tools: ["note"], edges: [{ from: "n", to: "n", id: "loop" }] });
-  const a = { ...base, nodes: [{ id: "n", text: "hello brave world", custom: 1 }] };
-  const b = { ...base, nodes: [{ id: "n", text: "hello world!", custom: 1 }] };
-  const r = boardMerge3(editRecords(base), editRecords(a), editRecords(b), { mergeStrings3, work: 1e12 });
+  const base = B({ nodes: [{ id: "n", text: "hello\nworld", custom: 1 }], tools: ["note"], edges: [{ from: "n", to: "n", id: "loop" }] });
+  const a = { ...base, nodes: [{ id: "n", text: "hello brave\nworld", custom: 1 }] };
+  const b = { ...base, nodes: [{ id: "n", text: "hello\nworld!", custom: 1 }] };
+  const r = boardMerge3(editRecords(base), editRecords(a), editRecords(b), { work: 1e12 });
   const merged = fromEditRecords(r.records);
-  check(merged.nodes[0].text === "hello brave world!" && merged.tools[0] === "note" && merged.edges[0].id === "loop", "a merge keeps the carried fields");
+  check(merged.nodes[0].text === "hello brave\nworld!" && merged.tools[0] === "note" && merged.edges[0].id === "loop", "a merge keeps the carried fields");
   check(bytesAre(serialize(merged), merged).ok, "...and its bytes are the merged board");
   check(firstDifference(merged, { ...merged, extra: 1 }, "") === "/extra", "a difference is found where it is");
 }

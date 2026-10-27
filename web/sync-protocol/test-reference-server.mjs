@@ -132,12 +132,12 @@ const C1 = "clientA1", C2 = "clientB1";
   check(server.controls.doc(A.account, DOC) === null, "…and it stored nothing (no document)");
   // (a lost claim answer: the claim resent gets the same answer)
   server.controls.fake("doc_claim", { drop: true });
-  const lostR = a.tell({ t: "doc_claim", doc: DOC, client: C1 });
+  const lostR = a.tell({ t: "doc_claim", epoch: 1, doc: DOC, client: C1 });
   await sleep(30);
   check(!a.got.some((m) => m.req === lostR), "the claim's answer lost (test control)");
-  const claim = await a.ask({ t: "doc_claim", doc: DOC, client: C1 });
+  const claim = await a.ask({ t: "doc_claim", epoch: 1, doc: DOC, client: C1 });
   check(J(claim.claim) === J({ client: C1, fgen: 0, next_cseq: 1 }), "a resent claim: the same answer, fgen 0, next_cseq 1: " + J(claim));
-  const foreign = await b.ask({ t: "doc_claim", doc: DOC, client: C1 });
+  const foreign = await b.ask({ t: "doc_claim", epoch: 1, doc: DOC, client: C1 });
   check(foreign.code === "forbidden", "another writer's claim of the client: forbidden");
   const r = await a.ask(batch(DOC, 1, { [C1]: 0 }, [{ cseq: 1, id: pid(1, C1) }], { kind: "notebook" }));
   check(r.batch?.seq === 1 && r.batch.new === 1 && r.batch.head.epoch === 1 && r.batch.head.seq === 1 && /^[0-9a-f]{64}$/.test(r.batch.head.chain), "the claimed client's first batch: seq 1, the head with its chain: " + J(r));
@@ -145,17 +145,17 @@ const C1 = "clientA1", C2 = "clientB1";
   check(ch.head.seq === 1 && ch.by_device === "devA0010" && ch.owner === A.hash, "changed to the other sockets, with the head and the device: " + J(ch));
   const fb = await b.ask(batch(DOC, 1, { [C1]: 0 }, [{ cseq: 2, id: pid(2, C1), parents: [pid(1, C1)] }]));
   check(fb.code === "forbidden", "another writer's batch for the client: forbidden");
-  const ff = await b.ask({ t: "doc_fence", doc: DOC, clients: [{ client: C1, target: 1 }] });
+  const ff = await b.ask({ t: "doc_fence", epoch: 1, doc: DOC, clients: [{ client: C1, target: 1 }] });
   check(ff.code === "forbidden", "another writer's fence of the client: forbidden");
-  const absent = await a.ask({ t: "doc_fence", doc: DOC, clients: [{ client: "neverClaimed", target: 1 }] });
+  const absent = await a.ask({ t: "doc_fence", epoch: 1, doc: DOC, clients: [{ client: "neverClaimed", target: 1 }] });
   check(J(absent.fence) === J({ clients: [{ client: "neverClaimed", absent: true }] }), "a fence of a client never claimed: absent, terminal: " + J(absent));
 }
 {
   // (a lost fence answer: resent with the same target, the same terminal answer, nothing raised further)
   server.controls.fake("doc_fence", { drop: true });
-  a.tell({ t: "doc_fence", doc: DOC, clients: [{ client: C1, target: 1 }] });
+  a.tell({ t: "doc_fence", epoch: 1, doc: DOC, clients: [{ client: C1, target: 1 }] });
   await sleep(30);
-  const f = await a.ask({ t: "doc_fence", doc: DOC, clients: [{ client: C1, target: 1 }] });
+  const f = await a.ask({ t: "doc_fence", epoch: 1, doc: DOC, clients: [{ client: C1, target: 1 }] });
   check(J(f.fence.clients) === J([{ client: C1, fgen: 1, next_cseq: 2 }]), "a resent fence: fgen 1, next_cseq 2 (terminal): " + J(f));
   check(server.controls.clients(A.account, DOC)[C1].fgen === 1, "…the stored fgen is 1, not 2");
   // (a mixed resend under the old fgen: the accepted patch answered with its seq, the new one refused whole)
@@ -170,11 +170,11 @@ const C1 = "clientA1", C2 = "clientB1";
 }
 {
   // (a forward paused before its commit, a fence meanwhile: the fence's answer is terminal, the forward refused)
-  await a.ask({ t: "doc_claim", doc: DOC, client: C2 });
+  await a.ask({ t: "doc_claim", epoch: 1, doc: DOC, client: C2 });
   const release = server.controls.holdForward(DOC, C2);
   const req = a.tell(batch(DOC, 1, { [C2]: 0 }, [{ cseq: 1, id: pid(10, C2) }]));
   await sleep(20);
-  const f = await a.ask({ t: "doc_fence", doc: DOC, clients: [{ client: C2, target: 1 }] });
+  const f = await a.ask({ t: "doc_fence", epoch: 1, doc: DOC, clients: [{ client: C2, target: 1 }] });
   check(J(f.fence.clients) === J([{ client: C2, fgen: 1, next_cseq: 1 }]), "a fence while the forward is held: next_cseq 1 (nothing committed): " + J(f));
   release();
   const late = await a.next((m) => m.req === req);
@@ -186,13 +186,13 @@ const C1 = "clientA1", C2 = "clientB1";
   await sleep(20);
   rel2();
   const done = await a.next((m) => m.req === req2);
-  const f2 = await a.ask({ t: "doc_fence", doc: DOC, clients: [{ client: C2, target: 2 }] });
+  const f2 = await a.ask({ t: "doc_fence", epoch: 1, doc: DOC, clients: [{ client: C2, target: 2 }] });
   check(done.batch?.new === 1 && f2.fence.clients[0].next_cseq === 2, "a forward committed before the fence: the fence says next_cseq 2: " + J({ done, f2 }));
 }
 {
   // (unused claims: at most 16 per writer per document)
   let last;
-  for (let i = 0; i < 17; i++) last = await b.ask({ t: "doc_claim", doc: DOC, client: "unused" + i });
+  for (let i = 0; i < 17; i++) last = await b.ask({ t: "doc_claim", epoch: 1, doc: DOC, client: "unused" + i });
   check(last.code === "limit" && last.detail.limit === "unused_claims", "the 17th unused claim: limit: " + J(last));
 }
 
@@ -305,7 +305,7 @@ const C1 = "clientA1", C2 = "clientB1";
   {
     // CORR-173-1: a resent clear is the stored root exactly; a changed cseq or another writer is refused, nothing changes
     const D2 = "0123456789cd";
-    await a.ask({ t: "doc_claim", doc: D2, client: "rc1" });
+    await a.ask({ t: "doc_claim", epoch: 1, doc: D2, client: "rc1" });
     await a.ask(batch(D2, 1, { rc1: 0 }, [{ cseq: 1, id: pid(1, "rc1") }]));
     const root = patches([{ cseq: 2, id: pid(2, "rc1") }]);
     const cl = await a.ask({ t: "clear", doc: D2, expect_head: { epoch: 1, seq: 1 }, root, fgen: { rc1: 0 } });
@@ -316,7 +316,7 @@ const C1 = "clientA1", C2 = "clientB1";
     check(foreignRetry.code === "forbidden", "CORR-173-1: the same root resent by another writer: forbidden: " + J(foreignRetry));
     check(J(server.controls.doc(A.account, D2)) === before && J(server.controls.clients(A.account, D2)) === clientsBefore, "CORR-173-1: …head, batches and clients unchanged");
     // (the accepted resend still answers after a later fence: its old fgen isn't asked again)
-    await a.ask({ t: "doc_fence", doc: D2, clients: [{ client: "rc1", target: 1 }] });
+    await a.ask({ t: "doc_fence", doc: D2, epoch: 2, clients: [{ client: "rc1", target: 1 }] });
     const exact = await a.ask({ t: "clear", doc: D2, expect_head: { epoch: 1, seq: 1 }, root, fgen: { rc1: 0 } });
     check(exact.batch?.seq === cl.batch.seq && exact.batch.new === 0, "CORR-173-1: the exact root resent, after a fence: the same answer: " + J(exact));
   }
@@ -324,7 +324,7 @@ const C1 = "clientA1", C2 = "clientB1";
     // CORR-173-2: a new patch's blobs must be held; refused whole (missing) with nothing changed, accepted once uploaded
     const D3 = "0123456789ef";
     const bytes = new TextEncoder().encode("a patch's blob"), sha = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
-    await a.ask({ t: "doc_claim", doc: D3, client: "bc1" });
+    await a.ask({ t: "doc_claim", epoch: 1, doc: D3, client: "bc1" });
     await a.ask(batch(D3, 1, { bc1: 0 }, [{ cseq: 1, id: pid(1, "bc1") }]));
     const withBlob = (list) => {
       const m = batch(D3, 1, { bc1: 0 }, list);
@@ -364,7 +364,7 @@ const C1 = "clientA1", C2 = "clientB1";
     const Q = await signedIn(server, "acct-held");
     await Q.call("POST", "/api/sync/v1/enable");
     const q = await socket(server, Q, "devQ0001");
-    await q.ask({ t: "doc_claim", doc: DOC, client: "hq1" });
+    await q.ask({ t: "doc_claim", epoch: 1, doc: DOC, client: "hq1" });
     const release = server.controls.holdForward(DOC, "hq1");
     const req = q.tell(batch(DOC, 1, { hq1: 0 }, [{ cseq: 1, id: pid(1, "hq1") }]));
     await sleep(20);
@@ -425,6 +425,30 @@ const C1 = "clientA1", C2 = "clientB1";
     check(utf16 < (1 << 20) && p1.more === true && p1.ops.length < 500 && bytes1 <= (1 << 20), `UTF-8 pages: the first page stops at 1 MiB of UTF-8 (${p1.ops.length} ops, ${bytes1} bytes; the 500 are ${utf16} UTF-16 units)`);
     const p2 = await u.ask({ t: "pull_index", after: p1.ops[p1.ops.length - 1].seq });
     check(p1.ops.length + p2.ops.length === 500 && p2.more === false && p2.ops[0].seq === p1.ops[p1.ops.length - 1].seq + 1, `UTF-8 pages: pull_index returns the rest (${p2.ops.length})`);
+  }
+
+  {
+    // (stale_epoch: a claim or fence for another epoch than the document's is refused, with the current epoch, and changes
+    // nothing; the same for a document not made yet, whose epoch is 1; then the current epoch is accepted)
+    const SE = await signedIn(server, "acct-stale");
+    await SE.call("POST", "/api/sync/v1/enable");
+    const s = await socket(server, SE, "devS0001"), DS = "0123456789aa";
+    const early = await s.ask({ t: "doc_claim", doc: DS, epoch: 2, client: "s1" });
+    check(early.code === "stale_epoch" && early.detail.epoch === 1 && server.controls.doc("acct-stale", DS) === null, "stale_epoch: a claim for epoch 2 of a document not made yet: refused, nothing made: " + J(early));
+    await s.ask({ t: "doc_claim", doc: DS, epoch: 1, client: "s1" });
+    await s.ask(batch(DS, 1, { s1: 0 }, [{ cseq: 1, id: pid(1, "s1") }]));
+    const cl = await s.ask({ t: "clear", doc: DS, expect_head: { epoch: 1, seq: 1 }, root: patches([{ cseq: 2, id: pid(2, "s1") }]), fgen: { s1: 0 } });
+    check(cl.batch?.head.epoch === 2, "stale_epoch: the document cleared to epoch 2");
+    const before = J(server.controls.clients("acct-stale", DS));
+    const late = await s.ask({ t: "doc_claim", doc: DS, epoch: 1, client: "s2" });
+    check(late.code === "stale_epoch" && late.detail.epoch === 2 && late.detail.head.epoch === 2, "stale_epoch: a delayed claim for epoch 1, after the clear: refused, with the current epoch: " + J(late));
+    const lateFence = await s.ask({ t: "doc_fence", doc: DS, epoch: 1, clients: [{ client: "s1", target: 5 }] });
+    check(lateFence.code === "stale_epoch" && J(server.controls.clients("acct-stale", DS)) === before, "stale_epoch: a fence for epoch 1: refused, and no client's fgen moved");
+    const ahead = await s.ask({ t: "doc_claim", doc: DS, epoch: 3, client: "s2" });
+    check(ahead.code === "stale_epoch" && J(server.controls.clients("acct-stale", DS)) === before, "stale_epoch: a claim for a future epoch: refused too, nothing changed");
+    const now = await s.ask({ t: "doc_claim", doc: DS, epoch: 2, client: "s2" });
+    const f2 = await s.ask({ t: "doc_fence", doc: DS, epoch: 2, clients: [{ client: "s1", target: 1 }] });
+    check(J(now.claim) === J({ client: "s2", fgen: 0, next_cseq: 1 }) && f2.fence?.clients[0].fgen === 1, "stale_epoch: the current epoch's claim and fence are accepted");
   }
 
   // ---- the shared claim and fence vectors (doc-claim-vectors.json), each on a fresh account
