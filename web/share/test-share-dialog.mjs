@@ -1296,6 +1296,52 @@ try {
       ok(!afterA.includes(la?.sent ?? "?") && afterA.includes(lb?.sent ?? "?"), `R1 ...A's retry answered and settled: A's record gone (${!afterA.includes(la?.sent ?? "?")}), B's kept (${afterA.includes(lb?.sent ?? "?")})`);
       await A.ev("window.fetch = window.__f0 ?? window.fetch");
       await raw("Target.closeTarget", { targetId: B.targetId });
+
+      // R4 (daybreak3's CORR-UPLOAD-R5-4): ONE notebook in two tabs of this browser, one account. A is held inside
+      // its record's change, past its last store check; B, which looked for a record before A wrote one, stores
+      // another attempt and reaches its record after A's: B must neither replace A's record nor send its attempt.
+      // A's answer is then lost; A's retry sends A's attempt and recovers A's share: one share
+      await nbIn(A, "R4");
+      const idR4 = await A.ev("localStorage.getItem('sagebrush-current')");
+      const B2 = await newPage();
+      await B2.send("Page.navigate", { url: dev.site + "/" });
+      await B2.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+      const sameNb = (await B2.ev("localStorage.getItem('sagebrush-current')")) === idR4 && (await B2.ev("window.sagebrush.notebook.snapshot().cells.length > 0"));
+      const nR4 = await sharesIn(A);
+      const otherR4 = "e".repeat(32);
+      await A.ev(lose);
+      await B2.ev(lose);
+      await openIn(A);
+      await openIn(B2);
+      // (B's save before its upload stores the other attempt, as another tab's edit would land)
+      await B2.ev(`window.sagebrush.shareTest.saved = async () => { await ${storeOther(otherR4)}; await window.sagebrush.notebook.saved(); }`);
+      await A.ev("window.__hold = true; window.__held = 0; window.__heldQ = []");
+      await uploadIn(A, "R4");
+      await A.until("window.__held > 0", 60000);
+      await uploadIn(B2, "R4");
+      await B2.until(`(async () => window.__sentN > 0 || (await ${bLockWait}))()`, 60000).catch(() => {});
+      const b2Waited = await B2.ev(bLockWait);
+      await A.ev("window.__hold = false; for (const f of window.__heldQ.splice(0)) f()");
+      await A.until("!!window.__lost && /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
+      await B2.until("/failed/.test(document.querySelector('#shareresult').textContent)", 60000).catch(() => {});
+      const la4 = await A.ev("window.__lost");
+      const b2Sent = await B2.ev("window.__sentN");
+      const b2Said = await B2.ev("document.querySelector('#shareresult').textContent");
+      const reg4 = await regIn(A);
+      ok(sameNb && b2Waited && !!la4?.sent && la4.sent !== otherR4 && b2Sent === 0 && reg4.includes(la4.sent) && !reg4.includes(otherR4) && /another upload of this notebook/.test(b2Said),
+        `R4 one notebook in two tabs: B, with another attempt, reached its record after A's (waited: ${b2Waited}, same notebook: ${sameNb}): it sent nothing (${b2Sent}) and A's record stands (A ${reg4.includes(la4?.sent ?? "?")}, B's ${reg4.includes(otherR4)}): ${b2Said}`);
+      await B2.ev("delete window.sagebrush.shareTest.saved");
+      await raw("Target.closeTarget", { targetId: B2.targetId });
+      // (A's answer was lost: its retry sends A's attempt, as recorded, and gets A's share)
+      await A.ev(`(() => { window.__pass = true; window.__r4 = []; const f = window.fetch; window.fetch = async (u, o) => { if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") window.__r4.push(JSON.parse(o.body).attempt); return f(u, o); }; })()`);
+      await uploadIn(A, "R4");
+      await A.until("!!document.querySelector('#shareresult a') || /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
+      const sent4 = await A.ev("window.__r4");
+      const id4 = await A.ev("window.sagebrush.notebook.snapshot().share_id ?? null");
+      const nR4b = await sharesIn(A);
+      ok(sent4.length === 1 && sent4[0] === la4?.sent && id4 === la4?.collection && nR4b === nR4 + 1,
+        `R4 ...A's retry sent A's attempt (${sent4.map((x) => x.slice(0, 6))} vs ${la4?.sent?.slice(0, 6)}) and recovered A's share (${id4} vs ${la4?.collection}); shares +${nR4b - nR4}`);
+      await A.ev("window.fetch = window.__f0 ?? window.fetch");
     }, 900_000);
   }
 
