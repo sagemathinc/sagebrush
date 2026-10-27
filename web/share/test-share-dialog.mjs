@@ -965,18 +965,44 @@ try {
       await openDialog();
       // (120 records of browser notebooks that don't exist here, 30 of workspace files, the oldest first)
       await ev(`(() => { const all = {}; for (let i = 0; i < 120; i++) all['acct|gone' + i] = { attempt: 'a'.repeat(32), at: i + 1 }; for (let i = 0; i < 30; i++) all['acct|file:/f' + i + '.ipynb'] = { attempt: 'b'.repeat(32), at: 1000 + i }; localStorage.setItem('sagebrush-share-sent', JSON.stringify(all)); })()`);
+      // (and one of a browser notebook here that is durably shared: it never sends a first upload again)
+      const sharedId = await ev(`(async () => { const db = await new Promise((ok, no) => { const r = indexedDB.open('sagebrush'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }); const all = await new Promise((ok, no) => { const q = db.transaction('notebooks').objectStore('notebooks').getAll(); q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); }); db.close(); return all.find((d) => d?.share_id && typeof d.id === 'string' && d.id !== localStorage.getItem('sagebrush-current'))?.id ?? null; })()`);
+      await ev(`(() => { const all = JSON.parse(localStorage.getItem('sagebrush-share-sent')); all['acct|' + ${JSON.stringify(sharedId)}] = { attempt: 'd'.repeat(32), at: 2000 }; localStorage.setItem('sagebrush-share-sent', JSON.stringify(all)); })()`);
       const l1 = await shareNow("D11");
       const after1 = await ev("Object.keys(window.sagebrush.shareTest.sent())");
+      ok(!!sharedId && !after1.includes("acct|" + sharedId), `D11 a record of a browser notebook here that is durably shared (${sharedId}) is dropped as it never sends a first upload again`);
       ok(/\/s\//.test(l1) && after1.filter((k) => k.startsWith("acct|gone")).length === 0 && after1.filter((k) => k.startsWith("acct|file:")).length === 30, `D11 a record's write drops the records of browser notebooks no longer here (120 -> ${after1.filter((k) => k.startsWith("acct|gone")).length}) and keeps the workspace files' (${after1.filter((k) => k.startsWith("acct|file:")).length})`);
       await closeDialog();
-      // (130 workspace-file records: at most 100 are kept, the newest)
-      await fresh("D11b");
+      await ev("localStorage.removeItem('sagebrush-share-sent')");
+    });
+    // R2 (daybreak3's CORR-UPLOAD-R4-2): 100 live records, none provably done (workspace files', which no prune
+    // drops): a 101st first upload is refused before its request, and no record is evicted for it; at 100 with this
+    // notebook's own record among them, its retry still goes and recovers its share
+    await block("R2", async () => {
+      const reg = async () => JSON.parse((await ev("localStorage.getItem('sagebrush-share-sent')")) ?? "{}");
+      await fresh("R2");
+      const n = await mine();
       await openDialog();
-      await ev(`(() => { const all = {}; for (let i = 0; i < 130; i++) all['acct|file:/g' + i + '.ipynb'] = { attempt: 'c'.repeat(32), at: i + 1 }; localStorage.setItem('sagebrush-share-sent', JSON.stringify(all)); })()`);
-      const l2 = await shareNow("D11b");
-      const after2 = await ev("window.sagebrush.shareTest.sent()");
-      const ks = Object.keys(after2);
-      ok(/\/s\//.test(l2) && ks.length <= 100 && !ks.includes("acct|file:/g0.ipynb") && ks.includes("acct|file:/g129.ipynb"), `D11 at most 100 records, the newest kept: ${ks.length} kept, the oldest gone, the newest there`);
+      await ev(`(() => { const all = {}; for (let i = 0; i < 100; i++) all['acct|file:/g' + i + '.ipynb'] = { attempt: 'c'.repeat(32), at: i + 1 }; localStorage.setItem('sagebrush-share-sent', JSON.stringify(all)); })()`);
+      await recordSent();
+      const l1 = await shareNow("R2");
+      const sent1 = await ev("window.__attempts");
+      await restore();
+      const k1 = Object.keys(await reg());
+      ok(/failed/.test(l1) && /outcome it hasn't confirmed/.test(l1) && sent1.length === 0 && (await mine()) === n && k1.length === 100 && k1.includes("acct|file:/g0.ipynb"), `R2 100 live records: a 101st first upload is refused before its request (${sent1.length} sent), none evicted (${k1.length} kept, the oldest ${k1.includes("acct|file:/g0.ipynb") ? "there" : "GONE"}): ${l1}`);
+      // (one slot freed: this notebook's upload is recorded, its answer lost; at 100 again, its retry goes)
+      await ev("(() => { const all = JSON.parse(localStorage.getItem('sagebrush-share-sent')); delete all['acct|file:/g0.ipynb']; localStorage.setItem('sagebrush-share-sent', JSON.stringify(all)); })()");
+      await intercept("lose");
+      const l2 = await shareNow("R2");
+      const made2 = await ev("window.__made");
+      await restore();
+      const k2 = Object.keys(await reg());
+      await recordSent();
+      const l3 = await shareNow("R2");
+      const sent3 = await ev("window.__attempts");
+      await restore();
+      const id3 = await snap("share_id");
+      ok(/failed/.test(l2) && !!made2?.collection && k2.length === 100 && /\/s\//.test(l3) && sent3.length === 1 && id3 === made2.collection && (await mine()) === n + 1, `R2 ...at 100 with this notebook's own record among them (${k2.length}): its retry goes (${sent3.length} sent) and gets the share its lost answer made (${id3} vs ${made2?.collection}): ${l3}`);
       await ev("localStorage.removeItem('sagebrush-share-sent')");
       await closeDialog();
     });
@@ -1174,7 +1200,95 @@ try {
       const nB2 = await sharesIn(q4);
       ok(firstB?.collection && second === 409 && storedB.share_attempt === otherB && !storedB.share_id && sentB.length === 1 && sentB[0] === firstB.sent && idB === firstB.collection && nB2 === nB + 1,
         `L1b a 409 adoption whose save didn't land, another device's attempt stored meanwhile (${storedB.share_attempt?.slice(0, 6)}), a crash: the retry sent the recorded attempt again (${sentB.map((x) => x.slice(0, 6))} vs ${firstB?.sent?.slice(0, 6)}) and the notebook's share is the first one (${idB} vs ${firstB?.collection}); shares +${nB2 - nB}`);
-    }, 600_000);
+
+      // (this device's records, raw)
+      const regIn = async (P) => JSON.stringify(JSON.parse((await P.ev("localStorage.getItem('sagebrush-share-sent')")) ?? "{}"));
+      // R3 (daybreak3's CORR-UPLOAD-R4-3): a 200 whose share_id save the notebook's store refuses; the record's
+      // settling held at its save, while the page switches notebooks and is held between them (no store
+      // attached); released there: the record is kept, as only the origin's own store can prove the share saved.
+      // R3b: the same with the store saving: settled from the origin's store, after the switch, the record goes.
+      for (const refuse of [true, false]) {
+        const tag = refuse ? "R3" : "R3b";
+        await nbIn(q4, tag);
+        await q4.ev(`(() => { const f = window.fetch, nb = window.sagebrush.notebook, st = nb.store, saved = nb.saved; window.__r3 = null; window.__fetch0 = f;
+          window.fetch = async (u, o) => {
+            if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") {
+              const r = await f(u, o);
+              window.__r3 = { ...(await r.clone().json()), sent: JSON.parse(o.body).attempt };
+              if (${refuse}) st.save = async () => "not saved: the test's store refuses";
+              // (the settling's save held until released)
+              nb.saved = () => new Promise((go) => (window.__savedGo = go)).then(() => { nb.saved = saved; return saved(); });
+              return r;
+            }
+            return f(u, o); }; })()`);
+        await openIn(q4);
+        await uploadIn(q4, tag);
+        await q4.until("!!window.__r3 && !!document.querySelector('#shareresult a') && !!window.__savedGo", 60000);
+        const r3 = await q4.ev("window.__r3");
+        // (a switch, held with no notebook attached)
+        await q4.ev("window.sagebrush.shareTest.beforeAttach = () => new Promise((go) => (window.__attachGo = go))");
+        await q4.ev("document.querySelector('#sharedlg').open && document.querySelector('#sharedlg').close()");
+        await q4.ev("document.querySelector('#filemenu [data-f=new]').click()");
+        await q4.until("!!window.__attachGo && !window.sagebrush.notebook.store", 30000);
+        await q4.ev("window.__savedGo()");
+        await sleep(1500);
+        const reg3 = await regIn(q4);
+        await q4.ev("delete window.sagebrush.shareTest.beforeAttach; window.__attachGo()");
+        await q4.until("!!window.sagebrush.notebook.store", 30000);
+        await q4.ev("window.fetch = window.__fetch0 ?? window.fetch");
+        ok(!!r3?.collection && (refuse ? reg3.includes(r3.sent) : !reg3.includes(r3.sent)),
+          refuse
+            ? `R3 the share's save refused, its settling released while the page had no notebook attached: the record is kept (${reg3.includes(r3?.sent ?? "?")}), with no proof from the notebook's own store`
+            : `R3b the share saved, its settling released while the page had no notebook attached: the record goes (${!reg3.includes(r3?.sent ?? "?")}), proved by the notebook's own store`);
+      }
+
+      // R1 (astra3's CORR-UPLOAD-IMPL-ASTRA-3, daybreak3's CORR-UPLOAD-R4-1): two tabs, two notebooks recording at
+      // once: tab A held inside its record's change (its read of the notebooks' keys), tab B's record waits for it
+      // (no request until A's is written); both sent, both answers lost: both records kept; A settled: B's kept
+      const A = q4;
+      await nbIn(A, "R1a");
+      const B = await newPage();
+      await B.send("Page.navigate", { url: dev.site + "/" });
+      await B.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+      await nbIn(B, "R1b");
+      const lose = `(() => { const f = window.fetch; window.__f0 = f; window.__lost = null; window.__sentN = 0; window.__pass = false;
+        window.fetch = async (u, o) => {
+          if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") {
+            window.__sentN++;
+            const r = await f(u, o);
+            if (window.__pass) return r;
+            window.__lost = { ...(await r.json()), sent: JSON.parse(o.body).attempt };
+            return new Response('{"error":"lost"}', { status: 503 });
+          }
+          return f(u, o); }; })()`;
+      await A.ev(lose);
+      await B.ev(lose);
+      await openIn(A);
+      await openIn(B);
+      // (A's read of the notebooks' keys kept open, its transaction busy, until released)
+      await A.ev(`(() => { const g = IDBObjectStore.prototype.getAllKeys; window.__hold = true; window.__held = 0; IDBObjectStore.prototype.getAllKeys = function (...a) { const r = g.apply(this, a); if (window.__hold && this.name === 'notebooks') { window.__held++; const st = this; const spin = () => { if (window.__hold) st.get('__r1-spin').onsuccess = spin; }; r.addEventListener('success', spin); } return r; }; })()`);
+      await uploadIn(A, "R1a");
+      await A.until("window.__held > 0", 60000);
+      await uploadIn(B, "R1b");
+      await sleep(2000);
+      const bWhileHeld = await B.ev("window.__sentN");
+      await A.ev("window.__hold = false");
+      await A.until("!!window.__lost && /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
+      await B.until("!!window.__lost && /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
+      const la = await A.ev("window.__lost"), lb = await B.ev("window.__lost");
+      const both = await regIn(A);
+      // (A's retry, answered: settled; B's record stays)
+      await A.ev("window.__pass = true");
+      await uploadIn(A, "R1a");
+      await A.until("!!document.querySelector('#shareresult a') || /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
+      await A.until(`!(localStorage.getItem('sagebrush-share-sent') ?? '').includes(${JSON.stringify(la?.sent ?? "?")})`, 15000).catch(() => {});
+      const afterA = await regIn(A);
+      ok(bWhileHeld === 0 && !!la?.sent && !!lb?.sent && la.sent !== lb.sent && both.includes(la.sent) && both.includes(lb.sent),
+        `R1 two tabs, two notebooks, recorded at once: B's request waited for A's record (${bWhileHeld} sent while A held); both sent, both answers lost: both records kept (A ${both.includes(la?.sent ?? "?")}, B ${both.includes(lb?.sent ?? "?")})`);
+      ok(!afterA.includes(la?.sent ?? "?") && afterA.includes(lb?.sent ?? "?"), `R1 ...A's retry answered and settled: A's record gone (${!afterA.includes(la?.sent ?? "?")}), B's kept (${afterA.includes(lb?.sent ?? "?")})`);
+      await A.ev("window.fetch = window.__f0 ?? window.fetch");
+      await raw("Target.closeTarget", { targetId: B.targetId });
+    }, 900_000);
   }
 
 
