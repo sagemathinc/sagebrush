@@ -38,6 +38,7 @@ from sagebrush import _native
 
 WINDOWS = os.name == "nt"
 HOOKS = hasattr(_native, "_serve_test")
+NATIVE_STOP = getattr(_native, "_serve_native_stop", lambda: False)()
 STOP_S = 0.25  # (the Stop bound: a targeted interrupt's reply within this of the notification)
 failed = []
 
@@ -327,7 +328,7 @@ s.close()
 '''
 
 
-def pty_case(stale):
+def pty_case(stale):  # noqa: F811 (the parameter shadows the stale() case)
     import pty
     flag = tmpfile("started")
     child = tmpfile("child.py")
@@ -426,7 +427,7 @@ NATIVE = [
 
 
 def test_native():
-    if not _native._serve_native_stop():
+    if not NATIVE_STOP:
         print("skip the native Stop tests (factor, GF(p) echelon): they need @sagebrush-sage2's guarded Stop window")
         return
     for name, code in NATIVE:
@@ -453,20 +454,28 @@ def test_native():
             s.close()
 
 
+def case(f, *a):
+    # (a case that raises is a failure, and the rest still run: the fail-first control runs this file on PR A's worker)
+    try:
+        f(*a)
+    except Exception as e:
+        check(False, "%s%r raised %s: %s" % (f.__name__, a, type(e).__name__, e))
+
+
 if __name__ == "__main__":
-    test_lifecycle()
+    case(test_lifecycle)
     for name, body in WORKLOADS:
-        targeted(name, body)
-        stale(name, body)
-    test_external_sigint()
-    test_injections()
-    test_post_commit_target()
-    test_retarget()
+        case(targeted, name, body)
+        case(stale, name, body)
+    case(test_external_sigint)
+    case(test_injections)
+    case(test_post_commit_target)
+    case(test_retarget)
     if not WINDOWS:
-        pty_case(stale=False)
-        pty_case(stale=True)
-    test_hooks()
-    test_native()
+        case(pty_case, False)
+        case(pty_case, True)
+    case(test_hooks)
+    case(test_native)
     if failed:
         print("ctrlc native: %d FAILED" % len(failed))
         sys.exit(1)
