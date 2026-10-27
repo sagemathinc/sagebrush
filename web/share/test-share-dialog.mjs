@@ -778,13 +778,15 @@ try {
       };
     })()`);
     const restore = () => ev("window.fetch = window.__realFetch ?? window.fetch");
-    // (each case on its own: one that throws is a failure, and the next still runs)
-    const block = async (name, fn) => {
-      try { await fn(); } catch (e) { ok(false, `${name} threw: ${e.message}`); await restore().catch(() => {}); await closeDialog().catch(() => {}); }
+    // (each case on its own, with its own time: one that throws, or doesn't end within 90 s, is a failure, and
+    // the next still runs; its cleanup is bounded too, as a crashed page answers nothing)
+    const within = (ms, pr) => Promise.race([pr, new Promise((_, rej) => setTimeout(() => rej(new Error(`no end within ${ms / 1000} s`)), ms))]);
+    const block = async (name, fn, ms = 90_000) => {
+      try { await within(ms, fn()); } catch (e) { ok(false, `${name} threw: ${e.message}`); await within(5000, restore()).catch(() => {}); await within(5000, closeDialog()).catch(() => {}); }
     };
 
-    // D1: a failed first upload, then a retry
-    await block("D1", async () => {
+    // D1: a failed first upload, then a retry (SHARE_D1_RUNS times: 2 shows it's stable)
+    for (let run = 1; run <= Math.max(1, Number(process.env.SHARE_D1_RUNS) || 1); run++) await block(`D1 (run ${run})`, async () => {
     await fresh("D1");
     const n0 = await mine();
     await openDialog();
@@ -867,10 +869,9 @@ try {
     const copied = await snap("share_attempt");
     ok((await snap("name")) === "D6 copy" && !copied && typeof ipynb === "string" && ipynb.includes("cells") && !ipynb.includes("0123456789abcdef") && typeof link === "string" && link.includes("#") && !link.includes("0123456789abcdef"), "D6 \"make a copy\" has no attempt, and the notebook's .ipynb export and its share link don't carry it");
     });
-  }
 
-  // ---- D2 (last: it crashes the page): the answer lost, the page crashed at once, then a reload
-  {
+    // D2 (last: it crashes the page): the answer lost, the page crashed at once, then a reload
+    await block("D2", async () => {
     await ev("document.querySelector('#filemenu [data-f=new]').click()");
     await until("document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value && !window.sagebrush.notebook.snapshot().share_id");
     await setFirst(`T = 2  # D2 ${Date.now()}`);
@@ -898,7 +899,10 @@ try {
     const id2 = await q.ev("window.sagebrush.notebook.snapshot().share_id ?? null");
     const n2b = await q.ev("(async () => (await (await fetch('/api/share/mine')).json()).collections.length)()");
     ok(made2?.collection && /^[0-9a-f]{32}$/.test(att2 ?? "") && id2 === made2.collection && n2b === n2 + 1, `D2 the answer lost, the page crashed at once, a reload, the same upload: one share, the one the lost answer made (attempt kept: ${!!att2}, share ${id2} vs ${made2?.collection}, shares +${n2b - n2})`);
+    }, 150_000);
   }
+
+
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);
