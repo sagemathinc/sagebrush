@@ -1175,6 +1175,154 @@
         "clashes": []
       },
       {
+        "name": "an own __proto__ field changed on a, pos on b: both kept",
+        "base": [
+          {
+            "type": "cell",
+            "id": "a",
+            "pos": 0,
+            "input": "x\n",
+            "cell_type": "code",
+            "__proto__": {
+              "keep": "old"
+            }
+          }
+        ],
+        "a": [
+          {
+            "type": "cell",
+            "id": "a",
+            "pos": 0,
+            "input": "x\n",
+            "cell_type": "code",
+            "__proto__": {
+              "keep": "new"
+            }
+          }
+        ],
+        "b": [
+          {
+            "type": "cell",
+            "id": "a",
+            "pos": 1,
+            "input": "x\n",
+            "cell_type": "code",
+            "__proto__": {
+              "keep": "old"
+            }
+          }
+        ],
+        "value": [
+          {
+            "__proto__": {
+              "keep": "new"
+            },
+            "cell_type": "code",
+            "id": "a",
+            "input": "x\n",
+            "pos": 1,
+            "type": "cell"
+          }
+        ],
+        "clashes": []
+      },
+      {
+        "name": "an own __proto__ field set to null on a, pos on b",
+        "base": [
+          {
+            "type": "cell",
+            "id": "a",
+            "pos": 0,
+            "input": "x\n",
+            "cell_type": "code",
+            "__proto__": "s"
+          }
+        ],
+        "a": [
+          {
+            "type": "cell",
+            "id": "a",
+            "pos": 0,
+            "input": "x\n",
+            "cell_type": "code",
+            "__proto__": null
+          }
+        ],
+        "b": [
+          {
+            "type": "cell",
+            "id": "a",
+            "pos": 1,
+            "input": "x\n",
+            "cell_type": "code",
+            "__proto__": "s"
+          }
+        ],
+        "value": [
+          {
+            "__proto__": null,
+            "cell_type": "code",
+            "id": "a",
+            "input": "x\n",
+            "pos": 1,
+            "type": "cell"
+          }
+        ],
+        "clashes": []
+      },
+      {
+        "name": "an own __proto__ field changed differently on both: a clash",
+        "base": [
+          {
+            "type": "cell",
+            "id": "a",
+            "pos": 0,
+            "input": "x\n",
+            "cell_type": "code",
+            "__proto__": "s"
+          }
+        ],
+        "a": [
+          {
+            "type": "cell",
+            "id": "a",
+            "pos": 0,
+            "input": "x\n",
+            "cell_type": "code",
+            "__proto__": "t"
+          }
+        ],
+        "b": [
+          {
+            "type": "cell",
+            "id": "a",
+            "pos": 0,
+            "input": "x\n",
+            "cell_type": "code",
+            "__proto__": {
+              "u": 1
+            }
+          }
+        ],
+        "value": [
+          {
+            "__proto__": "t",
+            "cell_type": "code",
+            "id": "a",
+            "input": "x\n",
+            "pos": 0,
+            "type": "cell"
+          }
+        ],
+        "clashes": [
+          {
+            "key": "[\"cell\",\"a\"]",
+            "field": "__proto__",
+            "kind": "changed"
+          }
+        ]
+      },
+      {
         "name": "a nested value's key order doesn't make a change",
         "base": [
           {

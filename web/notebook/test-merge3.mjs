@@ -102,6 +102,29 @@ check(/keeps the whole of a/.test(V.contract) && /copy/.test(V.contract) && /nev
   }
 }
 
+// ---- a field named "__proto__" is the record's own data (astra's and daybreak3's HOLD on #199): kept through the field
+// merge, the record's prototype untouched, the JSON the same after a round trip
+{
+  const P = (j) => JSON.parse(j);
+  const base = [P('{"type":"cell","id":"a","pos":0,"input":"x\\n","cell_type":"code","__proto__":{"keep":"old"}}')];
+  const a = [P('{"type":"cell","id":"a","pos":0,"input":"x\\n","cell_type":"code","__proto__":{"keep":"new"}}')];
+  const b = [P('{"type":"cell","id":"a","pos":1,"input":"x\\n","cell_type":"code","__proto__":{"keep":"old"}}')];
+  const r = mergeRecords3(S, base, a, b), rec = r.value[0];
+  check(r.clashes.length === 0 && Object.prototype.hasOwnProperty.call(rec, "__proto__") && Object.getPrototypeOf(rec) === Object.prototype && rec.pos === 1, "an own __proto__ field kept as data, the prototype untouched: " + JSON.stringify(rec));
+  check(JSON.stringify(JSON.parse(JSON.stringify(rec))) === JSON.stringify(rec) && JSON.stringify(rec).includes('"__proto__":{"keep":"new"}'), "…and it survives a JSON round trip");
+  // (the names Object.prototype holds, as boardMerge3's regression has them (astra2's CORR-PR121-1), each set to an
+  // object, null, a string and a number on a, another field changed on b: each kept as own data, the prototype untouched)
+  const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  for (const name of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+    for (const v of [{ x: 1 }, null, "s", 7]) {
+      const mk = (pos, val) => P(`{"type":"cell","id":"a","pos":${pos},"input":"x\\n","cell_type":"code",${JSON.stringify(name)}:${JSON.stringify(val)}}`);
+      const rr = mergeRecords3(S, [mk(0, "old")], [mk(0, v)], [mk(2, "old")]);
+      const rec2 = rr.value[0];
+      check(rr.clashes.length === 0 && own(rec2, name) && JSON.stringify(rec2[name]) === JSON.stringify(v) && rec2.pos === 2 && Object.getPrototypeOf(rec2) === Object.prototype, `an own ${name} field set to ${JSON.stringify(v)} on a, pos on b: both kept: ` + JSON.stringify(rec2));
+    }
+  }
+}
+
 // ---- malformed input refused
 for (const [name, args] of [
   ["a base that isn't a list", [{}, [], []]],
