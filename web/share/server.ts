@@ -6,10 +6,11 @@
 //   POST /auth/dev                     dev only: a session for a test account
 //   GET  /api/share/me                 who you are, your usage and limits
 //   GET  /api/share/mine               your collections
-//   POST /api/share/collections        {title, license, files, attempt} -> {id, version}: a new
-//                                      share, created with its first version (an older page's
-//                                      {title} alone -> {id}, kept for now: it leaves an empty
-//                                      collection when its upload fails)
+//   POST /api/share/first-upload       {title, license, files, attempt} -> {collection, version}: a
+//                                      new share, created with its first version (its own path: a
+//                                      server from before it answers 404 and creates nothing)
+//   POST /api/share/collections        {title} -> {id}: an older page's empty collection, kept for
+//                                      now (it is left empty when its upload fails); with files: 400
 //   POST /api/share/check              {blobs: [{sha256, size}]} -> {missing}
 //   PUT  /api/share/blob/<sha256>      the bytes (R2 checks the hash)
 //   POST /api/share/collections/<id>/versions   {title, license, files} -> {version}
@@ -99,6 +100,16 @@ const SESSION_DAYS = 30;
 const SESSIONS_MAX = 20;
 /** records of finished deletions: how long (collections and self-deletions; account deletions), and at most how many collection records per account */
 const DELETION_RECORD_DAYS = 30, ADMIN_RECORD_DAYS = 365, DELETION_RECORDS_MAX = 1000;
+/**
+ * Deleted shares' receipts kept per account (beside its live ones), newest first: a retry of a deleted
+ * share's attempt gets 410 for DELETION_RECORD_DAYS, or until the account has deleted this many newer
+ * shares; after either, it makes a new share with a new id (the deleted link stays dead).  So the table
+ * holds at most MAX_COLLECTIONS + RETIRED_RECEIPTS_MAX rows per account, however fast shares are made
+ * and deleted (daybreak3's S1).
+ */
+const RETIRED_RECEIPTS_MAX = 1000;
+/** the deleted shares' receipts past their days, removed per scheduled run: pages of 500, until none is left or this many */
+const RETIRED_RECEIPT_PAGES = 20;
 const LIMITS_TTL = 600;
 /** how long an upload may take before its reservation is reclaimed */
 const RESERVE_SECONDS = 3600;
@@ -730,6 +741,8 @@ async function deleteCollection(env: ShareEnv, account: string, cid: string): Pr
     db.prepare("DELETE FROM collections WHERE id = ?1").bind(cid),
     // (its first upload's attempt can never make a share again: a retry of it gets 410)
     db.prepare("UPDATE upload_receipts SET state = 'retired', retired = ?3 WHERE owner = ?1 AND collection = ?2 AND state = 'committed'").bind(account, cid, t),
+    // (and at most RETIRED_RECEIPTS_MAX of them per account, the newest)
+    db.prepare("DELETE FROM upload_receipts WHERE owner = ?1 AND state = 'retired' AND rowid NOT IN (SELECT rowid FROM upload_receipts WHERE owner = ?1 AND state = 'retired' ORDER BY retired DESC, rowid DESC LIMIT ?2)").bind(account, RETIRED_RECEIPTS_MAX),
   ]);
   return { bytes: b?.n ?? 0 };
 }
@@ -761,6 +774,7 @@ async function purgeAccount(env: ShareEnv, account: string, rid: string, admin: 
     admin
       ? db.prepare("DELETE FROM upload_receipts WHERE owner = ?1").bind(account)
       : db.prepare("UPDATE upload_receipts SET state = 'retired', retired = ?2 WHERE owner = ?1 AND state = 'committed'").bind(account, t),
+    ...(admin ? [] : [db.prepare("DELETE FROM upload_receipts WHERE owner = ?1 AND state = 'retired' AND rowid NOT IN (SELECT rowid FROM upload_receipts WHERE owner = ?1 AND state = 'retired' ORDER BY retired DESC, rowid DESC LIMIT ?2)").bind(account, RETIRED_RECEIPTS_MAX)]),
     db.prepare("DELETE FROM holdings WHERE account_id = ?1").bind(account),
     db.prepare("DELETE FROM limits_cache WHERE account_id = ?1").bind(account),
     db.prepare("UPDATE purges SET status = 'files', collections = ?2, bytes = ?3, lease = NULL WHERE request_id = ?1").bind(rid, counts?.c ?? 0, counts?.b ?? 0),
@@ -926,7 +940,10 @@ export async function scheduled(env: ShareEnv): Promise<void> {
   await db.prepare("DELETE FROM purges WHERE status = 'done' AND ((kind IN ('collection', 'self') AND finished < ?1) OR (kind = 'admin' AND finished < ?2))").bind(t - DELETION_RECORD_DAYS * DAY, t - ADMIN_RECORD_DAYS * DAY).run();
   // the receipts of deleted shares' attempts, after DELETION_RECORD_DAYS: a later request carrying
   // such an attempt makes a new share, with a new id (the deleted one's link stays dead)
-  await db.prepare("DELETE FROM upload_receipts WHERE rowid IN (SELECT rowid FROM upload_receipts WHERE state = 'retired' AND retired < ?1 LIMIT 500)").bind(t - DELETION_RECORD_DAYS * DAY).run();
+  for (let page = 0; page < RETIRED_RECEIPT_PAGES; page++) {
+    const r = await db.prepare("DELETE FROM upload_receipts WHERE rowid IN (SELECT rowid FROM upload_receipts WHERE state = 'retired' AND retired < ?1 ORDER BY retired LIMIT 500)").bind(t - DELETION_RECORD_DAYS * DAY).run();
+    if ((r.meta?.changes ?? 0) < 500) break;
+  }
 }
 
 /**
@@ -991,10 +1008,15 @@ export async function handleShare(req: Request, env: ShareEnv, ctx: Ctx): Promis
   }
   if (p === "/api/share/mine" && m === "GET") return mine(env, id);
   if (m !== "GET" && m !== "PUT" && m !== "DELETE" && !/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
+  if (p === "/api/share/first-upload" && m === "POST") {
+    const body = (await req.json().catch(() => null)) as (CommitBody & { attempt?: unknown }) | null;
+    return body && typeof body === "object" ? firstUpload(env, who, body) : err(400, "a JSON object is required");
+  }
   if (p === "/api/share/collections" && m === "POST") {
     const body = (await req.json().catch(() => null)) as (CommitBody & { attempt?: unknown }) | null;
-    // (with its files: a new share, made with its first version; a title alone: an older page's empty collection)
-    return body && typeof body === "object" && body.files !== undefined ? firstUpload(env, who, body) : createCollection(env, who, body);
+    // (an older page's empty collection; a first upload's form is never taken for it)
+    if (body && typeof body === "object" && (body.files !== undefined || body.attempt !== undefined)) return err(400, "a first upload goes to /api/share/first-upload");
+    return createCollection(env, who, body);
   }
   if (p === "/api/share/check" && m === "POST") return check(req, env, who);
   g = p.match(/^\/api\/share\/blob\/([0-9a-f]{64})$/);

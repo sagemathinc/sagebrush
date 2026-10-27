@@ -549,7 +549,7 @@ async function purgeStatus(rid) {
   const versions = async (cid) => (await db.prepare("SELECT COUNT(*) AS n FROM versions WHERE collection = ?1").bind(cid).first()).n;
   const att = () => randomBytes(16).toString("hex");
   const blob = async (c, path, text) => { const b = Buffer.from(text); await c.put(`/api/share/blob/${sha(b)}`, b); return { path, sha256: sha(b), size: b.length }; };
-  const first = (c, body) => c.post("/api/share/collections", body);
+  const first = (c, body) => c.post("/api/share/first-upload", body);
   // (requests really at once: each held at CoCalc's limits, which a fresh cache asks for, then all let go
   // together, so each passes its receipt check before any commits; without this the worker finishes one first)
   const atOnce = async (who, reqs) => {
@@ -694,6 +694,83 @@ async function purgeStatus(rid) {
     const failed = await (await c.post("/api/share/collections", { title: "legacy, failed" })).json();
     const empty = await db.prepare("SELECT latest FROM collections WHERE id = ?1").bind(failed.id).first();
     ok(v.status === 201 && (await rows(R2)) === before + 2 && empty && empty.latest === null, "S6 the older {title} form: create then commit works; one never committed stays an empty collection (the known leak)");
+    // (the older form's path never takes a first upload's form for a {title}: no empty collection from it)
+    const n = await rows(R2);
+    const wrong = await c.post("/api/share/collections", { title: "t", files: [f], attempt: att() });
+    ok(wrong.status === 400 && (await rows(R2)) === n, "S6 a first upload's form sent to the older path is refused (400), making no collection: " + wrong.status);
+  }
+
+  // S9 (daybreak3's S1): deleted shares' receipts are bounded per account, however fast shares are made and deleted
+  {
+    const X = owner("7");
+    fake.limits.set(X, { tier: "member", storage_bytes: 1_000_000, max_file_bytes: 50_000, private_links: false });
+    const c = api((await signIn(X)).session);
+    const t = Math.floor(Date.now() / 1000);
+    // (1200 older deletions, seeded: more than the account keeps)
+    await db.prepare("INSERT INTO upload_receipts (owner, attempt_hash, request_digest, collection, version, state, created, retired) SELECT ?1, printf('h%06d', value), 'd', printf('x%011d', value), 'v', 'retired', ?2, ?2 + value FROM json_each(?3)").bind(X, t - 3600, JSON.stringify([...Array(1200).keys()])).run();
+    const f = await blob(c, "x.txt", "X's file");
+    const j = await (await first(c, { title: "X", files: [f], attempt: att() })).json();
+    ok((await c.del(`/api/share/collections/${j.collection}`)).status === 200, "(S9 X deletes a share)");
+    const kept = await db.prepare("SELECT COUNT(*) AS n, SUM(collection = ?2) AS mine, MIN(retired) AS oldest FROM upload_receipts WHERE owner = ?1 AND state = 'retired'").bind(X, j.collection).first();
+    ok(kept.n === 1000 && kept.mine === 1 && kept.oldest === t - 3600 + 201, `S9 at most 1000 deleted shares' receipts per account, the newest (the one just deleted included): ${JSON.stringify(kept)}`);
+  }
+  // S10: a backlog past its days, larger than a page, drains over scheduled runs; younger receipts stay
+  {
+    const t = Math.floor(Date.now() / 1000);
+    const ids = JSON.stringify([...Array(12_000).keys()]);
+    await db.prepare("INSERT INTO upload_receipts (owner, attempt_hash, request_digest, collection, version, state, created, retired) SELECT 'old-' || (value % 3), printf('a%06d', value), 'd', printf('y%011d', value), 'v', 'retired', ?1, ?1 FROM json_each(?2)").bind(t - 31 * 86400, ids).run();
+    await db.prepare("INSERT INTO upload_receipts (owner, attempt_hash, request_digest, collection, version, state, created, retired) SELECT 'old-0', printf('b%06d', value), 'd', printf('z%011d', value), 'v', 'retired', ?1, ?1 FROM json_each(?2)").bind(t - 86400, JSON.stringify([0, 1, 2, 3, 4])).run();
+    const aged = async () => (await db.prepare("SELECT COUNT(*) AS n FROM upload_receipts WHERE owner LIKE 'old-%' AND retired < ?1").bind(t - 30 * 86400).first()).n;
+    const a0 = await aged();
+    await tick();
+    const a1 = await aged();
+    await tick();
+    const a2 = await aged();
+    const young = (await db.prepare("SELECT COUNT(*) AS n FROM upload_receipts WHERE owner = 'old-0' AND retired >= ?1").bind(t - 30 * 86400).first()).n;
+    ok(a0 === 12_000 && a1 === 2000 && a2 === 0 && young === 5, `S10 12,000 receipts past their days: 10,000 removed by one run (20 pages of 500), the rest by the next; 5 younger ones stay (${a0} -> ${a1} -> ${a2}, young ${young})`);
+  }
+
+  // S11 (daybreak3's S2): a Worker rolled back to before this change (b06b01b7's share server, from git history),
+  // and this change's page client (uploadCollection, bundled as the page is): the upload fails, and the old server
+  // never makes an empty collection, as nothing reaches the path that would.  Without that history (a shallow
+  // clone, as in CI) it is skipped, saying so; test-upload.mjs's U5 checks the same against the old routes' answers.
+  {
+    let dir = null;
+    try {
+      execFileSync("git", ["cat-file", "-e", "b06b01b7^{commit}"], { cwd: here, stdio: "ignore" });
+      const { mkdtempSync, writeFileSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      dir = mkdtempSync(join(tmpdir(), "share-old-"));
+      for (const f of ["server.ts", "files.ts", "test-entry.ts"]) writeFileSync(join(dir, f), execFileSync("git", ["show", `b06b01b7:web/share/${f}`], { cwd: here }));
+    } catch { dir = null; }
+    // (and only with this change's page client: in a two-phase rollout's first phase, the page is still the older one)
+    const newClient = readFileSync(join(here, "../share-client/upload.ts"), "utf8").includes("/api/share/first-upload");
+    if (!newClient) console.log("SKIP S11: the page client here predates /api/share/first-upload (the rollout's server-first phase)");
+    else if (!dir) console.log("SKIP S11: no git history for b06b01b7 here (a shallow clone); U5 in test-upload.mjs covers the client against the old routes");
+    else {
+      const oldScript = execFileSync("bun", ["build", join(dir, "test-entry.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
+      const m3 = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "old-share", modules: true, script: oldScript, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"], bindings, outboundService: cocalc }] }));
+      const d3 = await m3.getD1Database("SHARE_DB");
+      for (const m of readdirSync(join(here, "migrations")).filter((f) => f.endsWith(".sql") && f < "0005").sort())
+        for (const st of readFileSync(join(here, "migrations", m), "utf8").replace(/--.*$/gm, "").split(";").map((x) => x.trim()).filter(Boolean)) await d3.prepare(st).run();
+      const O = owner("8");
+      fake.limits.set(O, { tier: "member", storage_bytes: 1_000_000, max_file_bytes: 50_000, private_links: false });
+      const dev = await m3.dispatchFetch(SITE + "/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "dev-token", account_id: O }) });
+      const cookie = (dev.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
+      const clientSrc = execFileSync("bun", ["build", join(here, "../share-client/upload.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
+      const { uploadCollection } = await import("data:text/javascript;base64," + Buffer.from(clientSrc).toString("base64"));
+      const realFetch = globalThis.fetch, realLocation = globalThis.location;
+      const paths = [];
+      globalThis.location = { href: SITE + "/" };
+      globalThis.fetch = async (u, init = {}) => { const url = new URL(String(u), SITE); paths.push(`${init.method ?? "GET"} ${url.pathname}`); return m3.dispatchFetch(url.href, { ...init, headers: { ...(init.headers ?? {}), cookie, origin: SITE } }); };
+      let e = null;
+      try { await uploadCollection({ id: null, attempt: "0".repeat(31) + "1", title: "rolled back", files: [{ path: "a.txt", size: 5, read: async () => new TextEncoder().encode("hello") }] }); } catch (x) { e = x; }
+      globalThis.fetch = realFetch;
+      globalThis.location = realLocation;
+      const n = (await d3.prepare("SELECT COUNT(*) AS n FROM collections WHERE owner = ?1").bind(O).first()).n;
+      await m3.dispose();
+      ok(dev.status === 200 && !!cookie && e instanceof Error && n === 0 && !paths.includes("POST /api/share/collections") && paths.includes("POST /api/share/first-upload"), `S11 this page's client against b06b01b7's server (a rolled-back Worker): the upload fails (${e?.message}), and no collection is made (${n}); requests: ${paths.join(", ")}`);
+    }
   }
 
   // S7: migration 0005, as the post-check reads it

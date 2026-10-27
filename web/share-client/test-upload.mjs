@@ -15,15 +15,16 @@ const ok = (cond, what) => {
   }
 };
 globalThis.location = { href: "https://sagebrush.test/" };
-let events = [], live = new Set(), peak = 0, answer = null, failing = null;
+let events = [], live = new Set(), peak = 0, answer = null, failing = null, oldServer = false;
 const track = () => (peak = Math.max(peak, [...live].reduce((n, d) => n + d.length, 0)));
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url), body = init.body;
   const json = (v) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
   // (a new share: one request, with its files and attempt, makes it; a title alone, an older page's empty collection)
-  if (u.endsWith("/api/share/collections") && init.method === "POST") {
+  if ((u.endsWith("/api/share/first-upload") || u.endsWith("/api/share/collections")) && init.method === "POST") {
     const b = JSON.parse(body);
-    events.push(b.files ? `new ${b.files.length} ${b.attempt}` : "create");
+    if (oldServer && u.endsWith("/api/share/first-upload")) return new Response('{"error":"not found"}', { status: 404 });
+    events.push(u.endsWith("/api/share/first-upload") ? `new ${b.files.length} ${b.attempt}` : "create");
     if (answer) return answer(b);
     return json({ collection: "c1", version: "v", url: "/s/c1", frozen: "/s/c1@v" });
   }
@@ -129,6 +130,23 @@ const run = async (files, limit) => {
   const gone = await uploadCollection({ id: null, attempt: ATT, title: "t", files: [lazy("a", 4)] }).then(() => null, (x) => x);
   answer = null;
   ok(used instanceof AttemptError && used.kind === "used" && used.share?.id === "c7" && used.share.url === "https://sagebrush.test/s/c7" && gone instanceof AttemptError && gone.kind === "retired", "U4 409 attempt_used and 410 attempt_retired: typed errors (the earlier share named), never a result");
+}
+{
+  // U5 (daybreak3's S2): this page against a server from before this change (a Worker rolled back), which has
+  // no first-upload route (404) and whose /api/share/collections would make an empty collection: the upload
+  // fails, and nothing is ever sent to that older path
+  events = [];
+  oldServer = true;
+  const e = await uploadCollection({ id: null, attempt: ATT, title: "t", files: [lazy("a", 4)] }).then(() => null, (x) => x);
+  oldServer = false;
+  ok(e instanceof Error && /not found/.test(e.message) && !events.includes("create"), `U5 against a rolled-back server: the upload fails (${e?.message}), and no empty collection is asked for (${JSON.stringify(events)})`);
+}
+{
+  // U6 (astra3's L1): beforeCommit runs before the first-upload request, and its refusal sends nothing
+  events = [];
+  let called = 0;
+  const e = await uploadCollection({ id: null, attempt: ATT, title: "t", files: [lazy("a", 4)] }, () => {}, { beforeCommit: () => { called++; throw new Error("the notebook's share changed"); } }).then(() => null, (x) => x);
+  ok(called === 1 && e?.message === "the notebook's share changed" && !events.some((x) => x.startsWith("new ")), `U6 beforeCommit refuses: no first-upload request (${JSON.stringify(events)})`);
 }
 
 console.log(`${checks - fails.length}/${checks} passed`);
