@@ -149,6 +149,8 @@
   #sharedlg .sharebar button { font-size: 12px; }
   #shareupload.busy::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sbspin .8s linear infinite; vertical-align: -1px; }
   @keyframes sbspin { to { transform: rotate(360deg); } }
+  /* (an always-present live region: its text is the check's state, so both its start and its end are announced) */
+  #sharechecking:empty { margin: 0; }
   @media (prefers-reduced-motion: reduce) { #shareupload.busy::before { animation: none; border: 0; border-radius: 0; width: auto; height: auto; content: "…"; } }
   #sharedlg .result { overflow-wrap: anywhere; font-size: 13px; }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
@@ -353,7 +355,7 @@
   <h4>Upload, with its files</h4>
   <p class="note">A page at sagebrush.space/s/… with this notebook, its outputs and the files you choose, for anyone with the link. You can delete it at any time. Needs a CoCalc account.</p>
   <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
-  <p class="note" id="sharechecking" hidden aria-live="polite">Checking your sign-in…</p>
+  <p class="note" id="sharechecking" aria-live="polite"></p>
   <p class="note" id="shareunreachable" hidden>Sagebrush couldn't reach its server to check your sign-in. Open Share again in a moment.</p>
   <div id="shareform" hidden>
     <label>Title <input type="text" id="sharetitlein" maxlength="200"></label>
@@ -1495,8 +1497,11 @@ async function copyShareLink() {
 // (none under `sagebrush notebook`, whose server has no share API: not asked)
 let sharing = { enabled: false };
 const shareDlg = $("#sharedlg");
+// (until the first check has answered, nothing is known: Share opens the dialog, which says it's checking)
+let shareKnown = false;
 const shareReady = (LOCAL ? Promise.resolve(sharing) : shareStatus()).then((s) => {
   sharing = s;
+  shareKnown = true;
 });
 $("#sharelink").onclick = async () => { if (shareDialog.busy) return; await copyShareLink(); shareDlg.close(); };
 // (each open's number: an open whose check ends after the dialog was closed, or opened again, stops there)
@@ -1510,16 +1515,18 @@ async function openShare() {
   if (!LOCAL) {
     // (the dialog at once, its link usable, while the check runs: up to 10 s, #207 board's note 1)
     $("#shareup").hidden = false;
-    $("#sharechecking").hidden = false;
+    $("#sharechecking").textContent = "Checking your sign-in…";
     for (const id of ["#sharesignin", "#shareunreachable", "#shareform"]) $(id).hidden = true;
     if (!shareDlg.open) shareDlg.showModal();
+    // (the page's first check, still running when this open began, is this open's answer: not asked twice)
+    const first = !shareKnown;
     await shareReady;
     // (a check that failed keeps what was known: a passing network error is neither "signed out"
     // nor "no sharing", and doesn't turn Share into Copy share link for the rest of the visit)
-    const s = await shareStatus();
+    const s = first ? sharing : await shareStatus();
     if (t !== shareOpens || !shareDlg.open) return;
     if (!(s.enabled === false && s.error && sharing.enabled)) sharing = s;
-    $("#sharechecking").hidden = true;
+    $("#sharechecking").textContent = "";
   }
   const me = sharing.enabled ? sharing.me : null;
   // (a site without the share API, known for sure: no Upload section at all, #207 board's note 2)
@@ -1767,7 +1774,8 @@ fileMenu.addEventListener("click", async (e) => {
     case "print": window.print(); break;
     case "share": {
       // (a page whose first check failed asks again: Share, not Copy share link, if it can)
-      if (sharing.enabled || sharing.error) { openShare(); break; }
+      // (and one whose first check hasn't answered yet: the dialog, saying it's checking, never a copied link)
+      if (!shareKnown || sharing.enabled || sharing.error) { openShare(); break; }
       await copyShareLink();
       break;
     }
