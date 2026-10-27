@@ -566,6 +566,9 @@ test("a protocol member the census can't resolve is a fail-closed obligation, re
   // a string key could: an obligation
   const sk = fixture(files("declare function mkFn(): any;\nexport function put(o: any, k: string): void { o[k] = mkFn(); }"));
   assert.equal(sk.obligations.length, 1);
+  // a value that can't be a function, though typed any: no obligation
+  const plain = fixture(files("declare const src: any;\nexport function put(o: any, k: string): void { o[k] = Object.create(null); o[k] = JSON.parse(\"{}\"); o[k] = { a: 1 }; o[k] = [src]; o[k] = new Map(); }"));
+  assert.deepEqual(plain.obligations, []);
   // known, non-callable or non-protocol names: no obligation
   const none = fixture(files("export class F { toJSON = 3; data = () => 1; [\"x\"]() { return 1; } }"));
   assert.deepEqual(none.obligations, []);
