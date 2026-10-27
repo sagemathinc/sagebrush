@@ -526,10 +526,10 @@ name = "sagebrush-ap"
 version = "0.1.0"
 dependencies = [
  "num-traits",
- "rayon",
  "sagebrush-ball",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-par",
 ]
 
 [[package]]
@@ -541,6 +541,7 @@ dependencies = [
  "num-traits",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-par",
 ]
 
 [[package]]
@@ -581,10 +582,10 @@ dependencies = [
 name = "sagebrush-cli"
 version = "0.1.0"
 dependencies = [
- "rayon",
  "sagebrush-ap",
  "sagebrush-bigint",
  "sagebrush-modsym",
+ "sagebrush-par",
 ]
 
 [[package]]
@@ -626,11 +627,11 @@ version = "0.1.0"
 dependencies = [
  "num-integer",
  "num-traits",
- "rayon",
  "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-classgroup",
  "sagebrush-interrupt",
+ "sagebrush-par",
  "sagebrush-poly",
 ]
 
@@ -654,6 +655,7 @@ dependencies = [
  "sagebrush-ap",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-par",
  "sagebrush-poly",
  "serde_json",
 ]
@@ -667,6 +669,7 @@ dependencies = [
  "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-par",
  "sagebrush-poly",
 ]
 
@@ -677,10 +680,10 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
- "rayon",
  "sagebrush-ap",
  "sagebrush-bigint",
  "sagebrush-modsym",
+ "sagebrush-par",
 ]
 
 [[package]]
@@ -694,6 +697,15 @@ dependencies = [
  "sagebrush-modsym",
  "sagebrush-poly",
  "serde_json",
+]
+
+[[package]]
+name = "sagebrush-par"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+ "sagebrush-interrupt",
+ "sagebrush-ledger",
 ]
 
 [[package]]
@@ -712,13 +724,13 @@ version = "0.1.0"
 dependencies = [
  "num-bigint",
  "pyo3",
- "rayon",
  "sagebrush-ap",
  "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-ledger",
  "sagebrush-modsym",
  "sagebrush-mpoly",
+ "sagebrush-par",
  "sagebrush-raster",
  "sagebrush-sym",
  "sagebrush-web",

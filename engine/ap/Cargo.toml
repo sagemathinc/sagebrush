@@ -7,11 +7,11 @@ description = "Traces of Frobenius a_p of elliptic curves over Q, for all primes
 
 [features]
 default = ["parallel"]
-parallel = ["dep:rayon"]
+parallel = ["sagebrush-par/parallel"]
 
 [dependencies]
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-ball = { path = "../ball" }
 num-traits = "0.2"
 sagebrush-interrupt = { path = "../interrupt" }
-rayon = { version = "1.10", optional = true }
+sagebrush-par = { path = "../par" }
