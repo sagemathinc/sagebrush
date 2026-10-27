@@ -580,9 +580,9 @@ test("a protocol member the census can't resolve is a fail-closed obligation, re
   // a string key could: an obligation
   const sk = fixture(files("declare function mkFn(): any;\nexport function put(o: any, k: string): void { o[k] = mkFn(); }"));
   assert.equal(sk.obligations.length, 1);
-  // a value that can't be a function, though typed any: no obligation
-  const plain = fixture(files("declare const src: any;\nexport function put(o: any, k: string): void { o[k] = Object.create(null); o[k] = JSON.parse(\"{}\"); o[k] = { a: 1 }; o[k] = [src]; o[k] = new Map(); }"));
-  assert.deepEqual(plain.obligations, []);
+  // only literals are exempt by syntax: lib calls typed any and new-expressions are obligations (astra2 X1)
+  const plain = fixture(files("declare const src: any;\nexport function put(o: any, k: string): void {\n  o[k] = { a: 1 };\n  o[k] = [src];\n  o[k] = Object.create(null);\n  o[k] = JSON.parse(\"{}\");\n  o[k] = new Map();\n}"));
+  assert.deepEqual(plain.obligations.map((o: any) => o.line).sort(), [5, 6, 7], "Object.create, JSON.parse and new Map; not the two literals");
   // known, non-callable or non-protocol names: no obligation
   const none = fixture(files("export class F { toJSON = 3; data = () => 1; [\"x\"]() { return 1; } }"));
   assert.deepEqual(none.obligations, []);
@@ -603,8 +603,16 @@ test("a value whose type may be callable without a call signature is an obligati
   assert.deepEqual(mayAlloc(f("export function install<T extends { a: number }>(o: any, fn: T): void { o.toJSON = fn; }"), ["json"]), { json: true }, "a type parameter constrained to an object type");
   assert.deepEqual(mayAlloc(f("export function install(o: any, fn: { a: number }): void { o.toJSON = fn; }"), ["json"]), { json: true }, "a structural object type");
   assert.deepEqual(mayAlloc(f("export function install<T extends number>(o: any, fn: T): void { o.toJSON = fn; }"), ["json"]), { json: false }, "a type parameter constrained to a primitive");
-  assert.deepEqual(mayAlloc(f("export function install(o: any, fn: number[]): void { o.toJSON = fn; }"), ["json"]), { json: false }, "an array");
+  assert.deepEqual(mayAlloc(f("export function install(o: any, fn: number[]): void { o.toJSON = fn; }"), ["json"]), { json: true }, "an array type may be a function (Object.assign(fn, []))");
   assert.deepEqual(mayAlloc(f("export function install(o: any): void { o.toJSON = { a: 1 }; }"), ["json"]), { json: false }, "an object literal: provably not a function");
+});
+
+test("X1 and X2, isolated: a constructor returning a function, and an array-constrained parameter holding one, are obligations (astra2)", () => {
+  const x1 = fixture({ "src/runtime/x1.ts": "export class Factory { constructor() { return (() => new Uint8Array(8)) as any; } }\nexport function install(o: any): void { o.toJSON = new Factory(); }\nexport function json(o: object): string { return JSON.stringify(o); }\n" });
+  assert.deepEqual(x1.obligations.map((o: any) => [o.line, o.kinds.join()]), [[2, "json"]]);
+  const x2 = fixture({ "src/runtime/x2.ts": "export function install<T extends unknown[]>(o: any, f: T): void { o.toJSON = f; }\nexport function make(): any { return Object.assign(() => new Uint8Array(8), []); }\nexport function json(o: object): string { return JSON.stringify(o); }\n" });
+  assert.deepEqual(x2.obligations.map((o: any) => [o.line, o.kinds.join()]), [[1, "json"]]);
+  assert.deepEqual(mayAlloc({ "src/runtime/x1.ts": "export class Factory { constructor() { return (() => new Uint8Array(8)) as any; } }\nexport function install(o: any): void { o.toJSON = new Factory(); }\nexport function json(o: object): string { return JSON.stringify(o); }\n" }, ["json"]), { json: true });
 });
 
 test("E1.1: typescript-api is named only by the gate's script and its test; it has no install scripts", () => {
