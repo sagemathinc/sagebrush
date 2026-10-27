@@ -2,8 +2,20 @@
 // web/test-interrupt-matrix.mjs and its unit tests (test/interrupt-classify.test.ts).
 // A trial: { t_send (harness ms, or undefined), marks: { ENTER, RET, KI: { t, rest } }, stray, probe }.
 // Every time is on the harness's own monotonic clock; `rest` of ENTER and KI carry the driver's.
-export const SLOW_MS = 10_000;
+// The Stop bound (William, Oct 27 2026; plan-nocliffs S-delta Stop-250 r4 433ed0cf): a Stop is honoured
+// when the public caller's KeyboardInterrupt (or the exit) comes within 250 ms of the request, on the
+// harness's raw clock (never a rounded figure).  Later is "honoured late": a FAIL that a baseline entry never
+// pins; only one of William's waiver records (web/interrupt-waivers.json) covers it, as WAIVED.  Not at all
+// ("did not stop", "no KeyboardInterrupt") is "not honoured", which a baseline entry may pin, as before.
+export const STOP_BOUND_MS = 250;
 export const POLL_GAP_MS = 100; // §5: recognized this fast, the route polled
+// a request's raw latency against the bound: null when honoured in time, else the cell's FAIL ("late": a
+// finite latency past the bound; a missing, NaN or negative one is a harness defect, never a pass)
+export function stopGate(latency, what = "the KeyboardInterrupt") {
+  if (typeof latency !== "number" || !Number.isFinite(latency) || latency < 0) return { outcome: "FAIL", why: `harness bug: no valid latency for ${what} (${latency})` };
+  if (latency <= STOP_BOUND_MS) return null;
+  return { outcome: "FAIL", why: `honoured late: ${what} came ${latency.toFixed(1)} ms after the Stop, past the ${STOP_BOUND_MS} ms bound`, late: true, latency_raw_ms: latency };
+}
 
 // an XK case's cell (r5 §6.2).  xk: { kind: "window", R_ms } (the non-polling call is wrapped:
 // XSTART i before it, XEND i after it) or { kind: "bound", T_ms, f } (the Stop at f of T).
@@ -15,16 +27,17 @@ export function classifyXK(t, xk) {
     const inside = t.t_send != null && x && x.t < t.t_send && !(e && e.t < t.t_send);
     if (!inside) return { ...base, xk_inside: false };
     const bound = xk.R_ms + Math.max(1000, 0.25 * xk.R_ms);
-    if (base.outcome !== "PASS" && base.outcome !== "SLOW") return { ...base, xk_inside: true };
-    if (base.latency_ms > bound) return { ...base, outcome: "FAIL", why: `KI past the XK bound (${base.latency_ms} > ${Math.round(bound)} ms)`, xk_inside: true };
-    // (recognized within the poll gap inside the window: the call polls now)
-    return { ...base, outcome: base.latency_ms <= POLL_GAP_MS ? "PASS" : "EXCEPTION", exception: "XK", xk_inside: true, xk_bound_ms: Math.round(bound) };
+    // (past the window's own bound the call didn't end the wait: never waivable, whatever the latency)
+    if (base.late && base.latency_raw_ms > bound) return { ...base, why: `KI past the XK bound (${base.latency_ms} > ${Math.round(bound)} ms)`, past_xk_bound: true, xk_inside: true, xk_bound_ms: Math.round(bound) };
+    if (base.outcome !== "PASS") return { ...base, xk_inside: true, xk_bound_ms: Math.round(bound) };
+    // (recognized within the poll gap inside the window: the call polls now; past it, within the Stop bound: EXCEPTION)
+    return { ...base, outcome: base.latency_raw_ms <= POLL_GAP_MS ? "PASS" : "EXCEPTION", exception: "XK", xk_inside: true, xk_bound_ms: Math.round(bound) };
   }
   if (xk.kind === "bound") {
-    if (base.outcome !== "PASS" && base.outcome !== "SLOW") return base;
     const bound = (1 - xk.f) * xk.T_ms + Math.max(1000, 0.25 * xk.T_ms);
-    if (base.latency_ms > bound) return { ...base, outcome: "FAIL", why: `KI past the XK bound (${base.latency_ms} > ${Math.round(bound)} ms)` };
-    return { ...base, outcome: base.latency_ms <= POLL_GAP_MS ? "PASS" : "EXCEPTION", exception: "XK", xk_bound_ms: Math.round(bound) };
+    if (base.late && base.latency_raw_ms > bound) return { ...base, why: `KI past the XK bound (${base.latency_ms} > ${Math.round(bound)} ms)`, past_xk_bound: true, xk_bound_ms: Math.round(bound) };
+    if (base.outcome !== "PASS") return base;
+    return { ...base, outcome: base.latency_raw_ms <= POLL_GAP_MS ? "PASS" : "EXCEPTION", exception: "XK", xk_bound_ms: Math.round(bound) };
   }
   return { ...base, outcome: "FAIL", why: "harness bug: unknown XK kind " + xk.kind };
 }
@@ -75,7 +88,8 @@ export function classify(t) {
   // a Stop that could not be dispatched (the process gone, EPERM...): the cell is uncovered, never a
   // result, and the error is kept (astra CORR-168-R2-1)
   if (t.send_error) return { outcome: "INVALID", why: "the Stop could not be sent: " + (t.send_error.error ?? t.send_error), send_error: t.send_error };
-  if (t.t_send == null) return { outcome: "INVALID", why: t.marks.RET ? "returned before the Stop" : "no Stop sent" };
+  // (the target started and wasn't done, yet no send time was recorded: the harness lost the request, a FAIL)
+  if (t.t_send == null) return t.marks.RET ? { outcome: "INVALID", why: "returned before the Stop" } : t.marks.ENTER ? { outcome: "FAIL", why: "harness bug: the target started (ENTER) but no Stop send time was recorded" } : { outcome: "INVALID", why: "no Stop sent" };
   // (a KI from before the send is stale, another trial's or the setup's: never a tiny latency)
   if (t.marks.KI && t.marks.KI.t < t.t_send) return { outcome: "INVALID", why: "stale KI before the Stop" };
   if (t.marks.RET) {
@@ -89,19 +103,20 @@ export function classify(t) {
   const latency = t.marks.KI.t - t.t_send;
   if (!(latency >= 0)) return { outcome: "FAIL", why: "harness bug: negative latency" };
   const enter = Number(t.marks.ENTER?.rest), ki = Number(t.marks.KI.rest);
-  const r = { latency_ms: Math.round(latency), driver_elapsed_to_ki_s: Number.isFinite(enter) && Number.isFinite(ki) ? +(ki - enter).toFixed(3) : null };
+  // (latency_ms is for display; the gate reads latency_raw_ms)
+  const r = { latency_ms: Math.round(latency), latency_raw_ms: latency, driver_elapsed_to_ki_s: Number.isFinite(enter) && Number.isFinite(ki) ? +(ki - enter).toFixed(3) : null };
   if (!String(t.probe ?? "").startsWith("ok")) return { outcome: "FAIL", why: "probe " + t.probe, ...r };
-  return { outcome: latency > SLOW_MS ? "SLOW" : "PASS", ...r };
+  return { ...r, ...(stopGate(latency) ?? { outcome: "PASS" }) };
 }
 
-// a (case, host) row from its required cells (r4 §6.1): FAIL, INCOMPLETE, or the worst of
-// SLOW / EXCEPTION / PASS.  cells: [{ outcome }], with every required cell present.
-// leakOk: false fails the row; null (not measured) leaves it INCOMPLETE.
+// a (case, host) row from its required cells (r4 §6.1): FAIL, INCOMPLETE, EXCEPTION or PASS.
+// cells: [{ outcome }], with every required cell present.  leakOk: false fails the row; null (not
+// measured) leaves it INCOMPLETE.  A cell outcome it doesn't know (the retired SLOW, a typo) FAILs.
+const CELL_OUTCOMES = new Set(["PASS", "EXCEPTION", "FAIL", "INVALID", "UNCALIBRATED"]);
 export function rowOutcome(cells, leakOk = true) {
-  if (leakOk === false || cells.some((c) => c.outcome === "FAIL")) return "FAIL";
+  if (leakOk === false || cells.some((c) => c.outcome === "FAIL" || !CELL_OUTCOMES.has(c.outcome))) return "FAIL";
   if (leakOk == null || cells.length === 0 || cells.some((c) => c.outcome === "INVALID" || c.outcome === "UNCALIBRATED")) return "INCOMPLETE";
-  for (const o of ["SLOW", "EXCEPTION"]) if (cells.some((c) => c.outcome === o)) return o;
-  return "PASS";
+  return cells.some((c) => c.outcome === "EXCEPTION") ? "EXCEPTION" : "PASS";
 }
 
 // the heap+external sample (the DONE marker's figure), Python run in the session after each trial: the
@@ -165,10 +180,39 @@ export function againstBaseline(row, baseline) {
   const bs = (baseline?.entries ?? []).filter((e) => e.case === row.case && e.host === row.host);
   // (a row with a failed Stop dispatch never matches a baseline: its cells say nothing about the route)
   if (!bs.length || row.leak?.ok === false || (row.trials ?? []).some((t) => t.send_error)) return row.outcome;
-  if (row.outcome === "PASS" || row.outcome === "SLOW" || row.outcome === "EXCEPTION") return "FIXED";
+  if (row.outcome === "PASS" || row.outcome === "EXCEPTION") return "FIXED";
+  // (a Stop honoured late is never KNOWN: only a waiver covers it, withWaiver)
+  if ((row.trials ?? []).some((t) => t.outcome === "FAIL" && t.late)) return row.outcome;
   const res = bs.map((b) => new RegExp(b.signature));
   const whys = (row.trials ?? []).filter((t) => t.outcome === "FAIL").map((t) => t.why ?? "");
   return row.outcome === "FAIL" && whys.length > 0 && whys.every((w) => res.some((re) => re.test(w))) ? "KNOWN" : row.outcome;
+}
+
+// William's waiver records (web/interrupt-waivers.json): a record covers a FAIL row only when every failing
+// cell was honoured late (not past an XK window's own bound; nothing else failed, no leak), and its scope
+// is exactly the row's case, host and the case's declared call.  The row is then WAIVED (own_outcome FAIL,
+// never counted as a pass); a matching record that has ended leaves it FAIL, saying so.
+export const WAIVER_FIELDS = ["id", "granted", "by", "words", "scope", "owner", "follow_up", "ends_when", "ended"];
+export function waiverErrors(records) {
+  const errs = [];
+  if (!Array.isArray(records)) return ["the registry is not an array"];
+  for (const [k, w] of records.entries()) {
+    for (const f of WAIVER_FIELDS) if (!w || !(f in w)) errs.push(`record ${k}: no ${f}`);
+    if (w && (typeof w.words !== "string" || !w.words.trim())) errs.push(`record ${k}: empty words`);
+    if (w && w.by !== "William") errs.push(`record ${k}: not William's (by ${w.by})`);
+    if (w && typeof w.ended !== "boolean") errs.push(`record ${k}: ended is not a boolean`);
+    if (w && !["case", "host", "call"].every((f) => typeof w.scope?.[f] === "string" && w.scope[f])) errs.push(`record ${k}: scope needs case, host and call`);
+  }
+  return errs;
+}
+export function withWaiver(row, outcome, waivers, call) {
+  if (outcome !== "FAIL" || call == null) return { outcome };
+  const w = (waivers ?? []).find((x) => x.scope?.case === row.case && x.scope?.host === row.host && x.scope?.call === call);
+  const fails = (row.trials ?? []).filter((t) => t.outcome === "FAIL");
+  if (!w || !fails.length || row.leak?.ok === false || !fails.every((t) => t.late && !t.past_xk_bound)) return { outcome };
+  if (w.ended !== false) return { outcome: "FAIL", why: `waiver ${w.id} ended: remove the record in the fixing change` };
+  const late = Math.max(...fails.map((t) => t.latency_raw_ms));
+  return { outcome: "WAIVED", waiver: w.id, why: `${fails.length} cell(s) honoured late, at most ${late.toFixed(1)} ms; waived by ${w.id} (William, ${w.granted})` };
 }
 
 // a performance cliff between two close calibration sizes (r5 §3; William, Oct 25), proven over
