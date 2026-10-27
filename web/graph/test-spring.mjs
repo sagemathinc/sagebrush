@@ -235,6 +235,48 @@ check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }
   }
 }
 
+// the packing is exactly the one finish() always did (astra2's review of
+// #240 r2): master's packing, verbatim below as the oracle, sorts the parts
+// before summing their area, and one ulp of that sum decides whether a part
+// fits its row.  Three parts on such a threshold (astra2's counterexample:
+// summed in input order, part 2 wraps), and seeded random ones
+{
+  const masterPacking = (parts, gap) => {
+    const free = parts.map((pt, i) => ({ pt, i, bb: pt.bb }));
+    free.sort((a, b) => b.pt.boxes - a.pt.boxes || a.i - b.i);
+    let total = 0;
+    for (const f of free) total += (f.bb.x1 - f.bb.x0 + gap) * (f.bb.y1 - f.bb.y0 + gap);
+    const width = Math.max(Math.sqrt(total) * 1.2, ...free.map((f) => f.bb.x1 - f.bb.x0), 0);
+    let x = 0, y = 0, rowH = 0;
+    const out = parts.map(() => null);
+    for (const f of free) {
+      const w = f.bb.x1 - f.bb.x0, h = f.bb.y1 - f.bb.y0;
+      if (x > 0 && x + w > width) { x = 0; y += rowH + gap * 2; rowH = 0; }
+      out[f.i] = [x - f.bb.x0, y - f.bb.y0];
+      x += w + gap * 2;
+      rowH = Math.max(rowH, h);
+    }
+    return out;
+  };
+  const ours = (parts, gap) => placeRows(parts.map((p) => p.bb), packRows(parts, gap), gap, null);
+  const ws = [76.89682551566193, 120.25662880371895, 168.30429545468735], hs = [54.827157211541056, 62.697630934738044, 278.65504534137085];
+  const edge = [1, 3, 2].map((boxes, i) => ({ boxes, bb: { x0: 0, y0: 0, x1: ws[i], y1: hs[i] } }));
+  const want = masterPacking(edge, 24);
+  check(JSON.stringify(want) === JSON.stringify([[0, 326.65504534137085], [0, 0], [168.25662880371897, 0]]), `the oracle is master's packing of the counterexample (${JSON.stringify(want)})`);
+  check(JSON.stringify(ours(edge, 24)) === JSON.stringify(want), `on a row threshold the packing is master's, exactly (${JSON.stringify(ours(edge, 24))})`);
+  let seed = 12345, same = 0, n = 0;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  for (let k = 0; k < 2000; k++) {
+    const parts = Array.from({ length: 2 + Math.floor(rand() * 6) }, () => {
+      const x0 = rand() * 50, y0 = rand() * 50;
+      return { boxes: 1 + Math.floor(rand() * 5), bb: { x0, y0, x1: x0 + 10 + rand() * 200, y1: y0 + 10 + rand() * 300 } };
+    });
+    n++;
+    if (JSON.stringify(ours(parts, 24)) === JSON.stringify(masterPacking(parts, 24))) same++;
+  }
+  check(same === n, `2000 random packings equal master's exactly (${same}/${n})`);
+}
+
 // the same on Node and Deno as here (Bun)
 {
   const [nodes, edges] = GRAPHS.tree;
