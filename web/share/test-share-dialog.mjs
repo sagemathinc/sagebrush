@@ -1313,8 +1313,11 @@ try {
       await B2.ev(lose);
       await openIn(A);
       await openIn(B2);
-      // (B's save before its upload stores the other attempt, as another tab's edit would land)
-      await B2.ev(`window.sagebrush.shareTest.saved = async () => { await ${storeOther(otherR4)}; await window.sagebrush.notebook.saved(); }`);
+      // (B's save before its upload stores the other attempt, as another tab's edit would land: written, and said
+      // on the notebooks' channel as a tab's save is, so A's page has it too; unsaid, A's retry stopped at
+      // "changed elsewhere", run 15)
+      const storeOtherSaid = (att) => `(async () => { const id = localStorage.getItem('sagebrush-current'); const db = await new Promise((ok, no) => { const r = indexedDB.open('sagebrush'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }); let rec = null; await new Promise((ok, no) => { const tx = db.transaction('notebooks', 'readwrite'), st = tx.objectStore('notebooks'); const g = st.get(id); g.onsuccess = () => { rec = { ...g.result, share_attempt: '${att}', rev: (g.result.rev ?? 0) + 1, updated: Date.now() }; st.put(rec); }; tx.oncomplete = ok; tx.onerror = () => no(tx.error); }); db.close(); const ch = new BroadcastChannel('sagebrush-notebooks'); ch.postMessage({ from: 'other-tab', id, doc: rec }); ch.close(); })()`;
+      await B2.ev(`window.sagebrush.shareTest.saved = async () => { await ${storeOtherSaid(otherR4)}; await window.sagebrush.notebook.saved(); }`);
       await A.ev("window.__hold = true; window.__held = 0; window.__heldQ = []");
       await uploadIn(A, "R4");
       await A.until("window.__held > 0", 60000);
