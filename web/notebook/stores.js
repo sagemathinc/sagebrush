@@ -459,9 +459,12 @@ function getChannel() {
 }
 
 export class IdbStore {
-  /** @param db an IndexedDB database from openDb(); @param id the notebook's id; @param initial its document if it is new */
-  constructor(db, id, initial = null) { this.db = db; this.id = admitId(id); this.initial = initial; }
-  async load() {
+  /** @param db an IndexedDB database from openDb(); @param id the notebook's id; @param initial its document if it is new;
+   * `opts.journal`: the journal's store (web/notebook/journal.js), whose every save carries the journal's {j, hash}
+   * and is written only in the phase "journal" (plan-sync-slice2-client r4 §1a, r9 §3.1a's T2) */
+  constructor(db, id, initial = null, opts = {}) { this.db = db; this.id = admitId(id); this.initial = initial; this.journal = !!opts.journal; }
+  /** The stored record (undefined if none), the store bound to the fence read with it. */
+  async loadRecord() {
     // (the document and the fence it belongs with, read in one transaction: the workspace this store writes into)
     const both = this.db ? await new Promise((ok, no) => {
       const tx = this.db.transaction("notebooks", "readonly"), st = tx.objectStore("notebooks"), d = st.get(this.id), f = st.get(FENCE);
@@ -469,15 +472,22 @@ export class IdbStore {
       tx.onerror = () => no(tx.error);
     }) : { doc: undefined, fence: undefined };
     if (this.fence === undefined) this.fence = fenceOf(both.fence);
-    const doc = both.doc;
+    return both.doc;
+  }
+  async load() {
+    const doc = await this.loadRecord();
     if (doc) return doc;
     const fresh = { ...(this.initial ?? { name: "Untitled", mode: "python", cells: [] }), id: this.id };
     await this.save(fresh);
     return fresh;
   }
-  /** `opts.lockHeld`: the caller holds the workspace's lock already (the workspace's own verbs). */
+  /** `opts.lockHeld`: the caller holds the workspace's lock already (the workspace's own verbs).  `opts.journal`
+   * ({j, hash}, a journal store's only): T2, written only over a stored j no later than `j`. */
   async save(doc, opts = {}) {
     if (!this.db) return "not saved: this browser has no storage";
+    // (a journal store writes nothing without the journal's word; any other store, nothing with it)
+    const jw = opts.journal;
+    if (this.journal !== !!jw || (jw && !(Number.isSafeInteger(jw.j) && jw.j >= 0 && typeof jw.hash === "string"))) return "not saved: this notebook's save didn't come through sync's journal: reload this page";
     // (refused while the page says so: the workspace quarantined, design/workspace-durability.md A.3)
     const gate = refusal();
     if (gate) return `not saved: ${gate}`;
@@ -497,13 +507,15 @@ export class IdbStore {
       fence.onsuccess = () => {
         // (a store saving before it loaded binds to the fence it finds now)
         if (this.fence === undefined) this.fence = fenceOf(fence.result);
-        const why = fenceRefusal(fence.result, this.fence);
+        const why = fenceRefusal(fence.result, this.fence, jw ? "journal" : "ok");
         if (why) result = { refused: why };
       };
       const get = st.get(this.id);
       get.onsuccess = () => {
         if (result?.refused) return;
-        const rec = revise(get.result, { ...doc, id: this.id, updated: Date.now() });
+        // (T2: never over a value the journal has later than this one's, so the store never moves back)
+        const { j: _j, hash: _h, ...plain } = doc;
+        const rec = (jw && (get.result?.j ?? 0) > jw.j) ? null : revise(get.result, { ...plain, id: this.id, updated: Date.now(), ...(jw ? { j: jw.j, hash: jw.hash } : {}) });
         if (!rec) result = { conflict: get.result };
         else {
           st.put(rec);
@@ -545,7 +557,29 @@ function getHistoryChannel() {
   return historyChannel;
 }
 export class IdbPatchStore {
-  constructor(db, id) { this.db = db; this.id = admitId(id); this.owned = !db || ownedByWorkspace(db.name, id); }
+  /** `opts.journal`: the journal's hooks (web/notebook/journal.js): `t1(st, row)`, run in each append's own transaction
+   * (the patch's row and the journal's rows written together, T1), and `drop(st)`, in a drop's; with them every write
+   * is in the phase "journal" only, and each append's outcome is had from `appended(time)`. */
+  constructor(db, id, opts = {}) {
+    this.db = db; this.id = admitId(id); this.owned = !db || ownedByWorkspace(db.name, id);
+    this.journal = opts.journal ?? null; this.t1s = new Map();
+  }
+  // (the phase this store's writes go in)
+  get phase() { return this.journal ? "journal" : "ok"; }
+  /** A journal store's append's outcome, once its transaction has completed: {j} or {refused}. */
+  appended(time) {
+    const t = this.t1s.get(time);
+    return t ? t.p : Promise.resolve({ refused: "that version wasn't kept" });
+  }
+  // (the promise of an append's outcome, made when it is asked for, settled when its transaction ends)
+  expect(time) {
+    if (!this.journal) return null;
+    let settle;
+    const p = new Promise((ok) => { settle = ok; });
+    const t = { p, settle: (v) => { if (this.t1s.get(time) === t) this.t1s.delete(time); settle(v); } };
+    this.t1s.set(time, t);
+    return t;
+  }
   // (one queue, in the order they were asked for, for append, clear and drop: none overtakes another, and each
   // tells the other tabs at its turn, so they hear them in that order too: astra's CORR-511-1)
   queue(f) {
@@ -557,7 +591,7 @@ export class IdbPatchStore {
   async allowed() {
     if (!this.owned) return;
     if (this.fence === undefined) this.fence = fenceOf((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
-    const why = refusal() || (await primaryRefusal(this.db, this.fence)) || fenceRefusal((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence, this.fence);
+    const why = refusal() || (await primaryRefusal(this.db, this.fence)) || fenceRefusal((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence, this.fence, this.phase);
     if (why) throw new Error(`not done: ${why}`);
   }
   range() { return IDBKeyRange.bound([this.id, ""], [this.id, "\uffff"]); }
@@ -575,6 +609,8 @@ export class IdbPatchStore {
   append(env) {
     // (not while the page refuses saves, nor when the fence says no, checked in the write's own transaction)
     if (!this.db || (this.owned && refusal())) return false;
+    // (a journal store's: one at a time per version)
+    if (this.journal && (typeof env?.time !== "string" || this.t1s.has(env.time))) return false;
     // (bounded: past HISTORY_BACKLOG, refused and said, never queued)
     // (kept while it waits as its JSON text alone, made now: what is charged is what is held, however the caller
     // changes the envelope later, and whatever its shape; parsed only at its turn.  Plain JSON data only: one
@@ -601,6 +637,7 @@ export class IdbPatchStore {
     // check before the walk stays as a defence)
     const text = writeJson(inert.snap);
     if (text.length !== inert.size) return false;
+    const t1 = this.expect(env.time);
     env = undefined;
     let size = 0;
     if (this.owned) {
@@ -616,22 +653,37 @@ export class IdbPatchStore {
     // of the workspace's lock)
     this.queue(async () => {
       const env = JSON.parse(text);
-      getHistoryChannel()?.postMessage({ from: tabId, id: this.id, env });
+      // (a journal store's tells the other tabs only once its T1 has committed)
+      if (!t1) getHistoryChannel()?.postMessage({ from: tabId, id: this.id, env });
       if (this.owned && this.fence === undefined) this.fence = fenceOf((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
       await underLock(!this.owned, async () => {
-      if (this.owned && (await primaryRefusal(this.db, this.fence))) return;
+      const why = this.owned ? await primaryRefusal(this.db, this.fence) : null;
+      if (why) { t1?.settle({ refused: why }); return; }
+      let out = null;
       await new Promise((ok) => {
         const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
         f.onsuccess = () => {
           if (this.fence === undefined) this.fence = fenceOf(f.result?.fence);
-          if (this.owned && fenceRefusal(f.result?.fence, this.fence)) return;
-          st.put({ nb: this.id, time: env.time, env });
+          const refused = this.owned ? fenceRefusal(f.result?.fence, this.fence, this.phase) : null;
+          if (refused) { out = { refused }; return; }
+          const row = { nb: this.id, time: env.time, env };
+          if (!t1) { st.put(row); return; }
+          // (T1: the journal's rows and the patch's, in this one transaction; refused, nothing of it written)
+          this.journal.t1(st, row).then((r) => {
+            out = r;
+            if (r?.refused) { try { tx.abort(); } catch {} }
+          }, (e) => { out = { refused: `not kept: ${e?.message ?? e}` }; try { tx.abort(); } catch {} });
         };
         tx.oncomplete = () => ok();
-        tx.onerror = () => { console.warn("history:", tx.error); ok(); };
+        tx.onabort = () => { out ??= { refused: `not kept: ${tx.error?.message ?? "the write was stopped"}` }; if (out.j !== undefined) out = { refused: "not kept: the write was stopped" }; ok(); };
+        tx.onerror = () => { console.warn("history:", tx.error); };
       });
+      if (t1) {
+        t1.settle(out ?? { refused: "not kept" });
+        if (out?.j !== undefined) getHistoryChannel()?.postMessage({ from: tabId, id: this.id, env });
+      }
       });
-    }).catch((e) => console.warn("history:", e)).finally(() => { if (this.owned) { backlog.entries--; backlog.bytes -= size; } });
+    }).catch((e) => { t1?.settle({ refused: `not kept: ${e?.message ?? e}` }); console.warn("history:", e); }).finally(() => { if (this.owned) { backlog.entries--; backlog.bytes -= size; } });
     return true;
   }
   subscribe(f) {
@@ -653,17 +705,18 @@ export class IdbPatchStore {
   }
   /** Forget this notebook's history without telling anyone (the notebook was deleted). */
   drop(opts = {}) {
-    return this.deleteQueued(opts, false);
+    return this.deleteQueued(opts, false, true);
   }
   // (in the queue, in the order asked for; its deadline from when it was asked: refused once it passes, even
   // while still queued behind appends waiting for the lock, and its turn then does nothing, so it can never
   // delete afterwards: daybreak2's LIMIT-9D7-1)
-  deleteQueued(opts, tell) {
+  deleteQueued(opts, tell, dropping = false) {
     const timed = !(opts.lockHeld || !this.owned) && typeof globalThis.navigator?.locks?.request === "function";
     const d = timed ? deadlineOf() : null;
     const turn = this.queue(async () => {
       if (d?.ctl.signal.aborted) return;
-      await this.deleteAllowed(opts, d ?? false);
+      this.dropping = dropping;
+      try { await this.deleteAllowed(opts, d ?? false); } finally { this.dropping = false; }
       if (tell) getHistoryChannel()?.postMessage({ from: tabId, id: this.id, clear: true });
     });
     if (!d) return turn;
@@ -687,7 +740,14 @@ export class IdbPatchStore {
     const why = await new Promise((ok, no) => {
       const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
       let refused = null;
-      f.onsuccess = () => { refused = this.owned ? fenceRefusal(f.result?.fence, this.fence) : null; if (!refused) st.delete(this.range()); };
+      f.onsuccess = () => {
+        refused = this.owned ? fenceRefusal(f.result?.fence, this.fence, this.phase) : null;
+        if (refused) return;
+        st.delete(this.range());
+        // (a journal store's drop takes the document's journal rows with it, charges and all; a clear keeps them:
+        // its jseq only ever rises)
+        if (this.journal && this.dropping) this.journal.drop(st).catch(() => { try { tx.abort(); } catch {} });
+      };
       tx.oncomplete = () => ok(refused);
       tx.onerror = () => no(tx.error);
     });
