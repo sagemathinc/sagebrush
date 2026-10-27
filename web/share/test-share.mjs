@@ -325,6 +325,34 @@ async function purgeStatus(rid) {
   const ts = Math.floor(Date.now() / 1000);
   const post = (headers) => fetchSite("/api/admin/purge", { method: "POST", headers: { "content-type": "application/json", ...headers }, body });
   ok((await post({})).status === 401, "an unsigned purge is refused");
+  {
+    // its length, checked before anything else: none or 0 (no body) 411, over 4096 413 (signed, so only the length decides)
+    const signedHeaders = (b) => ({ "content-type": "application/json", "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": sign(ts, "POST", "/api/admin/purge", b) });
+    const noLen = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(body)); c.close(); } });
+    const r0 = await fetchSite("/api/admin/purge", { method: "POST", headers: signedHeaders(body), body: noLen, duplex: "half" });
+    ok(r0.status === 411, "a purge without a content-length gets 411: " + r0.status);
+    const r1 = await fetchSite("/api/admin/purge", { method: "POST", headers: signedHeaders("") });
+    ok(r1.status === 411, "a purge with no body gets 411: " + r1.status);
+    const r2 = await fetchSite("/api/admin/purge", { method: "POST", headers: signedHeaders(""), body: "" });
+    ok(r2.status === 411, "an empty body (content-length 0) gets 411: " + r2.status);
+    const big = JSON.stringify({ account_id: C, request_id: "9b2d6c1e-0000-4000-8000-000000000001", pad: "x".repeat(4097) });
+    const r3 = await fetchSite("/api/admin/purge", { method: "POST", headers: signedHeaders(big), body: big });
+    ok(r3.status === 413, "a purge over 4096 bytes gets 413: " + r3.status);
+    const edge = JSON.stringify({ account_id: C, request_id: "9b2d6c1e-0000-4000-8000-0000000000ff", pad: "" });
+    const at = edge.slice(0, -2) + "x".repeat(4096 - edge.length) + '"}';
+    const r4 = await fetchSite("/api/admin/purge", { method: "POST", headers: signedHeaders(at + " "), body: at });
+    ok(at.length === 4096 && r4.status === 401, "exactly 4096 bytes passes the length check (and, signed over other bytes here, stops at the signature): " + r4.status);
+    ok(!(await db.prepare("SELECT 1 AS x FROM purges WHERE request_id IN ('9b2d6c1e-0000-4000-8000-000000000001', '9b2d6c1e-0000-4000-8000-0000000000ff')").first()), "none of them started a purge");
+  }
+  {
+    // the length predicate itself, for values no HTTP client sends with a real body (a length that
+    // isn't the body's: the platform refuses or rewrites those before the Worker), bundled as the Worker is
+    const src = execFileSync("bun", ["build", join(here, "server.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
+    const { adminLength } = await import("data:text/javascript;base64," + Buffer.from(src).toString("base64"));
+    const cases = [[null, 411], ["", 411], ["0", 411], ["0000000000000", 411], ["+10", 411], ["-1", 411], [" 10", 411], ["10 ", 411], ["1e3", 411], ["0x10", 411], ["١٠", 411], ["10", null], ["0010", null], ["4096", null], ["4097", 413], ["1000000000000", 413], ["9".repeat(400), 413]];
+    const wrong = cases.filter(([v, want]) => adminLength(v) !== want).map(([v, want]) => `${JSON.stringify(v)}: ${adminLength(v)}, not ${want}`);
+    ok(wrong.length === 0 && Number("9".repeat(400)) === Infinity, "the purge's Content-Length: 411 unless ASCII digits over 0, then 413 over 4096 at any length (Infinity included): " + (wrong.join("; ") || "all " + cases.length));
+  }
   ok((await post({ "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": sign(ts, "POST", "/api/admin/purge", body + " ") })).status === 401, "a purge signed over other bytes is refused");
   ok((await post({ "x-sagebrush-timestamp": String(ts - 600), "x-sagebrush-signature": sign(ts - 600, "POST", "/api/admin/purge", body) })).status === 401, "an old signature is refused");
   ok((await post({ "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": sign(ts, "GET", "/api/admin/purge", body) })).status === 401, "the signature binds the method");

@@ -32,6 +32,8 @@ import { PatchHistory, createImmerDbCodec, decodePatchId } from "./patch-history
 export { decodePatchId };
 // (this module is the sagebrush-history.js bundle: boards load the shared history from it)
 export { PatchHistory, createImmerDbCodec };
+// (and the notebook journal's, loaded with it: notebook/journal.js, given the page's stores)
+export { journalClasses } from "./journal.js";
 
 export const SCHEMA = { primaryKeys: ["type", "id"], stringCols: ["input"] };
 const codec = createImmerDbCodec(SCHEMA);

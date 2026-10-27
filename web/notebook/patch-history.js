@@ -38,9 +38,12 @@ export class PatchHistory {
   // (a patch the session made, refused: the history paused, the session rebuilt without it)
   appendMade(env) {
     const took = this.store.append(env);
-    if (took === false) { this.paused = true; this.refusedTime = env.time; this.edits = null; this.rebuild(); }
+    if (took === false) this.refused(env.time);
     return took;
   }
+  /** A version the store didn't keep (refused when asked, or, a journal's, when its transaction ended): the history
+   * paused, the session rebuilt without it. */
+  refused(time) { this.paused = true; this.refusedTime = time; this.edits = null; this.rebuild(); }
   // (the next generation of the session: any rebuild of the one before let go; one running no longer joined)
   nextGen() { this.gen++; this.rebuilding = null; this.again = false; }
   // (the session made again from what the store keeps, after any append still waiting; one rebuild at a time,
@@ -73,6 +76,15 @@ export class PatchHistory {
   // (an edit while paused, or before the session has caught up: stored by itself, a root if paused, else a patch
   // from the tail; kept, it is the tail; refused, paused (again), nothing kept)
   commitDetached(next, meta) {
+    // (a journal's history, paused: no version; a save's intent alone is its T1 (F4; notebook/journal.js), and the
+    // history stays paused for this page)
+    if (this.paused && this.store.writePending) {
+      const timeMs = Math.max(Date.now(), this.lastMs + 1);
+      this.lastMs = timeMs;
+      const env = { time: encodePatchId(timeMs, this.clientId), pending: this.store.writePending() };
+      this.emit();
+      return env;
+    }
     if (!this.paused && this.tail && next.isEqual(this.tail.doc)) return null;
     const root = this.paused, timeMs = Math.max(Date.now(), this.lastMs + 1);
     this.lastMs = timeMs;

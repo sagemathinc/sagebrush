@@ -199,6 +199,7 @@ jobs:
           node scripts/core-api-surface.mjs --check
           node scripts/size-budget.mjs --check
           node scripts/test-size-measure.mjs
+          node scripts/test-install-engine-wasm.mjs
           node scripts/test-npm-pack-metrics.mjs
           node scripts/test-install-timing.mjs
           node --test scripts/test-heap-budget.mjs
@@ -517,6 +518,7 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash-v4.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-journal.mjs
+          CHROME=google-chrome bun web/notebook/test-journal.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox-855.mjs

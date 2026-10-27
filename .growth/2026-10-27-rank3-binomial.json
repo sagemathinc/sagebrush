@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Rank-3 plan r3 PR 5 (#212): BINOMIAL_MAX_BITS removed, the residue prefilter's proof before the root search (engine wasm). Rows MEASURED by the transition-mode size-gate of the PR ci 40534037658 on 79148233 (merge 74c6eb6c, base b06b01b7), which carries CI's fresh wasm of 064b08ce (run 40532423870; the run on 79148233 rebuilt it byte for byte, sha256 57556da8): engine wasm 7213584 -> 7222784 (+9200); cli/pyjs.cjs +12276 (the base64 of the wasm growth; no Python change)",
+ "bytes": {
+  "cli/pyjs.cjs": 12276,
+  "engine/sagebrush-engine.wasm": 9200
+ }
+}

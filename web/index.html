@@ -817,7 +817,7 @@ nb.onDetachedConflict(async (doc, theirs, key) => {
   const was = String(doc.name || "Untitled"), name = was + " (your changes, made while it changed elsewhere)";
   const copy = nbKept.get(key);
   if (copy && (await idb(db, "notebooks", "readonly", (st) => st.get(copy.id)))) {
-    const out = await new IdbStore(db, copy.id).save({ ...rest, id: copy.id, name, baseRev: copy.rev });
+    const out = await (await storeFor(copy.id)).save({ ...rest, id: copy.id, name, baseRev: copy.rev });
     if (typeof out === "string") throw new Error(out);
     if (!out.conflict) {
       copy.rev = out.rev;
@@ -825,8 +825,9 @@ nb.onDetachedConflict(async (doc, theirs, key) => {
       return;
     }
   }
-  const id = newId(), st = new IdbStore(db, id, { ...rest, id, name });
+  const id = newId(), st = await storeFor(id, { ...rest, id, name });
   await st.load();
+  if (st.journaled) st.release();
   const rec = await idb(db, "notebooks", "readonly", (s) => s.get(id));
   if (!rec) throw new Error(`"${name}" couldn't be written`);
   // (listed in the workspace, or not kept: a notebook no entry lists is
@@ -890,9 +891,22 @@ const ttEl = $("#timetravel"), ttBtn = $("#ttbtn"), ttSlider = $("#ttslider");
 // Changes made before the history is ready (its module and database load
 // after the notebook) wait here, and are recorded in order once it is.
 let historyQueue = [];
+// (a journal's store keeps its own history, T1 of its every save (notebook/journal.js): shown here, never recorded
+// from the page's changes, and let go, not closed, when another notebook opens: its saves still running finish first)
+let nbJournal = null;
 async function startHistory(id) {
-  nbHistory?.close();
+  if (nbJournal) nbJournal.release(); else nbHistory?.close();
   nbHistory = null;
+  nbJournal = null;
+  if (nb.store?.journaled) {
+    nbJournal = nb.store;
+    nbHistory = nbJournal.history;
+    historyQueue = [];
+    kernels.get(id)?.journal?.flushPending(id);
+    nbHistory.on(() => { if (!ttEl.hidden) ttRefresh(false); });
+    if (!ttEl.hidden) ttRefresh(true);
+    return;
+  }
   historyQueue = [nb.snapshot()]; // the notebook as it opened
   const hdb = await historyDbReady;
   if (!hdb) {
@@ -912,7 +926,7 @@ async function startHistory(id) {
   h.on(() => { if (!ttEl.hidden) ttRefresh(false); });
   if (!ttEl.hidden) ttRefresh(true); // opened while the history was loading
 }
-nb.on("change", (doc) => (nbHistory ? nbHistory.record(doc) : historyQueue.push(doc)));
+nb.on("change", (doc) => (nb.store?.journaled ? null : nbHistory ? nbHistory.record(doc) : historyQueue.push(doc)));
 function ttShow(open) {
   if (open === !ttEl.hidden) return;
   // the same place in the notebook, going in and coming back
@@ -990,7 +1004,7 @@ async function resumeFrom(srcId, at) {
   const { id: _i, rev: _r, updated: _u, cells: _c, mode: _m, ...meta } = src;
   const name = `${src.name || "Untitled"} (at version ${v.index + 1})`;
   if (plan.session && !plan.blocking.length) kernelFor(id).journal.continueSession(plan, id);
-  await open(new IdbStore(db, id, { ...meta, id, name, mode: doc.mode, cells: doc.cells }), id);
+  await open(await storeFor(id, { ...meta, id, name, mode: doc.mode, cells: doc.cells }), id);
   return { plan, version: v.index + 1 };
 }
 async function replayResumed({ plan, version }) {
@@ -1409,14 +1423,14 @@ async function openDocument(doc, here = false, made = "elsewhere") {
   const id = newId();
   madeAs.set(id, here ? "person" : made);
   const { here: _h, ...rest } = doc;
-  return open(new IdbStore(db, id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id);
+  return open(await storeFor(id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id);
 }
 // (here: a new notebook, written in this browser; else examples and share links)
 const openNew = (name, mode, codes, here = false) => openDocument({ name, mode, cells: codes.map(asCell) }, here);
 async function openId(id) {
   const doc = await idb(db, "notebooks", "readonly", (st) => st.get(id));
   if (!doc) return false;
-  await open(new IdbStore(db, id), id);
+  await open(await storeFor(id), id);
   savedEl.textContent = "opened";
   return true;
 }
@@ -1842,7 +1856,7 @@ async function openBundle(bytes) {
   const b = await readBundle(bytes);
   const id = newId();
   await keepBundle(b, id, { hdb: await historyDbReady, bdb: await blobDbReady });
-  await open(new IdbStore(db, id, { ...b.notebook, id }), id);
+  await open(await storeFor(id, { ...b.notebook, id }), id);
   return id;
 }
 window.sagebrush.bundle = makeBundle;
@@ -2391,6 +2405,19 @@ const wsReady = (async () => {
   }
   finally { wsSettled = true; }
 })();
+// (once this device's journal is activated (plan-sync-slice2-client r4 §1a, web/workspace/api.ts activateJournal), every
+// notebook is written through it: T1 in its history, then T2 (notebook/journal.js); before, as before.  Told by the
+// notebooks' fence, read as each store is made: its phase "journal" is what refuses every other writer, so a store
+// made from it is never the wrong one for long, and an error reading it makes the plain store, which is then refused)
+let journalKit = null;
+async function storeFor(id, initial) {
+  const fence = db ? await idb(db, "notebooks", "readonly", (st) => st.get(FENCE)).catch(() => undefined) : undefined;
+  if (fence?.phase !== "journal") return new IdbStore(db, id, initial);
+  const [hdb, mod] = await Promise.all([historyDbReady, loadHistory()]);
+  if (!hdb) throw new Error("this browser saves notebooks through sync's journal, which needs its storage: it isn't available here");
+  journalKit ??= mod.journalClasses({ IdbStore, IdbPatchStore });
+  return new journalKit.JournalStore(db, hdb, id, initial, mod);
+}
 // (the workspace, or null if it isn't open within a few seconds)
 const wsNow = () => Promise.race([wsReady, new Promise((r) => setTimeout(() => r(null), 5000))]);
 async function wsListNotebook(id, name, mode) {
