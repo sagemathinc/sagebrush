@@ -1,0 +1,126 @@
+// The escape-hatch policy for tsconfig.web.json's closure (tooling plan r2 G-C4; astra2 on #232 r1), on WHOLE comments:
+// a small lexer finds every comment (strings, template literals with ${} nesting and regex literals skipped), so a
+// directive or a JSDoc type spread over lines is seen whole.  TypeScript 7 ships no JS API to borrow a parser from.
+// It fails closed: an unterminated comment, string or template is a problem, never a pass.
+// Kinds counted, permitted ones included:
+//   ts-nocheck, ts-ignore                  refused, always
+//   ts-expect-error                        permitted with a reason (three or more letters) in the same comment
+//   jsdoc-any                              a JSDoc type containing any or the * wildcard: permitted with "any: <reason>"
+//                                          in the same comment, or in a line comment right after it on its last line
+
+export type Comment = { text: string; line: number; endLine: number; block: boolean; jsdoc: boolean; after: string };
+export type Kind = "ts-nocheck" | "ts-ignore" | "ts-expect-error" | "jsdoc-any";
+export type Finding = { kind: Kind; line: number; reasoned: boolean; permitted: boolean; why?: string };
+export type Scan = { findings: Finding[]; problems: string[]; counts: Record<Kind, { permitted: number; refused: number }> };
+
+// (a "/" starts a regex after these, or at the start: otherwise it's division)
+const REGEX_AFTER = /[(,=:[!&|?{};+\-*%<>~^]$|^$|\b(?:return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)$/;
+
+/** Every comment in a JS/TS text, with its 1-based lines; problems for anything left unterminated. */
+export function comments(src: string): { list: Comment[]; problems: string[] } {
+  const list: Comment[] = [];
+  const problems: string[] = [];
+  let i = 0, line = 1, last = ""; // last: the code just before, trimmed, for the regex heuristic
+  const braces: number[] = []; // template nesting: the brace depth at each `${`
+  let depth = 0;
+  const n = src.length;
+  const lineAt = (from: number, to: number) => { for (let k = from; k < to; k++) if (src[k] === "\n") line++; };
+  while (i < n) {
+    const c = src[i], d = src[i + 1];
+    if (c === "/" && d === "/") {
+      const e = src.indexOf("\n", i);
+      const end = e < 0 ? n : e;
+      list.push({ text: src.slice(i, end), line, endLine: line, block: false, jsdoc: false, after: "" });
+      i = end;
+      continue;
+    }
+    if (c === "/" && d === "*") {
+      const e = src.indexOf("*/", i + 2);
+      if (e < 0) { problems.push(`line ${line}: an unterminated block comment`); break; }
+      const start = line;
+      lineAt(i, e + 2);
+      const rest = src.slice(e + 2, (src.indexOf("\n", e + 2) + 1 || n + 1) - 1);
+      list.push({ text: src.slice(i, e + 2), line: start, endLine: line, block: true, jsdoc: src[i + 2] === "*" && src[i + 3] !== "/", after: rest });
+      i = e + 2;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      let k = i + 1;
+      while (k < n && src[k] !== c && src[k] !== "\n") k += src[k] === "\\" ? 2 : 1;
+      if (src[k] !== c) { problems.push(`line ${line}: an unterminated string`); break; }
+      i = k + 1;
+      last = "x";
+      continue;
+    }
+    if (c === "`" || (c === "}" && braces.length && depth === braces[braces.length - 1])) {
+      if (c === "}") braces.pop();
+      let k = i + 1;
+      for (;;) {
+        if (k >= n) { problems.push(`line ${line}: an unterminated template literal`); i = n; break; }
+        if (src[k] === "\\") { k += 2; continue; }
+        if (src[k] === "`") { lineAt(i, k + 1); i = k + 1; last = "x"; break; }
+        if (src[k] === "$" && src[k + 1] === "{") { lineAt(i, k + 2); braces.push(depth); i = k + 2; last = "{"; break; }
+        k++;
+      }
+      continue;
+    }
+    if (c === "/" && REGEX_AFTER.test(last)) {
+      let k = i + 1, cls = false;
+      while (k < n && src[k] !== "\n" && (cls || src[k] !== "/")) {
+        if (src[k] === "\\") k++;
+        else if (src[k] === "[") cls = true;
+        else if (src[k] === "]") cls = false;
+        k++;
+      }
+      if (src[k] !== "/") { problems.push(`line ${line}: an unterminated regular expression`); break; }
+      i = k + 1;
+      while (/[a-z]/i.test(src[i] ?? "")) i++;
+      last = "x";
+      continue;
+    }
+    if (c === "{") depth++;
+    if (c === "}") depth--;
+    if (c === "\n") line++;
+    if (!/\s/.test(c)) last = /[A-Za-z0-9_$]/.test(c) ? (/[A-Za-z0-9_$]/.test(last.slice(-1)) ? last + c : c).slice(-12) : c;
+    i++;
+  }
+  return { list, problems };
+}
+
+/** A JSDoc comment's type expressions after a tag, braces balanced across lines. */
+function jsdocTypes(text: string): string[] {
+  const body = text.replace(/^\/\*\*|\*\/$/g, "").replace(/^[ \t]*\*[ \t]?/gm, "");
+  const out: string[] = [];
+  const re = /@(?:type|param|returns?|typedef|property|prop|template|this|enum|satisfies|callback|arg|argument)\b\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body))) {
+    let k = m.index + m[0].length, deep = 1;
+    while (k < body.length && deep) { if (body[k] === "{") deep++; else if (body[k] === "}") deep--; k++; }
+    out.push(body.slice(m.index + m[0].length, k - 1));
+  }
+  return out;
+}
+const reasonOf = (s: string) => /[A-Za-z]{3,}/.test(s.replace(/\*\/\s*$/, "").replace(/^[\s*]*$/gm, ""));
+
+export function hatches(src: string): Scan {
+  const { list, problems } = comments(src);
+  const findings: Finding[] = [];
+  for (const c of list) {
+    for (const [kind, re] of [["ts-nocheck", /@ts-nocheck\b/], ["ts-ignore", /@ts-ignore\b/]] as [Kind, RegExp][])
+      if (re.test(c.text)) findings.push({ kind, line: c.line, reasoned: false, permitted: false, why: `@${kind} turns the check off` });
+    const ee = c.text.match(/@ts-expect-error\b([\s\S]*)$/);
+    if (ee) {
+      const reasoned = reasonOf(ee[1]);
+      findings.push({ kind: "ts-expect-error", line: c.line, reasoned, permitted: reasoned, ...(reasoned ? {} : { why: "@ts-expect-error without a reason" }) });
+    }
+    if (c.jsdoc && jsdocTypes(c.text).some((t) => /\bany\b|\*/.test(t))) {
+      // (a reason: "any:" followed by real words, three or more letters, in the comment or a line comment right after it)
+      const said = (s: string) => { const m = s.match(/\bany:\s*([\s\S]*)$/); return !!m && reasonOf(m[1]); };
+      const reasoned = said(c.text) || (/\/\//.test(c.after) && said(c.after.slice(c.after.indexOf("//"))));
+      findings.push({ kind: "jsdoc-any", line: c.line, reasoned, permitted: reasoned, ...(reasoned ? {} : { why: 'a JSDoc any without an "any: <reason>"' }) });
+    }
+  }
+  const counts = { "ts-nocheck": { permitted: 0, refused: 0 }, "ts-ignore": { permitted: 0, refused: 0 }, "ts-expect-error": { permitted: 0, refused: 0 }, "jsdoc-any": { permitted: 0, refused: 0 } };
+  for (const f of findings) counts[f.kind][f.permitted ? "permitted" : "refused"]++;
+  return { findings, problems, counts };
+}
