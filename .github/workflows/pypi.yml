@@ -50,6 +50,8 @@ jobs:
           python -I test/capacity_ctypes_cases.py
           # (on Windows, each kernel32/psapi call typed and untyped: board's probe, which changes nothing)
           if [ "$RUNNER_OS" = Windows ]; then python test/win_capacity_probe.py engine/py/python/sagebrush/_sagelib || true; fi
+          # (what interrupts a blocked computation in a session worker: CREATE_NEW_PROCESS_GROUP, Ctrl-Break; a probe, which changes nothing)
+          if [ "$RUNNER_OS" = Windows ]; then python test/win_interrupt_probe.py || true; fi
       - name: test the wheel
         shell: bash
         run: |
@@ -60,6 +62,7 @@ jobs:
           python engine/py/test_interrupt.py
           python engine/py/test_audit.py
           python engine/py/test_mcp.py
+          python engine/py/test_session_ctrl.py
           cd engine/py && python -m doctest README.md && echo doctests ok
       - uses: actions/upload-artifact@v5
         with:

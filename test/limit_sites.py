@@ -65,7 +65,9 @@ VOCAB = re.compile(r"max(?!\s*\()|limit|budget|too large|exceeds|NotImplementedE
 CLASSES = {"1", "2", "3", "1+2", "1+3", "2+3", "1+2+3", "coverage", "none"}
 # (web files in the census, one by one: the sync client's ledger, whose shared-resource bounds (the hub's namespaces and
 # tentative epochs, the waits, the ledger's rows) are class 1 (PR #128's LIMIT-PR128-3); the rest of web/ is a follow-up)
-WEB = {"web/workspace/sync-ledger.ts"}
+# and the text-overlap detector shared by the notebook and board merges, whose per-diff bound turns into a conflict, never a
+# truncation: class 1)
+WEB = {"web/workspace/sync-ledger.ts", "web/notebook/text-overlap.ts"}
 
 
 def short(key):

@@ -33,9 +33,16 @@ mod binomial;
 pub mod budget;
 mod lll;
 pub mod nf;
+/// The recombination faults, for other crates' tests of how an internal
+/// error reaches their surfaces (feature `test-faults`, dev-dependencies
+/// only; rank-3 plan r3 section 4.3).
+#[cfg(feature = "test-faults")]
+pub mod test_faults {
+    pub use crate::vanhoeij::fault::{reach, with, with_hooks, Reach, CORRUPT_CLD, FORCE_S0, INTERRUPT_AFTER_PASS2, S2_LAST_PASS, SKIP_PREPASS, STAGE1_EXIT, STAGE1_LOW_PREC, STAGE1_NO_CERT};
+}
 mod vanhoeij;
 
-pub use budget::{with_default_limits, Budget, FactorLimit, Limits, MemorySource, Phase};
+pub use budget::{with_default_limits, Budget, FactorLimit, Kind, Limits, MemorySource, Phase, INTERNAL_PREFIX};
 use budget::{big_bytes, div_work, limbs, mul_work, poly_bytes, words_bytes, FResult, Reservation};
 
 pub type ZPoly = Vec<BigInt>;
@@ -72,6 +79,11 @@ impl<'b> Held<'b> {
     pub fn into_vec(self) -> ZPoly {
         self.v
     }
+    /// The bytes reserved for it (the tests' ledger).
+    #[cfg(test)]
+    pub fn reserved(&self) -> u64 {
+        self._r.bytes()
+    }
 }
 
 /// A big integer whose memory is reserved in the call's budget for as long
@@ -92,13 +104,34 @@ impl Deref for HeldInt<'_> {
 /// p^k, reserved first: the power (at most k bitlen(p) bits) and, of the
 /// same size, the two transients of its computation and two working
 /// integers its users keep beside it (a leading coefficient mod p^k and its
-/// inverse).
-pub(crate) fn power<'b>(b: &'b Budget, p: u64, k: u32) -> FResult<HeldInt<'b>> {
-    let bits = (k as u64).checked_mul(64 - p.leading_zeros() as u64);
-    let r = b.reserve(bits.and_then(big_bytes).and_then(|x| x.checked_mul(5)))?;
+/// inverse).  The exponent is a u64 (rank-3 plan r3, section 3.6): no
+/// precision is cut off by its width, and one whose power can't be counted
+/// in bytes is refused by the reservation, before anything is built.
+pub(crate) fn power<'b>(b: &'b Budget, p: u64, k: u64) -> FResult<HeldInt<'b>> {
+    let bits = k.checked_mul(64 - p.leading_zeros() as u64);
+    let r = b.reserve(power_bytes(p, k))?;
     let l = limbs(bits.unwrap_or(u64::MAX));
-    b.debit(l.checked_mul(l).and_then(|x| x.checked_mul(clog2(k as u64) + 1)))?;
-    Ok(HeldInt { v: BigInt::from(p).pow(k), _r: r })
+    b.debit(l.checked_mul(l).and_then(|x| x.checked_mul(clog2(k) + 1)))?;
+    Ok(HeldInt { v: pow_u64(&BigInt::from(p), k, 32), _r: r })
+}
+
+/// Bytes reserved by `power(p, k)`.
+pub(crate) fn power_bytes(p: u64, k: u64) -> Option<u64> {
+    k.checked_mul(64 - p.leading_zeros() as u64).and_then(big_bytes).and_then(|x| x.checked_mul(5))
+}
+
+/// x^k for a u64 exponent: BigInt::pow takes a u32, so with k = hi 2^s + lo
+/// (lo < 2^s, s <= 32), x^k = (x^(2^s))^hi x^lo (s is 32 except in the test).
+fn pow_u64(x: &BigInt, k: u64, s: u32) -> BigInt {
+    if k >> s == 0 {
+        return x.pow(k as u32);
+    }
+    // x^(2^s), by s squarings
+    let mut y = x.clone();
+    for _ in 0..s {
+        y = &y * &y;
+    }
+    pow_u64(&y, k >> s, s) * x.pow((k & ((1u64 << s) - 1)) as u32)
 }
 
 /// Room for `count` transient integers of `bits` bits (an operation's
@@ -662,7 +695,7 @@ fn to_z<'b>(b: &'b Budget, x: &[u64]) -> FResult<Held<'b>> {
 /// Lift f = u g h (mod p), u a unit mod p, g and h monic and coprime mod p,
 /// to monic G, H with f = u G H (mod p^k): quadratic Hensel steps
 /// (von zur Gathen-Gerhard, Algorithm 15.10).  f is given modulo p^k.
-fn hensel_pair<'b>(b: &'b Budget, f: &[BigInt], g: &[u64], h: &[u64], p: u64, k: u32) -> FResult<(Held<'b>, Held<'b>)> {
+fn hensel_pair<'b>(b: &'b Budget, f: &[BigInt], g: &[u64], h: &[u64], p: u64, k: u64) -> FResult<(Held<'b>, Held<'b>)> {
     let pk = power(b, p, k)?;
     let u = f.last().unwrap().mod_floor(&pk);
     // work with G = u g so that f = G H
@@ -671,9 +704,11 @@ fn hensel_pair<'b>(b: &'b Budget, f: &[BigInt], g: &[u64], h: &[u64], p: u64, k:
     let (s0, t0) = fxgcd(b, &gu, h, p)?;
     let (mut gg, mut hh, mut s, mut t) = (to_z(b, &gu)?, to_z(b, h)?, to_z(b, &s0)?, to_z(b, &t0)?);
     let mut m = power(b, p, 1)?;
-    let mut e_now = 1u32;
+    let mut e_now = 1u64;
     while e_now < k {
-        let e_next = (2 * e_now).min(k);
+        // the doubled precision, clipped to k (checked: a doubling past
+        // u64::MAX is past k)
+        let e_next = e_now.checked_mul(2).map_or(k, |e| e.min(k));
         let m2 = power(b, p, e_next)?;
         let e = msub(b, f, &mmul(b, &gg, &hh, &m2)?, &m2)?;
         let (q, r) = mdivrem(b, &mmul(b, &s, &e, &m2)?, &hh, &m2)?;
@@ -697,7 +732,7 @@ fn hensel_pair<'b>(b: &'b Budget, f: &[BigInt], g: &[u64], h: &[u64], p: u64, k:
 
 /// Lift the monic factors fs of f (mod p) to monic factors mod p^k, by a
 /// factor tree.  f is given modulo p^k; its leading coefficient is a unit.
-pub(crate) fn hensel<'b>(b: &'b Budget, f: &[BigInt], fs: &[FPoly], p: u64, k: u32) -> FResult<Vec<Held<'b>>> {
+pub(crate) fn hensel<'b>(b: &'b Budget, f: &[BigInt], fs: &[FPoly], p: u64, k: u64) -> FResult<Vec<Held<'b>>> {
     let pk = power(b, p, k)?;
     if fs.len() == 1 {
         let u = f.last().unwrap().mod_floor(&pk);
@@ -744,7 +779,7 @@ pub(crate) struct Modular<'b> {
     pub p: u64,
     pub modfs: Vec<FPoly>,
     pub possible: Vec<bool>,
-    pub k: u32,
+    pub k: u64,
 }
 
 /// The exponent k with p^k > 2 |lc| 2^n (n + 1) |f|_inf (twice the
@@ -752,12 +787,12 @@ pub(crate) struct Modular<'b> {
 /// Computed from bit lengths, allocating nothing: 2 |lc| 2^n (n + 1)
 /// |f|_inf < 2^B with B = bits(lc) + n + bits(n + 1) + bits(|f|_inf) + 1, and
 /// p^k >= 2^(k floor(log2 p)) >= 2^B for k = ceil(B / floor(log2 p)).
-pub(crate) fn mignotte_exponent(f: &[BigInt], p: u64) -> u32 {
+pub(crate) fn mignotte_exponent(f: &[BigInt], p: u64) -> u64 {
     let n = deg(f) as u64;
     let lc = f.last().unwrap();
     let bb = lc.bits() + n + (64 - (n + 1).leading_zeros() as u64) + maxbits(f) + 1;
     let lp = 63 - p.leading_zeros() as u64; // floor(log2 p) >= 1 for p >= 3
-    bb.div_ceil(lp).max(1) as u32
+    bb.div_ceil(lp).max(1)
 }
 
 /// Factor f modulo a few good primes; None when that proves f irreducible.
@@ -825,7 +860,7 @@ fn modular<'b>(b: &'b Budget, f: &[BigInt]) -> FResult<Option<Modular<'b>>> {
 }
 
 /// Lift the modular factors of f to p^k (within the call's budget).
-pub(crate) fn lift<'b>(b: &'b Budget, f: &[BigInt], m: &Modular, k: u32) -> FResult<Vec<Held<'b>>> {
+pub(crate) fn lift<'b>(b: &'b Budget, f: &[BigInt], m: &Modular, k: u64) -> FResult<Vec<Held<'b>>> {
     let _p = b.enter(Phase::Hensel);
     // the F_p[x] temporaries of the factor tree (the products of each node's
     // halves and the Bezout pair: four of at most n + 1 words a level) and
@@ -879,6 +914,11 @@ pub(crate) fn zassenhaus<'b>(
     possible: &[bool],
     max_size: usize,
 ) -> FResult<Zassenhaus<'b>> {
+    // the no-subset audit (rank-3 plan r3, section 4.2): a full search on a
+    // residual with more than ZASSENHAUS_MAX factors must never run
+    if max_size == usize::MAX && lifted.len() > vanhoeij::ZASSENHAUS_MAX {
+        vanhoeij::fault::count(|c| c.full_subsets_large += 1);
+    }
     let mut f = Held::copy(b, f)?;
     let mut rest: Vec<Held<'b>> = lifted;
     let mut found = vec![];
@@ -1105,12 +1145,43 @@ mod tests;
 #[cfg(test)]
 pub(crate) mod alloc_spy {
     use std::alloc::{GlobalAlloc, Layout, System};
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
+    use std::collections::HashMap;
 
     thread_local! {
         static BYTES: Cell<u64> = const { Cell::new(0) };
         static LIVE: Cell<i64> = const { Cell::new(0) };
         static PEAK: Cell<i64> = const { Cell::new(0) };
+        // the ledger audit (rank-3 plan r3, section 4.5, delta 1 r2): this
+        // thread's live bytes at its start (None: no audit running)
+        static AUDIT: Cell<Option<i64>> = const { Cell::new(None) };
+        static REPORT: Cell<Report> = const { Cell::new(Report::new()) };
+        // the attribution: the current tag, every live tagged block, and
+        // the live and reserved bytes of each tag
+        static TAG: Cell<Option<&'static str>> = const { Cell::new(None) };
+        static BLOCKS: RefCell<HashMap<usize, (&'static str, i64)>> = RefCell::new(HashMap::new());
+        static TAGS: RefCell<HashMap<&'static str, (i64, i64)>> = RefCell::new(HashMap::new());
+        // set while the spy's own bookkeeping runs (its maps allocate)
+        static BUSY: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// What an audit found.
+    #[derive(Clone, Copy, Debug)]
+    pub struct Report {
+        /// The largest excess of live bytes over the whole reservation at a
+        /// debit or a reservation, and the phase it was in.
+        pub excess: i64,
+        pub excess_phase: &'static str,
+        /// Checks where a tag's live bytes exceeded its reservation, and the
+        /// first one: (tag, live, reserved, phase).
+        pub tag_breaches: u64,
+        pub first_breach: Option<(&'static str, i64, i64, &'static str)>,
+    }
+
+    impl Report {
+        const fn new() -> Report {
+            Report { excess: i64::MIN, excess_phase: "", tag_breaches: 0, first_breach: None }
+        }
     }
 
     fn grow(n: i64) {
@@ -1125,23 +1196,142 @@ pub(crate) mod alloc_spy {
         });
     }
 
+    /// The spy's bookkeeping, while an audit runs, and not re-entered.
+    fn book(f: impl FnOnce()) {
+        if AUDIT.try_with(|a| a.get().is_none()).unwrap_or(true) {
+            return;
+        }
+        let Ok(false) = BUSY.try_with(|b| b.replace(true)) else { return };
+        f();
+        let _ = BUSY.try_with(|b| b.set(false));
+    }
+
+    // (the allocator's paths use try_with: they also run while the
+    // thread's locals are being destroyed)
+    fn tag_live(t: &'static str, n: i64) {
+        let _ = TAGS.try_with(|m| m.borrow_mut().entry(t).or_insert((0, 0)).0 += n);
+    }
+
+    fn current_tag() -> Option<&'static str> {
+        TAG.try_with(|t| t.get()).ok().flatten()
+    }
+
+    fn on_alloc(p: *mut u8, size: usize) {
+        book(|| {
+            if let Some(t) = current_tag() {
+                let _ = BLOCKS.try_with(|m| m.borrow_mut().insert(p as usize, (t, size as i64)));
+                tag_live(t, size as i64);
+            }
+        });
+    }
+
+    fn on_free(p: *mut u8) -> Option<&'static str> {
+        let mut out = None;
+        book(|| {
+            if let Some((t, n)) = BLOCKS.try_with(|m| m.borrow_mut().remove(&(p as usize))).ok().flatten() {
+                tag_live(t, -n);
+                out = Some(t);
+            }
+        });
+        out
+    }
+
     pub struct Spy;
 
     unsafe impl GlobalAlloc for Spy {
         unsafe fn alloc(&self, l: Layout) -> *mut u8 {
             let _ = BYTES.try_with(|b| b.set(b.get() + l.size() as u64));
             grow(l.size() as i64);
-            System.alloc(l)
+            let p = System.alloc(l);
+            on_alloc(p, l.size());
+            p
         }
         unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
             grow(-(l.size() as i64));
+            on_free(p);
             System.dealloc(p, l)
         }
         unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
             let _ = BYTES.try_with(|b| b.set(b.get() + n as u64));
             grow(n as i64 - l.size() as i64);
-            System.realloc(p, l, n)
+            // a tagged block keeps its tag; an untagged one takes the current
+            let was = on_free(p);
+            let q = System.realloc(p, l, n);
+            book(|| {
+                if let Some(t) = was.or(current_tag()) {
+                    let _ = BLOCKS.try_with(|m| m.borrow_mut().insert(q as usize, (t, n as i64)));
+                    tag_live(t, n as i64);
+                }
+            });
+            q
         }
+    }
+
+    /// The current tag (Budget's `tag` guard); returns the previous one.
+    pub fn set_tag(t: Option<&'static str>) -> Option<&'static str> {
+        TAG.with(|c| c.replace(t))
+    }
+
+    /// A reservation of a tagged object made (n > 0) or released.
+    pub fn tag_reserved(t: &'static str, n: i64) {
+        book(|| TAGS.with(|m| m.borrow_mut().entry(t).or_insert((0, 0)).1 += n));
+    }
+
+    /// A debit or a reservation (`reserved`: the budget's live reservation),
+    /// checked while an audit runs.
+    pub fn audit_point(reserved: u64, phase: &'static str) {
+        book(|| {
+            let Some(base) = AUDIT.with(|a| a.get()) else { return };
+            let mut r = REPORT.with(|r| r.get());
+            let excess = LIVE.with(|l| l.get()) - base - reserved as i64;
+            if excess > r.excess {
+                r.excess = excess;
+                r.excess_phase = phase;
+            }
+            TAGS.with(|m| {
+                for (&t, &(live, res)) in m.borrow().iter() {
+                    if live > res {
+                        r.tag_breaches += 1;
+                        r.first_breach.get_or_insert((t, live, res, phase));
+                    }
+                }
+            });
+            REPORT.with(|c| c.set(r));
+        });
+    }
+
+    /// Run f under the audit (only this thread's allocations count).  The
+    /// audit ends when f returns or unwinds (a failed assertion inside it).
+    pub fn audit<T>(f: impl FnOnce() -> T) -> (T, Report) {
+        struct End;
+        impl Drop for End {
+            fn drop(&mut self) {
+                let _ = AUDIT.try_with(|a| a.set(None));
+                let _ = TAG.try_with(|t| t.set(None));
+            }
+        }
+        BLOCKS.with(|m| m.borrow_mut().clear());
+        TAGS.with(|m| m.borrow_mut().clear());
+        REPORT.with(|r| r.set(Report::new()));
+        AUDIT.with(|a| a.set(Some(LIVE.with(|l| l.get()))));
+        let end = End;
+        let r = f();
+        drop(end);
+        (r, REPORT.with(|r| r.get()))
+    }
+
+    thread_local! {
+        static REFUSED_AT: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// A memory refusal: this thread's allocated bytes at that moment.
+    pub fn note_refusal() {
+        let _ = REFUSED_AT.try_with(|r| r.set(allocated()));
+    }
+
+    /// The allocated bytes at the last memory refusal.
+    pub fn refused_at() -> u64 {
+        REFUSED_AT.with(|r| r.get())
     }
 
     /// Bytes allocated by this thread so far.

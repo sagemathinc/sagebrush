@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "rank-13 PR 1 (#193), the LU's own browser chunk (size policy (a)+(a'), daybreak2 and astra2 CLEAR): web/lib-chunks.mts's matlab-lu rule (the worker's manifest) and unmeasured_reason moved into lib/_matlab_sparse.py (matlab.src, matlab.pre, and the CLI's lib.gen.js and pyjs.cjs), over the r1 and r2 markers. engine/lib/matlab-lu.src (47600 B) is a new bundle, authorized by its budgets.json entry; matlab-more.src is back to its base size. Measured at master b340cd2b vs cfc0ba8f with CI's toolchain (bun 1.4.4, Node 24.21.0) on VM3: the three markers sum to each listed bundle's growth exactly",
+ "bytes": {
+  "cli/lib.gen.js": 346,
+  "cli/pyjs.cjs": 508,
+  "engine/lib/matlab.pre": 1890,
+  "engine/lib/matlab.src": 796,
+  "engine/sagebrush-worker.js": 155
+ }
+}

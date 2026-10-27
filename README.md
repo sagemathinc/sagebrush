@@ -186,6 +186,11 @@ and saves without a setting. A program that calls
 `sys.set_int_max_str_digits(n)` gets CPython's checks and messages; the only
 other bound on a conversion, or on `math.log` of a huge int, is the session's
 memory, refused at once with a `MemoryError` that says how much it needs.
+With several GB of arrays in memory, Stop can lag about 0.1 s per GB: that is
+the JavaScript engine's own garbage collection, which can't be interrupted
+("with several GB of arrays in memory, Stop can lag about 0.1 s per GB",
+William, Oct 25 2026). Sagebrush's own code still checks for Stop at least
+every 25 ms; the exception covers only the engine's garbage-collection pauses.
 
 Files: pyjs has no reference counting, so a file object isn't closed when
 its last reference goes. `with open(...)` or `.close()` is the portable form.

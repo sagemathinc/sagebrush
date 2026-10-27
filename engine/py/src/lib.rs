@@ -565,17 +565,19 @@ fn host_error(py: Python<'_>, e: PyErr) {
     }
 }
 
-/// Register the host's engine memory total (no-cliffs plan C r13): `source()`
-/// returns (bytes, status, joint, measures) or None, status 0 observed, 1
-/// zero, 2 nominal; measures, the binding rows' usage measures, a list of
-/// (kind, path) with kind "cgroup" (path: its usage file), "address_space",
-/// "data_segment", "physical", "windows_job" or "windows_physical".  The
-/// ledger asks when the total is 100 ms old, with the GIL taken for it and
-/// its own lock not held, and only on a thread with an asking call (see
-/// `Asking`); an ordinary exception or a malformed answer is unreadable (the
-/// nominal total, uncertified), while KeyboardInterrupt and any other
-/// BaseException, from the call or from converting its answer, go to the
-/// asking call.  The first registration stands.
+/// Register the host's engine memory total (no-cliffs plan C r13, r17):
+/// `source()` returns (bytes, status, joint, rows) or None, status 0
+/// observed, 1 zero, 2 nominal; rows, EVERY row that constrains the
+/// engine's domain (not only those at the least figure), a list of (kind,
+/// path, figure) with kind "cgroup" (path: its usage file), "address_space",
+/// "data_segment", "physical", "windows_job", "windows_physical", or
+/// anything else for a row that can't be measured (then the ledger is not
+/// certified).  The ledger asks when the total is 100 ms old, with the GIL
+/// taken for it and its own lock not held, and only on a thread with an
+/// asking call (see `Asking`); an ordinary exception or a malformed answer
+/// is unreadable (the nominal total, uncertified), while KeyboardInterrupt
+/// and any other BaseException, from the call or from converting its answer,
+/// go to the asking call.  The first registration stands.
 #[pyfunction]
 fn set_memory_total_source(source: Py<PyAny>) {
     use sagebrush_ledger::HostAnswer;
@@ -591,35 +593,39 @@ fn set_memory_total_source(source: Py<PyAny>) {
                     return HostAnswer::Unreadable;
                 }
             };
-            let answer = match r.extract::<Option<(u64, u32, bool, Vec<(String, Option<String>)>)>>(py) {
+            // (bytes, status, joint, [(kind, path, figure)]): every applicable
+            // row (no-cliffs plan C r17 section 1.3), an unknown kind kept as
+            // Unknown so that the ledger fails closed rather than drops it
+            let answer = match r.extract::<Option<(u64, u32, bool, Vec<(String, Option<String>, u64)>)>>(py) {
                 Ok(a) => a,
                 Err(e) => {
                     host_error(py, e);
                     return HostAnswer::Unreadable;
                 }
             };
-            let Some((bytes, status, joint, measures)) = answer else {
+            let Some((bytes, status, joint, rows)) = answer else {
                 return HostAnswer::Unreadable;
             };
             let Some(status) = sagebrush_ledger::TotalStatus::from_code(status) else {
                 return HostAnswer::Unreadable;
             };
-            let kinds = measures
+            let total = sagebrush_ledger::Total { bytes, status, joint, uncertified: false };
+            let rows = rows
                 .into_iter()
-                .map(|(k, p)| match (k.as_str(), p) {
-                    ("cgroup", Some(p)) => Some(sagebrush_ledger::MeasureKind::Cgroup(p)),
-                    ("address_space", _) => Some(sagebrush_ledger::MeasureKind::AddressSpace),
-                    ("data_segment", _) => Some(sagebrush_ledger::MeasureKind::DataSegment),
-                    ("physical", _) => Some(sagebrush_ledger::MeasureKind::Physical),
-                    ("windows_job", _) => Some(sagebrush_ledger::MeasureKind::WindowsJob),
-                    ("windows_physical", _) => Some(sagebrush_ledger::MeasureKind::WindowsPhysical),
-                    _ => None,
+                .map(|(k, p, figure)| {
+                    let kind = match (k.as_str(), p) {
+                        ("cgroup", Some(p)) => sagebrush_ledger::MeasureKind::Cgroup(p),
+                        ("address_space", _) => sagebrush_ledger::MeasureKind::AddressSpace,
+                        ("data_segment", _) => sagebrush_ledger::MeasureKind::DataSegment,
+                        ("physical", _) => sagebrush_ledger::MeasureKind::Physical,
+                        ("windows_job", _) => sagebrush_ledger::MeasureKind::WindowsJob,
+                        ("windows_physical", _) => sagebrush_ledger::MeasureKind::WindowsPhysical,
+                        _ => sagebrush_ledger::MeasureKind::Unknown,
+                    };
+                    sagebrush_ledger::Row { kind, figure }
                 })
-                .collect::<Option<Vec<_>>>();
-            match kinds {
-                Some(kinds) => HostAnswer::Total(sagebrush_ledger::Total { bytes, status, joint }, kinds),
-                None => HostAnswer::Unreadable,
-            }
+                .collect();
+            HostAnswer::Total(total, rows)
         })
     });
 }

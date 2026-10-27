@@ -293,7 +293,7 @@ export class EditWatch {
  * what an interrupted save left recovered, FILE read and checked as an editable board: the hub, or why the
  * board is shown read only instead.
  */
-export async function startEdit(path: string, limits: Limits, deps: { mergeStrings3: (o: { base: string; a: string; b: string }) => string; now: () => number }): Promise<{ hub: EditHub } | { why: string }> {
+export async function startEdit(path: string, limits: Limits, deps: { now: () => number }): Promise<{ hub: EditHub } | { why: string }> {
   const fs = await import("fs");
   const { dirname, join } = await import("path");
   const { randomBytes } = await import("crypto");
