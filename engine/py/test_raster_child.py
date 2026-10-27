@@ -710,12 +710,24 @@ def test_r2_CORR_157_4_the_thread_transport_portable():
     # (select takes sockets only there; no readv): forced here, the same
     # code: a round trip, back-pressure with Ctrl-C at once, and a retry
     # (portable: also run on Windows and macOS)
+    # The echo child reads all it's sent before it answers, as the engine's
+    # child does (raster_child.rs reads a whole request first): one that
+    # wrote back as it read deadlocked on Windows's 4 KiB pipes, the parent
+    # not reading until it had written everything (#157's train-10 run);
+    # on Linux the pipes are made that small too, so it would here.
     out = ok(R2 + """
     import signal
     rc._FORCE_THREADS = True
-    echo = [sys.executable, "-c", "import os\\nwhile True:\\n d = os.read(0, 65536)\\n if not d: break\\n os.write(1, d)"]
-    c = rc.spawn(1 << 30, rc.Plan(None, 0, echo, dict(os.environ)))
+    def echo(n):
+        return [sys.executable, "-c", "import os, sys\\nn = int(sys.argv[1])\\nb = bytearray()\\nwhile len(b) < n:\\n d = os.read(0, n - len(b))\\n if not d: break\\n b += d\\nos.write(1, b)", str(n)]
+    def small_pipes(c):
+        if sys.platform.startswith("linux"):
+            import fcntl
+            for fd in (c.wfd, c.rfd):
+                fcntl.fcntl(fd, 1031, 4096)  # (F_SETPIPE_SZ: Windows's size)
     data = bytes(range(256)) * 64
+    c = rc.spawn(1 << 30, rc.Plan(None, 0, echo(len(data)), dict(os.environ)))
+    small_pipes(c)
     rc.write_all(c, [data[:8000], data[8000:]])
     back = bytearray(len(data))
     rc.read_into(c, back)
@@ -735,7 +747,7 @@ def test_r2_CORR_157_4_the_thread_transport_portable():
     except KeyboardInterrupt:
         print("interrupted", time.monotonic() - t < 0.8)
     c.kill()
-    c = rc.spawn(1 << 30, rc.Plan(None, 0, echo, dict(os.environ)))
+    c = rc.spawn(1 << 30, rc.Plan(None, 0, echo(5), dict(os.environ)))
     rc.write_all(c, [b"again"])
     back = bytearray(5)
     rc.read_into(c, back)
