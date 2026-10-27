@@ -323,7 +323,7 @@ async function runHost(host) {
   for (const c of CASES) {
     if (c.hosts && !c.hosts.includes(host)) continue; // (a case's own hosts, e.g. E13g: the CLI)
     // the CI set (r5 §8): the CLI's five rows, the prompt's two; everything else is VM-only
-    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l"]).includes(c.id)) continue;
+    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l", "L1c"]).includes(c.id)) continue;
     if (overBudget()) {
       rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: "run budget spent" });
       record(rows.at(-1));
@@ -420,6 +420,11 @@ for (const h of HOSTS) {
     // (a browser that can't start is an uncovered host, reported, not a crash that loses the run)
     out.hosts[h] = overBudget() ? { skipped: "run budget spent" } : await browserPilot({ record, overBudget, remainingMs: workLeft, mode: MODE, baseline: BASELINE, onChild: (pid) => track(pid), onChildDone: (pid) => untrack(pid) }).catch((e) => ({ error: String(e?.stack ?? e).slice(0, 600), rows: [] }));
   } else out.hosts[h] = await runHost(h);
+}
+// the leak control must have run: in --ci on the CLI, a missing L1c row FAILs (never passes silently)
+if (MODE === "ci" && HOSTS.includes("cli") && (!ROWS || ROWS.split(",").includes("L1c")) && Array.isArray(out.hosts.cli) && !out.hosts.cli.some((r) => r.case === "L1c")) {
+  out.hosts.cli.push({ case: "L1c", host: "cli", outcome: "FAIL", why: "leak control: its row is missing from the CI run" });
+  record(out.hosts.cli.at(-1));
 }
 if (SIGNALS !== "none") {
   const { runSignals } = await import("./interrupt-signals.mjs");

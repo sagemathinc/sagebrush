@@ -151,21 +151,38 @@ test("the heap+external sample settles: the least of a few collected readings, s
   assert.equal(none.stdout.trim(), "''", none.stderr);
 });
 
-test("the leak control (L1c): its row PASSes only when the leak check catches the deliberate leak", () => {
+test("the leak control (L1c): PASS only on measured heap+external growth over its allowance; a thread-only failure, the RSS fallback or a malformed result FAIL", () => {
   const pass = `[{ outcome: "PASS" }, { outcome: "PASS" }]`;
-  const caught = run(`leakControlOutcome(${pass}, { ok: false, growth_kb: 49152, allowed_kb: 16384 }, undefined)`);
-  assert.equal(caught.outcome, "PASS");
-  assert.match(caught.why, /caught/);
-  assert.equal(run(`leakControlOutcome(${pass}, { ok: true, growth_kb: 100, allowed_kb: 16384 }, undefined)`).outcome, "FAIL");
+  const ser = (mem: (number | null)[], threads: number[]) => JSON.stringify(mem.map((m, k) => ({ i: k + 1, rss_kb: 5e5 + k * 30e3, threads: threads[k], ...(m == null ? {} : { mem_kb: m * 1024 }) })));
+  // the series the control produces (+24 MB a repeat): leakCheck fails it on growth, and the control PASSes
+  const grown = run(`leakCheck(${ser([150, 174, 198, 222, 246], [8, 8, 8, 8, 8])}, 20, "heap+external")`);
+  assert.equal(grown.ok, false);
+  assert.ok(grown.growth_kb > grown.allowed_kb);
+  const ok = run(`leakControlOutcome(${pass}, ${JSON.stringify(grown)}, undefined)`);
+  assert.equal(ok.outcome, "PASS");
+  assert.match(ok.why, /caught \(growth \d+ KB > allowed \d+ KB\)/);
+  // astra2's negative: no growth, a thread change only -> leakCheck ok:false, but NOT the control's leak
+  const threadOnly = run(`leakCheck(${ser([150, 150, 150, 150, 150], [8, 8, 8, 8, 9])}, 20, "heap+external")`);
+  assert.equal(threadOnly.ok, false);
+  assert.equal(threadOnly.growth_kb, 0);
+  const t = run(`leakControlOutcome(${pass}, ${JSON.stringify(threadOnly)}, undefined)`);
+  assert.equal(t.outcome, "FAIL");
+  assert.match(t.why, /thread count changed/);
+  // growth AND a thread change: still not a clean catch
+  const both = run(`leakCheck(${ser([150, 174, 198, 222, 246], [8, 8, 8, 8, 9])}, 20, "heap+external")`);
+  assert.equal(run(`leakControlOutcome(${pass}, ${JSON.stringify(both)}, undefined)`).outcome, "FAIL");
+  // the host had no heap figure: the RSS fallback, even with RSS growth over its bound, is not the control
+  const rss = run(`leakCheck(${JSON.stringify([1, 2, 3, 4, 5].map((i) => ({ i, rss_kb: 3e5 + i * 50e3, threads: 8 })))}, 20, "heap+external")`);
+  assert.equal(rss.ok, false);
+  assert.match(rss.measure, /^rss/);
+  assert.equal(run(`leakControlOutcome(${pass}, ${JSON.stringify(rss)}, undefined)`).outcome, "FAIL");
+  // the leak not caught (flat), a malformed result, no series, a surviving worker, a failed cell
+  const flat = run(`leakCheck(${ser([150, 150, 150, 150, 150], [8, 8, 8, 8, 8])}, 20, "heap+external")`);
+  assert.equal(run(`leakControlOutcome(${pass}, ${JSON.stringify(flat)}, undefined)`).outcome, "FAIL");
+  assert.equal(run(`leakControlOutcome(${pass}, { ok: false, measure: "heap+external after gc" }, undefined)`).outcome, "FAIL");
   assert.equal(run(`leakControlOutcome(${pass}, null, undefined)`).outcome, "INCOMPLETE");
-  assert.equal(run(`leakControlOutcome(${pass}, { ok: false, survived_kill: [123] }, undefined)`).outcome, "FAIL");
-  // (caught, but a cell failed: the cells still decide)
-  assert.equal(run(`leakControlOutcome([{ outcome: "FAIL" }], { ok: false, growth_kb: 49152, allowed_kb: 16384 }, undefined)`).outcome, "FAIL");
-  // the series the control produces, settled: +24 MB a repeat fails the check
-  const ser = [150, 174, 198, 222, 246].map((m, k) => ({ i: k + 1, rss_kb: 5e5, threads: 8, mem_kb: m * 1024 }));
-  const lk = run(`leakCheck(${JSON.stringify(ser)}, 20, "heap+external")`);
-  assert.equal(lk.ok, false);
-  assert.equal(run(`leakControlOutcome(${pass}, ${JSON.stringify(lk)}, undefined)`).outcome, "PASS");
+  assert.equal(run(`leakControlOutcome(${pass}, ${JSON.stringify({ ...grown, ok: false, survived_kill: [123] })}, undefined)`).outcome, "FAIL");
+  assert.equal(run(`leakControlOutcome([{ outcome: "FAIL" }], ${JSON.stringify(grown)}, undefined)`).outcome, "FAIL");
 });
 
 test("XK window (E13g): inside the call, a KI within R + max(1 s, R/4) is EXCEPTION; past it, or a return, FAILs", () => {

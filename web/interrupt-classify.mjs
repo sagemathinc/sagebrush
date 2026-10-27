@@ -54,14 +54,19 @@ export function xkRowOutcome(cells, leakOk, xk) {
   return { outcome: "FIXED", why: "stale exception: every cell PASS; remove the case's xk field" };
 }
 
-// a leak CONTROL row (a case with expect_leak: a deliberate retention per repeat): the leak check
-// must catch it, every run, or the row FAILs; when it does, the row is judged on its cells alone.
-// A worker that outlived its kill is never excused by the control.  (#217: the settled sample can't
-// read a real leak lower than it is; this keeps that proven on the real runtime in CI)
+// a leak CONTROL row (a case with expect_leak: a deliberate retention per repeat): it PASSes only
+// when the heap+external leak check measured a finite growth ABOVE its allowance, with the thread
+// count unchanged, no worker outliving its kill, and every cell healthy.  Any other leak.ok = false
+// (a thread change alone, the RSS fallback when the host has no heap figure, a malformed result) is
+// not the control catching its leak and FAILs, as does a missing series (INCOMPLETE).  (#217,
+// astra2 K2: a thread-only failure must not pass the control)
 export function leakControlOutcome(cells, leak, xk) {
   if (leak == null) return { outcome: "INCOMPLETE", why: "leak control: the leak series was not measured" };
   if (leak.survived_kill) return { outcome: "FAIL", why: "leak control: a worker survived its kill" };
-  if (leak.ok !== false) return { outcome: "FAIL", why: `leak control: the deliberate leak was NOT caught (growth ${leak.growth_kb} KB, allowed ${leak.allowed_kb} KB)` };
+  if (leak.measure !== "heap+external after gc") return { outcome: "FAIL", why: `leak control: measured by ${leak.measure ?? "nothing"}, not heap+external after gc` };
+  if (!Number.isFinite(leak.growth_kb) || !Number.isFinite(leak.allowed_kb)) return { outcome: "FAIL", why: "leak control: a malformed leak result (no finite growth or allowance)" };
+  if (leak.threads_same !== true) return { outcome: "FAIL", why: "leak control: the thread count changed (not the control's leak)" };
+  if (!(leak.growth_kb > leak.allowed_kb) || leak.ok !== false) return { outcome: "FAIL", why: `leak control: the deliberate leak was NOT caught (growth ${leak.growth_kb} KB, allowed ${leak.allowed_kb} KB)` };
   const r = xkRowOutcome(cells, true, xk);
   return { ...r, why: r.why ?? `leak control: caught (growth ${leak.growth_kb} KB > allowed ${leak.allowed_kb} KB)` };
 }
