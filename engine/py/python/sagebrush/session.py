@@ -689,9 +689,12 @@ class Session:
                 return None
             if not isinstance(r, dict) or r.get("id") != rid:
                 self.stale += 1
-                continue
-            if "out" not in r:
+            elif "out" not in r:
                 return r
+            # (a dropped or output message: the deadline holds however many are
+            # queued, so a queue that stays nonempty can't extend the wait)
+            if time.monotonic() >= end:
+                return False
 
     def run(self, code, mode="sage", timeout=60.0, isolated=False, data=False):
         """Run code ("sage" syntax or plain "python"); a dict with stdout,

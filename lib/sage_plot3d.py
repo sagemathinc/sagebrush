@@ -819,6 +819,7 @@ def gc_temps(root=".sagebrush", budget_s=GC_BUDGET_S, clock=None, alive=None):
     me = os.getpid()
     seeking = bool(cursor)
     last = None
+    examined = 0
     with it:
         for e in it:
             # (the resume: names read up to the cursor, nothing else done.  Before
@@ -829,10 +830,14 @@ def gc_temps(root=".sagebrush", budget_s=GC_BUDGET_S, clock=None, alive=None):
             if seeking:
                 if e.name == cursor:
                     seeking = False
+                    t0 = clock()  # (the budget is the examinations': the seek's time isn't charged to it)
                 continue
-            if clock() - t0 > budget_s:
+            # (every pass examines at least one entry past its cursor, so passes
+            # always progress, whatever the seek or one examination took)
+            if examined and clock() - t0 > budget_s:
                 rec["stopped"] = True
                 break
+            examined += 1
             m = re.fullmatch(r"(\d+)-(\d+)", e.name)
             if m and int(m.group(1)) != me and not alive(int(m.group(1))):
                 try:
