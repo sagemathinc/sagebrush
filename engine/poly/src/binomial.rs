@@ -617,6 +617,11 @@ fn pow_cmp(b: &Budget, c: &BigInt, l: u64, n: &BigInt) -> FResult<Option<bool>> 
 /// outside tier 1, by rem_u64, until WITNESSES witnesses were tried.  A
 /// witness serves l when p = 1 mod l; fewer witnesses only weaken the filter:
 /// the exact search still runs, never a refusal.
+///
+/// Perf: the proof costs a few microseconds above 4096 bits, where master
+/// skipped Stage B and so omitted it.  William approved that as a waiver of
+/// the 1% gate (2026-10-27, waiver r2): native cold B/A up to 1.11, only on
+/// the frozen binom4097, binom16384 and binom65536 rows of harness r6c.
 #[cfg(test)]
 const FOLD_MINUS: [u64; 7] = [3, 5, 17, 257, 641, 65537, 6700417];
 /// The distinct prime factors of 2^48 - 1 = 3^2 5 7 13 17 97 241 257 673
