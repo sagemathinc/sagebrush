@@ -35,7 +35,7 @@ A **collection** is a directory of notebooks, boards and data files that someone
 2. It uploads those (`PUT /api/share/blob/<sha256>`, with its length).
    - The bytes are first **reserved** by one conditional INSERT that counts the account's files, manifests and running uploads. Concurrent uploads can't all pass one check.
    - R2 refuses bytes that don't hash to the SHA-256, and the stored size must equal the declared one.
-3. It commits the version: a new version of a share (`POST /api/share/collections/<id>/versions`), or, for a new share, the request that makes its collection too (`POST /api/share/collections` with `{title, license, files, attempt}`).
+3. It commits the version: a new version of a share (`POST /api/share/collections/<id>/versions`), or, for a new share, the request that makes its collection too (`POST /api/share/first-upload` with `{title, license, files, attempt}`: its own path, so a server from before it answers 404 and makes nothing).
    - Every file must be one the account uploaded, at its stated size, and every path a plain relative path.
    - The manifest's bytes count against the quota too.
    - Limits: 1,000 collections per account, 1,000 versions per collection, 10,000 files per version.
@@ -47,8 +47,9 @@ A **collection** is a directory of notebooks, boards and data files that someone
 - **The receipt** (`upload_receipts`) records the attempt's hash, the digest of what the request asked for (title, license, files) and the exact version it made. A retry of the attempt (its answer lost, the page reloaded) is answered from it:
   - the same contents: that version, never a second share;
   - other contents: 409 `attempt_used`, naming the share. It is never a success; the page then treats that share as the notebook's.
-  - the share deleted meanwhile: 410 `attempt_retired`. A deletion retires the receipt in its own transaction, and a retired receipt is kept 30 days.
-- **An older page** may still create an empty collection first (`{title}` alone). That form is kept only for pages loaded before this change, and will be removed.
+  - the share deleted meanwhile: 410 `attempt_retired`. A deletion retires the receipt in its own transaction. A retired receipt is kept 30 days, or until its account has deleted 1,000 newer shares, whichever comes first; after that, a retry makes a new share with a new id, and the deleted link stays dead. So the table holds at most 2,000 rows per account.
+- **The page keeps what the save kept:** if a remote update merged by that save replaced the attempt, the kept one is used; if it brought a share made elsewhere, the upload stops. Just before the share request, the notebook must still hold that attempt.
+- **An older page** may still create an empty collection first (`POST /api/share/collections` with `{title}` alone). That form is kept only for pages loaded before this change, and will be removed. It refuses a first upload's form (400).
 
 **Each step that depends on an earlier check ends in one D1 transaction** whose guard re-checks it: the account isn't being deleted, the collection is still its own, every file is still held. An R2 write whose D1 write then fails is found from its expired reservation and deleted by the scheduled job.
 
