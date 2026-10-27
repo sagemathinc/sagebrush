@@ -53,8 +53,8 @@ fn f4_host_poll_gap() {
         hooks::reset();
         eprintln!("cyclic-{}: {} elements in {:.2} s; {} checks; longest gap between checks {:.2} ms, between host polls {:.2} ms", n, g.len(), secs, total, gap as f64 / 1e6, poll as f64 / 1e6);
         assert!(poll > 0, "cyclic-{}: no host poll traced", n);
-        // (generous for slow runners: before the coarse checks in the row
-        // loops this was 4.1 s on cyclic-8, and 0.07 s after)
-        assert!(poll < 1_000_000_000, "cyclic-{}: {:.2} s between two host polls", n, poll as f64 / 1e9);
+        // the 250 ms Stop bound (before the coarse checks in the row loops
+        // this was 4.1 s on cyclic-8, and 0.07 s after)
+        assert!(poll <= 250_000_000, "cyclic-{}: {:.2} ms between two host polls, past the 250 ms Stop bound", n, poll as f64 / 1e6);
     }
 }
