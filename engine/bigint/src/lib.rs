@@ -140,7 +140,9 @@ mod tests {
 
     #[test]
     fn the_limb_stream_matches_the_digits() {
-        for n in [BigInt::from(-5), (BigInt::from(1) << 64u32) - 1, (BigInt::from(1) << 200u32) + 12345, -((BigInt::from(1) << 4097u32) + 3)] {
+        let big: BigInt = (BigInt::from(1) << 4097u32) + 3;
+        let ns: [BigInt; 4] = [BigInt::from(-5), (BigInt::from(1) << 64u32) - 1, (BigInt::from(1) << 200u32) + 12345, -big];
+        for n in ns {
             let mut v = vec![];
             for_each_u64_limb(&n, |d| v.push(d));
             let want = n.to_u64_digits().1;
