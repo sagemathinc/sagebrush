@@ -147,8 +147,9 @@ export type WorkspaceErrorCode = "invalid" | "exists" | "missing" | "conflict" |
 /** The kinds of document whose saves go through the journal once it is active (plan-sync-slice2-client r4 §1a). */
 export const JOURNAL_KINDS = ["notebooks", "boards"] as const;
 const journalWriters = new Set<string>();
-/** This build saves documents of `kind` through the journal (web/notebook/journal.js for notebooks; boards' in 2c-1b):
- * activateJournal is refused until every kind has said so. */
+/** This build's documents of `kind` work under an active journal: notebooks are saved through it (web/notebook/journal.js);
+ * boards keep their save and follow the fences' phase (web/board/page.ts; their own journal is 2c-1b's).
+ * activateJournal is refused until every kind has said so, in the page that activates. */
 export function registerJournalWriter(kind: (typeof JOURNAL_KINDS)[number]): void {
   if (!(JOURNAL_KINDS as readonly string[]).includes(kind)) throw new TypeError(`no journal writer of kind ${String(kind)}`);
   journalWriters.add(kind);
