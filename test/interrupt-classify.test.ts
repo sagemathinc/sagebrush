@@ -10,7 +10,7 @@ import { join } from "node:path";
 const mod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 
 function run(js: string): any {
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { leakControlOutcome, classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -149,6 +149,23 @@ test("the heap+external sample settles: the least of a few collected readings, s
   // no figure on the host: nothing
   const none = spawnSync("python3", ["-c", ["import time", "_hu = None", "_he = None", "for _x in [1]:", sample.replace(/\n$/, ""), "    print(repr(_m))"].join("\n")], { encoding: "utf8" });
   assert.equal(none.stdout.trim(), "''", none.stderr);
+});
+
+test("the leak control (L1c): its row PASSes only when the leak check catches the deliberate leak", () => {
+  const pass = `[{ outcome: "PASS" }, { outcome: "PASS" }]`;
+  const caught = run(`leakControlOutcome(${pass}, { ok: false, growth_kb: 49152, allowed_kb: 16384 }, undefined)`);
+  assert.equal(caught.outcome, "PASS");
+  assert.match(caught.why, /caught/);
+  assert.equal(run(`leakControlOutcome(${pass}, { ok: true, growth_kb: 100, allowed_kb: 16384 }, undefined)`).outcome, "FAIL");
+  assert.equal(run(`leakControlOutcome(${pass}, null, undefined)`).outcome, "INCOMPLETE");
+  assert.equal(run(`leakControlOutcome(${pass}, { ok: false, survived_kill: [123] }, undefined)`).outcome, "FAIL");
+  // (caught, but a cell failed: the cells still decide)
+  assert.equal(run(`leakControlOutcome([{ outcome: "FAIL" }], { ok: false, growth_kb: 49152, allowed_kb: 16384 }, undefined)`).outcome, "FAIL");
+  // the series the control produces, settled: +24 MB a repeat fails the check
+  const ser = [150, 174, 198, 222, 246].map((m, k) => ({ i: k + 1, rss_kb: 5e5, threads: 8, mem_kb: m * 1024 }));
+  const lk = run(`leakCheck(${JSON.stringify(ser)}, 20, "heap+external")`);
+  assert.equal(lk.ok, false);
+  assert.equal(run(`leakControlOutcome(${pass}, ${JSON.stringify(lk)}, undefined)`).outcome, "PASS");
 });
 
 test("XK window (E13g): inside the call, a KI within R + max(1 s, R/4) is EXCEPTION; past it, or a return, FAILs", () => {
