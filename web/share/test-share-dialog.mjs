@@ -382,7 +382,7 @@ try {
     const q = await newPage(browserContextId);
     // (the stub before the page's own scripts: Page enabled first, and the call's answer checked, as raw() hides CDP errors)
     await q.send("Page.enable");
-    const added = await q.send("Page.addScriptToEvaluateOnNewDocument", { source: "(() => { const f = window.fetch; window.__me = 503; window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? Promise.resolve(new Response('x', { status: window.__me })) : f(u, o)); })()" });
+    const added = await q.send("Page.addScriptToEvaluateOnNewDocument", { source: "(() => { const f = window.fetch; window.__me = 503; window.__served = []; window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? (window.__served.push(window.__me), Promise.resolve(new Response('x', { status: window.__me }))) : f(u, o)); })()" });
     ok(!!added?.identifier, "(the fresh page's /api/share/me stub is registered: " + JSON.stringify(added) + ")");
     await q.send("Page.navigate", { url: dev.site + "/" });
     await q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
@@ -396,9 +396,12 @@ try {
     ok(Date.now() - t0 < 11000 && (await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden")), `(the check ends: ${Date.now() - t0} ms) ` + (await st()));
     ok(await q.ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareup').hidden && !document.querySelector('#shareunreachable').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "nothing known and the check fails again: the dialog says why, with neither 'Sign in' nor the form: " + (await st()));
     await q.ev("document.querySelector('#sharedlg').close()");
+    // (set before this open's own check, which reads it when it asks)
     await q.ev("window.__me = 404");
+    const asked = await q.ev("window.__served.length");
     await q.ev("document.querySelector('#sharemenu').click()");
-    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden", 10000).catch(() => {});
+    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden", 12000).catch(() => {});
+    ok((await q.ev(`window.__served.slice(${asked}).join()`)) === "404", "(this open's check was answered 404 by the stub: " + (await q.ev("window.__served.join()")) + ")");
     ok(await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#shareup').hidden && !document.querySelector('#sharelink').hidden"), "then a 404 (this site has no sharing): no Upload section at all, the link still there: " + (await st()));
     await raw("Target.closeTarget", { targetId: q.targetId });
     await raw("Target.disposeBrowserContext", { browserContextId });
