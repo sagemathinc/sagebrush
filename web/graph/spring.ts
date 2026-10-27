@@ -45,6 +45,10 @@ export const MIN_ITERATIONS = 50;
  * forces: it is not iterated. */
 export const MAX_ITERATIONS = 1000;
 export const MAX_FRAMES = 300;
+/** The frames, within MAX_FRAMES, in which the animation's last frame glides
+ * to the layout's (finish() packs the settled parts again, and a part can
+ * end in another row than the animation kept: board's review of #240). */
+export const TRANSITION_FRAMES = 10;
 export const MIN_LENGTH = 1;
 export const MAX_LENGTH = 1e5;
 export const PART_COST = 64;
@@ -398,9 +402,10 @@ export function* springSteps(nodes: SpringNode[], edges: [string, string][], opt
   const p = plan(nodes, edges, opts);
   if (p === null) return;
   const most = Math.max(0, ...p.parts.map((pt) => pt.iterations));
-  const k0 = Math.max(1, Math.floor(every), Math.ceil(most / MAX_FRAMES));
+  const k0 = Math.max(1, Math.floor(every), Math.ceil(most / (MAX_FRAMES - TRANSITION_FRAMES)));
   // (the rows of the animation's packing, fixed at its first frame)
   let rows: number[][] | null = null;
+  let shown: Positions | null = null;
   for (let k = 0; k < most; k++) {
     for (const part of p.parts) if (part.done < part.iterations) part.step(p.gap);
     if ((k + 1) % k0 === 0) {
@@ -408,10 +413,27 @@ export function* springSteps(nodes: SpringNode[], edges: [string, string][], opt
         const { free, bbs } = freeParts(p);
         rows = packRows(free.map((pt, i) => ({ boxes: pt.bodies.length, bb: bbs[i] })), p.gap);
       }
-      yield frame(p, rows);
+      shown = frame(p, rows);
+      yield shown;
     }
   }
   finish(p);
   const last = checked(nodes, snapshot(p.all), p.gap);
-  if (last !== null) yield last;
+  if (last === null) return;
+  // (from the animation's last frame to the layout, every box in a straight
+  // line, in TRANSITION_FRAMES steps; the last frame is the layout itself)
+  if (shown !== null) {
+    const from = shown;
+    const r = (v: number) => Math.round(v * 1e6) / 1e6 + 0;
+    for (let k = 1; k <= TRANSITION_FRAMES; k++) {
+      const t = k / (TRANSITION_FRAMES + 1);
+      const out: Positions = new Map();
+      for (const [id, b] of last) {
+        const a = from.get(id)!;
+        out.set(id, { x: r(a.x + (b.x - a.x) * t), y: r(a.y + (b.y - a.y) * t) });
+      }
+      yield out;
+    }
+  }
+  yield last;
 }
