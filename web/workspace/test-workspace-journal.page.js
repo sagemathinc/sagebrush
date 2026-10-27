@@ -393,6 +393,12 @@ async function boardsFollowPhase() {
   W.showBusyNotice("Deleting old versions… 50%");
   W.hideBusyNotice();
   check(!!top() && top().textContent.includes(S.HISTORY_STOPPED) && [...top().querySelectorAll("button")].some((x) => x.textContent === "Reload") && !busy(), "…shown at the top with Reload, kept through a deletion's progress and its end: " + J(top()?.textContent ?? null));
+  // (a newer tab closing the database after it: the page's "can't save" is said over it, in the one box; and said
+  // first, it isn't replaced by TimeTravel's: board's R1 on 65675b8e)
+  W.showReloadNotice();
+  check(top()?.textContent.includes(W.RELOAD_TEXT ?? "updated in another tab") && !top().textContent.includes(S.HISTORY_STOPPED) && document.querySelectorAll("#sagebrush-reload-notice").length === 1, "…and a later closing of the database (showReloadNotice()) says the page can't save, in its place: " + J(top()?.textContent ?? null));
+  W.showHistoryNotice?.(S.HISTORY_STOPPED, S.HISTORY_STOPPED);
+  check(top()?.textContent.includes(W.RELOAD_TEXT ?? "updated in another tab") && !top().textContent.includes(S.HISTORY_STOPPED), "…which TimeTravel's notice, after it, doesn't replace");
   top()?.remove();
   W.showHistoryNotice?.(S.HISTORY_REFUSED, S.HISTORY_STOPPED);
   check(!top() && busy()?.textContent.includes(S.HISTORY_REFUSED), "…while TimeTravel's pause is still a busy notice");
