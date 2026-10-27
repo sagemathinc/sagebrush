@@ -1397,13 +1397,6 @@ async function open(store, id, kind = "browser") {
   await shareTest.beforeAttach?.();
   const doc = await nb.attach(store);
   showName(doc.name);
-  // (the journal's recovery kept a version saved in this browser that the history didn't hold, and that clashed with
-  // it, as a notebook of its own: listed beside this one, and said)
-  if (store?.journaled && store.recovered?.row === "copied") {
-    const copyName = `${doc.name || "Untitled"} (kept from this browser)`;
-    wsAdoptNotebook(store.recovered.copy, copyName, doc.mode).catch((e) => console.warn("workspace:", e));
-    statusEl.textContent = `a version of "${doc.name || "Untitled"}" saved in this browser conflicted with its history: it is kept as "${copyName}"`;
-  }
   modeEl.value = nb.mode;
   $("#ttrepro").checked = nb.meta.reproducible !== false;
   // (the reactive notebook: random numbers are reproducible per cell, always)

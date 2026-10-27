@@ -2,7 +2,7 @@
 // core (journal.js).  W the workspace, N the journal, H the notebook's history (history.js), R sync's rows.  Each case
 // has a workspace of its own; the notebooks' history is one database for the whole origin, its fence dropped before
 // each case (in a browser there is only ever one workspace), and each case's notebooks have ids of their own.
-import { W, N, H, R } from "./all.js";
+import { W, N, H, R, B } from "./all.js";
 
 const results = [];
 const check = (ok, what) => results.push([!!ok, what]);
@@ -46,7 +46,7 @@ async function recount(hdb) {
     else if (r.nb === R.SYNC_NB && r.time === "n") meta += R.rowCharge([r.nb, r.time], r.v);
     else if (r.nb === R.SYNC_NB && r.time === "b:m:local") counted.meta = r.v.bytes;
     else if (r.nb === R.SYNC_NB && r.time === "b:p:local") counted.pend = r.v.bytes;
-    else if (r.time === "p") pend += R.rowCharge([r.nb, r.time], r.v);
+    else if (r.nb !== R.SYNC_NB && r.time.startsWith("p")) pend += R.rowCharge([r.nb, r.time], r.v);
   }
   // (each document's metadata as charged: its registry row and its j row, measured again)
   const ctr = rows.find((r) => r.nb === R.SYNC_NB && r.time === "n");
@@ -58,6 +58,26 @@ async function recount(hdb) {
   return { meta, pend, counted, measured };
 }
 const close = (...xs) => { for (const x of xs) try { x?.history?.close?.(); x?.close?.(); } catch {} };
+
+
+// (a promise's outcome, or "timeout" after ms)
+const within = (p, ms) => Promise.race([p.then((v) => ({ v }), (e) => ({ e })), sleep(ms).then(() => "timeout")]);
+const fenceRow = (hdb) => rawGet(hdb, "history", [FENCE, ""]);
+// (a notebook loaded fresh, and the crash points: T1 alone (the tab gone before T2); T1 and T2 without the prune)
+const loadNew = async (w, hdb, cells, extra) => { const id = newId(), st = store(w, hdb, id, doc(cells, extra)); const d = await st.load(); return { id, st, d }; };
+const t1Only = (st, d) => st.t1(d);
+const reopen = async (w, hdb, id) => { const st = store(w, hdb, id); const d = await st.load(); return { st, d, row: st.recovered.row, catchUp: st.recovered.catchUp }; };
+// (the persisted document: its cells' text, its hash right, its j the history's J, no intent left)
+async function persisted(w, hdb, id) {
+  const rec = await rawGet(w.main, "notebooks", id), js = await jState(hdb, id);
+  return { codes: codes(rec), hashOk: rec.hash === (await N.docHash(rec)), jOk: rec.j === js.J, intents: js.intents.length, rec, js };
+}
+const pause = async (st) => { st.history.refused("refused-for-the-test"); await st.history.rebuilding; };
+// (the outputs-only save that takes the record to revision 2 at its first load (astra's repro))
+async function outputsOnly(st, d) {
+  const out = await st.save({ ...d, cells: d.cells.map((c) => ({ ...c, outputs: [{ text: "o" }] })), baseRev: d.rev });
+  return { ...d, cells: d.cells.map((c) => ({ ...c, outputs: [{ text: "o" }] })), rev: out.rev };
+}
 
 async function inactive() {
   // before activation: the journal's store writes nothing (its phase isn't there yet); a plain store saves as before,
@@ -75,163 +95,266 @@ async function inactive() {
 }
 
 async function saves() {
-  const { w, hdb } = await active(), id = newId();
-  // a plain store is refused now
+  const { w, hdb } = await active();
   const pid = newId(), plain = new W.IdbStore(w.main, pid, doc([]));
   const said = await plain.save(doc([["a", "1"]]));
   check(typeof said === "string" && /doesn't: reload/.test(said) && (await rawGet(w.main, "notebooks", pid)) === undefined, "after activation a plain store's save is refused, nothing written: " + said);
-  // a new notebook: its first save journaled (row "new"), j 1, the hash of what it holds
-  const st = store(w, hdb, id, doc([["a", "1"], ["b", "2"]]));
-  const d0 = await st.load();
-  let rec = await rawGet(w.main, "notebooks", id), js = await jState(hdb, id);
-  check(st.recovered.row === "new" && rec.j === 1 && js.J === 1 && rec.hash === (await N.docHash(rec)) && codes(d0) === codes(rec), "a new notebook: T1 then T2, record j 1 = jseq, its hash: " + J({ row: st.recovered.row, j: rec.j, J: js.J }));
-  const rows0 = await histRows(hdb, id);
-  check(rows0.length === 1 && rows0[0].j === 1, "…its version in the history with j 1");
-  // edits: each a version at the next j, the record following
-  let rev = rec.rev;
-  for (const code of ["11", "111"]) {
-    const out = await st.save({ ...rec, cells: [{ id: "a", code }, { id: "b", code: "2" }], baseRev: rev });
-    rec = await rawGet(w.main, "notebooks", id);
-    rev = out.rev;
-  }
-  js = await jState(hdb, id);
-  check(rec.j === 3 && js.J === 3 && rec.cells[0].code === "111" && rec.hash === (await N.docHash(rec)), "two edits: j 3 in both, the record holding the last: " + J({ j: rec.j, J: js.J }));
-  const rows = await histRows(hdb, id);
-  check(J(rows.map((r) => r.j)) === J([1, 2, 3]), "…each version in the history with its j: " + J(rows.map((r) => r.j)));
-  // an output-only save: no version, the same j
+  const { id, st, d } = await loadNew(w, hdb, [["a", "1"], ["b", "2"]]);
+  let p = await persisted(w, hdb, id);
+  check(st.recovered.row === "new" && p.rec.j === 1 && p.jOk && p.hashOk && p.intents === 0 && codes(d) === p.codes, "a new notebook: T1 (its intent, its version) then T2, j 1, its hash, the intent pruned: " + J({ row: st.recovered.row, j: p.rec.j, intents: p.intents }));
+  let rec = p.rec, rev = rec.rev;
+  for (const code of ["11", "111"]) { const out = await st.save({ ...rec, cells: [{ id: "a", code }, { id: "b", code: "2" }], baseRev: rev }); rev = out.rev; rec = await rawGet(w.main, "notebooks", id); }
+  p = await persisted(w, hdb, id);
+  check(p.rec.j === 3 && p.jOk && p.hashOk && p.intents === 0 && J((await histRows(hdb, id)).map((r) => r.j)) === J([1, 2, 3]), "two edits: each a version and an intent at its j, the record at j 3, every intent pruned");
+  // an outputs-only save: an intent alone at the next j (every save writes one), no version
   const out = await st.save({ ...rec, cells: [{ id: "a", code: "111", outputs: [{ text: "x" }] }, { id: "b", code: "2" }], baseRev: rev });
-  rec = await rawGet(w.main, "notebooks", id);
-  check(!!out?.saved && rec.j === 3 && (await jState(hdb, id)).J === 3 && rec.cells[0].outputs?.[0]?.text === "x", "an outputs-only save: written at the same j, no version");
-  // a stale base: a conflict, nothing written
-  const c = await st.save({ ...rec, cells: [{ id: "a", code: "zzz" }], baseRev: rev });
-  check(c?.conflict && (await rawGet(w.main, "notebooks", id)).cells[0].code === "111", "a save from a stale revision: a conflict, the record as it was (T2's compare and swap)");
-  // a journal store's save without the journal's {j, hash}, and a plain store's with it: refused, nothing written
+  p = await persisted(w, hdb, id);
+  check(!!out?.saved && p.rec.j === 4 && p.jOk && p.intents === 0 && (await histRows(hdb, id)).length === 3 && p.rec.cells[0].outputs?.[0]?.text === "x", "an outputs-only save: its intent alone at j 4, no version, the record at j 4");
+  rec = p.rec;
+  const c = await st.save({ ...rec, cells: [{ id: "a", code: "zzz" }], baseRev: rec.rev - 1 });
+  p = await persisted(w, hdb, id);
+  check(c?.conflict && p.rec.cells[0].code === "111" && p.intents === 1, "a save from a stale revision: a conflict, the record as it was, its intent left (refused, for recovery's replay to skip)");
+  const back = await W.IdbStore.prototype.save.call(st, { ...rec, baseRev: rec.rev }, { journal: { j: 2, hash: rec.hash } });
+  check(back?.conflict && (await rawGet(w.main, "notebooks", id)).j === 4, "a T2 at a j earlier than the record's: a conflict, nothing written");
   const bare = await W.IdbStore.prototype.save.call(st, { ...rec, cells: [{ id: "a", code: "bare" }], baseRev: rec.rev });
   const plainJ = await new W.IdbStore(w.main, id).save({ ...rec, cells: [{ id: "a", code: "plain" }], baseRev: rec.rev }, { journal: { j: 9, hash: "x" } });
-  check(typeof bare === "string" && /didn't come through sync's journal/.test(bare) && typeof plainJ === "string" && (await rawGet(w.main, "notebooks", id)).cells[0].code === "111", "a journal store's save without the journal's word, and a plain store's with it: refused, nothing written: " + bare);
-  // the record never moves back: a T2 at an earlier j
-  const back = await W.IdbStore.prototype.save.call(st, { ...rec, baseRev: rec.rev }, { journal: { j: 2, hash: rec.hash } });
-  check(back?.conflict && (await rawGet(w.main, "notebooks", id)).j === 3, "a T2 at a j earlier than the record's: a conflict, nothing written");
-  // the charges: as counted, and as measured again
+  check(typeof bare === "string" && /didn't come through sync's journal/.test(bare) && typeof plainJ === "string" && (await rawGet(w.main, "notebooks", id)).cells[0].code === "111", "a journal store's save without the journal's word, and a plain store's with it: refused, nothing written");
   const c1 = await recount(hdb);
   check(c1.meta === c1.counted.meta && c1.measured === c1.meta && c1.pend === c1.counted.pend, "the journal's charges equal a recount of its rows: " + J(c1));
   close(st, w);
   hdb.close();
 }
 
-async function recoveryRows() {
+async function replayModel() {
+  // design r4 §3.1's replay, pure: the traces of §5
+  const it = (j, srev, value) => ({ j, srev, value });
+  const cases = [
+    ["original: a stale edit", 2, [it(3, 1, "C")], null],
+    ["repeated stale", 2, [it(3, 1, "C1"), it(4, 1, "C2")], null],
+    ["isolated interrupted", 2, [it(2, 2, "B")], "B"],
+    ["1a: B interrupted, then stale C", 2, [it(2, 2, "B"), it(3, 1, "C")], "B"],
+    ["1b: stale B, then an identical retry", 2, [it(2, 1, "B"), it(3, 2, "B'")], "B'"],
+    ["two interrupted in order", 2, [it(2, 2, "B"), it(3, 3, "D")], "D"],
+    ["an unconditional save", 2, [it(2, null, "N")], "N"],
+    ["no record: the last", null, [it(1, null, "X"), it(2, 1, "Y")], "Y"],
+  ];
+  for (const [name, rev, list, want] of cases) check((N.replay(rev, list)?.value ?? null) === want, `replay: ${name} -> ${want ?? "the record"}`);
+}
+
+// (the traces, in the normal path or paused (each save an intent alone), the document checked after reopening, and
+// again after a second reopen: "consistent", nothing left)
+async function traces(paused) {
+  const { w, hdb } = await active(), tag = paused ? " (paused)" : "";
+  const check2 = async (id, want, rowWant, what) => {
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    close(r.st);
+    const r2 = await reopen(w, hdb, id), p2 = await persisted(w, hdb, id);
+    close(r2.st);
+    check(r.row === rowWant && p.codes === want && p.hashOk && p.jOk && p.intents === 0 && r2.row === "consistent" && p2.codes === want, `${what}${tag}: ${r.row}, the document ${p.codes}, hash and j right, nothing left; reopened again, consistent`);
+  };
+  // the original: an outputs-only save (rev 2), then a stale edit refused: A stays
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    if (paused) await pause(st);
+    const d2 = await outputsOnly(st, d);
+    const c = await st.save({ ...d2, cells: [{ id: "a", code: "C" }], baseRev: d.rev });
+    close(st);
+    check(!!c?.conflict, "the stale edit is refused" + tag);
+    await check2(id, J([["a", "A"]]), "stamped", "astra's original: the stale edit never becomes the document");
+  }
+  // repeated stale saves
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    if (paused) await pause(st);
+    const d2 = await outputsOnly(st, d);
+    for (const x of ["C1", "C2"]) await st.save({ ...d2, cells: [{ id: "a", code: x }], baseRev: d.rev });
+    close(st);
+    await check2(id, J([["a", "A"]]), "stamped", "repeated stale saves");
+  }
+  // an isolated interrupted save: the whole B written (astra's 1c)
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    if (paused) await pause(st);
+    await t1Only(st, { ...d, cells: [{ id: "a", code: "B" }], baseRev: d.rev });
+    close(st);
+    await check2(id, J([["a", "B"]]), "rewritten", "an isolated interrupted save: the whole B written");
+  }
+  // 1a: B interrupted, then a stale C refused: B
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    if (paused) await pause(st);
+    const d2 = await outputsOnly(st, d);
+    await t1Only(st, { ...d2, cells: [{ id: "a", code: "B" }], baseRev: d2.rev });
+    const c = await st.save({ ...d2, cells: [{ id: "a", code: "C" }], baseRev: d.rev });
+    close(st);
+    check(!!c?.conflict, "1a's stale C is refused" + tag);
+    await check2(id, J([["a", "B"]]), "rewritten", "1a: an interrupted B then a refused C: B is the document");
+  }
+  // 1b: a stale B refused, then the identical value retried at the right revision, interrupted: B
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    if (paused) await pause(st);
+    const d2 = await outputsOnly(st, d);
+    const c = await st.save({ ...d2, cells: [{ id: "a", code: "B" }], baseRev: d.rev });
+    const r = await t1Only(st, { ...d2, cells: [{ id: "a", code: "B" }], baseRev: d2.rev });
+    close(st);
+    check(!!c?.conflict && r.j !== undefined, "1b: the stale B refused, the identical retry's T1 an intent of its own" + tag);
+    await check2(id, J([["a", "B"]]), "rewritten", "1b: the identical retry, interrupted, is the document");
+  }
+  close(w);
+  hdb.close();
+}
+const tracesNormal = () => traces(false), tracesPaused = () => traces(true);
+
+async function crashPoints() {
+  // 1a's recovery stopped at each point: before its T2 (above), after its T2 before the prune, and after the prune
   const { w, hdb } = await active();
-  // row "j = J": consistent
-  {
-    const id = newId(), st = store(w, hdb, id, doc([["a", "1"]]));
-    await st.load(); close(st);
-    const again = store(w, hdb, id);
-    await again.load();
-    check(again.recovered.row === "consistent", "recovery, j = J and the hash right: nothing done (" + again.recovered.row + ")");
-    close(again);
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  const d2 = await outputsOnly(st, d);
+  const b = await t1Only(st, { ...d2, cells: [{ id: "a", code: "B" }], baseRev: d2.rev });
+  await st.save({ ...d2, cells: [{ id: "a", code: "C" }], baseRev: d.rev });
+  // (T2 of the outcome, without the prune: the record holds B at B's j, both intents still there)
+  const bDoc = { ...d2, cells: [{ id: "a", code: "B", outputs: [{ text: "o" }] }] };
+  const t2 = await W.IdbStore.prototype.save.call(st, { ...bDoc, baseRev: d2.rev }, { journal: { j: b.j, hash: await N.docHash(bDoc) } });
+  close(st);
+  const mid = await jState(hdb, id);
+  check(!!t2?.saved && mid.intents.length === 2, "crash after the outcome's T2, before its prune: the record holds B, both intents left");
+  const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+  close(r.st);
+  check(r.row === "stamped" && p.codes === J([["a", "B"]]) && p.hashOk && p.jOk && p.intents === 0, "…reopened: B stays, j and hash right, the intents pruned: " + J({ row: r.row, codes: p.codes }));
+  const r2 = await reopen(w, hdb, id);
+  close(r2.st);
+  check(r2.row === "consistent", "…after the prune, consistent");
+  close(w);
+  hdb.close();
+}
+
+async function atCapacity() {
+  // design r4 §3.4: recovery adds no intent, so it progresses with the intents at their bound or the budget full
+  const { w, hdb } = await active();
+  for (const valid of [false, true]) {
+    for (const paused of [false, true]) {
+      const tag = `${valid ? "an interrupted B, then " : ""}${N.MAX_INTENTS} stale intents${paused ? " (paused)" : ""}`;
+      const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+      if (paused) await pause(st);
+      const d2 = await outputsOnly(st, d);
+      if (valid) await t1Only(st, { ...d2, cells: [{ id: "a", code: "B" }], baseRev: d2.rev });
+      let refused = null;
+      for (let i = 0; i < N.MAX_INTENTS + 1 && !refused; i++) {
+        const out = await st.save({ ...d2, cells: [{ id: "a", code: "C" + i }], baseRev: d.rev });
+        if (typeof out === "string") refused = out;
+      }
+      const js = await jState(hdb, id);
+      close(st);
+      check(refused && /too many saves/.test(refused) && js.intents.length === N.MAX_INTENTS, `${tag}: the next save refused, said, nothing written: ${refused}`);
+      const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+      const want = valid ? J([["a", "B"]]) : J([["a", "A"]]);
+      check(r.row === (valid ? "rewritten" : "stamped") && p.codes === want && p.hashOk && p.jOk && p.intents === 0, `…reopened at capacity: ${r.row}, the document ${p.codes}, every intent pruned`);
+      const again = await r.st.save({ ...r.d, cells: [{ id: "a", code: "after" }], baseRev: r.d.rev });
+      check(!!again?.saved, "…and the next save is taken");
+      close(r.st);
+    }
   }
-  // row "j < J": T1 committed, T2 didn't (the tab gone between)
+  // the pending budget full: a save refused; recovery still completes, and its prune makes room
   {
-    const id = newId(), st = store(w, hdb, id, doc([["a", "1"]]));
-    const d = await st.load();
-    const r = await st.t1({ ...d, cells: [{ id: "a", code: "T1 only" }] });
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const d2 = await outputsOnly(st, d);
+    await t1Only(st, { ...d2, cells: [{ id: "a", code: "B" }], baseRev: d2.rev });
+    const keep = N.JOURNAL_BUDGETS.pendingAll;
+    N.JOURNAL_BUDGETS.pendingAll = (await recount(hdb)).counted.pend;
+    const out = await st.save({ ...d2, cells: [{ id: "a", code: "C" }], baseRev: d2.rev });
     close(st);
-    const before = await rawGet(w.main, "notebooks", id);
-    const again = store(w, hdb, id), d2 = await again.load(), rec = await rawGet(w.main, "notebooks", id);
-    check(r.j === 2 && before.j === 1 && again.recovered.row === "rewritten" && d2.cells[0].code === "T1 only" && rec.j === 2 && rec.hash === (await N.docHash(rec)), "recovery, j < J: the record rewritten from the history at J: " + J({ row: again.recovered.row, j: rec.j }));
-    close(again);
-  }
-  // row "hash differs", j = J: a value written by code from before the journal (its record without j or hash)
-  {
-    const id = newId(), st = store(w, hdb, id, doc([["a", "1"], ["b", "2"]]));
-    const d = await st.load(); close(st);
-    const { j: _j, hash: _h, ...old } = await rawGet(w.main, "notebooks", id);
-    await rawPut(w.main, "notebooks", { ...old, cells: [{ id: "a", code: "old code wrote this" }, { id: "b", code: "2" }], rev: old.rev + 1 });
-    const again = store(w, hdb, id), d2 = await again.load(), rec = await rawGet(w.main, "notebooks", id), js = await jState(hdb, id);
-    const last = H.fromRecords(again.history.session.value());
-    check(again.recovered.row === "journaled" && d2.cells[0].code === "old code wrote this" && rec.j === 2 && js.J === 2 && last.cells[0].code === "old code wrote this", "recovery, the hash wrong at j = J: the record's value journaled (a version at the next j), then written: " + J({ row: again.recovered.row, j: rec.j, J: js.J }));
-    close(again);
-  }
-  // row "hash differs", the hash present but stale: a page from before the journal saves the record it loaded (its j
-  // and hash among the fields it keeps) with new cells
-  {
-    const id = newId(), st = store(w, hdb, id, doc([["a", "1"]]));
-    await st.load(); close(st);
-    const rec0 = await rawGet(w.main, "notebooks", id);
-    await rawPut(w.main, "notebooks", { ...rec0, cells: [{ id: "a", code: "an old page's save" }], rev: rec0.rev + 1 });
-    const again = store(w, hdb, id), d2 = await again.load(), rec = await rawGet(w.main, "notebooks", id);
-    check(again.recovered.row === "journaled" && d2.cells[0].code === "an old page's save" && rec.j === 2 && rec.hash === (await N.docHash(rec)) && rec.hash !== rec0.hash, "recovery, a stale hash kept by an old page's save at j = J: journaled, then written with its own hash: " + J({ row: again.recovered.row, j: rec.j }));
-    close(again);
-  }
-  // row "hash differs", j < J: the history moved on and the record holds other work: merged three ways
-  {
-    const id = newId(), st = store(w, hdb, id, doc([["a", "1"], ["b", "2"]]));
-    const d = await st.load();
-    await st.t1({ ...d, cells: [{ id: "a", code: "history's" }, { id: "b", code: "2" }] });
-    close(st);
-    const { hash: _h, ...rec0 } = await rawGet(w.main, "notebooks", id);
-    await rawPut(w.main, "notebooks", { ...rec0, cells: [{ id: "a", code: "1" }, { id: "b", code: "the record's" }], rev: rec0.rev + 1 });
-    const again = store(w, hdb, id), d2 = await again.load(), rec = await rawGet(w.main, "notebooks", id);
-    check(again.recovered.row === "journaled" && codes(d2) === J([["a", "history's"], ["b", "the record's"]]) && rec.j === 3 && rec.hash === (await N.docHash(rec)), "recovery, the hash wrong at j < J, different cells: both kept, merged and journaled: " + codes(d2));
-    close(again);
-  }
-  // a clash: the same cell changed both ways: the history's value is the document, the record's kept as a copy
-  {
-    const id = newId(), st = store(w, hdb, id, doc([["a", "1"]], { name: "mine" }));
-    const d = await st.load();
-    await st.t1({ ...d, cells: [{ id: "a", code: "history's" }] });
-    close(st);
-    const { hash: _h, ...rec0 } = await rawGet(w.main, "notebooks", id);
-    await rawPut(w.main, "notebooks", { ...rec0, cells: [{ id: "a", code: "the record's" }], rev: rec0.rev + 1 });
-    const again = store(w, hdb, id), d2 = await again.load();
-    const copy = again.recovered.copy && (await rawGet(w.main, "notebooks", again.recovered.copy));
-    check(again.recovered.row === "copied" && codes(d2) === J([["a", "history's"]]) && copy?.cells?.[0]?.code === "the record's" && copy.name === "mine (kept from this browser)" && copy.j === 1 && copy.hash === (await N.docHash(copy)), "recovery, a clash: the history's value kept as the document, the record's whole as a journaled copy: " + J({ row: again.recovered.row, copy: copy?.name }));
-    close(again);
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    N.JOURNAL_BUDGETS.pendingAll = keep;
+    check(typeof out === "string" && /too large to keep/.test(out) && r.row === "rewritten" && p.codes === J([["a", "B"]]) && p.intents === 0, "the pending budget full: a save refused; recovery completes all the same (B), its prune freeing the room: " + out);
+    close(r.st);
   }
   close(w);
   hdb.close();
 }
 
-async function pendingValue() {
-  // F4: TimeTravel paused (a version it didn't keep), the next save goes to the pending value at the next j
-  const { w, hdb } = await active(), id = newId(), st = store(w, hdb, id, doc([["a", "1"]]));
-  const d = await st.load();
-  st.history.refused("refused-for-the-test");
-  await st.history.rebuilding;
-  const out = await st.save({ ...d, cells: [{ id: "a", code: "pending" }], baseRev: d.rev });
-  let rec = await rawGet(w.main, "notebooks", id), js = await jState(hdb, id);
-  check(!!out?.saved && js.pending?.j === 2 && js.J === 2 && rec.j === 2 && rec.cells[0].code === "pending", "paused: the save's T1 is the pending value at the next j, and T2 follows: " + J({ pending: js.pending?.j, J: js.J, j: rec.j }));
-  check(H.fromRecords(st.history.codec.fromString(js.pending.value)).cells[0].code === "pending", "…the pending value holds the version");
-  // again: replaced, at the next j, conditional on the j the tab saw
-  await st.save({ ...rec, cells: [{ id: "a", code: "pending 2" }], baseRev: out.rev });
-  js = await jState(hdb, id);
-  check(js.pending.j === 3 && js.J === 3, "…a second paused save replaces it at j 3");
-  // a pending value from a tab that hadn't seen j 3: a conflict, nothing written
-  const stale = await N.writePending(st.patches, "x", 1);
-  check(stale.conflict === 3 && (await jState(hdb, id)).pending.j === 3, "a pending value conditional on a j that isn't the document's: a conflict, nothing written");
-  // a patch while a pending value waits: refused (the history pauses, F4)
-  const other = KIT.journalPatchStore(hdb, id);
-  other.append({ time: "0000000000000-zz", parents: [], patch: [] });
-  const r = await other.appended("0000000000000-zz");
-  check(r.refused === N.PENDING_OPEN && !(await histRows(hdb, id)).some((x) => x.time === "0000000000000-zz"), "a patch while a pending value waits: refused, not written");
+async function noIntentProducers() {
+  // after an interrupted save X, every producer of history rows that isn't a save decides nothing (daybreak3)
+  const { w, hdb } = await active();
+  const make = async () => { const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]); await t1Only(st, { ...d, cells: [{ id: "a", code: "X" }], baseRev: d.rev }); return { id, st, d }; };
+  // an execution-journal patch
+  {
+    const { id, st } = await make();
+    st.history.journal([{ type: "run", id: "s:1", sid: "s", n: 1, t: 1 }]);
+    await st.patches.appending;
+    close(st);
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    close(r.st);
+    check(r.row === "rewritten" && p.codes === J([["a", "X"]]) && p.jOk, "an interrupted save, then an execution-journal version: X is the document");
+  }
+  // a TimeTravel clear's re-record of another value
+  {
+    const { id, st, d } = await make();
+    await st.history.clear({ ...d, cells: [{ id: "a", code: "the clear's" }] });
+    await st.patches.appending;
+    close(st);
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    close(r.st);
+    check(r.row === "rewritten" && p.codes === J([["a", "X"]]) && p.jOk && p.hashOk, "…then a TimeTravel clear's re-record: X, never the re-recorded value");
+  }
+  // Resume from here's copy (index.html: the rows copied to a new id), and an import (bundle.js keepBundle)
+  {
+    const { id, st } = await make();
+    close(st);
+    const rows = await histRows(hdb, id), copy = newId(), imported = newId();
+    for (const row of rows) await rawPut(hdb, "history", { nb: copy, time: row.time, env: row.env });
+    await B.keepBundle({ history: rows.map((r) => r.env), blobs: {} }, imported, { hdb });
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    close(r.st);
+    const jc = await jState(hdb, copy), ji = await jState(hdb, imported);
+    check(r.row === "rewritten" && p.codes === J([["a", "X"]]) && jc.intents.length === 0 && ji.intents.length === 0 && jc.J === 0 && ji.J === 0, "…a Resume copy and an import of its rows: X stays, and neither copy has an intent or a j");
+  }
+  close(w);
+  hdb.close();
+}
+
+async function catchUpInterleaved() {
+  // the catch-up's committed j is the record's, whatever else was appended meanwhile (both reviewers)
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  const d2 = await outputsOnly(st, d);
+  await st.save({ ...d2, cells: [{ id: "a", code: "C" }], baseRev: d.rev });
   close(st);
-  // recovery through the pending value: T1 only, then a load rewrites the record from it
-  const st2 = store(w, hdb, id), d2 = await st2.load();
-  check(st2.recovered.row === "consistent" && st2.history.paused, "reloaded: consistent, the history still paused while the pending value waits");
-  await st2.t1({ ...d2, cells: [{ id: "a", code: "pending, T1 only" }] });
-  close(st2);
-  const st3 = store(w, hdb, id), d3 = await st3.load();
-  rec = await rawGet(w.main, "notebooks", id);
-  check(st3.recovered.row === "rewritten" && d3.cells[0].code === "pending, T1 only" && rec.j === 4, "recovery, j < J with a pending value: the record rewritten from it: " + J({ row: st3.recovered.row, j: rec.j }));
-  const c = await recount(hdb);
-  check(c.pend === c.counted.pend && c.pend > 0 && c.meta === c.counted.meta, "the pending value's charge equals a recount: " + J(c));
-  close(st3, w);
+  // (another history of the same notebook, open first, appends an execution-journal version while the catch-up waits)
+  const other = store(w, hdb, id);
+  await other.open();
+  W.JOURNAL_TX_HOOK.beforeTx = async () => {
+    W.JOURNAL_TX_HOOK.beforeTx = undefined;
+    other.history.journal([{ type: "run", id: "s:9", sid: "s", n: 9, t: 9 }]);
+    await other.patches.appending;
+  };
+  const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+  W.JOURNAL_TX_HOOK.beforeTx = undefined;
+  close(r.st);
+  close(other);
+  const r2 = await reopen(w, hdb, id);
+  close(r2.st);
+  check(r.row === "stamped" && r.catchUp !== null && p.codes === J([["a", "A"]]) && p.jOk && r2.row === "consistent", "a version appended while the catch-up waited: the record takes the catch-up's committed j, and reopens consistent: " + J({ catchUp: r.catchUp, j: p.rec.j, J: p.js.J }));
+  close(w);
+  hdb.close();
+}
+
+async function oldCodeWrite() {
+  // a page from before the journal saved (its record's j and hash stale): the record's own value, stamped
+  const { w, hdb } = await active();
+  const { id, st } = await loadNew(w, hdb, [["a", "1"]]);
+  close(st);
+  const rec0 = await rawGet(w.main, "notebooks", id);
+  await rawPut(w.main, "notebooks", { ...rec0, cells: [{ id: "a", code: "an old page's save" }], rev: rec0.rev + 1 });
+  const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+  close(r.st);
+  check(r.row === "stamped" && p.codes === J([["a", "an old page's save"]]) && p.hashOk && p.jOk && p.rec.hash !== rec0.hash, "an old page's save (stale j and hash): its value stamped, with its own hash: " + r.row);
+  close(w);
   hdb.close();
 }
 
 async function budgetsAndDrop() {
   const { w, hdb } = await active();
-  // the metadata budget full: a new notebook's first save refused, nothing of it written
   const before = J(await syncRows(hdb)), keep = N.JOURNAL_BUDGETS.metaAll;
   N.JOURNAL_BUDGETS.metaAll = (await recount(hdb)).counted.meta + 10;
   const id = newId(), st = store(w, hdb, id, doc([["a", "1"]]));
@@ -239,33 +362,134 @@ async function budgetsAndDrop() {
   N.JOURNAL_BUDGETS.metaAll = keep;
   check(why !== null && /too many documents/.test(why) && J(await syncRows(hdb)) === before && (await rawGet(w.main, "notebooks", id)) === undefined && (await histRows(hdb, id)).length === 0, "the metadata budget full: refused, said, nothing written: " + why);
   close(st);
-  // a dropped notebook's journal rows go with it, their charges released
-  const id2 = newId(), st2 = store(w, hdb, id2, doc([["a", "1"]]));
-  await st2.load();
-  const c0 = await recount(hdb), reg = (await syncRows(hdb)).find((r) => r.time === "d:local:" + id2);
+  // a dropped notebook's journal rows go with it (its intents too), their charges released
+  const { id: id2, st: st2, d: d2 } = await loadNew(w, hdb, [["a", "1"]]);
+  await st2.save({ ...d2, cells: [{ id: "a", code: "stale" }], baseRev: d2.rev - 1 });
+  const c0 = await recount(hdb), reg = (await syncRows(hdb)).find((r) => r.time === "d:local:" + id2), pend0 = (await jState(hdb, id2)).intents.length;
   await st2.patches.drop();
   const c1 = await recount(hdb), left = (await syncRows(hdb)).filter((r) => r.nb === R.SYNC_NB + reg.v.h || r.time === "d:local:" + id2);
-  check(reg && left.length === 0 && (await histRows(hdb, id2)).length === 0 && c1.counted.meta === c0.counted.meta - reg.v.meta && c1.meta === c1.counted.meta, "a drop deletes the document's journal rows with its versions, and releases their charge: " + J({ before: c0.counted.meta, after: c1.counted.meta }));
-  // a notebook removed for good by the workspace (emptying Trash): its journal rows go with its versions
-  const id4 = newId(), st4 = store(w, hdb, id4, doc([["a", "1"]]));
-  await st4.load();
+  check(reg && pend0 === 1 && left.length === 0 && (await histRows(hdb, id2)).length === 0 && c1.counted.meta === c0.counted.meta - reg.v.meta && c1.meta === c1.counted.meta && c1.pend === c1.counted.pend && c1.counted.pend < c0.counted.pend, "a drop deletes the document's journal rows and intents with its versions, releasing their charges");
+  // the workspace's dropContents (emptying Trash) the same
+  const { id: id4, st: st4 } = await loadNew(w, hdb, [["a", "1"]]);
   close(st4);
   const c2 = await recount(hdb), reg4 = (await syncRows(hdb)).find((r) => r.time === "d:local:" + id4);
   await w.dropContents([{ kind: "notebook", ref: id4 }]);
   const c3 = await recount(hdb), left4 = (await syncRows(hdb)).filter((r) => r.nb === R.SYNC_NB + reg4.v.h || r.time === "d:local:" + id4);
-  check(reg4 && left4.length === 0 && (await histRows(hdb, id4)).length === 0 && (await rawGet(w.main, "notebooks", id4)) === undefined && c3.counted.meta === c2.counted.meta - reg4.v.meta && c3.meta === c3.counted.meta, "the workspace's dropContents deletes a notebook's journal rows too, releasing their charge: " + J({ reg: !!reg4, left: left4.length, hist: (await histRows(hdb, id4)).length, c2: c2.counted.meta, c3: c3.counted.meta, m: reg4?.v.meta, c3m: c3.meta }));
-  // a clear keeps the journal's j: the next version is at a later j
-  const id3 = newId(), st3 = store(w, hdb, id3, doc([["a", "1"]]));
-  const d3 = await st3.load();
+  check(reg4 && left4.length === 0 && (await histRows(hdb, id4)).length === 0 && (await rawGet(w.main, "notebooks", id4)) === undefined && c3.counted.meta === c2.counted.meta - reg4.v.meta && c3.meta === c3.counted.meta, "the workspace's dropContents deletes a notebook's journal rows too, releasing their charge");
+  // a clear keeps the journal's j: the next save is at a later j
+  const { id: id3, st: st3, d: d3 } = await loadNew(w, hdb, [["a", "1"]]);
   await st3.history.clear();
   await st3.save({ ...d3, cells: [{ id: "a", code: "after clear" }], baseRev: d3.rev });
   const rec = await rawGet(w.main, "notebooks", id3);
-  check(rec.j === 2 && (await jState(hdb, id3)).J === 2, "a TimeTravel clear keeps jseq: the next version at j 2");
+  check(rec.j === 2 && (await jState(hdb, id3)).J === 2, "a TimeTravel clear keeps jseq: the next save at j 2");
   close(st2, st3, w);
   hdb.close();
 }
 
-const CASES = [inactive, saves, recoveryRows, pendingValue, budgetsAndDrop];
+async function backlogFull() {
+  // the bounded backlog full (entries, then bytes): a journal save neither hangs nor loses T1/T2's agreement
+  // (daybreak3's LIMIT-208-DAYBREAK3-1): its patch refused at once, its intent written alone
+  const { w, hdb } = await active();
+  for (const which of ["entries", "bytes"]) {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "1"]]);
+    const keep = W.HISTORY_BACKLOG[which];
+    W.HISTORY_BACKLOG[which] = which === "entries" ? 0 : 1;
+    const r = await within(st.save({ ...d, cells: [{ id: "a", code: "while full" }], baseRev: d.rev }), 3000);
+    W.HISTORY_BACKLOG[which] = keep;
+    const p = await persisted(w, hdb, id);
+    check(r !== "timeout" && r.v?.saved && p.jOk && p.codes === J([["a", "while full"]]) && p.intents === 0 && p.hashOk, `the backlog's ${which} full: the save settles at once (${r === "timeout" ? "timeout" : J(r.v ?? r.e?.message)}), its intent alone, record and journal at the same j`);
+    close(st);
+  }
+  close(w);
+  hdb.close();
+}
+
+async function fencedWrites() {
+  // a journal write under the workspace's lock, the fence read in its own transaction (daybreak3's
+  // CORR-208-DAYBREAK3-2): the fence changed after the workspace's word refuses it, and nothing changes
+  const { w, hdb } = await active();
+  const was = await fenceRow(hdb);
+  const moveFence = () => { W.JOURNAL_TX_HOOK.beforeTx = async () => { W.JOURNAL_TX_HOOK.beforeTx = undefined; await rawPut(hdb, "history", { ...was, fence: { ...was.fence, generation: was.fence.generation + 1 } }); }; };
+  for (const paused of [true, false]) {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "1"]]);
+    if (paused) await pause(st);
+    const before = J(await syncRows(hdb)), rec0 = await rawGet(w.main, "notebooks", id), rows0 = J(await histRows(hdb, id));
+    moveFence();
+    const out = await within(st.save({ ...d, cells: [{ id: "a", code: "after the fence moved" }], baseRev: d.rev }), 5000);
+    W.JOURNAL_TX_HOOK.beforeTx = undefined;
+    await rawPut(hdb, "history", was);
+    check(out !== "timeout" && typeof out.v === "string" && /reset in another tab/.test(out.v) && J(await syncRows(hdb)) === before && J(await rawGet(w.main, "notebooks", id)) === J(rec0) && J(await histRows(hdb, id)) === rows0, `${paused ? "a paused save's intent" : "a save's version and intent"} whose fence changed after the workspace's word: refused in its transaction, nothing written: ${J(out.v ?? out)}`);
+    close(st);
+  }
+  close(w);
+  hdb.close();
+}
+
+async function dropRefused() {
+  // a drop whose journal rows can't be dropped (daybreak3's CORR-208-DAYBREAK3-3): it ends at once, refused, and
+  // nothing of it is done
+  const { w, hdb } = await active();
+  const { id, st } = await loadNew(w, hdb, [["a", "1"]]);
+  close(st);
+  const rows = J(await histRows(hdb, id)), sync = J(await syncRows(hdb));
+  const bad = new W.IdbPatchStore(hdb, id, { journal: { t1: () => Promise.resolve({ refused: "no" }), drop: () => Promise.reject(new Error("the test's refusal")) } });
+  const r = await within(bad.drop(), 3000);
+  check(r !== "timeout" && r.e && /couldn't be dropped/.test(r.e.message) && J(await histRows(hdb, id)) === rows && J(await syncRows(hdb)) === sync, "a drop whose journal rows can't be dropped: refused at once (" + (r === "timeout" ? "timeout" : r.e?.message) + "), its versions and journal rows untouched");
+  close(w);
+  hdb.close();
+}
+
+
+async function pruneAndConcurrency() {
+  const { w, hdb } = await active();
+  // a save's prune takes only what its T2 settles: a later save's intent, its T2 not yet run, stays and is recovered
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const x = await t1Only(st, { ...d, cells: [{ id: "a", code: "X" }], baseRev: d.rev });
+    const y = await t1Only(st, { ...d, cells: [{ id: "a", code: "Y" }], baseRev: d.rev + 1 });
+    const xDoc = { ...d, cells: [{ id: "a", code: "X" }] };
+    await W.IdbStore.prototype.save.call(st, { ...xDoc, baseRev: d.rev }, { journal: { j: x.j, hash: await N.docHash(xDoc) } });
+    await N.prune(st.patches, x.j);
+    const left = (await jState(hdb, id)).intents.map((it) => it.j);
+    close(st);
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    close(r.st);
+    check(J(left) === J([y.j]) && r.row === "rewritten" && p.codes === J([["a", "Y"]]) && p.intents === 0, "a save's prune takes only intents at or below its j: the next save's intent stays, and, its T2 interrupted, is recovered: " + J({ left, row: r.row, codes: p.codes }));
+  }
+  // an intent at or below the record's j (a prune that hadn't run) never decides, whatever its srev
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const k = await N.writeIntent(st.patches, { srev: d.rev + 1, value: st.textOf({ ...d, cells: [{ id: "a", code: "never" }] }) });
+    const dd = { ...d, cells: [{ id: "a", code: "A" }] };
+    await W.IdbStore.prototype.save.call(st, { ...dd, baseRev: d.rev }, { journal: { j: k.j, hash: await N.docHash(dd) } });
+    close(st);
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    close(r.st);
+    check(r.row === "consistent" && p.codes === J([["a", "A"]]), "an intent at or below the record's j, its srev the record's revision, decides nothing: " + J({ row: r.row, codes: p.codes }));
+  }
+  // recovery's T2 is conditional on the record's revision: a save that lands while it runs wins, and recovery replays
+  // again from it
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const d2 = await outputsOnly(st, d);
+    await st.save({ ...d2, cells: [{ id: "a", code: "C" }], baseRev: d.rev });
+    close(st);
+    const other = store(w, hdb, id);
+    await other.open();
+    W.JOURNAL_TX_HOOK.beforeTx = async () => {
+      W.JOURNAL_TX_HOOK.beforeTx = undefined;
+      await other.save({ ...d2, cells: [{ id: "a", code: "D, saved meanwhile", outputs: [{ text: "o" }] }], baseRev: d2.rev });
+    };
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    W.JOURNAL_TX_HOOK.beforeTx = undefined;
+    close(r.st, other);
+    check(p.codes === J([["a", "D, saved meanwhile"]]) && p.hashOk && p.jOk && codes(r.d) === p.codes, "a save that lands while recovery runs wins (recovery's T2 conditional on the revision it read), and recovery replays from it: " + J({ row: r.row, codes: p.codes }));
+  }
+  close(w);
+  hdb.close();
+}
+
+const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
@@ -274,6 +498,7 @@ export async function run() {
     } catch (e) {
       check(false, `${c.name} threw: ${e?.stack ?? e}`);
     }
+    W.JOURNAL_TX_HOOK.beforeTx = undefined;
   }
   return results;
 }

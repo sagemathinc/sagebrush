@@ -76,15 +76,12 @@ export class PatchHistory {
   // (an edit while paused, or before the session has caught up: stored by itself, a root if paused, else a patch
   // from the tail; kept, it is the tail; refused, paused (again), nothing kept)
   commitDetached(next, meta) {
-    // (a journal's history, paused: the version is the document's pending value, F4 (notebook/journal.js), and the
-    // history stays paused while one waits)
+    // (a journal's history, paused: no version; a save's intent alone is its T1 (F4; notebook/journal.js), and the
+    // history stays paused for this page)
     if (this.paused && this.store.writePending) {
-      const text = this.codec.toString(next);
-      if (text === this.pendingText) return null;
       const timeMs = Math.max(Date.now(), this.lastMs + 1);
       this.lastMs = timeMs;
-      const env = { time: encodePatchId(timeMs, this.clientId), pending: this.store.writePending(text) };
-      env.pending.then((r) => { if (r?.j !== undefined) this.pendingText = text; });
+      const env = { time: encodePatchId(timeMs, this.clientId), pending: this.store.writePending() };
       this.emit();
       return env;
     }
