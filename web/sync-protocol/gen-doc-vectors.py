@@ -495,8 +495,15 @@ def main():
     # may send it again; the snapshot's, agreed for 2b-7 by @sagebrush-sync-docs and @sagebrush-sync-client, Oct 27)
     v["refusals"] = [
         {"for": "snapshot", "when": "the deployment's snapshot switch is off", "error": {"code": "unavailable", "detail": {"why": "snapshots_off"}}, "again": "never in this session"},
-        {"for": "snapshot", "when": "sent before the cadence allows", "error": {"code": "limit", "detail": {"limit": "snapshot_cadence", "retry_after_batches": 12, "retry_after_ms": 60000}}, "again": "after both retry_afters"},
-        {"for": "snapshot", "when": "another sha256 at an at_seq already taken", "error": {"code": "conflict"}, "again": "never at that at_seq"},
+        # (the cadence (plan-sync-slice2-client r4 §2.5): (500 batches OR 4 MiB) since the epoch's last snapshot AND 1 h
+        # since it.  Each field is what is left of its own condition: retry_after_batches = max(0, 500 - batches since),
+        # retry_after_bytes = max(0, 4 MiB - body bytes since), retry_after_ms = max(0, 1 h - time since; 0 with no earlier
+        # snapshot in the epoch).  The server refuses unless (batches = 0 or bytes = 0) and ms = 0; the client offers again
+        # once that holds)
+        {"for": "snapshot", "when": "too little history since the last snapshot", "error": {"code": "limit", "detail": {"limit": "snapshot_cadence", "retry_after_batches": 12, "retry_after_bytes": 1048576, "retry_after_ms": 60000}}, "again": "when (retry_after_batches = 0 or retry_after_bytes = 0) and retry_after_ms = 0"},
+        {"for": "snapshot", "when": "enough history, within the hour", "error": {"code": "limit", "detail": {"limit": "snapshot_cadence", "retry_after_batches": 0, "retry_after_bytes": 2097152, "retry_after_ms": 60000}}, "again": "when (retry_after_batches = 0 or retry_after_bytes = 0) and retry_after_ms = 0"},
+        {"for": "snapshot", "when": "another sha256 or byte count at an at_seq already taken", "error": {"code": "conflict"}, "again": "never at that at_seq"},
+        {"for": "snapshot", "when": "an at_seq at or before the epoch's latest snapshot", "error": {"code": "conflict", "detail": {"latest_at_seq": 1500}}, "again": "only past latest_at_seq"},
     ]
     json.dump(v, sys.stdout, ensure_ascii=False, indent=1)
     sys.stdout.write("\n")
