@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Rank-3 plan r3 PR 3 (#192): u64 exponents and checked doubling in engine/poly (engine wasm). Against master b4dd49df: the engine wasm is CI's fresh-wasm-5938116e (7197313 B) against master's committed 7196815 B (+498); cli/pyjs.cjs embeds the wasm in base64 and has no other change: 4 ceil(7197313/3) - 4 ceil(7196815/3) = 664, marked 668 (one base64 quantum over, as #190's measured row was) until the exact-head dispatch measures it",
+ "bytes": {
+  "cli/pyjs.cjs": 668,
+  "engine/sagebrush-engine.wasm": 498
+ }
+}
