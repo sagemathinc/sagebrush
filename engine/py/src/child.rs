@@ -7,38 +7,46 @@
 //! KeyboardInterrupt can land) separates an effect from its record:
 //!
 //! - Running -> ExitedAwaitingReap: the life pipe reached EOF (every writer,
-//!   the child alone, has exited) or the pidfd became readable;
+//!   the child alone, has exited) or the pidfd became readable (Windows: the
+//!   process handle was signalled);
 //! - Running or ExitedAwaitingReap -> Reaped: OUR wait returned the child's
-//!   status;
+//!   status (Windows: its exit code was read and the handle closed);
 //! - -> Lost: our wait returned ECHILD (someone else reaped it: outside the
-//!   supported contract).  Lost and Reaped are terminal: the pid is never
-//!   signalled or waited on again.
+//!   supported contract; never on Windows, where the handle is the
+//!   identity).  Lost and Reaped are terminal: the pid is never signalled or
+//!   waited on again.
 //!
-//! The pipes (H-1), each close-on-exec in the parent, dup2'ed into the child
-//! by the spawn's file actions: request (parent writes, child fd 0), reply
-//! (child fd 1, parent reads), kill (parent writes, child fd 3), life (child
-//! fd 4 writes, never; the parent reads its EOF).  stderr is the caller's
-//! file (fd 2).  Ending a child is a byte on the kill pipe and closing it: the
-//! child's watchdog thread (raster_child.rs) exits at once; SIGKILL is only a
-//! fallback, after one slice, while the life pipe shows no exit, through the
-//! pidfd where there is one (identity-bound) and otherwise by pid (safe only
-//! under the exclusive-reaper contract, which `sigchld_ok` checks at spawn).
+//! POSIX (`sys` below): the pipes (H-1), each close-on-exec in the parent,
+//! dup2'ed into the child by the spawn's file actions: request (parent
+//! writes, child fd 0), reply (child fd 1, parent reads), kill (parent
+//! writes, child fd 3), life (child fd 4 writes, never; the parent reads its
+//! EOF).  stderr is the caller's file (fd 2).  Ending a child is a byte on
+//! the kill pipe and closing it: the child's watchdog thread (raster_child.rs)
+//! exits at once; SIGKILL is only a fallback, after one slice, while the life
+//! pipe shows no exit, through the pidfd where there is one (identity-bound)
+//! and otherwise by pid (safe only under the exclusive-reaper contract, which
+//! `sigchld_refusal` checks at spawn).  Identity (T4): with glibc's
+//! `pidfd_spawn` (found at run time) the pidfd comes from the creation
+//! itself; it falls back to `posix_spawn` only when `pidfd_spawn` reports
+//! ENOSYS (no child created then: H-4).
 //!
-//! Identity (T4): with glibc's `pidfd_spawn` (found at run time) the pidfd
-//! comes from the creation itself; it falls back to `posix_spawn` only when
-//! `pidfd_spawn` reports ENOSYS (no child created then: H-4).
+//! Windows (`sys` below, r5 R3.4): created suspended, assigned to a job
+//! object that kills it when the job's handle closes, then resumed; any
+//! failure after the creation terminates it, waits and closes every handle
+//! before `run` returns.  Only the child's three standard handles are
+//! inherited (PROC_THREAD_ATTRIBUTE_HANDLE_LIST), so a concurrent creation
+//! elsewhere in the process can't receive them.  Ending it is
+//! TerminateProcess on its handle (identity-bound: the object can't be reused
+//! while the handle is open).
+
+#[cfg(any(unix, windows))]
+pub use api::*;
 
 #[cfg(unix)]
-pub use imp::*;
-
-#[cfg(unix)]
-mod imp {
-    use pyo3::exceptions::{PyOSError, PyRuntimeError};
+mod sys {
+    use pyo3::exceptions::PyOSError;
     use pyo3::prelude::*;
-    use pyo3::types::PyDict;
     use std::ffi::CString;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::{Condvar, Mutex, MutexGuard};
 
     fn errno() -> i32 {
         std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
@@ -76,7 +84,7 @@ mod imp {
     /// The supported reaper contract (r6 S2.1): SIGCHLD neither ignored nor
     /// SA_NOCLDWAIT.  Read only: the application's signal state is never
     /// changed.
-    pub fn sigchld_refusal() -> Option<String> {
+    pub(super) fn sigchld_refusal() -> Option<String> {
         let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
         if unsafe { libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut old) } != 0 {
             return Some(format!("SIGCHLD's action can't be read (errno {})", errno()));
@@ -90,16 +98,8 @@ mod imp {
         None
     }
 
-    #[pyfunction]
-    pub fn sigchld_check() -> PyResult<()> {
-        match sigchld_refusal() {
-            Some(m) => Err(PyRuntimeError::new_err(m)),
-            None => Ok(()),
-        }
-    }
-
     #[derive(Clone, Copy, PartialEq, Debug)]
-    enum State {
+    pub(super) enum State {
         Running,
         Exited,
         Reaped,
@@ -107,25 +107,46 @@ mod imp {
     }
 
     /// The process and the parent's ends of its pipes.
-    struct Proc {
+    pub(super) struct Proc {
         pid: libc::pid_t,
         pidfd: i32,
-        wfd: i32,
-        rfd: i32,
+        pub(super) wfd: i32,
+        pub(super) rfd: i32,
         killfd: i32,
         lifefd: i32,
-        state: State,
+        pub(super) state: State,
         status: Option<i32>,
-        signals: u64,
+        pub(super) signals: u64,
     }
 
     impl Proc {
-        fn terminal(&self) -> bool {
+        pub(super) fn pid(&self) -> i64 {
+            self.pid as i64
+        }
+
+        pub(super) fn has_pidfd(&self) -> bool {
+            self.pidfd >= 0
+        }
+
+        /// os.waitstatus_to_exitcode's value, once reaped.
+        pub(super) fn code(&self) -> Option<i32> {
+            self.status.map(|st| {
+                if libc::WIFEXITED(st) {
+                    libc::WEXITSTATUS(st)
+                } else if libc::WIFSIGNALED(st) {
+                    -libc::WTERMSIG(st)
+                } else {
+                    st
+                }
+            })
+        }
+
+        pub(super) fn terminal(&self) -> bool {
             matches!(self.state, State::Reaped | State::Lost)
         }
 
         /// The life pipe (or the pidfd) shows the exit: Running -> Exited.
-        fn observe(&mut self, timeout_ms: i32) {
+        pub(super) fn observe(&mut self, timeout_ms: i32) {
             if self.state != State::Running {
                 return;
             }
@@ -151,7 +172,7 @@ mod imp {
 
         /// One non-blocking wait (ours): Reaped with the status, Lost on
         /// ECHILD, or unchanged.
-        fn try_wait(&mut self) {
+        pub(super) fn try_wait(&mut self) {
             if self.terminal() {
                 return;
             }
@@ -182,7 +203,7 @@ mod imp {
         /// The end asked for: a byte on the kill pipe and its close (the
         /// watchdog exits at once); then, after `wake_ms` with no exit seen,
         /// SIGKILL while the child is ours and running.
-        fn kill(&mut self, wake_ms: i32) {
+        pub(super) fn kill(&mut self, wake_ms: i32) {
             if self.terminal() {
                 return;
             }
@@ -200,7 +221,7 @@ mod imp {
             }
         }
 
-        fn signal_kill(&mut self) {
+        pub(super) fn signal_kill(&mut self) {
             if self.state != State::Running {
                 return;
             }
@@ -216,7 +237,7 @@ mod imp {
             self.signals += 1;
         }
 
-        fn close_io(&mut self) {
+        pub(super) fn close_io(&mut self) {
             close(&mut self.wfd);
             close(&mut self.rfd);
         }
@@ -241,168 +262,9 @@ mod imp {
         }
     }
 
-    static THREAD_IDS: AtomicU64 = AtomicU64::new(1);
-    thread_local! {
-        static THREAD_ID: u64 = THREAD_IDS.fetch_add(1, Ordering::Relaxed);
-    }
-    fn this_thread() -> u64 {
-        THREAD_ID.with(|t| *t)
-    }
-
-    /// The native handle (see the module comment).
-    #[pyclass(module = "sagebrush._native.raster")]
-    pub struct Child {
-        p: Mutex<Proc>,
-        busy: AtomicU64,
-    }
-
-    /// The method's thread marked as inside the handle; cleared on any exit
-    /// (only by the thread that marked it).
-    struct Busy<'a>(Option<&'a AtomicU64>);
-    impl Drop for Busy<'_> {
-        fn drop(&mut self) {
-            if let Some(b) = self.0 {
-                b.store(0, Ordering::Release);
-            }
-        }
-    }
-
-    impl Child {
-        fn new_from(p: Proc) -> Self {
-            Child { p: Mutex::new(p), busy: AtomicU64::new(0) }
-        }
-
-        /// A call from a signal handler on the thread already inside one of
-        /// this handle's methods is refused ("busy"), never a deadlock.
-        fn enter(&self) -> PyResult<Busy<'_>> {
-            let me = this_thread();
-            if self.busy.load(Ordering::Acquire) == me {
-                return Err(PyRuntimeError::new_err("the PNG engine's process handle is busy in this thread (a signal handler's call?)"));
-            }
-            // (another thread inside: this one isn't marked, and never clears
-            // that thread's mark; the lock alone serialises the two)
-            match self.busy.compare_exchange(0, me, Ordering::AcqRel, Ordering::Acquire) {
-                Ok(_) => Ok(Busy(Some(&self.busy))),
-                Err(_) => Ok(Busy(None)),
-            }
-        }
-
-        /// f(&mut Proc) with the handle's lock, taken and held only without
-        /// the GIL (a holder never needs the GIL, so no deadlock).
-        fn with<T: Send>(&self, py: Python<'_>, f: impl FnOnce(&mut Proc) -> T + Send) -> T {
-            py.detach(|| {
-                let mut g = self.p.lock().unwrap_or_else(|e| e.into_inner());
-                f(&mut g)
-            })
-        }
-    }
-
-    fn state_name(s: State) -> &'static str {
-        match s {
-            State::Running => "running",
-            State::Exited => "exited",
-            State::Reaped => "reaped",
-            State::Lost => "lost",
-        }
-    }
-
-    /// os.waitstatus_to_exitcode's value.
-    fn exit_code(st: i32) -> i32 {
-        if libc::WIFEXITED(st) {
-            libc::WEXITSTATUS(st)
-        } else if libc::WIFSIGNALED(st) {
-            -libc::WTERMSIG(st)
-        } else {
-            st
-        }
-    }
-
-    #[pymethods]
-    impl Child {
-        #[getter]
-        fn pid(&self, py: Python<'_>) -> i64 {
-            self.with(py, |p| p.pid as i64)
-        }
-        #[getter]
-        fn wfd(&self, py: Python<'_>) -> i32 {
-            self.with(py, |p| p.wfd)
-        }
-        #[getter]
-        fn rfd(&self, py: Python<'_>) -> i32 {
-            self.with(py, |p| p.rfd)
-        }
-        #[getter]
-        fn state(&self, py: Python<'_>) -> &'static str {
-            state_name(self.with(py, |p| p.state))
-        }
-        #[getter]
-        fn signals_sent(&self, py: Python<'_>) -> u64 {
-            self.with(py, |p| p.signals)
-        }
-        #[getter]
-        fn has_pidfd(&self, py: Python<'_>) -> bool {
-            self.with(py, |p| p.pidfd >= 0)
-        }
-        /// The exit status as os.waitstatus_to_exitcode gives it, once
-        /// reaped; None before, or when Lost.
-        #[getter]
-        fn returncode(&self, py: Python<'_>) -> Option<i32> {
-            self.with(py, |p| p.status.map(exit_code))
-        }
-
-        /// Whether the process has ended (reaped here, or lost), after one
-        /// non-blocking look: the old `_exited(child)`.
-        fn poll_exit(&self, py: Python<'_>) -> PyResult<bool> {
-            let _b = self.enter()?;
-            Ok(self.with(py, |p| {
-                p.observe(0);
-                // (an exited child is reaped here, and so is one whose life
-                // pipe is still open but that has exited: its zombie keeps
-                // the pid ours)
-                p.try_wait();
-                p.terminal()
-            }))
-        }
-
-        /// The end, then the reap: wake seconds per slice, signals checked
-        /// between slices (a Stop leaves the state as it is: a retry is safe).
-        /// Returns the exit code (None if lost).
-        #[pyo3(signature = (wake=0.025))]
-        fn kill_and_reap(&self, py: Python<'_>, wake: f64) -> PyResult<Option<i32>> {
-            let _b = self.enter()?;
-            let ms = (wake * 1000.0).max(1.0) as i32;
-            self.with(py, |p| p.kill(ms));
-            loop {
-                let done = self.with(py, |p| {
-                    p.observe(ms);
-                    p.try_wait();
-                    if p.state == State::Running {
-                        p.signal_kill();
-                    }
-                    p.terminal()
-                });
-                // (after every slice, the last too: a Stop raised after the
-                // reap leaves Reaped, and a retry returns the code)
-                py.check_signals()?;
-                if done {
-                    break;
-                }
-            }
-            Ok(self.with(py, |p| p.status.map(exit_code)))
-        }
-
-        /// The parent's request/reply ends closed (each set to -1 with its
-        /// close).  The kill pipe stays: closing it ends the child.
-        fn close_io(&self, py: Python<'_>) -> PyResult<()> {
-            let _b = self.enter()?;
-            self.with(py, |p| p.close_io());
-            Ok(())
-        }
-    }
-
     // ---------------------------------------------------------------- spawning
 
-    struct Spec {
+    pub(super) struct Spec {
         path: CString,
         argv: Vec<CString>,
         envp: Vec<CString>,
@@ -410,29 +272,15 @@ mod imp {
         fail_after: Option<u32>,
     }
 
-    #[derive(Clone, Copy, PartialEq)]
-    enum TaskState {
-        Queued,
-        Running,
-        Done,
-        Cancelled,
-        Taken,
+    fn cstr(s: &str) -> PyResult<CString> {
+        CString::new(s).map_err(|_| PyOSError::new_err("an argument with a NUL byte"))
     }
 
-    struct TaskInner {
-        state: TaskState,
-        spec: Option<Spec>,
-        out: Option<Result<Proc, (i32, String)>>,
-        // (run() has returned: whatever it made is kept or cleaned)
-        finished: bool,
-    }
-
-    /// A child's creation on the persistent spawner thread (r5 R3): the
-    /// state and the result are written only by these methods.
-    #[pyclass(module = "sagebrush._native.raster")]
-    pub struct SpawnTask {
-        m: Mutex<TaskInner>,
-        cv: Condvar,
+    impl Spec {
+        pub(super) fn new(path: &str, argv: &[String], env: &[(String, String)], err_fd: i32, fail_after: Option<u32>) -> PyResult<Self> {
+            let envp = env.iter().map(|(k, v)| cstr(&format!("{}={}", k, v))).collect::<PyResult<_>>()?;
+            Ok(Spec { path: cstr(path)?, argv: argv.iter().map(|a| cstr(a)).collect::<PyResult<_>>()?, envp, err_fd, fail_after })
+        }
     }
 
     type SpawnFn = unsafe extern "C" fn(
@@ -475,7 +323,7 @@ mod imp {
     /// The creation itself (no lock held): the four pipes, the file actions,
     /// an empty signal mask, then pidfd_spawn or posix_spawn; on any error
     /// every descriptor made is closed.
-    fn create(spec: &Spec) -> Result<Proc, (i32, String)> {
+    pub(super) fn create(spec: &Spec) -> Result<Proc, (i32, String)> {
         let mut made: Vec<i32> = Vec::new();
         let fail = |made: &mut Vec<i32>, e: i32, what: &str| {
             for fd in made.drain(..) {
@@ -572,24 +420,713 @@ mod imp {
         }
         Ok(Proc { pid, pidfd, wfd: req.1, rfd: rep.0, killfd: kil.1, lifefd: life.0, state: State::Running, status: None, signals: 0 })
     }
+}
 
-    fn cstr(s: &str) -> PyResult<CString> {
-        CString::new(s).map_err(|_| PyOSError::new_err("an argument with a NUL byte"))
+#[cfg(windows)]
+#[allow(non_snake_case, clippy::upper_case_acronyms)]
+mod sys {
+    use pyo3::exceptions::PyOSError;
+    use pyo3::prelude::*;
+    use std::ffi::c_void;
+
+    type HANDLE = isize;
+
+    #[repr(C)]
+    struct SecurityAttributes {
+        n_length: u32,
+        descriptor: *mut c_void,
+        inherit: i32,
+    }
+
+    #[repr(C)]
+    struct StartupInfoW {
+        cb: u32,
+        reserved: *mut u16,
+        desktop: *mut u16,
+        title: *mut u16,
+        x: u32,
+        y: u32,
+        x_size: u32,
+        y_size: u32,
+        x_count_chars: u32,
+        y_count_chars: u32,
+        fill_attribute: u32,
+        flags: u32,
+        show_window: u16,
+        cb_reserved2: u16,
+        reserved2: *mut u8,
+        std_input: HANDLE,
+        std_output: HANDLE,
+        std_error: HANDLE,
+    }
+
+    #[repr(C)]
+    struct StartupInfoExW {
+        si: StartupInfoW,
+        attributes: *mut c_void,
+    }
+
+    #[repr(C)]
+    struct ProcessInformation {
+        process: HANDLE,
+        thread: HANDLE,
+        pid: u32,
+        tid: u32,
+    }
+
+    #[repr(C)]
+    struct BasicLimitInformation {
+        per_process_user_time_limit: i64,
+        per_job_user_time_limit: i64,
+        limit_flags: u32,
+        minimum_working_set_size: usize,
+        maximum_working_set_size: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+
+    #[repr(C)]
+    struct IoCounters {
+        read_operations: u64,
+        write_operations: u64,
+        other_operations: u64,
+        read_transfer: u64,
+        write_transfer: u64,
+        other_transfer: u64,
+    }
+
+    #[repr(C)]
+    struct ExtendedLimitInformation {
+        basic: BasicLimitInformation,
+        io: IoCounters,
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory_used: usize,
+        peak_job_memory_used: usize,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreatePipe(read: *mut HANDLE, write: *mut HANDLE, sa: *const SecurityAttributes, size: u32) -> i32;
+        fn SetHandleInformation(h: HANDLE, mask: u32, flags: u32) -> i32;
+        fn DuplicateHandle(source_process: HANDLE, source: HANDLE, target_process: HANDLE, target: *mut HANDLE, access: u32, inherit: i32, options: u32) -> i32;
+        fn GetCurrentProcess() -> HANDLE;
+        fn CloseHandle(h: HANDLE) -> i32;
+        fn CreateJobObjectW(sa: *const SecurityAttributes, name: *const u16) -> HANDLE;
+        fn SetInformationJobObject(job: HANDLE, class: i32, info: *const c_void, len: u32) -> i32;
+        fn AssignProcessToJobObject(job: HANDLE, process: HANDLE) -> i32;
+        fn InitializeProcThreadAttributeList(list: *mut c_void, count: u32, flags: u32, size: *mut usize) -> i32;
+        fn UpdateProcThreadAttribute(list: *mut c_void, flags: u32, attribute: usize, value: *const c_void, size: usize, previous: *mut c_void, returned: *mut usize) -> i32;
+        fn DeleteProcThreadAttributeList(list: *mut c_void);
+        fn CreateProcessW(
+            application: *const u16,
+            command_line: *mut u16,
+            process_attributes: *const SecurityAttributes,
+            thread_attributes: *const SecurityAttributes,
+            inherit_handles: i32,
+            flags: u32,
+            environment: *const c_void,
+            directory: *const u16,
+            startup: *const StartupInfoW,
+            info: *mut ProcessInformation,
+        ) -> i32;
+        fn ResumeThread(thread: HANDLE) -> u32;
+        fn TerminateProcess(process: HANDLE, code: u32) -> i32;
+        fn WaitForSingleObject(h: HANDLE, ms: u32) -> u32;
+        fn GetExitCodeProcess(process: HANDLE, code: *mut u32) -> i32;
+        fn GetLastError() -> u32;
+    }
+
+    // (the C runtime's descriptors, which Python's os.read/os.write use)
+    extern "C" {
+        fn _open_osfhandle(h: isize, flags: i32) -> i32;
+        fn _get_osfhandle(fd: i32) -> isize;
+        fn _close(fd: i32) -> i32;
+    }
+
+    const HANDLE_FLAG_INHERIT: u32 = 1;
+    const DUPLICATE_SAME_ACCESS: u32 = 2;
+    const STARTF_USESTDHANDLES: u32 = 0x100;
+    const CREATE_SUSPENDED: u32 = 0x4;
+    const CREATE_UNICODE_ENVIRONMENT: u32 = 0x400;
+    const EXTENDED_STARTUPINFO_PRESENT: u32 = 0x80000;
+    const PROC_THREAD_ATTRIBUTE_HANDLE_LIST: usize = 0x20002;
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+    const WAIT_OBJECT_0: u32 = 0;
+    const INFINITE: u32 = 0xFFFF_FFFF;
+    const O_RDONLY: i32 = 0;
+    const O_WRONLY: i32 = 1;
+    const O_NOINHERIT: i32 = 0x80;
+    const O_BINARY: i32 = 0x8000;
+    const ERROR_INVALID_HANDLE: i32 = 6;
+    const ERROR_TOO_MANY_OPEN_FILES: i32 = 4;
+    const ERROR_ACCESS_DENIED: i32 = 5;
+    /// TerminateProcess's exit code, as subprocess.Popen.kill gives it.
+    const KILLED: u32 = 1;
+
+    fn last_error() -> i32 {
+        unsafe { GetLastError() as i32 }
+    }
+
+    fn close_handle(h: &mut HANDLE) {
+        if *h != 0 {
+            unsafe { CloseHandle(*h) };
+            *h = 0;
+        }
+    }
+
+    fn close_fd(fd: &mut i32) {
+        if *fd >= 0 {
+            unsafe { _close(*fd) };
+            *fd = -1;
+        }
+    }
+
+    /// No reaping on Windows: nothing to refuse (r6 S2.2).
+    pub(super) fn sigchld_refusal() -> Option<String> {
+        None
+    }
+
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    pub(super) enum State {
+        Running,
+        Exited,
+        Reaped,
+        #[allow(dead_code)]
+        Lost,
+    }
+
+    /// The process (its handle and its job's) and the parent's ends of its
+    /// pipes, as C runtime descriptors.
+    pub(super) struct Proc {
+        pid: u32,
+        handle: HANDLE,
+        job: HANDLE,
+        pub(super) wfd: i32,
+        pub(super) rfd: i32,
+        pub(super) state: State,
+        status: Option<i32>,
+        pub(super) signals: u64,
+    }
+
+    impl Proc {
+        pub(super) fn pid(&self) -> i64 {
+            self.pid as i64
+        }
+
+        pub(super) fn has_pidfd(&self) -> bool {
+            false
+        }
+
+        /// The exit code (subprocess's returncode), once read.
+        pub(super) fn code(&self) -> Option<i32> {
+            self.status
+        }
+
+        pub(super) fn terminal(&self) -> bool {
+            matches!(self.state, State::Reaped | State::Lost)
+        }
+
+        /// The handle signalled: Running -> Exited.
+        pub(super) fn observe(&mut self, timeout_ms: i32) {
+            if self.state != State::Running || self.handle == 0 {
+                return;
+            }
+            if unsafe { WaitForSingleObject(self.handle, timeout_ms.max(0) as u32) } == WAIT_OBJECT_0 {
+                self.state = State::Exited;
+            }
+        }
+
+        /// Exited: its code read and the identity released (Reaped), in one
+        /// step.
+        pub(super) fn try_wait(&mut self) {
+            if self.terminal() {
+                return;
+            }
+            if self.state == State::Running {
+                self.observe(0);
+            }
+            if self.state == State::Exited {
+                let mut code: u32 = 0;
+                self.status = if unsafe { GetExitCodeProcess(self.handle, &mut code) } != 0 { Some(code as i32) } else { None };
+                self.state = State::Reaped;
+                self.release_identity();
+            }
+        }
+
+        fn release_identity(&mut self) {
+            close_handle(&mut self.handle);
+            // (the job's last handle: anything the child started ends with it)
+            close_handle(&mut self.job);
+        }
+
+        /// The end: TerminateProcess on the handle, then up to `wake_ms` for
+        /// it to show.
+        pub(super) fn kill(&mut self, wake_ms: i32) {
+            if self.terminal() {
+                return;
+            }
+            self.signal_kill();
+            self.observe(wake_ms);
+            self.try_wait();
+        }
+
+        pub(super) fn signal_kill(&mut self) {
+            if self.state != State::Running || self.handle == 0 {
+                return;
+            }
+            unsafe { TerminateProcess(self.handle, KILLED) };
+            self.signals += 1;
+        }
+
+        pub(super) fn close_io(&mut self) {
+            close_fd(&mut self.wfd);
+            close_fd(&mut self.rfd);
+        }
+    }
+
+    impl Drop for Proc {
+        fn drop(&mut self) {
+            self.close_io();
+            if !self.terminal() {
+                self.kill(25);
+                while !self.terminal() {
+                    self.observe(25);
+                    self.try_wait();
+                    if !self.terminal() {
+                        self.signal_kill();
+                    }
+                }
+            }
+            self.release_identity();
+        }
+    }
+
+    // ---------------------------------------------------------------- spawning
+
+    pub(super) struct Spec {
+        application: Vec<u16>,
+        command_line: Vec<u16>,
+        environment: Vec<u16>,
+        err_fd: i32,
+        fail_after: Option<u32>,
+    }
+
+    fn wide(s: &str) -> PyResult<Vec<u16>> {
+        if s.contains('\0') {
+            return Err(PyOSError::new_err("an argument with a NUL byte"));
+        }
+        Ok(s.encode_utf16().collect())
+    }
+
+    /// subprocess.list2cmdline's quoting (the C runtime's argv parsing).
+    fn quote(arg: &str, out: &mut String) {
+        let needs = arg.is_empty() || arg.contains(' ') || arg.contains('\t');
+        if needs {
+            out.push('"');
+        }
+        let mut backslashes = 0;
+        for c in arg.chars() {
+            match c {
+                '\\' => backslashes += 1,
+                '"' => {
+                    out.extend(std::iter::repeat('\\').take(backslashes * 2 + 1));
+                    out.push('"');
+                    backslashes = 0;
+                }
+                _ => {
+                    out.extend(std::iter::repeat('\\').take(backslashes));
+                    backslashes = 0;
+                    out.push(c);
+                }
+            }
+        }
+        out.extend(std::iter::repeat('\\').take(backslashes));
+        if needs {
+            out.extend(std::iter::repeat('\\').take(backslashes));
+            out.push('"');
+        }
+    }
+
+    impl Spec {
+        pub(super) fn new(path: &str, argv: &[String], env: &[(String, String)], err_fd: i32, fail_after: Option<u32>) -> PyResult<Self> {
+            let mut application = wide(path)?;
+            application.push(0);
+            let mut line = String::new();
+            for (i, a) in argv.iter().enumerate() {
+                if i > 0 {
+                    line.push(' ');
+                }
+                quote(a, &mut line);
+            }
+            let mut command_line = wide(&line)?;
+            command_line.push(0);
+            let mut environment = Vec::new();
+            for (k, v) in env {
+                // (a leading '=' is allowed: Windows' per-drive "=C:" names)
+                if k.is_empty() || k.chars().skip(1).any(|c| c == '=') {
+                    return Err(PyOSError::new_err("an environment name that is empty or holds '='"));
+                }
+                environment.extend(wide(&format!("{}={}", k, v))?);
+                environment.push(0);
+            }
+            if environment.is_empty() {
+                environment.push(0);
+            }
+            environment.push(0);
+            Ok(Spec { application, command_line, environment, err_fd, fail_after })
+        }
+    }
+
+    fn fail<T>(made: &mut Vec<HANDLE>, e: i32, what: &str) -> Result<T, (i32, String)> {
+        for mut h in made.drain(..) {
+            close_handle(&mut h);
+        }
+        Err((e, format!("{} (error {})", what, e)))
+    }
+
+    /// The creation itself (no lock held), r5 R3.4: two pipes, the job, the
+    /// process suspended with only its three standard handles inherited,
+    /// assigned, resumed.  On any error every handle made is closed, and a
+    /// process already created is terminated and waited for first.
+    pub(super) fn create(spec: &Spec) -> Result<Proc, (i32, String)> {
+        let mut made: Vec<HANDLE> = Vec::new();
+        let sa = SecurityAttributes { n_length: std::mem::size_of::<SecurityAttributes>() as u32, descriptor: std::ptr::null_mut(), inherit: 0 };
+        let mut pipes = [(0isize, 0isize); 2];
+        for (i, slot) in pipes.iter_mut().enumerate() {
+            if spec.fail_after == Some(i as u32) {
+                return fail(&mut made, ERROR_TOO_MANY_OPEN_FILES, "a pipe for the PNG engine's process (test fault)");
+            }
+            let (mut r, mut w) = (0, 0);
+            if unsafe { CreatePipe(&mut r, &mut w, &sa, 0) } == 0 {
+                return fail(&mut made, last_error(), "a pipe for the PNG engine's process");
+            }
+            made.push(r);
+            made.push(w);
+            *slot = (r, w);
+        }
+        // (the child reads req.0 and writes rep.1; the parent keeps req.1 and rep.0)
+        let (req, rep) = (pipes[0], pipes[1]);
+        let eh = unsafe { _get_osfhandle(spec.err_fd) };
+        if eh == -1 || eh == -2 {
+            return fail(&mut made, ERROR_INVALID_HANDLE, "the PNG engine's standard error file");
+        }
+        let cur = unsafe { GetCurrentProcess() };
+        let mut err: HANDLE = 0;
+        if unsafe { DuplicateHandle(cur, eh, cur, &mut err, 0, 1, DUPLICATE_SAME_ACCESS) } == 0 {
+            return fail(&mut made, last_error(), "the PNG engine's standard error file");
+        }
+        made.push(err);
+        for h in [req.0, rep.1] {
+            if unsafe { SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) } == 0 {
+                return fail(&mut made, last_error(), "a pipe for the PNG engine's process");
+            }
+        }
+        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if job == 0 {
+            return fail(&mut made, last_error(), "the PNG engine process's job object");
+        }
+        made.push(job);
+        let mut limits: ExtendedLimitInformation = unsafe { std::mem::zeroed() };
+        limits.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if unsafe { SetInformationJobObject(job, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, &limits as *const _ as *const c_void, std::mem::size_of::<ExtendedLimitInformation>() as u32) } == 0 {
+            return fail(&mut made, last_error(), "the PNG engine process's job object");
+        }
+        // (only these three are inherited)
+        let inherit: [HANDLE; 3] = [req.0, rep.1, err];
+        let mut size: usize = 0;
+        unsafe { InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut size) };
+        let mut list_buf: Vec<u64> = vec![0; size / 8 + 1];
+        let list = list_buf.as_mut_ptr() as *mut c_void;
+        if unsafe { InitializeProcThreadAttributeList(list, 1, 0, &mut size) } == 0 {
+            return fail(&mut made, last_error(), "starting the PNG engine's process");
+        }
+        if unsafe { UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit.as_ptr() as *const c_void, std::mem::size_of_val(&inherit), std::ptr::null_mut(), std::ptr::null_mut()) } == 0 {
+            let e = last_error();
+            unsafe { DeleteProcThreadAttributeList(list) };
+            return fail(&mut made, e, "starting the PNG engine's process");
+        }
+        let mut si: StartupInfoExW = unsafe { std::mem::zeroed() };
+        si.si.cb = std::mem::size_of::<StartupInfoExW>() as u32;
+        si.si.flags = STARTF_USESTDHANDLES;
+        si.si.std_input = req.0;
+        si.si.std_output = rep.1;
+        si.si.std_error = err;
+        si.attributes = list;
+        let mut pi: ProcessInformation = unsafe { std::mem::zeroed() };
+        let mut command_line = spec.command_line.clone();
+        let ok = unsafe {
+            CreateProcessW(
+                spec.application.as_ptr(),
+                command_line.as_mut_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+                CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
+                spec.environment.as_ptr() as *const c_void,
+                std::ptr::null(),
+                &si.si,
+                &mut pi,
+            )
+        };
+        let e = last_error();
+        unsafe { DeleteProcThreadAttributeList(list) };
+        drop(list_buf);
+        if ok == 0 {
+            return fail(&mut made, e, "starting the PNG engine's process");
+        }
+        // (the child's ends closed in the parent)
+        for mut h in [req.0, rep.1, err] {
+            made.retain(|&x| x != h);
+            close_handle(&mut h);
+        }
+        // (from here the process exists, suspended: any failure ends it, waits for it and closes its handles)
+        let end = |made: &mut Vec<HANDLE>, e: i32, what: &str| -> Result<Proc, (i32, String)> {
+            unsafe {
+                TerminateProcess(pi.process, KILLED);
+                WaitForSingleObject(pi.process, INFINITE);
+                CloseHandle(pi.thread);
+                CloseHandle(pi.process);
+            }
+            fail(made, e, what)
+        };
+        if spec.fail_after == Some(2) {
+            return end(&mut made, ERROR_ACCESS_DENIED, "assigning the PNG engine's process to its job (test fault)");
+        }
+        if unsafe { AssignProcessToJobObject(job, pi.process) } == 0 {
+            return end(&mut made, last_error(), "assigning the PNG engine's process to its job");
+        }
+        if spec.fail_after == Some(3) {
+            return end(&mut made, ERROR_ACCESS_DENIED, "resuming the PNG engine's process (test fault)");
+        }
+        if unsafe { ResumeThread(pi.thread) } == u32::MAX {
+            return end(&mut made, last_error(), "resuming the PNG engine's process");
+        }
+        unsafe { CloseHandle(pi.thread) };
+        // (the parent's ends as C runtime descriptors, each owning its handle from then on)
+        let wfd = unsafe { _open_osfhandle(req.1, O_WRONLY | O_BINARY | O_NOINHERIT) };
+        if wfd < 0 {
+            return end(&mut made, ERROR_TOO_MANY_OPEN_FILES, "a descriptor for the PNG engine's pipe");
+        }
+        made.retain(|&x| x != req.1);
+        let rfd = unsafe { _open_osfhandle(rep.0, O_RDONLY | O_BINARY | O_NOINHERIT) };
+        if rfd < 0 {
+            unsafe { _close(wfd) };
+            return end(&mut made, ERROR_TOO_MANY_OPEN_FILES, "a descriptor for the PNG engine's pipe");
+        }
+        Ok(Proc { pid: pi.pid, handle: pi.process, job, wfd, rfd, state: State::Running, status: None, signals: 0 })
+    }
+}
+
+#[cfg(any(unix, windows))]
+mod api {
+    use super::sys::{create, sigchld_refusal, Proc, Spec, State};
+    use pyo3::exceptions::{PyOSError, PyRuntimeError};
+    use pyo3::prelude::*;
+    use pyo3::types::PyDict;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Condvar, Mutex};
+
+    #[pyfunction]
+    pub fn sigchld_check() -> PyResult<()> {
+        match sigchld_refusal() {
+            Some(m) => Err(PyRuntimeError::new_err(m)),
+            None => Ok(()),
+        }
+    }
+
+    static THREAD_IDS: AtomicU64 = AtomicU64::new(1);
+    thread_local! {
+        static THREAD_ID: u64 = THREAD_IDS.fetch_add(1, Ordering::Relaxed);
+    }
+    fn this_thread() -> u64 {
+        THREAD_ID.with(|t| *t)
+    }
+
+    /// The native handle (see the module comment).
+    #[pyclass(module = "sagebrush._native.raster")]
+    pub struct Child {
+        p: Mutex<Proc>,
+        busy: AtomicU64,
+    }
+
+    /// The method's thread marked as inside the handle; cleared on any exit
+    /// (only by the thread that marked it).
+    struct Busy<'a>(Option<&'a AtomicU64>);
+    impl Drop for Busy<'_> {
+        fn drop(&mut self) {
+            if let Some(b) = self.0 {
+                b.store(0, Ordering::Release);
+            }
+        }
+    }
+
+    impl Child {
+        fn new_from(p: Proc) -> Self {
+            Child { p: Mutex::new(p), busy: AtomicU64::new(0) }
+        }
+
+        /// A call from a signal handler on the thread already inside one of
+        /// this handle's methods is refused ("busy"), never a deadlock.
+        fn enter(&self) -> PyResult<Busy<'_>> {
+            let me = this_thread();
+            if self.busy.load(Ordering::Acquire) == me {
+                return Err(PyRuntimeError::new_err("the PNG engine's process handle is busy in this thread (a signal handler's call?)"));
+            }
+            // (another thread inside: this one isn't marked, and never clears
+            // that thread's mark; the lock alone serialises the two)
+            match self.busy.compare_exchange(0, me, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => Ok(Busy(Some(&self.busy))),
+                Err(_) => Ok(Busy(None)),
+            }
+        }
+
+        /// f(&mut Proc) with the handle's lock, taken and held only without
+        /// the GIL (a holder never needs the GIL, so no deadlock).
+        fn with<T: Send>(&self, py: Python<'_>, f: impl FnOnce(&mut Proc) -> T + Send) -> T {
+            py.detach(|| {
+                let mut g = self.p.lock().unwrap_or_else(|e| e.into_inner());
+                f(&mut g)
+            })
+        }
+    }
+
+    fn state_name(s: State) -> &'static str {
+        match s {
+            State::Running => "running",
+            State::Exited => "exited",
+            State::Reaped => "reaped",
+            State::Lost => "lost",
+        }
+    }
+
+    #[pymethods]
+    impl Child {
+        #[getter]
+        fn pid(&self, py: Python<'_>) -> i64 {
+            self.with(py, |p| p.pid())
+        }
+        #[getter]
+        fn wfd(&self, py: Python<'_>) -> i32 {
+            self.with(py, |p| p.wfd)
+        }
+        #[getter]
+        fn rfd(&self, py: Python<'_>) -> i32 {
+            self.with(py, |p| p.rfd)
+        }
+        #[getter]
+        fn state(&self, py: Python<'_>) -> &'static str {
+            state_name(self.with(py, |p| p.state))
+        }
+        #[getter]
+        fn signals_sent(&self, py: Python<'_>) -> u64 {
+            self.with(py, |p| p.signals)
+        }
+        #[getter]
+        fn has_pidfd(&self, py: Python<'_>) -> bool {
+            self.with(py, |p| p.has_pidfd())
+        }
+        /// The exit status as os.waitstatus_to_exitcode gives it (Windows:
+        /// the exit code), once reaped; None before, or when Lost.
+        #[getter]
+        fn returncode(&self, py: Python<'_>) -> Option<i32> {
+            self.with(py, |p| p.code())
+        }
+
+        /// Whether the process has ended (reaped here, or lost), after one
+        /// non-blocking look: the old `_exited(child)`.
+        fn poll_exit(&self, py: Python<'_>) -> PyResult<bool> {
+            let _b = self.enter()?;
+            Ok(self.with(py, |p| {
+                p.observe(0);
+                // (an exited child is reaped here, and so is one whose life
+                // pipe is still open but that has exited: its zombie keeps
+                // the pid ours)
+                p.try_wait();
+                p.terminal()
+            }))
+        }
+
+        /// The end, then the reap: wake seconds per slice, signals checked
+        /// between slices (a Stop leaves the state as it is: a retry is safe).
+        /// Returns the exit code (None if lost).
+        #[pyo3(signature = (wake=0.025))]
+        fn kill_and_reap(&self, py: Python<'_>, wake: f64) -> PyResult<Option<i32>> {
+            let _b = self.enter()?;
+            let ms = (wake * 1000.0).max(1.0) as i32;
+            self.with(py, |p| p.kill(ms));
+            loop {
+                let done = self.with(py, |p| {
+                    p.observe(ms);
+                    p.try_wait();
+                    if p.state == State::Running {
+                        p.signal_kill();
+                    }
+                    p.terminal()
+                });
+                // (after every slice, the last too: a Stop raised after the
+                // reap leaves Reaped, and a retry returns the code)
+                py.check_signals()?;
+                if done {
+                    break;
+                }
+            }
+            Ok(self.with(py, |p| p.code()))
+        }
+
+        /// The parent's request/reply ends closed (each set to -1 with its
+        /// close).  The kill pipe stays: closing it ends the child.
+        fn close_io(&self, py: Python<'_>) -> PyResult<()> {
+            let _b = self.enter()?;
+            self.with(py, |p| p.close_io());
+            Ok(())
+        }
+    }
+
+    // ---------------------------------------------------------------- spawning
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum TaskState {
+        Queued,
+        Running,
+        Done,
+        Cancelled,
+        Taken,
+    }
+
+    struct TaskInner {
+        state: TaskState,
+        spec: Option<Spec>,
+        out: Option<Result<Proc, (i32, String)>>,
+        // (run() has returned: whatever it made is kept or cleaned)
+        finished: bool,
+    }
+
+    /// A child's creation on the persistent spawner thread (r5 R3): the
+    /// state and the result are written only by these methods.
+    #[pyclass(module = "sagebrush._native.raster")]
+    pub struct SpawnTask {
+        m: Mutex<TaskInner>,
+        cv: Condvar,
     }
 
     #[pymethods]
     impl SpawnTask {
         /// The creation's spec: the program's path, its argv, its environment
         /// (a dict), the stderr file's descriptor; `fail_after` (tests only):
-        /// fail before making that pipe.
+        /// fail at that stage (POSIX: before making that pipe; Windows: 0-1
+        /// before a pipe, 2 at the job assignment, 3 at the resume).
         #[new]
         #[pyo3(signature = (path, argv, env, err_fd, fail_after=None))]
         fn new(path: &str, argv: Vec<String>, env: &Bound<'_, PyDict>, err_fd: i32, fail_after: Option<u32>) -> PyResult<Self> {
-            let mut envp = Vec::new();
+            let mut pairs = Vec::new();
             for (k, v) in env.iter() {
-                envp.push(cstr(&format!("{}={}", k.extract::<String>()?, v.extract::<String>()?))?);
+                pairs.push((k.extract::<String>()?, v.extract::<String>()?));
             }
-            let spec = Spec { path: cstr(path)?, argv: argv.iter().map(|a| cstr(a)).collect::<PyResult<_>>()?, envp, err_fd, fail_after };
+            let spec = Spec::new(path, &argv, &pairs, err_fd, fail_after)?;
             Ok(SpawnTask { m: Mutex::new(TaskInner { state: TaskState::Queued, spec: Some(spec), out: None, finished: false }), cv: Condvar::new() })
         }
 

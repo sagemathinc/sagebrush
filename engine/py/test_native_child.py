@@ -1,5 +1,6 @@
 """The raster child's native process handle and its creation (#157 simpler
-path: engine/py/src/child.rs), POSIX.
+path: engine/py/src/child.rs), on POSIX and Windows (the tests that are
+about POSIX alone, the kill pipe, reaping and signals, are skipped there).
 
     python engine/py/test_native_child.py [-k NAME]
 """
@@ -36,6 +37,20 @@ import os, sys
 os.write(1, b"R")
 sys.exit(3)
 '''
+# One that starts a grandchild, writes its pid, and waits (Windows: the job
+# ends the grandchild with it).
+PARENT = r'''
+import os, subprocess, sys, time
+g = subprocess.Popen([sys.executable, "-I", "-S", "-c", "import time; time.sleep(120)"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+os.write(1, b"R" + str(g.pid).encode() + b"\n")
+time.sleep(120)
+'''
+WINDOWS = sys.platform == "win32"
+
+
+def posix_only(f):
+    f.posix_only = True
+    return f
 
 
 class Ob:
@@ -43,14 +58,28 @@ class Ob:
 
 
 def fds():
+    """This process's descriptors (Windows: its handle count)."""
+    if WINDOWS:
+        import ctypes
+        n = ctypes.c_ulong()
+        assert ctypes.windll.kernel32.GetProcessHandleCount(ctypes.windll.kernel32.GetCurrentProcess(), ctypes.byref(n))
+        return n.value
     return len(os.listdir("/proc/self/fd")) if os.path.isdir("/proc/self/fd") else len(os.listdir("/dev/fd"))
+
+
+def env():
+    e = {"LC_ALL": "C"}
+    for k in ("SYSTEMROOT", "PATH"):  # (as launch_plan: Windows needs SYSTEMROOT to start)
+        if WINDOWS and k in os.environ:
+            e[k] = os.environ[k]
+    return e
 
 
 def start(code, fail_after=None):
     """A child made the way _raster_child makes one: a SpawnTask run on
     another thread (the spawner), then taken into an object."""
     err = tempfile.TemporaryFile()
-    t = raster.SpawnTask(sys.executable, [sys.executable, "-I", "-S", "-c", code], {"LC_ALL": "C"}, err.fileno(), fail_after)
+    t = raster.SpawnTask(sys.executable, [sys.executable, "-I", "-S", "-c", code], env(), err.fileno(), fail_after)
     th = threading.Thread(target=t.run)
     th.start()
     th.join(10)
@@ -64,6 +93,19 @@ def start(code, fail_after=None):
 
 
 def gone(pid):
+    if WINDOWS:
+        # (never os.kill there: any signal number but the console events is a TerminateProcess)
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return True
+        try:
+            code = ctypes.c_ulong()
+            k.GetExitCodeProcess(h, ctypes.byref(code))
+            return code.value != 259  # STILL_ACTIVE
+        finally:
+            k.CloseHandle(h)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -72,6 +114,8 @@ def gone(pid):
 
 
 def test_the_kill_pipe_ends_a_watched_child_without_a_signal():
+    # (Windows: TerminateProcess on the handle, once, exit code 1 as Popen.kill's)
+    want, sent = (1, 1) if WINDOWS else (137, 0)
     c = start(WATCHED)
     pid = c.pid
     print("  pidfd: %s" % c.has_pidfd)
@@ -80,12 +124,13 @@ def test_the_kill_pipe_ends_a_watched_child_without_a_signal():
     # SIGKILL fallback: the exit itself ends the wait at once)
     code = c.kill_and_reap(0.2)
     dt = time.monotonic() - t0
-    assert code == 137 and c.state == "reaped" and c.signals_sent == 0, (code, c.state, c.signals_sent)
+    assert code == want and c.state == "reaped" and c.signals_sent == sent, (code, c.state, c.signals_sent)
     assert dt < 0.25 and gone(pid), dt
     # (reaped is terminal: nothing more is ever sent)
-    assert c.kill_and_reap() == 137 and c.signals_sent == 0
+    assert c.kill_and_reap() == want and c.signals_sent == sent
 
 
+@posix_only
 def test_a_child_without_a_watchdog_gets_the_sigkill_fallback():
     c = start(DEAF)
     t0 = time.monotonic()
@@ -104,6 +149,7 @@ def test_an_exit_is_seen_and_reaped_once():
     assert c.kill_and_reap() == 3 and c.signals_sent == 0
 
 
+@posix_only
 def test_a_child_reaped_by_someone_else_is_lost_and_never_signalled():
     # (outside the supported contract: our wait gets ECHILD, and the handle
     # stops: Lost, no signal to that pid ever again)
@@ -119,7 +165,7 @@ def test_cancellation_before_during_and_after_the_creation_leaves_nothing():
     err = tempfile.TemporaryFile()
     argv = [sys.executable, "-I", "-S", "-c", WATCHED]
     # before: never runs
-    t = raster.SpawnTask(sys.executable, argv, {}, err.fileno())
+    t = raster.SpawnTask(sys.executable, argv, env(), err.fileno())
     t.cancel_and_clean()
     t.run()
     ob = Ob()
@@ -129,11 +175,11 @@ def test_cancellation_before_during_and_after_the_creation_leaves_nothing():
     except RuntimeError:
         pass
     # after it ran, before it was taken: ended and reaped by the cancel
-    t = raster.SpawnTask(sys.executable, argv, {}, err.fileno())
+    t = raster.SpawnTask(sys.executable, argv, env(), err.fileno())
     t.run()
     t.cancel_and_clean()
     # during: the spawner thread ends what it makes, and the cancel waits for it
-    t = raster.SpawnTask(sys.executable, argv, {}, err.fileno())
+    t = raster.SpawnTask(sys.executable, argv, env(), err.fileno())
     th = threading.Thread(target=t.run)
     th.start()
     t.cancel_and_clean()
@@ -142,6 +188,8 @@ def test_cancellation_before_during_and_after_the_creation_leaves_nothing():
     time.sleep(0.2)
     err.close()
     assert fds() == base, (fds(), base)
+    if WINDOWS:
+        return
     # (no child of ours left: every one was reaped)
     try:
         os.waitpid(-1, os.WNOHANG)
@@ -161,6 +209,26 @@ def test_a_failed_creation_closes_what_it_made():
     assert fds() == base, (fds(), base)
 
 
+def test_the_job_ends_what_the_child_started():
+    # (Windows: the kill-on-close job; POSIX: the grandchild isn't ours to
+    # end, so it is only reported)
+    c = start(PARENT)
+    line = b""
+    while not line.endswith(b"\n"):
+        line += os.read(c.rfd, 1)
+    g = int(line)
+    c.kill_and_reap()
+    t0 = time.monotonic()
+    while not gone(g) and time.monotonic() - t0 < 5:
+        time.sleep(0.02)
+    if WINDOWS:
+        assert gone(g), "the grandchild outlived the job"
+    else:
+        print("  grandchild gone with its parent: %s" % gone(g))
+        if not gone(g):
+            os.kill(g, signal.SIGKILL)
+
+
 def test_fifty_children_leave_no_descriptor():
     base = fds()
     for i in range(50):
@@ -171,6 +239,7 @@ def test_fifty_children_leave_no_descriptor():
     assert fds() == base, (fds(), base)
 
 
+@posix_only
 def test_the_sigchld_contract_is_checked_before_anything_is_made():
     raster.sigchld_check()
     prev = signal.signal(signal.SIGCHLD, signal.SIG_IGN)
@@ -192,6 +261,7 @@ def test_the_sigchld_contract_is_checked_before_anything_is_made():
         signal.signal(signal.SIGCHLD, prev)
 
 
+@posix_only
 def test_a_handler_calling_into_the_busy_handle_is_refused_not_deadlocked():
     c = start(DEAF)
     seen = []
@@ -222,10 +292,9 @@ def test_a_handler_calling_into_the_busy_handle_is_refused_not_deadlocked():
 
 
 if __name__ == "__main__":
-    if sys.platform == "win32":
-        print("n/a on Windows (child.rs is POSIX)")
-        sys.exit(0)
     names = [n for n in list(globals()) if n.startswith("test_")]
+    if WINDOWS:
+        names = [n for n in names if not getattr(globals()[n], "posix_only", False)]
     if "-k" in sys.argv:
         names = [n for n in names if sys.argv[sys.argv.index("-k") + 1] in n]
     for n in names:
