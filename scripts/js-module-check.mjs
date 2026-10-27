@@ -63,27 +63,61 @@ const isHelper = (n) =>
   (n.type === "FunctionDeclaration" && n.id?.name === "hostCall") ||
   (n.type === "VariableDeclarator" && n.id?.type === "Identifier" && n.id.name === "hostCall" && /Function/.test(n.init?.type ?? ""));
 
+// The field paths of an object literal ("rejected", "rejected.refusal", ...) and the paths whose values aren't
+// object literals (opaque: what is under them can't be read), or null when it isn't one, or has a spread or a
+// computed key (what it sends can't be read from the code).
+function fieldPaths(e, prefix = "") {
+  if (!e || e.type !== "ObjectExpression") return null;
+  const paths = [], opaque = [];
+  for (const p of e.properties) {
+    if (p.type !== "Property" || p.computed) return null;
+    const k = p.key.type === "Identifier" ? p.key.name : p.key.type === "Literal" ? String(p.key.value) : null;
+    if (k === null) return null;
+    paths.push(prefix + k);
+    if (p.value.type === "ObjectExpression") {
+      const sub = fieldPaths(p.value, prefix + k + ".");
+      if (sub === null) return null;
+      paths.push(...sub.paths);
+      opaque.push(...sub.opaque);
+    } else opaque.push(prefix + k);
+  }
+  return { paths, opaque };
+}
+
 /**
- * host_req of `text` against `table` ({name: level}): the highest level of the
- * literal names passed to hostCall.  Returns {host_req, names, errors}; any
- * error means the build fails.
+ * host_req of `text` against `table` ({name: level}) and `fields` ({"name.field.path": level}, the compatible
+ * widenings of a message, A1.4): the highest level of the literal names passed to hostCall, and of the widened
+ * fields their payloads send.  A message that has widenings must be sent with an object literal (with no
+ * spread or computed key), so which fields it sends is read from the code, never assumed.  Returns {host_req,
+ * names, fields, errors}; any error means the build fails.
  */
-export function hostRequirement(text, table) {
-  const names = new Set();
+export function hostRequirement(text, table, fields = {}) {
+  const names = new Set(), used = new Set();
   const errors = [];
   for (const [n, up] of nodes(parseModule(text))) {
     if (n.type === "CallExpression" && n.callee.type === "Identifier" && n.callee.name === "hostCall") {
       const a = n.arguments[0];
       if (!a || a.type !== "Literal" || typeof a.value !== "string") errors.push(`${at(n)} hostCall's name is not a string literal`);
       else if (!Object.hasOwn(table, a.value)) errors.push(`${at(n)} hostCall(${JSON.stringify(a.value)}) is not in the host level table`);
-      else names.add(a.value);
+      else {
+        names.add(a.value);
+        const widened = Object.keys(fields).filter((f) => f.startsWith(a.value + "."));
+        if (widened.length) {
+          const fp = fieldPaths(n.arguments[1]);
+          // (a widened field under a value the code doesn't show, { rejected: x }, can't be told sent or not)
+          const hidden = fp && widened.some((f) => fp.opaque.some((o) => f.slice(a.value.length + 1).startsWith(o + ".")));
+          if (fp === null || hidden) errors.push(`${at(n)} hostCall(${JSON.stringify(a.value)})'s payload isn't an object literal: its fields have levels (${widened.join(", ")})`);
+          else for (const f of widened) if (fp.paths.includes(f.slice(a.value.length + 1))) used.add(f);
+        }
+      }
     }
     const isPost = (n.type === "Identifier" && n.name === "postMessage") || (n.type === "Literal" && n.value === "postMessage" && up.at(-1)?.type === "MemberExpression");
     if (isPost && !up.some(isHelper)) errors.push(`${at(n)} postMessage outside the hostCall helper`);
   }
   let host_req = 0;
   for (const name of names) host_req = Math.max(host_req, table[name]);
-  return { host_req, names: [...names].sort(), errors };
+  for (const f of used) host_req = Math.max(host_req, fields[f]);
+  return { host_req, names: [...names].sort(), fields: [...used].sort(), errors };
 }
 
 // ---------------------------------------------------------------------------
