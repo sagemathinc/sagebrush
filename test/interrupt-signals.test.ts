@@ -72,7 +72,7 @@ test("Stop bound (S-delta Stop-250): S1's exit, S2's two KIs and S3's first pres
   const s1 = one(1250.4);
   assert.deepEqual([s1.outcome, s1.late], ["FAIL", true]);
   assert.match(s1.why, /the exit came 250\.4 ms/);
-  assert.match(judge("S1", { ...base, sends: [], text: "KeyboardInterrupt", exit: { code: null, signal: "SIGINT", t: 1030 } }).why, /^invalid evidence: press 1 has no valid send time/);
+  assert.match(judge("S1", { ...base, sends: [], text: "KeyboardInterrupt", exit: { code: null, signal: "SIGINT", t: 1030 } }).why, /^invalid evidence: press 1 (not sent at a valid time|has no valid send time)/);
   // S2: each press gated, the why names it
   const two = { ...base, sends: [{ t: 1000 }, { t: 5000 }], exit: { code: 0, signal: null, t: 6000 } };
   const ok = judge("S2", { ...two, marks: [m("KI 1", 1010), m("CONT", 1011), m("KI 2", 5250), m("END", 5251)] });
@@ -149,6 +149,114 @@ test("R1 signals: a malformed cell keeps a row out of KNOWN under any signature;
   const b = { signature: "." };
   assert.equal(so([{ outcome: "FAIL", why: "first Stop not honoured" }, { outcome: "INVALID", why: "invalid evidence: x", malformed: true }], b).fin, "FAIL");
   assert.equal(so([{ outcome: "INVALID", why: "invalid evidence: x", malformed: true }], b).fin, "INCOMPLETE");
+});
+
+// ---- #225 r3: through the full composition, judge -> signalOutcome (with the ACTUAL baseline entry) -> the --ci exit
+const classifyMod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
+const BASE = JSON.parse(readFileSync(join(__dirname, "..", "..", "web", "interrupt-baseline.json"), "utf8")).entries;
+/** [cell outcome, row's final outcome, failing --ci] for one session of trial id on host */
+function chain(id: string, r: object, host = "cli"): [string, string, boolean] {
+  const entry = BASE.find((e: any) => e.case === id && e.host === host) ?? null;
+  const src = `import { TRIALS, signalOutcome } from ${JSON.stringify(mod)};\nimport { ciFailing } from ${JSON.stringify(classifyMod)};
+const c = await TRIALS[${JSON.stringify(id)}].judge(${JSON.stringify(r)}, ${JSON.stringify(host)});
+const { fin } = signalOutcome([c], ${JSON.stringify(entry)});
+console.log(JSON.stringify([c.outcome, fin, ciFailing([{ outcome: fin }]).length === 1]));`;
+  const p = spawnSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8" });
+  assert.equal(p.status, 0, p.stderr);
+  return JSON.parse(p.stdout);
+}
+const ENTER = m("ENTER 1", 500);
+
+test("r3 S1: S4 validates its request evidence before 'returned without a KeyboardInterrupt' can be pinned KNOWN", () => {
+  const ret = { ...base, marks: [ENTER, m("RET 1", 7000)], exit: { code: 0, signal: null, t: 7100 } };
+  assert.deepEqual(chain("S4", { ...ret, sends: [{ t: 1000 }, { t: 4000 }] }), ["FAIL", "KNOWN", false]); // (control: pinned)
+  for (const sends of [[{ t: null }, { t: 4000 }], [{ t: 1000, error: "Error: kill ESRCH" }, { t: 4000 }], [{ t: "1000" }, { t: 4000 }], [{ t: -1 }, { t: 4000 }], [{ t: 1000 }, { t: NaN }], [{ t: 1000 }]]) {
+    assert.deepEqual(chain("S4", { ...ret, sends }), ["INVALID", "INCOMPLETE", true], JSON.stringify(sends));
+  }
+  // (press 2 legitimately absent: the program ended before 3.5 s after ENTER)
+  assert.deepEqual(chain("S4", { ...base, sends: [{ t: 1000 }], marks: [ENTER, m("KI 1", 1100), m("END", 1101)], exit: { code: 0, signal: null, t: 1200 } }), ["PASS", "FIXED", true]);
+  // (press 2 failed ESRCH only after the exit: legitimate; before it: malformed)
+  const early = { ...base, marks: [ENTER, m("KI 1", 1100), m("END", 1101)], exit: { code: 0, signal: null, t: 1200 } };
+  assert.equal(chain("S4", { ...early, sends: [{ t: 1000 }, { t: 4000, error: "Error: kill ESRCH" }] })[0], "PASS");
+  assert.equal(chain("S4", { ...early, sends: [{ t: 1000 }, { t: 1150, error: "Error: kill ESRCH" }] })[0], "INVALID");
+  // (the genuine pre-send return stays INVALID, unflagged)
+  const j = judge("S4", { ...base, sends: [], marks: [ENTER, m("RET 1", 600)], exit: { code: 0, signal: null, t: 700 } });
+  assert.deepEqual([j.outcome, j.malformed], ["INVALID", undefined]);
+});
+
+test("pressGate itself validates both times before subtracting (the shared gate, used by S1, S2, S4)", () => {
+  const pg = (r: object, k: number, endT: unknown) => {
+    const src = `import { pressGate } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(pressGate(${JSON.stringify(r)}, ${k}, ${JSON.stringify(endT)}, "x") ?? "null"));`;
+    const p = spawnSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8" });
+    assert.equal(p.status, 0, p.stderr);
+    return JSON.parse(p.stdout);
+  };
+  assert.equal(pg({ sends: [{ t: 1000 }] }, 0, 1250), "null");
+  assert.equal(pg({ sends: [{ t: 1000 }] }, 0, 1251).late, true);
+  for (const [r, e] of [[{ sends: [{ t: "1000" }] }, 1250], [{ sends: [{ t: -1 }] }, 100], [{ sends: [{ t: 1000, error: "x" }] }, 1250], [{ sends: [] }, 1250], [{ sends: [{ t: 1000 }] }, "1250"], [{ sends: [{ t: 1000 }] }, null]] as [object, unknown][]) {
+    const g = pg(r, 0, e);
+    assert.deepEqual([g.outcome, g.malformed], ["INVALID", true], JSON.stringify([r, e]));
+  }
+});
+
+test("r3 S1: S1 and S2 validate the presses before their functional failures", () => {
+  // S1: no traceback, with a missing or bad press -> malformed, never the pinnable "no KeyboardInterrupt"
+  for (const host of ["cli", "prompt"]) {
+    for (const sends of [[], [{ t: null }], [{ t: 1000, error: "Error: kill EPERM" }]]) {
+      assert.deepEqual(chain("S1", { ...base, sends, marks: [ENTER], text: "", exit: { code: 0, signal: null, t: 3000 } }, host), ["INVALID", host === "prompt" ? "INCOMPLETE" : "INCOMPLETE", true], host + JSON.stringify(sends));
+    }
+  }
+  assert.equal(chain("S1", { ...base, marks: [ENTER], text: "", exit: { code: 0, signal: null, t: 3000 } }, "prompt")[1], "KNOWN"); // (control: the prompt's F3 pin)
+  // S2: no first KI with a bad press 1; no second KI with press 2 missing after CONT
+  assert.deepEqual(chain("S2", { ...base, sends: [{ t: "1000" }], marks: [ENTER], exit: { code: 0, signal: null, t: 9000 } }), ["INVALID", "INCOMPLETE", true]);
+  assert.deepEqual(chain("S2", { ...base, sends: [{ t: 1000 }], marks: [ENTER, m("KI 1", 1010), m("CONT", 1011), m("RET 2", 9000), m("END", 9001)], exit: { code: 0, signal: null, t: 9100 } }), ["INVALID", "INCOMPLETE", true]);
+  // (and a malformed marker time anywhere)
+  assert.equal(chain("S2", { ...base, sends: [{ t: 1000 }, { t: 5000 }], marks: [ENTER, m("KI 1", NaN)], exit: { code: 0, signal: null, t: 9000 } })[0], "INVALID");
+});
+
+test("r3 S2: S3 validates press 2 before believing press 1's early endpoint (with the stated ESRCH amendment on the CLI)", () => {
+  // daybreak2's: press 2 missing -> never PASS, on both hosts
+  assert.equal(judge("S3", { ...base, sends: [{ t: 1000 }], exit: { code: null, signal: "SIGINT", t: 1200 } }).outcome, "INVALID");
+  assert.equal(judge("S3", { ...base, sends: [{ t: 1000 }], ki_text_t: 1200 }, "prompt").outcome, "INVALID");
+  // press 2 errored while the program still ran (ESRCH before the exit, or another error): never PASS
+  assert.equal(judge("S3", { ...base, sends: [{ t: 1000 }, { t: 1150, error: "Error: kill ESRCH" }], exit: { code: null, signal: "SIGINT", t: 1200 } }).outcome, "INVALID");
+  assert.equal(judge("S3", { ...base, sends: [{ t: 1000 }, { t: 1500, error: "Error: kill EPERM" }], exit: { code: null, signal: "SIGINT", t: 1200 } }).outcome, "INVALID");
+  assert.equal(judge("S3", { ...base, sends: [{ t: 1000 }, { t: 1500, error: "write EPIPE" }], ki_text_t: 1200 }, "prompt").outcome, "INVALID");
+  // THE AMENDMENT: on the CLI, press 1 honoured ends the process, so press 2's kill fails ESRCH AFTER the exit: the honoured path
+  const amend = judge("S3", { ...base, sends: [{ t: 1000 }, { t: 1500, error: "Error: kill ESRCH" }], exit: { code: null, signal: "SIGINT", t: 1200 } });
+  assert.deepEqual([amend.outcome, amend.first_stop, amend.escalation], ["PASS", "honoured", "not exercised (press 1 ended it)"]);
+  // (the prompt doesn't exit: its honoured path is the KeyboardInterrupt line before a successfully sent press 2)
+  assert.equal(judge("S3", { ...base, sends: [{ t: 1000 }, { t: 1500 }], ki_text_t: 1200 }, "prompt").outcome, "PASS");
+});
+
+test("r3 S3: S3's escalation is gated at 250 ms on press 2's endpoint (raw), late is never the pinned signature; endpoint order checked; both hosts", () => {
+  const re = /^first Stop not honoured/;
+  const eps = 2 ** -42; // (at 1500 + 250 the step is 2^-42)
+  const at = (e: number, host = "cli") => judge("S3", { ...base, sends: [{ t: 1000 }, { t: 1500 }], exit: { code: null, signal: "SIGINT", t: 1500 + e } }, host);
+  for (const host of ["cli", "prompt"]) {
+    for (const e of [249, 250]) {
+      const r = at(e, host);
+      assert.deepEqual([r.outcome, r.escalation, r.first_stop], ["FAIL", "PASS", "not honoured"], host + " " + e);
+      assert.ok(re.test(r.why));
+    }
+    for (const e of [251, 250 + eps]) {
+      const r = at(e, host);
+      assert.deepEqual([r.outcome, r.late, r.escalation, r.first_stop], ["FAIL", true, "honoured late", "not honoured"], host + " " + e);
+      assert.ok(!re.test(r.why), r.why);
+    }
+    // (an exit before press 2 with no KeyboardInterrupt line for press 1, on the prompt: a negative endpoint)
+  }
+  const neg = judge("S3", { ...base, sends: [{ t: 1000 }, { t: 1500 }], exit: { code: null, signal: "SIGINT", t: 1400 } }, "prompt");
+  assert.deepEqual([neg.outcome, neg.malformed], ["INVALID", true]);
+  assert.match(neg.why, /came before press 2/);
+  // (a string press-2 time would coerce through the spacing as 500 ms: malformed, never the pinned signature)
+  const str = judge("S3", { ...base, sends: [{ t: 1000 }, { t: "1500" }], exit: { code: null, signal: "SIGINT", t: 1508 } });
+  assert.deepEqual([str.outcome, str.malformed], ["INVALID", true]);
+  assert.ok(!re.test(str.why));
+  // the full composition with the actual baselines: in-bound escalation pins KNOWN on the CLI; late never does, either host
+  assert.deepEqual(chain("S3", { ...base, sends: [{ t: 1000 }, { t: 1500 }], exit: { code: null, signal: "SIGINT", t: 1508 } }), ["FAIL", "KNOWN", false]);
+  assert.deepEqual(chain("S3", { ...base, sends: [{ t: 1000 }, { t: 1500 }], exit: { code: null, signal: "SIGINT", t: 1751 } }), ["FAIL", "FAIL", true]);
+  assert.deepEqual(chain("S3", { ...base, sends: [{ t: 1000 }, { t: 1500 }], exit: { code: null, signal: "SIGINT", t: 1751 } }, "prompt"), ["FAIL", "FAIL", true]);
 });
 
 test("baseline: S3 cli's entry pins only 'first Stop not honoured' (anchored); S4 cli's stays 'returned without a KeyboardInterrupt'", () => {

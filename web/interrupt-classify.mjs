@@ -47,7 +47,7 @@ export function classifyXK(t, xk) {
     if (base.outcome !== "PASS") return base;
     return { ...base, outcome: base.latency_raw_ms <= POLL_GAP_MS ? "PASS" : "EXCEPTION", exception: "XK", xk_bound_ms: Math.round(bound) };
   }
-  return { ...base, outcome: "FAIL", why: "harness bug: unknown XK kind " + xk.kind };
+  return malformed("an unknown XK kind " + JSON.stringify(xk.kind));
 }
 
 // an XK row (r5 §6.2): FAIL / INCOMPLETE as rowOutcome; then EXCEPTION only if the exception was
@@ -223,8 +223,10 @@ export function waiverErrors(records) {
 // INVALID, UNCALIBRATED or unknown; the leak measured and ok; and each late Stop inside the declared call's window,
 // with a valid bound: a declared call binds the case, it doesn't waive another phase of it)
 const lateInWindow = (t) => t.outcome === "FAIL" && t.late === true && !t.past_xk_bound && !t.malformed && t.xk_inside === true && Number.isFinite(t.xk_bound_ms) && t.xk_bound_ms > 0 && validTime(t.latency_raw_ms);
-export function withWaiver(row, outcome, waivers, call) {
+// (expected: the row's required cell count, from the caller; a shortened cells array is never inferred complete, S4)
+export function withWaiver(row, outcome, waivers, call, expected) {
   if (outcome !== "FAIL" || call == null) return { outcome };
+  if (!Number.isInteger(expected) || (row.trials ?? []).length !== expected) return { outcome };
   const w = (waivers ?? []).find((x) => x.scope?.case === row.case && x.scope?.host === row.host && x.scope?.call === call);
   const cells = row.trials ?? [];
   const fails = cells.filter((t) => t.outcome === "FAIL");

@@ -371,12 +371,12 @@ const ord = (lat: number) => `{ t_send: 0, marks: { ENTER: { t: 0, rest: "1" }, 
 const XS = 1024, EPS_XK = 2 ** -42;
 const xkw = (lat: number) => `{ t_send: ${XS}, marks: { ENTER: { t: 900, rest: "1" }, XSTART: { t: 1000 }, KI: { t: ${XS + lat}, rest: "2" } }, probe: "ok" }`;
 // the whole pipeline the matrix runs: classifyCell -> xkRowOutcome -> againstBaseline -> withWaiver
-const pipe = (trials: string[], o: { xk?: string; kase?: string; host?: string; baseline?: string; waivers?: string; call?: string; leak?: string } = {}) =>
+const pipe = (trials: string[], o: { xk?: string; kase?: string; host?: string; baseline?: string; waivers?: string; call?: string; leak?: string; expected?: number } = {}) =>
   run(`(() => { const xk = ${o.xk ?? "null"}; const cells = [${trials.join(",")}].map((t) => classifyCell(t, xk));
     const own = xkRowOutcome(cells, true, xk).outcome; const leak = ${o.leak ?? "{ ok: true }"};
     const row = { case: ${JSON.stringify(o.kase ?? "E13g")}, host: ${JSON.stringify(o.host ?? "cli")}, outcome: own, trials: cells, leak };
     const known = againstBaseline(row, ${o.baseline ?? "{ entries: [] }"});
-    return { own, known, ...withWaiver(row, known, ${o.waivers ?? "[]"}, ${o.call === undefined ? "undefined" : JSON.stringify(o.call)}), cells }; })()`);
+    return { own, known, ...withWaiver(row, known, ${o.waivers ?? "[]"}, ${o.call === undefined ? "undefined" : JSON.stringify(o.call)}, ${o.expected ?? trials.length}), cells }; })()`);
 const WIN = `{ kind: "window", R_ms: 4000 }`;
 
 test("Stop bound: STOP_BOUND_MS is 250 and POLL_GAP_MS stays 100; the gate passes 249 and 250, fails 251, 250 + eps, 10 s, and NaN, Infinity, negative or missing", () => {
@@ -535,18 +535,32 @@ test("R2: WAIVED needs every cell eligible, the leak measured and ok, and each l
   // (an unknown, retired SLOW cell beside the late one: rowOutcome fails it, the waiver mustn't hide it)
   const r = run(`(() => { const xk = ${WIN}; const cells = [classifyCell(${xkw(300)}, xk), { outcome: "SLOW", latency_ms: 20000 }];
     const own = xkRowOutcome(cells, true, xk).outcome; const row = { case: "E13g", host: "cli", outcome: own, trials: cells, leak: { ok: true } };
-    return withWaiver(row, againstBaseline(row, ${BROAD}), ${JSON.stringify([E13G])}, "_sbraster.render").outcome; })()`);
+    return withWaiver(row, againstBaseline(row, ${BROAD}), ${JSON.stringify([E13G])}, "_sbraster.render", 2).outcome; })()`);
   assert.equal(r, "FAIL");
   // (the leak not measured: null, undefined)
   assert.deepEqual(ci([xkw(300)], { ...ws, leak: "null" }), ["FAIL", "FAIL", null, true]);
   const u = run(`(() => { const xk = ${WIN}; const cells = [classifyCell(${xkw(300)}, xk)]; const row = { case: "E13g", host: "cli", outcome: "FAIL", trials: cells };
-    return withWaiver(row, "FAIL", ${JSON.stringify([E13G])}, "_sbraster.render").outcome; })()`);
+    return withWaiver(row, "FAIL", ${JSON.stringify([E13G])}, "_sbraster.render", 1).outcome; })()`);
   assert.equal(u, "FAIL");
   // (a Stop outside the render window: XEND before the send, a late KI: case, host and call match, the window doesn't)
   const outside = `{ t_send: ${XS}, marks: { ENTER: { t: 900 }, XSTART: { t: 950 }, XEND: { t: 1000 }, KI: { t: ${XS + 300}, rest: "2" } }, probe: "ok" }`;
   assert.deepEqual(run(`classifyXK(${outside}, ${WIN})`).xk_inside, false);
   assert.deepEqual(ci([outside], ws), ["FAIL", "FAIL", null, true]);
   // (and on its own: a late cell that carries a valid bound but is marked outside the window is never waived)
-  const out2 = run(`withWaiver({ case: "E13g", host: "cli", trials: [{ outcome: "FAIL", late: true, xk_inside: false, xk_bound_ms: 5000, latency_raw_ms: 300 }], leak: { ok: true } }, "FAIL", ${JSON.stringify([E13G])}, "_sbraster.render")`);
+  const out2 = run(`withWaiver({ case: "E13g", host: "cli", trials: [{ outcome: "FAIL", late: true, xk_inside: false, xk_bound_ms: 5000, latency_raw_ms: 300 }], leak: { ok: true } }, "FAIL", ${JSON.stringify([E13G])}, "_sbraster.render", 1)`);
   assert.equal(out2.outcome, "FAIL");
+});
+
+// ---- #225 r3 (astra2 S1 XK kind, S4)
+test("S4: the waiver checks the row's required cell count from the caller: a shortened cells array, or no count, is never waived", () => {
+  const ws = { xk: WIN, waivers: JSON.stringify([E13G]), call: "_sbraster.render" };
+  assert.deepEqual(ci([xkw(300), xkw(40)], { ...ws, expected: 2 }), ["FAIL", "WAIVED", E13G.id, false]); // (control)
+  assert.deepEqual(ci([xkw(300), xkw(40)], { ...ws, expected: 3 }), ["FAIL", "FAIL", null, true]); // one required cell missing
+  const none = run(`withWaiver({ case: "E13g", host: "cli", trials: [classifyCell(${xkw(300)}, ${WIN})], leak: { ok: true } }, "FAIL", ${JSON.stringify([E13G])}, "_sbraster.render")`);
+  assert.equal(none.outcome, "FAIL");
+});
+test("S1: an unknown XK kind is malformed evidence (INVALID), never a pinnable FAIL", () => {
+  const r = run(`classifyXK(${xkw(300)}, { kind: "sideways" })`);
+  assert.deepEqual([r.outcome, r.malformed], ["INVALID", true]);
+  assert.deepEqual(ci([xkw(300)], { xk: `{ kind: "sideways" }`, kase: "P1" }), ["INCOMPLETE", "INCOMPLETE", null, true]);
 });
