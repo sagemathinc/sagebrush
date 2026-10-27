@@ -10,7 +10,7 @@ use napi::{Error, Result};
 use napi_derive::napi;
 
 fn run<T: Send>(threads: Option<u32>, f: impl FnOnce() -> T + Send) -> T {
-    rayon::ThreadPoolBuilder::new().num_threads(threads.unwrap_or(0) as usize).build().unwrap().install(f)
+    sagebrush_par::install(threads.unwrap_or(0) as usize, f)
 }
 
 // JavaScript numbers are doubles: every integer argument is taken as one and

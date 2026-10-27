@@ -240,8 +240,15 @@ pub enum HostAnswer {
     NotAsked,
 }
 
+/// The native host: its answer, and whether this thread may ask it at all
+/// (published together, in the one registration that stands).  `may_ask`
+/// false means the answer here would be NotAsked, so a refresh on this
+/// thread could change nothing (C-2c-i hot path, scope r3 section 1).
 #[cfg(not(target_arch = "wasm32"))]
-type TotalHost = Box<dyn Fn() -> HostAnswer + Send + Sync>;
+struct TotalHost {
+    answer: Box<dyn Fn() -> HostAnswer + Send + Sync>,
+    may_ask: fn() -> bool,
+}
 #[cfg(not(target_arch = "wasm32"))]
 static TOTAL_HOST: std::sync::OnceLock<TotalHost> = std::sync::OnceLock::new();
 /// (the native host's TOTAL, a limit, not a usage, is asked again when 100
@@ -253,7 +260,17 @@ const TOTAL_REFRESH: std::time::Duration = std::time::Duration::from_millis(100)
 /// registration stands): asked outside the ledger's lock.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn set_total_host(f: impl Fn() -> HostAnswer + Send + Sync + 'static) {
-    let _ = TOTAL_HOST.set(Box::new(f));
+    set_total_host_asking(f, || true);
+}
+
+/// Register the native host's total with its `may_ask` predicate: true on a
+/// thread where `f` would ask its source, false where it would answer
+/// NotAsked.  It runs outside the ledger's lock, so it must be a plain
+/// thread-local read (no lock, no host code).  The first registration of
+/// either kind stands.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn set_total_host_asking(f: impl Fn() -> HostAnswer + Send + Sync + 'static, may_ask: fn() -> bool) {
+    let _ = TOTAL_HOST.set(TotalHost { answer: Box::new(f), may_ask });
 }
 
 /// Take the native host's answer.
@@ -273,7 +290,7 @@ pub fn total() -> Total {
     if let Some(host) = TOTAL_HOST.get() {
         let stale = state().total_at.is_none_or(|t| t.elapsed() >= TOTAL_REFRESH);
         if stale {
-            apply_host_answer(host());
+            apply_host_answer((host.answer)());
         }
     }
     state().total.unwrap_or(NOMINAL)
@@ -573,11 +590,93 @@ static NEXT_CHAIN: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
     static CHAIN: Cell<u64> = const { Cell::new(0) };
+    /// exclusive mode (no-cliffs C r8 section 2): every parallel entry runs
+    /// sequentially on its calling thread while it is set
+    static EXCLUSIVE: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The current thread's chain (0: no outer entry).
 pub fn current_chain() -> u64 {
     CHAIN.with(|c| c.get())
+}
+
+/// Whether this thread runs in exclusive mode (C r8 section 2: the wrapper
+/// in sagebrush-par then runs every parallel entry sequentially here).
+pub fn is_exclusive() -> bool {
+    EXCLUSIVE.with(|e| e.get())
+}
+
+/// What a parallel closure inherits from the thread that spawned it
+/// (no-cliffs C-2c scope r2 section 1.2): its chain and the exclusive flag.
+/// Identity only: never an asking call or an operation, whose thread-bound
+/// guards stay on the owner thread.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Context {
+    pub chain: u64,
+    pub exclusive: bool,
+}
+
+impl Context {
+    /// This thread's context.
+    pub fn current() -> Context {
+        Context { chain: current_chain(), exclusive: is_exclusive() }
+    }
+
+    /// Install this context on the current thread until the guard drops;
+    /// the thread's previous context then comes back, on success, error,
+    /// panic or Stop alike (a reused pool thread keeps nothing).  Entering
+    /// the context already installed writes nothing (the parallel wrapper
+    /// does it per item, millions of times in one call); the guard still
+    /// restores on drop, in any drop order.
+    pub fn enter(self) -> ContextGuard {
+        let prev = Context::current();
+        if prev != self {
+            CHAIN.with(|c| c.set(self.chain));
+            EXCLUSIVE.with(|e| e.set(self.exclusive));
+        }
+        ContextGuard { prev, _thread: ThreadBound::default() }
+    }
+}
+
+/// The guard of [`Context::enter`]: restores the previous context when
+/// dropped.  Thread-bound (neither Send nor Sync).
+#[must_use = "the context is restored as soon as the guard is dropped"]
+pub struct ContextGuard {
+    prev: Context,
+    _thread: ThreadBound,
+}
+
+impl Drop for ContextGuard {
+    fn drop(&mut self) {
+        // (the thread ends at `prev` whatever happened in between: written
+        // only when it isn't there already)
+        if Context::current() != self.prev {
+            CHAIN.with(|c| c.set(self.prev.chain));
+            EXCLUSIVE.with(|e| e.set(self.prev.exclusive));
+        }
+    }
+}
+
+/// Refresh a stale total where this thread may ask the host's source (C-2c
+/// scope r2 section 2.3): the parallel wrapper calls it before handing work
+/// out.  The host alone decides whether this thread is the asking owner (the
+/// Python host answers NotAsked on any other thread, so a worker refreshes
+/// nothing and never moves the total's age); the source runs outside the
+/// ledger's lock, as for any admission.
+///
+/// Where it could change nothing it returns at once, without the lock (the
+/// parallel wrapper calls it on every entry, ~10^4 times in one modsym call):
+/// with no native host the read was all it did, and on a thread whose
+/// `may_ask` is false the host's answer would be NotAsked.  Anywhere else it
+/// is `total()`, unchanged: an owner refreshes exactly as before.
+pub fn refresh_if_owner() {
+    #[cfg(not(target_arch = "wasm32"))]
+    match TOTAL_HOST.get() {
+        None => return,
+        Some(host) if !(host.may_ask)() => return,
+        Some(_) => {}
+    }
+    let _ = total();
 }
 
 /// Run f under a given chain (a parallel closure runs under its parent's).
