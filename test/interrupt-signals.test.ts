@@ -296,7 +296,7 @@ const j = await TRIALS.S3.judge(r, "cli");
 console.log(JSON.stringify({ sends: r.sends, exit: r.exit, end: r.end, j }));`;
     const p = spawnSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8", env: { ...process.env, SB_LAUNCHER: fake, SCENARIO: scenario }, timeout: 30000 });
     assert.equal(p.status, 0, p.stderr);
-    return JSON.parse(p.stdout.trim().split("\n").at(-1));
+    return JSON.parse(p.stdout.trim().split("\n").at(-1) ?? "");
   };
   // (honoured: press 1's exit, then finish 200 ms after close, before press 2's due time: runProc records it cancelled)
   const h = play("honoured");
