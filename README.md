@@ -192,6 +192,9 @@ the JavaScript engine's own garbage collection, which can't be interrupted
 William, Oct 25 2026). Sagebrush's own code still checks for Stop at least
 every 250 ms; the exception covers only engine garbage-collection pauses
 longer than that.
+For now, rendering a plot to PNG in the command-line host can't be stopped
+mid-render: Stop takes effect once the render finishes. This lifts when
+interruptible rendering lands.
 
 Files: pyjs has no reference counting, so a file object isn't closed when
 its last reference goes. `with open(...)` or `.close()` is the portable form.
