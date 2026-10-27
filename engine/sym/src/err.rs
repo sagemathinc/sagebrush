@@ -12,6 +12,10 @@ pub enum SymError {
     Value(String),
     /// Not implemented (yet).
     NotImplemented(String),
+    /// A failed proved invariant below (the factoring engine's internal
+    /// error, with its message): a bug to report, raised as RuntimeError,
+    /// never a resource limit or an unfactored result.
+    Internal(String),
 }
 
 impl fmt::Display for SymError {
@@ -20,6 +24,7 @@ impl fmt::Display for SymError {
             SymError::DivisionByZero => write!(f, "Symbolic division by zero"),
             SymError::Value(s) => write!(f, "{}", s),
             SymError::NotImplemented(s) => write!(f, "{}", s),
+            SymError::Internal(s) => write!(f, "{}", s),
         }
     }
 }
@@ -95,6 +100,7 @@ pub fn install_quiet_hook() {
                         SymError::DivisionByZero => "ZeroDivisionError",
                         SymError::Value(_) => "ValueError",
                         SymError::NotImplemented(_) => "NotImplementedError",
+                        SymError::Internal(_) => "RuntimeError",
                     };
                     if let Ok(mut l) = LAST.try_lock() {
                         *l = Some((kind.to_string(), e.to_string()));

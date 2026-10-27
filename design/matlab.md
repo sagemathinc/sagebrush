@@ -214,12 +214,31 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
     - a diagonal one row by row;
     - one of small bandwidth by a banded LU, in LAPACK's band storage;
     - any other by a sparse LU (left-looking, partial pivoting that
-      prefers the diagonal).
+      prefers the diagonal) of its columns in a fill-reducing order: an
+      approximate minimum degree ordering of A'*A's structure, internal
+      (lib/_matlab_colamd.py, from the published papers only; there is no
+      public `colamd` or `symamd` yet).
 
-    There is no fill-reducing column ordering, as UMFPACK has. So a matrix
-    whose factors fill in too far is refused with `MATLAB:nomem`, rather
-    than run for minutes. `condest` of a large sparse matrix uses the same
-    LU.
+    The LU has no size or work cap: memory is its only bound. It reserves
+    the memory of each step before allocating it, and when the session's
+    memory can't hold the factors it stops with Sagebrush's memory message
+    (`MATLAB:nomem`), saying how much it needs. Stop interrupts it at any
+    point. The opt-in limit `matlab.lu_work` (unlimited by default) bounds
+    its work, for a context that wants one. `condest` and `eigs` (with a
+    shift) of a large sparse matrix use the same LU.
+
+    In the browser, for now, the session's JavaScript memory can't be
+    measured (its capacity figure covers only the engine's), so there the
+    LU is still the one before this change: no column ordering, refused with
+    `MATLAB:nomem` past its fixed fill and work caps. That stays until the
+    browser reports a figure for its JavaScript memory.
+
+    With several GB of arrays in memory, Stop can lag about 0.1 s per GB:
+    that is the JavaScript engine's own garbage collection, which can't be
+    interrupted ("with several GB of arrays in memory, Stop can lag about
+    0.1 s per GB", William, Oct 25 2026). Sagebrush's own code still checks
+    for Stop at least every 25 ms; the exception covers only the engine's
+    garbage-collection pauses.
   - Every other function sees the full matrix a sparse one stands for. The
     first sparse matrix a program makes wraps the built-ins for this, so
     programs without one pay nothing. Those MATLAB keeps sparse convert

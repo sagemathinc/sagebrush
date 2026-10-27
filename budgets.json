@@ -59,6 +59,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/matlab-lu.src": {
+   "exact": false,
+   "ceiling": 52360,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/matlab-more.src": {
    "exact": false,
    "ceiling": 288570,
@@ -535,6 +542,7 @@
    "engine/lib/magma-more.src": 146512,
    "engine/lib/magma.pre": 2889506,
    "engine/lib/magma.src": 553791,
+   "engine/lib/matlab-lu.src": 47600,
    "engine/lib/matlab-more.src": 262337,
    "engine/lib/matlab.pre": 5400429,
    "engine/lib/matlab.src": 1069005,

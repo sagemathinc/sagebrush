@@ -34,27 +34,70 @@ async function api(method: string, path: string, body?: unknown): Promise<any> {
 
 const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 
+/** A file to upload, read only when its turn comes (share-ux-plan r2 §1). */
+export interface LazyFile {
+  path: string;
+  /** its size, if known beforehand (for the progress) */
+  size?: number;
+  /** its bytes; may throw (the file changed: the upload stops, and no version is created) */
+  read: () => Promise<Uint8Array>;
+}
+
+/** Bytes read and hashed before the server is asked which of them it is missing. */
+export const UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
+
 /**
  * Upload files as a new version of a collection (a new collection if `id`
- * is null).  `progress(done, total)` counts bytes uploaded.
+ * is null).  Each file is read once, in order; a batch of at most
+ * `batchBytes` (or one larger file) is hashed, the server says which of it
+ * it is missing, those are uploaded, and the batch's bytes are dropped.  The
+ * batch is sent *before* the next file is read whenever that file, by its
+ * listed size, would take the batch over `batchBytes`, or its size isn't
+ * known (#172 r2's review, LIMIT-SHAREB-1): so at most max(batchBytes, the
+ * largest file) is held at a time, by listed sizes (a file that grew since it
+ * was listed counts as read).  The version
+ * is created only after every file was read and uploaded: a file that can't
+ * be read stops the upload with no version.  `progress(done, total)` counts
+ * bytes read (total: the files' known sizes).
  */
 export async function uploadCollection(
-  o: { id: string | null; title: string; license?: string; files: { path: string; data: Uint8Array }[] },
+  o: { id: string | null; title: string; license?: string; files: LazyFile[] },
   progress: (done: number, total: number) => void = () => {},
+  opts: { batchBytes?: number } = {},
 ): Promise<{ id: string; version: string; url: string; frozen: string }> {
-  const files = await Promise.all(o.files.map(async (f) => ({ ...f, sha256: hex(await crypto.subtle.digest("SHA-256", f.data)), size: f.data.length })));
+  const limit = opts.batchBytes ?? UPLOAD_BATCH_BYTES;
+  const total = o.files.reduce((s, f) => s + (f.size ?? 0), 0);
   const id = o.id ?? (await api("POST", "/api/share/collections", { title: o.title })).id;
-  const { missing } = await api("POST", "/api/share/check", { blobs: files.map(({ sha256, size }) => ({ sha256, size })) });
-  const todo = files.filter((f, i) => missing.includes(f.sha256) && files.findIndex((g) => g.sha256 === f.sha256) === i);
-  const total = todo.reduce((s, f) => s + f.size, 0);
+  const manifest: { path: string; sha256: string; size: number }[] = [];
+  const sent = new Set<string>();
   let done = 0;
   progress(0, total);
-  for (const f of todo) {
-    const r = await fetch(`/api/share/blob/${f.sha256}`, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/octet-stream" }, body: f.data });
-    if (!r.ok) throw new Error(`${f.path}: ${(await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`}`);
-    done += f.size;
-    progress(done, total);
+  let batch: { path: string; data: Uint8Array; sha256: string }[] = [];
+  let held = 0;
+  const flush = async () => {
+    if (!batch.length) return;
+    const { missing } = await api("POST", "/api/share/check", { blobs: batch.map((f) => ({ sha256: f.sha256, size: f.data.length })) });
+    for (const f of batch) {
+      if (!missing.includes(f.sha256) || sent.has(f.sha256)) continue;
+      const r = await fetch(`/api/share/blob/${f.sha256}`, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/octet-stream" }, body: f.data as BufferSource });
+      if (!r.ok) throw new Error(`${f.path}: ${(await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`}`);
+      sent.add(f.sha256);
+    }
+    batch = [];
+    held = 0;
+  };
+  for (const f of o.files) {
+    if (held && (f.size === undefined || held + f.size > limit)) await flush();
+    const data = await f.read();
+    const sha256 = hex(await crypto.subtle.digest("SHA-256", data as BufferSource));
+    manifest.push({ path: f.path, sha256, size: data.length });
+    if (held && held + data.length > limit) await flush();
+    batch.push({ path: f.path, data, sha256 });
+    held += data.length;
+    done += f.size ?? data.length;
+    progress(Math.min(done, total || done), total || done);
   }
-  const v = await api("POST", `/api/share/collections/${id}/versions`, { title: o.title, license: o.license || undefined, files: files.map(({ path, sha256, size }) => ({ path, sha256, size })) });
+  await flush();
+  const v = await api("POST", `/api/share/collections/${id}/versions`, { title: o.title, license: o.license || undefined, files: manifest });
   return { id, version: v.version, url: new URL(v.url, location.href).href, frozen: new URL(v.frozen, location.href).href };
 }

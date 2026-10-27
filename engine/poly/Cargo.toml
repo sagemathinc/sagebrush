@@ -12,6 +12,17 @@ num-integer = "0.1"
 num-traits = "0.2"
 
 
+[features]
+# Tests of other crates inject the recombination faults (vanhoeij::fault):
+# never enabled in a build that ships (dev-dependencies only)
+test-faults = []
+
 [dev-dependencies]
 # (tests only: Stop at a chosen check of a named site, tests/binomial_stop.rs)
 sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
+
+# The transition gate's bench (rank-3 plan r3 section 5): it drives Stage 1's
+# exits through the recombination hooks, so it builds only with them
+[[example]]
+name = "transition_bench"
+required-features = ["test-faults"]

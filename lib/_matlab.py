@@ -150,6 +150,9 @@ def _identifier(e):
         return e.identifier
     if isinstance(e, NameError):
         return "MATLAB:UndefinedFunction"
+    if isinstance(e, MemoryError):
+        # (a memory guard's refusal, or the session's own: MATLAB's out of memory)
+        return "MATLAB:nomem"
     return ""
 
 
