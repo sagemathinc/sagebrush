@@ -942,6 +942,32 @@ try {
       await closeDialog();
     });
 
+    // D9 (astra3's r2 note 2): a store that can't be read stops the upload, at either re-read; it is never taken for no storage
+    await block("D9a", async () => {
+      await fresh("D9a");
+      const n = await mine();
+      await openDialog();
+      await recordSent();
+      await ev("(() => { const st = window.sagebrush.notebook.store; st.load = () => Promise.reject(new Error('disk')); })()");
+      const f9 = await shareNow("D9a");
+      await ev("delete window.sagebrush.notebook.store.load");
+      await restore();
+      ok(/couldn't be read/.test(f9) && (await ev("window.__attempts.length")) === 0 && (await mine()) === n, `D9a the store unreadable after the awaited save (which succeeded): nothing is sent, no share made: ${f9}`);
+      await closeDialog();
+    });
+    await block("D9b", async () => {
+      await fresh("D9b");
+      const n = await mine();
+      await openDialog();
+      await recordSent();
+      await ev(`(() => { const f = window.fetch; let once = false; window.fetch = async (u, o) => { if (!once && String(u).endsWith("/api/share/check")) { once = true; window.sagebrush.notebook.store.load = () => Promise.reject(new Error("disk")); } return f(u, o); }; })()`);
+      const f9 = await shareNow("D9b");
+      await ev("delete window.sagebrush.notebook.store.load");
+      await restore();
+      ok(/couldn't be read/.test(f9) && (await ev("window.__attempts.length")) === 0 && (await mine()) === n, `D9b the store unreadable just before the share request: it isn't sent, no share made: ${f9}`);
+      await closeDialog();
+    });
+
     // D2 (last: it crashes the page): the answer lost, the page crashed at once, then a reload (with another
     // writer's attempt merged by the awaited save, astra3's L1: the kept attempt is the one sent and kept)
     await block("D2", async () => {
@@ -977,7 +1003,48 @@ try {
     const id2 = await q.ev("window.sagebrush.notebook.snapshot().share_id ?? null");
     const n2b = await q.ev("(async () => (await (await fetch('/api/share/mine')).json()).collections.length)()");
     ok(made2?.collection && made2.sent === "dddddddddddddddddddddddddddddddd" && att2 === "dddddddddddddddddddddddddddddddd" && id2 === made2.collection && n2b === n2 + 1, `D2 (sent ${made2?.sent?.slice(0, 6)}…, kept ${att2?.slice(0, 6)}…) the answer lost, the page crashed at once, a reload, the same upload: one share, the one the lost answer made (attempt kept: ${!!att2}, share ${id2} vs ${made2?.collection}, shares +${n2b - n2})`);
-    }, 150_000);
+      // D8 (astra3's r2 note 1), in the reloaded page: another device's attempt saved AFTER the final store read,
+      // as the share request goes; the answer lost; a crash; a reload; the retry sends this device's recorded
+      // attempt, so the share that request made is found, never a second one
+      await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#sharedlg').close()");
+      await q.ev("document.querySelector('#filemenu [data-f=new]').click()");
+      await q.until("document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value && !window.sagebrush.notebook.snapshot().share_id");
+      await q.ev(`(() => { const c = document.querySelector('.cell'); const ta = c.querySelector('textarea'); ta.value = 'T = 8  # D8 ${Date.now()}'; ta.dispatchEvent(new Event('input', {bubbles: true})); })()`);
+      await sleep(700);
+      const n8 = await q.ev("(async () => (await (await fetch('/api/share/mine')).json()).collections.length)()");
+      const other = "f".repeat(32);
+      await q.ev(`(() => { const f = window.fetch; window.__made = null; window.fetch = async (u, o) => {
+        if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") {
+          const id = localStorage.getItem('sagebrush-current');
+          const db = await new Promise((ok, no) => { const r = indexedDB.open('sagebrush'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+          await new Promise((ok, no) => { const tx = db.transaction('notebooks', 'readwrite'), st = tx.objectStore('notebooks'); const g = st.get(id); g.onsuccess = () => st.put({ ...g.result, share_attempt: '${other}', rev: (g.result.rev ?? 0) + 1, updated: Date.now() }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+          db.close();
+          const r = await f(u, o); window.__made = { ...(await r.json()), sent: JSON.parse(o.body).attempt }; return new Promise(() => {});
+        }
+        return f(u, o); }; })()`);
+      await q.ev("document.querySelector('#sharemenu').click()");
+      await q.until("document.querySelector('#sharedlg').open && !!window.sagebrush.share.selection && document.querySelectorAll('#sharelist .sharerow').length > 0", 60000);
+      await q.until("!window.sagebrush.share.analyzing && /^(Checked|Found no|Stopped|The notebook's interpreter didn't answer)/.test(document.querySelector('#sharestatus').textContent)", 60000).catch(() => {});
+      await q.ev("document.querySelector('#sharetitlein').value = 'D8'; document.querySelector('#shareupload').click()");
+      await q.until("!!window.__made", 60000);
+      const made8 = await q.ev("window.__made");
+      void q.send("Page.crash");
+      await sleep(1000);
+      const q2 = await newPage();
+      await q2.send("Page.navigate", { url: dev.site + "/" });
+      await q2.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+      const stored8 = await q2.ev("window.sagebrush.notebook.snapshot().share_attempt ?? null");
+      await q2.ev(`(() => { const f = window.fetch; window.__attempts = []; window.fetch = async (u, o) => { if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") window.__attempts.push(JSON.parse(o.body).attempt); return f(u, o); }; })()`);
+      await q2.ev("document.querySelector('#sharemenu').click()");
+      await q2.until("document.querySelector('#sharedlg').open && !!window.sagebrush.share.selection && document.querySelectorAll('#sharelist .sharerow').length > 0", 60000);
+      await q2.until("!window.sagebrush.share.analyzing && /^(Checked|Found no|Stopped|The notebook's interpreter didn't answer)/.test(document.querySelector('#sharestatus').textContent)", 60000).catch(() => {});
+      await q2.ev("document.querySelector('#sharetitlein').value = 'D8'; document.querySelector('#shareresult').textContent = ''; document.querySelector('#shareupload').click()");
+      await q2.until("document.querySelector('#shareresult a') || /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
+      const id8 = await q2.ev("window.sagebrush.notebook.snapshot().share_id ?? null");
+      const sent8 = await q2.ev("window.__attempts");
+      const n8b = await q2.ev("(async () => (await (await fetch('/api/share/mine')).json()).collections.length)()");
+      ok(made8?.collection && stored8 === other && sent8.length === 1 && sent8[0] === made8.sent && id8 === made8.collection && n8b === n8 + 1, `D8 another device's attempt saved as the share request went, the answer lost, a crash, a reload: the store held the other attempt (${stored8?.slice(0, 6)}…), yet the retry sent this device's recorded one (${sent8.map((x) => x.slice(0, 6)).join()} vs ${made8?.sent?.slice(0, 6)}), and found its share (${id8} vs ${made8?.collection}; shares +${n8b - n8})`);
+    }, 300_000);
   }
 
 
