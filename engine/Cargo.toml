@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["interrupt", "ledger", "par", "bigint", "ball", "arith", "mpoly", "group", "galois", "sym", "modsym", "hmf", "ap", "poly", "classgroup", "flint", "oracle", "cli", "py", "wasm", "node", "web", "raster", "growth-probe"]
+members = ["interrupt", "ledger", "par", "bigint", "ball", "arith", "mpoly", "group", "galois", "sym", "modsym", "hmf", "ap", "poly", "classgroup", "flint", "oracle", "cli", "py", "node", "web", "raster", "growth-probe"]
 
 # Unsafe code is the trusted boundary of the engine ledger's safe-Rust proof
 # (no-cliffs C-2c-ii scope r4 section 1.3): denied everywhere; each existing
