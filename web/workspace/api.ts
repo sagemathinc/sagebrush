@@ -28,6 +28,7 @@ import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInf
 import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeLocal, writeOpfs, type Held, type Place, type ResetKind, type State, type Witness } from "./witness";
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
 import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE } from "../notebook/stores.js";
+import { dropRows } from "../notebook/journal-rows.js";
 import { isBoard } from "../board/doc";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
@@ -143,6 +144,15 @@ export const PRUNE_STEP = 1;
 export const LIMITS: Limits = { maxFileBytes: 200 * 2 ** 20, maxBoardBytes: 64 * 2 ** 20, maxEntries: 100_000, maxFolderEntries: 10_000, maxVersions: 20, maxVersionAgeMs: 30 * 864e5, maxVersionBytes: 2 ** 30 };
 
 export type WorkspaceErrorCode = "invalid" | "exists" | "missing" | "conflict" | "limit" | "storage" | "quarantined" | "busy";
+/** The kinds of document whose saves go through the journal once it is active (plan-sync-slice2-client r4 §1a). */
+export const JOURNAL_KINDS = ["notebooks", "boards"] as const;
+const journalWriters = new Set<string>();
+/** This build saves documents of `kind` through the journal (web/notebook/journal.js for notebooks; boards' in 2c-1b):
+ * activateJournal is refused until every kind has said so. */
+export function registerJournalWriter(kind: (typeof JOURNAL_KINDS)[number]): void {
+  if (!(JOURNAL_KINDS as readonly string[]).includes(kind)) throw new TypeError(`no journal writer of kind ${String(kind)}`);
+  journalWriters.add(kind);
+}
 export class WorkspaceError extends Error {
   constructor(public code: WorkspaceErrorCode, message: string, public current?: unknown) { super(message); }
 }
@@ -507,6 +517,10 @@ export class Workspace {
    * stop at any step (the tab closed, a fence that can't be written) leaves it begun, and the next write of the
    * fences carries it on.  Refused while the workspace is quarantined.  Resolves whether it is active. */
   async activateJournal(): Promise<boolean> {
+    // (one way, and for both kinds of document at once: not until this build's boards save through the journal too
+    // (board's ask; 2c-1b registers it), so no activation can leave boards' saves refused)
+    const missing = JOURNAL_KINDS.filter((k) => !journalWriters.has(k));
+    if (missing.length) throw new Error(`the journal can't be turned on yet: ${missing.join(" and ")} don't save through it in this version`);
     return this.locked(async () => {
       await inTx(this.ws, "meta", "readwrite", async (tx) => {
         const st = tx.objectStore("meta"), j = (await req(st.get("journal"))) as JournalState | undefined;
@@ -1807,7 +1821,10 @@ export class Workspace {
       try {
         if (e.kind === "notebook") {
           await this.mainTx("notebooks", "readwrite", (st) => st.delete(e.ref!));
-          if (hdb) await inTx(hdb, "history", "readwrite", async (tx) => { tx.objectStore("history").delete(IDBKeyRange.bound([e.ref, -Infinity], [e.ref, Infinity])); });
+          // (its versions, and its journal's rows with their charges, in one transaction: web/notebook/journal-rows.js.
+          // Its versions' keys are [id, patch id], a string: [id, -Infinity] up to [id, []], an array, takes every key
+          // of its, whatever the type of the second part (numbers, dates, strings, binary, in that order, then arrays))
+          if (hdb) await inTx(hdb, "history", "readwrite", async (tx) => { const st = tx.objectStore("history"); st.delete(IDBKeyRange.bound([e.ref, -Infinity], [e.ref, []])); await dropRows(st, e.ref!); });
         } else if (e.kind === "board") {
           await inTx(this.ws, "boards", "readwrite", async (tx) => { tx.objectStore("boards").delete(e.ref!); });
           // (its TimeTravel: by the board's source, "board:local:<id>", with its name in this browser after it)

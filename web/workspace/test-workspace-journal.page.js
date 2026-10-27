@@ -116,6 +116,21 @@ async function beforeActivation() {
   w.close();
 }
 
+async function gated() {
+  // (activation waits for both kinds of document to save through the journal in this build: refused, nothing written,
+  // until boards' writer says so (2c-1b); the tests below then register both, as this build's pages will)
+  const o = await named(), w = await open(o);
+  const f0 = await fences(w), m0 = J(await meta(w, "journal"));
+  const why = await w.activateJournal().then(() => null, (e) => e?.message ?? String(e));
+  check(why !== null && /boards/.test(why) && J(await fences(w)) === J(f0) && J(await meta(w, "journal")) === m0 && (await w.journalActive()) === false, "activateJournal is refused while no board journal writer is registered, and writes nothing: " + why);
+  W.registerJournalWriter("notebooks");
+  const why2 = await w.activateJournal().then(() => null, (e) => e?.message ?? String(e));
+  check(why2 !== null && /boards/.test(why2) && !/notebooks/.test(why2) && J(await meta(w, "journal")) === m0, "…with only notebooks', still refused: " + why2);
+  check((() => { try { W.registerJournalWriter("files"); return false; } catch { return true; } })(), "…and a kind that isn't one is refused");
+  W.registerJournalWriter("boards");
+  w.close();
+}
+
 async function activation() {
   const o = await named(), w = await open(o);
   const f0 = await fences(w);
@@ -338,7 +353,7 @@ async function storeUnopened() {
   w.close();
 }
 
-const CASES = [upgradeAndOldBuilds, beforeActivation, activation, writersRefused, refusalRule, keptByLaterWrites, stopsCarriedOn, blockedFence, markAdopted, resetKeepsMeta, storeUnopened];
+const CASES = [gated, upgradeAndOldBuilds, beforeActivation, activation, writersRefused, refusalRule, keptByLaterWrites, stopsCarriedOn, blockedFence, markAdopted, resetKeepsMeta, storeUnopened];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
