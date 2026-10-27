@@ -144,11 +144,35 @@ fn guarded<T>(f: impl FnOnce() -> Result<T, Fail> + std::panic::UnwindSafe) -> R
     })
 }
 
+/// The kill pipe's watchdog (#157 r6 S2.3, r7 T4): when the parent gave
+/// the kill pipe's read end as fd 3, a thread blocked on it ends the process
+/// at once on a byte or on EOF (the parent closing it, or exiting): an end
+/// identity-bound to this process, needing no signal and no pid.  Its stack
+/// is small (64 KiB), inside the launch footprint the parent charges.  fd 4,
+/// the life pipe's write end, is simply kept open until the process exits.
+#[cfg(unix)]
+fn start_watchdog() {
+    if unsafe { libc::fcntl(3, libc::F_GETFD) } < 0 {
+        return;
+    }
+    let _ = std::thread::Builder::new().name("sagebrush-raster-watchdog".into()).stack_size(64 * 1024).spawn(|| {
+        let mut b = [0u8; 1];
+        loop {
+            let n = unsafe { libc::read(3, b.as_mut_ptr() as *mut libc::c_void, 1) };
+            if n < 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            unsafe { libc::_exit(137) };
+        }
+    });
+}
+
 /// The loop on the process's standard input and output.
 pub fn main() -> ! {
     #[cfg(unix)]
     {
         use std::os::fd::FromRawFd;
+        start_watchdog();
         // (the descriptors themselves: std's stdout is line-buffered, and
         // its stdin buffered, which a binary stream doesn't want)
         let (input, out) = unsafe { (std::fs::File::from_raw_fd(0), std::fs::File::from_raw_fd(1)) };

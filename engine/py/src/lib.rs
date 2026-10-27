@@ -3,6 +3,7 @@
 //! also uses `threads` worker threads (0 = all cores).  Invalid arguments
 //! raise ValueError; Ctrl-C raises KeyboardInterrupt (see `guarded`).
 
+mod child;
 mod guard;
 use sagebrush_modsym::exact::Exact;
 use pyo3::exceptions::{PyKeyboardInterrupt, PyValueError};
@@ -796,6 +797,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     raster.add_function(wrap_pyfunction!(guard::locked_call, &raster)?)?;
     raster.add_function(wrap_pyfunction!(guard::locked_call_counts, &raster)?)?;
     raster.add_class::<guard::ReleaseLog>()?;
+    #[cfg(unix)]
+    child::register(&raster)?;
     m.add_submodule(&raster)?;
     m.add_function(wrap_pyfunction!(set_memory_share_source, m)?)?;
     m.add_function(wrap_pyfunction!(set_memory_total_source, m)?)?;
