@@ -54,6 +54,18 @@ export function xkRowOutcome(cells, leakOk, xk) {
   return { outcome: "FIXED", why: "stale exception: every cell PASS; remove the case's xk field" };
 }
 
+// a leak CONTROL row (a case with expect_leak: a deliberate retention per repeat): the leak check
+// must catch it, every run, or the row FAILs; when it does, the row is judged on its cells alone.
+// A worker that outlived its kill is never excused by the control.  (#217: the settled sample can't
+// read a real leak lower than it is; this keeps that proven on the real runtime in CI)
+export function leakControlOutcome(cells, leak, xk) {
+  if (leak == null) return { outcome: "INCOMPLETE", why: "leak control: the leak series was not measured" };
+  if (leak.survived_kill) return { outcome: "FAIL", why: "leak control: a worker survived its kill" };
+  if (leak.ok !== false) return { outcome: "FAIL", why: `leak control: the deliberate leak was NOT caught (growth ${leak.growth_kb} KB, allowed ${leak.allowed_kb} KB)` };
+  const r = xkRowOutcome(cells, true, xk);
+  return { ...r, why: r.why ?? `leak control: caught (growth ${leak.growth_kb} KB > allowed ${leak.allowed_kb} KB)` };
+}
+
 export function classify(t) {
   // a Stop that could not be dispatched (the process gone, EPERM...): the cell is uncovered, never a
   // result, and the error is kept (astra CORR-168-R2-1)
