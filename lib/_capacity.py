@@ -25,6 +25,9 @@ plan-d-memory-message-r3 §1d, amended by plan-d0-capacity-r2 §0:
 - engine_total(): the constrained total of the engine's own memory domain
   (the engine ledger's base, no-cliffs plan C r10 section 1), with its
   status: observed, zero (kept as 0) or nominal.
+- engine_totals(): the same by row extent (no-cliffs C r16b): the rows
+  bounding one WebAssembly memory's address space, which retired engine
+  instances don't occupy, and the shared rows, on which they count.
 - poly_share(): the one route that does follow free memory: the default
   budget of a polynomial factorization, floor(effective_guard_bytes / 2),
   or a quarter of what is free when that is more (a small session),
@@ -81,14 +84,14 @@ _src = _Sources()
 def _set_sources(**kw):
     """Tests only: replace the sources (keyword names as in _Sources);
     _set_sources() restores the real ones."""
-    global _src, _poly_snap, _total_snap, _engine_snap, _rows_snap, _cg_dirs, _api
+    global _src, _poly_snap, _total_snap, _engine_snap, _totals_snap, _rows_snap, _cg_dirs, _api
     _src = _Sources()
     _api = {}
     for k, v in kw.items():
         if not hasattr(_Sources, k):
             raise TypeError("no source %r" % k)
         setattr(_src, k, v)
-    _poly_snap = _total_snap = _engine_snap = _rows_snap = _cg_dirs = None
+    _poly_snap = _total_snap = _engine_snap = _totals_snap = _rows_snap = _cg_dirs = None
 
 
 try:
@@ -498,7 +501,10 @@ def _runtime_parts():
     none: it can never widen capacity()["domains"].  Each tuple carries a
     sixth item, True when the part named a constrained domain this module
     doesn't know: it is dropped from the list, but engine_rows must not
-    read the rest as engine-only."""
+    read the rest as engine-only.  A seventh item is the part's extent
+    (no-cliffs C r16b section 3.1): "instance" when the part declares that
+    it bounds one WebAssembly memory's address space (its sixth field,
+    only the runtime's own wasm engine part), else "shared"."""
     if _src.runtime is not None:
         parts = list(_src.runtime())
     elif not hasattr(_sys, "_sagebrush_heap_limit"):
@@ -512,11 +518,12 @@ def _runtime_parts():
     out = []
     for p in parts:
         p = tuple(p)
+        extent = "instance" if len(p) >= 6 and p[5] == "instance" else "shared"
         if len(p) >= 5:
             out.append((p[0], p[1], p[2], [d for d in DOMAINS if d in p[3]], [d for d in DOMAINS if d in p[4]],
-                        any(d not in DOMAINS for d in p[4])))
+                        any(d not in DOMAINS for d in p[4]), extent))
         else:
-            out.append((p[0], p[1], p[2], [], [], False))
+            out.append((p[0], p[1], p[2], [], [], False, "shared"))
     return out
 
 
@@ -625,6 +632,50 @@ def engine_total():
 _engine_snap = None
 
 
+def engine_totals():
+    """The engine's totals by row extent (no-cliffs C r16b section 3.1):
+    {"instance": ..., "shared": ...}, each as engine_total returns it but
+    over that extent's applicable rows only, or None when it has none, from
+    a snapshot at most 100 ms old.
+
+    - instance: the rows that bound one WebAssembly memory's address space
+      (declared by their producer; the runtime's own wasm engine part):
+      retired engine instances are outside their scope;
+    - shared: every other applicable row (process, cgroup, machine, a
+      configured total, any aggregate engine budget, any row whose extent
+      is not declared): retired instances count on them.
+
+    When no row applies at all, shared is engine_total's nominal 1 GiB
+    record and instance None, as before.  engine_total keeps its meaning
+    (the least row over both extents) for D0's other consumers."""
+    global _totals_snap
+    now = _src.clock()
+    if _totals_snap is not None and now - _totals_snap[0] < _SNAPSHOT_S:
+        return {k: (None if v is None else dict(v)) for k, v in _totals_snap[1].items()}
+    domain = _engine_domain()
+    host = [d for d in _SELF if d not in ("wasm-engine", "wasm-instance")]
+    rows = [b for b in capacity()["basis"] if domain in b["constrains"]]
+
+    def least(sel):
+        if not sel:
+            return None
+        m = min(b["limit"] for b in sel)
+        at = [b for b in sel if b["limit"] == m]
+        return {"bytes": m, "status": "zero" if m == 0 else "observed", "basis": [b["source"] for b in at],
+                "joint": any(d in host for b in at for d in b["constrains"])}
+
+    if not rows:
+        out = {"instance": None, "shared": {"bytes": _NOMINAL, "status": "nominal", "basis": ["nominal"], "joint": False}}
+    else:
+        out = {"instance": least([b for b in rows if b.get("extent") == "instance"]),
+               "shared": least([b for b in rows if b.get("extent") != "instance"])}
+    _totals_snap = (now, out)
+    return {k: (None if v is None else dict(v)) for k, v in out.items()}
+
+
+_totals_snap = None
+
+
 def engine_rows():
     """Every row that constrains the engine's domain, for the ledger's
     certification (no-cliffs plan C r17 section 1.2): {"rows": [{"source",
@@ -689,7 +740,7 @@ def capacity():
         rem = None if used is None else max(0, int(limit) - int(used))
         # (a usage not read counts nothing)
         row = {"source": source, "limit": int(limit), "used": None if used is None else int(used), "remaining": rem,
-               "includes": [] if used is None else list(includes), "constrains": list(constrains)}
+               "includes": [] if used is None else list(includes), "constrains": list(constrains), "extent": "shared"}
         row.update(extra)
         basis.append(row)
         if rem is None:
@@ -750,11 +801,11 @@ def capacity():
     if parts is None:
         unknown.append("runtime")
     else:
-        for source, lim, used, inc, con, unnamed in parts:
+        for source, lim, used, inc, con, unnamed, extent in parts:
             if unnamed:
-                add(source, lim, used, inc, con, unknown_domains=True)
+                add(source, lim, used, inc, con, unknown_domains=True, extent=extent)
             else:
-                add(source, lim, used, inc, con)
+                add(source, lim, used, inc, con, extent=extent)
     return _record(basis, unknown)
 
 

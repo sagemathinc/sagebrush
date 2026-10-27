@@ -95,6 +95,25 @@ pub extern "C" fn sb_set_memory_total(bytes: f64, status: u32, uncertified: u32)
     sagebrush_ledger::set_total(sagebrush_ledger::total_from_wasm(bytes, status, uncertified));
 }
 
+/// The instance-local total (no-cliffs C r16b section 3.2: a row bounding
+/// this instance's own memory, the wasm32 ceiling), checked without R_ret:
+/// bytes as for sb_set_memory_total, status 0 observed, 1 zero, 2 nominal,
+/// or 3 for none (no instance row).  0; -1 for anything else, which also
+/// sets the ledger's sticky fault (never certified from then on).
+#[no_mangle]
+pub extern "C" fn sb_set_instance_total(bytes: f64, status: u32) -> i32 {
+    match sagebrush_ledger::instance_total_from_wasm(bytes, status) {
+        Ok(t) => {
+            sagebrush_ledger::set_instance_total(t);
+            0
+        }
+        Err(()) => {
+            sagebrush_ledger::set_fault();
+            -1
+        }
+    }
+}
+
 /// The ledger's live estimate (committed pages, or the baseline plus
 /// residents, whichever is larger: no-cliffs plan C r13) and its gross
 /// outstanding obligations: the host's common-domain check reads them (C-2).
@@ -340,7 +359,7 @@ fn slot_take(handle: f64) -> Option<(usize, sagebrush_ledger::Reservation)> {
 /// host turns it into D1's error (SagebrushMemoryError), never a string to
 /// parse (no-cliffs plan C r10; callers adopt it as their caps go).
 pub fn memory_error_value(r: &sagebrush_ledger::Refusal) -> Value {
-    json!({ "what": r.what, "need": r.need, "allowance": r.allowance, "live": r.live, "outstanding": r.outstanding,
+    json!({ "what": r.what, "row": r.row, "need": r.need, "allowance": r.allowance, "live": r.live, "outstanding": r.outstanding,
             "total": r.total, "status": r.status.name(), "joint": r.joint, "retired": r.retired })
 }
 

@@ -83,3 +83,13 @@ double 1x2 [2 2]
 double 2x2 [5.9160797830999998 7.4373574415999997;0 0.8280786712]
 double 1x2 [3 2]
 double 1x2 [2 2]
+logical 1x1 false
+double 1x2 [4900 1]
+logical 1x1 true
+double 1x2 [4900 3]
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 false
+logical 1x1 true

@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "no-cliffs C-2b-ii (#194), a top-up of 2026-10-26-nocliffs-c2b-retire-r3.json after the merge of master 3ffb7dda (#193): dispatch 40414552770's transition-mode size-gate (base 3ffb7dda, head 001bd712) measured cli/pyjs.cjs +12083 (28870025 -> 28882108) against 11108 + 935 + 8 = 12051; every other row exact",
+ "bytes": {
+  "cli/pyjs.cjs": 32
+ }
+}
