@@ -14,6 +14,7 @@ import { InkCapture, inkHit, inkOutline, inkPath } from "./ink";
 import { iconEmoji } from "./stickers";
 import { ICON_NAME, GROUP_PAD, GROUP_TITLE, refLabel, askOptions, type AskAnswer, type DocAsk } from "./doc";
 import { answerProblem, scaleRange, ASK_LIMITS } from "./ask";
+import { INK, readPalette, type Palette } from "./palette";
 
 /** A page's backdrop (doc.ts BoardPage's slide and background). */
 export interface Backdrop { slide?: { x: number; y: number; w: number; h: number }; color?: string; image?: string }
@@ -21,8 +22,8 @@ export interface Backdrop { slide?: { x: number; y: number; w: number; h: number
 /** How a pen draws: its width, its color, and below 1 a highlighter's opacity. */
 export interface InkStyle { size: number; color: string; opacity?: number }
 
-/** Ink's color, unless a stroke says. */
-export const INK = "#1d241a";
+/** Ink's color, unless a stroke says (palette.ts). */
+export { INK };
 
 export interface Item {
   id: string;
@@ -123,7 +124,6 @@ const BUDGET = 4; // ms of building notes' elements per frame; the rest wait, dr
 const PER_FRAME = 30; // and at most this many elements added (each costs the browser's layout too)
 const MARGIN = 0.5; // mounted: the viewport plus this fraction around it
 const CLOSE = 1.1; // from this zoom: notes' details
-const GROUP = "#eef2ea", EDGE = "#5f7457";
 
 // A uniform grid: each item is in the cells its box overlaps.
 class Grid {
@@ -175,6 +175,8 @@ export class Board {
   private ctx: CanvasRenderingContext2D;
   private back: HTMLCanvasElement; // behind them: groups and edges
   private bctx: CanvasRenderingContext2D;
+  // the colors it draws with (palette.ts), read from its style at its first drawing
+  private pal?: Palette;
   private edges: Edge[] = [];
   /** an edge being drawn: from an item to a world point */
   pending: { from: string; x: number; y: number } | null = null;
@@ -459,6 +461,10 @@ export class Board {
       if (u < 1) this.flight = requestAnimationFrame(step);
     };
     this.flight = requestAnimationFrame(step);
+  }
+
+  private get palette(): Palette {
+    return (this.pal ??= readPalette(this.el));
   }
 
   request() {
@@ -1176,10 +1182,10 @@ export class Board {
     if (!b) return;
     if (s) {
       ctx.save();
-      ctx.shadowColor = "rgba(0, 0, 0, .18)";
+      ctx.shadowColor = this.palette.slideShadow;
       ctx.shadowBlur = 12 * this.dpr;
       ctx.shadowOffsetY = 2 * this.dpr;
-      ctx.fillStyle = "#fff";
+      ctx.fillStyle = this.palette.slide;
       ctx.fillRect(s.x, s.y, s.w, s.h);
       ctx.restore();
     }
@@ -1210,7 +1216,7 @@ export class Board {
 
   // behind the notes: groups (outer first) and edges
   private drawBack(v: { x0: number; y0: number; x1: number; y1: number }, far: boolean) {
-    const ctx = this.bctx, c = this.camera, d = this.dpr;
+    const ctx = this.bctx, c = this.camera, d = this.dpr, pal = this.palette;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.back.width, this.back.height);
     ctx.setTransform(c.z * d, 0, 0, c.z * d, -c.x * c.z * d, -c.y * c.z * d);
@@ -1220,14 +1226,14 @@ export class Board {
     for (const g of groups) {
       ctx.beginPath();
       ctx.roundRect(g.x, g.y, g.w, g.h, 14);
-      ctx.fillStyle = g.color ?? GROUP;
+      ctx.fillStyle = g.color ?? pal.group;
       ctx.fill();
       ctx.lineWidth = (g.id === this.dropTarget ? 3 : 1) / c.z;
-      ctx.strokeStyle = g.id === this.dropTarget ? "#2a6f2f" : "rgba(0,0,0,.18)";
+      ctx.strokeStyle = g.id === this.dropTarget ? pal.accent : pal.groupBorder;
       ctx.stroke();
       // (an empty group, in Edit: how to fill it, B3)
       if (g.empty && !far && this.el.classList.contains("editing")) {
-        ctx.fillStyle = "#8a8f99";
+        ctx.fillStyle = pal.emptyHint;
         ctx.font = "italic 14px system-ui, sans-serif";
         ctx.textAlign = "center";
         ctx.fillText("Empty group: drag items into it", g.x + g.w / 2, g.y + g.h / 2);
@@ -1238,14 +1244,14 @@ export class Board {
     if (!far && this.unbuilt) {
       for (const it of this.boxes.query(v.x0, v.y0, v.x1, v.y1, new Set())) {
         if (it.kind !== "note" || this.mounted.has(it.id)) continue;
-        ctx.fillStyle = it.color ?? "#fff";
+        ctx.fillStyle = it.color ?? pal.noteBg;
         ctx.fillRect(it.x, it.y, it.w, it.h);
       }
     }
     // edges: center to center, from border to border, an arrowhead at the end
     const lw = Math.max(1.6, 1.2 / c.z), head = Math.max(9, 7 / c.z);
     ctx.lineWidth = lw;
-    ctx.strokeStyle = ctx.fillStyle = EDGE;
+    ctx.strokeStyle = ctx.fillStyle = pal.edge;
     const labels: [string, number, number][] = [];
     // an arrowhead at (x, y), pointing along (ux, uy)
     const arrowhead = (x: number, y: number, ux: number, uy: number) => {
@@ -1279,7 +1285,7 @@ export class Board {
       const sl = Math.hypot(p[2] - p[0], p[3] - p[1]) || 1, vx = (p[0] - p[2]) / sl, vy = (p[1] - p[3]) / sl;
       // the line (rounded corners), stopping short of its arrowheads
       const sel = e.id === this.selectedEdge;
-      ctx.strokeStyle = ctx.fillStyle = sel ? "#1f7a2a" : EDGE;
+      ctx.strokeStyle = ctx.fillStyle = sel ? pal.edgeSelected : pal.edge;
       ctx.lineWidth = (e.line === "thick" ? lw * 2 : lw) * (sel ? 1.8 : 1);
       if (e.line === "dotted") ctx.setLineDash([4 * Math.max(1, 0.8 / c.z), 4 * Math.max(1, 0.8 / c.z)]);
       ctx.beginPath();
@@ -1296,7 +1302,7 @@ export class Board {
       if (e.label) labels.push([e.label, e.lx ?? (p[0] + ex) / 2, e.ly ?? (p[1] + ey) / 2]);
     }
     ctx.lineWidth = lw;
-    ctx.strokeStyle = ctx.fillStyle = EDGE;
+    ctx.strokeStyle = ctx.fillStyle = pal.edge;
     if (this.pending) {
       const a = this.byId.get(this.pending.from);
       if (a) {
@@ -1315,9 +1321,9 @@ export class Board {
       ctx.textBaseline = "middle";
       for (const [text, x, y] of labels) {
         const w = ctx.measureText(text).width + 10;
-        ctx.fillStyle = "rgba(250,250,247,.92)";
+        ctx.fillStyle = pal.edgeLabelBg;
         ctx.fillRect(x - w / 2, y - 9, w, 18);
-        ctx.fillStyle = "#3d4a37";
+        ctx.fillStyle = pal.edgeLabel;
         ctx.fillText(text, x, y);
       }
       ctx.textAlign = "start";
@@ -1328,7 +1334,7 @@ export class Board {
   private draw(v: { x0: number; y0: number; x1: number; y1: number }, far: boolean) {
     // (near, no title is drawn on the canvas: none to hover there)
     if (!far) this.titleRects.clear();
-    const ctx = this.ctx, c = this.camera, d = this.dpr;
+    const ctx = this.ctx, c = this.camera, d = this.dpr, pal = this.palette;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.setTransform(c.z * d, 0, 0, c.z * d, -c.x * c.z * d, -c.y * c.z * d);
@@ -1345,7 +1351,7 @@ export class Board {
           ctx.font = `${it.h * 0.8}px system-ui, sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillStyle = it.color ?? INK;
+          ctx.fillStyle = it.color ?? pal.ink;
           ctx.fillText(it.emoji || (it.icon && iconEmoji(it.icon)) || "●", it.x + it.w / 2, it.y + it.h / 2);
           continue;
         }
@@ -1354,7 +1360,7 @@ export class Board {
           const im = this.picture(it.image);
           if (im) { ctx.drawImage(im, it.x, it.y, it.w, it.h); continue; }
         }
-        const k = it.color ?? "#9cc28f";
+        const k = it.color ?? pal.farFill;
         (byColor.get(k) ?? byColor.set(k, []).get(k)!).push(it);
       }
       for (const [color, its] of byColor) {
@@ -1367,7 +1373,7 @@ export class Board {
       // titles, when legible
       if (260 * c.z > 40) {
         ctx.font = `${12 / c.z}px system-ui, sans-serif`;
-        ctx.fillStyle = "#10140f";
+        ctx.fillStyle = pal.farTitle;
         // (only titles that fit: squeezed text is worse than none)
         // (shrunk to fit its box, down to 7 px, rather than left out)
         const font = ctx.font;
@@ -1420,11 +1426,11 @@ export class Board {
         const r = { x0: g.x, y0: top, x1: g.x + tw, y1: top + th };
         taken.push(r);
         this.titleRects.set(g.id, r);
-        if (whole) { ctx.fillStyle = "rgba(250,250,247,.96)"; ctx.fillRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0); }
+        if (whole) { ctx.fillStyle = pal.plate; ctx.fillRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0); }
         ctx.lineWidth = 4 / c.z;
-        ctx.strokeStyle = "rgba(250,250,247,.9)";
+        ctx.strokeStyle = pal.halo;
         ctx.strokeText(title, g.x + 6 / c.z, top + (px + 3) / c.z);
-        ctx.fillStyle = "#1d241a";
+        ctx.fillStyle = pal.groupTitle;
         ctx.fillText(title, g.x + 6 / c.z, top + (px + 3) / c.z);
       }
     }
@@ -1451,16 +1457,16 @@ export class Board {
         // (a pen's stroke: its outline, filled; a highlighter's, see-through;
         // one being erased, faded; a selected one, outlined)
         if (this.selection.has(it.id)) {
-          ctx.strokeStyle = "rgba(42, 111, 47, .9)";
+          ctx.strokeStyle = pal.inkSelected;
           ctx.lineWidth = 3 / c.z;
           ctx.stroke(p);
         }
-        ctx.fillStyle = it.color ?? INK;
+        ctx.fillStyle = it.color ?? pal.ink;
         ctx.globalAlpha = (it.opacity ?? 1) * (this.erased?.ids.has(it.id) ? 0.2 : 1);
         ctx.fill(p);
         ctx.globalAlpha = 1;
       } else {
-        ctx.strokeStyle = it.color ?? "#2a6f2f";
+        ctx.strokeStyle = it.color ?? pal.lineInk;
         ctx.lineWidth = lw;
         ctx.stroke(p);
       }
@@ -1477,8 +1483,8 @@ export class Board {
     // the selection rectangle being drawn, and a drag's alignment guides
     if (this.marquee) {
       const m = this.marquee;
-      ctx.fillStyle = "rgba(42, 111, 47, .08)";
-      ctx.strokeStyle = "rgba(42, 111, 47, .7)";
+      ctx.fillStyle = pal.marqueeFill;
+      ctx.strokeStyle = pal.marquee;
       ctx.lineWidth = 1 / c.z;
       ctx.fillRect(Math.min(m.x0, m.x1), Math.min(m.y0, m.y1), Math.abs(m.x1 - m.x0), Math.abs(m.y1 - m.y0));
       ctx.strokeRect(Math.min(m.x0, m.x1), Math.min(m.y0, m.y1), Math.abs(m.x1 - m.x0), Math.abs(m.y1 - m.y0));
@@ -1487,8 +1493,8 @@ export class Board {
       const it = this.byId.get(this.handle);
       if (it) {
         const s = 9 / c.z;
-        ctx.fillStyle = "#fff";
-        ctx.strokeStyle = "#2a6f2f";
+        ctx.fillStyle = pal.handleBg;
+        ctx.strokeStyle = pal.accent;
         ctx.lineWidth = 1.5 / c.z;
         ctx.fillRect(it.x + it.w - s / 2, it.y + it.h - s / 2, s, s);
         ctx.strokeRect(it.x + it.w - s / 2, it.y + it.h - s / 2, s, s);
@@ -1498,14 +1504,14 @@ export class Board {
     const g = this.grip && !far ? this.byId.get(this.grip) : undefined;
     if (g) {
       const b = gripBox(g, c.z), r = 4 / c.z;
-      ctx.fillStyle = "#fff";
-      ctx.strokeStyle = "#2a6f2f";
+      ctx.fillStyle = pal.handleBg;
+      ctx.strokeStyle = pal.accent;
       ctx.lineWidth = 1.5 / c.z;
       ctx.beginPath();
       ctx.roundRect(b.x, b.y, b.w, b.h, r);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = "#2a6f2f";
+      ctx.fillStyle = pal.accent;
       for (let i = 0; i < 2; i++) for (let j = 0; j < 3; j++) {
         ctx.beginPath();
         ctx.arc(b.x + b.w * (i ? 0.66 : 0.34), b.y + b.h * (0.27 + j * 0.23), 1.7 / c.z, 0, 2 * Math.PI);
@@ -1516,15 +1522,15 @@ export class Board {
     const as = this.addSame && !far ? this.byId.get(this.addSame.id) : undefined;
     if (as) {
       const b = this.addSameBox(as, c.z), r = 4 / c.z;
-      ctx.fillStyle = "#fff";
-      ctx.strokeStyle = "#2a6f2f";
+      ctx.fillStyle = pal.handleBg;
+      ctx.strokeStyle = pal.accent;
       ctx.lineWidth = 1.5 / c.z;
       ctx.beginPath();
       ctx.roundRect(b.x, b.y, b.w, b.h, r);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = "#2a6f2f";
-      ctx.strokeStyle = "#2a6f2f";
+      ctx.fillStyle = pal.accent;
+      ctx.strokeStyle = pal.accent;
       ctx.lineWidth = 2 / c.z;
       // (the "+": a cross, 10 px)
       const px = b.x + b.w / 2, py = b.y + b.h / 2, k = 5 / c.z;
@@ -1534,7 +1540,7 @@ export class Board {
       ctx.stroke();
     }
     if (this.guides) {
-      ctx.strokeStyle = "#d6336c";
+      ctx.strokeStyle = pal.guide;
       ctx.lineWidth = 1 / c.z;
       ctx.beginPath();
       for (const x of this.guides.xs) { ctx.moveTo(x, v.y0); ctx.lineTo(x, v.y1); }
@@ -2067,7 +2073,7 @@ export function synthetic(n: number, strokes: number, seed = 1): Item[] {
   const rand = () => ((s = (Math.imul(s, 1103515245) + 12345) >>> 0) / 4294967296);
   const items: Item[] = [];
   const cols = Math.ceil(Math.sqrt(n));
-  const colors = ["#cfe3c6", "#f3e3b5", "#d5e4f5", "#f2d0d0", "#e2d6f1"];
+  const colors = ["#cfe3c6", "#f3e3b5", "#d5e4f5", "#f2d0d0", "#e2d6f1"]; // palette-exempt: the notes' own colors (a document's)
   for (let i = 0; i < n; i++) {
     items.push({
       id: "n" + i, kind: "note", x: (i % cols) * 320 + rand() * 40, y: Math.floor(i / cols) * 240 + rand() * 40, w: 260, h: 170,

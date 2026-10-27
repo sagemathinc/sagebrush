@@ -2196,6 +2196,8 @@ export function createNotebook(root, opts = {}) {
     setManual,
     /** Files changed outside the notebook's cells (uploaded, deleted): the cells that read them rerun (the reactive notebook). */
     filesChanged(paths) { return reactive() && kernel.reactive ? kernel.reactive.filesChanged(paths) : Promise.resolve(null); },
+    // (what each cell's last run read, by cell id: the Share dialog's runtime evidence, share-ux-plan r2 §2.1)
+    fileReads() { return reactive() && kernel.reactive ? new Map([...kernel.reactive.files].map(([id, io]) => [id, [...io.reads]])) : new Map(); },
     /**
      * Each code cell's output key, time from root, whether a widget moved
      * since it ran, and how many files its last run, and those of the cells

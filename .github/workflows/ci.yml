@@ -455,8 +455,12 @@ jobs:
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
+          CHROME=google-chrome node web/share/test-share-dialog.mjs
           bun web/site/test-preview.mjs
           bun web/share-client/test-file-deps.mjs
+          bun web/share-client/test-selection.mjs
+          bun web/share-client/test-deps-client.mjs
+          bun web/share-client/test-upload.mjs
           bun web/test-no-site-build.mjs
           bun web/test-reproducible-build.mjs
 
@@ -527,6 +531,8 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-be4-idb.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-529.mjs
           bun web/notebook/test-json-text.mjs
+          bun web/notebook/test-text-overlap.mjs
+          bun web/notebook/test-merge3.mjs
           bun web/notebook/test-sync-rows.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-migrate-time.mjs
           CHROME=google-chrome node web/workspace/test-workspace-pages.mjs
@@ -806,12 +812,14 @@ jobs:
               bun web/notebook/test-kernel-evaluate.mjs
               bun web/notebook/test-runner-fallback.mjs
               bun web/board/test-canvas.mjs
+              bun web/board/test-palette.mjs
               bun web/board/test-channel.mjs
               bun web/board/test-merge.mjs
               bun web/board/test-cached-store.mjs
               bun web/board/test-complete.mjs
               bun web/board/test-syncdb.mjs
               bun web/board/test-board-merge3.mjs
+              bun web/board/gen-merge3-board-vectors.mjs --check
               bun web/board/test-lossless.mjs
               bun web/board/test-mermaid-export.mjs
               bun web/board/test-fromhtml.mjs
@@ -1143,6 +1151,7 @@ jobs:
           python3 engine/py/test_engine_errors.py
           python3 engine/py/test_memguard.py
           python3 engine/py/test_capacity.py
+          python3 engine/py/test_session_ctrl.py
           python3 engine/py/test_progress.py
           python3 engine/py/test_kedlaya.py
           python3 engine/py/test_ffmat_echelon.py
