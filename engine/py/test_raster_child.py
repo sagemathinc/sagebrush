@@ -736,19 +736,16 @@ def test_r2_CORR_157_4_the_thread_transport_portable():
     still = [sys.executable, "-c", "import time; time.sleep(30)"]
     c = rc.spawn(1 << 30, rc.Plan(None, 0, still, dict(os.environ)))
     # (Ctrl-C's latency: from the interrupt to its KeyboardInterrupt here,
-    # at most 100 ms: the wait wakes every 25 ms, William's Oct 25 bound;
-    # the Timer's moment taken just before interrupt_main, SIGALRM's at its
-    # scheduled time, the earliest it can arrive)
+    # at most 100 ms: the wait wakes every 25 ms, William's Oct 25 bound.
+    # The interrupt is interrupt_main from a Timer on every system, its
+    # moment taken just before it: a SIGALRM's own delivery can be late
+    # (0.1 s on macOS CI, #157's pypi 40501974415), which is the system's,
+    # not this wait's)
     fired = []
-    if hasattr(signal, "SIGALRM"):
-        signal.signal(signal.SIGALRM, lambda *a: (_ for _ in ()).throw(KeyboardInterrupt()))
-        fired.append(time.monotonic() + 0.3)
-        signal.setitimer(signal.ITIMER_REAL, 0.3)
-    else:
-        def fire():
-            fired.append(time.monotonic())
-            _thread.interrupt_main()
-        threading.Timer(0.3, fire).start()
+    def fire():
+        fired.append(time.monotonic())
+        _thread.interrupt_main()
+    threading.Timer(0.3, fire).start()
     try:
         rc.write_all(c, [bytes(16 << 20)])
         print("written")
