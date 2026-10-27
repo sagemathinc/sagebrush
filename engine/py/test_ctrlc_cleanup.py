@@ -86,14 +86,14 @@ def test_page_atomic_and_v2():
 
         os.fsync = interrupted
         try:
-            P3.write_page(path, "partial?")
+            P3._write_page(path, "partial?")
         except KeyboardInterrupt:
             pass
         finally:
             os.fsync = real
         assert not os.path.exists(path)
         assert len(_temps(".sagebrush")) == 1
-        P3.write_page(path, "whole")
+        P3._write_page(path, "whole")
         assert open(path).read() == "whole" and _temps(".sagebrush") == []
         # (a failure: the temporary removed, by name, and the error raised)
         def failing(fd):
@@ -101,7 +101,7 @@ def test_page_atomic_and_v2():
 
         os.fsync = failing
         try:
-            P3.write_page(os.path.join(".sagebrush", "plot3d-v2-full.html"), "x")
+            P3._write_page(os.path.join(".sagebrush", "plot3d-v2-full.html"), "x")
             raise AssertionError("expected OSError")
         except OSError:
             pass
@@ -128,7 +128,7 @@ def test_page_two_threads():
     os.fsync = fsync
     try:
         os.makedirs(".sagebrush")
-        ts = [threading.Thread(target=P3.write_page, args=(os.path.join(".sagebrush", "plot3d-v2-%s.html" % n), n * 1000)) for n in "ab"]
+        ts = [threading.Thread(target=P3._write_page, args=(os.path.join(".sagebrush", "plot3d-v2-%s.html" % n), n * 1000)) for n in "ab"]
         for t in ts:
             t.start()
         for t in ts:
@@ -187,7 +187,7 @@ def test_page_no_listing_with_stale_temps():
         for k in saved[0]:
             setattr(os, k, no)
         glob.glob = glob.iglob = no
-        P3.write_page(os.path.join(".sagebrush", "plot3d-v2-a.html"), "a")  # (success)
+        P3._write_page(os.path.join(".sagebrush", "plot3d-v2-a.html"), "a")  # (success)
         real_replace = os.replace
 
         def bad_replace(a, b):
@@ -195,7 +195,7 @@ def test_page_no_listing_with_stale_temps():
 
         os.replace = bad_replace
         try:
-            P3.write_page(os.path.join(".sagebrush", "plot3d-v2-b.html"), "b")  # (the rename fails: cleanup by name)
+            P3._write_page(os.path.join(".sagebrush", "plot3d-v2-b.html"), "b")  # (the rename fails: cleanup by name)
         except OSError:
             pass
         finally:
@@ -232,11 +232,11 @@ def test_gc():
         ticks[0] += 1
         return ticks[0]
 
-    alive = lambda pid: pid in live  # noqa: E731  (this process reported dead too: only gc_temps' own rule keeps its temporary)
+    alive = lambda pid: pid in live  # noqa: E731  (this process reported dead too: only _gc_temps' own rule keeps its temporary)
     recs = []
     for _ in range(1000):
         # (a budget of 150 ticks, more than the 101 entries kept: the seek, charged, fits)
-        recs.append(P3.gc_temps(root, budget_s=150, clock=clock, alive=alive))
+        recs.append(P3._gc_temps(root, budget_s=150, clock=clock, alive=alive))
         assert recs[-1]["removed"] + recs[-1]["kept"] >= 1 or not recs[-1]["stopped"], recs[-1]  # (a pass that stops examined an entry)
         if not recs[-1]["stopped"] and not recs[-1].get("cursor_lost"):
             break
@@ -248,13 +248,13 @@ def test_gc():
     log = open(os.path.join(root, ".plot3d-gc.log")).read().splitlines()
     assert len(log) == len(recs) and json.loads(log[0])["stopped"] is True
     # (the log rotates to one backup, never more)
-    saved = P3.GC_LOG_BYTES
-    P3.GC_LOG_BYTES = 1
+    saved = P3._GC_LOG_BYTES
+    P3._GC_LOG_BYTES = 1
     try:
         for _ in range(5):
-            P3.gc_temps(root, alive=alive)
+            P3._gc_temps(root, alive=alive)
     finally:
-        P3.GC_LOG_BYTES = saved
+        P3._GC_LOG_BYTES = saved
     logs = sorted(n for n in os.listdir(root) if n.startswith(".plot3d-gc.log"))
     assert logs == [".plot3d-gc.log", ".plot3d-gc.log.1"], logs
     # (a real dead pid is removed, a real live one kept)
@@ -263,7 +263,7 @@ def test_gc():
     p.wait()
     open(os.path.join(host, "%d-1" % p.pid), "w").close()
     open(os.path.join(host, "%d-1" % os.getppid()), "w").close()
-    P3.gc_temps(root)
+    P3._gc_temps(root)
     assert not os.path.exists(os.path.join(host, "%d-1" % p.pid)) or P3._pid_alive(p.pid)  # (unless the pid was reused already)
     assert os.path.exists(os.path.join(host, "%d-1" % os.getppid()))
     print("gc: live, own and foreign kept; dead removed; the cursor progresses; one log backup: ok")
@@ -314,7 +314,7 @@ def test_gc_mixed_prefix():
         try:
             for _ in range(max_passes):
                 t = ticks[0]
-                r = P3.gc_temps(root, budget_s=budget, clock=clock, alive=lambda pid: pid in live)
+                r = P3._gc_temps(root, budget_s=budget, clock=clock, alive=lambda pid: pid in live)
                 recs.append(r)
                 assert r["removed"] + r["kept"] >= 1 or not r["stopped"], r  # (a pass that stops examined an entry)
                 # (and is bounded: the start's tick, the budget, the check crossing it, the allowed entry, the stop)
@@ -372,7 +372,7 @@ def test_gc_wall_time():
         times, recs = [], []
         for _ in range(60):
             t = time.monotonic()
-            r = P3.gc_temps(root, budget_s=BUDGET, alive=lambda pid: pid in live)
+            r = P3._gc_temps(root, budget_s=BUDGET, alive=lambda pid: pid in live)
             times.append(time.monotonic() - t)
             recs.append(r)
             assert r["removed"] + r["kept"] >= 1 or not r["stopped"], r  # (a pass that stops examined an entry)
@@ -406,7 +406,7 @@ def test_gc_wall_time():
         return pid in live3
 
     for _ in range(20):
-        P3.gc_temps(root, budget_s=BUDGET, alive=slow_alive)
+        P3._gc_temps(root, budget_s=BUDGET, alive=slow_alive)
         if set(os.listdir(host)) == {"%d-1" % p for p in live3}:
             break
     assert set(os.listdir(host)) == {"%d-1" % p for p in live3}, os.listdir(host)
@@ -451,7 +451,7 @@ def test_gc_no_fetch_after_the_last_entry():
 
     os.scandir = Guarded
     try:
-        r = P3.gc_temps(root, budget_s=2.5, clock=lambda: now[0], alive=alive)
+        r = P3._gc_temps(root, budget_s=2.5, clock=lambda: now[0], alive=alive)
     finally:
         os.scandir = real
     assert r["removed"] == 3 and r["stopped"], r
