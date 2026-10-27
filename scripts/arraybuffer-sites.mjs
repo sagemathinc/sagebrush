@@ -443,77 +443,226 @@ export function census(root = ROOT, { commit = null } = {}) {
   };
   const unknownAccessors = new Set();
   const obligations = [];
-  // the function a protocol member runs: a function value's own declaration (or, unnamed,
-  // the declaration its body belongs to), a function a const binding names; else, if the value
-  // may be callable, a fail-closed obligation (reported, and seeded as may-allocate)
-  const registerValue = (kinds, v, at, what) => {
-    if (!kinds.length || !v) return;
-    v = skipParens(v);
-    const asTarget = (f) => (declName(f, f.getSourceFile()) !== null ? f : enclosing(f, f.getSourceFile()));
-    let f = isFunctionLike(v) ? v : null;
-    if (!f && (ts.isIdentifier(v) || ts.isPropertyAccessExpression(v))) f = resolveFn(checker, checker.getSymbolAtLocation(v));
-    if (f && isSourceFile(f.getSourceFile())) {
-      for (const k of kinds) protocol[k].add(declOf(asTarget(f)).fp);
-      return;
+  const oblBySite = new Map();
+  const oblOcc = new Map();
+  // ---- installs (astra2 R1, R2: one semantic rule).  Every way a value becomes a property
+  // registers that property: assignment (= ??= ||= &&=), a destructuring or for-of target, a
+  // class field, an object-literal property or shorthand, a method or accessor, an export,
+  // Object.defineProperty / defineProperties / create, Reflect.defineProperty / set,
+  // Object.assign and spread (copies), and a Proxy's get trap.  The value is classified:
+  // a function (registered: its code is the member), provably not callable (exempt), or
+  // anything else, which may be callable (an obligation, fail closed).
+  const PRIM = ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike | ts.TypeFlags.BigIntLike | ts.TypeFlags.BooleanLike | ts.TypeFlags.EnumLike | ts.TypeFlags.ESSymbolLike |
+    ts.TypeFlags.Null | ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Never;
+  const isArrayish = (t) => !!(t.flags & ts.TypeFlags.Object) && ((checker.isArrayType?.(t) || checker.isTupleType?.(t)) ||
+    (/^(Array|ReadonlyArray)$/.test(t.getSymbol?.()?.getName() ?? "") && isLibSymbol(t.getSymbol())));
+  // a type no function can have: primitives, literals, arrays and tuples (and unions of them)
+  const notCallableType = (t, depth = 0) => {
+    if (!t || depth > 8) return false;
+    if (t.flags & PRIM) return true;
+    if (t.isUnion?.()) return t.types.every((u) => notCallableType(u, depth + 1));
+    // a type parameter: by its constraint (none: it may be anything, a function included)
+    if (t.flags & ts.TypeFlags.Instantiable) {
+      const c = checker.getBaseConstraintOfType(t);
+      return !!c && c !== t && notCallableType(c, depth + 1);
     }
-    // a value that can't be a function, whatever its declared type: a literal, a new of a lib
-    // non-function class, or a lib call that makes plain data (Object.create(null), JSON.parse, ...)
+    return isArrayish(t);
+  };
+  const unwrap = (v) => {
+    for (;;) {
+      if (ts.isParenthesizedExpression(v) || ts.isAsExpression(v) || ts.isTypeAssertionExpression?.(v) || ts.isSatisfiesExpression?.(v) || ts.isNonNullExpression(v)) v = v.expression;
+      else return v;
+    }
+  };
+  // a value: {fns: [function nodes], obligation: why | null}; exempt when both are empty
+  const classify = (v, depth = 0) => {
+    const out = { fns: [], obligation: null };
+    if (!v) return out;
+    v = unwrap(v);
+    if (depth > 8) return ((out.obligation = "too deep to resolve"), out);
+    if (isFunctionLike(v)) return (out.fns.push(v), out);
+    // provably not callable by its syntax
+    if (ts.isObjectLiteralExpression(v) || ts.isArrayLiteralExpression(v) || ts.isTemplateExpression(v) || ts.isNoSubstitutionTemplateLiteral(v) || ts.isStringLiteralLike(v) ||
+      ts.isNumericLiteral(v) || ts.isBigIntLiteral(v) || ts.isRegularExpressionLiteral(v) || ts.isClassExpression(v) || ts.isTypeOfExpression(v) || ts.isVoidExpression(v) ||
+      v.kind === ts.SyntaxKind.TrueKeyword || v.kind === ts.SyntaxKind.FalseKeyword || v.kind === ts.SyntaxKind.NullKeyword) return out;
+    if (ts.isConditionalExpression(v)) return merge(classify(v.whenTrue, depth + 1), classify(v.whenFalse, depth + 1));
+    if (ts.isBinaryExpression(v) && [ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.CommaToken].includes(v.operatorToken.kind)) {
+      return v.operatorToken.kind === ts.SyntaxKind.CommaToken ? classify(v.right, depth + 1) : merge(classify(v.left, depth + 1), classify(v.right, depth + 1));
+    }
+    if (ts.isNewExpression(v)) {
+      // a new of a class is an instance, not a function (a class whose chain reaches Function aside)
+      const t = checker.getTypeAtLocation(v);
+      if (!t.getCallSignatures().length && !(t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown))) return out;
+    }
     if (ts.isCallExpression(v) || ts.isNewExpression(v)) {
       const d = checker.getResolvedSignature(v)?.getDeclaration?.();
-      if (d && libFile(d.getSourceFile().fileName) && NOT_A_FUNCTION.test(libMemberName(d) + (ts.isNewExpression(v) ? ".new" : ""))) return;
+      if (d && libFile(d.getSourceFile().fileName) && NOT_A_FUNCTION.test(libMemberName(d) + (ts.isNewExpression(v) ? ".new" : ""))) return out;
     }
-    const t = checker.getTypeAtLocation(v);
-    if (!(t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) && !t.getCallSignatures().length && !(t.isUnion?.() && t.types.some((u) => u.getCallSignatures().length || u.flags & ts.TypeFlags.Any))) return;
+    if (ts.isIdentifier(v) || ts.isPropertyAccessExpression(v) || ts.isShorthandPropertyAssignment(v)) {
+      // (a shorthand property's value is the variable it names)
+      let sy = ts.isShorthandPropertyAssignment(v) ? checker.getShorthandAssignmentValueSymbol(v) : checker.getSymbolAtLocation(v);
+      const f = resolveFn(checker, sy);
+      if (f && isSourceFile(f.getSourceFile())) return (out.fns.push(f), out);
+      if (sy && sy.flags & ts.SymbolFlags.Alias) sy = checker.getAliasedSymbol(sy);
+      const vd = sy?.valueDeclaration;
+      // a const binding: its initializer decides
+      if (vd && ts.isVariableDeclaration(vd) && vd.initializer && isConstBinding(vd) && ts.isIdentifier(vd.name)) return classify(vd.initializer, depth + 1);
+      if (vd && (ts.isFunctionDeclaration(vd) || ts.isClassDeclaration(vd)) && isSourceFile(vd.getSourceFile())) return ts.isClassDeclaration(vd) ? ((out.fns.push(vd), out)) : ((out.fns.push(vd), out));
+    }
+    if (notCallableType(ts.isShorthandPropertyAssignment(v) ? checker.getTypeAtLocation(v.name) : checker.getTypeAtLocation(v))) return out;
+    out.obligation = "its value may be callable and can't be resolved";
+    return out;
+  };
+  const merge = (a, b) => ({ fns: [...a.fns, ...b.fns], obligation: a.obligation ?? b.obligation });
+  const asTarget = (f) => (ts.isClassDeclaration(f) || ts.isClassExpression(f) ? f : declName(f, f.getSourceFile()) !== null ? f : enclosing(f, f.getSourceFile()));
+  const obligation = (at, what, kinds, accessorName) => {
     const sf = at.getSourceFile();
     const rel = relOf(root, sf);
     const line = sf.getLineAndCharacterOfPosition(at.getStart(sf)).line + 1;
-    const fp = "obligation:" + sha(rel + ":" + norm(at, sf)).slice(0, 16);
-    if (!decls.has(fp)) {
-      const reason = `${what}: the function it holds can't be resolved (${kinds.join(", ")})`;
-      decls.set(fp, { file: rel, name: `obligation at line ${line}`, fp, refs: new Set(), irefs: new Set(), libs: new Set(), obligation: reason });
-      obligations.push({ fp, file: rel, line, kinds, reason });
+    const role = accessorName === null ? "" : ` accessor ${accessorName ?? "(any name)"}`;
+    // one obligation per install site and role: keyed by its text and its occurrence in the file
+    const site = `${rel}:${at.pos}:${at.end}${role}`;
+    let fp = oblBySite.get(site);
+    if (fp) return fp;
+    const base = rel + ":" + norm(at, sf) + role;
+    const k = oblOcc.get(base) ?? 0;
+    oblOcc.set(base, k + 1);
+    fp = "obligation:" + sha(base + "#" + k).slice(0, 16);
+    oblBySite.set(site, fp);
+    {
+      const reason = `${what}: ${role ? "an accessor whose function" : "a value that"} may be callable and can't be resolved (${role ? "accessor " + (accessorName ?? "any name") : kinds.join(", ")})`;
+      decls.set(fp, { file: rel, name: `obligation: ${norm(at, sf).slice(0, 60)}${role} #${k}`, fp, refs: new Set(), irefs: new Set(), libs: new Set(), obligation: reason });
+      obligations.push({ fp, file: rel, line, kinds, accessor: accessorName === null ? null : accessorName ?? "*", reason });
     }
-    for (const k of kinds) protocol[k].add(fp);
+    return fp;
   };
+  const addAccessor = (fp, name) => {
+    if (name === undefined) unknownAccessors.add(fp);
+    else (accessorsByName.get(name) ?? accessorsByName.set(name, new Set()).get(name)).add(fp);
+    allAccessors.add(fp);
+  };
+  // a value installed under protocol kinds (a property that may be a protocol member)
+  const install = (kinds, v, at, what) => {
+    if (!kinds.length) return;
+    const c = v === UNKNOWN ? { fns: [], obligation: "an unknown value" } : classify(v);
+    for (const f of c.fns) for (const k of kinds) protocol[k].add(declOf(asTarget(f)).fp);
+    if (c.obligation) {
+      const fp = obligation(at, what, kinds, null);
+      for (const k of kinds) protocol[k].add(fp);
+    }
+  };
+  // a function installed as an accessor (a descriptor's get or set, a Proxy's get trap)
+  const installAccessor = (name, v, at, what) => {
+    const c = v === UNKNOWN ? { fns: [], obligation: "an unknown value" } : classify(v);
+    for (const f of c.fns) addAccessor(declOf(asTarget(f)).fp, name);
+    if (c.obligation) addAccessor(obligation(at, what, [], name), name);
+  };
+  const UNKNOWN = Symbol("unknown value");
+  // a property descriptor: its value under kinds, its get and set as accessors; not a
+  // literal: anything (both)
+  const installDescriptor = (name, kinds, desc, at, what) => {
+    desc = desc && unwrap(desc);
+    if (!desc || !ts.isObjectLiteralExpression(desc)) {
+      install(kinds, UNKNOWN, at, what + " (a descriptor the census can't read)");
+      installAccessor(name, UNKNOWN, at, what + " (a descriptor the census can't read)");
+      return;
+    }
+    for (const pr of desc.properties) {
+      const pn = pr.name && memberName(pr.name);
+      const val = ts.isPropertyAssignment(pr) ? pr.initializer : ts.isShorthandPropertyAssignment(pr) ? pr.name : ts.isMethodDeclaration(pr) ? pr : null;
+      if (ts.isSpreadAssignment(pr) || pn === undefined) {
+        install(kinds, UNKNOWN, at, what + " (a spread or computed descriptor field)");
+        installAccessor(name, UNKNOWN, at, what + " (a spread or computed descriptor field)");
+      } else if (pn === "value") install(kinds, val, at, what + "'s value");
+      else if (pn === "get" || pn === "set") installAccessor(name, val, at, `${what}'s ${pn}`);
+    }
+  };
+  // a property-descriptor map (defineProperties, Object.create's second argument)
+  const installDescriptors = (map, at, what) => {
+    map = map && unwrap(map);
+    if (!map || !ts.isObjectLiteralExpression(map)) {
+      install(Object.keys(PROTOCOL), UNKNOWN, at, what + " (a descriptor map the census can't read)");
+      installAccessor(undefined, UNKNOWN, at, what + " (a descriptor map the census can't read)");
+      return;
+    }
+    for (const pr of map.properties) {
+      const name = ts.isSpreadAssignment(pr) ? undefined : memberName(pr.name);
+      const kinds = kindsOf(name);
+      const d = ts.isPropertyAssignment(pr) ? pr.initializer : ts.isShorthandPropertyAssignment(pr) ? pr.name : null;
+      installDescriptor(name, kinds, d, at, `${what} ${name ?? "(computed)"}`);
+    }
+  };
+  const kindsOfTarget = (t) => (ts.isPropertyAccessExpression(t) ? kindsOf(t.name.text) : ts.isElementAccessExpression(t) ? kindsOfKey(t.argumentExpression) : []);
+  // is this property access the target of a destructuring assignment or a for-of/for-in?
+  const isPatternTarget = (n) => {
+    let c = n, p = n.parent;
+    for (; p; c = p, p = p.parent) {
+      if ((ts.isForOfStatement(p) || ts.isForInStatement(p)) && p.initializer === c) return true;
+      if (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken) return p.left === c && c !== n && (ts.isObjectLiteralExpression(c) || ts.isArrayLiteralExpression(c));
+      if (!(ts.isArrayLiteralExpression(p) || ts.isObjectLiteralExpression(p) || ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p) || ts.isSpreadElement(p) || ts.isSpreadAssignment(p) ||
+        (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.left === c))) return false;
+      if (ts.isPropertyAssignment(p) && p.name === c) return false;
+    }
+    return false;
+  };
+  const ASSIGN = new Set([ts.SyntaxKind.EqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken, ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.AmpersandAmpersandEqualsToken]);
+  const exported = (n) => !!(ts.getCombinedModifierFlags(n) & ts.ModifierFlags.Export);
   const registerMember = (n) => {
-    // a method or accessor: its own name, normalized; an unknown name could be any member
+    const text = (x) => x.getText(x.getSourceFile()).slice(0, 60);
+    // the code itself: a method or accessor, by its normalized name (unknown: every member)
     if (isFunctionLike(n) && n.name && !ts.isFunctionDeclaration(n)) {
       const name = memberName(n.name);
-      if (ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n)) {
-        const fp = declOf(n).fp;
-        if (name === undefined) unknownAccessors.add(fp);
-        else (accessorsByName.get(name) ?? accessorsByName.set(name, new Set()).get(name)).add(fp);
-        allAccessors.add(fp);
-        return;
-      }
+      if (ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n)) return addAccessor(declOf(n).fp, name);
       if (ts.isMethodDeclaration(n)) for (const k of kindsOf(name)) protocol[k].add(declOf(n).fp);
       return;
     }
-    // a property holding a function: a class field, an object-literal property or shorthand
-    if ((ts.isPropertyDeclaration(n) && n.initializer) || ts.isPropertyAssignment(n)) return registerValue(ts.isComputedPropertyName(n.name) ? kindsOfKey(n.name.expression) : kindsOf(memberName(n.name)), n.initializer, n, `the property ${n.name.getText(n.getSourceFile())}`);
-    if (ts.isShorthandPropertyAssignment(n)) return registerValue(kindsOf(n.name.text), n.name, n, `the property ${n.name.text}`);
-    // an assignment to a property: o.toJSON = f, o["valueOf"] = f (an unknown key: any member)
-    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && (ts.isPropertyAccessExpression(n.left) || ts.isElementAccessExpression(n.left))) {
-      const kinds = ts.isPropertyAccessExpression(n.left) ? kindsOf(n.left.name.text) : kindsOfKey(n.left.argumentExpression);
-      return registerValue(kinds, n.right, n, `the assignment to ${n.left.getText(n.getSourceFile()).slice(0, 60)}`);
+    // a class field, an object-literal property or shorthand
+    if ((ts.isPropertyDeclaration(n) && n.initializer) || ts.isPropertyAssignment(n)) {
+      if (ts.isPropertyAssignment(n) && ts.isObjectLiteralExpression(n.parent) && isPatternTarget(n.parent.parent ? n.initializer : n)) return;
+      return install(ts.isComputedPropertyName(n.name) ? kindsOfKey(n.name.expression) : kindsOf(memberName(n.name)), n.initializer, n, `the property ${text(n.name)}`);
     }
-    // Object.defineProperty(o, key, {value | get}): the descriptor's function
-    if (ts.isCallExpression(n) && n.arguments.length >= 3 && n.expression.getText(n.getSourceFile()).replace(/\s/g, "") === "Object.defineProperty" && ts.isObjectLiteralExpression(skipParens(n.arguments[2]))) {
-      const name = keyOfExpr(n.arguments[1]);
-      const keyKinds = kindsOfKey(n.arguments[1]);
-      for (const pr of skipParens(n.arguments[2]).properties) {
-        const pn = pr.name && memberName(pr.name);
-        const val = ts.isPropertyAssignment(pr) ? pr.initializer : ts.isMethodDeclaration(pr) || ts.isGetAccessorDeclaration(pr) ? pr : null;
-        if (pn === "value" && val) registerValue(keyKinds, val, n, "a defined property's value");
-        if ((pn === "get" || pn === "set") && val) {
-          const f = isFunctionLike(val) ? val : null;
-          if (f) {
-            const fp = declOf(declName(f, f.getSourceFile()) !== null ? f : enclosing(f, f.getSourceFile())).fp;
-            if (name === undefined) unknownAccessors.add(fp);
-            else (accessorsByName.get(name) ?? accessorsByName.set(name, new Set()).get(name)).add(fp);
-            allAccessors.add(fp);
+    // (in a destructuring pattern, a shorthand or spread binds a variable, not a property)
+    if ((ts.isShorthandPropertyAssignment(n) || ts.isSpreadAssignment(n)) && isPatternTarget(n.name ?? n.expression)) return;
+    if (ts.isShorthandPropertyAssignment(n)) return install(kindsOf(n.name.text), n, n, `the property ${n.name.text}`);
+    // object spread copies another object's own properties: any name, any value
+    if (ts.isSpreadAssignment(n)) return ts.isObjectLiteralExpression(unwrap(n.expression)) ? undefined : install(Object.keys(PROTOCOL), UNKNOWN, n, `a spread of ${text(n.expression)}`);
+    // an assignment to a property
+    if (ts.isBinaryExpression(n) && ASSIGN.has(n.operatorToken.kind) && (ts.isPropertyAccessExpression(n.left) || ts.isElementAccessExpression(n.left))) {
+      return install(kindsOfTarget(n.left), n.right, n, `the assignment to ${text(n.left)}`);
+    }
+    // a property as a destructuring or loop target: its value is unknown
+    if ((ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) && isPatternTarget(n)) return install(kindsOfTarget(n), UNKNOWN, n, `the destructuring target ${text(n)}`);
+    // an export: a property of the module's namespace object
+    if (ts.isFunctionDeclaration(n) && n.name && n.body && exported(n)) for (const k of kindsOf(n.name.text)) protocol[k].add(declOf(n).fp);
+    if (ts.isVariableStatement(n) && exported(n)) for (const d of n.declarationList.declarations) if (ts.isIdentifier(d.name)) install(kindsOf(d.name.text), d.initializer ?? UNKNOWN, d, `the export ${d.name.text}`);
+    if (ts.isExportSpecifier(n)) install(kindsOf(n.name.text), n.propertyName ?? n.name, n, `the export ${n.name.text}`);
+    // lib calls that install properties
+    if (ts.isCallExpression(n) || ts.isNewExpression(n)) {
+      const d = checker.getResolvedSignature(n)?.getDeclaration?.();
+      const lib = d && libFile(d.getSourceFile().fileName);
+      if (!lib) return;
+      const ln = libMemberName(d);
+      const m = ts.isNewExpression(n) && !ln.endsWith(".new") ? ln + ".new" : ln;
+      const a = n.arguments ?? [];
+      if (/^(ObjectConstructor\.defineProperty|defineProperty)$/.test(m) && (m.startsWith("Object") || lib.includes("reflect"))) {
+        return installDescriptor(keyOfExpr(a[1]), kindsOfKey(a[1]), a[2], n, `the defined property ${a[1] ? text(a[1]) : "?"}`);
+      }
+      if (m === "ObjectConstructor.defineProperties" || m === "ObjectConstructor.create" && a.length >= 2) return installDescriptors(a[1], n, m === "ObjectConstructor.create" ? "Object.create's descriptors" : "defineProperties");
+      if (m === "set" && lib.includes("reflect") && a.length >= 3) return install(kindsOfKey(a[1]), a[2], n, `Reflect.set of ${text(a[1])}`);
+      if (m === "ObjectConstructor.assign") {
+        for (const src of a.slice(1)) if (!ts.isObjectLiteralExpression(unwrap(src))) install(Object.keys(PROTOCOL), UNKNOWN, n, `Object.assign from ${text(src)}`);
+        return;
+      }
+      if (m === "ProxyConstructor.new") {
+        const h = a[1] && unwrap(a[1]);
+        install(Object.keys(PROTOCOL), UNKNOWN, n, "a Proxy (its get trap answers any name)");
+        if (h && ts.isObjectLiteralExpression(h)) {
+          for (const pr of h.properties) {
+            const pn = pr.name && memberName(pr.name);
+            if (pn === "get" || pn === "set") installAccessor(undefined, ts.isPropertyAssignment(pr) ? pr.initializer : ts.isMethodDeclaration(pr) ? pr : UNKNOWN, n, `a Proxy's ${pn} trap`);
+            if (ts.isSpreadAssignment(pr) || pn === undefined) installAccessor(undefined, UNKNOWN, n, "a Proxy's spread handler");
           }
-        }
+        } else installAccessor(undefined, UNKNOWN, n, "a Proxy's handler");
       }
     }
   };
@@ -918,7 +1067,7 @@ export function census(root = ROOT, { commit = null } = {}) {
     by_kind: Object.fromEntries(Object.entries(byKind).sort()),
   };
   const programFiles = program.getSourceFiles().filter((s) => !s.fileName.includes(`${sep}node_modules${sep}`)).map((s) => relOf(root, s));
-  return { header, records, decls, libs, classes, allSites, spans, programFiles, protocol, accessors: allAccessors, obligations, files: files.map((s) => relOf(root, s)) };
+  return { header, records, decls, libs, classes, allSites, spans, programFiles, protocol, accessors: allAccessors, accessorsByName, unknownAccessors, obligations, files: files.map((s) => relOf(root, s)) };
 }
 
 // the declaration a site belongs to: the nearest named function-like ancestor,

@@ -574,6 +574,25 @@ test("a protocol member the census can't resolve is a fail-closed obligation, re
   assert.deepEqual(none.obligations, []);
 });
 
+test("descriptor accessors with named or unresolved functions, getter and setter (astra2 R1)", () => {
+  const f = (desc: string) => ({ "src/runtime/d.ts": `export function make(): any { return new Uint8Array(1); }\nexport function quiet(): any { return 1; }\ndeclare const anyFn: any;\nexport function install(o: object): void { Object.defineProperty(o, "bytes", ${desc}); }\nexport function read(o: any): any { return o.bytes; }\nexport function write(o: any): void { o.bytes = 1; }\nexport function caller(o: any): any { return read(o); }\n` });
+  assert.deepEqual(mayAlloc(f("{ get: make }"), ["read", "caller"]), { read: true, caller: true }, "a named getter");
+  assert.deepEqual(mayAlloc(f("{ set: make }"), ["write"]), { write: true }, "a named setter");
+  assert.deepEqual(mayAlloc(f("{ get: anyFn }"), ["read", "caller"]), { read: true, caller: true }, "an unresolved getter: an accessor obligation");
+  assert.deepEqual(mayAlloc(f("{ set: anyFn }"), ["write"]), { write: true }, "an unresolved setter");
+  assert.deepEqual(mayAlloc(f("{ get: quiet, set: quiet }"), ["read", "write"]), { read: false, write: false }, "a named non-allocating twin");
+});
+
+test("a value whose type may be callable without a call signature is an obligation: generics and structural types (astra2 R2)", () => {
+  const f = (install: string) => ({ "src/runtime/g.ts": `${install}\nexport function json(o: object): string { return JSON.stringify(o); }\n` });
+  assert.deepEqual(mayAlloc(f("export function install<T>(o: any, fn: T): void { o.toJSON = fn; }"), ["json"]), { json: true }, "an unconstrained type parameter");
+  assert.deepEqual(mayAlloc(f("export function install<T extends { a: number }>(o: any, fn: T): void { o.toJSON = fn; }"), ["json"]), { json: true }, "a type parameter constrained to an object type");
+  assert.deepEqual(mayAlloc(f("export function install(o: any, fn: { a: number }): void { o.toJSON = fn; }"), ["json"]), { json: true }, "a structural object type");
+  assert.deepEqual(mayAlloc(f("export function install<T extends number>(o: any, fn: T): void { o.toJSON = fn; }"), ["json"]), { json: false }, "a type parameter constrained to a primitive");
+  assert.deepEqual(mayAlloc(f("export function install(o: any, fn: number[]): void { o.toJSON = fn; }"), ["json"]), { json: false }, "an array");
+  assert.deepEqual(mayAlloc(f("export function install(o: any): void { o.toJSON = { a: 1 }; }"), ["json"]), { json: false }, "an object literal: provably not a function");
+});
+
 test("E1.1: typescript-api is named only by the gate's script and its test; it has no install scripts", () => {
   const out = execFileSync("git", ["grep", "-l", "typescript-api", "--", ":!pnpm-lock.yaml", ":!package.json"], { cwd: ROOT, encoding: "utf8" }).trim().split("\n").sort();
   assert.deepEqual(out, ["scripts/arraybuffer-sites.mjs", "test/arraybuffer-sites.test.ts"]);
