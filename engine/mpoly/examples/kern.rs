@@ -3,6 +3,10 @@
 use std::time::Instant;
 
 #[inline(never)]
+// SAFETY: the benchmark's indices are below 2000 each, so ia[t] + ib[j] < 4000 <
+// boxsize (4096), and j < ib.len() == xb.len(): every unchecked index is in
+// bounds.  A microbenchmark example, not built into the engine.
+#[allow(unsafe_code)]
 fn run_i64(acc: &mut [i64], ia: &[u32], xa: &[i64], ib: &[u32], xb: &[i64]) {
     for (t, &c) in xa.iter().enumerate() {
         let row = &mut acc[ia[t] as usize..];
@@ -16,6 +20,10 @@ fn run_i64(acc: &mut [i64], ia: &[u32], xa: &[i64], ib: &[u32], xb: &[i64]) {
 }
 
 #[inline(never)]
+// SAFETY: the benchmark's indices are below 2000 each, so ia[t] + ib[j] < 4000 <
+// boxsize (4096), and j < ib.len() == xb.len(): every unchecked index is in
+// bounds.  A microbenchmark example, not built into the engine.
+#[allow(unsafe_code)]
 fn run_i128(acc: &mut [i128], ia: &[u32], xa: &[i64], ib: &[u32], xb: &[i64]) {
     for (t, &c) in xa.iter().enumerate() {
         let row = &mut acc[ia[t] as usize..];
@@ -32,6 +40,10 @@ fn run_i128(acc: &mut [i128], ia: &[u32], xa: &[i64], ib: &[u32], xb: &[i64]) {
 /// Two u64 lanes per slot: (lo, hi) with an explicit carry; the product by
 /// 32-bit halves of nonnegative words (the sign folded in by the caller).
 #[inline(never)]
+// SAFETY: the benchmark's indices are below 2000 each, so ia[t] + ib[j] < 4000 <
+// boxsize (4096), and j < ib.len() == xb.len(): every unchecked index is in
+// bounds.  A microbenchmark example, not built into the engine.
+#[allow(unsafe_code)]
 fn run_split(acc: &mut [(u64, u64)], ia: &[u32], xa: &[i64], ib: &[u32], xb0: &[u64], xb1: &[u64]) {
     for (t, &c) in xa.iter().enumerate() {
         let row = &mut acc[ia[t] as usize..];
@@ -55,6 +67,10 @@ fn run_split(acc: &mut [(u64, u64)], ia: &[u32], xa: &[i64], ib: &[u32], xb0: &[
 
 /// Like run_split with f64 lanes: the products of 26-bit pieces are exact.
 #[inline(never)]
+// SAFETY: the benchmark's indices are below 2000 each, so ia[t] + ib[j] < 4000 <
+// boxsize (4096), and j < ib.len() == xb.len(): every unchecked index is in
+// bounds.  A microbenchmark example, not built into the engine.
+#[allow(unsafe_code)]
 fn run_f64(acc: &mut [[f64; 3]], ia: &[u32], xa: &[[f64; 2]], ib: &[u32], xb: &[[f64; 2]]) {
     for (t, c) in xa.iter().enumerate() {
         let row = &mut acc[ia[t] as usize..];

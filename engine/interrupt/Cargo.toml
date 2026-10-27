@@ -15,3 +15,6 @@ wasm-host = []
 # Tests only: count checks per phase and request Stop at a chosen check
 # (sagebrush_interrupt::hooks)
 test-hooks = []
+
+[lints]
+workspace = true
