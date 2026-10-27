@@ -66,6 +66,8 @@
   /* until the notebook is read from IndexedDB, nothing below it shows (no layout shift) */
   body.opening .about, body.opening footer { display: none; }
   #nbline { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
+  /* (a notebook another tab is editing: read-only here, and why: web/notebook/journal.js's writer lock) */
+  #writerbar { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--fg); background: var(--cell); }
   #nbname { field-sizing: content; font: 600 16px system-ui, sans-serif; color: var(--fg); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; min-width: 8em; max-width: 100%; }
   #nbname:hover, #nbname:focus { border-color: var(--line); background: var(--cell); }
   #saved { color: var(--muted); font-size: 12px; }
@@ -238,6 +240,7 @@
 </header>
 <main>
   <div id="nbline"><input id="nbname" aria-label="Notebook name" value="Untitled" spellcheck="false"><span id="saved" aria-live="polite"></span><span id="tabs" aria-live="polite"></span><span id="status" role="status">loading…</span></div>
+  <div id="writerbar" role="status" hidden></div>
   <!-- one row: what you do most on the left (one of Run all / Stop shows, by
        whether cells are running); settings and menus on the right -->
   <div class="bar" role="toolbar" aria-label="Notebook">
@@ -1031,7 +1034,7 @@ async function replayResumed({ plan, version }) {
     });
   } finally {
     replaying = false;
-    nb.setReadOnly(!!ws?.quarantined);
+    nb.setReadOnly(!!ws?.quarantined || !!nb.store?.viewOnly);
     if (journal.session) journal.session.replay = false;
   }
   nb.flush();
@@ -1115,7 +1118,7 @@ async function recompute(plan, what) {
     report = await nb.runAll();
   } finally {
     replaying = false;
-    nb.setReadOnly(!!ws?.quarantined);
+    nb.setReadOnly(!!ws?.quarantined || !!nb.store?.viewOnly);
     if (journal.session) journal.session.replay = false;
   }
   nb.flush();
@@ -1397,6 +1400,7 @@ async function open(store, id, kind = "browser") {
   await shareTest.beforeAttach?.();
   const doc = await nb.attach(store);
   showName(doc.name);
+  showWriter(store, id);
   modeEl.value = nb.mode;
   $("#ttrepro").checked = nb.meta.reproducible !== false;
   // (the reactive notebook: random numbers are reproducible per cell, always)
@@ -2392,7 +2396,7 @@ const wsReady = (async () => {
     w.onDurability(() => showLossNotice(w));
     setSaveGate(() => (w.quarantined ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : w.closed ? "the workspace was reset or upgraded in another tab: reload this page" : w.fenceBlocked.length ? "this browser's record of the workspace couldn't be written: reload this page" : null));
     // (and the notebook read-only meanwhile, now and when another tab finds the loss)
-    const readOnlyIfQuarantined = () => { if (w.quarantined) nb.setReadOnly(true); };
+    const readOnlyIfQuarantined = () => { if (w.quarantined || nb.store?.viewOnly) nb.setReadOnly(true); };
     readOnlyIfQuarantined();
     w.onDurability(readOnlyIfQuarantined);
     void startMigrator(w);
@@ -2409,6 +2413,17 @@ const wsReady = (async () => {
 // notebook is written through it: T1 in its history, then T2 (notebook/journal.js); before, as before.  Told by the
 // notebooks' fence, read as each store is made: its phase "journal" is what refuses every other writer, so a store
 // made from it is never the wrong one for long, and an error reading it makes the plain store, which is then refused)
+// (one writer per notebook on this device, for the milestone (William, Oct 27): a journal's store that isn't its
+// notebook's writer (another tab is: notebook/journal.js's lock) shows it read-only, says why in the bar, and takes
+// over, reloaded as the writer, when that tab lets go)
+const writerBar = $("#writerbar");
+function showWriter(store, id) {
+  const why = store?.journaled ? store.viewOnly : null;
+  writerBar.hidden = !why;
+  writerBar.textContent = why ?? "";
+  nb.setReadOnly(!!why || !!ws?.quarantined);
+  if (why && store.readOnly === "other") store.ontakeover = () => { if (current.id === id && nb.store === store) open(store, id).catch((e) => console.warn("notebook:", e)); };
+}
 let journalKit = null;
 async function storeFor(id, initial) {
   const fence = db ? await idb(db, "notebooks", "readonly", (st) => st.get(FENCE)).catch(() => undefined) : undefined;
