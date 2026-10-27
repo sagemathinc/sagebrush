@@ -237,8 +237,8 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
     that is the JavaScript engine's own garbage collection, which can't be
     interrupted ("with several GB of arrays in memory, Stop can lag about
     0.1 s per GB", William, Oct 25 2026). Sagebrush's own code still checks
-    for Stop at least every 25 ms; the exception covers only the engine's
-    garbage-collection pauses.
+    for Stop at least every 250 ms; the exception covers only engine
+    garbage-collection pauses longer than that.
   - Every other function sees the full matrix a sparse one stands for. The
     first sparse matrix a program makes wraps the built-ins for this, so
     programs without one pay nothing. Those MATLAB keeps sparse convert
