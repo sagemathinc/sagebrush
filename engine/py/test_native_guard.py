@@ -12,6 +12,7 @@ import sys
 import time
 
 import sagebrush  # noqa: F401
+from sagebrush.sage import *  # noqa: F401,F403  (the top-level modules _memledger, _capacity)
 from sagebrush._native import raster
 import _thread
 
