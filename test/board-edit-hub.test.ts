@@ -13,7 +13,6 @@ import { editRecords, recordsAre } from "../web/board/lossless";
 // P₀ and what can't be edited; tabs' submissions (accepted, replayed, mismatched, stale, unknown, reactivated
 // from a tombstone); saving (quiet, then written; persistedSeq and persistedGen); an outside version merged
 // against P with a tab's edit; the file adopted when it is the board; and §4.3's older-copy flag.
-const { mergeStrings3 } = require("patchflow");
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const B = (nodes: any[], extra: any = {}) => ({ format: "sagebrush-board", version: 1, title: "t", nodes, edges: [], ...extra });
 const text = (d: any) => JSON.stringify(d, null, 2) + "\n";
@@ -25,7 +24,7 @@ async function setup(d: any, limits: Record<string, number> = {}) {
   fs.writeFileSync(file, text(d));
   let now = 1_000_000;
   const clock = { now: () => now, advance: (ms: number) => { now += ms; } };
-  const hub = new EditHub(file, { ...defaultLimits(), ...limits }, { mergeStrings3, now: clock.now });
+  const hub = new EditHub(file, { ...defaultLimits(), ...limits }, { now: clock.now });
   const r = await hub.start(fs.readFileSync(file));
   assert.ok(r.ok, !r.ok ? r.why : "");
   return { dir, file, hub, clock, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
@@ -38,10 +37,10 @@ test("board open --edit hub: P₀ is the file; a board that can't come back is n
     assert.equal(hub.P.seq, hub.H.seq);
     assert.equal(hub.persistedSeq, hub.P.seq);
     assert.deepEqual(hub.P.json.nodes[0].text, "hello");
-    const other = new EditHub(file, defaultLimits(), { mergeStrings3, now: () => 0 });
+    const other = new EditHub(file, defaultLimits(), { now: () => 0 });
     const r = await other.start(Buffer.from(JSON.stringify(B([{ id: "a" }], { edges: [{ from: "a", to: "a", id: "x", $eid: "y" }] }))));
     assert.ok(!r.ok && /can't be edited/.test(r.why));
-    const big = new EditHub(file, { ...defaultLimits(), EDIT_MAX: 10 }, { mergeStrings3, now: () => 0 });
+    const big = new EditHub(file, { ...defaultLimits(), EDIT_MAX: 10 }, { now: () => 0 });
     assert.ok(!(await big.start(Buffer.from(JSON.stringify(B([]))))).ok);
   } finally { cleanup(); }
 });
@@ -209,7 +208,7 @@ test("board open --edit hub: a merge past MERGE_MS, in any phase, is refused (ti
     const file = join(dir, "b.board.json");
     fs.writeFileSync(file, text(B([{ id: "n", text: "hello" }])));
     let now = 0;
-    const hub = new EditHub(file, { ...defaultLimits(), MERGE_MS: 100 }, { mergeStrings3, now: () => now });
+    const hub = new EditHub(file, { ...defaultLimits(), MERGE_MS: 100 }, { now: () => now });
     assert.ok((await hub.start(fs.readFileSync(file))).ok);
     hub.connect("t1");
     const s1 = snap(B([{ id: "n", text: "hello world" }]));
@@ -538,7 +537,7 @@ test("board open --edit hub: astra's r5 interleaving end to end: FILE changed in
     file = join(dir, "b.board.json");
     fs.writeFileSync(file, text(B([{ id: "n", text: "hello", x: 0 }, { id: "m", text: "m" }])));
     let now = 1_000_000;
-    const hub = new EditHub(file, defaultLimits(), { mergeStrings3, now: () => now, fs: fsx });
+    const hub = new EditHub(file, defaultLimits(), { now: () => now, fs: fsx });
     assert.ok((await hub.start(fs.readFileSync(file))).ok);
     hub.connect("t1");
     const s1 = snap(B([{ id: "n", text: "hello tab", x: 0 }, { id: "m", text: "m" }]));

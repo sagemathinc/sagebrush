@@ -205,8 +205,7 @@ export async function boardOpen(argv: string[]): Promise<number> {
   let editing: { hub: import("./board-edit-hub").EditHub; server: import("./board-edit-serve").EditServer; watch: import("./board-edit-serve").EditWatch } | null = null;
   if (edit && limits) {
     const { startEdit, EditServer, EditWatch } = await import("./board-edit-serve");
-    const { mergeStrings3 } = await import("patchflow");
-    const started = await startEdit(path, limits, { mergeStrings3: mergeStrings3 as any, now: Date.now });
+    const started = await startEdit(path, limits, { now: Date.now });
     if ("why" in started) say(`not editing: ${started.why} (shown read only)`);
     else {
       const editApi = { "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Sagebrush-Seq, Retry-After", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
