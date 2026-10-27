@@ -199,6 +199,7 @@ jobs:
           node scripts/core-api-surface.mjs --check
           node scripts/size-budget.mjs --check
           node scripts/test-size-measure.mjs
+          node scripts/test-install-engine-wasm.mjs
           node scripts/test-npm-pack-metrics.mjs
           node scripts/test-install-timing.mjs
           node --test scripts/test-heap-budget.mjs
