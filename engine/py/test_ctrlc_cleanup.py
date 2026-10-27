@@ -237,7 +237,7 @@ def test_gc():
     for _ in range(1000):
         # (a budget of 150 ticks, more than the 101 entries kept: the seek, charged, fits)
         recs.append(P3.gc_temps(root, budget_s=150, clock=clock, alive=alive))
-        assert recs[-1]["removed"] + recs[-1]["kept"] >= 1, recs[-1]  # (every pass examines an entry)
+        assert recs[-1]["removed"] + recs[-1]["kept"] >= 1 or not recs[-1]["stopped"], recs[-1]  # (a pass that stops examined an entry)
         if not recs[-1]["stopped"] and not recs[-1].get("cursor_lost"):
             break
     left = set(os.listdir(host))
@@ -316,7 +316,7 @@ def test_gc_mixed_prefix():
                 t = ticks[0]
                 r = P3.gc_temps(root, budget_s=budget, clock=clock, alive=lambda pid: pid in live)
                 recs.append(r)
-                assert r["removed"] + r["kept"] >= 1, r      # (each pass progresses by an entry at least)
+                assert r["removed"] + r["kept"] >= 1 or not r["stopped"], r  # (a pass that stops examined an entry)
                 # (and is bounded: the start's tick, the budget, the check crossing it, the allowed entry, the stop)
                 assert ticks[0] - t <= budget + 4, ticks[0] - t
                 if not r["stopped"] and not r.get("cursor_lost"):
@@ -375,7 +375,7 @@ def test_gc_wall_time():
             r = P3.gc_temps(root, budget_s=BUDGET, alive=lambda pid: pid in live)
             times.append(time.monotonic() - t)
             recs.append(r)
-            assert r["removed"] + r["kept"] >= 1, r  # (every pass progresses)
+            assert r["removed"] + r["kept"] >= 1 or not r["stopped"], r  # (a pass that stops examined an entry)
             if not os.listdir(host) or set(os.listdir(host)) == {"%d-1" % p for p in live}:
                 break
         return times, recs
@@ -410,9 +410,52 @@ def test_gc_wall_time():
         if set(os.listdir(host)) == {"%d-1" % p for p in live3}:
             break
     assert set(os.listdir(host)) == {"%d-1" % p for p in live3}, os.listdir(host)
-    bound = BUDGET + 2 * PER + 0.05  # (the budget, the entry that crossed it, the allowed one, and slack)
+    bound = BUDGET + PER + 0.03  # (the budget and one entry, plus slack for the pass's own work)
     assert max(t1 + t2) <= bound, (max(t1), max(t2), bound)
     print("gc under real time: passes of at most %.3f s (bound %.3f) reach the dead entries, %d and %d passes: ok" % (max(t1 + t2), bound, len(t1), len(t2)))
+
+
+def test_gc_no_fetch_after_the_last_entry():
+    """daybreak2's A-2-B1: once the deadline has passed at an examination, the
+    pass stops there, without fetching another entry (the iterator here
+    raises if it is asked for one then)."""
+    d = tempfile.mkdtemp(prefix="sb-p3f-")
+    root = os.path.join(d, ".sagebrush")
+    host = os.path.join(root, ".plot3d-tmp", P3._host())
+    os.makedirs(host)
+    for i in range(5):
+        open(os.path.join(host, "%d-1" % (910000 + i)), "w").close()
+    now = [0.0]
+    real = os.scandir
+
+    class Guarded:
+        def __init__(self, d):
+            with real(d) as it:
+                self.es = sorted(it, key=lambda e: e.name)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def __iter__(self):
+            for e in self.es:
+                yield e
+                if now[0] > 2.5:
+                    raise AssertionError("an entry fetched after the budget was spent")
+
+    def alive(pid):
+        now[0] += 1.0  # (each examination takes one unit; the budget is 2.5)
+        return False
+
+    os.scandir = Guarded
+    try:
+        r = P3.gc_temps(root, budget_s=2.5, clock=lambda: now[0], alive=alive)
+    finally:
+        os.scandir = real
+    assert r["removed"] == 3 and r["stopped"], r
+    print("gc: no entry fetched after the one that spent the budget: ok")
 
 
 def test_get_deadline_nonempty():
@@ -577,6 +620,7 @@ if __name__ == "__main__":
     test_gc()
     test_gc_mixed_prefix()
     test_gc_wall_time()
+    test_gc_no_fetch_after_the_last_entry()
     test_timeout_race_keeps_a_finished_reply()
     test_ids()
     test_get_deadline_nonempty()
