@@ -254,6 +254,29 @@ pub fn install<T: Send>(threads: usize, f: impl FnOnce() -> T + Send) -> T {
     f()
 }
 
+/// The sequential forms, for a crate whose own `parallel` feature is off: its
+/// `par` shim routes here so that it stays sequential however this crate's
+/// features are unified in a build (`engine/web` opts out of parallelism with
+/// `default-features = false`).  Plain iteration on the calling thread, which
+/// already holds the caller's context.
+pub mod seq {
+    pub fn map_range<T: Send, F: Fn(usize) -> T + Sync + Send>(n: usize, f: F) -> Vec<T> {
+        (0..n).map(f).collect()
+    }
+
+    pub fn map_slice<A: Sync, T: Send, F: Fn(&A) -> T + Sync + Send>(xs: &[A], f: F) -> Vec<T> {
+        xs.iter().map(f).collect()
+    }
+
+    pub fn for_each_mut<A: Send, F: Fn(usize, &mut A) + Sync + Send>(xs: &mut [A], f: F) {
+        xs.iter_mut().enumerate().for_each(|(i, x)| f(i, x));
+    }
+
+    pub fn for_each_chunk_mut<A: Send, F: Fn(usize, &mut [A]) + Sync + Send>(xs: &mut [A], size: usize, f: F) {
+        xs.chunks_mut(size).enumerate().for_each(|(i, x)| f(i, x));
+    }
+}
+
 /// The number of threads parallel entries use here: the current pool's (in
 /// [`install`], its size), or 1 without the `parallel` feature.
 pub fn current_num_threads() -> usize {
