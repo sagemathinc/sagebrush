@@ -442,7 +442,9 @@ try {
     // is checked, and their round trip is timed from here, so that a page waiting on the parse would show)
     await runFirst("open('long.py', 'w').write('x = 1\\n' * 2000000)\nprint('long')");
     await setFirst(CODE + "\nimport long");
-    await ev(WRAP("long.py", false, 600000));
+    // (hold: what the worker says after long.py never reaches the page, so the analysis can't end by
+    // itself, which would terminate the worker too; only the close below can, grader's #206 note)
+    await ev(WRAP("long.py", true, 600000));
     await openDialog({ wait: false });
     await until("window.sagebrush.shareTest.postedAt !== undefined", 60000);
     // (the post reaches the worker in well under 200 ms; from then on it is parsing)
@@ -460,7 +462,11 @@ try {
     await ev("document.querySelector('#shareall').click()");
     const crt = Date.now() - c0;
     ok(crt >= 1000, `(control) the same measurement sees a page blocked for 1.5 s: ${crt} ms round trip`);
+    ok(await ev("window.sagebrush.shareTest.terminated === 0 && window.sagebrush.shareTest.quieted === true"), "before the close: the worker still running (not terminated), its answers held back");
     await closeDialog();
+    // (closing stops the still-running parse: its worker terminated, once; the close event is a queued task)
+    await until("window.sagebrush.shareTest.terminated === 1", 10000).catch(() => {});
+    ok((await ev("window.sagebrush.shareTest.terminated")) === 1, "closing the dialog mid-parse terminates the worker, once");
     await unwrap();
     // (long.py removed again: the later checks count the workspace's files)
     await runFirst("import os\nos.remove('long.py')\nprint('removed')");
