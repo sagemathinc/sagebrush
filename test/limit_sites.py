@@ -41,14 +41,21 @@ registered.  A baseline hash whose line is gone is harmless and stays (the
 pin is stable).
 
     python3 test/limit_sites.py --check           the differences (JSON); exit 1 if any
-    python3 test/limit_sites.py --register CLASS OWNER [--key K ...]
-                                                  register the unregistered sites (or the keys given)
+    python3 test/limit_sites.py --register CLASS OWNER [--key K ...] [--disposition JSON] [--reason TEXT]
+                                                  register the unregistered sites (or the keys given); a class
+                                                  with a 1, 2 or 3 needs its disposition (test/limit_sweep.py)
     python3 test/limit_sites.py --prune           drop the registry entries that match no site
     python3 test/limit_sites.py --seed REV SEEDFILE
                                                   write the registry and the baseline from the files at
                                                   REV, classified by SEEDFILE's inventory rows
     python3 test/limit_sites.py --list-baseline REV
                                                   the baseline's sites, readably, from the files at REV
+
+The baseline sweep (plan-limit-sites-sweep-r3) registers the baseline's sites
+batch by batch: test/limit_sweep.py, its manifest and its checks, which
+check() runs too ("sweep").  Its readers take a revision, so a manifest is
+built from one commit's files, registry and baseline together (`load(rev)`,
+`baseline_keys(rev)`), never from the working tree.
 """
 import ast
 import hashlib
@@ -187,7 +194,18 @@ def sites(rev=None):
     return out
 
 
-def load():
+def use_root(root):
+    """Point the census at another checkout (the sweep's fixture repositories)."""
+    global ROOT, REGISTRY, BASELINE
+    ROOT = root
+    REGISTRY = os.path.join(ROOT, "test", "limit-sites.json")
+    BASELINE = os.path.join(ROOT, "test", "limit-sites-baseline.txt")
+
+
+def load(rev=None):
+    """The registry, in the working tree or at REV."""
+    if rev is not None:
+        return json.loads(read("test/limit-sites.json", rev))
     with open(REGISTRY, encoding="utf-8") as f:
         return json.load(f)
 
@@ -198,9 +216,19 @@ def save(reg):
         f.write("\n")
 
 
-def baseline_keys():
+def baseline_keys(rev=None):
+    """The baseline's hashes, in the working tree or at REV."""
+    if rev is not None:
+        return set(l for l in read("test/limit-sites-baseline.txt", rev).split("\n") if l)
     with open(BASELINE, encoding="utf-8") as f:
         return set(l for l in f.read().split("\n") if l)
+
+
+def active_baseline(now, reg, base):
+    """The sites the baseline still excuses: present, unregistered, their hash
+    in the baseline.  The one definition, for check(), the sweep's checks and
+    its transition (B18 asserts it is empty, derived, never a constant)."""
+    return sorted(k for k in now if k not in reg and short(k) in base)
 
 
 def baseline_sha256():
@@ -209,9 +237,15 @@ def baseline_sha256():
 
 
 def check():
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import limit_sweep
     reg = load()
-    now = {k for k, _, _ in sites()}
+    found = sites()
+    now = {k for k, _, _ in found}
     base = baseline_keys()
+    active = active_baseline(now, reg, base)
     bad = {
         "unregistered": sorted(k for k in now if k not in reg and short(k) not in base),
         "stale": sorted(set(reg) - now),
@@ -219,9 +253,12 @@ def check():
         # guards' message, item D; true or absent)
         "invalid": sorted(k for k, v in reg.items() if v.get("class") not in CLASSES or not v.get("owner")
                           or v.get("explained", True) is not True or ("explained" in v and "2" not in v["class"])),
+        # (the sweep's: entries' dispositions, follow-ups, the manifest's membership and done batches; each names its key)
+        "sweep": limit_sweep.problems(found, reg, base, active),
     }
     return {"baseline_sha256": baseline_sha256(), "sites": len(now), "registered": len(reg),
-            "explained": sum(1 for v in reg.values() if v.get("explained")), "problems": bad}
+            "explained": sum(1 for v in reg.values() if v.get("explained")), "active_baseline": len(active),
+            "problems": bad}
 
 
 def seed(rev, seedfile):
@@ -273,7 +310,22 @@ def main(argv):
         print("%d pruned" % len(drop))
         return 0
     if argv[:1] == ["--register"] and len(argv) >= 3:
-        cls, owner, keys = argv[1], argv[2], argv[4::2] if "--key" in argv else None
+        cls, owner, keys, extra, rest = argv[1], argv[2], None, {}, argv[3:]
+        while rest:
+            if len(rest) < 2 or rest[0] not in ("--key", "--disposition", "--reason"):
+                print(__doc__)
+                return 2
+            if rest[0] == "--key":
+                keys = (keys or []) + [rest[1]]
+            elif rest[0] == "--disposition":
+                try:
+                    extra["disposition"] = json.loads(rest[1])
+                except ValueError as e:
+                    print("--disposition is JSON: %s" % e)
+                    return 2
+            else:
+                extra["reason"] = rest[1]
+            rest = rest[2:]
         if cls not in CLASSES:
             print("class must be one of %s" % ", ".join(sorted(CLASSES)))
             return 2
@@ -281,11 +333,12 @@ def main(argv):
         now = {k for k, _, _ in sites()}
         base = baseline_keys()
         todo = keys if keys is not None else sorted(k for k in now if k not in reg and short(k) not in base)
+        # (a batch's baseline sites are registered by test/limit_sweep.py's apply, with their dispositions)
         for k in todo:
             if k not in now:
                 print("not a current site: %s" % k)
                 return 2
-            reg[k] = {"class": cls, "owner": owner}
+            reg[k] = dict({"class": cls, "owner": owner}, **extra)
         save(reg)
         print("%d registered" % len(todo))
         return 0
@@ -294,4 +347,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    sys.modules["limit_sites"] = sys.modules["__main__"]  # (one module, for test/limit_sweep.py's import of it)
     sys.exit(main(sys.argv[1:]))

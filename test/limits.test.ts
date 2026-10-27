@@ -139,13 +139,32 @@ test("every census-vocabulary refusal site is registered with a class and owner;
   assert.equal(got.baseline_sha256, LIMIT_SITES_BASELINE_SHA256, "test/limit-sites-baseline.txt changed: only a deliberate, reviewed --seed may change it");
   assert.deepEqual(
     got.problems,
-    { unregistered: [], stale: [], invalid: [] },
-    "register each new or changed site with its class (1, 2, 3, ..., coverage, none) and owner: python3 test/limit_sites.py --register CLASS OWNER [--key K ...]; drop stale entries: --prune",
+    { unregistered: [], stale: [], invalid: [], sweep: [] },
+    "register each new or changed site with its class (1, 2, 3, ..., coverage, none) and owner: python3 test/limit_sites.py --register CLASS OWNER [--key K ...]; drop stale entries: --prune; a baseline site the sweep's manifest doesn't excuse, or a sweep problem: test/limit_sweep.py",
   );
   assert.equal(r.status, 0, r.stderr);
   // (the class-2 sites whose guards say so in the memory guards' message,
   // item D: a count that only goes up, as doctest coverage's)
   assert.ok(got.explained >= 17, `${got.explained} explained memory-guard sites, fewer than D1's 17`);
+  // (the sweep's progress: the tree's count, which batches.json records and the sweep's check compares)
+  const state = JSON.parse(readFileSync(TEST + "limit-sweep/batches.json", "utf8"));
+  assert.equal(got.active_baseline, state.active_baseline, "the active-baseline count isn't batches.json's: python3 test/limit_sweep.py recount");
+});
+
+// The baseline sweep (plan-limit-sites-sweep-r3): its manifest is the one
+// rebuilt from the commit it names (that commit's files, registry and
+// baseline, whatever the working tree holds), and its tooling's fixture
+// cases (the manifest, astra2's membership counterexamples, the follow-ups'
+// liveness, apply's refusals, the three-way merge) pass.
+test("the sweep's manifest is the one rebuilt from its revision (test/limit_sweep.py verify)", () => {
+  const r = spawnSync("python3", [TEST + "limit_sweep.py", "verify"], { encoding: "utf8", maxBuffer: 64 << 20 });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
+test("the sweep's tooling: its fixture cases (test/limit_sweep_cases.py)", () => {
+  const r = spawnSync("python3", [TEST + "limit_sweep_cases.py"], { encoding: "utf8", maxBuffer: 16 << 20 });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^ok: the sweep's tooling, \d+ checks\n$/);
 });
 
 // Every limit unlimited by default, finite ones opt-in (plan-c0 r2):
