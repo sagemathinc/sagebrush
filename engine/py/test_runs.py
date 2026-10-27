@@ -1192,7 +1192,13 @@ def test_worker_threads():
         "t.join()\n"
         "errors\n")
     reqs = json.dumps({"code": code, "mode": "python"}) + "\n" + json.dumps({"code": "7", "mode": "python"}) + "\n"
-    for nth in (0, 3, 9):
+    nths = (0, 3, 9)
+    if (3, 12) <= sys.version_info[:3] < (3, 12, 10):
+        # (CPython 3.12.0-3.12.9 can segfault in a printing thread when the Ctrl-C ends the run; fixed in 3.12.10:
+        # FU-WORKERTHREADS-312, measured on 3.12.3-3.12.9 for master and PR A alike.  The uninterrupted run still runs)
+        nths = (0,)
+        print("worker threads: the interrupted variants skipped on Python %s (FU-WORKERTHREADS-312: a CPython bug fixed in 3.12.10)" % sys.version.split()[0])
+    for nth in nths:
         r = subprocess.run([sys.executable, "-c", harness, str(nth)], input=reqs, capture_output=True, text=True, timeout=120)
         msgs = [json.loads(l) for l in r.stdout.splitlines()]  # (every line valid JSON)
         replies = [m for m in msgs if "result" in m]
