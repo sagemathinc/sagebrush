@@ -438,8 +438,7 @@ export function census(root = ROOT, { commit = null } = {}) {
     if (name !== undefined) return kindsOf(name);
     const t = checker.getTypeAtLocation(e);
     const parts = t.isUnion?.() ? t.types : [t];
-    if (parts.every((u) => u.flags & (ts.TypeFlags.NumberLike | ts.TypeFlags.BigIntLike | ts.TypeFlags.BooleanLike | ts.TypeFlags.Undefined | ts.TypeFlags.Null))) return [];
-    if (parts.every((u) => u.isStringLiteral?.() || u.isNumberLiteral?.() || u.flags & (ts.TypeFlags.NumberLike | ts.TypeFlags.Undefined | ts.TypeFlags.Null))) return [...new Set(parts.filter((u) => u.isStringLiteral?.()).flatMap((u) => kindsOf(u.value)))];
+    if (parts.every((u) => u.isStringLiteral?.() || u.flags & (ts.TypeFlags.NumberLike | ts.TypeFlags.BigIntLike | ts.TypeFlags.BooleanLike | ts.TypeFlags.Undefined | ts.TypeFlags.Null))) return [...new Set(parts.filter((u) => u.isStringLiteral?.()).flatMap((u) => kindsOf(u.value)))];
     return Object.keys(PROTOCOL);
   };
   const unknownAccessors = new Set();
