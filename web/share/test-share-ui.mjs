@@ -55,7 +55,8 @@ try {
 
   // signed out: the dialog offers sign-in, returning to this page with ?share
   await ev("document.querySelector('#sharemenu').click()");
-  await until("document.querySelector('#sharedlg').open");
+  // (the dialog opens at once, saying it's checking the sign-in: what it offers comes after the check)
+  await until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden");
   ok(await ev("!document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "signed out: Sign in with CoCalc");
   ok((await ev("document.querySelector('#signin').getAttribute('href')")).startsWith("/auth/login?return=%2F%3Fshare"), "sign-in returns to the page with ?share");
   await ev("document.querySelector('#sharedlg').close()");

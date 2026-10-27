@@ -348,7 +348,7 @@ try {
     ok(await ev("!document.querySelector('#shareform').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareunreachable').hidden"), "a 503 from the sign-in check: the form as before, not 'Sign in', and the list opens");
     await closeDialog();
     await ev("document.querySelector('#sharemenu').click()");
-    await until("document.querySelector('#sharedlg').open", 10000).catch(() => {});
+    await until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden", 10000).catch(() => {});
     ok(await ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareform').hidden"), "...and File → Share again: still the Share dialog, not Copy share link");
     await closeDialog();
     await ev("window.fetch = window.__fetch");
@@ -383,14 +383,16 @@ try {
     await q.send("Page.addScriptToEvaluateOnNewDocument", { source: "(() => { const f = window.fetch; window.__me = 503; window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? Promise.resolve(new Response('x', { status: window.__me })) : f(u, o)); })()" });
     await q.send("Page.navigate", { url: dev.site + "/" });
     await q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+    // (on a failure, the dialog's state: which part of it is shown)
+    const st = () => q.ev("JSON.stringify({ open: document.querySelector('#sharedlg').open, checking: !document.querySelector('#sharechecking').hidden, up: !document.querySelector('#shareup').hidden, unreachable: !document.querySelector('#shareunreachable').hidden, signin: !document.querySelector('#sharesignin').hidden, form: !document.querySelector('#shareform').hidden, menu: document.querySelector('#sharemenu').textContent, stubbed: window.__me, status: document.querySelector('#status')?.textContent })");
     await q.ev("document.querySelector('#sharemenu').click()");
     await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden", 10000).catch(() => {});
-    ok(await q.ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareup').hidden && !document.querySelector('#shareunreachable').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "nothing known and the check fails again: the dialog says why, with neither 'Sign in' nor the form");
+    ok(await q.ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareup').hidden && !document.querySelector('#shareunreachable').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "nothing known and the check fails again: the dialog says why, with neither 'Sign in' nor the form: " + (await st()));
     await q.ev("document.querySelector('#sharedlg').close()");
     await q.ev("window.__me = 404");
     await q.ev("document.querySelector('#sharemenu').click()");
     await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden", 10000).catch(() => {});
-    ok(await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#shareup').hidden && !document.querySelector('#sharelink').hidden"), "then a 404 (this site has no sharing): no Upload section at all, the link still there");
+    ok(await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#shareup').hidden && !document.querySelector('#sharelink').hidden"), "then a 404 (this site has no sharing): no Upload section at all, the link still there: " + (await st()));
     await raw("Target.closeTarget", { targetId: q.targetId });
     await raw("Target.disposeBrowserContext", { browserContextId });
   }
