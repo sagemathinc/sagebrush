@@ -9,7 +9,7 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { killTree, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
-import { STOP_BOUND_MS, stopGate } from "./interrupt-classify.mjs";
+import { STOP_BOUND_MS, malformed, stopGate, validTime } from "./interrupt-classify.mjs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const LAUNCHER = process.env.SB_LAUNCHER ?? join(ROOT, "packages/sagebrush/bin/sagebrush.cjs"); // (SB_LAUNCHER: another build, for checking the harness)
@@ -46,6 +46,9 @@ export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS,
     const t0 = now();
     const marks = [], sends = [];
     let text = "", buf = "", done = false, exit = null;
+    // (the first KeyboardInterrupt line after a press, on the harness clock: the prompt's caller endpoint, which has
+    // no marker of its own; magma H1 on #225)
+    let ki_text_t = null;
     // (in the one lifecycle registry from its spawn: killed if the harness is stopped, astra CORR-168-1)
     const known = track(p.pid);
     const remember = () => { const t = procTable(); for (const q of sessionTree(p.pid, known)) if (t.has(q)) known.set(q, t.get(q).start); };
@@ -90,10 +93,11 @@ export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS,
         if (left.length === 0) untrack(p.pid);
         const tr = existsSync(trace) ? readFileSync(trace, "utf8").split("\n").filter(Boolean) : [];
         rmSync(dir, { recursive: true, force: true });
-        resolve({ end: why, exit, marks, sends, gone_ms, text: text.slice(-2000), alive_at_end: aliveAtEnd, left, trace: tr, wall_ms: now() - t0 });
+        resolve({ end: why, exit, marks, sends, ki_text_t, gone_ms, text: text.slice(-2000), alive_at_end: aliveAtEnd, left, trace: tr, wall_ms: now() - t0 });
       }, 300);
     };
     const onLine = (line) => {
+      if (ki_text_t == null && sends.some((x) => x.act === "press") && /KeyboardInterrupt/.test(line)) ki_text_t = now();
       // a marker, its trial number if any, and the rest of the line ("PROBE yes": mk PROBE, rest "yes";
       // "RET 0.25": mk RET, rest "0.25", since a trial number ends at a space or the end, pilot 4)
       const pm = parseMarker(line);
@@ -123,10 +127,12 @@ export function parseMarker(line) {
 const safeRead = (f) => { try { return readFileSync(f, "utf8"); } catch { return ""; } };
 const markT = (r, mk) => r.marks.find((x) => x.mk === mk)?.t;
 // a press's raw latency to its caller endpoint (the KI mark, or the exit), against the Stop bound: null when
-// honoured in time, else the cell's FAIL.  A press scheduled after ENTER with no send time is a harness defect.
+// honoured in time, else the cell's FAIL.  Both times are validated before the difference is taken: a press with
+// no valid send time, or an endpoint that is no valid time, is malformed evidence (INVALID, never KNOWN: R1).
 const pressGate = (r, k, endT, what) => {
   const s = r.sends[k];
-  if (!s || s.t == null || s.error) return { outcome: "FAIL", why: `harness bug: press ${k + 1} has no send time${s?.error ? " (" + s.error + ")" : ""}` };
+  if (!s || s.error || !validTime(s.t)) return malformed(`press ${k + 1} has no valid send time${s?.error ? " (" + s.error + ")" : ` (${JSON.stringify(s?.t)})`}`);
+  if (!validTime(endT)) return malformed(`no valid time for ${what} (${JSON.stringify(endT)})`);
   return stopGate(endT - s.t, what);
 };
 const lat = (x) => ({ latency_ms: Math.round(x), latency_raw_ms: x });
@@ -143,8 +149,9 @@ export const TRIALS = {
       if (host === "prompt") {
         // the prompt survives: KeyboardInterrupt shown, then the next input runs (the probe)
         if (!/KeyboardInterrupt/.test(r.text)) return { outcome: "FAIL", why: "no KeyboardInterrupt" };
-        // (the prompt has no KI marker, so its Stop latency is not measured here: stop_gate says so)
-        return markT(r, "PROBE") ? { outcome: "PASS", stop_gate: "not measured on the prompt" } : { outcome: "FAIL", why: "the prompt did not take the next input" };
+        // (the caller endpoint is the first KeyboardInterrupt line after press 1, stamped by runProc: gated like the CLI's exit)
+        if (!markT(r, "PROBE")) return { outcome: "FAIL", why: "the prompt did not take the next input" };
+        return pressGate(r, 0, r.ki_text_t ?? NaN, "the KeyboardInterrupt") ?? { outcome: "PASS", ...lat(r.ki_text_t - r.sends[0].t) };
       }
       if (!/KeyboardInterrupt/.test(r.text)) return { outcome: "FAIL", why: "no KeyboardInterrupt traceback" };
       if (!r.exit || !ended130(r.exit)) return { outcome: "FAIL", why: `exit ${JSON.stringify(r.exit)}, not 130` };
@@ -172,30 +179,47 @@ export const TRIALS = {
     },
   },
   // S3: a second press 0.5 s after the first, while the first is pending (a regex that doesn't poll): escalation, 130.
-  // Two verdicts on the CLI: escalation, judged as before, and first_stop, the first press against the Stop bound.
-  // An escalation proves the first press was not honoured (recorded before escalation is judged: a second press
-  // never erases the first request's missed deadline); the first press ending the program itself is honoured
-  // (PASS: nothing left to escalate) or honoured late.  The why leads with escalation's failure if any, else with
-  // "first Stop not honoured", the signature a baseline entry may pin (never "honoured late").
+  // Two independent verdicts on every judged path, CLI and prompt: escalation, as before, and first_stop, press 1
+  // against the Stop bound (astra2/magma/daybreak2 #225 R3).  The missed first deadline is proven from the ACTUAL
+  // sends, never the schedule: both presses sent at valid times more than 250 ms apart, with no endpoint for press 1
+  // (the CLI's exit, the prompt's KeyboardInterrupt line) before press 2 went.  Missing, malformed or coalesced
+  // sends are malformed evidence (INVALID, both verdicts INVALID), never the pinned "first Stop not honoured".  Press 1
+  // ending the program itself is honoured (PASS) or honoured late, with escalation not exercised.  The why leads with
+  // escalation's failure if any, else with "first Stop not honoured", which a baseline entry may pin.
   S3: {
     hosts: ["cli", "prompt"],
     needsRegex: true,
     src: (n) => REGEX(n) + `print("ENTER 1", flush=True)\nre.match(r"(a+)+$", _s)\nprint("RET 1", flush=True)\n`,
     schedule: () => [{ after: "ENTER 1", ms: 500, act: "press" }, { after: "ENTER 1", ms: 1000, act: "press" }],
     judge(r, host) {
+      const both = (v) => ({ escalation: v, first_stop: v });
+      const bad = (w) => ({ ...malformed(w), ...both("INVALID") });
+      const [s0, s1] = r.sends;
       const ret = markT(r, "RET 1");
-      if (ret) return ret < (r.sends[0]?.t ?? Infinity) ? { outcome: "INVALID", why: "the regex returned before the presses" } : { outcome: "FAIL", why: "no escalation: the presses were not recognized, the regex ran to completion" };
-      if (!r.exit || !ended130(r.exit)) return { outcome: "FAIL", why: `no escalation: exit ${JSON.stringify(r.exit)}`, first_stop: "not honoured" };
-      if (r.alive_at_end.length) return { outcome: "FAIL", why: "the escalation left processes running: " + r.alive_at_end.join(","), first_stop: "not honoured" };
-      const s1 = r.sends[1];
-      // (the first press ended the program before the second was sent: no escalation to judge)
-      if (host !== "prompt" && (!s1 || s1.error || r.exit.t < s1.t)) {
-        const g = pressGate(r, 0, r.exit.t, "the exit after press 1");
-        return g ? { ...g, first_stop: g.late ? "honoured late" : "harness bug", escalated: false } : { outcome: "PASS", first_stop: "honoured", escalated: false, ...lat(r.exit.t - r.sends[0].t) };
+      if (ret != null && !validTime(ret)) return bad(`RET 1's time ${JSON.stringify(ret)}`);
+      if (ret != null && s0 && validTime(s0.t) && ret < s0.t) return { outcome: "INVALID", why: "the regex returned before the presses", ...both("INVALID") };
+      if (!s0 || s0.error || !validTime(s0.t)) return bad(`press 1 not sent at a valid time (${JSON.stringify(s0 ?? null)})`);
+      if (r.exit && !validTime(r.exit.t)) return bad(`the exit's time ${JSON.stringify(r.exit.t)}`);
+      if (r.ki_text_t != null && !validTime(r.ki_text_t)) return bad(`the KeyboardInterrupt line's time ${JSON.stringify(r.ki_text_t)}`);
+      // (press 2 sent but its time unreadable: the exit can't be attributed to either press)
+      if (s1 && !s1.error && !validTime(s1.t)) return bad(`press 2's send time ${JSON.stringify(s1.t)}`);
+      const s1ok = !!s1 && !s1.error && validTime(s1.t);
+      // press 1's own endpoint, if it came before press 2 was sent: the prompt's KeyboardInterrupt line, the CLI's 130
+      const end1 = host === "prompt" ? r.ki_text_t : r.exit && ended130(r.exit) ? r.exit.t : null;
+      if (end1 != null && (!s1ok || end1 < s1.t)) {
+        const g = stopGate(end1 - s0.t, host === "prompt" ? "the KeyboardInterrupt after press 1" : "the exit after press 1");
+        const nx = { escalation: "not exercised (press 1 ended it)", escalated: false };
+        return g ? { ...g, ...nx, first_stop: g.late ? "honoured late" : "INVALID" } : { outcome: "PASS", ...nx, first_stop: "honoured", ...lat(end1 - s0.t) };
       }
-      const esc = { escalated: true, latency_ms: Math.round(r.exit.t - s1.t), latency_raw_ms: r.exit.t - s1.t };
-      if (host === "prompt") return { outcome: "PASS", ...esc, first_stop: "not measured on the prompt" };
-      return { outcome: "FAIL", why: `first Stop not honoured: no KeyboardInterrupt or exit within ${STOP_BOUND_MS} ms of press 1 (the second press escalated)`, first_stop: "not honoured", escalation: "PASS", ...esc };
+      if (!s1ok) return bad(`press 2 not sent at a valid time (${JSON.stringify(s1 ?? null)})`);
+      const spacing = s1.t - s0.t;
+      if (!(spacing > STOP_BOUND_MS)) return bad(`the presses were ${spacing.toFixed(1)} ms apart, not more than ${STOP_BOUND_MS}: an escalation proves no missed first deadline`);
+      const missed = { first_stop: "not honoured", press_spacing_ms: +spacing.toFixed(1) };
+      if (ret != null) return { outcome: "FAIL", why: "no escalation: the presses were not recognized, the regex ran to completion", escalation: "FAIL", ...missed };
+      if (!r.exit || !ended130(r.exit)) return { outcome: "FAIL", why: `no escalation: exit ${JSON.stringify(r.exit)}`, escalation: "FAIL", ...missed };
+      if (r.alive_at_end.length) return { outcome: "FAIL", why: "the escalation left processes running: " + r.alive_at_end.join(","), escalation: "FAIL", ...missed };
+      const e = r.exit.t - s1.t;
+      return { outcome: "FAIL", why: `first Stop not honoured: no KeyboardInterrupt or exit within ${STOP_BOUND_MS} ms of press 1 (the presses were ${spacing.toFixed(1)} ms apart; the second press escalated)`, escalation: "PASS", escalated: true, latency_ms: Math.round(e), latency_raw_ms: e, ...missed };
     },
   },
   // S4: the first press stays pending past the 2 s window; a second press at 3 s re-arms, never escalates;
@@ -270,11 +294,12 @@ const runS6 = (host, flags, cell) => runProc({ host, flags, src: TRIALS.S6.src()
 
 // a signal row from its cells and its baseline entry (if any): FAIL / INCOMPLETE / PASS, then KNOWN when
 // every failing cell matches the entry's signature, FIXED when an entry's row passes.  A press honoured late
-// is never KNOWN, whatever its why says (S-delta Stop-250: only a waiver covers it, and none covers signals)
+// is never KNOWN, whatever its why says (S-delta Stop-250: only a waiver covers it, and none covers signals), nor is
+// a row with malformed evidence in any cell (R1)
 export function signalOutcome(cells, b) {
   const outcome = cells.some((c) => c.outcome === "FAIL") ? "FAIL" : cells.some((c) => c.outcome !== "PASS") ? "INCOMPLETE" : "PASS";
   const fails = cells.filter((c) => c.outcome === "FAIL");
-  const fin = !b ? outcome : outcome === "PASS" ? "FIXED" : outcome === "FAIL" && fails.every((c) => !c.late && new RegExp(b.signature).test(c.why)) ? "KNOWN" : outcome;
+  const fin = !b ? outcome : outcome === "PASS" ? "FIXED" : outcome === "FAIL" && !cells.some((c) => c.malformed) && fails.every((c) => !c.late && new RegExp(b.signature).test(c.why)) ? "KNOWN" : outcome;
   return { outcome, fin };
 }
 

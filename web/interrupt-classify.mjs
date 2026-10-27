@@ -9,10 +9,15 @@
 // ("did not stop", "no KeyboardInterrupt") is "not honoured", which a baseline entry may pin, as before.
 export const STOP_BOUND_MS = 250;
 export const POLL_GAP_MS = 100; // §5: recognized this fast, the route polled
-// a request's raw latency against the bound: null when honoured in time, else the cell's FAIL ("late": a
-// finite latency past the bound; a missing, NaN or negative one is a harness defect, never a pass)
+// Evidence that can't be judged (a missing, null, string, NaN, infinite or negative time; a malformed XK
+// calibration) is INVALID with `malformed`: never a pass, never KNOWN under any baseline signature, never WAIVED
+// (astra2 #225 R1).  Every time is validated BEFORE a difference is taken, so nothing is coerced.
+export const validTime = (x) => typeof x === "number" && Number.isFinite(x) && x >= 0;
+export const malformed = (why) => ({ outcome: "INVALID", why: "invalid evidence: " + why, malformed: true });
+// a request's raw latency against the bound: null when honoured in time, else the cell's FAIL ("late": a finite
+// latency past the bound) or, for a latency that is no valid number, the cell's malformed INVALID
 export function stopGate(latency, what = "the KeyboardInterrupt") {
-  if (typeof latency !== "number" || !Number.isFinite(latency) || latency < 0) return { outcome: "FAIL", why: `harness bug: no valid latency for ${what} (${latency})` };
+  if (typeof latency !== "number" || !Number.isFinite(latency) || latency < 0) return malformed(`no valid latency for ${what} (${latency})`);
   if (latency <= STOP_BOUND_MS) return null;
   return { outcome: "FAIL", why: `honoured late: ${what} came ${latency.toFixed(1)} ms after the Stop, past the ${STOP_BOUND_MS} ms bound`, late: true, latency_raw_ms: latency };
 }
@@ -21,10 +26,13 @@ export function stopGate(latency, what = "the KeyboardInterrupt") {
 // XSTART i before it, XEND i after it) or { kind: "bound", T_ms, f } (the Stop at f of T).
 export function classifyXK(t, xk) {
   const base = classify(t);
-  if (!xk) return base;
+  if (!xk || base.malformed) return base;
+  // (an XK calibration that isn't a valid window R or bound T, f can't bound anything: malformed, R1)
+  if (xk.kind === "window" && !(validTime(xk.R_ms) && xk.R_ms > 0)) return malformed(`XK window R_ms ${xk.R_ms}`);
+  if (xk.kind === "bound" && !(validTime(xk.T_ms) && xk.T_ms > 0 && typeof xk.f === "number" && xk.f >= 0 && xk.f <= 1)) return malformed(`XK bound T_ms ${xk.T_ms}, f ${xk.f}`);
   if (xk.kind === "window") {
     const x = t.marks.XSTART, e = t.marks.XEND;
-    const inside = t.t_send != null && x && x.t < t.t_send && !(e && e.t < t.t_send);
+    const inside = validTime(t.t_send) && x && validTime(x.t) && x.t < t.t_send && !(e && e.t < t.t_send);
     if (!inside) return { ...base, xk_inside: false };
     const bound = xk.R_ms + Math.max(1000, 0.25 * xk.R_ms);
     // (past the window's own bound the call didn't end the wait: never waivable, whatever the latency)
@@ -88,8 +96,11 @@ export function classify(t) {
   // a Stop that could not be dispatched (the process gone, EPERM...): the cell is uncovered, never a
   // result, and the error is kept (astra CORR-168-R2-1)
   if (t.send_error) return { outcome: "INVALID", why: "the Stop could not be sent: " + (t.send_error.error ?? t.send_error), send_error: t.send_error };
-  // (the target started and wasn't done, yet no send time was recorded: the harness lost the request, a FAIL)
-  if (t.t_send == null) return t.marks.RET ? { outcome: "INVALID", why: "returned before the Stop" } : t.marks.ENTER ? { outcome: "FAIL", why: "harness bug: the target started (ENTER) but no Stop send time was recorded" } : { outcome: "INVALID", why: "no Stop sent" };
+  // (every marker present, detection diagnostics included, has a valid time before any difference is taken: R1)
+  for (const [k, v] of Object.entries(t.marks ?? {})) if (v != null && !validTime(v.t)) return malformed(`the ${k} marker's time ${JSON.stringify(v.t)}`);
+  // (the target started and wasn't done, yet no send time was recorded: the harness lost the request)
+  if (t.t_send == null) return t.marks.RET ? { outcome: "INVALID", why: "returned before the Stop" } : t.marks.ENTER ? malformed("the target started (ENTER) but no Stop send time was recorded") : { outcome: "INVALID", why: "no Stop sent" };
+  if (!validTime(t.t_send)) return malformed(`the Stop's send time ${JSON.stringify(t.t_send)}`);
   // (a KI from before the send is stale, another trial's or the setup's: never a tiny latency)
   if (t.marks.KI && t.marks.KI.t < t.t_send) return { outcome: "INVALID", why: "stale KI before the Stop" };
   if (t.marks.RET) {
@@ -181,8 +192,8 @@ export function againstBaseline(row, baseline) {
   // (a row with a failed Stop dispatch never matches a baseline: its cells say nothing about the route)
   if (!bs.length || row.leak?.ok === false || (row.trials ?? []).some((t) => t.send_error)) return row.outcome;
   if (row.outcome === "PASS" || row.outcome === "EXCEPTION") return "FIXED";
-  // (a Stop honoured late is never KNOWN: only a waiver covers it, withWaiver)
-  if ((row.trials ?? []).some((t) => t.outcome === "FAIL" && t.late)) return row.outcome;
+  // (a Stop honoured late is never KNOWN: only a waiver covers it, withWaiver; nor is a row with invalid evidence)
+  if ((row.trials ?? []).some((t) => (t.outcome === "FAIL" && t.late) || t.malformed)) return row.outcome;
   const res = bs.map((b) => new RegExp(b.signature));
   const whys = (row.trials ?? []).filter((t) => t.outcome === "FAIL").map((t) => t.why ?? "");
   return row.outcome === "FAIL" && whys.length > 0 && whys.every((w) => res.some((re) => re.test(w))) ? "KNOWN" : row.outcome;
@@ -192,6 +203,9 @@ export function againstBaseline(row, baseline) {
 // cell was honoured late (not past an XK window's own bound; nothing else failed, no leak), and its scope
 // is exactly the row's case, host and the case's declared call.  The row is then WAIVED (own_outcome FAIL,
 // never counted as a pass); a matching record that has ended leaves it FAIL, saying so.
+// the rows that fail a --ci run (the matrix's exit): WAIVED and KNOWN are not among them, INVALID and INCOMPLETE are
+export const CI_FAILING = ["FAIL", "FIXED", "INCOMPLETE", "INVALID", "PENDING-READY"];
+export const ciFailing = (rows) => rows.filter((r) => CI_FAILING.includes(r.outcome));
 export const WAIVER_FIELDS = ["id", "granted", "by", "words", "scope", "owner", "follow_up", "ends_when", "ended"];
 export function waiverErrors(records) {
   const errs = [];
@@ -205,11 +219,17 @@ export function waiverErrors(records) {
   }
   return errs;
 }
+// (astra2 #225 R2: every required cell present and eligible, PASS, EXCEPTION or the scoped late FAIL, with nothing
+// INVALID, UNCALIBRATED or unknown; the leak measured and ok; and each late Stop inside the declared call's window,
+// with a valid bound: a declared call binds the case, it doesn't waive another phase of it)
+const lateInWindow = (t) => t.outcome === "FAIL" && t.late === true && !t.past_xk_bound && !t.malformed && t.xk_inside === true && Number.isFinite(t.xk_bound_ms) && t.xk_bound_ms > 0 && validTime(t.latency_raw_ms);
 export function withWaiver(row, outcome, waivers, call) {
   if (outcome !== "FAIL" || call == null) return { outcome };
   const w = (waivers ?? []).find((x) => x.scope?.case === row.case && x.scope?.host === row.host && x.scope?.call === call);
-  const fails = (row.trials ?? []).filter((t) => t.outcome === "FAIL");
-  if (!w || !fails.length || row.leak?.ok === false || !fails.every((t) => t.late && !t.past_xk_bound)) return { outcome };
+  const cells = row.trials ?? [];
+  const fails = cells.filter((t) => t.outcome === "FAIL");
+  const eligible = cells.length > 0 && cells.every((t) => t.outcome === "PASS" || t.outcome === "EXCEPTION" || lateInWindow(t));
+  if (!w || !fails.length || row.leak?.ok !== true || !eligible) return { outcome };
   if (w.ended !== false) return { outcome: "FAIL", why: `waiver ${w.id} ended: remove the record in the fixing change` };
   const late = Math.max(...fails.map((t) => t.latency_raw_ms));
   return { outcome: "WAIVED", waiver: w.id, why: `${fails.length} cell(s) honoured late, at most ${late.toFixed(1)} ms; waived by ${w.id} (William, ${w.granted})` };

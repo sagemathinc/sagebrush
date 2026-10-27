@@ -23,7 +23,11 @@ test("S1: the traceback then SIGINT's default action (signal or 130) passes; a c
   assert.equal(judge("S1", { ...base, text: "KeyboardInterrupt", exit: { code: 0, signal: null, t: 1030 } }).outcome, "FAIL");
   assert.match(judge("S1", { ...base, exit: { code: null, signal: "SIGINT", t: 1030 } }).why, /no KeyboardInterrupt/);
   // the prompt: it survives and takes the next input
-  assert.equal(judge("S1", { ...base, text: "KeyboardInterrupt", marks: [m("PROBE", 3000)] }, "prompt").outcome, "PASS");
+  // (gated at its KeyboardInterrupt line, stamped by runProc as ki_text_t: 250 ms passes, 251 is late, unstamped fails)
+  assert.equal(judge("S1", { ...base, text: "KeyboardInterrupt", ki_text_t: 1250, marks: [m("PROBE", 3000)] }, "prompt").outcome, "PASS");
+  const pl = judge("S1", { ...base, text: "KeyboardInterrupt", ki_text_t: 1251, marks: [m("PROBE", 3000)] }, "prompt");
+  assert.deepEqual([pl.outcome, pl.late], ["FAIL", true]);
+  assert.match(judge("S1", { ...base, text: "KeyboardInterrupt", marks: [m("PROBE", 3000)] }, "prompt").why, /^invalid evidence: no valid time for the KeyboardInterrupt/);
   assert.match(judge("S1", { ...base, marks: [] }, "prompt").why, /no KeyboardInterrupt/);
 });
 
@@ -37,11 +41,16 @@ test("S2: two caught KIs and exit 0; a second press that ends the program fails"
 test("S3: a second press while pending escalates (130, nothing left); a completed regex is a failure to recognize", () => {
   const two = { ...base, sends: [{ t: 1000 }, { t: 1500 }] };
   // (on the CLI an escalation now also says the first Stop was not honoured: the cell FAILs with that
-  // signature, which S3 cli's baseline entry pins; on the prompt the first Stop isn't measured)
+  // signature, which S3 cli's baseline entry pins; on the prompt too, since press 2 comes 500 ms after press 1)
   const esc = judge("S3", { ...two, exit: { code: null, signal: "SIGINT", t: 1520 } });
   assert.deepEqual([esc.outcome, esc.escalation, esc.first_stop, esc.escalated], ["FAIL", "PASS", "not honoured", true]);
   assert.match(esc.why, /^first Stop not honoured/);
-  assert.equal(judge("S3", { ...two, exit: { code: null, signal: "SIGINT", t: 1520 } }, "prompt").outcome, "PASS");
+  const pe = judge("S3", { ...two, exit: { code: null, signal: "SIGINT", t: 1520 } }, "prompt");
+  assert.deepEqual([pe.outcome, pe.first_stop], ["FAIL", "not honoured"]);
+  assert.match(pe.why, /^first Stop not honoured/);
+  // (the prompt honouring press 1 itself: its KeyboardInterrupt line before press 2, gated; late FAILs)
+  assert.deepEqual([judge("S3", { ...two, ki_text_t: 1200 }, "prompt").outcome, judge("S3", { ...two, ki_text_t: 1200 }, "prompt").first_stop], ["PASS", "honoured"]);
+  assert.equal(judge("S3", { ...two, ki_text_t: 1400 }, "prompt").late, true);
   assert.match(judge("S3", { ...two, exit: { code: null, signal: "SIGINT", t: 1520 }, alive_at_end: [4242] }).why, /left processes/);
   assert.match(judge("S3", { ...two, marks: [m("RET 1", 7000)], exit: { code: 0, signal: null, t: 7100 } }).why, /not recognized/);
   assert.equal(judge("S3", { ...two, marks: [m("RET 1", 900)], exit: { code: 0, signal: null, t: 950 } }).outcome, "INVALID");
@@ -63,7 +72,7 @@ test("Stop bound (S-delta Stop-250): S1's exit, S2's two KIs and S3's first pres
   const s1 = one(1250.4);
   assert.deepEqual([s1.outcome, s1.late], ["FAIL", true]);
   assert.match(s1.why, /the exit came 250\.4 ms/);
-  assert.match(judge("S1", { ...base, sends: [], text: "KeyboardInterrupt", exit: { code: null, signal: "SIGINT", t: 1030 } }).why, /harness bug: press 1 has no send time/);
+  assert.match(judge("S1", { ...base, sends: [], text: "KeyboardInterrupt", exit: { code: null, signal: "SIGINT", t: 1030 } }).why, /^invalid evidence: press 1 has no valid send time/);
   // S2: each press gated, the why names it
   const two = { ...base, sends: [{ t: 1000 }, { t: 5000 }], exit: { code: 0, signal: null, t: 6000 } };
   const ok = judge("S2", { ...two, marks: [m("KI 1", 1010), m("CONT", 1011), m("KI 2", 5250), m("END", 5251)] });
@@ -78,6 +87,68 @@ test("Stop bound (S-delta Stop-250): S1's exit, S2's two KIs and S3's first pres
   const s3late = s3(1400);
   assert.deepEqual([s3late.outcome, s3late.first_stop, s3late.late], ["FAIL", "honoured late", true]);
   assert.doesNotMatch(s3late.why, /^first Stop not honoured/);
+});
+
+test("R3: S3 proves the missed first deadline from the actual sends: two verdicts on every judged path; missing, malformed or coalesced sends are malformed evidence, never the pinned signature", () => {
+  const re = /^first Stop not honoured/;
+  const esc = (sends: object[], extra: object = {}, host = "cli") => judge("S3", { ...base, sends, exit: { code: null, signal: "SIGINT", t: (sends as any)[1]?.t + 20 || 1520 }, ...extra }, host);
+  // (the valid case: 500 ms apart, both verdicts, the spacing reported)
+  const ok5 = esc([{ t: 1000 }, { t: 1500 }]);
+  assert.deepEqual([ok5.outcome, ok5.escalation, ok5.first_stop, ok5.press_spacing_ms], ["FAIL", "PASS", "not honoured", 500]);
+  assert.ok(re.test(ok5.why));
+  // (coalesced presses: a delayed timer loop sent them 200 ms apart, or at once)
+  for (const sends of [[{ t: 1000 }, { t: 1200 }], [{ t: 1000 }, { t: 1000 }], [{ t: 1000 }, { t: 1250 }]]) {
+    const r = esc(sends);
+    assert.deepEqual([r.outcome, r.malformed, r.escalation, r.first_stop], ["INVALID", true, "INVALID", "INVALID"], JSON.stringify(sends));
+    assert.ok(!re.test(r.why), r.why);
+  }
+  // (missing or malformed sends, on the CLI and the prompt)
+  for (const host of ["cli", "prompt"]) {
+    for (const sends of [[], [{ t: "1000" }, { t: 1500 }], [{ t: 1000 }, { t: NaN }], [{ t: 1000, error: "ESRCH" }, { t: 1500 }], [{ t: -5 }, { t: 1500 }]]) {
+      const r = judge("S3", { ...base, sends, exit: { code: null, signal: "SIGINT", t: 1520 } }, host);
+      assert.deepEqual([r.outcome, r.malformed], ["INVALID", true], host + " " + JSON.stringify(sends));
+      assert.ok(!re.test(r.why));
+    }
+  }
+  // (every non-INVALID path carries both verdicts, failures included)
+  const two = [{ t: 1000 }, { t: 1500 }];
+  const paths = [
+    judge("S3", { ...base, sends: two, marks: [m("RET 1", 7000)], exit: { code: 0, signal: null, t: 7100 } }),
+    judge("S3", { ...base, sends: two, exit: null }),
+    judge("S3", { ...base, sends: two, exit: { code: null, signal: "SIGINT", t: 1520 }, alive_at_end: [4242] }),
+    judge("S3", { ...base, sends: two, exit: { code: null, signal: "SIGINT", t: 1520 } }, "prompt"),
+    judge("S3", { ...base, sends: two, ki_text_t: 1200 }, "prompt"),
+    judge("S3", { ...base, sends: two, exit: { code: null, signal: "SIGINT", t: 1200 } }),
+  ];
+  for (const p of paths) {
+    assert.ok(p.outcome !== "INVALID" && typeof p.escalation === "string" && typeof p.first_stop === "string", JSON.stringify(p));
+  }
+  assert.deepEqual(paths.slice(0, 3).map((p) => [p.escalation, p.first_stop]), [["FAIL", "not honoured"], ["FAIL", "not honoured"], ["FAIL", "not honoured"]]);
+  // (a second press never supplies a first-Stop PASS: the prompt's escalation is not honoured)
+  assert.deepEqual([paths[3].outcome, paths[3].first_stop], ["FAIL", "not honoured"]);
+});
+
+test("R1 signals: pressGate validates the send's own time before subtracting: a string or negative send time is malformed in S1, S2 and S4", () => {
+  for (const t of ["1000", -5, null]) {
+    const one = judge("S1", { ...base, sends: [{ act: "press", t }], text: "KeyboardInterrupt", exit: { code: null, signal: "SIGINT", t: 1030 } });
+    assert.deepEqual([one.outcome, one.malformed], ["INVALID", true], "S1 " + JSON.stringify(t));
+  }
+  const s2 = judge("S2", { ...base, sends: [{ t: 1000 }, { t: "5000" }], marks: [m("KI 1", 1010), m("CONT", 1011), m("KI 2", 5010), m("END", 5011)], exit: { code: 0, signal: null, t: 6000 } });
+  assert.deepEqual([s2.outcome, s2.malformed], ["INVALID", true]);
+  const s4 = judge("S4", { ...base, sends: [{ t: -1000 }, { t: 4000 }], marks: [m("KI 1", 1100), m("END", 1101)], exit: { code: 0, signal: null, t: 1200 } });
+  assert.deepEqual([s4.outcome, s4.malformed], ["INVALID", true]);
+});
+
+test("R1 signals: a malformed cell keeps a row out of KNOWN under any signature; it counts as INCOMPLETE alone", () => {
+  const so = (cells: object[], b: object | null) => {
+    const src = `import { signalOutcome } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(signalOutcome(${JSON.stringify(cells)}, ${JSON.stringify(b)})));`;
+    const p = spawnSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8" });
+    assert.equal(p.status, 0, p.stderr);
+    return JSON.parse(p.stdout);
+  };
+  const b = { signature: "." };
+  assert.equal(so([{ outcome: "FAIL", why: "first Stop not honoured" }, { outcome: "INVALID", why: "invalid evidence: x", malformed: true }], b).fin, "FAIL");
+  assert.equal(so([{ outcome: "INVALID", why: "invalid evidence: x", malformed: true }], b).fin, "INCOMPLETE");
 });
 
 test("baseline: S3 cli's entry pins only 'first Stop not honoured' (anchored); S4 cli's stays 'returned without a KeyboardInterrupt'", () => {

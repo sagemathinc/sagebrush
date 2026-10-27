@@ -17,7 +17,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, waiverErrors, widenedPick, withWaiver, xkRowOutcome } from "./interrupt-classify.mjs";
+import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, ciFailing, waiverErrors, widenedPick, withWaiver, xkRowOutcome } from "./interrupt-classify.mjs";
 import { killTracked, killTree, onStop, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 // William's waivers of the Stop bound (only active records; a malformed registry fails the run, below)
@@ -457,6 +457,6 @@ const rowsOf = (h, v) => (Array.isArray(v) ? v : v?.rows?.length ? v.rows : [{ c
 const all = [...Object.entries(out.hosts).flatMap(([h, v]) => rowsOf(h, v)), ...(out.signals ?? []), ...out.waiver_rows];
 // (WAIVED is not a pass: listed on its own, with its record)
 for (const r of all.filter((x) => x.outcome === "WAIVED")) console.log("WAIVED", r.case ?? r.trial, r.host ?? "", r.waiver, r.why ?? "");
-const bad = all.filter((r) => ["FAIL", "FIXED", "INCOMPLETE", "INVALID", "PENDING-READY"].includes(r.outcome));
+const bad = ciFailing(all);
 for (const r of bad) console.log(r.outcome, r.case ?? r.trial, r.host ?? "", r.outcome === "FIXED" ? "(remove its baseline entry)" : r.outcome === "PENDING-READY" ? "(its capability is present: make it required)" : r.why ?? "");
 process.exit(args.includes("--ci") && bad.length ? 1 : 0);
