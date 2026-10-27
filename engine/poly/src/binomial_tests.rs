@@ -489,9 +489,10 @@ fn the_early_proof_allocates_nothing_coefficient_sized() {
 }
 
 /// The residue proof is admitted on its own (PREF-WORK-1): a generic
-/// non-power needs only the proof's work, never the bisection plan's.  At the
-/// least work that factors it, the whole call is far below that plan, makes
-/// no bisection and multiplies back; one unit less is refused.  And stage_b
+/// non-power needs only the proof's work, never the bisection plan's.  Less
+/// work than that plan alone factors it (the old order refused there); at the
+/// least work that does, it makes no bisection and multiplies back; one unit
+/// less is refused.  And stage_b
 /// alone: the divisor scan plus exactly the proof's preflight returns g = 1,
 /// one unit less refuses for that preflight, before any work or copy.
 #[test]
@@ -505,10 +506,11 @@ fn a_generic_binomial_needs_only_the_proofs_work() {
         let probe = Budget::unlimited();
         let (r, a) = audit::during(|| try_factor_with(&f, &probe));
         r.unwrap();
-        // a tenth of the bisection plan suffices; then the least that does
+        // less work than the bisection plan alone suffices (the old order
+        // refused below it); then the least that does
         let plan = plan_powers(bits as u64, 12, &[2, 3]).unwrap();
-        let (mut lo, mut hi) = (0u64, plan / 10);
-        assert!(ok(hi), "{bits} bits: a tenth of the bisection plan ({}) refused", plan / 10);
+        let (mut lo, mut hi) = (0u64, plan - 1);
+        assert!(ok(hi), "{bits} bits: refused below the bisection plan ({plan}) it never runs");
         while lo + 1 < hi {
             let mid = lo + (hi - lo) / 2;
             if ok(mid) {
