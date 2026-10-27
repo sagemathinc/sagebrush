@@ -51,30 +51,39 @@ test("the gate passes on this tree: every record classified, nothing stale, the 
   assert.equal(g.classes.size, g.cur.records.length);
 });
 
-// (train-16, r9) the tracked tree only: each kind of reference into build/, built and not
-const GEN_CLI = readFileSync(join(ROOT, "scripts/build-cli.mjs"), "utf8");
+// (train-16, r9, r10) the tracked tree only: each kind of reference into build/, built and not
+const GEN = "scripts/build-cli.mjs";
+const LM = "build/cli/lib-meta.gen.js";
+const GEN_INPUTS: { path: string; text: string }[] = ["scripts/build-cli.mjs", "scripts/build-id.mjs", "scripts/packages.mjs"].map((path) => ({ path, text: readFileSync(join(ROOT, path), "utf8") }));
+const GEN_FILES = Object.fromEntries(GEN_INPUTS.map((i) => [i.path, i.text]));
 const LIB_META = 'globalThis.__SAGEBRUSH_BUILD_ID__ = "b";\nglobalThis.__SAGEBRUSH_VERSION__ = "v";\nglobalThis.__SAGEBRUSH_NOTICES__ = [];\n';
 const FX_OPTS = JSON.parse(readFileSync(join(ROOT, "tsconfig.json"), "utf8")).compilerOptions;
-const fxConfig = (extra: object) => JSON.stringify({ compilerOptions: { ...FX_OPTS, ...extra }, include: ["src/**/*.ts", "pyparse/src/**/*.ts", "web/**/*.ts"] });
+const fxConfig = (extra: object, more: object = {}) => JSON.stringify({ compilerOptions: { ...FX_OPTS, ...extra }, include: ["src/**/*.ts", "pyparse/src/**/*.ts", "web/**/*.ts"], ...more });
 const STORE = "export const a = new Uint8Array(3);\n";
+const link = (target: string) => `\0symlink:${target}`;
 const REFERENCE_CASES: [string, Record<string, string>, Record<string, string>, string[]][] = [
   // [name, tracked files, the build's files, the generated problems' paths]
-  ["the reviewed generated module", { "web/worker.ts": 'import "../build/cli/lib-meta.gen.js";\nimport { u } from "./util";\nexport const w = [u, new Uint8Array(2)];\n', "web/util.ts": "export const u = 1;\n", "scripts/build-cli.mjs": GEN_CLI }, { "build/cli/lib-meta.gen.js": LIB_META }, []],
+  ["the reviewed generated module", { "web/worker.ts": 'import "../build/cli/lib-meta.gen.js";\nimport { u } from "./util";\nexport const w = [u, new Uint8Array(2)];\n', "web/util.ts": "export const u = 1;\n", ...GEN_FILES }, { [LM]: LIB_META }, []],
   ["a triple-slash .ts reference", { "web/worker.ts": '/// <reference path="../build/hidden.ts" />\nexport const w = 1;\n' }, { "build/hidden.ts": "const hiddenStore = new Uint8Array(1);\n" }, ["build/hidden.ts"]],
   ["a triple-slash .d.ts reference (it would change the checker)", { "web/worker.ts": '/// <reference path="../build/types.d.ts" />\nexport const m = mk();\n' }, { "build/types.d.ts": "declare function mk(): ArrayBuffer;\n" }, ["build/types.d.ts"]],
   ["a tracked declaration file's reference", { "web/worker.ts": '/// <reference path="./types.d.ts" />\nexport const m = mk2();\n', "web/types.d.ts": '/// <reference path="../build/t2.d.ts" />\n' }, { "build/t2.d.ts": "declare function mk2(): ArrayBuffer;\n" }, ["build/t2.d.ts"]],
   ["a relative types reference", { "web/worker.ts": '/// <reference types="../build/tref" />\nexport const t = tr();\n' }, { "build/tref/index.d.ts": "declare function tr(): ArrayBuffer;\n" }, ["build/tref"]],
   ["a tsconfig path alias", { "tsconfig.json": fxConfig({ paths: { "gen/*": ["build/*"] } }), "web/worker.ts": 'import { a } from "gen/alias";\nexport const x = a;\n' }, { "build/alias.ts": STORE }, ["build", "build/alias"]],
   ["a tsconfig typeRoots entry", { "tsconfig.json": fxConfig({ typeRoots: ["./build/types", "./node_modules/@types"] }), "web/worker.ts": "export const w = 1;\n" }, { "build/types/x/index.d.ts": "declare function tx(): ArrayBuffer;\n" }, ["build/types"]],
-  ["a tracked symlink to a built file", { "web/link.ts": "\0symlink:../build/real.ts", "web/worker.ts": 'import { a } from "./link";\nexport const y = a;\n' }, { "build/real.ts": STORE }, ["build/real.ts"]],
-  ["a tracked symlink to the build directory", { "web/gen": "\0symlink:../build/gendir", "web/worker.ts": 'import { a } from "./gen/mod";\nexport const y = a;\n' }, { "build/gendir/mod.ts": STORE }, ["build/gendir/mod"]],
+  ["a tracked symlink to a built file", { "web/link.ts": link("../build/real.ts"), "web/worker.ts": 'import { a } from "./link";\nexport const y = a;\n' }, { "build/real.ts": STORE }, ["web/link.ts"]],
+  ["a tracked symlink to the build directory", { "web/gen": link("../build/gendir"), "web/worker.ts": 'import { a } from "./gen/mod";\nexport const y = a;\n' }, { "build/gendir/mod.ts": STORE }, ["web/gen", "web/gen/mod"]],
+  ["a tracked symlink in an include directory, nothing importing it (the roots' src/runtime/**)", { "src/runtime/gen": link("../../build/rt"), "web/worker.ts": "export const w = 1;\n" }, { "build/rt/a.ts": STORE }, ["src/runtime/gen"]],
+  ["a path through a hidden link back out of build/", { "web/d": link("../build"), "web/visible/v.ts": STORE, "web/worker.ts": 'import { a } from "./d/back/v";\nexport const y = a;\n' }, { "build/back": link("../web/visible") }, ["web/d", "web/d/back/v"]],
+  ["a tsconfig include into build/", { "tsconfig.json": JSON.stringify({ compilerOptions: FX_OPTS, include: ["src/**/*.ts", "web/**/*.ts", "build/**/*.ts"] }), "web/worker.ts": "export const w = 1;\n" }, { "build/inc.ts": STORE }, ["build"]],
   ["an import", { "web/worker.ts": 'import "../build/other.gen.js";\n' }, { "build/other.gen.js": "export {};\n" }, ["build/other.gen.js"]],
   ["an export from", { "web/worker.ts": 'export * from "../build/x/other.gen.js";\n' }, { "build/x/other.gen.js": "export {};\n" }, ["build/x/other.gen.js"]],
   ["an import()", { "web/worker.ts": 'export const p = () => import("../build/other.gen.js");\n' }, { "build/other.gen.js": "export {};\n" }, ["build/other.gen.js"]],
   ["a require", { "web/worker.ts": 'declare const require: (s: string) => unknown;\nexport const r = require("../build/other.gen.js");\n' }, { "build/other.gen.js": "export {};\n" }, ["build/other.gen.js"]],
   ["an import-equals", { "web/worker.ts": 'import o = require("../build/other.gen");\nexport const r = o;\n' }, { "build/other.gen.ts": "export const z = new Uint8Array(1);\n" }, ["build/other.gen"]],
   ["an import type", { "web/worker.ts": 'export type T = typeof import("../build/other.gen");\n' }, { "build/other.gen.ts": "export const z = new Uint8Array(1);\n" }, ["build/other.gen"]],
+  ["a chain of 40 links (the most the OS follows) into build/", { ...Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`web/l${i}.ts`, link(i === 39 ? "../build/t.ts" : `l${i + 1}.ts`)])), "web/worker.ts": 'import { a } from "./l0";\nexport const y = a;\n' }, { "build/t.ts": STORE }, Array.from({ length: 40 }, (_, i) => `web/l${i}.ts`)],
 ];
+const generatedKeys = (c: any) => G.gate(null, { table: {}, cur: c }).problems.filter((p: any) => p.problem === "generated");
 test("train-16: the census reads the tracked tree only: whatever references build/, a build changes nothing, and only a reviewed generated module passes the gate", () => {
   for (const [name, tracked, built, want] of REFERENCE_CASES) {
     const without = fixture(tracked);
@@ -83,90 +92,189 @@ test("train-16: the census reads the tracked tree only: whatever references buil
     assert.deepEqual(withBuild.records, without.records, `${name}: the records, built or not`);
     assert.deepEqual(withBuild.programFiles, without.programFiles, `${name}: the program's files, built or not`);
     for (const c of [without, withBuild]) {
-      assert.ok(!c.programFiles.some((f: string) => f.startsWith("build/") || f === "web/link.ts" || f.startsWith("web/gen/")), `${name}: ${c.programFiles.join(" ")}`);
-      const ps = G.gate(null, { table: {}, cur: c }).problems.filter((p: any) => p.problem === "generated");
-      assert.deepEqual(ps.map((p: any) => p.key).sort(), [...want].sort(), `${name}: ${JSON.stringify(c.header.generated)}`);
+      assert.ok(!c.programFiles.some((f: string) => f.startsWith("build/") || f === "web/link.ts" || /^web\/(gen|d)\/|^src\/runtime\/gen\/|^web\/l\d+\.ts$/.test(f)), `${name}: ${c.programFiles.join(" ")}`);
+      const ps = generatedKeys(c);
+      assert.deepEqual([...new Set(ps.map((p: any) => p.key))].sort(), [...want].sort(), `${name}: ${JSON.stringify(c.header.generated)}`);
       for (const p of ps) assert.match(p.detail, /in the excluded build output, with no reviewed generator$/, name);
     }
   }
   const reviewed = fixture(REFERENCE_CASES[0][1]);
-  assert.deepEqual(reviewed.header.generated, [{ path: "build/cli/lib-meta.gen.js", from: ["web/worker.ts"], generator: "scripts/build-cli.mjs", fragment_sha256: S.GENERATED["build/cli/lib-meta.gen.js"].fragment_sha256, contract: null }]);
-  // its generator missing from the tree: it fails, never passes by name
-  const { "scripts/build-cli.mjs": _, ...noGenerator } = REFERENCE_CASES[0][1];
-  const ps = G.generatedProblems(fixture(noGenerator));
-  assert.equal(ps.length, 1);
-  assert.match(ps[0].detail, /breaks the contract \(its generator scripts\/build-cli\.mjs is missing\)/);
+  assert.deepEqual(reviewed.header.generated, [{ path: LM, from: ["web/worker.ts"], generator: GEN, inputs: GEN_INPUTS.map((i) => i.path), generator_sha256: S.GENERATED[LM].generator_sha256, contract: null }]);
+  // its generator, or one of the generator's inputs, missing from the tree: it fails, never passes by name
+  for (const gone of [GEN, "scripts/build-id.mjs"]) {
+    const { [gone]: _, ...rest } = REFERENCE_CASES[0][1];
+    const ps = G.generatedProblems(fixture(rest));
+    assert.equal(ps.length, 1, gone);
+    assert.match(ps[0].detail, new RegExp(`breaks the contract \\(its generator's inputs are missing: ${gone.replace(/[.]/g, "\\.")}\\)`), gone);
+  }
 });
 
-test("train-16: the census host answers every read of an excluded path as missing, symlinks resolved; a program holding one is refused", () => {
+test("train-16: the census's links fail closed: more than 40, a cycle or a dangling cycle throws, built or not", () => {
+  const chain = (n: number) => ({ ...Object.fromEntries(Array.from({ length: n }, (_, i) => [`web/l${i}.ts`, link(i === n - 1 ? "../build/t.ts" : `l${i + 1}.ts`)])), "web/worker.ts": 'import { a } from "./l0";\nexport const y = a;\n' });
+  const cases: [string, Record<string, string>, RegExp][] = [
+    ["41 links", chain(41), /more than 40 symbolic links resolving .*web\/l0\.ts/],
+    ["a cycle", { "web/c1.ts": link("c2.ts"), "web/c2.ts": link("c1.ts"), "web/worker.ts": 'import { a } from "./c1";\nexport const y = a;\n' }, /a cycle of symbolic links at .*web\/c[12]\.ts/],
+    ["a dangling cycle (a link through itself)", { "web/dc.ts": link("dc.ts/x"), "web/worker.ts": 'import { a } from "./dc";\nexport const y = a;\n' }, /a cycle of symbolic links at .*web\/dc\.ts/],
+  ];
+  for (const [name, tracked, re] of cases) for (const extra of [{}, { "build/t.ts": STORE }] as Record<string, string>[]) assert.throws(() => fixture({ ...tracked, ...extra }), re, name);
+  // the resolver itself: 40 hops resolve, 41 throw
+  const dir = mkdtempSync(join(tmpdir(), "ab-links-"));
+  try {
+    writeFileSync(join(dir, "t"), "");
+    for (let i = 0; i < 41; i++) symlinkSync(i === 40 ? "t" : `k${i + 1}`, join(dir, `k${i}`));
+    assert.equal(S.resolveLinks(join(dir, "k1")), join(S.resolveLinks(dir), "t"));
+    assert.throws(() => S.resolveLinks(join(dir, "k0")), /more than 40 symbolic links/);
+    assert.equal(S.MAX_LINK_HOPS, 40);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("train-16: the census's tsconfig is read on the boundary: an extends into build/ (direct, nested, symlinked, in an array) is refused by name, built or not; no config diagnostic is dropped", () => {
+  const base = (extra: object) => JSON.stringify({ compilerOptions: FX_OPTS, ...extra });
+  const cases: [string, Record<string, string>, RegExp][] = [
+    ["direct", { "tsconfig.json": fxConfig({}, { extends: "./build/options.json" }) }, /extends excluded configs: build\/options\.json \(extended by tsconfig\.json\)/],
+    ["nested", { "tsconfig.json": fxConfig({}, { extends: "./tsconfig.base.json" }), "tsconfig.base.json": base({ extends: "./build/options" }) }, /extends excluded configs: build\/options\.json \(extended by tsconfig\.base\.json\)/],
+    ["symlinked", { "tsconfig.json": fxConfig({}, { extends: "./linked.json" }), "linked.json": link("build/options.json") }, /extends excluded configs: linked\.json \(extended by tsconfig\.json\)/],
+    ["in an array", { "tsconfig.json": fxConfig({}, { extends: ["./tsconfig.base.json", "./build/options.json"] }), "tsconfig.base.json": base({}) }, /extends excluded configs: build\/options\.json \(extended by tsconfig\.json\)/],
+    ["a missing tracked config (a diagnostic)", { "tsconfig.json": fxConfig({}, { extends: "./missing.json" }) }, /the census's tsconfig: .*missing\.json/],
+    ["an invalid option (a diagnostic)", { "tsconfig.json": fxConfig({ target: "es1999" }) }, /the census's tsconfig: .*target/],
+  ];
+  for (const [name, tracked, re] of cases) for (const extra of [{}, { "build/options.json": base({ compilerOptions: { strict: false } }) }] as Record<string, string>[]) assert.throws(() => fixture({ "web/worker.ts": "export const w = 1;\n", ...tracked, ...extra }), re, name);
+  // the control: a tracked extends chain is read
+  const ok = fixture({ "web/worker.ts": "export const w = new Uint8Array(1);\n", "tsconfig.json": fxConfig({}, { extends: "./tsconfig.base.json" }), "tsconfig.base.json": base({}) });
+  assert.equal(one(ok, "new Uint8Array ( 1 )").kind, "store");
+});
+
+test("train-16: the census host answers every read of an excluded path as missing, symlinks resolved, a path through build/ included; a program holding one is refused", () => {
   const dir = mkdtempSync(join(tmpdir(), "ab-host-"));
   try {
-    for (const [p, t] of Object.entries({ "build/x.ts": "export {};\n", "web/a.ts": "export {};\n" })) {
+    for (const [p, t] of Object.entries({ "build/x.ts": "export {};\n", "web/a.ts": "export {};\n", "web/visible/v.d.ts": "export {};\n" })) {
       mkdirSync(dirname(join(dir, p)), { recursive: true });
       writeFileSync(join(dir, p), t);
     }
     symlinkSync("../build/x.ts", join(dir, "web/l.ts"));
     symlinkSync("../build", join(dir, "web/d"));
     symlinkSync("../build/never.ts", join(dir, "web/dangling.ts"));
+    // a link out of build/ again: web/d/back is web/visible, reached through build/
+    symlinkSync("../web/visible", join(dir, "build/back"));
+    // `..` after a link is the OS's: web/up/../x.ts is build/x.ts when web/up is build/sub
+    mkdirSync(join(dir, "build/sub"));
+    symlinkSync("../build/sub", join(dir, "web/up"));
+    assert.equal(S.hiddenPath(dir, `${dir}/web/up/../x.ts`), true, "(a raw path: join() would fold the ..)");
+    assert.equal(S.hiddenPath(dir, `${dir}/web/visible/../a.ts`), false);
+    // an absolute link
+    symlinkSync(join(dir, "build/x.ts"), join(dir, "web/abs.ts"));
+    assert.equal(S.hiddenPath(dir, join(dir, "web/abs.ts")), true);
+    // the config parse's system, method by method
+    const sys = S.trackedSys(dir);
+    for (const p of ["web/a.ts", "web/visible/v.d.ts"]) assert.equal(sys.fileExists(join(dir, p)), true, p);
+    for (const p of ["build/x.ts", "web/l.ts", "web/d/back/v.d.ts"]) {
+      assert.equal(sys.fileExists(join(dir, p)), false, p);
+      assert.equal(sys.readFile(join(dir, p)), undefined, p);
+    }
+    assert.equal(typeof sys.readFile(join(dir, "web/a.ts")), "string");
+    assert.equal(sys.directoryExists(join(dir, "web")), true);
+    for (const p of ["build", "web/d"]) assert.equal(sys.directoryExists(join(dir, p)), false, p);
+    assert.deepEqual(sys.readDirectory(dir, [".ts"], undefined, ["**/*"]).map((f: string) => f.slice(dir.length + 1)).sort(), ["web/a.ts", "web/visible/v.d.ts"]);
     const h = S.trackedHost(dir, {});
     const at = (p: string) => join(dir, p);
     assert.equal(h.fileExists(at("web/a.ts")), true);
-    for (const p of ["build/x.ts", "web/l.ts", "web/d/x.ts", "web/dangling.ts"]) assert.equal(h.fileExists(at(p)), false, p);
+    assert.equal(h.fileExists(at("web/visible/v.d.ts")), true);
+    for (const p of ["build/x.ts", "web/l.ts", "web/d/x.ts", "web/dangling.ts", "web/d/back/v.d.ts"]) assert.equal(h.fileExists(at(p)), false, p);
     assert.equal(typeof h.readFile(at("web/a.ts")), "string");
-    for (const p of ["build/x.ts", "web/l.ts", "web/d/x.ts"]) assert.equal(h.readFile(at(p)), undefined, p);
+    for (const p of ["build/x.ts", "web/l.ts", "web/d/x.ts", "web/d/back/v.d.ts"]) assert.equal(h.readFile(at(p)), undefined, p);
     assert.ok(h.getSourceFile(at("web/a.ts"), 99));
-    for (const p of ["build/x.ts", "web/l.ts", "web/d/x.ts"]) assert.equal(h.getSourceFile(at(p), 99), undefined, p);
+    for (const p of ["build/x.ts", "web/l.ts", "web/d/x.ts", "web/d/back/v.d.ts"]) assert.equal(h.getSourceFile(at(p), 99), undefined, p);
     assert.equal(h.directoryExists(at("web")), true);
-    for (const p of ["build", "web/d"]) assert.equal(h.directoryExists(at(p)), false, p);
+    for (const p of ["build", "web/d", "web/d/back", "build/back"]) assert.equal(h.directoryExists(at(p)), false, p);
     assert.deepEqual(h.getDirectories(dir).sort(), ["web"]);
-    assert.deepEqual(h.getDirectories(at("web")), []);
-    assert.deepEqual(h.getDirectories(at("build")), []);
-    S.assertTracked(dir, [at("web/a.ts")]);
-    for (const p of ["build/x.ts", "web/l.ts", "web/d/x.ts"]) assert.throws(() => S.assertTracked(dir, [at("web/a.ts"), at(p)]), /the census program holds excluded files: /, p);
+    assert.deepEqual(h.getDirectories(at("web")), ["visible"]);
+    for (const p of ["build", "web/d"]) assert.deepEqual(h.getDirectories(at(p)), [], p);
+    S.assertTracked(dir, [at("web/a.ts"), at("web/visible/v.d.ts")]);
+    for (const p of ["build/x.ts", "web/l.ts", "web/d/x.ts", "web/d/back/v.d.ts"]) assert.throws(() => S.assertTracked(dir, [at("web/a.ts"), at(p)]), /the census program holds excluded files: /, p);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("train-16: a generated module is bound to its generator's fragment and contract, checked without a build", () => {
-  const P = "build/cli/lib-meta.gen.js";
-  const want = S.GENERATED[P].fragment_sha256;
-  const real = S.generatorContract(GEN_CLI, P);
-  assert.deepEqual(real, { fragment_sha256: want, contract: null }, "the tracked generator holds the reviewed fragment and the contract");
-  const frag = GEN_CLI.split("\n").find((l: string) => l.includes('"lib-meta.gen.js"'))!;
-  const edit = (from: string, to: string) => {
-    assert.equal(GEN_CLI.split(from).length, 2, from);
-    return GEN_CLI.replace(from, to);
+test("train-16: a generated module is bound to its generator's whole input closure (sha256 pinned) and a contract checked without a build", () => {
+  const want = S.GENERATED[LM].generator_sha256;
+  assert.equal(S.closureSha(GEN_INPUTS), want, "the tracked closure is the reviewed one");
+  assert.equal(S.generatorContract(GEN_INPUTS, GEN, LM), null, "the tracked generator holds the contract");
+  const main = GEN_INPUTS[0].text;
+  const frag = main.split("\n").find((l: string) => l.includes('"lib-meta.gen.js"'))!;
+  const withText = (path: string, text: string) => GEN_INPUTS.map((i) => (i.path === path ? { path, text } : i));
+  const edit = (from: string, to: string, path = GEN) => {
+    const t = GEN_INPUTS.find((i) => i.path === path)!.text;
+    assert.equal(t.split(from).length, 2, from);
+    return withText(path, t.replace(from, to));
   };
   const fragEdit = (from: string, to: string) => edit(frag, frag.replace(from, to));
-  const contractFails: [string, string, RegExp][] = [
+  const after = (code: string) => edit(frag, `${frag}\n${code}`);
+  const contractFails: [string, any[], RegExp][] = [
     ["a value not through JSON.stringify", fragEdit("${JSON.stringify(version)}", "${version}"), /a value isn't JSON\.stringify\(\.\.\.\): version/],
     ["an allocation in the output", fragEdit("\\n`);", "\\nglobalThis.__X__ = new Uint8Array(4);\\n`);"), /its lines aren't each/],
     ["a call in the output", fragEdit("globalThis.__SAGEBRUSH_VERSION__ = ", "globalThis.f(); globalThis.__SAGEBRUSH_VERSION__ = "), /its lines aren't each/],
     ["not a template", fragEdit(/`.*`/.exec(frag)![0], "code"), /its text isn't a template/],
-    ["two writes of it", edit(frag, `${frag}\n${frag}`), /2 writes of lib-meta\.gen\.js, not one/],
+    ["two writes of it", after(frag), /2 writes of lib-meta\.gen\.js, not one/],
     ["no write of it", edit(frag, ""), /0 writes of lib-meta\.gen\.js, not one/],
     ["another directory", fragEdit("join(out, ", "join(root, "), /its directory isn't the generator's one `out`/],
     ["out moved", edit('const out = join(root, "build", "cli");', 'const out = join(root, "build", "other");'), /`out` isn't join\(root, "build", "cli"\)/],
+    // outside the write: semantic changes (astra2's r9 controls)
+    ["an appendFileSync to the output after the write", after('appendFileSync(join(out, "lib-meta.gen.js"), "globalThis.f = () => new Uint8Array(1);\\n");'), /lib-meta\.gen\.js is named 2 times in the closure's strings \(scripts\/build-cli\.mjs:\d+, scripts\/build-cli\.mjs:\d+\), not once/],
+    ["a copyFileSync onto the output", after('copyFileSync(join(root, "x.js"), `${out}/lib-meta.gen.js`);'), /is named 2 times/],
+    ["JSON.stringify reassigned before the write", edit(frag, `JSON.stringify = (v) => "new Uint8Array(1)";\n${frag}`), /scripts\/build-cli\.mjs assigns to JSON: JSON\.stringify = /],
+    ["JSON reassigned on globalThis", edit(frag, `globalThis.JSON = { stringify: () => "f()" };\n${frag}`), /assigns to JSON: globalThis\.JSON = /],
+    ["JSON.stringify redefined", edit(frag, `Object.defineProperty(JSON, "stringify", { value: () => "f()" });\n${frag}`), /redefines JSON: Object\.defineProperty\(JSON/],
+    ["JSON reassigned in an imported module", edit('import { createHash } from "node:crypto";', 'import { createHash } from "node:crypto";\nJSON.stringify = () => "f()";', "scripts/build-id.mjs"), /scripts\/build-id\.mjs assigns to JSON/],
   ];
-  for (const [name, text, re] of contractFails) assert.match(S.generatorContract(text, P).contract ?? "(holds)", re, name);
-  // the contract held, the fragment changed (a renamed global): review and renewal, never silent
-  const renamed = S.generatorContract(fragEdit("__SAGEBRUSH_NOTICES__", "__SAGEBRUSH_NOTICES2__"), P);
-  assert.equal(renamed.contract, null);
-  assert.notEqual(renamed.fragment_sha256, want);
-  // the output directory's declaration is part of the fragment
-  const spaced = S.generatorContract(edit('const out = join(root, "build", "cli");', 'const out = join(root, "build", "cli" );'), P);
-  assert.equal(spaced.contract, null);
-  assert.notEqual(spaced.fragment_sha256, want);
-  // a change outside the fragment: the same fragment
-  assert.equal(S.generatorContract(edit("// 1. The Python library, as a JS object.", "// 1. The Python library, as a JS object (edited)."), P).fragment_sha256, want);
+  for (const [name, inputs, re] of contractFails) {
+    assert.match(S.generatorContract(inputs, GEN, LM) ?? "(holds)", re, name);
+    assert.notEqual(S.closureSha(inputs), want, `${name}: the pin moves too`);
+  }
+  // a contract-preserving change anywhere in the closure moves the pin: review and renewal, never silent
+  const holds: [string, any[]][] = [
+    ["an aliased copy onto the output (no string names it)", after('copyFileSync(join(root, "x.js"), join(out, "lib-meta" + ".gen.js"));')],
+    ["a renamed global", fragEdit("__SAGEBRUSH_NOTICES__", "__SAGEBRUSH_NOTICES2__")],
+    ["out's declaration respaced", edit('const out = join(root, "build", "cli");', 'const out = join(root, "build", "cli" );')],
+    ["a comment elsewhere in the generator", edit("// 1. The Python library, as a JS object.", "// 1. The Python library, as a JS object (edited).")],
+    ["an edit in an imported module", edit('import { createHash } from "node:crypto";', 'import { createHash } from "node:crypto";\n// edited', "scripts/build-id.mjs")],
+  ];
+  for (const [name, inputs] of holds) {
+    assert.equal(S.generatorContract(inputs, GEN, LM), null, name);
+    assert.notEqual(S.closureSha(inputs), want, `${name}: the pin moves`);
+  }
+  // the closure: the generator's tracked imports, static and dynamic, transitively; a new one joins it
+  const dir = mkdtempSync(join(tmpdir(), "ab-gen-"));
+  try {
+    for (const i of GEN_INPUTS) {
+      mkdirSync(dirname(join(dir, i.path)), { recursive: true });
+      writeFileSync(join(dir, i.path), i.text);
+    }
+    assert.deepEqual(S.generatorClosure(dir, GEN).inputs.map((i: any) => i.path), GEN_INPUTS.map((i) => i.path));
+    writeFileSync(join(dir, GEN), `import "./extra.mjs";\n${main}`);
+    writeFileSync(join(dir, "scripts/extra.mjs"), 'import "./deeper.mjs";\n');
+    const c = S.generatorClosure(dir, GEN);
+    assert.deepEqual(c.inputs.map((i: any) => i.path), ["scripts/build-cli.mjs", "scripts/build-id.mjs", "scripts/extra.mjs", "scripts/packages.mjs"]);
+    assert.deepEqual(c.missing, ["scripts/deeper.mjs"]);
+    // an input that's a link into build/ is missing, never read
+    mkdirSync(join(dir, "build"));
+    writeFileSync(join(dir, "build/deeper.mjs"), "JSON.stringify = () => 'f()';\n");
+    symlinkSync("../build/deeper.mjs", join(dir, "scripts/deeper.mjs"));
+    assert.deepEqual(S.generatorClosure(dir, GEN).missing, ["scripts/deeper.mjs"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // the pin binds each input's path as well as its text
+  assert.notEqual(S.closureSha([{ path: "a.mjs", text: "x" }]), S.closureSha([{ path: "b.mjs", text: "x" }]));
   // the gate: each way it fails, and the reviewed one passing
-  const cur = (g: object) => ({ header: { generated: [{ path: P, from: ["web/worker.ts"], generator: "scripts/build-cli.mjs", fragment_sha256: want, contract: null, ...g }] } });
+  const cur = (g: object) => ({ header: { generated: [{ path: LM, from: ["web/worker.ts"], generator: GEN, inputs: GEN_INPUTS.map((i) => i.path), generator_sha256: want, contract: null, ...g }] } });
   assert.deepEqual(G.generatedProblems(cur({})), []);
-  assert.match(G.generatedProblems(cur({ fragment_sha256: renamed.fragment_sha256 }))[0].detail, /its generator's fragment changed \(sha256 \w+, reviewed \w+\): review it and renew GENERATED/);
+  assert.match(G.generatedProblems(cur({ generator_sha256: "0".repeat(64) }))[0].detail, /its generator changed \(closure scripts\/build-cli\.mjs, scripts\/build-id\.mjs, scripts\/packages\.mjs: sha256 0+, reviewed \w+\): review it and renew GENERATED/);
   assert.match(G.generatedProblems(cur({ contract: "x" }))[0].detail, /breaks the contract \(x\)/);
   assert.match(G.generatedProblems(cur({ generator: null }))[0].detail, /with no reviewed generator/);
-  assert.match(G.generatedProblems({ header: { generated: [{ path: "build/cli/other.gen.js", from: ["web/worker.ts"], generator: "scripts/build-cli.mjs", fragment_sha256: want, contract: null }] } })[0].detail, /with no reviewed generator/);
+  assert.match(G.generatedProblems({ header: { generated: [{ path: "build/cli/other.gen.js", from: ["web/worker.ts"], generator: GEN, inputs: [], generator_sha256: want, contract: null }] } })[0].detail, /with no reviewed generator/);
 });
 
 test("the base census is the census recomputed at its commit, byte for byte", () => {
@@ -182,9 +290,9 @@ test("the base census is the census recomputed at its commit, byte for byte", ()
   }
   const dir = mkdtempSync(join(tmpdir(), "ab-base-"));
   try {
-    // (the census's tracked inputs at B: its tsconfig, the directories it scans, and each reviewed generator it
-    // checks a generated module's contract in; a generator missing at B fails the archive, loudly)
-    const generators = [...new Set((base.header.generated ?? []).map((g: any) => g.generator).filter(Boolean))] as string[];
+    // (the census's tracked inputs at B: its tsconfig, the directories it scans, and each reviewed generator's
+    // input closure it checks a generated module's contract in; one missing at B fails the archive, loudly)
+    const generators = [...new Set((base.header.generated ?? []).flatMap((g: any) => g.inputs ?? []))] as string[];
     const tar = execFileSync("git", ["archive", B, "tsconfig.json", ...base.header.dirs, ...generators], { cwd: ROOT, maxBuffer: 1 << 30 });
     execFileSync("tar", ["-x", "-C", dir], { input: tar });
     symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));

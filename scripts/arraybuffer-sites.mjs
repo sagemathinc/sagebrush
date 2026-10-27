@@ -25,9 +25,9 @@
 // typescript-api (the repository's own tsc is TypeScript 7, which has none);
 // SB_TS_API overrides the module for local runs.
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, readlinkSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -338,62 +338,153 @@ const VIEW_CTOR = /^(Int8|Uint8|Uint8Clamped|Int16|Uint16|Int32|Uint32|Float16|F
 
 // Generated modules: the repository's build output (build/, gitignored) isn't part of the tracked tree, so
 // the census never reads it, whether or not a build ran (CI's engine jobs run scripts/build-cli.mjs first).
-// The boundary is the program's host: every way it reads a path (exists, read, parse, list) treats an excluded
-// one as missing, with symlinks resolved, and a final check refuses a program holding one.  Every reference a
-// program file makes into an excluded path (a module specifier of any form, a tsconfig path alias, a
-// triple-slash path or relative types reference, a tsconfig option naming one) is listed in the header; one
-// that isn't a reviewed generated module, or whose generator's reviewed fragment changed or breaks the
-// contract, fails the gate (generatedProblems in arraybuffer-sites-check.mjs).
+// The boundary covers every read the census makes: the tsconfig's (trackedConfig: its extends chain walked
+// first, an excluded config refused, every parse diagnostic fatal) and the program's (trackedHost: exists,
+// read, list), with symlinks resolved; a final check refuses a program holding an excluded file.  Every
+// reference a program file or the tsconfig makes into an excluded path is listed in the header; one that
+// isn't a reviewed generated module, or whose generator changed or breaks the contract, fails the gate
+// (generatedProblems in arraybuffer-sites-check.mjs).
 export const EXCLUDED_DIRS = ["build/"];
-// a reviewed generated module: its tracked generator, and the sha256 of the generator's fragment that writes it
-// (its output directory's declaration and its write statement), renewed only by review.  The contract, checked
-// on the generator's text without a build: the module is `globalThis.NAME = ${JSON.stringify(...)};` lines and
-// nothing else, so loading it assigns JSON literals to globals and runs nothing else
+// A reviewed generated module: its tracked generator, and the sha256 of the generator's whole input closure
+// (the generator and every tracked module it imports, statically or by a literal import(), transitively),
+// renewed only by review (`node scripts/arraybuffer-sites-check.mjs --generated` prints it).  The contract,
+// checked on those texts without a build, holds only together with the pin, never instead of it: the output
+// is written once, by a template whose lines are `globalThis.NAME = ${JSON.stringify(...)};`; its file name
+// appears in no other string of the closure; and nothing in the closure assigns to JSON.  What the pin and
+// the contract assume (stated, reviewed with each renewal): the closure is all the JavaScript the generator
+// process runs, Node's builtins are unpatched (the closure assigns none), and the tools it runs (bun build,
+// deno compile, node --build-sea, git) write only the outputs named on their command lines, none of them this
+// module.  So loading the module assigns JSON literals to globals and runs nothing else.
 export const GENERATED = {
-  "build/cli/lib-meta.gen.js": { generator: "scripts/build-cli.mjs", fragment_sha256: "cf876c878df4a875e60a8b93b62f8ff86a991d79d0ffb6b24210d419a1192a22" },
+  "build/cli/lib-meta.gen.js": { generator: "scripts/build-cli.mjs", generator_sha256: "97bb16975783b31a96a29b2be140f28fde5b8a39b35777d6c36b9a1abc0adefc" },
 };
 const toRel = (root, f) => relative(root, f).split(sep).join("/");
 const excludedPath = (root, f) => EXCLUDED_DIRS.some((d) => `${toRel(root, f)}/`.startsWith(d));
-// a path with its symlinks resolved, component by component, whether or not its last components exist (so a
-// dangling link is resolved the same as a live one: the result doesn't depend on a build)
-function canonical(p, memo = new Map()) {
-  const parts = resolve(p).split(sep).filter(Boolean);
+// Symlinks are resolved as the OS does (component by component, `..` after the links before it), reading each
+// link's text, so a dangling link resolves the same as a live one and the result doesn't depend on a build.
+// `step` sees every directory or file the walk passes through.  A cycle, or more than MAX_LINK_HOPS links
+// (Linux's MAXSYMLINKS: the OS refuses such a path with ELOOP), throws: never a path left unresolved.
+export const MAX_LINK_HOPS = 40;
+export function resolveLinks(p, step = () => {}) {
+  const parts = (isAbsolute(p) ? p : join(process.cwd(), p)).split(sep);
   let cur = sep;
-  for (let hops = 0; parts.length; ) {
-    const next = join(cur, parts.shift());
-    if (memo.has(next)) {
-      cur = memo.get(next);
+  let hops = 0;
+  const seen = new Set();
+  while (parts.length) {
+    const part = parts.shift();
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      cur = dirname(cur);
+      step(cur);
       continue;
     }
+    const next = join(cur, part);
+    step(next);
     let link = null;
     try {
       if (lstatSync(next).isSymbolicLink()) link = readlinkSync(next);
     } catch {}
-    if (link === null || ++hops > 40) {
+    if (link === null) {
       cur = next;
       continue;
     }
-    parts.unshift(...resolve(cur, link).split(sep).filter(Boolean));
-    cur = sep;
+    if (seen.has(next)) throw new Error(`a cycle of symbolic links at ${next}`);
+    seen.add(next);
+    if (++hops > MAX_LINK_HOPS) throw new Error(`more than ${MAX_LINK_HOPS} symbolic links resolving ${p}`);
+    parts.unshift(...link.split(sep));
+    if (isAbsolute(link)) cur = sep;
   }
   return cur;
 }
-export function hiddenPath(root, f, memo) {
-  return excludedPath(root, f) || excludedPath(canonical(root, memo), canonical(f, memo));
+// excluded: under build/ as written, or anywhere the resolution of its links passes through build/
+export function hiddenPath(root, f) {
+  if (excludedPath(root, f)) return true;
+  const croot = resolveLinks(root);
+  let through = false;
+  const end = resolveLinks(f, (x) => {
+    if (excludedPath(croot, x)) through = true;
+  });
+  return through || excludedPath(croot, end);
+}
+// the tsconfig, read on the boundary: its extends chain (relative entries; a package's resolves in
+// node_modules) walked over tracked configs, any excluded one refused by name, then parsed with excluded
+// paths missing; every diagnostic of the parse is fatal, never dropped
+export function trackedConfig(root) {
+  const bad = [];
+  const seen = new Set();
+  const walk = (file, from) => {
+    if (hiddenPath(root, file)) return void bad.push(`${toRel(root, file)} (extended by ${from})`);
+    if (seen.has(file)) return;
+    seen.add(file);
+    let text;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      return; // (missing: the parse reports it)
+    }
+    const ext = ts.parseConfigFileTextToJson(file, text).config?.extends;
+    for (const e of [ext].flat()) {
+      if (typeof e !== "string" || !(e.startsWith(".") || isAbsolute(e))) continue;
+      const f = resolve(dirname(file), e);
+      walk(f.endsWith(".json") ? f : `${f}.json`, toRel(root, file));
+    }
+  };
+  walk(join(root, "tsconfig.json"), "the census");
+  if (bad.length) throw new Error(`the census's tsconfig extends excluded configs: ${bad.join(", ")}`);
+  const cfg = ts.getParsedCommandLineOfConfigFile(join(root, "tsconfig.json"), {}, trackedSys(root));
+  if (cfg.errors.length) throw new Error(`the census's tsconfig: ${cfg.errors.map((d) => ts.flattenDiagnosticMessageText(d.messageText, " ")).join("; ")}`);
+  return cfg;
+}
+// the config parse's system: ts.sys with every read of an excluded path answered as missing
+export function trackedSys(root) {
+  const hid = (f) => hiddenPath(root, f);
+  const entries = (dir) => {
+    const files = [];
+    const directories = [];
+    let es = [];
+    try {
+      es = readdirSync(dir || ".", { withFileTypes: true });
+    } catch {}
+    for (const e of es) {
+      const f = join(dir, e.name);
+      if (hid(f)) continue;
+      let st = e;
+      if (e.isSymbolicLink()) {
+        try {
+          st = statSync(f);
+        } catch {
+          continue;
+        }
+      }
+      if (st.isFile()) files.push(e.name);
+      else if (st.isDirectory()) directories.push(e.name);
+    }
+    return { files: files.sort(), directories: directories.sort() };
+  };
+  return {
+    ...ts.sys,
+    fileExists: (f) => !hid(f) && ts.sys.fileExists(f),
+    readFile: (f) => (hid(f) ? undefined : ts.sys.readFile(f)),
+    directoryExists: (d) => !hid(d) && ts.sys.directoryExists(d),
+    // (TS's own walk, given entries without the hidden ones: it never enters a hidden directory, so its
+    // realpath dedupe can't take a hidden alias of a tracked directory for the directory; the pinned 5.9's
+    // matchFiles, the function ts.sys.readDirectory calls)
+    readDirectory: (path, extensions, excludes, includes, depth) => ts.matchFiles(path, extensions, excludes, includes, ts.sys.useCaseSensitiveFileNames, process.cwd(), depth, entries, ts.sys.realpath),
+    onUnRecoverableConfigFileDiagnostic: (d) => { throw new Error(ts.flattenDiagnosticMessageText(d.messageText, "\n")); },
+  };
 }
 // the census program's host: the compiler's own, with every read of an excluded path answered as missing
 export function trackedHost(root, options) {
   const host = ts.createCompilerHost(options);
-  const memo = new Map();
-  const hid = (f) => hiddenPath(root, f, memo);
+  const hid = (f) => hiddenPath(root, f);
   const { fileExists, readFile, directoryExists, getDirectories } = host;
   host.fileExists = (f) => !hid(f) && fileExists.call(host, f);
   // (the source read: the compiler's getSourceFile reads through host.readFile, so this one denial covers
   // parsing too, a triple-slash reference's included; the tests pin that)
   host.readFile = (f) => (hid(f) ? undefined : readFile.call(host, f));
   host.directoryExists = (d) => !hid(d) && directoryExists.call(host, d);
-  // (a hidden directory's children are hidden too, so it lists as empty)
-  host.getDirectories = (d) => getDirectories.call(host, d).filter((c) => !hid(join(d, c)));
+  // (a hidden directory lists nothing, even a child whose links lead back out of build/)
+  host.getDirectories = (d) => (hid(d) ? [] : getDirectories.call(host, d).filter((c) => !hid(join(d, c))));
   return host;
 }
 // the final check: a program holding an excluded file is refused, whatever path brought it in
@@ -401,12 +492,60 @@ export function assertTracked(root, fileNames) {
   const bad = fileNames.filter((f) => hiddenPath(root, f));
   if (bad.length) throw new Error(`the census program holds excluded files: ${bad.map((f) => toRel(root, f)).join(", ")}`);
 }
-// a generated module's contract and fragment, from its tracked generator's text: {fragment_sha256, contract}
-// (contract null when it holds, else why not)
-export function generatorContract(text, path) {
+// a generator's input closure: it and the tracked modules it imports (relative static imports, export
+// froms and literal import()s), transitively: {inputs: [{path, text}], missing: [path]}
+export function generatorClosure(root, generator) {
+  const inputs = [];
+  const missing = [];
+  const seen = new Set();
+  const visit = (rel) => {
+    if (seen.has(rel)) return;
+    seen.add(rel);
+    const f = join(root, rel);
+    let text = null;
+    try {
+      if (!hiddenPath(root, f)) text = readFileSync(f, "utf8");
+    } catch {}
+    if (text === null) return void missing.push(rel);
+    inputs.push({ path: rel, text });
+    const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true);
+    const dep = (x) => {
+      if (x && isLiteralText(x) && x.text.startsWith(".")) visit(toRel(root, join(dirname(f), x.text)));
+    };
+    const walk = (n) => {
+      if (ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) dep(n.moduleSpecifier);
+      else if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && n.arguments.length >= 1) dep(n.arguments[0]);
+      ts.forEachChild(n, walk);
+    };
+    walk(sf);
+  };
+  visit(generator);
+  inputs.sort((a, b) => (a.path < b.path ? -1 : 1));
+  return { inputs, missing: missing.sort() };
+}
+export const closureSha = (inputs) => sha(inputs.map((i) => `${i.path}\n${sha(i.text)}\n`).join(""));
+// the contract, on the closure's texts: null when it holds, else why not
+export function generatorContract(inputs, generator, path) {
   const name = path.split("/").pop();
   const dirParts = path.split("/").slice(0, -1);
-  const sf = ts.createSourceFile("generator.mjs", text, ts.ScriptTarget.Latest, true);
+  const main = inputs.find((i) => i.path === generator);
+  if (!main) return `its generator ${generator} is missing`;
+  const named = [];
+  for (const i of inputs) {
+    const sf = ts.createSourceFile(i.path, i.text, ts.ScriptTarget.Latest, true);
+    let bad = null;
+    const walk = (n) => {
+      // its name in a string: only the one write may name the output
+      if ((ts.isStringLiteralLike(n) || ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n)) && n.text.includes(name)) named.push(`${i.path}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}`);
+      // JSON reassigned, or redefined: the contract reads JSON.stringify as the builtin
+      if (ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment && /^(globalThis\s*\.\s*)?JSON\b/.test(n.left.getText(sf))) bad ??= `${i.path} assigns to JSON: ${n.getText(sf).slice(0, 80)}`;
+      if (ts.isCallExpression(n) && /^(Object\.(defineProperty|defineProperties|assign|setPrototypeOf)|Reflect\.(set|defineProperty|setPrototypeOf))$/.test(n.expression.getText(sf)) && n.arguments[0] && /^(globalThis\s*\.\s*)?JSON\b/.test(n.arguments[0].getText(sf))) bad ??= `${i.path} redefines JSON: ${n.getText(sf).slice(0, 80)}`;
+      ts.forEachChild(n, walk);
+    };
+    walk(sf);
+    if (bad) return bad;
+  }
+  const sf = ts.createSourceFile(generator, main.text, ts.ScriptTarget.Latest, true);
   const writes = [];
   const outs = [];
   const walk = (n) => {
@@ -418,32 +557,29 @@ export function generatorContract(text, path) {
     ts.forEachChild(n, walk);
   };
   walk(sf);
-  if (writes.length !== 1) return { fragment_sha256: null, contract: `${writes.length} writes of ${name}, not one` };
+  if (writes.length !== 1) return `${writes.length} writes of ${name}, not one`;
+  if (named.length !== 1) return `${name} is named ${named.length} times in the closure's strings (${named.join(", ")}), not once`;
   const w = writes[0];
   const dir = w.arguments[0].arguments[0];
-  if (!ts.isIdentifier(dir) || dir.text !== "out" || outs.length !== 1) return { fragment_sha256: null, contract: "its directory isn't the generator's one `out`" };
+  if (!ts.isIdentifier(dir) || dir.text !== "out" || outs.length !== 1) return "its directory isn't the generator's one `out`";
   const o = outs[0].initializer;
   const oParts = o && ts.isCallExpression(o) && o.expression.getText(sf) === "join" ? o.arguments.map((x) => (isLiteralText(x) ? x.text : null)) : [];
   if (!(oParts.length === dirParts.length + 1 && o.arguments[0].getText(sf) === "root" && dirParts.every((d, i) => oParts[i + 1] === d)))
-    return { fragment_sha256: null, contract: `\`out\` isn't join(root, ${dirParts.map((d) => JSON.stringify(d)).join(", ")})` };
-  const fragment_sha256 = sha(`${outs[0].getText(sf)}\n${w.getText(sf)}`);
+    return `\`out\` isn't join(root, ${dirParts.map((d) => JSON.stringify(d)).join(", ")})`;
   const t = w.arguments[1];
-  if (!ts.isTemplateExpression(t)) return { fragment_sha256, contract: "its text isn't a template of globalThis assignments" };
+  if (!ts.isTemplateExpression(t)) return "its text isn't a template of globalThis assignments";
   let shape = t.head.text;
   for (const span of t.templateSpans) {
     const e = span.expression;
-    if (!(ts.isCallExpression(e) && e.expression.getText(sf) === "JSON.stringify" && e.arguments.length === 1)) return { fragment_sha256, contract: `a value isn't JSON.stringify(...): ${e.getText(sf).slice(0, 80)}` };
+    if (!(ts.isCallExpression(e) && e.expression.getText(sf) === "JSON.stringify" && e.arguments.length === 1)) return `a value isn't JSON.stringify(...): ${e.getText(sf).slice(0, 80)}`;
     shape += "${}" + span.literal.text;
   }
-  if (!/^(globalThis\.[A-Za-z_$][\w$]* = \$\{\};\n)+$/.test(shape)) return { fragment_sha256, contract: `its lines aren't each \`globalThis.NAME = \${JSON.stringify(...)};\`: ${JSON.stringify(shape.slice(0, 120))}` };
-  return { fragment_sha256, contract: null };
+  if (!/^(globalThis\.[A-Za-z_$][\w$]* = \$\{\};\n)+$/.test(shape)) return `its lines aren't each \`globalThis.NAME = \${JSON.stringify(...)};\`: ${JSON.stringify(shape.slice(0, 120))}`;
+  return null;
 }
 
 export function census(root = ROOT, { commit = null } = {}) {
-  const cfg = ts.getParsedCommandLineOfConfigFile(join(root, "tsconfig.json"), {}, {
-    ...ts.sys,
-    onUnRecoverableConfigFileDiagnostic: (d) => { throw new Error(ts.flattenDiagnosticMessageText(d.messageText, "\n")); },
-  });
+  const cfg = trackedConfig(root);
   // the roots: src/runtime/** and the worker; plus every scanned-repository module a
   // constant relative require() names (its code runs too), to a fixpoint
   const rootNames = [...cfg.fileNames.filter((f) => f.includes(`${sep}src${sep}runtime${sep}`)), join(root, "web", "worker.ts")];
@@ -472,15 +608,31 @@ export function census(root = ROOT, { commit = null } = {}) {
   assertTracked(root, program.getSourceFiles().map((f) => f.fileName));
   // every reference a program file (declarations too) or the tsconfig makes into an excluded path, present or not
   const generatedFrom = new Map();
-  const memo = new Map();
-  const croot = canonical(root, memo);
   const note = (p0, from, module = false) => {
     // (a module specifier names a file by its stem too: a tracked link "./x" may be x.ts, pointing into build/)
-    const p = (module ? [p0, ...[".ts", ".tsx", ".d.ts", ".js", ".mjs", ".cjs", "/index.ts", "/index.js"].map((e) => p0 + e)] : [p0]).find((x) => hiddenPath(root, x, memo));
+    const p = (module ? [p0, ...[".ts", ".tsx", ".d.ts", ".js", ".mjs", ".cjs", "/index.ts", "/index.js"].map((e) => p0 + e)] : [p0]).find((x) => hiddenPath(root, x));
     if (p === undefined) return;
-    const k = excludedPath(root, p) ? toRel(root, p) : toRel(croot, canonical(p, memo));
+    // (by the path as the tree writes it, not where its links lead: that may depend on a build)
+    const k = toRel(root, p);
     (generatedFrom.get(k) ?? generatedFrom.set(k, new Set()).get(k)).add(from);
   };
+  // every tracked symlink under the tsconfig's include directories that resolves into an excluded path, its
+  // target there or not (the config read drops what it would list, so it's listed here, the same built or not)
+  const linksIn = (d) => {
+    let es = [];
+    try {
+      es = readdirSync(d, { withFileTypes: true });
+    } catch {}
+    for (const e of es) {
+      const f = join(d, e.name);
+      if (e.isSymbolicLink()) note(f, "tsconfig.json include");
+      else if (e.isDirectory() && e.name !== "node_modules" && !hiddenPath(root, f)) linksIn(f);
+    }
+  };
+  for (const d of Object.keys(cfg.wildcardDirectories ?? {})) {
+    if (hiddenPath(root, d)) note(d, "tsconfig.json include");
+    else linksIn(d);
+  }
   const paths = Object.entries(options.paths ?? {});
   const pathsBase = options.pathsBasePath ?? options.baseUrl ?? root;
   for (const [, targets] of paths) for (const t of targets) note(join(pathsBase, t.replace("*", "")), "tsconfig.json");
@@ -510,12 +662,10 @@ export function census(root = ROOT, { commit = null } = {}) {
   }
   const generated = [...generatedFrom].sort(([a], [b]) => (a < b ? -1 : 1)).map(([path, from]) => {
     const g = GENERATED[path];
-    let text = null;
-    try {
-      if (g) text = readFileSync(join(root, g.generator), "utf8");
-    } catch {}
-    const c = g ? (text === null ? { fragment_sha256: null, contract: `its generator ${g.generator} is missing` } : generatorContract(text, path)) : null;
-    return { path, from: [...from].sort(), generator: g?.generator ?? null, ...(c ?? {}) };
+    if (!g) return { path, from: [...from].sort(), generator: null };
+    const { inputs, missing } = generatorClosure(root, g.generator);
+    const contract = missing.length ? `its generator's inputs are missing: ${missing.join(", ")}` : generatorContract(inputs, g.generator, path);
+    return { path, from: [...from].sort(), generator: g.generator, inputs: [...inputs.map((i) => i.path), ...missing].sort(), generator_sha256: missing.length ? null : closureSha(inputs), contract };
   });
   const records = [];
   // the reference graph, by declaration fingerprint: {file, name, fp, refs, irefs, libs}

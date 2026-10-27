@@ -24,7 +24,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { census, censusText, GENERATED, ROOT } from "./arraybuffer-sites.mjs";
+import { census, censusText, closureSha, GENERATED, generatorClosure, generatorContract, ROOT } from "./arraybuffer-sites.mjs";
 
 export const TABLE = "test/arraybuffer-sites.json";
 export const BASE = "test/arraybuffer-sites.base.json";
@@ -319,8 +319,8 @@ export function renewal(oldBase, deltas, cur, problemsAtB) {
 
 // the whole gate, for the test and the command line
 // a reference into the excluded build output (which the census doesn't read) must be a reviewed generated
-// module (GENERATED in arraybuffer-sites.mjs) whose generator still holds its contract and whose fragment is
-// the one reviewed; anything else fails, by its path
+// module (GENERATED in arraybuffer-sites.mjs) whose generator still holds its contract and whose input closure
+// is the one reviewed; anything else fails, by its path
 export function generatedProblems(cur) {
   const out = [];
   for (const g of cur.header.generated ?? []) {
@@ -328,7 +328,7 @@ export function generatedProblems(cur) {
     const want = GENERATED[g.path];
     if (!g.generator || !want) out.push({ problem: "generated", key: g.path, detail: `${where}, with no reviewed generator` });
     else if (g.contract) out.push({ problem: "generated", key: g.path, detail: `${where}: its generator ${g.generator} breaks the contract (${g.contract})` });
-    else if (g.fragment_sha256 !== want.fragment_sha256) out.push({ problem: "generated", key: g.path, detail: `${where}: its generator's fragment changed (sha256 ${g.fragment_sha256}, reviewed ${want.fragment_sha256}): review it and renew GENERATED` });
+    else if (g.generator_sha256 !== want.generator_sha256) out.push({ problem: "generated", key: g.path, detail: `${where}: its generator changed (closure ${g.inputs.join(", ")}: sha256 ${g.generator_sha256}, reviewed ${want.generator_sha256}): review it and renew GENERATED` });
   }
   return out;
 }
@@ -346,6 +346,14 @@ export function gate(root = ROOT, { table = readTable(root), base = null, cur = 
   return { cur, derived, classes, problems, derivation: d, pyparseExcluded: pp.excluded };
 }
 
+if (import.meta.url === `file://${process.argv[1]}` && process.argv.includes("--generated")) {
+  // each reviewed generated module's closure and sha256 as this tree has them, for a reviewed renewal
+  for (const [path, g] of Object.entries(GENERATED)) {
+    const { inputs, missing } = generatorClosure(ROOT, g.generator);
+    console.log(JSON.stringify({ path, generator: g.generator, inputs: inputs.map((i) => i.path), missing, generator_sha256: closureSha(inputs), reviewed: g.generator_sha256, contract: generatorContract(inputs, g.generator, path) }));
+  }
+  process.exit(0);
+}
 if (import.meta.url === `file://${process.argv[1]}`) {
   const t0 = Date.now();
   const table = readTable();
