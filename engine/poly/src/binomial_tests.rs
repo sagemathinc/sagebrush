@@ -435,9 +435,9 @@ fn the_residue_prefilter_agrees_with_exact_root() {
 /// a x^12 - b with a = 2^(bits-1) + 1 and b = a + 2: perf_bench's binom
 /// fixture, a generic non-perfect-power binomial.
 fn binom(bits: u32) -> ZPoly {
-    let a = (BigInt::one() << (bits - 1)) + 1;
+    let a: BigInt = (BigInt::one() << (bits - 1)) + 1;
     let mut f = vec![BigInt::zero(); 13];
-    f[0] = -(&a + BigInt::from(2));
+    f[0] = -(a.clone() + BigInt::from(2));
     f[12] = a;
     f
 }
