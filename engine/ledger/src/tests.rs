@@ -1,6 +1,6 @@
 // The ledger's admission, ownership and exit rules (plan C r13).  The tests
 // share the process-wide state, so each takes SERIAL and starts from a clean
-// ledger; the usage measure is a fake (hooks::set_fake_usage), read under
+// ledger; the usage measures are fakes (hooks::set_fake_usage, set_fake_rows), read under
 // the lock at every check as the real one is.
 use super::*;
 use std::sync::{Arc, Barrier};
@@ -13,14 +13,30 @@ fn fresh(total_bytes: u64) -> std::sync::MutexGuard<'static, ()> {
     s.set_outstanding(0);
     s.set_resident(0);
     s.chains = [(0, 0); CHAIN_SLOTS];
+    s.certified_chains = [0; CHAIN_SLOTS];
+    s.baseline = None;
+    s.retired = 0;
+    s.fault = false;
+    s.instance = None;
+    s.permit_in_flight = 0;
+    s.last_growth_delta = 0;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        s.measure = Measure::NONE;
+    }
     drop(s);
+    hooks::set_fake_unreadable(false);
+    hooks::set_fake_committed(None);
     hooks::set_fake_usage(Some((0, None)));
-    set_total(Some(Total { bytes: total_bytes, status: TotalStatus::Observed, joint: false }));
+    set_total(Some(Total { bytes: total_bytes, status: TotalStatus::Observed, joint: false, uncertified: false }));
     g
 }
 
-/// E = total / 4 and phi = 5/4: a total of 4 * 5/4 * n gives n usable bytes.
+/// E = total / 4 and phi = FRAG_NUM / FRAG_DEN (21/8): a total of 4 phi n
+/// gives exactly n usable bytes when n is a multiple of FRAG_DEN (then E is
+/// exact), which every test's figure is.
 fn total_for_usable(n: u64) -> u64 {
+    assert_eq!(n % FRAG_DEN, 0, "usable figures are multiples of FRAG_DEN");
     n * SHARE_DEN * FRAG_NUM / FRAG_DEN
 }
 
@@ -46,18 +62,17 @@ fn the_union_counts_pending_and_measured_bytes() {
 fn retained_growth_after_a_release_is_seen_by_the_next_check() {
     // astra2's C r12 case: usage 100; reserve 100; a covered allocation
     // grows the domain to 200; free it and release O, no resident; the next
-    // check reads 200 (no cached measure).  (Usable figures are multiples of
-    // 4 so that E = total / 4 is exact.)
-    let _g = fresh(total_for_usable(252));
+    // check reads 200 (no cached measure).
+    let _g = fresh(total_for_usable(256));
     hooks::set_fake_usage(Some((100, None)));
     let r = reserve("work", 100).unwrap();
     hooks::set_fake_usage(Some((200, None))); // (grown, and retained after the free)
     drop(r);
-    match reserve("next", 53) {
+    match reserve("next", 57) {
         Err(EngineError::Memory(r)) => assert_eq!(r.live, 200),
-        _ => panic!("200 + 53 > 252 must be refused"),
+        _ => panic!("200 + 57 > 256 must be refused"),
     }
-    assert!(reserve("next", 52).is_ok());
+    assert!(reserve("next", 56).is_ok());
 }
 
 #[test]
@@ -91,7 +106,8 @@ fn machine_availability_refuses_when_others_use_the_machine() {
 
 #[test]
 fn two_admissions_before_either_allocates_cannot_both_fit() {
-    let _g = fresh(total_for_usable(100));
+    // 30 in use: one 50 fits (80 <= 104), both don't (130 > 104)
+    let _g = fresh(total_for_usable(104));
     hooks::set_fake_usage(Some((30, None)));
     let (start, held) = (Arc::new(Barrier::new(2)), Arc::new(Barrier::new(2)));
     let hs: Vec<_> = (0..2)
@@ -114,7 +130,7 @@ fn two_admissions_before_either_allocates_cannot_both_fit() {
 fn a_transition_during_the_read_to_commit_window_waits() {
     // the read and the commit share one critical section: a release on
     // another thread waits until the paused admission has committed
-    let _g = fresh(total_for_usable(100));
+    let _g = fresh(total_for_usable(96));
     let first = reserve("first", 40).unwrap();
     let b = Arc::new(Barrier::new(2));
     hooks::pause_next_admission(b.clone());
@@ -124,7 +140,7 @@ fn a_transition_during_the_read_to_commit_window_waits() {
     std::thread::sleep(std::time::Duration::from_millis(50));
     assert!(!t.is_finished(), "the release must wait for the lock");
     b.wait();
-    // 40 outstanding when it read: 40 + 50 = 90 <= 100
+    // 40 outstanding when it read: 40 + 50 = 90 <= 96
     assert_eq!(h.join().unwrap(), Some(50));
     t.join().unwrap();
 }
@@ -202,7 +218,7 @@ fn a_host_that_did_not_ask_leaves_the_total_in_force() {
     assert_eq!(now(), before);
     apply_host_answer(HostAnswer::Unreadable);
     assert_eq!(now(), (None, None));
-    let t = Total { bytes: 8000, status: TotalStatus::Observed, joint: false };
+    let t = Total { bytes: 8000, status: TotalStatus::Observed, joint: false, uncertified: false };
     apply_host_answer(HostAnswer::Total(t, vec![]));
     let (total, at) = now();
     assert_eq!(total, Some(t));
@@ -212,7 +228,7 @@ fn a_host_that_did_not_ask_leaves_the_total_in_force() {
 #[test]
 fn an_observed_zero_refuses_and_no_total_is_nominal() {
     let _g = fresh(0);
-    set_total(Some(Total { bytes: 0, status: TotalStatus::Zero, joint: false }));
+    set_total(Some(Total { bytes: 0, status: TotalStatus::Zero, joint: false, uncertified: false }));
     assert!(matches!(reserve("x", 1), Err(EngineError::Memory(r)) if r.allowance == 0 && r.status == TotalStatus::Zero));
     set_total(None);
     assert_eq!(total(), NOMINAL);
@@ -225,25 +241,37 @@ fn an_unmeasured_platform_is_not_certified() {
     let _g = fresh(total_for_usable(1000));
     #[cfg(not(target_arch = "wasm32"))]
     {
-        set_total_and_measure(Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true }), &[MeasureKind::WindowsJob]);
+        let t = Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true, uncertified: false });
+        let row = |kind| Row { kind, figure: 1 << 30 };
+        set_total_and_measure(t, &[row(MeasureKind::WindowsJob)]);
         assert!(!certified());
-        set_total_and_measure(Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true }), &[MeasureKind::Cgroup("/nonexistent/memory.current".into())]);
+        set_total_and_measure(t, &[row(MeasureKind::Cgroup("/nonexistent/memory.current".into()))]);
         assert!(!certified());
         if cfg!(target_os = "linux") {
-            set_total_and_measure(Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true }), &[MeasureKind::Physical]);
+            set_total_and_measure(t, &[row(MeasureKind::Physical)]);
             assert!(certified());
-            let r = state().measure.read().expect("the process's own measure");
-            assert!(r.usage > 0 && r.available.unwrap() > 0, "{:?}", r);
+            let mut seen = vec![];
+            assert!(state().measure.read_each(|r| seen.push(r)), "the process's own measure");
+            assert!(seen.len() == 1 && seen[0].usage > 0 && seen[0].available.unwrap() > 0, "{:?}", seen);
+            // (C r17 section 1.2: one unknown row among measured ones is
+            // enough to fail closed)
+            set_total_and_measure(t, &[row(MeasureKind::Physical), row(MeasureKind::Unknown)]);
+            assert!(!certified());
+            set_total_and_measure(t, &[row(MeasureKind::Physical), Row { kind: MeasureKind::AddressSpace, figure: 1 << 40 }]);
+            assert!(certified());
+            let mut n = 0;
+            assert!(state().measure.read_each(|r| n += (r.figure == 1 << 40) as u32));
+            assert_eq!(n, 1, "each row is read with its own figure");
         }
     }
 }
 
 #[test]
 fn a_credit_grows_by_new_admissions() {
-    let _g = fresh(total_for_usable(100));
-    let mut c = reserve("credit", 60).unwrap();
+    let _g = fresh(total_for_usable(104));
+    let mut c = reserve("credit", 64).unwrap();
     assert!(c.grow("credit", 40).is_ok());
-    assert_eq!((c.amount(), outstanding_bytes()), (100, 100));
+    assert_eq!((c.amount(), outstanding_bytes()), (104, 104));
     assert!(c.grow("credit", 1).is_err());
     drop(c);
     assert_eq!(outstanding_bytes(), 0);
@@ -251,8 +279,13 @@ fn a_credit_grows_by_new_admissions() {
 
 #[test]
 fn wasm_totals_are_checked() {
-    assert_eq!(total_from_wasm(4294967296.0, 0, 1), Some(Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: true }));
-    for (b, s, j) in [(-1.0, 0, 0), (1.5, 0, 0), (f64::NAN, 0, 0), (f64::INFINITY, 0, 0), (1.0, 3, 0), (1.0, 0, 2), (1e300, 0, 0)] {
+    // (the third number is now the host's classification, C r17 section
+    // 1.3: 1 when some applicable row is joint or unknown)
+    assert_eq!(total_from_wasm(4294967296.0, 0, 1), Some(Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: true, uncertified: true }));
+    assert_eq!(total_from_wasm(4294967296.0, 0, 0).map(|t| t.uncertified), Some(false));
+    // (3 is absent since C r16b: no shared row applies; 4 and up are none)
+    assert_eq!(total_from_wasm(1.0, 3, 0).map(|t| t.status), Some(TotalStatus::Absent));
+    for (b, s, j) in [(-1.0, 0, 0), (1.5, 0, 0), (f64::NAN, 0, 0), (f64::INFINITY, 0, 0), (1.0, 4, 0), (1.0, 0, 2), (1e300, 0, 0)] {
         assert_eq!(total_from_wasm(b, s, j), None, "{} {} {}", b, s, j);
     }
 }
@@ -272,4 +305,624 @@ fn internal_errors_are_not_memory_errors() {
     let m = EngineError::Internal("x".into());
     assert!(!matches!(m, EngineError::Memory(_)));
     assert!(m.to_string().starts_with("internal error"));
+}
+
+#[test]
+fn every_applicable_row_is_checked_not_only_the_least() {
+    // astra2's probe (C r17 section 1.1), natively: the least figure is 4 GiB
+    // (here 256 MiB used), a larger joint row is 8 GiB (2304 MiB used).  With
+    // phi = 21/8, 32 MiB fits the least row (21/8 (256 + 32) = 756 <= 1024
+    // MiB) but not the joint one (21/8 (2304 + 32) > 2048 MiB): refused, on
+    // the joint row's figures.
+    const MIB: u64 = 1 << 20;
+    let _g = fresh(4096 * MIB);
+    hooks::set_fake_rows(Some(vec![(4096 * MIB, 256 * MIB, None), (8192 * MIB, 2304 * MIB, None)]));
+    match reserve("probe", 32 * MIB) {
+        Err(EngineError::Memory(r)) => assert_eq!((r.total, r.allowance, r.live), (8192 * MIB, 2048 * MIB, 2304 * MIB)),
+        other => panic!("the joint row must refuse: {:?}", other.map(|r| r.amount())),
+    }
+    assert_eq!(outstanding_bytes(), 0);
+    // the least row alone (what a check of the least rows only would see)
+    // admits it: the difference this test pins
+    hooks::set_fake_rows(Some(vec![(4096 * MIB, 256 * MIB, None)]));
+    let r = reserve("probe", 32 * MIB).unwrap();
+    drop(r);
+    // the order of the rows doesn't matter; the first refusing row is reported
+    hooks::set_fake_rows(Some(vec![(8192 * MIB, 2304 * MIB, None), (4096 * MIB, 256 * MIB, None)]));
+    assert!(matches!(reserve("probe", 32 * MIB), Err(EngineError::Memory(r)) if r.total == 8192 * MIB));
+}
+
+#[test]
+fn a_physical_row_among_others_keeps_its_availability_check() {
+    const MIB: u64 = 1 << 20;
+    let _g = fresh(1 << 40);
+    let avail = 1024 * MIB; // reserve 256 + 103 MiB: room about 665 MiB
+    hooks::set_fake_rows(Some(vec![(1 << 40, 0, None), (1 << 40, 0, Some(avail))]));
+    assert!(matches!(reserve("big", 700 * MIB), Err(EngineError::Memory(r)) if r.available.is_some()));
+    let r = reserve("ok", 600 * MIB).unwrap();
+    drop(r);
+}
+
+#[cfg(target_os = "linux")]
+fn fixture(dir: &std::path::Path, name: &str, text: &str) -> String {
+    let p = dir.join(name);
+    std::fs::write(&p, text).unwrap();
+    p.to_str().unwrap().to_string()
+}
+
+#[cfg(target_os = "linux")]
+fn scratch_dir(tag: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("sb-ledger-{}-{}", tag, std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_measure_that_becomes_unreadable_uncertifies_and_refuses() {
+    // astra2's CORR-C2A-1 probe, on a real (cgroup-format) usage file: high
+    // usage refuses; the same opened file made non-numeric must neither
+    // certify nor admit (no residents-only fallback); a valid figure again
+    // recovers
+    let _g = fresh(total_for_usable(1000));
+    hooks::set_fake_usage(None);
+    let d = scratch_dir("unreadable");
+    let path = fixture(&d, "memory.current", "1000000\n");
+    let t = Some(Total { bytes: 1 << 20, status: TotalStatus::Observed, joint: true, uncertified: false });
+    set_total_and_measure(t, &[Row { kind: MeasureKind::Cgroup(path.clone()), figure: 1 << 20 }]);
+    assert!(certified());
+    assert!(matches!(reserve("x", 1024), Err(EngineError::Memory(r)) if r.measured), "high usage refuses");
+    // the source changes between the certification and the admission
+    std::fs::write(&path, "not a number\n").unwrap();
+    assert!(matches!(reserve("x", 1024), Err(EngineError::Memory(r)) if !r.measured), "an unreadable measure must refuse");
+    assert!(!certified(), "an unreadable measure must not certify");
+    assert_eq!(outstanding_bytes(), 0);
+    // recovery
+    std::fs::write(&path, "1000\n").unwrap();
+    assert!(certified());
+    let r = reserve("x", 1024).unwrap();
+    drop(r);
+    // one invalid source among good rows
+    let bad = fixture(&d, "bad.current", "abc\n");
+    set_total_and_measure(t, &[Row { kind: MeasureKind::Physical, figure: 1 << 40 }, Row { kind: MeasureKind::Cgroup(path.clone()), figure: 1 << 20 }, Row { kind: MeasureKind::Cgroup(bad), figure: 1 << 20 }]);
+    assert!(!certified());
+    assert!(matches!(reserve("x", 1024), Err(EngineError::Memory(r)) if !r.measured));
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+#[test]
+fn a_fake_unreadable_measure_fails_closed() {
+    let _g = fresh(total_for_usable(1000));
+    hooks::set_fake_unreadable(true);
+    assert!(!certified());
+    assert!(matches!(reserve("x", 8), Err(EngineError::Memory(r)) if !r.measured));
+    hooks::set_fake_unreadable(false);
+    assert!(reserve("x", 8).is_ok());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn any_number_of_rows_is_measured_no_cutoff() {
+    // daybreak2's LIMIT-C2A-1: no fixed row table.  16, 17 and a deep chain
+    // of 70 cgroup rows (as _cgroup_dirs can walk) plus the physical row are
+    // all certified, and every row is checked: one high row among 70 refuses
+    let _g = fresh(total_for_usable(1000));
+    hooks::set_fake_usage(None);
+    let d = scratch_dir("rows");
+    let t = Some(Total { bytes: 1 << 20, status: TotalStatus::Observed, joint: true, uncertified: false });
+    for n in [16usize, 17, 70] {
+        let mut rows: Vec<Row> = (0..n).map(|i| Row { kind: MeasureKind::Cgroup(fixture(&d, &format!("g{}", i), "1000\n")), figure: 1 << 20 }).collect();
+        rows.push(Row { kind: MeasureKind::Physical, figure: 1 << 40 });
+        set_total_and_measure(t, &rows);
+        assert!(certified(), "{} cgroup rows + physical must certify", n);
+        let mut seen = 0;
+        assert!(state().measure.read_each(|_| seen += 1));
+        assert_eq!(seen, n + 1, "every row read");
+        let r = reserve("x", 1024).unwrap();
+        drop(r);
+    }
+    std::fs::write(d.join("g42"), "1000000\n").unwrap();
+    assert!(matches!(reserve("x", 1024), Err(EngineError::Memory(r)) if r.measured && r.live == 1000000), "the 43rd row refuses");
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_certified_operation_is_not_downgraded_by_a_refresh() {
+    // astra2's refresh/reopen probe (CORR-C2A-1): an operation entered as
+    // certification-dependent keeps refusing when a total refresh leaves a
+    // row unknown or unmeasured, or the host source fails; an ordinary
+    // operation in the same state keeps C-1's unmeasured check
+    let _g = fresh(total_for_usable(1000));
+    hooks::set_fake_usage(None);
+    let d = scratch_dir("refresh");
+    let path = fixture(&d, "memory.current", "1000\n");
+    let t = Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true, uncertified: false });
+    let good = [Row { kind: MeasureKind::Cgroup(path.clone()), figure: 1 << 30 }];
+    set_total_and_measure(t, &good);
+    let op = Operation::enter_certified().expect("certified at entry");
+    let r = reserve("held", 4096).unwrap();
+    // a refresh replaces the measure with an unknown row
+    set_total_and_measure(t, &[Row { kind: MeasureKind::Unknown, figure: 1 << 30 }]);
+    assert!(matches!(reserve("next", 1024), Err(EngineError::Memory(e)) if !e.measured), "an unknown refreshed row must refuse");
+    // a refresh whose host source failed: no total, no rows
+    set_total_and_measure(None, &[]);
+    assert!(matches!(reserve("next", 1024), Err(EngineError::Memory(e)) if !e.measured), "a failed host source must refuse");
+    // a refresh whose file was deleted (it reopens unmeasured)
+    std::fs::remove_file(&path).unwrap();
+    set_total_and_measure(t, &good);
+    assert!(matches!(reserve("next", 1024), Err(EngineError::Memory(e)) if !e.measured), "a failed reopen must refuse");
+    assert_eq!(outstanding_bytes(), 4096, "nothing admitted past the refusals");
+    drop(r);
+    assert_eq!(op.finish(), Ok(()));
+    // an ordinary (not certification-dependent) operation keeps C-1's check
+    let op = Operation::enter();
+    let r = reserve("ordinary", 1024).unwrap();
+    drop(r);
+    assert_eq!(op.finish(), Ok(()));
+    // and the chain mark is gone once the certified operation ended
+    assert!(state().certified_chains.iter().all(|&c| c == 0));
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+#[test]
+fn enter_certified_needs_certification_now() {
+    let _g = fresh(total_for_usable(1000));
+    // (fresh: no measure at all: not certified)
+    assert!(Operation::enter_certified().is_none());
+    assert_eq!(current_chain(), 0);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_nested_certified_entry_keeps_the_outer_mark() {
+    let _g = fresh(total_for_usable(1000));
+    hooks::set_fake_usage(None);
+    let d = scratch_dir("nested");
+    let path = fixture(&d, "memory.current", "1000\n");
+    let t = Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true, uncertified: false });
+    set_total_and_measure(t, &[Row { kind: MeasureKind::Cgroup(path), figure: 1 << 30 }]);
+    let outer = Operation::enter_certified().unwrap();
+    let inner = Operation::enter_certified().unwrap();
+    assert_eq!(inner.finish(), Ok(()));
+    assert!(state().is_certified_chain(outer.chain()), "the outer mark stays after the nested one ends");
+    let chain = outer.chain();
+    assert_eq!(outer.finish(), Ok(()));
+    assert!(!state().is_certified_chain(chain));
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+// ------------------------------------------------------------------ C-2b-i: page growth (C r15 sections 1-2), R_ret (r14 section 2, r15 section 4, r16 section 1)
+
+const P: u64 = PAGE;
+
+/// Fake pages: `committed` bytes, and a total whose floor(E / phi) is
+/// `usable` (a multiple of FRAG_DEN).
+fn paged(committed: u64, usable: u64) -> std::sync::MutexGuard<'static, ()> {
+    let g = fresh(total_for_usable(usable));
+    hooks::set_fake_committed(Some(committed));
+    g
+}
+
+#[test]
+fn the_envelope_covers_header_rounding_and_one_slack_page() {
+    assert_eq!(growth_envelope(0), Some(2 * P));
+    assert_eq!(growth_envelope(1), Some(2 * P));
+    assert_eq!(growth_envelope(P - 64), Some(2 * P));
+    assert_eq!(growth_envelope(P - 63), Some(3 * P));
+    for k in [1u64, 2, 16] {
+        assert_eq!(growth_envelope(k * P - 1), Some((k + 2) * P));
+        assert_eq!(growth_envelope(k * P), Some((k + 2) * P));
+        assert_eq!(growth_envelope(k * P + 1), Some((k + 2) * P));
+    }
+    // checked: no wrap
+    assert_eq!(growth_envelope(!0u64), None);
+    assert_eq!(growth_envelope(!0u64 - 64), None);
+}
+
+#[test]
+fn natively_a_growth_is_a_whole_block_reservation_without_permits() {
+    let _g = fresh(total_for_usable(1 << 20));
+    let mut g = reserve_growth("block", 4096).unwrap();
+    assert_eq!((g.granted(), g.held(), outstanding_bytes()), (4096, 4096, 4096));
+    assert!(matches!(g.permit(P), Err(EngineError::Internal(_))));
+    drop(g);
+    assert_eq!(outstanding_bytes(), 0);
+}
+
+#[test]
+fn g_is_the_envelope_or_the_room_and_zero_room_is_reuse_only() {
+    // floor(E/phi) = 100 pages, L = 10 pages: room 90 pages
+    let _g = paged(10 * P, 100 * P);
+    let g = reserve_growth("block", 100).unwrap();
+    assert_eq!((g.granted(), outstanding_bytes()), (2 * P, 2 * P));
+    drop(g);
+    assert_eq!(outstanding_bytes(), 0);
+    // room exactly 0 (L = floor(E/phi)): success, nothing granted
+    hooks::set_fake_committed(Some(100 * P));
+    let mut z = reserve_growth("block", 100).unwrap();
+    assert_eq!((z.granted(), z.held(), outstanding_bytes()), (0, 0, 0));
+    assert!(matches!(z.permit(P), Err(EngineError::Memory(r)) if r.need == P));
+}
+
+#[test]
+fn a_permit_beyond_what_the_room_granted_refuses_with_need_k() {
+    // room one page, a block whose envelope is two pages: g = 1 page; a
+    // grow of two pages refuses at the permit (need = k), one page is fine
+    let _g = paged(10 * P, 11 * P);
+    let mut g = reserve_growth("block", 100).unwrap();
+    assert_eq!(g.granted(), P);
+    match g.permit(2 * P) {
+        Err(EngineError::Memory(r)) => assert_eq!((r.need, r.what.as_str()), (2 * P, "memory growth")),
+        _ => panic!("two pages against one held must refuse"),
+    }
+    let p = g.permit(P).unwrap();
+    hooks::fake_grow(P);
+    p.commit();
+    assert_eq!((g.held(), outstanding_bytes()), (0, 0));
+}
+
+#[test]
+fn commit_releases_the_full_k_so_the_boundary_admission_fits() {
+    // daybreak2's case (C r15 section 2.3): baseline + resident dominate L,
+    // so a grow raises M but not L (Delta-L = 0); the full k still leaves O,
+    // and a host admission at the exact boundary fits.  (Mutation: release
+    // Delta-L instead of k; then O keeps 2 pages and the boundary refuses.)
+    let _g = paged(10 * P, 64 * P);
+    let keep = reserve("result", 20 * P).unwrap().register_resident();
+    hooks::set_fake_usage(Some((30 * P, None))); // L = max(M, B_w + R_res) = 30 pages, as admit reads it
+    let mut g = reserve_growth("block", 3 * P).unwrap();
+    for _ in 0..2 {
+        let p = g.permit(P).unwrap();
+        hooks::fake_grow(P);
+        p.commit();
+    }
+    assert_eq!(last_growth_delta(), 0, "M grew under the B_w + R_res watermark");
+    // during the call: g = 5 pages granted, 2 committed, so O = 3 pages; the
+    // boundary is 64 - 30 - 3 = 31 pages (with Delta-L released, O would
+    // still be 5 pages and 31 would refuse)
+    assert_eq!((g.granted(), g.held(), outstanding_bytes()), (5 * P, 3 * P, 3 * P));
+    let edge = reserve("host result", 31 * P).unwrap();
+    assert!(reserve("one more", FRAG_DEN).is_err());
+    drop(edge);
+    drop(g);
+    assert_eq!(outstanding_bytes(), 0);
+    drop(keep);
+}
+
+#[test]
+fn a_failed_grow_changes_nothing_and_a_new_permit_follows() {
+    let _g = paged(10 * P, 100 * P);
+    let mut g = reserve_growth("block", 100).unwrap();
+    let (held, o) = (g.held(), outstanding_bytes());
+    {
+        let _p = g.permit(P).unwrap();
+        // (memory.grow returned -1: no fake_grow, no commit)
+    }
+    assert_eq!((g.held(), outstanding_bytes(), hooks::fake_committed()), (held, o, Some(10 * P)));
+    let p = g.permit(P).unwrap();
+    hooks::fake_grow(P);
+    p.commit();
+    assert_eq!(g.held(), held - P);
+}
+
+#[test]
+fn one_permit_in_flight_per_instance_across_handles() {
+    let _g = paged(10 * P, 100 * P);
+    let mut a = reserve_growth("a", 100).unwrap();
+    let mut b = reserve_growth("b", 100).unwrap();
+    let pa = a.permit(P).unwrap();
+    assert!(matches!(b.permit(P), Err(EngineError::Internal(m)) if m.contains("in flight")));
+    drop(pa);
+    assert!(b.permit(P).is_ok());
+}
+
+#[test]
+fn nested_handles_keep_their_own_held_and_drop_releases_only_it() {
+    let _g = paged(10 * P, 100 * P);
+    let before = outstanding_bytes();
+    let op = Operation::enter();
+    let a = reserve_growth("outer", 100).unwrap();
+    let inner = Operation::enter();
+    let mut b = reserve_growth("inner", P + 1).unwrap();
+    assert_eq!((a.held(), b.held()), (2 * P, 3 * P));
+    let p = b.permit(P).unwrap();
+    hooks::fake_grow(P);
+    p.commit();
+    drop(b);
+    assert_eq!(outstanding_bytes(), before + 2 * P);
+    assert_eq!(inner.finish(), Ok(()));
+    drop(a);
+    assert_eq!(op.finish(), Ok(()));
+    assert_eq!(outstanding_bytes(), before);
+}
+
+#[test]
+fn success_then_a_refusal_or_panic_keeps_m_and_returns_o() {
+    let _g = paged(10 * P, 100 * P);
+    let o0 = outstanding_bytes();
+    let r = std::panic::catch_unwind(|| {
+        let mut g = reserve_growth("block", 3 * P).unwrap();
+        let p = g.permit(P).unwrap();
+        hooks::fake_grow(P);
+        p.commit();
+        panic!("Stop");
+    });
+    assert!(r.is_err());
+    assert_eq!((outstanding_bytes(), hooks::fake_committed()), (o0, Some(11 * P)));
+}
+
+#[test]
+fn f5a_call_shape_charges_g_plus_t_never_the_block_twice() {
+    // C r14 section 1.5 / 4.3: reserve(T) for the host, reserve_growth(B)
+    // for the block; O peaks at g + T (+ R).  (Mutation: add reserve(B)
+    // back, and the peak is B + g + T.)
+    let _g = paged(10 * P, 1000 * P);
+    let block = 8 * P;
+    let mut h = reserve("nmod host", 3 * P).unwrap();
+    let g = reserve_growth("nmod block", block).unwrap();
+    h.grow("nmod result", P).unwrap();
+    assert_eq!(outstanding_bytes(), g.granted() + 3 * P + P);
+    assert_eq!(g.granted(), growth_envelope(block).unwrap());
+    drop(g);
+    drop(h);
+    assert_eq!(outstanding_bytes(), 0);
+}
+
+#[test]
+fn a_permit_must_be_whole_pages() {
+    let _g = paged(10 * P, 100 * P);
+    let mut g = reserve_growth("block", 100).unwrap();
+    assert!(matches!(g.permit(P + 1), Err(EngineError::Internal(_))));
+}
+
+#[test]
+fn retired_pages_count_as_live_by_one_byte_and_at_equality() {
+    // phi (L + R_ret + O + x) <= E: 80 usable, R_ret 24 (fake rows stand
+    // for the watermark row), live 16: x = 40 fits exactly, 48 doesn't
+    let _g = fresh(total_for_usable(80 * P));
+    hooks::set_fake_usage(Some((16 * P, None)));
+    set_retired((24 * P) as f64, 0).unwrap();
+    assert_eq!(retired_bytes(), 24 * P);
+    match reserve("x", 40 * P + FRAG_DEN) {
+        Err(EngineError::Memory(r)) => {
+            assert_eq!((r.retired, r.live), (24 * P, 16 * P));
+            assert!(EngineError::Memory(r).to_string().contains("retired engine instances"));
+        }
+        _ => panic!("one step over must refuse"),
+    }
+    assert!(reserve("x", 40 * P).is_ok());
+}
+
+#[test]
+fn the_room_counts_retired_pages() {
+    let _g = paged(10 * P, 100 * P);
+    set_retired((89 * P) as f64, 0).unwrap();
+    let g = reserve_growth("block", 100).unwrap();
+    assert_eq!(g.granted(), P); // 100 - 10 - 89
+}
+
+#[test]
+fn an_invalid_retired_figure_is_internal_and_a_sticky_fault() {
+    for (b, f) in [(f64::NAN, 0), (-65536.0, 0), (65536.5, 0), (9007199254740992.0, 0), (1000.0, 0), (65536.0, 2)] {
+        let _g = fresh(total_for_usable(1 << 20));
+        assert!(!state().fault);
+        assert!(matches!(set_retired(b, f), Err(EngineError::Internal(_))), "{} {}", b, f);
+        assert!(state().fault && !certified());
+        // an ordinary refresh doesn't clear it, nor does a valid figure
+        set_total(Some(Total { bytes: total_for_usable(1 << 20), status: TotalStatus::Observed, joint: false, uncertified: false }));
+        assert!(set_retired(0.0, 0).is_ok());
+        assert!(state().fault && !certified(), "a fault stays");
+    }
+}
+
+#[test]
+fn the_failed_creation_fault_is_sticky_and_refuses_protected_growth() {
+    let _g = paged(10 * P, 100 * P);
+    let op = Operation::enter();
+    {
+        let mut s = state();
+        s.mark_certified_chain(op.chain()).unwrap();
+    }
+    // control: certified (observed, no fault), a protected growth is granted
+    drop(reserve_growth("block", 100).unwrap());
+    set_retired(0.0, 1).unwrap();
+    set_retired(0.0, 0).unwrap();
+    assert!(state().fault);
+    assert!(matches!(reserve_growth("block", 100), Err(EngineError::Memory(_))));
+    state().unmark_certified_chain(op.chain());
+    assert_eq!(op.finish(), Ok(()));
+}
+
+// ---- C r16b: the instance-local row takes no R_ret; both scopes are checked
+
+/// Pages with no shared row (absent) and an instance total of `usable`
+/// usable bytes; the fake usage rows (which stand for the shared watermark
+/// row) are cleared.
+fn instance_only(committed: u64, usable: u64) -> std::sync::MutexGuard<'static, ()> {
+    let g = fresh(total_for_usable(usable));
+    hooks::set_fake_usage(None);
+    hooks::set_fake_committed(Some(committed));
+    set_total(Some(Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false }));
+    set_instance_total(Some(Total { bytes: total_for_usable(usable), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    g
+}
+
+#[test]
+fn the_instance_row_takes_no_retired_pages_by_one_byte_and_at_equality() {
+    // phi (L + O + x) <= E_inst: 80 usable, L 16: x = 64 fits exactly, one
+    // FRAG_DEN more doesn't; R_ret (far over the room) is not a term
+    let _g = instance_only(16 * P, 80 * P);
+    set_retired((1000 * P) as f64, 0).unwrap();
+    match reserve("x", 64 * P + FRAG_DEN) {
+        Err(EngineError::Memory(r)) => {
+            assert_eq!((r.row, r.live), ("instance", 16 * P));
+            // (LIMIT-C2BII-2: the instance row's own figures, never the
+            // absent shared record's, and no R_ret)
+            let inst = total_for_usable(80 * P);
+            assert_eq!((r.status, r.total, r.allowance, r.joint, r.retired), (TotalStatus::Observed, inst, inst / SHARE_DEN, false, 0));
+            let m = EngineError::Memory(r).to_string();
+            assert!(m.contains("this engine instance") && !m.contains("retired"), "{}", m);
+        }
+        _ => panic!("one step over must refuse"),
+    }
+    assert!(reserve("x", 64 * P).is_ok());
+}
+
+#[test]
+fn both_scopes_are_checked_and_the_shared_row_still_takes_retired_pages() {
+    // shared 100 usable with R_ret 30 (fake row: usage 10), instance 80
+    // usable (L 10): the shared row binds at 60, the instance one at 70
+    let _g = fresh(total_for_usable(100 * P));
+    hooks::set_fake_usage(Some((10 * P, None)));
+    hooks::set_fake_committed(Some(10 * P));
+    set_instance_total(Some(Total { bytes: total_for_usable(80 * P), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    set_retired((30 * P) as f64, 0).unwrap();
+    match reserve("x", 60 * P + FRAG_DEN) {
+        Err(EngineError::Memory(r)) => {
+            let t = total_for_usable(100 * P);
+            assert_eq!((r.row, r.status, r.total, r.allowance, r.retired), ("shared", TotalStatus::Observed, t, t / SHARE_DEN, 30 * P));
+        }
+        _ => panic!("the shared row must refuse"),
+    }
+    let r = reserve("x", 60 * P).unwrap();
+    drop(r);
+    // without R_ret the shared row would admit 90: the instance row (70) binds
+    set_retired(0.0, 0).unwrap();
+    set_instance_total(Some(Total { bytes: total_for_usable(80 * P), status: TotalStatus::Zero, joint: false, uncertified: false }));
+    set_retired((5 * P) as f64, 0).unwrap();
+    match reserve("x", 70 * P + FRAG_DEN) {
+        Err(EngineError::Memory(r)) => {
+            // (its own status, zero here, and no R_ret though 5 pages are retired)
+            let i = total_for_usable(80 * P);
+            assert_eq!((r.row, r.status, r.total, r.allowance, r.retired), ("instance", TotalStatus::Zero, i, i / SHARE_DEN, 0));
+        }
+        _ => panic!("the instance row must refuse"),
+    }
+    set_retired(0.0, 0).unwrap();
+    assert!(reserve("x", 70 * P).is_ok());
+}
+
+#[test]
+fn the_growth_room_is_the_least_over_the_rows_in_force() {
+    // shared 100 usable, R_ret 30, instance 50 usable, L 10: rooms 60 and 40
+    let _g = paged(10 * P, 100 * P);
+    set_instance_total(Some(Total { bytes: total_for_usable(50 * P), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    set_retired((30 * P) as f64, 0).unwrap();
+    assert_eq!(reserve_growth("block", 69 * P).unwrap().granted(), 40 * P);
+    // the instance row alone (shared absent): 40, R_ret not a term
+    set_total(Some(Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false }));
+    assert_eq!(reserve_growth("block", 69 * P).unwrap().granted(), 40 * P);
+    set_instance_total(Some(Total { bytes: total_for_usable(100 * P), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    assert_eq!(reserve_growth("block", 69 * P).unwrap().granted(), 71 * P, "W(b) within an instance room of 90");
+}
+
+/// The room of the nominal shared total (D0's 1 GiB) at L and R_ret.
+fn nominal_room(live: u64, retired: u64) -> u64 {
+    (NOMINAL_TOTAL / SHARE_DEN) * FRAG_DEN / FRAG_NUM - live - retired
+}
+
+#[test]
+fn no_usable_row_is_never_permission_the_nominal_total_is_checked() {
+    // LIMIT-C2BII-1 (astra2): an absent shared total and no instance total
+    // fail closed to the nominal total, for growth (never the whole
+    // envelope) and for ordinary reservations (never no check at all)
+    let _g = paged(10 * P, 100 * P);
+    set_retired((30 * P) as f64, 0).unwrap();
+    set_total(Some(Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false }));
+    set_instance_total(None);
+    let room = nominal_room(10 * P, 30 * P);
+    let g = reserve_growth("block", 1 << 40).unwrap();
+    assert_eq!(g.granted(), room, "the nominal room, not W(1 TiB)");
+    drop(g);
+    assert_eq!(outstanding_bytes(), 0);
+    // an envelope that overflows is refused on the nominal shared row
+    match reserve_growth("block", u64::MAX) {
+        Err(EngineError::Memory(r)) => assert_eq!((r.row, r.status, r.total, r.retired), ("shared", TotalStatus::Nominal, NOMINAL_TOTAL, 30 * P)),
+        _ => panic!("an overflowing envelope must refuse"),
+    }
+    // ordinary admission: the fake row stands for the watermark row (usage 10)
+    hooks::set_fake_usage(Some((10 * P, None)));
+    match reserve("x", 1 << 40) {
+        Err(EngineError::Memory(r)) => {
+            assert_eq!((r.row, r.status, r.total, r.allowance, r.retired), ("shared", TotalStatus::Nominal, NOMINAL_TOTAL, NOMINAL_TOTAL / SHARE_DEN, 30 * P));
+        }
+        _ => panic!("1 TiB with no usable row must refuse"),
+    }
+    assert_eq!(outstanding_bytes(), 0, "the refused call holds nothing");
+    assert!(reserve("x", room - FRAG_DEN).is_ok());
+    // with no measure either: the native fallback checks the nominal total
+    hooks::set_fake_usage(None);
+    match reserve("x", 1 << 40) {
+        Err(EngineError::Memory(r)) => assert_eq!((r.status, r.total), (TotalStatus::Nominal, NOMINAL_TOTAL)),
+        _ => panic!("1 TiB with no usable row and no measure must refuse"),
+    }
+    // and an instance row present makes the shared absence real again
+    set_instance_total(Some(Total { bytes: total_for_usable(100 * P), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    assert_eq!(shared_row(total(), true), None);
+}
+
+#[test]
+fn growth_refusals_name_the_binding_row_with_its_own_figures() {
+    // LIMIT-C2BII-2: the instance row binds (room 40, shared absent, R_ret
+    // 30 retired): a permit over the grant reports the instance's own total
+    // and status, retired 0; then the shared row binds (room 30 < 40)
+    let _g = paged(10 * P, 100 * P);
+    set_retired((30 * P) as f64, 0).unwrap();
+    let inst = Total { bytes: total_for_usable(50 * P), status: TotalStatus::Observed, joint: false, uncertified: false };
+    set_instance_total(Some(inst));
+    set_total(Some(Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false }));
+    let mut g = reserve_growth("block", 69 * P).unwrap();
+    assert_eq!(g.granted(), 40 * P);
+    match g.permit(41 * P) {
+        Err(EngineError::Memory(r)) => {
+            assert_eq!((r.row, r.status, r.total, r.allowance, r.joint, r.retired), ("instance", TotalStatus::Observed, inst.bytes, inst.bytes / SHARE_DEN, false, 0));
+        }
+        _ => panic!("a permit over the grant must refuse"),
+    }
+    drop(g);
+    match reserve_growth("block", u64::MAX) {
+        Err(EngineError::Memory(r)) => assert_eq!((r.row, r.status, r.total, r.retired), ("instance", TotalStatus::Observed, inst.bytes, 0)),
+        _ => panic!("an overflowing envelope must refuse"),
+    }
+    // shared 70 usable, R_ret 30, L 10: room 30, under the instance's 40
+    let shared = Total { bytes: total_for_usable(70 * P), status: TotalStatus::Observed, joint: false, uncertified: false };
+    set_total(Some(shared));
+    let mut g = reserve_growth("block", 69 * P).unwrap();
+    assert_eq!(g.granted(), 30 * P);
+    match g.permit(31 * P) {
+        Err(EngineError::Memory(r)) => {
+            assert_eq!((r.row, r.status, r.total, r.allowance, r.retired), ("shared", TotalStatus::Observed, shared.bytes, shared.bytes / SHARE_DEN, 30 * P));
+        }
+        _ => panic!("a permit over the grant must refuse"),
+    }
+    drop(g);
+}
+
+#[test]
+fn certification_with_an_absent_shared_total_needs_an_observed_instance_total() {
+    let obs = Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: false, uncertified: false };
+    let absent = Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false };
+    let nominal = Total { status: TotalStatus::Nominal, ..obs };
+    assert!(wasm_totals_certified(false, obs, None));
+    assert!(wasm_totals_certified(false, obs, Some(obs)));
+    assert!(wasm_totals_certified(false, absent, Some(obs)));
+    assert!(!wasm_totals_certified(false, absent, None), "absent and no instance total");
+    assert!(!wasm_totals_certified(false, obs, Some(nominal)), "an instance total present but not observed");
+    assert!(!wasm_totals_certified(false, Total { uncertified: true, ..absent }, Some(obs)), "a joint or unknown row anywhere");
+    assert!(!wasm_totals_certified(true, absent, Some(obs)), "the fault");
+    assert!(!wasm_totals_certified(false, nominal, Some(obs)));
+}
+
+#[test]
+fn the_pushed_totals_parse_absent_and_refuse_anything_else() {
+    // (absent is a status, never zero: a zero total stays a zero total)
+    assert_eq!(total_from_wasm(0.0, 3, 1).map(|t| (t.status, t.uncertified)), Some((TotalStatus::Absent, true)));
+    assert_eq!(total_from_wasm(0.0, 1, 0).map(|t| t.status), Some(TotalStatus::Zero));
+    assert_eq!(TotalStatus::from_code(3), None, "a native host never sends absent");
+    assert_eq!(instance_total_from_wasm(4294967296.0, 0), Ok(Some(Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: false, uncertified: false })));
+    assert_eq!(instance_total_from_wasm(0.0, 3), Ok(None));
+    for (b, st) in [(f64::NAN, 0), (-1.0, 0), (0.5, 0), (1e17, 0), (65536.0, 7), (65536.0, 4)] {
+        assert_eq!(instance_total_from_wasm(b, st), Err(()), "{} {}", b, st);
+    }
 }
