@@ -75,6 +75,22 @@ const board = recs({
   check(short.every((r) => r.refused === "work"), `every budget below ${used} units refused as work: ${JSON.stringify(short.map((r) => r.refused ?? "merged"))}`);
 }
 {
+  // (astra, #197) a merged text that is the word "exhausted" is merged, not taken for exhaustion, in both orders
+  const base3 = edit(board, "n", (r) => ({ ...r, text: "x\nexhausteD" }));
+  const x = edit(base3, "n", (r) => ({ ...r, text: "exhausteD" })), y = edit(base3, "n", (r) => ({ ...r, text: "x\nexhausted" }));
+  const r1 = m3(base3, x, y), r2 = m3(base3, y, x);
+  check(!r1.refused && !r2.refused && item(r1.records, "n").text === "exhausted" && item(r2.records, "n").text === "exhausted", `a merged text "exhausted": merged, both orders (${JSON.stringify([r1.refused, r2.refused])})`);
+}
+{
+  // (daybreak2, #197) a line diff past TEXT_DIFF_PRODUCT_LIMIT end to end: refused as work, never a conflict or a result
+  const n = 2000;
+  const base3 = edit(board, "n", (r) => ({ ...r, text: Array.from({ length: n }, (_, i) => `b${i}\n`).join("") }));
+  const x = edit(base3, "n", (r) => ({ ...r, text: Array.from({ length: n + 1 }, (_, i) => `a${i}\n`).join("") }));
+  const y = edit(base3, "n", (r) => ({ ...r, text: item(base3, "n").text.replace("b5\n", "B5\n") }));
+  const r = m3(base3, x, y, 1e12);
+  check(r.refused === "work" && !("records" in r), `a diff past the limit: refused as work (${JSON.stringify(r.refused ?? "merged")})`);
+}
+{
   // two different insertions at the same place: an overlap, both kept
   const base3 = edit(board, "n", (r) => ({ ...r, text: "a\nb\n" }));
   const x = edit(base3, "n", (r) => ({ ...r, text: "a\nX\nb\n" })), y = edit(base3, "n", (r) => ({ ...r, text: "a\nY\nb\n" }));

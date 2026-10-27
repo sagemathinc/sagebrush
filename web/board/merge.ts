@@ -29,8 +29,9 @@
 //   record must then be reachable from a root, or the merge is refused.
 // - Work: one ledger per merge.  Every record and field costs a unit; a text
 //   merge charges lineMerge3's own work to the same ledger, before it
-//   allocates (each diff also at most TEXT_DIFF_PRODUCT units); past the ledger
-//   it is "exhausted", and the merge is refused, never guessed.  Using exactly
+//   allocates (each diff also at most TEXT_DIFF_PRODUCT_LIMIT units); past the
+//   ledger it is {exhausted: true} (a tagged result: no merged text can be taken
+//   for it), and the merge is refused, never guessed.  Using exactly
 //   the ledger succeeds; the next unit refuses the merge.
 
 import { lineMerge3 } from "../notebook/text-overlap";
@@ -127,8 +128,8 @@ function merge(base: Rec[], a: Rec[], b: Rec[], charge: (n: number) => void, lef
     const ledger = { left: Math.max(left(), 0) };
     const r = lineMerge3(base, x, y, ledger);
     charge(Math.max(left(), 0) - ledger.left);
-    if (r === "exhausted") throw new Refused("work");
-    return r;
+    if ("exhausted" in r) throw new Refused("work");
+    return "text" in r ? r.text : false;
   };
   // a record changed (or created) on both sides: field by field
   const fields = (key: string, r0: Rec | undefined, r1: Rec, r2: Rec): Rec => {
