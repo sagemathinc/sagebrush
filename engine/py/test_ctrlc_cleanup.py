@@ -495,11 +495,17 @@ def test_get_deadline_nonempty():
 # ------------------------------------------------------------------ 3b and 4: Session's ids and the timeout race
 
 STANDIN = textwrap.dedent(r'''
-    import json, signal, sys, time
+    import json, os, signal, sys, threading, time
     hit = [False]
     def on_int(*a):
         hit[0] = True
     signal.signal(signal.SIGINT, on_int)
+    ctl = os.environ.get("SAGEBRUSH_CONTROL_FD")  # (POSIX: Session.interrupt's ids, as the real worker reads them)
+    def control(fd):
+        for line in os.fdopen(fd, "rb"):
+            on_int()
+    if ctl:
+        threading.Thread(target=control, args=(int(ctl),), daemon=True).start()
     print(json.dumps({"ready": True}), flush=True)
     for line in sys.stdin:
         req = json.loads(line)

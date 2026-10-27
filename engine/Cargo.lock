@@ -722,6 +722,7 @@ dependencies = [
 name = "sagebrush-py"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "num-bigint",
  "pyo3",
  "sagebrush-ap",

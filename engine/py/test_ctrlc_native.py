@@ -1,0 +1,473 @@
+"""Ctrl-C PR B (plan-ctrlc-fixes r2 §3a, r3-r5 notes): the worker's native
+request loop, one terminal reply per admitted request, and targeted
+interrupts that never reach a newer request.
+
+    python3 engine/py/test_ctrlc_native.py
+
+Each case counts admitted requests against terminal replies (the worker's
+_native._serve_stats), checks the side effect of the user's code against the
+phase the interrupt hit (a counter whose increment is the code's first
+statement: 0 before it, <= 1 during, = 1 after), that the parent got its
+answer promptly (no restart, the generation unchanged) and that the namespace
+is kept.
+
+- Every build: the lifecycle, targeted interrupts of a Python loop and of
+  time.sleep within the Stop bound (250 ms from the notification to the
+  reply), their stale-target variants, an external SIGINT busy and idle,
+  injections through the worker's own module (setup, the fallback, encode),
+  the parent's re-target, and real terminal Ctrl-C through a pty (POSIX).
+- A test-hooks build (_native._serve_test): the admission injection and
+  astra's gate tests (stale ids read before any arm; a late wake).
+- Native engine calls (factor, a GF(p) echelon), targeted and stale: they
+  need @sagebrush-sage2's guarded Stop window (_native._serve_native_stop()),
+  and are skipped until it lands.
+
+On Windows interrupts are Ctrl-Break, untargeted, as before: the stale-target
+assertions are expected to fail there (CORR-CTRLC-3-Windows), recorded as
+XFAIL; everything else must hold.
+"""
+
+import json
+import os
+import signal
+import sys
+import time
+
+import sagebrush.session as S
+from sagebrush import _native
+
+WINDOWS = os.name == "nt"
+HOOKS = hasattr(_native, "_serve_test")
+STOP_S = 0.25  # (the Stop bound: a targeted interrupt's reply within this of the notification)
+failed = []
+
+
+def check(cond, what, xfail_windows=False):
+    if xfail_windows and WINDOWS:
+        print(("XFAIL (CORR-CTRLC-3-Windows) " if not cond else "XPASS ") + what)
+        return
+    print(("ok   " if cond else "FAIL ") + what)
+    if not cond:
+        failed.append(what)
+
+
+def stats(s):
+    r = s.run("import sagebrush._native as _n; _n._serve_stats()", mode="python")
+    return eval(r["result"]) if r["result"] else None
+
+
+def counts_match(s, what):
+    # (the stats request itself is admitted and running: replied lags it by one)
+    st = stats(s)
+    check(st is not None and st["admitted"] == st["replied"] + 1, "%s: admitted = replied (%r)" % (what, st))
+    return st
+
+
+def submit(s, code):
+    rid = s._send(code, "python", False, False)
+    return rid
+
+
+def started(s, path, timeout=10):
+    end = time.monotonic() + timeout
+    while not os.path.exists(path):
+        if time.monotonic() > end:
+            return False
+        time.sleep(0.005)
+    return True
+
+
+def tmpfile(name):
+    import tempfile
+    d = tempfile.mkdtemp(prefix="sb-ctrlc-b-")
+    return os.path.join(d, name).replace("\\", "/")
+
+
+def running(s, body, flag):
+    """Submit `n += 1; open(flag); body`, wait until it has started: its id."""
+    rid = submit(s, "n += 1\nopen(%r, 'w').close()\n%s" % (flag, body))
+    assert started(s, flag), "the request never started"
+    return rid
+
+
+# ------------------------------------------------------------------ lifecycle
+
+def test_lifecycle():
+    s = S.Session()
+    try:
+        check(s.run("n = 0; n", mode="python")["result"] == "0", "lifecycle: a first request")
+        r = s.run("print('hi'); n += 1; n", mode="python")
+        check(r["result"] == "1" and r["stdout"] == "hi\n" and r["id"] == s.last_id, "lifecycle: result, output and id")
+        r = s.run("1/0", mode="python")
+        check(r["error_info"]["type"] == "exception" and r["id"] == s.last_id, "lifecycle: an error is its request's reply")
+        r = s.run("{", mode="python")
+        check(r["error_info"]["type"] == "syntax", "lifecycle: a syntax error")
+        r = s.run("raise SystemExit(3)", mode="python")
+        check(r["error_info"]["exception"] == "SystemExit" and s.alive(), "lifecycle: SystemExit leaves the session alive")
+        r = s.run("import sys; sys.stdin.read()", mode="python")
+        check(r["result"] == "''" and s.alive(), "lifecycle: the user's stdin is empty, never the protocol")
+        r = s.run("x", mode="python", isolated=True)
+        check(r["error_info"]["exception"] == "NameError", "lifecycle: isolated")
+        counts_match(s, "lifecycle")
+    finally:
+        s.close()
+
+
+# ------------------------------------------------------------------ targeted interrupts, and their stale variants
+
+WORKLOADS = [
+    ("a Python loop", "while True:\n    pass"),
+    ("time.sleep(60)", "import time\ntime.sleep(60)"),
+]
+
+
+def targeted(name, body, native=False):
+    s = S.Session()
+    try:
+        s.run("n = 0; keep = 'kept'", mode="python")
+        gen = s.generation
+        flag = tmpfile("started")
+        rid = running(s, body, flag)
+        t0 = time.monotonic()
+        s.interrupt(rid)
+        r = s._get(rid, 30)
+        dt = time.monotonic() - t0
+        check(bool(r) and r["error_info"]["type"] == "interrupted" and r["id"] == rid, "%s, targeted: its interrupted reply" % name)
+        check(dt <= STOP_S, "%s, targeted: within the Stop bound (%.0f ms)" % (name, dt * 1000))
+        after = s.run("(n, keep)", mode="python")
+        check(after["result"] == "(1, 'kept')" and s.generation == gen and not after["restarted"],
+              "%s, targeted: once, the namespace kept, no restart (%s)" % (name, after["result"]))
+        counts_match(s, name + ", targeted")
+    finally:
+        s.close()
+
+
+def stale(name, body, native=False):
+    """R committed; R+1 runs `body` for a while (until a file appears); an
+    interrupt for R, twice, must not end R+1."""
+    s = S.Session()
+    try:
+        s.run("n = 0", mode="python")
+        old = s.last_id
+        stop = tmpfile("stop")
+        flag = tmpfile("started")
+        # (the workload, bounded: it ends by itself once `stop` exists)
+        bounded = {
+            "a Python loop": "import os\nwhile not os.path.exists(%r):\n    pass" % stop,
+            "time.sleep(60)": "import os, time\nwhile not os.path.exists(%r):\n    time.sleep(0.05)" % stop,
+        }.get(name, body)
+        rid = running(s, bounded, flag)
+        s.interrupt(old)
+        s.interrupt(old)
+        time.sleep(0.5)
+        open(stop, "w").close()
+        r = s._get(rid, 30)
+        check(bool(r) and r["error_info"] is None and r["id"] == rid, "%s, stale target: R+1 finishes normally" % name, xfail_windows=True)
+        check(s.run("n", mode="python")["result"] == "1", "%s, stale target: once" % name)
+        st = counts_match(s, name + ", stale target")
+        if st is not None and not WINDOWS:
+            check(st["stale"] >= 2 and st["woken"] == 0, "%s, stale target: both ids armed nothing, nothing woken (%r)" % (name, st))
+    finally:
+        s.close()
+
+
+# ------------------------------------------------------------------ external SIGINT
+
+def test_external_sigint():
+    if WINDOWS:
+        print("skip external SIGINT (POSIX: kill -INT)")
+        return
+    s = S.Session()
+    try:
+        s.run("n = 0", mode="python")
+        os.kill(s.proc.pid, signal.SIGINT)  # (idle: for nothing)
+        time.sleep(0.2)
+        r = s.run("n", mode="python")
+        check(r["result"] == "0" and s.alive(), "external SIGINT, idle: ignored, the next request its own")
+        flag = tmpfile("started")
+        rid = running(s, "while True:\n    pass", flag)
+        os.kill(s.proc.pid, signal.SIGINT)
+        r = s._get(rid, 10)
+        check(bool(r) and r["error_info"]["type"] == "interrupted" and r["id"] == rid, "external SIGINT, busy: interrupts the running request")
+        check(s.run("n", mode="python")["result"] == "1", "external SIGINT: once, kept")
+        counts_match(s, "external SIGINT")
+    finally:
+        s.close()
+
+
+# ------------------------------------------------------------------ injections, through the worker's own module
+
+def inject(s, code):
+    # (the worker runs as __main__: its module's globals are the loop's)
+    r = s.run("import sys\n_W = sys.modules['__main__']\n" + code, mode="python")
+    assert r["error"] is None, r
+
+
+def test_injections():
+    s = S.Session()
+    try:
+        s.run("n = 0", mode="python")
+        gen = s.generation
+        # setup: a KeyboardInterrupt before the user's code
+        inject(s, "_real_reset = _W._reset_run_state\n"
+                  "def _once():\n    _W._reset_run_state = _real_reset\n    raise KeyboardInterrupt\n"
+                  "_W._reset_run_state = _once")
+        r = s.run("n += 1; n", mode="python")
+        check(r["error_info"]["type"] == "interrupted" and r["id"] == s.last_id, "injection in setup: its interrupted reply")
+        check(s.run("n", mode="python")["result"] == "0", "injection in setup: no side effect")
+        # a handler escape: the user's own except re-raising
+        r = s.run("n += 1\ntry:\n    raise KeyboardInterrupt\nexcept KeyboardInterrupt:\n    raise", mode="python")
+        check(r["error_info"]["type"] == "interrupted" and s.run("n", mode="python")["result"] == "1", "a handler escape: one reply, once")
+        # past the user's code: the run's own KeyboardInterrupt, after it, out of run_request
+        # (the injecting request's own reply calls text() first: skipped)
+        inject(s, "_real_text = _W._Capture.text\n_calls = [0]\n"
+                  "def _once(self):\n    _calls[0] += 1\n    if _calls[0] == 2:\n        _W._Capture.text = _real_text\n        raise KeyboardInterrupt\n    return _real_text(self)\n"
+                  "_W._Capture.text = _once")
+        r = s.run("n += 1; n", mode="python")
+        check(r["error_info"]["type"] == "interrupted" and s.run("n", mode="python")["result"] == "2",
+              "an escape after the user's code: the fallback's reply, the code once")
+        # the fallback itself interrupted, on its first call (run_request's
+        # except calls _interrupted first, and its KeyboardInterrupt escapes
+        # to the fallback, whose own first call raises too)
+        inject(s, "_real_int = _W._interrupted\n_calls = [0]\n"
+                  "def _twice(e):\n    _calls[0] += 1\n    if _calls[0] == 2:\n        _W._interrupted = _real_int\n    raise KeyboardInterrupt\n"
+                  "_W._interrupted = _twice\n"
+                  "_real_reset = _W._reset_run_state\n"
+                  "def _kick():\n    _W._reset_run_state = _real_reset\n    raise KeyboardInterrupt\n"
+                  "_W._reset_run_state = _kick")
+        r = s.run("n += 1; n", mode="python")
+        check(r["error_info"]["type"] == "interrupted" and s.run("n", mode="python")["result"] == "2", "the fallback interrupted: called again, one reply")
+        # encode interrupted on its first call
+        inject(s, "import json as _j\n_real_dumps = _j.dumps\n"
+                  "def _once(o, *a, **k):\n"
+                  "    if isinstance(o, dict) and o.get('result') == '3':\n"
+                  "        _j.dumps = _real_dumps\n        raise KeyboardInterrupt\n"
+                  "    return _real_dumps(o, *a, **k)\n"
+                  "_j.dumps = _once")
+        r = s.run("n += 1; n", mode="python")
+        check(r["result"] == "3" and r["error"] is None, "encode interrupted: encoded again, the reply whole (%r)" % (r["result"],))
+        check(s.generation == gen and s.alive(), "injections: no restart")
+        counts_match(s, "injections")
+    finally:
+        s.close()
+
+
+def test_post_commit_target():
+    """An interrupt for a request just answered (the time limit's race)
+    interrupts nothing: the next request is its own."""
+    s = S.Session()
+    try:
+        s.run("n = 0", mode="python")
+        s.interrupt(s.last_id)
+        r = s.run("import time; time.sleep(0.3); n += 1; n", mode="python")
+        check(r["result"] == "1" and r["error"] is None, "after the commit: the next request is not interrupted", xfail_windows=True)
+    finally:
+        s.close()
+
+
+def test_retarget():
+    """Session.run's own KeyboardInterrupt (its terminal's Ctrl-C) re-targets
+    the request, so the worker ends it even if it lost the signal."""
+    s = S.Session()
+    try:
+        s.run("n = 0", mode="python")
+        real = s._get
+        calls = []
+
+        def interrupted_get(rid, timeout):
+            calls.append(rid)
+            if len(calls) == 1:
+                started(s, flag)
+                raise KeyboardInterrupt  # (the parent's Ctrl-C; the worker never saw one)
+            return real(rid, timeout)
+
+        flag = tmpfile("started")
+        s._get = interrupted_get
+        try:
+            s.run("n += 1\nopen(%r, 'w').close()\nwhile True:\n    pass" % flag, mode="python")
+            got = None
+        except KeyboardInterrupt as e:
+            got = e
+        rid = calls[0]
+        r = real(rid, 10)
+        check(got is not None and bool(r) and r["error_info"]["type"] == "interrupted" and r["id"] == rid,
+              "re-target: the parent's KeyboardInterrupt ends the worker's request")
+        del s._get
+        check(s.run("n", mode="python")["result"] == "1", "re-target: the next run is its own, the namespace kept")
+    finally:
+        s.close()
+
+
+# ------------------------------------------------------------------ a real terminal Ctrl-C (pty)
+
+PTY_CHILD = r'''
+import json, os, sys, time
+import sagebrush.session as S
+flag, stale = sys.argv[1], sys.argv[2] == "stale"
+s = S.Session()
+s.run("n = 0; keep = 'kept'", mode="python")
+gen = s.generation
+if stale:
+    # (run 1 interrupted by its own id, the notification left behind)
+    s.interrupt(s.last_id)
+out = {}
+try:
+    s.run("n += 1\nopen(%r, 'w').close()\nwhile True:\n    pass" % flag, mode="python", timeout=30)
+    out["parent"] = "no interrupt"
+except KeyboardInterrupt:
+    out["parent"] = "KeyboardInterrupt"
+rid = s.last_id
+r = s._get(rid, 10)
+out["reply"] = r and (r["id"] == rid and r["error_info"]["type"])
+t0 = time.monotonic()
+r2 = s.run("(n, keep)", mode="python")
+out.update(next=r2["result"], restarted=r2["restarted"], gen=s.generation == gen, prompt=time.monotonic() - t0 < 5)
+print("RESULT " + json.dumps(out), flush=True)
+s.close()
+'''
+
+
+def pty_case(stale):
+    import pty
+    flag = tmpfile("started")
+    child = tmpfile("child.py")
+    open(child, "w").write(PTY_CHILD)
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execv(sys.executable, [sys.executable, child, flag, "stale" if stale else "fresh"])
+    buf = b""
+    try:
+        assert started(None, flag, 60), "the child's run never started"
+        time.sleep(0.1)
+        os.write(fd, b"\x03")  # (the line discipline's SIGINT, to the foreground group: parent and worker)
+        end = time.monotonic() + 60
+        while b"RESULT " not in buf or not buf.rstrip().endswith(b"}"):
+            if time.monotonic() > end:
+                break
+            try:
+                chunk = os.read(fd, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf += chunk
+    finally:
+        os.waitpid(pid, 0)
+    line = [x for x in buf.decode("utf-8", "replace").splitlines() if x.startswith("RESULT ")]
+    out = json.loads(line[0][7:]) if line else {}
+    what = "pty Ctrl-C %s" % ("after a stale target" if stale else "before any target")
+    check(out.get("parent") == "KeyboardInterrupt", "%s: the parent sees KeyboardInterrupt (%r)" % (what, out))
+    check(out.get("reply") == "interrupted", "%s: one interrupted reply with its id" % what)
+    check(out.get("next") == "(1, 'kept')" and out.get("restarted") is False and out.get("gen") and out.get("prompt"),
+          "%s: the next run is its own, promptly, no restart, the namespace kept" % what)
+
+
+# ------------------------------------------------------------------ test-hooks builds: admission, and astra's gates
+
+def hook(s, name, value):
+    inject(s, "import sagebrush._native as _n\n_n._serve_test(%r, %d)" % (name, value))
+
+
+def test_hooks():
+    if not HOOKS:
+        print("skip the admission and gate tests: they need a test-hooks build")
+        return
+    s = S.Session()
+    try:
+        s.run("n = 0", mode="python")
+        hook(s, "admit_interrupt", 1)
+        r = s.run("n += 1; n", mode="python")
+        check(r["error_info"]["type"] == "interrupted" and s.run("n", mode="python")["result"] == "0",
+              "an interrupt at admission: its interrupted reply, no side effect")
+        if WINDOWS:
+            return
+        # (gate 1: R committed, R+1 running; interrupt(R) twice, read before any arm)
+        old = s.last_id
+        before = stats(s)
+        hook(s, "arm_delay_ms", 200)
+        stop, flag = tmpfile("stop"), tmpfile("started")
+        rid = running(s, "import os, time\nwhile not os.path.exists(%r):\n    time.sleep(0.01)" % stop, flag)
+        s.interrupt(old)
+        s.interrupt(old)
+        time.sleep(0.8)
+        open(stop, "w").close()
+        r = s._get(rid, 30)
+        hook(s, "arm_delay_ms", 0)
+        st = stats(s)
+        check(bool(r) and r["error_info"] is None and s.run("n", mode="python")["result"] == "1",
+              "gate: stale ids read before any arm: R+1 finishes normally, once")
+        check(st["stale"] - before["stale"] >= 2 and st["woken"] == before["woken"], "gate: both arms failed, nothing woken (%r)" % st)
+        # (gate 2, the late wake: arm(R+1) succeeds, R+1 commits, R+2 is admitted, then the wake)
+        before = stats(s)
+        hook(s, "wake_delay_ms", 400)
+        flag = tmpfile("started")
+        rid = running(s, "import time\ntime.sleep(0.1)", flag)
+        s.interrupt(rid)
+        r1 = s._get(rid, 10)
+        flag2 = tmpfile("started")
+        rid2 = running(s, "import time\ntime.sleep(1.0)\n'R+2'", flag2)
+        r2 = s._get(rid2, 10)
+        hook(s, "wake_delay_ms", 0)
+        st = stats(s)
+        check(bool(r1) and r1["error_info"] is None, "late wake: R+1 finished before its wake")
+        check(bool(r2) and r2["result"] == "'R+2'" and r2["error"] is None, "late wake: R+2 is not interrupted")
+        check(st["woken"] - before["woken"] == 1 and st["late"] > before["late"], "late wake: woken once, taken as late (%r)" % st)
+        counts_match(s, "hooks")
+    finally:
+        s.close()
+
+
+# ------------------------------------------------------------------ native engine calls (after the guarded Stop window)
+
+NATIVE = [
+    ("factor", "n += 1\nfactor(next_prime(2^120) * next_prime(2^121))"),
+    ("a GF(p) echelon", "n += 1\nF = GF(next_prime(2^62)); A = random_matrix(F, 1024, 1024); A.echelon_form().rank()"),
+]
+
+
+def test_native():
+    if not _native._serve_native_stop():
+        print("skip the native Stop tests (factor, GF(p) echelon): they need @sagebrush-sage2's guarded Stop window")
+        return
+    for name, code in NATIVE:
+        s = S.Session()
+        try:
+            s.run("n = 0", mode="python")
+            rid = s._send(code, "sage", False, False)
+            time.sleep(0.5)  # (inside the engine call)
+            t0 = time.monotonic()
+            s.interrupt(rid)
+            r = s._get(rid, 30)
+            dt = time.monotonic() - t0
+            check(bool(r) and r["error_info"]["type"] == "interrupted", "%s, targeted: interrupted" % name)
+            check(dt <= STOP_S, "%s, targeted: within the Stop bound (%.0f ms)" % (name, dt * 1000))
+            check(s.run("n", mode="python")["result"] == "1", "%s: once, kept" % name)
+            # (stale: an earlier id's interrupt during the call ends nothing)
+            old = s.last_id
+            rid = s._send(code, "sage", False, False)
+            time.sleep(0.5)
+            s.interrupt(old)
+            r = s._get(rid, 600)
+            check(bool(r) and r["error"] is None, "%s, stale target: finishes normally" % name, xfail_windows=True)
+        finally:
+            s.close()
+
+
+if __name__ == "__main__":
+    test_lifecycle()
+    for name, body in WORKLOADS:
+        targeted(name, body)
+        stale(name, body)
+    test_external_sigint()
+    test_injections()
+    test_post_commit_target()
+    test_retarget()
+    if not WINDOWS:
+        pty_case(stale=False)
+        pty_case(stale=True)
+    test_hooks()
+    test_native()
+    if failed:
+        print("ctrlc native: %d FAILED" % len(failed))
+        sys.exit(1)
+    print("ctrlc native: all ok")
