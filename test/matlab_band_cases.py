@@ -282,10 +282,12 @@ try:
         tags = [r[3] for r in L._recorder if r[0] == "reserve"]
     finally:
         L._recorder = None
-    assert L._routes == ["band"] and "ordering" not in tags, (L._routes, tags)
+    # (the incumbent COSTS (2abc0a61) charge c_step per row: T_band = 1e-4 n + 1.8e-7 n (kl + 1)(kl + ku + 1) = 0.4087
+    # here, over c_ord nnz = 9.2e-6 * 16000 = 0.1472, so the pre-order shortcut can't take it: band after the ordering)
+    assert L._routes == ["band"] and tags == ["discovery", "ordering", "band", "band-step"], (L._routes, tags)
     X0 = sp._legacy_band_solve(T, b.copy())
     assert float(np.max(np.abs(X - X0))) == 0.0
-    ok("route: a tridiagonal-like n = 4001 system takes the band path at once (no ordering), with master's band answer exactly; G = M_band admits it")
+    ok("route: a tridiagonal-like n = 4001 system takes the band path after the ordering (incumbent COSTS), with master's band answer exactly; G = M_band admits it")
     # (one byte less: band is refused; the LU, whose own need is larger here, too: one refusal, naming both)
     use(Cap(m_band - 1))
     L._routes = []
@@ -306,6 +308,27 @@ try:
     ok("route: the route-only mutant (band never cheaper) takes LU, so the band-route assertion kills it")
 finally:
     L.COSTS["cli"].update(saved_costs)
+    restore()
+
+# (the pre-order shortcut, its own row: band(4001, 8, 8) has T_band = 0.5103 <= c_ord nnz = 9.2e-6 * 67945 = 0.6251
+# under the incumbent COSTS (a margin of 1.225), so band is taken at once, with no ordering)
+n = 4001
+T8 = band_matrix(n, 8, 8)
+b = np.ones((n, 1))
+try:
+    use(Cap(10 ** 12))
+    L._routes = []
+    L._recorder = []
+    try:
+        X, s = L.solve(T8, b, "t")
+        tags = [r[3] for r in L._recorder if r[0] == "reserve"]
+    finally:
+        L._recorder = None
+    assert L._routes == ["band"] and tags == ["discovery", "band", "band-step"], (L._routes, tags)
+    X0 = sp._legacy_band_solve(T8, b.copy())
+    assert float(np.max(np.abs(X - X0))) == 0.0
+    ok("route: band(4001, 8, 8) takes the band path at once (the pre-order shortcut, no ordering), with master's band answer exactly")
+finally:
     restore()
 
 
