@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 const mod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 
 function run(js: string): any {
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { leakControlOutcome, classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, stopGate, withWaiver, waiverErrors, STOP_BOUND_MS, POLL_GAP_MS, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { leakControlOutcome, classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, stopGate, withWaiver, waiverErrors, ciFailing, STOP_BOUND_MS, POLL_GAP_MS, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -365,8 +365,11 @@ const EPS = 2 ** -45; // the smallest step above 250 (250's ulp)
 const W = join(__dirname, "..", "..", "web");
 const REGISTRY = JSON.parse(readFileSync(join(W, "interrupt-waivers.json"), "utf8")).records;
 const E13G = REGISTRY.find((w: any) => w.scope.case === "E13g");
-const ord = (lat: number) => `{ t_send: 0, marks: { ENTER: { t: -100, rest: "1" }, KI: { t: ${lat}, rest: "2" } }, probe: "ok" }`;
-const xkw = (lat: number) => `{ t_send: 0, marks: { ENTER: { t: -100, rest: "1" }, XSTART: { t: -10 }, KI: { t: ${lat}, rest: "2" } }, probe: "ok" }`;
+// (every time valid and non-negative, R1; an XK trial's send at 1024, so XSTART can precede it: at 1024 + 250 the
+// smallest step is 2^-42, so its epsilon is that one, and 1024 + x - 1024 is exactly x)
+const ord = (lat: number) => `{ t_send: 0, marks: { ENTER: { t: 0, rest: "1" }, KI: { t: ${lat}, rest: "2" } }, probe: "ok" }`;
+const XS = 1024, EPS_XK = 2 ** -42;
+const xkw = (lat: number) => `{ t_send: ${XS}, marks: { ENTER: { t: 900, rest: "1" }, XSTART: { t: 1000 }, KI: { t: ${XS + lat}, rest: "2" } }, probe: "ok" }`;
 // the whole pipeline the matrix runs: classifyCell -> xkRowOutcome -> againstBaseline -> withWaiver
 const pipe = (trials: string[], o: { xk?: string; kase?: string; host?: string; baseline?: string; waivers?: string; call?: string; leak?: string } = {}) =>
   run(`(() => { const xk = ${o.xk ?? "null"}; const cells = [${trials.join(",")}].map((t) => classifyCell(t, xk));
@@ -386,24 +389,25 @@ test("Stop bound: STOP_BOUND_MS is 250 and POLL_GAP_MS stays 100; the gate passe
     assert.deepEqual([g.outcome, g.late], ["FAIL", true], x);
     assert.match(g.why, /^honoured late: .* past the 250 ms bound/);
   }
-  for (const x of ["NaN", "Infinity", "-1", "undefined", "null"]) {
+  // (no valid latency is malformed evidence: INVALID, never a pass, never KNOWN or WAIVED; R1)
+  for (const x of ["NaN", "Infinity", "-1", "undefined", "null", `"12"`]) {
     const g = run(`stopGate(${x})`);
-    assert.deepEqual([g.outcome, g.late], ["FAIL", undefined], x);
-    assert.match(g.why, /harness bug/);
+    assert.deepEqual([g.outcome, g.late, g.malformed], ["INVALID", undefined, true], x);
+    assert.match(g.why, /^invalid evidence/);
   }
 });
 
-test("Stop bound in classify: the raw latency is gated (250.4 ms FAILs though it displays as 250); a missing send time after ENTER is a harness FAIL; detection doesn't count, the caller's KI does", () => {
+test("Stop bound in classify: the raw latency is gated (250.4 ms FAILs though it displays as 250); a missing send time after ENTER is malformed evidence (INVALID); detection doesn't count, the caller's KI does", () => {
   const r = run(`classify(${ord(250.4)})`);
   assert.deepEqual([r.outcome, r.latency_ms, r.latency_raw_ms, r.late], ["FAIL", 250, 250.4, true]);
   assert.equal(run(`classify(${ord(250)})`).outcome, "PASS");
   const lost = run(`classify({ marks: { ENTER: { t: 0, rest: "1" } }, probe: "ok" })`);
-  assert.deepEqual([lost.outcome, /harness bug/.test(lost.why)], ["FAIL", true]);
+  assert.deepEqual([lost.outcome, lost.malformed], ["INVALID", true]);
   // (still INVALID for its real reasons: a return before the Stop, a target that never started)
   assert.equal(run(`classify({ marks: { ENTER: { t: 0 }, RET: { t: 5 } }, probe: "ok" })`).outcome, "INVALID");
   assert.equal(run(`classify({ marks: {}, probe: "ok" })`).outcome, "INVALID");
   // (an earlier detection mark is a diagnostic: the caller's KI at 300 ms is what counts)
-  assert.equal(run(`classify({ t_send: 0, marks: { ENTER: { t: -100, rest: "1" }, DETECT: { t: 50 }, KI: { t: 300, rest: "2" } }, probe: "ok" })`).outcome, "FAIL");
+  assert.equal(run(`classify({ t_send: 0, marks: { ENTER: { t: 0, rest: "1" }, DETECT: { t: 50 }, KI: { t: 300, rest: "2" } }, probe: "ok" })`).outcome, "FAIL");
 });
 
 test("D4.5: an ordinary latency-only row: 249 and 250 ms PASS through the whole pipeline, 251 and 250 + eps FAIL", () => {
@@ -415,11 +419,11 @@ test("D4.5: an ordinary latency-only row: 249 and 250 ms PASS through the whole 
 
 test("D4.5b: an XK window row keeps its stricter split: 100 PASS / 100 + eps EXCEPTION (POLL_GAP_MS, unmoved), 249 and 250 EXCEPTION, 251 and 250 + eps FAIL unless waived", () => {
   assert.equal(pipe([xkw(100)], { xk: WIN }).outcome, "FIXED"); // every cell PASS: the stale-exception row, as today
-  assert.equal(pipe([xkw(100 + 2 ** -46)], { xk: WIN }).outcome, "EXCEPTION");
+  assert.equal(pipe([xkw(100 + EPS_XK)], { xk: WIN }).outcome, "EXCEPTION");
   assert.equal(pipe([xkw(249)], { xk: WIN }).outcome, "EXCEPTION");
   assert.equal(pipe([xkw(250)], { xk: WIN }).outcome, "EXCEPTION");
   assert.equal(pipe([xkw(251)], { xk: WIN }).outcome, "FAIL");
-  assert.equal(pipe([xkw(250 + EPS)], { xk: WIN }).outcome, "FAIL");
+  assert.equal(pipe([xkw(250 + EPS_XK)], { xk: WIN }).outcome, "FAIL");
 });
 
 test("D4.1-2, G4: an XK cell honoured late is FAIL; with William's exact E13g record it is WAIVED (own_outcome FAIL, labelled), never PASS", () => {
@@ -436,7 +440,7 @@ test("D4.3, G4: a waiver never matches by association: another host, another cas
   assert.equal(pipe([xkw(300)], { xk: WIN, waivers: ws, call: "_sbraster.encode" }).outcome, "FAIL");
   assert.equal(pipe([xkw(300)], { xk: WIN, waivers: ws }).outcome, "FAIL");
   // (a late cell beside a did-not-stop cell, a KI past the window's own bound, or a leak: not the waiver's)
-  const ret = `{ t_send: 0, marks: { ENTER: { t: -100 }, XSTART: { t: -10 }, RET: { t: 3300 } }, probe: "ok" }`;
+  const ret = `{ t_send: 1024, marks: { ENTER: { t: 900 }, XSTART: { t: 1000 }, RET: { t: 4300 } }, probe: "ok" }`;
   assert.equal(pipe([xkw(300), ret], { xk: WIN, waivers: ws, call: "_sbraster.render" }).outcome, "FAIL");
   assert.equal(pipe([xkw(5100)], { xk: WIN, waivers: ws, call: "_sbraster.render" }).outcome, "FAIL");
   assert.equal(pipe([xkw(300)], { xk: WIN, waivers: ws, call: "_sbraster.render", leak: "{ ok: false }" }).outcome, "FAIL");
@@ -445,7 +449,7 @@ test("D4.3, G4: a waiver never matches by association: another host, another cas
 test("D4.4: a baseline entry never pins a Stop honoured late, even when its signature would match; a not-honoured failure it pins is KNOWN, as before", () => {
   const b = `{ entries: [{ case: "P1", host: "cli", signature: "honoured late|no KeyboardInterrupt|did not stop" }] }`;
   assert.equal(pipe([ord(300)], { kase: "P1", baseline: b }).outcome, "FAIL");
-  const none = `{ t_send: 0, marks: { ENTER: { t: -100 } }, probe: "ok" }`;
+  const none = `{ t_send: 0, marks: { ENTER: { t: 0 } }, probe: "ok" }`;
   assert.equal(pipe([none], { kase: "P1", baseline: b }).outcome, "KNOWN");
   assert.equal(pipe([none, ord(300)], { kase: "P1", baseline: b }).outcome, "FAIL");
 });
@@ -479,4 +483,70 @@ test("G5: a synthetic end-to-end row (classify -> rowOutcome -> againstBaseline)
   const r = run(`(() => { const cells = [${ord(20)}, ${ord(300)}].map((t) => classify(t)); const own = rowOutcome(cells, true);
     return [own, againstBaseline({ case: "E2", host: "cli", outcome: own, trials: cells }, { entries: [{ case: "E2", host: "cli", signature: "." }] })]; })()`);
   assert.deepEqual(r, ["FAIL", "FAIL"]);
+});
+
+// ---- #225 r2 (astra2 R1, R2): malformed evidence and the waiver's complete-evidence rule, through the CI exit
+const BROAD = `{ entries: [{ case: "E13g", host: "cli", signature: "." }, { case: "P1", host: "cli", signature: "." }] }`;
+// the matrix's composition, then the CI exit: [own, final, waiver id, failing in --ci]
+const ci = (trials: string[], o: Parameters<typeof pipe>[1] = {}) => {
+  const r = pipe(trials, { baseline: BROAD, ...o });
+  return [r.own, r.outcome, r.waiver ?? null, run(`ciFailing([{ outcome: ${JSON.stringify(r.outcome)} }]).length`) === 1];
+};
+
+test("R1: every marker and the send time are validated before any difference: null, string, NaN, infinite or negative times are malformed (INVALID), never PASS", () => {
+  const bad = [
+    `{ t_send: 0, marks: { ENTER: { t: 0 }, KI: { t: null, rest: "1" } }, probe: "ok" }`, // astra2's: was latency 0, PASS
+    `{ t_send: 0, marks: { ENTER: { t: 0 }, KI: { t: "120", rest: "1" } }, probe: "ok" }`,
+    `{ t_send: "0", marks: { ENTER: { t: 0 }, KI: { t: 120, rest: "1" } }, probe: "ok" }`,
+    `{ t_send: -100, marks: { ENTER: { t: 0 }, KI: { t: 50, rest: "1" } }, probe: "ok" }`, // a positive difference from a negative time
+    `{ t_send: 0, marks: { ENTER: { t: 0 }, DETECT: { t: NaN }, KI: { t: 50, rest: "1" } }, probe: "ok" }`, // a malformed diagnostic
+    `{ t_send: 0, marks: { ENTER: { t: Infinity }, KI: { t: 50, rest: "1" } }, probe: "ok" }`,
+  ];
+  for (const t of bad) {
+    const r = run(`classify(${t})`);
+    assert.deepEqual([r.outcome, r.malformed], ["INVALID", true], t);
+  }
+  // (the genuine INVALIDs stay as they were, unflagged)
+  const before = run(`classify({ t_send: 1000, marks: { ENTER: { t: 500 }, RET: { t: 900 } }, probe: "ok" })`);
+  assert.deepEqual([before.outcome, before.malformed, before.why], ["INVALID", undefined, "returned before the Stop"]);
+  // (an XK calibration that is no valid window or bound)
+  for (const xk of [`{ kind: "window", R_ms: NaN }`, `{ kind: "window", R_ms: 0 }`, `{ kind: "bound", T_ms: 8000, f: NaN }`, `{ kind: "bound", T_ms: Infinity, f: 0.5 }`]) {
+    const r = run(`classifyXK(${xkw(300)}, ${xk})`);
+    assert.deepEqual([r.outcome, r.malformed], ["INVALID", true], xk);
+  }
+});
+
+test("R1 composition: malformed evidence is never KNOWN under a broad signature, nor WAIVED, and fails the CI exit", () => {
+  const nul = `{ t_send: 0, marks: { ENTER: { t: 0 }, KI: { t: null, rest: "1" } }, probe: "ok" }`;
+  const did = `{ t_send: 0, marks: { ENTER: { t: 0 }, RET: { t: 3300 } }, probe: "ok" }`; // did not stop: pinnable
+  assert.deepEqual(ci([did], { kase: "P1" }), ["FAIL", "KNOWN", null, false]); // (control: pinned without it)
+  assert.deepEqual(ci([did, nul], { kase: "P1" }), ["FAIL", "FAIL", null, true]);
+  assert.deepEqual(ci([nul], { kase: "P1" }), ["INCOMPLETE", "INCOMPLETE", null, true]);
+  const xnul = `{ t_send: ${XS}, marks: { ENTER: { t: 900 }, XSTART: { t: 1000 }, KI: { t: "1500", rest: "2" } }, probe: "ok" }`;
+  assert.deepEqual(ci([xkw(300), xnul], { xk: WIN, waivers: JSON.stringify([E13G]), call: "_sbraster.render" }), ["FAIL", "FAIL", null, true]);
+  assert.deepEqual(ci([xkw(300)], { xk: `{ kind: "window", R_ms: NaN }`, waivers: JSON.stringify([E13G]), call: "_sbraster.render" }), ["INCOMPLETE", "INCOMPLETE", null, true]);
+});
+
+test("R2: WAIVED needs every cell eligible, the leak measured and ok, and each late Stop inside the declared call's window; otherwise FAIL through the CI exit", () => {
+  const ws = { xk: WIN, waivers: JSON.stringify([E13G]), call: "_sbraster.render" };
+  assert.deepEqual(ci([xkw(300), xkw(40)], ws), ["FAIL", "WAIVED", E13G.id, false]); // (control)
+  const retBefore = `{ t_send: ${XS}, marks: { ENTER: { t: 900 }, XSTART: { t: 1000 }, RET: { t: 1010 } }, probe: "ok" }`; // INVALID: returned before
+  assert.deepEqual(ci([xkw(300), retBefore], ws), ["FAIL", "FAIL", null, true]);
+  // (an unknown, retired SLOW cell beside the late one: rowOutcome fails it, the waiver mustn't hide it)
+  const r = run(`(() => { const xk = ${WIN}; const cells = [classifyCell(${xkw(300)}, xk), { outcome: "SLOW", latency_ms: 20000 }];
+    const own = xkRowOutcome(cells, true, xk).outcome; const row = { case: "E13g", host: "cli", outcome: own, trials: cells, leak: { ok: true } };
+    return withWaiver(row, againstBaseline(row, ${BROAD}), ${JSON.stringify([E13G])}, "_sbraster.render").outcome; })()`);
+  assert.equal(r, "FAIL");
+  // (the leak not measured: null, undefined)
+  assert.deepEqual(ci([xkw(300)], { ...ws, leak: "null" }), ["FAIL", "FAIL", null, true]);
+  const u = run(`(() => { const xk = ${WIN}; const cells = [classifyCell(${xkw(300)}, xk)]; const row = { case: "E13g", host: "cli", outcome: "FAIL", trials: cells };
+    return withWaiver(row, "FAIL", ${JSON.stringify([E13G])}, "_sbraster.render").outcome; })()`);
+  assert.equal(u, "FAIL");
+  // (a Stop outside the render window: XEND before the send, a late KI: case, host and call match, the window doesn't)
+  const outside = `{ t_send: ${XS}, marks: { ENTER: { t: 900 }, XSTART: { t: 950 }, XEND: { t: 1000 }, KI: { t: ${XS + 300}, rest: "2" } }, probe: "ok" }`;
+  assert.deepEqual(run(`classifyXK(${outside}, ${WIN})`).xk_inside, false);
+  assert.deepEqual(ci([outside], ws), ["FAIL", "FAIL", null, true]);
+  // (and on its own: a late cell that carries a valid bound but is marked outside the window is never waived)
+  const out2 = run(`withWaiver({ case: "E13g", host: "cli", trials: [{ outcome: "FAIL", late: true, xk_inside: false, xk_bound_ms: 5000, latency_raw_ms: 300 }], leak: { ok: true } }, "FAIL", ${JSON.stringify([E13G])}, "_sbraster.render")`);
+  assert.equal(out2.outcome, "FAIL");
 });

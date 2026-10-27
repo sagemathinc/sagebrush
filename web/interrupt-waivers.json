@@ -12,7 +12,7 @@
     "call": "_sbraster.render"
    },
    "owner": "board/plot",
-   "follow_up": "plan-interruptible-raster r1 (d20587eb88d4e70ee0aa3d9cbf7bcc8b29ca36440d00659d4e5e284f1df7585c)",
+   "follow_up": "plan-interruptible-raster r11 (70001ef90f8db28396c2e3e3f986be73bd63f305c096acd1c343be525708e37e), ALL CLEAR Oct 27",
    "ends_when": "the interruptible-render fix (interruptible-raster) lands",
    "ended": false
   }
