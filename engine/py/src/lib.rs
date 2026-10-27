@@ -795,21 +795,30 @@ fn progress_tables() -> String {
 /// re-exported by the pure-Python package (python/sagebrush).
 /// Tests only (feature `test-hooks`, never in a released wheel): a guarded
 /// call whose body ends by `kind`: "panic" (an ordinary Rust panic), "stop"
-/// (a Stop at a check), "nested" (past the 100 ms window, one parallel
-/// wrapper entry on this, the owner, thread, and no admission: the C-2c-i
-/// hot path's owner refresh) or anything else (it returns 1), for the
-/// delivery of a retained control exception on every exit path (C-2c scope
-/// r2 section 2.1; astra2's CORR-C2CI-3).
+/// (a Stop at a check), "nested_gated" (waits until `_test_gate(True)`,
+/// then one parallel wrapper entry on this, the owner, thread, and no
+/// admission: the C-2c-i hot path's owner refresh, ordered after another
+/// owner's invalidation), "nested_now" (that wrapper entry at once) or
+/// anything else (it returns 1), for the delivery of a retained control
+/// exception on every exit path (C-2c scope r2 section 2.1; astra2's
+/// CORR-C2CI-3).
 #[cfg(feature = "test-hooks")]
 #[pyfunction(name = "_test_guarded")]
 fn test_guarded(py: Python<'_>, kind: &str) -> PyResult<u32> {
     let kind = kind.to_string();
     let r = guarded(py, move || match kind.as_str() {
         "panic" => panic!("a body failure (test hook)"),
-        "nested" => {
-            std::thread::sleep(std::time::Duration::from_millis(150));
+        "nested_gated" => {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            while !TEST_GATE.load(std::sync::atomic::Ordering::SeqCst) {
+                if std::time::Instant::now() > deadline {
+                    return 0;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
             sagebrush_par::map_range(2, |i| i as u32).len() as u32
         }
+        "nested_now" => sagebrush_par::map_range(2, |i| i as u32).len() as u32,
         "stop" => {
             sagebrush_interrupt::request();
             sagebrush_interrupt::check();
@@ -821,11 +830,24 @@ fn test_guarded(py: Python<'_>, kind: &str) -> PyResult<u32> {
     r
 }
 
+/// Tests only: the gate "nested_gated" waits on (set by the test once the
+/// other owner's invalidation is published).
+#[cfg(feature = "test-hooks")]
+static TEST_GATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(feature = "test-hooks")]
+#[pyfunction(name = "_test_gate")]
+fn test_gate(open: bool) {
+    TEST_GATE.store(open, std::sync::atomic::Ordering::SeqCst);
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let _ = MAIN.set(std::thread::current().id());
     #[cfg(feature = "test-hooks")]
     m.add_function(wrap_pyfunction!(test_guarded, m)?)?;
+    #[cfg(feature = "test-hooks")]
+    m.add_function(wrap_pyfunction!(test_gate, m)?)?;
     let modsym = PyModule::new(m.py(), "modsym")?;
     modsym.add_function(wrap_pyfunction!(hecke_charpoly, &modsym)?)?;
     modsym.add_function(wrap_pyfunction!(charpoly_exact, &modsym)?)?;

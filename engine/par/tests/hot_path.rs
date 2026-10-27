@@ -29,13 +29,19 @@ static NOT_ASKED: AtomicUsize = AtomicUsize::new(0);
 static SERIAL: Mutex<()> = Mutex::new(());
 static REGISTER: Once = Once::new();
 
+/// the source trace, poison-tolerant: a failing test must not turn the
+/// other tests' setup into a PoisonError (each kill stays its own)
+fn sources() -> std::sync::MutexGuard<'static, Vec<String>> {
+    SOURCE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn answer() -> HostAnswer {
     if !owner() {
         NOT_ASKED.fetch_add(1, SeqCst);
         return HostAnswer::NotAsked;
     }
     let who = std::thread::current().name().unwrap_or("?").to_string();
-    SOURCE.lock().unwrap().push(who.clone());
+    sources().push(who.clone());
     if who == "owner-b" {
         return HostAnswer::Unreadable;
     }
@@ -46,13 +52,13 @@ fn answer() -> HostAnswer {
 fn setup() -> std::sync::MutexGuard<'static, ()> {
     let g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     REGISTER.call_once(|| set_total_host_asking(answer, owner));
-    SOURCE.lock().unwrap().clear();
+    sources().clear();
     NOT_ASKED.store(0, SeqCst);
     g
 }
 
 fn counts() -> (usize, usize) {
-    (SOURCE.lock().unwrap().len(), NOT_ASKED.load(SeqCst))
+    (sources().len(), NOT_ASKED.load(SeqCst))
 }
 
 /// (asked, reached the host)
@@ -158,23 +164,23 @@ fn an_owners_nested_entry_asks_after_another_owner_invalidated_with_no_later_adm
         .unwrap();
     b.join().unwrap();
     a.join().unwrap();
-    assert_eq!(*SOURCE.lock().unwrap(), vec!["owner-a", "owner-b", "owner-a"], "A's nested entry asked A's source");
+    assert_eq!(*sources(), vec!["owner-a", "owner-b", "owner-a"], "A's nested entry asked A's source");
     assert_eq!(NOT_ASKED.load(SeqCst), 0);
 }
 
 #[test]
 fn the_owner_refresh_expires_with_the_unchanged_100_ms_window() {
-    // (total() and its `>= 100 ms` staleness are unchanged; without a clock
-    // hook this checks either side of the window, not the exact instant)
+    // (total() and its `>= 100 ms` staleness are unchanged, and the exact
+    // boundary rests on those source lines; this checks an immediate
+    // re-refresh (fresh) and one past the window, not the instant)
     let _g = setup();
     OWNER.with(|o| o.set(true));
     set_total(None);
     refresh_if_owner();
     assert_eq!(counts().0, 1, "a None total is asked at once");
-    std::thread::sleep(Duration::from_millis(40));
     refresh_if_owner();
-    assert_eq!(counts().0, 1, "inside the window: not asked again");
-    std::thread::sleep(Duration::from_millis(80));
+    assert_eq!(counts().0, 1, "immediately after: fresh, not asked again");
+    std::thread::sleep(Duration::from_millis(120));
     refresh_if_owner();
     assert_eq!(counts().0, 2, "past the window: asked once more");
     OWNER.with(|o| o.set(false));
