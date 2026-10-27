@@ -3,8 +3,15 @@
   "extends": "../../../tsconfig.web.json",
   "files": [
     "multi.mjs",
-    "lex.mjs",
-    "lex2.mjs",
-    "lex-brace.mjs"
+    "shapes/brace.mjs",
+    "shapes/guards.mjs",
+    "shapes/member-gap.mjs",
+    "shapes/member-if.mjs",
+    "shapes/member-return.mjs",
+    "shapes/nonnull.ts",
+    "shapes/paren.mjs",
+    "shapes/postdec.mjs",
+    "shapes/postinc.mjs",
+    "shapes/unicode.mjs"
   ]
 }

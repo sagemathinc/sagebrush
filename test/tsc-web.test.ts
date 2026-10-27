@@ -87,28 +87,40 @@ test("the escape-hatch policy against the compiler: tsc ACCEPTS the fixture, the
   assert.equal(h.findings.find((f) => !f.permitted)?.line, 2, "the refused any is reported at its comment's line");
 });
 
-test("the lexer's slash context against the compiler (T1-LEX): divisions after postfix ++, -- and (a) never hide the comments after them; regexes after a control head and nested templates make no false finding", () => {
+// astra2's T1-LEX shapes, r2-r4, one per file (each a division then an unexplained any; tsc accepts every file):
+const SHAPES = ["postinc.mjs", "postdec.mjs", "paren.mjs", "brace.mjs", "member-return.mjs", "member-if.mjs", "member-gap.mjs", "unicode.mjs", "nonnull.ts"];
+const shapeSrc = (f: string) => readFileSync(join(ROOT, "test", "fixtures", "tsc-web-hatches", "shapes", f), "utf8");
+const refusedOrFailedClosed = (h: ReturnType<typeof hatches>) => h.problems.some((p) => /ambiguous slash|non-ASCII/.test(p)) || h.counts["jsdoc-any"].refused >= 1;
+
+test("T1-LEX: every shape tsc accepts (r2-r4) is refused or fails closed, and nothing else unexplained is near it", () => {
   const r = tsc(join("test", "fixtures", "tsc-web-hatches"));
-  assert.equal(r.status, 0, "tsc accepts lex.mjs:\n" + r.out.slice(0, 2000));
-  const h = hatches(readFileSync(join(ROOT, "test", "fixtures", "tsc-web-hatches", "lex.mjs"), "utf8"));
-  assert.deepEqual(h.problems, []);
-  assert.deepEqual(h.counts["jsdoc-any"], { permitted: 0, refused: 2 }, "the multiline any after a++ / b and the any after (a) / b: " + JSON.stringify(h.findings));
-  assert.deepEqual(h.counts["ts-ignore"], { permitted: 0, refused: 1 }, "the ignore after a-- / b");
-  assert.deepEqual(h.counts["ts-nocheck"], { permitted: 0, refused: 0 }, "a regex after if (...) and nested templates hold no comment");
+  assert.equal(r.status, 0, "tsc accepts every shape and the guards:\n" + r.out.slice(0, 2000));
+  for (const f of SHAPES) {
+    const h = hatches(shapeSrc(f));
+    assert.ok(refusedOrFailedClosed(h), `${f}: neither refused nor failed closed: ${JSON.stringify({ problems: h.problems, counts: h.counts })}`);
+    assert.ok(h.counts["jsdoc-any"].refused <= 1 && h.counts["ts-ignore"].refused === 0 && h.counts["ts-nocheck"].refused === 0, `${f}: only its one planted hatch`);
+  }
 });
 
-test("the lexer's member-access and } contexts against the compiler (T1-LEX r4): keyword-like property names divide; the } slash fails closed when a comment could hide; certain regexes with / and * in a class are harmless", () => {
-  const r = tsc(join("test", "fixtures", "tsc-web-hatches"));
-  assert.equal(r.status, 0, "tsc accepts lex2.mjs and lex-brace.mjs:\n" + r.out.slice(0, 2000));
-  const h2 = hatches(readFileSync(join(ROOT, "test", "fixtures", "tsc-web-hatches", "lex2.mjs"), "utf8"));
-  assert.deepEqual(h2.problems, [], "lex2: no ambiguity, the regexes in certain contexts are harmless");
-  assert.deepEqual(h2.counts["jsdoc-any"], { permitted: 1, refused: 2 }, "lex2: the anys after obj.return / b and obj.if(1) / b are seen and refused: " + JSON.stringify(h2.findings));
-  const hb = hatches(readFileSync(join(ROOT, "test", "fixtures", "tsc-web-hatches", "lex-brace.mjs"), "utf8"));
-  assert.match(hb.problems.join(), /ambiguous slash after \}/, "lex-brace: the } slash whose candidate span holds a comment fails closed");
+test("T1-LEX: the span safeguard ALONE catches every shape: with the context rules discarded (every slash a regex candidate), each is still refused or fails closed", () => {
+  for (const f of SHAPES) {
+    const h = hatches(shapeSrc(f), { everySlashRegex: true });
+    assert.ok(refusedOrFailedClosed(h), `${f} with every slash read as a regex: ${JSON.stringify({ problems: h.problems, counts: h.counts })}`);
+  }
+});
+
+test("T1-LEX false-positive guards: ordinary regexes (no comment-like text in their bodies), escaped slashes, regexes after control heads and operators, nested templates: no problem, no hatch", () => {
+  const h = hatches(readFileSync(join(ROOT, "test", "fixtures", "tsc-web-hatches", "shapes", "guards.mjs"), "utf8"));
+  assert.deepEqual(h.problems, []);
+  for (const k of Object.keys(h.counts) as (keyof typeof h.counts)[]) assert.deepEqual(h.counts[k], { permitted: 0, refused: 0 }, k);
+});
+
+test("T1-LEX: today's three roots don't trip the safeguard (no ambiguous slash, no non-ASCII in code)", () => {
+  for (const f of JSON.parse(readFileSync(join(ROOT, "tsconfig.web.json"), "utf8")).files as string[]) assert.deepEqual(hatches(readFileSync(join(ROOT, f), "utf8")).problems, [], f);
 });
 
 test("the lexer fails closed at the ambiguous } slash; division after } off its line is fine", () => {
-  assert.match(hatches("x = {} / 2 /* @ts-ignore */;\n").problems.join(), /ambiguous slash after \}/);
+  assert.match(hatches("x = {} / 2 /* @ts-ignore */;\n").problems.join(), /ambiguous slash/);
   assert.deepEqual(hatches("if (x) {}\ny = {} / 2;\n").problems, []);
   assert.deepEqual(hatches("function f() {}\n/ab/.test('x');\n").problems, []);
   assert.equal(hatches("a++ / b; // @ts-ignore\n").counts["ts-ignore"].refused, 1);
@@ -118,7 +130,12 @@ test("the lexer fails closed at the ambiguous } slash; division after } off its 
   assert.equal(hatches("while (go) /x\\/* y/.exec(s);\n").problems.length, 0);
   assert.equal(hatches("x = obj?.typeof / b; // @ts-ignore\n").counts["ts-ignore"].refused, 1, "?. member access too");
   assert.equal(hatches("x = obj . return / b; // @ts-ignore\n").counts["ts-ignore"].refused, 1, "spaces around the dot");
-  assert.equal(hatches("if (x) {}\n/[/*]z/.test(s);\n").problems.length, 1, "a regex after } with /* in it: fail closed (the conservative reading)");
+  assert.equal(hatches("if (x) {}\n/[/*]z/.test(s);\n").problems.length, 1, "a regex whose body holds /*: fail closed, in any context");
+  assert.equal(hatches("x = (/[/*]z/).test(s);\n").problems.length, 1, "even where a regex is certain: the safeguard doesn't depend on context");
+  assert.deepEqual(hatches("x = (/[\\/\\*]z/).test(s);\n").problems, [], "escaped, it's fine");
+  assert.match(hatches("const caf\u00e9 = 1;\n").problems.join(), /non-ASCII/, "a non-ASCII identifier fails closed, whatever follows it");
+  assert.deepEqual(hatches("const s = 'caf\u00e9'; // caf\u00e9\n").problems, [], "non-ASCII in a string or a comment is fine");
+  assert.equal(hatches("y = q /x//* c */;\n", { everySlashRegex: true }).problems.length, 1, "a closing slash right before a comment start: fail closed");
 });
 
 test("the escape-hatch policy's own controls: each refused kind, multiline forms, reasons, and the lexer failing closed", () => {
