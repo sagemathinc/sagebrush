@@ -71,6 +71,7 @@ const REFERENCE_CASES: [string, Record<string, string>, Record<string, string>, 
   ["a tsconfig path alias", { "tsconfig.json": fxConfig({ paths: { "gen/*": ["build/*"] } }), "web/worker.ts": 'import { a } from "gen/alias";\nexport const x = a;\n' }, { "build/alias.ts": STORE }, ["build", "build/alias"]],
   ["a tsconfig typeRoots entry", { "tsconfig.json": fxConfig({ typeRoots: ["./build/types", "./node_modules/@types"] }), "web/worker.ts": "export const w = 1;\n" }, { "build/types/x/index.d.ts": "declare function tx(): ArrayBuffer;\n" }, ["build/types"]],
   ["a tracked symlink to a built file", { "web/link.ts": link("../build/real.ts"), "web/worker.ts": 'import { a } from "./link";\nexport const y = a;\n' }, { "build/real.ts": STORE }, ["web/link.ts"]],
+  ["a tracked symlink outside the include directories, by its stem", { "lib/link.ts": link("../build/real.ts"), "web/worker.ts": 'import { a } from "../lib/link";\nexport const y = a;\n' }, { "build/real.ts": STORE }, ["lib/link.ts"]],
   ["a tracked symlink to the build directory", { "web/gen": link("../build/gendir"), "web/worker.ts": 'import { a } from "./gen/mod";\nexport const y = a;\n' }, { "build/gendir/mod.ts": STORE }, ["web/gen", "web/gen/mod"]],
   ["a tracked symlink in an include directory, nothing importing it (the roots' src/runtime/**)", { "src/runtime/gen": link("../../build/rt"), "web/worker.ts": "export const w = 1;\n" }, { "build/rt/a.ts": STORE }, ["src/runtime/gen"]],
   ["a path through a hidden link back out of build/", { "web/d": link("../build"), "web/visible/v.ts": STORE, "web/worker.ts": 'import { a } from "./d/back/v";\nexport const y = a;\n' }, { "build/back": link("../web/visible") }, ["web/d", "web/d/back/v"]],
@@ -92,7 +93,7 @@ test("train-16: the census reads the tracked tree only: whatever references buil
     assert.deepEqual(withBuild.records, without.records, `${name}: the records, built or not`);
     assert.deepEqual(withBuild.programFiles, without.programFiles, `${name}: the program's files, built or not`);
     for (const c of [without, withBuild]) {
-      assert.ok(!c.programFiles.some((f: string) => f.startsWith("build/") || f === "web/link.ts" || /^web\/(gen|d)\/|^src\/runtime\/gen\/|^web\/l\d+\.ts$/.test(f)), `${name}: ${c.programFiles.join(" ")}`);
+      assert.ok(!c.programFiles.some((f: string) => f.startsWith("build/") || f === "web/link.ts" || f === "lib/link.ts" || /^web\/(gen|d)\/|^src\/runtime\/gen\/|^web\/l\d+\.ts$/.test(f)), `${name}: ${c.programFiles.join(" ")}`);
       const ps = generatedKeys(c);
       assert.deepEqual([...new Set(ps.map((p: any) => p.key))].sort(), [...want].sort(), `${name}: ${JSON.stringify(c.header.generated)}`);
       for (const p of ps) assert.match(p.detail, /in the excluded build output, with no reviewed generator$/, name);
