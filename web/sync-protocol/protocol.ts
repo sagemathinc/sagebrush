@@ -68,11 +68,13 @@ export const ADMIT_MS = 60_000;
 /** A signed blob URL (§5.4). */
 export const URL_MS = 5 * 60_000;
 
-/** The codes a refusal uses (§5.2; slice 2's claims and fences, plan-sync-slice2-r9.md §5.8). */
+/** The codes a refusal uses (§5.2; slice 2's claims and fences, plan-sync-slice2-r9.md §5.8).  "unavailable": a feature
+ * the deployment has switched off (2b-7's snapshots: `{why: "snapshots_off"}`, no retry_after; the client stops asking
+ * for the session), doc-vectors.json's `refusals`. */
 export type Code =
   | "invalid" | "exists" | "missing" | "conflict" | "order" | "epoch" | "unknown_doc" | "forbidden"
   | "limit" | "storage_full" | "rate" | "readonly" | "deleting" | "busy"
-  | "unknown_client" | "fenced" | "stale_epoch";
+  | "unknown_client" | "fenced" | "stale_epoch" | "unavailable";
 
 export class SyncError extends Error {
   constructor(public code: Code, message: string, public detail?: Record<string, unknown>) { super(message); }

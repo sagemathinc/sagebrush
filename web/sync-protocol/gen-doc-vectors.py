@@ -491,6 +491,13 @@ def main():
             ("board", {"type": "item", "page": "", "id": "i", "text": {NUL: "n"}}),
         ]
     ]
+    # (refusals whose shape the servers and the client agree on by vector: the code, its detail, and whether the client
+    # may send it again; the snapshot's, agreed for 2b-7 by @sagebrush-sync-docs and @sagebrush-sync-client, Oct 27)
+    v["refusals"] = [
+        {"for": "snapshot", "when": "the deployment's snapshot switch is off", "error": {"code": "unavailable", "detail": {"why": "snapshots_off"}}, "again": "never in this session"},
+        {"for": "snapshot", "when": "sent before the cadence allows", "error": {"code": "limit", "detail": {"limit": "snapshot_cadence", "retry_after_batches": 12, "retry_after_ms": 60000}}, "again": "after both retry_afters"},
+        {"for": "snapshot", "when": "another sha256 at an at_seq already taken", "error": {"code": "conflict"}, "again": "never at that at_seq"},
+    ]
     json.dump(v, sys.stdout, ensure_ascii=False, indent=1)
     sys.stdout.write("\n")
 
