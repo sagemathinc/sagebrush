@@ -76,6 +76,10 @@ const REFERENCE_CASES: [string, Record<string, string>, Record<string, string>, 
   ["a tracked symlink in an include directory, nothing importing it (the roots' src/runtime/**)", { "src/runtime/gen": link("../../build/rt"), "web/worker.ts": "export const w = 1;\n" }, { "build/rt/a.ts": STORE }, ["src/runtime/gen"]],
   ["a path through a hidden link back out of build/", { "web/d": link("../build"), "web/visible/v.ts": STORE, "web/worker.ts": 'import { a } from "./d/back/v";\nexport const y = a;\n' }, { "build/back": link("../web/visible") }, ["web/d", "web/d/back/v"]],
   ["a tsconfig include into build/", { "tsconfig.json": JSON.stringify({ compilerOptions: FX_OPTS, include: ["src/**/*.ts", "web/**/*.ts", "build/**/*.ts"] }), "web/worker.ts": "export const w = 1;\n" }, { "build/inc.ts": STORE }, ["build"]],
+  // (r11, astra2 P1) the tsconfig's explicit and inherited files roots
+  ["an explicit files root that is a symlink into build/", { "tsconfig.json": JSON.stringify({ compilerOptions: FX_OPTS, files: ["src/runtime/link.ts", "web/worker.ts"], include: [] }), "src/runtime/link.ts": link("../../build/hidden.ts"), "web/worker.ts": "export const w = 1;\n" }, { "build/hidden.ts": STORE }, ["src/runtime/link.ts"]],
+  ["an explicit files root in build/", { "tsconfig.json": JSON.stringify({ compilerOptions: FX_OPTS, files: ["build/hidden.ts", "web/worker.ts"], include: [] }), "web/worker.ts": "export const w = 1;\n" }, { "build/hidden.ts": STORE }, ["build/hidden.ts"]],
+  ["an inherited files root", { "tsconfig.json": JSON.stringify({ extends: "./tsconfig.base.json", include: [] }), "tsconfig.base.json": JSON.stringify({ compilerOptions: FX_OPTS, files: ["src/runtime/link.ts", "web/worker.ts"] }), "src/runtime/link.ts": link("../../build/hidden.ts"), "web/worker.ts": "export const w = 1;\n" }, { "build/hidden.ts": STORE }, ["src/runtime/link.ts"]],
   ["an import", { "web/worker.ts": 'import "../build/other.gen.js";\n' }, { "build/other.gen.js": "export {};\n" }, ["build/other.gen.js"]],
   ["an export from", { "web/worker.ts": 'export * from "../build/x/other.gen.js";\n' }, { "build/x/other.gen.js": "export {};\n" }, ["build/x/other.gen.js"]],
   ["an import()", { "web/worker.ts": 'export const p = () => import("../build/other.gen.js");\n' }, { "build/other.gen.js": "export {};\n" }, ["build/other.gen.js"]],
@@ -142,6 +146,8 @@ test("train-16: the census's tsconfig is read on the boundary: an extends into b
     ["an invalid option (a diagnostic)", { "tsconfig.json": fxConfig({ target: "es1999" }) }, /the census's tsconfig: .*target/],
   ];
   for (const [name, tracked, re] of cases) for (const extra of [{}, { "build/options.json": base({ compilerOptions: { strict: false } }) }] as Record<string, string>[]) assert.throws(() => fixture({ "web/worker.ts": "export const w = 1;\n", ...tracked, ...extra }), re, name);
+  // a tracked root the program can't read is an error, never dropped (r11)
+  assert.throws(() => fixture({ "tsconfig.json": JSON.stringify({ compilerOptions: FX_OPTS, files: ["src/runtime/gone.ts", "web/worker.ts"], include: [] }), "web/worker.ts": "export const w = 1;\n" }), /the census program lost roots: src\/runtime\/gone\.ts/);
   // the control: a tracked extends chain is read
   const ok = fixture({ "web/worker.ts": "export const w = new Uint8Array(1);\n", "tsconfig.json": fxConfig({}, { extends: "./tsconfig.base.json" }), "tsconfig.base.json": base({}) });
   assert.equal(one(ok, "new Uint8Array ( 1 )").kind, "store");

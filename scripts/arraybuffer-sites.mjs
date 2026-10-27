@@ -582,7 +582,10 @@ export function census(root = ROOT, { commit = null } = {}) {
   const cfg = trackedConfig(root);
   // the roots: src/runtime/** and the worker; plus every scanned-repository module a
   // constant relative require() names (its code runs too), to a fixpoint
-  const rootNames = [...cfg.fileNames.filter((f) => f.includes(`${sep}src${sep}runtime${sep}`)), join(root, "web", "worker.ts")];
+  // (every file the tsconfig names, its explicit `files` and inherited ones included, is checked before the
+  // program exists: an excluded one is listed below and never a root, so the host's denial can't lose it silently)
+  const excludedRoots = cfg.fileNames.filter((f) => hiddenPath(root, f));
+  const rootNames = [...cfg.fileNames.filter((f) => !excludedRoots.includes(f) && f.includes(`${sep}src${sep}runtime${sep}`)), join(root, "web", "worker.ts")];
   let program;
   const options = { ...cfg.options, noEmit: true, allowJs: true };
   const host = trackedHost(root, options);
@@ -606,6 +609,9 @@ export function census(root = ROOT, { commit = null } = {}) {
   const checker = program.getTypeChecker();
   const files = program.getSourceFiles().filter(isSourceFile);
   assertTracked(root, program.getSourceFiles().map((f) => f.fileName));
+  // and every root is in the program: a tracked root it couldn't read (missing, unreadable) is an error, never dropped
+  const lost = rootNames.filter((f) => !program.getSourceFile(f));
+  if (lost.length) throw new Error(`the census program lost roots: ${lost.map((f) => toRel(root, f)).join(", ")}`);
   // every reference a program file (declarations too) or the tsconfig makes into an excluded path, present or not
   const generatedFrom = new Map();
   const note = (p0, from, module = false) => {
@@ -629,6 +635,7 @@ export function census(root = ROOT, { commit = null } = {}) {
       else if (e.isDirectory() && e.name !== "node_modules" && !hiddenPath(root, f)) linksIn(f);
     }
   };
+  for (const f of excludedRoots) note(f, "tsconfig.json files");
   for (const d of Object.keys(cfg.wildcardDirectories ?? {})) {
     if (hiddenPath(root, d)) note(d, "tsconfig.json include");
     else linksIn(d);
