@@ -363,10 +363,16 @@ async function boardsFollowPhase() {
   await fpBefore.loadInitial();
   check(fpBefore.phase === "ok", "a phase-following board store bound before activation is in \"ok\": " + fpBefore.phase);
   await w.activateJournal();
-  // bound before: refused after, as any writer from before (a reload binds it again)
+  // bound before: refused after, as any writer from before (a reload binds it again); said once, however many
+  // appends are refused (the board page shows it: onHistoryRefused -> showBusyNotice)
+  const said = [], off = W.onHistoryRefused((m) => said.push(m));
   await Promise.resolve(fpBefore.append({ time: "2026-10-27T00:00:01.000Z", id: "q1" })).catch(() => {});
   await sleep(150);
   check((await rows(bdb, before)) === 0, "…and after the activation its append is refused, nothing written (reload to bind again)");
+  check(typeof S.HISTORY_STOPPED === "string" && J(said) === J([S.HISTORY_STOPPED]), "…and said, that TimeTravel stopped recording in this tab: " + J(said));
+  await Promise.resolve(fpBefore.append({ time: "2026-10-27T00:00:01.500Z", id: "q1b" })).catch(() => {});
+  await sleep(150);
+  check(said.length === 1 && (await rows(bdb, before)) === 0, "…once only: a second refused append writes nothing and says nothing more: " + said.length);
   // bound after: in "journal", it appends and clears; a store that doesn't follow the phase is still refused
   const fp = new W.IdbPatchStore(bdb, after, { followPhase: true });
   await fp.loadInitial();
@@ -379,6 +385,8 @@ async function boardsFollowPhase() {
   await Promise.resolve(plain.append({ time: "2026-10-27T00:00:03.000Z", id: "q3" })).catch(() => {});
   await sleep(150);
   check((await rows(bdb, after)) === 1, "…while a store that doesn't follow the phase (the board page before this build) is still refused");
+  off();
+  check(said.length === 1, "…and nothing said by the store bound after, nor by one that doesn't follow the phase: " + J(said));
   const cleared = await fp.clear().then(() => "cleared", (e) => "refused: " + String(e?.message ?? e).slice(0, 80));
   check(cleared === "cleared" && (await rows(bdb, after)) === 0, "…and the phase-following store clears its history: " + cleared);
   bdb.close();
