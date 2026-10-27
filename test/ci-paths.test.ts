@@ -201,7 +201,7 @@ test("the limits census runs on engine-only, lib and src changes even when the n
   for (const f of ["lib/_magma.py", "src/runtime/ops.ts", "web/workspace/sync-ledger.ts", "test/limit-sites.json", "test/limit-sites-baseline.txt", "test/limit_sites.py", "test/limits.test.ts",
     "test/limit-sweep/manifest.json", "test/limit-sweep/batches.json", "test/limit_sweep.py", "test/limit_sweep_cases.py"])
     assert.equal(classify([f]).census, "true", f);
-  // the unsafe-code boundary's inputs select it too (scripts/unsafe-inventory.mjs runs in the census job)
+  // the unsafe boundary's inputs select it too (scripts/unsafe-inventory.mjs runs in the census job)
   for (const f of ["scripts/unsafe-inventory.mjs", "test/unsafe-allow-inventory.json", ".cargo/config.toml", "engine/.cargo/config.toml", ".github/workflows/pypi.yml", "web/package.json"])
     assert.equal(classify([f]).census, "true", f);
   // and not for files the census does not read
@@ -233,4 +233,23 @@ test("every file the limits census scans selects the census job (scripts/ci-path
   assert.deepEqual([...kinds.keys()].sort(), ["engine", "lib", "src"]);
   for (const f of [...kinds.values(), ...others, ...web]) assert.equal(classify([f]).census, "true", f);
   assert.ok(web.includes("web/workspace/sync-ledger.ts"), web.join(","));
+});
+
+test("the unsafe boundary's routes: every build input the scanner reads selects census (one shared list), and only compiler-affecting inputs select the sweep (#234 r2 U3)", () => {
+  // the known-path representatives both reviews named, outside engine/ and scripts/
+  const buildInputs = ["app/src-tauri/Cargo.toml", "app/strip-appimage.sh", "conformance/diff1.sh", "cdn/publish.sh", "web/run-tests.sh",
+    "test/helper.sh", "web/rust-toolchain.toml", "web/helper.rs", "bench/bigint/src/main.rs", ".cargo/config.toml", "x/.cargo/config"];
+  for (const f of buildInputs) assert.equal(classify([f]).census, "true", f);
+  // a rename lists both names (--no-renames), so a build input renamed out of a selecting path still selects
+  assert.equal(classify(["engine/a/build.rs", "docs/build.rs.txt"]).census, "true");
+  // a brand-new path of a build-input kind selects census by its kind, not by a known directory
+  for (const f of ["newtool/run.sh", "newcrate/Cargo.toml", "newdir/lib.rs"]) assert.equal(classify([f]).census, "true", f);
+  // the compiler sweep: engine/ (sources, manifests, the lockfile, build scripts and their inputs), cargo
+  // configs and toolchain files anywhere, its own tooling and job; never a plain script or workflow edit,
+  // never the unknown-path fallback
+  for (const f of ["engine/modsym/src/lib.rs", "engine/Cargo.lock", "engine/flint/build.rs", "engine/x/data/t.txt", ".cargo/config.toml",
+    "web/rust-toolchain.toml", "scripts/unsafe-sweep.sh", "scripts/unsafe-inventory.mjs", "scripts/build-inputs.mjs", "test/unsafe-allow-inventory.json", ".github/workflows/ci.yml"])
+    assert.equal(classify([f]).unsafe_sweep, "true", f);
+  for (const f of ["scripts/build-cli.mjs", "web/run-tests.sh", ".github/workflows/pypi.yml", "app/src-tauri/Cargo.toml", "newdir/unknown.xyz", "design/plan.md"])
+    assert.equal(classify([f]).unsafe_sweep, "false", f);
 });
