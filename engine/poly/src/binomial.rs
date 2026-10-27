@@ -616,7 +616,7 @@ const WITNESSES: u64 = 8;
 const WITNESS_K: u64 = 64;
 
 fn is_prime_trial(p: u64) -> bool {
-    p >= 2 && (2..).take_while(|d: &u64| d * d <= p).all(|d| p % d != 0)
+    p >= 2 && (2..).take_while(|d: &u64| d * d <= p).all(|d| !p.is_multiple_of(d))
 }
 
 /// x^e mod p for p < 2^63 (u128 products).
