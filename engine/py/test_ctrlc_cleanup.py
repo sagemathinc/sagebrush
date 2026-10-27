@@ -234,8 +234,10 @@ def test_gc():
 
     alive = lambda pid: pid in live  # noqa: E731  (this process reported dead too: only gc_temps' own rule keeps its temporary)
     recs = []
-    for _ in range(50):
-        recs.append(P3.gc_temps(root, budget_s=50, clock=clock, alive=alive))
+    for _ in range(1000):
+        # (a budget of 150 ticks, more than the 101 entries kept: the seek, charged, fits)
+        recs.append(P3.gc_temps(root, budget_s=150, clock=clock, alive=alive))
+        assert recs[-1]["removed"] + recs[-1]["kept"] >= 1, recs[-1]  # (every pass examines an entry)
         if not recs[-1]["stopped"] and not recs[-1].get("cursor_lost"):
             break
     left = set(os.listdir(host))
@@ -269,67 +271,28 @@ def test_gc():
 
 def test_gc_mixed_prefix():
     """daybreak2's gate: many kept (live) entries before the dead ones, in a
-    directory order that stays the same from pass to pass: each pass
-    examines past its cursor, so later passes reach the dead ones."""
-    d = tempfile.mkdtemp(prefix="sb-p3m-")
-    root = os.path.join(d, ".sagebrush")
-    host = os.path.join(root, ".plot3d-tmp", P3._host())
-    os.makedirs(host)
-    live = {800000 + i for i in range(400)}
-    dead = {810000 + i for i in range(100)}
-    for pid in live | dead:
-        open(os.path.join(host, "%d-1" % pid), "w").close()
+    directory order that stays the same from pass to pass.  With one deadline
+    over seek and examination, a pass reads at most the budget's worth of
+    entries: so later passes reach the dead ones when the kept prefix fits
+    the budget, and when it doesn't (no random access into a directory: the
+    kept entries before them must be read every pass), every pass is still
+    bounded, progresses by its one entry, and its log line says it stopped."""
     real = os.scandir
 
-    class Ordered:
-        # (the real entries, every live one first)
-        def __init__(self, d):
-            with real(d) as it:
-                self.es = sorted(it, key=lambda e: (int(e.name.split("-")[0]) not in live, e.name))
+    def run(live_n, budget, max_passes):
+        d = tempfile.mkdtemp(prefix="sb-p3m-")
+        root = os.path.join(d, ".sagebrush")
+        host = os.path.join(root, ".plot3d-tmp", P3._host())
+        os.makedirs(host)
+        live = {800000 + i for i in range(live_n)}
+        dead = {810000 + i for i in range(100)}
+        for pid in live | dead:
+            open(os.path.join(host, "%d-1" % pid), "w").close()
 
-        def __enter__(self):
-            return self
-
-        def __iter__(self):
-            return iter(self.es)
-
-        def __exit__(self, *a):
-            return False
-
-    ticks = [0]
-
-    def clock():
-        ticks[0] += 1
-        return ticks[0]
-
-    os.scandir = Ordered
-    try:
-        passes = 0
-        while passes < 100:
-            passes += 1
-            r = P3.gc_temps(root, budget_s=50, clock=clock, alive=lambda pid: pid in live)
-            if not r["stopped"] and not r.get("cursor_lost"):
-                break
-    finally:
-        os.scandir = real
-    assert set(os.listdir(host)) == {"%d-1" % p for p in live}, len(os.listdir(host))
-    assert 8 <= passes <= 12, passes  # (400 kept, about 50 examined a pass, then the dead ones)
-    print("gc mixed prefix: %d passes reach the dead entries behind 400 live ones: ok" % passes)
-
-
-def test_gc_wall_time():
-    """astra's CORR-CTRLC-A-2: real time passes as entries are read, the seek's
-    included.  (a) A seek longer than the whole budget: the pass still
-    examines past its cursor (the budget starts there, and every pass
-    examines at least one entry).  (b) A slow seek, then fast examinations:
-    the budget is the examinations', so the pass removes every dead one."""
-    real = os.scandir
-
-    def slow(per_entry_s, until=None):
-        class It:
+        class Ordered:
             def __init__(self, d):
                 with real(d) as it:
-                    self.es = sorted(it, key=lambda e: (not e.name.startswith("1-"), e.name))  # (the live one, 1-*, first)
+                    self.es = sorted(it, key=lambda e: (int(e.name.split("-")[0]) not in live, e.name))
 
             def __enter__(self):
                 return self
@@ -338,42 +301,118 @@ def test_gc_wall_time():
                 return False
 
             def __iter__(self):
-                for e in self.es:
-                    if until is None or e.name <= until:
-                        time.sleep(per_entry_s)
-                    yield e
-        return It
+                return iter(self.es)
 
-    def setup(dead):
+        ticks = [0]
+
+        def clock():
+            ticks[0] += 1
+            return ticks[0]
+
+        os.scandir = Ordered
+        recs = []
+        try:
+            for _ in range(max_passes):
+                t = ticks[0]
+                r = P3.gc_temps(root, budget_s=budget, clock=clock, alive=lambda pid: pid in live)
+                recs.append(r)
+                assert r["removed"] + r["kept"] >= 1, r      # (each pass progresses by an entry at least)
+                # (and is bounded: the start's tick, the budget, the check crossing it, the allowed entry, the stop)
+                assert ticks[0] - t <= budget + 4, ticks[0] - t
+                if not r["stopped"] and not r.get("cursor_lost"):
+                    break
+        finally:
+            os.scandir = real
+        return host, live, recs
+
+    host, live, recs = run(400, 450, 50)  # (the kept prefix fits the budget)
+    assert set(os.listdir(host)) == {"%d-1" % p for p in live}, len(os.listdir(host))
+    host, live, recs = run(400, 100, 30)  # (it doesn't: bounded, logged, never silent)
+    assert all(r["stopped"] for r in recs) and len(os.listdir(host)) > len(live)
+    print("gc mixed prefix: the dead entries behind 400 live ones are reached when they fit the budget; otherwise every pass is bounded and logs that it stopped: ok")
+
+
+def test_gc_wall_time():
+    """daybreak2's A-2-B1 and astra's A-2, under real time (entries take real
+    time to read, the seek's included): one deadline from the pass's start;
+    each pass takes at most the budget and one entry; every pass progresses;
+    repeated passes reach and remove the dead entries.  (1) A slow seek that
+    runs out of budget before a present cursor.  (2) A missing cursor, then
+    many slow stale entries."""
+    real = os.scandir
+    PER, BUDGET = 0.03, 0.05
+
+    class Slow:
+        def __init__(self, d):
+            with real(d) as it:
+                self.es = sorted(it, key=lambda e: e.name)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def __iter__(self):
+            for e in self.es:
+                time.sleep(PER)
+                yield e
+
+    def setup(live, dead, cursor):
         d = tempfile.mkdtemp(prefix="sb-p3w-")
         root = os.path.join(d, ".sagebrush")
         host = os.path.join(root, ".plot3d-tmp", P3._host())
         os.makedirs(host)
-        open(os.path.join(host, "1-1"), "w").close()  # (a live writer's)
-        for i in range(dead):
-            open(os.path.join(host, "%d-1" % (900000 + i)), "w").close()
-        open(os.path.join(root, ".plot3d-gc.cursor"), "w").write("1-1")  # (a cursor at it, from an earlier pass)
+        for p in live + dead:
+            open(os.path.join(host, "%d-1" % p), "w").close()
+        open(os.path.join(root, ".plot3d-gc.cursor"), "w").write(cursor)
         return root, host
 
-    alive = lambda pid: pid == 1  # noqa: E731
-    # (a) every entry slow, a budget shorter than one entry's read: each pass examines one, so both go in two passes
-    root, host = setup(2)
-    os.scandir = slow(0.03)
+    def passes(root, host, live):
+        times, recs = [], []
+        for _ in range(60):
+            t = time.monotonic()
+            r = P3.gc_temps(root, budget_s=BUDGET, alive=lambda pid: pid in live)
+            times.append(time.monotonic() - t)
+            recs.append(r)
+            assert r["removed"] + r["kept"] >= 1, r  # (every pass progresses)
+            if not os.listdir(host) or set(os.listdir(host)) == {"%d-1" % p for p in live}:
+                break
+        return times, recs
+
+    os.scandir = Slow
     try:
-        removed = [P3.gc_temps(root, budget_s=0.01, alive=alive)["removed"] for _ in range(4)]
+        # (1) the cursor (a live writer's) behind four dead entries, two more after
+        # it: the seek to it alone takes 5 x 0.03 s, past the budget
+        root, host = setup([400001], [100001, 100002, 100003, 100004, 500001, 500002], "400001-1")
+        t1, r1 = passes(root, host, {400001})
+        assert os.listdir(host) == ["400001-1"], os.listdir(host)
+        # (2) a missing cursor, then eight slow stale entries
+        root, host = setup([], list(range(300001, 300009)), "999999-1")
+        t2, r2 = passes(root, host, set())
+        assert os.listdir(host) == [], os.listdir(host)
     finally:
         os.scandir = real
-    assert sum(removed) == 2 and removed[0] == 1, removed
-    assert os.listdir(host) == ["1-1"]
-    # (b) the seek slow (0.05 s, past a 0.02 s budget), the examinations fast: one pass removes all 5
-    root, host = setup(5)
-    os.scandir = slow(0.05, until="1-1")
-    try:
-        r = P3.gc_temps(root, budget_s=0.02, alive=alive)
-    finally:
-        os.scandir = real
-    assert r["removed"] == 5 and not r["stopped"], r
-    print("gc under real time: a slow seek is not charged; every pass examines past its cursor: ok")
+    # (3) reading names is cheap, examining one is not (a slow liveness check):
+    # six live entries before four dead ones.  A stopped pass's cursor is the
+    # last entry it kept, so the next pass skips what it examined and goes on;
+    # without it every pass would re-examine the same live ones and never
+    # reach the dead.
+    live3 = set(range(600001, 600007))
+    root, host = setup(sorted(live3), [700001, 700002, 700003, 700004], "")
+
+    def slow_alive(pid):
+        time.sleep(0.02)
+        return pid in live3
+
+    for _ in range(20):
+        P3.gc_temps(root, budget_s=BUDGET, alive=slow_alive)
+        if set(os.listdir(host)) == {"%d-1" % p for p in live3}:
+            break
+    assert set(os.listdir(host)) == {"%d-1" % p for p in live3}, os.listdir(host)
+    bound = BUDGET + 2 * PER + 0.05  # (the budget, the entry that crossed it, the allowed one, and slack)
+    assert max(t1 + t2) <= bound, (max(t1), max(t2), bound)
+    print("gc under real time: passes of at most %.3f s (bound %.3f) reach the dead entries, %d and %d passes: ok" % (max(t1 + t2), bound, len(t1), len(t2)))
 
 
 def test_get_deadline_nonempty():

@@ -792,10 +792,12 @@ def _pid_alive(pid):
 def gc_temps(root=".sagebrush", budget_s=GC_BUDGET_S, clock=None, alive=None):
     """One time-bounded pass over this host's temporaries: a dead writer's is
     removed; a live writer's (or a reused pid's) is kept; other hosts' are in
-    other directories, never read.  The deadline is checked at every entry;
-    a pass that stops leaves a cursor, and the next pass resumes after it
-    (reading names up to it, linear in the entries kept), so passes progress
-    past any number of kept entries.  Each pass appends one
+    other directories, never read.  One deadline, from the pass's start, is
+    checked at every entry, the resume's seek included, and a pass stops only
+    once it has examined an entry: so a pass takes at most the budget and one
+    entry, and every pass progresses.  A pass that stops leaves a cursor (a
+    kept entry, or where its seek ran out of budget), and the next pass
+    resumes after it, re-examining any kept entries between, which keeps them.  Each pass appends one
     line to .plot3d-gc.log (rotated to one backup): what it removed and kept,
     and whether it stopped with entries left.  Returns that line's record."""
     import json
@@ -818,26 +820,30 @@ def gc_temps(root=".sagebrush", budget_s=GC_BUDGET_S, clock=None, alive=None):
         return None  # (no temporaries on this host)
     me = os.getpid()
     seeking = bool(cursor)
-    last = None
-    examined = 0
+    resume = cursor   # (where the next pass resumes if this one stops: after an entry it saw)
+    progressed = False
     with it:
         for e in it:
-            # (the resume: names read up to the cursor, nothing else done.  Before
-            # it are only the entries the last pass kept, every dead one there
-            # having been removed: so the seek is linear in live writers, not in
-            # the dead ones, and isn't charged to the deadline, which bounds the
-            # examinations, so every pass examines past its cursor)
+            # (one deadline, from the pass's start, checked at every entry, the
+            # seek's included; a pass stops only once it has made progress, so it
+            # takes at most the budget and one entry more)
+            over = clock() - t0 > budget_s
+            if over and progressed:
+                rec["stopped"] = True
+                break
             if seeking:
                 if e.name == cursor:
                     seeking = False
-                    t0 = clock()  # (the budget is the examinations': the seek's time isn't charged to it)
-                continue
-            # (every pass examines at least one entry past its cursor, so passes
-            # always progress, whatever the seek or one examination took)
-            if examined and clock() - t0 > budget_s:
-                rec["stopped"] = True
-                break
-            examined += 1
+                    continue
+                if not over:
+                    continue
+                # (the budget ran out before the cursor (slow, or gone): this entry
+                # is examined instead, the pass's one entry.  Kept, it is the next
+                # pass's cursor (resuming here re-examines the kept ones up to the
+                # old cursor, keeping them); removed, the directory shrank and the
+                # old cursor, a kept entry, still holds)
+                seeking = False
+            progressed = True
             m = re.fullmatch(r"(\d+)-(\d+)", e.name)
             if m and int(m.group(1)) != me and not alive(int(m.group(1))):
                 try:
@@ -847,13 +853,10 @@ def gc_temps(root=".sagebrush", budget_s=GC_BUDGET_S, clock=None, alive=None):
                 except OSError:
                     pass
             rec["kept"] += 1
-            last = e.name  # (the cursor is a kept entry: one removed couldn't be found again)
+            resume = e.name  # (the cursor is a kept entry: one removed couldn't be found again)
     if seeking:
-        rec["cursor_lost"] = True  # (its entry is gone, its writer done: the next pass starts over)
-    # (stopped: resume after the last entry kept, or, if it kept none (all it
-    # examined were removed, so gone), after the same cursor as this pass, itself
-    # a kept entry; finished, or the cursor lost: start over)
-    nxt = (last or cursor) if rec["stopped"] else ""
+        rec["cursor_lost"] = True  # (its entry is gone, its writer done, and the pass read to the end in time: the next one starts over)
+    nxt = resume if rec["stopped"] else ""
     try:
         with open(cursor_path, "w", encoding="utf-8") as f:
             f.write(nxt)
