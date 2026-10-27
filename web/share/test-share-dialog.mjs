@@ -883,7 +883,9 @@ try {
     await ev("document.querySelector('#sharetitlein').value = 'D2'; document.querySelector('#shareupload').click()");
     await until("!!window.__made", 60000);
     const made2 = await ev("window.__made");
-    await p.send("Page.crash").catch(() => {});
+    // (a crashed page never answers Page.crash: not awaited, or the run hangs, as run 3 did)
+    void p.send("Page.crash");
+    await sleep(1000);
     const q = await newPage();
     await q.send("Page.navigate", { url: dev.site + "/" });
     await q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
