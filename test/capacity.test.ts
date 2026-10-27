@@ -299,7 +299,7 @@ test("VmData counts an ArrayBuffer and a wasm Memory's growth (Node, Linux)", { 
 // module, so on Linux the soft RLIMIT_AS and RLIMIT_DATA come from the
 // process's own /proc/self/limits (Node's or Bun's fs: the host's procfs,
 // /proc/self the process running pyjs).  The parser, the order and the rows
-// are capacity_cases.py's (section 19-21, both runtimes); here the real
+// are capacity_cases.py's (sections 19-22, both runtimes); here the real
 // file, under Node and under Bun: the limits now, and explicit soft limits
 // set by the shell that then becomes pyjs (the same process's limits, read
 // both ways: magma's N2), each figure exactly x 1024 and its usage measured
@@ -321,15 +321,23 @@ C._set_sources()
   const line = (out: string, tag: string) => out.split("\n").find((l) => l.startsWith(tag + " ")) ?? "";
   const bytes = (k: string) => (k === "unlimited" ? "None" : String(BigInt(k) * 1024n));
   // (64 GiB of address space and 48 GiB of data, or the hard limit where it
-  // is lower: a soft limit can't pass it)
-  const soft = (flag: string, kib: number) => `h=$(ulimit -H ${flag}); if [ "$h" = unlimited ] || [ "$h" -gt ${kib} ]; then h=${kib}; fi; ulimit -S ${flag} "$h" &&`;
+  // is lower: a soft limit can't pass it.  Each step fails closed before
+  // the exec: a ulimit that fails exits 97, so pyjs never runs on limits
+  // other than the ones intended, and execFileSync throws; the intended
+  // figure is printed, WANT, and compared too: astra2's #231 hardening)
+  const soft = (flag: string, kib: number) =>
+    `h=$(ulimit -H ${flag}) || exit 97; if [ "$h" = unlimited ] || [ "$h" -gt ${kib} ]; then h=${kib}; fi; ulimit -S ${flag} "$h" || exit 97; echo "WANT ${flag} $h";`;
   for (const [who, runtime] of [["node", process.execPath], ["bun", bun]]) {
     const run = (ulimits: string) =>
       execFileSync("sh", ["-c", `${ulimits} echo "SH $(ulimit -S -v) $(ulimit -S -d)"; exec "$0" "$1" --sage -c "$2"`, runtime, CLI, probe], { encoding: "utf8", timeout: 120000 });
     for (const [label, ulimits] of [["now", ""], ["set", soft("-v", 67108864) + " " + soft("-d", 50331648)]]) {
       const out = run(ulimits);
       const [, v, d] = line(out, "SH").split(" ");
-      if (label === "set") assert.ok(v !== "unlimited" && d !== "unlimited", `${who}: both soft limits set: ${line(out, "SH")}`);
+      if (label === "set") {
+        assert.ok(v !== "unlimited" && d !== "unlimited", `${who}: both soft limits set: ${line(out, "SH")}`);
+        assert.equal(line(out, "WANT -v"), `WANT -v ${v}`, `${who}: the intended RLIMIT_AS is the one in force`);
+        assert.equal(line(out, "WANT -d"), `WANT -d ${d}`, `${who}: the intended RLIMIT_DATA is the one in force`);
+      }
       assert.equal(line(out, "RL"), `RL ${bytes(v)} ${bytes(d)}`, `${who} ${label}`);
       assert.equal(line(out, "UNK"), "UNK []", `${who} ${label}`);
       const rows = [["RLIMIT_AS", v], ["RLIMIT_DATA", d]].filter(([, k]) => k !== "unlimited").map(([n, k]) => `('${n}', ${bytes(k)}, True)`);

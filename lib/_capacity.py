@@ -84,14 +84,14 @@ _src = _Sources()
 def _set_sources(**kw):
     """Tests only: replace the sources (keyword names as in _Sources);
     _set_sources() restores the real ones."""
-    global _src, _poly_snap, _total_snap, _engine_snap, _totals_snap, _rows_snap, _cg_dirs, _api, _proc_snap
+    global _src, _poly_snap, _total_snap, _engine_snap, _totals_snap, _rows_snap, _cg_dirs, _api, _proc_scope
     _src = _Sources()
     _api = {}
     for k, v in kw.items():
         if not hasattr(_Sources, k):
             raise TypeError("no source %r" % k)
         setattr(_src, k, v)
-    _poly_snap = _total_snap = _engine_snap = _totals_snap = _rows_snap = _cg_dirs = _proc_snap = None
+    _poly_snap = _total_snap = _engine_snap = _totals_snap = _rows_snap = _cg_dirs = _proc_scope = None
 
 
 try:
@@ -224,7 +224,7 @@ def _resource():
 _PROC_LIMIT_ROWS = {"RLIMIT_AS": "Max address space", "RLIMIT_DATA": "Max data size"}
 _PROC_LIMIT_HEAD = ["Limit", "Soft", "Limit", "Hard", "Limit", "Units"]
 _DIGITS = frozenset("0123456789")
-_proc_snap = None  # (when, {name: None | bytes | False}): the file parsed once per snapshot
+_proc_scope = None  # {name: None | bytes | False} while one observation (capacity(), _machine_total()) runs
 
 
 def _proc_value(text, row):
@@ -250,17 +250,45 @@ def _proc_rlimit(name):
     /proc/self is the process running it): None, bytes or False as
     _proc_value says; False for everything when the file is missing, denied
     or empty, its header isn't the kernel's columns, or it holds a byte that
-    didn't decode.  Read and parsed once per snapshot (_SNAPSHOT_S).
-    C delta plan-c-rlimit-pyjs r1."""
-    global _proc_snap
+    didn't decode.  Read fresh: once per observation (capacity() or
+    _machine_total(), both names from that one read, never kept past it, so
+    a snapshot over that observation is no older than its own stamp:
+    astra2's H1), else once per call.  C delta plan-c-rlimit-pyjs r1."""
     if name not in _PROC_LIMIT_ROWS:
         return False
-    now = _src.clock()
-    if _proc_snap is None or now - _proc_snap[0] >= _SNAPSHOT_S:
-        text = _read("/proc/self/limits")
-        good = bool(text) and "\ufffd" not in text and text.splitlines()[0].split() == _PROC_LIMIT_HEAD
-        _proc_snap = (now, {n: _proc_value(text, row) if good else False for n, row in _PROC_LIMIT_ROWS.items()})
-    return _proc_snap[1][name]
+    if _proc_scope:
+        return _proc_scope[name]
+    text = _read("/proc/self/limits")
+    good = bool(text) and "\ufffd" not in text and text.splitlines()[0].split() == _PROC_LIMIT_HEAD
+    got = {n: _proc_value(text, row) if good else False for n, row in _PROC_LIMIT_ROWS.items()}
+    if _proc_scope is not None:
+        _proc_scope.update(got)
+    return got[name]
+
+
+class _ProcObservation:
+    """One observation's /proc/self/limits: read at most once inside it,
+    forgotten when it ends (an exception included); nested, the outer one's."""
+
+    def __enter__(self):
+        global _proc_scope
+        self.outer = _proc_scope
+        if _proc_scope is None:
+            _proc_scope = {}
+
+    def __exit__(self, *exc):
+        global _proc_scope
+        _proc_scope = self.outer
+        return False
+
+
+def _proc_observation(f):
+    """f (capacity, _machine_total) as one observation: _ProcObservation."""
+    def observed(*a, **k):
+        with _ProcObservation():
+            return f(*a, **k)
+    observed.__name__, observed.__doc__ = f.__name__, f.__doc__
+    return observed
 
 
 def _rlimit(name):
@@ -601,6 +629,7 @@ def heap_figure():
 _total_snap = None
 
 
+@_proc_observation
 def _machine_total():
     """(total, basis): see heap_figure."""
     limits = []
@@ -777,6 +806,7 @@ def engine_uncertified():
 
 # ------------------------------------------------------------------ free now
 
+@_proc_observation
 def capacity():
     """The memory observed free now (plan-d-memory-message-r3 §1d):
     {"bytes", "basis", "unknown_parts", "observed_at", "reserve_bytes"}.

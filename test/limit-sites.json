@@ -1949,6 +1949,11 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_capacity.py :: _ProcObservation :: \"\"\"One observation's /proc/self/limits: read at most once inside it, #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1 (+ astra2's H1 on #231): reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux, once per observation; refuses nothing"
+ },
  "lib/_capacity.py :: _Sources :: others (a fake root for /proc and /sys, fake resource limits, a fake #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -2078,15 +2083,10 @@
   "owner": "python (@sagebrush-python)",
   "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
  },
- "lib/_capacity.py :: _proc_rlimit :: C delta plan-c-rlimit-pyjs r1.\"\"\" #0": {
+ "lib/_capacity.py :: _proc_rlimit :: astra2's H1), else once per call.  C delta plan-c-rlimit-pyjs r1.\"\"\" #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
-  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
- },
- "lib/_capacity.py :: _proc_rlimit :: _proc_snap = (now, {n: _proc_value(text, row) if good else False for n, row in _PROC_LIMIT_ROWS.items()}) #0": {
-  "class": "none",
-  "owner": "python (@sagebrush-python)",
-  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+  "reason": "C delta plan-c-rlimit-pyjs r1 (+ astra2's H1 on #231): reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux, once per observation; refuses nothing"
  },
  "lib/_capacity.py :: _proc_rlimit :: def _proc_rlimit(name): #0": {
   "class": "none",
@@ -2102,6 +2102,11 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py :: _proc_rlimit :: got = {n: _proc_value(text, row) if good else False for n, row in _PROC_LIMIT_ROWS.items()} #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1 (+ astra2's H1 on #231): reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux, once per observation; refuses nothing"
  },
  "lib/_capacity.py :: _proc_rlimit :: if name not in _PROC_LIMIT_ROWS: #0": {
   "class": "none",
