@@ -6507,6 +6507,18 @@ def _factorization(n):
 Factorization = Factorisation = _factorization
 
 
+def _estimate(f, args=None):
+    """Estimate(f, args): Sagebrush's estimate of the time and memory of
+    f(args), the same record as sagebrush.estimate (a Sagebrush extension,
+    not a Magma intrinsic; design-estimates-progress r4 §3).  f is never
+    called."""
+    import sagebrush
+    return sagebrush.estimate(f, *([] if args is None else list(args)))
+
+
+Estimate = _estimate
+
+
 # ------------------------------------------------------------------ polynomials over finite fields
 
 # The work one operation on polynomials over a finite field may take, in

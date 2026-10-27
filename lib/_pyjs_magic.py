@@ -467,7 +467,41 @@ def _no_install(line):
                      "with the modules it comes with")
 
 
+def _estimate(line):
+    """%estimate f(args): sagebrush.estimate(f, args) for the outermost call
+    only, when its arguments are names or literals (design-estimates-progress
+    r4 §3); it never runs a nested call, so anything else is declined."""
+    import ast
+    code = line.strip()
+    try:
+        node = ast.parse(code, mode="eval").body
+    except SyntaxError:
+        raise UsageError("%estimate needs a call, f(args)")
+    if not isinstance(node, ast.Call):
+        raise UsageError("%estimate needs a call, f(args)")
+
+    def plain(n):
+        if isinstance(n, ast.Constant):
+            return True
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.USub) and isinstance(n.operand, ast.Constant):
+            return True
+        return isinstance(n, ast.Name)
+
+    def func(n):
+        return isinstance(n, ast.Name) or (isinstance(n, ast.Attribute) and func(n.value))
+
+    if not func(node.func) or not all(plain(a) for a in node.args) or \
+            not all(k.arg is not None and plain(k.value) for k in node.keywords):
+        raise UsageError("%estimate estimates only the outermost call, with names or literals as its arguments: "
+                         "evaluate the arguments first")
+    ns = _user_ns()
+    ev = lambda n: eval(compile(ast.Expression(n), "<estimate>", "eval"), ns)
+    import sagebrush
+    return sagebrush.estimate(ev(node.func), *[ev(a) for a in node.args], **{k.arg: ev(k.value) for k in node.keywords})
+
+
 _LINE = {
+    "estimate": _estimate,
     "matplotlib": _matplotlib,
     "load_ext": _load_ext,
     "reload_ext": lambda line: _load_ext(line, True),

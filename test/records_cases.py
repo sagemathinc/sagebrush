@@ -26,6 +26,10 @@ estimate = {
              "guard_ceiling_bytes": None, "options": ["the Python package"]},
     "stages": [{"name": "trial division", "work": {"units": 210000000, "label": "known"}, "time": interval,
                 "memory": None, "condition": None, "success": None},
+               # (a validator fixture only, with its time null: not an example
+               # of the fields' meaning.  Estimates give one stage per chance
+               # milestone q, with p_typical = p_high = q and the time to reach
+               # it: test/estimates_cases.py, the estimates ruling of Oct 27)
                {"name": "ECM 30 digits", "work": None, "time": None, "memory": mem,
                 "condition": "if a factor of at most 30 digits exists",
                 "success": {"p_typical": 0.5, "p_high": 0.95, "label": "heuristic model"}}],

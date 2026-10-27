@@ -98,10 +98,51 @@
   "class": "3",
   "owner": "class group/number fields"
  },
- "engine/classgroup/src/nf/ecm.rs ::  :: const MAXL: usize = 16; #0": {
+ "engine/classgroup/src/nf/ecm.rs ::  :: pub const MAXL: usize = 16; #0": {
   "class": "coverage",
   "owner": "class group/number fields",
+  "reason": "the Montgomery arithmetic's range (16 limbs, 1024 bits): beyond it rho and ECM don't apply (TooLarge); made pub for the estimator (nf/cost.rs), unchanged",
   "row": "inv-41"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: ecm_curve :: pub const DOUBLING_B2_MAX: u64 = 1_000_000_000; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: ecm_curve :: pub const DOUBLING_TABLE_MAX: u64 = 100_000_000; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: ecm_curve :: pub const FIXED_B2_MAX: u64 = 10_000_000; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: ecm_until_found :: if let Some(g) = ecm_curve(n, sigma, b1, b2.min(DOUBLING_TABLE_MAX), &primes) { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: ecm_until_found :: let b2 = (50 * b1).min(DOUBLING_B2_MAX); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: ecm_until_found :: let primes = crate::arith::primes_up_to(b2.min(DOUBLING_TABLE_MAX) + STAGE2_D); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: fixed_b2 :: (50 * b1).min(FIXED_B2_MAX).max(b1) #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/factor.rs :: strong_lucas_prp :: pub const SPLIT_BITS_MAX: u64 = 1024; #0": {
+  "class": "coverage",
+  "owner": "class group/number fields",
+  "reason": "the Montgomery arithmetic's range (16 limbs, 1024 bits): beyond it rho and ECM don't apply (TooLarge); made pub for the estimator (nf/cost.rs), unchanged"
  },
  "engine/classgroup/src/nf/proof.rs ::  :: impl Limits { #0": {
   "class": "3",

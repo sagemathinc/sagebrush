@@ -7,7 +7,7 @@ use sagebrush_bigint::{BigInt, BigUint, Sign};
 use num_integer::Integer;
 use num_traits::{One, Zero};
 
-const MAXL: usize = 16;
+pub const MAXL: usize = 16;
 
 /// t + a b + c as (low, high) words (it fits: (2^64 - 1)^2 + 2 (2^64 - 1) =
 /// 2^128 - 1).  One 64 x 64 -> 128-bit product on 64-bit targets; wasm32 has
@@ -445,6 +445,26 @@ pub fn ecm_curve(n: &BigUint, sigma: u64, b1: u64, b2: u64, primes: &[u64]) -> O
     None
 }
 
+// ECM's schedule, named so that the estimator (nf/cost.rs) models exactly
+// the bounds and curve counts run here.
+/// The fixed levels: (B1, curves); B2 = min(50 B1, FIXED_B2_MAX).
+pub const SCHEDULE: [(u64, usize); 5] = [(2000, 25), (11000, 90), (50000, 300), (250000, 700), (1_000_000, 1800)];
+pub const FIXED_B2_MAX: u64 = 10_000_000;
+/// After the fixed levels: B1 doubling from DOUBLING_B1, DOUBLING_CURVES
+/// curves each, B2 = min(50 B1, DOUBLING_B2_MAX), of which stage 2 covers
+/// at most DOUBLING_TABLE_MAX (the prime table's bound).
+pub const DOUBLING_B1: u64 = 2_000_000;
+pub const DOUBLING_CURVES: usize = 2000;
+pub const DOUBLING_B2_MAX: u64 = 1_000_000_000;
+pub const DOUBLING_TABLE_MAX: u64 = 100_000_000;
+/// Stage 2's giant step and its baby steps: the odd j < D / 2 prime to D.
+pub const STAGE2_D: u64 = 2310;
+
+/// The B2 of a fixed level with bound b1.
+pub fn fixed_b2(b1: u64) -> u64 {
+    (50 * b1).min(FIXED_B2_MAX).max(b1)
+}
+
 /// A nontrivial factor of a composite odd n (not a perfect power): ECM's
 /// schedule, then B1 doubling (B2 = 50 B1, at most 10^9) with 2000 curves
 /// at each until a factor is found; Stop interrupts.  None only if n is
@@ -455,14 +475,14 @@ pub fn ecm_until_found(n: &BigUint, seed: u64) -> Option<BigUint> {
         return Some(g);
     }
     let mut s = seed.rotate_left(17) | 1;
-    let mut b1: u64 = 2_000_000;
+    let mut b1: u64 = DOUBLING_B1;
     loop {
-        let b2 = (50 * b1).min(1_000_000_000);
-        let primes = crate::arith::primes_up_to(b2.min(100_000_000) + 2310);
-        for _ in 0..2000 {
+        let b2 = (50 * b1).min(DOUBLING_B2_MAX);
+        let primes = crate::arith::primes_up_to(b2.min(DOUBLING_TABLE_MAX) + STAGE2_D);
+        for _ in 0..DOUBLING_CURVES {
             sagebrush_interrupt::check();
             let sigma = 6 + rng(&mut s) % (1 << 30);
-            if let Some(g) = ecm_curve(n, sigma, b1, b2.min(100_000_000), &primes) {
+            if let Some(g) = ecm_curve(n, sigma, b1, b2.min(DOUBLING_TABLE_MAX), &primes) {
                 return Some(g);
             }
         }
@@ -474,12 +494,11 @@ pub fn ecm_until_found(n: &BigUint, seed: u64) -> Option<BigUint> {
 /// (B1 = 2000, 11000, 50000, 250000, 1000000; B2 = 50 B1 up to 10^7),
 /// or None.
 pub fn ecm(n: &BigUint, seed: u64) -> Option<BigUint> {
-    let schedule: [(u64, usize); 5] = [(2000, 25), (11000, 90), (50000, 300), (250000, 700), (1_000_000, 1800)];
     let mut primes: Vec<u64> = vec![];
     let mut s = seed | 1;
-    for &(b1, curves) in &schedule {
+    for &(b1, curves) in &SCHEDULE {
         // B2 = 50 B1, at most 10^7 (the primes are sieved up to B2)
-        let b2 = (50 * b1).min(10_000_000).max(b1);
+        let b2 = fixed_b2(b1);
         if primes.last().map_or(true, |&p| p < b2) {
             primes = crate::arith::primes_up_to(b2 + 2310);
         }

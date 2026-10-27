@@ -1,0 +1,41 @@
+fits
+  None None capacity 1000 all observed -> unknown
+  5 6 capacity 1000 all observed -> estimated to fit
+  1001 2000 capacity 1000 all observed -> estimated to exceed the observed capacity
+  1000 1001 capacity 1000 all observed -> uncertain
+  1000 1000 capacity 1000 all observed -> estimated to fit
+  1000 None capacity 1000 all observed -> estimated to fit, high unavailable
+  1000 None capacity 1000 unknown parts -> estimated to fit, high unavailable (observed capacity)
+  10 20 capacity 1000 unknown parts -> estimated to fit the observed capacity
+  10 20 capacity 1000 all observed -> estimated to fit
+  5 6 capacity None -> unknown
+  options when it fits: [] | guard kept apart: 500
+calibration
+  prior ns/unit: rho k=1 1.950, rho k=8 3.150, ecm k=4 2.080, prp 1279 bits 0.470
+  after a probe at half speed: rho k=1 x2.00, ecm k=4 x2.00, prp x2.00, source probe
+  after 30 samples at speed: x1.00
+  throttled to half speed, the factor after each sample: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0]
+  adapted within 8 samples: True
+  a censored sample counts: x3.0, samples 1
+  with 0 samples: high_s null
+  with 19 samples: high_s null
+  with 25 samples: high_s set, at least typical: True
+  a fresh cache entry is used: True cache
+  past the 7-day TTL it is not: False
+  nor under another key: False
+factor
+  the user's random state unchanged: True
+  valid estimate/1: True
+  total time: None | peak memory: 200000 bound | estimated to fit
+  trial division below 2^16 | work 1000000 bound | None | success None
+  probable-prime test (Baillie-PSW) of the cofactor | work 2000000 bound | if a cofactor remains after trial division | success None
+  ECM level B1 = 2000, B2 = 100000: 25 curves | work 90000000 known | if rho found no factor, and no earlier level did | success None
+  ECM: a factor of at most 15 digits, a modelled 50% chance | work 20000000 known | if a factor of at most 15 digits exists | success (0.5, 0.5)
+  ECM: a factor of at most 15 digits, a modelled 95% chance | work 80000000 known | if a factor of at most 15 digits exists | success (0.95, 0.95)
+  ECM: a factor of at most 20 digits, a modelled 50% chance | work 70000000 known | if a factor of at most 20 digits exists | success (0.5, 0.5)
+  ECM: a factor of at most 20 digits, by the end of the modelled schedule | work 90000000 known | if a factor of at most 20 digits exists | success (0.6, 0.6)
+  15 digits: 95% time / 50% time = 4.0 (the work's ratio 4.0, not 1 + 4)
+  no total made of the milestones: True
+  the model stated: True | never added: True
+unknown operation
+  len None [] ['no estimate is available for len'] True
