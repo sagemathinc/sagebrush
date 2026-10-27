@@ -7,7 +7,7 @@
 // A document's rows: its registry row (its handle h), its j row (jseq), and its saves' intents ("p" + j, each
 // {srev, value}); each charged (F8): the registry and j rows to the metadata budget (at most 4 KiB a document, 4 MiB in
 // all), the intents to the 32 MiB pending budget, in the same transaction as the row.  What doesn't fit is refused, said, and nothing of it written.
-import { SYNC_NB, handleOf, registryKey, rowCharge, rowKey, seqKey } from "./sync-rows.js";
+import { SYNC_NB, SYNC_KEY_BOUNDS, handleOf, registryKey, rowCharge, rowKey, seqKey } from "./sync-rows.js";
 
 /** The namespace of a device's local journal (the account's namespaces are the sender's, 2c-2). */
 export const JOURNAL_NS = "local";
@@ -79,6 +79,13 @@ export async function t1Write(st, id, { row, intent } = {}) {
   if (row) st.put({ ...row, j });
   return { j };
 }
+
+/** A T1 refused for room (2c-1d-iii §1: the intents' bound, the pending or the metadata budget, or the history
+ * database's quota), after which the save's record is still written, marked: true.  Any other refusal (not the
+ * writer, the fence, the workspace) is the save's own: not saved. */
+export const roomRefused = (r) => !!r && (r.quota === true || r.refused === NO_ROOM_META || r.refused === NO_ROOM_PENDING || r.refused === NO_ROOM_INTENTS);
+/** What an intent of the codec's text `value` is charged, at most (its key as wide as a key can be). */
+export const intentCharge = (value) => rowCharge([SYNC_NB + "z".repeat(SYNC_KEY_BOUNDS.handle), "p" + "9".repeat(16)], { srev: Number.MAX_SAFE_INTEGER, value });
 
 /** The document's intents at or below j `upTo` deleted, in `st`, and their charges released (design r4 §3.3: only
  * after a record write holding j `upTo` has committed).  Resolves how many. */
