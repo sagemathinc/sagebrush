@@ -421,6 +421,20 @@ export function jsonAll(o: any): string { return JSON.stringify(o); }
 `,
   }, ["getBracket", "getIt", "setBracket", "setDot", "computed", "destructure", "untyped", "plainOnly", "viaField", "typedComputed", "unrelated", "assignPat", "objSpread", "oassign", "jsonAll"]);
   assert.deepEqual(r, { getBracket: true, getIt: true, setBracket: true, setDot: true, computed: true, destructure: true, untyped: true, plainOnly: false, viaField: true, typedComputed: true, unrelated: false, assignPat: true, objSpread: true, oassign: true, jsonAll: true });
+  // spread, Object.assign and JSON.stringify also make copy or protocol obligations of their own,
+  // which allocate too: their accessor edge is checked as an edge, so no obligation can mask it
+  const c = fixture({
+    "src/runtime/acc2.ts": `export class Maker { get bytes(): any { return new Uint8Array(8); } }
+export function objSpread(o: any): any { return { ...o }; }
+export function oassign(o: any): any { return Object.assign({}, o); }
+export function jsonAll(o: any): string { return JSON.stringify(o); }
+`,
+  });
+  const getter = [...c.decls.values()].find((d: any) => d.name === "get Maker.bytes");
+  for (const n of ["objSpread", "oassign", "jsonAll"]) {
+    const d = [...c.decls.values()].find((x: any) => x.name === n);
+    assert.ok(d.irefs.has(getter.fp), `${n} reaches every accessor`);
+  }
 });
 
 test("implicit invocations: JSON, coercions, iteration and awaiting reach the scanned members they run (astra2 C2)", () => {
