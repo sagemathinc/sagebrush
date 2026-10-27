@@ -43,6 +43,7 @@ export const KINDS: [string, string, string][] = [
   ["structural {a: number}", "s", "oblig"],
   ["object literal", "{ a: 1 }", "none"],
   ["number", "1", "none"],
+  ["a string-typed value", "k", "none"],
   ["a new instance of a scanned class", "new Plain()", "none"],
   ["a function or an any", "c ? NAMED : a", "both"],
 ];
@@ -189,7 +190,7 @@ test("the install matrix: installs whose value the census can't see are obligati
 test("the install matrix: exports are properties of the module's namespace", () => {
   const files: Record<string, string> = {};
   const want: Record<string, string> = {};
-  const decl = "export class Plain { a = 1; }\nexport function named_fn(): number { return 1; }\nexport function named_target(): number { return 1; }\nconst alias_fn = named_target;\ndeclare const a: any;\ndeclare const u: unknown;\ndeclare const s: { a: number };\ndeclare const c: boolean;\n";
+  const decl = "export class Plain { a = 1; }\nexport function named_fn(): number { return 1; }\nexport function named_target(): number { return 1; }\nconst alias_fn = named_target;\ndeclare const a: any;\ndeclare const u: unknown;\ndeclare const s: { a: number };\ndeclare const c: boolean;\ndeclare const k: string;\n";
   KINDS.filter(([kind]) => kind !== "generic T").forEach(([kind, v0, w], j) => {
     const v = v0.replace(/NAMED/g, "named_fn").replace(/ALIAS/g, "alias_fn");
     files[`src/runtime/e${j}.ts`] = `${decl}export const toJSON = ${v};\n`;
