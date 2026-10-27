@@ -48,7 +48,7 @@ export function tokenize(src) {
       const end = src.indexOf(close, i + raw[0].length);
       if (end < 0) throw new Error("unterminated raw string");
       i = end + close.length;
-      out.push({ t: "lit", v: src.slice(start, i), at: start });
+      out.push({ t: "lit", v: src.slice(start, i), at: start, e: i });
       continue;
     }
     if (c === '"' || ((c === "b" || c === "c") && src[i + 1] === '"' && (i === 0 || !isId(src[i - 1])))) {
@@ -56,27 +56,27 @@ export function tokenize(src) {
       while (i < n && src[i] !== '"') i += src[i] === "\\" ? 2 : 1;
       if (i >= n) throw new Error("unterminated string");
       i++;
-      out.push({ t: "lit", v: src.slice(start, i), at: start });
+      out.push({ t: "lit", v: src.slice(start, i), at: start, e: i });
       continue;
     }
     if (c === "'" || (c === "b" && src[i + 1] === "'" && (i === 0 || !isId(src[i - 1])))) {
       // a char literal ('x', '\n', '\u{..}', b'x') or a lifetime/label ('a)
       const j = c === "'" ? i + 1 : i + 2;
       const m = /^(\\(u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^\\'\n])'/su.exec(src.slice(j, j + 16));
-      if (m) { i = j + m[0].length; out.push({ t: "lit", v: src.slice(start, i), at: start }); continue; }
+      if (m) { i = j + m[0].length; out.push({ t: "lit", v: src.slice(start, i), at: start, e: i }); continue; }
       i = j;
       while (i < n && isId(src[i])) i++;
-      out.push({ t: "life", v: src.slice(start, i), at: start });
+      out.push({ t: "life", v: src.slice(start, i), at: start, e: i });
       continue;
     }
     if (isId(c)) {
       if (c === "r" && src[i + 1] === "#" && isId(src[i + 2] ?? "")) i += 2; // raw identifier r#name
       while (i < n && isId(src[i])) i++;
       // number suffixes / floats stay one token enough for hashing purposes
-      out.push({ t: /^[0-9]/.test(src[start]) ? "num" : "id", v: src.slice(start, i).replace(/^r#/, ""), at: start });
+      out.push({ t: /^[0-9]/.test(src[start]) ? "num" : "id", v: src.slice(start, i).replace(/^r#/, ""), at: start, e: i });
       continue;
     }
-    out.push({ t: "p", v: c, at: start });
+    out.push({ t: "p", v: c, at: start, e: start + 1 });
     i++;
   }
   return out;
@@ -157,7 +157,7 @@ export function scanFile(rel, src) {
     const own = kw < 0 ? "?" : body[kw].v === "impl" ? "impl " + body.slice(kw + 1, body.findIndex((x) => x.v === "{")).map((x) => x.v).join(" ") : body[kw].v + " " + (body[kw + 1]?.v === "$" ? "$" + (body[kw + 2]?.v ?? "?") : body[kw + 1]?.v ?? "?");
     const name = (ctx[j] ? ctx[j] + " > " : "") + own;
     const hash = createHash("sha256").update(hashed.map((x) => x.v).join(" ")).digest("hex");
-    items.push({ item: name, line: at, hash, start: s, end, from: lineOf(src, toks[s].at), to: lineOf(src, toks[end - 1].at) });
+    items.push({ item: name, line: at, hash, start: s, end, from: lineOf(src, toks[s].at), to: lineOf(src, toks[end - 1].at), bFrom: Buffer.byteLength(src.slice(0, toks[s].at)), bTo: Buffer.byteLength(src.slice(0, toks[end - 1].e)) });
   }
   // each site exactly once: no allowed item inside another
   for (const a of items) for (const b of items) if (a !== b && b.start >= a.start && b.end <= a.end) errors.push(`${rel}:${b.line}: an allowed item inside another allowed item (${a.item}, line ${a.line})`);
@@ -324,7 +324,7 @@ export function scan(files = tracked(), read = (f) => readFileSync(join(ROOT, f)
     try { src = read(f); r = scanFile(f, src); } catch (e) { errors.push(`${f}: ${e.message}`); continue; }
     errors.push(...r.errors);
     if (!f.startsWith("engine/ledger/")) errors.push(...reexportErrors(f, tokenize(src)));
-    for (const it of r.items) found.push({ file: f, item: it.item, hash: it.hash, from: it.from, to: it.to });
+    for (const it of r.items) found.push({ file: f, item: it.item, hash: it.hash, from: it.from, to: it.to, bFrom: it.bFrom, bTo: it.bTo });
   }
   if (!files.includes("engine/Cargo.toml")) return { errors: [...errors, "engine/Cargo.toml missing"], found };
   const model = workspaceModel(files, read);
@@ -405,8 +405,17 @@ export function compilerSites(jsonTexts, found, root = ROOT) {
       else if (!p.startsWith("/")) p = "engine/" + p;
       sites.push(`${p}:${sp.line_start}`);
       if (p.startsWith("/") || /\/out\//.test(p) || /(^|\/)target\//.test(p)) { errors.push(`${p}:${sp.line_start}: an unsafe_code site in generated code (OUT_DIR or another file outside the tree): ${m.message.message}`); continue; }
-      const ok = (byFile.get(p) ?? []).some((x) => sp.line_start >= x.from && sp.line_start <= x.to);
-      if (!ok) errors.push(`${p}:${sp.line_start}: an unsafe_code site outside every pinned allowed item: ${m.message.message}`);
+      // containment by byte range (#234 r3 U1-SPAN): the site's whole span inside one pinned item's bytes
+      if (!(Number.isInteger(sp.byte_start) && Number.isInteger(sp.byte_end) && sp.byte_end >= sp.byte_start)) { errors.push(`${p}:${sp.line_start}: an unsafe_code site without a byte range (fail closed): ${m.message.message}`); continue; }
+      const ok = (byFile.get(p) ?? []).some((x) => sp.byte_start >= x.bFrom && sp.byte_end <= x.bTo);
+      if (!ok) { errors.push(`${p}:${sp.line_start}: an unsafe_code site outside every pinned allowed item (bytes ${sp.byte_start}..${sp.byte_end}): ${m.message.message}`); continue; }
+      // every expansion frame must come from a definition in this tree (a local macro_rules, whose body the token
+      // scan holds to its allowed items); a frame defined elsewhere or with no origin is an expansion we don't model
+      for (let e = sp.expansion; e; e = e.span?.expansion) {
+        const d = e.def_site_span?.file_name;
+        if (!d) { errors.push(`${p}:${sp.line_start}: an expansion frame (${e.macro_decl_name ?? "?"}) with no definition site (fail closed)`); break; }
+        if (d.startsWith("/") || external(d)) { errors.push(`${p}:${sp.line_start}: an expansion frame (${e.macro_decl_name ?? "?"}) defined outside the tree (${d})`); break; }
+      }
     }
   }
   return { sites: [...new Set(sites)], errors };
@@ -445,7 +454,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const { errors, found, model } = scan(undefined, undefined, inv0.premises);
   if (process.argv.includes("--write")) {
     const audits = new Map(inv0.items.map((x) => [`${x.file} :: ${x.item}`, x.audit]));
-    const items = found.map(({ from, to, ...x }) => ({ ...x, audit: audits.get(`${x.file} :: ${x.item}`) ?? "UNAUDITED" }));
+    const items = found.map(({ from, to, bFrom, bTo, ...x }) => ({ ...x, audit: audits.get(`${x.file} :: ${x.item}`) ?? "UNAUDITED" }));
     writeFileSync(path, JSON.stringify({ comment: inv0.comment ?? "", premises: inv0.premises ?? {}, items }, null, 1) + "\n");
     console.log(`wrote ${INVENTORY}: ${items.length} items`);
   }
