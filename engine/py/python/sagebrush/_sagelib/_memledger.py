@@ -361,8 +361,8 @@ class _PyReleaseLog:
 
 def _release_log():
     try:
-        import _raster
-        return _raster.ReleaseLog()
+        from sagebrush._native import raster as _r
+        return _r.ReleaseLog()
     except (ImportError, AttributeError):
         return _PyReleaseLog()
 
@@ -380,8 +380,8 @@ def _native_locked_call():
     statement's cleanup range).  None where the package's native module
     isn't there (pyjs)."""
     try:
-        import _raster
-        return _raster.locked_call
+        from sagebrush._native import raster as _r
+        return _r.locked_call
     except (ImportError, AttributeError):
         return None
 
