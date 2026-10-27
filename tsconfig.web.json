@@ -1,0 +1,20 @@
+{
+  "//": "The browser code's type check (tooling plan r2 T1; William, Oct 27). Explicit roots only: each is checked with its whole import closure (roots are not a boundary). test/tsc-web.test.ts runs it, times it against the ceiling and the shard trigger, checks the suppressions, and proves a planted error fails.",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "types": ["node"]
+  },
+  "files": [
+    "web/test-port.mjs",
+    "web/workspace/longtask-span.ts",
+    "web/sync-protocol/doc-protocol.ts"
+  ]
+}
