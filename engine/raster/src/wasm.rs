@@ -44,6 +44,11 @@ static mut REFUSAL: Refusal = Refusal { need_pages: 0, size_pages: 0, limit_page
 
 struct Bounded;
 
+// SAFETY: dlmalloc's system layer contract: `alloc` hands out either the initial
+// memory's slack above __heap_base (once) or freshly grown, page-aligned pages
+// that nothing else uses, zeroed by memory.grow; it never frees or remaps, and
+// the static state it touches is used on the module's single thread.
+#[allow(unsafe_code)]
 unsafe impl Allocator for Bounded {
     fn alloc(&self, size: usize) -> (*mut u8, usize, u32) {
         unsafe {
@@ -109,6 +114,10 @@ static mut DL: Dlmalloc<Bounded> = Dlmalloc::new_with_allocator(Bounded);
 
 struct Heap;
 
+// SAFETY: each method forwards to the one dlmalloc instance with the caller's
+// layout, so dlmalloc's malloc/calloc/free/realloc contract is GlobalAlloc's;
+// DL is used on the module's single thread, with no other reference live.
+#[allow(unsafe_code)]
 unsafe impl GlobalAlloc for Heap {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
         (*addr_of_mut!(DL)).malloc(l.size(), l.align())
@@ -130,6 +139,9 @@ static HEAP: Heap = Heap;
 /// The host's bound: from now on the memory may grow by at most `pages`
 /// pages over its size now (on a fresh instance, its initial pages).
 #[no_mangle]
+// SAFETY: an export of the raster module's wasm ABI (no_mangle; the rs_ prefix keeps
+// the symbol unique); LIMIT_PAGES is written on the module's single thread.
+#[allow(unsafe_code)]
 pub extern "C" fn rs_begin(pages: u32) {
     unsafe {
         *addr_of_mut!(LIMIT_PAGES) = wasm32::memory_size(0).saturating_add(pages as usize);
@@ -139,17 +151,26 @@ pub extern "C" fn rs_begin(pages: u32) {
 
 /// The last growth refused since the call began (all zero: none).
 #[no_mangle]
+// SAFETY: an export of the raster module's wasm ABI (no_mangle; the rs_ prefix keeps
+// the symbol unique); no unsafe operation.
+#[allow(unsafe_code)]
 pub extern "C" fn rs_last_refusal() -> *const Refusal {
     addr_of!(REFUSAL)
 }
 
 /// Where the heap starts: below it the stack and static data.
 #[no_mangle]
+// SAFETY: an export of the raster module's wasm ABI (no_mangle; the rs_ prefix keeps
+// the symbol unique); no unsafe operation.
+#[allow(unsafe_code)]
 pub extern "C" fn rs_heap_base() -> usize {
     addr_of!(__heap_base) as usize
 }
 
 /// At each call's start: no refusal yet.
+// SAFETY: REFUSAL is written on the module's single thread, with no reference to
+// it live.
+#[allow(unsafe_code)]
 pub fn clear_refusal() {
     unsafe {
         *addr_of_mut!(REFUSAL) = Refusal { need_pages: 0, size_pages: 0, limit_pages: 0 };
