@@ -513,6 +513,7 @@ jobs:
           CHROME=google-chrome node web/test-board-open.mjs
           CHROME=google-chrome node web/notebook/test-render-contain.mjs
           CHROME=google-chrome bun web/workspace/test-workspace.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-admit.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash-v4.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-journal.mjs
@@ -764,6 +765,9 @@ jobs:
               node web/test-pkgset-page.mjs
               # (the bash shell's loader and its worker's own policy: plan-bash-shell r3 step 1)
               bun web/test-shell.mjs
+              # (ShellHost, the mediator, over a real workspace: step 2)
+              bun web/shell/test-shell-host.mjs
+              bun web/shell/test-bounded-json.mjs
               node web/test-worker-limits.mjs
               node web/test-kedlaya-worker.mjs
               ;;
