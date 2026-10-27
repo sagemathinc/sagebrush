@@ -4,7 +4,7 @@ members = ["interrupt", "ledger", "par", "bigint", "ball", "arith", "mpoly", "gr
 
 # Unsafe code is the trusted boundary of the engine ledger's safe-Rust proof
 # (no-cliffs C-2c-ii scope r4 section 1.3): denied everywhere; each existing
-# site carries #[allow(unsafe_code)] on its smallest enclosing item, pinned by
+# site carries an allow on its smallest enclosing item, pinned by
 # test/unsafe-allow-inventory.json (scripts/unsafe-inventory.mjs).
 [workspace.lints.rust]
 unsafe_code = "deny"
