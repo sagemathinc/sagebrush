@@ -495,7 +495,7 @@ async function pruneAndConcurrency() {
 
 
 // (a promise that resolves on the store's takeover, or "timeout")
-const takeover = (st, ms = 3000) => within(new Promise((ok) => { st.ontakeover = ok; }), ms);
+const takeover = (st, ms = 3000) => within(new Promise((ok) => { st.onTakeover(ok); }), ms);
 
 async function oneWriter() {
   // for the milestone, one writer per notebook per device (William, Oct 27): a second store of it is read-only, says
@@ -583,7 +583,106 @@ async function noWebLocks() {
   hdb.close();
 }
 
-const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks];
+
+async function lockOrderings() {
+  // astra's three orderings, with real Web Locks and IndexedDB
+  const { w, hdb } = await active();
+  // CORR-215-1: the same store reattached at a takeover (the page's switchJournal) keeps its lock and saves
+  {
+    const { id, st } = await loadNew(w, hdb, [["a", "A"]]);
+    const v = store(w, hdb, id);
+    await v.load();
+    const t = takeover(v);
+    await close(st);
+    await t;
+    const d = await v.load();
+    // (the page's startHistory after open(): the same store, kept; then a save, with no load in between)
+    const kept = N.switchJournal(v, v);
+    const out = await v.save({ ...d, cells: [{ id: "a", code: "after the reattach" }], baseRev: d.rev });
+    const other = store(w, hdb, newId());
+    const next = N.switchJournal(v, other);
+    const freed = await within(v.lockDone ?? Promise.resolve(), 2000);
+    check(kept === v && v.writer === false && freed !== "timeout" && next === other && !!out?.saved, "CORR-215-1: the same store reattached keeps its lock and saves; switching to another store lets it go: " + J({ saved: !!out?.saved }));
+    await close(other);
+  }
+  // CORR-215-2: a release before the initial grant: the grant isn't kept, the release settles, the next store writes
+  {
+    const { id, st } = await loadNew(w, hdb, [["a", "A"]]);
+    await close(st);
+    const a = store(w, hdb, id), loading = a.load();
+    const rel = a.release();
+    await loading.catch(() => {});
+    const r = await within(rel, 2000), held = a.writer;
+    const b = store(w, hdb, id);
+    await b.load();
+    check(r !== "timeout" && !held && b.writer && b.viewOnly === null, "CORR-215-2: a release before the initial grant: the grant isn't kept, the release settles, the next store is the writer: " + J({ r: r === "timeout" ? r : "ok", held, next: b.writer }));
+    await close(a, b);
+  }
+  // CORR-215-3: the grant arrives while the read-only load is still reading: it loads as the writer, recovering first
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    await t1Only(st, { ...d, cells: [{ id: "a", code: "B" }], baseRev: d.rev });
+    const v = store(w, hdb, id), init = v.history.init.bind(v.history);
+    let paused = false;
+    v.history.init = async () => { if (!paused) { paused = true; await close(st); await sleep(100); } return init(); };
+    let told = 0;
+    await v.load();
+    v.onTakeover(() => { told++; });
+    await sleep(50);
+    const p = await persisted(w, hdb, id), out = await v.save({ ...(await rawGet(w.main, "notebooks", id)), cells: [{ id: "a", code: "B2" }], baseRev: p.rec.rev });
+    check(v.writer && v.viewOnly === null && v.recovered.row === "rewritten" && p.codes === J([["a", "B"]]) && told === 0 && !!out?.saved, "CORR-215-3: granted during the read-only load: loaded as the writer, the interrupted save (B) recovered first, nothing left to tell: " + J({ row: v.recovered.row, told }));
+    await close(v);
+  }
+  // …and granted after the read-only load, before the page asks: told at once when it does (latched)
+  {
+    const { id, st } = await loadNew(w, hdb, [["a", "A"]]);
+    const v = store(w, hdb, id);
+    await v.load();
+    await close(st);
+    await sleep(100);
+    const t = takeover(v, 1000);
+    check((await t) !== "timeout" && v.writer && v.viewOnly !== null, "a grant before the page asks to be told: told at once (latched), still read-only until its reload");
+    await close(v);
+  }
+  close(w);
+  hdb.close();
+}
+
+async function takeoverRefusesTheViewersState() {
+  // board's B: at a takeover, before its reload, the read-only tab's own state (flushed as the page reattaches) is
+  // refused: nothing of it is written; after the reload, the writer saves
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  const v = store(w, hdb, id), dv = await v.load();
+  const t = takeover(v);
+  await close(st);
+  await t;
+  const rec0 = J(await rawGet(w.main, "notebooks", id)), sync0 = J(await syncRows(hdb));
+  const flushed = await v.save({ ...dv, cells: [{ id: "a", code: "A", outputs: [{ text: "the viewer's run" }] }], name: "renamed in the viewer", baseRev: dv.rev });
+  check(flushed === "not saved: this notebook is open for editing in another tab of this browser" && J(await rawGet(w.main, "notebooks", id)) === rec0 && J(await syncRows(hdb)) === sync0, "a save between the grant and the reload (the page's flush at detach): refused, nothing written");
+  const d2 = await v.load();
+  const out = await v.save({ ...d2, cells: [{ id: "a", code: "the new writer's" }], baseRev: d2.rev });
+  check(!!out?.saved && (await rawGet(w.main, "notebooks", id)).name !== "renamed in the viewer", "…after the reload, the writer saves its own");
+  await close(v, w);
+  hdb.close();
+}
+
+async function controls() {
+  // board's 1: what the page allows for a store: everything for the writer and a plain store; for a read-only one, no
+  // name (no workspace rename), no language, no reproducibility, no rename, no Trash
+  const { w, hdb } = await active();
+  const { id, st } = await loadNew(w, hdb, [["a", "A"]]);
+  const v = store(w, hdb, id);
+  await v.load();
+  const cw = N.pageControls(st), cv = N.pageControls(v), cp = N.pageControls(new W.IdbStore(w.main, newId()));
+  const all = (c) => c.name && c.mode && c.repro && c.rename && c.trash && !c.readOnly && c.bar === null;
+  const none = (c) => !c.name && !c.mode && !c.repro && !c.rename && !c.trash && c.readOnly && c.bar === N.READ_ONLY.other;
+  check(all(cw) && all(cp) && none(cv) && typeof N.TAKEOVER === "string" && N.TAKEOVER.length > 0, "the page's controls: all for the writer and a plain store; none (and the bar) for a read-only store");
+  await close(st, v, w);
+  hdb.close();
+}
+
+const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
