@@ -47,6 +47,13 @@ ok(h(base) === h("#[no_mangle]\n#[allow(unsafe_code)]\nfn f() {\n    // a commen
 ok(h(base) !== h("#[no_mangle]\n#[allow(unsafe_code)]\nfn f() { unsafe { g(2) } }\n"), "a token change moves the hash");
 ok(h(base) !== h("#[export_name = \"y\"]\n#[allow(unsafe_code)]\nfn f() { unsafe { g(1) } }\n"), "a changed outer attribute moves the hash");
 
+// item byte ranges are UTF-8 byte offsets (what rustc's spans use), multi-byte text before the item included
+{
+  const src = "// é ü ✓\n#[allow(unsafe_code)]\nfn f() { unsafe { g() } }\n";
+  const it = items(src)[0];
+  ok(it.bFrom === Buffer.byteLength("// é ü ✓\n") && it.bTo === Buffer.byteLength(src.trimEnd()), "U1-SPAN: item byte ranges count UTF-8 bytes, from the first attribute to the closing brace");
+}
+
 // items in impls are named by their context; macro-generated items by the macro
 const ctx = "impl A { #[allow(unsafe_code)] fn new() {} }\nimpl B { #[allow(unsafe_code)] fn new() {} }\nmacro_rules! d { () => { #[allow(unsafe_code)] fn $name() {} } }\n";
 ok(JSON.stringify(items(ctx).map((x) => x.item)) === JSON.stringify(["impl A > fn new", "impl B > fn new", "macro_rules ! d > fn $name"]), "names carry their impl / macro context");
@@ -120,9 +127,10 @@ ok(scan(files, tree({ "engine/Cargo.toml": ws, "engine/a/Cargo.toml": member, "s
 
 // ---- #234 r2 U1: compiler sites against the pinned items (synthetic cargo JSON)
 {
-  const found = [{ file: "engine/x/src/lib.rs", item: "fn f", hash: "h", from: 10, to: 20 }];
+  const found = [{ file: "engine/x/src/lib.rs", item: "fn f", hash: "h", from: 10, to: 20, bFrom: 1000, bTo: 1200 }];
   const LOCAL = "path+file:///repo/engine/x#sagebrush-x@0.1.0", REG = "registry+https://github.com/rust-lang/crates.io-index#pyo3@0.27.2";
-  const msg = (file, line, code = "unsafe_code", pkg = LOCAL) => JSON.stringify({ reason: "compiler-message", package_id: pkg, message: { code: { code }, message: "usage of an `unsafe` block", spans: file == null ? [] : [{ is_primary: true, file_name: file, line_start: line }] } });
+  // (a site's byte range: by default inside fn f's bytes 1000..1200 for lines 10..20, outside it otherwise)
+  const msg = (file, line, code = "unsafe_code", pkg = LOCAL, extra = {}) => JSON.stringify({ reason: "compiler-message", package_id: pkg, message: { code: { code }, message: "usage of an `unsafe` block", spans: file == null ? [] : [{ is_primary: true, file_name: file, line_start: line, byte_start: line >= 10 && line <= 20 ? 1050 : 5000, byte_end: line >= 10 && line <= 20 ? 1060 : 5010, ...extra }] } });
   const run = (...lines) => compilerSites([lines.join("\n")], found, "/repo/");
   ok(run(msg("x/src/lib.rs", 15)).errors.length === 0, "U1: a site inside a pinned item passes");
   ok(run(msg("x/src/lib.rs", 25)).errors.length === 1, "U1 refused: a site outside every pinned item");
@@ -133,6 +141,13 @@ ok(scan(files, tree({ "engine/Cargo.toml": ws, "engine/a/Cargo.toml": member, "s
   ok(run(msg(null, 0)).errors.some((e) => /no usable location/.test(e)), "U1 refused: a local site with no usable location (never assumed safe)");
   ok(run(msg("x/src/lib.rs", 0)).errors.some((e) => /no usable location/.test(e)), "U1 refused: a zero-line span");
   ok(run(msg("x/src/lib.rs", 25, "dead_code")).errors.length === 0, "U1: other lints are ignored");
+  // #234 r3 U1-SPAN: byte ranges and every expansion frame
+  ok(run(msg("x/src/lib.rs", 20, "unsafe_code", LOCAL, { byte_start: 1201, byte_end: 1210 })).errors.some((e) => /outside every pinned allowed item/.test(e)), "U1-SPAN refused: a site on the item's last line but after its closing brace (same line, outside the item)");
+  ok(run(msg("x/src/lib.rs", 15, "unsafe_code", LOCAL, { byte_start: undefined, byte_end: undefined })).errors.some((e) => /without a byte range/.test(e)), "U1-SPAN refused: a site without a byte range");
+  ok(run(msg("x/src/lib.rs", 15, "unsafe_code", LOCAL, { expansion: { macro_decl_name: "m!", def_site_span: { file_name: "x/src/lib.rs" }, span: { file_name: "x/src/lib.rs" } } })).errors.length === 0, "U1-SPAN: a local macro_rules frame passes");
+  ok(run(msg("x/src/lib.rs", 15, "unsafe_code", LOCAL, { expansion: { macro_decl_name: "gen!", def_site_span: { file_name: "/home/u/.cargo/registry/src/pm/lib.rs" }, span: {} } })).errors.some((e) => /defined outside the tree/.test(e)), "U1-SPAN refused: a frame defined outside the tree, though the span lands in a pinned item (a cross-item expansion)");
+  ok(run(msg("x/src/lib.rs", 15, "unsafe_code", LOCAL, { expansion: { macro_decl_name: "gen!", span: {} } })).errors.some((e) => /no definition site/.test(e)), "U1-SPAN refused: a frame with no origin");
+  ok(run(msg("x/src/lib.rs", 15, "unsafe_code", LOCAL, { expansion: { macro_decl_name: "a!", def_site_span: { file_name: "x/src/lib.rs" }, span: { expansion: { macro_decl_name: "b!", def_site_span: { file_name: "/tmp/out/gen.rs" } } } } })).errors.some((e) => /defined outside the tree/.test(e)), "U1-SPAN refused: a nested frame from generated code");
 }
 
 // ---- #234 r2 U1: the generation closure the compiler can't see
