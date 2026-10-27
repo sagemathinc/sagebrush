@@ -602,6 +602,11 @@
  },
  "engine/poly/src/binomial.rs :: stage_b :: let (work, out_bytes, scratch, costs) = ledger().ok_or_else(|| b.refuse(\"work (overflow)\", u64::MAX, b.work_left()))?; #0": {
   "class": "2",
+  "disposition": {
+   "2": {
+    "followup": "FU-B14-1"
+   }
+  },
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/binomial.rs :: stage_b :: let _t = crate::budget::tag(\"piece costs\"); #0": {
@@ -610,10 +615,20 @@
  },
  "engine/poly/src/binomial.rs :: stage_b :: let len = usize::try_from(k.len).map_err(|_| b.refuse(\"memory (overflow)\", u64::MAX, 0))?; #0": {
   "class": "2",
+  "disposition": {
+   "2": {
+    "followup": "FU-B14-1"
+   }
+  },
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/binomial.rs :: stage_b :: let need = primes.iter().try_fold(0u64, |s, &l| s.checked_add(prefilter_plan(bits, l)?.checked_mul(2)?)).ok_or_else(|| b.refuse(\"work (overflow)\", u64::MAX, b.work_left()))?; #0": {
   "class": "2",
+  "disposition": {
+   "2": {
+    "followup": "FU-B14-1"
+   }
+  },
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/binomial_tests.rs :: a_4200_bit_binomial_takes_stage_b :: let b = Budget::default(); #0": {
