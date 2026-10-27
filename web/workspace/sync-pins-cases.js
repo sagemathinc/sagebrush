@@ -1470,9 +1470,11 @@ async function upgradeV5() {
   const marker = await get(db5, "meta", W.BACKFILL), prunable = after.prunable, ledger = after.syncLedger;
   delete after.prunable;
   delete after.syncLedger;
-  const metaKeys = JSON.parse(after.meta)[0];
-  after.meta = J([metaKeys.filter((k) => k !== W.BACKFILL), JSON.parse(after.meta)[1].filter((v) => !(v && typeof v === "object" && "after" in v))]);
-  check(db5.version === W.WS_VERSION && J(after) === J(before) && J(idx) === J(["byStorage"]) && prunable === J([[], []]) && ledger === J([[], []]) && marker?.after === 0, "version 4 to 5 (and on to 7): every store the same, byte for byte; the pins' index byStorage and the empty stores prunable and syncLedger added; the backfill's marker set: " + J({ idx, prunable, marker }));
+  const [metaKeys, metaValues] = JSON.parse(after.meta), ji = metaKeys.indexOf("journal");
+  // (version 8's one write: the journal's record, not activated, exactly)
+  const journal = ji < 0 ? undefined : J(metaValues[ji]);
+  after.meta = J([metaKeys.filter((k) => k !== W.BACKFILL && k !== "journal"), metaValues.filter((v, i) => i !== ji && !(v && typeof v === "object" && "after" in v))]);
+  check(db5.version === W.WS_VERSION && J(after) === J(before) && J(idx) === J(["byStorage"]) && prunable === J([[], []]) && ledger === J([[], []]) && marker?.after === 0 && journal === J({ v: 1, active: false }), "version 4 to 5 (and on to 8): every store the same, byte for byte; the pins' index byStorage and the empty stores prunable and syncLedger added; the backfill's marker and the journal's record (not activated) set: " + J({ idx, prunable, marker, journal }));
   db5.close();
 }
 

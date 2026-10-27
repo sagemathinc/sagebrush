@@ -68,7 +68,12 @@ jobs:
         run: |
           python3 test/limit_sites.py --check > census.json || { cat census.json; exit 1; }
           pinned=$(sed -n 's/^const LIMIT_SITES_BASELINE_SHA256 = "\([0-9a-f]*\)";$/\1/p' test/limits.test.ts)
-          python3 -c 'import json, sys; d = json.load(open("census.json")); print(json.dumps({k: d[k] for k in ("sites", "registered", "explained", "problems")})); sys.exit(0 if d["baseline_sha256"] == sys.argv[1] and d["explained"] >= 17 else 1)' "$pinned"
+          python3 -c 'import json, sys; d = json.load(open("census.json")); print(json.dumps({k: d[k] for k in ("sites", "registered", "explained", "active_baseline", "problems")})); sys.exit(0 if d["baseline_sha256"] == sys.argv[1] and d["explained"] >= 17 else 1)' "$pinned"
+      # (the baseline sweep: its manifest rebuilt from the commit it names, fetched if this shallow checkout lacks it, and its tooling's fixture cases)
+      - name: "limits sweep: the manifest is the one rebuilt from its revision, and the tooling's fixture cases pass (test/limit_sweep.py)"
+        run: |
+          python3 test/limit_sweep.py verify
+          python3 test/limit_sweep_cases.py
 
   node-tests:
     needs: changes
@@ -455,8 +460,12 @@ jobs:
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
+          CHROME=google-chrome node web/share/test-share-dialog.mjs
           bun web/site/test-preview.mjs
           bun web/share-client/test-file-deps.mjs
+          bun web/share-client/test-selection.mjs
+          bun web/share-client/test-deps-client.mjs
+          bun web/share-client/test-upload.mjs
           bun web/test-no-site-build.mjs
           bun web/test-reproducible-build.mjs
 
@@ -504,8 +513,10 @@ jobs:
           CHROME=google-chrome node web/test-board-open.mjs
           CHROME=google-chrome node web/notebook/test-render-contain.mjs
           CHROME=google-chrome bun web/workspace/test-workspace.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-admit.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash-v4.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-journal.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox-855.mjs
@@ -526,6 +537,9 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-be4-idb.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-529.mjs
           bun web/notebook/test-json-text.mjs
+          bun web/notebook/test-text-overlap.mjs
+          bun web/notebook/test-merge3.mjs
+          bun web/notebook/test-sync-rows.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-migrate-time.mjs
           CHROME=google-chrome node web/workspace/test-workspace-pages.mjs
           CHROME=google-chrome node web/workspace/test-workspace-browser.mjs
@@ -752,6 +766,9 @@ jobs:
               node web/test-pkgset-page.mjs
               # (the bash shell's loader and its worker's own policy: plan-bash-shell r3 step 1)
               bun web/test-shell.mjs
+              # (ShellHost, the mediator, over a real workspace: step 2)
+              bun web/shell/test-shell-host.mjs
+              bun web/shell/test-bounded-json.mjs
               node web/test-worker-limits.mjs
               node web/test-kedlaya-worker.mjs
               ;;
@@ -804,12 +821,14 @@ jobs:
               bun web/notebook/test-kernel-evaluate.mjs
               bun web/notebook/test-runner-fallback.mjs
               bun web/board/test-canvas.mjs
+              bun web/board/test-palette.mjs
               bun web/board/test-channel.mjs
               bun web/board/test-merge.mjs
               bun web/board/test-cached-store.mjs
               bun web/board/test-complete.mjs
               bun web/board/test-syncdb.mjs
               bun web/board/test-board-merge3.mjs
+              bun web/board/gen-merge3-board-vectors.mjs --check
               bun web/board/test-lossless.mjs
               bun web/board/test-mermaid-export.mjs
               bun web/board/test-fromhtml.mjs
@@ -1141,6 +1160,7 @@ jobs:
           python3 engine/py/test_engine_errors.py
           python3 engine/py/test_memguard.py
           python3 engine/py/test_capacity.py
+          python3 engine/py/test_session_ctrl.py
           python3 engine/py/test_progress.py
           python3 engine/py/test_kedlaya.py
           python3 engine/py/test_ffmat_echelon.py

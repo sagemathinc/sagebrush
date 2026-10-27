@@ -41,7 +41,7 @@
 // (web/replay-env.ts ClockRecord).
 // `target` is null for the cell's own output, or the id of the @interact
 // whose function is running, whose output area should receive it.
-import { initParser, R, libDir, packageModuleNames } from "./compile";
+import { initParser, R, libDir, packageModuleNames, optionalModuleNames } from "./compile";
 import { needsMore, complete, ipythonSyntax } from "./interactive";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
@@ -343,6 +343,25 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     if (m.complete !== undefined) {
       const [matches, prefix] = complete(main, m.complete, () => [...new Set(moduleNames())]);
       post({ id, matches, prefix });
+      return;
+    }
+    if (m.importInfo !== undefined) {
+      // Where imports resolve here, for the Share dialog's pre-selection
+      // (web/share-client/file-deps.ts, share-ux-plan r2 §2.3): the cwd,
+      // sys.path in order, the native modules (which always win: every one,
+      // the runtime's own too, and the ones it seeds in sys.modules; never
+      // the library's), the library's
+      // top-level modules (found under its sys.path entry), and the packages'
+      // (the registry's and the optional set's, found after sys.path).
+      const sys = R.importModule("sys");
+      const path = (R.toArray(sys.path) as unknown[]).filter((d): d is string => typeof d === "string");
+      // (unknown is null, never a guess: the dialog then resolves no name in the code, CORR-172-ASTRA-1)
+      let cwd: string | null = null;
+      try {
+        cwd = String(R.importModule("os").getcwd());
+      } catch {}
+      const lib = [...new Set(Object.keys((globalThis as any).__PYJS_LIB__ ?? {}).map((k) => k.split("/")[0].replace(/\.py$/, "")))];
+      post({ id, cwd, path, builtins: R.resolvedModuleNames(), lib, packages: [...new Set([...packageModuleNames(), ...optionalModuleNames()])] });
       return;
     }
     // Interrupt (the page wrote INTR[1]): runs queued before it are skipped

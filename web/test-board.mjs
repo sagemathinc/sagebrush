@@ -5,7 +5,7 @@
 //   node web/test-board.mjs [doc.json]
 // SHOT=dir also saves screenshots (the whole board, each tour step, zoomed in).
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
@@ -288,6 +288,16 @@ try {
       if (process.env.SHOT) writeFileSync(join(process.env.SHOT, `print-${mode}.pdf`), bytes);
       console.log(`print ${mode}: ${n} sheets, a ${(bytes.length / 1024).toFixed(0)} KB PDF`);
     }
+    // (print's sheets are drawn in the board's colors, light whatever the
+    // screen shows: each of board.css's color properties is defined there, at
+    // its light value, astra's CORR-203-1)
+    if (!(await ev(`!!document.getElementById("board-print")`))) await ev(`window.sagebrush.board.print({ mode: "pages", dialog: false })`);
+    const defs = Object.fromEntries([.../:where\(\.sbb, \.sbb-layer, #board-print\) \{([^{}]*)\}/.exec(readFileSync(new URL("board/board.css", import.meta.url), "utf8"))[1].replace(/\/\*.*?\*\//gs, "").matchAll(/(--board-[a-z0-9-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
+    const inPrint = await ev(`(() => { const r = document.querySelector("#board-print .board-item") ?? document.getElementById("board-print"), s = getComputedStyle(r); return Object.fromEntries(${JSON.stringify(Object.keys(defs))}.map((v) => [v, s.getPropertyValue(v).trim()])); })()`);
+    const off = Object.keys(defs).filter((v) => inPrint[v] !== defs[v]);
+    check(Object.keys(defs).length > 90 && !off.length, `print's sheets have the board's light colors: ${off.map((v) => `${v} ${JSON.stringify(inPrint[v])}`).join(", ")}`);
+    const note = await ev(`(() => { const n = [...document.querySelectorAll("#board-print .board-note")].find((e) => !e.style.getPropertyValue("--c")); return n && getComputedStyle(n).backgroundColor; })()`);
+    check(!note || note === "rgb(255, 255, 255)", `print: a note without a color of its own is white, not ${note}`);
     await ev(`document.getElementById("board-print")?.remove()`);
   }
   if (process.env.SHOT) {
