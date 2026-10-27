@@ -60,6 +60,7 @@ try:
     import _thread
 except ImportError:  # (a runtime without threads: one caller)
     _thread = None
+import weakref as _weakref
 import _capacity
 try:
     import itertools as _itertools
@@ -324,7 +325,6 @@ class _PyReleaseLog:
         return self._n - 1
 
     def track(self, owner, key):
-        import weakref
         wr = self._tracked.get(key)
         if wr is not None and wr() is not None:
             return
@@ -333,7 +333,7 @@ class _PyReleaseLog:
         def gone(_wr, key=key):
             q[nxt()] = key
             tracked.pop(key, None)
-        self._tracked[key] = weakref.ref(owner, gone)
+        self._tracked[key] = _weakref.ref(owner, gone)
 
     def peek(self, frm, count):
         out, q = [], self._q
@@ -573,8 +573,7 @@ class Ledger:
         (an owner that can't be referenced weakly is the caller's error:
         TypeError, before anything is charged)."""
         if owner is not None:
-            import weakref
-            weakref.ref(owner)
+            _weakref.ref(owner)
         r = Record(self.new_id(), "resident", domain, nbytes)
         # (tracked BEFORE the commit: an interruption between leaves a tracked
         # owner without a record, whose release is then skipped, never a
