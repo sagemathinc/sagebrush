@@ -54,6 +54,23 @@ export function xkRowOutcome(cells, leakOk, xk) {
   return { outcome: "FIXED", why: "stale exception: every cell PASS; remove the case's xk field" };
 }
 
+// a leak CONTROL row (a case with expect_leak: a deliberate retention per repeat): it PASSes only
+// when the heap+external leak check measured a finite growth ABOVE its allowance, with the thread
+// count unchanged, no worker outliving its kill, and every cell healthy.  Any other leak.ok = false
+// (a thread change alone, the RSS fallback when the host has no heap figure, a malformed result) is
+// not the control catching its leak and FAILs, as does a missing series (INCOMPLETE).  (#217,
+// astra2 K2: a thread-only failure must not pass the control)
+export function leakControlOutcome(cells, leak, xk) {
+  if (leak == null) return { outcome: "INCOMPLETE", why: "leak control: the leak series was not measured" };
+  if (leak.survived_kill) return { outcome: "FAIL", why: "leak control: a worker survived its kill" };
+  if (leak.measure !== "heap+external after gc") return { outcome: "FAIL", why: `leak control: measured by ${leak.measure ?? "nothing"}, not heap+external after gc` };
+  if (!Number.isFinite(leak.growth_kb) || !Number.isFinite(leak.allowed_kb)) return { outcome: "FAIL", why: "leak control: a malformed leak result (no finite growth or allowance)" };
+  if (leak.threads_same !== true) return { outcome: "FAIL", why: "leak control: the thread count changed (not the control's leak)" };
+  if (!(leak.growth_kb > leak.allowed_kb) || leak.ok !== false) return { outcome: "FAIL", why: `leak control: the deliberate leak was NOT caught (growth ${leak.growth_kb} KB, allowed ${leak.allowed_kb} KB)` };
+  const r = xkRowOutcome(cells, true, xk);
+  return { ...r, why: r.why ?? `leak control: caught (growth ${leak.growth_kb} KB > allowed ${leak.allowed_kb} KB)` };
+}
+
 export function classify(t) {
   // a Stop that could not be dispatched (the process gone, EPERM...): the cell is uncovered, never a
   // result, and the error is kept (astra CORR-168-R2-1)
@@ -86,6 +103,32 @@ export function rowOutcome(cells, leakOk = true) {
   for (const o of ["SLOW", "EXCEPTION"]) if (cells.some((c) => c.outcome === o)) return o;
   return "PASS";
 }
+
+// the heap+external sample (the DONE marker's figure), Python run in the session after each trial: the
+// live JS heap after a full collection plus its external memory, SETTLED.  One collection followed by
+// an immediate read can still count a previous trial's ArrayBuffer backing stores, which V8 frees after
+// the collection (their sweeping), so single readings swung by ~25 MB between two levels, and a series
+// whose repeat 3 fell at the lower one read as a 25-28 MB "leak" (M1o: 166.5, 145.5, 145.8, 146.0, 171.7
+// MB on master d1af1141; 166.7, 171.1, 143.4, 146.1, 171.8 on #196).  Garbage only ever adds to a
+// post-collection figure, so the sample is the least of up to 5 collected readings, 50 ms apart,
+// stopping once two agree within 1 MiB: live memory, a real leak included, can't read lower than it is.
+// (an indented block: _hu, _he and time come from the program around it; it sets _m)
+export const HEAP_EXTERNAL_SAMPLE = `    _m = ""
+    try:
+        _v = []
+        for _k in range(5):
+            _a = _hu() if _hu else None
+            _b = _he() if (_he and _a is not None) else None
+            if _a is None or _b is None:
+                break
+            _v.append(_a + _b)
+            if len(_v) >= 2 and abs(_v[-1] - _v[-2]) < 1048576:
+                break
+            time.sleep(0.05)
+        _m = "%d" % min(_v) if _v else ""
+    except Exception:
+        _m = ""
+`;
 
 // the leak criterion (r4 §6.1): from repeat 3 to the last, each metric grows at most
 // max(64 MiB, 10%) and the thread count does not change.  samples: [{ i, rss_kb, threads }], one

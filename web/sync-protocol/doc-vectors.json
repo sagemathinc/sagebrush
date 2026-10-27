@@ -1049,5 +1049,65 @@
    },
    "field": "text"
   }
+ ],
+ "refusals": [
+  {
+   "for": "snapshot",
+   "when": "the deployment's snapshot switch is off",
+   "error": {
+    "code": "unavailable",
+    "detail": {
+     "why": "snapshots_off"
+    }
+   },
+   "again": "never in this session"
+  },
+  {
+   "for": "snapshot",
+   "when": "too little history since the last snapshot",
+   "error": {
+    "code": "limit",
+    "detail": {
+     "limit": "snapshot_cadence",
+     "retry_after_batches": 12,
+     "retry_after_bytes": 1048576,
+     "retry_after_ms": 60000
+    }
+   },
+   "again": "when (retry_after_batches = 0 or retry_after_bytes = 0) and retry_after_ms = 0"
+  },
+  {
+   "for": "snapshot",
+   "when": "enough history, within the hour",
+   "error": {
+    "code": "limit",
+    "detail": {
+     "limit": "snapshot_cadence",
+     "retry_after_batches": 0,
+     "retry_after_bytes": 2097152,
+     "retry_after_ms": 60000
+    }
+   },
+   "again": "when (retry_after_batches = 0 or retry_after_bytes = 0) and retry_after_ms = 0"
+  },
+  {
+   "for": "snapshot",
+   "when": "another sha256 or byte count at an at_seq already taken",
+   "error": {
+    "code": "conflict"
+   },
+   "again": "never at that at_seq"
+  },
+  {
+   "for": "snapshot",
+   "when": "an at_seq at or before the epoch's latest snapshot",
+   "error": {
+    "code": "conflict",
+    "detail": {
+     "latest_at_seq": 1500
+    }
+   },
+   "again": "only past latest_at_seq"
+  }
  ]
 }
