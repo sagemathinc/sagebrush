@@ -484,12 +484,14 @@ export class IdbStore {
     return fresh;
   }
   /** `opts.lockHeld`: the caller holds the workspace's lock already (the workspace's own verbs).  `opts.journal`
-   * ({j, hash}, a journal store's only): T2, written only over a stored j no later than `j`. */
+   * ({j, hash}, a journal store's only): T2, written only over a stored j no later than `j`; `{keep: true, hash}`
+   * instead of j: the stored j kept (a save whose T1 was refused, 2c-1d-iii §1); `unjournaled`: the record's mark
+   * (true or "too-large"), written with it, or none. */
   async save(doc, opts = {}) {
     if (!this.db) return "not saved: this browser has no storage";
     // (a journal store writes nothing without the journal's word; any other store, nothing with it)
     const jw = opts.journal;
-    if (this.journal !== !!jw || (jw && !(Number.isSafeInteger(jw.j) && jw.j >= 0 && typeof jw.hash === "string"))) return "not saved: this notebook's save didn't come through sync's journal: reload this page";
+    if (this.journal !== !!jw || (jw && !((jw.keep === true || (Number.isSafeInteger(jw.j) && jw.j >= 0)) && typeof jw.hash === "string" && [undefined, false, true, "too-large"].includes(jw.unjournaled) && (!jw.markOnly || (jw.keep === true && jw.unjournaled === true))))) return "not saved: this notebook's save didn't come through sync's journal: reload this page";
     // (refused while the page says so: the workspace quarantined, design/workspace-durability.md A.3)
     const gate = refusal();
     if (gate) return `not saved: ${gate}`;
@@ -516,8 +518,15 @@ export class IdbStore {
       get.onsuccess = () => {
         if (result?.refused) return;
         // (T2: never over a value the journal has later than this one's, so the store never moves back)
-        const { j: _j, hash: _h, ...plain } = doc;
-        const rec = (jw && (get.result?.j ?? 0) > jw.j) ? null : revise(get.result, { ...plain, id: this.id, updated: Date.now(), ...(jw ? { j: jw.j, hash: jw.hash } : {}) });
+        // (the record marked alone, its value and revision kept (journal.js markRecord): no new revision, nothing told)
+        if (jw?.markOnly) {
+          if (get.result && !get.result.unjournaled) st.put({ ...get.result, unjournaled: jw.unjournaled });
+          result = { marked: true };
+          return;
+        }
+        const { j: _j, hash: _h, unjournaled: _u, ...plain } = doc;
+        const j = jw?.keep ? get.result?.j ?? 0 : jw?.j;
+        const rec = (jw && (get.result?.j ?? 0) > j) ? null : revise(get.result, { ...plain, id: this.id, updated: Date.now(), ...(jw ? { j, hash: jw.hash, ...(jw.unjournaled ? { unjournaled: jw.unjournaled } : {}) } : {}) });
         if (!rec) result = { conflict: get.result };
         else {
           st.put(rec);
@@ -526,6 +535,9 @@ export class IdbStore {
       };
       tx.oncomplete = () => resolve(result);
       tx.onerror = () => reject(tx.error);
+      // (stopped without a request's error (out of room at its commit, or a handler that threw): not saved, said, never
+      // a save left waiting (2c-1d-iii D1))
+      tx.onabort = () => reject(tx.error ?? new Error("the write was stopped"));
     });
     }, true);
     } catch (e) {
@@ -535,6 +547,7 @@ export class IdbStore {
       throw e;
     }
     if (out.refused) return `not saved: ${out.refused}`;
+    if (out.marked) return { marked: true };
     if (out.conflict) return { conflict: out.conflict };
     getChannel()?.postMessage({ from: tabId, id: this.id, doc: out.rec });
     return { saved: "saved in this browser", rev: out.rec.rev };
@@ -705,11 +718,12 @@ export class IdbPatchStore {
           if (this.fence === undefined) this.fence = fenceOf(f.result?.fence);
           const refused = this.owned ? fenceRefusal(f.result?.fence, this.fence, this.phase) : null;
           if (refused) { out = { refused }; stop(); return; }
-          fn(st).then((r) => { out = r; if (r?.j === undefined) stop(); }, (e) => { out = { refused: e?.refusal ?? `not kept: ${e?.message ?? e}` }; stop(); });
+          fn(st).then((r) => { out = r; if (r?.j === undefined) stop(); }, (e) => { out = { refused: e?.refusal ?? `not kept: ${e?.message ?? e}`, ...(e?.name === "QuotaExceededError" ? { quota: true } : {}) }; stop(); });
         };
         tx.oncomplete = () => ok();
         // (stopped, or failed: nothing of it written, whatever `fn` had said)
-        tx.onabort = () => { if (!out || out.j !== undefined) out = { refused: `not kept: ${tx.error?.message ?? "the write was stopped"}` }; ok(); };
+        // (the history database out of room: said as such, so the save's record is still written, marked (2c-1d-iii §1))
+        tx.onabort = () => { if (!out || out.j !== undefined) out = { refused: `not kept: ${tx.error?.message ?? "the write was stopped"}`, ...(tx.error?.name === "QuotaExceededError" ? { quota: true } : {}) }; ok(); };
         tx.onerror = () => {};
       });
       return out ?? { refused: "not kept" };
