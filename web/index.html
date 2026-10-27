@@ -1570,6 +1570,9 @@ const shareSent = {
     const k = this.key(account, notebook);
     await this.change(async (all) => {
       await this.pruned(all);
+      // (another live attempt of this notebook, recorded by another tab since this one looked: never replaced, as
+      // it may have made a share; this upload stops, and the next one sends that attempt, daybreak3's CORR-UPLOAD-R5-4)
+      if (Object.hasOwn(all, k) && /^[0-9a-f]{32}$/.test(all[k]?.attempt ?? "") && all[k].attempt !== attempt) throw Object.assign(new Error("other"), { other: true });
       if (!Object.hasOwn(all, k) && Object.keys(all).length >= SHARE_SENT_MAX) throw Object.assign(new Error("full"), { full: true });
       all[k] = { attempt, at: Date.now() };
     });
@@ -1730,6 +1733,7 @@ const shareDialog = createShareDialog({
       } catch (e) {
         // (never a live record evicted for this one: the oldest's share would be lost to a retry, CORR-UPLOAD-R4-2)
         if (e?.full) throw new Error(`this browser has ${SHARE_SENT_MAX} first uploads whose outcome it hasn't confirmed yet, so nothing was shared. Upload one of those notebooks again (that confirms it), then this one.`);
+        if (e?.other) throw new Error("another upload of this notebook from this browser hasn't finished, so nothing was shared. Upload again: that continues it.");
         throw new Error("this browser couldn't record the upload, so nothing was shared; upload again");
       }
       committing = true;
