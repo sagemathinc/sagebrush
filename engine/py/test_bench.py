@@ -16,12 +16,15 @@ from sagebrush.bench import _bench_common, _timing
 from sagebrush.bench._proc import LineProcess
 from sagebrush.bench.suite import Case, EngineTimeout, Suite
 
-# the timing procedure: answers come from the last call; at least 0.1 s
-# per sample; calls of 10 s or more once (patched to 0.05 s here)
+# the timing procedure: answers come from the last call; the calibration run
+# that chose the calls per sample took at least TARGET (0.1 s); the samples
+# reuse its n, so they only get a loose check (they can run a few % faster on
+# fast or turbo runners); calls of 10 s or more once (patched to 0.05 s here)
 calls = []
 t = _timing.sample(lambda: calls.append(1) or len(calls), 3)
 assert len(t.times) == 3 and t.calls >= 1 and t.answer == len(calls)
-assert all(x * t.calls >= 0.09 for x in t.times), t.times
+assert t.calibrated >= _timing.TARGET, t.calibrated
+assert all(x * t.calls > _timing.TARGET / 4 for x in t.times), t.times
 old = _timing.ONCE
 _timing.ONCE = 0.05
 try:
@@ -29,6 +32,7 @@ try:
 
     t = _timing.sample(lambda: time.sleep(0.06) or "slow", 5)
     assert t.times and len(t.times) == 1 and t.calls == 1 and t.answer == "slow"
+    assert t.calibrated == t.times[0] >= 0.05, (t.calibrated, t.times)
 finally:
     _timing.ONCE = old
 assert _timing.Timing([3, 1, 2], 1, None).median == 2

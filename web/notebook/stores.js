@@ -61,15 +61,40 @@ export function setSaveGate(f) { saveGate = f; }
  * before a reset (or in a tab whose page knows nothing of it) can't write into the next workspace (astra's
  * CORR-2A4-2).  Every list of notebooks passes it over. */
 export const FENCE = "__sagebrush-workspace__";
+/** Sync's own rows in the history databases (plan-sync-slice2-client r4 §4, F1; web/notebook/sync-rows.js) are under
+ * nb keys that begin with this character, which no document id may: so no document's range ever holds one. */
+export const SYNC_KEY_PREFIX = "\u0001";
+/** Whether an nb key is one of sync's (F1's one predicate, for every path that reads the history databases whole). */
+export const isSyncKey = (nb) => typeof nb === "string" && nb.startsWith(SYNC_KEY_PREFIX);
+/** Why a document id can't be a store's (null if it can): empty, or beginning with a control character, the range
+ * sync's reserved keys live in (F1's admission, checked at every store opened and every import). */
+export function docIdProblem(id) {
+  if (typeof id !== "string" || id === "") return "a document id is a non-empty string";
+  return /^[\u0000-\u001f\u007f]/.test(id) ? "a document id can't begin with a control character" : null;
+}
+const admitId = (id) => {
+  const why = docIdProblem(id);
+  if (why) throw new TypeError(`stores: ${why}: ${JSON.stringify(String(id).slice(0, 40))}`);
+  return id;
+};
 // (the rules, the same for every write (astra's CORR-2A4-2 on 0eefec71): a store is bound to the fence it found
 // when it loaded, read in the same transaction as the document; a write is allowed only if the fence now is that
 // same workspace and generation, in phase "ok"; a fence that appeared since a store found none, or went since it
 // found one, refuses it.  A fence is never deleted.  Which records the workspace owns is decided by
-// ownedByWorkspace, never by whether a fence is there)
-const fenceRefusal = (f, seen) => {
+// ownedByWorkspace, never by whether a fence is there.
+// `accept`: the one phase a writer writes in.  Every writer here writes as before the journal, in "ok"; once the
+// journal is activated the fences say "journal" (plan-sync-slice2-client r4 §1a), which only the journal's
+// writers (2c-1d) accept, so a writer from before it, in an old tab or this one, is refused before it changes
+// anything)
+export const fenceRefusal = (f, seen, accept = "ok") => {
   if (!f) return seen ? "this browser's record of the workspace is missing: reload this page" : null;
   if (f.quarantined) return "this browser's copy of your workspace was lost or is missing changes: choose what to do first";
-  if (f.phase && f.phase !== "ok") return f.phase === "quarantined" ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : "this browser's workspace is being reset: wait for it, then reload";
+  if ((f.phase ?? "ok") !== accept) {
+    if (f.phase === "quarantined") return "this browser's copy of your workspace was lost or is missing changes: choose what to do first";
+    if (f.phase === "journal") return "this browser now saves notebooks through sync's journal, which this page doesn't: reload this page";
+    if (accept === "journal" && (f.phase ?? "ok") === "ok") return "this browser's workspace isn't saving through sync's journal yet: reload this page";
+    return "this browser's workspace is being reset: wait for it, then reload";
+  }
   if (seen === null) return "the workspace was set up after this notebook was opened: reload this page";
   if (seen && (f.workspace !== seen.workspace || f.generation !== seen.generation)) return "the workspace was reset in another tab: reload this page";
   return null;
@@ -355,6 +380,9 @@ async function primaryRefusal(db, fence) {
  * workspace's own boards' ("local:" and the 12-hex ref): an example's, a board in the address or another site's
  * frame keep theirs whatever the workspace's state, deliberately. */
 export function ownedByWorkspace(name, id) {
+  // (sync's rows are the workspace's own in either history database, whatever a board id's pattern says: reset,
+  // quarantine and deletion fence and clear them as they do its documents, F1)
+  if (isSyncKey(id)) return true;
   if (name === "sagebrush-board-history") return /^(board:)?local:[0-9a-f]{12}(:|$)/.test(String(id));
   return true;
 }
@@ -432,7 +460,7 @@ function getChannel() {
 
 export class IdbStore {
   /** @param db an IndexedDB database from openDb(); @param id the notebook's id; @param initial its document if it is new */
-  constructor(db, id, initial = null) { this.db = db; this.id = id; this.initial = initial; }
+  constructor(db, id, initial = null) { this.db = db; this.id = admitId(id); this.initial = initial; }
   async load() {
     // (the document and the fence it belongs with, read in one transaction: the workspace this store writes into)
     const both = this.db ? await new Promise((ok, no) => {
@@ -517,7 +545,7 @@ function getHistoryChannel() {
   return historyChannel;
 }
 export class IdbPatchStore {
-  constructor(db, id) { this.db = db; this.id = id; this.owned = !db || ownedByWorkspace(db.name, id); }
+  constructor(db, id) { this.db = db; this.id = admitId(id); this.owned = !db || ownedByWorkspace(db.name, id); }
   // (one queue, in the order they were asked for, for append, clear and drop: none overtakes another, and each
   // tells the other tabs at its turn, so they hear them in that order too: astra's CORR-511-1)
   queue(f) {

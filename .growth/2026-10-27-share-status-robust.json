@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "#207 share: a failed sign-in check keeps what was known (web/index.html's openShare and Share menu, web/share-client/upload.ts's shareStatus), which cli/pyjs.cjs embeds with the page; measured with CI's toolchain (bun 1.4.4, Node 24.21.0) on committed trees: +484 for 2024928e merged with master 2bf6847d vs 2bf6847d, and +484 for 2024928e vs its base 279b16e6; no other bundle changes",
+ "bytes": {
+  "cli/pyjs.cjs": 484
+ }
+}

@@ -116,7 +116,14 @@ def where():
     """
     if getattr(getattr(_sys, "implementation", None), "name", "") == "cpython":
         return "package"
-    return "cli" if hasattr(_sys, "_sagebrush_heap_used") else "browser"
+    # (the engine's own host, decided once at its start: an attribute such
+    # as sys._sagebrush_heap_used exists on every pyjs host)
+    try:
+        import _sbengine
+        host = _sbengine.js_host()
+    except Exception:
+        host = None
+    return "browser" if host == "browser" else "cli"
 
 
 _UNITS = ((10 ** 9, "GB"), (10 ** 6, "MB"), (10 ** 3, "kB"), (1, "bytes"))

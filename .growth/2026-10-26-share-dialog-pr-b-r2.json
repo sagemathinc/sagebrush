@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "#172 share UX PR B, a top-up of 2026-10-25-share-dialog-pr-b.json: the Share dialog's stale-close guard (a close event arriving once the dialog is open again is ignored; train 4's web-sync race), which cli/pyjs.cjs embeds with the page; dispatch 40405837498's transition-mode size-gate (base b340cd2b, head 5ee09c85) measured cli/pyjs.cjs +19771 against the marker's 19723",
+ "bytes": {
+  "cli/pyjs.cjs": 48
+ }
+}

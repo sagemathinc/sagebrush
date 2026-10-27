@@ -13,17 +13,36 @@ import { admitIndex, checkJsChunk, PKGSET_LIMITS, PkgsetError, type SetPlan } fr
 import HOST_LEVELS from "./host-levels.json";
 
 export const SHELL_PACKAGE = "@sagebrush/bash";
-export const SHELL_HOST_LEVEL: number = Math.max(...Object.values(HOST_LEVELS.names as Record<string, number>));
+// (the highest level of any message, or of any compatible widening of one: host-levels.json's "fields")
+export const SHELL_HOST_LEVEL: number = Math.max(...Object.values(HOST_LEVELS.names as Record<string, number>), ...Object.values(((HOST_LEVELS as any).fields ?? {}) as Record<string, number>));
 
 /**
  * What one invocation came to (r3 §7.4, D8 point 5): a real shell exit, whose
  * status is the only thing that makes an exit status (an integer in 0..255),
  * or a rejection of the module's exec(), reported as a rejection and never
- * folded into a status.  (Step 2 adds the refusal's id, by identity.)
+ * folded into a status.  `refusal`: the id of the mediator's refusal the
+ * module says it rejected with (it reports one only if the rejected value is
+ * the very object it threw for it), else null.  The module's word only:
+ * web/shell/host.ts checks it against its own records.
  */
 export type ShellOutcome =
   | { exit: { code: number; stdout: string; stderr: string } }
-  | { rejected: { message: string; refusal: null } };
+  | { rejected: { message: string; refusal: string | null } };
+
+/** One file call of an invocation's (fs.request), for its mediator to answer: `ok` with a value, or an
+ * error `{code, message, refusal?}` (an errno code; `refusal`, the mediator's id for it, when it is one). */
+export type FsRequest = { req: number; op: string; args: unknown[] };
+export type FsAnswer = { ok: unknown } | { err: { code: string; message: string; refusal?: string } };
+export interface ExecOptions {
+  stdin?: string;
+  /** the run's id, which the module puts on each of its file calls (r3 §2.2 step 1) */
+  run?: string;
+  cwd?: string;
+  /** the invocation's mediator: every file call it makes, answered (without one, each is refused EBADF) */
+  onRequest?: (r: FsRequest) => Promise<FsAnswer>;
+  /** Stop: aborts the invocation's signal in the module (it stops at the next statement boundary) */
+  signal?: AbortSignal;
+}
 
 /**
  * The shell is gone (terminated, its worker failed, or its protocol broke):
@@ -41,9 +60,11 @@ export interface Shell {
   /** the package set this worker runs (one S per shell worker: A1.5) */
   readonly S: string;
   readonly version: string;
+  /** the host level its package needs, as its verified index pins it (host_req: computed at publish, A1.4) */
+  readonly hostReq: number;
   /** "closed" once terminated or failed; it doesn't reopen */
   readonly state: "open" | "closed";
-  exec(script: string, stdin?: string): Promise<ShellOutcome>;
+  exec(script: string, opts?: string | ExecOptions): Promise<ShellOutcome>;
   /** idempotent: ends the worker and its channel, and fails what is pending */
   terminate(): void;
 }
@@ -106,8 +127,8 @@ function outcome(p: any): ShellOutcome | null {
     if (!Number.isInteger(code) || code < 0 || code > 255 || typeof stdout !== "string" || typeof stderr !== "string") return null;
     return { exit: { code, stdout, stderr } };
   }
-  const message = p.rejected?.message;
-  return typeof message === "string" ? { rejected: { message, refusal: null } } : null;
+  const message = p.rejected?.message, refusal = p.rejected?.refusal ?? null;
+  return typeof message === "string" && (refusal === null || typeof refusal === "string") ? { rejected: { message, refusal } } : null;
 }
 
 /**
@@ -143,7 +164,7 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
   signal?.throwIfAborted();
   const worker = new Worker(new URL("shell/worker-boot.js", base), { type: "module", name: "sagebrush-shell" });
   const { port1, port2 } = new MessageChannel();
-  const pending = new Map<number, { resolve: (o: ShellOutcome) => void; reject: (e: unknown) => void }>();
+  const pending = new Map<number, { resolve: (o: ShellOutcome) => void; reject: (e: unknown) => void; run: string; onRequest?: ExecOptions["onRequest"] }>();
   let next = 1;
   let closed: ShellUnavailableError | null = null;
   let startup: { resolve: (version: string) => void; reject: (e: unknown) => void } | null = null;
@@ -169,6 +190,22 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
       startup.resolve(String(payload?.version ?? ""));
       startup = null;
     } else if (name === "boot.failed" && startup) close(String(payload?.message));
+    else if (name === "fs.request" && !startup) {
+      const { id, run, req, op, args } = payload ?? {};
+      if (!Number.isSafeInteger(req) || typeof op !== "string" || !Array.isArray(args)) return close("it broke the shell protocol (a malformed fs.request)");
+      const p = pending.get(id);
+      const reply = (a: FsAnswer) => {
+        if (closed) return;
+        try {
+          port1.postMessage({ fs: { id, req, ...a } });
+        } catch (err) {
+          close(`a file call's answer couldn't be posted to it: ${(err as Error)?.message ?? err}`);
+        }
+      };
+      // (a call from an invocation that has ended, or for another run: refused, never executed (r3 §2.2 step 1))
+      if (!p || run !== p.run || !p.onRequest) return reply({ err: { code: "EBADF", message: "this run has ended, or has no file access" } });
+      p.onRequest({ req, op, args }).then(reply, (err) => reply({ err: { code: "EIO", message: String((err as Error)?.message ?? err) } }));
+    }
     else if (name === "shell.result" && !startup) {
       const o = outcome(payload);
       const p = pending.get(payload?.id);
@@ -192,20 +229,30 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
   const shell: Shell = {
     S,
     version,
+    hostReq: j.js.host_req,
     get state() {
       return closed ? "closed" : "open";
     },
-    exec(script: string, stdin?: string) {
+    exec(script: string, opts: string | ExecOptions = {}) {
       if (closed) return Promise.reject(closed);
-      if (typeof script !== "string" || (stdin !== undefined && typeof stdin !== "string")) return Promise.reject(new TypeError("exec(script, stdin?) takes strings"));
+      const o: ExecOptions = typeof opts === "string" ? { stdin: opts } : opts;
+      const { stdin, cwd = "/", run = "-", onRequest, signal } = o;
+      if (typeof script !== "string" || (stdin !== undefined && typeof stdin !== "string") || typeof cwd !== "string" || typeof run !== "string") return Promise.reject(new TypeError("exec(script, {stdin?, cwd?, run?}) takes strings"));
       const id = next++;
       return new Promise<ShellOutcome>((resolve, reject) => {
-        pending.set(id, { resolve, reject });
+        const onAbort = () => {
+          if (pending.has(id) && !closed) try { port1.postMessage({ abort: { id } }); } catch {}
+        };
+        const done = <T,>(f: (x: T) => void) => (x: T) => { signal?.removeEventListener("abort", onAbort); f(x); };
+        pending.set(id, { resolve: done(resolve), reject: done(reject), run, onRequest });
         try {
-          port1.postMessage({ exec: { id, script, ...(stdin === undefined ? {} : { stdin }) } });
+          port1.postMessage({ exec: { id, run, script, cwd, ...(stdin === undefined ? {} : { stdin }) } });
         } catch (err) {
           close(`an invocation couldn't be posted to it: ${(err as Error)?.message ?? err}`);
+          return;
         }
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener("abort", onAbort, { once: true });
       });
     },
     terminate() {

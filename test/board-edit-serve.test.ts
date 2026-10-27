@@ -15,7 +15,6 @@ import { editRecords } from "../web/board/lossless";
 // addendum 2): a submission answered from its URL, or admitted, before its body is read (CORR-BOARD-A1-1:
 // a second one from the same tab and a rate-refused one, their bodies never sent); bodies counted and cut
 // off; a tab's events; a save reaching persistedGen; the ledger back where it was.
-const { mergeStrings3 } = require("patchflow");
 const sha = (s: string | Buffer) => createHash("sha256").update(s).digest("hex");
 const B = (nodes: any[]) => ({ format: "sagebrush-board", version: 1, title: "t", nodes, edges: [] });
 const snap = (d: any) => editRecords(d).map((r) => JSON.stringify(r)).join("\n");
@@ -28,7 +27,7 @@ async function setup(limits: Record<string, number> = {}) {
   let now = 1_000_000;
   const clock = { now: () => now, advance: (ms: number) => { now += ms; } };
   const L = { ...defaultLimits(), ...limits };
-  const started = await startEdit(file, L, { mergeStrings3, now: clock.now });
+  const started = await startEdit(file, L, { now: clock.now });
   assert.ok("hub" in started, "why" in started ? started.why : "");
   const hub = (started as { hub: EditHub }).hub;
   const es = new EditServer(hub, L, { "Access-Control-Allow-Origin": "*" }, clock.now);
