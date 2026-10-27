@@ -10,7 +10,28 @@
    "mpoly",
    "poly",
    "raster"
-  ]
+  ],
+  "external_proc_macros": [
+   "ctor 0.2.9",
+   "indoc 2.0.7",
+   "napi-derive 2.16.13",
+   "pyo3-macros 0.27.2",
+   "rustversion 1.0.23",
+   "serde_derive 1.0.229"
+  ],
+  "external_proc_macros_audit": "Trusted dependencies (scope r4: external crates and their macro expansions are the trusted boundary). The compiler sweep can't see their expansions (rustc treats them as external), so the exact name/version set is pinned: a new proc-macro dependency or a version change fails until reviewed.",
+  "build_scripts": {
+   "engine/flint/build.rs": {
+    "sha256": "ed0625d134a22bb53943274fd4a2314eabd7916cdb969f2d94329679b37bedae",
+    "audit": "Emits only cargo link directives (link-search, static/dylib libs); writes no Rust source and nothing is include!d. Test-only crate (never in a shipped graph)."
+   },
+   "engine/node/build.rs": {
+    "sha256": "fcbd1ff3f627a7553fa1704dc6f558998daff8bc256015c37aace62cc49ce584",
+    "audit": "napi_build::setup() only: N-API link arguments; writes no Rust source, and engine/node has no include!."
+   }
+  },
+  "no_ledger_dep_audit": "Checked per crate from its manifest (any dependency section, any name); with no re-export of sagebrush_ledger anywhere (also checked), a crate on this list cannot name a ledger type.",
+  "local_proc_macros": {}
  },
  "items": [
   {

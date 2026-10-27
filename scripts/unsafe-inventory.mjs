@@ -161,6 +161,22 @@ export function scanFile(rel, src) {
   }
   // each site exactly once: no allowed item inside another
   for (const a of items) for (const b of items) if (a !== b && b.start >= a.start && b.end <= a.end) errors.push(`${rel}:${b.line}: an allowed item inside another allowed item (${a.item}, line ${a.line})`);
+  // the generation closure the compiler sweep can't see (#234 r2 U1: rustc doesn't report unsafe produced by
+  // another crate's macros): no code include!, no exported macro, and every `unsafe` inside a macro_rules!
+  // body lies in an allowed item written in that body (so the macro's expansion is the pinned item)
+  for (let k = 0; k + 1 < toks.length; k++) {
+    const at = () => lineOf(src, toks[k].at);
+    if (toks[k].t === "id" && toks[k].v === "include" && toks[k + 1].v === "!") errors.push(`${rel}:${at()}: include! of code (generated or out-of-tree source can't be pinned; include_str!/include_bytes! data is fine)`);
+    if (toks[k].t === "id" && toks[k].v === "macro_export") errors.push(`${rel}:${at()}: #[macro_export] (a macro expanded in another crate is invisible to the compiler sweep: review it, then extend the check)`);
+    if (toks[k].t === "id" && toks[k].v === "macro_rules" && toks[k + 1].v === "!") {
+      let j = k + 2;
+      while (toks[j] && toks[j].v !== "{" && toks[j].v !== "(" && toks[j].v !== "[") j++;
+      const end = itemEnd(toks, j);
+      for (let u = j; u < end; u++) {
+        if (toks[u].t === "id" && toks[u].v === "unsafe" && !items.some((x) => u >= x.start && u < x.end)) errors.push(`${rel}:${lineOf(src, toks[u].at)}: unsafe in a macro_rules! body outside an allowed item written in it`);
+      }
+    }
+  }
   return { items, errors };
 }
 
@@ -285,6 +301,26 @@ export function scan(files = tracked(), read = (f) => readFileSync(join(ROOT, f)
   const model = workspaceModel(files, read);
   errors.push(...model.errors);
   errors.push(...overrideErrors(files, read));
+  // build scripts: exactly the pinned ones, byte for byte (a build script can generate code: #234 r2 U1)
+  const pinnedBuild = premises?.build_scripts ?? {};
+  const buildFiles = files.filter((f) => /^engine\/.*(^|\/)build\.rs$/.test(f));
+  for (const m of model.members) if (/\nbuild\s*=/.test(read(`engine/${m}/Cargo.toml`))) errors.push(`engine/${m}/Cargo.toml: a custom build = key is not modelled`);
+  for (const f of buildFiles) {
+    const h = createHash("sha256").update(read(f)).digest("hex");
+    if (!pinnedBuild[f]) errors.push(`${f}: a build script not pinned in ${INVENTORY} (review what it generates, then pin it)`);
+    else if (pinnedBuild[f].sha256 !== h) errors.push(`${f}: the build script changed (sha256 ${h.slice(0, 12)}): re-review it`);
+  }
+  for (const f of Object.keys(pinnedBuild)) if (!buildFiles.includes(f)) errors.push(`${f}: pinned but not found`);
+  // local proc-macro crates: none unless pinned, each by a hash over its whole tracked source (the caller's
+  // item hash can't see a generator change; this does)
+  for (const [dir, pin] of Object.entries(premises?.local_proc_macros ?? {})) {
+    const own = files.filter((f) => f.startsWith(dir + "/")).sort();
+    if (!own.length) { errors.push(`${dir}: a pinned local proc-macro crate not found`); continue; }
+    const h = createHash("sha256");
+    for (const f of own) h.update(f + "\0" + read(f) + "\0");
+    const d = h.digest("hex");
+    if (d !== pin.sha256) errors.push(`${dir}: the local proc-macro crate changed (sha256 ${d.slice(0, 12)}): re-review what it generates`);
+  }
   // the audits' premise: these crates have no direct ledger dependency (any section, any name)
   for (const c of premises?.no_ledger_dep ?? []) {
     if (!model.members.includes(c)) { errors.push(`premise no_ledger_dep: "${c}" is not a member`); continue; }
@@ -342,12 +378,30 @@ export function compilerSites(jsonTexts, found, root = ROOT) {
   return { sites: [...new Set(sites)], errors };
 }
 
-// `--metadata FILE`: cargo metadata --no-deps --format-version 1 (run in engine/) must list exactly the model's members
-export function metadataErrors(metaText, model, root = ROOT) {
-  const meta = JSON.parse(metaText);
-  const dirs = meta.packages.filter((p) => meta.workspace_members.includes(p.id)).map((p) => p.manifest_path.replace(root, "").replace(/\/Cargo\.toml$/, "").replace(/^engine\//, ""));
+// `--metadata FILE`: `cargo metadata --format-version 1 --locked` run in engine/ (the sweep's own root, config and
+// lockfile).  Its workspace members must equal the model's; no member may be a proc-macro crate; the external
+// proc-macro crates (whose expansions the compiler sweep can't see, rustc treating them as external) must be
+// exactly the pinned name/version set; the build scripts must be exactly the pinned ones
+export function metadataErrors(metaText, model, premises, root = ROOT) {
+  const errors = [];
+  let meta;
+  try { meta = JSON.parse(metaText); } catch { return ["cargo metadata output isn't JSON (a failed metadata run rejects)"]; }
+  if (!Array.isArray(meta.workspace_members) || !Array.isArray(meta.packages)) return ["cargo metadata output has no workspace_members/packages"];
+  const ws = new Set(meta.workspace_members);
+  const rel = (p) => p.replace(root, "").replace(/\/Cargo\.toml$/, "").replace(/^engine\//, "");
+  const dirs = meta.packages.filter((p) => ws.has(p.id)).map((p) => rel(p.manifest_path));
   const a = [...dirs].sort().join(","), b = [...model.members].sort().join(",");
-  return a === b ? [] : [`cargo metadata's workspace members (${a}) differ from the model's (${b})`];
+  if (a !== b) errors.push(`cargo metadata's workspace members (${a}) differ from the model's (${b})`);
+  const kinds = (p) => p.targets.flatMap((t) => t.kind);
+  const pinnedPm = premises?.local_proc_macros ?? {};
+  for (const p of meta.packages) if (ws.has(p.id) && kinds(p).includes("proc-macro") && !pinnedPm[`engine/${rel(p.manifest_path)}`]) errors.push(`engine/${rel(p.manifest_path)}: a local proc-macro crate not pinned (its expansions are invisible to the compiler sweep)`);
+  const ext = meta.packages.filter((p) => !ws.has(p.id) && kinds(p).includes("proc-macro")).map((p) => `${p.name} ${p.version}`).sort();
+  const want = [...(premises?.external_proc_macros ?? [])].sort();
+  if (ext.join(",") !== want.join(",")) errors.push(`the external proc-macro crates (${ext.join(", ")}) differ from the pinned set (${want.join(", ")}): review the new or changed ones`);
+  const builds = meta.packages.filter((p) => ws.has(p.id)).flatMap((p) => p.targets.filter((t) => t.kind.includes("custom-build")).map((t) => t.src_path.replace(root, ""))).sort();
+  const wantB = Object.keys(premises?.build_scripts ?? {}).sort();
+  if (builds.join(",") !== wantB.join(",")) errors.push(`cargo's build scripts (${builds.join(", ")}) differ from the pinned ones (${wantB.join(", ")})`);
+  return errors;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -379,7 +433,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`compiler sweep: ${r.sites.length} distinct sites, each checked against the pinned items`);
   }
   const meta = arg("--metadata");
-  if (meta.length && model) all.push(...metadataErrors(readFileSync(meta[0], "utf8"), model, ROOT));
+  if (meta.length && model) all.push(...metadataErrors(readFileSync(meta[0], "utf8"), model, inv.premises, ROOT));
   for (const e of all) console.log("FAIL", e);
   console.log(all.length ? `${all.length} problems` : `unsafe inventory: ${found.length} allowed items, all pinned and audited`);
   process.exit(all.length ? 1 : 0);

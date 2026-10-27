@@ -1,7 +1,9 @@
 // scripts/unsafe-inventory.mjs: every way of overriding or widening the unsafe_code lint is refused, a
 // changed or new allowed item fails until reviewed, and the tokenizer isn't fooled by strings or comments.
 //   node scripts/test-unsafe-inventory.mjs
-import { check, compilerSites, scan, scanFile, tokenize } from "./unsafe-inventory.mjs";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { check, compilerSites, metadataErrors, scan, scanFile, tokenize } from "./unsafe-inventory.mjs";
 
 let failures = 0;
 const ok = (c, what) => (c ? console.log("ok  ", what) : (failures++, console.log("FAIL", what)));
@@ -121,8 +123,47 @@ ok(scan(files, tree({ "engine/Cargo.toml": ws, "engine/a/Cargo.toml": member, "s
   ok(run(msg("x/src/lib.rs", 25, "dead_code")).errors.length === 0, "U1: other lints are ignored");
 }
 
+// ---- #234 r2 U1: the generation closure the compiler can't see
+ok(errs("#[allow(unsafe_code)]\nfn f() { include!(concat!(env!(\"OUT_DIR\"), \"/gen.rs\")); }\n").some((e) => /include! of code/.test(e)), "U1 refused: include! of generated code, even inside a pinned item");
+ok(errs('const S: &str = include_str!("data.txt");\n').length === 0, "U1: include_str! data is fine");
+ok(errs("#[macro_export]\nmacro_rules! m { () => {} }\n").some((e) => /macro_export/.test(e)), "U1 refused: an exported macro (expanded in another crate, unseen by the sweep)");
+ok(errs("macro_rules! m { () => { fn g() { unsafe { h() } } } }\n").some((e) => /macro_rules! body outside an allowed item/.test(e)), "U1 refused: unsafe in a macro body outside an allowed item");
+ok(errs("macro_rules! m { () => { #[allow(unsafe_code)] fn g() { unsafe { h() } } } }\n").length === 0, "U1: unsafe in a macro body inside its own allowed item passes");
+{
+  const files = ["engine/Cargo.toml", "engine/a/Cargo.toml", "engine/a/build.rs"];
+  const base = { "engine/Cargo.toml": ws, "engine/a/Cargo.toml": member, "engine/a/build.rs": "fn main() {}\n" };
+  const h = createHash("sha256").update("fn main() {}\n").digest("hex");
+  const pinned = { build_scripts: { "engine/a/build.rs": { sha256: h, audit: "x" } } };
+  ok(scan(files, tree(base), pinned).errors.length === 0, "U1: a pinned build script passes");
+  ok(scan(files, tree({ ...base, "engine/a/build.rs": 'fn main() { std::fs::write(std::env::var("OUT_DIR").unwrap() + "/gen.rs", "unsafe {}").unwrap(); }\n' }), pinned).errors.some((e) => /build script changed/.test(e)), "U1 refused: a pinned build script that changes (now generating code)");
+  ok(scan(files, tree(base), {}).errors.some((e) => /not pinned/.test(e)), "U1 refused: a new build script");
+  const model = { members: ["a"] };
+  const meta = (extra) => JSON.stringify({ workspace_members: ["a 0.1"], packages: [{ id: "a 0.1", name: "a", version: "0.1.0", manifest_path: "/r/engine/a/Cargo.toml", targets: [{ kind: ["lib"], src_path: "/r/engine/a/src/lib.rs" }] }, ...extra] });
+  const pm = (name, v, ws) => ({ id: `${name} ${v}`, name, version: v, manifest_path: `/r/x/${name}/Cargo.toml`, targets: [{ kind: ["proc-macro"], src_path: "/r/x/lib.rs" }] });
+  ok(metadataErrors(meta([pm("serde_derive", "1.0.0")]), model, { external_proc_macros: ["serde_derive 1.0.0"] }, "/r/").length === 0, "U1: the pinned external proc-macro set passes");
+  ok(metadataErrors(meta([pm("serde_derive", "1.0.1")]), model, { external_proc_macros: ["serde_derive 1.0.0"] }, "/r/").some((e) => /proc-macro crates/.test(e)), "U1 refused: an external proc-macro version change");
+  ok(metadataErrors(meta([pm("paste", "1.0.0")]), model, { external_proc_macros: [] }, "/r/").some((e) => /proc-macro crates/.test(e)), "U1 refused: a new external proc macro (e.g. paste)");
+  const local = JSON.stringify({ workspace_members: ["a 0.1", "m 0.1"], packages: [{ id: "a 0.1", name: "a", version: "0.1.0", manifest_path: "/r/engine/a/Cargo.toml", targets: [] }, { id: "m 0.1", name: "m", version: "0.1.0", manifest_path: "/r/engine/m/Cargo.toml", targets: [{ kind: ["proc-macro"], src_path: "/r/engine/m/src/lib.rs" }] }] });
+  ok(metadataErrors(local, { members: ["a", "m"] }, {}, "/r/").some((e) => /local proc-macro crate not pinned/.test(e)), "U1 refused: an unpinned local proc-macro crate");
+  ok(metadataErrors(local, { members: ["a", "m"] }, { local_proc_macros: { "engine/m": { sha256: "x" } } }, "/r/").length === 0, "U1: a pinned local proc-macro crate passes the metadata check");
+  ok(metadataErrors(meta([]), { members: ["a", "b"] }, {}, "/r/").some((e) => /differ from the model/.test(e)), "U2 refused: cargo's members differ from the model's");
+  ok(metadataErrors("not json", model, {}, "/r/").length > 0, "U2 refused: a failed metadata run");
+}
+
+{
+  // the caller unchanged, only the local proc macro's source changes: refused by its crate hash
+  const files = ["engine/Cargo.toml", "engine/a/Cargo.toml", "engine/m/Cargo.toml", "engine/m/src/lib.rs"];
+  const ws2 = ws.replace('["a"]', '["a", "m"]');
+  const base = { "engine/Cargo.toml": ws2, "engine/a/Cargo.toml": member, "engine/m/Cargo.toml": member.replace('"a"', '"m"') + "\n[lib]\nproc-macro = true\n", "engine/m/src/lib.rs": "pub fn gen() -> &'static str { \"fn x() {}\" }\n" };
+  const h = createHash("sha256");
+  for (const f of ["engine/m/Cargo.toml", "engine/m/src/lib.rs"]) h.update(f + "\0" + base[f] + "\0");
+  const pin = { local_proc_macros: { "engine/m": { sha256: h.digest("hex"), audit: "x" } } };
+  ok(scan(files, tree(base), pin).errors.length === 0, "U1: a pinned local proc-macro crate passes (baseline)");
+  ok(scan(files, tree({ ...base, "engine/m/src/lib.rs": "pub fn gen() -> &'static str { \"#[allow(unsafe_code)] fn x() { unsafe {} }\" }\n" }), pin).errors.some((e) => /local proc-macro crate changed/.test(e)), "U1 refused: only the local proc macro changes (the caller's hash identical)");
+}
+
 // and the real tree
-const real = scan();
+const real = scan(undefined, undefined, JSON.parse(readFileSync(new URL("../test/unsafe-allow-inventory.json", import.meta.url), "utf8")).premises);
 ok(real.errors.length === 0, `the tree scans clean (${real.found.length} allowed items)`);
 
 console.log(failures ? `${failures} failures` : "unsafe inventory: all controls pass");
