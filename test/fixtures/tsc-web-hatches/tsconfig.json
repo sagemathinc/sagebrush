@@ -3,8 +3,12 @@
   "extends": "../../../tsconfig.web.json",
   "files": [
     "multi.mjs",
+    "shapes/asi.mjs",
+    "shapes/backtick.mjs",
     "shapes/brace.mjs",
+    "shapes/forawait.mjs",
     "shapes/guards.mjs",
+    "shapes/hashbang.mjs",
     "shapes/member-gap.mjs",
     "shapes/member-if.mjs",
     "shapes/member-return.mjs",
