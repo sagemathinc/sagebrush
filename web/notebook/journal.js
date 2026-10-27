@@ -78,10 +78,12 @@ export const READ_ONLY = {
 };
 /** Said when a read-only tab becomes the writer (the page's status line). */
 export const TAKEOVER = "You can edit this notebook here now (the other tab let go of it).";
+/** Said when a read-only tab couldn't reopen the notebook as its writer (and let the lock go). */
+export const TAKEOVER_FAILED = "This notebook couldn't be opened for editing here: reload this page to try again.";
 /** What the page shows and allows for a store (the notebook page's controls; a plain store: everything). */
 export function pageControls(store) {
   const why = store?.journaled ? store.viewOnly : null;
-  return { readOnly: !!why, bar: why, name: !why, mode: !why, repro: !why, rename: !why, trash: !why };
+  return { readOnly: !!why, bar: why, name: !why, mode: !why, repro: !why, rename: !why, trash: !why, history: !why };
 }
 /** The store the page now uses, `next`, after `prev`: `prev` let go (its lock, its history) only if it is another
  * store; the same store reattached (a takeover's reload) is kept as it is. */
@@ -191,9 +193,13 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
    * opens it again). */
   release() {
     this.released = true;
-    if (this.inflight) return Promise.resolve();
-    this.history.close();
-    return this.letGo();
+    // (nothing let go while a write of its can still commit: its load's (recovery's T2, catch-up and prune) and its
+    // history's queue (astra's CORR-215-5); a save still running lets go when it ends)
+    return Promise.allSettled([this.loading, this.patches.appending]).then(() => {
+      if (this.inflight || !this.released) return;
+      this.history.close();
+      return this.letGo();
+    });
   }
   // (the codec's text of a document's versioned records: an intent's value)
   textOf(doc) { return this.history.codec.toString(this.mod.toRecords(doc)); }
@@ -248,13 +254,23 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     // (the writer from here: its saves and versions allowed; a tab taking over from a read-only view reads its history
     // again, as the writer left it)
     this.ready = true;
-    if (this.viewed) { this.viewed = false; await this.history.init(); } else await this.open();
-    for (let i = 0; ; i++) {
-      const out = await this.recover(await super.loadRecord());
-      if (out || i >= 4) { this.recovered = out ?? { row: "busy" }; break; }
+    this.loading = (async () => {
+      if (this.viewed) { this.viewed = false; await this.history.init(); } else await this.open();
+      for (let i = 0; ; i++) {
+        const out = await this.recover(await super.loadRecord());
+        if (out || i >= 4) { this.recovered = out ?? { row: "busy" }; break; }
+      }
+      if (this.recovered.row === "busy") throw new Error("the notebook kept changing while it was opened: reload this page");
+      return this.recovered.doc;
+    })();
+    try {
+      return await this.loading;
+    } catch (e) {
+      // (a load or recovery that failed writes nothing more: no save, no version, until a load succeeds (astra's
+      // CORR-215-5); the page then lets the lock go)
+      this.ready = false;
+      throw e;
     }
-    if (this.recovered.row === "busy") throw new Error("the notebook kept changing while it was opened: reload this page");
-    return this.recovered.doc;
   }
   // (the record as a notebook document with the versioned part of `value` (records), its own outputs, names and
   // settings kept for the cells it still has)

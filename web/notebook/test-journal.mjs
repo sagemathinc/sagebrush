@@ -43,8 +43,10 @@ if (!b.success) {
   process.exit(1);
 }
 copyFileSync(join(here, "test-journal.page.js"), join(site, "cases.js"));
+// (the notebook page's source, for its journal functions, run as they are (the cases extract them))
+copyFileSync(join(here, "../index.html"), join(site, "page-src.html"));
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>notebook journal test</title><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
-const FILES = ["/all.js", "/cases.js"];
+const FILES = ["/all.js", "/cases.js", "/page-src.html"];
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
   if (p !== "/" && !FILES.includes(p)) return new Response("not found", { status: 404 });

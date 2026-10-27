@@ -675,14 +675,129 @@ async function controls() {
   const v = store(w, hdb, id);
   await v.load();
   const cw = N.pageControls(st), cv = N.pageControls(v), cp = N.pageControls(new W.IdbStore(w.main, newId()));
-  const all = (c) => c.name && c.mode && c.repro && c.rename && c.trash && !c.readOnly && c.bar === null;
-  const none = (c) => !c.name && !c.mode && !c.repro && !c.rename && !c.trash && c.readOnly && c.bar === N.READ_ONLY.other;
+  const all = (c) => c.name && c.mode && c.repro && c.rename && c.trash && c.history && !c.readOnly && c.bar === null;
+  const none = (c) => !c.name && !c.mode && !c.repro && !c.rename && !c.trash && !c.history && c.readOnly && c.bar === N.READ_ONLY.other;
   check(all(cw) && all(cp) && none(cv) && typeof N.TAKEOVER === "string" && N.TAKEOVER.length > 0, "the page's controls: all for the writer and a plain store; none (and the bar) for a read-only store");
   await close(st, v, w);
   hdb.close();
 }
 
-const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls];
+
+// (the notebook page's own functions, as index.html has them, run with what they use given to them: startHistory and
+// takeOver (astra's CORR-215-4, board's C))
+async function pageFunctions(deps) {
+  const src = await (await fetch("./page-src.html")).text();
+  const a = src.indexOf("let nbJournal = null, nbHistoryOff = null;"), b = src.indexOf('nb.on("change"', a);
+  const t0 = src.indexOf("async function takeOver(store, id) {"), t1 = src.indexOf("\n}\n", t0) + 3;
+  if (a < 0 || b < 0 || t0 < 0) throw new Error("the page's journal functions weren't found");
+  const make = new Function("deps", `with (deps) {\n${src.slice(a, b)}\n${src.slice(t0, t1)}\nreturn { startHistory, takeOver };\n}`);
+  return make(deps);
+}
+const pageHelpers = () => ({ pageControls: N.pageControls, switchJournal: N.switchJournal, TAKEOVER: N.TAKEOVER, TAKEOVER_FAILED: N.TAKEOVER_FAILED });
+
+async function pageStartHistory() {
+  // CORR-215-4: the page's startHistory, run as it is: for a plain store (before activation), and for a journal's store
+  // reattached (the takeover's reload): no error, and the writer keeps its lock and saves
+  const { w, hdb } = await active();
+  const plain = new W.IdbStore(w.main, newId());
+  const deps = { nb: { store: plain, snapshot: () => ({ cells: [] }) }, nbHistory: null, historyQueue: [], journalPage: pageHelpers(), kernels: new Map(), ttEl: { hidden: true }, ttRefresh() {}, historyDbReady: Promise.resolve(null), ttUnavailable: "", current: { id: "x" } };
+  const f = await pageFunctions(deps);
+  const r1 = await f.startHistory("x").then(() => "ok", (e) => String(e));
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  deps.nb.store = st;
+  const r2 = await f.startHistory(id).then(() => "ok", (e) => String(e));
+  const r3 = await f.startHistory(id).then(() => "ok", (e) => String(e));
+  const out = await st.save({ ...d, cells: [{ id: "a", code: "after two starts" }], baseRev: d.rev });
+  check(r1 === "ok" && r2 === "ok" && r3 === "ok" && st.writer && !!out?.saved && deps.nbHistory === st.history, "the page's startHistory, run as it is: a plain store, then a journal's store reattached: no error, the writer keeps its lock and saves: " + J({ r1, r2, r3, saved: !!out?.saved }));
+  await close(st, w);
+  hdb.close();
+}
+
+async function viewerHistoryWrites() {
+  // daybreak3: a read-only store's TimeTravel can't be cleared or dropped (the storage refuses, whatever the page does);
+  // the writer's can
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  await st.save({ ...d, cells: [{ id: "a", code: "v2" }], baseRev: d.rev });
+  const v = store(w, hdb, id);
+  await v.load();
+  const rows0 = J(await histRows(hdb, id)), sync0 = J(await syncRows(hdb));
+  const c = await v.history.clear().then(() => "cleared", (e) => e.message);
+  const dr = await v.patches.drop().then(() => "dropped", (e) => e.message);
+  check(/open for editing in another tab/.test(c) && /open for editing in another tab/.test(dr) && J(await histRows(hdb, id)) === rows0 && J(await syncRows(hdb)) === sync0, "a read-only store's TimeTravel clear and drop: refused, its versions and journal rows byte for byte as they were: " + J({ c, dr }));
+  await st.history.clear();
+  check((await histRows(hdb, id)).length === 0, "…the writer's clear still clears");
+  await close(st, v, w);
+  hdb.close();
+}
+
+async function takeoverFails() {
+  // board's C: a takeover whose reopen fails lets the lock go (said), so another tab can take it
+  const { w, hdb } = await active();
+  const { id, st } = await loadNew(w, hdb, [["a", "A"]]);
+  const v = store(w, hdb, id), x = store(w, hdb, id);
+  await v.load(); await x.load();
+  const bar = { hidden: true, textContent: "" };
+  const deps = { current: { id }, nb: { store: v }, anchorOf: () => null, restoreAnchor() {}, document, open: async () => { throw new Error("the test's failed reopen"); }, writerBar: bar, writerBarHeight() {}, writerBarTimer: null, journalPage: pageHelpers(), statusEl: { textContent: "" } };
+  const f = await pageFunctions({ ...deps, nbHistory: null, historyQueue: [], kernels: new Map(), ttEl: { hidden: true }, ttRefresh() {}, historyDbReady: Promise.resolve(null), ttUnavailable: "" });
+  const tookOver = new Promise((ok) => v.onTakeover(() => f.takeOver(v, id).then(ok, ok)));
+  const xt = takeover(x, 3000);
+  await close(st);
+  await within(tookOver, 3000);
+  const r = await xt;
+  check(bar.textContent === N.TAKEOVER_FAILED && !bar.hidden && !v.writer && r !== "timeout" && x.writer, "a takeover whose reopen fails: the lock let go and said; the next waiting store takes over: " + J({ bar: bar.textContent.slice(0, 30), x: x.writer }));
+  await close(v, x, w);
+  hdb.close();
+}
+
+
+async function takeoverFailsInRecovery() {
+  // astra's CORR-215-5: a reload that fails during recovery leaves the store writing nothing (no save, no version) at
+  // once, before any release; and the page's takeOver then lets the lock go to the next tab
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  const v = store(w, hdb, id), x = store(w, hdb, id);
+  await v.load(); await x.load();
+  const grant = takeover(v, 3000);
+  await close(st);
+  await grant;
+  v.recover = async () => { throw new Error("the test's failed recovery"); };
+  const failed = await v.load().then(() => null, (e) => e.message);
+  const said = await v.save({ ...d, cells: [{ id: "a", code: "after a failed reload" }], baseRev: d.rev });
+  const rec = await rawGet(w.main, "notebooks", id);
+  check(failed && v.writer && !v.ready && v.viewOnly !== null && said === "not saved: this notebook is open for editing in another tab of this browser" && rec.cells[0].code === "A", "a reload that fails during recovery: it writes nothing more, at once: " + J({ failed, said }));
+  const bar = { hidden: true, textContent: "" };
+  const f = await pageFunctions({ current: { id }, nb: { store: v }, anchorOf: () => null, restoreAnchor() {}, document, open: async () => { await v.load(); }, writerBar: bar, writerBarHeight() {}, writerBarTimer: null, journalPage: pageHelpers(), statusEl: { textContent: "" }, nbHistory: null, historyQueue: [], kernels: new Map(), ttEl: { hidden: true }, ttRefresh() {}, historyDbReady: Promise.resolve(null), ttUnavailable: "" });
+  const xt = takeover(x, 3000);
+  await f.takeOver(v, id);
+  const r = await xt;
+  check(bar.textContent === N.TAKEOVER_FAILED && !v.writer && r !== "timeout" && x.writer, "…the page's takeOver then lets the lock go, said; the next waiting store takes over");
+  await close(v, x, w);
+  hdb.close();
+}
+
+
+async function releaseWaitsForLoad() {
+  // astra's CORR-215-5: a release while the load's recovery is still writing lets go only once those writes are done
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  await t1Only(st, { ...d, cells: [{ id: "a", code: "B" }], baseRev: d.rev });
+  await close(st);
+  const v = store(w, hdb, id), recover = v.recover.bind(v);
+  v.recover = async (rec) => { await sleep(300); return recover(rec); };
+  let done = false;
+  const loading = v.load().finally(() => { done = true; });
+  await sleep(80);
+  await v.release();
+  const settled = done;
+  await loading.catch(() => {});
+  const p = await persisted(w, hdb, id);
+  check(settled && p.codes === J([["a", "B"]]), "a release during the load's recovery lets go only after its writes (the recovered B committed first): " + J({ settled }));
+  close(w);
+  hdb.close();
+}
+
+const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
