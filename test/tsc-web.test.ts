@@ -75,83 +75,75 @@ test("the negative control: a planted error in a root, and one in a file it only
   assert.match(r.out, /tsc-web-negative\/dep\.mjs\(\d+,\d+\): error TS2322/, "the imported file's planted error is reported (roots are not a boundary)");
 });
 
-test("the escape-hatch policy against the compiler: tsc ACCEPTS the fixture, the policy refuses its unexplained multiline any and permits and counts the reasoned ones", () => {
+const FIX = join(ROOT, "test", "fixtures", "tsc-web-hatches");
+const fx = (f: string) => readFileSync(join(FIX, f), "utf8");
+// every shape astra2 found, r2-r5 (a division or a regex a lexer could misread, then a hatch it would hide), plus a
+// hashbang; tsc accepts every file
+const SHAPES: [string, keyof ReturnType<typeof hatches>["counts"]][] = [
+  ["postinc.mjs", "jsdoc-any"], ["postdec.mjs", "jsdoc-any"], ["paren.mjs", "jsdoc-any"], ["brace.mjs", "jsdoc-any"],
+  ["member-return.mjs", "jsdoc-any"], ["member-if.mjs", "jsdoc-any"], ["member-gap.mjs", "jsdoc-any"], ["unicode.mjs", "jsdoc-any"],
+  ["nonnull.ts", "jsdoc-any"], ["asi.mjs", "jsdoc-any"], ["forawait.mjs", "jsdoc-any"], ["backtick.mjs", "jsdoc-any"], ["hashbang.mjs", "ts-ignore"],
+];
+
+test("the policy against the compiler: tsc ACCEPTS the fixtures; multi.mjs's unexplained multiline any is refused, its reasoned any and expect-error permitted and counted", () => {
   const r = tsc(join("test", "fixtures", "tsc-web-hatches"));
-  assert.equal(r.signal, null);
-  assert.equal(r.status, 0, "tsc accepts the fixture (the multiline any, the reasoned any and the expect-error over a real error):\n" + r.out.slice(0, 2000));
-  const h = hatches(readFileSync(join(ROOT, "test", "fixtures", "tsc-web-hatches", "multi.mjs"), "utf8"));
+  assert.equal(r.status, 0, "tsc accepts every fixture:\n" + r.out.slice(0, 2000));
+  const h = hatches(fx("multi.mjs"));
   assert.deepEqual(h.problems, []);
   assert.deepEqual(h.counts["jsdoc-any"], { permitted: 1, refused: 1 }, JSON.stringify(h.findings));
   assert.deepEqual(h.counts["ts-expect-error"], { permitted: 1, refused: 0 });
-  assert.deepEqual([h.counts["ts-nocheck"], h.counts["ts-ignore"]], [{ permitted: 0, refused: 0 }, { permitted: 0, refused: 0 }], "a string, a template and a regex holding comment-like text aren't comments");
-  assert.equal(h.findings.find((f) => !f.permitted)?.line, 2, "the refused any is reported at its comment's line");
+  assert.equal(h.findings.find((f) => !f.permitted)?.line, 4, "the refused any, at its tag's line");
 });
 
-// astra2's T1-LEX shapes, r2-r4, one per file (each a division then an unexplained any; tsc accepts every file):
-const SHAPES = ["postinc.mjs", "postdec.mjs", "paren.mjs", "brace.mjs", "member-return.mjs", "member-if.mjs", "member-gap.mjs", "unicode.mjs", "nonnull.ts"];
-const shapeSrc = (f: string) => readFileSync(join(ROOT, "test", "fixtures", "tsc-web-hatches", "shapes", f), "utf8");
-const refusedOrFailedClosed = (h: ReturnType<typeof hatches>) => h.problems.some((p) => /ambiguous slash|non-ASCII/.test(p)) || h.counts["jsdoc-any"].refused >= 1;
-
-test("T1-LEX: every shape tsc accepts (r2-r4) is refused or fails closed, and nothing else unexplained is near it", () => {
-  const r = tsc(join("test", "fixtures", "tsc-web-hatches"));
-  assert.equal(r.status, 0, "tsc accepts every shape and the guards:\n" + r.out.slice(0, 2000));
-  for (const f of SHAPES) {
-    const h = hatches(shapeSrc(f));
-    assert.ok(refusedOrFailedClosed(h), `${f}: neither refused nor failed closed: ${JSON.stringify({ problems: h.problems, counts: h.counts })}`);
-    assert.ok(h.counts["jsdoc-any"].refused <= 1 && h.counts["ts-ignore"].refused === 0 && h.counts["ts-nocheck"].refused === 0, `${f}: only its one planted hatch`);
+test("T1-LEX r6: every shape tsc accepts (astra2 r2-r5, both regex/division directions, the backtick variant, a hashbang) is REFUSED by the superset scan", () => {
+  for (const [f, kind] of SHAPES) {
+    const h = hatches(fx("shapes/" + f));
+    assert.ok(h.counts[kind].refused >= 1, `${f}: its ${kind} must be refused: ${JSON.stringify({ problems: h.problems, counts: h.counts })}`);
   }
 });
 
-test("T1-LEX: the span safeguard ALONE catches every shape: with the context rules discarded (every slash a regex candidate), each is still refused or fails closed", () => {
-  for (const f of SHAPES) {
-    const h = hatches(shapeSrc(f), { everySlashRegex: true });
-    assert.ok(refusedOrFailedClosed(h), `${f} with every slash read as a regex: ${JSON.stringify({ problems: h.problems, counts: h.counts })}`);
+test("false-positive guards: ordinary code (regexes, escaped slashes, divisions, a URL, nested templates) has no finding and no problem", () => {
+  const h = hatches(fx("shapes/guards.mjs"));
+  assert.deepEqual([h.problems, h.findings], [[], []]);
+});
+
+test("today's three roots don't trip the superset scan (no fake candidate, no unterminated /*)", () => {
+  for (const f of JSON.parse(readFileSync(join(ROOT, "tsconfig.web.json"), "utf8")).files as string[]) {
+    const h = hatches(readFileSync(join(ROOT, f), "utf8"));
+    assert.deepEqual([h.problems, h.findings], [[], []], f);
   }
 });
 
-test("T1-LEX false-positive guards: ordinary regexes (no comment-like text in their bodies), escaped slashes, regexes after control heads and operators, nested templates: no problem, no hatch", () => {
-  const h = hatches(readFileSync(join(ROOT, "test", "fixtures", "tsc-web-hatches", "shapes", "guards.mjs"), "utf8"));
-  assert.deepEqual(h.problems, []);
-  for (const k of Object.keys(h.counts) as (keyof typeof h.counts)[]) assert.deepEqual(h.counts[k], { permitted: 0, refused: 0 }, k);
-});
-
-test("T1-LEX: today's three roots don't trip the safeguard (no ambiguous slash, no non-ASCII in code)", () => {
-  for (const f of JSON.parse(readFileSync(join(ROOT, "tsconfig.web.json"), "utf8")).files as string[]) assert.deepEqual(hatches(readFileSync(join(ROOT, f), "utf8")).problems, [], f);
-});
-
-test("the lexer fails closed at the ambiguous } slash; division after } off its line is fine", () => {
-  assert.match(hatches("x = {} / 2 /* @ts-ignore */;\n").problems.join(), /ambiguous slash/);
-  assert.deepEqual(hatches("if (x) {}\ny = {} / 2;\n").problems, []);
-  assert.deepEqual(hatches("function f() {}\n/ab/.test('x');\n").problems, []);
-  assert.equal(hatches("a++ / b; // @ts-ignore\n").counts["ts-ignore"].refused, 1);
-  assert.equal(hatches("a-- / b; /* @ts-nocheck */\n").counts["ts-nocheck"].refused, 1);
-  assert.equal(hatches("x = ++a / b; // @ts-ignore\n").counts["ts-ignore"].refused, 1, "a prefix ++ operand: division after a");
-  assert.equal(hatches("x = a + /re\\/*/.source; // @ts-ignore\n").counts["ts-ignore"].refused, 1, "a regex after + still lexes as a regex");
-  assert.equal(hatches("while (go) /x\\/* y/.exec(s);\n").problems.length, 0);
-  assert.equal(hatches("x = obj?.typeof / b; // @ts-ignore\n").counts["ts-ignore"].refused, 1, "?. member access too");
-  assert.equal(hatches("x = obj . return / b; // @ts-ignore\n").counts["ts-ignore"].refused, 1, "spaces around the dot");
-  assert.equal(hatches("if (x) {}\n/[/*]z/.test(s);\n").problems.length, 1, "a regex whose body holds /*: fail closed, in any context");
-  assert.equal(hatches("x = (/[/*]z/).test(s);\n").problems.length, 1, "even where a regex is certain: the safeguard doesn't depend on context");
-  assert.deepEqual(hatches("x = (/[\\/\\*]z/).test(s);\n").problems, [], "escaped, it's fine");
-  assert.match(hatches("const caf\u00e9 = 1;\n").problems.join(), /non-ASCII/, "a non-ASCII identifier fails closed, whatever follows it");
-  assert.deepEqual(hatches("const s = 'caf\u00e9'; // caf\u00e9\n").problems, [], "non-ASCII in a string or a comment is fine");
-  assert.equal(hatches("y = q /x//* c */;\n", { everySlashRegex: true }).problems.length, 1, "a closing slash right before a comment start: fail closed");
-});
-
-test("the escape-hatch policy's own controls: each refused kind, multiline forms, reasons, and the lexer failing closed", () => {
+test("the superset scan's controls: each kind, multiline, reasons only inside their own comment, terminators, HTML-like comments, fail closed, one count per hatch", () => {
   const k = (src: string) => hatches(src).counts;
+  // (each kind, block and line, multiline)
   assert.equal(k("// @ts-nocheck\n")["ts-nocheck"].refused, 1);
   assert.equal(k("x(); /* @ts-ignore */\n")["ts-ignore"].refused, 1);
   assert.equal(k("/**\n * @ts-ignore\n */\n")["ts-ignore"].refused, 1);
   assert.equal(k("// @ts-expect-error\n")["ts-expect-error"].refused, 1);
-  assert.equal(k("/* @ts-expect-error\n *\n */\n")["ts-expect-error"].refused, 1);
   assert.equal(k("/* @ts-expect-error\n * the DOM lib lacks this event\n */\n")["ts-expect-error"].permitted, 1);
   assert.equal(k("/** @type {any} */ let a;\n")["jsdoc-any"].refused, 1);
   assert.equal(k("/** @param {Array<*>} a */\n")["jsdoc-any"].refused, 1);
   assert.equal(k("/**\n * @returns {Promise<\n *   any\n * >}\n */\n")["jsdoc-any"].refused, 1);
-  assert.equal(k("/** @type {any} */ let a; // any: a parsed JSON payload\n")["jsdoc-any"].permitted, 1);
+  assert.equal(k("/** any: a parsed JSON payload\n * @type {any} */ let a;\n")["jsdoc-any"].permitted, 1);
   assert.equal(k("/** @type {number} */ const company = 1; /** @type {Many} */ let m;\n")["jsdoc-any"].refused, 0);
-  assert.equal(k("const s = '// @ts-ignore'; const t = `${a /* @ts-nocheck */}`;\n")["ts-nocheck"].refused, 1, "a comment inside a template's expression IS a comment");
-  assert.equal(k("const t = `${'x'} // @ts-ignore`;\n")["ts-ignore"].refused, 0, "text in a template is not");
-  for (const src of ["/* never closed", "const s = 'never closed\n", "const t = `never closed", "x = /never closed\n"]) assert.ok(hatches(src).problems.length > 0, "fails closed: " + src);
+  // (a reason counts only inside its own comment: never a trailing line comment, never a fake candidate)
+  assert.equal(k("/** @type {any} */ let a; // any: a parsed JSON payload\n")["jsdoc-any"].refused, 1);
+  assert.equal(k('const s = "/** any: fake reason"; /** @type {any} */ let a;\n')["jsdoc-any"].refused, 1, "a fake candidate can't lend the real comment a reason");
+  assert.equal(k("// @ts-expect-error\r a fake reason past a CR\n")["ts-expect-error"].refused, 1, "a line comment ends at CR");
+  assert.equal(k("// @ts-expect-error\u2028 a fake reason past LS\n")["ts-expect-error"].refused, 1, "and at U+2028");
+  // (HTML-like comments, which tsc 7 rejects but a script engine accepts: still refused)
+  assert.equal(k("<!-- @ts-ignore\nx;\n")["ts-ignore"].refused, 1);
+  assert.equal(k("x;\n--> @ts-nocheck\n")["ts-nocheck"].refused, 1);
+  // (hatch-like text in a string, regex or template fails too: the price of the superset)
+  assert.equal(k('const s = "// @ts-ignore";\n')["ts-ignore"].refused, 1);
+  assert.equal(k("const r = /@ts-nocheck/; // fine\n")["ts-nocheck"].refused, 0, "no comment opener before it: no candidate");
+  assert.deepEqual(hatches('const s = "@" + "ts-ignore";\n').findings, [], "the rewrite a future file would use");
+  // (fail closed: a /* with no */ after it)
+  assert.match(hatches("/* never closed").problems.join(), /fails closed/);
+  assert.match(hatches('const s = "a/*b";\n').problems.join(), /fails closed/);
+  // (one count per hatch, by position: a line candidate inside a block comment, or a nested /*, counts once; the refusal wins)
+  assert.equal(k("/* x // @ts-ignore */\n")["ts-ignore"].refused, 1);
+  assert.equal(k("/** a /* @type {any} */\n")["jsdoc-any"].refused, 1);
+  assert.deepEqual(k('const s = "/** any: fake"; /** @type {any} */ let a;\n')["jsdoc-any"], { permitted: 0, refused: 1 }, "the real any once, refused");
 });
