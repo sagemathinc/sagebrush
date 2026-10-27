@@ -95,10 +95,12 @@ const closeDialog = () => ev("document.querySelector('#sharedlg').close()");
 // (the "checking" live region's every change, with whether the dialog was open then: what a screen reader would hear)
 // (recorded as each text is set, synchronously: a MutationObserver would see the dialog as it is a task later)
 const RECORD_LIVE = "(() => { const el = document.querySelector('#sharechecking'), d = document.querySelector('#sharedlg'); const desc = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent'); window.__live = []; Object.defineProperty(el, 'textContent', { configurable: true, get() { return desc.get.call(this); }, set(v) { window.__live.push({ text: String(v), open: d.open }); desc.set.call(this, v); } }); })()";
-// (said in order: "Checking…" only once the dialog is shown, then the outcome, which is never removed)
-const liveOrder = (seq, outcome) => {
+// (said in order: "Checking…" only once the dialog is shown, then the outcome, which is never removed; a check
+// that answers before the next frame may go straight to the outcome, so "Checking…" is required only for slow ones)
+const liveOrder = (seq, outcome, slow = true) => {
   const said = seq.filter((x) => x.text).map((x) => x.text);
-  return seq.every((x) => !/Checking/.test(x.text) || x.open) && said[0] === "Checking your sign-in…" && said.at(-1) === outcome && seq.at(-1)?.text === outcome;
+  const order = slow ? said.length === 2 && said[0] === "Checking your sign-in…" : said.length === 1 || (said.length === 2 && said[0] === "Checking your sign-in…");
+  return seq.every((x) => !/Checking/.test(x.text) || x.open) && order && said.at(-1) === outcome && seq.at(-1)?.text === outcome;
 };
 // A held stand-in for the analysis worker: messages to the page wait until released.
 const HOLD = `(() => {
@@ -416,7 +418,7 @@ try {
     await q.ev("document.querySelector('#sharemenu').click()");
     await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking'", 12000).catch(() => {});
     const seq503 = await q.ev("window.__live");
-    ok(liveOrder(seq503, "Couldn't reach the server to check your sign-in."), "the live region, no answer: 'Checking…' (the dialog open), then 'Couldn't reach the server…', kept: " + JSON.stringify(seq503));
+    ok(liveOrder(seq503, "Couldn't reach the server to check your sign-in.", false), "the live region, no answer (at once): 'Checking…' (the dialog open), then 'Couldn't reach the server…', kept: " + JSON.stringify(seq503));
     // (the end state, apart from the stub: the stubbed 503's check ends within its 10 s bound)
     ok(Date.now() - t0 < 11000 && (await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking'")), `(the check ends: ${Date.now() - t0} ms) ` + (await st()));
     ok(await q.ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareup').hidden && !document.querySelector('#shareunreachable').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "nothing known and the check fails again: the dialog says why, with neither 'Sign in' nor the form: " + (await st()));
