@@ -83,6 +83,9 @@ export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS,
     const finish = (why) => {
       if (done) return;
       done = true;
+      // (a scheduled act the run's end cancelled is recorded as such, by the producer, never left as a lost record:
+      // astra2 #225 r3 N1.  An early, honoured exit cancels S3's press 2 this way.)
+      for (const s of schedule) if (s.armed && !s.fired) { clearTimeout(s.timer); sends.push({ act: s.act, cancelled: "the run finished before it was due", due: s.due, at: now() }); }
       clearTimeout(guard);
       clearInterval(watch);
       const tree = [...new Set([...known.keys(), ...sessionTree(p.pid, known)])];
@@ -105,7 +108,11 @@ export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS,
       const { mk } = pm;
       const kind = mk.split(" ")[0];
       marks.push({ mk, t: now(), rest: pm.rest });
-      for (const s of schedule) if (s.after === mk && !s.armed) { s.armed = true; setTimeout(() => !done && act(s.act), s.ms); }
+      for (const s of schedule) if (s.after === mk && !s.armed) {
+        s.armed = true;
+        s.due = now() + s.ms;
+        s.timer = setTimeout(() => { s.fired = true; if (!done) act(s.act); }, s.ms);
+      }
       if (kind === "END" || (host === "prompt" && kind === "PROBE")) setTimeout(() => finish("end"), host === "cli" ? 2000 : 500);
     };
     const feed = (d) => {
@@ -146,6 +153,7 @@ const evidenceBad = (r) => {
 };
 const pressBad = (r, k) => {
   const s = r.sends[k];
+  if (s?.cancelled) return malformed(`press ${k + 1} was cancelled: the run finished before it was due`);
   return !s || s.error || !validTime(s.t) ? malformed(`press ${k + 1} not sent at a valid time (${JSON.stringify(s ?? null)})`) : null;
 };
 
@@ -163,9 +171,14 @@ export const TRIALS = {
       if (host === "prompt") {
         // the prompt survives: KeyboardInterrupt shown, then the next input runs (the probe)
         if (!/KeyboardInterrupt/.test(r.text)) return { outcome: "FAIL", why: "no KeyboardInterrupt" };
-        // (the caller endpoint is the first KeyboardInterrupt line after press 1, stamped by runProc: gated like the CLI's exit)
-        if (!markT(r, "PROBE")) return { outcome: "FAIL", why: "the prompt did not take the next input" };
-        return pressGate(r, 0, r.ki_text_t ?? NaN, "the KeyboardInterrupt") ?? { outcome: "PASS", ...lat(r.ki_text_t - r.sends[0].t) };
+        // (the caller endpoint is the first KeyboardInterrupt line after press 1, stamped by runProc, gated like the CLI's
+        // exit and BEFORE the probe's functional failure, astra2 #225 r3 N2: a late Stop never hides under "did not take
+        // the next input"; KeyboardInterrupt text without its stamp is malformed)
+        if (r.ki_text_t == null) return malformed("the KeyboardInterrupt text was seen but its line was never stamped");
+        const g = pressGate(r, 0, r.ki_text_t, "the KeyboardInterrupt");
+        if (g) return g;
+        if (!markT(r, "PROBE")) return { outcome: "FAIL", why: "the prompt did not take the next input", ...lat(r.ki_text_t - r.sends[0].t) };
+        return { outcome: "PASS", ...lat(r.ki_text_t - r.sends[0].t) };
       }
       if (!/KeyboardInterrupt/.test(r.text)) return { outcome: "FAIL", why: "no KeyboardInterrupt traceback" };
       if (!r.exit || !ended130(r.exit)) return { outcome: "FAIL", why: `exit ${JSON.stringify(r.exit)}, not 130` };
@@ -215,7 +228,7 @@ export const TRIALS = {
       const [s0, s1] = r.sends;
       const ret = markT(r, "RET 1");
       if (ret != null && !validTime(ret)) return bad(`RET 1's time ${JSON.stringify(ret)}`);
-      if (ret != null && s0 && validTime(s0.t) && ret < s0.t) return { outcome: "INVALID", why: "the regex returned before the presses", ...both("INVALID") };
+      if (ret != null && ((s0 && validTime(s0.t) && ret < s0.t) || !s0 || s0.cancelled)) return { outcome: "INVALID", why: "the regex returned before the presses", ...both("INVALID") };
       if (!s0 || s0.error || !validTime(s0.t)) return bad(`press 1 not sent at a valid time (${JSON.stringify(s0 ?? null)})`);
       if (r.exit && !validTime(r.exit.t)) return bad(`the exit's time ${JSON.stringify(r.exit.t)}`);
       if (r.ki_text_t != null && !validTime(r.ki_text_t)) return bad(`the KeyboardInterrupt line's time ${JSON.stringify(r.ki_text_t)}`);
@@ -226,13 +239,18 @@ export const TRIALS = {
       // on the CLI, press 1 ending the process makes press 2's kill fail with ESRCH, attempted after the exit; that is
       // the honoured path, and without it a fixed S3 could never pass)
       if (!s1) return bad("press 2 was due but never recorded");
-      if (!validTime(s1.t)) return bad(`press 2's send time ${JSON.stringify(s1.t)}`);
-      const gone = host !== "prompt" && s1.error && /ESRCH/.test(String(s1.error)) && r.exit && ended130(r.exit) && r.exit.t <= s1.t;
+      // (the CLI's honoured path: press 1's exit 130 came first, and press 2 was then cancelled by the run's end before it
+      // was due (runProc's own record), or sent and failed ESRCH after the exit; anything else about press 2 is malformed)
+      const exited = host !== "prompt" && !!r.exit && ended130(r.exit);
+      const cancelledAfterExit = exited && !!s1.cancelled && validTime(s1.due) && validTime(s1.at) && r.exit.t <= s1.due && r.exit.t <= s1.at;
+      if (s1.cancelled && !cancelledAfterExit) return bad(`press 2 was cancelled without press 1's exit before it was due (${JSON.stringify(s1)})`);
+      if (!s1.cancelled && !validTime(s1.t)) return bad(`press 2's send time ${JSON.stringify(s1.t)}`);
+      const gone = cancelledAfterExit || (exited && !!s1.error && /ESRCH/.test(String(s1.error)) && r.exit.t <= s1.t);
       if (s1.error && !gone) return bad(`press 2 failed while the program ran (${s1.error})`);
-      const s1ok = !s1.error;
+      const s1ok = !s1.error && !s1.cancelled;
       // press 1's own endpoint, if it came before press 2 was sent: the prompt's KeyboardInterrupt line, the CLI's 130
       const end1 = host === "prompt" ? r.ki_text_t : r.exit && ended130(r.exit) ? r.exit.t : null;
-      if (end1 != null && (gone || end1 < s1.t)) {
+      if (end1 != null && (gone || (s1ok && end1 < s1.t))) {
         const g = stopGate(end1 - s0.t, host === "prompt" ? "the KeyboardInterrupt after press 1" : "the exit after press 1");
         const nx = { escalation: "not exercised (press 1 ended it)", escalated: false };
         return g ? { ...g, ...nx, first_stop: g.late ? "honoured late" : "INVALID" } : { outcome: "PASS", ...nx, first_stop: "honoured", ...lat(end1 - s0.t) };
@@ -265,7 +283,7 @@ export const TRIALS = {
       if (ev) return ev;
       const ret = markT(r, "RET 1");
       // (a return before any press is the genuine INVALID; otherwise press 1 must have been sent validly)
-      if (ret != null && !r.sends.length) return { outcome: "INVALID", why: "the regex returned before the presses" };
+      if (ret != null && (!r.sends[0] || r.sends[0].cancelled)) return { outcome: "INVALID", why: "the regex returned before the presses" };
       const p1 = pressBad(r, 0);
       if (p1) return p1;
       if (ret != null && ret < r.sends[0].t) return { outcome: "INVALID", why: "the regex returned before the presses" };
@@ -273,7 +291,9 @@ export const TRIALS = {
       // ESRCH only once the process had exited)
       const s1 = r.sends[1], enter = markT(r, "ENTER 1"), endT = r.exit?.t ?? ret;
       if (!s1 && !(enter != null && endT != null && endT < enter + 3500)) return malformed("press 2 was due but never recorded");
-      if (s1 && !validTime(s1.t)) return malformed(`press 2's send time ${JSON.stringify(s1.t)}`);
+      // (cancelled by the run's end: legitimate only if the program had ended before press 2 was due)
+      if (s1?.cancelled && !(validTime(s1.due) && endT != null && endT <= s1.due)) return malformed(`press 2 was cancelled while the program ran (${JSON.stringify(s1)})`);
+      if (s1 && !s1.cancelled && !validTime(s1.t)) return malformed(`press 2's send time ${JSON.stringify(s1.t)}`);
       if (s1?.error && !(/ESRCH/.test(String(s1.error)) && r.exit && r.exit.t <= s1.t)) return malformed(`press 2 failed while the program ran (${s1.error})`);
       if (ret != null) return { outcome: "FAIL", why: "the regex returned without a KeyboardInterrupt" };
       if (!r.exit || ended130(r.exit)) return { outcome: "FAIL", why: `the second press, after the window, ended the process (exit ${JSON.stringify(r.exit)})` };
