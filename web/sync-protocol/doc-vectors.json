@@ -1049,5 +1049,39 @@
    },
    "field": "text"
   }
+ ],
+ "refusals": [
+  {
+   "for": "snapshot",
+   "when": "the deployment's snapshot switch is off",
+   "error": {
+    "code": "unavailable",
+    "detail": {
+     "why": "snapshots_off"
+    }
+   },
+   "again": "never in this session"
+  },
+  {
+   "for": "snapshot",
+   "when": "sent before the cadence allows",
+   "error": {
+    "code": "limit",
+    "detail": {
+     "limit": "snapshot_cadence",
+     "retry_after_batches": 12,
+     "retry_after_ms": 60000
+    }
+   },
+   "again": "after both retry_afters"
+  },
+  {
+   "for": "snapshot",
+   "when": "another sha256 at an at_seq already taken",
+   "error": {
+    "code": "conflict"
+   },
+   "again": "never at that at_seq"
+  }
  ]
 }

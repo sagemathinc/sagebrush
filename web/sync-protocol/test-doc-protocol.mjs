@@ -37,6 +37,19 @@ check(res.code === "limit", `jcs: 16 MiB of U+0001 refused (${res.code})`);
 check(res.maxRSS > 0 && res.maxRSS < 96 * 1024, `jcs: 16 MiB of U+0001 refused below the escaped copy's peak (max RSS ${res.maxRSS} KiB)`);
 
 
+// ---- the refusals' vectors: each code one of protocol.ts's Code (read from its source: a type), and each shape as agreed
+{
+  const src = readFileSync(here + "protocol.ts", "utf8"), m = /export type Code =([^;]*);/.exec(src);
+  const codes = new Set([...(m?.[1] ?? "").matchAll(/"([a-z_]+)"/g)].map((x) => x[1]));
+  check(codes.has("unavailable") && codes.size >= 18, "protocol.ts's Code has unavailable: " + [...codes].join(" "));
+  check(Array.isArray(V.refusals) && V.refusals.length >= 3, "the refusals' vectors");
+  for (const r of V.refusals ?? []) check(codes.has(r.error?.code), `refusal ${r.for}, ${r.when}: its code ${r.error?.code} is one of Code's`);
+  const off = V.refusals?.find((r) => r.error?.code === "unavailable");
+  check(off && off.error.detail?.why === "snapshots_off" && !("retry_after" in (off.error.detail ?? {})) && off.again === "never in this session", "snapshots off: unavailable, {why: snapshots_off}, no retry_after");
+  const cad = V.refusals?.find((r) => r.error?.detail?.limit === "snapshot_cadence");
+  check(cad && cad.error.code === "limit" && Number.isSafeInteger(cad.error.detail.retry_after_batches) && Number.isSafeInteger(cad.error.detail.retry_after_ms), "the cadence: limit, snapshot_cadence, with retry_after_batches and retry_after_ms");
+}
+
 // ---- the encodings, against the vectors
 
 for (const t of V.sha256) check(P.hex(P.sha256(P.fromHex(t.hex_in))) === t.out, `sha256 of ${t.hex_in.length / 2} bytes`);
