@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "no-cliffs C-2c-i (#196): sagebrush-par, the one parallel wrapper (the engine's modsym/hmf/ap/arith reach its handoff, also in wasm), and its THIRD-PARTY-NOTICES line; the wasm is CI's fresh-wasm artifact of a0c71129 (PR ci run 40427845554, merge 73ef537c with the head's tree; sha256 ae6b2110), 7199884 against master d3617031's 7199449 (+435); that run's size-gate (master's wasm still embedded): cli/lib.gen.js +15, engine/sagebrush-worker.js +15, cli/pyjs.cjs +35; pyjs adds the wasm's base64 growth (+580) and one quantum (+4) until a size-gate measures it with this wasm",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 435,
+  "cli/lib.gen.js": 15,
+  "engine/sagebrush-worker.js": 15,
+  "cli/pyjs.cjs": 619
+ }
+}
