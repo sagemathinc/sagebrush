@@ -712,7 +712,7 @@ def jupyter_bundle(scene_json, svg, title, page):
     path = os.path.join(".sagebrush", "plot3d-v2-%08x-%x.html" % (zlib.crc32(scene_json.encode()), len(scene_json)))
     if not os.path.exists(path):
         os.makedirs(".sagebrush", exist_ok=True)
-        write_page(path, page())
+        _write_page(path, page())
     size = "%.1f MB" % (os.path.getsize(path) / 1e6)
     full = os.path.abspath(path)
     project, home = os.environ.get("COCALC_PROJECT_ID"), os.environ.get("HOME", "").rstrip("/")
@@ -735,7 +735,7 @@ def jupyter_bundle(scene_json, svg, title, page):
 # then renamed over its name.  Whatever an interrupted write of the same
 # writer left is overwritten, never searched for: the write touches its
 # temporary and its name, whatever else the directory holds.  The temporaries
-# of writers that died are gc_temps()'s, once per session start.
+# of writers that died are _gc_temps()'s, once per session start.
 
 def _host():
     import re
@@ -749,7 +749,7 @@ def _temp_for(root):
     return os.path.join(root, ".plot3d-tmp", _host(), "%d-%d" % (os.getpid(), threading.get_ident()))
 
 
-def write_page(path, text):
+def _write_page(path, text):
     """text to path, atomically: its writer's temporary written whole and
     closed, then renamed over path (same directory tree, so one filesystem).
     A failure removes that temporary (by name) and raises."""
@@ -774,8 +774,8 @@ def write_page(path, text):
         raise
 
 
-GC_BUDGET_S = 0.05      # (a pass's work, at most; the next pass goes on from its cursor)
-GC_LOG_BYTES = 64 * 1024  # (the log rotates past this, to one backup, .1)
+_GC_BUDGET_S = 0.05      # (a pass's work, at most; the next pass goes on from its cursor)
+_GC_LOG_BYTES = 64 * 1024  # (the log rotates past this, to one backup, .1)
 
 
 def _pid_alive(pid):
@@ -789,7 +789,7 @@ def _pid_alive(pid):
     return True
 
 
-def gc_temps(root=".sagebrush", budget_s=GC_BUDGET_S, clock=None, alive=None):
+def _gc_temps(root=".sagebrush", budget_s=_GC_BUDGET_S, clock=None, alive=None):
     """One time-bounded pass over this host's temporaries: a dead writer's is
     removed; a live writer's (or a reused pid's) is kept; other hosts' are in
     other directories, never read.  One deadline, from the pass's start, is
@@ -868,7 +868,7 @@ def gc_temps(root=".sagebrush", budget_s=GC_BUDGET_S, clock=None, alive=None):
         with open(cursor_path, "w", encoding="utf-8") as f:
             f.write(nxt)
         log = os.path.join(root, ".plot3d-gc.log")
-        if os.path.exists(log) and os.path.getsize(log) > GC_LOG_BYTES:
+        if os.path.exists(log) and os.path.getsize(log) > _GC_LOG_BYTES:
             os.replace(log, log + ".1")
         with open(log, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec) + "\n")
