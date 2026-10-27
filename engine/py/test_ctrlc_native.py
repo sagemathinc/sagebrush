@@ -225,9 +225,14 @@ def test_injections():
         inject(s, "_real_text = _W._Capture.text\n_calls = [0]\n"
                   "def _once(self):\n    _calls[0] += 1\n    if _calls[0] == 2:\n        _W._Capture.text = _real_text\n        raise KeyboardInterrupt\n    return _real_text(self)\n"
                   "_W._Capture.text = _once")
-        r = s.run("n += 1; n", mode="python")
+        r = s.run("n += 1; print('kept output'); n", mode="python")
         check(r["error_info"]["type"] == "interrupted" and s.run("n", mode="python")["result"] == "2",
               "an escape after the user's code: the fallback's reply, the code once")
+        check("kept output" in r["stdout"], "an escape after the user's code: the fallback keeps the run's output (%r)" % r["stdout"][:80])
+        # an interrupt as the run's end hold closes, its reply already recorded: the finished reply is kept
+        r = s.run("import sys\nsys.modules['__main__']._HOLD.pending = True\nn += 1\nn", mode="python")
+        check(r["result"] == "3" and r["error"] is None, "an interrupt after the reply is recorded: the finished reply, whole (%r, %r)" % (r["result"], r["error"]))
+        s.run("n -= 1", mode="python")
         # the fallback itself interrupted, on its first call (run_request's
         # except calls _interrupted first, and its KeyboardInterrupt escapes
         # to the fallback, whose own first call raises too)
