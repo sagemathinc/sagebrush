@@ -119,3 +119,71 @@ fn in_exclusive_mode_everything_runs_on_the_calling_thread_in_order() {
     let (a, b) = join(|| std::thread::current().id(), || std::thread::current().id());
     assert_eq!((a, b), (me, me));
 }
+
+#[test]
+fn the_scope_body_runs_under_the_callers_context() {
+    // astra2's probe: the root callback of a rayon scope may run on a pool
+    // worker; it (a direct reservation, a nested wrapper) is the caller's
+    let _g = setup();
+    let op = Operation::enter();
+    let c = op.chain();
+    let (seen, held, nested) = scope(|_| (current_chain(), r(5), map_range(3, |_| r(1))));
+    assert_eq!(seen, c, "the scope body saw the caller's chain");
+    assert_eq!(chain_outstanding(c), 8, "a reservation in the scope body and a nested map_range are the caller's");
+    drop((held, nested));
+    // a panic in the body: the thread that ran it keeps its own context
+    let _outer = Context { chain: 919, exclusive: false }.enter();
+    let p = std::panic::catch_unwind(|| scope(|_| -> () { panic!("in the scope body") }));
+    assert!(p.is_err());
+    assert_eq!((current_chain(), is_exclusive()), (919, false));
+    let seen: Vec<u64> = install(1, || scope(|_| vec![current_chain()]));
+    assert_eq!(seen, vec![919], "a reused worker ran the next body under its caller's context");
+    drop(_outer);
+    op.finish().unwrap();
+}
+
+#[test]
+fn every_spawn_takes_the_spawning_threads_context_at_the_spawn() {
+    // astra2's probe and daybreak2's LIMIT-C2CI-2: a context entered between
+    // the scope's construction and a spawn is the one the spawned closure
+    // gets; an exclusive one makes the spawn run here, now
+    let _g = setup();
+    let _outer = Context { chain: 919, exclusive: false }.enter();
+    // thread_scope, changed chain and mode: inline, on the caller, 929/exclusive
+    let (child, me, after) = thread_scope(|sc| {
+        let _inner = Context { chain: 929, exclusive: true }.enter();
+        let child = sc.spawn(|| (current_chain(), is_exclusive(), std::thread::current().id())).join().unwrap();
+        (child, std::thread::current().id(), Context::current())
+    });
+    assert_eq!(child, (929, true, me), "the spawn ran inline under the spawning context");
+    assert_eq!(after, Context { chain: 929, exclusive: true });
+    assert_eq!((current_chain(), is_exclusive()), (919, false), "the caller's context came back");
+    // thread_scope, changed chain only: a real thread, charged to the new chain
+    // (any chain id will do: the ledger attributes reservations to the current one)
+    let op = 9393u64;
+    let held = thread_scope(|sc| {
+        let _inner = Context { chain: op, exclusive: false }.enter();
+        let h = sc.spawn(|| (r(7), current_chain(), std::thread::current().id()));
+        let (res, ch, _t) = h.join().unwrap();
+        assert_eq!(ch, op);
+        assert_eq!(current_chain(), op, "the spawning thread's context is unchanged by the spawn");
+        res
+    });
+    assert_eq!(chain_outstanding(op), 7, "charged to the chain current at the spawn");
+    drop(held);
+    // rayon scope, changed chain and mode, nested spawns
+    let out = Mutex::new(Vec::new());
+    scope(|s| {
+        let body = std::thread::current().id();
+        let _inner = Context { chain: 939, exclusive: true }.enter();
+        s.spawn(|s| {
+            out.lock().unwrap().push((current_chain(), is_exclusive(), std::thread::current().id() == body));
+            let _deeper = Context { chain: 949, exclusive: false }.enter();
+            s.spawn(|_| out.lock().unwrap().push((current_chain(), is_exclusive(), true)));
+        });
+    });
+    let out = out.into_inner().unwrap();
+    assert_eq!(out[0], (939, true, true), "exclusive at the spawn: inline, on the spawning thread");
+    assert_eq!((out[1].0, out[1].1), (949, false), "a nested spawn takes the nested spawner's context");
+    assert_eq!((current_chain(), is_exclusive()), (919, false));
+}

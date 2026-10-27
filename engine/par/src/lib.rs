@@ -123,42 +123,43 @@ type Lifetimes<'a, 'scope> = std::marker::PhantomData<(&'a (), fn(&'scope ()))>;
 
 /// A rayon-style scope whose only spawn capability is the wrapped one
 /// ([`Scope::spawn`]): there is no way to reach an unwrapped spawn from it.
+/// It holds no context of its own: each spawn takes the context of the
+/// thread that spawns, at that moment.
 pub struct Scope<'a, 'scope> {
     #[cfg(feature = "parallel")]
     inner: Option<&'a rayon::Scope<'scope>>,
-    ctx: Context,
     _lt: Lifetimes<'a, 'scope>,
 }
 
 impl<'scope> Scope<'_, 'scope> {
-    /// Run f, possibly on another thread, under this scope's context; the
-    /// scope waits for it.  Sequential (now, on this thread) in exclusive
-    /// mode or without the `parallel` feature.
+    /// Run f, possibly on another thread, under the context of the thread
+    /// spawning it (captured now, after a refresh on the owner); the scope
+    /// waits for it.  Now, on this thread, if that context is exclusive (even
+    /// in a scope made in parallel mode) or without the `parallel` feature.
     pub fn spawn<F>(&self, f: F)
     where
         F: for<'b> FnOnce(&Scope<'b, 'scope>) + Send + 'scope,
     {
-        let ctx = self.ctx;
+        let ctx = handoff();
         #[cfg(feature = "parallel")]
-        if let Some(s) = self.inner {
+        if let (Some(s), false) = (self.inner, ctx.exclusive) {
             s.spawn(move |s2| {
                 let _g = ctx.enter();
-                f(&Scope { inner: Some(s2), ctx, _lt: std::marker::PhantomData })
+                f(&Scope { inner: Some(s2), _lt: std::marker::PhantomData })
             });
             return;
         }
         let _g = ctx.enter();
         f(&Scope {
             #[cfg(feature = "parallel")]
-            inner: None,
-            ctx,
+            inner: self.inner,
             _lt: std::marker::PhantomData,
         })
     }
 }
 
-/// A scope: op runs here, and every closure spawned in it has finished when
-/// this returns.
+/// A scope: op runs under this thread's context (on whichever thread runs
+/// it), and every closure spawned in it has finished when this returns.
 pub fn scope<'scope, OP, R>(op: OP) -> R
 where
     OP: for<'a> FnOnce(&Scope<'a, 'scope>) -> R + Send,
@@ -167,25 +168,27 @@ where
     let ctx = handoff();
     #[cfg(feature = "parallel")]
     if !ctx.exclusive {
-        return rayon::scope(move |s| op(&Scope { inner: Some(s), ctx, _lt: std::marker::PhantomData }));
+        return rayon::scope(move |s| {
+            let _g = ctx.enter();
+            op(&Scope { inner: Some(s), _lt: std::marker::PhantomData })
+        });
     }
+    let _ = ctx;
     op(&Scope {
         #[cfg(feature = "parallel")]
         inner: None,
-        ctx,
         _lt: std::marker::PhantomData,
     })
 }
 
 /// The standard library's scoped threads, wrapped: [`ThreadScope::spawn`] is
 /// the only spawn capability, and each spawned closure runs under the
-/// spawning thread's context.  In exclusive mode a spawn runs its closure
-/// now, on this thread (a panic then propagates at once, as in sequential
-/// code).
+/// context of the thread spawning it, captured at the spawn.  When that
+/// context is exclusive a spawn runs its closure now, on this thread (a
+/// panic then propagates at once, as in sequential code).
 #[derive(Clone, Copy)]
 pub struct ThreadScope<'scope, 'env: 'scope> {
     inner: Option<&'scope std::thread::Scope<'scope, 'env>>,
-    ctx: Context,
 }
 
 /// A spawned closure's result.
@@ -210,13 +213,13 @@ impl<'scope> ThreadScope<'scope, '_> {
         F: FnOnce() -> T + Send + 'scope,
         T: Send + 'scope,
     {
-        let ctx = self.ctx;
-        match self.inner {
-            Some(s) => Handle::Thread(s.spawn(move || {
+        let ctx = handoff();
+        match (self.inner, ctx.exclusive) {
+            (Some(s), false) => Handle::Thread(s.spawn(move || {
                 let _g = ctx.enter();
                 f()
             })),
-            None => {
+            _ => {
                 let _g = ctx.enter();
                 Handle::Done(f())
             }
@@ -224,16 +227,15 @@ impl<'scope> ThreadScope<'scope, '_> {
     }
 }
 
-/// `std::thread::scope`, wrapped (see [`ThreadScope`]).
+/// `std::thread::scope`, wrapped (see [`ThreadScope`]); f runs here.
 pub fn thread_scope<'env, F, T>(f: F) -> T
 where
     F: for<'scope> FnOnce(ThreadScope<'scope, 'env>) -> T,
 {
-    let ctx = handoff();
-    if ctx.exclusive {
-        return f(ThreadScope { inner: None, ctx });
+    if handoff().exclusive {
+        return f(ThreadScope { inner: None });
     }
-    std::thread::scope(|s| f(ThreadScope { inner: Some(s), ctx }))
+    std::thread::scope(|s| f(ThreadScope { inner: Some(s) }))
 }
 
 /// f on a pool of `threads` threads (0: rayon's default), under this thread's

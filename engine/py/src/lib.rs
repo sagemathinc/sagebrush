@@ -30,14 +30,24 @@ fn guarded<T: Send>(py: Python<'_>, f: impl FnOnce() -> T + Send) -> PyResult<T>
     let asking = Asking::enter();
     sagebrush_ledger::refresh_if_owner();
     let main = MAIN.get() == Some(&std::thread::current().id());
-    let r = py
-        .detach(|| {
+    // (the body's unwind, a Rust panic, is caught here, at the owner, so
+    // that the asking call is finished on every exit: return, error, Stop
+    // or panic; the GIL is held again once detach returns or unwinds)
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        py.detach(|| {
             let _sigint = main.then(sagebrush_interrupt::SigintGuard::new);
             sagebrush_interrupt::catch(f)
         })
-        .map_err(|_| PyKeyboardInterrupt::new_err(()));
-    asking.finish()?;
-    r
+        .map_err(|_| PyKeyboardInterrupt::new_err(()))
+    }));
+    match (asking.finish(), r) {
+        // the source's control exception is this call's, and wins over the
+        // body's result, error or panic
+        (Err(control), _) => Err(control),
+        (Ok(()), Ok(r)) => r,
+        // no control exception: the body's panic goes on as before
+        (Ok(()), Err(panic)) => std::panic::resume_unwind(panic),
+    }
 }
 
 /// guarded, on a pool of `threads` worker threads (sagebrush-par's install:
@@ -769,9 +779,33 @@ fn progress_tables() -> String {
 
 /// The native extension, `sagebrush._native`; each engine is a submodule,
 /// re-exported by the pure-Python package (python/sagebrush).
+/// Tests only (feature `test-hooks`, never in a released wheel): a guarded
+/// call whose body ends by `kind`: "panic" (an ordinary Rust panic), "stop"
+/// (a Stop at a check) or anything else (it returns 1), for the delivery of
+/// a retained control exception on every exit path (C-2c scope r2 section
+/// 2.1; astra2's CORR-C2CI-3).
+#[cfg(feature = "test-hooks")]
+#[pyfunction(name = "_test_guarded")]
+fn test_guarded(py: Python<'_>, kind: &str) -> PyResult<u32> {
+    let kind = kind.to_string();
+    let r = guarded(py, move || match kind.as_str() {
+        "panic" => panic!("a body failure (test hook)"),
+        "stop" => {
+            sagebrush_interrupt::request();
+            sagebrush_interrupt::check();
+            0
+        }
+        _ => 1,
+    });
+    sagebrush_interrupt::clear();
+    r
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let _ = MAIN.set(std::thread::current().id());
+    #[cfg(feature = "test-hooks")]
+    m.add_function(wrap_pyfunction!(test_guarded, m)?)?;
     let modsym = PyModule::new(m.py(), "modsym")?;
     modsym.add_function(wrap_pyfunction!(hecke_charpoly, &modsym)?)?;
     modsym.add_function(wrap_pyfunction!(charpoly_exact, &modsym)?)?;

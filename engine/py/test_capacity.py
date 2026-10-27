@@ -409,6 +409,28 @@ def _two_native_callers(f):
 for _name, _f in _native_calls().items():
     check("%s: two simultaneous callers each get their own exception" % _name, _two_native_callers(_f), True)
 
+# a retained control exception is delivered on EVERY exit of the body: a
+# Rust panic and a Stop too (astra2's CORR-C2CI-3), and never to the next
+# call; without one, a body panic and a Stop raise as before.  The hook is
+# in wheels built with the test-hooks feature only (the VM runs; CI's
+# release-mode wheel skips these rows).
+if hasattr(_native, "_test_guarded"):
+    for _body in ("panic", "stop", "ok"):
+        _exc = SystemExit()
+        _stand_in(_raising(_exc))
+        check("_test_guarded(%s): the retained SystemExit is delivered, the same object" % _body, _raised(_outcome(lambda b=_body: _native._test_guarded(b)), _exc), True)
+        _stand_in(lambda: _good)
+        check("_test_guarded(%s): and not to the next call" % _body, _outcome(lambda: _native._test_guarded("ok")), ("returned", 1))
+    _got = _outcome(lambda: _native._test_guarded("panic"))
+    check("a body panic with no control exception still raises (PanicException)", (_got[0], type(_got[1]).__name__), ("raised", "PanicException"))
+    _got = _outcome(lambda: _native._test_guarded("stop"))
+    check("a Stop with no control exception raises KeyboardInterrupt", (_got[0], isinstance(_got[1], KeyboardInterrupt)), ("raised", True))
+    _stand_in(_raising(OSError("unreadable")))
+    _got = _outcome(lambda: _native._test_guarded("panic"))
+    check("an ordinary failure of the source is unreadable: the body's panic is what raises", (_got[0], type(_got[1]).__name__), ("raised", "PanicException"))
+else:
+    print("test_capacity: the _test_guarded rows need a test-hooks build (skipped)")
+
 _stand_in(_source)
 _snap = _native.ledger_snapshot()
 check("the next read answers again", (_snap["total"], _snap["status"], _snap["certified"]), (16 * GiB, "observed", True))

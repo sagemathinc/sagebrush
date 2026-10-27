@@ -704,6 +704,7 @@ name = "sagebrush-par"
 version = "0.1.0"
 dependencies = [
  "rayon",
+ "sagebrush-interrupt",
  "sagebrush-ledger",
 ]
 
