@@ -139,6 +139,7 @@ pub(crate) mod audit {
         pub hom_used: u64,
         /// the residue prefilter: witnesses evaluated, numbers it proved
         /// not a power, and the bisections (exact_root calls) still made
+        pub proof_preflight: u64,
         pub prefilter_calls: u64,
         pub prefilter_evals: u64,
         pub prefilter_rejects: u64,
@@ -146,7 +147,7 @@ pub(crate) mod audit {
     }
 
     thread_local! {
-        static LAST: std::cell::Cell<Audit> = const { std::cell::Cell::new(Audit { pp_preflight: 0, pp_used: 0, hom_preflight: 0, hom_used: 0, prefilter_calls: 0, prefilter_evals: 0, prefilter_rejects: 0, bisections: 0 }) };
+        static LAST: std::cell::Cell<Audit> = const { std::cell::Cell::new(Audit { pp_preflight: 0, pp_used: 0, hom_preflight: 0, hom_used: 0, proof_preflight: 0, prefilter_calls: 0, prefilter_evals: 0, prefilter_rejects: 0, bisections: 0 }) };
     }
 
     pub fn set(f: impl FnOnce(&mut Audit)) {
@@ -565,12 +566,8 @@ fn plan_powers(bits: u64, m: u64, primes: &[u64]) -> Option<u64> {
         }
         let steps = bits.div_ceil(l - 1).checked_add(v)?.checked_add(1)?;
         u = u.checked_add(steps.checked_mul(2 * clog2(l) + 1)?.checked_mul(lb.checked_mul(lb)?)?)?;
-        // the residue prefilter, per call (at most v + 2: the g = 1 proof,
-        // then each root attempt): the fold, tier 1's 9 powerings, tier 2's
-        // WITNESS_K trial divisions (p < 2^32: sqrt(p) + 1 <= 2^16 + 1) and
-        // WITNESSES reductions
-        let call = lb.checked_add(1)?.checked_add(9 * 130)?.checked_add(WITNESS_K.checked_mul((1 << 16) + 1)?)?.checked_add(WITNESSES.checked_mul(lb.checked_add(66)?)?)?;
-        u = u.checked_add(v.checked_add(2)?.checked_mul(call)?)?;
+        // the residue prefilter on each root attempt (at most v + 1)
+        u = u.checked_add(v.checked_add(1)?.checked_mul(prefilter_plan(bits, l)?)?)?;
     }
     u.checked_mul(2)?.checked_add(m.sqrt().checked_mul(2)?)
 }
@@ -632,18 +629,22 @@ fn powmod_w(x: u64, mut e: u64, p: u64) -> u64 {
     r as u64
 }
 
-/// |n| mod 2^64 - 1 and |n| mod 2^64 + 1, from one pass over the limbs.
+/// |n| mod 2^64 - 1 and |n| mod 2^64 + 1, from one pass over its borrowed
+/// limbs (no allocation; a poll every 256 limbs).
 fn fold_residues(n: &BigInt) -> (u128, u128) {
-    let (_, d) = n.to_u64_digits();
-    let (mut s, mut e, mut o) = (0u128, 0u128, 0u128);
-    for (i, &x) in d.iter().enumerate() {
+    let (mut s, mut e, mut o, mut i) = (0u128, 0u128, 0u128, 0u64);
+    sagebrush_bigint::for_each_u64_limb(n, |x| {
+        if i & 255 == 0 {
+            check();
+        }
         s += x as u128;
         if i % 2 == 0 {
             e += x as u128;
         } else {
             o += x as u128;
         }
-    }
+        i += 1;
+    });
     let (mm, mp) = ((1u128 << 64) - 1, (1u128 << 64) + 1);
     (s % mm, (e % mp + mp - o % mp) % mp)
 }
@@ -653,6 +654,17 @@ fn fold_residues(n: &BigInt) -> (u128, u128) {
 /// not dividing t gives r^((p-1)/l) = t^(p-1) = 1 (Fermat).
 fn witness_rejects(r: u64, p: u64, l: u64) -> bool {
     r != 0 && powmod_w(r, (p - 1) / l, p) != 1
+}
+
+/// The work one not_a_power call may debit for an n of `bits` bits and the
+/// prime l, checked (None: overflow): the fold, tier 1's 9 powerings, tier
+/// 2's WITNESS_K trial divisions (p <= WITNESS_K l + 1: sqrt(p) + 1 each) and
+/// WITNESSES reductions.
+fn prefilter_plan(bits: u64, l: u64) -> Option<u64> {
+    let lb = limbs(bits);
+    let pmax = WITNESS_K.checked_mul(l).and_then(|x| x.checked_add(1)).map_or(1 << 32, |p| p.min(1 << 32));
+    let trial = WITNESS_K.checked_mul(pmax.sqrt() + 1)?;
+    lb.checked_add(1)?.checked_add(9 * 130)?.checked_add(trial)?.checked_add(WITNESSES.checked_mul(lb.checked_add(66)?)?)
 }
 
 /// Whether n >= 1 is PROVED not an l-th power (false: not proved, and the
@@ -775,36 +787,48 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
     let pp_start = b.work_left();
     let (g, p, q) = {
         let _p = b.enter(Phase::PerfectPower);
-        let (u0, v0) = (-c0.clone(), a.clone());
-        let bits = u0.bits().max(v0.bits());
+        // the coefficients stay borrowed until the residue proof is done
+        let bits = c0.bits().max(a.bits());
         let (_, primes) = divisors_and_primes(b, m)?;
+        // the residue proof first, under its own preflight (two calls per
+        // prime l | m): g = 1 when every l is excluded (l = 2 with c0 > 0,
+        // or |c0| or a proved not an l-th power); then the general path,
+        // without the root search's preflight, reservation or copies
+        {
+            let need = primes.iter().try_fold(0u64, |s, &l| s.checked_add(prefilter_plan(bits, l)?.checked_mul(2)?)).ok_or_else(|| b.refuse("work (overflow)", u64::MAX, b.work_left()))?;
+            if need > b.work_left() {
+                return Err(b.refuse("work", need, b.work_left()));
+            }
+            #[cfg(test)]
+            audit::set(|x| x.proof_preflight = need);
+            let _s = enter("residue prefilter S7a");
+            let mut excluded = true;
+            for &l in &primes {
+                if c0.is_positive() && l == 2 {
+                    continue;
+                }
+                if !(not_a_power(b, c0, l)? || not_a_power(b, a, l)?) {
+                    excluded = false;
+                    break;
+                }
+            }
+            if excluded {
+                #[cfg(test)]
+                audit::set(|x| x.pp_used = pp_start - b.work_left());
+                return Ok(None);
+            }
+        }
+        // not proved: the root search's own preflight, then its reservation,
+        // then the copies
         let need = plan_powers(bits, m, &primes).ok_or_else(|| b.refuse("work (overflow)", u64::MAX, b.work_left()))?;
         if need > b.work_left() {
             return Err(b.refuse("work", need, b.work_left()));
         }
         #[cfg(test)]
         audit::set(|a| a.pp_preflight = need);
-        // g = 1 when every prime l | m is excluded: -c0 negative for l = 2, or
-        // |c0| or a proved not an l-th power; then the general path, before
-        // any copy or reservation (a generic large binomial pays only this)
-        let mut excluded = true;
-        for &l in &primes {
-            if c0.is_positive() && l == 2 {
-                continue;
-            }
-            if !(not_a_power(b, c0, l)? || not_a_power(b, a, l)?) {
-                excluded = false;
-                break;
-            }
-        }
-        if excluded {
-            #[cfg(test)]
-            audit::set(|x| x.pp_used = pp_start - b.work_left());
-            return Ok(None);
-        }
         let _r = b.reserve(big_bytes(bits.checked_mul(2).and_then(|x| x.checked_add(64)).unwrap_or(u64::MAX)).and_then(|x| x.checked_mul(4)?.checked_add(big_bytes(bits)?.checked_mul(2)?)))?;
         let _s = enter("perfect power S7");
-        let (mut u, mut v, mut g) = (u0, v0, 1u64);
+        let (mut u, mut v, mut g) = (-c0.clone(), a.clone(), 1u64);
         for &l in &primes {
             let mut t = m;
             while t % l == 0 {

@@ -23,6 +23,12 @@ fn stop_at_every_site() {
     let mut stage_b = xn(12, -81);
     stage_b[12] = BigInt::from(16);
     // many pieces: 2^5040 x^5040 - 3^5040 (60 of them)
+    // a generic non-power (perf_bench's binom fixture at 65536 bits): Stop
+    // inside the residue proof's streamed fold
+    let mut generic = vec![BigInt::zero(); 13];
+    let big = (BigInt::one() << 65535u32) + BigInt::one();
+    generic[0] = -(big.clone() + BigInt::from(2));
+    generic[12] = big;
     let mut many = xn(5040, 0);
     many[0] = -BigInt::from(3u32).pow(5040u32);
     many[5040] = BigInt::from(2u32).pow(5040u32);
@@ -38,6 +44,7 @@ fn stop_at_every_site() {
         (&stage_b, "homogenize S8"),
         (&stage_b, "homogenize S9 pieces"),
         (&stage_b, "homogenize S10 certificate"),
+        (&generic, "residue prefilter S7a"),
         (&many, "perfect power S7"),
         (&many, "homogenize S8"),
         (&many, "homogenize S10 certificate"),
