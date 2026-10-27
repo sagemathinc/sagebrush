@@ -1129,7 +1129,9 @@ try {
       await uploadIn(q2, "L1a");
       await q2.until("!!window.__got && (!!document.querySelector('#shareresult a') || /failed/.test(document.querySelector('#shareresult').textContent))", 60000);
       const gotA = await q2.ev("window.__got");
-      const recA = await q2.ev("JSON.stringify(window.sagebrush.shareTest.sent())");
+      // (this device's records, read from localStorage itself, in whatever form the page keeps them: so a page
+      // without the registry (r3's, one key per notebook) fails here on what it did, not on a missing helper)
+      const recA = await q2.ev("JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter((k) => k.startsWith('sagebrush-share-sent')).map((k) => [k, localStorage.getItem(k)])))");
       const q3 = await reopen(q2);
       const storedA = await q3.ev("window.sagebrush.notebook.snapshot()");
       await recordSentIn(q3);
@@ -1142,13 +1144,16 @@ try {
       ok(gotA?.collection && recA.includes(gotA.sent) && !storedA.share_id && storedA.share_attempt === otherA && sentA.length === 1 && sentA[0] === gotA.sent && idA === gotA.collection && nA2 === nA + 1,
         `L1a a delivered 200 whose share couldn't be saved, another device's attempt stored meanwhile, a crash: the record was kept (${recA.includes(gotA?.sent ?? "?")}), the retry sent it (${sentA.map((x) => x.slice(0, 6))} vs ${gotA?.sent?.slice(0, 6)}) and found its share (${idA} vs ${gotA?.collection}); shares +${nA2 - nA}`);
 
-      // L1b: a 409 adoption, a crash before its save: the retry recovers that share
+      // L1b: a 409 adoption, another device's attempt stored during that request, a crash before its save: the
+      // retry recovers that share (without the other device's attempt, the notebook's own still names the first
+      // share, so a page that dropped its record would pass too)
       await nbIn(q3, "L1b");
       const nB = await sharesIn(q3);
+      const otherB = "2".repeat(32);
       // (the first request's answer is lost: the share is made, the page doesn't know)
       await q3.ev(`(() => { const f = window.fetch; window.__first = null; window.fetch = async (u, o) => {
-        if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST" && !window.__first) { const r = await f(u, o); window.__first = await r.json(); return new Response('{"error":"lost"}', { status: 503 }); }
-        if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") { const r = await f(u, o); if (r.status === 409) window.sagebrush.notebook.store.save = async () => "not saved: the test's store refuses"; window.__second = r.status; return r; }
+        if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST" && !window.__first) { const r = await f(u, o); window.__first = { ...(await r.json()), sent: JSON.parse(o.body).attempt }; return new Response('{"error":"lost"}', { status: 503 }); }
+        if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") { await ${storeOther(otherB)}; const r = await f(u, o); if (r.status === 409) window.sagebrush.notebook.store.save = async () => "not saved: the test's store refuses"; window.__second = r.status; return r; }
         return f(u, o); }; })()`);
       await openIn(q3);
       await uploadIn(q3, "L1b");
@@ -1159,6 +1164,7 @@ try {
       await q3.until("window.__second === 409 && /different files/.test(document.querySelector('#shareresult').textContent)", 60000).catch(() => {});
       const second = await q3.ev("window.__second ?? null");
       const q4 = await reopen(q3);
+      const storedB = await q4.ev("window.sagebrush.notebook.snapshot()");
       await recordSentIn(q4);
       await openIn(q4);
       await uploadIn(q4, "L1b, renamed");
@@ -1166,8 +1172,8 @@ try {
       const sentB = await q4.ev("window.__attempts");
       const idB = await q4.ev("window.sagebrush.notebook.snapshot().share_id ?? null");
       const nB2 = await sharesIn(q4);
-      ok(firstB?.collection && second === 409 && sentB.length === 1 && idB === firstB.collection && nB2 === nB + 1,
-        `L1b a 409 adoption whose save didn't land, a crash: the retry sent the recorded attempt again (${sentB.map((x) => x.slice(0, 6))}) and the notebook's share is the first one (${idB} vs ${firstB?.collection}); shares +${nB2 - nB}`);
+      ok(firstB?.collection && second === 409 && storedB.share_attempt === otherB && !storedB.share_id && sentB.length === 1 && sentB[0] === firstB.sent && idB === firstB.collection && nB2 === nB + 1,
+        `L1b a 409 adoption whose save didn't land, another device's attempt stored meanwhile (${storedB.share_attempt?.slice(0, 6)}), a crash: the retry sent the recorded attempt again (${sentB.map((x) => x.slice(0, 6))} vs ${firstB?.sent?.slice(0, 6)}) and the notebook's share is the first one (${idB} vs ${firstB?.collection}); shares +${nB2 - nB}`);
     }, 600_000);
   }
 
