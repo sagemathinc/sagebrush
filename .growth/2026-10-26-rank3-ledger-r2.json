@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Rank-3 plan r3 PR 2 (#190), a top-up of 2026-10-26-rank3-ledger.json: its cli/pyjs.cjs row (2164) came from the base64 formula 4 ceil(7183028/3) - 4 ceil(7181404/3); dispatch 40290075113's transition-mode size-gate (base 2acc6e4c, head 6772ff21) measured +2168, one base64 quantum (4 B) more",
+ "bytes": {
+  "cli/pyjs.cjs": 4
+ }
+}

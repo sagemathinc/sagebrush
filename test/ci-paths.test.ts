@@ -113,6 +113,19 @@ test("engine-cpython runs on pull requests that touch the CPython package's inpu
   assert.match(r.stdout, /^engine_cpython=true$/m);
 });
 
+// (plan-size-gate-dispatch-range r2): a dispatch or a schedule has no file list, yet its growth gate always
+// runs on the measurement: size_inputs is true, so the gate can never take its docs-only exit there
+test("a dispatch and a schedule always select the growth gate's inputs (size_inputs)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ci-paths-size-"));
+  const list = join(dir, "files.txt");
+  writeFileSync(list, "README.md\n");
+  for (const event of ["workflow_dispatch", "schedule"]) {
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: event, GITHUB_REF: "refs/heads/x" } });
+    assert.match(r.stdout, /^size_inputs=true$/m, event);
+  }
+  assert.equal(classify(["README.md"]).size_inputs, "false");
+});
+
 // CORR-PR133-2 (astra2): with git's rename detection, diff --name-only names
 // only a rename's destination, so a file moved out of a selecting path
 // selected nothing.  A real repository: engine/py/needed.py moved to

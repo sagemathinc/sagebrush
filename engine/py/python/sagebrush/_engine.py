@@ -37,8 +37,20 @@ def call(fn, **args):
     args = _with_limits(fn, args)
     r = _json.loads(_native.call(_json.dumps(dict(fn=fn, **args))))
     if "error" in r:
+        if r.get("internal"):
+            # a failed proved invariant (an engine bug), never a resource
+            # limit or a user error
+            raise RuntimeError(r["error"])
         raise ValueError(r["error"])
     return r["ok"]
+
+
+def call_text(request):
+    """The engine's reply text for one JSON request text, unparsed (for a
+    caller that builds the request itself and drops each text as soon as
+    the next exists: lib/_sage_ffmat.py's echelon transport).  No session
+    limit is added: only for fns without a _LIMITED entry."""
+    return _native.call(request)
 
 
 def chi_arg(chi):

@@ -217,10 +217,29 @@ impl QPoly {
             .map(|(g, e)| (QPoly::new(g.into_iter().map(Q::from_integer).collect()).monic(), e))
             .collect())
     }
+    /// [`QPoly::try_factor`] for a caller that can do without the
+    /// factorization: None on a resource refusal; an internal error (a
+    /// failed proved invariant) is thrown as the typed SymError::Internal,
+    /// which every host reports as RuntimeError with the engine's message
+    /// (natively through catch, in WebAssembly through the last-error
+    /// record), never silently taken as "not factored".
+    pub fn try_factor_or_none(&self) -> Option<Vec<(QPoly, u32)>> {
+        match self.try_factor() {
+            Ok(fs) => Some(fs),
+            Err(e) if e.kind == sagebrush_poly::Kind::Internal => crate::err::throw(crate::err::SymError::Internal(e.to_string())),
+            Err(_) => None,
+        }
+    }
     /// [`QPoly::try_factor`] where there is no error channel: a refusal
-    /// panics (the bindings report it as an error, never as a result).
+    /// panics (the bindings report it as an error, never as a result); an
+    /// internal error is the typed SymError::Internal, as above.
     pub fn factor(&self) -> Vec<(QPoly, u32)> {
-        self.try_factor().unwrap_or_else(|e| panic!("{e}"))
+        self.try_factor().unwrap_or_else(|e| {
+            if e.kind == sagebrush_poly::Kind::Internal {
+                crate::err::throw(crate::err::SymError::Internal(e.to_string()))
+            }
+            panic!("{e}")
+        })
     }
     pub fn to_expr(&self, x: &Expr) -> Expr {
         add(self.0.iter().enumerate().map(|(k, c)| mul2(&qnum(c.clone()), &pow(x, &int(k as i64)))).collect())

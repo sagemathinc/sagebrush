@@ -1,1 +1,0 @@
-{"v":1, "reason":"#109 revision: with ff.embed_max unlimited, fields bounded by the Conway cutoff in the operation's words (lib/_sage_ffsub.py CONWAY_MAX)", "bytes":{"cli/lib.gen.js": 323, "cli/pyjs.cjs": 317, "engine/lib/magma.src": 323}}

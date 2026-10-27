@@ -375,6 +375,101 @@ check("docs-only: design/x.md is not a gate input", gateInputs(["design/x.md", "
   }
 }
 
+// ---- a dispatch's base (plan-size-gate-dispatch-range r2): master absolute; a head without origin/master
+// refused; one PR one transition (any number of commits); a train a range of k = its PR merges
+{
+  const dir = mkdtempSync(join(tmpdir(), "size-measure-dispatch-"));
+  const g = (cwd, ...a) => execFileSync("git", a, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).trim();
+  // (true only for an error matching `re`: a wrong message is a failure, printed)
+  const throws = (f, re) => { try { f(); return false; } catch (e) { if (re.test(e.message)) return true; console.log(`  (got: ${e.message})`); return false; } };
+  try {
+    const origin = join(dir, "origin.git"), w = join(dir, "w"), o = join(dir, "other");
+    g(dir, "init", "-q", "--bare", "-b", "master", origin);
+    g(dir, "clone", "-q", origin, w);
+    g(dir, "clone", "-q", origin, o);
+    let n = 0;
+    const commit = (cwd, msg) => (writeFileSync(join(cwd, `f${n++}`), msg), g(cwd, "add", "-A"), g(cwd, "commit", "-q", "-m", msg), g(cwd, "rev-parse", "HEAD"));
+    const T0 = commit(w, "t0");
+    g(w, "push", "-q", "origin", "HEAD:master");
+    const D = (master) => testedTransition({ cwd: w, name: "workflow_dispatch", ev: {}, master });
+    const fetch = () => g(w, "fetch", "-q", "origin");
+    // master itself
+    fetch();
+    g(w, "checkout", "-q", "--detach", T0);
+    check("dispatch: HEAD == origin/master is absolute", D().mode === "absolute");
+    // one PR of one commit, HEAD not a merge (no HEAD^2 assumed: grader's note 1)
+    g(w, "checkout", "-q", "-b", "one", T0);
+    const H1 = commit(w, "h1");
+    let t = D();
+    check("dispatch: a one-commit PR (HEAD not a merge) is one transition against master's tip", t.mode === "transition" && t.base === T0 && t.head === H1 && t.merge === H1 && t.master === T0, jcs(t));
+    // a 30-commit PR with two merges of master in it: still one transition, never k = 30 (SG-1), and a merge
+    // of master is no PR merge
+    g(w, "checkout", "-q", "-b", "long", T0);
+    for (let i = 0; i < 10; i++) commit(w, `l${i}`);
+    g(o, "pull", "-q", "origin", "master");
+    commit(o, "t1a");
+    g(o, "push", "-q", "origin", "HEAD:master");
+    fetch();
+    g(w, "merge", "-q", "--no-edit", "origin/master");
+    for (let i = 10; i < 20; i++) commit(w, `l${i}`);
+    const T1 = commit(o, "t1");
+    g(o, "push", "-q", "origin", "HEAD:master");
+    fetch();
+    g(w, "merge", "-q", "--no-edit", "origin/master");
+    for (let i = 20; i < 30; i++) commit(w, `l${i}`);
+    t = D();
+    check("dispatch: a 30-commit PR with two merges of master in it is one transition (SG-1)", t.mode === "transition" && t.base === T1, jcs(t));
+    // a PR head that is its own merge commit (--no-ff onto master's tip): one transition
+    g(w, "checkout", "-q", "-b", "pr2", T1);
+    const P2 = commit(w, "p2");
+    g(w, "checkout", "-q", "--detach", T1);
+    g(w, "merge", "-q", "--no-ff", "--no-edit", P2);
+    t = D();
+    check("dispatch: a PR merged --no-ff onto master is one transition", t.mode === "transition" && t.base === T1, jcs(t));
+    // a train: three PR merges on master's tip: a range of k = 3
+    const prs = ["a", "b", "c"].map((x) => (g(w, "checkout", "-q", "-b", `tr-${x}`, T1), commit(w, `tr-${x}`)));
+    g(w, "checkout", "-q", "--detach", T1);
+    for (const p of prs) g(w, "merge", "-q", "--no-ff", "--no-edit", p);
+    const train = g(w, "rev-parse", "HEAD");
+    t = D();
+    check("dispatch: a train of 3 PR merges is a range, k = 3", t.mode === "range" && t.k === 3 && t.base === T1, jcs(t));
+    // master moved during the run: the run's own master (size-base's output) is used, not refused
+    const T2 = commit(o, "t2");
+    g(o, "push", "-q", "origin", "HEAD:master");
+    fetch();
+    t = D(T1);
+    check("dispatch: master moved during the run: the run's master is the base", t.mode === "range" && t.base === T1 && t.master === T1, jcs(t));
+    check("dispatch: a run's master that isn't a commit of origin/master is refused", throws(() => D(prs[0]), /isn't a commit of refs\/remotes\/origin\/master/));
+    check("dispatch: a malformed run's master is refused", throws(() => D("abc"), /isn't a commit of/));
+    // a stale head: master has moved past it (1 commit here, then 2)
+    const want = (k) => new RegExp(`^HEAD is ${k} behind origin/master ${g(w, "rev-parse", "origin/master")}: merge master and re-dispatch$`);
+    check("dispatch: a stale head (1 behind) is refused, as ruled", throws(() => D(), want(1)));
+    commit(o, "t3");
+    g(o, "push", "-q", "origin", "HEAD:master");
+    fetch();
+    check("dispatch: a stale head (2 behind) is refused, naming N and origin/master's sha", throws(() => D(), want(2)));
+    // a diverged head (master rewritten to a line HEAD doesn't contain)
+    g(o, "checkout", "-q", "--detach", T0);
+    const X = commit(o, "x");
+    g(o, "push", "-q", "--force", "origin", `${X}:refs/heads/master`);
+    fetch();
+    g(w, "checkout", "-q", "--detach", train);
+    check("dispatch: a diverged head is refused the same way", throws(() => D(), /^HEAD is 1 behind origin\/master [0-9a-f]{40}: merge master and re-dispatch$/));
+    // no origin/master: an error naming the ref, never absolute (N4)
+    g(w, "update-ref", "-d", "refs/remotes/origin/master");
+    check("dispatch: no origin/master is an error naming the ref", throws(() => D(), /refs\/remotes\/origin\/master is missing/));
+    // the modes it gives, through the gate's rules: a marker-short single PR fails (#164's case), a covered
+    // one passes; a train's noise is k transitions'; a train containing a reset fails (the push's range rule)
+    fails("dispatch, one PR: a marker short of Δ (#164's case)", transition({ n: S(100000), m: S(100547) }), /needs a marker/);
+    passes("dispatch, one PR: a marker covering Δ", transition({ n: S(100000), m: S(100547), markers: [mk({ "cli/pyjs.cjs": 547 })] }));
+    passes("dispatch, a train of 3: markers + 3 × noise", range({ n: S(100000), m: S(101000), markers: [mk({ "cli/pyjs.cjs": 1000 })], k: 3 }));
+    fails("dispatch, a train of 3: one byte past markers + 3 × noise", range({ n: S(100000), m: S(101001), markers: [mk({ "cli/pyjs.cjs": 1000 })], k: 3 }), /rule 6/);
+    fails("dispatch, a train containing a reset", range({ n: S(100000), m: S(100000), markers: [], k: 3, epochChanged: true }), /epoch reset/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // ---- CORR-GATE95-2 (#95 review): a max change must be a raise
 {
   const t = (oldMax, newMax) => transition({ n: S(100000, 5000, 100), m: S(100000, 5000, 110), B: budgets({ max: newMax }), baseB: budgets({ max: oldMax }) });
