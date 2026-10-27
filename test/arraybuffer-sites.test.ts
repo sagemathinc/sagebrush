@@ -50,6 +50,34 @@ test("the gate passes on this tree: every record classified, nothing stale, the 
   assert.equal(g.classes.size, g.cur.records.length);
 });
 
+test("train-16: the census reads the tracked tree only: a build's output changes nothing; an unreviewed generated import fails the gate", () => {
+  // the worker imports a generated module, which the build writes (here with a store in it, which the
+  // census must not see either way) and which a fresh checkout doesn't have
+  const worker = 'import "../build/cli/lib-meta.gen.js";\nimport { u } from "./util";\nexport const w = [u, new Uint8Array(2)];\n';
+  const built = { "build/cli/lib-meta.gen.js": "globalThis.__SAGEBRUSH_BUILD_ID__ = new Uint8Array(4);\n" };
+  const util = { "web/util.ts": "export const u = 1;\n" };
+  const without = fixture({ "web/worker.ts": worker, ...util });
+  const withBuild = fixture({ "web/worker.ts": worker, ...util, ...built });
+  assert.deepEqual(withBuild.header, without.header, "the header, built or not");
+  assert.deepEqual(withBuild.records, without.records, "the records, built or not");
+  assert.deepEqual(withBuild.programFiles, without.programFiles, "the program's files, built or not");
+  assert.ok(!withBuild.programFiles.some((f: string) => f.startsWith("build/")), withBuild.programFiles.join(" "));
+  assert.deepEqual(without.header.generated, [{ path: "build/cli/lib-meta.gen.js", from: ["web/worker.ts"], generator: S.GENERATED["build/cli/lib-meta.gen.js"] }]);
+  assert.deepEqual(G.generatedProblems(without), [], "a reviewed generated module passes");
+  assert.equal(G.gate(null, { table: {}, cur: withBuild }).problems.filter((p: any) => p.problem === "generated").length, 0);
+  // an unreviewed one fails, by its path, built or not, whichever way it's named
+  for (const [name, text] of [["import", 'import "../build/other.gen.js";\n'], ["export from", 'export * from "../build/x/other.gen.js";\n'], ["import()", 'export const p = () => import("../build/other.gen.js");\n'], ["require", 'declare const require: (s: string) => unknown;\nexport const r = require("../build/other.gen.js");\n']]) {
+    for (const extra of [{}, { "build/other.gen.js": "export {};\n", "build/x/other.gen.js": "export {};\n" }] as Record<string, string>[]) {
+      const c = fixture({ "web/worker.ts": text, ...extra });
+      const ps = G.gate(null, { table: {}, cur: c }).problems.filter((p: any) => p.problem === "generated");
+      assert.equal(ps.length, 1, `${name}: ${JSON.stringify(c.header.generated)}`);
+      assert.ok(!c.programFiles.some((f: string) => f.startsWith("build/")), `${name}: ${c.programFiles.join(" ")}`);
+      assert.match(ps[0].key, /^build\/(x\/)?other\.gen\.js$/, name);
+      assert.match(ps[0].detail, /imported by web\/worker\.ts from the excluded build output, with no reviewed generator/, name);
+    }
+  }
+});
+
 test("the base census is the census recomputed at its commit, byte for byte", () => {
   const text = readFileSync(join(ROOT, G.BASE), "utf8");
   const base = JSON.parse(text);

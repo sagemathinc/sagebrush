@@ -336,6 +336,19 @@ const className = (c, sf) => (c.name ? c.name.getText(sf) : "<class>");
 // argument decides between a view of an existing store and a new one
 const VIEW_CTOR = /^(Int8|Uint8|Uint8Clamped|Int16|Uint16|Int32|Uint32|Float16|Float32|Float64|BigInt64|BigUint64)ArrayConstructor\.new$|^DataViewConstructor\.new$/;
 
+// Generated modules: the repository's build output (build/, gitignored) isn't part of the tracked tree, so
+// the census never reads it, whether or not a build ran (CI's engine jobs run scripts/build-cli.mjs first).
+// Every scanned file's import of one is listed in the header with the tracked generator that writes it, and
+// one not reviewed here fails the gate (generatedProblems in arraybuffer-sites-check.mjs).
+export const EXCLUDED_DIRS = ["build/"];
+export const GENERATED = {
+  "build/cli/lib-meta.gen.js": "scripts/build-cli.mjs: globalThis.__SAGEBRUSH_BUILD_ID__, __SAGEBRUSH_VERSION__ and __SAGEBRUSH_NOTICES__, each assigned a JSON literal",
+};
+const excludedPath = (root, f) => {
+  const r = relative(root, f).split(sep).join("/");
+  return EXCLUDED_DIRS.some((d) => `${r}/`.startsWith(d));
+};
+
 export function census(root = ROOT, { commit = null } = {}) {
   const cfg = ts.getParsedCommandLineOfConfigFile(join(root, "tsconfig.json"), {}, {
     ...ts.sys,
@@ -345,14 +358,20 @@ export function census(root = ROOT, { commit = null } = {}) {
   // constant relative require() names (its code runs too), to a fixpoint
   const rootNames = [...cfg.fileNames.filter((f) => f.includes(`${sep}src${sep}runtime${sep}`)), join(root, "web", "worker.ts")];
   let program;
+  const options = { ...cfg.options, noEmit: true, allowJs: true };
+  // (the program's host doesn't see the excluded paths: a module there resolves as missing, built or not,
+  // and no root is ever one)
+  const host = ts.createCompilerHost(options);
+  const { fileExists } = host;
+  host.fileExists = (f) => !excludedPath(root, f) && fileExists.call(host, f);
   for (;;) {
-    program = ts.createProgram({ rootNames, options: { ...cfg.options, noEmit: true, allowJs: true } });
+    program = ts.createProgram({ rootNames, options, host });
     const more = [];
     for (const sf of program.getSourceFiles().filter(isSourceFile)) {
       const scan = (n) => {
         if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "require" && n.arguments.length === 1 && isLiteralText(n.arguments[0]) && n.arguments[0].text.startsWith(".")) {
           const base = join(dirname(sf.fileName), n.arguments[0].text);
-          const f = [base, base + ".ts", base + ".js", join(base, "index.ts")].find((x) => ts.sys.fileExists(x) && !ts.sys.directoryExists(x));
+          const f = [base, base + ".ts", base + ".js", join(base, "index.ts")].find((x) => host.fileExists(x) && !ts.sys.directoryExists(x));
           if (f && !program.getSourceFile(f) && !rootNames.includes(f)) more.push(f);
         }
         ts.forEachChild(n, scan);
@@ -364,6 +383,26 @@ export function census(root = ROOT, { commit = null } = {}) {
   }
   const checker = program.getTypeChecker();
   const files = program.getSourceFiles().filter(isSourceFile);
+  // every relative module specifier a scanned file names (import, export from, import(), require) that
+  // points into an excluded path, present or not
+  const generatedFrom = new Map();
+  for (const sf of files) {
+    const note = (spec) => {
+      if (!spec || !isLiteralText(spec) || !spec.text.startsWith(".")) return;
+      const p = join(dirname(sf.fileName), spec.text);
+      if (!excludedPath(root, p)) return;
+      const k = relative(root, p).split(sep).join("/");
+      (generatedFrom.get(k) ?? generatedFrom.set(k, new Set()).get(k)).add(relOf(root, sf));
+    };
+    const scan = (n) => {
+      if (ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) note(n.moduleSpecifier);
+      else if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference)) note(n.moduleReference.expression);
+      else if (ts.isCallExpression(n) && n.arguments.length === 1 && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === "require"))) note(n.arguments[0]);
+      ts.forEachChild(n, scan);
+    };
+    scan(sf);
+  }
+  const generated = [...generatedFrom].sort(([a], [b]) => (a < b ? -1 : 1)).map(([path, from]) => ({ path, from: [...from].sort(), generator: GENERATED[path] ?? null }));
   const records = [];
   // the reference graph, by declaration fingerprint: {file, name, fp, refs, irefs, libs}
   // (refs: resolved references; irefs: the implicit-invocation and by-name accessor edges)
@@ -1058,6 +1097,7 @@ export function census(root = ROOT, { commit = null } = {}) {
     obligations: obligations.length,
     records: records.length,
     by_kind: Object.fromEntries(Object.entries(byKind).sort()),
+    generated,
   };
   const programFiles = program.getSourceFiles().filter((s) => !s.fileName.includes(`${sep}node_modules${sep}`)).map((s) => relOf(root, s));
   return { header, records, decls, libs, classes, allSites, spans, programFiles, protocol, accessors: allAccessors, accessorsByName, unknownAccessors, obligations, files: files.map((s) => relOf(root, s)) };
