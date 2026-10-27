@@ -1265,8 +1265,12 @@ try {
       await B.ev(lose);
       await openIn(A);
       await openIn(B);
-      // (A's read of the notebooks' keys kept open, its transaction busy, until released)
-      await A.ev(`(() => { const g = IDBObjectStore.prototype.getAllKeys; window.__hold = true; window.__held = 0; IDBObjectStore.prototype.getAllKeys = function (...a) { const r = g.apply(this, a); if (window.__hold && this.name === 'notebooks') { window.__held++; const st = this; const spin = () => { if (window.__hold) st.get('__r1-spin').onsuccess = spin; }; r.addEventListener('success', spin); } return r; }; })()`);
+      // (A's read of the notebooks' keys held: its transaction completes, so nobody else's waits for it (a
+      // transaction kept open held B's own notebook saves too, run 13), and only its completion is given to the
+      // page once released)
+      await A.ev(`(() => { const keys = IDBObjectStore.prototype.getAllKeys, tr = IDBDatabase.prototype.transaction; window.__hold = true; window.__held = 0; window.__heldQ = [];
+        IDBObjectStore.prototype.getAllKeys = function (...a) { if (this.name === 'notebooks') this.transaction.__keys = true; return keys.apply(this, a); };
+        IDBDatabase.prototype.transaction = function (...a) { const tx = tr.apply(this, a); Object.defineProperty(tx, 'oncomplete', { configurable: true, set(h) { tx.addEventListener('complete', (e) => { if (tx.__keys && window.__hold) { window.__held++; window.__heldQ.push(() => h.call(tx, e)); } else h.call(tx, e); }); } }); return tx; }; })()`);
       await uploadIn(A, "R1a");
       await A.until("window.__held > 0", 60000);
       await uploadIn(B, "R1b");
@@ -1276,7 +1280,7 @@ try {
       await B.until(`(async () => window.__sentN > 0 || (await ${bLockWait}))()`, 60000).catch(() => {});
       const bWhileHeld = await B.ev("window.__sentN");
       const bWaited = await B.ev(bLockWait);
-      await A.ev("window.__hold = false");
+      await A.ev("window.__hold = false; for (const f of window.__heldQ.splice(0)) f()");
       await A.until("!!window.__lost && /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
       await B.until("!!window.__lost && /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
       const la = await A.ev("window.__lost"), lb = await B.ev("window.__lost");
