@@ -6,15 +6,17 @@ license = "MIT OR Apache-2.0"
 
 [features]
 default = ["parallel"]
-parallel = ["dep:rayon"]
+parallel = ["sagebrush-par/parallel"]
 
 [dependencies]
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-interrupt = { path = "../interrupt" }
-rayon = { version = "1.10", optional = true }
+sagebrush-par = { path = "../par" }
 num-traits = "0.2"
 sagebrush-poly = { path = "../poly" }
 
 [dev-dependencies]
+# (the examples run their own rayon pools)
+rayon = "1.10"
 sagebrush-ap = { path = "../ap" }
 serde_json = "1"
