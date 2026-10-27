@@ -14,7 +14,7 @@
 //   fgen), pull (with upto, recv and chain), clear (its root bootstraps the
 //   clearing client's new-epoch row), changed;
 // - HTTP: the test sign-in, status, enable, delete, blobs/check, blob PUT/GET.
-// Document sockets, tickets, snapshots and outputs come with their stages
+// Document sockets, tickets and snapshots come with their stages
 // (2c-5, 2d); until then a ticket is refused as `invalid`.
 //
 // Test controls (`server.controls`): the clock, holding a batch's forward

@@ -138,9 +138,18 @@
   #sharedlg .note { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
   #sharedlg label { display: flex; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
   #sharedlg label input[type=text] { flex: 1; }
-  #sharedlg ul { list-style: none; margin: 6px 0; padding: 0; max-height: 30vh; overflow: auto; font-size: 13px; }
-  #sharedlg li label { margin: 2px 0; }
-  #sharedlg li .size { color: var(--muted); margin-left: auto; }
+  /* the file list: virtualized rows of two lines (web/share-client/dialog.ts), in one stable order */
+  #sharedlg #sharelist { position: relative; height: 30vh; min-height: 160px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; margin: 6px 0; }
+  #sharedlg #sharelistinner { position: relative; }
+  #sharedlg .sharerow { position: absolute; left: 0; right: 0; height: 40px; padding: 2px 8px; box-sizing: border-box; font-size: 13px; }
+  #sharedlg .sharerow label { margin: 0; white-space: nowrap; }
+  #sharedlg .sharerow .name { overflow: hidden; }
+  #sharedlg .sharerow .size { color: var(--muted); margin-left: auto; padding-left: 8px; }
+  #sharedlg .sharerow .why { color: var(--muted); font-size: 12px; padding-left: 24px; height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sharedlg .sharebar button { font-size: 12px; }
+  #shareupload.busy::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sbspin .8s linear infinite; vertical-align: -1px; }
+  @keyframes sbspin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #shareupload.busy::before { animation: none; border: 0; border-radius: 0; width: auto; height: auto; content: "…"; } }
   #sharedlg .result { overflow-wrap: anywhere; font-size: 13px; }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   #exdlg::backdrop { background: rgba(0,0,0,.35); }
@@ -346,7 +355,10 @@
   <div id="shareform" hidden>
     <label>Title <input type="text" id="sharetitlein" maxlength="200"></label>
     <label>License <select id="sharelicense"><option value="CC-BY-4.0">CC BY 4.0</option><option value="CC0-1.0">CC0 (public domain)</option><option value="MIT">MIT</option><option value="Apache-2.0">Apache 2.0</option><option value="">None given</option></select></label>
-    <ul id="sharefiles" aria-label="Files to include"></ul>
+    <div class="sharebar"><button type="button" id="shareall">Select all</button> <button type="button" id="sharenone">Select none</button></div>
+    <div id="sharelist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
+    <p class="note" id="sharestatus" aria-live="polite"></p>
+    <p class="note" id="sharesummary"></p>
     <button class="primary" id="shareupload">Upload</button> <span id="shareprogress" class="note"></span>
     <p class="result" id="shareresult"></p>
   </div>
@@ -391,6 +403,7 @@ import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection } from "./share-client/upload.ts";
+import { createShareDialog } from "./share-client/dialog.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
@@ -844,6 +857,8 @@ window.sagebrush = {
   get consoleKernel() { return consoleKernel; },
   // (tests: the reactive notebook's analyzer and its worker)
   analyzer, get analyzeWorker() { return analyzeWorker; },
+  // (tests: the Share dialog, and its seams)
+  get share() { return shareDialog; }, get shareTest() { return shareTest; },
   /** Open a notebook of this browser by id (switching to its interpreter). */
   open: (id) => openId(id),
 };
@@ -1336,12 +1351,35 @@ class TextFileStore {
 
 // Open a document in the notebook, from a store (and remember it for next time).
 let current = { id: null, kind: "browser" };
+// (before the notebook changes: the Share dialog's upload ends first, and its open is closed, CORR-172-ASTRA-2)
+const beforeSwitch = [];
+// (while the notebook is changing, from the first wait to the new one attached, there is no notebook
+// identity, and Share waits for the switch to end: #172 r3's review, CORR-172-R3-ASTRA-1; nested switches
+// end with the outermost)
+let switches = 0, switched = null, switchDone = null;
+function beginSwitch() {
+  if (switches++ === 0) switched = new Promise((r) => (switchDone = r));
+  let ended = false;
+  return () => {
+    if (ended) return;
+    ended = true;
+    if (--switches === 0) {
+      switched = null;
+      switchDone();
+    }
+  };
+}
 async function open(store, id, kind = "browser") {
+  const endSwitch = beginSwitch();
+  try {
+  for (const f of beforeSwitch) await f();
+  await shareTest.beforeLeave?.();
   await nb.mayLeave(); // (LIMIT-900-2)
   nb.detach();
   ttShow(false);
   current = { id, kind };
   useKernel(id); // (before the document: the outputs its interpreter computed are not stale)
+  await shareTest.beforeAttach?.();
   const doc = await nb.attach(store);
   showName(doc.name);
   modeEl.value = nb.mode;
@@ -1354,6 +1392,9 @@ async function open(store, id, kind = "browser") {
   startHistory(id);
   presence.open(id);
   return doc;
+  } finally {
+    endSwitch();
+  }
 }
 // cells: code strings, or {md: text} for Markdown (examples, share links)
 const asCell = (c) => ({ id: cellId(), ...(typeof c === "string" ? { code: c } : c.md !== undefined ? { type: "markdown", code: c.md } : c) });
@@ -1389,8 +1430,13 @@ async function bindDiskFile(path, doc = null) {
   const { dir, sep, name } = splitPath(path);
   diskFile = { path, dir, sep, name };
   const store = new TextFileStore(name, () => TAURI.fs.readTextFile(path), (text) => TAURI.fs.writeTextFile(path, text), name);
-  if (doc) { await nb.mayLeave(); nb.detach(); current = { id: "file:" + path, kind: "file" }; await store.save({ ...nb.snapshot(), name: name.replace(/\.ipynb$/i, "") }); }
-  await open(store, "file:" + path, "file");
+  const endSwitch = beginSwitch();
+  try {
+    if (doc) { for (const f of beforeSwitch) await f(); await nb.mayLeave(); nb.detach(); current = { id: "file:" + path, kind: "file" }; await store.save({ ...nb.snapshot(), name: name.replace(/\.ipynb$/i, "") }); }
+    await open(store, "file:" + path, "file");
+  } finally {
+    endSwitch();
+  }
   try { await TAURI.window.getCurrentWindow().setTitle(name + " — Sagebrush"); } catch {}
 }
 async function openDiskFile(path) {
@@ -1448,8 +1494,11 @@ const shareDlg = $("#sharedlg");
 const shareReady = (LOCAL ? Promise.resolve(sharing) : shareStatus()).then((s) => {
   sharing = s;
 });
-$("#sharelink").onclick = async () => { await copyShareLink(); shareDlg.close(); };
+$("#sharelink").onclick = async () => { if (shareDialog.busy) return; await copyShareLink(); shareDlg.close(); };
 async function openShare() {
+  // (while uploading, Share only shows the dialog again, with the upload's own state: UI-B1)
+  if (shareDialog.busy) return void shareDialog.open();
+  while (switched) await switched;
   await shareReady;
   if (!LOCAL) sharing = await shareStatus();
   const me = sharing.enabled ? sharing.me : null;
@@ -1458,46 +1507,79 @@ async function openShare() {
   $("#signin").href = signInUrl(location.pathname + "?share" + location.hash);
   $("#shareresult").textContent = "";
   $("#shareprogress").textContent = "";
-  if (me) {
-    $("#sharetitlein").value = docName();
-    const ul = $("#sharefiles");
-    ul.replaceChildren();
-    const li = (text, size, checked, disabled) => {
-      const l = document.createElement("li"), lab = document.createElement("label"), box = document.createElement("input"), sz = document.createElement("span");
-      box.type = "checkbox"; box.checked = checked; box.disabled = disabled; box.value = text;
-      sz.className = "size"; sz.textContent = size;
-      lab.append(box, document.createTextNode(" " + text), sz);
-      l.append(lab);
-      ul.append(l);
-    };
-    li(fileBase() + ".ipynb", "this notebook", true, true);
-    for (const [k, v] of await storedFiles()) li(String(k).replace(/^\/+/, ""), fmtSize(v?.length ?? 0), true, false);
-  }
+  if (me) $("#sharetitlein").value = docName();
   shareDlg.showModal();
+  if (me) void shareDialog.open();
 }
-$("#shareupload").onclick = async () => {
-  const btn = $("#shareupload"), prog = $("#shareprogress"), out = $("#shareresult");
-  btn.disabled = true;
-  out.textContent = "";
-  try {
-    const name = fileBase() + ".ipynb";
-    const files = [{ path: name, data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }];
-    {
-      const want = new Set([...$("#sharefiles").querySelectorAll("input:checked:not(:disabled)")].map((b) => b.value));
-      for (const [k, v] of await storedFiles()) { const p = String(k).replace(/^\/+/, ""); if (want.has(p) && p !== name) files.push({ path: p, data: v }); }
-    }
+// The workspace's data files, metadata only: opening the dialog reads no file (share-ux-plan r2 §1)
+async function storedFileMeta() {
+  const w = await wsNow();
+  if (w && !w.closed) return (await w.list("/", { recursive: true })).filter((e) => e.kind === "file").map((e) => ({ path: e.path, size: e.size, fid: e.fid, rev: e.rev }));
+  db ??= await dbReady;
+  if (!db) return [];
+  const keys = (await idb(db, "files", "readonly", (st) => st.getAllKeys())) ?? [];
+  return keys.map((k) => ({ path: "/" + String(k).replace(/^\/+/, "") }));
+}
+// (tests: the Share dialog's seams, read at the moment they're used: a stand-in worker, shorter
+// fail-safes, a counter of the files the dialog reads, the interpreter's answer and the notebook's identity)
+const shareTest = { workspace: () => wsNow() };
+// One file's bytes, as it is now; if it is no longer the file that was listed (another fid), it changed
+async function storedFileBytes(f) {
+  await shareTest.onRead?.(f.path);
+  const w = await wsNow();
+  const shown = f.path.replace(/^\/+/, "");
+  if (w && !w.closed) {
+    const e = await w.stat(f.path);
+    if (!e || e.kind !== "file" || (f.fid && e.fid !== f.fid)) throw new Error(`${shown} changed; check the list and upload again`);
+    const b = await w.contents(e);
+    if (!(b instanceof Uint8Array)) throw new Error(`${shown} can't be read`);
+    return b;
+  }
+  db ??= await dbReady;
+  const v = db && ((await idb(db, "files", "readonly", (st) => st.get(f.path))) ?? (await idb(db, "files", "readonly", (st) => st.get(shown))));
+  if (!(v instanceof Uint8Array)) throw new Error(`${shown} changed; check the list and upload again`);
+  return v;
+}
+const shareDialog = createShareDialog({
+  dlg: shareDlg,
+  notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
+  notebookId: () => (switched ? null : (shareTest.notebookId?.() ?? String(current.id))),
+  listFiles: () => shareTest.listFiles?.() ?? storedFileMeta(),
+  readFile: storedFileBytes,
+  readBytes: (path) => storedFileBytes({ path }),
+  cells: () => nb.snapshot().cells.map((c, index) => ({ index, kind: c.type === "markdown" ? "markdown" : ["sage", "magma", "matlab"].includes(nb.mode) ? nb.mode : "python", source: String(c.code ?? "") })),
+  // (what each cell's last run read: the reactive notebook's own record)
+  fileReads: () => {
+    const byId = nb.fileReads?.() ?? new Map();
+    const order = new Map(nb.snapshot().cells.map((c, i) => [c.id, i]));
+    return new Map([...byId].filter(([id]) => order.has(id)).map(([id, reads]) => [order.get(id), reads]));
+  },
+  // (where this notebook's interpreter resolves imports: its own answer, src/notebook-session.ts)
+  importInfo: async () => {
+    if (shareTest.importInfo) return shareTest.importInfo();
+    if (!kernel) return null;
+    const m = await Promise.race([kernel.ask({ importInfo: true }, nb.mode, null), new Promise((r) => setTimeout(() => r(null), 5000))]);
+    // (no answer, or no working directory: null, and nothing in the code is resolved, CORR-172-ASTRA-1)
+    if (!m || !Array.isArray(m.path) || typeof m.cwd !== "string") return null;
+    return { cwd: m.cwd, importPath: m.path.map((dir) => ({ dir: String(dir), workspace: !String(dir).startsWith("/$pyjs") })), builtinModules: m.builtins ?? [], externalModules: m.lib ?? [], packageModules: m.packages ?? [] };
+  },
+  createWorker: () => shareTest.createWorker?.() ?? new Worker("/sagebrush-share-deps.js"),
+  failsafe: () => shareTest.failsafe,
+  bounds: () => ({ maxFiles: 10000, maxFileBytes: sharing.me?.limits?.max_file_bytes, bytesLeft: sharing.me?.limits ? sharing.me.limits.storage_bytes - sharing.me.usage : undefined }),
+  upload: async ({ files, title, license }, progress) => {
+    const origin = current.id;
     const prev = nb.snapshot().share_id ?? null;
-    const r = await uploadCollection({ id: prev, title: $("#sharetitlein").value.trim() || docName(), license: $("#sharelicense").value, files }, (done, total) => { prog.textContent = total ? `uploading ${fmtSize(done)} of ${fmtSize(total)}` : ""; });
-    nb.setMeta({ share_id: r.id });
-    prog.textContent = "";
-    const a = Object.assign(document.createElement("a"), { href: r.url, target: "_blank", rel: "noopener", textContent: r.url });
-    out.replaceChildren(document.createTextNode(prev ? "A new version is at " : "Shared at "), a, document.createTextNode(". "));
-    try { await navigator.clipboard.writeText(r.url); out.append("Link copied."); } catch {}
-  } catch (e) {
-    prog.textContent = "";
-    out.textContent = "Upload failed: " + (e?.message ?? e);
-  } finally { btn.disabled = false; }
-};
+    const r = await uploadCollection({ id: prev, title: title.trim() || docName(), license, files }, progress);
+    // (its collection is its notebook's: never written onto another one attached meanwhile, CORR-172-ASTRA-2)
+    if (current.id === origin) nb.setMeta({ share_id: r.id });
+    return { url: r.url, again: !!prev };
+  },
+  fmtSize: (n) => fmtSize(n),
+});
+beforeSwitch.push(async () => {
+  await shareDialog.idle();
+  shareDialog.invalidate();
+});
 
 async function fromLink(hash) {
   const z = /z=([\w-]+)/.exec(hash), c = /c=([\w-]+)/.exec(hash);

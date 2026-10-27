@@ -182,6 +182,11 @@ try {
   ok(r.out === "False\nTrue True\nlocked True\n", `python mode, no limits: _limits not loaded at start, locked at its first import (${JSON.stringify(r)})`);
   r = await sbw([init('{"ff.work": 123456}'), { id: 2, code: "import sys\nprint('_limits' in sys.modules, sys._sagebrush_limits['ff.work'])\nimport _limits\n" + LOCKED }]);
   ok(r.out === "True 123456\nlocked True\n", `python mode, limits given: loaded and locked at init (${JSON.stringify(r)})`);
+  // where Sagebrush runs, for a memory refusal's routes: the browser here, by
+  // the engine's own host (_sbengine.js_host()), not by an attribute every
+  // pyjs host has (plan-d0-browser-capacity r1 section 2)
+  r = await sbw([init(null), { id: 2, code: "import _memguard\nprint(_memguard.where())\nprint(_memguard.message('A list', 10**6, 10, 'one list').splitlines()[2])\n" }]);
+  ok(r.out === "browser\nTo run it, use Sagebrush outside the browser, where it can use your machine's\n", `where(): "browser" in the worker, and a refusal names the browser's routes (${JSON.stringify(r)})`);
   const pyBig = "from sage_all import GF, PolynomialRing\nR = PolynomialRing(GF(2), 'x')\nx = R.gen()\nK = GF(2**79, 'a', modulus=x**79 + x**9 + 1)\nprint((K.gen()**3 + K.gen()).minpoly().degree())\n";
   r = await sbw([init('{"ff.work": 10000000}'), { id: 2, code: pyBig }], 180000);
   ok(r.out.includes("is not supported yet (work)") && !r.out.includes("79\n"), `python mode, ff.work = 10^7: refused (${r.out.slice(-200)})`);
