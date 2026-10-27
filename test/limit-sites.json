@@ -576,6 +576,14 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/binomial.rs :: prefilter_plan :: let pmax = WITNESS_K.checked_mul(l).and_then(|x| x.checked_add(1)).map_or(1 << 32, |p| p.min(1 << 32)); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: prefilter_plan :: let trial = WITNESS_K.checked_mul(pmax.sqrt() + 1)?; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/binomial.rs :: stage_b :: let (work, out_bytes, scratch, costs) = ledger().ok_or_else(|| b.refuse(\"work (overflow)\", u64::MAX, b.work_left()))?; #0": {
   "class": "2",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -588,6 +596,10 @@
   "class": "2",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/binomial.rs :: stage_b :: let need = primes.iter().try_fold(0u64, |s, &l| s.checked_add(prefilter_plan(bits, l)?.checked_mul(2)?)).ok_or_else(|| b.refuse(\"work (overflow)\", u64::MAX, b.work_left()))?; #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/binomial_tests.rs :: a_4200_bit_binomial_takes_stage_b :: let b = Budget::default(); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -596,7 +608,39 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_needs_only_the_proofs_work :: let b = Budget::new(Limits { work: hi, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_needs_only_the_proofs_work :: let b = Budget::new(Limits { work: scan + need - 1, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_needs_only_the_proofs_work :: let b = Budget::new(Limits { work: scan + need, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_needs_only_the_proofs_work :: let b = Budget::new(Limits { work: w, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_needs_only_the_proofs_work :: let probe = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_needs_only_the_proofs_work :: let ub = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/binomial_tests.rs :: ledger_audit_at :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_early_proof_allocates_nothing_coefficient_sized :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_early_proof_allocates_nothing_coefficient_sized :: let b = Budget::unlimited(); #1": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },

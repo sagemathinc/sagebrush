@@ -83,6 +83,35 @@ pub fn rem_u64(x: &BigInt, m: u64) -> u64 {
     }
 }
 
+/// Calls f with each 64-bit limb of |x|, least significant first, from the
+/// borrowed digits (no allocation; any word width: 32-bit words are paired).
+#[cfg(not(feature = "num-backend"))]
+pub fn for_each_u64_limb(x: &BigInt, mut f: impl FnMut(u64)) {
+    let (_, w) = x.0.as_sign_words();
+    let (mut acc, mut nb) = (0u128, 0u32);
+    for &d in w {
+        acc |= (d as u128) << nb;
+        nb += 8 * std::mem::size_of_val(&d) as u32;
+        if nb >= 64 {
+            f(acc as u64);
+            acc >>= 64;
+            nb -= 64;
+        }
+    }
+    if nb > 0 {
+        f(acc as u64);
+    }
+}
+
+/// Calls f with each 64-bit limb of |x|, least significant first, from the
+/// borrowed digits (no allocation).
+#[cfg(feature = "num-backend")]
+pub fn for_each_u64_limb(x: &BigInt, mut f: impl FnMut(u64)) {
+    for d in x.magnitude().iter_u64_digits() {
+        f(d);
+    }
+}
+
 /// The integer with these 64-bit limbs (little-endian), negated if neg.
 #[cfg(not(feature = "num-backend"))]
 pub fn from_limbs(neg: bool, limbs: &[u64]) -> BigInt {
@@ -108,6 +137,16 @@ mod tests {
     use super::*;
     use num_integer::Integer;
     use num_traits::{FromPrimitive, Num, One, Signed, ToPrimitive, Zero};
+
+    #[test]
+    fn the_limb_stream_matches_the_digits() {
+        for n in [BigInt::from(-5), (BigInt::from(1) << 64u32) - 1, (BigInt::from(1) << 200u32) + 12345, -((BigInt::from(1) << 4097u32) + 3)] {
+            let mut v = vec![];
+            for_each_u64_limb(&n, |d| v.push(d));
+            let want = n.to_u64_digits().1;
+            assert_eq!(v, want, "{n}");
+        }
+    }
 
     #[test]
     fn rem_and_limbs() {

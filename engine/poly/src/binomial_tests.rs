@@ -458,7 +458,85 @@ fn a_generic_binomial_is_rejected_before_any_bisection() {
         assert!(a.prefilter_rejects >= 1 && a.prefilter_evals >= a.prefilter_rejects, "{bits} bits: {a:?}");
         // each call debits its fold (limbs + 1), each witness at least 130
         assert!(a.pp_used >= a.prefilter_calls * (limbs(bits as u64) + 1) + a.prefilter_evals * 130, "{bits} bits: the prefilter's work not debited: {a:?}");
-        assert!(a.pp_preflight >= a.pp_used, "{bits} bits: {a:?}");
+        assert!(a.proof_preflight >= a.pp_used && a.pp_preflight == 0, "{bits} bits: the proof alone is admitted: {a:?}");
+        assert_eq!(b.live(), 0);
+    }
+}
+
+/// The early proof allocates nothing coefficient-sized: not_a_power streams
+/// borrowed limbs (zero bytes allocated, through both tiers), and stage_b
+/// proves g = 1 before any copy, reservation or conversion buffer (its live
+/// peak stays below one coefficient's size) (CORR-R3-BIN5-R3-1/2, PREF-MEM-1).
+#[test]
+fn the_early_proof_allocates_nothing_coefficient_sized() {
+    let b = Budget::unlimited();
+    for bits in [4097u32, 16384, 65536] {
+        let f = binom(bits);
+        for (n, l) in [(&f[0], 2u64), (&f[12], 3), (&(BigInt::from(3).pow(bits / 2)), 2), (&(BigInt::from(5).pow(bits / 3)), 7)] {
+            let before = crate::alloc_spy::allocated();
+            not_a_power(&b, n, l).unwrap();
+            assert_eq!(crate::alloc_spy::allocated(), before, "{bits} bits, l {l}: the prefilter allocated");
+        }
+    }
+    for bits in [16384u32, 65536] {
+        let f = binom(bits);
+        let b = Budget::unlimited();
+        let (r, peak) = crate::alloc_spy::peak_during(|| stage_b(&b, 12, &f[12], &f[0]).map(|o| o.is_none()));
+        assert!(r.unwrap(), "{bits} bits: g = 1 proved");
+        assert!(peak < (bits / 8) as i64, "{bits} bits: live peak {peak} B, a coefficient is {} B", bits / 8);
+        assert_eq!(b.live(), 0);
+    }
+}
+
+/// The residue proof is admitted on its own (PREF-WORK-1): a generic
+/// non-power needs only the proof's work, never the bisection plan's.  At the
+/// least work that factors it, the whole call is far below that plan, makes
+/// no bisection and multiplies back; one unit less is refused.  And stage_b
+/// alone: the divisor scan plus exactly the proof's preflight returns g = 1,
+/// one unit less refuses for that preflight, before any work or copy.
+#[test]
+fn a_generic_binomial_needs_only_the_proofs_work() {
+    for bits in [4097u32, 8192, 16384] {
+        let f = binom(bits);
+        let ok = |w: u64| {
+            let b = Budget::new(Limits { work: w, ..Limits::DEFAULT });
+            try_factor_with(&f, &b).is_ok()
+        };
+        let probe = Budget::unlimited();
+        let (r, a) = audit::during(|| try_factor_with(&f, &probe));
+        r.unwrap();
+        // a tenth of the bisection plan suffices; then the least that does
+        let plan = plan_powers(bits as u64, 12, &[2, 3]).unwrap();
+        let (mut lo, mut hi) = (0u64, plan / 10);
+        assert!(ok(hi), "{bits} bits: a tenth of the bisection plan ({}) refused", plan / 10);
+        while lo + 1 < hi {
+            let mid = lo + (hi - lo) / 2;
+            if ok(mid) {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        assert!(hi >= a.proof_preflight, "{bits} bits: least work {hi} below the proof's preflight");
+        let b = Budget::new(Limits { work: hi, ..Limits::DEFAULT });
+        let (r, a2) = audit::during(|| try_factor_with(&f, &b));
+        let (c, fs) = r.unwrap();
+        assert_eq!(expand(&c, &fs), f);
+        assert_eq!(a2.bisections, 0, "{bits} bits: {a2:?}");
+        assert!(!ok(hi - 1));
+        // stage_b alone, at the proof's exact admission
+        let ub = Budget::unlimited();
+        let before = ub.work_left();
+        divisors_and_primes(&ub, 12).unwrap();
+        let scan = before - ub.work_left();
+        let need = a.proof_preflight;
+        let b = Budget::new(Limits { work: scan + need, ..Limits::DEFAULT });
+        assert!(stage_b(&b, 12, &f[12], &f[0]).unwrap().is_none(), "{bits} bits");
+        let b = Budget::new(Limits { work: scan + need - 1, ..Limits::DEFAULT });
+        let start = crate::alloc_spy::allocated();
+        let e = stage_b(&b, 12, &f[12], &f[0]).err().unwrap();
+        assert_eq!((e.what, e.need, e.phase), ("work", need, Phase::PerfectPower), "{bits} bits: {e}");
+        assert!(crate::alloc_spy::allocated() - start < 1024, "{bits} bits: allocated before the refusal");
         assert_eq!(b.live(), 0);
     }
 }
