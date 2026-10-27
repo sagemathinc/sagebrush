@@ -25,7 +25,8 @@ function fixture(files: Record<string, string>): any {
     symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
     for (const [p, text] of Object.entries({ "web/worker.ts": "export {};\n", ...files })) {
       mkdirSync(dirname(join(dir, p)), { recursive: true });
-      writeFileSync(join(dir, p), text);
+      if (text.startsWith("\0symlink:")) symlinkSync(text.slice(9), join(dir, p));
+      else writeFileSync(join(dir, p), text);
     }
     return S.census(dir);
   } finally {
@@ -50,32 +51,122 @@ test("the gate passes on this tree: every record classified, nothing stale, the 
   assert.equal(g.classes.size, g.cur.records.length);
 });
 
-test("train-16: the census reads the tracked tree only: a build's output changes nothing; an unreviewed generated import fails the gate", () => {
-  // the worker imports a generated module, which the build writes (here with a store in it, which the
-  // census must not see either way) and which a fresh checkout doesn't have
-  const worker = 'import "../build/cli/lib-meta.gen.js";\nimport { u } from "./util";\nexport const w = [u, new Uint8Array(2)];\n';
-  const built = { "build/cli/lib-meta.gen.js": "globalThis.__SAGEBRUSH_BUILD_ID__ = new Uint8Array(4);\n" };
-  const util = { "web/util.ts": "export const u = 1;\n" };
-  const without = fixture({ "web/worker.ts": worker, ...util });
-  const withBuild = fixture({ "web/worker.ts": worker, ...util, ...built });
-  assert.deepEqual(withBuild.header, without.header, "the header, built or not");
-  assert.deepEqual(withBuild.records, without.records, "the records, built or not");
-  assert.deepEqual(withBuild.programFiles, without.programFiles, "the program's files, built or not");
-  assert.ok(!withBuild.programFiles.some((f: string) => f.startsWith("build/")), withBuild.programFiles.join(" "));
-  assert.deepEqual(without.header.generated, [{ path: "build/cli/lib-meta.gen.js", from: ["web/worker.ts"], generator: S.GENERATED["build/cli/lib-meta.gen.js"] }]);
-  assert.deepEqual(G.generatedProblems(without), [], "a reviewed generated module passes");
-  assert.equal(G.gate(null, { table: {}, cur: withBuild }).problems.filter((p: any) => p.problem === "generated").length, 0);
-  // an unreviewed one fails, by its path, built or not, whichever way it's named
-  for (const [name, text] of [["import", 'import "../build/other.gen.js";\n'], ["export from", 'export * from "../build/x/other.gen.js";\n'], ["import()", 'export const p = () => import("../build/other.gen.js");\n'], ["require", 'declare const require: (s: string) => unknown;\nexport const r = require("../build/other.gen.js");\n']]) {
-    for (const extra of [{}, { "build/other.gen.js": "export {};\n", "build/x/other.gen.js": "export {};\n" }] as Record<string, string>[]) {
-      const c = fixture({ "web/worker.ts": text, ...extra });
+// (train-16, r9) the tracked tree only: each kind of reference into build/, built and not
+const GEN_CLI = readFileSync(join(ROOT, "scripts/build-cli.mjs"), "utf8");
+const LIB_META = 'globalThis.__SAGEBRUSH_BUILD_ID__ = "b";\nglobalThis.__SAGEBRUSH_VERSION__ = "v";\nglobalThis.__SAGEBRUSH_NOTICES__ = [];\n';
+const FX_OPTS = JSON.parse(readFileSync(join(ROOT, "tsconfig.json"), "utf8")).compilerOptions;
+const fxConfig = (extra: object) => JSON.stringify({ compilerOptions: { ...FX_OPTS, ...extra }, include: ["src/**/*.ts", "pyparse/src/**/*.ts", "web/**/*.ts"] });
+const STORE = "export const a = new Uint8Array(3);\n";
+const REFERENCE_CASES: [string, Record<string, string>, Record<string, string>, string[]][] = [
+  // [name, tracked files, the build's files, the generated problems' paths]
+  ["the reviewed generated module", { "web/worker.ts": 'import "../build/cli/lib-meta.gen.js";\nimport { u } from "./util";\nexport const w = [u, new Uint8Array(2)];\n', "web/util.ts": "export const u = 1;\n", "scripts/build-cli.mjs": GEN_CLI }, { "build/cli/lib-meta.gen.js": LIB_META }, []],
+  ["a triple-slash .ts reference", { "web/worker.ts": '/// <reference path="../build/hidden.ts" />\nexport const w = 1;\n' }, { "build/hidden.ts": "const hiddenStore = new Uint8Array(1);\n" }, ["build/hidden.ts"]],
+  ["a triple-slash .d.ts reference (it would change the checker)", { "web/worker.ts": '/// <reference path="../build/types.d.ts" />\nexport const m = mk();\n' }, { "build/types.d.ts": "declare function mk(): ArrayBuffer;\n" }, ["build/types.d.ts"]],
+  ["a tracked declaration file's reference", { "web/worker.ts": '/// <reference path="./types.d.ts" />\nexport const m = mk2();\n', "web/types.d.ts": '/// <reference path="../build/t2.d.ts" />\n' }, { "build/t2.d.ts": "declare function mk2(): ArrayBuffer;\n" }, ["build/t2.d.ts"]],
+  ["a relative types reference", { "web/worker.ts": '/// <reference types="../build/tref" />\nexport const t = tr();\n' }, { "build/tref/index.d.ts": "declare function tr(): ArrayBuffer;\n" }, ["build/tref"]],
+  ["a tsconfig path alias", { "tsconfig.json": fxConfig({ paths: { "gen/*": ["build/*"] } }), "web/worker.ts": 'import { a } from "gen/alias";\nexport const x = a;\n' }, { "build/alias.ts": STORE }, ["build", "build/alias"]],
+  ["a tsconfig typeRoots entry", { "tsconfig.json": fxConfig({ typeRoots: ["./build/types", "./node_modules/@types"] }), "web/worker.ts": "export const w = 1;\n" }, { "build/types/x/index.d.ts": "declare function tx(): ArrayBuffer;\n" }, ["build/types"]],
+  ["a tracked symlink to a built file", { "web/link.ts": "\0symlink:../build/real.ts", "web/worker.ts": 'import { a } from "./link";\nexport const y = a;\n' }, { "build/real.ts": STORE }, ["build/real.ts"]],
+  ["a tracked symlink to the build directory", { "web/gen": "\0symlink:../build/gendir", "web/worker.ts": 'import { a } from "./gen/mod";\nexport const y = a;\n' }, { "build/gendir/mod.ts": STORE }, ["build/gendir/mod"]],
+  ["an import", { "web/worker.ts": 'import "../build/other.gen.js";\n' }, { "build/other.gen.js": "export {};\n" }, ["build/other.gen.js"]],
+  ["an export from", { "web/worker.ts": 'export * from "../build/x/other.gen.js";\n' }, { "build/x/other.gen.js": "export {};\n" }, ["build/x/other.gen.js"]],
+  ["an import()", { "web/worker.ts": 'export const p = () => import("../build/other.gen.js");\n' }, { "build/other.gen.js": "export {};\n" }, ["build/other.gen.js"]],
+  ["a require", { "web/worker.ts": 'declare const require: (s: string) => unknown;\nexport const r = require("../build/other.gen.js");\n' }, { "build/other.gen.js": "export {};\n" }, ["build/other.gen.js"]],
+  ["an import-equals", { "web/worker.ts": 'import o = require("../build/other.gen");\nexport const r = o;\n' }, { "build/other.gen.ts": "export const z = new Uint8Array(1);\n" }, ["build/other.gen"]],
+  ["an import type", { "web/worker.ts": 'export type T = typeof import("../build/other.gen");\n' }, { "build/other.gen.ts": "export const z = new Uint8Array(1);\n" }, ["build/other.gen"]],
+];
+test("train-16: the census reads the tracked tree only: whatever references build/, a build changes nothing, and only a reviewed generated module passes the gate", () => {
+  for (const [name, tracked, built, want] of REFERENCE_CASES) {
+    const without = fixture(tracked);
+    const withBuild = fixture({ ...tracked, ...built });
+    assert.deepEqual(withBuild.header, without.header, `${name}: the header, built or not`);
+    assert.deepEqual(withBuild.records, without.records, `${name}: the records, built or not`);
+    assert.deepEqual(withBuild.programFiles, without.programFiles, `${name}: the program's files, built or not`);
+    for (const c of [without, withBuild]) {
+      assert.ok(!c.programFiles.some((f: string) => f.startsWith("build/") || f === "web/link.ts" || f.startsWith("web/gen/")), `${name}: ${c.programFiles.join(" ")}`);
       const ps = G.gate(null, { table: {}, cur: c }).problems.filter((p: any) => p.problem === "generated");
-      assert.equal(ps.length, 1, `${name}: ${JSON.stringify(c.header.generated)}`);
-      assert.ok(!c.programFiles.some((f: string) => f.startsWith("build/")), `${name}: ${c.programFiles.join(" ")}`);
-      assert.match(ps[0].key, /^build\/(x\/)?other\.gen\.js$/, name);
-      assert.match(ps[0].detail, /imported by web\/worker\.ts from the excluded build output, with no reviewed generator/, name);
+      assert.deepEqual(ps.map((p: any) => p.key).sort(), [...want].sort(), `${name}: ${JSON.stringify(c.header.generated)}`);
+      for (const p of ps) assert.match(p.detail, /in the excluded build output, with no reviewed generator$/, name);
     }
   }
+  const reviewed = fixture(REFERENCE_CASES[0][1]);
+  assert.deepEqual(reviewed.header.generated, [{ path: "build/cli/lib-meta.gen.js", from: ["web/worker.ts"], generator: "scripts/build-cli.mjs", fragment_sha256: S.GENERATED["build/cli/lib-meta.gen.js"].fragment_sha256, contract: null }]);
+  // its generator missing from the tree: it fails, never passes by name
+  const { "scripts/build-cli.mjs": _, ...noGenerator } = REFERENCE_CASES[0][1];
+  const ps = G.generatedProblems(fixture(noGenerator));
+  assert.equal(ps.length, 1);
+  assert.match(ps[0].detail, /breaks the contract \(its generator scripts\/build-cli\.mjs is missing\)/);
+});
+
+test("train-16: the census host answers every read of an excluded path as missing, symlinks resolved; a program holding one is refused", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ab-host-"));
+  try {
+    for (const [p, t] of Object.entries({ "build/x.ts": "export {};\n", "web/a.ts": "export {};\n" })) {
+      mkdirSync(dirname(join(dir, p)), { recursive: true });
+      writeFileSync(join(dir, p), t);
+    }
+    symlinkSync("../build/x.ts", join(dir, "web/l.ts"));
+    symlinkSync("../build", join(dir, "web/d"));
+    symlinkSync("../build/never.ts", join(dir, "web/dangling.ts"));
+    const h = S.trackedHost(dir, {});
+    const at = (p: string) => join(dir, p);
+    assert.equal(h.fileExists(at("web/a.ts")), true);
+    for (const p of ["build/x.ts", "web/l.ts", "web/d/x.ts", "web/dangling.ts"]) assert.equal(h.fileExists(at(p)), false, p);
+    assert.equal(typeof h.readFile(at("web/a.ts")), "string");
+    for (const p of ["build/x.ts", "web/l.ts", "web/d/x.ts"]) assert.equal(h.readFile(at(p)), undefined, p);
+    assert.ok(h.getSourceFile(at("web/a.ts"), 99));
+    for (const p of ["build/x.ts", "web/l.ts", "web/d/x.ts"]) assert.equal(h.getSourceFile(at(p), 99), undefined, p);
+    assert.equal(h.directoryExists(at("web")), true);
+    for (const p of ["build", "web/d"]) assert.equal(h.directoryExists(at(p)), false, p);
+    assert.deepEqual(h.getDirectories(dir).sort(), ["web"]);
+    assert.deepEqual(h.getDirectories(at("web")), []);
+    assert.deepEqual(h.getDirectories(at("build")), []);
+    S.assertTracked(dir, [at("web/a.ts")]);
+    for (const p of ["build/x.ts", "web/l.ts", "web/d/x.ts"]) assert.throws(() => S.assertTracked(dir, [at("web/a.ts"), at(p)]), /the census program holds excluded files: /, p);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("train-16: a generated module is bound to its generator's fragment and contract, checked without a build", () => {
+  const P = "build/cli/lib-meta.gen.js";
+  const want = S.GENERATED[P].fragment_sha256;
+  const real = S.generatorContract(GEN_CLI, P);
+  assert.deepEqual(real, { fragment_sha256: want, contract: null }, "the tracked generator holds the reviewed fragment and the contract");
+  const frag = GEN_CLI.split("\n").find((l: string) => l.includes('"lib-meta.gen.js"'))!;
+  const edit = (from: string, to: string) => {
+    assert.equal(GEN_CLI.split(from).length, 2, from);
+    return GEN_CLI.replace(from, to);
+  };
+  const fragEdit = (from: string, to: string) => edit(frag, frag.replace(from, to));
+  const contractFails: [string, string, RegExp][] = [
+    ["a value not through JSON.stringify", fragEdit("${JSON.stringify(version)}", "${version}"), /a value isn't JSON\.stringify\(\.\.\.\): version/],
+    ["an allocation in the output", fragEdit("\\n`);", "\\nglobalThis.__X__ = new Uint8Array(4);\\n`);"), /its lines aren't each/],
+    ["a call in the output", fragEdit("globalThis.__SAGEBRUSH_VERSION__ = ", "globalThis.f(); globalThis.__SAGEBRUSH_VERSION__ = "), /its lines aren't each/],
+    ["not a template", fragEdit(/`.*`/.exec(frag)![0], "code"), /its text isn't a template/],
+    ["two writes of it", edit(frag, `${frag}\n${frag}`), /2 writes of lib-meta\.gen\.js, not one/],
+    ["no write of it", edit(frag, ""), /0 writes of lib-meta\.gen\.js, not one/],
+    ["another directory", fragEdit("join(out, ", "join(root, "), /its directory isn't the generator's one `out`/],
+    ["out moved", edit('const out = join(root, "build", "cli");', 'const out = join(root, "build", "other");'), /`out` isn't join\(root, "build", "cli"\)/],
+  ];
+  for (const [name, text, re] of contractFails) assert.match(S.generatorContract(text, P).contract ?? "(holds)", re, name);
+  // the contract held, the fragment changed (a renamed global): review and renewal, never silent
+  const renamed = S.generatorContract(fragEdit("__SAGEBRUSH_NOTICES__", "__SAGEBRUSH_NOTICES2__"), P);
+  assert.equal(renamed.contract, null);
+  assert.notEqual(renamed.fragment_sha256, want);
+  // the output directory's declaration is part of the fragment
+  const spaced = S.generatorContract(edit('const out = join(root, "build", "cli");', 'const out = join(root, "build", "cli" );'), P);
+  assert.equal(spaced.contract, null);
+  assert.notEqual(spaced.fragment_sha256, want);
+  // a change outside the fragment: the same fragment
+  assert.equal(S.generatorContract(edit("// 1. The Python library, as a JS object.", "// 1. The Python library, as a JS object (edited)."), P).fragment_sha256, want);
+  // the gate: each way it fails, and the reviewed one passing
+  const cur = (g: object) => ({ header: { generated: [{ path: P, from: ["web/worker.ts"], generator: "scripts/build-cli.mjs", fragment_sha256: want, contract: null, ...g }] } });
+  assert.deepEqual(G.generatedProblems(cur({})), []);
+  assert.match(G.generatedProblems(cur({ fragment_sha256: renamed.fragment_sha256 }))[0].detail, /its generator's fragment changed \(sha256 \w+, reviewed \w+\): review it and renew GENERATED/);
+  assert.match(G.generatedProblems(cur({ contract: "x" }))[0].detail, /breaks the contract \(x\)/);
+  assert.match(G.generatedProblems(cur({ generator: null }))[0].detail, /with no reviewed generator/);
+  assert.match(G.generatedProblems({ header: { generated: [{ path: "build/cli/other.gen.js", from: ["web/worker.ts"], generator: "scripts/build-cli.mjs", fragment_sha256: want, contract: null }] } })[0].detail, /with no reviewed generator/);
 });
 
 test("the base census is the census recomputed at its commit, byte for byte", () => {
@@ -91,7 +182,10 @@ test("the base census is the census recomputed at its commit, byte for byte", ()
   }
   const dir = mkdtempSync(join(tmpdir(), "ab-base-"));
   try {
-    const tar = execFileSync("git", ["archive", B, "tsconfig.json", ...base.header.dirs], { cwd: ROOT, maxBuffer: 1 << 30 });
+    // (the census's tracked inputs at B: its tsconfig, the directories it scans, and each reviewed generator it
+    // checks a generated module's contract in; a generator missing at B fails the archive, loudly)
+    const generators = [...new Set((base.header.generated ?? []).map((g: any) => g.generator).filter(Boolean))] as string[];
+    const tar = execFileSync("git", ["archive", B, "tsconfig.json", ...base.header.dirs, ...generators], { cwd: ROOT, maxBuffer: 1 << 30 });
     execFileSync("tar", ["-x", "-C", dir], { input: tar });
     symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
     const now: string = S.censusText(S.census(dir, { commit: B }));
