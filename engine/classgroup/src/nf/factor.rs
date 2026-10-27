@@ -127,6 +127,15 @@ fn strong_lucas_prp(n: &BigInt) -> bool {
     false
 }
 
+// The pipeline's fixed parameters, named so that the estimator
+// (nf/cost.rs) models exactly what runs here.
+/// Trial division by the primes below this bound.
+pub const TRIAL_BOUND: u64 = 1 << 16;
+/// One Pollard-Brent rho attempt's iterations.
+pub const RHO_ITERS: u64 = 1 << 20;
+/// Rho and ECM work modulo at most this many bits.
+pub const SPLIT_BITS_MAX: u64 = 1024;
+
 /// A nontrivial factor of a composite n (no factors below 2^16): a perfect
 /// power's root, then Pollard-Brent rho (in Montgomery arithmetic; factors
 /// up to ~10^12), then the elliptic curve method with bounds that keep
@@ -140,7 +149,7 @@ fn split(n: &BigInt) -> Option<BigInt> {
         }
     }
     let nu = n.to_biguint()?;
-    if let Some(d) = super::ecm::rho(&nu, 1 << 20, 0x9E37_79B9) {
+    if let Some(d) = super::ecm::rho(&nu, RHO_ITERS, 0x9E37_79B9) {
         return Some(BigInt::from(d));
     }
     super::ecm::ecm_until_found(&nu, 0x2545_F491_4F6C_DD1D).map(BigInt::from)
@@ -160,7 +169,7 @@ pub fn factor(n: &BigInt) -> Result<Vec<(BigInt, u32)>, String> {
             out.push((p, 1));
         }
     };
-    for p in crate::arith::primes_up_to(1 << 16) {
+    for p in crate::arith::primes_up_to(TRIAL_BOUND) {
         let bp = BigInt::from(p);
         if &bp * &bp > n {
             break;
