@@ -891,6 +891,143 @@ def test_r2_CORR_157_4_wait_timeline_diagnostic_portable():
             print("  timeline: " + l)
 
 
+def test_r2_CORR_157_4_precise_wait_diagnostic_portable():
+    # DIAGNOSTICS ONLY (#157 Stop, design r4's review: "a different wait
+    # strategy first"): can a timed wait keep 25 ms slices on macOS, where
+    # Event/Lock/sleep/select at 25 ms took 65-185 ms (pypi 40505623350)?
+    # Nothing here changes Sagebrush or is bounded; it prints, per system:
+    # - the main thread's QoS class (macOS);
+    # - waits by: time.sleep, Event.wait, select; on macOS
+    #   also mach_wait_until (an absolute deadline), a kqueue timer with
+    #   NOTE_CRITICAL, and sleep/Event/select/mach_wait_until again after
+    #   raising the thread's QoS to USER_INTERACTIVE; on Windows a
+    #   high-resolution waitable timer, and sleep/Event after timeBeginPeriod(1);
+    # - for each, Stop's latency through a loop of such waits: interrupt_main
+    #   from a Timer, taken just before it, to the KeyboardInterrupt (10 tries).
+    # Each slice is requested at 20 ms; every ACTUAL slice is measured from
+    # just before the call to just after it returns to Python (so including
+    # the GIL's reacquisition: check to check), 200 plus those of the Stop
+    # tries: count, median, p99, MAX, and how many exceeded 25 ms.  Stop: 10
+    # interrupt_main tries and, on POSIX, 5 real SIGINTs from another process
+    # (send time just before os.kill): the worst of each.  A QoS or timer
+    # period change is recorded and undone in finally.
+    # Asserted only: the runs complete.
+    out = ok(diag("""
+    import ctypes, select, statistics
+    W = 0.020   # (each slice requested at 20 ms: the claim is every ACTUAL slice <= 25 ms)
+    N, TRIES = 200, 10
+    def stats(name, f, n=N):
+        try:
+            f()
+            d = []
+            for _ in range(n):
+                a = time.monotonic(); f(); d.append(time.monotonic() - a)
+            lat, inloop = [], []
+            for _ in range(TRIES):
+                fired = []
+                def fire():
+                    fired.append(time.monotonic())
+                    _thread.interrupt_main()
+                threading.Timer(0.15, fire).start()
+                try:
+                    while True:
+                        a = time.monotonic()
+                        try:
+                            f()
+                        finally:
+                            inloop.append(time.monotonic() - a)
+                except KeyboardInterrupt:
+                    lat.append(time.monotonic() - fired[0])
+            real = []
+            if sys.platform != "win32":
+                SEND = "import os, signal, sys, time\\ntime.sleep(0.15)\\nt = time.monotonic()\\nos.kill(int(sys.argv[1]), signal.SIGINT)\\nprint(repr(t), flush=True)"
+                for _ in range(5):
+                    sender = subprocess.Popen([sys.executable, "-I", "-c", SEND, str(os.getpid())], stdout=subprocess.PIPE, text=True)
+                    try:
+                        while True:
+                            a = time.monotonic()
+                            try:
+                                f()
+                            finally:
+                                inloop.append(time.monotonic() - a)
+                    except KeyboardInterrupt:
+                        at = time.monotonic()
+                        real.append(at - float(sender.communicate()[0].strip()))
+            allw = sorted(d + inloop)
+            over = sum(1 for x in allw if x > 0.025)
+            print("precise %-30s slices %4d: min %.4f median %.4f p99 %.4f MAX %.4f over25ms %d | interrupt_main x%d worst %.4f | real SIGINT x%d worst %s" % (
+                name, len(allw), allw[0], statistics.median(allw), allw[int(len(allw) * 0.99) - 1], allw[-1], over, len(lat), max(lat),
+                len(real), "%.4f" % max(real) if real else "n/a"))
+        except Exception as e:
+            print("precise %-30s n/a (%s: %s)" % (name, type(e).__name__, str(e)[:80]))
+    ev = threading.Event()
+    def sel():
+        select.select([], [], [], W)
+    stats("sleep", lambda: time.sleep(W))
+    stats("event", lambda: ev.wait(W))
+    if sys.platform != "win32":
+        stats("select", sel)
+    if sys.platform == "darwin":
+        libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+        libc.qos_class_self.restype = ctypes.c_uint
+        print("precise qos_class_self at start: 0x%x" % libc.qos_class_self())
+        class TB(ctypes.Structure):
+            _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+        tb = TB(); libc.mach_timebase_info(ctypes.byref(tb))
+        libc.mach_absolute_time.restype = ctypes.c_uint64
+        libc.mach_wait_until.argtypes = [ctypes.c_uint64]
+        ticks = int(W * 1e9 * tb.denom / tb.numer)
+        def mach():
+            libc.mach_wait_until(libc.mach_absolute_time() + ticks)
+        stats("mach_wait_until", mach)
+        kq = select.kqueue()
+        NOTE_CRITICAL = 0x20
+        def kqt():
+            kq.control([select.kevent(1, filter=select.KQ_FILTER_TIMER, flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT, fflags=NOTE_CRITICAL, data=20)], 1, None)
+        stats("kqueue timer NOTE_CRITICAL", kqt)
+        q0 = libc.qos_class_self()
+        r = libc.pthread_set_qos_class_self_np(0x21, 0)
+        try:
+            print("precise pthread_set_qos_class_self_np(USER_INTERACTIVE) -> %d; qos now 0x%x" % (r, libc.qos_class_self()))
+            stats("sleep +QoS UI", lambda: time.sleep(W))
+            stats("event +QoS UI", lambda: ev.wait(W))
+            stats("select +QoS UI", sel)
+            stats("mach_wait_until +QoS UI", mach)
+            stats("kqueue NOTE_CRITICAL +QoS UI", kqt)
+        finally:
+            r2 = libc.pthread_set_qos_class_self_np(q0, 0)
+            print("precise QoS restored to 0x%x -> %d; qos now 0x%x" % (q0, r2, libc.qos_class_self()))
+    if sys.platform == "win32":
+        k32 = ctypes.WinDLL("kernel32")
+        k32.CreateWaitableTimerExW.restype = ctypes.c_void_p
+        k32.CreateWaitableTimerExW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32]
+        k32.SetWaitableTimer.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_longlong), ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+        k32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        h = k32.CreateWaitableTimerExW(None, None, 0x2, 0x1F0003)
+        due = ctypes.c_longlong(-int(W * 1e7))
+        def hrt():
+            k32.SetWaitableTimer(h, ctypes.byref(due), 0, None, None, 0)
+            k32.WaitForSingleObject(h, 0xFFFFFFFF)
+        if h:
+            stats("waitable timer HIGH_RESOLUTION", hrt)
+        else:
+            print("precise waitable timer HIGH_RESOLUTION n/a (CreateWaitableTimerExW failed)")
+        winmm = ctypes.WinDLL("winmm")
+        print("precise timeBeginPeriod(1) -> %d" % winmm.timeBeginPeriod(1))
+        try:
+            stats("sleep +timeBeginPeriod(1)", lambda: time.sleep(W))
+            stats("event +timeBeginPeriod(1)", lambda: ev.wait(W))
+        finally:
+            print("precise timeEndPeriod(1) -> %d" % winmm.timeEndPeriod(1))
+    print("precise done")
+    """))
+    lines = out.split("\n")
+    assert "precise done" in lines, out
+    for l in lines:
+        if l.startswith("precise "):
+            print("  " + l)
+
+
 # (after the diagnostics above, so that a failure here leaves their numbers in the log)
 def test_r2_CORR_157_4_the_thread_transport_portable():
     # astra2: Windows's pipes driven by blocking calls on helper threads
