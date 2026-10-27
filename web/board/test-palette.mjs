@@ -1,6 +1,6 @@
 // The board's palette (plan-board-dark r2 §2, step 1): every color board.css
 // and the canvas use is one of the custom properties board.css defines on
-// :where(.sbb, .sbb-layer), the canvas's with palette.ts's LIGHT values
+// :where(.sbb, .sbb-layer, #board-print), the canvas's with palette.ts's LIGHT values
 // exactly (so light draws as before), and readPalette takes each property,
 // else LIGHT's.
 //   bun web/board/test-palette.mjs
@@ -20,8 +20,9 @@ check(literal.length === 0, "board.ts draws with the palette, no color of its ow
 
 // board.css: the definitions, and no color outside them (Find's ::highlight aside)
 const css = readFileSync(new URL("board.css", here), "utf8");
-const def = /:where\(\.sbb, \.sbb-layer\) \{([^{}]*)\}/.exec(css);
-check(!!def, "board.css defines its colors on :where(.sbb, .sbb-layer)");
+const def = /:where\(\.sbb, \.sbb-layer, #board-print\) \{([^{}]*)\}/.exec(css);
+check(!!def, "board.css defines its colors on :where(.sbb, .sbb-layer, #board-print): the board, its panels, print's sheets");
+check(/root\.id = "board-print";/.test(readFileSync(new URL("print.ts", here), "utf8")), "print's root is #board-print (print.ts)");
 const defs = new Map();
 for (const m of (def?.[1] ?? "").replace(/\/\*.*?\*\//gs, "").matchAll(/(--board-[a-z0-9-]+):\s*([^;]+);/g)) {
   check(!defs.has(m[1]), "defined once: " + m[1]);
