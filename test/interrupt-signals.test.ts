@@ -68,10 +68,10 @@ test("the regex calibration's pick: in band first, else the smallest size in [5.
   // train-18: n = 27 at 8035 ms, widened as before
   const t18 = pick([a(24, 1003), a(27, 8035)]).r;
   assert.deepEqual([t18.n, t18.label], [27, "widened (doubling step)"]);
-  // a size in band wins over a smaller widened one, unlabelled
-  const inBand = pick([a(26, 5100), a(27, 7000)]).r;
+  // a size in band wins over a smaller eligible widened one (5600 ms is inside [5.5, 12] s), unlabelled
+  const inBand = pick([a(26, 5600), a(27, 7000)]).r;
   assert.deepEqual([inBand.n, inBand.label], [27, undefined]);
-  // controls: nothing in [5, 12] s (or untimed) stays null, so the rows stay INVALID
+  // controls: nothing in [5.5, 12] s (or untimed) stays null, so the rows stay INVALID
   assert.equal(pick([a(24, 754), a(26, 5499), a(27, 12001)]).r, null);
   // the window's edges are inclusive
   assert.deepEqual([pick([a(26, 5500)]).r.n, pick([a(28, 12000)]).r.n], [26, 28]);
