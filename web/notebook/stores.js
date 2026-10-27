@@ -491,7 +491,7 @@ export class IdbStore {
     if (!this.db) return "not saved: this browser has no storage";
     // (a journal store writes nothing without the journal's word; any other store, nothing with it)
     const jw = opts.journal;
-    if (this.journal !== !!jw || (jw && !((jw.keep === true || (Number.isSafeInteger(jw.j) && jw.j >= 0)) && typeof jw.hash === "string" && [undefined, false, true, "too-large"].includes(jw.unjournaled)))) return "not saved: this notebook's save didn't come through sync's journal: reload this page";
+    if (this.journal !== !!jw || (jw && !((jw.keep === true || (Number.isSafeInteger(jw.j) && jw.j >= 0)) && typeof jw.hash === "string" && [undefined, false, true, "too-large"].includes(jw.unjournaled) && (!jw.markOnly || (jw.keep === true && jw.unjournaled === true))))) return "not saved: this notebook's save didn't come through sync's journal: reload this page";
     // (refused while the page says so: the workspace quarantined, design/workspace-durability.md A.3)
     const gate = refusal();
     if (gate) return `not saved: ${gate}`;
@@ -518,6 +518,12 @@ export class IdbStore {
       get.onsuccess = () => {
         if (result?.refused) return;
         // (T2: never over a value the journal has later than this one's, so the store never moves back)
+        // (the record marked alone, its value and revision kept (journal.js markRecord): no new revision, nothing told)
+        if (jw?.markOnly) {
+          if (get.result && !get.result.unjournaled) st.put({ ...get.result, unjournaled: jw.unjournaled });
+          result = { marked: true };
+          return;
+        }
         const { j: _j, hash: _h, unjournaled: _u, ...plain } = doc;
         const j = jw?.keep ? get.result?.j ?? 0 : jw?.j;
         const rec = (jw && (get.result?.j ?? 0) > j) ? null : revise(get.result, { ...plain, id: this.id, updated: Date.now(), ...(jw ? { j, hash: jw.hash, ...(jw.unjournaled ? { unjournaled: jw.unjournaled } : {}) } : {}) });
@@ -541,6 +547,7 @@ export class IdbStore {
       throw e;
     }
     if (out.refused) return `not saved: ${out.refused}`;
+    if (out.marked) return { marked: true };
     if (out.conflict) return { conflict: out.conflict };
     getChannel()?.postMessage({ from: tabId, id: this.id, doc: out.rec });
     return { saved: "saved in this browser", rev: out.rec.rev };
