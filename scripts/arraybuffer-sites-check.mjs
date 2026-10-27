@@ -318,6 +318,12 @@ export function renewal(oldBase, deltas, cur, problemsAtB) {
 }
 
 // the whole gate, for the test and the command line
+// an import of a generated module (the excluded build output, which the census doesn't read) needs a
+// reviewed generator (GENERATED in arraybuffer-sites.mjs); any other fails, by its path
+export function generatedProblems(cur) {
+  return (cur.header.generated ?? []).filter((g) => !g.generator).map((g) => ({ problem: "generated", key: g.path, detail: `imported by ${g.from.join(", ")} from the excluded build output, with no reviewed generator` }));
+}
+
 export function gate(root = ROOT, { table = readTable(root), base = null, cur = census(root) } = {}) {
   const d = derive(cur, table);
   const derived = derivedEntries(cur, d);
@@ -326,6 +332,7 @@ export function gate(root = ROOT, { table = readTable(root), base = null, cur = 
   if (want !== JSON.stringify(derived)) problems.push({ problem: "stale", what: "derived", detail: "the derived section is out of date: run --update and review the diff" });
   const pp = pyparseRule(cur);
   problems.push(...pp.problems);
+  problems.push(...generatedProblems(cur));
   if (base) problems.push(...compareBase(base, cur, table.deltas));
   return { cur, derived, classes, problems, derivation: d, pyparseExcluded: pp.excluded };
 }
