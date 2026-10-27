@@ -9,3 +9,6 @@ description = "Rigorous ball arithmetic for Sagebrush's certificates: enclosures
 sagebrush-bigint = { path = "../bigint" }
 num-integer = "0.1"
 num-traits = "0.2"
+
+[lints]
+workspace = true
