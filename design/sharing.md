@@ -67,7 +67,7 @@ Pages read the files with CORS, plus `Cross-Origin-Resource-Policy: cross-origin
 ## Link previews
 
 - **A live share's page** (`/s/<id>`, `/s/<id>@<hash prefix>`) carries its version's title in its `<title>` and og/twitter tags, from D1 (`versions.title`), never cached (web/site/src/preview.ts).
-- **Anything else** gets the generic card: the same bytes for a deleted share, an id that never existed, a version without a stored title (every version from before migration 0004), and a lookup that fails. Its image is made absolute from the site's origin and it has no `og:url`.
+- **Anything else** gets the generic card: the same bytes for a deleted share, an id that never existed, a version without a stored title (older versions left untitled by migration 0004), and a lookup that fails. Its image is made absolute from the site's origin and it has no `og:url`.
 - **Visibility:** every committed collection today is for anyone with the link, so a title on its page reveals nothing the link doesn't. An uncommitted draft has no latest version, and gets the generic card. **A private or signed-in-only share mode, if one comes, needs its own gate in `sharePreview`.**
 
 ## Deleting

@@ -455,8 +455,12 @@ jobs:
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
+          CHROME=google-chrome node web/share/test-share-dialog.mjs
           bun web/site/test-preview.mjs
           bun web/share-client/test-file-deps.mjs
+          bun web/share-client/test-selection.mjs
+          bun web/share-client/test-deps-client.mjs
+          bun web/share-client/test-upload.mjs
           bun web/test-no-site-build.mjs
           bun web/test-reproducible-build.mjs
 
