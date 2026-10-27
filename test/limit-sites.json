@@ -560,6 +560,14 @@
   "class": "none",
   "owner": "sage"
  },
+ "engine/poly/examples/transition_bench.rs ::  :: use sagebrush_poly::Budget; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/examples/transition_bench.rs :: main :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/binomial.rs ::  :: pub(crate) const BINOMIAL_MAX_BITS: u64 = 4096; #0": {
   "class": "3",
   "owner": "polynomial factorization",
@@ -868,6 +876,11 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/lib.rs :: zassenhaus :: if max_size == usize::MAX && lifted.len() > vanhoeij::ZASSENHAUS_MAX { #0": {
+  "class": "none",
+  "note": "the no-subset audit counter (plan r3 4.2)",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/tests.rs :: a_huge_exponent_is_refused_by_its_reservation :: for k in [u64::MAX, u64::MAX / 2, u64::MAX / 4, 1 << 61] { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -937,19 +950,14 @@
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs ::  :: pub const MAX_COLS: usize = 32; #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
- },
- "engine/poly/src/vanhoeij.rs ::  :: pub const MAX_R: usize = 96; #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+  "class": "none",
+  "note": "stage length: Stage 1's columns, then Stage 2 continues (rank-3 plan r3 4.7)",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs ::  :: pub const ZASSENHAUS_MAX: usize = 8; #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+  "class": "none",
+  "note": "selector by measurement (plan r3 3.1), never a refusal",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs ::  :: use crate::budget::{big_bytes, limbs, mul_work, poly_bytes, tag, words_bytes, Budget, FResult, Phase, Reservation}; #0": {
   "class": "none",
@@ -964,6 +972,10 @@
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: a_huge_precision_is_refused_before_it_wraps :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: a_star :: let gamma = maxbits(g).checked_add(cl(n.checked_add(1)?).div_ceil(2))?; #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
@@ -987,6 +999,10 @@
   "class": "2",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/vanhoeij.rs :: factored :: let r = fault::with_hooks(hooks, a0, at_star, || crate::try_factor_with(f, &Budget::unlimited()).map(|x| x.1.len())); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/vanhoeij.rs :: lattice :: Vec::with_capacity(MAX_COLS) #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -999,10 +1015,9 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/vanhoeij.rs :: lattice :: fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> FResult<Option<Vec<Held<'b>>>> { #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+ "engine/poly/src/vanhoeij.rs :: lattice :: fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_last: &mut u64) -> FResult<Option<Vec<Held<'b>>>> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: lattice :: handoff!(whole, level_bytes, held_want, lll::lattice_bytes(d, w, cap).unwrap()); #0": {
   "class": "none",
@@ -1017,9 +1032,14 @@
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: lattice :: if cols.len() >= MAX_COLS { #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+  "class": "none",
+  "note": "stage length: Stage 1's columns, then Stage 2 continues (rank-3 plan r3 4.7)",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: if cols.len() >= MAX_COLS { #2": {
+  "class": "none",
+  "note": "stage length: Stage 1's columns, then Stage 2 continues (rank-3 plan r3 4.7)",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: lattice :: let (entry, modfs_b, bounds_b, cols_b) = (b.live(), words_bytes(2 * (n as u64 + r as u64 + 1)).unwrap(), bounds_bytes(g).unwrap(), words_bytes(MAX_COLS as u64).unwrap()); #0": {
   "class": "none",
@@ -1047,29 +1067,39 @@
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: lattice :: while want.len() < COLS_PER_PASS && cols.len() + want.len() < MAX_COLS && (used_low + used_high) < n { #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+  "class": "none",
+  "note": "stage length (Stage 1) and batching width (COLS_PER_PASS)",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: product :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: recombine :: found.extend(zassenhaus(b, &g, rest, &pk, &m.possible, usize::MAX)?.found); #0": {
   "class": "3",
   "owner": "polynomial factorization",
   "row": "inv-35"
  },
- "engine/poly/src/vanhoeij.rs :: recombine :: found.extend(zassenhaus(b, &g, rest, &pk, &m.possible, usize::MAX)?.found); #1": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+ "engine/poly/src/vanhoeij.rs :: recombine :: if rest.len() <= ZASSENHAUS_MAX { #0": {
+  "class": "none",
+  "note": "selector by measurement (plan r3 3.1), never a refusal",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/vanhoeij.rs :: recombine :: if rest.len() <= ZASSENHAUS_MAX || rest.len() > MAX_R { #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+ "engine/poly/src/vanhoeij.rs :: s5_stage2 :: fn s5_stage2(b: &Budget, limit: Option<u64>) -> (FResult<usize>, crate::alloc_spy::Report, fault::Reach) { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/vanhoeij.rs :: recombine :: let _p = b.enter(if rest.len() <= ZASSENHAUS_MAX { Phase::Zassenhaus } else { Phase::Fallback }); #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+ "engine/poly/src/vanhoeij.rs :: s5_stage2 :: s5_stage2_from(b, limit, None) #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: s5_stage2_from :: b.set_memory_limit(limit.unwrap_or(1 << 30)); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: s5_stage2_from :: fn s5_stage2_from(b: &Budget, limit: Option<u64>, a0: Option<u64>) -> (FResult<usize>, crate::alloc_spy::Report, fault::Reach) { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/vanhoeij.rs :: s6_lattice :: assert!(lifted.len() > ZASSENHAUS_MAX); #0": {
   "class": "none",
@@ -1099,11 +1129,171 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/vanhoeij.rs :: shift :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage1_call :: b.set_memory_limit(limit.unwrap_or(u64::MAX)); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage1_call :: fn stage1_call(b: &Budget, f: &[BigInt], limit: Option<u64>) -> FResult<Option<usize>> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: None => a_last.checked_mul(2).ok_or_else(|| b.refuse(\"precision\", u64::MAX, a_last))?.max(m.k), #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: assert!(dets.iter().all(|x| x.bits() <= cap), \"a Gram determinant above cap bits\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: b.debit(mul_work(rows.len() as u64, maxbits(&q), r as u64, 64))?; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_last: u64) -> FResult<Vec<Held<'b>>> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: handoff!(whole, level_bytes, held_want, lll::lattice_bytes(d, w, cap).unwrap()); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: held.shrink(rows_bytes(d, w, cap).unwrap_or(0)); #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: held_want = lll::lattice_bytes(d, w, cap).unwrap(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: let (rows_b, dets_b) = (rows_bytes(d, w, cap).unwrap(), big_bytes(cap).unwrap() * (d as u64 + 1)); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: let cap = lll::cap_bits(d, e).ok_or_else(|| b.refuse(\"lll bits (overflow)\", u64::MAX, 0))?; #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: let dets_bytes = big_bytes(cap).and_then(|x| x.checked_mul(d as u64 + 1)); #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: let e = rows.iter().map(|x| maxbits(x)).max().unwrap_or(0); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: let ebits = rows.iter().map(|x| maxbits(x)).max().unwrap_or(0).max(ubits + pa.bits() + clog2(r as u64) + 1); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: let kept = b.reserve(rows_bytes(d, w, cap).zip(dets_bytes).and_then(|(x, y)| x.checked_add(y)))?; #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: let l = b.reserve(lll::lattice_bytes(d, w, cap))?; #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: let ubits = rows.iter().map(|x| maxbits(&x[..r])).max().unwrap_or(0); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2 :: lll::lll(b, std::mem::take(&mut rows), cap)? #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2_direct :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2_reaches_a_fourth_level :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2_tight_memory_over_all_passes :: assert_eq!((e.what, e.kind), (\"memory\", crate::Kind::Resource), \"{e}\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2_tight_memory_over_all_passes :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2_tight_memory_over_all_passes :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #1": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: stage2_tight_memory_over_all_passes :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #2": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/vanhoeij.rs :: the_ledger_holds_on_s6 :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/vanhoeij.rs :: the_proved_precision_bounds_hold_exactly :: assert!(big(p) * big(p) * &bmax * &bmax * &num_bp2 * &q * &q < pow2(2 * st.mu) * &den); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_proved_precision_bounds_hold_exactly :: assert!(bmax < pow2(st.beta_b)); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_proved_precision_bounds_hold_exactly :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_proved_precision_bounds_hold_exactly :: let bmax = bounds.iter().max().unwrap().clone(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_proved_precision_bounds_hold_exactly :: let lhs = big(n) * big(p) * big(p) * &bmax * &bmax * big(1 + 2 * s + r) * &num_bp2; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/vanhoeij.rs :: the_size_tags_hold_on_s6 :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_stage2_ledger_charges_the_retained_shape :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_stage2_ledger_charges_the_retained_shape :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #1": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_stage2_ledger_charges_the_retained_shape :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #2": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: the_stage2_ledger_holds_on_every_pass :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: vm_guard_rows :: assert_eq!((e.what, e.kind), (\"memory\", crate::Kind::Resource), \"{name}: {e}\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: vm_guard_rows :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: vm_guard_rows :: let b = Budget::new(Limits::DEFAULT); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: vm_s7s6_tight_memory :: let b = Budget::new(Limits::UNLIMITED); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: vm_s7s6_tight_memory :: let b = Budget::new(Limits::UNLIMITED); #1": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/vanhoeij.rs :: vm_s7s6_tight_memory :: let b = Budget::new(Limits::UNLIMITED); #2": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
@@ -1315,6 +1505,26 @@
   "class": "2+3",
   "owner": "symbolic engine",
   "row": "inv-44"
+ },
+ "engine/sym/tests/stage2_interrupt.rs ::  :: use sagebrush_poly::{Budget, Limits}; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/sym/tests/stage2_interrupt.rs :: an_interrupt_between_stage2_passes_leaves_no_reservation :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/sym/tests/stage2_interrupt.rs :: an_interrupt_between_stage2_passes_leaves_no_reservation :: let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT }); #1": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/sym/tests/stage2_interrupt.rs :: stop_in_each_lll :: let b = Budget::new(Limits { memory, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/sym/tests/stage2_interrupt.rs :: stop_in_each_lll :: let b = Budget::new(Limits { memory, ..Limits::DEFAULT }); #1": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/web/src/hmfq.rs ::  :: const MAX_DISC: i64 = 1 << 20; #0": {
   "class": "3",
