@@ -20,8 +20,10 @@ After each: admitted = replied (the worker's native counts), N replies, each
 with its request's id, none twice, no restart, the worker alive, and the log
 phase-correct: each index at most once (no replay), every request that
 finished normally in it, with its own result.  One JSON line of results;
-exit 1 on any failure.  WALL_S (default 900) bounds each phase: a phase that
-runs over fails.
+exit 1 on any failure.  WALL_S (default 900, the plan's 15 min per version)
+bounds the whole run, half for each phase: a phase that runs over fails.
+Against PR A's worker (the control) interrupts are untargeted SIGINTs and
+there are no native counts; the same checks run on the replies and the log.
 """
 
 import json
@@ -35,7 +37,15 @@ import time
 import sagebrush.session as S
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 2000
-WALL_S = float(sys.argv[2]) if len(sys.argv) > 2 else 900.0
+WALL_S = float(sys.argv[2]) if len(sys.argv) > 2 else 900.0  # (the whole run's: each phase gets half)
+
+
+def interrupt(s, rid):
+    # (the control run, on PR A's worker: Session.interrupt() takes no id there, and signals whatever runs)
+    try:
+        s.interrupt(rid)
+    except TypeError:
+        s.interrupt()
 
 
 def quiet_run(s, code, tries=50):
@@ -48,7 +58,9 @@ def quiet_run(s, code, tries=50):
 
 
 def stats(s):
-    return eval(quiet_run(s, "import sagebrush._native as _n; _n._serve_stats()")["result"])
+    # (None on PR A's worker: no native loop, so no native counts)
+    r = quiet_run(s, "import sagebrush._native as _n; getattr(_n, '_serve_stats', lambda: None)()")
+    return eval(r["result"]) if r["result"] else None
 
 
 def phase(s, name, storm):
@@ -56,7 +68,7 @@ def phase(s, name, storm):
     quiet_run(s, "log = []")
     base = stats(s)
     gen = s.generation
-    t_end = time.monotonic() + WALL_S
+    t_end = time.monotonic() + WALL_S / 2
     stop = threading.Event()
     sent = {}  # id -> interrupts targeted at it
     replies = {}
@@ -88,11 +100,11 @@ def phase(s, name, storm):
         k = rng.random()
         if k < 0.3:
             time.sleep(rng.uniform(0, 0.006))
-            s.interrupt(rid)
+            interrupt(s, rid)
             sent[rid] = sent.get(rid, 0) + 1
         elif k < 0.5 and done_ids:
             old = rng.choice(done_ids[-5:])
-            s.interrupt(old)
+            interrupt(s, old)
             sent[old] = sent.get(old, 0) + 1
         r = s._get(rid, 60)
         if not r:
@@ -109,8 +121,9 @@ def phase(s, name, storm):
         time.sleep(0.2)
     log = eval(quiet_run(s, "log")["result"])
     st = stats(s)
-    admitted = st["admitted"] - base["admitted"]
-    replied = st["replied"] - base["replied"]
+    native = st is not None and base is not None
+    admitted = st["admitted"] - base["admitted"] if native else None
+    replied = st["replied"] - base["replied"] if native else None
     interrupted = [rid for rid, (i, r) in replies.items() if (r.get("error_info") or {}).get("type") == "interrupted"]
     finished = [i for rid, (i, r) in replies.items() if r.get("error") is None]
     if len(log) != len(set(log)):
@@ -129,15 +142,16 @@ def phase(s, name, storm):
         if unearned:
             problems.append("interrupted with no interrupt for their id (a stale one ended them): %r" % unearned[:10])
     # (the quiet_run requests in between are admitted and replied too: the stats request itself is the one not yet replied)
-    if admitted != replied:
+    if native and admitted != replied:
         problems.append("admitted %d != replied %d" % (admitted, replied))
     if len(replies) != N:
         problems.append("%d replies for %d requests" % (len(replies), N))
     if s.generation != gen or not s.alive():
         problems.append("restarted or dead")
     return {"phase": name, "n": N, "replies": len(replies), "interrupted": len(interrupted), "targeted_sent": sum(sent.values()),
-            "sigints": sigints[0], "log": len(log), "admitted": admitted, "replied": replied, "stale": st["stale"] - base["stale"],
-            "woken": st["woken"] - base["woken"], "late": st["late"] - base["late"], "problems": problems}
+            "sigints": sigints[0], "log": len(log), "admitted": admitted, "replied": replied, "native": native,
+            "stale": st["stale"] - base["stale"] if native else None, "woken": st["woken"] - base["woken"] if native else None,
+            "late": st["late"] - base["late"] if native else None, "problems": problems}
 
 
 def replies_err(replies, i):
