@@ -8,9 +8,10 @@
    the Edit toolbar's ⋯ panel, an edge's editor), which adds no specificity. */
 /* The board's colors (plan-board-dark r2 §2): every color below is one of these,
    on the board and the panels it puts on the page, so a theme sets them in one
-   place; the canvas reads the ones it draws with (palette.ts).  (Find's marks,
-   ::highlight(sb-find), keep their color: a highlight's own.) */
-:where(.sbb, .sbb-layer) {
+   place; the canvas reads the ones it draws with (palette.ts).  Print's sheets
+   (#board-print, print.ts) have them too, and always these: exports stay light.
+   (Find's marks, ::highlight(sb-find), keep their color: a highlight's own.) */
+:where(.sbb, .sbb-layer, #board-print) {
   --board-note-bg: #fff; --board-surface: #fff; --board-bg: #fafaf7; --board-hover: #eef2ea;
   --board-code-bg: #f3f2ec; --board-doc-bg: #f6f6f2; --board-code-inline-bg: rgba(0, 0, 0, .06);
   --board-pre-bg: rgba(0, 0, 0, .05); --board-block-hover: rgba(0, 0, 0, .03);
