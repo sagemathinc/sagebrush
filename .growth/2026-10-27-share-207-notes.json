@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "#207 notes (#222): the Share dialog opens at once while the sign-in check runs, its live region speaks once the dialog is drawn, and a site without sharing has no Upload section (web/index.html's openShare, Share menu and #sharechecking), which cli/pyjs.cjs embeds with the page; measured by #222's PR ci 40575736776 size-gate row: cli/pyjs.cjs 28912584 -> 28915008, +2424, tested merge e1ad1ad8 (head 91556f97, base 2cdcc518); no other bundle changes",
+ "bytes": {
+  "cli/pyjs.cjs": 2424
+ }
+}
