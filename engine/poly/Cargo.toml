@@ -20,3 +20,9 @@ test-faults = []
 [dev-dependencies]
 # (tests only: Stop at a chosen check of a named site, tests/binomial_stop.rs)
 sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
+
+# The transition gate's bench (rank-3 plan r3 section 5): it drives Stage 1's
+# exits through the recombination hooks, so it builds only with them
+[[example]]
+name = "transition_bench"
+required-features = ["test-faults"]

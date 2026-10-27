@@ -17,6 +17,7 @@ fn fresh(total_bytes: u64) -> std::sync::MutexGuard<'static, ()> {
     s.baseline = None;
     s.retired = 0;
     s.fault = false;
+    s.instance = None;
     s.permit_in_flight = 0;
     s.last_growth_delta = 0;
     #[cfg(not(target_arch = "wasm32"))]
@@ -282,7 +283,9 @@ fn wasm_totals_are_checked() {
     // 1.3: 1 when some applicable row is joint or unknown)
     assert_eq!(total_from_wasm(4294967296.0, 0, 1), Some(Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: true, uncertified: true }));
     assert_eq!(total_from_wasm(4294967296.0, 0, 0).map(|t| t.uncertified), Some(false));
-    for (b, s, j) in [(-1.0, 0, 0), (1.5, 0, 0), (f64::NAN, 0, 0), (f64::INFINITY, 0, 0), (1.0, 3, 0), (1.0, 0, 2), (1e300, 0, 0)] {
+    // (3 is absent since C r16b: no shared row applies; 4 and up are none)
+    assert_eq!(total_from_wasm(1.0, 3, 0).map(|t| t.status), Some(TotalStatus::Absent));
+    for (b, s, j) in [(-1.0, 0, 0), (1.5, 0, 0), (f64::NAN, 0, 0), (f64::INFINITY, 0, 0), (1.0, 4, 0), (1.0, 0, 2), (1e300, 0, 0)] {
         assert_eq!(total_from_wasm(b, s, j), None, "{} {} {}", b, s, j);
     }
 }
@@ -729,4 +732,197 @@ fn the_failed_creation_fault_is_sticky_and_refuses_protected_growth() {
     assert!(matches!(reserve_growth("block", 100), Err(EngineError::Memory(_))));
     state().unmark_certified_chain(op.chain());
     assert_eq!(op.finish(), Ok(()));
+}
+
+// ---- C r16b: the instance-local row takes no R_ret; both scopes are checked
+
+/// Pages with no shared row (absent) and an instance total of `usable`
+/// usable bytes; the fake usage rows (which stand for the shared watermark
+/// row) are cleared.
+fn instance_only(committed: u64, usable: u64) -> std::sync::MutexGuard<'static, ()> {
+    let g = fresh(total_for_usable(usable));
+    hooks::set_fake_usage(None);
+    hooks::set_fake_committed(Some(committed));
+    set_total(Some(Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false }));
+    set_instance_total(Some(Total { bytes: total_for_usable(usable), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    g
+}
+
+#[test]
+fn the_instance_row_takes_no_retired_pages_by_one_byte_and_at_equality() {
+    // phi (L + O + x) <= E_inst: 80 usable, L 16: x = 64 fits exactly, one
+    // FRAG_DEN more doesn't; R_ret (far over the room) is not a term
+    let _g = instance_only(16 * P, 80 * P);
+    set_retired((1000 * P) as f64, 0).unwrap();
+    match reserve("x", 64 * P + FRAG_DEN) {
+        Err(EngineError::Memory(r)) => {
+            assert_eq!((r.row, r.live), ("instance", 16 * P));
+            // (LIMIT-C2BII-2: the instance row's own figures, never the
+            // absent shared record's, and no R_ret)
+            let inst = total_for_usable(80 * P);
+            assert_eq!((r.status, r.total, r.allowance, r.joint, r.retired), (TotalStatus::Observed, inst, inst / SHARE_DEN, false, 0));
+            let m = EngineError::Memory(r).to_string();
+            assert!(m.contains("this engine instance") && !m.contains("retired"), "{}", m);
+        }
+        _ => panic!("one step over must refuse"),
+    }
+    assert!(reserve("x", 64 * P).is_ok());
+}
+
+#[test]
+fn both_scopes_are_checked_and_the_shared_row_still_takes_retired_pages() {
+    // shared 100 usable with R_ret 30 (fake row: usage 10), instance 80
+    // usable (L 10): the shared row binds at 60, the instance one at 70
+    let _g = fresh(total_for_usable(100 * P));
+    hooks::set_fake_usage(Some((10 * P, None)));
+    hooks::set_fake_committed(Some(10 * P));
+    set_instance_total(Some(Total { bytes: total_for_usable(80 * P), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    set_retired((30 * P) as f64, 0).unwrap();
+    match reserve("x", 60 * P + FRAG_DEN) {
+        Err(EngineError::Memory(r)) => {
+            let t = total_for_usable(100 * P);
+            assert_eq!((r.row, r.status, r.total, r.allowance, r.retired), ("shared", TotalStatus::Observed, t, t / SHARE_DEN, 30 * P));
+        }
+        _ => panic!("the shared row must refuse"),
+    }
+    let r = reserve("x", 60 * P).unwrap();
+    drop(r);
+    // without R_ret the shared row would admit 90: the instance row (70) binds
+    set_retired(0.0, 0).unwrap();
+    set_instance_total(Some(Total { bytes: total_for_usable(80 * P), status: TotalStatus::Zero, joint: false, uncertified: false }));
+    set_retired((5 * P) as f64, 0).unwrap();
+    match reserve("x", 70 * P + FRAG_DEN) {
+        Err(EngineError::Memory(r)) => {
+            // (its own status, zero here, and no R_ret though 5 pages are retired)
+            let i = total_for_usable(80 * P);
+            assert_eq!((r.row, r.status, r.total, r.allowance, r.retired), ("instance", TotalStatus::Zero, i, i / SHARE_DEN, 0));
+        }
+        _ => panic!("the instance row must refuse"),
+    }
+    set_retired(0.0, 0).unwrap();
+    assert!(reserve("x", 70 * P).is_ok());
+}
+
+#[test]
+fn the_growth_room_is_the_least_over_the_rows_in_force() {
+    // shared 100 usable, R_ret 30, instance 50 usable, L 10: rooms 60 and 40
+    let _g = paged(10 * P, 100 * P);
+    set_instance_total(Some(Total { bytes: total_for_usable(50 * P), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    set_retired((30 * P) as f64, 0).unwrap();
+    assert_eq!(reserve_growth("block", 69 * P).unwrap().granted(), 40 * P);
+    // the instance row alone (shared absent): 40, R_ret not a term
+    set_total(Some(Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false }));
+    assert_eq!(reserve_growth("block", 69 * P).unwrap().granted(), 40 * P);
+    set_instance_total(Some(Total { bytes: total_for_usable(100 * P), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    assert_eq!(reserve_growth("block", 69 * P).unwrap().granted(), 71 * P, "W(b) within an instance room of 90");
+}
+
+/// The room of the nominal shared total (D0's 1 GiB) at L and R_ret.
+fn nominal_room(live: u64, retired: u64) -> u64 {
+    (NOMINAL_TOTAL / SHARE_DEN) * FRAG_DEN / FRAG_NUM - live - retired
+}
+
+#[test]
+fn no_usable_row_is_never_permission_the_nominal_total_is_checked() {
+    // LIMIT-C2BII-1 (astra2): an absent shared total and no instance total
+    // fail closed to the nominal total, for growth (never the whole
+    // envelope) and for ordinary reservations (never no check at all)
+    let _g = paged(10 * P, 100 * P);
+    set_retired((30 * P) as f64, 0).unwrap();
+    set_total(Some(Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false }));
+    set_instance_total(None);
+    let room = nominal_room(10 * P, 30 * P);
+    let g = reserve_growth("block", 1 << 40).unwrap();
+    assert_eq!(g.granted(), room, "the nominal room, not W(1 TiB)");
+    drop(g);
+    assert_eq!(outstanding_bytes(), 0);
+    // an envelope that overflows is refused on the nominal shared row
+    match reserve_growth("block", u64::MAX) {
+        Err(EngineError::Memory(r)) => assert_eq!((r.row, r.status, r.total, r.retired), ("shared", TotalStatus::Nominal, NOMINAL_TOTAL, 30 * P)),
+        _ => panic!("an overflowing envelope must refuse"),
+    }
+    // ordinary admission: the fake row stands for the watermark row (usage 10)
+    hooks::set_fake_usage(Some((10 * P, None)));
+    match reserve("x", 1 << 40) {
+        Err(EngineError::Memory(r)) => {
+            assert_eq!((r.row, r.status, r.total, r.allowance, r.retired), ("shared", TotalStatus::Nominal, NOMINAL_TOTAL, NOMINAL_TOTAL / SHARE_DEN, 30 * P));
+        }
+        _ => panic!("1 TiB with no usable row must refuse"),
+    }
+    assert_eq!(outstanding_bytes(), 0, "the refused call holds nothing");
+    assert!(reserve("x", room - FRAG_DEN).is_ok());
+    // with no measure either: the native fallback checks the nominal total
+    hooks::set_fake_usage(None);
+    match reserve("x", 1 << 40) {
+        Err(EngineError::Memory(r)) => assert_eq!((r.status, r.total), (TotalStatus::Nominal, NOMINAL_TOTAL)),
+        _ => panic!("1 TiB with no usable row and no measure must refuse"),
+    }
+    // and an instance row present makes the shared absence real again
+    set_instance_total(Some(Total { bytes: total_for_usable(100 * P), status: TotalStatus::Observed, joint: false, uncertified: false }));
+    assert_eq!(shared_row(total(), true), None);
+}
+
+#[test]
+fn growth_refusals_name_the_binding_row_with_its_own_figures() {
+    // LIMIT-C2BII-2: the instance row binds (room 40, shared absent, R_ret
+    // 30 retired): a permit over the grant reports the instance's own total
+    // and status, retired 0; then the shared row binds (room 30 < 40)
+    let _g = paged(10 * P, 100 * P);
+    set_retired((30 * P) as f64, 0).unwrap();
+    let inst = Total { bytes: total_for_usable(50 * P), status: TotalStatus::Observed, joint: false, uncertified: false };
+    set_instance_total(Some(inst));
+    set_total(Some(Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false }));
+    let mut g = reserve_growth("block", 69 * P).unwrap();
+    assert_eq!(g.granted(), 40 * P);
+    match g.permit(41 * P) {
+        Err(EngineError::Memory(r)) => {
+            assert_eq!((r.row, r.status, r.total, r.allowance, r.joint, r.retired), ("instance", TotalStatus::Observed, inst.bytes, inst.bytes / SHARE_DEN, false, 0));
+        }
+        _ => panic!("a permit over the grant must refuse"),
+    }
+    drop(g);
+    match reserve_growth("block", u64::MAX) {
+        Err(EngineError::Memory(r)) => assert_eq!((r.row, r.status, r.total, r.retired), ("instance", TotalStatus::Observed, inst.bytes, 0)),
+        _ => panic!("an overflowing envelope must refuse"),
+    }
+    // shared 70 usable, R_ret 30, L 10: room 30, under the instance's 40
+    let shared = Total { bytes: total_for_usable(70 * P), status: TotalStatus::Observed, joint: false, uncertified: false };
+    set_total(Some(shared));
+    let mut g = reserve_growth("block", 69 * P).unwrap();
+    assert_eq!(g.granted(), 30 * P);
+    match g.permit(31 * P) {
+        Err(EngineError::Memory(r)) => {
+            assert_eq!((r.row, r.status, r.total, r.allowance, r.retired), ("shared", TotalStatus::Observed, shared.bytes, shared.bytes / SHARE_DEN, 30 * P));
+        }
+        _ => panic!("a permit over the grant must refuse"),
+    }
+    drop(g);
+}
+
+#[test]
+fn certification_with_an_absent_shared_total_needs_an_observed_instance_total() {
+    let obs = Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: false, uncertified: false };
+    let absent = Total { bytes: 0, status: TotalStatus::Absent, joint: false, uncertified: false };
+    let nominal = Total { status: TotalStatus::Nominal, ..obs };
+    assert!(wasm_totals_certified(false, obs, None));
+    assert!(wasm_totals_certified(false, obs, Some(obs)));
+    assert!(wasm_totals_certified(false, absent, Some(obs)));
+    assert!(!wasm_totals_certified(false, absent, None), "absent and no instance total");
+    assert!(!wasm_totals_certified(false, obs, Some(nominal)), "an instance total present but not observed");
+    assert!(!wasm_totals_certified(false, Total { uncertified: true, ..absent }, Some(obs)), "a joint or unknown row anywhere");
+    assert!(!wasm_totals_certified(true, absent, Some(obs)), "the fault");
+    assert!(!wasm_totals_certified(false, nominal, Some(obs)));
+}
+
+#[test]
+fn the_pushed_totals_parse_absent_and_refuse_anything_else() {
+    // (absent is a status, never zero: a zero total stays a zero total)
+    assert_eq!(total_from_wasm(0.0, 3, 1).map(|t| (t.status, t.uncertified)), Some((TotalStatus::Absent, true)));
+    assert_eq!(total_from_wasm(0.0, 1, 0).map(|t| t.status), Some(TotalStatus::Zero));
+    assert_eq!(TotalStatus::from_code(3), None, "a native host never sends absent");
+    assert_eq!(instance_total_from_wasm(4294967296.0, 0), Ok(Some(Total { bytes: 1 << 32, status: TotalStatus::Observed, joint: false, uncertified: false })));
+    assert_eq!(instance_total_from_wasm(0.0, 3), Ok(None));
+    for (b, st) in [(f64::NAN, 0), (-1.0, 0), (0.5, 0), (1e17, 0), (65536.0, 7), (65536.0, 4)] {
+        assert_eq!(instance_total_from_wasm(b, st), Err(()), "{} {}", b, st);
+    }
 }

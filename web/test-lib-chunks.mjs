@@ -51,5 +51,17 @@ ok(twins.manifest.files["_string.py"] === "mod-string" && twins.manifest.files["
 let clash = "";
 try { libChunks({ "a_b.py": "", "a-b.py": "" }, { py: rec({}) }, "b"); } catch (e) { clash = String(e.message); }
 ok(/would both be mod-a-b/.test(clash), "two other names that would share a group are refused: " + clash);
+// (MATLAB's sparse LU, _matlab_lu and _matlab_colamd, is its own group,
+// matlab-lu; the other MATLAB extras, and names that only start alike, stay
+// in matlab-more; a file a mode's start compiled stays in that mode's group)
+const lu = libChunks({ "core.py": "", "_matlab.py": "", "_matlab_lu.py": "L = 1\n", "_matlab_colamd.py": "C = 1\n", "_matlab_plot.py": "", "_matlab_lu_extra.py": "", "_matlab_colamd_extra.py": "", "_matlab_tex.py": "" },
+  { py: rec({ "py|core": mod("core.py") }), matlab: rec({ "py|core": mod("core.py"), "py|_matlab": mod("_matlab.py") }) }, "b");
+const fl = lu.manifest.files;
+ok(fl["_matlab_lu.py"] === "matlab-lu" && fl["_matlab_colamd.py"] === "matlab-lu", "_matlab_lu and _matlab_colamd: matlab-lu");
+ok(["_matlab_plot.py", "_matlab_lu_extra.py", "_matlab_colamd_extra.py", "_matlab_tex.py"].every((f) => fl[f] === "matlab-more") && fl["_matlab.py"] === "matlab", "the other MATLAB extras stay in matlab-more, _matlab in matlab: " + JSON.stringify(fl));
+ok(lu.manifest.chunks["matlab-lu"]?.src && !lu.manifest.chunks["matlab-lu"].pre && !lu.manifest.modes.matlab.includes("matlab-lu"), "matlab-lu: sources only, and no mode's start fetches it");
+ok(JSON.stringify(Object.keys(JSON.parse(lu.chunks.get(lu.manifest.chunks["matlab-lu"].src.file).toString()).files).sort()) === JSON.stringify(["_matlab_colamd.py", "_matlab_lu.py"]), "its chunk holds exactly those two files");
+const luRec = libChunks({ "core.py": "", "_matlab.py": "", "_matlab_lu.py": "" }, { py: rec({}), matlab: rec({ "py|_matlab": mod("_matlab.py"), "py|_matlab_lu": mod("_matlab_lu.py") }) }, "b");
+ok(luRec.manifest.files["_matlab_lu.py"] === "matlab", "a start that compiled _matlab_lu keeps it in its own group (the recordings first)");
 console.log(`${checks - fails}/${checks} checks passed`);
 process.exit(fails ? 1 : 0);
