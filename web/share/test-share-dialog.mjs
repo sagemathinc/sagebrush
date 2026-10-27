@@ -112,7 +112,8 @@ const lastManifest = async () => {
   const mine = await ev("(async () => (await fetch('/api/share/mine')).json())()");
   const c = mine.collections[0];
   const v = await ev(`(async () => (await fetch('/api/share/c/${c.id}')).json())()`);
-  return { id: c.id, files: v.manifest.files.map((f) => f.path).sort() };
+  // (a collection with no version, as an older page's create-first left: no files, so the case fails, the run goes on)
+  return { id: c.id, files: (v.manifest?.files ?? []).map((f) => f.path).sort() };
 };
 
 try {
