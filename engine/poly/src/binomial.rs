@@ -139,13 +139,14 @@ pub(crate) mod audit {
         pub hom_used: u64,
         /// the residue prefilter: witnesses evaluated, numbers it proved
         /// not a power, and the bisections (exact_root calls) still made
+        pub prefilter_calls: u64,
         pub prefilter_evals: u64,
         pub prefilter_rejects: u64,
         pub bisections: u64,
     }
 
     thread_local! {
-        static LAST: std::cell::Cell<Audit> = const { std::cell::Cell::new(Audit { pp_preflight: 0, pp_used: 0, hom_preflight: 0, hom_used: 0, prefilter_evals: 0, prefilter_rejects: 0, bisections: 0 }) };
+        static LAST: std::cell::Cell<Audit> = const { std::cell::Cell::new(Audit { pp_preflight: 0, pp_used: 0, hom_preflight: 0, hom_used: 0, prefilter_calls: 0, prefilter_evals: 0, prefilter_rejects: 0, bisections: 0 }) };
     }
 
     pub fn set(f: impl FnOnce(&mut Audit)) {
@@ -564,11 +565,12 @@ fn plan_powers(bits: u64, m: u64, primes: &[u64]) -> Option<u64> {
         }
         let steps = bits.div_ceil(l - 1).checked_add(v)?.checked_add(1)?;
         u = u.checked_add(steps.checked_mul(2 * clog2(l) + 1)?.checked_mul(lb.checked_mul(lb)?)?)?;
-        // the residue prefilter: its witness search (at most WITNESS_K trial
-        // divisions of p < 2^32, sqrt(p) + 1 units each), then per root
-        // attempt (at most v + 1) WITNESSES evaluations of lb + 66 units
-        u = u.checked_add(WITNESS_K.checked_mul((1 << 16) + 1)?)?;
-        u = u.checked_add(v.checked_add(1)?.checked_mul(WITNESSES as u64)?.checked_mul(lb.checked_add(66)?)?)?;
+        // the residue prefilter, per call (at most v + 2: the g = 1 proof,
+        // then each root attempt): the fold, tier 1's 9 powerings, tier 2's
+        // WITNESS_K trial divisions (p < 2^32: sqrt(p) + 1 <= 2^16 + 1) and
+        // WITNESSES reductions
+        let call = lb.checked_add(1)?.checked_add(9 * 130)?.checked_add(WITNESS_K.checked_mul((1 << 16) + 1)?)?.checked_add(WITNESSES.checked_mul(lb.checked_add(66)?)?)?;
+        u = u.checked_add(v.checked_add(2)?.checked_mul(call)?)?;
     }
     u.checked_mul(2)?.checked_add(m.sqrt().checked_mul(2)?)
 }
@@ -602,48 +604,100 @@ fn pow_cmp(b: &Budget, c: &BigInt, l: u64, n: &BigInt) -> FResult<Option<bool>> 
 }
 
 /// The residue prefilter before the bisection (rank-3 PR 5 perf ruling,
-/// daybreak2 option (ii)): for a prime l, witnesses p = k l + 1 < 2^32, k =
-/// 1..=WITNESS_K, at most WITNESSES of them.  Fewer (or none: l large) only
-/// weaken the filter; the exact search still runs, never a refusal.
-const WITNESSES: usize = 8;
+/// daybreak2 option (ii)).  Tier 1: the prime factors of 2^64 - 1 and
+/// 2^64 + 1, whose residues come from one pass of additions over the limbs
+/// (2^64 = 1, resp. -1); tier 2: primes p = k l + 1 < 2^32 (k <= WITNESS_K)
+/// outside tier 1, by rem_u64, until WITNESSES witnesses were tried.  A
+/// witness serves l when p = 1 mod l; fewer witnesses only weaken the filter:
+/// the exact search still runs, never a refusal.
+const FOLD_MINUS: [u64; 7] = [3, 5, 17, 257, 641, 65537, 6700417];
+const FOLD_PLUS: [u64; 2] = [274177, 67280421310721];
+const WITNESSES: u64 = 8;
 const WITNESS_K: u64 = 64;
 
 fn is_prime_trial(p: u64) -> bool {
     p >= 2 && (2..).take_while(|d: &u64| d * d <= p).all(|d| p % d != 0)
 }
 
-/// The witness primes for l: one poll and one debit (sqrt(p) + 1 units: the
-/// trial division) per candidate.
-fn residue_witnesses(b: &Budget, l: u64) -> FResult<([u64; WITNESSES], usize)> {
-    let (mut w, mut n) = ([0u64; WITNESSES], 0usize);
-    for k in 1..=WITNESS_K {
-        let Some(p) = l.checked_mul(k).and_then(|x| x.checked_add(1)).filter(|&p| p < 1 << 32) else { break };
-        check();
-        b.debit(Some(p.sqrt() + 1))?;
-        if is_prime_trial(p) {
-            w[n] = p;
-            n += 1;
-            if n == WITNESSES {
-                break;
-            }
+/// x^e mod p for p < 2^63 (u128 products).
+fn powmod_w(x: u64, mut e: u64, p: u64) -> u64 {
+    let (mut r, mut x, p) = (1u128, x as u128 % p as u128, p as u128);
+    while e > 0 {
+        if e & 1 == 1 {
+            r = r * x % p;
         }
+        x = x * x % p;
+        e >>= 1;
     }
-    Ok((w, n))
+    r as u64
 }
 
-/// Whether n >= 1 is PROVED not an l-th power: some witness p (p = 1 mod l)
-/// has n mod p != 0 and (n mod p)^((p-1)/l) != 1 mod p.  Sound: n = r^l with
-/// p not dividing r gives (n mod p)^((p-1)/l) = r^(p-1) = 1 (Fermat).  false
-/// means "not proved", and the exact search decides.  One poll and one debit
-/// (the reduction's limbs plus the powering) per witness.
-fn not_a_power(b: &Budget, n: &BigInt, l: u64, w: &[u64]) -> FResult<bool> {
-    for &p in w {
-        check();
-        b.debit(limbs(n.bits()).checked_add(2 * clog2(p) + 2))?;
+/// |n| mod 2^64 - 1 and |n| mod 2^64 + 1, from one pass over the limbs.
+fn fold_residues(n: &BigInt) -> (u128, u128) {
+    let (_, d) = n.to_u64_digits();
+    let (mut s, mut e, mut o) = (0u128, 0u128, 0u128);
+    for (i, &x) in d.iter().enumerate() {
+        s += x as u128;
+        if i % 2 == 0 {
+            e += x as u128;
+        } else {
+            o += x as u128;
+        }
+    }
+    let (mm, mp) = ((1u128 << 64) - 1, (1u128 << 64) + 1);
+    (s % mm, (e % mp + mp - o % mp) % mp)
+}
+
+/// Whether the witness p proves r = n mod p is not an l-th power residue
+/// (p = 1 mod l): r != 0 and r^((p-1)/l) != 1 mod p.  Sound: n = t^l with p
+/// not dividing t gives r^((p-1)/l) = t^(p-1) = 1 (Fermat).
+fn witness_rejects(r: u64, p: u64, l: u64) -> bool {
+    r != 0 && powmod_w(r, (p - 1) / l, p) != 1
+}
+
+/// Whether n >= 1 is PROVED not an l-th power (false: not proved, and the
+/// exact search decides).  Polled; every step debited: the fold (limbs(n) +
+/// 1), each witness's powering (130), each tier-2 candidate's trial division
+/// (sqrt(p) + 1) and reduction (limbs(n) + 66).
+fn not_a_power(b: &Budget, n: &BigInt, l: u64) -> FResult<bool> {
+    check();
+    b.debit(limbs(n.bits()).checked_add(1))?;
+    #[cfg(test)]
+    audit::set(|a| a.prefilter_calls += 1);
+    let (rm, rp) = fold_residues(n);
+    let mut tried = 0u64;
+    let tier1 = FOLD_MINUS.iter().map(|&p| (p, (rm % p as u128) as u64)).chain(FOLD_PLUS.iter().map(|&p| (p, (rp % p as u128) as u64)));
+    for (p, r) in tier1.filter(|&(p, _)| p % l == 1) {
+        b.debit(Some(130))?;
+        tried += 1;
         #[cfg(test)]
         audit::set(|a| a.prefilter_evals += 1);
-        let r = n.mod_floor(&BigInt::from(p)).to_u64().unwrap();
-        if r != 0 && powmod_u(r, (p - 1) / l, p) != 1 {
+        if witness_rejects(r, p, l) {
+            #[cfg(test)]
+            audit::set(|a| a.prefilter_rejects += 1);
+            return Ok(true);
+        }
+    }
+    for k in 1..=WITNESS_K {
+        if tried >= WITNESSES {
+            break;
+        }
+        let Some(p) = l.checked_mul(k).and_then(|x| x.checked_add(1)).filter(|&p| p < 1 << 32) else { break };
+        if FOLD_MINUS.contains(&p) || FOLD_PLUS.contains(&p) {
+            continue;
+        }
+        check();
+        b.debit(Some(p.sqrt() + 1))?;
+        if !is_prime_trial(p) {
+            continue;
+        }
+        b.debit(limbs(n.bits()).checked_add(66))?;
+        tried += 1;
+        #[cfg(test)]
+        audit::set(|a| a.prefilter_evals += 1);
+        let r = sagebrush_bigint::rem_u64(n, p);
+        let r = if n.is_negative() && r != 0 { p - r } else { r };
+        if witness_rejects(r, p, l) {
             #[cfg(test)]
             audit::set(|a| a.prefilter_rejects += 1);
             return Ok(true);
@@ -730,12 +784,28 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
         }
         #[cfg(test)]
         audit::set(|a| a.pp_preflight = need);
+        // g = 1 when every prime l | m is excluded: -c0 negative for l = 2, or
+        // |c0| or a proved not an l-th power; then the general path, before
+        // any copy or reservation (a generic large binomial pays only this)
+        let mut excluded = true;
+        for &l in &primes {
+            if c0.is_positive() && l == 2 {
+                continue;
+            }
+            if !(not_a_power(b, c0, l)? || not_a_power(b, a, l)?) {
+                excluded = false;
+                break;
+            }
+        }
+        if excluded {
+            #[cfg(test)]
+            audit::set(|x| x.pp_used = pp_start - b.work_left());
+            return Ok(None);
+        }
         let _r = b.reserve(big_bytes(bits.checked_mul(2).and_then(|x| x.checked_add(64)).unwrap_or(u64::MAX)).and_then(|x| x.checked_mul(4)?.checked_add(big_bytes(bits)?.checked_mul(2)?)))?;
         let _s = enter("perfect power S7");
         let (mut u, mut v, mut g) = (u0, v0, 1u64);
         for &l in &primes {
-            let (w, nw) = residue_witnesses(b, l)?;
-            let w = &w[..nw];
             let mut t = m;
             while t % l == 0 {
                 t /= l;
@@ -744,7 +814,7 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
                     break;
                 }
                 // a proved non-power ends the search before any bisection
-                if not_a_power(b, &u.abs(), l, w)? || not_a_power(b, &v, l, w)? {
+                if not_a_power(b, &u, l)? || not_a_power(b, &v, l)? {
                     break;
                 }
                 #[cfg(test)]
