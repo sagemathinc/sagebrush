@@ -475,17 +475,22 @@ fn a_generic_binomial_is_rejected_before_any_bisection() {
 }
 
 /// The early proof folds each coefficient once and reuses its residues for
-/// every l: q^210 x^210 - p^210 has both coefficients true 210th powers, so
-/// every prime l | 210 consults both, each needing both folds; at most 2
-/// passes per coefficient (4), not one per (coefficient, l).
+/// every l: (2^210 + 1) x^210 - 3^210, where c0 = -3^210 is a true 210th
+/// power (never rejected, so consulted for every prime l | 210 = 2, 3, 5, 7,
+/// needing both its folds) and a = 2^210 + 1 is rejected at every l by a
+/// first-pass witness (3, 7, 641, 673: checked exactly).  g = 1 is proved
+/// with exactly 3 fold passes (c0's two, a's one), not one per (coefficient,
+/// l).
 #[test]
 fn the_residue_proof_folds_each_coefficient_once() {
-    let f = power_binomial(210, 2, 3);
+    let mut f = vec![BigInt::zero(); 211];
+    f[0] = -BigInt::from(3u32).pow(210u32);
+    f[210] = (BigInt::one() << 210u32) + BigInt::one();
     let b = Budget::unlimited();
-    let (r, a) = audit::during(|| stage_b(&b, 210, &f[210], &f[0]).map(|o| o.map(|v| v.len())));
-    assert!(r.unwrap().is_some());
-    assert!((2..=4).contains(&a.proof_folds), "{a:?}");
-    assert_eq!(b.live(), 0);
+    let (r, a) = audit::during(|| stage_b(&b, 210, &f[210], &f[0]).map(|o| o.is_none()));
+    assert!(r.unwrap(), "g = 1 proved");
+    assert_eq!(a.proof_folds, 3, "{a:?}");
+    assert_eq!((a.bisections, b.live()), (0, 0));
 }
 
 /// The early proof allocates nothing coefficient-sized: not_a_power streams
