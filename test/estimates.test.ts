@@ -81,8 +81,8 @@ test("%estimate: the outermost call with names or literals; anything else declin
     r.stdout,
     [
       "factor_integer an integer of 201 bits",
-      "UsageError %estimate estimates only the outermost",
-      "UsageError %estimate estimates only the outermost",
+      "UsageError %estimate estimates only the outermost c",
+      "UsageError %estimate estimates only the outermost c",
       "UsageError %estimate needs a call, f(args)",
       "",
     ].join("\n"),
