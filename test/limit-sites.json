@@ -568,14 +568,6 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/binomial.rs :: phi_exp :: fn phi_exp(b: &Budget, ph: usize) -> FResult<u32> { #0": {
-  "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)"
- },
- "engine/poly/src/binomial.rs :: phi_exp :: u32::try_from(ph).map_err(|_| b.refuse(\"work (overflow)\", u64::MAX, b.work_left())) #0": {
-  "class": "2",
-  "owner": "polynomial factorization (@sagebrush-sage2)"
- },
  "engine/poly/src/binomial.rs :: phis_certify :: fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q: &BigInt, h: usize, costs: &[PieceCost]) -> FResult<()> { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -584,11 +576,23 @@
   "class": "2",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/binomial.rs :: stage_b :: let _t = crate::budget::tag(\"piece costs\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: stage_b :: let len = usize::try_from(k.len).map_err(|_| b.refuse(\"memory (overflow)\", u64::MAX, 0))?; #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/binomial_tests.rs :: a_4200_bit_binomial_takes_stage_b :: let b = Budget::default(); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/binomial_tests.rs :: ledger_audit_at :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_piece_costs_are_charged_for_their_whole_life :: let b = Budget::default(); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
@@ -601,6 +605,10 @@
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/binomial_tests.rs :: the_piece_ledger_overflow_is_none :: assert!(plan_powers(u64::MAX, 2, &[2]).is_none()); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_piece_power_has_no_u32_cutoff :: let e = u32::MAX as u64 + 1; #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
