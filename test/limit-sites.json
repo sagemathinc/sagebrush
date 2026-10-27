@@ -568,15 +568,41 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/binomial.rs ::  :: pub(crate) const BINOMIAL_MAX_BITS: u64 = 4096; #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+ "engine/poly/src/binomial.rs :: phi_exp :: fn phi_exp(b: &Budget, ph: usize) -> FResult<u32> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/binomial.rs :: factor :: } else if a.bits() <= BINOMIAL_MAX_BITS && c0.bits() <= BINOMIAL_MAX_BITS { #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+ "engine/poly/src/binomial.rs :: phi_exp :: u32::try_from(ph).map_err(|_| b.refuse(\"work (overflow)\", u64::MAX, b.work_left())) #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: phis_certify :: fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q: &BigInt, h: usize, costs: &[PieceCost]) -> FResult<()> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: stage_b :: let (work, out_bytes, scratch, costs) = ledger().ok_or_else(|| b.refuse(\"work (overflow)\", u64::MAX, b.work_left()))?; #0": {
+  "class": "2",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_4200_bit_binomial_takes_stage_b :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: ledger_audit_at :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_piece_ledger_overflow_is_none :: assert!(piece_cost(1, 1, 1, u64::MAX).is_none()); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_piece_ledger_overflow_is_none :: assert!(piece_cost(u64::MAX, 1, 1, 1).is_none()); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_piece_ledger_overflow_is_none :: assert!(plan_powers(u64::MAX, 2, &[2]).is_none()); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/budget.rs :: default :: Budget::default_with(sagebrush_interrupt::memory_share()) #0": {
   "class": "2",
