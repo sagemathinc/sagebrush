@@ -189,10 +189,30 @@ pub fn aplist_many(curves: &[EllipticCurve], n: u64) -> Vec<Vec<(u64, Option<i64
     map(curves, |e| primes.iter().map(|&p| (p, e.ap(p))).collect())
 }
 
-/// (parallel with the `parallel` feature: the engine's one wrapper,
-/// sagebrush-par, under the caller's ledger context)
+/// (parallel with this crate's own `parallel` feature: the engine's one
+/// wrapper, sagebrush-par, under the caller's ledger context; sequential
+/// without it, however sagebrush-par's features are unified in the build)
 fn map<A: Sync, T: Send, F: Fn(&A) -> T + Sync + Send>(xs: &[A], f: F) -> Vec<T> {
-    sagebrush_par::map_slice(xs, f)
+    #[cfg(feature = "parallel")]
+    return sagebrush_par::map_slice(xs, f);
+    #[cfg(not(feature = "parallel"))]
+    return sagebrush_par::seq::map_slice(xs, f);
+}
+
+#[cfg(test)]
+mod par_gate_tests {
+    /// Parallel exactly when this crate's own feature is on.  Run also as
+    /// `--no-default-features --features sagebrush-par/parallel`, the
+    /// unification case.
+    #[test]
+    fn map_is_parallel_iff_this_crates_feature_is_on() {
+        let here = std::thread::current().id();
+        let ids = super::map(&[0u8; 64], |_| {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::thread::current().id()
+        });
+        assert_eq!(ids.iter().all(|&t| t == here), !cfg!(feature = "parallel"));
+    }
 }
 
 /// Sato-Tate statistics without storing every a_p: the number of good
