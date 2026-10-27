@@ -94,6 +94,8 @@ export function derive(c, table) {
     if ((k === "allocates" || k === "unproved-generated") && !why.has(r.decl)) why.set(r.decl, r.key);
     if (r.target?.lib && libClass(r.target.lib) === "per-site" && k === "allocates" && !why.has(r.decl)) why.set(r.decl, r.key);
   }
+  // a protocol member the census couldn't resolve (an obligation) may allocate (fail closed)
+  for (const [fp, d] of byFp) if (d.obligation && !why.has(fp)) why.set(fp, "obligation: " + d.obligation);
   const rev = new Map(); // fp -> the declarations that reference it
   const addEdge = (from, to) => (rev.get(to) ?? rev.set(to, new Set()).get(to)).add(from);
   for (const [fp, d] of byFp) for (const t of [...d.refs, ...(d.irefs ?? [])]) addEdge(fp, t);

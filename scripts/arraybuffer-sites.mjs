@@ -396,18 +396,117 @@ export function census(root = ROOT, { commit = null } = {}) {
     if (!u) uses.set(fp, (u = { kinds: new Set(), names: new Set(), all: false, members: [], classes: [] }));
     return u;
   };
-  const registerMember = (n) => {
-    if (!isFunctionLike(n) || !n.name) return;
-    const sf = n.getSourceFile();
-    const name = ts.isComputedPropertyName(n.name) ? "[" + n.name.expression.getText(sf) + "]" : n.name.getText(sf);
-    if (ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n)) {
-      const fp = declOf(n).fp;
-      (accessorsByName.get(name) ?? accessorsByName.set(name, new Set()).get(name)).add(fp);
-      allAccessors.add(fp);
+  // the runtime name of a property (astra2 C2b): an identifier, a quoted or numeric name,
+  // or a computed one the checker resolves to a literal or a well-known symbol
+  // ("[Symbol.iterator]"); undefined if it can't be named
+  const keyOfExpr = (e, depth = 0) => {
+    e = skipParens(e);
+    if (ts.isStringLiteralLike(e) || ts.isNumericLiteral(e)) return e.text;
+    const t = checker.getTypeAtLocation(e);
+    if (t.isStringLiteral?.() || t.isNumberLiteral?.()) return String(t.value);
+    if (t.flags & ts.TypeFlags.UniqueESSymbol) {
+      // a well-known symbol: declared on lib's SymbolConstructor (Symbol.iterator, ...)
+      const d = t.symbol?.valueDeclaration ?? t.symbol?.declarations?.[0];
+      const owner = d?.parent && (ts.isInterfaceDeclaration(d.parent) ? d.parent.name.text : null);
+      if (owner === "SymbolConstructor" && libFile(d.getSourceFile().fileName)) return `[Symbol.${t.symbol.getName()}]`;
+      return "[symbol " + (t.symbol?.getName() ?? "?") + "]";
+    }
+    // a const alias: its initializer's name
+    if (ts.isIdentifier(e) && depth < 8) {
+      let sy = checker.getSymbolAtLocation(e);
+      if (sy && sy.flags & ts.SymbolFlags.Alias) sy = checker.getAliasedSymbol(sy);
+      const v = sy?.valueDeclaration;
+      if (v && ts.isVariableDeclaration(v) && v.initializer && isConstBinding(v)) return keyOfExpr(v.initializer, depth + 1);
+    }
+    return undefined;
+  };
+  const memberName = (nm) => {
+    if (!nm) return undefined;
+    if (ts.isIdentifier(nm) || ts.isPrivateIdentifier(nm) || ts.isStringLiteralLike(nm) || ts.isNumericLiteral(nm)) return nm.text;
+    if (ts.isComputedPropertyName(nm)) return keyOfExpr(nm.expression);
+    return undefined;
+  };
+  const kindsOf = (name) => (name === undefined ? Object.keys(PROTOCOL) : Object.keys(PROTOCOL).filter((k) => PROTOCOL[k].test(name)));
+  // the protocols a key expression can name: by its literal name; else by its type (a number
+  // can't name a protocol member; a union of literals names only those); else all of them
+  const kindsOfKey = (e) => {
+    const name = keyOfExpr(e);
+    if (name !== undefined) return kindsOf(name);
+    const t = checker.getTypeAtLocation(e);
+    const parts = t.isUnion?.() ? t.types : [t];
+    if (parts.every((u) => u.flags & (ts.TypeFlags.NumberLike | ts.TypeFlags.BigIntLike | ts.TypeFlags.BooleanLike | ts.TypeFlags.Undefined | ts.TypeFlags.Null))) return [];
+    if (parts.every((u) => u.isStringLiteral?.() || u.isNumberLiteral?.() || u.flags & (ts.TypeFlags.NumberLike | ts.TypeFlags.Undefined | ts.TypeFlags.Null))) return [...new Set(parts.filter((u) => u.isStringLiteral?.()).flatMap((u) => kindsOf(u.value)))];
+    return Object.keys(PROTOCOL);
+  };
+  const unknownAccessors = new Set();
+  const obligations = [];
+  // the function a protocol member runs: a function value's own declaration (or, unnamed,
+  // the declaration its body belongs to), a function a const binding names; else, if the value
+  // may be callable, a fail-closed obligation (reported, and seeded as may-allocate)
+  const registerValue = (kinds, v, at, what) => {
+    if (!kinds.length || !v) return;
+    v = skipParens(v);
+    const asTarget = (f) => (declName(f, f.getSourceFile()) !== null ? f : enclosing(f, f.getSourceFile()));
+    let f = isFunctionLike(v) ? v : null;
+    if (!f && (ts.isIdentifier(v) || ts.isPropertyAccessExpression(v))) f = resolveFn(checker, checker.getSymbolAtLocation(v));
+    if (f && isSourceFile(f.getSourceFile())) {
+      for (const k of kinds) protocol[k].add(declOf(asTarget(f)).fp);
       return;
     }
-    if (!ts.isMethodDeclaration(n) && !ts.isFunctionExpression(n) && !ts.isArrowFunction(n)) return;
-    for (const [k, re] of Object.entries(PROTOCOL)) if (re.test(name)) protocol[k].add(declOf(n).fp);
+    const t = checker.getTypeAtLocation(v);
+    if (!(t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) && !t.getCallSignatures().length && !(t.isUnion?.() && t.types.some((u) => u.getCallSignatures().length || u.flags & ts.TypeFlags.Any))) return;
+    const sf = at.getSourceFile();
+    const rel = relOf(root, sf);
+    const line = sf.getLineAndCharacterOfPosition(at.getStart(sf)).line + 1;
+    const fp = "obligation:" + sha(rel + ":" + norm(at, sf)).slice(0, 16);
+    if (!decls.has(fp)) {
+      const reason = `${what}: the function it holds can't be resolved (${kinds.join(", ")})`;
+      decls.set(fp, { file: rel, name: `obligation at line ${line}`, fp, refs: new Set(), irefs: new Set(), libs: new Set(), obligation: reason });
+      obligations.push({ fp, file: rel, line, kinds, reason });
+    }
+    for (const k of kinds) protocol[k].add(fp);
+  };
+  const registerMember = (n) => {
+    // a method or accessor: its own name, normalized; an unknown name could be any member
+    if (isFunctionLike(n) && n.name && !ts.isFunctionDeclaration(n)) {
+      const name = memberName(n.name);
+      if (ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n)) {
+        const fp = declOf(n).fp;
+        if (name === undefined) unknownAccessors.add(fp);
+        else (accessorsByName.get(name) ?? accessorsByName.set(name, new Set()).get(name)).add(fp);
+        allAccessors.add(fp);
+        return;
+      }
+      if (ts.isMethodDeclaration(n)) for (const k of kindsOf(name)) protocol[k].add(declOf(n).fp);
+      return;
+    }
+    // a property holding a function: a class field, an object-literal property or shorthand
+    if ((ts.isPropertyDeclaration(n) && n.initializer) || ts.isPropertyAssignment(n)) return registerValue(ts.isComputedPropertyName(n.name) ? kindsOfKey(n.name.expression) : kindsOf(memberName(n.name)), n.initializer, n, `the property ${n.name.getText(n.getSourceFile())}`);
+    if (ts.isShorthandPropertyAssignment(n)) return registerValue(kindsOf(n.name.text), n.name, n, `the property ${n.name.text}`);
+    // an assignment to a property: o.toJSON = f, o["valueOf"] = f (an unknown key: any member)
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && (ts.isPropertyAccessExpression(n.left) || ts.isElementAccessExpression(n.left))) {
+      const kinds = ts.isPropertyAccessExpression(n.left) ? kindsOf(n.left.name.text) : kindsOfKey(n.left.argumentExpression);
+      return registerValue(kinds, n.right, n, `the assignment to ${n.left.getText(n.getSourceFile()).slice(0, 60)}`);
+    }
+    // Object.defineProperty(o, key, {value | get}): the descriptor's function
+    if (ts.isCallExpression(n) && n.arguments.length >= 3 && n.expression.getText(n.getSourceFile()).replace(/\s/g, "") === "Object.defineProperty" && ts.isObjectLiteralExpression(skipParens(n.arguments[2]))) {
+      const name = keyOfExpr(n.arguments[1]);
+      const keyKinds = kindsOfKey(n.arguments[1]);
+      for (const pr of skipParens(n.arguments[2]).properties) {
+        const pn = pr.name && memberName(pr.name);
+        const val = ts.isPropertyAssignment(pr) ? pr.initializer : ts.isMethodDeclaration(pr) || ts.isGetAccessorDeclaration(pr) ? pr : null;
+        if (pn === "value" && val) registerValue(keyKinds, val, n, "a defined property's value");
+        if ((pn === "get" || pn === "set") && val) {
+          const f = isFunctionLike(val) ? val : null;
+          if (f) {
+            const fp = declOf(declName(f, f.getSourceFile()) !== null ? f : enclosing(f, f.getSourceFile())).fp;
+            if (name === undefined) unknownAccessors.add(fp);
+            else (accessorsByName.get(name) ?? accessorsByName.set(name, new Set()).get(name)).add(fp);
+            allAccessors.add(fp);
+          }
+        }
+      }
+    }
   };
   // may a value of this type be an object (whose members scanned code may define)?
   const nonPrim = (t, depth = 0) => {
@@ -773,13 +872,20 @@ export function census(root = ROOT, { commit = null } = {}) {
   }
   for (const r of records) allSites.set(r.key, r.kind);
   // the implicit-invocation and accessor edges (every member and class is known now)
+  const ancestors = (cfp) => {
+    const out = [];
+    for (let b = classes.get(cfp)?.base; b && classes.has(b) && !out.includes(b); b = classes.get(b).base) out.push(b);
+    return out;
+  };
   const accessorsOf = (cfp) => [...(classes.get(cfp)?.methods ?? [])].filter(([k]) => /^(get|set) /.test(k)).map(([, v]) => v);
   for (const [fp, u] of uses) {
     const d = decls.get(fp);
     for (const k of u.kinds) for (const t of protocol[k]) d.irefs.add(t);
     if (u.all) for (const t of allAccessors) d.irefs.add(t);
-    for (const nm of u.names) for (const t of accessorsByName.get(nm) ?? []) d.irefs.add(t);
-    for (const cfp of u.classes) for (const c of [cfp, ...descendants(cfp)]) for (const t of accessorsOf(c)) d.irefs.add(t);
+    for (const nm of u.names) for (const t of [...(accessorsByName.get(nm) ?? []), ...unknownAccessors]) d.irefs.add(t);
+    // an unknown key on a class receiver: every class whose instance it can be, and whose
+    // accessors it inherits: the ancestors, the class, its descendants (astra2 C1b)
+    for (const cfp of u.classes) for (const c of [...ancestors(cfp), cfp, ...descendants(cfp)]) for (const t of accessorsOf(c)) d.irefs.add(t);
     for (const [cfp, nm] of u.members) for (const c of descendants(cfp)) for (const pre of ["get ", "set "]) {
       const t = classes.get(c)?.methods.get(pre + nm);
       if (t) d.irefs.add(t);
@@ -798,11 +904,12 @@ export function census(root = ROOT, { commit = null } = {}) {
     files: files.length,
     dirs: [...new Set(files.map((s) => relOf(root, s).split("/")[0]))].sort(),
     calls,
+    obligations: obligations.length,
     records: records.length,
     by_kind: Object.fromEntries(Object.entries(byKind).sort()),
   };
   const programFiles = program.getSourceFiles().filter((s) => !s.fileName.includes(`${sep}node_modules${sep}`)).map((s) => relOf(root, s));
-  return { header, records, decls, libs, classes, allSites, spans, programFiles, protocol, accessors: allAccessors, files: files.map((s) => relOf(root, s)) };
+  return { header, records, decls, libs, classes, allSites, spans, programFiles, protocol, accessors: allAccessors, obligations, files: files.map((s) => relOf(root, s)) };
 }
 
 // the declaration a site belongs to: the nearest named function-like ancestor,
