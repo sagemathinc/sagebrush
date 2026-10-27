@@ -41,7 +41,7 @@ _HEAD = struct.Struct("<IIQ")
 # The launcher's and the prelude's ERR_START stages
 STAGE_LIMIT, STAGE_PDEATHSIG, STAGE_FOOTPRINT, STAGE_EXEC, STAGE_FLAGS, STAGE_IMPORT_MEMORY = 1, 2, 3, 4, 5, 6
 
-_WAKE = 0.05            # (the wait loop's wake, to see Ctrl-C and a child's exit: an interval, not a limit)
+_WAKE = 0.025           # (the wait loop's wake, to see Ctrl-C and a child's exit: an interval, not a limit; Stop within 25 ms, William Oct 25)
 _STDERR_TAIL = 4096     # (the bytes of the child's standard error shown after a failure: display only)
 
 

@@ -735,17 +735,26 @@ def test_r2_CORR_157_4_the_thread_transport_portable():
     c.kill()
     still = [sys.executable, "-c", "import time; time.sleep(30)"]
     c = rc.spawn(1 << 30, rc.Plan(None, 0, still, dict(os.environ)))
-    t = time.monotonic()
+    # (Ctrl-C's latency: from the interrupt to its KeyboardInterrupt here,
+    # at most 100 ms: the wait wakes every 25 ms, William's Oct 25 bound;
+    # the Timer's moment taken just before interrupt_main, SIGALRM's at its
+    # scheduled time, the earliest it can arrive)
+    fired = []
     if hasattr(signal, "SIGALRM"):
         signal.signal(signal.SIGALRM, lambda *a: (_ for _ in ()).throw(KeyboardInterrupt()))
+        fired.append(time.monotonic() + 0.3)
         signal.setitimer(signal.ITIMER_REAL, 0.3)
     else:
-        threading.Timer(0.3, _thread.interrupt_main).start()
+        def fire():
+            fired.append(time.monotonic())
+            _thread.interrupt_main()
+        threading.Timer(0.3, fire).start()
     try:
         rc.write_all(c, [bytes(16 << 20)])
         print("written")
     except KeyboardInterrupt:
-        print("interrupted", time.monotonic() - t < 0.8)
+        latency = time.monotonic() - fired[0]
+        print("interrupted", latency <= 0.100)
     c.kill()
     c = rc.spawn(1 << 30, rc.Plan(None, 0, echo(5), dict(os.environ)))
     rc.write_all(c, [b"again"])
@@ -753,6 +762,7 @@ def test_r2_CORR_157_4_the_thread_transport_portable():
     rc.read_into(c, back)
     print("retry", bytes(back) == b"again")
     c.kill()
+    print("latency %.4f" % latency)
     """)
     assert out.split("\n")[:3] == ["echo True", "interrupted True", "retry True"], out
 
