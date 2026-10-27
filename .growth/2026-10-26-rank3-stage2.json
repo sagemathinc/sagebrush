@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Rank-3 plan r3 PR 4 (#195): Stage 2 recombination with the proved a* (passes, delta 2 r2), MAX_R and the fallback subset search removed (engine wasm). Rows MEASURED by the transition-mode size-gate of the PR ci 40421971829 on 094d4982 (base d3617031, which carries CI's fresh wasm of fa78b6a8, run 40420979708): engine wasm 7199449 -> 7213584 (+14135); cli/pyjs.cjs +18836 (the base64 of the wasm growth; no Python change)",
+ "bytes": {
+  "cli/pyjs.cjs": 18836,
+  "engine/sagebrush-engine.wasm": 14135
+ }
+}
