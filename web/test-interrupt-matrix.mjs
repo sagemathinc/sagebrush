@@ -386,10 +386,15 @@ async function runHost(host) {
     const leak = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
     let { outcome: own, why: rowWhy } = c.expect_leak ? leakControlOutcome(cells, leak, c.xk) : xkRowOutcome(cells, leak && leak.ok, c.xk);
     // (a session cut at the run's deadline leaves its cells unresolved: the row is INVALID-budget, unless it already failed)
-    if (overBudget() && sessions.some((x) => x.end === "budget") && own !== "FAIL") { own = "INVALID"; rowWhy = "run budget spent: a session was cut at the deadline"; }
+    if (overBudget() && sessions.some((x) => x.end === "budget") && own !== "FAIL") {
+      // (a malformed cell is named too, so the relabel doesn't hide the harness's evidence loss: magma N3)
+      const bad = cells.filter((x) => x.malformed).length;
+      own = "INVALID"; rowWhy = "run budget spent: a session was cut at the deadline" + (bad ? `; malformed evidence in ${bad} cell(s)` : "");
+    }
     const known = againstBaseline({ case: c.id, host, outcome: own, trials: cells, leak }, BASELINE);
     // (a Stop honoured late: FAIL unless one of William's records covers exactly this case, host and call)
-    const waived = withWaiver({ case: c.id, host, trials: cells, leak }, known, WAIVERS, c.call);
+    // (the required cells: the phase offsets and the repeats; a session cut short leaves fewer, never waivable)
+    const waived = withWaiver({ case: c.id, host, trials: cells, leak }, known, WAIVERS, c.call, offsets.length + reps);
     const outcome = waived.outcome;
     if (waived.why) rowWhy = waived.why;
     rows.push({ case: c.id, host, mode: c.mode, run: MODE, outcome, ...(cal.label ? { label: cal.label } : {}), ...(outcome !== own ? { own_outcome: own } : {}), ...(waived.waiver ? { waiver: waived.waiver } : {}), ...(rowWhy ? { why: rowWhy } : {}), ...(c.xk ? { xk: c.xk.kind } : {}), s: cal.s, T_ms: cal.T && Math.round(cal.T), ...(cal.R != null ? { R_ms: Math.round(cal.R) } : {}), calibration: cal, ...(c.leak_s != null ? { leak_s: leakAt ?? { s: c.leak_s, T_ms: null, why: "no calibration attempt at leak_s: the series ran at s" } } : {}), cells, leak, sessions });
