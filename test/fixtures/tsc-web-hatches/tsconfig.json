@@ -3,6 +3,8 @@
   "extends": "../../../tsconfig.web.json",
   "files": [
     "multi.mjs",
-    "lex.mjs"
+    "lex.mjs",
+    "lex2.mjs",
+    "lex-brace.mjs"
   ]
 }
