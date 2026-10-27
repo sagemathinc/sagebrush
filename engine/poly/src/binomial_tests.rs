@@ -383,7 +383,7 @@ fn the_fold_residues_are_exact() {
     assert!(FOLD_MINUS.iter().chain(FOLD_PLUS.iter()).chain(FOLD_48.iter()).all(|&p| is_prime_trial(p)));
     // each tier-1 witness divides the fold it is read from
     for &(p, wide) in TIER1.iter() {
-        assert_eq!(if wide { FOLD_MINUS.contains(&p) } else { FOLD_48.contains(&p) }, true, "{p}");
+        assert!(if wide { FOLD_MINUS.contains(&p) } else { FOLD_48.contains(&p) }, "{p}");
     }
     assert!(TIER1.windows(2).all(|w| w[0].0 < w[1].0));
     for bits in [1u32, 47, 48, 49, 63, 64, 65, 95, 96, 97, 127, 128, 129, 191, 192, 193, 1000, 4097] {
