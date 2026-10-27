@@ -6,11 +6,10 @@ import type { AddressInfo } from "net";
 import { EditServer, startEdit } from "../src/board-edit-serve";
 import { defaultLimits } from "../src/board-edit-limits";
 
-const { mergeStrings3 } = require("patchflow");
 
 async function main() {
   const L = defaultLimits();
-  const started = await startEdit(process.argv[2], L, { mergeStrings3, now: Date.now });
+  const started = await startEdit(process.argv[2], L, { now: Date.now });
   if (!("hub" in started)) { console.error(started.why); process.exit(2); }
   const es = new EditServer(started.hub, L, {}, Date.now);
   const server = http.createServer((req, res) => {
