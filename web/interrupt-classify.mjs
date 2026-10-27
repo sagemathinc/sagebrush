@@ -87,6 +87,32 @@ export function rowOutcome(cells, leakOk = true) {
   return "PASS";
 }
 
+// the heap+external sample (the DONE marker's figure), Python run in the session after each trial: the
+// live JS heap after a full collection plus its external memory, SETTLED.  One collection followed by
+// an immediate read can still count a previous trial's ArrayBuffer backing stores, which V8 frees after
+// the collection (their sweeping), so single readings swung by ~25 MB between two levels, and a series
+// whose repeat 3 fell at the lower one read as a 25-28 MB "leak" (M1o: 166.5, 145.5, 145.8, 146.0, 171.7
+// MB on master d1af1141; 166.7, 171.1, 143.4, 146.1, 171.8 on #196).  Garbage only ever adds to a
+// post-collection figure, so the sample is the least of up to 5 collected readings, 50 ms apart,
+// stopping once two agree within 1 MiB: live memory, a real leak included, can't read lower than it is.
+// (an indented block: _hu, _he and time come from the program around it; it sets _m)
+export const HEAP_EXTERNAL_SAMPLE = `    _m = ""
+    try:
+        _v = []
+        for _k in range(5):
+            _a = _hu() if _hu else None
+            _b = _he() if (_he and _a is not None) else None
+            if _a is None or _b is None:
+                break
+            _v.append(_a + _b)
+            if len(_v) >= 2 and abs(_v[-1] - _v[-2]) < 1048576:
+                break
+            time.sleep(0.05)
+        _m = "%d" % min(_v) if _v else ""
+    except Exception:
+        _m = ""
+`;
+
 // the leak criterion (r4 §6.1): from repeat 3 to the last, each metric grows at most
 // max(64 MiB, 10%) and the thread count does not change.  samples: [{ i, rss_kb, threads }], one
 // per repeat.  20 repeats is the full check; fewer is the short one (CI), labelled as such.

@@ -17,7 +17,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { againstBaseline, classify, classifyCell, cliffOf, leakCheck, widenedPick, xkRowOutcome } from "./interrupt-classify.mjs";
+import { HEAP_EXTERNAL_SAMPLE, againstBaseline, classify, classifyCell, cliffOf, leakCheck, widenedPick, xkRowOutcome } from "./interrupt-classify.mjs";
 import { killTracked, killTree, onStop, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 
@@ -91,15 +91,9 @@ _xm.${wf} = _xwrap
   // (a case with leak_measure "heap+external": after each trial's probe, between trials and outside
   // every timed window, a full collection and then the live JS heap plus its external memory,
   // in the DONE marker; nothing where the host has no such figure)
+  // (settled: the least of a few collected readings, web/interrupt-classify.mjs HEAP_EXTERNAL_SAMPLE)
   const measure = c.leak_measure === "heap+external"
-    ? `    _m = ""
-    try:
-        _a = _hu() if _hu else None
-        _b = _he() if (_he and _a is not None) else None
-        _m = "%d" % (_a + _b) if _a is not None and _b is not None else ""
-    except Exception:
-        _m = ""
-`
+    ? HEAP_EXTERNAL_SAMPLE
     : `    _m = ""
 `;
   return `import time
