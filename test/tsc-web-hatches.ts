@@ -15,10 +15,12 @@ export type Scan = { findings: Finding[]; problems: string[]; counts: Record<Kin
 
 // The slash: a regex starts where an operand can't end, so the lexer tracks the last significant token as an operand
 // (an identifier, a number, a literal, a postfix ++ or --, a ] or a ) that closes an expression) or an operator (any
-// other punctuator, a prefix ++ or --, an operator keyword, a ) closing if/while/for/with's head).  A } stays
-// ambiguous (a block's end or an object's): there the slash is read as a regex unless its candidate span can't close
-// on its line (then division), and if the candidate's closing slash runs straight into * or / (a comment could hide
-// either way) the scan fails closed (astra2 #232 r2 T1-LEX).
+// other punctuator, a prefix ++ or --, an operator keyword, a ) closing if/while/for/with's head).  A word after
+// . or ?. is a property name, an operand, never a keyword or a control head (obj.return / b, obj.if(a) / b).  A } is
+// the one context the grammar leaves ambiguous (a block's end or an object's): there the slash is a division if no
+// regex can close on its line, and otherwise the WHOLE candidate span is checked: if a comment could start or end
+// inside it or at its end (/*, */ or //), either reading could hide a comment, so the scan fails closed.  Everywhere
+// else the context is certain, so a real regex such as /[/*]x/ is harmless (astra2 #232 r2/r3 T1-LEX).
 const OPERATOR_WORDS = new Set(["return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else", "yield", "await"]);
 const CONTROL_WORDS = new Set(["if", "while", "for", "with"]);
 
@@ -91,7 +93,8 @@ export function comments(src: string): { list: Comment[]; problems: string[] } {
       const e = regexEnd(i);
       if (prev === "brace") {
         if (e < 0) { i++; prev = "operator"; continue; } // (can't be a regex on this line: division)
-        if (src[e + 1] === "*" || src[e + 1] === "/") { problems.push(`line ${line}: an ambiguous slash after } (a regex or a division; a comment could start at column ${e + 2})`); break; }
+        const span = src.slice(i, e + 2); // (the candidate regex and the character after its closing slash)
+        if (/\/\*|\*\/|\/\//.test(span.slice(1))) { problems.push(`line ${line}: an ambiguous slash after } (a regex or a division, and a comment could start or end inside ${JSON.stringify(span.slice(0, 60))})`); break; }
       }
       if (e < 0) { problems.push(`line ${line}: an unterminated regular expression`); break; }
       i = e + 1;
@@ -103,8 +106,10 @@ export function comments(src: string): { list: Comment[]; problems: string[] } {
       let k = i + 1;
       while (k < n && /[A-Za-z0-9_$]/.test(src[k])) k++;
       const w = src.slice(i, k);
-      prev = OPERATOR_WORDS.has(w) ? "operator" : "operand";
-      control = CONTROL_WORDS.has(w);
+      // (a property name, after . or ?. with nothing but spaces between: an operand, whatever the word)
+      const member = /(?:^|[^.])\.\s*$|\?\.\s*$/.test(src.slice(Math.max(0, i - 40), i));
+      prev = !member && OPERATOR_WORDS.has(w) ? "operator" : "operand";
+      control = !member && CONTROL_WORDS.has(w);
       i = k;
       continue;
     }

@@ -97,6 +97,16 @@ test("the lexer's slash context against the compiler (T1-LEX): divisions after p
   assert.deepEqual(h.counts["ts-nocheck"], { permitted: 0, refused: 0 }, "a regex after if (...) and nested templates hold no comment");
 });
 
+test("the lexer's member-access and } contexts against the compiler (T1-LEX r4): keyword-like property names divide; the } slash fails closed when a comment could hide; certain regexes with / and * in a class are harmless", () => {
+  const r = tsc(join("test", "fixtures", "tsc-web-hatches"));
+  assert.equal(r.status, 0, "tsc accepts lex2.mjs and lex-brace.mjs:\n" + r.out.slice(0, 2000));
+  const h2 = hatches(readFileSync(join(ROOT, "test", "fixtures", "tsc-web-hatches", "lex2.mjs"), "utf8"));
+  assert.deepEqual(h2.problems, [], "lex2: no ambiguity, the regexes in certain contexts are harmless");
+  assert.deepEqual(h2.counts["jsdoc-any"], { permitted: 1, refused: 2 }, "lex2: the anys after obj.return / b and obj.if(1) / b are seen and refused: " + JSON.stringify(h2.findings));
+  const hb = hatches(readFileSync(join(ROOT, "test", "fixtures", "tsc-web-hatches", "lex-brace.mjs"), "utf8"));
+  assert.match(hb.problems.join(), /ambiguous slash after \}/, "lex-brace: the } slash whose candidate span holds a comment fails closed");
+});
+
 test("the lexer fails closed at the ambiguous } slash; division after } off its line is fine", () => {
   assert.match(hatches("x = {} / 2 /* @ts-ignore */;\n").problems.join(), /ambiguous slash after \}/);
   assert.deepEqual(hatches("if (x) {}\ny = {} / 2;\n").problems, []);
@@ -106,6 +116,9 @@ test("the lexer fails closed at the ambiguous } slash; division after } off its 
   assert.equal(hatches("x = ++a / b; // @ts-ignore\n").counts["ts-ignore"].refused, 1, "a prefix ++ operand: division after a");
   assert.equal(hatches("x = a + /re\\/*/.source; // @ts-ignore\n").counts["ts-ignore"].refused, 1, "a regex after + still lexes as a regex");
   assert.equal(hatches("while (go) /x\\/* y/.exec(s);\n").problems.length, 0);
+  assert.equal(hatches("x = obj?.typeof / b; // @ts-ignore\n").counts["ts-ignore"].refused, 1, "?. member access too");
+  assert.equal(hatches("x = obj . return / b; // @ts-ignore\n").counts["ts-ignore"].refused, 1, "spaces around the dot");
+  assert.equal(hatches("if (x) {}\n/[/*]z/.test(s);\n").problems.length, 1, "a regex after } with /* in it: fail closed (the conservative reading)");
 });
 
 test("the escape-hatch policy's own controls: each refused kind, multiline forms, reasons, and the lexer failing closed", () => {
