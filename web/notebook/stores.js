@@ -742,11 +742,15 @@ export class IdbPatchStore {
   deleteQueued(opts, tell, dropping = false) {
     // (a journal store's history is cleared or dropped only by the notebook's writer here (daybreak3): a read-only tab's
     // never, whatever its page does)
-    if (this.journal && this.writerOK?.() === false) return Promise.reject(new Error("not done: this notebook is open for editing in another tab of this browser"));
+    // (asked when it is asked for, and again at its turn in the queue: it may have changed meanwhile (daybreak3's P2))
+    const notWriter = () => this.journal && (this.mutateOK ?? this.writerOK)?.() === false;
+    const NOT = "not done: this notebook is open for editing in another tab of this browser";
+    if (notWriter()) return Promise.reject(new Error(NOT));
     const timed = !(opts.lockHeld || !this.owned) && typeof globalThis.navigator?.locks?.request === "function";
     const d = timed ? deadlineOf() : null;
     const turn = this.queue(async () => {
       if (d?.ctl.signal.aborted) return;
+      if (notWriter()) throw new Error(NOT);
       this.dropping = dropping;
       try { await this.deleteAllowed(opts, d ?? false); } finally { this.dropping = false; }
       if (tell) getHistoryChannel()?.postMessage({ from: tabId, id: this.id, clear: true });

@@ -112,7 +112,11 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     super(db, id, initial, { journal: true });
     this.hdb = hdb; this.mod = mod;
     this.patches = journalPatchStore(hdb, id);
-    this.patches.writerOK = () => this.writer && this.ready;
+    // (two phases of a writer (daybreak3's P2): `ready`, its load and recovery done: saves, versions, clears and drops
+    // from outside; `recovering`, its load's own writes only (recovery's T1 catch-up, T2 and prune). T1's hook allows
+    // either; a clear or a drop (mutateOK) and a public save only the first)
+    this.patches.writerOK = () => this.writer && !this.released && (this.ready || this.recovering);
+    this.patches.mutateOK = () => this.writer && !this.released && this.ready;
     this.history = new mod.NotebookHistory(this.patches);
     this.recovered = null;
     this.inflight = 0; this.released = false; this.opening = null;
@@ -193,13 +197,22 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
    * opens it again). */
   release() {
     this.released = true;
-    // (nothing let go while a write of its can still commit: its load's (recovery's T2, catch-up and prune) and its
-    // history's queue (astra's CORR-215-5); a save still running lets go when it ends)
-    return Promise.allSettled([this.loading, this.patches.appending]).then(() => {
-      if (this.inflight || !this.released) return;
-      this.history.close();
-      return this.letGo();
-    });
+    this.draining ??= this.drain().finally(() => { this.draining = null; });
+    return this.draining;
+  }
+  // (the one way this store lets go, whatever asks (the page leaving it, a failed takeover, a release while saves run):
+  // only once nothing of it can still commit: its load's writes (recovery's catch-up, T2 and prune), every save running
+  // (T1, T2, prune) and its history's queue, each waited for until none is left (astra's CORR-215-5, CORR-215-6))
+  async drain() {
+    for (;;) {
+      const a = this.patches.appending, l = this.loading;
+      await Promise.allSettled([a, l]);
+      if (this.inflight) { await new Promise((r) => { this.whenIdle = r; }); continue; }
+      if (a === this.patches.appending && l === this.loading) break;
+    }
+    if (!this.released) return;
+    this.history.close();
+    return this.letGo();
   }
   // (the codec's text of a document's versioned records: an intent's value)
   textOf(doc) { return this.history.codec.toString(this.mod.toRecords(doc)); }
@@ -223,9 +236,14 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
   /** T1, then T2, then the intents it settles pruned. */
   async save(doc, opts = {}) {
     if (opts.journal) return super.save(doc, opts);
-    // (only this notebook's writer here saves, once its load has begun: for the milestone, one tab per device; a
-    // read-only tab's own state, flushed as it is reattached at a takeover, is refused (board's B))
-    if (!this.writer || !this.ready) return NOT_WRITER;
+    // (only this notebook's writer here saves, once its load and recovery are done: for the milestone, one tab per
+    // device; a read-only tab's own state, flushed as it is reattached at a takeover, is refused (board's B), and so is
+    // a save while recovery runs or after a release (daybreak3's P2))
+    if (!this.writer || !this.ready || this.released) return NOT_WRITER;
+    return this.writeSave(doc, opts);
+  }
+  // (a save's T1, T2 and prune, counted while they run: a release waits for them (drain))
+  async writeSave(doc, opts = {}) {
     this.inflight++;
     try {
       const r = await this.t1(doc);
@@ -234,7 +252,7 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
       if (out && typeof out === "object" && out.saved) await prune(this.patches, r.j);
       return out;
     } finally {
-      if (!--this.inflight && this.released) { this.history.close(); this.letGo(); }
+      if (!--this.inflight) { const r = this.whenIdle; this.whenIdle = null; r?.(); }
     }
   }
   async load() {
@@ -252,8 +270,10 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
       this.takeoverDue = false;
     }
     // (the writer from here: its saves and versions allowed; a tab taking over from a read-only view reads its history
-    // again, as the writer left it)
-    this.ready = true;
+    // again, as the writer left it; not ready again until this load's recovery is done, even if an earlier load was:
+    // a load or recovery that fails writes nothing more, no save, no version, until a load succeeds (astra's
+    // CORR-215-5); the page then lets the lock go)
+    this.recovering = true; this.ready = false;
     this.loading = (async () => {
       if (this.viewed) { this.viewed = false; await this.history.init(); } else await this.open();
       for (let i = 0; ; i++) {
@@ -264,12 +284,11 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
       return this.recovered.doc;
     })();
     try {
-      return await this.loading;
-    } catch (e) {
-      // (a load or recovery that failed writes nothing more: no save, no version, until a load succeeds (astra's
-      // CORR-215-5); the page then lets the lock go)
-      this.ready = false;
-      throw e;
+      const doc = await this.loading;
+      this.ready = true;
+      return doc;
+    } finally {
+      this.recovering = false;
     }
   }
   // (the record as a notebook document with the versioned part of `value` (records), its own outputs, names and
@@ -294,7 +313,7 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     if (!rec && !chosen) {
       // (a new notebook: its first save journaled like any other)
       const fresh = { ...(this.initial ?? { name: "Untitled", mode: "python", cells: [] }), id: this.id };
-      const saved = await this.save(fresh);
+      const saved = await this.writeSave(fresh);
       if (typeof saved === "string") throw new Error(saved);
       return saved.conflict ? null : { doc: { ...fresh, rev: saved.rev }, row: "new" };
     }

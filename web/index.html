@@ -2426,6 +2426,8 @@ const writerBar = $("#writerbar");
 let writerBarTimer = null;
 // (the bar's height, for the page's scroll padding while it shows: it sticks under the toolbar (board's R3))
 function writerBarHeight() { document.documentElement.style.setProperty("--writerbar-h", writerBar.hidden ? "0px" : `${writerBar.offsetHeight}px`); }
+// (and again whenever its height changes: a narrower window wraps its text (board's (a), as --bar-h is kept))
+if (typeof ResizeObserver === "function") new ResizeObserver(() => writerBarHeight()).observe(writerBar);
 // (the journal's page helpers (notebook/journal.js pageControls, switchJournal, TAKEOVER), from the history bundle
 // once a journal's store is made; plain stores never need them)
 let journalPage = { pageControls: () => ({ readOnly: false, bar: null, name: true, mode: true, repro: true, rename: true, trash: true, history: true }), switchJournal: (p, n) => (n?.journaled ? n : null), TAKEOVER: "", TAKEOVER_FAILED: "" };

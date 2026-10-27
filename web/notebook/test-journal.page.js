@@ -797,7 +797,105 @@ async function releaseWaitsForLoad() {
   hdb.close();
 }
 
-const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad];
+
+async function lifetimeP1P2() {
+  const { w, hdb } = await active();
+  // daybreak3's P2: while a load's recovery is pending, an ordinary save, a TimeTravel clear and a drop are refused, and
+  // a recovery that then fails leaves the notebook, its versions and its journal rows byte for byte as they were
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    await t1Only(st, { ...d, cells: [{ id: "a", code: "B" }], baseRev: d.rev });
+    await close(st);
+    const v = store(w, hdb, id);
+    let open; const gate = new Promise((r) => { open = r; });
+    v.recover = async () => { await gate; throw new Error("the test's failed recovery"); };
+    const rec0 = J(await rawGet(w.main, "notebooks", id)), rows0 = J(await histRows(hdb, id)), sync0 = J(await syncRows(hdb));
+    const loading = v.load().then(() => "loaded", (e) => e.message);
+    await sleep(100);
+    const said = await v.save({ ...d, cells: [{ id: "a", code: "during recovery" }], baseRev: d.rev });
+    const c = await v.history.clear().then(() => "cleared", (e) => e.message);
+    const dr = await v.patches.drop().then(() => "dropped", (e) => e.message);
+    open();
+    const l = await loading;
+    check(/failed recovery/.test(l) && said === "not saved: this notebook is open for editing in another tab of this browser" && /open for editing/.test(c) && /open for editing/.test(dr) && J(await rawGet(w.main, "notebooks", id)) === rec0 && J(await histRows(hdb, id)) === rows0 && J(await syncRows(hdb)) === sync0, "P2: during a pending recovery a save, a clear and a drop are refused; the recovery then fails: the notebook, its versions and journal rows byte for byte unchanged: " + J({ said: said.slice(0, 20), c: c.slice(0, 20), dr: dr.slice(0, 20) }));
+    await close(v);
+  }
+  // astra's P1: one drain for every unlock: a save of the load's own (a new notebook's first) finishing while the store
+  // is released and its load is still pending doesn't let the lock go; the next store gets it only after the load
+  {
+    const id = newId(), v = store(w, hdb, id, doc([["a", "first"]])), recover = v.recover.bind(v);
+    let open; const gate = new Promise((r) => { open = r; });
+    v.recover = async (rec) => { const out = await recover(rec); await gate; return out; };
+    // (the load's own save held in its last journal write (its prune), so the release comes while it runs)
+    let calls = 0, openSave, inSave; const saveGate = new Promise((r) => { openSave = r; }), reached = new Promise((r) => { inSave = r; });
+    W.JOURNAL_TX_HOOK.beforeTx = async () => { if (++calls === 2) { W.JOURNAL_TX_HOOK.beforeTx = undefined; inSave(); await saveGate; } };
+    const loading = v.load();
+    await within(reached, 3000);
+    const x = store(w, hdb, id);
+    await x.load();
+    const xt = takeover(x, 4000);
+    const released = v.release();
+    openSave();
+    await sleep(200);
+    const early = x.writer;
+    open();
+    await loading.catch(() => {});
+    await released;
+    const r = await xt;
+    check(v.inflight === 0 && !early && r !== "timeout" && x.writer, "P1: released while its load's own save runs and its load is pending: the save ends, and the lock is let go only once the load is done: " + J({ early, later: x.writer }));
+    await close(x);
+  }
+  close(w);
+  hdb.close();
+}
+
+
+async function clearCheckedAtItsTurn() {
+  // daybreak3's P2: a TimeTravel clear asked for by the writer, queued, and the store released before its turn: refused at
+  // its turn, nothing deleted
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  await st.save({ ...d, cells: [{ id: "a", code: "v2" }], baseRev: d.rev });
+  const rows0 = J(await histRows(hdb, id));
+  let open; const gate = new Promise((r) => { open = r; });
+  W.JOURNAL_TX_HOOK.beforeTx = async () => { W.JOURNAL_TX_HOOK.beforeTx = undefined; await gate; };
+  const rec = await rawGet(w.main, "notebooks", id);
+  const saving = st.save({ ...rec, cells: [{ id: "a", code: "v3" }], baseRev: rec.rev });
+  await sleep(50);
+  const clearing = st.history.clear().then(() => "cleared", (e) => e.message);
+  await sleep(20);
+  const releasing = st.release();
+  open();
+  const [sv, c] = await Promise.all([saving, clearing]);
+  await releasing;
+  const after = new Set((await histRows(hdb, id)).map((r) => J([r.nb, r.time])));
+  check(/open for editing/.test(c) && JSON.parse(rows0).every((r) => after.has(J([r.nb, r.time]))), "a clear queued by the writer, the store released before its turn: refused at its turn, no version deleted: " + J({ c: c.slice(0, 30), saved: typeof sv === "string" ? sv.slice(0, 20) : !!sv?.saved }));
+  close(w);
+  hdb.close();
+}
+
+
+async function reloadFails() {
+  // astra's CORR-215-5: a writer already loaded that loads again: not ready while that recovery runs, and a recovery that
+  // fails leaves it writing nothing more
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  let open; const gate = new Promise((r) => { open = r; });
+  st.recover = async () => { await gate; throw new Error("the test's failed recovery"); };
+  const loading = st.load().then(() => "loaded", (e) => e.message);
+  await sleep(50);
+  const during = await st.save({ ...d, cells: [{ id: "a", code: "during" }], baseRev: d.rev });
+  open();
+  const l = await loading;
+  const after = await st.save({ ...d, cells: [{ id: "a", code: "after" }], baseRev: d.rev });
+  const rec = await rawGet(w.main, "notebooks", id);
+  check(/failed recovery/.test(l) && during === "not saved: this notebook is open for editing in another tab of this browser" && after === during && rec.cells[0].code === "A", "a loaded writer loading again: no save while its recovery runs, and none after it fails: " + J({ l, during: String(during).slice(0, 20), after: String(after).slice(0, 20) }));
+  await close(st);
+  close(w);
+  hdb.close();
+}
+
+const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
