@@ -1249,7 +1249,37 @@ async function clearAgainstTheProof() {
   hdb.close();
 }
 
-const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof];
+
+async function reloadDuringClear() {
+  // astra's CORR-229-2: a reload while a clear has marked the record and not yet deleted: the reload's recovery waits for
+  // the clear (now refused at its turn, nothing deleted), and the record is never left unmarked without its value as
+  // the history's head; the same for a drop
+  const { w, hdb } = await active();
+  for (const kind of ["clear", "drop"]) {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const mark = st.markRecord.bind(st);
+    let resume, reached; const gate = new Promise((r) => { resume = r; }), marked = new Promise((r) => { reached = r; });
+    st.markRecord = async () => { await mark(); reached(); await gate; };
+    const op = kind === "clear" ? st.history.clear({ ...d, cells: [{ id: "a", code: "C" }] }) : st.patches.drop();
+    const doing = op.then(() => "done", (e) => e.message);
+    const held = await within(marked, 3000);
+    const atMark = await rawGet(w.main, "notebooks", id);
+    const loading = st.load().then(() => "loaded", (e) => e.message);
+    await sleep(100);
+    const early = (await rawGet(w.main, "notebooks", id)).unjournaled;
+    const out = await noRoom("history", async () => { resume(); const o = await doing; const l = await loading; await st.patches.appending; return { o, l }; });
+    const rec = await rawGet(w.main, "notebooks", id), head = await st.headHash().catch(() => null), rows = await versions(hdb, id);
+    await close(st);
+    const r = await reopen(w, hdb, id);
+    const after = await rawGet(w.main, "notebooks", id), headAfter = await r.st.headHash();
+    check(held !== "timeout" && atMark.unjournaled === true && early === true && out.l === "loaded" && /open for editing/.test(out.o) && (rec.unjournaled !== undefined || head === rec.hash) && (after.unjournaled !== undefined || headAfter === after.hash), `CORR-229-2 (${kind}): a reload while it has marked and not deleted waits for it (it is then refused at its turn); a record left unmarked is the head's value, before reopening and after: ` + J({ held, o: String(out.o).slice(0, 30), l: out.l, early, mark: rec.unjournaled, rows, row: r.row, markAfter: after.unjournaled }));
+    await close(r.st);
+  }
+  await close(w);
+  hdb.close();
+}
+
+const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
