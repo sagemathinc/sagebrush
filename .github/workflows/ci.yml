@@ -200,6 +200,7 @@ jobs:
           node scripts/size-budget.mjs --check
           node scripts/test-size-measure.mjs
           node scripts/test-install-engine-wasm.mjs
+          node scripts/test-check-fresh-wasm.mjs
           node scripts/test-npm-pack-metrics.mjs
           node scripts/test-install-timing.mjs
           node --test scripts/test-heap-budget.mjs
@@ -279,10 +280,12 @@ jobs:
         with:
           version: 11
       # (the same pins as the checks job: budgets.json's bun, heap-budget.json's node)
+      # (no pnpm cache here: this job installs only the base's worktree, and only when it needs a new
+      # record, so on a cache miss with nothing installed setup-node's post-step failed the job on a
+      # missing store path, #210 run 40543703855)
       - uses: actions/setup-node@v4
         with:
           node-version: "24.21.0"
-          cache: pnpm
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.4"
@@ -993,7 +996,8 @@ jobs:
           (cd engine && cargo build --release -p sagebrush-growth-probe --target wasm32-unknown-unknown)
           node engine/growth-probe/sweep.mjs engine/target/wasm32-unknown-unknown/release/sagebrush_growth_probe.wasm
           node engine/web/tests/wasm_designated.mjs
-          git diff --quiet wasm/ || echo "::warning::wasm/sagebrush-engine.wasm differs from a fresh build of engine/"
+          # (a stale committed engine: an ERROR on master pushes, dispatches and the schedule, a warning on a PR)
+          node scripts/check-fresh-wasm.mjs
           node scripts/third-party-notices.mjs --check
           pnpm run build
           node scripts/build-cli.mjs
