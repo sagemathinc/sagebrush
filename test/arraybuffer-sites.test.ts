@@ -488,6 +488,89 @@ export function forPlain(x: any): number { let n = 0; for (const _ of x) n++; re
   assert.deepEqual(r, { forAwait: true, forPlain: false });
 });
 
+test("an unknown key reaches inherited accessors too: the class's ancestors, itself and its descendants (astra2 C1b)", () => {
+  const files = (alloc: string) => ({
+    "src/runtime/inh.ts": `
+export class Base { x: any = null; get bytes(): any { return ${alloc}; } set sink(v: any) { this.x = ${alloc}; } }
+export class Derived extends Base {}
+export class Other { get bytes(): any { return 1; } }
+export function inherited(d: Derived, key: string): any { return d[key as "bytes"]; }
+export function getInherited(d: Derived): any { return inherited(d, "bytes"); }
+export function setInherited(d: Derived, key: string): void { (d as any as Derived)[key as "sink"] = 1; }
+export function otherComputed(o: Other, key: string): any { return o[key as "bytes"]; }
+`,
+  });
+  assert.deepEqual(mayAlloc(files("new Uint8Array(8)"), ["inherited", "getInherited", "setInherited", "otherComputed"]), { inherited: true, getInherited: true, setInherited: true, otherComputed: false });
+  // the negative control: nothing allocates, nothing is reached
+  assert.deepEqual(mayAlloc(files("8"), ["inherited", "setInherited"]), { inherited: false, setInherited: false });
+});
+
+// one protocol-member form per fixture, each with a non-allocating twin: nothing else in
+// the fixture allocates, so no other member can mask the result (astra2 C2b)
+const C2B: [string, (alloc: string) => string, string][] = [
+  ["a class field arrow toJSON", (a) => `export class F { toJSON = () => ${a}; }`, "json"],
+  ["a class field function-expression valueOf", (a) => `export class F { valueOf = function () { return ${a}; }; }`, "coerce"],
+  ["a quoted method toJSON", (a) => `export class F { "toJSON"() { return ${a}; } }`, "json"],
+  ["a computed literal toJSON", (a) => `export class F { ["toJSON"]() { return ${a}; } }`, "json"],
+  ["a const-alias computed toJSON", (a) => `const K = "toJSON";\nexport class F { [K]() { return ${a}; } }`, "json"],
+  ["a Symbol.iterator alias", (a) => `const IT = Symbol.iterator;\nexport class F { *[IT]() { yield ${a}; } }`, "iterate"],
+  ["a Symbol.toPrimitive field", (a) => `export class F { [Symbol.toPrimitive] = () => { const b = ${a}; return 1; }; }`, "coerce"],
+  ["a then field", (a) => `export class F { then = (f: any) => f(${a}); }`, "await"],
+  ["an object-literal toJSON property", (a) => `export function mk(): any { return { toJSON: () => ${a} }; }`, "json"],
+  ["an object-literal quoted toString", (a) => `export function mk(): any { return { "toString": function () { return String(${a}); } }; }`, "coerce"],
+  ["an assigned toJSON", (a) => `export function mk(o: any): void { o.toJSON = () => ${a}; }`, "json"],
+  ["an assigned quoted valueOf", (a) => `export function mk(o: any): void { o["valueOf"] = () => { const b = ${a}; return 1; }; }`, "coerce"],
+];
+const USE: Record<string, string> = {
+  json: "export function use(x: object): string { return JSON.stringify(x); }",
+  coerce: "export function use(x: object): number { return +x; }",
+  iterate: "export function use(x: any): any[] { return [...x]; }",
+  await: "export async function use(x: any): Promise<any> { await x; return 1; }",
+};
+for (const [what, src, kind] of C2B) {
+  test(`a protocol member by its runtime property: ${what} (astra2 C2b)`, () => {
+    const files = (alloc: string) => ({ "src/runtime/pm.ts": `${src(alloc)}\n${USE[kind]}\nexport function caller(x: any): any { return use(x); }\n` });
+    assert.deepEqual(mayAlloc(files("new Uint8Array(32)"), ["use", "caller"]), { use: true, caller: true }, "the allocating member is reached");
+    assert.deepEqual(mayAlloc(files("32"), ["use", "caller"]), { use: false, caller: false }, "its non-allocating twin: no witness");
+  });
+}
+
+test("a resolved name is that protocol only: an aliased toJSON isn't a coercion member, an aliased Symbol.iterator isn't toJSON (astra2 C2b)", () => {
+  const files = (member: string) => ({ "src/runtime/al.ts": `${member}\nexport function json(x: object): string { return JSON.stringify(x); }\nexport function coerce(x: object): number { return +x; }\nexport function spread(x: any): any[] { return [...x]; }\n` });
+  assert.deepEqual(mayAlloc(files('const K = "toJSON";\nexport class F { [K]() { return new Uint8Array(1); } }'), ["json", "coerce", "spread"]), { json: true, coerce: false, spread: false });
+  assert.deepEqual(mayAlloc(files("const IT = Symbol.iterator;\nexport class F { *[IT]() { yield new Uint8Array(1); } }"), ["json", "coerce", "spread"]), { json: false, coerce: false, spread: true });
+  assert.deepEqual(mayAlloc(files('export class F { ["toJSON"]() { return new Uint8Array(1); } }'), ["json", "coerce", "spread"]), { json: true, coerce: false, spread: false });
+  assert.deepEqual(mayAlloc(files("export class F { *[Symbol.iterator]() { yield new Uint8Array(1); } }"), ["json", "coerce", "spread"]), { json: false, coerce: false, spread: true });
+});
+
+test("a protocol member the census can't resolve is a fail-closed obligation, reported (astra2 C2b)", () => {
+  const files = (src: string) => ({ "src/runtime/ob.ts": `${src}\nexport function use(x: object): string { return JSON.stringify(x); }\nexport function coerce(x: object): number { return +x; }\n` });
+  // a method with a name the census can't resolve is registered under every protocol: its body decides
+  assert.deepEqual(mayAlloc(files("declare function k(): string;\nexport class F { [k()]() { return new Uint8Array(1); } }"), ["use", "coerce"]), { use: true, coerce: true });
+  assert.deepEqual(mayAlloc(files("declare function k(): string;\nexport class F { [k()]() { return 1; } }"), ["use", "coerce"]), { use: false, coerce: false });
+  // a property under an unknown name holding a function that can't be resolved: an obligation, every protocol
+  const unk = fixture(files("declare function k(): string;\ndeclare function mkFn(): any;\nexport class F { [k()] = mkFn(); }"));
+  assert.ok(unk.obligations.length === 1 && /can't be resolved/.test(unk.obligations[0].reason), "reported, with its reason");
+  assert.deepEqual(mayAlloc(files("declare function k(): string;\ndeclare function mkFn(): any;\nexport class F { [k()] = mkFn(); }"), ["use", "coerce"]), { use: true, coerce: true });
+  // a protocol-named field whose function can't be resolved
+  assert.deepEqual(mayAlloc(files("declare function mkFn(): any;\nexport class F { toJSON = mkFn(); }"), ["use", "coerce"]), { use: true, coerce: false });
+  // an accessor under a name the census can't resolve: every by-name access reaches it
+  assert.deepEqual(mayAlloc({ "src/runtime/ua.ts": "declare function k(): string;\nexport class F { get [k()](): any { return new Uint8Array(1); } }\nexport function rd(o: any): any { return o.whatever; }\n" }, ["rd"]), { rd: true });
+  assert.deepEqual(mayAlloc({ "src/runtime/ua.ts": "declare function k(): string;\nexport class F { get [k()](): any { return 1; } }\nexport function rd(o: any): any { return o.whatever; }\n" }, ["rd"]), { rd: false });
+  // Object.defineProperty: a value under a protocol name, and a getter under a name
+  assert.deepEqual(mayAlloc(files("export function def(o: object): void { Object.defineProperty(o, \"toJSON\", { value: () => new Uint8Array(1) }); }"), ["use", "coerce"]), { use: true, coerce: false });
+  assert.deepEqual(mayAlloc({ "src/runtime/dp.ts": "export function def(o: object): void { Object.defineProperty(o, \"bytes\", { get() { return new Uint8Array(1); } }); }\nexport function rd(o: any): any { return o.bytes; }\nexport function rd2(o: any): any { return o.other; }\n" }, ["rd", "rd2"]), { rd: true, rd2: false });
+  // a numeric key, or a union of literal keys without protocol names, can't install a member: no obligation
+  const keyed = fixture(files("declare function mkFn(): any;\nexport function put(o: any, i: number, k: \"a\" | \"b\"): void { o[i] = mkFn(); o[k] = mkFn(); }"));
+  assert.deepEqual(keyed.obligations, []);
+  // a string key could: an obligation
+  const sk = fixture(files("declare function mkFn(): any;\nexport function put(o: any, k: string): void { o[k] = mkFn(); }"));
+  assert.equal(sk.obligations.length, 1);
+  // known, non-callable or non-protocol names: no obligation
+  const none = fixture(files("export class F { toJSON = 3; data = () => 1; [\"x\"]() { return 1; } }"));
+  assert.deepEqual(none.obligations, []);
+});
+
 test("E1.1: typescript-api is named only by the gate's script and its test; it has no install scripts", () => {
   const out = execFileSync("git", ["grep", "-l", "typescript-api", "--", ":!pnpm-lock.yaml", ":!package.json"], { cwd: ROOT, encoding: "utf8" }).trim().split("\n").sort();
   assert.deepEqual(out, ["scripts/arraybuffer-sites.mjs", "test/arraybuffer-sites.test.ts"]);
