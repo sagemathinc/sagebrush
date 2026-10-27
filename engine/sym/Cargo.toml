@@ -19,3 +19,6 @@ serde_json = "1"
 sagebrush-poly = { path = "../poly", features = ["test-faults"] }
 # (tests only: Stop requested between Stage-2 passes, tests/stage2_interrupt.rs)
 sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
+
+[lints]
+workspace = true

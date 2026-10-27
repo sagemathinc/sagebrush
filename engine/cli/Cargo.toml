@@ -13,3 +13,6 @@ sagebrush-bigint = { path = "../bigint" }
 sagebrush-modsym = { path = "../modsym" }
 sagebrush-ap = { path = "../ap" }
 sagebrush-par = { path = "../par", features = ["parallel"] }
+
+[lints]
+workspace = true
