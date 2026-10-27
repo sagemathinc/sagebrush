@@ -705,68 +705,6 @@ def test_r2_CORR_157_3_refusals_and_failed_starts_leak_no_descriptor():
     assert out.split("\n")[:2] == ["enforced True", "failed True"], out
 
 
-def test_r2_CORR_157_4_the_thread_transport_portable():
-    # astra2: Windows's pipes driven by blocking calls on helper threads
-    # (select takes sockets only there; no readv): forced here, the same
-    # code: a round trip, back-pressure with Ctrl-C at once, and a retry
-    # (portable: also run on Windows and macOS)
-    # The echo child reads all it's sent before it answers, as the engine's
-    # child does (raster_child.rs reads a whole request first): one that
-    # wrote back as it read deadlocked on Windows's 4 KiB pipes, the parent
-    # not reading until it had written everything (#157's train-10 run);
-    # on Linux the pipes are made that small too, so it would here.
-    out = ok(R2 + """
-    import signal
-    rc._FORCE_THREADS = True
-    def echo(n):
-        return [sys.executable, "-c", "import os, sys\\nn = int(sys.argv[1])\\nb = bytearray()\\nwhile len(b) < n:\\n d = os.read(0, n - len(b))\\n if not d: break\\n b += d\\nos.write(1, b)", str(n)]
-    def small_pipes(c):
-        if sys.platform.startswith("linux"):
-            import fcntl
-            for fd in (c.wfd, c.rfd):
-                fcntl.fcntl(fd, 1031, 4096)  # (F_SETPIPE_SZ: Windows's size)
-    data = bytes(range(256)) * 64
-    c = rc.spawn(1 << 30, rc.Plan(None, 0, echo(len(data)), dict(os.environ)))
-    small_pipes(c)
-    rc.write_all(c, [data[:8000], data[8000:]])
-    back = bytearray(len(data))
-    rc.read_into(c, back)
-    print("echo", bytes(back) == data)
-    c.kill()
-    still = [sys.executable, "-c", "import time; time.sleep(30)"]
-    c = rc.spawn(1 << 30, rc.Plan(None, 0, still, dict(os.environ)))
-    # (Ctrl-C's latency: from the interrupt to its KeyboardInterrupt here,
-    # at most 100 ms: the wait wakes every 25 ms, William's Oct 25 bound.
-    # The interrupt is interrupt_main from a Timer on every system, its
-    # moment taken just before it.  r2 measured a SIGALRM from its scheduled
-    # time instead, and macOS arm64 failed at 0.1011 s (pypi 40501974415):
-    # an unseparated scheduled-deadline/delivery/handling delay, cause
-    # unresolved; the two real-signal diagnostics below report the parts)
-    fired = []
-    def fire():
-        fired.append(time.monotonic())
-        _thread.interrupt_main()
-    threading.Timer(0.3, fire).start()
-    try:
-        rc.write_all(c, [bytes(16 << 20)])
-        print("written")
-    except KeyboardInterrupt:
-        latency = time.monotonic() - fired[0]
-        print("interrupted", latency <= 0.100)
-    c.kill()
-    c = rc.spawn(1 << 30, rc.Plan(None, 0, echo(5), dict(os.environ)))
-    rc.write_all(c, [b"again"])
-    back = bytearray(5)
-    rc.read_into(c, back)
-    print("retry", bytes(back) == b"again")
-    c.kill()
-    print("latency timer %.4f (checked: <= 0.100)" % latency)
-    """)
-    assert out.split("\n")[:3] == ["echo True", "interrupted True", "retry True"], out
-    # (in every run's log, on every system)
-    print("  " + out.split("\n")[3])
-
-
 DIAG_CODE = """
 import subprocess
 rc._FORCE_THREADS = True
@@ -870,6 +808,150 @@ def test_r2_CORR_157_4_real_sigint_diagnostic_portable():
     assert len(trials) == SIGINT_TRIALS and "caught %d of %d" % (SIGINT_TRIALS, SIGINT_TRIALS) in lines and "retry True" in lines, out
     for l in trials:
         print("  sigint: " + l)
+
+
+WAIT_TRIALS = 3  # (the sample, declared before any run)
+
+
+def test_r2_CORR_157_4_wait_timeline_diagnostic_portable():
+    # DIAGNOSTICS ONLY (#157, the macOS 0.100 s gate failures, pypi
+    # 40503768272): no behaviour change, nothing bounded; it only records,
+    # in a run of its own, on every system:
+    # - the timed waits themselves: 40 each of Event.wait, Lock.acquire,
+    #   time.sleep and select at _WAKE (wall time: min, median, p90, max);
+    # - the gated case's timeline, WAIT_TRIALS times: the Timer callback's
+    #   moment just before and just after interrupt_main; every slice of
+    #   _blocking's main-thread wait (Thread.join, wrapped here, so the
+    #   module itself is unchanged): its start, end, length, and whether
+    #   the helper was still alive; the slices after the request; the first
+    #   return to Python after it; and the KeyboardInterrupt's catch.
+    # Asserted only: each trial caught, and a retry works after them.
+    out = ok(diag("""
+    import select, statistics
+    W = rc._WAKE
+    def stats(name, f):
+        d = []
+        for _ in range(40):
+            a = time.monotonic(); f(); d.append(time.monotonic() - a)
+        d.sort()
+        print("wait %%-8s x40 at %%.3f: min %%.4f median %%.4f p90 %%.4f max %%.4f" %% (name, W, d[0], statistics.median(d), d[35], d[-1]))
+    ev, lk = threading.Event(), threading.Lock()
+    lk.acquire()
+    stats("event", lambda: ev.wait(W))
+    stats("lock", lambda: lk.acquire(True, W))
+    stats("sleep", lambda: time.sleep(W))
+    if sys.platform != "win32":
+        stats("select", lambda: select.select([], [], [], W))
+    log = []
+    join = threading.Thread.join
+    def traced(self, timeout=None):
+        a = time.monotonic()
+        try:
+            return join(self, timeout)
+        finally:
+            log.append((a, time.monotonic(), self.is_alive()))
+    threading.Thread.join = traced
+    caught = 0
+    for i in range(%d):
+        del log[:]
+        fired = {}
+        def fire():
+            fired["before"] = time.monotonic()
+            _thread.interrupt_main()
+            fired["after"] = time.monotonic()
+        c = rc.spawn(1 << 30, rc.Plan(None, 0, still, dict(os.environ)))
+        threading.Timer(0.3, fire).start()
+        at = None
+        try:
+            try:
+                rc.write_all(c, [bytes(16 << 20)])
+            except KeyboardInterrupt:
+                at = time.monotonic()
+        finally:
+            c.kill()
+        caught += at is not None
+        b = fired.get("before")
+        after = [s for s in log if b is not None and s[1] >= b]
+        first = after[0][1] if after else None
+        print("trial %%d caught %%s" %% (i + 1, at is not None))
+        if b is not None and at is not None:
+            print("  before->after interrupt_main %%.4f; before->first return to Python %%s; first return->catch %%s; before->catch %%.4f" %% (
+                fired["after"] - b, "%%.4f" %% (first - b) if first else "-", "%%.4f" %% (at - first) if first else "-", at - b))
+        print("  slices %%d, %%d ending after the request; lengths (ms): %%s" %% (len(log), len(after), " ".join("%%.1f%%s" %% ((e - a) * 1000, "" if alive else "(done)") for a, e, alive in log[-12:])))
+        if after:
+            print("  slices ending after the request (ms from 'before'): %%s" %% " ".join("[%%.1f..%%.1f]" %% ((a - b) * 1000, (e - b) * 1000) for a, e, alive in after))
+    threading.Thread.join = join
+    print("caught %%d of %%d" %% (caught, %d))
+    print("retry", retry())
+    """ % (WAIT_TRIALS, WAIT_TRIALS)))
+    lines = out.split("\n")
+    assert "caught %d of %d" % (WAIT_TRIALS, WAIT_TRIALS) in lines and "retry True" in lines, out
+    for l in lines:
+        if l.startswith(("wait ", "trial ", "  ")):
+            print("  timeline: " + l)
+
+
+# (after the diagnostics above, so that a failure here leaves their numbers in the log)
+def test_r2_CORR_157_4_the_thread_transport_portable():
+    # astra2: Windows's pipes driven by blocking calls on helper threads
+    # (select takes sockets only there; no readv): forced here, the same
+    # code: a round trip, back-pressure with Ctrl-C at once, and a retry
+    # (portable: also run on Windows and macOS)
+    # The echo child reads all it's sent before it answers, as the engine's
+    # child does (raster_child.rs reads a whole request first): one that
+    # wrote back as it read deadlocked on Windows's 4 KiB pipes, the parent
+    # not reading until it had written everything (#157's train-10 run);
+    # on Linux the pipes are made that small too, so it would here.
+    out = ok(R2 + """
+    import signal
+    rc._FORCE_THREADS = True
+    def echo(n):
+        return [sys.executable, "-c", "import os, sys\\nn = int(sys.argv[1])\\nb = bytearray()\\nwhile len(b) < n:\\n d = os.read(0, n - len(b))\\n if not d: break\\n b += d\\nos.write(1, b)", str(n)]
+    def small_pipes(c):
+        if sys.platform.startswith("linux"):
+            import fcntl
+            for fd in (c.wfd, c.rfd):
+                fcntl.fcntl(fd, 1031, 4096)  # (F_SETPIPE_SZ: Windows's size)
+    data = bytes(range(256)) * 64
+    c = rc.spawn(1 << 30, rc.Plan(None, 0, echo(len(data)), dict(os.environ)))
+    small_pipes(c)
+    rc.write_all(c, [data[:8000], data[8000:]])
+    back = bytearray(len(data))
+    rc.read_into(c, back)
+    print("echo", bytes(back) == data)
+    c.kill()
+    still = [sys.executable, "-c", "import time; time.sleep(30)"]
+    c = rc.spawn(1 << 30, rc.Plan(None, 0, still, dict(os.environ)))
+    # (Ctrl-C's latency: from the interrupt to its KeyboardInterrupt here,
+    # at most 100 ms: the wait wakes every 25 ms, William's Oct 25 bound.
+    # The interrupt is interrupt_main from a Timer on every system, its
+    # moment taken just before it.  r2 measured a SIGALRM from its scheduled
+    # time instead, and macOS arm64 failed at 0.1011 s (pypi 40501974415):
+    # an unseparated scheduled-deadline/delivery/handling delay, cause
+    # unresolved; the two real-signal diagnostics below report the parts)
+    fired = []
+    def fire():
+        fired.append(time.monotonic())
+        _thread.interrupt_main()
+    threading.Timer(0.3, fire).start()
+    try:
+        rc.write_all(c, [bytes(16 << 20)])
+        print("written")
+    except KeyboardInterrupt:
+        latency = time.monotonic() - fired[0]
+        print("interrupted", latency <= 0.100)
+    c.kill()
+    c = rc.spawn(1 << 30, rc.Plan(None, 0, echo(5), dict(os.environ)))
+    rc.write_all(c, [b"again"])
+    back = bytearray(5)
+    rc.read_into(c, back)
+    print("retry", bytes(back) == b"again")
+    c.kill()
+    print("latency timer %.4f (checked: <= 0.100)" % latency)
+    """)
+    assert out.split("\n")[:3] == ["echo True", "interrupted True", "retry True"], out
+    # (in every run's log, on every system)
+    print("  " + out.split("\n")[3])
 
 
 def test_r2_CORR_157_4_render_and_decode_over_the_thread_transport_portable():
