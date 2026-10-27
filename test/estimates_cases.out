@@ -24,7 +24,7 @@ calibration
   past the 7-day TTL it is not: False
   nor under another key: False
 factor
-  the user's random state unchanged: True
+  the user's random stream unchanged: True
   valid estimate/1: True
   total time: None | peak memory: 200000 bound | estimated to fit
   trial division below 2^16 | work 1000000 bound | None | success None

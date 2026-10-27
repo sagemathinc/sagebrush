@@ -98,6 +98,76 @@
   "class": "3",
   "owner": "class group/number fields"
  },
+ "engine/classgroup/src/nf/cost.rs ::  :: use super::ecm::{fixed_b2, DOUBLING_B1, DOUBLING_B2_MAX, DOUBLING_CURVES, DOUBLING_TABLE_MAX, MAXL, SCHEDULE, STAGE2_D}; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs ::  :: use super::factor::{RHO_ITERS, SPLIT_BITS_MAX, TRIAL_BOUND}; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: SPLIT_BITS_MAX, SPLIT_BITS_MAX #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: if bits > SPLIT_BITS_MAX { #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: if d > max_digits.max(15) { #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: let max_digits = ((bits as f64 / 2.0) * 2f64.log10()).ceil() as u32; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: let sqrt_bound = if bits / 2 + 1 >= 64 { u64::MAX } else { 1u64 << (bits / 2 + 1) }; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: memory: 32 * 8 * MAXL as u64, #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: gcd_u64 :: const RHO_UMAX: usize = 64; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: levels :: let b2 = (50 * b1).min(DOUBLING_B2_MAX).min(DOUBLING_TABLE_MAX); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: rho_table :: let n = RHO_UMAX * RHO_STEPS; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: sat :: x.min(u64::MAX as u128) as u64 #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: sizes_and_limits :: fn sizes_and_limits() { #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: stage2_buffers :: babies * 2 * MAXL as u64 * 8 #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
  "engine/classgroup/src/nf/ecm.rs ::  :: pub const MAXL: usize = 16; #0": {
   "class": "coverage",
   "owner": "class group/number fields",
