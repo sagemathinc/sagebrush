@@ -73,7 +73,7 @@ ok(scan(files, tree({ "engine/Cargo.toml": ws, "engine/a/Cargo.toml": member, "s
 
 // and the real tree
 const real = scan();
-ok(real.errors.length === 0 || real.errors.every((e) => /engine\/wasm\/Cargo\.toml/.test(e)), `the tree scans clean (${real.found.length} allowed items)`);
+ok(real.errors.length === 0, `the tree scans clean (${real.found.length} allowed items)`);
 
 console.log(failures ? `${failures} failures` : "unsafe inventory: all controls pass");
 process.exit(failures ? 1 : 0);
