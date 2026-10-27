@@ -35,8 +35,13 @@ _REGISTRY = {}
 def _key(f):
     if isinstance(f, str):
         mod, _, name = f.rpartition(".")
-        return (mod, name)
-    return (getattr(f, "__module__", None), getattr(f, "__qualname__", getattr(f, "__name__", None)))
+    else:
+        mod, name = getattr(f, "__module__", None), getattr(f, "__qualname__", getattr(f, "__name__", None))
+    # (the CPython package loads lib's modules as sagebrush._sagelib.X; the
+    # browser and the CLI as X: one key for both)
+    if isinstance(mod, str) and mod.startswith("sagebrush._sagelib."):
+        mod = mod[len("sagebrush._sagelib."):]
+    return (mod, name)
 
 
 def _name(f):
