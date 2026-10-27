@@ -225,17 +225,352 @@ fn stage_b_against_sage() {
     assert!(b.debited(Phase::Modular));
 }
 
-/// A coefficient above BINOMIAL_MAX_BITS takes today's path (Sage:
-/// (2^2100 x - 1)(2^2100 x + 1)).
+/// A 4200-bit binomial takes Stage B (no bits cap: plan rank 3 r3, 3.8),
+/// with the same answer as before (Sage: (2^2100 x - 1)(2^2100 x + 1)).
 #[test]
-fn above_the_bits_cap_takes_the_general_path() {
+fn a_4200_bit_binomial_takes_stage_b() {
     let big = BigInt::one() << 4200u32;
     let f = vec![-BigInt::one(), BigInt::zero(), big.clone()];
     let b = Budget::default();
     let (c, fs) = try_factor_with(&f, &b).unwrap();
     let h = BigInt::one() << 2100u32;
     assert_eq!((c, fs), (BigInt::one(), vec![(vec![-BigInt::one(), h.clone()], 1), (vec![BigInt::one(), h], 1)]));
-    assert!(!b.debited(Phase::PerfectPower) && b.debited(Phase::Modular));
+    assert!(b.debited(Phase::PerfectPower) && !b.debited(Phase::Modular));
+}
+
+/// q^2 x^2 - 49 with a leading coefficient of exactly `bits` bits:
+/// q = 2^(bits/2) - 1 for even bits, 2^((bits-1)/2) + 1 for odd (7 divides
+/// neither at these sizes: the content is 1).
+fn square_binomial(bits: u64) -> (Vec<BigInt>, BigInt) {
+    let q: BigInt = if bits.is_multiple_of(2) { (BigInt::one() << (bits / 2) as u32) - 1 } else { (BigInt::one() << ((bits - 1) / 2) as u32) + 1 };
+    let a: BigInt = &q * &q;
+    assert_eq!(a.bits(), bits);
+    (vec![BigInt::from(-49), BigInt::zero(), a], q)
+}
+
+/// Stage B's executable ledger at a size: the factors (q x - 7)(q x + 7),
+/// and each section's preflight at least the units it actually debited
+/// (the perfect-power search, then the build and certificate), for one
+/// call on an unlimited budget.
+fn ledger_audit_at(bits: u64) {
+    let (f, q) = square_binomial(bits);
+    let b = Budget::unlimited();
+    let (r, a) = audit::during(|| try_factor_with(&f, &b));
+    let (c, fs) = r.unwrap();
+    assert_eq!((c, fs), (BigInt::one(), vec![(vec![BigInt::from(-7), q.clone()], 1), (vec![BigInt::from(7), q], 1)]), "{bits} bits");
+    assert!(b.debited(Phase::PerfectPower) && !b.debited(Phase::Modular), "{bits} bits: Stage B");
+    assert!(a.pp_used > 0 && a.hom_used > 0, "{bits} bits: {a:?}");
+    assert!(a.bisections >= 1 && a.prefilter_rejects == 0, "{bits} bits: a true power must reach the exact search: {a:?}");
+    assert!(a.pp_preflight >= a.pp_used, "{bits} bits: perfect-power preflight below its debits: {a:?}");
+    assert!(a.hom_preflight >= a.hom_used, "{bits} bits: homogenization preflight below its debits: {a:?}");
+    assert_eq!(b.live(), 0);
+    eprintln!("ledger audit at {bits} bits: {a:?}");
+}
+
+#[test]
+fn the_stage_b_ledger_holds_at_2_12_and_2_12_plus_1_bits() {
+    ledger_audit_at(1 << 12);
+    ledger_audit_at((1 << 12) + 1);
+}
+
+#[test]
+fn the_stage_b_ledger_holds_at_2_16_bits() {
+    ledger_audit_at(1 << 16);
+}
+
+/// 2^20 bits: the root search is cubic in the size, so this row runs on the
+/// VM (`cargo test --release -- --ignored`).
+#[test]
+#[ignore]
+fn vm_the_stage_b_ledger_holds_at_2_20_bits() {
+    ledger_audit_at(1 << 20);
+}
+
+/// The ledger's arithmetic is checked: a size whose costs overflow u64 is
+/// None (a refusal), never a wrapped, smaller figure.
+#[test]
+fn the_piece_ledger_overflow_is_none() {
+    assert!(piece_cost(1 << 40, 64, 1 << 30, 1).is_none());
+    assert!(piece_cost(u64::MAX, 1, 1, 1).is_none());
+    assert!(piece_cost(1, 1, 1, u64::MAX).is_none());
+    assert!(plan_powers(u64::MAX, 2, &[2]).is_none());
+}
+
+/// Every PieceCost field against an independent scalar oracle (astra2's
+/// values for (4, 3, 4096, 1); the second by hand): a term dropped inside
+/// piece_cost changes the preflight and the debits together, which the
+/// preflight >= used audit cannot see, but this can.
+#[test]
+fn the_piece_costs_match_an_independent_oracle() {
+    let k = piece_cost(4, 3, 4096, 1).unwrap();
+    assert_eq!((k.fb, k.bh, k.len, k.pw, k.build, k.cert), (16384, 16388, 5, 393216, 49601, 165121));
+    // ph 2, c 1, beta 64, h 2: fb 128 (2 limbs), bh 130 (3 limbs), len 5;
+    // pw = 2 clog2(3) 2^2 = 16; build = (1 + 3) 3 = 12;
+    // cert = 2*1*2 + 3*2 + 1*2 + limbs(129)*2 + limbs(257) = 4 + 6 + 2 + 6 + 5
+    let k = piece_cost(2, 1, 64, 2).unwrap();
+    assert_eq!((k.fb, k.bh, k.len, k.pw, k.build, k.cert), (128, 130, 5, 16, 12, 23));
+}
+
+/// p^phi has no u32 cutoff on the Stage B route (plan rank 3 r3, 3.6): an
+/// exponent above u32::MAX is computed, never refused or narrowed.
+#[test]
+fn the_piece_power_has_no_u32_cutoff() {
+    let e = u32::MAX as u64 + 1;
+    assert_eq!(phi_power(&BigInt::one(), e), BigInt::one());
+    assert_eq!(phi_power(&-BigInt::one(), e + 1), -BigInt::one());
+    assert_eq!(phi_power(&BigInt::from(3), 5), BigInt::from(243));
+}
+
+/// The product of a factorization, multiplicities included.
+fn expand(c: &BigInt, fs: &[(ZPoly, u32)]) -> ZPoly {
+    let mut acc = vec![c.clone()];
+    for (f, e) in fs {
+        for _ in 0..*e {
+            let mut r = vec![BigInt::zero(); acc.len() + f.len() - 1];
+            for (i, x) in acc.iter().enumerate() {
+                for (j, y) in f.iter().enumerate() {
+                    r[i + j] += x * y;
+                }
+            }
+            acc = r;
+        }
+    }
+    acc
+}
+
+/// a x^m - b with a = q^m, b = p^m: Stage B with g = m.
+fn power_binomial(m: usize, q: u32, p: u32) -> ZPoly {
+    let mut f = vec![BigInt::zero(); m + 1];
+    f[0] = -BigInt::from(p).pow(m as u32);
+    f[m] = BigInt::from(q).pow(m as u32);
+    f
+}
+
+/// The piece costs' metadata (CORR-R3-BIN5-1) is charged before it is
+/// allocated and for its whole life: under the allocation audit, the
+/// "piece costs" tag never holds more than its reservation, on many pieces
+/// (2^5040 x^5040 - 3^5040: 60 pieces, h = 1) and on a heterogeneous g with
+/// h > 1 (64 x^12 - 729: g = 6, 4 pieces through the general path); both
+/// ledgers hold, the factorization multiplies back, nothing stays reserved.
+#[test]
+fn the_piece_costs_are_charged_for_their_whole_life() {
+    let mut h2 = vec![BigInt::zero(); 13];
+    h2[0] = BigInt::from(-729);
+    h2[12] = BigInt::from(64);
+    for (f, pieces) in [(power_binomial(5040, 2, 3), Some(60usize)), (h2, None)] {
+        let b = Budget::default();
+        let ((r, a), rep) = crate::alloc_spy::audit(|| audit::during(|| try_factor_with(&f, &b)));
+        let (c, fs) = r.unwrap();
+        assert_eq!(expand(&c, &fs), f);
+        if let Some(n) = pieces {
+            assert_eq!(fs.len(), n);
+        }
+        assert!(b.debited(Phase::PerfectPower));
+        assert_eq!(rep.tag_breaches, 0, "{:?}", rep.first_breach);
+        assert!(a.pp_preflight >= a.pp_used && a.hom_preflight >= a.hom_used && a.hom_used > 0, "{a:?}");
+        assert_eq!(b.live(), 0);
+    }
+}
+
+/// The tier-1 witnesses are exactly the prime factors of 2^64 - 1 and
+/// 2^64 + 1, and the one-pass fold gives |n| mod each of them (against an
+/// independent reduction), for signs and sizes around limb boundaries.
+#[test]
+fn the_fold_residues_are_exact() {
+    assert_eq!(FOLD_MINUS.iter().map(|&p| p as u128).product::<u128>(), (1u128 << 64) - 1);
+    assert_eq!(FOLD_PLUS.iter().map(|&p| p as u128).product::<u128>(), (1u128 << 64) + 1);
+    assert_eq!(FOLD_48.iter().map(|&p| p as u128).product::<u128>() * 3, (1u128 << 48) - 1);
+    assert!(FOLD_MINUS.iter().chain(FOLD_PLUS.iter()).chain(FOLD_48.iter()).all(|&p| is_prime_trial(p)));
+    // each tier-1 witness divides the fold it is read from
+    for &(p, wide) in TIER1.iter() {
+        assert!(if wide { FOLD_MINUS.contains(&p) } else { FOLD_48.contains(&p) }, "{p}");
+    }
+    assert!(TIER1.windows(2).all(|w| w[0].0 < w[1].0));
+    for bits in [1u32, 47, 48, 49, 63, 64, 65, 95, 96, 97, 127, 128, 129, 191, 192, 193, 1000, 4097] {
+        for n in [(BigInt::one() << bits) - 1, (BigInt::one() << bits) + 12345, BigInt::from(3).pow(bits / 2 + 1)] {
+            for n in [n.clone(), -n] {
+                let ((rm, r48), rp) = (fold_minus(&n), fold_plus(&n));
+                assert!(rm < u64::MAX && r48 < (1 << 48) - 1, "{bits} bits: 2^k - 1 is folded to 0");
+                for &p in FOLD_MINUS.iter() {
+                    assert_eq!(rm % p, n.abs().mod_floor(&BigInt::from(p)).to_u64().unwrap(), "{bits} bits mod {p}");
+                }
+                for &p in FOLD_48.iter() {
+                    assert_eq!(r48 % p, n.abs().mod_floor(&BigInt::from(p)).to_u64().unwrap(), "{bits} bits mod {p} (48)");
+                }
+                assert_eq!(r48, n.abs().mod_floor(&BigInt::from((1u64 << 48) - 1)).to_u64().unwrap(), "{bits} bits mod 2^48 - 1");
+                for &p in FOLD_PLUS.iter() {
+                    assert_eq!((rp % p as u128) as u64, n.abs().mod_floor(&BigInt::from(p)).to_u64().unwrap(), "{bits} bits mod {p}");
+                }
+            }
+        }
+    }
+}
+
+/// The residue prefilter never rejects a true l-th power: r^l (and -r^l for
+/// odd l) for r up to 3000 (multiples of every witness included) and a few
+/// large r, for each small prime l, through both tiers.
+#[test]
+fn the_residue_prefilter_never_rejects_a_power() {
+    let b = Budget::unlimited();
+    for l in [2u64, 3, 5, 7, 11, 13] {
+        let big = [BigInt::from(12345u32), (BigInt::one() << 300u32) + 7, (BigInt::one() << 2100u32) - 1, BigInt::from(6700417u32), BigInt::from(274177u32)];
+        for r in (1u32..3000).map(BigInt::from).chain(big) {
+            let n = r.pow(l as u32);
+            assert!(!not_a_power(&b, &n, l).unwrap(), "{r}^{l} rejected");
+            if l % 2 == 1 {
+                assert!(!not_a_power(&b, &-n, l).unwrap(), "-{r}^{l} rejected");
+            }
+        }
+    }
+}
+
+/// Exhaustively on small n: whenever the prefilter rejects n, exact_root
+/// finds no l-th root (soundness), and it rejects most non-powers.
+#[test]
+fn the_residue_prefilter_agrees_with_exact_root() {
+    let b = Budget::unlimited();
+    for l in [2u64, 3, 5, 7] {
+        let (mut rejected, mut non_powers) = (0, 0);
+        for n in 1u32..20000 {
+            let n = BigInt::from(n);
+            let is_power = exact_root(&b, &n, l).unwrap().is_some();
+            let rej = not_a_power(&b, &n, l).unwrap();
+            assert!(!(rej && is_power), "{n} is an {l}-th power but was rejected");
+            non_powers += !is_power as u32;
+            rejected += rej as u32;
+        }
+        assert!(rejected * 10 >= non_powers * 9, "l {l}: only {rejected} of {non_powers} non-powers rejected");
+    }
+}
+
+/// a x^12 - b with a = 2^(bits-1) + 1 and b = a + 2: perf_bench's binom
+/// fixture, a generic non-perfect-power binomial.
+fn binom(bits: u32) -> ZPoly {
+    let a: BigInt = (BigInt::one() << (bits - 1)) + 1;
+    let mut f = vec![BigInt::zero(); 13];
+    f[0] = -(a.clone() + BigInt::from(2));
+    f[12] = a;
+    f
+}
+
+/// The generic binom4097 fixture (the 89.8x regression of the r3 perf run)
+/// and its larger siblings are rejected by the residue prefilter before any
+/// bisection, with every witness evaluation debited; they then factor as
+/// before (the general path).
+#[test]
+fn a_generic_binomial_is_rejected_before_any_bisection() {
+    for bits in [4097u32, 8192, 16384] {
+        let f = binom(bits);
+        let b = Budget::unlimited();
+        let (r, a) = audit::during(|| try_factor_with(&f, &b));
+        let (c, fs) = r.unwrap();
+        assert_eq!(expand(&c, &fs), f, "{bits} bits");
+        assert_eq!(a.bisections, 0, "{bits} bits: {a:?}");
+        assert!(a.prefilter_rejects >= 1 && a.prefilter_evals >= a.prefilter_rejects, "{bits} bits: {a:?}");
+        // each fold pass debits limbs + 1, each witness at least 130
+        assert!(a.pp_used >= a.fold_passes * (limbs(bits as u64) + 1) + a.prefilter_evals * 130, "{bits} bits: the prefilter's work not debited: {a:?}");
+        assert!(a.proof_preflight >= a.pp_used && a.pp_preflight == 0, "{bits} bits: the proof alone is admitted: {a:?}");
+        assert_eq!(b.live(), 0);
+    }
+}
+
+/// The early proof folds each coefficient once and reuses its residues for
+/// every l: (2^210 + 1) x^210 - 3^210, where c0 = -3^210 is a true 210th
+/// power (never rejected, so consulted for every prime l | 210 = 2, 3, 5, 7,
+/// needing both its folds) and a = 2^210 + 1 is rejected at every l by a
+/// first-pass witness (3, 7, 641, 673: checked exactly).  g = 1 is proved
+/// with exactly 3 fold passes (c0's two, a's one), not one per (coefficient,
+/// l).
+#[test]
+fn the_residue_proof_folds_each_coefficient_once() {
+    let mut f = vec![BigInt::zero(); 211];
+    f[0] = -BigInt::from(3u32).pow(210u32);
+    f[210] = (BigInt::one() << 210u32) + BigInt::one();
+    let b = Budget::unlimited();
+    let (r, a) = audit::during(|| stage_b(&b, 210, &f[210], &f[0]).map(|o| o.is_none()));
+    assert!(r.unwrap(), "g = 1 proved");
+    assert_eq!(a.proof_folds, 3, "{a:?}");
+    assert_eq!((a.bisections, b.live()), (0, 0));
+}
+
+/// The early proof allocates nothing coefficient-sized: not_a_power streams
+/// borrowed limbs (zero bytes allocated, through both tiers), and stage_b
+/// proves g = 1 before any copy, reservation or conversion buffer (its live
+/// peak stays below one coefficient's size) (CORR-R3-BIN5-R3-1/2, PREF-MEM-1).
+#[test]
+fn the_early_proof_allocates_nothing_coefficient_sized() {
+    let b = Budget::unlimited();
+    for bits in [4097u32, 16384, 65536] {
+        let f = binom(bits);
+        for (n, l) in [(&f[0], 2u64), (&f[12], 3), (&(BigInt::from(3).pow(bits / 2)), 2), (&(BigInt::from(5).pow(bits / 3)), 7)] {
+            let before = crate::alloc_spy::allocated();
+            not_a_power(&b, n, l).unwrap();
+            assert_eq!(crate::alloc_spy::allocated(), before, "{bits} bits, l {l}: the prefilter allocated");
+        }
+    }
+    for bits in [16384u32, 65536] {
+        let f = binom(bits);
+        let b = Budget::unlimited();
+        let (r, peak) = crate::alloc_spy::peak_during(|| stage_b(&b, 12, &f[12], &f[0]).map(|o| o.is_none()));
+        assert!(r.unwrap(), "{bits} bits: g = 1 proved");
+        assert!(peak < (bits / 8) as i64, "{bits} bits: live peak {peak} B, a coefficient is {} B", bits / 8);
+        assert_eq!(b.live(), 0);
+    }
+}
+
+/// The residue proof is admitted on its own (PREF-WORK-1): a generic
+/// non-power needs only the proof's work, never the bisection plan's.  Less
+/// work than that plan alone factors it (the old order refused there); at the
+/// least work that does, it makes no bisection and multiplies back; one unit
+/// less is refused.  And stage_b
+/// alone: the divisor scan plus exactly the proof's preflight returns g = 1,
+/// one unit less refuses for that preflight, before any work or copy.
+#[test]
+fn a_generic_binomial_needs_only_the_proofs_work() {
+    for bits in [4097u32, 8192, 16384] {
+        let f = binom(bits);
+        let ok = |w: u64| {
+            let b = Budget::new(Limits { work: w, ..Limits::DEFAULT });
+            try_factor_with(&f, &b).is_ok()
+        };
+        let probe = Budget::unlimited();
+        let (r, a) = audit::during(|| try_factor_with(&f, &probe));
+        r.unwrap();
+        // less work than the bisection plan alone suffices (the old order
+        // refused below it); then the least that does
+        let plan = plan_powers(bits as u64, 12, &[2, 3]).unwrap();
+        let (mut lo, mut hi) = (0u64, plan - 1);
+        assert!(ok(hi), "{bits} bits: refused below the bisection plan ({plan}) it never runs");
+        while lo + 1 < hi {
+            let mid = lo + (hi - lo) / 2;
+            if ok(mid) {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        assert!(hi >= a.proof_preflight, "{bits} bits: least work {hi} below the proof's preflight");
+        let b = Budget::new(Limits { work: hi, ..Limits::DEFAULT });
+        let (r, a2) = audit::during(|| try_factor_with(&f, &b));
+        let (c, fs) = r.unwrap();
+        assert_eq!(expand(&c, &fs), f);
+        assert_eq!(a2.bisections, 0, "{bits} bits: {a2:?}");
+        assert!(!ok(hi - 1));
+        // stage_b alone, at the proof's exact admission
+        let ub = Budget::unlimited();
+        let before = ub.work_left();
+        divisors_and_primes(&ub, 12).unwrap();
+        let scan = before - ub.work_left();
+        let need = a.proof_preflight;
+        let b = Budget::new(Limits { work: scan + need, ..Limits::DEFAULT });
+        assert!(stage_b(&b, 12, &f[12], &f[0]).unwrap().is_none(), "{bits} bits");
+        let b = Budget::new(Limits { work: scan + need - 1, ..Limits::DEFAULT });
+        let start = crate::alloc_spy::allocated();
+        let e = stage_b(&b, 12, &f[12], &f[0]).err().unwrap();
+        assert_eq!((e.what, e.need, e.phase), ("work", need, Phase::PerfectPower), "{bits} bits: {e}");
+        assert!(crate::alloc_spy::allocated() - start < 1024, "{bits} bits: allocated before the refusal");
+        assert_eq!(b.live(), 0);
+    }
 }
 
 /// Exact roots: powers and non-powers, signs, the quick rejections.
@@ -423,7 +758,7 @@ fn preflights_refuse_before_allocating() {
 fn live_memory_stays_within_the_budget() {
     let mut f16 = xn(12, -81);
     f16[12] = BigInt::from(16);
-    for input in [xn(5040, -1), xn(9240, 1), f16, xn(8, -16)] {
+    for input in [xn(5040, -1), xn(9240, 1), f16, xn(8, -16), power_binomial(5040, 2, 3)] {
         let mut limit: u64 = 1 << 10;
         while limit <= 64 << 20 {
             let b = Budget::new(Limits { memory: limit, ..Limits::DEFAULT });

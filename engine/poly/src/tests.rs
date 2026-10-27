@@ -384,9 +384,8 @@ fn timings() {
         ("x^10000-1".into(), xn(10000, -1)),
         ("x^9240+1".into(), xn(9240, 1)),
     ];
-    // Stage B: 2^4080 x^9240 - 1 (the perfect-power search finds g = 120
-    // under the 4096-bit cap; pieces of degree up to 32 * 77 go on to the
-    // general path)
+    // Stage B: 2^4080 x^9240 - 1 (the perfect-power search finds g = 120;
+    // pieces of degree up to 32 * 77 go on to the general path)
     let mut f = xn(9240, -1);
     f[9240] = BigInt::one() << 4080u32;
     cases.push(("2^4080 x^9240 - 1".into(), f));
