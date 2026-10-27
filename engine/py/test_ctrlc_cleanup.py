@@ -317,6 +317,99 @@ def test_gc_mixed_prefix():
     print("gc mixed prefix: %d passes reach the dead entries behind 400 live ones: ok" % passes)
 
 
+def test_gc_wall_time():
+    """astra's CORR-CTRLC-A-2: real time passes as entries are read, the seek's
+    included.  (a) A seek longer than the whole budget: the pass still
+    examines past its cursor (the budget starts there, and every pass
+    examines at least one entry).  (b) A slow seek, then fast examinations:
+    the budget is the examinations', so the pass removes every dead one."""
+    real = os.scandir
+
+    def slow(per_entry_s, until=None):
+        class It:
+            def __init__(self, d):
+                with real(d) as it:
+                    self.es = sorted(it, key=lambda e: (not e.name.startswith("1-"), e.name))  # (the live one, 1-*, first)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def __iter__(self):
+                for e in self.es:
+                    if until is None or e.name <= until:
+                        time.sleep(per_entry_s)
+                    yield e
+        return It
+
+    def setup(dead):
+        d = tempfile.mkdtemp(prefix="sb-p3w-")
+        root = os.path.join(d, ".sagebrush")
+        host = os.path.join(root, ".plot3d-tmp", P3._host())
+        os.makedirs(host)
+        open(os.path.join(host, "1-1"), "w").close()  # (a live writer's)
+        for i in range(dead):
+            open(os.path.join(host, "%d-1" % (900000 + i)), "w").close()
+        open(os.path.join(root, ".plot3d-gc.cursor"), "w").write("1-1")  # (a cursor at it, from an earlier pass)
+        return root, host
+
+    alive = lambda pid: pid == 1  # noqa: E731
+    # (a) every entry slow, a budget shorter than one entry's read: each pass examines one, so both go in two passes
+    root, host = setup(2)
+    os.scandir = slow(0.03)
+    try:
+        removed = [P3.gc_temps(root, budget_s=0.01, alive=alive)["removed"] for _ in range(4)]
+    finally:
+        os.scandir = real
+    assert sum(removed) == 2 and removed[0] == 1, removed
+    assert os.listdir(host) == ["1-1"]
+    # (b) the seek slow (0.05 s, past a 0.02 s budget), the examinations fast: one pass removes all 5
+    root, host = setup(5)
+    os.scandir = slow(0.05, until="1-1")
+    try:
+        r = P3.gc_temps(root, budget_s=0.02, alive=alive)
+    finally:
+        os.scandir = real
+    assert r["removed"] == 5 and not r["stopped"], r
+    print("gc under real time: a slow seek is not charged; every pass examines past its cursor: ok")
+
+
+def test_get_deadline_nonempty():
+    """astra's CORR-CTRLC-A-1: the deadline holds while the queue stays
+    nonempty (stale replies, or a flood of output chunks): a clock that
+    advances as messages are processed passes it, and _get returns False;
+    the process's end (None) is still returned as death."""
+    import queue
+    s = S.Session.__new__(S.Session)
+    s.stale = 0
+    real = S.time.monotonic
+    t = [0.0]
+
+    def clock():
+        t[0] += 1.0  # (one tick per look at the clock)
+        return t[0]
+
+    try:
+        S.time.monotonic = clock
+        for msgs in ([{"id": 9, "result": "stale"}] * 4 + [{"id": 1, "result": "late"}],
+                     [{"id": 1, "out": "x", "stream": "stdout"}] * 4 + [{"id": 1, "result": "late"}]):
+            s.replies = queue.Queue()
+            for m in msgs:
+                s.replies.put(m)
+            assert s._get(1, 1.5) is False, msgs[0]
+        s.replies = queue.Queue()
+        s.replies.put(None)
+        assert s._get(1, 1.5) is None
+        s.replies = queue.Queue()
+        s.replies.put({"id": 1, "result": "mine"})
+        assert s._get(1, 1.5)["result"] == "mine"
+    finally:
+        S.time.monotonic = real
+    print("_get: the deadline holds over a nonempty queue; EOF kept: ok")
+
+
 # ------------------------------------------------------------------ 3b and 4: Session's ids and the timeout race
 
 STANDIN = textwrap.dedent(r'''
@@ -444,7 +537,9 @@ if __name__ == "__main__":
     test_page_no_listing_with_stale_temps()
     test_gc()
     test_gc_mixed_prefix()
+    test_gc_wall_time()
     test_timeout_race_keeps_a_finished_reply()
     test_ids()
+    test_get_deadline_nonempty()
     test_runner_drops_stale()
     print("ctrlc cleanup: all ok")
