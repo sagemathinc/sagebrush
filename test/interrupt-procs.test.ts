@@ -19,17 +19,28 @@ function run(body: string): any {
   // (the tag is assembled at run time, so it is whole only in the fakes' command lines, never in
   // this child's own -e source: pkill must not match the child itself)
   const src = `import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 const TAG = "sb-procs-" + "test-" + ${JSON.stringify(id)};
 import { killTree, procTable, sessionTree, survivors } from ${JSON.stringify(mod)};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const stubborn = () => spawn("script", ["-qfec", "sh -c 'trap \\"\\" TERM HUP INT; while :; do sleep 0.2; done # " + TAG + "'", "/dev/null"], { detached: true, stdio: ["pipe", "ignore", "ignore"] });
-// the fake's shell is running (not only script): wait for it, up to 10 s, rather than a fixed sleep
-const ready = async (p) => { for (let k = 0; k < 200; k++) { if (sessionTree(p.pid).length >= 2) return true; await sleep(50); } return false; };
+const ARM = mkdtempSync(tmpdir() + "/sb-procs-arm-");
+// the fake: a shell that ignores TERM, HUP and INT, and only then writes its pid to ARM/armed
+// (delay: seconds it waits before its trap, for the slow-to-arm control)
+const stubborn = (delay = 0) => spawn("script", ["-qfec", "sh -c '" + (delay ? "sleep " + delay + "; " : "") + "trap \\"\\" TERM HUP INT; echo $$ > " + ARM + "/armed.t && mv " + ARM + "/armed.t " + ARM + "/armed; while :; do sleep 0.2; done # " + TAG + "'", "/dev/null"], { detached: true, stdio: ["pipe", "ignore", "ignore"] });
+// the fake is ready once its shell is ARMED: the pid it wrote after its trap is in script's session
+// tree; its pid, or 0 if it never armed in 10 s.  (Two entries in the tree weren't enough: under
+// load the second could still be the wrapper shell, before the trap or before the inner shell
+// existed, and the wrapper dies of the pty's HUP; grader, master c4104b7e, 4 of 30 under load.)
+const ready = async (p) => { for (let k = 0; k < 200; k++) { let q = 0; try { q = Number(readFileSync(ARM + "/armed", "utf8")); } catch {} if (q > 0 && sessionTree(p.pid).includes(q)) return q; await sleep(50); } return 0; };
+// whether a process ignores SIGHUP (bit 0 of SigIgn in /proc/PID/status)
+const ignoresHup = (q) => { try { return (BigInt("0x" + /SigIgn:\\s*([0-9a-f]+)/.exec(readFileSync("/proc/" + q + "/status", "utf8"))[1]) & 1n) === 1n; } catch { return false; } };
 try {
   const out = await (async () => { ${body} })();
   console.log(JSON.stringify(out));
 } finally {
   spawnSync("pkill", ["-KILL", "-f", TAG]);
+  rmSync(ARM, { recursive: true, force: true });
 }`;
   const r = spawnSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8", timeout: 30_000 });
   spawnSync("pkill", ["-KILL", "-f", tag]); // (also when the child itself timed out)
@@ -40,13 +51,15 @@ try {
 test("the session tree reaches the launcher outside the group, and the kill leaves nothing", { skip: !hasScript && "no script(1)" }, () => {
   const r = run(`
     const p = stubborn();
-    if (!(await ready(p))) return { notReady: true };
+    const armed = await ready(p);
+    if (!armed) return { notReady: true };
     const t = procTable();
     const tree = sessionTree(p.pid, new Map(), t);
     const outside = tree.filter((q) => t.get(q).pgid !== p.pid);
     const killed = killTree(p.pid);
     await sleep(500);
     return { tree: tree.length, outside: outside.length, left: survivors(killed) };`);
+  assert.ok(!r.notReady, "the fake never armed in 10 s");
   assert.ok(r.tree >= 2, "script and its shell");
   assert.ok(r.outside >= 1, "the shell is outside script's group (the case the group kill missed)");
   assert.deepEqual(r.left, []);
@@ -55,7 +68,8 @@ test("the session tree reaches the launcher outside the group, and the kill leav
 test("a process orphaned before the kill is still killed, from the pids remembered while it ran", { skip: !hasScript && "no script(1)" }, () => {
   const r = run(`
     const p = stubborn();
-    if (!(await ready(p))) return { notReady: true };
+    const armed = await ready(p);
+    if (!armed) return { notReady: true };
     const known = new Map();
     const t = procTable();
     for (const q of sessionTree(p.pid, new Map(), t)) known.set(q, t.get(q).start);
@@ -65,7 +79,32 @@ test("a process orphaned before the kill is still killed, from the pids remember
     const killed = killTree(p.pid, known);
     await sleep(500);
     return { orphans: orphans.length, left: survivors([...known.keys(), ...killed]) };`);
+  assert.ok(!r.notReady, "the fake never armed in 10 s");
   assert.ok(r.orphans >= 1, "the orphan outlived script");
+  assert.deepEqual(r.left, []);
+});
+
+// grader's race made certain: a fake that waits 1 s before its trap.  ready() returns only once
+// the shell it names ignores HUP, and that shell, orphaned, is still killed.  (The old ready(),
+// two entries in the tree, returned during the wait: this test fails on it every time.)
+test("a fake slow to arm is waited for, and its armed shell, orphaned, is still killed", { skip: !hasScript && "no script(1)" }, () => {
+  const r = run(`
+    const p = stubborn(1);
+    const armed = await ready(p);
+    if (!armed) return { notReady: true };
+    const hup = ignoresHup(armed);
+    const known = new Map();
+    const t = procTable();
+    for (const q of sessionTree(p.pid, new Map(), t)) known.set(q, t.get(q).start);
+    process.kill(p.pid, "SIGKILL");
+    await sleep(500);
+    const orphans = survivors([...known.keys()]);
+    const killed = killTree(p.pid, known);
+    await sleep(500);
+    return { hup, armedOrphaned: orphans.includes(armed), left: survivors([...known.keys(), ...killed]) };`);
+  assert.ok(!r.notReady, "the fake never armed in 10 s");
+  assert.ok(r.hup, "ready() named a shell that ignores HUP (armed)");
+  assert.ok(r.armedOrphaned, "the armed shell outlived script");
   assert.deepEqual(r.left, []);
 });
 

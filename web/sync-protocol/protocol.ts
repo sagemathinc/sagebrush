@@ -42,7 +42,6 @@ export const LIMITS = {
   pullMax: 500,
   pullBytes: 4 << 20,
   checkItems: 1000,
-  outputsItems: 500,
   /** batches per account: a burst, and the sustained rate a second */
   batchBurst: 20,
   batchRate: 4,

@@ -162,6 +162,9 @@ throwsCode(() => P.checkProgress({ t: "progress", claims: "AAAA" }), "invalid", 
 // ---- the messages
 
 const DOC = "0123456789ab", SHA = "f".repeat(64);
+// (sync never carries outputs (William, Oct 26; erratum-sync-no-outputs r2): no outputs message, while LTI's grading
+// descriptor keeps its outputs digest and its 4 MiB output bound)
+check(!("checkOutputs" in P) && !("outputsSet" in P.DOC_LIMITS) && P.DOC_LIMITS.outputBytes === 4 << 20 && typeof P.outputsDigest === "function", "no sync outputs message; LTI's outputs digest and bound kept");
 check(P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, epoch: 1, client: "c1" }).client === "c1", "doc_claim: accepted");
 check(P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, epoch: 3, client: "c1" }).epoch === 3, "doc_claim: its epoch kept");
 check(P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, epoch: 1, client: "c1", owner: SHA }).owner === SHA, "doc_claim: with an owner");
@@ -193,15 +196,6 @@ const snap = { t: "snapshot", req: 3, doc: DOC, at_seq: 10, sha256: SHA, bytes: 
 check(P.checkSnapshot(snap).at_seq === 10, "snapshot: accepted");
 throwsCode(() => P.checkSnapshot({ ...snap, at_seq: 0 }), "invalid", "snapshot: at_seq 0");
 throwsCode(() => P.checkSnapshot({ ...snap, bytes: (32 << 20) + 1 }), "limit", "snapshot: over 32 MiB");
-const outs = { t: "outputs", req: 4, doc: DOC, oreq: { client: "c1", n: 1 }, set: [{ cell: "a", full: { sha256: SHA, size: 10 } }, { cell: "b", preview: { sha256: SHA, size: 10, kind: "png" } }] };
-check(P.checkOutputs(outs).set.length === 2, "outputs: accepted");
-throwsCode(() => P.checkOutputs({ ...outs, set: [{ cell: "a" }] }), "invalid", "outputs: a cell with neither");
-throwsCode(() => P.checkOutputs({ ...outs, set: [{ cell: "a", full: { sha256: SHA, size: (4 << 20) + 1 } }] }), "limit", "outputs: over 4 MiB");
-throwsCode(() => P.checkOutputs({ ...outs, set: [{ cell: "a", preview: { sha256: SHA, size: (256 << 10) + 1, kind: "png" } }] }), "limit", "outputs: a preview over 256 KiB");
-throwsCode(() => P.checkOutputs({ ...outs, set: [{ cell: "a", preview: { sha256: SHA, size: 1, kind: "html" } }] }), "invalid", "outputs: a preview kind");
-throwsCode(() => P.checkOutputs({ ...outs, set: [outs.set[0], outs.set[0]] }), "invalid", "outputs: a cell twice");
-throwsCode(() => P.checkOutputs({ ...outs, oreq: { client: "c1", n: 0 } }), "invalid", "outputs: oreq n 0");
-throwsCode(() => P.checkOutputs({ ...outs, set: Array.from({ length: 501 }, (_, i) => ({ cell: "c" + i, full: { sha256: SHA, size: 1 } })) }), "limit", "outputs: 501 cells");
 // both socket forms (CORR-PR62-2): the document socket's message names no doc, and is normalized with the attachment's
 const OWNER = "a".repeat(64), VIA = { socket: "document", doc: DOC, owner: OWNER };
 const rawSnap = { t: "snapshot", req: 3, at_seq: 10, sha256: SHA, bytes: 100 };
@@ -215,8 +209,6 @@ throwsCode(() => P.checkSnapshot(rawSnap, { socket: "document", doc: "bad", owne
 check(P.checkDocClaim({ t: "doc_claim", req: 1, epoch: 1, client: "c1" }, VIA).doc === DOC, "doc_claim: the document-socket form");
 check(P.checkDocFence({ t: "doc_fence", req: 1, epoch: 1, clients: [{ client: "c1", target: 1 }] }, VIA).owner === OWNER, "doc_fence: the document-socket form");
 throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, client: "c1" }, VIA), "invalid", "doc_claim: the document-socket form needs its epoch too");
-check(P.checkOutputs({ t: "outputs", req: 1, oreq: { client: "c1", n: 1 }, set: [{ cell: "a", full: { sha256: SHA, size: 1 } }] }, VIA).doc === DOC, "outputs: the document-socket form");
-throwsCode(() => P.checkOutputs({ ...outs }, VIA), "invalid", "outputs: a document socket's message with doc is refused");
 const blob = { format: "sb-sync-snapshot", v: 1, kind: "notebook", epoch: 1, at_seq: 4, time: "0000000000a_c1", value: "" };
 check(P.checkSnapshotBlob(blob).at_seq === 4, "snapshot blob: accepted");
 throwsCode(() => P.checkSnapshotBlob({ ...blob, v: 2 }), "invalid", "snapshot blob: another version");

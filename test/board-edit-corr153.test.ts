@@ -22,7 +22,6 @@ import { ABSENT } from "../web/board/merge";
 // later); the prevs a failed save keeps are watched, and a name it couldn't unlink keeps its slot; a stream dropped
 // as slow is released like any other; a snapshot nested too deeply is refused, the server alive; an ordinary
 // outside change is reported with its restore; the event backlogs are on the ledger, and bounded by MEMORY_MAX.
-const { mergeStrings3 } = require("patchflow");
 const sha = (s: string | Buffer) => createHash("sha256").update(s).digest("hex");
 const B = (nodes: any[], edges: any[] = []) => ({ format: "sagebrush-board", version: 1, title: "t", nodes, edges });
 const text = (d: any) => JSON.stringify(d, null, 2) + "\n";
@@ -38,7 +37,7 @@ async function setup(d: any, limits: Record<string, number> = {}, fsx?: W.WriteF
   let now = 1_000_000;
   const clock = { now: () => now, advance: (ms: number) => { now += ms; } };
   const L = { ...defaultLimits(), ...limits };
-  const hub = new EditHub(file, L, { mergeStrings3, now: clock.now, fs: fsx });
+  const hub = new EditHub(file, L, { now: clock.now, fs: fsx });
   const r = await hub.start(fs.readFileSync(file));
   assert.ok(r.ok, !r.ok ? r.why : "");
   return { dir, file, hub, clock, L, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
@@ -191,7 +190,7 @@ async function serve(d: any, limits: Record<string, number> = {}) {
   const file = join(dir, "b.board.json");
   fs.writeFileSync(file, text(d));
   const L = { ...defaultLimits(), ...limits };
-  const started = await startEdit(file, L, { mergeStrings3, now: Date.now });
+  const started = await startEdit(file, L, { now: Date.now });
   assert.ok("hub" in started, "why" in started ? started.why : "");
   const hub = (started as { hub: EditHub }).hub;
   const es = new EditServer(hub, L, {}, Date.now);

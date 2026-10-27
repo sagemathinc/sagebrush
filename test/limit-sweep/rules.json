@@ -1,0 +1,22 @@
+{
+ "v": 1,
+ "note": "The sweep's partition (plan-limit-sites-sweep-r3 section 3; owners: @sagebrush, Oct 26): the first owner row whose match (a regular expression, matched in full) matches a census file's path owns it; each owner's files whole, ordered by their share of high-signal work, cut at the target of work items, a tail under the tail size joining the owner's previous batch; a single file over the target is a batch of its own (oversize). dispositions_everywhere turns true at the transition (B18). A change here changes the manifest: a reviewed migration.",
+ "target": 400,
+ "tail": 50,
+ "order": ["python", "sage", "sage2", "magma", "matlab", "board"],
+ "dispositions_everywhere": false,
+ "owners": [
+  {"owner": "sage2", "match": "engine/mpoly/src/(f4|f4q|sigf4|fglm)\\.rs|engine/web/src/nmod_ops\\.rs|engine/web/tests/nmod_[^/]*\\.rs|engine/arith/src/(nmod_mat|nmod_poly)\\.rs"},
+  {"owner": "python", "match": "engine/(web|py|node|interrupt|oracle)/.*"},
+  {"owner": "sage", "match": "engine/(hmf|modsym|ap|classgroup|galois|group)/.*"},
+  {"owner": "magma", "match": "engine/(poly|mpoly|arith|bigint|ball|sym)/.*"},
+  {"owner": "board", "match": "engine/raster/.*"},
+  {"owner": "python", "match": "engine/.*"},
+  {"owner": "python", "match": "src/runtime/.*|web/.*"},
+  {"owner": "board", "match": "src/.*"},
+  {"owner": "sage", "match": "lib/(_sage|sage_|_padic)[^/]*"},
+  {"owner": "magma", "match": "lib/_magma[^/]*"},
+  {"owner": "matlab", "match": "lib/(_matlab|_octave)[^/]*"},
+  {"owner": "python", "match": ".*"}
+ ]
+}

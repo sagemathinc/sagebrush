@@ -615,6 +615,10 @@ export function installPackageSet(S: string, index: Uint8Array, fetch: ChunkFetc
   optional = { plan, fetch };
   return plan;
 }
+/** The top-level module names this runtime's optional package set provides (none without one). */
+export function optionalModuleNames(): string[] {
+  return optional === null ? [] : [...optional.plan.modules.keys()].filter((m) => !m.includes("."));
+}
 /** This runtime's package set id, or null. */
 export function packageSetId(): string | null {
   return optional === null ? null : optional.plan.S;
