@@ -1,0 +1,5 @@
+{
+ "v": 1,
+ "note": "The sweep's follow-ups, the source of truth (plan-limit-sites-sweep-r3 section 2): {id FU-<batch>-<n>, status open|fixed|withdrawn, keys, what, owner, fixed_by {pr, commit}, withdrawn_because}. An open one has at least one active key, and its active keys and the entries pointing to it agree; no active key points to a fixed or withdrawn one.",
+ "items": []
+}

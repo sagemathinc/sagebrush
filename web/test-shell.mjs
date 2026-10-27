@@ -61,12 +61,13 @@ const S = build("bash");
 const NO_SHELL = build("hello");
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const index = JSON.parse(readFileSync(join(dir, "pkgset", S + ".json"), "utf8"));
-index.packages["@sagebrush/bash@0.1.0"].js.host_req = 99;
+const KEY = Object.keys(index.packages).find((k) => k.startsWith("@sagebrush/bash@"));
+index.packages[KEY].js.host_req = 99;
 const canon = (await import(join(root, "scripts", "optional-packages.mjs"))).canonical;
 const newer = Buffer.from(canon(index));
 const NEWER = sha(newer);
 writeFileSync(join(dir, "pkgset", NEWER + ".json"), newer);
-const chunkSha = index.packages["@sagebrush/bash@0.1.0"].js.sha256;
+const chunkSha = index.packages[KEY].js.sha256;
 let tamper = false; // serve the shell's chunk with one byte changed
 let longer = false; // serve it with one byte more than its declared size (stage 2)
 // (stage 3: a chunk within its declared size whose notices are one byte past 256 KiB)
@@ -74,8 +75,8 @@ const chunk = JSON.parse(readFileSync(join(dir, "pkg", chunkSha + ".json"), "utf
 const bigChunk = Buffer.from(canon({ ...chunk, notices: "x".repeat(256 * 1024 + 1) }));
 writeFileSync(join(dir, "pkg", sha(bigChunk) + ".json"), bigChunk);
 const bigIndex = JSON.parse(readFileSync(join(dir, "pkgset", S + ".json"), "utf8"));
-bigIndex.packages["@sagebrush/bash@0.1.0"].js.sha256 = sha(bigChunk);
-bigIndex.packages["@sagebrush/bash@0.1.0"].js.size = bigChunk.length;
+bigIndex.packages[KEY].js.sha256 = sha(bigChunk);
+bigIndex.packages[KEY].js.size = bigChunk.length;
 const bigIx = Buffer.from(canon(bigIndex));
 const BIG_NOTICES = sha(bigIx);
 writeFileSync(join(dir, "pkgset", BIG_NOTICES + ".json"), bigIx);
@@ -84,7 +85,7 @@ const withModule = (text) => {
   const c = Buffer.from(canon({ ...chunk, modules: { "shell.js": text } }));
   writeFileSync(join(dir, "pkg", sha(c) + ".json"), c);
   const ix = JSON.parse(readFileSync(join(dir, "pkgset", S + ".json"), "utf8"));
-  Object.assign(ix.packages["@sagebrush/bash@0.1.0"].js, { sha256: sha(c), size: c.length });
+  Object.assign(ix.packages[KEY].js, { sha256: sha(c), size: c.length });
   const b = Buffer.from(canon(ix));
   writeFileSync(join(dir, "pkgset", sha(b) + ".json"), b);
   return sha(b);
@@ -124,6 +125,11 @@ const BUILTINS = ". : [ break builtin cd command compgen complete compopt contin
 
 // the page: web/shell/loader.ts, bundled for this test only
 execFileSync("bun", ["build", join(here, "shell", "loader.ts"), "--target=browser", "--format=esm", `--outfile=${join(dir, "loader.js")}`], { stdio: ["ignore", "ignore", "inherit"] });
+// (and the host with the workspace, loaded only when a run needs it: from step 2 the module reaches files only
+// through ShellHost, the page's mediator.  Loaded on demand, so N1's page, freshly loaded, never holds it)
+const hostEntry = join(dir, "host-entry.ts");
+writeFileSync(hostEntry, `export { ShellHost } from ${JSON.stringify(join(here, "shell", "host.ts"))};\nexport { Workspace } from ${JSON.stringify(join(here, "workspace", "index.ts"))};\n`);
+execFileSync("bun", ["build", hostEntry, "--target=browser", "--format=esm", `--outfile=${join(dir, "host.js")}`], { stdio: ["ignore", "ignore", "inherit"] });
 const page = `<!doctype html><meta charset="utf-8"><script type="module" src="/test-shell-page.js"></script>`;
 const pageJs = `import { startShell } from "/loader.js";
 const made = [];
@@ -141,6 +147,16 @@ window.portsClosed = () => closes;
 // (only whether each message carried the notices: keeping the messages would keep each module's text in the page, against N1)
 window.noticesPosted = () => posted.some(Boolean);
 window.startShell = startShell;
+// (the module's runs here go through a real ShellHost over a real Workspace; the lifecycle checks, which run
+// the module's exec() directly, give it an empty file system as its mediator: nothing exists)
+window.hostOver = async (sh) => {
+  const { ShellHost, Workspace } = await import("/host.js");
+  localStorage.clear();
+  const ws = await Workspace.open({ name: "test-shell-" + Math.random().toString(16).slice(2), mainName: "test-shell-main-" + Math.random().toString(16).slice(2) });
+  const host = new ShellHost(ws, async () => sh);
+  return (script) => host.exec({ kind: "person" }, script).then((r) => (r.kind === "exit" ? { exit: { code: r.code, stdout: r.stdout, stderr: r.stderr } } : { typed: r }));
+};
+window.EMPTY_FS = { onRequest: async (r) => (r.op === "exists" ? { ok: false } : { err: { code: "ENOENT", message: "no such file or directory" } }) };
 window.blobScripts = () => made.filter((t) => /javascript/.test(String(t))).length;
 window.ready = true;`;
 mkdirSync(join(dir, "shell"), { recursive: true });
@@ -233,6 +249,7 @@ const server = createServer((req, res) => {
   if (path === "/") return send("text/html", page, { "Content-Security-Policy": pagePolicy() });
   if (path === "/test-shell-page.js") return send("text/javascript", pageJs);
   if (path === "/loader.js") return send("text/javascript", readFileSync(join(dir, "loader.js")));
+  if (path === "/host.js") return send("text/javascript", readFileSync(join(dir, "host.js")));
   if (path === "/shell/worker-boot.js") return send("text/javascript", readFileSync(join(dir, "shell", "worker-boot.js")), { "Content-Security-Policy": shellWorkerPolicy() });
   if (path === "/probe.txt") return send("text/plain", "reachable");
   const m = /^\/(pkgset|pkg)\/([0-9a-f]{64})\.json$/.exec(path);
@@ -295,10 +312,59 @@ try {
   await navigate(url);
   for (let i = 0; i < 100 && (await evaluate("window.ready === true")) !== true; i++) await new Promise((r) => setTimeout(r, 100));
 
+  // (N1 needs Chromium's heap figures: CDP and performance.memory.  First, before any check loads the host
+  // and the workspace (host.js), so what the page holds is the loader's alone)
+  if (cdp) {
+    // N1, per realm (A1.2): what the page keeps once the module is posted, and
+    // the shell worker's heap while it holds the module (its structured-clone
+    // copy, the Blob, the module's source and the shell), both after a GC
+    const workers = new Map(); // sessionId -> url
+    const onAttach = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "worker") workers.set(m.params.sessionId, m.params.targetInfo.url);
+    };
+    cdp.ws.addEventListener("message", onAttach);
+    await cdp.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+    const used = () => evaluate("(gc(), performance.memory.usedJSHeapSize)");
+    // (a warm-up shell first: from one start to the next, the page's used heap after a GC swings by a few MB
+    // either way, while its heap snapshot holds no object near b (so not a copy of the module); after a
+    // warm-up, the next start's figure is steady.  The snapshot below checks the copies themselves.)
+    const cold = await used();
+    await evaluate(`(async () => { const { shell } = await startShell(${JSON.stringify(S)}, "/"); await shell.exec("true", EMPTY_FS); shell.terminate(); })()`);
+    const before = await used();
+    console.log(`info N1: after the warm-up shell, the page's used heap moved ${before - cold} bytes`);
+    await evaluate(`(async () => { window.sh2 = (await startShell(${JSON.stringify(S)}, "/")).shell; return (await sh2.exec("echo ok", EMPTY_FS)).exit.stdout; })()`);
+    const pageAfter = await used();
+    // the page's heap snapshot, with the shell running: its largest objects (a copy of the module, its chunk's
+    // JSON or bytes would be one of b or more)
+    const chunks = [];
+    const onChunk = (e) => { const m = JSON.parse(e.data); if (m.method === "HeapProfiler.addHeapSnapshotChunk") chunks.push(m.params.chunk); };
+    cdp.ws.addEventListener("message", onChunk);
+    await cdp.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
+    cdp.ws.removeEventListener("message", onChunk);
+    const snap = JSON.parse(chunks.join(""));
+    const nf = snap.snapshot.meta.node_fields.length, iSize = snap.snapshot.meta.node_fields.indexOf("self_size");
+    let largest = 0;
+    for (let i = iSize; i < snap.nodes.length; i += nf) largest = Math.max(largest, snap.nodes[i]);
+    await new Promise((r) => setTimeout(r, 300));
+    // (the newest shell worker: sh2's; the warm-up's, attached first, has been terminated)
+    const sid = [...workers].filter(([, u]) => /worker-boot\.js$/.test(u)).at(-1)?.[0];
+    const sendTo = (method, params = {}) => cdp.send(method, params, sid);
+    if (sid) await sendTo("HeapProfiler.collectGarbage");
+    const wheap = sid ? (await sendTo("Runtime.getHeapUsage")).result : null;
+    const moduleBytes = Buffer.byteLength(JSON.parse(readFileSync(join(dir, "pkg", chunkSha + ".json"), "utf8")).modules["shell.js"]);
+    console.log(`info N1: module b = ${moduleBytes} bytes, 4b = ${4 * moduleBytes}; page keeps ${pageAfter - before} bytes after a GC; the shell worker's heap ${wheap?.usedSize} bytes (of ${wheap?.totalSize})`);
+    console.log(`info N1: the page's largest live object, with the shell running: ${largest} bytes`);
+    ok(pageAfter - before <= moduleBytes, "the page keeps less than b once the module is posted: its copies are released (N1, page realm)");
+    ok(largest > 0 && largest < moduleBytes / 4, "and no object in the page's heap snapshot comes near b: no copy of the module, its chunk's JSON or its bytes is kept (N1, page realm)");
+    ok(wheap && wheap.usedSize > 0 && wheap.usedSize <= 4 * moduleBytes + 16 * 2 ** 20, "the shell worker's heap is within 4b plus the shell's live set (16 MiB measured allowance) (N1, worker realm)");
+    await evaluate("sh2.terminate()");
+  }
   // the shell, and every registered command under the worker's policy (N3)
   const run = await evaluate(`(async () => {
     const { shell: sh, notices } = await startShell(${JSON.stringify(S)}, "/");
     const out = {};
+    const run = await hostOver(sh);
     const cmds = {
       ls: "mkdir -p d && touch d/x && ls d", cat: "echo a > f && cat f", head: "seq 5 | head -2", tail: "seq 5 | tail -1", wc: "printf 'a b\\\\n' | wc -w",
       mkdir: "mkdir -p m/n && echo ok", mv: "echo x > a1 && mv a1 b1 && cat b1", cp: "echo y > c1 && cp c1 c2 && cat c2", rm: "touch r1 && rm r1 && echo gone",
@@ -309,17 +375,17 @@ try {
       true: "true && echo t", false: "false || echo f", seq: "seq 3", jq: "echo '{\\"a\\":[1,2]}' | jq '.a[1]'",
       cd: "mkdir -p cdd && cd cdd && pwd", export: "export X=5 && env | grep X=5", test: "test 1 -lt 2 && echo lt",
     };
-    for (const [name, script] of Object.entries(cmds)) out[name] = await sh.exec(script);
+    for (const [name, script] of Object.entries(cmds)) out[name] = await run(script);
     const absent = {};
-    for (const name of ["curl", "python3", "js-exec", "sqlite3", "tee", "node"]) absent[name] = await sh.exec(name + " --version");
+    for (const name of ["curl", "python3", "js-exec", "sqlite3", "tee", "node"]) absent[name] = await run(name + " --version");
     const runs = [];
     for (const name of ${JSON.stringify(CENSUS_NAMES)}) {
-      const r = await sh.exec(\`{ \${name} --help >/dev/null 2>&1; echo "rc=$?"; }\`);
+      const r = await run(\`\${name} --help >/dev/null 2>&1; echo "rc=$?"\`);
       if ((r.exit?.stdout ?? "").trim() !== "rc=127") runs.push(name);
     }
     return { S: sh.S, version: sh.version, out, absent, runs, blobScripts: blobScripts(), notices: { length: notices.length, head: notices.slice(0, 80), hasJustBash: notices.includes("just-bash 3.6.0 (Apache-2.0"), onShell: Object.values(sh).some((v) => v === notices) } };
   })()`);
-  ok(run && !run.error && run.S === S && run.version === "0.1.0", `the shell starts from set ${S.slice(0, 12)} (${run?.error ?? run?.version})`);
+  ok(run && !run.error && run.S === S && run.version === "0.2.0", `the shell starts from set ${S.slice(0, 12)} (${run?.error ?? run?.version})`);
   const failed = Object.entries(run?.out ?? {}).filter(([, r]) => r.exit?.code !== 0 || /Content Security Policy|EvalError|unsafe-eval/.test(r.exit.stderr));
   ok(run?.out && Object.keys(run.out).length === 34 && !failed.length, `every registered command runs under the worker's policy (N3)${failed.length ? ": " + JSON.stringify(failed).slice(0, 600) : ""}`);
   ok(run?.out?.jq?.exit?.stdout === "2\n" && run?.out?.awk?.exit?.stdout === "3\n" && run?.out?.printf?.exit?.stdout === "00042\n" && run?.out?.diff?.exit?.stdout?.includes("rc=1"), "and they compute what they should (jq, awk, printf, diff)");
@@ -399,7 +465,7 @@ try {
     res.neverLive = workersLive() - live0;
     const { shell: real } = await startShell(BAD.reject, "/");
     res.rejected = await within(real.exec("echo before; echo refuse-me > f; echo after"));
-    res.afterRejected = await within(real.exec("echo still here"));
+    res.afterRejected = await within(real.exec("echo still here", EMPTY_FS));
     real.terminate();
     const { shell: silent } = await startShell(BAD.silent, "/");
     const running = within(silent.exec("echo never answered"));
@@ -429,52 +495,6 @@ try {
   ok(unavailable(life?.code, /broke the shell protocol/) && life.codeState === "closed", `an exit code outside 0..255 is a failure, never a status (${JSON.stringify(life?.code)})`);
   ok(life?.endLive === 0, `and none of these leaves a worker running (${life?.endLive})`);
 
-  // (N1 needs Chromium's heap figures: CDP and performance.memory)
-  if (cdp) {
-    // N1, per realm (A1.2): what the page keeps once the module is posted, and
-    // the shell worker's heap while it holds the module (its structured-clone
-    // copy, the Blob, the module's source and the shell), both after a GC
-    const workers = new Map(); // sessionId -> url
-    const onAttach = (e) => {
-      const m = JSON.parse(e.data);
-      if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "worker") workers.set(m.params.sessionId, m.params.targetInfo.url);
-    };
-    cdp.ws.addEventListener("message", onAttach);
-    await cdp.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
-    const used = () => evaluate("(gc(), performance.memory.usedJSHeapSize)");
-    // (a warm-up shell first: from one start to the next, the page's used heap after a GC swings by a few MB
-    // either way, while its heap snapshot holds no object near b (so not a copy of the module); after a
-    // warm-up, the next start's figure is steady.  The snapshot below checks the copies themselves.)
-    const cold = await used();
-    await evaluate(`(async () => { const { shell } = await startShell(${JSON.stringify(S)}, "/"); await shell.exec("true"); shell.terminate(); })()`);
-    const before = await used();
-    console.log(`info N1: after the warm-up shell, the page's used heap moved ${before - cold} bytes`);
-    await evaluate(`(async () => { window.sh2 = (await startShell(${JSON.stringify(S)}, "/")).shell; return (await sh2.exec("echo ok")).exit.stdout; })()`);
-    const pageAfter = await used();
-    // the page's heap snapshot, with the shell running: its largest objects (a copy of the module, its chunk's
-    // JSON or bytes would be one of b or more)
-    const chunks = [];
-    const onChunk = (e) => { const m = JSON.parse(e.data); if (m.method === "HeapProfiler.addHeapSnapshotChunk") chunks.push(m.params.chunk); };
-    cdp.ws.addEventListener("message", onChunk);
-    await cdp.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
-    cdp.ws.removeEventListener("message", onChunk);
-    const snap = JSON.parse(chunks.join(""));
-    const nf = snap.snapshot.meta.node_fields.length, iSize = snap.snapshot.meta.node_fields.indexOf("self_size");
-    let largest = 0;
-    for (let i = iSize; i < snap.nodes.length; i += nf) largest = Math.max(largest, snap.nodes[i]);
-    await new Promise((r) => setTimeout(r, 300));
-    const sid = [...workers].find(([, u]) => /worker-boot\.js$/.test(u))?.[0];
-    const sendTo = (method, params = {}) => cdp.send(method, params, sid);
-    if (sid) await sendTo("HeapProfiler.collectGarbage");
-    const wheap = sid ? (await sendTo("Runtime.getHeapUsage")).result : null;
-    const moduleBytes = Buffer.byteLength(JSON.parse(readFileSync(join(dir, "pkg", chunkSha + ".json"), "utf8")).modules["shell.js"]);
-    console.log(`info N1: module b = ${moduleBytes} bytes, 4b = ${4 * moduleBytes}; page keeps ${pageAfter - before} bytes after a GC; the shell worker's heap ${wheap?.usedSize} bytes (of ${wheap?.totalSize})`);
-    console.log(`info N1: the page's largest live object, with the shell running: ${largest} bytes`);
-    ok(pageAfter - before <= moduleBytes, "the page keeps less than b once the module is posted: its copies are released (N1, page realm)");
-    ok(largest > 0 && largest < moduleBytes / 4, "and no object in the page's heap snapshot comes near b: no copy of the module, its chunk's JSON or its bytes is kept (N1, page realm)");
-    ok(wheap && wheap.usedSize > 0 && wheap.usedSize <= 4 * moduleBytes + 16 * 2 ** 20, "the shell worker's heap is within 4b plus the shell's live set (16 MiB measured allowance) (N1, worker realm)");
-    await evaluate("sh2.terminate()");
-  }
 } finally {
   try { ws?.close(); } catch {}
   chrome?.kill();

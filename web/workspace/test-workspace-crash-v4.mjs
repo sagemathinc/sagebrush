@@ -94,7 +94,7 @@ window.check = async () => {
   const st = await W.migrationState(w);
   const version = w.ws.version;
   w.close();
-  return { problems, moved: hashed, state: st, version };
+  return { problems, moved: hashed, state: st, version, current: W.WS_VERSION };
 };
 window.reseed = async () => {
   for (const n of [NAME, MAIN]) await new Promise((ok, no) => { const r = indexedDB.deleteDatabase(n); r.onsuccess = ok; r.onerror = () => no(r.error); });
@@ -230,7 +230,7 @@ try {
   await t.ev("window.migrate()");
   for (let i = 0; i < 600 && !(await t.ev("window.migDone === true")); i++) await sleep(100);
   const r = await t.ev("window.check()");
-  check(r.problems.length === 0 && r.moved === 120 && r.version === 7 && r.state.done === true, `finally: the current version (7), done, every file hashed: ${JSON.stringify({ hashed: r.moved, version: r.version, state: r.state, problems: r.problems.slice(0, 5) })}`);
+  check(r.problems.length === 0 && r.moved === 120 && r.version === r.current && r.state.done === true, `finally: the current version (${r.current}), done, every file hashed: ${JSON.stringify({ hashed: r.moved, version: r.version, state: r.state, problems: r.problems.slice(0, 5) })}`);
   t.ws.close();
   // (how often Chrome deleted the origin as corrupt, to watch the rate)
   console.log(`Chrome's corrupt-database deletions: ${wipes} of 6 rounds`);
