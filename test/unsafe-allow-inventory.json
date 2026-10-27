@@ -1,5 +1,17 @@
 {
  "comment": "The engine's allowed unsafe items (no-cliffs C-2c-ii scope r4 section 1.3): scripts/unsafe-inventory.mjs --check compares them with the tree. hash: sha256 of the item's tokens (its outer attributes included; comments and layout excluded). audit: the answer to the boundary question for that item; a new or changed item needs a fresh review and audit.",
+ "premises": {
+  "no_ledger_dep": [
+   "arith",
+   "flint",
+   "growth-probe",
+   "interrupt",
+   "modsym",
+   "mpoly",
+   "poly",
+   "raster"
+  ]
+ },
  "items": [
   {
    "file": "engine/arith/src/crt.rs",
