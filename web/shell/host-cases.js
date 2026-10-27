@@ -396,25 +396,38 @@ async function pending(check) {
 
 // ---------------------------------------------------------------- Stop (r3 §4.3; D8 "Also found")
 // The CPU-only loop's Stop comes LOOP_STOP_MS after the loop starts, not at a wall-clock time from exec: the script's
-// first command is a file call (`[ -e /m ]`, ws.stat through the host), whose hook marks the loop's start.  The hook
-// only schedules the abort: an abort while the worker waits on that answer would test the file-call path instead.
+// first command is a file call (`[ -e /m ]`, ws.stat through the host), and the loop starts once it has answered.  So
+// the view's stat of /m (the host's own call) records when its answer is ready, and only then schedules the abort: an
+// abort while the worker still waits on that answer would test the file-call path instead (and pass, interrupted too).
 const LOOP_STOP_MS = 20;
 const LOOP = "[ -e /m ]; while true; do :; done";
-const loopStart = (hooks, then) => {
+function loopStart(hooks, then) {
   let t = null;
-  hooks.stat = async (p) => {
-    if (p !== "/m" || t !== null) return;
-    t = performance.now();
-    then?.();
+  const wrap = (ws) => {
+    const v = hookable(hooks)(ws);
+    const stat = v.stat;
+    let depth = 0;
+    v.stat = async function (p, ...rest) {
+      depth++;
+      try {
+        return await stat.call(this, p, ...rest);
+      } finally {
+        if (--depth === 0 && p === "/m" && t === null) {
+          t = performance.now();
+          then?.();
+        }
+      }
+    };
+    return v;
   };
-  return () => t;
-};
+  return { wrap, at: () => t };
+}
 async function stop(check) {
   const hooks = {};
-  const { ws, host } = await fresh("stop", { wrap: hookable(hooks) });
   let ac = new AbortController();
   let tAbort = null;
-  const tLoop = loopStart(hooks, () => setTimeout(() => ((tAbort = performance.now()), ac.abort()), LOOP_STOP_MS));
+  const loop = loopStart(hooks, () => setTimeout(() => ((tAbort = performance.now()), ac.abort()), LOOP_STOP_MS));
+  const { ws, host } = await fresh("stop", { wrap: loop.wrap });
   let r = await host.exec(PERSON, LOOP, { signal: ac.signal });
   let t0 = tAbort;
   let ms = performance.now() - (t0 ?? NaN);
@@ -422,12 +435,13 @@ async function stop(check) {
   // for a file call's answer, which the fence refuses after a Stop anyway.  The pinned just-bash itself checks its signal
   // only there.  So a CPU-only loop is ended by just-bash's own default of 100,000 commands in this step, and by the
   // 2 s grace once step 3 passes +Infinity for every own-computation key that is off, plan r3 §5 A; probe in packet r3)
-  check(tLoop() !== null && tAbort !== null && r.kind === "interrupted" && ms < STOP_GRACE_MS + 600,
+  check(loop.at() !== null && tAbort !== null && tAbort > loop.at(),
+    `the CPU-only loop's Stop came after its file call had answered (stat of /m answered at ${loop.at()?.toFixed(1)} ms, Stop at ${tAbort?.toFixed(1)} ms): otherwise it landed during the file call`);
+  check(r.kind === "interrupted" && ms < STOP_GRACE_MS + 600,
     `Stop during a CPU-only loop, ${LOOP_STOP_MS} ms into it: interrupted, by the cap or the grace (${JSON.stringify(r)}, ${Math.round(ms)} ms after the Stop)`);
   {
-    const hcHooks = {};
-    const { host: hc } = await fresh("stop-control", { wrap: hookable(hcHooks) });
-    const tc = loopStart(hcHooks);
+    const { wrap, at: tc } = loopStart({});
+    const { host: hc } = await fresh("stop-control", { wrap });
     const rc = await hc.exec(PERSON, LOOP);
     const loopMs = performance.now() - (tc() ?? NaN);
     check(rc.kind === "exit" && rc.code === 126 && /too many commands executed \(>100000\)/.test(rc.stderr),
