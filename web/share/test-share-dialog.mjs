@@ -340,6 +340,20 @@ try {
     await closeDialog();
   }
 
+  // ---- a sign-in check that fails keeps what was known: a passing 5xx, or no answer, is neither
+  // "signed out" nor "no sharing" (the open still happens, and Share stays Share)
+  {
+    await ev("(() => { const f = window.fetch; window.__fetch = f; window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? Promise.resolve(new Response('busy', { status: 503 })) : f(u, o)); })()");
+    await openDialog();
+    ok(await ev("!document.querySelector('#shareform').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareunreachable').hidden"), "a 503 from the sign-in check: the form as before, not 'Sign in', and the list opens");
+    await closeDialog();
+    await ev("document.querySelector('#sharemenu').click()");
+    await until("document.querySelector('#sharedlg').open", 10000).catch(() => {});
+    ok(await ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareform').hidden"), "...and File → Share again: still the Share dialog, not Copy share link");
+    await closeDialog();
+    await ev("window.fetch = window.__fetch");
+  }
+
   // ---- #172 r2's review: closing mid-upload (board's UI-B1, astra3's CORR-172-ASTRA-4)
   {
     await openDialog();

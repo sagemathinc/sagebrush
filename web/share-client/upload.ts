@@ -9,17 +9,20 @@ export interface Me {
   usage: number;
   limits: { storage_bytes: number; max_file_bytes: number } | null;
 }
-export type ShareStatus = { enabled: false } | { enabled: true; me: Me | null };
+/** `error`: the check itself failed (the network, a 5xx, no answer in time), which says nothing
+ * about sharing or the sign-in; without it, enabled: false means this site has no share API */
+export type ShareStatus = { enabled: false; error?: true } | { enabled: true; me: Me | null };
 
-/** Whether this site has sharing, and who is signed in. */
-export async function shareStatus(): Promise<ShareStatus> {
+/** Whether this site has sharing, and who is signed in (within `ms`). */
+export async function shareStatus(ms = 10_000): Promise<ShareStatus> {
   try {
-    const r = await fetch("/api/share/me", { credentials: "same-origin" });
+    const r = await fetch("/api/share/me", { credentials: "same-origin", signal: AbortSignal.timeout(ms) });
     if (r.status === 401) return { enabled: true, me: null };
-    if (!r.ok) return { enabled: false };
+    if (r.status === 404) return { enabled: false };
+    if (!r.ok) return { enabled: false, error: true };
     return { enabled: true, me: (await r.json()) as Me };
   } catch {
-    return { enabled: false };
+    return { enabled: false, error: true };
   }
 }
 
