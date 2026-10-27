@@ -449,12 +449,14 @@ export function census(root = ROOT, { commit = null } = {}) {
   // a function (registered: its code is the member), provably not callable (exempt), or
   // anything else, which may be callable (an obligation, fail closed).
   const PRIM = ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike | ts.TypeFlags.BigIntLike | ts.TypeFlags.BooleanLike | ts.TypeFlags.EnumLike | ts.TypeFlags.ESSymbolLike |
-    ts.TypeFlags.Null | ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Never;
-  // a type no function can have, a closed set (astra2 X1, X2): primitives only (string, number,
-  // bigint, boolean, symbol, undefined, null, void, their literal and enum types), unions of these,
-  // and a type parameter constrained to one.  Every object-capable type (arrays and tuples,
-  // structural and class-instance types, intersections) may be a function: Object.assign(fn, [])
-  // is an array, and a constructor can return a function
+    ts.TypeFlags.Null | ts.TypeFlags.Undefined;
+  // a type no function can have, a closed set (astra2 X1, X2, V1): primitives that hold a value
+  // (string, number, bigint, boolean, symbol, undefined, null, their literal and enum types),
+  // unions of these, and a type parameter constrained to one.  Every object-capable type (arrays
+  // and tuples, structural and class-instance types, intersections) may be a function:
+  // Object.assign(fn, []) is an array, and a constructor can return a function.  void is not
+  // in the set: a () => void function may return a function (TypeScript accepts any return
+  // there); nor is never (a never-typed value from a declare or a cast is unchecked)
   const notCallableType = (t, depth = 0) => {
     if (!t || depth > 8) return false;
     if (t.flags & PRIM) return true;

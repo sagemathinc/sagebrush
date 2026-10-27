@@ -624,6 +624,16 @@ test("an array literal copied by Object.assign or spread installs no protocol me
   assert.deepEqual([...t.protocol.json].map((fp: string) => t.decls.get(fp)?.name), ["f"]);
 });
 
+test("V1, isolated: a () => void function that returns a function installs an obligation (astra2)", () => {
+  const src = "const get: () => void = () => () => new Uint8Array(8);\nexport function install(o: any): void { o.toJSON = get(); }\nexport function json(o: object): any { return JSON.stringify(o); }\nexport function caller(o: object): any { return json(o); }\n";
+  const c = fixture({ "src/runtime/v1.ts": src });
+  assert.deepEqual(c.obligations.map((o: any) => [o.line, o.kinds.join()]), [[2, "json"]], "the only obligation, at the install");
+  assert.deepEqual(mayAlloc({ "src/runtime/v1.ts": src }, ["json", "caller"]), { json: true, caller: true });
+  // void-typed and void-constrained values, each alone
+  const v = fixture({ "src/runtime/v2.ts": "declare const vd: void;\nexport function a(o: any): void { o.toJSON = vd; }\nexport function b<T extends void>(o: any, t: T): void { o.valueOf = t; }\nexport function c(o: any, x: number | void): void { o.then = x; }\nexport function d(o: any): void { o.toJSON = void 0; }\n" });
+  assert.deepEqual(v.obligations.map((o: any) => o.line).sort(), [2, 3, 4], "void, T extends void, number | void; not void 0 (undefined)");
+});
+
 test("E1.1: typescript-api is named only by the gate's script and its test; it has no install scripts", () => {
   const out = execFileSync("git", ["grep", "-l", "typescript-api", "--", ":!pnpm-lock.yaml", ":!package.json"], { cwd: ROOT, encoding: "utf8" }).trim().split("\n").sort();
   assert.deepEqual(out, ["scripts/arraybuffer-sites.mjs", "test/arraybuffer-sites.test.ts"]);

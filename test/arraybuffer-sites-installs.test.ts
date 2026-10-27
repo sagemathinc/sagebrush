@@ -54,6 +54,12 @@ export const KINDS: [string, string, string][] = [
   ["an intersection", "inter", "oblig"],
   ["a class-instance-typed value", "pl", "oblig"],
   ["a Date-typed value", "dt", "oblig"],
+  // void is not proof (astra2 V1): a () => void function may return a function
+  ["a void-typed value", "vd", "oblig"],
+  ["a type parameter constrained to void", "gv", "oblig"],
+  ["a number-or-void union", "nv", "oblig"],
+  ["a void expression (undefined)", "void 0", "none"],
+  ["a never-typed value", "nev", "oblig"],
   ["a function or an any", "c ? NAMED : a", "both"],
 ];
 // the protocol installs (the property is toJSON): [path, template with V]
@@ -104,9 +110,9 @@ export function named_fn(): number { return 1; }
 export function named_target(): number { return 1; }
 const alias_fn = named_target;
 `;
-const SIG = "<G, GA extends unknown[], GP extends string>(o: any, k: string, g: G, a: any, u: unknown, s: { a: number }, c: boolean, arr: number[], tup: [number], inter: { a: number } & object, pl: Plain, dt: Date, ga: GA, gp: GP): any";
+const SIG = "<G, GA extends unknown[], GP extends string, GV extends void>(o: any, k: string, g: G, a: any, u: unknown, s: { a: number }, c: boolean, arr: number[], tup: [number], inter: { a: number } & object, pl: Plain, dt: Date, ga: GA, gp: GP, vd: void, gv: GV, nv: number | void, nev: never): any";
 // the kinds that need a type parameter (not at a module's top level, so not in the export cases)
-const GENERIC = new Set(["generic T", "a type parameter constrained to string", "a type parameter constrained to an array (X2)"]);
+const GENERIC = new Set(["generic T", "a type parameter constrained to string", "a type parameter constrained to an array (X2)", "a type parameter constrained to void"]);
 
 // each case gets its own named function and alias target, so no case's registration can stand
 // in for another's
@@ -202,7 +208,7 @@ test("the install matrix: installs whose value the census can't see are obligati
 test("the install matrix: exports are properties of the module's namespace", () => {
   const files: Record<string, string> = {};
   const want: Record<string, string> = {};
-  const decl = "export class Plain { a = 1; }\nexport class Factory { constructor() { return (() => new Uint8Array(8)) as any; } }\ndeclare const arr: number[];\ndeclare const tup: [number];\ndeclare const inter: { a: number } & object;\ndeclare const pl: Plain;\ndeclare const dt: Date;\nexport function named_fn(): number { return 1; }\nexport function named_target(): number { return 1; }\nconst alias_fn = named_target;\ndeclare const a: any;\ndeclare const u: unknown;\ndeclare const s: { a: number };\ndeclare const c: boolean;\ndeclare const k: string;\n";
+  const decl = "export class Plain { a = 1; }\nexport class Factory { constructor() { return (() => new Uint8Array(8)) as any; } }\ndeclare const arr: number[];\ndeclare const tup: [number];\ndeclare const inter: { a: number } & object;\ndeclare const pl: Plain;\ndeclare const dt: Date;\ndeclare const vd: void;\ndeclare const nv: number | void;\ndeclare const nev: never;\nexport function named_fn(): number { return 1; }\nexport function named_target(): number { return 1; }\nconst alias_fn = named_target;\ndeclare const a: any;\ndeclare const u: unknown;\ndeclare const s: { a: number };\ndeclare const c: boolean;\ndeclare const k: string;\n";
   KINDS.filter(([kind]) => !GENERIC.has(kind)).forEach(([kind, v0, w], j) => {
     const v = v0.replace(/NAMED/g, "named_fn").replace(/ALIAS/g, "alias_fn");
     files[`src/runtime/e${j}.ts`] = `${decl}export const toJSON = ${v};\n`;
