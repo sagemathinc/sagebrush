@@ -133,7 +133,14 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     this.patches.mutateOK = () => this.writer && !this.released && this.ready;
     this.history = new mod.NotebookHistory(this.patches);
     this.recovered = null;
-    this.inflight = 0; this.released = false; this.opening = null;
+    this.inflight = 0; this.released = false; this.opening = null; this.idleWaiters = []; this.mutating = null;
+    // (a TimeTravel clear or a drop deletes the versions a mark's proof rests on (astra's CORR-229-1): it waits until no
+    // save is between its proof and its T2, marks the record first (durably, so a crash after it leaves the record
+    // marked), and saves asked for meanwhile wait for it; the next save, or recovery, unmarks it by the proof again)
+    for (const k of ["clear", "drop"]) {
+      const f = this.patches[k].bind(this.patches);
+      this.patches[k] = (opts) => this.exclusive(() => f(opts));
+    }
     // (the writer's lock: `writer` once held; `readOnly` why not (READ_ONLY's keys), while waiting for it)
     this.writer = false; this.readOnly = null; this.unlock = null; this.waiting = null; this.ontakeover = null;
     // (`ready`: a writer whose load (and recovery) has begun: only then does it write; `lockGen`: what a lock's grant
@@ -219,10 +226,10 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
   // (T1, T2, prune) and its history's queue, each waited for until none is left (astra's CORR-215-5, CORR-215-6))
   async drain() {
     for (;;) {
-      const a = this.patches.appending, l = this.loading;
-      await Promise.allSettled([a, l]);
+      const a = this.patches.appending, l = this.loading, m = this.mutating;
+      await Promise.allSettled([a, l, m]);
       if (this.inflight) { await new Promise((r) => { this.whenIdle = r; }); continue; }
-      if (a === this.patches.appending && l === this.loading) break;
+      if (a === this.patches.appending && l === this.loading && m === this.mutating) break;
     }
     if (!this.released) return;
     this.history.close();
@@ -247,6 +254,26 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     this.history.refused(env.time);
     return again ? this.t1(doc, false) : r;
   }
+  // (`f`, a clear or a drop, alone: after the ones asked for before it, once no save is between its proof and its T2,
+  // the record marked first)
+  exclusive(f) {
+    const run = (this.mutating ?? Promise.resolve()).then(async () => {
+      while (this.inflight) await new Promise((r) => { this.idleWaiters.push(r); });
+      if (this.writer && this.ready && !this.released) await this.markRecord();
+      return f();
+    });
+    const tail = run.then(() => {}, () => {});
+    this.mutating = tail;
+    tail.then(() => { if (this.mutating === tail) this.mutating = null; });
+    return run;
+  }
+  // (the record marked, its value and revision as they are: no version need hold it until the proof says so again)
+  async markRecord() {
+    const rec = await super.loadRecord();
+    if (!rec || rec.unjournaled || typeof rec.hash !== "string") return;
+    const out = await super.save(rec, { journal: { keep: true, hash: rec.hash, unjournaled: true, markOnly: true } });
+    if (typeof out === "string") throw new Error(out);
+  }
   /** T1, then T2, then the intents it settles pruned. */
   async save(doc, opts = {}) {
     if (opts.journal) return super.save(doc, opts);
@@ -265,6 +292,8 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
   }
   // (a save's T1, T2 and prune, counted while they run: a release waits for them (drain))
   async writeSave(doc, opts = {}) {
+    // (not while a clear or a drop runs: its versions gone, this save's proof is read after it)
+    while (this.mutating) await this.mutating;
     this.inflight++;
     try {
       const r = await this.t1(doc), hash = await docHash(doc);
@@ -283,7 +312,7 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
       }
       return out;
     } finally {
-      if (!--this.inflight) { const r = this.whenIdle; this.whenIdle = null; r?.(); }
+      if (!--this.inflight) { for (const w of this.idleWaiters.splice(0)) w(); const r = this.whenIdle; this.whenIdle = null; r?.(); }
     }
   }
   async load() {
