@@ -530,6 +530,7 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-be4-idb.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-529.mjs
           bun web/notebook/test-json-text.mjs
+          bun web/notebook/test-text-overlap.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-migrate-time.mjs
           CHROME=google-chrome node web/workspace/test-workspace-pages.mjs
           CHROME=google-chrome node web/workspace/test-workspace-browser.mjs
@@ -814,6 +815,7 @@ jobs:
               bun web/board/test-complete.mjs
               bun web/board/test-syncdb.mjs
               bun web/board/test-board-merge3.mjs
+              bun web/board/gen-merge3-board-vectors.mjs --check
               bun web/board/test-lossless.mjs
               bun web/board/test-mermaid-export.mjs
               bun web/board/test-fromhtml.mjs

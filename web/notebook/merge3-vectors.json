@@ -1,0 +1,287 @@
+{
+  "about": "Shared three-way merge vectors (plan-sync-slice2-client r4 §2.1; the ruling of Oct 26). textOverlap: web/notebook/text-overlap.ts's cases, {base, a, b, overlap, merged (lineMerge3: the text, or false for an overlap), minUnits (the exact work charged: with one unit less, \"exhausted\")}. records: mergeRecords3's (2c-1c). board: boardMerge3's.",
+  "textOverlap": [
+    {
+      "name": "the same edit on both sides",
+      "base": "a\nb\n",
+      "a": "A\nb\n",
+      "b": "A\nb\n",
+      "overlap": false,
+      "merged": "A\nb\n",
+      "minUnits": 2
+    },
+    {
+      "name": "one side unchanged",
+      "base": "a\nb\n",
+      "a": "a\nb\n",
+      "b": "a\nB\n",
+      "overlap": false,
+      "merged": "a\nB\n",
+      "minUnits": 1
+    },
+    {
+      "name": "a shared edit plus one side's own (the shared one applied once)",
+      "base": "a\nb\nc\n",
+      "a": "A\nb\nC\n",
+      "b": "A\nb\nc\n",
+      "overlap": false,
+      "merged": "A\nb\nC\n",
+      "minUnits": 10
+    },
+    {
+      "name": "separate lines",
+      "base": "a\nb\nc\n",
+      "a": "A\nb\nc\n",
+      "b": "a\nb\nC\n",
+      "overlap": false,
+      "merged": "A\nb\nC\n",
+      "minUnits": 2
+    },
+    {
+      "name": "adjacent lines, each replaced by one side",
+      "base": "a\nb\n",
+      "a": "A\nb\n",
+      "b": "a\nB\n",
+      "overlap": false,
+      "merged": "A\nB\n",
+      "minUnits": 2
+    },
+    {
+      "name": "the same line, differently",
+      "base": "a\nb\n",
+      "a": "A\nb\n",
+      "b": "a2\nb\n",
+      "overlap": true,
+      "merged": false,
+      "minUnits": 2
+    },
+    {
+      "name": "a line deleted on one side, changed on the other",
+      "base": "a\nb\nc\n",
+      "a": "a\nc\n",
+      "b": "a\nB\nc\n",
+      "overlap": true,
+      "merged": false,
+      "minUnits": 1
+    },
+    {
+      "name": "the same line deleted on both sides",
+      "base": "a\nb\nc\n",
+      "a": "a\nc\n",
+      "b": "a\nc\n",
+      "overlap": false,
+      "merged": "a\nc\n",
+      "minUnits": 0
+    },
+    {
+      "name": "insertions at the same place, different",
+      "base": "a\nb\n",
+      "a": "a\nX\nb\n",
+      "b": "a\nY\nb\n",
+      "overlap": true,
+      "merged": false,
+      "minUnits": 0
+    },
+    {
+      "name": "the same insertion on both sides",
+      "base": "a\nb\n",
+      "a": "a\nX\nb\n",
+      "b": "a\nX\nb\n",
+      "overlap": false,
+      "merged": "a\nX\nb\n",
+      "minUnits": 0
+    },
+    {
+      "name": "insertions at different places",
+      "base": "a\nb\nc\n",
+      "a": "X\na\nb\nc\n",
+      "b": "a\nb\nc\nY\n",
+      "overlap": false,
+      "merged": "X\na\nb\nc\nY\n",
+      "minUnits": 0
+    },
+    {
+      "name": "an insertion just after a line the other side replaced (ambiguous)",
+      "base": "a\nb\n",
+      "a": "A\nb\n",
+      "b": "a\nX\nb\n",
+      "overlap": true,
+      "merged": false,
+      "minUnits": 1
+    },
+    {
+      "name": "an insertion just before a line the other side replaced (ambiguous)",
+      "base": "a\nb\n",
+      "a": "a\nB\n",
+      "b": "a\nX\nb\n",
+      "overlap": true,
+      "merged": false,
+      "minUnits": 1
+    },
+    {
+      "name": "an insertion one line away from a replaced line",
+      "base": "a\nb\nc\n",
+      "a": "A\nb\nc\n",
+      "b": "a\nb\nX\nc\n",
+      "overlap": false,
+      "merged": "A\nb\nX\nc\n",
+      "minUnits": 1
+    },
+    {
+      "name": "no final newline, separate lines",
+      "base": "a\nb",
+      "a": "A\nb",
+      "b": "a\nB",
+      "overlap": false,
+      "merged": "A\nB",
+      "minUnits": 2
+    },
+    {
+      "name": "a final newline added on one side, the first line changed on the other",
+      "base": "a\nb",
+      "a": "a\nb\n",
+      "b": "A\nb",
+      "overlap": false,
+      "merged": "A\nb\n",
+      "minUnits": 2
+    },
+    {
+      "name": "a final newline added on one side, the last line changed on the other",
+      "base": "a\nb",
+      "a": "a\nb\n",
+      "b": "a\nB",
+      "overlap": true,
+      "merged": false,
+      "minUnits": 2
+    },
+    {
+      "name": "an empty base, different text on both sides",
+      "base": "",
+      "a": "x\n",
+      "b": "y\n",
+      "overlap": true,
+      "merged": false,
+      "minUnits": 0
+    },
+    {
+      "name": "an empty base, the same text on both sides",
+      "base": "",
+      "a": "x\n",
+      "b": "x\n",
+      "overlap": false,
+      "merged": "x\n",
+      "minUnits": 0
+    },
+    {
+      "name": "repeated lines: an insertion and a deletion apart",
+      "base": "x\nx\nx\n",
+      "a": "x\ny\nx\nx\n",
+      "b": "x\nx\n",
+      "overlap": false,
+      "merged": "x\ny\nx\n",
+      "minUnits": 0
+    },
+    {
+      "name": "repeated lines: both sides change the middle",
+      "base": "x\nx\nx\n",
+      "a": "x\nA\nx\n",
+      "b": "x\nB\nx\n",
+      "overlap": true,
+      "merged": false,
+      "minUnits": 2
+    },
+    {
+      "name": "everything replaced on one side, one line on the other",
+      "base": "a\nb\nc\n",
+      "a": "p\nq\n",
+      "b": "a\nB\nc\n",
+      "overlap": true,
+      "merged": false,
+      "minUnits": 7
+    },
+    {
+      "name": "a cell's input: two functions edited separately",
+      "base": "def f():\n    return 1\n\ndef g():\n    return 2\n",
+      "a": "def f():\n    return 10\n\ndef g():\n    return 2\n",
+      "b": "def f():\n    return 1\n\ndef g():\n    return 20\n",
+      "overlap": false,
+      "merged": "def f():\n    return 10\n\ndef g():\n    return 20\n",
+      "minUnits": 2
+    }
+  ],
+  "board": [
+    {
+      "name": "different lines: merged by lines",
+      "base": "one\ntwo\nthree\n",
+      "a": "ONE\ntwo\nthree\n",
+      "b": "one\ntwo\nTHREE\n",
+      "text": "ONE\ntwo\nTHREE\n",
+      "overlap": false,
+      "minUnits": 23
+    },
+    {
+      "name": "the same line: a text-overlap, one whole text kept by the tie-break, the other its alternative",
+      "base": "hello world",
+      "a": "hello brave world",
+      "b": "hello world!",
+      "text": "hello brave world",
+      "overlap": true,
+      "kept": "hello brave world",
+      "other": "hello world!",
+      "minUnits": 23
+    },
+    {
+      "name": "the same line, sides swapped: the same result (symmetric)",
+      "base": "hello world",
+      "a": "hello world!",
+      "b": "hello brave world",
+      "text": "hello brave world",
+      "overlap": true,
+      "kept": "hello brave world",
+      "other": "hello world!",
+      "minUnits": 23
+    },
+    {
+      "name": "two different insertions at the same gap: a text-overlap",
+      "base": "a\nb\n",
+      "a": "a\nX\nb\n",
+      "b": "a\nY\nb\n",
+      "text": "a\nX\nb\n",
+      "overlap": true,
+      "kept": "a\nX\nb\n",
+      "other": "a\nY\nb\n",
+      "minUnits": 21
+    },
+    {
+      "name": "an insertion touching the other side's replaced line: a text-overlap (conservative)",
+      "base": "a\nb\nc\n",
+      "a": "a\nB\nc\n",
+      "b": "a\nb\nNEW\nc\n",
+      "text": "a\nB\nc\n",
+      "overlap": true,
+      "kept": "a\nB\nc\n",
+      "other": "a\nb\nNEW\nc\n",
+      "minUnits": 22
+    },
+    {
+      "name": "the same edit on both sides: taken once, no report",
+      "base": "x\ny\n",
+      "a": "x\nY\n",
+      "b": "x\nY\n",
+      "text": "x\nY\n",
+      "overlap": false,
+      "minUnits": 15
+    },
+    {
+      "name": "x = 0 against x = 1 and x = 2: never the hybrid x = 1 2",
+      "base": "x = 0",
+      "a": "x = 1",
+      "b": "x = 2",
+      "text": "x = 1",
+      "overlap": true,
+      "kept": "x = 1",
+      "other": "x = 2",
+      "minUnits": 23
+    }
+  ]
+}

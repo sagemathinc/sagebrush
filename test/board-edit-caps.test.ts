@@ -14,7 +14,6 @@ import { editRecords } from "../web/board/lossless";
 // `board open --edit`'s caps where they are enforced, each at its exact bound and one past it (plan-board-open-edit
 // r7 §8.1, §11 step 2).  MERGE_WORK, MERGE_MS, MEMORY_MAX, BODY_MAX, EDIT_MAX for a merged head and BACKUPS_MAX
 // are in board-edit-hub, board-edit-serve and board-edit-write's tests; the rest here.
-const { mergeStrings3 } = require("patchflow");
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const B = (nodes: any[]) => ({ format: "sagebrush-board", version: 1, title: "t", nodes, edges: [] });
 const text = (d: any) => JSON.stringify(d, null, 2) + "\n";
@@ -27,7 +26,7 @@ async function hubOn(d: any, limits: Record<string, number> = {}, fsx?: WriteFs)
   fs.writeFileSync(file, text(d));
   let now = 1_000_000;
   const clock = { now: () => now, advance: (ms: number) => { now += ms; } };
-  const hub = new EditHub(file, { ...defaultLimits(), ...limits }, { mergeStrings3, now: clock.now, fs: fsx });
+  const hub = new EditHub(file, { ...defaultLimits(), ...limits }, { now: clock.now, fs: fsx });
   const r = await hub.start(fs.readFileSync(file));
   return { dir, file, hub, clock, started: r, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
@@ -41,7 +40,7 @@ test("board open --edit caps: FILE_MAX and EDIT_MAX at start, exactly and one by
         const file = join(dir, "b.board.json");
         fs.writeFileSync(file, sized(64 * KiB + extra));
         assert.equal(fs.statSync(file).size, 64 * KiB + extra);
-        const r = await startEdit(file, { ...defaultLimits(), ...limits }, { mergeStrings3, now: () => 0 });
+        const r = await startEdit(file, { ...defaultLimits(), ...limits }, { now: () => 0 });
         if (extra === 0) assert.ok("hub" in r, `${cap}: ${"why" in r ? r.why : ""}`);
         else assert.ok("why" in r && /larger than/.test(r.why), `${cap}+1: ${JSON.stringify("why" in r ? r.why : "ok")}`);
       } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -273,7 +272,7 @@ test("board open --edit: a symlinked FILE: its target is what is saved, the link
     fs.writeFileSync(target, text(B([{ id: "n", text: "hello" }])));
     fs.symlinkSync(target, link);
     let now = 0;
-    const r = await startEdit(link, defaultLimits(), { mergeStrings3, now: () => now });
+    const r = await startEdit(link, defaultLimits(), { now: () => now });
     assert.ok("hub" in r);
     const hub = (r as { hub: EditHub }).hub;
     assert.equal(hub.file, fs.realpathSync(target));
