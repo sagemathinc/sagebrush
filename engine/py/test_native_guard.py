@@ -19,10 +19,11 @@ import _thread
 BOMB_S = 6.0  # (seconds of bombardment per case)
 
 
-def bombard(body, seconds=BOMB_S):
+def bombard(body, check, seconds=BOMB_S):
     """body() run in a loop under SIGALRM every 50 us, each alarm raising one
-    KeyboardInterrupt (re-armed after each catch); returns (interrupts,
-    the results of check() after each)."""
+    KeyboardInterrupt while armed; check() after each interrupt (disarmed).
+    Returns the number of interrupts.  Arming happens only inside the
+    protected region, so no interrupt escapes the harness itself."""
     import signal
     armed = [False]
 
@@ -35,26 +36,27 @@ def bombard(body, seconds=BOMB_S):
     hits = 0
     t0 = time.monotonic()
     try:
-        while True:
+        while time.monotonic() - t0 < seconds:
             try:
-                armed[0] = True
-                while time.monotonic() - t0 < seconds:
-                    body()
-                    # (a KeyboardInterrupt swallowed where Python ignores
-                    # exceptions, a weakref callback's say: armed again)
+                try:
                     armed[0] = True
-                armed[0] = False
-                break
+                    while time.monotonic() - t0 < seconds:
+                        body()
+                        # (a KeyboardInterrupt swallowed where Python ignores
+                        # exceptions, a weakref callback's say: armed again)
+                        armed[0] = True
+                finally:
+                    armed[0] = False
             except KeyboardInterrupt:
-                armed[0] = False
                 hits += 1
-                yield hits
+                check()
     finally:
         armed[0] = False
         signal.setitimer(signal.ITIMER_REAL, 0)
         # (an alarm still pending is absorbed before the old handler is back)
         signal.signal(signal.SIGALRM, signal.SIG_IGN)
         signal.signal(signal.SIGALRM, prev)
+    return hits
 
 
 def test_locked_call_returns_raises_and_releases():
@@ -140,12 +142,14 @@ def test_bombardment_never_leaves_the_lock_held():
 
     def body():
         raster.locked_call(L, lambda: sink.append(1) or sink.clear())
-    leaks = 0
-    n = 0
-    for n in bombard(body):
+    leaks = [0]
+
+    def check():
         if L.locked():
-            leaks += 1
+            leaks[0] += 1
             L.release()
+    n = bombard(body, check)
+    leaks = leaks[0]
     a, r = raster.locked_call_counts()
     print("  bombardment: python %s, %d interrupts, %d leaked locks" % (sys.version.split()[0], n, leaks))
     assert n > 1000 and leaks == 0
@@ -176,10 +180,10 @@ def test_bombardment_of_the_ledger_keeps_its_image_and_lock():
             del keep[:25]
             gc.collect()
         led.sweep()
-    n = 0
-    for n in bombard(body):
+    def check():
         assert not led._lock.locked(), "the ledger's lock left held"
         T.audit(led)
+    n = bombard(body, check)
     keep.clear()
     gc.collect()
     led.sweep()
