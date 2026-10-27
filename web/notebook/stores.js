@@ -330,8 +330,8 @@ export const historyBacklog = () => ({ ...backlog });
 // (a refusal pauses the document's TimeTravel until a version can be kept whole: notebook/patch-history.js)
 export const HISTORY_REFUSED = "your files are busy (another tab is changing them), so TimeTravel paused for this document: it resumes from the next version that can be saved in full. The document itself is saved";
 export const HISTORY_TOO_LARGE = "this version is too large to keep in TimeTravel, so TimeTravel paused for this document: it resumes from the next version that can be saved in full. The document itself is saved";
-// (said once by a phase-following store whose append the fence refuses: a board tab open across the journal's
-// activation, or a reset, keeps saving the board but no longer its versions (board's note on #227))
+// (said once by a phase-following store whose append the fence refuses for its phase: a board tab open across the
+// journal's activation keeps saving the board but no longer its versions (board's note on #227))
 export const HISTORY_STOPPED = "TimeTravel stopped recording in this tab: reload the board to keep its versions";
 const BUSY = "your files are busy (another tab is changing them): not saved yet, tried again with your next change";
 const BUSY_DELETE = "your files are busy (another tab is changing them)";
@@ -593,9 +593,12 @@ export class IdbPatchStore {
     this.fence = fenceOf(f);
     if (this.followPhase && this.boundPhase === undefined) this.boundPhase = f?.phase === "journal" ? "journal" : "ok";
   }
-  // (a phase-following store's append refused: said once, to onHistoryRefused's listeners, never again for this store)
-  stopped() {
-    if (!this.followPhase || this.stopSaid) return;
+  // (a phase-following store's append refused because it was bound before the journal's activation, the fence
+  // `f` now in "journal": said once, to onHistoryRefused's listeners, never again for this store.  Any other
+  // refusal (a reset, a quarantine, storage that couldn't be read) is said by the notices that are for it, not as
+  // this one's "reload": board's N1 on 7e4ddd5b)
+  stopped(f) {
+    if (!this.followPhase || this.stopSaid || this.phase !== "ok" || f?.phase !== "journal") return;
     this.stopSaid = true;
     for (const f of refusedSubs) try { f(HISTORY_STOPPED); } catch {}
   }
@@ -703,12 +706,12 @@ export class IdbPatchStore {
       getHistoryChannel()?.postMessage({ from: tabId, id: this.id, env });
       if (this.owned && this.fence === undefined) this.bindFence((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
       await underLock(!this.owned, async () => {
-      if (this.owned && (await primaryRefusal(this.db, this.fence))) return this.stopped();
+      if (this.owned && (await primaryRefusal(this.db, this.fence))) return;
       await new Promise((ok) => {
         const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
         f.onsuccess = () => {
           if (this.fence === undefined) this.bindFence(f.result?.fence);
-          if (this.owned && fenceRefusal(f.result?.fence, this.fence, this.phase)) return this.stopped();
+          if (this.owned && fenceRefusal(f.result?.fence, this.fence, this.phase)) return this.stopped(f.result?.fence);
           st.put({ nb: this.id, time: env.time, env });
         };
         tx.oncomplete = () => ok();

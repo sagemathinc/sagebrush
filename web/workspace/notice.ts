@@ -56,6 +56,13 @@ export function showBusyNotice(text: string): HTMLElement | null {
   return box;
 }
 
+/** TimeTravel's word from the history stores (onHistoryRefused): a pause, as a busy notice; `stopped` (that it
+ * stopped recording in this tab, notebook/stores.js HISTORY_STOPPED), at the top with Reload, once, which no busy
+ * notice replaces or hides. */
+export function showHistoryNotice(text: string, stopped?: string): HTMLElement | null {
+  return stopped !== undefined && text === stopped ? showReloadNotice(text) : showBusyNotice(text);
+}
+
 const LOSS_ID = "sagebrush-loss-notice";
 
 /** The notice that this browser's copy of the workspace was lost or is missing changes (design/workspace-

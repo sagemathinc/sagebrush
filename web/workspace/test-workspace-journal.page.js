@@ -362,6 +362,18 @@ async function boardsFollowPhase() {
   const fpBefore = new W.IdbPatchStore(bdb, before, { followPhase: true });
   await fpBefore.loadInitial();
   check(fpBefore.phase === "ok", "a phase-following board store bound before activation is in \"ok\": " + fpBefore.phase);
+  // (refused for another reason, before the activation: a reset in another tab (another generation) is not said as
+  // TimeTravel having stopped, board's N1 on 7e4ddd5b)
+  const reset = boardId() + ":r", heard = [], off0 = W.onHistoryRefused((m) => heard.push(m));
+  const fpReset = new W.IdbPatchStore(bdb, reset, { followPhase: true });
+  await fpReset.loadInitial();
+  const was = await rawGet(bdb, "history", [FENCE, ""]);
+  await rawPut(bdb, "history", { ...was, fence: { ...was.fence, generation: was.fence.generation + 1 } });
+  await Promise.resolve(fpReset.append({ time: "2026-10-27T00:00:00.500Z", id: "q0" })).catch(() => {});
+  await sleep(150);
+  await rawPut(bdb, "history", was);
+  off0();
+  check(was?.fence?.phase === "ok" && (await rows(bdb, reset)) === 0 && heard.length === 0, "…one refused for a reset, not its phase, writes nothing and doesn't say TimeTravel stopped: " + J(heard));
   await w.activateJournal();
   // bound before: refused after, as any writer from before (a reload binds it again); said once, however many
   // appends are refused (the board page shows it: onHistoryRefused -> showBusyNotice)
@@ -373,6 +385,18 @@ async function boardsFollowPhase() {
   await Promise.resolve(fpBefore.append({ time: "2026-10-27T00:00:01.500Z", id: "q1b" })).catch(() => {});
   await sleep(150);
   check(said.length === 1 && (await rows(bdb, before)) === 0, "…once only: a second refused append writes nothing and says nothing more: " + said.length);
+  // (the board page's notice of it (showHistoryNotice): at the top with Reload, which a deletion's progress and its
+  // end (showBusyNotice, hideBusyNotice) neither replace nor hide; a pause is still a busy notice)
+  const top = () => document.getElementById("sagebrush-reload-notice"), busy = () => document.getElementById("sagebrush-busy-notice");
+  top()?.remove();
+  W.showHistoryNotice?.(said[0], S.HISTORY_STOPPED);
+  W.showBusyNotice("Deleting old versions… 50%");
+  W.hideBusyNotice();
+  check(!!top() && top().textContent.includes(S.HISTORY_STOPPED) && [...top().querySelectorAll("button")].some((x) => x.textContent === "Reload") && !busy(), "…shown at the top with Reload, kept through a deletion's progress and its end: " + J(top()?.textContent ?? null));
+  top()?.remove();
+  W.showHistoryNotice?.(S.HISTORY_REFUSED, S.HISTORY_STOPPED);
+  check(!top() && busy()?.textContent.includes(S.HISTORY_REFUSED), "…while TimeTravel's pause is still a busy notice");
+  W.hideBusyNotice();
   // bound after: in "journal", it appends and clears; a store that doesn't follow the phase is still refused
   const fp = new W.IdbPatchStore(bdb, after, { followPhase: true });
   await fp.loadInitial();
