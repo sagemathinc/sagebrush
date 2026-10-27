@@ -804,6 +804,7 @@ jobs:
               bun web/notebook/test-kernel-evaluate.mjs
               bun web/notebook/test-runner-fallback.mjs
               bun web/board/test-canvas.mjs
+              bun web/board/test-palette.mjs
               bun web/board/test-channel.mjs
               bun web/board/test-merge.mjs
               bun web/board/test-cached-store.mjs
