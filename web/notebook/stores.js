@@ -65,11 +65,20 @@ export const FENCE = "__sagebrush-workspace__";
 // when it loaded, read in the same transaction as the document; a write is allowed only if the fence now is that
 // same workspace and generation, in phase "ok"; a fence that appeared since a store found none, or went since it
 // found one, refuses it.  A fence is never deleted.  Which records the workspace owns is decided by
-// ownedByWorkspace, never by whether a fence is there)
-const fenceRefusal = (f, seen) => {
+// ownedByWorkspace, never by whether a fence is there.
+// `accept`: the one phase a writer writes in.  Every writer here writes as before the journal, in "ok"; once the
+// journal is activated the fences say "journal" (plan-sync-slice2-client r4 §1a), which only the journal's
+// writers (2c-1d) accept, so a writer from before it, in an old tab or this one, is refused before it changes
+// anything)
+export const fenceRefusal = (f, seen, accept = "ok") => {
   if (!f) return seen ? "this browser's record of the workspace is missing: reload this page" : null;
   if (f.quarantined) return "this browser's copy of your workspace was lost or is missing changes: choose what to do first";
-  if (f.phase && f.phase !== "ok") return f.phase === "quarantined" ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : "this browser's workspace is being reset: wait for it, then reload";
+  if ((f.phase ?? "ok") !== accept) {
+    if (f.phase === "quarantined") return "this browser's copy of your workspace was lost or is missing changes: choose what to do first";
+    if (f.phase === "journal") return "this browser now saves notebooks through sync's journal, which this page doesn't: reload this page";
+    if (accept === "journal" && (f.phase ?? "ok") === "ok") return "this browser's workspace isn't saving through sync's journal yet: reload this page";
+    return "this browser's workspace is being reset: wait for it, then reload";
+  }
   if (seen === null) return "the workspace was set up after this notebook was opened: reload this page";
   if (seen && (f.workspace !== seen.workspace || f.generation !== seen.generation)) return "the workspace was reset in another tab: reload this page";
   return null;
