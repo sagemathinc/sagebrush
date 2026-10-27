@@ -370,8 +370,16 @@ for _name, _f in _native_calls().items():
         _exc = _kind()
         _stand_in(_raising(_exc))
         check("%s: a %s from the source reaches that call, the same object" % (_name, _kind.__name__), _raised(_outcome(_f), _exc), True)
-    _stand_in(_raising(OSError("unreadable")))
-    check("%s: an ordinary failure of the source is an unreadable total, not an error" % _name, _outcome(_f)[0], "returned")
+    # an ordinary failure leaves the total unreadable, so stale on every
+    # read: a worker's read would run the source if it could ask (it can't)
+    _failed_on = []
+
+    def _failing(failed_on=_failed_on):
+        failed_on.append(threading.get_ident())
+        raise OSError("unreadable")
+    _stand_in(_failing)
+    _got = _outcome(_f)
+    check("%s: an ordinary failure of the source is an unreadable total, not an error, and no worker asked" % _name, (_got[0], set(_failed_on)), ("returned", {threading.get_ident()}))
 
 
 def _two_native_callers(f):
