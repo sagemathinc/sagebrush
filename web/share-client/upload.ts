@@ -83,7 +83,7 @@ export const UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
 export async function uploadCollection(
   o: { id: string | null; attempt?: string; title: string; license?: string; files: LazyFile[] },
   progress: (done: number, total: number) => void = () => {},
-  opts: { batchBytes?: number } = {},
+  opts: { batchBytes?: number; beforeCommit?: () => void | Promise<void> } = {},
 ): Promise<{ id: string; version: string; url: string; frozen: string }> {
   const limit = opts.batchBytes ?? UPLOAD_BATCH_BYTES;
   const total = o.files.reduce((s, f) => s + (f.size ?? 0), 0);
@@ -120,6 +120,8 @@ export async function uploadCollection(
   await flush();
   const body = { title: o.title, license: o.license || undefined, files: manifest };
   // (a new share: its collection is made with this version, by this one request)
-  const v = o.id === null ? await api("POST", "/api/share/collections", { ...body, attempt: o.attempt }) : await api("POST", `/api/share/collections/${o.id}/versions`, body);
+  if (o.id === null) await opts.beforeCommit?.();
+  // (a new share: its own path, which a server from before this answers with 404, creating nothing)
+  const v = o.id === null ? await api("POST", "/api/share/first-upload", { ...body, attempt: o.attempt }) : await api("POST", `/api/share/collections/${o.id}/versions`, body);
   return { id: o.id ?? v.collection, version: v.version, url: new URL(v.url, location.href).href, frozen: new URL(v.frozen, location.href).href };
 }

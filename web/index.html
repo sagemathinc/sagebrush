@@ -1591,11 +1591,29 @@ const shareDialog = createShareDialog({
         throw new Error("this notebook couldn't be saved, so it isn't uploaded (a retry could otherwise share it twice)");
       }
       if (current.id !== origin) throw new Error("the notebook changed; upload again");
+      // (what the save kept is what this upload uses: a remote update merged by that save may have replaced the
+      // attempt, or brought a share made elsewhere, astra3's L1; the kept attempt is adopted, a kept share stops it)
+      const kept = nb.snapshot();
+      if (kept.share_id) throw new Error("this notebook was shared from elsewhere meanwhile. Upload again to make a new version of that share.");
+      if (!/^[0-9a-f]{32}$/.test(kept.share_attempt ?? "")) throw new Error("this notebook's upload changed elsewhere meanwhile; upload again");
+      attempt = kept.share_attempt;
     }
+    // (just before the request that makes the share: the notebook still holds this attempt, and no share)
+    let committing = false;
+    const beforeCommit = () => {
+      const now = nb.snapshot();
+      if (current.id !== origin || now.share_id || now.share_attempt !== attempt) throw new Error("this notebook's share changed elsewhere while uploading; nothing was shared. Upload again.");
+      committing = true;
+    };
     let r;
     try {
-      r = await uploadCollection({ id: prev, attempt, title: title.trim() || docName(), license, files }, progress);
+      r = await uploadCollection({ id: prev, attempt, title: title.trim() || docName(), license, files }, progress, { beforeCommit });
     } catch (e) {
+      // (an unknown outcome (no answer, a 5xx): the attempt sent is the one kept, so a retry gets its share back)
+      if (committing && !(e instanceof AttemptError) && current.id === origin && !nb.snapshot().share_id && nb.snapshot().share_attempt !== attempt) {
+        nb.setMeta({ share_attempt: attempt });
+        await nb.saved().catch(() => {});
+      }
       // (the attempt made a share with other files, or its share was deleted: never a success, and the attempt is done)
       if (!(e instanceof AttemptError)) throw e;
       if (current.id === origin) nb.setMeta(e.kind === "used" ? { share_id: e.share.id, share_attempt: null } : { share_attempt: null });

@@ -769,9 +769,9 @@ try {
       const f = window.__realFetch ?? window.fetch; window.__realFetch = f; window.__made = null; window.__sent = [];
       window.fetch = async (u, o) => {
         const s = String(u), m = o?.method ?? "GET";
-        if (/\\/api\\/share\\/(collections|check|blob)/.test(s) && m !== "GET") window.__sent.push(m + " " + s.replace(location.origin, ""));
+        if (/\\/api\\/share\\/(collections|first-upload|check|blob)/.test(s) && m !== "GET") window.__sent.push(m + " " + s.replace(location.origin, ""));
         if (${JSON.stringify(mode)} === "putfail" && s.includes("/api/share/blob/") && m === "PUT") return new Response('{"error":"busy"}', { status: 503 });
-        if (${JSON.stringify(mode)} === "lose" && s.endsWith("/api/share/collections") && m === "POST") {
+        if (${JSON.stringify(mode)} === "lose" && s.endsWith("/api/share/first-upload") && m === "POST") {
           const r = await f(u, o);
           window.__made = await r.clone().json();
           return new Response('{"error":"lost"}', { status: 503 });
@@ -872,7 +872,56 @@ try {
     ok((await snap("name")) === "D6 copy" && !copied && typeof ipynb === "string" && ipynb.includes("cells") && !ipynb.includes("0123456789abcdef") && typeof link === "string" && link.includes("#") && !link.includes("0123456789abcdef"), "D6 \"make a copy\" has no attempt, and the notebook's .ipynb export and its share link don't carry it");
     });
 
-    // D2 (last: it crashes the page): the answer lost, the page crashed at once, then a reload
+
+    // D7 (astra3's L1): a remote update merged during the awaited save, or while uploading, decides what is sent
+    const B = "b".repeat(32), C = "c".repeat(32);
+    // (the real merge of a store conflict, notebook.js applyRemote, with another writer's metadata)
+    const remote = (patch) => `window.sagebrush.notebook.applyRemote({ ...window.sagebrush.notebook.snapshot(), ...${JSON.stringify(patch)} }, true, true)`;
+    const recordSent = () => ev(`(() => { const f = window.__realFetch ?? window.fetch; window.__realFetch = f; window.__attempts = []; window.fetch = async (u, o) => { if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") window.__attempts.push(JSON.parse(o.body).attempt); return f(u, o); }; })()`);
+    await block("D7a", async () => {
+      await fresh("D7a");
+      const n = await mine();
+      await openDialog();
+      await recordSent();
+      await ev(`window.sagebrush.shareTest.saved = async () => { await window.sagebrush.notebook.saved(); ${remote({ share_attempt: B })}; }`);
+      const l = await shareNow("D7a");
+      await ev("delete window.sagebrush.shareTest.saved");
+      await restore();
+      const sent = await ev("window.__attempts");
+      ok(/\/s\//.test(l) && sent.length === 1 && sent[0] === B && (await mine()) === n + 1 && !(await snap("share_attempt")), `D7a another writer's attempt merged by the awaited save: the kept attempt is the one sent (${JSON.stringify(sent)}), one share`);
+      await closeDialog();
+    });
+    await block("D7b", async () => {
+      await fresh("D7b");
+      const n = await mine();
+      await openDialog();
+      await recordSent();
+      await ev(`window.sagebrush.shareTest.saved = async () => { await window.sagebrush.notebook.saved(); ${remote({ share_id: "zzzzzzzzzzzz", share_attempt: null })}; }`);
+      const f7 = await shareNow("D7b");
+      await ev("delete window.sagebrush.shareTest.saved");
+      await restore();
+      ok(/shared from elsewhere/.test(f7) && (await ev("window.__attempts.length")) === 0 && (await mine()) === n, `D7b a share made elsewhere, merged by the awaited save: nothing is sent, no share made: ${f7}`);
+      await ev("window.sagebrush.notebook.setMeta({ share_id: null })");
+      await closeDialog();
+    });
+    await block("D7c", async () => {
+      await fresh("D7c");
+      const n = await mine();
+      await openDialog();
+      await recordSent();
+      await ev(`(() => { const t = window.sagebrush.shareTest; let once = false; t.onRead = () => { if (!once) { once = true; ${remote({ share_attempt: C })}; } }; })()`);
+      const f7 = await shareNow("D7c");
+      await ev("window.sagebrush.shareTest.onRead = null");
+      const none = await ev("window.__attempts.length");
+      const l = await shareNow("D7c");
+      await restore();
+      const sent = await ev("window.__attempts");
+      ok(/changed elsewhere while uploading/.test(f7) && none === 0 && /\/s\//.test(l) && sent.length === 1 && sent[0] === C && (await mine()) === n + 1, `D7c the attempt replaced while uploading: the share request isn't sent (${f7}); the retry sends the kept attempt (${JSON.stringify(sent)}), one share`);
+      await closeDialog();
+    });
+
+    // D2 (last: it crashes the page): the answer lost, the page crashed at once, then a reload (with another
+    // writer's attempt merged by the awaited save, astra3's L1: the kept attempt is the one sent and kept)
     await block("D2", async () => {
     await ev("document.querySelector('#filemenu [data-f=new]').click()");
     await until("document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value && !window.sagebrush.notebook.snapshot().share_id");
@@ -881,8 +930,9 @@ try {
     const n2 = await ev("(async () => (await (await fetch('/api/share/mine')).json()).collections.length)()");
     await openDialog();
     await ev(`(() => { const f = window.fetch; window.__made = null; window.fetch = async (u, o) => {
-      if (String(u).endsWith("/api/share/collections") && o?.method === "POST") { const r = await f(u, o); window.__made = await r.json(); return new Promise(() => {}); }
+      if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") { const r = await f(u, o); window.__made = { ...(await r.json()), sent: JSON.parse(o.body).attempt }; return new Promise(() => {}); }
       return f(u, o); }; })()`);
+    await ev(`window.sagebrush.shareTest.saved = async () => { await window.sagebrush.notebook.saved(); window.sagebrush.notebook.applyRemote({ ...window.sagebrush.notebook.snapshot(), share_attempt: "${"d".repeat(32)}" }, true, true); await window.sagebrush.notebook.saved(); }`);
     await ev("document.querySelector('#sharetitlein').value = 'D2'; document.querySelector('#shareupload').click()");
     await until("!!window.__made", 60000);
     const made2 = await ev("window.__made");
@@ -900,7 +950,7 @@ try {
     await q.until("document.querySelector('#shareresult a') || /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
     const id2 = await q.ev("window.sagebrush.notebook.snapshot().share_id ?? null");
     const n2b = await q.ev("(async () => (await (await fetch('/api/share/mine')).json()).collections.length)()");
-    ok(made2?.collection && /^[0-9a-f]{32}$/.test(att2 ?? "") && id2 === made2.collection && n2b === n2 + 1, `D2 the answer lost, the page crashed at once, a reload, the same upload: one share, the one the lost answer made (attempt kept: ${!!att2}, share ${id2} vs ${made2?.collection}, shares +${n2b - n2})`);
+    ok(made2?.collection && made2.sent === "dddddddddddddddddddddddddddddddd" && att2 === "dddddddddddddddddddddddddddddddd" && id2 === made2.collection && n2b === n2 + 1, `D2 (sent ${made2?.sent?.slice(0, 6)}…, kept ${att2?.slice(0, 6)}…) the answer lost, the page crashed at once, a reload, the same upload: one share, the one the lost answer made (attempt kept: ${!!att2}, share ${id2} vs ${made2?.collection}, shares +${n2b - n2})`);
     }, 150_000);
   }
 
