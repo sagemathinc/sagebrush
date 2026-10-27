@@ -1531,8 +1531,10 @@ def _sparse_lu(S, q=None):
 
 # the dense route's simultaneous copies, per element of A and of B (full(a),
 # full(b), and _matlab's solve's own: its transposed copies, the factored copy,
-# the result): PROVISIONAL until M2 measures the dense path's peak (r6 section 2.2)
-DENSE_A_COPIES = 4
+# the result): A's from M2 (r6 section 2.2: VmHWM - VmRSS over A's bytes, 6.05
+# copies at most, real and complex, n = 2000-4000, times 1.25, rounded up); B's
+# still PROVISIONAL (M2 measured A's copies with k = 1)
+DENSE_A_COPIES = 8
 DENSE_B_COPIES = 4
 
 
