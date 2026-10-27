@@ -129,6 +129,9 @@ pub fn charpoly(h: Vec<Vec<u64>>, p: u64) -> Vec<u64> {
 macro_rules! dispatch {
     ($name:ident, $generic:ident, ($($a:ident: $t:ty),*) -> $r:ty) => {
         #[inline]
+        // SAFETY: the AVX2 copy is called only after is_x86_feature_detected!("avx2");
+        // its body is the safe generic kernel.
+        #[allow(unsafe_code)]
         fn $name($($a: $t),*) -> $r {
             #[cfg(target_arch = "x86_64")]
             {

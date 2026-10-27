@@ -15,3 +15,6 @@ sagebrush-ball = { path = "../ball" }
 num-traits = "0.2"
 sagebrush-interrupt = { path = "../interrupt" }
 sagebrush-par = { path = "../par" }
+
+[lints]
+workspace = true
