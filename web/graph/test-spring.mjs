@@ -160,6 +160,39 @@ check(springLayout([], [], { seed: 1 }).size === 0, "no nodes: an empty layout")
 }
 check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }).size === 1, "a loop and an unknown end are ignored");
 
+// every frame of the animation places each node once, and the connected
+// parts side by side, never drawn over each other (William's X3: two parts
+// iterated in the same place looked like one graph drawn twice until the
+// last frame)
+{
+  const house = (o) => [[0, 1], [1, 2], [2, 0], [2, 3], [3, 4], [4, 0]].map(([a, b]) => ["v" + (a + o), "v" + (b + o)]);
+  const cases = { "two houses": [pts(10), [...house(0), ...house(5)]], parts: GRAPHS.parts, "pairs and a triangle": [pts(9, 20, 20), [["v0", "v1"], ["v2", "v3"], ["v4", "v5"], ["v6", "v7"], ["v7", "v8"], ["v8", "v6"]]] };
+  for (const [name, [nodes, edges]] of Object.entries(cases)) {
+    // (the parts: union-find over the edges)
+    const up = new Map(nodes.map((n) => [n.id, n.id]));
+    const find = (x) => { while (up.get(x) !== x) x = up.get(x); return x; };
+    for (const [a, b] of edges) up.set(find(a), find(b));
+    const partOf = new Map(nodes.map((n) => [n.id, find(n.id)]));
+    const frames = [...springSteps(nodes, edges, { seed: 3 }, 1)];
+    let counted = true, apart = true, where = "";
+    frames.forEach((f, k) => {
+      if (f.size !== nodes.length || nodes.some((n) => !f.has(n.id))) counted = false;
+      const bb = new Map();
+      for (const n of nodes) {
+        const p = f.get(n.id), r = partOf.get(n.id), b = bb.get(r) ?? [Infinity, Infinity, -Infinity, -Infinity];
+        bb.set(r, [Math.min(b[0], p.x), Math.min(b[1], p.y), Math.max(b[2], p.x + n.w), Math.max(b[3], p.y + n.h)]);
+      }
+      const boxes = [...bb.values()];
+      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+        const [a, b] = [boxes[i], boxes[j]];
+        if (a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3] && apart) { apart = false; where = `frame ${k} of ${frames.length}`; }
+      }
+    });
+    check(counted, `${name}: every frame places each node exactly once`);
+    check(apart, `${name}: in every frame the parts' boxes are apart (${where})`);
+  }
+}
+
 // the same on Node and Deno as here (Bun)
 {
   const [nodes, edges] = GRAPHS.tree;
