@@ -125,3 +125,41 @@ windows diagnosis fail physical None [('windows-job', 'physical: GlobalMemorySta
 windows diagnosis fail in_job None [('windows-job', 'in_job: IsProcessInJob')]
 windows diagnosis fail job_limit None [('windows-job', 'job_limit: QueryInformationJobObject')]
 windows diagnosis job without memory limit 10737418240 []
+proc limits unlimited None None
+proc limits finite 3072000000 1258291200
+proc limits finite hard 1048576 0
+proc limits no header False False
+proc limits wrong header False False
+proc limits row missing False None
+proc limits row twice False None
+proc limits two tokens False False
+proc limits four tokens False False
+proc limits minus one False False
+proc limits hex False False
+proc limits suffix False False
+proc limits non-ascii digits False False
+proc limits garbage hard False False
+proc limits empty False False
+proc limits units kB False False
+proc limits units KiB False False
+proc limits units pages False False
+proc limits units Bytes False False
+proc limits units empty False False
+proc limits name prefix False False
+proc limits missing False False False
+proc limits non-utf-8 in the row False False
+proc limits non-utf-8 elsewhere False False
+rlimit order figures first 1073741824 None
+rlimit order resource first 5368709120 5368709120
+rlimit order resource fails False False
+rlimit order proc on linux None None
+rlimit order planted browser False False
+rlimit order planted darwin False False
+rlimit value sentinel None None
+rlimit value huge None None
+rlimit value zero 0 0
+rlimit value one byte 1 None
+proc rows finite [('RLIMIT_AS', 4294967296, 2147483648, True), ('RLIMIT_DATA', 3221225472, 1073741824, True)] [] [('RLIMIT_AS', True), ('RLIMIT_DATA', True)]
+proc rows finite no status [('RLIMIT_AS', 4294967296, None, True), ('RLIMIT_DATA', 3221225472, None, True)] ['RLIMIT_AS usage', 'RLIMIT_DATA usage'] [('RLIMIT_AS', True), ('RLIMIT_DATA', True)]
+proc rows zero data [('RLIMIT_DATA', 0, 1073741824, True)] [] [('RLIMIT_DATA', True)]
+proc rows unlimited [] [] []
