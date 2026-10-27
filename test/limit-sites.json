@@ -568,7 +568,7 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/binomial.rs :: fold_minus :: if s == u64::MAX { #0": {
+ "engine/poly/src/binomial.rs :: fold_minus :: (if s == u64::MAX { 0 } else { s }, if s48 == M48 { 0 } else { s48 }) #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
@@ -648,7 +648,7 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/binomial_tests.rs :: the_fold_residues_are_exact :: assert!(rm < u64::MAX, \"{bits} bits: 2^64 - 1 is folded to 0\"); #0": {
+ "engine/poly/src/binomial_tests.rs :: the_fold_residues_are_exact :: assert!(rm < u64::MAX && r48 < (1 << 48) - 1, \"{bits} bits: 2^k - 1 is folded to 0\"); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
