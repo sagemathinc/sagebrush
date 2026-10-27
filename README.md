@@ -166,7 +166,7 @@ The same functions are available from:
 | Node.js (`require("./engine/node").modsym`) | napi-rs | native addon; exact coefficients are `BigInt`s |
 | Rust (`sagebrush-modsym`) | - | the engine itself |
 | command line (`sagebrush`) | - | `sagebrush modsym N q [p] [--exact] [--threads T]` |
-| WebAssembly | wasm-bindgen | single-threaded; mod-p only for now |
+| WebAssembly (`engine/web`) | plain wasm32, JSON in and out | single-threaded |
 
 Every interface is multithreaded except WASM: `threads=0` means all cores.
 
