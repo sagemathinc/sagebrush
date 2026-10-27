@@ -14,9 +14,8 @@ export const DOC_PROTOCOL_VERSION = 1;
 export const DOC_LIMITS = {
   /** clients one doc_fence names (the slots, §3.2) */
   fenceClients: 8,
-  /** cells an outputs message sets (§5.3) */
-  outputsSet: 500,
-  /** an output's blob; a larger one keeps a preview (G3) */
+  /** an output's blob in LTI's grading descriptor (§6.7.2); a larger one keeps a preview.  (Sync itself never
+   * carries outputs: William, Oct 26; erratum-sync-no-outputs r2.) */
   outputBytes: 4 << 20,
   previewBytes: 256 << 10,
   /** cells a census lists, and its bytes (§6.7.2) */
@@ -541,8 +540,6 @@ const U32 = 0xffffffff;
  * than the document's is refused (stale_epoch) and changes nothing, so a delayed one can't land in a later epoch. */
 export interface DocClaim { t: "doc_claim"; req: number; doc: string; epoch: number; client: string; owner?: string }
 export interface DocFence { t: "doc_fence"; req: number; doc: string; epoch: number; clients: { client: string; target: number }[]; owner?: string }
-export interface OutputSet { cell: string; full?: { sha256: string; size: number }; preview?: { sha256: string; size: number; kind: "text" | "png" } }
-export interface Outputs { t: "outputs"; req: number; doc: string; oreq: { client: string; n: number }; set: OutputSet[]; owner?: string }
 export interface Snapshot { t: "snapshot"; req: number; doc: string; at_seq: number; sha256: string; bytes: number; owner?: string }
 export interface Progress { t: "progress"; claims: Uint8Array }
 
@@ -611,36 +608,6 @@ export function checkSnapshot(v: unknown, via: Via = ACCOUNT): Snapshot {
     throw invalid("snapshot: t, req, at_seq, sha256 and bytes");
   if (o.bytes > DOC_LIMITS.snapshotBytes) throw tooBig("snapshot_bytes", DOC_LIMITS.snapshotBytes, "snapshot: at most 32 MiB");
   return withDoc({ t: "snapshot" as const, req: o.req, at_seq: o.at_seq, sha256: o.sha256, bytes: o.bytes }, d);
-}
-const CELL = /^[^\u0000-\u001f\u007f]{1,128}$/;
-export function checkOutputs(v: unknown, via: Via = ACCOUNT): Outputs {
-  const d = docFields(v, ["t", "req", "oreq", "set"], via, "outputs"), o = d.o;
-  if (o.t !== "outputs" || !isNat(o.req)) throw invalid("outputs: t and req");
-  const r = fields(o.oreq, ["client", "n"], "outputs oreq");
-  if (!isClient(r.client) || !isNat(r.n) || r.n < 1) throw invalid("outputs: oreq is a client and a positive n");
-  if (!Array.isArray(o.set) || o.set.length === 0) throw invalid("outputs: set");
-  if (o.set.length > DOC_LIMITS.outputsSet) throw tooBig("outputs_set", DOC_LIMITS.outputsSet, "outputs: too many cells");
-  const set = o.set.map((s): OutputSet => {
-    const x = fields(s, ["cell", "full", "preview"], "outputs cell");
-    if (typeof x.cell !== "string" || !CELL.test(x.cell)) throw invalid("outputs: cell");
-    const out: OutputSet = { cell: x.cell };
-    if (has(x, "full")) {
-      const f = fields(x.full, ["sha256", "size"], "outputs full");
-      if (!isSha(f.sha256) || !isNat(f.size)) throw invalid("outputs: full");
-      if (f.size > DOC_LIMITS.outputBytes) throw tooBig("output_bytes", DOC_LIMITS.outputBytes, "outputs: over 4 MiB; send a preview instead");
-      out.full = { sha256: f.sha256, size: f.size };
-    }
-    if (has(x, "preview")) {
-      const p = fields(x.preview, ["sha256", "size", "kind"], "outputs preview");
-      if (!isSha(p.sha256) || !isNat(p.size) || (p.kind !== "text" && p.kind !== "png")) throw invalid("outputs: preview");
-      if (p.size > DOC_LIMITS.previewBytes) throw tooBig("preview_bytes", DOC_LIMITS.previewBytes, "outputs: a preview is at most 256 KiB");
-      out.preview = { sha256: p.sha256, size: p.size, kind: p.kind };
-    }
-    if (!out.full && !out.preview) throw invalid("outputs: a cell sets a full output or a preview");
-    return out;
-  });
-  if (new Set(set.map((s) => s.cell)).size !== set.length) throw invalid("outputs: a cell set twice");
-  return withDoc({ t: "outputs" as const, req: o.req, oreq: { client: r.client, n: r.n }, set }, d);
 }
 export function checkProgress(v: unknown): Progress {
   const o = fields(v, ["t", "claims"], "progress");
