@@ -63,12 +63,35 @@ jobs:
           python engine/py/test_audit.py
           python engine/py/test_mcp.py
           python engine/py/test_session_ctrl.py
-          python engine/py/test_python_floor.py
+          python engine/py/test_python_floor.py --wheel
           cd engine/py && python -m doctest README.md && echo doctests ok
       - uses: actions/upload-artifact@v5
         with:
           name: wheel-${{ matrix.os }}-${{ matrix.target }}
           path: engine/py/dist/*.whl
+
+  # The floor, as a tested claim: the Linux x86_64 abi3 wheel built above, installed on
+  # Python 3.10 (the oldest supported), imported, and run once end to end
+  py310:
+    if: github.repository == 'sagemathinc/sagebrush'
+    needs: [wheels]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - uses: actions/download-artifact@v5
+        with:
+          name: wheel-ubuntu-latest-x86_64
+          path: dist
+      - name: the wheel on Python 3.10
+        shell: bash
+        run: |
+          python --version
+          python -m pip install dist/*.whl
+          python engine/py/test_python_floor.py --wheel
+          cd /tmp && python -c "import sagebrush, sagebrush.sage; from sagebrush import nf; assert [tuple(t) for t in nf.factor_integer(600851475143)] == [(71, 1), (839, 1), (1471, 1), (6857, 1)]; from sagebrush.session import Session; s = Session(); r = s.run('R.<x> = QQ[]; (x^4 - 1).factor()'); s.close(); assert r['error'] is None and r['result'] == '(x - 1) * (x + 1) * (x^2 + 1)', r; print('python 3.10: import, factor and a session run: ok')"
 
   sdist:
     if: github.repository == 'sagemathinc/sagebrush'
@@ -87,7 +110,7 @@ jobs:
 
   publish:
     if: github.repository == 'sagemathinc/sagebrush' && startsWith(github.ref, 'refs/tags/py-v')
-    needs: [wheels, sdist]
+    needs: [wheels, sdist, py310]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
