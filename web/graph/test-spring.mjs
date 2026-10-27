@@ -3,7 +3,7 @@
 // Node and Deno too), linked boxes end nearer than others, and past its caps
 // it refuses. With bun:
 //   bun web/graph/test-spring.mjs
-import { springLayout, springSteps, gapViolations, springWork, WORK, MAX_NODES, MAX_EDGES, MAX_FRAMES, MIN_LENGTH, MAX_LENGTH, packRows, placeRows } from "./spring.ts";
+import { springLayout, springSteps, gapViolations, springWork, WORK, MAX_NODES, MAX_EDGES, MAX_FRAMES, MIN_LENGTH, MAX_LENGTH, packRows, placeRows, TRANSITION_FRAMES } from "./spring.ts";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -173,6 +173,8 @@ check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }
     "pairs and a triangle": [pts(9, 20, 20), [["v0", "v1"], ["v2", "v3"], ["v4", "v5"], ["v6", "v7"], ["v7", "v8"], ["v8", "v6"]]],
     // (python's note: a part with a fixed node; the free parts go below it)
     "two houses, one with a fixed node": [pinnedOne, [...house(0), ...house(5)]],
+    // (board's: two houses and a Petersen graph, 24 px boxes)
+    "two houses and a Petersen graph": [pts(20, 24, 24), [...house(0), ...house(5), ...GRAPHS.petersen[1].map(([a, b]) => ["v" + (10 + +a.slice(1)), "v" + (10 + +b.slice(1))])]],
   };
   for (const [name, [nodes, edges]] of Object.entries(cases)) {
     // (the parts: union-find over the edges)
@@ -181,7 +183,10 @@ check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }
     for (const [a, b] of edges) up.set(find(a), find(b));
     const partOf = new Map(nodes.map((n) => [n.id, find(n.id)]));
     const frames = [...springSteps(nodes, edges, { seed: 3 }, 1)];
-    let counted = true, apart = true, where = "", rowsKept = true, rowsWhere = "";
+    let counted = true, apart = true, where = "", rowsKept = true, rowsWhere = "", glides = true, glideWhere = "";
+    let prev = null;
+    // (the animation's frames, then TRANSITION_FRAMES gliding to the layout, which is the last)
+    const animated = frames.length - TRANSITION_FRAMES - 1;
     const pinnedParts = new Set(nodes.filter((n) => n.fixed).map((n) => partOf.get(n.id)));
     let rows0 = null;
     frames.forEach((f, k) => {
@@ -192,13 +197,22 @@ check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }
         bb.set(r, [Math.min(b[0], p.x), Math.min(b[1], p.y), Math.max(b[2], p.x + n.w), Math.max(b[3], p.y + n.h)]);
       }
       const boxes = [...bb.values()];
-      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+      if (k < animated) for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
         const [a, b] = [boxes[i], boxes[j]];
         if (a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3] && apart) { apart = false; where = `frame ${k} of ${frames.length}`; }
       }
+      // (board's bound: from one frame to the next no part moves more than
+      // its own size, through the glide and onto the layout; from the second
+      // frame on: the first step leaves the random start, where every part
+      // expands at once)
+      if (prev && k >= 2) for (const [r, b] of bb) {
+        const a = prev.get(r), move = Math.hypot(b[0] - a[0], b[1] - a[1]), size = Math.max(b[2] - b[0], b[3] - b[1], 1);
+        if (move > size && glides) { glides = false; glideWhere = `frame ${k} of ${frames.length}: ${move.toFixed(1)} > ${size.toFixed(1)}`; }
+      }
+      prev = bb;
       // (the free parts' rows: parts of a row share their box's top; the
       // rows, and each row's order left to right, kept until the last frame)
-      if (k < frames.length - 1) {
+      if (k < animated) {
         const free = [...bb.entries()].filter(([r]) => !pinnedParts.has(r)).sort((a, b) => a[1][1] - b[1][1] || a[1][0] - b[1][0]);
         const rows = [];
         for (const [r, b] of free) {
@@ -213,7 +227,9 @@ check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }
     });
     check(counted, `${name}: every frame places each node exactly once`);
     check(apart, `${name}: in every frame the parts' boxes are apart (${where})`);
-    check(rowsKept, `${name}: no part changes row, nor its place in it, before the last frame (${rowsWhere})`);
+    check(rowsKept, `${name}: no part changes row, nor its place in it, while it settles (${rowsWhere})`);
+    check(glides, `${name}: from frame to frame no part moves more than its own size, to the last frame (${glideWhere})`);
+    check(animated > 0 && JSON.stringify([...frames.at(-1)]) === JSON.stringify([...springLayout(nodes, edges, { seed: 3 })]), `${name}: the animation, then ${TRANSITION_FRAMES} gliding frames, end on the layout`);
   }
 }
 
