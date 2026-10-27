@@ -1,1 +1,0 @@
-{"v":1, "reason":"#119 bash shell step 1 (plan-bash-shell r3, r4 addendum A1 r3): src/pkgset.ts admits js packages in v2 sets and checks js chunks (checkJsChunk, the notices, the A1.2 caps), in the CLI and the browser worker; measured by size-gate on aadf1f7f (base 7390040d)", "bytes":{"cli/pyjs.cjs": 1745, "engine/sagebrush-worker.js": 1333}}

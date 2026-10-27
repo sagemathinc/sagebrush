@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "Rank-3 plan r3 PR 1 (#188, r2): FactorLimit's kind (Resource, Internal), its message, the JSON 'internal' flag, newspace's kept Internal and sym's SymError::Internal (engine wasm); sagebrush._engine raises RuntimeError for an internal error (lib bundles). Figures against master 6871eb1a with CI's toolchain: lib.gen/sage.pre/sage.src from size-gate's transition mode (dispatches 40277069977, 40279684904); the engine wasm is CI's fresh-wasm-df723152 (7179351 B) against master's committed 7172688 B (+6663); cli/pyjs.cjs embeds the wasm in base64, so its row is 183 (Python) + 8884 (base64 of the wasm growth) = 9067, marked 9100 until the final dispatch measures it",
+ "bytes": {
+  "cli/lib.gen.js": 191,
+  "cli/pyjs.cjs": 9100,
+  "engine/lib/sage.pre": 349,
+  "engine/lib/sage.src": 191,
+  "engine/sagebrush-engine.wasm": 6663
+ }
+}

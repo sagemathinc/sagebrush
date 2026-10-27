@@ -181,7 +181,8 @@ const outputs = {
   webkit,
   census,
   // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
-  size_inputs: gateInputs(files).length > 0,
+  // (a dispatch or a schedule has no file list: its gate always runs on the measurement, never docs-only)
+  size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0,
   files: files.length,
 };
 for (const [key, value] of Object.entries(outputs)) console.log(`${key}=${value}`);

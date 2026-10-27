@@ -10,7 +10,8 @@ import { join } from "node:path";
 //   op longer than any nmod reply (> 20 * 400 * 401 bytes), grows the
 //   instance's memory by less than the op's closed-form peak (8, 12, 14,
 //   2 MiB) with a quarter of allocator headroom: the previous reply is
-//   freed at entry;
+//   freed at entry; and nmod_echelon at its 1024 x 1024 envelope within
+//   ECH_PEAK = 50,369,536 bytes the same way;
 // - the shared transform cache, filled by other ops to its 64-table policy
 //   and to its 2^28-byte policy, is neither used nor changed by them, and
 //   100 NTT primes in a row do not grow memory;
@@ -156,6 +157,27 @@ test("the nmod ops' largest requests stay within their peaks in wasm, after a la
   }
 });
 
+// ECH_PEAK at the envelope (engine/web/src/nmod_ops.rs): R + 28 E + 33 KiB
+const ECH_PEAK = 50_369_536;
+
+test("nmod_echelon at its 1024 x 1024 envelope stays within ECH_PEAK in wasm", (t) => {
+  const e = instance();
+  if (call(e, preq("gcd", 7n, "1,1", "1")).includes("unknown fn")) return t.skip("this engine build predates the nmod ops");
+  if (!call(e, `{"fn":"nmod_echelon","p":"7","rows":401,"cols":401,"m":"${Array(401).fill(Array(401).fill("0").join(",")).join(";")}"}`).startsWith('{"ok":'))
+    return t.skip("this engine build predates the 1024 x 1024 envelope");
+  // every entry 19 digits, of rank 1 (equal rows): the parse holds
+  // R + 20 E + 8 E and the reply reserves its 20 E bound, and the
+  // elimination is short
+  const row = matrix(1, 1024, P);
+  const req = `{"fn":"nmod_echelon","p":"${P}","rows":1024,"cols":1024,"m":"${Array(1024).fill(row).join(";")}","reduced":true,"want_rows":true}`;
+  const before = e.memory.buffer.byteLength;
+  const reply = call(e, req);
+  const grew = e.memory.buffer.byteLength - before;
+  assert.ok(reply.startsWith('{"ok":{"pivots":"0",'), reply.slice(0, 200));
+  console.log(`nmod_echelon 1024 x 1024 wasm: request ${req.length} bytes, grew ${grew} bytes, ECH_PEAK ${ECH_PEAK}`);
+  assert.ok(grew < ECH_PEAK * 1.25, `grew by ${grew} bytes`);
+});
+
 function isPrime(n: bigint): boolean {
   if (n < 2n) return false;
   for (const q of [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n]) if (n % q === 0n) return n === q;
@@ -240,7 +262,12 @@ test("the nmod ops' caps through the ABI", (t) => {
   assert.match(call(e, ech(1, 1024)), /^\{"ok":/);
   assert.match(call(e, ech(1, 1025)), /rows and cols/);
   assert.match(call(e, ech(400, 401)), /^\{"ok":/);
-  assert.match(call(e, ech(401, 401)), /entries, more than/);
+  // no entry-count cap below the dimensions' (F4): the old cap's first
+  // refusal and the envelope are admitted; a short request claiming 1025
+  // rows is refused by the dimension check
+  assert.match(call(e, ech(401, 401)), /^\{"ok":/);
+  assert.match(call(e, ech(1024, 1024)), /^\{"ok":/);
+  assert.match(call(e, `{"fn":"nmod_echelon","p":"7","rows":1025,"cols":1,"m":"0"}`), /rows and cols/);
   const ones = (n: number) => Array(n).fill("1").join(",");
   for (const [f, cap] of [["mul", 1 << 15], ["divrem", 1 << 15], ["gcd", 1 << 14]] as const) {
     assert.match(call(e, preq(f, 7n, ones(cap), "1,1")), /^\{"ok":/, f);

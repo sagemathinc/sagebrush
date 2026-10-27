@@ -1227,6 +1227,13 @@ def _band_solve(S, B):
 # the most multiply-adds a band solve may take (beyond, the sparse LU)
 MAX_BAND_WORK = 1 << 29
 
+# MASTER'S LU, kept verbatim as an interim (@sagebrush's ruling (d) on M1b,
+# Oct 26 2026): where the capacity record does not cover the js-heap and
+# js-arraybuffer domains (the browser worker today), memory can't be
+# admitted, so the LU path keeps master's fixed caps and behaviour (no
+# column ordering, refused past MAX_LU_FILL or MAX_LU_WORK) rather than
+# refuse everything.  Owner D0; removed when the browser reports a figure
+# for those domains (python's D0 follow-up).
 # the most a sparse LU factorization may hold (nonzeros of L and U together)
 # and do (multiply-adds); a matrix whose factors fill in beyond is refused
 MAX_LU_FILL = 1 << 22
@@ -1275,7 +1282,7 @@ def _too_much_fill(n):
     return _err("Out of memory: the LU factors of this %dx%d sparse matrix fill in too far to solve with it (Sagebrush orders no columns to reduce fill)." % (n, n), "MATLAB:nomem")
 
 
-def _sparse_lu(S):
+def _legacy_lu(S):
     """the LU factorization of a square sparse S, never its full form:
     left-looking, each column by a sparse triangular solve over the steps it
     reaches (as Gilbert and Peierls's; a row in L's column k is pivoted after
@@ -1361,6 +1368,48 @@ def _sparse_lu(S):
     F.lstep = [pinv[r] for r in lrow]
     F.singular = bool(np.any(udiag == 0))
     return F
+
+
+# the capacity module, imported by unmeasured_reason when it first needs it
+# (a test seam: a stand-in may be put here)
+_capacity = None
+
+
+def unmeasured_reason(rec=None):
+    """why this host's capacity record can't admit the LU's memory, or None:
+    no figure, or one that doesn't cover the js-heap and js-arraybuffer
+    domains (Ledger's refusal; _matlab_sparse._sparse_lu then keeps master's
+    LU, @sagebrush's interim ruling (d))"""
+    global _capacity
+    if rec is None and _capacity is None:
+        # (imported at the first solve, not at MATLAB mode's start)
+        import _capacity
+    rec = rec if rec is not None else _capacity.capacity()
+    if rec.get("bytes") is None:
+        return "no memory figure"
+    missing = [d for d in ("js-heap", "js-arraybuffer") if d not in (rec.get("domains") or [])]
+    return "the figure doesn't cover %s" % " or ".join(missing) if missing else None
+
+
+def _sparse_lu(S, q=None):
+    """the LU factorization of a square sparse S, never its full form:
+    left-looking, each column by a sparse triangular solve over the steps it
+    reaches (as Gilbert and Peierls's), its columns in a fill-reducing order
+    (an approximate minimum degree ordering of S'*S, internal), with partial
+    pivoting that keeps the diagonal while it is within a factor of 10 of
+    the largest candidate.  No size or work cap: it reserves its memory
+    before each step, Stop interrupts it, and the opt-in limit
+    matlab.lu_work bounds its work (lib/_matlab_lu.py).  A zero pivot is
+    kept (the solves then give Inf or NaN, as MATLAB's do, with its
+    warning).  q: a column order to use instead (a test seam)"""
+    if q is None and unmeasured_reason() is not None:
+        # (no figure for the JS memory here: master's LU and its caps, _legacy_lu;
+        # checked before _matlab_lu is imported, so the browser doesn't fetch
+        # its chunk, matlab-lu, for a solve that doesn't use it)
+        return _legacy_lu(S)
+    import _matlab_lu
+
+    return _matlab_lu.factor(S, "Solving with this %d-by-%d sparse matrix" % (S.n, S.n), q=q)
 
 
 def mldivide(a, b):

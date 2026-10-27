@@ -12,7 +12,7 @@ static ALLOC: audit::Audit<std::alloc::System> = audit::Audit::new(std::alloc::S
 #[test]
 fn every_allocation_inside_an_entry_is_attributed() {
     // (one test function: the audit's counters are process-wide)
-    set_total(Some(Total { bytes: 1 << 34, status: TotalStatus::Observed, joint: false }));
+    set_total(Some(Total { bytes: 1 << 34, status: TotalStatus::Observed, joint: false, uncertified: false }));
     audit::start(64 << 10);
 
     // covered: a reservation's scope
