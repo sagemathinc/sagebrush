@@ -260,6 +260,7 @@ fn ledger_audit_at(bits: u64) {
     assert_eq!((c, fs), (BigInt::one(), vec![(vec![BigInt::from(-7), q.clone()], 1), (vec![BigInt::from(7), q], 1)]), "{bits} bits");
     assert!(b.debited(Phase::PerfectPower) && !b.debited(Phase::Modular), "{bits} bits: Stage B");
     assert!(a.pp_used > 0 && a.hom_used > 0, "{bits} bits: {a:?}");
+    assert!(a.bisections >= 1 && a.prefilter_rejects == 0, "{bits} bits: a true power must reach the exact search: {a:?}");
     assert!(a.pp_preflight >= a.pp_used, "{bits} bits: perfect-power preflight below its debits: {a:?}");
     assert!(a.hom_preflight >= a.hom_used, "{bits} bits: homogenization preflight below its debits: {a:?}");
     assert_eq!(b.live(), 0);
@@ -367,6 +368,75 @@ fn the_piece_costs_are_charged_for_their_whole_life() {
         assert!(b.debited(Phase::PerfectPower));
         assert_eq!(rep.tag_breaches, 0, "{:?}", rep.first_breach);
         assert!(a.pp_preflight >= a.pp_used && a.hom_preflight >= a.hom_used && a.hom_used > 0, "{a:?}");
+        assert_eq!(b.live(), 0);
+    }
+}
+
+/// The residue prefilter never rejects a true l-th power: r^l for r up to
+/// 3000 (multiples of every witness included) and a few large r, for each
+/// small prime l; and the witnesses are primes p = 1 mod l.
+#[test]
+fn the_residue_prefilter_never_rejects_a_power() {
+    let b = Budget::unlimited();
+    for l in [2u64, 3, 5, 7, 11, 13] {
+        let (w, nw) = residue_witnesses(&b, l).unwrap();
+        let w = &w[..nw];
+        assert_eq!(nw, WITNESSES, "l {l}");
+        assert!(w.iter().all(|&p| is_prime_trial(p) && p % l == 1 && p < 1 << 32), "l {l}: {w:?}");
+        let big = [BigInt::from(12345u32), (BigInt::one() << 300u32) + 7, (BigInt::one() << 2100u32) - 1];
+        for r in (1u32..3000).map(BigInt::from).chain(big) {
+            let n = r.pow(l as u32);
+            assert!(!not_a_power(&b, &n, l, w).unwrap(), "{r}^{l} rejected");
+        }
+    }
+}
+
+/// Exhaustively on small n: whenever the prefilter rejects n, exact_root
+/// finds no l-th root (soundness), and it rejects most non-powers.
+#[test]
+fn the_residue_prefilter_agrees_with_exact_root() {
+    let b = Budget::unlimited();
+    for l in [2u64, 3, 5] {
+        let (w, nw) = residue_witnesses(&b, l).unwrap();
+        let (mut rejected, mut non_powers) = (0, 0);
+        for n in 1u32..20000 {
+            let n = BigInt::from(n);
+            let is_power = exact_root(&b, &n, l).unwrap().is_some();
+            let rej = not_a_power(&b, &n, l, &w[..nw]).unwrap();
+            assert!(!(rej && is_power), "{n} is an {l}-th power but was rejected");
+            non_powers += !is_power as u32;
+            rejected += rej as u32;
+        }
+        assert!(rejected * 10 >= non_powers * 9, "l {l}: only {rejected} of {non_powers} non-powers rejected");
+    }
+}
+
+/// a x^12 - b with a = 2^(bits-1) + 1 and b = a + 2: perf_bench's binom
+/// fixture, a generic non-perfect-power binomial.
+fn binom(bits: u32) -> ZPoly {
+    let a = (BigInt::one() << (bits - 1)) + 1;
+    let mut f = vec![BigInt::zero(); 13];
+    f[0] = -(&a + BigInt::from(2));
+    f[12] = a;
+    f
+}
+
+/// The generic binom4097 fixture (the 89.8x regression of the r3 perf run)
+/// and its larger siblings are rejected by the residue prefilter before any
+/// bisection, with every witness evaluation debited; they then factor as
+/// before (the general path).
+#[test]
+fn a_generic_binomial_is_rejected_before_any_bisection() {
+    for bits in [4097u32, 8192, 16384] {
+        let f = binom(bits);
+        let b = Budget::unlimited();
+        let (r, a) = audit::during(|| try_factor_with(&f, &b));
+        let (c, fs) = r.unwrap();
+        assert_eq!(expand(&c, &fs), f, "{bits} bits");
+        assert_eq!(a.bisections, 0, "{bits} bits: {a:?}");
+        assert!(a.prefilter_rejects >= 1 && a.prefilter_evals >= a.prefilter_rejects, "{bits} bits: {a:?}");
+        assert!(a.pp_used >= a.prefilter_evals * limbs(bits as u64), "{bits} bits: the prefilter's work not debited: {a:?}");
+        assert!(a.pp_preflight >= a.pp_used, "{bits} bits: {a:?}");
         assert_eq!(b.live(), 0);
     }
 }

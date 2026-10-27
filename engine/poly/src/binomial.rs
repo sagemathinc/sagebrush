@@ -137,10 +137,15 @@ pub(crate) mod audit {
         pub pp_used: u64,
         pub hom_preflight: u64,
         pub hom_used: u64,
+        /// the residue prefilter: witnesses evaluated, numbers it proved
+        /// not a power, and the bisections (exact_root calls) still made
+        pub prefilter_evals: u64,
+        pub prefilter_rejects: u64,
+        pub bisections: u64,
     }
 
     thread_local! {
-        static LAST: std::cell::Cell<Audit> = const { std::cell::Cell::new(Audit { pp_preflight: 0, pp_used: 0, hom_preflight: 0, hom_used: 0 }) };
+        static LAST: std::cell::Cell<Audit> = const { std::cell::Cell::new(Audit { pp_preflight: 0, pp_used: 0, hom_preflight: 0, hom_used: 0, prefilter_evals: 0, prefilter_rejects: 0, bisections: 0 }) };
     }
 
     pub fn set(f: impl FnOnce(&mut Audit)) {
@@ -559,6 +564,11 @@ fn plan_powers(bits: u64, m: u64, primes: &[u64]) -> Option<u64> {
         }
         let steps = bits.div_ceil(l - 1).checked_add(v)?.checked_add(1)?;
         u = u.checked_add(steps.checked_mul(2 * clog2(l) + 1)?.checked_mul(lb.checked_mul(lb)?)?)?;
+        // the residue prefilter: its witness search (at most WITNESS_K trial
+        // divisions of p < 2^32, sqrt(p) + 1 units each), then per root
+        // attempt (at most v + 1) WITNESSES evaluations of lb + 66 units
+        u = u.checked_add(WITNESS_K.checked_mul((1 << 16) + 1)?)?;
+        u = u.checked_add(v.checked_add(1)?.checked_mul(WITNESSES as u64)?.checked_mul(lb.checked_add(66)?)?)?;
     }
     u.checked_mul(2)?.checked_add(m.sqrt().checked_mul(2)?)
 }
@@ -589,6 +599,57 @@ fn pow_cmp(b: &Budget, c: &BigInt, l: u64, n: &BigInt) -> FResult<Option<bool>> 
             return Ok(None);
         }
     }
+}
+
+/// The residue prefilter before the bisection (rank-3 PR 5 perf ruling,
+/// daybreak2 option (ii)): for a prime l, witnesses p = k l + 1 < 2^32, k =
+/// 1..=WITNESS_K, at most WITNESSES of them.  Fewer (or none: l large) only
+/// weaken the filter; the exact search still runs, never a refusal.
+const WITNESSES: usize = 8;
+const WITNESS_K: u64 = 64;
+
+fn is_prime_trial(p: u64) -> bool {
+    p >= 2 && (2..).take_while(|d: &u64| d * d <= p).all(|d| p % d != 0)
+}
+
+/// The witness primes for l: one poll and one debit (sqrt(p) + 1 units: the
+/// trial division) per candidate.
+fn residue_witnesses(b: &Budget, l: u64) -> FResult<([u64; WITNESSES], usize)> {
+    let (mut w, mut n) = ([0u64; WITNESSES], 0usize);
+    for k in 1..=WITNESS_K {
+        let Some(p) = l.checked_mul(k).and_then(|x| x.checked_add(1)).filter(|&p| p < 1 << 32) else { break };
+        check();
+        b.debit(Some(p.sqrt() + 1))?;
+        if is_prime_trial(p) {
+            w[n] = p;
+            n += 1;
+            if n == WITNESSES {
+                break;
+            }
+        }
+    }
+    Ok((w, n))
+}
+
+/// Whether n >= 1 is PROVED not an l-th power: some witness p (p = 1 mod l)
+/// has n mod p != 0 and (n mod p)^((p-1)/l) != 1 mod p.  Sound: n = r^l with
+/// p not dividing r gives (n mod p)^((p-1)/l) = r^(p-1) = 1 (Fermat).  false
+/// means "not proved", and the exact search decides.  One poll and one debit
+/// (the reduction's limbs plus the powering) per witness.
+fn not_a_power(b: &Budget, n: &BigInt, l: u64, w: &[u64]) -> FResult<bool> {
+    for &p in w {
+        check();
+        b.debit(limbs(n.bits()).checked_add(2 * clog2(p) + 2))?;
+        #[cfg(test)]
+        audit::set(|a| a.prefilter_evals += 1);
+        let r = n.mod_floor(&BigInt::from(p)).to_u64().unwrap();
+        if r != 0 && powmod_u(r, (p - 1) / l, p) != 1 {
+            #[cfg(test)]
+            audit::set(|a| a.prefilter_rejects += 1);
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The l-th root of n >= 1 when n is an l-th power: bisection over the
@@ -673,6 +734,8 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
         let _s = enter("perfect power S7");
         let (mut u, mut v, mut g) = (u0, v0, 1u64);
         for &l in &primes {
+            let (w, nw) = residue_witnesses(b, l)?;
+            let w = &w[..nw];
             let mut t = m;
             while t % l == 0 {
                 t /= l;
@@ -680,6 +743,12 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
                 if u.is_negative() && l == 2 {
                     break;
                 }
+                // a proved non-power ends the search before any bisection
+                if not_a_power(b, &u.abs(), l, w)? || not_a_power(b, &v, l, w)? {
+                    break;
+                }
+                #[cfg(test)]
+                audit::set(|a| a.bisections += 1);
                 let Some(ru) = exact_root(b, &u.abs(), l)? else { break };
                 let Some(rv) = exact_root(b, &v, l)? else { break };
                 u = if u.is_negative() { -ru } else { ru };
