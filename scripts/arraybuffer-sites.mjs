@@ -458,7 +458,6 @@ export function census(root = ROOT, { commit = null } = {}) {
     }
     // a value that can't be a function, whatever its declared type: a literal, a new of a lib
     // non-function class, or a lib call that makes plain data (Object.create(null), JSON.parse, ...)
-    if (ts.isObjectLiteralExpression(v) || ts.isArrayLiteralExpression(v) || ts.isTemplateExpression(v) || ts.isNoSubstitutionTemplateLiteral(v) || ts.isStringLiteralLike(v) || ts.isNumericLiteral(v)) return;
     if (ts.isCallExpression(v) || ts.isNewExpression(v)) {
       const d = checker.getResolvedSignature(v)?.getDeclaration?.();
       if (d && libFile(d.getSourceFile().fileName) && NOT_A_FUNCTION.test(libMemberName(d) + (ts.isNewExpression(v) ? ".new" : ""))) return;
