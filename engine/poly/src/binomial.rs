@@ -141,13 +141,17 @@ pub(crate) mod audit {
         /// not a power, and the bisections (exact_root calls) still made
         pub proof_preflight: u64,
         pub prefilter_calls: u64,
+        /// fold passes over a coefficient (first and 2^64 + 1), and those
+        /// of the early residue proof alone
+        pub fold_passes: u64,
+        pub proof_folds: u64,
         pub prefilter_evals: u64,
         pub prefilter_rejects: u64,
         pub bisections: u64,
     }
 
     thread_local! {
-        static LAST: std::cell::Cell<Audit> = const { std::cell::Cell::new(Audit { pp_preflight: 0, pp_used: 0, hom_preflight: 0, hom_used: 0, proof_preflight: 0, prefilter_calls: 0, prefilter_evals: 0, prefilter_rejects: 0, bisections: 0 }) };
+        static LAST: std::cell::Cell<Audit> = const { std::cell::Cell::new(Audit { pp_preflight: 0, pp_used: 0, hom_preflight: 0, hom_used: 0, proof_preflight: 0, prefilter_calls: 0, fold_passes: 0, proof_folds: 0, prefilter_evals: 0, prefilter_rejects: 0, bisections: 0 }) };
     }
 
     pub fn set(f: impl FnOnce(&mut Audit)) {
@@ -156,6 +160,10 @@ pub(crate) mod audit {
             f(&mut a);
             c.set(a)
         })
+    }
+
+    pub fn get() -> Audit {
+        LAST.with(|c| c.get())
     }
 
     /// Clear, run, and return what the run recorded.
@@ -710,34 +718,72 @@ fn prefilter_plan(bits: u64, l: u64) -> Option<u64> {
     lb.checked_add(1)?.checked_mul(2)?.checked_add(14 * 130)?.checked_add(trial)?.checked_add(WITNESSES.checked_mul(lb.checked_add(66)?)?)
 }
 
+/// One number's residues for the prefilter, each pass made once: the 2^64 -
+/// 1 and 2^48 - 1 folds (the first pass), and the 2^64 + 1 fold (a second
+/// pass, on first need).  Both passes polled and debited (limbs(n) + 1).
+struct Folds {
+    m64: u64,
+    m48: u64,
+    p64: Option<u128>,
+}
+
+impl Folds {
+    fn of(b: &Budget, n: &BigInt) -> FResult<Folds> {
+        // the first pass
+        check();
+        b.debit(limbs(n.bits()).checked_add(1))?;
+        #[cfg(test)]
+        audit::set(|a| a.fold_passes += 1);
+        let (m64, m48) = fold_minus(n);
+        Ok(Folds { m64, m48, p64: None })
+    }
+
+    fn plus(&mut self, b: &Budget, n: &BigInt) -> FResult<u128> {
+        if let Some(r) = self.p64 {
+            return Ok(r);
+        }
+        // the second pass, once
+        check();
+        b.debit(limbs(n.bits()).checked_add(1))?;
+        #[cfg(test)]
+        audit::set(|a| a.fold_passes += 1);
+        let r = fold_plus(n);
+        self.p64 = Some(r);
+        Ok(r)
+    }
+}
+
 /// Whether n >= 1 is PROVED not an l-th power (false: not proved, and the
-/// exact search decides).  Tier 1 cheapest first: the 2^64 - 1 witnesses
-/// (one u64 fold), then, only if none rejected, the 2^64 + 1 ones (a second
-/// fold; the 46-bit witness last).  Polled; every step debited: each fold
-/// (limbs(n) + 1), each witness's powering (130), each tier-2 candidate's
-/// trial division (sqrt(p) + 1) and reduction (limbs(n) + 66).
+/// exact search decides), with fresh folds of n (the root search's calls;
+/// the early proof reuses one Folds per coefficient for every l).
 fn not_a_power(b: &Budget, n: &BigInt, l: u64) -> FResult<bool> {
+    let mut f = Folds::of(b, n)?;
+    not_a_power_with(b, n, &mut f, l)
+}
+
+/// As not_a_power, from n's folds `f`.  Tier 1 cheapest first: the 2^48 - 1
+/// and 2^64 - 1 witnesses (the first pass), then, only if none rejected, the
+/// 2^64 + 1 ones (the second pass; the 46-bit witness last).  Every step
+/// debited: each witness's powering (130), each tier-2 candidate's trial
+/// division (sqrt(p) + 1) and reduction (limbs(n) + 66).
+fn not_a_power_with(b: &Budget, n: &BigInt, f: &mut Folds, l: u64) -> FResult<bool> {
     check();
-    b.debit(limbs(n.bits()).checked_add(1))?;
     #[cfg(test)]
     audit::set(|a| a.prefilter_calls += 1);
-    let (rm, r48) = fold_minus(n);
     let mut tried = 0u64;
     for &(p, wide) in TIER1.iter().filter(|&&(p, _)| p % l == 1) {
         b.debit(Some(130))?;
         tried += 1;
         #[cfg(test)]
         audit::set(|a| a.prefilter_evals += 1);
-        if witness_rejects(if wide { rm % p } else { r48 % p }, p, l) {
+        if witness_rejects(if wide { f.m64 % p } else { f.m48 % p }, p, l) {
             #[cfg(test)]
             audit::set(|a| a.prefilter_rejects += 1);
             return Ok(true);
         }
     }
     if FOLD_PLUS.iter().any(|&p| p % l == 1) {
-        check();
-        b.debit(limbs(n.bits()).checked_add(1))?;
-        let rp = fold_plus(n);
+        let rp = f.plus(b, n)?;
         for &p in FOLD_PLUS.iter().filter(|&&p| p % l == 1) {
             b.debit(Some(130))?;
             tried += 1;
@@ -862,16 +908,31 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
             #[cfg(test)]
             audit::set(|x| x.proof_preflight = need);
             let _s = enter("residue prefilter S7a");
+            #[cfg(test)]
+            let folds0 = audit::get().fold_passes;
+            // each coefficient folded once, its residues reused for every l
+            let (mut fc, mut fa) = (None::<Folds>, None::<Folds>);
             let mut excluded = true;
             for &l in &primes {
                 if c0.is_positive() && l == 2 {
                     continue;
                 }
-                if !(not_a_power(b, c0, l)? || not_a_power(b, a, l)?) {
+                if fc.is_none() {
+                    fc = Some(Folds::of(b, c0)?);
+                }
+                if not_a_power_with(b, c0, fc.as_mut().unwrap(), l)? {
+                    continue;
+                }
+                if fa.is_none() {
+                    fa = Some(Folds::of(b, a)?);
+                }
+                if !not_a_power_with(b, a, fa.as_mut().unwrap(), l)? {
                     excluded = false;
                     break;
                 }
             }
+            #[cfg(test)]
+            audit::set(|x| x.proof_folds = x.fold_passes - folds0);
             if excluded {
                 #[cfg(test)]
                 audit::set(|x| x.pp_used = pp_start - b.work_left());

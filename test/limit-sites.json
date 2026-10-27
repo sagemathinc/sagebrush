@@ -576,7 +576,19 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/binomial.rs :: not_a_power_with :: fn not_a_power_with(b: &Budget, n: &BigInt, f: &mut Folds, l: u64) -> FResult<bool> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: of :: fn of(b: &Budget, n: &BigInt) -> FResult<Folds> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
  "engine/poly/src/binomial.rs :: phis_certify :: fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q: &BigInt, h: usize, costs: &[PieceCost]) -> FResult<()> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: plus :: fn plus(&mut self, b: &Budget, n: &BigInt) -> FResult<u128> { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
@@ -677,6 +689,10 @@
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/binomial_tests.rs :: the_residue_prefilter_never_rejects_a_power :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_residue_proof_folds_each_coefficient_once :: let b = Budget::unlimited(); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },

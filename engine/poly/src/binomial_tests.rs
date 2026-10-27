@@ -467,11 +467,25 @@ fn a_generic_binomial_is_rejected_before_any_bisection() {
         assert_eq!(expand(&c, &fs), f, "{bits} bits");
         assert_eq!(a.bisections, 0, "{bits} bits: {a:?}");
         assert!(a.prefilter_rejects >= 1 && a.prefilter_evals >= a.prefilter_rejects, "{bits} bits: {a:?}");
-        // each call debits its fold (limbs + 1), each witness at least 130
-        assert!(a.pp_used >= a.prefilter_calls * (limbs(bits as u64) + 1) + a.prefilter_evals * 130, "{bits} bits: the prefilter's work not debited: {a:?}");
+        // each fold pass debits limbs + 1, each witness at least 130
+        assert!(a.pp_used >= a.fold_passes * (limbs(bits as u64) + 1) + a.prefilter_evals * 130, "{bits} bits: the prefilter's work not debited: {a:?}");
         assert!(a.proof_preflight >= a.pp_used && a.pp_preflight == 0, "{bits} bits: the proof alone is admitted: {a:?}");
         assert_eq!(b.live(), 0);
     }
+}
+
+/// The early proof folds each coefficient once and reuses its residues for
+/// every l: q^210 x^210 - p^210 has both coefficients true 210th powers, so
+/// every prime l | 210 consults both, each needing both folds; at most 2
+/// passes per coefficient (4), not one per (coefficient, l).
+#[test]
+fn the_residue_proof_folds_each_coefficient_once() {
+    let f = power_binomial(210, 2, 3);
+    let b = Budget::unlimited();
+    let (r, a) = audit::during(|| stage_b(&b, 210, &f[210], &f[0]).map(|o| o.map(|v| v.len())));
+    assert!(r.unwrap().is_some());
+    assert!((2..=4).contains(&a.proof_folds), "{a:?}");
+    assert_eq!(b.live(), 0);
 }
 
 /// The early proof allocates nothing coefficient-sized: not_a_power streams
