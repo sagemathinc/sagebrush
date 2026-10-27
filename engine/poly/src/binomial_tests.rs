@@ -225,17 +225,76 @@ fn stage_b_against_sage() {
     assert!(b.debited(Phase::Modular));
 }
 
-/// A coefficient above BINOMIAL_MAX_BITS takes today's path (Sage:
-/// (2^2100 x - 1)(2^2100 x + 1)).
+/// A 4200-bit binomial takes Stage B (no bits cap: plan rank 3 r3, 3.8),
+/// with the same answer as before (Sage: (2^2100 x - 1)(2^2100 x + 1)).
 #[test]
-fn above_the_bits_cap_takes_the_general_path() {
+fn a_4200_bit_binomial_takes_stage_b() {
     let big = BigInt::one() << 4200u32;
     let f = vec![-BigInt::one(), BigInt::zero(), big.clone()];
     let b = Budget::default();
     let (c, fs) = try_factor_with(&f, &b).unwrap();
     let h = BigInt::one() << 2100u32;
     assert_eq!((c, fs), (BigInt::one(), vec![(vec![-BigInt::one(), h.clone()], 1), (vec![BigInt::one(), h], 1)]));
-    assert!(!b.debited(Phase::PerfectPower) && b.debited(Phase::Modular));
+    assert!(b.debited(Phase::PerfectPower) && !b.debited(Phase::Modular));
+}
+
+/// q^2 x^2 - 49 with a leading coefficient of exactly `bits` bits:
+/// q = 2^(bits/2) - 1 for even bits, 2^((bits-1)/2) + 1 for odd (7 divides
+/// neither at these sizes: the content is 1).
+fn square_binomial(bits: u64) -> (Vec<BigInt>, BigInt) {
+    let q: BigInt = if bits % 2 == 0 { (BigInt::one() << (bits / 2) as u32) - 1 } else { (BigInt::one() << ((bits - 1) / 2) as u32) + 1 };
+    let a: BigInt = &q * &q;
+    assert_eq!(a.bits(), bits);
+    (vec![BigInt::from(-49), BigInt::zero(), a], q)
+}
+
+/// Stage B's executable ledger at a size: the factors (q x - 7)(q x + 7),
+/// and each section's preflight at least the units it actually debited
+/// (the perfect-power search, then the build and certificate), for one
+/// call on an unlimited budget.
+fn ledger_audit_at(bits: u64) {
+    let (f, q) = square_binomial(bits);
+    let b = Budget::unlimited();
+    let (r, a) = audit::during(|| try_factor_with(&f, &b));
+    let (c, fs) = r.unwrap();
+    assert_eq!((c, fs), (BigInt::one(), vec![(vec![BigInt::from(-7), q.clone()], 1), (vec![BigInt::from(7), q], 1)]), "{bits} bits");
+    assert!(b.debited(Phase::PerfectPower) && !b.debited(Phase::Modular), "{bits} bits: Stage B");
+    assert!(a.pp_used > 0 && a.hom_used > 0, "{bits} bits: {a:?}");
+    assert!(a.pp_preflight >= a.pp_used, "{bits} bits: perfect-power preflight below its debits: {a:?}");
+    assert!(a.hom_preflight >= a.hom_used, "{bits} bits: homogenization preflight below its debits: {a:?}");
+    assert_eq!(b.live(), 0);
+    eprintln!("ledger audit at {bits} bits: {a:?}");
+}
+
+#[test]
+fn the_stage_b_ledger_holds_at_2_12_and_2_12_plus_1_bits() {
+    ledger_audit_at(1 << 12);
+    ledger_audit_at((1 << 12) + 1);
+}
+
+#[test]
+fn the_stage_b_ledger_holds_at_2_16_bits() {
+    ledger_audit_at(1 << 16);
+}
+
+/// 2^20 bits: the root search is cubic in the size, so this row runs on the
+/// VM (`cargo test --release -- --ignored`).
+#[test]
+#[ignore]
+fn vm_the_stage_b_ledger_holds_at_2_20_bits() {
+    ledger_audit_at(1 << 20);
+}
+
+/// The ledger's arithmetic is checked: a size whose costs overflow u64 is
+/// None (a refusal), never a wrapped, smaller figure.
+#[test]
+fn the_piece_ledger_overflow_is_none() {
+    assert!(piece_cost(1 << 40, 64, 1 << 30, 1).is_none());
+    assert!(piece_cost(u64::MAX, 1, 1, 1).is_none());
+    assert!(piece_cost(1, 1, 1, u64::MAX).is_none());
+    assert!(plan_powers(u64::MAX, 2, &[2]).is_none());
+    let k = piece_cost(4, 3, 4096, 1).unwrap();
+    assert_eq!((k.fb, k.bh, k.len), (16384, 16388, 5));
 }
 
 /// Exact roots: powers and non-powers, signs, the quick rejections.

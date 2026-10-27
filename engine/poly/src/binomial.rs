@@ -15,8 +15,8 @@
 //! to be the true one by the chain identity (F4) (by induction on r, from
 //! Phi_1 = x - 1), the outputs by a positional certificate, and the index
 //! set by its distinctness, membership and total degree.  Stage B (|a| !=
-//! |b|, both of at most BINOMIAL_MAX_BITS bits): -b/a = (p/q)^g for the
-//! largest g | m, by exact roots; then the pieces H_d = Phi_d(q x^h, p),
+//! |b|, of any size: plan rank 3 r3, 3.8): -b/a = (p/q)^g for the largest
+//! g | m, by exact roots; then the pieces H_d = Phi_d(q x^h, p),
 //! h = m/g, each proved coefficient by coefficient against the verified
 //! Phi_d; for h = 1 they are irreducible, else they go through the general
 //! square-free path with the same budget.
@@ -29,10 +29,6 @@
 use super::*;
 use num_integer::Roots;
 use sagebrush_interrupt::{check, enter};
-
-/// Stage B runs only when both coefficients have at most this many bits;
-/// above it today's general path runs (not a refusal).  Plan r3, 3.2.
-pub(crate) const BINOMIAL_MAX_BITS: u64 = 4096;
 
 /// The factors of f (primitive, positive leading coefficient, degree >= 1)
 /// with their multiplicities, when f = x^k (a x^m + b) is a binomial this
@@ -65,13 +61,11 @@ pub(crate) fn factor<'b>(b: &'b Budget, f: &[BigInt]) -> FResult<Option<Vec<(Hel
     let (a, c0) = (&f[top], &f[k]);
     let pieces = if a.is_one() && c0.abs().is_one() {
         stage_a(b, m, c0.is_positive())?
-    } else if a.bits() <= BINOMIAL_MAX_BITS && c0.bits() <= BINOMIAL_MAX_BITS {
+    } else {
         match stage_b(b, m, a, c0)? {
             Some(p) => p,
             None => return Ok(None),
         }
-    } else {
-        return Ok(None);
     };
     let mut out: Vec<(Held<'b>, u32)> = pieces.into_iter().map(|h| (h, 1)).collect();
     if k > 0 {
@@ -131,6 +125,39 @@ pub(crate) mod fault {
 }
 
 use fault::is as fault;
+
+/// Stage B's executable-ledger audit (plan rank 3 r3, 3.8): each preflight
+/// next to the units its section actually debited, from the last call on
+/// this thread.
+#[cfg(test)]
+pub(crate) mod audit {
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct Audit {
+        pub pp_preflight: u64,
+        pub pp_used: u64,
+        pub hom_preflight: u64,
+        pub hom_used: u64,
+    }
+
+    thread_local! {
+        static LAST: std::cell::Cell<Audit> = const { std::cell::Cell::new(Audit { pp_preflight: 0, pp_used: 0, hom_preflight: 0, hom_used: 0 }) };
+    }
+
+    pub fn set(f: impl FnOnce(&mut Audit)) {
+        LAST.with(|c| {
+            let mut a = c.get();
+            f(&mut a);
+            c.set(a)
+        })
+    }
+
+    /// Clear, run, and return what the run recorded.
+    pub fn during<T>(run: impl FnOnce() -> T) -> (T, Audit) {
+        LAST.with(|c| c.set(Audit::default()));
+        let r = run();
+        (r, LAST.with(|c| c.get()))
+    }
+}
 
 // ------------------------------------------------------------------ small integers
 
@@ -545,7 +572,7 @@ fn pow_cmp(b: &Budget, c: &BigInt, l: u64, n: &BigInt) -> FResult<Option<bool>> 
     let mut e = l;
     loop {
         if e & 1 == 1 {
-            b.debit(Some(limbs(result.bits()) * limbs(base.bits())))?;
+            b.debit(limbs(result.bits()).checked_mul(limbs(base.bits())))?;
             result *= &base;
             if &result > n {
                 return Ok(None);
@@ -555,7 +582,7 @@ fn pow_cmp(b: &Budget, c: &BigInt, l: u64, n: &BigInt) -> FResult<Option<bool>> 
         if e == 0 {
             return Ok(Some(&result == n));
         }
-        b.debit(Some(limbs(base.bits()) * limbs(base.bits())))?;
+        b.debit(limbs(base.bits()).checked_mul(limbs(base.bits())))?;
         base = &base * &base;
         if &base > n {
             // the remaining factors are at least base
@@ -587,10 +614,49 @@ fn exact_root(b: &Budget, n: &BigInt, l: u64) -> FResult<Option<BigInt>> {
     Ok(if exact { Some(t) } else { None })
 }
 
+/// One piece's sizes and unit costs (plan r3, 4.4), every one in checked
+/// arithmetic: the ledger sums them, and the build and the certificate
+/// debit exactly these (a coefficient's c_i is at most the piece's c bits).
+/// None on overflow, which is a refusal, never a wrap (plan rank 3 r3, 3.8).
+struct PieceCost {
+    /// phi(d) beta: the bits of p^phi
+    fb: u64,
+    /// the bits of a piece coefficient: c + fb + 1
+    bh: u64,
+    /// the piece's length, phi h + 1
+    len: u64,
+    /// p^phi by square-and-multiply
+    pw: u64,
+    /// one coefficient of the build
+    build: u64,
+    /// one coefficient of the certificate
+    cert: u64,
+}
+
+fn piece_cost(ph: u64, c: u64, beta: u64, h: u64) -> Option<PieceCost> {
+    let fb = ph.checked_mul(beta)?;
+    let bh = c.checked_add(fb)?.checked_add(1)?;
+    let len = ph.checked_mul(h)?.checked_add(1)?;
+    let (lb, lfb) = (limbs(beta), limbs(fb));
+    let pw = clog2(ph.checked_add(1)?).checked_mul(2)?.checked_mul(lfb.checked_mul(lfb)?)?;
+    let build = limbs(c).checked_add(lb.checked_mul(3)?)?.checked_mul(limbs(bh))?;
+    let cert = [lb.checked_mul(2)?.checked_mul(lfb)?, limbs(bh).checked_mul(lfb)?, limbs(c).checked_mul(lfb)?, limbs(c.checked_add(fb)?).checked_mul(lfb)?, limbs(fb.checked_mul(2)?.checked_add(c)?.checked_add(1)?)]
+        .into_iter()
+        .try_fold(0u64, |s, x| s.checked_add(x))?;
+    Some(PieceCost { fb, bh, len, pw, build, cert })
+}
+
+/// phi(d) as a power's exponent; above u32 a refusal (never a truncation).
+fn phi_exp(b: &Budget, ph: usize) -> FResult<u32> {
+    u32::try_from(ph).map_err(|_| b.refuse("work (overflow)", u64::MAX, b.work_left()))
+}
+
 /// a x^m + b with |a| != |b|: the pieces Phi_d(q x^h, p), proved, either
 /// final (h = 1) or factored by the general path (h > 1); None when g = 1.
 fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option<Vec<Held<'b>>>> {
     // the perfect-power search: the original a, b are not modified
+    #[cfg(test)]
+    let pp_start = b.work_left();
     let (g, p, q) = {
         let _p = b.enter(Phase::PerfectPower);
         let (u0, v0) = (-c0.clone(), a.clone());
@@ -600,6 +666,8 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
         if need > b.work_left() {
             return Err(b.refuse("work", need, b.work_left()));
         }
+        #[cfg(test)]
+        audit::set(|a| a.pp_preflight = need);
         let _r = b.reserve(big_bytes(bits.checked_mul(2).and_then(|x| x.checked_add(64)).unwrap_or(u64::MAX)).and_then(|x| x.checked_mul(4)?.checked_add(big_bytes(bits)?.checked_mul(2)?)))?;
         let _s = enter("perfect power S7");
         let (mut u, mut v, mut g) = (u0, v0, 1u64);
@@ -620,6 +688,8 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
         }
         (g, u, v)
     };
+    #[cfg(test)]
+    audit::set(|a| a.pp_used = pp_start - b.work_left());
     if g == 1 {
         return Ok(None);
     }
@@ -630,32 +700,33 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
     let _p = b.enter(Phase::Homogenize);
     let beta = p.bits().max(q.bits());
     // the ledger: build and certificate (plan r3, 4.4), from the actual Phi_d
-    let ledger = || -> Option<(u64, Vec<u64>, u64)> {
+    let ledger = || -> Option<(u64, Vec<u64>, u64, Vec<PieceCost>)> {
         // (the build's scratch and the certificate's, both reserved: plan
         // r3, 4.4)
-        let (mut work, mut out, mut build, mut cert) = (0u64, vec![], 0u64, 0u64);
+        let (mut work, mut out, mut build, mut cert, mut costs) = (0u64, vec![], 0u64, 0u64, vec![]);
         for (_, f) in &phis {
             let ph = (f.len() - 1) as u64;
             let c = maxbits(f);
-            let fb = ph.checked_mul(beta)?;
-            let bh = c.checked_add(fb)?.checked_add(1)?;
-            let pw = (2 * clog2(ph + 1)).checked_mul(limbs(fb).checked_mul(limbs(fb))?)?;
+            let k = piece_cost(ph, c, beta, h as u64)?;
             // build: p^phi, then per coefficient
-            work = work.checked_add(pw)?.checked_add((ph + 1).checked_mul((limbs(c) + 3 * limbs(beta)).checked_mul(limbs(bh))?)?)?;
-            // certificate: p^phi, then per coefficient, then the zero scan
-            let per = 2 * limbs(beta) * limbs(fb) + limbs(bh) * limbs(fb) + limbs(c) * limbs(fb) + limbs(c.checked_add(fb)?) * limbs(fb) + limbs(fb.checked_mul(2)?.checked_add(c)?.checked_add(1)?);
-            let len = ph.checked_mul(h as u64)?.checked_add(1)?;
-            work = work.checked_add(pw)?.checked_add((ph + 1).checked_mul(per)?)?.checked_add(len)?;
-            out.push(poly_bytes(len, bh)?);
-            build = build.max(big_bytes(fb.checked_add(c)?.checked_add(64)?)?.checked_mul(3)?);
-            cert = cert.max(big_bytes(fb.checked_mul(2)?.checked_add(c)?.checked_add(64)?)?.checked_mul(6)?);
+            work = work.checked_add(k.pw)?.checked_add(ph.checked_add(1)?.checked_mul(k.build)?)?;
+            // certificate: the zero scan, p^phi, then per coefficient
+            work = work.checked_add(k.pw)?.checked_add(ph.checked_add(1)?.checked_mul(k.cert)?)?.checked_add(k.len)?;
+            out.push(poly_bytes(k.len, k.bh)?);
+            build = build.max(big_bytes(k.fb.checked_add(c)?.checked_add(64)?)?.checked_mul(3)?);
+            cert = cert.max(big_bytes(k.fb.checked_mul(2)?.checked_add(c)?.checked_add(64)?)?.checked_mul(6)?);
+            costs.push(k);
         }
-        Some((work, out, build.checked_add(cert)?))
+        Some((work, out, build.checked_add(cert)?, costs))
     };
-    let (work, out_bytes, scratch) = ledger().ok_or_else(|| b.refuse("work (overflow)", u64::MAX, b.work_left()))?;
+    let (work, out_bytes, scratch, costs) = ledger().ok_or_else(|| b.refuse("work (overflow)", u64::MAX, b.work_left()))?;
     if work > b.work_left() {
         return Err(b.refuse("work", work, b.work_left()));
     }
+    #[cfg(test)]
+    let hom_start = b.work_left();
+    #[cfg(test)]
+    audit::set(|a| a.hom_preflight = work);
     let _sr = b.reserve(Some(scratch))?;
     let mut out_r = Vec::with_capacity(out_bytes.len());
     for &x in &out_bytes {
@@ -667,14 +738,12 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
     for (i, (_, f)) in phis.iter().enumerate() {
         let _s = enter("homogenize S8");
         let ph = f.len() - 1;
-        let c = maxbits(f);
-        let fb = ph as u64 * beta;
-        let bh = c + fb + 1;
-        b.debit(Some(2 * clog2(ph as u64 + 1) * limbs(fb) * limbs(fb)))?;
-        let mut t = p.pow(ph as u32);
-        let mut v = vec![BigInt::zero(); ph * h + 1];
+        let k = &costs[i];
+        b.debit(Some(k.pw))?;
+        let mut t = p.pow(phi_exp(b, ph)?);
+        let mut v = vec![BigInt::zero(); k.len as usize];
         for (j, cj) in f.iter().enumerate() {
-            b.debit(Some((limbs(c) + 3 * limbs(beta)) * limbs(bh)))?;
+            b.debit(Some(k.build))?;
             v[j * h] = cj * &t;
             if j < ph {
                 t = &t / &p * &q;
@@ -688,7 +757,9 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
         }
         pieces.push(Held { v, _r: out_r[i].take().unwrap() });
     }
-    phis_certify(b, &phis, &pieces, &p, &q, h, beta)?;
+    phis_certify(b, &phis, &pieces, &p, &q, h, &costs)?;
+    #[cfg(test)]
+    audit::set(|a| a.hom_used = hom_start - b.work_left());
     drop(phis);
     if h == 1 {
         return Ok(Some(pieces));
@@ -708,16 +779,12 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
 /// zero, and eta_i p^i = c_i q^i p^phi for every i, with P_i = p^i and
 /// Q_i = q^i ascending (independent of the build's descending T).  As p !=
 /// 0 this forces H_d = Phi_d(q x^h, p) exactly.
-fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q: &BigInt, h: usize, beta: u64) -> FResult<()> {
+fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q: &BigInt, h: usize, costs: &[PieceCost]) -> FResult<()> {
     let _s = enter("homogenize S10 certificate");
-    for ((_, f), piece) in phis.iter().zip(pieces) {
+    for (((_, f), piece), k) in phis.iter().zip(pieces).zip(costs) {
         let ph = f.len() - 1;
-        let c = maxbits(f);
-        let fb = ph as u64 * beta;
-        let bh = c + fb + 1;
-        let len = ph * h + 1;
-        b.debit(Some(len as u64))?;
-        if piece.len() != len {
+        b.debit(Some(k.len))?;
+        if piece.len() as u64 != k.len {
             return Err(failed(b, "binomial verification"));
         }
         for (t, x) in piece.iter().enumerate() {
@@ -728,12 +795,11 @@ fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q
                 return Err(failed(b, "binomial verification"));
             }
         }
-        b.debit(Some(2 * clog2(ph as u64 + 1) * limbs(fb) * limbs(fb)))?;
-        let pphi = p.pow(ph as u32);
+        b.debit(Some(k.pw))?;
+        let pphi = p.pow(phi_exp(b, ph)?);
         let (mut pi, mut qi) = (BigInt::one(), BigInt::one());
-        let per = 2 * limbs(beta) * limbs(fb) + limbs(bh) * limbs(fb) + limbs(c) * limbs(fb) + limbs(c + fb) * limbs(fb) + limbs(2 * fb + c + 1);
         for (i, ci) in f.iter().enumerate() {
-            b.debit(Some(per))?;
+            b.debit(Some(k.cert))?;
             let lhs = &piece[i * h] * &pi;
             let rhs = ci * &qi * &pphi;
             if lhs != rhs {
