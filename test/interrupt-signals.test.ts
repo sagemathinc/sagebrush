@@ -173,8 +173,10 @@ test("r3 S1: S4 validates its request evidence before 'returned without a Keyboa
   for (const sends of [[{ t: null }, { t: 4000 }], [{ t: 1000, error: "Error: kill ESRCH" }, { t: 4000 }], [{ t: "1000" }, { t: 4000 }], [{ t: -1 }, { t: 4000 }], [{ t: 1000 }, { t: NaN }], [{ t: 1000 }]]) {
     assert.deepEqual(chain("S4", { ...ret, sends }), ["INVALID", "INCOMPLETE", true], JSON.stringify(sends));
   }
-  // (press 2 legitimately absent: the program ended before 3.5 s after ENTER)
-  assert.deepEqual(chain("S4", { ...base, sends: [{ t: 1000 }], marks: [ENTER, m("KI 1", 1100), m("END", 1101)], exit: { code: 0, signal: null, t: 1200 } }), ["PASS", "FIXED", true]);
+  // (press 2 not sent because the program ended before 3.5 s after ENTER: runProc records it cancelled; no record at all is
+  // lost evidence, r5 C1)
+  assert.deepEqual(chain("S4", { ...base, sends: [{ t: 1000 }, { act: "press", cancelled: "the run finished before it was due", due: 4000, at: 3300 }], marks: [ENTER, m("KI 1", 1100), m("END", 1101)], exit: { code: 0, signal: null, t: 1200 } }), ["PASS", "FIXED", true]);
+  assert.equal(judge("S4", { ...base, sends: [{ t: 1000 }], marks: [ENTER, m("KI 1", 1100), m("END", 1101)], exit: { code: 0, signal: null, t: 1200 } }).outcome, "INVALID");
   // (press 2 failed ESRCH only after the exit: legitimate; before it: malformed)
   const early = { ...base, marks: [ENTER, m("KI 1", 1100), m("END", 1101)], exit: { code: 0, signal: null, t: 1200 } };
   assert.equal(chain("S4", { ...early, sends: [{ t: 1000 }, { t: 4000, error: "Error: kill ESRCH" }] })[0], "PASS");
@@ -319,6 +321,47 @@ test("r4 N2: the prompt's S1 gates its KeyboardInterrupt endpoint before the pro
   assert.deepEqual(chain("S1", pr(1251, true), "prompt"), ["FAIL", "FAIL", true]);
   assert.deepEqual(chain("S1", pr(null, false), "prompt"), ["INVALID", "INCOMPLETE", true]); // KI text, no stamp: malformed
   assert.equal(judge("S1", pr(1300, false), "prompt").late, true);
+});
+
+// ---- #225 r5 (astra2 r4 C1): one disjoint validation of a cancelled record before S3 or S4 consumes it
+test("r5 C1: S4 never pins KNOWN on a malformed or causally impossible cancelled press 2; RET alone proves no exit", () => {
+  const ret = { ...base, marks: [ENTER, m("RET 1", 7000)], exit: { code: 0, signal: null, t: 7100 } };
+  assert.deepEqual(chain("S4", { ...ret, sends: [{ t: 1000 }, { t: 4000 }] }), ["FAIL", "KNOWN", false]); // (control: the pin)
+  const c = (extra: object) => ({ act: "press", cancelled: "the run finished before it was due", due: 4000, ...extra });
+  const shapes: [string, object][] = [
+    ["at missing", c({})], ["at null", c({ at: null })], ["at string", c({ at: "7150" })], ["at negative", c({ at: -1 })],
+    ["at before the exit", c({ at: 7050 })], ["due before the exit", c({ at: 7150 })], // (exit 7100 > due 4000)
+    ["no reason", { act: "press", cancelled: "", due: 8000, at: 7150 }], ["not a press", { act: "probe", cancelled: "x", due: 8000, at: 7150 }],
+    ["cancelled + a send's t + EPERM", { act: "press", cancelled: "x", due: 8000, at: 7150, t: 7120, error: "Error: kill EPERM" }],
+  ];
+  for (const [what, s1] of shapes) {
+    assert.deepEqual(chain("S4", { ...ret, sends: [{ t: 1000 }, s1] }), ["INVALID", "INCOMPLETE", true], what);
+    // (a malformed record is rejected by the shape check itself, a well-formed one by its causal order: each by name)
+    const why = judge("S4", { ...ret, sends: [{ t: 1000 }, s1] }).why;
+    assert.match(why, /before (the exit|it)/.test(what) ? /without the program's exit before it/ : /press 2's cancelled record: /, what + ": " + why);
+  }
+  // (a RET with no exit at all: a cancelled press 2 can't be justified by the RET alone)
+  assert.equal(judge("S4", { ...base, marks: [ENTER, m("RET 1", 7000)], exit: null, sends: [{ t: 1000 }, c({ due: 8000, at: 7150 })] }).outcome, "INVALID");
+  // (valid shapes keep their outcomes: cancelled after the actual exit -> judged as before)
+  assert.equal(judge("S4", { ...base, sends: [{ t: 1000 }, c({ due: 4000, at: 3300 })], marks: [ENTER, m("KI 1", 1100), m("END", 1101)], exit: { code: 0, signal: null, t: 1200 } }).outcome, "PASS");
+});
+
+test("r5 C1: S3's cancelled press 2 is validated before the honoured path: mixed with a send's t or error, or malformed, it never PASSes", () => {
+  const ex = { exit: { code: null, signal: "SIGINT", t: 1010 } };
+  const s3 = (s1: object, host = "cli") => judge("S3", { ...base, sends: [{ act: "press", t: 1000 }, s1], ...ex }, host);
+  const good = { act: "press", cancelled: "the run finished before it was due", due: 1500, at: 1220 };
+  assert.equal(s3(good).outcome, "PASS"); // (control: the producer's honoured record)
+  for (const [what, s1] of [["+ t + EPERM", { ...good, t: 1500, error: "Error: kill EPERM" }], ["+ t", { ...good, t: 1500 }], ["+ ESRCH", { ...good, error: "Error: kill ESRCH" }],
+    ["no reason", { ...good, cancelled: "" }], ["not a press", { ...good, act: "probe" }], ["at string", { ...good, at: "1220" }], ["due null", { ...good, due: null }]] as [string, object][]) {
+    const r = s3(s1);
+    assert.deepEqual([r.outcome, r.malformed], ["INVALID", true], what);
+    assert.match(r.why, /press 2's cancelled record: /, what + ": " + r.why);
+  }
+  // (and a malformed cancelled press 1 with a RET isn't the genuine pre-send INVALID)
+  const p1 = judge("S3", { ...base, sends: [{ act: "press", cancelled: "x", due: 1000 }], marks: [m("RET 1", 900)] });
+  assert.deepEqual([p1.outcome, p1.malformed], ["INVALID", true]);
+  const g1 = judge("S3", { ...base, sends: [{ act: "press", cancelled: "x", due: 1000, at: 950 }], marks: [m("RET 1", 900)] });
+  assert.deepEqual([g1.outcome, g1.malformed, g1.why], ["INVALID", undefined, "the regex returned before the presses"]);
 });
 
 test("baseline: S3 cli's entry pins only 'first Stop not honoured' (anchored); S4 cli's stays 'returned without a KeyboardInterrupt'", () => {
