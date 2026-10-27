@@ -428,6 +428,40 @@ if hasattr(_native, "_test_guarded"):
     _stand_in(_raising(OSError("unreadable")))
     _got = _outcome(lambda: _native._test_guarded("panic"))
     check("an ordinary failure of the source is unreadable: the body's panic is what raises", (_got[0], type(_got[1]).__name__), ("raised", "PanicException"))
+    # C-2c-i hot path (scope r3): the outer entry always refreshes a stale
+    # total (guarded's own locked total(), whatever the wrapper's refresh does)
+    _exc = SystemExit()
+    _stand_in(_raising(_exc))
+    _t2.sleep(0.15)
+    check("the outer entry refreshes a stale total: the source's SystemExit is delivered", _raised(_outcome(lambda: _native._test_guarded("ok")), _exc), True)
+    # astra2's two-owner schedule: owner A refreshes at entry; owner B, on
+    # another thread, publishes Unreadable (the total is None); A's nested
+    # wrapper entry on A's own thread, with no admission after it, asks A's
+    # source, whose KeyboardInterrupt A raises, once; B gets nothing of A's
+    _excA, _askedA = KeyboardInterrupt(), []
+
+    def _two_owner_source():
+        who = threading.current_thread().name
+        if who == "A":
+            _askedA.append(1)
+            if len(_askedA) == 1:
+                return _good
+            raise _excA
+        raise OSError("B's source is unreadable")
+
+    _stand_in(_two_owner_source)
+    _t2.sleep(0.15)
+    _out = {}
+    _ta = threading.Thread(target=lambda: _out.__setitem__("A", _outcome(lambda: _native._test_guarded("nested"))), name="A")
+    _tb = threading.Thread(target=lambda: (_t2.sleep(0.11), _out.__setitem__("B", _outcome(lambda: _native._test_guarded("ok")))), name="B")
+    _ta.start()
+    _tb.start()
+    _ta.join(20)
+    _tb.join(20)
+    check("two owners: A's nested entry asked A's source after B's Unreadable, and A raises its KeyboardInterrupt", _raised(_out.get("A", ("missing",)), _excA), True)
+    check("two owners: A's source ran exactly twice (entry, nested entry); B got nothing of A's", (len(_askedA), _out.get("B")), (2, ("returned", 1)))
+    _stand_in(lambda: _good)
+    check("two owners: A's exception is not delivered again", _outcome(lambda: _native._test_guarded("ok")), ("returned", 1))
 else:
     print("test_capacity: the _test_guarded rows need a test-hooks build (skipped)")
 
