@@ -215,6 +215,14 @@ function hasStringTimer(checker, n) {
 // sink too (a supplement to the capability rule, for untyped values)
 const SINK_NAMES = new Set(["eval", "Function", "runInThisContext", "runInContext", "runInNewContext", "compileFunction", "importScripts", "Script", "evaluate"]);
 
+// the members implicit invocations run, by protocol (a member's name as declared)
+export const PROTOCOL = {
+  coerce: /^(valueOf|toString|\[Symbol\.toPrimitive\])$/,
+  iterate: /^(\[Symbol\.(iterator|asyncIterator)\]|next|return|throw)$/,
+  await: /^then$/,
+  json: /^toJSON$/,
+};
+
 // the host's own modules (Node's builtins), which require() may name
 const HOST_MODULE = /^(node:)?(fs|os|path|crypto|zlib|util|url|child_process|worker_threads|v8|perf_hooks|module|process|buffer|events|stream|tty|readline|assert)$/;
 
@@ -357,7 +365,8 @@ export function census(root = ROOT, { commit = null } = {}) {
   const checker = program.getTypeChecker();
   const files = program.getSourceFiles().filter(isSourceFile);
   const records = [];
-  // the reference graph, by declaration fingerprint: {file, name, fp, refs, libs, implicit}
+  // the reference graph, by declaration fingerprint: {file, name, fp, refs, irefs, libs}
+  // (refs: resolved references; irefs: the implicit-invocation and by-name accessor edges)
   const decls = new Map();
   const libs = new Map(); // lib member key -> {calls, kinds, fnParam}
   const classes = new Map(); // class fp -> {node, base: fp | lib key | null, ctor: fp | null, methods: Map<name, fp>}
@@ -373,9 +382,146 @@ export function census(root = ROOT, { commit = null } = {}) {
   const declOf = (node) => {
     const id = idOf(node);
     let e = decls.get(id.fp);
-    if (!e) decls.set(id.fp, (e = { ...id, refs: new Set(), libs: new Set(), implicit: false }));
+    if (!e) decls.set(id.fp, (e = { ...id, refs: new Set(), irefs: new Set(), libs: new Set() }));
     return e;
   };
+  // the protocol members and accessors scanned code declares, and who may run them
+  const protocol = { coerce: new Set(), iterate: new Set(), await: new Set(), json: new Set() };
+  const accessorsByName = new Map();
+  const allAccessors = new Set();
+  const uses = new Map(); // decl fp -> {kinds: Set, names: Set, all: boolean}
+  const useOf = (encNode) => {
+    const fp = declOf(encNode).fp;
+    let u = uses.get(fp);
+    if (!u) uses.set(fp, (u = { kinds: new Set(), names: new Set(), all: false, members: [], classes: [] }));
+    return u;
+  };
+  const registerMember = (n) => {
+    if (!isFunctionLike(n) || !n.name) return;
+    const sf = n.getSourceFile();
+    const name = ts.isComputedPropertyName(n.name) ? "[" + n.name.expression.getText(sf) + "]" : n.name.getText(sf);
+    if (ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n)) {
+      const fp = declOf(n).fp;
+      (accessorsByName.get(name) ?? accessorsByName.set(name, new Set()).get(name)).add(fp);
+      allAccessors.add(fp);
+      return;
+    }
+    if (!ts.isMethodDeclaration(n) && !ts.isFunctionExpression(n) && !ts.isArrowFunction(n)) return;
+    for (const [k, re] of Object.entries(PROTOCOL)) if (re.test(name)) protocol[k].add(declOf(n).fp);
+  };
+  // may a value of this type be an object (whose members scanned code may define)?
+  const nonPrim = (t, depth = 0) => {
+    if (!t || depth > 8) return true;
+    const f = t.flags;
+    if (f & (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.NonPrimitive | ts.TypeFlags.Object)) return true;
+    if (f & ts.TypeFlags.Instantiable) {
+      const c = checker.getBaseConstraintOfType(t);
+      return !c || c === t || nonPrim(c, depth + 1);
+    }
+    if (f & ts.TypeFlags.UnionOrIntersection) return t.types.some((u) => nonPrim(u, depth + 1));
+    return false;
+  };
+  const np = (e) => !!e && nonPrim(checker.getTypeAtLocation(e));
+  const COERCE_BIN = new Set([ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken, ts.SyntaxKind.AsteriskToken, ts.SyntaxKind.SlashToken, ts.SyntaxKind.PercentToken, ts.SyntaxKind.AsteriskAsteriskToken,
+    ts.SyntaxKind.AmpersandToken, ts.SyntaxKind.BarToken, ts.SyntaxKind.CaretToken, ts.SyntaxKind.LessThanLessThanToken, ts.SyntaxKind.GreaterThanGreaterThanToken, ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken,
+    ts.SyntaxKind.LessThanToken, ts.SyntaxKind.GreaterThanToken, ts.SyntaxKind.LessThanEqualsToken, ts.SyntaxKind.GreaterThanEqualsToken, ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken,
+    ts.SyntaxKind.PlusEqualsToken, ts.SyntaxKind.MinusEqualsToken, ts.SyntaxKind.AsteriskEqualsToken, ts.SyntaxKind.SlashEqualsToken, ts.SyntaxKind.PercentEqualsToken, ts.SyntaxKind.AsteriskAsteriskEqualsToken,
+    ts.SyntaxKind.AmpersandEqualsToken, ts.SyntaxKind.BarEqualsToken, ts.SyntaxKind.CaretEqualsToken, ts.SyntaxKind.LessThanLessThanEqualsToken, ts.SyntaxKind.GreaterThanGreaterThanEqualsToken,
+    ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken]);
+  const COERCE_UNARY = new Set([ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken, ts.SyntaxKind.TildeToken, ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken]);
+  const keyName = (e) => (e && (ts.isStringLiteralLike(e) || ts.isNumericLiteral(e)) ? e.text : null);
+  const inAsync = (n) => {
+    for (let p = n.parent; p; p = p.parent) if (isFunctionLike(p)) return !!(ts.getCombinedModifierFlags(p) & ts.ModifierFlags.Async);
+    return false;
+  };
+  const implicitUses = (n, encNode) => {
+    if (ts.isPartOfTypeNode(n)) return;
+    const mark = (k) => useOf(encNode).kinds.add(k);
+    // coercion
+    if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) && COERCE_UNARY.has(n.operator) && np(n.operand)) mark("coerce");
+    if (ts.isBinaryExpression(n) && COERCE_BIN.has(n.operatorToken.kind) && (np(n.left) || np(n.right))) mark("coerce");
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.InKeyword && np(n.left)) mark("coerce");
+    if (ts.isTemplateSpan(n) && !ts.isTaggedTemplateExpression(n.parent.parent) && np(n.expression)) mark("coerce");
+    if (ts.isElementAccessExpression(n) && keyName(n.argumentExpression) === null && np(n.argumentExpression)) mark("coerce");
+    // iteration
+    if (ts.isForOfStatement(n) && np(n.expression)) (mark("iterate"), n.awaitModifier && mark("await"));
+    if (ts.isSpreadElement(n) && np(n.expression)) mark("iterate");
+    if (ts.isArrayBindingPattern(n) && nonPrim(checker.getTypeAtLocation(n))) mark("iterate");
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isArrayLiteralExpression(n.left) && np(n.right)) mark("iterate");
+    if (ts.isYieldExpression(n) && n.asteriskToken && np(n.expression)) mark("iterate");
+    // awaiting
+    if (ts.isAwaitExpression(n) && np(n.expression)) mark("await");
+    if (ts.isReturnStatement(n) && n.expression && inAsync(n) && np(n.expression)) mark("await");
+    // lib calls: what their parameters do with a non-primitive argument
+    if ((ts.isCallExpression(n) || ts.isNewExpression(n)) && n.expression.kind !== ts.SyntaxKind.ImportKeyword) {
+      const sig = checker.getResolvedSignature(n);
+      const d = sig?.getDeclaration?.();
+      if (d && libFile(d.getSourceFile().fileName)) {
+        const member = libMemberName(d);
+        if (member === "JSON.stringify") (mark("json"), (useOf(encNode).all = true));
+        // a promise resolves a thenable it's given, or its callbacks return, by calling its then
+        if (/^Promise(Constructor)?\./.test(member) && (n.arguments ?? []).some((a) => np(a) || isFunctionLike(skipParens(a)))) mark("await");
+        if (/^(ObjectConstructor|Reflect)\./.test(member) || /^(apply|construct|get|set|ownKeys|has|defineProperty)$/.test(member) && libFile(d.getSourceFile().fileName).includes("reflect")) {
+          if ((n.arguments ?? []).some((a) => np(a))) useOf(encNode).all = true;
+        }
+        const ps = sig.getParameters();
+        (n.arguments ?? []).forEach((a, i) => {
+          const p = ps[Math.min(i, ps.length - 1)];
+          if (!p || !np(a)) return;
+          const pt = checker.getTypeOfSymbolAtLocation(p, n);
+          const names = [pt, ...(pt.isUnion?.() ? pt.types : [])].map((u) => u.getSymbol?.()?.getName() ?? u.aliasSymbol?.getName() ?? "");
+          if (!nonPrim(pt) || pt.flags & ts.TypeFlags.Any) mark("coerce");
+          if (names.some((x) => /^(Iterable|AsyncIterable|IterableIterator|ArrayLike)$/.test(x))) mark("iterate");
+        });
+      }
+    }
+    // accessors: a typed receiver reaches the property it resolves to (its accessors, and a
+    // subclass's same-named accessor overriding it); an untyped one, or a property its type
+    // can't resolve, every scanned accessor of that name; a key it can't name, the accessors
+    // of the receiver's class and its subclasses (or, untyped, every accessor)
+    const untyped = (t) => !t || t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown) || (t.flags & ts.TypeFlags.Instantiable && nonPrim(t) && !checker.getBaseConstraintOfType(t));
+    const classOf = (t) => {
+      const sy = t?.getSymbol?.();
+      const cd = sy?.valueDeclaration ?? sy?.declarations?.[0];
+      return cd && (ts.isClassDeclaration(cd) || ts.isClassExpression(cd)) && isSourceFile(cd.getSourceFile()) ? idOf(cd).fp : null;
+    };
+    const access = (recvT, name, sym) => {
+      const u = useOf(encNode);
+      if (name === null) {
+        const cls = untyped(recvT) ? null : classOf(checker.getApparentType(recvT));
+        if (cls) u.classes.push(cls);
+        else u.all = true;
+        return;
+      }
+      if (untyped(recvT) || !sym) return u.names.add(name);
+      for (const d of sym.declarations ?? []) {
+        if ((ts.isGetAccessorDeclaration(d) || ts.isSetAccessorDeclaration(d)) && isSourceFile(d.getSourceFile())) declOf(encNode).refs.add(declOf(d).fp);
+        const owner = d.parent && (ts.isClassDeclaration(d.parent) || ts.isClassExpression(d.parent)) && isSourceFile(d.getSourceFile()) ? idOf(d.parent).fp : null;
+        if (owner) u.members.push([owner, name]);
+      }
+    };
+    if (ts.isPropertyAccessExpression(n)) access(checker.getTypeAtLocation(n.expression), n.name.text, checker.getSymbolAtLocation(n.name));
+    if (ts.isElementAccessExpression(n)) {
+      const k = keyName(n.argumentExpression);
+      access(checker.getTypeAtLocation(n.expression), k, k === null ? null : checker.getSymbolAtLocation(n));
+    }
+    if (ts.isBindingElement(n) && ts.isObjectBindingPattern(n.parent)) {
+      const pn = n.propertyName ?? n.name;
+      const k = ts.isIdentifier(pn) ? pn.text : ts.isComputedPropertyName(pn) ? keyName(pn.expression) : keyName(pn);
+      const src = checker.getTypeAtLocation(n.parent);
+      access(src, k, k === null || untyped(src) ? null : checker.getPropertyOfType(checker.getApparentType(src), k));
+      if (n.dotDotDotToken) access(src, null, null);
+    }
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isObjectLiteralExpression(n.left)) {
+      const src = checker.getTypeAtLocation(n.right);
+      for (const pr of n.left.properties) {
+        const k = ts.isShorthandPropertyAssignment(pr) ? pr.name.text : ts.isPropertyAssignment(pr) ? (ts.isIdentifier(pr.name) ? pr.name.text : ts.isComputedPropertyName(pr.name) ? keyName(pr.name.expression) : keyName(pr.name)) : null;
+        access(src, k, k === null || untyped(src) ? null : checker.getPropertyOfType(checker.getApparentType(src), k));
+      }
+    }
+    if (ts.isSpreadAssignment(n)) access(checker.getTypeAtLocation(n.expression), null, null);
+  };
+
   // a scanned declaration a symbol's declaration stands for: a function-like
   // node, a class, or null
   const refTarget = (d) => {
@@ -445,6 +591,7 @@ export function census(root = ROOT, { commit = null } = {}) {
     };
     const visit = (n) => {
       const encNode = enclosing(n, sf);
+      registerMember(n);
       if (ts.isClassDeclaration(n) || ts.isClassExpression(n)) {
         const id = declOf(n);
         const info = { base: null, ctor: null, methods: new Map(), node: n };
@@ -582,12 +729,13 @@ export function census(root = ROOT, { commit = null } = {}) {
           curKey = null;
         }
       }
-      // implicit invocations: iteration, spreading, destructuring, coercion and awaiting run
-      // methods no call site names (the derivation's over-approximation, section 5)
-      if (ts.isForOfStatement(n) || ts.isSpreadElement(n) || ts.isSpreadAssignment(n) || ts.isArrayBindingPattern(n) || ts.isYieldExpression(n) && n.asteriskToken || ts.isAwaitExpression(n) ||
-        ts.isTemplateSpan(n) || ts.isTaggedTemplateExpression(n) || (ts.isBinaryExpression(n) && [ts.SyntaxKind.PlusToken, ts.SyntaxKind.PlusEqualsToken, ts.SyntaxKind.LessThanToken, ts.SyntaxKind.GreaterThanToken, ts.SyntaxKind.LessThanEqualsToken, ts.SyntaxKind.GreaterThanEqualsToken, ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken, ts.SyntaxKind.MinusToken, ts.SyntaxKind.AsteriskToken, ts.SyntaxKind.SlashToken, ts.SyntaxKind.InKeyword].includes(n.operatorToken.kind))) {
-        declOf(encNode).implicit = true;
-      }
+      // implicit invocations (section 5; astra2 C2): an operation that runs a member no call
+      // site names, when an operand isn't primitive, is an edge to every scanned member of
+      // that protocol: coercion (valueOf, toString, [Symbol.toPrimitive]), iteration
+      // ([Symbol.iterator], [Symbol.asyncIterator], next, return, throw), awaiting (then) and
+      // JSON (toJSON); and a property read or write by name (or by a key it can't name) is
+      // an edge to the scanned accessors of that name (or to every accessor) (astra2 C1)
+      implicitUses(n, encNode);
       // the reference graph: every reference to a scanned declaration, called or as a
       // value; a type position runs no code, and is no edge
       if ((ts.isIdentifier(n) || ts.isPrivateIdentifier(n)) && !ts.isPartOfTypeNode(n)) {
@@ -624,6 +772,19 @@ export function census(root = ROOT, { commit = null } = {}) {
     }
   }
   for (const r of records) allSites.set(r.key, r.kind);
+  // the implicit-invocation and accessor edges (every member and class is known now)
+  const accessorsOf = (cfp) => [...(classes.get(cfp)?.methods ?? [])].filter(([k]) => /^(get|set) /.test(k)).map(([, v]) => v);
+  for (const [fp, u] of uses) {
+    const d = decls.get(fp);
+    for (const k of u.kinds) for (const t of protocol[k]) d.irefs.add(t);
+    if (u.all) for (const t of allAccessors) d.irefs.add(t);
+    for (const nm of u.names) for (const t of accessorsByName.get(nm) ?? []) d.irefs.add(t);
+    for (const cfp of u.classes) for (const c of [cfp, ...descendants(cfp)]) for (const t of accessorsOf(c)) d.irefs.add(t);
+    for (const [cfp, nm] of u.members) for (const c of descendants(cfp)) for (const pre of ["get ", "set "]) {
+      const t = classes.get(c)?.methods.get(pre + nm);
+      if (t) d.irefs.add(t);
+    }
+  }
   records.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   const byKind = {};
   for (const r of records) {
@@ -641,7 +802,7 @@ export function census(root = ROOT, { commit = null } = {}) {
     by_kind: Object.fromEntries(Object.entries(byKind).sort()),
   };
   const programFiles = program.getSourceFiles().filter((s) => !s.fileName.includes(`${sep}node_modules${sep}`)).map((s) => relOf(root, s));
-  return { header, records, decls, libs, classes, allSites, spans, programFiles, files: files.map((s) => relOf(root, s)) };
+  return { header, records, decls, libs, classes, allSites, spans, programFiles, protocol, accessors: allAccessors, files: files.map((s) => relOf(root, s)) };
 }
 
 // the declaration a site belongs to: the nearest named function-like ancestor,
@@ -672,7 +833,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log("delegating by target:", by((r) => (r.kind === "delegating" ? r.target.dynamic : "-")));
     console.log("sinks:", c.records.filter((r) => r.kind === "code-sink").map((r) => `${r.file}:${r.line} ${r.capability} ${r.origin}`));
     if (process.argv.includes("--libs")) for (const [k, v] of [...c.libs].sort()) console.log("LIB", k, JSON.stringify(v));
-    console.log("classes", c.classes.size, "implicit decls", [...c.decls.values()].filter((d) => d.implicit).length);
+    console.log("classes", c.classes.size, "protocol members", Object.values(c.protocol).reduce((n, x) => n + x.size, 0), "accessors", c.accessors.size);
     console.log(`${c.decls.size} declarations; ${Date.now() - t0} ms; ${Math.round(process.memoryUsage().rss / 1e6)} MB`);
   }
 }

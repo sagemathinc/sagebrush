@@ -378,6 +378,104 @@ export function viaGetter(l: Lazy): any { return l.v; }
   assert.ok(G.classify(c2, t2, {}).problems.some((p: any) => p.problem === "stale" && p.key === r2.key));
 });
 
+// the derivation's verdict for named declarations of a fixture: may each make a new store?
+function mayAlloc(files: Record<string, string>, names: string[]): Record<string, boolean> {
+  const c = fixture(files);
+  const libs = Object.fromEntries([...c.libs.keys()].map((k) => [k, { class: /ArrayConstructor\.new|ArrayBufferConstructor/.test(k) && !/^lib:lib\.es5\.d\.ts :: ArrayConstructor/.test(k) ? "allocates" : "no-new-store", reason: "fixture" }]));
+  const d = G.derive(c, { lib: libs, sites: {}, deltas: [], derived: {} });
+  const out: Record<string, boolean> = {};
+  for (const n of names) {
+    const x = [...c.decls.values()].find((v: any) => v.name === n);
+    assert.ok(x, `declaration ${n}`);
+    out[n] = d.why.has(x.fp);
+  }
+  return out;
+}
+
+test("accessors reached by element access, destructuring and untyped receivers are edges (astra2 C1)", () => {
+  const r = mayAlloc({
+    "src/runtime/acc.ts": `
+export class Maker {
+  x: any = null;
+  get bytes(): any { return new Uint8Array(8); }
+  set sink(v: any) { this.x = new Uint8Array(4); }
+  get plain(): number { return 1; }
+}
+export function getBracket(m: Maker): any { return m["bytes"]; }
+export function getIt(m: Maker): any { return getBracket(m); }
+export function setBracket(m: Maker): void { m["sink"] = 1; }
+export function setDot(m: Maker): void { m.sink = 1; }
+export function computed(m: Maker, k: string): any { return (m as any)[k]; }
+export function destructure(m: Maker): any { let { bytes } = m; return bytes; }
+export function untyped(o: any): any { return o.bytes; }
+export function plainOnly(m: Maker): any { return m["plain"]; }
+export class B0 { x: any = 0; }
+export class B1 extends B0 { get x(): any { return new Uint8Array(1); } }
+export function viaField(b: B0): any { return b.x; }
+export function typedComputed(m: Maker, k: string): any { return m[k as "plain"]; }
+export function unrelated(o: { bytes: number }): any { return o.bytes; }
+export function assignPat(m: Maker): any { let b; ({ bytes: b } = m); return b; }
+export function objSpread(o: any): any { return { ...o }; }
+export function oassign(o: any): any { return Object.assign({}, o); }
+export function jsonAll(o: any): string { return JSON.stringify(o); }
+`,
+  }, ["getBracket", "getIt", "setBracket", "setDot", "computed", "destructure", "untyped", "plainOnly", "viaField", "typedComputed", "unrelated", "assignPat", "objSpread", "oassign", "jsonAll"]);
+  assert.deepEqual(r, { getBracket: true, getIt: true, setBracket: true, setDot: true, computed: true, destructure: true, untyped: true, plainOnly: false, viaField: true, typedComputed: true, unrelated: false, assignPat: true, objSpread: true, oassign: true, jsonAll: true });
+});
+
+test("implicit invocations: JSON, coercions, iteration and awaiting reach the scanned members they run (astra2 C2)", () => {
+  const r = mayAlloc({
+    "src/runtime/imp.ts": `
+export class J { toJSON(): any { return new Uint8Array(2); } }
+export class V { valueOf(): number { const b = new Uint8Array(1); return b.length; } }
+export class S { toString(): string { return String(new Uint8Array(1).length); } }
+export class P { [Symbol.toPrimitive](): number { return new Uint8Array(1).length; } }
+export class It { *[Symbol.iterator]() { yield new Uint8Array(1); } }
+export class Th { then(f: any) { f(new Uint8Array(1)); } }
+export function json(x: any): string { return JSON.stringify(x); }
+export function unaryPlus(x: object): number { return +x; }
+export function unaryMinus(x: object): number { return -(x as any); }
+export function bitNot(x: object): number { return ~(x as any); }
+export function bitOr(x: object): number { return (x as any) | 0; }
+export function shift(x: object): number { return (x as any) << 1; }
+export function rel(x: object, y: object): boolean { return x < y; }
+export function plusStr(x: object): string { return "" + x; }
+export function tmpl(x: object): string { return \`\${x}\`; }
+export function strCall(x: object): string { return String(x); }
+export function inc(x: any): any { x++; return x; }
+export function key(o: any, x: object): any { return o[x as any]; }
+export function forOf(x: any): number { let n = 0; for (const _ of x) n++; return n; }
+export function spread(x: any): any[] { return [...x]; }
+export function arrDestr(x: any): any { const [a] = x; return a; }
+export async function aw(x: any): Promise<any> { return await x; }
+export function arrAssign(x: any): any { let a; [a] = x; return a; }
+export function inOp(x: object, o: object): boolean { return (x as any) in o; }
+export async function awaitOnly(x: any): Promise<number> { const y = await x; return y === 1 ? 1 : 0; }
+export function* ystar(x: any) { yield* x; }
+export async function asyncRet(x: any): Promise<any> { return x; }
+export function arrFrom(x: object): any[] { return Array.from(x as Iterable<any>); }
+export function pres(x: object): Promise<any> { return Promise.resolve(x); }
+export function numbers(a: number, b: number): number { return +a + (b | 0) + -a; }
+export function strings(a: string): string { return \`\${a}\` + a; }
+`,
+  }, ["json", "unaryPlus", "unaryMinus", "bitNot", "bitOr", "shift", "rel", "plusStr", "tmpl", "strCall", "inc", "key", "forOf", "spread", "arrDestr", "aw", "arrAssign", "inOp", "awaitOnly", "ystar", "asyncRet", "arrFrom", "pres", "numbers", "strings"]);
+  const want: Record<string, boolean> = {};
+  for (const k of Object.keys(r)) want[k] = !["numbers", "strings"].includes(k);
+  assert.deepEqual(r, want);
+});
+
+test("for await awaits each value: an edge to every scanned then, apart from iteration (astra2 C2)", () => {
+  const r = mayAlloc({
+    "src/runtime/fa.ts": `
+export class Th { then(f: any) { f(new Uint8Array(1)); } }
+export class It { *[Symbol.iterator]() { yield 1; } }
+export async function forAwait(x: any): Promise<number> { let n = 0; for await (const _ of x) n++; return n; }
+export function forPlain(x: any): number { let n = 0; for (const _ of x) n++; return n; }
+`,
+  }, ["forAwait", "forPlain"]);
+  assert.deepEqual(r, { forAwait: true, forPlain: false });
+});
+
 test("E1.1: typescript-api is named only by the gate's script and its test; it has no install scripts", () => {
   const out = execFileSync("git", ["grep", "-l", "typescript-api", "--", ":!pnpm-lock.yaml", ":!package.json"], { cwd: ROOT, encoding: "utf8" }).trim().split("\n").sort();
   assert.deepEqual(out, ["scripts/arraybuffer-sites.mjs", "test/arraybuffer-sites.test.ts"]);

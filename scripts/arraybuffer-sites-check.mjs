@@ -51,8 +51,8 @@ export const EDGE_KINDS = [
   "a class to its constructor and to its base class (a lib base: that lib member)",
   "a class's field initializers (their sites belong to the class)",
   "a method to every same-named member of its subclasses (overrides; an abstract member to its implementations)",
-  "a getter or setter, by the reference its property access resolves to",
-  "implicit invocations (iteration, coercion, await, JSON) to iterator, toString, valueOf, then and toJSON members, if any of those may allocate",
+  "a getter or setter, by the reference its property access resolves to; and by NAME: a property read or write (dot, literal element key, destructuring, assignment pattern) reaches every scanned accessor of that name, and a key it can't name (a computed key, object spread, JSON.stringify, an Object.* or Reflect.* call with a non-primitive argument) every scanned accessor",
+  "implicit invocations, when an operand may be an object: coercion (unary + - ~ ++ --, arithmetic, bitwise, relational, loose equality and compound assignment, in, untagged template spans, a computed key, a lib parameter of primitive type) to every scanned valueOf, toString and [Symbol.toPrimitive]; iteration (for-of, spread, array destructuring, yield*, a lib Iterable/ArrayLike parameter) to every scanned [Symbol.iterator], [Symbol.asyncIterator], next, return, throw; awaiting (await, an async return, for await, a Promise or PromiseConstructor lib call given an object or a callback) to every scanned then; JSON.stringify to every scanned toJSON",
 ];
 const canon = (o) => JSON.stringify(Object.fromEntries(Object.entries(o ?? {}).sort((a, b) => (a[0] < b[0] ? -1 : 1))));
 export const seeds = (t) => ({ lib: sha(canon(t.lib)), sites: sha(canon(t.sites)), lib_entries: Object.keys(t.lib ?? {}).length, site_entries: Object.keys(t.sites ?? {}).length, derived: sha(canon(t.derived)), derived_entries: Object.keys(t.derived ?? {}).length });
@@ -70,9 +70,8 @@ export function readTable(root = ROOT) {
 // or reads is `allocates`, a record in its body has a site entry of class
 // `allocates` or `unproved-generated` (a code sink), or a declaration or class
 // it references may allocate.  Dynamic targets are excluded (they are
-// delegating records of their own).  Implicit invocations: if any scanned
-// declaration an implicit invocation can reach may allocate, every declaration
-// with implicit-invocation syntax references all of them.
+// delegating records of their own).  Implicit invocations and accessors are
+// edges the census adds by protocol and by name (EDGE_KINDS).
 export function derive(c, table) {
   const libClass = (k) => table.lib?.[k]?.class;
   const siteClass = new Map();
@@ -97,7 +96,7 @@ export function derive(c, table) {
   }
   const rev = new Map(); // fp -> the declarations that reference it
   const addEdge = (from, to) => (rev.get(to) ?? rev.set(to, new Set()).get(to)).add(from);
-  for (const [fp, d] of byFp) for (const t of d.refs) addEdge(fp, t);
+  for (const [fp, d] of byFp) for (const t of [...d.refs, ...(d.irefs ?? [])]) addEdge(fp, t);
   const run = () => {
     const work = [...why.keys()];
     while (work.length) {
@@ -111,15 +110,9 @@ export function derive(c, table) {
     }
   };
   run();
-  const implicitTargets = [...byFp.values()].filter((d) => IMPLICIT_NAME.test(d.name)).map((d) => d.fp);
+  // (implicit invocations and accessors are edges of the census's own, by protocol)
+  const implicitTargets = Object.values(c.protocol ?? {}).flatMap((x) => [...x]);
   const implicitAlloc = implicitTargets.filter((fp) => why.has(fp));
-  if (implicitAlloc.length) {
-    for (const [fp, d] of byFp) if (d.implicit) for (const t of implicitAlloc) addEdge(fp, t);
-    for (const [fp, d] of byFp) if (d.implicit && !why.has(fp)) {
-      why.set(fp, "implicit:" + implicitAlloc[0]);
-    }
-    run();
-  }
   return { why, implicitTargets, implicitAlloc };
 }
 
@@ -214,8 +207,11 @@ export function classify(c, table, derived) {
 // in pyparse/src or a lib member (rules 1 and 2: the closure is closed; a
 // reference outside fails the rule).  A dynamic edge (rule 2) fails the rule
 // for its own site: that site is a delegating or code-sink record, classified
-// by itself, never by the group (returned as `excluded`).  Typed store sites
-// stay classified one by one (rule 3), like any record.
+// by itself, never by the group (returned as `excluded`); so does an implicit
+// edge outside pyparse/src (a protocol member or accessor reached by an
+// untyped operand: unproved, so that declaration leaves the group, and the
+// derivation counts the edge).  Typed store sites stay classified one by one
+// (rule 3), like any record.
 export function pyparseRule(c) {
   const problems = [];
   const excluded = [];
@@ -229,6 +225,10 @@ export function pyparseRule(c) {
     for (const t of d.refs) {
       const x = c.decls.get(t);
       if (x && !inP(x.file)) problems.push({ problem: "pyparse", key: `${d.file} :: ${d.name}`, detail: `references ${x.file} :: ${x.name}, outside pyparse/src` });
+    }
+    for (const t of d.irefs ?? []) {
+      const x = c.decls.get(t);
+      if (x && !inP(x.file)) excluded.push(`${d.file} :: ${d.name} (implicit -> ${x.file} :: ${x.name})`);
     }
   }
   return { problems, excluded };
