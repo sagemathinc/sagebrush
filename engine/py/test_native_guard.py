@@ -35,7 +35,7 @@ def bombard(body, seconds=BOMB_S):
     hits = 0
     t0 = time.monotonic()
     try:
-        while time.monotonic() - t0 < seconds:
+        while True:
             try:
                 armed[0] = True
                 while time.monotonic() - t0 < seconds:
@@ -43,6 +43,8 @@ def bombard(body, seconds=BOMB_S):
                     # (a KeyboardInterrupt swallowed where Python ignores
                     # exceptions, a weakref callback's say: armed again)
                     armed[0] = True
+                armed[0] = False
+                break
             except KeyboardInterrupt:
                 armed[0] = False
                 hits += 1
@@ -50,6 +52,8 @@ def bombard(body, seconds=BOMB_S):
     finally:
         armed[0] = False
         signal.setitimer(signal.ITIMER_REAL, 0)
+        # (an alarm still pending is absorbed before the old handler is back)
+        signal.signal(signal.SIGALRM, signal.SIG_IGN)
         signal.signal(signal.SIGALRM, prev)
 
 
