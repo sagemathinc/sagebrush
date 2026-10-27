@@ -35,19 +35,25 @@ def bombard(body, check, seconds=BOMB_S):
     signal.setitimer(signal.ITIMER_REAL, 0.00005, 0.00005)
     hits = 0
     t0 = time.monotonic()
+
+    # (the bombarded loop in a frame of its own: on CPython 3.13 and 3.14 a
+    # KeyboardInterrupt raised at a loop's backward jump can skip the
+    # enclosing try blocks of that frame (python/cpython#130279), but it
+    # still reaches the caller, whose try covers the single call)
+    def spin():
+        armed[0] = True
+        while time.monotonic() - t0 < seconds:
+            body()
+            # (a KeyboardInterrupt swallowed where Python ignores exceptions,
+            # a weakref callback's say: armed again)
+            armed[0] = True
+        armed[0] = False
     try:
         while time.monotonic() - t0 < seconds:
             try:
-                try:
-                    armed[0] = True
-                    while time.monotonic() - t0 < seconds:
-                        body()
-                        # (a KeyboardInterrupt swallowed where Python ignores
-                        # exceptions, a weakref callback's say: armed again)
-                        armed[0] = True
-                finally:
-                    armed[0] = False
+                spin()
             except KeyboardInterrupt:
+                armed[0] = False
                 hits += 1
                 check()
     finally:
