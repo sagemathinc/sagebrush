@@ -22,6 +22,10 @@ fn stop_at_every_site() {
     let stage_a = xn(5040, -1);
     let mut stage_b = xn(12, -81);
     stage_b[12] = BigInt::from(16);
+    // many pieces: 2^5040 x^5040 - 3^5040 (60 of them)
+    let mut many = xn(5040, 0);
+    many[0] = -BigInt::from(3u32).pow(5040u32);
+    many[5040] = BigInt::from(2u32).pow(5040u32);
     let cases: Vec<(&Vec<BigInt>, &str)> = vec![
         (&stage_a, "binomial S1 scan"),
         (&stage_a, "binomial S2 enumeration"),
@@ -34,6 +38,9 @@ fn stop_at_every_site() {
         (&stage_b, "homogenize S8"),
         (&stage_b, "homogenize S9 pieces"),
         (&stage_b, "homogenize S10 certificate"),
+        (&many, "perfect power S7"),
+        (&many, "homogenize S8"),
+        (&many, "homogenize S10 certificate"),
     ];
     sagebrush_interrupt::clear();
     for (f, site) in cases {

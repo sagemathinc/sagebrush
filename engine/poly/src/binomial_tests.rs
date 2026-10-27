@@ -293,8 +293,82 @@ fn the_piece_ledger_overflow_is_none() {
     assert!(piece_cost(u64::MAX, 1, 1, 1).is_none());
     assert!(piece_cost(1, 1, 1, u64::MAX).is_none());
     assert!(plan_powers(u64::MAX, 2, &[2]).is_none());
+}
+
+/// Every PieceCost field against an independent scalar oracle (astra2's
+/// values for (4, 3, 4096, 1); the second by hand): a term dropped inside
+/// piece_cost changes the preflight and the debits together, which the
+/// preflight >= used audit cannot see, but this can.
+#[test]
+fn the_piece_costs_match_an_independent_oracle() {
     let k = piece_cost(4, 3, 4096, 1).unwrap();
-    assert_eq!((k.fb, k.bh, k.len), (16384, 16388, 5));
+    assert_eq!((k.fb, k.bh, k.len, k.pw, k.build, k.cert), (16384, 16388, 5, 393216, 49601, 165121));
+    // ph 2, c 1, beta 64, h 2: fb 128 (2 limbs), bh 130 (3 limbs), len 5;
+    // pw = 2 clog2(3) 2^2 = 16; build = (1 + 3) 3 = 12;
+    // cert = 2*1*2 + 3*2 + 1*2 + limbs(129)*2 + limbs(257) = 4 + 6 + 2 + 6 + 5
+    let k = piece_cost(2, 1, 64, 2).unwrap();
+    assert_eq!((k.fb, k.bh, k.len, k.pw, k.build, k.cert), (128, 130, 5, 16, 12, 23));
+}
+
+/// p^phi has no u32 cutoff on the Stage B route (plan rank 3 r3, 3.6): an
+/// exponent above u32::MAX is computed, never refused or narrowed.
+#[test]
+fn the_piece_power_has_no_u32_cutoff() {
+    let e = u32::MAX as u64 + 1;
+    assert_eq!(phi_power(&BigInt::one(), e), BigInt::one());
+    assert_eq!(phi_power(&-BigInt::one(), e + 1), -BigInt::one());
+    assert_eq!(phi_power(&BigInt::from(3), 5), BigInt::from(243));
+}
+
+/// The product of a factorization, multiplicities included.
+fn expand(c: &BigInt, fs: &[(ZPoly, u32)]) -> ZPoly {
+    let mut acc = vec![c.clone()];
+    for (f, e) in fs {
+        for _ in 0..*e {
+            let mut r = vec![BigInt::zero(); acc.len() + f.len() - 1];
+            for (i, x) in acc.iter().enumerate() {
+                for (j, y) in f.iter().enumerate() {
+                    r[i + j] += x * y;
+                }
+            }
+            acc = r;
+        }
+    }
+    acc
+}
+
+/// a x^m - b with a = q^m, b = p^m: Stage B with g = m.
+fn power_binomial(m: usize, q: u32, p: u32) -> ZPoly {
+    let mut f = vec![BigInt::zero(); m + 1];
+    f[0] = -BigInt::from(p).pow(m as u32);
+    f[m] = BigInt::from(q).pow(m as u32);
+    f
+}
+
+/// The piece costs' metadata (CORR-R3-BIN5-1) is charged before it is
+/// allocated and for its whole life: under the allocation audit, the
+/// "piece costs" tag never holds more than its reservation, on many pieces
+/// (2^5040 x^5040 - 3^5040: 60 pieces, h = 1) and on a heterogeneous g with
+/// h > 1 (64 x^12 - 729: g = 6, 4 pieces through the general path); both
+/// ledgers hold, the factorization multiplies back, nothing stays reserved.
+#[test]
+fn the_piece_costs_are_charged_for_their_whole_life() {
+    let mut h2 = vec![BigInt::zero(); 13];
+    h2[0] = BigInt::from(-729);
+    h2[12] = BigInt::from(64);
+    for (f, pieces) in [(power_binomial(5040, 2, 3), Some(60usize)), (h2, None)] {
+        let b = Budget::default();
+        let ((r, a), rep) = crate::alloc_spy::audit(|| audit::during(|| try_factor_with(&f, &b)));
+        let (c, fs) = r.unwrap();
+        assert_eq!(expand(&c, &fs), f);
+        if let Some(n) = pieces {
+            assert_eq!(fs.len(), n);
+        }
+        assert!(b.debited(Phase::PerfectPower));
+        assert_eq!(rep.tag_breaches, 0, "{:?}", rep.first_breach);
+        assert!(a.pp_preflight >= a.pp_used && a.hom_preflight >= a.hom_used && a.hom_used > 0, "{a:?}");
+        assert_eq!(b.live(), 0);
+    }
 }
 
 /// Exact roots: powers and non-powers, signs, the quick rejections.
@@ -482,7 +556,7 @@ fn preflights_refuse_before_allocating() {
 fn live_memory_stays_within_the_budget() {
     let mut f16 = xn(12, -81);
     f16[12] = BigInt::from(16);
-    for input in [xn(5040, -1), xn(9240, 1), f16, xn(8, -16)] {
+    for input in [xn(5040, -1), xn(9240, 1), f16, xn(8, -16), power_binomial(5040, 2, 3)] {
         let mut limit: u64 = 1 << 10;
         while limit <= 64 << 20 {
             let b = Budget::new(Limits { memory: limit, ..Limits::DEFAULT });

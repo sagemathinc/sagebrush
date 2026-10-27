@@ -646,9 +646,10 @@ fn piece_cost(ph: u64, c: u64, beta: u64, h: u64) -> Option<PieceCost> {
     Some(PieceCost { fb, bh, len, pw, build, cert })
 }
 
-/// phi(d) as a power's exponent; above u32 a refusal (never a truncation).
-fn phi_exp(b: &Budget, ph: usize) -> FResult<u32> {
-    u32::try_from(ph).map_err(|_| b.refuse("work (overflow)", u64::MAX, b.work_left()))
+/// p^phi for any u64 exponent: no u32 cutoff (plan rank 3 r3, 3.6); its
+/// work and room are the piece's, preflighted and reserved by the caller.
+fn phi_power(p: &BigInt, ph: u64) -> BigInt {
+    pow_u64(p, ph, 32)
 }
 
 /// a x^m + b with |a| != |b|: the pieces Phi_d(q x^h, p), proved, either
@@ -700,10 +701,18 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
     let _p = b.enter(Phase::Homogenize);
     let beta = p.bits().max(q.bits());
     // the ledger: build and certificate (plan r3, 4.4), from the actual Phi_d
+    // the ledger's per-piece costs, one PieceCost per Phi_d at a known
+    // capacity: reserved before they are allocated and held until the
+    // certificate ends (CORR-R3-BIN5-1)
+    let costs_r = b.reserve_as("piece costs", (phis.len() as u64).checked_mul(std::mem::size_of::<PieceCost>() as u64))?;
     let ledger = || -> Option<(u64, Vec<u64>, u64, Vec<PieceCost>)> {
         // (the build's scratch and the certificate's, both reserved: plan
         // r3, 4.4)
-        let (mut work, mut out, mut build, mut cert, mut costs) = (0u64, vec![], 0u64, 0u64, vec![]);
+        let mut costs = {
+            let _t = crate::budget::tag("piece costs");
+            Vec::with_capacity(phis.len())
+        };
+        let (mut work, mut out, mut build, mut cert) = (0u64, vec![], 0u64, 0u64);
         for (_, f) in &phis {
             let ph = (f.len() - 1) as u64;
             let c = maxbits(f);
@@ -740,8 +749,11 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
         let ph = f.len() - 1;
         let k = &costs[i];
         b.debit(Some(k.pw))?;
-        let mut t = p.pow(phi_exp(b, ph)?);
-        let mut v = vec![BigInt::zero(); k.len as usize];
+        let mut t = phi_power(&p, ph as u64);
+        // (the length's room is reserved: a size beyond the address space
+        // is refused, never narrowed)
+        let len = usize::try_from(k.len).map_err(|_| b.refuse("memory (overflow)", u64::MAX, 0))?;
+        let mut v = vec![BigInt::zero(); len];
         for (j, cj) in f.iter().enumerate() {
             b.debit(Some(k.build))?;
             v[j * h] = cj * &t;
@@ -760,6 +772,8 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
     phis_certify(b, &phis, &pieces, &p, &q, h, &costs)?;
     #[cfg(test)]
     audit::set(|a| a.hom_used = hom_start - b.work_left());
+    drop(costs);
+    drop(costs_r);
     drop(phis);
     if h == 1 {
         return Ok(Some(pieces));
@@ -796,7 +810,7 @@ fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q
             }
         }
         b.debit(Some(k.pw))?;
-        let pphi = p.pow(phi_exp(b, ph)?);
+        let pphi = phi_power(p, ph as u64);
         let (mut pi, mut qi) = (BigInt::one(), BigInt::one());
         for (i, ci) in f.iter().enumerate() {
             b.debit(Some(k.cert))?;
