@@ -1533,9 +1533,11 @@ async function storedFileMeta() {
 // fail-safes, a counter of the files the dialog reads, the interpreter's answer and the notebook's identity)
 // This device's records of first uploads whose share request it sent, by account and notebook: one bounded
 // localStorage entry (astra3's r2 note 1, daybreak3's r3 notes 2 and 3).  A record goes once its outcome is durably
-// the notebook's; a deleted notebook's, and a browser notebook's no longer here, are dropped; at most SHARE_SENT_MAX
-// are kept, the newest.
-const SHARE_SENT_KEY = "sagebrush-share-sent", SHARE_SENT_MAX = 100;
+// the notebook's; a deleted notebook's, and a browser notebook's no longer here or durably shared, are dropped.
+// Every change is made under one origin-wide Web Lock, from a fresh read to its verified write, so no tab's change
+// is lost to another's (astra3's CORR-UPLOAD-IMPL-ASTRA-3, daybreak3's CORR-UPLOAD-R4-1).  A live record is never
+// evicted: with SHARE_SENT_MAX of them, a new first upload is refused before its request (CORR-UPLOAD-R4-2).
+const SHARE_SENT_KEY = "sagebrush-share-sent", SHARE_SENT_MAX = 100, SHARE_SENT_LOCK = "sagebrush-share-sent";
 const shareSent = {
   all() {
     try {
@@ -1550,25 +1552,35 @@ const shareSent = {
     const r = this.all()[this.key(account, notebook)];
     return r && /^[0-9a-f]{32}$/.test(r.attempt ?? "") ? r.attempt : null;
   },
-  /** Record it, or throw (then the share request isn't sent). */
+  /** f(all) on a fresh read, then the map written and read back, all under the origin-wide lock; throws if it
+   * can't be done so (no Web Locks, a failed write): then nothing was changed by it. */
+  async change(f) {
+    if (typeof navigator.locks?.request !== "function") throw new Error("this browser can't lock its records (no Web Locks)");
+    return navigator.locks.request(SHARE_SENT_LOCK, { mode: "exclusive" }, async () => {
+      const all = this.all();
+      const r = await f(all);
+      const json = JSON.stringify(all);
+      localStorage.setItem(SHARE_SENT_KEY, json);
+      if (localStorage.getItem(SHARE_SENT_KEY) !== json) throw new Error("not recorded");
+      return r;
+    });
+  },
+  /** Record it, or throw (then the share request isn't sent); `full` when SHARE_SENT_MAX others are live. */
   async put(account, notebook, attempt) {
-    const all = await this.pruned(this.all());
-    all[this.key(account, notebook)] = { attempt, at: Date.now() };
-    for (const k of Object.keys(all).sort((a, b) => (all[b].at ?? 0) - (all[a].at ?? 0)).slice(SHARE_SENT_MAX)) delete all[k];
-    localStorage.setItem(SHARE_SENT_KEY, JSON.stringify(all));
+    const k = this.key(account, notebook);
+    await this.change(async (all) => {
+      await this.pruned(all);
+      if (!Object.hasOwn(all, k) && Object.keys(all).length >= SHARE_SENT_MAX) throw Object.assign(new Error("full"), { full: true });
+      all[k] = { attempt, at: Date.now() };
+    });
     if (this.get(account, notebook) !== attempt) throw new Error("not recorded");
   },
-  write(f) {
-    try {
-      const all = this.all();
-      f(all);
-      localStorage.setItem(SHARE_SENT_KEY, JSON.stringify(all));
-    } catch {}
-  },
-  drop(account, notebook) { this.write((all) => delete all[this.key(account, notebook)]); },
+  /** (a failed change keeps the record: a record kept too long costs a slot, one dropped could cost a share) */
+  drop(account, notebook) { return this.change((all) => { delete all[this.key(account, notebook)]; }).catch(() => {}); },
   /** A notebook deleted for good: its records, every account's. */
-  forget(notebook) { this.write((all) => { for (const k of Object.keys(all)) if (k.endsWith("|" + notebook)) delete all[k]; }); },
-  /** Without the records of browser notebooks no longer in this browser (others, a workspace's files, are kept). */
+  forget(notebook) { return this.change((all) => { for (const k of Object.keys(all)) if (k.endsWith("|" + notebook)) delete all[k]; }).catch(() => {}); },
+  /** Without the records of browser notebooks no longer in this browser, or durably shared there (it never sends
+   * a first upload again; others, a workspace's files, are kept); read raw, so no notebook is made by reading it. */
   async pruned(all) {
     db ??= await dbReady;
     if (!db) return all;
@@ -1577,7 +1589,9 @@ const shareSent = {
     const ids = new Set(keys.map(String));
     for (const k of Object.keys(all)) {
       const id = k.slice(k.indexOf("|") + 1);
-      if (!/^[a-z]+:/.test(id) && !ids.has(id)) delete all[k];
+      if (/^[a-z]+:/.test(id)) continue;
+      if (!ids.has(id)) delete all[k];
+      else if ((await idb(db, "notebooks", "readonly", (st) => st.get(id)).catch(() => undefined))?.share_id) delete all[k];
     }
     return all;
   },
@@ -1652,12 +1666,18 @@ const shareDialog = createShareDialog({
     const sentAttempt = () => shareSent.get(account, origin);
     const sentDone = () => shareSent.drop(account, origin);
     // (the record goes only once share `id` is durably the notebook's: a save that fails, or a crash before it ends,
-    // keeps it, so a retry recovers that share through its receipt, astra3's and daybreak3's r3 note 1)
+    // keeps it, so a retry recovers that share through its receipt, astra3's and daybreak3's r3 note 1; read from
+    // THIS notebook's own store, captured now, as the page may show another by then; no store, a failed read, or
+    // another share or none there (a detached conflict kept the other version) keep it, daybreak3's CORR-UPLOAD-R4-3)
+    const originStore = nb.store;
     const settle = async (id) => {
       try {
         await nb.saved();
-        const s = await storedShare();
-        if (s === null || s.share_id === id) sentDone();
+        const st = originStore;
+        if (!st || ("db" in st && !st.db)) return;
+        // (a browser notebook's record read raw: loading a store makes its notebook if it is gone)
+        const d = st instanceof IdbStore ? await idb(st.db, "notebooks", "readonly", (o) => o.get(st.id)) : await st.load();
+        if (d && typeof d === "object" && d.share_id === id) await sentDone();
       } catch {}
     };
     const prev = nb.snapshot().share_id ?? null;
@@ -1707,7 +1727,9 @@ const shareDialog = createShareDialog({
       // (recorded on this device before the request goes: unrecordable, it isn't sent)
       try {
         await shareSent.put(account, origin, attempt);
-      } catch {
+      } catch (e) {
+        // (never a live record evicted for this one: the oldest's share would be lost to a retry, CORR-UPLOAD-R4-2)
+        if (e?.full) throw new Error(`this browser has ${SHARE_SENT_MAX} first uploads whose outcome it hasn't confirmed yet, so nothing was shared. Upload one of those notebooks again (that confirms it), then this one.`);
         throw new Error("this browser couldn't record the upload, so nothing was shared; upload again");
       }
       committing = true;
