@@ -1533,7 +1533,10 @@ async function openShare() {
     checking.dataset.state = "checking";
     for (const id of ["#sharesignin", "#shareunreachable", "#shareform"]) $(id).hidden = true;
     if (!shareDlg.open) shareDlg.showModal();
-    requestAnimationFrame(() => { if (t === shareOpens && checking.dataset.state === "checking") checking.textContent = "Checking your sign-in…"; });
+    // (the next frame, or 50 ms where frames don't run, as in a hidden tab: once)
+    const say = () => { if (t === shareOpens && checking.dataset.state === "checking" && !checking.textContent) checking.textContent = "Checking your sign-in…"; };
+    requestAnimationFrame(say);
+    setTimeout(say, 50);
     // (the page's first check, still running when this open began, is this open's answer: not asked twice)
     const first = !shareKnown;
     await shareReady;
