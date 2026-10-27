@@ -163,3 +163,27 @@ proc rows finite [('RLIMIT_AS', 4294967296, 2147483648, True), ('RLIMIT_DATA', 3
 proc rows finite no status [('RLIMIT_AS', 4294967296, None, True), ('RLIMIT_DATA', 3221225472, None, True)] ['RLIMIT_AS usage', 'RLIMIT_DATA usage'] [('RLIMIT_AS', True), ('RLIMIT_DATA', True)]
 proc rows zero data [('RLIMIT_DATA', 0, 1073741824, True)] [] [('RLIMIT_DATA', True)]
 proc rows unlimited [] [] []
+fresh capacity t=0.000 [] reads 1
+fresh capacity again, same instant t=0.000 [] reads 1
+fresh _rlimit AS alone t=0.000 None reads 1
+fresh _rlimit DATA alone t=0.000 None reads 1
+fresh engine_rows t=0.000 ([], False) reads 1
+fresh engine_rows, 99 ms on (its own snapshot) t=0.099 ([], False) reads 0
+fresh engine_rows, 100 ms on: unlimited -> finite, both names t=0.100 ([('RLIMIT_AS', 4294967296), ('RLIMIT_DATA', 3221225472)], False) reads 1
+fresh capacity between: finite -> tighter t=0.150 [('RLIMIT_AS', 2147483648), ('RLIMIT_DATA', 3221225472)] reads 1
+fresh engine_rows, 90 ms after its read (the capacity at 150 ms not reused) t=0.190 ([('RLIMIT_AS', 4294967296), ('RLIMIT_DATA', 3221225472)], False) reads 0
+fresh engine_rows, 100 ms after its read t=0.200 ([('RLIMIT_AS', 2147483648), ('RLIMIT_DATA', 3221225472)], False) reads 1
+fresh engine_rows: finite -> missing (110 ms after its read) t=0.310 ([], False) reads 1
+fresh engine_total +0.000 t=1.000 True reads 1
+fresh engine_total +0.099 t=1.099 True reads 0
+fresh engine_total +0.100 t=1.100 True reads 1
+fresh engine_totals +0.000 t=2.000 True reads 1
+fresh engine_totals +0.099 t=2.099 True reads 0
+fresh engine_totals +0.100 t=2.100 True reads 1
+fresh poly_share +0.000 t=3.000 True reads 1
+fresh poly_share +0.249 t=3.249 True reads 0
+fresh poly_share +0.250 t=3.250 True reads 1
+fresh scope inside ['RLIMIT_AS', 'RLIMIT_DATA']
+fresh scope after None
+fresh scope after an exception None
+fresh scope after _set_sources None

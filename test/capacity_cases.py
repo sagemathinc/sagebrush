@@ -488,6 +488,79 @@ for label, files in (("finite", {"/proc/self/status": status(2 * GiB, GiB)}), ("
           [(r["source"], r["joint"]) for r in C.engine_rows()["rows"] if r["source"].startswith("RLIMIT")])
 C._resource_mod = had_res
 
+# 22. freshness (astra2's H1 on #231): /proc/self/limits is read once per
+# observation and never kept past it, so a snapshot over capacity() is no
+# older than its own stamp; a fake clock and the file's reads counted
+reads = [0]
+real_read = C._read
+
+
+def counting(path):
+    if path == "/proc/self/limits":
+        reads[0] += 1
+    return real_read(path)
+
+
+C._read = counting
+C._resource_mod = None
+t = [0.0]
+fr = tree("limits-fresh", {"/proc/self/limits": limits(), "/proc/meminfo": meminfo(16 * GiB, 8 * GiB), "/proc/self/status": status(2 * GiB, GiB)})
+lp = fr + "/proc/self/limits"
+
+
+def setlim(text):
+    with open(lp, "w") as f:
+        f.write(text)
+
+
+C._set_sources(root=fr, platform="linux", clock=lambda: t[0], runtime=lambda: [("wasm engine", 4 * GiB, 0)])
+rlim = lambda rows: [(r["source"], r.get("figure", r.get("limit"))) for r in rows if r["source"].startswith("RLIMIT")]
+
+
+def fresh(label, at, f):
+    t[0] = at
+    before = reads[0]
+    v = f()
+    print("fresh", label, "t=%.3f" % at, v, "reads", reads[0] - before)
+
+
+basis = lambda: rlim(C.capacity()["basis"])
+rows = lambda: (rlim(C.engine_rows()["rows"]), C.engine_rows()["complete"])
+fresh("capacity", 0.0, basis)
+fresh("capacity again, same instant", 0.0, basis)
+fresh("_rlimit AS alone", 0.0, lambda: C._rlimit("RLIMIT_AS"))
+fresh("_rlimit DATA alone", 0.0, lambda: C._rlimit("RLIMIT_DATA"))
+fresh("engine_rows", 0.0, rows)
+setlim(limits("4294967296", "3221225472"))
+fresh("engine_rows, 99 ms on (its own snapshot)", 0.099, rows)
+fresh("engine_rows, 100 ms on: unlimited -> finite, both names", 0.1, rows)
+setlim(limits("2147483648", "3221225472"))
+fresh("capacity between: finite -> tighter", 0.15, basis)
+fresh("engine_rows, 90 ms after its read (the capacity at 150 ms not reused)", 0.19, rows)
+fresh("engine_rows, 100 ms after its read", 0.2, rows)
+os.remove(lp)
+fresh("engine_rows: finite -> missing (110 ms after its read)", 0.31, rows)
+setlim(limits("4294967296", "unlimited"))
+for name, f, ttl in (("engine_total", C.engine_total, 0.1), ("engine_totals", C.engine_totals, 0.1), ("poly_share", C.poly_share, 0.25)):
+    base = {"engine_total": 1.0, "engine_totals": 2.0, "poly_share": 3.0}[name]
+    for dt in (0.0, ttl - 0.001, ttl):
+        fresh("%s +%.3f" % (name, dt), base + dt, lambda: f() is not None)
+with C._ProcObservation():
+    C._rlimit("RLIMIT_AS")
+    print("fresh scope inside", sorted(C._proc_scope))
+print("fresh scope after", C._proc_scope)
+try:
+    with C._ProcObservation():
+        C._rlimit("RLIMIT_AS")
+        raise RuntimeError("x")
+except RuntimeError:
+    pass
+print("fresh scope after an exception", C._proc_scope)
+C._set_sources()
+print("fresh scope after _set_sources", C._proc_scope)
+C._read = real_read
+C._resource_mod = had_res
+
 C._set_sources()
 if had_limit is not None:
     sys._sagebrush_heap_limit = had_limit
