@@ -108,11 +108,12 @@ works on its own
 (`sagebrush.session.Session`), and `sagebrush.preparse.preparse` turns Sage
 syntax into Python.
 
-On Python 3.12.0 to 3.12.9, a Ctrl-C (or a cancel) that ends a run while
-threads the run started are still printing can crash the session's process,
-a CPython bug fixed in 3.12.10. The session is then restarted, without its
-variables. Ubuntu 24.04's system Python is 3.12.3: use Python 3.12.10 or
-later, or 3.13 or later.
+On CPython 3.12 before 3.12.10, a Ctrl-C (or a cancel) that ends a run
+while threads the run started are still printing can crash the session's
+process: we reproduced this on 3.12.3 through 3.12.9, and not on 3.12.10 or
+later, nor on 3.13. The session is then restarted, without its variables.
+Ubuntu 24.04's system Python is 3.12.3: use Python 3.12.10 or later, or 3.13
+or later.
 
 ## Benchmarks: `sagebrush bench`
 
