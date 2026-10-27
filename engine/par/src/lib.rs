@@ -118,13 +118,16 @@ where
     (a(), b())
 }
 
+/// (Scope's lifetimes: the borrow of rayon's scope, 'a, and its 'scope)
+type Lifetimes<'a, 'scope> = std::marker::PhantomData<(&'a (), fn(&'scope ()))>;
+
 /// A rayon-style scope whose only spawn capability is the wrapped one
 /// ([`Scope::spawn`]): there is no way to reach an unwrapped spawn from it.
 pub struct Scope<'a, 'scope> {
     #[cfg(feature = "parallel")]
     inner: Option<&'a rayon::Scope<'scope>>,
     ctx: Context,
-    _lt: std::marker::PhantomData<(&'a (), fn(&'scope ()))>,
+    _lt: Lifetimes<'a, 'scope>,
 }
 
 impl<'scope> Scope<'_, 'scope> {
