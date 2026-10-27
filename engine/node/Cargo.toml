@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-modsym = { path = "../modsym" }
 sagebrush-ap = { path = "../ap" }
-rayon = "1.10"
+sagebrush-par = { path = "../par", features = ["parallel"] }
 napi = { version = "2", default-features = false, features = ["napi6"] }
 napi-derive = "2"
 
