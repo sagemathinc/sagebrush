@@ -107,8 +107,9 @@ def test_lifecycle():
         check(r["error_info"]["exception"] == "SystemExit" and s.alive(), "lifecycle: SystemExit leaves the session alive")
         r = s.run("import sys; sys.stdin.read()", mode="python")
         check(r["result"] == "''" and s.alive(), "lifecycle: the user's stdin is empty, never the protocol")
-        r = s.run("x", mode="python", isolated=True)
-        check(r["error_info"]["exception"] == "NameError", "lifecycle: isolated")
+        s.run("only_here = 1", mode="python")
+        r = s.run("only_here", mode="python", isolated=True)
+        check((r["error_info"] or {}).get("exception") == "NameError", "lifecycle: isolated (%r)" % (r["error_info"],))
         counts_match(s, "lifecycle")
     finally:
         s.close()
@@ -354,8 +355,11 @@ def pty_case(stale):  # noqa: F811 (the parameter shadows the stale() case)
             buf += chunk
     finally:
         os.waitpid(pid, 0)
-    line = [x for x in buf.decode("utf-8", "replace").splitlines() if x.startswith("RESULT ")]
-    out = json.loads(line[0][7:]) if line else {}
+    # (the terminal echoes ^C with no newline: the line may start with it)
+    line = [x[x.index("RESULT ") + 7:] for x in buf.decode("utf-8", "replace").splitlines() if "RESULT " in x]
+    out = json.loads(line[0]) if line else {}
+    if not out:
+        print("    (the child's terminal, last 1500 bytes: %r)" % buf[-1500:])
     what = "pty Ctrl-C %s" % ("after a stale target" if stale else "before any target")
     check(out.get("parent") == "KeyboardInterrupt", "%s: the parent sees KeyboardInterrupt (%r)" % (what, out))
     check(out.get("reply") == "interrupted", "%s: one interrupted reply with its id" % what)
