@@ -576,12 +576,16 @@ class Ledger:
             import weakref
             weakref.ref(owner)
         r = Record(self.new_id(), "resident", domain, nbytes)
+        # (tracked BEFORE the commit: an interruption between leaves a tracked
+        # owner without a record, whose release is then skipped, never a
+        # record whose owner nobody tracks; the caller holds owner meanwhile,
+        # so its release can't come before the record)
+        if owner is not None:
+            self._log.track(owner, r.key)
 
         def build(st):
             return _overdraw(_add(st, r)), r
         self._commit(build)
-        if owner is not None:
-            self._log.track(owner, r.key)
         return r
 
     def end_call(self, host, engine, standing=KEEP, outputs=(), txn=None, out_ids=None):
@@ -598,6 +602,11 @@ class Ledger:
             out_ids = [self.new_id() for _ in outputs]
         srid = self.new_id() if standing is not Ledger.KEEP and standing is not None else None
         outs = [Record(i, "resident", d, n) for i, (n, d, o) in zip(out_ids, outputs)]
+        # (each owner tracked BEFORE the commit, as in resident(); a retry
+        # tracks again, a no-op while the owner is tracked)
+        for r, (n, d, o) in zip(outs, outputs):
+            if o is not None:
+                self._log.track(o, r.key)
 
         def build(st):
             if txn is not None and txn in st.applied:
@@ -632,9 +641,6 @@ class Ledger:
         for g in gone:
             if g is not None:
                 g._left(RELEASED)
-        for r, (n, d, o) in zip(recs, outputs):
-            if o is not None and r is not None:
-                self._log.track(o, r.key)
         return recs
 
     def rollback(self, txn, host, engine, reaped):

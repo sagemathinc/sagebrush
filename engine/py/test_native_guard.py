@@ -38,8 +38,11 @@ def bombard(body, seconds=BOMB_S):
         while time.monotonic() - t0 < seconds:
             try:
                 armed[0] = True
-                while True:
+                while time.monotonic() - t0 < seconds:
                     body()
+                    # (a KeyboardInterrupt swallowed where Python ignores
+                    # exceptions, a weakref callback's say: armed again)
+                    armed[0] = True
             except KeyboardInterrupt:
                 armed[0] = False
                 hits += 1
@@ -198,7 +201,9 @@ def test_the_release_log_credits_each_owner_once_and_keeps_none_alive():
     del owners[:3]
     gc.collect()
     got = log.peek(0, 100)
-    assert [k[2] for _, k in got] == [3, 0, 1, 2] and [s for s, _ in got] == [0, 1, 2, 3], got
+    # (in the order the owners went: 3 first; a deleted slice's order is
+    # CPython's)
+    assert got[0][1][2] == 3 and sorted(k[2] for _, k in got) == [0, 1, 2, 3] and [s for s, _ in got] == [0, 1, 2, 3], got
     assert log.peek(2, 1) == [got[2]]
     log.ack(2)
     assert log.pending() == 2 and log.peek(0, 9) == got[2:]
