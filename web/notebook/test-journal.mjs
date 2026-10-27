@@ -10,6 +10,22 @@ import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
+// (the producers' invariant, over the sources (design r4 §6, daybreak3): only journal-rows.js writes a save's intent
+// (a "p" row), only the journal's store asks for one, and every other writer of the notebooks' history (Resume's copy in
+// index.html, an import's keepBundle) writes rows of {nb, time, env} alone)
+const J = JSON.stringify;
+const statics = [];
+{
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const files = [...readdirSync(here).filter((f) => /\.(js|ts)$/.test(f) && !f.startsWith("test-")).map((f) => join(here, f)), join(here, "../index.html"), ...readdirSync(join(here, "../workspace")).filter((f) => /\.ts$/.test(f) && !f.startsWith("test-")).map((f) => join(here, "../workspace", f))];
+  const src = Object.fromEntries(files.map((f) => [f.slice(here.length - "notebook/".length), readFileSync(f, "utf8")]));
+  const writes = Object.keys(src).filter((f) => /seqKey\([^)]*"p"/.test(src[f]));
+  statics.push([J(writes) === J(["notebook/journal-rows.js"]), "only journal-rows.js writes an intent row: " + J(writes)]);
+  const asks = Object.keys(src).filter((f) => /t1Write\(/.test(src[f]));
+  statics.push([J(asks.sort()) === J(["notebook/journal-rows.js", "notebook/journal.js"]), "only the journal asks for a T1 with an intent: " + J(asks)]);
+  const copy = /st\.put\(\{ nb: id, time: row\.time, env: row\.env \}\)/.test(src["index.html"] ?? ""), imp = /st\.put\(\{ nb: id, time: env\.time, env \}\)/.test(src["notebook/bundle.js"] ?? "");
+  statics.push([copy && imp, "Resume's copy and an import write {nb, time, env} rows alone"]);
+}
 const site = mkdtempSync(join(tmpdir(), "sb-nbj-site-")), src = mkdtempSync(join(here, ".test-journal-"));
 let code = 1;
 // (one bundle, so the page, the workspace and the journal share one copy of the notebook's stores)
@@ -18,6 +34,7 @@ writeFileSync(join(src, "entry.js"), [
   `export * as N from ${JSON.stringify(join(here, "journal.js"))};`,
   `export * as H from ${JSON.stringify(join(here, "history.js"))};`,
   `export * as R from ${JSON.stringify(join(here, "sync-rows.js"))};`,
+  `export * as B from ${JSON.stringify(join(here, "bundle.js"))};`,
 ].join("\n"));
 const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
 rmSync(src, { recursive: true, force: true });
@@ -59,7 +76,7 @@ try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Page.navigate", { url: `http://127.0.0.1:${server.port}/` });
   for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
-  const results = await ev("window.run()");
+  const results = [...statics, ...(await ev("window.run()"))];
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);
   if (fails.length) {

@@ -1822,8 +1822,9 @@ export class Workspace {
         if (e.kind === "notebook") {
           await this.mainTx("notebooks", "readwrite", (st) => st.delete(e.ref!));
           // (its versions, and its journal's rows with their charges, in one transaction: web/notebook/journal-rows.js.
-          // Its versions' keys are [id, patch id], a string: [id, -Infinity] up to [id, []], an array, takes every key
-          // of its, whatever the type of the second part (numbers, dates, strings, binary, in that order, then arrays))
+          // Its versions' keys are [id, patch id], a string: [id, -Infinity] up to [id, []] takes every key of its whose
+          // second part is a number, a date, a string or binary (they sort in that order, below every array); no
+          // array is ever written there)
           if (hdb) await inTx(hdb, "history", "readwrite", async (tx) => { const st = tx.objectStore("history"); st.delete(IDBKeyRange.bound([e.ref, -Infinity], [e.ref, []])); await dropRows(st, e.ref!); });
         } else if (e.kind === "board") {
           await inTx(this.ws, "boards", "readwrite", async (tx) => { tx.objectStore("boards").delete(e.ref!); });
