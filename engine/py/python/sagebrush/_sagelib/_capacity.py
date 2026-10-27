@@ -84,14 +84,14 @@ _src = _Sources()
 def _set_sources(**kw):
     """Tests only: replace the sources (keyword names as in _Sources);
     _set_sources() restores the real ones."""
-    global _src, _poly_snap, _total_snap, _engine_snap, _totals_snap, _rows_snap, _cg_dirs, _api
+    global _src, _poly_snap, _total_snap, _engine_snap, _totals_snap, _rows_snap, _cg_dirs, _api, _proc_snap
     _src = _Sources()
     _api = {}
     for k, v in kw.items():
         if not hasattr(_Sources, k):
             raise TypeError("no source %r" % k)
         setattr(_src, k, v)
-    _poly_snap = _total_snap = _engine_snap = _totals_snap = _rows_snap = _cg_dirs = None
+    _poly_snap = _total_snap = _engine_snap = _totals_snap = _rows_snap = _cg_dirs = _proc_snap = None
 
 
 try:
@@ -221,9 +221,55 @@ def _resource():
     return _resource_mod
 
 
+_PROC_LIMIT_ROWS = {"RLIMIT_AS": "Max address space", "RLIMIT_DATA": "Max data size"}
+_PROC_LIMIT_HEAD = ["Limit", "Soft", "Limit", "Hard", "Limit", "Units"]
+_DIGITS = frozenset("0123456789")
+_proc_snap = None  # (when, {name: None | bytes | False}): the file parsed once per snapshot
+
+
+def _proc_value(text, row):
+    """One row of /proc/self/limits: None for an "unlimited" soft limit, the
+    soft limit in bytes (0 included), or False: the row absent or there
+    twice, not exactly soft, hard and "bytes", or either figure anything but
+    "unlimited" or ASCII digits."""
+    found = [l[len(row):] for l in text.splitlines()[1:] if l.startswith(row) and l[len(row):len(row) + 1] in (" ", "\t")]
+    if len(found) != 1:
+        return False
+    fields = found[0].split()
+    if len(fields) != 3 or fields[2] != "bytes":
+        return False
+    ok = lambda f: f == "unlimited" or (f != "" and set(f) <= _DIGITS)
+    if not (ok(fields[0]) and ok(fields[1])):
+        return False
+    return None if fields[0] == "unlimited" else int(fields[0])
+
+
+def _proc_rlimit(name):
+    """The soft limit `name` (RLIMIT_AS, RLIMIT_DATA) from /proc/self/limits,
+    for Linux without the resource module (pyjs on Node or Bun, whose
+    /proc/self is the process running it): None, bytes or False as
+    _proc_value says; False for everything when the file is missing, denied
+    or empty, its header isn't the kernel's columns, or it holds a byte that
+    didn't decode.  Read and parsed once per snapshot (_SNAPSHOT_S).
+    C delta plan-c-rlimit-pyjs r1."""
+    global _proc_snap
+    if name not in _PROC_LIMIT_ROWS:
+        return False
+    now = _src.clock()
+    if _proc_snap is None or now - _proc_snap[0] >= _SNAPSHOT_S:
+        text = _read("/proc/self/limits")
+        good = bool(text) and "\ufffd" not in text and text.splitlines()[0].split() == _PROC_LIMIT_HEAD
+        _proc_snap = (now, {n: _proc_value(text, row) if good else False for n, row in _PROC_LIMIT_ROWS.items()})
+    return _proc_snap[1][name]
+
+
 def _rlimit(name):
     """The soft limit `name` (RLIMIT_AS, RLIMIT_DATA): None for none, or
-    False when it can't be read."""
+    False when it can't be read.  Read from the test's figures, else the
+    resource module (a getrlimit that fails is False: never /proc), else,
+    only on Linux (the platform checked before any read), /proc/self/limits:
+    pyjs's; a browser's platform is "browser", and its file system the
+    user's, never read."""
     try:
         if _src.rlimits is not None:
             soft = _src.rlimits[name][0]
@@ -231,9 +277,15 @@ def _rlimit(name):
         else:
             resource = _resource()
             if resource is None:
-                return False
-            soft = resource.getrlimit(getattr(resource, name))[0]
-            inf = resource.RLIM_INFINITY
+                if _src.platform != "linux":
+                    return False
+                soft = _proc_rlimit(name)
+                if soft is None or soft is False:
+                    return soft
+                inf = -1
+            else:
+                soft = resource.getrlimit(getattr(resource, name))[0]
+                inf = resource.RLIM_INFINITY
     except Exception:
         return False
     if soft == inf or soft < 0 or soft >= _NO_CEILING:
