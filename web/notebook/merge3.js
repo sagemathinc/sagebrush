@@ -78,9 +78,15 @@ function mergeFields(schema, key, r0, ra, rb, clashes, ledger) {
       clashes.push({ key, field: f, kind: "changed" });
       v = va;
     }
-    if (v !== ABSENT) out[f] = v;
+    if (v !== ABSENT) putOwn(out, f, v);
   }
   return out;
+}
+
+// (a field set as the record's own data, whatever its name: `out[f] = v` would run Object.prototype's __proto__
+// setter for a field named "__proto__", losing the field and changing the record's prototype (astra's HOLD on #199))
+function putOwn(o, k, v) {
+  Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
 }
 
 // (the ledger charged `n`, if it has that much left; nothing charged otherwise)
