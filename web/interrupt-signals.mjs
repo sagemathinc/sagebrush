@@ -193,18 +193,23 @@ export const TRIALS = {
 
 // the bounded regex (§8.1): its time doubles with each step of n (pilot 4b, VM3: n = 26 took about 5.1 s,
 // n = 27 about 10.4 s), so a 6-8 s band can fall between two sizes.  Taken: a size in [6, 8] s if
-// one is seen, else the smallest seen size in [6, 12] s; S4 only needs the call to outlast its
-// second press at 3.5 s with margin.  A size is never run twice.
-export const REGEX_BAND = { min: 6000, max: 8000, ceiling: 12000 };
+// one is seen, else the smallest seen size in [floor, ceiling] = [5.5, 12] s (labelled widened).  That
+// window is a ratio of about 2.18, more than one doubling, so one doubling sequence always has a size
+// in it unless a step is off 2x by more than about 9%; [6, 12] s was a ratio of exactly 2, and train-17
+// missed it by 50 ms and 21 ms (n = 27 5950 ms, n = 28 12021 ms).  The floor keeps S4's margin: its
+// second press is at 3.5 s, so a 5.5 s call outlasts it by 2 s, and still by 350 ms if the trial runs
+// 30% shorter than its calibration (S3's presses are at 0.5 s and 1 s).  A size is never run twice.
+export const REGEX_BAND = { floor: 5500, min: 6000, max: 8000, ceiling: 12000 };
+export function pickRegex(attempts) {
+  const timed = attempts.filter((x) => x.T_ms != null);
+  const inBand = timed.find((x) => x.T_ms >= REGEX_BAND.min && x.T_ms <= REGEX_BAND.max);
+  const widened = timed.filter((x) => x.T_ms >= REGEX_BAND.floor && x.T_ms <= REGEX_BAND.ceiling).sort((x, y) => x.n - y.n)[0];
+  const c = inBand ?? widened;
+  return c ? { n: c.n, T: c.T_ms, attempts, ...(inBand ? {} : { label: "widened (doubling step)" }) } : null;
+}
 async function calibrateRegex(host, flags) {
   const attempts = [];
-  const pick = () => {
-    const ok = attempts.filter((x) => x.T_ms != null && x.T_ms >= REGEX_BAND.min);
-    const inBand = ok.find((x) => x.T_ms <= REGEX_BAND.max);
-    const widened = ok.filter((x) => x.T_ms <= REGEX_BAND.ceiling).sort((x, y) => x.n - y.n)[0];
-    const c = inBand ?? widened;
-    return c ? { n: c.n, T: c.T_ms, attempts, ...(inBand ? {} : { label: "widened (doubling step)" }) } : null;
-  };
+  const pick = () => pickRegex(attempts);
   let n = 24;
   for (let a = 0; a < 8; a++) {
     const r = await runProc({ host: "cli", flags, src: REGEX(n) + `import time\n_t = time.monotonic()\nre.match(r"(a+)+$", _s)\nprint("RET", time.monotonic() - _t, flush=True)\nprint("END", flush=True)\n`, guard_ms: 60_000 });

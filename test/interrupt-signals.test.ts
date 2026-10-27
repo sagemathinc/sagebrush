@@ -49,6 +49,36 @@ test("S4: a press after the window re-arms, never escalates; the KI when the reg
   assert.equal(judge("S4", { ...two, marks: [m("RET 1", 7000)], exit: { code: 0, signal: null, t: 7100 } }).outcome, "FAIL");
 });
 
+test("the regex calibration's pick: in band first, else the smallest size in [5.5, 12] s (widened); nothing there stays uncalibrated", () => {
+  const pick = (attempts: object[]) => {
+    const src = `import { pickRegex, REGEX_BAND } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify({ r: pickRegex(${JSON.stringify(attempts)}), band: REGEX_BAND }));`;
+    const p = spawnSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8" });
+    assert.equal(p.status, 0, p.stderr);
+    return JSON.parse(p.stdout);
+  };
+  const a = (n: number, T_ms: number | null) => ({ n, T_ms, end: "exit" });
+  // the window is wider than one doubling (a ratio over 2), and a floor-sized call outlasts S4's second
+  // press (3.5 s) by at least 300 ms even when the trial runs 30% shorter than its calibration
+  const { band } = pick([]);
+  assert.ok(band.ceiling / band.floor > 2 && band.floor * 0.7 - 3500 >= 300, JSON.stringify(band));
+  // train-17 (run 40563301923): both sizes just outside [6, 12] s, uncalibrated before; now n = 27, widened
+  const t17 = pick([a(24, 754), a(27, 5950), a(28, 12021)]).r;
+  assert.ok(t17, "train-17's attempts left the regex uncalibrated");
+  assert.deepEqual([t17.n, t17.T, t17.label], [27, 5950, "widened (doubling step)"]);
+  // train-18: n = 27 at 8035 ms, widened as before
+  const t18 = pick([a(24, 1003), a(27, 8035)]).r;
+  assert.deepEqual([t18.n, t18.label], [27, "widened (doubling step)"]);
+  // a size in band wins over a smaller eligible widened one (5600 ms is inside [5.5, 12] s), unlabelled
+  const inBand = pick([a(26, 5600), a(27, 7000)]).r;
+  assert.deepEqual([inBand.n, inBand.label], [27, undefined]);
+  // controls: nothing in [5.5, 12] s (or untimed) stays null, so the rows stay INVALID
+  assert.equal(pick([a(24, 754), a(26, 5499), a(27, 12001)]).r, null);
+  // the window's edges are inclusive
+  assert.deepEqual([pick([a(26, 5500)]).r.n, pick([a(28, 12000)]).r.n], [26, 28]);
+  assert.equal(pick([a(24, null), a(22, 300)]).r, null);
+  assert.equal(pick([]).r, null);
+});
+
 test("PENDING-READY: a capability expression that is True makes its pending trial PENDING-READY; False stays PENDING", () => {
   // a fake launcher (SB_LAUNCHER): runs the probe program with python3, so the yes path is exercised without a build
   const fake = join(__dirname, "fake-launcher.cjs");
