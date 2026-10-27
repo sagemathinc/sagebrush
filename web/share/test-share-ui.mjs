@@ -64,8 +64,10 @@ try {
 
   await ev("document.querySelector('#sharemenu').click()");
   await until("!document.querySelector('#shareform').hidden");
-  const listed = await ev("[...document.querySelectorAll('#sharefiles input')].map((b) => b.value)");
-  ok(listed.length === 2 && listed[1] === "data/points.csv", "the dialog lists the notebook and the browser's files: " + JSON.stringify(listed));
+  // (the rows, from metadata; the file the code opens is pre-checked once the analysis says so: share-ux-plan r2)
+  await until("/^Checked /.test(document.querySelector('#sharestatus').textContent)");
+  const listed = await ev("[...document.querySelectorAll('#sharelist .sharerow')].sort((a, b) => a.dataset.i - b.dataset.i).map((r) => [r.querySelector('.name').title, r.querySelector('input').checked, r.querySelector('.why').textContent])");
+  ok(listed.length === 2 && listed[1][0] === "data/points.csv" && listed[1][1] === true && /cell/.test(listed[1][2]), "the dialog lists the notebook and the browser's files, the one the code opens pre-checked with why: " + JSON.stringify(listed));
   await ev("document.querySelector('#sharetitlein').value = 'Points'; document.querySelector('#shareupload').click()");
   await until("document.querySelector('#shareresult a')");
   const link = await ev("document.querySelector('#shareresult a').href");
