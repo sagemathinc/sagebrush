@@ -19,6 +19,21 @@ import _memledger
 ALL = list(_capacity.DOMAINS)
 
 
+def native_like(lock, fn):
+    # (a stand-in for _raster.locked_call where the native module has none:
+    # its frames aren't _memledger's, so the opcode injector below never
+    # raises inside it, as it can't inside the Rust frame)
+    lock.acquire()
+    try:
+        return fn()
+    finally:
+        lock.release()
+
+
+if _memledger._native_locked_call() is None:
+    _memledger._native_locked_call = lambda: native_like
+
+
 def obs(free, domains=ALL):
     """A D0 record: `free` bytes observed (None: unknown), its reserve D0's."""
     return {"bytes": free, "basis": [], "unknown_parts": [], "observed_at": 0,
@@ -140,7 +155,8 @@ def test_the_shrink_transition_at_equality_and_one_byte_less():
     o = Owner()
     u = led.resident(F, "wasm-instance", owner=o)
     assert led.rebase() == 0
-    u.bytes = F + 1
+    led.release(u)
+    u = led.resident(F + 1, "wasm-instance", owner=o)
     try:
         led.rebase()
         raise AssertionError("not refused")
@@ -148,7 +164,7 @@ def test_the_shrink_transition_at_equality_and_one_byte_less():
         assert led.overdrawn and led.f0 is None
     del o
     gc.collect()
-    assert u.finalized
+    assert led.pending_releases() >= 1
     assert led.rebase() == F and not led.overdrawn and u.state == _memledger.RELEASED
 
 
@@ -252,13 +268,13 @@ def test_the_invariant_is_checked_at_every_change():
     # (a state past F0, a grant counted twice say, is caught at the next
     # change, as a Sagebrush bug)
     bad = _memledger.Record(999, "engine", "child", 700)
-    led.records.append(bad)
+    led._inject_for_test(bad)
     try:
         led.reserve("host", "cpython-heap", 0)
         raise AssertionError("not checked")
     except RuntimeError as e:
         assert "more than F0" in str(e)
-    led.records.remove(bad)
+    led._remove_for_test(bad)
     led.end_call(h, None, None)
     assert led.held() == 0, led.records
 
@@ -296,6 +312,400 @@ def test_an_unobservable_outputs_charge_follows_its_buffer_through_aliases():
     assert led.rebase() == 1000 and led.held() == 0
     h = led.reserve("host", "cpython-heap", 1000)
     led.end_call(h, None, None)
+
+
+# ---- #157 simpler path r10: the ledger as one immutable image (T1, T2, U1,
+# U2, W1, Y1; astra2's and daybreak2's reviews r6-r10)
+
+def audit(led):
+    """The image's own consistency: an AVL tree in key order whose heights
+    and charge sums are right, the active count, the standing key."""
+    st = led._state
+    keys, act = [], [0]
+
+    def walk(n):
+        if n is None:
+            return 0, 0
+        hl, sl = walk(n.l)
+        keys.append(n.k)
+        hg, sg = walk(n.g)
+        assert abs(hl - hg) <= 1, "unbalanced"
+        assert n.h == max(hl, hg) + 1 and n.s == sl + sg + n.r.bytes, "stale node"
+        assert n.k == n.r.key, "key"
+        act[0] += n.r.kind in _memledger.ACTIVE
+        return n.h, n.s
+    h, s = walk(st.records)
+    assert keys == sorted(keys) and len(set(keys)) == len(keys)
+    assert s == led.held() and act[0] == st.active
+    if st.standing is not None:
+        assert _memledger._get(st.records, st.standing) is not None
+    return h
+
+
+def summary(led):
+    st = led._state
+    return (sorted((r.kind, r.domain, r.bytes) for r in led.records), st.f0, st.overdrawn, sorted(st.applied), st.obs is None)
+
+
+class Injected(KeyboardInterrupt):
+    pass
+
+
+def opcodes(fn, at=None, sites=None):
+    """fn() with a KeyboardInterrupt raised at the at-th opcode executed in
+    _memledger's own frames (an opcode is a superset of the interpreter's
+    eval-breaker points); returns the number of opcodes, or raises.  sites:
+    a list filled with each opcode's (code, offset)."""
+    count = [0]
+    target = _memledger.__file__
+
+    def tracer(frame, event, arg):
+        if frame.f_code.co_filename != target:
+            return None
+        frame.f_trace_opcodes = True
+
+        def local(frame, event, arg):
+            if event == "opcode":
+                if at is not None and count[0] == at:
+                    count[0] += 1
+                    raise Injected()
+                if sites is not None:
+                    sites.append((frame.f_code, frame.f_lasti))
+                count[0] += 1
+            return local
+        return local
+    sys.settrace(tracer)
+    try:
+        fn()
+    finally:
+        sys.settrace(None)
+    return count[0]
+
+
+def seams(setup, op, check=None):
+    """op(led) interrupted at every instruction site it executes (each
+    site's first and last execution), then retried: the image consistent
+    after each interruption, and the retry's end the same as an
+    uninterrupted run's."""
+    led = setup()
+    sites = []
+    n = opcodes(lambda: op(led), sites=sites)
+    want = summary(led)
+    first, last = {}, {}
+    for i, s in enumerate(sites):
+        first.setdefault(s, i)
+        last[s] = i
+    for k in sorted(set(first.values()) | set(last.values())):
+        led = setup()
+        try:
+            opcodes(lambda: op(led), at=k)
+        except Injected:
+            pass
+        audit(led)
+        if check:
+            check(led)
+        op(led)
+        audit(led)
+        assert summary(led) == want, (k, summary(led), want)
+    return n
+
+
+def test_r10_every_transaction_survives_a_ctrl_c_at_every_opcode():
+    class Owner:
+        pass
+    keep = []
+
+    def admitted():
+        led = exact(1000)
+        led.rebase()
+        for i in range(5):
+            led.resident(10, "cpython-heap")
+        return led
+
+    # admission: one commit (host and grant) or nothing
+    def admit(led):
+        led.admit(901, 902, 100, 903, "child")
+    n = seams(admitted, admit, lambda led: (led._state.active in (0, 2)) or (_ for _ in ()).throw(AssertionError("half admitted")))
+    assert n > 10
+
+    def ended():
+        led = admitted()
+        led.admit(901, 902, 100, 903, "child")
+        return led
+
+    def end(led):
+        st = led._state
+        h = _memledger._get(st.records, ("host", "cpython-heap", 902))
+        e = _memledger._get(st.records, ("engine", "child", 903))
+        o = Owner()
+        keep.append(o)
+        led.end_call(h, e, 200, [(30, "cpython-heap", None), (20, "cpython-heap", o)], txn=904, out_ids=[905, 906])
+
+    def no_double(led):
+        rs = led.records
+        assert sum(r.kind == "standing" for r in rs) <= 1, rs
+        assert led.held() <= led.f0, rs
+    seams(ended, end, no_double)
+
+    def rollback(led):
+        st = led._state
+        h = _memledger._get(st.records, ("host", "cpython-heap", 902))
+        e = _memledger._get(st.records, ("engine", "child", 903))
+        led.rollback(907, h, e, True)
+    seams(ended, rollback)
+
+    # a re-base absorbing many residents in several chunks, with a standing charge
+    def many():
+        led = exact(10 ** 6)
+        led.rebase()
+        led.set_standing(500)
+        for i in range(40):
+            led.resident(7, "cpython-heap")
+        led.resident(11, "js-arraybuffer")
+        return led
+    old = _memledger.CHUNK
+    _memledger.CHUNK = 8
+    try:
+        seams(many, lambda led: led.rebase(child=lambda: (600, 100)))
+    finally:
+        _memledger.CHUNK = old
+
+    def closing(led):
+        led.close([901, 904])
+    seams(ended, closing)
+
+
+def test_r10_absorption_removes_only_covered_residents_of_its_snapshot():
+    # (W1) a snapshot with covered residents, uncovered residents and a
+    # standing record: after the absorption only the covered residents are gone
+    led = _memledger.Ledger(capacity=lambda: {"bytes": 10 ** 9, "basis": [], "unknown_parts": [], "observed_at": 0,
+                                              "reserve_bytes": 0, "domains": ["cpython-heap"]}, environ={})
+    led.rebase()
+    led.set_standing(1000)
+    cov = [led.resident(10, "cpython-heap") for _ in range(30)]
+    unc = [led.resident(20, "js-heap") for _ in range(30)]
+    st0 = led.standing
+    old = _memledger.CHUNK
+    _memledger.CHUNK = 7
+    try:
+        led.rebase()
+    finally:
+        _memledger.CHUNK = old
+    left = led.records
+    assert not any(r in left for r in cov) and all(r in left for r in unc), left
+    assert led.standing.bytes == st0.bytes and led.held() == 1000 + 600
+    # (an active record during a re-base is the invariant's error)
+    led._inject_for_test(_memledger.Record(99999, "host", "cpython-heap", 1))
+    try:
+        led.rebase()
+        raise AssertionError("not refused")
+    except RuntimeError as e:
+        assert "call active" in str(e)
+
+
+def test_r10_a_resident_published_between_chunks_is_never_absorbed_by_that_observation():
+    # (U1, astra2's counterexample) the observation's eligible set is its
+    # snapshot: a resident published after it, between two chunks (or with an
+    # id planned before it), stays charged
+    led = exact(10 ** 6)
+    led.rebase()
+    early = [led.resident(10, "cpython-heap") for _ in range(20)]
+    planned = led.new_id()
+    late = []
+    commit = led._commit
+    seen = [0]
+
+    def between(build):
+        out = commit(build)
+        if led._state.obs is not None and led._state.obs.remaining is not None:
+            seen[0] += 1
+            if seen[0] == 2:
+                late.append(led.resident(30, "cpython-heap"))
+                r = _memledger.Record(planned, "resident", "cpython-heap", 40)
+                led._commit(lambda st: (_memledger._overdraw(_memledger._add(st, r)), None))
+                late.append(r)
+        return out
+    led._commit = between
+    old = _memledger.CHUNK
+    _memledger.CHUNK = 3
+    try:
+        led.rebase()
+    finally:
+        _memledger.CHUNK = old
+        del led._commit
+    assert seen[0] >= 2 and late
+    assert not any(r in led.records for r in early)
+    assert all(r in led.records for r in late) and led.held() == 70
+    # (the next observation covers them)
+    led.rebase()
+    assert led.held() == 0
+
+
+def test_r10_an_interrupted_absorption_is_finished_before_a_new_observation():
+    # (Y1) no supersede: the next re-base finishes the old observation's
+    # remaining snapshot first, then observes afresh
+    led = exact(10 ** 6)
+    led.rebase()
+    for _ in range(50):
+        led.resident(10, "cpython-heap")
+    old = _memledger.CHUNK
+    _memledger.CHUNK = 5
+    try:
+        commit = led._commit
+        n = [0]
+
+        def cut(build):
+            out = commit(build)
+            o = led._state.obs
+            if o is not None and o.remaining is not None:
+                n[0] += 1
+                if n[0] == 3:
+                    raise Injected()
+            return out
+        led._commit = cut
+        try:
+            led.rebase()
+            raise AssertionError("not interrupted")
+        except Injected:
+            pass
+        del led._commit
+        assert led._state.obs is not None and led.f0 is None and 0 < led.held() < 500
+        late = led.resident(5, "cpython-heap")
+        assert led.rebase() == 10 ** 6 - 0 and late not in led.records
+    finally:
+        _memledger.CHUNK = old
+    audit(led)
+
+
+def test_r10_released_owners_are_credited_exactly_once_whatever_the_interruption():
+    # (U2, W4: H-5/H-6) the release log is read from the image's cursor,
+    # committed, then acknowledged; a Ctrl-C anywhere loses nothing and
+    # credits nothing twice; appends meanwhile are kept
+    class Owner:
+        pass
+
+    def setup():
+        led = exact(10 ** 6)
+        led.rebase()
+        led.keep = [Owner() for _ in range(25)]
+        led.recs = [led.resident(3, "cpython-heap", owner=o) for o in led.keep]
+        led.keep[:20] = []
+        gc.collect()
+        assert led.pending_releases() == 20
+        return led
+    old = _memledger.CHUNK
+    _memledger.CHUNK = 6
+    try:
+        def op(led):
+            led.sweep()
+            assert led.held() == 15
+            # (more released after: the cursor moves on, nothing lost)
+        n = seams(setup, op, lambda led: led.held() in range(15, 76, 3))
+        assert n > 0
+        led = setup()
+        led.sweep()
+        assert led.held() == 15 and led.pending_releases() == 0 and led._state.rel == 20
+        del led.keep[:2]
+        gc.collect()
+        led.sweep()
+        assert led.held() == 9 and led.pending_releases() == 0
+        # (an empty retry after a commit still acknowledges: H-6)
+        led._log.ack(0)
+        led.sweep()
+        assert led.pending_releases() == 0
+    finally:
+        _memledger.CHUNK = old
+
+
+def test_r10_another_writer_between_a_commit_and_its_retry_keeps_the_checkpoint():
+    # (T2, astra2's interleaving) commit A, Ctrl-C before the caller records
+    # it, another writer commits B, retry A: A's id is still in the image
+    led = exact(10 ** 6)
+    led.rebase()
+    h, e = led.admit(11, 12, 100, 13, "child")
+    led.end_call(h, e, 50, [(10, "cpython-heap", None)], txn=14, out_ids=[15])
+    held = led.held()
+    led.resident(7, "js-heap")
+    led.set_standing(60)
+    recs = led.end_call(h, e, 50, [(10, "cpython-heap", None)], txn=14, out_ids=[15])
+    assert led.held() == held + 7 + 10 and [r.id for r in recs] == [15]
+    assert led.applied(11) and led.applied(14)
+    led.close([11, 14])
+    assert not led.applied(11) and not led.applied(14)
+    # (distinct ids per stage: an admission's id never counts as the success)
+    led2 = exact(1000)
+    led2.rebase()
+    h, e = led2.admit(21, 22, 100, 23, "child")
+    led2.end_call(h, e, 50, [], txn=24)
+    assert led2.standing.bytes == 50
+
+
+def test_r10_a_commit_frees_only_its_changed_paths():
+    # (Y1, astra2: destruction counted across both trees and the temporary
+    # paths, rotations included, against AVL's proved height bound
+    # h <= 1.4405 log2(n + 2) - 0.3277)
+    import math
+    freed = [0]
+
+    class Counting(_memledger._Node):
+        __slots__ = ()
+
+        def __del__(self):
+            freed[0] += 1
+    orig = _memledger._Node
+    _memledger._Node = Counting
+    try:
+        for n in (10 ** 3, 10 ** 4):
+            led = exact(10 ** 9)
+            led.rebase()
+            for _ in range(n):
+                led.resident(1, "cpython-heap")
+            hmax = math.floor(1.4405 * math.log2(n + 2) - 0.3277) + 1
+            assert audit(led) <= hmax
+            old = _memledger.CHUNK
+            _memledger.CHUNK = 16
+            commit = led._commit
+            worst = [0]
+
+            def counted(build):
+                freed[0] = 0
+                out = commit(build)
+                gc.collect()
+                worst[0] = max(worst[0], freed[0])
+                return out
+            led._commit = counted
+            try:
+                led.rebase()
+            finally:
+                del led._commit
+                _memledger.CHUNK = old
+            # (per commit: two trees (records, remaining), each deletion's
+            # path and its rotations' new nodes: at most 3 nodes per level)
+            bound = 2 * 16 * 3 * (hmax + 1) + 64
+            assert 0 < worst[0] <= bound, (n, worst[0], bound)
+    finally:
+        _memledger._Node = orig
+
+
+def test_r10_the_tree_matches_a_dict_under_random_inserts_and_deletes():
+    import random
+    rnd = random.Random(157)
+    t, ref = None, {}
+    for i in range(4000):
+        k = ("resident", "cpython-heap", rnd.randrange(500))
+        if rnd.random() < 0.55:
+            r = _memledger.Record(k[2], *k[:2], rnd.randrange(100))
+            t = _memledger._ins(t, k, r)
+            ref[k] = r
+        else:
+            t = _memledger._del(t, k)
+            ref.pop(k, None)
+        if i % 97 == 0:
+            got = _memledger._first(t, 10 ** 6)
+            assert [k for k, _ in got] == sorted(ref) and all(ref[k] is r for k, r in got)
+            assert _memledger._s(t) == sum(r.bytes for r in ref.values())
+            lo, hi = ("resident", "cpython-heap", 100), ("resident", "cpython-heap", 300)
+            assert _memledger._range_sum(t, lo, hi) == sum(r.bytes for k, r in ref.items() if lo <= k < hi)
 
 
 if __name__ == "__main__":
