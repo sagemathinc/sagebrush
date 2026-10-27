@@ -120,11 +120,13 @@ fn a_stop_in_either_stage_lll_unwinds_there() {
 }
 
 /// S_8 (degree 256, r = 128 at its prime): the VM row of section 4.6.  Stage
-/// 1's lattice needs about 0.9 GB (a 1 GiB share), Stage 2's about 3.5 GB (4
-/// GiB, measured: a 1 GiB share refuses it cleanly in Lll); `cargo test
-/// --release -- --ignored` on the VM.
+/// 1's peak reservation is 904,700,344 B (a 1 GiB share); Stage 2's, with
+/// Stage 1 ended at once, is 5,820,886,840 B (an 8 GiB share; measured on the
+/// VM under a 64 GiB share: one level, one pass, certified at a = 358; 1 and 4
+/// GiB shares refuse it cleanly); `cargo test --release -- --ignored` on the
+/// VM.
 #[test]
 #[ignore]
 fn a_stop_in_either_stage_lll_unwinds_there_s8() {
-    stop_in_each_lll(&sk(8), [1 << 30, 4 << 30]);
+    stop_in_each_lll(&sk(8), [1 << 30, 8 << 30]);
 }
