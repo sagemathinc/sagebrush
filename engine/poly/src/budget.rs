@@ -27,7 +27,6 @@ pub enum Phase {
     Lll,
     Echelon,
     Reconstruct,
-    Fallback,
     /// Binomials (binomial.rs): cyclotomic polynomials, perfect powers and
     /// the homogenized pieces with their certificate.
     Cyclotomic,
@@ -35,7 +34,7 @@ pub enum Phase {
     Homogenize,
 }
 
-pub const PHASES: usize = 15;
+pub const PHASES: usize = 14;
 
 impl Phase {
     fn index(self) -> usize {
@@ -54,7 +53,6 @@ impl Phase {
             Phase::Lll => "LLL",
             Phase::Echelon => "echelon",
             Phase::Reconstruct => "reconstruction",
-            Phase::Fallback => "fallback recombination",
             Phase::Cyclotomic => "cyclotomic polynomials",
             Phase::PerfectPower => "perfect powers",
             Phase::Homogenize => "homogenized pieces",
@@ -74,9 +72,25 @@ pub enum MemorySource {
     NoHostFigure,
 }
 
-/// A refusal: a resource limit was reached; nothing was factored.
+/// What a refusal is (rank-3 plan r3, section 3.5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// A resource limit was reached (work, memory, a representable size).
+    Resource,
+    /// A proved invariant failed: a bug, never an expected outcome for a
+    /// valid input, and never reported as a resource limit.
+    Internal,
+}
+
+/// The start of every internal error's message: how the JSON surface
+/// (engine/web) and the Python callers recognize one in a string.
+pub const INTERNAL_PREFIX: &str = "factor: internal error";
+
+/// A refusal: a resource limit was reached, or (kind Internal) a proved
+/// invariant failed; nothing was factored.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FactorLimit {
+    pub kind: Kind,
     pub phase: Phase,
     pub what: &'static str,
     pub need: u64,
@@ -89,6 +103,9 @@ pub struct FactorLimit {
 
 impl fmt::Display for FactorLimit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.kind == Kind::Internal {
+            return write!(f, "{} ({} in {}); please report it; not factored", INTERNAL_PREFIX, self.what, self.phase.name());
+        }
         write!(
             f,
             "factor: resource limit exceeded ({} in {}: {} > {}",
@@ -188,6 +205,9 @@ pub struct Budget {
     /// Debits per phase (for the tests' coverage log; also cheap).
     debits: [Cell<u64>; PHASES],
     peak: Cell<u64>,
+    /// The tests' memory limit, replacing the policy's after setup.
+    #[cfg(test)]
+    memory_override: Cell<Option<u64>>,
 }
 
 thread_local! {
@@ -237,6 +257,8 @@ impl Budget {
             phase: Cell::new(Phase::Admission),
             debits: Default::default(),
             peak: Cell::new(0),
+            #[cfg(test)]
+            memory_override: Cell::new(None),
         }
     }
 
@@ -278,6 +300,14 @@ impl Budget {
         self.peak.get()
     }
 
+    /// Tests: a new memory limit from now on, and the peak restarted at the
+    /// live reservation.
+    #[cfg(test)]
+    pub fn set_memory_limit(&self, m: u64) {
+        self.memory_override.set(Some(m));
+        self.peak.set(self.live.get());
+    }
+
     /// How many debits each phase made (the tests' coverage log).
     pub fn debit_counts(&self) -> [u64; PHASES] {
         let mut out = [0; PHASES];
@@ -297,7 +327,12 @@ impl Budget {
     }
 
     pub fn refuse(&self, what: &'static str, need: u64, remaining: u64) -> FactorLimit {
-        FactorLimit { phase: self.phase.get(), what, need, remaining, memory_limit: self.limits.memory, memory_source: self.memory_source }
+        FactorLimit { kind: Kind::Resource, phase: self.phase.get(), what, need, remaining, memory_limit: self.limits.memory, memory_source: self.memory_source }
+    }
+
+    /// A failed proved invariant (an internal error, never a result).
+    pub fn internal(&self, what: &'static str) -> FactorLimit {
+        FactorLimit { kind: Kind::Internal, phase: self.phase.get(), what, need: 0, remaining: 0, memory_limit: self.limits.memory, memory_source: self.memory_source }
     }
 
     /// Debit `units` limb operations (computed by the caller with checked
@@ -306,6 +341,8 @@ impl Budget {
         sagebrush_interrupt::check();
         let left = self.work.get();
         let units = units.ok_or_else(|| self.refuse("work (overflow)", u64::MAX, left))?;
+        #[cfg(test)]
+        crate::alloc_spy::audit_point(self.live.get(), self.phase.get().name());
         let c = &self.debits[self.phase.get().index()];
         c.set(c.get().saturating_add(1));
         if units > left {
@@ -339,16 +376,64 @@ impl Budget {
     /// the guard drops.
     pub fn reserve(&self, bytes: Option<u64>) -> FResult<Reservation<'_>> {
         let live = self.live.get();
-        let room = self.limits.memory.saturating_sub(live);
+        let limit = self.limits.memory;
+        #[cfg(test)]
+        let limit = self.memory_override.get().unwrap_or(limit);
+        let room = limit.saturating_sub(live);
         let bytes = bytes.ok_or_else(|| self.refuse("memory (overflow)", u64::MAX, room))?;
         if bytes > room {
+            #[cfg(test)]
+            crate::alloc_spy::note_refusal();
             return Err(self.refuse("memory", bytes, room));
         }
+        #[cfg(test)]
+        crate::alloc_spy::audit_point(live, self.phase.get().name());
         self.live.set(live + bytes);
         if live + bytes > self.peak.get() {
             self.peak.set(live + bytes);
         }
-        Ok(Reservation { b: self, bytes })
+        Ok(Reservation {
+            b: self,
+            bytes,
+            #[cfg(test)]
+            tag: None,
+        })
+    }
+
+    /// A reservation for one named object of the ledger (rank-3 plan r3,
+    /// section 3.7): the same as `reserve`; the tests' audit also checks
+    /// that the allocations made under `tag(name)` stay within it.
+    pub fn reserve_as(&self, _name: &'static str, bytes: Option<u64>) -> FResult<Reservation<'_>> {
+        #[allow(unused_mut)]
+        let mut r = self.reserve(bytes)?;
+        #[cfg(test)]
+        {
+            crate::alloc_spy::tag_reserved(_name, r.bytes as i64);
+            r.tag = Some(_name);
+        }
+        Ok(r)
+    }
+}
+
+/// The tests' attribution of allocations to a named object of the ledger
+/// (see `Budget::reserve_as`): until the guard drops, this thread's
+/// allocations belong to `name`.  Nothing outside the tests.
+pub(crate) fn tag(_name: &'static str) -> TagGuard {
+    TagGuard {
+        #[cfg(test)]
+        prev: crate::alloc_spy::set_tag(Some(_name)),
+    }
+}
+
+pub(crate) struct TagGuard {
+    #[cfg(test)]
+    prev: Option<&'static str>,
+}
+
+impl Drop for TagGuard {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        crate::alloc_spy::set_tag(self.prev);
     }
 }
 
@@ -368,17 +453,34 @@ impl Drop for PhaseGuard<'_> {
 pub struct Reservation<'a> {
     b: &'a Budget,
     bytes: u64,
+    #[cfg(test)]
+    tag: Option<&'static str>,
 }
 
 impl Reservation<'_> {
     pub fn bytes(&self) -> u64 {
         self.bytes
     }
+
+    /// Release all but `bytes` of it (at most what it holds).
+    pub fn shrink(&mut self, bytes: u64) {
+        let less = self.bytes.saturating_sub(bytes);
+        self.b.live.set(self.b.live.get() - less);
+        self.bytes -= less;
+        #[cfg(test)]
+        if let Some(t) = self.tag {
+            crate::alloc_spy::tag_reserved(t, -(less as i64));
+        }
+    }
 }
 
 impl Drop for Reservation<'_> {
     fn drop(&mut self) {
         self.b.live.set(self.b.live.get() - self.bytes);
+        #[cfg(test)]
+        if let Some(t) = self.tag {
+            crate::alloc_spy::tag_reserved(t, -(self.bytes as i64));
+        }
     }
 }
 
@@ -448,6 +550,15 @@ mod tests {
         assert!(b.debit(None).is_err());
         assert!(b.reserve(None).is_err());
         assert!(e.to_string().starts_with("factor: resource limit exceeded (work in LLL: 60 > 40)"));
+        assert_eq!(e.kind, Kind::Resource);
+        // an internal error says so, and never reads as a resource limit
+        let b2 = Budget::unlimited();
+        let i = {
+            let _p = b2.enter(Phase::Lll);
+            b2.internal("an invariant")
+        };
+        assert_eq!(i.kind, Kind::Internal);
+        assert_eq!(i.to_string(), format!("{} (an invariant in LLL); please report it; not factored", INTERNAL_PREFIX));
     }
 
     #[test]

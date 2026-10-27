@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Rank-3 plan r3 PR 2 (#190): the recombination lattice's ledger (gaps 1-4: the bounds' reservation kept, cols and pw reserved, kept covering the Gram determinants then shrunk; the CLD values dropped before LLL; the lattice's phase) in the engine wasm. Figures against master 2acc6e4c: the engine wasm is CI's fresh-wasm-420c228b (7183028 B) against master's committed 7181404 B (+1624); cli/pyjs.cjs embeds the wasm in base64 and has no Python change, so its row is 4 ceil(7183028/3) - 4 ceil(7181404/3) = 2164",
+ "bytes": {
+  "cli/pyjs.cjs": 2164,
+  "engine/sagebrush-engine.wasm": 1624
+ }
+}
