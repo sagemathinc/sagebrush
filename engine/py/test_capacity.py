@@ -434,34 +434,85 @@ if hasattr(_native, "_test_guarded"):
     _stand_in(_raising(_exc))
     _t2.sleep(0.15)
     check("the outer entry refreshes a stale total: the source's SystemExit is delivered", _raised(_outcome(lambda: _native._test_guarded("ok")), _exc), True)
-    # astra2's two-owner schedule: owner A refreshes at entry; owner B, on
-    # another thread, publishes Unreadable (the total is None); A's nested
-    # wrapper entry on A's own thread, with no admission after it, asks A's
-    # source, whose KeyboardInterrupt A raises, once; B gets nothing of A's
-    _excA, _askedA = KeyboardInterrupt(), []
+    # astra2's two-owner schedule, causally ordered (HP-E1): owner A
+    # refreshes at entry and is held at a gate; owner B, on another thread,
+    # then publishes Unreadable (the total is None), and only after B's call
+    # returned is A released into one wrapper entry on its own thread, with
+    # no admission after it.  The source trace must be A, B, A; A raises its
+    # own KeyboardInterrupt, once; B gets nothing of A's.
+    _excA, _trace2 = KeyboardInterrupt(), []
 
     def _two_owner_source():
         who = threading.current_thread().name
+        _trace2.append(who)
         if who == "A":
-            _askedA.append(1)
-            if len(_askedA) == 1:
+            if _trace2.count("A") == 1:
                 return _good
             raise _excA
         raise OSError("B's source is unreadable")
 
     _stand_in(_two_owner_source)
+    _native._test_gate(False)
     _t2.sleep(0.15)
-    _out = {}
-    _ta = threading.Thread(target=lambda: _out.__setitem__("A", _outcome(lambda: _native._test_guarded("nested"))), name="A")
-    _tb = threading.Thread(target=lambda: (_t2.sleep(0.11), _out.__setitem__("B", _outcome(lambda: _native._test_guarded("ok")))), name="B")
+    _out, _a_in = {}, threading.Event()
+
+    def _owner_a():
+        _out["A"] = _outcome(lambda: _native._test_guarded("nested_gated"))
+
+    def _owner_b():
+        while _trace2[:1] != ["A"]:  # A has refreshed at entry
+            _t2.sleep(0.001)
+        _t2.sleep(0.11)  # (so that B's own entry finds the total stale and asks)
+        _out["B"] = _outcome(lambda: _native._test_guarded("ok"))
+        _out["trace_at_release"] = list(_trace2)
+        _native._test_gate(True)  # only now may A make its nested entry
+
+    _ta = threading.Thread(target=_owner_a, name="A")
+    _tb = threading.Thread(target=_owner_b, name="B")
     _ta.start()
     _tb.start()
-    _ta.join(20)
-    _tb.join(20)
-    check("two owners: A's nested entry asked A's source after B's Unreadable, and A raises its KeyboardInterrupt", _raised(_out.get("A", ("missing",)), _excA), True)
-    check("two owners: A's source ran exactly twice (entry, nested entry); B got nothing of A's", (len(_askedA), _out.get("B")), (2, ("returned", 1)))
+    _ta.join(30)
+    _tb.join(30)
+    _native._test_gate(False)
+    check("two owners: B's Unreadable was published before A was released", _out.get("trace_at_release"), ["A", "B"])
+    check("two owners: the source trace is A, B, A (A's nested entry asked A's source)", _trace2, ["A", "B", "A"])
+    check("two owners: A raises its own KeyboardInterrupt, the same object", _raised(_out.get("A", ("missing",)), _excA), True)
+    check("two owners: B got nothing of A's", _out.get("B"), ("returned", 1))
     _stand_in(lambda: _good)
     check("two owners: A's exception is not delivered again", _outcome(lambda: _native._test_guarded("ok")), ("returned", 1))
+    # a real reentrant asking call (HP-E2): the outer guarded call's source
+    # (ASKING 1) itself makes a guarded call (ASKING 2), whose entry reads an
+    # unreadable total (None) and whose body makes one wrapper entry on this,
+    # the owner, thread: the predicate-backed refresh there asks the source
+    # (at ASKING 2), which raises SystemExit; the inner call doesn't raise it
+    # (not the outermost), the outer one does, once; nothing leaks to the
+    # next call or to a reused pool worker
+    _excS, _trace3, _depth = SystemExit(), [], [0]
+
+    def _reentrant_source():
+        if _depth[0] == 0:
+            _trace3.append("outer")
+            _depth[0] = 1
+            try:
+                _trace3.append(("inner call", _outcome(lambda: _native._test_guarded("nested_now"))))
+            finally:
+                _depth[0] = 0
+            return _good
+        if "inner entry" not in _trace3:
+            _trace3.append("inner entry")
+            raise OSError("unreadable inside the reentrant call")
+        _trace3.append("inner wrapper entry")
+        raise _excS
+
+    _stand_in(_reentrant_source)
+    _t2.sleep(0.15)
+    _got = _outcome(lambda: _native._test_guarded("ok"))
+    check("reentrant: the source ran at ASKING 1, then 2 (entry), then 2 (the wrapper entry)", _trace3, ["outer", "inner entry", "inner wrapper entry", ("inner call", ("returned", 2))])
+    check("reentrant: the outer call raises the SystemExit, the same object", _raised(_got, _excS), True)
+    _stand_in(lambda: _good)
+    check("reentrant: back at depth 0, the next call raises nothing", _outcome(lambda: _native._test_guarded("ok")), ("returned", 1))
+    _f = _native_calls().get("aplist_many (run, a pool)")
+    check("reentrant: a pool call afterwards (reused workers) raises nothing", _outcome(_f)[0] if _f else "missing", "returned")
 else:
     print("test_capacity: the _test_guarded rows need a test-hooks build (skipped)")
 
