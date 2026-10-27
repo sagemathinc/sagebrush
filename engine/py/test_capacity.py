@@ -346,7 +346,7 @@ _EC = [[0, 0, 1, -1, 0]]  # (an elliptic curve: aplist_many runs on a pool)
 def _native_calls():
     return {
         "call (guarded)": lambda: _native.call('{"fn": "progress_tables"}'),
-        "aplist_many (run, a pool)": lambda: _native.aplist_many(_EC, 200, 4),
+        "aplist_many (run, a pool)": lambda: _native.ap.aplist_many(_EC, 200, 4),
     }
 
 
