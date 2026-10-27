@@ -223,6 +223,10 @@ export const PROTOCOL = {
   json: /^toJSON$/,
 };
 
+// lib calls whose result is never a function (an `any` result included): a protocol member
+// they're stored under can't be installed by them
+const NOT_A_FUNCTION = /^(ObjectConstructor\.(create|fromEntries|entries|keys|values|getOwnPropertyNames|getOwnPropertyDescriptors)|JSON\.parse|structuredClone|ArrayConstructor\.(from|of|new|call)|(Map|Set|WeakMap|WeakSet|Error|Date|RegExp|ArrayBuffer|SharedArrayBuffer|DataView|Promise)Constructor\.new|Array\.(map|filter|slice|concat|flat|flatMap|splice)|String\..*|Number\..*)(\.new)?$/;
+
 // the host's own modules (Node's builtins), which require() may name
 const HOST_MODULE = /^(node:)?(fs|os|path|crypto|zlib|util|url|child_process|worker_threads|v8|perf_hooks|module|process|buffer|events|stream|tty|readline|assert)$/;
 
@@ -452,6 +456,13 @@ export function census(root = ROOT, { commit = null } = {}) {
     if (f && isSourceFile(f.getSourceFile())) {
       for (const k of kinds) protocol[k].add(declOf(asTarget(f)).fp);
       return;
+    }
+    // a value that can't be a function, whatever its declared type: a literal, a new of a lib
+    // non-function class, or a lib call that makes plain data (Object.create(null), JSON.parse, ...)
+    if (ts.isObjectLiteralExpression(v) || ts.isArrayLiteralExpression(v) || ts.isTemplateExpression(v) || ts.isNoSubstitutionTemplateLiteral(v) || ts.isStringLiteralLike(v) || ts.isNumericLiteral(v)) return;
+    if (ts.isCallExpression(v) || ts.isNewExpression(v)) {
+      const d = checker.getResolvedSignature(v)?.getDeclaration?.();
+      if (d && libFile(d.getSourceFile().fileName) && NOT_A_FUNCTION.test(libMemberName(d) + (ts.isNewExpression(v) ? ".new" : ""))) return;
     }
     const t = checker.getTypeAtLocation(v);
     if (!(t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) && !t.getCallSignatures().length && !(t.isUnion?.() && t.types.some((u) => u.getCallSignatures().length || u.flags & ts.TypeFlags.Any))) return;
