@@ -421,7 +421,8 @@ def test_hooks():
 # ------------------------------------------------------------------ native engine calls (after the guarded Stop window)
 
 NATIVE = [
-    ("factor", "n += 1\nfactor(next_prime(2^120) * next_prime(2^121))"),
+    # (test_interrupt.py's: a 60-digit semiprime, far beyond 2 s)
+    ("factor", "n += 1\nfrom sagebrush import nf\nnf.factor_integer(100000000000000000000000012349 * 300000000000000000000000000823)"),
     ("a GF(p) echelon", "n += 1\nF = GF(next_prime(2^62)); A = random_matrix(F, 1024, 1024); A.echelon_form().rank()"),
 ]
 
