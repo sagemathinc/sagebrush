@@ -348,7 +348,7 @@ try {
     ok(await ev("!document.querySelector('#shareform').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareunreachable').hidden"), "a 503 from the sign-in check: the form as before, not 'Sign in', and the list opens");
     await closeDialog();
     await ev("document.querySelector('#sharemenu').click()");
-    await until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden", 10000).catch(() => {});
+    await until("document.querySelector('#sharedlg').open && !document.querySelector('#sharechecking').textContent", 10000).catch(() => {});
     ok(await ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareform').hidden"), "...and File → Share again: still the Share dialog, not Copy share link");
     await closeDialog();
     await ev("window.fetch = window.__fetch");
@@ -361,10 +361,10 @@ try {
     const t0 = Date.now();
     await ev("document.querySelector('#sharemenu').click()");
     await until("document.querySelector('#sharedlg').open", 1000).catch(() => {});
-    const early = await ev("({ open: document.querySelector('#sharedlg').open, checking: !document.querySelector('#sharechecking').hidden, form: !document.querySelector('#shareform').hidden, signin: !document.querySelector('#sharesignin').hidden, link: !document.querySelector('#sharelink').disabled && !document.querySelector('#shareup').contains(document.querySelector('#sharelink')) })");
+    const early = await ev("({ open: document.querySelector('#sharedlg').open, checking: !!document.querySelector('#sharechecking').textContent, form: !document.querySelector('#shareform').hidden, signin: !document.querySelector('#sharesignin').hidden, link: !document.querySelector('#sharelink').disabled && !document.querySelector('#shareup').contains(document.querySelector('#sharelink')) })");
     ok(Date.now() - t0 < 1000 && early.open && early.checking && !early.form && !early.signin && early.link, "a slow sign-in check: the dialog is open at once, saying it's checking, its link usable: " + JSON.stringify(early));
     await until("!document.querySelector('#shareform').hidden", 10000).catch(() => {});
-    ok(await ev("!document.querySelector('#shareform').hidden && document.querySelector('#sharechecking').hidden"), "...then the form, the 'checking' note gone");
+    ok(await ev("!document.querySelector('#shareform').hidden && !document.querySelector('#sharechecking').textContent"), "...then the form, the 'checking' note gone");
     await until("/^(Checked|Found no|Stopped)/.test(document.querySelector('#sharestatus').textContent)", 60000).catch(() => {});
     await closeDialog();
     const g = await ev("window.sagebrush.share.generation");
@@ -374,6 +374,16 @@ try {
     await closeDialog();
     await sleep(2500);
     ok(await ev(`!document.querySelector('#sharedlg').open && window.sagebrush.share.generation === ${g}`), "closed while checking: the check's end opens nothing, and no file list is made");
+    // (board's note b: the link, used mid-check: it copies, closes the dialog, and that open stops there)
+    await ev("document.querySelector('#status').textContent = ''");
+    await ev("document.querySelector('#sharemenu').click()");
+    await until("document.querySelector('#sharedlg').open && !!document.querySelector('#sharechecking').textContent", 1000).catch(() => {});
+    await sleep(200);
+    await ev("document.querySelector('#sharelink').click()");
+    await sleep(2500);
+    ok(await ev(`!document.querySelector('#sharedlg').open && /^link (copied|in the address bar)$/.test(document.querySelector('#status').textContent) && location.hash.length > 1 && window.sagebrush.share.generation === ${g}`), "Copy link while checking: the link is copied and the dialog closed, and the check's end opens nothing: " + (await ev("document.querySelector('#status').textContent")));
+    // (the copied link left in the address bar is taken out: nothing later reads it)
+    await ev("history.replaceState(null, '', location.pathname + location.search)");
     await ev("window.fetch = window.__fetch");
   }
   // ---- nothing known (a fresh page whose every check fails), then a 404: board's untested row, and note 2
@@ -388,21 +398,45 @@ try {
     await q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
     ok((await q.ev("window.__me ?? null")) === 503, "(...and in place in the page, before its first check)");
     // (on a failure, the dialog's state: which part of it is shown)
-    const st = () => q.ev("JSON.stringify({ open: document.querySelector('#sharedlg').open, checking: !document.querySelector('#sharechecking').hidden, up: !document.querySelector('#shareup').hidden, unreachable: !document.querySelector('#shareunreachable').hidden, signin: !document.querySelector('#sharesignin').hidden, form: !document.querySelector('#shareform').hidden, menu: document.querySelector('#sharemenu').textContent, stubbed: window.__me, status: document.querySelector('#status')?.textContent })");
+    const st = () => q.ev("JSON.stringify({ open: document.querySelector('#sharedlg').open, checking: !!document.querySelector('#sharechecking').textContent, up: !document.querySelector('#shareup').hidden, unreachable: !document.querySelector('#shareunreachable').hidden, signin: !document.querySelector('#sharesignin').hidden, form: !document.querySelector('#shareform').hidden, menu: document.querySelector('#sharemenu').textContent, stubbed: window.__me, status: document.querySelector('#status')?.textContent })");
     const t0 = Date.now();
     await q.ev("document.querySelector('#sharemenu').click()");
-    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden", 12000).catch(() => {});
+    await q.until("document.querySelector('#sharedlg').open && !document.querySelector('#sharechecking').textContent", 12000).catch(() => {});
     // (the end state, apart from the stub: the stubbed 503's check ends within its 10 s bound)
-    ok(Date.now() - t0 < 11000 && (await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden")), `(the check ends: ${Date.now() - t0} ms) ` + (await st()));
+    ok(Date.now() - t0 < 11000 && (await q.ev("document.querySelector('#sharedlg').open && !document.querySelector('#sharechecking').textContent")), `(the check ends: ${Date.now() - t0} ms) ` + (await st()));
     ok(await q.ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareup').hidden && !document.querySelector('#shareunreachable').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "nothing known and the check fails again: the dialog says why, with neither 'Sign in' nor the form: " + (await st()));
     await q.ev("document.querySelector('#sharedlg').close()");
     // (set before this open's own check, which reads it when it asks)
     await q.ev("window.__me = 404");
     const asked = await q.ev("window.__served.length");
     await q.ev("document.querySelector('#sharemenu').click()");
-    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').hidden", 12000).catch(() => {});
+    await q.until("document.querySelector('#sharedlg').open && !document.querySelector('#sharechecking').textContent", 12000).catch(() => {});
     ok((await q.ev(`window.__served.slice(${asked}).join()`)) === "404", "(this open's check was answered 404 by the stub: " + (await q.ev("window.__served.join()")) + ")");
     ok(await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#shareup').hidden && !document.querySelector('#sharelink').hidden"), "then a 404 (this site has no sharing): no Upload section at all, the link still there: " + (await st()));
+    await raw("Target.closeTarget", { targetId: q.targetId });
+    await raw("Target.disposeBrowserContext", { browserContextId });
+  }
+  // ---- board's H1: Share clicked on a fresh page while its FIRST check is still pending (slow): the dialog
+  // at once, saying it's checking, never a copied link; then that check's own answer (not asked twice)
+  for (const [code, want] of [[401, "signin"], [404, "linkonly"]]) {
+    const { browserContextId } = await raw("Target.createBrowserContext");
+    const q = await newPage(browserContextId);
+    await q.send("Page.enable");
+    const added = await q.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const f = window.fetch; window.__me = ${code}; window.__served = []; window.__pending = 0;
+      window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? (window.__pending++, new Promise((r) => setTimeout(r, 6000)).then(() => (window.__pending--, window.__served.push(window.__me), new Response('x', { status: window.__me })))) : f(u, o)); })()` });
+    await q.send("Page.navigate", { url: dev.site + "/" });
+    await q.until("!!document.querySelector('#sharemenu') && !!window.sagebrush", 30000);
+    const before = await q.ev("({ pending: window.__pending, served: window.__served.length, hash: location.hash, status: document.querySelector('#status').textContent })");
+    const t0 = Date.now();
+    await q.ev("document.querySelector('#sharemenu').click()");
+    await q.until("document.querySelector('#sharedlg').open", 1000).catch(() => {});
+    const early = await q.ev("({ open: document.querySelector('#sharedlg').open, checking: document.querySelector('#sharechecking').textContent })");
+    ok(!!added?.identifier && before.pending === 1 && before.served === 0 && early.open && /Checking/.test(early.checking) && Date.now() - t0 < 1500, `H1 (${code}) Share clicked while the first check is pending: the dialog is open at once, saying it's checking: ` + JSON.stringify({ before, early }));
+    await q.until("document.querySelector('#sharedlg').open && !document.querySelector('#sharechecking').textContent", 12000).catch(() => {});
+    const end = await q.ev("({ open: document.querySelector('#sharedlg').open, up: !document.querySelector('#shareup').hidden, signin: !document.querySelector('#sharesignin').hidden, form: !document.querySelector('#shareform').hidden, unreachable: !document.querySelector('#shareunreachable').hidden, served: window.__served.join(), hash: location.hash, status: document.querySelector('#status').textContent })");
+    const right = want === "signin" ? end.up && end.signin && !end.form && !end.unreachable : !end.up && !end.signin && !end.form;
+    ok(end.open && right && end.served === String(code), `H1 (${code}) ...then the first check's own answer, asked once (${want === "signin" ? "Sign in" : "the link only"}): ` + JSON.stringify(end));
+    ok(end.hash === before.hash && !/link (copied|in the address bar)/.test(end.status), "H1 (" + code + ") ...and never a copied link: the address bar's hash unchanged, no 'link copied'");
     await raw("Target.closeTarget", { targetId: q.targetId });
     await raw("Target.disposeBrowserContext", { browserContextId });
   }
