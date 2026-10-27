@@ -147,3 +147,47 @@ test("the superset scan's controls: each kind, multiline, reasons only inside th
   assert.equal(k("/** a /* @type {any} */\n")["jsdoc-any"].refused, 1);
   assert.deepEqual(k('const s = "/** any: fake"; /** @type {any} */ let a;\n')["jsdoc-any"], { permitted: 0, refused: 1 }, "the real any once, refused");
 });
+
+test("r7: a tag type's extent: unmatched braces cut at the comment's end (still refused); a multiline non-any type's leading * isn't a wildcard", () => {
+  assert.equal(hatches("/** @type {any */ let a;\n").counts["jsdoc-any"].refused, 1);
+  assert.deepEqual(hatches("/**\n * @type {{\n *   x: number\n * }}\n */\nlet a;\n").findings, []);
+  assert.deepEqual(hatches("/** @type {number} */ let a; // a * b\n").findings, [], "a * outside the type's braces doesn't count");
+  assert.equal(hatches("/** @type {Record<string, *>} */ let a;\n").counts["jsdoc-any"].refused, 1, "the wildcard inside the braces does");
+});
+
+test("r7: an unterminated /* fails closed (never outside every candidate); a // at the very end of the file is a candidate", () => {
+  assert.match(hatches("x;\n/* @ts-ignore").problems.join(), /fails closed/);
+  assert.equal(hatches("x; // @ts-ignore").counts["ts-ignore"].refused, 1, "a line comment with no terminator after it, at EOF");
+  assert.equal(hatches("x; // @ts-expect-error").counts["ts-expect-error"].refused, 1);
+  // (inside both a line candidate and a block candidate, both must allow it: the line one here has no reason)
+  assert.equal(hatches("// /* @ts-expect-error\n a justification for it */\nx;\n").counts["ts-expect-error"].refused, 1);
+  // (a line candidate's reason is judged in the SHORTEST one holding the token: a string's "// any: fake reason"
+  // earlier on the line can't lend one to the real line comment after it)
+  assert.equal(hatches('const s = "// any: fake reason"; // @type {any}\n').counts["jsdoc-any"].refused, 1);
+  assert.equal(hatches('const s = "// fine"; // @ts-expect-error\n').counts["ts-expect-error"].refused, 1);
+  // (a line candidate ends at its terminator: hatch text in code on a later line is in no candidate)
+  assert.deepEqual(hatches("// a comment\nconst s = '@' + 'x'; const t = 1; // ok\nconst u = s + '@ts-ignore'.slice(0, 0);\n").findings, []);
+});
+
+test("r7 linearity (daybreak2): pathological inputs at 0.5, 1 and 2 MiB scan in linear time, each doubling well under 3x", () => {
+  const MiB = 1 << 20;
+  const kinds: [string, (n: number) => string][] = [
+    ["/*/*/*...", (n) => "/*".repeat(n / 2)],
+    ["////...", (n) => "/".repeat(n)],
+    ["one unclosed /*", (n) => "/*" + "x".repeat(n - 2)],
+    ["/*x/*x/*x... (every /* unclosed: '/*/*' holds a '*/', this doesn't)", (n) => "/*x".repeat(Math.floor(n / 3))],
+    ["unmatched @type { in one block", (n) => "/**" + " @type {".repeat(Math.floor((n - 5) / 8)) + "*/"],
+    ["// @ts-ignore lines", (n) => "// @ts-ignore\n".repeat(Math.floor(n / 14))],
+  ];
+  const time = (s: string) => { let best = Infinity; for (let k = 0; k < 3; k++) { const t0 = process.hrtime.bigint(); hatches(s); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); } return best; };
+  const rows: Record<string, number[]> = {};
+  for (const [name, make] of kinds) {
+    const ms = [MiB / 2, MiB, 2 * MiB].map((n) => time(make(n)));
+    rows[name] = ms.map((x) => +x.toFixed(1));
+    // (a linear scan doubles its time with its input; quadratic would quadruple: bound each doubling at 3x, with a
+    // floor of 20 ms for noise at the small end, and the 2 MiB run at 4 s on a busy runner)
+    for (const k of [1, 2]) assert.ok(ms[k] <= 3 * Math.max(ms[k - 1], 20), `${name}: ${rows[name].join(" / ")} ms over 0.5 / 1 / 2 MiB is not linear`);
+    assert.ok(ms[2] < 4000, `${name}: 2 MiB took ${ms[2]} ms`);
+  }
+  console.log(JSON.stringify({ tsc_web_hatches_linearity_ms: rows }));
+});
