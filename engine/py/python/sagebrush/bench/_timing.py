@@ -23,10 +23,14 @@ ONCE = 10.0  # calls this long are timed once
 
 
 class Timing:
-    """Seconds per call of each sample, the calls per sample, the answer."""
+    """Seconds per call of each sample, the calls per sample, the answer,
+    and (from sample()) the total of the calibration run that chose the calls
+    per sample: only that run is promised to reach TARGET; the samples reuse
+    its n and can be a little faster."""
 
-    def __init__(self, times, calls, answer):
+    def __init__(self, times, calls, answer, calibrated=None):
         self.times, self.calls, self.answer = list(times), calls, answer
+        self.calibrated = calibrated
 
     @property
     def median(self):
@@ -42,7 +46,7 @@ def sample(f, repeat):
     answer = f()
     t = clock() - t0
     if t >= ONCE:
-        return Timing([t], 1, answer)
+        return Timing([t], 1, answer, calibrated=t)
     n = 1
     while t < TARGET:
         n = n * 10 if t <= 0 else max(n + 1, math.ceil(n * 1.2 * TARGET / t))
@@ -56,7 +60,7 @@ def sample(f, repeat):
         for _ in range(n):
             answer = f()
         times.append((clock() - t0) / n)
-    return Timing(times, n, answer)
+    return Timing(times, n, answer, calibrated=t)
 
 
 def _first_line(cmd):
