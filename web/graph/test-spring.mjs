@@ -3,7 +3,7 @@
 // Node and Deno too), linked boxes end nearer than others, and past its caps
 // it refuses. With bun:
 //   bun web/graph/test-spring.mjs
-import { springLayout, springSteps, gapViolations, springWork, WORK, MAX_NODES, MAX_EDGES, MAX_FRAMES, MIN_LENGTH, MAX_LENGTH } from "./spring.ts";
+import { springLayout, springSteps, gapViolations, springWork, WORK, MAX_NODES, MAX_EDGES, MAX_FRAMES, MIN_LENGTH, MAX_LENGTH, packRows, placeRows } from "./spring.ts";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -166,7 +166,14 @@ check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }
 // last frame)
 {
   const house = (o) => [[0, 1], [1, 2], [2, 0], [2, 3], [3, 4], [4, 0]].map(([a, b]) => ["v" + (a + o), "v" + (b + o)]);
-  const cases = { "two houses": [pts(10), [...house(0), ...house(5)]], parts: GRAPHS.parts, "pairs and a triangle": [pts(9, 20, 20), [["v0", "v1"], ["v2", "v3"], ["v4", "v5"], ["v6", "v7"], ["v7", "v8"], ["v8", "v6"]]] };
+  const pinnedOne = pts(10).map((n, i) => (i === 0 ? { ...n, fixed: { x: 40, y: -30 } } : n));
+  const cases = {
+    "two houses": [pts(10), [...house(0), ...house(5)]],
+    parts: GRAPHS.parts,
+    "pairs and a triangle": [pts(9, 20, 20), [["v0", "v1"], ["v2", "v3"], ["v4", "v5"], ["v6", "v7"], ["v7", "v8"], ["v8", "v6"]]],
+    // (python's note: a part with a fixed node; the free parts go below it)
+    "two houses, one with a fixed node": [pinnedOne, [...house(0), ...house(5)]],
+  };
   for (const [name, [nodes, edges]] of Object.entries(cases)) {
     // (the parts: union-find over the edges)
     const up = new Map(nodes.map((n) => [n.id, n.id]));
@@ -174,7 +181,9 @@ check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }
     for (const [a, b] of edges) up.set(find(a), find(b));
     const partOf = new Map(nodes.map((n) => [n.id, find(n.id)]));
     const frames = [...springSteps(nodes, edges, { seed: 3 }, 1)];
-    let counted = true, apart = true, where = "";
+    let counted = true, apart = true, where = "", rowsKept = true, rowsWhere = "";
+    const pinnedParts = new Set(nodes.filter((n) => n.fixed).map((n) => partOf.get(n.id)));
+    let rows0 = null;
     frames.forEach((f, k) => {
       if (f.size !== nodes.length || nodes.some((n) => !f.has(n.id))) counted = false;
       const bb = new Map();
@@ -187,9 +196,42 @@ check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }
         const [a, b] = [boxes[i], boxes[j]];
         if (a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3] && apart) { apart = false; where = `frame ${k} of ${frames.length}`; }
       }
+      // (the free parts' rows: parts of a row share their box's top; the
+      // rows, and each row's order left to right, kept until the last frame)
+      if (k < frames.length - 1) {
+        const free = [...bb.entries()].filter(([r]) => !pinnedParts.has(r)).sort((a, b) => a[1][1] - b[1][1] || a[1][0] - b[1][0]);
+        const rows = [];
+        for (const [r, b] of free) {
+          const last = rows.at(-1);
+          if (last && Math.abs(last.top - b[1]) < 1e-3) last.parts.push(r);
+          else rows.push({ top: b[1], parts: [r] });
+        }
+        const shape = JSON.stringify(rows.map((x) => x.parts));
+        if (rows0 === null) rows0 = shape;
+        else if (shape !== rows0 && rowsKept) { rowsKept = false; rowsWhere = `frame ${k}: ${shape} after ${rows0}`; }
+      }
     });
     check(counted, `${name}: every frame places each node exactly once`);
     check(apart, `${name}: in every frame the parts' boxes are apart (${where})`);
+    check(rowsKept, `${name}: no part changes row, nor its place in it, before the last frame (${rowsWhere})`);
+  }
+}
+
+// the animation's packing slides, never jumps (astra2's review of #240):
+// two parts of 100 x h; between h = 148.22 and 148.23 the packing's own row
+// break moves the second part to the other row, but with the rows kept, as
+// the animation keeps them, its offset moves by about the 0.01 of growth, in
+// both directions
+{
+  const free = (h) => [0, 1].map(() => ({ boxes: 2, bb: { x0: 0, y0: 0, x1: 100, y1: h } }));
+  const bbs = (h) => free(h).map((f) => f.bb);
+  const [lo, hi] = [148.22, 148.23];
+  check(JSON.stringify(packRows(free(lo), 24)) !== JSON.stringify(packRows(free(hi), 24)), `the control crosses the packing's row break (${JSON.stringify(packRows(free(lo), 24))} vs ${JSON.stringify(packRows(free(hi), 24))})`);
+  for (const [from, to] of [[lo, hi], [hi, lo]]) {
+    const rows = packRows(free(from), 24);
+    const a = placeRows(bbs(from), rows, 24, null), b = placeRows(bbs(to), rows, 24, null);
+    const jump = Math.max(...a.flatMap((p, i) => [Math.abs(p[0] - b[i][0]), Math.abs(p[1] - b[i][1])]));
+    check(jump <= Math.abs(to - from) + 1e-9, `h ${from} -> ${to} with ${from}'s rows: each part moves by at most the growth (${jump.toFixed(4)})`);
   }
 }
 

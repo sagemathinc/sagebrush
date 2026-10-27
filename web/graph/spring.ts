@@ -212,11 +212,17 @@ function plan(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts):
   return { parts, all, gap, left: WORK - used - 2 * n * n };
 }
 
+// (a movable box's top-left corner, moved by (ox, oy) and rounded: one rule
+// for the layout and for the animation's frames)
+const corner = (b: Body, ox = 0, oy = 0) => {
+  const r = (v: number) => Math.round(v * 1e6) / 1e6 + 0;
+  return { x: r(b.x - b.w / 2 + ox), y: r(b.y - b.h / 2 + oy) };
+};
+
 function snapshot(all: Body[]): Positions {
   const out: Positions = new Map();
-  const r = (v: number) => Math.round(v * 1e6) / 1e6 + 0;
   // (a fixed box exactly where it was given)
-  for (const b of all) out.set(b.id, b.fixed ? { x: b.fx, y: b.fy } : { x: r(b.x - b.w / 2), y: r(b.y - b.h / 2) });
+  for (const b of all) out.set(b.id, b.fixed ? { x: b.fx, y: b.fy } : corner(b));
   return out;
 }
 
@@ -280,29 +286,64 @@ const box = (bs: Body[]) => {
   return { x0, y0, x1, y1 };
 };
 
-/** Where each part goes when the parts are packed in rows, largest first,
- * below the parts with a fixed node (those stay where they are): its offset,
- * from where its boxes are now.  Nothing is moved. */
-function packing(p: Plan): Map<Part, [number, number]> {
-  const { parts, gap } = p;
-  const out = new Map<Part, [number, number]>();
-  const pinned = parts.filter((pt) => pt.bodies.some((b) => b.fixed));
-  const free = parts.filter((pt) => !pt.bodies.some((b) => b.fixed)).map((pt, i) => ({ pt, i, bb: box(pt.bodies) }));
-  free.sort((a, b) => b.pt.bodies.length - a.pt.bodies.length || a.i - b.i);
-  const pin = pinned.length ? box(pinned.flatMap((pt) => pt.bodies)) : null;
+export type BoxBounds = { x0: number; y0: number; x1: number; y1: number };
+
+/** The packing's rows: the free parts, by index into `free`, largest first
+ * (the most boxes, then input order), in rows of a width from their total
+ * area; each row a list of parts, left to right.  Discrete: a part's box
+ * crossing the width moves it to the next row (exported for the tests). */
+export function packRows(free: { boxes: number; bb: BoxBounds }[], gap: number): number[][] {
+  const order = free.map((f, i) => i).sort((a, b) => free[b].boxes - free[a].boxes || a - b);
   let total = 0;
   for (const f of free) total += (f.bb.x1 - f.bb.x0 + gap) * (f.bb.y1 - f.bb.y0 + gap);
   const width = Math.max(Math.sqrt(total) * 1.2, ...free.map((f) => f.bb.x1 - f.bb.x0), 0);
-  let x = 0, y = pin ? pin.y1 + gap * 2 : 0, rowH = 0;
-  const left = pin ? pin.x0 : 0;
-  for (const f of free) {
-    const w = f.bb.x1 - f.bb.x0, h = f.bb.y1 - f.bb.y0;
-    if (x > 0 && x + w > width) { x = 0; y += rowH + gap * 2; rowH = 0; }
-    out.set(f.pt, [left + x - f.bb.x0, y - f.bb.y0]);
+  const rows: number[][] = [];
+  let x = 0;
+  for (const i of order) {
+    const w = free[i].bb.x1 - free[i].bb.x0;
+    if (!rows.length || (x > 0 && x + w > width)) { rows.push([]); x = 0; }
+    rows[rows.length - 1].push(i);
     x += w + gap * 2;
-    rowH = Math.max(rowH, h);
+  }
+  return rows;
+}
+
+/** Each free part's offset (by index into `bbs`) for given rows: left to
+ * right in each row, the rows one below another, below `pin` (the parts
+ * with a fixed node) if any.  Continuous in the boxes: for fixed rows, a box
+ * that grows a little moves its neighbours a little (exported for the tests). */
+export function placeRows(bbs: BoxBounds[], rows: number[][], gap: number, pin: BoxBounds | null): [number, number][] {
+  const out: [number, number][] = bbs.map(() => [0, 0]);
+  const left = pin ? pin.x0 : 0;
+  let y = pin ? pin.y1 + gap * 2 : 0;
+  for (const row of rows) {
+    let x = 0, rowH = 0;
+    for (const i of row) {
+      const bb = bbs[i];
+      out[i] = [left + x - bb.x0, y - bb.y0];
+      x += bb.x1 - bb.x0 + gap * 2;
+      rowH = Math.max(rowH, bb.y1 - bb.y0);
+    }
+    y += rowH + gap * 2;
   }
   return out;
+}
+
+/** The free parts (no fixed node) and the box of the pinned ones. */
+function freeParts(p: Plan) {
+  const pinned = p.parts.filter((pt) => pt.bodies.some((b) => b.fixed));
+  const free = p.parts.filter((pt) => !pt.bodies.some((b) => b.fixed));
+  return { free, bbs: free.map((pt) => box(pt.bodies)), pin: pinned.length ? box(pinned.flatMap((pt) => pt.bodies)) : null };
+}
+
+/** Where each free part goes when the parts are packed (packRows, then
+ * placeRows; with `rows` given, those rows rather than the current ones):
+ * its offset from where its boxes are now.  Nothing is moved. */
+function packing(p: Plan, rows?: number[][]): Map<Part, [number, number]> {
+  const { free, bbs, pin } = freeParts(p);
+  const r = rows ?? packRows(free.map((pt, i) => ({ boxes: pt.bodies.length, bb: bbs[i] })), p.gap);
+  const off = placeRows(bbs, r, p.gap, pin);
+  return new Map(free.map((pt, i) => [pt, off[i]]));
 }
 
 /** The parts packed (packing()); then no box is closer than gap to another. */
@@ -323,15 +364,16 @@ function finish(p: Plan): void {
 }
 
 /** A frame of the animation: the parts as the iterations have them, each
- * moved to where the packing would put it now, so that while they settle
- * the connected parts are side by side, as at the end, never drawn over
- * each other (William's X3: a graph of two parts looked like one drawn
- * twice until the last frame). */
-function frame(p: Plan): Positions {
+ * moved to where the packing puts it now, so that while they settle the
+ * connected parts are side by side, never drawn over each other (William's
+ * X3: a graph of two parts looked like one drawn twice until the last
+ * frame).  The rows are the first frame's, kept for the whole animation:
+ * a part only slides as boxes grow, never jumps to another row (astra2's
+ * review); the last frame is finish()'s layout. */
+function frame(p: Plan, rows: number[][]): Positions {
   const out = snapshot(p.all);
-  const r = (v: number) => Math.round(v * 1e6) / 1e6 + 0;
-  for (const [pt, [ox, oy]] of packing(p)) {
-    for (const b of pt.bodies) out.set(b.id, { x: r(b.x - b.w / 2 + ox), y: r(b.y - b.h / 2 + oy) });
+  for (const [pt, [ox, oy]] of packing(p, rows)) {
+    for (const b of pt.bodies) out.set(b.id, corner(b, ox, oy));
   }
   return out;
 }
@@ -354,9 +396,17 @@ export function* springSteps(nodes: SpringNode[], edges: [string, string][], opt
   if (p === null) return;
   const most = Math.max(0, ...p.parts.map((pt) => pt.iterations));
   const k0 = Math.max(1, Math.floor(every), Math.ceil(most / MAX_FRAMES));
+  // (the rows of the animation's packing, fixed at its first frame)
+  let rows: number[][] | null = null;
   for (let k = 0; k < most; k++) {
     for (const part of p.parts) if (part.done < part.iterations) part.step(p.gap);
-    if ((k + 1) % k0 === 0) yield frame(p);
+    if ((k + 1) % k0 === 0) {
+      if (rows === null) {
+        const { free, bbs } = freeParts(p);
+        rows = packRows(free.map((pt, i) => ({ boxes: pt.bodies.length, bb: bbs[i] })), p.gap);
+      }
+      yield frame(p, rows);
+    }
   }
   finish(p);
   const last = checked(nodes, snapshot(p.all), p.gap);
