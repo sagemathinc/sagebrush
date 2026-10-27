@@ -10,11 +10,14 @@
 //   created on both sides with the same key, merged field by field from an
 //   empty base (two different edges between the same ends: both kept).
 // - Fields: changed on one side, that side's; changed to equal values, taken
-//   once; a text field changed differently on both sides, merged by
-//   patchflow's mergeStrings3; any other field changed differently, a
-//   conflict: the value whose canonical JSON sorts first is kept (absent <
-//   null < any JSON value), the other kept as its alternative.  A missing
-//   field is never null.
+//   once; a text field changed differently on both sides, merged by lines
+//   (web/notebook/text-overlap.ts's lineMerge3, the notebooks' detector too)
+//   when the two sides' line edits provably don't overlap; when they do (or
+//   might: same-gap insertions, touching or ambiguous ranges), a text-overlap
+//   conflict, never a hybrid text; any other field changed differently, a
+//   conflict.  A conflict keeps the value whose canonical JSON sorts first
+//   (absent < null < any JSON value) and the other as its alternative, so both
+//   sides' whole values survive.  A missing field is never null.
 // - Then the graph, on records, before anything decodes it (fromRecords walks
 //   from the roots, so a cycle would vanish there): a parent cycle is broken by
 //   moving its member with the smallest key to the top of its page; an item
@@ -25,15 +28,19 @@
 //   `paged` on one side with any change on the other is refused.  Every
 //   record must then be reachable from a root, or the merge is refused.
 // - Work: one ledger per merge.  Every record and field costs a unit; a text
-//   merge costs an upper bound of its diffs' work: mergeStrings3 bounds each
-//   diff's middle by MAX_DIFF_PRODUCT units (patchflow 0.16's merge3.js), and
-//   takes no budget of its own, so the bound is charged before the call.
-//   Using exactly the ledger succeeds; the next unit refuses the merge.
+//   merge charges lineMerge3's own work to the same ledger, before it
+//   allocates (each diff also at most TEXT_DIFF_PRODUCT units); past the ledger
+//   it is "exhausted", and the merge is refused, never guessed.  Using exactly
+//   the ledger succeeds; the next unit refuses the merge.
+
+import { lineMerge3 } from "../notebook/text-overlap";
 
 /** A record: {type, page, id, ...fields}. */
 export type Rec = Record<string, unknown>;
 export type MergeReport =
   | { kind: "conflict"; key: string; field: string; kept: unknown; other: unknown }
+  /** a text field whose two sides' line edits overlap (or may): a conflict, kept and other whole texts */
+  | { kind: "text-overlap"; key: string; field: string; kept: string; other: string }
   | { kind: "kept-after-delete"; key: string }
   | { kind: "both-added-edge"; key: string; other: string }
   | { kind: "cycle"; key: string }
@@ -52,8 +59,6 @@ export type MergeResult =
   | { refused: "work" | "paged" | "conservation" | "time"; used: number };
 
 export interface MergeOptions {
-  /** patchflow's mergeStrings3 (passed in: the page loads patchflow lazily) */
-  mergeStrings3: (o: { base: string; a: string; b: string }) => string;
   /** the work ledger: units this merge may use */
   work: number;
   /** a wall-clock deadline (ms since the epoch): past it, refused (the hub's MERGE_MS) */
@@ -64,8 +69,6 @@ export interface MergeOptions {
 
 /** The text fields: merged as text (history.ts's SCHEMA.stringCols). */
 export const TEXT_FIELDS = ["title", "text", "code", "detail", "label", "intro"];
-/** patchflow 0.16's merge3.js: a diff's middle above this many units is one replacement. */
-export const MAX_DIFF_PRODUCT = 4_000_000;
 /** A field's absence, as an alternative's value. */
 export const ABSENT = { absent: true } as const;
 
@@ -96,7 +99,7 @@ export function boardMerge3(base: Rec[], a: Rec[], b: Rec[], o: MergeOptions): M
     if (o.deadline !== undefined && now() > o.deadline) throw new Refused("time");
   };
   try {
-    const r = merge(base, a, b, o, charge);
+    const r = merge(base, a, b, charge, () => left);
     return { ...r, used: o.work - left };
   } catch (e) {
     if (e instanceof Refused) return { refused: e.why, used: o.work - Math.max(left, 0) };
@@ -104,7 +107,7 @@ export function boardMerge3(base: Rec[], a: Rec[], b: Rec[], o: MergeOptions): M
   }
 }
 
-function merge(base: Rec[], a: Rec[], b: Rec[], o: MergeOptions, charge: (n: number) => void) {
+function merge(base: Rec[], a: Rec[], b: Rec[], charge: (n: number) => void, left: () => number) {
   const index = (rs: Rec[]) => {
     const m = new Map<string, Rec>();
     for (const r of rs) { charge(1); m.set(keyOf(r), r); }
@@ -119,11 +122,13 @@ function merge(base: Rec[], a: Rec[], b: Rec[], o: MergeOptions, charge: (n: num
   const changed = (m: Map<string, Rec>) => m.size !== B.size || [...m].some(([k, r]) => !B.has(k) || canon(B.get(k)) !== canon(r));
   if ((pagedOf(A) !== pagedOf(B) && changed(C)) || (pagedOf(C) !== pagedOf(B) && changed(A))) throw new Refused("paged");
 
-  const text = (base: string, x: string, y: string) => {
-    // (two diffs, base to each side: each bounded by its middle's product, plus the texts' lengths)
-    const diff = (s: string, t: string) => Math.min(s.length * t.length, MAX_DIFF_PRODUCT) + s.length + t.length;
-    charge(diff(base, x) + diff(base, y) + x.length + y.length);
-    return o.mergeStrings3({ base, a: x, b: y });
+  // (both sides' line edits applied to the base, or false when they overlap or may; its work on this merge's ledger)
+  const text = (base: string, x: string, y: string): string | false => {
+    const ledger = { left: Math.max(left(), 0) };
+    const r = lineMerge3(base, x, y, ledger);
+    charge(Math.max(left(), 0) - ledger.left);
+    if (r === "exhausted") throw new Refused("work");
+    return r;
   };
   // a record changed (or created) on both sides: field by field
   const fields = (key: string, r0: Rec | undefined, r1: Rec, r2: Rec): Rec => {
@@ -138,7 +143,15 @@ function merge(base: Rec[], a: Rec[], b: Rec[], o: MergeOptions, charge: (n: num
       else if (same(v0, v1)) v = v2;
       else if (same(v0, v2)) v = v1;
       else if (TEXT_FIELDS.includes(f) && typeof v1 === "string" && typeof v2 === "string" && (v0 === NONE || typeof v0 === "string")) {
-        v = text(v0 === NONE ? "" : (v0 as string), v1, v2);
+        const m = text(v0 === NONE ? "" : (v0 as string), v1, v2);
+        if (m !== false) v = m;
+        else {
+          // (the line edits overlap, or may: the two whole texts, one kept and one its alternative, never a hybrid)
+          const [kept, other] = rank(v1) <= rank(v2) ? [v1, v2] : [v2, v1];
+          v = kept;
+          reports.push({ kind: "text-overlap", key, field: f, kept, other });
+          alternatives.push({ key, field: f, value: other });
+        }
       } else {
         // (a conflict: the first by the tie-break's order kept, the other its alternative)
         const [kept, other] = rank(v1) <= rank(v2) ? [v1, v2] : [v2, v1];

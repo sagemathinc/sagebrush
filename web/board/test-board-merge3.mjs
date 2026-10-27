@@ -4,7 +4,6 @@
 // edit lost (each change present in the result, or reported with its
 // alternative); the work ledger at its exact bound and one unit less.
 //   bun web/board/test-board-merge3.mjs
-import { mergeStrings3 } from "patchflow";
 import { boardMerge3, keyOf, canon, ABSENT } from "./merge.ts";
 import { toRecords } from "./history.ts";
 
@@ -12,7 +11,7 @@ let checks = 0;
 const fails = [];
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 const BIG = 1e12;
-const m3 = (base, a, b, work = BIG) => boardMerge3(base, a, b, { mergeStrings3, work });
+const m3 = (base, a, b, work = BIG) => boardMerge3(base, a, b, { work });
 const recs = (d) => toRecords({ format: "sagebrush-board", version: 1, ...d });
 const byKey = (rs) => new Map(rs.map((r) => [keyOf(r), r]));
 const item = (rs, id, page = "") => byKey(rs).get(keyOf({ type: "item", page, id }));
@@ -47,9 +46,41 @@ const board = recs({
   check(n.custom === "keep" && n.x === 5 && n.text === "hello brave world", "independent fields: both kept, the extension field too");
 }
 {
-  // text changed on both sides: merged as text
+  // text changed on both sides, on different lines: merged by lines (lineMerge3), with no report
+  const base3 = edit(board, "n", (r) => ({ ...r, text: "one\ntwo\nthree\n" }));
+  const x = edit(base3, "n", (r) => ({ ...r, text: "ONE\ntwo\nthree\n" })), y = edit(base3, "n", (r) => ({ ...r, text: "one\ntwo\nTHREE\n" }));
+  const r = m3(base3, x, y);
+  check(item(r.records, "n").text === "ONE\ntwo\nTHREE\n" && !r.reports.some((q) => q.kind === "text-overlap"), "text on both sides, different lines: merged by lines");
+}
+{
+  // text changed on both sides, on the same line: a text-overlap conflict, both whole texts kept, never a hybrid
   const x = edit(board, "n", (r) => ({ ...r, text: "hello brave world" })), y = edit(board, "n", (r) => ({ ...r, text: "hello world!" }));
-  check(item(m3(board, x, y).records, "n").text === "hello brave world!", "text on both sides: merged by mergeStrings3");
+  const r = m3(board, x, y), s = m3(board, y, x);
+  const rep = r.reports.find((q) => q.kind === "text-overlap"), alt = r.alternatives.find((q) => q.field === "text");
+  check(item(r.records, "n").text === "hello brave world" && rep?.kept === "hello brave world" && rep?.other === "hello world!" && alt?.value === "hello world!",
+    `the same line on both sides: one whole text kept, the other its alternative (${JSON.stringify([item(r.records, "n").text, rep, alt])})`);
+  check(canon(r) === canon(s), "...and symmetric");
+  // (patchflow's mergeStrings3 would have made the hybrid "hello brave world!")
+}
+{
+  // the ledger runs out inside the text merge itself: refused, never a cheaper result (no conflict, no partial text)
+  // (a edits the first and the last line, so its diff spans every line: the line diff is most of the merge's work)
+  const lines = (n, edit) => Array.from({ length: n }, (_, i) => `line ${i}${edit(i) ? " edited" : ""}\n`).join("");
+  const base3 = edit(board, "n", (r) => ({ ...r, text: lines(120, () => false) }));
+  const x = edit(base3, "n", (r) => ({ ...r, text: lines(120, (i) => i === 0 || i === 119) }));
+  const y = edit(base3, "n", (r) => ({ ...r, text: lines(120, (i) => i === 60) }));
+  check(item(m3(base3, x, y).records, "n").text === lines(120, (i) => i === 0 || i === 60 || i === 119), "disjoint edits across a long text: merged");
+  const used = m3(base3, x, y).used;
+  const short = [1, 2, 10, 100, Math.floor(used / 2)].map((k) => m3(base3, x, y, used - k));
+  check(short.every((r) => r.refused === "work"), `every budget below ${used} units refused as work: ${JSON.stringify(short.map((r) => r.refused ?? "merged"))}`);
+}
+{
+  // two different insertions at the same place: an overlap, both kept
+  const base3 = edit(board, "n", (r) => ({ ...r, text: "a\nb\n" }));
+  const x = edit(base3, "n", (r) => ({ ...r, text: "a\nX\nb\n" })), y = edit(base3, "n", (r) => ({ ...r, text: "a\nY\nb\n" }));
+  const r = m3(base3, x, y);
+  check(r.reports.some((q) => q.kind === "text-overlap" && q.field === "text") && [item(r.records, "n").text, r.alternatives.find((q) => q.field === "text")?.value].sort().join("|") === "a\nX\nb\n|a\nY\nb\n",
+    "two insertions at the same gap: a text-overlap, both whole texts kept");
 }
 {
   // a scalar on both sides: a conflict, symmetric, the other value its alternative
