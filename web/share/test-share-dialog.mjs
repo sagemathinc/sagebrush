@@ -754,11 +754,11 @@ try {
   {
     const mine = () => ev("(async () => (await (await fetch('/api/share/mine')).json()).collections.length)()");
     const snap = (k) => ev(`window.sagebrush.notebook.snapshot().${k} ?? null`);
-    // (a new notebook whose file is new to the server, so its upload PUTs it; the first cell reads table.csv)
+    // (a new notebook whose file is new to the server, so its upload PUTs it)
     const fresh = async (tag) => {
       await ev("document.querySelector('#filemenu [data-f=new]').click()");
       await until("document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value && !window.sagebrush.notebook.snapshot().share_id");
-      await setFirst(`T = open('table.csv').read()  # ${tag} ${Date.now()}`);
+      await setFirst(`T = 1  # ${tag} ${Date.now()}`);
       await sleep(700);
     };
     // (the page's own requests: the share's answer lost after the server made it, or a blob refused)
@@ -777,9 +777,13 @@ try {
       };
     })()`);
     const restore = () => ev("window.fetch = window.__realFetch ?? window.fetch");
-    const result = () => ev("document.querySelector('#shareresult').textContent");
+    // (each case on its own: one that throws is a failure, and the next still runs)
+    const block = async (name, fn) => {
+      try { await fn(); } catch (e) { ok(false, `${name} threw: ${e.message}`); await restore().catch(() => {}); await closeDialog().catch(() => {}); }
+    };
 
     // D1: a failed first upload, then a retry
+    await block("D1", async () => {
     await fresh("D1");
     const n0 = await mine();
     await openDialog();
@@ -791,8 +795,10 @@ try {
     const l1 = await shareNow("D1");
     ok(/\/s\//.test(l1) && (await mine()) === n0 + 1 && (await snap("share_id")) && !(await snap("share_attempt")), "D1 ...the retry makes exactly one share; share_id set, the attempt cleared");
     await closeDialog();
+    });
 
     // D3: the attempt can't be saved: nothing is read or sent
+    await block("D3", async () => {
     await fresh("D3");
     const n3 = await mine();
     await openDialog();
@@ -804,28 +810,35 @@ try {
     await restore();
     ok(/couldn't be saved/.test(f3) && sent3.length === 0 && (await mine()) === n3, `D3 a notebook whose attempt can't be saved isn't uploaded: no request to collections, check or blob (${JSON.stringify(sent3)}): ${f3}`);
     await closeDialog();
+    });
 
     // D4: a lost answer, then other files: never a success, and the earlier share is named
+    await block("D4", async () => {
     await fresh("D4");
     const n4 = await mine();
     await openDialog();
+    // (a workspace file besides the notebook, checked here by hand: what the analysis pre-checks isn't the point)
+    const extra = (await rows()).find((x) => x.name !== "Untitled.ipynb")?.name;
+    if (extra && !(await rows()).find((x) => x.name === extra)?.checked) await clickRow(extra);
     const had = await checkedNames();
     await intercept("lose");
     await shareNow("D4");
     const made4 = await ev("window.__made");
     await restore();
-    ok(made4?.collection && (await mine()) === n4 + 1 && had.includes("table.csv"), `(D4 the share was made, its answer lost; checked ${JSON.stringify(had)})`);
-    await clickRow("table.csv");
+    ok(made4?.collection && (await mine()) === n4 + 1 && !!extra && had.includes(extra), `(D4 the share was made, its answer lost; checked ${JSON.stringify(had)})`);
+    await clickRow(extra);
     const f4 = await shareNow("D4");
     const files4 = await ev(`(async () => (await (await fetch('/api/share/c/${made4?.collection}')).json()).manifest.files.map((f) => f.path).sort().join())()`);
     ok(/different files/.test(f4) && f4.includes(`/s/${made4?.collection}`) && !(await ev("!!document.querySelector('#shareresult a') && /^(Shared at|A new version)/.test(document.querySelector('#shareresult').textContent)")) && (await snap("share_id")) === made4?.collection && !(await snap("share_attempt")) && (await mine()) === n4 + 1 && files4 === [...had].sort().join(),
       `D4 the same attempt with a file unchecked: "shared with different files" and its link, not the success view; share_id is that share's, which still holds the first files (${files4}): ${f4}`);
     const l4 = await shareNow("D4");
     const files4b = await ev(`(async () => (await (await fetch('/api/share/c/${made4?.collection}')).json()).manifest.files.map((f) => f.path).sort().join())()`);
-    ok(/\/s\//.test(l4) && (await mine()) === n4 + 1 && !files4b.includes("table.csv"), `D4 ...the next upload is a new version of that share, with the current selection (${files4b})`);
+    ok(/\/s\//.test(l4) && (await mine()) === n4 + 1 && !files4b.split(",").includes(extra), `D4 ...the next upload is a new version of that share, with the current selection (${files4b})`);
     await closeDialog();
+    });
 
     // D5: a lost answer, the share deleted, then the retry
+    await block("D5", async () => {
     await fresh("D5");
     const n5 = await mine();
     await openDialog();
@@ -840,8 +853,10 @@ try {
     const l5 = await shareNow("D5");
     ok(/\/s\//.test(l5) && !l5.includes(made5?.collection) && (await mine()) === n5 + 1, "D5 ...the next upload makes a new share, with a new id");
     await closeDialog();
+    });
 
     // D6: copies and exports never carry the attempt
+    await block("D6", async () => {
     await fresh("D6");
     await ev("window.sagebrush.notebook.setMeta({ share_attempt: '0123456789abcdef0123456789abcdef' })");
     const { ipynb, link } = await ev("window.sagebrush.shareTest.exports()");
@@ -850,6 +865,7 @@ try {
     await until("window.sagebrush.notebook.snapshot().name === 'D6 copy'", 30000).catch(() => {});
     const copied = await snap("share_attempt");
     ok((await snap("name")) === "D6 copy" && !copied && typeof ipynb === "string" && ipynb.includes("cells") && !ipynb.includes("0123456789abcdef") && typeof link === "string" && link.includes("#") && !link.includes("0123456789abcdef"), "D6 \"make a copy\" has no attempt, and the notebook's .ipynb export and its share link don't carry it");
+    });
   }
 
   // ---- D2 (last: it crashes the page): the answer lost, the page crashed at once, then a reload
