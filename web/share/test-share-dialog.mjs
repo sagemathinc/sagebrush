@@ -418,24 +418,71 @@ try {
     await closeDialog();
   }
 
-  // ---- a pathological source: the dialog stays responsive, the fail-safe stops the analysis (§3)
+  // A stand-in for the analysis worker around the real one (deps-worker.ts, really parsing): it records,
+  // on the page's clock, when `name` is posted to it and when the worker next says anything. The worker
+  // parses a file synchronously, so between those two moments it is busy with that file and says nothing.
+  // With hold, what the worker says after `name` is held back from the page (t.quieted).
+  const WRAP = (name, hold, silenceMs) => `(() => {
+    const t = window.sagebrush.shareTest;
+    t.failsafe = { silenceMs: ${silenceMs}, sourceBytes: 1e9 };
+    t.terminated = 0; t.quieted = false; delete t.postedAt; delete t.nextAt;
+    t.createWorker = () => {
+      const w = new Worker('/sagebrush-share-deps.js');
+      const o = { onmessage: null, terminate: () => { t.terminated++; w.terminate(); },
+        postMessage: (m) => { if (String(m?.file?.path ?? '').endsWith(${JSON.stringify(name)})) { t.postedAt = performance.now(); if (${hold}) t.quieted = true; } w.postMessage(m); } };
+      w.onmessage = (e) => { if (t.postedAt !== undefined && t.nextAt === undefined) t.nextAt = performance.now(); if (!t.quieted) o.onmessage?.(e); };
+      return o;
+    };
+  })()`;
+  const unwrap = () => ev("(() => { const t = window.sagebrush.shareTest; delete t.failsafe; delete t.createWorker; })()");
+
+  // ---- a long parse in the worker: the dialog answers while it runs (§3)
   {
-    // (400,000 lines take pyparse seconds, past the 2 s silence fail-safe; a deeply nested source would
-    // fail at once, "too many nested parentheses", and be a parse note, not a stop: #172 r2's review.
-    // The worker really parses deep.py, but what it says after deep.py is held back from the page, so
-    // the silence is 2 s on any machine: a fast runner's parse can't finish first, train-9b's web-sync)
+    // (2,000,000 lines: pyparse takes seconds on any machine; the clicks must land while it runs, which
+    // is checked, and their round trip is timed from here, so that a page waiting on the parse would show)
+    await runFirst("open('long.py', 'w').write('x = 1\\n' * 2000000)\nprint('long')");
+    await setFirst(CODE + "\nimport long");
+    await ev(WRAP("long.py", false, 600000));
+    await openDialog({ wait: false });
+    await until("window.sagebrush.shareTest.postedAt !== undefined", 60000);
+    // (the post reaches the worker in well under 200 ms; from then on it is parsing)
+    await sleep(200);
+    const t0 = Date.now();
+    const r = await ev("(() => { const t = window.sagebrush.shareTest; const a = performance.now(); document.querySelector('#shareall').click(); document.querySelector('#sharenone').click(); const b = performance.now(); return { a, b, posted: t.postedAt, next: t.nextAt ?? null }; })()");
+    const rt = Date.now() - t0;
+    const during = r.posted + 150 < r.a && (r.next === null || r.next > r.b);
+    ok(during, `the clicks land while the worker parses long.py (posted at ${r.posted.toFixed(0)} ms, clicks ${r.a.toFixed(0)}-${r.b.toFixed(0)}, the worker's next message ${r.next === null ? "not yet" : r.next.toFixed(0)})`);
+    ok(rt < 500 && r.b - r.a < 100, `the dialog answers while the analysis parses (${rt} ms round trip, ${(r.b - r.a).toFixed(1)} ms in the page)`);
+    // (control: the same round trip sees a page that is busy: a 1.5 s loop on the page's own thread)
+    await ev("setTimeout(() => { const t = performance.now(); while (performance.now() - t < 1500) {} }, 0)");
+    await sleep(30);
+    const c0 = Date.now();
+    await ev("document.querySelector('#shareall').click()");
+    const crt = Date.now() - c0;
+    ok(crt >= 1000, `(control) the same measurement sees a page blocked for 1.5 s: ${crt} ms round trip`);
+    await closeDialog();
+    await unwrap();
+    // (long.py removed again: the later checks count the workspace's files)
+    await runFirst("import os\nos.remove('long.py')\nprint('removed')");
+    await setFirst(CODE);
+  }
+
+  // ---- the fail-safe: a worker silent past it is stopped, and the dialog still works (§3)
+  {
+    // (the watchdog, not responsiveness: the worker really parses deep.py, but what it says after deep.py
+    // is held back from the page, so the page sees a silent worker for the 2 s on any machine, train-9b's
+    // web-sync: a fast runner's parse could finish first. A deeply nested source would fail at once, "too
+    // many nested parentheses", and be a parse note, not a stop: #172 r2's review)
     await runFirst("open('deep.py', 'w').write('x = 1\\n' * 400000)\nprint('deep')");
     await setFirst(CODE + "\nimport deep");
-    await ev("(() => { const t = window.sagebrush.shareTest; t.failsafe = { silenceMs: 2000, sourceBytes: 1e9 }; t.terminated = 0; const real = () => new Worker('/sagebrush-share-deps.js'); t.createWorker = () => { const w = real(); let quiet = false; const o = { onmessage: null, postMessage: (m) => { if (String(m?.file?.path ?? '').endsWith('deep.py')) quiet = true; w.postMessage(m); }, terminate: () => { t.terminated++; w.terminate(); } }; w.onmessage = (e) => !quiet && o.onmessage?.(e); return o; }; })()");
+    await ev(WRAP("deep.py", true, 2000));
     await openDialog({ wait: false });
-    await sleep(500);
-    const ms = await ev("(() => { const t0 = performance.now(); document.querySelector('#shareall').click(); document.querySelector('#sharenone').click(); return performance.now() - t0; })()");
-    ok(ms < 100, `the dialog answers while the analysis parses (${ms.toFixed(1)} ms)`);
     await until("/^Stopped finding files/.test(document.querySelector('#sharestatus').textContent)", 30000);
+    ok(await ev("window.sagebrush.shareTest.quieted === true"), "the worker was silent to the page after deep.py (the hold-back engaged)");
     ok((await ev("window.sagebrush.shareTest.terminated")) === 1, "the fail-safe terminated the worker");
     ok(await ev("[...document.querySelectorAll('#sharelist .sharerow .why')].some((w) => w.textContent === 'not analyzed')"), "unchecked rows say 'not analyzed'");
     ok(!(await ev("document.querySelector('#shareupload').disabled")), "...and Upload still works");
-    await ev("(() => { const t = window.sagebrush.shareTest; delete t.failsafe; delete t.createWorker; })()");
+    await unwrap();
     await closeDialog();
     await setFirst(CODE);
   }
