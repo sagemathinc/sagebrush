@@ -454,11 +454,11 @@ def _reset_run_state():
 
 def _gc_page_temps():
     """Once per worker start, after ready: one time-bounded pass over the
-    plot3d page temporaries of writers that died (sage_plot3d.gc_temps).
+    plot3d page temporaries of writers that died (sage_plot3d._gc_temps).
     Nothing it meets stops the worker."""
     try:
         import importlib
-        importlib.import_module("sage_plot3d").gc_temps()
+        importlib.import_module("sage_plot3d")._gc_temps()
     except KeyboardInterrupt:
         pass  # (a stray interrupt at start: the pass is for later)
     except Exception:

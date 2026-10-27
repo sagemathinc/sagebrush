@@ -4707,7 +4707,7 @@
   "owner": "real/rational arithmetic",
   "row": "inv-15"
  },
- "lib/sage_plot3d.py ::  :: GC_BUDGET_S = 0.05 # (a pass's work, at most; the next pass goes on from its cursor) #0": {
+ "lib/sage_plot3d.py ::  :: _GC_BUDGET_S = 0.05 # (a pass's work, at most; the next pass goes on from its cursor) #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -4715,7 +4715,7 @@
   "owner": "sagebrush-python",
   "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
  },
- "lib/sage_plot3d.py :: gc_temps :: (a directory has no random access); a pass whose budget runs out in its #0": {
+ "lib/sage_plot3d.py :: _gc_temps :: (a directory has no random access); a pass whose budget runs out in its #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -4723,7 +4723,7 @@
   "owner": "sagebrush-python",
   "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
  },
- "lib/sage_plot3d.py :: gc_temps :: def gc_temps(root=\".sagebrush\", budget_s=GC_BUDGET_S, clock=None, alive=None): #0": {
+ "lib/sage_plot3d.py :: _gc_temps :: def _gc_temps(root=\".sagebrush\", budget_s=_GC_BUDGET_S, clock=None, alive=None): #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -4731,7 +4731,7 @@
   "owner": "sagebrush-python",
   "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
  },
- "lib/sage_plot3d.py :: gc_temps :: if over or clock() - t0 > budget_s: #0": {
+ "lib/sage_plot3d.py :: _gc_temps :: if over or clock() - t0 > budget_s: #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -4739,7 +4739,7 @@
   "owner": "sagebrush-python",
   "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
  },
- "lib/sage_plot3d.py :: gc_temps :: over = clock() - t0 > budget_s #0": {
+ "lib/sage_plot3d.py :: _gc_temps :: over = clock() - t0 > budget_s #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -4747,7 +4747,7 @@
   "owner": "sagebrush-python",
   "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
  },
- "lib/sage_plot3d.py :: gc_temps :: reading the kept entries before the dead ones exhausts each pass's budget #0": {
+ "lib/sage_plot3d.py :: _gc_temps :: reading the kept entries before the dead ones exhausts each pass's budget #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -4755,7 +4755,7 @@
   "owner": "sagebrush-python",
   "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
  },
- "lib/sage_plot3d.py :: gc_temps :: without fetching another, so it takes at most the budget and one entry. A #0": {
+ "lib/sage_plot3d.py :: _gc_temps :: without fetching another, so it takes at most the budget and one entry. A #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
