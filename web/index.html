@@ -1510,13 +1510,14 @@ $("#sharelink").onclick = async () => { if (shareDialog.busy) return; await copy
 // (each open's number: an open whose check ends after the dialog was closed, or opened again, stops there)
 let shareOpens = 0;
 // (fn once the dialog has rendered at least one frame since it opened: two frames, as one frame's callback runs
-// before that frame is drawn, or 50 ms where no frame runs at all, as in a hidden tab; text written earlier
-// reaches the accessibility tree with the dialog itself, and isn't announced, board's r4b HOLD 1)
+// before that frame is drawn; text written earlier reaches the accessibility tree with the dialog itself, and
+// isn't announced, board's r4b HOLD 1. Where frames stop, even after the first (a tab hidden meanwhile, or
+// never shown), fn runs anyway: after 50 ms in a hidden tab, else after 1 s, so it is never lost, board's note)
 function afterRendered(fn) {
-  let done = false, framed = false;
+  let done = false;
   const go = () => { if (!done) { done = true; fn(); } };
-  requestAnimationFrame(() => { framed = true; requestAnimationFrame(go); });
-  setTimeout(() => { if (!framed) go(); }, 50);
+  requestAnimationFrame(() => requestAnimationFrame(go));
+  setTimeout(go, document.visibilityState === "hidden" ? 50 : 1000);
 }
 // (the page's first document, opened: until then Share waits, as that open closes the dialog of no document)
 let booted, isBooted = false;
