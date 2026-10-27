@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 
 // The signal-state trials' judges (web/interrupt-signals.mjs, plan-interrupt-harness r5 §7, §8.1),
 // on synthetic session results: what counts as the expected exit, escalation, re-arm and survival.
@@ -36,7 +36,12 @@ test("S2: two caught KIs and exit 0; a second press that ends the program fails"
 
 test("S3: a second press while pending escalates (130, nothing left); a completed regex is a failure to recognize", () => {
   const two = { ...base, sends: [{ t: 1000 }, { t: 1500 }] };
-  assert.equal(judge("S3", { ...two, exit: { code: null, signal: "SIGINT", t: 1520 } }).outcome, "PASS");
+  // (on the CLI an escalation now also says the first Stop was not honoured: the cell FAILs with that
+  // signature, which S3 cli's baseline entry pins; on the prompt the first Stop isn't measured)
+  const esc = judge("S3", { ...two, exit: { code: null, signal: "SIGINT", t: 1520 } });
+  assert.deepEqual([esc.outcome, esc.escalation, esc.first_stop, esc.escalated], ["FAIL", "PASS", "not honoured", true]);
+  assert.match(esc.why, /^first Stop not honoured/);
+  assert.equal(judge("S3", { ...two, exit: { code: null, signal: "SIGINT", t: 1520 } }, "prompt").outcome, "PASS");
   assert.match(judge("S3", { ...two, exit: { code: null, signal: "SIGINT", t: 1520 }, alive_at_end: [4242] }).why, /left processes/);
   assert.match(judge("S3", { ...two, marks: [m("RET 1", 7000)], exit: { code: 0, signal: null, t: 7100 } }).why, /not recognized/);
   assert.equal(judge("S3", { ...two, marks: [m("RET 1", 900)], exit: { code: 0, signal: null, t: 950 } }).outcome, "INVALID");
@@ -44,9 +49,60 @@ test("S3: a second press while pending escalates (130, nothing left); a complete
 
 test("S4: a press after the window re-arms, never escalates; the KI when the regex returns", () => {
   const two = { ...base, sends: [{ t: 1000 }, { t: 4000 }] };
-  assert.equal(judge("S4", { ...two, marks: [m("KI 1", 7000), m("END", 7001)], exit: { code: 0, signal: null, t: 7100 } }).outcome, "PASS");
+  // (a KI that waits for the regex to return is honoured late now: FAIL, never KNOWN)
+  const late = judge("S4", { ...two, marks: [m("KI 1", 7000), m("END", 7001)], exit: { code: 0, signal: null, t: 7100 } });
+  assert.deepEqual([late.outcome, late.late], ["FAIL", true]);
+  assert.equal(judge("S4", { ...two, marks: [m("KI 1", 1100), m("END", 1101)], exit: { code: 0, signal: null, t: 1200 } }).outcome, "PASS");
   assert.match(judge("S4", { ...two, exit: { code: null, signal: "SIGINT", t: 4010 } }).why, /after the window, ended/);
   assert.equal(judge("S4", { ...two, marks: [m("RET 1", 7000)], exit: { code: 0, signal: null, t: 7100 } }).outcome, "FAIL");
+});
+
+test("Stop bound (S-delta Stop-250): S1's exit, S2's two KIs and S3's first press are gated at 250 ms on the raw clock; a missing send is a harness FAIL", () => {
+  const one = (t: number) => judge("S1", { ...base, text: "KeyboardInterrupt", exit: { code: null, signal: "SIGINT", t } });
+  assert.equal(one(1250).outcome, "PASS");
+  const s1 = one(1250.4);
+  assert.deepEqual([s1.outcome, s1.late], ["FAIL", true]);
+  assert.match(s1.why, /the exit came 250\.4 ms/);
+  assert.match(judge("S1", { ...base, sends: [], text: "KeyboardInterrupt", exit: { code: null, signal: "SIGINT", t: 1030 } }).why, /harness bug: press 1 has no send time/);
+  // S2: each press gated, the why names it
+  const two = { ...base, sends: [{ t: 1000 }, { t: 5000 }], exit: { code: 0, signal: null, t: 6000 } };
+  const ok = judge("S2", { ...two, marks: [m("KI 1", 1010), m("CONT", 1011), m("KI 2", 5250), m("END", 5251)] });
+  assert.deepEqual([ok.outcome, ok.latency2_raw_ms], ["PASS", 250]);
+  const s2 = judge("S2", { ...two, marks: [m("KI 1", 1010), m("CONT", 1011), m("KI 2", 5251), m("END", 5252)] });
+  assert.deepEqual([s2.outcome, s2.late], ["FAIL", true]);
+  assert.match(s2.why, /press 2's KeyboardInterrupt came 251\.0 ms/);
+  assert.match(judge("S2", { ...two, marks: [m("KI 1", 1300), m("CONT", 1301), m("KI 2", 5010), m("END", 5011)] }).why, /press 1's/);
+  // S3: the first press ending the program before the second press: honoured in time PASSes, late FAILs (not the pinned signature)
+  const s3 = (t: number) => judge("S3", { ...base, sends: [{ t: 1000 }, { t: 1500 }], exit: { code: null, signal: "SIGINT", t } });
+  assert.deepEqual([s3(1200).outcome, s3(1200).first_stop], ["PASS", "honoured"]);
+  const s3late = s3(1400);
+  assert.deepEqual([s3late.outcome, s3late.first_stop, s3late.late], ["FAIL", "honoured late", true]);
+  assert.doesNotMatch(s3late.why, /^first Stop not honoured/);
+});
+
+test("baseline: S3 cli's entry pins only 'first Stop not honoured' (anchored); S4 cli's stays 'returned without a KeyboardInterrupt'", () => {
+  const b = JSON.parse(readFileSync(join(__dirname, "..", "..", "web", "interrupt-baseline.json"), "utf8")).entries;
+  const s3 = b.find((e: any) => e.case === "S3" && e.host === "cli");
+  assert.equal(s3.signature, "^first Stop not honoured");
+  const re = new RegExp(s3.signature);
+  assert.ok(re.test("first Stop not honoured: no KeyboardInterrupt or exit within 250 ms of press 1 (the second press escalated)"));
+  assert.ok(!re.test("honoured late: the exit after press 1 came 400.0 ms after the Stop, past the 250 ms bound"));
+  assert.ok(!re.test("no escalation: exit null"));
+  assert.equal(b.find((e: any) => e.case === "S4" && e.host === "cli").signature, "returned without a KeyboardInterrupt");
+});
+
+test("signal rows: a pinned not-honoured failure is KNOWN; a late press never is, even under a matching signature; a passing pinned row is FIXED", () => {
+  const so = (cells: object[], b: object | null) => {
+    const src = `import { signalOutcome } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(signalOutcome(${JSON.stringify(cells)}, ${JSON.stringify(b)})));`;
+    const p = spawnSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8" });
+    assert.equal(p.status, 0, p.stderr);
+    return JSON.parse(p.stdout).fin;
+  };
+  const b = { signature: "^first Stop not honoured|honoured late" };
+  assert.equal(so([{ outcome: "FAIL", why: "first Stop not honoured: ..." }], b), "KNOWN");
+  assert.equal(so([{ outcome: "FAIL", why: "honoured late: the exit after press 1 came 400.0 ms", late: true }], b), "FAIL");
+  assert.equal(so([{ outcome: "PASS" }], b), "FIXED");
+  assert.equal(so([{ outcome: "FAIL", why: "no escalation: exit null" }], b), "FAIL");
 });
 
 test("the regex calibration's pick: in band first, else the smallest size in [5.5, 12] s (widened); nothing there stays uncalibrated", () => {

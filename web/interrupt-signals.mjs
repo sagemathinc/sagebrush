@@ -9,6 +9,7 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { killTree, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
+import { STOP_BOUND_MS, stopGate } from "./interrupt-classify.mjs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const LAUNCHER = process.env.SB_LAUNCHER ?? join(ROOT, "packages/sagebrush/bin/sagebrush.cjs"); // (SB_LAUNCHER: another build, for checking the harness)
@@ -121,6 +122,14 @@ export function parseMarker(line) {
 }
 const safeRead = (f) => { try { return readFileSync(f, "utf8"); } catch { return ""; } };
 const markT = (r, mk) => r.marks.find((x) => x.mk === mk)?.t;
+// a press's raw latency to its caller endpoint (the KI mark, or the exit), against the Stop bound: null when
+// honoured in time, else the cell's FAIL.  A press scheduled after ENTER with no send time is a harness defect.
+const pressGate = (r, k, endT, what) => {
+  const s = r.sends[k];
+  if (!s || s.t == null || s.error) return { outcome: "FAIL", why: `harness bug: press ${k + 1} has no send time${s?.error ? " (" + s.error + ")" : ""}` };
+  return stopGate(endT - s.t, what);
+};
+const lat = (x) => ({ latency_ms: Math.round(x), latency_raw_ms: x });
 
 // ---- the trials (§8.1).  Each returns { outcome, why, ... } for one cell.
 const REGEX = (n) => `import re\n_s = "a" * ${n} + "b"\n`;
@@ -134,11 +143,13 @@ export const TRIALS = {
       if (host === "prompt") {
         // the prompt survives: KeyboardInterrupt shown, then the next input runs (the probe)
         if (!/KeyboardInterrupt/.test(r.text)) return { outcome: "FAIL", why: "no KeyboardInterrupt" };
-        return markT(r, "PROBE") ? { outcome: "PASS" } : { outcome: "FAIL", why: "the prompt did not take the next input" };
+        // (the prompt has no KI marker, so its Stop latency is not measured here: stop_gate says so)
+        return markT(r, "PROBE") ? { outcome: "PASS", stop_gate: "not measured on the prompt" } : { outcome: "FAIL", why: "the prompt did not take the next input" };
       }
       if (!/KeyboardInterrupt/.test(r.text)) return { outcome: "FAIL", why: "no KeyboardInterrupt traceback" };
       if (!r.exit || !ended130(r.exit)) return { outcome: "FAIL", why: `exit ${JSON.stringify(r.exit)}, not 130` };
-      return { outcome: "PASS", latency_ms: Math.round(r.exit.t - r.sends[0].t) };
+      // (the caller endpoint is the exit: request -> 130 within the Stop bound)
+      return pressGate(r, 0, r.exit.t, "the exit") ?? { outcome: "PASS", ...lat(r.exit.t - r.sends[0].t) };
     },
     probe: 'print("PROBE", 41, flush=True)',
   },
@@ -151,21 +162,40 @@ export const TRIALS = {
       if (!markT(r, "KI 1")) return { outcome: "FAIL", why: "no first KeyboardInterrupt" };
       if (!markT(r, "KI 2")) return { outcome: "FAIL", why: markT(r, "RET 2") ? "the second press was not recognized" : "no second KeyboardInterrupt" };
       if (!markT(r, "END") || !r.exit || r.exit.code !== 0) return { outcome: "FAIL", why: `the second press ended the program (exit ${JSON.stringify(r.exit)})` };
-      return { outcome: "PASS", latency_ms: Math.round(markT(r, "KI 1") - r.sends[0].t), latency2_ms: Math.round(markT(r, "KI 2") - r.sends[1].t) };
+      // (each press is gated at its own KI; the why names the press)
+      for (const k of [0, 1]) {
+        const g = pressGate(r, k, markT(r, `KI ${k + 1}`), `press ${k + 1}'s KeyboardInterrupt`);
+        if (g) return g;
+      }
+      const l1 = markT(r, "KI 1") - r.sends[0].t, l2 = markT(r, "KI 2") - r.sends[1].t;
+      return { outcome: "PASS", ...lat(l1), latency2_ms: Math.round(l2), latency2_raw_ms: l2 };
     },
   },
-  // S3: a second press 0.5 s after the first, while the first is pending (a regex that doesn't poll): escalation, 130
+  // S3: a second press 0.5 s after the first, while the first is pending (a regex that doesn't poll): escalation, 130.
+  // Two verdicts on the CLI: escalation, judged as before, and first_stop, the first press against the Stop bound.
+  // An escalation proves the first press was not honoured (recorded before escalation is judged: a second press
+  // never erases the first request's missed deadline); the first press ending the program itself is honoured
+  // (PASS: nothing left to escalate) or honoured late.  The why leads with escalation's failure if any, else with
+  // "first Stop not honoured", the signature a baseline entry may pin (never "honoured late").
   S3: {
     hosts: ["cli", "prompt"],
     needsRegex: true,
     src: (n) => REGEX(n) + `print("ENTER 1", flush=True)\nre.match(r"(a+)+$", _s)\nprint("RET 1", flush=True)\n`,
     schedule: () => [{ after: "ENTER 1", ms: 500, act: "press" }, { after: "ENTER 1", ms: 1000, act: "press" }],
-    judge(r) {
+    judge(r, host) {
       const ret = markT(r, "RET 1");
       if (ret) return ret < (r.sends[0]?.t ?? Infinity) ? { outcome: "INVALID", why: "the regex returned before the presses" } : { outcome: "FAIL", why: "no escalation: the presses were not recognized, the regex ran to completion" };
-      if (!r.exit || !ended130(r.exit)) return { outcome: "FAIL", why: `no escalation: exit ${JSON.stringify(r.exit)}` };
-      if (r.alive_at_end.length) return { outcome: "FAIL", why: "the escalation left processes running: " + r.alive_at_end.join(",") };
-      return { outcome: "PASS", escalated: true, latency_ms: Math.round(r.exit.t - r.sends[1].t) };
+      if (!r.exit || !ended130(r.exit)) return { outcome: "FAIL", why: `no escalation: exit ${JSON.stringify(r.exit)}`, first_stop: "not honoured" };
+      if (r.alive_at_end.length) return { outcome: "FAIL", why: "the escalation left processes running: " + r.alive_at_end.join(","), first_stop: "not honoured" };
+      const s1 = r.sends[1];
+      // (the first press ended the program before the second was sent: no escalation to judge)
+      if (host !== "prompt" && (!s1 || s1.error || r.exit.t < s1.t)) {
+        const g = pressGate(r, 0, r.exit.t, "the exit after press 1");
+        return g ? { ...g, first_stop: g.late ? "honoured late" : "harness bug", escalated: false } : { outcome: "PASS", first_stop: "honoured", escalated: false, ...lat(r.exit.t - r.sends[0].t) };
+      }
+      const esc = { escalated: true, latency_ms: Math.round(r.exit.t - s1.t), latency_raw_ms: r.exit.t - s1.t };
+      if (host === "prompt") return { outcome: "PASS", ...esc, first_stop: "not measured on the prompt" };
+      return { outcome: "FAIL", why: `first Stop not honoured: no KeyboardInterrupt or exit within ${STOP_BOUND_MS} ms of press 1 (the second press escalated)`, first_stop: "not honoured", escalation: "PASS", ...esc };
     },
   },
   // S4: the first press stays pending past the 2 s window; a second press at 3 s re-arms, never escalates;
@@ -179,7 +209,8 @@ export const TRIALS = {
       if (markT(r, "RET 1")) return { outcome: markT(r, "RET 1") < r.sends[0]?.t ? "INVALID" : "FAIL", why: "the regex returned without a KeyboardInterrupt" };
       if (!r.exit || ended130(r.exit)) return { outcome: "FAIL", why: `the second press, after the window, ended the process (exit ${JSON.stringify(r.exit)})` };
       if (!markT(r, "KI 1")) return { outcome: "FAIL", why: "no KeyboardInterrupt when the regex returned" };
-      return { outcome: "PASS", latency_ms: Math.round(markT(r, "KI 1") - r.sends[0].t) };
+      // (a KI that waited for the regex to return is honoured late: a FAIL, never KNOWN)
+      return pressGate(r, 0, markT(r, "KI 1"), "press 1's KeyboardInterrupt") ?? { outcome: "PASS", ...lat(markT(r, "KI 1") - r.sends[0].t) };
     },
   },
   // S6: SIGHUP to a busy prompt's launcher (cell a), or the pty closed (cell b): the whole tree gone within 2 s
@@ -237,6 +268,16 @@ export function judgeS6(r) {
 }
 const runS6 = (host, flags, cell) => runProc({ host, flags, src: TRIALS.S6.src(), schedule: TRIALS.S6.schedule(cell), guard_ms: 15_000 });
 
+// a signal row from its cells and its baseline entry (if any): FAIL / INCOMPLETE / PASS, then KNOWN when
+// every failing cell matches the entry's signature, FIXED when an entry's row passes.  A press honoured late
+// is never KNOWN, whatever its why says (S-delta Stop-250: only a waiver covers it, and none covers signals)
+export function signalOutcome(cells, b) {
+  const outcome = cells.some((c) => c.outcome === "FAIL") ? "FAIL" : cells.some((c) => c.outcome !== "PASS") ? "INCOMPLETE" : "PASS";
+  const fails = cells.filter((c) => c.outcome === "FAIL");
+  const fin = !b ? outcome : outcome === "PASS" ? "FIXED" : outcome === "FAIL" && fails.every((c) => !c.late && new RegExp(b.signature).test(c.why)) ? "KNOWN" : outcome;
+  return { outcome, fin };
+}
+
 export async function runSignals({ hosts = ["cli"], mode = "ci", record = () => {}, overBudget = () => false, remainingMs = () => Infinity, baseline = { pending: [] }, flags = [], only = null } = {}) {
   runRemaining = remainingMs;
   const rows = [];
@@ -258,9 +299,7 @@ export async function runSignals({ hosts = ["cli"], mode = "ci", record = () => 
         const leftFail = r.left.length ? { outcome: "FAIL", why: "processes survived the kill: " + r.left.join(",") } : null;
         cells.push({ i: k, ...(leftFail ?? j), exit: r.exit && { code: r.exit.code, signal: r.exit.signal }, trace_lines: r.trace.length, ...(j.outcome !== "PASS" ? { tail: r.text.slice(-600) } : {}) });
       }
-      const outcome = cells.some((c) => c.outcome === "FAIL") ? "FAIL" : cells.some((c) => c.outcome !== "PASS") ? "INCOMPLETE" : "PASS";
-      const b = (baseline.entries ?? []).find((e) => e.case === id && e.host === host);
-      const fin = !b ? outcome : outcome === "PASS" ? "FIXED" : outcome === "FAIL" && cells.filter((c) => c.outcome === "FAIL").every((c) => new RegExp(b.signature).test(c.why)) ? "KNOWN" : outcome;
+      const { outcome, fin } = signalOutcome(cells, (baseline.entries ?? []).find((e) => e.case === id && e.host === host));
       rows.push({ trial: id, host, run: mode, outcome: fin, ...(fin !== outcome ? { own_outcome: outcome } : {}), cells, ...(t.needsRegex ? { regex_n: regex.n, regex_T_ms: Math.round(regex.T), ...(regex.label ? { regex_label: regex.label } : {}) } : {}) });
       record(rows.at(-1));
     }
