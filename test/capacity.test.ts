@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -293,4 +293,76 @@ test("VmData counts an ArrayBuffer and a wasm Memory's growth (Node, Linux)", { 
   assert.ok(a1 - a0 >= 60 * MiB, `ArrayBuffer: VmData +${(a1 - a0) / MiB} MiB`);
   assert.ok(m1 - m0 >= 60 * MiB, `wasm Memory: VmData +${(m1 - m0) / MiB} MiB`);
   assert.ok(buf.byteLength > 0 && mem.buffer.byteLength > 0);
+});
+
+// /proc/self/limits (C delta plan-c-rlimit-pyjs r1): pyjs has no resource
+// module, so on Linux the soft RLIMIT_AS and RLIMIT_DATA come from the
+// process's own /proc/self/limits (Node's or Bun's fs: the host's procfs,
+// /proc/self the process running pyjs).  The parser, the order and the rows
+// are capacity_cases.py's (sections 19-22, both runtimes); here the real
+// file, under Node and under Bun: the limits now, and explicit soft limits
+// set by the shell that then becomes pyjs (the same process's limits, read
+// both ways: magma's N2), each figure exactly x 1024 and its usage measured
+// (VmSize, VmData: an address-space figure, never asserted as headroom:
+// magma's N1); and a real denied read.  (A runner's own cgroup or finite
+// RLIMIT is fine here: the figures are compared, not assumed.)
+test("pyjs reads RLIMIT_AS and RLIMIT_DATA from the real /proc/self/limits, under Node and Bun", { skip: process.platform !== "linux" }, () => {
+  const probe = String.raw`
+import _capacity as C
+C._set_sources(platform="linux")
+rec = C.capacity()
+print("RL", C._rlimit("RLIMIT_AS"), C._rlimit("RLIMIT_DATA"))
+print("UNK", sorted(u for u in rec["unknown_parts"] if u.startswith("RLIMIT") and not u.endswith(" usage")))
+print("ROWS", sorted((b["source"], b["limit"], b["used"] is not None and b["used"] > 0) for b in rec["basis"] if b["source"].startswith("RLIMIT")))
+C._set_sources()
+`;
+  const bun = execFileSync("sh", ["-c", "command -v bun"], { encoding: "utf8" }).trim();
+  assert.ok(bun, "bun is on PATH (CI's pinned bun): the Bun run is required");
+  const line = (out: string, tag: string) => out.split("\n").find((l) => l.startsWith(tag + " ")) ?? "";
+  const bytes = (k: string) => (k === "unlimited" ? "None" : String(BigInt(k) * 1024n));
+  // (64 GiB of address space and 48 GiB of data, or the hard limit where it
+  // is lower: a soft limit can't pass it.  Each step fails closed before
+  // the exec: a ulimit that fails exits 97, so pyjs never runs on limits
+  // other than the ones intended, and execFileSync throws; the intended
+  // figure is printed, WANT, and compared too: astra2's #231 hardening)
+  const soft = (flag: string, kib: number) =>
+    `h=$(ulimit -H ${flag}) || exit 97; if [ "$h" = unlimited ] || [ "$h" -gt ${kib} ]; then h=${kib}; fi; ulimit -S ${flag} "$h" || exit 97; echo "WANT ${flag} $h";`;
+  for (const [who, runtime] of [["node", process.execPath], ["bun", bun]]) {
+    const run = (ulimits: string) =>
+      execFileSync("sh", ["-c", `${ulimits} echo "SH $(ulimit -S -v) $(ulimit -S -d)"; exec "$0" "$1" --sage -c "$2"`, runtime, CLI, probe], { encoding: "utf8", timeout: 120000 });
+    for (const [label, ulimits] of [["now", ""], ["set", soft("-v", 67108864) + " " + soft("-d", 50331648)]]) {
+      const out = run(ulimits);
+      const [, v, d] = line(out, "SH").split(" ");
+      if (label === "set") {
+        assert.ok(v !== "unlimited" && d !== "unlimited", `${who}: both soft limits set: ${line(out, "SH")}`);
+        assert.equal(line(out, "WANT -v"), `WANT -v ${v}`, `${who}: the intended RLIMIT_AS is the one in force`);
+        assert.equal(line(out, "WANT -d"), `WANT -d ${d}`, `${who}: the intended RLIMIT_DATA is the one in force`);
+      }
+      assert.equal(line(out, "RL"), `RL ${bytes(v)} ${bytes(d)}`, `${who} ${label}`);
+      assert.equal(line(out, "UNK"), "UNK []", `${who} ${label}`);
+      const rows = [["RLIMIT_AS", v], ["RLIMIT_DATA", d]].filter(([, k]) => k !== "unlimited").map(([n, k]) => `('${n}', ${bytes(k)}, True)`);
+      assert.equal(line(out, "ROWS"), `ROWS [${rows.join(", ")}]`, `${who} ${label}`);
+    }
+  }
+});
+
+// a /proc/self/limits that can't be read (denied: mode 000) is unknown,
+// never unlimited (not as root, who reads it anyway)
+test("a denied /proc/self/limits is unknown, never unlimited", { skip: process.platform !== "linux" || process.getuid?.() === 0 }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-limits-"));
+  try {
+    mkdirSync(join(dir, "proc", "self"), { recursive: true });
+    const p = join(dir, "proc", "self", "limits");
+    writeFileSync(p, "Limit                     Soft Limit           Hard Limit           Units     \nMax data size             unlimited            unlimited            bytes     \nMax address space         unlimited            unlimited            bytes     \n");
+    chmodSync(p, 0);
+    const out = sage(String.raw`
+import _capacity as C
+C._set_sources(root=${JSON.stringify(dir)}, platform="linux", runtime=lambda: [])
+print("DENIED", C._rlimit("RLIMIT_AS"), C._rlimit("RLIMIT_DATA"), sorted(u for u in C.capacity()["unknown_parts"] if u.startswith("RLIMIT")))
+C._set_sources()
+`);
+    assert.match(out, /^DENIED False False \['RLIMIT_AS', 'RLIMIT_DATA'\]$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

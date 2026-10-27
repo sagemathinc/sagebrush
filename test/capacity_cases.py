@@ -386,6 +386,181 @@ for label, w in (("fail physical", Win(fail="physical")), ("fail in_job", Win(fa
     rec = C.capacity()
     print("windows diagnosis", label, rec["bytes"], sorted(C.diagnosis().items()))
 
+# 19. /proc/self/limits (pyjs on Linux has no resource module; C delta
+# plan-c-rlimit-pyjs r1): the parser alone, the same in both runtimes; only
+# exactly the kernel's form is read, anything else is False
+HEAD = "Limit                     Soft Limit           Hard Limit           Units     \n"
+
+
+def limits_line(name, soft, hard="unlimited", units="bytes"):
+    return "%-26s%-21s%-21s%-10s\n" % (name, soft, hard, units)
+
+
+def limits(as_soft="unlimited", data_soft="unlimited", units="bytes", head=HEAD, extra=""):
+    return (head + limits_line("Max cpu time", "unlimited", "unlimited", "seconds") + limits_line("Max data size", data_soft, units=units)
+            + limits_line("Max stack size", "8388608", "unlimited", "bytes") + limits_line("Max address space", as_soft, units=units) + extra)
+
+
+proc_cases = [
+    ("unlimited", limits()),
+    ("finite", limits("3072000000", "1258291200")),
+    ("finite hard", HEAD + limits_line("Max address space", "1048576", "2097152") + limits_line("Max data size", "0", "0")),
+    ("no header", limits(head="")),
+    ("wrong header", limits(head="Limit Soft Hard\n")),
+    ("row missing", HEAD + limits_line("Max data size", "unlimited")),
+    ("row twice", limits(extra=limits_line("Max address space", "1024"))),
+    ("two tokens", HEAD + "Max address space         unlimited            bytes\nMax data size             unlimited            bytes\n"),
+    ("four tokens", HEAD + "Max address space         1 2 3 bytes\nMax data size             1 2 3 bytes\n"),
+    ("minus one", limits("-1", "-1")),
+    ("hex", limits("0x10", "0x10")),
+    ("suffix", limits("12k", "12k")),
+    ("non-ascii digits", limits("１２", "１２")),
+    ("garbage hard", HEAD + limits_line("Max address space", "1024", "lots") + limits_line("Max data size", "1024", "-")),
+    ("empty", ""),
+    ("units kB", limits(units="kB")),
+    ("units KiB", limits(units="KiB")),
+    ("units pages", limits(units="pages")),
+    ("units Bytes", limits(units="Bytes")),
+    ("units empty", HEAD + "Max address space         unlimited            unlimited\nMax data size             unlimited            unlimited\n"),
+    ("name prefix", HEAD + limits_line("Max address spaces", "1024") + limits_line("Max data sizes", "1024")),
+]
+for label, text in proc_cases:
+    r = tree("limits-" + label.replace(" ", "-"), {"/proc/self/limits": text})
+    C._set_sources(root=r, platform="linux", runtime=NO_RUNTIME)
+    print("proc limits", label, C._proc_rlimit("RLIMIT_AS"), C._proc_rlimit("RLIMIT_DATA"))
+C._set_sources(root=os.path.join(BASE, "none"), platform="linux", runtime=NO_RUNTIME)
+print("proc limits missing", C._proc_rlimit("RLIMIT_AS"), C._proc_rlimit("RLIMIT_DATA"), C._proc_rlimit("RLIMIT_STACK"))
+# (a byte that doesn't decode, anywhere in the file, even in a row not
+# asked for: python3's strict read fails, pyjs's replaces it; False either way)
+for label, junk in (("non-utf-8 in the row", b"Max address space         \xff\xfe                   unlimited            bytes     \n"),
+                    ("non-utf-8 elsewhere", b"Max open files            1024\xff                 4096                 files     \n")):
+    p = os.path.join(BASE, "limits-" + label.replace(" ", "-"), "proc", "self", "limits")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "wb") as f:
+        f.write(HEAD.encode() + junk + limits_line("Max data size", "unlimited").encode() + limits_line("Max address space", "unlimited").encode())
+    C._set_sources(root=os.path.dirname(os.path.dirname(os.path.dirname(p))), platform="linux", runtime=NO_RUNTIME)
+    print("proc limits", label, C._proc_rlimit("RLIMIT_AS"), C._proc_rlimit("RLIMIT_DATA"))
+
+# 20. _rlimit's order, with pyjs's missing resource module made up in both
+# runtimes: the test's figures, then the resource module (a getrlimit that
+# fails is False, never /proc), then /proc/self/limits on Linux only (a
+# planted file under "browser" or "darwin" is never read); a sentinel or
+# huge soft limit is none; 0 is a limit
+class Res:
+    RLIMIT_AS, RLIMIT_DATA, RLIM_INFINITY = 9, 2, -1
+    def __init__(self, soft=None, fail=False):
+        self.soft, self.fail = soft, fail
+    def getrlimit(self, which):
+        if self.fail:
+            raise OSError("getrlimit")
+        return (self.soft, -1)
+
+had_res = C._resource_mod
+planted = tree("limits-planted", {"/proc/self/limits": limits("unlimited", "unlimited")})
+for label, res, kw in (("figures first", None, dict(platform="linux", rlimits={"RLIMIT_AS": (GiB, -1), "RLIMIT_DATA": (-1, -1)})),
+                       ("resource first", Res(5 * GiB), dict(platform="linux")),
+                       ("resource fails", Res(fail=True), dict(platform="linux")),
+                       ("proc on linux", None, dict(platform="linux")),
+                       ("planted browser", None, dict(platform="browser")),
+                       ("planted darwin", None, dict(platform="darwin"))):
+    C._resource_mod = res
+    C._set_sources(root=planted, runtime=NO_RUNTIME, **kw)
+    print("rlimit order", label, C._rlimit("RLIMIT_AS"), C._rlimit("RLIMIT_DATA"))
+C._resource_mod = None
+for label, a, d in (("sentinel", "18446744073709551615", "9223372036854775807"), ("huge", "9" * 20, "4611686018427387904"),
+                    ("zero", "0", "0"), ("one byte", "1", "unlimited")):
+    C._set_sources(root=tree("limits-" + label, {"/proc/self/limits": limits(a, d)}), platform="linux", runtime=NO_RUNTIME)
+    print("rlimit value", label, C._rlimit("RLIMIT_AS"), C._rlimit("RLIMIT_DATA"))
+
+# 21. the rows /proc's limits make: finite RLIMIT_AS and RLIMIT_DATA are
+# this process's rows (VmSize, VmData their usage, read from
+# /proc/self/status), joint for the engine; usage not readable stays
+# unknown; 0 is a row; unlimited is no row, nothing unknown
+for label, files in (("finite", {"/proc/self/status": status(2 * GiB, GiB)}), ("finite no status", {}),
+                     ("zero data", {"/proc/self/status": status(2 * GiB, GiB)}), ("unlimited", {"/proc/self/status": status(2 * GiB, GiB)})):
+    lim = {"finite": limits("4294967296", "3221225472"), "finite no status": limits("4294967296", "3221225472"),
+           "zero data": limits("unlimited", "0"), "unlimited": limits()}[label]
+    files = dict(files, **{"/proc/self/limits": lim, "/proc/meminfo": meminfo(16 * GiB, 8 * GiB)})
+    C._set_sources(root=tree("limits-rows-" + label.replace(" ", "-"), files), platform="linux", runtime=lambda: [("wasm engine", 4 * GiB, 0)])
+    rec = C.capacity()
+    print("proc rows", label, [(b["source"], b["limit"], b["used"], b["constrains"] == C._SELF) for b in rec["basis"] if b["source"].startswith("RLIMIT")],
+          [u for u in rec["unknown_parts"] if u.startswith("RLIMIT")],
+          [(r["source"], r["joint"]) for r in C.engine_rows()["rows"] if r["source"].startswith("RLIMIT")])
+C._resource_mod = had_res
+
+# 22. freshness (astra2's H1 on #231): /proc/self/limits is read once per
+# observation and never kept past it, so a snapshot over capacity() is no
+# older than its own stamp; a fake clock and the file's reads counted
+reads = [0]
+real_read = C._read
+
+
+def counting(path):
+    if path == "/proc/self/limits":
+        reads[0] += 1
+    return real_read(path)
+
+
+C._read = counting
+C._resource_mod = None
+t = [0.0]
+fr = tree("limits-fresh", {"/proc/self/limits": limits(), "/proc/meminfo": meminfo(16 * GiB, 8 * GiB), "/proc/self/status": status(2 * GiB, GiB)})
+lp = fr + "/proc/self/limits"
+
+
+def setlim(text):
+    with open(lp, "w") as f:
+        f.write(text)
+
+
+C._set_sources(root=fr, platform="linux", clock=lambda: t[0], runtime=lambda: [("wasm engine", 4 * GiB, 0)])
+rlim = lambda rows: [(r["source"], r.get("figure", r.get("limit"))) for r in rows if r["source"].startswith("RLIMIT")]
+
+
+def fresh(label, at, f):
+    t[0] = at
+    before = reads[0]
+    v = f()
+    print("fresh", label, "t=%.3f" % at, v, "reads", reads[0] - before)
+
+
+basis = lambda: rlim(C.capacity()["basis"])
+rows = lambda: (rlim(C.engine_rows()["rows"]), C.engine_rows()["complete"])
+fresh("capacity", 0.0, basis)
+fresh("capacity again, same instant", 0.0, basis)
+fresh("_rlimit AS alone", 0.0, lambda: C._rlimit("RLIMIT_AS"))
+fresh("_rlimit DATA alone", 0.0, lambda: C._rlimit("RLIMIT_DATA"))
+fresh("engine_rows", 0.0, rows)
+setlim(limits("4294967296", "3221225472"))
+fresh("engine_rows, 99 ms on (its own snapshot)", 0.099, rows)
+fresh("engine_rows, 100 ms on: unlimited -> finite, both names", 0.1, rows)
+setlim(limits("2147483648", "3221225472"))
+fresh("capacity between: finite -> tighter", 0.15, basis)
+fresh("engine_rows, 90 ms after its read (the capacity at 150 ms not reused)", 0.19, rows)
+fresh("engine_rows, 100 ms after its read", 0.2, rows)
+os.remove(lp)
+fresh("engine_rows: finite -> missing (110 ms after its read)", 0.31, rows)
+setlim(limits("4294967296", "unlimited"))
+for name, f, ttl in (("engine_total", C.engine_total, 0.1), ("engine_totals", C.engine_totals, 0.1), ("poly_share", C.poly_share, 0.25)):
+    base = {"engine_total": 1.0, "engine_totals": 2.0, "poly_share": 3.0}[name]
+    for dt in (0.0, ttl - 0.001, ttl):
+        fresh("%s +%.3f" % (name, dt), base + dt, lambda: f() is not None)
+with C._ProcObservation():
+    C._rlimit("RLIMIT_AS")
+    print("fresh scope inside", sorted(C._proc_scope))
+print("fresh scope after", C._proc_scope)
+try:
+    with C._ProcObservation():
+        C._rlimit("RLIMIT_AS")
+        raise RuntimeError("x")
+except RuntimeError:
+    pass
+print("fresh scope after an exception", C._proc_scope)
+C._set_sources()
+print("fresh scope after _set_sources", C._proc_scope)
+C._read = real_read
+C._resource_mod = had_res
+
 C._set_sources()
 if had_limit is not None:
     sys._sagebrush_heap_limit = had_limit
