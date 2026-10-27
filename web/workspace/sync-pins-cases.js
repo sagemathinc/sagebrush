@@ -803,6 +803,38 @@ async function slicedCleanup() {
   w.close();
 }
 
+async function longtaskControl() {
+  // (daybreak2's H1 on #219: the in-save measure still catches a real long task inside a save, and the gate
+  // rejects it.  Synthetic tasks and spans first, then a live one: a 60 ms busy-wait after t0, inside a measured
+  // save, seen by the same PerformanceObserver, must give an in-save longest >= 50 that the gate rejects)
+  const A = W.saveLongest([{ startTime: 932, duration: 71 }], [[1000, 1007]]);
+  const B = W.saveLongest([{ startTime: 1002, duration: 60 }], [[1000, 1063]]);
+  const C = W.saveLongest([{ startTime: 1005, duration: 40 }], [[1000, 1020], [1025, 1060]]);
+  check(A.longest === 3 && A.longestRaw === 71 && B.longest === 60 && B.longestRaw === 60 && C.longest === 20 && C.longestRaw === 40 && W.saveLongest([{ startTime: 0, duration: 99 }], [[200, 210]]).longestRaw === 0,
+    "the in-save task measure: a task begun before a save counts only its overlap (3 of 71 ms), one wholly inside a save in full (60), one touching two saves by its largest intersection, not their sum (20 of 15 + 20): " + J({ A, B, C }));
+  const w = await fresh();
+  await w.create("/c.bin", { content: "c" });
+  const tasks = [], spans = [];
+  const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) tasks.push(e); });
+  obs.observe({ type: "longtask", buffered: false });
+  let ms = 0;
+  for (let k = 0; k < 3; k++) {
+    const t0 = performance.now();
+    if (k === 1) { const end = performance.now() + 60; while (performance.now() < end) {} } // (the injected main-thread task)
+    await w.write("/c.bin", "c" + k);
+    const t1 = performance.now();
+    spans.push([t0, t1]);
+    ms = Math.max(ms, t1 - t0);
+  }
+  await sleep(0);
+  for (const e of obs.takeRecords()) tasks.push(e);
+  obs.disconnect();
+  const got = W.saveLongest(tasks, spans);
+  const row = { longest: Math.round(got.longest), longestRaw: Math.round(got.longestRaw), ms: Math.round(ms), tasks: tasks.length };
+  check(tasks.length > 0 && got.longest >= 50 && !W.saveTaskGate(row), "the control: a 60 ms task inside a save is observed, measured >= 50 ms in the save, and rejected by the gate: " + J(row));
+  w.close();
+}
+
 async function versionScale() {
   // (daybreak2's LIMIT-E5C-2: one file with 1,000, 10,000 and 50,000 versions kept for sync: a save reads a
   // bounded few of them, whatever the number, its time and longest task flat, its memory too)
@@ -844,15 +876,10 @@ async function versionScale() {
     await sleep(0);
     for (const e of obs.takeRecords()) tasks.push(e);
     obs.disconnect();
-    // (a long task counts toward a save for the part of it inside the save's span, [t0, t1]: the main thread is
-    // busy for all of a task, so a save's own work, which starts at t0, can't run outside it, and a task that
-    // began before t0 and ended inside it (the insert's garbage collected late) is that save's only for its
-    // overlap.  The whole task is reported as longestRaw.  Train-15 and #211's dispatch: 71 and 65 ms tasks
+    // (a long task counts toward a save only for its part inside the save's span, the whole task reported as
+    // longestRaw: W.saveLongest, longtask-span.ts.  Train-15 and #211's dispatch: 71 and 65 ms tasks
     // "overlapping" saves that took 7 ms at most, impossible inside a save)
-    const overlap = (e) => Math.max(0, ...spans.map(([a, b]) => Math.min(b, e.startTime + e.duration) - Math.max(a, e.startTime)));
-    const touching = tasks.filter((e) => spans.some(([a, b]) => e.startTime < b && e.startTime + e.duration > a));
-    const longest = Math.max(0, ...touching.map(overlap));
-    const longestRaw = Math.max(0, ...touching.map((e) => e.duration));
+    const { longest, longestRaw } = W.saveLongest(tasks, spans);
     open();
     W.PINS.cleanAfter = null;
     globalThis.gc?.();
@@ -865,7 +892,7 @@ async function versionScale() {
   // window, 21) and makes at most 3 * PRUNE_STEP + 1 more requests to drop and mark due; versions kept for sync,
   // or another file's, aren't read at all.  Times are reported, not asserted)
   const look = W.LIMITS.maxVersions + W.PRUNE_STEP, [a, b, c, d, e] = out;
-  check(b.records === a.records && c.records === a.records && b.calls === a.calls && c.calls === a.calls && d.records <= a.records + look && d.calls <= a.calls + 3 * W.PRUNE_STEP + 1 && e.records === a.records && e.calls === a.calls && out.every((x) => x.longest < 50 && x.longest <= x.ms + 1) && c.heapKB < 4096, "one file with 1,000 to 50,000 versions kept for sync, 50,000 not kept, or 50,000 of another file: a save reads the same records and makes the same requests (at most the window of 21 and 4 more requests for a backlog), its longest task inside a save under 50 ms (whole tasks reported as longestRaw; times reported): " + J(out));
+  check(b.records === a.records && c.records === a.records && b.calls === a.calls && c.calls === a.calls && d.records <= a.records + look && d.calls <= a.calls + 3 * W.PRUNE_STEP + 1 && e.records === a.records && e.calls === a.calls && out.every(W.saveTaskGate) && c.heapKB < 4096, "one file with 1,000 to 50,000 versions kept for sync, 50,000 not kept, or 50,000 of another file: a save reads the same records and makes the same requests (at most the window of 21 and 4 more requests for a backlog), its longest task inside a save under 50 ms (whole tasks reported as longestRaw; times reported): " + J(out));
 }
 
 async function bulkDrop() {
@@ -1487,7 +1514,7 @@ async function upgradeV5() {
 }
 
 export async function run() {
-  for (const f of [pinning, exemptions, lifecycle, held, successorGate, gone, baseEdge, quota, cleanup, tipBase, collapseInSave, deferredClean, txCache, pruneStep, ordering, slicedCleanup, versionScale, unpinPrunable, caughtUp, bulkDrop, dueDrain, upgradeOpen, backfill, backfillLive, deleteLatency, deleteRaces, deleteDuringBackfill, lateRelease, backfillRewind, backfillGone, rangeEdges, storageInvariant, manyPins, upgradeV5, tail]) {
+  for (const f of [pinning, exemptions, lifecycle, held, successorGate, gone, baseEdge, quota, cleanup, tipBase, collapseInSave, deferredClean, txCache, pruneStep, ordering, slicedCleanup, longtaskControl, versionScale, unpinPrunable, caughtUp, bulkDrop, dueDrain, upgradeOpen, backfill, backfillLive, deleteLatency, deleteRaces, deleteDuringBackfill, lateRelease, backfillRewind, backfillGone, rangeEdges, storageInvariant, manyPins, upgradeV5, tail]) {
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); } finally { restore(); }
   }
   return results;
