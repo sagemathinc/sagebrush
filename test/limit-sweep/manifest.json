@@ -2,15 +2,15 @@
  "format": "sagebrush-limit-sweep-manifest",
  "inputs": {
   "test/limit-sites-baseline.txt": "b0d463cb97ced28f8d3331c4a1dc3401cfd419d011ab37152227a11e498029e4",
-  "test/limit-sites.json": "d90cf25d1dbc143e07de86a44efa8899e7eae0d5ea1c7883c49dadbdb9ef790c",
-  "test/limit_sites.py": "cb95443bc04d082af918c68856577108f72c9bc4145f885577f5a7dd967bfaeb"
+  "test/limit-sites.json": "c16317f380afdb0ab95cad3e0b2175575b3c0bef68b8f7cb6c59eaa9d38b5e78",
+  "test/limit_sites.py": "7834d29989a1d1b1f5fb401ae542a470c6af2192f881c9cda956c2158b155418"
  },
- "rev": "fd818896605127cf856eb6f78445e232dddf0dcb",
+ "rev": "279b16e66a5e13bb3f10acb3663f1c46474d03bb",
  "rules_sha256": "63d064d128ea11143509fae96743c0a7d32612ae031748053c6c18719ff88936",
  "v": 1
 ,
  "batches": [
-  {"dispositions": 163, "files": ["lib/_capacity.py", "lib/_compat_pickle.py", "lib/_pyjs_doctest.py", "lib/_pyjs_open.py", "lib/_python_docsearch.py", "lib/_strptime.py", "lib/_thread.py", "lib/_viewer3d.py", "lib/ctypes.py", "lib/io.py", "lib/posixpath.py", "src/runtime/argconv.ts", "src/runtime/complex.ts", "src/runtime/engine.ts", "src/runtime/format.ts", "src/runtime/heap.ts", "src/runtime/memoryview.ts", "src/runtime/strpos.ts", "src/runtime/struct.ts", "web/workspace/sync-ledger.ts", "lib/numbers.py", "lib/_tzrules.py", "lib/board_checks.py", "lib/itertools.py", "lib/_special.py"], "id": "B1", "oversize": false, "owner": "python", "register": 183, "work": 346},
+  {"dispositions": 165, "files": ["lib/_capacity.py", "lib/_compat_pickle.py", "lib/_pyjs_doctest.py", "lib/_pyjs_open.py", "lib/_python_docsearch.py", "lib/_strptime.py", "lib/_thread.py", "lib/_viewer3d.py", "lib/ctypes.py", "lib/io.py", "lib/posixpath.py", "src/runtime/argconv.ts", "src/runtime/complex.ts", "src/runtime/engine.ts", "src/runtime/format.ts", "src/runtime/heap.ts", "src/runtime/memoryview.ts", "src/runtime/strpos.ts", "src/runtime/struct.ts", "web/notebook/text-overlap.ts", "web/workspace/sync-ledger.ts", "lib/numbers.py", "lib/_tzrules.py", "lib/board_checks.py", "lib/itertools.py", "lib/_special.py"], "id": "B1", "oversize": false, "owner": "python", "register": 183, "work": 348},
   {"dispositions": 106, "files": ["src/runtime/modules.ts", "src/runtime/zlib.ts", "lib/_collections_abc.py", "lib/_pytime.py", "lib/_limits.py", "src/runtime/ops.ts", "src/runtime/re.ts", "src/runtime/json.ts", "src/runtime/types.ts", "lib/_png.py", "src/runtime/unicodecs.ts", "engine/web/src/lib.rs", "engine/interrupt/src/lib.rs", "engine/oracle/examples/integral.rs", "engine/web/src/hmfq.rs", "lib/_catalog.py", "lib/_graph_spring.py", "lib/_string.py"], "id": "B2", "oversize": false, "owner": "python", "register": 242, "work": 348},
   {"dispositions": 15, "files": ["lib/_sbx.py", "lib/_display_budget.py", "lib/_pydatetime.py", "engine/py/src/lib.rs", "lib/_capability_map.py", "lib/pickle.py", "lib/fractions.py", "lib/textwrap.py", "lib/_zoneinfo.py", "src/runtime/index.ts", "src/runtime/numpy.ts", "lib/_python_examples.py", "src/runtime/numpy_random.ts", "lib/_pyjs_pretty.py", "engine/node/src/lib.rs", "src/runtime/object.ts", "lib/_pyjs_docsearch.py"], "id": "B3", "oversize": false, "owner": "python", "register": 381, "work": 396},
   {"dispositions": 0, "files": ["src/runtime/re-shape.ts", "lib/pprint.py", "src/runtime/fdlibm.ts", "lib/_graphics.py", "lib/functools.py", "src/runtime/builtins.ts", "lib/reprlib.py", "engine/oracle/examples/newspaces_vs_lmfdb.rs", "engine/oracle/examples/orbits_vs_lmfdb.rs", "engine/oracle/examples/traces_vs_lmfdb.rs", "engine/web/tests/dispatch_fuzz.rs", "lib/_interact.py", "lib/colorsys.py", "lib/contextlib.py", "lib/datetime.py", "lib/heapq.py", "lib/warnings.py", "src/runtime/array.ts", "src/runtime/crmath.ts", "src/runtime/numpy_fft.ts", "src/runtime/numpy_linalg.ts"], "id": "B4", "oversize": false, "owner": "python", "register": 271, "work": 271},
@@ -349,6 +349,8 @@
   ["src/runtime/strpos.ts :: refuseMerge :: raise(T.NotImplementedError, \"a lone high surrogate followed by a lone low surrogate would become one character in Sagebrush's strings; not supported\"); #0", "register", "B1", "refusal"],
   ["src/runtime/struct.ts :: packInto :: if (Number.isFinite(x) && Math.abs(x) > 3.4028235677973366e38) raise(T.OverflowError, \"float too large to pack with f format\"); #0", "register", "B1", "refusal"],
   ["src/runtime/struct.ts :: toHalf :: if (Number.isFinite(x)) raise(T.OverflowError, \"float too large to pack with e format\"); #0", "register", "B1", "refusal"],
+  ["web/notebook/text-overlap.ts ::  :: export const TEXT_DIFF_PRODUCT_LIMIT = 4_000_000; #0", "disposition", "B1", "constant"],
+  ["web/notebook/text-overlap.ts :: hunks :: if (work > TEXT_DIFF_PRODUCT_LIMIT || work > ledger.left) return \"exhausted\"; #0", "disposition", "B1", "other"],
   ["web/workspace/sync-ledger.ts ::  :: export const CODE = { max: 32 }; #0", "disposition", "B1", "constant"],
   ["web/workspace/sync-ledger.ts ::  :: export const STATE = { max: 1000 }; #0", "disposition", "B1", "constant"],
   ["web/workspace/sync-ledger.ts ::  :: max: 16, #0", "disposition", "B1", "other"],
