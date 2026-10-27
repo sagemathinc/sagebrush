@@ -271,27 +271,21 @@ function shelve(all: Body[], gap: number): void {
   }
 }
 
-/** The parts packed in rows, largest first, below the parts with a fixed
- * node (those stay where they are); then no box is closer than gap to another. */
-function finish(p: Plan): void {
-  const { parts, all, gap } = p;
-  const box = (bs: Body[]) => {
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const b of bs) {
-      x0 = Math.min(x0, b.x - b.w / 2); y0 = Math.min(y0, b.y - b.h / 2);
-      x1 = Math.max(x1, b.x + b.w / 2); y1 = Math.max(y1, b.y + b.h / 2);
-    }
-    return { x0, y0, x1, y1 };
-  };
-  // (up to FINAL_SWEEPS passes while boxes move, each counted against p.left)
-  const sweeps = (bs: Body[]) => {
-    for (let k = 0; k < FINAL_SWEEPS && pairsOf(bs.length) <= p.left; k++) {
-      p.left -= pairsOf(bs.length);
-      springWork.sweeps++;
-      if (!separate(bs, gap)) break;
-    }
-  };
-  for (const part of parts) sweeps(part.bodies);
+const box = (bs: Body[]) => {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const b of bs) {
+    x0 = Math.min(x0, b.x - b.w / 2); y0 = Math.min(y0, b.y - b.h / 2);
+    x1 = Math.max(x1, b.x + b.w / 2); y1 = Math.max(y1, b.y + b.h / 2);
+  }
+  return { x0, y0, x1, y1 };
+};
+
+/** Where each part goes when the parts are packed in rows, largest first,
+ * below the parts with a fixed node (those stay where they are): its offset,
+ * from where its boxes are now.  Nothing is moved. */
+function packing(p: Plan): Map<Part, [number, number]> {
+  const { parts, gap } = p;
+  const out = new Map<Part, [number, number]>();
   const pinned = parts.filter((pt) => pt.bodies.some((b) => b.fixed));
   const free = parts.filter((pt) => !pt.bodies.some((b) => b.fixed)).map((pt, i) => ({ pt, i, bb: box(pt.bodies) }));
   free.sort((a, b) => b.pt.bodies.length - a.pt.bodies.length || a.i - b.i);
@@ -304,13 +298,42 @@ function finish(p: Plan): void {
   for (const f of free) {
     const w = f.bb.x1 - f.bb.x0, h = f.bb.y1 - f.bb.y0;
     if (x > 0 && x + w > width) { x = 0; y += rowH + gap * 2; rowH = 0; }
-    const ox = left + x - f.bb.x0, oy = y - f.bb.y0;
-    for (const b of f.pt.bodies) { b.x += ox; b.y += oy; }
+    out.set(f.pt, [left + x - f.bb.x0, y - f.bb.y0]);
     x += w + gap * 2;
     rowH = Math.max(rowH, h);
   }
+  return out;
+}
+
+/** The parts packed (packing()); then no box is closer than gap to another. */
+function finish(p: Plan): void {
+  const { parts, all, gap } = p;
+  // (up to FINAL_SWEEPS passes while boxes move, each counted against p.left)
+  const sweeps = (bs: Body[]) => {
+    for (let k = 0; k < FINAL_SWEEPS && pairsOf(bs.length) <= p.left; k++) {
+      p.left -= pairsOf(bs.length);
+      springWork.sweeps++;
+      if (!separate(bs, gap)) break;
+    }
+  };
+  for (const part of parts) sweeps(part.bodies);
+  for (const [pt, [ox, oy]] of packing(p)) for (const b of pt.bodies) { b.x += ox; b.y += oy; }
   sweeps(all);
   shelve(all, gap);
+}
+
+/** A frame of the animation: the parts as the iterations have them, each
+ * moved to where the packing would put it now, so that while they settle
+ * the connected parts are side by side, as at the end, never drawn over
+ * each other (William's X3: a graph of two parts looked like one drawn
+ * twice until the last frame). */
+function frame(p: Plan): Positions {
+  const out = snapshot(p.all);
+  const r = (v: number) => Math.round(v * 1e6) / 1e6 + 0;
+  for (const [pt, [ox, oy]] of packing(p)) {
+    for (const b of pt.bodies) out.set(b.id, { x: r(b.x - b.w / 2 + ox), y: r(b.y - b.h / 2 + oy) });
+  }
+  return out;
 }
 
 export function springLayout(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts): Positions | null {
@@ -333,7 +356,7 @@ export function* springSteps(nodes: SpringNode[], edges: [string, string][], opt
   const k0 = Math.max(1, Math.floor(every), Math.ceil(most / MAX_FRAMES));
   for (let k = 0; k < most; k++) {
     for (const part of p.parts) if (part.done < part.iterations) part.step(p.gap);
-    if ((k + 1) % k0 === 0) yield snapshot(p.all);
+    if ((k + 1) % k0 === 0) yield frame(p);
   }
   finish(p);
   const last = checked(nodes, snapshot(p.all), p.gap);
