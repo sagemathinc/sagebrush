@@ -403,7 +403,7 @@ onHistoryRefused((m) => showBusyNotice(m));
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
-import { shareStatus, signInUrl, uploadCollection } from "./share-client/upload.ts";
+import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
@@ -813,7 +813,8 @@ nb.on("left", (n) => (n > 0 ? addEventListener : removeEventListener)("beforeunl
 const nbKept = new WeakMap();
 nb.onDetachedConflict(async (doc, theirs, key) => {
   if (!db) throw new Error("this browser has no storage to keep it in");
-  const { id: _i, rev: _r, updated: _u, baseRev: _b, share_id: _s, ...rest } = doc;
+  // (a copy is its own notebook: not the share, nor the share's pending attempt, of the one it copies)
+  const { id: _i, rev: _r, updated: _u, baseRev: _b, share_id: _s, share_attempt: _a, ...rest } = doc;
   const was = String(doc.name || "Untitled"), name = was + " (your changes, made while it changed elsewhere)";
   const copy = nbKept.get(key);
   if (copy && (await idb(db, "notebooks", "readonly", (st) => st.get(copy.id)))) {
@@ -1530,7 +1531,7 @@ async function storedFileMeta() {
 }
 // (tests: the Share dialog's seams, read at the moment they're used: a stand-in worker, shorter
 // fail-safes, a counter of the files the dialog reads, the interpreter's answer and the notebook's identity)
-const shareTest = { workspace: () => wsNow() };
+const shareTest = { workspace: () => wsNow(), exports: async () => ({ ipynb: toIpynb({ ...nb.snapshot(), name: docName() }), link: await shareLink() }) };
 // One file's bytes, as it is now; if it is no longer the file that was listed (another fid), it changed
 async function storedFileBytes(f) {
   await shareTest.onRead?.(f.path);
@@ -1577,9 +1578,37 @@ const shareDialog = createShareDialog({
   upload: async ({ files, title, license }, progress) => {
     const origin = current.id;
     const prev = nb.snapshot().share_id ?? null;
-    const r = await uploadCollection({ id: prev, title: title.trim() || docName(), license, files }, progress);
+    // (a new share's attempt (plan-upload-leak r3 §3c): kept with the notebook, and saved, before
+    // anything is read or sent, so a retry, even after a lost answer and a reload, gets that same
+    // share back, never a second one; a notebook that can't be saved isn't uploaded)
+    let attempt = null;
+    if (!prev) {
+      attempt = nb.snapshot().share_attempt ?? [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      nb.setMeta({ share_attempt: attempt });
+      try {
+        await (shareTest.saved?.() ?? nb.saved());
+      } catch {
+        throw new Error("this notebook couldn't be saved, so it isn't uploaded (a retry could otherwise share it twice)");
+      }
+      if (current.id !== origin) throw new Error("the notebook changed; upload again");
+    }
+    let r;
+    try {
+      r = await uploadCollection({ id: prev, attempt, title: title.trim() || docName(), license, files }, progress);
+    } catch (e) {
+      // (the attempt made a share with other files, or its share was deleted: never a success, and the attempt is done)
+      if (!(e instanceof AttemptError)) throw e;
+      if (current.id === origin) nb.setMeta(e.kind === "used" ? { share_id: e.share.id, share_attempt: null } : { share_attempt: null });
+      throw new Error(e.kind === "used"
+        ? `an earlier upload of this notebook was shared with different files: ${e.share.url}. Nothing new was uploaded. Delete that share, or upload again to make a new version with your current selection.`
+        : "this notebook's earlier share was deleted. Upload again to make a new one.");
+    }
     // (its collection is its notebook's: never written onto another one attached meanwhile, CORR-172-ASTRA-2)
-    if (current.id === origin) nb.setMeta({ share_id: r.id });
+    if (current.id === origin) {
+      nb.setMeta({ share_id: r.id, share_attempt: null });
+      // (if this save fails, a retry carries the same attempt and files, and gets this share back)
+      void nb.saved().catch(() => {});
+    }
     return { url: r.url, again: !!prev };
   },
   fmtSize: (n) => fmtSize(n),
@@ -1723,7 +1752,7 @@ fileMenu.addEventListener("click", async (e) => {
       const d = nb.snapshot();
       // (a copy has its source's provenance; unknown stays unknown)
       const src = ws && current.id ? await ws.pathOf("notebook", current.id).then((p) => (p ? ws.stat(p) : undefined)).catch(() => undefined) : undefined;
-      await openDocument({ ...d, share_id: undefined, name: name.trim(), cells: d.cells.map((c) => ({ ...c, id: cellId() })) }, false, src?.made);
+      await openDocument({ ...d, share_id: undefined, share_attempt: undefined, name: name.trim(), cells: d.cells.map((c) => ({ ...c, id: cellId() })) }, false, src?.made);
       break;
     }
     case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
