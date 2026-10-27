@@ -738,9 +738,10 @@ def test_r2_CORR_157_4_the_thread_transport_portable():
     # (Ctrl-C's latency: from the interrupt to its KeyboardInterrupt here,
     # at most 100 ms: the wait wakes every 25 ms, William's Oct 25 bound.
     # The interrupt is interrupt_main from a Timer on every system, its
-    # moment taken just before it: a SIGALRM's own delivery can be late
-    # (0.1 s on macOS CI, #157's pypi 40501974415), which is the system's,
-    # not this wait's)
+    # moment taken just before it.  r2 measured a SIGALRM from its scheduled
+    # time instead, and macOS arm64 failed at 0.1011 s (pypi 40501974415):
+    # an unseparated scheduled-deadline/delivery/handling delay, cause
+    # unresolved; the two real-signal diagnostics below report the parts)
     fired = []
     def fire():
         fired.append(time.monotonic())
@@ -753,24 +754,6 @@ def test_r2_CORR_157_4_the_thread_transport_portable():
         latency = time.monotonic() - fired[0]
         print("interrupted", latency <= 0.100)
     c.kill()
-    # (reported, not checked: on POSIX, a SIGALRM measured from its
-    # scheduled time, which includes the system's delivery: beside the
-    # Timer's, it tells a late signal from a slow wake)
-    alarm = None
-    if hasattr(signal, "SIGALRM"):
-        c = rc.spawn(1 << 30, rc.Plan(None, 0, still, dict(os.environ)))
-        prev = signal.signal(signal.SIGALRM, lambda *a: (_ for _ in ()).throw(KeyboardInterrupt()))
-        due = time.monotonic() + 0.3
-        signal.setitimer(signal.ITIMER_REAL, 0.3)
-        try:
-            rc.write_all(c, [bytes(16 << 20)])
-        except KeyboardInterrupt:
-            alarm = time.monotonic() - due
-        except Exception:
-            pass
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, prev)
-        c.kill()
     c = rc.spawn(1 << 30, rc.Plan(None, 0, echo(5), dict(os.environ)))
     rc.write_all(c, [b"again"])
     back = bytearray(5)
@@ -778,11 +761,115 @@ def test_r2_CORR_157_4_the_thread_transport_portable():
     print("retry", bytes(back) == b"again")
     c.kill()
     print("latency timer %.4f (checked: <= 0.100)" % latency)
-    print("latency alarm " + ("%.4f (reported only)" % alarm if alarm is not None else "n/a (no SIGALRM here)"))
     """)
     assert out.split("\n")[:3] == ["echo True", "interrupted True", "retry True"], out
-    # (the latencies, in every run's log: both bases, on every system)
-    print("  " + "; ".join(out.split("\n")[3:5]))
+    # (in every run's log, on every system)
+    print("  " + out.split("\n")[3])
+
+
+DIAG_CODE = """
+import subprocess
+rc._FORCE_THREADS = True
+still = [sys.executable, "-c", "import time; time.sleep(30)"]
+def echo(n):
+    return [sys.executable, "-c", "import os, sys\\nn = int(sys.argv[1])\\nb = bytearray()\\nwhile len(b) < n:\\n d = os.read(0, n - len(b))\\n if not d: break\\n b += d\\nos.write(1, b)", str(n)]
+def retry():
+    c = rc.spawn(1 << 30, rc.Plan(None, 0, echo(5), dict(os.environ)))
+    try:
+        rc.write_all(c, [b"again"])
+        back = bytearray(5)
+        rc.read_into(c, back)
+        return bytes(back) == b"again"
+    finally:
+        c.kill()
+"""
+
+
+def diag(body):
+    # (R2's prelude, indented as R2 is, then the shared helpers and the body)
+    return R2 + textwrap.indent(DIAG_CODE + textwrap.dedent(body), "    ")
+
+
+def test_r2_CORR_157_4_sigalrm_diagnostic_portable():
+    # daybreak2 (#157 r3's review): a real SIGALRM on the same blocked
+    # 16 MiB write over the thread transport, in a run of its own, its
+    # parts apart: scheduled deadline -> handler entry (the system's
+    # delivery, and Python's running of the handler) and handler entry ->
+    # the KeyboardInterrupt here.  Reported, not bounded: it must be
+    # caught, and the cleanup and a retry work after it.  POSIX only.
+    if sys.platform == "win32":
+        print("  sigalrm: n/a (no SIGALRM on Windows)")
+        return
+    out = ok(diag("""
+    t = {}
+    def handler(*a):
+        t["handler"] = time.monotonic()
+        raise KeyboardInterrupt()
+    c = rc.spawn(1 << 30, rc.Plan(None, 0, still, dict(os.environ)))
+    prev = signal.signal(signal.SIGALRM, handler)
+    try:
+        t["due"] = time.monotonic() + 0.3
+        signal.setitimer(signal.ITIMER_REAL, 0.3)
+        try:
+            rc.write_all(c, [bytes(16 << 20)])
+            print("caught False (written)")
+        except KeyboardInterrupt:
+            t["catch"] = time.monotonic()
+            print("caught True")
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, prev)
+        c.kill()
+    print("retry", retry())
+    print("scheduled->handler %.4f handler->catch %.4f" % (t["handler"] - t["due"], t["catch"] - t["handler"]))
+    """))
+    lines = out.split("\n")
+    assert lines[:2] == ["caught True", "retry True"], out
+    print("  sigalrm: " + lines[2])
+
+
+SIGINT_TRIALS = 5  # (the sample, declared before any run: every outcome is logged)
+
+
+def test_r2_CORR_157_4_real_sigint_diagnostic_portable():
+    # astra2 (#157 r3's review): a real SIGINT from an independent process,
+    # SIGINT_TRIALS times, each on a fresh child blocked in the same 16 MiB
+    # write: the sender takes its monotonic time just before os.kill (the
+    # same system-wide clock), this process its own at the catch.  Every
+    # trial's outcome and send->catch printed; reported, not bounded: each
+    # must be caught, and the cleanup and a retry work after them.  POSIX
+    # only (a console's Ctrl-C on Windows is not a signal another process
+    # can send this way).
+    if sys.platform == "win32":
+        print("  sigint: n/a (no SIGINT from another process on Windows)")
+        return
+    out = ok(diag("""
+    SEND = "import os, signal, sys, time\\ntime.sleep(0.3)\\nt = time.monotonic()\\nos.kill(int(sys.argv[1]), signal.SIGINT)\\nprint(repr(t), flush=True)"
+    caught = 0
+    for i in range(%d):
+        c = rc.spawn(1 << 30, rc.Plan(None, 0, still, dict(os.environ)))
+        sender = subprocess.Popen([sys.executable, "-I", "-c", SEND, str(os.getpid())], stdout=subprocess.PIPE, text=True)
+        at = None
+        try:
+            try:
+                rc.write_all(c, [bytes(16 << 20)])
+                outcome = "written"
+            except KeyboardInterrupt:
+                at = time.monotonic()
+                outcome = "caught"
+        finally:
+            c.kill()
+        sent = float(sender.communicate()[0].strip())
+        caught += outcome == "caught"
+        print("trial %%d %%s send->catch %%s" %% (i + 1, outcome, "%%.4f" %% (at - sent) if at is not None else "-"))
+    print("caught %%d of %%d" %% (caught, %d))
+    print("retry", retry())
+    """ % (SIGINT_TRIALS, SIGINT_TRIALS)))
+    lines = out.split("\n")
+    trials = [l for l in lines if l.startswith("trial ")]
+    assert len(trials) == SIGINT_TRIALS and "caught %d of %d" % (SIGINT_TRIALS, SIGINT_TRIALS) in lines and "retry True" in lines, out
+    for l in trials:
+        print("  sigint: " + l)
 
 
 def test_r2_CORR_157_4_render_and_decode_over_the_thread_transport_portable():
