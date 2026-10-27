@@ -67,7 +67,7 @@
   body.opening .about, body.opening footer { display: none; }
   #nbline { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
   /* (a notebook another tab is editing: read-only here, and why: web/notebook/journal.js's writer lock) */
-  #writerbar { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--fg); background: var(--cell); }
+  #writerbar { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--fg); background: var(--cell); position: sticky; top: 0; z-index: 5; }
   #nbname { field-sizing: content; font: 600 16px system-ui, sans-serif; color: var(--fg); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; min-width: 8em; max-width: 100%; }
   #nbname:hover, #nbname:focus { border-color: var(--line); background: var(--cell); }
   #saved { color: var(--muted); font-size: 12px; }
@@ -896,17 +896,20 @@ const ttEl = $("#timetravel"), ttBtn = $("#ttbtn"), ttSlider = $("#ttslider");
 let historyQueue = [];
 // (a journal's store keeps its own history, T1 of its every save (notebook/journal.js): shown here, never recorded
 // from the page's changes, and let go, not closed, when another notebook opens: its saves still running finish first)
-let nbJournal = null;
+let nbJournal = null, nbHistoryOff = null;
 async function startHistory(id) {
-  if (nbJournal) nbJournal.release(); else nbHistory?.close();
+  // (the journal's store let go only if the page now shows another: the same store reattached (a takeover's reload)
+  // keeps its lock and its history (astra's CORR-215-1); notebook/journal.js switchJournal)
+  if (!nbJournal) nbHistory?.close();
+  nbJournal = switchJournal(nbJournal, nb.store);
+  nbHistoryOff?.();
+  nbHistoryOff = null;
   nbHistory = null;
-  nbJournal = null;
-  if (nb.store?.journaled) {
-    nbJournal = nb.store;
+  if (nbJournal) {
     nbHistory = nbJournal.history;
     historyQueue = [];
     kernels.get(id)?.journal?.flushPending(id);
-    nbHistory.on(() => { if (!ttEl.hidden) ttRefresh(false); });
+    nbHistoryOff = nbHistory.on(() => { if (!ttEl.hidden) ttRefresh(false); });
     if (!ttEl.hidden) ttRefresh(true);
     return;
   }
@@ -1775,6 +1778,7 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "delete": {
       if (current.kind !== "browser") break;
+      if (!pageMay().trash) { statusEl.textContent = "not moved to Trash: this notebook is open for editing in another tab of this browser"; break; }
       // (with the workspace, or while it is still opening: to Trash, which
       // keeps it until it is emptied, never deleted for good; another
       // notebook opened first; only this one, by its identity.  One not in
@@ -2417,12 +2421,30 @@ const wsReady = (async () => {
 // notebook's writer (another tab is: notebook/journal.js's lock) shows it read-only, says why in the bar, and takes
 // over, reloaded as the writer, when that tab lets go)
 const writerBar = $("#writerbar");
+// (the journal's page helpers (notebook/journal.js pageControls, switchJournal, TAKEOVER), from the history bundle
+// once a journal's store is made; plain stores never need them)
+let journalPage = { pageControls: () => ({ readOnly: false, bar: null, name: true, mode: true, repro: true, rename: true, trash: true }), switchJournal: (p, n) => (n?.journaled ? n : null), TAKEOVER: "" };
+const pageMay = () => journalPage.pageControls(nb.store);
 function showWriter(store, id) {
-  const why = store?.journaled ? store.viewOnly : null;
-  writerBar.hidden = !why;
-  writerBar.textContent = why ?? "";
-  nb.setReadOnly(!!why || !!ws?.quarantined);
-  if (why && store.readOnly === "other") store.ontakeover = () => { if (current.id === id && nb.store === store) open(store, id).catch((e) => console.warn("notebook:", e)); };
+  const c = journalPage.pageControls(store);
+  writerBar.hidden = !c.bar;
+  writerBar.textContent = c.bar ?? "";
+  nb.setReadOnly(c.readOnly || !!ws?.quarantined);
+  // (the page's own controls too: the name (and with it the workspace file's), the language, reproducibility (board's 1))
+  nbName.readOnly = !c.name;
+  modeEl.disabled = !c.mode;
+  $("#ttrepro").disabled = !c.repro;
+  if (c.readOnly && store.onTakeover) store.onTakeover(() => takeOver(store, id));
+}
+// (a read-only tab that became the writer: reopened as it, said, the reader's place kept: the scroll, and the cell
+// that had the focus (board's 2))
+async function takeOver(store, id) {
+  if (current.id !== id || nb.store !== store) return;
+  const at = anchorOf(nb), focused = document.activeElement?.closest?.("#cells .cell")?.cell?.id ?? null;
+  try { await open(store, id); } catch (e) { console.warn("notebook:", e); return; }
+  restoreAnchor(nb, at);
+  if (focused) [...document.querySelectorAll("#cells .cell")].find((el) => el.cell?.id === focused)?.cell?.ta?.focus({ preventScroll: true });
+  statusEl.textContent = journalPage.TAKEOVER;
 }
 let journalKit = null;
 async function storeFor(id, initial) {
@@ -2431,6 +2453,7 @@ async function storeFor(id, initial) {
   const [hdb, mod] = await Promise.all([historyDbReady, loadHistory()]);
   if (!hdb) throw new Error("this browser saves notebooks through sync's journal, which needs its storage: it isn't available here");
   journalKit ??= mod.journalClasses({ IdbStore, IdbPatchStore });
+  journalPage = { pageControls: mod.pageControls, switchJournal: mod.switchJournal, TAKEOVER: mod.TAKEOVER };
   return new journalKit.JournalStore(db, hdb, id, initial, mod);
 }
 // (the workspace, or null if it isn't open within a few seconds)
@@ -2464,6 +2487,8 @@ function wsRenameSoon() {
   wsRenameCancel();
   const id = current.id, name = docName(), gen = wsRenameGen;
   if (current.kind !== "browser" || !id) return;
+  // (not from a tab that isn't the notebook's writer: its file is the writer's to rename)
+  if (!pageMay().rename) return;
   wsRenameTimer = setTimeout(async () => {
     const w = await wsNow();
     if (!w) return;
