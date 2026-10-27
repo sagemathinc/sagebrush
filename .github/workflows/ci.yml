@@ -74,6 +74,13 @@ jobs:
         run: |
           python3 test/limit_sweep.py verify
           python3 test/limit_sweep_cases.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: "unsafe-code boundary: every allowed unsafe item pinned and audited, no lint override (scripts/unsafe-inventory.mjs)"
+        run: |
+          node scripts/test-unsafe-inventory.mjs
+          node scripts/unsafe-inventory.mjs --check
 
   node-tests:
     needs: changes
@@ -201,8 +208,6 @@ jobs:
           node scripts/test-size-measure.mjs
           node scripts/test-install-engine-wasm.mjs
           node scripts/test-check-fresh-wasm.mjs
-          node scripts/test-unsafe-inventory.mjs
-          node scripts/unsafe-inventory.mjs --check
           node scripts/test-npm-pack-metrics.mjs
           node scripts/test-install-timing.mjs
           node --test scripts/test-heap-budget.mjs
