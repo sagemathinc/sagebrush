@@ -1270,8 +1270,12 @@ try {
       await uploadIn(A, "R1a");
       await A.until("window.__held > 0", 60000);
       await uploadIn(B, "R1b");
-      await sleep(2000);
+      // (until B has reached its record while A is held: waiting for the lock, or, with no lock, past its record
+      // and sending; a fixed wait let B arrive only after A was released, run 12's control)
+      const bLockWait = "(async () => ((await navigator.locks?.query?.())?.pending ?? []).some((l) => l.name === 'sagebrush-share-sent'))()";
+      await B.until(`(async () => window.__sentN > 0 || (await ${bLockWait}))()`, 60000).catch(() => {});
       const bWhileHeld = await B.ev("window.__sentN");
+      const bWaited = await B.ev(bLockWait);
       await A.ev("window.__hold = false");
       await A.until("!!window.__lost && /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
       await B.until("!!window.__lost && /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
@@ -1283,8 +1287,8 @@ try {
       await A.until("!!document.querySelector('#shareresult a') || /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
       await A.until(`!(localStorage.getItem('sagebrush-share-sent') ?? '').includes(${JSON.stringify(la?.sent ?? "?")})`, 15000).catch(() => {});
       const afterA = await regIn(A);
-      ok(bWhileHeld === 0 && !!la?.sent && !!lb?.sent && la.sent !== lb.sent && both.includes(la.sent) && both.includes(lb.sent),
-        `R1 two tabs, two notebooks, recorded at once: B's request waited for A's record (${bWhileHeld} sent while A held); both sent, both answers lost: both records kept (A ${both.includes(la?.sent ?? "?")}, B ${both.includes(lb?.sent ?? "?")})`);
+      ok(bWaited && bWhileHeld === 0 && !!la?.sent && !!lb?.sent && la.sent !== lb.sent && both.includes(la.sent) && both.includes(lb.sent),
+        `R1 two tabs, two notebooks, recorded at once: B reached its record while A was held, waiting for the lock (${bWaited}), and sent nothing then (${bWhileHeld}); both sent, both answers lost: both records kept (A ${both.includes(la?.sent ?? "?")}, B ${both.includes(lb?.sent ?? "?")})`);
       ok(!afterA.includes(la?.sent ?? "?") && afterA.includes(lb?.sent ?? "?"), `R1 ...A's retry answered and settled: A's record gone (${!afterA.includes(la?.sent ?? "?")}), B's kept (${afterA.includes(lb?.sent ?? "?")})`);
       await A.ev("window.fetch = window.__f0 ?? window.fetch");
       await raw("Target.closeTarget", { targetId: B.targetId });
