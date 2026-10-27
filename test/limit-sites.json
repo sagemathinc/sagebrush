@@ -6205,11 +6205,19 @@
  },
  "web/notebook/text-overlap.ts ::  :: export const TEXT_DIFF_PRODUCT_LIMIT = 4_000_000; #0": {
   "class": "1",
-  "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)"
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)",
+  "reason": "the shared 3-way text merge diff-work bound: past it lineMerge3 returns tagged exhaustion; notebook records a too-large clash, while board refuses the whole merge as work with no partial records; neither guesses nor loses data."
  },
  "web/notebook/text-overlap.ts :: hunks :: if (work > TEXT_DIFF_PRODUCT_LIMIT || work > ledger.left) return \"exhausted\"; #0": {
   "class": "1",
-  "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)"
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)",
+  "reason": "the shared 3-way text merge diff-work bound: past it lineMerge3 returns tagged exhaustion; notebook records a too-large clash, while board refuses the whole merge as work with no partial records; neither guesses nor loses data."
  },
  "web/workspace/sync-ledger.ts ::  :: export const CODE = { max: 32 }; #0": {
   "class": "1",
