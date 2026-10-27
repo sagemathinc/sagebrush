@@ -25,9 +25,9 @@
 // typescript-api (the repository's own tsc is TypeScript 7, which has none);
 // SB_TS_API overrides the module for local runs.
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -338,16 +338,106 @@ const VIEW_CTOR = /^(Int8|Uint8|Uint8Clamped|Int16|Uint16|Int32|Uint32|Float16|F
 
 // Generated modules: the repository's build output (build/, gitignored) isn't part of the tracked tree, so
 // the census never reads it, whether or not a build ran (CI's engine jobs run scripts/build-cli.mjs first).
-// Every scanned file's import of one is listed in the header with the tracked generator that writes it, and
-// one not reviewed here fails the gate (generatedProblems in arraybuffer-sites-check.mjs).
+// The boundary is the program's host: every way it reads a path (exists, read, parse, list) treats an excluded
+// one as missing, with symlinks resolved, and a final check refuses a program holding one.  Every reference a
+// program file makes into an excluded path (a module specifier of any form, a tsconfig path alias, a
+// triple-slash path or relative types reference, a tsconfig option naming one) is listed in the header; one
+// that isn't a reviewed generated module, or whose generator's reviewed fragment changed or breaks the
+// contract, fails the gate (generatedProblems in arraybuffer-sites-check.mjs).
 export const EXCLUDED_DIRS = ["build/"];
+// a reviewed generated module: its tracked generator, and the sha256 of the generator's fragment that writes it
+// (its output directory's declaration and its write statement), renewed only by review.  The contract, checked
+// on the generator's text without a build: the module is `globalThis.NAME = ${JSON.stringify(...)};` lines and
+// nothing else, so loading it assigns JSON literals to globals and runs nothing else
 export const GENERATED = {
-  "build/cli/lib-meta.gen.js": "scripts/build-cli.mjs: globalThis.__SAGEBRUSH_BUILD_ID__, __SAGEBRUSH_VERSION__ and __SAGEBRUSH_NOTICES__, each assigned a JSON literal",
+  "build/cli/lib-meta.gen.js": { generator: "scripts/build-cli.mjs", fragment_sha256: "cf876c878df4a875e60a8b93b62f8ff86a991d79d0ffb6b24210d419a1192a22" },
 };
-const excludedPath = (root, f) => {
-  const r = relative(root, f).split(sep).join("/");
-  return EXCLUDED_DIRS.some((d) => `${r}/`.startsWith(d));
-};
+const toRel = (root, f) => relative(root, f).split(sep).join("/");
+const excludedPath = (root, f) => EXCLUDED_DIRS.some((d) => `${toRel(root, f)}/`.startsWith(d));
+// a path with its symlinks resolved, component by component, whether or not its last components exist (so a
+// dangling link is resolved the same as a live one: the result doesn't depend on a build)
+function canonical(p, memo = new Map()) {
+  const parts = resolve(p).split(sep).filter(Boolean);
+  let cur = sep;
+  for (let hops = 0; parts.length; ) {
+    const next = join(cur, parts.shift());
+    if (memo.has(next)) {
+      cur = memo.get(next);
+      continue;
+    }
+    let link = null;
+    try {
+      if (lstatSync(next).isSymbolicLink()) link = readlinkSync(next);
+    } catch {}
+    if (link === null || ++hops > 40) {
+      cur = next;
+      continue;
+    }
+    parts.unshift(...resolve(cur, link).split(sep).filter(Boolean));
+    cur = sep;
+  }
+  return cur;
+}
+export function hiddenPath(root, f, memo) {
+  return excludedPath(root, f) || excludedPath(canonical(root, memo), canonical(f, memo));
+}
+// the census program's host: the compiler's own, with every read of an excluded path answered as missing
+export function trackedHost(root, options) {
+  const host = ts.createCompilerHost(options);
+  const memo = new Map();
+  const hid = (f) => hiddenPath(root, f, memo);
+  const { fileExists, readFile, directoryExists, getDirectories } = host;
+  host.fileExists = (f) => !hid(f) && fileExists.call(host, f);
+  // (the source read: the compiler's getSourceFile reads through host.readFile, so this one denial covers
+  // parsing too, a triple-slash reference's included; the tests pin that)
+  host.readFile = (f) => (hid(f) ? undefined : readFile.call(host, f));
+  host.directoryExists = (d) => !hid(d) && directoryExists.call(host, d);
+  // (a hidden directory's children are hidden too, so it lists as empty)
+  host.getDirectories = (d) => getDirectories.call(host, d).filter((c) => !hid(join(d, c)));
+  return host;
+}
+// the final check: a program holding an excluded file is refused, whatever path brought it in
+export function assertTracked(root, fileNames) {
+  const bad = fileNames.filter((f) => hiddenPath(root, f));
+  if (bad.length) throw new Error(`the census program holds excluded files: ${bad.map((f) => toRel(root, f)).join(", ")}`);
+}
+// a generated module's contract and fragment, from its tracked generator's text: {fragment_sha256, contract}
+// (contract null when it holds, else why not)
+export function generatorContract(text, path) {
+  const name = path.split("/").pop();
+  const dirParts = path.split("/").slice(0, -1);
+  const sf = ts.createSourceFile("generator.mjs", text, ts.ScriptTarget.Latest, true);
+  const writes = [];
+  const outs = [];
+  const walk = (n) => {
+    if (ts.isCallExpression(n) && n.expression.getText(sf) === "writeFileSync" && n.arguments.length === 2) {
+      const a = n.arguments[0];
+      if (ts.isCallExpression(a) && a.expression.getText(sf) === "join" && a.arguments.length === 2 && isLiteralText(a.arguments[1]) && a.arguments[1].text === name) writes.push(n);
+    }
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === "out") outs.push(n);
+    ts.forEachChild(n, walk);
+  };
+  walk(sf);
+  if (writes.length !== 1) return { fragment_sha256: null, contract: `${writes.length} writes of ${name}, not one` };
+  const w = writes[0];
+  const dir = w.arguments[0].arguments[0];
+  if (!ts.isIdentifier(dir) || dir.text !== "out" || outs.length !== 1) return { fragment_sha256: null, contract: "its directory isn't the generator's one `out`" };
+  const o = outs[0].initializer;
+  const oParts = o && ts.isCallExpression(o) && o.expression.getText(sf) === "join" ? o.arguments.map((x) => (isLiteralText(x) ? x.text : null)) : [];
+  if (!(oParts.length === dirParts.length + 1 && o.arguments[0].getText(sf) === "root" && dirParts.every((d, i) => oParts[i + 1] === d)))
+    return { fragment_sha256: null, contract: `\`out\` isn't join(root, ${dirParts.map((d) => JSON.stringify(d)).join(", ")})` };
+  const fragment_sha256 = sha(`${outs[0].getText(sf)}\n${w.getText(sf)}`);
+  const t = w.arguments[1];
+  if (!ts.isTemplateExpression(t)) return { fragment_sha256, contract: "its text isn't a template of globalThis assignments" };
+  let shape = t.head.text;
+  for (const span of t.templateSpans) {
+    const e = span.expression;
+    if (!(ts.isCallExpression(e) && e.expression.getText(sf) === "JSON.stringify" && e.arguments.length === 1)) return { fragment_sha256, contract: `a value isn't JSON.stringify(...): ${e.getText(sf).slice(0, 80)}` };
+    shape += "${}" + span.literal.text;
+  }
+  if (!/^(globalThis\.[A-Za-z_$][\w$]* = \$\{\};\n)+$/.test(shape)) return { fragment_sha256, contract: `its lines aren't each \`globalThis.NAME = \${JSON.stringify(...)};\`: ${JSON.stringify(shape.slice(0, 120))}` };
+  return { fragment_sha256, contract: null };
+}
 
 export function census(root = ROOT, { commit = null } = {}) {
   const cfg = ts.getParsedCommandLineOfConfigFile(join(root, "tsconfig.json"), {}, {
@@ -359,11 +449,7 @@ export function census(root = ROOT, { commit = null } = {}) {
   const rootNames = [...cfg.fileNames.filter((f) => f.includes(`${sep}src${sep}runtime${sep}`)), join(root, "web", "worker.ts")];
   let program;
   const options = { ...cfg.options, noEmit: true, allowJs: true };
-  // (the program's host doesn't see the excluded paths: a module there resolves as missing, built or not,
-  // and no root is ever one)
-  const host = ts.createCompilerHost(options);
-  const { fileExists } = host;
-  host.fileExists = (f) => !excludedPath(root, f) && fileExists.call(host, f);
+  const host = trackedHost(root, options);
   for (;;) {
     program = ts.createProgram({ rootNames, options, host });
     const more = [];
@@ -383,26 +469,54 @@ export function census(root = ROOT, { commit = null } = {}) {
   }
   const checker = program.getTypeChecker();
   const files = program.getSourceFiles().filter(isSourceFile);
-  // every relative module specifier a scanned file names (import, export from, import(), require) that
-  // points into an excluded path, present or not
+  assertTracked(root, program.getSourceFiles().map((f) => f.fileName));
+  // every reference a program file (declarations too) or the tsconfig makes into an excluded path, present or not
   const generatedFrom = new Map();
-  for (const sf of files) {
-    const note = (spec) => {
-      if (!spec || !isLiteralText(spec) || !spec.text.startsWith(".")) return;
-      const p = join(dirname(sf.fileName), spec.text);
-      if (!excludedPath(root, p)) return;
-      const k = relative(root, p).split(sep).join("/");
-      (generatedFrom.get(k) ?? generatedFrom.set(k, new Set()).get(k)).add(relOf(root, sf));
+  const memo = new Map();
+  const croot = canonical(root, memo);
+  const note = (p0, from, module = false) => {
+    // (a module specifier names a file by its stem too: a tracked link "./x" may be x.ts, pointing into build/)
+    const p = (module ? [p0, ...[".ts", ".tsx", ".d.ts", ".js", ".mjs", ".cjs", "/index.ts", "/index.js"].map((e) => p0 + e)] : [p0]).find((x) => hiddenPath(root, x, memo));
+    if (p === undefined) return;
+    const k = excludedPath(root, p) ? toRel(root, p) : toRel(croot, canonical(p, memo));
+    (generatedFrom.get(k) ?? generatedFrom.set(k, new Set()).get(k)).add(from);
+  };
+  const paths = Object.entries(options.paths ?? {});
+  const pathsBase = options.pathsBasePath ?? options.baseUrl ?? root;
+  for (const [, targets] of paths) for (const t of targets) note(join(pathsBase, t.replace("*", "")), "tsconfig.json");
+  for (const d of [...(options.typeRoots ?? []), ...(options.rootDirs ?? []), ...(options.baseUrl ? [options.baseUrl] : [])]) note(d, "tsconfig.json");
+  for (const sf of program.getSourceFiles().filter((f) => !f.fileName.includes(`${sep}node_modules${sep}`))) {
+    const from = relOf(root, sf);
+    const spec = (x) => {
+      if (!x || !isLiteralText(x)) return;
+      if (x.text.startsWith(".")) return note(join(dirname(sf.fileName), x.text), from, true);
+      // a path alias: each of its targets, the specifier substituted
+      for (const [pat, targets] of paths) {
+        const star = pat.indexOf("*");
+        const m = star < 0 ? (x.text === pat ? "" : null) : x.text.startsWith(pat.slice(0, star)) && x.text.endsWith(pat.slice(star + 1)) ? x.text.slice(star, x.text.length - (pat.length - star - 1)) : null;
+        if (m !== null) for (const t of targets) note(join(pathsBase, t.replace("*", m)), from, true);
+      }
     };
+    for (const r of sf.referencedFiles) note(join(dirname(sf.fileName), r.fileName), from);
+    for (const r of sf.typeReferenceDirectives) if (r.fileName.startsWith(".")) note(join(dirname(sf.fileName), r.fileName), from);
     const scan = (n) => {
-      if (ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) note(n.moduleSpecifier);
-      else if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference)) note(n.moduleReference.expression);
-      else if (ts.isCallExpression(n) && n.arguments.length === 1 && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === "require"))) note(n.arguments[0]);
+      if (ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) spec(n.moduleSpecifier);
+      else if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference)) spec(n.moduleReference.expression);
+      else if (ts.isCallExpression(n) && n.arguments.length === 1 && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === "require"))) spec(n.arguments[0]);
+      else if (ts.isImportTypeNode(n) && ts.isLiteralTypeNode(n.argument)) spec(n.argument.literal);
       ts.forEachChild(n, scan);
     };
     scan(sf);
   }
-  const generated = [...generatedFrom].sort(([a], [b]) => (a < b ? -1 : 1)).map(([path, from]) => ({ path, from: [...from].sort(), generator: GENERATED[path] ?? null }));
+  const generated = [...generatedFrom].sort(([a], [b]) => (a < b ? -1 : 1)).map(([path, from]) => {
+    const g = GENERATED[path];
+    let text = null;
+    try {
+      if (g) text = readFileSync(join(root, g.generator), "utf8");
+    } catch {}
+    const c = g ? (text === null ? { fragment_sha256: null, contract: `its generator ${g.generator} is missing` } : generatorContract(text, path)) : null;
+    return { path, from: [...from].sort(), generator: g?.generator ?? null, ...(c ?? {}) };
+  });
   const records = [];
   // the reference graph, by declaration fingerprint: {file, name, fp, refs, irefs, libs}
   // (refs: resolved references; irefs: the implicit-invocation and by-name accessor edges)

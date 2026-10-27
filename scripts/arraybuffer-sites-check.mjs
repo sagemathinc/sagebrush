@@ -24,7 +24,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { census, censusText, ROOT } from "./arraybuffer-sites.mjs";
+import { census, censusText, GENERATED, ROOT } from "./arraybuffer-sites.mjs";
 
 export const TABLE = "test/arraybuffer-sites.json";
 export const BASE = "test/arraybuffer-sites.base.json";
@@ -318,10 +318,19 @@ export function renewal(oldBase, deltas, cur, problemsAtB) {
 }
 
 // the whole gate, for the test and the command line
-// an import of a generated module (the excluded build output, which the census doesn't read) needs a
-// reviewed generator (GENERATED in arraybuffer-sites.mjs); any other fails, by its path
+// a reference into the excluded build output (which the census doesn't read) must be a reviewed generated
+// module (GENERATED in arraybuffer-sites.mjs) whose generator still holds its contract and whose fragment is
+// the one reviewed; anything else fails, by its path
 export function generatedProblems(cur) {
-  return (cur.header.generated ?? []).filter((g) => !g.generator).map((g) => ({ problem: "generated", key: g.path, detail: `imported by ${g.from.join(", ")} from the excluded build output, with no reviewed generator` }));
+  const out = [];
+  for (const g of cur.header.generated ?? []) {
+    const where = `referenced by ${g.from.join(", ")} in the excluded build output`;
+    const want = GENERATED[g.path];
+    if (!g.generator || !want) out.push({ problem: "generated", key: g.path, detail: `${where}, with no reviewed generator` });
+    else if (g.contract) out.push({ problem: "generated", key: g.path, detail: `${where}: its generator ${g.generator} breaks the contract (${g.contract})` });
+    else if (g.fragment_sha256 !== want.fragment_sha256) out.push({ problem: "generated", key: g.path, detail: `${where}: its generator's fragment changed (sha256 ${g.fragment_sha256}, reviewed ${want.fragment_sha256}): review it and renew GENERATED` });
+  }
+  return out;
 }
 
 export function gate(root = ROOT, { table = readTable(root), base = null, cur = census(root) } = {}) {
