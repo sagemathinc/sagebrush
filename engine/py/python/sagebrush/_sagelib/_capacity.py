@@ -6,12 +6,16 @@ plan-d-memory-message-r3 §1d, amended by plan-d0-capacity-r2 §0:
   use 1/4 of it, say).  In pyjs it is the runtime's own figure
   (sys._sagebrush_heap_limit: the old space the session can grow to), exactly
   as before.  In CPython it is the machine's total as this process sees it
-  (cgroup, resource limits, physical memory), from a snapshot at most
-  100 ms old; a nominal 1 GiB when nothing can be read, as before.
+  (cgroup, resource limits, physical memory: /proc on Linux, sysctl on
+  macOS, GlobalMemoryStatusEx and the job on Windows), from a snapshot at
+  most 100 ms old; a nominal 1 GiB when nothing can be read, as before.
 - capacity(): the memory observed free now, fresh on each call, with its
   basis and what could not be read.  It decides no admission: it goes in a
   refusal's record and in estimates' `fits`.  An observation, not a
-  reservation or a promise that an allocation succeeds.
+  reservation or a promise that an allocation succeeds.  On macOS its host
+  row is "macos-host": host_statistics64's free and inactive pages; on
+  Windows, physical available and the job's limit.  A source that can't be
+  read is unknown (diagnosis() says why), never a guess.
 - capacity()["domains"]: the kinds of memory this observation vouches for
   (plan-d0-domains-r2): each basis row says which DOMAINS its `used` counts
   ("includes") and which its `limit` bounds ("constrains"); a domain is in
@@ -21,6 +25,9 @@ plan-d-memory-message-r3 §1d, amended by plan-d0-capacity-r2 §0:
 - engine_total(): the constrained total of the engine's own memory domain
   (the engine ledger's base, no-cliffs plan C r10 section 1), with its
   status: observed, zero (kept as 0) or nominal.
+- engine_totals(): the same by row extent (no-cliffs C r16b): the rows
+  bounding one WebAssembly memory's address space, which retired engine
+  instances don't occupy, and the shared rows, on which they count.
 - poly_share(): the one route that does follow free memory: the default
   budget of a polynomial factorization, floor(effective_guard_bytes / 2),
   or a quarter of what is free when that is more (a small session),
@@ -66,6 +73,7 @@ class _Sources:
     platform = _sys.platform
     rlimits = None          # None: the resource module; else name -> (soft, hard)
     windows = None          # None: ctypes; else an object with the queries
+    mac = None              # None: ctypes (libSystem); else an object with physical() and available()
     runtime = None          # None: _sbengine.capacity_parts() in pyjs
     clock = staticmethod(_time.monotonic)
 
@@ -76,13 +84,14 @@ _src = _Sources()
 def _set_sources(**kw):
     """Tests only: replace the sources (keyword names as in _Sources);
     _set_sources() restores the real ones."""
-    global _src, _poly_snap, _total_snap, _engine_snap, _cg_dirs
+    global _src, _poly_snap, _total_snap, _engine_snap, _totals_snap, _rows_snap, _cg_dirs, _api
     _src = _Sources()
+    _api = {}
     for k, v in kw.items():
         if not hasattr(_Sources, k):
             raise TypeError("no source %r" % k)
         setattr(_src, k, v)
-    _poly_snap = _total_snap = _engine_snap = _cg_dirs = None
+    _poly_snap = _total_snap = _engine_snap = _totals_snap = _rows_snap = _cg_dirs = None
 
 
 try:
@@ -239,22 +248,135 @@ def _windows():
     (_job_choice), None when not in a job or the source doesn't say."""
     w = _src.windows
     if w is None:
-        try:
-            w = _CtypesWindows()
-        except Exception:
+        w = _ctypes_api("windows", _CtypesWindows)
+        if w is None:
             return None
+    step = "physical"
     try:
         total, available = w.physical()
+        step = "in_job"
         in_job = w.in_job()
         if not in_job:
             return (None, None, total, available, None)
+        step = "job_limit"
         got = tuple(w.job_limit())
         # (a source with no scope, as an older one: unknown, read
         # conservatively by _job_domains)
         limit, used, scope = got if len(got) == 3 else got + (None,)
         return (limit, used, total, available, scope)
-    except Exception:
+    except Exception as e:
+        _note("windows-job", step, e)
         return None
+
+
+# (why each source last failed, for diagnosis(): part -> "step: error")
+_why = {}
+# (the ctypes sources, made once: their library handles and, on macOS, the host port)
+_api = {}
+
+
+def _note(part, step, e):
+    _why[part] = "%s: %s" % (step, (str(e) or type(e).__name__)[:200])
+
+
+def _ctypes_api(name, make):
+    """The real source `name`, made once (None, its reason noted, when it can't be)."""
+    if name not in _api:
+        try:
+            _api[name] = make()
+        except Exception as e:
+            _note({"windows": "windows-job", "mac": "macos-host"}[name], "load", e)
+            return None
+    return _api[name]
+
+
+def diagnosis():
+    """Why each source the last capacity() could not read failed: {part:
+    "step: error"} (the Windows job query, the macOS host statistics); {} when
+    every one was read.  For logs and tests: it decides nothing."""
+    return dict(_why)
+
+
+def _mac():
+    """macOS: (total, available) bytes of physical memory, or None when they
+    can't be read (and then nothing finite is claimed from them)."""
+    m = _src.mac
+    if m is None:
+        m = _ctypes_api("mac", _CtypesMac)
+        if m is None:
+            return None
+    step = "physical"
+    try:
+        total = int(m.physical())
+        if total <= 0:
+            raise ValueError("a total of %d bytes" % total)
+        step = "available"
+        available = int(m.available())
+        if available < 0:
+            raise ValueError("%d bytes available" % available)
+        return total, min(available, total)
+    except Exception as e:
+        _note("macos-host", step, e)
+        return None
+
+
+class _CtypesMac:
+    """macOS through ctypes (libSystem's documented interfaces, no
+    subprocess): physical memory from sysctlbyname("hw.memsize"); what is
+    available from host_statistics64(HOST_VM_INFO64) as the free and the
+    inactive pages times host_page_size.  Inactive pages are the ones the
+    system reclaims first.  free_count already includes the speculative
+    pages, so they aren't added twice; purgeable pages aren't added, so the
+    figure errs low.  The host port is taken once."""
+
+    _HOST_VM_INFO64 = 4
+
+    def __init__(self):
+        import ctypes
+        import ctypes.util
+        c = self.c = ctypes
+        lib = self.lib = c.CDLL(ctypes.util.find_library("System") or "/usr/lib/libSystem.B.dylib", use_errno=True)
+        lib.sysctlbyname.argtypes = [c.c_char_p, c.c_void_p, c.POINTER(c.c_size_t), c.c_void_p, c.c_size_t]
+        lib.sysctlbyname.restype = c.c_int
+        lib.mach_host_self.argtypes = []
+        lib.mach_host_self.restype = c.c_uint
+        lib.host_page_size.argtypes = [c.c_uint, c.POINTER(c.c_size_t)]
+        lib.host_page_size.restype = c.c_int
+        lib.host_statistics64.argtypes = [c.c_uint, c.c_int, c.c_void_p, c.POINTER(c.c_uint)]
+        lib.host_statistics64.restype = c.c_int
+
+        class VMStatistics64(c.Structure):
+            # (struct vm_statistics64, as <mach/vm_statistics.h> declares it: counts in pages)
+            _fields_ = [(n, c.c_uint) for n in ("free_count", "active_count", "inactive_count", "wire_count")] + \
+                [(n, c.c_uint64) for n in ("zero_fill_count", "reactivations", "pageins", "pageouts", "faults", "cow_faults", "lookups", "hits", "purges")] + \
+                [(n, c.c_uint) for n in ("purgeable_count", "speculative_count")] + \
+                [(n, c.c_uint64) for n in ("decompressions", "compressions", "swapins", "swapouts")] + \
+                [(n, c.c_uint) for n in ("compressor_page_count", "throttled_count", "external_page_count", "internal_page_count")] + \
+                [("total_uncompressed_pages_in_compressor", c.c_uint64)]
+        self.VM = VMStatistics64
+        self.host = lib.mach_host_self()
+        if not self.host:
+            raise OSError("mach_host_self")
+
+    def physical(self):
+        c = self.c
+        n, size = c.c_uint64(0), c.c_size_t(c.sizeof(c.c_uint64))
+        if self.lib.sysctlbyname(b"hw.memsize", c.byref(n), c.byref(size), None, 0) != 0:
+            raise OSError(c.get_errno(), "sysctlbyname hw.memsize")
+        return n.value
+
+    def available(self):
+        c = self.c
+        page = c.c_size_t(0)
+        kr = self.lib.host_page_size(self.host, c.byref(page))
+        if kr != 0 or not page.value:
+            raise OSError("host_page_size: kern_return %d" % kr)
+        vm = self.VM()
+        count = c.c_uint(c.sizeof(vm) // 4)
+        kr = self.lib.host_statistics64(self.host, self._HOST_VM_INFO64, c.byref(vm), c.byref(count))
+        if kr != 0:
+            raise OSError("host_statistics64: kern_return %d" % kr)
+        return (int(vm.free_count) + int(vm.inactive_count)) * int(page.value)
 
 
 _PROCESS_MEMORY, _JOB_MEMORY = 0x100, 0x200   # (JOB_OBJECT_LIMIT_*_MEMORY)
@@ -296,9 +418,26 @@ class _CtypesWindows:
 
     def __init__(self):
         import ctypes
-        from ctypes import wintypes
-        self.c, self.w = ctypes, wintypes
-        self.k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        from ctypes import wintypes as w
+        c = ctypes
+        self.c, self.w = c, w
+        k = self.k32 = c.WinDLL("kernel32", use_last_error=True)
+        # (every call typed: a HANDLE is pointer-sized, and an untyped call
+        # passes and returns a C int, which on 64-bit Windows isn't one)
+        k.GetCurrentProcess.argtypes = []
+        k.GetCurrentProcess.restype = w.HANDLE
+        k.GlobalMemoryStatusEx.argtypes = [c.c_void_p]
+        k.GlobalMemoryStatusEx.restype = w.BOOL
+        k.IsProcessInJob.argtypes = [w.HANDLE, w.HANDLE, c.POINTER(w.BOOL)]
+        k.IsProcessInJob.restype = w.BOOL
+        k.QueryInformationJobObject.argtypes = [w.HANDLE, c.c_int, c.c_void_p, w.DWORD, c.POINTER(w.DWORD)]
+        k.QueryInformationJobObject.restype = w.BOOL
+        self.psapi = c.WinDLL("psapi", use_last_error=True)
+        self.psapi.GetProcessMemoryInfo.argtypes = [w.HANDLE, c.c_void_p, w.DWORD]
+        self.psapi.GetProcessMemoryInfo.restype = w.BOOL
+
+    def _fail(self, name):
+        return OSError("%s failed: winerror %d" % (name, self.c.get_last_error()))
 
     def physical(self):
         c = self.c
@@ -310,14 +449,14 @@ class _CtypesWindows:
         m = MEMORYSTATUSEX()
         m.dwLength = c.sizeof(m)
         if not self.k32.GlobalMemoryStatusEx(c.byref(m)):
-            raise OSError("GlobalMemoryStatusEx")
+            raise self._fail("GlobalMemoryStatusEx")
         return int(m.ullTotalPhys), int(m.ullAvailPhys)
 
     def in_job(self):
         c, w = self.c, self.w
         r = w.BOOL()
         if not self.k32.IsProcessInJob(self.k32.GetCurrentProcess(), None, c.byref(r)):
-            raise OSError("IsProcessInJob")
+            raise self._fail("IsProcessInJob")
         return bool(r.value)
 
     def job_limit(self):
@@ -336,7 +475,7 @@ class _CtypesWindows:
                         ("JobMemoryLimit", c.c_size_t), ("PeakProcessMemoryUsed", c.c_size_t), ("PeakJobMemoryUsed", c.c_size_t)]
         info = EXTENDED()
         if not self.k32.QueryInformationJobObject(None, 9, c.byref(info), c.sizeof(info), None):
-            raise OSError("QueryInformationJobObject")
+            raise self._fail("QueryInformationJobObject")
         flags = info.BasicLimitInformation.LimitFlags
         commit = self._commit() if flags & _PROCESS_MEMORY else None
         return _job_choice(flags, int(info.ProcessMemoryLimit), commit, int(info.JobMemoryLimit), int(info.PeakJobMemoryUsed))
@@ -350,9 +489,8 @@ class _CtypesWindows:
                 "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage", "PrivateUsage")]
         p = PMC()
         p.cb = c.sizeof(p)
-        psapi = c.WinDLL("psapi", use_last_error=True)
-        if not psapi.GetProcessMemoryInfo(self.k32.GetCurrentProcess(), c.byref(p), p.cb):
-            raise OSError("GetProcessMemoryInfo")
+        if not self.psapi.GetProcessMemoryInfo(self.k32.GetCurrentProcess(), c.byref(p), p.cb):
+            raise self._fail("GetProcessMemoryInfo")
         return int(p.PrivateUsage)
 
 
@@ -360,7 +498,13 @@ def _runtime_parts():
     """pyjs's own parts, from the runtime (never guessed here): [(source,
     limit, used, includes, constrains)]; [] in CPython.  A part with no
     domains, (source, limit, used) from an older engine or a test, gets
-    none: it can never widen capacity()["domains"]."""
+    none: it can never widen capacity()["domains"].  Each tuple carries a
+    sixth item, True when the part named a constrained domain this module
+    doesn't know: it is dropped from the list, but engine_rows must not
+    read the rest as engine-only.  A seventh item is the part's extent
+    (no-cliffs C r16b section 3.1): "instance" when the part declares that
+    it bounds one WebAssembly memory's address space (its sixth field,
+    only the runtime's own wasm engine part), else "shared"."""
     if _src.runtime is not None:
         parts = list(_src.runtime())
     elif not hasattr(_sys, "_sagebrush_heap_limit"):
@@ -374,10 +518,12 @@ def _runtime_parts():
     out = []
     for p in parts:
         p = tuple(p)
+        extent = "instance" if len(p) >= 6 and p[5] == "instance" else "shared"
         if len(p) >= 5:
-            out.append((p[0], p[1], p[2], [d for d in DOMAINS if d in p[3]], [d for d in DOMAINS if d in p[4]]))
+            out.append((p[0], p[1], p[2], [d for d in DOMAINS if d in p[3]], [d for d in DOMAINS if d in p[4]],
+                        any(d not in DOMAINS for d in p[4]), extent))
         else:
-            out.append((p[0], p[1], p[2], [], []))
+            out.append((p[0], p[1], p[2], [], [], False, "shared"))
     return out
 
 
@@ -414,6 +560,14 @@ def _machine_total():
         limits.append(("physical", total))
         if job is not None:
             limits.append(("windows job", job))
+    elif _src.platform == "darwin":
+        m = _mac()
+        if m is not None:
+            limits.append(("hw.memsize", m[0]))
+        for r in ("RLIMIT_AS", "RLIMIT_DATA"):
+            v = _rlimit(r)
+            if v is not None and v is not False:
+                limits.append((r, v))
     else:
         for name, lim, _ in (_cgroups() or []):
             limits.append((name, lim))
@@ -478,6 +632,97 @@ def engine_total():
 _engine_snap = None
 
 
+def engine_totals():
+    """The engine's totals by row extent (no-cliffs C r16b section 3.1):
+    {"instance": ..., "shared": ...}, each as engine_total returns it but
+    over that extent's applicable rows only, or None when it has none, from
+    a snapshot at most 100 ms old.
+
+    - instance: the rows that bound one WebAssembly memory's address space
+      (declared by their producer; the runtime's own wasm engine part):
+      retired engine instances are outside their scope;
+    - shared: every other applicable row (process, cgroup, machine, a
+      configured total, any aggregate engine budget, any row whose extent
+      is not declared): retired instances count on them.
+
+    When no row applies at all, shared is engine_total's nominal 1 GiB
+    record and instance None, as before.  engine_total keeps its meaning
+    (the least row over both extents) for D0's other consumers."""
+    global _totals_snap
+    now = _src.clock()
+    if _totals_snap is not None and now - _totals_snap[0] < _SNAPSHOT_S:
+        return {k: (None if v is None else dict(v)) for k, v in _totals_snap[1].items()}
+    domain = _engine_domain()
+    host = [d for d in _SELF if d not in ("wasm-engine", "wasm-instance")]
+    rows = [b for b in capacity()["basis"] if domain in b["constrains"]]
+
+    def least(sel):
+        if not sel:
+            return None
+        m = min(b["limit"] for b in sel)
+        at = [b for b in sel if b["limit"] == m]
+        return {"bytes": m, "status": "zero" if m == 0 else "observed", "basis": [b["source"] for b in at],
+                "joint": any(d in host for b in at for d in b["constrains"])}
+
+    if not rows:
+        out = {"instance": None, "shared": {"bytes": _NOMINAL, "status": "nominal", "basis": ["nominal"], "joint": False}}
+    else:
+        out = {"instance": least([b for b in rows if b.get("extent") == "instance"]),
+               "shared": least([b for b in rows if b.get("extent") != "instance"])}
+    _totals_snap = (now, out)
+    return {k: (None if v is None else dict(v)) for k, v in out.items()}
+
+
+_totals_snap = None
+
+
+def engine_rows():
+    """Every row that constrains the engine's domain, for the ledger's
+    certification (no-cliffs plan C r17 section 1.2): {"rows": [{"source",
+    "figure", "joint"}], "complete"}, from a snapshot at most 100 ms old.
+
+    - rows: each applicable row (its `constrains` includes the engine's
+      domain), joint unless it constrains EXACTLY the engine's domain (any
+      other domain, a known one or one this module doesn't know, makes it
+      joint: C r17 section 1.2, astra2's CORR-C2A-2);
+    - complete: False when a constraint's figure could not be read
+      (capacity's unknown parts, other than a row's unread usage) or a
+      row's domains are unknown (an older part with none): then the
+      ledger is not certified.
+
+    engine_total keeps its contract (the rows at the least figure only);
+    this is the view of all of them, which certification needs: a larger
+    joint row can bind through its usage."""
+    global _rows_snap
+    now = _src.clock()
+    if _rows_snap is None or now - _rows_snap[0] >= _SNAPSHOT_S:
+        domain = _engine_domain()
+        rec = capacity()
+        complete = all(u.endswith(" usage") for u in rec["unknown_parts"])
+        rows = []
+        for b in rec["basis"]:
+            if not b["constrains"]:
+                complete = False  # (its domains unknown: it may constrain the engine)
+            elif domain in b["constrains"]:
+                joint = bool(b.get("unknown_domains")) or any(d != domain for d in b["constrains"])
+                rows.append({"source": b["source"], "figure": b["limit"], "joint": joint})
+        _rows_snap = (now, {"rows": rows, "complete": complete})
+    out = _rows_snap[1]
+    return {"rows": [dict(r) for r in out["rows"]], "complete": out["complete"]}
+
+
+_rows_snap = None
+
+
+def engine_uncertified():
+    """For the WebAssembly ledger (no-cliffs plan C r17 section 1.3): True
+    when some applicable row is joint (the instance has no fresh measure of
+    a row that also bounds a host domain) or the classification is
+    incomplete; False only when every applicable row is engine-only."""
+    r = engine_rows()
+    return (not r["complete"]) or any(row["joint"] for row in r["rows"])
+
+
 # ------------------------------------------------------------------ free now
 
 def capacity():
@@ -487,6 +732,7 @@ def capacity():
     is observable, and always None on Windows when its sources can't be
     read); reserve_bytes is 256 MiB + ceil(bytes / 10)."""
     basis, unknown = [], []
+    _why.clear()
 
     def add(source, limit, used, includes=_ALL, constrains=_ALL, **extra):
         if limit is None:
@@ -494,7 +740,7 @@ def capacity():
         rem = None if used is None else max(0, int(limit) - int(used))
         # (a usage not read counts nothing)
         row = {"source": source, "limit": int(limit), "used": None if used is None else int(used), "remaining": rem,
-               "includes": [] if used is None else list(includes), "constrains": list(constrains)}
+               "includes": [] if used is None else list(includes), "constrains": list(constrains), "extent": "shared"}
         row.update(extra)
         basis.append(row)
         if rem is None:
@@ -511,6 +757,22 @@ def capacity():
             if job is not None:
                 inc, con = _job_domains(scope)
                 add("windows job", job, job_used, inc, con, scope=scope)
+    elif _src.platform == "darwin":
+        m = _mac()
+        if m is None:
+            unknown.append("macos-host")
+        else:
+            total, available = m
+            add("macos-host", total, total - available)
+        # (the process's resource limits, as on Linux; macOS has no
+        # /proc/self/status to measure them against, so their usage is
+        # unknown: shown, never the binding figure)
+        for r in ("RLIMIT_AS", "RLIMIT_DATA"):
+            v = _rlimit(r)
+            if v is False:
+                unknown.append(r)
+            elif v is not None:
+                add(r, v, None, _SELF, _SELF)
     else:
         groups = _cgroups()
         if groups is None:
@@ -539,8 +801,11 @@ def capacity():
     if parts is None:
         unknown.append("runtime")
     else:
-        for source, lim, used, inc, con in parts:
-            add(source, lim, used, inc, con)
+        for source, lim, used, inc, con, unnamed, extent in parts:
+            if unnamed:
+                add(source, lim, used, inc, con, unknown_domains=True, extent=extent)
+            else:
+                add(source, lim, used, inc, con, extent=extent)
     return _record(basis, unknown)
 
 

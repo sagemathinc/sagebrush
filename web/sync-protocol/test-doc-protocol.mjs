@@ -162,14 +162,20 @@ throwsCode(() => P.checkProgress({ t: "progress", claims: "AAAA" }), "invalid", 
 // ---- the messages
 
 const DOC = "0123456789ab", SHA = "f".repeat(64);
-check(P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, client: "c1" }).client === "c1", "doc_claim: accepted");
-check(P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, client: "c1", owner: SHA }).owner === SHA, "doc_claim: with an owner");
-throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, client: "c 1" }), "invalid", "doc_claim: a bad client");
-throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: "nope", client: "c1" }), "invalid", "doc_claim: a bad doc");
-throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, client: "c1", fgen: 0 }), "invalid", "doc_claim: an unknown field");
-throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, client: "c1", owner: "x" }), "invalid", "doc_claim: a bad owner");
-const fence = { t: "doc_fence", req: 2, doc: DOC, clients: [{ client: "c1", target: 3 }] };
-check(P.checkDocFence(fence).clients[0].target === 3, "doc_fence: accepted");
+check(P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, epoch: 1, client: "c1" }).client === "c1", "doc_claim: accepted");
+check(P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, epoch: 3, client: "c1" }).epoch === 3, "doc_claim: its epoch kept");
+check(P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, epoch: 1, client: "c1", owner: SHA }).owner === SHA, "doc_claim: with an owner");
+throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, epoch: 1, client: "c 1" }), "invalid", "doc_claim: a bad client");
+throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: "nope", epoch: 1, client: "c1" }), "invalid", "doc_claim: a bad doc");
+throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, epoch: 1, client: "c1", fgen: 0 }), "invalid", "doc_claim: an unknown field");
+throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, epoch: 1, client: "c1", owner: "x" }), "invalid", "doc_claim: a bad owner");
+// (the epoch is required, a whole number from 1)
+throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, client: "c1" }), "invalid", "doc_claim: no epoch");
+for (const e of [0, -1, 1.5, "1", null, 2 ** 53]) throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, epoch: e, client: "c1" }), "invalid", `doc_claim: epoch ${String(e)}`);
+const fence = { t: "doc_fence", req: 2, doc: DOC, epoch: 1, clients: [{ client: "c1", target: 3 }] };
+check(P.checkDocFence(fence).clients[0].target === 3 && P.checkDocFence(fence).epoch === 1, "doc_fence: accepted, its epoch kept");
+throwsCode(() => P.checkDocFence({ t: "doc_fence", req: 2, doc: DOC, clients: [{ client: "c1", target: 3 }] }), "invalid", "doc_fence: no epoch");
+for (const e of [0, -1, 1.5, "1", null]) throwsCode(() => P.checkDocFence({ ...fence, epoch: e }), "invalid", `doc_fence: epoch ${String(e)}`);
 throwsCode(() => P.checkDocFence({ ...fence, clients: [] }), "invalid", "doc_fence: no clients");
 throwsCode(() => P.checkDocFence({ ...fence, clients: Array.from({ length: 9 }, (_, i) => ({ client: "c" + i, target: 1 })) }), "limit", "doc_fence: nine clients");
 throwsCode(() => P.checkDocFence({ ...fence, clients: [{ client: "c1", target: 1 }, { client: "c1", target: 2 }] }), "invalid", "doc_fence: a client twice");
@@ -206,8 +212,9 @@ throwsCode(() => P.checkSnapshot(rawSnap), "invalid", "snapshot: the account soc
 throwsCode(() => P.checkSnapshot({ ...rawSnap, doc: "aaaaaaaaaaaa" }, VIA), "invalid", "snapshot: a document socket's message can't name another doc");
 throwsCode(() => P.checkSnapshot({ ...rawSnap, owner: "b".repeat(64) }, VIA), "invalid", "snapshot: a document socket's message can't name another owner");
 throwsCode(() => P.checkSnapshot(rawSnap, { socket: "document", doc: "bad", owner: OWNER }), "invalid", "snapshot: a malformed attachment");
-check(P.checkDocClaim({ t: "doc_claim", req: 1, client: "c1" }, VIA).doc === DOC, "doc_claim: the document-socket form");
-check(P.checkDocFence({ t: "doc_fence", req: 1, clients: [{ client: "c1", target: 1 }] }, VIA).owner === OWNER, "doc_fence: the document-socket form");
+check(P.checkDocClaim({ t: "doc_claim", req: 1, epoch: 1, client: "c1" }, VIA).doc === DOC, "doc_claim: the document-socket form");
+check(P.checkDocFence({ t: "doc_fence", req: 1, epoch: 1, clients: [{ client: "c1", target: 1 }] }, VIA).owner === OWNER, "doc_fence: the document-socket form");
+throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, client: "c1" }, VIA), "invalid", "doc_claim: the document-socket form needs its epoch too");
 check(P.checkOutputs({ t: "outputs", req: 1, oreq: { client: "c1", n: 1 }, set: [{ cell: "a", full: { sha256: SHA, size: 1 } }] }, VIA).doc === DOC, "outputs: the document-socket form");
 throwsCode(() => P.checkOutputs({ ...outs }, VIA), "invalid", "outputs: a document socket's message with doc is refused");
 const blob = { format: "sb-sync-snapshot", v: 1, kind: "notebook", epoch: 1, at_seq: 4, time: "0000000000a_c1", value: "" };
@@ -285,6 +292,160 @@ throwsCode(() => P.jcs("\u0001".repeat(1 << 20), 6 << 20), "limit", "jcs: 1 MiB 
 check(P.jcs("\u0001".repeat(1000), 6002).length === 6002, "jcs: escaped length exactly at the budget");
 throwsCode(() => P.jcs("\u0001".repeat(1000), 6001), "limit", "jcs: escaped length one over the budget");
 throwsCode(() => P.jcs("é".repeat(10), 21), "limit", "jcs: two-byte characters counted as two");
+// LRE, the lossless record encoding (plan-sync-slice2-client-r4 §1b): the vectors, then through patchflow's own codec
+{
+  const S = { notebook: P.NOTEBOOK_SCHEMA, board: P.BOARD_SCHEMA };
+  const J = JSON.stringify;
+  // (a record is a map: decoded values compared with their keys sorted, at every level; arrays keep their order)
+  const canon = (x) => J(x, (_, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v));
+  for (const t of V.lre_encode) {
+    const e = P.lreEncode(S[t.schema], t.in);
+    check(J(e) === J(t.out), `lre encode: ${J(t.in)} -> ${J(e)}`);
+    check(canon(P.lreDecode(S[t.schema], t.out)) === canon(t.in), `lre decode of an encoded record: ${J(t.out)}`);
+  }
+  for (const t of V.lre_decode) check(canon(P.lreDecode(S[t.schema], t.in)) === canon(t.out), `lre decode, a merge's form: ${J(t.in)}`);
+  const refused = (f, field, what) => {
+    try {
+      f();
+      check(false, `${what}: not refused`);
+    } catch (e) {
+      check(e instanceof P.DocError && e.code === "invalid_value" && e.detail?.field === field, `${what}: ${e?.code} ${J(e?.detail)} (wanted invalid_value, field ${J(field)})`);
+    }
+  };
+  for (const t of V.lre_refused_encode) refused(() => P.lreEncode(S[t.schema], t.in), t.field, `lre encode refuses ${J(t.in)}`);
+  for (const t of V.lre_refused_decode) {
+    refused(() => P.lreDecode(S[t.schema], t.in), t.field, `lre decode refuses ${J(t.in)}`);
+    refused(() => P.lreCheckRecord(S[t.schema], t.in), t.field, `lreCheckRecord refuses ${J(t.in)}`);
+  }
+  // (depth: refused before any recursion past it, as JCS is)
+  let deep = 1;
+  for (let i = 0; i < P.DOC_LIMITS.jcsDepth + 2; i++) deep = [deep];
+  throwsCode(() => P.lreEncode(S.notebook, { type: "cell", id: "c", x: deep }), "limit", "lre encode: too deep");
+
+  // (astra's CORR-175-1: "__proto__", an ordinary JSON key, is kept as an own data property at every level, on the way out
+  // and on the way in, and never becomes a prototype; constructor and prototype are the controls)
+  {
+  try {
+    const own = (o, k) => o !== null && typeof o === "object" && Object.prototype.hasOwnProperty.call(o, k);
+    const rec = JSON.parse('{"type":"cell","id":"c","__proto__":{"kept":7},"x":{"__proto__":{"kept":7},"other":2},"constructor":1,"prototype":{"a":null}}');
+    const wire = JSON.parse(JSON.stringify(P.lreEncode(S.notebook, rec)));
+    const back = P.lreDecode(S.notebook, wire);
+    check(own(back, "__proto__") && back.__proto__ !== Object.prototype && own(back.x, "__proto__") && back.x.other === 2, "lre: __proto__ survives encode, the wire and decode, as own keys at the record and nested");
+    check(Object.getPrototypeOf(back) === Object.prototype && Object.getPrototypeOf(back.x) === Object.prototype && back.kept === undefined && back.x.kept === undefined, "lre: …and nothing is inherited (no prototype was set)");
+    check(canon(back) === canon(rec) && own(back, "constructor") && own(back, "prototype"), "lre: …the record equals the input, constructor and prototype kept as own keys");
+    const incoming = JSON.parse('{"type":"cell","id":"c","__proto__":{"inherited":true}}');
+    P.lreCheckRecord(S.notebook, incoming);
+    const dec = P.lreDecode(S.notebook, incoming);
+    check(own(dec, "__proto__") && dec.inherited === undefined && Object.getPrototypeOf(dec) === Object.prototype, "lre: an incoming record's __proto__ key passes the check and decodes as an own key, not a prototype");
+    const { createImmerDbCodec } = await import("patchflow");
+    const c = createImmerDbCodec(P.NOTEBOOK_SCHEMA);
+    const enc = (r) => c.fromString(J(P.lreEncode(S.notebook, r)));
+    const viaPatch = P.lreDecode(S.notebook, JSON.parse(c.toString(c.applyPatch(c.fromString(""), c.makePatch(c.fromString(""), enc(rec)))).trim()));
+    check(canon(viaPatch) === canon(rec) && own(viaPatch, "__proto__") && own(viaPatch.x, "__proto__"), "lre: …and through the pinned patchflow codec, from nothing");
+  } catch (e) {
+    check(false, `CORR-175-1 (__proto__): threw: ${e?.message ?? e}`);
+  }
+  }
+  // (daybreak3's LIMIT-2C1-2: a sparse array is no JSON value: refused on the way out and on the way in, never encoded or
+  // skipped; a dense array with explicit nulls is lossless through the wire)
+  {
+  try {
+    const refusedSparse = (f, what) => {
+      try {
+        f();
+        check(false, `${what}: not refused`);
+      } catch (e) {
+        check(e instanceof P.DocError && e.code === "invalid_value" && /sparse/.test(e.message), `${what}: ${e?.code} ${e?.message}`);
+      }
+    };
+    refusedSparse(() => P.lreEncode(S.notebook, { type: "cell", id: "c", x: new Array(1) }), "lre encode refuses new Array(1)");
+    refusedSparse(() => P.lreEncode(S.notebook, { type: "cell", id: "c", x: { y: [1, , 2] } }), "lre encode refuses a nested hole");
+    refusedSparse(() => P.lreDecode(S.notebook, { type: "cell", id: "c", x: [1, , 2] }), "lre decode refuses a sparse array");
+    refusedSparse(() => P.lreCheckRecord(S.notebook, { type: "cell", id: "c", x: [[, 1]] }), "lreCheckRecord refuses a nested sparse array");
+    const dense = { type: "cell", id: "c", x: [null, 1, [null]] };
+    const back = P.lreDecode(S.notebook, JSON.parse(JSON.stringify(P.lreEncode(S.notebook, dense))));
+    check(canon(back) === canon(dense), "lre: a dense array with explicit nulls through encode, the wire and decode: " + J(back));
+  } catch (e) {
+    check(false, `LIMIT-2C1-2 (sparse arrays): threw: ${e?.message ?? e}`);
+  }
+  }
+  // (daybreak3's LIMIT-2C1-1, the maximum fixtures: a NUL-key-heavy record at the 256 KiB inline patch bound and a
+  // sidecar-heavy board at the 1 MiB batch bound.  Each: exact round trips (the wire, and the pinned codec from nothing);
+  // its encoded size exactly the predicted expansion of its own JSON; and where it falls against the bounds and F8's
+  // charge, measured on the ENCODED record (lreEncodedBytes), which is what every bound and charge counts)
+  {
+  try {
+    const { createImmerDbCodec } = await import("patchflow");
+    const KiB = 1024, PATCH = 256 * KiB, BATCH = 1024 * KiB;
+    const bytes = (x) => new TextEncoder().encode(J(x)).length;
+    const charge = (x) => 2 * J(x).length + 64; // (F8: inert JSON, two bytes a character, plus 64 B of overhead)
+    const rows = [];
+    // NUL-key-heavy: N keys "\u0000k<i>", each null.  Each entry grows by 6 (the doubled \u0000, escaped on the wire) and 10
+    // (null, 4 bytes, becomes {"\u0000":"n"}, 14 bytes): exactly 16 bytes an entry
+    const N = 12000, m = {};
+    for (let i = 0; i < N; i++) m["\u0000k" + i] = null;
+    const heavy = { type: "cell", id: "c", m };
+    const hRaw = bytes(heavy), hEnc = P.lreEncodedBytes(S.notebook, heavy);
+    check(hEnc - hRaw === 16 * N, `fixture (NUL-key-heavy): the encoded record is exactly 16 bytes an entry larger: ${hEnc} - ${hRaw} = ${hEnc - hRaw}, want ${16 * N}`);
+    check(hRaw <= PATCH && hEnc > PATCH, `fixture (NUL-key-heavy): its own JSON fits the 256 KiB inline bound (${hRaw}) but its encoded record doesn't (${hEnc}): the bound is judged on the encoded bytes`);
+    const nb = createImmerDbCodec(P.NOTEBOOK_SCHEMA);
+    const hPatch = nb.applyPatch(nb.fromString(""), nb.makePatch(nb.fromString(""), nb.fromString(J(P.lreEncode(S.notebook, heavy)))));
+    check(canon(P.lreDecode(S.notebook, JSON.parse(nb.toString(hPatch).trim()))) === canon(heavy) && canon(P.lreDecode(S.notebook, JSON.parse(J(P.lreEncode(S.notebook, heavy))))) === canon(heavy), "fixture (NUL-key-heavy): exact round trips, the wire and the codec");
+    rows.push({ fixture: "NUL-key-heavy record", raw: hRaw, encoded: hEnc, charge: charge(P.lreEncode(S.notebook, heavy)) });
+    // sidecar-heavy: K board items, every one of the 6 string columns null.  Each `"f":null` (len f + 7 bytes) becomes
+    // `"\u0000n:f":true` (len f + 15): exactly 8 bytes a sidecar, 48 an item
+    const K = 9000, items = [];
+    for (let i = 0; i < K; i++) items.push({ type: "item", page: "", id: "i" + i, title: null, text: null, code: null, detail: null, label: null, intro: null });
+    const sRaw = items.reduce((n, r) => n + bytes(r), 0), sEnc = items.reduce((n, r) => n + P.lreEncodedBytes(S.board, r), 0);
+    check(sEnc - sRaw === 48 * K, `fixture (sidecar-heavy): exactly 8 bytes a sidecar: ${sEnc} - ${sRaw} = ${sEnc - sRaw}, want ${48 * K}`);
+    check(sRaw <= BATCH && sEnc > BATCH, `fixture (sidecar-heavy): its records fit the 1 MiB batch bound as JSON (${sRaw}) but not encoded (${sEnc}): the bound is judged on the encoded bytes`);
+    const bc = createImmerDbCodec(P.BOARD_SCHEMA);
+    const lines = (rs) => rs.map((r) => J(P.lreEncode(S.board, r))).join("\n");
+    const sDoc = bc.applyPatch(bc.fromString(""), bc.makePatch(bc.fromString(""), bc.fromString(lines(items))));
+    const sBack = bc.toString(sDoc).trim().split("\n").map((l) => P.lreDecode(S.board, JSON.parse(l)));
+    check(sBack.length === K && canon(sBack.sort((x, y) => (x.id < y.id ? -1 : 1))) === canon(items.slice().sort((x, y) => (x.id < y.id ? -1 : 1))), "fixture (sidecar-heavy): exact round trip through the codec (every item, every null)");
+    rows.push({ fixture: "sidecar-heavy board (all items)", raw: sRaw, encoded: sEnc, charge: items.reduce((n, r) => n + charge(P.lreEncode(S.board, r)), 0) });
+    console.log("LRE maximum fixtures (bytes; charge = F8's 2 bytes a character + 64):");
+    for (const r of rows) console.log(`  ${r.fixture}: JSON ${r.raw}, encoded ${r.encoded} (x${(r.encoded / r.raw).toFixed(3)}), charge ${r.charge}`);
+  } catch (e) {
+    check(false, `LIMIT-2C1-1 (maximum fixtures): threw: ${e?.message ?? e}`);
+  }
+  }
+
+  // (the reason it exists: through the pinned patchflow codec, a null set, kept, removed and made from nothing survives;
+  // raw records lose it.  And board's MUST-1 merges: a field set null on one device while another adds a key)
+  const { createImmerDbCodec } = await import("patchflow");
+  for (const [kind, schema] of [["notebook", P.NOTEBOOK_SCHEMA], ["board", P.BOARD_SCHEMA]]) {
+    const c = createImmerDbCodec(schema);
+    const key = kind === "board" ? { type: "item", page: "", id: "i" } : { type: "cell", id: "c" };
+    const col = schema.stringCols[0];
+    const doc = (rs, enc) => c.fromString(rs.map((r) => J(enc ? P.lreEncode(schema, r) : r)).join("\n"));
+    const read = (d) => c.toString(d).trim().split("\n").filter(Boolean).map((l) => P.lreDecode(schema, JSON.parse(l)));
+    const via = (a, b) => read(c.applyPatch(doc(a, true), c.makePatch(doc(a, true), doc(b, true))));
+    const cases = [
+      ["value -> null", [{ ...key, x: 1 }], [{ ...key, x: null }]],
+      ["null -> absent", [{ ...key, x: null }], [{ ...key }]],
+      ["null -> value", [{ ...key, x: null }], [{ ...key, x: 2 }]],
+      ["initially null, from nothing", [], [{ ...key, x: null }]],
+      ["a nested null set", [{ ...key, m: { p: 1, q: 2 } }], [{ ...key, m: { p: null, q: 2 } }]],
+      ["a nested null kept while a sibling changes", [{ ...key, m: { p: null, q: 1 } }], [{ ...key, m: { p: null, q: 3 } }]],
+      ["a string column: text -> null", [{ ...key, [col]: "abc" }], [{ ...key, [col]: null }]],
+      ["a string column: null -> text", [{ ...key, [col]: null }], [{ ...key, [col]: "abc" }]],
+      ["a string column: null from nothing", [], [{ ...key, [col]: null }]],
+      ["a string column: an ordinary edit", [{ ...key, [col]: "hello world" }], [{ ...key, [col]: "hello there world" }]],
+    ];
+    for (const [name, a, b] of cases) check(canon(via(a, b)) === canon(b), `lre through patchflow (${kind}): ${name}: ${J(via(a, b))}`);
+    // (raw records, the control: the codec loses the null)
+    const raw = (a, b) => c.toString(c.applyPatch(doc(a, false), c.makePatch(doc(a, false), doc(b, false)))).trim();
+    check(!raw([{ ...key, x: 1 }], [{ ...key, x: null }]).includes("null"), `the control (${kind}): raw records lose value -> null`);
+    // (MUST-1: device A sets x null, device B adds x.q; both orders decode to the same value, and none is refused)
+    const base = doc([{ ...key, x: { p: 1 } }], true);
+    const pa = c.makePatch(base, doc([{ ...key, x: null }], true)), pb = c.makePatch(base, doc([{ ...key, x: { p: 1, q: 2 } }], true));
+    const ab = read(c.applyPatch(c.applyPatch(base, pa), pb)), ba = read(c.applyPatch(c.applyPatch(base, pb), pa));
+    check(canon(ab) === canon(ba), `lre through patchflow (${kind}): a concurrent null and added key converge: ${J(ab)} / ${J(ba)}`);
+  }
+}
+
 console.log(`${checks - fails.length}/${checks} checks passed`);
 if (fails.length) {
   for (const f of fails.slice(0, 40)) console.log("FAIL", f);

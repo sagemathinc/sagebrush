@@ -507,5 +507,547 @@
    },
    "out": "AQEADAAHAAEAAwAFAAERcAAAAaFmcFR7AAAAAAAAAAA="
   }
+ ],
+ "lre_encode": [
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "settings",
+    "kernel": "python3"
+   },
+   "out": {
+    "type": "settings",
+    "kernel": "python3"
+   }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c1",
+    "pos": 0,
+    "input": null,
+    "cell_type": "code",
+    "execution_count": null
+   },
+   "out": {
+    "type": "cell",
+    "id": "c1",
+    "pos": 0,
+    "\u0000n:input": true,
+    "cell_type": "code",
+    "execution_count": {
+     "\u0000": "n"
+    }
+   }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c2",
+    "input": "x = 1",
+    "meta": {
+     "a": null,
+     "b": {
+      "c": null,
+      "d": [
+       null,
+       1,
+       "s"
+      ]
+     },
+     "\u0000k": 1,
+     "\u0000": 2
+    }
+   },
+   "out": {
+    "type": "cell",
+    "id": "c2",
+    "input": "x = 1",
+    "meta": {
+     "a": {
+      "\u0000": "n"
+     },
+     "b": {
+      "c": {
+       "\u0000": "n"
+      },
+      "d": [
+       {
+        "\u0000": "n"
+       },
+       1,
+       "s"
+      ]
+     },
+     "\u0000\u0000k": 1,
+     "\u0000\u0000": 2
+    }
+   }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "file",
+    "id": "s1:1",
+    "sid": "s1",
+    "n": 1,
+    "t": 5,
+    "path": "/a",
+    "hash": null
+   },
+   "out": {
+    "type": "file",
+    "id": "s1:1",
+    "sid": "s1",
+    "n": 1,
+    "t": 5,
+    "path": "/a",
+    "hash": {
+     "\u0000": "n"
+    }
+   }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c3",
+    "\u0000top": null,
+    "e": [],
+    "o": {}
+   },
+   "out": {
+    "type": "cell",
+    "id": "c3",
+    "\u0000\u0000top": {
+     "\u0000": "n"
+    },
+    "e": [],
+    "o": {}
+   }
+  },
+  {
+   "schema": "board",
+   "in": {
+    "type": "item",
+    "page": "",
+    "id": "i1",
+    "text": null,
+    "x": null,
+    "title": "T",
+    "tags": [
+     null
+    ]
+   },
+   "out": {
+    "type": "item",
+    "page": "",
+    "id": "i1",
+    "\u0000n:text": true,
+    "x": {
+     "\u0000": "n"
+    },
+    "title": "T",
+    "tags": [
+     {
+      "\u0000": "n"
+     }
+    ]
+   }
+  },
+  {
+   "schema": "board",
+   "in": {
+    "type": "doc",
+    "page": "",
+    "id": "",
+    "title": "é😀",
+    "intro": null
+   },
+   "out": {
+    "type": "doc",
+    "page": "",
+    "id": "",
+    "title": "é😀",
+    "\u0000n:intro": true
+   }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "__proto__": {
+     "kept": 7,
+     "n": null
+    },
+    "x": {
+     "__proto__": {
+      "kept": 7
+     },
+     "other": 2
+    }
+   },
+   "out": {
+    "type": "cell",
+    "id": "c",
+    "__proto__": {
+     "kept": 7,
+     "n": {
+      "\u0000": "n"
+     }
+    },
+    "x": {
+     "__proto__": {
+      "kept": 7
+     },
+     "other": 2
+    }
+   }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "constructor": 1,
+    "prototype": {
+     "a": null
+    },
+    "toString": "s"
+   },
+   "out": {
+    "type": "cell",
+    "id": "c",
+    "constructor": 1,
+    "prototype": {
+     "a": {
+      "\u0000": "n"
+     }
+    },
+    "toString": "s"
+   }
+  }
+ ],
+ "lre_decode": [
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c1",
+    "x": {
+     "\u0000": "n",
+     "q": 2
+    }
+   },
+   "out": {
+    "type": "cell",
+    "id": "c1",
+    "x": {
+     "q": 2
+    }
+   }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c1",
+    "input": "abc",
+    "\u0000n:input": true
+   },
+   "out": {
+    "type": "cell",
+    "id": "c1",
+    "input": "abc"
+   }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c1",
+    "\u0000n:input": true
+   },
+   "out": {
+    "type": "cell",
+    "id": "c1",
+    "input": null
+   }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c1",
+    "m": {
+     "\u0000\u0000": {
+      "\u0000": "n"
+     },
+     "z": [
+      {
+       "\u0000": "n",
+       "p": 3
+      }
+     ]
+    }
+   },
+   "out": {
+    "type": "cell",
+    "id": "c1",
+    "m": {
+     "\u0000": null,
+     "z": [
+      {
+       "p": 3
+      }
+     ]
+    }
+   }
+  },
+  {
+   "schema": "board",
+   "in": {
+    "type": "edge",
+    "page": "p",
+    "id": "e",
+    "label": "L",
+    "\u0000n:label": true,
+    "w": {
+     "\u0000": "n"
+    }
+   },
+   "out": {
+    "type": "edge",
+    "page": "p",
+    "id": "e",
+    "label": "L",
+    "w": null
+   }
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "__proto__": {
+     "inherited": true
+    },
+    "x": {
+     "__proto__": {
+      "\u0000": "n"
+     }
+    }
+   },
+   "out": {
+    "type": "cell",
+    "id": "c",
+    "__proto__": {
+     "inherited": true
+    },
+    "x": {
+     "__proto__": null
+    }
+   }
+  }
+ ],
+ "lre_refused_encode": [
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": null
+   },
+   "field": "id"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": 5
+   },
+   "field": "id"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "input": 5
+   },
+   "field": "input"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "input": {}
+   },
+   "field": "input"
+  },
+  {
+   "schema": "board",
+   "in": {
+    "type": "item",
+    "page": null,
+    "id": "i"
+   },
+   "field": "page"
+  },
+  {
+   "schema": "board",
+   "in": {
+    "type": "item",
+    "page": "",
+    "id": "i",
+    "text": [
+     "a"
+    ]
+   },
+   "field": "text"
+  }
+ ],
+ "lre_refused_decode": [
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": null
+   },
+   "field": "id"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": {
+     "\u0000": "n"
+    }
+   },
+   "field": "id"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": 5
+   },
+   "field": "id"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "input": 5
+   },
+   "field": "input"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "input": 5,
+    "\u0000n:input": true
+   },
+   "field": "input"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "input": null
+   },
+   "field": "input"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "x": null
+   },
+   "field": "x"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "x": {
+     "y": [
+      1,
+      null
+     ]
+    }
+   },
+   "field": "x"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "x": {
+     "\u0000": "x"
+    }
+   },
+   "field": "x"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "x": {
+     "\u0000k": 1
+    }
+   },
+   "field": "x"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "\u0000k": 1
+   },
+   "field": "\u0000k"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "\u0000n:x": true
+   },
+   "field": "x"
+  },
+  {
+   "schema": "notebook",
+   "in": {
+    "type": "cell",
+    "id": "c",
+    "\u0000n:input": false
+   },
+   "field": "input"
+  },
+  {
+   "schema": "board",
+   "in": {
+    "type": "item",
+    "page": "",
+    "id": "i",
+    "text": {
+     "\u0000": "n"
+    }
+   },
+   "field": "text"
+  }
  ]
 }

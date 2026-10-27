@@ -59,6 +59,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/matlab-lu.src": {
+   "exact": false,
+   "ceiling": 52360,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/matlab-more.src": {
    "exact": false,
    "ceiling": 288570,
@@ -535,16 +542,17 @@
  },
  "epoch": {
   "sizes": {
-   "cli/lib.gen.js": 7029212,
-   "cli/pyjs.cjs": 28168472,
-   "engine/lib/core.pre": 1747540,
-   "engine/lib/core.src": 405156,
-   "engine/lib/magma-more.src": 146156,
-   "engine/lib/magma.pre": 2817482,
-   "engine/lib/magma.src": 529140,
+   "cli/lib.gen.js": 7200191,
+   "cli/pyjs.cjs": 28780108,
+   "engine/lib/core.pre": 1803195,
+   "engine/lib/core.src": 419078,
+   "engine/lib/magma-more.src": 146512,
+   "engine/lib/magma.pre": 2889506,
+   "engine/lib/magma.src": 553791,
+   "engine/lib/matlab-lu.src": 47600,
    "engine/lib/matlab-more.src": 262337,
-   "engine/lib/matlab.pre": 5393067,
-   "engine/lib/matlab.src": 1068735,
+   "engine/lib/matlab.pre": 5400429,
+   "engine/lib/matlab.src": 1069005,
    "engine/lib/mod-bisect.src": 1699,
    "engine/lib/mod-board-checks.src": 35237,
    "engine/lib/mod-capability-map.src": 15413,
@@ -575,7 +583,7 @@
    "engine/lib/mod-pyjs-doctest.src": 14117,
    "engine/lib/mod-pyjs-help.src": 8050,
    "engine/lib/mod-pyjs-magic.src": 21074,
-   "engine/lib/mod-pyjs-open.src": 8301,
+   "engine/lib/mod-pyjs-open.src": 8323,
    "engine/lib/mod-pyjs-pretty.src": 24565,
    "engine/lib/mod-python-docsearch.src": 11218,
    "engine/lib/mod-python-examples.src": 27977,
@@ -593,23 +601,30 @@
    "engine/lib/mod-zoneinfo.src": 84951,
    "engine/lib/pkg-cremona-small.src": 137656,
    "engine/lib/pkg-pypi-sortedcontainers.src": 126368,
-   "engine/lib/pkg-scipy-io.pre": 61127,
+   "engine/lib/pkg-scipy-io.pre": 61203,
    "engine/lib/pkg-scipy-io.src": 12835,
-   "engine/lib/sage-more.src": 287233,
-   "engine/lib/sage.pre": 12759333,
-   "engine/lib/sage.src": 2675646,
-   "engine/lib/sci.pre": 1896228,
+   "engine/lib/sage-more.src": 326946,
+   "engine/lib/sage.pre": 13033596,
+   "engine/lib/sage.src": 2754406,
+   "engine/lib/sci.pre": 1897948,
    "engine/lib/sci.src": 366319,
    "engine/lib/tzdata": 257239,
-   "engine/runner/index.html": 4275,
-   "engine/sagebrush-analyze.js": 355908,
-   "engine/sagebrush-engine.wasm": 7141596,
+   "engine/runner/index.html": 4634,
+   "engine/sagebrush-analyze.js": 356439,
+   "engine/sagebrush-engine.wasm": 7172791,
    "engine/sagebrush-graphview.js": 14111,
-   "engine/sagebrush-notebook.js": 207740,
-   "engine/sagebrush-raster.wasm": 808830,
+   "engine/sagebrush-notebook.js": 208117,
+   "engine/sagebrush-raster.wasm": 825569,
    "engine/sagebrush-viewer3d.js": 88151,
-   "engine/sagebrush-worker.js": 1503247
+   "engine/sagebrush-worker.js": 1545037
   },
-  "reset": null
+  "reset": {
+   "reason": "#184 (the size gate checks a dispatch's markers, plan-size-gate-dispatch-range r2) changes scripts/size-measure.mjs, which is in the measurement key, so the epoch is reset under the new key. The new epoch also absorbs merge train 2c's growth (dbb4a0e1..0ce1121e), whose rule-6 attribution by PR is @sagebrush's ruling of Oct 26 with magma's evidence, rule6-attribution-dbb4a0e1-0ce1121e-20261026.tar (sha256 310d3b1e4ed2afdf563f1826e589ed5b6f447866304c99595335c8ec859052a7): #178 covered by its marker; #171 pyjs.cjs +368 and #164 wasm +6592, worker +547, lib.gen.js +18, pyjs.cjs +9554 unmarked, none over 1%.",
+   "prev": "ca3a16505dba37447ed5798295558df48ff38596ecfe4840ebaf4c167ecffad4",
+   "growth": {},
+   "map": [],
+   "added": [],
+   "removed": []
+  }
  }
 }

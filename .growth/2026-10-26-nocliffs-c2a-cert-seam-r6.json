@@ -1,0 +1,1 @@
+{"v": 1, "reason": "no-cliffs C-2a (#174) r6: cli/pyjs.cjs embeds the engine; after the master 6871eb1a merge and CI's fresh wasm of that merge (7174741 B), dispatch 40278314213's size-gate (transition vs 6871eb1a) measured cli/pyjs.cjs +5584 against the r1 + r5 markers' 5552: these 32 B make it exact; every other row was already exact", "bytes": {"cli/pyjs.cjs": 32}}

@@ -87,6 +87,42 @@ def _capacity_share():
     return _capacity_module().poly_share()
 
 
+_TOTAL_STATUS = {"observed": 0, "zero": 1, "nominal": 2}
+
+
+def _capacity_total():
+    """The engine's memory total for its ledger (no-cliffs plan C r13, r17):
+    (bytes, status code, joint, rows) from _capacity.engine_total and
+    engine_rows, the rows being EVERY row that constrains the engine's
+    domain as (kind, path, figure), the kind naming the row's own usage
+    measure (a cgroup's usage file, RLIMIT_AS, RLIMIT_DATA, the physical
+    row, Windows's rows); a row with no measure, or an incomplete
+    classification, is an "unknown" row (the ledger is then not
+    certified).  Asked when the engine's total is 100 ms old."""
+    C = _capacity_module()
+    t = C.engine_total()
+    r = C.engine_rows()
+    dirs = {name: (kind, d) for kind, name, d in (C._cgroup_dirs() or [])}
+    rows = []
+    for row in r["rows"]:
+        src, figure = row["source"], int(row["figure"])
+        if src in dirs:
+            kind, d = dirs[src]
+            rows.append(("cgroup", d + ("/memory.current" if kind == "v2" else "/memory.usage_in_bytes"), figure))
+        elif src in _MEASURES:
+            rows.append((_MEASURES[src], None, figure))
+        else:
+            rows.append(("unknown", None, figure))
+    if not r["complete"]:
+        rows.append(("unknown", None, 0))
+    return int(t["bytes"]), _TOTAL_STATUS[t["status"]], bool(t["joint"]), rows
+
+
+# (D0's row names -> the binding row's usage measure)
+_MEASURES = {"RLIMIT_AS": "address_space", "RLIMIT_DATA": "data_segment", "MemAvailable": "physical",
+             "windows job": "windows_job", "physical available": "windows_physical"}
+
+
 def _limits_from_environment():
     """SAGEBRUSH_LIMITS=FILE: a JSON text of at most 4096 bytes, proposed
     (not locked) at import; an unreadable or invalid file is a ValueError
@@ -120,6 +156,12 @@ def _register_capacity():
     except ImportError:
         return  # (an older native build: its factorizations keep their default)
     set_memory_share_source(_capacity_share)
+    try:
+        from ._native import set_memory_total_source
+    except ImportError:
+        return  # (a native build without the ledger: nominal total)
+    # (looked up at each read, so that a test can stand in a source)
+    set_memory_total_source(lambda: _capacity_total())
 
 
 _register_capacity()

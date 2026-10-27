@@ -42,7 +42,7 @@ test("the session tree reaches the launcher outside the group, and the kill leav
     const p = stubborn();
     if (!(await ready(p))) return { notReady: true };
     const t = procTable();
-    const tree = sessionTree(p.pid);
+    const tree = sessionTree(p.pid, new Map(), t);
     const outside = tree.filter((q) => t.get(q).pgid !== p.pid);
     const killed = killTree(p.pid);
     await sleep(500);
@@ -58,7 +58,7 @@ test("a process orphaned before the kill is still killed, from the pids remember
     if (!(await ready(p))) return { notReady: true };
     const known = new Map();
     const t = procTable();
-    for (const q of sessionTree(p.pid)) known.set(q, t.get(q).start);
+    for (const q of sessionTree(p.pid, new Map(), t)) known.set(q, t.get(q).start);
     process.kill(p.pid, "SIGKILL"); // script dies first: its shell is reparented, still running
     await sleep(500);
     const orphans = survivors([...known.keys()]);
@@ -75,4 +75,12 @@ test("a remembered pid with a different start time (reused) is never killed", ()
     const known = new Map([[process.pid, "not-" + t.get(process.pid).start]]);
     return { tree: sessionTree(999999999, known) };`);
   assert.deepEqual(r.tree, []);
+});
+
+test("the session tree comes from the table it is given: a pid missing from it is never returned (master 0ce1121e's race)", () => {
+  const r = run(`
+    const t = new Map([[100, { ppid: 1, pgid: 100, start: "5" }], [101, { ppid: 100, pgid: 100, start: "6" }]]);
+    const known = new Map([[102, "7"]]);
+    return { tree: sessionTree(100, known, t).sort((a, b) => a - b) };`);
+  assert.deepEqual(r.tree, [100, 101]);
 });

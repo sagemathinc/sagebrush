@@ -30,6 +30,12 @@ test("the collector on made-up systems: the same from python3 and from Sagebrush
   }
 });
 
+// (the ctypes sources themselves, against fake system libraries: every call typed, what each reads, a
+// failing call said; CPython only, pyjs has no ctypes; the pypi workflow runs it on macOS and Windows too)
+test("the macOS and Windows sources through ctypes: typed calls, free + inactive pages, a job without a memory limit, failures named", () => {
+  assert.match(execFileSync("python3", ["-I", TEST + "capacity_ctypes_cases.py"], { encoding: "utf8" }), /^ok: the ctypes sources/m);
+});
+
 const sage = (code: string, heap = 256) =>
   execFileSync(process.execPath, [`--max-old-space-size=${heap}`, CLI, "--sage", "-c", code], { encoding: "utf8", timeout: 120000 });
 
@@ -139,6 +145,39 @@ except KeyboardInterrupt:
   assert.deepEqual(out.slice(4, 8), ["-5 2", "1099511627776 2", "1.50000000000000 2", "'x' 2"]);
   assert.equal(out[8], "100000 [[['-1', '1'], 1], [['1', '1'], 1]]");
   assert.equal(out[9], "KeyboardInterrupt");
+});
+
+// The engine total's certification bit (no-cliffs C r17 section 1.3): a
+// Ctrl-C that _capacity.engine_uncertified sees, on the push before a
+// dispatch, is the program's: delivered once, not lost (astra2's
+// CORR-C2A-3) and not delivered again to a later call
+test("a Ctrl-C engine_uncertified sees is delivered once, not lost or repeated", () => {
+  const code = String.raw`
+import json, time, _sbengine, _capacity as C
+req = json.dumps({"fn": "factor", "f": ["-1", "0", "1"]})
+def ctrl_c():
+    raise KeyboardInterrupt
+time.sleep(0.26)
+C.engine_uncertified = ctrl_c
+try:
+    _sbengine.call(req)
+    for i in range(10 ** 6):
+        pass
+    print("first: not interrupted")
+except KeyboardInterrupt:
+    print("first: KeyboardInterrupt")
+C.engine_uncertified = lambda: True
+time.sleep(0.26)
+try:
+    _sbengine.call(req)
+    for i in range(10 ** 6):
+        pass
+    print("second: not interrupted")
+except KeyboardInterrupt:
+    print("second: KeyboardInterrupt")
+`;
+  const out = sage(code).trim().split("\n");
+  assert.deepEqual(out.slice(-2), ["first: KeyboardInterrupt", "second: not interrupted"]);
 });
 
 // The push is optional both ways: an engine without the export (one built

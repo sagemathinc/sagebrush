@@ -617,6 +617,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-growth-probe"
+version = "0.1.0"
+
+[[package]]
 name = "sagebrush-hmf"
 version = "0.1.0"
 dependencies = [
@@ -636,6 +640,10 @@ version = "0.1.0"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "sagebrush-ledger"
+version = "0.1.0"
 
 [[package]]
 name = "sagebrush-modsym"
@@ -708,6 +716,7 @@ dependencies = [
  "sagebrush-ap",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-ledger",
  "sagebrush-modsym",
  "sagebrush-mpoly",
  "sagebrush-raster",
@@ -760,6 +769,7 @@ dependencies = [
  "sagebrush-group",
  "sagebrush-hmf",
  "sagebrush-interrupt",
+ "sagebrush-ledger",
  "sagebrush-modsym",
  "sagebrush-mpoly",
  "sagebrush-poly",

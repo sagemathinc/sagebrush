@@ -537,8 +537,10 @@ const isDocId = (s: unknown): s is string =>
   typeof s === "string" && (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s) || /^[0-9a-f]{12}$/.test(s));
 const U32 = 0xffffffff;
 
-export interface DocClaim { t: "doc_claim"; req: number; doc: string; client: string; owner?: string }
-export interface DocFence { t: "doc_fence"; req: number; doc: string; clients: { client: string; target: number }[]; owner?: string }
+/** A claim and a fence name the document's epoch they are for (plan-sync-slice2-2b-r4 §2.4): one for another epoch
+ * than the document's is refused (stale_epoch) and changes nothing, so a delayed one can't land in a later epoch. */
+export interface DocClaim { t: "doc_claim"; req: number; doc: string; epoch: number; client: string; owner?: string }
+export interface DocFence { t: "doc_fence"; req: number; doc: string; epoch: number; clients: { client: string; target: number }[]; owner?: string }
 export interface OutputSet { cell: string; full?: { sha256: string; size: number }; preview?: { sha256: string; size: number; kind: "text" | "png" } }
 export interface Outputs { t: "outputs"; req: number; doc: string; oreq: { client: string; n: number }; set: OutputSet[]; owner?: string }
 export interface Snapshot { t: "snapshot"; req: number; doc: string; at_seq: number; sha256: string; bytes: number; owner?: string }
@@ -567,13 +569,15 @@ function docFields(v: unknown, own: readonly string[], via: Via, what: string): 
 }
 const withDoc = <T extends object>(m: T, d: { doc: string; owner?: string }) => ({ ...m, doc: d.doc, ...(d.owner !== undefined ? { owner: d.owner } : {}) });
 export function checkDocClaim(v: unknown, via: Via = ACCOUNT): DocClaim {
-  const d = docFields(v, ["t", "req", "client"], via, "doc_claim"), o = d.o;
+  const d = docFields(v, ["t", "req", "epoch", "client"], via, "doc_claim"), o = d.o;
   if (o.t !== "doc_claim" || !isNat(o.req) || !isClient(o.client)) throw invalid("doc_claim: t, req and client");
-  return withDoc({ t: "doc_claim" as const, req: o.req, client: o.client }, d);
+  if (!isNat(o.epoch) || o.epoch < 1) throw invalid("doc_claim: epoch, the document's (from 1)");
+  return withDoc({ t: "doc_claim" as const, req: o.req, epoch: o.epoch, client: o.client }, d);
 }
 export function checkDocFence(v: unknown, via: Via = ACCOUNT): DocFence {
-  const d = docFields(v, ["t", "req", "clients"], via, "doc_fence"), o = d.o;
+  const d = docFields(v, ["t", "req", "epoch", "clients"], via, "doc_fence"), o = d.o;
   if (o.t !== "doc_fence" || !isNat(o.req)) throw invalid("doc_fence: t and req");
+  if (!isNat(o.epoch) || o.epoch < 1) throw invalid("doc_fence: epoch, the document's (from 1)");
   if (!Array.isArray(o.clients) || o.clients.length === 0) throw invalid("doc_fence: clients");
   if (o.clients.length > DOC_LIMITS.fenceClients) throw tooBig("fence_clients", DOC_LIMITS.fenceClients, "doc_fence: too many clients");
   const clients = o.clients.map((c) => {
@@ -582,7 +586,7 @@ export function checkDocFence(v: unknown, via: Via = ACCOUNT): DocFence {
     return { client: x.client, target: x.target };
   });
   if (new Set(clients.map((c) => c.client)).size !== clients.length) throw invalid("doc_fence: a client named twice");
-  return withDoc({ t: "doc_fence" as const, req: o.req, clients }, d);
+  return withDoc({ t: "doc_fence" as const, req: o.req, epoch: o.epoch, clients }, d);
 }
 /** A batch's `fgen` (§5.8): the fence generation each client in the batch was sent under, every one of them and no other. */
 export function checkFgen(v: unknown, clientsInBatch: ReadonlySet<string>): Map<string, number> {
@@ -645,6 +649,149 @@ export function checkProgress(v: unknown): Progress {
   for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
   decodeClaims(b);
   return { t: "progress", claims: b };
+}
+
+// ---- the lossless record encoding, LRE (plan-sync-slice2-client-r4 §1b)
+//
+// patchflow's record codec treats null as delete, so a record of a synced
+// history is encoded before the codec sees it and decoded after: the codec
+// never holds a null.  Non-string fields, recursively through objects and
+// arrays: null is the object {"\u0000": "n"}, and an object key starting
+// with \u0000 is escaped by doubling that prefix.  String columns (the
+// schema's stringCols, which the codec diffs as text): null makes the field
+// absent and sets the sidecar key "\u0000n:<field>" to true.  Decoding checks
+// the record as it stands after patches were applied (lreCheckRecord), so a
+// patch's own null, a delete, stays legal; and it reads the mixed forms a
+// concurrent merge makes as the merge means them: a null marker beside other
+// keys is dropped (the object), a sidecar beside a present string is dropped
+// (the string).  Every refusal is invalid_value, with the field it found.
+
+/** The record schema a document kind's codec uses: its primary keys, and its string (text-diffed) columns. */
+export interface RecordSchema { primaryKeys: readonly string[]; stringCols: readonly string[] }
+export const NOTEBOOK_SCHEMA: RecordSchema = { primaryKeys: ["type", "id"], stringCols: ["input"] };
+export const BOARD_SCHEMA: RecordSchema = { primaryKeys: ["type", "page", "id"], stringCols: ["title", "text", "code", "detail", "label", "intro"] };
+const NUL = "\u0000", SIDECAR = "\u0000n:";
+const lreRefused = (field: string, m: string) => new DocError("invalid_value", `LRE: ${m}`, { field });
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === "object" && !Array.isArray(v) && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
+const lreKey = (k: string) => (k.startsWith(NUL) ? NUL + k : k);
+/** A key set as an own, enumerable data property: "__proto__" included, which `o[k] = v` would take as the
+ * prototype setter, losing the key (astra's CORR-175-1).  Every object LRE makes is built this way. */
+function putOwn(o: Record<string, unknown>, k: string, v: unknown): void {
+  Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+}
+/** An array's items, by index: a hole (a sparse array, which no JSON value is) refused, never skipped as map
+ * would skip it (daybreak3's LIMIT-2C1-2). */
+function lreItems(v: unknown[], field: string, each: (x: unknown) => unknown): unknown[] {
+  const out: unknown[] = [];
+  for (let i = 0; i < v.length; i++) {
+    if (!Object.prototype.hasOwnProperty.call(v, i)) throw lreRefused(field, `a sparse array (a hole at ${i})`);
+    out.push(each(v[i]));
+  }
+  return out;
+}
+function lreValue(v: unknown, field: string, depth: number): unknown {
+  if (depth > DOC_LIMITS.jcsDepth) throw tooBig("lre_depth", DOC_LIMITS.jcsDepth, "LRE: nested too deep");
+  if (v === null) return { [NUL]: "n" };
+  if (typeof v === "string" || typeof v === "boolean") return v;
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) throw lreRefused(field, "a number that isn't finite");
+    return v;
+  }
+  if (Array.isArray(v)) return lreItems(v, field, (x) => lreValue(x, field, depth + 1));
+  if (isPlainObject(v)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) putOwn(out, lreKey(k), lreValue(x, field, depth + 1));
+    return out;
+  }
+  throw lreRefused(field, "a value that isn't JSON");
+}
+/**
+ * A record as a synced history stores it.  Refused (invalid_value, with the
+ * field): a primary key present as anything but a string (absent is legal: a
+ * notebook's one `settings` record has no id), a string column holding anything
+ * but a string or null (patchflow never patches it: board's MUST-2), a value
+ * that isn't JSON.  An undefined field is absent.
+ */
+export function lreEncode(schema: RecordSchema, rec: Record<string, unknown>): Record<string, unknown> {
+  if (!isPlainObject(rec)) throw lreRefused("", "a record is an object");
+  for (const k of schema.primaryKeys) if (rec[k] !== undefined && typeof rec[k] !== "string") throw lreRefused(k, "a primary key is absent or a string");
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rec)) {
+    if (v === undefined) continue;
+    if (schema.stringCols.includes(k)) {
+      if (v === null) putOwn(out, SIDECAR + k, true);
+      else if (typeof v === "string") putOwn(out, k, v);
+      else throw lreRefused(k, "a string column holds a string or null");
+    } else putOwn(out, lreKey(k), lreValue(v, k, 1));
+  }
+  return out;
+}
+function lreDecodeValue(v: unknown, field: string, depth: number): unknown {
+  if (depth > DOC_LIMITS.jcsDepth) throw tooBig("lre_depth", DOC_LIMITS.jcsDepth, "LRE: nested too deep");
+  if (v === null) throw lreRefused(field, "a raw null in an encoded record");
+  if (typeof v === "string" || typeof v === "boolean") return v;
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) throw lreRefused(field, "a number that isn't finite");
+    return v;
+  }
+  if (Array.isArray(v)) return lreItems(v, field, (x) => lreDecodeValue(x, field, depth + 1));
+  if (!isPlainObject(v)) throw lreRefused(field, "a value that isn't JSON");
+  const keys = Object.keys(v);
+  if (Object.prototype.hasOwnProperty.call(v, NUL)) {
+    if (v[NUL] !== "n") throw lreRefused(field, "a null marker whose value isn't \"n\"");
+    // (alone, a null; beside other keys, a concurrent merge's object: the marker dropped)
+    if (keys.length === 1) return null;
+  }
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    if (k === NUL) continue;
+    if (k.startsWith(NUL)) {
+      if (!k.startsWith(NUL + NUL)) throw lreRefused(field, "a key starting with \\u0000 that isn't escaped");
+      putOwn(out, k.slice(1), lreDecodeValue(v[k], field, depth + 1));
+    } else putOwn(out, k, lreDecodeValue(v[k], field, depth + 1));
+  }
+  return out;
+}
+/**
+ * A stored record decoded, checked as a whole first (lreCheckRecord's rules):
+ * primary keys absent or strings; a string column present only as a string,
+ * and null only when it is absent beside its sidecar (true); no raw null
+ * anywhere; null markers whose value is "n"; every other key starting with
+ * \u0000 doubled or a sidecar of a string column.
+ */
+export function lreDecode(schema: RecordSchema, enc: unknown): Record<string, unknown> {
+  if (!isPlainObject(enc)) throw lreRefused("", "a record is an object");
+  const out: Record<string, unknown> = {};
+  const sidecars: string[] = [];
+  for (const [k, v] of Object.entries(enc)) {
+    if (k.startsWith(SIDECAR)) {
+      const f = k.slice(SIDECAR.length);
+      if (!schema.stringCols.includes(f)) throw lreRefused(f, "a sidecar on a column that isn't a string column");
+      if (v !== true) throw lreRefused(f, "a sidecar whose value isn't true");
+      sidecars.push(f);
+    } else if (k.startsWith(NUL)) {
+      if (!k.startsWith(NUL + NUL)) throw lreRefused(k, "a key starting with \\u0000 that isn't escaped");
+      putOwn(out, k.slice(1), lreDecodeValue(v, k.slice(1), 1));
+    } else if (schema.stringCols.includes(k)) {
+      if (typeof v !== "string") throw lreRefused(k, "a string column present as anything but a string");
+      putOwn(out, k, v);
+    } else putOwn(out, k, lreDecodeValue(v, k, 1));
+  }
+  // (a sidecar beside its present string: a concurrent merge's string, the sidecar dropped)
+  for (const f of sidecars) if (!Object.prototype.hasOwnProperty.call(out, f)) putOwn(out, f, null);
+  for (const k of schema.primaryKeys) if (Object.prototype.hasOwnProperty.call(out, k) && typeof out[k] !== "string") throw lreRefused(k, "a primary key is absent or a string");
+  return out;
+}
+/** A record's size as a synced history stores and sends it: the UTF-8 bytes of its encoded JSON.  What a patch's
+ * 256 KiB inline bound, a batch's 1 MiB and the client's charges (plan-sync-slice2-client-r4 F8) count is this,
+ * never the record's own JSON: LRE's markers, sidecars and escaped keys take bytes (LIMIT-2C1-1). */
+export function lreEncodedBytes(schema: RecordSchema, rec: Record<string, unknown>): number {
+  return utf8(JSON.stringify(lreEncode(schema, rec))).length;
+}
+/** Whether a stored record is one LRE accepts (the applied state, never a patch's instructions): throws invalid_value if not. */
+export function lreCheckRecord(schema: RecordSchema, enc: unknown): void {
+  lreDecode(schema, enc);
 }
 
 // ---- the snapshot blob (§5.2)

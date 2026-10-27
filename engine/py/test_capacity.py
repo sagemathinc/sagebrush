@@ -69,6 +69,11 @@ root = tempfile.mkdtemp(prefix="sb-capacity-")
 os.makedirs(root + "/proc")
 with open(root + "/proc/meminfo", "w") as f:
     f.write("MemTotal:       %d kB\nMemAvailable:   %d kB\n" % (16 * GiB // 1024, 12 * GiB // 1024))
+# (a readable cgroup file with no memory controller: no cgroup row, and
+# no unknown cgroup part either)
+os.makedirs(root + "/proc/self")
+with open(root + "/proc/self/cgroup", "w") as f:
+    f.write("0::/\n")
 C._set_sources(root=root, rlimits={}, runtime=lambda: [])
 check("16 GiB", C.heap_figure(), 16 * GiB)
 check("admitted under 16 GiB", M._admit_size(F, 1450, 1450), (1450, 1450))
@@ -145,7 +150,201 @@ _t = C.engine_total()
 check("engine total, MemTotal from /proc", (_t["status"], _t["basis"], _t["joint"]), ("observed", ["MemAvailable"], True))
 C._set_sources()
 
+# every row that constrains the engine's domain, not only the least ones
+# (no-cliffs plan C r17 section 1): astra2's probe, in pyjs's domains (the
+# engine's own WebAssembly memory), through the real helpers
+import sys as _sys2
+_NOLIM = {"RLIMIT_AS": (-1, -1), "RLIMIT_DATA": (-1, -1)}  # (readable: no limit set)
+_probe = lambda: [("engine-local", 4 * GiB, 768 * MiB, ["wasm-engine"], ["wasm-engine"]),
+                  ("process-joint", 8 * GiB, 2304 * MiB, ["wasm-engine", "js-heap"], ["wasm-engine", "js-heap"])]
+C._set_sources(root=root, rlimits=_NOLIM, runtime=_probe)
+_sys2._sagebrush_heap_limit = 1  # (pyjs: the engine's domain is wasm-engine)
+try:
+    _et, _er = C.engine_total(), C.engine_rows()
+finally:
+    del _sys2._sagebrush_heap_limit
+check("probe: engine_total keeps its least-rows contract", (_et["bytes"], _et["basis"], _et["joint"]), (4 * GiB, ["engine-local"], False))
+check("probe: engine_rows lists the larger joint row too (and the machine's)",
+      [(r["source"], r["figure"], r["joint"]) for r in _er["rows"]],
+      [("MemAvailable", 16 * GiB, True), ("engine-local", 4 * GiB, False), ("process-joint", 8 * GiB, True)])
+check("probe: the classification is complete", _er["complete"], True)
+# (the host's bit for the WebAssembly ledger: some applicable row joint or
+# unknown -> not certified; src/runtime/engine.ts computes the same)
+_sys2._sagebrush_heap_limit = 1
+try:
+    check("probe: uncertified in WebAssembly (engine.ts reads this)", C.engine_uncertified(), True)
+    C._set_sources(root=root, rlimits=_NOLIM, runtime=lambda: [("engine-local", 4 * GiB, 768 * MiB, ["wasm-engine"], ["wasm-engine"])])
+    # (MemAvailable bounds every domain: joint for the engine too, so even an
+    # engine-local row alongside it stays uncertified in WebAssembly)
+    check("a machine row is joint for the WebAssembly engine", C.engine_uncertified(), True)
+finally:
+    del _sys2._sagebrush_heap_limit
+# engine-only means EXACTLY the engine's domain (astra2's CORR-C2A-2): any
+# other domain, wasm-instance and child included, makes a row joint, and so
+# does a domain this module doesn't know (dropped from the list, flagged)
+_real_capacity = C.capacity
+def _classify(con):
+    C._set_sources()
+    C.capacity = lambda: {"basis": [{"source": "r", "limit": 4 * GiB, "used": 0, "remaining": 4 * GiB, "includes": con, "constrains": con}],
+                          "unknown_parts": []}
+    _sys2._sagebrush_heap_limit = 1
+    try:
+        return C.engine_uncertified()
+    finally:
+        del _sys2._sagebrush_heap_limit
+        C.capacity = _real_capacity
+for _con, _want in ((["wasm-engine"], False), (["wasm-engine", "js-heap"], True), (["wasm-engine", "wasm-instance"], True),
+                    (["wasm-engine", "child"], True)):
+    check("exact engine-only: %s" % "+".join(_con), _classify(_con), _want)
+C._set_sources(root=root, rlimits=_NOLIM, runtime=lambda: [("p", 4 * GiB, 0, ["wasm-engine"], ["wasm-engine", "made-up-domain"])])
+_sys2._sagebrush_heap_limit = 1
+try:
+    check("an unknown constrained domain makes the row joint", [r["joint"] for r in C.engine_rows()["rows"] if r["source"] == "p"], [True])
+finally:
+    del _sys2._sagebrush_heap_limit
+check("engine_total's least-rows joint flag is unchanged", C.engine_total()["joint"], True)
+C._set_sources(root=root, rlimits=_NOLIM, runtime=lambda: [("old", 2 * GiB, 0)])
+check("a part whose domains are unknown makes the classification incomplete", C.engine_rows()["complete"], False)
+C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [])
+check("an unreadable constraint makes it incomplete", C.engine_rows()["complete"], False)
+C._set_sources(root=root, rlimits={}, runtime=lambda: [])
+check("an unreadable RLIMIT makes it incomplete", C.engine_rows()["complete"], False)
+# natively every applicable row reaches the ledger with its own measure; a
+# row with no native measure is an "unknown" row (fail-closed)
+import sagebrush as _sb
+C._set_sources(root=root, rlimits={"RLIMIT_AS": (64 * GiB, -1), "RLIMIT_DATA": (-1, -1)}, runtime=lambda: [])
+_ct = _sb._capacity_total()
+check("native rows: every applicable row, with its own figure", sorted((k, f) for k, _p, f in _ct[3]), [("address_space", 64 * GiB), ("physical", 16 * GiB)])
+C._set_sources(root=root, rlimits=_NOLIM, runtime=lambda: [("made-up", 2 * GiB, 0, ["cpython-heap"], ["cpython-heap"])])
+check("native rows: a row with no measure is unknown", ("unknown", None, 2 * GiB) in _sb._capacity_total()[3], True)
+C._set_sources()
+
+# the engine's ledger takes its total from engine_total (no-cliffs C-1):
+# the registered source answers, and the counting allocator sees the
+# module's own allocations
+from sagebrush import _native
+C._set_sources(root=root, rlimits=_NOLIM, runtime=lambda: [])
+import time as _t2
+_t2.sleep(0.15)  # (the engine's figure is read again when 100 ms old)
+_snap = _native.ledger_snapshot()
+check("the ledger's total is engine_total's", (_snap["total"], _snap["status"], _snap["joint"]), (16 * GiB, "observed", True))
+check("the ledger's allowance is a quarter", _snap["allowance"], 4 * GiB)
+check("the process's own measure is read (physical row)", _snap["live"] > 0 and _snap["certified"], True)
+check("nothing outstanding between calls", _snap["outstanding"], 0)
+
+# what the total source raises (CORR-C1-1): a KeyboardInterrupt, SystemExit or
+# any other BaseException, from the call or from converting its answer,
+# reaches the call that asked, as the same object, and no other call; an
+# ordinary failure or a malformed answer is an unreadable total
+import threading
+
+_source = sagebrush._capacity_total
+_good = _source()
+
+
+def _stand_in(f):
+    sagebrush._capacity_total = f
+    _t2.sleep(0.15)  # (read again when 100 ms old)
+
+
+def _raising(exc):
+    def f():
+        raise exc
+    return f
+
+
+class _BadInt:
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __index__(self):
+        raise self.exc
+
+
+def _snapshot():
+    try:
+        return ("returned", _native.ledger_snapshot())
+    except BaseException as e:  # noqa: B902  (the point of the test)
+        return ("raised", e)
+
+
+def _raised(got, exc):
+    return got[0] == "raised" and got[1] is exc
+
+
+for _kind in (KeyboardInterrupt, SystemExit):
+    _exc = _kind()
+    _stand_in(_raising(_exc))
+    check("a %s from the source reaches the asking call, the same object" % _kind.__name__, _raised(_snapshot(), _exc), True)
+    _exc = _kind()
+    _stand_in(lambda e=_exc: (_BadInt(e), _good[1], _good[2], _good[3]))
+    check("a %s converting its answer reaches the asking call, the same object" % _kind.__name__, _raised(_snapshot(), _exc), True)
+for _f, _label in ((_raising(OSError("unreadable")), "an ordinary failure of the source"),
+                   (lambda: (_BadInt(ValueError("bad")), _good[1], _good[2], _good[3]), "an ordinary failure converting its answer"),
+                   (lambda: ("x", 0, False, []), "a malformed answer")):
+    _stand_in(_f)
+    _got = _snapshot()
+    check(_label + " is an unreadable total", (_got[0],) + ((_got[1]["status"], _got[1]["certified"]) if _got[0] == "returned" else ()), ("returned", "nominal", False))
+
+
+def _two_callers(a_first, b_answers):
+    """Thread A asks; its source raises a_first, then (on the same call's
+    next read) waits while thread B asks with sources b_answers (one per
+    read: an exception to raise, or None for the good answer).  Returns
+    (A's result, B's result)."""
+    a_waiting, go = threading.Event(), threading.Event()
+    reads = {"A": 0, "B": 0}
+
+    def source():
+        who = threading.current_thread().name
+        n = reads[who]
+        reads[who] = n + 1
+        if who == "A":
+            if n == 0:
+                raise a_first
+            a_waiting.set()
+            go.wait(10)
+            return _good
+        e = b_answers[min(n, len(b_answers) - 1)]
+        if e is not None:
+            raise e
+        return _good
+
+    out = {}
+
+    def ask(who):
+        out[who] = _snapshot()
+
+    _stand_in(source)
+    a = threading.Thread(target=ask, args=("A",), name="A")
+    a.start()
+    if a_waiting.wait(10):
+        b = threading.Thread(target=ask, args=("B",), name="B")
+        b.start()
+        b.join(10)
+    go.set()
+    a.join(10)
+    return out.get("A"), out.get("B")
+
+
+_exc_a = SystemExit()
+_a, _b = _two_callers(_exc_a, [None])
+check("another call's successful read does not take A's exception", (_b[0] if _b else None, _b[1]["status"] if _b and _b[0] == "returned" else None), ("returned", "observed"))
+check("A raises its own exception, the same object", _raised(_a or ("missing",), _exc_a), True)
+_exc_a, _exc_b = KeyboardInterrupt(), KeyboardInterrupt()
+_a, _b = _two_callers(_exc_a, [_exc_b, None])
+check("two failing calls: B raises its own", _raised(_b or ("missing",), _exc_b), True)
+check("two failing calls: A raises its own", _raised(_a or ("missing",), _exc_a), True)
+
+_stand_in(_source)
+_snap = _native.ledger_snapshot()
+check("the next read answers again", (_snap["total"], _snap["status"], _snap["certified"]), (16 * GiB, "observed", True))
+check("a native call still runs", P.factor([-1, 0, 1]), (1, [([-1, 1], 1), ([1, 1], 1)]))
+C._set_sources()
+
 os.remove(root + "/proc/meminfo")
+os.remove(root + "/proc/self/cgroup")
+os.rmdir(root + "/proc/self")
 os.rmdir(root + "/proc")
 os.rmdir(root)
 print("test_capacity:", "FAILED %d" % failures if failures else "ok")

@@ -1,14 +1,26 @@
-// Kedlaya's Frobenius matrix in the browser worker, in headless Chromium
-// (plan-kedlaya-optin r6 section 6): the worker's JavaScript engine is V8
-// on a browser host, the ledger's V8 table; and Stop during four stages,
-// sent by the page through the shared interrupt flag once the shared
-// progress slots show that stage with done > 0, raises KeyboardInterrupt
-// within 1 s, releases the slot, and leaves the worker computing rightly.
-// The page is cross-origin isolated (COOP and COEP), as Stop needs.
-//   bun web/build.ts && node web/test-kedlaya-worker.mjs
+// Kedlaya's Frobenius matrix in the browser worker (plan-kedlaya-optin r6;
+// for WebKit, plan-kedlaya-webkit-ci r4): the worker's JavaScript engine and
+// host, and Stop during four stages, sent by the page through the shared
+// interrupt flag once the shared progress slots show the run's own call in
+// that stage with done > 0, raising KeyboardInterrupt within 1 s, releasing
+// the slot, and leaving the worker computing rightly.  The page is
+// cross-origin isolated (COOP and COEP), as Stop needs.
+//
+//   Chromium (CDP):  bun web/build.ts && node web/test-kedlaya-worker.mjs
+//   WebKit:          BROWSER=webkit PLAYWRIGHT=<dir with node_modules/playwright> node web/test-kedlaya-worker.mjs
+//
+// Chromium: V8 on a browser host, the V8 table, frobenius() computes.
+// WebKit: JavaScriptCore on a browser host, whose table is established for
+// Bun only, so the production path is refused, exactly, before the working
+// modulus is made; that is tested first, in a clean worker, before any
+// test-only override.  The Stop cases then run under the override
+// _kd_engine = "jsc" (in their own fresh workers, so it reaches nothing
+// else).  This job certifies nothing about memory: certification of the JSC
+// table on WebKit is unavailable (plan-kedlaya-webkit-ci r4, section 0).
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +28,7 @@ import { devtoolsPort } from "./test-port.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "dist");
+const ENGINE = process.env.BROWSER ?? "chromium";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (c, msg) => {
   console.log((c ? "ok   " : "FAIL ") + msg);
@@ -35,9 +48,11 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}/`;
 
-const profile = mkdtempSync(join(tmpdir(), "sb-kedlaya-chrome-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, base + "test.html"], { stdio: "ignore" });
-try {
+// the browser: ev(expression) evaluates in the page and returns the value
+let ev, close;
+const profile = mkdtempSync(join(tmpdir(), "sb-kedlaya-browser-"));
+if (ENGINE === "chromium") {
+  const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, base + "test.html"], { stdio: "ignore" });
   const port = await devtoolsPort(profile);
   let targets;
   for (let i = 0; i < 300; i++) {
@@ -59,15 +74,29 @@ try {
   await send("Page.enable");
   await send("Page.navigate", { url: base + "test.html" });
   for (let i = 0; i < 100; i++) {
-    const r = await send("Runtime.evaluate", { expression: "location.href + ' ' + crossOriginIsolated", returnByValue: true });
-    if (r.result?.value === base + "test.html true") break;
+    const r = await send("Runtime.evaluate", { expression: "location.href", returnByValue: true });
+    if (r.result?.value === base + "test.html") break;
     await sleep(100);
   }
-  const ev = async (expression) => {
+  ev = async (expression) => {
     const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 500));
     return r.result.value;
   };
+  close = () => chrome.kill();
+} else if (ENGINE === "webkit") {
+  if (!process.env.PLAYWRIGHT) throw new Error("BROWSER=webkit needs PLAYWRIGHT=<a directory with node_modules/playwright>");
+  const { webkit } = createRequire(join(process.env.PLAYWRIGHT, "node_modules", "x.js"))("playwright");
+  const browser = await webkit.launch();
+  const page = await browser.newPage();
+  await page.goto(base + "test.html");
+  console.log(`WebKit ${browser.version()}`);
+  ev = (expression) => page.evaluate(expression);
+  close = () => browser.close();
+} else throw new Error(`BROWSER=${ENGINE}: chromium or webkit`);
+
+try {
+  ok(await ev("crossOriginIsolated"), `${ENGINE}: the page is cross-origin isolated`);
   // a consistent copy of slot i (24 words), as src/runtime/progress.ts's
   // read(): an even sequence (word 0) the same before and after the words,
   // else null after 4 torn reads; `load` reads word k (Atomics.load, or a
@@ -104,25 +133,37 @@ try {
   ok(torn.raw === true && torn.odd === null && torn.moving === null && torn.stable?.stage === 4 && torn.stable.done === 5,
      `a torn progress slot is never read as a stage with done > 0, which the separate loads were (${JSON.stringify(torn)})`);
 
-  // a fresh worker: run `code` (Sage) as run 2; if `stage` is set, Stop once
-  // a consistent copy of a progress slot shows that call in that stage with
-  // done > 0 (seen: the copy Stop was sent on)
+  // a fresh worker runs `code` (Sage) as run 2; with `stage` set, the page
+  // reads consistent copies of the shared progress slots (kdSlot), remembers
+  // the call ids in use before the run, and sends Stop only once a copy shows
+  // a call id new since then in that stage with done > 0 (stopSlot: that copy)
   await ev(`window.kd = (code, stage, wait = 600000) => new Promise((resolve) => {
     const w = new Worker("/sagebrush-worker.js", { type: "module" });
-    let out = "", sent = 0, seen = "", timer;
-    const end = (r) => { clearInterval(timer); w.terminate(); resolve({ out, sent, seen, ...r }); };
+    let out = "", sent = 0, seen = [], timer, before = null, callId = null, stopCall = null, stopSlot = null;
+    const end = (r) => { clearInterval(timer); w.terminate(); resolve({ out, sent, seen: seen.slice(-6), callId, stopCall, stopSlot, before, ...r }); };
     w.onmessage = (e) => {
       const m = e.data;
       if (m.ready) {
         if (stage !== null) {
           if (!m.interrupt || !m.progress) return end({ error: "no shared interrupt flag or progress slots" });
           const intr = new Int32Array(m.interrupt), slots = new Int32Array(m.progress);
+          const load = (k) => Atomics.load(slots, k);
+          before = [];
+          for (let i = 0; i < 32; i++) {
+            const c = kdSlot(load, i);
+            if (c === null) return end({ error: "a torn progress slot before the run" });
+            if (c.inUse) before.push(c.callId);
+          }
           timer = setInterval(() => {
             for (let i = 0; i < 32 && !sent; i++) {
-              const s = kdSlot((k) => Atomics.load(slots, k), i);
-              if (!s || !s.inUse) continue;
-              if (s.stage === stage && s.done > 0) {
-                seen = s;
+              const c = kdSlot(load, i);
+              if (!c || !c.inUse || before.includes(c.callId)) continue;
+              if (callId === null) callId = c.callId;
+              const s = c.callId + ":" + c.stage + ":" + c.done;
+              if (seen[seen.length - 1] !== s) seen.push(s);
+              if (c.stage === stage && c.done > 0) {
+                stopCall = c.callId;
+                stopSlot = c;
                 sent = Date.now();
                 Atomics.or(intr, 0, 1);
                 Atomics.notify(intr, 0);
@@ -140,33 +181,63 @@ try {
   })`);
   const kd = (code, stage = null) => ev(`kd(${JSON.stringify(code)}, ${stage})`);
 
-  let r = await kd("import _sbengine, _sage_padic_lseries as L\nprint(_sbengine.js_engine(), _sbengine.js_host(), L._kd_engine())\nprint(EllipticCurve('14a1').padic_lseries(5).frobenius(5).det())");
-  ok(r.out === "v8 browser v8\n5^-1 + O(5^4)\n", `Chromium's worker: V8 on a browser host, the V8 table, and a value (${JSON.stringify(r)})`);
+  const DETECT = "import _sbengine, _sage_padic_lseries as L\nprint(_sbengine.js_engine(), _sbengine.js_host(), L._kd_engine())";
+  const REFUSE = [
+    "try:",
+    "    EllipticCurve('14a1').padic_lseries(5).frobenius(5)",
+    "    print('COMPUTED')",
+    "except NotImplementedError as e:",
+    "    print('REFUSED', type(e).__name__, str(e), hasattr(e, 'need_bytes'))",
+  ].join("\n");
+  let override = "";
+  if (ENGINE === "webkit") {
+    // 1. the production path, first, in a clean worker: no override anywhere yet
+    let r = await kd(DETECT + "\n" + REFUSE);
+    const want = "the Frobenius matrix at p = 5 to precision 5: the memory estimate for this computation isn't established for this JavaScript engine (jsc (WebKit)); the native package computes it";
+    ok(r.out === `jsc browser jsc (WebKit)\nREFUSED NotImplementedError ${want} False\n`, `WebKit's worker: JavaScriptCore on a browser host, and the production refusal, exactly (${JSON.stringify(r)})`);
+    // 2. ... and before the working modulus is made: in a fresh worker whose
+    // _kd_modulus raises, the refusal is the same (the modulus never reached)
+    r = await kd("import _sage_padic_lseries as L\ndef _sentinel(p, W):\n    raise AssertionError('MODULUS REACHED')\nL._kd_modulus = _sentinel\n" + REFUSE);
+    ok(r.out.startsWith("REFUSED ") && r.out.includes("isn't established for this JavaScript engine (jsc (WebKit))") && !r.out.includes("MODULUS REACHED"), `WebKit: refused before the working modulus (${JSON.stringify(r)})`);
+    // the Stop cases run the call under the test-only override, each in its own worker
+    override = "import _sage_padic_lseries as _K\n_K._kd_engine = lambda: 'jsc'\n";
+  } else {
+    const r = await kd(DETECT + "\nprint(EllipticCurve('14a1').padic_lseries(5).frobenius(5).det())");
+    ok(r.out === "v8 browser v8\n5^-1 + O(5^4)\n", `Chromium's worker: V8 on a browser host, the V8 table, and a value (${JSON.stringify(r)})`);
+  }
 
   // (stages 4 and 6 at p = 2003: at p = 1013 either can end, on a fast
   // runner, before progress's next 250 ms write shows done > 0; stage 6 did
   // in CI web-browser (notebook), job 121261851557)
   for (const [what, p, prec, stage] of [["setup: Q^p", 4001, 2, 1], ["series", 5, 400, 3], ["reduce dx/y", 2003, 1, 4], ["check: setup Q^p", 2003, 1, 6]]) {
-    const code = [
+    const code = override + [
       "import time",
       "from sagebrush import progress",
+      "assert progress.snapshot() == [], progress.snapshot()",
       `L = EllipticCurve('27a1').padic_lseries(${p})`,
       "try:",
       `    L.frobenius(${prec})`,
-      "    print('finished')",
+      "    print('FINISHED')",
       "except KeyboardInterrupt:",
       "    t = time.time() * 1000",
       "    print('interrupted', t, len(progress.snapshot()), EllipticCurve('14a1').padic_lseries(5).frobenius(5).det())",
+      "except Exception as e:",
+      "    print('RAISED', type(e).__name__, e)",
     ].join("\n");
-    r = await kd(code, stage);
+    const r = await kd(code, stage);
     const m = /^interrupted (\S+) (\d+) (.*)$/m.exec(r.out);
     const ms = m ? Number(m[1]) - r.sent : NaN;
-    console.log(`Stop in stage ${stage} (${what}) at p = ${p}, prec ${prec}, in Chromium's worker: KeyboardInterrupt ${ms.toFixed(0)} ms after Stop`);
-    ok(!!m && r.seen.inUse && r.seen.callId > 0 && r.seen.stage === stage && r.seen.done > 0 && ms < 1000 && m[2] === "0" && m[3] === "5^-1 + O(5^4)",
-       `Stop in stage ${stage}: sent on a consistent copy of the call's slot in that stage with done > 0; within 1 s, the slot released, a later call right (${JSON.stringify(r)})`);
+    console.log(`Stop in stage ${stage} (${what}) at p = ${p}, prec ${prec}, in ${ENGINE}'s worker: KeyboardInterrupt ${ms.toFixed(0)} ms after Stop`);
+    // (a pass needs: this run's own new call seen in the intended stage with
+    // done > 0 when Stop went out, KeyboardInterrupt, not a finished or
+    // refused call or the harness's timeout, within 1 s, the slot released,
+    // and a later call right)
+    const active = r.sent > 0 && r.stopCall !== null && r.stopCall === r.callId && Array.isArray(r.before) && !r.before.includes(r.stopCall) &&
+      !!r.stopSlot && r.stopSlot.inUse && r.stopSlot.callId === r.stopCall && r.stopSlot.stage === stage && r.stopSlot.done > 0;
+    ok(active && !r.timeout && !!m && !/FINISHED|RAISED/.test(r.out) && ms < 1000 && m[2] === "0" && m[3] === "5^-1 + O(5^4)", `Stop in stage ${stage}: this call active in that stage, KeyboardInterrupt within 1 s, the slot released, a later call right (${JSON.stringify(r)})`);
   }
 } finally {
-  chrome.kill();
+  await close();
   server.close();
   await sleep(200);
   rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
