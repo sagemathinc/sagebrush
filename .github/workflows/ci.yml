@@ -201,6 +201,8 @@ jobs:
           node scripts/test-size-measure.mjs
           node scripts/test-install-engine-wasm.mjs
           node scripts/test-check-fresh-wasm.mjs
+          node scripts/test-unsafe-inventory.mjs
+          node scripts/unsafe-inventory.mjs --check
           node scripts/test-npm-pack-metrics.mjs
           node scripts/test-install-timing.mjs
           node --test scripts/test-heap-budget.mjs
