@@ -294,8 +294,11 @@ export type BoxBounds = { x0: number; y0: number; x1: number; y1: number };
  * crossing the width moves it to the next row (exported for the tests). */
 export function packRows(free: { boxes: number; bb: BoxBounds }[], gap: number): number[][] {
   const order = free.map((f, i) => i).sort((a, b) => free[b].boxes - free[a].boxes || a - b);
+  // (the area summed in the packing's order, as finish() always summed it:
+  // floating addition isn't associative, and the width decides the rows;
+  // astra2's review)
   let total = 0;
-  for (const f of free) total += (f.bb.x1 - f.bb.x0 + gap) * (f.bb.y1 - f.bb.y0 + gap);
+  for (const i of order) total += (free[i].bb.x1 - free[i].bb.x0 + gap) * (free[i].bb.y1 - free[i].bb.y0 + gap);
   const width = Math.max(Math.sqrt(total) * 1.2, ...free.map((f) => f.bb.x1 - f.bb.x0), 0);
   const rows: number[][] = [];
   let x = 0;
