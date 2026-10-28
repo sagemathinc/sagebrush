@@ -1,4 +1,59 @@
 {
+ "engine/arith/src/nmod_poly.rs :: poll_accumulate :: let a = acc.saturating_add(u64::try_from(work).unwrap_or(u64::MAX)); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(poll_accumulate(0, usize::MAX), (0, true)); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(poll_accumulate(u64::MAX - 1, 1), (0, true)); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(poll_accumulate(u64::MAX, usize::MAX), (0, true)); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(weighted_work(0, usize::MAX), 1); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(weighted_work(usize::MAX / 2 + 1, 2), usize::MAX); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(weighted_work(usize::MAX, 1), usize::MAX); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(weighted_work(usize::MAX, 2), usize::MAX); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: weighted_work :: usize::try_from(weighted_work_in(n as u64, w as u64, usize::MAX as u64)).unwrap_or(usize::MAX) #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: weighted_work_in :: n.saturating_mul(w).saturating_add(1).min(max) #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: weighted_work_in :: pub(crate) fn weighted_work_in(n: u64, w: u64, max: u64) -> u64 { #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
  "engine/arith/src/zmat.rs :: max_bits_polled :: fn max_bits_polled(&self, poll: &mut Poll) -> u64 { #0": {
   "class": "none",
   "owner": "magma",
@@ -9,10 +64,30 @@
   "owner": "magma",
   "reason": "dense-mul Stop polling: max_bits / usize::MAX / max_gap_ns name a bit count, a saturating conversion and a test hook; nothing is refused"
  },
- "engine/arith/src/zmat.rs :: mul :: let w = usize::try_from(words(ba).saturating_mul(words(bb))).unwrap_or(usize::MAX); #0": {
+ "engine/arith/src/zmat.rs :: mul_weight :: usize::try_from(mul_weight_in(ba, bb, usize::MAX as u64)).unwrap_or(usize::MAX) #0": {
   "class": "none",
   "owner": "magma",
-  "reason": "dense-mul Stop polling: max_bits / usize::MAX / max_gap_ns name a bit count, a saturating conversion and a test hook; nothing is refused"
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight_in :: fn mul_weight_in(ba: u64, bb: u64, max: u64) -> u64 { #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight_in :: words(ba).saturating_mul(words(bb)).min(max) #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight_saturates_on_both_word_sizes :: assert_eq!(mul_weight_in(1 << 22, 1 << 22, u64::MAX), 1 << 32); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight_saturates_on_both_word_sizes :: let wasm = u32::MAX as u64; #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
  },
  "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
   "class": "2+3",

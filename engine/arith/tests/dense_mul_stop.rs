@@ -154,5 +154,36 @@ fn dense_products_poll_in_every_kernel_phase() {
             case(&mut bad, &format!("{} p={}", label, p), "nmod-transpose", c as u64 >> 16, &want, || a.mul(&b).d);
         }
     }
+    // ---- empty dimensions (astra2 DENSE-R2-ZERO): R x 0 x C, R x K x 0,
+    // 0 x K x C, and a large R x 0 x C: the exact shape, all zeros, and a
+    // Stop requested beforehand still seen
+    for (r, k, c) in [(5usize, 0usize, 7usize), (5, 3, 0), (0, 3, 7), (1 << 12, 0, 1 << 6)] {
+        let (a, b) = (zm(&mut s, r, k, 9), zm(&mut s, k, c, 9));
+        let z = a.mul(&b);
+        if z.rows != r || z.cols != c || z.d.len() != r * c || z.d.iter().any(|x| *x != BigInt::from(0i64)) {
+            bad.push(format!("zmat empty {}x{}x{}: not the {}x{} zero matrix", r, k, c, r, c));
+        }
+        sagebrush_interrupt::request();
+        let e = sagebrush_interrupt::catch(|| a.mul(&b));
+        sagebrush_interrupt::clear();
+        if e.is_ok() {
+            bad.push(format!("zmat empty {}x{}x{}: a pending Stop was not seen", r, k, c));
+        }
+        for p in [7u64, 9223372036854775783] {
+            let m = Modulus::new(p);
+            let a = Mat { rows: r, cols: k, m, d: (0..r * k).map(|_| rng(&mut s) % p).collect() };
+            let b = Mat { rows: k, cols: c, m, d: (0..k * c).map(|_| rng(&mut s) % p).collect() };
+            let z = a.mul(&b);
+            if z.rows != r || z.cols != c || z.d.len() != r * c || z.d.iter().any(|&x| x != 0) {
+                bad.push(format!("nmod empty {}x{}x{} p={}: not the {}x{} zero matrix", r, k, c, p, r, c));
+            }
+            sagebrush_interrupt::request();
+            let e = sagebrush_interrupt::catch(|| a.mul(&b));
+            sagebrush_interrupt::clear();
+            if e.is_ok() {
+                bad.push(format!("nmod empty {}x{}x{} p={}: a pending Stop was not seen", r, k, c, p));
+            }
+        }
+    }
     assert!(bad.is_empty(), "{} problem(s):\n{}", bad.len(), bad.join("\n"));
 }

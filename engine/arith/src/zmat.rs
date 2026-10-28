@@ -19,7 +19,7 @@
 
 use crate::nmod::{Modulus, Primes};
 use crate::nmod_mat::{Lu, Mat};
-use crate::nmod_poly::Poll;
+use crate::nmod_poly::{weighted_work, Poll};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
@@ -38,6 +38,20 @@ pub fn mod_u64(x: &BigInt, m: &Modulus) -> u64 {
         return m.from_i64(v);
     }
     x.mod_floor(&BigInt::from(m.n)).to_u64().unwrap()
+}
+
+/// A BigInt multiply-add's weight in [`ZMat::mul`]: the word products of
+/// the largest entries, saturating at usize::MAX (on wasm32 two 2^22-bit
+/// operands give 2^32 words products: saturated, so every multiply-add
+/// polls).
+fn mul_weight(ba: u64, bb: u64) -> usize {
+    usize::try_from(mul_weight_in(ba, bb, usize::MAX as u64)).unwrap_or(usize::MAX)
+}
+
+/// [`mul_weight`] for a usize of at most `max` (tests: wasm32's u32::MAX).
+fn mul_weight_in(ba: u64, bb: u64, max: u64) -> u64 {
+    let words = |b: u64| b.div_ceil(64).max(1);
+    words(ba).saturating_mul(words(bb)).min(max)
 }
 
 /// The multiply-adds between two polls in [`ZMat::mul`]'s inner loops.
@@ -125,7 +139,24 @@ impl ZMat {
     pub fn mul(&self, o: &ZMat) -> ZMat {
         assert_eq!(self.cols, o.rows, "matrix dimensions do not match");
         let (r, k, c) = (self.rows, self.cols, o.cols);
+        if r == 0 || c == 0 {
+            // (no entries: the empty result directly, with no loop over an
+            // empty dimension; a pending Stop is still seen)
+            sagebrush_interrupt::check_coarse();
+            return ZMat { rows: r, cols: c, d: vec![] };
+        }
         let mut poll = Poll::new();
+        if k == 0 {
+            // (an empty inner dimension: R x C zeros, checked first and
+            // polled while built)
+            sagebrush_interrupt::check_coarse();
+            let mut d = Vec::with_capacity(r * c);
+            for _ in 0..r * c {
+                d.push(BigInt::zero());
+                poll.add(1);
+            }
+            return ZMat { rows: r, cols: c, d };
+        }
         // (the phases name where a Stop lands, for the tests' hooks)
         let scan = sagebrush_interrupt::enter("zmat-scan");
         let (ba, bb) = (self.max_bits_polled(&mut poll), o.max_bits_polled(&mut poll));
@@ -161,8 +192,7 @@ impl ZMat {
         drop(scan);
         let _dot = sagebrush_interrupt::enter("zmat-big-dot");
         // a multiply-add's weight: the word products of the largest entries
-        let words = |b: u64| b.div_ceil(64).max(1);
-        let w = usize::try_from(words(ba).saturating_mul(words(bb))).unwrap_or(usize::MAX);
+        let w = mul_weight(ba, bb);
         let step = (MUL_STEP / w).max(1);
         let mut d = Vec::with_capacity(r * c);
         for i in 0..r {
@@ -176,7 +206,7 @@ impl ZMat {
                             s += &self.d[i * k + l] * &o.d[l * c + j];
                         }
                     }
-                    poll.add((l1 - l0).saturating_mul(w) + 1);
+                    poll.add(weighted_work(l1 - l0, w));
                     if l1 >= k {
                         break;
                     }
@@ -835,6 +865,25 @@ pub fn charpoly(a: &ZMat) -> Vec<BigInt> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mul_weight_saturates_on_both_word_sizes() {
+        use super::{mul_weight_in, MUL_STEP};
+        use crate::nmod_poly::weighted_work_in;
+        let wasm = u32::MAX as u64;
+        // two 2^22-bit operands (512 KiB each): 2^16 x 2^16 = 2^32 word
+        // products, past wasm32's usize
+        assert_eq!(mul_weight_in(1 << 22, 1 << 22, u64::MAX), 1 << 32);
+        assert_eq!(mul_weight_in(1 << 22, 1 << 22, wasm), wasm);
+        // then the chunk is one multiply-add, and its count saturates there
+        let w = mul_weight_in(1 << 22, 1 << 22, wasm);
+        assert_eq!(((MUL_STEP as u64) / w).max(1), 1);
+        assert_eq!(weighted_work_in(1, w, wasm), wasm);
+        assert_eq!(weighted_work_in(wasm, wasm, wasm), wasm);
+        // small entries weigh one word product
+        assert_eq!(mul_weight_in(0, 30, wasm), 1);
+        assert_eq!(mul_weight_in(64, 65, wasm), 2);
+    }
+
     use super::*;
 
     fn rng(seed: &mut u64) -> u64 {

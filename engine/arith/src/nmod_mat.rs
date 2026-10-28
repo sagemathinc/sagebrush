@@ -70,9 +70,9 @@ impl Poll {
     }
     #[inline]
     fn add(&mut self, work: usize) {
-        self.0 += work as u64;
-        if self.0 >= 1 << 16 {
-            self.0 = 0;
+        let (acc, due) = crate::nmod_poly::poll_accumulate(self.0, work);
+        self.0 = acc;
+        if due {
             sagebrush_interrupt::check_coarse();
         }
     }
@@ -475,6 +475,13 @@ impl Mat {
     pub fn mul(&self, o: &Mat) -> Mat {
         assert_eq!(self.cols, o.rows);
         let m = self.m;
+        if self.rows == 0 || self.cols == 0 || o.cols == 0 {
+            // (an empty dimension: the zero R x C result directly, with no
+            // loop over its entries or over the empty one; a pending Stop
+            // is still seen)
+            sagebrush_interrupt::check_coarse();
+            return Mat::zero(self.rows, o.cols, m);
+        }
         let mut poll = Poll::new();
         // (the transpose, polled by entry: a 1 x C or K x C copy)
         let transpose = sagebrush_interrupt::enter("nmod-transpose");
@@ -508,10 +515,6 @@ impl Mat {
                     poll.add(ca.len() + 1);
                 }
                 c.d[i * o.cols + j] = r;
-            }
-            if self.cols == 0 {
-                // (an empty inner dimension: the row's zero entries)
-                poll.add(o.cols + 1);
             }
         }
         c
