@@ -1179,6 +1179,28 @@ try {
     // writer's attempt merged by the awaited save, astra3's L1: the kept attempt is the one sent and kept)
     // (the crash chain says where it is, so a stall shows its step: #243's CI)
     const chainAt = (step) => console.log(`  (crash chain: ${step}, ${new Date().toISOString().slice(11, 19)}Z)`);
+    // (a crash, then the site opened again in a new tab, as a person would after one: the crashed tab is closed,
+    // so nothing of it lingers; a new tab whose first navigation doesn't commit within 20 s, or isn't ready within
+    // 60 s (#243's CI: D8's Page.navigate unanswered while the browser answered), fails the case with Chrome's
+    // targets said (type, path, attached: service workers included). No retry: a person reopening after a crash
+    // would meet the same thing, so it must show)
+    const crashAndReopen = async (P, what) => {
+      chainAt(`${what}: the page crashes`);
+      void P.send("Page.crash").catch(() => {});
+      await sleep(1000);
+      await raw("Target.closeTarget", { targetId: P.targetId }, undefined, 10_000).catch(() => {});
+      chainAt(`${what}: a new page`);
+      const Q = await newPage();
+      try {
+        await Q.send("Page.navigate", { url: dev.site + "/" }, 20_000);
+        await Q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+        return Q;
+      } catch (e) {
+        const t = await raw("Target.getTargets", {}, undefined, 10_000).catch(() => null);
+        console.log(`  (${what}: the new page didn't load (${e.message}); Chrome's targets: ${JSON.stringify((t?.targetInfos ?? []).map((x) => [x.type, String(x.url).replace(dev.site, ""), x.attached]))})`);
+        throw e;
+      }
+    };
     await block("D2", async () => {
     chainAt("D2 starts");
     await ev("document.querySelector('#filemenu [data-f=new]').click()");
@@ -1199,13 +1221,7 @@ try {
     await until("!!window.__made", 60000);
     const made2 = await ev("window.__made");
     // (a crashed page never answers Page.crash: not awaited, or the run hangs, as run 3 did)
-    chainAt("D2: the page crashes");
-    void p.send("Page.crash").catch(() => {});
-    await sleep(1000);
-    chainAt("D2: a new page");
-    const q = await newPage();
-    await q.send("Page.navigate", { url: dev.site + "/" });
-    await q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+    const q = await crashAndReopen(p, "D2");
     const att2 = await q.ev("window.sagebrush.notebook.snapshot().share_attempt ?? null");
     await q.ev("document.querySelector('#sharemenu').click()");
     await q.until("document.querySelector('#sharedlg').open && !!window.sagebrush.share.selection && document.querySelectorAll('#sharelist .sharerow').length > 0", 60000);
@@ -1241,13 +1257,7 @@ try {
       await q.ev("document.querySelector('#sharetitlein').value = 'D8'; document.querySelector('#shareupload').click()");
       await q.until("!!window.__made", 60000);
       const made8 = await q.ev("window.__made");
-      chainAt("D8: the page crashes");
-      void q.send("Page.crash").catch(() => {});
-      await sleep(1000);
-      chainAt("D8: a new page");
-      const q2 = await newPage();
-      await q2.send("Page.navigate", { url: dev.site + "/" });
-      await q2.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+      const q2 = await crashAndReopen(q, "D8");
       const stored8 = await q2.ev("window.sagebrush.notebook.snapshot().share_attempt ?? null");
       await q2.ev(`(() => { const f = window.fetch; window.__attempts = []; window.fetch = async (u, o) => { if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") window.__attempts.push(JSON.parse(o.body).attempt); return f(u, o); }; })()`);
       await q2.ev("document.querySelector('#sharemenu').click()");
@@ -1276,15 +1286,7 @@ try {
         await P.ev(`document.querySelector('#sharetitlein').value = ${JSON.stringify(title)}; document.querySelector('#shareresult').textContent = ''; document.querySelector('#shareupload').click()`);
       };
       const sharesIn = (P) => P.ev("(async () => (await (await fetch('/api/share/mine')).json()).collections.length)()");
-      const reopen = async (P) => {
-        chainAt("reopen: the page crashes");
-        void P.send("Page.crash").catch(() => {});
-        await sleep(1000);
-        const Q = await newPage();
-        await Q.send("Page.navigate", { url: dev.site + "/" });
-        await Q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
-        return Q;
-      };
+      const reopen = (P) => crashAndReopen(P, "reopen");
       const storeOther = (att) => `(async () => { const id = localStorage.getItem('sagebrush-current'); const db = await new Promise((ok, no) => { const r = indexedDB.open('sagebrush'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }); await new Promise((ok, no) => { const tx = db.transaction('notebooks', 'readwrite'), st = tx.objectStore('notebooks'); const g = st.get(id); g.onsuccess = () => st.put({ ...g.result, share_attempt: '${att}', rev: (g.result.rev ?? 0) + 1, updated: Date.now() }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); }); db.close(); })()`;
       const recordSentIn = (P) => P.ev(`(() => { const f = window.fetch; window.__attempts = []; window.fetch = async (u, o) => { if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") window.__attempts.push(JSON.parse(o.body).attempt); return f(u, o); }; })()`);
 
