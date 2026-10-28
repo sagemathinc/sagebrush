@@ -770,11 +770,17 @@ try {
     if (process.env.SHOW) emit.show(results);
     code = 0;
   }
+  // (Chrome closed through its own protocol: it ends its own processes, so none is left for a subreaper to adopt)
+  await Promise.race([send("Browser.close"), sleep(5000)]);
   ws.close();
 } catch (e) {
   emit.crash(e);
 } finally {
-  try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
+  // (Chrome's exit waited for, at most 15 s; only if it is still running is its process group killed, and said)
+  const exited = chrome.exitCode !== null || chrome.signalCode !== null
+    || (await Promise.race([new Promise((ok) => chrome.once("exit", () => ok(true))), sleep(15_000).then(() => false)]));
+  emit.text("browser: ", exited ? "exited by itself" : "still running after 15 s: its process group killed");
+  if (!exited) try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   front.stop(true);
   try { await cloud?.stop(); } catch {}
   await sleep(200);
