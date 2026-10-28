@@ -208,7 +208,8 @@ export class ShellRun {
       this.limitHit("invocations");
       return this.typed();
     }
-    // (bash.source_bytes: the script's UTF-8, before it is sent; a file it sources is just-bash's own check)
+    // (bash.source_bytes: the script's UTF-8, before it is sent.  It bounds only this script: a file it sources is a
+    // read, bounded by bash.read_bytes (typed); just-bash's maxSourceBytes doesn't check `source` or `.`)
     if (utf8(script) > L.source_bytes!) {
       this.limitHit("source_bytes");
       return this.typed();

@@ -957,14 +957,20 @@ async function limits(check) {
     check(u8(at) === 1024 && r1.kind === "exit" && r1.code === 0 && typed(r2, "source_bytes") && c.dispatched === 1, `bash.source_bytes 1024: a script of ${u8(at)} UTF-8 bytes runs, one of ${u8(past)} is refused before dispatch (${show(r1)}; ${show(r2)})`);
     check(u8(L.wrap("")) === L.WRAPPER_BYTES && u8(L.wrap(at)) === u8(at) + L.WRAPPER_BYTES, `the host's wrapper adds exactly ${L.WRAPPER_BYTES} bytes, which just-bash's maxSourceBytes allows for`);
   }
-  // a sourced file: just-bash's own check, at source_bytes + the wrapper's bytes; ordinary past it, never typed
+  // a sourced file is a read, bounded by bash.read_bytes (typed), not by source_bytes: the pinned just-bash checks
+  // maxSourceBytes in exec() and transform() only, and its `source`/`.` parses what it read with no size check
+  // (PR 279's first CI, run 40757814227 job 123062107940: a sourced file past source_bytes + the wrapper ran)
   {
-    const { ws, host } = await fresh("source-file", { bash: { source_bytes: 1024 } });
+    const { ws, host } = await fresh("source-file", { readBytes: 2000, bash: { source_bytes: 1024 } });
     const body = (n) => ": " + "a".repeat(n - 3) + "\n";
-    await ws.create("/ok.sh", { content: enc(body(1024 + L.WRAPPER_BYTES)) });
-    await ws.create("/big.sh", { content: enc(body(1024 + L.WRAPPER_BYTES + 1)) });
-    const r1 = await host.exec(PERSON, ". ./ok.sh; echo SENTINEL"), r2 = await host.exec(PERSON, ". ./big.sh && echo SENTINEL");
-    check(u8(body(1028)) === 1028 && r1.code === 0 && r1.stdout === "SENTINEL\n" && r2.kind === "exit" && r2.code !== 0 && !r2.stdout.includes("SENTINEL"), `a sourced file of ${1024 + L.WRAPPER_BYTES} bytes is read; one of ${1024 + L.WRAPPER_BYTES + 1} is just-bash's own stop, ordinary, never typed (${show(r1)}; ${show(r2)})`);
+    await ws.create("/over-source.sh", { content: enc(body(1500)) });
+    await ws.create("/at-read.sh", { content: enc(body(2000)) });
+    await ws.create("/over-read.sh", { content: enc(body(2001)) });
+    const r1 = await host.exec(PERSON, ". ./over-source.sh; echo SENTINEL"), r2 = await host.exec(PERSON, ". ./at-read.sh; echo SENTINEL");
+    check(u8(body(1500)) === 1500 && r1.kind === "exit" && r1.code === 0 && r1.stdout === "SENTINEL\n", `a sourced file of 1500 bytes, over bash.source_bytes 1024, runs: source_bytes bounds only the script the page sends (${show(r1)})`);
+    check(u8(body(2000)) === 2000 && r2.kind === "exit" && r2.code === 0 && r2.stdout === "SENTINEL\n", `a sourced file of exactly bash.read_bytes (2000 bytes) runs (${show(r2)})`);
+    const r3 = await host.exec(PERSON, ". ./over-read.sh; echo SENTINEL");
+    check(u8(body(2001)) === 2001 && typed(r3, "read_bytes") && r3.value === 2000, `one of 2001 bytes is bash.read_bytes, typed: the read is refused before just-bash parses it (${show(r3)})`);
   }
   // pipeline_width: the module's own pre-parse, before anything runs
   {
@@ -1070,7 +1076,10 @@ async function limits(check) {
     let run = host.run(PERSON);
     const cpu = await run.invoke("while true; do :; done");
     check(typed(cpu, "script_ms") && run.ledger().script_ms >= 1000, `G2 (b): a CPU-only loop is stopped at the run's time, typed bash.script_ms, by just-bash's deadline or the watchdog (watchdog fired ${run.watchdogFired}; debited ${run.ledger().script_ms.toFixed(0)} ms, never refunded) (${show(cpu)})`);
-    check(typed(await run.invoke("echo again"), "script_ms") && run.ledger().invocations === 2, `nothing more is admitted once the time is spent`);
+    // (a latched run admits nothing and so charges nothing: invoke() returns the typed outcome before the invocations
+    // charge, so the ledger keeps the one invocation that ran (PR 279's first CI, run 40757814227 job 123062107940))
+    const again = await run.invoke("echo again");
+    check(typed(again, "script_ms") && run.ledger().invocations === 1, `nothing more is admitted once the time is spent, nor charged (${show(again)}; ${JSON.stringify(run.ledger())})`);
     // (G2 (c), G1-b: a cap far past Stop and its grace, so only Stop ends it)
     const { host: hc } = await fresh("script-ms-c", { bash: { script_ms: BIG } });
     const crun = hc.run(PERSON);
@@ -1155,8 +1164,14 @@ async function limits(check) {
 // with the key off, SENTINEL (past just-bash's own default where there is one).
 // (G8-a: just-bash's own boundary for each script below, exact: frozen from the first CI run, which records them while
 // these are null.  They aren't derivable from the minified vendor code alone: its counters also count what the
-// host's wrapper and the script's own commands consume.)
-const BOUNDARIES = { commands: null, loop_iterations: null, call_depth: null, glob_paths: null };
+// host's wrapper and the script's own commands consume.  Frozen from PR 279's first CI (run 40757814227, job
+// 123062107940, web-browser (notebook)): "RECORD BOUNDARIES.commands = 48 (bash.commands 50)", "RECORD
+// BOUNDARIES.loop_iterations = 49 (bash.loop_iterations 50)", "RECORD BOUNDARIES.call_depth = 7 (bash.call_depth 8)",
+// "RECORD BOUNDARIES.glob_paths = 50 (bash.glob_paths 100)".)
+// (glob_paths maps to both maxGlobOperations and maxBraceExpansionResults (limits.ts executionLimitsOf); its probe
+// below is brace expansion, and its stop is just-bash's "brace expansion: brace_operations work limit exceeded", so
+// the 50 is the BRACE side only.  The glob side (maxGlobOperations) has no probe: an open measurement, not measured.)
+const BOUNDARIES = { commands: 48, loop_iterations: 49, call_depth: 7, glob_paths: 50 };
 async function upstream(check) {
   // the boundary of `script(k)` under `bash`: the largest k (lo..hi) whose run ends with SENTINEL
   const boundary = async (name, bash, script, lo, hi) => {
