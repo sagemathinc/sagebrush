@@ -5,6 +5,8 @@
 //! operations multiply by a fixed scalar with Shoup's trick.
 
 use crate::nmod::{mul_shoup, Modulus};
+use std::hint::black_box;
+use std::ops::Range;
 
 /// P A = L U modulo p: L lower triangular (the pivots on its diagonal),
 /// U unit upper triangular, stored together in `a`; row i of P A is row
@@ -76,6 +78,74 @@ impl Poll {
             sagebrush_interrupt::check_coarse();
         }
     }
+}
+
+/// The inner dimension from which [`Mat::mul`]'s dot products are made one
+/// output at a time (each by [`dot_slice`]).
+const DOT_STEP: usize = 1 << 16;
+/// The width of B from which [`Mat::mul`]'s transpose moves a row at a
+/// time.
+const TRANSPOSE_WIDE: usize = 1 << 12;
+
+// ---- the hot loops of Mat::mul, each outlined (#[inline(never)], no
+// closures, not generic) so that it compiles the same whatever the loop
+// around it; the ranges come through black_box at every call
+
+/// Rows `rows` of B (all its columns) into bt, B's transpose.
+#[inline(never)]
+fn transpose_rows(o: &Mat, bt: &mut [u64], rows: Range<usize>) {
+    for i in rows {
+        for j in 0..o.cols {
+            bt[j * o.rows + i] = o.d[i * o.cols + j];
+        }
+    }
+}
+
+/// Columns `cols` of row i of B into bt, B's transpose.
+#[inline(never)]
+fn transpose_row_part(o: &Mat, bt: &mut [u64], i: usize, cols: Range<usize>) {
+    for j in cols {
+        bt[j * o.rows + i] = o.d[i * o.cols + j];
+    }
+}
+
+/// The outputs (i, j) for i in rows, j in cols of A B, A's rows of k
+/// entries in `a`, B's columns in `bt` (B's transpose), into `out`
+/// (row-major, `cols` a row): each dot product summed in u128 in batches
+/// of `batch` products, each batch reduced and added mod m.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn dot_block(a: &[u64], bt: &[u64], k: usize, cols: usize, batch: usize, m: &Modulus, rows: Range<usize>, js: Range<usize>, out: &mut [u64]) {
+    for i in rows {
+        let ra = &a[i * k..(i + 1) * k];
+        for j in js.clone() {
+            let rb = &bt[j * k..(j + 1) * k];
+            let mut r = 0u64;
+            for (ca, cb) in ra.chunks(batch).zip(rb.chunks(batch)) {
+                let mut acc = 0u128;
+                for (&x, &y) in ca.iter().zip(cb) {
+                    acc += x as u128 * y as u128;
+                }
+                r = m.add(r, m.reduce_u128(acc));
+            }
+            out[i * cols + j] = r;
+        }
+    }
+}
+
+/// r plus the dot product of a and b mod m, summed in u128 in batches of
+/// `batch` products, each batch reduced and added.
+#[inline(never)]
+fn dot_slice(a: &[u64], b: &[u64], batch: usize, m: &Modulus, r: u64) -> u64 {
+    let mut r = r;
+    for (ca, cb) in a.chunks(batch).zip(b.chunks(batch)) {
+        let mut acc = 0u128;
+        for (&x, &y) in ca.iter().zip(cb) {
+            acc += x as u128 * y as u128;
+        }
+        r = m.add(r, m.reduce_u128(acc));
+    }
+    r
 }
 
 /// How many products of reduced residues fit in a u128 sum.
@@ -475,24 +545,34 @@ impl Mat {
     pub fn mul(&self, o: &Mat) -> Mat {
         assert_eq!(self.cols, o.rows);
         let m = self.m;
-        let bt = o.transpose();
+        // (the transpose of B: a B with one row or one column keeps its
+        // entry order, so it is a copy; otherwise the entries move, a wide
+        // row at a time when B is wide)
+        let bt = if o.rows == 1 || o.cols == 1 {
+            Mat { rows: o.cols, cols: o.rows, m, d: o.d.clone() }
+        } else {
+            let mut bt = Mat::zero(o.cols, o.rows, m);
+            if o.cols >= TRANSPOSE_WIDE {
+                for i in 0..o.rows {
+                    transpose_row_part(o, &mut bt.d, black_box(i), black_box(0..o.cols));
+                }
+            } else {
+                transpose_rows(o, &mut bt.d, black_box(0..o.rows));
+            }
+            bt
+        };
         let sq = (m.n as u128 - 1) * (m.n as u128 - 1);
         let batch = if sq == 0 { usize::MAX } else { (u128::MAX / sq).min(1 << 30) as usize };
         let mut c = Mat::zero(self.rows, o.cols, m);
         let mut poll = Poll::new();
+        let (k, cols) = (self.cols, o.cols);
         for i in 0..self.rows {
-            let a = self.row(i);
-            for j in 0..o.cols {
-                let b = bt.row(j);
-                let mut r = 0u64;
-                for (ca, cb) in a.chunks(batch).zip(b.chunks(batch)) {
-                    let mut acc = 0u128;
-                    for (&x, &y) in ca.iter().zip(cb) {
-                        acc += x as u128 * y as u128;
-                    }
-                    r = m.add(r, m.reduce_u128(acc));
+            if k < DOT_STEP {
+                dot_block(&self.d, &bt.d, k, cols, batch, &m, black_box(i..i + 1), black_box(0..cols), &mut c.d);
+            } else {
+                for j in 0..cols {
+                    c.d[i * cols + j] = dot_slice(&self.d[i * k..(i + 1) * k], &bt.d[j * k..(j + 1) * k], batch, &m, 0);
                 }
-                c.d[i * o.cols + j] = r;
             }
             poll.add(o.cols * self.cols);
         }
@@ -677,6 +757,79 @@ mod tests {
 
     fn rand_mat(r: usize, c: usize, m: Modulus, s: &mut u64) -> Mat {
         Mat { rows: r, cols: c, m, d: (0..r * c).map(|_| rng(s) % m.n).collect() }
+    }
+
+    /// master's Mat::mul before the outlining, verbatim (less its polls):
+    /// the reference.
+    fn mul_reference(a: &Mat, o: &Mat) -> Mat {
+        let m = a.m;
+        let bt = o.transpose();
+        let sq = (m.n as u128 - 1) * (m.n as u128 - 1);
+        let batch = if sq == 0 { usize::MAX } else { (u128::MAX / sq).min(1 << 30) as usize };
+        let mut c = Mat::zero(a.rows, o.cols, m);
+        for i in 0..a.rows {
+            let ra = a.row(i);
+            for j in 0..o.cols {
+                let rb = bt.row(j);
+                let mut r = 0u64;
+                for (ca, cb) in ra.chunks(batch).zip(rb.chunks(batch)) {
+                    let mut acc = 0u128;
+                    for (&x, &y) in ca.iter().zip(cb) {
+                        acc += x as u128 * y as u128;
+                    }
+                    r = m.add(r, m.reduce_u128(acc));
+                }
+                c.d[i * o.cols + j] = r;
+            }
+        }
+        c
+    }
+
+    #[test]
+    fn outlined_mul_equals_the_reference() {
+        let mut s = 0x241a_u64;
+        for p in [2u64, 7, 1_000_000_007, (1 << 62) - 57, 18446744073709551557] {
+            let m = Modulus::new(p);
+            // B a row, a column, wide (a row at a time), narrow; K on both
+            // sides of DOT_STEP; empty dimensions; r7's tails
+            for (r, k, c) in [(1, 1, 1), (3, 1, 5), (4, 6, 1), (2, 3, TRANSPOSE_WIDE), (2, 3, TRANSPOSE_WIDE + 1), (1, 17, 4095), (5, 7, 9),
+                              (1, DOT_STEP - 1, 2), (2, DOT_STEP, 1), (1, DOT_STEP + 3, 3), (0, 3, 4), (3, 0, 4), (3, 4, 0), (4, 65534, 3), (2, 21845, 7)] {
+                let (a, b) = (rand_mat(r, k, m, &mut s), rand_mat(k, c, m, &mut s));
+                assert_eq!(a.mul(&b), mul_reference(&a, &b), "p={p} {r}x{k}x{c}");
+            }
+        }
+    }
+
+    #[test]
+    fn outlined_helpers_equal_their_loops() {
+        let mut s = 13u64;
+        let m = Modulus::new(1_000_000_007);
+        let b = rand_mat(5, 6, m, &mut s);
+        let t = b.transpose();
+        // the transpose in two row groups, and in row parts
+        let mut bt = vec![0u64; 30];
+        transpose_rows(&b, &mut bt, 0..2);
+        transpose_rows(&b, &mut bt, 2..5);
+        assert_eq!(bt, t.d);
+        let mut bt2 = vec![0u64; 30];
+        for i in 0..5 {
+            transpose_row_part(&b, &mut bt2, i, 0..4);
+            transpose_row_part(&b, &mut bt2, i, 4..6);
+        }
+        assert_eq!(bt2, t.d);
+        // a block of outputs, and a dot product in slices continuing r
+        let a = rand_mat(3, 5, m, &mut s);
+        let want = mul_reference(&a, &b);
+        let mut out = vec![0u64; 3 * 6];
+        dot_block(&a.d, &t.d, 5, 6, 2, &m, 1..3, 2..5, &mut out);
+        for i in 1..3 {
+            for j in 2..5 {
+                assert_eq!(out[i * 6 + j], want.get(i, j));
+            }
+        }
+        let (ra, rb) = (a.row(2), t.row(4));
+        let half = dot_slice(&ra[..2], &rb[..2], 3, &m, 0);
+        assert_eq!(dot_slice(&ra[2..], &rb[2..], 3, &m, half), want.get(2, 4));
     }
 
     #[test]

@@ -22,6 +22,8 @@ use crate::nmod_mat::{Lu, Mat};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
+use std::hint::black_box;
+use std::ops::Range;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZMat {
@@ -41,6 +43,141 @@ pub fn mod_u64(x: &BigInt, m: &Modulus) -> u64 {
 
 fn bits(x: &BigInt) -> u64 {
     x.bits()
+}
+
+/// The entries per call of the pre-scans' helpers.
+const SCAN_CHUNK: usize = 1 << 12;
+/// The inner dimension from which [`ZMat::mul`]'s dot products are made
+/// one output at a time (each by [`dot_run_i64`] or [`dot_run_big`]).
+const MUL_STEP: usize = 1 << 16;
+
+/// [`ZMat::prepare_product`]'s decision, made before any product is
+/// allocated.
+pub enum Prepared<'a> {
+    Small(SmallPrep),
+    Big(BigPrep<'a>),
+}
+
+/// An r x k by k x c product whose entries are all i64 and whose dot
+/// products fit in i128 (proved by [`ZMat::prepare_product`]), with the
+/// entries converted.
+pub struct SmallPrep {
+    r: usize,
+    k: usize,
+    c: usize,
+    a: Vec<i64>,
+    b: Vec<i64>,
+}
+
+/// A product in BigInt arithmetic, with the largest entries' bits.
+pub struct BigPrep<'a> {
+    a: &'a ZMat,
+    o: &'a ZMat,
+    #[allow(dead_code)]
+    ba: u64,
+    #[allow(dead_code)]
+    bb: u64,
+}
+
+impl SmallPrep {
+    /// The product's (rows, columns).
+    pub fn rows_cols(&self) -> (usize, usize) {
+        (self.r, self.c)
+    }
+
+    /// The product as a ZMat.
+    pub fn compute_bigint(self) -> ZMat {
+        let SmallPrep { r, k, c, a, b } = self;
+        let mut d = Vec::with_capacity(r * c);
+        if k < MUL_STEP {
+            dot_block_i64(&a, &b, k, c, black_box(0..r), black_box(0..c), &mut d);
+        } else {
+            for i in 0..r {
+                for j in 0..c {
+                    let s = dot_run_i64(&a[i * k..(i + 1) * k], &b, c, j, black_box(0..k), 0);
+                    d.push(BigInt::from(s));
+                }
+            }
+        }
+        ZMat { rows: r, cols: c, d }
+    }
+}
+
+impl BigPrep<'_> {
+    /// The product as a ZMat.
+    pub fn compute(self) -> ZMat {
+        let (a, o) = (self.a, self.o);
+        let (r, k, c) = (a.rows, a.cols, o.cols);
+        let mut d = Vec::with_capacity(r * c);
+        for i in 0..r {
+            for j in 0..c {
+                let mut s = BigInt::zero();
+                dot_run_big(&a.d[i * k..(i + 1) * k], &o.d, c, j, black_box(0..k), &mut s);
+                d.push(s);
+            }
+            sagebrush_interrupt::check();
+        }
+        ZMat { rows: r, cols: c, d }
+    }
+}
+
+// ---- the hot loops of ZMat::mul, each outlined (#[inline(never)], no
+// closures, not generic) so that it compiles the same whatever the loop
+// around it; the ranges come through black_box at every call
+
+/// The largest bit length in a chunk of entries.
+#[inline(never)]
+fn scan_max_bits(chunk: &[BigInt]) -> u64 {
+    chunk.iter().map(bits).max().unwrap_or(0)
+}
+
+/// Each entry of a chunk as an i64, pushed in order; false at the first
+/// that is not one.  `out` is sized by the caller, so it never grows here.
+#[inline(never)]
+fn scan_to_i64(chunk: &[BigInt], out: &mut Vec<i64>) -> bool {
+    for x in chunk {
+        match x.to_i64() {
+            Some(v) => out.push(v),
+            None => return false,
+        }
+    }
+    true
+}
+
+/// The i64 products' outputs (i, j) for i in rows, j in cols, row by row,
+/// each dot product of k terms in i128, pushed in order.
+#[inline(never)]
+fn dot_block_i64(a: &[i64], b: &[i64], k: usize, c: usize, rows: Range<usize>, cols: Range<usize>, out: &mut Vec<BigInt>) {
+    for i in rows {
+        for j in cols.clone() {
+            let mut s = 0i128;
+            for l in 0..k {
+                s += a[i * k + l] as i128 * b[l * c + j] as i128;
+            }
+            out.push(BigInt::from(s));
+        }
+    }
+}
+
+/// s plus the terms l in ls of row a (one row of A) times column j of B.
+#[inline(never)]
+fn dot_run_i64(a: &[i64], b: &[i64], c: usize, j: usize, ls: Range<usize>, s: i128) -> i128 {
+    let mut s = s;
+    for l in ls {
+        s += a[l] as i128 * b[l * c + j] as i128;
+    }
+    s
+}
+
+/// The BigInt terms l in ls of row a times column j of B, added to s
+/// (zero entries of a skipped).
+#[inline(never)]
+fn dot_run_big(a: &[BigInt], b: &[BigInt], c: usize, j: usize, ls: Range<usize>, s: &mut BigInt) {
+    for l in ls {
+        if !a[l].is_zero() {
+            *s += &a[l] * &b[l * c + j];
+        }
+    }
 }
 
 impl ZMat {
@@ -111,38 +248,48 @@ impl ZMat {
     }
 
     pub fn mul(&self, o: &ZMat) -> ZMat {
+        match self.prepare_product(o) {
+            Prepared::Small(p) => p.compute_bigint(),
+            Prepared::Big(p) => p.compute(),
+        }
+    }
+
+    /// The product's path, decided once and before any product is
+    /// allocated: Small (every entry an i64 and every dot product within
+    /// i128: the largest entries' bits plus the bits of k under 126) with
+    /// the entries converted, else Big.
+    pub fn prepare_product<'a>(&'a self, o: &'a ZMat) -> Prepared<'a> {
         assert_eq!(self.cols, o.rows, "matrix dimensions do not match");
-        let (r, k, c) = (self.rows, self.cols, o.cols);
-        let small = self.max_bits() + o.max_bits() + (64 - (k as u64).leading_zeros() as u64) < 126;
+        let k = self.cols;
+        let (ba, bb) = (self.max_bits_scanned(), o.max_bits_scanned());
+        let small = ba + bb + (64 - (k as u64).leading_zeros() as u64) < 126;
         if small {
-            if let (Some(a), Some(b)) = (self.as_i64(), o.as_i64()) {
-                let mut d = Vec::with_capacity(r * c);
-                for i in 0..r {
-                    for j in 0..c {
-                        let mut s = 0i128;
-                        for l in 0..k {
-                            s += a[i * k + l] as i128 * b[l * c + j] as i128;
-                        }
-                        d.push(BigInt::from(s));
-                    }
-                }
-                return ZMat { rows: r, cols: c, d };
+            if let (Some(a), Some(b)) = (self.as_i64_scanned(), o.as_i64_scanned()) {
+                return Prepared::Small(SmallPrep { r: self.rows, k, c: o.cols, a, b });
             }
         }
-        let mut d = Vec::with_capacity(r * c);
-        for i in 0..r {
-            for j in 0..c {
-                let mut s = BigInt::zero();
-                for l in 0..k {
-                    if !self.d[i * k + l].is_zero() {
-                        s += &self.d[i * k + l] * &o.d[l * c + j];
-                    }
-                }
-                d.push(s);
-            }
-            sagebrush_interrupt::check();
+        Prepared::Big(BigPrep { a: self, o, ba, bb })
+    }
+
+    /// [`max_bits`](ZMat::max_bits) in chunks of SCAN_CHUNK entries.
+    fn max_bits_scanned(&self) -> u64 {
+        let mut m = 0;
+        for chunk in self.d.chunks(SCAN_CHUNK) {
+            m = m.max(scan_max_bits(black_box(chunk)));
         }
-        ZMat { rows: r, cols: c, d }
+        m
+    }
+
+    /// [`as_i64`](ZMat::as_i64) in chunks of SCAN_CHUNK entries, into one
+    /// vector sized once.
+    fn as_i64_scanned(&self) -> Option<Vec<i64>> {
+        let mut v = Vec::with_capacity(self.d.len());
+        for chunk in self.d.chunks(SCAN_CHUNK) {
+            if !scan_to_i64(black_box(chunk), &mut v) {
+                return None;
+            }
+        }
+        Some(v)
     }
 
     pub fn scale(&self, s: &BigInt) -> ZMat {
@@ -779,6 +926,130 @@ mod tests {
 
     fn rand_zmat(r: usize, c: usize, range: i64, s: &mut u64) -> ZMat {
         ZMat { rows: r, cols: c, d: (0..r * c).map(|_| BigInt::from((rng(s) % (2 * range as u64 + 1)) as i64 - range)).collect() }
+    }
+
+    /// master's ZMat::mul before the outlining, verbatim: the reference.
+    fn mul_reference(a: &ZMat, o: &ZMat) -> ZMat {
+        let (r, k, c) = (a.rows, a.cols, o.cols);
+        let small = a.max_bits() + o.max_bits() + (64 - (k as u64).leading_zeros() as u64) < 126;
+        if small {
+            if let (Some(x), Some(y)) = (a.as_i64(), o.as_i64()) {
+                let mut d = Vec::with_capacity(r * c);
+                for i in 0..r {
+                    for j in 0..c {
+                        let mut s = 0i128;
+                        for l in 0..k {
+                            s += x[i * k + l] as i128 * y[l * c + j] as i128;
+                        }
+                        d.push(BigInt::from(s));
+                    }
+                }
+                return ZMat { rows: r, cols: c, d };
+            }
+        }
+        let mut d = Vec::with_capacity(r * c);
+        for i in 0..r {
+            for j in 0..c {
+                let mut s = BigInt::zero();
+                for l in 0..k {
+                    if !a.d[i * k + l].is_zero() {
+                        s += &a.d[i * k + l] * &o.d[l * c + j];
+                    }
+                }
+                d.push(s);
+            }
+        }
+        ZMat { rows: r, cols: c, d }
+    }
+
+    fn big_zmat(r: usize, c: usize, bits: u32, s: &mut u64) -> ZMat {
+        ZMat {
+            rows: r,
+            cols: c,
+            d: (0..r * c)
+                .map(|_| {
+                    let x = (BigInt::from(rng(s)) << (bits.saturating_sub(64) as usize)) + BigInt::from(rng(s));
+                    if rng(s) & 1 == 0 { -x } else { x }
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn outlined_mul_equals_the_reference() {
+        let mut s = 0x241a_u64;
+        // small (i64 path), both sides of MUL_STEP, empty dimensions, K = 0
+        for (r, k, c, range) in [(1, 1, 1, 9), (3, 5, 4, 1 << 40), (1, 4095, 1, 1 << 30), (1, 4097, 1, 1 << 30), (2, MUL_STEP - 1, 3, 1000),
+                                 (2, MUL_STEP, 2, 1000), (1, MUL_STEP + 5, 2, 1 << 20), (0, 3, 4, 9), (3, 0, 4, 9), (3, 4, 0, 9), (4, 1, 4, 1 << 62)] {
+            let (a, b) = (rand_zmat(r, k, range, &mut s), rand_zmat(k, c, range, &mut s));
+            assert_eq!(a.mul(&b), mul_reference(&a, &b), "{r}x{k}x{c} range {range}");
+        }
+        // i64::MIN and extremes: i64 entries whose bits sum past 126 go Big
+        let mut a = rand_zmat(2, 3, 5, &mut s);
+        a.d[0] = BigInt::from(i64::MIN);
+        a.d[4] = BigInt::from(i64::MAX);
+        let b = a.transpose();
+        assert_eq!(a.mul(&b), mul_reference(&a, &b));
+        // BigInt path: large entries, zeros inside (the zero skip)
+        for (r, k, c, bits) in [(2, 3, 2, 100), (1, 50, 1, 300), (3, 7, 5, 70), (2, MUL_STEP + 1, 1, 65)] {
+            let (mut a, b) = (big_zmat(r, k, bits, &mut s), big_zmat(k, c, bits, &mut s));
+            for x in a.d.iter_mut().step_by(3) {
+                *x = BigInt::zero();
+            }
+            assert_eq!(a.mul(&b), mul_reference(&a, &b), "big {r}x{k}x{c} {bits} bits");
+        }
+    }
+
+    #[test]
+    fn prepare_product_decides_once_as_before() {
+        let mut s = 7u64;
+        let (a, b) = (rand_zmat(3, 4, 1000, &mut s), rand_zmat(4, 2, 1000, &mut s));
+        match a.prepare_product(&b) {
+            Prepared::Small(p) => {
+                assert_eq!(p.rows_cols(), (3, 2));
+                assert_eq!(p.compute_bigint(), mul_reference(&a, &b));
+            }
+            Prepared::Big(_) => panic!("small entries must take the i64 path"),
+        }
+        // bits at the bound: 62 + 62 + bitlen(4) = 127 is not under 126
+        let x = ZMat { rows: 1, cols: 4, d: vec![BigInt::from(1i64 << 61); 4] };
+        let y = x.transpose();
+        assert!(matches!(x.prepare_product(&y), Prepared::Big(_)));
+        // fits the bits test but an entry is not an i64: Big too
+        let mut z = ZMat { rows: 1, cols: 1, d: vec![BigInt::from(1u64 << 63)] };
+        let one = ZMat { rows: 1, cols: 1, d: vec![BigInt::from(1)] };
+        assert!(matches!(z.prepare_product(&one), Prepared::Big(_)));
+        z.d[0] = BigInt::from(5);
+        assert!(matches!(z.prepare_product(&one), Prepared::Small(_)));
+    }
+
+    #[test]
+    fn outlined_helpers_equal_their_loops() {
+        let mut s = 11u64;
+        let (r, k, c) = (3, 9, 5);
+        let a: Vec<i64> = (0..r * k).map(|_| rng(&mut s) as i64 >> 2).collect();
+        let b: Vec<i64> = (0..k * c).map(|_| rng(&mut s) as i64 >> 2).collect();
+        let dot = |i: usize, j: usize| (0..k).fold(0i128, |s, l| s + a[i * k + l] as i128 * b[l * c + j] as i128);
+        // a block of outputs, in order
+        let mut out = Vec::new();
+        dot_block_i64(&a, &b, k, c, 1..3, 2..4, &mut out);
+        assert_eq!(out, vec![BigInt::from(dot(1, 2)), BigInt::from(dot(1, 3)), BigInt::from(dot(2, 2)), BigInt::from(dot(2, 3))]);
+        // a run continues a partial sum
+        let half = dot_run_i64(&a[2 * k..3 * k], &b, c, 4, 0..4, 0);
+        assert_eq!(dot_run_i64(&a[2 * k..3 * k], &b, c, 4, 4..k, half), dot(2, 4));
+        // BigInt runs the same way
+        let (ab, bb): (Vec<BigInt>, Vec<BigInt>) = (a.iter().map(|&x| BigInt::from(x)).collect(), b.iter().map(|&x| BigInt::from(x)).collect());
+        let mut t = BigInt::zero();
+        dot_run_big(&ab[k..2 * k], &bb, c, 0, 0..5, &mut t);
+        dot_run_big(&ab[k..2 * k], &bb, c, 0, 5..k, &mut t);
+        assert_eq!(t, BigInt::from(dot(1, 0)));
+        // the scans
+        let m = big_zmat(2, 3, 130, &mut s);
+        assert_eq!(scan_max_bits(&m.d), m.max_bits());
+        let mut v = Vec::with_capacity(ab.len());
+        assert!(scan_to_i64(&ab, &mut v) && v == a);
+        let mut w = Vec::with_capacity(m.d.len());
+        assert!(!scan_to_i64(&m.d, &mut w));
     }
 
     #[test]
