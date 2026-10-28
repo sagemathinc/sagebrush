@@ -3,7 +3,7 @@
 Fast, certified engines for research mathematics, in Rust, for Python.
 Permissively licensed (MIT OR Apache-2.0): use them anywhere, in anything,
 from agents and notebooks to products. No C libraries; one abi3 wheel per
-platform covers Python 3.9 and later.
+platform covers Python 3.10 and later.
 
 This is an early release of [Sagebrush](https://github.com/sagemathinc/sagebrush),
 which also runs in the browser at [sagebrush.space](https://sagebrush.space).
