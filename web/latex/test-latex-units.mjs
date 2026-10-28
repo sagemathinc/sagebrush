@@ -11,7 +11,8 @@ import { RenderGate } from "./gate.ts";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 600)); };
-const u8 = (...parts) => { const out = []; for (const p of parts) typeof p === "string" ? out.push(...new TextEncoder().encode(p)) : out.push(...p); return new Uint8Array(out); };
+// (bytes of strings and byte lists, joined without spreading: a fixture is 3 MiB)
+const u8 = (...parts) => { const bs = parts.map((p) => (typeof p === "string" ? new TextEncoder().encode(p) : Uint8Array.from(p))); const out = new Uint8Array(bs.reduce((n, b) => n + b.length, 0)); let at = 0; for (const b of bs) { out.set(b, at); at += b.length; } return out; };
 const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 // ---- save.ts: the fixtures, each opened, its text encoded back unedited (the open-time assertion), then edited
