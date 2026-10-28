@@ -359,6 +359,9 @@ function path(p: unknown): string {
 // character, is in it: CORR-4A0-3)
 const subtree = (p: string) => (p === "/" ? undefined : IDBKeyRange.bound(p + "/", p + "0", false, true));
 
+/** pathOfFile reads at most this many entries with one identity (normally one); more is "ambiguous", unread. */
+export const PATH_OF_FILE_MAX = 64;
+
 export class Workspace {
   private subs = new Set<(c: Change) => void>();
   private channel: BroadcastChannel | null = null;
@@ -1940,16 +1943,20 @@ export class Workspace {
   // ------------------------------------------------------------ for the pages
 
   /** Where the data file with this fid is now, read-only (for a page bound to a file by its id, which may have been
-   * moved since): exactly one live entry (not in Trash) with that fid, found through the index byIdent and checked at
-   * its path in the same read.  Otherwise why not: "none" (no such file, or not that one at its path), "trashed"
-   * (only in Trash), "ambiguous" (more than one live entry: never the first of them).  Writes, moves and repairs
-   * nothing. */
+   * moved since): exactly one live entry (not in Trash) with that fid, found through the index byIdent (every entry
+   * with it is read: none is left unseen) and checked at its path in the same read.  Otherwise why not: "none" (no
+   * such file, or not that one at its path), "trashed" (only in Trash), "ambiguous" (more than one live entry, never
+   * the first of them; or more than PATH_OF_FILE_MAX entries with that identity, which are not read).  Writes, moves
+   * and repairs nothing. */
   async pathOfFile(fid: string): Promise<{ ok: true; path: string; entry: Entry } | { ok: false; why: "none" | "trashed" | "ambiguous" }> {
     if (typeof fid !== "string" || fid === "") return { ok: false, why: "none" };
     this.open();
     return inTx(this.ws, "entries", "readonly", async (tx) => {
       const v = await entriesOf(tx);
-      const all = (await v.byIdentAll(IDBKeyRange.only(fid), 64)).filter((e) => e.kind === "file" && e.fid === fid);
+      // (counted first: past the bound it fails closed, unread; under it, every entry with the identity is read)
+      const n = await v.byIdentCount(fid);
+      if (n > PATH_OF_FILE_MAX) return { ok: false, why: "ambiguous" } as const;
+      const all = (await v.byIdentAll(IDBKeyRange.only(fid))).filter((e) => e.kind === "file" && e.fid === fid);
       const live = all.filter((e) => !e.trashed && !within(e.path, TRASH));
       if (live.length > 1) return { ok: false, why: "ambiguous" } as const;
       if (live.length === 0) return { ok: false, why: all.length ? "trashed" : "none" } as const;

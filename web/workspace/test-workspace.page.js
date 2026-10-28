@@ -921,7 +921,7 @@ async function migrateOnWrite() {
 async function writeGuard() {
   const w = await v1([["/g/a.txt", "theirs"], ["/g/b.txt", "bee"]]);
   const snap = async () => JSON.stringify({ entry: await rawGet(w.ws, "entries", "/g/a.txt"), fileBytes: await rawKeys(w.ws, "fileBytes"), old: dec(await rawGet(w.main, "files", "/g/a.txt")),
-    meta: await rawKeys(w.ws, "meta"), ops: (await rawKeys(w.ws, "ops")).length, versions: (await rawKeys(w.ws, "versions")).length, left: await legacyLeft(w) });
+    meta: await Promise.all((await rawKeys(w.ws, "meta")).map(async (k) => [k, await rawGet(w.ws, "meta", k)])), ops: (await rawKeys(w.ws, "ops")).length, versions: (await rawKeys(w.ws, "versions")).length, left: await legacyLeft(w) });
   const before = await snap();
   const a0 = await rawGet(w.ws, "entries", "/g/a.txt");
   check(!a0.migrated && await fails(w.write("/g/a.txt", "mine", { fid: "0123456789abcdef" }), "conflict"), "a write naming another file's fid, an unmigrated file at the path: refused");
@@ -958,6 +958,17 @@ async function pathOfFile_() {
   await rawPut(w.ws, "entries", { ...d, path: "/d2.txt" });
   const amb = await w.pathOfFile(d.fid);
   check(amb.ok === false && amb.why === "ambiguous", "two live entries with the same fid: ambiguous");
+  // the bound (api.ts PATH_OF_FILE_MAX = 64 entries with one identity): one live among exactly that many is found; one more
+  // live entry past it is never missed (ambiguous, unread, never the first live one)
+  await w.create("/c.txt", { content: "c" });
+  const { nkey: _c, ...c } = await rawGet(w.ws, "entries", "/c.txt");
+  const MAX = 64;   // (api.ts PATH_OF_FILE_MAX)
+  for (let k = 0; k < MAX - 1; k++) await rawPut(w.ws, "entries", { ...c, path: `/Trash/c${k}.txt`, trashed: { from: "/c.txt", at: 1, id: "c" + k } });
+  const atCap = await w.pathOfFile(c.fid);
+  check(atCap.ok && atCap.path === "/c.txt", "pathOfFile: one live entry among exactly the bound's entries with its fid: found");
+  await rawPut(w.ws, "entries", { ...c, path: "/zz-late.txt" });
+  const over = await w.pathOfFile(c.fid);
+  check(over.ok === false && over.why === "ambiguous", "…and a second live one past the bound: ambiguous, never the first");
   w.close();
 }
 
