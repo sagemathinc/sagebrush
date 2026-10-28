@@ -2085,6 +2085,31 @@ async function s5Lifecycle() {
   owner.destroy();
 }
 
+async function s5Docs() {
+  // (DEV's switch for notebooks' contents (doc-sync-switch.ts): the owner says whether its client runs, waiting up to a
+  // bound; and a DocSync handed to it (setDocs) goes on its client's connection: a running client made again with it)
+  await account();
+  const w = await fresh();
+  const owner = W.SyncOwner.of(w, { origin: location.origin });
+  owner.start();
+  const t0 = Date.now(), none = await owner.clientRunning(400);
+  check(none === false && Date.now() - t0 >= 350, "docs: sync off here: clientRunning false, after its wait");
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check((await owner.clientRunning(15_000)) === true, "docs: sync on: clientRunning true");
+  await until(() => owner.view().s.state === "synced", 15_000);
+  const calls = [];
+  const docs = { connected(l) { calls.push("connected:" + typeof l.ask); }, disconnected() { calls.push("disconnected"); }, changed() {} };
+  const c1 = owner.client;
+  owner.setDocs(docs);
+  check(await until(() => calls.includes("connected:function") && !!owner.client && owner.client !== c1, 15_000), "docs: setDocs: the client made again with it, and its welcome connects document sync: " + J(calls));
+  check(!el.textContent.includes("Notebooks sync between your devices"), "docs: the Sync panel's notebooks note isn't shown on this test origin (DEV's only)");
+  s.dispose();
+  owner.destroy();
+}
+
 async function s5Tabs() {
   // (status across tabs: only the holder publishes; a follower opened later gets it at once; a flood of status? costs
   // one bit and at most one message a slot; an old holder's messages dropped; nothing echoed)
@@ -3380,7 +3405,7 @@ async function docWire() {
   await stop(c);
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified, docWire };
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
