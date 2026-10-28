@@ -27,12 +27,15 @@ def run():
 
 
 orig = open(F, "rb").read()
+NL = "\r\n" if b"\r\n" in orig else "\n"  # (a Windows checkout's wheel carries CRLF sources: the anchors follow the file)
+print("sage_plot3d.py line endings: %s" % ("CRLF" if NL == "\r\n" else "LF"), flush=True)
 bad = 0
 code, lines = run()
 print("control (unmutated): exit %d | %s" % (code, " | ".join(lines)[:400]), flush=True)
 bad += code != 0
 for name, a, b in M:
     text = orig.decode("utf-8")
+    a, b = a.replace("\n", NL), b.replace("\n", NL)
     assert text.count(a) == 1, (name, text.count(a))
     open(F, "wb").write(text.replace(a, b, 1).encode("utf-8"))
     try:
