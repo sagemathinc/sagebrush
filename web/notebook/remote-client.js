@@ -3,25 +3,39 @@
 // (RFC 9449) made with this page's own P-256 key, which never leaves it
 // (WebCrypto, generated non-extractable); the access token is bound to that
 // key, so a copied token is useless without it.  The server's DPoP-Nonce is
-// used, and a request refused for want of a fresh one is retried once.
+// used, and a resource request refused for want of a fresh one is retried
+// once.  (The /token endpoint's 400 nonce challenge is the grant flow's, not
+// implemented in this client.)
 //
-// Run events arrive as a fetch-streamed text/event-stream (headers work,
-// unlike EventSource); each event is refused before it is parsed if it is
-// over EVENT_MAX bytes, and request bodies are checked against their
-// endpoint's cap before they are sent.
+// Transport: the gateway's base must be an https: URL (RFC 9449 §2: DPoP
+// does not replace TLS), with no user info; every request stays under that
+// base, and redirects are refused (fetch's redirect: "error"), so a request
+// carrying a token or proof never goes anywhere else.
+//
+// Sizes: a request body over its endpoint's cap is never sent; a response
+// body is read as a stream and refused at the first byte past RESPONSE_MAX;
+// run events (a fetch-streamed text/event-stream, so headers work) are
+// refused at the first byte past their cap, before they are decoded.
+//
+// Three kinds of failure, because they mean different things to a run:
+//   NotSentError  the request was never sent (a cap, a bad path, aborted first): it had no effect
+//   GatewayError  the gateway answered with a typed refusal ({error: code}): definitive
+//   AmbiguousError it was sent, and no valid answer came back (network, abort, oversized or
+//                  unreadable answer): it may or may not have taken effect
 //
 //   const client = await RemoteClient.create({ base: "https://cocalc.ai/api/compute/v1", token: () => accessToken });
-//   const r = await client.request("POST", "/bindings", { notebook, kernel, path });
-//   for await (const ev of client.events(`/bindings/${b}/runs/${rq}/events`, 0)) ...
+//   const r = await client.request("POST", "/bindings", { notebook, kernel, path }, { signal });
+//   for await (const ev of client.events(`/bindings/${b}/runs/${rq}/events`, 0, signal)) ...
 
-// (the largest event the page parses: the gateway's events are at most
-// 897 KiB of JSON, one 896 KiB message plus its envelope)
-export const EVENT_MAX = 897 * 1024;
+// (an event's JSON is at most 897 KiB: one 896 KiB message and its envelope;
+// its SSE framing, "id: <seq>\ndata: ", at most 64 bytes more)
+export const EVENT_DATA_MAX = 897 * 1024;
+export const EVENT_FRAME_MAX = 64;
+export const EVENT_RAW_MAX = EVENT_DATA_MAX + EVENT_FRAME_MAX;
 // (request bodies: a run's code is at most 1 MiB per cell, a file chunk is
 // 512 KiB raw in base64, anything else is small)
 export const BODY_MAX = { run: 2.25 * 1024 * 1024, put: 768 * 1024, other: 64 * 1024 };
-// (a response body read as JSON: lists are paginated within 256 KiB; a file
-// chunk's answer is the largest, under 1 MiB)
+// (a JSON answer: lists are paginated within 256 KiB; a file chunk's answer is the largest)
 export const RESPONSE_MAX = 1024 * 1024;
 
 const enc = new TextEncoder();
@@ -41,7 +55,14 @@ export async function jwkThumbprint(jwk) {
   return b64url(await sha256(JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y })));
 }
 
-/** An error from the gateway: `status` (HTTP), `code` (its typed error), `retryAfter` (seconds, if given). */
+/** Never sent: no effect anywhere. */
+export class NotSentError extends Error {
+  constructor(message, { aborted = false } = {}) {
+    super(message);
+    this.aborted = aborted;
+  }
+}
+/** The gateway's typed refusal: `status` (HTTP), `code` (its error), `retryAfter` (seconds, if given). */
 export class GatewayError extends Error {
   constructor(status, code, message, retryAfter = null, body = null) {
     super(message || code || `HTTP ${status}`);
@@ -51,33 +72,73 @@ export class GatewayError extends Error {
     this.body = body;
   }
 }
-
-/** Why an event stream ended early: `tooLarge` if an event was over EVENT_MAX. */
+/** Sent, without a valid answer: it may have taken effect. */
+export class AmbiguousError extends Error {
+  constructor(message, { aborted = false, tooLarge = false, status = null } = {}) {
+    super(message);
+    this.aborted = aborted;
+    this.tooLarge = tooLarge;
+    this.status = status;
+  }
+}
+/** Why an event stream ended early: `tooLarge` if an event was over its cap, `aborted` if asked to. */
 export class StreamError extends Error {
-  constructor(message, { tooLarge = false } = {}) {
+  constructor(message, { tooLarge = false, aborted = false } = {}) {
     super(message);
     this.tooLarge = tooLarge;
+    this.aborted = aborted;
   }
+}
+
+const notSentIfAborted = (signal) => {
+  if (signal?.aborted) throw new NotSentError("aborted before it was sent", { aborted: true });
+};
+
+/** The gateway's base URL, checked: absolute https:, no user info, query or fragment. */
+export function checkBase(base) {
+  let u;
+  try {
+    u = new URL(String(base));
+  } catch {
+    throw new TypeError("the compute gateway's address is not a URL");
+  }
+  if (u.protocol !== "https:") throw new TypeError("the compute gateway must be reached over https");
+  if (u.username || u.password) throw new TypeError("the compute gateway's address must not contain credentials");
+  if (u.search || u.hash) throw new TypeError("the compute gateway's address must not have a query or fragment");
+  return u.origin + u.pathname.replace(/\/+$/, "");
+}
+
+// (a request path under the base: plain segments only, never "..", "//" or a backslash)
+const PATH_RE = /^(\/[A-Za-z0-9._~%-]+)+$/;
+function checkPath(path) {
+  const p = String(path);
+  if (!PATH_RE.test(p) || p.split("/").some((s) => s === "." || s === ".." || /%2f|%5c|%2e/i.test(s))) {
+    throw new NotSentError(`not a gateway path: ${p.slice(0, 80)}`);
+  }
+  return p;
 }
 
 export class RemoteClient {
   /**
    * @param {object} o
-   * @param {string} o.base the gateway's base URL (its configured origin and /api/compute/v1)
+   * @param {string} o.base the gateway's base URL: https:, its configured origin and /api/compute/v1
    * @param {() => string | Promise<string>} o.token the current access token
    * @param {typeof fetch} [o.fetch] (tests: a fake gateway)
-   * @param {CryptoKeyPair} [o.keys] (default: a new non-extractable P-256 pair)
+   * @param {CryptoKeyPair} [o.keys] (default, and the only sound choice: a new non-extractable
+   *   P-256 pair; a supplied pair whose private key is extractable is refused)
    */
   static async create({ base, token, fetch: f, keys }) {
+    const checked = checkBase(base);
+    if (keys && keys.privateKey?.extractable !== false) throw new TypeError("the DPoP private key must not be extractable");
     const pair = keys ?? (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]));
     // (a public key is always exportable; the private key never is)
     const full = await crypto.subtle.exportKey("jwk", pair.publicKey);
     const jwk = { kty: full.kty, crv: full.crv, x: full.x, y: full.y };
-    return new RemoteClient({ base, token, fetch: f, privateKey: pair.privateKey, jwk, jkt: await jwkThumbprint(jwk) });
+    return new RemoteClient({ base: checked, token, fetch: f, privateKey: pair.privateKey, jwk, jkt: await jwkThumbprint(jwk) });
   }
 
   constructor({ base, token, fetch: f, privateKey, jwk, jkt }) {
-    this.base = String(base).replace(/\/+$/, "");
+    this.base = checkBase(base);
     this.token = token;
     this.fetch = f ?? ((...a) => globalThis.fetch(...a));
     this.privateKey = privateKey;
@@ -105,122 +166,207 @@ export class RemoteClient {
 
   // (the cap on a request body: by the endpoint's kind)
   static bodyCap(method, path) {
-    if (method === "POST" && /\/runs$/.test(path)) return BODY_MAX.run;
-    if (method === "PUT" && /\/files\//.test(path)) return BODY_MAX.put;
+    if (method === "POST" && /^\/bindings\/[^/]+\/runs$/.test(path)) return BODY_MAX.run;
+    if (method === "PUT" && /^\/bindings\/[^/]+\/files\/[^/]+$/.test(path)) return BODY_MAX.put;
     return BODY_MAX.other;
   }
 
-  // One request with its proof; a 401 (or a /token 400) asking for a fresh
-  // nonce is retried once with the nonce it gave; a second refusal is an error.
-  async send(method, path, body, { accept = "application/json" } = {}) {
-    const url = this.base + path;
+  // One request with its proof; a 401 asking for a fresh nonce is retried
+  // once with the nonce it gave.  Resolves to the Response; throws
+  // NotSentError before anything was sent, AmbiguousError after.
+  async send(method, path, body, { accept = "application/json", signal, query = "" } = {}) {
+    const p = checkPath(path);
+    const url = this.base + p + query;
     const text = body === undefined ? undefined : JSON.stringify(body);
-    if (text !== undefined && enc.encode(text).length > RemoteClient.bodyCap(method, path)) {
-      throw new GatewayError(413, "too-large", "this request is over its size limit, so it was not sent");
+    if (text !== undefined && enc.encode(text).length > RemoteClient.bodyCap(method, p)) {
+      throw new NotSentError("this request is over its size limit, so it was not sent");
     }
+    notSentIfAborted(signal);
     const accessToken = await this.token();
     for (let attempt = 0; ; attempt++) {
-      const headers = { Authorization: `DPoP ${accessToken}`, DPoP: await this.proof(method, url, accessToken), Accept: accept };
+      notSentIfAborted(signal);
+      const proof = await this.proof(method, url, accessToken);
+      notSentIfAborted(signal);
+      const headers = { Authorization: `DPoP ${accessToken}`, DPoP: proof, Accept: accept };
       if (text !== undefined) headers["Content-Type"] = "application/json";
-      const res = await this.fetch(url, { method, headers, ...(text !== undefined ? { body: text } : {}) });
+      let res;
+      try {
+        res = await this.fetch(url, { method, headers, redirect: "error", credentials: "omit", cache: "no-store", signal, ...(text !== undefined ? { body: text } : {}) });
+      } catch (e) {
+        throw new AmbiguousError(signal?.aborted ? "aborted after it was sent" : `the request failed: ${String(e?.message ?? e).slice(0, 200)}`, { aborted: !!signal?.aborted });
+      }
       const fresh = res.headers.get("DPoP-Nonce");
       if (fresh) this.nonce = fresh;
       const wantsNonce = res.status === 401 && /use_dpop_nonce/.test(res.headers.get("WWW-Authenticate") ?? "");
+      // (a nonce challenge is a refusal before any effect: retried once)
       if (wantsNonce && attempt === 0 && fresh) {
-        await res.body?.cancel?.();
+        await res.body?.cancel?.().catch?.(() => {});
         continue;
       }
       return res;
     }
   }
 
-  /** A JSON request; resolves to the parsed answer, or throws a GatewayError. */
-  async request(method, path, body) {
-    const res = await this.send(method, path, body);
-    const data = await readJson(res);
-    if (res.ok) return data;
-    const ra = Number(res.headers.get("Retry-After"));
-    throw new GatewayError(res.status, data?.error ?? null, data?.message ?? null, Number.isFinite(ra) && ra >= 0 ? ra : null, data);
+  /**
+   * A JSON request: resolves to the parsed object.  Throws NotSentError,
+   * GatewayError (a non-2xx answer with a typed {error}), or AmbiguousError
+   * (no valid answer: a 2xx that isn't a JSON object, an untyped error, an
+   * answer over RESPONSE_MAX, a broken or aborted read).
+   */
+  async request(method, path, body, { signal } = {}) {
+    const res = await this.send(method, path, body, { signal });
+    let data;
+    try {
+      data = await readJson(res, signal);
+    } catch (e) {
+      throw new AmbiguousError(e?.message ?? "the answer could not be read", { aborted: !!signal?.aborted, tooLarge: !!e?.tooLarge, status: res.status });
+    }
+    const isObject = data && typeof data === "object" && !Array.isArray(data);
+    if (res.ok) {
+      if (!isObject) throw new AmbiguousError("the gateway's answer was not a JSON object", { status: res.status });
+      return data;
+    }
+    if (isObject && typeof data.error === "string") {
+      const ra = Number(res.headers.get("Retry-After"));
+      throw new GatewayError(res.status, data.error, typeof data.message === "string" ? data.message : null, Number.isFinite(ra) && ra >= 0 ? ra : null, data);
+    }
+    throw new AmbiguousError(`the gateway answered ${res.status} without a typed error`, { status: res.status });
   }
 
   /**
-   * A run's events after `after` (their seq numbers), as they arrive:
-   * {seq, type, ...}.  Throws StreamError if the stream breaks or an event is
-   * over EVENT_MAX (never parsed), GatewayError if it is refused.
-   * `signal` aborts it.
+   * A run's events after `after`, as they arrive: {seq, type, ...}.  Throws
+   * StreamError if the stream breaks, is aborted, or an event is over its
+   * cap (refused before it is decoded); GatewayError if it is refused.
    */
   async *events(path, after, signal) {
-    const res = await this.send("GET", `${path}?after=${Number(after) | 0}`, undefined, { accept: "text/event-stream" });
-    if (!res.ok) {
-      const data = await readJson(res).catch(() => null);
-      throw new GatewayError(res.status, data?.error ?? null, data?.message ?? null, null, data);
-    }
-    const reader = res.body.getReader();
-    const onAbort = () => reader.cancel().catch(() => {});
+    // (the abort is watched from the first moment: one that happens while
+    // waiting for the response's headers cancels that wait too)
+    if (signal?.aborted) throw new StreamError("aborted", { aborted: true });
+    let reader = null;
+    const onAbort = () => reader?.cancel().catch(() => {});
     signal?.addEventListener?.("abort", onAbort);
-    let buf = new Uint8Array(0);
     try {
+      let res;
+      try {
+        res = await this.send("GET", `${path}/events`, undefined, { accept: "text/event-stream", signal, query: `?after=${Number(after) | 0}` });
+      } catch (e) {
+        if (signal?.aborted) throw new StreamError("aborted", { aborted: true });
+        throw new StreamError(`the event stream could not be opened: ${String(e?.message ?? e).slice(0, 200)}`);
+      }
+      if (!res.ok) {
+        let data = null;
+        try { data = await readJson(res, signal); } catch {}
+        if (data && typeof data.error === "string") throw new GatewayError(res.status, data.error, null, null, data);
+        throw new StreamError(`the event stream was refused (${res.status})`);
+      }
+      reader = res.body.getReader();
+      if (signal?.aborted) throw new StreamError("aborted", { aborted: true });
+      let buf = new Uint8Array(0);
       for (;;) {
         // every complete event in the buffer, each checked for size before it is decoded
         for (;;) {
           const end = eventEnd(buf);
-          if (end < 0) break;
+          if (end === null) break;
           const raw = buf.subarray(0, end.at);
           buf = buf.slice(end.at + end.len);
-          if (raw.length > EVENT_MAX) throw new StreamError("an event was over the size limit, so it was refused", { tooLarge: true });
-          const ev = parseEvent(new TextDecoder().decode(raw));
+          if (raw.length > EVENT_RAW_MAX) throw new StreamError("an event was over the size limit, so it was refused", { tooLarge: true });
+          const ev = parseEvent(raw);
           if (ev) yield ev;
+          if (signal?.aborted) throw new StreamError("aborted", { aborted: true });
         }
-        // (an event still arriving that is already too big: refused without waiting for its end)
-        if (buf.length > EVENT_MAX + 64) throw new StreamError("an event was over the size limit, so it was refused", { tooLarge: true });
-        const { done, value } = await reader.read();
-        if (done) return;
-        const next = new Uint8Array(buf.length + value.length);
+        // (an event still arriving: refused as soon as it is past the cap, not counting
+        // the start of its separator, without waiting for its end)
+        if (pendingLength(buf) > EVENT_RAW_MAX) throw new StreamError("an event was over the size limit, so it was refused", { tooLarge: true });
+        let r;
+        try {
+          r = await reader.read();
+        } catch (e) {
+          throw new StreamError(signal?.aborted ? "aborted" : `the event stream broke: ${String(e?.message ?? e).slice(0, 200)}`, { aborted: !!signal?.aborted });
+        }
+        if (signal?.aborted) throw new StreamError("aborted", { aborted: true });
+        if (r.done) return;
+        const next = new Uint8Array(buf.length + r.value.length);
         next.set(buf);
-        next.set(value, buf.length);
+        next.set(r.value, buf.length);
         buf = next;
       }
-    } catch (e) {
-      if (e instanceof StreamError || e instanceof GatewayError) throw e;
-      throw new StreamError(signal?.aborted ? "aborted" : `the event stream broke: ${String(e?.message ?? e).slice(0, 200)}`);
     } finally {
       signal?.removeEventListener?.("abort", onAbort);
-      reader.cancel().catch(() => {});
+      reader?.cancel().catch(() => {});
     }
   }
 }
 
-// (a JSON body, refused unread past RESPONSE_MAX)
-async function readJson(res) {
+/**
+ * A JSON body, read as a stream and refused at the first byte past
+ * RESPONSE_MAX, before it is decoded or parsed (a declared length past it is
+ * refused unread).  Empty: null.
+ */
+export async function readJson(res, signal) {
+  const tooLarge = () => Object.assign(new Error("the gateway's answer was over its size limit"), { tooLarge: true });
   const len = Number(res.headers.get("Content-Length"));
   if (Number.isFinite(len) && len > RESPONSE_MAX) {
-    await res.body?.cancel?.();
-    throw new GatewayError(res.status, "too-large", "the gateway's answer was over its size limit");
+    await res.body?.cancel?.().catch?.(() => {});
+    throw tooLarge();
   }
-  const text = await res.text();
-  if (enc.encode(text).length > RESPONSE_MAX) throw new GatewayError(res.status, "too-large", "the gateway's answer was over its size limit");
-  if (!text) return null;
+  if (!res.body) return null;
+  const reader = res.body.getReader();
+  const onAbort = () => reader.cancel().catch(() => {});
+  signal?.addEventListener?.("abort", onAbort);
+  const chunks = [];
+  let n = 0;
   try {
-    return JSON.parse(text);
+    for (;;) {
+      if (signal?.aborted) throw new Error("aborted");
+      const { done, value } = await reader.read();
+      if (done) break;
+      n += value.length;
+      if (n > RESPONSE_MAX) throw tooLarge();
+      chunks.push(value);
+    }
+  } finally {
+    signal?.removeEventListener?.("abort", onAbort);
+    reader.cancel().catch(() => {});
+  }
+  if (!n) return null;
+  const all = new Uint8Array(n);
+  let at = 0;
+  for (const c of chunks) { all.set(c, at); at += c.length; }
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(all));
   } catch {
-    return null;
+    return undefined; // (unreadable: not an object, so never a valid answer)
   }
 }
 
-// The end of the first event in `buf`: a blank line, "\n\n" or "\r\n\r\n"
-// (the gateway sends "\n"); {at, len}, or -1.
+// The end of the first event in `buf`: a blank line, "\n\n" or "\n\r\n"
+// (the gateway sends "\n"); {at, len}, or null.
 function eventEnd(buf) {
   for (let i = 0; i + 1 < buf.length; i++) {
     if (buf[i] !== 10) continue;
     if (buf[i + 1] === 10) return { at: i, len: 2 };
-    if (buf[i + 1] === 13 && buf[i + 2] === 10) return { at: i, len: 3 };
+    if (buf[i + 1] === 13 && i + 2 < buf.length && buf[i + 2] === 10) return { at: i, len: 3 };
   }
-  return -1;
+  return null;
+}
+// The length of an incomplete event, without a trailing partial separator ("\n", "\n\r").
+function pendingLength(buf) {
+  let n = buf.length;
+  if (n && buf[n - 1] === 13) n--;
+  if (n && buf[n - 1] === 10) n--;
+  return n;
 }
 
-// One server-sent event: its data lines joined, parsed as JSON; its id is
-// the run's event seq.  Comments (": keep-alive") and empty events: null.
-function parseEvent(text) {
+// One server-sent event: its data lines joined (at most EVENT_DATA_MAX
+// bytes, checked before parsing), parsed as JSON; its id is the run's event
+// seq.  Comments (": keep-alive") and empty events: null.
+function parseEvent(raw) {
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(raw);
+  } catch {
+    throw new StreamError("an event was not valid UTF-8");
+  }
   const data = [];
   let id = null;
   for (const line0 of text.split("\n")) {
@@ -233,13 +379,15 @@ function parseEvent(text) {
     else if (field === "id") id = value;
   }
   if (!data.length) return null;
+  const json = data.join("\n");
+  if (enc.encode(json).length > EVENT_DATA_MAX) throw new StreamError("an event was over the size limit, so it was refused", { tooLarge: true });
   let ev;
   try {
-    ev = JSON.parse(data.join("\n"));
+    ev = JSON.parse(json);
   } catch {
     throw new StreamError("an event was not valid JSON");
   }
   if (!ev || typeof ev !== "object" || Array.isArray(ev)) throw new StreamError("an event was not an object");
-  if (ev.seq === undefined && id !== null) ev.seq = Number(id);
+  if (ev.seq === undefined && id !== null && /^\d+$/.test(id)) ev.seq = Number(id);
   return ev;
 }

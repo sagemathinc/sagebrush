@@ -1,18 +1,25 @@
 // RemoteKernel (remote-kernel.js) and its client (remote-client.js) against
 // an in-memory fake of CoCalc's compute gateway (remote-fake.js): DPoP
-// proofs and nonces, one terminal per request, the plan's prep-result table
-// and the gateway's outcomes, busy, a lost reply resent once, broken and
-// oversized event streams, interrupt, restart, the restart fence in each
-// order (a restart never lets an old run's code into the new kernel), stale
-// callbacks, takeover, quarantine and a moved binding.
+// proofs and nonces; https only, no redirects; size caps at their exact
+// boundaries; one terminal per request; the plan's prep-result table and the
+// gateway's outcomes; busy; lost, oversized and unreadable acknowledgements;
+// broken, oversized, duplicated and gapped event streams; interrupt;
+// restart; the restart fence in each order; late answers of every lifecycle
+// operation (they never change what came after them); aborts while waiting
+// for headers, for a body that never comes, and while polling; takeover,
+// quarantine and a moved binding.  Every wait is bounded.
 //   bun web/notebook/test-remote-kernel.mjs
-import { RemoteClient, GatewayError, EVENT_MAX } from "./remote-client.js";
+import { RemoteClient, GatewayError, NotSentError, AmbiguousError, StreamError, EVENT_DATA_MAX, EVENT_RAW_MAX, RESPONSE_MAX, BODY_MAX } from "./remote-client.js";
 import { RemoteKernel, NOTES, outcomeNote } from "./remote-kernel.js";
 import { FakeGateway } from "./remote-fake.js";
+
+// (the whole file is bounded: a hang is a failure, never a stuck CI job)
+setTimeout(() => { console.log("FAIL the tests did not finish within 120 s"); process.exit(1); }, 120_000).unref?.();
 
 let fails = 0;
 const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails++; };
 const fast = (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 5)));
+const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 async function until(cond, ms = 3000) {
   const t0 = Date.now();
   while (!cond()) {
@@ -21,19 +28,30 @@ async function until(cond, ms = 3000) {
   }
   return true;
 }
+const within = (p, ms = 3000) => Promise.race([p.then((v) => ({ v }), (e) => ({ e })), new Promise((r) => setTimeout(() => r({ timeout: true }), ms))]);
+const enc = new TextEncoder();
+const streamOf = (chunks, { close = true } = {}) => new ReadableStream({
+  start(c) { for (const x of chunks) c.enqueue(typeof x === "string" ? enc.encode(x) : x); if (close) c.close(); },
+});
+const jsonOfSize = (n) => JSON.stringify({ p: "x".repeat(n - 8) }); // ({"p":""} is 8 bytes)
 
+async function makeClient(fake, extra = {}) {
+  let token = null;
+  const client = await RemoteClient.create({ base: fake.base, token: () => token, fetch: fake.fetch, ...extra });
+  token = fake.issueToken(client.jkt);
+  return client;
+}
 async function setup() {
   const fake = new FakeGateway();
-  let token = null;
-  const client = await RemoteClient.create({ base: fake.base, token: () => token, fetch: fake.fetch });
-  token = fake.issueToken(client.jkt);
+  const client = await makeClient(fake);
   const kernel = new RemoteKernel({ client, notebook: "fid-1", clientId: "c1", sleep: fast });
-  const restarts = { n: 0 };
+  const restarts = { n: 0 }, readies = { n: 0 };
   kernel.on("restart", () => restarts.n++);
+  kernel.on("ready", () => readies.n++);
   const statuses = [];
   kernel.on("status", (t) => statuses.push(t));
   check(await kernel.start(), "the kernel binds");
-  return { fake, client, kernel, restarts, statuses };
+  return { fake, client, kernel, restarts, readies, statuses };
 }
 
 const sinks = [];
@@ -57,12 +75,14 @@ function sink() {
 async function run(kernel, code, opts = {}) {
   const s = sink();
   kernel.execute(code, { mode: "python", ...opts }, s);
-  const t = await Promise.race([s.ended.then(() => true), new Promise((r) => setTimeout(() => r(false), 5000))]);
-  if (!t) check(false, `a terminal for ${JSON.stringify(code).slice(0, 40)} within 5 s`);
+  const t = await within(s.ended, 5000);
+  if (t.timeout) check(false, `a terminal for ${JSON.stringify(code).slice(0, 40)} within 5 s`);
   return s;
 }
 const text = (s) => s.outs.map((o) => o[0]).join("");
-const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/runs$/.test(p)).length;
+const posted = (fake, re) => fake.calls.filter(([m, p]) => m === "POST" && re.test(p)).length;
+const runsPosted = (fake) => posted(fake, /\/runs$/);
+const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
 
 // ---- DPoP: the proofs, the key, the nonce
 {
@@ -88,6 +108,81 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
   fake.faults.staleNonceAlways = false;
 }
 
+// ---- P1A-A3-2: https only, no credentials in the address, no redirects, no escaping the base
+{
+  const fake = new FakeGateway();
+  let tokens = 0;
+  const token = () => { tokens++; return "t"; };
+  for (const [base, what] of [["http://cocalc.test/api/compute/v1", "an http base"], ["https://u:p@cocalc.test/api/compute/v1", "a base with credentials"], ["https://cocalc.test/api/compute/v1?x=1", "a base with a query"]]) {
+    let err = null;
+    try { await RemoteClient.create({ base, token, fetch: fake.fetch }); } catch (e) { err = e; }
+    check(err instanceof TypeError && fake.fetches.length === 0 && tokens === 0, `P1A-A3-2 ${what}: refused before any token, proof or request`);
+  }
+  const extractable = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  let err = null;
+  try { await RemoteClient.create({ base: fake.base, token, fetch: fake.fetch, keys: extractable }); } catch (e) { err = e; }
+  check(err instanceof TypeError, "P1A-A3-2 carry: a supplied extractable private key is refused");
+  const client = await makeClient(fake);
+  fake.faults.redirectTo = "http://evil.test/steal";
+  err = null;
+  try { await client.request("GET", "/bindings/b1/runs/x"); } catch (e) { err = e; }
+  check(err instanceof AmbiguousError && fake.insecure.length === 0, "P1A-A3-2 a redirect (https to http): refused; no credential-bearing request follows it");
+  const n = fake.fetches.length;
+  for (const bad of ["/bindings/../x", "/bindings//x", "/bindings/%2e%2e/x", "bindings/x", "/bindings/a\\b"]) {
+    err = null;
+    try { await client.request("GET", bad); } catch (e) { err = e; }
+    check(err instanceof NotSentError && fake.fetches.length === n, `P1A-A3-2 a path escaping the base (${JSON.stringify(bad)}): not sent`);
+  }
+  const ok = await client.request("POST", "/bindings", { notebook: "n" });
+  check(ok.binding === "b1", "P1A-A3-2 the https fake: the positive case works");
+}
+
+// ---- P1A-D2-1, P1A-D2-2: the caps, at the limit and one past it
+{
+  const fake = new FakeGateway();
+  const client = await makeClient(fake);
+  // responses: read as a stream, refused at the first byte past the cap, never trusting a length
+  fake.raw("GET", /^\/caps\/exact$/, () => new Response(streamOf([jsonOfSize(RESPONSE_MAX)]), { status: 200 }));
+  const r1 = await client.request("GET", "/caps/exact");
+  check(r1?.p?.length === RESPONSE_MAX - 8, `P1A-D2-1 a response of exactly ${RESPONSE_MAX} bytes, no Content-Length: read`);
+  fake.raw("GET", /^\/caps\/over$/, () => new Response(streamOf([jsonOfSize(RESPONSE_MAX + 1)]), { status: 200 }));
+  let err = null;
+  try { await client.request("GET", "/caps/over"); } catch (e) { err = e; }
+  check(err instanceof AmbiguousError && err.tooLarge, "P1A-D2-1 one byte past it: refused");
+  fake.raw("GET", /^\/caps\/endless$/, () => new Response(streamOf(["{\"p\":\"", "x".repeat(RESPONSE_MAX)], { close: false }), { status: 200 }));
+  const t = await within(client.request("GET", "/caps/endless"), 3000);
+  check(!t.timeout && t.e instanceof AmbiguousError && t.e.tooLarge, "P1A-D2-1 a body past the cap that never ends: refused at the cap, without waiting for its end");
+  // events: the JSON at most EVENT_DATA_MAX, the raw event at most EVENT_RAW_MAX, an unfinished one refused at once
+  const evOfSize = (n) => {
+    const base = JSON.stringify({ seq: 1, type: "stream", name: "stdout", text: "" });
+    return JSON.stringify({ seq: 1, type: "stream", name: "stdout", text: "x".repeat(n - base.length) });
+  };
+  const events = async (path) => { const out = []; for await (const ev of client.events(path, 0)) out.push(ev); return out; };
+  fake.raw("GET", /^\/caps\/ev1\/events$/, () => new Response(streamOf([`data: ${evOfSize(EVENT_DATA_MAX)}\n\n`]), { status: 200 }));
+  const e1 = await within(events("/caps/ev1"));
+  check(e1.v?.length === 1, `P1A-D2-2 an event of exactly ${EVENT_DATA_MAX} bytes of JSON: accepted`);
+  fake.raw("GET", /^\/caps\/ev2\/events$/, () => new Response(streamOf([`data: ${evOfSize(EVENT_DATA_MAX + 1)}\n\n`]), { status: 200 }));
+  const e2 = await within(events("/caps/ev2"));
+  check(e2.e instanceof StreamError && e2.e.tooLarge, "P1A-D2-2 one byte past it: refused before parsing");
+  fake.raw("GET", /^\/caps\/ev3\/events$/, () => new Response(streamOf(["data: ", "x".repeat(EVENT_RAW_MAX - 6 + 1)], { close: false }), { status: 200 }));
+  const e3 = await within(events("/caps/ev3"));
+  check(!e3.timeout && e3.e instanceof StreamError && e3.e.tooLarge, "P1A-D2-2 an unfinished event one byte past the raw cap: refused at once, without waiting");
+  fake.raw("GET", /^\/caps\/ev4\/events$/, () => new Response(streamOf(["data: ", "x".repeat(EVENT_RAW_MAX - 6), "\n"]), { status: 200 }));
+  const e4 = await within(events("/caps/ev4"));
+  check(!e4.timeout && !e4.e, "P1A-D2-2 an unfinished event of exactly the raw cap, its separator begun: not refused");
+  // request bodies: each class at its cap is sent, one byte past it is not
+  for (const [method, path, cap, what] of [["POST", "/bindings/bx/runs", BODY_MAX.run, "a run"], ["PUT", "/bindings/bx/files/f", BODY_MAX.put, "a file chunk"], ["POST", "/bindings", BODY_MAX.other, "anything else"]]) {
+    const n0 = fake.fetches.length;
+    let e = null;
+    try { await client.request(method, path, JSON.parse(jsonOfSize(cap))); } catch (x) { e = x; }
+    check(!(e instanceof NotSentError) && fake.fetches.length > n0, `P1A-D2 ${what} body of exactly ${cap} bytes: sent`);
+    const n1 = fake.fetches.length;
+    e = null;
+    try { await client.request(method, path, JSON.parse(jsonOfSize(cap + 1))); } catch (x) { e = x; }
+    check(e instanceof NotSentError && fake.fetches.length === n1, `P1A-D2 ${what} body one byte past it: not sent`);
+  }
+}
+
 // ---- the plan's §2.3 table: a prep result that is not ok never sends the user's code
 {
   const { fake, kernel } = await setup();
@@ -96,7 +191,6 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
     ["setup-failed", /^\nNot run: the remote kernel's setup failed/],
     ["helper-error", /^\nNot run: the remote kernel's setup failed \(helper error: NameError\)/],
     ["malformed", /^\nNot run: the remote kernel's setup failed \(no valid response from the kernel helper\)/],
-    ["interrupted", new RegExp("^" + NOTES.beforeCode.replace(/[.()]/g, "\\$&") + "$")],
   ];
   for (const [prep, want] of rows) {
     fake.prep = () => prep;
@@ -104,6 +198,9 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
     const s = await run(kernel, `x_${prep}`);
     check(s.terminal?.[0] === "stopped" && want.test(s.terminal[1]) && fake.executions.length === n, `prep ${prep}: ${JSON.stringify(s.terminal?.[1]).slice(0, 70)}; the user's code never sent`);
   }
+  fake.prep = () => "interrupted";
+  const si = await run(kernel, "x_interrupted");
+  check(si.terminal?.[1] === NOTES.beforeCode, "prep interrupted: not run, interrupted before the code");
   for (const prep of ["missing-helper", "wrong-incarnation"]) {
     fake.prep = () => prep;
     const g = kernel.generation, n = fake.executions.length;
@@ -112,6 +209,15 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
     check(s.terminal?.[1] === NOTES.restartedBeforeRun && fake.executions.length === n, `prep ${prep}: restarted before the run, the user's code never sent`);
     check(await until(() => kernel.generation === g + 1), `prep ${prep}: one recovery (a restart, a new generation)`);
   }
+  // (P1A-C1) a recovery while another run is queued: that run waits for the recovery, and is told the kernel restarted
+  fake.prep = () => "missing-helper";
+  const g = kernel.generation;
+  const a = sink(), b = sink();
+  kernel.execute("needs-recovery", { mode: "python" }, a);
+  kernel.execute("queued-behind", { mode: "python" }, b);
+  await within(Promise.all([a.ended, b.ended]));
+  fake.prep = () => "ok";
+  check(await until(() => kernel.generation === g + 1) && b.terminal?.[0] === "stopped" && !fake.executions.some((x) => x.code === "queued-behind"), "P1A-C1 a run queued behind a recovery: never sent to the old kernel, told the kernel restarted");
   const s = await run(kernel, "after");
   check(s.terminal?.[0] === "done", "after the recoveries, runs work again");
 }
@@ -132,12 +238,12 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
   fake.kernel = async () => ({ events: [], outcome: { status: "unknown" } });
   const s = await run(kernel, "u");
   check(s.terminal?.[1] === NOTES.unknown && kernel.needsFence, "an unknown outcome: said so, and the binding is fenced before more work");
-  fake.kernel = async (code) => ({ events: [], outcome: { status: "ok", ms: 1 } });
+  fake.kernel = async () => ({ events: [], outcome: { status: "ok", ms: 1 } });
   const s2 = await run(kernel, "v");
-  check(s2.terminal?.[0] === "done" && fake.calls.some(([m, p]) => m === "POST" && p.endsWith("/takeover")), "the next run takes the binding over first, then runs");
+  check(s2.terminal?.[0] === "done" && posted(fake, /\/takeover$/) === 1, "the next run takes the binding over first, then runs");
 }
 
-// ---- busy, a lost reply, a broken stream, an oversized event, the envelope MIME, the body cap
+// ---- busy; lost, oversized and unreadable acknowledgements (P1A-C3); streams; envelopes; completion
 {
   const { fake, kernel } = await setup();
   const b = fake.bindings.get(kernel.binding);
@@ -148,29 +254,58 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
   b.busy = null;
 
   fake.faults.loseReply = 1;
-  const e0 = fake.executions.length, r0 = runsPosted(fake);
+  let e0 = fake.executions.length, r0 = runsPosted(fake);
   const s2 = await run(kernel, "lost");
   check(s2.terminal?.[0] === "done" && fake.executions.length === e0 + 1 && runsPosted(fake) === r0 + 2, "a lost reply: resent once, identically; it runs exactly once");
 
+  fake.faults.oversizeAck = 1;
+  e0 = fake.executions.length; r0 = runsPosted(fake);
+  const s3 = await run(kernel, "oversized-ack");
+  check(s3.terminal?.[0] === "done" && fake.executions.length === e0 + 1 && runsPosted(fake) === r0 + 2 && !/Not run/.test(text(s3)), "P1A-C3 an oversized acknowledgement of an admitted run: never 'Not run'; reconciled by the identical resend; it runs exactly once");
+
+  fake.intercept("POST", /\/runs$/, { skip: false, respond: { status: 202, body: "not an object" } });
+  e0 = fake.executions.length;
+  const s4 = await run(kernel, "malformed-ack");
+  check(s4.terminal?.[0] === "done" && fake.executions.length === e0 + 1, "P1A-C3 an unreadable acknowledgement: reconciled, runs exactly once");
+
+  fake.faults.oversizeAck = 2;
+  e0 = fake.executions.length;
+  const s5 = await run(kernel, "twice-ambiguous");
+  check(s5.terminal?.[1] === NOTES.unknown && kernel.needsFence && fake.executions.length === e0 + 1, "P1A-C3 ambiguous twice: unknown (not 'Not run'), and fenced before more work");
+  await until(() => !fake.bindings.get(kernel.binding).busy);
+  const s6 = await run(kernel, "after-unknown");
+  check(s6.terminal?.[0] === "done" && !kernel.needsFence, "the next run fences first, then runs");
+
+  const e1 = fake.executions.length;
+  const s7 = await run(kernel, "x".repeat(2.5 * 1024 * 1024));
+  check(s7.terminal?.[0] === "stopped" && /^\nNot run: this request is over its size limit/.test(s7.terminal[1]) && fake.executions.length === e1 && !kernel.needsFence, "P1A-C3 negative control: a body over its cap is refused before sending: 'Not run', no fence");
+
   fake.kernel = async () => ({ events: [1, 2, 3].map((i) => ({ type: "stream", name: "stdout", text: `${i}\n` })), outcome: { status: "ok", ms: 1 } });
   fake.faults.breakStream = 2;
-  const s3 = await run(kernel, "broken");
-  check(s3.terminal?.[0] === "done" && text(s3) === "1\n2\n3\n", "a stream broken twice: resumed after the last event seen, every output exactly once");
+  const s8 = await run(kernel, "broken");
+  check(s8.terminal?.[0] === "done" && text(s8) === "1\n2\n3\n", "a stream broken twice: resumed after the last event seen, every output exactly once");
+
+  // (astra's carry) duplicates and a gap, checked by the client itself, not the fake
+  fake.kernel = async () => ({ events: [{ type: "stream", name: "stdout", text: "a\n" }, { type: "stream", name: "stdout", text: "b\n" }], outcome: { status: "ok", ms: 1 } });
+  fake.raw("GET", /\/events$/, () => new Response(streamOf([
+    'data: {"seq":1,"type":"start"}\n\n', 'data: {"seq":1,"type":"start"}\n\n',
+    'data: {"seq":2,"type":"stream","name":"stdout","text":"a\\n"}\n\n', 'data: {"seq":2,"type":"stream","name":"stdout","text":"a\\n"}\n\n',
+    'data: {"seq":4,"type":"terminal","outcome":{"status":"ok"}}\n\n',
+  ]), { status: 200 }));
+  const s9 = await run(kernel, "dupes");
+  check(s9.terminal?.[0] === "done" && text(s9) === "a\nb\n", "duplicated events are skipped, and a gap reconnects from the last one seen: every output once, in order");
 
   fake.faults.bigEvent = true;
-  const s4 = await run(kernel, "big");
-  check(s4.terminal?.[0] === "done" && s4.outs.some(([t, err]) => t === NOTES.tooLarge && err), `an event over ${EVENT_MAX} bytes: refused unparsed, said so, and the outcome is still reported`);
+  fake.kernel = async () => ({ events: [{ type: "stream", name: "stdout", text: "1\n" }], outcome: { status: "ok", ms: 1 } });
+  const s10 = await run(kernel, "big");
+  check(s10.terminal?.[0] === "done" && s10.outs.some(([t, err]) => t === NOTES.tooLarge && err), "an event over its cap: refused unparsed, said so, and the outcome is still reported");
 
   fake.kernel = async () => ({ events: [
     { type: "display", data: { "application/vnd.sagebrush.envelope.v1+json": { v: 1 } } },
     { type: "display", data: { "text/plain": "shown" } },
   ], outcome: { status: "ok", ms: 1 } });
-  const s5 = await run(kernel, "env");
-  check(s5.displays.length === 1 && s5.displays[0]["text/plain"] === "shown", "an envelope never reaches a cell; other displays do");
-
-  const e1 = fake.executions.length;
-  const s6 = await run(kernel, "x".repeat(2.5 * 1024 * 1024));
-  check(s6.terminal?.[0] === "stopped" && /over its size limit/.test(s6.terminal[1]) && fake.executions.length === e1, "a run over its body cap: not sent");
+  const s11 = await run(kernel, "env");
+  check(s11.displays.length === 1 && s11.displays[0]["text/plain"] === "shown", "an envelope never reaches a cell; other displays do");
 
   const c = await kernel.ask({ complete: "ab" }, "python", "fallback");
   check(c.matches?.[0] === "ab_x" && c.prefix === "ab", "completion");
@@ -180,13 +315,13 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
 // ---- interrupt: the running run is interrupted, the queued one skipped
 {
   const { fake, kernel } = await setup();
-  fake.kernel = (code, r) => new Promise(() => {}); // (runs until interrupted)
+  fake.kernel = () => new Promise(() => {}); // (runs until interrupted)
   const s1 = sink(), s2 = sink();
   kernel.execute("loop", { mode: "python" }, s1);
   kernel.execute("next", { mode: "python" }, s2);
   check(await until(() => fake.executions.length === 1), "the first run reaches the kernel");
   kernel.interrupt();
-  await s1.ended; await s2.ended;
+  await within(Promise.all([s1.ended, s2.ended]));
   check(s1.terminal?.[0] === "done" && s1.terminal[1].error && s1.terminal[1].interrupted, "interrupted: KeyboardInterrupt, an error, marked interrupted");
   check(s2.terminal?.[0] === "skipped" && fake.executions.length === 1, "the queued run: skipped, never sent");
 }
@@ -195,29 +330,31 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
 {
   const { fake, kernel, restarts } = await setup();
   // (d), and the old-user-first case: the code is still running when the kernel is killed
-  fake.kernel = (code, r) => new Promise(() => {});
+  fake.kernel = () => new Promise(() => {});
   const s = sink();
   kernel.execute("forever", { mode: "python" }, s);
   check(await until(() => fake.executions.length === 1), "(d) the user phase reaches the kernel, and keeps running");
+  const jobA = kernel.current;
   const g = kernel.generation;
-  kernel.restart();
-  await s.ended;
-  const old = fake.runs.get([...fake.runs.keys()].pop());
+  await kernel.restart();
+  await within(s.ended);
+  const old = lastRun(fake);
   check(s.terminal?.[1] === NOTES.stoppedRestart && old.outcome?.status === "stopped" && /restart/.test(old.outcome.reason), "(d) killed by the restart: stopped, kernel restarted");
-  check(await until(() => kernel.generation === g + 1 && restarts.n === 1), "a new generation, and the restart event");
-  // a late event for the old request changes nothing
+  check(kernel.generation === g + 1 && restarts.n === 1 && kernel.current === null, "a new generation, the restart event, and the old run released");
+  // (P1A-C1) the old run's late callbacks change nothing: no fence, no recovery, no output
   const outs = s.outs.length;
   fake.emitEvent(old, { type: "stream", name: "stdout", text: "late\n" });
-  await fast(20);
-  check(s.outs.length === outs && s.terminals === 1, "a late event of the old request: dropped");
-  fake.kernel = async (code) => ({ events: [], outcome: { status: "ok", ms: 1 } });
+  kernel.finish(jobA, { status: "unknown" });
+  kernel.finish(jobA, { status: "restarted-before-run", incarnation: 9 });
+  await tick(50);
+  check(s.outs.length === outs && s.terminals === 1 && !kernel.needsFence && kernel.generation === g + 1, "P1A-C1 an old request's late event, unknown outcome or restarted-before-run: dropped; no fence, no recovery");
+  fake.kernel = async () => ({ events: [], outcome: { status: "ok", ms: 1 } });
 
   // (K3) a run that finished before the kill keeps its done(ok)
   const s0 = await run(kernel, "quick");
-  const quick = fake.runs.get([...fake.runs.keys()].pop());
-  kernel.restart();
-  await until(() => kernel.generation === g + 2);
-  check(s0.terminal?.[0] === "done" && quick.outcome.status === "ok", "(K3) a done(ok) before the restart stays historical: never rewritten");
+  const quick = lastRun(fake);
+  await kernel.restart();
+  check(s0.terminal?.[0] === "done" && quick.outcome.status === "ok" && kernel.generation === g + 2, "(K3) a done(ok) before the restart stays historical: never rewritten");
 
   // (a) prep done, not yet validated; (b) validated, not yet allocated: fenced when the restart is admitted
   for (const point of ["after-prep", "before-user-alloc"]) {
@@ -225,12 +362,11 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
     const sp = sink();
     kernel.execute(`paused_${point}`, { mode: "python" }, sp);
     const r = await pz.reached;
-    const g0 = kernel.generation, n = fake.executions.length;
-    kernel.restart();
-    await until(() => kernel.generation === g0 + 1);
+    const n = fake.executions.length;
+    await kernel.restart();
     pz.release();
-    await sp.ended;
-    await fast(20);
+    await within(sp.ended);
+    await tick();
     check(r.outcome?.status === "stopped" && fake.executions.length === n && sp.terminal?.[1] === NOTES.stoppedRestart, `(${point === "after-prep" ? "a" : "b"}) paused at ${point}, then a restart: the run is fenced, its user code never runs`);
   }
 
@@ -243,8 +379,8 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
     const n = fake.executions.length;
     fake.bindings.get(kernel.binding).restartVersion++;
     pz.release();
-    await sp.ended;
-    check(r.outcome?.status === "stopped" && fake.executions.length === n, "the gateway's atomic allocation check, on its own: nothing is sent");
+    await within(sp.ended);
+    check(r.outcome?.status === "stopped" && fake.executions.length === n, "K2 the gateway's atomic allocation check, on its own: nothing is sent");
   }
 
   // (c) allocated, the RPC not yet delivered, then a restart commits: the receiver refuses it
@@ -253,9 +389,8 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
     const sp = sink();
     kernel.execute("in-transit", { mode: "python" }, sp);
     const r = await pz.reached;
-    const g0 = kernel.generation, n = fake.executions.length;
-    kernel.restart();
-    await until(() => kernel.generation === g0 + 1);
+    const n = fake.executions.length;
+    await kernel.restart();
     pz.release();
     await until(() => !!r.outcome);
     check(r.outcome?.status === "refused" && r.outcome.reason === "stale-incarnation" && fake.executions.length === n, "(c) delivered after the restart: refused as a stale incarnation, never runs in the new kernel");
@@ -271,8 +406,8 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
     const n = fake.executions.length;
     fake.bindings.get(kernel.binding).incarnation++;
     pz.release();
-    await sp.ended;
-    check(r.outcome?.reason === "stale-incarnation" && fake.executions.length === n && sp.terminal?.[1] === NOTES.notHanded, "the receiver's incarnation check, on its own: refused, never runs");
+    await within(sp.ended);
+    check(r.outcome?.reason === "stale-incarnation" && fake.executions.length === n && sp.terminal?.[1] === NOTES.notHanded, "K2 the receiver's incarnation check, on its own: refused, never runs");
   }
 
   // a refused restart changes nothing
@@ -280,11 +415,144 @@ const runsPosted = (fake) => fake.calls.filter(([m, p]) => m === "POST" && /\/ru
   const g2 = kernel.generation;
   const st = [];
   const off = kernel.on("status", (t) => st.push(t));
-  kernel.restart();
-  await until(() => st.some((t) => /restart failed/.test(t)));
+  await kernel.restart();
   off();
-  check(kernel.generation === g2 && st.some((t) => t.includes("access expired")), "a refused restart: the status says why, and the generation is unchanged");
+  check(kernel.generation === g2 && st.some((t) => /restart failed/.test(t) && t.includes("access expired")), "a refused restart: the status says why, and the generation is unchanged");
   fake.faults.restartRefused = null;
+
+  // (P1A-C1) a restart answer without an outcome is not success: checked with the gateway (nothing applied)
+  fake.intercept("POST", /\/restart$/, { respond: { status: 200, body: {} } });
+  const g3 = kernel.generation, t3 = posted(fake, /\/takeover$/);
+  await kernel.restart();
+  check(kernel.generation === g3 && posted(fake, /\/takeover$/) === t3 + 1 && !kernel.needsFence, "P1A-C1 a restart answer with no outcome: not taken as success; a takeover finds it didn't happen");
+  // (P1A-C1) applied, its answer lost: the takeover finds it, and the restart's effects follow
+  fake.intercept("POST", /\/restart$/, { lose: true });
+  const r4 = restarts.n;
+  await kernel.restart();
+  check(kernel.generation === g3 + 1 && restarts.n === r4 + 1, "P1A-C1 a restart applied with its answer lost: found by the takeover, a new generation");
+  // (P1A-C1) two restarts asked at once: one restart, never two answers applied out of order
+  const g5 = kernel.generation, n5 = posted(fake, /\/restart$/);
+  await Promise.all([kernel.restart(), kernel.restart()]);
+  check(kernel.generation === g5 + 1 && posted(fake, /\/restart$/) === n5 + 1, "P1A-C1 two restarts at once: serialized, one restart, one new generation");
+  // (P1A-C1) a completion answered after a restart: the fallback, not the old kernel's answer
+  const hold = fake.intercept("POST", /\/complete$/, { pause: true });
+  const asking = kernel.ask({ complete: "ab" }, "python", "fallback");
+  await hold.reached;
+  await kernel.restart();
+  hold.release();
+  check((await asking) === "fallback", "P1A-C1 a completion answered after a restart: the fallback");
+  const after = await run(kernel, "after-restarts");
+  check(after.terminal?.[0] === "done", "and runs work after all of it");
+}
+
+// ---- P1A-C1 / A3-1 / A5-1: late answers of lifecycle operations never touch what came after them
+{
+  // a late epoch refusal, and a late quarantine, for a run the restart already settled
+  for (const [code, body, what] of [[409, { error: "epoch" }, "an epoch refusal"], [410, { error: "quarantined" }, "a quarantine"]]) {
+    const { fake, kernel } = await setup();
+    const hold = fake.intercept("POST", /\/runs$/, { respond: { status: code, body }, pause: true, ignoreAbort: true });
+    const sa = sink();
+    kernel.execute(`late-${code}`, { mode: "python" }, sa);
+    await hold.reached;
+    const b0 = kernel.binding;
+    await kernel.restart();
+    hold.release();
+    await tick(50);
+    check(sa.terminal?.[1] === NOTES.stoppedRestart && !kernel.moved && kernel.binding === b0 && kernel.ready, `P1A-C1 a late ${what} for a run the restart settled: the kernel is not moved or replaced`);
+    const sb = await run(kernel, "b-runs");
+    check(sb.terminal?.[0] === "done", `P1A-C1 after a late ${what}: the next run works`);
+  }
+  // a late restart answer after close
+  {
+    const { fake, kernel, restarts, readies } = await setup();
+    const hold = fake.intercept("POST", /\/restart$/, { pause: true, ignoreAbort: true });
+    const restarting = kernel.restart();
+    await hold.reached;
+    const g = kernel.generation;
+    kernel.close();
+    hold.release();
+    await within(restarting);
+    check(kernel.closed && kernel.generation === g && restarts.n === 0 && readies.n === 1, "P1A-C1 a restart answered after close: no new generation, no restart or ready event");
+  }
+  // a late bind answer after close
+  {
+    const fake = new FakeGateway();
+    const client = await makeClient(fake);
+    const k = new RemoteKernel({ client, notebook: "fid-2", clientId: "c2", sleep: fast });
+    let ready = 0;
+    k.on("ready", () => ready++);
+    const hold = fake.intercept("POST", /^\/bindings$/, { pause: true, ignoreAbort: true });
+    const starting = k.start();
+    await hold.reached;
+    k.close();
+    hold.release();
+    const r = await within(starting);
+    check(r.v === false && !k.ready && ready === 0 && k.binding === null, "P1A-C1 a bind answered after close: no binding, never ready");
+  }
+  // a late takeover answer after close
+  {
+    const { fake, kernel } = await setup();
+    kernel.needsFence = true;
+    const hold = fake.intercept("POST", /\/takeover$/, { pause: true, ignoreAbort: true });
+    const s = sink();
+    kernel.execute("waits-for-fence", { mode: "python" }, s);
+    await hold.reached;
+    const e0 = kernel.epoch;
+    kernel.close();
+    hold.release();
+    await within(s.ended);
+    await tick();
+    check(s.terminal?.[1] === NOTES.closed && kernel.epoch === e0 && kernel.closed && posted(fake, /\/runs$/) === 0, "P1A-C1 a takeover answered after close: no new epoch, nothing sent");
+  }
+}
+
+// ---- P1A-C2 / A5-2: aborts reach every wait, and a lifecycle change releases the queue
+{
+  const { fake, kernel } = await setup();
+  fake.kernel = () => new Promise(() => {});
+  // paused response headers for the event stream
+  const hold = fake.intercept("GET", /\/events$/, { pause: true });
+  const s1 = sink();
+  kernel.execute("paused-headers", { mode: "python" }, s1);
+  await hold.reached;
+  await kernel.restart();
+  await within(s1.ended);
+  check(s1.terminal?.[1] === NOTES.stoppedRestart && kernel.current === null, "P1A-C2 a restart while the stream's headers are pending: the run is settled and released");
+  fake.kernel = async () => ({ events: [], outcome: { status: "ok", ms: 1 } });
+  const s2 = await run(kernel, "after-paused-headers");
+  check(s2.terminal?.[0] === "done", "P1A-C2 and the queue moves on");
+  // a body that never produces anything
+  fake.kernel = () => new Promise(() => {});
+  fake.faults.silentStream = true;
+  const s3 = sink();
+  kernel.execute("silent-body", { mode: "python" }, s3);
+  check(await until(() => fake.executions.some((x) => x.code === "silent-body")), "the run reaches the kernel; its stream never yields");
+  await kernel.restart();
+  await within(s3.ended);
+  fake.kernel = async () => ({ events: [], outcome: { status: "ok", ms: 1 } });
+  const s4 = await run(kernel, "after-silent");
+  check(s3.terminal?.[1] === NOTES.stoppedRestart && s4.terminal?.[0] === "done", "P1A-C2 a restart while reading a body that never yields: aborted, released, and the next run works");
+  // polling an outcome (the stream was refused as too big), then a restart
+  fake.kernel = () => new Promise(() => {});
+  fake.faults.bigEvent = true;
+  const s5 = sink();
+  kernel.execute("polling", { mode: "python" }, s5);
+  check(await until(() => fake.calls.filter(([m, p]) => m === "GET" && /\/runs\/[^/]+$/.test(p)).length > 0), "the run's outcome is being polled");
+  await kernel.restart();
+  await within(s5.ended);
+  const polls = fake.calls.filter(([m, p]) => m === "GET" && /\/runs\/[^/]+$/.test(p)).length;
+  await tick(100);
+  const polls2 = fake.calls.filter(([m, p]) => m === "GET" && /\/runs\/[^/]+$/.test(p)).length;
+  check(s5.terminal?.[1] === NOTES.stoppedRestart && polls2 === polls, "P1A-C2 a restart while polling: settled, and the polling stops");
+  // close while the headers are pending: nothing left running
+  fake.kernel = () => new Promise(() => {});
+  const hold2 = fake.intercept("GET", /\/events$/, { pause: true });
+  const s6 = sink();
+  kernel.execute("close-in-headers", { mode: "python" }, s6);
+  await hold2.reached;
+  kernel.close();
+  await within(s6.ended);
+  check(s6.terminal?.[1] === NOTES.closed && kernel.current === null, "P1A-C2 close while the headers are pending: settled, no job left");
 }
 
 // ---- takeover, quarantine, a moved binding, a run still executing elsewhere
