@@ -34,6 +34,7 @@
 import { bytesHash, HISTORY_BACKLOG, ENTRY_OVERHEAD } from "./stores.js";
 import { t1Write, pruneIntents, dropRows, readJournal, roomRefused, intentCharge, JOURNAL_BUDGETS, syncedKey, acked, markSent, rotate } from "./journal-rows.js";
 import { makeClientId, decodePatchId } from "patchflow";
+import { mergeRecords3 } from "./merge3.js";
 export * from "./journal-rows.js";
 
 /** The part of a notebook document the history keeps (history.js toRecords: its kind and each cell's id, type,
@@ -236,6 +237,51 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     if (this.patches.id !== key) { this.history.close(); this.patches.id = key; }
     this.synced = js.start;
     useClient(this.history, js.slot.client, js.slot.last);
+    this.watchRemote(js.slot.client);
+  }
+  // (2c-3: another device's patch stored here (doc-sync.ts, told by tellHistory): the writer makes the record their merge
+  // with this device's value, once, after the burst)
+  watchRemote(client) {
+    this.unwatchRemote?.();
+    this.unwatchRemote = this.patches.subscribe((env) => {
+      if (typeof env?.time !== "string" || env.time.slice(12) === client) return;
+      clearTimeout(this.remoteTimer);
+      this.remoteTimer = setTimeout(() => { void this.remoteArrived().catch((e) => console.warn("sync: a remote change not merged:", e)); }, 50);
+    });
+  }
+  async remoteArrived() {
+    if (!this.writer || !this.ready || this.released) return;
+    await this.history.init();
+    // (the page's editor, when it has one: it merges with what it shows, unsaved edits too, and saves (journal.js's
+    // users: the notebook page); else the record itself)
+    if (this.onremote) return this.onremote();
+    const rec = await super.loadRecord();
+    if (!rec) return;
+    const { doc } = await this.mergeRemote((({ j: _j, hash: _h, rev: _r, unjournaled: _u, ...d }) => d)(rec));
+    return this.writeSave({ ...doc, baseRev: rec.rev });
+  }
+  /** The merge of the server's patches with `mine` (this device's value: the record's, or what the editor shows): base
+   * the history's value at the record's j, theirs the history's head.  Changes on separate cells, or separate lines of
+   * one cell, are all kept.  A clash (the same cell's same field, a cell deleted on one side and changed on the
+   * other, too much to merge) is decided the same way on every device, so they converge: the side with the later
+   * patch (patch ids: time, then client) is kept whole, and the other side's version stays in TimeTravel (its patches
+   * are stored on both devices), never dropped quietly (astra's A3 on 2c-3).  Resolves {doc, clashes, kept}. */
+  async mergeRemote(mine) {
+    const rec = await super.loadRecord(), js = await readJournal(this.hdb, this.id);
+    let baseTime = null, best = -1, theirsLast = "";
+    for (const [time, j] of js.jOf) {
+      if (j <= (rec?.j ?? 0) && j > best) { best = j; baseTime = time; }
+      if (j > (rec?.j ?? 0) && time.slice(12) !== js.slot?.client && time > theirsLast) theirsLast = time;
+    }
+    const session = this.history.session;
+    const base = baseTime ? this.mod.fromRecords(session.value({ time: baseTime })) : { mode: mine.mode, cells: [] };
+    const head = this.mod.fromRecords(session.value());
+    // (which side a clash keeps: the later one, by patch id; this device's side is its last version's (the record's j))
+    const theirsWin = theirsLast > (baseTime ?? "");
+    const [a, b] = theirsWin ? [head, mine] : [mine, head];
+    const r = mergeRecords3(this.mod.SCHEMA, this.mod.recordsOf(base), this.mod.recordsOf(a), this.mod.recordsOf(b));
+    const value = r.clashes.length ? a : this.mod.docOfRecords(r.value);
+    return { doc: this.withValue(rec ?? mine, this.mod.toRecords(value)), clashes: r.clashes, kept: r.clashes.length ? (theirsWin ? "theirs" : "mine") : null };
   }
   // (the synced history started (William's D6(a)): a new key, the root the whole value `doc`, from a new client, all of
   // it in the root's one T1 (journal-rows.js t1Write `start`); refused, the history as it was)
@@ -253,7 +299,7 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
       this.patches.start = { n, client, time: env.time };
       try { r = await this.patches.appended(env.time); } finally { this.patches.start = undefined; }
     }
-    if (r.j !== undefined) { this.synced = { n, from_j: r.j }; return true; }
+    if (r.j !== undefined) { this.synced = { n, from_j: r.j }; this.watchRemote(client); return true; }
     this.history.close();
     this.patches.id = old;
     this.history.clientId = was.client; delete this.history.sessionOptions; this.history.lastMs = was.lastMs;
@@ -304,6 +350,7 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
       if (a === this.patches.appending && l === this.loading && m === this.mutating) break;
     }
     if (!this.released) return;
+    this.unwatchRemote?.(); this.unwatchRemote = null; clearTimeout(this.remoteTimer);
     this.history.close();
     return this.letGo();
   }
@@ -454,6 +501,16 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     const state = await readJournal(this.hdb, this.id);
     const above = state.intents.filter((it) => it.j > (rec && Number.isSafeInteger(rec.j) ? rec.j : 0));
     const chosen = replay(rec ? rec.rev ?? 0 : null, above);
+    if (!rec && !chosen && this.synced && state.jOf.size) {
+      // (2c-3: a notebook this device has only from the server (its synced history pulled, no record yet): the record
+      // is the history's head, its j the history's J, unmarked)
+      const head = this.mod.fromRecords(this.history.session.value());
+      const doc = { ...(this.initial ?? { name: "Untitled" }), ...head, id: this.id };
+      const hash = await docHash(doc);
+      const out = await super.save(doc, { journal: { j: state.J, hash } });
+      if (typeof out === "string") throw new Error(out);
+      return out.conflict ? null : { doc: { ...doc, rev: out.rev, j: state.J, hash }, row: "from-server" };
+    }
     if (!rec && !chosen) {
       // (a new notebook: its first save journaled like any other)
       const fresh = { ...(this.initial ?? { name: "Untitled", mode: "python", cells: [] }), id: this.id };
@@ -464,8 +521,13 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     const base = rec ?? { ...(this.initial ?? { name: "Untitled", mode: "python", cells: [] }), id: this.id };
     const recText = this.textOf(base);
     const value = chosen ? chosen.value : recText, own = value === recText;
-    const doc = own ? (({ j: _j, hash: _h, rev: _r, unjournaled: _u, ...d }) => d)(base) : this.withValue(base, this.history.codec.fromString(value));
-    const hash = await docHash(doc), big = neverFits(value);
+    let doc = own ? (({ j: _j, hash: _h, rev: _r, unjournaled: _u, ...d }) => d)(base) : this.withValue(base, this.history.codec.fromString(value));
+    // (2c-3: another device's patches stored above the record's j (a page applied, its T2 not written yet): merged
+    // with the chosen value, never reverted by the catch-up below (astra's A1 on 2c-3))
+    const slotClient = state.slot?.client;
+    const merged = !!rec && !!slotClient && [...state.jOf].some(([time, j]) => j > (rec.j ?? 0) && time.slice(12) !== slotClient);
+    if (merged) doc = (await this.mergeRemote(doc)).doc;
+    const hash = await docHash(doc), big = neverFits(merged ? this.textOf(doc) : value);
     // (consistent: its own value, j and hash right, and unmarked, or marked too large with nothing to try (§4))
     const settled = (mark) => rec && own && rec.j === state.J && rec.hash === hash && (rec.unjournaled ?? false) === mark;
     if (settled(false) || (big && settled("too-large"))) {
@@ -492,7 +554,7 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     if (typeof out === "string") throw new Error(out);
     if (out.conflict) return null;
     await prune(this.patches, j);
-    return { doc: { ...doc, rev: out.rev, j, hash, ...(mark ? { unjournaled: mark } : {}) }, row: own ? "stamped" : "rewritten", catchUp };
+    return { doc: { ...doc, rev: out.rev, j, hash, ...(mark ? { unjournaled: mark } : {}) }, row: merged ? "merged" : own ? "stamped" : "rewritten", catchUp };
   }
   /** What the page asks of a store to know it is the journal's. */
   get journaled() { return true; }

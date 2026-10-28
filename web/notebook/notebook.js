@@ -2245,6 +2245,20 @@ export function createNotebook(root, opts = {}) {
       load(doc);
       store = s;
       unsubscribe = s.subscribe?.((d) => applyRemote(d)) ?? null;
+      // (2c-3: another device's changes reached this notebook's history: merged with the record by the store, then with
+      // what this page shows, its unsaved edits kept cell by cell (applyRemote), and saved.  A clash keeps the later
+      // device's version on every device, and says so: the other is in TimeTravel)
+      if (s.journaled) s.onremote = async () => {
+        if (store !== s) return;
+        const rec = await s.loadRecord();
+        if (!rec || store !== s) return;
+        const { j: _j, hash: _h, rev: _r, unjournaled: _u, ...mine } = rec;
+        const { doc: merged, kept } = await s.mergeRemote(mine);
+        if (store !== s) return;
+        applyRemote(merged, true);
+        schedule();
+        if (kept) emit("saved", kept === "theirs" ? "Another device changed the same cells later: its version is kept, this device's is in TimeTravel" : "Another device changed the same cells earlier: this device's version is kept, theirs is in TimeTravel");
+      };
       return doc;
     },
     /** A save of a document no longer shown here met a change made
@@ -2267,7 +2281,7 @@ export function createNotebook(root, opts = {}) {
     /** Saves of documents no longer shown that met a change made elsewhere and couldn't be kept: only in this page. */
     get unkeptCount() { return unkept.size; },
     onDetachedConflict(f) { const was = detachedConflict; detachedConflict = f; return was; },
-    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; store = null; shown = { synced: null, remoteSeen: 0 }; leftChanged(); },
+    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; if (store?.journaled) store.onremote = null; store = null; shown = { synced: null, remoteSeen: 0 }; leftChanged(); },
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },
     showKeys() { keysDlg.showModal(); },
