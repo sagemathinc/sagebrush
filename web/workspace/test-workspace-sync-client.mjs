@@ -109,11 +109,11 @@ const ctl = {
 const closers = new Set();
 /** every open proxied socket's sender to the page (a notice injected as the server would send it, D8) */
 const toPage = new Set();
-const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0, fgenRefused: 0 };
+const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0, fgenRefused: 0, batchesUp: 0 };
 const held = [];
 /** the server's own index_changed dropped by the front over the whole run (log.serverNotices is per case: reset) */
 let serverNoticesDropped = 0;
-const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0, fgenRefused: 0 });
+const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0, fgenRefused: 0, batchesUp: 0 });
 
 async function upstream(method, path, headers, body) {
   const h = { origin: SITE, ...headers };
@@ -348,6 +348,9 @@ server.on("upgrade", async (req, socket, head) => {
         else answer();
         return;
       }
+      // (the one place a page's frame goes upstream: batches counted here, so a case can tell a refused batch was never
+      // forwarded)
+      if (m.t === "batch") log.batchesUp++;
       try { up.send(text); } catch {}
     });
     client.on("close", (code) => closeBoth(code));
