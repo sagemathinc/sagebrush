@@ -50,7 +50,8 @@ export async function latexBoot(ws: Workspace | null) {
   if (tex === null || !ws) return false;
   const root = el("div");
   document.body.append(root);
-  // (the page module, from the site's root, where this page is)
-  await (await import("/sagebrush-latex.js")).mount(root, { ws, fid: tex, back: () => location.assign("/" + q) });
+  // (the page module, from the site's root, where this page is: a variable, so the bundler leaves it to the browser)
+  const page = "/sagebrush-latex.js";
+  await (await import(page)).mount(root, { ws, fid: tex, back: () => location.assign("/" + q) });
   return true;
 }
