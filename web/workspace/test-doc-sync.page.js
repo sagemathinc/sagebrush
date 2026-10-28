@@ -2,7 +2,7 @@
 // Locks): a workspace with the journal active and DEV's docsync on, a notebook store per notebook, and doc-sync.ts's
 // DocSync on a minimal account socket to the reference server (hello, welcome, then the document requests).  The
 // harness drives two of these, as two devices of one account.
-import { W, N, H, DS, P } from "./all.js";
+import { W, N, H, DS, P, NB } from "./all.js";
 
 const J = JSON.stringify;
 const T = { stores: new Map(), pending: new Map(), req: 0, log: [] };
@@ -72,9 +72,77 @@ T.idle = async () => {
   for (let i = 0; i < 5; i++) { await T.ds.idle(); await new Promise((r) => setTimeout(r, 150)); }
   return true;
 };
-T.record = async (id) => { const r = await rawGet(T.w.main, "notebooks", id); return r ? { codes: codesOf(r), mark: r.unjournaled ?? null, j: r.j } : null; };
+T.record = async (id) => { const r = await rawGet(T.w.main, "notebooks", id); return r ? { codes: codesOf(r), mark: r.unjournaled ?? null, j: r.j, hashOk: r.hash === (await N.docHash(r)) } : null; };
 T.journal = async (id) => { const js = await N.readJournal(T.hdb, id); return { start: js.start, slot: js.slot, lrows: js.lrows, cursor: js.cursor, J: js.J }; };
 T.events = () => T.ds.events.splice(0);
 T.stopped = () => Object.fromEntries(T.ds.stopped);
 T.close = async (id) => { await T.stores.get(id)?.release(); T.stores.delete(id); return true; };
+
+// ---- sync's local budget (journal-rows.js SYNC_DEBT), lowered for a case and restored
+T.setDebt = (k, v) => { T.debtKeep ??= { ...N.SYNC_DEBT }; N.SYNC_DEBT[k] = v; return true; };
+T.resetDebt = () => { if (T.debtKeep) Object.assign(N.SYNC_DEBT, T.debtKeep); return true; };
+
+// ---- a DocSync of its own over a deferred link (no server): each request of the notebook `only` waits until the test
+// answers it (fakeAnswer); any other notebook's is answered `busy` at once.  Lets a case answer a pull, drop the
+// connection while a request waits, or kick during a flight, deterministically (astra's CORR-2C3-1, D3-4c)
+T.fakeStart = async (account, only, retryMs = 60_000) => {
+  const owner = await P.accountHash(account);
+  T.fake = { q: [], sent: [], only, owner, ds: new DS.DocSync({ retryMs, askMs: 60_000 }) };
+  T.fake.link = {
+    owner,
+    reserve: () => ++T.req,
+    ask: (req, msg) => new Promise((answer) => {
+      if (msg.doc !== T.fake.only) return answer({ t: "error", req, code: "busy", detail: { message: "not this case's" } });
+      T.fake.sent.push(msg.t);
+      T.fake.q.push({ req, msg, answer });
+    }),
+  };
+  return true;
+};
+T.fakeConnect = () => { void T.fake.ds.connected(T.fake.link); return true; };
+T.fakeKick = () => { T.fake.ds.kick(T.fake.only); return true; };
+/** The next waiting request of type `t` (its message), or null after `ms`. */
+T.fakeWait = async (t, ms = 5000) => {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 10))) {
+    const p = T.fake.q.find((x) => x.msg.t === t);
+    if (p) return p.msg;
+  }
+  return null;
+};
+/** The waiting request of type `t` answered with `frame` (its req added); then a moment for what follows it. */
+T.fakeAnswer = async (t, frame, settle = 150) => {
+  const i = T.fake.q.findIndex((x) => x.msg.t === t);
+  if (i < 0) return false;
+  const [p] = T.fake.q.splice(i, 1);
+  p.answer({ ...frame, req: p.req });
+  await new Promise((r) => setTimeout(r, settle));
+  return true;
+};
+/** The connection dropped as SyncClient drops it: its waiting requests answered `busy`, then DocSync told. */
+T.fakeDisconnect = async () => {
+  for (const p of T.fake.q.splice(0)) p.answer({ t: "error", req: p.req, code: "busy", detail: { message: "the connection ended" } });
+  T.fake.ds.disconnected();
+  await new Promise((r) => setTimeout(r, 150));
+  return true;
+};
+T.fakeState = () => ({ sent: T.fake.sent.slice(), waiting: T.fake.q.map((x) => x.msg.t), stopped: T.fake.ds.stopped.get(T.fake.only)?.code ?? null, held: !!T.fake.ds.held?.has?.(T.fake.only) });
+
+// ---- the notebook page itself (notebook.js createNotebook) on a notebook's store, as index.html attaches it
+T.mount = async (id) => {
+  const div = document.body.appendChild(document.createElement("div"));
+  T.nb = NB.createNotebook(div, {});
+  const st = new T.kit.JournalStore(T.w.main, T.hdb, id, null, H);
+  await T.nb.attach(st);
+  T.stores.set(id, st);
+  return codesOf(T.nb.snapshot());
+};
+T.shown = () => codesOf(T.nb.snapshot());
+/** Typing in a cell of the mounted notebook: its text set, and the editor told (as a keystroke tells it). */
+T.type = (cid, text) => {
+  const cell = [...document.querySelectorAll(".sbnb .cells > *")].map((el) => el.cell).find((c) => c?.id === cid);
+  if (!cell) return false;
+  cell.ta.value = text;
+  cell.ta.dispatchEvent(new Event("input", { bubbles: true }));
+  return true;
+};
 window.ready = true;

@@ -3346,6 +3346,16 @@ async function docWire() {
   const a3 = await gone.ask(gone.reserve(), { t: "pull", owner: gone.owner, doc: id, epoch: 1, after: 0 });
   check(a3.t === "error" && a3.code === "busy", "docWire: a request on a connection that's gone is answered `busy` (transient), never sent: " + J(a3));
   check(await until(() => calls.filter((x) => x === "connected").length >= 2 && c.status.state === "synced"), "docWire: connected again on the next welcome: " + J(calls));
+  // (CORR-2C3-4: the server's own readonly notice (no req, as cloud's server pushes it when a plan lapses): document
+  // sync told the link is gone, and a request on it answered busy, never sent, until a writable welcome)
+  const link2 = link, nDisc = calls.filter((x) => x === "disconnected").length;
+  const before5 = (await ctl("log")).sent.length;
+  await ctl("frame", { frame: { t: "error", code: "readonly", detail: { message: "this account's plan doesn't include sync: read-only", purge_after: Date.now() + 86_400_000 } } });
+  check(await until(() => calls.filter((x) => x === "disconnected").length > nDisc, 3000), "docWire: an unasked readonly notice: document sync told the link is gone: " + J(calls));
+  const a5 = await Promise.race([link2.ask(link2.reserve(), { t: "pull", owner: link2.owner, doc: id, epoch: 1, after: 0 }), sleep(3000).then(() => ({ t: "no answer in 3 s" }))]);
+  await sleep(200);
+  const sent5 = (await ctl("log")).sent.slice(before5).filter((m) => m.t === "pull" || m.t === "batch" || m.t === "doc_claim");
+  check(a5.t === "error" && a5.code === "busy" && sent5.length === 0, "docWire: …and a document request after it answered busy, never sent: " + J({ a: a5, sent: sent5.map((m) => m.t) }));
   await stop(c);
 }
 
