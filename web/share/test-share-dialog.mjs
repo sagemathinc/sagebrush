@@ -23,6 +23,19 @@ import { join } from "node:path";
 import { startDev } from "./serve-dev.mjs";
 import { devtoolsPort } from "../test-port.mjs";
 
+// (where crashAndReopen's renderer-attribution trace is taken, SHARE_TRACE_SCOPE: "page" (the default), the page's
+// own flattened session, whose trace is the one used; or "browser", the browser target, REPORT-ONLY: its trace is
+// described and never used, so its crash cases fail before any crash. #243's tracing r5: on the browser target,
+// TracingStartedInBrowser has no frames (tracing_handler.cc fills them only for a host with WebContents). Anything
+// else stops the run here, before the dev server and Chrome are started)
+const traceScope = process.env.SHARE_TRACE_SCOPE ?? "page";
+if (traceScope !== "page" && traceScope !== "browser") { console.log(`FAIL SHARE_TRACE_SCOPE is ${JSON.stringify(traceScope)}, not "page" or "browser"`); process.exit(2); }
+console.log(`trace scope: ${traceScope === "page" ? "page session (attributing)" : "browser target (report-only)"}`);
+// (a negative control, SHARE_TRACE_CONTROL=late-complete: an unasked-for tracingComplete after the last case, through
+// the page connection's own handler, so the run must fail by its trace-state check below; anything else stops here)
+const traceControl = process.env.SHARE_TRACE_CONTROL ?? "";
+if (traceControl !== "" && traceControl !== "late-complete") { console.log(`FAIL SHARE_TRACE_CONTROL is ${JSON.stringify(traceControl)}, not "late-complete" or unset`); process.exit(2); }
+if (traceControl) console.log(`trace control: ${traceControl} (this run must fail its trace-state check)`);
 const A = "11111111-1111-4111-8111-111111111111";
 const dev = await startDev({ sitePort: 18792, filesPort: 18793, limits: { [A]: { tier: "dev", storage_bytes: 1e9, max_file_bytes: 2e6, private_links: false } } });
 const profile = mkdtempSync(join(tmpdir(), "sb-share-dlg-"));
@@ -38,6 +51,10 @@ await new Promise((r) => (bws.onopen = r));
 let n = 0;
 const waiting = new Map();
 const swVersions = new Map();
+// (the one trace being collected, if any, and the session it must come from: crashAndReopen's renderer attribution)
+let onTracingComplete = null;
+// (set when a trace's stop or its stream's close isn't confirmed: then no later case crashes a page)
+let tracingUncertain = null;
 // (a JavaScript dialog a page opens (alert, confirm, beforeunload) would hold every later call to that page: said,
 // and dismissed, so the case fails or goes on instead of the run hanging; #243's CI)
 bws.onmessage = (e) => {
@@ -49,6 +66,11 @@ bws.onmessage = (e) => {
   }
   // (service worker versions, by id, each at its latest state: the ServiceWorker domain is enabled only once a reopened
   // page has failed, since DevTools' attention could start or keep a worker alive and so hide the stall)
+  else if (m.method === "Tracing.tracingComplete") {
+    // (with no trace being collected, an unasked-for trace exists: no later case crashes a page)
+    if (onTracingComplete) onTracingComplete(m.params ?? {}, m.sessionId ?? null);
+    else tracingUncertain ??= `a tracingComplete came with no trace being collected (${m.sessionId ? "a page session" : "the browser target"})`;
+  }
   else if (m.method === "ServiceWorker.workerVersionUpdated") {
     for (const v of m.params?.versions ?? []) swVersions.set(v.versionId, { registrationId: v.registrationId, script: String(v.scriptURL).replace(/^https?:\/\/[^/]+/, "").split(/[?#]/)[0], runningStatus: v.runningStatus, status: v.status, controlled: (v.controlledClients ?? []).length });
   }
@@ -80,10 +102,29 @@ async function newPage(contextId, timing = {}) {
     await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, modifiers, windowsVirtualKeyCode: k === " " ? 32 : k === "Escape" ? 27 : 0 });
     await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, modifiers, windowsVirtualKeyCode: k === " " ? 32 : k === "Escape" ? 27 : 0 });
   };
-  return { send, ev, until, key, targetId, timing };
+  return { send, ev, until, key, targetId, sessionId, timing };
 }
 let failures = 0, count = 0;
 const ok = (c, msg) => { count++; console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
+// (a process list from SystemInfo.getProcessInfo, used only when it is whole: nonempty, every entry an object with a
+// nonempty string type and a positive integer id, ids unique; anything else is unknown (null), so it can never show a
+// pid absent. Checked here on its own inputs, before any browser work: #243's tracing-attribution review)
+const validProcs = (x) => {
+  const a = x?.processInfo;
+  if (!Array.isArray(a) || a.length === 0) return null;
+  const ids = new Set();
+  for (const p of a) {
+    if (!p || typeof p !== "object" || typeof p.type !== "string" || !p.type || !Number.isInteger(p.id) || p.id <= 0 || ids.has(p.id)) return null;
+    ids.add(p.id);
+  }
+  return a.map((p) => [p.type, p.id, typeof p.cpuTime === "number" ? p.cpuTime : null]);
+};
+{
+  const cases = [["no answer", undefined], ["an error object", { code: -32000, message: "x" }], ["an empty list", { processInfo: [] }], ["an entry without an id", { processInfo: [{ type: "renderer" }] }], ["a zero id", { processInfo: [{ type: "renderer", id: 0 }] }], ["a string id", { processInfo: [{ type: "renderer", id: "7" }] }], ["no type", { processInfo: [{ id: 7 }] }], ["a duplicate id", { processInfo: [{ type: "browser", id: 7 }, { type: "renderer", id: 7 }] }], ["a null entry", { processInfo: [null] }]];
+  for (const [what, x] of cases) ok(validProcs(x) === null, `(self-check) a process list with ${what} is unknown, so it can't show a pid absent`);
+  const good = validProcs({ processInfo: [{ type: "browser", id: 5, cpuTime: 1.5 }, { type: "renderer", id: 9 }] });
+  ok(JSON.stringify(good) === JSON.stringify([["browser", 5, 1.5], ["renderer", 9, null]]) && !good.some((x) => x[1] === 7), "(self-check) a whole process list is read, and a pid missing from it is absent");
+}
 
 const p = await newPage();
 const { ev, until } = p;
@@ -1468,14 +1509,133 @@ try {
       };
       // (the crashed renderer must have exited before the site is opened again: a new same-site tab made while it is
       // still tearing down can have its first navigation hang, never sending a request (#243's CI, arms A-C: the
-      // renderer outlived the 1 s wait below by about 0.7 s, and the one reopen that waited for it passed). Chrome
-      // doesn't say which process a page's renderer is, so it is found by a HEURISTIC: the renderer whose cpu rose
-      // most (at least 0.3 s) between a read just before the crash and one after the close. Only a real process
-      // list counts; any other answer is unknown. If no renderer qualifies, or the one found isn't observed absent
-      // within 30 s of the crash, the case fails here, before any new page. A misidentified renderer that happens to exit
-      // can't be told apart: that is the heuristic's limit)
-      const listProcs = (ms) => raw("SystemInfo.getProcessInfo", {}, undefined, ms).then((x) => Array.isArray(x?.processInfo) ? x.processInfo.map((p) => [p.type, p.id, p.cpuTime ?? 0]) : null, () => null);
+      // renderer outlived the 1 s wait below by about 0.7 s, and the one reopen that waited for it passed). Which
+      // process is the page's renderer is read from Chrome itself, before the crash: a short trace of the
+      // disabled-by-default devtools.timeline category, whose TracingStartedInBrowser (and FrameCommittedInBrowser,
+      // ProcessReadyInBrowser) events give each frame's devtools token with its RenderProcessHost's OS pid
+      // (content/browser/devtools/protocol/tracing_handler.cc, FillFrameData). The page's main frame is matched by its
+      // exact id (Page.getFrameTree), never by url; exactly one positive pid must be named for it, and it must be a
+      // renderer in a validated process list read before the crash; the frame is read again after the trace, and must
+      // be the same. Anything else, or a trace not completed within its bounds, fails the case BEFORE the crash. After
+      // the close, that exact pid must be observed absent from a validated process list (an unreadable one is unknown,
+      // never absence) within 30 s of the crash, else the case fails before any new page. No other identification is
+      // used. The trace itself is an observer change, said in the reports that use it)
+      const listProcs = (ms) => raw("SystemInfo.getProcessInfo", {}, undefined, ms).then(validProcs, () => null);
+      const frameIdOf = (X) => X.send("Page.getFrameTree", {}, 5000).then((x) => typeof x?.frameTree?.frame?.id === "string" && x.frameTree.frame.id ? x.frameTree.frame.id : null, () => null);
+      const traceOnce = async (sid) => {
+        // (one bounded trace: start; end; tracingComplete within 10 s, with dataLossOccurred exactly false; its stream
+        // read to EOF within 20 s and 32 MiB of decoded bytes (counted per chunk, the last one too); the stream closed.
+        // Every exit clears the timer and the listener and closes a stream it was given; a stop or close that isn't
+        // confirmed sets tracingUncertain, which stops every later crash case. Every call is on sid (null: the browser
+        // target), and a tracingComplete is taken only from that session; one from any other sets tracingUncertain)
+        let timer = null, handle = null, started = false, stopped = false;
+        try {
+          const st = await raw("Tracing.start", { transferMode: "ReturnAsStream", traceConfig: { includedCategories: ["disabled-by-default-devtools.timeline"] } }, sid ?? undefined, 5000).then((x) => JSON.stringify(x ?? null), (x) => `no answer: ${x.message}`);
+          // (a start not confirmed exactly, a lost answer included, may have left a trace running: uncertain, so this
+          // case and every later crash case stop, and the run's trace state isn't clean)
+          if (st !== "{}") {
+            const kind = st.startsWith("no answer: ") ? "no answer within its bound" : st.startsWith('{"code":') ? "a protocol error" : "an unexpected answer";
+            tracingUncertain ??= `Tracing.start wasn't confirmed: ${kind}: ${st.slice(0, 200)}`;
+            return { error: `Tracing.start wasn't confirmed: ${kind}: ${st.slice(0, 200)}` };
+          }
+          started = true;
+          const complete = new Promise((ok) => {
+            onTracingComplete = (params, from) => {
+              if (from !== sid) { tracingUncertain ??= `a tracingComplete from ${from ? "a page session" : "the browser target"}, not the traced ${sid ? "page session" : "browser target"}`; return; }
+              onTracingComplete = null; ok(params);
+            };
+            timer = setTimeout(() => { onTracingComplete = null; ok(null); }, 10_000);
+          });
+          const en = await raw("Tracing.end", {}, sid ?? undefined, 5000).then((x) => JSON.stringify(x ?? null), (x) => `no answer: ${x.message}`);
+          const done = await complete;
+          if (done && typeof done.stream === "string") handle = done.stream;
+          if (en !== "{}") return { error: `Tracing.end answered ${en}` };
+          if (!done) return { error: "no tracingComplete within 10 s" };
+          stopped = true;
+          if (done.dataLossOccurred !== false) return { error: `tracingComplete's dataLossOccurred is ${JSON.stringify(done.dataLossOccurred)}` };
+          if (!handle) return { error: "tracingComplete without a stream" };
+          const until = Date.now() + 20_000, cap = 32 * 1024 * 1024, parts = [];
+          let bytes = 0, eof = false;
+          while (!eof) {
+            if (Date.now() >= until) return { error: "the trace wasn't read to its end within 20 s" };
+            const r = await raw("IO.read", { handle, size: 1 << 20 }, sid ?? undefined, Math.max(1, until - Date.now())).catch(() => null);
+            if (!r || typeof r.data !== "string") return { error: "IO.read failed" };
+            const buf = r.base64Encoded ? Buffer.from(r.data, "base64") : Buffer.from(r.data, "utf8");
+            bytes += buf.length;
+            if (bytes > cap) return { error: `the trace is over ${cap} bytes` };
+            parts.push(buf);
+            eof = r.eof === true;
+          }
+          let parsed; try { parsed = JSON.parse(Buffer.concat(parts).toString("utf8")); } catch { return { error: "the trace isn't JSON" }; }
+          const events = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.traceEvents) ? parsed.traceEvents : null;
+          return events ? { events } : { error: "the trace has no event list" };
+        } finally {
+          if (timer) clearTimeout(timer);
+          onTracingComplete = null;
+          if (started && !stopped) tracingUncertain ??= "a trace's stop wasn't confirmed";
+          if (handle) {
+            const c = await raw("IO.close", { handle }, sid ?? undefined, 5000).then((x) => JSON.stringify(x ?? null), (x) => `no answer: ${x.message}`);
+            if (c !== "{}") tracingUncertain ??= `a trace stream's IO.close answered ${c}`;
+          }
+        }
+      };
+      // (when a completed trace attributes nothing, what it held instead, said and never used: the event names by
+      // count, the shapes (keys and value types, never values) of the frame events' data and of their frames, and how
+      // many events' args mention the main frame's id at all, with those events' names. Bounded; it changes no
+      // decision: #243's tracing r4, where Chrome 156 named no process for the main frame)
+      const traceShape = (events, fid) => {
+        try {
+          const word = (x, re) => typeof x === "string" ? (re.test(x) ? x : "(other)") : `(${typeof x})`;
+          const top = (m, k) => [...m].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, k).map(([x, c]) => `${x} x${c}`).join(", ");
+          const keys = (o) => o && typeof o === "object" && !Array.isArray(o) ? Object.keys(o).sort().map((k) => `${word(k, /^[A-Za-z0-9_]{1,40}$/)}:${Array.isArray(o[k]) ? `array(${o[k].length})` : o[k] === null ? "null" : typeof o[k]}`).join(" ") : Array.isArray(o) ? `array(${o.length})` : o === undefined ? "none" : typeof o;
+          const names = new Map(), cats = new Map(), mention = new Map(), shapes = [];
+          for (const e of events) {
+            const nm = word(e?.name, /^[A-Za-z0-9_.:-]{1,60}$/);
+            names.set(nm, (names.get(nm) ?? 0) + 1);
+            const ct = word(e?.cat, /^[A-Za-z0-9_.,:-]{1,80}$/);
+            cats.set(ct, (cats.get(ct) ?? 0) + 1);
+            if (e?.args !== undefined && JSON.stringify(e.args)?.includes(fid)) mention.set(nm, (mention.get(nm) ?? 0) + 1);
+            if (shapes.length < 6 && (nm === "TracingStartedInBrowser" || nm === "FrameCommittedInBrowser" || nm === "ProcessReadyInBrowser")) {
+              const d = e?.args?.data, fr = Array.isArray(d?.frames) ? d.frames[0] : undefined;
+              shapes.push(`${nm}: data {${keys(d)}}${fr !== undefined ? `, frames[0] {${keys(fr)}}` : ""}`);
+            }
+          }
+          const nMention = [...mention.values()].reduce((a, b) => a + b, 0);
+          return `${events.length} events; names: ${top(names, 15)}; categories: ${top(cats, 6)}; frame events: ${shapes.join(" | ") || "none"}; events whose args mention the main frame id: ${nMention}${nMention ? ` (${top(mention, 6)})` : ""}`.slice(0, 1500);
+        } catch (e) { return `unreadable (${String(e?.message ?? e).slice(0, 100)})`; }
+      };
+      if (tracingUncertain) throw new Error(`${what}: an earlier trace's cleanup wasn't confirmed (${tracingUncertain}), so no page is crashed`);
       const preCrash = await listProcs(5000);
+      const fid = await frameIdOf(P);
+      let attr = { error: "not attributed" }, traced = null;
+      if (!preCrash) attr = { error: "the pre-crash process list was unreadable" };
+      else if (!fid) attr = { error: "the page's main frame id couldn't be read" };
+      else {
+        const tr = await traceOnce(traceScope === "page" ? P.sessionId : null);
+        if (tr.error) attr = tr;
+        else if (traceScope === "browser") { traced = tr.events; attr = { error: "the browser target's trace is report-only (SHARE_TRACE_SCOPE=browser): it never attributes" }; }
+        else {
+          traced = tr.events;
+          const pids = new Set(), seen = [];
+          for (const e of tr.events) {
+            const d = e?.args?.data;
+            const frames = e?.name === "TracingStartedInBrowser" ? (Array.isArray(d?.frames) ? d.frames : []) : (e?.name === "FrameCommittedInBrowser" || e?.name === "ProcessReadyInBrowser") && d ? [d] : [];
+            for (const fr of frames) if (fr?.frame === fid) { seen.push([e.name, fr.processId ?? null]); if (fr.processId !== undefined) pids.add(fr.processId); }
+          }
+          const [pid] = [...pids];
+          if (pids.size !== 1) attr = { error: `${pids.size} process ids named for the main frame (events: ${JSON.stringify(seen).slice(0, 300)})` };
+          else if (!Number.isInteger(pid) || pid <= 0) attr = { error: `the named process id isn't a positive integer (${JSON.stringify(pid)})` };
+          else if (!preCrash.some((x) => x[0] === "renderer" && x[1] === pid)) attr = { error: `pid ${pid} isn't a renderer in the pre-crash process list` };
+          else {
+            const fid2 = await frameIdOf(P);
+            attr = fid2 === fid ? { pid, events: seen.length } : { error: `the main frame changed during the trace (${fid} then ${fid2})` };
+          }
+        }
+      }
+      console.log(`  (${what}: the page's renderer, from Chrome's trace: ${attr.error ? `NOT ATTRIBUTED: ${attr.error}` : `pid ${attr.pid} (page session; main frame ${fid}, ${attr.events} frame events)`})`);
+      if (attr.error && traced) console.log(`  (${what}: the trace's shape, report-only: ${traceShape(traced, fid)})`);
+      if (!attr.error && tracingUncertain) attr = { error: tracingUncertain };
+      if (attr.error) { await said(false); throw new Error(`${what}: the page's renderer couldn't be attributed (${attr.error}), so the page wasn't crashed`); }
       await snap("before the crash");
       chainAt(`${what}: the page crashes`);
       t0 = Date.now();
@@ -1488,23 +1648,16 @@ try {
       snapAt("closed");
       {
         const left = () => 30_000 - (Date.now() - t0);
-        const remain = left();
-        const now = remain > 0 ? await listProcs(Math.min(5000, remain)) : null;
-        let pid = null, rise = 0;
-        for (const [type, id, cpu] of now ?? []) {
-          const was = (preCrash ?? []).find((x) => x[0] === "renderer" && x[1] === id);
-          if (type === "renderer" && was && cpu - was[2] > rise) { rise = cpu - was[2]; pid = id; }
-        }
-        if (rise < 0.3) pid = null;
+        const pid = attr.pid;
         let gone = false;
-        while (pid !== null && left() > 0) {
+        while (left() > 0) {
           const list = await listProcs(Math.max(1, Math.min(5000, left())));
           if (list && !list.some((x) => x[1] === pid)) { gone = true; break; }
           await sleep(Math.max(0, Math.min(100, left())));
         }
         mark(gone ? "crashed renderer exited" : "crashed renderer wait failed");
-        console.log(`  (${what}: the crashed renderer, by heuristic (largest cpu rise since before the crash): ${pid === null ? `none found (${now === null || preCrash === null ? "a process list was unreadable, or the 30 s had passed" : "no renderer rose 0.3 s"})` : `pid ${pid} (+${Math.round(rise * 100) / 100} s), ${gone ? `observed absent ${marks["crashed renderer exited"]} ms after the crash` : "not observed absent within 30 s of the crash"}`})`);
-        if (!gone) { await said(false); throw new Error(`${what}: the crashed renderer ${pid === null ? "couldn't be identified" : `(pid ${pid}) wasn't observed to exit within 30 s`}, so the site wasn't opened again`); }
+        console.log(`  (${what}: the crashed renderer, pid ${pid}: ${gone ? `observed absent ${marks["crashed renderer exited"]} ms after the crash` : "not observed absent within 30 s of the crash"})`);
+        if (!gone) { await said(false); throw new Error(`${what}: the crashed renderer (pid ${pid}) wasn't observed to exit within 30 s, so the site wasn't opened again`); }
       }
       chainAt(`${what}: a new page`);
       try {
@@ -1864,6 +2017,7 @@ try {
   }
 
 
+  if (traceControl === "late-complete") bws.onmessage({ data: JSON.stringify({ method: "Tracing.tracingComplete", params: {} }) });
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);
@@ -1873,5 +2027,10 @@ try {
   await sleep(300);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
+// (a trace whose state isn't confirmed clean, latched at any time, after the last crash case too, fails this run:
+// astra3's REOPEN-LANDING-A3-1)
+if (tracingUncertain) { count++; failures++; console.log(`FAIL trace state: not confirmed clean: ${tracingUncertain}`); }
 console.log(failures ? `${failures} failed (of ${count})` : `all ${count} passed`);
+// (whether every trace this run took was confirmed stopped and closed, with nothing unasked-for: one exact line)
+console.log(tracingUncertain ? `trace state: UNCERTAIN (scope ${traceScope}): ${tracingUncertain}` : `trace state: clean (scope ${traceScope})`);
 process.exit(failures ? 1 : 0);
