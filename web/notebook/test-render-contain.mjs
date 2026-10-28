@@ -37,11 +37,14 @@ try {
   const cover = `<svg xmlns="http://www.w3.org/2000/svg" width="100vw" height="100vh" style="position:fixed;left:0;top:0;inset:0;width:100vw;height:100vh;z-index:2147483647;margin:0">` +
     `<rect width="100%" height="100%" style="fill:rgb(1,2,3)"/><text x="20" y="30" style="font-size:20px;fill:red" id="covertext">COVER</text></svg>`;
   const out = (data) => ({ output_type: "display_data", data, metadata: {} });
+  // (a 2D plot as sagebrush draws one: its ink currentColor)
+  const plot = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80" viewBox="0 0 120 80"><path d="M10 70H110" stroke="currentColor"/></svg>`;
   await ev(`(async () => sagebrush.notebook.load({ mode: "python", cells: [
     { id: "c1", code: "1", outputs: [${JSON.stringify(out({ "image/svg+xml": cover, "text/plain": "cover" }))}] },
     { id: "c2", code: "2", outputs: [${JSON.stringify(out({ "text/html": "<constructor foo=bar>first</constructor>", "text/plain": "a" }))}] },
     { id: "c3", code: "3", outputs: [${JSON.stringify(out({ "text/html": "<__proto__ x=1>second</__proto__><tostring y=2>third</tostring>&constructor;", "text/plain": "b" }))}] },
     { id: "c4", code: "4", outputs: [${JSON.stringify(out({ "text/html": "<b>after</b>", "text/plain": "c" }))}] },
+    { id: "c5", code: "5", outputs: [${JSON.stringify(out({ "image/svg+xml": plot, "text/plain": "plot" }))}] },
   ] }))()`);
   ok(await until("document.body.innerText.includes('after')", 10000), "the document loads, its last output drawn");
   // the page's own controls are still the ones under the pointer
@@ -55,6 +58,13 @@ try {
   const svgStyle = await ev(`(() => { const s = document.querySelector(".cell .out svg"); if (!s) return null; const c = getComputedStyle(s); return { position: c.position, z: c.zIndex, attrW: s.getAttribute("width"), style: s.getAttribute("style") }; })()`);
   ok(svgStyle && svgStyle.position !== "fixed" && svgStyle.z === "auto" && svgStyle.attrW === null && !/position|z-index|inset|vw|vh/.test(svgStyle.style ?? ""), "...its position, inset, z-index and viewport sizes are dropped: " + JSON.stringify(svgStyle));
   ok(await ev(`(() => { const t = document.querySelector(".cell .out svg text"); return !!t && getComputedStyle(t).fontSize === "20px" && /255, 0, 0/.test(getComputedStyle(t).fill); })()`), "...while its painting styles (fill, font-size) are kept");
+  // a 2D plot on white with dark ink, in the light theme and the dark one (William's X4a, Oct 27: not the page's cream)
+  const plotLook = (theme) => ev(`(() => { document.documentElement.dataset.theme = "${theme}"; const s = [...document.querySelectorAll(".cell .out figure.plot > svg")].at(-1), p = s?.querySelector("path"); if (!p) return null; return { bg: getComputedStyle(s).backgroundColor, ink: getComputedStyle(p).stroke }; })()`);
+  for (const theme of ["light", "dark"]) {
+    const look = await plotLook(theme);
+    ok(look?.bg === "rgb(255, 255, 255)" && look?.ink === "rgb(31, 36, 33)", `a 2D plot in the ${theme} theme: on white, its axes dark: ` + JSON.stringify(look));
+  }
+  await ev(`delete document.documentElement.dataset.theme`);
   // tag names that are properties of every object: text, not a failure
   const text = await ev("document.body.innerText");
   ok(["first", "second", "third"].every((w) => text.includes(w)), "outputs naming constructor, __proto__ or toString show their text");

@@ -328,7 +328,7 @@ POSIX defaults.
 
 ## Try it
 
-From Python (3.9 or later; a 1.2 MB wheel for Linux, macOS and Windows):
+From Python (3.10 or later; a 1.2 MB wheel for Linux, macOS and Windows):
 
 ```sh
 pip install sagebrush

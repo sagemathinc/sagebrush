@@ -19,7 +19,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, ciFailing, waiverErrors, widenedPick, withWaiver, xkRowOutcome } from "./interrupt-classify.mjs";
 import { killTracked, killTree, onStop, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
-const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
+// (SB_BASELINE: another baseline, for checking the harness: its tests pin their fake rows there, never in the real one)
+const BASELINE = JSON.parse(readFileSync(process.env.SB_BASELINE ?? new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 // William's waivers of the Stop bound (only active records; a malformed registry fails the run, below)
 const WAIVERS = JSON.parse(readFileSync(new URL("./interrupt-waivers.json", import.meta.url), "utf8")).records;
 
@@ -249,11 +250,14 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
           }
           // (the guard, clipped to the run's deadline: a clipped guard ends the session as "budget")
           const g = Math.max(1, Math.min(guard_ms, workLeft()));
+          if (guard) clearTimeout(guard);
           guard = setTimeout(() => finish(g < guard_ms ? "budget" : "guard"), g);
         }, delays[t.i - 1]);
         sends.add(h);
       }
-      if (mk === "KI" && guard) { clearTimeout(guard); guard = null; }
+      // (the guard is its own Stop's: the trial's end, a KI or its RET, ends it, so an earlier trial's
+      // guard never cuts a later trial whose Stop is still to be sent)
+      if ((mk === "KI" || mk === "RET") && guard) { clearTimeout(guard); guard = null; }
       if (mk === "PROBE") t.probe = rest;
       if (mk === "STRAY") t.stray = rest;
       if (mk === "DONE") samples.push({ i: t.i, ...(procStatus(host === "cli" ? p.pid : launcherChild(p.pid)) ?? {}), ...(/^\d+$/.test(rest.trim()) ? { mem_kb: Number(rest.trim()) / 1024 } : {}) });

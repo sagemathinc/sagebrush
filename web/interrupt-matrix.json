@@ -357,6 +357,13 @@
    "owner": "groups/Galois"
   },
   {
+   "id": "engineCall:cost_probe",
+   "transport": "engineCall:cost_probe",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
    "id": "engineCall:cycle_type_counts",
    "transport": "engineCall:cycle_type_counts",
    "status": "planned",
@@ -474,6 +481,13 @@
    "status": "planned",
    "family": "E5 polynomials",
    "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:factor_estimate",
+   "transport": "engineCall:factor_estimate",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
   },
   {
    "id": "engineCall:factor_mod",

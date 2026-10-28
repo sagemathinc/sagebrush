@@ -1,0 +1,21 @@
+{
+  "//": "The escape-hatch policy's compiler-backed control (test/tsc-web.test.ts): with the real options tsc ACCEPTS this file, and the policy refuses its unexplained multiline any while permitting and counting the reasoned any and the reasoned expect-error.",
+  "extends": "../../../tsconfig.web.json",
+  "files": [
+    "multi.mjs",
+    "shapes/asi.mjs",
+    "shapes/backtick.mjs",
+    "shapes/brace.mjs",
+    "shapes/forawait.mjs",
+    "shapes/guards.mjs",
+    "shapes/hashbang.mjs",
+    "shapes/member-gap.mjs",
+    "shapes/member-if.mjs",
+    "shapes/member-return.mjs",
+    "shapes/nonnull.ts",
+    "shapes/paren.mjs",
+    "shapes/postdec.mjs",
+    "shapes/postinc.mjs",
+    "shapes/unicode.mjs"
+  ]
+}

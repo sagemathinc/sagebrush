@@ -330,6 +330,9 @@ export const historyBacklog = () => ({ ...backlog });
 // (a refusal pauses the document's TimeTravel until a version can be kept whole: notebook/patch-history.js)
 export const HISTORY_REFUSED = "your files are busy (another tab is changing them), so TimeTravel paused for this document: it resumes from the next version that can be saved in full. The document itself is saved";
 export const HISTORY_TOO_LARGE = "this version is too large to keep in TimeTravel, so TimeTravel paused for this document: it resumes from the next version that can be saved in full. The document itself is saved";
+// (said once by a phase-following store whose append the fence refuses for its phase: a board tab open across the
+// journal's activation keeps saving the board but no longer its versions (board's note on #227))
+export const HISTORY_STOPPED = "TimeTravel stopped recording in this tab: reload the board to keep its versions";
 const BUSY = "your files are busy (another tab is changing them): not saved yet, tried again with your next change";
 const BUSY_DELETE = "your files are busy (another tab is changing them)";
 // (a deadline: LOCK_WAIT from when it is made, its signal aborted then unless the lock was had first; made when a
@@ -578,9 +581,27 @@ export class IdbPatchStore {
   constructor(db, id, opts = {}) {
     this.db = db; this.id = admitId(id); this.owned = !db || ownedByWorkspace(db.name, id);
     this.journal = opts.journal ?? null; this.t1s = new Map();
+    // (`opts.followPhase`, for a writer whose saves are the same before and after the journal's activation (boards'
+    // TimeTravel until 2c-1b, plan-sync-slice2-client r4 §2): its phase is the fence's when it was first read,
+    // "journal" or "ok", and stays that: a store bound before the activation is refused after it, as any other)
+    this.followPhase = !!opts.followPhase && !this.journal; this.boundPhase = undefined;
   }
   // (the phase this store's writes go in)
-  get phase() { return this.journal ? "journal" : "ok"; }
+  get phase() { return this.journal ? "journal" : this.followPhase ? (this.boundPhase ?? "ok") : "ok"; }
+  // (the fence this store is bound to, from the first one read; a phase-following store's phase with it)
+  bindFence(f) {
+    this.fence = fenceOf(f);
+    if (this.followPhase && this.boundPhase === undefined) this.boundPhase = f?.phase === "journal" ? "journal" : "ok";
+  }
+  // (a phase-following store's append refused because it was bound before the journal's activation, the fence
+  // `f` now in "journal": said once, to onHistoryRefused's listeners, never again for this store.  Any other
+  // refusal (a reset, a quarantine, storage that couldn't be read) is said by the notices that are for it, not as
+  // this one's "reload": board's N1 on 7e4ddd5b)
+  stopped(f) {
+    if (!this.followPhase || this.stopSaid || this.phase !== "ok" || f?.phase !== "journal") return;
+    this.stopSaid = true;
+    for (const f of refusedSubs) try { f(HISTORY_STOPPED); } catch {}
+  }
   /** A journal store's append's outcome, once its transaction has completed: {j} or {refused}. */
   appended(time) {
     const t = this.t1s.get(time);
@@ -605,7 +626,7 @@ export class IdbPatchStore {
   // (refused, said, by the page's gate or the fence; a history the workspace doesn't own, never)
   async allowed() {
     if (!this.owned) return;
-    if (this.fence === undefined) this.fence = fenceOf((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
+    if (this.fence === undefined) this.bindFence((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
     const why = refusal() || (await primaryRefusal(this.db, this.fence)) || fenceRefusal((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence, this.fence, this.phase);
     if (why) throw new Error(`not done: ${why}`);
   }
@@ -617,7 +638,7 @@ export class IdbPatchStore {
       tx.oncomplete = () => ok({ rows: r.result, fence: f.result?.fence });
       tx.onerror = () => no(tx.error);
     }) : { rows: [], fence: undefined };
-    if (this.fence === undefined) this.fence = fenceOf(both.fence);
+    if (this.fence === undefined) this.bindFence(both.fence);
     const rows = both.rows ?? [];
     return { patches: rows.map((r) => r.env), hasMore: false };
   }
@@ -683,14 +704,14 @@ export class IdbPatchStore {
     this.queue(async () => {
       const env = JSON.parse(text);
       getHistoryChannel()?.postMessage({ from: tabId, id: this.id, env });
-      if (this.owned && this.fence === undefined) this.fence = fenceOf((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
+      if (this.owned && this.fence === undefined) this.bindFence((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
       await underLock(!this.owned, async () => {
       if (this.owned && (await primaryRefusal(this.db, this.fence))) return;
       await new Promise((ok) => {
         const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
         f.onsuccess = () => {
-          if (this.fence === undefined) this.fence = fenceOf(f.result?.fence);
-          if (this.owned && fenceRefusal(f.result?.fence, this.fence)) return;
+          if (this.fence === undefined) this.bindFence(f.result?.fence);
+          if (this.owned && fenceRefusal(f.result?.fence, this.fence, this.phase)) return this.stopped(f.result?.fence);
           st.put({ nb: this.id, time: env.time, env });
         };
         tx.oncomplete = () => ok();
@@ -705,7 +726,7 @@ export class IdbPatchStore {
    * fence, read in that same transaction, is this store's in the phase "journal" (daybreak3's CORR-208-DAYBREAK3-2).
    * Resolves `fn`'s outcome once the transaction has committed ({j}), or {refused}/{conflict} with nothing written. */
   async journalTx(fn) {
-    if (this.owned && this.fence === undefined) this.fence = fenceOf((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
+    if (this.owned && this.fence === undefined) this.bindFence((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
     return underLock(!this.owned, async () => {
       const why = this.owned ? refusal() || (await primaryRefusal(this.db, this.fence)) : null;
       if (why) return { refused: why };
@@ -715,7 +736,7 @@ export class IdbPatchStore {
         const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
         const stop = () => { try { tx.abort(); } catch {} };
         f.onsuccess = () => {
-          if (this.fence === undefined) this.fence = fenceOf(f.result?.fence);
+          if (this.fence === undefined) this.bindFence(f.result?.fence);
           const refused = this.owned ? fenceRefusal(f.result?.fence, this.fence, this.phase) : null;
           if (refused) { out = { refused }; stop(); return; }
           fn(st).then((r) => { out = r; if (r?.j === undefined) stop(); }, (e) => { out = { refused: e?.refusal ?? `not kept: ${e?.message ?? e}`, ...(e?.name === "QuotaExceededError" ? { quota: true } : {}) }; stop(); });
