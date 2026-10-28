@@ -564,7 +564,7 @@ export class SyncClient {
       owner: c.account,
       reserve: () => ++c.req,
       ask: (req, msg) => new Promise((answer) => {
-        if (this.conn !== c) return answer({ t: "error", code: "busy", detail: { message: "not connected" } });
+        if (this.conn !== c || !c.writable || c.halted) return answer({ t: "error", code: "busy", detail: { message: "not connected" } });
         c.pending.set(req, { kind: "doc", answer });
         this.send(c, { ...msg, req });
       }),
@@ -803,6 +803,9 @@ export class SyncClient {
     if (!isNat(m.req)) {
       if (code === "readonly" || code === "deleting") {
         c.writable = false;
+        // (document sync stops writing on this connection too: told the link is gone, as at its end; the next writable
+        // welcome connects it again (astra's CORR-2C3-4))
+        this.opts.docs?.disconnected();
         this.say({ state: "paused", ns: c.ns, reason: code === "readonly" ? "read-only" : "deleting" });
         return;
       }

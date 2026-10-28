@@ -243,11 +243,18 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
   // with this device's value, once, after the burst)
   watchRemote(client) {
     this.unwatchRemote?.();
-    this.unwatchRemote = this.patches.subscribe((env) => {
+    const off = this.patches.subscribe((env) => {
       if (typeof env?.time !== "string" || env.time.slice(12) === client) return;
       clearTimeout(this.remoteTimer);
       this.remoteTimer = setTimeout(() => { void this.remoteArrived().catch((e) => console.warn("sync: a remote change not merged:", e)); }, 50);
     });
+    // (an acknowledgement over the wire (doc-sync.ts) released the debt: a history paused for want of room resumes, as
+    // ackedUpTo's does (astra's CORR-2C3-3))
+    const offAcked = this.patches.onAcked(() => { void this.resumeAfterAck().catch((e) => console.warn("sync: a paused history not resumed:", e)); });
+    this.unwatchRemote = () => { off(); offAcked(); };
+  }
+  async resumeAfterAck() {
+    if (this.history.paused && this.writer && this.ready && !this.released) await this.history.init();
   }
   async remoteArrived() {
     if (!this.writer || !this.ready || this.released) return;
@@ -265,7 +272,10 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
    * one cell, are all kept.  A clash (the same cell's same field, a cell deleted on one side and changed on the
    * other, too much to merge) is decided the same way on every device, so they converge: the side with the later
    * patch (patch ids: time, then client) is kept whole, and the other side's version stays in TimeTravel (its patches
-   * are stored on both devices), never dropped quietly (astra's A3 on 2c-3).  Resolves {doc, clashes, kept}. */
+   * are stored on both devices), never dropped quietly (astra's A3 on 2c-3).  But a marked record's value (saved with
+   * no room for its version, 2c-1d-iii) is in no version: replacing it would lose it, so its side is kept whole on a
+   * clash (the remote side stays in TimeTravel), and the merge stays marked until its catch-up keeps it as a version,
+   * which then reaches the other devices (astra's CORR-2C3-2).  Resolves {doc, clashes, kept}. */
   async mergeRemote(mine) {
     const rec = await super.loadRecord(), js = await readJournal(this.hdb, this.id);
     let baseTime = null, best = -1, theirsLast = "";
@@ -277,7 +287,7 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     const base = baseTime ? this.mod.fromRecords(session.value({ time: baseTime })) : { mode: mine.mode, cells: [] };
     const head = this.mod.fromRecords(session.value());
     // (which side a clash keeps: the later one, by patch id; this device's side is its last version's (the record's j))
-    const theirsWin = theirsLast > (baseTime ?? "");
+    const theirsWin = !rec?.unjournaled && theirsLast > (baseTime ?? "");
     const [a, b] = theirsWin ? [head, mine] : [mine, head];
     const r = mergeRecords3(this.mod.SCHEMA, this.mod.recordsOf(base), this.mod.recordsOf(a), this.mod.recordsOf(b));
     const value = r.clashes.length ? a : this.mod.docOfRecords(r.value);
@@ -319,7 +329,7 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
    * released, in the history's queue; a history paused for want of room then resumes (astra's pin 3 on 2c-2). */
   async ackedUpTo(which) {
     const r = await this.patches.queue(() => this.patches.journalTx(async (st) => ({ j: 0, n: await acked(st, this.id, which) })));
-    if (r?.n && this.history.paused && this.writer && this.ready && !this.released) await this.history.init();
+    if (r?.n) await this.resumeAfterAck();
     return r;
   }
   /** This notebook's client's l rows up to cseq `upTo`, marked sent with fence generation `fgen` (2c-3, before a send). */

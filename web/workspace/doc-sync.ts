@@ -11,7 +11,7 @@
 // applyPage), and told to the notebook's history in every tab; the writer then makes the record the merged value
 // (web/notebook/journal.js).  One flight per notebook: a pull and a send of one notebook never overlap here.
 import { applyPage, acked, markSent, readCursor, readJournal, recordClaim, syncedKey, unsent } from "../notebook/journal-rows.js";
-import { IdbPatchStore, openHistoryDb, tellHistory } from "../notebook/stores.js";
+import { IdbPatchStore, openHistoryDb, tellHistory, tellAcked } from "../notebook/stores.js";
 import { makeClientId } from "patchflow";
 import { chainStart, hex, fromHex, verifyChainPage, type ChainedBatch, type ChainState } from "../sync-protocol/doc-protocol";
 import { toB64, fromB64, LIMITS } from "../sync-protocol/protocol";
@@ -37,9 +37,13 @@ export class DocSync {
   private hdb: IDBDatabase | null = null;
   private flights = new Map<string, Promise<void>>();
   private again = new Set<string>();
-  // (the notebooks held after a transient refusal: no flight for them, a kick meanwhile too, until their timer (or,
-  // for `readonly`, the next connection))
-  private held = new Set<string>();
+  // (each connect and disconnect raises it: a flight's requests belong to the connection it began on, and nothing it
+  // learns after that connection is gone (a `busy` for the drop) holds or stops a notebook)
+  private conn = 0;
+  /** the notebooks held after a transient refusal, each by its hold's token: no request for them until their timer
+   * (that same hold's: an older timer never lifts a newer hold) or, for `readonly`, the next connection */
+  readonly held = new Map<string, number>();
+  private holds = 0;
   /** the notebooks stopped here, and why (the Sync panel's per-document state) */
   readonly stopped = new Map<string, Stopped>();
   /** what happened, for tests and the driver: acks, refusals, applied pages */
@@ -70,10 +74,11 @@ export class DocSync {
   /** The account connection is up: every started notebook pulled, then its unsent patches sent. */
   async connected(link: DocLink) {
     this.link = link;
+    this.conn++;
     this.held.clear();
     for (const id of await this.started()) this.kick(id);
   }
-  disconnected() { this.link = null; }
+  disconnected() { this.link = null; this.conn++; }
   /** Another device changed `doc` (`changed {owner, doc, head}`): pulled (and started here if it wasn't). */
   changed(m: Record<string, unknown>) {
     if (!this.link || m.owner !== this.link.owner || typeof m.doc !== "string") return;
@@ -81,28 +86,35 @@ export class DocSync {
   }
   /** A notebook's local patches or the server's head moved: one flight for it, run again if asked meanwhile. */
   kick(id: string, startHere = false) {
-    if (this.stopped.has(id) || this.held.has(id)) return;
     if (this.flights.has(id)) { this.again.add(id); return; }
     const run = (async () => {
       do {
         this.again.delete(id);
-        if (!this.link) return;
+        const link = this.link, conn = this.conn;
+        if (!link) return;
         try {
-          await this.pull(id, startHere);
-          await this.send(id);
+          // (each request admitted by live(): a pull that held or stopped the notebook, or a dropped connection, ends
+          // the flight before anything more is asked (astra's CORR-2C3-1))
+          if (await this.pull(id, startHere, link, conn)) await this.send(id, link, conn);
         } catch (e) {
           this.stop(id, "invalid", (e as Error)?.message ?? String(e));
         }
-      } while (this.again.has(id) && !this.stopped.has(id) && !this.held.has(id));
+      } while (this.again.has(id));
     })().finally(() => this.flights.delete(id));
     this.flights.set(id, run);
+  }
+  // (a request of a flight may go: its connection still the live one, its notebook neither held nor stopped)
+  private live(id: string, conn: number) {
+    return this.link !== null && conn === this.conn && !this.stopped.has(id) && !this.held.has(id);
   }
   /** Settled: every flight done (tests). */
   async idle() { while (this.flights.size) await Promise.allSettled([...this.flights.values()]); }
 
-  private stop(id: string, code: string, detail?: string) {
+  // (false: what a flight's pull returns for a stop)
+  private stop(id: string, code: string, detail?: string): false {
     this.stopped.set(id, { code, detail: detail?.slice(0, 300), at: (this.opts.now ?? Date.now)() });
     this.events.push({ t: "stopped", doc: id, code, detail });
+    return false;
   }
   // (the notebooks whose synced history has started here)
   private async started(): Promise<string[]> {
@@ -121,9 +133,8 @@ export class DocSync {
 
   // ---- sending
 
-  private async send(id: string) {
-    const link = this.link!;
-    for (let round = 0; round < 64 && this.link === link; round++) {
+  private async send(id: string, link: DocLink, conn: number) {
+    for (let round = 0; round < 64; round++) {
       const js = await readJournal(await this.db(), id);
       if (!js.start || !js.slot) return;
       const slot = js.slot, epoch = js.cursor?.epoch ?? 1;
@@ -131,9 +142,10 @@ export class DocSync {
       if (!rows.length) return;
       // (claimed first, for this epoch and this client: the answer recorded only for the client it was asked for)
       if (slot.claimed?.epoch !== epoch || slot.claimed?.client !== slot.client) {
+        if (!this.live(id, conn)) return;
         const req = link.reserve();
         const a = await this.ask(link, req, { t: "doc_claim", owner: link.owner, doc: id, epoch, client: slot.client });
-        if (a.t === "error") { if (this.refused(id, a)) return; continue; }
+        if (a.t === "error") { this.refused(id, a, conn); return; }
         const c = a.claim as { client?: string; fgen?: number; next_cseq?: number } | undefined;
         if (!c || c.client !== slot.client || !Number.isSafeInteger(c.fgen)) return this.stop(id, "invalid", "a claim's answer");
         await this.tx(id, js.start.n, (st) => recordClaim(st, id, { gen: slot.gen, client: slot.client, epoch, fgen: c.fgen }));
@@ -161,11 +173,14 @@ export class DocSync {
       const body = new Uint8Array(bytes);
       let at = 0;
       for (const p of parts) { body.set(p, at); at += p.length; }
+      if (!this.live(id, conn)) return;
       const upTo = envs[envs.length - 1].cseq as number, req = link.reserve();
       await this.tx(id, js.start.n, (st) => markSent(st, id, { gen: slot.gen, client: slot.client, upTo, fgen: slot.fgen, epoch, req }));
       const a = await this.ask(link, req, { t: "batch", owner: link.owner, doc: id, epoch, kind: "notebook", patches: envs, body: toB64(body), fgen: { [slot.client]: slot.fgen } });
       if (a.t === "ack") {
         const n = await this.tx(id, js.start.n, (st) => acked(st, id, { gen: slot.gen, client: slot.client, upTo, epoch, req }));
+        // (debt released: the writer's history, paused for want of room, resumes (astra's CORR-2C3-3))
+        if (n) tellAcked(key);
         this.events.push({ t: "ack", doc: id, patch: envs[envs.length - 1].id, seq: (a.batch as any)?.seq, n });
         continue;
       }
@@ -173,7 +188,7 @@ export class DocSync {
       const detail = (a.detail && typeof a.detail === "object" ? a.detail : {}) as { next_cseq?: number; client?: string };
       if (code === "order" && Number.isSafeInteger(detail.next_cseq)) {
         // (the rows of this request below next_cseq were accepted: acknowledged, and the rest resent from it)
-        if (detail.next_cseq! > 1) await this.tx(id, js.start.n, (st) => acked(st, id, { gen: slot.gen, client: slot.client, upTo: detail.next_cseq! - 1, epoch, req }));
+        if (detail.next_cseq! > 1 && (await this.tx(id, js.start.n, (st) => acked(st, id, { gen: slot.gen, client: slot.client, upTo: detail.next_cseq! - 1, epoch, req })))) tellAcked(key);
         continue;
       }
       if (code === "unknown_client") {
@@ -181,43 +196,48 @@ export class DocSync {
         await this.tx(id, js.start.n, (st) => recordClaim(st, id, { gen: slot.gen, client: slot.client, epoch: null, fgen: slot.fgen }));
         continue;
       }
-      if (this.refused(id, a, envs[envs.length - 1].id as string)) return;
+      this.refused(id, a, conn, envs[envs.length - 1].id as string);
+      return;
     }
   }
-  // (a refusal: transient ones wait (true: nothing more now); final ones (and a parent-only `order`) stop the notebook)
-  private refused(id: string, a: Record<string, unknown>, patch = ""): boolean {
+  // (a refusal: transient ones hold the notebook (each hold its own token); final ones (and a parent-only `order`)
+  // stop it.  One that came after its connection was gone (the drop's `busy`) does neither: the next connection asks
+  // again)
+  private refused(id: string, a: Record<string, unknown>, conn: number, patch = "") {
     const code = String(a.code ?? "");
     this.events.push({ t: "refused", doc: id, patch, code });
+    if (conn !== this.conn) return;
     if (TRANSIENT.has(code)) {
-      this.held.add(id);
-      if (code !== "readonly") setTimeout(() => { this.held.delete(id); this.kick(id); }, this.opts.retryMs ?? 30_000);
-      return true;
+      const token = ++this.holds;
+      this.held.set(id, token);
+      if (code !== "readonly") setTimeout(() => { if (this.held.get(id) !== token) return; this.held.delete(id); this.kick(id); }, this.opts.retryMs ?? 30_000);
+      return;
     }
     this.stop(id, code, JSON.stringify(a.detail ?? {}).slice(0, 200));
-    return true;
   }
 
   // ---- receiving
 
-  private async pull(id: string, startHere: boolean) {
-    const link = this.link!;
-    for (let page = 0; page < 1000 && this.link === link; page++) {
+  // (true: the flight goes on to send; false: the notebook was held or stopped, or the connection is gone)
+  private async pull(id: string, startHere: boolean, link: DocLink, conn: number): Promise<boolean> {
+    for (let page = 0; page < 1000; page++) {
       const { cursor, start } = await this.read(id);
-      if (!start && !startHere) return;
+      if (!start && !startHere) return true;
+      if (!this.live(id, conn)) return false;
       const epoch = cursor?.epoch ?? 1, after = cursor?.after ?? 0;
       const req = link.reserve();
       const a = await this.ask(link, req, { t: "pull", owner: link.owner, doc: id, epoch, after, limit: 100 });
       if (a.t === "error") {
         // (not on the server yet (its first claim makes it): nothing to pull)
-        if (a.code === "unknown_doc") return;
-        this.refused(id, a);
-        return;
+        if (a.code === "unknown_doc") return true;
+        this.refused(id, a, conn);
+        return false;
       }
       if (a.t !== "batches" || a.owner !== link.owner || a.doc !== id || !Array.isArray(a.items)) return this.stop(id, "invalid", "a pull's answer");
       // (a snapshot: keeping the local root, debt and mark across one needs 2c-4: stopped here on DEV (astra's A5))
       if (a.snapshot) return this.stop(id, "snapshot", "a snapshot start is 2c-4's");
       const items = a.items as Record<string, unknown>[];
-      if (!items.length) return;
+      if (!items.length) return true;
       const from: ChainState = cursor ? { seq: cursor.after, recv: cursor.recv, chain: fromHex(cursor.chain) } : chainStart(link.owner, id, epoch);
       const page: ChainedBatch[] = items.map((b) => ({ seq: b.seq as number, recv: b.recv as number, epoch, author: String(b.author), writer: String(b.writer), envs: JSON.stringify(b.patches), body: fromB64(b.body, LIMITS.batchBytes), chain: String(b.chain) }));
       const v = verifyChainPage({ epoch }, from, page);
@@ -238,8 +258,9 @@ export class DocSync {
       const out = await this.tx(id, start?.n ?? 1, (st) => applyPage(st, id, { expect: cursor, next, rows, start: start ? undefined : { client: makeClientId() } }));
       for (const r of rows) tellHistory(syncedKey(id, start?.n ?? 1), r.env);
       this.events.push({ t: "page", doc: id, through: next.after, applied: out.applied });
-      if (!a.more) return;
+      if (!a.more) return true;
     }
+    return true;
   }
   private async read(id: string): Promise<{ cursor: { epoch: number; after: number; recv: number; chain: string } | null; start: { n: number } | null }> {
     const hdb = await this.db();
