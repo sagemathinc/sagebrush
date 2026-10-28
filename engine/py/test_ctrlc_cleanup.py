@@ -637,20 +637,35 @@ def test_runner_drops_stale():
     assert "mine" in text and "NOT MINE" not in text, text[:400]
     print("runner drops another request's messages: ok")
 
+def case(f):
+    # (a case that fails is reported, and the rest still run; the exit is non-zero if any failed)
+    try:
+        f()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        print("FAIL %s" % f.__name__, flush=True)
+        failed.append(f.__name__)
+
+
+failed = []
 
 if __name__ == "__main__":
-    test_display_reset()
-    test_page_atomic_and_v2()
-    test_page_two_threads()
-    test_page_nested_callback()
-    test_page_no_listing_with_stale_temps()
-    test_gc()
-    test_gc_mixed_prefix()
-    test_gc_bound_control()
-    test_gc_wall_time()
-    test_gc_no_fetch_after_the_last_entry()
-    test_timeout_race_keeps_a_finished_reply()
-    test_ids()
-    test_get_deadline_nonempty()
-    test_runner_drops_stale()
+    case(test_display_reset)
+    case(test_page_atomic_and_v2)
+    case(test_page_two_threads)
+    case(test_page_nested_callback)
+    case(test_page_no_listing_with_stale_temps)
+    case(test_gc)
+    case(test_gc_mixed_prefix)
+    case(test_gc_bound_control)
+    case(test_gc_wall_time)
+    case(test_gc_no_fetch_after_the_last_entry)
+    case(test_timeout_race_keeps_a_finished_reply)
+    case(test_ids)
+    case(test_get_deadline_nonempty)
+    case(test_runner_drops_stale)
+    if failed:
+        print("ctrlc cleanup: %d FAILED (%s)" % (len(failed), ", ".join(failed)))
+        sys.exit(1)
     print("ctrlc cleanup: all ok")
