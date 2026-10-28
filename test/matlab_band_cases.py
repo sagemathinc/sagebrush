@@ -586,3 +586,102 @@ try:
     ok("s1: the cached-record mutant reads one record for two operations, which the exactly-once check catches")
 finally:
     restore()
+
+
+# -- 7. the slow-LU warning (William, Oct 28 2026: decision A on the 4000/4001 boundary, with a warning): before a
+# factorization whose estimate t_lu >= L.SLOW_LU_WARN_S starts, once per session per n, through MATLAB's warning
+# machinery (silenced by warning('off', id), lastwarn either way, re-armed by warning('on', id)), on stderr
+def random3(n):
+    ent = []
+    for j in range(n):
+        ent.append((j, j, 4.0))
+        for _ in range(3):
+            ent.append((int(rnd() * n), j, rnd() - 0.5))
+    return make(n, ent)
+
+
+class _Factoring(Exception):
+    pass
+
+
+shown = []
+real_err, real_factor, real_warn_s = M._write_err, L.factor, L.SLOW_LU_WARN_S
+
+
+def wstate(st):
+    M.warning_b(0, M.Char(st), M.Char(L.SLOW_LU_ID))
+
+
+def stop_at_factor(*a, **k):
+    raise _Factoring()
+
+
+def until_factor(S):
+    """L.solve(S) up to the factorization (seamed out): what was shown before it starts"""
+    before = len(shown)
+    L.factor = stop_at_factor
+    try:
+        L.solve(S, np.ones((S.n, 1)), "t")
+        reached = False
+    except _Factoring:
+        reached = True
+    finally:
+        L.factor = real_factor
+    return reached, shown[before:]
+
+
+try:
+    use(Cap(10 ** 12))
+    assert not M._doc_layout()
+    M._write_err = lambda s: shown.append(s)
+    M._warn_once.clear()
+    M._lastwarn[:] = ["", ""]
+    # (random3(4001): the inv1 row's family; its LU estimate is over the threshold, so it warns before factoring)
+    R3 = random3(4001)
+    reached, out = until_factor(R3)
+    assert reached and len(out) == 1 and out[0].startswith("Warning: Solving this 4001x4001 sparse system by its sparse LU"), out
+    assert M._lastwarn[1] == L.SLOW_LU_ID, M._lastwarn
+    reached, out = until_factor(R3)
+    assert reached and out == [], out
+    ok("slow LU: random3(4001) warns once, on stderr and before its factorization starts; a repeat in the session shows nothing")
+    wstate("off")
+    M._lastwarn[:] = ["", ""]
+    wstate("on")
+    reached, out = until_factor(R3)
+    assert reached and len(out) == 1 and M._lastwarn[1] == L.SLOW_LU_ID, out
+    wstate("off")
+    M._warn_once.clear()
+    M._lastwarn[:] = ["", ""]
+    reached, out = until_factor(R3)
+    assert reached and out == [] and M._lastwarn[1] == L.SLOW_LU_ID, (out, M._lastwarn)
+    wstate("on")
+    ok("slow LU: warning('on', id) re-arms it; warning('off', id) silences it, and lastwarn records it either way")
+    # (never below the threshold, or off the LU route: random3(4000) (dense), a tridiagonal and an arrow at 4001)
+    M._warn_once.clear()
+    before = len(shown)
+    M._mat(sp.mldivide(random3(4000), M._unmat(np.ones((4000, 1)))))
+    M._mat(sp.mldivide(band_matrix(4001, 1, 1), M._unmat(np.ones((4001, 1)))))
+    n = 4001
+    A = make(n, [(j, j, 4.0 + rnd()) for j in range(n)] + [(0, j, rnd()) for j in range(1, n)] + [(j, 0, rnd()) for j in range(1, n)])
+    L._routes = []
+    XA = M._mat(sp.mldivide(A, M._unmat(np.ones((n, 1)))))
+    assert L._routes == ["lu"] and shown[before:] == [], (L._routes, shown[before:])
+    ok("slow LU: no warning for random3(4000) (dense), a tridiagonal(4001) (band) or a cheap LU (an arrow at 4001)")
+    # (the result is byte-identical with the warning shown: the arrow's LU with the threshold at 0)
+    L.SLOW_LU_WARN_S = 0.0
+    M._warn_once.clear()
+    before = len(shown)
+    XW = M._mat(sp.mldivide(A, M._unmat(np.ones((n, 1)))))
+    assert len(shown) == before + 1 and XW.tobytes() == XA.tobytes()
+    ok("slow LU: the warning changes no result (the same LU, byte for byte, with and without it)")
+    # (the browser's interim, master's route, never reaches it: an unmeasured record, threshold 0)
+    use(Cap(10 ** 12, domains=("js-heap",)))
+    M._warn_once.clear()
+    before = len(shown)
+    M._mat(sp.mldivide(A, M._unmat(np.ones((n, 1)))))
+    assert shown[before:] == [], shown[before:]
+    ok("slow LU: the unmeasured (browser) path, master's route, never warns")
+finally:
+    M._write_err, L.factor, L.SLOW_LU_WARN_S = real_err, real_factor, real_warn_s
+    M._warn_once.clear()
+    restore()

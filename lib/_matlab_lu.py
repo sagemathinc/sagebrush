@@ -1245,6 +1245,29 @@ def _route(path):
         _routes.append(path)
 
 
+# the slow-LU warning (William, Oct 28 2026, on the n = 4000/4001 boundary:
+# decision A, a known cost, "but ... we should output a warning"): an LU
+# estimated (t_lu, the route's own estimate) to take at least SLOW_LU_WARN_S
+# seconds warns before its factorization starts, through MATLAB's warning
+# machinery: shown once per session per n (no flood in a loop), silenced by
+# warning('off', SLOW_LU_ID), recorded by lastwarn, re-armed by
+# warning('on', SLOW_LU_ID) or warning('on', 'all').  It changes no result
+# and no route; the browser's interim (master's route) never reaches it
+SLOW_LU_WARN_S = 10.0
+SLOW_LU_ID = "sagebrush:mldivide:slowSparseLU"
+
+
+def _warn_slow(n, t_lu):
+    if t_lu < SLOW_LU_WARN_S:
+        return
+    import _matlab as _m
+    import _matlab_sparse as _sp
+
+    _m.warning_once("Solving this %dx%d sparse system by its sparse LU, whose factors fill in heavily: it may take "
+                    "minutes, and Stop works throughout.  (A banded system, or one of order %d or less, is solved "
+                    "faster.)" % (n, n, _sp.MAX_DENSE_SOLVE), SLOW_LU_ID, n)
+
+
 def solve(S, Bm, what, bands=None, rec=None):
     """S \\ Bm for a square sparse S, n > MAX_DENSE_SOLVE, by its band or its
     sparse LU (r6 section 2.4a): the bandwidths found in chunks (their
@@ -1316,7 +1339,9 @@ def solve(S, Bm, what, bands=None, rec=None):
         q = None
         led.release(qheld)
         return band()
-    # 5. the LU, falling back to band if it can't be admitted part way
+    # 5. the LU, falling back to band if it can't be admitted part way; a
+    # slow one warns first, before its factorization starts
+    _warn_slow(n, t_lu)
     before = led.owned - qheld
     try:
         F = factor(S, what, q=q, ledger=led, work=work, qheld=qheld)

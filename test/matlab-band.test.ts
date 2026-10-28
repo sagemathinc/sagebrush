@@ -22,7 +22,7 @@ test("bandwidths, the band path, the route, the fallback table and ruling d2 (te
   assert.ok(r.stderr.split("\n").every((l) => l === "" || l === "Warning: Matrix is singular to working precision."), r.stderr);
   const lines = r.stdout.trim().split("\n").filter((l) => !l.startsWith("Warning: "));
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 21, r.stdout);
+  assert.equal(lines.length, 26, r.stdout);
 });
 
 test("ruling d2's legacy bodies are master's, and reached only from the unmeasured branches (test/matlab_legacy_pin.py)", () => {
