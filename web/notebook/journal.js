@@ -58,6 +58,9 @@ export function journalClasses({ IdbStore, IdbPatchStore }) {
     // (nothing written but by the notebook's writer here: `writerOK`, set by its JournalStore)
     // (`start`: a synced history's start, set by the store for its root's append (2c-2))
     const store = new IdbPatchStore(hdb, id, { journal: { t1: (st, row, intent) => (store.writerOK?.() === false ? Promise.resolve({ refused: NOT_WRITER }) : t1Write(st, id, { row, intent, start: row && store.start?.time === row.time ? store.start : undefined })), drop: (st) => dropRows(st, id) } });
+    // (the notebook's journal identity, for good: `store.id` is its history's key, which a synced notebook's start
+    // changes to `<id>:s<n>`; every journal row is the notebook's (astra's CORR-2C2-1))
+    store.docId = id;
     // (F4: paused, a save's T1 is its intent alone; nothing to write for a version that isn't a save's)
     store.writePending = () => (store.intent ? writeIntent(store, store.intent) : Promise.resolve({ refused: "TimeTravel is paused for this notebook" }));
     return store;
@@ -69,11 +72,11 @@ export function journalClasses({ IdbStore, IdbPatchStore }) {
  * through its journalTx (the workspace's word and lock, the fence in the transaction). */
 export function writeIntent(store, intent) {
   if (store.writerOK?.() === false) return Promise.resolve({ refused: NOT_WRITER });
-  return store.queue(() => store.journalTx((st) => t1Write(st, store.id, { intent }))).catch((e) => ({ refused: e?.message ?? String(e) }));
+  return store.queue(() => store.journalTx((st) => t1Write(st, store.docId ?? store.id, { intent }))).catch((e) => ({ refused: e?.message ?? String(e) }));
 }
 /** The intents at or below j `upTo` pruned (after a record write holding it has committed), through journalTx. */
 export function prune(store, upTo) {
-  return store.queue(() => store.journalTx(async (st) => ({ j: upTo, pruned: await pruneIntents(st, store.id, upTo) }))).catch((e) => ({ refused: e?.message ?? String(e) }));
+  return store.queue(() => store.journalTx(async (st) => ({ j: upTo, pruned: await pruneIntents(st, store.docId ?? store.id, upTo) }))).catch((e) => ({ refused: e?.message ?? String(e) }));
 }
 
 /** Whether this page syncs notebooks' contents (DEV's docsync switch, set by the page once the journal is active): a
@@ -409,7 +412,11 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
       // deleting; not ready now, so its turn refuses it if it hasn't deleted yet, and the mark stays until the proof
       // below.  The load's own saves wait for nothing else: nothing can be running here when a store first loads)
       while (this.mutating) await this.mutating;
-      if (this.viewed) { this.viewed = false; await this.history.init(); } else await this.open();
+      // (the synced history's key and client read again now, under the writer's lock: a start or a rotation by the tab
+      // that held it before is adopted, never an earlier read's (astra's CORR-2C2-2)); the history made again from it
+      await this.useSynced();
+      this.viewed = false;
+      await this.history.init();
       for (let i = 0; ; i++) {
         const out = await this.recover(await super.loadRecord());
         if (out || i >= 4) { this.recovered = out ?? { row: "busy" }; break; }

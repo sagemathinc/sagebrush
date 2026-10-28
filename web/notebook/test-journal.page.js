@@ -1321,11 +1321,15 @@ async function syncStart() {
     const all = await N.unsent(hdb, id), two = await N.unsent(hdb, id, { max: 2 }), small = await N.unsent(hdb, id, { maxBytes: 1 }), after = await N.unsent(hdb, id, { after: all[1].j });
     check(all.length === 5 && two.length === 2 && two[1].j < all[2].j && small.length === 1 && after.length === 3 && after[0].j === all[2].j, "unsent: in j order, at most max a page, one at least past maxBytes, after a j");
     // (a read-only tab shows the synced history; a patch not from the slot's client is refused by T1)
+    // (another tab holds the writer's lock, so this one is read-only: its history from the load's first read)
+    const holder = store(w, hdb, id);
+    await holder.load();
     const viewer = store(w, hdb, id);
     await viewer.load();
+    const readOnly = !viewer.writer;
     const wrong = await viewer.patches.queue(() => viewer.patches.journalTx((s) => N.t1Write(s, id, { row: { nb: key, time: "000mvr8ccru_not-the-slot-client", env: { time: "000mvr8ccru_not-the-slot-client" } } })));
-    check(viewer.patches.id === key && viewer.history.session && /not this device's sync client/.test(wrong?.refused ?? "") && (await keyRows(hdb, key)).length === 5, "a read-only tab reads the synced history; a patch from another client is refused by T1, nothing written: " + J(wrong?.refused));
-    await close(viewer);
+    check(readOnly && viewer.patches.id === key && viewer.history.session && /not this device's sync client/.test(wrong?.refused ?? "") && (await keyRows(hdb, key)).length === 5, "a read-only tab reads the synced history; a patch from another client is refused by T1, nothing written: " + J(wrong?.refused));
+    await close(viewer, holder);
     // (a drop: the synced and the old keys' rows, the l rows and the slot gone, the namespace's debt released)
     const d0 = await debtRow(hdb), mine = (await jState(hdb, id)).slot.debt;
     const s2 = store(w, hdb, id);
@@ -1423,7 +1427,83 @@ async function syncRotation() {
   hdb.close();
 }
 
-const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation];
+
+async function syncIdentity() {
+  // astra's CORR-2C2-1: once a notebook's history key is its synced one (<id>:s1), every journal row stays the notebook's
+  // own: one registry, one rising J, its intents pruned; an intent-only save (unchanged, or paused) recovered after a
+  // crash before its T2
+  const { w, hdb } = await active();
+  await synced(async () => {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const key = N.syncedKey(id, 1), regOf = async (x) => (await syncRows(hdb)).filter((r) => r.time === "d:local:" + x);
+    let rec = await rawGet(w.main, "notebooks", id);
+    const js0 = await jState(hdb, id);
+    // (a changed save, an unchanged one, then a paused one)
+    const outs = [];
+    outs.push(await st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: rec.rev }));
+    rec = await rawGet(w.main, "notebooks", id);
+    const js1 = await jState(hdb, id);
+    outs.push(await st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: rec.rev }));
+    rec = await rawGet(w.main, "notebooks", id);
+    const js2 = await jState(hdb, id);
+    await pause(st);
+    outs.push(await st.save({ ...d, cells: [{ id: "a", code: "C" }], baseRev: rec.rev }));
+    rec = await rawGet(w.main, "notebooks", id);
+    const js3 = await jState(hdb, id);
+    check(outs.every((o) => !!o?.saved) && js1.J > js0.J && js2.J > js1.J && js3.J > js2.J && rec.j === js3.J && js3.intents.length === 0 && (await regOf(key)).length === 0 && (await regOf(id)).length === 1 && codes(rec) === J([["a", "C"]]), "CORR-2C2-1: synced, a changed, an unchanged and a paused save: each T2 written, one registry (the notebook's, none for <id>:s1), one J rising, every intent pruned: " + J({ J: [js0.J, js1.J, js2.J, js3.J], recj: rec.j, intents: js3.intents.length, s1: (await regOf(key)).length }));
+    // (an intent-only T1 (paused) whose T2 never came: recovered from the notebook's own journal)
+    await t1Only(st, { ...d, cells: [{ id: "a", code: "D" }], baseRev: rec.rev });
+    const js4 = await jState(hdb, id);
+    await close(st);
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    check(js4.intents.length === 1 && js4.J === js3.J + 1 && (await regOf(key)).length === 0 && r.row === "rewritten" && p.codes === J([["a", "D"]]) && p.intents === 0 && p.jOk, "CORR-2C2-1: …an intent-only T1 cut off before its T2 is in the notebook's journal, and a reopen recovers it: " + J({ row: r.row, codes: p.codes }));
+    await close(r.st);
+  });
+  await close(w);
+  hdb.close();
+}
+
+async function syncGrantDuringLoad() {
+  // astra's CORR-2C2-2: B loads read-only while A holds the lock; A starts the synced history (and, the second time,
+  // rotates its client) and lets go while B's first load still reads; B, granted then, takes the persisted key and
+  // the current client, and its first edit is one l row of that client
+  const { w, hdb } = await active();
+  for (const rotateToo of [false, true]) {
+    const { id, st: a, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const b = store(w, hdb, id), load = S.IdbStore.prototype.loadRecord;
+    let resume, reached; const gate = new Promise((r) => { resume = r; }), inRead = new Promise((r) => { reached = r; });
+    S.IdbStore.prototype.loadRecord = async function () { if (this === b) { S.IdbStore.prototype.loadRecord = load; reached(); await gate; } return load.call(this); };
+    try {
+      const loading = b.load().then(() => "loaded", (e) => e.message);
+      const held = await within(inRead, 3000);
+      if (held === "timeout") S.IdbStore.prototype.loadRecord = load;
+      // (A starts, and rotates, while B's read-only load waits)
+      N.DOC_SYNC.on = true;
+      const rec0 = await rawGet(w.main, "notebooks", id);
+      await a.startSynced({ ...d, rev: rec0.rev });
+      if (rotateToo) await a.rotateClient();
+      N.DOC_SYNC.on = false;
+      const slot = (await jState(hdb, id)).slot;
+      const granted = takeover(b, 3000);
+      await close(a);
+      await within(granted, 3000);
+      resume();
+      const l = await loading;
+      const rec = await rawGet(w.main, "notebooks", id), before = (await lrows(hdb, id)).length;
+      const out = await b.save({ ...d, cells: [{ id: "a", code: "after" }], baseRev: rec.rev });
+      const after = await lrows(hdb, id), last = after[after.length - 1]?.v;
+      check(held !== "timeout" && l === "loaded" && b.writer && b.patches.id === N.syncedKey(id, 1) && !!out?.saved && after.length === before + 1 && last?.client === slot.client && last?.gen === slot.gen, `CORR-2C2-2${rotateToo ? " (with a rotation)" : ""}: granted during its read-only load, B adopts the persisted synced key and the current client; its first edit is one l row of that client: ` + J({ l, key: b.patches.id === N.syncedKey(id, 1), saved: !!out?.saved, rows: [before, after.length], client: last?.client === slot.client, gen: [last?.gen, slot.gen] }));
+      await close(b);
+    } finally {
+      S.IdbStore.prototype.loadRecord = load;
+      N.DOC_SYNC.on = false;
+    }
+  }
+  await close(w);
+  hdb.close();
+}
+
+const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
