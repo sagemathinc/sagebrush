@@ -156,6 +156,27 @@ export class SyncOwner {
     void this.reconcile();
   }
 
+  /** (sync 2c-3, DEV's switch: web/workspace/doc-sync-switch.ts) notebooks' contents on this page's connection:
+   * every client made from now on carries `docs`, and one running now is made again with it (its new connection's
+   * welcome then connects it). */
+  setDocs(docs: ClientOptions["docs"]) {
+    this.opts = { ...this.opts, docs };
+    if (this.client) void this.stopClient().then(() => this.reconcile());
+  }
+  /** Whether this page's sync client runs, waiting up to `ms` for one to start (the switch's third condition). */
+  clientRunning(ms = 20_000): Promise<boolean> {
+    if (this.client) return Promise.resolve(true);
+    return new Promise((ok) => {
+      const t = setTimeout(() => { off(); ok(!!this.client); }, ms);
+      const off = this.onChange(() => {
+        if (!this.client) return;
+        clearTimeout(t);
+        off();
+        ok(true);
+      });
+    });
+  }
+
   private openLife() {
     if (this.lifeCh || typeof BroadcastChannel !== "function") return;
     this.lifeCh = new BroadcastChannel("sagebrush-sync-life:" + this.w.ws.name);
