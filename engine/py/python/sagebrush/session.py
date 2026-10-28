@@ -348,7 +348,15 @@ class _Capture:
         return self.chars["stdout"] + self.chars["stderr"]
 
     def stream(self, name):
-        return _Stream(self, name)
+        # (one per stream, kept by the capture, which outlives the run: the
+        # redirect's end swaps sys.stdout back without freeing the run's
+        # stream, so a thread whose print() still holds it, borrowed, never
+        # writes to freed memory (CPython 3.12.0-3.12.9 segfaulted there,
+        # FU-WORKERTHREADS-312); its writes reach the sealed capture: dropped)
+        st = self.__dict__.setdefault("_streams", {})
+        if name not in st:
+            st[name] = _Stream(self, name)
+        return st[name]
 
     def write(self, text, stream="stdout"):
         if not isinstance(text, str):

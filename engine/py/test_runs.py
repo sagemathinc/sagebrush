@@ -1150,31 +1150,35 @@ def test_worker_real_signal():
     print("worker real signal: ok")
 
 
-def wt312_affected(version_info=None, implementation=None):
-    """FU-WORKERTHREADS-312: on CPython 3.12 before 3.12.10 a printing thread
-    can segfault when a Ctrl-C ends the run (measured on VM1: crashes on
-    3.12.3-3.12.9, master and PR A alike; none on 3.12.10-3.12.15 or 3.13; no
-    upstream fix identified, so the boundary is as measured).  By number only
-    (version_info[:3]): 3.12.0-3.12.9, their alphas and release candidates
-    included, are skipped; 3.12.10's pre-releases are not (not measured).
-    CPython only: another implementation reporting 3.12 isn't skipped."""
-    v = sys.version_info if version_info is None else version_info
-    impl = sys.implementation.name if implementation is None else implementation
-    return impl == "cpython" and (3, 12) <= tuple(v[:3]) < (3, 12, 10)
+def test_capture_keeps_streams():
+    """FU-WORKERTHREADS-312: a run's sys.stdout/sys.stderr stand-ins live as
+    long as its capture, not only while they are sys.stdout: the redirect's
+    end must not free one that a thread's print() still holds (borrowed:
+    CPython 3.12.0-3.12.9 segfaulted, a use-after-free)."""
+    import contextlib
+    import gc
+    import weakref
+    from sagebrush import session as S
 
+    class Sender:
+        lock = threading.RLock()
 
-def test_wt312_gate():
-    """Exactly which interpreters skip test_worker_threads' interrupted variants."""
-    skip = [(3, 12, 0), (3, 12, 3), (3, 12, 9)]
-    run = [(3, 11, 9), (3, 12, 10), (3, 12, 15), (3, 13, 0), (3, 14, 4)]
-    for v in skip:
-        assert wt312_affected(v + ("final", 0), "cpython"), v
-        assert wt312_affected(v + ("candidate", 1), "cpython"), v  # (by number: its pre-releases too)
-        assert not wt312_affected(v + ("final", 0), "pypy"), v
-    for v in run:
-        assert not wt312_affected(v + ("final", 0), "cpython"), v
-    assert not wt312_affected((3, 12, 10, "alpha", 1), "cpython")  # (3.12.10's pre-releases: not skipped)
-    print("worker threads gate: ok")
+        def dumps(self, m):
+            return json.dumps(m)
+
+        def send(self, msg, committed=None):
+            if committed:
+                committed()
+
+    out = S._Capture(Sender())
+    with contextlib.redirect_stdout(out.stream("stdout")):
+        alive = weakref.ref(sys.stdout)
+    assert out.stream("stdout") is alive(), "the capture didn't keep its stream"
+    assert alive() is not None and sys.stdout is not alive()
+    del out
+    gc.collect()
+    assert alive() is None, "the stream outlived its capture"
+    print("capture keeps its streams: ok")
 
 
 def test_worker_threads():
@@ -1219,12 +1223,7 @@ def test_worker_threads():
         "t.join()\n"
         "errors\n")
     reqs = json.dumps({"code": code, "mode": "python"}) + "\n" + json.dumps({"code": "7", "mode": "python"}) + "\n"
-    nths = (0, 3, 9)
-    if wt312_affected():
-        nths = (0,)  # (the uninterrupted run still runs)
-        print("worker threads: the interrupted variants skipped on CPython %s (FU-WORKERTHREADS-312: a CPython 3.12 crash, "
-              "reproduced through 3.12.9, not from 3.12.10 on)" % sys.version.split()[0])
-    for nth in nths:
+    for nth in (0, 3, 9):
         r = subprocess.run([sys.executable, "-c", harness, str(nth)], input=reqs, capture_output=True, text=True, timeout=120)
         msgs = [json.loads(l) for l in r.stdout.splitlines()]  # (every line valid JSON)
         replies = [m for m in msgs if "result" in m]
@@ -1491,7 +1490,7 @@ if __name__ == "__main__":
     test_capture()
     test_capture_signal_boundaries()
     test_worker_real_signal()
-    test_wt312_gate()
+    test_capture_keeps_streams()
     test_worker_threads()
     test_late_output_sealed()
     test_session_start_failure()

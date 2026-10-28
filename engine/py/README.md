@@ -108,12 +108,10 @@ works on its own
 (`sagebrush.session.Session`), and `sagebrush.preparse.preparse` turns Sage
 syntax into Python.
 
-On CPython 3.12 before 3.12.10, a Ctrl-C (or a cancel) that ends a run
-while threads the run started are still printing can crash the session's
-process: we reproduced this on 3.12.3 through 3.12.9, and not on 3.12.10 or
-later, nor on 3.13. The session is then restarted, without its variables.
-Ubuntu 24.04's system Python is 3.12.3: use Python 3.12.10 or later, or 3.13
-or later.
+On Python 3.10 and 3.11, importing `sagebrush` adds two methods of 3.12's
+`fractions.Fraction` that its Sage layer uses, `_from_coprime_ints` and
+`is_integer`, where they are missing; `int.is_integer` (also 3.12) is not
+added.
 
 ## Benchmarks: `sagebrush bench`
 
