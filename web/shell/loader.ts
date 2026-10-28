@@ -32,11 +32,12 @@ export type ShellOutcome =
 /**
  * Step 3 (host level 3): the module's own count of a result (r8c E2, @sagebrush's output_bytes ruling C with astra5's
  * conditions): `producedBytes`, the whole result's UTF-8 size (stdout then stderr); `deliveredBytes`, the size of the
- * prefix it sent, within the invocation's allowance; `exceeded`, its flag that the result passed the allowance.
+ * prefix it sent, within the invocation's allowance and the fixed backstop; `exceeded`, its flag that the result
+ * passed the allowance; `truncated`, that it passed only the backstop (an ordinary result's prefix, never typed).
  * Checked here for shape and its own bounds (delivered <= produced; not exceeded means all of it delivered); the host
  * checks them against the allowance and the strings it got.
  */
-export type OutputCount = { producedBytes: number; deliveredBytes: number; exceeded: boolean };
+export type OutputCount = { producedBytes: number; deliveredBytes: number; exceeded: boolean; truncated: boolean };
 /** The limits the module enforces itself and reports as a typed limit (only bash.pipeline_width). */
 export type ModuleLimitKey = "pipeline_width";
 
@@ -148,9 +149,9 @@ export function shellPackage(plan: SetPlan, level = SHELL_HOST_LEVEL) {
 const count = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
 function outputOf(o: any): OutputCount | undefined | null {
   if (o === undefined) return undefined;
-  if (!o || typeof o !== "object" || !count(o.producedBytes) || !count(o.deliveredBytes) || typeof o.exceeded !== "boolean") return null;
-  if (o.deliveredBytes > o.producedBytes || (!o.exceeded && o.deliveredBytes !== o.producedBytes)) return null;
-  return { producedBytes: o.producedBytes, deliveredBytes: o.deliveredBytes, exceeded: o.exceeded };
+  if (!o || typeof o !== "object" || !count(o.producedBytes) || !count(o.deliveredBytes) || typeof o.exceeded !== "boolean" || typeof o.truncated !== "boolean") return null;
+  if (o.deliveredBytes > o.producedBytes || (o.exceeded && o.truncated) || (!o.exceeded && !o.truncated && o.deliveredBytes !== o.producedBytes)) return null;
+  return { producedBytes: o.producedBytes, deliveredBytes: o.deliveredBytes, exceeded: o.exceeded, truncated: o.truncated };
 }
 function outcome(p: any): ShellOutcome | null {
   if (!p || typeof p !== "object" || Number(Object.hasOwn(p, "exit")) + Number(Object.hasOwn(p, "rejected")) + Number(Object.hasOwn(p, "limit")) !== 1) return null;
@@ -250,11 +251,16 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
     }
     else if (name === "shell.configured" && !startup && configuring) {
       const c = configuring;
-      configuring = null;
       const lim = payload?.limits;
-      if (typeof payload?.error === "string") c.reject(new Error(payload.error));
-      else if (lim && typeof lim === "object" && Object.values(lim).every((v) => typeof v === "number")) c.resolve({ ...lim });
-      else close("it broke the shell protocol (a malformed shell.configured)");
+      // (r2, astra5 B3-A5-1: the waiter is settled on every path; a malformed answer closes the shell, and close()
+      // rejects the waiter, which is still set then, so neither configure() nor the host's start is left waiting)
+      if (typeof payload?.error === "string") {
+        configuring = null;
+        c.reject(new Error(payload.error));
+      } else if (lim && typeof lim === "object" && Object.values(lim).every((v) => typeof v === "number")) {
+        configuring = null;
+        c.resolve({ ...lim });
+      } else close("it broke the shell protocol (a malformed shell.configured)");
     }
     else if (name === "shell.result" && !startup) {
       const o = outcome(payload);

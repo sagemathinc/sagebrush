@@ -475,11 +475,11 @@ try {
   const cnt = (r) => JSON.stringify(r?.output);
   ok(m3?.before?.rejected && /isn't configured/.test(m3.before.rejected.message), `an exec before the init is refused by the module (${JSON.stringify(m3?.before ?? m3).slice(0, 200)})`);
   ok(typeof m3?.resolved === "number" && m3.resolved > 30 && /already configured/.test(m3.again), `one init per worker: the first resolves just-bash's limits (${m3?.resolved} names), a second is refused (${m3?.again})`);
-  ok(m3?.fits?.exit?.stdout === "hello\n" && cnt(m3.fits) === JSON.stringify({ producedBytes: 6, deliveredBytes: 6, exceeded: false }), `a result within the allowance is sent whole, with its count (${cnt(m3?.fits)})`);
-  ok(m3?.cut?.exit?.stdout === "hel" && cnt(m3.cut) === JSON.stringify({ producedBytes: 6, deliveredBytes: 3, exceeded: true }), `past it, only the prefix within the allowance is sent, and the module says exceeded (${JSON.stringify(m3?.cut)})`);
-  ok(m3?.scalar?.exit?.stdout === "a" && cnt(m3.scalar) === JSON.stringify({ producedBytes: 3, deliveredBytes: 1, exceeded: true }), `the cut is at a scalar boundary: never half of a 2-byte scalar (${JSON.stringify(m3?.scalar)})`);
-  ok(m3?.order?.exit?.stdout === "ab" && m3.order.exit.stderr === "c" && cnt(m3.order) === JSON.stringify({ producedBytes: 4, deliveredBytes: 3, exceeded: true }), `stdout first, then stderr in what is left (${JSON.stringify(m3?.order)})`);
-  ok(m3?.none?.exit?.stdout === "" && cnt(m3.none) === JSON.stringify({ producedBytes: 1, deliveredBytes: 0, exceeded: true }), `an allowance of 0 sends nothing (${JSON.stringify(m3?.none)})`);
+  ok(m3?.fits?.exit?.stdout === "hello\n" && cnt(m3.fits) === JSON.stringify({ producedBytes: 6, deliveredBytes: 6, exceeded: false, truncated: false }), `a result within the allowance is sent whole, with its count (${cnt(m3?.fits)})`);
+  ok(m3?.cut?.exit?.stdout === "hel" && cnt(m3.cut) === JSON.stringify({ producedBytes: 6, deliveredBytes: 3, exceeded: true, truncated: false }), `past it, only the prefix within the allowance is sent, and the module says exceeded (${JSON.stringify(m3?.cut)})`);
+  ok(m3?.scalar?.exit?.stdout === "a" && cnt(m3.scalar) === JSON.stringify({ producedBytes: 3, deliveredBytes: 1, exceeded: true, truncated: false }), `the cut is at a scalar boundary: never half of a 2-byte scalar (${JSON.stringify(m3?.scalar)})`);
+  ok(m3?.order?.exit?.stdout === "ab" && m3.order.exit.stderr === "c" && cnt(m3.order) === JSON.stringify({ producedBytes: 4, deliveredBytes: 3, exceeded: true, truncated: false }), `stdout first, then stderr in what is left (${JSON.stringify(m3?.order)})`);
+  ok(m3?.none?.exit?.stdout === "" && cnt(m3.none) === JSON.stringify({ producedBytes: 1, deliveredBytes: 0, exceeded: true, truncated: false }), `an allowance of 0 sends nothing (${JSON.stringify(m3?.none)})`);
   ok(m3?.two?.exit?.stdout === "a\n" && JSON.stringify(m3?.three) === JSON.stringify({ limit: { key: "pipeline_width", value: 2 } }), `bash.pipeline_width 2: a 2-stage pipeline runs, a 3-stage one is refused by the module's own parse, structured (${JSON.stringify(m3?.three)})`);
 
   // the lifecycle: every end settles everything, and leaves no worker or channel

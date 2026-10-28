@@ -50,7 +50,7 @@ const withModule = (text) => {
 const stand = `export function start(port) {
   const waits = new Map(); let req = 1;
   const n = (s) => new TextEncoder().encode(s).length;
-  const output = (a, b) => ({ producedBytes: n(a) + n(b), deliveredBytes: n(a) + n(b), exceeded: false });
+  const output = (a, b) => ({ producedBytes: n(a) + n(b), deliveredBytes: n(a) + n(b), exceeded: false, truncated: false });
   port.onmessage = async (e) => {
     const m = e.data;
     if (m.init) return port.postMessage({ name: "shell.configured", payload: { limits: m.init.limits } });
@@ -73,6 +73,9 @@ const STAND = withModule(stand);
 // never answered (its fetch hangs until cancelled; the server counts the open ones): the starts Stop's grace
 // must end, not merely abandon (CORR-BASH-S2-R2-1)
 const NEVER = withModule("export function start(port) { port.onmessage = () => {}; }");
+// (r2, astra5 B3-A5-1: modules that say ready, then answer the init malformed, or never answer it)
+const CONF_BAD = withModule(`export function start(port) { port.onmessage = (e) => { if (e.data.init) port.postMessage({ name: "shell.configured", payload: {} }); }; port.postMessage({ name: "shell.ready", payload: { version: "conf-bad" } }); }`);
+const CONF_NEVER = withModule(`export function start(port) { port.onmessage = () => {}; port.postMessage({ name: "shell.ready", payload: { version: "conf-never" } }); }`);
 const HANG = "f".repeat(64);
 const hang = { open: 0, total: 0 };
 // Real old shells, each built by the publisher itself from a copy of the package with its old source, so its
@@ -108,7 +111,7 @@ export * as W from ${JSON.stringify(join(here, "..", "workspace", "index.ts"))};
 `);
 execFileSync("bun", ["build", entry, "--target=browser", "--format=esm", `--outfile=${join(dir, "host-bundle.js")}`], { stdio: ["ignore", "ignore", "inherit"] });
 const data = {
-  S, STAND, OLD, OLD2, NEVER, HANG,
+  S, STAND, OLD, OLD2, NEVER, HANG, CONF_BAD, CONF_NEVER,
   cases: JSON.parse(readFileSync(join(root, "test", "bash-oracle-cases.json"), "utf8")),
   oracle: JSON.parse(readFileSync(join(root, "test", "bash-oracle.json"), "utf8")),
   known: JSON.parse(readFileSync(join(root, "test", "bash-known.json"), "utf8")),
