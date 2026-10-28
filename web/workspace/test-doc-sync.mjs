@@ -5,6 +5,9 @@
 // what the server sends one device (a chain, an owner, a snapshot), as a broken server would.  The cases are below:
 // each drives the two devices (test-doc-sync.page.js) and checks the server and both devices.
 //   CHROME=chromium bun web/workspace/test-doc-sync.mjs
+// SERVER=cloud runs the same cases against cloud's server (what DEV answers): under cloud's scripts/with-core.sh,
+// whose web/sync/test-harness.mjs (startCloud) it imports; the server-side figures only the reference server keeps
+// (a document's claimed clients) are then not checked.
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,14 +41,37 @@ copyFileSync(join(here, "test-doc-sync.page.js"), join(site, "device.js"));
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>doc sync test</title><script type="module" src="./device.js"></script>`);
 
 // ---- the server, and the front
-const ref = new ReferenceServer();
+const CLOUD = process.env.SERVER === "cloud";
 const ACCOUNT = "d5d5d5d5-0000-4d5d-8d5d-d5d5d5d5d5d5";
-const sessions = { A: ref.signIn(ACCOUNT), B: ref.signIn(ACCOUNT), C: ref.signIn(ACCOUNT), D: ref.signIn(ACCOUNT) };
+let ref = null, cloud = null;
+if (CLOUD) {
+  const harness = await import("../sync/test-harness.mjs").catch((e) => {
+    console.error("FAIL: SERVER=cloud needs cloud's web/sync/test-harness.mjs (run under cloud's scripts/with-core.sh): " + e.message);
+    process.exit(1);
+  });
+  cloud = await harness.startCloud({ accounts: [ACCOUNT] });
+} else ref = new ReferenceServer();
+// (each device's session, as its Cookie header's name=value)
+const signIn = async () => (CLOUD ? await cloud.signIn(ACCOUNT) : `${SESSION_COOKIE}=${ref.signIn(ACCOUNT)}`);
+const sessions = { A: await signIn(), B: await signIn(), C: await signIn(), D: await signIn() };
 // (sync on for the account, as its first device's enable does: off, the server refuses every hello `readonly`)
-const enabled = await (await ref.fetch(new Request("http://ref/api/sync/v1/enable", { method: "POST", headers: { cookie: `${SESSION_COOKIE}=${sessions.A}` } }))).json();
+const enabled = await (CLOUD ? cloud.enable(sessions.A) : ref.fetch(new Request("http://ref/api/sync/v1/enable", { method: "POST", headers: { cookie: sessions.A } }))).then((r) => r.json());
 if (enabled.state !== "active") { console.error("FAIL: enable: " + J(enabled)); process.exit(1); }
 // (what the front does to the next `batches` sent to a device: rewrite its chain, its owner, or add a snapshot)
 const tamper = { A: null, B: null };
+// (the next request of a kind answered with a refusal instead: the request still goes to the server, which does what
+// it does with it, and only its answer is replaced, as a lost answer and a refusal would look; on either server)
+const fakes = { batch: [] };
+const fake = (t, f) => fakes[t].push(f);
+// (a socket to cloud's server, as the reference server's connect gives one: send, close, onmessage, onclose)
+const cloudSocket = (cookie) => new Promise((ok) => {
+  const w = new WebSocket(cloud.url.replace(/^http/, "ws") + "/api/sync/v1/account", { headers: { cookie, origin: cloud.url } });
+  const s = { send: (m) => w.send(m), close: () => w.close(), onmessage: null, onclose: null };
+  w.onmessage = (e) => s.onmessage?.(String(e.data));
+  w.onclose = (e) => s.onclose?.(e.code);
+  w.onopen = () => ok(s);
+  w.onerror = () => ok({});
+});
 const front = Bun.serve({
   port: 0, hostname: "127.0.0.1",
   async fetch(req, server) {
@@ -56,10 +82,10 @@ const front = Bun.serve({
     // site serves them on its own origin)
     if (u.pathname === "/api/share/me") return Response.json({ account_id: ACCOUNT });
     if (u.pathname.startsWith("/api/sync/")) {
-      const h = new Headers({ cookie: `${SESSION_COOKIE}=${sessions.D}` });
+      const h = new Headers({ cookie: sessions.D, ...(CLOUD ? { origin: cloud.url } : {}) });
       for (const k of ["content-type", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
       const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
-      return ref.fetch(new Request("http://ref" + u.pathname + u.search, { method: req.method, headers: h, body }));
+      return CLOUD ? fetch(cloud.url + u.pathname + u.search, { method: req.method, headers: h, body }) : ref.fetch(new Request("http://ref" + u.pathname + u.search, { method: req.method, headers: h, body }));
     }
     const f = { "/": "index.html", "/all.js": "all.js", "/device.js": "device.js" }[u.pathname];
     if (!f) return new Response("not found", { status: 404 });
@@ -67,13 +93,16 @@ const front = Bun.serve({
   },
   websocket: {
     async open(ws) {
-      const s = await ref.connect(`${SESSION_COOKIE}=${sessions[ws.data.dev]}`);
+      const s = CLOUD ? await cloudSocket(sessions[ws.data.dev]) : await ref.connect(sessions[ws.data.dev]);
       if (!s.send) return ws.close(4401, "no session");
       ws.data.s = s;
       s.onmessage = (text) => {
         const t = tamper[ws.data.dev];
-        if (t) {
-          const m = JSON.parse(text);
+        const m = JSON.parse(text), f = Number.isSafeInteger(m.req) ? ws.data.faked?.[m.req] : undefined;
+        if (f) {
+          delete ws.data.faked[m.req];
+          text = J({ t: "error", req: m.req, code: f.error.code, detail: { message: "faked", ...f.error.detail } });
+        } else if (t) {
           if (m.t === "batches" && m.items?.length) {
             tamper[ws.data.dev] = null;
             if (t === "chain") m.items[0].chain = "0".repeat(64);
@@ -87,10 +116,36 @@ const front = Bun.serve({
       s.onclose = (c) => { try { ws.close(c); } catch {} };
       for (const m of ws.data.queue ?? []) s.send(m);
     },
-    message(ws, m) { if (ws.data.s) ws.data.s.send(String(m)); else (ws.data.queue ??= []).push(String(m)); },
+    message(ws, m) {
+      const text = String(m);
+      try {
+        const x = JSON.parse(text);
+        if (fakes[x.t]?.length && Number.isSafeInteger(x.req)) (ws.data.faked ??= {})[x.req] = fakes[x.t].shift();
+      } catch {}
+      if (ws.data.s) ws.data.s.send(text); else (ws.data.queue ??= []).push(text);
+    },
     close(ws) { ws.data.s?.close(); },
   },
 });
+
+// (a document's head on cloud's server, read as another device would: a socket of A's session over the real port
+// (Bun's own WebSocket: the harness's Node-side socket needs ws's 'upgrade' event, which Bun doesn't have), hello,
+// then a pull; null after 10 s)
+async function cloudHead(id) {
+  const owner = await accountHash(ACCOUNT);
+  return new Promise((ok) => {
+    const w = new WebSocket(cloud.url.replace(/^http/, "ws") + "/api/sync/v1/account", { headers: { cookie: sessions.A, origin: cloud.url } });
+    const done = (v) => { clearTimeout(t); try { w.close(); } catch {} ok(v); };
+    const t = setTimeout(() => done(null), 10_000);
+    w.onopen = () => w.send(J({ t: "hello", v: 1, device: "probe-node-0000", name: "probe", index_after: 0 }));
+    w.onmessage = (e) => {
+      const m = JSON.parse(String(e.data));
+      if (m.t === "welcome") w.send(J({ t: "pull", req: 1, owner, doc: id, epoch: 1, after: 0, limit: 1 }));
+      else if (m.req === 1) done(m.t === "batches" ? { head: m.head?.seq } : null);
+    };
+    w.onerror = () => done(null);
+  });
+}
 
 // ---- Chromium: one browser, a context per device
 let port = Number(process.env.CDP_PORT) || 0;
@@ -152,8 +207,8 @@ try {
   await A.call("open", N1, [["a", "A1"], ["b", "B1"]]);
   await A.call("kick", N1);
   await settle();
-  const sd = ref.controls.doc(ACCOUNT, N1), clients = ref.controls.clients(ACCOUNT, N1), aj = await A.call("journal", N1);
-  check(sd && sd.head >= 1 && clients && Object.keys(clients).length === 1 && aj.lrows === 0 && aj.slot?.claimed?.client === aj.slot?.client, "1: A's new notebook: its client claimed before its batch, the batch acked, its l rows released: " + J({ head: sd?.head, clients: clients && Object.keys(clients).length, lrows: aj.lrows }));
+  const sd = CLOUD ? await cloudHead(N1) : ref.controls.doc(ACCOUNT, N1), clients = CLOUD ? null : ref.controls.clients(ACCOUNT, N1), aj = await A.call("journal", N1);
+  check(sd && sd.head >= 1 && (CLOUD || (clients && Object.keys(clients).length === 1)) && aj.lrows === 0 && aj.slot?.claimed?.client === aj.slot?.client, "1: A's new notebook: its client claimed before its batch, the batch acked, its l rows released: " + J({ head: sd?.head, clients: clients && Object.keys(clients).length, lrows: aj.lrows }));
   const bj = await B.call("journal", N1);
   const bo = await B.call("open", N1);
   check(bj.start && bj.cursor?.after === sd.head && bo.row === "from-server" && bo.codes === J([["a", "A1"], ["b", "B1"]]), "1: …B, told `changed`, pulls it (the chain checked), and its record is the history's head: " + J({ row: bo.row, codes: bo.codes, cursor: bj.cursor?.after }));
@@ -193,10 +248,10 @@ try {
   progress("case 5");
   // 5. order with next_cseq: the rows below it acknowledged, the rest sent again; then unknown_client: claimed again
   const aj5 = await A.call("journal", N1);
-  ref.controls.fake("batch", { error: { code: "order", detail: { client: aj5.slot.client, next_cseq: aj5.slot.cseq } } });
+  fake("batch", { error: { code: "order", detail: { client: aj5.slot.client, next_cseq: aj5.slot.cseq } } });
   await A.call("edit", N1, [["a", "Y5"], ["b", "B3"]]);
   await settle();
-  ref.controls.fake("batch", { error: { code: "unknown_client", detail: {} } });
+  fake("batch", { error: { code: "unknown_client", detail: {} } });
   await A.call("edit", N1, [["a", "Y6"], ["b", "B3"]]);
   await settle();
   const [aj6, br6] = [await A.call("journal", N1), await B.call("record", N1)];
@@ -204,7 +259,7 @@ try {
 
   progress("case 6");
   // 6. a transient refusal waits and sends again; a final one stops the notebook, its rows kept
-  ref.controls.fake("batch", { error: { code: "rate", detail: { retry_after: 1 } } });
+  fake("batch", { error: { code: "rate", detail: { retry_after: 1 } } });
   await A.call("edit", N1, [["a", "Y7"], ["b", "B3"]]);
   await settle();
   await sleep(400);
@@ -215,7 +270,7 @@ try {
   // sent again at the next connection.  The reference server's fake replaces the answer only, the batch stored: so
   // this is told by A's rows and events, not by B)
   await A.call("events");
-  ref.controls.fake("batch", { error: { code: "readonly", detail: {} } });
+  fake("batch", { error: { code: "readonly", detail: {} } });
   await A.call("edit", N1, [["a", "Y7r"], ["b", "B3"]]);
   await settle();
   await sleep(400);
@@ -230,7 +285,7 @@ try {
   const refusedR = evR.filter((e) => e.t === "refused" && e.code === "readonly").length, ackedR = evR.filter((e) => e.t === "ack").length;
   check(ajR.lrows >= 1 && refusedR === 1 && ackedR === 0 && ajR2.lrows === 0 && evR2.some((e) => e.t === "ack") && !stR[N1] && brR.codes === J([["a", "Y7r"], ["b", "B3"]]), "6: `readonly`: refused once, nothing resent on a timer or a kick, the rows kept; sent at the next connection and acknowledged; not stopped: " + J({ lrows: ajR.lrows, refused: refusedR, acked: ackedR, after: ajR2.lrows, stopped: stR[N1]?.code ?? null }));
   const N2 = "22222222-3333-4444-8555-666666666666";
-  ref.controls.fake("batch", { error: { code: "forbidden", detail: {} } });
+  fake("batch", { error: { code: "forbidden", detail: {} } });
   await A.call("open", N2, [["a", "Z"]]);
   await A.call("kick", N2);
   await settle();
@@ -432,7 +487,7 @@ try {
     await A.call("edit", id, [["a", "x2"]]);
     const m = await A.call("record", id);
     await A.call("resetDebt");
-    if (how === "order") ref.controls.fake("batch", { error: { code: "order", detail: { client: (await A.call("journal", id)).slot.client, next_cseq: (await A.call("journal", id)).slot.cseq } } });
+    if (how === "order") fake("batch", { error: { code: "order", detail: { client: (await A.call("journal", id)).slot.client, next_cseq: (await A.call("journal", id)).slot.cseq } } });
     await A.call("connect", "A", ACCOUNT);
     await settle();
     await A.call("edit", id, [["a", "x3"]]);
@@ -647,6 +702,7 @@ try {
 } finally {
   try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   front.stop(true);
+  try { await cloud?.stop(); } catch {}
   await sleep(200);
   for (const d of [profile, site]) rmSync(d, { recursive: true, force: true });
 }
