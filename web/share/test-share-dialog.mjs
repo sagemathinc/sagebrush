@@ -1198,6 +1198,14 @@ try {
       } catch (e) {
         const t = await raw("Target.getTargets", {}, undefined, 10_000).catch(() => null);
         console.log(`  (${what}: the new page didn't load (${e.message}); Chrome's targets: ${JSON.stringify((t?.targetInfos ?? []).map((x) => [x.type, String(x.url).replace(dev.site, ""), x.attached]))})`);
+        // (the local server, asked directly: whether it answers at all, and what it holds open, so a stalled server
+        // tells itself apart from the browser's connections; #243's CI)
+        for (const path of ["/", "/api/share/me"]) {
+          const t0 = Date.now();
+          const r = await fetch(dev.site + path, { signal: AbortSignal.timeout(5000) }).then((x) => x.status, (x) => String(x?.name ?? x));
+          console.log(`  (${what}: node's own GET ${path}: ${r} in ${Date.now() - t0} ms)`);
+        }
+        console.log(`  (${what}: the local server holds: ${JSON.stringify(dev.stats?.() ?? "no stats")})`);
         throw e;
       }
     };
