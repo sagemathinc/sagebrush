@@ -691,15 +691,16 @@ async function controls() {
 
 
 // (B: notebooks' kind (web/journal/store.js): the store's law, withValue(rec, toRecords(rec)) is rec but for the store's
-// own fields (rev, j, hash, unjournaled), for a record of each cell type, outputs, attachments and fields of its own;
+// own fields (rev, j, hash, unjournaled, and baseRev on the way in), for a record of each cell type, outputs,
+// attachments and fields of its own;
 // its hash is docHash, its lock the writer lock's name, its texts the notebook's, a new notebook as before)
 async function kindLaw() {
-  const K = N.notebookKind(H), own = ["rev", "j", "hash", "unjournaled"];
+  const K = N.notebookKind(H), own = ["rev", "j", "hash", "unjournaled", "baseRev"];
   const canon = (v) => J(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((y) => [y, x[y]])) : x));
   const strip = (d) => Object.fromEntries(Object.entries(d).filter(([k]) => !own.includes(k)));
   const recs = [
     { id: "x", name: "t", mode: "python", cells: [] },
-    { id: "x", name: "t", mode: "sage", rev: 3, j: 7, hash: "h", unjournaled: true, cells: [{ id: "a", code: "1+1", outputs: [{ text: "2" }], collapsed: true }, { id: "b", type: "markdown", code: "# h", attachments: { "p.png": "AA==" } }, { id: "c", type: "raw", code: "r" }] },
+    { id: "x", name: "t", mode: "sage", rev: 3, j: 7, hash: "h", unjournaled: true, baseRev: 2, cells: [{ id: "a", code: "1+1", outputs: [{ text: "2" }], collapsed: true }, { id: "b", type: "markdown", code: "# h", attachments: { "p.png": "AA==" } }, { id: "c", type: "raw", code: "r" }] },
     { id: "x", name: "t", mode: "magma", repro: { k: 1 }, cells: [{ id: "a", code: "" }, { id: "b", type: "markdown", code: "no attachments" }] },
   ];
   for (const [i, rec] of recs.entries()) {
