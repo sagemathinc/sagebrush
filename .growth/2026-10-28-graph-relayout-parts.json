@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "X3 (#240): the graph view's \"Lay out again\" animates a multi-part graph without overlapping its parts (web/graph/spring.ts: rows frozen at the first frame, then glide frames to the final packing). As measured by the size-gate of PR ci 40605015580 at e8e8fb2a (rule 2's figures): engine/sagebrush-graphview.js (+885) and cli/pyjs.cjs, which embeds it (+2000)",
+ "bytes": {
+  "cli/pyjs.cjs": 2000,
+  "engine/sagebrush-graphview.js": 885
+ }
+}
