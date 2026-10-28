@@ -2481,10 +2481,10 @@ const wsReady = (async () => {
 })();
 // (sync 2c-3, DEV's switch for notebooks' contents (web/workspace/doc-sync-switch.ts): on any origin but DEV's own,
 // nothing at all is asked or started here.  On DEV: this page's sync owner started; then, only if the server lets this
-// account sync and its client runs, evaluated afresh on every load: the journal turned on (lasting for this browser;
-// the Sync panel says so), notebooks and boards registered as its writers, DOC_SYNC on, and a DocSync handed to the
-// sync owner.  The open notebook is kept read-only while its saves finish and the journal turns on, then opened again
-// through it.  Any doubt, any failure: off, nothing more done)
+// account sync and its client runs, evaluated afresh on every load: enableDocSync turns the journal on (lasting for
+// this browser; the Sync panel says so), DOC_SYNC on, reopens the open notebook through it, and hands a DocSync to the
+// sync owner.  It ends on, off (a doubt or a failure before anything lasting changed), or reload (the activation began
+// and this page couldn't go on: the notebook read-only, said, until a reload); see doc-sync-switch.ts)
 const docSyncReady = (async () => {
   if (!docSyncOrigin(location.origin)) return false;
   const w = await wsReady;
