@@ -83,5 +83,25 @@ if record:
     print("python floor: the installed wheel is %s, Requires-Python %s" % (tags[0], dist.metadata["Requires-Python"]))
 else:
     print("python floor: no installed wheel to check (skipped; --wheel makes it required)")
+# 4. sagebrush/_compat.py: on 3.10 and 3.11 Fraction gains 3.12's _from_coprime_ints and is_integer; on
+# 3.12+ it sets nothing, the standard library's own methods are left in place (so their speed is theirs)
+import fractions
+from importlib import util as _util
+
+spec = _util.spec_from_file_location("_sb_compat_test", os.path.join(HERE, "python", "sagebrush", "_compat.py"))
+before = dict(vars(fractions.Fraction))
+spec.loader.exec_module(_util.module_from_spec(spec))
+F = fractions.Fraction
+if sys.version_info[:2] >= (3, 12):
+    assert dict(vars(F)) == before, "_compat changed Fraction on Python 3.12+"
+    assert F._from_coprime_ints.__func__.__module__ == "fractions" and F.is_integer.__module__ == "fractions"
+    print("python floor: on %d.%d _compat leaves Fraction as it is" % sys.version_info[:2])
+else:
+    class Q(F):
+        pass
+    q = Q._from_coprime_ints(3, 4)
+    assert type(q) is Q and q == F(3, 4) and (q.numerator, q.denominator) == (3, 4), q
+    assert F._from_coprime_ints(-5, 1) == -5 and F(6, 3).is_integer() and not F(1, 2).is_integer()
+    print("python floor: on %d.%d _compat adds Fraction._from_coprime_ints and is_integer" % sys.version_info[:2])
 assert sys.version_info[:2] >= FLOOR
 print("python floor: ok")
