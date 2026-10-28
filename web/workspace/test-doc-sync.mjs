@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { ReferenceServer, SESSION_COOKIE } from "../sync-protocol/reference-server.ts";
 import { accountHash } from "../sync-protocol/protocol.ts";
 import { devtoolsPort } from "../test-port.mjs";
+import { emit } from "./doc-sync-diag.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const J = JSON.stringify;
@@ -42,26 +43,12 @@ writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><t
 
 // ---- the server, and the front
 const CLOUD = process.env.SERVER === "cloud";
-// (r3: what this run prints about the sync API and the pages: never a body, a cookie, an auth header or a query
-// string; a session-like name=value redacted, a URL's query and fragment dropped, the text cut short)
-const redact = (s, n = 300) => String(s)
-  .replace(/\b(cookie|authorization|set-cookie)\s*[:=]\s*[^\n]*/gi, "$1: <redacted>")
-  .replace(/\b([\w-]*(?:session|token|secret|auth|key)[\w-]*)=[^;&\s"']*/gi, "$1=<redacted>")
-  .replace(/(\bhttps?:\/\/[^\s"'?#]*)[?#][^\s"']*/gi, "$1?<dropped>")
-  .slice(0, n);
-// (the front's sync requests and sockets: numbered, logged as each starts and ends; the open ones, for a stopped case)
+// (r4: every line this run prints about the sync API, the sockets, the pages and a stopped case 14 is emitted by
+// ./doc-sync-diag.mjs: structured lines from allow-listed fields, free text only through its scrub(); nothing raw, and
+// no stream of this process is wrapped)
+// (the front's sync requests and sockets: numbered; the open ones, for a stopped case)
 let proxyN = 0, sockN = 0;
 const proxyOpen = new Map(), sockOpen = new Set();
-// (cloud's log: what reaches this process's stdout and stderr streams once cloud starts (Miniflare and workerd, if
-// they write there), the last 200 lines, for a stopped case; this file's own lines left out)
-const cloudLog = [];
-if (CLOUD) for (const s of [process.stdout, process.stderr]) {
-  const write = s.write.bind(s);
-  s.write = (chunk, ...rest) => {
-    for (const l of String(chunk).split("\n")) if (l && !/^(front |step |diag14|CENSUS AT )/.test(l)) { cloudLog.push(l); if (cloudLog.length > 200) cloudLog.shift(); }
-    return write(chunk, ...rest);
-  };
-}
 // (FU-DBUS cause pinning (@sagebrush's r3 ruling): with FUDBUS_AT, the VM runner's census script, run here at the
 // browser's seams and at every case, its lines in this run's output; a failure is its own line, which the judge fails)
 const SUITE = CLOUD ? "cloud" : "ref";
@@ -110,20 +97,20 @@ const front = Bun.serve({
     // site serves them on its own origin)
     if (u.pathname === "/api/share/me") return Response.json({ account_id: ACCOUNT });
     if (u.pathname.startsWith("/api/sync/")) {
-      // (r3: logged as it starts, and as its answer's status arrives or it throws, with the time taken: the method and
-      // the path only; a start without an end is a request still waiting)
-      const k = ++proxyN, t = Date.now(), what = `${req.method} ${redact(u.pathname, 120)}`;
-      proxyOpen.set(k, { what, t });
-      console.log(`front sync #${k} start ${what}`);
+      // (logged as it starts, and as its answer's status arrives or it throws, with the time taken: the method, the
+      // path's safe characters, the status or the error's name; a start without an end is a request still waiting)
+      const k = ++proxyN, t = Date.now();
+      proxyOpen.set(k, { method: req.method, path: u.pathname, t });
+      emit.syncStart(k, req.method, u.pathname);
       try {
         const h = new Headers({ cookie: sessions.D, ...(CLOUD ? { origin: cloud.url } : {}) });
         for (const k of ["content-type", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
         const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
         const r = await (CLOUD ? fetch(cloud.url + u.pathname + u.search, { method: req.method, headers: h, body }) : ref.fetch(new Request("http://ref" + u.pathname + u.search, { method: req.method, headers: h, body })));
-        console.log(`front sync #${k} end ${what} ${r.status} ${Date.now() - t}ms`);
+        emit.syncEnd(k, req.method, u.pathname, r.status, Date.now() - t);
         return r;
       } catch (e) {
-        console.log(`front sync #${k} end ${what} error ${redact(e?.name ?? "", 40)}: ${redact(e?.message ?? e, 200)} ${Date.now() - t}ms`);
+        emit.syncError(k, req.method, u.pathname, e?.name, Date.now() - t);
         throw e;
       } finally {
         proxyOpen.delete(k);
@@ -137,10 +124,10 @@ const front = Bun.serve({
     async open(ws) {
       const k = (ws.data.k = ++sockN), t = Date.now();
       sockOpen.add(k);
-      console.log(`front socket #${k} open (device ${ws.data.dev})`);
+      emit.sockOpen(k, ws.data.dev);
       const s = CLOUD ? await cloudSocket(sessions[ws.data.dev]) : await ref.connect(sessions[ws.data.dev]);
-      if (!s.send) { console.log(`front socket #${k} no upstream ${Date.now() - t}ms`); return ws.close(4401, "no session"); }
-      console.log(`front socket #${k} upstream open ${Date.now() - t}ms`);
+      if (!s.send) { emit.sockNoUp(k, Date.now() - t); return ws.close(4401, "no session"); }
+      emit.sockUp(k, Date.now() - t);
       ws.data.s = s;
       s.onmessage = (text) => {
         const t = tamper[ws.data.dev];
@@ -159,7 +146,7 @@ const front = Bun.serve({
         }
         try { ws.send(text); } catch {}
       };
-      s.onclose = (c) => { console.log(`front socket #${k} closed by the server ${c}`); try { ws.close(c); } catch {} };
+      s.onclose = (c) => { emit.sockServerClosed(k, c); try { ws.close(c); } catch {} };
       for (const m of ws.data.queue ?? []) s.send(m);
     },
     message(ws, m) {
@@ -170,7 +157,7 @@ const front = Bun.serve({
       } catch {}
       if (ws.data.s) ws.data.s.send(text); else (ws.data.queue ??= []).push(text);
     },
-    close(ws, code) { if (sockOpen.delete(ws.data.k)) console.log(`front socket #${ws.data.k} closed ${code}`); ws.data.s?.close(); },
+    close(ws, code) { if (sockOpen.delete(ws.data.k)) emit.sockClosed(ws.data.k, code); ws.data.s?.close(); },
   },
 });
 
@@ -198,9 +185,10 @@ let port = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-ds-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
 const errors = [];
-// (r3: the pages' own console warnings and errors and the browser's log entries for them, by the page's label)
+// (r3: the pages' own console warnings and errors and the browser's log entries for them, by the page's label, kept
+// here (the last 200) and printed only through emit.text)
 const labels = new Map(), pageConsole = [];
-const noteConsole = (s) => { pageConsole.push(redact(s)); if (pageConsole.length > 200) pageConsole.shift(); };
+const noteConsole = (s) => { pageConsole.push(String(s).slice(0, 2000)); if (pageConsole.length > 200) pageConsole.shift(); };
 // (its own deadline: a hang anywhere ends the run here, the browser killed, saying where it was)
 let step = "start";
 const t0 = Date.now();
@@ -746,29 +734,32 @@ try {
   const r14 = await Promise.race([run14.then(() => ({ ok: true }), (e) => ({ ok: false, e })), new Promise((r) => { timer14 = setTimeout(() => r(LATECASE), Math.max(1, budget14)); })]).finally(() => clearTimeout(timer14));
   if (r14 === LATECASE) check(false, `14: the case didn't finish within its ${Math.round(budget14 / 1000)} s budget, at step: ${step}`);
   else if (!r14.ok && r14.e !== STOP14) check(false, "14: the case stopped: " + String(r14.e?.message ?? r14.e).slice(0, 300));
-  // (r3: case 14 not finished (a failed check, a throw or its budget): what it needs to be diagnosed, every page
-  // question bounded at 10 s, every line redacted: each page's turn-on phases (the last one completed), owner and
-  // warnings; the pages' console; the sync requests still waiting and the sockets open; on cloud, its log's tail)
+  // (case 14 not finished (a failed check, a throw or its budget): what it needs to be diagnosed, every page question
+  // bounded at 10 s, every line through doc-sync-diag.mjs: each page's turn-on phases (the last one completed), owner
+  // state, panel text, what the panel said, and warnings; the pages' console; the sync requests still waiting, the
+  // sockets open, and the front's last 60 lines)
   if (r14 === LATECASE || !r14.ok) {
-    const say = (s) => console.log("diag14: " + redact(s, 600));
-    const ask = async (P, expr) => {
-      const v = await Promise.race([P.ev(expr).catch((e) => ({ error: String(e?.message ?? e) })), sleep(10_000).then(() => "(no answer in 10 s)")]);
-      return typeof v === "string" ? v : J(v);
-    };
-    if (!D14) say("the pages weren't made");
+    const NO = Symbol("no answer");
+    const ask = async (P, expr) => Promise.race([P.ev(expr).catch((e) => ({ [NO]: String(e?.message ?? e) })), sleep(10_000).then(() => ({ [NO]: "no answer in 10 s" }))]);
+    if (!D14) emit.text("diag14: ", "the pages weren't made");
     else for (const [n, P] of Object.entries(D14)) {
-      say(`${n} turnOn: ` + (await ask(P, "T.turnInfo ? T.turnInfo() : null")));
-      say(`${n} owner: ` + (await ask(P, "T.owner ? T.ownerState() : null")));
-      say(`${n} warnings: ` + (await ask(P, "T.warnings()")));
+      const info = await ask(P, "T.turnInfo ? T.turnInfo() : null");
+      if (info?.[NO]) emit.text(`diag14: ${n} turnOn: `, info[NO]);
+      else {
+        emit.phases(`diag14: ${n} turnOn phases: `, info?.phases);
+        emit.text(`diag14: ${n} panel: `, info?.panel ?? "(none)");
+        emit.text(`diag14: ${n} said: `, J(info?.said ?? []), 600);
+      }
+      const st = await ask(P, "T.owner ? T.ownerState() : null");
+      if (st?.[NO]) emit.text(`diag14: ${n} owner: `, st[NO]); else emit.owner(`diag14: ${n} owner: `, st);
+      const w = await ask(P, "T.warnings()");
+      emit.text(`diag14: ${n} warnings: `, w?.[NO] ?? J(w), 600);
     }
-    say(`the pages' console warnings and errors: ${pageConsole.length}${pageConsole.length > 40 ? " (the last 40)" : ""}`);
-    for (const l of pageConsole.slice(-40)) say("  " + l);
-    say("sync requests still waiting: " + J([...proxyOpen].map(([k, { what, t }]) => `#${k} ${what} ${Date.now() - t}ms`)));
-    say(`sockets open: ${J([...sockOpen])} of ${sockN}; sync requests ${proxyN}`);
-    if (CLOUD) {
-      say(`cloud's log: ${cloudLog.length} line(s) on this process's stdout/stderr streams${cloudLog.length > 60 ? " (the last 60)" : ""}`);
-      for (const l of cloudLog.slice(-60)) say("  cloud: " + l);
-    }
+    emit.text("diag14: ", `the pages' console warnings and errors: ${pageConsole.length}${pageConsole.length > 40 ? " (the last 40)" : ""}`);
+    for (const l of pageConsole.slice(-40)) emit.text("diag14:   ", l);
+    emit.waiting("diag14: ", [...proxyOpen].map(([k, { method, path, t }]) => ({ k, method, path, ms: Date.now() - t })));
+    emit.counts("diag14: ", [...sockOpen], sockN, proxyN);
+    emit.recent("diag14: ", 60);
   }
   censusAt("cases-done");
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
