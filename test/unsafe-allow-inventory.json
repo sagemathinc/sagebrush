@@ -332,6 +332,54 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-poly (deps: bigint, interrupt) does not depend on sagebrush-ledger, so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
+   "file": "engine/py/src/serve.rs",
+   "item": "impl Source for Borrowed > fn readable_within",
+   "hash": "3567165f40508ddac708330d07460fb3a66d2134dfb29ddab82bdd5538203fb6",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. libc::poll on one pollfd local to the call (the borrowed input descriptor, POLLIN), with a bounded millisecond timeout; it reads and writes only that local and returns a count. No ledger object is involved."
+  },
+  {
+   "file": "engine/py/src/serve.rs",
+   "item": "fn borrow_file",
+   "hash": "ed59f461a97c55b0bc2f46a02dece9afa58e03c2a87c2695b5a907baac657a49",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. It wraps a descriptor (POSIX) or handle (Windows) that the caller owns in a File held in ManuallyDrop, so the File is never closed here; the request loop only reads and writes bytes through it. It touches no ledger object and is not generic over one."
+  },
+  {
+   "file": "engine/py/src/serve.rs",
+   "item": "impl Send for MainThread",
+   "hash": "dace69d9855149c83015ea06269336830e883f752d8605dc15f68a23e52b934f",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. MainThread holds a pthread_t, only ever passed to pthread_kill by the control thread (a pointer type on macOS, hence not Send by default). Sending the id across threads shares no memory. No ledger type is involved."
+  },
+  {
+   "file": "engine/py/src/serve.rs",
+   "item": "fn this_thread",
+   "hash": "c8b38451a7ead6b34bb053f5c0cd8f6365f9ad075354555b2c3dab850a001c30",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. pthread_self() returns the calling thread's id, wrapped for the control thread's wake. It has no preconditions and no effect."
+  },
+  {
+   "file": "engine/py/src/serve.rs",
+   "item": "fn wake",
+   "hash": "7efbf86291dd12f026e53397cffee1d88e54955521ce7848a8b0d57ca42787b1",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sigaction with a null new action only reads SIGUSR1's current action (into a zeroed local); pthread_kill sends SIGUSR1 to the worker's main thread when that action is a handler. It reads and writes no memory but the local, and touches no ledger object."
+  },
+  {
+   "file": "engine/py/src/serve.rs",
+   "item": "fn line_str",
+   "hash": "fad205a2e4a29daebbfe2d27c0f876d3d5829fee423d12ac1f66ed56f20a7b40",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. PyUnicode_DecodeUTF8 reads exactly line.len() bytes of the borrowed request line (valid for the call), with the GIL held; it returns a new str reference or NULL with an exception set, which Bound::from_owned_ptr_or_err takes over. It creates a Python str only; no ledger object."
+  },
+  {
+   "file": "engine/py/src/serve.rs",
+   "item": "mod hooks > fn at_admission",
+   "hash": "352b63d9ad9fb0a96165020fc5ef60a5170b061392a0f975bd0af4350a56f694",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test-hooks builds only: PyErr_SetInterrupt (GIL held) asks the interpreter to raise KeyboardInterrupt at its next check, as a SIGINT would. No memory is passed, and no ledger object is touched."
+  },
+  {
+   "file": "engine/py/src/serve.rs",
+   "item": "mod tests > fn lines_across_short_reads",
+   "hash": "fe29f57464862fb74d76566cf8155df0574834887818285ff81249ce09f77e87",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test only: libc::pipe into a local [i32; 2], and libc::close of the two descriptors that pipe made, after their last use. Plain descriptors; no ledger object."
+  },
+  {
    "file": "engine/raster/src/lib.rs",
    "item": "fn rs_alloc",
    "hash": "141546c7e7c5158568365f8f3e6f5e2af4baad9c494ab70cc719379c44c1b1be",

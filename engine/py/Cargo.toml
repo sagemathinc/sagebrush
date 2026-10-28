@@ -22,6 +22,10 @@ sagebrush-par = { path = "../par", features = ["parallel"] }
 pyo3 = { version = "0.27", features = ["extension-module", "num-bigint"] }
 num-bigint = "0.4"
 serde_json = "1"
+memchr = "2"  # (already in the tree, through serde_json: the request reader's newline scan)
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [features]
 # Tests only, never in a released wheel: _native._test_guarded (test_capacity.py)

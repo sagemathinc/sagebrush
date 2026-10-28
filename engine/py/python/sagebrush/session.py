@@ -82,22 +82,38 @@ class _Hold:
     as KeyboardInterrupt when the outermost hold ends; otherwise it raises
     at once, as Python's own handler does.  Other threads never hold: a
     Ctrl-C interrupts the main thread, not them, so their writes need only
-    the capture's lock."""
+    the capture's lock.
+
+    Installed with the native request loop (install(native), the worker),
+    an interrupt counts only for a request that is running, told by its
+    signal (Ctrl-C plan r4): SIGUSR1 is a targeted interrupt's wake, and
+    raises iff the request it was armed for is still running (native
+    _serve_take); SIGINT (SIGBREAK) is external, a terminal's Ctrl-C, and
+    raises iff a request is running (_serve_busy).  Any other is a stray,
+    counted and ignored.  Without it (install()), every interrupt counts."""
 
     def __init__(self):
         import threading
 
         self.depth = 0
         self.pending = False
+        self.strays = 0
         self.main = threading.main_thread()
         self.current = threading.current_thread
+        self.busy = self.take = lambda: True
 
-    def install(self):
+    def install(self, native=None):
+        if native is not None:
+            self.busy, self.take = native._serve_busy, native._serve_take
         for sig in _INT_SIGNALS:
             signal.signal(sig, self._handler)
+        if native is not None and hasattr(signal, "SIGUSR1"):
+            signal.signal(signal.SIGUSR1, self._handler)
 
     def _handler(self, signum, frame):
-        if self.depth:
+        if not (self.take() if signum == getattr(signal, "SIGUSR1", None) else self.busy()):
+            self.strays += 1
+        elif self.depth:
             self.pending = True
         else:
             raise KeyboardInterrupt
@@ -112,7 +128,7 @@ class _Hold:
             self.depth -= 1
             if not self.depth and self.pending:
                 self.pending = False
-                if exc[0] is None:
+                if exc[0] is None and self.busy():
                     raise KeyboardInterrupt
         return False
 
@@ -350,6 +366,14 @@ class _Capture:
     def stream(self, name):
         return _Stream(self, name)
 
+    def release(self):
+        """After its reply is encoded: the capture sealed and its text let go
+        (daybreak2's PR B r1 #2: no earlier run's output resident while the
+        next request is read, even for a thread that kept the run's stream)."""
+        with _HOLD, self.sender.lock:
+            self.sealed = True
+            self.head, self.tail, self.tail_n, self.buf, self.pending = "", [], 0, [], 0
+
     def write(self, text, stream="stdout"):
         if not isinstance(text, str):
             raise TypeError("write() argument must be str, not %s" % type(text).__name__)
@@ -466,14 +490,142 @@ def _gc_page_temps():
 
 
 def _send_until_committed(sender, msg):
-    """A message that must reach the parent once (the reply): sent again
-    after an interrupt only if it wasn't written."""
+    """A message that must reach the parent once (the ready message): sent
+    again after an interrupt only if it wasn't written."""
     done = []
     while not done:
         try:
             sender.send(msg, lambda: done.append(True))
         except KeyboardInterrupt:
             continue
+
+
+class _Run:
+    """One admitted request's state, kept by assignment so that the native
+    loop's fallback finds what the run got to (Ctrl-C plan r2 §3a)."""
+
+    __slots__ = ("serial", "out", "reply", "t0", "displays")
+
+    def __init__(self, serial):
+        self.serial, self.out, self.reply, self.t0 = serial, None, None, time.perf_counter()
+        self.displays = []  # (this request's own: astra's CORR-CTRLC-B-1)
+
+
+def _requests(sender, shared, preparse):
+    """The native loop's three callbacks (sagebrush._native._serve_requests):
+    run_request(line, serial), called once per admitted request: its setup,
+    the user's code and its reply, the capture sealed under the sender's lock
+    before it returns; fallback_reply(id, serial, exc), for a request that
+    run_request didn't finish (an exception escaped it: a KeyboardInterrupt
+    anywhere, in setup or past a skipped handler): the reply run_request had
+    recorded, or else what its capture has, sealed, with the error; it runs
+    no user code, and the loop calls it again if it is interrupted; and
+    encode(reply), the reply's line, after which the run is let go (its
+    capture released, its streams kept: _Capture.release).  A request's
+    displays are its own _Run's, never an earlier one's (astra's
+    CORR-CTRLC-B-1): a request stopped before its _Run exists has none."""
+    import ast
+    import builtins
+    import contextlib
+    import json
+
+    cur = [None]
+
+    def display(obj):
+        run = cur[0]
+        return _show(run.displays if run is not None else [], obj)
+
+    builtins.__pyjs_display__ = display
+
+    def run_request(line, serial):
+        run = _Run(serial)
+        cur[0] = run
+        req = json.loads(line)
+        code, mode, isolated, rid = req["code"], req.get("mode", "sage"), req.get("isolated", False), req.get("id")
+        want_data = req.get("data", False)
+        run.out = out = _Capture(sender, rid)
+        result = error = info = data = None
+        try:
+            _reset_run_state()
+            ns = shared
+            if isolated:
+                ns = {"__name__": "__main__"}
+                exec("from sagebrush.sage import *", ns)
+            with contextlib.redirect_stdout(out.stream("stdout")), contextlib.redirect_stderr(out.stream("stderr")):
+                src = preparse(code) if mode == "sage" else code
+                tree = ast.parse(src, "<cell>", "exec")
+                last = tree.body.pop() if tree.body and isinstance(tree.body[-1], ast.Expr) else None
+                exec(compile(tree, "<cell>", "exec"), ns)
+                if last is not None:
+                    v = eval(compile(ast.Expression(last.value), "<cell>", "eval"), ns)
+                    if v is not None:
+                        ns["_"] = v
+                        if not (hasattr(v, "_repr_svg_") and _show(run.displays, v)):
+                            result = repr(v)
+                if want_data:
+                    data = ns.get("__sagebrush_data__")
+                    json.dumps(data)  # (JSON, or the TypeError says why not)
+        except KeyboardInterrupt as e:
+            error, info = _interrupted(e)
+        except BaseException as e:  # SystemExit too: the session survives
+            error = _format_exception(e, e.__traceback__)
+            info = _error_info(e, e.__traceback__)
+        # (the run's end, in one step under the output lock: what is left of
+        # its output drained, its capture sealed, its counts taken.  A thread
+        # that still holds the run's stream writes into the sealed capture:
+        # dropped, astra PR120-SEM-8.  The native loop writes the reply)
+        with _HOLD, sender.lock:
+            out._flush()
+            out.sealed = True
+            run.reply = {"id": rid, "stdout": out.text(), "stdout_chars": out.total, "output_bytes": dict(out.bytes), "result": result, "error": error,
+                         "error_info": info, "data": data if info is None else None, "displays": list(run.displays),
+                         "seconds": time.perf_counter() - run.t0}
+        return run.reply
+
+    def fallback_reply(rid, serial, exc):
+        run = cur[0]
+        if run is None or run.serial != serial:
+            run = None  # (it escaped before this request's state was recorded)
+        if run is not None and run.reply is not None:
+            return run.reply  # (it had finished: its own reply)
+        out = run.out if run is not None else None
+        if out is not None:
+            with _HOLD, sender.lock:
+                if not out.sealed:
+                    out._flush()
+                    out.sealed = True
+        if isinstance(exc, KeyboardInterrupt):
+            error, info = _interrupted(exc)
+        else:
+            error, info = _format_exception(exc, exc.__traceback__), _error_info(exc, exc.__traceback__)
+        return {"id": rid, "stdout": out.text() if out else "", "stdout_chars": out.total if out else 0,
+                "output_bytes": dict(out.bytes) if out else {"stdout": 0, "stderr": 0}, "result": None, "error": error,
+                "error_info": info, "data": None, "displays": list(run.displays) if run else [],
+                "seconds": time.perf_counter() - run.t0 if run else 0.0}
+
+    def encode(reply):
+        line = json.dumps(reply) + "\n"  # (ASCII: \\u escapes, a lone surrogate included)
+        run, cur[0] = cur[0], None
+        if run is not None and run.out is not None:
+            run.out.release()
+        return line
+
+    return run_request, fallback_reply, encode
+
+
+def _interrupted(e):
+    error = "KeyboardInterrupt: the computation was interrupted"
+    info = _error_info(e, None)
+    info["message"], info["traceback"] = "the computation was interrupted", error
+    return error, info
+
+
+def _show(displays, obj):
+    f = getattr(obj, "_repr_svg_", None)
+    if f is None:
+        return False
+    displays.append(("image/svg+xml", f()))
+    return True
 
 
 def _print_borrows_stdout(version=None, implementation=None):
@@ -509,32 +661,33 @@ def _strong_print():
 
 def _worker():
     """The child: JSON requests on stdin, JSON replies on the original
-    stdout; everything else written to stdout goes to stderr."""
-    import ast
+    stdout; everything else written to stdout goes to stderr.  The requests
+    are read, run and answered by the native loop (_requests); stdin itself
+    is /dev/null for the user's code.  POSIX: targeted interrupts arrive on
+    the control pipe (SAGEBRUSH_CONTROL_FD, Session.interrupt)."""
     import builtins
-    import contextlib
-    import io
-    import json
+    from sagebrush import _native
 
-    proto = os.fdopen(os.dup(1), "w", encoding="utf-8")
+    proto_fd = os.dup(1)
+    proto = os.fdopen(proto_fd, "w", encoding="utf-8", closefd=False)
     try:
         os.dup2(2, 1)
     except OSError:
         pass
     sys.stdout = sys.stderr
-    displays = []
-
-    def display(obj):
-        f = getattr(obj, "_repr_svg_", None)
-        if f is None:
-            return False
-        displays.append(("image/svg+xml", f()))
-        return True
-
-    builtins.__pyjs_display__ = display
+    in_fd = os.dup(0)
+    try:
+        null = os.open(os.devnull, os.O_RDONLY)
+        os.dup2(null, 0)
+        os.close(null)
+    except OSError:
+        pass
+    ctl = os.environ.pop("SAGEBRUSH_CONTROL_FD", None)
+    ctl_fd = int(ctl) if ctl and os.name != "nt" else None
+    builtins.__pyjs_display__ = lambda obj: _show([], obj)  # (until the loop's own: _requests)
     from sagebrush.preparse import preparse
 
-    _HOLD.install()  # (the main thread: the only one that handles signals)
+    _HOLD.install(_native)  # (the main thread: the only one that handles signals)
     _break_as_sigint()
     if _print_borrows_stdout():
         _strong_print()
@@ -543,65 +696,13 @@ def _worker():
     exec("from sagebrush.sage import *", shared)
     _send_until_committed(sender, {"ready": True})
     _gc_page_temps()
-    inp = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
-    while True:
-        try:
-            line = inp.readline()
-        except KeyboardInterrupt:
-            continue  # an interrupt that arrived after the computation ended
-        if not line:
-            return
-        req = json.loads(line)
-        code, mode, isolated, rid = req["code"], req.get("mode", "sage"), req.get("isolated", False), req.get("id")
-        want_data = req.get("data", False)
-        ns = shared
-        if isolated:
-            ns = {"__name__": "__main__"}
-            exec("from sagebrush.sage import *", ns)
-        out = _Capture(sender, rid)
-        del displays[:]
-        result = error = info = data = None
-        t0 = time.perf_counter()
-        try:
-            _reset_run_state()
-            with contextlib.redirect_stdout(out.stream("stdout")), contextlib.redirect_stderr(out.stream("stderr")):
-                src = preparse(code) if mode == "sage" else code
-                tree = ast.parse(src, "<cell>", "exec")
-                last = tree.body.pop() if tree.body and isinstance(tree.body[-1], ast.Expr) else None
-                exec(compile(tree, "<cell>", "exec"), ns)
-                if last is not None:
-                    v = eval(compile(ast.Expression(last.value), "<cell>", "eval"), ns)
-                    if v is not None:
-                        ns["_"] = v
-                        if not (hasattr(v, "_repr_svg_") and display(v)):
-                            result = repr(v)
-                if want_data:
-                    data = ns.get("__sagebrush_data__")
-                    json.dumps(data)  # (JSON, or the TypeError says why not)
-        except KeyboardInterrupt as e:
-            error = "KeyboardInterrupt: the computation was interrupted"
-            info = _error_info(e, None)
-            info["message"], info["traceback"] = "the computation was interrupted", error
-        except BaseException as e:  # SystemExit too: the session survives
-            error = _format_exception(e, e.__traceback__)
-            info = _error_info(e, e.__traceback__)
-        # (the run's end, in one step under the output lock: what is left of
-        # its output drained, its capture sealed, its counts taken, and the
-        # reply written, once.  A thread that still holds the run's stream
-        # writes into the sealed capture: dropped, astra PR120-SEM-8)
-        done, reply = [], None
-        while not done:
-            try:
-                with _HOLD, sender.lock:
-                    if reply is None:
-                        out._flush()
-                        out.sealed = True
-                        reply = {"id": rid, "stdout": out.text(), "stdout_chars": out.total, "output_bytes": dict(out.bytes), "result": result, "error": error,
-                                 "error_info": info, "data": data if info is None else None, "displays": list(displays),
-                                 "seconds": time.perf_counter() - t0}
-                    sender.send(reply, lambda: done.append(True))
-            except KeyboardInterrupt:
-                continue  # (an interrupt after the computation: for nothing)
+    if os.name == "nt":
+        import msvcrt
+        handle = msvcrt.get_osfhandle
+    else:
+        def handle(fd):
+            return fd
+    _native._serve_requests(handle(in_fd), handle(proto_fd), ctl_fd, *_requests(sender, shared, preparse))
 
 
 class Session:
@@ -616,6 +717,7 @@ class Session:
 
     def __init__(self):
         self.proc = None
+        self.control = None  # (POSIX: the write end of the worker's control pipe)
         self.generation = 0
         self.last_id = 0   # (each request's id, minted before it is sent)
         self.stale = 0     # (messages dropped for another request's id)
@@ -627,12 +729,29 @@ class Session:
         import threading
 
         flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
-        self.proc = subprocess.Popen(
-            self.WORKER_ARGV or [sys.executable, "-m", "sagebrush.session", "--worker"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            creationflags=flags,
-        )
+        self._close_control()
+        env, fds, r = None, (), None
+        if os.name != "nt":
+            # (targeted interrupts: ids written here, read by the worker's
+            # control thread; the write end never blocks)
+            r, self.control = os.pipe()
+            os.set_blocking(self.control, False)
+            env, fds = dict(os.environ, SAGEBRUSH_CONTROL_FD=str(r)), (r,)
+        try:
+            self.proc = subprocess.Popen(
+                self.WORKER_ARGV or [sys.executable, "-m", "sagebrush.session", "--worker"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                creationflags=flags,
+                env=env,
+                pass_fds=fds,
+            )
+        except BaseException:
+            self._close_control()
+            raise
+        finally:
+            if r is not None:
+                os.close(r)
         self.generation += 1
         self.replies = queue.Queue()
 
@@ -674,15 +793,32 @@ class Session:
         if self.alive():
             self.proc.kill()
             self.proc.wait(5)
+        self._close_control()
 
-    def interrupt(self):
-        """Interrupt the running computation (KeyboardInterrupt in the
-        session, which also stops the Rust engines)."""
-        if self.alive():
-            if os.name == "nt":
-                self.proc.send_signal(signal.CTRL_BREAK_EVENT)
-            else:
-                self.proc.send_signal(signal.SIGINT)
+    def _close_control(self):
+        if self.control is not None:
+            try:
+                os.close(self.control)
+            except OSError:
+                pass
+            self.control = None
+
+    def interrupt(self, rid=None):
+        """Interrupt request rid's computation (KeyboardInterrupt in the
+        session, which also stops the Rust engines), if it is still running;
+        rid None: whatever is running.  POSIX: the id goes on the control
+        pipe, no signal is sent from here, so an interrupt for a request that
+        already finished interrupts nothing (Ctrl-C plan r4).  Windows: a
+        Ctrl-Break, untargeted, as before (CORR-CTRLC-3-Windows)."""
+        if not self.alive():
+            return
+        if os.name == "nt":
+            self.proc.send_signal(signal.CTRL_BREAK_EVENT)
+        elif self.control is not None:
+            try:
+                os.write(self.control, b"*\n" if rid is None else b"%d\n" % rid)
+            except OSError:
+                pass  # (the worker isn't reading: the caller's grace and restart end it)
 
     def _send(self, code, mode, isolated, data):
         import json
@@ -743,7 +879,14 @@ class Session:
             self._start()
             restarted = True
         rid = self._send(code, mode, isolated, data)
-        r = self._get(rid, timeout)
+        try:
+            r = self._get(rid, timeout)
+        except KeyboardInterrupt:
+            # (this process's own Ctrl-C, a terminal's, which the worker may
+            # have lost to coalescing: re-targeted at the request, so it ends
+            # with its interrupted reply, which the next run drops by id)
+            self.interrupt(rid)
+            raise
         if r:
             r["restarted"] = restarted
             return r
@@ -752,7 +895,7 @@ class Session:
             msg = "The session process died during the computation and was restarted (its variables were lost)."
             return {"stdout": "", "result": None, "error": msg, "error_info": _failure("session", msg), "data": None, "displays": [], "seconds": 0.0, "restarted": True}
         # over time: interrupt, then give it a few seconds to stop cleanly
-        self.interrupt()
+        self.interrupt(rid)
         r = self._get(rid, 5)
         if r:
             if (r.get("error_info") or {}).get("type") == "interrupted":

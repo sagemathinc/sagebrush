@@ -8,6 +8,8 @@ use pyo3::exceptions::{PyKeyboardInterrupt, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+mod serve;
+
 /// The thread that imported the module: Python's main thread, the one that
 /// receives Ctrl-C.
 static MAIN: std::sync::OnceLock<std::thread::ThreadId> = std::sync::OnceLock::new();
@@ -878,6 +880,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_memory_share_source, m)?)?;
     m.add_function(wrap_pyfunction!(set_memory_total_source, m)?)?;
     m.add_function(wrap_pyfunction!(ledger_snapshot, m)?)?;
+    serve::register(m)?;
     for f in [
         wrap_pyfunction!(progress_begin, m)?,
         wrap_pyfunction!(progress_update, m)?,
