@@ -1238,10 +1238,16 @@ jobs:
         run: scripts/ci-cpus.sh
       - uses: dtolnay/rust-toolchain@stable
       # (engine/rust-toolchain.toml pins the toolchain (1.99.1, profile minimal) for every cargo command under engine/:
-      #  clippy goes onto THAT toolchain, which rustup selects here from the file; the file itself is unchanged)
+      #  clippy goes onto THAT toolchain, which rustup selects here from the file; the file itself is unchanged.
+      #  `rustup toolchain install` with no name installs the file's toolchain first, explicitly, rather than
+      #  relying on rustup's implicit install on first use, whose default has changed between rustup releases.
+      #  RUSTUP_AUTO_INSTALL=0 turns that implicit install off for this step, so a command that would need it fails
+      #  instead; `rustup --version` comes after the install, since it resolves the active toolchain too)
       - name: clippy for the pinned engine toolchain
         working-directory: engine
-        run: rustup component add clippy && rustup show active-toolchain
+        env:
+          RUSTUP_AUTO_INSTALL: "0"
+        run: rustup toolchain install && rustup --version && rustup component add clippy && rustup show active-toolchain
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: engine
