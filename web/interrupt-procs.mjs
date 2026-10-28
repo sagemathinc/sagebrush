@@ -2,8 +2,8 @@
 // process a session started, killing all of them, and checking that none survived.  Linux /proc.
 import { readdirSync, readFileSync } from "node:fs";
 
-// the live (non-zombie) processes: pid -> { ppid, pgid, start } (start: the kernel's start time,
-// so a remembered pid is never confused with a reused one)
+// the live (non-zombie) processes: pid -> { ppid, pgid, start, comm } (start: the kernel's start time,
+// so a remembered pid is never confused with a reused one; comm: the exact name in the stat line)
 export function procTable() {
   const t = new Map();
   for (const p of readdirSync("/proc")) {
@@ -11,11 +11,79 @@ export function procTable() {
     try {
       const f = readFileSync(`/proc/${p}/stat`, "utf8");
       const fields = f.slice(f.lastIndexOf(")") + 2).split(" ");
-      if (fields[0] !== "Z") t.set(Number(p), { ppid: Number(fields[1]), pgid: Number(fields[2]), start: fields[19] });
+      if (fields[0] !== "Z") t.set(Number(p), { ppid: Number(fields[1]), pgid: Number(fields[2]), start: fields[19], comm: f.slice(f.indexOf("(") + 1, f.lastIndexOf(")")) });
     } catch {}
   }
   return t;
 }
+// The prompt host's target: `script` runs its command under `$SHELL -c`, so the launcher can be below script's
+// child rather than the child itself.  On CI, master's E2/prompt leak check, looking only at script's children, fell
+// back to sampling `script` itself (2.1 MB, 1 thread; ci 40623842094, 40630220192, 40654466507, 40657095581), and
+// #267's first head, without that fallback, found no target at all (ci 40663773904).
+// From ONE table snapshot, following current parent links down from root only (a remembered orphan or a member of
+// root's group that isn't below it is cleanup evidence, never a candidate): the unique nearest process named exactly
+// `name`, as { pid, comm, depth, start }.  None, or a tie at the nearest depth: { pid: null, why, tree }, never an
+// arbitrary pid and never root; tree: root's current descendants with their depth (at most 16), the evidence.
+export function selectTarget(root, t = procTable(), name = "node") {
+  const depth = new Map([[root, 0]]);
+  for (let level = [root], d = 1; level.length && d <= t.size; d++) {
+    const next = [];
+    for (const [q, x] of t) if (!depth.has(q) && level.includes(x.ppid)) { depth.set(q, d); next.push(q); }
+    level = next;
+  }
+  const tree = [...depth].filter(([q]) => t.has(q)).map(([q, d]) => ({ pid: q, ppid: t.get(q).ppid, comm: t.get(q).comm, depth: d }))
+    .sort((a, b) => a.depth - b.depth || a.pid - b.pid);
+  const named = tree.filter((x) => x.pid !== root && x.comm === name);
+  if (!named.length) return { pid: null, why: `no ${name} process below ${root}`, tree: tree.slice(0, 16) };
+  const nearest = named.filter((x) => x.depth === named[0].depth);
+  if (nearest.length > 1) return { pid: null, why: `${nearest.length} ${name} processes at depth ${nearest[0].depth}: ${nearest.map((x) => x.pid).join(", ")}`, ambiguous: true, tree: tree.slice(0, 16) };
+  const { pid, comm, depth: dd } = nearest[0];
+  return { pid, comm, depth: dd, start: t.get(pid).start };
+}
+
+// (a process's /proc/PID/stat as { state, flags, start } (its start time identifies the process across reads), or
+// "gone" when it no longer exists (ENOENT), or an { error } for any other failure or a malformed line)
+export function statOf(pid) {
+  let s;
+  try {
+    s = readFileSync(`/proc/${pid}/stat`, "utf8");
+  } catch (e) {
+    return e?.code === "ENOENT" || e?.code === "ESRCH" ? "gone" : { error: `stat: ${e?.code ?? e}` };
+  }
+  const f = s.slice(s.lastIndexOf(")") + 2).trim().split(" ");
+  const flags = Number(f[6]), start = f[19];
+  if (!/^[A-Za-z]$/.test(f[0] ?? "") || !Number.isFinite(flags) || !/^\d+$/.test(start ?? "")) return { error: "a malformed stat line" };
+  return { state: f[0], flags, start };
+}
+export const exitingStat = (x) => x === "gone" || x.state === "Z" || x.state === "X" || (x.flags & 0x4) !== 0;
+// (the target's rss and threads at a DONE, read between two stat reads of the same process (its start time the same
+// in both): exiting if either read finds it exiting (Z, X or PF_EXITING) or gone, as a target that prints its last
+// DONE and exits at once is read with its threads already going (python's report on #251's fake); and a sample
+// error, invalid evidence, never "exiting", for a read that fails otherwise, a malformed stat, or a different
+// process under the pid. No target (the prompt host's node gone): exiting, never the wrapper in its place.
+// start: the start time the target was selected with (selectTarget): a first read with another start time is a
+// different process under a reused pid, a sample error.
+// leakCheck drops a final exiting sample and says so; any other exiting sample, or any sample error, is invalid)
+export function procStatus(pid, start = null) {
+  if (pid == null) return { exiting: true, why: "no target process" };
+  const a = statOf(pid);
+  if (a.error) return { sample_error: a.error };
+  if (a === "gone") return { exiting: true, why: "gone" };
+  if (start != null && a.start !== start) return { sample_error: "another process under the selected pid (its start time changed)" };
+  let t;
+  try {
+    t = readFileSync(`/proc/${pid}/status`, "utf8");
+  } catch (e) {
+    return e?.code === "ENOENT" || e?.code === "ESRCH" ? { exiting: true, why: "gone" } : { sample_error: `status: ${e?.code ?? e}` };
+  }
+  const b = statOf(pid);
+  if (b.error) return { sample_error: b.error };
+  if (b !== "gone" && b.start !== a.start) return { sample_error: "another process under the pid" };
+  const g = (k) => Number((t.match(new RegExp(`^${k}:\\s+(\\d+)`, "m")) ?? [])[1]);
+  const r = { rss_kb: g("VmRSS"), threads: g("Threads") };
+  return exitingStat(a) || exitingStat(b) ? { ...r, exiting: true } : r;
+}
+
 // a session's processes: its group and every descendant.  The prompt's launcher runs under
 // `script` in a session (and group) of its own, so the group alone misses it, and killing
 // `script` orphans it, still computing (VM1, Oct 24): the tree is collected before any kill.

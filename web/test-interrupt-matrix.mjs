@@ -14,11 +14,11 @@
 // leak series 20 repeats (plan-interrupt-harness r4 §3, §6.1, §8).  Rows are checked against
 // web/interrupt-baseline.json; --ci exits 1 on FAIL, INCOMPLETE or FIXED.
 import { spawn } from "node:child_process";
-import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, leakRowOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, ciFailing, waiverErrors, widenedPick, withWaiver, xkRowOutcome } from "./interrupt-classify.mjs";
-import { killTracked, killTree, onStop, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
+import { killTracked, killTree, onStop, procStatus, procTable, selectTarget, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 // (SB_BASELINE: another baseline, for checking the harness: its tests pin their fake rows there, never in the real one)
 const BASELINE = JSON.parse(readFileSync(process.env.SB_BASELINE ?? new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 // William's waivers of the Stop bound (only active records; a malformed registry fails the run, below)
@@ -151,57 +151,14 @@ if (args.includes("--print-driver")) {
   process.exit(0);
 }
 
-// (the target's /proc/PID/stat as { state, flags, start } (its start time identifies the process across reads), or
-// "gone" when it no longer exists (ENOENT), or an { error } for any other failure or a malformed line)
-function statOf(pid) {
-  let s;
-  try {
-    s = readFileSync(`/proc/${pid}/stat`, "utf8");
-  } catch (e) {
-    return e?.code === "ENOENT" || e?.code === "ESRCH" ? "gone" : { error: `stat: ${e?.code ?? e}` };
-  }
-  const f = s.slice(s.lastIndexOf(")") + 2).trim().split(" ");
-  const flags = Number(f[6]), start = f[19];
-  if (!/^[A-Za-z]$/.test(f[0] ?? "") || !Number.isFinite(flags) || !/^\d+$/.test(start ?? "")) return { error: "a malformed stat line" };
-  return { state: f[0], flags, start };
-}
-const exitingStat = (x) => x === "gone" || x.state === "Z" || x.state === "X" || (x.flags & 0x4) !== 0;
-// (the target's rss and threads at a DONE, read between two stat reads of the same process (its start time the same
-// in both): exiting if either read finds it exiting (Z, X or PF_EXITING) or gone, as a target that prints its last
-// DONE and exits at once is read with its threads already going (python's report on #251's fake); and a sample
-// error, invalid evidence, never "exiting", for a read that fails otherwise, a malformed stat, or a different
-// process under the pid. No target (the prompt host's node gone): exiting, never the wrapper in its place.
-// leakCheck drops a final exiting sample and says so; any other exiting sample, or any sample error, is invalid)
-function procStatus(pid) {
-  if (pid == null) return { exiting: true, why: "no target process" };
-  const a = statOf(pid);
-  if (a.error) return { sample_error: a.error };
-  if (a === "gone") return { exiting: true, why: "gone" };
-  let t;
-  try {
-    t = readFileSync(`/proc/${pid}/status`, "utf8");
-  } catch (e) {
-    return e?.code === "ENOENT" || e?.code === "ESRCH" ? { exiting: true, why: "gone" } : { sample_error: `status: ${e?.code ?? e}` };
-  }
-  const b = statOf(pid);
-  if (b.error) return { sample_error: b.error };
-  if (b !== "gone" && b.start !== a.start) return { sample_error: "another process under the pid" };
-  const g = (k) => Number((t.match(new RegExp(`^${k}:\\s+(\\d+)`, "m")) ?? [])[1]);
-  const r = { rss_kb: g("VmRSS"), threads: g("Threads") };
-  return exitingStat(a) || exitingStat(b) ? { ...r, exiting: true } : r;
-}
-// the launcher under `script` (the prompt host): the node process among script's children
-function launcherChild(pid) {
-  for (const q of readdirSync("/proc")) {
-    if (!/^\d+$/.test(q)) continue;
-    try {
-      const f = readFileSync(`/proc/${q}/stat`, "utf8");
-      const fields = f.slice(f.lastIndexOf(")") + 2).split(" ");
-      if (Number(fields[1]) === pid && /node/.test(f.slice(f.indexOf("(") + 1, f.lastIndexOf(")")))) return Number(q);
-    } catch {}
-  }
-  // (no node child: it's gone; never the wrapper in its place, whose memory and threads aren't the target's)
-  return null;
+// the launcher under `script` (the prompt host): selectTarget's unique nearest node below script, recorded in every
+// prompt sample with its pid, comm, depth and start; none, or a tie: pid null with why and the tree.  A tie is a
+// sample error (invalid evidence); none is a missing target (exiting), never the wrapper in its place, whose memory
+// and threads aren't the target's
+function promptSample(pid) {
+  const target = selectTarget(pid);
+  const read = target.pid == null && target.ambiguous ? { sample_error: target.why } : procStatus(target.pid, target.start ?? null);
+  return { target, ...read };
 }
 // (every session is in interrupt-procs.mjs's one registry: killed, tree and all, if the harness is stopped)
 
@@ -291,7 +248,7 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       if ((mk === "KI" || mk === "RET") && guard) { clearTimeout(guard); guard = null; }
       if (mk === "PROBE") t.probe = rest;
       if (mk === "STRAY") t.stray = rest;
-      if (mk === "DONE") samples.push({ i: t.i, ...(procStatus(host === "cli" ? p.pid : launcherChild(p.pid)) ?? {}), ...(/^\d+$/.test(rest.trim()) ? { mem_kb: Number(rest.trim()) / 1024 } : {}) });
+      if (mk === "DONE") samples.push({ i: t.i, ...(host === "cli" ? procStatus(p.pid) : promptSample(p.pid)), ...(/^\d+$/.test(rest.trim()) ? { mem_kb: Number(rest.trim()) / 1024 } : {}) });
     };
     const feed = (d) => {
       buf += d;
