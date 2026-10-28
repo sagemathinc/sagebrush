@@ -22,7 +22,7 @@ const statics = [];
   const writes = Object.keys(src).filter((f) => /seqKey\([^)]*"p"/.test(src[f]));
   statics.push([J(writes) === J(["journal/rows.js"]), "only journal/rows.js writes an intent row: " + J(writes)]);
   const asks = Object.keys(src).filter((f) => /t1Write\(/.test(src[f]));
-  statics.push([J(asks.sort()) === J(["journal/core.js", "journal/rows.js", "notebook/journal.js"]), "only the journal asks for a T1 with an intent: " + J(asks)]);
+  statics.push([J(asks.sort()) === J(["journal/core.js", "journal/rows.js", "journal/store.js"]), "only the journal asks for a T1 with an intent: " + J(asks)]);
   const copy = /st\.put\(\{ nb: id, time: row\.time, env: row\.env \}\)/.test(src["index.html"] ?? ""), imp = /st\.put\(\{ nb: id, time: env\.time, env \}\)/.test(src["notebook/bundle.js"] ?? "");
   statics.push([copy && imp, "Resume's copy and an import write {nb, time, env} rows alone"]);
 }
