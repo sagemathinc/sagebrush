@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
-import { againstBaseline, browserFailure, browserLeak, rowOutcome, workerRoles } from "./interrupt-classify.mjs";
+import { againstBaseline, browserFailure, browserLeak, rowOutcome, stopGate, workerRoles } from "./interrupt-classify.mjs";
 
 const now = () => Number(process.hrtime.bigint()) / 1e6;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -203,12 +203,13 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
           const w1 = await workers();
           const sameWorker = JSON.stringify(w0.map((w) => w.id)) === JSON.stringify(w1.map((w) => w.id));
           const probe = (out.match(new RegExp(`PROBE ${i} (\\w+)`)) ?? [])[1];
-          let outcome = "FAIL", why = "";
+          let outcome = "FAIL", why = "", late = {};
           if (/(^|\n)RET /.test(out)) why = "did not stop (returned after the Stop)";
           else if (t_recog == null) why = /did not stop/.test(out) ? "interpreter restarted" : "no KeyboardInterrupt within the guard";
           else if (!sameWorker) why = "worker replaced";
           else if (probe !== "ok") why = "probe " + probe;
-          else outcome = t_recog - t_send > 10000 ? "SLOW" : "PASS";
+          // (the gate reads the raw recognized-KI time minus the request: STOP_BOUND_MS, never a rounded figure)
+          else ({ outcome, why = "", ...late } = stopGate(t_recog - t_send) ?? { outcome: "PASS" });
           // the leak metrics, on the repeat series: the workers' heap every repeat, the page's total at
           // repeat 3 and at the last (it forces a garbage collection)
           let worker_heap, page_total, heap_targets;
@@ -219,7 +220,7 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
             if (rep === 3 || rep === reps) page_total = await pageTotal();
             samples.push({ i: rep, worker_heap, page_total, same_worker: sameWorker });
           }
-          trials.push({ i, cell, delay_ms: delay, outcome, why, ...(outcome === "PASS" ? {} : { out: out.slice(-600) }), latency_ms: t_recog && Math.round(t_recog - t_send), poll_ms: 20, same_worker: sameWorker, ...(worker_heap !== undefined ? { worker_heap } : {}), ...(heap_targets ? { heap_targets } : {}), ...(page_total !== undefined ? { page_total } : {}) });
+          trials.push({ i, cell, delay_ms: delay, outcome, why, ...(outcome === "PASS" ? {} : { out: out.slice(-600) }), latency_ms: t_recog && Math.round(t_recog - t_send), ...(t_recog != null ? { latency_raw_ms: t_recog - t_send } : {}), ...late, poll_ms: 20, same_worker: sameWorker, ...(worker_heap !== undefined ? { worker_heap } : {}), ...(heap_targets ? { heap_targets } : {}), ...(page_total !== undefined ? { page_total } : {}) });
         } catch (e) {
           // a trial that threw: classified (decision 4, astra CORR-168-6), and the case's other trials skipped
           const f = browserFailure(e?.message ?? e, dialogOpen);

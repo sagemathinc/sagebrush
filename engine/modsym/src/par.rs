@@ -2,7 +2,7 @@
 //! otherwise: the engine's one wrapper (sagebrush-par; every closure runs
 //! under its caller's ledger context, sequentially in exclusive mode).  The
 //! gate is this crate's feature, not sagebrush-par's, so a build that opts out
-//! (`engine/web`, `engine/wasm`: `default-features = false`) stays sequential
+//! (`engine/web`: `default-features = false`) stays sequential
 //! even when another crate in it turns sagebrush-par's `parallel` on.
 
 #[cfg(feature = "parallel")]

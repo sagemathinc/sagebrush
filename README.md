@@ -166,7 +166,7 @@ The same functions are available from:
 | Node.js (`require("./engine/node").modsym`) | napi-rs | native addon; exact coefficients are `BigInt`s |
 | Rust (`sagebrush-modsym`) | - | the engine itself |
 | command line (`sagebrush`) | - | `sagebrush modsym N q [p] [--exact] [--threads T]` |
-| WebAssembly | wasm-bindgen | single-threaded; mod-p only for now |
+| WebAssembly (`engine/web`) | plain wasm32, JSON in and out | single-threaded |
 
 Every interface is multithreaded except WASM: `threads=0` means all cores.
 
@@ -192,6 +192,9 @@ the JavaScript engine's own garbage collection, which can't be interrupted
 William, Oct 25 2026). Sagebrush's own code still checks for Stop at least
 every 250 ms; the exception covers only engine garbage-collection pauses
 longer than that.
+For now, rendering a plot to PNG in the command-line host can't be stopped
+mid-render: Stop takes effect once the render finishes. This lifts when
+interruptible rendering lands.
 
 Files: pyjs has no reference counting, so a file object isn't closed when
 its last reference goes. `with open(...)` or `.close()` is the portable form.
@@ -325,7 +328,7 @@ POSIX defaults.
 
 ## Try it
 
-From Python (3.9 or later; a 1.2 MB wheel for Linux, macOS and Windows):
+From Python (3.10 or later; a 1.2 MB wheel for Linux, macOS and Windows):
 
 ```sh
 pip install sagebrush

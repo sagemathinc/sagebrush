@@ -29,3 +29,6 @@ libc = "0.2"
 [features]
 # Tests only, never in a released wheel: _native._test_guarded (test_capacity.py)
 test-hooks = []
+
+[lints]
+workspace = true

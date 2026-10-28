@@ -3,7 +3,7 @@
 Fast, certified engines for research mathematics, in Rust, for Python.
 Permissively licensed (MIT OR Apache-2.0): use them anywhere, in anything,
 from agents and notebooks to products. No C libraries; one abi3 wheel per
-platform covers Python 3.9 and later.
+platform covers Python 3.10 and later.
 
 This is an early release of [Sagebrush](https://github.com/sagemathinc/sagebrush),
 which also runs in the browser at [sagebrush.space](https://sagebrush.space).
@@ -107,6 +107,19 @@ by one that has exited, is listed with liveness "unknown". The session also
 works on its own
 (`sagebrush.session.Session`), and `sagebrush.preparse.preparse` turns Sage
 syntax into Python.
+
+On CPython 3.10, 3.11, 3.12 before 3.12.10 and 3.13 before 3.13.3, a
+thread's `print()` racing the end of a run could write to a freed stream
+([CPython gh-130163](https://github.com/python/cpython/issues/130163)); the
+session's process makes `print()` safe there, but a thread's own lower-level
+writes at that moment (an uncaught exception's traceback, `input()`) can
+still crash it, and the session is then restarted, without its variables.
+Python 3.12.10 or later, or 3.13.3 or later, has the fix.
+
+On Python 3.10 and 3.11, importing `sagebrush` adds two methods of 3.12's
+`fractions.Fraction` that its Sage layer uses, `_from_coprime_ints` and
+`is_integer`, where they are missing; `int.is_integer` (also 3.12) is not
+added.
 
 ## Benchmarks: `sagebrush bench`
 

@@ -32,6 +32,7 @@ jobs:
       engine_cpython: ${{ steps.paths.outputs.engine_cpython }}
       webkit: ${{ steps.paths.outputs.webkit }}
       census: ${{ steps.paths.outputs.census }}
+      unsafe_sweep: ${{ steps.paths.outputs.unsafe_sweep }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
     steps:
       - uses: actions/checkout@v4
@@ -74,6 +75,13 @@ jobs:
         run: |
           python3 test/limit_sweep.py verify
           python3 test/limit_sweep_cases.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: "unsafe boundary: every allowed unsafe item pinned and audited, no lint override (scripts/unsafe-inventory.mjs)"
+        run: |
+          node scripts/test-unsafe-inventory.mjs
+          node scripts/unsafe-inventory.mjs --check
 
   node-tests:
     needs: changes
@@ -954,6 +962,33 @@ jobs:
       - working-directory: engine
         run: cargo test --workspace --exclude sagebrush-flint --exclude sagebrush-oracle
 
+  # (the unsafe boundary's compiler sweep, #234 r2 U1: every unsafe site the compiler sees, generated and
+  # expanded code included, must lie in a pinned allowed item; its own cache, parallel to engine-rust)
+  engine-unsafe-sweep:
+    needs: changes
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.unsafe_sweep == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    env:
+      RUSTFLAGS: "--force-warn unsafe-code"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+          shared-key: unsafe-sweep
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: "unsafe boundary: compiler sweep over host, feature, wasm32 and windows-msvc views (scripts/unsafe-sweep.sh)"
+        run: |
+          scripts/unsafe-sweep.sh "$RUNNER_TEMP/sweep"
+          if grep -q ' rc=[1-9]' "$RUNNER_TEMP/sweep/timings.txt"; then tail -20 "$RUNNER_TEMP"/sweep/*.err; exit 1; fi
+          node scripts/unsafe-inventory.mjs --check --compiler "$RUNNER_TEMP"/sweep/host-default.json "$RUNNER_TEMP"/sweep/host-features.json "$RUNNER_TEMP"/sweep/wasm.json "$RUNNER_TEMP"/sweep/windows.json --metadata "$RUNNER_TEMP/sweep/metadata.json"
+
   engine-wasm:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_smoke == 'true'
@@ -1169,6 +1204,7 @@ jobs:
           python3 engine/py/test_session_ctrl.py
           python3 engine/py/test_ctrlc_cleanup.py
           python3 engine/py/test_ctrlc_native.py
+          python3 engine/py/test_python_floor.py --wheel
           python3 engine/py/test_progress.py
           python3 engine/py/test_kedlaya.py
           python3 engine/py/test_ffmat_echelon.py
