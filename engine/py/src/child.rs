@@ -75,7 +75,15 @@ mod sys {
                 return Err(errno());
             }
             for fd in fds {
-                unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+                if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } != 0 {
+                    // (a pipe whose ends would be inherited: refused, both closed)
+                    let e = errno();
+                    unsafe {
+                        libc::close(fds[0]);
+                        libc::close(fds[1]);
+                    }
+                    return Err(e);
+                }
             }
         }
         Ok((fds[0], fds[1]))
@@ -330,9 +338,17 @@ mod sys {
         }
     }
 
-    /// Test stages past the creation (`fail_after`, tests only): 10 the
+    /// Test stages past the pipes (`fail_after`, tests only): 10 the
     /// pidfd_open failing, 11 a fault after the creation, 12 waitid(P_PIDFD)
-    /// unsupported, 13 the child reaped by "someone else" before pidfd_open.
+    /// unsupported, 13 the child reaped by "someone else" before pidfd_open,
+    /// 14 the file actions' initialisation failing, 15 the attributes',
+    /// 16 waitid(P_PIDFD) answering ECHILD, 17 waitid interrupted once (EINTR).
+    const T_FA_INIT: u32 = 14;
+    const T_AT_INIT: u32 = 15;
+    #[cfg(target_os = "linux")]
+    const T_WAITID_ECHILD: u32 = 16;
+    #[cfg(target_os = "linux")]
+    const T_WAITID_EINTR: u32 = 17;
     #[cfg(target_os = "linux")]
     const T_NO_PIDFD: u32 = 10;
     const T_FAULT_AFTER: u32 = 11;
@@ -369,10 +385,20 @@ mod sys {
             // under I-2: our own wait decides, and ECHILD there is Lost)
             return (-1, false);
         }
+        let mut interrupted = false;
         loop {
             let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-            let r = if test == Some(T_NO_P_PIDFD) {
-                unsafe { *libc::__errno_location() = libc::EINVAL };
+            let fake = match test {
+                Some(T_NO_P_PIDFD) => Some(libc::EINVAL),
+                Some(T_WAITID_ECHILD) => Some(libc::ECHILD),
+                Some(T_WAITID_EINTR) if !interrupted => {
+                    interrupted = true;
+                    Some(libc::EINTR)
+                }
+                _ => None,
+            };
+            let r = if let Some(e) = fake {
+                unsafe { *libc::__errno_location() = e };
                 -1
             } else {
                 unsafe { libc::waitid(libc::P_PIDFD, fd as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) }
@@ -449,11 +475,22 @@ mod sys {
             }
             dups.push(d);
         }
+        // (each initialisation checked, its own result kept (they return an
+        // errno value; on macOS they allocate, and ENOMEM is theirs): an
+        // object is used and destroyed only if its initialisation succeeded,
+        // and nothing is spawned after a failure (astra2's SPAWN-INIT))
         let mut fa: libc::posix_spawn_file_actions_t = unsafe { std::mem::zeroed() };
         let mut at: libc::posix_spawnattr_t = unsafe { std::mem::zeroed() };
-        unsafe {
-            libc::posix_spawn_file_actions_init(&mut fa);
-            libc::posix_spawnattr_init(&mut at);
+        let r = if spec.fail_after == Some(T_FA_INIT) { libc::ENOMEM } else { unsafe { libc::posix_spawn_file_actions_init(&mut fa) } };
+        if r != 0 {
+            close_all(&mut dups);
+            return fail(&mut made, r, "the PNG engine's process: its file actions");
+        }
+        let r = if spec.fail_after == Some(T_AT_INIT) { libc::ENOMEM } else { unsafe { libc::posix_spawnattr_init(&mut at) } };
+        if r != 0 {
+            unsafe { libc::posix_spawn_file_actions_destroy(&mut fa) };
+            close_all(&mut dups);
+            return fail(&mut made, r, "the PNG engine's process: its attributes");
         }
         let mut r = 0;
         for (to, from) in dups.iter().enumerate() {

@@ -4,6 +4,7 @@ about POSIX alone, the kill pipe, reaping and signals, are skipped there).
 
     python engine/py/test_native_child.py [-k NAME]
 """
+import errno
 import os
 import signal
 import sys
@@ -381,6 +382,46 @@ def test_a_child_that_exits_at_once_is_reaped_with_its_status():
     assert c.state == "reaped" and c.returncode == 7 and c.signals_sent == 0
     if sys.platform.startswith("linux"):
         assert children() == set()
+
+
+@posix_only
+def test_a_spawn_objects_initialisation_failing_leaves_nothing():
+    # (astra2's SPAWN-INIT: posix_spawn_file_actions_init (14) or
+    # posix_spawnattr_init (15) failing, as macOS's may with ENOMEM: refused
+    # with its own error, no child, no descriptor, nothing used or destroyed
+    # uninitialised; the next start works)
+    base = fds()
+    for stage in (14, 15):
+        try:
+            start(WATCHED, fail_after=stage)
+            raise AssertionError("not refused")
+        except OSError as e:
+            assert e.args[0] == errno.ENOMEM, e
+    assert fds() == base, (fds(), base)
+    if sys.platform.startswith("linux"):
+        assert children() == set()
+    c = start(WATCHED)
+    assert c.kill_and_reap(0.2) == 137
+    c.close_io()
+
+
+@linux_only
+def test_a_pidfd_whose_waitid_says_echild_is_lost():
+    # (own_pidfd's ECHILD branch itself: the pidfd closed, the handle Lost,
+    # nothing sent; the real child, never waited on by the handle, is reaped
+    # here by the test)
+    c = start(QUICK, fail_after=16)
+    pid = c.pid
+    assert c.state == "lost" and not c.has_pidfd and c.returncode is None
+    assert c.kill_and_reap() is None and c.signals_sent == 0
+    os.waitpid(pid, 0)
+
+
+@linux_only
+def test_a_waitid_interrupted_once_is_retried():
+    c = start(WATCHED, fail_after=17)
+    assert c.has_pidfd and c.state == "running"
+    assert c.kill_and_reap(0.2) == 137 and c.signals_sent == 0
 
 
 def test_fifty_children_leave_no_descriptor():
