@@ -530,8 +530,10 @@ try {
     const br13b = await B.call("record", N13);
     need13(br13b.codes === J([["a", "c3"], ["b", "d2"]]), "13: …then its own connection (the holder now) sends what was saved meanwhile: " + br13b.codes);
   };
-  const r13 = await case13().then(() => null, (e) => e ?? new Error("thrown"));
-  if (r13 && r13 !== STOP13) check(false, "13: the case stopped: " + String(r13?.message ?? r13).slice(0, 300));
+  // (the outcome tagged, never tested for truthiness: a throw of false, 0 or "" is recorded too (astra's DEVSW-R6C-1);
+  // STOP13, already recorded as its failed check, is not counted again)
+  const r13 = await case13().then(() => ({ ok: true }), (e) => ({ ok: false, e }));
+  if (!r13.ok && r13.e !== STOP13) check(false, "13: the case stopped: " + String(r13.e?.message ?? r13.e).slice(0, 300));
 
   progress("case 14");
   // (the whole case within a budget that ends before the run's deadline: past it, or on a throw, this case records
@@ -627,9 +629,10 @@ try {
   const run14 = case14();
   run14.catch(() => {});
   let timer14;
-  const r14 = await Promise.race([run14.then(() => null, (e) => e ?? new Error("thrown")), new Promise((r) => { timer14 = setTimeout(() => r(LATECASE), Math.max(1, budget14)); })]).finally(() => clearTimeout(timer14));
+  // (tagged as case 13's: a throw of any value is recorded, the budget's expiry too, STOP14 not counted again)
+  const r14 = await Promise.race([run14.then(() => ({ ok: true }), (e) => ({ ok: false, e })), new Promise((r) => { timer14 = setTimeout(() => r(LATECASE), Math.max(1, budget14)); })]).finally(() => clearTimeout(timer14));
   if (r14 === LATECASE) check(false, `14: the case didn't finish within its ${Math.round(budget14 / 1000)} s budget, at step: ${step}`);
-  else if (r14 && r14 !== STOP14) check(false, "14: the case stopped: " + String(r14?.message ?? r14).slice(0, 300));
+  else if (!r14.ok && r14.e !== STOP14) check(false, "14: the case stopped: " + String(r14.e?.message ?? r14.e).slice(0, 300));
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
