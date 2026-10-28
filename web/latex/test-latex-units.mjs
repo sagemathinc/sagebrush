@@ -86,7 +86,8 @@ check("hl-display", run("\\[ a", "N").end === "D" && run("b \\]", "D").end === "
 check("hl-mathenv", run("\\begin{align}", "N").end === "E:align" && run("\\end{align}", "E:align").end === "N", null);
 
 // ---- boot.ts: the flag
-const on = (host, search, stored) => latexOn({ hostname: host, search }, () => stored).on;
+const DEV = ["dev.sagebrush.space"];   // (the DEV build's hosts, as web/build.ts defines them)
+const on = (host, search, stored) => latexOn({ hostname: host, search }, () => stored, DEV).on;
 check("flag-dev-url", on("dev.sagebrush.space", "?latex=1", null) && on("dev.sagebrush.space", "", "1"), null);
 check("flag-off-without", !on("dev.sagebrush.space", "", null) && !on("dev.sagebrush.space", "?latex=0", "0"), null);
 check("flag-prod-never", !on("sagebrush.space", "?latex=1", "1"), null);

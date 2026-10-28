@@ -10,7 +10,8 @@ import { openPreview } from "../workspace/preview";
 declare const __SB_LATEX_HOSTS__: string[];
 
 /** Whether the editor is on here: the host exactly, then the URL flag or the stored one. */
-export function latexOn(loc: { hostname: string; search: string }, read: () => string | null, hosts: readonly string[] = typeof __SB_LATEX_HOSTS__ !== "undefined" ? __SB_LATEX_HOSTS__ : ["dev.sagebrush.space"]) {
+// (hosts: the build's define, web/build.ts; the unit tests pass their own)
+export function latexOn(loc: { hostname: string; search: string }, read: () => string | null, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
   const byUrl = new URLSearchParams(loc.search).get("latex") == "1";
   let stored = false;
   try { stored = read() == "1"; } catch {}
