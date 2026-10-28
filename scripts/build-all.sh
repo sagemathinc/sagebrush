@@ -69,7 +69,10 @@ echo
 echo "== build-all: done"
 printf '%s\n' "${summary[@]}"
 echo "total $((SECONDS / 60)) min $((SECONDS % 60)) s"
-# (a fresh engine equal to the committed one leaves no diff; a different toolchain would show here)
+# (the fresh engine is a modified tracked file now. It differs from the committed one on any machine but CI's: the
+# wasm embeds the absolute paths of crate sources, $CARGO_HOME/registry/..., and CI's are /home/runner/.cargo.
+# Functionally it's the same engine. `git checkout -- wasm/` restores the committed one; DEVELOPMENT.md)
 if [ "$ENGINE" = 1 ] && ! git diff --quiet -- wasm/sagebrush-engine.wasm; then
-  echo "note: wasm/sagebrush-engine.wasm differs from the committed engine (is the toolchain engine/rust-toolchain.toml's?)"
+  echo "note: wasm/sagebrush-engine.wasm now differs from the committed engine: expected off CI (it embeds"
+  echo "      \$CARGO_HOME paths; DEVELOPMENT.md). git checkout -- wasm/ restores the committed one."
 fi
