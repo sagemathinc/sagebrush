@@ -66,6 +66,81 @@ test("estimate(factor, n) from the real engine: valid, milestones q = p_typical 
   );
 });
 
+// Astra's review of PR 2a, EST-BOUND: every count is exact or unknown, never
+// clamped, at the first boundaries (where u64 saturated before, and where
+// u128 ends), through the engine op and the record path.  The figures are
+// CPython's, from the closed forms term by term (nf/cost.rs's tests check
+// the same values).
+test("estimates: exact counts or unknown at the first boundaries, through the engine op and the record path", () => {
+  const code = [
+    "import sagebrush",
+    "from sagebrush import _estimates as E, records",
+    "import sagebrush.nf",
+    "for b in (8989697, 10000000, 6683713, 23753194114880, 23753194114881, 11375423353295, 11375423353296):",
+    "    st = {s['phase']: s for s in E._call('factor_estimate', bits=b)['stages']}",
+    "    print(b, st['prp']['units'], st['prp']['label'], st['roots']['units'], st['roots']['label'])",
+    "r = E._factor_record_bits(23753194114881, 'factor_integer')",
+    "records.validate(r)",
+    "print([(s['work'] and s['work']['label'], s['time'] is None) for s in r['stages'][:4]])",
+    "for n in (2**8989696 + 1, 2**(10**7) + 1):",
+    "    r = sagebrush.estimate(sagebrush.nf.factor_integer, n)",
+    "    records.validate(dict(r))",
+    "    print(n.bit_length(), [s['work']['units'] for s in r['stages'] if s['name'].startswith('probable')])",
+  ].join("\n");
+  const r = spawnSync(process.execPath, [CLI, "-c", code], { encoding: "utf8", env: ENV });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(
+    r.stdout,
+    [
+      "8989697 18446793225993710240 bound 47513286619705088000 bound",
+      "10000000 25390952929725000000 bound 66043789099680000000 bound",
+      "6683713 7581294184231772928 bound 18447060781041159168 bound",
+      "23753194114880 340282366919670981844554008132644298600 bound None unknown",
+      "23753194114881 None unknown None unknown",
+      "11375423353295 37374560726011974348278361498271622400 bound 340282366920657346910351792021376933888 bound",
+      "11375423353296 37374560726015259901665276305702965632 bound None unknown",
+      "[('bound', False), (None, True), (None, True), (None, True)]",
+      "8989697 [18446793225993710240]",
+      "10000001 [25391280472010000672]",
+      "",
+    ].join("\n"),
+  );
+});
+
+// Astra's review of PR 2a, EST-PIPELINE: above 1024 bits a perfect power
+// and a cofactor that trial division shrinks are factored by the real
+// pipeline, and the estimate states those branches conditionally.
+test("estimates: above 1024 bits, the branches the pipeline can take are conditional, not a failure", () => {
+  const code = [
+    "import sagebrush",
+    "from sagebrush import records",
+    "import sagebrush.nf",
+    "q = 2**521 - 1",
+    "n = 3**700 * 998244353 * 1000000007",
+    "print(sagebrush.nf.factor_integer(q**4) == [(q, 4)], sagebrush.nf.factor_integer(n))",
+    "for m in (q**4, n):",
+    "    r = sagebrush.estimate(sagebrush.nf.factor_integer, m)",
+    "    records.validate(dict(r))",
+    "    last = r['stages'][-1]",
+    "    print(m.bit_length(), last['name'], last['work'], last['memory']['label'], r['total_time'])",
+    "    print(any('only if it is a perfect power' in a for a in r['assumptions']),",
+    "          any('is not split' in a for a in r['assumptions']))",
+  ].join("\n");
+  const r = spawnSync(process.execPath, [CLI, "-c", code], { encoding: "utf8", env: ENV });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(
+    r.stdout,
+    [
+      "True [(3, 700), (998244353, 1), (1000000007, 1)]",
+      "2084 Pollard-Brent rho and ECM on a cofactor of at most 1024 bits None bound None",
+      "True False",
+      "1170 Pollard-Brent rho and ECM on a cofactor of at most 1024 bits None bound None",
+      "True False",
+      "",
+    ].join("\n"),
+  );
+});
+
 test("%estimate: the outermost call with names or literals; anything else declined, never run", () => {
   const code = [
     "import _pyjs_magic as M",
@@ -73,7 +148,7 @@ test("%estimate: the outermost call with names or literals; anything else declin
     "n = 2**200 + 1",
     "e = M.run_line_magic('estimate', 'factor_integer(n)')",
     "print(e['op'], e['args_summary'])",
-    "for line in ('factor_integer(n + 1)', 'factor_integer(int(n))', 'n'):",
+    "for line in ('factor_integer(n + 1)', 'factor_integer(int(n))', 'n', 'factor_integer(n=n, n=1)'):",
     "    try:",
     "        M.run_line_magic('estimate', line)",
     "    except Exception as x:",
@@ -88,6 +163,7 @@ test("%estimate: the outermost call with names or literals; anything else declin
       "UsageError %estimate estimates only the outermost c",
       "UsageError %estimate estimates only the outermost c",
       "UsageError %estimate needs a call, f(args)",
+      "UsageError %estimate: keyword argument repeated: n",
       "",
     ].join("\n"),
   );

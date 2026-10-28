@@ -37,5 +37,15 @@ factor
   15 digits: 95% time / 50% time = 4.0 (the work's ratio 4.0, not 1 + 4)
   no total made of the milestones: True
   the model stated: True | never added: True
+exact or unknown
+  valid estimate/1: True
+  probable-prime test (Baillie-PSW) of the cofactor | work {'units': 25390952929725000000, 'label': 'bound'} | time estimated
+  perfect-power test | work None | time unknown
+  exact beyond 2^64: True
+  stated: ["a stage's work shown as unknown is beyond the model: no time is derived from it"]
+    perfect-power test: work unknown; time unknown; if the cofactor is composite
+  a memory beyond the model: None unknown | unknown | True
+  20 samples: high_s set: True | high time called unknown: False
+  no samples: high_s set: False | high time called unknown: True
 unknown operation
   len None [] ['no estimate is available for len'] True

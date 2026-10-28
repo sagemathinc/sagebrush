@@ -108,7 +108,32 @@
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
  },
- "engine/classgroup/src/nf/cost.rs :: factor_estimate :: SPLIT_BITS_MAX, SPLIT_BITS_MAX #0": {
+ "engine/classgroup/src/nf/cost.rs :: counts_are_exact_or_unknown :: assert!(prp_cost(8_989_696).unwrap() <= u64::MAX as u128); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: counts_are_exact_or_unknown :: assert_eq!(e.stages[1].memory, Some(limbs(u64::MAX) as u128 * 128)); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: counts_are_exact_or_unknown :: let e = factor_estimate(u64::MAX); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: SPLIT_BITS_MAX #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: SPLIT_BITS_MAX #1": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: SPLIT_BITS_MAX #2": {
   "class": "none",
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
@@ -133,7 +158,12 @@
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
  },
- "engine/classgroup/src/nf/cost.rs :: factor_estimate :: memory: 32 * 8 * MAXL as u64, #0": {
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: limbs: limbs(SPLIT_BITS_MAX), #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: name: format!(\"Pollard-Brent rho and ECM on a cofactor of at most {} bits\", SPLIT_BITS_MAX), #0": {
   "class": "none",
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
@@ -153,7 +183,12 @@
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
  },
- "engine/classgroup/src/nf/cost.rs :: sat :: x.min(u64::MAX as u128) as u64 #0": {
+ "engine/classgroup/src/nf/cost.rs :: roots_cost :: let e_max = (bits / 16) as u128; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: roots_cost :: let hi = (1u128 << c).min(e_max); #0": {
   "class": "none",
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
@@ -163,7 +198,12 @@
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
  },
- "engine/classgroup/src/nf/cost.rs :: stage2_buffers :: babies * 2 * MAXL as u64 * 8 #0": {
+ "engine/classgroup/src/nf/cost.rs :: stage2_buffers :: babies * 2 * MAXL as u128 * 8 #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: stage2_buffers :: const RHO_MEMORY: u128 = 32 * 8 * MAXL as u128; #0": {
   "class": "none",
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
