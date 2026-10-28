@@ -327,6 +327,13 @@ def _line_options(p, default_color="blue"):
 
 # ------------------------------------------------------------------ functions
 
+def _samples(f):
+    """Whether plot() samples f itself (a symbolic expression: its plot()
+    method calls plot()), rather than leaving the picture to f's plot()."""
+    from _sage_expr import Expression
+    return isinstance(f, Expression)
+
+
 def _callable(f):
     fast = getattr(f, "_fast_callable", None)
     if fast is not None:
@@ -368,7 +375,46 @@ def plot(f, *args, **options):
         Graphics object consisting of 1 graphics primitive
         sage: plot([sin(x), cos(x)], (x, 0, pi))
         Graphics object consisting of 2 graphics primitives
+
+    An object with a plot of its own (a graph, a polyhedron, a picture) is
+    drawn by it, with the same arguments, as in Sage::
+
+        sage: plot(graphs.CycleGraph(4))
+        Graphics object consisting of 9 graphics primitives
+        sage: str(plot(graphs.HouseGraph())) == str(graphs.HouseGraph().plot())
+        True
+        sage: C = graphs.CycleGraph(5)
+        sage: str(plot(C, layout='circular', vertex_labels=False)) == str(C.plot(layout='circular', vertex_labels=False))
+        True
+        sage: plot(Polyhedron(vertices=[[0, 0], [1, 0], [0, 1]]))
+        Graphics object consisting of 5 graphics primitives
+        sage: G = point((1, 1)); plot(G) is G
+        True
+
+    Anything with a plot() of its own is drawn by it, even a callable,
+    which is then never sampled; plain functions, lists of them and
+    symbolic expressions and functions are sampled as before::
+
+        sage: class Shape:
+        ....:     def __call__(self, t):
+        ....:         raise ValueError("a shape is not sampled")
+        ....:     def plot(self, *args, **options):
+        ....:         return args, sorted(options)
+        sage: plot(Shape(), 1, 2, color='red')
+        ((1, 2), ['color'])
+        sage: plot([lambda t: t, lambda t: t^2], -1, 1)
+        Graphics object consisting of 2 graphics primitives
+        sage: plot((lambda t: t, lambda t: 1 - t), 0, 1)
+        Graphics object consisting of 2 graphics primitives
+        sage: f(x) = x^2
+        sage: plot(f, (x, 0, 1)), plot(sin(x), (x, 0, 1))
+        (Graphics object consisting of 1 graphics primitive, Graphics object consisting of 1 graphics primitive)
     """
+    # (a symbolic expression's own plot() is this function, so it is
+    # sampled here, not dispatched back)
+    own = getattr(f, "plot", None)
+    if own is not None and callable(own) and not _samples(f):
+        return own(*args, **options)
     if isinstance(f, (list, tuple)):
         g = Graphics()
         colors = options.pop("color", None)

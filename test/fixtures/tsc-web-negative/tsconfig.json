@@ -1,0 +1,5 @@
+{
+  "//": "The negative control for tsconfig.web.json (test/tsc-web.test.ts): the real options, and a root with a planted type error that imports a file with another. tsc must exit nonzero and report both.",
+  "extends": "../../../tsconfig.web.json",
+  "files": ["root.mjs"]
+}

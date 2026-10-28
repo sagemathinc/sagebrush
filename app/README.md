@@ -24,17 +24,41 @@ The service worker is off in the app, since the app's files are local.
 
 ## Build
 
+The last step needs the Tauri 2 CLI, which isn't part of Rust or of this
+repository's dependencies: install it once, either as CI does (npm) or
+with cargo:
+
+```sh
+npm install -g @tauri-apps/cli@^2               # as .github/workflows/app.yml does: the `tauri` command
+cargo install tauri-cli --version "^2" --locked  # or this: the `cargo tauri` subcommand
+```
+
+Then, from the repository's root:
+
 ```sh
 pnpm run build && node scripts/build-cli.mjs   # the Python library
 bun web/build.ts                               # the notebook page (web/dist)
 node app/build-frontend.mjs                    # app/dist: the page's files for the app
-cd app/src-tauri && cargo tauri build          # or `tauri build` with npm's @tauri-apps/cli
+cd app/src-tauri && tauri build                # or `cargo tauri build`, or `npx @tauri-apps/cli@2 build`
 ```
+
+The Tauri command must run in `app/src-tauri` (where `tauri.conf.json` is).
+Without the CLI installed, `cargo tauri build` fails with "no such command:
+tauri".
 
 On Linux, Tauri needs `libwebkit2gtk-4.1-dev librsvg2-dev patchelf` (see
 `.github/workflows/app.yml`). The bundles are in
 `app/src-tauri/target/release/bundle/` (`.app`/`.dmg`, `.deb`/`.AppImage`/`.rpm`,
 `.msi`/`.exe`). They are not signed or notarized yet.
+
+A plain `cargo build` in `app/src-tauri` (no CLI) builds only the binary,
+in debug mode, as `target/debug/sagebrush-app`, without any bundle. It is
+Tauri's development build (`tauri` without its `custom-protocol` feature),
+but since `tauri.conf.json` sets no `devUrl`, it still embeds `app/dist`
+(`frontendDist`) when it compiles. So it needs no dev server; build
+`app/dist` first, or the compile stops: "The `frontendDist` configuration
+is set to ... but this path doesn't exist". Releases use the CLI's build:
+optimized, the production `custom-protocol` build, and bundled.
 
 ## Self-test
 

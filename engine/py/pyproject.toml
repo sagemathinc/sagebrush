@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: Implementation :: CPython",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "(MIT OR Apache-2.0) AND Artistic-2.0"
 license-files = ["LICENSE-MIT", "LICENSE-APACHE", "LICENSE-Artistic-2.0.txt", "THIRD-PARTY-NOTICES.txt"]
 
@@ -32,4 +32,4 @@ Repository = "https://github.com/sagemathinc/sagebrush"
 [tool.maturin]
 module-name = "sagebrush._native"
 python-source = "python"
-features = ["pyo3/abi3-py39"]
+features = ["pyo3/abi3-py310"]

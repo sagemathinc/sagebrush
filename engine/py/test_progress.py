@@ -13,7 +13,7 @@
 - a call begun on one thread and ended on another leaves the first
   thread's next call top-level;
 - every record a valid sagebrush.progress/1 record;
-- capabilities(): progress only; estimate, run and resume (request_stop comes with PR 5a),
+- capabilities(): progress and estimates (PR 2a); run and resume (request_stop comes with PR 5a),
   and factor's deadline= work= resume= checkpoint_every= checkpoint_path=,
   refused before running ("not available in this build").
 
@@ -190,9 +190,15 @@ def test_call_ended_on_another_thread():
 
 def test_capabilities():
     c = sagebrush.capabilities()
-    check(c["progress"] is True and not any(c[k] for k in ("estimate", "deadline", "work", "run", "request_stop", "checkpoints", "resume")), c)
+    check(c["progress"] is True and c["estimate"] is True
+          and not any(c[k] for k in ("deadline", "work", "run", "request_stop", "checkpoints", "resume")), c)
     check(sagebrush.stop_points("factor") == [], "no stop points yet")
-    for name in ("estimate", "run", "resume"):
+    from sagebrush.sage import factor as sage_factor
+    e = sagebrush.estimate(sage_factor, 2 ** 300 + 1)
+    records.validate(dict(e))
+    check(e["op"] == "factor" and e["total_time"] is None and e["stages"], e)
+    check(all(s["success"]["p_typical"] == s["success"]["p_high"] for s in e["stages"] if s["success"]), e)
+    for name in ("run", "resume"):
         try:
             getattr(sagebrush, name)(1)
         except TypeError as e:

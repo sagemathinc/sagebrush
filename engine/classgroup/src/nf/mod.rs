@@ -4,6 +4,7 @@ pub mod ecm;
 pub mod embed;
 pub mod bnf;
 pub mod certify;
+pub mod cost;
 pub mod factor;
 pub mod grh;
 pub mod order;

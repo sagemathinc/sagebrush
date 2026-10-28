@@ -199,7 +199,9 @@ self.onmessage = async (ev: MessageEvent) => {
   const mode = m.sage ? "sage" : m.magma ? "magma" : m.matlab ? "matlab" : null;
   if (mode) {
     const p = prefetchMode(mode, fetchBytes, libLoading);
-    if (m.code !== undefined) await p;
+    // (a run, and the questions that load the language first: Tab, check, a
+    // warm-up, X1; the session's admission comes after this await)
+    if (m.code !== undefined || m.complete !== undefined || m.check !== undefined || m.warm !== undefined) await p;
   }
   if (m.code !== undefined) {
     await pkgsetReady;

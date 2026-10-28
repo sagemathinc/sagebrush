@@ -35,6 +35,8 @@ export class PatchHistory {
     // (the store as the session sees it: its append noting a refusal, the rest as they are)
     this.guarded = new Proxy(store, { get: (t, k) => (k === "append" ? (env) => this.appendMade(env) : typeof t[k] === "function" ? t[k].bind(t) : t[k]) });
   }
+  // (a session's options: a synced document's history adds its slot's client (web/notebook/journal.js, 2c-2))
+  sessionOptions() { return { codec: this.codec, patchStore: this.guarded }; }
   // (a patch the session made, refused: the history paused, the session rebuilt without it)
   appendMade(env) {
     const took = this.store.append(env);
@@ -57,7 +59,7 @@ export class PatchHistory {
         this.again = false;
         await this.store.appending;
         if (gen !== this.gen) return;
-        const session = new Session({ codec: this.codec, patchStore: this.guarded });
+        const session = new Session(this.sessionOptions());
         await session.init();
         if (gen !== this.gen) { session.close(); return; }
         this.session?.close();
@@ -106,7 +108,7 @@ export class PatchHistory {
     this.session?.close();
     this.session = null;
     this.paused = false; this.refusedTime = null; this.tail = null;
-    const session = new Session({ codec: this.codec, patchStore: this.guarded });
+    const session = new Session(this.sessionOptions());
     await session.init();
     if (gen !== this.gen) { session.close(); return this; }
     this.session = session;

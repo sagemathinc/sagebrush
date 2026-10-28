@@ -22,8 +22,9 @@ The design goals were set by what agents (and screen readers) need:
 - **Small and fast.** The renderer plus both APIs add about 0.1 MB to the
   browser worker, and an `@interact` update (rerun the function, resample,
   render) typically takes 10–30 ms, so dragging a slider feels immediate.
-- **Theme-aware.** Axes and text use `currentColor`, so plots follow the
-  page's light or dark theme; saved files render them black.
+- **On white.** Axes and text use `currentColor`. The notebook and the board
+  draw a 2D plot on white with dark ink in both themes, as the graph view;
+  saved files render them black.
 
 In the notebook (sagebrush.space), plots show the data coordinates under the
 mouse, with a crosshair.
