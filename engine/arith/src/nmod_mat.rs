@@ -504,10 +504,14 @@ impl Mat {
                         acc += x as u128 * y as u128;
                     }
                     r = m.add(r, m.reduce_u128(acc));
-                    poll.add(ca.len());
+                    // (the batch's multiply-adds, and the output entry)
+                    poll.add(ca.len() + 1);
                 }
                 c.d[i * o.cols + j] = r;
-                poll.add(1);
+            }
+            if self.cols == 0 {
+                // (an empty inner dimension: the row's zero entries)
+                poll.add(o.cols + 1);
             }
         }
         c

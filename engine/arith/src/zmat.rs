@@ -42,6 +42,8 @@ pub fn mod_u64(x: &BigInt, m: &Modulus) -> u64 {
 
 /// The multiply-adds between two polls in [`ZMat::mul`]'s inner loops.
 const MUL_STEP: usize = 1 << 16;
+/// The entries scanned between two polls in its pre-scans.
+const SCAN_CHUNK: usize = 1 << 12;
 
 fn bits(x: &BigInt) -> u64 {
     x.bits()
@@ -136,15 +138,21 @@ impl ZMat {
                 for i in 0..r {
                     for j in 0..c {
                         let mut s = 0i128;
-                        for l0 in (0..k).step_by(MUL_STEP) {
+                        // (chunks of MUL_STEP multiply-adds, one poll each,
+                        // the output entry counted with the last)
+                        let mut l0 = 0;
+                        loop {
                             let l1 = (l0 + MUL_STEP).min(k);
                             for l in l0..l1 {
                                 s += a[i * k + l] as i128 * b[l * c + j] as i128;
                             }
-                            poll.add(l1 - l0);
+                            poll.add(l1 - l0 + 1);
+                            if l1 >= k {
+                                break;
+                            }
+                            l0 = l1;
                         }
                         d.push(BigInt::from(s));
-                        poll.add(1);
                     }
                 }
                 return ZMat { rows: r, cols: c, d };
@@ -160,17 +168,21 @@ impl ZMat {
         for i in 0..r {
             for j in 0..c {
                 let mut s = BigInt::zero();
-                for l0 in (0..k).step_by(step) {
+                let mut l0 = 0;
+                loop {
                     let l1 = (l0 + step).min(k);
                     for l in l0..l1 {
                         if !self.d[i * k + l].is_zero() {
                             s += &self.d[i * k + l] * &o.d[l * c + j];
                         }
                     }
-                    poll.add((l1 - l0).saturating_mul(w));
+                    poll.add((l1 - l0).saturating_mul(w) + 1);
+                    if l1 >= k {
+                        break;
+                    }
+                    l0 = l1;
                 }
                 d.push(s);
-                poll.add(1);
             }
         }
         ZMat { rows: r, cols: c, d }
@@ -179,9 +191,11 @@ impl ZMat {
     /// [`max_bits`](ZMat::max_bits), polling for Stop.
     fn max_bits_polled(&self, poll: &mut Poll) -> u64 {
         let mut m = 0;
-        for x in &self.d {
-            m = m.max(bits(x));
-            poll.add(1);
+        for chunk in self.d.chunks(SCAN_CHUNK) {
+            for x in chunk {
+                m = m.max(bits(x));
+            }
+            poll.add(chunk.len());
         }
         m
     }
@@ -189,9 +203,11 @@ impl ZMat {
     /// [`as_i64`](ZMat::as_i64), polling for Stop.
     fn as_i64_polled(&self, poll: &mut Poll) -> Option<Vec<i64>> {
         let mut v = Vec::with_capacity(self.d.len());
-        for x in &self.d {
-            v.push(x.to_i64()?);
-            poll.add(1);
+        for chunk in self.d.chunks(SCAN_CHUNK) {
+            for x in chunk {
+                v.push(x.to_i64()?);
+            }
+            poll.add(chunk.len());
         }
         Some(v)
     }
