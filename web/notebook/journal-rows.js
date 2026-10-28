@@ -43,9 +43,10 @@ async function registry(st, id, make) {
   return { key, h, meta: 0, fresh: true };
 }
 
-// (the document's metadata rows, j (jseq), m (its sync start) and s (its slot, 2c-2), those in `changes` rewritten, and
-// its metadata recharged: the registry's and these rows', together within the document's 4 KiB and everything's 4 MiB)
-const META_ROWS = ["j", "m", "s"];
+// (the document's metadata rows, j (jseq), m (its sync start), s (its slot, 2c-2) and k (its pull cursor, 2c-3), those in
+// `changes` rewritten, and its metadata recharged: the registry's and these rows', together within the document's 4 KiB
+// and everything's 4 MiB)
+const META_ROWS = ["j", "m", "s", "k"];
 async function setMeta(st, reg, changes) {
   let rows = 0;
   for (const L of META_ROWS) {
@@ -176,29 +177,90 @@ async function eachOf(st, h, gen, client, upTo, f) {
   for (const r of await rq(st.getAll(lseqs(h)))) if (r.v.gen === gen && r.v.client === client && r.v.cseq <= upTo) f(r);
 }
 
-/** The l rows of client (`gen`, `client`) up to cseq `upTo` not yet marked, marked sent with its fence generation
- * `fgen`, in `st`, before their first send (CORR-SS2B-1).  Resolves how many. */
-export async function markSent(st, id, { gen, client, upTo, fgen }) {
+/** The l rows of client (`gen`, `client`) up to cseq `upTo`, marked sent, in `st`, before the request `req` carries them
+ * (CORR-SS2B-1): with the client's fence generation `fgen`, the epoch the batch names and the request, so an answer
+ * is bound to exactly the rows it answers (astra's A4 on 2c-3).  A row marked by an earlier request is marked again
+ * (a resend).  Resolves how many. */
+export async function markSent(st, id, { gen, client, upTo, fgen, epoch = null, req = null }) {
   const reg = await registered(st, id);
   if (!reg) return 0;
   let n = 0;
-  await eachOf(st, reg.h, gen, client, upTo, (r) => { if (r.v.sent === undefined) { st.put(rowOf([r.nb, r.time], { ...r.v, sent: fgen })); n++; } });
+  await eachOf(st, reg.h, gen, client, upTo, (r) => { st.put(rowOf([r.nb, r.time], { ...r.v, sent: { fgen, epoch, req } })); n++; });
   return n;
 }
 
 /** The server's acknowledgement of client (`gen`, `client`) up to cseq `upTo`, in `st`: those l rows deleted and their
  * debt released, the document's and its namespace's.  Idempotent: rows gone stay gone.  (The patches themselves stay:
  * they are TimeTravel's versions.)  Resolves how many. */
-export async function acked(st, id, { gen, client, upTo }) {
+export async function acked(st, id, { gen, client, upTo, epoch, req }) {
   const reg = await registered(st, id), slot = reg && (await rq(st.get(rowKey(reg.h, "s"))))?.v;
   if (!slot) return 0;
   let n = 0, bytes = 0;
-  await eachOf(st, reg.h, gen, client, upTo, (r) => { st.delete([r.nb, r.time]); n++; bytes += r.v.bytes; });
+  // (with a request: only the rows that request carried, in its epoch (astra's A4 on 2c-3); a later resend re-marks them)
+  const mine = (r) => req === undefined || (r.v.sent?.req === req && r.v.sent?.epoch === epoch);
+  await eachOf(st, reg.h, gen, client, upTo, (r) => { if (mine(r)) { st.delete([r.nb, r.time]); n++; bytes += r.v.bytes; } });
   if (!n) return 0;
   const ns = (await rq(st.get(DEBT)))?.v ?? { count: 0, bytes: 0 };
   st.put(rowOf(DEBT, { count: Math.max(0, ns.count - n), bytes: Math.max(0, ns.bytes - bytes) }));
   await setMeta(st, reg, { s: { ...slot, debt: { count: Math.max(0, slot.debt.count - n), bytes: Math.max(0, slot.debt.bytes - bytes) } } });
   return n;
+}
+
+// ---- 2c-3: what the server answers, applied
+
+/** A claim's answer (`doc_claim`, r9 §5.8), recorded in `st` only for the client it was sent for, its generation and
+ * id: a delayed answer for an earlier client marks nothing.  Resolves whether it was recorded. */
+export async function recordClaim(st, id, { gen, client, epoch, fgen }) {
+  const reg = await registered(st, id), slot = reg && (await rq(st.get(rowKey(reg.h, "s"))))?.v;
+  if (!slot || slot.gen !== gen || slot.client !== client) return false;
+  await setMeta(st, reg, { s: { ...slot, claimed: { epoch, client }, fgen } });
+  return true;
+}
+
+/** The document's pull cursor ({epoch, after, chain}) and start, read in `st`. */
+export async function readCursor(st, id) {
+  const reg = await registered(st, id);
+  if (!reg) return { cursor: null, start: null };
+  return { cursor: (await rq(st.get(rowKey(reg.h, "k"))))?.v ?? null, start: (await rq(st.get(rowKey(reg.h, "m"))))?.v ?? null };
+}
+
+// (a patch envelope as one canonical text: its keys sorted, for comparing a stored patch with one received)
+const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
+
+/** One page of the server's batches applied, in `st` (one history transaction): only if the cursor is still `expect`
+ * (a compare and swap: two pages checked against the same cursor can't both be applied, astra's A2), each patch of
+ * `rows` ([{time, env}], in the server's order) appended to the synced history with the next j and no l row and no
+ * debt (it's the server's); one already stored is skipped only if it is exactly that patch (astra's A4), and a different
+ * one under the same id refuses the page; then the cursor is `next`.  A document not started here yet is started with
+ * `start` ({client}), no root of its own: the server's patches are its history.  Resolves {j, applied}; refused
+ * (thrown, with `refusal`), nothing of it is written. */
+export async function applyPage(st, id, { expect, next, rows, start }) {
+  const reg = await registry(st, id, true);
+  const changes = {};
+  let m = (await rq(st.get(rowKey(reg.h, "m"))))?.v ?? null;
+  if (!m) {
+    if (!start) throw refusedWith("this notebook's synced history hasn't started here");
+    m = changes.m = { n: 1, from_j: null };
+    changes.s = { gen: 1, client: start.client, cseq: 1, last: null, fgen: 0, claimed: null, debt: { count: 0, bytes: 0 } };
+  }
+  const cur = (await rq(st.get(rowKey(reg.h, "k"))))?.v ?? null;
+  if (canon(cur) !== canon(expect ?? null)) throw refusedWith("the pull cursor moved: this page is not applied");
+  const key = syncedKey(id, m.n);
+  let j = (await rq(st.get(rowKey(reg.h, "j"))))?.v?.j ?? 0, applied = 0;
+  for (const r of rows) {
+    const had = await rq(st.get([key, r.time]));
+    if (had) {
+      if (canon(had.env) !== canon(r.env)) throw refusedWith("another patch is stored under a received patch's id: this notebook stops syncing");
+      continue;
+    }
+    j++;
+    applied++;
+    st.put({ nb: key, time: r.time, env: r.env, j });
+  }
+  if (applied) changes.j = { j };
+  changes.k = next;
+  await setMeta(st, reg, changes);
+  return { j, applied };
 }
 
 /** A T1 refused for room (2c-1d-iii §1: the intents' bound, the pending or the metadata budget, or the history
@@ -244,10 +306,10 @@ export async function dropRows(st, id) {
 }
 
 /** The document's journal as the history database has it: {J, intents: [{j, srev, value}] in increasing j, jOf:
- * Map(patch time → j) (of its synced history once started), start, slot, lrows (2c-2)}. */
+ * Map(patch time → j) (of its synced history once started), start, slot, lrows (2c-2), cursor (2c-3)}. */
 export function readJournal(hdb, id) {
   return new Promise((ok, no) => {
-    const tx = hdb.transaction("history", "readonly"), st = tx.objectStore("history"), out = { J: 0, intents: [], jOf: new Map(), start: null, slot: null, lrows: 0 };
+    const tx = hdb.transaction("history", "readonly"), st = tx.objectStore("history"), out = { J: 0, intents: [], jOf: new Map(), start: null, slot: null, lrows: 0, cursor: null };
     const rowsOf = (key) => { const rows = st.getAll(IDBKeyRange.bound([key, ""], [key, "\uffff"])); rows.onsuccess = () => { for (const r of rows.result) if (Number.isSafeInteger(r.j)) out.jOf.set(r.time, r.j); }; };
     const g = st.get(registryKey(JOURNAL_NS, id));
     g.onsuccess = () => {
@@ -258,6 +320,8 @@ export function readJournal(hdb, id) {
       p.onsuccess = () => { out.intents = p.result.map((r) => ({ j: Number(r.time.slice(1)), srev: r.v.srev, value: r.v.value })); };
       m.onsuccess = () => { out.start = m.result?.v ?? null; rowsOf(out.start ? syncedKey(id, out.start.n) : id); };
       s.onsuccess = () => { out.slot = s.result?.v ?? null; };
+      const k = st.get(rowKey(h, "k"));
+      k.onsuccess = () => { out.cursor = k.result?.v ?? null; };
       l.onsuccess = () => { out.lrows = l.result; };
     };
     tx.oncomplete = () => ok(out);

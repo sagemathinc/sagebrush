@@ -44,6 +44,7 @@ import type { SyncOp } from "./sync-reduce";
 import { queued, keepUrl, finalize, install, pauseKey, CANONICAL_LENGTH, type FetchItem } from "./sync-fetch";
 import { reserve } from "./reserve";
 import { accountHash, Bucket } from "../sync-protocol/protocol";
+import type { DocSync } from "./doc-sync";
 
 export const CLIENT = {
   /** ops in one `ops` message (the server's opsPerMessage) */
@@ -134,6 +135,8 @@ export type ClientOptions = {
   onLease?: (lease: Lease) => void;
   /** (step 5) the sender lock let go (the connection ended; the client may ask for it again): no longer the holder */
   onRelease?: () => void;
+  /** (2c-3, DEV's docsync) notebooks' contents on this connection: doc-sync.ts */
+  docs?: DocSync;
 };
 
 const key = (ns: string, what: string) => `sync:${ns}:${what}`;
@@ -148,7 +151,7 @@ const isNat = (n: unknown): n is number => Number.isSafeInteger(n) && (n as numb
 const SAME = ["dseq", "t", "by", "op", "path", "to", "kind", "ref", "fid", "sha256", "size", "base", "parent"] as const;
 const sameOp = (a: WireOp, b: Record<string, unknown>) => SAME.every((k) => (a as Record<string, unknown>)[k] === b[k]);
 
-type Pending = { kind: "ops"; recs: OutboxRecord[] } | { kind: "index" } | { kind: "rebuilt"; through: number };
+type Pending = { kind: "ops"; recs: OutboxRecord[] } | { kind: "index" } | { kind: "rebuilt"; through: number } | { kind: "doc"; answer: (m: Record<string, unknown>) => void };
 type Conn = {
   ns: string;
   /** the account's hash and the generation this connection is bound to: sent in hello and on every blob request,
@@ -440,6 +443,9 @@ export class SyncClient {
           ended = true;
           if (this.conn === c) this.conn = null;
           this.unwake();
+          // (2c-3: document requests still waiting answered as a dropped connection: transient, sent again later)
+          for (const [, p] of c.pending) if (p.kind === "doc") p.answer({ t: "error", code: "busy", detail: { message: "the connection ended" } });
+          this.opts.docs?.disconnected();
           // (what was in flight on it is local again (task #14))
           hubOf(this.w.ws).reset(c.ns, c.epoch, c.ob.lease.gen);
           try { ws.close(1000, why); } catch {}
@@ -513,8 +519,12 @@ export class SyncClient {
       case "revoked":
         this.say({ state: "off", ns: c.ns, reason: "signed out" });
         return c.end("revoked");
+      case "changed":
+        return this.opts.docs?.changed(m);
+      case "batches":
+        return this.docAnswer(c, m);
       default:
-        // (changed, watching, batches: slice 2's)
+        // (watching: slice 2's document sockets, not used yet)
         return;
     }
   }
@@ -549,6 +559,16 @@ export class SyncClient {
     this.armIdle(c);
     this.fetchKick(c);
     this.kick();
+    // (2c-3: notebooks' contents on this connection, once it is writable and not halted)
+    if (this.opts.docs && c.writable && !c.halted) void this.opts.docs.connected({
+      owner: c.account,
+      reserve: () => ++c.req,
+      ask: (req, msg) => new Promise((answer) => {
+        if (this.conn !== c) return answer({ t: "error", code: "busy", detail: { message: "not connected" } });
+        c.pending.set(req, { kind: "doc", answer });
+        this.send(c, { ...msg, req });
+      }),
+    });
   }
 
   /** The server's notice that the log grew (D8, plan-sync-index-changed r1 §4): the target raised to its head, and a
@@ -713,8 +733,17 @@ export class SyncClient {
     return hi > 0 ? { lo, hi } : null;
   }
 
+  // (2c-3: an answer to a document request: handed to doc-sync.ts)
+  private docAnswer(c: Conn, m: Record<string, unknown>): boolean {
+    const p = isNat(m.req) ? c.pending.get(m.req) : undefined;
+    if (p?.kind !== "doc") return false;
+    c.pending.delete(m.req as number);
+    p.answer(m);
+    return true;
+  }
   private async ack(c: Conn, m: Record<string, unknown>) {
     if (!isNat(m.req)) return;
+    if (this.docAnswer(c, m)) return;
     const p = c.pending.get(m.req);
     if (p?.kind === "rebuilt") {
       // (the announce stays pending until its answer is recorded: a driver run meanwhile (a page, a wake) finds it
@@ -753,6 +782,7 @@ export class SyncClient {
   }
 
   private async error(c: Conn, m: Record<string, unknown>) {
+    if (this.docAnswer(c, m)) return;
     const p = isNat(m.req) ? c.pending.get(m.req) : undefined;
     if (p?.kind !== "rebuilt") return this.errorOf(c, m);
     try {

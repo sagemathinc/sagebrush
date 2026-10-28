@@ -1420,7 +1420,7 @@ async function syncRotation() {
     const wrong = await st.ackedUpTo({ gen: 2, client: old.client, upTo: 5 });
     const a1 = await st.ackedUpTo({ gen: 1, client: old.client, upTo: 5 }), a2 = await st.ackedUpTo({ gen: 1, client: old.client, upTo: 5 });
     const l3 = await lrows(hdb, id);
-    check(next.slot.gen === 2 && next.slot.cseq === 1 && next.slot.rotations === 1 && l.length === 3 && l[2].v.gen === 2 && l[2].v.cseq === 1 && mk.n === 1 && l2.filter((r) => r.v.sent === 1).length === 1 && l2.find((r) => r.v.sent === 1).v.gen === 2 && wrong.n === 0 && a1.n === 2 && a2.n === 0 && l3.length === 1 && l3[0].v.gen === 2, "a rotation: the new client from cseq 1 (gen 2); the old rows keep gen 1; a mark or an ack of one client never touches another's; acks idempotent: " + J({ l: l.map((r) => [r.v.gen, r.v.cseq]), mk: mk.n, wrong: wrong.n, a1: a1.n, a2: a2.n }));
+    check(next.slot.gen === 2 && next.slot.cseq === 1 && next.slot.rotations === 1 && l.length === 3 && l[2].v.gen === 2 && l[2].v.cseq === 1 && mk.n === 1 && l2.filter((r) => r.v.sent?.fgen === 1).length === 1 && l2.find((r) => r.v.sent?.fgen === 1).v.gen === 2 && wrong.n === 0 && a1.n === 2 && a2.n === 0 && l3.length === 1 && l3[0].v.gen === 2, "a rotation: the new client from cseq 1 (gen 2); the old rows keep gen 1; a mark or an ack of one client never touches another's; acks idempotent: " + J({ l: l.map((r) => [r.v.gen, r.v.cseq]), mk: mk.n, wrong: wrong.n, a1: a1.n, a2: a2.n }));
     await close(st);
   });
   await close(w);
@@ -1503,7 +1503,51 @@ async function syncGrantDuringLoad() {
   hdb.close();
 }
 
-const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad];
+// ---- 2c-3: what the wire writes into the journal (journal-rows.js): acks bound to their request, the pull cursor's
+// compare and swap (astra's A2), a received patch skipped only when the exact patch is there, claims for the slot's own
+// client
+async function syncWireRows() {
+  const { w, hdb } = await active();
+  await synced(async () => {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const jtx = (fn) => st.patches.queue(() => st.patches.journalTx(async (s) => ({ j: 0, out: await fn(s) }))).catch((e) => ({ refused: String(e?.message ?? e) }));
+    let rec = await rawGet(w.main, "notebooks", id);
+    await st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: rec.rev });
+    const slot = (await jState(hdb, id)).slot, l0 = await lrows(hdb, id);
+    // (acks: A4, only the rows the request carried, in its epoch)
+    const mk = await jtx((s) => N.markSent(s, id, { gen: slot.gen, client: slot.client, upTo: 99, fgen: 1, epoch: 1, req: 7 }));
+    const otherReq = await jtx((s) => N.acked(s, id, { gen: slot.gen, client: slot.client, upTo: 99, epoch: 1, req: 8 }));
+    const otherEpoch = await jtx((s) => N.acked(s, id, { gen: slot.gen, client: slot.client, upTo: 99, epoch: 2, req: 7 }));
+    const l1 = await lrows(hdb, id);
+    const right = await jtx((s) => N.acked(s, id, { gen: slot.gen, client: slot.client, upTo: 99, epoch: 1, req: 7 }));
+    const l2 = await lrows(hdb, id);
+    check(l0.length >= 1 && mk.out === l0.length && otherReq.out === 0 && otherEpoch.out === 0 && l1.length === l0.length && l1.every((r) => r.v.sent?.req === 7 && r.v.sent?.epoch === 1) && right.out === l0.length && l2.length === 0, "2c-3 A4: an ack releases only the rows its own request carried, in its epoch: " + J({ l0: l0.length, mk: mk.out, otherReq: otherReq.out, otherEpoch: otherEpoch.out, right: right.out, left: l2.length }));
+    // (claims: recorded only for the slot's own generation and client)
+    const wrongClaim = await jtx((s) => N.recordClaim(s, id, { gen: slot.gen + 1, client: slot.client, epoch: 1, fgen: 3 }));
+    const goodClaim = await jtx((s) => N.recordClaim(s, id, { gen: slot.gen, client: slot.client, epoch: 1, fgen: 3 }));
+    const s2 = (await jState(hdb, id)).slot;
+    check(wrongClaim.out === false && goodClaim.out === true && s2.claimed?.epoch === 1 && s2.claimed?.client === slot.client && s2.fgen === 3, "2c-3: a claim is recorded for the slot's own generation and client only: " + J({ wrong: wrongClaim.out, claimed: s2.claimed, fgen: s2.fgen }));
+    // (the cursor: A2's compare and swap; a page applied once; the exact patch skipped, another under its id refused)
+    const key = N.syncedKey(id, 1), k1 = { epoch: 1, after: 1, recv: 10, chain: "a".repeat(64) }, k2 = { epoch: 1, after: 2, recv: 20, chain: "b".repeat(64) };
+    const p1 = { time: "zz-remote-1", env: { time: "zz-remote-1", parents: [], v: 1 } }, p2 = { time: "zz-remote-2", env: { time: "zz-remote-2", parents: ["zz-remote-1"], v: 2 } };
+    const J0 = (await jState(hdb, id)).J;
+    const first = await jtx((s) => N.applyPage(s, id, { expect: null, next: k1, rows: [p1] }));
+    const stale = await jtx((s) => N.applyPage(s, id, { expect: null, next: k2, rows: [p2] }));
+    const js1 = await jState(hdb, id), had2 = (await keyRows(hdb, key)).some((r) => r.time === p2.time);
+    check(first.out?.applied === 1 && first.out?.j === J0 + 1 && stale.out === undefined && J(js1.cursor) === J(k1) && !had2 && js1.J === J0 + 1, "2c-3 A2: a page applies under the cursor it was asked from; one asked from a stale cursor writes nothing (no patch, no cursor, no j): " + J({ first: first.out, stale: stale.out ?? stale.refused ?? null, cursor: js1.cursor, J: js1.J }));
+    const again = await jtx((s) => N.applyPage(s, id, { expect: k1, next: k2, rows: [p1, p2] }));
+    const js2 = await jState(hdb, id);
+    check(again.out?.applied === 1 && js2.J === J0 + 2 && J(js2.cursor) === J(k2), "2c-3: a patch already there exactly is skipped, the new one applied: " + J({ again: again.out, J: js2.J - J0 }));
+    const clash = await jtx((s) => N.applyPage(s, id, { expect: k2, next: { ...k2, after: 3 }, rows: [{ time: p2.time, env: { ...p2.env, v: 99 } }] }));
+    const js3 = await jState(hdb, id), stored2 = (await keyRows(hdb, key)).find((r) => r.time === p2.time);
+    check(clash.out === undefined && J(js3.cursor) === J(k2) && stored2?.env?.v === 2 && js3.J === js2.J, "2c-3: another patch under a stored patch's id is refused, nothing changed: " + J({ clash: clash.out ?? clash.refused ?? null, v: stored2?.env?.v }));
+    await close(st);
+  });
+  await close(w);
+  hdb.close();
+}
+
+const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
