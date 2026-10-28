@@ -87,7 +87,10 @@ removed before it, and it runs its own build lines. That costs a few minutes ove
 CLI built while `web/dist` exists carries the page, and a bundle that carries its page runs `sagebrush board open`
 as an installed CLI does, with its engine from sagebrush.space rather than your checkout. `web/test-board-open.mjs`
 would then wait for an engine that was never deployed. Each job keeps CI's time limits: the job's `timeout-minutes`
-is one budget for all its steps. Everything a step leaves running is ended (found by ancestry) before the next.
+is one budget for all its steps, even past a step marked continue-on-error. What a step leaves running carries on
+into the job's later steps, as on CI, and is ended (found by ancestry) before the next job. If something won't end,
+the whole run stops there, even with `--keep-going`, and leaves everything as it is for inspection. At the end, the
+committed engine is put back only over this run's own engine-wasm build; any other change to it is left and reported.
 
 `build-all.sh` first isn't needed: each job builds what it needs, as in CI. The jobs, in the order they run, with
 their times here:

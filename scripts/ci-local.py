@@ -56,6 +56,7 @@ It needs PyYAML (scripts/test-all.sh makes a venv with it).
 
 import argparse
 import ctypes
+import hashlib
 import itertools
 import os
 import re
@@ -204,8 +205,26 @@ def reap_orphans(keep):
             return
 
 
+class Unresolved(Exception):
+    """Processes this run started that couldn't be ended: the whole run stops at once (even with --keep-going), its
+    state is left as it is for inspection, and the engine isn't restored while anything may still write."""
+    def __init__(self, pids, where):
+        super().__init__(f"{len(pids)} process(es) could not be ended {where}: {pids}")
+        self.pids = pids
+
+
+def bounded_wait(p, seconds=10.0):
+    """Wait for a Popen at most this long; whether it ended."""
+    try:
+        p.wait(timeout=seconds)
+        return True
+    except subprocess.TimeoutExpired:
+        return False
+
+
 def end_descendants(grace=10.0):
-    """TERM, then (after grace) KILL, everything under this process; reaped and checked gone. Returns (found, left)."""
+    """TERM, then (after grace) KILL, everything under this process; reaped and checked gone. Returns (found, the
+    pids left: empty when all are gone)."""
     found = descendants()
     for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 5.0)):
         for p in descendants():
@@ -220,7 +239,7 @@ def end_descendants(grace=10.0):
         reap()
         if not descendants():
             break
-    return len(found), len(descendants())
+    return len(found), descendants()
 
 
 def set_subreaper():
@@ -231,6 +250,22 @@ def set_subreaper():
         return False
 
 
+ENGINE = "wasm/sagebrush-engine.wasm"
+
+
+def engine_sha():
+    try:
+        with open(os.path.join(ROOT, ENGINE), "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def head_engine_sha():
+    r = subprocess.run(["git", "show", "HEAD:" + ENGINE], cwd=ROOT, capture_output=True)
+    return hashlib.sha256(r.stdout).hexdigest() if r.returncode == 0 else None
+
+
 class Interrupted(Exception):
     pass
 
@@ -238,7 +273,8 @@ class Interrupted(Exception):
 def run_step(script, cwd, env, limit):
     """One step's script in its own session, bounded by limit seconds. On a timeout or an interruption everything
     under this process is ended (and checked gone) at once; otherwise what the step leaves runs on into the job's
-    later steps, as on CI, and is ended at the job's end. Returns (code, cleanup note or "")."""
+    later steps, as on CI, and is ended at the job's end. Every wait after an ending is bounded; anything that won't
+    end raises Unresolved. Returns (code, cleanup note or "")."""
     p = subprocess.Popen(["bash", "-eo", "pipefail", "-c", script], cwd=cwd, env=env, start_new_session=True)
     end = time.monotonic() + max(limit, 0.001)
     try:
@@ -251,13 +287,20 @@ def run_step(script, cwd, env, limit):
                 return code, ""
             if time.monotonic() >= end:
                 found, left = end_descendants()
-                p.wait()
-                return ("timeout" if not left else "timeout; processes left"), f"timed out: ended {found} process(es)" + (f"; {left} REMAIN" if left else "")
+                if not bounded_wait(p) and p.pid not in left:
+                    left = left + [p.pid]
+                if left:
+                    raise Unresolved(left, "after a step's timeout")
+                return "timeout", f"timed out: ended {found} process(es)"
             time.sleep(0.05)
+    except Unresolved:
+        raise
     except BaseException:
-        end_descendants()
-        if p.poll() is None:
-            p.wait()
+        found, left = end_descendants()
+        if not bounded_wait(p) and p.pid not in left:
+            left = left + [p.pid]
+        if left:
+            raise Unresolved(left, "after an interruption")
         raise
 
 
@@ -324,21 +367,50 @@ def run_job(name, job, combo, args, state):
             notes.append(f"{cleanup}: {label}")
             print(f"(ci-local: {cleanup})", flush=True)
         if code != 0:
-            if code == "timeout" and limit < 60 * float(step.get("timeout-minutes", 1e9)):
+            # (the job's own budget running out always fails the job, continue-on-error or not; a step's own failure
+            # or its own timeout, with job time left, is what continue-on-error lets through)
+            job_out = code == "timeout" and limit < 60 * float(step.get("timeout-minutes", 1e9))
+            if job_out:
                 code = "timeout: the job's time ran out"
-            if step.get("continue-on-error"):
+            if step.get("continue-on-error") and not job_out:
                 notes.append(f"failed, continue-on-error ({code}): {label}")
                 continue
             failed = failed or f"FAILED ({code}): {label}"
-    # (the job's end: whatever its steps left running is ended and checked gone, as CI's runner does)
+        elif name == "engine-wasm" and "build-engine.mjs" in script:
+            # (this run's own engine build: the bytes it may restore from at the end, and only these)
+            state["engine_built"] = engine_sha()
+    # (the job's end: whatever its steps left running is ended and checked gone, as CI's runner does; if anything
+    # won't end, the whole run stops here, its temp dir kept: CI_LOCAL_FAULT_UNRESOLVED=<job> injects that, for the
+    # fixtures, without any real process)
     if not args.dry_run:
         found, left = end_descendants()
+        if os.environ.get("CI_LOCAL_FAULT_UNRESOLVED") == name:
+            left = left + ["(injected)"]
         if found:
-            notes.append(f"ended {found} process(es) left at the job's end" + (f"; {left} REMAIN" if left else ""))
+            notes.append(f"ended {found} process(es) left at the job's end")
         if left:
-            failed = failed or f"FAILED ({left} process(es) could not be ended)"
+            print(f"ci-local: the job's temp dir is kept: {temp}", flush=True)
+            raise Unresolved(left, f"at the end of job {name}")
     shutil.rmtree(temp, ignore_errors=True)
     return failed is None, time.time() - t0, notes + ([failed] if failed else [])
+
+
+def restore_engine(state, start, clean):
+    """At the end: the committed engine back, only if this run built one and its bytes are still that build's; bytes
+    this run didn't make are left as they are and reported. Returns whether that is a failure."""
+    now = engine_sha()
+    if now == start:
+        return False  # (unchanged by this run)
+    if clean and state["engine_built"] is not None and now == state["engine_built"]:
+        r = subprocess.run(["git", "checkout", "--", ENGINE], cwd=ROOT)
+        if r.returncode != 0 or engine_sha() != head_engine_sha():
+            print(f"ci-local: RESTORING {ENGINE} FAILED: `git checkout -- {ENGINE}` by hand", flush=True)
+            return True
+        print(f"ci-local: {ENGINE} restored (this run's engine-wasm build replaced by the committed one)", flush=True)
+        return False
+    print(f"ci-local: UNEXPECTED: {ENGINE} changed, and not to this run's own engine-wasm build"
+          f"{'' if state['engine_built'] else ' (this run built none)'}: left as it is for inspection", flush=True)
+    return True
 
 
 def main():
@@ -391,16 +463,19 @@ def main():
     if not engine_clean and "engine-wasm" in plan and not args.dry_run:
         sys.exit("ci-local: wasm/sagebrush-engine.wasm has local changes, and engine-wasm would write over them: commit them, or `git checkout -- wasm/`, first")
     if not args.dry_run and not set_subreaper():
-        print("ci-local: warning: not a subreaper (not Linux?): what a step leaves can't all be found", flush=True)
+        sys.exit("ci-local: can't become the subreaper of the steps' processes (prctl PR_SET_CHILD_SUBREAPER, Linux): "
+                 "what they leave couldn't be found by ancestry, so nothing is run")
     # (a TERM or HUP to this run ends the running step and its processes, then reports, like Ctrl-C)
     def stop(sig, _frame):
         raise Interrupted(signal.Signals(sig).name)
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGHUP, stop)
-    state = {"sha": sha, "workflow_env": wf.get("env") or {}}
+    state = {"sha": sha, "workflow_env": wf.get("env") or {}, "engine_built": None}
+    start_engine = engine_sha()
     report = []
     failed = False
     interrupted = None
+    unresolved = None
     try:
         for n in plan:
             for combo in matrix_of(jobs[n]):
@@ -414,15 +489,20 @@ def main():
         pass
     except (KeyboardInterrupt, Interrupted) as e:
         interrupted, failed = (e.args[0] if e.args else "SIGINT"), True
+    except Unresolved as e:
+        unresolved, failed = e, True
     finally:
-        found, left = end_descendants()
-        if found:
-            print(f"ci-local: ended {found} leftover process(es){'; ' + str(left) + ' REMAIN' if left else ''}", flush=True)
-        if engine_clean and not args.dry_run:
-            r = subprocess.run(["git", "checkout", "--", "wasm/sagebrush-engine.wasm"], cwd=ROOT)
-            if r.returncode != 0:
-                print("ci-local: RESTORING wasm/sagebrush-engine.wasm FAILED: `git checkout -- wasm/` by hand", flush=True)
-                failed = True
+        if not args.dry_run:
+            found, left = end_descendants()
+            if found:
+                print(f"ci-local: ended {found} leftover process(es)", flush=True)
+            if left and not unresolved:
+                unresolved, failed = Unresolved(left, "at the run's end"), True
+        if unresolved:
+            print(f"\nci-local: ABORTED: {unresolved}. The engine isn't restored, and everything is left as it is for "
+                  f"inspection (end those processes by number, then `git status`)", flush=True)
+        elif not args.dry_run:
+            failed = restore_engine(state, start_engine, engine_clean) or failed
     if interrupted:
         print(f"\nci-local: interrupted ({interrupted})", flush=True)
     print("\n==== ci-local report")
