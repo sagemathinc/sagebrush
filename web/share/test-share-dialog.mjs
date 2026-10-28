@@ -1226,6 +1226,9 @@ try {
       // (the new page as Chrome sees it before it is sent anywhere, and whether its about:blank renderer answers,
       // within a strict 3 s)
       const before = await raw("Target.getTargetInfo", { targetId: Q.targetId }, undefined, 10_000).then((x) => x?.targetInfo, (x) => `unread: ${x.message}`);
+      // (this probe can itself wake the renderer: its start and end are marked, so a timeout here is decisive and a
+      // later pass is diagnostic only; daybreak3)
+      mark("renderer asking");
       preNav = await Q.send("Runtime.evaluate", { expression: "document.readyState", returnByValue: true }, 3000).then((x) => JSON.stringify(x?.result?.value ?? x), (x) => `no answer: ${x.message}`);
       mark("renderer asked");
       await snap("new page");
