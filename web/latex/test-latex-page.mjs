@@ -171,7 +171,7 @@ try {
   await until(`document.querySelector(".tex-preview").textContent.includes("AGAIN")`, 60000);
   await sleep(500);
   const lts = await ev(`window.__lt`);
-  const own = await ev(`({ step: +document.querySelector(".tex-preview").dataset.patchMaxMs, swap: +document.querySelector(".tex-preview").dataset.swapMaxMs })`);
+  const own = await ev(`({ step: +document.querySelector(".tex-preview").dataset.patchMaxMs, swap: +document.querySelector(".tex-preview").dataset.swapMaxMs, reply: +document.querySelector(".tex-preview").dataset.replyMs })`);
   console.log("long tasks during the re-patch (ms):", JSON.stringify(lts), "patch loop's own longest step and swap (ms):", JSON.stringify(own));
   check(own.step <= 50 && own.swap <= 50, "the patch loop's own steps and swap each under 50 ms", own);
   check(lts.every((d) => d <= 50), "no Long Task over 50 ms while re-patching (VM2, not a timing box)", { lts, own });

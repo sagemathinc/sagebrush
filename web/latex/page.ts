@@ -110,6 +110,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images });
   };
   const onReply = (r: any) => {
+    const tReply = performance.now();
     clearTimeout(watchdog);
     inflight = null;
     if (queued) request();
@@ -117,6 +118,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (!ok.patch) return;
     if (!r.ok) { say("the preview failed: " + String(r.error).slice(0, 200)); return; }
     schedulePatch(r.items as { g: number; h: string }[], r.groups as number);
+    preview.dataset.replyMs = String(Math.round(performance.now() - tReply));
     if (ok.current) resolveImages(r.imageRefs as string[], gate.token());
   };
 
@@ -160,7 +162,15 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       groups = kids.slice(0, p).concat(staged, kids.slice(groupHtml.length - s));
       groupHtml = next;
       swapMs = Math.max(swapMs, performance.now() - tSwap);
-      const drop = () => { const w = old.pop(); if (w) { w.remove(); requestAnimationFrame(drop); } };
+      // (a piece at a time: a large group's whole subtree is never torn down in one task)
+      const drop = () => {
+        const w = old[old.length - 1];
+        if (!w) return;
+        const t1 = performance.now();
+        while (w.lastChild && performance.now() - t1 < PATCH_BUDGET.ms) w.lastChild.remove();
+        if (!w.lastChild) { w.remove(); old.pop(); }
+        requestAnimationFrame(drop);
+      };
       requestAnimationFrame(drop);
       preview.dataset.patchMaxMs = String(Math.round(stepMax)); preview.dataset.swapMaxMs = String(Math.round(swapMs));
     };
