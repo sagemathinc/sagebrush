@@ -1202,6 +1202,7 @@ jobs:
           python3 engine/py/test_memguard.py
           python3 engine/py/test_capacity.py
           python3 engine/py/test_session_ctrl.py
+          python3 engine/py/test_ctrlc_cleanup.py
           python3 engine/py/test_progress.py
           python3 engine/py/test_kedlaya.py
           python3 engine/py/test_ffmat_echelon.py

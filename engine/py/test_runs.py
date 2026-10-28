@@ -37,6 +37,7 @@ class FakeSession:
         self.gate = None  # (a restart waits for it when set)
         self.submit_gate = None  # (and a submit, once in_submit is set)
         self.in_submit = threading.Event()
+        self.rid = 0  # (the request in flight's id, as Session mints them)
 
     def alive(self):
         return self.live
@@ -50,15 +51,16 @@ class FakeSession:
             self.q = queue.Queue()
             self.live = True
         self.pending = code
+        self.rid += 1
         if code.startswith("auto:"):
             self.finish(code[5:])
-        return self.generation, self.q
+        return self.generation, self.q, self.rid
 
     def finish(self, result=None, stdout="", error_info=None):
         # (output streams first, in chunks, as the real worker sends it)
         for i in range(0, len(stdout), 64 * 1024):
-            self.q.put({"out": stdout[i:i + 64 * 1024]})
-        r = {"stdout": stdout, "result": result, "error": None if error_info is None else error_info["message"],
+            self.q.put({"out": stdout[i:i + 64 * 1024], "id": self.rid})
+        r = {"id": self.rid, "stdout": stdout, "result": result, "error": None if error_info is None else error_info["message"],
              "error_info": error_info, "displays": [], "seconds": 0.01}
         self.pending = None
         self.q.put(r)
@@ -504,7 +506,7 @@ def test_output_bounded_streaming():
     s = r.made[0]
     chunk = "y" * 65536
     for _ in range(1600):  # (100 MiB, in the worker's chunks)
-        s.q.put({"out": chunk})
+        s.q.put({"out": chunk, "id": s.rid})
     s.finish("1")
     until(run.done.is_set, "the run's end", 60)
     o = r.record(run.record["handle"])["output"]
