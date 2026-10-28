@@ -117,6 +117,13 @@ try {
   check((await ev(`${W}.stat("/t/doc.tex").then((e) => e.rev ?? 0)`)) === rev0, "…and the revision unchanged");
   await typeInto(DOC.replace("Some text", "Edited text"));
   check(await page(`P.querySelector(".tex-dirty").hidden === false && P.querySelector(".tex-save").disabled === false`), "an edit: Unsaved changes, Save enabled");
+  // (plan r5 §6's marks, for the TIMING harness: an edit's input, request, reply, patch and paint carry its revision;
+  // the highlighter's done mark carries its wall and busy ms)
+  const marksOk = await until(`(() => { const m = (n) => performance.getEntriesByName(n); const inp = m("tex-input").at(-1); if (!inp) return false; const r = inp.detail.rev;
+    return ["tex-request", "tex-parse-done", "tex-patch-done", "tex-paint"].every((n) => m(n).some((e) => e.detail.rev === r && e.startTime >= inp.startTime))
+      && m("tex-highlight-done").some((e) => e.startTime >= inp.startTime && e.detail.wall >= e.detail.busy && e.detail.busy >= 0)
+      && m("tex-mount").length === 1 && m("tex-read-done").length === 1; })()`, 10000);
+  check(marksOk, "the §6 marks: an edit's input, request, parse, patch and paint by revision; the highlighter's wall and busy", await ev(`performance.getEntriesByType("mark").map((e) => [e.name, e.detail]).slice(-12)`));
   await ctrlS();
   check(await statusIs(/^Saved$/), "Ctrl+S: Saved");
   check(JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Edited text"))), "…the bytes written are the text");

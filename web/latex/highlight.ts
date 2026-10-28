@@ -5,6 +5,8 @@
 // tokenizer is a generator, so a long line resumes where it stopped); then it continues in later slices. A line over
 // LONG_LINE is plain (its end state "unknown", reset to normal). If an edit hasn't converged within FALLBACK_MS, the
 // lines not yet rescanned are drawn plain until done. A file over PLAIN_FILE isn't highlighted at all.
+import { mark } from "./marks";
+
 export const SLICE = { lines: 2000, bytes: 64 * 1024, ms: 8, check: 256 };
 export const LONG_LINE = 16 * 1024, FALLBACK_MS = 150, PLAIN_FILE = 2 ** 20;
 export type State = string;   // "N" normal, "M" inline math, "D" display math, "E:env" a math environment, "V:env" verbatim
@@ -60,7 +62,7 @@ export class Highlighter {
   lines: string[] = [];
   start: State[] = [];          // the cached start state of each line
   els: HTMLElement[] = [];
-  job: { at: number; state: State; until: number; gen: Generator<Tok, State, void> | null; html: string; t0: number; plainShown: boolean } | null = null;
+  job: { at: number; state: State; until: number; gen: Generator<Tok, State, void> | null; html: string; t0: number; busy: number; plainShown: boolean } | null = null;
   timer: any = null;
   stats = { linesRescanned: 0, bytesRescanned: 0, maxSliceMs: 0 };
   constructor(readonly root: HTMLElement, text: string, readonly off: boolean) {
@@ -74,11 +76,12 @@ export class Highlighter {
     this.els = this.lines.map((l) => this.lineEl(l));
     this.root.append(...this.els);
     if (this.off || text.length > PLAIN_FILE) return;
-    this.schedule(0, "N", this.lines.length);
+    this.schedule(0, "N", this.lines.length, performance.now());
   }
   /** The textarea's new text: the changed lines replaced (plain), then rescanned from the first of them. The cached
    * start states of the unchanged lines after the edit are kept: convergence compares against them. */
   update(text: string) {
+    const tU = performance.now();
     const next = text.split("\n");
     let p = 0; const n = Math.min(this.lines.length, next.length);
     while (p < n && this.lines[p] === next[p]) p++;
@@ -96,13 +99,18 @@ export class Highlighter {
     const init = this.start[from] ?? "N";
     this.start.splice(p, oldMid, ...fresh.map(() => "?"));
     this.lines = next;
-    if (this.off || text.length > PLAIN_FILE) { for (const e of this.els) if (e.childElementCount) e.textContent = e.textContent; return; }
-    this.schedule(from, init, p + newMid);
+    if (this.off || text.length > PLAIN_FILE) {
+      for (const e of this.els) if (e.childElementCount) e.textContent = e.textContent;
+      const ms = performance.now() - tU; mark("tex-highlight-done", { wall: ms, busy: ms, plain: true });
+      return;
+    }
+    this.schedule(from, init, p + newMid, tU);
   }
-  private schedule(from: number, init: State, editEnd: number) {
+  // (t0: when the edit reached the highlighter; busy counts its own time, the slices and the line diff before them)
+  private schedule(from: number, init: State, editEnd: number, t0: number) {
     clearTimeout(this.timer);
     this.start[from] = init === "?" ? "N" : init;
-    this.job = { at: from, state: this.start[from], until: editEnd, gen: null, html: "", t0: performance.now(), plainShown: false };
+    this.job = { at: from, state: this.start[from], until: editEnd, gen: null, html: "", t0, busy: performance.now() - t0, plainShown: false };
     this.slice();
   }
   /** One bounded slice of the rescan; schedules the next. */
@@ -120,7 +128,7 @@ export class Highlighter {
           if (r.done) { end = r.value; break; }
           const [cls, t] = r.value;
           j.html += cls ? '<span class="' + cls + '">' + esc(t) + "</span>" : esc(t);
-          if (++toks % SLICE.check === 0 && performance.now() - t0 > SLICE.ms) return this.later();
+          if (++toks % SLICE.check === 0 && performance.now() - t0 > SLICE.ms) return this.later(t0);
         }
         this.els[j.at].innerHTML = j.html || "\u200b";
         j.gen = null;
@@ -131,12 +139,13 @@ export class Highlighter {
       if (nextAt < this.lines.length && nextAt >= j.until && this.start[nextAt] === end) { this.done(t0); return; }
       if (nextAt < this.lines.length) this.start[nextAt] = end;
       j.at = nextAt; j.state = end;
-      if (lines >= SLICE.lines || bytes >= SLICE.bytes || performance.now() - t0 > SLICE.ms) return this.later();
+      if (lines >= SLICE.lines || bytes >= SLICE.bytes || performance.now() - t0 > SLICE.ms) return this.later(t0);
     }
     this.done(t0);
   }
-  private later() {
+  private later(t0: number) {
     const j = this.job!;
+    j.busy += performance.now() - t0;
     this.stats.maxSliceMs = Math.max(this.stats.maxSliceMs, 0);
     // (not converged within FALLBACK_MS of the edit: what isn't rescanned yet is drawn plain until it is)
     if (!j.plainShown && performance.now() - j.t0 > FALLBACK_MS) {
@@ -145,5 +154,11 @@ export class Highlighter {
     }
     this.timer = setTimeout(() => this.slice(), 0);
   }
-  private done(t0: number) { this.stats.maxSliceMs = Math.max(this.stats.maxSliceMs, performance.now() - t0); this.job = null; }
+  private done(t0: number) {
+    const now = performance.now(), j = this.job!;
+    this.stats.maxSliceMs = Math.max(this.stats.maxSliceMs, now - t0);
+    // (§6: the rescan converged; wall from the edit, busy its own time)
+    mark("tex-highlight-done", { wall: now - j.t0, busy: j.busy + (now - t0) });
+    this.job = null;
+  }
 }

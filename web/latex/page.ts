@@ -13,6 +13,7 @@ import { imageCandidates, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./im
 import { RenderGate, type Token } from "./gate";
 import { Highlighter } from "./highlight";
 import { PAGE_CSS } from "./style";
+import { mark } from "./marks";
 
 export const PATCH_BUDGET = { items: 200, bytes: 512 * 1024, ms: 8 };
 const BANNER = "LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file. If the file changed elsewhere since you opened it (another tab, Python, a collaborator), Save replaces those changes; the file's versions keep the bytes it replaced. Nothing is saved automatically. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
@@ -29,6 +30,7 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""):
 const enc = new TextEncoder();
 
 export async function mount(root: HTMLElement, host: Host): Promise<void> {
+  mark("tex-mount", {});
   const style = el("style"); style.textContent = PAGE_CSS; document.head.appendChild(style);
   if (!document.getElementById("sb-katex")) {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
@@ -67,6 +69,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let read: { entry: Entry; content: Uint8Array };
   try { read = await host.ws.readUpTo(where.path, EDIT_MAX); } catch (err) { gone("This file can't be read here: " + String((err as Error)?.message ?? err)); return; }
   if (read.entry.fid !== host.fid) { gone("This file isn't here any more."); return; }
+  mark("tex-read-done", { bytes: read.content.length });
   const opened = openBytes(read.content);
   if (opened.kind === "binary") { gone("This file can't be opened in the LaTeX editor: " + opened.why + "."); banner.textContent = BANNER_NO_SAVE(opened.why); return; }
   // (the whole file only: the bytes read are the file's size, else no Save)
@@ -111,17 +114,19 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (restartedAt === t.rev) { say("stopped: this document takes too long"); return; }
       restartedAt = t.rev; startWorker(); request();
     }, 15000);
+    mark("tex-request", { rev: t.rev });
     worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images });
   };
   const onReply = (r: any) => {
     const tReply = performance.now();
+    mark("tex-parse-done", { rev: r.rev });
     clearTimeout(watchdog);
     inflight = null;
     if (queued) request();
     const ok = gate.accept(r);
     if (!ok.patch) return;
     if (!r.ok) { say("the preview failed: " + String(r.error).slice(0, 200)); return; }
-    schedulePatch(r.items as Item[], r.groups as number);
+    schedulePatch(r.items as Item[], r.groups as number, r.rev as number);
     preview.dataset.replyMs = String(Math.round(performance.now() - tReply));
     if (ok.current) resolveImages(r.imageRefs as string[], gate.token());
   };
@@ -131,7 +136,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the patch loop's own longest step and swap, and the most UTF-8 bytes parsed in one step: preview.dataset)
   let patchSeq = 0, stepMax = 0, swapMs = 0, stepBytesMax = 0;
   const stops = { items: 0, bytes: 0, ms: 0 };   // (which stop ended each step, all patches: preview.dataset.stops)
-  const schedulePatch = (items: Item[], ng: number) => {
+  const schedulePatch = (items: Item[], ng: number, rev: number) => {
     const seq = ++patchSeq;
     const html: string[][] = Array.from({ length: ng }, () => []), sizes: number[][] = Array.from({ length: ng }, () => []);
     // (a piece's UTF-8 size from the worker; without one, 3 bytes per UTF-16 unit, UTF-8's most)
@@ -182,6 +187,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       };
       requestAnimationFrame(drop);
       preview.dataset.patchMaxMs = String(Math.round(stepMax)); preview.dataset.swapMaxMs = String(Math.round(swapMs)); preview.dataset.stepBytesMax = String(stepBytesMax); preview.dataset.stops = JSON.stringify(stops);
+      // (§6: the patch of this revision done, then the frame after it: the preview's paint)
+      mark("tex-patch-done", { rev });
+      requestAnimationFrame(() => mark("tex-paint", { rev }));
     };
     step();
   };
@@ -237,7 +245,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const isDirty = () => src.value !== savedText;
   const showDirty = () => { const d = isDirty(); dirty.hidden = !d; save.disabled = !d || !saveable || saving; };
   src.addEventListener("input", () => {
-    gate.edit(); showDirty();
+    gate.edit(); mark("tex-input", { rev: gate.token().rev }); showDirty();
     // (an edit makes the last message ("Saved", "No changes to save", …) stale; a save under way keeps its own)
     if (!saving) say("");
     highlighter.update(src.value);
