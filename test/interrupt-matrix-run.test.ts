@@ -182,15 +182,11 @@ process.kill = (pid, sig) => { if (sig === "SIGINT") { const e = new Error("kill
   }
 });
 
-test("a pinned row whose target ignores the Stop and returns: every trial is judged, none cut by an earlier trial's guard (E2/prompt, CI 40617387921)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
-  try {
-    // a fake that ignores SIGINT and returns: each trial prints ENTER, runs 7.2 s, then RET.  With the
-    // CI window (20 s) armed at trial 1's Stop (0.5 T = 3.6 s) and never cleared by a RET, the session
-    // was cut at about 23.6 s, after trial 4's ENTER (21.6 s) and before its Stop (25.2 s): a malformed
-    // cell, so a FAIL row where every trial says "did not stop"
-    const f = join(dir, "fake-ignoring.cjs");
-    writeFileSync(f, `
+// a fake launcher that ignores SIGINT and returns: each trial prints ENTER, runs trialMs, then RET, PROBE and DONE;
+// after the last DONE it stays up holdMs before END and its exit (0: it exits at once, as a fast launcher teardown does)
+function fakeIgnoring(dir: string, holdMs: number, trialMs: number): string {
+  const f = join(dir, "fake-ignoring.cjs");
+  writeFileSync(f, `
 const fs = require("node:fs");
 process.on("SIGINT", () => {});
 const src = fs.readFileSync(process.argv.at(-1), "utf8");
@@ -198,30 +194,57 @@ const n = Number((src.match(/range\\(1, (\\d+) \\+ 1\\)/) ?? [])[1] ?? 1);
 const say = (s) => process.stdout.write(s + "\\n");
 let i = 0;
 const next = () => {
-  // (after the last DONE it stays up a moment, as a real launcher's teardown does: the harness samples the
-  // target's threads at each DONE, and a process already exiting there reads as fewer threads, so the
-  // leak check's threads_same would fail; VM2 diagnosis, 3 runs of 4)
-  if (++i > n) { setTimeout(() => { say("END"); process.exit(0); }, 1000); return; }
+  if (++i > n) { setTimeout(() => { say("END"); process.exit(0); }, ${holdMs}); return; }
   say("SETUP " + i); say("ENTER " + i + " 0.1");
-  setTimeout(() => { say("RET " + i); say("PROBE " + i + " ok"); say("DONE " + i); next(); }, 7200);
+  setTimeout(() => { say("RET " + i); say("PROBE " + i + " ok"); say("DONE " + i); next(); }, ${trialMs});
 };
 next();
 `);
-    // the fake row pinned, in the test's own baseline
-    const baseline = join(dir, "baseline.json");
-    writeFileSync(baseline, JSON.stringify({ comment: "the harness test's fake row", entries: [{ case: "E2", host: "cli", finding: "test", owner: "test", fix: "test", signature: "did not stop|no KeyboardInterrupt" }], pending: [] }));
-    const h = spawn(process.execPath, [matrix, "--ci", "--host", "cli", "--rows", "E2", "--signals", "none", "--budget-ms", "240000", "--out", join(dir, "out.json")], { env: { ...process.env, SB_LAUNCHER: f, SB_BASELINE: baseline }, stdio: ["ignore", "pipe", "pipe"] });
-    let err = "";
-    h.stderr.on("data", (d: Buffer) => (err += d));
-    const code = await exitOf(h);
-    const rows = readFileSync(join(dir, "out.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-    const e2 = rows.find((r) => r.case === "E2");
-    assert.ok(e2, "E2's row");
-    const cells = e2.cells.map((c: any) => [c.outcome, c.why]);
-    const row = JSON.stringify({ outcome: e2.outcome, own_outcome: e2.own_outcome, why: e2.why, leak: e2.leak, cells, samples: (e2.sessions ?? []).map((x: any) => [x.label, x.end, x.samples]) });
+  return f;
+}
+
+// the E2/cli row of a run on a fake, its own baseline pinning the fake's failure
+async function e2OnFake(dir: string, f: string) {
+  const baseline = join(dir, "baseline.json");
+  writeFileSync(baseline, JSON.stringify({ comment: "the harness test's fake row", entries: [{ case: "E2", host: "cli", finding: "test", owner: "test", fix: "test", signature: "did not stop|no KeyboardInterrupt" }], pending: [] }));
+  const h = spawn(process.execPath, [matrix, "--ci", "--host", "cli", "--rows", "E2", "--signals", "none", "--budget-ms", "240000", "--out", join(dir, "out.json")], { env: { ...process.env, SB_LAUNCHER: f, SB_BASELINE: baseline }, stdio: ["ignore", "pipe", "pipe"] });
+  let err = "";
+  h.stderr.on("data", (d: Buffer) => (err += d));
+  const code = await exitOf(h);
+  const rows = readFileSync(join(dir, "out.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const e2 = rows.find((r) => r.case === "E2");
+  assert.ok(e2, "E2's row");
+  const cells = e2.cells.map((c: any) => [c.outcome, c.why]);
+  const row = JSON.stringify({ outcome: e2.outcome, own_outcome: e2.own_outcome, why: e2.why, leak: e2.leak, cells, samples: (e2.sessions ?? []).map((x: any) => [x.label, x.end, x.samples]) });
+  return { e2, code, err, row };
+}
+
+test("a pinned row whose target ignores the Stop and returns: every trial is judged, none cut by an earlier trial's guard (E2/prompt, CI 40617387921)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
+  try {
+    // (7.2 s trials: with the CI window (20 s) armed at trial 1's Stop (0.5 T = 3.6 s) and never cleared by a RET,
+    // the session was cut at about 23.6 s, after trial 4's ENTER (21.6 s) and before its Stop (25.2 s): a malformed
+    // cell, so a FAIL row where every trial says "did not stop". It stays up 1 s after its last DONE)
+    const { e2, code, err, row } = await e2OnFake(dir, fakeIgnoring(dir, 1000, 7200));
     assert.equal(e2.cells.length, 5, row);
     assert.ok(e2.cells.every((c: any) => c.outcome === "FAIL" && /^did not stop/.test(c.why) && !c.malformed), row);
     assert.ok(e2.leak?.ok === true, row);
+    assert.equal(e2.outcome, "KNOWN", row);
+    assert.equal(code, 0, err.slice(-600));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a target that exits at once after its last DONE: the last sample, read as it exits, is dropped and said, not a thread change (python's report on #251's fake)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
+  try {
+    // (no hold: the last DONE's sample may catch the process with its threads going, 3 runs of 4 on VM2 before this
+    // fix; either it reads live, or it's marked exiting and dropped. Both pass; a lower thread count never fails)
+    const { e2, code, err, row } = await e2OnFake(dir, fakeIgnoring(dir, 0, 3000));
+    assert.equal(e2.cells.length, 5, row);
+    assert.ok(e2.leak?.ok === true && e2.leak?.threads_same === true, row);
+    assert.ok(e2.leak.last_exiting === true ? e2.leak.to === 4 : e2.leak.to === 5, row);
     assert.equal(e2.outcome, "KNOWN", row);
     assert.equal(code, 0, err.slice(-600));
   } finally {

@@ -14,11 +14,11 @@
 // leak series 20 repeats (plan-interrupt-harness r4 §3, §6.1, §8).  Rows are checked against
 // web/interrupt-baseline.json; --ci exits 1 on FAIL, INCOMPLETE or FIXED.
 import { spawn } from "node:child_process";
-import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, ciFailing, waiverErrors, widenedPick, withWaiver, xkRowOutcome } from "./interrupt-classify.mjs";
-import { killTracked, killTree, onStop, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
+import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, leakRowOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, ciFailing, waiverErrors, widenedPick, withWaiver, xkRowOutcome } from "./interrupt-classify.mjs";
+import { killTracked, killTree, onStop, procStatus, procTable, promptSample, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 // (SB_BASELINE: another baseline, for checking the harness: its tests pin their fake rows there, never in the real one)
 const BASELINE = JSON.parse(readFileSync(process.env.SB_BASELINE ?? new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 // William's waivers of the Stop bound (only active records; a malformed registry fails the run, below)
@@ -151,27 +151,9 @@ if (args.includes("--print-driver")) {
   process.exit(0);
 }
 
-function procStatus(pid) {
-  try {
-    const t = readFileSync(`/proc/${pid}/status`, "utf8");
-    const g = (k) => Number((t.match(new RegExp(`^${k}:\\s+(\\d+)`, "m")) ?? [])[1]);
-    return { rss_kb: g("VmRSS"), threads: g("Threads") };
-  } catch {
-    return null;
-  }
-}
-// the launcher under `script` (the prompt host): the node process among script's children
-function launcherChild(pid) {
-  for (const q of readdirSync("/proc")) {
-    if (!/^\d+$/.test(q)) continue;
-    try {
-      const f = readFileSync(`/proc/${q}/stat`, "utf8");
-      const fields = f.slice(f.lastIndexOf(")") + 2).split(" ");
-      if (Number(fields[1]) === pid && /node/.test(f.slice(f.indexOf("(") + 1, f.lastIndexOf(")")))) return Number(q);
-    } catch {}
-  }
-  return pid;
-}
+// (the prompt host's sample is promptSample's (interrupt-procs.mjs): the launcher below `script`, known by its command
+// line [process.execPath, LAUNCHER] (its comm is "MainThread" under Node 24), never the wrapper in its place, whose
+// memory and threads aren't the target's)
 // (every session is in interrupt-procs.mjs's one registry: killed, tree and all, if the harness is stopped)
 
 // ---- running one session (cli or prompt): delays[i] (ms after ENTER i, or null for none)
@@ -260,7 +242,7 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       if ((mk === "KI" || mk === "RET") && guard) { clearTimeout(guard); guard = null; }
       if (mk === "PROBE") t.probe = rest;
       if (mk === "STRAY") t.stray = rest;
-      if (mk === "DONE") samples.push({ i: t.i, ...(procStatus(host === "cli" ? p.pid : launcherChild(p.pid)) ?? {}), ...(/^\d+$/.test(rest.trim()) ? { mem_kb: Number(rest.trim()) / 1024 } : {}) });
+      if (mk === "DONE") samples.push({ i: t.i, ...(host === "cli" ? procStatus(p.pid) : promptSample(p.pid, [process.execPath, LAUNCHER])), ...(/^\d+$/.test(rest.trim()) ? { mem_kb: Number(rest.trim()) / 1024 } : {}) });
     };
     const feed = (d) => {
       buf += d;
@@ -388,7 +370,7 @@ async function runHost(host) {
     const left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
     const leak0 = leakCheck(lr.samples, 20, c.leak_measure ?? "rss");
     const leak = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
-    let { outcome: own, why: rowWhy } = c.expect_leak ? leakControlOutcome(cells, leak, c.xk) : xkRowOutcome(cells, leak && leak.ok, c.xk);
+    let { outcome: own, why: rowWhy } = leakRowOutcome(cells, leak, c);
     // (a session cut at the run's deadline leaves its cells unresolved: the row is INVALID-budget, unless it already failed)
     if (overBudget() && sessions.some((x) => x.end === "budget") && own !== "FAIL") {
       // (a malformed cell is named too, so the relabel doesn't hide the harness's evidence loss: magma N3)
