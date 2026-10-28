@@ -24,6 +24,10 @@ pub mod nmod_ops;
 static mut REPLY: Vec<u8> = Vec::new();
 
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique);
+// the block is leaked to the host, which returns it through sb_free with its length.
+#[allow(unsafe_code)]
 pub extern "C" fn sb_alloc(len: usize) -> *mut u8 {
     let mut v = Vec::<u8>::with_capacity(len);
     let p = v.as_mut_ptr();
@@ -32,16 +36,34 @@ pub extern "C" fn sb_alloc(len: usize) -> *mut u8 {
 }
 
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique);
+// the host passes back a block from sb_alloc(len) with that len, so rebuilding
+// the Vec (length 0, capacity len) and dropping it frees exactly that allocation.
+#[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_free(ptr: *mut u8, len: usize) {
     drop(Vec::from_raw_parts(ptr, 0, len));
 }
 
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique);
+// REPLY's length is read on one thread with no other reference to REPLY live
+// (wasm is single-threaded; natively only one-test ABI binaries call this).
+// That is the supported boundary: any other native caller is unsupported.
+#[allow(unsafe_code)]
 pub extern "C" fn sb_reply_len() -> usize {
     unsafe { (*std::ptr::addr_of!(REPLY)).len() }
 }
 
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique);
+// the host wrote `len` request bytes at `ptr` (a block from sb_alloc), so the
+// slice is readable; REPLY is replaced on one thread with no other reference
+// to it live (wasm is single-threaded; natively only one-test ABI binaries call
+// this).  That is the supported boundary: any other native caller is unsupported.
+#[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
@@ -55,6 +77,13 @@ pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
 /// A symbolic-engine call (engine/sym/src/api.rs: "op\x1fargs..."); the
 /// reply is in the same buffer as sb_call's.
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique);
+// the host wrote `len` request bytes at `ptr` (a block from sb_alloc), so the
+// slice is readable; REPLY is replaced on one thread with no other reference
+// to it live (wasm is single-threaded; natively only one-test ABI binaries call
+// this).  That is the supported boundary: any other native caller is unsupported.
+#[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
@@ -66,6 +95,13 @@ pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
 /// A multivariate polynomial call (engine/mpoly: binary framing of
 /// sagebrush_mpoly::call); the reply is in the same buffer as sb_call's.
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique);
+// the host wrote `len` request bytes at `ptr` (a block from sb_alloc), so the
+// slice is readable; REPLY is replaced on one thread with no other reference
+// to it live (wasm is single-threaded; natively only one-test ABI binaries call
+// this).  That is the supported boundary: any other native caller is unsupported.
+#[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::slice::from_raw_parts(ptr, len);
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
@@ -79,6 +115,9 @@ pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
 /// for none (anything else is none too).  Optional: a host that never calls
 /// it leaves the factorizations their default.
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique); no unsafe operation.
+#[allow(unsafe_code)]
 pub extern "C" fn sb_set_memory_share(v: f64) {
     sagebrush_interrupt::set_memory_share(sagebrush_interrupt::share_from_f64(v));
 }
@@ -91,6 +130,9 @@ pub extern "C" fn sb_set_memory_share(v: f64) {
 /// the ledger still admits but is not certified); anything else is none,
 /// and the ledger uses the nominal total.  Optional, as sb_set_memory_share.
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique); no unsafe operation.
+#[allow(unsafe_code)]
 pub extern "C" fn sb_set_memory_total(bytes: f64, status: u32, uncertified: u32) {
     sagebrush_ledger::set_total(sagebrush_ledger::total_from_wasm(bytes, status, uncertified));
 }
@@ -101,6 +143,9 @@ pub extern "C" fn sb_set_memory_total(bytes: f64, status: u32, uncertified: u32)
 /// or 3 for none (no instance row).  0; -1 for anything else, which also
 /// sets the ledger's sticky fault (never certified from then on).
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique); no unsafe operation.
+#[allow(unsafe_code)]
 pub extern "C" fn sb_set_instance_total(bytes: f64, status: u32) -> i32 {
     match sagebrush_ledger::instance_total_from_wasm(bytes, status) {
         Ok(t) => {
@@ -118,11 +163,17 @@ pub extern "C" fn sb_set_instance_total(bytes: f64, status: u32) -> i32 {
 /// residents, whichever is larger: no-cliffs plan C r13) and its gross
 /// outstanding obligations: the host's common-domain check reads them (C-2).
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique); no unsafe operation.
+#[allow(unsafe_code)]
 pub extern "C" fn sb_live_estimate() -> f64 {
     sagebrush_ledger::live_estimate() as f64
 }
 
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique); no unsafe operation.
+#[allow(unsafe_code)]
 pub extern "C" fn sb_outstanding_bytes() -> f64 {
     sagebrush_ledger::outstanding_bytes() as f64
 }
@@ -135,6 +186,9 @@ pub extern "C" fn sb_outstanding_bytes() -> f64 {
 /// set; -1 for anything else, which is also a sticky fault (the ledger is
 /// not certified from then on).
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique); no unsafe operation.
+#[allow(unsafe_code)]
 pub extern "C" fn sb_set_retired_bytes(bytes: f64, faulted: u32) -> i32 {
     match sagebrush_ledger::set_retired(bytes, faulted) {
         Ok(()) => 0,
@@ -218,10 +272,20 @@ fn host_handle(handle: f64) -> Option<(usize, u32)> {
 /// The reply buffer's address (sb_reserve and sb_grow leave a refusal there,
 /// sb_reply_len bytes of JSON).
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique);
+// REPLY's address is read on one thread with no other reference to REPLY live
+// (wasm is single-threaded; natively only one-test ABI binaries call this).
+// That is the supported boundary: any other native caller is unsupported.
+#[allow(unsafe_code)]
 pub extern "C" fn sb_reply_ptr() -> *const u8 {
     unsafe { (*std::ptr::addr_of!(REPLY)).as_ptr() }
 }
 
+// SAFETY: REPLY is replaced on one thread with no other reference to it live
+// (wasm is single-threaded; natively only the one-test ABI binaries reach it).
+// That is the supported boundary: any other native caller is unsupported.
+#[allow(unsafe_code)]
 fn set_reply(v: Value) {
     let r = unsafe { &mut *std::ptr::addr_of_mut!(REPLY) };
     drop(std::mem::take(r));
@@ -239,6 +303,11 @@ fn set_reply(v: Value) {
 /// `what_ptr` must point to `what_len` readable bytes (or `what_len` be 0),
 /// as the host writes them into this instance's memory.
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique);
+// `what` is read per this fn's `# Safety` (the host wrote `what_len` bytes at
+// `what_ptr`); the reservation itself is made through the ledger's safe API.
+#[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_reserve(what_ptr: *const u8, what_len: usize, bytes: f64) -> f64 {
     let what = if what_len == 0 { "host" } else { std::str::from_utf8(std::slice::from_raw_parts(what_ptr, what_len)).unwrap_or("host") };
     let Some(x) = host_bytes(bytes) else {
@@ -292,6 +361,9 @@ pub unsafe extern "C" fn sb_reserve(what_ptr: *const u8, what_len: usize, bytes:
 /// section 3.1): 0 ok; 1 refused, the reply holds {"memory": {...}}; -1 an
 /// unknown or released handle, an invalid argument or an internal error.
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique); no unsafe operation.
+#[allow(unsafe_code)]
 pub extern "C" fn sb_grow(handle: f64, bytes: f64) -> i32 {
     let Some(x) = host_bytes(bytes) else {
         set_reply(json!({ "error": format!("sb_grow: {} is not a byte count", bytes) }));
@@ -321,6 +393,9 @@ pub extern "C" fn sb_grow(handle: f64, bytes: f64) -> i32 {
 /// Release a host handle: 0, or -1 for an unknown or released handle.  The
 /// slot's generation advances, so this handle is stale from then on.
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique); no unsafe operation.
+#[allow(unsafe_code)]
 pub extern "C" fn sb_release(handle: f64) -> i32 {
     match slot_take(handle) {
         Some((i, r)) => {
@@ -366,6 +441,12 @@ pub fn memory_error_value(r: &sagebrush_ledger::Refusal) -> Value {
 /// After a trap (an error aborts in WebAssembly): "err\x1fKind\x1fmessage"
 /// for the last symbolic error, or "" (an interrupt or a bug).
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique);
+// REPLY is replaced on one thread with no other reference to it live (wasm is
+// single-threaded; natively only one-test ABI binaries call this).  That is the
+// supported boundary: any other native caller is unsupported.
+#[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_last_error() -> *const u8 {
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
     drop(std::mem::take(r));
@@ -383,6 +464,9 @@ pub unsafe extern "C" fn sb_last_error() -> *const u8 {
 /// progress, and the engine needs no import for it.
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique); no unsafe operation.
+#[allow(unsafe_code)]
 pub extern "C" fn sb_progress_ptr() -> *const u32 {
     sagebrush_interrupt::progress::frames_ptr()
 }

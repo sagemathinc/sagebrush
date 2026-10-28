@@ -151,6 +151,10 @@
   #sharedlg .sharebar button { font-size: 12px; }
   #shareupload.busy::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sbspin .8s linear infinite; vertical-align: -1px; }
   @keyframes sbspin { to { transform: rotate(360deg); } }
+  /* (an always-present live region: "Checking…" once the dialog is open, then the check's outcome, which the
+     notes around it already show, so it is kept for screen readers only) */
+  #sharechecking:empty { margin: 0; }
+  #sharechecking[data-state="done"] { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   @media (prefers-reduced-motion: reduce) { #shareupload.busy::before { animation: none; border: 0; border-radius: 0; width: auto; height: auto; content: "…"; } }
   #sharedlg .result { overflow-wrap: anywhere; font-size: 13px; }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
@@ -352,6 +356,7 @@
   <h4>A link with the notebook in it</h4>
   <p class="note">No account needed. The link holds the cells' code and text, not outputs or files, and is never sent to a server.</p>
   <button id="sharelink">Copy link</button>
+  <div id="shareup">
   <h4>Upload, with its files</h4>
   <p class="note">A page at sagebrush.space/s/… with this notebook, its outputs and the files you choose, for anyone with the link. You can delete it at any time. Needs a CoCalc account.</p>
   <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
@@ -366,6 +371,9 @@
     <button class="primary" id="shareupload">Upload</button> <span id="shareprogress" class="note"></span>
     <p class="result" id="shareresult"></p>
   </div>
+  </div>
+  <!-- (outside #shareup, which a site without sharing hides: its outcome is announced too) -->
+  <p class="note" id="sharechecking" aria-live="polite"></p>
 </dialog>
 <input id="importinput" type="file" accept=".ipynb,.py,.sage,.m,.mag,.sbreplay" hidden>
 <dialog id="docdlg" aria-labelledby="doctitle">
@@ -1517,22 +1525,72 @@ async function copyShareLink() {
 // (none under `sagebrush notebook`, whose server has no share API: not asked)
 let sharing = { enabled: false };
 const shareDlg = $("#sharedlg");
+// (until the first check has answered, nothing is known: Share opens the dialog, which says it's checking)
+let shareKnown = false;
 const shareReady = (LOCAL ? Promise.resolve(sharing) : shareStatus()).then((s) => {
   sharing = s;
+  shareKnown = true;
 });
 $("#sharelink").onclick = async () => { if (shareDialog.busy) return; await copyShareLink(); shareDlg.close(); };
+// (each open's number: an open whose check ends after the dialog was closed, or opened again, stops there)
+let shareOpens = 0;
+// (fn once the dialog has rendered at least one frame since it opened: two frames, as one frame's callback runs
+// before that frame is drawn; text written earlier reaches the accessibility tree with the dialog itself, and
+// isn't announced, board's r4b HOLD 1. Where frames stop, even after the first (a tab hidden meanwhile, or
+// never shown), fn runs anyway: after 50 ms in a hidden tab, else after 1 s, so it is never lost, board's note)
+function afterRendered(fn) {
+  let done = false;
+  const go = () => { if (!done) { done = true; fn(); } };
+  requestAnimationFrame(() => requestAnimationFrame(go));
+  setTimeout(go, document.visibilityState === "hidden" ? 50 : 1000);
+}
+// (the page's first document, opened: until then Share waits, as that open closes the dialog of no document)
+let booted, isBooted = false;
+const bootDone = new Promise((r) => (booted = () => { isBooted = true; r(); }));
 async function openShare() {
   // (while uploading, Share only shows the dialog again, with the upload's own state: UI-B1)
   if (shareDialog.busy) return void shareDialog.open();
+  const t = ++shareOpens;
+  const view = { rendered: false };
+  // (the page's first document still opening: said in the status line, bounded at 10 s)
+  if (!isBooted) {
+    const note = "Share opens once this notebook has loaded…";
+    statusEl.textContent = note;
+    await Promise.race([bootDone, new Promise((r) => setTimeout(r, 10_000))]);
+    if (statusEl.textContent === note) statusEl.textContent = "";
+  }
   while (switched) await switched;
-  await shareReady;
+  if (t !== shareOpens) return;
   if (!LOCAL) {
+    // (the dialog at once, its link usable, while the check runs: up to 10 s, #207 board's note 1)
+    $("#shareup").hidden = false;
+    // (empty while the dialog opens; "Checking…" on the next frame, once it is shown, so it is announced)
+    const checking = $("#sharechecking");
+    checking.textContent = "";
+    checking.dataset.state = "checking";
+    for (const id of ["#sharesignin", "#shareunreachable", "#shareform"]) $(id).hidden = true;
+    if (!shareDlg.open) shareDlg.showModal();
+    afterRendered(() => {
+      view.rendered = true;
+      if (t === shareOpens && checking.dataset.state === "checking" && !checking.textContent) checking.textContent = "Checking your sign-in…";
+    });
+    // (the page's first check, still running when this open began, is this open's answer: not asked twice)
+    const first = !shareKnown;
+    await shareReady;
     // (a check that failed keeps what was known: a passing network error is neither "signed out"
     // nor "no sharing", and doesn't turn Share into Copy share link for the rest of the visit)
-    const s = await shareStatus();
+    const s = first ? sharing : await shareStatus();
+    if (t !== shareOpens || !shareDlg.open) return;
     if (!(s.enabled === false && s.error && sharing.enabled)) sharing = s;
   }
   const me = sharing.enabled ? sharing.me : null;
+  // (the check's outcome, announced: a removed text isn't)
+  const live = $("#sharechecking");
+  live.dataset.state = "done";
+  const outcome = me ? "Signed in: choose what to upload." : sharing.enabled ? "Sign in with CoCalc to upload." : sharing.error ? "Couldn't reach the server to check your sign-in." : "Uploading isn't available on this site.";
+  const sayOutcome = () => { if (t === shareOpens) live.textContent = outcome; };
+  // (a site without the share API, known for sure: no Upload section at all, #207 board's note 2)
+  $("#shareup").hidden = sharing.enabled === false && !sharing.error;
   // (no answer at all, and nothing known: neither "sign in" nor the form, but why)
   $("#shareunreachable").hidden = !(sharing.enabled === false && sharing.error);
   $("#sharesignin").hidden = !!me || !sharing.enabled;
@@ -1541,7 +1599,10 @@ async function openShare() {
   $("#shareresult").textContent = "";
   $("#shareprogress").textContent = "";
   if (me) $("#sharetitlein").value = docName();
-  shareDlg.showModal();
+  if (!shareDlg.open) shareDlg.showModal();
+  // (the outcome once the dialog has been drawn: at once if it has, else after its first frame)
+  if (view.rendered) sayOutcome();
+  else afterRendered(() => { view.rendered = true; sayOutcome(); });
   if (me) void shareDialog.open();
 }
 // The workspace's data files, metadata only: opening the dialog reads no file (share-ux-plan r2 §1)
@@ -1776,7 +1837,8 @@ fileMenu.addEventListener("click", async (e) => {
     case "print": window.print(); break;
     case "share": {
       // (a page whose first check failed asks again: Share, not Copy share link, if it can)
-      if (sharing.enabled || sharing.error) { openShare(); break; }
+      // (and one whose first check hasn't answered yet: the dialog, saying it's checking, never a copied link)
+      if (!shareKnown || sharing.enabled || sharing.error) { openShare(); break; }
       await copyShareLink();
       break;
     }
@@ -2727,6 +2789,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   else if (opened) {}
   else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : /m=matlab/.test(location.hash) ? "matlab" : "python", shared);
   else if (!(last && (await openId(last)))) await openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
+  booted();
   // back from signing in to share (?share): the dialog again
   if (qs.has("share")) {
     history.replaceState(null, "", location.pathname + flagQuery + location.hash);
@@ -2762,7 +2825,8 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     const st = await TAURI.core.invoke("selftest_file");
     if (st) selftest(st);
   }
-})();
+  // (however the start ends, an error included, Share stops waiting for it)
+})().finally(() => booted());
 
 </script>
 </body>

@@ -35,6 +35,7 @@ writeFileSync(join(src, "entry.js"), [
   `export * as H from ${JSON.stringify(join(here, "history.js"))};`,
   `export * as R from ${JSON.stringify(join(here, "sync-rows.js"))};`,
   `export * as B from ${JSON.stringify(join(here, "bundle.js"))};`,
+  `export * as S from ${JSON.stringify(join(here, "stores.js"))};`,
 ].join("\n"));
 const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
 rmSync(src, { recursive: true, force: true });

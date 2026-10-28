@@ -334,8 +334,8 @@ class _Capture:
     characters (both streams, as printed), with exact per-stream counts in
     characters and UTF-8 bytes."""
 
-    def __init__(self, sender):
-        self.sender = sender
+    def __init__(self, sender, rid=None):
+        self.sender, self.rid = sender, rid  # (rid: the request's id, echoed in every chunk)
         self.buf, self.pending = [], 0   # [[stream, [text, ...]]] not yet sent; their bytes
         self.head = ""
         self.tail, self.tail_n = [], 0
@@ -387,7 +387,7 @@ class _Capture:
         """The longest prefix of text whose message fits WIRE_MAX bytes."""
         k = min(len(text), WIRE_MAX)
         while True:
-            size = len(self.sender.dumps({"out": text[:k], "stream": stream})) + 1  # (ASCII: escaped)
+            size = len(self.sender.dumps({"out": text[:k], "stream": stream, "id": self.rid})) + 1  # (ASCII: escaped)
             if size <= WIRE_MAX or k == 1:
                 return k
             k = max(1, min(k - 1, k * (WIRE_MAX - 64) // size))
@@ -413,7 +413,7 @@ class _Capture:
                     seg[1] = [text[k:]]
                 self.pending -= len(piece.encode("utf-8", "surrogatepass"))
 
-            self.sender.send({"out": piece, "stream": stream}, committed)
+            self.sender.send({"out": piece, "stream": stream, "id": self.rid}, committed)
 
     def text(self):
         tail = "".join(self.tail)[-REPLY_TAIL:]
@@ -441,6 +441,28 @@ class _Stream:
 
     def writable(self):
         return True
+
+
+def _reset_run_state():
+    """A request's start: the Sage layer's per-run state that a Ctrl-C can
+    leave behind (a display scope whose __exit__ was skipped, census #1)
+    reset by assignment, before the request's code."""
+    m = sys.modules.get("_display_budget")
+    if m is not None:
+        m.reset()
+
+
+def _gc_page_temps():
+    """Once per worker start, after ready: one time-bounded pass over the
+    plot3d page temporaries of writers that died (sage_plot3d._gc_temps).
+    Nothing it meets stops the worker."""
+    try:
+        import importlib
+        importlib.import_module("sage_plot3d")._gc_temps()
+    except KeyboardInterrupt:
+        pass  # (a stray interrupt at start: the pass is for later)
+    except Exception:
+        pass
 
 
 def _send_until_committed(sender, msg):
@@ -487,6 +509,7 @@ def _worker():
     shared = {"__name__": "__main__"}
     exec("from sagebrush.sage import *", shared)
     _send_until_committed(sender, {"ready": True})
+    _gc_page_temps()
     inp = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
     while True:
         try:
@@ -496,17 +519,18 @@ def _worker():
         if not line:
             return
         req = json.loads(line)
-        code, mode, isolated = req["code"], req.get("mode", "sage"), req.get("isolated", False)
+        code, mode, isolated, rid = req["code"], req.get("mode", "sage"), req.get("isolated", False), req.get("id")
         want_data = req.get("data", False)
         ns = shared
         if isolated:
             ns = {"__name__": "__main__"}
             exec("from sagebrush.sage import *", ns)
-        out = _Capture(sender)
+        out = _Capture(sender, rid)
         del displays[:]
         result = error = info = data = None
         t0 = time.perf_counter()
         try:
+            _reset_run_state()
             with contextlib.redirect_stdout(out.stream("stdout")), contextlib.redirect_stderr(out.stream("stderr")):
                 src = preparse(code) if mode == "sage" else code
                 tree = ast.parse(src, "<cell>", "exec")
@@ -539,7 +563,7 @@ def _worker():
                     if reply is None:
                         out._flush()
                         out.sealed = True
-                        reply = {"stdout": out.text(), "stdout_chars": out.total, "output_bytes": dict(out.bytes), "result": result, "error": error,
+                        reply = {"id": rid, "stdout": out.text(), "stdout_chars": out.total, "output_bytes": dict(out.bytes), "result": result, "error": error,
                                  "error_info": info, "data": data if info is None else None, "displays": list(displays),
                                  "seconds": time.perf_counter() - t0}
                     sender.send(reply, lambda: done.append(True))
@@ -560,6 +584,8 @@ class Session:
     def __init__(self):
         self.proc = None
         self.generation = 0
+        self.last_id = 0   # (each request's id, minted before it is sent)
+        self.stale = 0     # (messages dropped for another request's id)
         self._start()
 
     def _start(self):
@@ -625,21 +651,32 @@ class Session:
             else:
                 self.proc.send_signal(signal.SIGINT)
 
-    def submit(self, code, mode="sage", isolated=False, data=False):
-        """Start code and return at once: (generation, queue), the queue
-        giving the reply, or None if the process ended first.  The caller
-        waits as long as it likes; nothing here stops the computation."""
+    def _send(self, code, mode, isolated, data):
         import json
 
+        self.last_id += 1
+        rid = self.last_id
+        self.proc.stdin.write((json.dumps({"id": rid, "code": code, "mode": mode, "isolated": isolated, "data": data}) + "\n").encode("utf-8"))
+        self.proc.stdin.flush()
+        return rid
+
+    def submit(self, code, mode="sage", isolated=False, data=False):
+        """Start code and return at once: (generation, queue, id), the queue
+        giving the reply (and its output chunks), each with the request's id,
+        or None if the process ended first.  A message with another id is an
+        earlier request's: the caller drops it.  The caller waits as long as
+        it likes; nothing here stops the computation."""
         if not self.alive():
             self._start()
-        self.proc.stdin.write((json.dumps({"code": code, "mode": mode, "isolated": isolated, "data": data}) + "\n").encode("utf-8"))
-        self.proc.stdin.flush()
-        return self.generation, self.replies
+        rid = self._send(code, mode, isolated, data)
+        return self.generation, self.replies, rid
 
-    def _get(self, timeout):
-        """The next reply (not an {"out"} chunk: Session.run's caller has the
-        reply's bounded stdout), None if the process ended, False on time."""
+    def _get(self, rid, timeout):
+        """Request rid's reply (not an {"out"} chunk: Session.run's caller has
+        the reply's bounded stdout), None if the process ended, False on time.
+        One deadline, fixed here: a message with another id (an earlier,
+        interrupted request's) is dropped and counted, never returned, and
+        never extends the wait; the process's end is never dropped."""
         import queue
 
         end = time.monotonic() + timeout
@@ -648,8 +685,16 @@ class Session:
                 r = self.replies.get(timeout=max(0.0, end - time.monotonic()))
             except queue.Empty:
                 return False
-            if not (isinstance(r, dict) and "out" in r):
+            if r is None:
+                return None
+            if not isinstance(r, dict) or r.get("id") != rid:
+                self.stale += 1
+            elif "out" not in r:
                 return r
+            # (a dropped or output message: the deadline holds however many are
+            # queued, so a queue that stays nonempty can't extend the wait)
+            if time.monotonic() >= end:
+                return False
 
     def run(self, code, mode="sage", timeout=60.0, isolated=False, data=False):
         """Run code ("sage" syntax or plain "python"); a dict with stdout,
@@ -660,15 +705,12 @@ class Session:
         restarted (True if the session had to be restarted, losing its
         variables) and data: with data=True, the JSON value the code left in
         __sagebrush_data__ (None after an error)."""
-        import json
-
         restarted = False
         if not self.alive():
             self._start()
             restarted = True
-        self.proc.stdin.write((json.dumps({"code": code, "mode": mode, "isolated": isolated, "data": data}) + "\n").encode("utf-8"))
-        self.proc.stdin.flush()
-        r = self._get(timeout)
+        rid = self._send(code, mode, isolated, data)
+        r = self._get(rid, timeout)
         if r:
             r["restarted"] = restarted
             return r
@@ -678,10 +720,16 @@ class Session:
             return {"stdout": "", "result": None, "error": msg, "error_info": _failure("session", msg), "data": None, "displays": [], "seconds": 0.0, "restarted": True}
         # over time: interrupt, then give it a few seconds to stop cleanly
         self.interrupt()
-        r = self._get(5)
+        r = self._get(rid, 5)
         if r:
-            r["error"] = "Interrupted: the time limit of %g s was reached (the session and its variables are kept)." % timeout
-            r["error_info"], r["data"] = _failure("timeout", r["error"]), None
+            if (r.get("error_info") or {}).get("type") == "interrupted":
+                r["error"] = "Interrupted: the time limit of %g s was reached (the session and its variables are kept)." % timeout
+                r["error_info"], r["data"] = _failure("timeout", r["error"]), None
+            else:
+                # (it ended just as the time ran out: its result, its data
+                # and any other error are its own, kept; census #3)
+                r["timed_out"] = True
+                r["timeout_note"] = "it finished as the time limit of %g s was reached" % timeout
             r["restarted"] = restarted
             return r
         self.restart()
