@@ -418,8 +418,6 @@ import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-
 import { createShareDialog } from "./share-client/dialog.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
-// (the LaTeX editor's entry: used only in a build with it, else dropped with the branch that calls it)
-import { latexBoot } from "./latex/boot.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { uploadFiles, openableAs, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
@@ -3168,7 +3166,8 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   await wsNow();
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
-  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws))) return;
+  // (a dynamic import: a build without the editor drops it with the branch; a static one would stay)
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await (await import("./latex/boot.ts")).latexBoot(ws))) return;
   let mode = "python";
   try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
   // a shared link opens as a new notebook; else the last one; else the welcome

@@ -2,7 +2,7 @@
 // SAGEBRUSH_LATEX_PREVIEW). Kept small: it is in the page's own script (plan sbspace r5 §5: the DEV bootstrap delta).
 // On only on an allowed host (dev.sagebrush.space exactly; the loopback hosts too in a "test" build), and then only
 // with ?latex=1 or localStorage["sagebrush-latex-preview"] === "1"; nothing else can turn it on. On, it installs the
-// hooks the file browser and the preview call (__sbLatexOpen, __sbLatexPreview) and, for /?tex=<fid>, fetches the page
+// hooks the file browser and the preview call (__sbTex, __sbTexP) and, for /?tex=<fid>, fetches the page
 // (dist/sagebrush-latex.js) and mounts it. Off with ?tex=: a one-line note offering the file's preview.
 import type { Workspace, Entry } from "../workspace/api";
 import { openPreview } from "../workspace/preview";
@@ -32,17 +32,17 @@ export async function latexBoot(ws: Workspace | null) {
   }
   const q = st.byUrl ? "?latex=1" : "";
   // the file browser: a .tex row with a fid opens the editor; without one, its preview (which says why)
-  g.__sbLatexOpen = (e: Entry, how: string) => {
+  g.__sbTex = (e: Entry, how: string) => {
     if (!/\.tex$/i.test(e.path) || !e.fid) return false;
     const url = "/?tex=" + encodeURIComponent(e.fid) + q.replace("?", "&");
     how == "tab" ? open(url, "_blank", "noopener") : location.assign(url);
     return true;
   };
   // a .tex file's preview: the editor's button; disabled, saying why, for a file without a stable id
-  g.__sbLatexPreview = (e: Entry, box: HTMLElement) => {
+  g.__sbTexP = (e: Entry, box: HTMLElement) => {
     if (!/\.tex$/i.test(e.path)) return;
     const b = el("button", "Open in LaTeX editor") as HTMLButtonElement;
-    if (e.fid) b.onclick = () => g.__sbLatexOpen(e);
+    if (e.fid) b.onclick = () => g.__sbTex(e);
     else box.append(el("div", (b.disabled = true, b.title = "This file can't open in the LaTeX editor yet: it hasn't been given a stable id.")));
     box.append(b);
   };
