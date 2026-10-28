@@ -42,6 +42,34 @@ writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><t
 
 // ---- the server, and the front
 const CLOUD = process.env.SERVER === "cloud";
+// (r3: what this run prints about the sync API and the pages: never a body, a cookie, an auth header or a query
+// string; a session-like name=value redacted, a URL's query and fragment dropped, the text cut short)
+const redact = (s, n = 300) => String(s)
+  .replace(/\b(cookie|authorization|set-cookie)\s*[:=]\s*[^\n]*/gi, "$1: <redacted>")
+  .replace(/\b([\w-]*(?:session|token|secret|auth|key)[\w-]*)=[^;&\s"']*/gi, "$1=<redacted>")
+  .replace(/(\bhttps?:\/\/[^\s"'?#]*)[?#][^\s"']*/gi, "$1?<dropped>")
+  .slice(0, n);
+// (the front's sync requests and sockets: numbered, logged as each starts and ends; the open ones, for a stopped case)
+let proxyN = 0, sockN = 0;
+const proxyOpen = new Map(), sockOpen = new Set();
+// (cloud's log: what reaches this process's stdout and stderr streams once cloud starts (Miniflare and workerd, if
+// they write there), the last 200 lines, for a stopped case; this file's own lines left out)
+const cloudLog = [];
+if (CLOUD) for (const s of [process.stdout, process.stderr]) {
+  const write = s.write.bind(s);
+  s.write = (chunk, ...rest) => {
+    for (const l of String(chunk).split("\n")) if (l && !/^(front |step |diag14|CENSUS AT )/.test(l)) { cloudLog.push(l); if (cloudLog.length > 200) cloudLog.shift(); }
+    return write(chunk, ...rest);
+  };
+}
+// (FU-DBUS cause pinning (@sagebrush's r3 ruling): with FUDBUS_AT, the VM runner's census script, run here at the
+// browser's seams and at every case, its lines in this run's output; a failure is its own line, which the judge fails)
+const SUITE = CLOUD ? "cloud" : "ref";
+const censusAt = (name) => {
+  if (!process.env.FUDBUS_AT) return;
+  const r = Bun.spawnSync(["bash", process.env.FUDBUS_AT, `${SUITE}:${name}`], { stdout: "inherit", stderr: "inherit" });
+  if (r.exitCode !== 0) console.log(`CENSUS AT ${SUITE}:${name} FAILED (its script's rc ${r.exitCode})`);
+};
 const ACCOUNT = "d5d5d5d5-0000-4d5d-8d5d-d5d5d5d5d5d5";
 let ref = null, cloud = null;
 if (CLOUD) {
@@ -82,10 +110,24 @@ const front = Bun.serve({
     // site serves them on its own origin)
     if (u.pathname === "/api/share/me") return Response.json({ account_id: ACCOUNT });
     if (u.pathname.startsWith("/api/sync/")) {
-      const h = new Headers({ cookie: sessions.D, ...(CLOUD ? { origin: cloud.url } : {}) });
-      for (const k of ["content-type", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
-      const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
-      return CLOUD ? fetch(cloud.url + u.pathname + u.search, { method: req.method, headers: h, body }) : ref.fetch(new Request("http://ref" + u.pathname + u.search, { method: req.method, headers: h, body }));
+      // (r3: logged as it starts, and as its answer's status arrives or it throws, with the time taken: the method and
+      // the path only; a start without an end is a request still waiting)
+      const k = ++proxyN, t = Date.now(), what = `${req.method} ${redact(u.pathname, 120)}`;
+      proxyOpen.set(k, { what, t });
+      console.log(`front sync #${k} start ${what}`);
+      try {
+        const h = new Headers({ cookie: sessions.D, ...(CLOUD ? { origin: cloud.url } : {}) });
+        for (const k of ["content-type", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
+        const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
+        const r = await (CLOUD ? fetch(cloud.url + u.pathname + u.search, { method: req.method, headers: h, body }) : ref.fetch(new Request("http://ref" + u.pathname + u.search, { method: req.method, headers: h, body })));
+        console.log(`front sync #${k} end ${what} ${r.status} ${Date.now() - t}ms`);
+        return r;
+      } catch (e) {
+        console.log(`front sync #${k} end ${what} error ${redact(e?.name ?? "", 40)}: ${redact(e?.message ?? e, 200)} ${Date.now() - t}ms`);
+        throw e;
+      } finally {
+        proxyOpen.delete(k);
+      }
     }
     const f = { "/": "index.html", "/all.js": "all.js", "/device.js": "device.js" }[u.pathname];
     if (!f) return new Response("not found", { status: 404 });
@@ -93,8 +135,12 @@ const front = Bun.serve({
   },
   websocket: {
     async open(ws) {
+      const k = (ws.data.k = ++sockN), t = Date.now();
+      sockOpen.add(k);
+      console.log(`front socket #${k} open (device ${ws.data.dev})`);
       const s = CLOUD ? await cloudSocket(sessions[ws.data.dev]) : await ref.connect(sessions[ws.data.dev]);
-      if (!s.send) return ws.close(4401, "no session");
+      if (!s.send) { console.log(`front socket #${k} no upstream ${Date.now() - t}ms`); return ws.close(4401, "no session"); }
+      console.log(`front socket #${k} upstream open ${Date.now() - t}ms`);
       ws.data.s = s;
       s.onmessage = (text) => {
         const t = tamper[ws.data.dev];
@@ -113,7 +159,7 @@ const front = Bun.serve({
         }
         try { ws.send(text); } catch {}
       };
-      s.onclose = (c) => { try { ws.close(c); } catch {} };
+      s.onclose = (c) => { console.log(`front socket #${k} closed by the server ${c}`); try { ws.close(c); } catch {} };
       for (const m of ws.data.queue ?? []) s.send(m);
     },
     message(ws, m) {
@@ -124,7 +170,7 @@ const front = Bun.serve({
       } catch {}
       if (ws.data.s) ws.data.s.send(text); else (ws.data.queue ??= []).push(text);
     },
-    close(ws) { ws.data.s?.close(); },
+    close(ws, code) { if (sockOpen.delete(ws.data.k)) console.log(`front socket #${ws.data.k} closed ${code}`); ws.data.s?.close(); },
   },
 });
 
@@ -152,10 +198,13 @@ let port = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-ds-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
 const errors = [];
+// (r3: the pages' own console warnings and errors and the browser's log entries for them, by the page's label)
+const labels = new Map(), pageConsole = [];
+const noteConsole = (s) => { pageConsole.push(redact(s)); if (pageConsole.length > 200) pageConsole.shift(); };
 // (its own deadline: a hang anywhere ends the run here, the browser killed, saying where it was)
 let step = "start";
 const t0 = Date.now();
-const progress = (what) => { step = what; console.log(`step ${((Date.now() - t0) / 1000).toFixed(1)}s: ${what}`); };
+const progress = (what) => { step = what; console.log(`step ${((Date.now() - t0) / 1000).toFixed(1)}s: ${what}`); if (/^case \d+$/.test(what)) censusAt(what.replace(" ", "-")); };
 const deadline = setTimeout(() => {
   console.error(`FAIL: the run's deadline passed at step: ${step}`);
   for (const e of errors) console.error("page error: " + e);
@@ -167,6 +216,7 @@ try {
   if (!port) port = await devtoolsPort(profile);
   let version;
   for (let i = 0; i < 300; i++) { try { version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json(); break; } catch { await sleep(100); } }
+  censusAt("browser-up");
   const ws = new WebSocket(version.webSocketDebuggerUrl);
   await new Promise((r) => (ws.onopen = r));
   let n = 0;
@@ -175,6 +225,10 @@ try {
     const m = JSON.parse(ev.data);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.error ? { error: m.error } : m.result); waiting.delete(m.id); }
     if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? J(m.params.exceptionDetails));
+    if (m.method === "Runtime.consoleAPICalled" && labels.has(m.sessionId) && (m.params.type === "warning" || m.params.type === "error"))
+      noteConsole(`${labels.get(m.sessionId)} console.${m.params.type}: ` + (m.params.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(" "));
+    if (m.method === "Log.entryAdded" && labels.has(m.sessionId) && (m.params.entry?.level === "warning" || m.params.entry?.level === "error"))
+      noteConsole(`${labels.get(m.sessionId)} log.${m.params.entry.level}: ${m.params.entry.text}${m.params.entry.url ? " (" + m.params.entry.url + ")" : ""}`);
   };
   const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(J({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
   // (a device: a browser context of its own, a page in it, its session for evaluating there)
@@ -532,7 +586,9 @@ try {
   async function pageIn(label, ctx = cctx) {
     const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId: ctx });
     const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
+    labels.set(sessionId, label);
     await send("Runtime.enable", {}, sessionId);
+    await send("Log.enable", {}, sessionId);
     await send("Page.navigate", { url: `http://127.0.0.1:${front.port}/` }, sessionId);
     const ev = async (expression) => {
       const r = await Promise.race([send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId), sleep(45_000).then(() => ({ error: `timed out: ${expression.slice(0, 80)}` }))]);
@@ -598,6 +654,7 @@ try {
   // (a failed check ends the case there (recorded first): the rest depends on it, and a mutant's run stays short)
   const STOP14 = Symbol("stop");
   const need14 = (ok, what) => { check(ok, what); if (!ok) throw STOP14; };
+  let D14 = null;
   const case14 = async () => {
     // 14. (astra's DEVSW-1-R2, r5) The real owners: one device (D), two pages of one browser context, each with its own
     // SyncOwner and SyncClient on the namespace's sender lock, against this reference server (device D's session, through
@@ -608,6 +665,7 @@ try {
     // notebook page's owner takes the lock by itself: both directions again, nothing connected by hand
     const { browserContextId: dctx } = await send("Target.createBrowserContext");
     const D1 = await pageIn("D1", dctx), D2 = await pageIn("D2", dctx);
+    D14 = { D1, D2 };
     // (every await of this case bounded (astra's DEVSW-R6-1): a hung page call ends as this case's failed check, its
     // verdict printed, never as the run's deadline)
     const LATE14 = Symbol("late");
@@ -688,6 +746,31 @@ try {
   const r14 = await Promise.race([run14.then(() => ({ ok: true }), (e) => ({ ok: false, e })), new Promise((r) => { timer14 = setTimeout(() => r(LATECASE), Math.max(1, budget14)); })]).finally(() => clearTimeout(timer14));
   if (r14 === LATECASE) check(false, `14: the case didn't finish within its ${Math.round(budget14 / 1000)} s budget, at step: ${step}`);
   else if (!r14.ok && r14.e !== STOP14) check(false, "14: the case stopped: " + String(r14.e?.message ?? r14.e).slice(0, 300));
+  // (r3: case 14 not finished (a failed check, a throw or its budget): what it needs to be diagnosed, every page
+  // question bounded at 10 s, every line redacted: each page's turn-on phases (the last one completed), owner and
+  // warnings; the pages' console; the sync requests still waiting and the sockets open; on cloud, its log's tail)
+  if (r14 === LATECASE || !r14.ok) {
+    const say = (s) => console.log("diag14: " + redact(s, 600));
+    const ask = async (P, expr) => {
+      const v = await Promise.race([P.ev(expr).catch((e) => ({ error: String(e?.message ?? e) })), sleep(10_000).then(() => "(no answer in 10 s)")]);
+      return typeof v === "string" ? v : J(v);
+    };
+    if (!D14) say("the pages weren't made");
+    else for (const [n, P] of Object.entries(D14)) {
+      say(`${n} turnOn: ` + (await ask(P, "T.turnInfo ? T.turnInfo() : null")));
+      say(`${n} owner: ` + (await ask(P, "T.owner ? T.ownerState() : null")));
+      say(`${n} warnings: ` + (await ask(P, "T.warnings()")));
+    }
+    say(`the pages' console warnings and errors: ${pageConsole.length}${pageConsole.length > 40 ? " (the last 40)" : ""}`);
+    for (const l of pageConsole.slice(-40)) say("  " + l);
+    say("sync requests still waiting: " + J([...proxyOpen].map(([k, { what, t }]) => `#${k} ${what} ${Date.now() - t}ms`)));
+    say(`sockets open: ${J([...sockOpen])} of ${sockN}; sync requests ${proxyN}`);
+    if (CLOUD) {
+      say(`cloud's log: ${cloudLog.length} line(s) on this process's stdout/stderr streams${cloudLog.length > 60 ? " (the last 60)" : ""}`);
+      for (const l of cloudLog.slice(-60)) say("  cloud: " + l);
+    }
+  }
+  censusAt("cases-done");
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
@@ -704,6 +787,7 @@ try {
   front.stop(true);
   try { await cloud?.stop(); } catch {}
   await sleep(200);
+  censusAt("browser-killed");
   for (const d of [profile, site]) rmSync(d, { recursive: true, force: true });
 }
 clearTimeout(deadline);
