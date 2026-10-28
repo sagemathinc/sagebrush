@@ -2255,8 +2255,12 @@ export function createNotebook(root, opts = {}) {
         const { j: _j, hash: _h, rev: _r, unjournaled: _u, ...mine } = rec;
         const { doc: merged, kept } = await s.mergeRemote(mine);
         if (store !== s) return;
-        applyRemote(merged, true);
-        schedule();
+        // (the merge is not yet the record: shown against the record's own revision, the base its save then needs (a
+        // change typed meanwhile kept by applyRemote, cell by cell), and saved: after applyRemote's loading phase,
+        // marked unsaved, so even a clean remote change is saved (astra's CORR-2C3-5))
+        // (fromConflict: past the check that drops a document no newer than the one shown: the record's revision is it)
+        applyRemote({ ...merged, rev: rec.rev }, true, true);
+        Promise.resolve().then(() => { if (store !== s) return; lastJson = null; schedule(); });
         if (kept) emit("saved", kept === "theirs" ? "Another device changed the same cells later: its version is kept, this device's is in TimeTravel" : "Another device changed the same cells earlier: this device's version is kept, theirs is in TimeTravel");
       };
       return doc;
