@@ -12,7 +12,7 @@ import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { devtoolsPort } from "../test-port.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -38,7 +38,12 @@ const site = mkdtempSync(join(tmpdir(), "sb-sc-site-"));
 const script = execFileSync("bun", ["build", join(here, "../sync/test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8", maxBuffer: 64 << 20 });
 execFileSync("bun", ["build", join(here, "index.ts"), "--outdir", site, "--entry-naming", "ws.js", "--target", "browser", "--format", "esm"], { stdio: "inherit" });
 copyFileSync(join(here, "sync-client-cases.js"), join(site, "cases.js"));
-writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>sync client test</title><script>window.ACCOUNTS = ${JSON.stringify(ACCOUNTS)}; window.FULL = ${JSON.stringify(FULL)}; window.SMALL = ${JSON.stringify(SMALL)};</script><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
+// (the protocol's own batch check, as the canonical reference server runs it (sync-protocol's checkFgen and clientOf),
+// bundled for this front: every page's batch passes it here first, whatever server is behind)
+writeFileSync(join(site, "canon-entry.ts"), `export { checkFgen } from ${JSON.stringify(join(here, "../sync-protocol/doc-protocol.ts"))};\nexport { clientOf } from ${JSON.stringify(join(here, "../sync-protocol/protocol.ts"))};\n`);
+execFileSync("bun", ["build", join(site, "canon-entry.ts"), "--outfile", join(site, "canon.mjs"), "--target", "node", "--format", "esm"], { stdio: "inherit" });
+const canon = await import(pathToFileURL(join(site, "canon.mjs")).href);
+writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>sync client test</title><script>window.ACCOUNTS = ${JSON.stringify(ACCOUNTS)}; window.FULL = ${JSON.stringify(FULL)}; window.SMALL = ${JSON.stringify(SMALL)}; window.REQUIRE_CLAIM = ${JSON.stringify(process.env.SYNC_REQUIRE_CLAIM === "1")};</script><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
 
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [{
@@ -104,11 +109,11 @@ const ctl = {
 const closers = new Set();
 /** every open proxied socket's sender to the page (a notice injected as the server would send it, D8) */
 const toPage = new Set();
-const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0 };
+const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0, fgenRefused: 0, batchesUp: 0 };
 const held = [];
 /** the server's own index_changed dropped by the front over the whole run (log.serverNotices is per case: reset) */
 let serverNoticesDropped = 0;
-const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0 });
+const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0, fgenRefused: 0, batchesUp: 0 });
 
 async function upstream(method, path, headers, body) {
   const h = { origin: SITE, ...headers };
@@ -308,6 +313,17 @@ server.on("upgrade", async (req, socket, head) => {
       try { m = JSON.parse(text); } catch { m = {}; }
       log.sent.push(m.t === "ops" ? { t: "ops", req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)), at: Date.now() } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after, at: Date.now() });
       if (m.t === "hello") helloAccount = m.account ?? null;
+      // (every batch checked as the canonical reference server checks it (§5.8: one generation for each client in its
+      // patches, and no other): a failing one is refused here, routed to its request, and never forwarded)
+      if (m.t === "batch") {
+        let why = null;
+        try { canon.checkFgen(m.fgen, new Set((Array.isArray(m.patches) ? m.patches : []).map((p) => canon.clientOf(String(p?.id ?? ""))))); } catch (e) { why = String(e?.message ?? e); }
+        if (why !== null) {
+          log.fgenRefused++;
+          client.send(JSON.stringify({ t: "error", req: m.req, code: "invalid", detail: { message: why } }));
+          return;
+        }
+      }
       if (m.t === "ops") log.bindings.push({ session: socketSession, hello: helloAccount, dseqs: m.ops.map((o) => o.dseq) });
       if (m.t === "ops") log.ops.push(...m.ops.map((o) => JSON.stringify(o)));
       if (m.t === "rebuilt" && ctl.rebuiltReal) log.rebuilt.push({ through: m.through, answer: "server", at: Date.now() });
@@ -332,6 +348,9 @@ server.on("upgrade", async (req, socket, head) => {
         else answer();
         return;
       }
+      // (the one place a page's frame goes upstream: batches counted here, so a case can tell a refused batch was never
+      // forwarded)
+      if (m.t === "batch") log.batchesUp++;
       try { up.send(text); } catch {}
     });
     client.on("close", (code) => closeBoth(code));
