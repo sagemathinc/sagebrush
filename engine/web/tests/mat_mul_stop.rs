@@ -152,8 +152,12 @@ fn mat_mul_unpolled_intervals_at_size() {
             };
             let (full, lead, trail, gap) = traced(&req);
             hooks::reset();
+            // (past 250 ms these are the named temporary exception, labelled,
+            // never a silent pass: FU-MM-T, William Oct 27 2026, until PR T)
+            let over = lead >= 250.0 || trail >= 250.0 || gap >= 250.0;
             println!(
-                "{} {}: request {:.1} MB, reply {:.1} MB; leading {:.1} ms, trailing {:.1} ms, longest gap {:.1} ms",
+                "{}{} {}: request {:.1} MB, reply {:.1} MB; leading {:.1} ms, trailing {:.1} ms, longest gap {:.1} ms",
+                if over { "WAIVED FU-MM-T: " } else { "" },
                 label,
                 wire,
                 req.len() as f64 / 1e6,

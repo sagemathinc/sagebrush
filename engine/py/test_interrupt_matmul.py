@@ -113,6 +113,15 @@ SETS = {
 }
 SET = sys.argv[sys.argv.index("--set") + 1] if "--set" in sys.argv else "big"
 SHAPES = SETS[SET]
+# The named temporary exception (never a silent pass): in the big set only, a
+# row whose ONLY failure is latency past 250 ms is reported WAIVED, with its
+# measurement.  William, Oct 27 ~5:45 PM PDT (card pr241-stop250-interim):
+# "Yes, land #241 now with the named temporary exception": FU-MM-T, single
+# ZZ mat_mul calls large enough that one uninterruptible serde parse /
+# serialize, Python json dumps / loads or unwind drop exceeds 250 ms, until
+# the tiling PR T lands, which must retire it.  The small set is strict.
+WAIVER = "WAIVED FU-MM-T (William, Oct 27 2026: land #241 with the named temporary exception; retired by tiling PR T)"
+WAIVABLE = SET == "big"
 WAIT = 600.0  # the longest any child may take (a hang guard, not a limit of the computation)
 
 
@@ -182,8 +191,11 @@ def sigint_case(shape, n):
     if T < 0.5:
         # (too short for a signal at T / 2 to be scheduling evidence: reported, not judged)
         return True, "T=%.2f s: too short for a T/2 SIGINT row (n/a); KeyboardInterrupt %.0f ms, rc=%s" % (T, dt * 1000, rc)
-    ok = first == "interrupted\n" and rc == 0 and lines[-1:] == ['then: "11"'] and dt < 0.25
-    return ok, "T=%.2f s, KeyboardInterrupt %.0f ms after SIGINT, rc=%s, %s" % (T, dt * 1000, rc, " | ".join(lines)[:120] + err.strip()[-200:])
+    correct = first == "interrupted\n" and rc == 0 and lines[-1:] == ['then: "11"']
+    what = "T=%.2f s, KeyboardInterrupt %.0f ms after SIGINT, rc=%s, %s" % (T, dt * 1000, rc, " | ".join(lines)[:120] + err.strip()[-200:])
+    if correct and dt >= 0.25 and WAIVABLE:
+        return True, WAIVER + ": " + what
+    return correct and dt < 0.25, what
 
 
 def targeted_case(shape, n):
@@ -199,7 +211,10 @@ def targeted_case(shape, n):
     for r in rows:
         if "transport" in r:
             continue
-        if not (r.get("outcome") == "interrupted" and r.get("landed") == r["phase"] and r.get("latency_ms", 1e9) < 250 and r.get("then") == '"11"' and r.get("outstanding_back")):
+        correct = r.get("outcome") == "interrupted" and r.get("landed") == r["phase"] and r.get("then") == '"11"' and r.get("outstanding_back")
+        if correct and r.get("latency_ms", 1e9) >= 250 and WAIVABLE:
+            r["waiver"] = WAIVER
+        elif not (correct and r.get("latency_ms", 1e9) < 250):
             bad.append(json.dumps(r))
     return not bad, rows, bad
 
