@@ -100,13 +100,13 @@ test("cancelled before admission (the prefetch's await): warm, complete, check a
   assert.deepEqual(of(k), [{ id: k, more: false, interrupted: true, mode: "magma", modeReady: false }]);
   assert.deepEqual(of(r), [{ id: r, skipped: true }]);
   assert.equal(s.stats().loads, 0, "a load started for a cancelled request");
-  assert.equal(Atomics.load(R.INTR, 0) & 1, 1, "a cancelled request cleared the Stop's bit");
+  assert.equal(Atomics.load(R.INTR as Int32Array, 0) & 1, 1, "a cancelled request cleared the Stop's bit");
   // (a later request is admitted, clears the stale bit, loads and runs)
   const n = id();
   await s.handle({ id: n, code: "1 + 1", magma: true });
   assert.equal(of(n).find((m) => m.done).modeReady, true);
   assert.deepEqual(s.stats().loaded, ["magma"]);
-  assert.equal(Atomics.load(R.INTR, 0) & 1, 0);
+  assert.equal(Atomics.load(R.INTR as Int32Array, 0) & 1, 0);
 });
 
 test("a Stop between the admission's steps cancels the request, for every kind; one after them interrupts the load", async () => {
