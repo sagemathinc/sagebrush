@@ -198,7 +198,10 @@ const n = Number((src.match(/range\\(1, (\\d+) \\+ 1\\)/) ?? [])[1] ?? 1);
 const say = (s) => process.stdout.write(s + "\\n");
 let i = 0;
 const next = () => {
-  if (++i > n) { say("END"); process.exit(0); }
+  // (after the last DONE it stays up a moment, as a real launcher's teardown does: the harness samples the
+  // target's threads at each DONE, and a process already exiting there reads as fewer threads, so the
+  // leak check's threads_same would fail; VM2 diagnosis, 3 runs of 4)
+  if (++i > n) { setTimeout(() => { say("END"); process.exit(0); }, 1000); return; }
   say("SETUP " + i); say("ENTER " + i + " 0.1");
   setTimeout(() => { say("RET " + i); say("PROBE " + i + " ok"); say("DONE " + i); next(); }, 7200);
 };
@@ -215,9 +218,11 @@ next();
     const e2 = rows.find((r) => r.case === "E2");
     assert.ok(e2, "E2's row");
     const cells = e2.cells.map((c: any) => [c.outcome, c.why]);
-    assert.equal(e2.cells.length, 5, JSON.stringify(cells));
-    assert.ok(e2.cells.every((c: any) => c.outcome === "FAIL" && /^did not stop/.test(c.why) && !c.malformed), JSON.stringify(cells));
-    assert.equal(e2.outcome, "KNOWN", JSON.stringify(cells));
+    const row = JSON.stringify({ outcome: e2.outcome, own_outcome: e2.own_outcome, why: e2.why, leak: e2.leak, cells, samples: (e2.sessions ?? []).map((x: any) => [x.label, x.end, x.samples]) });
+    assert.equal(e2.cells.length, 5, row);
+    assert.ok(e2.cells.every((c: any) => c.outcome === "FAIL" && /^did not stop/.test(c.why) && !c.malformed), row);
+    assert.ok(e2.leak?.ok === true, row);
+    assert.equal(e2.outcome, "KNOWN", row);
     assert.equal(code, 0, err.slice(-600));
   } finally {
     rmSync(dir, { recursive: true, force: true });
