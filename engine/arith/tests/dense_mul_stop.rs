@@ -8,7 +8,8 @@
 //! - `nmod-transpose`: its transpose of B, polled by entry (a 1 x C B is
 //!   one row).
 //! For each case: the checks made **in that phase** (not in the scans
-//! before it) are at least its work / 2^16; a Stop armed at the phase's
+//! before it) are at least its work / 2^17 (a poll covers a group of outputs
+//! or rows worth at least 2^16 units, so up to about 2^17 between checks); a Stop armed at the phase's
 //! median check lands in that phase; the next product is exact.  Failures
 //! are collected per case and reported together, so a mutant that removes
 //! one kernel's polling fails exactly that kernel's cases.  One test: the
@@ -129,14 +130,14 @@ fn dense_products_poll_in_every_kernel_phase() {
     ] {
         let (a, b) = (zm(&mut s, r, k, 9), zm(&mut s, k, c, 9));
         let want = zref(&a, &b);
-        case(&mut bad, label, "zmat-dot", (r * k * c) as u64 >> 16, &want, || a.mul(&b).d);
+        case(&mut bad, label, "zmat-dot", (r * k * c) as u64 >> 17, &want, || a.mul(&b).d);
     }
     // ---- ZMat, the BigInt loop: 300-digit entries (997 bits: 16 x 16 word
     // products a multiply-add, weighed so)
     for (label, r, k, c) in [("zmat big 1xKx1", 1, 1 << 12, 1), ("zmat big 1xKxM", 1, 1 << 8, 1 << 4), ("zmat big square", 16, 16, 16)] {
         let (a, b) = (zm(&mut s, r, k, 300), zm(&mut s, k, c, 300));
         let want = zref(&a, &b);
-        case(&mut bad, label, "zmat-big-dot", (r * k * c * 256) as u64 >> 16, &want, || a.mul(&b).d);
+        case(&mut bad, label, "zmat-big-dot", (r * k * c * 256) as u64 >> 17, &want, || a.mul(&b).d);
     }
     // ---- nmod_mat::Mat::mul: a small prime (overflow-safe batch 2^30
     // before) and a 63-bit one
@@ -145,13 +146,14 @@ fn dense_products_poll_in_every_kernel_phase() {
         for (label, r, k, c) in [("nmod 1xKx1", 1, 1 << 18, 1), ("nmod 1xKxM", 1, 1 << 10, 1 << 8), ("nmod square", 64, 64, 64), ("nmod wide", 16, 16, 1 << 10)] {
             let (a, b) = (nm(&mut s, r, k, m), nm(&mut s, k, c, m));
             let want = nref(&a, &b, p);
-            case(&mut bad, &format!("{} p={}", label, p), "nmod-dot", (r * k * c) as u64 >> 16, &want, || a.mul(&b).d);
+            case(&mut bad, &format!("{} p={}", label, p), "nmod-dot", (r * k * c) as u64 >> 17, &want, || a.mul(&b).d);
         }
-        // the transpose: B = 1 x C is one row (1 x 1 x C), and R x 1 x C
-        for (label, r, c) in [("nmod transpose 1x1xC", 1, 1 << 18), ("nmod transpose Rx1xC", 4, 1 << 17)] {
-            let (a, b) = (nm(&mut s, r, 1, m), nm(&mut s, 1, c, m));
+        // the transpose: B = 1 x C is one long row, polled per chunk inside it
+        // (1 x 1 x C, R x 1 x C); B = K x 1 is many short rows, polled per group
+        for (label, r, k, c) in [("nmod transpose 1x1xC", 1, 1, 1 << 18), ("nmod transpose Rx1xC", 4, 1, 1 << 17), ("nmod transpose Kx1 rows", 1, 1 << 18, 1)] {
+            let (a, b) = (nm(&mut s, r, k, m), nm(&mut s, k, c, m));
             let want = nref(&a, &b, p);
-            case(&mut bad, &format!("{} p={}", label, p), "nmod-transpose", c as u64 >> 16, &want, || a.mul(&b).d);
+            case(&mut bad, &format!("{} p={}", label, p), "nmod-transpose", (k * c) as u64 >> 17, &want, || a.mul(&b).d);
         }
     }
     // ---- empty dimensions (astra2 DENSE-R2-ZERO): R x 0 x C, R x K x 0,

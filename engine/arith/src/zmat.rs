@@ -166,24 +166,46 @@ impl ZMat {
                 drop(scan);
                 let _dot = sagebrush_interrupt::enter("zmat-dot");
                 let mut d = Vec::with_capacity(r * c);
-                for i in 0..r {
-                    for j in 0..c {
-                        let mut s = 0i128;
-                        // (chunks of MUL_STEP multiply-adds, one poll each,
-                        // the output entry counted with the last)
-                        let mut l0 = 0;
-                        loop {
-                            let l1 = (l0 + MUL_STEP).min(k);
-                            for l in l0..l1 {
+                if k < MUL_STEP {
+                    // (each output's dot product exactly as before; one poll
+                    // per group of outputs worth at least MUL_STEP units)
+                    let per = MUL_STEP.div_ceil(k + 1);
+                    let mut left = per;
+                    for i in 0..r {
+                        for j in 0..c {
+                            let mut s = 0i128;
+                            for l in 0..k {
                                 s += a[i * k + l] as i128 * b[l * c + j] as i128;
                             }
-                            poll.add(l1 - l0 + 1);
-                            if l1 >= k {
-                                break;
+                            d.push(BigInt::from(s));
+                            left -= 1;
+                            if left == 0 {
+                                poll.add(per * (k + 1));
+                                left = per;
                             }
-                            l0 = l1;
                         }
-                        d.push(BigInt::from(s));
+                    }
+                } else {
+                    for i in 0..r {
+                        for j in 0..c {
+                            let mut s = 0i128;
+                            // (a long dot product: chunks of MUL_STEP
+                            // multiply-adds, one poll each, the output entry
+                            // counted with the last)
+                            let mut l0 = 0;
+                            loop {
+                                let l1 = (l0 + MUL_STEP).min(k);
+                                for l in l0..l1 {
+                                    s += a[i * k + l] as i128 * b[l * c + j] as i128;
+                                }
+                                poll.add(l1 - l0 + 1);
+                                if l1 >= k {
+                                    break;
+                                }
+                                l0 = l1;
+                            }
+                            d.push(BigInt::from(s));
+                        }
                     }
                 }
                 return ZMat { rows: r, cols: c, d };
@@ -222,9 +244,7 @@ impl ZMat {
     fn max_bits_polled(&self, poll: &mut Poll) -> u64 {
         let mut m = 0;
         for chunk in self.d.chunks(SCAN_CHUNK) {
-            for x in chunk {
-                m = m.max(bits(x));
-            }
+            m = m.max(chunk.iter().map(bits).max().unwrap_or(0));
             poll.add(chunk.len());
         }
         m

@@ -57,6 +57,11 @@ pub struct Mat {
     pub d: Vec<u64>,
 }
 
+/// The transpose's entries between two polls (per row group or row chunk).
+const TRANSPOSE_CHUNK: usize = 1 << 12;
+/// The multiply-adds a dot-product poll covers.
+const DOT_STEP: usize = 1 << 16;
+
 /// Asks for Stop (sagebrush_interrupt::check_coarse, which asks the wasm
 /// host at every call) about every 2^16 multiply-adds, a few milliseconds
 /// in wasm, where the 128-bit products are emulated: the natural
@@ -483,13 +488,32 @@ impl Mat {
             return Mat::zero(self.rows, o.cols, m);
         }
         let mut poll = Poll::new();
-        // (the transpose, polled by entry: a 1 x C or K x C copy)
+        // (the transpose, polled per group of whole rows of B, or per chunk
+        // inside a long row: never per entry, and never unpolled)
         let transpose = sagebrush_interrupt::enter("nmod-transpose");
         let mut bt = Mat::zero(o.cols, o.rows, m);
-        for i in 0..o.rows {
-            for j in 0..o.cols {
-                bt.d[j * o.rows + i] = o.d[i * o.cols + j];
-                poll.add(1);
+        if o.cols >= TRANSPOSE_CHUNK {
+            for i in 0..o.rows {
+                for j0 in (0..o.cols).step_by(TRANSPOSE_CHUNK) {
+                    let j1 = (j0 + TRANSPOSE_CHUNK).min(o.cols);
+                    for j in j0..j1 {
+                        bt.d[j * o.rows + i] = o.d[i * o.cols + j];
+                    }
+                    poll.add(j1 - j0);
+                }
+            }
+        } else {
+            let rows_per = TRANSPOSE_CHUNK.div_ceil(o.cols);
+            let mut left = rows_per;
+            for i in 0..o.rows {
+                for j in 0..o.cols {
+                    bt.d[j * o.rows + i] = o.d[i * o.cols + j];
+                }
+                left -= 1;
+                if left == 0 {
+                    poll.add(rows_per * o.cols);
+                    left = rows_per;
+                }
             }
         }
         drop(transpose);
@@ -497,24 +521,58 @@ impl Mat {
         let sq = (m.n as u128 - 1) * (m.n as u128 - 1);
         let batch = if sq == 0 { usize::MAX } else { (u128::MAX / sq).min(1 << 30) as usize };
         let mut c = Mat::zero(self.rows, o.cols, m);
-        // (polled inside each dot product too, so a 1 x K x C product asks
-        // about every 2^16 multiply-adds, not once per output row)
-        let batch = batch.min(1 << 16);
-        for i in 0..self.rows {
-            let a = self.row(i);
-            for j in 0..o.cols {
-                let b = bt.row(j);
-                let mut r = 0u64;
-                for (ca, cb) in a.chunks(batch).zip(b.chunks(batch)) {
-                    let mut acc = 0u128;
-                    for (&x, &y) in ca.iter().zip(cb) {
-                        acc += x as u128 * y as u128;
+        let k = self.cols;
+        if k < DOT_STEP {
+            // (each output's dot product exactly as before; one poll per
+            // group of outputs worth at least DOT_STEP units)
+            let unit = k + 1;
+            let per = DOT_STEP.div_ceil(unit);
+            let mut left = per;
+            for i in 0..self.rows {
+                let a = self.row(i);
+                for j in 0..o.cols {
+                    let b = bt.row(j);
+                    let mut r = 0u64;
+                    for (ca, cb) in a.chunks(batch).zip(b.chunks(batch)) {
+                        let mut acc = 0u128;
+                        for (&x, &y) in ca.iter().zip(cb) {
+                            acc += x as u128 * y as u128;
+                        }
+                        r = m.add(r, m.reduce_u128(acc));
                     }
-                    r = m.add(r, m.reduce_u128(acc));
-                    // (the batch's multiply-adds, and the output entry)
-                    poll.add(ca.len() + 1);
+                    c.d[i * o.cols + j] = r;
+                    left -= 1;
+                    if left == 0 {
+                        poll.add(per * unit);
+                        left = per;
+                    }
                 }
-                c.d[i * o.cols + j] = r;
+            }
+        } else {
+            // (a long dot product: batches of at most DOT_STEP, counted
+            // locally and polled about every DOT_STEP multiply-adds inside it)
+            let batch = batch.min(DOT_STEP);
+            for i in 0..self.rows {
+                let a = self.row(i);
+                for j in 0..o.cols {
+                    let b = bt.row(j);
+                    let mut r = 0u64;
+                    let mut pending = 0usize;
+                    for (ca, cb) in a.chunks(batch).zip(b.chunks(batch)) {
+                        let mut acc = 0u128;
+                        for (&x, &y) in ca.iter().zip(cb) {
+                            acc += x as u128 * y as u128;
+                        }
+                        r = m.add(r, m.reduce_u128(acc));
+                        pending += ca.len();
+                        if pending >= DOT_STEP {
+                            poll.add(pending);
+                            pending = 0;
+                        }
+                    }
+                    poll.add(pending + 1);
+                    c.d[i * o.cols + j] = r;
+                }
             }
         }
         c
