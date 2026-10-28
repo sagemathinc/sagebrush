@@ -394,7 +394,10 @@ try:
     X, s = L.solve(R, b, "t")
     assert L._routes == ["lu"]
     ok("fallback: LU-only feasible (band's need beyond G): the LU, at exactly its peak")
-    # band-only, at step 3: the ordering is refused and band fits (a cheap band forced by the cost seam)
+    # band-only, at step 3: the ordering is refused and band fits (a cheap band forced by the cost seam).  These
+    # fallback rows exercise the cost route's steps 3-5, so the routing floor (master's band route, which would take
+    # band(4001, 3, 3) at once) is turned off here and restored in this section's finally
+    sp.legacy_band_route = lambda n, kl, ku: False
     Tb = band_matrix(n, 3, 3)
     nbT = L.band_need(n, 3, 3, 1, False)
     mT = nbT["persistent"] + max(nbT["setup"], nbT["step"])
@@ -452,6 +455,7 @@ try:
     ok("fallback: band-only at step 5 (the LU preferred, refused part way): the ledger back to empty, then band, master's answer")
 finally:
     L.COSTS["cli"].update(saved_costs)
+    sp.legacy_band_route = saved_floor
     restore()
 
 
