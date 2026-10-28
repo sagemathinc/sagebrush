@@ -1220,7 +1220,8 @@ jobs:
           python3 sage-tests/run_cpython.py -v
 
   # clippy on sagebrush-py (FU-CI-CLIPPY, plan r4e): no workflow ran clippy, so a deny-level lint in Ctrl-C PR B's test
-  # code reached a green PR ci unseen. Default and all features (test-hooks, the crate's only feature), every target;
+  # code reached a green PR ci unseen. Default and all features (test-hooks, the crate's only feature), every target,
+  # on the toolchain engine/rust-toolchain.toml pins;
   # correctness and suspicious denied, the warn-level lints reported, not gated. The VM baseline at 1ff3d5cd: 0
   # errors, CLEAN in both passes. The summarizer (scripts/clippy) counts from clippy's JSON and is checked against its
   # fixtures first.
@@ -1234,8 +1235,11 @@ jobs:
       - name: detect CI CPU quota
         run: scripts/ci-cpus.sh
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      # (engine/rust-toolchain.toml pins the toolchain (1.99.1, profile minimal) for every cargo command under engine/:
+      #  clippy goes onto THAT toolchain, which rustup selects here from the file; the file itself is unchanged)
+      - name: clippy for the pinned engine toolchain
+        working-directory: engine
+        run: rustup component add clippy && rustup show active-toolchain
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: engine
