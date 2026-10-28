@@ -86,6 +86,10 @@ static STATE: Mutex<State> = Mutex::new(State {
 static INPUT_CAPACITY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static INPUT_RELEASES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static INPUT_ARENA: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// F2: the long-line buffers freed before their requests ran, and those of them that carried read-ahead bytes into
+/// the arena (an observation: no allocation is kept for them).
+static INPUT_EARLY_RELEASES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static INPUT_EARLY_SUFFIXES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn state() -> std::sync::MutexGuard<'static, State> {
     // (no code panics while holding it; a poisoned lock is still the state)
@@ -217,6 +221,8 @@ fn serve_stats(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     d.set_item("input_capacity", INPUT_CAPACITY.load(std::sync::atomic::Ordering::Relaxed))?;
     d.set_item("input_releases", INPUT_RELEASES.load(std::sync::atomic::Ordering::Relaxed))?;
     d.set_item("input_arena", INPUT_ARENA.load(std::sync::atomic::Ordering::Relaxed))?;
+    d.set_item("input_early_releases", INPUT_EARLY_RELEASES.load(std::sync::atomic::Ordering::Relaxed))?;
+    d.set_item("input_early_release_suffix", INPUT_EARLY_SUFFIXES.load(std::sync::atomic::Ordering::Relaxed))?;
     d.set_item("read_chunk", READ_CHUNK)?;
     Ok(d)
 }
@@ -324,6 +330,22 @@ const READ_CHUNK: usize = 1 << 16;
 /// r5 ruling: burst reuse, bounded).
 const IDLE_RELEASE_LIMIT: std::time::Duration = std::time::Duration::from_millis(250);
 
+/// The largest long-line buffer, by capacity, kept through its request for the burst reuse: a consumed long-line
+/// buffer of larger capacity is freed right after its line is decoded, before the request runs (PR B fix design r2c,
+/// F2; perf diag r2b: the cold 32 MiB request's peak was that buffer, still live through run_request).  The request
+/// reader therefore holds at most its arena plus one long-line buffer of capacity at most this through run_request.
+const LONG_LINE_KEEP_MAX: usize = 64 * READ_CHUNK;
+
+/// What the early release did (F2): not the request reader's long-line buffer; a long-line buffer of capacity at most
+/// `keep_max`, kept; or a larger one freed, any read-ahead bytes after its line carried into the arena (counted in
+/// `early_suffixes` when there were some).
+#[derive(Debug, PartialEq, Eq)]
+enum Early {
+    NotApplicable,
+    Kept,
+    Released,
+}
+
 /// What the reader reads from: bytes, whether some become readable within a
 /// time, and a monotonic clock (a seam: the tests drive both deterministically).
 trait Source: Read {
@@ -397,6 +419,14 @@ fn staging_bound(staged: usize, piece: usize, piece_cap: usize, list_extra: usiz
 /// in: no allocation.  The release follows that semantic state (`large`), not
 /// a capacity comparison.  Memory: the request reader holds A for the worker's
 /// life, and A more than the staging bound while a long line is staged or held.
+///
+/// F2 (PR B fix design r2c): the request reader frees a consumed long-line
+/// buffer of capacity over LONG_LINE_KEEP_MAX as soon as its line is decoded,
+/// before the request runs (`release_consumed_long_line`), any read-ahead
+/// bytes after the line carried into the arena; only a long-line buffer of
+/// capacity at most LONG_LINE_KEEP_MAX is kept for the burst reuse.  So through
+/// a request the reader holds at most A plus one long-line buffer of capacity
+/// at most LONG_LINE_KEEP_MAX, read-ahead input included.
 struct Lines<R: Source> {
     f: R,
     buf: Vec<u8>,
@@ -435,11 +465,16 @@ struct Lines<R: Source> {
     /// The capacity of a buffer taken out of `buf` at a staging start and still live while its bytes are staged
     /// (astra's accounting witness): counted by capacity(), so every allocation moment in between sees it.
     held: usize,
+    /// F2: the largest long-line buffer capacity kept through its request (LONG_LINE_KEEP_MAX for the request reader;
+    /// smaller only in the tests), and the early releases so far, all of them and those that carried a suffix.
+    keep_max: usize,
+    early_releases: u64,
+    early_suffixes: u64,
 }
 
 impl<R: Source> Lines<R> {
     fn new(f: R) -> Lines<R> {
-        Lines { f, buf: Vec::new(), head: 0, taken: 0, scanned: 0, eof: false, stage: Vec::new(), staged: 0, stage_caps: 0, piece: READ_CHUNK, extra: (0, 0, 0), releases: 0, flattens: 0, peak: 0, floor: 0, arena_cap: 0, large: false, spare: Vec::new(), held: 0 }
+        Lines { f, buf: Vec::new(), head: 0, taken: 0, scanned: 0, eof: false, stage: Vec::new(), staged: 0, stage_caps: 0, piece: READ_CHUNK, extra: (0, 0, 0), releases: 0, flattens: 0, peak: 0, floor: 0, arena_cap: 0, large: false, spare: Vec::new(), held: 0, keep_max: 0, early_releases: 0, early_suffixes: 0 }
     }
 
     /// The request reader: an arena of 2 READ_CHUNK (plus `extra`, which only the tests use, to stand for an
@@ -447,6 +482,7 @@ impl<R: Source> Lines<R> {
     fn request_with(f: R, extra: usize) -> Lines<R> {
         let mut l = Lines::new(f);
         l.floor = 2 * READ_CHUNK;
+        l.keep_max = LONG_LINE_KEEP_MAX;
         l.buf = Vec::with_capacity(l.floor + extra);
         l.arena_cap = l.buf.capacity();
         l.note_peak();
@@ -485,6 +521,39 @@ impl<R: Source> Lines<R> {
             self.buf = Vec::new();  // (idle after a burst: the large capacity let go before blocking)
         }
         self.releases += 1;
+    }
+
+    /// F2 (PR B fix design r2c), called right after the line `next` handed out last is decoded (its bytes no longer
+    /// borrowed): a consumed long-line buffer of capacity over `keep_max` is freed and the arena taken back, any
+    /// read-ahead bytes after the line's newline carried into it, and the cursors reset, so that the next `next()`
+    /// scans those bytes once, from their start.  No allocation: they fit the arena.  The control reader, or the arena
+    /// itself: NotApplicable.  A long-line buffer of capacity at most `keep_max`: Kept, for the burst reuse (its idle
+    /// release as before).
+    fn release_consumed_long_line(&mut self) -> Early {
+        if self.floor == 0 || !self.large {
+            return Early::NotApplicable;
+        }
+        if self.buf.capacity() <= self.keep_max {
+            return Early::Kept;
+        }
+        // (a buffer over keep_max exists only just after `flatten`, whose line `next` then returned without reading
+        // again: the stage is empty, and what follows the line is what the newline's read brought after it, a read of
+        // at most READ_CHUNK bytes, the newline among them; the arena holds at least 2 READ_CHUNK)
+        // (and the line starts the buffer: `flatten` set head to 0, and `next` reset scanned as it returned the line)
+        assert!(self.stage.is_empty() && self.staged == 0 && self.stage_caps == 0 && self.held == 0, "a staged line at the early release");
+        assert!(self.head == 0 && self.scanned == 0, "the long line doesn't start the buffer");
+        let suffix = self.buf.len() - self.taken;
+        let mut arena = std::mem::take(&mut self.spare);
+        assert!(arena.is_empty() && suffix < READ_CHUNK && suffix <= arena.capacity(), "the read-ahead doesn't fit the arena");
+        arena.extend_from_slice(&self.buf[self.taken..]);
+        self.buf = arena;  // (the long-line buffer freed here)
+        self.large = false;
+        self.taken = 0;
+        self.early_releases += 1;
+        if suffix > 0 {
+            self.early_suffixes += 1;
+        }
+        Early::Released
     }
 
     /// The request reader's staging start: the unconsumed part of the buffer (no newline in it) becomes the first
@@ -867,6 +936,12 @@ fn serve_requests(
         #[cfg(feature = "test-hooks")]
         hooks::at_admission(py);
         let text = line_str(py, line);
+        // (F2: `line` is not used after the decode, so its borrow has ended; a consumed long-line buffer over
+        // LONG_LINE_KEEP_MAX is freed here, before the request runs, and the capacity stored again for _serve_stats)
+        lines.release_consumed_long_line();
+        INPUT_CAPACITY.store(lines.capacity(), std::sync::atomic::Ordering::Relaxed);
+        INPUT_EARLY_RELEASES.store(lines.early_releases, std::sync::atomic::Ordering::Relaxed);
+        INPUT_EARLY_SUFFIXES.store(lines.early_suffixes, std::sync::atomic::Ordering::Relaxed);
         let ran = run_request.call1((text, serial));
         close();
         let reply = match ran {
@@ -1612,5 +1687,203 @@ mod tests {
         assert_eq!(take(&mut lines), None);
         t.join().unwrap();
         unsafe { libc::close(fds[0]) };
+    }
+
+    /// F2's tests (PR B fix design r2c): a source that returns exactly its scripted parts, one per read (a part longer
+    /// than the read is split, the rest kept first), then the end; always readable.
+    struct Script(std::collections::VecDeque<Vec<u8>>);
+    impl Read for Script {
+        fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+            match self.0.pop_front() {
+                None => Ok(0),
+                Some(mut p) => {
+                    let n = p.len().min(b.len());
+                    b[..n].copy_from_slice(&p[..n]);
+                    if n < p.len() {
+                        self.0.push_front(p.split_off(n));
+                    }
+                    Ok(n)
+                }
+            }
+        }
+    }
+    impl Source for Script {
+        fn readable_within(&mut self, _within: std::time::Duration) -> std::io::Result<bool> {
+            Ok(true)
+        }
+        fn now(&self) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
+    }
+    /// The parts: `data` cut at every READ_CHUNK boundary and at each given offset (so a read ends exactly there).
+    fn script(data: &[u8], cuts: &[usize]) -> Script {
+        let mut at: Vec<usize> = (1..=data.len() / READ_CHUNK).map(|k| k * READ_CHUNK).chain(cuts.iter().copied()).filter(|&c| c > 0 && c < data.len()).collect();
+        at.sort();
+        at.dedup();
+        let mut parts = std::collections::VecDeque::new();
+        let mut prev = 0;
+        for c in at.into_iter().chain([data.len()]) {
+            parts.push_back(data[prev..c].to_vec());
+            prev = c;
+        }
+        Script(parts)
+    }
+    /// A long line framed 5 READ_CHUNK + 1 bytes, so its newline (at offset 5 READ_CHUNK, a part boundary) is the first
+    /// byte of the read that ends `n` bytes after it (n < READ_CHUNK), then `rest`; and the line's length.
+    fn long_then(rest: &[u8], n: usize) -> (Script, usize) {
+        let first = framed(5 * READ_CHUNK + 1, b'L');
+        let mut data = first.clone();
+        data.extend_from_slice(rest);
+        (script(&data, &[first.len() + n]), first.len() - 1)
+    }
+
+    #[test]
+    fn early_release_frees_a_consumed_line_above_keep_max() {
+        // (no byte after the newline: Released, the arena back, the cursors reset; the next request and the end as
+        // before, and the arena is all that is left)
+        let (src, len) = long_then(&framed(100, b'z'), 0);
+        let mut lines = Lines::request(src);
+        lines.keep_max = 0;
+        let a = lines.arena_cap;
+        assert_eq!(take(&mut lines).unwrap(), vec![b'L'; len]);
+        assert!(lines.large && lines.taken == lines.buf.len() && lines.buf.capacity() > a);
+        assert_eq!(lines.release_consumed_long_line(), Early::Released);
+        assert!(!lines.large && lines.buf.is_empty() && lines.buf.capacity() == a && lines.spare.capacity() == 0);
+        assert_eq!((lines.head, lines.taken, lines.scanned), (0, 0, 0));
+        assert_eq!((lines.early_releases, lines.early_suffixes, lines.releases), (1, 0, 0));
+        assert_eq!(take(&mut lines).unwrap(), vec![b'z'; 99]);
+        assert_eq!(lines.release_consumed_long_line(), Early::NotApplicable);
+        assert_eq!(take(&mut lines), None);
+        assert_eq!(lines.capacity(), a);
+    }
+
+    #[test]
+    fn early_release_keeps_a_buffer_at_or_below_keep_max() {
+        // (the boundary is on the buffer's capacity c: keep_max = c keeps it, c - 1 releases it; the same input gives
+        // the same capacity)
+        let rest = line(3, b'r');
+        let (src, len) = long_then(&rest, 0);
+        let mut lines = Lines::request(src);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'L'; len]);
+        let c = lines.buf.capacity();
+        lines.keep_max = c;
+        assert_eq!(lines.release_consumed_long_line(), Early::Kept);
+        assert!(lines.large && lines.buf.capacity() == c && lines.early_releases == 0, "nothing was done");
+        assert_eq!(take(&mut lines).unwrap(), vec![b'r'; 3]);
+        assert_eq!(take(&mut lines), None);
+        let (src, _) = long_then(&rest, 0);
+        let mut lines = Lines::request(src);
+        take(&mut lines).unwrap();
+        assert_eq!(lines.buf.capacity(), c, "the same input, the same capacity");
+        lines.keep_max = c - 1;
+        assert_eq!(lines.release_consumed_long_line(), Early::Released);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'r'; 3]);
+        assert_eq!(take(&mut lines), None);
+    }
+
+    #[test]
+    fn early_release_carries_the_suffix() {
+        // (0, 1 and READ_CHUNK - 1 read-ahead bytes after the newline, the start of a framed 2 READ_CHUNK line: they
+        // are the arena's only bytes after the release, scanned once by the next call, and every line after them comes
+        // out exactly; the arena is never reallocated)
+        for n in [0, 1, READ_CHUNK - 1] {
+            let mut rest = framed(2 * READ_CHUNK, b'n');
+            rest.extend_from_slice(&line(5, b'e'));
+            let (src, len) = long_then(&rest, n);
+            let mut lines = Lines::request(src);
+            lines.keep_max = 0;
+            let a = lines.arena_cap;
+            assert_eq!(take(&mut lines).unwrap(), vec![b'L'; len], "suffix {n}");
+            assert_eq!(lines.buf.len() - lines.taken, n, "suffix {n}: the precondition");
+            assert_eq!(lines.release_consumed_long_line(), Early::Released, "suffix {n}");
+            assert!(!lines.large && lines.buf.capacity() == a && lines.spare.capacity() == 0, "suffix {n}: the arena back");
+            assert_eq!(lines.buf, vec![b'n'; n], "suffix {n}: exactly the read-ahead bytes");
+            assert_eq!((lines.head, lines.taken, lines.scanned), (0, 0, 0), "suffix {n}");
+            assert_eq!((lines.early_releases, lines.early_suffixes), (1, (n > 0) as u64), "suffix {n}");
+            let p0 = lines.buf.as_ptr();
+            assert_eq!(take(&mut lines).unwrap(), vec![b'n'; 2 * READ_CHUNK - 1], "suffix {n}");
+            assert_eq!(take(&mut lines).unwrap(), vec![b'e'; 5], "suffix {n}");
+            assert_eq!(take(&mut lines), None, "suffix {n}");
+            assert!(lines.buf.as_ptr() == p0 && lines.buf.capacity() == a && lines.flattens == 1, "suffix {n}: the same arena");
+        }
+    }
+
+    #[test]
+    fn early_release_carries_several_lines_in_the_suffix() {
+        // (two whole short lines and the start of a third in the read-ahead: all three exact, in order)
+        let mut rest = framed(10, b'a');
+        rest.extend_from_slice(&framed(20, b'b'));
+        rest.extend_from_slice(&framed(300, b'c'));
+        let (src, len) = long_then(&rest, 10 + 20 + 5);
+        let mut lines = Lines::request(src);
+        lines.keep_max = 0;
+        assert_eq!(take(&mut lines).unwrap(), vec![b'L'; len]);
+        assert_eq!(lines.release_consumed_long_line(), Early::Released);
+        assert_eq!(lines.buf.len(), 35);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'a'; 9]);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'b'; 19]);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 299]);
+        assert_eq!(take(&mut lines), None);
+        assert_eq!((lines.early_releases, lines.early_suffixes), (1, 1));
+    }
+
+    #[test]
+    fn early_release_not_applicable_on_the_arena_and_the_control_policy() {
+        // (keep_max below the arena's capacity, so that a release that ignored `large` would free the arena: the arena
+        // and its unread bytes are untouched; and never the control policy)
+        let mut lines = Lines::request(script(b"{\"id\": 1}\n{\"id\": 2}\n", &[]));
+        lines.keep_max = 0;
+        let a = lines.arena_cap;
+        assert!(lines.keep_max < a);
+        assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 1}");
+        assert_eq!(lines.release_consumed_long_line(), Early::NotApplicable);
+        assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 2}", "nothing was touched");
+        assert_eq!((lines.capacity(), lines.buf.capacity(), lines.early_releases), (a, a, 0));
+        let mut control = Lines::new(script(&framed(200_000, b'c'), &[]));
+        assert_eq!(take(&mut control).unwrap().len(), 200_000 - 1);
+        assert_eq!(control.release_consumed_long_line(), Early::NotApplicable, "never the control policy (floor 0)");
+    }
+
+    #[test]
+    fn early_release_then_another_long_line_stages_again() {
+        let one = framed(200_000, b'1');
+        let two = framed(400_000, b'2');
+        let mut data = one.clone();
+        data.extend_from_slice(&two);
+        data.extend_from_slice(b"{\"id\": 3}\n");
+        let mut lines = Lines::request(script(&data, &[one.len(), one.len() + two.len()]));
+        lines.keep_max = 0;
+        let a = lines.arena_cap;
+        assert_eq!(take(&mut lines).unwrap(), vec![b'1'; 200_000 - 1]);
+        assert_eq!(lines.release_consumed_long_line(), Early::Released);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'2'; 400_000 - 1], "the next long line, staged from the arena again");
+        assert_eq!(lines.flattens, 2);
+        assert_eq!(lines.release_consumed_long_line(), Early::Released);
+        assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 3}");
+        assert_eq!(take(&mut lines), None);
+        assert_eq!((lines.capacity(), lines.early_releases), (a, 2));
+    }
+
+    #[test]
+    fn early_release_at_the_production_threshold() {
+        // (LONG_LINE_KEEP_MAX itself: a line over it is released; a 1 MiB line, req_1mib's, is kept for the burst)
+        let big = framed(LONG_LINE_KEEP_MAX + 1, b'p');
+        let small = framed(1 << 20, b'q');
+        let mut data = big.clone();
+        data.extend_from_slice(&small);
+        data.extend_from_slice(&line(2, b'e'));
+        let mut lines = Lines::request(script(&data, &[big.len(), big.len() + small.len()]));
+        assert_eq!(lines.keep_max, LONG_LINE_KEEP_MAX);
+        let a = lines.arena_cap;
+        assert_eq!(take(&mut lines).unwrap().len(), LONG_LINE_KEEP_MAX);
+        assert!(lines.buf.capacity() > LONG_LINE_KEEP_MAX);
+        assert_eq!(lines.release_consumed_long_line(), Early::Released);
+        assert_eq!(lines.buf.capacity(), a);
+        assert_eq!(take(&mut lines).unwrap().len(), (1 << 20) - 1);
+        assert!(lines.large && lines.buf.capacity() <= LONG_LINE_KEEP_MAX);
+        assert_eq!(lines.release_consumed_long_line(), Early::Kept);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'e'; 2]);
+        assert_eq!(take(&mut lines), None);
+        assert_eq!(lines.early_releases, 1);
     }
 }

@@ -581,28 +581,40 @@ def test_short_writes():
 
 def test_input_release():
     """daybreak2's PR B r5 semantic memory gate, with the request reader's
-    arena (the Windows arena design r2): after an 8 MiB request the reader's
-    long-line buffer is kept for a request that follows at once (POSIX: the
-    burst reuse, the arena held alongside), Windows lets it go at once, and
-    after an idle half second more than the 250 ms limit it is let go, before
-    the reader blocks: the reader then holds exactly its arena again."""
+    arena (the Windows arena design r2) and F2 (PR B fix design r2c): the
+    long-line buffer's capacity decides.  A 2 MiB request (capacity at most
+    LONG_LINE_KEEP_MAX, 4 MiB) is kept for a request that follows at once on
+    POSIX (the burst reuse, the arena held alongside), let go at once on
+    Windows, and let go after an idle half second more than the 250 ms limit,
+    before the reader blocks.  An 8 MiB request (capacity over it) is let go
+    before it runs, on every platform: its own code reads the reader's stats
+    while it runs and finds exactly the arena.  Counters are deltas from the
+    session's baseline."""
     s = S.Session()
     try:
-        big = "x = '" + "a" * (8 << 20) + "'\nlen(x)"
-        r = s.run(big, mode="python")
-        check(r["result"] == str(8 << 20), "input release: the 8 MiB request ran (%r)" % (r["result"],))
+        st0 = stats(s)
+        check(st0["input_arena"] >= 2 * st0["read_chunk"], "input release: the request reader's arena (%r)" % (st0,))
+        two = "x = '" + "a" * (2 << 20) + "'\nlen(x)"
+        r = s.run(two, mode="python")
+        check(r["result"] == str(2 << 20), "input release: the 2 MiB request ran (%r)" % (r["result"],))
         st = stats(s)  # (the very next request: within the burst window)
-        check(st["input_arena"] >= 2 * st["read_chunk"], "input release: the request reader's arena (%r)" % (st,))
         if WINDOWS:
-            check(st["input_capacity"] == st["input_arena"], "input release (Windows): let go at once, the arena back (%r)" % (st,))
+            check(st["input_capacity"] == st["input_arena"], "input release (Windows): the 2 MiB buffer let go at once, the arena back (%r)" % (st,))
         else:
-            check(st["input_capacity"] > st["input_arena"], "input release: kept for the next request of a burst (%r)" % (st,))
+            check(st["input_capacity"] > st["input_arena"], "input release: the 2 MiB buffer kept for the next request of a burst (%r)" % (st,))
+        check(st["input_early_releases"] == st0["input_early_releases"], "input release: the 2 MiB buffer is not released early (%r)" % (st,))
         time.sleep(0.6)
         st2 = stats(s)
-        check(st2["input_capacity"] == st2["input_arena"] and st2["input_releases"] >= 1,
-              "input release: let go after the idle limit, the arena back (%r)" % (st2,))
-        r = s.run(big, mode="python")
-        check(r["result"] == str(8 << 20), "input release: the next large request after a release (%r)" % (r["result"],))
+        check(st2["input_capacity"] == st2["input_arena"] and st2["input_releases"] >= st0["input_releases"] + 1,
+              "input release: the 2 MiB buffer let go after the idle limit, the arena back (%r)" % (st2,))
+        eight = "x = '" + "a" * (8 << 20) + "'\nimport sagebrush._native as _n\n_st = _n._serve_stats()\n(len(x), _st['input_capacity'], _st['input_arena'], _st['input_early_releases'])"
+        for k in (1, 2):
+            r = s.run(eight, mode="python")
+            check(r["error"] is None, "input release: the 8 MiB request %d ran (%r)" % (k, r["error"]))
+            n, cap, arena, early = eval(r["result"])
+            check(n == 8 << 20, "input release: the 8 MiB request %d is exact (%r)" % (k, n))
+            check(cap == arena and early == st0["input_early_releases"] + k,
+                  "input release: the 8 MiB request %d's buffer let go before it ran (capacity %r, arena %r, early %r, baseline %r)" % (k, cap, arena, early, st0["input_early_releases"]))
         counts_match(s, "input release")
     finally:
         s.close()
