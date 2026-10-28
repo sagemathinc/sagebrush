@@ -705,11 +705,20 @@ function wsSave(id: string, d: BoardDoc, bridge?: string) {
         // (the board journal: T1, then T2 (Workspace.journalWrite), over the revision this page knows, tagged as
         // write's: in this queue, after its passing-over and its views' routing (§2.3 B4))
         const js = jstore ?? (await openJournal(id));
-        // (a replacement's clear that failed: tried again first; done, the versions it hid are gone and nothing is hidden)
-        if (jHideBefore > -Infinity && (await js.history.clear().then(() => true, () => false))) {
-          jHideBefore = -Infinity;
-          try { localStorage.removeItem(UNCLEAR(id)); } catch {}
-          for (const f of jSubs) f();
+        // (a replacement's clear that failed: tried again first, but only while the history still holds a version from
+        // before its mark (astra's BJ-R3-C1): done, every version is gone (the clear is all or nothing: any of the new
+        // document's kept meanwhile too), so TimeTravel starts again from this save.  A mark with nothing before it is
+        // spent: forgotten, never a cause to clear, so a mark whose removal failed (left in localStorage, read back at a
+        // reload) can never clear the new document's versions)
+        if (jHideBefore > -Infinity) {
+          // (its history open first: an unopened one lists no version, and would read as a spent mark)
+          await js.open();
+          const before = js.history.versions().some((v: { ms: number }) => v.ms <= jHideBefore);
+          if (!before || (await js.history.clear().then(() => true, () => false))) {
+            jHideBefore = -Infinity;
+            try { localStorage.removeItem(UNCLEAR(id)); } catch (e) { console.warn("board: TimeTravel: a spent mark not removed (harmless: nothing is before it):", e); }
+            for (const f of jSubs) f();
+          }
         }
         const out = await js.save({ ...d, baseRev: wsRev }, { tag: header });
         if (typeof out === "string") throw new Error(out);
@@ -1189,9 +1198,13 @@ const host: BoardHost = {
           if (js) await js.history.clear().catch((e: unknown) => {
             console.warn("board: TimeTravel: the versions before weren't cleared:", e);
             jHideBefore = Date.now();
-            try { localStorage.setItem(UNCLEAR(source.slice(6)), String(jHideBefore)); } catch {}
+            // (the mark kept for a reload, only if localStorage takes it, read back; if not, said: hidden in this tab only)
+            let kept = false;
+            try { localStorage.setItem(UNCLEAR(source.slice(6)), String(jHideBefore)); kept = localStorage.getItem(UNCLEAR(source.slice(6))) === String(jHideBefore); } catch {}
             for (const f of jSubs) f();
-            showBusyNotice("TimeTravel couldn't clear the previous document's versions. They stay hidden, and are cleared at your next save.");
+            showBusyNotice(kept
+              ? "TimeTravel couldn't clear the previous document's versions. They stay hidden; at your next save they're cleared, and TimeTravel starts again from that save."
+              : "TimeTravel couldn't clear the previous document's versions. They're hidden in this tab only (this browser didn't keep the mark: after a reload they show again); at your next save here they're cleared, and TimeTravel starts again from that save.");
           });
         });
       }
