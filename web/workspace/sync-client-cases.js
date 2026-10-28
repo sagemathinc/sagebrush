@@ -3389,20 +3389,23 @@ async function docWire() {
   const b64 = btoa(String.fromCharCode(...body));
   // (the control: a batch without fgen, through this page and the front, is refused (by the front's canonical check),
   // routed to its request, and never forwarded)
-  const g0 = (await ctl("log")).fgenRefused;
+  const l0 = await ctl("log");
   const r0 = link.reserve(), a0 = await askT(r0, { t: "batch", owner: link.owner, doc: doc4, epoch: 1, kind: "notebook", patches: [{ cseq: 1, id: pid, parents: [], size: body.length }], body: b64 });
-  const g1 = (await ctl("log")).fgenRefused;
-  check(a0.t === "error" && a0.req === r0 && a0.code === "invalid" && /^batch fgen/.test(a0.detail?.message ?? "") && g1 === g0 + 1,
-    "docWire: a batch without fgen is refused (invalid, batch fgen), routed to its request, never forwarded: " + J({ a: a0, refused: g1 - g0 }).slice(0, 200));
+  await sleep(200);
+  const l1 = await ctl("log");
+  check(a0.t === "error" && a0.req === r0 && a0.code === "invalid" && /^batch fgen/.test(a0.detail?.message ?? "") && l1.fgenRefused === l0.fgenRefused + 1 && l1.batchesUp === l0.batchesUp,
+    "docWire: a batch without fgen is refused (invalid, batch fgen), routed to its request, never forwarded (no batch went upstream): " + J({ a: a0, refused: l1.fgenRefused - l0.fgenRefused, up: l1.batchesUp - l0.batchesUp }).slice(0, 200));
   const rc = link.reserve(), ac = await askT(rc, { t: "doc_claim", owner: link.owner, doc: doc4, epoch: 1, client: client1 });
   const claimed = ac.t === "ack" && ac.req === rc && ac.claim?.client === client1 && Number.isSafeInteger(ac.claim?.fgen) && ac.claim.fgen >= 0 && Number.isSafeInteger(ac.claim?.next_cseq) && ac.claim.next_cseq >= 1;
   const legacy = ac.t === "error" && ac.req === rc && ac.code === "invalid" && ac.detail?.message === "unknown message";
   if (claimed || window.REQUIRE_CLAIM || !legacy) {
     check(claimed, "docWire: the client claimed (doc_claim answered with its client, fgen and next_cseq, to its request)" + (window.REQUIRE_CLAIM ? " (SYNC_REQUIRE_CLAIM)" : "") + ": " + J(ac).slice(0, 200));
+    const u4 = (await ctl("log")).batchesUp;
     const r4 = link.reserve(), a4 = claimed
       ? await askT(r4, { t: "batch", owner: link.owner, doc: doc4, epoch: 1, kind: "notebook", fgen: { [client1]: ac.claim.fgen }, patches: [{ cseq: ac.claim.next_cseq, id: pid, parents: [], size: body.length }], body: b64 })
       : { t: "not sent: no claim" };
-    check(a4.t === "ack" && a4.req === r4 && c.status.state === "synced", "docWire: …its batch (the claim's fgen and cseq): the document request's `ack` comes back to it (not to the ops' sender): " + J({ a: a4, state: c.status.state }).slice(0, 200));
+    const u5 = (await ctl("log")).batchesUp;
+    check(a4.t === "ack" && a4.req === r4 && c.status.state === "synced" && u5 === u4 + 1, "docWire: …its batch (the claim's fgen and cseq), forwarded once: the document request's `ack` comes back to it (not to the ops' sender): " + J({ a: a4, state: c.status.state, up: u5 - u4 }).slice(0, 200));
   } else check(legacy, "docWire: ack routing not exercised: server has no claim protocol (doc_claim refused as an unknown message, code invalid, routed to its request)");
   const from = await w.lastSeq();
   await w.mkdir("/docwire");
