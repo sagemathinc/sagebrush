@@ -68,11 +68,18 @@ export const ADMIT_MS = 60_000;
 /** A signed blob URL (§5.4). */
 export const URL_MS = 5 * 60_000;
 
-/** The codes a refusal uses (§5.2; slice 2's claims and fences, plan-sync-slice2-r9.md §5.8). */
-export type Code =
-  | "invalid" | "exists" | "missing" | "conflict" | "order" | "epoch" | "unknown_doc" | "forbidden"
-  | "limit" | "storage_full" | "rate" | "readonly" | "deleting" | "busy"
-  | "unknown_client" | "fenced" | "stale_epoch";
+/** The codes a refusal uses (§5.2; slice 2's claims and fences, plan-sync-slice2-r9.md §5.8).  "unavailable": a feature
+ * the deployment has switched off (2b-7's snapshots: `{why: "snapshots_off"}`, no retry_after; the client stops asking
+ * for the session), doc-vectors.json's `refusals`. */
+export const CODES = Object.freeze([
+  "invalid", "exists", "missing", "conflict", "order", "epoch", "unknown_doc", "forbidden",
+  "limit", "storage_full", "rate", "readonly", "deleting", "busy",
+  "unknown_client", "fenced", "stale_epoch", "unavailable",
+] as const);
+export type Code = (typeof CODES)[number];
+const KNOWN_CODES: ReadonlySet<string> = new Set(CODES);
+/** Whether `c` is one of the codes this build knows. */
+export const isCode = (c: unknown): c is Code => typeof c === "string" && KNOWN_CODES.has(c);
 
 export class SyncError extends Error {
   constructor(public code: Code, message: string, public detail?: Record<string, unknown>) { super(message); }
@@ -101,8 +108,15 @@ export async function attemptAsync<T>(f: () => Promise<T>): Promise<Result<T>> {
 }
 /** The value of a Result, or its refusal thrown as a SyncError. */
 export function unwrap<T>(r: Result<T>): T {
-  if ("error" in r) throw new SyncError(r.error.code, r.error.message, r.error.detail);
+  if ("error" in r) throw refusalOf(r.error);
   return r.ok;
+}
+/** A refusal as it arrived, as a SyncError.  A code this build doesn't know (a newer server's, or anything else) fails
+ * closed: it becomes "invalid", which is final and never sent again, with the code it had in `detail.unknown_code`. */
+export function refusalOf(e: { code?: unknown; message?: unknown; detail?: Record<string, unknown> }): SyncError {
+  const message = typeof e?.message === "string" ? e.message : "refused";
+  if (isCode(e?.code)) return new SyncError(e.code, message, e.detail);
+  return new SyncError("invalid", `a refusal this build doesn't know: ${message}`, { unknown_code: typeof e?.code === "string" ? e.code.slice(0, 64) : null, final: true });
 }
 
 export const invalid = (m: string) => new SyncError("invalid", m);

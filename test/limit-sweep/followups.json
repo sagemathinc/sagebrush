@@ -1,0 +1,17 @@
+{
+ "items": [
+  {
+   "id": "FU-B14-1",
+   "keys": [
+    "engine/poly/src/binomial.rs :: stage_b :: let (work, out_bytes, scratch, costs) = ledger().ok_or_else(|| b.refuse(\"work (overflow)\", u64::MAX, b.work_left()))?; #0",
+    "engine/poly/src/binomial.rs :: stage_b :: let len = usize::try_from(k.len).map_err(|_| b.refuse(\"memory (overflow)\", u64::MAX, 0))?; #0",
+    "engine/poly/src/binomial.rs :: stage_b :: let need = primes.iter().try_fold(0u64, |s, &l| s.checked_add(prefilter_plan(bits, l)?.checked_mul(2)?)).ok_or_else(|| b.refuse(\"work (overflow)\", u64::MAX, b.work_left()))?; #0"
+   ],
+   "owner": "magma",
+   "status": "open",
+   "what": "engine Budget overflow refusals (a cost or length not representable in u64/usize) have no reviewed route: decide a routes.json row for the engine Budget's refusals (daybreak2's lane; budget.rs is in B12), or a reclassification rule. Note wasm32: usize::try_from(k.len) refuses above 2^32, the 4 GiB address space, so that one is a real memory boundary, not unreachable."
+  }
+ ],
+ "note": "The sweep's follow-ups, the source of truth (plan-limit-sites-sweep-r3 section 2): {id FU-<batch>-<n>, status open|fixed|withdrawn, keys, what, owner, fixed_by {pr, commit}, withdrawn_because}. An open one has at least one active key, and its active keys and the entries pointing to it agree; no active key points to a fixed or withdrawn one.",
+ "v": 1
+}

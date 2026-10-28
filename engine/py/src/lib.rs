@@ -18,17 +18,46 @@ static MAIN: std::sync::OnceLock<std::thread::ThreadId> = std::sync::OnceLock::n
 /// Ctrl-C during it stops it at its next check (sagebrush-interrupt) and
 /// raises KeyboardInterrupt, with the interpreter's state intact; Python's
 /// own handler is back in place when this returns.
+///
+/// It is also the call that asks the host's memory total source (no-cliffs
+/// C-2c scope r2 section 2): the asking call is entered here, on the calling
+/// thread with the GIL held, before the work is handed off, and finished
+/// here after it.  Only this thread may run the source (a worker gets
+/// NotAsked: the total in force, its age unchanged), and a stale total is
+/// refreshed here first.  A control exception the source raised during the
+/// call (KeyboardInterrupt, SystemExit, ...) is raised by this call, the
+/// original object, once, in preference to the computation's own result or
+/// error; an ordinary Exception from the source is an unreadable answer.
 fn guarded<T: Send>(py: Python<'_>, f: impl FnOnce() -> T + Send) -> PyResult<T> {
+    let asking = Asking::enter();
+    // (the outer entry's refresh is the full, locked total(), whatever the
+    // parallel wrapper's refresh_if_owner does)
+    let _ = sagebrush_ledger::total();
     let main = MAIN.get() == Some(&std::thread::current().id());
-    py.detach(|| {
-        let _sigint = main.then(sagebrush_interrupt::SigintGuard::new);
-        sagebrush_interrupt::catch(f)
-    })
-    .map_err(|_| PyKeyboardInterrupt::new_err(()))
+    // (the body's unwind, a Rust panic, is caught here, at the owner, so
+    // that the asking call is finished on every exit: return, error, Stop
+    // or panic; the GIL is held again once detach returns or unwinds)
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        py.detach(|| {
+            let _sigint = main.then(sagebrush_interrupt::SigintGuard::new);
+            sagebrush_interrupt::catch(f)
+        })
+        .map_err(|_| PyKeyboardInterrupt::new_err(()))
+    }));
+    match (asking.finish(), r) {
+        // the source's control exception is this call's, and wins over the
+        // body's result, error or panic
+        (Err(control), _) => Err(control),
+        (Ok(()), Ok(r)) => r,
+        // no control exception: the body's panic goes on as before
+        (Ok(()), Err(panic)) => std::panic::resume_unwind(panic),
+    }
 }
 
+/// guarded, on a pool of `threads` worker threads (sagebrush-par's install:
+/// the workers run under the caller's ledger context, never its asking call).
 fn run<T: Send>(py: Python<'_>, threads: usize, f: impl FnOnce() -> T + Send) -> PyResult<T> {
-    guarded(py, || rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap().install(f))
+    guarded(py, || sagebrush_par::install(threads, f))
 }
 
 // Big integers cross into Python as num-bigint's (PyO3's conversion), from
@@ -531,6 +560,13 @@ thread_local! {
     static RAISED: std::cell::RefCell<Option<PyErr>> = const { std::cell::RefCell::new(None) };
 }
 
+/// Whether an asking call is active on this thread: a plain thread-local
+/// read (no GIL, no Python code, no lock), so the ledger may call it as its
+/// `may_ask` from anywhere.
+fn asking_here() -> bool {
+    ASKING.with(|a| a.get()) > 0
+}
+
 /// An asking call on this thread: what the source raises while it lives is
 /// its own.  Thread-bound (neither Send nor Sync).
 struct Asking(std::marker::PhantomData<*const ()>);
@@ -593,53 +629,58 @@ fn host_error(py: Python<'_>, e: PyErr) {
 #[pyfunction]
 fn set_memory_total_source(source: Py<PyAny>) {
     use sagebrush_ledger::HostAnswer;
-    sagebrush_ledger::set_total_host(move || {
-        if ASKING.with(|a| a.get()) == 0 {
-            return HostAnswer::NotAsked;
-        }
-        Python::attach(|py| {
-            let r = match source.call0(py) {
-                Ok(r) => r,
-                Err(e) => {
-                    host_error(py, e);
+    // (asking_here is both the ledger's may_ask and this answer's first
+    // check, registered together: they can't disagree)
+    sagebrush_ledger::set_total_host_asking(
+        move || {
+            if !asking_here() {
+                return HostAnswer::NotAsked;
+            }
+            Python::attach(|py| {
+                let r = match source.call0(py) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        host_error(py, e);
+                        return HostAnswer::Unreadable;
+                    }
+                };
+                // (bytes, status, joint, [(kind, path, figure)]): every applicable
+                // row (no-cliffs plan C r17 section 1.3), an unknown kind kept as
+                // Unknown so that the ledger fails closed rather than drops it
+                let answer = match r.extract::<Option<(u64, u32, bool, Vec<(String, Option<String>, u64)>)>>(py) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        host_error(py, e);
+                        return HostAnswer::Unreadable;
+                    }
+                };
+                let Some((bytes, status, joint, rows)) = answer else {
                     return HostAnswer::Unreadable;
-                }
-            };
-            // (bytes, status, joint, [(kind, path, figure)]): every applicable
-            // row (no-cliffs plan C r17 section 1.3), an unknown kind kept as
-            // Unknown so that the ledger fails closed rather than drops it
-            let answer = match r.extract::<Option<(u64, u32, bool, Vec<(String, Option<String>, u64)>)>>(py) {
-                Ok(a) => a,
-                Err(e) => {
-                    host_error(py, e);
+                };
+                let Some(status) = sagebrush_ledger::TotalStatus::from_code(status) else {
                     return HostAnswer::Unreadable;
-                }
-            };
-            let Some((bytes, status, joint, rows)) = answer else {
-                return HostAnswer::Unreadable;
-            };
-            let Some(status) = sagebrush_ledger::TotalStatus::from_code(status) else {
-                return HostAnswer::Unreadable;
-            };
-            let total = sagebrush_ledger::Total { bytes, status, joint, uncertified: false };
-            let rows = rows
-                .into_iter()
-                .map(|(k, p, figure)| {
-                    let kind = match (k.as_str(), p) {
-                        ("cgroup", Some(p)) => sagebrush_ledger::MeasureKind::Cgroup(p),
-                        ("address_space", _) => sagebrush_ledger::MeasureKind::AddressSpace,
-                        ("data_segment", _) => sagebrush_ledger::MeasureKind::DataSegment,
-                        ("physical", _) => sagebrush_ledger::MeasureKind::Physical,
-                        ("windows_job", _) => sagebrush_ledger::MeasureKind::WindowsJob,
-                        ("windows_physical", _) => sagebrush_ledger::MeasureKind::WindowsPhysical,
-                        _ => sagebrush_ledger::MeasureKind::Unknown,
-                    };
-                    sagebrush_ledger::Row { kind, figure }
-                })
-                .collect();
-            HostAnswer::Total(total, rows)
-        })
-    });
+                };
+                let total = sagebrush_ledger::Total { bytes, status, joint, uncertified: false };
+                let rows = rows
+                    .into_iter()
+                    .map(|(k, p, figure)| {
+                        let kind = match (k.as_str(), p) {
+                            ("cgroup", Some(p)) => sagebrush_ledger::MeasureKind::Cgroup(p),
+                            ("address_space", _) => sagebrush_ledger::MeasureKind::AddressSpace,
+                            ("data_segment", _) => sagebrush_ledger::MeasureKind::DataSegment,
+                            ("physical", _) => sagebrush_ledger::MeasureKind::Physical,
+                            ("windows_job", _) => sagebrush_ledger::MeasureKind::WindowsJob,
+                            ("windows_physical", _) => sagebrush_ledger::MeasureKind::WindowsPhysical,
+                            _ => sagebrush_ledger::MeasureKind::Unknown,
+                        };
+                        sagebrush_ledger::Row { kind, figure }
+                    })
+                    .collect();
+                HostAnswer::Total(total, rows)
+            })
+        },
+        asking_here,
+    );
 }
 
 /// The ledger as the engine sees it now (diagnostics and the package's
@@ -764,9 +805,61 @@ fn progress_tables() -> String {
 
 /// The native extension, `sagebrush._native`; each engine is a submodule,
 /// re-exported by the pure-Python package (python/sagebrush).
+/// Tests only (feature `test-hooks`, never in a released wheel): a guarded
+/// call whose body ends by `kind`: "panic" (an ordinary Rust panic), "stop"
+/// (a Stop at a check), "nested_gated" (waits until `_test_gate(True)`,
+/// then one parallel wrapper entry on this, the owner, thread, and no
+/// admission: the C-2c-i hot path's owner refresh, ordered after another
+/// owner's invalidation), "nested_now" (that wrapper entry at once) or
+/// anything else (it returns 1), for the delivery of a retained control
+/// exception on every exit path (C-2c scope r2 section 2.1; astra2's
+/// CORR-C2CI-3).
+#[cfg(feature = "test-hooks")]
+#[pyfunction(name = "_test_guarded")]
+fn test_guarded(py: Python<'_>, kind: &str) -> PyResult<u32> {
+    let kind = kind.to_string();
+    let r = guarded(py, move || match kind.as_str() {
+        "panic" => panic!("a body failure (test hook)"),
+        "nested_gated" => {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            while !TEST_GATE.load(std::sync::atomic::Ordering::SeqCst) {
+                if std::time::Instant::now() > deadline {
+                    return 0;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            sagebrush_par::map_range(2, |i| i as u32).len() as u32
+        }
+        "nested_now" => sagebrush_par::map_range(2, |i| i as u32).len() as u32,
+        "stop" => {
+            sagebrush_interrupt::request();
+            sagebrush_interrupt::check();
+            0
+        }
+        _ => 1,
+    });
+    sagebrush_interrupt::clear();
+    r
+}
+
+/// Tests only: the gate "nested_gated" waits on (set by the test once the
+/// other owner's invalidation is published).
+#[cfg(feature = "test-hooks")]
+static TEST_GATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(feature = "test-hooks")]
+#[pyfunction(name = "_test_gate")]
+fn test_gate(open: bool) {
+    TEST_GATE.store(open, std::sync::atomic::Ordering::SeqCst);
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let _ = MAIN.set(std::thread::current().id());
+    #[cfg(feature = "test-hooks")]
+    m.add_function(wrap_pyfunction!(test_guarded, m)?)?;
+    #[cfg(feature = "test-hooks")]
+    m.add_function(wrap_pyfunction!(test_gate, m)?)?;
     let modsym = PyModule::new(m.py(), "modsym")?;
     modsym.add_function(wrap_pyfunction!(hecke_charpoly, &modsym)?)?;
     modsym.add_function(wrap_pyfunction!(charpoly_exact, &modsym)?)?;

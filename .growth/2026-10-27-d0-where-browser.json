@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "D0-1: _memguard.where() decides by the engine's own host (_sbengine.js_host()), so the browser worker names the browser's routes in a memory refusal; lib/_memguard.py is in the library bundles. Measured with CI's toolchain (bun 1.4.4, Node 24.21.0) against master 279b16e6: lib.gen.js +234, pyjs.cjs +211, magma.pre +439, magma.src +234",
+ "bytes": {
+  "cli/lib.gen.js": 234,
+  "cli/pyjs.cjs": 211,
+  "engine/lib/magma.pre": 439,
+  "engine/lib/magma.src": 234
+ }
+}

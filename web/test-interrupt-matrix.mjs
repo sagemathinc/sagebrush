@@ -17,7 +17,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { againstBaseline, classify, classifyCell, cliffOf, leakCheck, widenedPick, xkRowOutcome } from "./interrupt-classify.mjs";
+import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, widenedPick, xkRowOutcome } from "./interrupt-classify.mjs";
 import { killTracked, killTree, onStop, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 
@@ -67,6 +67,10 @@ const CASES = [
   // whole target, Stop counted only after its PHASE marker (pyjs Python loops, polled at back-edges)
   { id: "M1o", mode: "python", leak_measure: "heap+external", s0: 250, smin: 40, smax: 600, grow: (s, r) => Math.round(s * Math.sqrt(r)), phase: "ordering", hosts: ["cli"], setup: "import numpy as np\nimport _matlab_sparse as _sp, _matlab_colamd as _C, _matlab_lu as _L\n_L._phase_hook = lambda name: _p(\"PHASE\", _i, name)\nk = S\nn = k * k\n_pm = [(i * 1999) % n for i in range(n)]\n_r, _c, _v = [], [], []\nfor _x in range(k):\n    for _y in range(k):\n        _t = _x * k + _y\n        for _dx, _dy, _w in ((0, 0, 4.0), (1, 0, -1.0), (-1, 0, -1.0), (0, 1, -1.0), (0, -1, -1.0)):\n            _a, _b = _x + _dx, _y + _dy\n            if 0 <= _a < k and 0 <= _b < k:\n                _r.append(_pm[_a * k + _b]); _c.append(_pm[_t]); _v.append(_w)\nA = _sp.make(n, n, np.array(_r), np.array(_c), np.array(_v))", target: "_L._phase(\"ordering\")\n_q = _C.order_columns(A.m, A.n, A.jc, A.ir)", probe: "assert _L.factor(_sp.make(2, 2, np.array([0, 1]), np.array([0, 1]), np.array([2.0, 4.0])), \"p\").solve(np.ones((2, 1)))[1, 0] == 0.25" },
   { id: "M1l", mode: "python", leak_measure: "heap+external", s0: 70, smin: 20, smax: 160, grow: (s, r) => Math.round(s * Math.cbrt(r)), phase: "lu", hosts: ["cli"], setup: "import numpy as np\nimport _matlab_sparse as _sp, _matlab_colamd as _C, _matlab_lu as _L\n_L._phase_hook = lambda name: _p(\"PHASE\", _i, name)\nk = S\nn = k * k\n_pm = [(i * 1999) % n for i in range(n)]\n_r, _c, _v = [], [], []\nfor _x in range(k):\n    for _y in range(k):\n        _t = _x * k + _y\n        for _dx, _dy, _w in ((0, 0, 4.0), (1, 0, -1.0), (-1, 0, -1.0), (0, 1, -1.0), (0, -1, -1.0)):\n            _a, _b = _x + _dx, _y + _dy\n            if 0 <= _a < k and 0 <= _b < k:\n                _r.append(_pm[_a * k + _b]); _c.append(_pm[_t]); _v.append(_w)\nA = _sp.make(n, n, np.array(_r), np.array(_c), np.array(_v))\n_q = _C.order_columns(A.m, A.n, A.jc, A.ir)", target: "_F = _L.factor(A, \"m1l\", q=_q)", probe: "assert _L.factor(_sp.make(2, 2, np.array([0, 1]), np.array([0, 1]), np.array([2.0, 4.0])), \"p\").solve(np.ones((2, 1)))[1, 0] == 0.25" },
+  // the leak CONTROL (#217): each trial's setup retains 24 MB more (a float64 array of 3,000,000),
+  // so the heap+external series grows 48 MB from repeat 3 to 5: the leak check must FAIL it, every
+  // run (leakControlOutcome; the row PASSes only then).  Its Stops are a plain interruptible loop.
+  { id: "L1c", mode: "python", leak_measure: "heap+external", expect_leak: true, calibration: "nonterminating", hosts: ["cli"], setup: "import numpy as np\n_keep = globals().setdefault('_keep', [])\n_keep.append(np.ones(3_000_000))\nk = 0", target: "while True:\n    k += 1", probe: "assert len(_keep) >= 1 and float(_keep[-1][0]) == 1.0" },
   { id: "E13g", mode: "sage", s0: 40, smin: 4, smax: 4000, grow: (s, r) => Math.max(1, Math.round(s * r)), xk: { kind: "window", wrap: "_sbraster.render" }, hosts: ["cli"], setup: "import tempfile, os\n_d = tempfile.mkdtemp()\nP = sum(polygon([(0, 0), (1, 0.1 * (j % 10)), (1, 1), (0.1 * (j % 7), 1)], alpha=0.02) for j in range(S))", target: "P.save(os.path.join(_d, 'big.png'), figsize=40, dpi=100)", probe: "line([(0, 0), (1, 1)]).save(os.path.join(_d, 'small.png'), figsize=1, dpi=100)\nassert os.path.getsize(os.path.join(_d, 'small.png')) > 0" },
 ].filter((c) => !ROWS || ROWS.split(",").includes(c.id));
 const FLAGS = { python: [], sage: ["--sage"], magma: ["--magma"], matlab: ["--matlab"] };
@@ -91,15 +95,9 @@ _xm.${wf} = _xwrap
   // (a case with leak_measure "heap+external": after each trial's probe, between trials and outside
   // every timed window, a full collection and then the live JS heap plus its external memory,
   // in the DONE marker; nothing where the host has no such figure)
+  // (settled: the least of a few collected readings, web/interrupt-classify.mjs HEAP_EXTERNAL_SAMPLE)
   const measure = c.leak_measure === "heap+external"
-    ? `    _m = ""
-    try:
-        _a = _hu() if _hu else None
-        _b = _he() if (_he and _a is not None) else None
-        _m = "%d" % (_a + _b) if _a is not None and _b is not None else ""
-    except Exception:
-        _m = ""
-`
+    ? HEAP_EXTERNAL_SAMPLE
     : `    _m = ""
 `;
   return `import time
@@ -325,7 +323,7 @@ async function runHost(host) {
   for (const c of CASES) {
     if (c.hosts && !c.hosts.includes(host)) continue; // (a case's own hosts, e.g. E13g: the CLI)
     // the CI set (r5 §8): the CLI's five rows, the prompt's two; everything else is VM-only
-    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l"]).includes(c.id)) continue;
+    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l", "L1c"]).includes(c.id)) continue;
     if (overBudget()) {
       rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: "run budget spent" });
       record(rows.at(-1));
@@ -384,7 +382,7 @@ async function runHost(host) {
     const left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
     const leak0 = leakCheck(lr.samples, 20, c.leak_measure ?? "rss");
     const leak = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
-    let { outcome: own, why: rowWhy } = xkRowOutcome(cells, leak && leak.ok, c.xk);
+    let { outcome: own, why: rowWhy } = c.expect_leak ? leakControlOutcome(cells, leak, c.xk) : xkRowOutcome(cells, leak && leak.ok, c.xk);
     // (a session cut at the run's deadline leaves its cells unresolved: the row is INVALID-budget, unless it already failed)
     if (overBudget() && sessions.some((x) => x.end === "budget") && own !== "FAIL") { own = "INVALID"; rowWhy = "run budget spent: a session was cut at the deadline"; }
     const outcome = againstBaseline({ case: c.id, host, outcome: own, trials: cells, leak }, BASELINE);
@@ -422,6 +420,11 @@ for (const h of HOSTS) {
     // (a browser that can't start is an uncovered host, reported, not a crash that loses the run)
     out.hosts[h] = overBudget() ? { skipped: "run budget spent" } : await browserPilot({ record, overBudget, remainingMs: workLeft, mode: MODE, baseline: BASELINE, onChild: (pid) => track(pid), onChildDone: (pid) => untrack(pid) }).catch((e) => ({ error: String(e?.stack ?? e).slice(0, 600), rows: [] }));
   } else out.hosts[h] = await runHost(h);
+}
+// the leak control must have run: in --ci on the CLI, a missing L1c row FAILs (never passes silently)
+if (MODE === "ci" && HOSTS.includes("cli") && (!ROWS || ROWS.split(",").includes("L1c")) && Array.isArray(out.hosts.cli) && !out.hosts.cli.some((r) => r.case === "L1c")) {
+  out.hosts.cli.push({ case: "L1c", host: "cli", outcome: "FAIL", why: "leak control: its row is missing from the CI run" });
+  record(out.hosts.cli.at(-1));
 }
 if (SIGNALS !== "none") {
   const { runSignals } = await import("./interrupt-signals.mjs");

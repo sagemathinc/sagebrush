@@ -568,15 +568,148 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/binomial.rs ::  :: pub(crate) const BINOMIAL_MAX_BITS: u64 = 4096; #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+ "engine/poly/src/binomial.rs :: fold_minus :: (if s == u64::MAX { 0 } else { s }, if s48 == M48 { 0 } else { s48 }) #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/binomial.rs :: factor :: } else if a.bits() <= BINOMIAL_MAX_BITS && c0.bits() <= BINOMIAL_MAX_BITS { #0": {
-  "class": "3",
-  "owner": "polynomial factorization",
-  "row": "inv-35"
+ "engine/poly/src/binomial.rs :: not_a_power :: fn not_a_power(b: &Budget, n: &BigInt, l: u64) -> FResult<bool> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: not_a_power_with :: fn not_a_power_with(b: &Budget, n: &BigInt, f: &mut Folds, l: u64) -> FResult<bool> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: of :: fn of(b: &Budget, n: &BigInt) -> FResult<Folds> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: phis_certify :: fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q: &BigInt, h: usize, costs: &[PieceCost]) -> FResult<()> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: plus :: fn plus(&mut self, b: &Budget, n: &BigInt) -> FResult<u128> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: prefilter_plan :: let pmax = WITNESS_K.checked_mul(l).and_then(|x| x.checked_add(1)).map_or(1 << 32, |p| p.min(1 << 32)); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: prefilter_plan :: let trial = WITNESS_K.checked_mul(pmax.sqrt() + 1)?; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: stage_b :: let (work, out_bytes, scratch, costs) = ledger().ok_or_else(|| b.refuse(\"work (overflow)\", u64::MAX, b.work_left()))?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "followup": "FU-B14-1"
+   }
+  },
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: stage_b :: let _t = crate::budget::tag(\"piece costs\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: stage_b :: let len = usize::try_from(k.len).map_err(|_| b.refuse(\"memory (overflow)\", u64::MAX, 0))?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "followup": "FU-B14-1"
+   }
+  },
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: stage_b :: let need = primes.iter().try_fold(0u64, |s, &l| s.checked_add(prefilter_plan(bits, l)?.checked_mul(2)?)).ok_or_else(|| b.refuse(\"work (overflow)\", u64::MAX, b.work_left()))?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "followup": "FU-B14-1"
+   }
+  },
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_4200_bit_binomial_takes_stage_b :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_is_rejected_before_any_bisection :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_needs_only_the_proofs_work :: let b = Budget::new(Limits { work: hi, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_needs_only_the_proofs_work :: let b = Budget::new(Limits { work: scan + need - 1, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_needs_only_the_proofs_work :: let b = Budget::new(Limits { work: scan + need, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_needs_only_the_proofs_work :: let b = Budget::new(Limits { work: w, ..Limits::DEFAULT }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_needs_only_the_proofs_work :: let probe = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_generic_binomial_needs_only_the_proofs_work :: let ub = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: ledger_audit_at :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_early_proof_allocates_nothing_coefficient_sized :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_early_proof_allocates_nothing_coefficient_sized :: let b = Budget::unlimited(); #1": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_fold_residues_are_exact :: assert!(rm < u64::MAX && r48 < (1 << 48) - 1, \"{bits} bits: 2^k - 1 is folded to 0\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_piece_costs_are_charged_for_their_whole_life :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_piece_ledger_overflow_is_none :: assert!(piece_cost(1, 1, 1, u64::MAX).is_none()); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_piece_ledger_overflow_is_none :: assert!(piece_cost(u64::MAX, 1, 1, 1).is_none()); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_piece_ledger_overflow_is_none :: assert!(plan_powers(u64::MAX, 2, &[2]).is_none()); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_piece_power_has_no_u32_cutoff :: let e = u32::MAX as u64 + 1; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_residue_prefilter_agrees_with_exact_root :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_residue_prefilter_never_rejects_a_power :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: the_residue_proof_folds_each_coefficient_once :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
  },
  "engine/poly/src/budget.rs :: default :: Budget::default_with(sagebrush_interrupt::memory_share()) #0": {
   "class": "2",
@@ -1416,7 +1549,12 @@
  },
  "engine/raster-launch/src/main.rs ::  :: const STAGE_LIMIT: u32 = 1; #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "engine/raster-launch/src/main.rs ::  :: pub const PRLIMIT64: usize = 261; #0": {
   "class": "none",
@@ -1428,7 +1566,12 @@
  },
  "engine/raster-launch/src/main.rs :: launch :: if limit > old[1] { #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "engine/raster-launch/src/main.rs :: launch :: let (Some(limit), Some(parent), Some(fd), Some(bound)) = (decimal(arg(1)), decimal(arg(2)), decimal(arg(3)), decimal(arg(4))) else { #0": {
   "class": "none",
@@ -1436,27 +1579,57 @@
  },
  "engine/raster-launch/src/main.rs :: launch :: let new = [limit, old[1]]; #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "engine/raster-launch/src/main.rs :: launch :: let r = syscall(nr::PRLIMIT64, 0, RLIMIT_AS, 0, old.as_mut_ptr() as usize); #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "engine/raster-launch/src/main.rs :: launch :: let r = syscall(nr::PRLIMIT64, 0, RLIMIT_AS, new.as_ptr() as usize, 0); #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "engine/raster-launch/src/main.rs :: launch :: refuse(fd, STAGE_LIMIT, (-r) as u32, 0); #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "engine/raster-launch/src/main.rs :: launch :: refuse(fd, STAGE_LIMIT, (-r) as u32, 0); #1": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "engine/raster-launch/src/main.rs :: launch :: refuse(fd, STAGE_LIMIT, 0, old[1]); #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "engine/raster-launch/src/main.rs :: vm_peak :: if n == 0 || len == cap { #0": {
   "class": "none",
@@ -3241,31 +3414,66 @@
  },
  "lib/_memledger.py ::  :: - standing: the warm engine process's limit, less what a fresh observation #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "lib/_memledger.py :: Ledger.end_call.build :: cap = (old_standing.bytes if old_standing is not None else 0) + (engine.bytes if engine is not None else 0) #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "lib/_memledger.py :: Ledger.end_call.build :: new = max(0, min(int(standing), cap)) #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "lib/_memledger.py :: Ledger.rebase :: (limit, rss) in bytes now. Returns the headroom F0' - held after #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "lib/_memledger.py :: Ledger.rebase :: limit, rss = child() #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "lib/_memledger.py :: Ledger.rebase :: standing = limit - self.child_rss #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "lib/_memledger.py :: Ledger.set_standing :: \"\"\"The engine process's standing charge (its whole limit, until an #0": {
   "class": "2",
-  "owner": "raster/image I/O"
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "lib/_png.py ::  :: MAX_AXIS = 16384 #0": {
   "class": "1+2",
@@ -6357,11 +6565,19 @@
  },
  "web/notebook/text-overlap.ts ::  :: export const TEXT_DIFF_PRODUCT_LIMIT = 4_000_000; #0": {
   "class": "1",
-  "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)"
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)",
+  "reason": "the shared 3-way text merge diff-work bound: past it lineMerge3 returns tagged exhaustion; notebook records a too-large clash, while board refuses the whole merge as work with no partial records; neither guesses nor loses data."
  },
  "web/notebook/text-overlap.ts :: hunks :: if (work > TEXT_DIFF_PRODUCT_LIMIT || work > ledger.left) return \"exhausted\"; #0": {
   "class": "1",
-  "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)"
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)",
+  "reason": "the shared 3-way text merge diff-work bound: past it lineMerge3 returns tagged exhaustion; notebook records a too-large clash, while board refuses the whole merge as work with no partial records; neither guesses nor loses data."
  },
  "web/workspace/sync-ledger.ts ::  :: export const CODE = { max: 32 }; #0": {
   "class": "1",

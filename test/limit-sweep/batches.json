@@ -1,0 +1,6 @@
+{
+ "active_baseline": 4362,
+ "done": [],
+ "note": "The sweep's batches done, and the active-baseline count the tree must have (written by apply, recount and merge; plan-limit-sites-sweep-r3 section 4.2).",
+ "v": 1
+}

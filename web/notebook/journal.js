@@ -1,0 +1,345 @@
+// The notebook journal (plan-sync-slice2-client r4 §2.1; r9 §3.1a as #208's design r4 amends it), its core: once this
+// device's journal is active (web/workspace/api.ts activateJournal), a notebook's save is two writes, in this order,
+// and its load checks them.
+//
+//   T1, in the history database ("sagebrush-history"), one transaction: the document's next j, the save's intent at it
+//       ({srev: the record revision its T2 requires, or null; value: the codec's text of its versioned records}), and,
+//       when its content changed and TimeTravel isn't paused, the version's patch at the same j.  Every save writes an
+//       intent, an unchanged or outputs-only one too.
+//   T2, in the notebooks' store: an ordinary save's record with its intent's j and the hash of its versioned value,
+//       written only if its revision is still `srev` (compare and swap, stores.js) and no later j is there.  Then the
+//       intents at or below that j are pruned.  (Recovery's T2, below, takes J or its catch-up's committed j.)
+//   Recovery, on every load, before the notebook is shown: the intents above the record's j replayed in increasing j,
+//       from the record's revision r: one whose srev is r (or null) is the save whose T2 would have won next (chosen,
+//       r + 1), any other was refused.  The outcome is written by T2 alone, under the record's compare and swap:
+//         consistent  the record's own value, its j the history's J, its hash right: nothing;
+//         stamped     the record's own value, its j or hash wrong: written again with j and the hash;
+//         rewritten   an interrupted save's value: the whole document, its hash and j;
+//       first, when the history's head isn't the chosen value, one version patching it there (best effort: never an
+//       intent, never authority), its committed j the record's.  Then the intents at or below are pruned.
+//   An edit counts as saved only once both T1 and T2 have completed; the catch-up version is never a saved one.
+//
+// The journal's rows are sync's reserved rows (journal-rows.js; sync-rows.js, F1, F2), each charged (F8).  Recovery
+// writes no intent and no charged row, so it always progresses.  Not here: an entry for a save whose T1 can't be
+// written (2c-1d-iii).  Several tabs' outstanding saves are serialized by the replay, one legal order of their T2s.
+// It loads with the history (the sagebrush-history.js bundle, history.js), and is given the page's own stores
+// (journalClasses): one copy of stores.js, the page's, its gate and its queues, writes everything.
+import { bytesHash } from "./stores.js";
+import { t1Write, pruneIntents, dropRows, readJournal } from "./journal-rows.js";
+export * from "./journal-rows.js";
+
+/** The part of a notebook document the history keeps (history.js toRecords: its kind and each cell's id, type,
+ * code and a Markdown cell's attachments, in order): what the store's hash is of. */
+export function versionedOf(doc) {
+  const type = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
+  return {
+    mode: doc?.mode ?? "python",
+    cells: (doc?.cells ?? []).map((c) => ({ id: c.id, type: type(c), code: c.code ?? "", ...(type(c) === "markdown" && c.attachments ? { attachments: c.attachments } : {}) })),
+  };
+}
+const canonical = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
+/** The hash of what the history keeps of `doc` (SHA-256 of its canonical JSON). */
+export const docHash = (doc) => bytesHash(new TextEncoder().encode(canonical(versionedOf(doc))));
+
+/** The journal's classes over the page's stores (stores.js: `{IdbStore, IdbPatchStore}`, the page's own copy):
+ * {JournalStore, journalPatchStore}. */
+export function journalClasses({ IdbStore, IdbPatchStore }) {
+  /** A notebook's history store whose writes are the journal's: T1 on every version (an IdbPatchStore with the
+   * journal's hooks), and, while paused, a save's intent alone (F4). */
+  function journalPatchStore(hdb, id) {
+    // (nothing written but by the notebook's writer here: `writerOK`, set by its JournalStore)
+    const store = new IdbPatchStore(hdb, id, { journal: { t1: (st, row, intent) => (store.writerOK?.() === false ? Promise.resolve({ refused: NOT_WRITER }) : t1Write(st, id, { row, intent })), drop: (st) => dropRows(st, id) } });
+    // (F4: paused, a save's T1 is its intent alone; nothing to write for a version that isn't a save's)
+    store.writePending = () => (store.intent ? writeIntent(store, store.intent) : Promise.resolve({ refused: "TimeTravel is paused for this notebook" }));
+    return store;
+  }
+  return { JournalStore: makeJournalStore(IdbStore, journalPatchStore), journalPatchStore };
+}
+
+/** A save's intent alone (no version: its content unchanged, or TimeTravel paused), its T1 in the store's queue,
+ * through its journalTx (the workspace's word and lock, the fence in the transaction). */
+export function writeIntent(store, intent) {
+  if (store.writerOK?.() === false) return Promise.resolve({ refused: NOT_WRITER });
+  return store.queue(() => store.journalTx((st) => t1Write(st, store.id, { intent }))).catch((e) => ({ refused: e?.message ?? String(e) }));
+}
+/** The intents at or below j `upTo` pruned (after a record write holding it has committed), through journalTx. */
+export function prune(store, upTo) {
+  return store.queue(() => store.journalTx(async (st) => ({ j: upTo, pruned: await pruneIntents(st, store.id, upTo) }))).catch((e) => ({ refused: e?.message ?? String(e) }));
+}
+
+/** The one writer of a notebook on this device, for the milestone (William, Oct 27: "Yes, single writer per device for
+ * the milestone"): the Web Lock a journal store holds while it may write the notebook.  Another tab's store waits for
+ * it, read-only; the browser frees it when its holder's tab closes or crashes. */
+export const writerLockName = (id) => `sagebrush-nb-writer:${id}`;
+/** Why a store isn't its notebook's writer: another tab is, or this browser can't tell (no Web Locks). */
+export const READ_ONLY = {
+  other: "This notebook is open for editing in another tab of this browser, so it's read-only here (two tabs editing it could overwrite each other's work). It becomes editable here as soon as that tab closes it or opens another notebook.",
+  nolocks: "This browser can't make sure that only one tab edits a notebook at a time, so notebooks are read-only in it. An up-to-date Chrome, Edge, Firefox or Safari can edit them.",
+};
+/** Said when a read-only tab becomes the writer (the page's status line). */
+export const TAKEOVER = "You can edit this notebook here now (the other tab let go of it).";
+/** Said when a read-only tab couldn't reopen the notebook as its writer (and let the lock go). */
+export const TAKEOVER_FAILED = "This notebook couldn't be opened for editing here: reload this page to try again.";
+/** What the page shows and allows for a store (the notebook page's controls; a plain store: everything). */
+export function pageControls(store) {
+  const why = store?.journaled ? store.viewOnly : null;
+  return { readOnly: !!why, bar: why, name: !why, mode: !why, repro: !why, rename: !why, trash: !why, history: !why };
+}
+/** The store the page now uses, `next`, after `prev`: `prev` let go (its lock, its history) only if it is another
+ * store; the same store reattached (a takeover's reload) is kept as it is. */
+export function switchJournal(prev, next) {
+  if (prev && prev !== next) prev.release();
+  return next?.journaled ? next : null;
+}
+const NOT_WRITER = "not saved: this notebook is open for editing in another tab of this browser";
+
+/** Recovery's replay (design r4 §3.1), pure: from the record's revision `rev` (null: no record) and the intents above
+ * its j in increasing j, the value chosen: the last one whose T2 would have won, in order, or null for the record's
+ * own. */
+export function replay(rev, intents) {
+  let r = rev, chosen = null;
+  for (const it of intents) {
+    if (r === null || it.srev === null || it.srev === r) { chosen = it; r = r === null ? null : r + 1; }
+  }
+  return chosen;
+}
+
+/** The journal's notebook store: IdbStore's record with {j, hash} (T2), its saves made only after their T1, and its
+ * load recovering per the table above.  `history`: a NotebookHistory over journalPatchStore(hdb, id), whose
+ * module (history.js) is passed in `mod` ({NotebookHistory, toRecords, fromRecords, SCHEMA}). */
+const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore extends IdbStore {
+  constructor(db, hdb, id, initial, mod) {
+    super(db, id, initial, { journal: true });
+    this.hdb = hdb; this.mod = mod;
+    this.patches = journalPatchStore(hdb, id);
+    // (two phases of a writer (daybreak3's P2): `ready`, its load and recovery done: saves, versions, clears and drops
+    // from outside; `recovering`, its load's own writes only (recovery's T1 catch-up, T2 and prune). T1's hook allows
+    // either; a clear or a drop (mutateOK) and a public save only the first)
+    this.patches.writerOK = () => this.writer && !this.released && (this.ready || this.recovering);
+    this.patches.mutateOK = () => this.writer && !this.released && this.ready;
+    this.history = new mod.NotebookHistory(this.patches);
+    this.recovered = null;
+    this.inflight = 0; this.released = false; this.opening = null;
+    // (the writer's lock: `writer` once held; `readOnly` why not (READ_ONLY's keys), while waiting for it)
+    this.writer = false; this.readOnly = null; this.unlock = null; this.waiting = null; this.ontakeover = null;
+    // (`ready`: a writer whose load (and recovery) has begun: only then does it write; `lockGen`: what a lock's grant
+    // must still match to be kept (a release in between makes it stale); `takeoverDue`: a grant not yet told)
+    this.ready = false; this.lockGen = 0; this.takeoverDue = false;
+  }
+  /** This store's notebook isn't writable here: READ_ONLY's text, or null. */
+  get viewOnly() {
+    if (this.writer && this.ready) return null;
+    if (this.readOnly === "nolocks") return READ_ONLY.nolocks;
+    return this.writer || this.readOnly === "other" ? READ_ONLY.other : null;
+  }
+  /** `f()` once this read-only store holds the lock, its reload (load) still to come: at once if it already does. */
+  onTakeover(f) {
+    this.ontakeover = f;
+    if (this.takeoverDue && f) { this.takeoverDue = false; queueMicrotask(f); }
+  }
+  // (the writer's lock: taken if free; else waited for, read-only meanwhile, and `ontakeover()` called once held.
+  // Without Web Locks, read-only for good (fail closed))
+  acquire() {
+    if (this.writer) return Promise.resolve(true);
+    if (this.waiting) return Promise.resolve(false);
+    const locks = globalThis.navigator?.locks;
+    if (!locks || typeof locks.request !== "function") { this.readOnly = "nolocks"; return (this.acquiring = Promise.resolve(false)); }
+    const name = writerLockName(this.id), gen = this.lockGen;
+    // (a grant kept only while nothing let go since it was asked for: else returned at once, and the next store's
+    // own request has it (astra's CORR-215-2))
+    const stale = () => gen !== this.lockGen || this.released;
+    const hold = () => {
+      this.writer = true; this.readOnly = null;
+      return new Promise((done) => { this.unlock = done; });
+    };
+    this.acquiring = new Promise((decided) => {
+      this.lockDone = locks.request(name, { ifAvailable: true }, (lock) => {
+        if (!lock || stale()) { decided(false); return null; }
+        const held = hold();
+        decided(true);
+        return held;
+      }).catch(() => decided(false));
+    }).then((got) => {
+      if (got || stale()) return got;
+      // (waiting in the lock's queue: granted when the writer's tab lets go, in turn; then this tab writes, once its
+      // reload has recovered (load): told by onTakeover, now or whenever it is asked (astra's CORR-215-3))
+      this.readOnly = "other";
+      this.waiting = new AbortController();
+      this.lockDone = locks.request(name, { signal: this.waiting.signal }, (lock) => {
+        this.waiting = null;
+        if (stale()) return null;
+        const held = hold();
+        if (this.ontakeover) { const f = this.ontakeover; queueMicrotask(() => f()); }
+        else this.takeoverDue = true;
+        return held;
+      }).catch(() => { this.waiting = null; });
+      return false;
+    });
+    return this.acquiring;
+  }
+  // (let go: the lock, or the place in its queue, and any grant still on its way; resolves once the browser has it back)
+  letGo() {
+    this.lockGen++;
+    this.waiting?.abort();
+    this.waiting = null;
+    this.unlock?.();
+    this.unlock = null;
+    this.writer = false; this.ready = false; this.takeoverDue = false;
+    return Promise.resolve(this.lockDone).catch(() => {});
+  }
+  // (the history open; opened again when a save comes after it was let go)
+  async open() {
+    if (this.history.session) return;
+    this.opening ??= this.history.init().finally(() => { this.opening = null; });
+    await this.opening;
+  }
+  /** The page is done with this notebook: its history let go once its saves still running are done (a save after it
+   * opens it again). */
+  release() {
+    this.released = true;
+    this.draining ??= this.drain().finally(() => { this.draining = null; });
+    return this.draining;
+  }
+  // (the one way this store lets go, whatever asks (the page leaving it, a failed takeover, a release while saves run):
+  // only once nothing of it can still commit: its load's writes (recovery's catch-up, T2 and prune), every save running
+  // (T1, T2, prune) and its history's queue, each waited for until none is left (astra's CORR-215-5, CORR-215-6))
+  async drain() {
+    for (;;) {
+      const a = this.patches.appending, l = this.loading;
+      await Promise.allSettled([a, l]);
+      if (this.inflight) { await new Promise((r) => { this.whenIdle = r; }); continue; }
+      if (a === this.patches.appending && l === this.loading) break;
+    }
+    if (!this.released) return;
+    this.history.close();
+    return this.letGo();
+  }
+  // (the codec's text of a document's versioned records: an intent's value)
+  textOf(doc) { return this.history.codec.toString(this.mod.toRecords(doc)); }
+  // (the hash of the history's versioned value as it is now: its settings and cells, as docHash hashes a document)
+  headHash() { return docHash(this.mod.fromRecords(this.history.session.value())); }
+  /** T1 for a save of `doc`: its intent, with its version when its content changed (and TimeTravel isn't paused);
+   * resolves {j} once committed, or {refused}. */
+  async t1(doc, again = true) {
+    await this.open();
+    const intent = { srev: doc.baseRev ?? null, value: this.textOf(doc) };
+    this.patches.intent = intent;
+    let env;
+    try { env = this.history.record(doc); } finally { this.patches.intent = undefined; }
+    const r = await (env?.pending ?? (env ? this.patches.appended(env.time) : writeIntent(this.patches, intent)));
+    if (r.j !== undefined || env?.pending || !env) return r;
+    // (a version the journal didn't keep: the history paused, the session rebuilt without it, and the save's intent
+    // written alone instead, once)
+    this.history.refused(env.time);
+    return again ? this.t1(doc, false) : r;
+  }
+  /** T1, then T2, then the intents it settles pruned. */
+  async save(doc, opts = {}) {
+    if (opts.journal) return super.save(doc, opts);
+    // (only this notebook's writer here saves, once its load and recovery are done: for the milestone, one tab per
+    // device; a read-only tab's own state, flushed as it is reattached at a takeover, is refused (board's B), and so is
+    // a save while recovery runs or after a release (daybreak3's P2))
+    if (!this.writer || !this.ready || this.released) return NOT_WRITER;
+    return this.writeSave(doc, opts);
+  }
+  // (a save's T1, T2 and prune, counted while they run: a release waits for them (drain))
+  async writeSave(doc, opts = {}) {
+    this.inflight++;
+    try {
+      const r = await this.t1(doc);
+      if (r.j === undefined) return `not saved: ${r.refused ?? "not kept"}`;
+      const out = await super.save(doc, { ...opts, journal: { j: r.j, hash: await docHash(doc) } });
+      if (out && typeof out === "object" && out.saved) await prune(this.patches, r.j);
+      return out;
+    } finally {
+      if (!--this.inflight) { const r = this.whenIdle; this.whenIdle = null; r?.(); }
+    }
+  }
+  async load() {
+    this.released = false;
+    // (not the writer: shown as it is, read-only, with nothing written (no recovery: that is the writer's))
+    if (!(await this.acquire())) {
+      this.viewed = true;
+      await this.open();
+      const rec = await super.loadRecord();
+      if (!this.writer) {
+        this.recovered = { doc: rec ?? { ...(this.initial ?? { name: "Untitled", mode: "python", cells: [] }), id: this.id }, row: "read-only" };
+        return this.recovered.doc;
+      }
+      // (granted while it loaded read-only: loaded as the writer instead, recovery first; nothing left to tell)
+      this.takeoverDue = false;
+    }
+    // (the writer from here: its saves and versions allowed; a tab taking over from a read-only view reads its history
+    // again, as the writer left it; not ready again until this load's recovery is done, even if an earlier load was:
+    // a load or recovery that fails writes nothing more, no save, no version, until a load succeeds (astra's
+    // CORR-215-5); the page then lets the lock go)
+    this.recovering = true; this.ready = false;
+    this.loading = (async () => {
+      if (this.viewed) { this.viewed = false; await this.history.init(); } else await this.open();
+      for (let i = 0; ; i++) {
+        const out = await this.recover(await super.loadRecord());
+        if (out || i >= 4) { this.recovered = out ?? { row: "busy" }; break; }
+      }
+      if (this.recovered.row === "busy") throw new Error("the notebook kept changing while it was opened: reload this page");
+      return this.recovered.doc;
+    })();
+    try {
+      const doc = await this.loading;
+      this.ready = true;
+      return doc;
+    } finally {
+      this.recovering = false;
+    }
+  }
+  // (the record as a notebook document with the versioned part of `value` (records), its own outputs, names and
+  // settings kept for the cells it still has)
+  withValue(rec, value) {
+    const v = this.mod.fromRecords(value), mine = new Map((rec?.cells ?? []).map((c) => [c.id, c]));
+    const { j: _j, hash: _h, rev: _r, ...rest } = rec ?? {};
+    const cell = (c) => {
+      const out = { ...(mine.get(c.id) ?? {}), ...c };
+      if (!c.type) delete out.type;
+      if (!c.attachments) delete out.attachments;
+      return out;
+    };
+    return { ...rest, mode: v.mode, cells: v.cells.map(cell) };
+  }
+  /** Recovery (design r4 §3): {doc, row: "consistent" | "stamped" | "rewritten" | "new", catchUp?}, or null when the
+   * record changed under its compare and swap (load reads it again and replays again). */
+  async recover(rec) {
+    const state = await readJournal(this.hdb, this.id);
+    const above = state.intents.filter((it) => it.j > (rec && Number.isSafeInteger(rec.j) ? rec.j : 0));
+    const chosen = replay(rec ? rec.rev ?? 0 : null, above);
+    if (!rec && !chosen) {
+      // (a new notebook: its first save journaled like any other)
+      const fresh = { ...(this.initial ?? { name: "Untitled", mode: "python", cells: [] }), id: this.id };
+      const saved = await this.writeSave(fresh);
+      if (typeof saved === "string") throw new Error(saved);
+      return saved.conflict ? null : { doc: { ...fresh, rev: saved.rev }, row: "new" };
+    }
+    const base = rec ?? { ...(this.initial ?? { name: "Untitled", mode: "python", cells: [] }), id: this.id };
+    const recText = this.textOf(base);
+    const value = chosen ? chosen.value : recText, own = value === recText;
+    const doc = own ? (({ j: _j, hash: _h, rev: _r, ...d }) => d)(base) : this.withValue(base, this.history.codec.fromString(value));
+    const hash = await docHash(doc);
+    if (rec && own && rec.j === state.J && rec.hash === hash) {
+      if (state.intents.some((it) => it.j <= rec.j)) await prune(this.patches, rec.j);
+      return { doc: rec, row: "consistent" };
+    }
+    // (TimeTravel's catch-up: the head made the chosen value by one version, with no intent, before T2; its committed
+    // j is the record's.  Refused, the record takes J, and TimeTravel's head waits for the next save)
+    let j = state.J, catchUp = null;
+    if ((await this.headHash()) !== hash) {
+      const env = this.history.record(doc);
+      const r = env && !env.pending ? await this.patches.appended(env.time) : { refused: "paused" };
+      if (r.j !== undefined) { j = r.j; catchUp = r.j; } else if (env && !env.pending) this.history.refused(env.time);
+    }
+    const out = await super.save({ ...doc, ...(rec ? { baseRev: rec.rev } : {}) }, { journal: { j, hash } });
+    if (typeof out === "string") throw new Error(out);
+    if (out.conflict) return null;
+    await prune(this.patches, j);
+    return { doc: { ...doc, rev: out.rev, j, hash }, row: own ? "stamped" : "rewritten", catchUp };
+  }
+  /** What the page asks of a store to know it is the journal's. */
+  get journaled() { return true; }
+};
