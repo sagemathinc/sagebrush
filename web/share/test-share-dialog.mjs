@@ -62,11 +62,16 @@ const raw = (method, params = {}, sessionId, ms = 60_000) => new Promise((r, no)
   bws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
 });
 async function newPage(contextId) {
+  // (each step's time, for a reopen that is slow or stalls to say which step: #243's CI)
+  const timing = {}, t0 = Date.now();
   const { targetId } = await raw("Target.createTarget", { url: "about:blank", ...(contextId ? { browserContextId: contextId } : {}) });
+  timing.createTarget = Date.now() - t0;
   const { sessionId } = await raw("Target.attachToTarget", { targetId, flatten: true });
+  timing.attach = Date.now() - t0;
   const send = (method, params = {}, ms) => raw(method, params, sessionId, ms);
   // (dialogs reported for this page: see bws.onmessage)
   await send("Page.enable");
+  timing.pageEnable = Date.now() - t0;
   const ev = async (expression, ms) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
   const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } throw new Error("timeout: " + expr); };
   const key = async (k, modifiers = 0) => {
@@ -74,7 +79,7 @@ async function newPage(contextId) {
     await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, modifiers, windowsVirtualKeyCode: k === " " ? 32 : k === "Escape" ? 27 : 0 });
     await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, modifiers, windowsVirtualKeyCode: k === " " ? 32 : k === "Escape" ? 27 : 0 });
   };
-  return { send, ev, until, key, targetId };
+  return { send, ev, until, key, targetId, timing };
 }
 let failures = 0, count = 0;
 const ok = (c, msg) => { count++; console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -1195,19 +1200,47 @@ try {
     const crashAndReopen = async (P, what) => {
       // (read only, before the crash: whether a service worker controlled the old page, and in what state)
       const controller = await P.ev("JSON.stringify(navigator.serviceWorker?.controller ? [navigator.serviceWorker.controller.state, new URL(navigator.serviceWorker.controller.scriptURL).pathname] : null)", 3000).catch((x) => `unread: ${x.message}`);
+      // (each step's time from the crash, and Chrome's processes (type, id, cpu seconds) at each step, read from the
+      // browser itself: so a reopen that is slow says which step, and whether a renderer is missing or busy;
+      // printed for every reopen, the processes when it fails or takes over 10 s. #243's CI: D2's reopen took
+      // about 61 s on master afcb1b72, about 4 s before)
+      const t0 = Date.now(), marks = {}, procs = {};
+      const mark = (step) => { marks[step] = Date.now() - t0; };
+      const snap = async (step) => { procs[step] = await raw("SystemInfo.getProcessInfo", {}, undefined, 5000).then((x) => (x?.processInfo ?? []).map((p) => [p.type, p.id, Math.round((p.cpuTime ?? 0) * 10) / 10]), (x) => `unread: ${x.message}`); };
+      const said = (ok) => {
+        console.log(`  (${what}: reopen timing, ms from the crash: ${JSON.stringify(marks)}; the new page's own steps, ms from its start: ${JSON.stringify(Q?.timing ?? null)}; renderer before navigating: ${preNav})`);
+        if (!ok || Date.now() - t0 > 10_000) console.log(`  (${what}: Chrome's processes [type, id, cpu s] by step: ${JSON.stringify(procs)})`);
+      };
+      let Q = null, preNav = "unread";
+      await snap("before the crash");
       chainAt(`${what}: the page crashes`);
       void P.send("Page.crash").catch(() => {});
       await sleep(1000);
+      mark("crashed");
       await raw("Target.closeTarget", { targetId: P.targetId }, undefined, 10_000).catch(() => {});
+      mark("closed");
+      await snap("closed");
       chainAt(`${what}: a new page`);
-      const Q = await newPage();
-      // (the new page as Chrome sees it before it is sent anywhere)
+      Q = await newPage();
+      mark("new page");
+      // (the new page as Chrome sees it before it is sent anywhere, and whether its about:blank renderer answers,
+      // within a strict 3 s)
       const before = await raw("Target.getTargetInfo", { targetId: Q.targetId }, undefined, 10_000).then((x) => x?.targetInfo, (x) => `unread: ${x.message}`);
+      preNav = await Q.send("Runtime.evaluate", { expression: "document.readyState", returnByValue: true }, 3000).then((x) => JSON.stringify(x?.result?.value ?? x), (x) => `no answer: ${x.message}`);
+      mark("renderer asked");
+      await snap("new page");
       try {
         await Q.send("Page.navigate", { url: dev.site + "/" }, 20_000);
+        mark("navigated");
+        await snap("navigated");
         await Q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+        mark("ready");
+        said(true);
         return Q;
       } catch (e) {
+        mark("failed");
+        await snap("failed");
+        said(false);
         // (which page is which: the crashed one, the new one, and every target by id and browser context; #243's
         // train-26 CI showed an unattached about:blank beside an attached "/", ids unsaid)
         const t = await raw("Target.getTargets", {}, undefined, 10_000).catch(() => null);
