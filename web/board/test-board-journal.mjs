@@ -20,14 +20,15 @@ const statics = [];
   const plain = (api.match(/"boards", "readwrite"/g) ?? []).length, journal = (api.match(/\["boards", "meta"\], "readwrite"/g) ?? []).length;
   statics.push([plain === 5 && journal === 1, `the boards store is written in 5 ordinary transactions and 1 journal one (census): ${J({ plain, journal })}`]);
   statics.push([/const \{ tag: _t, \.\.\.rest \} = plainRow\(cur\);/.test(api) && /st\.put\(\{ \.\.\.plainRow\(rec\), doc: \{ \.\.\.rec\.doc, title: newName \}/.test(api), "write and retitle drop the row's envelope (plainRow)"]);
+  statics.push([/tx\.objectStore\("boards"\)\.put\(plainRow\(also\.board\)\)/.test(api) && /stampOf\?: never/.test(api), "adopt writes plainRow of the row it is given; PlainBoardRecord's envelope fields are never (BJ-D3-1)"]);
   statics.push([/await dropRows\(st, pre\)/.test(api), "a board's deletion drops its journal's rows"]);
   // (the field guard (test 7): no board the site ships has a field of the journal's own, or an id, at its top)
   const ex = join(here, "examples"), bad = [];
   for (const f of readdirSync(ex).filter((f) => f.endsWith(".json") && f !== "index.json")) {
     const d = JSON.parse(readFileSync(join(ex, f), "utf8"));
-    for (const k of ["rev", "j", "hash", "unjournaled", "baseRev", "id"]) if (d && typeof d === "object" && k in d) bad.push(`${f}: ${k}`);
+    for (const k of ["rev", "j", "hash", "unjournaled", "stampOf", "baseRev", "id"]) if (d && typeof d === "object" && k in d) bad.push(`${f}: ${k}`);
   }
-  statics.push([bad.length === 0, "no example board has a top-level rev, j, hash, unjournaled, baseRev or id: " + J(bad)]);
+  statics.push([bad.length === 0, "no example board has a top-level rev, j, hash, unjournaled, stampOf, baseRev or id: " + J(bad)]);
 }
 const site = mkdtempSync(join(tmpdir(), "sb-bj-site-")), src = mkdtempSync(join(here, ".test-board-journal-"));
 let code = 1;
@@ -44,7 +45,7 @@ writeFileSync(join(src, "entry.js"), [
 const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
 rmSync(src, { recursive: true, force: true });
 if (!b.success) {
-  console.error(b.logs.join("\n"));
+  console.error("FAIL: the cases' bundle didn't build\n" + b.logs.join("\n"));
   rmSync(site, { recursive: true, force: true });
   process.exit(1);
 }

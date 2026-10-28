@@ -328,6 +328,12 @@ const journalOn = local && !!ws && (await ws.journalActive().catch(() => false))
 let jstore: any = null, jopening: Promise<any> | null = null, jkit: any = null;
 // (TimeTravel's listeners, told after each version the store keeps and once it is opened: §2.4's facade)
 const jSubs = new Set<() => void>();
+// (a replacement's clear that failed: the versions kept before this time are another document's, so TimeTravel lists
+// none of them (board's N1 on code r1))
+let jHideBefore = -Infinity;
+/** For tests (test-board-journal-page.mjs), under the board journal only: awaited by dropHistory before it drops, and
+ * told after (board's R1 on code r1: test 6c holds mount's dropHistory until the new document's version is kept). */
+export const BOARD_PAGE_HOOK: { beforeDropHistory?: () => Promise<void> | void; afterDropHistory?: () => void } = {};
 const historyModule = () => import(new URL("../sagebrush-history.js", import.meta.url).href) as Promise<HistoryModule & { journalStoreClasses: any; hashOf: any }>;
 const JOURNAL_NO_STORAGE = "this browser saves boards through sync's journal, which needs its storage: it isn't available here";
 /** The board's journal store, opened and loaded (its load recovers: intents replayed, an old row stamped). */
@@ -357,7 +363,7 @@ async function journalHistory(docId: string | null): Promise<BoardTimeTravel | n
   // (the journal's first version, when it is the last one from before it (the load's stamp, §2.1 D-2): not listed)
   let seam: { key: string; skip: boolean } | null = null;
   const parts = () => {
-    const lv = legacy?.versions() ?? [], jh = own(), jv: { time: string; ms: number }[] = jh ? jh.versions() : [];
+    const lv = legacy?.versions() ?? [], jh = own(), jv: { time: string; ms: number }[] = jh ? jh.versions().filter((v: { ms: number }) => v.ms > jHideBefore) : [];
     if (!lv.length || !jv.length) return { lv, jv };
     const key = lv[lv.length - 1].time + "|" + jv[0].time;
     if (seam?.key !== key) seam = { key, skip: canon(legacy!.docAt(lv[lv.length - 1].time)) === canon(jh.docAt(jv[0].time)) };
@@ -367,6 +373,8 @@ async function journalHistory(docId: string | null): Promise<BoardTimeTravel | n
     record: () => null,
     versions() {
       const { lv, jv } = parts();
+      // (`index` is this list's own numbering, the legacy versions' and the journal's in one sequence: never the store's,
+      // and never passed back to it; docAt takes a version's time)
       return [...lv, ...jv].map((v, index) => ({ time: v.time, ms: v.ms, index }));
     },
     docAt(time: string) {
@@ -824,10 +832,13 @@ async function journalLoad(id: string, path: string, pend: ReturnType<typeof rea
   if (pend && pend !== "unread") {
     if (typeof settled.hash === "string" && (await js.hashOf(pend.doc)) === settled.hash) dropPending(id, pend.header + "\n");
     else {
-      // (the record's writer: a session and that session's save number, read at the settled revision)
-      const rec = await ws!.read(path).catch(() => null);
-      const [tagSession, tagN] = (rec && rec.rev === settled.rev ? String(rec.tag ?? "") : "").split(":");
-      if (settled.rev === pend.base || (tagSession === pend.session && Number(tagN) < pend.n)) {
+      // (the record's writer, a session and that session's save number, and, a pure stamp's, the revision whose exact
+      // value it wraps: read at the settled revision (r3's erratum 1, astra's BJ-C1); the copy is newer if it was made
+      // on the record's revision or on the revision the stamp wraps, or after the session's last save the record has)
+      const prov = await ws!.boardProvenance(id).catch(() => null);
+      const at = prov && prov.rev === settled.rev ? prov : null;
+      const [tagSession, tagN] = String(at?.tag ?? "").split(":");
+      if (settled.rev === pend.base || (at?.stampOf !== undefined && at.stampOf === pend.base) || (tagSession === pend.session && Number(tagN) < pend.n)) {
         try { wsSave(id, pend.doc, pend.header); } catch (e) { console.warn("workspace:", e); }
         return { doc: pend.doc, original: null, ...(notice ? { notice } : {}) };
       }
@@ -1165,7 +1176,13 @@ const host: BoardHost = {
       if (fresh && journalOn) {
         wsWriting = wsWriting.then(async () => {
           const js = jstore ?? (jopening ? await jopening.catch(() => null) : null);
-          if (js) await js.history.clear().catch((e: unknown) => console.warn("board: TimeTravel: the versions before weren't cleared:", e));
+          // (failed: said, and the versions kept until now hidden, so no Revert brings the other document back)
+          if (js) await js.history.clear().catch((e: unknown) => {
+            console.warn("board: TimeTravel: the versions before weren't cleared:", e);
+            jHideBefore = Date.now();
+            for (const f of jSubs) f();
+            showBusyNotice("TimeTravel couldn't clear the previous document's versions; they're hidden here (reload to try again).");
+          });
         });
       }
       return id;
@@ -1204,8 +1221,10 @@ const host: BoardHost = {
   // which documentId's clear replaces: §2.4 B1)
   dropHistory: file ? undefined : async (id) => {
     if (journalOn && !id) return;
+    if (journalOn) await BOARD_PAGE_HOOK.beforeDropHistory?.();
     const db = await openBoardHistoryDb();
     if (db) await new IdbPatchStore(db, historyKey(id), { followPhase: true }).drop();
+    if (journalOn) BOARD_PAGE_HOOK.afterDropHistory?.();
   },
   address: {
     get: () => location.hash,
@@ -1368,4 +1387,4 @@ if (ws && local) {
 (window as any).boardBench = mounted.bench;
 (window as any).sagebrush = { ...(window as any).sagebrush, leaving: () => held, board: mounted.agent, ...(ws ? { workspace: ws.forAgent("agent:page"), saveLog: () => wsLog.slice() } : {}),
   // (the board journal's store, for tests: test-board-journal-page.mjs)
-  ...(journalOn ? { boardJournal: () => jstore } : {}) };
+  ...(journalOn ? { boardJournal: () => jstore, boardJournalHook: BOARD_PAGE_HOOK } : {}) };

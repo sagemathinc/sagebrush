@@ -40,10 +40,10 @@ const textOf = (d) => d?.nodes?.[0]?.text;
 async function made(w, d = board("A")) { k++; const e = await w.create(`/b${k}.board.json`, { content: d }); return { ref: e.ref, path: e.path }; }
 const row = (w, ref) => rawGet(w.ws, "boards", ref);
 const jState = (hdb, ref) => R.readJournal(hdb, BJ.journalId(ref));
-const STORE = ["rev", "j", "hash", "unjournaled", "baseRev"];
-const ENV = ["j", "hash", "unjournaled"];
+const STORE = ["rev", "j", "hash", "unjournaled", "stampOf", "baseRev"];
+const ENV = ["j", "hash", "unjournaled", "stampOf"];
 // (§2.1's invariant: an old-style row, or a whole envelope; the journal's fields never in the document)
-const coherent = (r) => !!r && !STORE.some((f) => r.doc && f in r.doc) && (ENV.every((f) => !(f in r)) || (Number.isSafeInteger(r.j) && r.j >= 0 && typeof r.hash === "string" && (!("unjournaled" in r) || r.unjournaled === true || r.unjournaled === "too-large")));
+const coherent = (r) => !!r && !STORE.some((f) => r.doc && f in r.doc) && (ENV.every((f) => !(f in r)) || (Number.isSafeInteger(r.j) && r.j >= 0 && typeof r.hash === "string" && (!("unjournaled" in r) || r.unjournaled === true || r.unjournaled === "too-large") && (!("stampOf" in r) || (Number.isSafeInteger(r.stampOf) && r.stampOf === r.rev - 1))));
 const oldStyle = (r) => !!r && ENV.every((f) => !(f in r));
 const close = async (...xs) => { for (const x of xs) try { if (x?.release) await x.release(); else x?.close?.(); } catch {} };
 const outcome = (p) => p.then((v) => ({ v }), (e) => ({ e: String(e?.message ?? e) }));
@@ -273,9 +273,9 @@ async function law() {
   ];
   const strip = (x) => Object.fromEntries(Object.entries(x).filter(([f]) => !STORE.includes(f)));
   for (const d of docs) {
-    const rec = { ...d, rev: 3, j: 2, hash: "h", unjournaled: true };
+    const rec = { ...d, rev: 3, j: 2, hash: "h", unjournaled: true, stampOf: 2 };
     check(canon(strip(kind.withValue(rec, kind.toRecords(rec)))) === canon(strip(rec)), "test 7: the law, withValue(rec, toRecords(rec)) is rec but for the store's own fields: " + (d.title ?? ""));
-    check((await hashOf(d)) === (await hashOf({ ...d, rev: 1, j: 2, hash: "x", unjournaled: true, baseRev: 4 })), "test 7: the store's own fields are in no hash (C3): " + (d.title ?? ""));
+    check((await hashOf(d)) === (await hashOf({ ...d, rev: 1, j: 2, hash: "x", unjournaled: true, stampOf: 0, baseRev: 4 })), "test 7: the store's own fields are in no hash (C3): " + (d.title ?? ""));
     check(canon(kind.versionedOf(d)) === canon(kind.versionedOf({ ...d, baseRev: 9, rev: 8 })), "test 7: …nor in what a version keeps: " + (d.title ?? ""));
     check((await hashOf(kind.fromRecords(kind.toRecords(d)))) === (await hashOf(d)), "test 7: a board and its records back: one hash (a reload adds no version): " + (d.title ?? ""));
   }
@@ -288,6 +288,66 @@ async function law() {
   const base = board("one"), paged = { title: "t", pages: [{ nodes: [{ id: "n", text: "one" }] }] }, other = board("two");
   const rr = kind.apply(base, paged, other, "shown");
   check(J(rr.value) === J(paged) && rr.clashes.length >= 2, "test 8: a merge refused (paging): the side wins names, every changed record a clash: " + J(rr.clashes));
+}
+
+async function stamps() {
+  // r3's erratum 1 (astra's BJ-C1, daybreak3's contract): a pure stamp keeps the old row's tag and records the
+  // revision whose exact value it wraps; nothing else makes, keeps or advances it
+  const { w, hdb } = await active();
+  const { ref, path } = await made(w);
+  await w.write(path, board("A"), { tag: "s:1:1" });
+  const r0 = await row(w, ref);
+  const st = store(w, hdb, ref);
+  await st.load();
+  const r1 = await row(w, ref), p1 = await w.boardProvenance(ref);
+  check(oldStyle(r0) && r1.rev === r0.rev + 1 && r1.stampOf === r0.rev && r1.tag === "s:1:1" && textOf(r1.doc) === "A" && coherent(r1) && J(p1) === J({ rev: r1.rev, tag: "s:1:1", stampOf: r0.rev }), "stampOf: the first load's stamp of an old-style row: rev R+1, stampOf R, its tag kept: " + J({ rev: r1.rev, stampOf: r1.stampOf, tag: r1.tag }));
+  await close(st);
+  const s2 = store(w, hdb, ref);
+  await s2.load();
+  check(J(await row(w, ref)) === J(r1) && s2.recovered.row === "consistent", "stampOf: a second load of the stamped row: nothing written, nothing made or advanced");
+  // markOnly keeps it (it changes only the mark); a changed T2 drops it and writes its own tag
+  await s2.history.clear();
+  const rm = await row(w, ref);
+  check(rm.stampOf === r0.rev && rm.unjournaled === true && rm.rev === r1.rev, "stampOf: markOnly keeps it (the mark alone)");
+  await s2.save({ ...board("B"), baseRev: rm.rev }, { tag: "s:2:" + rm.rev });
+  const r2 = await row(w, ref);
+  check(!("stampOf" in r2) && r2.tag === "s:2:" + rm.rev && textOf(r2.doc) === "B" && J(await w.boardProvenance(ref)) === J({ rev: r2.rev, tag: r2.tag }), "stampOf: a T2 that changes the board drops it, with its own tag");
+  // a forged stampOf (the caller's) neither stamps nor keeps a tag: on an enveloped row, and on an old-style one
+  await w.journalWrite(ref, { ...r2.doc, stampOf: 1, baseRev: r2.rev }, { journal: { j: r2.j, hash: r2.hash } });
+  const r3 = await row(w, ref);
+  check(!("stampOf" in r3) && !("tag" in r3) && !("stampOf" in r3.doc), "stampOf: a caller's own stampOf on an enveloped row: no stamp, the tag not kept");
+  await w.write(path, board("C"), { tag: "s:3:9" });
+  const r4 = await row(w, ref);
+  await w.journalWrite(ref, { ...board("D"), stampOf: r4.rev, baseRev: r4.rev }, { journal: { j: r3.j, hash: await hashOf(board("D")) } });
+  const r5 = await row(w, ref);
+  check(oldStyle(r4) && !("stampOf" in r5) && !("tag" in r5) && textOf(r5.doc) === "D", "stampOf: a changed body with a forged stampOf on an old-style row: no stamp, the tag not kept");
+  await close(s2);
+  // an ordinary write, a retitle and a recovered later intent each drop it
+  for (const how of ["write", "retitle", "intent"]) {
+    k++;
+    const name = `st${k}`, p = `/${name}.board.json`;
+    const e = await w.create(p, { content: { title: name, nodes: [{ id: "n", text: "A" }] } });
+    await w.write(p, { title: name, nodes: [{ id: "n", text: "A" }] }, { tag: "s:1:1" });
+    const s = store(w, hdb, e.ref), d = await s.load();
+    const before = await row(w, e.ref);
+    if (how === "write") await w.write(p, { title: name, nodes: [{ id: "n", text: "raw" }] }, {});
+    else if (how === "retitle") await w.rename(p, `/${name}x.board.json`, { retitle: true });
+    else await s.t1({ title: name, nodes: [{ id: "n", text: "I" }], baseRev: d.rev });
+    await close(s);
+    if (how === "intent") { const s3 = store(w, hdb, e.ref); await s3.load(); await close(s3); }
+    const after = await row(w, e.ref);
+    check(before.stampOf === before.rev - 1 && !("stampOf" in after) && (how === "intent" ? textOf(after.doc) === "I" && !("tag" in after) : oldStyle(after)), `stampOf: ${how === "intent" ? "a recovered later intent" : "an ordinary " + how} drops it: ` + J({ before: before.stampOf, after: after.stampOf, tag: after.tag }));
+  }
+  // daybreak3's BJ-D3-1: adopt writes an old-style row whatever it is given; a plain row as given
+  for (const env of [true, false]) {
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, "0")).join("");
+    const given = { id, doc: board("adopted"), rev: 1, updated: 1, ...(env ? { j: 5, hash: "forged", unjournaled: true, stampOf: 0 } : {}) };
+    await w.locked(() => w.adopt("/", "adopted-" + id, ".board.json", { kind: "board", ref: id, mode: "python" }, { at: `/adopted-${id}.board.json`, board: given }));
+    const r = await row(w, id);
+    check(env ? oldStyle(r) && textOf(r.doc) === "adopted" : J(r) === J(given), `BJ-D3-1: adopt ${env ? "of a row carrying an envelope: written old-style" : "of a plain row: written as given"}: ` + J(r));
+  }
+  w.close();
+  hdb.close();
 }
 
 async function journalOff() {
@@ -307,7 +367,7 @@ async function journalOff() {
 }
 
 export async function run() {
-  for (const f of [saves, conflicts, markRaces, fallbacks, deletion, law, journalOff]) {
+  for (const f of [saves, conflicts, markRaces, fallbacks, deletion, law, stamps, journalOff]) {
     console.log("test: " + f.name);
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); }
     A.BOARD_JOURNAL_HOOK.beforeLock = undefined;
