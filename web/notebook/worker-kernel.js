@@ -177,6 +177,11 @@ export class WorkerKernel {
       this.pending.clear();
       this.runs.clear();
       this.interrupted.clear();
+      // (X1: the languages' entries of an interpreter that never started are
+      // gone, so the next user action asks again; nothing asks by itself,
+      // astra2's X1-CODE-START)
+      this.modeState.clear();
+      this.modeClaims.clear();
       for (const p of pending) p.stopped(message);
     });
     w.onmessage = (ev) => {
@@ -344,11 +349,12 @@ export class WorkerKernel {
    * its entry is pending or ready; resolves to the worker's answer, or null
    * if nothing was sent. */
   warm(mode) {
+    if (!this.worker) return Promise.resolve(null);
+    // (a worker whose start failed is replaced first, so the entry is the new
+    // interpreter's, astra2's X1-CODE-START)
+    this.retryStart();
     const r = this.modeEntry(mode);
-    if (!r || !r.fresh || !this.worker) {
-      if (r?.fresh) this.modeState.delete(mode);
-      return Promise.resolve(null);
-    }
+    if (!r || !r.fresh) return Promise.resolve(null);
     return this.ask({ warm: true }, mode, { warmed: null, restarted: true }, r.e);
   }
 
