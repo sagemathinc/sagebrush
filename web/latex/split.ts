@@ -56,13 +56,15 @@ function contOpen(open: string, tag: string): string {
 
 /** A text run split at spaces into parts of at most `max` bytes (a run without spaces that large: null). */
 function splitText(t: string, max: number): string[] | null {
-  const out: string[] = []; let cur = "";
+  // (byte counts kept as it goes: linear in the text)
+  const out: string[] = []; let cur: string[] = [], n = 0;
   for (const w of t.split(/(?<= )/)) {
-    if (bytes(w) > max) return null;
-    if (bytes(cur) + bytes(w) > max) { out.push(cur); cur = ""; }
-    cur += w;
+    const b = bytes(w);
+    if (b > max) return null;
+    if (n + b > max) { out.push(cur.join("")); cur = []; n = 0; }
+    cur.push(w); n += b;
   }
-  if (cur) out.push(cur);
+  if (cur.length) out.push(cur.join(""));
   return out;
 }
 
@@ -86,11 +88,13 @@ export function splitChunk(h: string): string[] {
     return [placeholder("this block is too large to display in the prototype", n)];
   }
   const first = o.open, later = contOpen(o.open, o.tag);
-  const pieces: string[] = []; let cur = "";
-  const flush = () => { if (cur) pieces.push((pieces.length ? later : first) + cur + o.close); cur = ""; };
+  // (byte counts kept as it goes: linear in the chunk)
+  const pieces: string[] = []; let cur: string[] = [], n = 0;
+  const flush = () => { if (cur.length) pieces.push((pieces.length ? later : first) + cur.join("") + o.close); cur = []; n = 0; };
   for (const s of parts) {
-    if (cur && bytes(cur) + bytes(s) + 256 > PIECE_MAX) flush();
-    cur += s;
+    const b = bytes(s);
+    if (cur.length && n + b + 256 > PIECE_MAX) flush();
+    cur.push(s); n += b;
   }
   flush();
   void para;
