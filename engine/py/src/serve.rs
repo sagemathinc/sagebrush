@@ -81,6 +81,11 @@ static STATE: Mutex<State> = Mutex::new(State {
     aborted: 0,
 });
 
+/// The request reader's buffer capacity and its idle releases so far, as of
+/// its last line (reported in _serve_stats: the r5 semantic memory gate).
+static INPUT_CAPACITY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static INPUT_RELEASES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn state() -> std::sync::MutexGuard<'static, State> {
     // (no code panics while holding it; a poisoned lock is still the state)
     STATE.lock().unwrap_or_else(|e| e.into_inner())
@@ -208,6 +213,9 @@ fn serve_stats(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     d.set_item("woken", woken)?;
     d.set_item("late", late)?;
     d.set_item("aborted", aborted)?;
+    d.set_item("input_capacity", INPUT_CAPACITY.load(std::sync::atomic::Ordering::Relaxed))?;
+    d.set_item("input_releases", INPUT_RELEASES.load(std::sync::atomic::Ordering::Relaxed))?;
+    d.set_item("read_chunk", READ_CHUNK)?;
     Ok(d)
 }
 
@@ -241,6 +249,48 @@ impl Write for Borrowed {
     }
 }
 
+/// The process's monotonic clock, for the idle wait's deadline.
+fn monotonic() -> std::time::Duration {
+    static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    T0.get_or_init(std::time::Instant::now).elapsed()
+}
+
+/// POSIX: poll(2) for readable input (or its end), the GIL released by the caller.
+#[cfg(unix)]
+impl Source for Borrowed {
+    #[allow(unsafe_code)]
+    fn readable_within(&mut self, within: std::time::Duration) -> std::io::Result<bool> {
+        use std::os::unix::io::AsRawFd;
+        // (rounded up to a whole millisecond, so a wait never returns before its deadline as a 0 ms poll)
+        let ms = within.as_micros().div_ceil(1000).min(i32::MAX as u128) as i32;
+        let mut p = libc::pollfd { fd: self.0.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+        let r = unsafe { libc::poll(&mut p, 1, ms) };
+        if r < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(r > 0)
+    }
+    fn now(&self) -> std::time::Duration {
+        monotonic()
+    }
+}
+
+/// Windows: an anonymous pipe has nothing to wait on, so the burst reuse
+/// is POSIX-only by design (daybreak2's r5 ruling, option (i) alone): a
+/// fully consumed large buffer is let go at once, never kept.
+#[cfg(windows)]
+impl Source for Borrowed {
+    fn readable_within(&mut self, _within: std::time::Duration) -> std::io::Result<bool> {
+        Ok(false)
+    }
+    fn now(&self) -> std::time::Duration {
+        monotonic()
+    }
+    fn can_wait(&self) -> bool {
+        false
+    }
+}
+
 /// A descriptor (POSIX) or handle (Windows) the caller owns, as a File that is never closed here.
 #[allow(unsafe_code)]
 fn borrow_file(f: i64) -> Borrowed {
@@ -257,22 +307,49 @@ fn borrow_file(f: i64) -> Borrowed {
     Borrowed(ManuallyDrop::new(file))
 }
 
-/// The read quantum: each read asks for at most this many bytes, and a
-/// buffer read to its end keeps at most this much capacity (daybreak2's PR B
-/// r3 gate: the reusable I/O working set, not a request-size limit; a larger
-/// line's capacity is let go once it is all consumed, so it isn't kept while
-/// the worker idles).
+/// The read quantum: each read asks for at most this many bytes, and a line
+/// longer than this, read cold, is staged in pieces of this size and laid out
+/// once at its exact size (daybreak2's PR B r5 ruling: bounded cold growth).
 const READ_CHUNK: usize = 1 << 16;
 
-/// Newline-framed lines from a reader (a descriptor), its own buffer kept
-/// across short reads, EINTR retried.  The lines taken are passed by a head
-/// cursor, not drained from the front each time; the buffer is compacted
-/// only when the taken part is most of it, so a backlog of many queued lines
-/// costs time linear in its bytes (daybreak2's PR B r1 #4).  A line is handed
-/// out as a range of the buffer, read with `get` and not copied; it is let
-/// go, with any compaction or release, only at the next call (the borrow
-/// checker keeps a `get` slice from outliving it).
-struct Lines<R: Read> {
+/// How long a fully consumed buffer larger than READ_CHUNK is kept for the
+/// next request of a burst: if no input is readable for this long after a
+/// reply, the capacity is let go before the reader blocks (daybreak2's PR B
+/// r5 ruling: burst reuse, bounded).
+const IDLE_RELEASE_LIMIT: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// What the reader reads from: bytes, whether some become readable within a
+/// time, and a monotonic clock (a seam: the tests drive both deterministically).
+trait Source: Read {
+    /// Ok(true) as soon as input (or its end) is readable, Ok(false) once
+    /// `within` passed without; Interrupted is retried by the caller, with
+    /// the time left to the same deadline.
+    fn readable_within(&mut self, within: std::time::Duration) -> std::io::Result<bool>;
+    fn now(&self) -> std::time::Duration;
+    /// Whether this source can wait for input at all (false: the idle wait is
+    /// skipped, and a large buffer is let go as soon as it is all consumed).
+    fn can_wait(&self) -> bool {
+        true
+    }
+}
+
+/// Newline-framed lines from a source, its own buffer kept across short
+/// reads, EINTR retried.  The lines taken are passed by a head cursor, not
+/// drained from the front each time; the buffer is compacted only when the
+/// taken part is most of it, so a backlog of many queued lines costs time
+/// linear in its bytes (daybreak2's PR B r1 #4).  A line is handed out as a
+/// range of the buffer, read with `get` and not copied; it is let go, with
+/// any compaction or release, only at the next call (the borrow checker keeps
+/// a `get` slice from outliving it).
+///
+/// Memory (daybreak2's PR B r5 ruling): a line that doesn't fit the buffer's
+/// capacity is read into READ_CHUNK pieces, and laid out once at its exact
+/// size when it ends, so a cold long line's live bytes stay within twice its
+/// length plus a few pieces, with no regrowth copies; the buffer is then kept
+/// for the requests that follow, and let go (to no capacity) only when it is
+/// all consumed and no input is readable for IDLE_RELEASE_LIMIT.  A partial
+/// line or a backlog is never let go.
+struct Lines<R: Source> {
     f: R,
     buf: Vec<u8>,
     head: usize,
@@ -280,11 +357,21 @@ struct Lines<R: Read> {
     taken: usize,
     scanned: usize,
     eof: bool,
+    /// A long line's pieces, in order, until its newline (or the end) arrives,
+    /// each of its exact size, and their total.
+    stage: Vec<Vec<u8>>,
+    staged: usize,
+    /// Large buffers let go after an idle wait (reported in _serve_stats).
+    releases: u64,
+    /// Long lines laid out from pieces (tests: a warm buffer takes none).
+    flattens: u64,
+    /// The most bytes of capacity held at once, buffer and pieces (tests).
+    peak: usize,
 }
 
-impl<R: Read> Lines<R> {
+impl<R: Source> Lines<R> {
     fn new(f: R) -> Lines<R> {
-        Lines { f, buf: Vec::new(), head: 0, taken: 0, scanned: 0, eof: false }
+        Lines { f, buf: Vec::new(), head: 0, taken: 0, scanned: 0, eof: false, stage: Vec::new(), staged: 0, releases: 0, flattens: 0, peak: 0 }
     }
 
     /// The bytes of the range `next` returned last.
@@ -292,17 +379,62 @@ impl<R: Read> Lines<R> {
         &self.buf[r]
     }
 
+    /// The buffer's capacity now (reported in _serve_stats).
+    fn capacity(&self) -> usize {
+        self.buf.capacity()
+    }
+
+    fn note_peak(&mut self) {
+        let live = self.buf.capacity() + self.staged;
+        self.peak = self.peak.max(live);
+    }
+
     fn compact(&mut self) {
         if self.head == self.buf.len() {
             self.buf.clear();
             self.head = 0;
-            if self.buf.capacity() > READ_CHUNK {
-                self.buf = Vec::new();  // (all consumed: a large line's capacity let go)
-            }
         } else if self.head >= READ_CHUNK && self.head * 2 >= self.buf.len() {
             self.buf.drain(..self.head);
             self.head = 0;
         }
+    }
+
+    /// Whether input becomes readable before IDLE_RELEASE_LIMIT passes: one
+    /// deadline, taken once (an interrupted or early wait goes on to it).
+    fn readable_soon(&mut self) -> std::io::Result<bool> {
+        if !self.f.can_wait() {
+            return Ok(false);
+        }
+        let end = self.f.now() + IDLE_RELEASE_LIMIT;
+        loop {
+            let now = self.f.now();
+            if now >= end {
+                return Ok(false);
+            }
+            match self.f.readable_within(end - now) {
+                Ok(true) => return Ok(true),
+                Ok(false) => {}
+                Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    /// Lay the staged pieces out once, at their exact total size plus one read
+    /// quantum (so that the next request of a burst, of the same size, fits
+    /// without staging again), as the buffer.
+    fn flatten(&mut self) -> std::io::Result<()> {
+        let total = self.staged.checked_add(READ_CHUNK).ok_or_else(|| std::io::Error::other("a request line too long to hold"))?;
+        let mut flat = Vec::with_capacity(total);
+        self.peak = self.peak.max(self.staged + flat.capacity());
+        for p in self.stage.drain(..) {
+            flat.extend_from_slice(&p);
+        }
+        self.staged = 0;
+        self.buf = flat;
+        self.head = 0;
+        self.flattens += 1;
+        Ok(())
     }
 
     /// The next line's range, without its newline; a last line without one
@@ -310,30 +442,74 @@ impl<R: Read> Lines<R> {
     fn next(&mut self) -> std::io::Result<Option<std::ops::Range<usize>>> {
         self.head = self.taken;
         self.compact();
+        if self.head == self.buf.len() && self.buf.capacity() > READ_CHUNK && !self.eof && !self.readable_soon()? {
+            self.buf = Vec::new();  // (idle after a burst: the large capacity let go before blocking)
+            self.releases += 1;
+        }
         loop {
-            let from = self.head + self.scanned;
-            if let Some(i) = memchr::memchr(b'\n', &self.buf[from..]) {
-                let (start, end) = (self.head, from + i);
-                self.taken = end + 1;
-                self.scanned = 0;
-                return Ok(Some(start..end));
-            }
-            self.scanned = self.buf.len() - self.head;
-            if self.eof {
-                self.taken = self.buf.len();
-                if self.head == self.buf.len() {
-                    return Ok(None);
+            if self.stage.is_empty() {
+                let from = self.head + self.scanned;
+                if let Some(i) = memchr::memchr(b'\n', &self.buf[from..]) {
+                    let (start, end) = (self.head, from + i);
+                    self.taken = end + 1;
+                    self.scanned = 0;
+                    return Ok(Some(start..end));
                 }
-                self.scanned = 0;
-                return Ok(Some(self.head..self.buf.len()));
+                self.scanned = self.buf.len() - self.head;
+                if self.eof {
+                    self.taken = self.buf.len();
+                    if self.head == self.buf.len() {
+                        return Ok(None);
+                    }
+                    self.scanned = 0;
+                    return Ok(Some(self.head..self.buf.len()));
+                }
+                self.compact();
             }
-            self.compact();
             let mut chunk = [0u8; READ_CHUNK];
-            match self.f.read(&mut chunk) {
-                Ok(0) => self.eof = true,
-                Ok(n) => self.buf.extend_from_slice(&chunk[..n]),
-                Err(e) if e.kind() == ErrorKind::Interrupted => {}
+            let n = match self.f.read(&mut chunk) {
+                Ok(0) => {
+                    self.eof = true;
+                    if !self.stage.is_empty() {
+                        self.flatten()?;  // (the last line, without a newline)
+                        self.scanned = self.buf.len();
+                    }
+                    continue;
+                }
+                Ok(n) => n,
+                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e),
+            };
+            let partial = self.buf.len() - self.head;
+            if self.stage.is_empty() && self.buf.capacity() - self.buf.len() >= n {
+                self.buf.extend_from_slice(&chunk[..n]);  // (it fits: no growth)
+            } else if self.stage.is_empty() && partial + n <= 2 * READ_CHUNK {
+                // (a short partial line, or the tail of a backlog: moved to the front, and grown within two quanta)
+                self.buf.drain(..self.head);
+                self.head = 0;
+                self.buf.extend_from_slice(&chunk[..n]);
+                self.note_peak();
+            } else {
+                // (a line longer than the buffer: the partial line becomes the first piece, the
+                // buffer is let go, and the rest is read into pieces until the newline)
+                if self.stage.is_empty() {
+                    let first = self.buf[self.head..].to_vec();
+                    self.note_peak();
+                    self.buf = Vec::new();
+                    self.head = 0;
+                    self.staged = first.len();
+                    self.stage.push(first);
+                }
+                let known = self.staged;  // (the line so far: no newline in it)
+                let piece = chunk[..n].to_vec();
+                let newline = memchr::memchr(b'\n', &piece).is_some();
+                self.staged += piece.len();
+                self.stage.push(piece);
+                self.note_peak();
+                if newline {
+                    self.flatten()?;
+                    self.scanned = known;
+                }
             }
         }
     }
@@ -503,6 +679,8 @@ fn serve_requests(
             Ok(None) => return Ok(()),
             Err(e) => return Err(PyOSError::new_err(e.to_string())),
         };
+        INPUT_CAPACITY.store(lines.capacity(), std::sync::atomic::Ordering::Relaxed);
+        INPUT_RELEASES.store(lines.releases, std::sync::atomic::Ordering::Relaxed);
         // (idle: whatever arrived while no request was admitted is handled
         // now, by handlers that find nothing running and ignore it)
         let _ = py.check_signals();
@@ -740,6 +918,82 @@ mod tests {
             Ok(n)
         }
     }
+    impl Source for Chunks {
+        fn readable_within(&mut self, _within: std::time::Duration) -> std::io::Result<bool> {
+            Ok(true)  // (everything is there already: input is always readable)
+        }
+        fn now(&self) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
+    }
+
+    /// A source on a fake clock (ms): each part arrives at its time; a read
+    /// returns what has arrived (a blocking read moves the clock to the next
+    /// arrival); `readable_within` answers from the arrivals, moves the clock
+    /// as a wait would, and is interrupted at the scripted times.  Every wait
+    /// is recorded as (start, within).
+    struct Timed {
+        parts: std::collections::VecDeque<(u64, Vec<u8>)>,
+        cur: Vec<u8>,
+        at: usize,
+        clock: u64,
+        eintr_at: Vec<u64>,
+        waits: Vec<(u64, u64)>,
+    }
+    impl Timed {
+        fn new(parts: Vec<(u64, Vec<u8>)>, eintr_at: Vec<u64>) -> Timed {
+            Timed { parts: parts.into(), cur: Vec::new(), at: 0, clock: 0, eintr_at, waits: Vec::new() }
+        }
+    }
+    impl Read for Timed {
+        fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+            if self.at == self.cur.len() {
+                match self.parts.pop_front() {
+                    None => return Ok(0),
+                    Some((t, data)) => {
+                        self.clock = self.clock.max(t);
+                        self.cur = data;
+                        self.at = 0;
+                    }
+                }
+            }
+            let n = (self.cur.len() - self.at).min(b.len()).min(READ_CHUNK);
+            b[..n].copy_from_slice(&self.cur[self.at..self.at + n]);
+            self.at += n;
+            Ok(n)
+        }
+    }
+    impl Source for Timed {
+        fn readable_within(&mut self, within: std::time::Duration) -> std::io::Result<bool> {
+            let within = within.as_millis() as u64;
+            self.waits.push((self.clock, within));
+            assert!(self.waits.len() < 1000, "waiting on and on: {:?}", &self.waits[..4]);
+            if self.at < self.cur.len() {
+                return Ok(true);
+            }
+            let deadline = self.clock + within;
+            let next = self.parts.front().map(|p| p.0).unwrap_or(0);  // (the end is readable at once)
+            if let Some(k) = self.eintr_at.iter().position(|&e| e >= self.clock && e < deadline.min(next.max(self.clock))) {
+                self.clock = self.eintr_at.remove(k);
+                return Err(std::io::Error::from(ErrorKind::Interrupted));
+            }
+            if next <= deadline {
+                self.clock = self.clock.max(next);
+                Ok(true)
+            } else {
+                self.clock = deadline;
+                Ok(false)
+            }
+        }
+        fn now(&self) -> std::time::Duration {
+            std::time::Duration::from_millis(self.clock)
+        }
+    }
+    fn line(n: usize, b: u8) -> Vec<u8> {
+        let mut v = vec![b; n];
+        v.push(b'\n');
+        v
+    }
 
     #[test]
     fn lines_backlog_and_compaction() {
@@ -779,33 +1033,83 @@ mod tests {
     }
 
     #[test]
-    fn lines_release_after_a_large_line() {
-        // (daybreak2's r4 gate: a 32 MiB line, then small ones queued behind it, in fragmented reads; once
-        // the buffer is all consumed it keeps at most READ_CHUNK of capacity, and the lines are exact)
+    fn lines_cold_growth_bounded() {
+        // (daybreak2's r5 gate (i): a 32 MiB line, then small ones queued behind it, in fragmented reads, read
+        // cold: staged in pieces and laid out once (one flatten), the live peak within twice the line plus a few
+        // read quanta, and the lines exact; the last one without a newline)
         let mut data = vec![b'x'; 32 << 20];
         data.extend_from_slice(b"\n{\"id\": 1}\n{\"id\": 2}\nlast, no newline");
         let mut lines = Lines::new(Chunks { data, at: 0, sizes: vec![READ_CHUNK, 1, 777, READ_CHUNK - 1], k: 0, eintr: false });
         let r = lines.next().unwrap().unwrap();
         assert_eq!(r.len(), 32 << 20);
         assert!(lines.get(r).iter().all(|&b| b == b'x'));
+        assert_eq!(lines.flattens, 1);
+        assert!(lines.peak <= 2 * (32 << 20) + 4 * READ_CHUNK, "a peak of {} bytes", lines.peak);
         assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 1}");
         assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 2}");
         assert_eq!(take(&mut lines).unwrap(), b"last, no newline");
         assert_eq!(take(&mut lines), None);
-        assert!(lines.buf.capacity() <= READ_CHUNK, "kept {} bytes of capacity", lines.buf.capacity());
-        // (and while more input is still to come: the large line consumed, the reader's next call lets it go)
-        let mut data = vec![b'y'; 4 << 20];
-        data.extend_from_slice(b"\n");
-        let mut lines = Lines::new(Chunks { data, at: 0, sizes: vec![READ_CHUNK], k: 0, eintr: false });
-        assert_eq!(take(&mut lines).unwrap().len(), 4 << 20);
+        // (a long line that ends with the input, no newline: staged, then laid out at the end)
+        let mut lines = Lines::new(Chunks { data: vec![b'z'; 200_000], at: 0, sizes: vec![READ_CHUNK], k: 0, eintr: false });
+        let l = take(&mut lines).unwrap();
+        assert!(l.len() == 200_000 && l.iter().all(|&b| b == b'z'));
         assert_eq!(take(&mut lines), None);
-        assert!(lines.buf.capacity() <= READ_CHUNK, "kept {} bytes of capacity", lines.buf.capacity());
+    }
+
+    #[test]
+    fn lines_burst_reuse() {
+        // (daybreak2's r5 gate (ii): the next request arrives 100 ms after the last, within the idle limit: the
+        // buffer is kept and the next long line read into it, warm (no staging); one wait, of the full limit)
+        let n = 300_000;
+        let mut lines = Lines::new(Timed::new(vec![(0, line(n, b'a')), (100, line(n, b'b'))], vec![]));
+        assert_eq!(take(&mut lines).unwrap(), vec![b'a'; n]);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'b'; n]);
+        assert_eq!((lines.flattens, lines.releases), (1, 0));
+        assert_eq!(lines.f.waits, vec![(0, 250)]);
+        // (readable exactly at the deadline: it wins, nothing is let go)
+        let mut lines = Lines::new(Timed::new(vec![(0, line(n, b'a')), (250, line(10, b'c'))], vec![]));
+        take(&mut lines).unwrap();
+        assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 10]);
+        assert_eq!(lines.releases, 0);
+    }
+
+    #[test]
+    fn lines_idle_release() {
+        // (no input for the idle limit after a long line: its capacity is let go before the reader blocks, and
+        // the next request, a second later, is read as usual)
+        let n = 300_000;
+        let mut lines = Lines::new(Timed::new(vec![(0, line(n, b'a')), (1000, line(10, b'c'))], vec![]));
+        take(&mut lines).unwrap();
+        assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 10]);
+        assert_eq!(lines.releases, 1);
+        assert!(lines.capacity() <= READ_CHUNK, "kept {} bytes", lines.capacity());
+        assert_eq!(lines.f.waits, vec![(0, 250)]);
+        // (interrupted waits go on to the one deadline, never a new one)
+        let mut lines = Lines::new(Timed::new(vec![(0, line(n, b'a')), (1000, line(10, b'c'))], vec![100, 200]));
+        take(&mut lines).unwrap();
+        assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 10]);
+        assert_eq!(lines.releases, 1);
+        assert_eq!(lines.f.waits, vec![(0, 250), (100, 150), (200, 50)]);
+    }
+
+    #[test]
+    fn lines_never_release_a_partial_line() {
+        // (the long line's newline is followed by the start of the next line: nothing is waited for or let go,
+        // and the next line, finished a second later, is exact)
+        let n = 300_000;
+        let mut first = line(n, b'a');
+        first.extend_from_slice(b"partial-");
+        let mut lines = Lines::new(Timed::new(vec![(0, first), (1000, b"start\n".to_vec())], vec![]));
+        take(&mut lines).unwrap();
+        assert_eq!(take(&mut lines).unwrap(), b"partial-start");
+        assert_eq!(lines.releases, 0);
+        assert!(lines.f.waits.is_empty(), "{:?}", lines.f.waits);
     }
 
     #[test]
     fn lines_queued_and_at_the_boundary() {
         // (lines whose framed length is READ_CHUNK - 1, READ_CHUNK and READ_CHUNK + 1, queued together and
-        // read in odd fragments: each exact, and the buffer released at the end)
+        // read in odd fragments: each exact)
         let mut data = Vec::new();
         for n in [READ_CHUNK - 2, READ_CHUNK - 1, READ_CHUNK, 0, 3] {
             data.extend(std::iter::repeat_n(b'z', n));
@@ -817,7 +1121,6 @@ mod tests {
             assert!(l.len() == n && l.iter().all(|&b| b == b'z'), "{} for {}", l.len(), n);
         }
         assert_eq!(take(&mut lines), None);
-        assert!(lines.buf.capacity() <= READ_CHUNK);
     }
 
     /// A writer taking at most `n` bytes a call, with EINTR between, then failing as told after `fail_after` bytes.

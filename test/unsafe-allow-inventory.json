@@ -333,6 +333,12 @@
   },
   {
    "file": "engine/py/src/serve.rs",
+   "item": "impl Source for Borrowed > fn readable_within",
+   "hash": "c8cbfbcc086676b18bd3196b2c5d15fd4ac36fb57a63de67626ddc2e2b6a9606",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. libc::poll on one pollfd local to the call (the borrowed input descriptor, POLLIN), with a bounded millisecond timeout; it reads and writes only that local and returns a count. No ledger object is involved."
+  },
+  {
+   "file": "engine/py/src/serve.rs",
    "item": "fn borrow_file",
    "hash": "ed59f461a97c55b0bc2f46a02dece9afa58e03c2a87c2695b5a907baac657a49",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. It wraps a descriptor (POSIX) or handle (Windows) that the caller owns in a File held in ManuallyDrop, so the File is never closed here; the request loop only reads and writes bytes through it. It touches no ledger object and is not generic over one."

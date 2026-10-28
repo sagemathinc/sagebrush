@@ -18,8 +18,16 @@ each round's B over the mean of its two A's.  Rows (time unless said):
   rss_after_32mib
               the worker's VmRSS after the 32 MiB requests, one small request
               and an idle second (bytes): what a large request leaves retained
-  rss_peak    the worker's VmHWM after the rows above (bytes)
-  rss_idle    the worker's VmRSS after them and an idle second (bytes)
+  rss_peak    the worker's VmHWM after the rows above (bytes; report-only:
+              its history is the mixed sequence's)
+  peak_cold_32mib, peak_burst_32mib
+              a fresh worker's VmHWM (bytes) after the warm-up and one 32 MiB
+              request, or three back to back (daybreak2's PR B r5 ruling: the
+              gated peak rows, each in its own worker)
+  rss_idle    the worker's VmRSS after them and an idle second (bytes;
+              report-only, as rss_after_32mib: allocator history can reverse
+              their sign, PR B r4b diag2; the gate is the semantic one in
+              test_ctrlc_native's test_input_release)
   threads     the worker's thread count, idle
   fds         the worker's open file descriptors, idle
 Each sample first runs one untimed batch of 500 no-ops (a cold worker's
@@ -27,7 +35,14 @@ first batch is not a timed one: daybreak2's PR B r3 gate 3).  The gate: each
 row's B/A median <= 1.01, B against the mean of its round's two A's, with
 every round's ratio and the spread listed (no pooling across rows).  Each
 gated row also gets median(B/A1) and median(B/A2): if they fall on opposite
-sides of 1.01, the row is INVALID (rerun), whatever its main ratio says.  threads and fds are reported (B
+sides of 1.01, the row is INVALID (rerun), whatever its main ratio says.
+
+    python ctrlc_perf.py --sensitivity PY_B PY_M OUT.json [ROUNDS]
+
+runs the same rows with B in A's place and a control M in B's (B1, M, B2):
+the control is caught when, on reply_10mb, its median over the mean of B1
+and B2 is > 1.01, with M/B1 and M/B2 on the same side (daybreak2's PR B r5
+copy-only reply control, judged against B, not A).  threads and fds are reported (B
 has its control thread and pipe by design).  One JSON document out.
 """
 
@@ -107,13 +122,29 @@ out["rss_idle"] = proc(pid, "VmRSS")
 out["threads"] = proc(pid, "Threads")
 out["fds"] = len(os.listdir("/proc/%d/fd" % pid))
 s.close()
+
+def peak(n):
+    # (a fresh worker: the same warm-up, then n 32 MiB requests back to back; its VmHWM)
+    w = S.Session()
+    w.run("1", mode="python")
+    for _ in range(500):
+        w.run("1", mode="python")
+    for _ in range(n):
+        r = w.run(big32, mode="python", timeout=120)
+        assert r["result"] == str(32 << 20), r["result"]
+    v = proc(w.proc.pid, "VmHWM")
+    w.close()
+    return v
+
+out["peak_cold_32mib"] = peak(1)
+out["peak_burst_32mib"] = peak(3)
 print(json.dumps(out))
 '''
 
 ROWS = ["noop", "noop_tput", "req_1mib", "req_32mib", "req_rc_m1", "req_rc", "req_rc_p1", "reply_10mb",
-        "rss_after_32mib", "rss_peak", "rss_idle", "threads", "fds"]
+        "peak_cold_32mib", "peak_burst_32mib", "rss_after_32mib", "rss_peak", "rss_idle", "threads", "fds"]
 GATED = ["noop", "noop_tput", "req_1mib", "req_32mib", "req_rc_m1", "req_rc", "req_rc_p1", "reply_10mb",
-         "rss_after_32mib", "rss_peak", "rss_idle"]
+         "peak_cold_32mib", "peak_burst_32mib"]
 
 
 def sample(py):
@@ -124,8 +155,12 @@ def sample(py):
 
 
 def main():
-    py_a, py_b, out_path = sys.argv[1:4]
-    rounds = int(sys.argv[4]) if len(sys.argv) > 4 else 5
+    args = sys.argv[1:]
+    sensitivity = args[:1] == ["--sensitivity"]
+    if sensitivity:
+        args = args[1:]
+    py_a, py_b, out_path = args[:3]
+    rounds = int(args[3]) if len(args) > 3 else 5
     raw = []
     for k in range(rounds):
         a1 = sample(py_a)
@@ -145,6 +180,16 @@ def main():
                      "a_median": statistics.median([v for r in raw for v in (r["a1"][row], r["a2"][row])]),
                      "b_median": statistics.median([r["b"][row] for r in raw]), "gated": row in GATED,
                      "pass": (not invalid and statistics.median(ratios) <= 1.01) if row in GATED else None}
+    if sensitivity:
+        r = rows["reply_10mb"]
+        caught = r["median"] > 1.01 and (r["median_b_a1"] > 1.01) == (r["median_b_a2"] > 1.01)
+        doc = {"mode": "sensitivity", "py_b": py_a, "py_control": py_b, "rounds": rounds, "rows": rows, "raw": raw, "caught": caught}
+        with open(out_path, "w") as f:
+            json.dump(doc, f, indent=1)
+        print("reply_10mb  control/B median %.4f [%.4f, %.4f]  control/B1 %.4f  control/B2 %.4f  B2/B1 %.4f" % (
+            r["median"], r["min"], r["max"], r["median_b_a1"], r["median_b_a2"], r["drift_a2_a1"]))
+        print("the control is " + ("CAUGHT (> 1.01, both sides agreeing)" if caught else "NOT caught"))
+        return
     doc = {"py_a": py_a, "py_b": py_b, "rounds": rounds, "rows": rows, "raw": raw,
            "ok": all(r["pass"] for r in rows.values() if r["gated"])}
     with open(out_path, "w") as f:
