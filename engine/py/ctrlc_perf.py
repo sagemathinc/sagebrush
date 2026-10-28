@@ -37,12 +37,20 @@ every round's ratio and the spread listed (no pooling across rows).  Each
 gated row also gets median(B/A1) and median(B/A2): if they fall on opposite
 sides of 1.01, the row is INVALID (rerun), whatever its main ratio says.
 
-    python ctrlc_perf.py --sensitivity PY_B PY_M OUT.json [ROUNDS]
+    python ctrlc_perf.py [--gate ROW,ROW,...] PY_A PY_B OUT.json [ROUNDS]
 
-runs the same rows with B in A's place and a control M in B's (B1, M, B2):
-the control is caught when, on reply_10mb, its median over the mean of B1
-and B2 is > 1.01, with M/B1 and M/B2 on the same side (daybreak2's PR B r5
-copy-only reply control, judged against B, not A).  threads and fds are reported (B
+--gate: only these rows are gated (each must be measured); the others are
+reported.  Exit 0 only if every gated row is valid and <= 1.01; 1 if a row
+is OVER; 2 if a row is INVALID; anything else (a failed sample, a missing
+row) is an exception, nonzero.
+
+    python ctrlc_perf.py --control ROW PY_REF PY_M OUT.json [ROUNDS]
+
+a fail-first control: the same rows with the reference in A's place and a
+control M in B's (REF1, M, REF2).  M is CAUGHT on ROW when its median over
+the mean of REF1 and REF2, and its medians over REF1 and over REF2, are all
+> 1.01 (daybreak2's PR B r5 review: Mb against A on req_1mib; the copy-only
+reply control Mcopy against B, not A, on reply_10mb).  Exit 0 only if caught.  threads and fds are reported (B
 has its control thread and pipe by design).  One JSON document out.
 """
 
@@ -161,9 +169,9 @@ def sample(py):
 
 def main():
     args = sys.argv[1:]
-    sensitivity = args[:1] == ["--sensitivity"]
-    if sensitivity:
-        args = args[1:]
+    control = None
+    if args[:1] == ["--control"]:
+        control, args = args[1], args[2:]
     gate = None
     if args[:1] == ["--gate"]:
         gate, args = args[1].split(","), args[2:]
@@ -193,16 +201,18 @@ def main():
                      "a_median": statistics.median([v for r in raw for v in (r["a1"][row], r["a2"][row])]),
                      "b_median": statistics.median([r["b"][row] for r in raw]), "gated": row in gated,
                      "pass": (not invalid and statistics.median(ratios) <= 1.01) if row in gated else None}
-    if sensitivity:
-        r = rows["reply_10mb"]
-        caught = r["median"] > 1.01 and (r["median_b_a1"] > 1.01) == (r["median_b_a2"] > 1.01)
-        doc = {"mode": "sensitivity", "py_b": py_a, "py_control": py_b, "rounds": rounds, "rows": rows, "raw": raw, "caught": caught}
+    if control is not None:
+        if control not in rows:
+            raise SystemExit("the control's row %s wasn't measured" % control)
+        r = rows[control]
+        caught = r["median"] > 1.01 and r["median_b_a1"] > 1.01 and r["median_b_a2"] > 1.01
+        doc = {"mode": "control", "row": control, "py_ref": py_a, "py_control": py_b, "rounds": rounds, "rows": rows, "raw": raw, "caught": caught}
         with open(out_path, "w") as f:
             json.dump(doc, f, indent=1)
-        print("reply_10mb  control/B median %.4f [%.4f, %.4f]  control/B1 %.4f  control/B2 %.4f  B2/B1 %.4f" % (
-            r["median"], r["min"], r["max"], r["median_b_a1"], r["median_b_a2"], r["drift_a2_a1"]))
-        print("the control is " + ("CAUGHT (> 1.01, both sides agreeing)" if caught else "NOT caught"))
-        return
+        print("%s  control/ref median %.4f [%.4f, %.4f]  control/ref1 %.4f  control/ref2 %.4f  ref2/ref1 %.4f" % (
+            control, r["median"], r["min"], r["max"], r["median_b_a1"], r["median_b_a2"], r["drift_a2_a1"]))
+        print("CONTROL " + ("CAUGHT (all three > 1.01)" if caught else "NOT CAUGHT"))
+        sys.exit(0 if caught else 1)
     doc = {"py_a": py_a, "py_b": py_b, "rounds": rounds, "rows": rows, "raw": raw,
            "ok": all(r["pass"] for r in rows.values() if r["gated"])}
     with open(out_path, "w") as f:
@@ -212,7 +222,10 @@ def main():
         print("%-15s B/A median %.4f [%.4f, %.4f]  B/A1 %.4f  B/A2 %.4f  A2/A1 %.4f  A %s  B %s  %s" % (
             row, r["median"], r["min"], r["max"], r["median_b_a1"], r["median_b_a2"], r["drift_a2_a1"], r["a_median"], r["b_median"],
             "" if r["pass"] is None else ("INVALID (B/A1 and B/A2 on opposite sides of 1.01: rerun)" if r["invalid"] else "ok" if r["pass"] else "OVER 1.01")))
-    print("ok" if doc["ok"] else "over the gate")
+    invalid = [row for row in gated if rows[row]["invalid"]]
+    over = [row for row in gated if not rows[row]["invalid"] and not rows[row]["pass"]]
+    print("GATE " + ("PASS: %d rows" % len(gated) if doc["ok"] else "FAIL: over %s, invalid %s" % (over, invalid)))
+    sys.exit(0 if doc["ok"] else 1 if over else 2)
 
 
 if __name__ == "__main__":

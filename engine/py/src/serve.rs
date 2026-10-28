@@ -261,8 +261,8 @@ impl Source for Borrowed {
     #[allow(unsafe_code)]
     fn readable_within(&mut self, within: std::time::Duration) -> std::io::Result<bool> {
         use std::os::unix::io::AsRawFd;
-        // (rounded up to a whole millisecond, so a wait never returns before its deadline as a 0 ms poll)
-        let ms = within.as_micros().div_ceil(1000).min(i32::MAX as u128) as i32;
+        // (rounded up to a whole millisecond from the full precision, so a wait never ends before its deadline)
+        let ms = within.as_nanos().div_ceil(1_000_000).min(i32::MAX as u128) as i32;
         let mut p = libc::pollfd { fd: self.0.as_raw_fd(), events: libc::POLLIN, revents: 0 };
         let r = unsafe { libc::poll(&mut p, 1, ms) };
         if r < 0 {
@@ -361,8 +361,10 @@ struct Lines<R: Source> {
     taken: usize,
     scanned: usize,
     eof: bool,
-    /// A long line's pieces, in order, until its newline (or the end) arrives,
-    /// each of its exact size, and their total.
+    /// A long line's pieces, in order, until its newline (or the end) arrives:
+    /// each of READ_CHUNK capacity, filled before the next is begun (short
+    /// reads coalesce, so a line of L bytes takes at most L/READ_CHUNK + 1
+    /// pieces), and the bytes in them.
     stage: Vec<Vec<u8>>,
     staged: usize,
     /// Large buffers let go after an idle wait (reported in _serve_stats).
@@ -383,14 +385,32 @@ impl<R: Source> Lines<R> {
         &self.buf[r]
     }
 
-    /// The buffer's capacity now (reported in _serve_stats).
+    /// Every byte of input storage held now: the buffer's capacity, the
+    /// pieces' capacities and the piece list's own (reported in _serve_stats).
     fn capacity(&self) -> usize {
         self.buf.capacity()
+            + self.stage.iter().map(Vec::capacity).sum::<usize>()
+            + self.stage.capacity() * std::mem::size_of::<Vec<u8>>()
     }
 
     fn note_peak(&mut self) {
-        let live = self.buf.capacity() + self.staged;
-        self.peak = self.peak.max(live);
+        self.peak = self.peak.max(self.capacity());
+    }
+
+    /// Append to the staged line, filling the last piece before beginning
+    /// another (each of READ_CHUNK capacity).
+    fn stage_bytes(&mut self, mut bytes: &[u8]) {
+        while !bytes.is_empty() {
+            if self.stage.last().is_none_or(|p| p.len() == READ_CHUNK) {
+                self.stage.push(Vec::with_capacity(READ_CHUNK));
+                self.note_peak();
+            }
+            let last = self.stage.last_mut().expect("a piece");
+            let k = (READ_CHUNK - last.len()).min(bytes.len());
+            last.extend_from_slice(&bytes[..k]);
+            self.staged += k;
+            bytes = &bytes[k..];
+        }
     }
 
     fn compact(&mut self) {
@@ -413,6 +433,15 @@ impl<R: Source> Lines<R> {
         loop {
             let now = self.f.now();
             if now >= end {
+                // (the deadline: one last zero-time probe, so input readable at the boundary still wins; an
+                // interrupted probe is tried once more, then the deadline stands: no spin)
+                for _ in 0..2 {
+                    match self.f.readable_within(std::time::Duration::ZERO) {
+                        Ok(r) => return Ok(r),
+                        Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                        Err(e) => return Err(e),
+                    }
+                }
                 return Ok(false);
             }
             match self.f.readable_within(end - now) {
@@ -430,10 +459,10 @@ impl<R: Source> Lines<R> {
     fn flatten(&mut self) -> std::io::Result<()> {
         let total = self.staged.checked_add(READ_CHUNK).ok_or_else(|| std::io::Error::other("a request line too long to hold"))?;
         let mut flat = Vec::with_capacity(total);
-        self.peak = self.peak.max(self.staged + flat.capacity());
-        for p in self.stage.drain(..) {
+        self.peak = self.peak.max(self.capacity() + flat.capacity());
+        for p in std::mem::take(&mut self.stage) {
             flat.extend_from_slice(&p);
-        }
+        }  // (the pieces and the piece list itself are let go here, all of them)
         self.staged = 0;
         self.buf = flat;
         self.head = 0;
@@ -497,18 +526,17 @@ impl<R: Source> Lines<R> {
                 // (a line longer than the buffer: the partial line becomes the first piece, the
                 // buffer is let go, and the rest is read into pieces until the newline)
                 if self.stage.is_empty() {
-                    let first = self.buf[self.head..].to_vec();
+                    let old = std::mem::take(&mut self.buf);
+                    let h = self.head;
+                    self.stage_bytes(&old[h..]);
                     self.note_peak();
-                    self.buf = Vec::new();
+                    self.peak = self.peak.max(self.capacity() + old.capacity());  // (both, until the old buffer goes)
+                    drop(old);
                     self.head = 0;
-                    self.staged = first.len();
-                    self.stage.push(first);
                 }
                 let known = self.staged;  // (the line so far: no newline in it)
-                let piece = chunk[..n].to_vec();
-                let newline = memchr::memchr(b'\n', &piece).is_some();
-                self.staged += piece.len();
-                self.stage.push(piece);
+                let newline = memchr::memchr(b'\n', &chunk[..n]).is_some();
+                self.stage_bytes(&chunk[..n]);
                 self.note_peak();
                 if newline {
                     self.flatten()?;
@@ -856,7 +884,7 @@ mod tests {
     use super::*;
 
     /// The next line's bytes, copied (the tests' view of `next` and `get`).
-    fn take<R: Read>(lines: &mut Lines<R>) -> Option<Vec<u8>> {
+    fn take<R: Source>(lines: &mut Lines<R>) -> Option<Vec<u8>> {
         lines.next().unwrap().map(|r| lines.get(r).to_vec())
     }
 
@@ -977,7 +1005,8 @@ mod tests {
             }
             let deadline = self.clock + within;
             let next = self.parts.front().map(|p| p.0).unwrap_or(0);  // (the end is readable at once)
-            if let Some(k) = self.eintr_at.iter().position(|&e| e >= self.clock && e < deadline.min(next.max(self.clock))) {
+            // (an interrupt may land anywhere up to the deadline, the deadline itself included)
+            if let Some(k) = self.eintr_at.iter().position(|&e| e >= self.clock && e <= deadline.min(next.max(self.clock))) {
                 self.clock = self.eintr_at.remove(k);
                 return Err(std::io::Error::from(ErrorKind::Interrupted));
             }
@@ -1087,13 +1116,66 @@ mod tests {
         assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 10]);
         assert_eq!(lines.releases, 1);
         assert!(lines.capacity() <= READ_CHUNK, "kept {} bytes", lines.capacity());
-        assert_eq!(lines.f.waits, vec![(0, 250)]);
+        assert_eq!(lines.f.waits, vec![(0, 250), (250, 0)]);  // (the wait, then the final zero-time probe)
         // (interrupted waits go on to the one deadline, never a new one)
         let mut lines = Lines::new(Timed::new(vec![(0, line(n, b'a')), (1000, line(10, b'c'))], vec![100, 200]));
         take(&mut lines).unwrap();
         assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 10]);
         assert_eq!(lines.releases, 1);
-        assert_eq!(lines.f.waits, vec![(0, 250), (100, 150), (200, 50)]);
+        assert_eq!(lines.f.waits, vec![(0, 250), (100, 150), (200, 50), (250, 0)]);
+    }
+
+    #[test]
+    fn lines_interrupted_at_the_deadline() {
+        // (astra's R5-3: an interrupt exactly at the deadline, with input readable then: the final zero-time probe
+        // finds it, and the buffer is kept; with no input then, the deadline stands and the buffer is let go)
+        let n = 300_000;
+        let mut lines = Lines::new(Timed::new(vec![(0, line(n, b'a')), (250, line(10, b'c'))], vec![250]));
+        take(&mut lines).unwrap();
+        assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 10]);
+        assert_eq!(lines.releases, 0);
+        assert_eq!(lines.f.waits, vec![(0, 250), (250, 0)]);
+        let mut lines = Lines::new(Timed::new(vec![(0, line(n, b'a')), (1000, line(10, b'c'))], vec![250]));
+        take(&mut lines).unwrap();
+        assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 10]);
+        assert_eq!(lines.releases, 1);
+        assert_eq!(lines.f.waits, vec![(0, 250), (250, 0)]);
+    }
+
+    /// Windows' policy (option (i) alone): a source that never waits.
+    struct NoWait(Chunks);
+    impl Read for NoWait {
+        fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+            self.0.read(b)
+        }
+    }
+    impl Source for NoWait {
+        fn readable_within(&mut self, _within: std::time::Duration) -> std::io::Result<bool> {
+            Ok(false)
+        }
+        fn now(&self) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
+        fn can_wait(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn lines_one_byte_reads() {
+        // (astra's R5-2: a 300 kB line read one byte at a time, then a small one: short reads coalesce into
+        // read-quantum pieces, so every input allocation together, the piece list included, stays within twice the
+        // line plus a few quanta; and on Windows' policy, all of it is let go once the line is consumed)
+        let n = 300_000;
+        let mut data = line(n, b'a');
+        data.extend_from_slice(&line(10, b'c'));
+        let mut lines = Lines::new(NoWait(Chunks { data, at: 0, sizes: vec![1], k: 0, eintr: false }));
+        assert_eq!(take(&mut lines).unwrap(), vec![b'a'; n]);
+        assert!(lines.peak <= 2 * n + 4 * READ_CHUNK, "a peak of {} bytes for a {} byte line", lines.peak, n);
+        assert!(lines.stage.capacity() == 0 && lines.stage.is_empty(), "the piece list kept: {}", lines.stage.capacity());
+        assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 10]);
+        assert_eq!(lines.releases, 1);
+        assert!(lines.capacity() <= READ_CHUNK, "kept {} bytes of input storage", lines.capacity());
     }
 
     #[test]
