@@ -873,6 +873,15 @@ fn test_stopped() -> (String, u64) {
     (sagebrush_interrupt::hooks::stopped_in().to_string(), sagebrush_interrupt::hooks::stopped_at_ns())
 }
 
+/// Tests only: the first and last traced check's times on the hooks'
+/// clock (0, 0 before any): with `_test_now_ns` marks around a call, its
+/// leading and trailing work, which no two engine checks enclose.
+#[cfg(feature = "test-hooks")]
+#[pyfunction(name = "_test_first_last")]
+fn test_first_last() -> (u64, u64) {
+    sagebrush_interrupt::hooks::first_last_ns()
+}
+
 #[cfg(feature = "test-hooks")]
 #[pyfunction(name = "_test_now_ns")]
 fn test_now_ns() -> u64 {
@@ -893,6 +902,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wrap_pyfunction!(test_arm_at, m)?,
         wrap_pyfunction!(test_stopped, m)?,
         wrap_pyfunction!(test_now_ns, m)?,
+        wrap_pyfunction!(test_first_last, m)?,
     ] {
         m.add_function(f)?;
     }

@@ -152,12 +152,14 @@ fn mat_mul_unpolled_intervals_at_size() {
             };
             let (full, lead, trail, gap) = traced(&req);
             hooks::reset();
-            // (past 250 ms these are the named temporary exception, labelled,
-            // never a silent pass: FU-MM-T, William Oct 27 2026, until PR T)
-            let over = lead >= 250.0 || trail >= 250.0 || gap >= 250.0;
+            // (only the identified leading and trailing serde intervals may
+            // carry the named temporary exception, labelled: FU-MM-T, William
+            // Oct 27 2026, until PR T; the longest gap between two engine
+            // checks stays strict)
+            let waived: Vec<&str> = [("leading", lead), ("trailing", trail)].iter().filter(|x| x.1 >= 250.0).map(|x| x.0).collect();
             println!(
                 "{}{} {}: request {:.1} MB, reply {:.1} MB; leading {:.1} ms, trailing {:.1} ms, longest gap {:.1} ms",
-                if over { "WAIVED FU-MM-T: " } else { "" },
+                if waived.is_empty() { String::new() } else { format!("WAIVED FU-MM-T ({} serde interval past 250 ms): ", waived.join(" and ")) },
                 label,
                 wire,
                 req.len() as f64 / 1e6,
@@ -166,6 +168,7 @@ fn mat_mul_unpolled_intervals_at_size() {
                 trail,
                 gap
             );
+            assert!(gap < 250.0, "{} {}: {:.1} ms between two engine checks: strict, not waived", label, wire, gap);
         }
     }
 }

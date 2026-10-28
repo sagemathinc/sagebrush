@@ -1,29 +1,45 @@
 """Stop during dense integer products through the public route (CPython),
 within the 250 ms Stop bound (Unix; skipped on Windows).
 
-  python engine/py/test_interrupt_matmul.py [--set big|small] [--quick]      real SIGINT
-  python engine/py/test_interrupt_matmul.py --targeted [--set big|small]     a test-hooks wheel
+  python engine/py/test_interrupt_matmul.py [--set small|big] [--quick] [--raw FILE]
+  python engine/py/test_interrupt_matmul.py --reclassify FILE [--set small|big]
 
-Real SIGINT (any wheel): for each shape (1 x K x 1, 1 x K x M, square, wide,
-output-heavy, BigInt 300-digit) a child first runs the product
-uninterrupted and reports its time T; a second child gets SIGINT at T / 2.
-Checked: KeyboardInterrupt within 250 ms of the signal (monotonic clocks,
-every wait bounded, a timed-out child killed), the child's exit status 0,
-and the same interpreter's next product exactly "11".  T / 2 is scheduling
-evidence, not proof of the phase the Stop landed in.
+For each shape of the set, one RECORD (written to --raw as a JSON line, so
+the verdicts below can be recomputed from frozen data by --reclassify):
+- transport: the uninterrupted call's own intervals: the request's
+  json.dumps, the native call, the reply's json.loads, and (with a test-hooks
+  wheel) the native call's leading work (call entry to the first engine
+  check: serde's parse) and trailing work (the last check to the return: the
+  reply's serialization);
+- targeted (test-hooks wheel): for each engine phase (parse, zmat-scan, the
+  dot, reply), a Stop armed at that phase's median check, its latency from the
+  Stop's request to the KeyboardInterrupt in Python (the hooks' clock), the
+  phase it landed in, the next product, the ledger's outstanding bytes;
+- sigint: a child's uninterrupted time T, then a second child's real SIGINT
+  at T / 2: the time to its KeyboardInterrupt, its exit status, its next
+  product (monotonic clocks, every wait bounded, timed-out children killed).
 
-Targeted (a wheel built with the test-hooks feature): for each shape and
-each phase (parse, zmat-scan, the dot, reply), the call is traced, a Stop is
-armed at that phase's median check, and the public catch's latency is read
-on the hooks' clock: from the Stop's request to the KeyboardInterrupt in
-Python.  Checked: it landed in that phase, latency under 250 ms, the next
-product exactly "11", the ledger's outstanding bytes back to their value
-before.  Also printed: the Python-side transport's own intervals (the
-request's json.dumps, the native call, the reply's json.loads), which no
-engine check encloses."""
+The verdicts (classify(), a pure function of a record):
+- every targeted row is STRICT in every set: interrupted, landed in its
+  phase, latency < 250 ms, next product exactly "11", outstanding back;
+- a sigint row with T < 0.5 s is n/a (a signal at T/2 is no scheduling
+  evidence), never a pass;
+- a sigint row passes when correct with latency < 250 ms.  Past 250 ms it
+  is WAIVED only in the big set, only when the same record shows an
+  authorized uninterruptible interval of at least 250 ms (json.dumps,
+  json.loads, the native leading or trailing work) and every targeted row of
+  that record is strict-green; the waiver names the interval and both
+  measurements.  Otherwise it FAILS.
+
+The waiver: William, Oct 27 2026 ~5:45 PM PDT (card pr241-stop250-interim),
+"Yes, land #241 now with the named temporary exception": FU-MM-T, single ZZ
+mat_mul calls large enough that one uninterruptible serde parse/serialize,
+Python json dumps/loads or unwind drop exceeds 250 ms, until the tiling PR T
+lands, which must retire it.  Nothing else is waived."""
 
 import json
 import queue
+import re
 import signal
 import subprocess
 import sys
@@ -70,19 +86,29 @@ except KeyboardInterrupt:
 print("then: " + nxt(), flush=True)
 '''
 
-TARGETED_CHILD = COMMON + r'''
+RECORD_CHILD = COMMON + r'''
+hooks = hasattr(_native, "_test_arm_at")
 dot = "zmat-big-dot" if shape.startswith(("big", "huge")) else "zmat-dot"
 # (the phases with at least 2^16 units of work at these shapes: the
 # output-heavy product's inputs are n entries each, below one poll interval)
 phases = ([dot] if shape == "output-heavy" else ["parse", "zmat-scan", dot]) + (["reply"] if shape in ("square", "wide", "output-heavy", "big-square") else [])
 base = _native.ledger_snapshot()["outstanding"]
-req = json.dumps(dict(fn="mat_mul", a=a, b=b, wire="csv"))
-t0 = time.monotonic(); req2 = json.dumps(dict(fn="mat_mul", a=a, b=b, wire="csv")); t1 = time.monotonic()
-_native._test_trace(); rep = _native.call(req2); t2 = time.monotonic()
-json.loads(rep); t3 = time.monotonic()
-print(json.dumps(dict(transport=dict(request_mb=len(req) / 1e6, reply_mb=len(rep) / 1e6, dumps_ms=(t1 - t0) * 1e3, native_ms=(t2 - t1) * 1e3, loads_ms=(t3 - t2) * 1e3))), flush=True)
-del rep, req2
-for ph in phases:
+t0 = time.monotonic(); req = json.dumps(dict(fn="mat_mul", a=a, b=b, wire="csv")); t1 = time.monotonic()
+if hooks:
+    _native._test_trace()
+    h0 = _native._test_now_ns()
+rep = _native.call(req)
+t2 = time.monotonic()
+tr = dict(request_mb=len(req) / 1e6, reply_mb=len(rep) / 1e6, dumps_ms=(t1 - t0) * 1e3, native_ms=(t2 - t1) * 1e3)
+if hooks:
+    h1 = _native._test_now_ns()
+    first, last = _native._test_first_last()
+    tr["lead_ms"] = ((first or h1) - h0) / 1e6
+    tr["trail_ms"] = (h1 - last) / 1e6 if last else 0.0
+json.loads(rep); tr["loads_ms"] = (time.monotonic() - t2) * 1e3
+print(json.dumps(dict(transport=tr)), flush=True)
+del rep, req
+for ph in (phases if hooks else []):
     _native._test_trace()
     call("mat_mul", a=a, b=b, wire="csv")
     idx = _native._test_traced(ph)
@@ -98,31 +124,48 @@ for ph in phases:
             row.update(outcome="interrupted", landed=landed, latency_ms=(now - at) / 1e6)
         row["then"] = nxt()
         row["outstanding_back"] = _native.ledger_snapshot()["outstanding"] == base
-    print(json.dumps(row), flush=True)
+    print(json.dumps(dict(targeted=row)), flush=True)
 print("end", flush=True)
 '''
 
-# The shape sets (--set NAME, default big): (shape, size).
-# - big: about 1-4 s natively on a VM, with requests or replies of 25-640 MB:
-#   the FU-MM-T evidence (one call's serde/JSON/drop intervals grow with its bytes).
-# - small: every request and reply under about 8 MB (T's future per-call budget),
-#   for #241's own Stop-250 claim; real SIGINT at T/2 only where T >= 0.5 s.
 SETS = {
+    # big: about 1-4 s natively on a VM, requests or replies of 25-640 MB (the FU-MM-T evidence)
     "big": [("1xKx1", 8_000_000), ("1xKxM", 600_000), ("square", 1400), ("wide", 9000), ("output-heavy", 3000), ("big", 400_000)],
+    # small: every request and reply under about 8 MB (T's future per-call budget): #241's own claim
     "small": [("1xKx1", 400_000), ("1xKxM", 20_000), ("square", 630), ("wide", 500), ("output-heavy", 500), ("big", 12_000), ("big-1xKxM", 800), ("big-square", 100), ("huge", 600)],
 }
-SET = sys.argv[sys.argv.index("--set") + 1] if "--set" in sys.argv else "big"
-SHAPES = SETS[SET]
-# The named temporary exception (never a silent pass): in the big set only, a
-# row whose ONLY failure is latency past 250 ms is reported WAIVED, with its
-# measurement.  William, Oct 27 ~5:45 PM PDT (card pr241-stop250-interim):
-# "Yes, land #241 now with the named temporary exception": FU-MM-T, single
-# ZZ mat_mul calls large enough that one uninterruptible serde parse /
-# serialize, Python json dumps / loads or unwind drop exceeds 250 ms, until
-# the tiling PR T lands, which must retire it.  The small set is strict.
-WAIVER = "WAIVED FU-MM-T (William, Oct 27 2026: land #241 with the named temporary exception; retired by tiling PR T)"
-WAIVABLE = SET == "big"
 WAIT = 600.0  # the longest any child may take (a hang guard, not a limit of the computation)
+WAIVER = "WAIVED FU-MM-T (William, Oct 27 2026: land #241 with the named temporary exception; retired by tiling PR T)"
+AUTHORIZED = ["dumps_ms", "loads_ms", "lead_ms", "trail_ms"]  # the uninterruptible intervals FU-MM-T names
+
+
+def targeted_ok(r):
+    return r.get("outcome") == "interrupted" and r.get("landed") == r["phase"] and r.get("latency_ms", 1e9) < 250 and r.get("then") == '"11"' and r.get("outstanding_back") is True
+
+
+def classify(rec, set_name):
+    """[(verdict, text)] for one record; verdict in PASS, FAIL, WAIVED, N/A."""
+    out = []
+    targeted = rec.get("targeted") or []
+    for r in targeted:
+        out.append(("PASS" if targeted_ok(r) else "FAIL", "targeted " + json.dumps(r)))
+    s = rec.get("sigint")
+    if s is None:
+        return out
+    if s.get("error"):
+        return out + [("FAIL", "sigint " + s["error"])]
+    what = "T=%.2f s, KeyboardInterrupt %.0f ms after SIGINT, rc=%s, %s" % (s["T"], s["dt_ms"], s["rc"], s.get("lines", "")[:120])
+    if s["T"] < 0.5:
+        return out + [("N/A", "sigint (T < 0.5 s: no scheduling evidence) " + what)]
+    correct = s.get("first") == "interrupted" and s["rc"] == 0 and s.get("last") == 'then: "11"'
+    if correct and s["dt_ms"] < 250:
+        return out + [("PASS", "sigint " + what)]
+    tr = rec.get("transport") or {}
+    worst = max(((tr.get(k) or 0.0), k) for k in AUTHORIZED)
+    if correct and set_name == "big" and worst[0] >= 250 and targeted and all(targeted_ok(r) for r in targeted):
+        return out + [("WAIVED", "sigint %s: authorized interval %s = %.0f ms >= 250 in this record, every targeted row strict-green; %s" % (WAIVER, worst[1], worst[0], what))]
+    why = "incorrect" if not correct else ("small set: strict" if set_name != "big" else "no authorized interval >= 250 ms with strict-green targeted rows (worst %s = %.0f ms)" % (worst[1], worst[0]))
+    return out + [("FAIL", "sigint (%s) %s" % (why, what))]
 
 
 def spawn(code, shape, n):
@@ -168,19 +211,37 @@ def finish(c, timeout=60.0):
     return "".join(out), err + ("" if rc is not None else "\n(killed after %.0f s)" % timeout), rc
 
 
-def sigint_case(shape, n):
+def record_part(shape, n):
+    c = spawn(RECORD_CHILD, shape, n)
+    rec, deadline, line = dict(targeted=[]), time.monotonic() + WAIT, None
+    while True:
+        line = readline(c, deadline)
+        if line is None or line == "" or line == "end\n":
+            break
+        d = json.loads(line)
+        if "transport" in d:
+            rec["transport"] = d["transport"]
+        else:
+            rec["targeted"].append(d["targeted"])
+    out, err, rc = finish(c, 30)
+    if rc != 0 or line != "end\n":
+        rec["record_error"] = "rc=%s, %s" % (rc, err.strip()[-300:])
+    return rec
+
+
+def sigint_part(shape, n):
     c = spawn(SIGINT_CHILD, shape, n)
     if readline(c, time.monotonic() + WAIT) != "ready\n":
         out, err, _ = finish(c, 5)
-        return False, "no ready line: " + (out + err)[-300:]
+        return dict(error="no ready line: " + (out + err)[-300:])
     out, err, rc = finish(c, WAIT)
     if rc != 0 or not out.startswith("done "):
-        return False, "calibration rc=%s: %s" % (rc, (out + err)[-300:])
+        return dict(error="calibration rc=%s: %s" % (rc, (out + err)[-300:]))
     T = float(out.split()[1])
     c = spawn(SIGINT_CHILD, shape, n)
     if readline(c, time.monotonic() + WAIT) != "ready\n":
         out, err, _ = finish(c, 5)
-        return False, "no ready line: " + (out + err)[-300:]
+        return dict(error="no ready line: " + (out + err)[-300:])
     time.sleep(T / 2)
     ts = time.monotonic()
     c.send_signal(signal.SIGINT)
@@ -188,60 +249,75 @@ def sigint_case(shape, n):
     dt = time.monotonic() - ts
     out, err, rc = finish(c, 60)
     lines = ((first or "") + out).splitlines()
-    if T < 0.5:
-        # (too short for a signal at T / 2 to be scheduling evidence: reported, not judged)
-        return True, "T=%.2f s: too short for a T/2 SIGINT row (n/a); KeyboardInterrupt %.0f ms, rc=%s" % (T, dt * 1000, rc)
-    correct = first == "interrupted\n" and rc == 0 and lines[-1:] == ['then: "11"']
-    what = "T=%.2f s, KeyboardInterrupt %.0f ms after SIGINT, rc=%s, %s" % (T, dt * 1000, rc, " | ".join(lines)[:120] + err.strip()[-200:])
-    if correct and dt >= 0.25 and WAIVABLE:
-        return True, WAIVER + ": " + what
-    return correct and dt < 0.25, what
+    return dict(T=T, dt_ms=dt * 1000, rc=rc, first=(first or "").strip(), last=lines[-1] if lines else "", lines=" | ".join(lines) + err.strip()[-200:])
 
 
-def targeted_case(shape, n):
-    c = spawn(TARGETED_CHILD, shape, n)
-    rows, deadline = [], time.monotonic() + WAIT
-    while True:
-        line = readline(c, deadline)
-        if line is None or line == "" or line == "end\n":
-            break
-        rows.append(json.loads(line))
-    out, err, rc = finish(c, 30)
-    bad = [] if rc == 0 and line == "end\n" else ["rc=%s, %s" % (rc, err.strip()[-300:])]
-    for r in rows:
-        if "transport" in r:
+def report(recs, set_name):
+    fails = 0
+    for rec in recs:
+        if rec.get("record_error"):
+            print("%-12s n=%-9d FAIL record: %s" % (rec["shape"], rec["n"], rec["record_error"]))
+            fails += 1
+        if rec.get("transport"):
+            print("%-12s n=%-9d transport %s" % (rec["shape"], rec["n"], json.dumps(rec["transport"])))
+        for verdict, text in classify(rec, set_name):
+            print("%-12s n=%-9d %-6s %s" % (rec["shape"], rec["n"], verdict, text))
+            fails += verdict == "FAIL"
+    return fails
+
+
+def from_r3_logs(targeted_log, sigint_log):
+    """Records from r3's two logs (bab9c8c5's harness printed them as text):
+    the targeted log's transport and phase rows (no leading/trailing split:
+    that wheel had no _test_first_last) and the SIGINT log's lines."""
+    recs = {}
+    for line in open(targeted_log):
+        m = re.match(r"^(\S+)\s+n=(\d+)\s+(\{.*\})\s*$", line)
+        if not m:
             continue
-        correct = r.get("outcome") == "interrupted" and r.get("landed") == r["phase"] and r.get("then") == '"11"' and r.get("outstanding_back")
-        if correct and r.get("latency_ms", 1e9) >= 250 and WAIVABLE:
-            r["waiver"] = WAIVER
-        elif not (correct and r.get("latency_ms", 1e9) < 250):
-            bad.append(json.dumps(r))
-    return not bad, rows, bad
+        rec = recs.setdefault((m[1], int(m[2])), dict(shape=m[1], n=int(m[2]), targeted=[]))
+        d = json.loads(m[3])
+        if "transport" in d:
+            rec["transport"] = d["transport"]
+        else:
+            rec["targeted"].append({k: v for k, v in d.items() if k != "waiver"})
+    for line in open(sigint_log):
+        m = re.match(r"^(\S+)\s+n=(\d+)\s+\S+\s+(?:.*?: )?T=([\d.]+) s(?:: too short.*?)?[,;] KeyboardInterrupt (\d+) ms(?: after SIGINT)?, rc=(\S+?),? ?(.*)$", line.rstrip("\n"))
+        if not m:
+            continue
+        rec = recs.setdefault((m[1], int(m[2])), dict(shape=m[1], n=int(m[2]), targeted=[]))
+        rest = m[6]
+        parts = [p.strip() for p in rest.split("|")]
+        rec["sigint"] = dict(T=float(m[3]), dt_ms=float(m[4]), rc=None if m[5] == "None" else int(m[5]), first=parts[0] if parts else "", last=parts[-1] if parts else "", lines=rest)
+    return list(recs.values())
 
 
-if sys.platform == "win32":
-    print("skipped on Windows")
-    sys.exit(0)
-quick = "--quick" in sys.argv
-targeted = "--targeted" in sys.argv
-if targeted:
-    from sagebrush import _native
-
-    if not hasattr(_native, "_test_arm_at"):
-        print("--targeted needs a wheel built with the test-hooks feature")
-        sys.exit(2)
-fails = 0
-for shape, n in SHAPES:
-    if quick:
-        n = n // 2 if shape in ("1xKx1", "1xKxM", "big", "big-1xKxM", "huge") else int(n / 1.26)
-    if targeted:
-        ok, rows, bad = targeted_case(shape, n)
-        for r in rows:
-            print("%-12s n=%-9d %s" % (shape, n, json.dumps(r)))
-        for b in bad:
-            print("%-12s FAIL %s" % (shape, b))
-    else:
-        ok, what = sigint_case(shape, n)
-        print("%-12s n=%-9d %s  %s" % (shape, n, "ok" if ok else "FAIL", what))
-    fails += not ok
-sys.exit(1 if fails else 0)
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    set_name = args[args.index("--set") + 1] if "--set" in args else "big"
+    if "--reclassify" in args:
+        recs = [json.loads(l) for l in open(args[args.index("--reclassify") + 1]) if l.strip()]
+        sys.exit(1 if report(recs, set_name) else 0)
+    if "--from-r3-logs" in args:
+        i = args.index("--from-r3-logs")
+        recs = from_r3_logs(args[i + 1], args[i + 2])
+        for r in recs:
+            print(json.dumps(r))
+        sys.exit(0)
+    if sys.platform == "win32":
+        print("skipped on Windows")
+        sys.exit(0)
+    quick = "--quick" in args
+    raw = open(args[args.index("--raw") + 1], "w") if "--raw" in args else None
+    recs = []
+    for shape, n in SETS[set_name]:
+        if quick:
+            n = n // 2 if shape in ("1xKx1", "1xKxM", "big", "big-1xKxM", "huge") else int(n / 1.26)
+        rec = dict(shape=shape, n=n, set=set_name)
+        rec.update(record_part(shape, n))
+        rec["sigint"] = sigint_part(shape, n)
+        recs.append(rec)
+        if raw:
+            raw.write(json.dumps(rec) + "\n")
+            raw.flush()
+    sys.exit(1 if report(recs, set_name) else 0)
