@@ -174,8 +174,13 @@ def targeted_ok(r):
     return r.get("outcome") == "interrupted" and r.get("landed") == r["phase"] and r.get("latency_ms", 1e9) < 250 and r.get("then") == '"11"' and r.get("outstanding_back") is True
 
 
-def classify(rec, set_name):
-    """[(verdict, text)] for one record; verdict in PASS, FAIL, WAIVED, N/A."""
+def classify(rec):
+    """[(verdict, text)] for one record; verdict in PASS, FAIL, WAIVED, N/A.
+    A pure function of the record: the set (and so waiver eligibility) is the
+    record's own required "set" field, never a command-line choice."""
+    set_name = rec.get("set")
+    if set_name not in SETS:
+        return [("FAIL", "record without a known set (%r): no verdict can be given" % (set_name,))]
     out = []
     targeted = rec.get("targeted") or []
     ph = rec.get("phases")
@@ -196,7 +201,7 @@ def classify(rec, set_name):
             out.append(("PASS" if targeted_ok(r) else "FAIL", "targeted " + json.dumps(r)))
     s = rec.get("sigint")
     if s is None:
-        return out
+        return out + [("FAIL", "sigint: no sigint evidence in this record")]
     if s.get("error"):
         return out + [("FAIL", "sigint " + s["error"])]
     if s.get("sent") is False:
@@ -208,7 +213,7 @@ def classify(rec, set_name):
     tr = rec.get("transport") or {}
     worst = max(((tr.get(k) or 0.0), k) for k in AUTHORIZED)
     if correct and set_name == "big" and worst[0] >= 250 and targeted and all(targeted_ok(r) for r in targeted):
-        return out + [("WAIVED", "sigint %s: authorized interval %s = %.0f ms >= 250 in this record, every targeted row strict-green; %s" % (WAIVER, worst[1], worst[0], what))]
+        return out + [("WAIVED", "sigint FAIL, waived: %s: authorized interval %s = %.0f ms >= 250 in this record, every targeted row strict-green; %s" % (WAIVER, worst[1], worst[0], what))]
     why = "incorrect" if not correct else ("small set: strict" if set_name != "big" else "no authorized interval >= 250 ms with strict-green targeted rows (worst %s = %.0f ms)" % (worst[1], worst[0]))
     return out + [("FAIL", "sigint (%s) %s" % (why, what))]
 
@@ -271,7 +276,8 @@ def record_part(shape, n):
         else:
             rec["targeted"].append(d["targeted"])
     out, err, rc = finish(c, 30)
-    if rc != 0 or line != "end\n":
+    rec["end"] = rc == 0 and line == "end\n"
+    if not rec["end"]:
         rec["record_error"] = "rc=%s, %s" % (rc, err.strip()[-300:])
     return rec
 
@@ -306,21 +312,68 @@ def sigint_part(shape, n):
 MIN_REAL_SIGNAL_ROWS = 2  # per set: rows where a signal was actually sent and judged
 
 
-def report(recs, set_name):
+def expected_rows(set_name, quick):
+    """The (shape, n) pairs a complete run of this set has, in order."""
+    out = []
+    for shape, n in SETS[set_name]:
+        if quick:
+            n = n // 2 if shape in ("1xKx1", "1xKxM", "big", "big-1xKxM", "huge") else int(n / 1.26)
+        out.append((shape, n))
+    return out
+
+
+def report(recs, cli_set=None, errors=()):
+    """Print every verdict; the number of FAILs.  Fails closed: the records
+    must name one known set (a --set given on the command line must agree;
+    it never decides waivers), every expected (shape, n) of that set must
+    have exactly one complete record (phases, transport, sigint, end), and
+    any conversion error counts."""
     fails = 0
+    for e in errors:
+        print("FAIL evidence: %s" % e)
+        fails += 1
+    sets = {r.get("set") for r in recs}
+    quicks = {bool(r.get("quick")) for r in recs}
+    if len(sets) != 1 or next(iter(sets)) not in SETS or len(quicks) != 1:
+        print("FAIL provenance: the records name sets %r and quick %r: exactly one known set and one size are required" % (sorted(map(str, sets)), sorted(quicks)))
+        return fails + 1
+    set_name, quick = next(iter(sets)), next(iter(quicks))
+    if cli_set is not None and cli_set != set_name:
+        print("FAIL provenance: --set %s, but the records are from the %s set" % (cli_set, set_name))
+        return fails + 1
+    print("set %s%s (from the records)" % (set_name, " --quick" if quick else ""))
+    want = expected_rows(set_name, quick)
+    got = [(r.get("shape"), r.get("n")) for r in recs]
+    for key in want:
+        c = got.count(key)
+        if c != 1:
+            print("FAIL completeness: %s n=%s has %d records (exactly 1 required)" % (key[0], key[1], c))
+            fails += 1
+    for key in got:
+        if key not in want:
+            print("FAIL completeness: %s n=%s is not in the %s set" % (key[0], key[1], set_name))
+            fails += 1
     real = sum(1 for r in recs if (r.get("sigint") or {}).get("sent") and not r["sigint"].get("error"))
     print("real-signal rows: %d (at least %d required)" % (real, MIN_REAL_SIGNAL_ROWS))
     if real < MIN_REAL_SIGNAL_ROWS:
         print("FAIL real-signal coverage: %d < %d" % (real, MIN_REAL_SIGNAL_ROWS))
         fails += 1
     for rec in recs:
+        tag = "%-12s n=%-9s" % (rec.get("shape"), rec.get("n"))
+        for part in ["phases", "transport", "sigint"]:
+            if not rec.get(part):
+                print("%s FAIL record: no %s" % (tag, part))
+                fails += 1
+        if rec.get("end") is not True:
+            print("%s FAIL record: not complete (no end status)" % tag)
+            fails += 1
         if rec.get("record_error"):
-            print("%-12s n=%-9d FAIL record: %s" % (rec["shape"], rec["n"], rec["record_error"]))
+            print("%s FAIL record: %s" % (tag, rec["record_error"]))
             fails += 1
         if rec.get("transport"):
-            print("%-12s n=%-9d transport %s" % (rec["shape"], rec["n"], json.dumps(rec["transport"])))
-        for verdict, text in classify(rec, set_name):
-            print("%-12s n=%-9d %-6s %s" % (rec["shape"], rec["n"], verdict, text))
+            print("%s transport %s" % (tag, json.dumps(rec["transport"])))
+        for verdict, text in classify(rec):
+            print("%s %-6s %s" % (tag, verdict, text))
             fails += verdict == "FAIL"
     return fails
 
@@ -353,63 +406,180 @@ def declared_phases(shape, n):
     return dict(required=req, not_applicable={p: units[p] for p in units if p not in req}, declared_from="shape, lower-bound entry lengths")
 
 
-def from_r3_logs(targeted_log, sigint_log):
-    """Records from r3's two logs (bab9c8c5's harness printed them as text):
-    the targeted log's transport and phase rows (no leading/trailing split:
-    that wheel had no _test_first_last) and the SIGINT log's lines."""
-    recs = {}
-    for line in open(targeted_log):
+def from_r3_logs(targeted_log, sigint_log, set_name, quick):
+    """(records, errors) from r3's two text logs (bab9c8c5's harness), for
+    `set_name` (required; written into every record).  Fails closed: every
+    non-blank line must parse, as a row, a known r3 duplicate FAIL line, a
+    SIGINT row or an r3 SIGINT failure (kept as that record's sigint error);
+    anything else is an error.  r3 printed no end status per shape, so a
+    record has one when its transport row and every required phase row are
+    there and its SIGINT line is."""
+    recs, errors = {}, []
+
+    def rec_for(shape, n):
+        if shape not in DECLARED:
+            errors.append("unknown shape %r" % shape)
+        return recs.setdefault((shape, n), dict(shape=shape, n=n, set=set_name, quick=quick, targeted=[], source="r3 logs"))
+
+    for no, line in enumerate(open(targeted_log), 1):
+        line = line.rstrip("\n")
+        if not line.strip():
+            continue
         m = re.match(r"^(\S+)\s+n=(\d+)\s+(\{.*\})\s*$", line)
-        if not m:
+        if m:
+            try:
+                d = json.loads(m[3])
+            except ValueError:
+                errors.append("targeted log line %d: bad JSON: %s" % (no, line[:200]))
+                continue
+            rec = rec_for(m[1], int(m[2]))
+            if "transport" in d:
+                rec["transport"] = d["transport"]
+            else:
+                rec["targeted"].append({k: v for k, v in d.items() if k != "waiver"})
             continue
-        rec = recs.setdefault((m[1], int(m[2])), dict(shape=m[1], n=int(m[2]), targeted=[]))
-        d = json.loads(m[3])
-        if "transport" in d:
-            rec["transport"] = d["transport"]
+        if re.match(r"^(\S+)\s+FAIL \{.*\}\s*$", line):
+            continue  # (r3 repeated each bad row as "<shape> FAIL {...}": the row above has it)
+        errors.append("targeted log line %d: unparsed: %s" % (no, line[:200]))
+    for no, line in enumerate(open(sigint_log), 1):
+        line = line.rstrip("\n")
+        if not line.strip():
+            continue
+        m0 = re.match(r"^(\S+)\s+n=(\d+)\s+(ok|FAIL)\s+(.*)$", line)
+        if not m0:
+            errors.append("sigint log line %d: unparsed: %s" % (no, line[:200]))
+            continue
+        rec = rec_for(m0[1], int(m0[2]))
+        what = m0[4]
+        if "sigint" in rec:
+            errors.append("sigint log line %d: a second SIGINT line for %s n=%s" % (no, m0[1], m0[2]))
+        m = re.match(r"^(?:.*?: )?T=([\d.]+) s(?:: too short.*?)?[,;] KeyboardInterrupt (\d+) ms(?: after SIGINT)?, rc=(\S+?),? ?(.*)$", what)
+        if m:
+            parts = [p.strip() for p in m[4].split("|")]
+            # (r3 sent the signal in every row, also when T < 0.5 s, and then
+            # printed no output lines: judged as sent, so they FAIL as unproven)
+            rec["sigint"] = dict(T=float(m[1]), sent=True, dt_ms=float(m[2]), rc=None if m[3] == "None" else int(m[3]), first=parts[0] if parts else "", last=parts[-1] if parts else "", lines=m[4])
+        elif what.startswith(("no ready line", "calibration rc=")):
+            rec["sigint"] = dict(error=what[:300])
         else:
-            rec["targeted"].append({k: v for k, v in d.items() if k != "waiver"})
-    for line in open(sigint_log):
-        m = re.match(r"^(\S+)\s+n=(\d+)\s+\S+\s+(?:.*?: )?T=([\d.]+) s(?:: too short.*?)?[,;] KeyboardInterrupt (\d+) ms(?: after SIGINT)?, rc=(\S+?),? ?(.*)$", line.rstrip("\n"))
-        if not m:
-            continue
-        rec = recs.setdefault((m[1], int(m[2])), dict(shape=m[1], n=int(m[2]), targeted=[]))
-        rest = m[6]
-        parts = [p.strip() for p in rest.split("|")]
-        # (r3 sent the signal in every row, also when T < 0.5 s, and printed no
-        # output lines for those: they are judged as sent, so their correctness
-        # cannot be shown and they FAIL unless the lines are there)
-        rec["sigint"] = dict(T=float(m[3]), sent=True, dt_ms=float(m[4]), rc=None if m[5] == "None" else int(m[5]), first=parts[0] if parts else "", last=parts[-1] if parts else "", lines=rest)
+            rec["sigint"] = dict(error="unparsed r3 SIGINT line: " + what[:300])
+            errors.append("sigint log line %d: unparsed: %s" % (no, line[:200]))
     for rec in recs.values():
-        rec["phases"] = declared_phases(rec["shape"], rec["n"])
-    return list(recs.values())
+        if rec["shape"] in DECLARED:
+            rec["phases"] = declared_phases(rec["shape"], rec["n"])
+            seen = {r["phase"] for r in rec["targeted"]}
+            rec["end"] = "transport" in rec and "sigint" in rec and all(p in seen for p in rec["phases"]["required"])
+    return list(recs.values()), errors
+
+
+def selftest(good_targeted, good_sigint):
+    """Fail-first controls for the converter, the completeness checks and the
+    provenance rule, beside the good frozen-log control: each must give the
+    stated outcome.  Returns the number of controls that did not."""
+    import contextlib
+    import io
+    import os
+    import tempfile
+
+    def run(recs, errors=(), cli_set=None):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            n = report(recs, cli_set, errors)
+        return n, buf.getvalue()
+
+    bad = 0
+
+    def expect(name, cond, detail=""):
+        nonlocal bad
+        print("%s  %s %s" % ("ok  " if cond else "BAD ", name, detail))
+        bad += not cond
+
+    good, errs = from_r3_logs(good_targeted, good_sigint, "big", True)
+    n, out = run(good, errs)
+    expect("good frozen logs: no conversion error", not errs, str(errs)[:200])
+    expect("good frozen logs: the 454 ms row is 'FAIL, waived' via an authorized interval", "FAIL, waived" in out and "dumps_ms" in out)
+    expect("good frozen logs: no FAIL", n == 0, "(%d)" % n)
+    tmp = tempfile.mkdtemp()
+
+    def write(name, text):
+        path = os.path.join(tmp, name)
+        open(path, "w").write(text)
+        return path
+
+    sig = open(good_sigint).read()
+    tgt = open(good_targeted).read()
+    # no ready line / calibration failure in place of the big row's SIGINT line
+    for label, repl in [("no-ready", "big          n=200000    FAIL  no ready line: Traceback (most recent call last)"), ("calibration failure", "big          n=200000    FAIL  calibration rc=1: MemoryError")]:
+        lines = [repl if l.startswith("big ") else l for l in sig.splitlines()]
+        recs, errs = from_r3_logs(good_targeted, write("s.log", "\n".join(lines) + "\n"), "big", True)
+        n, out = run(recs, errs)
+        expect("%s: FAILs, the error kept on the record" % label, n > 0 and repl.split("FAIL  ")[1][:20] in out)
+    # an omitted shape (no lines at all for 'wide')
+    recs, errs = from_r3_logs(write("t.log", "\n".join(l for l in tgt.splitlines() if not l.startswith("wide ")) + "\n"), write("s.log", "\n".join(l for l in sig.splitlines() if not l.startswith("wide ")) + "\n"), "big", True)
+    n, out = run(recs, errs)
+    expect("omitted shape: FAILs on completeness", n > 0 and "completeness: wide" in out)
+    # a missing SIGINT line for one shape
+    recs, errs = from_r3_logs(good_targeted, write("s.log", "\n".join(l for l in sig.splitlines() if not l.startswith("square ")) + "\n"), "big", True)
+    n, out = run(recs, errs)
+    expect("missing sigint: FAILs", n > 0 and "no sigint" in out)
+    # a truncated targeted log (cut inside the square shape's rows)
+    lines = tgt.splitlines()
+    cut = next(i for i, l in enumerate(lines) if l.startswith("square ") and '"phase": "zmat-scan"' in l)
+    recs, errs = from_r3_logs(write("t.log", "\n".join(lines[:cut]) + "\n"), good_sigint, "big", True)
+    n, out = run(recs, errs)
+    expect("truncated record: FAILs", n > 0 and ("required phase zmat-scan has no row" in out or "not complete" in out))
+    # an unparsed line
+    recs, errs = from_r3_logs(write("t.log", tgt + "Traceback (most recent call last):\n"), good_sigint, "big", True)
+    n, out = run(recs, errs)
+    expect("unparsed line: FAILs", n > 0 and "unparsed" in out)
+    # provenance: the same record as small-set cannot be waived, whatever the CLI says
+    small = [dict(r, set="small") for r in good]
+    for cli in [None, "big"]:
+        n, out = run(small, (), cli)
+        expect("small-set record under --set %s: never waived, FAILs" % cli, "FAIL, waived" not in out and n > 0)
+    big_row = [r for r in good if r["shape"] == "big"]
+    expect("the explicitly recorded big-set row: waivable", "FAIL, waived" in "".join(t for _, t in classify(big_row[0])))
+    expect("a record without a set: FAIL", classify(dict(big_row[0], set=None))[0][0] == "FAIL")
+    n, out = run(good + small)
+    expect("mixed sets: FAIL provenance", n > 0 and "provenance" in out)
+    return bad
 
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    set_name = args[args.index("--set") + 1] if "--set" in args else "big"
+    cli_set = args[args.index("--set") + 1] if "--set" in args else None
+    quick = "--quick" in args
+    if "--selftest" in args:
+        i = args.index("--selftest")
+        sys.exit(1 if selftest(args[i + 1], args[i + 2]) else 0)
     if "--reclassify" in args:
-        recs = [json.loads(l) for l in open(args[args.index("--reclassify") + 1]) if l.strip()]
-        sys.exit(1 if report(recs, set_name) else 0)
+        lines = [json.loads(l) for l in open(args[args.index("--reclassify") + 1]) if l.strip()]
+        recs = [d for d in lines if "conversion_error" not in d]
+        errors = [d["conversion_error"] for d in lines if "conversion_error" in d]
+        sys.exit(1 if report(recs, cli_set, errors) else 0)
     if "--from-r3-logs" in args:
+        if cli_set not in SETS:
+            print("--from-r3-logs needs --set small|big (written into every record)")
+            sys.exit(2)
         i = args.index("--from-r3-logs")
-        recs = from_r3_logs(args[i + 1], args[i + 2])
+        recs, errors = from_r3_logs(args[i + 1], args[i + 2], cli_set, quick)
         for r in recs:
             print(json.dumps(r))
-        sys.exit(0)
+        for e in errors:
+            print(json.dumps(dict(conversion_error=e)))
+        sys.exit(1 if errors else 0)
     if sys.platform == "win32":
         print("skipped on Windows")
         sys.exit(0)
-    quick = "--quick" in args
+    set_name = cli_set or "big"
     raw = open(args[args.index("--raw") + 1], "w") if "--raw" in args else None
     recs = []
-    for shape, n in SETS[set_name]:
-        if quick:
-            n = n // 2 if shape in ("1xKx1", "1xKxM", "big", "big-1xKxM", "huge") else int(n / 1.26)
-        rec = dict(shape=shape, n=n, set=set_name)
+    for shape, n in expected_rows(set_name, quick):
+        rec = dict(shape=shape, n=n, set=set_name, quick=quick)
         rec.update(record_part(shape, n))
         rec["sigint"] = sigint_part(shape, n)
         recs.append(rec)
         if raw:
             raw.write(json.dumps(rec) + "\n")
             raw.flush()
-    sys.exit(1 if report(recs, set_name) else 0)
+    sys.exit(1 if report(recs) else 0)
