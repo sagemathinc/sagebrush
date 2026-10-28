@@ -1,0 +1,121 @@
+name: prb-windows-perf
+
+# Ctrl-C PR B r5's Windows exact-wheel A/B/A (daybreak2's r5 rulings: Windows takes option (i) alone, so its timing rows are
+# gated on Windows itself).  Only on the throwaway branch prb-windows-evidence (never on master); nothing is published.
+# build: A (master, MASTER below) and B (this branch, whose engine/ and test/ must equal PRB_HEAD, the reviewed PR B head)
+#   are each built ONCE as a release wheel; artifacts/<label>/ keeps each wheel's own filename; MANIFEST has exactly one row
+#   per label: <label> <wheel filename> <wheel sha256> <native basename> <native sha256>.
+# perf: verifies ctrlc_perf.py's hash (PERF_SHA) and every wheel against MANIFEST, installs them, checks each installed
+#   native payload (exactly one, basename and hash) before round 0 and after the run, then ctrlc_perf.py's A/B/A x 5 with
+#   noop, noop_tput, req_rc_m1, req_rc, req_rc_p1, req_1mib and req_32mib gated (<= 1.01, no straddle).  Any failure fails
+#   the job (bash -eo pipefail, and every check exits nonzero).
+
+on:
+  push:
+    branches: ["prb-windows-evidence"]
+
+permissions:
+  contents: read
+
+env:
+  MASTER: b7d0bbbac4a798109b42fd1eb2c3fe6e11073912
+  PRB_HEAD: "a76127c4d5e4721783ff959d022b836ebe63cfb6"
+  PERF_SHA: "32fe8129634131722863d16250f74a62dbab1730dccdc37e48998342ab05bed3"
+
+jobs:
+  build:
+    if: github.repository == 'sagemathinc/sagebrush'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: A and B, built once
+        shell: bash
+        run: |
+          git cat-file -e "$PRB_HEAD^{commit}"
+          git diff --quiet "$PRB_HEAD" HEAD -- engine test || { echo "B's tree is not the reviewed PR B head"; exit 1; }
+          echo "HEAD $(git rev-parse HEAD)  B tree = $PRB_HEAD  A $MASTER"
+          git worktree add -q ../srcA "$MASTER"
+          python -m pip install -q maturin
+          for K in A B; do
+            SRC=$PWD; [ $K = A ] && SRC=$PWD/../srcA
+            mkdir -p artifacts/$K
+            (cd "$SRC/engine/py" && maturin build --release --out "$GITHUB_WORKSPACE/artifacts/$K")
+            [ $(ls artifacts/$K/*.whl | wc -l) = 1 ]
+          done
+          : > artifacts/MANIFEST
+          for K in A B; do
+            WH=$(ls artifacts/$K/*.whl)
+            python -m venv vart-$K
+            vart-$K/Scripts/python.exe -m pip install -q "$WH"
+            [ $(ls vart-$K/Lib/site-packages/sagebrush/_native*.pyd | wc -l) = 1 ]
+            PYD=$(ls vart-$K/Lib/site-packages/sagebrush/_native*.pyd)
+            echo "$K $(basename $WH) $(sha256sum $WH | cut -c1-64) $(basename $PYD) $(sha256sum $PYD | cut -c1-64)" >> artifacts/MANIFEST
+          done
+          [ "$(cut -d' ' -f1 artifacts/MANIFEST | tr '\n' ' ')" = "A B " ] && [ "$(awk 'NF != 5' artifacts/MANIFEST | wc -l)" = 0 ]
+          cat artifacts/MANIFEST
+      - uses: actions/upload-artifact@v5
+        with:
+          name: prb-windows-perf-wheels
+          path: artifacts/
+          retention-days: 7
+  perf:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v5
+        with:
+          name: prb-windows-perf-wheels
+          path: artifacts
+      - name: verify, install, A/B/A
+        shell: bash
+        timeout-minutes: 80
+        run: |
+          P=engine/py/ctrlc_perf.py
+          [ "$(sha256sum $P | cut -c1-64)" = "$PERF_SHA" ] || { echo "INVALID: ctrlc_perf.py differs"; exit 9; }
+          M=artifacts/MANIFEST
+          [ "$(cut -d' ' -f1 $M | tr '\n' ' ')" = "A B " ] && [ "$(awk 'NF != 5' $M | wc -l)" = 0 ] || { echo "INVALID: MANIFEST malformed"; exit 9; }
+          field() { awk -v k="$1" -v i="$2" '$1 == k { print $i }' $M; }
+          cat $M
+          for K in A B; do
+            WH=artifacts/$K/$(field $K 2)
+            [ $(ls artifacts/$K/*.whl | wc -l) = 1 ] && [ -f "$WH" ] || { echo "INVALID: $K wheel"; exit 9; }
+            [ "$(sha256sum $WH | cut -c1-64)" = "$(field $K 3)" ] || { echo "INVALID: $K wheel hash"; exit 9; }
+            python -m venv venv-$K
+            venv-$K/Scripts/python.exe -m pip install -q "$WH"
+          done
+          check() {
+            for K in A B; do
+              [ $(ls venv-$K/Lib/site-packages/sagebrush/_native*.pyd | wc -l) = 1 ] || { echo "INVALID: $K payload count ($1)"; exit 9; }
+              PYD=$(ls venv-$K/Lib/site-packages/sagebrush/_native*.pyd)
+              [ "$(basename $PYD)" = "$(field $K 4)" ] && [ "$(sha256sum $PYD | cut -c1-64)" = "$(field $K 5)" ] || { echo "INVALID: $K payload ($1)"; exit 9; }
+            done
+            echo "payloads verified ($1)"
+          }
+          check "before round 0"
+          mkdir -p logs
+          c=0; venv-B/Scripts/python.exe $P --gate noop,noop_tput,req_rc_m1,req_rc,req_rc_p1,req_1mib,req_32mib venv-A/Scripts/python.exe venv-B/Scripts/python.exe logs/perf.json 5 > logs/perf.log 2>&1 || c=$?
+          tail -20 logs/perf.log
+          check "after the run"
+          [ $c = 0 ] || { echo "the Windows A/B/A gate failed (exit $c)"; exit 1; }
+          venv-B/Scripts/python.exe -c "import json, sys; d = json.load(open('logs/perf.json')); g = {k for k, r in d['rows'].items() if r['gated']}; sys.exit(0 if d['ok'] is True and g == {'noop', 'noop_tput', 'req_rc_m1', 'req_rc', 'req_rc_p1', 'req_1mib', 'req_32mib'} else 1)"
+          echo "WINDOWS A/B/A PASS"
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: prb-windows-perf-logs
+          path: logs/
+          retention-days: 7
