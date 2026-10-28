@@ -276,8 +276,12 @@ impl Source for Borrowed {
 }
 
 /// Windows: an anonymous pipe has nothing to wait on, so the burst reuse
-/// is POSIX-only by design (daybreak2's r5 ruling, option (i) alone): a
-/// fully consumed large buffer is let go at once, never kept.
+/// is POSIX-only by design (daybreak2's r5 ruling, option (i) alone; astra and
+/// daybreak2 YES): a fully consumed large buffer is let go at once, never
+/// kept.  "Not readable" here means only that there is no burst grace: the
+/// reader then makes its normal blocking read, as on POSIX (never an end of
+/// input, never dropped data, never a spin); a partial line or a backlog is
+/// kept as everywhere.
 #[cfg(windows)]
 impl Source for Borrowed {
     fn readable_within(&mut self, _within: std::time::Duration) -> std::io::Result<bool> {

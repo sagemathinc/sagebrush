@@ -59,6 +59,8 @@ CHILD = r'''
 import json, os, sys, time
 import sagebrush.session as S
 
+MEM = os.path.exists("/proc/self/status")  # (the memory rows need /proc: not on Windows, where only the timing rows run)
+
 def proc(pid, key):
     for line in open("/proc/%d/status" % pid):
         if line.startswith(key + ":"):
@@ -94,7 +96,8 @@ for _ in range(3):
 out["req_32mib"] = sorted(t)[len(t) // 2]
 s.run("x = None", mode="python")
 time.sleep(1.0)
-out["rss_after_32mib"] = proc(pid, "VmRSS")
+if MEM:
+    out["rss_after_32mib"] = proc(pid, "VmRSS")
 
 def framed(rid, n):
     # (code whose request line, as Session._send frames it, newline included, is n bytes)
@@ -117,10 +120,11 @@ for _ in range(5):
 out["reply_10mb"] = sorted(t)[len(t) // 2]
 s.run("x = None", mode="python")
 time.sleep(1.0)
-out["rss_peak"] = proc(pid, "VmHWM")
-out["rss_idle"] = proc(pid, "VmRSS")
-out["threads"] = proc(pid, "Threads")
-out["fds"] = len(os.listdir("/proc/%d/fd" % pid))
+if MEM:
+    out["rss_peak"] = proc(pid, "VmHWM")
+    out["rss_idle"] = proc(pid, "VmRSS")
+    out["threads"] = proc(pid, "Threads")
+    out["fds"] = len(os.listdir("/proc/%d/fd" % pid))
 s.close()
 
 def peak(n):
@@ -136,8 +140,9 @@ def peak(n):
     w.close()
     return v
 
-out["peak_cold_32mib"] = peak(1)
-out["peak_burst_32mib"] = peak(3)
+if MEM:
+    out["peak_cold_32mib"] = peak(1)
+    out["peak_burst_32mib"] = peak(3)
 print(json.dumps(out))
 '''
 
@@ -159,6 +164,9 @@ def main():
     sensitivity = args[:1] == ["--sensitivity"]
     if sensitivity:
         args = args[1:]
+    gate = None
+    if args[:1] == ["--gate"]:
+        gate, args = args[1].split(","), args[2:]
     py_a, py_b, out_path = args[:3]
     rounds = int(args[3]) if len(args) > 3 else 5
     raw = []
@@ -167,19 +175,24 @@ def main():
         b = sample(py_b)
         a2 = sample(py_a)
         raw.append({"a1": a1, "b": b, "a2": a2})
-        print("round %d: %s" % (k, json.dumps({row: round(b[row] / ((a1[row] + a2[row]) / 2), 4) for row in ROWS})), flush=True)
+        print("round %d: %s" % (k, json.dumps({row: round(b[row] / ((a1[row] + a2[row]) / 2), 4) for row in ROWS if row in b and row in a1 and row in a2})), flush=True)
+    present = [row for row in ROWS if all(row in r[k] for r in raw for k in ("a1", "b", "a2"))]
+    gated = [row for row in GATED if row in present and (gate is None or row in gate)]
+    missing = [row for row in (gate or []) if row not in present]
+    if missing:
+        raise SystemExit("rows to gate that weren't measured: %s" % missing)
     rows = {}
-    for row in ROWS:
+    for row in present:
         ratios = [r["b"][row] / ((r["a1"][row] + r["a2"][row]) / 2) for r in raw]
         m1 = statistics.median([r["b"][row] / r["a1"][row] for r in raw])
         m2 = statistics.median([r["b"][row] / r["a2"][row] for r in raw])
-        invalid = row in GATED and (m1 <= 1.01) != (m2 <= 1.01)
+        invalid = row in gated and (m1 <= 1.01) != (m2 <= 1.01)
         rows[row] = {"median": statistics.median(ratios), "min": min(ratios), "max": max(ratios), "ratios": ratios,
                      "median_b_a1": m1, "median_b_a2": m2, "invalid": invalid,
                      "drift_a2_a1": statistics.median([r["a2"][row] / r["a1"][row] for r in raw]),
                      "a_median": statistics.median([v for r in raw for v in (r["a1"][row], r["a2"][row])]),
-                     "b_median": statistics.median([r["b"][row] for r in raw]), "gated": row in GATED,
-                     "pass": (not invalid and statistics.median(ratios) <= 1.01) if row in GATED else None}
+                     "b_median": statistics.median([r["b"][row] for r in raw]), "gated": row in gated,
+                     "pass": (not invalid and statistics.median(ratios) <= 1.01) if row in gated else None}
     if sensitivity:
         r = rows["reply_10mb"]
         caught = r["median"] > 1.01 and (r["median_b_a1"] > 1.01) == (r["median_b_a2"] > 1.01)
@@ -194,7 +207,7 @@ def main():
            "ok": all(r["pass"] for r in rows.values() if r["gated"])}
     with open(out_path, "w") as f:
         json.dump(doc, f, indent=1)
-    for row in ROWS:
+    for row in present:
         r = rows[row]
         print("%-15s B/A median %.4f [%.4f, %.4f]  B/A1 %.4f  B/A2 %.4f  A2/A1 %.4f  A %s  B %s  %s" % (
             row, r["median"], r["min"], r["max"], r["median_b_a1"], r["median_b_a2"], r["drift_a2_a1"], r["a_median"], r["b_median"],
