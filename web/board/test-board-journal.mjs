@@ -9,6 +9,7 @@ import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { closeChrome } from "./test-board-journal-lib.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const J = JSON.stringify;
@@ -64,7 +65,7 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
 let port = Number(process.env.CDP_PORT) || 0;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const profile = mkdtempSync(join(tmpdir(), "sb-bj-"));
-// (its own process group, killed whole at the end: the browser's helpers with it)
+// (its own process group, ended gracefully at the end, its helpers with it)
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
 try {
   if (!port) port = await devtoolsPort(profile);
@@ -99,7 +100,8 @@ try {
 } catch (e) {
   console.error("FAIL: " + (e?.stack ?? e));
 } finally {
-  try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
+  // (ended gracefully, its group killed only as a said fallback: test-board-journal-lib.mjs closeChrome)
+  await closeChrome(chrome, port, "the store test's Chrome");
   server.stop(true);
   await sleep(200);
   for (const d of [profile, site]) rmSync(d, { recursive: true, force: true });

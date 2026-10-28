@@ -329,8 +329,11 @@ let jstore: any = null, jopening: Promise<any> | null = null, jkit: any = null;
 // (TimeTravel's listeners, told after each version the store keeps and once it is opened: §2.4's facade)
 const jSubs = new Set<() => void>();
 // (a replacement's clear that failed: the versions kept before this time are another document's, so TimeTravel lists
-// none of them (board's N1 on code r1))
+// none of them (board's N1 on code r1); kept in localStorage, per board, until a later clear succeeds, which the next
+// save tries again (board's N1-a on code r2))
+const UNCLEAR = (id: string) => "sagebrush-board-journal-unclear:" + id;
 let jHideBefore = -Infinity;
+if (journalOn) { try { const v = Number(localStorage.getItem(UNCLEAR(source.slice(6))) ?? NaN); if (Number.isFinite(v)) jHideBefore = v; } catch {} }
 /** For tests (test-board-journal-page.mjs), under the board journal only: awaited by dropHistory before it drops, and
  * told after (board's R1 on code r1: test 6c holds mount's dropHistory until the new document's version is kept). */
 export const BOARD_PAGE_HOOK: { beforeDropHistory?: () => Promise<void> | void; afterDropHistory?: () => void } = {};
@@ -702,6 +705,12 @@ function wsSave(id: string, d: BoardDoc, bridge?: string) {
         // (the board journal: T1, then T2 (Workspace.journalWrite), over the revision this page knows, tagged as
         // write's: in this queue, after its passing-over and its views' routing (§2.3 B4))
         const js = jstore ?? (await openJournal(id));
+        // (a replacement's clear that failed: tried again first; done, the versions it hid are gone and nothing is hidden)
+        if (jHideBefore > -Infinity && (await js.history.clear().then(() => true, () => false))) {
+          jHideBefore = -Infinity;
+          try { localStorage.removeItem(UNCLEAR(id)); } catch {}
+          for (const f of jSubs) f();
+        }
         const out = await js.save({ ...d, baseRev: wsRev }, { tag: header });
         if (typeof out === "string") throw new Error(out);
         if (out.conflict) throw Object.assign(new Error("this board was changed elsewhere"), { code: "conflict" });
@@ -1180,8 +1189,9 @@ const host: BoardHost = {
           if (js) await js.history.clear().catch((e: unknown) => {
             console.warn("board: TimeTravel: the versions before weren't cleared:", e);
             jHideBefore = Date.now();
+            try { localStorage.setItem(UNCLEAR(source.slice(6)), String(jHideBefore)); } catch {}
             for (const f of jSubs) f();
-            showBusyNotice("TimeTravel couldn't clear the previous document's versions; they're hidden here (reload to try again).");
+            showBusyNotice("TimeTravel couldn't clear the previous document's versions. They stay hidden, and are cleared at your next save.");
           });
         });
       }
