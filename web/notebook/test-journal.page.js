@@ -52,8 +52,9 @@ async function recount(hdb) {
   const ctr = rows.find((r) => r.nb === R.SYNC_NB && r.time === "n");
   let measured = ctr ? R.rowCharge([ctr.nb, ctr.time], ctr.v) : 0;
   for (const r of rows) if (r.nb === R.SYNC_NB && r.time.startsWith("d:")) {
-    const j = rows.find((x) => x.nb === R.SYNC_NB + r.v.h && x.time === "j");
-    measured += R.rowCharge([r.nb, r.time], { h: r.v.h, meta: r.v.meta }) + (j ? R.rowCharge([j.nb, j.time], j.v) : 0);
+    // (its j row, and a synced document's start and slot rows (2c-2))
+    measured += R.rowCharge([r.nb, r.time], { h: r.v.h, meta: r.v.meta });
+    for (const L of ["j", "m", "s"]) { const x = rows.find((y) => y.nb === R.SYNC_NB + r.v.h && y.time === L); if (x) measured += R.rowCharge([x.nb, x.time], x.v); }
   }
   return { meta, pend, counted, measured };
 }
@@ -1279,7 +1280,150 @@ async function reloadDuringClear() {
   hdb.close();
 }
 
-const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear];
+
+// ---- 2c-2: a notebook's synced history, its slot, its l rows and its debt
+const lrows = async (hdb, id) => { const js = await jState(hdb, id); const h = (await syncRows(hdb)).find((r) => r.time === "d:local:" + id)?.v?.h; return h ? (await syncRows(hdb)).filter((r) => r.nb === R.SYNC_NB + h && r.time.startsWith("l")) : []; };
+const keyRows = (hdb, key) => rawAll(hdb, "history", IDBKeyRange.bound([key, ""], [key, "￿"]));
+const debtRow = async (hdb) => (await syncRows(hdb)).find((r) => r.nb === R.SYNC_NB && r.time === "b:d:local")?.v ?? { count: 0, bytes: 0 };
+async function synced(f) { N.DOC_SYNC.on = true; try { return await f(); } finally { N.DOC_SYNC.on = false; } }
+
+async function syncStart() {
+  // D6(a): a writer's load starts the synced history: a new key, its root the whole value, from the slot's new client,
+  // in one T1 with the start row and the slot; the versions before stay under the old key, untouched
+  const { w, hdb } = await active();
+  await synced(async () => {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"], ["b", "B"]]);
+    const js = await jState(hdb, id), key = N.syncedKey(id, 1), rows = await keyRows(hdb, key), old = await keyRows(hdb, id), l = await lrows(hdb, id);
+    const root = rows[0]?.env;
+    check(js.start?.n === 1 && js.slot?.client && js.slot.cseq === 2 && rows.length === 1 && (root?.parents ?? []).length === 0 && root.time.endsWith("_" + js.slot.client) && old.length >= 1 && l.length === 1 && l[0].v.cseq === 1 && l[0].v.client === js.slot.client && l[0].v.gen === 1 && Number(l[0].time.slice(1)) === rows[0].j, "D6(a): the start: the synced key's root (no parents) from the slot's client, the start row, the slot and the root's l row (cseq 1, as the server counts) together; the version before it stays under the old key: " + J({ start: js.start, rows: rows.length, old: old.length, l: l.length }));
+    // (the root is the whole value)
+    check(codes(st.history.docAt(root.time)) === J([["a", "A"], ["b", "B"]]), "…the root holds the whole value");
+    // (saves: an l row each, the client's cseq rising, the debt counted exactly)
+    let rec = await rawGet(w.main, "notebooks", id);
+    for (const c of ["B1", "B2", "B3"]) { await st.save({ ...d, cells: [{ id: "a", code: c }, { id: "b", code: "B" }], baseRev: rec.rev }); rec = await rawGet(w.main, "notebooks", id); }
+    const l2 = await lrows(hdb, id), js2 = await jState(hdb, id), debt = await debtRow(hdb), sum = l2.reduce((x, r) => x + r.v.bytes, 0);
+    check(l2.map((r) => r.v.cseq).join() === "1,2,3,4" && js2.slot.cseq === 5 && js2.slot.debt.count === 4 && js2.slot.debt.bytes === sum && debt.count >= 4 && rec.unjournaled === undefined, "each save's version: its l row, the client's cseq rising, the debt counted exactly (the slot's and the namespace's): " + J({ cseqs: l2.map((r) => r.v.cseq), debt: js2.slot.debt }));
+    // (clear refused while synced; the slot's client and cseq kept across a reload, ids rising with the clock set back)
+    const cleared = await st.history.clear({ ...d }).then(() => "cleared", (e) => e.message);
+    check(/can't be cleared while this notebook syncs/.test(cleared) && (await keyRows(hdb, key)).length === 4, "astra's pin 1: TimeTravel's Clear refused for a synced notebook; its versions untouched");
+    await close(st);
+    const now = Date.now;
+    Date.now = () => now() - 3600e3;
+    try {
+      const r = await reopen(w, hdb, id);
+      const rec2 = await rawGet(w.main, "notebooks", id);
+      await r.st.save({ ...r.d, cells: [{ id: "a", code: "B4" }, { id: "b", code: "B" }], baseRev: rec2.rev });
+      const rows3 = await keyRows(hdb, key), l3 = await lrows(hdb, id), last = l3[l3.length - 1].v, prev = l3[l3.length - 2].v;
+      check(r.row === "consistent" && last.client === js.slot.client && last.cseq === 5 && last.time > prev.time && rows3.length === 5, "a reload with the clock an hour back: the same client, cseq 5 next, its id after the last one: " + J({ row: r.row, cseq: last.cseq, rising: last.time > prev.time }));
+      await close(r.st);
+    } finally { Date.now = now; }
+    // (pages: at most `max`, in j order; at least one past the bytes bound)
+    const all = await N.unsent(hdb, id), two = await N.unsent(hdb, id, { max: 2 }), small = await N.unsent(hdb, id, { maxBytes: 1 }), after = await N.unsent(hdb, id, { after: all[1].j });
+    check(all.length === 5 && two.length === 2 && two[1].j < all[2].j && small.length === 1 && after.length === 3 && after[0].j === all[2].j, "unsent: in j order, at most max a page, one at least past maxBytes, after a j");
+    // (a read-only tab shows the synced history; a patch not from the slot's client is refused by T1)
+    const viewer = store(w, hdb, id);
+    await viewer.load();
+    const wrong = await viewer.patches.queue(() => viewer.patches.journalTx((s) => N.t1Write(s, id, { row: { nb: key, time: "000mvr8ccru_not-the-slot-client", env: { time: "000mvr8ccru_not-the-slot-client" } } })));
+    check(viewer.patches.id === key && viewer.history.session && /not this device's sync client/.test(wrong?.refused ?? "") && (await keyRows(hdb, key)).length === 5, "a read-only tab reads the synced history; a patch from another client is refused by T1, nothing written: " + J(wrong?.refused));
+    await close(viewer);
+    // (a drop: the synced and the old keys' rows, the l rows and the slot gone, the namespace's debt released)
+    const d0 = await debtRow(hdb), mine = (await jState(hdb, id)).slot.debt;
+    const s2 = store(w, hdb, id);
+    await s2.load();
+    await s2.patches.drop();
+    const d1 = await debtRow(hdb);
+    check((await keyRows(hdb, key)).length === 0 && (await keyRows(hdb, id)).length === 0 && (await lrows(hdb, id)).length === 0 && d1.count === d0.count - mine.count && d1.bytes === d0.bytes - mine.bytes, "a drop takes the synced history, the versions before it, the l rows, and releases the debt: " + J({ d0, d1, mine }));
+    await close(s2);
+    // (the workspace's dropContents (emptying Trash) the same)
+    const n2 = await loadNew(w, hdb, [["a", "A"]]);
+    await close(n2.st);
+    await w.dropContents([{ kind: "notebook", ref: n2.id }]);
+    check((await keyRows(hdb, N.syncedKey(n2.id, 1))).length === 0 && (await keyRows(hdb, n2.id)).length === 0 && (await lrows(hdb, n2.id)).length === 0, "emptying Trash takes a synced notebook's synced history and its rows too");
+  });
+  await close(w);
+  hdb.close();
+}
+
+async function syncStartAtomic() {
+  // the start is one transaction: refused (out of room), nothing of it is written, the notebook stays local and
+  // saves as before; the next load starts it; a second start is refused
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  await close(st);
+  await synced(async () => {
+    const r = await noRoom("history", () => reopen(w, hdb, id));
+    const js = await jState(hdb, id);
+    check(js.start === null && js.slot === null && js.lrows === 0 && (await keyRows(hdb, N.syncedKey(id, 1))).length === 0 && !r.st.synced, "a start out of room: no start row, no slot, no l row, no synced key's row");
+    const rec = await rawGet(w.main, "notebooks", id);
+    const out = await r.st.save({ ...r.d, cells: [{ id: "a", code: "B" }], baseRev: rec.rev });
+    check(!!out?.saved && (await keyRows(hdb, id)).length >= 2, "…the notebook saves as before, its versions under its own key");
+    await close(r.st);
+    const r2 = await reopen(w, hdb, id), js2 = await jState(hdb, id);
+    check(js2.start?.n === 1 && js2.lrows === 1, "…its next load starts it");
+    const again = await r2.st.startSynced(r2.d).then(() => "started", (e) => e.message);
+    // (and T1's own check, asked directly: a start row already there refuses another)
+    const raw = await r2.st.patches.queue(() => r2.st.patches.journalTx((s) => N.t1Write(s, id, { start: { n: 2, client: "another-client-1", time: "t" } })));
+    check(/already started/.test(again) && /already started/.test(raw?.refused ?? "") && (await jState(hdb, id)).lrows === 1 && (await jState(hdb, id)).start.n === 1, "a second start refused, by the store and by T1 itself, nothing written: " + J([again, raw?.refused]));
+    await close(r2.st);
+  });
+  await close(w);
+  hdb.close();
+}
+
+async function syncDebt() {
+  // r9 §3.8 at its bound: the version refused for room (sync's debt), the save kept (intent, marked); an ack frees the
+  // room and the history resumes (astra's pin 3): the next save is a version with its l row, unmarked
+  const { w, hdb } = await active();
+  await synced(async () => {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const keep = { ...N.SYNC_DEBT };
+    N.SYNC_DEBT.docCount = 1;
+    try {
+      let rec = await rawGet(w.main, "notebooks", id);
+      const out = await st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: rec.rev });
+      rec = await rawGet(w.main, "notebooks", id);
+      const js = await jState(hdb, id);
+      check(!!out?.saved && rec.unjournaled === true && js.lrows === 1 && st.history.paused, "the debt at its bound: the version refused, the save kept and marked, no l row; the history paused: " + J({ mark: rec.unjournaled, lrows: js.lrows }));
+      N.SYNC_DEBT.docCount = keep.docCount;
+      const r = await st.ackedUpTo({ gen: js.slot.gen, client: js.slot.client, upTo: 1 });
+      const js2 = await jState(hdb, id);
+      check(r.n === 1 && js2.lrows === 0 && js2.slot.debt.count === 0 && js2.slot.debt.bytes === 0 && !st.history.paused, "an ack: the l row gone, the debt released, the history resumed");
+      const out2 = await st.save({ ...d, cells: [{ id: "a", code: "C" }], baseRev: rec.rev });
+      const rec2 = await rawGet(w.main, "notebooks", id), js3 = await jState(hdb, id);
+      check(!!out2?.saved && rec2.unjournaled === undefined && js3.lrows === 1 && (await N.unsent(hdb, id))[0].cseq === 2, "…the next save is a version again, with its l row (cseq 2), unmarked");
+    } finally { Object.assign(N.SYNC_DEBT, keep); }
+    await close(st);
+  });
+  await close(w);
+  hdb.close();
+}
+
+async function syncRotation() {
+  // astra's pin 2: a rotation keeps the old client's rows addressable by its generation and id; marks and acks of one
+  // client never touch another's, and acks are idempotent
+  const { w, hdb } = await active();
+  await synced(async () => {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    let rec = await rawGet(w.main, "notebooks", id);
+    await st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: rec.rev });
+    const old = (await jState(hdb, id)).slot;
+    const next = { slot: await st.rotateClient() }, nc = next.slot.client;
+    rec = await rawGet(w.main, "notebooks", id);
+    await st.save({ ...d, cells: [{ id: "a", code: "C" }], baseRev: rec.rev });
+    const l = await lrows(hdb, id);
+    const mk = await st.markSentUpTo({ gen: 2, client: nc, upTo: 5, fgen: 1 });
+    const l2 = await lrows(hdb, id);
+    const wrong = await st.ackedUpTo({ gen: 2, client: old.client, upTo: 5 });
+    const a1 = await st.ackedUpTo({ gen: 1, client: old.client, upTo: 5 }), a2 = await st.ackedUpTo({ gen: 1, client: old.client, upTo: 5 });
+    const l3 = await lrows(hdb, id);
+    check(next.slot.gen === 2 && next.slot.cseq === 1 && next.slot.rotations === 1 && l.length === 3 && l[2].v.gen === 2 && l[2].v.cseq === 1 && mk.n === 1 && l2.filter((r) => r.v.sent === 1).length === 1 && l2.find((r) => r.v.sent === 1).v.gen === 2 && wrong.n === 0 && a1.n === 2 && a2.n === 0 && l3.length === 1 && l3[0].v.gen === 2, "a rotation: the new client from cseq 1 (gen 2); the old rows keep gen 1; a mark or an ack of one client never touches another's; acks idempotent: " + J({ l: l.map((r) => [r.v.gen, r.v.cseq]), mk: mk.n, wrong: wrong.n, a1: a1.n, a2: a2.n }));
+    await close(st);
+  });
+  await close(w);
+  hdb.close();
+}
+
+const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
