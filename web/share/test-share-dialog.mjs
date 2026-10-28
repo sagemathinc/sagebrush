@@ -1218,6 +1218,16 @@ try {
         console.log(`  (${what}: reopen timing, ms from the crash: ${JSON.stringify(marks)}; the new page's own steps, ms from its start: ${JSON.stringify(qt)}; renderer before navigating: ${preNav})`);
         if (!ok || (marks.ready ?? marks.failed ?? 0) > 10_000) console.log(`  (${what}: Chrome's processes [type, id, cpu s] by step: ${JSON.stringify(procs)})`);
       };
+      // (the crashed renderer must have exited before the site is opened again: a new same-site tab made while it is
+      // still tearing down can have its first navigation hang, never sending a request (#243's CI, arms A-C: the
+      // renderer outlived the 1 s wait below by about 0.7 s, and the one reopen that waited for it passed). Chrome
+      // doesn't say which process a page's renderer is, so it is found by a HEURISTIC: the renderer whose cpu rose
+      // most (at least 0.3 s) between a read just before the crash and one after the close. Only a real process
+      // list counts; any other answer is unknown. If no renderer qualifies, or the one found isn't observed absent
+      // within 30 s of the crash, the case fails here, before any new page. A misidentified renderer that happens to exit
+      // can't be told apart: that is the heuristic's limit)
+      const listProcs = (ms) => raw("SystemInfo.getProcessInfo", {}, undefined, ms).then((x) => Array.isArray(x?.processInfo) ? x.processInfo.map((p) => [p.type, p.id, p.cpuTime ?? 0]) : null, () => null);
+      const preCrash = await listProcs(5000);
       await snap("before the crash");
       chainAt(`${what}: the page crashes`);
       t0 = Date.now();
@@ -1228,6 +1238,26 @@ try {
       await raw("Target.closeTarget", { targetId: P.targetId }, undefined, 10_000).catch(() => {});
       mark("closed");
       snapAt("closed");
+      {
+        const left = () => 30_000 - (Date.now() - t0);
+        const remain = left();
+        const now = remain > 0 ? await listProcs(Math.min(5000, remain)) : null;
+        let pid = null, rise = 0;
+        for (const [type, id, cpu] of now ?? []) {
+          const was = (preCrash ?? []).find((x) => x[0] === "renderer" && x[1] === id);
+          if (type === "renderer" && was && cpu - was[2] > rise) { rise = cpu - was[2]; pid = id; }
+        }
+        if (rise < 0.3) pid = null;
+        let gone = false;
+        while (pid !== null && left() > 0) {
+          const list = await listProcs(Math.max(1, Math.min(5000, left())));
+          if (list && !list.some((x) => x[1] === pid)) { gone = true; break; }
+          await sleep(Math.max(0, Math.min(100, left())));
+        }
+        mark(gone ? "crashed renderer exited" : "crashed renderer wait failed");
+        console.log(`  (${what}: the crashed renderer, by heuristic (largest cpu rise since before the crash): ${pid === null ? `none found (${now === null || preCrash === null ? "a process list was unreadable, or the 30 s had passed" : "no renderer rose 0.3 s"})` : `pid ${pid} (+${Math.round(rise * 100) / 100} s), ${gone ? `observed absent ${marks["crashed renderer exited"]} ms after the crash` : "not observed absent within 30 s of the crash"}`})`);
+        if (!gone) { await said(false); throw new Error(`${what}: the crashed renderer ${pid === null ? "couldn't be identified" : `(pid ${pid}) wasn't observed to exit within 30 s`}, so the site wasn't opened again`); }
+      }
       chainAt(`${what}: a new page`);
       try {
         Q = await newPage(undefined, qt);
