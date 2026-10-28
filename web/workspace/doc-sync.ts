@@ -97,7 +97,9 @@ export class DocSync {
           // the flight before anything more is asked (astra's CORR-2C3-1))
           if (await this.pull(id, startHere, link, conn)) await this.send(id, link, conn);
         } catch (e) {
-          this.stop(id, "invalid", (e as Error)?.message ?? String(e));
+          // (a failure of a flight whose connection is gone (a write that failed after a reconnect) is that flight's: the
+          // newer connection's flight is not stopped by it (astra's r2 CORR-2C3-1))
+          this.stop(id, "invalid", (e as Error)?.message ?? String(e), conn);
         }
       } while (this.again.has(id));
     })().finally(() => this.flights.delete(id));
@@ -110,8 +112,10 @@ export class DocSync {
   /** Settled: every flight done (tests). */
   async idle() { while (this.flights.size) await Promise.allSettled([...this.flights.values()]); }
 
-  // (false: what a flight's pull returns for a stop)
-  private stop(id: string, code: string, detail?: string): false {
+  // (false: what a flight's pull returns for a stop.  `conn`: the flight's connection; a stop learned on one that is
+  // gone is dropped, so nothing an older connection answers or fails at stops the notebook for the newer one)
+  private stop(id: string, code: string, detail?: string, conn?: number): false {
+    if (conn !== undefined && conn !== this.conn) return false;
     this.stopped.set(id, { code, detail: detail?.slice(0, 300), at: (this.opts.now ?? Date.now)() });
     this.events.push({ t: "stopped", doc: id, code, detail });
     return false;
@@ -147,7 +151,7 @@ export class DocSync {
         const a = await this.ask(link, req, { t: "doc_claim", owner: link.owner, doc: id, epoch, client: slot.client });
         if (a.t === "error") { this.refused(id, a, conn); return; }
         const c = a.claim as { client?: string; fgen?: number; next_cseq?: number } | undefined;
-        if (!c || c.client !== slot.client || !Number.isSafeInteger(c.fgen)) return this.stop(id, "invalid", "a claim's answer");
+        if (!c || c.client !== slot.client || !Number.isSafeInteger(c.fgen)) return this.stop(id, "invalid", "a claim's answer", conn);
         await this.tx(id, js.start.n, (st) => recordClaim(st, id, { gen: slot.gen, client: slot.client, epoch, fgen: c.fgen }));
         continue;
       }
@@ -161,11 +165,11 @@ export class DocSync {
       let bytes = 0;
       for (let i = 0; i < rows.length; i++) {
         const env = stored[i]?.env;
-        if (!env) return this.stop(id, "invalid", "an unsent patch isn't stored");
+        if (!env) return this.stop(id, "invalid", "an unsent patch isn't stored", conn);
         const { time: _t, parents, ...payload } = env;
         const b = enc.encode(JSON.stringify(payload));
         if (bytes + b.length > LIMITS.batchBytes && envs.length) break;
-        if (b.length > LIMITS.batchBytes) return this.stop(id, "limit", "a patch over 1 MiB (blobs are 2c-4's)");
+        if (b.length > LIMITS.batchBytes) return this.stop(id, "limit", "a patch over 1 MiB (blobs are 2c-4's)", conn);
         bytes += b.length;
         parts.push(b);
         envs.push({ cseq: rows[i].cseq, id: rows[i].time, parents: parents ?? [], size: b.length });
@@ -176,6 +180,9 @@ export class DocSync {
       if (!this.live(id, conn)) return;
       const upTo = envs[envs.length - 1].cseq as number, req = link.reserve();
       await this.tx(id, js.start.n, (st) => markSent(st, id, { gen: slot.gen, client: slot.client, upTo, fgen: slot.fgen, epoch, req }));
+      // (admitted again after the write: the connection may have gone, or the notebook been held or stopped, while it
+      // committed; the marked rows are sent again by a later flight (astra's r2 CORR-2C3-1))
+      if (!this.live(id, conn)) return;
       const a = await this.ask(link, req, { t: "batch", owner: link.owner, doc: id, epoch, kind: "notebook", patches: envs, body: toB64(body), fgen: { [slot.client]: slot.fgen } });
       if (a.t === "ack") {
         const n = await this.tx(id, js.start.n, (st) => acked(st, id, { gen: slot.gen, client: slot.client, upTo, epoch, req }));
@@ -233,15 +240,15 @@ export class DocSync {
         this.refused(id, a, conn);
         return false;
       }
-      if (a.t !== "batches" || a.owner !== link.owner || a.doc !== id || !Array.isArray(a.items)) return this.stop(id, "invalid", "a pull's answer");
+      if (a.t !== "batches" || a.owner !== link.owner || a.doc !== id || !Array.isArray(a.items)) return this.stop(id, "invalid", "a pull's answer", conn);
       // (a snapshot: keeping the local root, debt and mark across one needs 2c-4: stopped here on DEV (astra's A5))
-      if (a.snapshot) return this.stop(id, "snapshot", "a snapshot start is 2c-4's");
+      if (a.snapshot) return this.stop(id, "snapshot", "a snapshot start is 2c-4's", conn);
       const items = a.items as Record<string, unknown>[];
       if (!items.length) return true;
       const from: ChainState = cursor ? { seq: cursor.after, recv: cursor.recv, chain: fromHex(cursor.chain) } : chainStart(link.owner, id, epoch);
       const page: ChainedBatch[] = items.map((b) => ({ seq: b.seq as number, recv: b.recv as number, epoch, author: String(b.author), writer: String(b.writer), envs: JSON.stringify(b.patches), body: fromB64(b.body, LIMITS.batchBytes), chain: String(b.chain) }));
       const v = verifyChainPage({ epoch }, from, page);
-      if (!v.ok) return this.stop(id, "chain", `${v.why} at seq ${v.at}`);
+      if (!v.ok) return this.stop(id, "chain", `${v.why} at seq ${v.at}`, conn);
       // (each patch: its envelope and its payload slice, the stored patch again; one that carries its own time or
       // parents is refused, as sync-server §5.2 says)
       const rows: { time: string; env: Record<string, unknown> }[] = [];
@@ -250,7 +257,7 @@ export class DocSync {
         for (const e of items[i].patches as { id: string; parents: string[]; size: number }[]) {
           const payload = JSON.parse(dec.decode(page[i].body.subarray(at, at + e.size)));
           at += e.size;
-          if (payload && ("time" in payload || "parents" in payload)) return this.stop(id, "invalid", "a payload with its own time or parents");
+          if (payload && ("time" in payload || "parents" in payload)) return this.stop(id, "invalid", "a payload with its own time or parents", conn);
           rows.push({ time: e.id, env: { ...payload, time: e.id, parents: e.parents } });
         }
       }
