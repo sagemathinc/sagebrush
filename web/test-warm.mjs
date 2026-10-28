@@ -105,6 +105,9 @@ try {
   ok(false, String(e?.message ?? e).slice(0, 300));
 } finally {
   ws.close();
+  // (Chromium writes into its profile until it exits: wait for it, then remove it)
+  const exited = new Promise((r) => chrome.once("exit", r));
   chrome.kill();
-  rmSync(profile, { recursive: true, force: true });
+  await Promise.race([exited, sleep(5000)]);
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
 }
