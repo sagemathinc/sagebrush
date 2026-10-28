@@ -88,9 +88,23 @@ async function openDialog({ wait = true } = {}) {
   // (on a timeout, the dialog's state: which part of the open didn't happen)
   const why = (e) => ev(`JSON.stringify({ g: ${g}, generation: window.sagebrush.share.generation, selection: !!window.sagebrush.share.selection, analyzing: window.sagebrush.share.analyzing, rows: document.querySelectorAll('#sharelist .sharerow').length, busy: window.sagebrush.share.busy, open: document.querySelector('#sharedlg').open, signin: !document.querySelector('#sharesignin').hidden, form: !document.querySelector('#shareform').hidden, status: document.querySelector('#sharestatus').textContent, progress: document.querySelector('#shareprogress')?.textContent, result: document.querySelector('#shareresult').textContent })`).catch((x) => String(x)).then((state) => { throw new Error(`${e.message} ${state}`); });
   await until(`window.sagebrush.share.generation > ${g} && !!window.sagebrush.share.selection && document.querySelectorAll('#sharelist .sharerow').length > 0`).catch(why);
-  if (wait) await until("/^(Checked|Found no|Stopped)/.test(document.querySelector('#sharestatus').textContent)", 60000).catch(why);
+  // (this open's own result: no analysis running, so an earlier open's "Checked…" isn't taken for it)
+  if (wait) await until("!window.sagebrush.share.analyzing && /^(Checked|Found no|Stopped)/.test(document.querySelector('#sharestatus').textContent)", 60000).catch(why);
 }
 const closeDialog = () => ev("document.querySelector('#sharedlg').close()");
+// (the "checking" live region's every change, with whether the dialog was open then: what a screen reader would hear)
+// (recorded as each text is set, synchronously: a MutationObserver would see the dialog as it is a task later)
+// (and how many frames the dialog had rendered since showModal: a frame counter started by showModal itself, its
+// first callback running before the first frame's drawing, so `rendered` is the callbacks seen minus one)
+const RECORD_LIVE = "(() => { const el = document.querySelector('#sharechecking'), d = document.querySelector('#sharedlg'); const desc = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent'); window.__live = []; let frames = 0, gen = 0; const sm = HTMLDialogElement.prototype.showModal; HTMLDialogElement.prototype.showModal = function () { const r = sm.call(this); if (this === d) { frames = 0; const g = ++gen; const tick = () => { if (g !== gen) return; frames++; if (d.open) requestAnimationFrame(tick); }; requestAnimationFrame(tick); } return r; }; Object.defineProperty(el, 'textContent', { configurable: true, get() { return desc.get.call(this); }, set(v) { window.__live.push({ text: String(v), open: d.open, rendered: Math.max(0, frames - 1) }); desc.set.call(this, v); } }); })()";
+// (said in order: "Checking…" only once the dialog is shown, then the outcome, which is never removed; a check
+// that answers before the next frame may go straight to the outcome, so "Checking…" is required only for slow ones)
+const liveOrder = (seq, outcome, slow = true) => {
+  const said = seq.filter((x) => x.text).map((x) => x.text);
+  const order = slow ? said.length === 2 && said[0] === "Checking your sign-in…" : said.length === 1 || (said.length === 2 && said[0] === "Checking your sign-in…");
+  // (and nothing said before the dialog has been drawn at least once: board's r4b HOLD 1)
+  return seq.every((x) => !/Checking/.test(x.text) || x.open) && seq.every((x) => !x.text || x.rendered >= 1) && order && said.at(-1) === outcome && seq.at(-1)?.text === outcome;
+};
 // A held stand-in for the analysis worker: messages to the page wait until released.
 const HOLD = `(() => {
   const t = window.sagebrush.shareTest;
@@ -348,10 +362,122 @@ try {
     ok(await ev("!document.querySelector('#shareform').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareunreachable').hidden"), "a 503 from the sign-in check: the form as before, not 'Sign in', and the list opens");
     await closeDialog();
     await ev("document.querySelector('#sharemenu').click()");
-    await until("document.querySelector('#sharedlg').open", 10000).catch(() => {});
+    await until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking'", 10000).catch(() => {});
     ok(await ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareform').hidden"), "...and File → Share again: still the Share dialog, not Copy share link");
     await closeDialog();
     await ev("window.fetch = window.__fetch");
+  }
+
+  // ---- #207 board's notes: the dialog opens at once while the check runs, and a close meanwhile ends that open
+  {
+    const slow = (ms) => ev(`(() => { const f = window.__fetch ?? window.fetch; window.__fetch = f; window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? new Promise((r) => setTimeout(r, ${ms})).then(() => f(u, o)) : f(u, o)); })()`);
+    await slow(1500);
+    await ev(RECORD_LIVE);
+    const t0 = Date.now();
+    await ev("document.querySelector('#sharemenu').click()");
+    await until("document.querySelector('#sharedlg').open", 1000).catch(() => {});
+    const early = await ev("({ open: document.querySelector('#sharedlg').open, checking: document.querySelector('#sharechecking').dataset.state === 'checking', form: !document.querySelector('#shareform').hidden, signin: !document.querySelector('#sharesignin').hidden, link: !document.querySelector('#sharelink').disabled && !document.querySelector('#shareup').contains(document.querySelector('#sharelink')) })");
+    ok(Date.now() - t0 < 1000 && early.open && early.checking && !early.form && !early.signin && early.link, "a slow sign-in check: the dialog is open at once, saying it's checking, its link usable: " + JSON.stringify(early));
+    await until("!document.querySelector('#shareform').hidden", 10000).catch(() => {});
+    const seq0 = await ev("window.__live");
+    ok(liveOrder(seq0, "Signed in: choose what to upload."), "the live region, signed in: empty while the dialog opens, then 'Checking…' (the dialog open), then the outcome, kept: " + JSON.stringify(seq0));
+    ok(await ev("!document.querySelector('#shareform').hidden && document.querySelector('#sharechecking').dataset.state !== 'checking'"), "...then the form, the 'checking' note gone");
+    await until("/^(Checked|Found no|Stopped)/.test(document.querySelector('#sharestatus').textContent)", 60000).catch(() => {});
+    await closeDialog();
+    const g = await ev("window.sagebrush.share.generation");
+    await ev("document.querySelector('#sharemenu').click()");
+    await until("document.querySelector('#sharedlg').open", 1000).catch(() => {});
+    await sleep(200);
+    await closeDialog();
+    await sleep(2500);
+    ok(await ev(`!document.querySelector('#sharedlg').open && window.sagebrush.share.generation === ${g}`), "closed while checking: the check's end opens nothing, and no file list is made");
+    // (board's note b: the link, used mid-check: it copies, closes the dialog, and that open stops there)
+    await ev("document.querySelector('#status').textContent = ''");
+    await ev("document.querySelector('#sharemenu').click()");
+    await until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state === 'checking'", 1000).catch(() => {});
+    await sleep(200);
+    await ev("document.querySelector('#sharelink').click()");
+    await sleep(2500);
+    ok(await ev(`!document.querySelector('#sharedlg').open && /^link (copied|in the address bar)$/.test(document.querySelector('#status').textContent) && location.hash.length > 1 && window.sagebrush.share.generation === ${g}`), "Copy link while checking: the link is copied and the dialog closed, and the check's end opens nothing: " + (await ev("document.querySelector('#status').textContent")));
+    // (the copied link left in the address bar is taken out: nothing later reads it)
+    await ev("history.replaceState(null, '', location.pathname + location.search)");
+    await ev("window.fetch = window.__fetch");
+  }
+  // ---- nothing known (a fresh page whose every check fails), then a 404: board's untested row, and note 2
+  {
+    const { browserContextId } = await raw("Target.createBrowserContext");
+    const q = await newPage(browserContextId);
+    // (the stub before the page's own scripts: Page enabled first, and the call's answer checked, as raw() hides CDP errors)
+    await q.send("Page.enable");
+    const added = await q.send("Page.addScriptToEvaluateOnNewDocument", { source: "(() => { const f = window.fetch; window.__me = 503; window.__served = []; window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? (window.__served.push(window.__me), Promise.resolve(new Response('x', { status: window.__me }))) : f(u, o)); })()" });
+    ok(!!added?.identifier, "(the fresh page's /api/share/me stub is registered: " + JSON.stringify(added) + ")");
+    await q.send("Page.navigate", { url: dev.site + "/" });
+    await q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+    ok((await q.ev("window.__me ?? null")) === 503, "(...and in place in the page, before its first check)");
+    // (on a failure, the dialog's state: which part of it is shown)
+    const st = () => q.ev("JSON.stringify({ open: document.querySelector('#sharedlg').open, checking: document.querySelector('#sharechecking').dataset.state === 'checking', up: !document.querySelector('#shareup').hidden, unreachable: !document.querySelector('#shareunreachable').hidden, signin: !document.querySelector('#sharesignin').hidden, form: !document.querySelector('#shareform').hidden, menu: document.querySelector('#sharemenu').textContent, stubbed: window.__me, status: document.querySelector('#status')?.textContent })");
+    await q.ev(RECORD_LIVE);
+    const t0 = Date.now();
+    await q.ev("document.querySelector('#sharemenu').click()");
+    // (until the outcome is said, not only decided: an answer before the dialog's first frame sets the state at once
+    // and says the outcome once the dialog has been drawn, up to two frames or 50 ms later)
+    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking' && !!document.querySelector('#sharechecking').textContent", 12000).catch(() => {});
+    const seq503 = await q.ev("window.__live");
+    ok(liveOrder(seq503, "Couldn't reach the server to check your sign-in.", false), "the live region, no answer (at once): 'Checking…' (the dialog open), then 'Couldn't reach the server…', kept: " + JSON.stringify(seq503));
+    // (the end state, apart from the stub: the stubbed 503's check ends within its 10 s bound)
+    ok(Date.now() - t0 < 11000 && (await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking'")), `(the check ends: ${Date.now() - t0} ms) ` + (await st()));
+    ok(await q.ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareup').hidden && !document.querySelector('#shareunreachable').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "nothing known and the check fails again: the dialog says why, with neither 'Sign in' nor the form: " + (await st()));
+    await q.ev("document.querySelector('#sharedlg').close()");
+    // (frames that stop after the first one, as in a tab hidden just then: the outcome is still said, within the
+    // page's 1 s fallback; at 91556f97 the first frame turned that fallback off and nothing was ever said)
+    await q.ev("(() => { const r = window.requestAnimationFrame; window.__raf = r; let armed = false, stopped = false; window.requestAnimationFrame = (cb) => r((ts) => { if (stopped) return; if (!armed) { armed = true; setTimeout(() => (stopped = true), 0); } cb(ts); }); })()");
+    await q.ev(RECORD_LIVE);
+    const t1 = Date.now();
+    await q.ev("document.querySelector('#sharemenu').click()");
+    await q.until("document.querySelector('#sharedlg').open && !!document.querySelector('#sharechecking').textContent", 5000).catch(() => {});
+    const seqStop = await q.ev("window.__live");
+    const saidStop = seqStop.filter((x) => x.text).map((x) => x.text);
+    ok(saidStop.at(-1) === "Couldn't reach the server to check your sign-in." && seqStop.every((x) => !x.text || x.open) && Date.now() - t1 < 3000, `the live region, frames stopped after the first: the outcome still said, within ${Date.now() - t1} ms: ` + JSON.stringify(seqStop));
+    await q.ev("window.requestAnimationFrame = window.__raf");
+    await q.ev("document.querySelector('#sharedlg').close()");
+    // (set before this open's own check, which reads it when it asks)
+    await q.ev("window.__me = 404");
+    const asked = await q.ev("window.__served.length");
+    await q.ev("document.querySelector('#sharemenu').click()");
+    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking'", 12000).catch(() => {});
+    ok((await q.ev(`window.__served.slice(${asked}).join()`)) === "404", "(this open's check was answered 404 by the stub: " + (await q.ev("window.__served.join()")) + ")");
+    ok(await q.ev("document.querySelector('#sharedlg').open && document.querySelector('#shareup').hidden && !document.querySelector('#sharelink').hidden"), "then a 404 (this site has no sharing): no Upload section at all, the link still there: " + (await st()));
+    await raw("Target.closeTarget", { targetId: q.targetId });
+    await raw("Target.disposeBrowserContext", { browserContextId });
+  }
+  // ---- board's H1: Share clicked on a fresh page while its FIRST check is still pending (slow): the dialog
+  // at once, saying it's checking, never a copied link; then that check's own answer (not asked twice)
+  for (const [code, want] of [[401, "signin"], [404, "linkonly"]]) {
+    const { browserContextId } = await raw("Target.createBrowserContext");
+    const q = await newPage(browserContextId);
+    await q.send("Page.enable");
+    const added = await q.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const f = window.fetch; window.__me = ${code}; window.__served = []; window.__pending = 0;
+      window.fetch = (u, o) => (String(u).endsWith('/api/share/me') ? (window.__pending++, new Promise((r) => setTimeout(r, 6000)).then(() => (window.__pending--, window.__served.push(window.__me), new Response('x', { status: window.__me })))) : f(u, o)); })()` });
+    await q.send("Page.navigate", { url: dev.site + "/" });
+    // (the page has opened its notebook, and its first check is still pending: the slow-server case)
+    await q.until("!!document.querySelector('#sharemenu') && !!window.sagebrush && !document.body.classList.contains('opening')", 30000);
+    const before = await q.ev("({ pending: window.__pending, served: window.__served.length, hash: location.hash, status: document.querySelector('#status').textContent })");
+    await q.ev(RECORD_LIVE);
+    const t0 = Date.now();
+    await q.ev("document.querySelector('#sharemenu').click()");
+    await q.until("document.querySelector('#sharedlg').open && /Checking/.test(document.querySelector('#sharechecking').textContent)", 1000).catch(() => {});
+    const early = await q.ev("({ open: document.querySelector('#sharedlg').open, checking: document.querySelector('#sharechecking').textContent })");
+    ok(!!added?.identifier && before.pending === 1 && before.served === 0 && early.open && /Checking/.test(early.checking) && Date.now() - t0 < 1500, `H1 (${code}) Share clicked while the first check is pending: the dialog is open at once, saying it's checking: ` + JSON.stringify({ before, early }));
+    await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking'", 12000).catch(() => {});
+    const end = await q.ev("({ open: document.querySelector('#sharedlg').open, up: !document.querySelector('#shareup').hidden, signin: !document.querySelector('#sharesignin').hidden, form: !document.querySelector('#shareform').hidden, unreachable: !document.querySelector('#shareunreachable').hidden, served: window.__served.join(), hash: location.hash, status: document.querySelector('#status').textContent })");
+    const right = want === "signin" ? end.up && end.signin && !end.form && !end.unreachable : !end.up && !end.signin && !end.form;
+    ok(end.open && right && end.served === String(code), `H1 (${code}) ...then the first check's own answer, asked once (${want === "signin" ? "Sign in" : "the link only"}): ` + JSON.stringify(end));
+    ok(end.hash === before.hash && !/link (copied|in the address bar)/.test(end.status), "H1 (" + code + ") ...and never a copied link: the address bar's hash unchanged, no 'link copied'");
+    const seqH = await q.ev("window.__live");
+    const outcome = code === 401 ? "Sign in with CoCalc to upload." : "Uploading isn't available on this site.";
+    ok(liveOrder(seqH, outcome), `H1 (${code}) the live region: 'Checking…' only with the dialog open, then "${outcome}", kept: ` + JSON.stringify(seqH));
+    await raw("Target.closeTarget", { targetId: q.targetId });
+    await raw("Target.disposeBrowserContext", { browserContextId });
   }
 
   // ---- #172 r2's review: closing mid-upload (board's UI-B1, astra3's CORR-172-ASTRA-4)

@@ -4,10 +4,16 @@
 // state is process-wide), one test (no parallel interleaving).
 use sagebrush_web::*;
 
+// SAFETY: sb_reply_ptr()/sb_reply_len() describe the engine's current reply
+// buffer, which nothing changes between the two calls and the copy.
+#[allow(unsafe_code)]
 fn reply() -> String {
     unsafe { String::from_utf8_lossy(std::slice::from_raw_parts(sb_reply_ptr(), sb_reply_len())).into_owned() }
 }
 
+// SAFETY: `what` is a live &str, so (ptr, len) is readable for the call, as
+// sb_reserve requires.
+#[allow(unsafe_code)]
 fn reserve(what: &str, bytes: f64) -> f64 {
     unsafe { sb_reserve(what.as_ptr(), what.len(), bytes) }
 }

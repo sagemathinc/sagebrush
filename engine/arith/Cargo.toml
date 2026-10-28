@@ -13,3 +13,5 @@ num-integer = "0.1"
 num-traits = "0.2"
 dashu-int = "0.6"
 
+[lints]
+workspace = true

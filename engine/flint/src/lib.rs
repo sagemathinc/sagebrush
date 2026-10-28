@@ -66,6 +66,7 @@ struct FmpzMat {
 }
 
 /// An integer as FLINT's fmpz, read back as a BigInt.
+#[allow(unsafe_code)]
 fn fmpz_big(f: *const c_long) -> BigInt {
     // SAFETY: f points to an initialized fmpz.
     take_string(unsafe { fmpz_get_str(std::ptr::null_mut(), 10, f) }).parse().unwrap()
@@ -77,6 +78,7 @@ fn fmpz_big(f: *const c_long) -> BigInt {
 pub struct Fmpz(c_long);
 
 impl Fmpz {
+    #[allow(unsafe_code)]
     fn new() -> Fmpz {
         let mut f = Fmpz(0);
         // SAFETY: fmpz_init writes the zero representation.
@@ -89,6 +91,7 @@ impl Fmpz {
 }
 
 impl Drop for Fmpz {
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
         // SAFETY: initialized by fmpz_init.
         unsafe { fmpz_clear(&mut self.0) };
@@ -101,6 +104,7 @@ pub struct FMat {
 }
 
 impl FMat {
+    #[allow(unsafe_code)]
     pub fn zero(rows: usize, cols: usize) -> FMat {
         // SAFETY: fmpz_mat_init allocates and zeroes the matrix.
         unsafe {
@@ -111,6 +115,7 @@ impl FMat {
     }
 
     /// From row-major entries.
+    #[allow(unsafe_code)]
     pub fn new(rows: usize, cols: usize, d: &[BigInt]) -> FMat {
         let a = FMat::zero(rows, cols);
         for i in 0..rows {
@@ -132,6 +137,7 @@ impl FMat {
     }
 
     /// Row-major entries.
+    #[allow(unsafe_code)]
     pub fn entries(&self) -> Vec<BigInt> {
         let mut v = vec![];
         for i in 0..self.m.r {
@@ -148,6 +154,7 @@ impl FMat {
     }
 
     /// det, left as FLINT's integer.
+    #[allow(unsafe_code)]
     pub fn det_raw(&self) -> Fmpz {
         let mut d = Fmpz::new();
         // SAFETY: square matrix (FLINT aborts otherwise).
@@ -162,6 +169,7 @@ impl FMat {
     }
 
     /// rref, with den left as FLINT's integer.
+    #[allow(unsafe_code)]
     pub fn rref_raw(&self) -> (FMat, Fmpz, usize) {
         let mut b = FMat::zero(self.rows(), self.cols());
         let mut den = Fmpz::new();
@@ -175,6 +183,7 @@ impl FMat {
     }
 
     /// inv, with den left as FLINT's integer.
+    #[allow(unsafe_code)]
     pub fn inv_raw(&self) -> Option<(FMat, Fmpz)> {
         let mut b = FMat::zero(self.rows(), self.cols());
         let mut den = Fmpz::new();
@@ -192,6 +201,7 @@ impl FMat {
     }
 
     /// solve, with den left as FLINT's integer.
+    #[allow(unsafe_code)]
     pub fn solve_raw(&self, rhs: &FMat) -> Option<(FMat, Fmpz)> {
         let mut x = FMat::zero(self.cols(), rhs.cols());
         let mut den = Fmpz::new();
@@ -204,11 +214,13 @@ impl FMat {
         }
     }
 
+    #[allow(unsafe_code)]
     pub fn rank(&self) -> usize {
         // SAFETY: valid matrix.
         unsafe { fmpz_mat_rank(&self.m) as usize }
     }
 
+    #[allow(unsafe_code)]
     pub fn mul(&self, o: &FMat) -> FMat {
         let mut c = FMat::zero(self.rows(), o.cols());
         // SAFETY: shapes match.
@@ -222,6 +234,7 @@ impl FMat {
     }
 
     /// charpoly, left as FLINT's polynomial.
+    #[allow(unsafe_code)]
     pub fn charpoly_poly(&self) -> FPoly {
         let mut cp = FPoly::empty();
         // SAFETY: valid polynomial; square matrix.
@@ -231,6 +244,7 @@ impl FMat {
 }
 
 impl Drop for FMat {
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
         // SAFETY: initialized by fmpz_mat_init.
         unsafe { fmpz_mat_clear(&mut self.m) };
@@ -243,6 +257,7 @@ pub struct FPoly {
 }
 
 impl FPoly {
+    #[allow(unsafe_code)]
     pub fn new(f: &[BigInt]) -> FPoly {
         let text = format!("{}  {}", f.len(), f.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(" "));
         let cs = CString::new(text).unwrap();
@@ -255,6 +270,7 @@ impl FPoly {
         }
     }
 
+    #[allow(unsafe_code)]
     fn empty() -> FPoly {
         // SAFETY: init.
         unsafe {
@@ -264,11 +280,13 @@ impl FPoly {
         }
     }
 
+    #[allow(unsafe_code)]
     pub fn coeffs(&self) -> Vec<BigInt> {
         // SAFETY: valid polynomial.
         parse_poly(&take_string(unsafe { fmpz_poly_get_str(&self.p) }))
     }
 
+    #[allow(unsafe_code)]
     pub fn mul(&self, o: &FPoly) -> FPoly {
         let mut r = FPoly::empty();
         // SAFETY: valid polynomials.
@@ -277,6 +295,7 @@ impl FPoly {
     }
 
     /// The gcd with positive leading coefficient.
+    #[allow(unsafe_code)]
     pub fn gcd(&self, o: &FPoly) -> FPoly {
         let mut r = FPoly::empty();
         // SAFETY: valid polynomials.
@@ -286,12 +305,14 @@ impl FPoly {
 }
 
 impl Drop for FPoly {
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
         // SAFETY: initialized by fmpz_poly_init.
         unsafe { fmpz_poly_clear(&mut self.p) };
     }
 }
 
+#[allow(unsafe_code)]
 fn take_string(p: *mut c_char) -> String {
     // SAFETY: FLINT returns a NUL-terminated string allocated with flint_malloc.
     let s = unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned();
@@ -310,6 +331,7 @@ fn parse_poly(s: &str) -> Vec<BigInt> {
 /// Factors f (coefficients constant term first, f != 0) as
 /// content * prod g_i^{e_i} with g_i irreducible and primitive with
 /// positive leading coefficient; returns (content, [(g_i, e_i)]).
+#[allow(unsafe_code)]
 pub fn factor(f: &[BigInt]) -> (BigInt, Vec<(Vec<BigInt>, u32)>) {
     let mut f = f.to_vec();
     while f.len() > 1 && f.last().map_or(false, |c| c.sign() == sagebrush_bigint::Sign::NoSign) {
