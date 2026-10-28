@@ -189,6 +189,21 @@ def reap():
             return
 
 
+def reap_orphans(keep):
+    """Reap every exited child of this process except keep (the running step's own bash, which Popen waits for)."""
+    while True:
+        try:
+            info = os.waitid(os.P_ALL, 0, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        except ChildProcessError:
+            return
+        if info is None or info.si_pid == keep:
+            return
+        try:
+            os.waitpid(info.si_pid, os.WNOHANG)
+        except ChildProcessError:
+            return
+
+
 def end_descendants(grace=10.0):
     """TERM, then (after grace) KILL, everything under this process; reaped and checked gone. Returns (found, left)."""
     found = descendants()
@@ -225,18 +240,25 @@ def run_step(script, cwd, env, limit):
     under this process is ended (and checked gone) at once; otherwise what the step leaves runs on into the job's
     later steps, as on CI, and is ended at the job's end. Returns (code, cleanup note or "")."""
     p = subprocess.Popen(["bash", "-eo", "pipefail", "-c", script], cwd=cwd, env=env, start_new_session=True)
+    end = time.monotonic() + max(limit, 0.001)
     try:
-        code = p.wait(timeout=max(limit, 0.001))
-    except subprocess.TimeoutExpired:
-        found, left = end_descendants()
-        p.wait()
-        return ("timeout" if not left else "timeout; processes left"), f"timed out: ended {found} process(es)" + (f"; {left} REMAIN" if left else "")
+        while True:
+            # (orphans re-parented here are reaped as they exit, as init would: a test that kills a process and
+            # waits for it to leave /proc must see it go; the step's own bash is left to Popen)
+            reap_orphans(p.pid)
+            code = p.poll()
+            if code is not None:
+                return code, ""
+            if time.monotonic() >= end:
+                found, left = end_descendants()
+                p.wait()
+                return ("timeout" if not left else "timeout; processes left"), f"timed out: ended {found} process(es)" + (f"; {left} REMAIN" if left else "")
+            time.sleep(0.05)
     except BaseException:
         end_descendants()
         if p.poll() is None:
             p.wait()
         raise
-    return code, ""
 
 
 def run_job(name, job, combo, args, state):
