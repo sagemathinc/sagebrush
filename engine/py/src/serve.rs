@@ -1223,7 +1223,7 @@ mod tests {
         assert!(big.len() == 1 << 20 && big.iter().all(|&b| b == b'x'));
         assert_eq!(lines.flattens, 1);
         let kept = lines.buf.capacity();
-        assert!(kept > 1 << 20 && kept > 3 * READ_CHUNK, "the big line left {kept} bytes of capacity");  // (the precondition)
+        assert!(kept > 1 << 20, "the big line left {kept} bytes of capacity");  // (the precondition; 1 MiB > 3 READ_CHUNK)
         let mut most = 0;
         for i in 0..100_000u64 {
             let l = take(&mut lines).unwrap();
