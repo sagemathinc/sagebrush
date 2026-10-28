@@ -71,7 +71,8 @@ jobs:
           path: engine/py/dist/*.whl
 
   # The floor, as a tested claim: the Linux x86_64 abi3 wheel built above, installed on
-  # Python 3.10 (the oldest supported) and 3.11, with the Sage suites
+  # Python 3.10 (the oldest supported) and 3.11, with the Sage suites, and the worker's owning print()
+  # (gh-130163: 3.10 and 3.11 keep CPython's borrowing print, so the owning one is in use there)
   floor:
     if: github.repository == 'sagemathinc/sagebrush'
     needs: [wheels]
@@ -95,6 +96,7 @@ jobs:
           python --version
           python -m pip install dist/*.whl
           python engine/py/test_python_floor.py --wheel
+          (cd engine/py && python -c "import sagebrush.session as S, test_runs as t; assert S._print_borrows_stdout(), 'the owning print() must be in use here'; t.test_print_gate(); t.test_strong_print(); t.test_print_across_runs()")
           python sage-tests/run_cpython.py -v
           python sage-tests/run_cpython.py --own -v
           python sage-tests/run_calculus.py
