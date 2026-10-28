@@ -29,6 +29,7 @@ import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeL
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
 import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE } from "../notebook/stores.js";
 import { dropRows } from "../notebook/journal-rows.js";
+import { SYNC_NB } from "../notebook/sync-rows.js";
 import { isBoard } from "../board/doc";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
@@ -147,8 +148,9 @@ export type WorkspaceErrorCode = "invalid" | "exists" | "missing" | "conflict" |
 /** The kinds of document whose saves go through the journal once it is active (plan-sync-slice2-client r4 §1a). */
 export const JOURNAL_KINDS = ["notebooks", "boards"] as const;
 const journalWriters = new Set<string>();
-/** This build saves documents of `kind` through the journal (web/notebook/journal.js for notebooks; boards' in 2c-1b):
- * activateJournal is refused until every kind has said so. */
+/** This build's documents of `kind` work under an active journal: notebooks are saved through it (web/notebook/journal.js);
+ * boards keep their save and follow the fences' phase (web/board/page.ts; their own journal is 2c-1b's).
+ * activateJournal is refused until every kind has said so, in the page that activates. */
 export function registerJournalWriter(kind: (typeof JOURNAL_KINDS)[number]): void {
   if (!(JOURNAL_KINDS as readonly string[]).includes(kind)) throw new TypeError(`no journal writer of kind ${String(kind)}`);
   journalWriters.add(kind);
@@ -290,7 +292,7 @@ type Resetting = { to: Identity; seq: number };
 const OPFS_EVERY_MS = 10_000;
 /** Test hooks at the reset's boundaries (A.3a): each is called holding the lock, and may throw, as a kill
  * there would stop the reset; the next open then resolves it. */
-export const RESET_HOOK: { afterFirstWitness?: () => void; afterPrepare?: () => void; afterPage?: (store: string, n: number, ms?: number) => void; openBudgetMs?: number; beforePurge?: () => void; afterIdb?: () => void | Promise<void>; afterFirstCommit?: () => void; failCleanup?: boolean } = {};
+export const RESET_HOOK: { afterFirstWitness?: () => void; afterPrepare?: () => void; afterPage?: (store: string, n: number, ms?: number) => void; openBudgetMs?: number; beforePurge?: () => void; afterIdb?: () => void | Promise<void>; afterFirstCommit?: () => void; failCleanup?: boolean; historyDb?: () => Promise<IDBDatabase | null> } = {};
 
 // (bytes compared four at a time where both are aligned: a 200 MB file in well under a second, inside one
 // transaction's callback, which can't yield; a byte at a time was 2 s there)
@@ -830,7 +832,8 @@ export class Workspace {
       // (the cleanup: a page per hold of the lock, then the switch, each in its own hold; then the witnesses committed)
       if (kind !== "keep") await this.cleanUp(true);
       this.identity = id;
-      this.durability = { state: "ok" };
+      // (the old store's purge still pending (the notebooks' history couldn't be had): writers refused until it's done)
+      this.durability = this.purgePending ? { state: "purging" } : { state: "ok" };
       await RESET_HOOK.afterIdb?.();
       return this.locked(async () => {
       // (published only if the workspace is still the one this reset made: astra's CORR-28F-1)
@@ -876,7 +879,7 @@ export class Workspace {
         if (wasResetting && !throws && this.durability.state === "resetting") {
           const { identity } = await this.metaState();
           if (identity) this.identity = identity;
-          this.durability = { state: "ok" };
+          this.durability = this.purgePending ? { state: "purging" } : { state: "ok" };
           await this.locked(async () => { await this.writeWitnesses(await this.sample(), true); await this.writeFence(); }, undefined, { internal: true });
           this.durabilityChanged();
         }
@@ -927,6 +930,16 @@ export class Workspace {
     }
     if (purge) {
       if (this.main) for (const st of ["files", "notebooks"]) if (await this.deletePage(this.main, st)) return "purge";
+      // (then the notebooks' history database, every row but its fence (2c-1d-iii §6): unknown while it can't be had,
+      // so the marker stays, writers stay refused, and the next open tries again)
+      const h = await this.purgeHistoryPage();
+      if (h === "unknown") {
+        // (writers refused meanwhile, here too: a row written now would be purged with the old ones at the next open)
+        this.purgePending = true;
+        if (this.durability.state === "ok") { this.durability = { state: "purging" }; this.durabilityChanged(); }
+        return "done";
+      }
+      if (h) return "purge";
       // (the old store emptied: writers let go; localStorage's part marked pending in the same transaction)
       await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").delete("purgeMain"); tx.objectStore("meta").put(true, "purgeLocal"); });
       this.purgePending = false;
@@ -984,6 +997,34 @@ export class Workspace {
       if (this.durability.state === "resetting" && ++this.resetPages % 20 === 0) this.durabilityChanged();
     }
     return n;
+  }
+  /** One page of the notebooks' history database's purge (2c-1d-iii §6, daybreak3's D3): at most RESET_PAGE keys,
+   * from a bounded getAllKeys page, each deleted by its key in the page's own transaction (never a range: the fence's
+   * key, the composite [FENCE, ""], sorts among the notebooks' and is never deleted); the journal's counters (its
+   * handles' and its budgets') only once nothing else is left.  How many, or "unknown" if the database can't be had. */
+  private async purgeHistoryPage(): Promise<number | "unknown"> {
+    let hdb: IDBDatabase | null = null;
+    try { hdb = RESET_HOOK.historyDb ? await RESET_HOOK.historyDb() : (this.hdb ??= await openHistoryDb()); } catch {}
+    if (!hdb) { console.warn("workspace: the notebooks' history couldn't be opened to empty it; tried again at the next open"); return "unknown"; }
+    try {
+      const n = await inTx(hdb, "history", "readwrite", async (tx) => {
+        const st = tx.objectStore("history");
+        const isFence = (k: IDBValidKey) => Array.isArray(k) && k[0] === FENCE && k[1] === "";
+        // (the counters: the handles' ([SYNC_NB, "n"]) and each namespace's budgets ([SYNC_NB, "b:..."]), a few)
+        const last = [...((await req(st.getAllKeys(IDBKeyRange.bound([SYNC_NB, "b:"], [SYNC_NB, "b:\uffff"])))) as IDBValidKey[])];
+        if (await req(st.getKey([SYNC_NB, "n"]))) last.push([SYNC_NB, "n"]);
+        const isLast = (k: IDBValidKey) => Array.isArray(k) && k[0] === SYNC_NB && (k[1] === "n" || String(k[1]).startsWith("b:"));
+        const keys = (await req(st.getAllKeys(null, RESET_PAGE + last.length + 1))) as IDBValidKey[];
+        const page = keys.filter((k) => !isFence(k) && !isLast(k)).slice(0, RESET_PAGE);
+        for (const k of page.length ? page : last) st.delete(k);
+        return page.length || last.length;
+      });
+      if (n) RESET_HOOK.afterPage?.("history", n);
+      return n;
+    } catch (e) {
+      console.warn("workspace: the notebooks' history couldn't be emptied yet; tried again at the next open:", e);
+      return "unknown";
+    }
   }
   /** Files' bytes' sizes, by their keys, from the index: read before the cleanup's pages, a page at a time
    * (writers are refused meanwhile), so its pages can be cut by bytes. */

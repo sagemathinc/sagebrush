@@ -21,6 +21,8 @@ pub fn vec_with_capacity<T>(n: usize, what: &'static str) -> Result<Vec<T>, Fail
 /// n zero bytes, from the allocator's zeroed allocation (as vec![0; n] has
 /// them: memory fresh from the system is already zero, so nothing is
 /// written), refused rather than aborting.
+// SAFETY: see the block below.
+#[allow(unsafe_code)]
 pub fn zeroed(n: usize, what: &'static str) -> Result<Vec<u8>, Fail> {
     if n == 0 {
         return Ok(Vec::new());

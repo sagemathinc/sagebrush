@@ -37,6 +37,7 @@ class FakeSession:
         self.gate = None  # (a restart waits for it when set)
         self.submit_gate = None  # (and a submit, once in_submit is set)
         self.in_submit = threading.Event()
+        self.rid = 0  # (the request in flight's id, as Session mints them)
 
     def alive(self):
         return self.live
@@ -50,15 +51,16 @@ class FakeSession:
             self.q = queue.Queue()
             self.live = True
         self.pending = code
+        self.rid += 1
         if code.startswith("auto:"):
             self.finish(code[5:])
-        return self.generation, self.q
+        return self.generation, self.q, self.rid
 
     def finish(self, result=None, stdout="", error_info=None):
         # (output streams first, in chunks, as the real worker sends it)
         for i in range(0, len(stdout), 64 * 1024):
-            self.q.put({"out": stdout[i:i + 64 * 1024]})
-        r = {"stdout": stdout, "result": result, "error": None if error_info is None else error_info["message"],
+            self.q.put({"out": stdout[i:i + 64 * 1024], "id": self.rid})
+        r = {"id": self.rid, "stdout": stdout, "result": result, "error": None if error_info is None else error_info["message"],
              "error_info": error_info, "displays": [], "seconds": 0.01}
         self.pending = None
         self.q.put(r)
@@ -504,7 +506,7 @@ def test_output_bounded_streaming():
     s = r.made[0]
     chunk = "y" * 65536
     for _ in range(1600):  # (100 MiB, in the worker's chunks)
-        s.q.put({"out": chunk})
+        s.q.put({"out": chunk, "id": s.rid})
     s.finish("1")
     until(run.done.is_set, "the run's end", 60)
     o = r.record(run.record["handle"])["output"]
@@ -1150,6 +1152,33 @@ def test_worker_real_signal():
     print("worker real signal: ok")
 
 
+def wt312_affected(version_info=None, implementation=None):
+    """FU-WORKERTHREADS-312: on CPython 3.12 before 3.12.10 a printing thread
+    can segfault when a Ctrl-C ends the run (measured on VM1: crashes on
+    3.12.3-3.12.9, master and PR A alike; none on 3.12.10-3.12.15 or 3.13; no
+    upstream fix identified, so the boundary is as measured).  By number only
+    (version_info[:3]): 3.12.0-3.12.9, their alphas and release candidates
+    included, are skipped; 3.12.10's pre-releases are not (not measured).
+    CPython only: another implementation reporting 3.12 isn't skipped."""
+    v = sys.version_info if version_info is None else version_info
+    impl = sys.implementation.name if implementation is None else implementation
+    return impl == "cpython" and (3, 12) <= tuple(v[:3]) < (3, 12, 10)
+
+
+def test_wt312_gate():
+    """Exactly which interpreters skip test_worker_threads' interrupted variants."""
+    skip = [(3, 12, 0), (3, 12, 3), (3, 12, 9)]
+    run = [(3, 11, 9), (3, 12, 10), (3, 12, 15), (3, 13, 0), (3, 14, 4)]
+    for v in skip:
+        assert wt312_affected(v + ("final", 0), "cpython"), v
+        assert wt312_affected(v + ("candidate", 1), "cpython"), v  # (by number: its pre-releases too)
+        assert not wt312_affected(v + ("final", 0), "pypy"), v
+    for v in run:
+        assert not wt312_affected(v + ("final", 0), "cpython"), v
+    assert not wt312_affected((3, 12, 10, "alpha", 1), "cpython")  # (3.12.10's pre-releases: not skipped)
+    print("worker threads gate: ok")
+
+
 def test_worker_threads():
     """astra PR120-SEM-6, on the real worker loop: output from a thread, a
     thread pool and the main thread at once, large enough to fill chunks,
@@ -1192,7 +1221,12 @@ def test_worker_threads():
         "t.join()\n"
         "errors\n")
     reqs = json.dumps({"code": code, "mode": "python"}) + "\n" + json.dumps({"code": "7", "mode": "python"}) + "\n"
-    for nth in (0, 3, 9):
+    nths = (0, 3, 9)
+    if wt312_affected():
+        nths = (0,)  # (the uninterrupted run still runs)
+        print("worker threads: the interrupted variants skipped on CPython %s (FU-WORKERTHREADS-312: a CPython 3.12 crash, "
+              "reproduced through 3.12.9, not from 3.12.10 on)" % sys.version.split()[0])
+    for nth in nths:
         r = subprocess.run([sys.executable, "-c", harness, str(nth)], input=reqs, capture_output=True, text=True, timeout=120)
         msgs = [json.loads(l) for l in r.stdout.splitlines()]  # (every line valid JSON)
         replies = [m for m in msgs if "result" in m]
@@ -1459,6 +1493,7 @@ if __name__ == "__main__":
     test_capture()
     test_capture_signal_boundaries()
     test_worker_real_signal()
+    test_wt312_gate()
     test_worker_threads()
     test_late_output_sealed()
     test_session_start_failure()

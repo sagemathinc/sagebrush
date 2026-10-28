@@ -707,11 +707,12 @@ def jupyter_bundle(scene_json, svg, title, page):
     import zlib
     if len(scene_json) + len(svg) <= JUPYTER_INLINE:
         return {"text/html": viewer_html(scene_json, svg, title), "image/svg+xml": svg, "text/plain": title}
-    path = os.path.join(".sagebrush", "plot3d-%08x-%x.html" % (zlib.crc32(scene_json.encode()), len(scene_json)))
+    # (v2: written whole, then renamed, so the name only ever holds a whole
+    # page; v1's pages, possibly cut short by a Ctrl-C, are never shown again)
+    path = os.path.join(".sagebrush", "plot3d-v2-%08x-%x.html" % (zlib.crc32(scene_json.encode()), len(scene_json)))
     if not os.path.exists(path):
         os.makedirs(".sagebrush", exist_ok=True)
-        with open(path, "w") as f:
-            f.write(page())
+        _write_page(path, page())
     size = "%.1f MB" % (os.path.getsize(path) / 1e6)
     full = os.path.abspath(path)
     project, home = os.environ.get("COCALC_PROJECT_ID"), os.environ.get("HOME", "").rstrip("/")
@@ -726,6 +727,154 @@ def jupyter_bundle(scene_json, svg, title, page):
         html = ('<div style="font-size:13px">The interactive 3D view is in <a href="%s" target="_blank">%s</a> '
                 '(%s; open it in a browser).</div>') % (_urlq(path), _esc(path), size)
     return {"text/html": html, "text/plain": "%s\n(interactive view: %s)" % (title, path)}
+
+
+# ------------------------------------------------------------------ pages on disk
+# A page is written to its writer's own temporary, named directly (one per
+# host, process and thread: .sagebrush/.plot3d-tmp/<host>/<pid>-<tid>), closed,
+# then renamed over its name.  Whatever an interrupted write of the same
+# writer left is overwritten, never searched for: the write touches its
+# temporary and its name, whatever else the directory holds.  The temporaries
+# of writers that died are _gc_temps()'s, once per session start.
+
+def _host():
+    import re
+    import socket
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", socket.gethostname()) or "host"
+
+
+def _temp_for(root):
+    import os
+    import threading
+    return os.path.join(root, ".plot3d-tmp", _host(), "%d-%d" % (os.getpid(), threading.get_ident()))
+
+
+def _write_page(path, text):
+    """text to path, atomically: its writer's temporary written whole and
+    closed, then renamed over path (same directory tree, so one filesystem).
+    A failure removes that temporary (by name) and raises."""
+    import os
+    tmp = _temp_for(os.path.dirname(path) or ".")
+    os.makedirs(os.path.dirname(tmp), exist_ok=True)
+    # (a file object, not a bare fd: if an interrupt skips the close, the
+    # object's finalizer still closes it as the frame unwinds)
+    f = open(tmp, "w", encoding="utf-8", opener=lambda p, fl: os.open(p, fl | getattr(os, "O_NOFOLLOW", 0), 0o666))
+    try:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+        f.close()
+        os.replace(tmp, path)
+    except OSError:
+        f.close()
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+_GC_BUDGET_S = 0.05      # (a pass's work, at most; the next pass goes on from its cursor)
+_GC_LOG_BYTES = 64 * 1024  # (the log rotates past this, to one backup, .1)
+
+
+def _pid_alive(pid):
+    import os
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # (EPERM: a live process of another user)
+    return True
+
+
+def _gc_temps(root=".sagebrush", budget_s=_GC_BUDGET_S, clock=None, alive=None):
+    """One time-bounded pass over this host's temporaries: a dead writer's is
+    removed; a live writer's (or a reused pid's) is kept; other hosts' are in
+    other directories, never read.  One deadline, from the pass's start, is
+    checked as each entry is fetched (the resume's seek included) and right
+    after each examination: a pass examines at least one entry and then stops
+    without fetching another, so it takes at most the budget and one entry.  A
+    pass that stops leaves a cursor (the last entry it kept), and the next
+    pass resumes after it.  Not guaranteed: eventual collection while merely
+    reading the kept entries before the dead ones exhausts each pass's budget
+    (a directory has no random access); a pass whose budget runs out in its
+    seek examines the entry it reached, which may re-examine a kept one rather
+    than move its cursor forward (if that entry is the cursor itself, the next
+    pass starts over, to examine the entries before it).  Each such pass still
+    logs that it stopped.  Each pass appends one
+    line to .plot3d-gc.log (rotated to one backup): what it removed and kept,
+    and whether it stopped with entries left.  Returns that line's record."""
+    import json
+    import os
+    import re
+    import time
+    clock = clock or time.monotonic
+    alive = alive or _pid_alive
+    d = os.path.join(root, ".plot3d-tmp", _host())
+    cursor_path = os.path.join(root, ".plot3d-gc.cursor")
+    try:
+        cursor = open(cursor_path, encoding="utf-8").read().strip()
+    except OSError:
+        cursor = ""
+    t0 = clock()
+    rec = {"at": time.time(), "removed": 0, "kept": 0, "stopped": False, "resumed_after": cursor or None}
+    try:
+        it = os.scandir(d)
+    except OSError:
+        return None  # (no temporaries on this host)
+    me = os.getpid()
+    seeking = bool(cursor)
+    resume = cursor   # (where the next pass resumes if this one stops: after an entry it kept)
+    with it:
+        for e in it:
+            # (one deadline, from the pass's start: checked as each entry is
+            # fetched, the seek's included, and again right after each
+            # examination, so that once the budget is spent the pass stops
+            # without fetching another entry.  An entry fetched past the deadline
+            # is the pass's one examined entry (even if it is the cursor itself,
+            # or before it: a re-examination, which keeps a kept one), so a pass
+            # takes at most the budget and one entry)
+            over = clock() - t0 > budget_s
+            if seeking and not over:
+                if e.name == cursor:
+                    seeking = False
+                continue
+            # (the seek ran out of budget exactly at the cursor: this pass can't
+            # move it forward, so the next one starts over, examining the entries
+            # before it instead of only reading them)
+            restart = seeking and e.name == cursor
+            seeking = False
+            m = re.fullmatch(r"(\d+)-(\d+)", e.name)
+            removed = False
+            if m and int(m.group(1)) != me and not alive(int(m.group(1))):
+                try:
+                    os.unlink(e.path)
+                    rec["removed"] += 1
+                    removed = True
+                except OSError:
+                    pass
+            if not removed:
+                rec["kept"] += 1
+                resume = "" if restart else e.name  # (the cursor is a kept entry: one removed couldn't be found again)
+            if over or clock() - t0 > budget_s:
+                rec["stopped"] = True  # (conservatively, even after the last entry)
+                break
+    if seeking:
+        rec["cursor_lost"] = True  # (its entry is gone, its writer done, and the pass read to the end in time: the next one starts over)
+    nxt = resume if rec["stopped"] else ""
+    try:
+        with open(cursor_path, "w", encoding="utf-8") as f:
+            f.write(nxt)
+        log = os.path.join(root, ".plot3d-gc.log")
+        if os.path.exists(log) and os.path.getsize(log) > _GC_LOG_BYTES:
+            os.replace(log, log + ".1")
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+    except OSError:
+        pass
+    return rec
 
 
 def _short(v):

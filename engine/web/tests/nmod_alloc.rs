@@ -17,6 +17,10 @@ static FIRST_ARMED: AtomicUsize = AtomicUsize::new(0);
 static FIRST_LIVE: AtomicUsize = AtomicUsize::new(0);
 static FIRST_SIZE: AtomicUsize = AtomicUsize::new(0);
 
+// SAFETY: every method forwards to `System` with the caller's own arguments,
+// so System's GlobalAlloc contract carries over; the counting only updates
+// atomics.
+#[allow(unsafe_code)]
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
         let p = System.alloc(l);
@@ -240,6 +244,10 @@ fn ops_beside_full_cache() {
 /// digits, from another op): at the call's first allocation the old reply
 /// is already freed, and the call's peak above the heap without it is
 /// within the op's bound (the request excluded, already allocated).
+// SAFETY (the ABI block below): `p` is a fresh `sb_alloc(req.len())` block, so
+// copying `req.len()` bytes of the live `req` into it is in bounds; `sb_call`
+// reads exactly those bytes, and `sb_free` returns the block with its length.
+#[allow(unsafe_code)]
 fn abi_frees_the_old_reply_first() {
     let mut s = 0x51u64;
     let abi = |req: &str| -> (usize, usize, usize, usize) {
