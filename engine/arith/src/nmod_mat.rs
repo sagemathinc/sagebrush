@@ -475,14 +475,21 @@ impl Mat {
     pub fn mul(&self, o: &Mat) -> Mat {
         assert_eq!(self.cols, o.rows);
         let m = self.m;
-        let bt = o.transpose();
+        let mut poll = Poll::new();
+        // (the transpose, polled by row: a K x C copy)
+        let mut bt = Mat::zero(o.cols, o.rows, m);
+        for i in 0..o.rows {
+            for j in 0..o.cols {
+                bt.d[j * o.rows + i] = o.d[i * o.cols + j];
+            }
+            poll.add(o.cols.max(1));
+        }
         let sq = (m.n as u128 - 1) * (m.n as u128 - 1);
         let batch = if sq == 0 { usize::MAX } else { (u128::MAX / sq).min(1 << 30) as usize };
         let mut c = Mat::zero(self.rows, o.cols, m);
         // (polled inside each dot product too, so a 1 x K x C product asks
         // about every 2^16 multiply-adds, not once per output row)
         let batch = batch.min(1 << 16);
-        let mut poll = Poll::new();
         for i in 0..self.rows {
             let a = self.row(i);
             for j in 0..o.cols {

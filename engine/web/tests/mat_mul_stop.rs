@@ -79,6 +79,11 @@ fn mat_mul_stops_in_every_phase() {
     // 1 x K x 1 with 300-digit entries: the BigInt loop, weighed by words
     let (a, b) = (text(&mut s, 1, 1 << 10, 300), text(&mut s, 1 << 10, 1, 300));
     phases("1xKx1 big", &req(&a, &b), &[("parse", 8), ("product", 4)]);
+    // single BigInt operations as the unit: 20000-digit entries (one
+    // parse, product or conversion each is the longest step between two
+    // checks; the longest gap is printed and held under 250 ms)
+    let (a, b) = (text(&mut s, 1, 16, 20000), text(&mut s, 16, 1, 20000));
+    phases("1xKx1 huge entries", &req(&a, &b), &[("parse", 4), ("product", 16)]);
     // 1 x K x M
     let (a, b) = (text(&mut s, 1, 1 << 10, 9), text(&mut s, 1 << 10, 1 << 8, 9));
     phases("1xKxM", &req(&a, &b), &[("parse", 30), ("product", 4)]);
