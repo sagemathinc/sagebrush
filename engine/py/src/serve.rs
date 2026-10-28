@@ -820,7 +820,7 @@ mod tests {
         assert!(lines.buf.capacity() <= READ_CHUNK);
     }
 
- `n` bytes a call, with EINTR between, then failing as told after `fail_after` bytes.
+    /// A writer taking at most `n` bytes a call, with EINTR between, then failing as told after `fail_after` bytes.
     struct Sink { got: Vec<u8>, n: usize, eintr: bool, fail_after: Option<(usize, ErrorKind)> }
     impl Write for Sink {
         fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
