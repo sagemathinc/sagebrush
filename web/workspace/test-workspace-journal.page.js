@@ -385,7 +385,95 @@ async function boardsFollowPhase() {
   w.close();
 }
 
-const CASES = [gated, upgradeAndOldBuilds, beforeActivation, activation, writersRefused, boardsFollowPhase, refusalRule, keptByLaterWrites, stopsCarriedOn, blockedFence, markAdopted, resetKeepsMeta, storeUnopened];
+// (the notebooks' history as a reset leaves it to be emptied: 650 notebooks' rows, half sorting before the fence's key
+// [FENCE, ""] and half after it, so the fence is inside the pages; and sync's rows, its counters among them)
+const SYNC_NB = "\u0001s:";
+const COUNTERS = [[SYNC_NB, "n"], [SYNC_NB, "b:m:local"], [SYNC_NB, "b:p:local"]];
+async function seedHistory(h) {
+  await new Promise((ok, no) => {
+    const tx = h.transaction("history", "readwrite"), st = tx.objectStore("history");
+    for (let i = 0; i < 325; i++) {
+      st.put({ nb: "11111111-0000-4000-8000-" + String(i).padStart(12, "0"), time: "t" + i, env: { i } });
+      st.put({ nb: "aaaaaaaa-0000-4000-8000-" + String(i).padStart(12, "0"), time: "t" + i, env: { i } });
+    }
+    for (const [nb, time] of COUNTERS) st.put({ nb, time, v: { bytes: 1, next: 1 } });
+    st.put({ nb: SYNC_NB, time: "d:local:x", v: { h: "h1", meta: 1 } });
+    st.put({ nb: SYNC_NB + "h1", time: "j", v: { j: 1 } });
+    tx.oncomplete = ok; tx.onerror = () => no(tx.error);
+  });
+}
+const allKeys = (h) => new Promise((ok, no) => { const r = h.transaction("history").objectStore("history").getAllKeys(); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+const isFenceKey = (k) => k[0] === FENCE && k[1] === "";
+const counterKey = (k) => COUNTERS.some((c) => c[0] === k[0] && c[1] === k[1]);
+
+async function resetPurgesHistory() {
+  // 2c-1d-iii §6 (daybreak3's D3, D4): a reset to a new workspace empties the notebooks' history, every row but its
+  // fence: RESET_PAGE keys a page, each by its key (the fence inside the pages kept), the counters last
+  {
+    const o = await named(), w = await open(o);
+    await w.activateJournal();
+    const h = await W.openHistoryDb();
+    await seedHistory(h);
+    const pages = [];
+    W.RESET_HOOK.afterPage = (store, n) => { if (store === "history") pages.push([n, allKeys(h)]); };
+    await w.reset("new");
+    await w.settled();
+    W.RESET_HOOK.afterPage = undefined;
+    const snaps = await Promise.all(pages.map(([n, p]) => p.then((ks) => ({ n, fence: ks.filter(isFenceKey).length, counters: ks.filter(counterKey).length, left: ks.length }))));
+    const last = snaps[snaps.length - 1], keys = await allKeys(h);
+    check(snaps.length >= 3 && snaps.every((x) => x.n <= W.RESET_PAGE && x.fence === 1) && snaps.slice(0, -1).every((x) => x.counters === 3) && last.n === 3 && last.counters === 0, "D3: the history emptied RESET_PAGE keys a page at most, the fence inside the pages kept at every page, the counters deleted last: " + J(snaps.map((x) => [x.n, x.counters, x.left])));
+    check(keys.length === 1 && isFenceKey(keys[0]) && (await meta(w, "purgeMain")) === undefined && J(phases(await fences(w))) === J(["journal", "journal", "journal"]), "D3/D4: then the history holds exactly its fence, the purge's marker dropped, the fences \"journal\": " + J(keys.length));
+    h.close();
+    w.close();
+  }
+  // (killed between pages, then opened again: resumed to the end; the marker and the counters kept meanwhile)
+  {
+    const o = await named();
+    let w = await open(o);
+    await w.activateJournal();
+    const h = await W.openHistoryDb();
+    await seedHistory(h);
+    let seen = 0;
+    W.RESET_HOOK.afterPage = (store) => { if (store === "history" && ++seen === 1) throw new Error("stopped here (test)"); };
+    const threw = await w.reset("new").then(() => false, () => true);
+    await w.settled();
+    W.RESET_HOOK.afterPage = undefined;
+    const mid = await allKeys(h);
+    // (the purge runs after the reset proper, in the background: a stop there is noted, not thrown to the reset)
+    check(mid.length > 1 && mid.filter(isFenceKey).length === 1 && mid.filter(counterKey).length === 3 && (await meta(w, "purgeMain")) === true, "D3: killed after the history's first page: the purge's marker, the counters and the fence kept: " + J({ threw, left: mid.length }));
+    w.close();
+    w = await open(o);
+    await w.settled();
+    const keys = await allKeys(h);
+    check(keys.length === 1 && isFenceKey(keys[0]) && (await meta(w, "purgeMain")) === undefined, "D3: …opened again, resumed to the end: exactly the fence left, the marker dropped");
+    h.close();
+    w.close();
+  }
+  // (the history database unavailable: the purge unknown, not done; the marker kept, retried at the next open)
+  {
+    const o = await named();
+    let w = await open(o);
+    await w.activateJournal();
+    const h = await W.openHistoryDb();
+    await seedHistory(h);
+    W.RESET_HOOK.historyDb = async () => null;
+    await w.reset("new").catch(() => {});
+    await w.settled();
+    const state = w.durability.state, left = (await allKeys(h)).length;
+    const wrote = await w.create("/during-the-purge.ipynb").then(() => true, () => false);
+    check((await meta(w, "purgeMain")) === true && left > 1 && w.quarantined && !wrote, "D3: the history database unavailable: the purge unknown, its marker kept, nothing deleted, writers refused meanwhile: " + J({ state, left, wrote }));
+    W.RESET_HOOK.historyDb = undefined;
+    w.close();
+    w = await open(o);
+    await w.settled();
+    const keys = await allKeys(h);
+    check(keys.length === 1 && isFenceKey(keys[0]) && (await meta(w, "purgeMain")) === undefined, "D3: …once it can be had, the next open finishes it: exactly the fence left");
+    h.close();
+    w.close();
+  }
+}
+
+const CASES = [gated, upgradeAndOldBuilds, beforeActivation, activation, writersRefused, boardsFollowPhase, refusalRule, keptByLaterWrites, stopsCarriedOn, blockedFence, markAdopted, resetKeepsMeta, storeUnopened, resetPurgesHistory];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
@@ -397,6 +485,7 @@ export async function run() {
     W.JOURNAL_HOOK.afterFence = undefined;
     W.JOURNAL_HOOK.unopened = undefined;
     W.RESET_HOOK.afterPage = undefined;
+    W.RESET_HOOK.historyDb = undefined;
   }
   return results;
 }

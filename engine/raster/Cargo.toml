@@ -17,3 +17,6 @@ crc32fast = "1"
 # pages the heap may grow by (src/wasm.rs; PNG plan r8 §2.2)
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dlmalloc = { version = "=0.2.14", default-features = false }
+
+[lints]
+workspace = true

@@ -474,6 +474,10 @@ mod tests {
             });
         }
 
+        // SAFETY: every method forwards to `System` with the caller's own arguments,
+        // so System's GlobalAlloc contract carries over; `note` only updates this
+        // thread's counters.  Tests only.
+        #[allow(unsafe_code)]
         unsafe impl GlobalAlloc for Spy {
             unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
                 let p = System.alloc(layout);
