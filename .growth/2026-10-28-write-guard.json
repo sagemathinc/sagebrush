@@ -1,0 +1,1 @@
+{"v": 1, "reason": "The workspace write's fid check before migrating, and the read-only pathOfFile(fid) (#276). Exact, from the size-gate rows of PR ci 40744380812 on ff9aa7df (job 123017016928): cli/pyjs.cjs 29078454 -> 29079758 = +1304.", "bytes": {"cli/pyjs.cjs": 1304}}

@@ -916,6 +916,68 @@ async function migrateOnWrite() {
   v.close();
 }
 
+// R6-A3-1: a write naming a data file by its fid touches nothing unless the entry at the path is that file, checked
+// before migrateOne (which would otherwise move another, unmigrated file's bytes first)
+async function writeGuard() {
+  const w = await v1([["/g/a.txt", "theirs"], ["/g/b.txt", "bee"]]);
+  const snap = async () => JSON.stringify({ entry: await rawGet(w.ws, "entries", "/g/a.txt"), fileBytes: await Promise.all((await rawKeys(w.ws, "fileBytes")).map(async (k) => [k, Array.from(new Uint8Array(await rawGet(w.ws, "fileBytes", k) ?? []))])), old: dec(await rawGet(w.main, "files", "/g/a.txt")),
+    meta: await Promise.all((await rawKeys(w.ws, "meta")).map(async (k) => [k, await rawGet(w.ws, "meta", k)])), ops: (await rawKeys(w.ws, "ops")).length, versions: (await rawKeys(w.ws, "versions")).length, left: await legacyLeft(w) });
+  const before = await snap();
+  const a0 = await rawGet(w.ws, "entries", "/g/a.txt");
+  check(!a0.migrated && await fails(w.write("/g/a.txt", "mine", { fid: "0123456789abcdef" }), "conflict"), "a write naming another file's fid, an unmigrated file at the path: refused");
+  check((await snap()) === before && dec((await w.read("/g/a.txt")).content) === "theirs", "…that file untouched: its entry, its old bytes where they were, nothing in fileBytes, no op, no version, the migration's state");
+  const b = await w.stat("/g/b.txt");
+  await w.write("/g/b.txt", "bee 2", { fid: b.fid });
+  check(dec((await w.read("/g/b.txt")).content) === "bee 2" && (await w.stat("/g/b.txt")).migrated === true, "the same fid: written, the file moved first, as before");
+  await w.create("/g/n.ipynb");
+  check(await fails(w.write("/g/n.ipynb", { cells: [] }, { fid: b.fid }), "conflict"), "a fid named, a notebook at the path: refused");
+  w.close();
+}
+
+// pathOfFile: a data file's path by its fid, read-only
+async function pathOfFile_() {
+  const w = await fresh();
+  await w.create("/p/a.txt", { content: "a" });
+  const a = await w.stat("/p/a.txt");
+  const ops0 = (await rawKeys(w.ws, "ops")).length;
+  let r = await w.pathOfFile(a.fid);
+  check(r.ok && r.path === "/p/a.txt" && r.entry.fid === a.fid, "pathOfFile: a live file by its fid");
+  await w.rename("/p/a.txt", "/q.txt");
+  r = await w.pathOfFile(a.fid);
+  check(r.ok && r.path === "/q.txt", "…followed after a rename");
+  check((await w.pathOfFile("ffffffffffffffff")).why === "none" && (await w.pathOfFile("")).why === "none", "…an unknown fid, or none: none");
+  const ops1 = (await rawKeys(w.ws, "ops")).length;
+  await w.pathOfFile(a.fid);
+  check((await rawKeys(w.ws, "ops")).length === ops1 && ops1 > ops0, "…and it writes nothing (no op)");
+  await w.create("/x.ipynb");
+  await w.remove("/q.txt");
+  check((await w.pathOfFile(a.fid)).why === "trashed", "…only in Trash: trashed");
+  // two live rows with one fid (which the workspace doesn't make; put raw): ambiguous, never the first
+  await w.create("/d1.txt", { content: "1" });
+  const { nkey: _k, ...d } = await rawGet(w.ws, "entries", "/d1.txt");
+  await rawPut(w.ws, "entries", { ...d, path: "/d2.txt" });
+  const amb = await w.pathOfFile(d.fid);
+  check(amb.ok === false && amb.why === "ambiguous", "two live entries with the same fid: ambiguous");
+  // the bound (api.ts PATH_OF_FILE_MAX = 64 entries with one identity): one live among exactly that many is found; one more
+  // live entry past it is never missed (ambiguous, unread, never the first live one)
+  await w.create("/c.txt", { content: "c" });
+  const { nkey: _c, ...c } = await rawGet(w.ws, "entries", "/c.txt");
+  const MAX = 64;   // (api.ts PATH_OF_FILE_MAX)
+  for (let k = 0; k < MAX - 1; k++) await rawPut(w.ws, "entries", { ...c, path: `/Trash/c${k}.txt`, trashed: { from: "/c.txt", at: 1, id: "c" + k } });
+  const atCap = await w.pathOfFile(c.fid);
+  check(atCap.ok && atCap.path === "/c.txt", "pathOfFile: one live entry among exactly the bound's entries with its fid: found");
+  await rawPut(w.ws, "entries", { ...c, path: "/zz-late.txt" });
+  const over = await w.pathOfFile(c.fid);
+  check(over.ok === false && over.why === "ambiguous", "…and a second live one past the bound: ambiguous, never the first");
+  // the bound's trashed rows can't hide the one live entry either: 64 in Trash and one live is ambiguous, never "trashed"
+  await w.create("/h.txt", { content: "h" });
+  const { nkey: _h, ...hh } = await rawGet(w.ws, "entries", "/h.txt");
+  for (let k = 0; k < MAX; k++) await rawPut(w.ws, "entries", { ...hh, path: `/Trash/h${k}.txt`, trashed: { from: "/h.txt", at: 1, id: "h" + k } });
+  const hid = await w.pathOfFile(hh.fid);
+  check(hid.ok === false && hid.why === "ambiguous", "…" + MAX + " in Trash and one live: ambiguous (fail closed), never trashed nor a guess");
+  w.close();
+}
+
 async function migratePaused() {
   const w = await v1([["/p/a.txt", "AAA"], ["/p/b.txt", "BBB"]]);
   const est = navigator.storage.estimate;
@@ -2739,7 +2801,7 @@ async function durabilityLockOrder() {
 }
 
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority, () => historyOrder("clear"), () => historyOrder("drop"), purgeMarks, durabilityLockOrder]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, writeGuard, pathOfFile_, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority, () => historyOrder("clear"), () => historyOrder("drop"), purgeMarks, durabilityLockOrder]) {
     console.log(`test: ${t.name || t}`);
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
