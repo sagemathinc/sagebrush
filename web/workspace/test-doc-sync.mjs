@@ -284,6 +284,9 @@ try {
     await A.call("fakeConnect");
     const p = await A.call("fakeWait", "pull");
     await A.call("fakeAnswer", "pull", frame, 300);
+    // (and a kick after it: still nothing asked, held or stopped as it is)
+    await A.call("fakeKick");
+    await sleep(300);
     const [st, j] = [await A.call("fakeState"), await A.call("journal", N9)];
     const state = stopCode ? st.stopped === stopCode : st.held && st.stopped === null;
     check(!!p && J(st.sent) === J(["pull"]) && j.lrows === 1 && state, `9: a pull answered with ${what}: no claim or batch after it, the row kept, ${stopCode ? "stopped " + stopCode : "held"}: ` + J({ sent: st.sent, lrows: j.lrows, stopped: st.stopped, held: st.held }));
@@ -307,6 +310,15 @@ try {
     const sx = await A.call("fakeState");
     check(J(sx.sent) === J(["pull", "batch"]) && sx.stopped === null, `9: ${what} answered as the connection drops: no ${next} on the connection that's gone: ` + J({ sent: sx.sent, stopped: sx.stopped }));
   }
+  // (a flight of an older connection: its pull waits, the link connects again, then its answer comes: nothing more
+  // asked by that flight; the new connection's own flight pulls again)
+  await A.call("fakeStart", ACCOUNT, N9);
+  await A.call("fakeConnect");
+  await A.call("fakeWait", "pull");
+  await A.call("fakeConnect");
+  await A.call("fakeAnswer", "pull", { t: "batches", owner, doc: N9, epoch: 1, head: head9, items: [], more: false }, 300);
+  const sr9 = await A.call("fakeState");
+  check(J(sr9.sent) === J(["pull", "pull"]) && J(sr9.waiting) === J(["pull"]), "9: a flight of an older connection asks nothing after its answer; the newer connection pulls again: " + J({ sent: sr9.sent, waiting: sr9.waiting }));
   // (D3-4c: a kick while the batch waits, then the batch refused (rate): held, no second lap)
   await A.call("fakeStart", ACCOUNT, N9);
   await A.call("fakeConnect");
