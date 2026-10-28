@@ -67,7 +67,8 @@ check(J(using(/DOC_SYNC_ORIGINS/)) === J(["workspace/doc-sync-switch.ts", "works
 const sw = src(join(here, "doc-sync-switch.ts"));
 check(!/window\.|globalThis\.|localStorage|sessionStorage|URLSearchParams|location\.|document\./.test(sw), "the switch's module reads no window, global, storage, URL or location of its own");
 const page = src(join(web, "index.html"));
-const calls = [...page.matchAll(/docSyncAllowed\(/g)].length, oneArg = /docSyncAllowed\(\{[^()]*clientRunning: \(\) => owner\.clientRunning\(\) \}\)/.test(page);
+const calls = [...page.matchAll(/docSyncAllowed\(/g)].length;
+const oneArg = page.includes("docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning() });");
 check(calls === 1 && oneArg, "the page calls the gate once, with no origins argument (the frozen default)");
 check([...page.matchAll(/docSyncOrigin\(([^)]*)\)/g)].every((m) => m[1] === "location.origin"), "the page's origin checks are of location.origin alone");
 check(J(using(/DOC_SYNC\.on = true/)) === J(["index.html"]) && /if \(!allowed\) return false;[\s\S]*mod\.DOC_SYNC\.on = true/.test(page), "only the page's switch turns DOC_SYNC on, after the gate");
