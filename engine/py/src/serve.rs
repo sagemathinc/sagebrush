@@ -481,16 +481,28 @@ fn serve_requests(
         #[cfg(not(feature = "test-hooks"))]
         let written = py.detach(|| write_all(&mut out, wire.as_bytes()));
         drop(wire);
-        match written {
-            Ok(true) => commit(),
-            Ok(false) => {
-                abort();
-                return Ok(());
-            }
-            Err(e) => {
-                abort();
-                return Err(PyOSError::new_err(e.to_string()));
-            }
+        if let Some(end) = settle(written) {
+            return end.map_err(|e| PyOSError::new_err(e.to_string()));
+        }
+    }
+}
+
+/// The reply's write settled: committed if it was written whole (None, the
+/// loop goes on); otherwise the request ends uncommitted and the loop ends
+/// (Some: how).
+fn settle(written: std::io::Result<bool>) -> Option<std::io::Result<()>> {
+    match written {
+        Ok(true) => {
+            commit();
+            None
+        }
+        Ok(false) => {
+            abort();
+            Some(Ok(()))
+        }
+        Err(e) => {
+            abort();
+            Some(Err(e))
         }
     }
 }
@@ -589,7 +601,7 @@ mod tests {
         assert!(!serve_take(), "closing clears the armed mark");
         assert!(!arm(Target::Id(7)), "nothing to interrupt once its code is over");
         let (r0, a0) = { let st = state(); (st.replied, st.aborted) };
-        commit();
+        assert!(settle(Ok(true)).is_none(), "a complete write: the loop goes on");
         assert_eq!({ let st = state(); (st.replied, st.aborted) }, (r0 + 1, a0), "a complete write is one commit");
         let t = admit(Some(8));
         assert_eq!(t, s + 1);
@@ -597,8 +609,13 @@ mod tests {
         assert!(serve_busy());
         close();
         let (r1, a1) = { let st = state(); (st.replied, st.aborted) };
-        abort();
+        assert!(matches!(settle(Ok(false)), Some(Ok(()))), "the reader gone: the loop ends");
         assert_eq!({ let st = state(); (st.replied, st.aborted) }, (r1, a1 + 1), "an incomplete write is no commit (CORR-CTRLC-B-2)");
+        assert!(!serve_busy() && !arm(Target::Any));
+        admit(Some(9));
+        close();
+        assert!(matches!(settle(Err(std::io::Error::other("x"))), Some(Err(_))), "a write error: the loop ends with it");
+        assert_eq!({ let st = state(); (st.replied, st.aborted) }, (r1, a1 + 2), "a failed write is no commit either");
         assert!(!serve_busy() && !arm(Target::Any));
     }
 
@@ -615,7 +632,7 @@ mod tests {
         assert_eq!(request_id(br#"{"id": 12, "code": "x"}"#), Some(12));
         assert_eq!(request_id(br#"  {"id":7}"#), Some(7));
         assert_eq!(request_id(br#"{"id": 0, "code": "x"}"#), Some(0));
-        for bad in [&br#"{"code": "x", "id": 3}"#[..], br#"{"id": "3"}"#, br#"{"id": 3.5}"#, br#"{"id": -1}"#, br#"{"id": 007}"#, br#"[1]"#, b"", br#"{"id": 123456789012345678901234}"#, br#"{"idx": 3}"#] {
+        for bad in [&br#"{"code": "x", "id": 3}"#[..], br#"{"id": "3"}"#, br#"{"id": 3.5}"#, br#"{"id": -1}"#, br#"{"id": 007}"#, br#"[1]"#, b"", br#"{"id": 123456789012345678901234}"#, br#"{"idx": 3}"#, br#"{"ab": 3}"#, br#"{ "di" : 3}"#] {
             assert_eq!(request_id(bad), None, "{}", String::from_utf8_lossy(bad));
         }
     }
@@ -650,6 +667,25 @@ mod tests {
         assert_eq!(lines.next().unwrap(), None);
         assert!(lines.buf.len() < 1 << 18, "the buffer kept {} bytes", lines.buf.len());
         assert!(t.elapsed() < std::time::Duration::from_secs(5), "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn lines_compact_mid_stream() {
+        // (32-byte lines in 65535-byte reads: a read ends on a line's end
+        // only every 32 reads, so the backlog's compaction, not its clearing
+        // when all of it is consumed, is what bounds the buffer)
+        let mut data = Vec::new();
+        for i in 0..200_000u32 { data.extend_from_slice(format!("{{\"id\": {i:>8}, \"code\": \"xxx\"}}\n").as_bytes()); }
+        assert_eq!(data.len(), 200_000 * 32);
+        let mut lines = Lines::new(Chunks { data, at: 0, sizes: vec![65535], k: 0, eintr: false });
+        let mut most = 0;
+        for i in 0..200_000u64 {
+            let l = lines.next().unwrap().unwrap();
+            assert_eq!(request_id(&l), Some(i));
+            most = most.max(lines.buf.len());
+        }
+        assert_eq!(lines.next().unwrap(), None);
+        assert!(most < 1 << 18, "the buffer reached {most} bytes");
     }
 
     /// A writer taking at most `n` bytes a call, with EINTR between, then failing as told after `fail_after` bytes.

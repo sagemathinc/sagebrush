@@ -332,6 +332,25 @@ def test_gc_mixed_prefix():
     print("gc mixed prefix: the dead entries behind 400 live ones are reached when they fit the budget; otherwise every pass is bounded and logs that it stopped: ok")
 
 
+def gc_pass_bound(budget, per, windows=os.name == "nt"):
+    """A GC pass's wall-time ceiling: the budget and one entry, plus slack for
+    the pass's own work: 0.03 s, and 0.12 s on Windows, where a shared
+    runner's unlinks and log write took up to 0.162 s in all (daybreak2's PR B
+    r2 ruling; prb-windows run 40617561322)."""
+    return budget + per + (0.12 if windows else 0.03)
+
+
+def test_gc_bound_control():
+    """The Windows slack never reaches an ignored budget: with test_gc_wall_time's
+    budget (0.05 s) and entry (0.03 s), Windows' 0.200 s ceiling accepts the
+    0.162 s pass seen on a runner and rejects 0.300 s, ten 30 ms entries in one
+    pass; elsewhere the ceiling stays 0.110 s."""
+    w, p = gc_pass_bound(0.05, 0.03, windows=True), gc_pass_bound(0.05, 0.03, windows=False)
+    assert abs(w - 0.200) < 1e-9 and abs(p - 0.110) < 1e-9, (w, p)
+    assert 0.162 <= w and not 0.300 <= w and not 0.162 <= p, (w, p)
+    print("gc pass bound: 0.200 s on Windows (0.162 within, 0.300 over), 0.110 s elsewhere: ok")
+
+
 def test_gc_wall_time():
     """daybreak2's A-2-B1 and astra's A-2, under real time (entries take real
     time to read, the seek's included): one deadline from the pass's start;
@@ -410,7 +429,7 @@ def test_gc_wall_time():
         if set(os.listdir(host)) == {"%d-1" % p for p in live3}:
             break
     assert set(os.listdir(host)) == {"%d-1" % p for p in live3}, os.listdir(host)
-    bound = BUDGET + PER + 0.03  # (the budget and one entry, plus slack for the pass's own work)
+    bound = gc_pass_bound(BUDGET, PER)
     assert max(t1 + t2) <= bound, (max(t1), max(t2), bound)
     print("gc under real time: passes of at most %.3f s (bound %.3f) reach the dead entries, %d and %d passes: ok" % (max(t1 + t2), bound, len(t1), len(t2)))
 
@@ -500,6 +519,8 @@ STANDIN = textwrap.dedent(r'''
     def on_int(*a):
         hit[0] = True
     signal.signal(signal.SIGINT, on_int)
+    if hasattr(signal, "SIGBREAK"):  # (Windows: Session.interrupt's Ctrl-Break, as the real worker takes it)
+        signal.signal(signal.SIGBREAK, on_int)
     ctl = os.environ.get("SAGEBRUSH_CONTROL_FD")  # (POSIX: Session.interrupt's ids, as the real worker reads them)
     def control(fd):
         for line in os.fdopen(fd, "rb"):
@@ -554,10 +575,10 @@ def test_timeout_race_keeps_a_finished_reply():
     try:
         r = s.run("finishes-late", timeout=0.2)
         assert r["result"] == "42" and r["data"] == {"x": 1} and r["error"] is None, r
-        assert r["timed_out"] is True and "finished as the time limit" in r["timeout_note"], r
+        assert r["timed_out"] is True and "finished as the time limit" in r["timeout_note"] and r["restarted"] is False, r
         r = s.run("interruptible", timeout=0.2)
         assert r["error"].startswith("Interrupted: the time limit") and r["error_info"]["type"] == "timeout" and r["data"] is None, r
-        assert "timed_out" not in r
+        assert "timed_out" not in r and r["restarted"] is False, r
     finally:
         s.close()
     print("3b: a finished reply keeps its result; an interrupted one is relabelled: ok")
@@ -625,6 +646,7 @@ if __name__ == "__main__":
     test_page_no_listing_with_stale_temps()
     test_gc()
     test_gc_mixed_prefix()
+    test_gc_bound_control()
     test_gc_wall_time()
     test_gc_no_fetch_after_the_last_entry()
     test_timeout_race_keeps_a_finished_reply()
