@@ -562,6 +562,36 @@ def test_released():
                   "_caps = [o for o in gc.get_objects() if type(o).__name__ == '_Capture' and o.sealed]\n"
                   "(len(_runs), max((len(c.head) + c.tail_n for c in _caps), default=0))", mode="python")
         check(r["result"] == "(1, 0)", "released: one _Run (this request's), the kept capture empty (%s)" % r["result"])
+        # (a stream kept past its run, as a thread that outlives it would keep
+        # it: its capture stays alive, so only its release lets the text go)
+        s.run("import sys\n_kept = sys.stdout\nprint('y' * 2000000)", mode="python")
+        r = s.run("import gc\n_caps = [o for o in gc.get_objects() if type(o).__name__ == '_Capture' and o.sealed]\n"
+                  "(any(c is _kept.capture for c in _caps), max((len(c.head) + c.tail_n for c in _caps), default=0))", mode="python")
+        check(r["result"] == "(True, 0)", "released: a kept stream's capture holds no text (%s)" % r["result"])
+    finally:
+        s.close()
+
+
+def test_stale_state():
+    """The fallback's serial check (a test-hooks build): a reply that couldn't
+    be encoded leaves its request's state recorded; the next request,
+    interrupted at admission, gets its own interrupted reply, never that
+    earlier request's."""
+    if not HOOKS:
+        print("skip the stale-state control: it needs a test-hooks build")
+        return
+    s = S.Session()
+    try:
+        s.run("n = 0", mode="python")
+        r0 = s.run("class _Bad:\n    def _repr_svg_(self):\n        return {1}\n"
+                   "import sagebrush._native as _n\n_n._serve_test('admit_interrupt', 1)\n_Bad()", mode="python")
+        check(r0["error_info"]["type"] == "session", "stale state: the unencodable reply is the session's (%r)" % (r0["error"],))
+        rid = submit(s, "n += 1")
+        r1 = s._get(rid, 10)
+        check(bool(r1) and r1["id"] == rid and r1["error_info"]["type"] == "interrupted" and r1["displays"] == [],
+              "stale state: interrupted at admission, its own reply, not the earlier request's (%r)" % ((r1 or {}).get("error"),))
+        check(s.run("n", mode="python")["result"] == "0", "stale state: no side effect")
+        counts_match(s, "stale state")
     finally:
         s.close()
 
@@ -591,6 +621,7 @@ if __name__ == "__main__":
     case(test_write_faults)
     case(test_held_parse)
     case(test_released)
+    case(test_stale_state)
     case(test_native)
     if failed:
         print("ctrlc native: %d FAILED" % len(failed))
