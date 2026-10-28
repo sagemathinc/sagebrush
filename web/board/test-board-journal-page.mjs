@@ -250,6 +250,8 @@ try {
     // (board's N1 on code r1) a replacement whose clear fails (the browser refusing its mark's write): said, and the
     // versions from before it hidden, so no Revert brings the other document back
     await u.ev(`(() => { window.__put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (...x) { if (this.name === "boards") throw new DOMException("out of room (the test's)", "QuotaExceededError"); return window.__put.apply(this, x); }; return true; })()`);
+    // (board's N1-c on r3: versions there to hide, counted before the replacement)
+    const hiddenN = (await versionDocs(u)).length;
     await u.ev(`${B}.load({ title: "after a failed clear", nodes: [{ id: "tj", x: 0, y: 0, text: "n1" }] }).then(() => true)`);
     const saidClear = await u.until(`document.body.innerText.includes("TimeTravel couldn't clear the previous document's versions")`, 10000);
     await u.ev(`(() => { IDBObjectStore.prototype.put = window.__put; return true; })()`);
@@ -264,8 +266,66 @@ try {
     const cleared = await u.until(`localStorage.getItem(${J(UNCLEAR)}) === null`, 10000);
     await u.until(`${B}.versions().then((v) => v.length >= 1)`);
     const vd4 = await versionDocs(u);
-    check(saidClear && keyHeld && vd3.every((x) => x.title === "after a failed clear"), "N1, N1-a: a replacement's clear refused: said; the mark kept; reloaded, TimeTravel lists none of the previous document's versions: " + J(vd3.map((x) => [x.title, tjOf(x)])));
+    // (exact, N1-c: no save of the new document yet (its first was refused with the clear), so after the reload nothing
+    // at all is listed, though there were versions before; vd4 below is the positive control that the list works)
+    check(saidClear && keyHeld && hiddenN >= 1 && vd3.length === 0, "N1, N1-a: a replacement's clear refused: said; the mark kept; reloaded, TimeTravel lists none of the " + hiddenN + " versions from before: " + J(vd3.map((x) => [x.title, tjOf(x)])));
     check(cleared && vd4.length === 1 && tjOf(vd4[0]) === "after the failed clear", "N1-a: the next save clears them and forgets the mark: one version, the save's: " + J(vd4.map((x) => [x.title, tjOf(x)])));
+    // (board's N1-d on r3: the clear failing across a save of the new document (only the clear's mark is refused: the
+    // one boards write here with unjournaled true), then a reload: TimeTravel lists that new version, none of the
+    // previous document's (the hide is "before the mark", not "everything"); then the next save, the clear done, leaves
+    // exactly that save)
+    const hiddenD = (await versionDocs(u)).length;
+    await u.ev(`(() => { window.__put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (...x) { if (this.name === "boards" && x[0] && x[0].unjournaled === true) throw new DOMException("out of room (the test's)", "QuotaExceededError"); return window.__put.apply(this, x); }; return true; })()`);
+    await u.ev(`${B}.load({ title: "n1-d doc", nodes: [{ id: "tj", x: 0, y: 0, text: "n1-d" }] }).then(() => true)`);
+    const saidD = await u.until(`document.body.innerText.includes("TimeTravel couldn't clear the previous document's versions")`, 10000);
+    await u.ev(setTj("n1-d saved")).catch(() => {});
+    const savedD = await rowTj(u, id1, "n1-d saved");
+    await u.ev(`(() => { IDBObjectStore.prototype.put = window.__put; return true; })()`);
+    const keyD = await u.ev(`localStorage.getItem(${J(`sagebrush-board-journal-unclear:${id1}`)}) !== null`);
+    await openBoard(u, id1);
+    await u.until(`${B}.versions().then((v) => v.length >= 1)`);
+    const vd6 = await versionDocs(u);
+    check(saidD && savedD && keyD && hiddenD >= 1 && vd6.length >= 1 && vd6.every((x) => x.title === "n1-d doc") && vd6.some((x) => tjOf(x) === "n1-d saved"), "N1-d: the clear failing across a save of the new document, then a reload: TimeTravel lists the new document's versions (its save among them) and none of the " + hiddenD + " from before: " + J(vd6.map((x) => [x.title, tjOf(x)])));
+    await u.ev(setTj("n1-d after")).catch(() => {});
+    await rowTj(u, id1, "n1-d after");
+    const clearedD = await u.until(`localStorage.getItem(${J(`sagebrush-board-journal-unclear:${id1}`)}) === null`, 10000);
+    await u.until(`${B}.versions().then((v) => v.length >= 1)`);
+    const vd7 = await versionDocs(u);
+    check(clearedD && vd7.length === 1 && tjOf(vd7[0]) === "n1-d after", "N1-d, N1-b: the next save, the clear done: every version gone, TimeTravel starting again from that save: " + J(vd7.map((x) => [x.title, tjOf(x)])));
+    // (astra's BJ-R3-C1 on r3) the mark's localStorage failing.  (1) setItem throwing: the notice says the hide is this
+    // tab's only; reloaded, the previous document's versions show again, as said, and nothing is cleared by a save
+    const MARK = `sagebrush-board-journal-unclear:${id1}`;
+    const failClear = `(() => { window.__put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (...x) { if (this.name === "boards" && x[0] && x[0].unjournaled === true) throw new DOMException("out of room (the test's)", "QuotaExceededError"); return window.__put.apply(this, x); }; return true; })()`;
+    const okClear = `(() => { IDBObjectStore.prototype.put = window.__put; return true; })()`;
+    const failStore = (m) => `(() => { window.__${m} = Storage.prototype.${m}; Storage.prototype.${m} = function (k, ...x) { if (String(k).startsWith("sagebrush-board-journal-unclear:")) throw new DOMException("the test's", "QuotaExceededError"); return window.__${m}.call(this, k, ...x); }; return true; })()`;
+    const okStore = (m) => `(() => { Storage.prototype.${m} = window.__${m}; return true; })()`;
+    await u.ev(setTj("before s1")).catch(() => {});
+    await rowTj(u, id1, "before s1");
+    const beforeS1 = (await versionDocs(u)).length;
+    await u.ev(failClear); await u.ev(failStore("setItem"));
+    await u.ev(`${B}.load({ title: "s1 doc", nodes: [{ id: "tj", x: 0, y: 0, text: "s1" }] }).then(() => true)`);
+    const saidS1 = await u.until(`document.body.innerText.includes("hidden in this tab only")`, 10000);
+    const noMark = await u.ev(`localStorage.getItem(${J(MARK)}) === null`);
+    await u.ev(okClear); await u.ev(okStore("setItem"));
+    await openBoard(u, id1);
+    await u.until(`${B}.versions().then((v) => v.length >= 1)`);
+    const vs1 = await versionDocs(u);
+    check(saidS1 && noMark && beforeS1 >= 1 && vs1.some((x) => tjOf(x) === "before s1"), "BJ-R3-C1 (setItem throwing): said \"hidden in this tab only\", no mark kept; reloaded, the previous document's versions show again, as said: " + J({ n: vs1.length }));
+    // (2) removeItem throwing as a retried clear succeeds: the spent mark left in localStorage; through further saves, a
+    // reload and more saves, it never clears the new document's versions again (and is forgotten once it can be)
+    await u.ev(failClear);
+    await u.ev(`${B}.load({ title: "s2 doc", nodes: [{ id: "tj", x: 0, y: 0, text: "s2" }] }).then(() => true)`);
+    await u.until(`localStorage.getItem(${J(MARK)}) !== null`, 10000);
+    await u.ev(okClear); await u.ev(failStore("removeItem"));
+    const saves = ["s2 a", "s2 b", "s2 c"];
+    for (const t of saves) { await u.ev(setTj(t)).catch(() => {}); await rowTj(u, id1, t); }
+    const stale = await u.ev(`localStorage.getItem(${J(MARK)}) !== null`);
+    await u.ev(okStore("removeItem"));
+    await openBoard(u, id1);
+    for (const t of ["s2 d", "s2 e"]) { await u.ev(setTj(t)).catch(() => {}); await rowTj(u, id1, t); }
+    await u.until(`${B}.versions().then((v) => v.length >= 5)`, 10000);
+    const vs2 = await versionDocs(u), forgot = await u.ev(`localStorage.getItem(${J(MARK)}) === null`);
+    check(stale && forgot && J(vs2.map(tjOf)) === J(["s2 a", "s2 b", "s2 c", "s2 d", "s2 e"]) && vs2.every((x) => x.title === "s2 doc"), "BJ-R3-C1 (removeItem throwing): the spent mark left behind never clears the new document's versions, through saves, a reload and more saves; then forgotten: " + J({ stale, forgot, versions: vs2.map(tjOf) }));
     // …and a kill between T1 and T2 right after the replacement still replays
     const r2 = await row(u, id1), d2 = await doc(u);
     await u.ev(`window.sagebrush.boardJournal().t1({ ...${J(withTj(d2, "killed"))}, baseRev: ${r2.rev} }).then(() => true)`);
@@ -400,7 +460,9 @@ try {
   }
 
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
-  for (const e of br.errors) fails.push("page error: " + e);
+  // (each failure one line, so its summary's count is its list's: a page error's stack joined into one)
+  for (const e of br.errors) fails.push("page error: " + String(e).replace(/\s*\n\s*/g, " | "));
+  for (let i = 0; i < fails.length; i++) fails[i] = String(fails[i]).replace(/\s*\n\s*/g, " | ");
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
   else {
     console.log(`ok: the board page under the board journal, ${results.length} checks`);
