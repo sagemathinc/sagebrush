@@ -204,21 +204,28 @@ test("a reader racing a full-rate writer never sees a torn count (the seqlock re
       P.store(5, P.encode({ ...P.emptySlot(), inUse: true, done: v, total: v, work: v, stageCount: 0 }), buf);
     }`;
   const w = new Worker(src, { eval: true, workerData: [buf, stop] });
+  // the 400 ms window starts at the worker's first write, not at new Worker():
+  // on a slow runner the worker's startup alone can take 400 ms (train-25 ci
+  // 40626438054 saw nothing). Waiting for that first write is test
+  // infrastructure, bounded at 30 s.
   let seen = 0;
-  const t = Date.now();
-  while (Date.now() - t < 400) {
+  let start = 0;
+  let spins = 0;
+  const firstWriteBy = Date.now() + 30_000;
+  while (start ? Date.now() - start < 400 : Date.now() < firstWriteBy) {
+    if (++spins % 1000 === 0) await new Promise((r) => setImmediate(r));
     const words = P.read(5, buf);
     if (!words) continue;
     const d = P.decode(words);
     if (!d.inUse) continue;
+    if (!start) start = Date.now();
     assert.equal(d.total, d.done);
     assert.equal(d.work, d.done);
     seen++;
-    if (seen % 1000 === 0) await new Promise((r) => setImmediate(r));
   }
   Atomics.store(stop, 0, 1);
   await w.terminate();
-  assert.ok(seen > 0);
+  assert.ok(seen > 0, "the writer never wrote within 30 s");
 });
 
 test("Python routines report through _progress; the engine's self-test call shows nested frames", () => {
