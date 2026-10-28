@@ -112,7 +112,9 @@
    "license": "MIT",
    "path": "node_modules/.pnpm/patchflow@0.16.0/node_modules/patchflow",
    "in": [
-    "TimeTravel"
+    "TimeTravel",
+    "the board",
+    "the notebook page"
    ]
   }
  ]
