@@ -33,7 +33,7 @@ jobs:
       - uses: PyO3/maturin-action@v1
         with:
           working-directory: engine/py
-          args: --release --out dist ${{ matrix.kind == 'hooks' && '--features pyo3/abi3-py39,test-hooks' || '' }}
+          args: --release --out dist ${{ matrix.kind == 'hooks' && '--features test-hooks' || '' }}
       - name: install the wheel
         shell: bash
         run: python -m pip install engine/py/dist/*.whl
