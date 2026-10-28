@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "share upload-leak fix (#243, plan-upload-leak r3, reviewed to r5e): the Share dialog's first upload with its attempt and receipt, this device's bounded and locked record of the attempt it sent, and its settling from the notebook's own store (web/index.html's upload, storedShare, settle and shareSent; web/share-client/upload.ts), which cli/pyjs.cjs embeds with the page; measured by #243's PR ci 40612198221 size-gate row: cli/pyjs.cjs 28932218 -> 28939642, +7424, tested merge ea98ad57 (head 040bb177, base 639c9d17); no other bundle changes",
+ "bytes": {
+  "cli/pyjs.cjs": 7424
+ }
+}
