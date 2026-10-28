@@ -68,7 +68,9 @@ fn traced(req: &str) -> (String, f64, f64, f64) {
 
 /// Run req traced; then, for each phase, Stop at its median check: the
 /// call must stop in that phase, and the next call must work.  `min` is
-/// the fewest checks each phase must make.
+/// the fewest checks each phase must make (for the kernel's dot: work /
+/// 2^17, as a block poll covers at most 2^16 units after a remainder below
+/// 2^16).
 fn phases(label: &str, req: &str, want: &[(&str, usize)]) {
     let (full, lead, trail, gap) = traced(req);
     assert!(full.starts_with("{\"ok\":"), "{}: {}", label, &full[..full.len().min(200)]);
@@ -121,13 +123,13 @@ fn mat_mul_stops_in_every_phase() {
     phases("1xKx1 huge entries", &req_csv(&a, &b), &[("parse", 4), ("zmat-big-dot", 16)]);
     // 1 x K x M
     let (a, b) = (csv(&mut s, 1, 1 << 10, 9), csv(&mut s, 1 << 10, 1 << 8, 9));
-    phases("1xKxM", &req_csv(&a, &b), &[("parse", 30), ("zmat-dot", 4)]);
+    phases("1xKxM", &req_csv(&a, &b), &[("parse", 30), ("zmat-dot", 2)]);
     // square 128: 2^21 multiply-adds; the reply 2^14 entries of up to 21 digits
     let (a, b) = (csv(&mut s, 128, 128, 9), csv(&mut s, 128, 128, 9));
-    phases("square", &req_csv(&a, &b), &[("parse", 4), ("zmat-dot", 32), ("reply", 4)]);
+    phases("square", &req_csv(&a, &b), &[("parse", 4), ("zmat-dot", 16), ("reply", 4)]);
     // wide: 32 x 32 x 2^11 (2^21 multiply-adds, a 2^16-entry reply)
     let (a, b) = (csv(&mut s, 32, 32, 9), csv(&mut s, 32, 1 << 11, 9));
-    phases("wide", &req_csv(&a, &b), &[("parse", 8), ("zmat-dot", 32), ("reply", 16)]);
+    phases("wide", &req_csv(&a, &b), &[("parse", 8), ("zmat-dot", 16), ("reply", 16)]);
     // output-heavy, inner k = 1: 512 x 1 x 512, a 2^18-entry reply (CSV and array)
     let (a, b) = (csv(&mut s, 512, 1, 9), csv(&mut s, 1, 512, 9));
     phases("output-heavy", &req_csv(&a, &b), &[("zmat-dot", 4), ("reply", 64)]);
