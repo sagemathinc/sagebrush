@@ -179,4 +179,58 @@ T.type = (cid, text) => {
   cell.ta.dispatchEvent(new Event("input", { bubbles: true }));
   return true;
 };
+
+// ---- one device, two pages (astra's DEVSW-1): a board page holding the account connection, carrying notebooks with
+// the switch's followDocSync, and the notebook page turning the switch on with enableDocSync, its saves told to the
+// board's DocSync on the workspace's channel
+/** The workspace, its journal not yet active (the notebook page's switch activates it). */
+T.openWs = async (name) => {
+  T.w = await W.Workspace.open({ name: `ds-${name}`, mainName: `dsmain-${name}` });
+  T.hdb = await W.openHistoryDb();
+  T.kit = N.journalClasses({ IdbStore: W.IdbStore, IdbPatchStore: W.IdbPatchStore });
+  return await T.w.journalActive();
+};
+/** The board page's side: followDocSync, its DocSync the one T.connect then connects. */
+T.follow = async () => {
+  T.followed = 0;
+  T.unfollow = await W.followDocSync({
+    makeDocs: () => new DS.DocSync({ retryMs: 200, askMs: 5000 }),
+    makeChannel: () => new BroadcastChannel(W.docSyncChannel(T.w.ws.name)),
+    journalActive: () => T.w.journalActive(),
+    setDocs: (d) => { T.ds = d; T.followed++; },
+    warn: (...a) => T.log.push("warn: " + a.map(String).join(" ")),
+  });
+  return T.followed;
+};
+T.followedCount = () => T.followed ?? 0;
+/** The notebook page's side: enableDocSync with this page's pieces, its notebook `id` (made from `cells`) the one shown,
+ * reopened through the journal; what it returned, and the read-only it set. */
+T.enable = async (id, cells) => {
+  T.ro = [];
+  T.shownStore = null;
+  const out = await W.enableDocSync({
+    loadHistory: async () => H,
+    makeDocs: () => new DS.DocSync({ retryMs: 200, askMs: 5000 }),
+    makeChannel: () => new BroadcastChannel(W.docSyncChannel(T.w.ws.name)),
+    register: W.registerJournalWriter,
+    setReadOnly: (ro) => T.ro.push(ro),
+    readOnlyNow: () => !T.shownStore || !!T.shownStore.viewOnly,
+    flush() {},
+    saved: async () => {},
+    activate: () => T.w.activateJournal(),
+    begun: () => T.w.journalBegun(),
+    reopen: async () => { await T.open(id, cells); T.shownStore = T.stores.get(id); return !!T.shownStore.journaled; },
+    setDocs: (d) => { T.ds = d; },
+    needReload: () => { T.reload = true; },
+    warn: (...a) => T.log.push("warn: " + a.map(String).join(" ")),
+  });
+  return { out, ro: T.ro, on: H.DOC_SYNC.on, saved: typeof H.DOC_SYNC.saved, synced: !!T.shownStore?.synced, writer: !!T.shownStore?.writer };
+};
+/** A save as the page makes it: no kick of its own (the switch's DOC_SYNC.saved tells the connection's DocSync). */
+T.editOnly = async (id, cells) => {
+  const st = T.stores.get(id), rec = await rawGet(T.w.main, "notebooks", id);
+  const out = await st.save({ name: rec.name, mode: rec.mode, id, cells: cells.map(([cid, code]) => ({ id: cid, code })), baseRev: rec.rev });
+  return typeof out === "string" ? out : !!out?.saved;
+};
+T.warnings = () => T.log.filter((x) => typeof x === "string" && x.startsWith("warn: "));
 window.ready = true;
