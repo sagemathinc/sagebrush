@@ -1,14 +1,14 @@
 {
  "v": 1,
- "reason": "estimates plan r3 PR 2a (#233): estimate(factor, n) with time, memory, fits and calibration. As measured by the size-gate of PR ci 40607194043 at b0bb8777 (r2, after astra2's review: exact counts, the branches above 1024 bits) (rule 2's figures): the engine's cost model nf/cost.rs and its factor_estimate/cost_probe ops in the wasm (+27493, and cli/pyjs.cjs, which embeds the wasm and lib, +67599); lib/sagebrush/_estimates.py in sage-more.src (+29498) and cli/lib.gen.js (+32714); the %estimate magic and its own parser (the runtime has no ast) in mod-pyjs-magic.src (+3139); sagebrush/__init__.py's estimate() and records' capability in sage.src (+77) and sage.pre (+63); sagebrush-worker.js (+38). sage-more.src's ceiling is raised to the measured size + 1024 (357468; @sagebrush's option (i), Oct 27); mod-pyjs-magic.src's (24994) still covers 24213",
+ "reason": "estimates plan r3 PR 2a (#233): estimate(factor, n) with time, memory, fits and calibration. As measured by the size-gate of PR ci 40607194043 at b0bb8777 (r2, after astra2's review: exact counts, the branches above 1024 bits) (rule 2's figures): the engine's cost model nf/cost.rs and its factor_estimate/cost_probe ops in the wasm (+27557, and cli/pyjs.cjs, which embeds the wasm and lib, +67775; re-measured by PR ci 40618234996 at 020ac5a1 after the master merge, the fresh wasm of the merged tree); lib/sagebrush/_estimates.py in sage-more.src (+29498) and cli/lib.gen.js (+32714); the %estimate magic and its own parser (the runtime has no ast) in mod-pyjs-magic.src (+3139); sagebrush/__init__.py's estimate() and records' capability in sage.src (+77) and sage.pre (+63); sagebrush-worker.js (+38). sage-more.src's ceiling is raised to the measured size + 1024 (357468; @sagebrush's option (i), Oct 27); mod-pyjs-magic.src's (24994) still covers 24213",
  "bytes": {
   "cli/lib.gen.js": 32714,
-  "cli/pyjs.cjs": 67599,
+  "cli/pyjs.cjs": 67775,
   "engine/lib/mod-pyjs-magic.src": 3139,
   "engine/lib/sage-more.src": 29498,
   "engine/lib/sage.pre": 63,
   "engine/lib/sage.src": 77,
-  "engine/sagebrush-engine.wasm": 27493,
+  "engine/sagebrush-engine.wasm": 27557,
   "engine/sagebrush-worker.js": 38
  }
 }
