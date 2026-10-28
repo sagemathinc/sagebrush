@@ -37,6 +37,7 @@ const bws = new WebSocket(version.webSocketDebuggerUrl);
 await new Promise((r) => (bws.onopen = r));
 let n = 0;
 const waiting = new Map();
+const swVersions = new Map();
 // (a JavaScript dialog a page opens (alert, confirm, beforeunload) would hold every later call to that page: said,
 // and dismissed, so the case fails or goes on instead of the run hanging; #243's CI)
 bws.onmessage = (e) => {
@@ -45,6 +46,11 @@ bws.onmessage = (e) => {
   else if (m.method === "Page.javascriptDialogOpening") {
     console.log(`  (a page opened a JS ${m.params?.type} dialog: ${JSON.stringify(String(m.params?.message ?? "").slice(0, 200))}; dismissed)`);
     raw("Page.handleJavaScriptDialog", { accept: true }, m.sessionId).catch(() => {});
+  }
+  // (service worker versions, by id, each at its latest state: the ServiceWorker domain is enabled only once a reopened
+  // page has failed, since DevTools' attention could start or keep a worker alive and so hide the stall)
+  else if (m.method === "ServiceWorker.workerVersionUpdated") {
+    for (const v of m.params?.versions ?? []) swVersions.set(v.versionId, { registrationId: v.registrationId, script: String(v.scriptURL).replace(/^https?:\/\/[^/]+/, ""), runningStatus: v.runningStatus, status: v.status, controlled: (v.controlledClients ?? []).length });
   }
 };
 // (every call has a deadline, 60 s unless given: a call the browser never answers (a wedged page, a browser gone)
@@ -1185,27 +1191,46 @@ try {
     // targets said (type, path, attached: service workers included). No retry: a person reopening after a crash
     // would meet the same thing, so it must show)
     const crashAndReopen = async (P, what) => {
+      // (read only, before the crash: whether a service worker controlled the old page, and in what state)
+      const controller = await P.ev("JSON.stringify(navigator.serviceWorker?.controller ? [navigator.serviceWorker.controller.state, new URL(navigator.serviceWorker.controller.scriptURL).pathname] : null)", 3000).catch((x) => `unread: ${x.message}`);
       chainAt(`${what}: the page crashes`);
       void P.send("Page.crash").catch(() => {});
       await sleep(1000);
       await raw("Target.closeTarget", { targetId: P.targetId }, undefined, 10_000).catch(() => {});
       chainAt(`${what}: a new page`);
       const Q = await newPage();
+      // (the new page as Chrome sees it before it is sent anywhere)
+      const before = await raw("Target.getTargetInfo", { targetId: Q.targetId }, undefined, 10_000).then((x) => x?.targetInfo, (x) => `unread: ${x.message}`);
       try {
         await Q.send("Page.navigate", { url: dev.site + "/" }, 20_000);
         await Q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
         return Q;
       } catch (e) {
+        // (which page is which: the crashed one, the new one, and every target by id and browser context; #243's
+        // train-26 CI showed an unattached about:blank beside an attached "/", ids unsaid)
         const t = await raw("Target.getTargets", {}, undefined, 10_000).catch(() => null);
-        console.log(`  (${what}: the new page didn't load (${e.message}); Chrome's targets: ${JSON.stringify((t?.targetInfos ?? []).map((x) => [x.type, String(x.url).replace(dev.site, ""), x.attached]))})`);
-        // (the local server, asked directly: whether it answers at all, and what it holds open, so a stalled server
-        // tells itself apart from the browser's connections; #243's CI)
+        const brief = (x) => x && typeof x === "object" ? [x.type, String(x.url).replace(dev.site, ""), x.attached, x.targetId, x.browserContextId] : x;
+        console.log(`  (${what}: the new page didn't load (${e.message}); the crashed page ${P.targetId}, the new ${Q.targetId}; Chrome's targets: ${JSON.stringify((t?.targetInfos ?? []).map(brief))})`);
+        console.log(`  (${what}: the new page before its navigation: ${JSON.stringify(brief(before))}; the old page's service worker before the crash: ${controller})`);
+        // (whether the new page's renderer answers at all, within a strict 3 s, so a hung renderer adds no hang)
+        const alive = await Q.send("Runtime.evaluate", { expression: "location.href + ' ' + document.readyState", returnByValue: true }, 3000).then((x) => JSON.stringify(x?.result?.value ?? x).replace(dev.site, ""), (x) => `no answer: ${x.message}`);
+        console.log(`  (${what}: the new page's renderer: ${alive})`);
+        // (the service workers' state at the stall: enabled only now, it reports every registration and version at
+        // once, without having touched their lifecycle before)
+        swVersions.clear();
+        const sw = await Q.send("ServiceWorker.enable", {}, 3000).then(() => "enabled", (x) => `not enabled: ${x.message}`);
+        await sleep(500);
+        console.log(`  (${what}: service workers (${sw}): ${JSON.stringify([...swVersions.values()])})`);
+        // (the local server's own record first, so node's probes below are not in it: what it holds open, and the
+        // last requests it received with their answers; #243's CI)
+        console.log(`  (${what}: the local server holds: ${JSON.stringify(dev.stats?.() ?? "no stats")})`);
+        // (the local server, asked directly: whether it answers at all, so a stalled server tells itself apart from
+        // the browser's connections; #243's CI)
         for (const path of ["/", "/api/share/me"]) {
           const t0 = Date.now();
           const r = await fetch(dev.site + path, { signal: AbortSignal.timeout(5000) }).then((x) => x.status, (x) => String(x?.name ?? x));
           console.log(`  (${what}: node's own GET ${path}: ${r} in ${Date.now() - t0} ms)`);
         }
-        console.log(`  (${what}: the local server holds: ${JSON.stringify(dev.stats?.() ?? "no stats")})`);
         throw e;
       }
     };
