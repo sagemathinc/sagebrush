@@ -1642,6 +1642,9 @@ async function durabilityPurgePending() {
   w.close();
 }
 
+// (Storage's own length, read through its prototype's getter)
+const realLength = (s) => Object.getOwnPropertyDescriptor(Storage.prototype, "length").get.call(s);
+
 async function durabilityPurgeLocalSparse() {
   // daybreak2's LIMIT-28F-1: 500 keys to purge among 20,000 others: listed once per run, never a scan per step
   const o = await named();
@@ -1657,16 +1660,54 @@ async function durabilityPurgeLocalSparse() {
   await w.reset("new").catch(() => {});
   W.RESET_HOOK.beforePurge = undefined;
   w.close();
-  const steps = [];
-  let last = performance.now();
-  W.RESET_HOOK.afterPage = (store, n) => { if (store === "localStorage") { const t = performance.now(); steps.push([n, Math.round(t - last)]); last = t; } };
-  const t0 = performance.now();
-  w = await openAs(o);
-  const openMs = performance.now() - t0;
-  await w.settled();
-  W.RESET_HOOK.afterPage = undefined;
+  // (the work counted, not timed: daybreak2's r2 contract for LIMIT-28F-1. A scan is a run of localStorage.key(0),
+  // key(1), ... and must read exactly the length there was when it began; the purge makes exactly two, its first
+  // listing before any removal and its terminal verification after the last page, with no key() call between pages
+  // and at most LOCAL_PAGE removals a page. The counters are on Storage.prototype, counting only this localStorage
+  // (a property set on the instance would be a setItem), and are put back, and checked put back, in finally.
+  // Times are only reported: a hang is the runner's timeout's to catch)
+  const proto = Storage.prototype, realKey = proto.key, realRemove = proto.removeItem;
+  const scans = [], steps = [];
+  let removals = 0, pageRemovals = 0, stray = 0, cur = null;
+  const L0 = localStorage.length;
+  let last = performance.now(), openMs = 0;
+  // (installed inside the try, so a failure part way through still puts everything back; the put-back is checked at
+  // the end of finally, so it is checked whatever happened: daybreak2's #261 review)
+  try {
+    W.RESET_HOOK.afterPage = (store, n) => { if (store === "localStorage") { const t = performance.now(); steps.push({ n, removed: pageRemovals, keyCalls: 0, ms: Math.round(t - last) }); pageRemovals = 0; last = t; } };
+    proto.key = function (i) {
+      if (this === localStorage) {
+        if (i === 0) scans.push((cur = { len: realLength(this), n: 0, removalsBefore: removals, pagesBefore: steps.length }));
+        if (cur && i === cur.n) cur.n++;
+        else stray++;
+        if (steps.length) steps[steps.length - 1].keyCalls++;
+      }
+      return realKey.call(this, i);
+    };
+    proto.removeItem = function (k) {
+      if (this === localStorage) { removals++; pageRemovals++; }
+      return realRemove.call(this, k);
+    };
+    const t0 = performance.now();
+    w = await openAs(o);
+    openMs = performance.now() - t0;
+    await w.settled();
+  } finally {
+    W.RESET_HOOK.afterPage = undefined;
+    proto.key = realKey;
+    proto.removeItem = realRemove;
+    check(Storage.prototype.key === realKey && Storage.prototype.removeItem === realRemove, "the counters on Storage.prototype are put back");
+  }
   const left = Object.keys(localStorage).filter((k) => k.startsWith("sagebrush-board:local:")).length;
-  check(left === 0 && steps.length === 3 && steps.every(([n, ms]) => n <= W.LOCAL_PAGE && ms < 200), `500 keys purged among 20,000 others, ${W.LOCAL_PAGE} a step, each step bounded: ${JSON.stringify(steps)}`);
+  const [first, terminal] = scans;
+  // (key() calls after a page and before the next page's end: only the terminal scan may make them, after the last page)
+  const between = steps.slice(0, -1).reduce((a, s) => a + s.keyCalls, 0);
+  const scansOk = scans.length === 2 && stray === 0 && first.n === first.len && first.removalsBefore === 0 && first.pagesBefore === 0
+    && terminal.n === terminal.len && terminal.pagesBefore === steps.length && terminal.removalsBefore === removals;
+  // (every removal inside a page: none after the last page's hook, and the pages' removals are all of them)
+  const pagesOk = steps.length === 3 && steps.every((s) => s.n <= W.LOCAL_PAGE && s.removed <= W.LOCAL_PAGE) && removals === 500 && between === 0
+    && pageRemovals === 0 && steps.reduce((a, s) => a + s.removed, 0) === removals;
+  check(left === 0 && scansOk && pagesOk, `500 keys purged among 20,000 others, ${W.LOCAL_PAGE} a step: two scans (the listing, then the terminal check), no scan between pages: ${JSON.stringify({ L0, scans, stray, removals, afterLastPage: pageRemovals, steps })}`);
   check(openMs < 1000 && others.every((k) => localStorage.getItem(k) === "x"), `…the open within its budget (${Math.round(openMs)} ms), the other keys untouched`);
   for (const k of others) localStorage.removeItem(k);
   w.close();

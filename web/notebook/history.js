@@ -52,6 +52,14 @@ export function toRecords(doc) {
   (doc.cells ?? []).forEach((c, i) => (d = d.set(cellRecord(c, i))));
   return d;
 }
+/** A notebook document's records as a plain array (settings, then cells): what merge3.js's mergeRecords3 merges. */
+export const recordsOf = (doc) => [...toRecords(doc).get({ type: "settings" }), ...toRecords(doc).get({ type: "cell" })];
+/** A plain array of records as a notebook document (no outputs). */
+export function docOfRecords(records) {
+  let d = codec.fromString("");
+  for (const r of records) d = d.set(r);
+  return fromRecords(d);
+}
 /** Records as a notebook document (no outputs). */
 export function fromRecords(d) {
   const kernel = d.getOne({ type: "settings" })?.kernel;
