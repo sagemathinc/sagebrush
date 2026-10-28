@@ -118,6 +118,14 @@ export class WorkerKernel {
     // output hash and timing; reported by the "run" event when it is done
     this.runs = new Map();
     this.interrupted = new Set();
+    // X1: each language's environment in this worker, per mode: {gen, token,
+    // state: "pending" | "ready"}; requests that load it (a run, Tab, check,
+    // a warm-up) settle the entry they were sent with, by id (modeClaims), and
+    // only that entry: a late answer from an old worker or for an older entry
+    // changes nothing.  A new worker starts with none.
+    this.modeState = new Map();
+    this.modeClaims = new Map();
+    this.modeToken = 0;
     this.readyInfo = null; // the worker's ready message (seeded, startup clock)
     // where output addressed to an @interact goes (set by the notebook)
     this.targetSink = () => null;
@@ -132,6 +140,8 @@ export class WorkerKernel {
     this.libShown = false;
     this.emit("status", "loading…");
     this.generation++;
+    this.modeState.clear();
+    this.modeClaims.clear();
     const t0 = performance.now();
     const w = (this.worker = this.createWorker());
     // (the worker's first message: its limits, web/worker.ts's init gate)
@@ -203,6 +213,8 @@ export class WorkerKernel {
       }
       const p = this.pending.get(m.id);
       if (!p) return;
+      // (a request's one terminal message settles the language entry it was sent with)
+      if (p.reply || m.skipped || m.done) this.settleMode(m.id, m.modeReady === true);
       if (p.reply) { this.pending.delete(m.id); return p.reply(m); }
       if (m.skipped) { this.pending.delete(m.id); this.runs.delete(m.id); return p.skipped ? p.skipped() : p.stopped(""); }
       const r = this.runs.get(m.id);
@@ -262,6 +274,7 @@ export class WorkerKernel {
     // now ("execute"); it goes to the worker once the start is done, and into
     // the journal when it is done ("run"))
     this.track(id, run);
+    this.claim(id, opts.mode);
     this.whenStarted(id, sink, () => this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...forget }));
   }
 
@@ -303,14 +316,52 @@ export class WorkerKernel {
     this.emit("run", rec);
   }
 
-  /** Ask the interpreter a question ({complete: text} or {check: source}); resolves to its reply, or `fallback` if it restarts. */
-  ask(msg, mode, fallback) {
+  /** X1: the language entry for `mode` in this worker, made pending if there
+   * is none (synchronously: a storm of triggers finds it); null for Python,
+   * which loads nothing.  `fresh`: whether it was just made. */
+  modeEntry(mode) {
+    if (mode !== "sage" && mode !== "magma" && mode !== "matlab") return null;
+    let e = this.modeState.get(mode);
+    const fresh = !e || e.gen !== this.generation;
+    if (fresh) this.modeState.set(mode, (e = { gen: this.generation, token: ++this.modeToken, state: "pending" }));
+    return { e, fresh };
+  }
+  /** Settle request id's language entry: ready, or gone (the next trigger tries again), if it is still that entry. */
+  settleMode(id, ready) {
+    const c = this.modeClaims.get(id);
+    if (!c) return;
+    this.modeClaims.delete(id);
+    if (this.modeState.get(c.mode) !== c.e) return;
+    if (ready) c.e.state = "ready";
+    else this.modeState.delete(c.mode);
+  }
+  claim(id, mode) {
+    const r = this.modeEntry(mode);
+    if (r) this.modeClaims.set(id, { mode, e: r.e });
+  }
+  /** X1: load `mode`'s environment now, for a user's action (selecting the
+   * mode, pointing at or typing in a code cell): at most one warm-up while
+   * its entry is pending or ready; resolves to the worker's answer, or null
+   * if nothing was sent. */
+  warm(mode) {
+    const r = this.modeEntry(mode);
+    if (!r || !r.fresh || !this.worker) {
+      if (r?.fresh) this.modeState.delete(mode);
+      return Promise.resolve(null);
+    }
+    return this.ask({ warm: true }, mode, { warmed: null, restarted: true }, r.e);
+  }
+
+  /** Ask the interpreter a question ({complete: text}, {check: source} or {warm: true}); resolves to its reply, or `fallback` if it restarts. */
+  ask(msg, mode, fallback, entry0 = null) {
     return new Promise((resolve) => {
       if (!this.worker) return resolve(fallback);
       this.retryStart();
       const id = this.nextId++;
       const entry = { reply: resolve, stopped: () => resolve(fallback) };
       this.pending.set(id, entry);
+      if (entry0) this.modeClaims.set(id, { mode, e: entry0 });
+      else if (msg.complete !== undefined || msg.check !== undefined) this.claim(id, mode);
       this.whenStarted(id, entry, () => this.worker.postMessage({ id, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab", ...msg }));
     });
   }

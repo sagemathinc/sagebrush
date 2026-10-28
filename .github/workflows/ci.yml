@@ -761,6 +761,7 @@ jobs:
               node web/test-kernels.mjs
               node web/test-time.mjs
               node web/test-reactive.mjs
+              node web/test-warm.mjs
               node web/test-notebook-blocks.mjs
               node web/test-doclang.mjs
               node web/test-big-pictures.mjs
@@ -824,6 +825,7 @@ jobs:
               (cd packages/sagebrush-board && bun build.mjs && node test.mjs)
               bun web/board/test-format.mjs
               bun web/notebook/test-kernel-evaluate.mjs
+              bun web/notebook/test-kernel-warm.mjs
               bun web/notebook/test-runner-fallback.mjs
               bun web/board/test-canvas.mjs
               bun web/board/test-palette.mjs
