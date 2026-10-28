@@ -408,7 +408,7 @@ import { RunnerWorker } from "./notebook/runner-worker.js";
 // Only in Chromium (navigator.userAgentData), where it is tested: WebKit,
 // every browser on iOS, doesn't start its worker (design/runner.md, Next)
 const RUNNER = !(new URLSearchParams(location.search).get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !window.__TAURI__;
-import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT } from "./notebook/stores.js";
+import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSentDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT } from "./notebook/stores.js";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
 onHistoryRefused((m) => showBusyNotice(m));
 import { createJournal, fmtEstimate } from "./replay-page.js";
@@ -1617,75 +1617,229 @@ async function storedFileMeta() {
 }
 // (tests: the Share dialog's seams, read at the moment they're used: a stand-in worker, shorter
 // fail-safes, a counter of the files the dialog reads, the interpreter's answer and the notebook's identity)
-// This device's records of first uploads whose share request it sent, by account and notebook: one bounded
-// localStorage entry (astra3's r2 note 1, daybreak3's r3 notes 2 and 3).  A record goes once its outcome is durably
-// the notebook's; a deleted notebook's, and a browser notebook's no longer here or durably shared, are dropped.
-// Every change is made under one origin-wide Web Lock, from a fresh read to its verified write, so no tab's change
-// is lost to another's (astra3's CORR-UPLOAD-IMPL-ASTRA-3, daybreak3's CORR-UPLOAD-R4-1).  A live record is never
-// evicted: with SHARE_SENT_MAX of them, a new first upload is refused before its request (CORR-UPLOAD-R4-2).
-const SHARE_SENT_KEY = "sagebrush-share-sent", SHARE_SENT_MAX = 100, SHARE_SENT_LOCK = "sagebrush-share-sent";
+// This device's records of first uploads whose share request it sent, by account and notebook: one row each in
+// IndexedDB's "sagebrush-share-sent" (astra3's r2 note 1, daybreak3's r3 notes 2 and 3).  A record goes once its
+// outcome is durably the notebook's; a deleted notebook's, and a browser notebook's no longer here or durably shared,
+// are dropped.  A live record is never evicted: with SHARE_SENT_MAX of them, a new first upload is refused before
+// its request (CORR-UPLOAD-R4-2).  Every change is one strict readwrite transaction, under one origin-wide Web Lock,
+// read back before the lock goes (#243's registry design r3, CLEAR by astra3 and daybreak3): localStorage, which it
+// was, gave another tab's change late (#243's tracing r5b: R4's second tab read the records without the first's).
+const SHARE_SENT_MAX = 100, SHARE_SENT_LOCK = "sagebrush-share-sent";
+let shareSentDb = null;
 const shareSent = {
-  all() {
-    try {
-      const v = JSON.parse(localStorage.getItem(SHARE_SENT_KEY) ?? "{}");
-      return v && typeof v === "object" && !Array.isArray(v) ? v : {};
-    } catch {
-      return {};
-    }
-  },
   key: (account, notebook) => account + "|" + notebook,
-  get(account, notebook) {
-    const r = this.all()[this.key(account, notebook)];
-    return r && /^[0-9a-f]{32}$/.test(r.attempt ?? "") ? r.attempt : null;
+  /** A row that can be trusted: its own key, made of its account and notebook, and a 32-hex attempt.  Anything else
+   * is unknown, never absent: it refuses an upload of its notebook, counts towards SHARE_SENT_MAX, and is never
+   * pruned or compare-deleted; only forget removes it (design r3 §3a). */
+  wellFormed(row, key) {
+    return !!row && typeof row === "object" && row.key === key && typeof row.account === "string" && typeof row.notebook === "string"
+      && row.account + "|" + row.notebook === key && typeof row.attempt === "string" && /^[0-9a-f]{32}$/.test(row.attempt);
   },
-  /** f(all) on a fresh read, then the map written and read back, all under the origin-wide lock; throws if it
-   * can't be done so (no Web Locks, a failed write): then nothing was changed by it. */
-  async change(f) {
-    if (typeof navigator.locks?.request !== "function") throw new Error("this browser can't lock its records (no Web Locks)");
-    return navigator.locks.request(SHARE_SENT_LOCK, { mode: "exclusive" }, async () => {
-      const all = this.all();
-      const r = await f(all);
-      const json = JSON.stringify(all);
-      localStorage.setItem(SHARE_SENT_KEY, json);
-      if (localStorage.getItem(SHARE_SENT_KEY) !== json) throw new Error("not recorded");
-      return r;
+  async db() {
+    if (shareTest.fault?.open) return null;
+    shareSentDb ??= await openShareSentDb({ onVersionChange: () => { shareSentDb = null; } });
+    return shareSentDb;
+  },
+  /** One readonly read, settled once, by its transaction's completion, error or abort (an abort may come with no
+   * error event at all): never left pending, so no read can keep the lock (astra3's code r1 A3-2).  Tests: a native
+   * abort after its request succeeded, for the read tagged as `fault.readAbort` says. */
+  read(dbx, store, f, tag) {
+    return new Promise((resolve, reject) => {
+      let settled = false, tx, r;
+      const done = (ok, v) => { if (!settled) { settled = true; (ok ? resolve : reject)(v); } };
+      try {
+        tx = dbx.transaction(store, "readonly");
+        r = f(tx.objectStore(store));
+      } catch (e) {
+        return done(false, e);
+      }
+      tx.oncomplete = () => done(true, r?.result);
+      tx.onerror = () => done(false, tx.error ?? new Error(`${store}: the read failed`));
+      tx.onabort = () => done(false, tx.error ?? new Error(`${store}: the read was aborted`));
+      if (tag && shareTest.fault?.readAbort === tag && r) r.onsuccess = () => { try { tx.abort(); } catch {} };
     });
   },
-  /** Record it, or throw (then the share request isn't sent); `full` when SHARE_SENT_MAX others are live. */
-  async put(account, notebook, attempt) {
+  /** {tag: "none"} | {tag: "attempt", attempt} | {tag: "unreadable"}; rejects if it can't be read. */
+  async get(account, notebook) {
+    const d = await this.db();
+    if (!d) throw new Error("this browser's upload records couldn't be opened");
+    if (shareTest.fault?.get) throw new Error("test: the records can't be read");
     const k = this.key(account, notebook);
-    await this.change(async (all) => {
-      await this.pruned(all);
-      // (another live attempt of this notebook, recorded by another tab since this one looked: never replaced, as
-      // it may have made a share; this upload stops, and the next one sends that attempt, daybreak3's CORR-UPLOAD-R5-4)
-      if (Object.hasOwn(all, k) && /^[0-9a-f]{32}$/.test(all[k]?.attempt ?? "") && all[k].attempt !== attempt) throw Object.assign(new Error("other"), { other: true });
-      if (!Object.hasOwn(all, k) && Object.keys(all).length >= SHARE_SENT_MAX) throw Object.assign(new Error("full"), { full: true });
-      all[k] = { attempt, at: Date.now() };
-    });
-    if (this.get(account, notebook) !== attempt) throw new Error("not recorded");
+    const row = await this.read(d, "records", (st) => st.get(k), "get");
+    if (row === undefined) return { tag: "none" };
+    return this.wellFormed(row, k) ? { tag: "attempt", attempt: row.attempt } : { tag: "unreadable" };
   },
-  /** (a failed change keeps the record: a record kept too long costs a slot, one dropped could cost a share) */
-  drop(account, notebook) { return this.change((all) => { delete all[this.key(account, notebook)]; }).catch(() => {}); },
-  /** A notebook deleted for good: its records, every account's. */
-  forget(notebook) { return this.change((all) => { for (const k of Object.keys(all)) if (k.endsWith("|" + notebook)) delete all[k]; }).catch(() => {}); },
-  /** Without the records of browser notebooks no longer in this browser, or durably shared there (it never sends
-   * a first upload again; others, a workspace's files, are kept); read raw, so no notebook is made by reading it. */
-  async pruned(all) {
+  /** One change (design r3 §2), all under the origin-wide lock: `inputs` read first (other databases), then ONE strict
+   * readwrite transaction whose rows go to `plan(rows, inputs)`, synchronously, for {outcome, ops}; settled once;
+   * then `after(outcome, db)`, the read-back.  Resolves to the outcome's tag; rejects if it can't be done so. */
+  async change(kind, plan, { inputs, after } = {}) {
+    const locks = shareTest.fault?.locks ? undefined : navigator.locks;
+    if (typeof locks?.request !== "function") throw new Error("this browser can't lock its records (no Web Locks)");
+    return locks.request(SHARE_SENT_LOCK, { mode: "exclusive" }, async () => {
+      const d = await this.db();
+      if (!d) throw new Error("this browser's upload records couldn't be opened");
+      const got = inputs ? await inputs(d) : null;
+      const outcome = await this.transact(d, kind, (rows) => plan(rows, got));
+      if (after) await after(outcome, d);
+      return outcome;
+    });
+  },
+  /** The transaction: strict, or not at all; no await inside it; the first of complete, abort or a caught exception
+   * settles it, and nothing after that. */
+  transact(d, kind, plan) {
+    return new Promise((resolve, reject) => {
+      let settled = false, outcome = null, tx;
+      const settle = (ok, v) => { if (!settled) { settled = true; (ok ? resolve : reject)(v); } };
+      const abort = (e) => { try { tx.abort(); } catch {} settle(false, e); };
+      try {
+        if (shareTest.fault?.txCreate) throw new Error("test: no strict transaction");
+        tx = d.transaction("records", "readwrite", { durability: "strict" });
+      } catch (e) {
+        return settle(false, e);
+      }
+      const durability = shareTest.fault?.durability ? "default" : tx.durability;
+      if (Array.isArray(shareTest.changeLog)) shareTest.changeLog.push({ kind, durability });
+      tx.oncomplete = () => settle(true, outcome);
+      // (a failed request isn't stopped (no preventDefault), so it aborts the whole transaction: onabort settles)
+      tx.onabort = () => settle(false, tx.error ?? new Error("the records' transaction was aborted"));
+      if (durability !== "strict") return abort(new Error(`the records' transaction isn't strict (${durability})`));
+      try {
+        const st = tx.objectStore("records");
+        const all = st.getAll();
+        all.onsuccess = () => {
+          try {
+            if (shareTest.fault?.plan) throw new Error("test: the plan fails");
+            const p = plan(all.result ?? []);
+            outcome = p.outcome;
+            for (const op of p.ops) {
+              if ("del" in op) { st.delete(op.del); continue; }
+              const w = st.put(op.put);
+              // (tests: an abort after the write succeeded, as a quota failure at commit would; or a failing request)
+              if (shareTest.fault?.afterWrite || shareTest.fault?.quota) w.onsuccess = () => { try { tx.abort(); } catch {} };
+              else if (shareTest.fault?.requestFail) w.onsuccess = () => { st.add(op.put); };
+            }
+          } catch (e) {
+            abort(e);
+          }
+        };
+      } catch (e) {
+        abort(e);
+      }
+    });
+  },
+  /** "recorded" (then read back, under the lock), "other" (another live attempt of it: never replaced, as it may
+   * have made a share, daybreak3's CORR-UPLOAD-R5-4), "full" (SHARE_SENT_MAX others, after pruning) or "unreadable"
+   * (its row can't be trusted); rejects if it couldn't be recorded: then the share request isn't sent. */
+  put(account, notebook, attempt) {
+    const k = this.key(account, notebook);
+    return this.change("put", (rows, inp) => {
+      // (pruning, in put only: the records of browser notebooks no longer here, or durably shared there (they never
+      // send a first upload again; a workspace's files' are kept), as read by `inputs`; unknown is kept)
+      const del = new Set();
+      if (inp) for (const row of rows) {
+        if (!this.wellFormed(row, row?.key) || /^[a-z]+:/.test(row.notebook)) continue;
+        if (!inp.ids.has(row.notebook) || inp.shared.has(row.notebook)) del.add(row.key);
+      }
+      const live = rows.filter((row) => !del.has(row?.key));
+      const mine = live.find((row) => row?.key === k);
+      // (a refusal changes nothing: neither its record nor the prunes found on the way)
+      if (mine !== undefined && !this.wellFormed(mine, k)) return { outcome: "unreadable", ops: [] };
+      if (mine !== undefined && mine.attempt !== attempt) return { outcome: "other", ops: [] };
+      if (mine === undefined && live.length >= SHARE_SENT_MAX) return { outcome: "full", ops: [] };
+      return { outcome: "recorded", ops: [...[...del].map((key) => ({ del: key })), { put: { key: k, account, notebook, attempt, at: Date.now() } }] };
+    }, {
+      inputs: (d) => this.pruneInputs(d),
+      // (the read-back, before the lock goes: a failure here is after the commit, so the record stays, and a retry
+      // sends this same attempt; tests change what it sees, never the store)
+      after: async (outcome, d) => {
+        if (outcome !== "recorded") return;
+        const seen = shareTest.fault?.readback;
+        // (tests: the read-back held until the test lets it go, to show the lock is held all through it; a gate not
+        // opened within 20 s fails the read-back, so it can never keep the lock, and never lets a request go)
+        if (shareTest.fault?.readbackHold) {
+          await new Promise((go, no) => {
+            const t = setTimeout(() => no(new Error("test: the read-back's gate expired")), 20_000);
+            shareTest.readbackGo = () => { clearTimeout(t); go(); };
+          });
+        }
+        let row, failed = false;
+        try {
+          if (seen === "reject") throw new Error("test: the read-back fails");
+          row = await this.read(d, "records", (st) => st.get(k), "readback");
+        } catch {
+          failed = true;
+        }
+        if (Array.isArray(shareTest.changeLog)) shareTest.changeLog.push({ kind: "readback" });
+        if (failed) throw new Error("not recorded");
+        if (seen === "missing") row = undefined;
+        else if (seen === "mismatch" && row) row = { ...row, attempt: (row.attempt?.[0] === "f" ? "e" : "f").repeat(32) };
+        if (!this.wellFormed(row, k) || row.attempt !== attempt) throw new Error("not recorded");
+      },
+    });
+  },
+  /** What put prunes by, read before its transaction: the browser's notebooks, and which of the recorded ones are
+   * durably shared; read raw, so no notebook is made by reading it; null (nothing pruned) if they can't be read. */
+  async pruneInputs(d) {
     db ??= await dbReady;
-    if (!db) return all;
-    const keys = await idb(db, "notebooks", "readonly", (st) => st.getAllKeys()).catch(() => null);
-    if (!Array.isArray(keys)) return all;
-    const ids = new Set(keys.map(String));
-    for (const k of Object.keys(all)) {
-      const id = k.slice(k.indexOf("|") + 1);
-      if (/^[a-z]+:/.test(id)) continue;
-      if (!ids.has(id)) delete all[k];
-      else if ((await idb(db, "notebooks", "readonly", (st) => st.get(id)).catch(() => undefined))?.share_id) delete all[k];
+    if (!db) return null;
+    const keys = await this.read(db, "notebooks", (st) => st.getAllKeys(), "prune-keys").catch(() => null);
+    const rows = await this.read(d, "records", (st) => st.getAll(), "prune-rows").catch(() => null);
+    if (!Array.isArray(keys) || !Array.isArray(rows)) return null;
+    const ids = new Set(keys.map(String)), shared = new Set();
+    for (const row of rows) {
+      if (!this.wellFormed(row, row?.key) || /^[a-z]+:/.test(row.notebook) || !ids.has(row.notebook)) continue;
+      // (one that can't be read is unknown, so its record is kept)
+      if ((await this.read(db, "notebooks", (st) => st.get(row.notebook), "prune-notebook").catch(() => undefined))?.share_id) shared.add(row.notebook);
     }
-    return all;
+    return { ids, shared };
+  },
+  /** Settled: the record of `attempt` goes, and only that one (compare-and-delete: an older settle never takes a newer
+   * record); a failed change keeps it (a record kept too long costs a slot, one dropped could cost a share). */
+  drop(account, notebook, attempt) {
+    const k = this.key(account, notebook);
+    return this.change("drop", (rows) => {
+      const row = rows.find((r) => r?.key === k);
+      return row !== undefined && this.wellFormed(row, k) && row.attempt === attempt ? { outcome: "dropped", ops: [{ del: k }] } : { outcome: "kept", ops: [] };
+    }).catch(() => "failed");
+  },
+  /** A notebook deleted for good: its records, every account's, whatever their state. */
+  forget(notebook) {
+    return this.change("forget", (rows) => ({ outcome: "forgotten", ops: rows.filter((r) => typeof r?.key === "string" && r.key.endsWith("|" + notebook)).map((r) => ({ del: r.key })) })).catch(() => "failed");
   },
 };
-const shareTest = { workspace: () => wsNow(), sent: () => shareSent.all(), exports: async () => ({ ipynb: toIpynb({ ...nb.snapshot(), name: docName() }), link: await shareLink() }) };
+// (tests: the Share dialog's seams.  The records' own: `seed(map, {raw})` writes rows (map: key -> {attempt, at};
+// raw: rows as given, malformed ones included) through a strict transaction, replacing all; `sent()` reads them in a
+// fresh transaction, key -> {attempt, at, tag}; `registry()` and `account()` for the cases that order the records'
+// changes themselves; `fault` (see shareSent) and `changeLog` (each change's kind and durability, and each
+// read-back), set by a test)
+const shareTest = {
+  workspace: () => wsNow(),
+  async sent() {
+    const d = await shareSent.db();
+    if (!d) return null;
+    const rows = (await shareSent.read(d, "records", (st) => st.getAll())) ?? [];
+    return Object.fromEntries(rows.map((r) => [r.key, { attempt: r.attempt, at: r.at, tag: shareSent.wellFormed(r, r.key) ? "attempt" : "unreadable" }]));
+  },
+  registry: () => shareSent,
+  account: () => (sharing.enabled ? sharing.me?.account_id ?? null : null),
+  async seed(map = {}, { raw = [] } = {}) {
+    const d = await shareSent.db();
+    if (!d) throw new Error("no records database");
+    await new Promise((ok, no) => {
+      const tx = d.transaction("records", "readwrite", { durability: "strict" });
+      const st = tx.objectStore("records");
+      st.clear();
+      for (const [key, v] of Object.entries(map)) {
+        const i = key.indexOf("|");
+        st.put({ key, account: key.slice(0, i), notebook: key.slice(i + 1), attempt: v.attempt, at: v.at ?? 0 });
+      }
+      for (const r of raw) st.put(r);
+      tx.oncomplete = () => ok();
+      tx.onabort = () => no(tx.error);
+    });
+  },
+  exports: async () => ({ ipynb: toIpynb({ ...nb.snapshot(), name: docName() }), link: await shareLink() }),
+};
 // One file's bytes, as it is now; if it is no longer the file that was listed (another fid), it changed
 async function storedFileBytes(f) {
   await shareTest.onRead?.(f.path);
@@ -1752,8 +1906,19 @@ const shareDialog = createShareDialog({
     // another account's record is never used, daybreak3's r3 note 3)
     const account = sharing.enabled ? sharing.me?.account_id ?? null : null;
     if (!account) throw new Error("sign in to upload");
-    const sentAttempt = () => shareSent.get(account, origin);
-    const sentDone = () => shareSent.drop(account, origin);
+    // (this device's attempt for it, if any; records that can't be read, or a row that can't be trusted, refuse the
+    // upload: a live record must never read as none, or a second share could be made beside it)
+    const sentAttempt = async () => {
+      let g;
+      try {
+        g = await shareSent.get(account, origin);
+      } catch {
+        g = null;
+      }
+      if (g?.tag === "attempt") return g.attempt;
+      if (g?.tag === "none") return null;
+      throw new Error("this browser couldn't read its upload records, so nothing was shared; upload again");
+    };
     // (the record goes only once share `id` is durably the notebook's: a save that fails, or a crash before it ends,
     // keeps it, so a retry recovers that share through its receipt, astra3's and daybreak3's r3 note 1; read from
     // THIS notebook's own store, captured now, as the page may show another by then; no store, a failed read, or
@@ -1761,12 +1926,15 @@ const shareDialog = createShareDialog({
     const originStore = nb.store;
     const settle = async (id) => {
       try {
+        // (the record's attempt, read first: only that one goes, so an older settle never takes a newer record)
+        const g = await shareSent.get(account, origin);
+        if (g?.tag !== "attempt") return;
         await nb.saved();
         const st = originStore;
         if (!st || ("db" in st && !st.db)) return;
         // (a browser notebook's record read raw: loading a store makes its notebook if it is gone)
         const d = st instanceof IdbStore ? await idb(st.db, "notebooks", "readonly", (o) => o.get(st.id)) : await st.load();
-        if (d && typeof d === "object" && d.share_id === id) await sentDone();
+        if (d && typeof d === "object" && d.share_id === id) await shareSent.drop(account, origin, g.attempt);
       } catch {}
     };
     const prev = nb.snapshot().share_id ?? null;
@@ -1777,7 +1945,7 @@ const shareDialog = createShareDialog({
     // (a notebook with its share, durably: any record of a sent first upload is settled)
     if (prev) void settle(prev);
     if (!prev) {
-      attempt = sentAttempt() ?? nb.snapshot().share_attempt ?? [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      attempt = (await sentAttempt()) ?? nb.snapshot().share_attempt ?? [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
       nb.setMeta({ share_attempt: attempt });
       try {
         await (shareTest.saved?.() ?? nb.saved());
@@ -1792,7 +1960,7 @@ const shareDialog = createShareDialog({
       if (kept.share_id) throw new Error("this notebook was shared from elsewhere meanwhile. Upload again to make a new version of that share.");
       if (!/^[0-9a-f]{32}$/.test(kept.share_attempt ?? "")) throw new Error("this notebook's upload changed elsewhere meanwhile; upload again");
       // (an attempt this device already sent comes first: its share may exist; else the kept one is adopted)
-      const sent = sentAttempt();
+      const sent = await sentAttempt();
       if (sent && kept.share_attempt !== sent) {
         nb.setMeta({ share_attempt: sent });
         try {
@@ -1814,12 +1982,16 @@ const shareDialog = createShareDialog({
       const now = (await storedShare()) ?? nb.snapshot();
       if (current.id !== origin || now.share_id || now.share_attempt !== attempt) throw new Error("this notebook's share changed elsewhere while uploading; nothing was shared. Upload again.");
       // (recorded on this device before the request goes: unrecordable, it isn't sent)
+      let recorded;
       try {
-        await shareSent.put(account, origin, attempt);
-      } catch (e) {
+        recorded = await shareSent.put(account, origin, attempt);
+      } catch {
+        recorded = "failed";
+      }
+      if (recorded !== "recorded") {
         // (never a live record evicted for this one: the oldest's share would be lost to a retry, CORR-UPLOAD-R4-2)
-        if (e?.full) throw new Error(`this browser has ${SHARE_SENT_MAX} first uploads whose outcome it hasn't confirmed yet, so nothing was shared. Upload one of those notebooks again (that confirms it), then this one.`);
-        if (e?.other) throw new Error("another upload of this notebook from this browser hasn't finished, so nothing was shared. Upload again: that continues it.");
+        if (recorded === "full") throw new Error(`this browser has ${SHARE_SENT_MAX} first uploads whose outcome it hasn't confirmed yet, so nothing was shared. Upload one of those notebooks again (that confirms it), then this one.`);
+        if (recorded === "other") throw new Error("another upload of this notebook from this browser hasn't finished, so nothing was shared. Upload again: that continues it.");
         throw new Error("this browser couldn't record the upload, so nothing was shared; upload again");
       }
       committing = true;
@@ -1842,7 +2014,8 @@ const shareDialog = createShareDialog({
           void settle(e.share.id);
         }
       } else {
-        sentDone();
+        // (this attempt's record, and only it, goes: its share is gone, so no retry could recover one)
+        void shareSent.drop(account, origin, attempt);
         if (current.id === origin) nb.setMeta({ share_attempt: null });
       }
       throw new Error(e.kind === "used"
