@@ -4,7 +4,9 @@
    mldivide after its dimension check (which mldivide still makes first),
    compared as normalized source (ast.unparse) without docstrings, _band_solve read as _legacy_band_solve;
    the pins are the sha256 of master d3617031's normalized functions;
-2. MAX_FULL and MAX_BAND_WORK are read only inside the legacy functions;
+2. MAX_FULL and MAX_BAND_WORK are read only inside the legacy functions, and by
+   legacy_band_route, the routing floor (William's D-W1, Oct 27 2026), whose body
+   must be exactly master's band predicate;
 3. each legacy function is called only from the unmeasured branch of its
    measured twin (or from the other legacy functions)."""
 import ast
@@ -57,8 +59,12 @@ def main():
     for name, fn in f.items():
         reads = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and n.id in ("MAX_FULL", "MAX_BAND_WORK")}
         if reads:
-            assert name in legacy, "%s reads %s" % (name, sorted(reads))
-    print("ok MAX_FULL and MAX_BAND_WORK are read only by the legacy functions")
+            assert name in legacy or name == "legacy_band_route", "%s reads %s" % (name, sorted(reads))
+    # (the floor: one return of master's mldivide predicate, nothing else)
+    fl = [s for s in f["legacy_band_route"].body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))]
+    assert len(fl) == 1 and isinstance(fl[0], ast.Return) and ast.unparse(fl[0].value) == \
+        "(2 * kl + ku + 1) * n <= MAX_FULL and n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK", ast.unparse(f["legacy_band_route"])
+    print("ok MAX_FULL and MAX_BAND_WORK are read only by the legacy functions and the floor (master's predicate)")
     twin = {"_legacy_full_arr": "full_arr", "_legacy_mldivide": "mldivide", "_legacy_band_solve": "_legacy_mldivide"}
     for leg, owner in twin.items():
         callers = [name for name, fn in f.items() if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)

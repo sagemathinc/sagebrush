@@ -3419,6 +3419,14 @@
  },
  "lib/_matlab_sparse.py :: legacy_band_route :: return (2 * kl + ku + 1) * n <= MAX_FULL and n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK #0": {
   "class": "2+3",
+  "disposition": {
+   "2": {
+    "followup": "FU-B16-3"
+   },
+   "3": {
+    "followup": "FU-B16-3"
+   }
+  },
   "owner": "MATLAB sparse linear algebra: PR 2's routing floor (routing amendment r1, variant (d)): master's band route, a route only, never a refusal (admission is the ledger's)"
  },
  "lib/_matlab_sparse.py :: mldivide :: big = A.m == A.n and A.n > MAX_DENSE_SOLVE #0": {
