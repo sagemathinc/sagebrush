@@ -3185,7 +3185,7 @@ freely, subject to the following restrictions:
 
 == JavaScript packages in the notebook page's bundles (12) ==
 
-(from web/js-dependencies.json 1c775afe34eecc48)
+(from web/js-dependencies.json d6d7c799f99aaf60)
 
 @cocalc/diff-match-patch 1.1.1: Apache-2.0 (in TimeTravel)
 @preact/signals-core 1.14.4: MIT (in the board)
@@ -3198,7 +3198,7 @@ katex 0.19.0: MIT (in KaTeX's stylesheet and fonts (copied), math, the atlas)
 lru-cache 11.2.4: BlueOak-1.0.0 (in TimeTravel) [vendored by another package; license text from 11.5.3]
 marked 18.0.14: MIT (in the board, the notebook component, the notebook page, the shared collection page)
 mathjax-full 3.2.2: Apache-2.0 (in the command line's board render (math))
-patchflow 0.16.0: MIT (in TimeTravel)
+patchflow 0.16.0: MIT (in TimeTravel, the board, the notebook page)
 
 ------------------------------------------------------------------------
 @cocalc/diff-match-patch 1.1.1 (LICENSE)

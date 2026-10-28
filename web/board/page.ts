@@ -68,6 +68,8 @@ import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
 import { SyncOwner } from "../workspace/sync-owner";
+import { DocSync } from "../workspace/doc-sync";
+import { docSyncOrigin, docSyncAllowed, followDocSync, docSyncChannel } from "../workspace/doc-sync-switch";
 // (the frame other sites embed and exported boards: built with __SB_NO_SYNC__, so no sync owner, and with it no
 // client, is in that copy of the page: web/build.ts)
 declare const __SB_NO_SYNC__: boolean | undefined;
@@ -206,6 +208,23 @@ if (ws) {
   // (sync, step 5: the page's sync owner; it runs a client only while this browser's sync is on, for the account
   // signed in: nothing at all otherwise)
   if (!NO_SYNC) SyncOwner.of(ws).start();
+  // (DEV's switch for notebooks' contents (workspace/doc-sync-switch.ts): the account connection is whichever tab holds
+  // it, this one's too, so this page's carries notebooks once the notebook page turned the switch on (astra's DEVSW-1);
+  // behind the same gate, evaluated here on every load; on any other origin nothing is asked or started.  Boards' own
+  // contents never: DocSync carries only notebooks)
+  if (!NO_SYNC && docSyncOrigin(location.origin)) void docSyncHere(ws).catch((e) => console.warn("sync: notebooks on this page's connection:", e));
+}
+async function docSyncHere(w: Workspace) {
+  const owner = SyncOwner.of(w);
+  const allowed = await docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning() });
+  if (!allowed) return;
+  await followDocSync({
+    makeDocs: () => new DocSync(),
+    makeChannel: () => (typeof BroadcastChannel === "function" ? new BroadcastChannel(docSyncChannel(w.ws.name)) : null),
+    journalActive: () => w.journalActive(),
+    setDocs: (docs) => owner.setDocs(docs),
+    warn: (...a) => console.warn(...a),
+  });
 }
 const PENDING = "sagebrush-workspace-pending:", PENDING_UNREAD = "sagebrush-workspace-pending-unread:";
 /** The largest save journaled as pending (characters of JSON): a larger board is kept by the workspace alone, and a pending value larger than this isn't ours to parse (LIMIT-12C-4). */
