@@ -108,6 +108,22 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
   fake.faults.staleNonceAlways = false;
 }
 
+// ---- a run asked before the first bind finishes runs on it
+{
+  const fake = new FakeGateway();
+  const client = await makeClient(fake);
+  const k = new RemoteKernel({ client, notebook: "fid-3", clientId: "c3", sleep: fast });
+  const hold = fake.intercept("POST", /^\/bindings$/, { pause: true });
+  const starting = k.start();
+  await hold.reached;
+  const s = sink();
+  k.execute("asked-before-bind", { mode: "python" }, s);
+  hold.release();
+  await within(starting);
+  await within(s.ended);
+  check(s.terminal?.[0] === "done" && fake.executions.some((x) => x.code === "asked-before-bind"), "a run asked before the first bind finished: it runs on that binding");
+}
+
 // ---- P1A-A3-2: https only, no credentials in the address, no redirects, no escaping the base
 {
   const fake = new FakeGateway();
@@ -626,11 +642,16 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
     ["an applied restart without its incarnation", (r) => { delete r.incarnation; }],
   ];
   for (const [what, mutate] of variants) {
+    // (each variant from a consistent start: the fake's epoch is the client's, as an invalid takeover
+    // answer leaves the client's unchanged while the fake moved on)
+    fake.bindings.get(kernel.binding).epoch = kernel.epoch;
+    let applied = false;
     fake.intercept("POST", /\/restart$/, { lose: true });
-    fake.intercept("POST", /\/takeover$/, { mutate });
+    fake.intercept("POST", /\/takeover$/, { mutate: (r) => { applied = (r.applied_before_takeover ?? []).some((a) => a.kind === "restart"); mutate(r); } });
     const g = kernel.generation, n = statuses.length;
     await kernel.restart();
     const said = statuses.slice(n);
+    check(applied, `P1A-R2-C2 (${what}) the restart really was applied, and the gateway's real answer said so`);
     check(kernel.generation === g && kernel.needsFence && !said.some((t) => /did not happen/.test(t)) && said.some((t) => /could not be checked/.test(t)), `P1A-R2-C2 a restart applied, its answer lost, then a takeover answer with ${what}: nothing concluded, the fence stays`);
   }
   // (an old run still executing, and a ready answer that leaves in_flight out: not taken as "nothing running")
@@ -750,8 +771,17 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
 
   fake.faults.takeover = ["quarantined"];
   const b0 = kernel.binding, g0 = kernel.generation, r0 = restarts.n;
-  const s2 = await run(kernel, "quarantine");
+  const holdBind = fake.intercept("POST", /^\/bindings$/, { pause: true });
+  const s2 = sink();
+  kernel.execute("quarantine", { mode: "python" }, s2);
+  await holdBind.reached; // (the replacement is binding: there is no binding right now)
+  const sq = sink();
+  kernel.execute("asked-during-replacement", { mode: "python" }, sq);
+  holdBind.release();
+  await within(Promise.all([s2.ended, sq.ended]));
+  await until(() => kernel.ready && kernel.binding !== b0 && restarts.n === r0 + 1);
   check(s2.terminal?.[1] === NOTES.kernelReplaced && kernel.binding !== b0 && kernel.generation === g0 + 1 && restarts.n === r0 + 1, "quarantined: a new binding, a new generation, said so");
+  check(sq.terminal?.[0] === "done" && fake.executions.some((x) => x.code === "asked-during-replacement"), "a run asked while the replacement was binding: it runs on the new binding");
   const s3 = await run(kernel, "fresh");
   check(s3.terminal?.[0] === "done", "and the new binding runs");
 
