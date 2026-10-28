@@ -1219,6 +1219,55 @@ jobs:
           python3 engine/py/test_ffmat_echelon.py
           python3 sage-tests/run_cpython.py -v
 
+  # clippy on sagebrush-py (FU-CI-CLIPPY, plan r4e): no workflow ran clippy, so a deny-level lint in Ctrl-C PR B's test
+  # code reached a green PR ci unseen. Default and all features (test-hooks, the crate's only feature), every target;
+  # correctness and suspicious denied, the warn-level lints reported, not gated. The VM baseline at 1ff3d5cd: 0
+  # errors, CLEAN in both passes. The summarizer (scripts/clippy) counts from clippy's JSON and is checked against its
+  # fixtures first.
+  engine-clippy:
+    needs: changes
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_cpython == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: detect CI CPU quota
+        run: scripts/ci-cpus.sh
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+          shared-key: clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: the clippy summarizer against its fixtures
+        run: bash scripts/clippy/run-fixtures.sh scripts/clippy
+      - name: "clippy, sagebrush-py, default and all features: correctness and suspicious denied; warnings reported, not gated"
+        working-directory: engine
+        run: |
+          # (pyo3's build script needs an interpreter: setup-python's, from its pythonLocation; ci-local (event
+          #  "local") has no setup-python step and uses the host's python3)
+          if [ -n "${pythonLocation:-}" ]; then PYO3_PYTHON=$pythonLocation/bin/python
+          elif [ "${GITHUB_EVENT_NAME:-}" = local ]; then PYO3_PYTHON=$(command -v python3)
+          else echo "setup-python's pythonLocation is unset"; exit 1; fi
+          export PYO3_PYTHON
+          # (each identity producer keeps its own status: under bash -eo pipefail a failed one fails the step)
+          v_rustc=$(rustc -V); v_cargo=$(cargo -V); v_clippy=$(cargo clippy -V); v_py=$("$PYO3_PYTHON" -V 2>&1); v_lock=$(sha256sum < Cargo.lock)
+          echo "$v_rustc | $v_cargo | $v_clippy | PYO3_PYTHON $PYO3_PYTHON ($v_py) | Cargo.lock ${v_lock%% *}"
+          bad=0
+          for pass in default all; do
+            flags=(); [ "$pass" = all ] && flags=(--all-features)
+            rc=0
+            cargo clippy -p sagebrush-py --no-deps --all-targets "${flags[@]}" --locked --message-format=json -- -D clippy::correctness -D clippy::suspicious > "$RUNNER_TEMP/clippy-$pass.json" || rc=$?
+            echo "== $pass features: cargo rc $rc"
+            python3 -I ../scripts/clippy/clippy-summary.py "$RUNNER_TEMP/clippy-$pass.json" "$rc" engine/py/Cargo.toml || bad=1
+            [ "$rc" = 0 ] || bad=1
+          done
+          exit $bad
+
   ci:
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
     needs:
@@ -1240,6 +1289,8 @@ jobs:
       - engine-language
       - engine-modes
       - engine-cpython
+      - engine-clippy
+      - engine-unsafe-sweep
       - webkit
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     steps:
@@ -1258,6 +1309,7 @@ jobs:
             ${{ needs.engine-node.result }} ${{ needs.engine-language.result }}
             ${{ needs.engine-modes.result }}
             ${{ needs.engine-cpython.result }}
+            ${{ needs.engine-clippy.result }} ${{ needs.engine-unsafe-sweep.result }}
             ${{ needs.webkit.result }}
         run: |
           echo "$RESULTS"

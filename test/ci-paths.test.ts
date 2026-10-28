@@ -102,7 +102,7 @@ test("engine-cpython runs on pull requests that touch the CPython package's inpu
   // script, test_workspace_tools.py's schema and normPath, test_audit.py's
   // modsym fixture, and a root Cargo manifest (none today; the rule is
   // tested here, since engine/Cargo.lock is engine/'s)
-  for (const f of ["scripts/ci-cpus.sh", "web/workspace/schema.json", "web/workspace/paths.ts", "engine/modsym/examples/sage/eisenstein_new_dims.jsonl", "Cargo.lock", "Cargo.toml"])
+  for (const f of ["scripts/ci-cpus.sh", "scripts/clippy/clippy-summary.py", "scripts/clippy/fixtures/expected.tsv", "web/workspace/schema.json", "web/workspace/paths.ts", "engine/modsym/examples/sage/eisenstein_new_dims.jsonl", "Cargo.lock", "Cargo.toml"])
     assert.equal(cp([f]), "true", f);
   for (const f of ["web/board/test-merge.mjs", "web/workspace/api.ts", "scripts/build-cli.mjs", "design/notes.md", "README.md", "app/src/main.ts", "src/runtime/progress.ts", "test/progress.test.ts", "wasm/sagebrush-engine.wasm", "cdn/sagebrush-engine.mjs"])
     assert.equal(cp([f]), "false", f);
