@@ -312,11 +312,14 @@ try {
   await A.call("fakeConnect");
   await A.call("fakeWait", "pull");
   await A.call("fakeAnswer", "pull", { t: "batches", owner, doc: N9, epoch: 1, head: head9, items: [], more: false }, 50);
+  // (the unknown_client case above forgot N9's claim: claimed again first, then the batch)
+  const c9 = await A.call("fakeWait", "doc_claim", 500);
+  if (c9) await A.call("fakeAnswer", "doc_claim", { t: "ack", claim: { client: c9.client, fgen: 0, next_cseq: aj9.slot.cseq } }, 50);
   const b9 = await A.call("fakeWait", "batch");
   await A.call("fakeKick");
   await A.call("fakeAnswer", "batch", { t: "error", code: "rate", detail: { message: "m", retry_after: 1 } }, 300);
   const sk9 = await A.call("fakeState");
-  check(!!b9 && J(sk9.sent) === J(["pull", "batch"]) && sk9.held && sk9.waiting.length === 0, "9 (D3-4c): a kick during the flight, then the batch refused for a while: held, no second lap: " + J({ sent: sk9.sent, held: sk9.held, waiting: sk9.waiting }));
+  check(!!b9 && J(sk9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "batch"]) && sk9.held && sk9.waiting.length === 0, "9 (D3-4c): a kick during the flight, then the batch refused for a while: held, no second lap: " + J({ sent: sk9.sent, held: sk9.held, waiting: sk9.waiting }));
   // (an older hold's timer never lifts a newer one: rate (its timer 400 ms), a new connection, readonly)
   await A.call("fakeStart", ACCOUNT, N9, 400);
   await A.call("fakeConnect");
