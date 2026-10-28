@@ -296,12 +296,12 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       if (e.kind === "folder") { toggle(e.path); return; }
       if (trashView) return;
       // (a .tex file: the LaTeX editor, in a build with it and when it is on; web/latex/boot.ts)
-      if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && e.kind === "file" && (globalThis as any).__sbTex?.(e, ev.ctrlKey || ev.metaKey ? "tab" : "")) return;
+      if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && e.kind === "file" && (globalThis as any).__sbTex?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
       if (e.kind === "file") { preview(e); return; }
       host.open(e, ev.ctrlKey || ev.metaKey || ev.button === 1 ? "tab" : "here");
     };
     r.onauxclick = (ev) => {
-      if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && ev.button === 1 && e.kind === "file" && (globalThis as any).__sbTex?.(e, "tab")) return;
+      if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && ev.button === 1 && e.kind === "file") return void r.onclick!(ev);
       if (ev.button === 1 && e.kind !== "folder" && e.kind !== "file") host.open(e, "tab");
     };
     r.onkeydown = (ev) => {

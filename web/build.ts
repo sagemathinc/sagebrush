@@ -168,7 +168,9 @@ for (const r of [result, consoleResult, mathResult, graphResult, notebookResult,
   const m = /<script id="app">([\s\S]*?)<\/script>/.exec(html)!;
   const tmp = join(here, "app.tmp.js"); // beside index.html: its imports are relative to web/
   writeFileSync(tmp, m[1] + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
-  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: true, define: LATEX_DEFINE });
+  // (without the LaTeX editor, its entry module is resolved to an empty one: nothing of it reaches the page)
+  const latexOff = { name: "latex-off", setup(b: any) { b.onResolve({ filter: /latex\/boot\.ts$/ }, () => (LATEX ? undefined : { path: join(here, "latex", "boot-off.ts") })); } };
+  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: true, define: LATEX_DEFINE, plugins: [latexOff] });
   builds.push(["the notebook page", app]);
   if (!app.success) {
     for (const l of app.logs) console.error(l);

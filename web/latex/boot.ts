@@ -32,10 +32,10 @@ export async function latexBoot(ws: Workspace | null) {
   }
   const q = st.byUrl ? "?latex=1" : "";
   // the file browser: a .tex row with a fid opens the editor; without one, its preview (which says why)
-  g.__sbTex = (e: Entry, how: string) => {
+  g.__sbTex = (e: Entry, tab?: boolean) => {
     if (!/\.tex$/i.test(e.path) || !e.fid) return false;
     const url = "/?tex=" + encodeURIComponent(e.fid) + q.replace("?", "&");
-    how == "tab" ? open(url, "_blank", "noopener") : location.assign(url);
+    tab ? open(url, "_blank", "noopener") : location.assign(url);
     return true;
   };
   // a .tex file's preview: the editor's button; disabled, saying why, for a file without a stable id
