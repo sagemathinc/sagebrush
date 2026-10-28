@@ -2,7 +2,7 @@
 // core (journal.js).  W the workspace, N the journal, H the notebook's history (history.js), R sync's rows.  Each case
 // has a workspace of its own; the notebooks' history is one database for the whole origin, its fence dropped before
 // each case (in a browser there is only ever one workspace), and each case's notebooks have ids of their own.
-import { W, N, H, R, B } from "./all.js";
+import { W, N, H, R, B, S } from "./all.js";
 
 const results = [];
 const check = (ok, what) => results.push([!!ok, what]);
@@ -231,7 +231,9 @@ async function crashPoints() {
 }
 
 async function atCapacity() {
-  // design r4 §3.4: recovery adds no intent, so it progresses with the intents at their bound or the budget full
+  // design r4 §3.4: recovery adds no intent, so it progresses with the intents at their bound or the budget full.
+  // 2c-1d-iii §1: a save whose T1 has no room is still written by T2, its j kept, marked; recovery's catch-up then
+  // ingests it (one version, unmarked), or, paused, it stays marked
   const { w, hdb } = await active();
   for (const valid of [false, true]) {
     for (const paused of [false, true]) {
@@ -240,23 +242,21 @@ async function atCapacity() {
       if (paused) await pause(st);
       const d2 = await outputsOnly(st, d);
       if (valid) await t1Only(st, { ...d2, cells: [{ id: "a", code: "B" }], baseRev: d2.rev });
-      let refused = null;
-      for (let i = 0; i < N.MAX_INTENTS + 1 && !refused; i++) {
-        const out = await st.save({ ...d2, cells: [{ id: "a", code: "C" + i }], baseRev: d.rev });
-        if (typeof out === "string") refused = out;
-      }
-      const js = await jState(hdb, id);
+      // (stale saves, their T2s lost, until the intents are at their bound)
+      for (let i = 0; (await jState(hdb, id)).intents.length < N.MAX_INTENTS; i++) await st.save({ ...d2, cells: [{ id: "a", code: "C" + i }], baseRev: d.rev });
+      const rec0 = await rawGet(w.main, "notebooks", id), js0 = await jState(hdb, id), rows0 = (await histRows(hdb, id)).length;
+      const out = await st.save({ ...d2, cells: [{ id: "a", code: "F" }], baseRev: rec0.rev });
+      const rec = await rawGet(w.main, "notebooks", id), js = await jState(hdb, id);
       await close(st);
-      check(refused && /too many saves/.test(refused) && js.intents.length === N.MAX_INTENTS, `${tag}: the next save refused, said, nothing written: ${refused}`);
+      check(out?.saved === N.SAVED_UNJOURNALED && out.unjournaled === true && rec.unjournaled === true && rec.j === rec0.j && rec.hash === (await N.docHash(rec)) && codes(rec) === J([["a", "F"]]) && J(js) === J(js0) && (await histRows(hdb, id)).length === rows0, `${tag}: the next save has no room for its T1: written all the same, its j kept, marked, said; nothing of it in the history: ${J(out?.saved)}`);
       const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
-      const want = valid ? J([["a", "B"]]) : J([["a", "A"]]);
-      check(r.row === (valid ? "rewritten" : "stamped") && p.codes === want && p.hashOk && p.jOk && p.intents === 0, `…reopened at capacity: ${r.row}, the document ${p.codes}, every intent pruned`);
+      check(r.row === "stamped" && p.codes === J([["a", "F"]]) && p.hashOk && p.jOk && p.intents === 0 && p.rec.unjournaled === undefined && r.catchUp === p.rec.j, `…reopened: the marked value kept (B's T2 lost to it), ingested as one version and unmarked, every intent pruned: ${r.row}`);
       const again = await r.st.save({ ...r.d, cells: [{ id: "a", code: "after" }], baseRev: r.d.rev });
-      check(!!again?.saved, "…and the next save is taken");
+      check(!!again?.saved && again.saved !== N.SAVED_UNJOURNALED, "…and the next save is journaled");
       await close(r.st);
     }
   }
-  // the pending budget full: a save refused; recovery still completes, and its prune makes room
+  // the pending budget full: a save written all the same, marked; recovery ingests it, its prune freeing the room
   {
     const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
     const d2 = await outputsOnly(st, d);
@@ -265,9 +265,9 @@ async function atCapacity() {
     N.JOURNAL_BUDGETS.pendingAll = (await recount(hdb)).counted.pend;
     const out = await st.save({ ...d2, cells: [{ id: "a", code: "C" }], baseRev: d2.rev });
     await close(st);
-    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
     N.JOURNAL_BUDGETS.pendingAll = keep;
-    check(typeof out === "string" && /too large to keep/.test(out) && r.row === "rewritten" && p.codes === J([["a", "B"]]) && p.intents === 0, "the pending budget full: a save refused; recovery completes all the same (B), its prune freeing the room: " + out);
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    check(out?.saved === N.SAVED_UNJOURNALED && r.row === "stamped" && p.codes === J([["a", "C"]]) && p.intents === 0 && p.rec.unjournaled === undefined && r.catchUp === p.rec.j, "the pending budget full: a save written all the same, marked; recovery ingests it, unmarked, its prune freeing the room: " + J({ saved: out?.saved, row: r.row }));
     await close(r.st);
   }
   await close(w);
@@ -362,9 +362,15 @@ async function budgetsAndDrop() {
   N.JOURNAL_BUDGETS.metaAll = (await recount(hdb)).counted.meta + 10;
   const id = newId(), st = store(w, hdb, id, doc([["a", "1"]]));
   const why = await st.load().then(() => null, (e) => e?.message ?? String(e));
-  N.JOURNAL_BUDGETS.metaAll = keep;
-  check(why !== null && /too many documents/.test(why) && J(await syncRows(hdb)) === before && (await rawGet(w.main, "notebooks", id)) === undefined && (await histRows(hdb, id)).length === 0, "the metadata budget full: refused, said, nothing written: " + why);
+  const rec1 = await rawGet(w.main, "notebooks", id);
+  check(why === null && J(await syncRows(hdb)) === before && rec1?.unjournaled === true && rec1.j === 0 && (await histRows(hdb, id)).length === 0, "the metadata budget full: a new notebook's first save written all the same, marked, nothing in the journal or history: " + J({ why, mark: rec1?.unjournaled }));
   await close(st);
+  // (reopened with the budget still full: its catch-up refused, it stays as it is, marked)
+  const r0 = await reopen(w, hdb, id);
+  N.JOURNAL_BUDGETS.metaAll = keep;
+  const rec2 = await rawGet(w.main, "notebooks", id);
+  check(r0.row === "consistent" && rec2.rev === rec1.rev && J(await syncRows(hdb)) === before, "…reopened, still no room: consistent, still marked, nothing written: " + J({ row: r0.row, rev: [rec1.rev, rec2.rev], mark: rec2.unjournaled, j: rec2.j, sync: J(await syncRows(hdb)) === before }));
+  await close(r0.st);
   // a dropped notebook's journal rows go with it (its intents too), their charges released
   const { id: id2, st: st2, d: d2 } = await loadNew(w, hdb, [["a", "1"]]);
   await st2.save({ ...d2, cells: [{ id: "a", code: "stale" }], baseRev: d2.rev - 1 });
@@ -895,7 +901,385 @@ async function reloadFails() {
   hdb.close();
 }
 
-const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails];
+
+// (writes into the stores named refused as out of room while `f` runs: the history's put throws QuotaExceededError
+// (in the journal's write, its transaction stopped); the notebooks' transaction is stopped at its put, as a full
+// origin's is at its commit)
+async function noRoom(names, f) {
+  const put = IDBObjectStore.prototype.put, set = new Set([names].flat());
+  IDBObjectStore.prototype.put = function (...a) {
+    if (!set.has(this.name)) return put.apply(this, a);
+    if (this.name === "notebooks") { this.transaction.abort(); return {}; }
+    throw new DOMException("out of room (the test's)", "QuotaExceededError");
+  };
+  try { return await f(); } finally { IDBObjectStore.prototype.put = put; }
+}
+// (TimeTravel's bound for one version lowered while `f` runs, so a small value is one that can never be kept)
+async function smallBound(f) {
+  const keep = S.HISTORY_BACKLOG.bytes;
+  S.HISTORY_BACKLOG.bytes = 8192;
+  try { return await f(); } finally { S.HISTORY_BACKLOG.bytes = keep; }
+}
+const big = () => "x".repeat(6000);
+const versions = async (hdb, id) => (await histRows(hdb, id)).length;
+
+async function fallbackSaves() {
+  // 2c-1d-iii §1, D1: a save whose T1 has no room is written by T2 all the same, its j kept, marked, said; saved only if
+  // T2 commits
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  const rec0 = await rawGet(w.main, "notebooks", id), js0 = J(await jState(hdb, id)), v0 = await versions(hdb, id), sync0 = J(await syncRows(hdb));
+  const out = await noRoom("history", () => st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: rec0.rev }));
+  const rec = await rawGet(w.main, "notebooks", id);
+  check(out?.saved === N.SAVED_UNJOURNALED && out.unjournaled === true && rec.unjournaled === true && rec.j === rec0.j && rec.rev === rec0.rev + 1 && rec.hash === (await N.docHash(rec)) && codes(rec) === J([["a", "B"]]) && J(await jState(hdb, id)) === js0 && (await versions(hdb, id)) === v0 && J(await syncRows(hdb)) === sync0, "D1: T1 out of room (quota): the record written all the same, its j kept, marked, said; nothing in the history or the journal: " + J(out?.saved));
+  // (T1 and T2 both out of room: not saved, said, the record byte for byte as it was)
+  const before = J(await rawGet(w.main, "notebooks", id));
+  const both = await within(noRoom(["history", "notebooks"], () => st.save({ ...d, cells: [{ id: "a", code: "C" }], baseRev: rec.rev })), 3000);
+  check(both !== "timeout" && both.e && J(await rawGet(w.main, "notebooks", id)) === before && J(await jState(hdb, id)) === js0, "D1: T1 and T2 both out of room: not saved (said, never left waiting), the record byte for byte unchanged: " + J(both === "timeout" ? both : both.e?.name ?? both.v));
+  // (a refusal that isn't for room (the fence's, the writer's) is the save's own: no fallback)
+  check(N.roomRefused({ refused: "anything else" }) === false && N.roomRefused({ refused: "x", quota: true }) === true && N.roomRefused(null) === false, "only a refusal for room (the bound, a budget, the quota) falls back");
+  await close(st);
+  await close(w);
+  hdb.close();
+}
+
+async function coalescedVersions() {
+  // D2: fallback B, fallback C, then the catch-up (ingestion): exactly one new version, C's; none for B
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  const v0 = await versions(hdb, id);
+  let rec = await rawGet(w.main, "notebooks", id);
+  await noRoom("history", () => st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: rec.rev }));
+  rec = await rawGet(w.main, "notebooks", id);
+  await noRoom("history", () => st.save({ ...d, cells: [{ id: "a", code: "C" }], baseRev: rec.rev }));
+  await close(st);
+  const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+  const rows = await histRows(hdb, id), last = rows.find((x) => x.j === p.rec.j);
+  const head = last ? codes(r.st.history.docAt(last.time)) : null;
+  check(r.row === "stamped" && p.codes === J([["a", "C"]]) && p.rec.unjournaled === undefined && rows.length === v0 + 1 && r.catchUp === p.rec.j && head === J([["a", "C"]]), "D2: fallback B, fallback C, then ingestion: exactly one new version, C's, none for B; unmarked: " + J({ row: r.row, added: rows.length - v0, head }));
+  await close(r.st);
+  await close(w);
+  hdb.close();
+}
+
+async function markRule() {
+  // A1 (§2): the mark is cleared only when a version holds the value written
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  let rec = await rawGet(w.main, "notebooks", id);
+  await noRoom("history", () => st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: rec.rev }));
+  // (the history paused (as a refused version leaves it): a save's T1 is its intent alone, its value not the head)
+  rec = await rawGet(w.main, "notebooks", id);
+  const paused = await st.save({ ...d, cells: [{ id: "a", code: "C" }], baseRev: rec.rev });
+  const recP = await rawGet(w.main, "notebooks", id);
+  check(!!paused?.saved && paused.saved !== N.SAVED_UNJOURNALED && recP.unjournaled === true && recP.j > rec.j && codes(recP) === J([["a", "C"]]), "A1: after a fallback, an intent-only save (TimeTravel paused) is saved, journaled, and still marked: " + J({ mark: recP.unjournaled, paused: st.history.pauseState?.().paused }));
+  await close(st);
+  // (reopened: its catch-up a version holding C; then a save with its version, and one unchanged: unmarked)
+  const r = await reopen(w, hdb, id);
+  const recR = await rawGet(w.main, "notebooks", id);
+  const s1 = await r.st.save({ ...r.d, cells: [{ id: "a", code: "D" }], baseRev: recR.rev });
+  const rec1 = await rawGet(w.main, "notebooks", id);
+  const s2 = await r.st.save({ ...r.d, cells: [{ id: "a", code: "D" }], baseRev: rec1.rev });
+  const rec2 = await rawGet(w.main, "notebooks", id);
+  check(recR.unjournaled === undefined && !!s1?.saved && rec1.unjournaled === undefined && !!s2?.saved && rec2.unjournaled === undefined && rec2.j > rec1.j, "A1: then a version holding the value clears it, and a save whose value is already the head's stays clear: " + J([recR.unjournaled, rec1.unjournaled, rec2.unjournaled]));
+  await close(r.st);
+  await close(w);
+  hdb.close();
+}
+
+async function markTable() {
+  // A2, A3 (§3's table): recovery with the mark, each row; "refused": the catch-up out of room
+  const { w, hdb } = await active();
+  // (a notebook whose record is A, marked `mark` (a fallback save; too large: under a small bound), then, unless
+  // `intent` is null, a save B whose T2 never came: with its version, or its intent alone (paused))
+  async function setUp({ a = "A", mark = true, intent = null }) {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "0"]]);
+    let rec = await rawGet(w.main, "notebooks", id);
+    if (mark === "too-large") await smallBound(() => noRoom("history", () => st.save({ ...d, cells: [{ id: "a", code: a }], baseRev: rec.rev })));
+    else if (mark) await noRoom("history", () => st.save({ ...d, cells: [{ id: "a", code: a }], baseRev: rec.rev }));
+    else await st.save({ ...d, cells: [{ id: "a", code: a }], baseRev: rec.rev });
+    rec = await rawGet(w.main, "notebooks", id);
+    await close(st);
+    if (intent) {
+      // (a store whose load leaves the record as it is (no recovery), so its history isn't paused by the fallback's
+      // refusal; paused for an intent alone)
+      const s2 = store(w, hdb, id);
+      s2.recover = async (r) => ({ doc: r, row: "the test's" });
+      await s2.load();
+      if (intent !== "version") await pause(s2);
+      // (a stale intent: its srev a revision the record already passed, so the replay never chooses it)
+      await t1Only(s2, { ...d, cells: [{ id: "a", code: "B" }], baseRev: intent === "stale" ? rec.rev - 1 : rec.rev });
+      await close(s2);
+    }
+    return { id, rec };
+  }
+  const rows = [
+    { name: "A marked, none, kept", set: {}, want: { codes: "A", row: "stamped", mark: undefined, catchUp: true } },
+    { name: "A marked, none, refused", set: {}, refused: true, want: { codes: "A", row: "consistent", mark: true, catchUp: false } },
+    { name: "A marked, B with its version", set: { intent: "version" }, want: { codes: "B", row: "rewritten", mark: undefined, catchUp: false } },
+    { name: "A marked, B intent only, kept", set: { intent: "paused" }, want: { codes: "B", row: "rewritten", mark: undefined, catchUp: true } },
+    { name: "A marked, B intent only, refused", set: { intent: "paused" }, refused: true, want: { codes: "B", row: "rewritten", mark: true, catchUp: false } },
+    { name: "A too large, B fits with its version", set: { a: big(), mark: "too-large", intent: "version" }, small: true, want: { codes: "B", row: "rewritten", mark: undefined, catchUp: false } },
+    { name: "A too large, none", set: { a: big(), mark: "too-large" }, small: true, want: { codes: "big", row: "consistent", mark: "too-large", catchUp: false } },
+    { name: "A too large, only a stale intent above its j", set: { a: big(), mark: "too-large", intent: "stale" }, small: true, want: { codes: "big", row: "stamped", mark: "too-large", catchUp: false } },
+    { name: "A unmarked, B intent only, refused", set: { mark: false, intent: "paused" }, refused: true, want: { codes: "B", row: "rewritten", mark: true, catchUp: false } },
+    { name: "A too large, B fits intent only, refused", set: { a: big(), mark: "too-large", intent: "paused" }, small: true, refused: true, want: { codes: "B", row: "rewritten", mark: true, catchUp: false } },
+    { name: "A too large, B fits intent only, kept", set: { a: big(), mark: "too-large", intent: "paused" }, small: true, want: { codes: "B", row: "rewritten", mark: undefined, catchUp: true } },
+  ];
+  for (const t of rows) {
+    const run = async () => {
+      const { id, rec } = await setUp(t.set);
+      const v0 = await versions(hdb, id);
+      const r = await (t.refused ? noRoom("history", () => reopen(w, hdb, id)) : reopen(w, hdb, id));
+      const p = await persisted(w, hdb, id);
+      const c = t.want.codes === "big" ? J([["a", big()]]) : J([["a", t.want.codes]]);
+      // ("not tried": TimeTravel left as it was, not paused by a version it could never keep)
+      const ok = (t.want.mark !== "too-large" || !r.st.history.pauseState().paused) && r.row === t.want.row && p.codes === c && p.hashOk && p.rec.unjournaled === t.want.mark && (t.want.catchUp ? r.catchUp === p.rec.j && (await versions(hdb, id)) === v0 + 1 : r.catchUp == null && (await versions(hdb, id)) === v0) && p.intents === (t.refused ? p.intents : 0) && (rec.unjournaled === (t.set.mark ?? true) || (t.set.mark === false && rec.unjournaled === undefined));
+      check(ok, `§3 table: ${t.name}: ${t.want.row}, ${J(t.want.mark ?? "unmarked")}: ` + J({ row: r.row, mark: p.rec.unjournaled, catchUp: r.catchUp, j: p.rec.j, added: (await versions(hdb, id)) - v0, was: rec.unjournaled }));
+      await close(r.st);
+    };
+    await (t.small ? smallBound(run) : run());
+  }
+  // (a crash between the catch-up and T2: the next load finds the head already the value: no second version, unmarked)
+  {
+    const { id } = await setUp({});
+    const v0 = await versions(hdb, id);
+    const s1 = store(w, hdb, id);
+    const failed = await noRoom("notebooks", () => s1.load().then(() => "loaded", (e) => e?.message ?? String(e)));
+    await close(s1);
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    check(failed !== "loaded" && r.row === "stamped" && p.rec.unjournaled === undefined && r.catchUp === null && (await versions(hdb, id)) === v0 + 1 && p.jOk, "§3: a crash between the catch-up and T2: the next load writes T2 alone, unmarked, no second version: " + J({ failed, row: r.row, added: (await versions(hdb, id)) - v0 }));
+    await close(r.st);
+  }
+  await close(w);
+  hdb.close();
+}
+
+
+async function lifetimeWithMarks() {
+  // A4 (§5, #215 r4's C1-C4): the fallback's T2 and the ingestion run inside the writer's lifetime: a release waits for
+  // them, the next writer is granted only after they committed, and a save meanwhile is refused
+  const { w, hdb } = await active();
+  // (1) a pending ingestion (a marked record's catch-up held), a release, a waiting tab
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const rec0 = await rawGet(w.main, "notebooks", id);
+    await noRoom("history", () => st.save({ ...d, cells: [{ id: "a", code: "M" }], baseRev: rec0.rev }));
+    await close(st);
+    const v0 = await versions(hdb, id);
+    const v = store(w, hdb, id);
+    let open, reached; const gate = new Promise((r) => { open = r; }), inTx = new Promise((r) => { reached = r; });
+    W.JOURNAL_TX_HOOK.beforeTx = async () => { W.JOURNAL_TX_HOOK.beforeTx = undefined; reached(); await gate; };
+    const loading = v.load().then(() => "loaded", (e) => e.message);
+    const held = await within(inTx, 3000);
+    if (held === "timeout") W.JOURNAL_TX_HOOK.beforeTx = undefined;
+    const x = store(w, hdb, id);
+    await x.load();
+    const xt = takeover(x, 4000);
+    const said = await v.save({ ...d, cells: [{ id: "a", code: "meanwhile" }], baseRev: rec0.rev + 1 });
+    const released = v.release();
+    await sleep(200);
+    const early = x.writer;
+    open();
+    const l = await loading;
+    await released;
+    const r = await xt, rec = await rawGet(w.main, "notebooks", id), added = (await versions(hdb, id)) - v0;
+    // (released while it waited, its catch-up is refused at its turn; its T2 still commits before the lock is let go,
+    // and the mark says exactly whether a version holds the value)
+    check(held !== "timeout" && !early && r !== "timeout" && x.writer && said === "not saved: this notebook is open for editing in another tab of this browser" && codes(rec) === J([["a", "M"]]) && (rec.unjournaled === undefined) === (added === 1) && rec.hash === (await N.docHash(rec)), "A4: a release while the ingestion is pending: the next tab is granted only after it settled; a save meanwhile refused; the record M, marked unless a version holds it: " + J({ early, l, mark: rec.unjournaled, added }));
+    await close(x);
+  }
+  // (2) a fallback save of the load's own (a new notebook's first, the metadata budget full) held in its T2, a release
+  {
+    const id = newId(), v = store(w, hdb, id, doc([["a", "first"]]));
+    const keep = N.JOURNAL_BUDGETS.metaAll;
+    N.JOURNAL_BUDGETS.metaAll = (await recount(hdb)).counted.meta + 10;
+    const save = S.IdbStore.prototype.save;
+    let open, reached; const gate = new Promise((r) => { open = r; }), inT2 = new Promise((r) => { reached = r; });
+    S.IdbStore.prototype.save = async function (doc, opts) { if (opts?.journal?.keep) { S.IdbStore.prototype.save = save; reached(); await gate; } return save.call(this, doc, opts); };
+    try {
+      const loading = v.load().then(() => "loaded", (e) => e.message);
+      const held = await within(inT2, 3000);
+      if (held === "timeout") S.IdbStore.prototype.save = save;
+      const x = store(w, hdb, id);
+      await x.load();
+      const xt = takeover(x, 4000);
+      const released = v.release();
+      await sleep(200);
+      const early = x.writer;
+      open();
+      const l = await loading;
+      await released;
+      const r = await xt, rec = await rawGet(w.main, "notebooks", id);
+      check(held !== "timeout" && !early && r !== "timeout" && x.writer && l === "loaded" && rec?.unjournaled === true && codes(rec) === J([["a", "first"]]), "A4: the load's own fallback save held in its T2 and a release: the lock let go only once it committed (C1, C4); the record written, marked: " + J({ early, l, mark: rec?.unjournaled }));
+      await close(x);
+    } finally {
+      S.IdbStore.prototype.save = save;
+      N.JOURNAL_BUDGETS.metaAll = keep;
+    }
+  }
+  // (3) the same as (1), the takeover's reload failing: it lets go, and the next tab takes over, nothing more written
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const rec0 = await rawGet(w.main, "notebooks", id);
+    await noRoom("history", () => st.save({ ...d, cells: [{ id: "a", code: "M" }], baseRev: rec0.rev }));
+    const x = store(w, hdb, id), y = store(w, hdb, id);
+    await x.load(); await y.load();
+    const xt = takeover(x, 3000);
+    await close(st);
+    await xt;
+    const before = J(await rawGet(w.main, "notebooks", id)), v0 = await versions(hdb, id);
+    x.recover = async () => { throw new Error("the test's failed recovery"); };
+    const failed = await x.load().then(() => null, (e) => e.message);
+    const said = await x.save({ ...d, cells: [{ id: "a", code: "after" }], baseRev: rec0.rev + 1 });
+    const yt = takeover(y, 3000);
+    await x.release();
+    const r = await yt;
+    check(/failed recovery/.test(failed) && said === "not saved: this notebook is open for editing in another tab of this browser" && r !== "timeout" && y.writer && J(await rawGet(w.main, "notebooks", id)) === before && (await versions(hdb, id)) === v0, "A4: the takeover's reload failing: nothing more written, the lock let go, the next tab takes over");
+    await close(y);
+  }
+  await close(w);
+  hdb.close();
+}
+
+
+async function clearAgainstTheProof() {
+  // astra's CORR-229-1: a TimeTravel clear deletes the versions a mark's proof rests on.  It waits for a save between
+  // its proof and its T2, marks the record before it deletes anything, and so, whatever its re-record does, the record
+  // is never unmarked without a version holding its value: before reopening and after
+  const { w, hdb } = await active();
+  // (held saves: B's T2 held after its proof; an ordinary one (its version kept), then a fallback (out of room))
+  for (const fallback of [false, true]) {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const before = await rawGet(w.main, "notebooks", id);
+    const save = S.IdbStore.prototype.save;
+    let resume, reached; const gate = new Promise((r) => { resume = r; }), atT2 = new Promise((r) => { reached = r; });
+    S.IdbStore.prototype.save = async function (doc, opts) {
+      if (this.id === id && opts?.journal && !opts.journal.markOnly && doc.cells?.[0]?.code === "B") { S.IdbStore.prototype.save = save; reached(); await gate; }
+      return save.call(this, doc, opts);
+    };
+    try {
+      // (the fallback's T1 refused by a full pending budget, not by refused puts, so the clear's refused re-record below
+      // is the only thing out of room)
+      const keep = N.JOURNAL_BUDGETS.pendingAll;
+      if (fallback) N.JOURNAL_BUDGETS.pendingAll = (await recount(hdb)).counted.pend;
+      const saving = st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: before.rev }).finally(() => { N.JOURNAL_BUDGETS.pendingAll = keep; });
+      const held = await within(atT2, 3000);
+      if (held === "timeout") S.IdbStore.prototype.save = save;
+      // (the clear asked for while B is held, its re-record refused (out of room): it waits for B)
+      const result = await noRoom("history", async () => {
+        const clearing = st.history.clear({ ...d, cells: [{ id: "a", code: "C" }] }).then(() => "cleared", (e) => e.message);
+        await sleep(150);
+        const waited = (await versions(hdb, id)) > 0;
+        resume();
+        const out = await saving;
+        const c = await clearing;
+        await st.patches.appending;
+        return { waited, out, c };
+      });
+      const rec = await rawGet(w.main, "notebooks", id), rows = await versions(hdb, id);
+      await close(st);
+      const r = await reopen(w, hdb, id);
+      const after = await rawGet(w.main, "notebooks", id), rowsAfter = await versions(hdb, id);
+      const holds = (x, n) => x.unjournaled !== undefined || n > 0;
+      check(held !== "timeout" && result.waited && !!result.out?.saved && result.c === "cleared" && codes(rec) === J([["a", "B"]]) && rec.unjournaled === true && rec.rev === before.rev + 1 && holds(rec, rows) && holds(after, rowsAfter) && after.unjournaled === undefined && rowsAfter >= 1 && codes(after) === J([["a", "B"]]), `CORR-229-1${fallback ? " (a fallback save held)" : ""}: a clear while B is between its proof and T2 waits for it, marks the record before deleting (its revision kept), and its re-record refused leaves B marked; reopened, B is ingested and unmarked: ` + J({ held, waited: result.waited, c: result.c, mark: rec.unjournaled, rows, row: r.row, markAfter: after.unjournaled, rowsAfter }));
+      await close(r.st);
+    } finally {
+      S.IdbStore.prototype.save = save;
+    }
+  }
+  // (a save asked for while a clear runs (held as it marks the record) waits for the clear: its proof read after it.  The
+  // invariant, exactly: a record left unmarked is the history head's value, here and after reopening)
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const save = S.IdbStore.prototype.save;
+    // (the clear held as it marks; C's T2 held too, until the clear is done: a save that didn't wait for the clear would
+    // have proved C on a head the clear then deletes)
+    let resume, reached, resumeC; const gate = new Promise((r) => { resume = r; }), atMark = new Promise((r) => { reached = r; }), gateC = new Promise((r) => { resumeC = r; });
+    let marks = 0, cs = 0;
+    S.IdbStore.prototype.save = async function (doc, opts) {
+      if (this.id === id && opts?.journal?.markOnly && !marks++) { reached(); await gate; }
+      if (this.id === id && opts?.journal && !opts.journal.markOnly && doc.cells?.[0]?.code === "C" && !cs++) await gateC;
+      return save.call(this, doc, opts);
+    };
+    try {
+      const clearing = st.history.clear({ ...d, cells: [{ id: "a", code: "A" }] }).then(() => "cleared", (e) => e.message);
+      const held = await within(atMark, 3000);
+      if (held === "timeout") S.IdbStore.prototype.save = save;
+      const rec1 = await rawGet(w.main, "notebooks", id);
+      const saving = st.save({ ...d, cells: [{ id: "a", code: "C" }], baseRev: rec1.rev });
+      await sleep(100);
+      resume();
+      const c = await clearing;
+      await st.patches.appending;
+      resumeC();
+      const out = await saving;
+      S.IdbStore.prototype.save = save;
+      await st.patches.appending;
+      const rec = await rawGet(w.main, "notebooks", id), head = await st.headHash();
+      await close(st);
+      const r = await reopen(w, hdb, id);
+      const after = await rawGet(w.main, "notebooks", id), headAfter = await r.st.headHash();
+      check(held !== "timeout" && c === "cleared" && !!out?.saved && codes(rec) === J([["a", "C"]]) && (rec.unjournaled !== undefined || head === rec.hash) && (after.unjournaled !== undefined || headAfter === after.hash), "CORR-229-1: a save asked for while a clear marks the record waits for the clear; a record left unmarked is the head's value, before reopening and after: " + J({ c, mark: rec.unjournaled, headIsValue: head === rec.hash, row: r.row, markAfter: after.unjournaled, headAfterIsValue: headAfter === after.hash }));
+      await close(r.st);
+    } finally {
+      S.IdbStore.prototype.save = save;
+    }
+  }
+  // (a clear while recovery's ingestion is pending: refused (not ready), nothing deleted, the record still marked)
+  {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const rec0 = await rawGet(w.main, "notebooks", id);
+    await noRoom("history", () => st.save({ ...d, cells: [{ id: "a", code: "M" }], baseRev: rec0.rev }));
+    await close(st);
+    const v = store(w, hdb, id);
+    let open; const gate = new Promise((r) => { open = r; });
+    W.JOURNAL_TX_HOOK.beforeTx = async () => { W.JOURNAL_TX_HOOK.beforeTx = undefined; await gate; };
+    const loading = v.load().then(() => "loaded", (e) => e.message);
+    await sleep(100);
+    const c = await v.history.clear({ ...d, cells: [{ id: "a", code: "M" }] }).then(() => "cleared", (e) => e.message);
+    const recMid = await rawGet(w.main, "notebooks", id);
+    open();
+    const l = await loading;
+    const rec = await rawGet(w.main, "notebooks", id);
+    check(/open for editing/.test(c) && recMid.unjournaled === true && l === "loaded" && (rec.unjournaled !== undefined || (await versions(hdb, id)) > 0), "CORR-229-1: a clear while a marked ingestion is pending is refused, nothing deleted; the invariant holds after: " + J({ c: c.slice(0, 30), mark: rec.unjournaled }));
+    await close(v);
+  }
+  await close(w);
+  hdb.close();
+}
+
+
+async function reloadDuringClear() {
+  // astra's CORR-229-2: a reload while a clear has marked the record and not yet deleted: the reload's recovery waits for
+  // the clear (now refused at its turn, nothing deleted), and the record is never left unmarked without its value as
+  // the history's head; the same for a drop
+  const { w, hdb } = await active();
+  for (const kind of ["clear", "drop"]) {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const mark = st.markRecord.bind(st);
+    let resume, reached; const gate = new Promise((r) => { resume = r; }), marked = new Promise((r) => { reached = r; });
+    st.markRecord = async () => { await mark(); reached(); await gate; };
+    const op = kind === "clear" ? st.history.clear({ ...d, cells: [{ id: "a", code: "C" }] }) : st.patches.drop();
+    const doing = op.then(() => "done", (e) => e.message);
+    const held = await within(marked, 3000);
+    const atMark = await rawGet(w.main, "notebooks", id);
+    const loading = st.load().then(() => "loaded", (e) => e.message);
+    await sleep(100);
+    const early = (await rawGet(w.main, "notebooks", id)).unjournaled;
+    const out = await noRoom("history", async () => { resume(); const o = await doing; const l = await loading; await st.patches.appending; return { o, l }; });
+    const rec = await rawGet(w.main, "notebooks", id), head = await st.headHash().catch(() => null), rows = await versions(hdb, id);
+    await close(st);
+    const r = await reopen(w, hdb, id);
+    const after = await rawGet(w.main, "notebooks", id), headAfter = await r.st.headHash();
+    check(held !== "timeout" && atMark.unjournaled === true && early === true && out.l === "loaded" && /open for editing/.test(out.o) && (rec.unjournaled !== undefined || head === rec.hash) && (after.unjournaled !== undefined || headAfter === after.hash), `CORR-229-2 (${kind}): a reload while it has marked and not deleted waits for it (it is then refused at its turn); a record left unmarked is the head's value, before reopening and after: ` + J({ held, o: String(out.o).slice(0, 30), l: out.l, early, mark: rec.unjournaled, rows, row: r.row, markAfter: after.unjournaled }));
+    await close(r.st);
+  }
+  await close(w);
+  hdb.close();
+}
+
+const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);

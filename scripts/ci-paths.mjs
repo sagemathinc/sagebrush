@@ -3,6 +3,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { gateInputs } from "./size-measure.mjs";
+import { BUILD_INPUT_PATHS } from "./build-inputs.mjs";
 
 const event = process.env.GITHUB_EVENT_NAME ?? "local";
 const ref = process.env.GITHUB_REF ?? "";
@@ -164,8 +165,21 @@ const censusPaths = [
   /^test\/limit-sites\.json$/, /^test\/limit-sites-baseline\.txt$/, /^test\/limit_sites\.py$/, /^test\/limits\.test\.ts$/,
   // (the baseline sweep's files and tooling, which the census's check reads: plan-limit-sites-sweep-r3)
   /^test\/limit-sweep\//, /^test\/limit_sweep\.py$/, /^test\/limit_sweep_cases\.py$/,
+  // (the unsafe boundary's check, C-2c-ii scope r4 section 1.3: every build input it scans, from the one
+  // list scripts/unsafe-inventory.mjs uses too, and its inventory)
+  ...BUILD_INPUT_PATHS, /^test\/unsafe-allow-inventory\.json$/,
 ];
 const census = full || workflowOrBuild || matches(censusPaths) || fallback;
+// The unsafe boundary's compiler sweep (engine-unsafe-sweep, #234 r2): only inputs that can change what the
+// engine compiles, or the sweep's own tooling and job (daybreak2: never the unknown-path fallback, never every
+// script or workflow, which the cheap census covers).  Every file under engine/ (sources, manifests, the
+// lockfile, build scripts and the data they may read), cargo configs and toolchain files anywhere.
+const unsafeSweepPaths = [
+  /^engine\//, /(^|\/)\.cargo\//, /(^|\/)rust-toolchain(\.toml)?$/,
+  /^scripts\/unsafe-sweep\.sh$/, /^scripts\/unsafe-inventory\.mjs$/, /^scripts\/build-inputs\.mjs$/, /^scripts\/toml-json\.py$/, /^test\/unsafe-allow-inventory\.json$/,
+  /^\.github\/workflows\/ci\.yml$/,
+];
+const unsafeSweep = full || matches(unsafeSweepPaths);
 
 const outputs = {
   full,
@@ -180,6 +194,7 @@ const outputs = {
   engine_cpython: engineCpython,
   webkit,
   census,
+  unsafe_sweep: unsafeSweep,
   // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
   // (a dispatch or a schedule has no file list: its gate always runs on the measurement, never docs-only)
   size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0,

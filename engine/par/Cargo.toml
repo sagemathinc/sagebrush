@@ -17,3 +17,6 @@ parallel = ["dep:rayon"]
 [dev-dependencies]
 # (tests only: a real Stop in a closure, tests/stop_reuse.rs)
 sagebrush-interrupt = { path = "../interrupt" }
+
+[lints]
+workspace = true
