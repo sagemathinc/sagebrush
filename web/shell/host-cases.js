@@ -1079,22 +1079,45 @@ async function limits(check) {
     check(stopped.kind === "interrupted" && crun.watchdogFired === 0, `G2 (c): Stop during an invocation with script_ms set: one terminal outcome, interrupted, the watchdog not fired (${show(stopped)}; watchdog ${crun.watchdogFired})`);
   }
   // (r3, astra2: a run out of time commits nothing more.  (1) the shell stopped by its deadline with a redirection
-  // pending: the pending creation is dropped, typed script_ms.  (2) the time crossing during finalization: the seam holds
-  // the first pending commit past the remaining time (it was admitted before, so it finishes), and the next one isn't
-  // made: the time is a fence at each verb's own admission, so a verb admitted after it does nothing; one admitted before
-  // finishes, D8's one allowance)
+  // pending: the pending creation is dropped, typed script_ms.)
   {
     const { ws, host } = await fresh("script-ms-pending", { bash: { script_ms: 1000 } });
     const r = await host.exec(PERSON, "true > late; while true; do :; done");
     check(typed(r, "script_ms") && !(await ws.stat("/late")), `out of time with a redirection pending: typed bash.script_ms, and the pending creation is never committed (${show(r)})`);
   }
+  // ((2a) the time runs out BEFORE a pending commit is admitted: the seam holds /a's create, before its admission, past
+  // the remaining time (script_ms 5000, held 6000: grader's G1 margin), so out of time is the fence at /a's own admission:
+  // neither /a nor /b is made)
   {
     const hooks = {};
-    const { ws, host } = await fresh("script-ms-crossing", { wrap: hookable(hooks), bash: { script_ms: 1000 } });
+    const { ws, host } = await fresh("script-ms-before-admit", { wrap: hookable(hooks), bash: { script_ms: 5000 } });
     let held = 0;
-    hooks.create = async (p) => { if (p === "/a") { held++; await sleep(1200); } };
+    hooks.create = async (p) => { if (p === "/a") { held++; await sleep(6000); } };
     const r = await host.exec(PERSON, "true > a; true > b");
-    check(held === 1 && typed(r, "script_ms") && !(await ws.stat("/a")) && !(await ws.stat("/b")), `the time crossing during finalization (the seam holds /a's commit before its admission, past the time): neither /a nor /b is made, typed bash.script_ms (${show(r)}; /a ${!!(await ws.stat("/a"))}, /b ${!!(await ws.stat("/b"))})`);
+    check(held === 1 && typed(r, "script_ms") && !(await ws.stat("/a")) && !(await ws.stat("/b")), `out of time before /a's admission: neither /a nor /b is made, typed bash.script_ms (held ${held}; ${show(r)})`);
+  }
+  // ((2b) the time runs out INSIDE an admitted verb: the seam holds /a's create after its admission passed (in the
+  // admit, within the workspace's locked section), past the remaining time.  The admitted verb finishes (D8's one
+  // allowance): /a IS made; the next pending commit is refused: /b is not)
+  {
+    let held = 0;
+    const holdInside = (ws) => {
+      const v = Object.create(ws);
+      v.create = function (p, o = {}) {
+        if (p === "/a" && typeof o.admit === "function") {
+          const inner = o.admit;
+          o = { ...o, admit: (c) => {
+            inner(c);
+            if (c.role === "target") { held++; const end = performance.now() + 6000; while (performance.now() < end) {} }
+          } };
+        }
+        return ws.create.call(this, p, o);
+      };
+      return v;
+    };
+    const { ws, host } = await fresh("script-ms-inside-admit", { wrap: holdInside, bash: { script_ms: 5000 } });
+    const r = await host.exec(PERSON, "true > a; true > b");
+    check(held === 1 && typed(r, "script_ms") && (await ws.stat("/a")) && !(await ws.stat("/b")), `out of time inside /a's admitted create: /a is made (the admitted verb finishes), /b is not, typed bash.script_ms (held ${held}; ${show(r)})`);
   }
   // (r2, astra2 R2: one debit from dispatch through finalization: a pending commit held 300 ms by the seam is charged,
   // and the next invocation is sent only what is left)
