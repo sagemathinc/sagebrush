@@ -205,7 +205,11 @@ const next = () => {
   }
   say("SETUP " + i); say("ENTER " + i + " 0.1");
   setTimeout(() => {
-    const done = () => { say("RET " + i); say("PROBE " + i + " ok"); say("DONE " + i); next(); };
+    // (grader's P2: with a worker, the fake says its own thread count before each DONE, on a line the harness's
+    // marker parser ignores but keeps in the session's tail, so a missed drop shows whether it happened or the
+    // sampler missed it)
+    const own = () => { try { return (fs.readFileSync("/proc/self/status", "utf8").match(/^Threads:\\s+(\\d+)/m) ?? [])[1] ?? "?"; } catch { return "?"; } };
+    const done = () => { if (w) say("FAKE-THREADS " + i + " " + own()); say("RET " + i); say("PROBE " + i + " ok"); say("DONE " + i); next(); };
     if (w && i === n) w.terminate().then(() => setTimeout(done, 300)); else done();
   }, ${trialMs});
 };
@@ -226,7 +230,8 @@ async function e2OnFake(dir: string, f: string) {
   const e2 = rows.find((r) => r.case === "E2");
   assert.ok(e2, "E2's row");
   const cells = e2.cells.map((c: any) => [c.outcome, c.why]);
-  const row = JSON.stringify({ outcome: e2.outcome, own_outcome: e2.own_outcome, why: e2.why, leak: e2.leak, cells, samples: (e2.sessions ?? []).map((x: any) => [x.label, x.end, x.samples]) });
+  const row = JSON.stringify({ outcome: e2.outcome, own_outcome: e2.own_outcome, why: e2.why, leak: e2.leak, final_drop: e2.final_drop, cells, samples: (e2.sessions ?? []).map((x: any) => [x.label, x.end, x.samples]),
+    fake_threads: (e2.sessions ?? []).map((x: any) => [x.label, String(x.tail ?? "").match(/^FAKE-THREADS .*$/gm) ?? []]) });
   return { e2, code, err, row };
 }
 
