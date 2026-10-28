@@ -241,72 +241,94 @@ impl Write for Borrowed {
     }
 }
 
-#[cfg(unix)]
-fn borrow_file(fd: i64) -> Borrowed {
-    use std::os::unix::io::FromRawFd;
-    Borrowed(ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(fd as i32) }))
+/// A descriptor (POSIX) or handle (Windows) the caller owns, as a File that is never closed here.
+#[allow(unsafe_code)]
+fn borrow_file(f: i64) -> Borrowed {
+    #[cfg(unix)]
+    let file = {
+        use std::os::unix::io::FromRawFd;
+        unsafe { std::fs::File::from_raw_fd(f as i32) }
+    };
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::io::FromRawHandle;
+        unsafe { std::fs::File::from_raw_handle(f as isize as _) }
+    };
+    Borrowed(ManuallyDrop::new(file))
 }
 
-#[cfg(windows)]
-fn borrow_file(handle: i64) -> Borrowed {
-    use std::os::windows::io::FromRawHandle;
-    Borrowed(ManuallyDrop::new(unsafe { std::fs::File::from_raw_handle(handle as isize as _) }))
-}
+/// The read quantum: each read asks for at most this many bytes, and a
+/// buffer read to its end keeps at most this much capacity (daybreak2's PR B
+/// r3 gate: the reusable I/O working set, not a request-size limit; a larger
+/// line's capacity is let go once it is all consumed, so it isn't kept while
+/// the worker idles).
+const READ_CHUNK: usize = 1 << 16;
 
 /// Newline-framed lines from a reader (a descriptor), its own buffer kept
 /// across short reads, EINTR retried.  The lines taken are passed by a head
 /// cursor, not drained from the front each time; the buffer is compacted
 /// only when the taken part is most of it, so a backlog of many queued lines
-/// costs time linear in its bytes (daybreak2's PR B r1 #4).
+/// costs time linear in its bytes (daybreak2's PR B r1 #4).  A line is handed
+/// out as a range of the buffer, read with `get` and not copied; it is let
+/// go, with any compaction or release, only at the next call (the borrow
+/// checker keeps a `get` slice from outliving it).
 struct Lines<R: Read> {
     f: R,
     buf: Vec<u8>,
     head: usize,
+    /// Where the unconsumed bytes start once the line last handed out is let go.
+    taken: usize,
     scanned: usize,
     eof: bool,
 }
 
 impl<R: Read> Lines<R> {
     fn new(f: R) -> Lines<R> {
-        Lines { f, buf: Vec::new(), head: 0, scanned: 0, eof: false }
+        Lines { f, buf: Vec::new(), head: 0, taken: 0, scanned: 0, eof: false }
+    }
+
+    /// The bytes of the range `next` returned last.
+    fn get(&self, r: std::ops::Range<usize>) -> &[u8] {
+        &self.buf[r]
     }
 
     fn compact(&mut self) {
         if self.head == self.buf.len() {
             self.buf.clear();
             self.head = 0;
-        } else if self.head >= 1 << 16 && self.head * 2 >= self.buf.len() {
+            if self.buf.capacity() > READ_CHUNK {
+                self.buf = Vec::new();  // (all consumed: a large line's capacity let go)
+            }
+        } else if self.head >= READ_CHUNK && self.head * 2 >= self.buf.len() {
             self.buf.drain(..self.head);
             self.head = 0;
         }
     }
 
-    /// The next line without its newline; a last line without one is still
-    /// a line; None at the end.
-    fn next(&mut self) -> std::io::Result<Option<Vec<u8>>> {
+    /// The next line's range, without its newline; a last line without one
+    /// is still a line; None at the end.
+    fn next(&mut self) -> std::io::Result<Option<std::ops::Range<usize>>> {
+        self.head = self.taken;
+        self.compact();
         loop {
             let from = self.head + self.scanned;
-            if let Some(i) = self.buf[from..].iter().position(|&b| b == b'\n') {
-                let end = from + i;
-                let line = self.buf[self.head..end].to_vec();
-                self.head = end + 1;
+            if let Some(i) = memchr::memchr(b'\n', &self.buf[from..]) {
+                let (start, end) = (self.head, from + i);
+                self.taken = end + 1;
                 self.scanned = 0;
-                self.compact();
-                return Ok(Some(line));
+                return Ok(Some(start..end));
             }
             self.scanned = self.buf.len() - self.head;
             if self.eof {
+                self.taken = self.buf.len();
                 if self.head == self.buf.len() {
                     return Ok(None);
                 }
-                let line = self.buf[self.head..].to_vec();
-                self.head = self.buf.len();
                 self.scanned = 0;
-                self.compact();
-                return Ok(Some(line));
+                return Ok(Some(self.head..self.buf.len()));
             }
             self.compact();
-            let mut chunk = [0u8; 65536];
+            let mut chunk = [0u8; READ_CHUNK];
             match self.f.read(&mut chunk) {
                 Ok(0) => self.eof = true,
                 Ok(n) => self.buf.extend_from_slice(&chunk[..n]),
@@ -342,15 +364,23 @@ struct MainThread(libc::pthread_t);
 
 // (a thread id, only ever passed to pthread_kill; a pointer type on macOS)
 #[cfg(unix)]
+#[allow(unsafe_code)]
 unsafe impl Send for MainThread {}
+
+/// The calling thread, for the control thread's wake.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn this_thread() -> MainThread {
+    MainThread(unsafe { libc::pthread_self() })
+}
 
 #[cfg(unix)]
 fn control_loop(fd: i64, main: MainThread) {
     let mut lines = Lines::new(borrow_file(fd));
-    while let Ok(Some(line)) = lines.next() {
+    while let Ok(Some(r)) = lines.next() {
         #[cfg(feature = "test-hooks")]
         hooks::delay(&hooks::ARM_DELAY_MS);
-        let Some(target) = parse_target(&line) else { continue };
+        let Some(target) = parse_target(lines.get(r)) else { continue };
         if arm(target) {
             #[cfg(feature = "test-hooks")]
             hooks::delay(&hooks::WAKE_DELAY_MS);
@@ -368,6 +398,7 @@ fn control_loop(fd: i64, main: MainThread) {
 /// pthread_kill can still end the worker (astra's note), and the parent's
 /// restart then follows.
 #[cfg(unix)]
+#[allow(unsafe_code)]
 fn wake(main: MainThread) {
     unsafe {
         let mut cur: libc::sigaction = std::mem::zeroed();
@@ -400,6 +431,36 @@ fn native_reply(id: Option<u64>, what: &str) -> String {
     v.to_string() + "\n"
 }
 
+/// A reply line: the str `encode` returned (written from its own UTF-8, no
+/// copy), or one built here.
+enum Wire<'py> {
+    Encoded(Bound<'py, PyString>),
+    Native(String),
+}
+
+impl Wire<'_> {
+    fn bytes(&self) -> &[u8] {
+        match self {
+            Wire::Encoded(s) => s.to_str().map(str::as_bytes).unwrap_or_default(),  // (checked when made)
+            Wire::Native(t) => t.as_bytes(),
+        }
+    }
+}
+
+/// The request line as a str, decoded from the read buffer in place: one
+/// pass, no copy of the line first.  Invalid UTF-8 is replaced, as before.
+#[allow(unsafe_code)]
+fn line_str<'py>(py: Python<'py>, line: &[u8]) -> Bound<'py, PyAny> {
+    // SAFETY: PyUnicode_DecodeUTF8 reads exactly `line.len()` bytes from
+    // `line`, which is valid for this call; the GIL is held (`py`); it returns
+    // a new reference, or NULL with an exception set, which from_owned_ptr_or_err
+    // takes (and the Err drops).
+    let s = unsafe {
+        Bound::from_owned_ptr_or_err(py, pyo3::ffi::PyUnicode_DecodeUTF8(line.as_ptr().cast(), line.len() as pyo3::ffi::Py_ssize_t, c"strict".as_ptr()))
+    };
+    s.unwrap_or_else(|_| PyString::new(py, &String::from_utf8_lossy(line)).into_any())
+}
+
 /// The worker's loop (see the module comment): requests read from
 /// `input`, replies written to `output` (descriptors on POSIX, handles on
 /// Windows; neither is closed here), targeted interrupts read from
@@ -424,7 +485,7 @@ fn serve_requests(
     }
     #[cfg(unix)]
     if let Some(fd) = control {
-        let main = MainThread(unsafe { libc::pthread_self() });
+        let main = this_thread();
         std::thread::Builder::new()
             .name("sagebrush-control".into())
             .spawn(move || control_loop(fd, main))
@@ -435,8 +496,10 @@ fn serve_requests(
     let mut lines = Lines::new(borrow_file(input));
     let mut out = borrow_file(output);
     loop {
-        let line = match py.detach(|| lines.next()) {
-            Ok(Some(line)) => line,
+        // (filled and scanned detached; the line is then read in place, with
+        // the GIL held, and let go only at the next call)
+        let range = match py.detach(|| lines.next()) {
+            Ok(Some(r)) => r,
             Ok(None) => return Ok(()),
             Err(e) => return Err(PyOSError::new_err(e.to_string())),
         };
@@ -445,15 +508,12 @@ fn serve_requests(
         let _ = py.check_signals();
         // (admitted at once: the id from the line's start, the rest parsed
         // once, by run_request's json.loads)
-        let id = request_id(&line);
+        let line = lines.get(range);
+        let id = request_id(line);
         let serial = admit(id);
         #[cfg(feature = "test-hooks")]
         hooks::at_admission(py);
-        let text = match std::str::from_utf8(&line) {
-            Ok(t) => PyString::new(py, t),
-            Err(_) => PyString::new(py, &String::from_utf8_lossy(&line)),
-        };
-        drop(line);
+        let text = line_str(py, line);
         let ran = run_request.call1((text, serial));
         close();
         let reply = match ran {
@@ -467,19 +527,27 @@ fn serve_requests(
             },
         };
         let wire = match reply {
-            None => native_reply(id, "its fallback failed"),
+            None => Wire::Native(native_reply(id, "its fallback failed")),
             Some(reply) => loop {
-                match encode.call1((&reply,)).and_then(|s| s.extract::<String>()) {
-                    Ok(s) => break s,
+                match encode.call1((&reply,)) {
+                    Ok(s) => match s.cast_into::<PyString>() {
+                        Ok(s) if s.to_str().is_ok() => break Wire::Encoded(s),
+                        _ => break Wire::Native(native_reply(id, "it couldn't be encoded")),
+                    },
                     Err(e) if is_keyboard_interrupt(py, &e) => continue,
-                    Err(_) => break native_reply(id, "it couldn't be encoded"),
+                    Err(_) => break Wire::Native(native_reply(id, "it couldn't be encoded")),
                 }
             },
         };
+        // (the encoded str is held, in `wire`, until the write returns: its
+        // UTF-8 view is written with the GIL released, which PyO3's to_str
+        // allows: "Because `str` objects are immutable, the returned slice is
+        // independent of the GIL lifetime")
+        let bytes = wire.bytes();
         #[cfg(feature = "test-hooks")]
-        let written = py.detach(|| hooks::write_fault(&mut out, wire.as_bytes()).unwrap_or_else(|| write_all(&mut out, wire.as_bytes())));
+        let written = py.detach(|| hooks::write_fault(&mut out, bytes).unwrap_or_else(|| write_all(&mut out, bytes)));
         #[cfg(not(feature = "test-hooks"))]
-        let written = py.detach(|| write_all(&mut out, wire.as_bytes()));
+        let written = py.detach(|| write_all(&mut out, bytes));
         drop(wire);
         if let Some(end) = settle(written) {
             return end.map_err(|e| PyOSError::new_err(e.to_string()));
@@ -535,7 +603,12 @@ mod hooks {
     /// The next reply's write fails: 1, the reader gone before any byte;
     /// 2, part of it written, then an error.
     pub static WRITE_FAULT: AtomicU64 = AtomicU64::new(0);
+    /// Replies written this many bytes at a time, 0.2 ms apart (GIL released),
+    /// until set to 0 (daybreak2's r4 control: the encoded str's view stays
+    /// valid across a write in many parts).
+    pub static SHORT_WRITE: AtomicU64 = AtomicU64::new(0);
 
+    #[allow(unsafe_code)]
     pub fn at_admission(py: pyo3::Python<'_>) {
         if ADMIT_INTERRUPT.swap(false, SeqCst) {
             unsafe { pyo3::ffi::PyErr_SetInterrupt() };
@@ -553,7 +626,18 @@ mod hooks {
                 let _ = w.write_all(&bytes[..bytes.len() / 2]);
                 Some(Err(std::io::Error::other("an injected write error")))
             }
-            _ => None,
+            _ => match SHORT_WRITE.load(SeqCst) as usize {
+                0 => None,
+                k => {
+                    for part in bytes.chunks(k) {
+                        match super::write_all(w, part) {
+                            Ok(true) => std::thread::sleep(std::time::Duration::from_micros(200)),
+                            other => return Some(other),
+                        }
+                    }
+                    Some(Ok(true))
+                }
+            },
         }
     }
 }
@@ -568,6 +652,7 @@ fn serve_test(name: &str, value: u64) -> PyResult<()> {
         "wake_delay_ms" => hooks::WAKE_DELAY_MS.store(value, SeqCst),
         "hold_ms" => hooks::HOLD_MS.store(value, SeqCst),
         "write_fault" => hooks::WRITE_FAULT.store(value, SeqCst),
+        "short_write" => hooks::SHORT_WRITE.store(value, SeqCst),
         _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("no such hook: {name}"))),
     }
     Ok(())
@@ -587,6 +672,11 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The next line's bytes, copied (the tests' view of `next` and `get`).
+    fn take<R: Read>(lines: &mut Lines<R>) -> Option<Vec<u8>> {
+        lines.next().unwrap().map(|r| lines.get(r).to_vec())
+    }
 
     // (one test touches STATE: the loop's state is the process's)
     #[test]
@@ -660,11 +750,11 @@ mod tests {
         let mut lines = Lines::new(Chunks { data, at: 0, sizes: vec![1, 7, 65536, 300, 4093], k: 0, eintr: false });
         let t = std::time::Instant::now();
         for i in 0..200_000u64 {
-            let l = lines.next().unwrap().unwrap();
+            let l = take(&mut lines).unwrap();
             assert_eq!(request_id(&l), Some(i));
         }
-        assert_eq!(lines.next().unwrap().unwrap(), b"tail");
-        assert_eq!(lines.next().unwrap(), None);
+        assert_eq!(take(&mut lines).unwrap(), b"tail");
+        assert_eq!(take(&mut lines), None);
         assert!(lines.buf.len() < 1 << 18, "the buffer kept {} bytes", lines.buf.len());
         assert!(t.elapsed() < std::time::Duration::from_secs(5), "{:?}", t.elapsed());
     }
@@ -680,15 +770,57 @@ mod tests {
         let mut lines = Lines::new(Chunks { data, at: 0, sizes: vec![65535], k: 0, eintr: false });
         let mut most = 0;
         for i in 0..200_000u64 {
-            let l = lines.next().unwrap().unwrap();
+            let l = take(&mut lines).unwrap();
             assert_eq!(request_id(&l), Some(i));
             most = most.max(lines.buf.len());
         }
-        assert_eq!(lines.next().unwrap(), None);
+        assert_eq!(take(&mut lines), None);
         assert!(most < 1 << 18, "the buffer reached {most} bytes");
     }
 
-    /// A writer taking at most `n` bytes a call, with EINTR between, then failing as told after `fail_after` bytes.
+    #[test]
+    fn lines_release_after_a_large_line() {
+        // (daybreak2's r4 gate: a 32 MiB line, then small ones queued behind it, in fragmented reads; once
+        // the buffer is all consumed it keeps at most READ_CHUNK of capacity, and the lines are exact)
+        let mut data = vec![b'x'; 32 << 20];
+        data.extend_from_slice(b"\n{\"id\": 1}\n{\"id\": 2}\nlast, no newline");
+        let mut lines = Lines::new(Chunks { data, at: 0, sizes: vec![READ_CHUNK, 1, 777, READ_CHUNK - 1], k: 0, eintr: false });
+        let r = lines.next().unwrap().unwrap();
+        assert_eq!(r.len(), 32 << 20);
+        assert!(lines.get(r).iter().all(|&b| b == b'x'));
+        assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 1}");
+        assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 2}");
+        assert_eq!(take(&mut lines).unwrap(), b"last, no newline");
+        assert_eq!(take(&mut lines), None);
+        assert!(lines.buf.capacity() <= READ_CHUNK, "kept {} bytes of capacity", lines.buf.capacity());
+        // (and while more input is still to come: the large line consumed, the reader's next call lets it go)
+        let mut data = vec![b'y'; 4 << 20];
+        data.extend_from_slice(b"\n");
+        let mut lines = Lines::new(Chunks { data, at: 0, sizes: vec![READ_CHUNK], k: 0, eintr: false });
+        assert_eq!(take(&mut lines).unwrap().len(), 4 << 20);
+        assert_eq!(take(&mut lines), None);
+        assert!(lines.buf.capacity() <= READ_CHUNK, "kept {} bytes of capacity", lines.buf.capacity());
+    }
+
+    #[test]
+    fn lines_queued_and_at_the_boundary() {
+        // (lines whose framed length is READ_CHUNK - 1, READ_CHUNK and READ_CHUNK + 1, queued together and
+        // read in odd fragments: each exact, and the buffer released at the end)
+        let mut data = Vec::new();
+        for n in [READ_CHUNK - 2, READ_CHUNK - 1, READ_CHUNK, 0, 3] {
+            data.extend(std::iter::repeat_n(b'z', n));
+            data.push(b'\n');
+        }
+        let mut lines = Lines::new(Chunks { data, at: 0, sizes: vec![7, READ_CHUNK, 3, READ_CHUNK - 5], k: 0, eintr: false });
+        for n in [READ_CHUNK - 2, READ_CHUNK - 1, READ_CHUNK, 0, 3] {
+            let l = take(&mut lines).unwrap();
+            assert!(l.len() == n && l.iter().all(|&b| b == b'z'), "{} for {}", l.len(), n);
+        }
+        assert_eq!(take(&mut lines), None);
+        assert!(lines.buf.capacity() <= READ_CHUNK);
+    }
+
+ `n` bytes a call, with EINTR between, then failing as told after `fail_after` bytes.
     struct Sink { got: Vec<u8>, n: usize, eintr: bool, fail_after: Option<(usize, ErrorKind)> }
     impl Write for Sink {
         fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
@@ -717,6 +849,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[allow(unsafe_code)]
     fn lines_across_short_reads() {
         let mut fds = [0; 2];
         assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
@@ -730,10 +863,10 @@ mod tests {
             unsafe { libc::close(w.0.as_raw_fd()) };
         });
         let mut lines = Lines::new(borrow_file(fds[0] as i64));
-        assert_eq!(lines.next().unwrap().unwrap(), b"{\"id\":1}");
-        assert_eq!(lines.next().unwrap().unwrap(), b"{\"id\":2}");
-        assert_eq!(lines.next().unwrap().unwrap(), b"tail");
-        assert_eq!(lines.next().unwrap(), None);
+        assert_eq!(take(&mut lines).unwrap(), b"{\"id\":1}");
+        assert_eq!(take(&mut lines).unwrap(), b"{\"id\":2}");
+        assert_eq!(take(&mut lines).unwrap(), b"tail");
+        assert_eq!(take(&mut lines), None);
         t.join().unwrap();
         unsafe { libc::close(fds[0]) };
     }

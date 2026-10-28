@@ -11,12 +11,23 @@ each round's B over the mean of its two A's.  Rows (time unless said):
   req_1mib    a 1 MiB request (a string literal of 1 MiB), 20 times: median
   req_32mib   a 32 MiB request, 3 times: median
   reply_10mb  a 10 MB result (repr of a 10 MB string) encoded and written, 5 times: median
+  req_rc_m1, req_rc, req_rc_p1
+              requests whose framed line (newline included) is READ_CHUNK - 1,
+              READ_CHUNK and READ_CHUNK + 1 bytes (64 KiB: serve.rs's read
+              quantum and retained capacity), 200 times each: median
+  rss_after_32mib
+              the worker's VmRSS after the 32 MiB requests, one small request
+              and an idle second (bytes): what a large request leaves retained
   rss_peak    the worker's VmHWM after the rows above (bytes)
   rss_idle    the worker's VmRSS after them and an idle second (bytes)
   threads     the worker's thread count, idle
   fds         the worker's open file descriptors, idle
-The gate: each row's B/A median <= 1.01, with every round's ratio and the
-spread listed (no pooling across rows).  threads and fds are reported (B
+Each sample first runs one untimed batch of 500 no-ops (a cold worker's
+first batch is not a timed one: daybreak2's PR B r3 gate 3).  The gate: each
+row's B/A median <= 1.01, B against the mean of its round's two A's, with
+every round's ratio and the spread listed (no pooling across rows).  Each
+gated row also gets median(B/A1) and median(B/A2): if they fall on opposite
+sides of 1.01, the row is INVALID (rerun), whatever its main ratio says.  threads and fds are reported (B
 has its control thread and pipe by design).  One JSON document out.
 """
 
@@ -41,7 +52,10 @@ def proc(pid, key):
 s = S.Session()
 pid = s.proc.pid
 out = {}
+RC = 1 << 16  # (serve.rs's READ_CHUNK)
 s.run("1", mode="python")
+for _ in range(500):  # (the untimed warm-up batch)
+    assert s.run("1", mode="python")["result"] == "1"
 t = []
 t0 = time.perf_counter()
 for _ in range(500):
@@ -63,6 +77,24 @@ for _ in range(3):
     a = time.perf_counter(); r = s.run(big32, mode="python", timeout=120); t.append(time.perf_counter() - a)
     assert r["result"] == str(32 << 20), r["result"]
 out["req_32mib"] = sorted(t)[len(t) // 2]
+s.run("x = None", mode="python")
+time.sleep(1.0)
+out["rss_after_32mib"] = proc(pid, "VmRSS")
+
+def framed(rid, n):
+    # (code whose request line, as Session._send frames it, newline included, is n bytes)
+    req = lambda code: json.dumps({"id": rid, "code": code, "mode": "python", "isolated": False, "data": False}) + "\n"
+    code = "x='" + "a" * (n - len(req("x=''"))) + "'"
+    assert len(req(code).encode("utf-8")) == n, (len(req(code)), n)
+    return code
+
+for name, n in (("req_rc_m1", RC - 1), ("req_rc", RC), ("req_rc_p1", RC + 1)):
+    t = []
+    for _ in range(200):
+        code = framed(s.last_id + 1, n)
+        a = time.perf_counter(); r = s.run(code, mode="python"); t.append(time.perf_counter() - a)
+        assert r["error"] is None, r["error"]
+    out[name] = sorted(t)[len(t) // 2]
 t = []
 for _ in range(5):
     a = time.perf_counter(); r = s.run("'b' * 10000000", mode="python", timeout=120); t.append(time.perf_counter() - a)
@@ -78,8 +110,10 @@ s.close()
 print(json.dumps(out))
 '''
 
-ROWS = ["noop", "noop_tput", "req_1mib", "req_32mib", "reply_10mb", "rss_peak", "rss_idle", "threads", "fds"]
-GATED = ["noop", "noop_tput", "req_1mib", "req_32mib", "reply_10mb", "rss_peak", "rss_idle"]
+ROWS = ["noop", "noop_tput", "req_1mib", "req_32mib", "req_rc_m1", "req_rc", "req_rc_p1", "reply_10mb",
+        "rss_after_32mib", "rss_peak", "rss_idle", "threads", "fds"]
+GATED = ["noop", "noop_tput", "req_1mib", "req_32mib", "req_rc_m1", "req_rc", "req_rc_p1", "reply_10mb",
+         "rss_after_32mib", "rss_peak", "rss_idle"]
 
 
 def sample(py):
@@ -102,18 +136,24 @@ def main():
     rows = {}
     for row in ROWS:
         ratios = [r["b"][row] / ((r["a1"][row] + r["a2"][row]) / 2) for r in raw]
+        m1 = statistics.median([r["b"][row] / r["a1"][row] for r in raw])
+        m2 = statistics.median([r["b"][row] / r["a2"][row] for r in raw])
+        invalid = row in GATED and (m1 <= 1.01) != (m2 <= 1.01)
         rows[row] = {"median": statistics.median(ratios), "min": min(ratios), "max": max(ratios), "ratios": ratios,
+                     "median_b_a1": m1, "median_b_a2": m2, "invalid": invalid,
+                     "drift_a2_a1": statistics.median([r["a2"][row] / r["a1"][row] for r in raw]),
                      "a_median": statistics.median([v for r in raw for v in (r["a1"][row], r["a2"][row])]),
                      "b_median": statistics.median([r["b"][row] for r in raw]), "gated": row in GATED,
-                     "pass": (statistics.median(ratios) <= 1.01) if row in GATED else None}
+                     "pass": (not invalid and statistics.median(ratios) <= 1.01) if row in GATED else None}
     doc = {"py_a": py_a, "py_b": py_b, "rounds": rounds, "rows": rows, "raw": raw,
            "ok": all(r["pass"] for r in rows.values() if r["gated"])}
     with open(out_path, "w") as f:
         json.dump(doc, f, indent=1)
     for row in ROWS:
         r = rows[row]
-        print("%-11s B/A median %.4f [%.4f, %.4f]  A %s  B %s  %s" % (row, r["median"], r["min"], r["max"], r["a_median"], r["b_median"],
-                                                                     "" if r["pass"] is None else ("ok" if r["pass"] else "OVER 1.01")))
+        print("%-15s B/A median %.4f [%.4f, %.4f]  B/A1 %.4f  B/A2 %.4f  A2/A1 %.4f  A %s  B %s  %s" % (
+            row, r["median"], r["min"], r["max"], r["median_b_a1"], r["median_b_a2"], r["drift_a2_a1"], r["a_median"], r["b_median"],
+            "" if r["pass"] is None else ("INVALID (B/A1 and B/A2 on opposite sides of 1.01: rerun)" if r["invalid"] else "ok" if r["pass"] else "OVER 1.01")))
     print("ok" if doc["ok"] else "over the gate")
 
 

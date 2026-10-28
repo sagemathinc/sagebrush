@@ -552,6 +552,33 @@ def test_held_parse():
         s.close()
 
 
+def test_short_writes():
+    """daybreak2's PR B r4 #2 (a test-hooks build): a reply is written from
+    the encoded str's own UTF-8, the GIL released; the str is kept alive and
+    its view stays valid across a write in many short parts while another
+    thread runs and allocates.  A 1 MB result in 4 KiB parts, 0.2 ms apart."""
+    if not HOOKS:
+        print("skip the short-write control: it needs a test-hooks build")
+        return
+    s = S.Session()
+    try:
+        s.run("import threading\n_stop = [False]\n"
+              "def _churn():\n    while not _stop[0]:\n        _junk = [str(i) * 40 for i in range(2000)]\n"
+              "threading.Thread(target=_churn, daemon=True).start()", mode="python")
+        hook(s, "short_write", 4096)
+        t0 = time.monotonic()
+        r = s.run("'ab' * 500000", mode="python")
+        dt = time.monotonic() - t0
+        hook(s, "short_write", 0)
+        check(r["result"] == repr("ab" * 500000) and r["error"] is None,
+              "short writes: the 1 MB reply exact across its parts (%.2f s, %s chars)" % (dt, len(r["result"] or "")))
+        check(dt > 0.04, "short writes: the reply was written in parts (%.2f s)" % dt)
+        s.run("_stop[0] = True", mode="python")
+        counts_match(s, "short writes")
+    finally:
+        s.close()
+
+
 def test_released():
     """daybreak2's PR B r1 #2: an answered request's state is let go: no
     earlier _Run stays, and the capture kept for its streams holds no text."""
@@ -622,6 +649,7 @@ if __name__ == "__main__":
     case(test_held_parse)
     case(test_released)
     case(test_stale_state)
+    case(test_short_writes)
     case(test_native)
     if failed:
         print("ctrlc native: %d FAILED" % len(failed))
