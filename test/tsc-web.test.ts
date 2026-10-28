@@ -171,7 +171,7 @@ test("r7: an unterminated /* fails closed (never outside every candidate); a // 
 
 /** The linearity rule (daybreak2's r7, made robust after master's ci 40617260405 and #241's 40618056762, each
  *  failed by one slow point: 46 / 169.8 / 265.9 and 26.3 / 37.6 / 114.9 ms). ms are the times of the SAME batch
- *  of calls at sizes n/2, n and 2n; the batch is long enough at n/2 (at least 20 ms) that no floor is needed.
+ *  of calls at sizes n/2, n and 2n; the batch is long enough at n/2 (about 40 ms) that no floor is needed.
  *  - The span (2n against n/2): at most 8x. Over three log-spaced sizes, the least-squares slope of log time on
  *    log size depends only on the two ends (the middle has x = 0), so a slow middle point can't trip it. Linear
  *    is 4x, and a quadratic is 16x.
@@ -207,11 +207,11 @@ test("r7 linearity (daybreak2): pathological inputs at 0.5, 1 and 2 MiB scan in 
   const rows: Record<string, number[]> = {};
   for (const [name, make] of kinds) {
     const inputs = [MiB / 2, MiB, 2 * MiB].map(make);
-    // (a warm-up, untimed; then one batch size for all three sizes, chosen so the 0.5 MiB batch takes at least
-    // 20 ms; then 4 rounds that time each size's batch in turn, the best per size kept: a slow patch of the runner
+    // (a warm-up, untimed; then one batch size for all three sizes, chosen so the 0.5 MiB batch takes about 40 ms
+    // (daybreak2: a margin over the 20 ms the rule assumes); then 4 rounds that time each size's batch in turn, the best per size kept: a slow patch of the runner
     // lands on one try of each size, not on all of one size's)
     batch(inputs[0], 1);
-    const calls = Math.max(1, Math.ceil(20 / Math.max(batch(inputs[0], 1), 0.01)));
+    const calls = Math.max(1, Math.ceil(40 / Math.max(batch(inputs[0], 1), 0.01)));
     const best = [Infinity, Infinity, Infinity];
     for (let round = 0; round < 4; round++) for (let i = 0; i < 3; i++) best[i] = Math.min(best[i], batch(inputs[i], calls));
     rows[name] = best.map((x) => +(x / calls).toFixed(2));
