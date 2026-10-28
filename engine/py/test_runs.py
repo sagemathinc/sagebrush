@@ -37,6 +37,7 @@ class FakeSession:
         self.gate = None  # (a restart waits for it when set)
         self.submit_gate = None  # (and a submit, once in_submit is set)
         self.in_submit = threading.Event()
+        self.rid = 0  # (the request in flight's id, as Session mints them)
 
     def alive(self):
         return self.live
@@ -50,15 +51,16 @@ class FakeSession:
             self.q = queue.Queue()
             self.live = True
         self.pending = code
+        self.rid += 1
         if code.startswith("auto:"):
             self.finish(code[5:])
-        return self.generation, self.q
+        return self.generation, self.q, self.rid
 
     def finish(self, result=None, stdout="", error_info=None):
         # (output streams first, in chunks, as the real worker sends it)
         for i in range(0, len(stdout), 64 * 1024):
-            self.q.put({"out": stdout[i:i + 64 * 1024]})
-        r = {"stdout": stdout, "result": result, "error": None if error_info is None else error_info["message"],
+            self.q.put({"out": stdout[i:i + 64 * 1024], "id": self.rid})
+        r = {"id": self.rid, "stdout": stdout, "result": result, "error": None if error_info is None else error_info["message"],
              "error_info": error_info, "displays": [], "seconds": 0.01}
         self.pending = None
         self.q.put(r)
@@ -504,7 +506,7 @@ def test_output_bounded_streaming():
     s = r.made[0]
     chunk = "y" * 65536
     for _ in range(1600):  # (100 MiB, in the worker's chunks)
-        s.q.put({"out": chunk})
+        s.q.put({"out": chunk, "id": s.rid})
     s.finish("1")
     until(run.done.is_set, "the run's end", 60)
     o = r.record(run.record["handle"])["output"]
@@ -1150,31 +1152,98 @@ def test_worker_real_signal():
     print("worker real signal: ok")
 
 
-def wt312_affected(version_info=None, implementation=None):
-    """FU-WORKERTHREADS-312: on CPython 3.12 before 3.12.10 a printing thread
-    can segfault when a Ctrl-C ends the run (measured on VM1: crashes on
-    3.12.3-3.12.9, master and PR A alike; none on 3.12.10-3.12.15 or 3.13; no
-    upstream fix identified, so the boundary is as measured).  By number only
-    (version_info[:3]): 3.12.0-3.12.9, their alphas and release candidates
-    included, are skipped; 3.12.10's pre-releases are not (not measured).
-    CPython only: another implementation reporting 3.12 isn't skipped."""
-    v = sys.version_info if version_info is None else version_info
-    impl = sys.implementation.name if implementation is None else implementation
-    return impl == "cpython" and (3, 12) <= tuple(v[:3]) < (3, 12, 10)
+def test_print_gate():
+    """gh-130163: which interpreters get the worker's owning print()."""
+    from sagebrush import session as S
+
+    yes = [(3, 10, 0), (3, 10, 20), (3, 11, 15), (3, 12, 0), (3, 12, 3), (3, 12, 9), (3, 13, 0), (3, 13, 2)]
+    no = [(3, 12, 10), (3, 12, 15), (3, 13, 3), (3, 13, 14), (3, 14, 0), (3, 15, 0)]
+    for v in yes:
+        assert S._print_borrows_stdout(v, "cpython"), v
+        assert not S._print_borrows_stdout(v, "pypy"), v
+    for v in no:
+        assert not S._print_borrows_stdout(v, "cpython"), v
+    print("print gate: ok")
 
 
-def test_wt312_gate():
-    """Exactly which interpreters skip test_worker_threads' interrupted variants."""
-    skip = [(3, 12, 0), (3, 12, 3), (3, 12, 9)]
-    run = [(3, 11, 9), (3, 12, 10), (3, 12, 15), (3, 13, 0), (3, 14, 4)]
-    for v in skip:
-        assert wt312_affected(v + ("final", 0), "cpython"), v
-        assert wt312_affected(v + ("candidate", 1), "cpython"), v  # (by number: its pre-releases too)
-        assert not wt312_affected(v + ("final", 0), "pypy"), v
-    for v in run:
-        assert not wt312_affected(v + ("final", 0), "cpython"), v
-    assert not wt312_affected((3, 12, 10, "alpha", 1), "cpython")  # (3.12.10's pre-releases: not skipped)
-    print("worker threads gate: ok")
+def test_strong_print():
+    """The owning print() behaves as print(): its arguments, file=None, a
+    sys.stdout of None (nothing printed), flush."""
+    import builtins
+    import io
+    from sagebrush import session as S
+
+    real = builtins.print
+    try:
+        S._strong_print()
+        assert builtins.print is not real and builtins.print.__wrapped__ is real
+        buf = io.StringIO()
+        saved = sys.stdout
+        try:
+            sys.stdout = buf
+            print(1, "a", sep="-", end="!")
+            print()
+            print(2, file=None, flush=True)
+            print("x", sep=None, end=None)
+            sys.stdout = None
+            print("nothing")
+        finally:
+            sys.stdout = saved
+        assert buf.getvalue() == "1-a!\n2\nx\n", repr(buf.getvalue())
+        other = io.StringIO()
+        print("to", "file", file=other)
+        assert other.getvalue() == "to file\n"
+    finally:
+        builtins.print = real
+    print("owning print: ok")
+
+
+def print_across_runs(control=False):
+    """FU-WORKERTHREADS-312 (astra's CORR-WT312-KA-1), on the real worker
+    loop: a thread still inside print() (its second argument's __str__
+    sleeping, after the first was written) when its run ends, across the
+    next request, which collects garbage while it waits: the worker lives
+    and every reply comes; the late output is the old run's, dropped.
+    control: the worker's owning print() turned off (the fail-first)."""
+    import subprocess
+
+    pkg = os.path.dirname(RN.__file__)
+    harness = (
+        "import os, sys, types\n"
+        "m = types.ModuleType('sagebrush'); m.__path__ = [%r]; sys.modules['sagebrush'] = m\n"
+        "sage = types.ModuleType('sagebrush.sage'); sage.__all__ = []; sys.modules['sagebrush.sage'] = sage\n"
+        "prep = types.ModuleType('sagebrush.preparse'); prep.preparse = lambda s: s; sys.modules['sagebrush.preparse'] = prep\n"
+        "from sagebrush import session as S\n"
+        "if %r: S._print_borrows_stdout = lambda: False\n"
+        "S._worker()\n" % (pkg, control))
+    first = (
+        "import threading, time\n"
+        "class Slow:\n"
+        "    def __str__(self):\n"
+        "        time.sleep(0.6)\n"
+        "        return 'LATE' * 1000\n"
+        "threading.Thread(target=lambda: print('early', Slow())).start()\n"
+        "time.sleep(0.1)\n"
+        "1\n")
+    second = "import gc, time\nfor _ in range(20):\n    gc.collect()\n    x = [object() for _ in range(2000)]\n    time.sleep(0.05)\n2\n"
+    reqs = "".join(json.dumps({"code": c, "mode": "python"}) + "\n" for c in (first, second, "3"))
+    r = subprocess.run([sys.executable, "-X", "faulthandler", "-c", harness], input=reqs, capture_output=True, text=True, timeout=60)
+    msgs = []
+    for line in r.stdout.splitlines():
+        try:
+            msgs.append(json.loads(line))
+        except ValueError:
+            pass
+    replies = [m for m in msgs if "result" in m]
+    late = "".join(m.get("out", "") for m in msgs if "out" in m)
+    return r.returncode, [x["result"] for x in replies], "LATE" in late
+
+
+def test_print_across_runs():
+    code, results, late = print_across_runs()
+    assert code == 0 and results == ["1", "2", "3"], (code, results)
+    assert not late, "the old run's late output reached a later run"
+    print("a print() across the next run: ok (the owning print %s here)" % ("in use" if __import__("sagebrush.session").session._print_borrows_stdout() else "not needed"))
 
 
 def test_worker_threads():
@@ -1219,12 +1288,7 @@ def test_worker_threads():
         "t.join()\n"
         "errors\n")
     reqs = json.dumps({"code": code, "mode": "python"}) + "\n" + json.dumps({"code": "7", "mode": "python"}) + "\n"
-    nths = (0, 3, 9)
-    if wt312_affected():
-        nths = (0,)  # (the uninterrupted run still runs)
-        print("worker threads: the interrupted variants skipped on CPython %s (FU-WORKERTHREADS-312: a CPython 3.12 crash, "
-              "reproduced through 3.12.9, not from 3.12.10 on)" % sys.version.split()[0])
-    for nth in nths:
+    for nth in (0, 3, 9):
         r = subprocess.run([sys.executable, "-c", harness, str(nth)], input=reqs, capture_output=True, text=True, timeout=120)
         msgs = [json.loads(l) for l in r.stdout.splitlines()]  # (every line valid JSON)
         replies = [m for m in msgs if "result" in m]
@@ -1491,7 +1555,9 @@ if __name__ == "__main__":
     test_capture()
     test_capture_signal_boundaries()
     test_worker_real_signal()
-    test_wt312_gate()
+    test_print_gate()
+    test_strong_print()
+    test_print_across_runs()
     test_worker_threads()
     test_late_output_sealed()
     test_session_start_failure()

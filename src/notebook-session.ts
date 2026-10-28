@@ -26,7 +26,14 @@
 //                                 JSON {ok, value | error}; the caller runs
 //                                 the board's code again after it
 //      {id, check, sage?, magma?, matlab?}  -> {id, more}: is this input incomplete?
-//      {id, complete}             -> {id, matches, prefix}: Tab completion
+//      {id, complete, sage?, magma?, matlab?}  -> {id, matches, prefix}: Tab completion
+//      {id, warm, sage?, magma?, matlab?}  -> {id, warmed: mode | null, ms?}: load the
+//                                 language's environment now (X1), exactly one message
+// check, complete and warm each load their language's environment first (the
+// one a first run would), and each answer is their one message: with
+// {interrupted: true} if a Stop cancelled them (before or during that load), or
+// {error} if the load failed.  Every answer and every run's `done` has `mode`
+// and `modeReady`: whether that language's environment is loaded.
 // Out: {id, start}, then any of
 //      {id, target, stream: "stdout" | "stderr", text}
 //      {id, target, display: {mime: data}}   rich output (Jupyter MIME bundle)
@@ -58,6 +65,16 @@ export interface Session {
   handle(m: any): Promise<void>;
   // the interpreter is initialized
   ready: Promise<unknown>;
+  // (tests) the language environments loaded so far, and the loads attempted
+  stats(): { loaded: string[]; loads: number };
+}
+
+// Tests only: called between the admission's steps (1: after the first
+// cutoff check, 2: after the stale bit's clear) and just before a language's
+// load, so a test can land a Stop exactly there.
+export interface SessionHooks {
+  admit?(step: 1 | 2, id: number): void;
+  beforeLoad?(mode: string, id: number): void;
 }
 
 // Around each run (TimeTravel replay, web/replay-env.ts): begin(m) as it
@@ -111,7 +128,7 @@ export function exitStatus(code: unknown): { ok: boolean; text: string | null } 
 // anything else runs, and is never ready if they are invalid (ready rejects
 // with a LimitsError).  None: the defaults.
 export class LimitsError extends Error {}
-export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText> } = {}): Session {
+export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks } = {}): Session {
   let current: number | null = null;
   let target: number | null = null;
   const write = (fd: number, text: string) => {
@@ -258,7 +275,53 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     return { main, host };
   })();
 
-  let sageLoaded = false;
+  // A language's environment, loaded once (X1): Sage's names in __main__,
+  // Magma's and MATLAB's runtime modules.  Recorded only when the load
+  // succeeded: an interrupted or failed one is tried again by the next
+  // request in that language.
+  const loaded = new Set<string>();
+  let loads = 0;
+  const LOAD: Record<string, [string, "main" | "host"]> = {
+    sage: ["from sage_all import *\n", "main"],
+    magma: ["import _magma\n", "host"],
+    matlab: ["import _matlab\n", "host"],
+  };
+  const modeOf = (m: any) => (m.sage ? "sage" : m.magma ? "magma" : m.matlab ? "matlab" : "python");
+  /** The language's environment: "ready", "interrupted" (a Stop during the
+   * load) or {error, text} (it raised; text its traceback).  Synchronous:
+   * the interpreter runs one thing at a time, so loads never overlap. */
+  function ensureMode(mode: string, main: any, host: any, id: number): "ready" | "interrupted" | { error: string; text: string } {
+    const what = LOAD[mode];
+    if (!what || loaded.has(mode)) return "ready";
+    opts.hooks?.beforeLoad?.(mode, id);
+    loads++;
+    try {
+      R.loader.exec(what[0], what[1] === "main" ? main : host, "exec", "<" + mode + ">");
+    } catch (e) {
+      const exc = R.toPyExc(e);
+      if (R.typeOf(exc).$mro.includes(R.T.KeyboardInterrupt)) return "interrupted";
+      const text = String(R.formatException(exc));
+      const lines = text.trim().split("\n");
+      return { error: `the ${mode} environment didn't load: ${lines[lines.length - 1] || "an exception"}`, text };
+    }
+    loaded.add(mode);
+    return "ready";
+  }
+  /** Whether request `id` may run (X1-R2-STOP): not cancelled by a Stop
+   * (the page writes the cutoff INTR[1], then sets bit 0).  The cutoff is
+   * read, a stale Ctrl-C (bit 0, from a Stop for earlier requests) cleared,
+   * and the cutoff read again; Python follows at once, with no await.  A
+   * Stop landing between the reads cancels this request (the bit, kept or
+   * cleared, could only have interrupted it: nothing runs at an admission;
+   * a kept one is the next admitted request's to clear); one after them
+   * interrupts the Python it then runs. */
+  function admit(id: number): boolean {
+    if (id <= Atomics.load(R.INTR, 1)) return false;
+    opts.hooks?.admit?.(1, id);
+    Atomics.and(R.INTR, 0, ~1);
+    opts.hooks?.admit?.(2, id);
+    return id > Atomics.load(R.INTR, 1);
+  }
   const moduleNames = () => [
     ...R.builtinModuleNames(),
     ...Object.keys((globalThis as any).__PYJS_LIB__ ?? {}).map((k) => k.split("/")[0].replace(/\.py$/, "")),
@@ -335,15 +398,23 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
   async function handle(m: any) {
     const { id } = m;
     const { main, host } = await ready;
-    if (m.check !== undefined) {
-      // Magma's console runs each line as it is entered; MATLAB's waits for the end of an open block
-      post({ id, more: m.magma ? false : m.matlab ? matlabIsIncomplete(m.check) : needsMore(m.check, { sage: !!m.sage }) });
-      return;
-    }
-    if (m.complete !== undefined) {
+    // (each asked question's one answer: cancelled, failed, or its own)
+    const ask = m.check !== undefined ? "check" : m.complete !== undefined ? "complete" : m.warm !== undefined ? "warm" : null;
+    if (ask !== null) {
+      const mode = modeOf(m);
+      const none = ask === "check" ? { more: false } : ask === "complete" ? { matches: [], prefix: "" } : { warmed: null };
+      if (!admit(id)) return post({ id, ...none, interrupted: true, mode, modeReady: loaded.has(mode) || !LOAD[mode] });
+      const t = performance.now();
+      const r = ensureMode(mode, main, host, id);
+      if (r === "interrupted") return post({ id, ...none, interrupted: true, mode, modeReady: false });
+      if (typeof r === "object") return post({ id, ...none, error: r.error, mode, modeReady: false });
+      if (ask === "warm") return post({ id, warmed: mode, ms: performance.now() - t, mode, modeReady: true });
+      if (ask === "check") {
+        // Magma's console runs each line as it is entered; MATLAB's waits for the end of an open block
+        return post({ id, more: m.magma ? false : m.matlab ? matlabIsIncomplete(m.check) : needsMore(m.check, { sage: !!m.sage }), mode, modeReady: true });
+      }
       const [matches, prefix] = complete(main, m.complete, () => [...new Set(moduleNames())]);
-      post({ id, matches, prefix });
-      return;
+      return post({ id, matches, prefix, mode, modeReady: true });
     }
     if (m.importInfo !== undefined) {
       // Where imports resolve here, for the Share dialog's pre-selection
@@ -365,11 +436,12 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       return;
     }
     // Interrupt (the page wrote INTR[1]): runs queued before it are skipped
-    if (id <= R.INTR[1] && (m.code !== undefined || m.interact !== undefined)) {
+    // (admit: the cutoff, a stale Ctrl-C cleared, the cutoff again)
+    if ((m.code !== undefined || m.interact !== undefined) && !admit(id)) {
       post({ id, skipped: true });
       return;
     }
-    Atomics.and(R.INTR, 0, ~1); // a Ctrl-C that came after the previous run had finished (bit 0 only)
+    if (m.code === undefined && m.interact === undefined) Atomics.and(R.INTR, 0, ~1); // (anything else: as before)
     current = id;
     target = null;
     used.item = 0;
@@ -380,7 +452,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     // counting Sage's one-time load below, which is the interpreter's, not the cell's)
     let t0 = performance.now();
     opts.runs?.begin(m);
-    let ok = true, evaluated: string | null = null;
+    let ok = true, evaluated: string | null = null, modeReady: boolean | null = null;
     changedNames = new Set();
     scopedNames = m.scoped && typeof m.scoped === "object" ? Object.entries(m.scoped).filter((e): e is [string, string] => typeof e[1] === "string") : [];
     // A seeded run (the reactive notebook's per-cell seeds): Python's random
@@ -406,11 +478,17 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     if (m.interact !== undefined) {
       ok = run(`import _interact\n_interact._update(${Number(m.interact)}, ${JSON.stringify(JSON.stringify(m.values))})\n`, host, "exec", "<interact>");
     } else {
-      if (m.sage && !sageLoaded) {
-        run("from sage_all import *\n", main, "exec", "<sage>");
-        sageLoaded = true;
-        t0 = performance.now();
-      }
+      // (the language's environment first: a failed or stopped load ends the
+      // run there, its code not run, astra2's WARM-1; the load's time is the
+      // interpreter's, not the cell's)
+      const mode = modeOf(m), wasLoaded = loaded.has(mode) || !LOAD[mode];
+      const r = ensureMode(mode, main, host, id);
+      modeReady = r === "ready";
+      if (!wasLoaded) t0 = performance.now();
+      if (r !== "ready") {
+        R.stderr.write(r === "interrupted" ? "KeyboardInterrupt\n" : r.text);
+        ok = false;
+      } else
       if (m.evaluate !== undefined) {
         evaluated = evaluate(m, host);
       } else
@@ -481,14 +559,14 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         run(MAGIC_PRE, host, "exec", "<autoreload>");
         ok = run(ipythonSyntax(code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, transform });
       }
-      run(FLUSH_FIGURES, host, "exec", "<figures>");
+      if (modeReady) run(FLUSH_FIGURES, host, "exec", "<figures>");
     }
     flush();
     target = null;
     const more = opts.runs?.end() ?? {};
-    post({ id, done: true, ms: performance.now() - t0, ...(ok ? {} : { error: true }), ...(changedNames.size ? { names: [...changedNames] } : {}), ...(evaluated !== null ? { evaluated } : {}), ...more });
+    post({ id, done: true, ms: performance.now() - t0, ...(ok ? {} : { error: true }), ...(changedNames.size ? { names: [...changedNames] } : {}), ...(evaluated !== null ? { evaluated } : {}), ...(modeReady !== null ? { mode: modeOf(m), modeReady } : {}), ...more });
     current = null;
   }
 
-  return { write, handle, ready };
+  return { write, handle, ready, stats: () => ({ loaded: [...loaded], loads }) };
 }

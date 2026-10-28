@@ -1,6 +1,6 @@
 name: pypi
 
-# Wheels (abi3: one per platform for every Python >= 3.9) and the sdist of
+# Wheels (abi3: one per platform for every Python >= 3.10) and the sdist of
 # the `sagebrush` Python package (engine/py).  A manual run only builds and
 # tests; a `py-v*` tag also publishes to PyPI by trusted publishing (OIDC: no
 # token is stored), which needs a PyPI trusted publisher for this repository,
@@ -63,11 +63,43 @@ jobs:
           python engine/py/test_audit.py
           python engine/py/test_mcp.py
           python engine/py/test_session_ctrl.py
+          python engine/py/test_python_floor.py --wheel
           cd engine/py && python -m doctest README.md && echo doctests ok
       - uses: actions/upload-artifact@v5
         with:
           name: wheel-${{ matrix.os }}-${{ matrix.target }}
           path: engine/py/dist/*.whl
+
+  # The floor, as a tested claim: the Linux x86_64 abi3 wheel built above, installed on
+  # Python 3.10 (the oldest supported) and 3.11, with the Sage suites, and the worker's owning print()
+  # (gh-130163: 3.10 and 3.11 keep CPython's borrowing print, so the owning one is in use there)
+  floor:
+    if: github.repository == 'sagemathinc/sagebrush'
+    needs: [wheels]
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v5
+        with:
+          name: wheel-ubuntu-latest-x86_64
+          path: dist
+      - name: the wheel on Python ${{ matrix.python }}, with the suites
+        shell: bash
+        run: |
+          python --version
+          python -m pip install dist/*.whl
+          python engine/py/test_python_floor.py --wheel
+          (cd engine/py && python -c "import sagebrush.session as S, test_runs as t; assert S._print_borrows_stdout(), 'the owning print() must be in use here'; t.test_print_gate(); t.test_strong_print(); t.test_print_across_runs()")
+          python sage-tests/run_cpython.py -v
+          python sage-tests/run_cpython.py --own -v
+          python sage-tests/run_calculus.py
 
   sdist:
     if: github.repository == 'sagemathinc/sagebrush'
@@ -86,7 +118,7 @@ jobs:
 
   publish:
     if: github.repository == 'sagemathinc/sagebrush' && startsWith(github.ref, 'refs/tags/py-v')
-    needs: [wheels, sdist]
+    needs: [wheels, sdist, floor]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
