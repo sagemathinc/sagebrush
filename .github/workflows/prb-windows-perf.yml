@@ -5,7 +5,9 @@ name: prb-windows-perf
 # build: A (master, MASTER below) and B (this branch, whose engine/ and test/ must equal PRB_HEAD, the reviewed PR B head)
 #   are each built ONCE as a release wheel; artifacts/<label>/ keeps each wheel's own filename; MANIFEST has exactly one row
 #   per label: <label> <wheel filename> <wheel sha256> <native basename> <native sha256>.
-# perf: verifies ctrlc_perf.py's hash (PERF_SHA) and every wheel against MANIFEST, installs them, checks each installed
+# perf: checks the branch's engine/ and test/ equal PRB_HEAD, takes ctrlc_perf.py from HEAD's git blob (git show: the stored
+#   LF bytes; the Windows checkout's CRLF conversion changed the working-tree copy, run 40636733789), hashes and runs exactly
+#   those bytes (PERF_SHA), verifies every wheel against MANIFEST, installs them, checks each installed
 #   native payload (exactly one, basename and hash) before round 0 and after the run, then ctrlc_perf.py's A/B/A x 5 with
 #   noop, noop_tput, req_rc_m1, req_rc, req_rc_p1, req_1mib and req_32mib gated (<= 1.01, no straddle).  Any failure fails
 #   the job (bash -eo pipefail, and every check exits nonzero).
@@ -73,6 +75,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
@@ -84,8 +87,11 @@ jobs:
         shell: bash
         timeout-minutes: 80
         run: |
-          P=engine/py/ctrlc_perf.py
-          [ "$(sha256sum $P | cut -c1-64)" = "$PERF_SHA" ] || { echo "INVALID: ctrlc_perf.py differs"; exit 9; }
+          git diff --quiet "$PRB_HEAD" HEAD -- engine test || { echo "INVALID: the branch's tree is not the reviewed PR B head"; exit 9; }
+          P=$RUNNER_TEMP/ctrlc_perf.py
+          git show HEAD:engine/py/ctrlc_perf.py > "$P"
+          [ "$(sha256sum "$P" | cut -c1-64)" = "$PERF_SHA" ] || { echo "INVALID: ctrlc_perf.py differs"; exit 9; }
+          echo "HEAD $(git rev-parse HEAD)  tree = $PRB_HEAD  ctrlc_perf.py (HEAD blob) sha256 $PERF_SHA verified"
           M=artifacts/MANIFEST
           [ "$(cut -d' ' -f1 $M | tr '\n' ' ')" = "A B " ] && [ "$(awk 'NF != 5' $M | wc -l)" = 0 ] || { echo "INVALID: MANIFEST malformed"; exit 9; }
           field() { awk -v k="$1" -v i="$2" '$1 == k { print $i }' $M; }
