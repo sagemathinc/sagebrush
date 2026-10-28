@@ -384,23 +384,26 @@ kl, ku = sp.bandwidths(R)
 b = np.ones((n, 1))
 try:
     use(Cap(10 ** 12))
-    lu_peak = peak_of(lambda: L.solve(R, b, "t"))
-    nbR = L.band_need(n, kl, ku, 1, False)
-    mR = nbR["persistent"] + max(nbR["setup"], nbR["step"])
-    assert mR > lu_peak, (mR, lu_peak)
-    # LU-only feasible: band's need (a wide band) is beyond G, the LU's peak isn't
-    use(Cap(lu_peak))
-    L._routes = []
-    # (this LU's estimate is over L.SLOW_LU_WARN_S, so it shows the slow-LU warning, the first for n = 4001 in this
-    # session; it is caught here rather than left on stderr, and later 4001 solves stay silent until section 7 re-arms)
+    # (R's LU estimate is over L.SLOW_LU_WARN_S, so its first solve here, the peak measurement, shows the slow-LU
+    # warning, the first for n = 4001 in this session, and the LU-only solve below shows nothing (once per session per
+    # n).  Both solves are caught rather than left on stderr; later 4001 solves stay silent until section 7 re-arms it)
     shown4, real_err4 = [], M._write_err
     M._write_err = shown4.append
     try:
+        lu_peak = peak_of(lambda: L.solve(R, b, "t"))
+        n_peak = len(shown4)
+        nbR = L.band_need(n, kl, ku, 1, False)
+        mR = nbR["persistent"] + max(nbR["setup"], nbR["step"])
+        assert mR > lu_peak, (mR, lu_peak)
+        # LU-only feasible: band's need (a wide band) is beyond G, the LU's peak isn't
+        use(Cap(lu_peak))
+        L._routes = []
         X, s = L.solve(R, b, "t")
     finally:
         M._write_err = real_err4
     assert L._routes == ["lu"]
-    assert len(shown4) == 1 and shown4[0].startswith("Warning: Solving this 4001x4001 sparse system by its sparse LU"), shown4
+    assert n_peak == 1 and len(shown4) == 1, (n_peak, shown4)
+    assert shown4[0].startswith("Warning: Solving this 4001x4001 sparse system by its sparse LU"), shown4
     ok("fallback: LU-only feasible (band's need beyond G): the LU, at exactly its peak")
     # band-only, at step 3: the ordering is refused and band fits (a cheap band forced by the cost seam).  These
     # fallback rows exercise the cost route's steps 3-5, so the routing floor (master's band route, which would take
