@@ -332,15 +332,32 @@ def test_gc_mixed_prefix():
     print("gc mixed prefix: the dead entries behind 400 live ones are reached when they fit the budget; otherwise every pass is bounded and logs that it stopped: ok")
 
 
-def test_gc_wall_time():
-    """daybreak2's A-2-B1 and astra's A-2, under real time (entries take real
-    time to read, the seek's included): one deadline from the pass's start;
-    each pass takes at most the budget and one entry; every pass progresses;
-    repeated passes reach and remove the dead entries.  (1) A slow seek that
-    runs out of budget before a present cursor.  (2) A missing cursor, then
-    many slow stale entries."""
+def _gc_time_cases(fake):
+    """daybreak2's A-2-B1 and astra's A-2 (FU-GC-WALL): one deadline from the
+    pass's start; each pass takes at most the budget and one entry; every pass
+    progresses; repeated passes reach and remove the dead entries.  (1) A slow
+    seek that runs out of budget before a present cursor.  (2) A missing
+    cursor, then many slow stale entries.  (3) Cheap names, a slow liveness
+    check: six live entries before four dead ones.
+
+    fake=True: on an INJECTED clock (_gc_temps' clock=), in integer ticks:
+    reading an entry and examining one advance it, and nothing else does, so
+    the bound is exact and no scheduler can move it.  fake=False: the same in
+    real time (sleeps), for the smoke check.  Returns each case's per-pass
+    elapsed times and the costs (per entry read, budget, per examination)."""
     real = os.scandir
-    PER, BUDGET = 0.03, 0.05
+    PER, BUDGET, ALIVE = (30, 50, 20) if fake else (0.03, 0.05, 0.02)
+    now = [0]
+    clock = (lambda: now[0]) if fake else None  # (None: _gc_temps' own time.monotonic)
+
+    def spend(dt):
+        if fake:
+            now[0] += dt
+        else:
+            time.sleep(dt)
+
+    def stamp():
+        return now[0] if fake else time.monotonic()
 
     class Slow:
         def __init__(self, d):
@@ -355,7 +372,7 @@ def test_gc_wall_time():
 
         def __iter__(self):
             for e in self.es:
-                time.sleep(PER)
+                spend(PER)
                 yield e
 
     def setup(live, dead, cursor):
@@ -368,12 +385,12 @@ def test_gc_wall_time():
         open(os.path.join(root, ".plot3d-gc.cursor"), "w").write(cursor)
         return root, host
 
-    def passes(root, host, live):
+    def passes(root, host, live, alive, limit):
         times, recs = [], []
-        for _ in range(60):
-            t = time.monotonic()
-            r = P3._gc_temps(root, budget_s=BUDGET, alive=lambda pid: pid in live)
-            times.append(time.monotonic() - t)
+        for _ in range(limit):
+            t = stamp()
+            r = P3._gc_temps(root, budget_s=BUDGET, clock=clock, alive=alive)
+            times.append(stamp() - t)
             recs.append(r)
             assert r["removed"] + r["kept"] >= 1 or not r["stopped"], r  # (a pass that stops examined an entry)
             if not os.listdir(host) or set(os.listdir(host)) == {"%d-1" % p for p in live}:
@@ -383,13 +400,13 @@ def test_gc_wall_time():
     os.scandir = Slow
     try:
         # (1) the cursor (a live writer's) behind four dead entries, two more after
-        # it: the seek to it alone takes 5 x 0.03 s, past the budget
+        # it: the seek to it alone takes 5 entries' reads, past the budget
         root, host = setup([400001], [100001, 100002, 100003, 100004, 500001, 500002], "400001-1")
-        t1, r1 = passes(root, host, {400001})
+        t1, r1 = passes(root, host, {400001}, lambda pid: pid in {400001}, 60)
         assert os.listdir(host) == ["400001-1"], os.listdir(host)
         # (2) a missing cursor, then eight slow stale entries
         root, host = setup([], list(range(300001, 300009)), "999999-1")
-        t2, r2 = passes(root, host, set())
+        t2, r2 = passes(root, host, set(), lambda pid: False, 60)
         assert os.listdir(host) == [], os.listdir(host)
     finally:
         os.scandir = real
@@ -402,17 +419,41 @@ def test_gc_wall_time():
     root, host = setup(sorted(live3), [700001, 700002, 700003, 700004], "")
 
     def slow_alive(pid):
-        time.sleep(0.02)
+        spend(ALIVE)
         return pid in live3
 
-    for _ in range(20):
-        P3._gc_temps(root, budget_s=BUDGET, alive=slow_alive)
-        if set(os.listdir(host)) == {"%d-1" % p for p in live3}:
-            break
+    t3, _ = passes(root, host, live3, slow_alive, 20)
     assert set(os.listdir(host)) == {"%d-1" % p for p in live3}, os.listdir(host)
-    bound = BUDGET + PER + 0.03  # (the budget and one entry, plus slack for the pass's own work)
-    assert max(t1 + t2) <= bound, (max(t1), max(t2), bound)
-    print("gc under real time: passes of at most %.3f s (bound %.3f) reach the dead entries, %d and %d passes: ok" % (max(t1 + t2), bound, len(t1), len(t2)))
+    return t1, t2, t3, (PER, BUDGET, ALIVE)
+
+
+def test_gc_wall_time():
+    """The pass bound, asserted exactly on an injected clock (FU-GC-WALL: the
+    real-time bound flaked on a shared runner, max t2 0.1115 s against 0.11 s,
+    master ci 40690519630): every pass of every case takes at most the budget
+    plus ONE entry, where an entry costs its read (cases 1 and 2) or its
+    examination (case 3), whatever the scheduler does; and the cases reach
+    their end states (above)."""
+    t1, t2, t3, (PER, BUDGET, ALIVE) = _gc_time_cases(True)
+    assert all(isinstance(x, int) for x in t1 + t2 + t3), (t1, t2, t3)
+    assert max(t1 + t2) <= BUDGET + PER, (max(t1), max(t2), BUDGET + PER)
+    assert max(t3) <= BUDGET + ALIVE, (max(t3), BUDGET + ALIVE)
+    assert all(t > 0 for t in t1 + t2 + t3), "every pass read or examined at least one entry"
+    print("gc on an injected clock: passes of at most %d ticks (bound %d) and %d (bound %d) reach the dead entries, %d, %d and %d passes: ok"
+          % (max(t1 + t2), BUDGET + PER, max(t3), BUDGET + ALIVE, len(t1), len(t2), len(t3)))
+
+
+def test_gc_wall_time_smoke():
+    """The same cases in real time, a smoke check only: the end states are
+    asserted as above, and the pass times against a generous 4x bound (the
+    budget, one entry and 0.03 s of the pass's own work, times four), so a
+    shared runner's scheduling can't fail it; the exact bound is the injected
+    clock's, above."""
+    t1, t2, t3, (PER, BUDGET, ALIVE) = _gc_time_cases(False)
+    bound = 4 * (BUDGET + PER + 0.03)
+    assert max(t1 + t2 + t3) <= bound, (max(t1), max(t2), max(t3), bound)
+    print("gc under real time (smoke): passes of at most %.3f s (4x bound %.3f; case 3 %.3f s), %d, %d and %d passes: ok"
+          % (max(t1 + t2), bound, max(t3), len(t1), len(t2), len(t3)))
 
 
 def test_gc_no_fetch_after_the_last_entry():
@@ -620,6 +661,7 @@ if __name__ == "__main__":
     test_gc()
     test_gc_mixed_prefix()
     test_gc_wall_time()
+    test_gc_wall_time_smoke()
     test_gc_no_fetch_after_the_last_entry()
     test_timeout_race_keeps_a_finished_reply()
     test_ids()
