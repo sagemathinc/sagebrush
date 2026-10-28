@@ -468,6 +468,18 @@ test("check paused inside its final vid hash, nothing changes: send, and admitte
   assert.equal(n.ap.admit(v), false, "a token is consumed once");
 });
 
+test("check paused inside its witness hash, nothing changes, an ancestor not yet run: wait (a genuine wait stays a wait)", async () => {
+  const g = gated();
+  const n = nb([["a", "x = 1"], ["b", "y = x + 1"]], g.hash);
+  assert.ok(await n.ap.approveCells(["a", "b"]));
+  const f = await n.ap.freeze(["b"]);
+  const p = g.pause(kind("S"));
+  const done = n.ap.check(f, "rq-wait");
+  await p.entered;
+  p.release();
+  assert.ok(waits(await done));
+});
+
 test("a batch paused at its second cell's vid hash, then a later cell edited or a reset: stale", async () => {
   for (const [what, change] of [["c2 edited", (n: N) => n.set("c2", "x2 = x1 + 7")], ["a reset", (n: N) => n.ap.reset()]] as [string, (n: N) => void][]) {
     const g = gated();
