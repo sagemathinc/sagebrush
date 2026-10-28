@@ -337,9 +337,23 @@ trait Source: Read {
     }
 }
 
-/// The staging peak bound (see Lines): staged bytes, piece size.
-fn staging_bound(staged: usize, piece: usize) -> usize {
-    2 * staged + piece + 5 * READ_CHUNK + 96 + 72 * staged.div_ceil(piece)
+/// The staging peak bound (see Lines), in the allocations' ACTUAL
+/// capacities (daybreak2's r5c item 1): `staged` bytes in pieces filled to
+/// `piece` bytes, so p = ceil(staged/piece) pieces, each of actual capacity at
+/// most `piece_cap`; each piece-list allocation at most `list_extra` entries
+/// beyond the doubling it asked for (so at most max(4, 2p) + list_extra); the
+/// flat buffer at most `flat_extra` bytes beyond the staged bytes plus one
+/// READ_CHUNK.  Bounded over the three moments: the flatten (flat, pieces and
+/// list together), a list growth (pieces and the old and new lists together)
+/// and staging start (the old cold buffer, at most 4 READ_CHUNK, and the
+/// first pieces).  With the exact capacities std's allocator gives (all the
+/// extras 0, piece_cap = piece = READ_CHUNK = C), it is at most about
+/// 2 L' + 8 C + 24 (6 L'/C + 12), i.e. (2 + 2^-12 x 9) L' + O(C).
+#[cfg(test)]  // (the tests' gate: astra's R5C-1, no production dead code)
+fn staging_bound(staged: usize, piece: usize, piece_cap: usize, list_extra: usize, flat_extra: usize) -> usize {
+    let p = staged.div_ceil(piece);
+    let entry = std::mem::size_of::<Vec<u8>>();
+    staged + READ_CHUNK + flat_extra + p * piece_cap + 4 * READ_CHUNK + 2 * piece_cap + entry * (3 * (2 * p).max(4) + 2 * list_extra)
 }
 
 /// Newline-framed lines from a source, its own buffer kept across short
@@ -357,11 +371,11 @@ fn staging_bound(staged: usize, piece: usize) -> usize {
 /// with no regrowth copies.  For a cold line staging L' bytes (the line, its
 /// newline, and at most READ_CHUNK = C bytes read after it), every input
 /// allocation together (buffer, pieces, the piece list's own storage and the
-/// moments where old and new allocations coexist) stays within
-/// `staging_bound(L', P)` = 2 L' + P + 5 C + 96 + 72 ceil(L'/P): twice the
-/// line, plus a few quanta, plus 72 bytes per piece of list metadata (24 per
-/// list entry, a doubling list at most twice the pieces, and its old and new
-/// allocations once together), about 0.11% of L' when P is 64 KiB; the buffer is then kept
+/// moments where old and new allocations coexist), counted in their actual
+/// capacities, stays within `staging_bound`: twice the line, plus a few
+/// quanta, plus 24 bytes per list entry for a doubling list and its old and
+/// new allocations together (with exact capacities about 0.22% of L' at
+/// P = 64 KiB); the buffer is then kept
 /// for the requests that follow, and let go (to no capacity) only when it is
 /// all consumed and no input is readable for IDLE_RELEASE_LIMIT.  A partial
 /// line or a backlog is never let go.
@@ -382,6 +396,11 @@ struct Lines<R: Source> {
     staged: usize,
     stage_caps: usize,
     piece: usize,
+    /// Extra capacity asked for, beyond what is needed, for each new piece,
+    /// piece list and flat buffer: always 0 except in the tests, which use it
+    /// to stand for an allocator that hands out more than requested, so that
+    /// the accounting is shown to read actual capacities (daybreak2's r5c item 1).
+    extra: (usize, usize, usize),
     /// Large buffers let go after an idle wait (reported in _serve_stats).
     releases: u64,
     /// Long lines laid out from pieces (tests: a warm buffer takes none).
@@ -392,7 +411,7 @@ struct Lines<R: Source> {
 
 impl<R: Source> Lines<R> {
     fn new(f: R) -> Lines<R> {
-        Lines { f, buf: Vec::new(), head: 0, taken: 0, scanned: 0, eof: false, stage: Vec::new(), staged: 0, stage_caps: 0, piece: READ_CHUNK, releases: 0, flattens: 0, peak: 0 }
+        Lines { f, buf: Vec::new(), head: 0, taken: 0, scanned: 0, eof: false, stage: Vec::new(), staged: 0, stage_caps: 0, piece: READ_CHUNK, extra: (0, 0, 0), releases: 0, flattens: 0, peak: 0 }
     }
 
     /// The bytes of the range `next` returned last.
@@ -410,19 +429,23 @@ impl<R: Source> Lines<R> {
         self.peak = self.peak.max(self.capacity());
     }
 
-    /// Append to the staged line, filling the last piece before beginning
-    /// another.  The piece list grows by doubling, explicitly, with the moment
-    /// its old and new allocations coexist counted first.
+    /// Append to the staged line, filling the last piece (to `piece` bytes)
+    /// before beginning another.  The piece list grows by doubling into a new
+    /// allocation, the old one moved over and then let go; the moment both
+    /// exist is counted with their actual capacities, as is every piece.
     fn stage_bytes(&mut self, mut bytes: &[u8]) {
         while !bytes.is_empty() {
             if self.stage.last().is_none_or(|p| p.len() == self.piece) {
                 if self.stage.len() == self.stage.capacity() {
-                    let grown = (2 * self.stage.capacity()).max(4);
-                    self.peak = self.peak.max(self.capacity() + grown * std::mem::size_of::<Vec<u8>>());
-                    self.stage.reserve_exact(grown - self.stage.len());
+                    let mut grown: Vec<Vec<u8>> = Vec::with_capacity((2 * self.stage.capacity()).max(4) + self.extra.1);
+                    let entry = std::mem::size_of::<Vec<u8>>();
+                    self.peak = self.peak.max(self.buf.capacity() + self.stage_caps + (self.stage.capacity() + grown.capacity()) * entry);
+                    grown.append(&mut self.stage);
+                    self.stage = grown;  // (the old list let go here)
                 }
-                self.stage.push(Vec::with_capacity(self.piece));
-                self.stage_caps += self.piece;
+                let piece: Vec<u8> = Vec::with_capacity(self.piece + self.extra.0);
+                self.stage_caps += piece.capacity();
+                self.stage.push(piece);
                 self.note_peak();
             }
             let last = self.stage.last_mut().expect("a piece");
@@ -478,7 +501,7 @@ impl<R: Source> Lines<R> {
     /// without staging again), as the buffer.
     fn flatten(&mut self) -> std::io::Result<()> {
         let total = self.staged.checked_add(READ_CHUNK).ok_or_else(|| std::io::Error::other("a request line too long to hold"))?;
-        let mut flat = Vec::with_capacity(total);
+        let mut flat = Vec::with_capacity(total + self.extra.2);
         self.peak = self.peak.max(self.capacity() + flat.capacity());
         for p in std::mem::take(&mut self.stage) {
             flat.extend_from_slice(&p);
@@ -1099,7 +1122,7 @@ mod tests {
         assert!(lines.get(r).iter().all(|&b| b == b'x'));
         assert_eq!(lines.flattens, 1);
         let staged = (32 << 20) + 1 + READ_CHUNK;  // (the line, its newline, at most one read after it)
-        assert!(lines.peak <= staging_bound(staged, READ_CHUNK), "a peak of {} bytes", lines.peak);
+        assert!(lines.peak <= staging_bound(staged, READ_CHUNK, READ_CHUNK, 0, 0), "a peak of {} bytes", lines.peak);
         assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 1}");
         assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 2}");
         assert_eq!(take(&mut lines).unwrap(), b"last, no newline");
@@ -1193,7 +1216,7 @@ mod tests {
         data.extend_from_slice(&line(10, b'c'));
         let mut lines = Lines::new(NoWait(Chunks { data, at: 0, sizes: vec![1], k: 0, eintr: false }));
         assert_eq!(take(&mut lines).unwrap(), vec![b'a'; n]);
-        assert!(lines.peak <= staging_bound(n + 1, READ_CHUNK), "a peak of {} bytes for a {} byte line", lines.peak, n);
+        assert!(lines.peak <= staging_bound(n + 1, READ_CHUNK, READ_CHUNK, 0, 0), "a peak of {} bytes for a {} byte line", lines.peak, n);
         assert!(lines.stage.capacity() == 0 && lines.stage.is_empty(), "the piece list kept: {}", lines.stage.capacity());
         assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 10]);
         assert_eq!(lines.releases, 1);
@@ -1211,9 +1234,28 @@ mod tests {
         assert_eq!(take(&mut lines).unwrap(), vec![b'q'; n]);
         assert_eq!(lines.flattens, 1);
         let pieces = (n + 1).div_ceil(16);
-        assert!(lines.peak <= staging_bound(n + 1, 16), "a peak of {} over {}", lines.peak, staging_bound(n + 1, 16));
+        assert!(lines.peak <= staging_bound(n + 1, 16, 16, 0, 0), "a peak of {} over {}", lines.peak, staging_bound(n + 1, 16, 16, 0, 0));
         let at_flatten = (n + 1 + READ_CHUNK) + pieces * 16 + pieces * std::mem::size_of::<Vec<u8>>();
         assert!(lines.peak >= at_flatten, "the flatten's moment not counted: {} < {}", lines.peak, at_flatten);
+        assert!(lines.stage.capacity() == 0 && lines.stage_caps == 0);
+    }
+
+    #[test]
+    fn lines_staging_actual_capacities() {
+        // (daybreak2's r5c item 1: an allocator that hands out more than requested, injected: pieces 8 bytes
+        // over, piece lists 3 entries over, the flat buffer 100 bytes over.  The accounting reads the actual
+        // capacities: the peak covers the flatten's moment counted with them, and stays within staging_bound
+        // in those actual terms; an accounting of the requested sizes would come out below the moment)
+        let n = 1 << 20;
+        let mut lines = Lines::new(Chunks { data: line(n, b'r'), at: 0, sizes: vec![1000, 7, 4096], k: 0, eintr: false });
+        lines.piece = 16;
+        lines.extra = (8, 3, 100);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'r'; n]);
+        let pieces = (n + 1).div_ceil(16);
+        let at_flatten = (n + 1 + READ_CHUNK + 100) + pieces * (16 + 8) + pieces * std::mem::size_of::<Vec<u8>>();
+        assert!(lines.peak >= at_flatten, "actual capacities not counted: {} < {}", lines.peak, at_flatten);
+        let bound = staging_bound(n + 1, 16, 16 + 8, 3, 100);
+        assert!(lines.peak <= bound, "a peak of {} over {}", lines.peak, bound);
         assert!(lines.stage.capacity() == 0 && lines.stage_caps == 0);
     }
 
