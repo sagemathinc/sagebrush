@@ -580,25 +580,27 @@ def test_short_writes():
 
 
 def test_input_release():
-    """daybreak2's PR B r5 semantic memory gate: after an 8 MiB request the
-    reader's buffer is kept for a request that follows at once (POSIX: the
-    burst reuse; Windows lets it go at once, option (i) alone), and after an
-    idle half second more than the 250 ms limit it is let go, to at most one
-    read quantum, before the reader blocks."""
+    """daybreak2's PR B r5 semantic memory gate, with the request reader's
+    arena (the Windows arena design r2): after an 8 MiB request the reader's
+    long-line buffer is kept for a request that follows at once (POSIX: the
+    burst reuse, the arena held alongside), Windows lets it go at once, and
+    after an idle half second more than the 250 ms limit it is let go, before
+    the reader blocks: the reader then holds exactly its arena again."""
     s = S.Session()
     try:
         big = "x = '" + "a" * (8 << 20) + "'\nlen(x)"
         r = s.run(big, mode="python")
         check(r["result"] == str(8 << 20), "input release: the 8 MiB request ran (%r)" % (r["result"],))
         st = stats(s)  # (the very next request: within the burst window)
+        check(st["input_arena"] >= 2 * st["read_chunk"], "input release: the request reader's arena (%r)" % (st,))
         if WINDOWS:
-            check(st["input_capacity"] <= st["read_chunk"], "input release (Windows): let go at once (%r)" % (st,))
+            check(st["input_capacity"] == st["input_arena"], "input release (Windows): let go at once, the arena back (%r)" % (st,))
         else:
-            check(st["input_capacity"] > st["read_chunk"], "input release: kept for the next request of a burst (%r)" % (st,))
+            check(st["input_capacity"] > st["input_arena"], "input release: kept for the next request of a burst (%r)" % (st,))
         time.sleep(0.6)
         st2 = stats(s)
-        check(st2["input_capacity"] <= st2["read_chunk"] and st2["input_releases"] >= 1,
-              "input release: let go after the idle limit (%r)" % (st2,))
+        check(st2["input_capacity"] == st2["input_arena"] and st2["input_releases"] >= 1,
+              "input release: let go after the idle limit, the arena back (%r)" % (st2,))
         r = s.run(big, mode="python")
         check(r["result"] == str(8 << 20), "input release: the next large request after a release (%r)" % (r["result"],))
         counts_match(s, "input release")

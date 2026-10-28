@@ -85,6 +85,7 @@ static STATE: Mutex<State> = Mutex::new(State {
 /// its last line (reported in _serve_stats: the r5 semantic memory gate).
 static INPUT_CAPACITY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static INPUT_RELEASES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static INPUT_ARENA: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn state() -> std::sync::MutexGuard<'static, State> {
     // (no code panics while holding it; a poisoned lock is still the state)
@@ -215,6 +216,7 @@ fn serve_stats(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     d.set_item("aborted", aborted)?;
     d.set_item("input_capacity", INPUT_CAPACITY.load(std::sync::atomic::Ordering::Relaxed))?;
     d.set_item("input_releases", INPUT_RELEASES.load(std::sync::atomic::Ordering::Relaxed))?;
+    d.set_item("input_arena", INPUT_ARENA.load(std::sync::atomic::Ordering::Relaxed))?;
     d.set_item("read_chunk", READ_CHUNK)?;
     Ok(d)
 }
@@ -379,6 +381,22 @@ fn staging_bound(staged: usize, piece: usize, piece_cap: usize, list_extra: usiz
 /// for the requests that follow, and let go (to no capacity) only when it is
 /// all consumed and no input is readable for IDLE_RELEASE_LIMIT.  A partial
 /// line or a backlog is never let go.
+///
+/// That is the control policy (`Lines::new`: the POSIX control reader, and
+/// r5's tests).  The worker's request reader (`Lines::request`, the Windows
+/// arena design r2, daybreak2's and astra's rulings) keeps an ARENA instead:
+/// allocated once, of actual capacity A >= 2 READ_CHUNK, reads that ask for
+/// at most the buffer's free space (the consumed head drained first when
+/// less than a quantum is free), and staging only when the unconsumed part of
+/// a line fills the whole buffer.  So every request line of framed length (its
+/// newline included) at most A, every one up to 2 READ_CHUNK in particular, is
+/// read with no allocation, free or regrowth, whatever the read fragmentation
+/// and whatever later requests arrive in the same reads.  A longer line stages
+/// as above, with the arena kept (cleared) as `spare`; once that line is
+/// consumed and the input idle, its buffer is freed and the arena swapped back
+/// in: no allocation.  The release follows that semantic state (`large`), not
+/// a capacity comparison.  Memory: the request reader holds A for the worker's
+/// life, and A more than the staging bound while a long line is staged or held.
 struct Lines<R: Source> {
     f: R,
     buf: Vec<u8>,
@@ -405,13 +423,38 @@ struct Lines<R: Source> {
     releases: u64,
     /// Long lines laid out from pieces (tests: a warm buffer takes none).
     flattens: u64,
-    /// The most bytes of capacity held at once, buffer and pieces (tests).
+    /// The most bytes of capacity held at once, buffer, spare and pieces (tests).
     peak: usize,
+    /// The request reader's arena (see above): its requested size (2 READ_CHUNK; 0 for the control policy), its
+    /// actual capacity A, whether `buf` is a flattened long line rather than the arena, and the arena while it is not
+    /// in use (allocated, cleared; never freed while the reader lives).
+    floor: usize,
+    arena_cap: usize,
+    large: bool,
+    spare: Vec<u8>,
+    /// The capacity of a buffer taken out of `buf` at a staging start and still live while its bytes are staged
+    /// (astra's accounting witness): counted by capacity(), so every allocation moment in between sees it.
+    held: usize,
 }
 
 impl<R: Source> Lines<R> {
     fn new(f: R) -> Lines<R> {
-        Lines { f, buf: Vec::new(), head: 0, taken: 0, scanned: 0, eof: false, stage: Vec::new(), staged: 0, stage_caps: 0, piece: READ_CHUNK, extra: (0, 0, 0), releases: 0, flattens: 0, peak: 0 }
+        Lines { f, buf: Vec::new(), head: 0, taken: 0, scanned: 0, eof: false, stage: Vec::new(), staged: 0, stage_caps: 0, piece: READ_CHUNK, extra: (0, 0, 0), releases: 0, flattens: 0, peak: 0, floor: 0, arena_cap: 0, large: false, spare: Vec::new(), held: 0 }
+    }
+
+    /// The request reader: an arena of 2 READ_CHUNK (plus `extra`, which only the tests use, to stand for an
+    /// allocator that hands out more), its actual capacity recorded and counted from the start.
+    fn request_with(f: R, extra: usize) -> Lines<R> {
+        let mut l = Lines::new(f);
+        l.floor = 2 * READ_CHUNK;
+        l.buf = Vec::with_capacity(l.floor + extra);
+        l.arena_cap = l.buf.capacity();
+        l.note_peak();
+        l
+    }
+
+    fn request(f: R) -> Lines<R> {
+        Lines::request_with(f, 0)
     }
 
     /// The bytes of the range `next` returned last.
@@ -422,7 +465,45 @@ impl<R: Source> Lines<R> {
     /// Every byte of input storage held now: the buffer's capacity, the
     /// pieces' capacities and the piece list's own (reported in _serve_stats).
     fn capacity(&self) -> usize {
-        self.buf.capacity() + self.stage_caps + self.stage.capacity() * std::mem::size_of::<Vec<u8>>()
+        self.buf.capacity() + self.spare.capacity() + self.held + self.stage_caps + self.stage.capacity() * std::mem::size_of::<Vec<u8>>()
+    }
+
+    /// Whether a consumed buffer is let go at an idle moment: the request reader's long-line buffer (semantic: never
+    /// the arena, whatever its actual capacity), or under the control policy any buffer over a read quantum.
+    fn releasable(&self) -> bool {
+        if self.floor > 0 { self.large } else { self.buf.capacity() > READ_CHUNK }
+    }
+
+    /// The release: the request reader frees its long-line buffer and takes its arena back (no allocation); the
+    /// control policy lets the buffer go to no capacity.
+    fn release(&mut self) {
+        if self.floor > 0 {
+            self.buf = std::mem::take(&mut self.spare);  // (the long-line buffer freed here; the arena, cleared, back)
+            self.buf.clear();
+            self.large = false;
+        } else {
+            self.buf = Vec::new();  // (idle after a burst: the large capacity let go before blocking)
+        }
+        self.releases += 1;
+    }
+
+    /// The request reader's staging start: the unconsumed part of the buffer (no newline in it) becomes the first
+    /// pieces; the arena is kept, cleared, as the spare (a long-line buffer is freed instead).
+    fn stage_whole_buffer(&mut self) {
+        let mut old = std::mem::take(&mut self.buf);
+        self.held = old.capacity();  // (live, and counted, until it goes or is kept)
+        let h = self.head;
+        self.stage_bytes(&old[h..]);
+        self.note_peak();
+        self.held = 0;
+        if self.large {
+            drop(old);
+            self.large = false;
+        } else {
+            old.clear();
+            self.spare = old;
+        }
+        self.head = 0;
     }
 
     fn note_peak(&mut self) {
@@ -439,7 +520,7 @@ impl<R: Source> Lines<R> {
                 if self.stage.len() == self.stage.capacity() {
                     let mut grown: Vec<Vec<u8>> = Vec::with_capacity((2 * self.stage.capacity()).max(4) + self.extra.1);
                     let entry = std::mem::size_of::<Vec<u8>>();
-                    self.peak = self.peak.max(self.buf.capacity() + self.stage_caps + (self.stage.capacity() + grown.capacity()) * entry);
+                    self.peak = self.peak.max(self.capacity() + grown.capacity() * entry);  // (the old list and the new together)
                     grown.append(&mut self.stage);
                     self.stage = grown;  // (the old list let go here)
                 }
@@ -509,6 +590,7 @@ impl<R: Source> Lines<R> {
         self.staged = 0;
         self.stage_caps = 0;
         self.buf = flat;
+        self.large = self.floor > 0;  // (the request reader: a long-line buffer, its arena in spare)
         self.head = 0;
         self.flattens += 1;
         Ok(())
@@ -519,9 +601,8 @@ impl<R: Source> Lines<R> {
     fn next(&mut self) -> std::io::Result<Option<std::ops::Range<usize>>> {
         self.head = self.taken;
         self.compact();
-        if self.head == self.buf.len() && self.buf.capacity() > READ_CHUNK && !self.eof && !self.readable_soon()? {
-            self.buf = Vec::new();  // (idle after a burst: the large capacity let go before blocking)
-            self.releases += 1;
+        if self.head == self.buf.len() && self.releasable() && !self.eof && !self.readable_soon()? {
+            self.release();
         }
         loop {
             if self.stage.is_empty() {
@@ -543,8 +624,24 @@ impl<R: Source> Lines<R> {
                 }
                 self.compact();
             }
+            let mut want = READ_CHUNK;
+            if self.floor > 0 && self.stage.is_empty() {
+                // (the request reader's read rule: the consumed head drained when less than a quantum is free; a
+                // buffer full of one line's bytes, no newline among them, stages; otherwise a read of at most the
+                // free space, so the buffer never grows here)
+                if self.head > 0 && self.buf.capacity() - self.buf.len() < READ_CHUNK {
+                    self.buf.drain(..self.head);
+                    self.head = 0;
+                }
+                let room = self.buf.capacity() - self.buf.len();
+                if room == 0 {
+                    self.stage_whole_buffer();
+                } else {
+                    want = room.min(READ_CHUNK);
+                }
+            }
             let mut chunk = [0u8; READ_CHUNK];
-            let n = match self.f.read(&mut chunk) {
+            let n = match self.f.read(&mut chunk[..want]) {
                 Ok(0) => {
                     self.eof = true;
                     if !self.stage.is_empty() {
@@ -571,10 +668,11 @@ impl<R: Source> Lines<R> {
                 // buffer is let go, and the rest is read into pieces until the newline)
                 if self.stage.is_empty() {
                     let old = std::mem::take(&mut self.buf);
+                    self.held = old.capacity();  // (live, and counted, until it goes)
                     let h = self.head;
                     self.stage_bytes(&old[h..]);
                     self.note_peak();
-                    self.peak = self.peak.max(self.capacity() + old.capacity());  // (both, until the old buffer goes)
+                    self.held = 0;
                     drop(old);
                     self.head = 0;
                 }
@@ -745,7 +843,8 @@ fn serve_requests(
     }
     #[cfg(not(unix))]
     let _ = control;
-    let mut lines = Lines::new(borrow_file(input));
+    let mut lines = Lines::request(borrow_file(input));
+    INPUT_ARENA.store(lines.arena_cap, std::sync::atomic::Ordering::Relaxed);
     let mut out = borrow_file(output);
     loop {
         // (filled and scanned detached; the line is then read in place, with
@@ -1107,6 +1206,180 @@ mod tests {
         }
         assert_eq!(take(&mut lines), None);
         assert!(most < 1 << 18, "the buffer reached {most} bytes");
+    }
+
+    #[test]
+    fn lines_compact_within_a_kept_buffer() {
+        // (run5's surviving r2-lines-never-compact: since r5 the read path's own drain bounds a growing buffer, so
+        // lines_compact_mid_stream no longer reaches compact(); here a 1 MiB line leaves a kept buffer of about
+        // 1 MiB + 2 READ_CHUNK (Chunks is always readable: no idle release), every later 65535-byte read fits it,
+        // so the read path never drains, and only compact() keeps the used length short: under 2 READ_CHUNK + 32,
+        // where without it the length runs up to the whole capacity)
+        let mut data = vec![b'x'; 1 << 20];
+        data.push(b'\n');
+        for i in 0..100_000u32 { data.extend_from_slice(format!("{{\"id\": {i:>8}, \"code\": \"xxx\"}}\n").as_bytes()); }
+        let mut lines = Lines::new(Chunks { data, at: 0, sizes: vec![65535], k: 0, eintr: false });
+        let big = take(&mut lines).unwrap();
+        assert!(big.len() == 1 << 20 && big.iter().all(|&b| b == b'x'));
+        assert_eq!(lines.flattens, 1);
+        let kept = lines.buf.capacity();
+        assert!(kept > 1 << 20 && kept > 3 * READ_CHUNK, "the big line left {kept} bytes of capacity");  // (the precondition)
+        let mut most = 0;
+        for i in 0..100_000u64 {
+            let l = take(&mut lines).unwrap();
+            assert_eq!(request_id(&l), Some(i));
+            most = most.max(lines.buf.len());
+        }
+        assert_eq!(take(&mut lines), None);
+        assert_eq!(lines.buf.capacity(), kept, "the kept buffer was let go or regrown");
+        assert!(most < 3 * READ_CHUNK, "the used length reached {most} bytes of a {kept}-byte buffer");
+    }
+
+    /// A request line of framed length `n` (its newline included): `n - 1` copies of `b`, then the newline.
+    fn framed(n: usize, b: u8) -> Vec<u8> {
+        line(n - 1, b)
+    }
+
+    #[test]
+    fn request_arena_read_ahead() {
+        // (astra's WINPOL-1 trace: a framed 2C line read 65000, then at most 65536 a read; r5's rule staged it at
+        // partial + n = 196072, the arena reads it in place: after 65000 + 65536 bytes the room is 536, and the last
+        // read is the 535 remaining bytes and the newline, no byte of the next request (daybreak2's erratum).  Then a framed 2C - 100 line whose second read carries
+        // 100 bytes of the requests behind it: they fit too.  Windows' policy (NoWait) throughout)
+        let mut data = framed(2 * READ_CHUNK, b'a');
+        data.extend_from_slice(b"{\"id\": 2}\n{\"id\": 3}\n");
+        let mut lines = Lines::request(NoWait(Chunks { data, at: 0, sizes: vec![65000, 65536, 65536], k: 0, eintr: false }));
+        let (p0, a) = (lines.buf.as_ptr(), lines.arena_cap);
+        assert!(a >= 2 * READ_CHUNK);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'a'; 2 * READ_CHUNK - 1]);
+        assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 2}");
+        assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 3}");
+        assert_eq!(take(&mut lines), None);
+        assert_eq!((lines.flattens, lines.releases), (0, 0));
+        assert!(lines.buf.as_ptr() == p0 && lines.buf.capacity() == a, "the arena was reallocated");
+        assert_eq!(lines.peak, a);
+        let mut data = framed(2 * READ_CHUNK - 100, b'b');
+        for i in 0..10u8 { data.extend_from_slice(&framed(10, b'c' + i)); }  // (exactly 100 framed bytes behind it)
+        assert_eq!(data.len(), 2 * READ_CHUNK);
+        let mut lines = Lines::request(NoWait(Chunks { data, at: 0, sizes: vec![READ_CHUNK], k: 0, eintr: false }));
+        let p0 = lines.buf.as_ptr();
+        assert_eq!(take(&mut lines).unwrap(), vec![b'b'; 2 * READ_CHUNK - 101]);
+        for i in 0..10u8 { assert_eq!(take(&mut lines).unwrap(), vec![b'c' + i; 9]); }
+        assert_eq!(take(&mut lines), None);
+        assert_eq!((lines.flattens, lines.releases), (0, 0));
+        assert!(lines.buf.as_ptr() == p0 && lines.buf.capacity() == a, "the arena was reallocated (read-ahead)");
+    }
+
+    #[test]
+    fn request_arena_boundaries() {
+        // (framed 2C - 1, 2C and 2C + 1, and A - 1, A and A + 1 of the measured arena A, each after a short request
+        // (so it starts mid-buffer) and before three more, in fragmented reads, Windows' policy: up to A no staging,
+        // release or regrowth; past A one staged line, its buffer let go once consumed and the same arena back)
+        let a = Lines::request(NoWait(Chunks { data: Vec::new(), at: 0, sizes: vec![1], k: 0, eintr: false })).arena_cap;
+        let mut ns = vec![2 * READ_CHUNK - 1, 2 * READ_CHUNK, 2 * READ_CHUNK + 1, a - 1, a, a + 1];
+        ns.sort();
+        ns.dedup();
+        for n in ns {
+            let mut data = line(10, b'0');
+            data.extend_from_slice(&framed(n, b'q'));
+            for i in 0..3u8 { data.extend_from_slice(&line(5, b'a' + i)); }
+            let mut lines = Lines::request(NoWait(Chunks { data, at: 0, sizes: vec![READ_CHUNK, 1, 777, READ_CHUNK - 1], k: 0, eintr: false }));
+            let p0 = lines.buf.as_ptr();
+            assert_eq!(lines.arena_cap, a);
+            assert_eq!(take(&mut lines).unwrap(), vec![b'0'; 10]);
+            assert_eq!(take(&mut lines).unwrap(), vec![b'q'; n - 1], "framed {n}");
+            for i in 0..3u8 { assert_eq!(take(&mut lines).unwrap(), vec![b'a' + i; 5], "framed {n}"); }
+            assert_eq!(take(&mut lines), None);
+            let staged = (n > a) as u64;
+            assert_eq!((lines.flattens, lines.releases), (staged, staged), "framed {n}");
+            assert!(lines.buf.as_ptr() == p0 && lines.buf.capacity() == a && lines.spare.capacity() == 0, "framed {n}: not the same arena");
+        }
+    }
+
+    #[test]
+    fn request_arena_back_after_an_idle_release() {
+        // (POSIX's policy: a long line, then a short request after the idle limit: the arena kept as the spare while
+        // the long line is held, one release, and the short one read into the original arena; within the burst the
+        // long-line buffer is kept)
+        let n = 300_000;
+        let mut lines = Lines::request(Timed::new(vec![(0, line(n, b'a')), (1000, line(10, b'c'))], vec![]));
+        let (p0, a) = (lines.buf.as_ptr(), lines.arena_cap);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'a'; n]);
+        assert!(lines.large && lines.spare.as_ptr() == p0 && lines.spare.capacity() == a, "the arena not kept while the long line is held");
+        assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 10]);
+        assert_eq!((lines.flattens, lines.releases), (1, 1));
+        assert!(!lines.large && lines.buf.as_ptr() == p0 && lines.buf.capacity() == a && lines.spare.capacity() == 0);
+        let mut lines = Lines::request(Timed::new(vec![(0, line(n, b'a')), (100, line(10, b'c'))], vec![]));
+        take(&mut lines).unwrap();
+        assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 10]);
+        assert_eq!(lines.releases, 0);
+        assert!(lines.large);
+    }
+
+    #[test]
+    fn request_arena_actual_capacity() {
+        // (an allocator that hands the arena 100 bytes more: A is the measured capacity, a framed 2C + 50 line still
+        // fits it, and the release follows the semantic state, not "A is over a read quantum": nothing is let go)
+        let mut data = framed(2 * READ_CHUNK + 50, b'r');
+        data.extend_from_slice(&line(3, b's'));
+        let mut lines = Lines::request_with(NoWait(Chunks { data, at: 0, sizes: vec![READ_CHUNK - 3], k: 0, eintr: false }), 100);
+        let (p0, a) = (lines.buf.as_ptr(), lines.arena_cap);
+        assert!(a >= 2 * READ_CHUNK + 100);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'r'; 2 * READ_CHUNK + 49]);
+        assert_eq!(take(&mut lines).unwrap(), vec![b's'; 3]);
+        assert_eq!(take(&mut lines), None);
+        assert_eq!((lines.flattens, lines.releases), (0, 0));
+        assert!(lines.buf.as_ptr() == p0 && lines.buf.capacity() == a);
+        assert_eq!(lines.peak, a);
+    }
+
+    #[test]
+    fn request_arena_staging_peak() {
+        // (a 1 MiB line through the request reader, Windows' policy: the peak, in actual capacities, within the staging
+        // bound plus the arena kept alongside; once all is consumed, the arena alone)
+        let n = 1 << 20;
+        let mut data = line(n, b'z');
+        data.extend_from_slice(&line(4, b'y'));
+        let mut lines = Lines::request(NoWait(Chunks { data, at: 0, sizes: vec![READ_CHUNK, 4093], k: 0, eintr: false }));
+        let a = lines.arena_cap;
+        assert_eq!(take(&mut lines).unwrap(), vec![b'z'; n]);
+        let staged = n + 1 + READ_CHUNK;  // (the line, its newline, at most one read after it)
+        assert!(lines.peak <= staging_bound(staged, READ_CHUNK, READ_CHUNK, 0, 0) + a, "a peak of {} bytes", lines.peak);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'y'; 4]);
+        assert_eq!(take(&mut lines), None);
+        assert_eq!((lines.flattens, lines.releases), (1, 1));
+        assert_eq!(lines.capacity(), a);
+    }
+
+    #[test]
+    fn request_arena_staging_start_accounting() {
+        // (astra's witness: the arena over-allocated by 100 bytes, A = 131 172, 8-byte pieces, a framed A + 1 line.
+        // Its staging start copies the full arena into pieces; when the piece list grows from 16 384 to 32 768
+        // entries, the arena is still live: 16 384 x 8 piece bytes + A + (16 384 + 32 768) x 24 list bytes = 1 441 892.
+        // r2 recorded 1 310 720 there, without the arena)
+        let a = 2 * READ_CHUNK + 100;
+        let mut data = framed(a + 1, b'w');
+        data.extend_from_slice(&line(2, b'v'));
+        let mut lines = Lines::request_with(NoWait(Chunks { data, at: 0, sizes: vec![READ_CHUNK], k: 0, eintr: false }), 100);
+        assert_eq!(lines.arena_cap, a, "the precondition: the allocator's exact capacity for the injected arena");
+        lines.piece = 8;
+        assert_eq!(take(&mut lines).unwrap(), vec![b'w'; a]);
+        let at_growth = 16_384 * 8 + a + (16_384 + 32_768) * std::mem::size_of::<Vec<u8>>();
+        assert_eq!(at_growth, 1_441_892);
+        assert!(lines.peak >= at_growth, "the arena not counted at the list growth: a peak of {}", lines.peak);
+        assert_eq!(take(&mut lines).unwrap(), vec![b'v'; 2]);
+        assert_eq!(take(&mut lines), None);
+        assert_eq!((lines.flattens, lines.releases), (1, 1));
+        assert_eq!((lines.held, lines.capacity()), (0, a));
+    }
+
+    #[test]
+    fn control_reader_has_no_arena() {
+        // (the control policy, Lines::new: no arena, nothing held before input; a short line takes a short buffer)
+        let mut lines = Lines::new(NoWait(Chunks { data: line(5, b'1'), at: 0, sizes: vec![READ_CHUNK], k: 0, eintr: false }));
+        assert_eq!((lines.floor, lines.arena_cap, lines.capacity()), (0, 0, 0));
+        assert_eq!(take(&mut lines).unwrap(), vec![b'1'; 5]);
+        assert!(lines.capacity() < READ_CHUNK && lines.spare.capacity() == 0);
     }
 
     #[test]
