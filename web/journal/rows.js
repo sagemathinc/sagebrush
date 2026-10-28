@@ -74,7 +74,8 @@ async function setMeta(st, reg, changes) {
 export const SYNC_DEBT = { docCount: 10000, docBytes: 16 * 2 ** 20, nsCount: 50000, nsBytes: 64 * 2 ** 20 };
 const NO_ROOM_DEBT = "more unsent changes than this browser keeps for syncing: not kept as a version";
 const DEBT = [SYNC_NB, "b:d:" + JOURNAL_NS];
-const NOT_THIS_CLIENT = "not this device's sync client for this notebook: reload this page";
+// (the texts a refusal says, of the document's kind's noun: "notebook" unless the caller says otherwise)
+const NOT_THIS_CLIENT = (noun) => `not this device's sync client for this ${noun}: reload this page`;
 /** The history key of a document's synced history, its `n`th start. */
 export const syncedKey = (id, n) => `${id}:s${n}`;
 // (a patch id's client: patchflow's "<11 base-36 time digits>_<client>")
@@ -94,7 +95,8 @@ export async function readSync(st, id) {
 /** At most this many saves' intents wait per document (each pruned once a record holding it, or a later one, is
  * written: r4 §3.3). */
 export const MAX_INTENTS = 16;
-const NO_ROOM_INTENTS = "too many saves of this notebook are waiting to be confirmed: not saved";
+const NO_ROOM_INTENTS = (noun) => `too many saves of this ${noun} are waiting to be confirmed: not saved`;
+const NO_ROOM_INTENTS_RE = /^too many saves of this [a-z]+ are waiting to be confirmed: not saved$/;
 const intents = (h, upTo = Number.MAX_SAFE_INTEGER) => IDBKeyRange.bound([SYNC_NB + h, "p"], seqKey(h, "p", upTo));
 
 /** T1 (design r4 §1), in the history's transaction `st`: the document's next j, and at it, with `row`, the version's
@@ -102,11 +104,11 @@ const intents = (h, upTo = Number.MAX_SAFE_INTEGER) => IDBKeyRange.bound([SYNC_N
  * text of its versioned records), the save's intent row, charged to the pending budget, at most MAX_INTENTS waiting.
  * A version without an intent (the execution journal's, a TimeTravel clear's re-record, recovery's catch-up) decides
  * nothing.  Resolves {j}; refused (thrown, with `refusal`), nothing of it is written. */
-export async function t1Write(st, id, { row, intent, start, local = true } = {}) {
+export async function t1Write(st, id, { row, intent, start, local = true, noun = "notebook" } = {}) {
   const reg = await registry(st, id, true);
   const j = ((await rq(st.get(rowKey(reg.h, "j"))))?.v?.j ?? 0) + 1;
   if (intent) {
-    if ((await rq(st.count(intents(reg.h)))) >= MAX_INTENTS) throw refusedWith(NO_ROOM_INTENTS);
+    if ((await rq(st.count(intents(reg.h)))) >= MAX_INTENTS) throw refusedWith(NO_ROOM_INTENTS(noun));
     const key = seqKey(reg.h, "p", j), v = { srev: intent.srev ?? null, value: intent.value };
     await charge(st, PENDING, rowCharge(key, v), JOURNAL_BUDGETS.pendingAll, NO_ROOM_PENDING);
     st.put(rowOf(key, v));
@@ -116,14 +118,14 @@ export async function t1Write(st, id, { row, intent, start, local = true } = {})
   // twice)
   let m = (await rq(st.get(rowKey(reg.h, "m"))))?.v ?? null;
   if (start) {
-    if (m) throw refusedWith("this notebook's synced history has already started");
+    if (m) throw refusedWith(`this ${noun}'s synced history has already started`);
     m = changes.m = { n: start.n, from_j: j };
     changes.s = { gen: 1, client: start.client, cseq: 1, last: null, fgen: 0, claimed: null, debt: { count: 0, bytes: 0 } };
   }
   if (row && m && local) {
     // (a started document's local patch: on its synced history only, from its slot's client)
     const slot = changes.s ?? (await rq(st.get(rowKey(reg.h, "s"))))?.v;
-    if (row.nb !== syncedKey(id, m.n) || !slot || clientOf(row.time) !== slot.client) throw refusedWith(NOT_THIS_CLIENT);
+    if (row.nb !== syncedKey(id, m.n) || !slot || clientOf(row.time) !== slot.client) throw refusedWith(NOT_THIS_CLIENT(noun));
     const lkey = seqKey(reg.h, "l", j), lv = { time: row.time, gen: slot.gen, client: slot.client, cseq: slot.cseq, bytes: 0 };
     // (its debt: the patch row's charge and its l row's, measured with the bytes field as wide as it can be)
     lv.bytes = rowCharge([row.nb, row.time], { env: row.env, j }) + rowCharge(lkey, { ...lv, bytes: Number.MAX_SAFE_INTEGER });
@@ -142,9 +144,9 @@ export async function t1Write(st, id, { row, intent, start, local = true } = {})
 /** A new client for the document's slot (after a final refusal, an epoch move, `unknown_client`: 2c-3, 2c-4): its
  * generation raised, its cseq from 1 (the server counts a client's patches 1, 2, 3, …), unclaimed.  The old client's l rows stay as they are, each with its own gen and
  * client, so delayed work for it can still find them, and never touches the new one's (astra's pin 2). */
-export async function rotate(st, id, client) {
+export async function rotate(st, id, client, { noun = "notebook" } = {}) {
   const reg = await registered(st, id), slot = reg && (await rq(st.get(rowKey(reg.h, "s"))))?.v;
-  if (!slot) throw refusedWith("this notebook's synced history hasn't started");
+  if (!slot) throw refusedWith(`this ${noun}'s synced history hasn't started`);
   const next = { ...slot, gen: slot.gen + 1, client, cseq: 1, last: null, fgen: 0, claimed: null, rotations: (slot.rotations ?? 0) + 1 };
   await setMeta(st, reg, { s: next });
   return next;
@@ -236,12 +238,12 @@ const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && 
  * one under the same id refuses the page; then the cursor is `next`.  A document not started here yet is started with
  * `start` ({client}), no root of its own: the server's patches are its history.  Resolves {j, applied}; refused
  * (thrown, with `refusal`), nothing of it is written. */
-export async function applyPage(st, id, { expect, next, rows, start }) {
+export async function applyPage(st, id, { expect, next, rows, start, noun = "notebook" }) {
   const reg = await registry(st, id, true);
   const changes = {};
   let m = (await rq(st.get(rowKey(reg.h, "m"))))?.v ?? null;
   if (!m) {
-    if (!start) throw refusedWith("this notebook's synced history hasn't started here");
+    if (!start) throw refusedWith(`this ${noun}'s synced history hasn't started here`);
     m = changes.m = { n: 1, from_j: null };
     changes.s = { gen: 1, client: start.client, cseq: 1, last: null, fgen: 0, claimed: null, debt: { count: 0, bytes: 0 } };
   }
@@ -252,7 +254,7 @@ export async function applyPage(st, id, { expect, next, rows, start }) {
   for (const r of rows) {
     const had = await rq(st.get([key, r.time]));
     if (had) {
-      if (canon(had.env) !== canon(r.env)) throw refusedWith("another patch is stored under a received patch's id: this notebook stops syncing");
+      if (canon(had.env) !== canon(r.env)) throw refusedWith(`another patch is stored under a received patch's id: this ${noun} stops syncing`);
       continue;
     }
     j++;
@@ -268,7 +270,7 @@ export async function applyPage(st, id, { expect, next, rows, start }) {
 /** A T1 refused for room (2c-1d-iii §1: the intents' bound, the pending or the metadata budget, or the history
  * database's quota), after which the save's record is still written, marked: true.  Any other refusal (not the
  * writer, the fence, the workspace) is the save's own: not saved. */
-export const roomRefused = (r) => !!r && (r.quota === true || r.refused === NO_ROOM_META || r.refused === NO_ROOM_PENDING || r.refused === NO_ROOM_INTENTS || r.refused === NO_ROOM_DEBT);
+export const roomRefused = (r) => !!r && (r.quota === true || r.refused === NO_ROOM_META || r.refused === NO_ROOM_PENDING || (typeof r.refused === "string" && NO_ROOM_INTENTS_RE.test(r.refused)) || r.refused === NO_ROOM_DEBT);
 /** What an intent of the codec's text `value` is charged, at most (its key as wide as a key can be). */
 export const intentCharge = (value) => rowCharge([SYNC_NB + "z".repeat(SYNC_KEY_BOUNDS.handle), "p" + "9".repeat(16)], { srev: Number.MAX_SAFE_INTEGER, value });
 
