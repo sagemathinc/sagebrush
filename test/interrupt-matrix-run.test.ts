@@ -251,5 +251,3 @@ test("a target that exits at once after its last DONE: the last sample, read as 
     rmSync(dir, { recursive: true, force: true });
   }
 });
-  }
-});
