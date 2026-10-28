@@ -1,4 +1,94 @@
 {
+ "engine/arith/src/nmod_poly.rs :: poll_accumulate :: let a = acc.saturating_add(u64::try_from(work).unwrap_or(u64::MAX)); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(poll_accumulate(0, usize::MAX), (0, true)); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(poll_accumulate(u64::MAX - 1, 1), (0, true)); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(poll_accumulate(u64::MAX, usize::MAX), (0, true)); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(weighted_work(0, usize::MAX), 1); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(weighted_work(usize::MAX / 2 + 1, 2), usize::MAX); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(weighted_work(usize::MAX, 1), usize::MAX); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: poll_counts_never_wrap :: assert_eq!(weighted_work(usize::MAX, 2), usize::MAX); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: weighted_work :: usize::try_from(weighted_work_in(n as u64, w as u64, usize::MAX as u64)).unwrap_or(usize::MAX) #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: weighted_work_in :: n.saturating_mul(w).saturating_add(1).min(max) #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/nmod_poly.rs :: weighted_work_in :: pub(crate) fn weighted_work_in(n: u64, w: u64, max: u64) -> u64 { #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: max_bits_polled :: fn max_bits_polled(&self, poll: &mut Poll) -> u64 { #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: max_bits / usize::MAX / max_gap_ns name a bit count, a saturating conversion and a test hook; nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: mul :: let (ba, bb) = (self.max_bits_polled(&mut poll), o.max_bits_polled(&mut poll)); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: max_bits / usize::MAX / max_gap_ns name a bit count, a saturating conversion and a test hook; nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight :: usize::try_from(mul_weight_in(ba, bb, usize::MAX as u64)).unwrap_or(usize::MAX) #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight_in :: fn mul_weight_in(ba: u64, bb: u64, max: u64) -> u64 { #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight_in :: words(ba).saturating_mul(words(bb)).min(max) #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight_saturates_on_both_word_sizes :: assert_eq!(mul_weight_in(1 << 22, 1 << 22, u64::MAX), 1 << 32); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight_saturates_on_both_word_sizes :: let wasm = u32::MAX as u64; #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: saturating poll counters and weights (u64::MAX/usize::MAX/u32::MAX as saturation points) and their boundary tests; nothing is refused"
+ },
  "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
   "class": "2+3",
   "owner": "ball arithmetic",
@@ -1669,6 +1759,11 @@
   "owner": "HMF/web",
   "row": "inv-40"
  },
+ "engine/web/src/lib.rs :: digits :: usize::try_from(x.bits() / 3 + 2).unwrap_or(usize::MAX) #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: max_bits / usize::MAX / max_gap_ns name a bit count, a saturating conversion and a test hook; nothing is refused"
+ },
  "engine/web/src/lib.rs :: dispatch :: Some(w) => sagebrush_poly::try_factor_with(&f, &sagebrush_poly::Budget::new(sagebrush_poly::Limits { work: w, ..sagebrush_poly::Limits::DEFAULT })), #0": {
   "class": "3",
   "owner": "polynomial factorization"
@@ -1732,6 +1827,21 @@
  "engine/web/src/lib.rs :: with_rounds :: Some(n) => sagebrush_classgroup::limits::with_round_limit(usize::try_from(n).unwrap_or(usize::MAX), f), #0": {
   "class": "3",
   "owner": "class group/number fields"
+ },
+ "engine/web/src/lib.rs :: zrows :: cap += digits(x) + 1; #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: the reply String's exact byte bound (no reallocation), and a test hook; nothing is refused"
+ },
+ "engine/web/src/lib.rs :: zrows :: let mut cap = m.rows; #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: the reply String's exact byte bound (no reallocation), and a test hook; nothing is refused"
+ },
+ "engine/web/src/lib.rs :: zrows :: let mut out = String::with_capacity(cap); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: the reply String's exact byte bound (no reallocation), and a test hook; nothing is refused"
  },
  "engine/web/src/lib.rs :: zvec :: pub const NMOD_MAX_BYTES: usize = NMOD_MAX_N * NMOD_MAX_N * 20 + NMOD_MAX_N; #0": {
   "class": "1+3",
@@ -1822,6 +1932,11 @@
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
+ },
+ "engine/web/tests/mat_mul_stop.rs :: traced :: let gap = hooks::max_gap_ns(); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: the reply String's exact byte bound (no reallocation), and a test hook; nothing is refused"
  },
  "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: assert!(req.len() > ECH_MAX_TEXT - ECH_MAX_DIM * ECH_MAX_DIM); #0": {
   "class": "none",

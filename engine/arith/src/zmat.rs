@@ -19,6 +19,7 @@
 
 use crate::nmod::{Modulus, Primes};
 use crate::nmod_mat::{Lu, Mat};
+use crate::nmod_poly::{weighted_work, Poll};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
@@ -38,6 +39,25 @@ pub fn mod_u64(x: &BigInt, m: &Modulus) -> u64 {
     }
     x.mod_floor(&BigInt::from(m.n)).to_u64().unwrap()
 }
+
+/// A BigInt multiply-add's weight in [`ZMat::mul`]: the word products of
+/// the largest entries, saturating at usize::MAX (on wasm32 two 2^22-bit
+/// operands give 2^32 words products: saturated, so every multiply-add
+/// polls).
+fn mul_weight(ba: u64, bb: u64) -> usize {
+    usize::try_from(mul_weight_in(ba, bb, usize::MAX as u64)).unwrap_or(usize::MAX)
+}
+
+/// [`mul_weight`] for a usize of at most `max` (tests: wasm32's u32::MAX).
+fn mul_weight_in(ba: u64, bb: u64, max: u64) -> u64 {
+    let words = |b: u64| b.div_ceil(64).max(1);
+    words(ba).saturating_mul(words(bb)).min(max)
+}
+
+/// The multiply-adds between two polls in [`ZMat::mul`]'s inner loops.
+const MUL_STEP: usize = 1 << 16;
+/// The entries scanned between two polls in its pre-scans.
+const SCAN_CHUNK: usize = 1 << 12;
 
 fn bits(x: &BigInt) -> u64 {
     x.bits()
@@ -110,39 +130,156 @@ impl ZMat {
         ZMat { rows: rows.len(), cols: cols.len(), d }
     }
 
+    /// The product, asking for Stop about every 2^16 units of work whatever
+    /// the shape (a 1 x K x 1 dot product as much as a wide or tall one):
+    /// each entry scanned or converted, each output entry, and each
+    /// multiply-add, which the BigInt loop weighs by the word sizes of the
+    /// largest entries, so a poll is never more than about 2^16 word
+    /// products away.
     pub fn mul(&self, o: &ZMat) -> ZMat {
         assert_eq!(self.cols, o.rows, "matrix dimensions do not match");
         let (r, k, c) = (self.rows, self.cols, o.cols);
-        let small = self.max_bits() + o.max_bits() + (64 - (k as u64).leading_zeros() as u64) < 126;
+        if r == 0 || c == 0 {
+            // (no entries: the empty result directly, with no loop over an
+            // empty dimension; a pending Stop is still seen)
+            sagebrush_interrupt::check_coarse();
+            return ZMat { rows: r, cols: c, d: vec![] };
+        }
+        let mut poll = Poll::new();
+        if k == 0 {
+            // (an empty inner dimension: R x C zeros, checked first and
+            // polled while built)
+            sagebrush_interrupt::check_coarse();
+            let mut d = Vec::with_capacity(r * c);
+            for _ in 0..r * c {
+                d.push(BigInt::zero());
+                poll.add(1);
+            }
+            return ZMat { rows: r, cols: c, d };
+        }
+        // (the phases name where a Stop lands, for the tests' hooks)
+        let scan = sagebrush_interrupt::enter("zmat-scan");
+        let (ba, bb) = (self.max_bits_polled(&mut poll), o.max_bits_polled(&mut poll));
+        let small = ba + bb + (64 - (k as u64).leading_zeros() as u64) < 126;
         if small {
-            if let (Some(a), Some(b)) = (self.as_i64(), o.as_i64()) {
+            if let (Some(a), Some(b)) = (self.as_i64_polled(&mut poll), o.as_i64_polled(&mut poll)) {
+                drop(scan);
+                let _dot = sagebrush_interrupt::enter("zmat-dot");
                 let mut d = Vec::with_capacity(r * c);
-                for i in 0..r {
-                    for j in 0..c {
+                if k < MUL_STEP {
+                    // (each output's dot product exactly as before; one poll
+                    // per group of outputs worth at least MUL_STEP units)
+                    // (blocks of outputs: whole rows when a row is short, else
+                    // runs inside a row; the loops inside a block are the
+                    // plain ones, with no counting)
+                    // (a block is at most MUL_STEP units, so with the counter's
+                    // remainder (below MUL_STEP) two checks are under 2 MUL_STEP
+                    // units apart, row tails included)
+                    let per = (MUL_STEP / (k + 1)).max(1);
+                    let dot = |i: usize, j: usize| {
                         let mut s = 0i128;
                         for l in 0..k {
                             s += a[i * k + l] as i128 * b[l * c + j] as i128;
                         }
-                        d.push(BigInt::from(s));
+                        s
+                    };
+                    if c < per {
+                        let rows_per = (per / c).max(1);
+                        for i0 in (0..r).step_by(rows_per) {
+                            let i1 = (i0 + rows_per).min(r);
+                            for i in i0..i1 {
+                                for j in 0..c {
+                                    d.push(BigInt::from(dot(i, j)));
+                                }
+                            }
+                            poll.add((i1 - i0) * c * (k + 1));
+                        }
+                    } else {
+                        for i in 0..r {
+                            for j0 in (0..c).step_by(per) {
+                                let j1 = (j0 + per).min(c);
+                                for j in j0..j1 {
+                                    d.push(BigInt::from(dot(i, j)));
+                                }
+                                poll.add((j1 - j0) * (k + 1));
+                            }
+                        }
+                    }
+                } else {
+                    for i in 0..r {
+                        for j in 0..c {
+                            let mut s = 0i128;
+                            // (a long dot product: chunks of MUL_STEP
+                            // multiply-adds, one poll each, the output entry
+                            // counted with the last)
+                            let mut l0 = 0;
+                            loop {
+                                let l1 = (l0 + MUL_STEP).min(k);
+                                for l in l0..l1 {
+                                    s += a[i * k + l] as i128 * b[l * c + j] as i128;
+                                }
+                                poll.add(l1 - l0 + 1);
+                                if l1 >= k {
+                                    break;
+                                }
+                                l0 = l1;
+                            }
+                            d.push(BigInt::from(s));
+                        }
                     }
                 }
                 return ZMat { rows: r, cols: c, d };
             }
         }
+        drop(scan);
+        let _dot = sagebrush_interrupt::enter("zmat-big-dot");
+        // a multiply-add's weight: the word products of the largest entries
+        let w = mul_weight(ba, bb);
+        let step = (MUL_STEP / w).max(1);
         let mut d = Vec::with_capacity(r * c);
         for i in 0..r {
             for j in 0..c {
                 let mut s = BigInt::zero();
-                for l in 0..k {
-                    if !self.d[i * k + l].is_zero() {
-                        s += &self.d[i * k + l] * &o.d[l * c + j];
+                let mut l0 = 0;
+                loop {
+                    let l1 = (l0 + step).min(k);
+                    for l in l0..l1 {
+                        if !self.d[i * k + l].is_zero() {
+                            s += &self.d[i * k + l] * &o.d[l * c + j];
+                        }
                     }
+                    poll.add(weighted_work(l1 - l0, w));
+                    if l1 >= k {
+                        break;
+                    }
+                    l0 = l1;
                 }
                 d.push(s);
             }
-            sagebrush_interrupt::check();
         }
         ZMat { rows: r, cols: c, d }
+    }
+
+    /// [`max_bits`](ZMat::max_bits), polling for Stop.
+    fn max_bits_polled(&self, poll: &mut Poll) -> u64 {
+        let mut m = 0;
+        for chunk in self.d.chunks(SCAN_CHUNK) {
+            m = m.max(chunk.iter().map(bits).max().unwrap_or(0));
+            poll.add(chunk.len());
+        }
+        m
+    }
+
+    /// [`as_i64`](ZMat::as_i64), polling for Stop.
+    fn as_i64_polled(&self, poll: &mut Poll) -> Option<Vec<i64>> {
+        let mut v = Vec::with_capacity(self.d.len());
+        for chunk in self.d.chunks(SCAN_CHUNK) {
+            for x in chunk {
+                v.push(x.to_i64()?);
+            }
+            poll.add(chunk.len());
+        }
+        Some(v)
     }
 
     pub fn scale(&self, s: &BigInt) -> ZMat {
@@ -768,6 +905,25 @@ pub fn charpoly(a: &ZMat) -> Vec<BigInt> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mul_weight_saturates_on_both_word_sizes() {
+        use super::{mul_weight_in, MUL_STEP};
+        use crate::nmod_poly::weighted_work_in;
+        let wasm = u32::MAX as u64;
+        // two 2^22-bit operands (512 KiB each): 2^16 x 2^16 = 2^32 word
+        // products, past wasm32's usize
+        assert_eq!(mul_weight_in(1 << 22, 1 << 22, u64::MAX), 1 << 32);
+        assert_eq!(mul_weight_in(1 << 22, 1 << 22, wasm), wasm);
+        // then the chunk is one multiply-add, and its count saturates there
+        let w = mul_weight_in(1 << 22, 1 << 22, wasm);
+        assert_eq!(((MUL_STEP as u64) / w).max(1), 1);
+        assert_eq!(weighted_work_in(1, w, wasm), wasm);
+        assert_eq!(weighted_work_in(wasm, wasm, wasm), wasm);
+        // small entries weigh one word product
+        assert_eq!(mul_weight_in(0, 30, wasm), 1);
+        assert_eq!(mul_weight_in(64, 65, wasm), 2);
+    }
+
     use super::*;
 
     fn rng(seed: &mut u64) -> u64 {

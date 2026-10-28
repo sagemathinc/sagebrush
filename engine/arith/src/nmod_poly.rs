@@ -29,12 +29,39 @@ impl Poll {
     }
     #[inline]
     pub(crate) fn add(&mut self, work: usize) {
-        self.0 += work as u64;
-        if self.0 >= 1 << 16 {
-            self.0 = 0;
+        let (acc, due) = poll_accumulate(self.0, work);
+        self.0 = acc;
+        if due {
             sagebrush_interrupt::check_coarse();
         }
     }
+}
+
+/// A poll counter's step (every Poll in the crate): the work added with
+/// saturation, never wrapping, and whether a check is due (at or past
+/// 2^16, which resets the counter; any single addition of 2^16 or more is
+/// due at once).
+#[inline]
+pub(crate) fn poll_accumulate(acc: u64, work: usize) -> (u64, bool) {
+    let a = acc.saturating_add(u64::try_from(work).unwrap_or(u64::MAX));
+    if a >= 1 << 16 {
+        (0, true)
+    } else {
+        (a, false)
+    }
+}
+
+/// A multiply-add chunk's work, weighed by `w` word products, plus the
+/// output entry: saturating, never wrapping (ZMat::mul's BigInt loop).
+#[inline]
+pub(crate) fn weighted_work(n: usize, w: usize) -> usize {
+    usize::try_from(weighted_work_in(n as u64, w as u64, usize::MAX as u64)).unwrap_or(usize::MAX)
+}
+
+/// [`weighted_work`] for a usize of at most `max` (tests: wasm32's).
+#[inline]
+pub(crate) fn weighted_work_in(n: u64, w: u64, max: u64) -> u64 {
+    n.saturating_mul(w).saturating_add(1).min(max)
 }
 
 /// Products with a factor shorter than this are schoolbook.
@@ -584,6 +611,25 @@ impl PolyModulus {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn poll_counts_never_wrap() {
+        use super::{poll_accumulate, weighted_work};
+        // below the quantum: accumulated; at or past it: due, reset
+        assert_eq!(poll_accumulate(0, (1 << 16) - 1), ((1 << 16) - 1, false));
+        assert_eq!(poll_accumulate((1 << 16) - 1, 1), (0, true));
+        assert_eq!(poll_accumulate(0, 1 << 16), (0, true));
+        // the extremes saturate, and are due at once
+        assert_eq!(poll_accumulate(u64::MAX, usize::MAX), (0, true));
+        assert_eq!(poll_accumulate(u64::MAX - 1, 1), (0, true));
+        assert_eq!(poll_accumulate(0, usize::MAX), (0, true));
+        // the weighted count saturates instead of wrapping
+        assert_eq!(weighted_work(usize::MAX, 2), usize::MAX);
+        assert_eq!(weighted_work(usize::MAX / 2 + 1, 2), usize::MAX);
+        assert_eq!(weighted_work(usize::MAX, 1), usize::MAX);
+        assert_eq!(weighted_work(0, usize::MAX), 1);
+        assert_eq!(weighted_work(3, 4), 13);
+    }
+
     use super::*;
 
     fn rng(seed: &mut u64) -> u64 {

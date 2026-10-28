@@ -146,6 +146,8 @@ pub mod hooks {
     static TRACING: AtomicBool = AtomicBool::new(false);
     static TRACE: Mutex<Vec<u8>> = Mutex::new(Vec::new());
     static LAST_NS: AtomicU64 = AtomicU64::new(0);
+    static FIRST_NS: AtomicU64 = AtomicU64::new(0);
+    static STOPPED_NS: AtomicU64 = AtomicU64::new(0);
     static MAX_GAP_NS: AtomicU64 = AtomicU64::new(0);
     // the WebAssembly host's polls, simulated: every check_coarse, and
     // every 1024th check (poll_host's rule)
@@ -153,7 +155,9 @@ pub mod hooks {
     static LAST_POLL_NS: AtomicU64 = AtomicU64::new(0);
     static MAX_POLL_GAP_NS: AtomicU64 = AtomicU64::new(0);
 
-    fn now_ns() -> u64 {
+    /// Nanoseconds on the hooks' own monotonic clock (the clock of the
+    /// times below), for a test's own marks: a call's entry and return.
+    pub fn now_ns() -> u64 {
         static START: OnceLock<Instant> = OnceLock::new();
         START.get_or_init(Instant::now).elapsed().as_nanos() as u64
     }
@@ -165,6 +169,7 @@ pub mod hooks {
         if TRACING.load(Relaxed) {
             TRACE.lock().unwrap_or_else(|e| e.into_inner()).push(cur as u8);
             let n = now_ns();
+            let _ = FIRST_NS.compare_exchange(0, n, Relaxed, Relaxed);
             let last = LAST_NS.swap(n, Relaxed);
             if last != 0 {
                 MAX_GAP_NS.fetch_max(n - last, Relaxed);
@@ -179,6 +184,7 @@ pub mod hooks {
         let a = ARMED.load(Relaxed);
         if a != 0 && t >= a && !super::REQUESTED.load(Relaxed) {
             STOPPED.store(cur, Relaxed);
+            STOPPED_NS.store(now_ns(), Relaxed);
             super::request();
         }
     }
@@ -188,6 +194,7 @@ pub mod hooks {
     pub fn trace() {
         TRACE.lock().unwrap_or_else(|e| e.into_inner()).clear();
         LAST_NS.store(0, Relaxed);
+        FIRST_NS.store(0, Relaxed);
         MAX_GAP_NS.store(0, Relaxed);
         FINE.store(0, Relaxed);
         LAST_POLL_NS.store(0, Relaxed);
@@ -201,6 +208,19 @@ pub mod hooks {
         let Some(i) = names.iter().position(|&n| n == name) else { return vec![] };
         let tr = TRACE.lock().unwrap_or_else(|e| e.into_inner());
         tr.iter().enumerate().filter(|x| *x.1 as usize == i + 1).map(|x| x.0 as u64 + 1).collect()
+    }
+
+    /// The first and the last traced check's times (0, 0 before any), on
+    /// [`now_ns`]'s clock: with a test's marks at a call's entry and return
+    /// they give the leading and trailing work no two checks enclose.
+    pub fn first_last_ns() -> (u64, u64) {
+        (FIRST_NS.load(Relaxed), LAST_NS.load(Relaxed))
+    }
+
+    /// When the armed Stop was requested, on [`now_ns`]'s clock (0: not
+    /// yet): with a mark where the public catch sees it, the Stop's latency.
+    pub fn stopped_at_ns() -> u64 {
+        STOPPED_NS.load(Relaxed)
     }
 
     /// The longest wall time between two traced checks, in nanoseconds.
@@ -246,6 +266,7 @@ pub mod hooks {
         TOTAL.store(0, Relaxed);
         ARMED.store(0, Relaxed);
         STOPPED.store(0, Relaxed);
+        STOPPED_NS.store(0, Relaxed);
         TRACING.store(false, Relaxed);
         for c in COUNTS.iter() {
             c.store(0, Relaxed);

@@ -25,7 +25,9 @@ serde_json = "1"
 
 [features]
 # Tests only, never in a released wheel: _native._test_guarded (test_capacity.py)
-test-hooks = []
+# and the interrupt hooks' _test_trace / _test_traced / _test_arm_at /
+# _test_stopped / _test_now_ns (test_interrupt_matmul.py's phase-targeted Stops)
+test-hooks = ["sagebrush-interrupt/test-hooks"]
 
 [lints]
 workspace = true

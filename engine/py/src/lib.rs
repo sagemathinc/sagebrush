@@ -841,6 +841,53 @@ fn test_gate(open: bool) {
     TEST_GATE.store(open, std::sync::atomic::Ordering::SeqCst);
 }
 
+/// Tests only: the interrupt crate's hooks, for a Stop armed at a chosen
+/// check of a chosen phase through the public route (test_interrupt_matmul.py):
+/// `_test_trace()` resets and traces; `_test_traced(phase)` lists that
+/// phase's check indices; `_test_arm_at(i)` resets and arms a Stop at check
+/// i; `_test_stopped()` is (the phase it landed in, when, on the hooks'
+/// clock); `_test_now_ns()` reads that clock.
+#[cfg(feature = "test-hooks")]
+#[pyfunction(name = "_test_trace")]
+fn test_trace() {
+    sagebrush_interrupt::hooks::reset();
+    sagebrush_interrupt::hooks::trace();
+}
+
+#[cfg(feature = "test-hooks")]
+#[pyfunction(name = "_test_traced")]
+fn test_traced(phase: &str) -> Vec<u64> {
+    sagebrush_interrupt::hooks::traced(phase)
+}
+
+#[cfg(feature = "test-hooks")]
+#[pyfunction(name = "_test_arm_at")]
+fn test_arm_at(index: u64) {
+    sagebrush_interrupt::hooks::reset();
+    sagebrush_interrupt::hooks::arm_at(index);
+}
+
+#[cfg(feature = "test-hooks")]
+#[pyfunction(name = "_test_stopped")]
+fn test_stopped() -> (String, u64) {
+    (sagebrush_interrupt::hooks::stopped_in().to_string(), sagebrush_interrupt::hooks::stopped_at_ns())
+}
+
+/// Tests only: the first and last traced check's times on the hooks'
+/// clock (0, 0 before any): with `_test_now_ns` marks around a call, its
+/// leading and trailing work, which no two engine checks enclose.
+#[cfg(feature = "test-hooks")]
+#[pyfunction(name = "_test_first_last")]
+fn test_first_last() -> (u64, u64) {
+    sagebrush_interrupt::hooks::first_last_ns()
+}
+
+#[cfg(feature = "test-hooks")]
+#[pyfunction(name = "_test_now_ns")]
+fn test_now_ns() -> u64 {
+    sagebrush_interrupt::hooks::now_ns()
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let _ = MAIN.set(std::thread::current().id());
@@ -848,6 +895,17 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(test_guarded, m)?)?;
     #[cfg(feature = "test-hooks")]
     m.add_function(wrap_pyfunction!(test_gate, m)?)?;
+    #[cfg(feature = "test-hooks")]
+    for f in [
+        wrap_pyfunction!(test_trace, m)?,
+        wrap_pyfunction!(test_traced, m)?,
+        wrap_pyfunction!(test_arm_at, m)?,
+        wrap_pyfunction!(test_stopped, m)?,
+        wrap_pyfunction!(test_now_ns, m)?,
+        wrap_pyfunction!(test_first_last, m)?,
+    ] {
+        m.add_function(f)?;
+    }
     let modsym = PyModule::new(m.py(), "modsym")?;
     modsym.add_function(wrap_pyfunction!(hecke_charpoly, &modsym)?)?;
     modsym.add_function(wrap_pyfunction!(charpoly_exact, &modsym)?)?;
