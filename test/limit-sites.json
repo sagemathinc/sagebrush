@@ -3174,6 +3174,10 @@
   "class": "none",
   "owner": "MATLAB sparse linear algebra"
  },
+ "lib/_matlab_lu.py :: _warn_slow :: \"faster.)\" % (n, n, _sp.MAX_DENSE_SOLVE), SLOW_LU_ID, n) #0": {
+  "class": "none",
+  "owner": "MATLAB sparse linear algebra"
+ },
  "lib/_matlab_lu.py :: solve :: \"\"\"S \\\\ Bm for a square sparse S, n > MAX_DENSE_SOLVE, by its band or its #0": {
   "class": "none",
   "owner": "MATLAB sparse linear algebra"

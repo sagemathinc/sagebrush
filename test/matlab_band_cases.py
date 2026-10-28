@@ -674,11 +674,14 @@ try:
     XW = M._mat(sp.mldivide(A, M._unmat(np.ones((n, 1)))))
     assert len(shown) == before + 1 and XW.tobytes() == XA.tobytes()
     ok("slow LU: the warning changes no result (the same LU, byte for byte, with and without it)")
-    # (the browser's interim, master's route, never reaches it: an unmeasured record, threshold 0)
+    # (the browser's interim, master's route, never reaches it: an unmeasured record, threshold 0.  The arrow here has
+    # its hub at n - 1, the last row and column, so master's LU, which orders no columns, solves it with no fill; the
+    # hub-at-0 arrow above fills in completely and master's LU rightly refuses it)
+    He = make(n, [(j, j, 4.0 + rnd()) for j in range(n)] + [(n - 1, j, rnd()) for j in range(n - 1)] + [(j, n - 1, rnd()) for j in range(n - 1)])
     use(Cap(10 ** 12, domains=("js-heap",)))
     M._warn_once.clear()
     before = len(shown)
-    M._mat(sp.mldivide(A, M._unmat(np.ones((n, 1)))))
+    M._mat(sp.mldivide(He, M._unmat(np.ones((n, 1)))))
     assert shown[before:] == [], shown[before:]
     ok("slow LU: the unmeasured (browser) path, master's route, never warns")
 finally:
