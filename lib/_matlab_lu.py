@@ -1250,7 +1250,8 @@ def solve(S, Bm, what, bands=None, rec=None):
     sparse LU (r6 section 2.4a): the bandwidths found in chunks (their
     workspace reserved first; refused, the band path is unknown, not
     impossible); the band path's need M_band; band at once when it is
-    admitted and cheaper than LU's lower bound c_ord nnz; else the ordering
+    admitted and master's route takes band (the amendment r1 floor) or it is
+    cheaper than LU's lower bound c_ord nnz; else the ordering
     (admitted, or band if band fits), then band if admitted and cheaper than
     the LU estimated from the ordering's fill (q dropped first), else the
     LU, which, refused part way, leaves the ledger as before it and falls
@@ -1265,6 +1266,8 @@ def solve(S, Bm, what, bands=None, rec=None):
     cplx = S.pr.dtype.kind == "c" or Bm.dtype.kind == "c"
     nnz = int(S.jc[n])
     c = _costs()
+    import _matlab_sparse as _sp
+
     # 1. the bandwidths, then the band path's need
     kl = ku = None
     m_band = None
@@ -1275,8 +1278,6 @@ def solve(S, Bm, what, bands=None, rec=None):
     except MemoryError:
         pass
     else:
-        import _matlab_sparse as _sp
-
         kl, ku = bands if bands is not None else _sp.bandwidths(S, E, lambda u: work.charge(u, "discovery"))
         led.release(disc)
         if (kl, ku) == (0, 0):
@@ -1298,8 +1299,9 @@ def solve(S, Bm, what, bands=None, rec=None):
                               "an unknown number of bytes" if lu_need is None else "%d bytes" % lu_need),
                            min(needs) if needs else 0, led.G, led.allowance_for, record=led.rec)
 
-    # 2. band without the ordering, when it beats LU's lower bound
-    if band_ok and t_band <= c["ord"] * nnz:
+    # 2. band without the ordering: where master's route takes band (the
+    # amendment r1 floor: no sunk ordering), or where it beats LU's lower bound
+    if band_ok and (_sp.legacy_band_route(n, kl, ku) or t_band <= c["ord"] * nnz):
         return band()
     # 3. and 4. the ordering, admitted, then the estimate
     stats = {}

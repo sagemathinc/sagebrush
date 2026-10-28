@@ -3305,7 +3305,7 @@
  },
  "lib/_matlab_sparse.py ::  :: MAX_BAND_WORK = 1 << 29 #0": {
   "class": "2+3",
-  "owner": "D0 browser interim (ruling d2): master's full and band caps and route (until every production browser's capacity covers js-heap and js-arraybuffer)"
+  "owner": "D0 browser interim (ruling d2): master's full and band caps and route (until every production browser's capacity covers js-heap and js-arraybuffer); and PR 2's routing floor, legacy_band_route (routing amendment r1): kept past D0 while the floor stands"
  },
  "lib/_matlab_sparse.py ::  :: MAX_DENSE_SOLVE = 4000 #0": {
   "class": "2+3",
@@ -3314,7 +3314,7 @@
  },
  "lib/_matlab_sparse.py ::  :: MAX_FULL = 1 << 28 #0": {
   "class": "2+3",
-  "owner": "D0 browser interim (ruling d2): master's full and band caps and route (until every production browser's capacity covers js-heap and js-arraybuffer)"
+  "owner": "D0 browser interim (ruling d2): master's full and band caps and route (until every production browser's capacity covers js-heap and js-arraybuffer); and PR 2's routing floor, legacy_band_route (routing amendment r1): kept past D0 while the floor stands"
  },
  "lib/_matlab_sparse.py ::  :: MAX_LU_FILL = 1 << 22 #0": {
   "class": "2+3",
@@ -3416,6 +3416,10 @@
  "lib/_matlab_sparse.py :: full_arr :: master's MAX_FULL check and fill, verbatim (ruling d2)\"\"\" #0": {
   "class": "none",
   "owner": "MATLAB sparse linear algebra"
+ },
+ "lib/_matlab_sparse.py :: legacy_band_route :: return (2 * kl + ku + 1) * n <= MAX_FULL and n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra: PR 2's routing floor (routing amendment r1, variant (d)): master's band route, a route only, never a refusal (admission is the ledger's)"
  },
  "lib/_matlab_sparse.py :: mldivide :: big = A.m == A.n and A.n > MAX_DENSE_SOLVE #0": {
   "class": "2+3",
