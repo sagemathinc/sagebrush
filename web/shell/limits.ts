@@ -145,7 +145,7 @@ export function executionLimitsOf(b: BashLimits): Readonly<Record<string, number
     maxSourceDepth: depth,
     maxExecDepth: depth,
     maxSubstitutionDepth: Math.min(depth, 50),
-    maxSourceBytes: b.source_bytes!,
+    maxSourceBytes: b.source_bytes! + WRAPPER_BYTES,
     maxGlobOperations: glob,
     maxBraceExpansionResults: glob,
   });
@@ -166,6 +166,15 @@ export const FIXED_LIMITS = Object.freeze([
 ]);
 export const MAPPED_LIMITS = Object.freeze(Object.keys(executionLimitsOf(validateBash(undefined))));
 
+/**
+ * The host's wrapper around every script it sends (D8 point 1: `{ SCRIPT\n}`, web/shell/host.ts wrap()): its bytes.
+ * The page checks bash.source_bytes on the script itself; just-bash's maxSourceBytes, which checks what it parses
+ * (the wrapped script, and each file `source` or `.` reads), is the key plus these bytes, so a script at the key's
+ * value runs.  A sourced file is therefore checked by just-bash at source_bytes + WRAPPER_BYTES: that stop is its
+ * own, an ordinary outcome (astra2, step 3 r1).
+ */
+export const WRAPPER_BYTES = 4;
+export const wrap = (script: string) => `{ ${script}\n}`;
 /** A limit reached: the outcome row 4 (r3 §4.1), with the words the script ends with. */
 export const limitWords = (key: LimitKey, value: number) => `bash: bash.${key} exceeded (${value})\n`;
 /** The exit status of a typed limit (r3 §4.1). */

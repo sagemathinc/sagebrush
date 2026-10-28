@@ -114,14 +114,20 @@ function utf8(s, budget = Infinity) {
   }
   return { bytes: n, end };
 }
-// A result's stdout and stderr within `allowance` bytes, in that order (stdout's prefix first, then stderr's in
-// what is left), each cut at a scalar boundary; with the whole result's size and what is kept.
-function bounded(stdout, stderr, allowance) {
-  const o = utf8(stdout, allowance), e = utf8(stderr, Math.max(0, allowance - Math.min(o.bytes, allowance)));
+// A result's stdout and stderr within `cap` bytes, in that order (stdout's prefix first, then stderr's in what is
+// left), each cut at a scalar boundary; with the whole result's size and what is kept.  `cap` is the smaller of the
+// run's remaining allowance and just-bash's output bound (the page's fixed backstop): just-bash's collector bounds
+// what it accounts, but a result it stopped still carries that much stdout plus its own diagnostic, so the final
+// message is bounded here too (astra5 B3-A5-2).  `exceeded`: the whole result passed the ALLOWANCE (the page types it);
+// `truncated`: it passed only the backstop, so what is sent is a prefix of an ordinary result (never typed).
+function bounded(stdout, stderr, allowance, backstop) {
+  const cap = Math.min(allowance, backstop);
+  const o = utf8(stdout, cap), e = utf8(stderr, Math.max(0, cap - Math.min(o.bytes, cap)));
   const produced = o.bytes + e.bytes;
-  if (produced <= allowance) return { stdout, stderr, produced, delivered: produced, exceeded: false };
+  if (produced <= cap) return { stdout, stderr, produced, delivered: produced, exceeded: false, truncated: false };
   const so = stdout.slice(0, o.end), se = o.end < stdout.length ? "" : stderr.slice(0, e.end);
-  return { stdout: so, stderr: se, produced, delivered: utf8(so).bytes + utf8(se).bytes, exceeded: true };
+  const exceeded = produced > allowance;
+  return { stdout: so, stderr: se, produced, delivered: utf8(so).bytes + utf8(se).bytes, exceeded, truncated: !exceeded };
 }
 // The widest pipeline anywhere in a parsed script (bash.pipeline_width): an iterative walk of its AST.
 function widestPipeline(ast) {
@@ -286,8 +292,10 @@ export function start(port) {
     }
     if (!m.exec || typeof m.exec.script !== "string" || typeof m.exec.run !== "string") return;
     const { id, run, script, stdin, cwd } = m.exec;
-    if (!config) return hostCall("shell.result", { id, rejected: { message: "the shell isn't configured (no init)", refusal: null }, output: { producedBytes: 0, deliveredBytes: 0, exceeded: false } });
+    if (!config) return hostCall("shell.result", { id, rejected: { message: "the shell isn't configured (no init)", refusal: null }, output: { producedBytes: 0, deliveredBytes: 0, exceeded: false, truncated: false } });
     const allowance = typeof m.exec.allowance === "number" && m.exec.allowance >= 0 ? m.exec.allowance : 0;
+    // (the result's bound besides the allowance: just-bash's own output bound, from the init)
+    const backstop = typeof config.limits.maxOutputSize === "number" && config.limits.maxOutputSize >= 0 ? config.limits.maxOutputSize : 0;
     // (an invocation sets only its own remaining time; every other limit is the init's)
     const t = m.exec.limits?.maxExecutionTimeMs;
     const executionLimits = { ...config.limits, ...(typeof t === "number" && t >= 0 ? { maxExecutionTimeMs: t } : {}) };
@@ -307,14 +315,14 @@ export function start(port) {
       r = await new Bash({ fs: fsFor(inv), cwd: typeof cwd === "string" ? cwd : "/", commands: COMMANDS, executionLimits }).exec(script, { ...(typeof stdin === "string" ? { stdin } : {}), signal: inv.ctl.signal });
     } catch (err) {
       // (a rejection is reported as one, with its refusal only if it is one this invocation threw: D8 point 5)
-      const b = bounded("", String((err && err.message) || err), allowance);
-      hostCall("shell.result", { id, rejected: { message: b.stderr, refusal: inv.thrown.has(err) ? err.refusal : null }, output: { producedBytes: b.produced, deliveredBytes: b.delivered, exceeded: b.exceeded } });
+      const b = bounded("", String((err && err.message) || err), allowance, backstop);
+      hostCall("shell.result", { id, rejected: { message: b.stderr, refusal: inv.thrown.has(err) ? err.refusal : null }, output: { producedBytes: b.produced, deliveredBytes: b.delivered, exceeded: b.exceeded, truncated: b.truncated } });
       return;
     } finally {
       invocations.delete(id);
     }
-    const b = bounded(r.stdout, r.stderr, allowance);
-    hostCall("shell.result", { id, exit: { code: r.exitCode, stdout: b.stdout, stderr: b.stderr }, output: { producedBytes: b.produced, deliveredBytes: b.delivered, exceeded: b.exceeded } });
+    const b = bounded(r.stdout, r.stderr, allowance, backstop);
+    hostCall("shell.result", { id, exit: { code: r.exitCode, stdout: b.stdout, stderr: b.stderr }, output: { producedBytes: b.produced, deliveredBytes: b.delivered, exceeded: b.exceeded, truncated: b.truncated } });
   };
   hostCall("shell.ready", { version: VERSION });
 }

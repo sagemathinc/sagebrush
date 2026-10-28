@@ -45,7 +45,7 @@ import { normPath, parentOf, nameOf, within, TRASH, PathError } from "../workspa
 import { ShellUnavailableError, type Shell, type ShellOutcome, type FsRequest, type FsAnswer } from "./loader";
 export { BashConfigError, BASH_RANGES, OUTPUT_BACKSTOP } from "./limits";
 import { boundedJson, TooLarge } from "./bounded-json";
-import { validateBash, executionLimitsOf, limitWords, LIMIT_EXIT, type BashLimits, type LimitKey } from "./limits";
+import { validateBash, executionLimitsOf, limitWords, wrap, LIMIT_EXIT, OUTPUT_BACKSTOP, type BashLimits, type LimitKey } from "./limits";
 
 /** Who a run belongs to (r3 §2.1).  A grant names its actor, always: "person" (a document of the person's,
  * under its interpreter's grants) or "agent:<name>" (a paired agent); anything else is refused before work. */
@@ -71,7 +71,7 @@ export type OpRecord = { verb: "write" | "create" | "mkdir" | "rename" | "remove
  * committed.
  */
 export type HostOutcome =
-  | { kind: "exit"; code: number; stdout: string; stderr: string; ops: OpRecord[] }
+  | { kind: "exit"; code: number; stdout: string; stderr: string; ops: OpRecord[]; truncated?: true }
   | { kind: "interrupted"; row: 1; ops: OpRecord[] }
   | { kind: "unavailable"; row: 2 | 3 | 5; reason: string; ops: OpRecord[] }
   | { kind: "limit"; row: 4; key: LimitKey; value: number; code: 125; stderr: string; ops: OpRecord[] };
@@ -223,6 +223,15 @@ export class ShellRun {
     const ctl = (this.stopping = new AbortController());
     const grace = new Promise<null>((res) => (this.onGrace = () => res(null)));
     let o: ShellOutcome | null = null;
+    // (script_ms, r2 (astra2 R2): ONE debit, from dispatch through finalization (the queue's last answer and the
+    // pending commits of ordinary()), and the watchdog armed for all of it; debited once, on every path)
+    let watchdog: ReturnType<typeof setTimeout> | null = null, t0: number | null = null;
+    const debit = () => {
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = null;
+      if (t0 !== null) this.used.script_ms += performance.now() - t0;
+      t0 = null;
+    };
     try {
       let shell: Shell | null;
       try {
@@ -238,16 +247,16 @@ export class ShellRun {
         return this.typed();
       }
       // (script_ms's watchdog: the worker ended at the remaining time + 1 s, whatever just-bash does by then)
-      const watchdog = Number.isFinite(remainingMs)
+      watchdog = Number.isFinite(remainingMs)
         ? setTimeout(() => {
             this.watchdogFired++;
             this.limitHit("script_ms");
             this.host.endShell("its script_ms ran out");
           }, Math.ceil(remainingMs) + WATCHDOG_SLACK_MS)
         : null;
-      const t0 = performance.now();
+      t0 = performance.now();
       try {
-        o = await shell.exec(`{ ${script}\n}`, {
+        o = await shell.exec(wrap(script), {
           stdin: opts.stdin, cwd: opts.cwd ?? "/", run: this.id, signal: ctl.signal, onRequest: (r) => this.admit(n, r),
           // (just-bash takes a safe integer or +Infinity.  Rounded up, plus its clock's 1 ms grain: when just-bash's own
           // deadline ends the invocation, the page's clock, which started first, has passed the remaining time too)
@@ -256,29 +265,20 @@ export class ShellRun {
       } catch (err) {
         // (the worker was lost, or ended by Stop's grace or the watchdog: row 2 unless something came first)
         this.latch({ row: 2, reason: err instanceof ShellUnavailableError ? err.reason : why(err) });
-      } finally {
-        if (watchdog) clearTimeout(watchdog);
-        // (script_ms: debited from the page's clock, dispatch to end, on every path; never refunded)
-        this.used.script_ms += performance.now() - t0;
       }
-      if (L.script_ms !== null && this.used.script_ms >= L.script_ms) this.limitHit("script_ms");
+      this.cut = false;
       if (o) this.observe(o, allowance);
-      // (everything admitted has finished before the outcome is decided: the last request's answer may still be in the queue)
-      await this.queue.catch(() => {});
-      // (D8 point 5: the host's facts first; the shell's status never decides a typed outcome)
-      if (this.terminal) return this.typed();
-      if (o && "limit" in o) return this.typed();
-      if (o && "rejected" in o) {
-        const r = o.rejected.refusal;
-        // (provenance: only a refusal this host recorded for this very invocation; never inferred from what came last)
-        if (r === null || this.refusals.get(r) !== n) {
-          this.latch({ row: 5, reason: `internal error: the shell's run failed (${o.rejected.message.slice(0, 200)})` });
-          return this.typed();
-        }
-        return await this.ordinary({ code: 1, stdout: "", stderr: o.rejected.message.endsWith("\n") ? o.rejected.message : o.rejected.message + "\n" });
+      const out = await this.decide(n, o);
+      if (this.cut && out.kind === "exit") out.truncated = true;
+      // (the invocation has ended, its pending commits included: its time debited; reaching the run's time is typed)
+      debit();
+      if (L.script_ms !== null && this.used.script_ms >= L.script_ms) {
+        this.limitHit("script_ms");
+        return this.typed();
       }
-      return await this.ordinary(o!.exit);
+      return out;
     } finally {
+      debit();
       // (the lifecycle ends with the outcome: finalization above ran inside it, Stop and its grace included)
       this.stopping = null;
       this.onGrace = null;
@@ -288,6 +288,25 @@ export class ShellRun {
       this.pending.clear();
       this.obs.clear();
     }
+  }
+
+  // The outcome of a dispatched invocation, its finalization included (D8 point 5's rows, then an ordinary end).
+  private async decide(n: number, o: ShellOutcome | null): Promise<HostOutcome> {
+    // (everything admitted has finished before the outcome is decided: the last request's answer may still be in the queue)
+    await this.queue.catch(() => {});
+    // (D8 point 5: the host's facts first; the shell's status never decides a typed outcome)
+    if (this.terminal) return this.typed();
+    if (o && "limit" in o) return this.typed();
+    if (o && "rejected" in o) {
+      const r = o.rejected.refusal;
+      // (provenance: only a refusal this host recorded for this very invocation; never inferred from what came last)
+      if (r === null || this.refusals.get(r) !== n) {
+        this.latch({ row: 5, reason: `internal error: the shell's run failed (${o.rejected.message.slice(0, 200)})` });
+        return this.typed();
+      }
+      return await this.ordinary({ code: 1, stdout: "", stderr: o.rejected.message.endsWith("\n") ? o.rejected.message : o.rejected.message + "\n" });
+    }
+    return await this.ordinary(o!.exit);
   }
 
   // What the module says of a result (host level 3): a typed limit of its own (only bash.pipeline_width, at its
@@ -300,15 +319,20 @@ export class ShellRun {
       return;
     }
     const c = o.output;
-    // (the length bound only: a UTF-16 unit is 1 to 3 UTF-8 bytes; the exact count is the module's, in the worker)
+    // (the length bound only: a UTF-16 unit is 1 to 3 UTF-8 bytes; the exact count is the module's, in the worker.
+    // The cap is the allowance and the fixed backstop both (r2, astra5 B3-A5-2), and the two flags must agree with it)
     const units = "exit" in o ? o.exit.stdout.length + o.exit.stderr.length : o.rejected.message.length;
-    if (!c || c.deliveredBytes > allowance || c.deliveredBytes < units || c.deliveredBytes > 3 * units || (c.exceeded !== c.producedBytes > allowance)) {
+    const cap = Math.min(allowance, OUTPUT_BACKSTOP);
+    if (!c || c.deliveredBytes > cap || c.deliveredBytes < units || c.deliveredBytes > 3 * units || c.exceeded !== c.producedBytes > allowance || c.truncated !== (!c.exceeded && c.producedBytes > cap)) {
       this.latch({ row: 5, reason: `internal error: the shell's output count doesn't hold (${JSON.stringify(c ?? null)}, ${units} units, allowance ${allowance})` });
       return;
     }
     this.used.output_bytes += c.deliveredBytes;
     if (c.exceeded) this.limitHit("output_bytes");
+    this.cut = c.truncated;
   }
+  // (the last result was an ordinary one cut at the backstop: its outcome says so, never typed)
+  private cut = false;
 
   private typed(): HostOutcome {
     // (pending truncations and creations are dropped, unflushed: rule 7)
@@ -423,13 +447,20 @@ export class ShellRun {
    * The check at use with the charge of one mutating transaction (r8c E2, A1): `ops` by 1 and `written_bytes` by its
    * bytes, at the transaction's own admit (a target's, or a rename's or duplicate's destination), inside the verb's
    * locked section, before anything changes, once; refused (LimitHit) past either key.  A duplicate's bytes are its
-   * source's size, from the source's admit.  Never refunded, whatever the verb does after.
+   * source's size, from the source's admit.  Never refunded, whatever the verb does after.  `snapshot` (cp -r's walk,
+   * r2, daybreak3 BASH3-D3-1): the source must still be the entry the preflight measured, by identity and rev, at its
+   * own admit under the lock; one changed since (grown, replaced) is refused, so no byte beyond the reservation is
+   * copied.
    */
-  private charging(bytes: number | "source"): (c: AdmitCheck) => void {
+  private charging(bytes: number | "source", snapshot?: Entry): (c: AdmitCheck) => void {
     let charged = false, size = 0;
     return (c) => {
       this.check(c);
-      if (c.op === "duplicate" && c.role === "source") size = c.entry?.size ?? 0;
+      if (c.op === "duplicate" && c.role === "source") {
+        if (snapshot && (!c.entry || c.entry.fid !== snapshot.fid || (c.entry.rev ?? 0) !== (snapshot.rev ?? 0) || (c.entry.size ?? 0) !== (snapshot.size ?? 0)))
+          throw refuse("ECONFLICT", c.path, "changed during the copy (it is no longer what was measured)");
+        size = c.entry?.size ?? 0;
+      }
       if (charged || !MUTATES(c) || !(c.role === "target" || c.role === "destination")) return;
       charged = true;
       this.charge(1, bytes === "source" ? size : bytes);
@@ -761,7 +792,7 @@ export class ShellRun {
         await this.ws.mkdir(to(x.path), { admit: this.charging(0) });
         this.record({ verb: "mkdir", path: to(x.path), committed: "local" });
       } else {
-        await this.ws.duplicate(x.path, to(x.path), { admit: this.charging("source") });
+        await this.ws.duplicate(x.path, to(x.path), { admit: this.charging("source", x) });
         this.record({ verb: "duplicate", path: x.path, to: to(x.path), committed: "local" });
       }
     }

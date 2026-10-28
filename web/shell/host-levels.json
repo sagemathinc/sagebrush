@@ -11,6 +11,7 @@
     "shell.result.output.producedBytes": 3,
     "shell.result.output.deliveredBytes": 3,
     "shell.result.output.exceeded": 3,
+    "shell.result.output.truncated": 3,
     "shell.result.limit.key": 3,
     "shell.result.limit.value": 3
   }
