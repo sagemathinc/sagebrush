@@ -1553,7 +1553,7 @@ async function switchFunctions(deps) {
   const src = await (await fetch("./page-src.html")).text();
   const a = src.indexOf("// (DEV's switch, after the journal's activation"), b = src.indexOf("let journalKit = null;", a);
   if (a < 0 || b < 0) throw new Error("the page's switch functions weren't found");
-  const make = new Function("deps", `with (deps) {\n${src.slice(a, b)}\nreturn { reopenJournaled, shownReadOnly, docSyncReload, ownNotebook };\n}`);
+  const make = new Function("deps", `with (deps) {\n${src.slice(a, b)}\nreturn { reopenJournaled, shownReadOnly, docSyncReload, ownNotebook, recreating };\n}`);
   return make(deps);
 }
 const pageNb = (st) => ({ store: st, ro: [], detach() { this.store = null; }, setReadOnly(r) { this.ro.push(r); } });
@@ -1568,7 +1568,7 @@ async function switchReopenFails() {
   const xt = takeover(x, 3000);
   const nb = pageNb(prev);
   let made = null;
-  const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: false, replayEnded: null, docSwitch: null,
+  const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: false, replayEnded: null, docSwitch: null, docSyncNeedsReload: false,
     storeFor: async (i) => (made = store(w, hdb, i)),
     open: async (s) => { nb.detach(); await s.load(); throw new Error("the test's failed reopen"); } };
   const f = await switchFunctions(deps);
@@ -1592,7 +1592,7 @@ async function switchReopenOk() {
   await plain.load();
   const nb = pageNb(plain);
   let made = null, asked = 0;
-  const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: false, replayEnded: null, docSwitch: null,
+  const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: false, replayEnded: null, docSwitch: null, docSyncNeedsReload: false,
     storeFor: async (i) => { asked++; return (made = store(w, hdb, i)); },
     open: async (s) => { nb.detach(); await s.load(); nb.store = s; } };
   const f = await switchFunctions(deps);
@@ -1626,7 +1626,7 @@ async function switchReopenNoStore() {
     const plain = new W.IdbStore(w.main, id);
     await plain.load();
     const nb = pageNb(plain);
-    const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: false, replayEnded: null, docSwitch: null, replaying: false, replayEnded: null, docSwitch: null,
+    const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: false, replayEnded: null, docSwitch: null, docSyncNeedsReload: false, replaying: false, replayEnded: null, docSwitch: null, docSyncNeedsReload: false,
       storeFor: async (i) => { if (how === "throws") throw new Error("the test's storage unavailable"); return new W.IdbStore(w.main, i); },
       open: async (s) => { nb.detach(); await s.load(); nb.store = s; } };
     const f = await switchFunctions(deps);
@@ -1641,7 +1641,7 @@ async function switchReloadState() {
   // the switch's `reload`: the notebook and the page's controls for it read-only, and said
   const els = { "#ttrepro": { disabled: false }, "#ttclear": { disabled: false }, "#ttrevert": { disabled: false } };
   const nb = pageNb(null);
-  const deps = { nb, writerBar: { hidden: true, textContent: "" }, writerBarHeight() {}, writerBarTimer: null, nbName: { readOnly: false }, modeEl: { disabled: false }, $: (q) => els[q], DOC_SYNC_RELOAD: W.DOC_SYNC_RELOAD, current: {}, ws: null, storeFor() {}, open() {}, replaying: false, replayEnded: null, docSwitch: null };
+  const deps = { nb, writerBar: { hidden: true, textContent: "" }, writerBarHeight() {}, writerBarTimer: null, nbName: { readOnly: false }, modeEl: { disabled: false }, $: (q) => els[q], DOC_SYNC_RELOAD: W.DOC_SYNC_RELOAD, current: {}, ws: null, storeFor() {}, open() {}, replaying: false, replayEnded: null, docSwitch: null, docSyncNeedsReload: false };
   const f = await switchFunctions(deps);
   f.docSyncReload();
   check(J(nb.ro) === J([true]) && !deps.writerBar.hidden && deps.writerBar.textContent === W.DOC_SYNC_RELOAD && deps.nbName.readOnly && deps.modeEl.disabled && Object.values(els).every((e) => e.disabled), "switch: reload: the notebook, its name, language, reproducibility and TimeTravel's changes read-only; said in the bar");
@@ -1656,7 +1656,7 @@ async function switchReplayOwns() {
   const { id, st } = await loadNew(w, hdb, [["a", "A"]]);
   let endReplay;
   const nb = pageNb(st);
-  const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: true, replayEnded: new Promise((r) => { endReplay = r; }), docSwitch: null, storeFor: async () => st, open: async () => {} };
+  const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: true, replayEnded: new Promise((r) => { endReplay = r; }), docSwitch: null, docSyncNeedsReload: false, statusEl: { textContent: "" }, journal: { session: null }, DOC_SYNC_RELOAD: W.DOC_SYNC_RELOAD, storeFor: async () => st, open: async () => {} };
   const f = await switchFunctions(deps);
   const ro1 = f.shownReadOnly();
   const log = [];
@@ -1670,15 +1670,25 @@ async function switchReplayOwns() {
   const out = await switched;
   check(ro1 === true && during === "[]" && out === "on" && J(log) === J(["ro:true", "flush", "activate", "reopen", "setDocs", "ro:false"]) && deps.docSwitch === null && DOC.on === true,
     "switch: a session being recreated: shownReadOnly read-only; the switch waits for it to end (nothing done meanwhile), then on, and lets the notebook go: " + J({ ro1, during, out, log }));
-  // (the switch owning the notebook: a recreation waits (as the page's replay and recompute do: `while (docSwitch)`))
+  // (the switch owning the notebook: the page's recreating (its replay's and recompute's) waits; released, it runs,
+  // read-only meanwhile, and sets the read-only back from what holds)
   const release = await f.ownNotebook();
   let replayStarted = false;
-  const replayWaits = (async () => { while (deps.docSwitch) await deps.docSwitch; replayStarted = true; })();
+  const ro0 = nb.ro.length;
+  const replayWaits = f.recreating(async () => { replayStarted = deps.replaying && nb.ro.at(-1) === true; return "ran"; });
   await sleep(50);
-  const waited = !replayStarted;
+  const waited = !replayStarted && nb.ro.length === ro0;
   release();
-  await replayWaits;
-  check(waited && replayStarted && deps.docSwitch === null, "switch: while the switch owns the notebook, a recreation waits; released, it goes on");
+  const ran = await replayWaits;
+  check(waited && replayStarted && ran === "ran" && deps.docSwitch === null && deps.replaying === false && nb.ro.at(-1) === false, "switch: while the switch owns the notebook, the page's recreating waits; released, it runs (read-only meanwhile) and sets the read-only back: " + J({ waited, replayStarted, ran, ro: nb.ro.slice(ro0) }));
+  // (a recreation that ends with no store attached: the page's recreating sets the read-only back from shownReadOnly:
+  // read-only, nowhere to save)
+  const keep = nb.store;
+  nb.store = null;
+  const ranNoStore = await f.recreating(async () => "ran");
+  const roNoStore = nb.ro.at(-1);
+  nb.store = keep;
+  check(ranNoStore === "ran" && roNoStore === true, "switch: a recreation that ends with no store attached leaves the notebook read-only");
   // (the switch's restore while a recreation still runs (ownership bypassed): read-only kept)
   deps.replaying = true;
   check(f.shownReadOnly() === true, "switch: shownReadOnly with a store, no other tab and no quarantine, but a recreation running: read-only");
@@ -1686,6 +1696,51 @@ async function switchReplayOwns() {
   DOC.on = false;
   await close(st, w);
   hdb.close();
+}
+
+// (f() true within ms)
+const until = async (f, ms) => { for (const end = Date.now() + ms; ; await sleep(20)) { if (await f()) return true; if (Date.now() > end) return false; } };
+async function switchReloadQueued() {
+  // astra's DEVSW-2-R3: a recreation queued behind the switch while the switch ends in `reload` doesn't run, and can't
+  // unlock the notebook; the page's own ownNotebook, reopenJournaled, docSyncReload, shownReadOnly and recreating, with
+  // enableDocSync, over real stores.  Two ways to reload: (a) the activation done, the reopen failing (no store left
+  // attached); (b) the activation begun then refused (the old store kept attached)
+  for (const how of ["reopen fails", "activation refused after it began"]) {
+    const { w, hdb } = await active();
+    const { id, st: seed } = await loadNew(w, hdb, [["a", "A"]]);
+    await close(seed);
+    const plain = new W.IdbStore(w.main, id);
+    await plain.load();
+    const nb = pageNb(plain);
+    const els = { "#ttrepro": { disabled: false }, "#ttclear": { disabled: false }, "#ttrevert": { disabled: false } };
+    let gate, made = null;
+    const held = new Promise((r) => { gate = r; });
+    const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: false, replayEnded: null, docSwitch: null, docSyncNeedsReload: false,
+      statusEl: { textContent: "" }, journal: { session: null }, DOC_SYNC_RELOAD: W.DOC_SYNC_RELOAD, writerBar: { hidden: true, textContent: "" }, writerBarHeight() {}, writerBarTimer: null, nbName: { readOnly: false }, modeEl: { disabled: false }, $: (q) => els[q],
+      storeFor: async (i) => (made = store(w, hdb, i)),
+      open: async (s2) => { nb.detach(); await s2.load(); throw new Error("the test's failed reopen"); } };
+    const f = await switchFunctions(deps);
+    const DOC = { on: false, saved: null };
+    const switched = W.enableDocSync({ loadHistory: async () => ({ DOC_SYNC: DOC }), makeDocs: () => ({ kick() {} }), makeChannel: () => null, register: W.registerJournalWriter, own: f.ownNotebook, setReadOnly: (r) => nb.setReadOnly(r), readOnlyNow: f.shownReadOnly, flush() {}, saved: async () => {},
+      activate: async () => { await held; return how === "reopen fails"; }, begun: async () => true, reopen: f.reopenJournaled, setDocs() {}, needReload: f.docSyncReload, warn() {} });
+    // (the switch owns the notebook and waits in its activation; a recreation is asked for meanwhile)
+    check(await until(() => deps.docSwitch !== null, 3000), `switch reload (${how}): the switch owns the notebook`);
+    let ran = false;
+    const queued = f.recreating(async () => { ran = true; return "ran"; });
+    await sleep(50);
+    gate();
+    const [out, rec] = await Promise.all([switched, queued]);
+    const attached = how === "reopen fails" ? nb.store === null : nb.store === plain;
+    check(out === "reload" && rec === null && !ran && deps.replaying === false && nb.ro.at(-1) === true && f.shownReadOnly() === true && deps.docSyncNeedsReload === true && attached && deps.statusEl.textContent === W.DOC_SYNC_RELOAD && deps.writerBar.textContent === W.DOC_SYNC_RELOAD && deps.nbName.readOnly && deps.docSwitch === null,
+      `switch reload (${how}): the queued recreation doesn't run; the notebook stays read-only (${how === "reopen fails" ? "no store attached" : "the old store attached"}), reload said: ` + J({ out, rec, ran, ro: nb.ro, attached, status: deps.statusEl.textContent.slice(0, 40) }));
+    // (and any recreation asked for later doesn't run either, nor does it unlock it)
+    let ran2 = false;
+    const rec2 = await f.recreating(async () => { ran2 = true; return "ran"; });
+    check(rec2 === null && !ran2 && nb.ro.at(-1) === true && f.shownReadOnly() === true, `switch reload (${how}): a later recreation doesn't run either; still read-only`);
+    if (made) await close(made);
+    await close(w);
+    hdb.close();
+  }
 }
 
 async function switchActivationFails() {
@@ -1715,7 +1770,7 @@ async function switchActivationFails() {
   w.close();
 }
 
-const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns];
+const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
