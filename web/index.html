@@ -613,6 +613,9 @@ class RemoteWorker {
 // console has its own, a scratchpad apart from every notebook.  The notebook
 // is web/notebook.
 let db = null, replaying = false;
+// (a session's recreation and DEV's switch own the notebook one at a time: replayEnded resolves when the running
+// recreation ends, docSwitch while the switch holds it (ownNotebook))
+let replayEnded = null, docSwitch = null;
 const MAX_KERNELS = 4;
 const kernels = new Map(); // notebook id -> {kernel, journal, used, started}
 let kernel = null, journal = null; // the current notebook's
@@ -1036,6 +1039,10 @@ async function replayResumed({ plan, version }) {
   }
   if (!plan.session || !plan.runs) { statusEl.textContent = `Version ${version}: no code had run then.`; return; }
   if (!kernel.ready) await new Promise((r) => { const off = kernel.on("ready", () => { off(); r(); }); });
+  // (after DEV's switch, if it holds the notebook: checked with no await before replaying is set)
+  while (docSwitch) await docSwitch;
+  let endReplay;
+  replayEnded = new Promise((r) => { endReplay = r; });
   replaying = true;
   nb.setReadOnly(true);
   let report;
@@ -1045,6 +1052,7 @@ async function replayResumed({ plan, version }) {
     });
   } finally {
     replaying = false;
+    endReplay();
     nb.setReadOnly(!!ws?.quarantined || !!nb.store?.viewOnly);
     if (journal.session) journal.session.replay = false;
   }
@@ -1121,6 +1129,10 @@ async function recompute(plan, what) {
   const ready = new Promise((r) => { const off = kernel.on("ready", () => { off(); r(); }); });
   kernel.restart();
   await ready;
+  // (after DEV's switch, if it holds the notebook: checked with no await before replaying is set)
+  while (docSwitch) await docSwitch;
+  let endReplay;
+  replayEnded = new Promise((r) => { endReplay = r; });
   replaying = true;
   nb.setReadOnly(true);
   let report, missing = [];
@@ -1130,6 +1142,7 @@ async function recompute(plan, what) {
     report = await nb.runAll();
   } finally {
     replaying = false;
+    endReplay();
     nb.setReadOnly(!!ws?.quarantined || !!nb.store?.viewOnly);
     if (journal.session) journal.session.replay = false;
   }
@@ -2498,6 +2511,7 @@ const docSyncReady = (async () => {
     makeChannel: () => (typeof BroadcastChannel === "function" ? new BroadcastChannel(docSyncChannel(w.ws.name)) : null),
     register: registerJournalWriter,
     setReadOnly: (ro) => nb.setReadOnly(ro),
+    own: ownNotebook,
     readOnlyNow: shownReadOnly,
     flush: () => nb.flush(),
     saved: () => nb.saved(),
@@ -2586,9 +2600,18 @@ async function reopenJournaled() {
   }
 }
 // (what holds for the notebook shown, the switch's read-only set back from it: read-only with no store attached (nowhere
-// to save), one another tab writes, or a quarantined workspace)
+// to save), one another tab writes, a quarantined workspace, or a session being recreated)
 function shownReadOnly() {
-  return !nb.store || !!nb.store.viewOnly || !!ws?.quarantined;
+  return !nb.store || !!nb.store.viewOnly || !!ws?.quarantined || replaying;
+}
+// (the notebook owned by DEV's switch from its read-only to its last restore (astra's DEVSW-2-R2): it waits for a
+// session's recreation to end, and a recreation asked meanwhile waits for the switch (before it sets `replaying`);
+// returns the release)
+async function ownNotebook() {
+  while (replaying || docSwitch) await (replaying ? replayEnded : docSwitch);
+  let end;
+  docSwitch = new Promise((r) => { end = r; });
+  return () => { docSwitch = null; end(); };
 }
 // (the switch's `reload`: the journal's activation began and this page couldn't go on with it: the notebook and the
 // page's controls for it read-only, and said, until a reload)

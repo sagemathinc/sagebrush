@@ -458,10 +458,12 @@ try {
 
   progress("case 13");
   // 13. (astra's DEVSW-1) One device, two pages of one browser context (one IndexedDB, one set of Web Locks and
-  // channels): a board page that holds the account connection and the notebook page, a follower, that turns the switch
-  // on.  The board's page carries the notebook: what the notebook page saves reaches B (no kick of its own: the
-  // switch's DOC_SYNC.saved, on the channel), B's edit reaches the notebook page, the board never closed; then the
-  // board page closes and the notebook page's own connection sends what was saved meanwhile
+  // channels): a board page whose DocSync (followDocSync) is on this harness's minimal socket, and the notebook page,
+  // a follower, that turns the switch on.  The board's page carries the notebook: what the notebook page saves reaches
+  // B (no kick of its own: the switch's DOC_SYNC.saved, on the channel), B's edit reaches the notebook page, the board
+  // never closed; then the board page closes and the harness connects the notebook page's DocSync.  The transport
+  // only: the real owners, their sender lock and the automatic takeover are sync-client's s5DocsOwners (astra's
+  // DEVSW-1-R2)
   const { browserContextId: cctx } = await send("Target.createBrowserContext");
   async function pageIn(label) {
     const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId: cctx });

@@ -77,14 +77,15 @@ for (const [name, s] of [["the notebook page", page], ["the board page", board]]
   check([...s.matchAll(/docSyncOrigin\(([^)]*)\)/g)].every((m) => m[1] === "location.origin") && /docSyncOrigin\(location\.origin\)/.test(s), `${name}'s origin checks are of location.origin alone`);
 }
 check(J(using(/DOC_SYNC\.on = true/)) === J(["workspace/doc-sync-switch.ts"]) && J(using(/enableDocSync\(/)) === J(["index.html", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return false;\s*return \(await enableDocSync\(\{/.test(page), "only the switch's enableDocSync turns DOC_SYNC on, called only by the notebook page, right after the gate");
-check(["    readOnlyNow: shownReadOnly,", "    reopen: reopenJournaled,", "    needReload: docSyncReload,", "    begun: () => w.journalBegun(),", "    setDocs: (docs) => owner.setDocs(docs),"].every((l) => page.split(l).length === 2), "the notebook page's switch uses its own read-only rule, reopen and reload (tested in test-journal.mjs), and the workspace's journalBegun");
+check(page.split("  while (docSwitch) await docSwitch;\n  let endReplay;\n  replayEnded = new Promise((r) => { endReplay = r; });\n  replaying = true;").length === 3 && page.split("    replaying = false;\n    endReplay();").length === 3, "the page's two session recreations (replay, recompute) wait for the switch before they own the notebook, and say when they end (astra's DEVSW-2-R2)");
+check(["    own: ownNotebook,", "    readOnlyNow: shownReadOnly,", "    reopen: reopenJournaled,", "    needReload: docSyncReload,", "    begun: () => w.journalBegun(),", "    setDocs: (docs) => owner.setDocs(docs),"].every((l) => page.split(l).length === 2), "the notebook page's switch uses its own read-only rule, reopen and reload (tested in test-journal.mjs), and the workspace's journalBegun");
 check(J(using(/activateJournal\(\)/).filter((p) => p !== "workspace/api.ts")) === J(["index.html"]) && /if \(!allowed\) return false;[\s\S]*activate: \(\) => w\.activateJournal\(\)/.test(page), "only the page's switch activates the journal, after the gate");
-check(J(using(/followDocSync\(/)) === J(["board/page.ts", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return;\s*await followDocSync\(\{/.test(board) && /if \(!NO_SYNC && docSyncOrigin\(location\.origin\)\) void docSyncHere\(ws\)/.test(board), "the board page carries notebooks (followDocSync) only after the gate, on DEV's origin (astra's DEVSW-1)");
+check(J(using(/followDocSync(<[^>]*>)?\(/)) === J(["board/page.ts", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return;\s*await followDocSync\(\{/.test(board) && /if \(!NO_SYNC && docSyncOrigin\(location\.origin\)\) void docSyncHere\(ws\)/.test(board), "the board page carries notebooks (followDocSync) only after the gate, on DEV's origin (astra's DEVSW-1)");
 
 // ---- enableDocSync (astra's DEVSW-2, daybreak3): every failure, injected; what it returns, DOC_SYNC, the owner, the
 // notebook's read-only, the order of the lasting step
 function enableRig(over = {}) {
-  const t = { log: [], ro: [], docs: [], kicks: [], posted: [], DOC: { on: false, saved: null }, begun: false, roNow: false, reload: 0, onAtReopen: null, warned: 0 };
+  const t = { log: [], ro: [], docs: [], kicks: [], posted: [], DOC: { on: false, saved: null }, begun: false, roNow: false, reload: 0, onAtReopen: null, warned: 0, released: 0 };
   const ch = { posted: t.posted, onmessage: null, postMessage(m) { this.posted.push(m); } };
   t.ch = ch;
   const d = {
@@ -92,7 +93,8 @@ function enableRig(over = {}) {
     makeDocs: () => { t.log.push("docs"); return { kick: (id) => t.kicks.push(id) }; },
     makeChannel: () => { t.log.push("channel"); return ch; },
     register: (k) => t.log.push("register:" + k),
-    setReadOnly: (ro) => t.ro.push(ro),
+    own: async () => { t.log.push("own"); return () => { t.log.push("release"); t.released++; }; },
+    setReadOnly: (ro) => { t.ro.push(ro); t.log.push("ro:" + ro); },
     readOnlyNow: () => t.roNow,
     flush: () => t.log.push("flush"),
     saved: async () => { t.log.push("saved"); },
@@ -113,7 +115,7 @@ const lastRo = (t) => t.ro.at(-1);
   const out = await run();
   check(out === "on" && t.DOC.on === true && typeof t.DOC.saved === "function" && t.docs.length === 1 && t.onAtReopen === true && J(t.ro) === J([true, false]) && t.reload === 0 && J(t.posted) === J([{ on: true }]),
     "enable: all well: on, DOC_SYNC on (before the reopen), one DocSync to the owner, the other tabs told, read-only only meanwhile: " + J({ out, ro: t.ro, posted: t.posted }));
-  check(J(t.log) === J(["history", "docs", "channel", "register:notebooks", "register:boards", "flush", "saved", "activate", "reopen", "setDocs"]), "enable: the order: what can fail and changes nothing, then the saves, the activation, the reopen, the owner: " + J(t.log));
+  check(J(t.log) === J(["history", "docs", "channel", "register:notebooks", "register:boards", "own", "ro:true", "flush", "saved", "activate", "reopen", "setDocs", "ro:false", "release"]) && t.released === 1, "enable: the order: what can fail and changes nothing, then the notebook owned, read-only, its saves, the activation, the reopen, the owner; restored, then released: " + J(t.log));
   t.DOC.saved("n1");
   t.ch.onmessage({ data: { kick: "n2" } });
   t.ch.onmessage({ data: { on: true } });
@@ -142,6 +144,7 @@ const failures = [
   ["the reopen fails (said false: the store let go)", (t) => ({ reopen: async () => { t.log.push("reopen"); return false; } }), "reload", true],
   ["the reopen throws", (t) => ({ reopen: async () => { t.log.push("reopen"); throw new Error("injected: reopen"); } }), "reload", true],
   ["the owner's setDocs throws", (t) => ({ setDocs: () => { throw new Error("injected: setDocs"); } }), "reload", true],
+  ["the notebook can't be owned", (t) => ({ own: async () => { throw new Error("injected: own"); } }), "off", false],
 ];
 for (const [what, over, want, asked] of failures) {
   for (const roNow of [false, true]) {
@@ -150,11 +153,27 @@ for (const [what, over, want, asked] of failures) {
     let out, threw = null;
     try { out = await run(); } catch (e) { threw = e; }
     const pre = want === "off" && !asked && !t.log.includes("flush");
+    const owned = t.log.includes("own");
+    // (owned: restored, then released, last; never owned: nothing restored, nothing released)
+    const tail = owned ? J(t.log.slice(-2)) === J(["ro:" + (want === "reload" ? true : roNow), "release"]) && t.released === 1 : t.released === 0 && t.ro.length === 0;
     const ro = want === "reload" ? true : roNow;
     const ok = !threw && out === want && t.log.includes("activate") === asked && t.DOC.on === false && (want !== "reload" || t.DOC.saved === null) && t.docs.length === 0 &&
-      (pre ? t.ro.length === 0 : t.ro[0] === true && lastRo(t) === ro) && t.reload === (want === "reload" ? 1 : 0) && !t.posted.some((m) => m.on);
+      (pre ? t.ro.length === 0 : t.ro[0] === true && lastRo(t) === ro) && t.reload === (want === "reload" ? 1 : 0) && !t.posted.some((m) => m.on) && tail;
     check(ok, `enable: ${what} (read-only for its own reason: ${roNow}): ${want}${asked ? "" : ", the activation never asked"}, DOC_SYNC off, no DocSync to the owner, ${want === "reload" ? "read-only and said (reload)" : "the read-only set back"}: ` + J({ out, threw: threw && String(threw), log: t.log, ro: t.ro, on: t.DOC.on, docs: t.docs.length, reload: t.reload }));
   }
+}
+{
+  // (astra's DEVSW-2-R2: while a session is being recreated the switch waits to own the notebook: nothing read-only,
+  // flushed or activated until it ends; then it goes on)
+  let ended;
+  const replay = new Promise((r) => { ended = r; });
+  const { t, run } = rig((t) => ({ own: async () => { t.log.push("own?"); await replay; t.log.push("own"); return () => { t.log.push("release"); t.released++; }; } }));
+  const p = run();
+  await new Promise((r) => setTimeout(r, 30));
+  const during = J(t.log);
+  ended();
+  const out = await p;
+  check(during === J(["history", "docs", "channel", "register:notebooks", "register:boards", "own?"]) && t.ro.length === 2 && out === "on" && t.log.at(-1) === "release", "enable: while the notebook is owned elsewhere (a session recreated), nothing read-only, flushed or activated; then on: " + during);
 }
 check(typeof DOC_SYNC_RELOAD === "string" && /reload this page/.test(DOC_SYNC_RELOAD) && docSyncChannel("ws1") === "sagebrush-docsync:ws1", "enable: the reload text, and the channel's name");
 
