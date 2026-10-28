@@ -18,7 +18,7 @@ import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, leakRowOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, ciFailing, waiverErrors, widenedPick, withWaiver, xkRowOutcome } from "./interrupt-classify.mjs";
-import { killTracked, killTree, onStop, procStatus, procTable, selectTarget, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
+import { killTracked, killTree, onStop, procStatus, procTable, promptSample, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 // (SB_BASELINE: another baseline, for checking the harness: its tests pin their fake rows there, never in the real one)
 const BASELINE = JSON.parse(readFileSync(process.env.SB_BASELINE ?? new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 // William's waivers of the Stop bound (only active records; a malformed registry fails the run, below)
@@ -151,15 +151,8 @@ if (args.includes("--print-driver")) {
   process.exit(0);
 }
 
-// the launcher under `script` (the prompt host): selectTarget's unique nearest node below script, recorded in every
-// prompt sample with its pid, comm, depth and start; none, or a tie: pid null with why and the tree.  A tie is a
-// sample error (invalid evidence); none is a missing target (exiting), never the wrapper in its place, whose memory
-// and threads aren't the target's
-function promptSample(pid) {
-  const target = selectTarget(pid);
-  const read = target.pid == null && target.ambiguous ? { sample_error: target.why } : procStatus(target.pid, target.start ?? null);
-  return { target, ...read };
-}
+// (the prompt host's sample is promptSample's (interrupt-procs.mjs): the launcher below `script`, never the wrapper in
+// its place, whose memory and threads aren't the target's)
 // (every session is in interrupt-procs.mjs's one registry: killed, tree and all, if the harness is stopped)
 
 // ---- running one session (cli or prompt): delays[i] (ms after ENTER i, or null for none)

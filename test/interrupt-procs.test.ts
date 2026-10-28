@@ -8,6 +8,7 @@ import { join } from "node:path";
 // launcher running (VM1, Oct 24).  An idle fake stands in for the launcher: a shell under
 // `script` that ignores TERM, HUP and INT.
 const mod = join(__dirname, "..", "..", "web", "interrupt-procs.mjs");
+const cmod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 const hasScript = spawnSync("sh", ["-c", "command -v script"]).status === 0;
 
 // Each run tags its fakes (a comment in the shell's command), and kills every process carrying the
@@ -22,7 +23,8 @@ function run(body: string): any {
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 const TAG = "sb-procs-" + "test-" + ${JSON.stringify(id)};
-import { killTree, procStatus, procTable, selectTarget, sessionTree, survivors } from ${JSON.stringify(mod)};
+import { killTree, procSnapshot, procStatus, procTable, promptSample, selectTarget, sessionTree, survivors } from ${JSON.stringify(mod)};
+import { leakCheck } from ${JSON.stringify(cmod)};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ARM = mkdtempSync(tmpdir() + "/sb-procs-arm-");
 // the fake: a shell that ignores TERM, HUP and INT, and only then writes its pid to ARM/armed
@@ -138,7 +140,8 @@ test("the prompt host's target: the unique nearest exact node below script, by c
     const nearer = new Map([[100, row(1, 100, "script")], [101, row(100, 100, "bash")], [104, row(101, 100, "node")], [102, row(100, 100, "node")]]);
     const tie = new Map([[100, row(1, 100, "script")], [101, row(100, 100, "bash")], [102, row(101, 100, "node")], [103, row(101, 100, "node")]]);
     const alone = new Map([[100, row(1, 100, "node")]]);
-    return { deep: selectTarget(100, deep), none: selectTarget(100, none), nearer: selectTarget(100, nearer), tie: selectTarget(100, tie), alone: selectTarget(100, alone) };`);
+    const s = (t) => selectTarget(100, { t, errors: [] });
+    return { deep: s(deep), none: s(none), nearer: s(nearer), tie: s(tie), alone: s(alone) };`);
   assert.deepEqual(r.deep, { pid: 102, comm: "node", depth: 2, start: "9" }, "two levels down; not its own child node, a group member not below script, one outside, or a nodejs");
   assert.equal(r.none.pid, null);
   assert.match(r.none.why, /no node process below 100/);
@@ -166,3 +169,46 @@ test("a target read with another start time than it was selected with is a sampl
   assert.match(r.changed.sample_error, /start time changed/);
   assert.deepEqual(r.none, { exiting: true, why: "no target process" });
 });
+
+// daybreak2's r3 review: only a genuine disappearance is "no target"; a table that couldn't be read whole, or a
+// selected target without a decimal start time, is a sample error, so the row's leak check is INVALID even when it
+// is the final sample; a whole table with no node stays exiting, droppable only as the final sample
+test("the prompt sample fails closed: an unreadable table or a bad start is a sample error (INVALID); a whole table with no node is exiting", () => {
+  const r = run(`
+    const stat = (pid, ppid, comm, start = "7", state = "S") => pid + " (" + comm + ") " + state + " " + ppid + " " + ppid + " " + Array(16).fill("0").join(" ") + " " + start + " 0";
+    const lines = { 100: stat(100, 1, "script"), 101: stat(101, 100, "bash"), 102: stat(102, 101, "node", "9") };
+    const err = (code) => Object.assign(new Error(code), { code });
+    const reader = (over) => (p) => { if (p in over) { if (typeof over[p] === "string") return over[p]; throw err(over[p]); } if (p in lines) return lines[p]; throw err("ENOENT"); };
+    const list = () => ["100", "101", "102", "103", "self"];
+    const whole = procSnapshot(reader({}), list);
+    const eacces = procSnapshot(reader({ 102: "EACCES" }), list);
+    const malformed = procSnapshot(reader({ 102: "102 (node) S 101" }), list);
+    const raced = procSnapshot(reader({ 103: "ESRCH" }), list);
+    const noNode = procSnapshot(reader({ 102: "ENOENT" }), list);
+    const live = (i) => ({ i, rss_kb: 50000, threads: 7 });
+    const final = (x) => leakCheck([1, 2, 3, 4].map(live).concat([{ i: 5, ...x }]), 20, "rss");
+    const early = (x) => leakCheck([live(1), { i: 2, ...x }, live(3), live(4), live(5)], 20, "rss");
+    const badStart = (start) => promptSample(100, { t: new Map([[100, { ppid: 1, pgid: 100, start: "7", comm: "script" }], [102, { ppid: 100, pgid: 100, start, comm: "node" }]]), errors: [] });
+    return {
+      whole: selectTarget(100, whole), eaccesErrors: eacces.errors, malformedErrors: malformed.errors, racedErrors: raced.errors,
+      eacces: promptSample(100, eacces), malformed: promptSample(100, malformed), noNode: promptSample(100, noNode),
+      eaccesFinal: final(promptSample(100, eacces)), noNodeFinal: final(promptSample(100, noNode)), noNodeEarly: early(promptSample(100, noNode)),
+      missingStart: badStart(undefined), malformedStart: badStart("9x"), missingFinal: final(badStart(undefined)),
+    };`);
+  assert.deepEqual(r.whole, { pid: 102, comm: "node", depth: 2, start: "9" }, "a whole table: the node two levels down");
+  assert.deepEqual(r.racedErrors, [], "a process gone between the listing and its read is a race, not an error");
+  assert.deepEqual(r.eaccesErrors, ["102: EACCES"]);
+  assert.deepEqual(r.malformedErrors, ["102: a malformed stat line"]);
+  assert.match(r.eacces.sample_error, /couldn't be read whole: 102: EACCES/);
+  assert.equal(r.eacces.exiting, undefined, "an unreadable node is never no target");
+  assert.match(r.malformed.sample_error, /couldn't be read whole: 102: a malformed stat line/);
+  assert.equal(r.eaccesFinal.invalid, true, "INVALID even as the final sample");
+  assert.deepEqual({ exiting: r.noNode.exiting, why: r.noNode.why }, { exiting: true, why: "no target process" });
+  assert.equal(r.noNodeFinal.ok, true, "a whole table with no node, as the final sample: dropped");
+  assert.equal(r.noNodeFinal.last_exiting, true);
+  assert.equal(r.noNodeEarly.invalid, true, "no node before the last: INVALID");
+  assert.match(r.missingStart.sample_error, /no valid start time/);
+  assert.match(r.malformedStart.sample_error, /no valid start time/);
+  assert.equal(r.missingFinal.invalid, true);
+});
+

@@ -2,8 +2,8 @@
 // process a session started, killing all of them, and checking that none survived.  Linux /proc.
 import { readdirSync, readFileSync } from "node:fs";
 
-// the live (non-zombie) processes: pid -> { ppid, pgid, start, comm } (start: the kernel's start time,
-// so a remembered pid is never confused with a reused one; comm: the exact name in the stat line)
+// the live (non-zombie) processes: pid -> { ppid, pgid, start } (start: the kernel's start time,
+// so a remembered pid is never confused with a reused one)
 export function procTable() {
   const t = new Map();
   for (const p of readdirSync("/proc")) {
@@ -11,7 +11,7 @@ export function procTable() {
     try {
       const f = readFileSync(`/proc/${p}/stat`, "utf8");
       const fields = f.slice(f.lastIndexOf(")") + 2).split(" ");
-      if (fields[0] !== "Z") t.set(Number(p), { ppid: Number(fields[1]), pgid: Number(fields[2]), start: fields[19], comm: f.slice(f.indexOf("(") + 1, f.lastIndexOf(")")) });
+      if (fields[0] !== "Z") t.set(Number(p), { ppid: Number(fields[1]), pgid: Number(fields[2]), start: fields[19] });
     } catch {}
   }
   return t;
@@ -20,11 +20,44 @@ export function procTable() {
 // child rather than the child itself.  On CI, master's E2/prompt leak check, looking only at script's children, fell
 // back to sampling `script` itself (2.1 MB, 1 thread; ci 40623842094, 40630220192, 40654466507, 40657095581), and
 // #267's first head, without that fallback, found no target at all (ci 40663773904).
-// From ONE table snapshot, following current parent links down from root only (a remembered orphan or a member of
-// root's group that isn't below it is cleanup evidence, never a candidate): the unique nearest process named exactly
-// `name`, as { pid, comm, depth, start }.  None, or a tie at the nearest depth: { pid: null, why, tree }, never an
-// arbitrary pid and never root; tree: root's current descendants with their depth (at most 16), the evidence.
-export function selectTarget(root, t = procTable(), name = "node") {
+// One validated snapshot for the selection: { t: pid -> { ppid, pgid, start, comm }, errors }.  A process gone
+// between the listing and its read (ENOENT, ESRCH) is a race and left out; any other read failure, or a malformed
+// stat line, is an error, so a node that couldn't be read is never taken for no node (daybreak2's r3 review).
+// (read, list: the /proc readers, replaced in the tests)
+export function procSnapshot(read = (p) => readFileSync(`/proc/${p}/stat`, "utf8"), list = () => readdirSync("/proc")) {
+  const t = new Map(), errors = [];
+  let names;
+  try {
+    names = list();
+  } catch (e) {
+    return { t, errors: [`/proc: ${e?.code ?? e}`] };
+  }
+  for (const p of names) {
+    if (!/^\d+$/.test(p)) continue;
+    let f;
+    try {
+      f = read(p);
+    } catch (e) {
+      if (e?.code !== "ENOENT" && e?.code !== "ESRCH") errors.push(`${p}: ${e?.code ?? e}`);
+      continue;
+    }
+    const o = f.indexOf("("), c = f.lastIndexOf(")");
+    const fields = o >= 0 && c > o ? f.slice(c + 2).trim().split(" ") : [];
+    if (!/^[A-Za-z]$/.test(fields[0] ?? "") || ![1, 2, 19].every((k) => /^\d+$/.test(fields[k] ?? ""))) {
+      errors.push(`${p}: a malformed stat line`);
+      continue;
+    }
+    if (fields[0] !== "Z") t.set(Number(p), { ppid: Number(fields[1]), pgid: Number(fields[2]), start: fields[19], comm: f.slice(o + 1, c) });
+  }
+  return { t, errors };
+}
+// From that snapshot, following current parent links down from root only (a remembered orphan or a member of root's
+// group that isn't below it is cleanup evidence, never a candidate): the unique nearest process named exactly
+// `name`, as { pid, comm, depth, start }.  Otherwise { pid: null, why, tree }, never an arbitrary pid and never root:
+// none in a whole snapshot (no target); a tie at the nearest depth (ambiguous); or a snapshot with errors
+// (unreadable: a node may be among them).  tree: root's current descendants with their depth (at most 16).
+export function selectTarget(root, snap = procSnapshot(), name = "node") {
+  const t = snap.t;
   const depth = new Map([[root, 0]]);
   for (let level = [root], d = 1; level.length && d <= t.size; d++) {
     const next = [];
@@ -33,6 +66,7 @@ export function selectTarget(root, t = procTable(), name = "node") {
   }
   const tree = [...depth].filter(([q]) => t.has(q)).map(([q, d]) => ({ pid: q, ppid: t.get(q).ppid, comm: t.get(q).comm, depth: d }))
     .sort((a, b) => a.depth - b.depth || a.pid - b.pid);
+  if (snap.errors.length) return { pid: null, why: `the process table couldn't be read whole: ${snap.errors.slice(0, 4).join("; ")}`, unreadable: true, tree: tree.slice(0, 16) };
   const named = tree.filter((x) => x.pid !== root && x.comm === name);
   if (!named.length) return { pid: null, why: `no ${name} process below ${root}`, tree: tree.slice(0, 16) };
   const nearest = named.filter((x) => x.depth === named[0].depth);
@@ -82,6 +116,16 @@ export function procStatus(pid, start = null) {
   const g = (k) => Number((t.match(new RegExp(`^${k}:\\s+(\\d+)`, "m")) ?? [])[1]);
   const r = { rss_kb: g("VmRSS"), threads: g("Threads") };
   return exitingStat(a) || exitingStat(b) ? { ...r, exiting: true } : r;
+}
+
+// a prompt sample (web/test-interrupt-matrix.mjs, at each DONE): its target, then what procStatus read under the
+// selected start time.  No node in a whole snapshot: exiting (only a final one may be dropped); a tie, an unreadable
+// table, or a selected target without a decimal start time: a sample error (invalid evidence), never the unbound path
+export function promptSample(root, snap = procSnapshot()) {
+  const target = selectTarget(root, snap);
+  if (target.pid == null) return { target, ...(target.ambiguous || target.unreadable ? { sample_error: target.why } : procStatus(null)) };
+  if (!/^\d+$/.test(target.start ?? "")) return { target, sample_error: "the selected target has no valid start time" };
+  return { target, ...procStatus(target.pid, target.start) };
 }
 
 // a session's processes: its group and every descendant.  The prompt's launcher runs under
