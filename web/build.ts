@@ -167,10 +167,11 @@ for (const r of [result, consoleResult, mathResult, graphResult, notebookResult,
   const html = readFileSync(join(here, "index.html"), "utf8");
   const m = /<script id="app">([\s\S]*?)<\/script>/.exec(html)!;
   const tmp = join(here, "app.tmp.js"); // beside index.html: its imports are relative to web/
-  writeFileSync(tmp, m[1] + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
-  // (without the LaTeX editor, its entry module is resolved to an empty one: nothing of it reaches the page)
-  const latexOff = { name: "latex-off", setup(b: any) { b.onResolve({ filter: /latex\/boot\.ts$/ }, () => (LATEX ? undefined : { path: join(here, "latex", "boot-off.ts") })); } };
-  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: true, define: LATEX_DEFINE, plugins: [latexOff] });
+  // (without the LaTeX editor, its entry's import line is taken out first: its one use is in a branch the build drops)
+  const LATEX_IMPORT = 'import { latexBoot } from "./latex/boot.ts";\n';
+  if (m[1].split(LATEX_IMPORT).length !== 2) throw new Error("index.html must import the LaTeX editor's entry exactly once");
+  writeFileSync(tmp, (LATEX ? m[1] : m[1].replace(LATEX_IMPORT, "")) + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
+  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: true, define: LATEX_DEFINE });
   builds.push(["the notebook page", app]);
   if (!app.success) {
     for (const l of app.logs) console.error(l);
