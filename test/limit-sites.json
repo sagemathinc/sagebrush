@@ -98,10 +98,161 @@
   "class": "3",
   "owner": "class group/number fields"
  },
- "engine/classgroup/src/nf/ecm.rs ::  :: const MAXL: usize = 16; #0": {
+ "engine/classgroup/src/nf/cost.rs ::  :: use super::ecm::{fixed_b2, DOUBLING_B1, DOUBLING_B2_MAX, DOUBLING_CURVES, DOUBLING_TABLE_MAX, MAXL, SCHEDULE, STAGE2_D}; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs ::  :: use super::factor::{RHO_ITERS, SPLIT_BITS_MAX, TRIAL_BOUND}; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: counts_are_exact_or_unknown :: assert!(prp_cost(8_989_696).unwrap() <= u64::MAX as u128); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: counts_are_exact_or_unknown :: assert_eq!(e.stages[1].memory, Some(limbs(u64::MAX) as u128 * 128)); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: counts_are_exact_or_unknown :: let e = factor_estimate(u64::MAX); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: SPLIT_BITS_MAX #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: SPLIT_BITS_MAX #1": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: SPLIT_BITS_MAX #2": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: if bits > SPLIT_BITS_MAX { #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: if d > max_digits.max(15) { #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: let max_digits = ((bits as f64 / 2.0) * 2f64.log10()).ceil() as u32; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: let sqrt_bound = if bits / 2 + 1 >= 64 { u64::MAX } else { 1u64 << (bits / 2 + 1) }; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: limbs: limbs(SPLIT_BITS_MAX), #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: name: format!(\"Pollard-Brent rho and ECM on a cofactor of at most {} bits\", SPLIT_BITS_MAX), #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: gcd_u64 :: const RHO_UMAX: usize = 64; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: levels :: let b2 = (50 * b1).min(DOUBLING_B2_MAX).min(DOUBLING_TABLE_MAX); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: rho_table :: let n = RHO_UMAX * RHO_STEPS; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: roots_cost :: let e_max = (bits / 16) as u128; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: roots_cost :: let hi = (1u128 << c).min(e_max); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: sizes_and_limits :: fn sizes_and_limits() { #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: stage2_buffers :: babies * 2 * MAXL as u128 * 8 #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: stage2_buffers :: const RHO_MEMORY: u128 = 32 * 8 * MAXL as u128; #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/ecm.rs ::  :: pub const MAXL: usize = 16; #0": {
   "class": "coverage",
   "owner": "class group/number fields",
+  "reason": "the Montgomery arithmetic's range (16 limbs, 1024 bits): beyond it rho and ECM don't apply (TooLarge); made pub for the estimator (nf/cost.rs), unchanged",
   "row": "inv-41"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: ecm_curve :: pub const DOUBLING_B2_MAX: u64 = 1_000_000_000; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: ecm_curve :: pub const DOUBLING_TABLE_MAX: u64 = 100_000_000; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: ecm_curve :: pub const FIXED_B2_MAX: u64 = 10_000_000; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: ecm_until_found :: if let Some(g) = ecm_curve(n, sigma, b1, b2.min(DOUBLING_TABLE_MAX), &primes) { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: ecm_until_found :: let b2 = (50 * b1).min(DOUBLING_B2_MAX); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: ecm_until_found :: let primes = crate::arith::primes_up_to(b2.min(DOUBLING_TABLE_MAX) + STAGE2_D); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/ecm.rs :: fixed_b2 :: (50 * b1).min(FIXED_B2_MAX).max(b1) #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
+ },
+ "engine/classgroup/src/nf/factor.rs :: strong_lucas_prp :: pub const SPLIT_BITS_MAX: u64 = 1024; #0": {
+  "class": "coverage",
+  "owner": "class group/number fields",
+  "reason": "the Montgomery arithmetic's range (16 limbs, 1024 bits): beyond it rho and ECM don't apply (TooLarge); made pub for the estimator (nf/cost.rs), unchanged"
  },
  "engine/classgroup/src/nf/proof.rs ::  :: impl Limits { #0": {
   "class": "3",
@@ -5816,10 +5967,13 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
- "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText> } = {}): Session { #0": {
+ "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks } = {}): Session { #0": {
   "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
   "owner": "notebook/kernel",
-  "row": "src-17"
+  "reason": "the session's output bound per item and run (limit: item, run, displays): protects the page that receives a run's streams and displays; refuses nothing and stops no computation (the rest of the output is cut, said once); the line changed only by X1's test hooks"
  },
  "src/notebook-session.ts :: room :: const room = () => (opts.limit ? Math.min(opts.limit.item - used.item, opts.limit.run - used.run) : Infinity); #0": {
   "class": "1",
