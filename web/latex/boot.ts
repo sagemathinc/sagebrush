@@ -9,20 +9,19 @@ import { openPreview } from "../workspace/preview";
 
 declare const __SB_LATEX_HOSTS__: string[];
 
-/** Whether the editor is on here: the host exactly, then the URL flag or the stored one. */
-// (hosts: the build's define, web/build.ts; the unit tests pass their own)
-export function latexOn(loc: { hostname: string; search: string }, read: () => string | null, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
-  const byUrl = new URLSearchParams(loc.search).get("latex") == "1";
+/** Whether the editor is on here: the host exactly, then the URL flag (byUrl: ?latex=1) or the stored one.
+ * (hosts: the build's define, web/build.ts; the unit tests pass their own) */
+export function latexOn(host: string, byUrl: boolean, read: () => string | null, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
   let stored = false;
   try { stored = read() == "1"; } catch {}
-  return { on: hosts.includes(loc.hostname) && (byUrl || stored), byUrl };
+  return hosts.includes(host) && (byUrl || stored);
 }
 
 /** Called once by the notebook page; true if the LaTeX page took the page over. */
 export async function latexBoot(ws: Workspace | null) {
-  const tex = new URLSearchParams(location.search).get("tex"), st = latexOn(location, () => localStorage.getItem("sagebrush-latex-preview"));
+  const p = new URLSearchParams(location.search), tex = p.get("tex"), byUrl = p.get("latex") == "1";
   const g: any = globalThis, el = (t: string, s = "") => { const e = document.createElement(t); e.textContent = s; return e; }, isTex = (e: Entry) => /\.tex$/i.test(e.path);
-  if (!st.on) {
+  if (!latexOn(location.hostname, byUrl, () => localStorage.getItem("sagebrush-latex-preview"))) {
     if (tex === null) return false;
     // (r5 N2: the file's own preview, found by the same lookup; or why there is none)
     const d = el("p", "The LaTeX editor isn't enabled here."), at = ws && (await ws.pathOfFile(tex).catch(() => null));
@@ -31,7 +30,7 @@ export async function latexBoot(ws: Workspace | null) {
     document.body.prepend(d);
     return false;
   }
-  const q = st.byUrl ? "?latex=1" : "";
+  const q = byUrl ? "?latex=1" : "";
   // the file browser: a .tex row with a fid opens the editor; without one, its preview (which says why)
   g.__sbTex = (e: Entry, tab?: boolean) => {
     // (a fid is hex: nothing to encode)

@@ -87,12 +87,12 @@ check("hl-mathenv", run("\\begin{align}", "N").end === "E:align" && run("\\end{a
 
 // ---- boot.ts: the flag
 const DEV = ["dev.sagebrush.space"];   // (the DEV build's hosts, as web/build.ts defines them)
-const on = (host, search, stored) => latexOn({ hostname: host, search }, () => stored, DEV).on;
+const on = (host, search, stored) => latexOn(host, new URLSearchParams(search).get("latex") == "1", () => stored, DEV);
 check("flag-dev-url", on("dev.sagebrush.space", "?latex=1", null) && on("dev.sagebrush.space", "", "1"), null);
 check("flag-off-without", !on("dev.sagebrush.space", "", null) && !on("dev.sagebrush.space", "?latex=0", "0"), null);
 check("flag-prod-never", !on("sagebrush.space", "?latex=1", "1"), null);
 check("flag-lookalike-hosts", !on("x.dev.sagebrush.space", "?latex=1", "1") && !on("dev.sagebrush.space.evil", "?latex=1", "1"), null);
-check("flag-test-hosts-only-in-list", latexOn({ hostname: "127.0.0.1", search: "?latex=1" }, () => null, ["dev.sagebrush.space", "127.0.0.1"]).on && !latexOn({ hostname: "127.0.0.1", search: "?latex=1" }, () => null, ["dev.sagebrush.space"]).on, null);
+check("flag-test-hosts-only-in-list", latexOn("127.0.0.1", true, () => null, ["dev.sagebrush.space", "127.0.0.1"]) && !latexOn("127.0.0.1", true, () => null, ["dev.sagebrush.space"]), null);
 
 // ---- gate.ts
 {
