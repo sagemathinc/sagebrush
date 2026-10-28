@@ -271,7 +271,12 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
   fake.faults.oversizeAck = 2;
   e0 = fake.executions.length;
   const s5 = await run(kernel, "twice-ambiguous");
-  check(s5.terminal?.[1] === NOTES.unknown && kernel.needsFence && fake.executions.length === e0 + 1, "P1A-C3 ambiguous twice: unknown (not 'Not run'), and fenced before more work");
+  check(s5.terminal?.[0] === "done" && fake.executions.length === e0 + 1, "P1A-C3 ambiguous twice: reconciled from the request's own record (it ran), runs exactly once");
+  fake.faults.oversizeAck = 2;
+  fake.intercept("GET", /\/runs\/[^/]+$/, { respond: { status: 503, body: "unavailable" } });
+  e0 = fake.executions.length;
+  const s5b = await run(kernel, "twice-ambiguous-unreconciled");
+  check(s5b.terminal?.[1] === NOTES.unknown && kernel.needsFence && fake.executions.length === e0 + 1, "P1A-C3 ambiguous twice and its record unreachable: unknown (not 'Not run'), and fenced before more work");
   await until(() => !fake.bindings.get(kernel.binding).busy);
   const s6 = await run(kernel, "after-unknown");
   check(s6.terminal?.[0] === "done" && !kernel.needsFence, "the next run fences first, then runs");
@@ -553,6 +558,136 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
   kernel.close();
   await within(s6.ended);
   check(s6.terminal?.[1] === NOTES.closed && kernel.current === null, "P1A-C2 close while the headers are pending: settled, no job left");
+}
+
+// ---- P1A-R2-C1 / P1A2-A5-1: once a run may have been admitted, no retry outcome makes it "Not run"
+{
+  // (a) admitted, its answer lost, then another tab takes the binding over: the retry hears "epoch"
+  {
+    const { fake, kernel } = await setup();
+    const b = fake.bindings.get(kernel.binding);
+    fake.intercept("POST", /\/runs$/, { lose: true, after: () => { b.epoch++; } });
+    const e0 = fake.executions.length;
+    const s = await run(kernel, "r2c1-epoch");
+    check(s.terminal?.[0] === "done" && fake.executions.length === e0 + 1 && !/Not run/.test(s.terminal[1] ?? "") && !text(s).includes("Not run"), "P1A-R2-C1 (a) admitted, its answer lost, then another tab took over: the retry's epoch refusal is not 'Not run'; the request's own record shows it ran, once");
+  }
+  // (a') the same, and the request's record can't be read: unknown, fenced, and this tab stops taking work
+  {
+    const { fake, kernel } = await setup();
+    const b = fake.bindings.get(kernel.binding);
+    fake.intercept("POST", /\/runs$/, { lose: true, after: () => { b.epoch++; } });
+    fake.intercept("GET", /\/runs\/[^/]+$/, { respond: { status: 503, body: "unavailable" } });
+    const e0 = fake.executions.length;
+    const s = await run(kernel, "r2c1-epoch-unreconciled");
+    check(s.terminal?.[1] === NOTES.unknown && kernel.needsFence && kernel.moved && fake.executions.length === e0 + 1, "P1A-R2-C1 (a') and its record unreachable: unknown (never 'Not run'), fenced, and moved for future work");
+  }
+  // (b) the retry hears a typed authorization or fencing refusal
+  for (const [status, error] of [[401, "invalid_token"], [409, "fencing"]]) {
+    const { fake, kernel } = await setup();
+    fake.intercept("POST", /\/runs$/, { lose: true });
+    fake.intercept("POST", /\/runs$/, { respond: { status, body: { error } } });
+    const e0 = fake.executions.length;
+    const s = await run(kernel, `r2c1-${error}`);
+    check(s.terminal?.[0] === "done" && fake.executions.length === e0 + 1, `P1A-R2-C1 (b) admitted, its answer lost, the retry refused (${error}): reconciled from its record, it ran, once; never 'Not run'`);
+  }
+  // (c) the retry fails before it is sent (the token is gone): unknown, fenced
+  {
+    const { fake, client, kernel } = await setup();
+    const realToken = client.token;
+    fake.intercept("POST", /\/runs$/, { lose: true, after: () => { client.token = () => { throw new Error("signed out"); }; } });
+    const e0 = fake.executions.length;
+    const s = await run(kernel, "r2c1-presend");
+    check(s.terminal?.[1] === NOTES.unknown && kernel.needsFence && fake.executions.length === e0 + 1, "P1A-R2-C1 (c) admitted, its answer lost, the retry not even sent: unknown (never 'Not run'), and fenced");
+    client.token = realToken;
+    const s2 = await run(kernel, "r2c1-after");
+    check(s2.terminal?.[0] === "done" && posted(fake, /\/takeover$/) === 1, "P1A-R2-C1 (c) the next run fences first, then runs");
+  }
+}
+
+// ---- P1A-R2-C2 / P1A2-A5-3: an incomplete takeover answer is no evidence: nothing concluded, the fence stays
+{
+  const { fake, kernel, statuses } = await setup();
+  const variants = [
+    ["applied_before_takeover omitted", (r) => { delete r.applied_before_takeover; }],
+    ["applied_before_takeover not an array", (r) => { r.applied_before_takeover = {}; }],
+    ["in_flight omitted", (r) => { delete r.in_flight; }],
+    ["in_flight not an array", (r) => { r.in_flight = "none"; }],
+    ["a malformed entry", (r) => { r.applied_before_takeover = [{ op_id: 7, kind: "restart" }]; }],
+    ["an applied restart without its incarnation", (r) => { delete r.incarnation; }],
+  ];
+  for (const [what, mutate] of variants) {
+    fake.intercept("POST", /\/restart$/, { lose: true });
+    fake.intercept("POST", /\/takeover$/, { mutate });
+    const g = kernel.generation, n = statuses.length;
+    await kernel.restart();
+    const said = statuses.slice(n);
+    check(kernel.generation === g && kernel.needsFence && !said.some((t) => /did not happen/.test(t)) && said.some((t) => /could not be checked/.test(t)), `P1A-R2-C2 a restart applied, its answer lost, then a takeover answer with ${what}: nothing concluded, the fence stays`);
+  }
+  // (an old run still executing, and a ready answer that leaves in_flight out: not taken as "nothing running")
+  fake.kernel = () => new Promise(() => {});
+  const sa = sink();
+  kernel.execute("still-running", { mode: "python" }, sa);
+  check(await until(() => fake.executions.some((x) => x.code === "still-running")), "a run is executing");
+  kernel.close();
+  const fake2 = fake; // (the same gateway, a second tab)
+  const client2 = await makeClient(fake2);
+  const k2 = new RemoteKernel({ client: client2, notebook: "fid-1", clientId: "c9", sleep: fast });
+  await k2.start();
+  k2.lc = Object.freeze({ ...k2.lc, binding: kernel.binding }); // (k2 joins the first tab's binding)
+  k2.needsFence = true;
+  fake2.intercept("POST", /\/takeover$/, { mutate: (r) => { delete r.in_flight; } });
+  const sb = sink();
+  k2.execute("second-tab", { mode: "python" }, sb);
+  await within(sb.ended);
+  check(sb.terminal?.[1] === NOTES.unreachable && k2.needsFence && !fake2.executions.some((x) => x.code === "second-tab"), "P1A-R2-C2 a ready answer leaving in_flight out while an old run executes: nothing submitted, the fence stays");
+}
+
+// ---- P1A-R2-A3-1 / P1A2-A5-4: a replacement queued behind a restart never touches the kernel the restart made
+{
+  const { fake, kernel, restarts, readies } = await setup();
+  const holdA = fake.intercept("POST", /\/runs$/, { respond: { status: 410, body: { error: "quarantined" } }, pause: true });
+  const sa = sink();
+  kernel.execute("A", { mode: "python" }, sa);
+  await holdA.reached;
+  const holdR = fake.intercept("POST", /\/restart$/, { pause: true });
+  const b0 = kernel.binding, g0 = kernel.generation, r0 = restarts.n, rd0 = readies.n, binds0 = posted(fake, /^\/bindings$/);
+  const restarting = kernel.restart();
+  await holdR.reached;
+  holdA.release();
+  check(await until(() => kernel.lifeOps >= 2), "the quarantine arrived while the restart was pending: a replacement is queued behind it");
+  holdR.release();
+  await within(restarting);
+  await tick(50);
+  check(sa.terminal?.[1] === NOTES.kernelReplaced && kernel.binding === b0 && kernel.generation === g0 + 1 && restarts.n === r0 + 1 && readies.n === rd0 && posted(fake, /^\/bindings$/) === binds0 && kernel.lifeOps === 0, "P1A-R2-A3-1 the queued replacement found the restart's new record: it did nothing (same binding, one new generation, no new bind, no extra events)");
+  const sb = await run(kernel, "after-queued-replace");
+  check(sb.terminal?.[0] === "done", "P1A-R2-A3-1 and the restarted kernel runs");
+}
+
+// ---- P1A-R2-A3-2 / P1A2-A5-2: a token or proof that never comes can't hold a cancelled request
+{
+  const { fake, client, kernel } = await setup();
+  const realToken = client.token;
+  let hangToken = true;
+  client.token = (o) => (hangToken ? ((hangToken = false), new Promise(() => {})) : realToken(o));
+  const s1 = sink();
+  kernel.execute("token-hang", { mode: "python" }, s1);
+  check(await until(() => !!kernel.current?.lc), "the run is being submitted, waiting for a token that never comes");
+  await kernel.restart();
+  await within(s1.ended);
+  check(s1.terminal?.[1] === NOTES.stoppedRestart && kernel.current === null && kernel.lifeOps === 0, "P1A-R2-A3-2 a token that never comes, then a restart: the run settles; the queue and the lifecycle are free");
+  const s2 = await run(kernel, "after-token-hang");
+  check(s2.terminal?.[0] === "done", "P1A-R2-A3-2 and the next run works");
+  const realProof = client.proof.bind(client);
+  let hangProof = true;
+  client.proof = (...a) => (hangProof ? ((hangProof = false), new Promise(() => {})) : realProof(...a));
+  kernel.needsFence = true;
+  const s3 = sink();
+  kernel.execute("proof-hang", { mode: "python" }, s3);
+  check(await until(() => kernel.lifeOps === 1), "a takeover is waiting for a proof that never comes");
+  kernel.close();
+  await within(s3.ended);
+  await tick();
+  check(s3.terminal?.[1] === NOTES.closed && kernel.lifeOps === 0 && kernel.current === null, "P1A-R2-A3-2 a proof that never comes inside a takeover, then close: the takeover settles; lifeOps is 0, nothing is left running");
 }
 
 // ---- takeover, quarantine, a moved binding, a run still executing elsewhere
