@@ -38,6 +38,9 @@ await new Promise((r) => (bws.onopen = r));
 let n = 0;
 const waiting = new Map();
 const swVersions = new Map();
+// (NON-LANDING arm C: browser-level target crash/destroy events, with when they came; recorded only once discovery is
+// turned on for the teardown arm)
+const targetEvents = [];
 // (a JavaScript dialog a page opens (alert, confirm, beforeunload) would hold every later call to that page: said,
 // and dismissed, so the case fails or goes on instead of the run hanging; #243's CI)
 bws.onmessage = (e) => {
@@ -49,6 +52,9 @@ bws.onmessage = (e) => {
   }
   // (service worker versions, by id, each at its latest state: the ServiceWorker domain is enabled only once a reopened
   // page has failed, since DevTools' attention could start or keep a worker alive and so hide the stall)
+  else if (m.method === "Target.targetCrashed" || m.method === "Target.targetDestroyed") {
+    targetEvents.push({ event: m.method.slice(7), targetId: m.params?.targetId, at: Date.now() });
+  }
   else if (m.method === "ServiceWorker.workerVersionUpdated") {
     for (const v of m.params?.versions ?? []) swVersions.set(v.versionId, { registrationId: v.registrationId, script: String(v.scriptURL).replace(/^https?:\/\/[^/]+/, "").split(/[?#]/)[0], runningStatus: v.runningStatus, status: v.status, controlled: (v.controlledClients ?? []).length });
   }
@@ -1198,7 +1204,7 @@ try {
     // 60 s (#243's CI: D8's Page.navigate unanswered while the browser answered), fails the case with Chrome's
     // targets said (type, path, attached: service workers included). No retry: a person reopening after a crash
     // would meet the same thing, so it must show)
-    const crashAndReopen = async (P, what) => {
+    const crashAndReopen = async (P, what, { teardown = false } = {}) => {
       // (read only, before the crash: whether a service worker controlled the old page, and in what state)
       const controller = await P.ev("JSON.stringify(navigator.serviceWorker?.controller ? [navigator.serviceWorker.controller.state, new URL(navigator.serviceWorker.controller.scriptURL).pathname] : null)", 3000).catch((x) => `unread: ${x.message}`);
       // (each step's time from the crash, and Chrome's processes (type, id, cpu seconds) at each step, read from the
@@ -1218,6 +1224,18 @@ try {
         console.log(`  (${what}: reopen timing, ms from the crash: ${JSON.stringify(marks)}; the new page's own steps, ms from its start: ${JSON.stringify(qt)}; renderer before navigating: ${preNav})`);
         if (!ok || (marks.ready ?? marks.failed ?? 0) > 10_000) console.log(`  (${what}: Chrome's processes [type, id, cpu s] by step: ${JSON.stringify(procs)})`);
       };
+      // (NON-LANDING arm C, the teardown arm (daybreak3), for L1a's reopen only: target events are recorded from
+      // before the crash; after the close, the renderer whose cpu rose most since the pre-crash snapshot is taken
+      // as the crashed one, and the new page waits, in the same browser context, until that pid is gone from
+      // Chrome's processes (polled every 100 ms, 30 s at most); every event and pid timing is logged)
+      let discover = null;
+      if (teardown) {
+        discover = await raw("Target.setDiscoverTargets", { discover: true }, undefined, 5000).then((x) => JSON.stringify(x ?? null), (x) => `no answer: ${x.message}`);
+        targetEvents.length = 0;
+        // (r2, daybreak3: a CDP error comes back as a value, so only an empty result counts as registered; otherwise
+        // the run isn't arm C, and it stops here, before the crash)
+        if (discover !== "{}") throw new Error(`NON-LANDING arm C invalid: Target.setDiscoverTargets didn't register (${discover}); nothing was crashed`);
+      }
       await snap("before the crash");
       chainAt(`${what}: the page crashes`);
       t0 = Date.now();
@@ -1228,6 +1246,36 @@ try {
       await raw("Target.closeTarget", { targetId: P.targetId }, undefined, 10_000).catch(() => {});
       mark("closed");
       snapAt("closed");
+      if (teardown) {
+        // (r3, astra3: a CDP error comes back as a value, so only a real process list counts; any other answer is
+        // unknown (null), never "absent". Each read is cut to what is left of the 30 s from the crash)
+        const read = () => raw("SystemInfo.getProcessInfo", {}, undefined, Math.max(1, Math.min(5000, 30_000 - (Date.now() - t0)))).then((x) => Array.isArray(x?.processInfo) ? x.processInfo.map((p) => [p.type, p.id, p.cpuTime ?? 0]) : null, () => null);
+        const now = await read();
+        mark("teardown identified");
+        const pre = Array.isArray(procs["before the crash"]) ? procs["before the crash"] : [];
+        let pid = null, rise = 0;
+        for (const [type, id, cpu] of now ?? []) {
+          const was = pre.find((x) => x[0] === "renderer" && x[1] === id);
+          if (type === "renderer" && was && cpu - was[2] > rise) { rise = cpu - was[2]; pid = id; }
+        }
+        // (the pre-crash snapshot is rounded to 0.1 s, so a rise under 0.3 s isn't taken as the crash's; and a
+        // pre-crash renderer already missing at this read is said, since the crashed one may be gone by then)
+        if (rise < 0.3) pid = null;
+        const missing = now === null ? "unread" : pre.filter((x) => x[0] === "renderer" && !now.some((y) => y[1] === x[1])).map((x) => x[1]);
+        let polls = 0, gone = false;
+        if (pid !== null) {
+          while (Date.now() - t0 < 30_000) {
+            const list = await read();
+            polls++;
+            if (list && !list.some((x) => x[1] === pid)) { gone = true; break; }
+            await sleep(100);
+          }
+        }
+        mark(gone ? "crashed pid gone" : "teardown wait ended");
+        console.log(`  (${what}: NON-LANDING arm C: discovery ${discover}; pre-crash renderers already gone at the close: ${JSON.stringify(missing)}; the crashed renderer taken as pid ${pid} (cpu +${Math.round(rise * 100) / 100} s since before the crash); ${pid === null ? "no renderer's cpu rose, so no wait" : gone ? `gone after ${polls} polls` : `STILL PRESENT after ${polls} polls (30 s bound)`}; target events, ms from the crash: ${JSON.stringify(targetEvents.map((e) => ({ ...e, at: e.at - t0 })))})`);
+        // (r2, daybreak3: only a crashed pid seen to go makes this arm C; otherwise it stops here, before any new page)
+        if (pid === null || !gone) throw new Error(`NON-LANDING arm C invalid: ${pid === null ? "no crashed renderer identified" : `pid ${pid} still present at the 30 s bound`}; no new page was opened`);
+      }
       chainAt(`${what}: a new page`);
       try {
         Q = await newPage(undefined, qt);
@@ -1392,7 +1440,7 @@ try {
       // (this device's records, read from localStorage itself, in whatever form the page keeps them: so a page
       // without the registry (r3's, one key per notebook) fails here on what it did, not on a missing helper)
       const recA = await q2.ev("JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter((k) => k.startsWith('sagebrush-share-sent')).map((k) => [k, localStorage.getItem(k)])))");
-      const q3 = await reopen(q2);
+      const q3 = await crashAndReopen(q2, "reopen", { teardown: true });
       const storedA = await q3.ev("window.sagebrush.notebook.snapshot()");
       await recordSentIn(q3);
       await openIn(q3);
