@@ -326,6 +326,9 @@ extern "C" {
 static POLLS: AtomicU32 = AtomicU32::new(0);
 
 #[inline]
+// SAFETY: `interrupted` is the host's import `sagebrush.interrupted`, which takes no
+// arguments and only returns a flag.
+#[allow(unsafe_code)]
 fn poll_host() {
     #[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
     {
@@ -336,6 +339,9 @@ fn poll_host() {
 }
 
 #[inline]
+// SAFETY: `interrupted` is the host's import `sagebrush.interrupted`, which takes no
+// arguments and only returns a flag.
+#[allow(unsafe_code)]
 fn poll_host_now() {
     #[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
     {
@@ -435,6 +441,9 @@ pub struct SigintGuard {
 }
 
 #[cfg(unix)]
+// SAFETY: signal and raise are async-signal-safe, and restoring the default
+// action then re-raising SIGINT is the documented way to fall back to it.
+#[allow(unsafe_code)]
 extern "C" fn on_sigint(_: libc::c_int) {
     // async-signal-safe: atomics, and on the third press the default action
     REQUESTED.store(true, Relaxed);
@@ -453,6 +462,9 @@ extern "system" {
 }
 
 #[cfg(windows)]
+// SAFETY: a console control handler as SetConsoleCtrlHandler expects (the
+// `system` ABI, u32 in, BOOL out); it only touches atomics.
+#[allow(unsafe_code)]
 unsafe extern "system" fn on_ctrl(kind: u32) -> i32 {
     // CTRL_C_EVENT = 0, CTRL_BREAK_EVENT = 1; anything else goes on
     if kind <= 1 {
@@ -465,6 +477,10 @@ unsafe extern "system" fn on_ctrl(kind: u32) -> i32 {
 }
 
 impl SigintGuard {
+    // SAFETY: Unix: the sigaction structs are plain C data, zero-initialised then
+    // filled; the handler only touches atomics (on_sigint).  Windows: on_ctrl has
+    // the handler signature SetConsoleCtrlHandler expects.
+    #[allow(unsafe_code)]
     pub fn new() -> SigintGuard {
         clear();
         #[cfg(unix)]
@@ -493,6 +509,9 @@ impl Default for SigintGuard {
 }
 
 impl Drop for SigintGuard {
+    // SAFETY: restores the handler saved by `new` (Unix: the old sigaction; Windows:
+    // removes on_ctrl), with valid pointers.
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
         #[cfg(unix)]
         unsafe {

@@ -16,3 +16,6 @@ num-integer = "0.1"
 
 [dev-dependencies]
 sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
+
+[lints]
+workspace = true

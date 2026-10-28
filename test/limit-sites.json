@@ -1887,6 +1887,16 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_capacity.py ::  :: _PROC_LIMIT_HEAD = [\"Limit\", \"Soft\", \"Limit\", \"Hard\", \"Limit\", \"Units\"] #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py ::  :: _PROC_LIMIT_ROWS = {\"RLIMIT_AS\": \"Max address space\", \"RLIMIT_DATA\": \"Max data size\"} #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
  "lib/_capacity.py ::  :: _resource_mod = 0 # (0: not tried yet; None: there is none) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -1938,6 +1948,11 @@
  "lib/_capacity.py :: _CtypesWindows.job_limit.EXTENDED :: _fields_ = [(\"BasicLimitInformation\", BASIC), (\"IoInfo\", IO_COUNTERS), (\"ProcessMemoryLimit\", c.c_size_t), #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _ProcObservation :: \"\"\"One observation's /proc/self/limits: read at most once inside it, #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1 (+ astra2's H1 on #231): reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux, once per observation; refuses nothing"
  },
  "lib/_capacity.py :: _Sources :: others (a fake root for /proc and /sys, fake resource limits, a fake #0": {
   "class": "2",
@@ -2063,6 +2078,71 @@
   "class": "none",
   "owner": "python"
  },
+ "lib/_capacity.py :: _proc_rlimit :: \"\"\"The soft limit `name` (RLIMIT_AS, RLIMIT_DATA) from /proc/self/limits, #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py :: _proc_rlimit :: astra2's H1), else once per call.  C delta plan-c-rlimit-pyjs r1.\"\"\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1 (+ astra2's H1 on #231): reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux, once per observation; refuses nothing"
+ },
+ "lib/_capacity.py :: _proc_rlimit :: def _proc_rlimit(name): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py :: _proc_rlimit :: for Linux without the resource module (pyjs on Node or Bun, whose #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py :: _proc_rlimit :: good = bool(text) and \"\\ufffd\" not in text and text.splitlines()[0].split() == _PROC_LIMIT_HEAD #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py :: _proc_rlimit :: got = {n: _proc_value(text, row) if good else False for n, row in _PROC_LIMIT_ROWS.items()} #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1 (+ astra2's H1 on #231): reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux, once per observation; refuses nothing"
+ },
+ "lib/_capacity.py :: _proc_rlimit :: if name not in _PROC_LIMIT_ROWS: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py :: _proc_rlimit :: text = _read(\"/proc/self/limits\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py :: _proc_value :: \"\"\"One row of /proc/self/limits: None for an \"unlimited\" soft limit, the #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py :: _proc_value :: \"unlimited\" or ASCII digits.\"\"\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py :: _proc_value :: ok = lambda f: f == \"unlimited\" or (f != \"\" and set(f) <= _DIGITS) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py :: _proc_value :: return None if fields[0] == \"unlimited\" else int(fields[0]) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py :: _proc_value :: soft limit in bytes (0 included), or False: the row absent or there #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
  "lib/_capacity.py :: _resource :: \"\"\"The resource module, imported once (pyjs has none).\"\"\" #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -2111,9 +2191,24 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_capacity.py :: _rlimit :: only on Linux (the platform checked before any read), /proc/self/limits: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
  "lib/_capacity.py :: _rlimit :: resource = _resource() #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _rlimit :: resource module (a getrlimit that fails is False: never /proc), else, #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
+ },
+ "lib/_capacity.py :: _rlimit :: soft = _proc_rlimit(name) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "C delta plan-c-rlimit-pyjs r1: reads the soft RLIMIT_AS/RLIMIT_DATA from /proc/self/limits under pyjs on Linux; refuses nothing (a figure for capacity(), as resource.getrlimit is)"
  },
  "lib/_capacity.py :: _rlimit :: soft = _src.rlimits[name][0] #0": {
   "class": "2",
@@ -4706,6 +4801,62 @@
   "class": "3",
   "owner": "real/rational arithmetic",
   "row": "inv-15"
+ },
+ "lib/sage_plot3d.py ::  :: _GC_BUDGET_S = 0.05 # (a pass's work, at most; the next pass goes on from its cursor) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
+ },
+ "lib/sage_plot3d.py :: _gc_temps :: (a directory has no random access); a pass whose budget runs out in its #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
+ },
+ "lib/sage_plot3d.py :: _gc_temps :: def _gc_temps(root=\".sagebrush\", budget_s=_GC_BUDGET_S, clock=None, alive=None): #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
+ },
+ "lib/sage_plot3d.py :: _gc_temps :: if over or clock() - t0 > budget_s: #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
+ },
+ "lib/sage_plot3d.py :: _gc_temps :: over = clock() - t0 > budget_s #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
+ },
+ "lib/sage_plot3d.py :: _gc_temps :: reading the kept entries before the dead ones exhausts each pass's budget #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
+ },
+ "lib/sage_plot3d.py :: _gc_temps :: without fetching another, so it takes at most the budget and one entry. A #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
  },
  "src/allowance-host.ts ::  :: budget: number; #0": {
   "class": "3",
