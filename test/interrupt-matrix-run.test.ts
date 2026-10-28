@@ -181,3 +181,45 @@ process.kill = (pid, sig) => { if (sig === "SIGINT") { const e = new Error("kill
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a pinned row whose target ignores the Stop and returns: every trial is judged, none cut by an earlier trial's guard (E2/prompt, CI 40617387921)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
+  try {
+    // a fake that ignores SIGINT and returns: each trial prints ENTER, runs 7.2 s, then RET.  With the
+    // CI window (20 s) armed at trial 1's Stop (0.5 T = 3.6 s) and never cleared by a RET, the session
+    // was cut at about 23.6 s, after trial 4's ENTER (21.6 s) and before its Stop (25.2 s): a malformed
+    // cell, so a FAIL row where every trial says "did not stop"
+    const f = join(dir, "fake-ignoring.cjs");
+    writeFileSync(f, `
+const fs = require("node:fs");
+process.on("SIGINT", () => {});
+const src = fs.readFileSync(process.argv.at(-1), "utf8");
+const n = Number((src.match(/range\\(1, (\\d+) \\+ 1\\)/) ?? [])[1] ?? 1);
+const say = (s) => process.stdout.write(s + "\\n");
+let i = 0;
+const next = () => {
+  if (++i > n) { say("END"); process.exit(0); }
+  say("SETUP " + i); say("ENTER " + i + " 0.1");
+  setTimeout(() => { say("RET " + i); say("PROBE " + i + " ok"); say("DONE " + i); next(); }, 7200);
+};
+next();
+`);
+    // the fake row pinned, in the test's own baseline
+    const baseline = join(dir, "baseline.json");
+    writeFileSync(baseline, JSON.stringify({ comment: "the harness test's fake row", entries: [{ case: "E2", host: "cli", finding: "test", owner: "test", fix: "test", signature: "did not stop|no KeyboardInterrupt" }], pending: [] }));
+    const h = spawn(process.execPath, [matrix, "--ci", "--host", "cli", "--rows", "E2", "--signals", "none", "--budget-ms", "240000", "--out", join(dir, "out.json")], { env: { ...process.env, SB_LAUNCHER: f, SB_BASELINE: baseline }, stdio: ["ignore", "pipe", "pipe"] });
+    let err = "";
+    h.stderr.on("data", (d: Buffer) => (err += d));
+    const code = await exitOf(h);
+    const rows = readFileSync(join(dir, "out.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const e2 = rows.find((r) => r.case === "E2");
+    assert.ok(e2, "E2's row");
+    const cells = e2.cells.map((c: any) => [c.outcome, c.why]);
+    assert.equal(e2.cells.length, 5, JSON.stringify(cells));
+    assert.ok(e2.cells.every((c: any) => c.outcome === "FAIL" && /^did not stop/.test(c.why) && !c.malformed), JSON.stringify(cells));
+    assert.equal(e2.outcome, "KNOWN", JSON.stringify(cells));
+    assert.equal(code, 0, err.slice(-600));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
