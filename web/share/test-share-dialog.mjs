@@ -362,7 +362,9 @@ try {
     ok(await ev("!document.querySelector('#shareform').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareunreachable').hidden"), "a 503 from the sign-in check: the form as before, not 'Sign in', and the list opens");
     await closeDialog();
     await ev("document.querySelector('#sharemenu').click()");
-    await until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking'", 10000).catch(() => {});
+    // (until the outcome is said, not only decided: closed before the dialog is drawn, its outcome is written after
+    // the next case started recording the live region, which then saw a write from this open: train-22's CI)
+    await until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking' && !!document.querySelector('#sharechecking').textContent", 10000).catch(() => {});
     ok(await ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareform').hidden"), "...and File → Share again: still the Share dialog, not Copy share link");
     await closeDialog();
     await ev("window.fetch = window.__fetch");
