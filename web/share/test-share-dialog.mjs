@@ -61,9 +61,10 @@ const raw = (method, params = {}, sessionId, ms = 60_000) => new Promise((r, no)
   waiting.set(id, (v) => { clearTimeout(t); r(v); });
   bws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
 });
-async function newPage(contextId) {
-  // (each step's time, for a reopen that is slow or stalls to say which step: #243's CI)
-  const timing = {}, t0 = Date.now();
+async function newPage(contextId, timing = {}) {
+  // (each step's time, kept in the caller's object as it happens, so a reopen that is slow or stalls, even inside
+  // this function, says which step: #243's CI)
+  const t0 = Date.now();
   const { targetId } = await raw("Target.createTarget", { url: "about:blank", ...(contextId ? { browserContextId: contextId } : {}) });
   timing.createTarget = Date.now() - t0;
   const { sessionId } = await raw("Target.attachToTarget", { targetId, flatten: true });
@@ -1204,46 +1205,53 @@ try {
       // browser itself: so a reopen that is slow says which step, and whether a renderer is missing or busy;
       // printed for every reopen, the processes when it fails or takes over 10 s. #243's CI: D2's reopen took
       // about 61 s on master afcb1b72, about 4 s before)
-      const t0 = Date.now(), marks = {}, procs = {};
+      // (after the crash, each process snapshot starts at its step and isn't awaited there, so the navigation's and
+      // readiness's own deadlines run as before; all are drained once the outcome is known, before it is said.
+      // The one before the crash is awaited, so it is truly before it; daybreak3)
+      const marks = {}, procs = {}, pending = [], qt = {};
+      let t0 = 0, Q = null, before = "unread", preNav = "unread";
       const mark = (step) => { marks[step] = Date.now() - t0; };
-      const snap = async (step) => { procs[step] = await raw("SystemInfo.getProcessInfo", {}, undefined, 5000).then((x) => (x?.processInfo ?? []).map((p) => [p.type, p.id, Math.round((p.cpuTime ?? 0) * 10) / 10]), (x) => `unread: ${x.message}`); };
-      const said = (ok) => {
-        console.log(`  (${what}: reopen timing, ms from the crash: ${JSON.stringify(marks)}; the new page's own steps, ms from its start: ${JSON.stringify(Q?.timing ?? null)}; renderer before navigating: ${preNav})`);
-        if (!ok || Date.now() - t0 > 10_000) console.log(`  (${what}: Chrome's processes [type, id, cpu s] by step: ${JSON.stringify(procs)})`);
+      const snap = (step) => raw("SystemInfo.getProcessInfo", {}, undefined, 5000).then((x) => (x?.processInfo ?? []).map((p) => [p.type, p.id, Math.round((p.cpuTime ?? 0) * 10) / 10]), (x) => `unread: ${x.message}`).then((v) => { procs[step] = v; });
+      const snapAt = (step) => { pending.push(snap(step)); };
+      const said = async (ok) => {
+        await Promise.all(pending);
+        console.log(`  (${what}: reopen timing, ms from the crash: ${JSON.stringify(marks)}; the new page's own steps, ms from its start: ${JSON.stringify(qt)}; renderer before navigating: ${preNav})`);
+        if (!ok || (marks.ready ?? marks.failed ?? 0) > 10_000) console.log(`  (${what}: Chrome's processes [type, id, cpu s] by step: ${JSON.stringify(procs)})`);
       };
-      let Q = null, preNav = "unread";
       await snap("before the crash");
       chainAt(`${what}: the page crashes`);
+      t0 = Date.now();
       void P.send("Page.crash").catch(() => {});
+      mark("crash sent");
       await sleep(1000);
-      mark("crashed");
+      mark("post-crash wait");
       await raw("Target.closeTarget", { targetId: P.targetId }, undefined, 10_000).catch(() => {});
       mark("closed");
-      await snap("closed");
+      snapAt("closed");
       chainAt(`${what}: a new page`);
-      Q = await newPage();
-      mark("new page");
-      // (the new page as Chrome sees it before it is sent anywhere, and whether its about:blank renderer answers,
-      // within a strict 3 s)
-      const before = await raw("Target.getTargetInfo", { targetId: Q.targetId }, undefined, 10_000).then((x) => x?.targetInfo, (x) => `unread: ${x.message}`);
-      // (this probe can itself wake the renderer: its start and end are marked, so a timeout here is decisive and a
-      // later pass is diagnostic only; daybreak3)
-      mark("renderer asking");
-      preNav = await Q.send("Runtime.evaluate", { expression: "document.readyState", returnByValue: true }, 3000).then((x) => JSON.stringify(x?.result?.value ?? x), (x) => `no answer: ${x.message}`);
-      mark("renderer asked");
-      await snap("new page");
       try {
+        Q = await newPage(undefined, qt);
+        mark("new page");
+        // (the new page as Chrome sees it before it is sent anywhere)
+        before = await raw("Target.getTargetInfo", { targetId: Q.targetId }, undefined, 10_000).then((x) => x?.targetInfo, (x) => `unread: ${x.message}`);
+        // (whether its about:blank renderer answers, within a strict 3 s. This probe can itself wake the renderer:
+        // its start and end are marked, so a timeout here is decisive and a later pass is diagnostic only; daybreak3)
+        mark("renderer probe started");
+        preNav = await Q.send("Runtime.evaluate", { expression: "document.readyState", returnByValue: true }, 3000).then((x) => JSON.stringify(x?.result?.value ?? x), (x) => `no answer: ${x.message}`);
+        mark("renderer probe ended");
+        snapAt("new page");
         await Q.send("Page.navigate", { url: dev.site + "/" }, 20_000);
         mark("navigated");
-        await snap("navigated");
+        snapAt("navigated");
         await Q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
         mark("ready");
-        said(true);
+        await said(true);
         return Q;
       } catch (e) {
         mark("failed");
-        await snap("failed");
-        said(false);
+        snapAt("failed");
+        await said(false);
+        if (!Q) { console.log(`  (${what}: the new page couldn't be opened (${e.message}); the crashed page ${P.targetId})`); throw e; }
         // (which page is which: the crashed one, the new one, and every target by id and browser context; #243's
         // train-26 CI showed an unattached about:blank beside an attached "/", ids unsaid)
         const t = await raw("Target.getTargets", {}, undefined, 10_000).catch(() => null);
