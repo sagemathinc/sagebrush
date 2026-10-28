@@ -32,8 +32,8 @@
 //     refused: 409 busy | epoch | fencing | conflict; 410 quarantined; 429/503 with Retry-After
 //   GET  /bindings/{b}/runs/{request}/events?after=<seq> -> a text/event-stream of
 //     {seq, type: "start" | "stream" | "display" | "clear" | "terminal", ...}, seq = 1, 2, 3, ...
-//   GET  /bindings/{b}/runs/{request} -> {request, state, outcome?}; 404 {error: "not-found"} only if the
-//     gateway never admitted that request id, and it then refuses that id for good (so a late copy can't be admitted)
+//   GET  /bindings/{b}/runs/{request} -> {request, state, outcome?}; a 404 is not proof that the
+//     request was never admitted (nothing promises a late copy can't still be), so the page never reads it as such
 //   POST /bindings/{b}/interrupt | /restart {epoch, op_id} -> {outcome: {status: "done", incarnation} | {status: "refused", reason}}
 //   POST /bindings/{b}/complete {epoch, op_id, code, cursor_pos} -> {matches, prefix}
 //   POST /bindings/{b}/takeover {client} -> {state: "fencing" | "quarantined"} or
@@ -260,7 +260,8 @@ export class RemoteKernel {
     if (this.current || this.lifeOps || this.lc.phase !== "ready" || !this.queue.length) return;
     const job = this.queue.shift();
     this.current = job;
-    this.runJob(job)
+    // (job.settled: the whole run, its finally included, settled; tests use it)
+    job.settled = this.runJob(job)
       .catch((e) => { if (this.current === job) job.sink.stopped(`\nThe remote kernel failed: ${clip(e?.message ?? e)}\n`); })
       .finally(() => {
         if (this.current === job) this.current = null;
@@ -351,10 +352,11 @@ export class RemoteKernel {
   }
 
   // After an attempt that may have been admitted, the request's own record:
-  // found, it was admitted (follow it); the gateway's typed "not-found" for
-  // it (which also refuses that request id for good), it never was, and the
-  // retry's answer stands; anything else, unknown, and fenced (and if the
-  // retry said another tab has the binding, this one stops taking work).
+  // found, it was admitted (follow it).  Anything else, a "not-found"
+  // included, proves nothing (the gateway doesn't promise that a request id
+  // it hasn't seen yet can never be admitted later), so the outcome is
+  // unknown, and fenced (and if the retry said another tab has the binding,
+  // this one stops taking work).
   async reconcileSubmit(job, retryErr, signal) {
     const path = `/bindings/${job.lc.binding}/runs/${encodeURIComponent(job.request)}`;
     let r = null, err = null;
@@ -365,11 +367,6 @@ export class RemoteKernel {
     }
     if (this.current !== job) return false;
     if (!err && r.request === job.request) return true;
-    if (err instanceof GatewayError && err.status === 404 && err.code === "not-found") {
-      if (retryErr instanceof GatewayError) await this.notAdmitted(job, retryErr);
-      else job.sink.stopped(`\nNot run: ${clip(retryErr?.message ?? "it was not sent")}\n`);
-      return false;
-    }
     this.needsFence = true;
     if (retryErr instanceof GatewayError && retryErr.code === "epoch" && this.lc === job.lc) this.movedAway(NOTES.unknown);
     else job.sink.stopped(NOTES.unknown);
