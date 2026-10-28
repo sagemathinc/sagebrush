@@ -50,6 +50,13 @@ jobs:
             if [ $c -ne 0 ]; then status=1; fi
           done
           exit $status
+      - name: the GC-deadline mutants
+        if: always()
+        shell: bash
+        timeout-minutes: 15
+        run: |
+          mkdir -p logs
+          python .github/prb-gc-mutants.py 2>&1 | tee logs/gc-mutants.log
       - uses: actions/upload-artifact@v5
         if: always()
         with:
