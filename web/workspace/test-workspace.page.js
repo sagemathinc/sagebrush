@@ -920,7 +920,7 @@ async function migrateOnWrite() {
 // before migrateOne (which would otherwise move another, unmigrated file's bytes first)
 async function writeGuard() {
   const w = await v1([["/g/a.txt", "theirs"], ["/g/b.txt", "bee"]]);
-  const snap = async () => JSON.stringify({ entry: await rawGet(w.ws, "entries", "/g/a.txt"), fileBytes: await rawKeys(w.ws, "fileBytes"), old: dec(await rawGet(w.main, "files", "/g/a.txt")),
+  const snap = async () => JSON.stringify({ entry: await rawGet(w.ws, "entries", "/g/a.txt"), fileBytes: await Promise.all((await rawKeys(w.ws, "fileBytes")).map(async (k) => [k, Array.from(new Uint8Array(await rawGet(w.ws, "fileBytes", k) ?? []))])), old: dec(await rawGet(w.main, "files", "/g/a.txt")),
     meta: await Promise.all((await rawKeys(w.ws, "meta")).map(async (k) => [k, await rawGet(w.ws, "meta", k)])), ops: (await rawKeys(w.ws, "ops")).length, versions: (await rawKeys(w.ws, "versions")).length, left: await legacyLeft(w) });
   const before = await snap();
   const a0 = await rawGet(w.ws, "entries", "/g/a.txt");
@@ -969,6 +969,12 @@ async function pathOfFile_() {
   await rawPut(w.ws, "entries", { ...c, path: "/zz-late.txt" });
   const over = await w.pathOfFile(c.fid);
   check(over.ok === false && over.why === "ambiguous", "…and a second live one past the bound: ambiguous, never the first");
+  // the bound's trashed rows can't hide the one live entry either: 64 in Trash and one live is ambiguous, never "trashed"
+  await w.create("/h.txt", { content: "h" });
+  const { nkey: _h, ...hh } = await rawGet(w.ws, "entries", "/h.txt");
+  for (let k = 0; k < MAX; k++) await rawPut(w.ws, "entries", { ...hh, path: `/Trash/h${k}.txt`, trashed: { from: "/h.txt", at: 1, id: "h" + k } });
+  const hid = await w.pathOfFile(hh.fid);
+  check(hid.ok === false && hid.why === "ambiguous", "…" + MAX + " in Trash and one live: ambiguous (fail closed), never trashed nor a guess");
   w.close();
 }
 
