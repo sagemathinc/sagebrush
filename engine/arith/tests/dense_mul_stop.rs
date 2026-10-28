@@ -150,7 +150,15 @@ fn dense_products_poll_in_every_kernel_phase() {
         }
         // the transpose: B = 1 x C is one long row, polled per chunk inside it
         // (1 x 1 x C, R x 1 x C); B = K x 1 is many short rows, polled per group
-        for (label, r, k, c) in [("nmod transpose 1x1xC", 1, 1, 1 << 18), ("nmod transpose Rx1xC", 4, 1, 1 << 17), ("nmod transpose Kx1 rows", 1, 1 << 18, 1)] {
+        // (B with one row or one column is a chunked copy; a wide B row is
+        // chunked inside; a narrow B, 2 or more columns, counts down rows)
+        for (label, r, k, c) in [
+            ("nmod transpose 1x1xC", 1, 1, 1 << 18),
+            ("nmod transpose Rx1xC", 4, 1, 1 << 17),
+            ("nmod transpose Kx1 rows", 1, 1 << 18, 1),
+            ("nmod transpose 2xC wide rows", 1, 2, 1 << 17),
+            ("nmod transpose Kx2 narrow", 1, 1 << 17, 2),
+        ] {
             let (a, b) = (nm(&mut s, r, k, m), nm(&mut s, k, c, m));
             let want = nref(&a, &b, p);
             case(&mut bad, &format!("{} p={}", label, p), "nmod-transpose", (k * c) as u64 >> 17, &want, || a.mul(&b).d);

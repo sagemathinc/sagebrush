@@ -488,32 +488,46 @@ impl Mat {
             return Mat::zero(self.rows, o.cols, m);
         }
         let mut poll = Poll::new();
-        // (the transpose, polled per group of whole rows of B, or per chunk
-        // inside a long row: never per entry, and never unpolled)
+        // (the transpose of B, polled about every TRANSPOSE_CHUNK entries:
+        // a B with one row or one column keeps its entry order, so it is a
+        // copy in chunks; a wide row is copied in chunks inside the row;
+        // otherwise a countdown of rows, the loop itself as before)
         let transpose = sagebrush_interrupt::enter("nmod-transpose");
-        let mut bt = Mat::zero(o.cols, o.rows, m);
-        if o.cols >= TRANSPOSE_CHUNK {
-            for i in 0..o.rows {
-                for j0 in (0..o.cols).step_by(TRANSPOSE_CHUNK) {
-                    let j1 = (j0 + TRANSPOSE_CHUNK).min(o.cols);
-                    for j in j0..j1 {
-                        bt.d[j * o.rows + i] = o.d[i * o.cols + j];
-                    }
-                    poll.add(j1 - j0);
-                }
+        let bt = if o.rows == 1 || o.cols == 1 {
+            let mut d = Vec::with_capacity(o.d.len());
+            for chunk in o.d.chunks(TRANSPOSE_CHUNK << 4) {
+                d.extend_from_slice(chunk);
+                poll.add(chunk.len());
             }
+            Mat { rows: o.cols, cols: o.rows, m, d }
         } else {
-            let rows_per = TRANSPOSE_CHUNK.div_ceil(o.cols);
-            for i0 in (0..o.rows).step_by(rows_per) {
-                let i1 = (i0 + rows_per).min(o.rows);
-                for i in i0..i1 {
+            let mut bt = Mat::zero(o.cols, o.rows, m);
+            if o.cols >= TRANSPOSE_CHUNK {
+                for i in 0..o.rows {
+                    for j0 in (0..o.cols).step_by(TRANSPOSE_CHUNK) {
+                        let j1 = (j0 + TRANSPOSE_CHUNK).min(o.cols);
+                        for j in j0..j1 {
+                            bt.d[j * o.rows + i] = o.d[i * o.cols + j];
+                        }
+                        poll.add(j1 - j0);
+                    }
+                }
+            } else {
+                let rows_per = TRANSPOSE_CHUNK.div_ceil(o.cols);
+                let mut left = rows_per;
+                for i in 0..o.rows {
                     for j in 0..o.cols {
                         bt.d[j * o.rows + i] = o.d[i * o.cols + j];
                     }
+                    left -= 1;
+                    if left == 0 {
+                        poll.add(rows_per * o.cols);
+                        left = rows_per;
+                    }
                 }
-                poll.add((i1 - i0) * o.cols);
             }
-        }
+            bt
+        };
         drop(transpose);
         let _dot = sagebrush_interrupt::enter("nmod-dot");
         let sq = (m.n as u128 - 1) * (m.n as u128 - 1);

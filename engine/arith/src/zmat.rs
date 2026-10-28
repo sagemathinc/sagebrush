@@ -271,9 +271,9 @@ impl ZMat {
     fn as_i64_polled(&self, poll: &mut Poll) -> Option<Vec<i64>> {
         let mut v = Vec::with_capacity(self.d.len());
         for chunk in self.d.chunks(SCAN_CHUNK) {
-            // (each chunk converted as as_i64 converts the whole)
-            let part: Option<Vec<i64>> = chunk.iter().map(|x| x.to_i64()).collect();
-            v.extend(part?);
+            for x in chunk {
+                v.push(x.to_i64()?);
+            }
             poll.add(chunk.len());
         }
         Some(v)
