@@ -574,6 +574,20 @@ function getHistoryChannel() {
   }
   return historyChannel;
 }
+/** A patch received from the server and stored (sync 2c-3) told to this notebook's history in every tab, this one's
+ * too (the sender may be the writer's tab): `id` is the history key, `env` the patch. */
+export function tellHistory(id, env) {
+  const m = { from: tabId, id, env };
+  getHistoryChannel()?.postMessage(m);
+  for (const f of historySubs) try { f(m); } catch (e) { console.warn("history:", e); }
+}
+/** Sync's acknowledgement released history `id`'s debt (2c-3, doc-sync.ts): told to its writer, in whatever tab it is
+ * (onAcked), so a history paused for want of room resumes.  No `env`: never a patch to the history's subscribers. */
+export function tellAcked(id) {
+  const m = { from: tabId, id, acked: true };
+  getHistoryChannel()?.postMessage(m);
+  for (const f of historySubs) try { f(m); } catch (e) { console.warn("history:", e); }
+}
 export class IdbPatchStore {
   /** `opts.journal`: the journal's hooks (web/notebook/journal.js): `t1(st, row, intent)`, run in each append's own transaction
    * (the patch's row and the journal's rows written together, T1), and `drop(st)`, in a drop's; with them every write
@@ -752,6 +766,13 @@ export class IdbPatchStore {
   }
   subscribe(f) {
     const g = (m) => { if (m.id === this.id && m.env) f(m.env); };
+    getHistoryChannel();
+    historySubs.add(g);
+    return () => historySubs.delete(g);
+  }
+  /** Called when sync's acknowledgement released this history's debt (tellAcked), in any tab. */
+  onAcked(f) {
+    const g = (m) => { if (m.id === this.id && m.acked) f(); };
     getHistoryChannel();
     historySubs.add(g);
     return () => historySubs.delete(g);
