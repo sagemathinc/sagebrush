@@ -1336,6 +1336,14 @@ def _legacy_band_solve(S, B):
 # the most multiply-adds a band solve may take (beyond, the sparse LU)
 MAX_BAND_WORK = 1 << 29
 
+
+# master's band route, PR 2's routing floor (the routing amendment r1, variant (d)): _matlab_lu.solve takes band
+# at once wherever master's mldivide took band, so no system master bands pays the ordering.  A route only,
+# never a refusal: the band path is still admitted by the ledger, and a refused band takes the other path
+def legacy_band_route(n, kl, ku):
+    return (2 * kl + ku + 1) * n <= MAX_FULL and n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK
+
+
 # MASTER'S LU, kept verbatim as an interim (@sagebrush's ruling (d) on M1b,
 # Oct 26 2026): where the capacity record does not cover the js-heap and
 # js-arraybuffer domains (the browser worker today), memory can't be

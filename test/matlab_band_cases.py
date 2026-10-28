@@ -273,6 +273,7 @@ nb = L.band_need(n, 2, 1, 1, False)
 m_band = nb["persistent"] + max(nb["setup"], nb["step"])
 disc = 4 * L.E * L.C_IDX
 saved_costs = dict(L.COSTS["cli"])
+saved_floor = sp.legacy_band_route
 try:
     L._routes = []
     use(Cap(m_band))
@@ -282,12 +283,13 @@ try:
         tags = [r[3] for r in L._recorder if r[0] == "reserve"]
     finally:
         L._recorder = None
-    # (the incumbent COSTS (2abc0a61) charge c_step per row: T_band = 1e-4 n + 1.8e-7 n (kl + 1)(kl + ku + 1) = 0.4087
-    # here, over c_ord nnz = 9.2e-6 * 16000 = 0.1472, so the pre-order shortcut can't take it: band after the ordering)
-    assert L._routes == ["band"] and tags == ["discovery", "ordering", "band", "band-step"], (L._routes, tags)
+    # (master's route takes band here, (2 kl + ku + 1) n = 24006 <= 2^28 and n (kl + 1)(kl + ku + 1) = 48012 <= 2^29,
+    # so the amendment r1 floor takes it at once, though T_band = 0.4087 is over c_ord nnz = 9.2e-6 * 16000 = 0.1472:
+    # no ordering)
+    assert L._routes == ["band"] and tags == ["discovery", "band", "band-step"], (L._routes, tags)
     X0 = sp._legacy_band_solve(T, b.copy())
     assert float(np.max(np.abs(X - X0))) == 0.0
-    ok("route: a tridiagonal-like n = 4001 system takes the band path after the ordering (incumbent COSTS), with master's band answer exactly; G = M_band admits it")
+    ok("route: a tridiagonal-like n = 4001 system takes the band path at once (master's route as the floor, no ordering), with master's band answer exactly; G = M_band admits it")
     # (one byte less: band is refused; the LU, whose own need is larger here, too: one refusal, naming both)
     use(Cap(m_band - 1))
     L._routes = []
@@ -298,16 +300,19 @@ try:
         assert "band path needs %d bytes" % m_band in str(e).splitlines()[0] or "band path needs" in str(e), str(e)
         assert e.need_bytes <= m_band
     ok("route: G = M_band - 1 refuses band; neither path admitted gives one refusal naming both needs")
-    # (the route-only mutant: a band estimate never chosen is caught by the route assertion)
+    # (the route-only mutant: no floor and a band estimate never chosen is caught by the route assertion)
     use(Cap(10 ** 12))
     L.COSTS["cli"]["band"] = 1.0
+    sp.legacy_band_route = lambda n, kl, ku: False
     L._routes = []
     L.solve(T, b, "t")
     assert L._routes == ["lu"], L._routes
     L.COSTS["cli"].update(saved_costs)
-    ok("route: the route-only mutant (band never cheaper) takes LU, so the band-route assertion kills it")
+    sp.legacy_band_route = saved_floor
+    ok("route: the route-only mutant (no floor, band never cheaper) takes LU, so the band-route assertion kills it")
 finally:
     L.COSTS["cli"].update(saved_costs)
+    sp.legacy_band_route = saved_floor
     restore()
 
 # (the pre-order shortcut, its own row: band(4001, 8, 8) has T_band = 0.5103 <= c_ord nnz = 9.2e-6 * 67945 = 0.6251
@@ -328,6 +333,36 @@ try:
     X0 = sp._legacy_band_solve(T8, b.copy())
     assert float(np.max(np.abs(X - X0))) == 0.0
     ok("route: band(4001, 8, 8) takes the band path at once (the pre-order shortcut, no ordering), with master's band answer exactly")
+finally:
+    restore()
+
+# (the floor is master's predicate exactly, at both of its edges: the storage (2 kl + ku + 1) n <= 2^28 and the
+# work n (kl + 1)(kl + ku + 1) <= 2^29)
+assert sp.legacy_band_route(1 << 20, 0, 255) and not sp.legacy_band_route(1 << 20, 0, 256)
+assert sp.legacy_band_route(1 << 19, 3, 252) and not sp.legacy_band_route(1 << 19, 3, 253)
+ok("route: the floor is master's band predicate at its storage and work edges")
+
+# (where master's route doesn't take band, the cost route decides as before: an arrow, kl = ku = n - 1, whose band
+# work n^2 (2n - 1) is over 2^29, takes the ordering and the LU)
+n = 4001
+ent = [(j, j, 4.0 + rnd()) for j in range(n)] + [(0, j, rnd()) for j in range(1, n)] + [(j, 0, rnd()) for j in range(1, n)]
+W = make(n, ent)
+b = np.ones((n, 1))
+try:
+    use(Cap(10 ** 12))
+    L._routes = []
+    L._recorder = []
+    try:
+        X, s = L.solve(W, b, "t")
+        tags = [r[3] for r in L._recorder if r[0] == "reserve"]
+    finally:
+        L._recorder = None
+    assert not sp.legacy_band_route(n, n - 1, n - 1)
+    assert L._routes == ["lu"] and "ordering" in tags and "band" not in tags, (L._routes, tags)
+    AX = np.zeros((n, 1))
+    np.add.at(AX[:, 0], np.array([e[0] for e in ent]), np.array([e[2] for e in ent]) * X[np.array([e[1] for e in ent]), 0])
+    assert float(np.max(np.abs(AX - b))) < 1e-9
+    ok("route: an arrow (master's route takes LU) keeps the cost route: the ordering, then the LU")
 finally:
     restore()
 
