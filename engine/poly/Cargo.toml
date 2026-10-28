@@ -26,3 +26,6 @@ sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
 [[example]]
 name = "transition_bench"
 required-features = ["test-faults"]
+
+[lints]
+workspace = true

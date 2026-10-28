@@ -9,6 +9,7 @@
   { "case": "E6a", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" },
   { "case": "S1", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "no KeyboardInterrupt|did not take the next input" },
   { "case": "S3", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "no escalation" },
+  { "case": "S3", "host": "cli", "finding": "first Stop not honoured: the production regex doesn't poll, so press 1 is pending until the second press escalates (S-delta Stop-250 r4; not honoured, never honoured late)", "owner": "python", "fix": "a poll inside or around non-polling host calls (with magma's S plan)", "signature": "^first Stop not honoured" },
   { "case": "S4", "host": "cli", "finding": "slot 5: a pending Ctrl-C is never raised after a non-polling call when no loop follows (pyjs polls only at back-edges; same root as E13g)", "owner": "python", "fix": "a poll at host-call returns or statement boundaries", "signature": "returned without a KeyboardInterrupt", "routed": "python, with magma's S plan (@sagebrush, Oct 25)" }
  ],
  "pending": [
