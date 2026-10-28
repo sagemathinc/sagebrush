@@ -504,16 +504,14 @@ impl Mat {
             }
         } else {
             let rows_per = TRANSPOSE_CHUNK.div_ceil(o.cols);
-            let mut left = rows_per;
-            for i in 0..o.rows {
-                for j in 0..o.cols {
-                    bt.d[j * o.rows + i] = o.d[i * o.cols + j];
+            for i0 in (0..o.rows).step_by(rows_per) {
+                let i1 = (i0 + rows_per).min(o.rows);
+                for i in i0..i1 {
+                    for j in 0..o.cols {
+                        bt.d[j * o.rows + i] = o.d[i * o.cols + j];
+                    }
                 }
-                left -= 1;
-                if left == 0 {
-                    poll.add(rows_per * o.cols);
-                    left = rows_per;
-                }
+                poll.add((i1 - i0) * o.cols);
             }
         }
         drop(transpose);
@@ -525,52 +523,67 @@ impl Mat {
         if k < DOT_STEP {
             // (each output's dot product exactly as before; one poll per
             // group of outputs worth at least DOT_STEP units)
+            // (blocks of outputs: whole rows when a row is short, else runs
+            // inside a row; the loops inside a block are the plain ones)
             let unit = k + 1;
             let per = DOT_STEP.div_ceil(unit);
-            let mut left = per;
-            for i in 0..self.rows {
-                let a = self.row(i);
-                for j in 0..o.cols {
-                    let b = bt.row(j);
-                    let mut r = 0u64;
-                    for (ca, cb) in a.chunks(batch).zip(b.chunks(batch)) {
-                        let mut acc = 0u128;
-                        for (&x, &y) in ca.iter().zip(cb) {
-                            acc += x as u128 * y as u128;
-                        }
-                        r = m.add(r, m.reduce_u128(acc));
+            let dot = |a: &[u64], b: &[u64]| {
+                let mut r = 0u64;
+                for (ca, cb) in a.chunks(batch).zip(b.chunks(batch)) {
+                    let mut acc = 0u128;
+                    for (&x, &y) in ca.iter().zip(cb) {
+                        acc += x as u128 * y as u128;
                     }
-                    c.d[i * o.cols + j] = r;
-                    left -= 1;
-                    if left == 0 {
-                        poll.add(per * unit);
-                        left = per;
+                    r = m.add(r, m.reduce_u128(acc));
+                }
+                r
+            };
+            let cols = o.cols;
+            if cols < per {
+                let rows_per = per.div_ceil(cols);
+                for i0 in (0..self.rows).step_by(rows_per) {
+                    let i1 = (i0 + rows_per).min(self.rows);
+                    for i in i0..i1 {
+                        let a = self.row(i);
+                        for j in 0..cols {
+                            c.d[i * cols + j] = dot(a, bt.row(j));
+                        }
+                    }
+                    poll.add((i1 - i0) * cols * unit);
+                }
+            } else {
+                for i in 0..self.rows {
+                    let a = self.row(i);
+                    for j0 in (0..cols).step_by(per) {
+                        let j1 = (j0 + per).min(cols);
+                        for j in j0..j1 {
+                            c.d[i * cols + j] = dot(a, bt.row(j));
+                        }
+                        poll.add((j1 - j0) * unit);
                     }
                 }
             }
         } else {
-            // (a long dot product: batches of at most DOT_STEP, counted
-            // locally and polled about every DOT_STEP multiply-adds inside it)
+            // (a long dot product: slices of DOT_STEP multiply-adds, each in
+            // batches as before, one poll per slice)
             let batch = batch.min(DOT_STEP);
             for i in 0..self.rows {
                 let a = self.row(i);
                 for j in 0..o.cols {
                     let b = bt.row(j);
                     let mut r = 0u64;
-                    let mut pending = 0usize;
-                    for (ca, cb) in a.chunks(batch).zip(b.chunks(batch)) {
-                        let mut acc = 0u128;
-                        for (&x, &y) in ca.iter().zip(cb) {
-                            acc += x as u128 * y as u128;
+                    for l0 in (0..k).step_by(DOT_STEP) {
+                        let l1 = (l0 + DOT_STEP).min(k);
+                        for (ca, cb) in a[l0..l1].chunks(batch).zip(b[l0..l1].chunks(batch)) {
+                            let mut acc = 0u128;
+                            for (&x, &y) in ca.iter().zip(cb) {
+                                acc += x as u128 * y as u128;
+                            }
+                            r = m.add(r, m.reduce_u128(acc));
                         }
-                        r = m.add(r, m.reduce_u128(acc));
-                        pending += ca.len();
-                        if pending >= DOT_STEP {
-                            poll.add(pending);
-                            pending = 0;
-                        }
+                        poll.add(l1 - l0);
                     }
-                    poll.add(pending + 1);
+                    poll.add(1);
                     c.d[i * o.cols + j] = r;
                 }
             }

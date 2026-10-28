@@ -169,19 +169,36 @@ impl ZMat {
                 if k < MUL_STEP {
                     // (each output's dot product exactly as before; one poll
                     // per group of outputs worth at least MUL_STEP units)
+                    // (blocks of outputs: whole rows when a row is short, else
+                    // runs inside a row; the loops inside a block are the
+                    // plain ones, with no counting)
                     let per = MUL_STEP.div_ceil(k + 1);
-                    let mut left = per;
-                    for i in 0..r {
-                        for j in 0..c {
-                            let mut s = 0i128;
-                            for l in 0..k {
-                                s += a[i * k + l] as i128 * b[l * c + j] as i128;
+                    let dot = |i: usize, j: usize| {
+                        let mut s = 0i128;
+                        for l in 0..k {
+                            s += a[i * k + l] as i128 * b[l * c + j] as i128;
+                        }
+                        s
+                    };
+                    if c < per {
+                        let rows_per = per.div_ceil(c);
+                        for i0 in (0..r).step_by(rows_per) {
+                            let i1 = (i0 + rows_per).min(r);
+                            for i in i0..i1 {
+                                for j in 0..c {
+                                    d.push(BigInt::from(dot(i, j)));
+                                }
                             }
-                            d.push(BigInt::from(s));
-                            left -= 1;
-                            if left == 0 {
-                                poll.add(per * (k + 1));
-                                left = per;
+                            poll.add((i1 - i0) * c * (k + 1));
+                        }
+                    } else {
+                        for i in 0..r {
+                            for j0 in (0..c).step_by(per) {
+                                let j1 = (j0 + per).min(c);
+                                for j in j0..j1 {
+                                    d.push(BigInt::from(dot(i, j)));
+                                }
+                                poll.add((j1 - j0) * (k + 1));
                             }
                         }
                     }
@@ -254,9 +271,9 @@ impl ZMat {
     fn as_i64_polled(&self, poll: &mut Poll) -> Option<Vec<i64>> {
         let mut v = Vec::with_capacity(self.d.len());
         for chunk in self.d.chunks(SCAN_CHUNK) {
-            for x in chunk {
-                v.push(x.to_i64()?);
-            }
+            // (each chunk converted as as_i64 converts the whole)
+            let part: Option<Vec<i64>> = chunk.iter().map(|x| x.to_i64()).collect();
+            v.extend(part?);
             poll.add(chunk.len());
         }
         Some(v)
