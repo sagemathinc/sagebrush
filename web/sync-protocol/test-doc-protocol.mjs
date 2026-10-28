@@ -83,6 +83,11 @@ check(res.maxRSS > 0 && res.maxRSS < 96 * 1024, `jcs: 16 MiB of U+0001 refused b
   check(P.shapeMismatch(page, by("pull", "a page")) === null && P.shapeMismatch({ ...page, items: [] }, by("pull", "a page")) === null, "shapes: a page (and an empty one) matches, null chains too");
   check(/snapshot: not in the shape/.test(P.shapeMismatch({ ...page, snapshot: { at_seq: 1 } }, by("pull", "a page")) ?? ""), "shapes: a page with a snapshot key is refused");
   check(/items\[0\]\.device: missing/.test(P.shapeMismatch({ ...page, items: [{ ...page.items[0], device: undefined }].map(({ device, ...x }) => x) }, by("pull", "a page")) ?? ""), "shapes: an item without its device is refused");
+  // (daybreak4's item 4 review: a value of the wrong named type, a map's value of the wrong type, and a non-array
+  // where the shape is an array are each refused, so each of those three guards has a fixture that fails without it)
+  check(/\$\.req: not number/.test(P.shapeMismatch({ ...ack, req: "3" }, by("batch", "a new patch")) ?? ""), "shapes: a req that is a string, not a number, is refused");
+  check(/resent\.0{11}_c: not number/.test(P.shapeMismatch({ t: "ack", req: 4, batch: { new: 0, resent: { ["0".repeat(11) + "_c"]: "2" }, head } }, by("batch", "every patch a resend")) ?? ""), "shapes: a resent map's value that is a string, not a number, is refused");
+  check(/\$\.items: not an array/.test(P.shapeMismatch({ ...page, items: { 0: page.items[0] } }, by("pull", "a page")) ?? ""), "shapes: items as an object, not an array, is refused");
   const ep = { t: "error", req: 6, code: "epoch", detail: { message: "m", epoch: 2, head: { epoch: 2, seq: 1 } } };
   check(P.shapeMismatch(ep, by("batch", "another epoch")) === null && P.shapeMismatch(ep, by("pull", "another epoch")) === null, "shapes: the cleared history's refusal matches, for batch and pull");
   check(/code: not "stale_epoch"/.test(P.shapeMismatch(ep, by("doc_claim", "another epoch")) ?? ""), "shapes: a claim's other epoch is stale_epoch, not epoch");
