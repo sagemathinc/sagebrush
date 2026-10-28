@@ -73,7 +73,10 @@ def matrix_of(job):
     return [dict(zip(keys, combo)) for combo in itertools.product(*(m[k] for k in keys))]
 
 
-def substitute(text, ctx):
+def substitute(text, ctx, lenient=False):
+    """${{ ... }}: matrix.*, runner.temp and github.sha. Anything else is GitHub's own context: in an env value
+    (lenient) it's empty, as on a run with no such event; in a script it's an error, so a step that needs CI's
+    context is never run wrongly."""
     def one(m):
         expr = m.group(1).strip()
         if expr.startswith("matrix."):
@@ -82,6 +85,8 @@ def substitute(text, ctx):
             return ctx["temp"]
         if expr == "github.sha":
             return ctx["sha"]
+        if lenient:
+            return ""
         raise KeyError(expr)
     return re.sub(r"\$\{\{\s*([^}]+?)\s*\}\}", one, text)
 
@@ -115,7 +120,7 @@ def run_job(name, job, combo, args, state):
             v = str(v)
             if "${{" in v:
                 continue  # (CI's own variables, e.g. vars.CI_CPUS: not set locally)
-            env[k] = substitute(v, ctx)
+            env[k] = substitute(v, ctx, lenient=True)
     t0 = time.time()
     notes = []
     for step in job.get("steps", []):
@@ -125,7 +130,11 @@ def run_job(name, job, combo, args, state):
             if why != "uses":
                 notes.append(f"skipped ({why}): {label}")
             continue
-        script = substitute(step["run"], ctx)
+        try:
+            script = substitute(step["run"], ctx)
+        except KeyError as e:
+            shutil.rmtree(temp, ignore_errors=True)
+            return False, time.time() - t0, notes + [f"FAILED (needs CI's context: {e.args[0]}): {label}"]
         lines = [l.strip() for l in script.strip().splitlines() if l.strip()]
         cmds = [p.strip() for l in lines for p in l.split("&&")]
         if not args.rebuild_each and cmds and all(BUILD_LINE.match(c) for c in cmds):
@@ -144,7 +153,7 @@ def run_job(name, job, combo, args, state):
                 state["built"].add("node scripts/build-cli.mjs")
         senv = dict(env)
         for k, v in (step.get("env") or {}).items():
-            senv[k] = substitute(str(v), ctx)
+            senv[k] = substitute(str(v), ctx, lenient=True)
         # (what earlier steps put in $GITHUB_ENV)
         with open(genv) as f:
             for line in f:
