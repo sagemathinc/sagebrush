@@ -1211,10 +1211,10 @@ try {
       const marks = {}, procs = {}, pending = [], qt = {};
       let t0 = 0, Q = null, before = "unread", preNav = "unread";
       const mark = (step) => { marks[step] = Date.now() - t0; };
-      const snap = (step) => raw("SystemInfo.getProcessInfo", {}, undefined, 5000).then((x) => (x?.processInfo ?? []).map((p) => [p.type, p.id, Math.round((p.cpuTime ?? 0) * 10) / 10]), (x) => `unread: ${x.message}`).then((v) => { procs[step] = v; });
+      const snap = (step) => raw("SystemInfo.getProcessInfo", {}, undefined, 5000).then((x) => (x?.processInfo ?? []).map((p) => [p.type, p.id, Math.round((p.cpuTime ?? 0) * 10) / 10]), (x) => `unread: ${x.message}`).then((v) => { procs[step] = v; }, (x) => { procs[step] = `unread: ${x?.message}`; });
       const snapAt = (step) => { pending.push(snap(step)); };
       const said = async (ok) => {
-        await Promise.all(pending);
+        await Promise.allSettled(pending);
         console.log(`  (${what}: reopen timing, ms from the crash: ${JSON.stringify(marks)}; the new page's own steps, ms from its start: ${JSON.stringify(qt)}; renderer before navigating: ${preNav})`);
         if (!ok || (marks.ready ?? marks.failed ?? 0) > 10_000) console.log(`  (${what}: Chrome's processes [type, id, cpu s] by step: ${JSON.stringify(procs)})`);
       };
