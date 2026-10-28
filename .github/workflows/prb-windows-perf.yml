@@ -90,7 +90,9 @@ jobs:
           git diff --quiet "$PRB_HEAD" HEAD -- engine test || { echo "INVALID: the branch's tree is not the reviewed PR B head"; exit 9; }
           P=$RUNNER_TEMP/ctrlc_perf.py
           git show HEAD:engine/py/ctrlc_perf.py > "$P"
-          [ "$(sha256sum "$P" | cut -c1-64)" = "$PERF_SHA" ] || { echo "INVALID: ctrlc_perf.py differs"; exit 9; }
+          # hashed from stdin: $RUNNER_TEMP is a backslash path (D:\a\_temp), and sha256sum escapes such a name with a leading "\"
+          H=$(sha256sum < "$P" | cut -c1-64)
+          [ "$H" = "$PERF_SHA" ] || { echo "INVALID: ctrlc_perf.py differs (got $H, want $PERF_SHA)"; exit 9; }
           echo "HEAD $(git rev-parse HEAD)  tree = $PRB_HEAD  ctrlc_perf.py (HEAD blob) sha256 $PERF_SHA verified"
           M=artifacts/MANIFEST
           [ "$(cut -d' ' -f1 $M | tr '\n' ' ')" = "A B " ] && [ "$(awk 'NF != 5' $M | wc -l)" = 0 ] || { echo "INVALID: MANIFEST malformed"; exit 9; }

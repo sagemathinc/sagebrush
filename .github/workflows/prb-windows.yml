@@ -7,9 +7,10 @@ name: prb-windows
 # there (CORR-CTRLC-3-Windows, recorded as XFAIL).  Only on the throwaway
 # branch prb-windows-evidence (never on master); nothing is published.
 
+# Its evidence run is done (40636733599): dispatch-only now, so a push for prb-windows-perf can't start a duplicate
+# (40638493060).  workflow_dispatch works only for workflows on the default branch, so this never runs from here.
 on:
-  push:
-    branches: ["prb-windows-evidence"]
+  workflow_dispatch:
 
 permissions:
   contents: read
