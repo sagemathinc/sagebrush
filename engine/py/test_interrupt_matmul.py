@@ -71,6 +71,10 @@ elif shape == "big":  # 1 x n x 1, 300-digit entries
     a, b = text(1, n, lambda i, j: 10**299 + 7 * j), text(n, 1, lambda i, j: 10**299 - 3 * i)
 elif shape == "big-square":  # n x n, 300-digit entries
     a = b = text(n, n, lambda i, j: 10**299 + 7919 * i + 104729 * j)
+elif shape == "big1k-square":  # n x n, 1000-digit entries
+    a = b = text(n, n, lambda i, j: 10**999 + 7919 * i + 104729 * j)
+elif shape == "big2k-square":  # n x n, 2000-digit entries
+    a = b = text(n, n, lambda i, j: 10**1999 + 7919 * i + 104729 * j)
 elif shape == "big-1xKxM":  # 1 x n x 16, 300-digit entries
     a, b = text(1, n, lambda i, j: 10**299 + 7 * j), text(n, 16, lambda i, j: 10**299 - 3 * i - j)
 else:  # huge: 1 x n x 1, 4000-digit entries (under the 4300-digit int-str limit)
@@ -81,6 +85,7 @@ DIMS = {
     "1xKx1": lambda n: (1, n, 1), "1xKxM": lambda n: (1, n, 64), "square": lambda n: (n, n, n),
     "wide": lambda n: (n, 32, n), "output-heavy": lambda n: (n, 1, n), "big": lambda n: (1, n, 1),
     "big-square": lambda n: (n, n, n), "big-1xKxM": lambda n: (1, n, 16), "huge": lambda n: (1, n, 1),
+    "big1k-square": lambda n: (n, n, n), "big2k-square": lambda n: (n, n, n),
 }
 '''
 
@@ -162,8 +167,13 @@ print("end", flush=True)
 SETS = {
     # big: about 1-4 s natively on a VM, requests or replies of 25-640 MB (the FU-MM-T evidence)
     "big": [("1xKx1", 8_000_000), ("1xKxM", 600_000), ("square", 1400), ("wide", 9000), ("output-heavy", 3000), ("big", 400_000)],
-    # small: every request and reply under about 8 MB (T's future per-call budget): #241's own claim
-    "small": [("1xKx1", 400_000), ("1xKxM", 20_000), ("square", 630), ("wide", 500), ("output-heavy", 500), ("big", 12_000), ("big-1xKxM", 800), ("big-square", 100), ("huge", 600)],
+    # small: every request and reply under about 8 MB (T's future per-call budget): #241's own claim.
+    # big1k-square and big2k-square (requests and replies of about 7.1-7.2 MB)
+    # are the most work per byte under that cap, so that a fast timing box
+    # still has real-signal rows (T >= 0.5 s): VM3/VM4 gave square 630 and
+    # big-square 100 T = 0.42-0.57 s, too close to 0.5 s to count on
+    "small": [("1xKx1", 400_000), ("1xKxM", 20_000), ("square", 630), ("wide", 500), ("output-heavy", 500), ("big", 12_000), ("big-1xKxM", 800), ("big-square", 100), ("huge", 600),
+              ("big1k-square", 60), ("big2k-square", 42)],
 }
 WAIT = 600.0  # the longest any child may take (a hang guard, not a limit of the computation)
 WAIVER = "WAIVED FU-MM-T (William, Oct 27 2026: land #241 with the named temporary exception; retired by tiling PR T)"
@@ -386,6 +396,7 @@ DECLARED = {
     "output-heavy": (lambda n: (n, 1, n), 9, 9, False), "big": (lambda n: (1, n, 1), 300, 300, True),
     "big-square": (lambda n: (n, n, n), 300, 300, True), "big-1xKxM": (lambda n: (1, n, 16), 300, 300, True),
     "huge": (lambda n: (1, n, 1), 4000, 4000, True),
+    "big1k-square": (lambda n: (n, n, n), 1000, 1000, True), "big2k-square": (lambda n: (n, n, n), 2000, 2000, True),
 }
 
 
