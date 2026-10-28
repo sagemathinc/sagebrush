@@ -98,7 +98,7 @@ once). The jobs, in the order they run, with their times here:
 | `language-node` (6 shards) | the Magma and MATLAB case tests under Node | 23.2 min |
 | `checks` | security, bundles, generated files and web assets; the size record; the npm package metrics; Mermaid | 3.9 min |
 | `web-sync` | sharing, sync, the engines and the PWA, in Chrome | 22.2 min |
-| `web-runner` | the runner, the workspace and the board frame, in Chrome | 6.9 min |
+| `web-runner` | the runner, the workspace and the board frame, in Chrome | 11.8 min (8 cores; below) |
 | `interrupt-matrix` | Stop and Ctrl-C across hosts and modes (CI's set) | 6.5 min |
 | `web-browser` (5 groups) | the notebook's and the boards' browser suites | 40.6 min |
 | `conformance` (Node, Deno, Bun) | the catalog's examples and coverage | 1.5 min |
@@ -113,6 +113,10 @@ once). The jobs, in the order they run, with their times here:
 
 The engine jobs run last: `engine-wasm` builds a fresh engine, and the `engine-*` jobs after it test that engine,
 as in CI. The committed engine is restored at the end.
+
+The times were measured on the 16-core VM, except `web-runner`'s, which was measured alone on an 8-core VM. In the
+full run its step stopped at a failure (since fixed: the first paragraph of this section), so the time there
+didn't cover the whole step.
 
 Each job keeps CI's `timeout-minutes`. The first `engine-cpython` builds the CPython extension with
 `maturin build --release` from cold (CI restores a Rust cache), and that can take it past its 15 min limit.
