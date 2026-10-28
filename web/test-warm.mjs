@@ -52,6 +52,7 @@ const fileNew = async () => {
 const toSage = () => ev("sagebrush.notebook.setMode('sage'); true"); // (programmatic, as an agent or a document would)
 
 try {
+  await send("Page.enable");
   await send("Page.addScriptToEvaluateOnNewDocument", { source: COUNTER });
   await send("Page.navigate", { url: base });
   await until(ready);
