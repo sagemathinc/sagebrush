@@ -3,6 +3,8 @@
 //! also uses `threads` worker threads (0 = all cores).  Invalid arguments
 //! raise ValueError; Ctrl-C raises KeyboardInterrupt (see `guarded`).
 
+mod child;
+mod guard;
 use sagebrush_modsym::exact::Exact;
 use pyo3::exceptions::{PyKeyboardInterrupt, PyValueError};
 use pyo3::prelude::*;
@@ -454,6 +456,16 @@ fn mpoly_call<'py>(py: Python<'py>, request: Vec<u8>) -> PyResult<Bound<'py, pyo
     Ok(pyo3::types::PyBytes::new(py, &r))
 }
 
+mod raster_child;
+
+/// Runs the PNG engine's process (PNG plan r8 §2.3): called by the raster
+/// child's prelude, in a process of its own (`python -I -S -c PRELUDE`),
+/// never in a Python session.  Never returns.
+#[pyfunction]
+fn raster_child_main(py: Python<'_>) -> PyResult<()> {
+    py.detach(|| raster_child::main())
+}
+
 /// A PNG call's failure as the browser's _sbraster raises it
 /// (src/runtime/raster.ts): the input refused (a limit, an unsupported
 /// drawing, not a PNG) a ValueError; memory the engine could not allocate a
@@ -874,6 +886,13 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let raster = PyModule::new(m.py(), "raster")?;
     raster.add_function(wrap_pyfunction!(raster_render, &raster)?)?;
     raster.add_function(wrap_pyfunction!(raster_decode, &raster)?)?;
+    raster.add_function(wrap_pyfunction!(raster_child_main, &raster)?)?;
+    raster.add_function(wrap_pyfunction!(guard::locked_call, &raster)?)?;
+    raster.add_function(wrap_pyfunction!(guard::locked_call_counts, &raster)?)?;
+    raster.add_function(wrap_pyfunction!(guard::settled_call, &raster)?)?;
+    raster.add_class::<guard::ReleaseLog>()?;
+    #[cfg(any(unix, windows))]
+    child::register(&raster)?;
     m.add_submodule(&raster)?;
     m.add_function(wrap_pyfunction!(set_memory_share_source, m)?)?;
     m.add_function(wrap_pyfunction!(set_memory_total_source, m)?)?;

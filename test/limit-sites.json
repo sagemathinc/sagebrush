@@ -1474,10 +1474,174 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
+ "engine/py/src/child.rs :: _close :: const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9; #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: _close :: const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000; #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: active_process_limit: u32, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: basic: BasicLimitInformation, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: if unsafe { ResumeThread(pi.thread) } == u32::MAX { #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: if unsafe { SetInformationJobObject(job, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, &limits as *const _ as *const c_void, std::mem::size_of::<ExtendedLimitInformation>() as u32) } == 0 { #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: job_memory_limit: usize, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: let mut limits: ExtendedLimitInformation = unsafe { std::mem::zeroed() }; #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: limit_flags: u32, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: limits.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE; #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: maximum_working_set_size: usize, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: per_job_user_time_limit: i64, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: per_process_user_time_limit: i64, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: process_memory_limit: usize, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: struct BasicLimitInformation { #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: struct ExtendedLimitInformation { #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
  "engine/py/src/lib.rs :: raster_render :: const RASTER_MAX_FILE_BYTES: usize = 256 << 20; #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
   "row": "inv-31"
+ },
+ "engine/raster-launch/src/main.rs ::  :: const RLIMIT_AS: usize = 9; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs ::  :: const STAGE_LIMIT: u32 = 1; #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "engine/raster-launch/src/main.rs ::  :: pub const PRLIMIT64: usize = 261; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs ::  :: pub const PRLIMIT64: usize = 302; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: launch :: if limit > old[1] { #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "engine/raster-launch/src/main.rs :: launch :: let (Some(limit), Some(parent), Some(fd), Some(bound)) = (decimal(arg(1)), decimal(arg(2)), decimal(arg(3)), decimal(arg(4))) else { #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: launch :: let new = [limit, old[1]]; #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "engine/raster-launch/src/main.rs :: launch :: let r = syscall(nr::PRLIMIT64, 0, RLIMIT_AS, 0, old.as_mut_ptr() as usize); #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "engine/raster-launch/src/main.rs :: launch :: let r = syscall(nr::PRLIMIT64, 0, RLIMIT_AS, new.as_ptr() as usize, 0); #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "engine/raster-launch/src/main.rs :: launch :: refuse(fd, STAGE_LIMIT, (-r) as u32, 0); #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "engine/raster-launch/src/main.rs :: launch :: refuse(fd, STAGE_LIMIT, (-r) as u32, 0); #1": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "engine/raster-launch/src/main.rs :: launch :: refuse(fd, STAGE_LIMIT, 0, old[1]); #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "engine/raster-launch/src/main.rs :: vm_peak :: if n == 0 || len == cap { #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: vm_peak :: let cap = 8192usize; #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster-launch/src/main.rs :: vm_peak :: let n = syscall(nr::READ, fd as usize, base.add(len) as usize, cap - len, 0); #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
  },
  "engine/raster/src/dash.rs :: compare :: fn compare(path: &Path, array: &[f32], offset: f32, width: f32, cap: LineCap, t: Transform, size: u32) -> (usize, u8) { #0": {
   "class": "none",
@@ -3247,6 +3411,69 @@
  "lib/_memguard.py :: sizes :: return \"%d bytes\" % need_bytes, \"%d bytes\" % limit_bytes #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
+ },
+ "lib/_memledger.py ::  :: - standing: the warm engine process's limit, less what a fresh observation #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "lib/_memledger.py :: Ledger.end_call.build :: cap = (old_standing.bytes if old_standing is not None else 0) + (engine.bytes if engine is not None else 0) #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "lib/_memledger.py :: Ledger.end_call.build :: new = max(0, min(int(standing), cap)) #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "lib/_memledger.py :: Ledger.rebase :: (limit, rss) in bytes now. Returns the headroom F0' - held after #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "lib/_memledger.py :: Ledger.rebase :: limit, rss = child() #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "lib/_memledger.py :: Ledger.rebase :: standing = limit - self.child_rss #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "lib/_memledger.py :: Ledger.set_standing :: \"\"\"The engine process's standing charge (its whole limit, until an #0": {
+  "class": "2",
+  "owner": "raster/image I/O",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
  },
  "lib/_png.py ::  :: MAX_AXIS = 16384 #0": {
   "class": "1+2",

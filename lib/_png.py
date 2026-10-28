@@ -114,5 +114,9 @@ def read(fname, format=None):
         if str(e).startswith("a PNG file that cannot be read"):
             raise OSError("imread: " + str(e)) from None
         raise ValueError("imread: " + str(e)) from None
+    if isinstance(raw, np.ndarray):
+        # (the Python package's engine reads the values into an array of
+        # their own: reshaped, not copied)
+        return raw.reshape((h, w) if ch == 1 else (h, w, ch))
     a = np.frombuffer(raw, dtype=np.float32)
     return a.reshape((h, w) if ch == 1 else (h, w, ch)).copy()

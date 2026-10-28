@@ -161,6 +161,41 @@ free, less a reserve, or a quarter of what is free when that is more.
 These figures are observations, not reservations: another process can
 still take the memory.
 
+### PNG files
+
+A plot saved as PNG (`savefig("plot.png")`) and a PNG read with `imread`
+are drawn or read in a process of their own, which Sagebrush starts the
+first time and keeps for the next. That costs about half a millisecond a
+picture, and it buys:
+
+- **a bound:** on Linux, the process can't use more memory than Sagebrush
+  admitted for the picture, which is what is free less a reserve, read fresh
+  each time. A picture that needs more is a `MemoryError` that says so, and
+  your Python goes on;
+- **isolation:** if the engine runs out of memory or crashes, only its
+  process ends. Your session keeps running, and the next picture starts a
+  new one;
+- **Ctrl-C:** it stops a long render at once.
+
+On macOS and Windows (and on Linux if the bound can't be set up), the
+process runs without an OS memory limit, with a warning saying so: a crash
+still stays in it.
+
+Where Sagebrush can't see this process's memory and works from
+`SAGEBRUSH_MEMORY_BYTES` alone, writing a PNG is refused with an error
+that says why: a PNG's bytes, once returned, can't be tracked until they
+are freed, so they can't be kept within that figure. Reading PNG files
+still works there, and SVG output is unaffected.
+
+`SAGEBRUSH_RASTER_ISOLATION` chooses how:
+
+- `contained` (the default): as above;
+- `enforced`: refuse PNG work where the memory bound can't be enforced;
+- `in-process`: draw and read inside your Python process, with no separate
+  process. That gives up all three protections: running out of memory, or a
+  crash, can end your Python session, and Ctrl-C stops a render only when it
+  returns. A warning says so the first time.
+
 ## License
 
 Copyright (c) 2026 SageMath, Inc. Licensed under either of the Apache

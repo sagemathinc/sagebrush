@@ -1,0 +1,27 @@
+[package]
+name = "sagebrush-raster-launch"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Starts Sagebrush's PNG engine process under its memory limit: a static, syscall-only Linux executable that sets RLIMIT_AS and the parent-death signal before it execs Python (PNG plan r8 §2.3)"
+
+# (its own workspace: a no_std, no_main executable built with its own flags
+# by scripts/build-raster-launch.mjs, never with the engine's crates)
+[workspace]
+
+[[bin]]
+name = "sagebrush-raster-launch"
+path = "src/main.rs"
+test = false
+bench = false
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1
+debug = false
+strip = true
+
+[profile.dev]
+panic = "abort"

@@ -234,6 +234,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-memledger.src": {
+   "exact": false,
+   "ceiling": 16513,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-pickle.src": {
    "exact": false,
    "ceiling": 81015,
@@ -567,6 +574,7 @@
    "engine/lib/mod-json.src": 4930,
    "engine/lib/mod-marimo.src": 6464,
    "engine/lib/mod-matplotlib.src": 24036,
+   "engine/lib/mod-memledger.src": 15012,
    "engine/lib/mod-pickle.src": 73650,
    "engine/lib/mod-platform.src": 571,
    "engine/lib/mod-png.src": 5970,

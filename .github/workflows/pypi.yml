@@ -62,6 +62,11 @@ jobs:
           python engine/py/test_interrupt.py
           python engine/py/test_audit.py
           python engine/py/test_mcp.py
+          # (the PNG engine's child on each platform: all of it on Linux; the
+          # contained mode's portable tests on macOS and Windows; numpy, as
+          # decode returns its values as an array)
+          python -m pip install numpy==2.5.1
+          python engine/py/test_raster_child.py
           python engine/py/test_session_ctrl.py
           cd engine/py && python -m doctest README.md && echo doctests ok
       - uses: actions/upload-artifact@v5
