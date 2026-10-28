@@ -46,7 +46,9 @@ import { localFollow } from "./local-follow";
 import { embedded, engineRef, exportHtml, fileOutputs } from "./export";
 import { Images } from "./images";
 import { BoardHistory, type HistoryModule } from "./history";
-import { mountBoard, type BoardHost } from "./mount";
+import { BoardRecordStore, boardKind, journalId } from "./journal";
+import { canon } from "./merge";
+import { mountBoard, type BoardHost, type BoardTimeTravel } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { EditChannel, EDIT_BOUNDS, inlinePictures, utf8Length, type Kept } from "./edit-channel";
@@ -54,7 +56,7 @@ import { PictureChannel, byReference } from "./edit-pictures";
 import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistoryRefused, HISTORY_STOPPED } from "../notebook/stores.js";
 // (each from its own module, never the workspace barrel: the barrel re-exports the sync client by value, which
 // would keep it in the frame's and exports' build without sync)
-import { Workspace, LIMITS, registerJournalWriter, type Entry } from "../workspace/api";
+import { Workspace, LIMITS, registerJournalWriter, stripBoard, type Entry } from "../workspace/api";
 import { migrate } from "../workspace/migrate";
 import { freePath, nameOf, splitExt, safeName } from "../workspace/paths";
 import { startMigrator } from "../workspace/migrator";
@@ -78,7 +80,8 @@ import { within } from "./idb-open";
 // (this build's boards work under an active journal (plan-sync-slice2-client r4 §2, option (ii) of Oct 27): a
 // board's value is still saved as before, through Workspace.write, and its TimeTravel by a store that follows the
 // fence's phase ({followPhase}), so the journal's activation doesn't stop them; a board page from before this build
-// is still refused by the fences.  Boards' own journal (T1/T2) is 2c-1b's)
+// is still refused by the fences.  Boards' own journal (T1/T2), for a page loaded once the journal is active, is
+// journal.ts's: `journalOn` below)
 registerJournalWriter("boards");
 
 const q = new URLSearchParams(location.search);
@@ -317,6 +320,63 @@ const saveKey = "sagebrush-board:" + source;
 const local = /^local:[0-9a-f]{12}$/.test(source);
 // (a document's history in this browser: by its source and its name beside it)
 const historyKey = (id: string | null) => "board:" + source + (id ? ":" + id : "");
+// The board journal (2c-1b-i, DEV-only: design-2c1b-i r3, journal.ts): a board of the workspace is saved through the
+// journal's store once this browser's workspace journal is active, read once, at load (§2's gate).  Everything it
+// changes here is behind `journalOn`; with it off, the page is as before
+const journalOn = local && !!ws && (await ws.journalActive().catch(() => false));
+// (the store, once opened and loaded: its row must exist first (§2.3 B7); one per page, the board's)
+let jstore: any = null, jopening: Promise<any> | null = null, jkit: any = null;
+// (TimeTravel's listeners, told after each version the store keeps and once it is opened: §2.4's facade)
+const jSubs = new Set<() => void>();
+const historyModule = () => import(new URL("../sagebrush-history.js", import.meta.url).href) as Promise<HistoryModule & { journalStoreClasses: any; hashOf: any }>;
+const JOURNAL_NO_STORAGE = "this browser saves boards through sync's journal, which needs its storage: it isn't available here";
+/** The board's journal store, opened and loaded (its load recovers: intents replayed, an old row stamped). */
+function openJournal(id: string): Promise<any> {
+  return (jopening ??= (async () => {
+    const [mod, hdb] = await Promise.all([historyModule(), openBoardHistoryDb()]);
+    if (!hdb) throw new Error(JOURNAL_NO_STORAGE);
+    jkit ??= mod.journalStoreClasses({ IdbStore: BoardRecordStore, IdbPatchStore }, boardKind);
+    const s = new jkit.JournalStore(ws, hdb, journalId(id), null, mod);
+    s.hashOf = (d: BoardDoc) => mod.hashOf(s.kind, d);
+    await s.load();
+    s.history.on(() => { for (const f of jSubs) f(); });
+    jstore = s;
+    for (const f of jSubs) f();
+    return s;
+  })().catch((e) => { jopening = null; throw e; }));
+}
+/** TimeTravel under the journal (§2.4): the journal store's versions, after the versions this document had before the
+ * journal (read-only, from its own key); nothing recorded here (the store's saves are the versions); closing it lets
+ * only its own listeners go, never the store. */
+async function journalHistory(docId: string | null): Promise<BoardTimeTravel | null> {
+  const [mod, db] = await Promise.all([historyModule(), openBoardHistoryDb()]);
+  if (!db) return null;
+  const legacy = docId ? await new BoardHistory(mod, new IdbPatchStore(db, historyKey(docId), { followPhase: true })).init() : null;
+  const mine = new Set<() => void>();
+  const own = () => (jstore?.history?.session ? jstore.history : null);
+  // (the journal's first version, when it is the last one from before it (the load's stamp, §2.1 D-2): not listed)
+  let seam: { key: string; skip: boolean } | null = null;
+  const parts = () => {
+    const lv = legacy?.versions() ?? [], jh = own(), jv: { time: string; ms: number }[] = jh ? jh.versions() : [];
+    if (!lv.length || !jv.length) return { lv, jv };
+    const key = lv[lv.length - 1].time + "|" + jv[0].time;
+    if (seam?.key !== key) seam = { key, skip: canon(legacy!.docAt(lv[lv.length - 1].time)) === canon(jh.docAt(jv[0].time)) };
+    return { lv, jv: seam.skip ? jv.slice(1) : jv };
+  };
+  return {
+    record: () => null,
+    versions() {
+      const { lv, jv } = parts();
+      return [...lv, ...jv].map((v, index) => ({ time: v.time, ms: v.ms, index }));
+    },
+    docAt(time: string) {
+      const { lv } = parts();
+      return lv.some((v) => v.time === time) ? legacy!.docAt(time) : own().docAt(time);
+    },
+    on(f: () => void) { mine.add(f); jSubs.add(f); return () => { mine.delete(f); jSubs.delete(f); }; },
+    close() { for (const f of mine) jSubs.delete(f); mine.clear(); legacy?.close(); },
+  };
+}
 const bench = q.has("items") || q.has("strokes");
 const file = !!embedded();
 // (the frame other sites show a board in, /frame/board/ (export.ts
@@ -559,7 +619,11 @@ const logSave = (what: string, d: BoardDoc, epoch: number, base?: number) => {
 // made on an older view never writes the board, only that conflict's copy:
 // CORR-0FC-1)
 let wsEpoch = 0, wsCopy: { epoch: number; ref: string; rev: number } | null = null;
-function wsSave(id: string, d: BoardDoc) {
+// (under the board journal: the pending copy a load is bringing in (its original header), dropped once a save of its
+// view is kept: design-2c1b-i r3 §2.3's bridge)
+let wsBridge: { header: string; epoch: number } | null = null;
+/** `bridge`: the original header of the pending copy `d` is (the board journal's load bridge, §2.3): the save's tag. */
+function wsSave(id: string, d: BoardDoc, bridge?: string) {
   const w = ws!, refused = wsRefused;
   // (the workspace quarantined, being reset, or reset or upgraded elsewhere: nothing kept, not even the pending
   // copy in localStorage, and said: astra's CORR-2A4-2 on 0eefec71)
@@ -567,9 +631,18 @@ function wsSave(id: string, d: BoardDoc) {
     wsRefused = new Error(w.closed ? "the workspace was reset or upgraded in another tab: reload this page" : "this browser's copy of your workspace was lost, is missing changes, or is being reset: nothing can be changed until that is settled");
     throw wsRefused;
   }
+  // (the board journal: a tab that isn't this board's writer (another has it open, until 2c-1b-ii's bar) keeps nothing,
+  // and says so at its first edit (§0, §2.3 B2))
+  if (journalOn && jstore && !jstore.writer && jstore.viewOnly) {
+    wsRefused = new Error(`${jstore.viewOnly}: this tab can't save it`);
+    throw wsRefused;
+  }
   let journaled = true;
-  const text = JSON.stringify(d), header = `${SESSION}:${++wsSeq}:${wsRev}`, epoch = wsEpoch;
-  if (text.length > PENDING_MAX) {
+  const text = journalOn ? "" : JSON.stringify(d), header = bridge ?? `${SESSION}:${++wsSeq}:${wsRev}`, epoch = wsEpoch;
+  if (bridge) wsBridge = { header: bridge, epoch };
+  // (the board journal: no pending copy, T1's intent is it; so a refusal is said at the next save (§2.3 B2))
+  if (journalOn) journaled = false;
+  else if (text.length > PENDING_MAX) {
     // (too large to journal: the workspace alone keeps it; an older pending copy of this page's dropped, as it is older)
     journaled = false;
     dropPending(id, SESSION + ":");
@@ -607,6 +680,33 @@ function wsSave(id: string, d: BoardDoc) {
       if (!path) {
         path = await adoptBoard(w, id, d);
         wsRev = 1;
+        // (the board journal: its row made first, then its store opened, whose load stamps it with `d`, its one
+        // version: that is this save (§2.3 B7))
+        if (journalOn) {
+          wsRev = (await openJournal(id)).recovered.doc.rev;
+          logSave("adopted", d, epoch, wsRev);
+          wsRefused = null;
+          if (wsLatest.get(epoch) === d) wsLatest.delete(epoch);
+          return;
+        }
+      }
+      if (journalOn) {
+        // (the board journal: T1, then T2 (Workspace.journalWrite), over the revision this page knows, tagged as
+        // write's: in this queue, after its passing-over and its views' routing (§2.3 B4))
+        const js = jstore ?? (await openJournal(id));
+        const out = await js.save({ ...d, baseRev: wsRev }, { tag: header });
+        if (typeof out === "string") throw new Error(out);
+        if (out.conflict) throw Object.assign(new Error("this board was changed elsewhere"), { code: "conflict" });
+        wsRev = out.rev;
+        logSave(out.late ? "written, entry late" : "written", d, epoch, wsRev);
+        if (out.late) console.warn("workspace: a board's entry not updated after its save:", out.late);
+        // (kept, without each version: said, as the notebook page says it)
+        if (typeof out.saved === "string") showBusyNotice(out.saved);
+        wsRefused = null;
+        // (the pending copy being brought in, now in a kept save of its view: dropped, only if still its own)
+        if (wsBridge && wsBridge.epoch === epoch) { dropPending(id, wsBridge.header + "\n"); wsBridge = null; }
+        if (wsLatest.get(epoch) === d) wsLatest.delete(epoch);
+        return;
       }
       // (tagged with this save's session and number: a later load orders the
       // record against a pending copy by them, CORR-2D1-2; and only over the
@@ -628,7 +728,8 @@ function wsSave(id: string, d: BoardDoc) {
       else wsRefused = e instanceof Error ? e : new Error(String(e));
     }
   });
-  if (refused && !journaled) throw new Error(STORAGE_REFUSED);
+  // (the board journal: the refusal's own words, "Not kept in this browser: …" (§2.3 B2))
+  if (refused && !journaled) throw journalOn ? refused : new Error(STORAGE_REFUSED);
 }
 /** The board changed elsewhere (an agent, another tab) since this page last
  * read or wrote it: both kept.  This page's version becomes a board of its
@@ -640,8 +741,16 @@ async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string,
     const title = safeTitle(d.title) + " (your changes, made while it changed elsewhere)";
     wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title }, isHere(hereKey(id)), undefined, { copyOf: id }), rev: 1 };
     dropPending(id, header + "\n");
-    const path = await w.pathOf("board", id);
-    const cur = path ? await w.read(path) : null;
+    let cur: { content: unknown; rev: number } | null;
+    if (journalOn && jstore) {
+      // (the board journal: the version from elsewhere read by the store's load again, whose recovery stamps it and
+      // keeps it as a version when the history's head isn't it, the load's rule (§2.3 B5))
+      const rec = await jstore.load();
+      cur = rec ? { content: stripBoard(rec), rev: rec.rev } : null;
+    } else {
+      const path = await w.pathOf("board", id);
+      cur = path ? await w.read(path) : null;
+    }
     if (!cur || !isBoard(cur.content)) return;
     // (a new view from here, as the board is about to show the other
     // version: saves made on the old one, typed while this was handled,
@@ -686,6 +795,55 @@ function adoptBoard(w: Workspace, id: string, d: BoardDoc): Promise<string> {
     const e = await w.adopt("/", p.slice(1, -".board.json".length), ".board.json", { kind: "board", ref: id, mode: d.mode ?? "python" }, { at: p, board: { id, doc: d, rev: 1, updated: Date.now() } });
     return e.path;
   });
+}
+/** A board of the workspace loaded through the board journal (design-2c1b-i r3 §2.3): its store's load first (the
+ * writer's lock, then recovery: committed intents replayed, an old row stamped), then a pending copy left by a page
+ * closed while saving ordered against what that settled, once:
+ *   0. the copy is the record already, by hash (brought in before a crash, or the same): dropped;
+ *   1. the record is the one the copy was made on, or an earlier save of the session that left it: the copy saved,
+ *      through the queue, tagged with its own header, and dropped only once a save of it is kept;
+ *   2. a later save of that session: dropped;
+ *   otherwise another writer moved the record on: the copy kept as a board of its own, then dropped. */
+async function journalLoad(id: string, path: string, pend: ReturnType<typeof readPending>, notice: string): Promise<{ doc: BoardDoc; original: null; notice?: string }> {
+  const say = (more: string) => [notice, more].filter(Boolean).join("\n\n");
+  let js: any;
+  try {
+    js = await openJournal(id);
+  } catch (e) {
+    // (not opened: shown as kept, nothing written; each save says why until a reload opens it)
+    wsRefused = e instanceof Error ? e : new Error(String(e));
+    const rec = await ws!.read(path).catch(() => null);
+    wsEpoch++;
+    if (rec) wsRev = rec.rev;
+    const why = `**This board can't be saved in this browser now:** ${String(wsRefused.message).slice(0, 200)}. Reload the page to try again.`;
+    return rec && isBoard(rec.content) ? { doc: rec.content as BoardDoc, original: null, notice: say(why) } : { doc: blankBoard("python"), original: null, notice: say(why) };
+  }
+  const settled = js.recovered.doc;
+  wsEpoch++;
+  wsRev = settled.rev;
+  if (pend && pend !== "unread") {
+    if (typeof settled.hash === "string" && (await js.hashOf(pend.doc)) === settled.hash) dropPending(id, pend.header + "\n");
+    else {
+      // (the record's writer: a session and that session's save number, read at the settled revision)
+      const rec = await ws!.read(path).catch(() => null);
+      const [tagSession, tagN] = (rec && rec.rev === settled.rev ? String(rec.tag ?? "") : "").split(":");
+      if (settled.rev === pend.base || (tagSession === pend.session && Number(tagN) < pend.n)) {
+        try { wsSave(id, pend.doc, pend.header); } catch (e) { console.warn("workspace:", e); }
+        return { doc: pend.doc, original: null, ...(notice ? { notice } : {}) };
+      }
+      if (tagSession === pend.session && Number(tagN) >= pend.n) dropPending(id, pend.header + "\n");
+      else {
+        try {
+          await makeInWorkspace(ws!, { ...pend.doc, title: (pend.doc.title || "Untitled board") + " (unsaved changes from a closed page)" }, isHere(hereKey(id)), undefined, { copyOf: id });
+          dropPending(id, pend.header + "\n");
+          notice = say("**Changes left by a page closed while saving were made after this board changed elsewhere.** They are kept as a board of their own, \"" + safeTitle(pend.doc.title) + " (unsaved changes from a closed page)\".");
+        } catch (e: any) {
+          notice = say(`**Changes left by a page closed while saving couldn't be kept as a board of their own** (${String(e?.message ?? e)}); they stay in this browser.`);
+        }
+      }
+    }
+  }
+  return { doc: stripBoard(settled) as BoardDoc, original: null, ...(notice ? { notice } : {}) };
 }
 
 // (the function search's indexes, by language, as fetched)
@@ -863,6 +1021,8 @@ const host: BoardHost = {
         const conv = [takeNotice(), takeConverted(id)].filter(Boolean).join("\n\n");
         if (conv) notice = conv + (notice ? "\n\n" + notice : "");
         const path = await ws.pathOf("board", id);
+        // (the board journal: its store's load first, then the pending copy ordered against what it settled: §2.3)
+        if (path && journalOn) return journalLoad(id, path, pend, notice);
         if (path) {
           const rec = await ws.read(path).catch(() => null);
           if (rec && isBoard(rec.content)) {
@@ -899,8 +1059,13 @@ const host: BoardHost = {
             await adoptBoard(ws, id, pend.doc);
             wsEpoch++;
             wsRev = 1;
+            // (the board journal: the row made, then its store's load stamps it; the copy dropped only after (§2.3 B7))
+            if (journalOn) wsRev = (await openJournal(id)).recovered.doc.rev;
             dropPending(id, pend.header + "\n");
-          } catch (e) { console.warn("workspace:", e); }
+          } catch (e) {
+            console.warn("workspace:", e);
+            if (journalOn) wsRefused = e instanceof Error ? e : new Error(String(e));
+          }
           return { doc: pend.doc, original: null };
         }
         // (not in the workspace: as kept before, if it is; written into the workspace at the first save)
@@ -995,6 +1160,14 @@ const host: BoardHost = {
         id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
         try { localStorage.setItem(k, id); } catch {}
       }
+      // (the board journal: a document replaced in place (Open…, New board) clears the board's versions, once, in the
+      // saves' queue, so before any save of the new one; its journal rows stay (§2.4 B1, board's R2-B1))
+      if (fresh && journalOn) {
+        wsWriting = wsWriting.then(async () => {
+          const js = jstore ?? (jopening ? await jopening.catch(() => null) : null);
+          if (js) await js.history.clear().catch((e: unknown) => console.warn("board: TimeTravel: the versions before weren't cleared:", e));
+        });
+      }
       return id;
     },
   },
@@ -1021,12 +1194,16 @@ const host: BoardHost = {
   },
   // TimeTravel: patchflow (in sagebrush-history.js) and a database of its own; not in an exported file
   // (each document its own: by its name beside it in this browser)
-  history: file ? undefined : async (id) => {
+  // (the board journal: the journal store's versions, the ones from before it first, through a facade: §2.4)
+  history: file ? undefined : journalOn ? journalHistory : async (id) => {
     const [mod, db] = await Promise.all([import(new URL("../sagebrush-history.js", import.meta.url).href) as Promise<HistoryModule>, openBoardHistoryDb()]);
     return db ? new BoardHistory(mod, new IdbPatchStore(db, historyKey(id), { followPhase: true })).init() : null;
   },
   // (a document replaced: its versions, without opening its history)
+  // (the board journal: only the versions from before it, under the document's own name; never the journal's,
+  // which documentId's clear replaces: §2.4 B1)
   dropHistory: file ? undefined : async (id) => {
+    if (journalOn && !id) return;
     const db = await openBoardHistoryDb();
     if (db) await new IdbPatchStore(db, historyKey(id), { followPhase: true }).drop();
   },
@@ -1189,4 +1366,6 @@ if (ws && local) {
 
 (window as any).board = mounted.board;
 (window as any).boardBench = mounted.bench;
-(window as any).sagebrush = { ...(window as any).sagebrush, leaving: () => held, board: mounted.agent, ...(ws ? { workspace: ws.forAgent("agent:page"), saveLog: () => wsLog.slice() } : {}) };
+(window as any).sagebrush = { ...(window as any).sagebrush, leaving: () => held, board: mounted.agent, ...(ws ? { workspace: ws.forAgent("agent:page"), saveLog: () => wsLog.slice() } : {}),
+  // (the board journal's store, for tests: test-board-journal-page.mjs)
+  ...(journalOn ? { boardJournal: () => jstore } : {}) };

@@ -29,7 +29,7 @@
 import { FORMAT, VERSION, type BoardDoc, type BoardPage, type DocNode } from "./doc";
 
 /** Records as patchflow's immer-db codec keeps them. */
-interface Records {
+export interface Records {
   get(where: object): any[];
   getOne(where: object): any;
   set(r: object): Records;
@@ -120,6 +120,40 @@ export function fromRecords(rs: Records): BoardDoc {
   return d as BoardDoc;
 }
 
+/** A record as a version keeps it (a field null, or a text field that isn't text, isn't kept): what `record` writes
+ * at once, and what the board journal's hash is of (journal.ts versionedOf). */
+export function keptRecord(r: any): any {
+  const o = { ...r };
+  for (const k of Object.keys(o)) if (o[k] === null || (SCHEMA.stringCols.includes(k) && Array.isArray(o[k]))) delete o[k];
+  return o;
+}
+/** `d` recorded into `h` as a version (nothing if it has not changed): only what changed; null while the history is
+ * (re)opened (BoardHistory.record's, and the board journal's history's: journal.ts). */
+export function recordInto(h: { committed(): Records | null; commit(next: Records): unknown }, d: BoardDoc) {
+  const cur = h.committed();
+  if (!cur) return null;
+  const recs = toRecords(d);
+  // (the version: its records, as inserting or patching each would leave
+  // them, made at once; the patch is what changed, computed from the two.
+  // Made one record at a time, each remade the document's indexes: a
+  // large board's first version, or an item removed (every later one's
+  // place changed), took seconds)
+  if (cur.withRecords) return h.commit(cur.withRecords(recs.map(keptRecord)));
+  let next = cur;
+  // (a record's key: its type, page and id, whatever they hold, CORR-3D2-3)
+  const key = (r: any) => JSON.stringify([r.type, r.page, r.id]);
+  const want = new Map(recs.map((r) => [key(r), r]));
+  for (const t of TYPES) for (const r of cur.get({ type: t })) if (!want.has(key(r))) next = next.delete({ type: r.type, page: r.page, id: r.id });
+  for (const r of want.values()) {
+    const old = cur.getOne({ type: r.type, page: r.page, id: r.id });
+    if (old && canon(old) === canon(r)) continue;
+    // (a field taken off: the record anew; otherwise patched in place)
+    if (old && Object.keys(old).some((k) => !(k in r))) next = next.delete({ type: r.type, page: r.page, id: r.id });
+    next = next.set(r);
+  }
+  return h.commit(next);
+}
+
 export class BoardHistory {
   private h: PatchHistoryLike;
   constructor(mod: HistoryModule, store: unknown) {
@@ -129,36 +163,7 @@ export class BoardHistory {
   on(f: () => void) { return this.h.on(f); }
   /** Keep the board as it is now as a version (nothing if it has not changed): only what changed; null while the
    *  history is (re)opened, none made then (the next one has the change: astra's CORR-529-1). */
-  record(d: BoardDoc) {
-    const cur = this.h.committed();
-    if (!cur) return null;
-    const recs = toRecords(d);
-    // (the version: its records, as inserting or patching each would leave
-    // them, made at once; the patch is what changed, computed from the two.
-    // Made one record at a time, each remade the document's indexes: a
-    // large board's first version, or an item removed (every later one's
-    // place changed), took seconds)
-    if (cur.withRecords) {
-      return this.h.commit(cur.withRecords(recs.map((r) => {
-        const o = { ...r };
-        for (const k of Object.keys(o)) if (o[k] === null || (SCHEMA.stringCols.includes(k) && Array.isArray(o[k]))) delete o[k];
-        return o;
-      })));
-    }
-    let next = cur;
-    // (a record's key: its type, page and id, whatever they hold, CORR-3D2-3)
-    const key = (r: any) => JSON.stringify([r.type, r.page, r.id]);
-    const want = new Map(recs.map((r) => [key(r), r]));
-    for (const t of TYPES) for (const r of cur.get({ type: t })) if (!want.has(key(r))) next = next.delete({ type: r.type, page: r.page, id: r.id });
-    for (const r of want.values()) {
-      const old = cur.getOne({ type: r.type, page: r.page, id: r.id });
-      if (old && canon(old) === canon(r)) continue;
-      // (a field taken off: the record anew; otherwise patched in place)
-      if (old && Object.keys(old).some((k) => !(k in r))) next = next.delete({ type: r.type, page: r.page, id: r.id });
-      next = next.set(r);
-    }
-    return this.h.commit(next);
-  }
+  record(d: BoardDoc) { return recordInto(this.h, d); }
   /** The versions, oldest first. */
   versions(): Version[] { return this.h.versions(); }
   /** The board at a version. */
