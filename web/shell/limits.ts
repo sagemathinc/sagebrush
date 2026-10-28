@@ -71,10 +71,11 @@ export const CONFIG_MAX_BYTES = 4 * KiB;
  * (r3, astra5 B3R2-A5-1: declared before any module-level call uses it: MAPPED_LIMITS below calls
  * executionLimitsOf() at load, and a const read before its declaration is a TDZ ReferenceError in native ESM.)
  * The host's wrapper around every script it sends (D8 point 1: `{ SCRIPT\n}`, web/shell/host.ts wrap()): its bytes.
- * The page checks bash.source_bytes on the script itself; just-bash's maxSourceBytes, which checks what it parses
- * (the wrapped script, and each file `source` or `.` reads), is the key plus these bytes, so a script at the key's
- * value runs.  A sourced file is therefore checked by just-bash at source_bytes + WRAPPER_BYTES: that stop is its
- * own, an ordinary outcome (astra2, step 3 r1).
+ * The page checks bash.source_bytes on the script itself; just-bash's maxSourceBytes, which checks the script exec()
+ * is given (the wrapped script), is the key plus these bytes, so a script at the key's value runs.  It does NOT
+ * bound a sourced file: the pinned just-bash checks maxSourceBytes in exec() and transform() only, and its `source`
+ * and `.` parse what they read with no size check (PR 279's first CI).  A sourced file is a read, bounded by
+ * bash.read_bytes, typed (@sagebrush's ruling A); source_bytes bounds only the script the page sends.
  */
 export const WRAPPER_BYTES = 4;
 export const wrap = (script: string) => `{ ${script}\n}`;
@@ -157,6 +158,8 @@ export function executionLimitsOf(b: BashLimits): Readonly<Record<string, number
     maxExecDepth: depth,
     maxSubstitutionDepth: Math.min(depth, 50),
     maxSourceBytes: b.source_bytes! + WRAPPER_BYTES,
+    // (both from glob_paths; only the brace side has a measured boundary (host-cases.js BOUNDARIES.glob_paths), the
+    // glob side's is an open measurement)
     maxGlobOperations: glob,
     maxBraceExpansionResults: glob,
   });

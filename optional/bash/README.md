@@ -105,7 +105,10 @@ defaults.
   just-bash's own scope and command behaviour, and are ordinary outcomes:
   - they are not promised to stop the whole invocation (sed and awk turn the
     error into their own; the script can go on, even to exit 0);
-  - no limit key is ever inferred from their words.
+  - no limit key is ever inferred from their words;
+  - `glob_paths` sets both just-bash's glob operations and its brace
+    expansion results. Only the brace side has a measured boundary in the
+    tests; the glob side (`maxGlobOperations`) is still unmeasured.
 - **Output:** `output_bytes` (default 64 MiB) is cumulative across a run's
   invocations, and each invocation delivers at most 32 MiB:
   - this module counts each result in UTF-8, stdout then stderr, and sends
@@ -118,5 +121,7 @@ defaults.
 - **`pipeline_width`** is checked by this module before anything runs, from
   just-bash's own parse of the script: a longer pipeline is refused whole.
   A pipeline inside `eval` or a sourced file isn't seen there.
-- **`source_bytes`** is checked by the page on the script it sends. A sourced
-  file over it is just-bash's own `maxSourceBytes` stop, an ordinary outcome.
+- **`source_bytes`** is checked by the page on the script it sends, and bounds
+  only that script. A sourced file (`source` or `.`) is a read, bounded by
+  `read_bytes` (typed): the pinned just-bash checks `maxSourceBytes` only on
+  what `exec()` is given, not on what `source` reads.
