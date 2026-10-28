@@ -126,6 +126,10 @@ def run_job(name, job, combo, args, state):
     for step in job.get("steps", []):
         ok, why = step_runnable(step)
         label = step.get("name") or (step.get("run", "").strip().splitlines() or [""])[0][:70]
+        try:
+            label = substitute(str(label), ctx, lenient=True)
+        except Exception:
+            pass
         if not ok:
             if why != "uses":
                 notes.append(f"skipped ({why}): {label}")

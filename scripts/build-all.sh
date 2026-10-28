@@ -47,8 +47,9 @@ step() {
 
 step "dependencies (pnpm install)" pnpm install --frozen-lockfile
 if [ "$ENGINE" = 1 ]; then
-  # (rustup installs engine/rust-toolchain.toml's toolchain and wasm32 target on first use)
-  step "the engine as WebAssembly (wasm/sagebrush-engine.wasm)" node scripts/build-engine.mjs
+  # (rustup installs engine/rust-toolchain.toml's toolchain and wasm32 target on first use. The module embeds the
+  # crate registry's paths; mapped to CI's, the fresh engine is byte-identical to the committed one: README)
+  step "the engine as WebAssembly (wasm/sagebrush-engine.wasm)" env RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/home/runner/.cargo${RUSTFLAGS:+ $RUSTFLAGS}" node scripts/build-engine.mjs
 fi
 step "TypeScript (dist/)" pnpm run build
 step "the CLI (build/cli/pyjs.cjs)" node scripts/build-cli.mjs
@@ -69,10 +70,9 @@ echo
 echo "== build-all: done"
 printf '%s\n' "${summary[@]}"
 echo "total $((SECONDS / 60)) min $((SECONDS % 60)) s"
-# (the fresh engine is a modified tracked file now. It differs from the committed one on any machine but CI's: the
-# wasm embeds the absolute paths of crate sources, $CARGO_HOME/registry/..., and CI's are /home/runner/.cargo.
-# Functionally it's the same engine. `git checkout -- wasm/` restores the committed one; DEVELOPMENT.md)
-if [ "$ENGINE" = 1 ] && ! git diff --quiet -- wasm/sagebrush-engine.wasm; then
-  echo "note: wasm/sagebrush-engine.wasm now differs from the committed engine: expected off CI (it embeds"
-  echo "      \$CARGO_HOME paths; DEVELOPMENT.md). git checkout -- wasm/ restores the committed one."
+# (with the paths mapped, the fresh engine equals the committed one; a difference is real: another toolchain, or
+# engine/ changed without the committed module rebuilt. git checkout -- wasm/ restores the committed one)
+if [ "$ENGINE" = 1 ]; then
+  if git diff --quiet -- wasm/sagebrush-engine.wasm; then echo "the fresh engine is byte-identical to the committed wasm/sagebrush-engine.wasm"
+  else echo "warning: the fresh wasm/sagebrush-engine.wasm differs from the committed one (DEVELOPMENT.md: the engine)"; fi
 fi
