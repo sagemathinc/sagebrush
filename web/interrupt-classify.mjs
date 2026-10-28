@@ -81,6 +81,14 @@ export function xkRowOutcome(cells, leakOk, xk) {
 // (a thread change alone, the RSS fallback when the host has no heap figure, a malformed result) is
 // not the control catching its leak and FAILs, as does a missing series (INCOMPLETE).  (#217,
 // astra2 K2: a thread-only failure must not pass the control)
+// a row's outcome from its cells and its leak check: an invalid leak result (a sample read from a target already
+// exiting before the last repeat, or a sample that couldn't be read) makes the row INVALID, normal or control row
+// alike, with the leak's reason; otherwise the control or the normal rule
+export function leakRowOutcome(cells, leak, c) {
+  if (leak?.invalid) return { outcome: "INVALID", why: leak.why };
+  return c.expect_leak ? leakControlOutcome(cells, leak, c.xk) : xkRowOutcome(cells, leak && leak.ok, c.xk);
+}
+
 export function leakControlOutcome(cells, leak, xk) {
   if (leak == null) return { outcome: "INCOMPLETE", why: "leak control: the leak series was not measured" };
   if (leak.survived_kill) return { outcome: "FAIL", why: "leak control: a worker survived its kill" };
@@ -166,7 +174,9 @@ export const HEAP_EXTERNAL_SAMPLE = `    _m = ""
 // 10%) of it.  A host without that figure (the browser) is measured by RSS, and says so.
 export function leakCheck(samples, full = 20, measure = "rss") {
   // (a final sample read while the target was exiting is dropped, and the result says so; an exiting sample before
-  // the last is invalid evidence: the target was going while trials still ran)
+  // the last is invalid evidence: the target was going while trials still ran; and so is a sample error)
+  const bad = samples.find((x) => x.sample_error);
+  if (bad) return { ok: false, invalid: true, why: `the leak sample at repeat ${bad.i} couldn't be read: ${bad.sample_error}`, from: 3, to: samples.at(-1)?.i ?? 0, threads_same: false };
   const exitingAt = samples.findIndex((x) => x.exiting);
   if (exitingAt >= 0 && exitingAt < samples.length - 1) {
     return { ok: false, invalid: true, why: `the target was exiting at repeat ${samples[exitingAt].i}, before the last`, from: 3, to: samples.at(-1)?.i ?? 0, threads_same: false };

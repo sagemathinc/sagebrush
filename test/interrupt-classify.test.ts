@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 const mod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 
 function run(js: string): any {
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { leakControlOutcome, classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, stopGate, withWaiver, waiverErrors, ciFailing, STOP_BOUND_MS, POLL_GAP_MS, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { leakControlOutcome, leakRowOutcome, classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, stopGate, withWaiver, waiverErrors, ciFailing, STOP_BOUND_MS, POLL_GAP_MS, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -84,6 +84,22 @@ test("leak check: growth past max(64 MiB, 10%) from repeat 3, or a thread change
   assert.ok(run(`leakCheck(${ex([300e3, 300e3, 300e3, 300e3, 300e3], [7, 7, 7, 4, 4], 4)})`).ok === false, "a thread change before the exiting sample still fails");
   assert.ok(run(`leakCheck(${ex([300e3, 300e3, 300e3, 300e3, 400e3], [7, 7, 7, 7, 7], 9)})`).ok === false, "growth without any exiting sample still fails");
   assert.equal(run(`leakCheck(${ex([1, 2, 3], [7, 7, 4], 2)})`), null, "too few live repeats once the exiting one is dropped: unmeasured");
+  // (a sample that couldn't be read is invalid evidence, wherever it is)
+  const err = JSON.stringify([1, 2, 3, 4, 5].map((i) => (i === 5 ? { i, sample_error: "another process under the pid" } : { i, rss_kb: 300e3, threads: 7 })));
+  const se = run(`leakCheck(${err})`);
+  assert.ok(se.ok === false && se.invalid === true && /another process/.test(se.why), JSON.stringify(se));
+});
+
+test("a row whose leak check is invalid is INVALID, normal and control rows alike, with the leak's reason (daybreak2's review)", () => {
+  const cells = JSON.stringify([{ outcome: "PASS" }, { outcome: "PASS" }]);
+  const inv = `{ ok: false, invalid: true, why: "the target was exiting at repeat 3, before the last" }`;
+  const n = run(`leakRowOutcome(${cells}, ${inv}, { id: "E2" })`);
+  assert.ok(n.outcome === "INVALID" && /exiting at repeat 3/.test(n.why), JSON.stringify(n));
+  const k = run(`leakRowOutcome(${cells}, ${inv}, { id: "M1c", expect_leak: true })`);
+  assert.ok(k.outcome === "INVALID" && /exiting at repeat 3/.test(k.why), JSON.stringify(k));
+  // (a valid result keeps the rules as they were: an ordinary leak fails a normal row; ok passes it)
+  assert.equal(run(`leakRowOutcome(${cells}, { ok: false, threads_same: true }, { id: "E2" })`).outcome, "FAIL");
+  assert.equal(run(`leakRowOutcome(${cells}, { ok: true, threads_same: true }, { id: "E2" })`).outcome, "PASS");
   assert.equal(run(`rowOutcome([{ outcome: "PASS" }], null)`), "INCOMPLETE");
   assert.equal(run(`rowOutcome([{ outcome: "PASS" }], false)`), "FAIL");
   // a leak is never KNOWN, even on a baseline row
