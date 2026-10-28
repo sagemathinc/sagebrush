@@ -109,10 +109,14 @@ once). The jobs, in the order they run, with their times here:
 | `engine-node` (8 shards) | the Node tests on that fresh engine | 24.8 min |
 | `engine-language` (6 shards) | the Magma and MATLAB tests on it | 24.2 min |
 | `engine-modes` | Sage, calculus, Magma and MATLAB on it | 4.2 min |
-| `engine-cpython` | the CPython extension, audit regressions, MCP and Sage | @@CPY_T@@ |
+| `engine-cpython` | the CPython extension, audit regressions, MCP and Sage | 4.3 min (warm; below) |
 
 The engine jobs run last: `engine-wasm` builds a fresh engine, and the `engine-*` jobs after it test that engine,
 as in CI. The committed engine is restored at the end.
+
+Each job keeps CI's `timeout-minutes`. The first `engine-cpython` builds the CPython extension with
+`maturin build --release` from cold (CI restores a Rust cache), and that can take it past its 15 min limit.
+Run `scripts/test-all.sh --only engine-cpython` again: with the build warm it takes about 4 minutes here.
 
 **What only CI runs:**
 
