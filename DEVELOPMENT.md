@@ -8,7 +8,7 @@ scripts/test-all.sh     # every Linux job of CI, read from .github/workflows/ci.
 ```
 
 Both are short scripts you can read. `test-all.sh` doesn't keep its own list of tests: it runs ci.yml's jobs
-(scripts/ci-local.py), so it can't drift from CI. The timings below were measured on a 16-core x86_64 Ubuntu 24.04 VM from a fresh
+(scripts/ci-local.py), so it follows CI, and it refuses a workflow construct it doesn't model rather than guess. The timings below were measured on a 16-core x86_64 Ubuntu 24.04 VM from a fresh
 clone (October 28, 2026).
 
 ## Prerequisites (Linux; Ubuntu 24.04 shown)
@@ -82,13 +82,15 @@ scripts/test-all.sh --only checks    # one job, or a comma-separated list
 scripts/test-all.sh --keep-going     # report every failing job, not just the first
 ```
 
-It starts by removing `build/cli` and `web/dist` (both generated), so every job builds them as in CI's fresh checkout
-(`--keep-builds` doesn't). The order matters: a CLI built while `web/dist` exists carries the page, and a bundle
-that carries its page runs `sagebrush board open` as an installed CLI does, with its engine from sagebrush.space
-rather than your checkout. `web/test-board-open.mjs` then waits for an engine that was never deployed.
+Each job starts from a fresh checkout's generated state, as on CI: `build/cli`, `web/dist` and `engine/py/dist` are
+removed before it, and it runs its own build lines. That costs a few minutes over the whole run, and it's needed: a
+CLI built while `web/dist` exists carries the page, and a bundle that carries its page runs `sagebrush board open`
+as an installed CLI does, with its engine from sagebrush.space rather than your checkout. `web/test-board-open.mjs`
+would then wait for an engine that was never deployed. Each job keeps CI's time limits: the job's `timeout-minutes`
+is one budget for all its steps. Everything a step leaves running is ended (found by ancestry) before the next.
 
-`build-all.sh` first isn't needed: each job builds what it needs, as in CI (the builds every job repeats run
-once). The jobs, in the order they run, with their times here:
+`build-all.sh` first isn't needed: each job builds what it needs, as in CI. The jobs, in the order they run, with
+their times here:
 
 | job | what it runs | time |
 |---|---|---|
@@ -120,7 +122,10 @@ didn't cover the whole step.
 
 Each job keeps CI's `timeout-minutes`. The first `engine-cpython` builds the CPython extension with
 `maturin build --release` from cold (CI restores a Rust cache), and that can take it past its 15 min limit.
-Run `scripts/test-all.sh --only engine-cpython` again: with the build warm it takes about 4 minutes here.
+Run `scripts/test-all.sh --only engine-cpython` again: with the build warm it takes about 4 minutes here. Running
+`scripts/build-all.sh` first does the same: its wheel build uses the same cargo target and profile, so it leaves
+engine-cpython's warm. `--only engine-node` (or any `engine-*` job without `engine-wasm`) tests the engine already
+in `wasm/`, not a fresh one.
 
 **What only CI runs:**
 

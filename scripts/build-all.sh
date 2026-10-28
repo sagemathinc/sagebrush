@@ -59,7 +59,7 @@ step "the CLI again, with the page" node scripts/build-cli.mjs
 step "the board package (packages/sagebrush-board)" bash -c 'cd packages/sagebrush-board && bun build.mjs'
 step "the Node addon (engine/node/sagebrush.node)" engine/node/build.sh
 step "Python 3.14 and maturin (engine/.venv)" bash -c '[ -x engine/.venv/bin/python ] || uv venv --seed --python 3.14 engine/.venv; uv pip install --python engine/.venv/bin/python maturin'
-step "the Python wheel (engine/py/dist)" bash -c 'cd engine/py && ../.venv/bin/maturin build --release --out dist'
+step "the Python wheel (engine/py/dist)" bash -c 'cd engine/py && ../.venv/bin/maturin build --release -i ../.venv/bin/python --out dist'
 step "the MCP package (engine/py-mcp/dist)" uv build engine/py-mcp --out-dir engine/py-mcp/dist
 if [ "$APP" = 1 ]; then
   step "the app's page (app/dist)" node app/build-frontend.mjs
