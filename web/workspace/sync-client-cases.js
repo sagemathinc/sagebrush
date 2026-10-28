@@ -2414,14 +2414,28 @@ async function s5Flood() {
   await account();
   const nm = names();
   const w1 = await fresh(nm), w2 = await fresh(nm);
-  const o1 = W.SyncOwner.of(w1, { origin: location.origin });
+  // (the gap per holder is measured where the slot measures it: at each holder's send, on Date.now(), the clock its
+  // lastAt uses.  An arrival on the tap is a delivery time: a page busy posting 100 status? a tick can hold one
+  // publication back and deliver the next on time, so arrivals came closer than the slot sent them (TEST-PR130-2's
+  // flake: 'the least gap per holder' under minGapMs - 50 with the slot intact).  Arrivals still give the count and
+  // the bytes, the whole message as delivered)
+  const sends = [];
+  const sentBy = (o) => {
+    const post = o.post.bind(o);
+    o.post = (m) => {
+      if (m?.t === "status") sends.push({ at: Date.now(), gen: m.gen });
+      return post(m);
+    };
+    return o;
+  };
+  const o1 = sentBy(W.SyncOwner.of(w1, { origin: location.origin }));
   o1.start();
   const el = document.createElement("div");
   const s = W.syncSection(w1, el, hostOf(w1));
   await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
   click(el, /Turn on sync/);
   check(await until(() => o1.view().s.state === "synced" && o1.isHolder(), 15_000), "flood: the first tab holds");
-  const o2 = W.SyncOwner.of(w2, { origin: location.origin });
+  const o2 = sentBy(W.SyncOwner.of(w2, { origin: location.origin }));
   o2.start();
   await until(() => o2.client !== null, 5000);
   const ns = (await metaGet(w1.ws, "sync:current")).ns, epoch = (await metaGet(w1.ws, "sync:epoch")) ?? 0;
@@ -2438,7 +2452,7 @@ async function s5Flood() {
     // (at 3 s a follower opens; at 6 s the holder dies)
     if (!o3 && now > 3000) {
       const w3 = await fresh(nm);
-      o3 = W.SyncOwner.of(w3, { origin: location.origin });
+      o3 = sentBy(W.SyncOwner.of(w3, { origin: location.origin }));
       asked = performance.now();
       o3.start();
     }
@@ -2448,12 +2462,19 @@ async function s5Flood() {
   }
   const secs = (performance.now() - t0) / 1000;
   await sleep(1500);
+  const leastGap = (xs) => {
+    const by = {};
+    for (const p of xs) (by[p.gen] ??= []).push(p.at);
+    let g = Infinity;
+    for (const ats of Object.values(by)) for (let i = 1; i < ats.length; i++) g = Math.min(g, ats[i] - ats[i - 1]);
+    return g;
+  };
   const byGen = {};
   for (const p of pubs) (byGen[p.gen] ??= []).push(p.at);
-  let gap = Infinity;
-  for (const ats of Object.values(byGen)) for (let i = 1; i < ats.length; i++) gap = Math.min(gap, ats[i] - ats[i - 1]);
+  // (the send gap allows Date.now()'s own millisecond: a send stamped just after the tick its lastAt was taken in)
+  const gap = leastGap(sends), arrivalGap = leastGap(pubs);
   const maxBytes = Math.max(0, ...pubs.map((p) => p.bytes));
-  check(sent === 10_000 && secs < 12 && pubs.length > 0 && gap >= W.STATUS_PUB.minGapMs - 50 && maxBytes <= 512, `flood: ${sent} status? over ${secs.toFixed(1)} s: ${pubs.length} publications, the least gap per holder ${Math.round(gap)} ms (${W.STATUS_PUB.minGapMs}), each at most ${maxBytes} UTF-8 bytes (512)`);
+  check(sent === 10_000 && secs < 12 && pubs.length > 0 && sends.length > 0 && gap >= W.STATUS_PUB.minGapMs - 1 && maxBytes <= 512, `flood: ${sent} status? over ${secs.toFixed(1)} s: ${sends.length} publications sent (${pubs.length} arrived), the least gap per holder ${gap} ms at the sends (${W.STATUS_PUB.minGapMs}; ${Math.round(arrivalGap)} ms between arrivals), each at most ${maxBytes} UTF-8 bytes (512)`);
   check(got && got - asked <= 2000, `flood: the follower opened during it got the holder's snapshot ${Math.round(got - asked)} ms after starting (the next slot)`);
   const gens = Object.keys(byGen).map(Number), top = Math.max(...gens);
   check((o2.isHolder() || o3.isHolder()) && gens.length >= 2, "flood: the holder killed mid-flood: a waiting tab took over and published under a newer gen: " + J(gens));
