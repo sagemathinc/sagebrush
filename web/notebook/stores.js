@@ -330,6 +330,9 @@ export const historyBacklog = () => ({ ...backlog });
 // (a refusal pauses the document's TimeTravel until a version can be kept whole: notebook/patch-history.js)
 export const HISTORY_REFUSED = "your files are busy (another tab is changing them), so TimeTravel paused for this document: it resumes from the next version that can be saved in full. The document itself is saved";
 export const HISTORY_TOO_LARGE = "this version is too large to keep in TimeTravel, so TimeTravel paused for this document: it resumes from the next version that can be saved in full. The document itself is saved";
+// (said once by a phase-following store whose append the fence refuses for its phase: a board tab open across the
+// journal's activation keeps saving the board but no longer its versions (board's note on #227))
+export const HISTORY_STOPPED = "TimeTravel stopped recording in this tab: reload the board to keep its versions";
 const BUSY = "your files are busy (another tab is changing them): not saved yet, tried again with your next change";
 const BUSY_DELETE = "your files are busy (another tab is changing them)";
 // (a deadline: LOCK_WAIT from when it is made, its signal aborted then unless the lock was had first; made when a
@@ -416,6 +419,9 @@ export const openBoardHistoryDb = ({ onVersionChange } = {}) => open("sagebrush-
 // journal keeps only the hashes of the files a session read; replay and the
 // portable bundle find the bytes here.
 export const openBlobDb = ({ onVersionChange } = {}) => open("sagebrush-blobs", { blobs: null }, onVersionChange);
+// "sagebrush-share-sent": "records", this browser's records of first uploads whose share request it sent, by
+// account|notebook (web/index.html, shareSent): its own database, so that no other one needs a version change.
+export const openShareSentDb = ({ onVersionChange } = {}) => open("sagebrush-share-sent", { records: { keyPath: "key" } }, onVersionChange);
 
 /** The SHA-256 of bytes, in hex (a 53-bit hash, "c53:...", where there is no crypto.subtle: not a secure context). */
 export async function bytesHash(data) {
@@ -571,6 +577,20 @@ function getHistoryChannel() {
   }
   return historyChannel;
 }
+/** A patch received from the server and stored (sync 2c-3) told to this notebook's history in every tab, this one's
+ * too (the sender may be the writer's tab): `id` is the history key, `env` the patch. */
+export function tellHistory(id, env) {
+  const m = { from: tabId, id, env };
+  getHistoryChannel()?.postMessage(m);
+  for (const f of historySubs) try { f(m); } catch (e) { console.warn("history:", e); }
+}
+/** Sync's acknowledgement released history `id`'s debt (2c-3, doc-sync.ts): told to its writer, in whatever tab it is
+ * (onAcked), so a history paused for want of room resumes.  No `env`: never a patch to the history's subscribers. */
+export function tellAcked(id) {
+  const m = { from: tabId, id, acked: true };
+  getHistoryChannel()?.postMessage(m);
+  for (const f of historySubs) try { f(m); } catch (e) { console.warn("history:", e); }
+}
 export class IdbPatchStore {
   /** `opts.journal`: the journal's hooks (web/notebook/journal.js): `t1(st, row, intent)`, run in each append's own transaction
    * (the patch's row and the journal's rows written together, T1), and `drop(st)`, in a drop's; with them every write
@@ -589,6 +609,15 @@ export class IdbPatchStore {
   bindFence(f) {
     this.fence = fenceOf(f);
     if (this.followPhase && this.boundPhase === undefined) this.boundPhase = f?.phase === "journal" ? "journal" : "ok";
+  }
+  // (a phase-following store's append refused because it was bound before the journal's activation, the fence
+  // `f` now in "journal": said once, to onHistoryRefused's listeners, never again for this store.  Any other
+  // refusal (a reset, a quarantine, storage that couldn't be read) is said by the notices that are for it, not as
+  // this one's "reload": board's N1 on 7e4ddd5b)
+  stopped(f) {
+    if (!this.followPhase || this.stopSaid || this.phase !== "ok" || f?.phase !== "journal") return;
+    this.stopSaid = true;
+    for (const f of refusedSubs) try { f(HISTORY_STOPPED); } catch {}
   }
   /** A journal store's append's outcome, once its transaction has completed: {j} or {refused}. */
   appended(time) {
@@ -699,7 +728,7 @@ export class IdbPatchStore {
         const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
         f.onsuccess = () => {
           if (this.fence === undefined) this.bindFence(f.result?.fence);
-          if (this.owned && fenceRefusal(f.result?.fence, this.fence, this.phase)) return;
+          if (this.owned && fenceRefusal(f.result?.fence, this.fence, this.phase)) return this.stopped(f.result?.fence);
           st.put({ nb: this.id, time: env.time, env });
         };
         tx.oncomplete = () => ok();
@@ -740,6 +769,13 @@ export class IdbPatchStore {
   }
   subscribe(f) {
     const g = (m) => { if (m.id === this.id && m.env) f(m.env); };
+    getHistoryChannel();
+    historySubs.add(g);
+    return () => historySubs.delete(g);
+  }
+  /** Called when sync's acknowledgement released this history's debt (tellAcked), in any tab. */
+  onAcked(f) {
+    const g = (m) => { if (m.id === this.id && m.acked) f(); };
     getHistoryChannel();
     historySubs.add(g);
     return () => historySubs.delete(g);

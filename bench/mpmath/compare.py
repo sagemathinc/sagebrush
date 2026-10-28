@@ -35,9 +35,11 @@ def run(cmd, mod):
         try:
             r = json.loads(line)
         except ValueError:
-            r = {"module": mod, "crash": (p.stderr or p.stdout)[-600:]}
-    except subprocess.TimeoutExpired:
-        r = {"module": mod, "timeout": args.timeout}
+            # (a negative return code is a signal: -9 is a kill, as an OOM)
+            r = {"module": mod, "crash": (p.stderr or p.stdout)[-600:], "returncode": p.returncode}
+    except subprocess.TimeoutExpired as e:
+        out = e.stderr or e.stdout or ""
+        r = {"module": mod, "timeout": args.timeout, "tail": (out.decode(errors="replace") if isinstance(out, bytes) else out)[-600:]}
     r["wall_s"] = round(time.time() - t, 2)
     return r
 
@@ -68,5 +70,16 @@ for mod in mods:
     tc += cp.get("passed", 0); tp += pj.get("passed", 0)
     if a and b: tcp += a; tpj += b
 print("passed: cpython %d, pyjs %d;  test time where both ran: cpython %.1fs, pyjs %.1fs (%.1fx)" % (tc, tp, tcp, tpj, tpj / tcp if tcp else 0))
+# The stored tail of every crash and timeout, so that the CI log says what
+# happened (/tmp/mpmath-compare.json stays on the runner).
+for mod in mods:
+    for side in ("cpython", "pyjs"):
+        r = results[mod][side]
+        if "crash" in r:
+            print("\n%s, %s: crash (return code %s, %.1f s); the output's last 600 characters:\n%s"
+                  % (mod, side, r.get("returncode"), r["wall_s"], r["crash"]))
+        elif "timeout" in r:
+            print("\n%s, %s: timeout after %d s; the output's last 600 characters:\n%s"
+                  % (mod, side, r["timeout"], r.get("tail", "")))
 # Fail (for CI) if pyjs passes fewer tests than CPython.
 sys.exit(1 if tp < tc else 0)

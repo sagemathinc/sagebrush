@@ -1,6 +1,8 @@
 // Uploading a collection from the page (design/sharing.md): hash each file,
 // ask which ones the server is missing, upload those, then commit the
-// version.  The API is web/share/server.ts, on the page's own origin.
+// version (for a new share, the request that makes its collection too, so a
+// failed upload leaves none behind).  The API is web/share/server.ts, on the
+// page's own origin.
 
 export interface Me {
   account_id: string;
@@ -28,9 +30,21 @@ export async function shareStatus(ms = 10_000): Promise<ShareStatus> {
 
 export const signInUrl = (returnTo: string) => `/auth/login?return=${encodeURIComponent(returnTo)}`;
 
+/**
+ * A new share's attempt that already made a share with other contents (`used`, with that share),
+ * or whose share was deleted since (`retired`): never a success, and not retried as it was.
+ */
+export class AttemptError extends Error {
+  constructor(readonly kind: "used" | "retired", readonly share?: { id: string; version: string; url: string }) {
+    super(kind === "used" ? "an earlier upload of this notebook was shared with other files" : "this notebook's earlier share was deleted");
+  }
+}
+
 async function api(method: string, path: string, body?: unknown): Promise<any> {
   const r = await fetch(path, { method, credentials: "same-origin", headers: body === undefined ? {} : { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
   const v = await r.json().catch(() => ({}));
+  if (r.status === 409 && v.error === "attempt_used") throw new AttemptError("used", { id: v.collection, version: v.version, url: new URL(v.url, location.href).href });
+  if (r.status === 410 && v.error === "attempt_retired") throw new AttemptError("retired");
   if (!r.ok) throw new Error(v.error ?? `HTTP ${r.status}`);
   return v;
 }
@@ -50,9 +64,11 @@ export interface LazyFile {
 export const UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
 
 /**
- * Upload files as a new version of a collection (a new collection if `id`
- * is null).  Each file is read once, in order; a batch of at most
- * `batchBytes` (or one larger file) is hashed, the server says which of it
+ * Upload files as a new version of a collection, or (`id` null) as a new
+ * share, made by `attempt` (32 hex digits, kept with the notebook until the
+ * share is made: a retry of it gets that share back, never another).  Each
+ * file is read once, in order; a batch of at most `batchBytes` (or one
+ * larger file) is hashed, the server says which of it
  * it is missing, those are uploaded, and the batch's bytes are dropped.  The
  * batch is sent *before* the next file is read whenever that file, by its
  * listed size, would take the batch over `batchBytes`, or its size isn't
@@ -60,17 +76,18 @@ export const UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
  * largest file) is held at a time, by listed sizes (a file that grew since it
  * was listed counts as read).  The version
  * is created only after every file was read and uploaded: a file that can't
- * be read stops the upload with no version.  `progress(done, total)` counts
+ * be read stops the upload with no version (and, for a new share, no
+ * collection).  `progress(done, total)` counts
  * bytes read (total: the files' known sizes).
  */
 export async function uploadCollection(
-  o: { id: string | null; title: string; license?: string; files: LazyFile[] },
+  o: { id: string | null; attempt?: string; title: string; license?: string; files: LazyFile[] },
   progress: (done: number, total: number) => void = () => {},
-  opts: { batchBytes?: number } = {},
+  opts: { batchBytes?: number; beforeCommit?: () => void | Promise<void> } = {},
 ): Promise<{ id: string; version: string; url: string; frozen: string }> {
   const limit = opts.batchBytes ?? UPLOAD_BATCH_BYTES;
   const total = o.files.reduce((s, f) => s + (f.size ?? 0), 0);
-  const id = o.id ?? (await api("POST", "/api/share/collections", { title: o.title })).id;
+  if (o.id === null && !/^[0-9a-f]{32}$/.test(o.attempt ?? "")) throw new Error("a new share needs its attempt");
   const manifest: { path: string; sha256: string; size: number }[] = [];
   const sent = new Set<string>();
   let done = 0;
@@ -101,6 +118,10 @@ export async function uploadCollection(
     progress(Math.min(done, total || done), total || done);
   }
   await flush();
-  const v = await api("POST", `/api/share/collections/${id}/versions`, { title: o.title, license: o.license || undefined, files: manifest });
-  return { id, version: v.version, url: new URL(v.url, location.href).href, frozen: new URL(v.frozen, location.href).href };
+  const body = { title: o.title, license: o.license || undefined, files: manifest };
+  // (a new share: its collection is made with this version, by this one request)
+  if (o.id === null) await opts.beforeCommit?.();
+  // (a new share: its own path, which a server from before this answers with 404, creating nothing)
+  const v = o.id === null ? await api("POST", "/api/share/first-upload", { ...body, attempt: o.attempt }) : await api("POST", `/api/share/collections/${o.id}/versions`, body);
+  return { id: o.id ?? v.collection, version: v.version, url: new URL(v.url, location.href).href, frozen: new URL(v.frozen, location.href).href };
 }

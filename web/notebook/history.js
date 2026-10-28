@@ -33,7 +33,9 @@ export { decodePatchId };
 // (this module is the sagebrush-history.js bundle: boards load the shared history from it)
 export { PatchHistory, createImmerDbCodec };
 // (and the notebook journal's, loaded with it: notebook/journal.js, given the page's stores)
-export { journalClasses, pageControls, switchJournal, TAKEOVER, TAKEOVER_FAILED } from "./journal.js";
+export { journalClasses, pageControls, switchJournal, TAKEOVER, TAKEOVER_FAILED, DOC_SYNC } from "./journal.js";
+// (the journal's store for any kind, for a board page, which loads this bundle lazily: web/journal/store.js)
+export { journalStoreClasses, hashOf } from "../journal/store.js";
 
 export const SCHEMA = { primaryKeys: ["type", "id"], stringCols: ["input"] };
 const codec = createImmerDbCodec(SCHEMA);
@@ -51,6 +53,14 @@ export function toRecords(doc) {
   d = d.set({ type: "settings", kernel: KERNEL[doc.mode] ?? "python3" });
   (doc.cells ?? []).forEach((c, i) => (d = d.set(cellRecord(c, i))));
   return d;
+}
+/** A notebook document's records as a plain array (settings, then cells): what merge3.js's mergeRecords3 merges. */
+export const recordsOf = (doc) => [...toRecords(doc).get({ type: "settings" }), ...toRecords(doc).get({ type: "cell" })];
+/** A plain array of records as a notebook document (no outputs). */
+export function docOfRecords(records) {
+  let d = codec.fromString("");
+  for (const r of records) d = d.set(r);
+  return fromRecords(d);
 }
 /** Records as a notebook document (no outputs). */
 export function fromRecords(d) {

@@ -51,7 +51,7 @@ covered = {c["transport"] for c in CASES}
 
 # names that may be excluded as cheap once evidence is recorded (r4 §5); everything else is a case
 CHEAP = {
-    "engineCall": "ntt_cache_stats dims level_data commute estimate estimate_newforms is_prime".split(),
+    "engineCall": "ntt_cache_stats dims level_data commute estimate estimate_newforms is_prime factor_estimate cost_probe".split(),
     "symCall": ("add sub mul div neg const complex e euler_gamma float int pi rat str sym uinf fun rel latex variables operator "
                 "number pysrc numerator denominator degree coefficient coefficients is_zero special_calls enclose").split(),
     "mpCall": "new newp text eq len neg scale add sub".split(),

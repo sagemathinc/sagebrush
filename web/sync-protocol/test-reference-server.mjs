@@ -5,7 +5,7 @@
 // In memory, no browser, a few seconds.
 //   bun web/sync-protocol/test-reference-server.mjs
 import { ReferenceServer, SESSION_COOKIE } from "./reference-server.ts";
-import { batchHash, chainNext, chainStartAt, hex, verifyChain, verifyChainPage, fromHex } from "./doc-protocol.ts";
+import { batchHash, chainNext, chainStartAt, hex, verifyChain, verifyChainPage, fromHex, shapeMismatch } from "./doc-protocol.ts";
 import { toB64 } from "./protocol.ts";
 import { readFileSync } from "node:fs";
 
@@ -491,6 +491,34 @@ const C1 = "clientA1", C2 = "clientB1";
       check(subset(st.expect, ans), `${at}: ${J(ans)}`);
     }
   }
+
+// ---- the answers' shapes (doc-vectors.json's `answers`, agreed with cloud's server): each frame this server sends
+// for them, matched exactly
+{
+  const AV = JSON.parse(readFileSync(new URL("./doc-vectors.json", import.meta.url), "utf8")).answers;
+  const by = (f, w) => AV.find((x) => x.for === f && x.when.startsWith(w)).shape;
+  // (an account of its own: earlier sections end A's session)
+  const A9 = await signedIn(server, "acct-answers");
+  const en9 = await (await A9.call("POST", "/api/sync/v1/enable")).json();
+  check(en9.state === "active", "answers: an account of their own, sync on: " + J(en9));
+  const s9 = await socket(server, A9, "devA0099"), D9 = "0123456789ad", C9 = "clientS9";
+  const claim = await s9.ask({ t: "doc_claim", epoch: 1, doc: D9, client: C9 });
+  check(claim.t === "ack", "answers: the claim: " + J(claim));
+  const one = batch(D9, 1, { [C9]: 0 }, [{ cseq: 1, id: pid(1, C9) }], { kind: "notebook" });
+  const fresh = await s9.ask(one), again = await s9.ask(one);
+  check(shapeMismatch(fresh, by("batch", "a new patch")) === null, "answers: a new batch's ack, as the vector: " + (shapeMismatch(fresh, by("batch", "a new patch")) ?? J(fresh)));
+  check(shapeMismatch(again, by("batch", "every patch a resend")) === null, "answers: the same batch again (all resent, no seq), as the vector: " + (shapeMismatch(again, by("batch", "every patch a resend")) ?? J(again)));
+  const page = await s9.ask({ t: "pull", doc: D9, epoch: 1, after: 0 });
+  check(page.items?.length === 1 && shapeMismatch(page, by("pull", "a page")) === null, "answers: a page, as the vector: " + (shapeMismatch(page, by("pull", "a page")) ?? J(page).slice(0, 200)));
+  const eb = await s9.ask(batch(D9, 2, { [C9]: 0 }, [{ cseq: 2, id: pid(2, C9), parents: [pid(1, C9)] }]));
+  const ep = await s9.ask({ t: "pull", doc: D9, epoch: 2, after: 0 });
+  const ec = await s9.ask({ t: "doc_claim", epoch: 2, doc: D9, client: C9 });
+  check(shapeMismatch(eb, by("batch", "another epoch")) === null, "answers: a batch for another epoch, as the vector: " + (shapeMismatch(eb, by("batch", "another epoch")) ?? J(eb)));
+  check(shapeMismatch(ep, by("pull", "another epoch")) === null, "answers: a pull for another epoch, as the vector: " + (shapeMismatch(ep, by("pull", "another epoch")) ?? J(ep)));
+  check(shapeMismatch(ec, by("doc_claim", "another epoch")) === null, "answers: a claim for another epoch, as the vector: " + (shapeMismatch(ec, by("doc_claim", "another epoch")) ?? J(ec)));
+  s9.s.close();
+}
+
 } catch (e) {
   fails.push(`stopped after "${lastCheck.slice(0, 80)}": ${e?.message ?? e}`);
 }

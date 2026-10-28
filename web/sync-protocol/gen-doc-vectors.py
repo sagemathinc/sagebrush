@@ -505,6 +505,21 @@ def main():
         {"for": "snapshot", "when": "another sha256 or byte count at an at_seq already taken", "error": {"code": "conflict"}, "again": "never at that at_seq"},
         {"for": "snapshot", "when": "an at_seq at or before the epoch's latest snapshot", "error": {"code": "conflict", "detail": {"latest_at_seq": 1500}}, "again": "only past latest_at_seq"},
     ]
+    # (answers whose shape the servers and the client agree on by vector (sync-docs and sync-client, Oct 28): each a
+    # `shape`, matched by doc-protocol.ts's shapeMismatch: an object has exactly these keys; {"*": s} is a map whose
+    # every value is s; [s] an array whose every element is s; "number", "string", "boolean", "null", "string|null" and
+    # "array" a value of that type; "=x" exactly the string x)
+    head = {"epoch": "number", "seq": "number"}
+    chained = {"epoch": "number", "seq": "number", "chain": "string|null"}
+    refusal_shape = lambda code, detail: {"t": "=error", "req": "number", "code": "=" + code, "detail": detail}
+    v["answers"] = [
+        {"for": "pull", "when": "a page of batches (never a snapshot key)", "shape": {"t": "=batches", "req": "number", "owner": "string", "doc": "string", "epoch": "number", "head": chained, "items": [{"seq": "number", "author": "string", "writer": "string", "device": "string", "recv": "number", "chain": "string|null", "patches": "array", "body": "string"}], "more": "boolean"}},
+        {"for": "batch", "when": "a new patch stored", "shape": {"t": "=ack", "req": "number", "batch": {"seq": "number", "new": "number", "resent": {"*": "number"}, "head": chained}}},
+        {"for": "batch", "when": "every patch a resend: no seq", "shape": {"t": "=ack", "req": "number", "batch": {"new": "number", "resent": {"*": "number"}, "head": chained}}},
+        {"for": "batch", "when": "another epoch than the document's (its history was cleared)", "shape": refusal_shape("epoch", {"message": "string", "epoch": "number", "head": head})},
+        {"for": "pull", "when": "another epoch than the document's (its history was cleared)", "shape": refusal_shape("epoch", {"message": "string", "epoch": "number", "head": head})},
+        {"for": "doc_claim", "when": "another epoch than the document's", "shape": refusal_shape("stale_epoch", {"message": "string", "epoch": "number", "head": head})},
+    ]
     json.dump(v, sys.stdout, ensure_ascii=False, indent=1)
     sys.stdout.write("\n")
 

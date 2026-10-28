@@ -916,6 +916,68 @@ async function migrateOnWrite() {
   v.close();
 }
 
+// R6-A3-1: a write naming a data file by its fid touches nothing unless the entry at the path is that file, checked
+// before migrateOne (which would otherwise move another, unmigrated file's bytes first)
+async function writeGuard() {
+  const w = await v1([["/g/a.txt", "theirs"], ["/g/b.txt", "bee"]]);
+  const snap = async () => JSON.stringify({ entry: await rawGet(w.ws, "entries", "/g/a.txt"), fileBytes: await Promise.all((await rawKeys(w.ws, "fileBytes")).map(async (k) => [k, Array.from(new Uint8Array(await rawGet(w.ws, "fileBytes", k) ?? []))])), old: dec(await rawGet(w.main, "files", "/g/a.txt")),
+    meta: await Promise.all((await rawKeys(w.ws, "meta")).map(async (k) => [k, await rawGet(w.ws, "meta", k)])), ops: (await rawKeys(w.ws, "ops")).length, versions: (await rawKeys(w.ws, "versions")).length, left: await legacyLeft(w) });
+  const before = await snap();
+  const a0 = await rawGet(w.ws, "entries", "/g/a.txt");
+  check(!a0.migrated && await fails(w.write("/g/a.txt", "mine", { fid: "0123456789abcdef" }), "conflict"), "a write naming another file's fid, an unmigrated file at the path: refused");
+  check((await snap()) === before && dec((await w.read("/g/a.txt")).content) === "theirs", "…that file untouched: its entry, its old bytes where they were, nothing in fileBytes, no op, no version, the migration's state");
+  const b = await w.stat("/g/b.txt");
+  await w.write("/g/b.txt", "bee 2", { fid: b.fid });
+  check(dec((await w.read("/g/b.txt")).content) === "bee 2" && (await w.stat("/g/b.txt")).migrated === true, "the same fid: written, the file moved first, as before");
+  await w.create("/g/n.ipynb");
+  check(await fails(w.write("/g/n.ipynb", { cells: [] }, { fid: b.fid }), "conflict"), "a fid named, a notebook at the path: refused");
+  w.close();
+}
+
+// pathOfFile: a data file's path by its fid, read-only
+async function pathOfFile_() {
+  const w = await fresh();
+  await w.create("/p/a.txt", { content: "a" });
+  const a = await w.stat("/p/a.txt");
+  const ops0 = (await rawKeys(w.ws, "ops")).length;
+  let r = await w.pathOfFile(a.fid);
+  check(r.ok && r.path === "/p/a.txt" && r.entry.fid === a.fid, "pathOfFile: a live file by its fid");
+  await w.rename("/p/a.txt", "/q.txt");
+  r = await w.pathOfFile(a.fid);
+  check(r.ok && r.path === "/q.txt", "…followed after a rename");
+  check((await w.pathOfFile("ffffffffffffffff")).why === "none" && (await w.pathOfFile("")).why === "none", "…an unknown fid, or none: none");
+  const ops1 = (await rawKeys(w.ws, "ops")).length;
+  await w.pathOfFile(a.fid);
+  check((await rawKeys(w.ws, "ops")).length === ops1 && ops1 > ops0, "…and it writes nothing (no op)");
+  await w.create("/x.ipynb");
+  await w.remove("/q.txt");
+  check((await w.pathOfFile(a.fid)).why === "trashed", "…only in Trash: trashed");
+  // two live rows with one fid (which the workspace doesn't make; put raw): ambiguous, never the first
+  await w.create("/d1.txt", { content: "1" });
+  const { nkey: _k, ...d } = await rawGet(w.ws, "entries", "/d1.txt");
+  await rawPut(w.ws, "entries", { ...d, path: "/d2.txt" });
+  const amb = await w.pathOfFile(d.fid);
+  check(amb.ok === false && amb.why === "ambiguous", "two live entries with the same fid: ambiguous");
+  // the bound (api.ts PATH_OF_FILE_MAX = 64 entries with one identity): one live among exactly that many is found; one more
+  // live entry past it is never missed (ambiguous, unread, never the first live one)
+  await w.create("/c.txt", { content: "c" });
+  const { nkey: _c, ...c } = await rawGet(w.ws, "entries", "/c.txt");
+  const MAX = 64;   // (api.ts PATH_OF_FILE_MAX)
+  for (let k = 0; k < MAX - 1; k++) await rawPut(w.ws, "entries", { ...c, path: `/Trash/c${k}.txt`, trashed: { from: "/c.txt", at: 1, id: "c" + k } });
+  const atCap = await w.pathOfFile(c.fid);
+  check(atCap.ok && atCap.path === "/c.txt", "pathOfFile: one live entry among exactly the bound's entries with its fid: found");
+  await rawPut(w.ws, "entries", { ...c, path: "/zz-late.txt" });
+  const over = await w.pathOfFile(c.fid);
+  check(over.ok === false && over.why === "ambiguous", "…and a second live one past the bound: ambiguous, never the first");
+  // the bound's trashed rows can't hide the one live entry either: 64 in Trash and one live is ambiguous, never "trashed"
+  await w.create("/h.txt", { content: "h" });
+  const { nkey: _h, ...hh } = await rawGet(w.ws, "entries", "/h.txt");
+  for (let k = 0; k < MAX; k++) await rawPut(w.ws, "entries", { ...hh, path: `/Trash/h${k}.txt`, trashed: { from: "/h.txt", at: 1, id: "h" + k } });
+  const hid = await w.pathOfFile(hh.fid);
+  check(hid.ok === false && hid.why === "ambiguous", "…" + MAX + " in Trash and one live: ambiguous (fail closed), never trashed nor a guess");
+  w.close();
+}
+
 async function migratePaused() {
   const w = await v1([["/p/a.txt", "AAA"], ["/p/b.txt", "BBB"]]);
   const est = navigator.storage.estimate;
@@ -1642,6 +1704,9 @@ async function durabilityPurgePending() {
   w.close();
 }
 
+// (Storage's own length, read through its prototype's getter)
+const realLength = (s) => Object.getOwnPropertyDescriptor(Storage.prototype, "length").get.call(s);
+
 async function durabilityPurgeLocalSparse() {
   // daybreak2's LIMIT-28F-1: 500 keys to purge among 20,000 others: listed once per run, never a scan per step
   const o = await named();
@@ -1657,16 +1722,54 @@ async function durabilityPurgeLocalSparse() {
   await w.reset("new").catch(() => {});
   W.RESET_HOOK.beforePurge = undefined;
   w.close();
-  const steps = [];
-  let last = performance.now();
-  W.RESET_HOOK.afterPage = (store, n) => { if (store === "localStorage") { const t = performance.now(); steps.push([n, Math.round(t - last)]); last = t; } };
-  const t0 = performance.now();
-  w = await openAs(o);
-  const openMs = performance.now() - t0;
-  await w.settled();
-  W.RESET_HOOK.afterPage = undefined;
+  // (the work counted, not timed: daybreak2's r2 contract for LIMIT-28F-1. A scan is a run of localStorage.key(0),
+  // key(1), ... and must read exactly the length there was when it began; the purge makes exactly two, its first
+  // listing before any removal and its terminal verification after the last page, with no key() call between pages
+  // and at most LOCAL_PAGE removals a page. The counters are on Storage.prototype, counting only this localStorage
+  // (a property set on the instance would be a setItem), and are put back, and checked put back, in finally.
+  // Times are only reported: a hang is the runner's timeout's to catch)
+  const proto = Storage.prototype, realKey = proto.key, realRemove = proto.removeItem;
+  const scans = [], steps = [];
+  let removals = 0, pageRemovals = 0, stray = 0, cur = null;
+  const L0 = localStorage.length;
+  let last = performance.now(), openMs = 0;
+  // (installed inside the try, so a failure part way through still puts everything back; the put-back is checked at
+  // the end of finally, so it is checked whatever happened: daybreak2's #261 review)
+  try {
+    W.RESET_HOOK.afterPage = (store, n) => { if (store === "localStorage") { const t = performance.now(); steps.push({ n, removed: pageRemovals, keyCalls: 0, ms: Math.round(t - last) }); pageRemovals = 0; last = t; } };
+    proto.key = function (i) {
+      if (this === localStorage) {
+        if (i === 0) scans.push((cur = { len: realLength(this), n: 0, removalsBefore: removals, pagesBefore: steps.length }));
+        if (cur && i === cur.n) cur.n++;
+        else stray++;
+        if (steps.length) steps[steps.length - 1].keyCalls++;
+      }
+      return realKey.call(this, i);
+    };
+    proto.removeItem = function (k) {
+      if (this === localStorage) { removals++; pageRemovals++; }
+      return realRemove.call(this, k);
+    };
+    const t0 = performance.now();
+    w = await openAs(o);
+    openMs = performance.now() - t0;
+    await w.settled();
+  } finally {
+    W.RESET_HOOK.afterPage = undefined;
+    proto.key = realKey;
+    proto.removeItem = realRemove;
+    check(Storage.prototype.key === realKey && Storage.prototype.removeItem === realRemove, "the counters on Storage.prototype are put back");
+  }
   const left = Object.keys(localStorage).filter((k) => k.startsWith("sagebrush-board:local:")).length;
-  check(left === 0 && steps.length === 3 && steps.every(([n, ms]) => n <= W.LOCAL_PAGE && ms < 200), `500 keys purged among 20,000 others, ${W.LOCAL_PAGE} a step, each step bounded: ${JSON.stringify(steps)}`);
+  const [first, terminal] = scans;
+  // (key() calls after a page and before the next page's end: only the terminal scan may make them, after the last page)
+  const between = steps.slice(0, -1).reduce((a, s) => a + s.keyCalls, 0);
+  const scansOk = scans.length === 2 && stray === 0 && first.n === first.len && first.removalsBefore === 0 && first.pagesBefore === 0
+    && terminal.n === terminal.len && terminal.pagesBefore === steps.length && terminal.removalsBefore === removals;
+  // (every removal inside a page: none after the last page's hook, and the pages' removals are all of them)
+  const pagesOk = steps.length === 3 && steps.every((s) => s.n <= W.LOCAL_PAGE && s.removed <= W.LOCAL_PAGE) && removals === 500 && between === 0
+    && pageRemovals === 0 && steps.reduce((a, s) => a + s.removed, 0) === removals;
+  check(left === 0 && scansOk && pagesOk, `500 keys purged among 20,000 others, ${W.LOCAL_PAGE} a step: two scans (the listing, then the terminal check), no scan between pages: ${JSON.stringify({ L0, scans, stray, removals, afterLastPage: pageRemovals, steps })}`);
   check(openMs < 1000 && others.every((k) => localStorage.getItem(k) === "x"), `…the open within its budget (${Math.round(openMs)} ms), the other keys untouched`);
   for (const k of others) localStorage.removeItem(k);
   w.close();
@@ -2698,7 +2801,7 @@ async function durabilityLockOrder() {
 }
 
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority, () => historyOrder("clear"), () => historyOrder("drop"), purgeMarks, durabilityLockOrder]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, writeGuard, pathOfFile_, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority, () => historyOrder("clear"), () => historyOrder("drop"), purgeMarks, durabilityLockOrder]) {
     console.log(`test: ${t.name || t}`);
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
