@@ -332,25 +332,6 @@ def test_gc_mixed_prefix():
     print("gc mixed prefix: the dead entries behind 400 live ones are reached when they fit the budget; otherwise every pass is bounded and logs that it stopped: ok")
 
 
-def gc_pass_bound(budget, per, windows=os.name == "nt"):
-    """A GC pass's wall-time ceiling: the budget and one entry, plus slack for
-    the pass's own work: 0.03 s, and 0.12 s on Windows, where a shared
-    runner's unlinks and log write took up to 0.162 s in all (daybreak2's PR B
-    r2 ruling; prb-windows run 40617561322)."""
-    return budget + per + (0.12 if windows else 0.03)
-
-
-def test_gc_bound_control():
-    """The Windows slack never reaches an ignored budget: with test_gc_wall_time's
-    budget (0.05 s) and entry (0.03 s), Windows' 0.200 s ceiling accepts the
-    0.162 s pass seen on a runner and rejects 0.300 s, ten 30 ms entries in one
-    pass; elsewhere the ceiling stays 0.110 s."""
-    w, p = gc_pass_bound(0.05, 0.03, windows=True), gc_pass_bound(0.05, 0.03, windows=False)
-    assert abs(w - 0.200) < 1e-9 and abs(p - 0.110) < 1e-9, (w, p)
-    assert 0.162 <= w and not 0.300 <= w and not 0.162 <= p, (w, p)
-    print("gc pass bound: 0.200 s on Windows (0.162 within, 0.300 over), 0.110 s elsewhere: ok")
-
-
 def test_gc_wall_time():
     """daybreak2's A-2-B1 and astra's A-2, under real time (entries take real
     time to read, the seek's included): one deadline from the pass's start;
@@ -429,7 +410,14 @@ def test_gc_wall_time():
         if set(os.listdir(host)) == {"%d-1" % p for p in live3}:
             break
     assert set(os.listdir(host)) == {"%d-1" % p for p in live3}, os.listdir(host)
-    bound = gc_pass_bound(BUDGET, PER)
+    bound = BUDGET + PER + 0.03  # (the budget and one entry, plus slack for the pass's own work)
+    print("gc under real time, every pass (s): %s" % " ".join("%.3f" % t for t in t1 + t2))
+    if os.name == "nt":
+        # (Windows: report-only.  A shared runner's single passes there ranged from 0.064 s to 0.21 s
+        # for the same logic; the deadline is gated by the deterministic tests below instead:
+        # daybreak2's PR B r3 ruling)
+        print("gc under real time (Windows, report only): the longest pass %.3f s, %d and %d passes" % (max(t1 + t2), len(t1), len(t2)))
+        return
     assert max(t1 + t2) <= bound, (max(t1), max(t2), bound)
     print("gc under real time: passes of at most %.3f s (bound %.3f) reach the dead entries, %d and %d passes: ok" % (max(t1 + t2), bound, len(t1), len(t2)))
 
@@ -475,6 +463,118 @@ def test_gc_no_fetch_after_the_last_entry():
         os.scandir = real
     assert r["removed"] == 3 and r["stopped"], r
     print("gc: no entry fetched after the one that spent the budget: ok")
+
+
+class _Timed:
+    """A fake scandir over a directory's entries (by name) on a fake clock:
+    each fetch costs `fetch`, and asking for an entry once the clock is past
+    the pass's deadline (its start, given, plus the budget) raises: a pass
+    may finish the entry it fetched, never ask for another."""
+
+    def __init__(self, now, fetch, deadline):
+        self.now, self.fetch, self.deadline, self.asked = now, fetch, deadline, 0
+
+    def __call__(self, d):
+        real = _Timed.real
+        with real(d) as it:
+            self.es = sorted(it, key=lambda e: e.name)
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def __iter__(self):
+        for e in self.es:
+            if self.now[0] > self.deadline[0]:
+                raise AssertionError("an entry asked for at %.2f, past the deadline %.2f" % (self.now[0], self.deadline[0]))
+            self.asked += 1
+            self.now[0] += self.fetch
+            yield e
+
+
+_Timed.real = os.scandir
+
+
+def _gc_fake(names, cursor):
+    """A root whose host directory holds these (empty) entries, and this cursor."""
+    d = tempfile.mkdtemp(prefix="sb-p3d-")
+    root = os.path.join(d, ".sagebrush")
+    host = os.path.join(root, ".plot3d-tmp", P3._host())
+    os.makedirs(host)
+    for n in names:
+        open(os.path.join(host, n), "w").close()
+    open(os.path.join(root, ".plot3d-gc.cursor"), "w").write(cursor)
+    return root, host
+
+
+def _gc_pass(root, fetch, exam, budget, live=()):
+    """One fake-clock pass (the clock at 100 when it starts; entries dead
+    unless their pid is in live; each examination costs `exam`): its record,
+    and how many entries it asked for."""
+    now, deadline = [100.0], [100.0 + budget]
+    fake = _Timed(now, fetch, deadline)
+
+    def alive(pid):
+        now[0] += exam
+        return pid in live
+
+    os.scandir = fake
+    try:
+        r = P3._gc_temps(root, budget_s=budget, clock=lambda: now[0], alive=alive)
+    finally:
+        os.scandir = _Timed.real
+    return r, fake.asked
+
+
+def test_gc_deadline_traversal():
+    """daybreak2's PR B r3 (b), on a fake clock: one deadline from the pass's
+    start; once an examination ends past it, no entry is asked for (fetches
+    0.5, examinations 0.4, budget 2.5: the third examination ends at 2.7)."""
+    names = ["%d-1" % (930000 + i) for i in range(8)]
+    root, host = _gc_fake(names, "")
+    r, asked = _gc_pass(root, 0.5, 0.4, 2.5)
+    assert r["removed"] == 3 and r["kept"] == 0 and r["stopped"] and asked == 3, (r, asked)
+    assert len(os.listdir(host)) == 5, os.listdir(host)
+    print("gc deadline, traversal: three entries, stopped, none asked for after the deadline: ok")
+
+
+def test_gc_deadline_after_seek():
+    """The seek doesn't reset the deadline: the cursor (a live writer's) is
+    found at 1.0, then two examinations end at 2.8, past the pass's 2.5; a
+    deadline taken again after the seek would ask for a fourth entry."""
+    names = ["%d-1" % (940000 + i) for i in range(6)]
+    root, host = _gc_fake(names, names[1])
+    r, asked = _gc_pass(root, 0.5, 0.4, 2.5, live={940001})
+    assert r["removed"] == 2 and r["kept"] == 0 and r["stopped"] and r["resumed_after"] == names[1] and asked == 4, (r, asked)
+    assert open(os.path.join(root, ".plot3d-gc.cursor")).read() == names[1]
+    print("gc deadline, after a seek: one deadline, from the pass's start: ok")
+
+
+def test_gc_deadline_in_seek():
+    """The budget spent while seeking a present cursor (fetches 1.0, budget
+    2.5, the cursor fifth): the entry fetched past the deadline is the pass's
+    one examination, and nothing more is asked for.  Repeated passes, each
+    asked the same, still reach every dead entry; every pass logs whether it
+    stopped, and the cursor is a kept entry or none."""
+    names = ["%d-1" % (950000 + i) for i in range(6)]
+    root, host = _gc_fake(names, names[4])
+    r, asked = _gc_pass(root, 1.0, 0.0, 2.5, live={950004})
+    assert r["removed"] == 1 and r["kept"] == 0 and r["stopped"] and asked == 3, (r, asked)
+    assert names[2] not in os.listdir(host) and open(os.path.join(root, ".plot3d-gc.cursor")).read() == names[4]
+    n = 1
+    while set(os.listdir(host)) != {names[4]}:
+        n += 1
+        assert n <= 12, os.listdir(host)
+        r, asked = _gc_pass(root, 1.0, 0.0, 2.5, live={950004})
+        assert r["removed"] + r["kept"] >= 1 or not r["stopped"], r  # (a pass that stops examined an entry)
+        cur = open(os.path.join(root, ".plot3d-gc.cursor")).read()
+        assert cur in ("", names[4]), cur
+    log = [json.loads(l) for l in open(os.path.join(root, ".plot3d-gc.log"))]
+    assert len(log) == n and all("stopped" in x for x in log), log
+    print("gc deadline, in a seek: the entry reached is the one examined, nothing more asked for; %d passes reach the dead: ok" % n)
 
 
 def test_get_deadline_nonempty():
@@ -637,20 +737,46 @@ def test_runner_drops_stale():
     assert "mine" in text and "NOT MINE" not in text, text[:400]
     print("runner drops another request's messages: ok")
 
+def case(f):
+    # (a case that fails is reported, and the rest still run; the exit is non-zero if any failed)
+    try:
+        f()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        print("FAIL %s" % f.__name__, flush=True)
+        failed.append(f.__name__)
+
+
+failed = []
+
+GC_DEADLINE = [test_gc_no_fetch_after_the_last_entry, test_gc_deadline_traversal, test_gc_deadline_after_seek, test_gc_deadline_in_seek]
+
+if __name__ == "__main__" and sys.argv[1:] == ["gc-deadline"]:
+    # (the deterministic deadline tests alone: the Windows mutant runs use them)
+    for f in GC_DEADLINE:
+        case(f)
+    print("gc deadline: %s" % ("%d FAILED (%s)" % (len(failed), ", ".join(failed)) if failed else "all ok"))
+    sys.exit(1 if failed else 0)
 
 if __name__ == "__main__":
-    test_display_reset()
-    test_page_atomic_and_v2()
-    test_page_two_threads()
-    test_page_nested_callback()
-    test_page_no_listing_with_stale_temps()
-    test_gc()
-    test_gc_mixed_prefix()
-    test_gc_bound_control()
-    test_gc_wall_time()
-    test_gc_no_fetch_after_the_last_entry()
-    test_timeout_race_keeps_a_finished_reply()
-    test_ids()
-    test_get_deadline_nonempty()
-    test_runner_drops_stale()
+    case(test_display_reset)
+    case(test_page_atomic_and_v2)
+    case(test_page_two_threads)
+    case(test_page_nested_callback)
+    case(test_page_no_listing_with_stale_temps)
+    case(test_gc)
+    case(test_gc_mixed_prefix)
+    case(test_gc_wall_time)
+    case(test_gc_no_fetch_after_the_last_entry)
+    case(test_gc_deadline_traversal)
+    case(test_gc_deadline_after_seek)
+    case(test_gc_deadline_in_seek)
+    case(test_timeout_race_keeps_a_finished_reply)
+    case(test_ids)
+    case(test_get_deadline_nonempty)
+    case(test_runner_drops_stale)
+    if failed:
+        print("ctrlc cleanup: %d FAILED (%s)" % (len(failed), ", ".join(failed)))
+        sys.exit(1)
     print("ctrlc cleanup: all ok")
