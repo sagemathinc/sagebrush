@@ -122,7 +122,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
 
   // patching: one wrapper per chunk (group); changed groups are built hidden across frames under the budget, then
   // swapped in one step (old removed, new shown): never two versions of a group at once
-  let patchSeq = 0;
+  let patchSeq = 0, stepMax = 0, swapMs = 0;   // (the patch loop's own longest step and swap: preview.dataset)
   const schedulePatch = (items: { g: number; h: string }[], ng: number) => {
     const seq = ++patchSeq;
     const html: string[][] = Array.from({ length: ng }, () => []);
@@ -137,24 +137,32 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const step = () => {
       if (seq !== patchSeq) { for (const w of staged) w.remove(); return; }
       const t0 = performance.now(); let count = 0, bytesIn = 0;
+      const yieldNow = () => { stepMax = Math.max(stepMax, performance.now() - t0); requestAnimationFrame(step); };
       while (g < next.length - s) {
         if (k === 0) { const w = el("div", "ch"); w.hidden = true; staged.push(w); preview.appendChild(w); }
         const pieces = html[g], w = staged[staged.length - 1];
         while (k < pieces.length) {
           const h = pieces[k];
-          if (count >= PATCH_BUDGET.items || bytesIn + h.length > PATCH_BUDGET.bytes && count > 0 || performance.now() - t0 > PATCH_BUDGET.ms) { requestAnimationFrame(step); return; }
+          if (count >= PATCH_BUDGET.items || bytesIn + h.length > PATCH_BUDGET.bytes && count > 0 || performance.now() - t0 > PATCH_BUDGET.ms) return yieldNow();
           const piece = document.createElement("div"); piece.className = "pc"; piece.innerHTML = h; w.appendChild(piece);
           count++; bytesIn += h.length; k++;
         }
         k = 0; g++;
       }
-      // all new groups ready: swap them in (moves only, no parsing)
+      // all new groups ready: swap them in, in one step (old ones hidden, new ones moved and shown: no parsing);
+      // the old ones are removed afterwards, one per frame, while hidden, so they are never shown with the new
+      const tSwap = performance.now();
       const kids = groups;
       const before = kids[groupHtml.length - s] ?? null;
-      for (let q = groupHtml.length - s - 1; q >= p; q--) kids[q]?.remove();
+      const old = kids.slice(p, groupHtml.length - s);
+      for (const w of old) w.hidden = true;
       for (const w of staged) { preview.insertBefore(w, before); w.hidden = false; }
       groups = kids.slice(0, p).concat(staged, kids.slice(groupHtml.length - s));
       groupHtml = next;
+      swapMs = Math.max(swapMs, performance.now() - tSwap);
+      const drop = () => { const w = old.pop(); if (w) { w.remove(); requestAnimationFrame(drop); } };
+      requestAnimationFrame(drop);
+      preview.dataset.patchMaxMs = String(Math.round(stepMax)); preview.dataset.swapMaxMs = String(Math.round(swapMs));
     };
     step();
   };
