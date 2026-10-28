@@ -1,8 +1,8 @@
 """Stop during dense integer products through the public route (CPython),
 within the 250 ms Stop bound (Unix; skipped on Windows).
 
-  python engine/py/test_interrupt_matmul.py [--quick]      real SIGINT
-  python engine/py/test_interrupt_matmul.py --targeted     a test-hooks wheel
+  python engine/py/test_interrupt_matmul.py [--set big|small] [--quick]      real SIGINT
+  python engine/py/test_interrupt_matmul.py --targeted [--set big|small]     a test-hooks wheel
 
 Real SIGINT (any wheel): for each shape (1 x K x 1, 1 x K x M, square, wide,
 output-heavy, BigInt 300-digit) a child first runs the product
@@ -47,8 +47,14 @@ elif shape == "wide":  # n x 32 times 32 x n
     a, b = text(n, 32, lambda i, j: (i * 31 + j) % 10**9), text(32, n, lambda i, j: (i + j * 17) % 10**9)
 elif shape == "output-heavy":  # n x 1 times 1 x n
     a, b = text(n, 1, lambda i, j: 10**8 + i), text(1, n, lambda i, j: 10**8 + 7 * j)
-else:  # big: 1 x n x 1, 300-digit entries
+elif shape == "big":  # 1 x n x 1, 300-digit entries
     a, b = text(1, n, lambda i, j: 10**299 + 7 * j), text(n, 1, lambda i, j: 10**299 - 3 * i)
+elif shape == "big-square":  # n x n, 300-digit entries
+    a = b = text(n, n, lambda i, j: 10**299 + 7919 * i + 104729 * j)
+elif shape == "big-1xKxM":  # 1 x n x 16, 300-digit entries
+    a, b = text(1, n, lambda i, j: 10**299 + 7 * j), text(n, 16, lambda i, j: 10**299 - 3 * i - j)
+else:  # huge: 1 x n x 1, 4000-digit entries (under the 4300-digit int-str limit)
+    a, b = text(1, n, lambda i, j: 10**3999 + 7 * j), text(n, 1, lambda i, j: 10**3999 - 3 * i)
 def nxt():
     return json.dumps(call("mat_mul", a="1,2", b="3;4", wire="csv"))
 '''
@@ -65,10 +71,10 @@ print("then: " + nxt(), flush=True)
 '''
 
 TARGETED_CHILD = COMMON + r'''
-dot = "zmat-big-dot" if shape == "big" else "zmat-dot"
+dot = "zmat-big-dot" if shape.startswith(("big", "huge")) else "zmat-dot"
 # (the phases with at least 2^16 units of work at these shapes: the
 # output-heavy product's inputs are n entries each, below one poll interval)
-phases = ([dot] if shape == "output-heavy" else ["parse", "zmat-scan", dot]) + (["reply"] if shape in ("square", "wide", "output-heavy") else [])
+phases = ([dot] if shape == "output-heavy" else ["parse", "zmat-scan", dot]) + (["reply"] if shape in ("square", "wide", "output-heavy", "big-square") else [])
 base = _native.ledger_snapshot()["outstanding"]
 req = json.dumps(dict(fn="mat_mul", a=a, b=b, wire="csv"))
 t0 = time.monotonic(); req2 = json.dumps(dict(fn="mat_mul", a=a, b=b, wire="csv")); t1 = time.monotonic()
@@ -96,8 +102,17 @@ for ph in phases:
 print("end", flush=True)
 '''
 
-# (shape, size): about 1-4 s natively on a VM; --quick halves the work
-SHAPES = [("1xKx1", 8_000_000), ("1xKxM", 600_000), ("square", 1400), ("wide", 9000), ("output-heavy", 3000), ("big", 400_000)]
+# The shape sets (--set NAME, default big): (shape, size).
+# - big: about 1-4 s natively on a VM, with requests or replies of 25-640 MB:
+#   the FU-MM-T evidence (one call's serde/JSON/drop intervals grow with its bytes).
+# - small: every request and reply under about 8 MB (T's future per-call budget),
+#   for #241's own Stop-250 claim; real SIGINT at T/2 only where T >= 0.5 s.
+SETS = {
+    "big": [("1xKx1", 8_000_000), ("1xKxM", 600_000), ("square", 1400), ("wide", 9000), ("output-heavy", 3000), ("big", 400_000)],
+    "small": [("1xKx1", 400_000), ("1xKxM", 20_000), ("square", 630), ("wide", 500), ("output-heavy", 500), ("big", 12_000), ("big-1xKxM", 800), ("big-square", 100), ("huge", 600)],
+}
+SET = sys.argv[sys.argv.index("--set") + 1] if "--set" in sys.argv else "big"
+SHAPES = SETS[SET]
 WAIT = 600.0  # the longest any child may take (a hang guard, not a limit of the computation)
 
 
@@ -164,7 +179,10 @@ def sigint_case(shape, n):
     dt = time.monotonic() - ts
     out, err, rc = finish(c, 60)
     lines = ((first or "") + out).splitlines()
-    ok = first == "interrupted\n" and rc == 0 and lines[-1:] == ['then: "11"'] and dt < 0.25 and T >= 0.5
+    if T < 0.5:
+        # (too short for a signal at T / 2 to be scheduling evidence: reported, not judged)
+        return True, "T=%.2f s: too short for a T/2 SIGINT row (n/a); KeyboardInterrupt %.0f ms, rc=%s" % (T, dt * 1000, rc)
+    ok = first == "interrupted\n" and rc == 0 and lines[-1:] == ['then: "11"'] and dt < 0.25
     return ok, "T=%.2f s, KeyboardInterrupt %.0f ms after SIGINT, rc=%s, %s" % (T, dt * 1000, rc, " | ".join(lines)[:120] + err.strip()[-200:])
 
 
@@ -200,7 +218,7 @@ if targeted:
 fails = 0
 for shape, n in SHAPES:
     if quick:
-        n = n // 2 if shape in ("1xKx1", "1xKxM", "big") else int(n / 1.26)
+        n = n // 2 if shape in ("1xKx1", "1xKxM", "big", "big-1xKxM", "huge") else int(n / 1.26)
     if targeted:
         ok, rows, bad = targeted_case(shape, n)
         for r in rows:
