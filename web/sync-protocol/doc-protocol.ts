@@ -800,11 +800,14 @@ const TYPES: Record<string, (v: unknown) => boolean> = {
   array: (v) => Array.isArray(v),
 };
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+// (a key of the object itself, never one its prototype has: a frame's extra "constructor", "toString" or "__proto__"
+// key, or a shape naming one, is not matched by Object.prototype's (astra's item 4 review, A1))
+const own = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
 /** Where `v` differs from `shape` (a path and why), or null when it matches. */
 export function shapeMismatch(v: unknown, shape: Shape, at = "$"): string | null {
   if (typeof shape === "string") {
     if (shape.startsWith("=")) return v === shape.slice(1) ? null : `${at}: not ${JSON.stringify(shape.slice(1))}`;
-    const t = TYPES[shape];
+    const t = own(TYPES, shape) ? TYPES[shape] : undefined;
     if (!t) return `${at}: the shape names no type (${shape})`;
     return t(v) ? null : `${at}: not ${shape}`;
   }
@@ -825,9 +828,9 @@ export function shapeMismatch(v: unknown, shape: Shape, at = "$"): string | null
     }
     return null;
   }
-  for (const k of Object.keys(v)) if (!(k in shape)) return `${at}.${k}: not in the shape`;
+  for (const k of Object.keys(v)) if (!own(shape, k)) return `${at}.${k}: not in the shape`;
   for (const k of keys) {
-    if (!(k in v)) return `${at}.${k}: missing`;
+    if (!own(v, k)) return `${at}.${k}: missing`;
     const m = shapeMismatch(v[k], shape[k], `${at}.${k}`);
     if (m) return m;
   }

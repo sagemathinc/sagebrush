@@ -88,6 +88,22 @@ check(res.maxRSS > 0 && res.maxRSS < 96 * 1024, `jcs: 16 MiB of U+0001 refused b
   check(/\$\.req: not number/.test(P.shapeMismatch({ ...ack, req: "3" }, by("batch", "a new patch")) ?? ""), "shapes: a req that is a string, not a number, is refused");
   check(/resent\.0{11}_c: not number/.test(P.shapeMismatch({ t: "ack", req: 4, batch: { new: 0, resent: { ["0".repeat(11) + "_c"]: "2" }, head } }, by("batch", "every patch a resend")) ?? ""), "shapes: a resent map's value that is a string, not a number, is refused");
   check(/\$\.items: not an array/.test(P.shapeMismatch({ ...page, items: { 0: page.items[0] } }, by("pull", "a page")) ?? ""), "shapes: items as an object, not an array, is refused");
+  // (astra's item 4 review: A2, a map's later value of the wrong type after valid ones; A1, a frame's own extra key that
+  // Object.prototype also has, from JSON as a peer would send it, is not in the shape; a shape's required key is the
+  // frame's own; a shape naming a prototype property names no type)
+  const ids = ["0".repeat(11) + "_a", "0".repeat(11) + "_b", "0".repeat(11) + "_c"];
+  check(P.shapeMismatch({ t: "ack", req: 4, batch: { new: 0, resent: { [ids[0]]: 1, [ids[1]]: 2, [ids[2]]: 3 }, head } }, by("batch", "every patch a resend")) === null, "shapes: a resent map of three numbers matches (the control for the next two)");
+  check(/resent\.0{11}_c: not number/.test(P.shapeMismatch({ t: "ack", req: 4, batch: { new: 0, resent: { [ids[0]]: 1, [ids[1]]: 2, [ids[2]]: "3" }, head } }, by("batch", "every patch a resend")) ?? ""), "shapes: a resent map whose third value is a string, after two numbers, is refused at that value");
+  check(/resent\.0{11}_c: not number/.test(P.shapeMismatch({ t: "ack", req: 4, batch: { new: 0, resent: { [ids[0]]: 1, [ids[1]]: 2, [ids[2]]: {} }, head } }, by("batch", "every patch a resend")) ?? ""), "shapes: a resent map whose third value is an object, after two numbers, is refused at that value");
+  check(/items\[0\]\.patches: not array/.test(P.shapeMismatch({ ...page, items: [{ ...page.items[0], patches: {} }] }, by("pull", "a page")) ?? ""), "shapes: an item whose patches is an object, not an array (the named \"array\" type), is refused");
+  check(/\$\.more: not boolean/.test(P.shapeMismatch({ ...page, more: 0 }, by("pull", "a page")) ?? ""), "shapes: a page whose more is 0, not a boolean, is refused");
+  check(/the shape names no type \(integer\)/.test(P.shapeMismatch(1, "integer") ?? ""), "shapes: an unknown type name names no type");
+  for (const k of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+    const frame = JSON.parse(J(ack).slice(0, -1) + `,${J(k)}:1}`);
+    check(new RegExp(`\\$\\.${k}: not in the shape`).test(P.shapeMismatch(frame, by("batch", "a new patch")) ?? ""), `shapes: an ack with its own extra key ${k} (from JSON) is refused`);
+  }
+  check(/\$\.toString: missing/.test(P.shapeMismatch({}, { toString: "number" }) ?? ""), "shapes: a required key the frame has only on its prototype is missing");
+  check(/the shape names no type \(toString\)/.test(P.shapeMismatch(1, "toString") ?? ""), "shapes: a shape naming Object.prototype's toString names no type");
   const ep = { t: "error", req: 6, code: "epoch", detail: { message: "m", epoch: 2, head: { epoch: 2, seq: 1 } } };
   check(P.shapeMismatch(ep, by("batch", "another epoch")) === null && P.shapeMismatch(ep, by("pull", "another epoch")) === null, "shapes: the cleared history's refusal matches, for batch and pull");
   check(/code: not "stale_epoch"/.test(P.shapeMismatch(ep, by("doc_claim", "another epoch")) ?? ""), "shapes: a claim's other epoch is stale_epoch, not epoch");
