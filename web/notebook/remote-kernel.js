@@ -162,7 +162,7 @@ export class RemoteKernel {
     this.lifeChain = Promise.resolve();
     this.lifeOps = 0;
     this.needsFence = false; // after an unknown outcome: take the binding over (fence) before more work
-    this.queue = []; // {code, opts, sink, generation}
+    this.queue = []; // {code, opts, sink, generation (null: asked before its binding existed)}
     this.current = null; // the job being run: {..., lc, request}
     this.nextN = 1;
     this.nextOp = 1;
@@ -251,7 +251,9 @@ export class RemoteKernel {
     if (this.moved) return s.stopped(NOTES.moved);
     // (no binding, and none being made: nothing would ever run it)
     if (this.lc.phase === "idle" && !this.lifeOps) return s.stopped(NOTES.unreachable);
-    this.queue.push({ code, opts: opts ?? {}, sink: s, generation: this.lc.generation });
+    // (asked while no binding exists, being made: it runs on the kernel that comes next, so its
+    // generation is the one current when it is sent, not the one before the binding)
+    this.queue.push({ code, opts: opts ?? {}, sink: s, generation: this.lc.phase === "idle" ? null : this.lc.generation });
     this.pump();
   }
 
@@ -271,7 +273,8 @@ export class RemoteKernel {
 
   async runJob(job) {
     // (queued before a restart: its kernel is gone)
-    if (job.generation !== this.lc.generation) return job.sink.stopped(NOTES.restarted);
+    if (job.generation !== null && job.generation !== this.lc.generation) return job.sink.stopped(NOTES.restarted);
+    if (job.generation === null) job.generation = this.lc.generation;
     if (this.needsFence) {
       const ok = await this.lifecycle(() => this.takeover(job));
       if (!ok || this.current !== job) return;
