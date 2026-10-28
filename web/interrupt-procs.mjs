@@ -72,7 +72,9 @@ export function cmdlineOf(pid, read = (p) => readFileSync(`/proc/${p}/cmdline`))
 }
 // From that snapshot, following current parent links down from root only (a remembered orphan or a member of root's
 // group that isn't below it is cleanup evidence, never a candidate): the unique nearest process whose command line
-// begins with exactly `argv` (each element byte for byte), as { pid, comm, depth, start }.  Otherwise { pid: null,
+// begins with exactly `argv` (each element byte for byte), as { pid, comm, depth, start, argv } (argv: its first two
+// command-line elements as matched, utf8, at most 200 characters each: the record of what was matched, #268).
+// Otherwise { pid: null,
 // why, tree }, never an arbitrary pid and never root: none in a whole snapshot (no target); a tie at the nearest
 // depth (ambiguous); or a snapshot or a command line that couldn't be read (unreadable: the target may be the one).
 // A command line read fails closed: an error other than ENOENT/ESRCH, or an empty one for a process that is still
@@ -114,8 +116,8 @@ export function selectTarget(root, argv, snap = procSnapshot(), io = { cmdline: 
   if (!matched.length) return { pid: null, why: `no process below ${root} runs ${argv.join(" ")}`, tree: tree.slice(0, 16) };
   const nearest = matched.filter((x) => x.depth === matched[0].depth);
   if (nearest.length > 1) return { pid: null, why: `${nearest.length} processes at depth ${nearest[0].depth} run the launcher: ${nearest.map((x) => x.pid).join(", ")}`, ambiguous: true, tree: tree.slice(0, 16) };
-  const { pid, comm, depth: dd } = nearest[0];
-  return { pid, comm, depth: dd, start: t.get(pid).start };
+  const { pid, comm, depth: dd, argv: matchedArgv } = nearest[0];
+  return { pid, comm, depth: dd, start: t.get(pid).start, argv: matchedArgv };
 }
 
 // (a process's /proc/PID/stat as { state, flags, start } (its start time identifies the process across reads), or
