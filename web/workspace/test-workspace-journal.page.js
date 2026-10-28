@@ -353,6 +353,37 @@ async function storeUnopened() {
   w.close();
 }
 
+async function boardsFollowPhase() {
+  // (option (ii), Oct 27: boards keep their save under an active journal; their TimeTravel store follows the fence's
+  // phase, bound when it first reads the fence: plan-sync-slice2-client r4 §2 until 2c-1b)
+  const o = await named(), w = await open(o);
+  const bdb = await W.openBoardHistoryDb();
+  const before = boardId() + ":b", after = boardId() + ":a";
+  const fpBefore = new W.IdbPatchStore(bdb, before, { followPhase: true });
+  await fpBefore.loadInitial();
+  check(fpBefore.phase === "ok", "a phase-following board store bound before activation is in \"ok\": " + fpBefore.phase);
+  await w.activateJournal();
+  // bound before: refused after, as any writer from before (a reload binds it again)
+  await Promise.resolve(fpBefore.append({ time: "2026-10-27T00:00:01.000Z", id: "q1" })).catch(() => {});
+  await sleep(150);
+  check((await rows(bdb, before)) === 0, "…and after the activation its append is refused, nothing written (reload to bind again)");
+  // bound after: in "journal", it appends and clears; a store that doesn't follow the phase is still refused
+  const fp = new W.IdbPatchStore(bdb, after, { followPhase: true });
+  await fp.loadInitial();
+  check(fp.phase === "journal", "a phase-following board store bound after activation is in \"journal\": " + fp.phase);
+  check(fp.append({ time: "2026-10-27T00:00:02.000Z", id: "q2" }) === true, "…its append is taken");
+  await sleep(150);
+  check((await rows(bdb, after)) === 1, "…and written: an owned board's TimeTravel keeps working under an active journal");
+  const plain = new W.IdbPatchStore(bdb, after);
+  await plain.loadInitial();
+  await Promise.resolve(plain.append({ time: "2026-10-27T00:00:03.000Z", id: "q3" })).catch(() => {});
+  await sleep(150);
+  check((await rows(bdb, after)) === 1, "…while a store that doesn't follow the phase (the board page before this build) is still refused");
+  const cleared = await fp.clear().then(() => "cleared", (e) => "refused: " + String(e?.message ?? e).slice(0, 80));
+  check(cleared === "cleared" && (await rows(bdb, after)) === 0, "…and the phase-following store clears its history: " + cleared);
+  bdb.close();
+  w.close();
+}
 
 // (the notebooks' history as a reset leaves it to be emptied: 650 notebooks' rows, half sorting before the fence's key
 // [FENCE, ""] and half after it, so the fence is inside the pages; and sync's rows, its counters among them)
@@ -442,7 +473,7 @@ async function resetPurgesHistory() {
   }
 }
 
-const CASES = [gated, upgradeAndOldBuilds, beforeActivation, activation, writersRefused, refusalRule, keptByLaterWrites, stopsCarriedOn, blockedFence, markAdopted, resetKeepsMeta, storeUnopened, resetPurgesHistory];
+const CASES = [gated, upgradeAndOldBuilds, beforeActivation, activation, writersRefused, boardsFollowPhase, refusalRule, keptByLaterWrites, stopsCarriedOn, blockedFence, markAdopted, resetKeepsMeta, storeUnopened, resetPurgesHistory];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);

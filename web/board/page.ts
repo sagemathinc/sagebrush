@@ -54,7 +54,7 @@ import { PictureChannel, byReference } from "./edit-pictures";
 import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistoryRefused } from "../notebook/stores.js";
 // (each from its own module, never the workspace barrel: the barrel re-exports the sync client by value, which
 // would keep it in the frame's and exports' build without sync)
-import { Workspace, LIMITS, type Entry } from "../workspace/api";
+import { Workspace, LIMITS, registerJournalWriter, type Entry } from "../workspace/api";
 import { migrate } from "../workspace/migrate";
 import { freePath, nameOf, splitExt, safeName } from "../workspace/paths";
 import { startMigrator } from "../workspace/migrator";
@@ -71,6 +71,11 @@ import { SyncOwner } from "../workspace/sync-owner";
 declare const __SB_NO_SYNC__: boolean | undefined;
 const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
 import { within } from "./idb-open";
+// (this build's boards work under an active journal (plan-sync-slice2-client r4 §2, option (ii) of Oct 27): a
+// board's value is still saved as before, through Workspace.write, and its TimeTravel by a store that follows the
+// fence's phase ({followPhase}), so the journal's activation doesn't stop them; a board page from before this build
+// is still refused by the fences.  Boards' own journal (T1/T2) is 2c-1b's)
+registerJournalWriter("boards");
 
 const q = new URLSearchParams(location.search);
 
@@ -997,12 +1002,12 @@ const host: BoardHost = {
   // (each document its own: by its name beside it in this browser)
   history: file ? undefined : async (id) => {
     const [mod, db] = await Promise.all([import(new URL("../sagebrush-history.js", import.meta.url).href) as Promise<HistoryModule>, openBoardHistoryDb()]);
-    return db ? new BoardHistory(mod, new IdbPatchStore(db, historyKey(id))).init() : null;
+    return db ? new BoardHistory(mod, new IdbPatchStore(db, historyKey(id), { followPhase: true })).init() : null;
   },
   // (a document replaced: its versions, without opening its history)
   dropHistory: file ? undefined : async (id) => {
     const db = await openBoardHistoryDb();
-    if (db) await new IdbPatchStore(db, historyKey(id)).drop();
+    if (db) await new IdbPatchStore(db, historyKey(id), { followPhase: true }).drop();
   },
   address: {
     get: () => location.hash,
