@@ -91,6 +91,9 @@ is one budget for all its steps, even past a step marked continue-on-error. What
 into the job's later steps, as on CI, and is ended (found by ancestry) before the next job. If something won't end,
 the whole run stops there, even with `--keep-going`, and leaves everything as it is for inspection. At the end, the
 committed engine is put back only over this run's own engine-wasm build; any other change to it is left and reported.
+One known difference from CI: when a step runs past its own `timeout-minutes`, everything still running under the
+run is ended, including what earlier steps of the same job left in the background; on CI only that step's
+processes go. A later `continue-on-error` step that relied on such a background process won't have it here.
 
 `build-all.sh` first isn't needed: each job builds what it needs, as in CI. The jobs, in the order they run, with
 their times here:

@@ -270,11 +270,12 @@ class Interrupted(Exception):
     pass
 
 
-def run_step(script, cwd, env, limit):
+def run_step(script, cwd, env, limit, inject=False):
     """One step's script in its own session, bounded by limit seconds. On a timeout or an interruption everything
     under this process is ended (and checked gone) at once; otherwise what the step leaves runs on into the job's
     later steps, as on CI, and is ended at the job's end. Every wait after an ending is bounded; anything that won't
-    end raises Unresolved. Returns (code, cleanup note or "")."""
+    end raises Unresolved (inject: the fixtures' CI_LOCAL_FAULT_UNRESOLVED=<job>:step, an injected leftover at the
+    timeout, no real process). Returns (code, cleanup note or "")."""
     p = subprocess.Popen(["bash", "-eo", "pipefail", "-c", script], cwd=cwd, env=env, start_new_session=True)
     end = time.monotonic() + max(limit, 0.001)
     try:
@@ -289,6 +290,8 @@ def run_step(script, cwd, env, limit):
                 found, left = end_descendants()
                 if not bounded_wait(p) and p.pid not in left:
                     left = left + [p.pid]
+                if inject:
+                    left = left + ["(injected)"]
                 if left:
                     raise Unresolved(left, "after a step's timeout")
                 return "timeout", f"timed out: ended {found} process(es)"
@@ -362,7 +365,12 @@ def run_job(name, job, combo, args, state):
         if limit <= 0:
             failed = failed or f"FAILED (the job's time is up): {label}"
             continue
-        code, cleanup = run_step(script, cwd, senv, limit)
+        try:
+            code, cleanup = run_step(script, cwd, senv, limit, inject=os.environ.get("CI_LOCAL_FAULT_UNRESOLVED") == f"{name}:step")
+        except Unresolved:
+            # (the run stops here: this job's temp dir is kept, and said, as at a job's end)
+            print(f"ci-local: the job's temp dir is kept: {temp}", flush=True)
+            raise
         if cleanup:
             notes.append(f"{cleanup}: {label}")
             print(f"(ci-local: {cleanup})", flush=True)
@@ -492,6 +500,9 @@ def main():
     except Unresolved as e:
         unresolved, failed = e, True
     finally:
+        # (the cleanup and the report aren't cut short by another signal: a second Ctrl-C or TERM is ignored from here)
+        for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(s, signal.SIG_IGN)
         if not args.dry_run:
             found, left = end_descendants()
             if found:
