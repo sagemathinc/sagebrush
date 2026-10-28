@@ -23,6 +23,17 @@ def _charge(steps, chars, by="a __repr__"):
         raise MemoryError("displaying this value takes more than Sagebrush's limit of %d steps or %d characters (%s may be changing it as it is shown)" % (LIMITS["steps"], LIMITS["chars"], by))
 
 
+def reset():
+    """A run's start: no display open, nothing spent.  The CPython session's
+    worker calls it before each request's code, so a display whose __exit__ a
+    Ctrl-C skipped (CPython 3.9 and 3.14 can skip a with-block's exit) costs at
+    most its own run, never the session's later displays.  (The browser
+    runtime raises KeyboardInterrupt only at loop polls, and its with-blocks'
+    exits always run: there a scope can't be left open.)"""
+    _depth[0] = 0
+    _spent[0] = _spent[1] = 0
+
+
 class display:
     """A display's scope: the outermost one starts a new count.
 

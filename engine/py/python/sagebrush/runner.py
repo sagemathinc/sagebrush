@@ -14,6 +14,7 @@ never left as a run that looks busy forever.
 import hashlib
 import json
 import secrets
+import sys
 import threading
 import time
 
@@ -195,7 +196,7 @@ class Runner:
                             self.fresh += 1
                         run.sess = sess
                     before = sess.generation
-                    gen, q = sess.submit(code, mode=mode)
+                    gen, q, rid = sess.submit(code, mode=mode)
                 except Exception as e:
                     # (the session couldn't start: the run settles at once,
                     # and a slot taken for it goes back, daybreak2 PR120-FIX3-2)
@@ -209,7 +210,7 @@ class Runner:
                         # (the session had ended since its last run: a new process, its variables gone)
                         rec["session_restarted"] = True
                     self._save(rec)
-                    threading.Thread(target=self._finish, args=(run, q, gen), daemon=True).start()
+                    threading.Thread(target=self._finish, args=(run, q, gen, rid), daemon=True).start()
                     if deadline is not None:
                         t = threading.Timer(deadline, self._request, args=(run, "run_deadline", gen, rec["run_seq"]))
                         t.daemon = True
@@ -263,11 +264,16 @@ class Runner:
             run.done.set()
 
     # ---- the end of a run (§2.2's mapping)
-    def _finish(self, run, q, gen):
+    def _finish(self, run, q, gen, rid):
         out = R.Output(self.store.cfg["SAGEBRUSH_RUNS_OUTPUT_BYTES"])
         r = None
         while True:
             m = q.get()
+            if isinstance(m, dict) and m.get("id") != rid:
+                # (another request's message, which only a bug could put here:
+                # never taken for this run's, and said on stderr)
+                self._stale(run, m)
+                continue
             if isinstance(m, dict) and "out" in m:
                 # (output as it is printed, bounded here: head, rolling tail, counters)
                 out.add(m["out"], m.get("stream", "stdout"))
@@ -292,6 +298,12 @@ class Runner:
         except Exception:
             gone = []
         self.forget(gone)
+
+    def _stale(self, run, m):
+        try:
+            sys.stderr.write("sagebrush: run %s dropped a session message for request %r\n" % (run.record.get("handle"), m.get("id")))
+        except Exception:
+            pass
 
     def _end(self, run, r, out):
         rec = run.record
