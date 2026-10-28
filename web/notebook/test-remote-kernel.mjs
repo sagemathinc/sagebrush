@@ -604,6 +604,16 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
   }
 }
 
+// ---- P1A-R3-C1 / P1A3-A5-1: a "not-found" for a run that may have been admitted proves nothing
+{
+  const { fake, kernel } = await setup();
+  fake.intercept("POST", /\/runs$/, { respond: { status: 202, body: "unreadable" } }); // (sent; the answer can't be read)
+  fake.intercept("POST", /\/runs$/, { respond: { status: 409, body: { error: "busy" } } }); // (the retry is refused)
+  const e0 = fake.executions.length;
+  const s = await run(kernel, "r3c1-not-found");
+  check(s.terminal?.[1] === NOTES.unknown && kernel.needsFence && fake.executions.length === e0 && fake.calls.some(([m, p]) => m === "GET" && /\/runs\/[^/]+$/.test(p)), "P1A-R3-C1 an unreadable answer, a refused retry, then the record answers 404: unknown and fenced, never 'Not run'");
+}
+
 // ---- P1A-R2-C2 / P1A2-A5-3: an incomplete takeover answer is no evidence: nothing concluded, the fence stays
 {
   const { fake, kernel, statuses } = await setup();
@@ -663,31 +673,65 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
   check(sb.terminal?.[0] === "done", "P1A-R2-A3-1 and the restarted kernel runs");
 }
 
-// ---- P1A-R2-A3-2 / P1A2-A5-2: a token or proof that never comes can't hold a cancelled request
+// ---- P1A-R2-A3-2 / P1A2-A5-2 (controls per P1A-R3-C2 / P1A3-A5-2 / P1A-R3-A3-1): a token or proof that
+// never comes can't hold a cancelled request.  Each stub signals when it is entered, the abort comes
+// only after that, the original operation itself must settle (its finally included), and when the
+// stub answers late, nothing more is sent and nothing changes.
 {
   const { fake, client, kernel } = await setup();
+  const pathCount = (re) => fake.fetches.filter((u) => re.test(new URL(u).pathname)).length;
+  // (a) a run's token never comes; a restart aborts it
   const realToken = client.token;
-  let hangToken = true;
-  client.token = (o) => (hangToken ? ((hangToken = false), new Promise(() => {})) : realToken(o));
+  let tokenEntered, releaseToken = null;
+  const tokenIn = new Promise((r) => (tokenEntered = r));
+  let firstToken = true;
+  client.token = (o) => {
+    if (!firstToken) return realToken(o);
+    firstToken = false;
+    tokenEntered();
+    return new Promise((res) => { releaseToken = () => res(realToken(o)); });
+  };
   const s1 = sink();
   kernel.execute("token-hang", { mode: "python" }, s1);
-  check(await until(() => !!kernel.current?.lc), "the run is being submitted, waiting for a token that never comes");
+  const t1 = await within(tokenIn);
+  check(!t1.timeout, "P1A-R3-C2 (a) the run's token provider is entered (latch), and never answers");
+  const jobA = kernel.current;
+  const runs0 = pathCount(/\/runs$/);
   await kernel.restart();
-  await within(s1.ended);
-  check(s1.terminal?.[1] === NOTES.stoppedRestart && kernel.current === null && kernel.lifeOps === 0, "P1A-R2-A3-2 a token that never comes, then a restart: the run settles; the queue and the lifecycle are free");
+  const settled = await within(jobA.settled, 3000);
+  check(!settled.timeout && s1.terminal?.[1] === NOTES.stoppedRestart && kernel.lifeOps === 0 && kernel.current === null, "P1A-R3-C2 (a) a restart after the token wait was entered: the original run settles (its finally ran), the lifecycle is free");
+  const g = kernel.generation;
+  releaseToken();
+  await tick(50);
+  check(pathCount(/\/runs$/) === runs0 && kernel.generation === g && s1.terminals === 1, "P1A-R3-C2 (a) the token answers late: nothing is sent, nothing changes");
   const s2 = await run(kernel, "after-token-hang");
-  check(s2.terminal?.[0] === "done", "P1A-R2-A3-2 and the next run works");
+  check(s2.terminal?.[0] === "done", "P1A-R3-C2 (a) and the next run works");
+  // (b) a takeover's proof never comes; close aborts it
   const realProof = client.proof.bind(client);
-  let hangProof = true;
-  client.proof = (...a) => (hangProof ? ((hangProof = false), new Promise(() => {})) : realProof(...a));
+  let proofEntered, releaseProof = null;
+  const proofIn = new Promise((r) => (proofEntered = r));
+  let firstProof = true;
+  client.proof = (...a) => {
+    if (!firstProof) return realProof(...a);
+    firstProof = false;
+    proofEntered();
+    return new Promise((res) => { releaseProof = () => res(realProof(...a)); });
+  };
   kernel.needsFence = true;
   const s3 = sink();
   kernel.execute("proof-hang", { mode: "python" }, s3);
-  check(await until(() => kernel.lifeOps === 1), "a takeover is waiting for a proof that never comes");
+  const t3 = await within(proofIn);
+  check(!t3.timeout, "P1A-R3-C2 (b) the takeover's signer is entered (latch), and never answers");
+  const jobB = kernel.current;
+  const life = kernel.lifeChain; // (the takeover, a lifecycle operation, still pending)
+  const take0 = pathCount(/\/takeover$/), runs1 = pathCount(/\/runs$/);
   kernel.close();
-  await within(s3.ended);
-  await tick();
-  check(s3.terminal?.[1] === NOTES.closed && kernel.lifeOps === 0 && kernel.current === null, "P1A-R2-A3-2 a proof that never comes inside a takeover, then close: the takeover settles; lifeOps is 0, nothing is left running");
+  const lifeDone = await within(life, 3000), jobDone = await within(jobB.settled, 3000);
+  check(!lifeDone.timeout && !jobDone.timeout && s3.terminal?.[1] === NOTES.closed && kernel.lifeOps === 0 && kernel.current === null, "P1A-R3-C2 (b) close after the signer was entered: the takeover and the original run settle (their finally ran), the lifecycle is free");
+  const e0 = kernel.epoch;
+  releaseProof();
+  await tick(50);
+  check(pathCount(/\/takeover$/) === take0 && pathCount(/\/runs$/) === runs1 && kernel.epoch === e0 && kernel.closed && s3.terminals === 1, "P1A-R3-C2 (b) the signature comes late: no takeover or run is sent, nothing changes");
 }
 
 // ---- takeover, quarantine, a moved binding, a run still executing elsewhere
