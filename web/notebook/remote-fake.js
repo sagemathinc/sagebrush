@@ -55,6 +55,7 @@ export class FakeGateway {
     this.jtis = new Set();
     this.bindings = new Map();
     this.runs = new Map();
+    this.refusedIds = new Set(); // request ids answered "not-found": refused for good
     this.nextBinding = 1;
     this.calls = []; // [method, path] of each request whose proof was accepted
     this.fetches = []; // every URL fetch was called with (before any check)
@@ -103,6 +104,8 @@ export class FakeGateway {
    *   pause: true              hold the answer (late reply) until release(); an abort rejects it, as fetch does
    *   ignoreAbort: true        (with pause) the held answer is delivered even after an abort: a late answer
    *   lose: true               process it, then fail as if the reply were lost
+   *   after: () => {}          called once it is processed (e.g. another tab takes the binding over)
+   *   mutate: (data) => data   process it, then answer its real JSON as changed by mutate (in place, or returned)
    * -> {reached, release}
    */
   intercept(method, re, opts = {}) {
@@ -186,7 +189,12 @@ export class FakeGateway {
     const skip = it?.opts.respond && it.opts.skip !== false;
     const body = init.body ? JSON.parse(init.body) : null;
     let res = skip ? null : await this.route(method, path, u, body, signal);
+    it?.opts.after?.();
     if (it?.opts.respond) res = this.json(it.opts.respond.status, it.opts.respond.body);
+    else if (it?.opts.mutate && res) {
+      const data = await res.json();
+      res = this.json(res.status, it.opts.mutate(data) ?? data);
+    }
     if (it?.opts.pause) {
       it.reached();
       // (ignoreAbort: the answer arrives anyway, as one already on its way does)
@@ -210,8 +218,13 @@ export class FakeGateway {
       return this[`post_${m[2]}`](b, body);
     }
     if ((m = path.match(/^\/bindings\/([^/]+)\/runs\/([^/]+)(\/events)?$/)) && method === "GET") {
-      const run = this.runs.get(decodeURIComponent(m[2]));
-      if (!run || run.binding !== m[1]) return this.json(404, { error: "not-found" });
+      const id = decodeURIComponent(m[2]);
+      const run = this.runs.get(id);
+      if (!run || run.binding !== m[1]) {
+        // (never admitted: and from now on refused, so a late copy can't be admitted)
+        if (!m[3]) this.refusedIds.add(id);
+        return this.json(404, { error: "not-found" });
+      }
       if (m[3]) return this.stream(run, Number(u.searchParams.get("after")) || 0, signal);
       return this.json(200, { request: run.request, state: run.outcome ? "done" : "running", ...(run.outcome ? { outcome: run.outcome } : {}) });
     }
@@ -228,6 +241,7 @@ export class FakeGateway {
     if (b.state === "quarantined") return this.json(410, { error: "quarantined" });
     if (b.state === "fencing") return this.json(409, { error: "fencing" });
     if (body.epoch !== b.epoch) return this.json(409, { error: "epoch" });
+    if (this.refusedIds.has(body.request)) return this.json(409, { error: "refused" });
     const digest = JSON.stringify(body.payload);
     const had = this.runs.get(body.request);
     if (had) {

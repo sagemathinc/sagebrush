@@ -93,6 +93,20 @@ export class StreamError extends Error {
 const notSentIfAborted = (signal) => {
   if (signal?.aborted) throw new NotSentError("aborted before it was sent", { aborted: true });
 };
+// A wait that an abort ends at once (NotSentError), even if what it waits
+// for never settles: getting the token, signing the proof.
+function untilAborted(promise, signal) {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(new NotSentError("aborted before it was sent", { aborted: true }));
+    const onAbort = () => reject(new NotSentError("aborted before it was sent", { aborted: true }));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (v) => { signal.removeEventListener("abort", onAbort); resolve(v); },
+      (e) => { signal.removeEventListener("abort", onAbort); reject(e); },
+    );
+  });
+}
 
 /** The gateway's base URL, checked: absolute https:, no user info, query or fragment. */
 export function checkBase(base) {
@@ -122,7 +136,8 @@ export class RemoteClient {
   /**
    * @param {object} o
    * @param {string} o.base the gateway's base URL: https:, its configured origin and /api/compute/v1
-   * @param {() => string | Promise<string>} o.token the current access token
+   * @param {(o: {signal?: AbortSignal}) => string | Promise<string>} o.token the current access token
+   *   (given the request's signal; the client stops waiting for it on abort either way)
    * @param {typeof fetch} [o.fetch] (tests: a fake gateway)
    * @param {CryptoKeyPair} [o.keys] (default, and the only sound choice: a new non-extractable
    *   P-256 pair; a supplied pair whose private key is extractable is refused)
@@ -182,10 +197,25 @@ export class RemoteClient {
       throw new NotSentError("this request is over its size limit, so it was not sent");
     }
     notSentIfAborted(signal);
-    const accessToken = await this.token();
+    // (the token and the proof are waited for only until an abort: a token
+    // source or signer that never answers can't hold a cancelled request)
+    let accessToken;
+    try {
+      accessToken = await untilAborted(Promise.resolve().then(() => this.token({ signal })), signal);
+    } catch (e) {
+      if (e instanceof NotSentError) throw e;
+      throw new NotSentError(`no access token: ${String(e?.message ?? e).slice(0, 200)}`);
+    }
+    if (typeof accessToken !== "string" || !accessToken) throw new NotSentError("no access token");
     for (let attempt = 0; ; attempt++) {
       notSentIfAborted(signal);
-      const proof = await this.proof(method, url, accessToken);
+      let proof;
+      try {
+        proof = await untilAborted(Promise.resolve().then(() => this.proof(method, url, accessToken)), signal);
+      } catch (e) {
+        if (e instanceof NotSentError) throw e;
+        throw new NotSentError(`the request could not be signed: ${String(e?.message ?? e).slice(0, 200)}`);
+      }
       notSentIfAborted(signal);
       const headers = { Authorization: `DPoP ${accessToken}`, DPoP: proof, Accept: accept };
       if (text !== undefined) headers["Content-Type"] = "application/json";

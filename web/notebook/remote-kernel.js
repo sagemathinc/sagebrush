@@ -32,10 +32,14 @@
 //     refused: 409 busy | epoch | fencing | conflict; 410 quarantined; 429/503 with Retry-After
 //   GET  /bindings/{b}/runs/{request}/events?after=<seq> -> a text/event-stream of
 //     {seq, type: "start" | "stream" | "display" | "clear" | "terminal", ...}, seq = 1, 2, 3, ...
-//   GET  /bindings/{b}/runs/{request} -> {request, state, outcome?}
+//   GET  /bindings/{b}/runs/{request} -> {request, state, outcome?}; 404 {error: "not-found"} only if the
+//     gateway never admitted that request id, and it then refuses that id for good (so a late copy can't be admitted)
 //   POST /bindings/{b}/interrupt | /restart {epoch, op_id} -> {outcome: {status: "done", incarnation} | {status: "refused", reason}}
 //   POST /bindings/{b}/complete {epoch, op_id, code, cursor_pos} -> {matches, prefix}
-//   POST /bindings/{b}/takeover {client} -> {epoch, state, incarnation?, applied_before_takeover: [{op_id, kind}], in_flight}
+//   POST /bindings/{b}/takeover {client} -> {state: "fencing" | "quarantined"} or
+//     {state: "ready", epoch, applied_before_takeover: [{op_id, kind}], in_flight: [{op_id, kind}], incarnation}
+//     (when ready, both lists are required, every entry with string op_id and kind; incarnation is
+//     required whenever a restart or delete was applied; anything less is not evidence of anything)
 // A terminal's outcome is {status, reason?, detail?, ms?, ename?, incarnation?}.
 
 import { GatewayError, StreamError, NotSentError, AmbiguousError } from "./remote-client.js";
@@ -44,6 +48,21 @@ const ENVELOPE_MIME = "application/vnd.sagebrush.envelope.v1+json";
 const clip = (s, n = 300) => String(s ?? "").slice(0, n);
 const ID_RE = /^[A-Za-z0-9._~-]{1,128}$/;
 const isInt = (n) => Number.isInteger(n) && n >= 0;
+// (an applied control op, or a run still executing: {op_id, kind}, both strings)
+const isOpEntry = (a) => !!a && typeof a === "object" && !Array.isArray(a) && typeof a.op_id === "string" && typeof a.kind === "string";
+// A takeover's answer, complete: a known state; when ready, its epoch and
+// both lists, every entry well formed, and the new incarnation whenever a
+// restart or delete is among the applied ops.  Missing evidence is never
+// read as an empty list.
+function validTakeover(r) {
+  if (!r || !["ready", "fencing", "quarantined"].includes(r.state)) return false;
+  if (r.state !== "ready") return true;
+  if (!isInt(r.epoch)) return false;
+  if (!Array.isArray(r.applied_before_takeover) || !r.applied_before_takeover.every(isOpEntry)) return false;
+  if (!Array.isArray(r.in_flight) || !r.in_flight.every(isOpEntry)) return false;
+  if (r.applied_before_takeover.some((a) => a.kind === "restart" || a.kind === "delete") && !isInt(r.incarnation)) return false;
+  return true;
+}
 
 /** What the page says when a request ends without running, or is stopped (the plan's §9.4 notes). */
 export const NOTES = {
@@ -276,14 +295,18 @@ export class RemoteKernel {
     await this.follow(job, signal);
   }
 
-  // POST the run; true once the gateway has it.  Not sent: not run.  A typed
-  // refusal: not run (or moved, fenced, replaced).  Sent without a valid
-  // answer (lost, unreadable, oversized): resent once, identically (the
-  // gateway's at-most-once admission returns the existing request); a second
-  // such answer is an unknown outcome, and the binding is fenced first.
+  // POST the run; true once the gateway has it.  On the first attempt: not
+  // sent is not run, and a typed refusal is not run (or moved, fenced,
+  // replaced).  Sent without a valid answer (lost, unreadable, oversized):
+  // the run may have been admitted, and that stays so (latched) whatever a
+  // later attempt hears: it is resent once, identically (the gateway admits
+  // a request at most once), and if that doesn't succeed, only the
+  // request's own record decides; without it, the outcome is unknown and
+  // the binding is fenced.
   async submit(job, body, signal) {
     const path = `/bindings/${job.lc.binding}/runs`;
-    for (let attempt = 0; ; attempt++) {
+    let mayBeAdmitted = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
       let err = null;
       try {
         await this.client.request("POST", path, body, { signal });
@@ -292,34 +315,65 @@ export class RemoteKernel {
       }
       if (this.current !== job) return false; // (stale: the job was already told why)
       if (!err) return true;
+      // (a retry's refusal, or a failure to send it, says nothing about the first attempt)
+      if (mayBeAdmitted) return this.reconcileSubmit(job, err, signal);
       if (err instanceof NotSentError) {
         job.sink.stopped(`\nNot run: ${clip(err.message)}\n`);
         return false;
       }
       if (err instanceof GatewayError) {
-        if (err.code === "busy") job.sink.stopped(NOTES.busy);
-        else if (err.code === "epoch") {
-          // (only an answer for the current record means another tab has it)
-          if (this.lc === job.lc) this.movedAway();
-          else job.sink.stopped(NOTES.notHanded);
-        } else if (err.code === "fencing") {
-          this.needsFence = true;
-          job.sink.stopped(NOTES.notHanded);
-        } else if (err.code === "quarantined") {
-          job.sink.stopped(NOTES.kernelReplaced);
-          const lc = job.lc;
-          await this.lifecycle(() => this.replace(lc));
-        } else if (err.code === "conflict") {
-          this.needsFence = true;
-          job.sink.stopped(NOTES.unknown);
-        } else job.sink.stopped(`\nNot run: ${clip(err.message)}\n`);
+        await this.notAdmitted(job, err);
         return false;
       }
-      if (attempt === 0) continue;
+      mayBeAdmitted = true;
+    }
+    return false;
+  }
+
+  // A typed refusal of a request that was never admitted: its note, and what it means for the kernel.
+  async notAdmitted(job, err) {
+    if (err.code === "busy") job.sink.stopped(NOTES.busy);
+    else if (err.code === "epoch") {
+      // (only an answer for the current record means another tab has it)
+      if (this.lc === job.lc) this.movedAway();
+      else job.sink.stopped(NOTES.notHanded);
+    } else if (err.code === "fencing") {
+      this.needsFence = true;
+      job.sink.stopped(NOTES.notHanded);
+    } else if (err.code === "quarantined") {
+      job.sink.stopped(NOTES.kernelReplaced);
+      const lc = job.lc;
+      await this.lifecycle(() => this.replace(lc));
+    } else if (err.code === "conflict") {
       this.needsFence = true;
       job.sink.stopped(NOTES.unknown);
+    } else job.sink.stopped(`\nNot run: ${clip(err.message)}\n`);
+  }
+
+  // After an attempt that may have been admitted, the request's own record:
+  // found, it was admitted (follow it); the gateway's typed "not-found" for
+  // it (which also refuses that request id for good), it never was, and the
+  // retry's answer stands; anything else, unknown, and fenced (and if the
+  // retry said another tab has the binding, this one stops taking work).
+  async reconcileSubmit(job, retryErr, signal) {
+    const path = `/bindings/${job.lc.binding}/runs/${encodeURIComponent(job.request)}`;
+    let r = null, err = null;
+    try {
+      r = await this.client.request("GET", path, undefined, { signal });
+    } catch (e) {
+      err = e;
+    }
+    if (this.current !== job) return false;
+    if (!err && r.request === job.request) return true;
+    if (err instanceof GatewayError && err.status === 404 && err.code === "not-found") {
+      if (retryErr instanceof GatewayError) await this.notAdmitted(job, retryErr);
+      else job.sink.stopped(`\nNot run: ${clip(retryErr?.message ?? "it was not sent")}\n`);
       return false;
     }
+    this.needsFence = true;
+    if (retryErr instanceof GatewayError && retryErr.code === "epoch" && this.lc === job.lc) this.movedAway(NOTES.unknown);
+    else job.sink.stopped(NOTES.unknown);
+    return false;
   }
 
   // The run's events until its terminal, each exactly once and in order
@@ -407,7 +461,8 @@ export class RemoteKernel {
       return;
     }
     this.recoveredAt = key;
-    this.lifecycle(() => this.restartOp(NOTES.restartedBeforeRun, lc));
+    // (exactly the record the failed run saw: if anything changed before it runs, it is not needed)
+    this.lifecycle(() => (this.lc === lc ? this.restartOp(NOTES.restartedBeforeRun, lc) : undefined));
   }
 
   /** Interrupt what is running (the gateway signals the kernel); queued runs are skipped. */
@@ -519,10 +574,10 @@ export class RemoteKernel {
       }
       if (this.lc !== lc0 || (job && this.current !== job)) return false;
       if (err instanceof GatewayError && err.code === "quarantined") return this.replace(lc0);
-      const states = ["ready", "fencing", "quarantined"];
-      if (!err && !(states.includes(r.state) && (r.state !== "ready" || isInt(r.epoch)))) err = new AmbiguousError("the gateway's answer to takeover was not valid");
+      if (!err && !validTakeover(r)) err = new AmbiguousError("the gateway's answer to takeover was incomplete or not valid");
       if (err) {
-        this.emit("status", `error: the remote kernel could not be reached: ${clip(err?.message ?? err)}`);
+        // (no complete evidence: nothing is concluded, and the fence stays)
+        this.emit("status", `error: the remote kernel could not be checked: ${clip(err?.message ?? err)}`);
         this.needsFence = true;
         job?.sink.stopped(NOTES.unreachable);
         return false;
@@ -531,20 +586,19 @@ export class RemoteKernel {
       if (r.state === "ready") {
         this.needsFence = false;
         this.setLc({ epoch: r.epoch });
-        const applied = Array.isArray(r.applied_before_takeover) ? r.applied_before_takeover : [];
-        const inc = isInt(r.incarnation) ? r.incarnation : null;
-        if (lost && applied.some((a) => a?.op_id === lost.opId && a?.kind === "restart")) {
-          this.restarted(lost.message, inc);
+        const applied = r.applied_before_takeover;
+        if (lost && applied.some((a) => a.op_id === lost.opId && a.kind === "restart")) {
+          this.restarted(lost.message, r.incarnation);
           return false;
         }
-        if (applied.some((a) => a?.kind === "restart" || a?.kind === "delete")) {
+        if (applied.some((a) => a.kind === "restart" || a.kind === "delete")) {
           for (const j of this.queue.splice(0)) j.sink.stopped(NOTES.kernelReplaced);
-          this.setLc({ generation: this.lc.generation + 1, incarnation: inc }, NOTES.kernelReplaced);
+          this.setLc({ generation: this.lc.generation + 1, incarnation: r.incarnation }, NOTES.kernelReplaced);
           this.emit("status", "the remote kernel was restarted before this tab took it over; variables are gone");
           this.emit("restart");
           return false;
         }
-        if (Array.isArray(r.in_flight) && r.in_flight.length) {
+        if (r.in_flight.length) {
           this.emit("status", "a run from the previous tab is still executing");
           this.needsFence = true; // (asked again before the next run)
           job?.sink.stopped(NOTES.inFlight);
@@ -565,7 +619,9 @@ export class RemoteKernel {
   // a new generation), if `lc0`'s binding is still the current one.  Run
   // inside a lifecycle operation.  Always false: nothing from before goes ahead.
   async replace(lc0) {
-    if (this.lc.binding !== lc0.binding || this.lc.phase !== "ready") return false;
+    // (exactly the record it was asked for: queued behind a restart, it must
+    // never replace the kernel that restart made, even on the same binding)
+    if (this.lc !== lc0 || this.lc.phase !== "ready") return false;
     this.emit("status", "This notebook's kernel couldn't be handed over safely; starting a fresh kernel");
     for (const j of this.queue.splice(0)) j.sink.stopped(NOTES.kernelReplaced);
     this.setLc({ binding: null, phase: "idle" }, NOTES.kernelReplaced);
@@ -574,9 +630,10 @@ export class RemoteKernel {
   }
 
   // Another tab owns the binding now: this one stops, its queue skipped.
-  movedAway() {
+  // (`note`: what the running request is told; NOTES.moved unless its own outcome is unknown)
+  movedAway(note = NOTES.moved) {
     for (const j of this.queue.splice(0)) j.sink.stopped(NOTES.moved);
-    this.setLc({ phase: "moved" }, NOTES.moved);
+    this.setLc({ phase: "moved" }, note);
     this.emit("status", "this notebook's kernel is in use in another tab");
   }
 
