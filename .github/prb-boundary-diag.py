@@ -13,8 +13,8 @@ Twelve conditions, each in its OWN fresh worker (Session), each with exactly ONE
     and rc targets then fit it: no reader allocation at all.  p1 (C+1) can't fit: it is the in-condition control.
   - Z: a request of framed length 70000, written on the SAME schedule (16 writes: 15 fragments of 4096 bytes and the
     8560-byte rest, the same fifteen 50 ms waits; daybreak2's r2 item 2): the buffer ends > C, so Windows releases it at
-    the next request (the stats request), and the targets start from that verified LOW-capacity start (the stats
-    line's own small buffer).
+    the next request (the stats request), and the targets start from that verified LOW-capacity start: the stats
+    probe's own small buffer, capacity < 4096 (astra's r2 note: not a zero-capacity buffer).
   Verified on B with the existing _serve_stats counters, before and after the timed block (A has none: not checked):
   K needs input_capacity == C after the prep and, for m1/rc, input_releases unchanged and input_capacity == C after the
   block (so zero reader allocations); Z's start needs exactly one release at the request after the prep and

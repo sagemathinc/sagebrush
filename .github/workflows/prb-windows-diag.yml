@@ -1,10 +1,11 @@
 name: prb-windows-diag
 
-# PR B's Windows RC-1 boundary diagnostic (plan r3; daybreak2's and astra's r1 reviews of run 40643092091's req_rc_m1
+# PR B's Windows RC-1 boundary diagnostic (plan r3b; daybreak2's and astra's r1 reviews of run 40643092091's req_rc_m1
 # OVER): causal-only and NON-GATING.  It never amends that run's FAIL and selects no fix by itself.  Only on the throwaway
 # branch prb-windows-evidence (never on master); nothing is published.
 # It builds nothing: it takes run 40643092091's own wheels artifact, the MANIFEST pinned (MANIFEST_SHA), verifies each
-# wheel against it, installs them, and checks each installed .pyd (exactly one, basename and hash) before and after.
+# wheel against it, installs them, and checks the MANIFEST, each wheel (count, basename, hash) and each installed .pyd
+# (exactly one, basename and hash) before round 0 and again after the run.
 # The diagnostic is .github/prb-boundary-diag.py from HEAD's git blob, hashed from stdin (DIAG_SHA), and run A/B/A x 5.
 # Any failed check fails the job, as does a diagnostic that can't complete; E1's regime checks are reported, not fatal.
 
@@ -19,7 +20,7 @@ permissions:
 env:
   SRC_RUN: "40643092091"
   MANIFEST_SHA: "0f511215c7b31cf339d8154fd8ef5e618fae4ec8fcc4fd81250a3ca54ec64d7d"
-  DIAG_SHA: "f8b086ea410f7cd77d610e16963b32c9bdbbcceb2ef55d49749c2e16bfa779b0"
+  DIAG_SHA: "ac6a5c1d6b397ecba0cce6e189cbb9a3cca108ae2258113b5c717257c4134c5d"
 
 jobs:
   diag:
@@ -54,14 +55,23 @@ jobs:
           echo "HEAD $(git rev-parse HEAD)  diagnostic $DIAG_SHA  MANIFEST $MANIFEST_SHA (run $SRC_RUN's wheels)"
           field() { awk -v k="$1" -v i="$2" '$1 == k { print $i }' $M; }
           cat $M
+          wheels() {  # (astra's r2 repair: the MANIFEST and the wheels themselves, before install and after the run)
+            H=$(sha256sum < $M | cut -c1-64)
+            [ "$H" = "$MANIFEST_SHA" ] || { echo "INVALID: MANIFEST differs ($1: got $H)"; exit 9; }
+            for K in A B; do
+              WH=artifacts/$K/$(field $K 2)
+              [ $(ls artifacts/$K/*.whl | wc -l) = 1 ] && [ -f "$WH" ] || { echo "INVALID: $K wheel count or basename ($1)"; exit 9; }
+              [ "$(sha256sum $WH | cut -c1-64)" = "$(field $K 3)" ] || { echo "INVALID: $K wheel hash ($1)"; exit 9; }
+            done
+            echo "MANIFEST and wheels verified ($1)"
+          }
+          wheels "before install"
           for K in A B; do
-            WH=artifacts/$K/$(field $K 2)
-            [ $(ls artifacts/$K/*.whl | wc -l) = 1 ] && [ -f "$WH" ] || { echo "INVALID: $K wheel"; exit 9; }
-            [ "$(sha256sum $WH | cut -c1-64)" = "$(field $K 3)" ] || { echo "INVALID: $K wheel hash"; exit 9; }
             python -m venv venv-$K
-            venv-$K/Scripts/python.exe -m pip install -q "$WH"
+            venv-$K/Scripts/python.exe -m pip install -q "artifacts/$K/$(field $K 2)"
           done
           check() {
+            wheels "$1"
             for K in A B; do
               [ $(ls venv-$K/Lib/site-packages/sagebrush/_native*.pyd | wc -l) = 1 ] || { echo "INVALID: $K payload count ($1)"; exit 9; }
               PYD=$(ls venv-$K/Lib/site-packages/sagebrush/_native*.pyd)
