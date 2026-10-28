@@ -7,8 +7,10 @@
 //     --meta       the DEV build's build/latex-metafile.json (every bundle's inputs), for the KaTeX census
 // Checks (each one printed; the last line is the verdict):
 //   1. PROD: every file of web/dist and web/site/public, by name and SHA-256, the same as before the editor, except
-//      the DECLARED list: board/examples/source.json, the generated board of the repository's own web/*.ts, whose
-//      only differing node may be "g:web" (the group holding web/build.ts) with every other field equal;
+//      the DECLARED list: board/examples/source.json, the generated board of the repository's own sources (by folder:
+//      src, lib, web, scripts, ...), whose differing nodes may only be the groups of the source files this change
+//      touches (--changed FILE: one repository path per line, made from the two trees' manifests), every other field
+//      equal;
 //   2. PROD holds no LaTeX-owned file (named sagebrush-latex*) and no page or script names one;
 //   3. the DEV bootstrap: index.html's growth over PROD, at most 1536 bytes minified and 717 gzip (level 9);
 //   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most 180 KiB minified and 60 KiB gzip; no CSS
@@ -21,7 +23,7 @@ import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 
 const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : undefined; };
-const BASE = arg("--base-prod"), PROD = arg("--prod"), DEV = arg("--dev"), META = arg("--meta"), OUT = arg("--out");
+const BASE = arg("--base-prod"), PROD = arg("--prod"), DEV = arg("--dev"), META = arg("--meta"), OUT = arg("--out"), CHANGED = arg("--changed");
 if (!BASE || !PROD || !DEV) { console.error("usage: --base-prod DIR --prod DIR --dev DIR [--meta FILE] [--out FILE]"); process.exit(2); }
 const ROOTS = ["dist", "site/public"];
 const DECLARED = new Set(["dist/board/examples/source.json", "site/public/board/examples/source.json"]);
@@ -57,7 +59,9 @@ for (const n of differing.filter((x) => DECLARED.has(x))) {
   const na = byId(a), nb = byId(b);
   const nodes = [...new Set([...na.keys(), ...nb.keys()])].filter((k) => na.get(k) !== nb.get(k));
   const rest = (d) => JSON.stringify(Object.fromEntries(Object.entries(d).filter(([k]) => k !== "nodes")));
-  check(`declared difference ${n}: only the node g:web, every other field the same`, nodes.length === 1 && nodes[0] === "g:web" && rest(a) === rest(b), { nodes });
+  // (a changed file's group: "g:" + its folder; scripts/x.mjs -> g:scripts, web/build.ts -> g:web)
+  const allowed = new Set((CHANGED ? readFileSync(CHANGED, "utf8").split("\n").filter(Boolean) : []).map((p) => "g:" + p.slice(0, Math.max(0, p.lastIndexOf("/")))));
+  check(`declared difference ${n}: only the groups of changed sources, every other field the same`, nodes.length > 0 && nodes.every((k) => allowed.has(k)) && rest(a) === rest(b), { nodes, allowed: [...allowed].filter((k) => nodes.includes(k) || /^g:(web|scripts)$/.test(k)) });
 }
 // 2. nothing of the editor in PROD
 const prodLatex = [...prod.keys()].filter((n) => /(^|\/)sagebrush-latex/.test(n));
