@@ -3377,11 +3377,33 @@ async function docWire() {
   check(a1.req === r1 && (a1.t === "batches" || a1.t === "error"), "docWire: a document request's answer comes back to it: " + J(a1).slice(0, 200));
   const r2 = link.reserve(), a2 = await link.ask(r2, { t: "pull", owner: link.owner, doc: "not a document", epoch: 1, after: 0 });
   check(r2 > r1 && a2.t === "error" && a2.req === r2, "docWire: a document request's refusal comes back to it too: " + J(a2).slice(0, 200));
-  // (an `ack` too: a new document's first batch, one patch; the ops' sender never sees it (its ack has no ops))
+  // (an `ack` too, as the protocol has it (§5.8): the client claimed first (doc_claim), then a new document's first
+  // batch, one patch, with the claim's fgen and cseq; the ops' sender never sees it (its ack has no ops).  Core's own
+  // test server predates claims: only its exact refusal of an unknown message takes the named fallback (the ack routing
+  // not exercised), and never with SYNC_REQUIRE_CLAIM=1 (cloud's CI, window.REQUIRE_CLAIM); any other answer, no
+  // answer, a malformed claim, or a claim followed by a refused batch fails.  The claim branch counts two checks, the
+  // fallback one, so the total shows which branch ran)
   const askT = (r, m) => Promise.race([link.ask(r, m), sleep(5000).then(() => ({ t: "no answer in 5 s" }))]);
-  const body = new TextEncoder().encode(J({ v: 1 })), pid = Date.now().toString(36).padStart(11, "0") + "_docwire1";
-  const r4 = link.reserve(), a4 = await askT(r4, { t: "batch", owner: link.owner, doc: crypto.randomUUID(), epoch: 1, kind: "notebook", patches: [{ cseq: 1, id: pid, parents: [], size: body.length }], body: btoa(String.fromCharCode(...body)) });
-  check(a4.t === "ack" && a4.req === r4 && c.status.state === "synced", "docWire: a document request's `ack` comes back to it (not to the ops' sender): " + J({ a: a4, state: c.status.state }).slice(0, 200));
+  const client1 = "docwire1", doc4 = crypto.randomUUID();
+  const body = new TextEncoder().encode(J({ v: 1 })), pid = Date.now().toString(36).padStart(11, "0") + "_" + client1;
+  const b64 = btoa(String.fromCharCode(...body));
+  // (the control: a batch without fgen, through this page and the front, is refused (by the front's canonical check),
+  // routed to its request, and never forwarded)
+  const g0 = (await ctl("log")).fgenRefused;
+  const r0 = link.reserve(), a0 = await askT(r0, { t: "batch", owner: link.owner, doc: doc4, epoch: 1, kind: "notebook", patches: [{ cseq: 1, id: pid, parents: [], size: body.length }], body: b64 });
+  const g1 = (await ctl("log")).fgenRefused;
+  check(a0.t === "error" && a0.req === r0 && a0.code === "invalid" && /^batch fgen/.test(a0.detail?.message ?? "") && g1 === g0 + 1,
+    "docWire: a batch without fgen is refused (invalid, batch fgen), routed to its request, never forwarded: " + J({ a: a0, refused: g1 - g0 }).slice(0, 200));
+  const rc = link.reserve(), ac = await askT(rc, { t: "doc_claim", owner: link.owner, doc: doc4, epoch: 1, client: client1 });
+  const claimed = ac.t === "ack" && ac.req === rc && ac.claim?.client === client1 && Number.isSafeInteger(ac.claim?.fgen) && ac.claim.fgen >= 0 && Number.isSafeInteger(ac.claim?.next_cseq) && ac.claim.next_cseq >= 1;
+  const legacy = ac.t === "error" && ac.req === rc && ac.code === "invalid" && ac.detail?.message === "unknown message";
+  if (claimed || window.REQUIRE_CLAIM || !legacy) {
+    check(claimed, "docWire: the client claimed (doc_claim answered with its client, fgen and next_cseq, to its request)" + (window.REQUIRE_CLAIM ? " (SYNC_REQUIRE_CLAIM)" : "") + ": " + J(ac).slice(0, 200));
+    const r4 = link.reserve(), a4 = claimed
+      ? await askT(r4, { t: "batch", owner: link.owner, doc: doc4, epoch: 1, kind: "notebook", fgen: { [client1]: ac.claim.fgen }, patches: [{ cseq: ac.claim.next_cseq, id: pid, parents: [], size: body.length }], body: b64 })
+      : { t: "not sent: no claim" };
+    check(a4.t === "ack" && a4.req === r4 && c.status.state === "synced", "docWire: …its batch (the claim's fgen and cseq): the document request's `ack` comes back to it (not to the ops' sender): " + J({ a: a4, state: c.status.state }).slice(0, 200));
+  } else check(legacy, "docWire: ack routing not exercised: server has no claim protocol (doc_claim refused as an unknown message, code invalid, routed to its request)");
   const from = await w.lastSeq();
   await w.mkdir("/docwire");
   check(await until(() => settled(w, c)), "docWire: the ops' sender untouched by them: an op sent and decided after: " + J(c.status));
