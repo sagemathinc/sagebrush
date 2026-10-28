@@ -21,9 +21,11 @@ lines. A matrix is expanded, and its combinations run one after another. A
 it would install are DEVELOPMENT.md's prerequisites.
 
 Every step runs in its own session, with this process as the subreaper of
-anything it leaves (Linux). When a step ends, times out, or this run is
-interrupted, whatever it left is found by ancestry (never by name), sent TERM,
-then KILL, and checked gone before the next step or the engine restore.
+anything it leaves (Linux). What a step leaves runs on into the job's later
+steps, as on CI, and is ended at the job's end; on a step's timeout, or when this
+run is interrupted, it is ended at once. Ending: found by ancestry (never by
+name), sent TERM, then KILL, and checked gone before the next job or the engine
+restore.
 
 What it doesn't do, and refuses rather than guesses at: a matrix's
 include/exclude, and an `if:` beyond always(), matrix.X ==/!= 'v', `&&`, and the
@@ -219,24 +221,22 @@ class Interrupted(Exception):
 
 
 def run_step(script, cwd, env, limit):
-    """One step's script in its own session, bounded by limit seconds. Returns (code, cleanup note or "")."""
+    """One step's script in its own session, bounded by limit seconds. On a timeout or an interruption everything
+    under this process is ended (and checked gone) at once; otherwise what the step leaves runs on into the job's
+    later steps, as on CI, and is ended at the job's end. Returns (code, cleanup note or "")."""
     p = subprocess.Popen(["bash", "-eo", "pipefail", "-c", script], cwd=cwd, env=env, start_new_session=True)
-    code = None
     try:
         code = p.wait(timeout=max(limit, 0.001))
     except subprocess.TimeoutExpired:
-        code = "timeout"
-    finally:
-        # (whatever the step left, or all of it on a timeout or an interruption: ended and checked gone)
         found, left = end_descendants()
+        p.wait()
+        return ("timeout" if not left else "timeout; processes left"), f"timed out: ended {found} process(es)" + (f"; {left} REMAIN" if left else "")
+    except BaseException:
+        end_descendants()
         if p.poll() is None:
             p.wait()
-    note = ""
-    if found:
-        note = f"ended {found} process(es) it left" + (f"; {left} REMAIN" if left else "")
-    if left and code == 0:
-        code = "processes left"
-    return code, note
+        raise
+    return code, ""
 
 
 def run_job(name, job, combo, args, state):
@@ -308,6 +308,13 @@ def run_job(name, job, combo, args, state):
                 notes.append(f"failed, continue-on-error ({code}): {label}")
                 continue
             failed = failed or f"FAILED ({code}): {label}"
+    # (the job's end: whatever its steps left running is ended and checked gone, as CI's runner does)
+    if not args.dry_run:
+        found, left = end_descendants()
+        if found:
+            notes.append(f"ended {found} process(es) left at the job's end" + (f"; {left} REMAIN" if left else ""))
+        if left:
+            failed = failed or f"FAILED ({left} process(es) could not be ended)"
     shutil.rmtree(temp, ignore_errors=True)
     return failed is None, time.time() - t0, notes + ([failed] if failed else [])
 
