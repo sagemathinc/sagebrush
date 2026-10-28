@@ -50,7 +50,7 @@ bws.onmessage = (e) => {
   // (service worker versions, by id, each at its latest state: the ServiceWorker domain is enabled only once a reopened
   // page has failed, since DevTools' attention could start or keep a worker alive and so hide the stall)
   else if (m.method === "ServiceWorker.workerVersionUpdated") {
-    for (const v of m.params?.versions ?? []) swVersions.set(v.versionId, { registrationId: v.registrationId, script: String(v.scriptURL).replace(/^https?:\/\/[^/]+/, ""), runningStatus: v.runningStatus, status: v.status, controlled: (v.controlledClients ?? []).length });
+    for (const v of m.params?.versions ?? []) swVersions.set(v.versionId, { registrationId: v.registrationId, script: String(v.scriptURL).replace(/^https?:\/\/[^/]+/, "").split(/[?#]/)[0], runningStatus: v.runningStatus, status: v.status, controlled: (v.controlledClients ?? []).length });
   }
 };
 // (every call has a deadline, 60 s unless given: a call the browser never answers (a wedged page, a browser gone)
@@ -1209,11 +1209,11 @@ try {
         // (which page is which: the crashed one, the new one, and every target by id and browser context; #243's
         // train-26 CI showed an unattached about:blank beside an attached "/", ids unsaid)
         const t = await raw("Target.getTargets", {}, undefined, 10_000).catch(() => null);
-        const brief = (x) => x && typeof x === "object" ? [x.type, String(x.url).replace(dev.site, ""), x.attached, x.targetId, x.browserContextId] : x;
+        const brief = (x) => x && typeof x === "object" ? [x.type, String(x.url).replace(dev.site, "").split(/[?#]/)[0], x.attached, x.targetId, x.browserContextId] : x;
         console.log(`  (${what}: the new page didn't load (${e.message}); the crashed page ${P.targetId}, the new ${Q.targetId}; Chrome's targets: ${JSON.stringify((t?.targetInfos ?? []).map(brief))})`);
         console.log(`  (${what}: the new page before its navigation: ${JSON.stringify(brief(before))}; the old page's service worker before the crash: ${controller})`);
         // (whether the new page's renderer answers at all, within a strict 3 s, so a hung renderer adds no hang)
-        const alive = await Q.send("Runtime.evaluate", { expression: "location.href + ' ' + document.readyState", returnByValue: true }, 3000).then((x) => JSON.stringify(x?.result?.value ?? x).replace(dev.site, ""), (x) => `no answer: ${x.message}`);
+        const alive = await Q.send("Runtime.evaluate", { expression: "location.origin + location.pathname + ' ' + document.readyState", returnByValue: true }, 3000).then((x) => JSON.stringify(x?.result?.value ?? x).replace(dev.site, ""), (x) => `no answer: ${x.message}`);
         console.log(`  (${what}: the new page's renderer: ${alive})`);
         // (the service workers' state at the stall: enabled only now, it reports every registration and version at
         // once, without having touched their lifecycle before)
