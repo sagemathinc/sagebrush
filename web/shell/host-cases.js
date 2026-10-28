@@ -1053,7 +1053,9 @@ async function limits(check) {
     hooks.duplicate = async (p) => { if (p === "/src/a" && !grown++) { const e = await ws.stat("/src/a"); await ws.write("/src/a", enc("abc".repeat(100)), { base: e.rev, fid: e.fid }); } };
     const run = host.run(PERSON);
     const r = await run.invoke("cp -r src dst");
-    check(grown === 1 && r.kind === "exit" && r.code !== 0 && !(await ws.stat("/dst/a")) && run.ledger().cp_bytes === 7 && run.ledger().written_bytes <= 7 && same(r.ops.map((o) => o.verb + " " + o.path), ["mkdir /dst"]),
+    // (r3, daybreak3 BASH3-D3-2: the exact ledger: F = 2, D = 1 (the copy itself) reserved; one op (its mkdir), nothing written)
+    const led = run.ledger();
+    check(grown === 1 && r.kind === "exit" && r.code !== 0 && (await ws.stat("/dst")) && !(await ws.stat("/dst/a")) && !(await ws.stat("/dst/b")) && led.cp_entries === 3 && led.cp_bytes === 7 && led.ops === 1 && led.written_bytes === 0 && same(r.ops.map((o) => o.verb + " " + o.path), ["mkdir /dst"]),
       `a source grown after cp -r's walk is refused at its duplicate's admit: nothing past the 7 reserved bytes copied (${show(r)}; ${JSON.stringify(run.ledger())})`);
   }
   // script_ms: G2's three cases, and the watchdog's own (structural on CI, G1)
@@ -1075,6 +1077,24 @@ async function limits(check) {
     setTimeout(() => crun.stop(), 200);
     const stopped = await crun.invoke("while true; do :; done");
     check(stopped.kind === "interrupted" && crun.watchdogFired === 0, `G2 (c): Stop during an invocation with script_ms set: one terminal outcome, interrupted, the watchdog not fired (${show(stopped)}; watchdog ${crun.watchdogFired})`);
+  }
+  // (r3, astra2: a run out of time commits nothing more.  (1) the shell stopped by its deadline with a redirection
+  // pending: the pending creation is dropped, typed script_ms.  (2) the time crossing during finalization: the seam holds
+  // the first pending commit past the remaining time (it was admitted before, so it finishes), and the next one isn't
+  // made: the time is a fence at each verb's own admission, so a verb admitted after it does nothing; one admitted before
+  // finishes, D8's one allowance)
+  {
+    const { ws, host } = await fresh("script-ms-pending", { bash: { script_ms: 1000 } });
+    const r = await host.exec(PERSON, "true > late; while true; do :; done");
+    check(typed(r, "script_ms") && !(await ws.stat("/late")), `out of time with a redirection pending: typed bash.script_ms, and the pending creation is never committed (${show(r)})`);
+  }
+  {
+    const hooks = {};
+    const { ws, host } = await fresh("script-ms-crossing", { wrap: hookable(hooks), bash: { script_ms: 1000 } });
+    let held = 0;
+    hooks.create = async (p) => { if (p === "/a") { held++; await sleep(1200); } };
+    const r = await host.exec(PERSON, "true > a; true > b");
+    check(held === 1 && typed(r, "script_ms") && !(await ws.stat("/a")) && !(await ws.stat("/b")), `the time crossing during finalization (the seam holds /a's commit before its admission, past the time): neither /a nor /b is made, typed bash.script_ms (${show(r)}; /a ${!!(await ws.stat("/a"))}, /b ${!!(await ws.stat("/b"))})`);
   }
   // (r2, astra2 R2: one debit from dispatch through finalization: a pending commit held 300 ms by the seam is charged,
   // and the next invocation is sent only what is left)

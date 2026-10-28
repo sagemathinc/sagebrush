@@ -255,6 +255,8 @@ export class ShellRun {
           }, Math.ceil(remainingMs) + WATCHDOG_SLACK_MS)
         : null;
       t0 = performance.now();
+      const started = t0, budget = remainingMs;
+      this.overTime = () => performance.now() - started >= budget;
       try {
         o = await shell.exec(wrap(script), {
           stdin: opts.stdin, cwd: opts.cwd ?? "/", run: this.id, signal: ctl.signal, onRequest: (r) => this.admit(n, r),
@@ -268,6 +270,7 @@ export class ShellRun {
       }
       this.cut = false;
       if (o) this.observe(o, allowance);
+      this.deadlineHit();
       const out = await this.decide(n, o);
       if (this.cut && out.kind === "exit") out.truncated = true;
       // (the invocation has ended, its pending commits included: its time debited; reaching the run's time is typed)
@@ -278,6 +281,7 @@ export class ShellRun {
       }
       return out;
     } finally {
+      this.overTime = () => false;
       debit();
       // (the lifecycle ends with the outcome: finalization above ran inside it, Stop and its grace included)
       this.stopping = null;
@@ -294,6 +298,7 @@ export class ShellRun {
   private async decide(n: number, o: ShellOutcome | null): Promise<HostOutcome> {
     // (everything admitted has finished before the outcome is decided: the last request's answer may still be in the queue)
     await this.queue.catch(() => {});
+    this.deadlineHit();
     // (D8 point 5: the host's facts first; the shell's status never decides a typed outcome)
     if (this.terminal) return this.typed();
     if (o && "limit" in o) return this.typed();
@@ -333,6 +338,15 @@ export class ShellRun {
   }
   // (the last result was an ordinary one cut at the backstop: its outcome says so, never typed)
   private cut = false;
+  // (r3, astra2: the run's time observed apart from its one debit: true once dispatch-to-now reaches the remaining
+  // script_ms; checked when the shell's result comes, after the queue's last answer, and before each pending commit,
+  // so a run out of time commits nothing more.  A verb already admitted finishes, D8's one allowance)
+  private overTime: () => boolean = () => false;
+  private deadlineHit(): boolean {
+    if (this.terminal || !this.overTime()) return false;
+    this.limitHit("script_ms");
+    return true;
+  }
 
   private typed(): HostOutcome {
     // (pending truncations and creations are dropped, unflushed: rule 7)
@@ -350,7 +364,7 @@ export class ShellRun {
   private async ordinary(r: { code: number; stdout: string; stderr: string }): Promise<HostOutcome> {
     let { code, stderr } = r;
     for (const p of [...this.pending.keys()].sort()) {
-      if (this.terminal) return this.typed();
+      if (this.terminal || this.deadlineHit()) return this.typed();
       try {
         await this.commit(p, EMPTY);
       } catch (err) {
@@ -431,7 +445,8 @@ export class ShellRun {
    * may change (data files, folders: never writes into a notebook or board, never copies one).
    */
   private readonly check = (c: AdmitCheck): void => {
-    if (this.terminal) throw new Fenced();
+    // (r3: out of time is the fence too, at the verb's own admission, inside its locked section)
+    if (this.terminal || this.deadlineHit()) throw new Fenced();
     const pr = this.principal;
     if (pr.kind === "grant") {
       if (pr.live() !== "ok") throw new Revoked();
