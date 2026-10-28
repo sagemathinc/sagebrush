@@ -58,10 +58,20 @@ for (const n of differing.filter((x) => DECLARED.has(x))) {
   const byId = (d) => new Map((d.nodes ?? []).map((x) => [x.id, JSON.stringify(x)]));
   const na = byId(a), nb = byId(b);
   const nodes = [...new Set([...na.keys(), ...nb.keys()])].filter((k) => na.get(k) !== nb.get(k));
-  const rest = (d) => JSON.stringify(Object.fromEntries(Object.entries(d).filter(([k]) => k !== "nodes")));
+  // (besides its nodes: the intro may differ only in its count of source files, and edges only between files or
+  //  groups of changed sources; every other field the same)
+  const rest = (d) => JSON.stringify(Object.fromEntries(Object.entries(d).filter(([k]) => k !== "nodes" && k !== "edges" && k !== "intro")));
+  const intro = (d) => String(d.intro ?? "").replace(/^\*\*\d+ source files\*\*/, "**N source files**");
+  const edgeKey = (e) => JSON.stringify(e);
+  const ea = new Set((a.edges ?? []).map(edgeKey)), eb = new Set((b.edges ?? []).map(edgeKey));
+  const edgeDiff = [...[...ea].filter((k) => !eb.has(k)), ...[...eb].filter((k) => !ea.has(k))].map((k) => JSON.parse(k));
   // (a changed file's group: "g:" + its folder; scripts/x.mjs -> g:scripts, web/build.ts -> g:web)
   const allowed = new Set((CHANGED ? readFileSync(CHANGED, "utf8").split("\n").filter(Boolean) : []).map((p) => "g:" + p.slice(0, Math.max(0, p.lastIndexOf("/")))));
-  check(`declared difference ${n}: only the groups of changed sources, every other field the same`, nodes.length > 0 && nodes.every((k) => allowed.has(k)) && rest(a) === rest(b), { nodes, allowed: [...allowed].filter((k) => nodes.includes(k) || /^g:(web|scripts)$/.test(k)) });
+  const changedFile = (id) => (CHANGED ? readFileSync(CHANGED, "utf8").split("\n") : []).some((p) => id === "f:" + p);
+  const edgesOk = edgeDiff.every((e) => [e.from, e.to].some((x) => allowed.has(x) || changedFile(x)));
+  check(`declared difference ${n}: only the groups of changed sources (nodes, edges, the intro's file count), every other field the same`,
+    nodes.length > 0 && nodes.every((k) => allowed.has(k)) && edgesOk && intro(a) === intro(b) && rest(a) === rest(b),
+    { nodes, edges: edgeDiff.length, edgesOk, introSame: intro(a) === intro(b), restSame: rest(a) === rest(b) });
 }
 // 2. nothing of the editor in PROD
 const prodLatex = [...prod.keys()].filter((n) => /(^|\/)sagebrush-latex/.test(n));
