@@ -359,8 +359,8 @@ try:
         L._recorder = None
     assert not sp.legacy_band_route(n, n - 1, n - 1)
     assert L._routes == ["lu"] and "ordering" in tags and "band" not in tags, (L._routes, tags)
-    AX = np.zeros((n, 1))
-    np.add.at(AX[:, 0], np.array([e[0] for e in ent]), np.array([e[2] for e in ent]) * X[np.array([e[1] for e in ent]), 0])
+    # (the residual through the runtime's own sparse product: its numpy has no ufunc .at)
+    AX = M._mat(sp.binop("mtimes", W, M._unmat(X)))
     assert float(np.max(np.abs(AX - b))) < 1e-9
     ok("route: an arrow (master's route takes LU) keeps the cost route: the ordering, then the LU")
 finally:

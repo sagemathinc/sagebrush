@@ -31,6 +31,15 @@
    "owner": "matlab",
    "status": "open",
    "what": "mldivide's 4000/4001 dense-routing floor (big = n > MAX_DENSE_SOLVE): memory is bounded by memguard; the routing boundary itself (M2 finding 2: random3 at 4000 vs 4001, 93.4x) needs a measured routing rule, in the routing-model project after PR 2."
+  },
+  {
+   "id": "FU-B16-3",
+   "keys": [
+    "lib/_matlab_sparse.py :: legacy_band_route :: return (2 * kl + ku + 1) * n <= MAX_FULL and n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK #0"
+   ],
+   "owner": "matlab",
+   "status": "open",
+   "what": "MATLAB PR 2's routing floor (legacy_band_route: master's band predicate, MAX_FULL 2^28 and MAX_BAND_WORK 2^29, as a route, never a refusal), kept by William's decisions of Oct 27 2026 (D-W1, D-W2: its two inherited edge cliffs are known costs) until the routing-model project replaces it."
   }
  ],
  "note": "The sweep's follow-ups, the source of truth (plan-limit-sites-sweep-r3 section 2): {id FU-<batch>-<n>, status open|fixed|withdrawn, keys, what, owner, fixed_by {pr, commit}, withdrawn_because}. An open one has at least one active key, and its active keys and the entries pointing to it agree; no active key points to a fixed or withdrawn one.",
