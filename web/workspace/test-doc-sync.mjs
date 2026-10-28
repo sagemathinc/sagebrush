@@ -487,42 +487,51 @@ try {
     for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
     return { targetId, ev, call: (f, ...args) => { progress(`${label}.${f}`); return ev(`T.${f}(${args.map((a) => J(a)).join(", ")})`); } };
   }
-  const C1 = await pageIn("C1"), C2 = await pageIn("C2");
-  const act13 = await C1.call("openWs", "C"), f13 = await C1.call("follow");
-  check(act13 === false && f13 === 0, "13: a board page on a device whose journal isn't active yet: no DocSync of its own: " + J({ act13, f13 }));
-  await C2.call("openWs", "C");
-  const N13 = "13131313-2222-4333-8444-555555555555";
-  const en13 = await C2.call("enable", N13, [["a", "c0"], ["b", "d0"]]);
-  check(en13.out === "on" && en13.on === true && en13.saved === "function" && en13.synced && en13.writer && J(en13.ro) === J([true, false]), "13: the notebook page's switch: on, DOC_SYNC on with its save hook, the notebook reopened as its synced writer, read-only only meanwhile: " + J(en13));
-  let joined13 = 0;
-  for (let i = 0; i < 100 && !(joined13 = await C1.call("followedCount")); i++) await sleep(50);
-  check(joined13 === 1, "13: the board page, told the switch is on, hands one DocSync to its own connection: " + joined13);
-  await C1.call("connect", "C", ACCOUNT);
-  const settle13 = async () => { for (let i = 0; i < 3; i++) await Promise.all([C1.call("idle"), C2.call("idle"), B.call("idle")]); };
-  await settle13();
-  await B.call("kick", N13, true);
-  await settle13();
-  const bo13 = await B.call("open", N13);
-  check(bo13.codes === J([["a", "c0"], ["b", "d0"]]), "13: the notebook made in the notebook page reaches B through the board page's connection: " + J(bo13));
-  check((await C2.call("editOnly", N13, [["a", "c1"], ["b", "d0"]])) === true, "13: the notebook page (a follower) saves an edit");
-  await settle13();
-  const br13 = await B.call("record", N13);
-  check(br13.codes === J([["a", "c1"], ["b", "d0"]]), "13: …it reaches B, the board page still open and holding: " + br13.codes);
-  await B.call("edit", N13, [["a", "c1"], ["b", "d2"]]);
-  await settle13();
-  await sleep(300);
-  await settle13();
-  const cr13 = await C2.call("record", N13);
-  check(cr13.codes === J([["a", "c1"], ["b", "d2"]]) && cr13.mark === null, "13: B's edit arrives in the notebook page through the board page's connection: " + J(cr13));
-  const w13 = [...(await C1.call("warnings")), ...(await C2.call("warnings"))];
-  check(w13.length === 0, "13: no warnings on either page: " + J(w13).slice(0, 300));
-  await send("Target.closeTarget", { targetId: C1.targetId });
-  await sleep(300);
-  check((await C2.call("editOnly", N13, [["a", "c3"], ["b", "d2"]])) === true, "13: the board page closed: the notebook page saves with no page holding the connection");
-  await C2.call("connect", "C", ACCOUNT);
-  for (let i = 0; i < 3; i++) await Promise.all([C2.call("idle"), B.call("idle")]);
-  const br13b = await B.call("record", N13);
-  check(br13b.codes === J([["a", "c3"], ["b", "d2"]]), "13: …then its own connection (the holder now) sends what was saved meanwhile: " + br13b.codes);
+  // (a failed check ends the case right after it is recorded (the rest depends on it), and a throw is recorded as this
+  // case's failed check: the run goes on and prints every verdict (#266 r6b's run: R-14d and B-1o made case 13's
+  // C1.connect throw after its failed check, and the run ended with no verdict)
+  const STOP13 = Symbol("stop");
+  const need13 = (ok, what) => { check(ok, what); if (!ok) throw STOP13; };
+  const case13 = async () => {
+    const C1 = await pageIn("C1"), C2 = await pageIn("C2");
+    const act13 = await C1.call("openWs", "C"), f13 = await C1.call("follow");
+    need13(act13 === false && f13 === 0, "13: a board page on a device whose journal isn't active yet: no DocSync of its own: " + J({ act13, f13 }));
+    await C2.call("openWs", "C");
+    const N13 = "13131313-2222-4333-8444-555555555555";
+    const en13 = await C2.call("enable", N13, [["a", "c0"], ["b", "d0"]]);
+    need13(en13.out === "on" && en13.on === true && en13.saved === "function" && en13.synced && en13.writer && J(en13.ro) === J([true, false]), "13: the notebook page's switch: on, DOC_SYNC on with its save hook, the notebook reopened as its synced writer, read-only only meanwhile: " + J(en13));
+    let joined13 = 0;
+    for (let i = 0; i < 100 && !(joined13 = await C1.call("followedCount")); i++) await sleep(50);
+    need13(joined13 === 1, "13: the board page, told the switch is on, hands one DocSync to its own connection: " + joined13);
+    await C1.call("connect", "C", ACCOUNT);
+    const settle13 = async () => { for (let i = 0; i < 3; i++) await Promise.all([C1.call("idle"), C2.call("idle"), B.call("idle")]); };
+    await settle13();
+    await B.call("kick", N13, true);
+    await settle13();
+    const bo13 = await B.call("open", N13);
+    need13(bo13.codes === J([["a", "c0"], ["b", "d0"]]), "13: the notebook made in the notebook page reaches B through the board page's connection: " + J(bo13));
+    need13((await C2.call("editOnly", N13, [["a", "c1"], ["b", "d0"]])) === true, "13: the notebook page (a follower) saves an edit");
+    await settle13();
+    const br13 = await B.call("record", N13);
+    need13(br13.codes === J([["a", "c1"], ["b", "d0"]]), "13: …it reaches B, the board page still open and holding: " + br13.codes);
+    await B.call("edit", N13, [["a", "c1"], ["b", "d2"]]);
+    await settle13();
+    await sleep(300);
+    await settle13();
+    const cr13 = await C2.call("record", N13);
+    need13(cr13.codes === J([["a", "c1"], ["b", "d2"]]) && cr13.mark === null, "13: B's edit arrives in the notebook page through the board page's connection: " + J(cr13));
+    const w13 = [...(await C1.call("warnings")), ...(await C2.call("warnings"))];
+    need13(w13.length === 0, "13: no warnings on either page: " + J(w13).slice(0, 300));
+    await send("Target.closeTarget", { targetId: C1.targetId });
+    await sleep(300);
+    need13((await C2.call("editOnly", N13, [["a", "c3"], ["b", "d2"]])) === true, "13: the board page closed: the notebook page saves with no page holding the connection");
+    await C2.call("connect", "C", ACCOUNT);
+    for (let i = 0; i < 3; i++) await Promise.all([C2.call("idle"), B.call("idle")]);
+    const br13b = await B.call("record", N13);
+    need13(br13b.codes === J([["a", "c3"], ["b", "d2"]]), "13: …then its own connection (the holder now) sends what was saved meanwhile: " + br13b.codes);
+  };
+  const r13 = await case13().then(() => null, (e) => e ?? new Error("thrown"));
+  if (r13 && r13 !== STOP13) check(false, "13: the case stopped: " + String(r13?.message ?? r13).slice(0, 300));
 
   progress("case 14");
   // (the whole case within a budget that ends before the run's deadline: past it, or on a throw, this case records
