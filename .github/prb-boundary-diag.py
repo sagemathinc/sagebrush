@@ -11,12 +11,17 @@ Twelve conditions, each in its OWN fresh worker (Session), each with exactly ONE
   - K: a request of framed length C, written as 16 fragments of 4096 bytes, flushed, with an untimed 50 ms wait after
     each (so each fragment is a separate read): the buffer doubles 4096 -> ... -> 65536 = C and is KEPT (<= C).  The m1
     and rc targets then fit it: no reader allocation at all.  p1 (C+1) can't fit: it is the in-condition control.
-  - Z: a request of framed length 70000, written whole: the buffer ends > C, so Windows releases it at the next request;
-    the targets start from an empty buffer (the natural state after any large request on Windows).
+  - Z: a request of framed length 70000, written on the SAME schedule (16 writes: 15 fragments of 4096 bytes and the
+    8560-byte rest, the same fifteen 50 ms waits; daybreak2's r2 item 2): the buffer ends > C, so Windows releases it at
+    the next request (the stats request), and the targets start from that verified LOW-capacity start (the stats
+    line's own small buffer).
   Verified on B with the existing _serve_stats counters, before and after the timed block (A has none: not checked):
   K needs input_capacity == C after the prep and, for m1/rc, input_releases unchanged and input_capacity == C after the
-  block; Z needs exactly one release at the request after the prep and input_capacity < 4096 then.  A failed check makes
-  the run INVALID (exit 9): the regime wasn't established, and nothing is concluded.
+  block (so zero reader allocations); Z's start needs exactly one release at the request after the prep and
+  input_capacity < 4096 then.  Z's TIMED regime (daybreak2's r2 item 1), per length, from the block's release delta in
+  every B sample: RECURRING if it is 200 in every sample (every target released and regrew: the terminal stats request
+  counts target 200), NONE if 0 in every sample, MIXED otherwise.  A failed E1 check, or a Z regime that isn't
+  RECURRING for m1, leaves H1 UNRESOLVED (reported as such); E2 stays usable, and the run still completes.
 - E2, the prelude (H2), regime natural (no prep), lengths m1/rc/p1 x prelude P0 / P1, P1 = the warm-up, then 3 x 32 MiB
   requests, `x = None` and an idle sleep(1.0) (ctrlc_perf.py's own sequence before its rc rows).
 
@@ -39,13 +44,15 @@ handshake (as ctrlc_perf.py r5f).
 
 Per condition: B/A median over rounds of B / mean(A1, A2), and the bracket medians B/A1 and B/A2.  OVER: all three
 > 1.01.  UNDER: all three <= 1.01.  Otherwise STRADDLE.  The decision table (frozen with this script):
-  H1 (reader regime): SUPPORTED if E1 m1-Z is OVER and E1 m1-K is UNDER; REJECTED if E1 m1-K is OVER (the excess with
-     verified zero reader allocations); otherwise UNRESOLVED.
-  H2 (prelude/position): SUPPORTED if E2 m1-P1 is OVER and E2 m1-P0 is UNDER; BOUNDARY (not the prelude) if both are OVER;
-     otherwise UNRESOLVED.
+  H1 (reader regime), only if every E1 check passed (else UNRESOLVED, E1 not established): REJECTED if E1 m1-K is OVER
+     (the excess with verified zero reader allocations); SUPPORTED if E1 m1-K is UNDER, E1 m1-Z is OVER and m1's Z
+     regime is RECURRING; otherwise UNRESOLVED.
+  H2 (prelude/position): SUPPORTED if E2 m1-P1 is OVER and E2 m1-P0 is UNDER; REJECTED_PRELUDE if both are OVER (the
+     excess doesn't depend on the 32 MiB prelude; its cause stays unresolved: daybreak2's r2 item 3); otherwise
+     UNRESOLVED.
   H3 (not reproduced): if no m1 condition (E1 K, E1 Z, E2 P0, E2 P1) is OVER.
 Every condition is reported (the full matrices, raw samples, the stats); nothing is dropped, retried or pooled.
-Exit 0 once the run is complete and valid (whatever the decision), 9 if INVALID.
+Exit 0 once the run is complete (whatever the decision, E1's checks included); nonzero only if it couldn't complete.
 """
 import ast
 import json
@@ -124,7 +131,7 @@ for i in range(len(CONDS)):
     if how == "K":
         prep(s, C, [4096] * 16, 0.05)
     elif how == "Z":
-        prep(s, 70000, [70000], 0.0)
+        prep(s, 70000, [4096] * 15 + [8560], 0.05)
     rec["before"] = stats(s)
     t = []
     for _ in range(200):
@@ -193,13 +200,13 @@ def main():
     py_a, py_b = resolve(args[0]), resolve(args[1])
     out_path = args[2]
     rounds = int(args[3]) if len(args) > 3 else 5
-    raw, invalid = [], []
+    raw, e1_failures = [], []
     for k in range(rounds):
         a1 = sample(py_a, k)
         b = sample(py_b, k)
         a2 = sample(py_a, k)
         raw.append({"a1": a1, "b": b, "a2": a2})
-        invalid += ["round %d: %s" % (k, e) for e in verify(b)]
+        e1_failures += ["round %d: %s" % (k, e) for e in verify(b)]
         print("round %d: %s" % (k, json.dumps({c: round(b[c]["median"] / ((a1[c]["median"] + a2[c]["median"]) / 2), 4) for c in NAMES})), flush=True)
     rows = {}
     for c in NAMES:
@@ -213,21 +220,27 @@ def main():
                                            if r["b"][c]["after"] and r["b"][c]["before"] else None for r in raw]}
         rows[c]["class"] = classify(rows[c])
     cl = {c: rows[c]["class"] for c in NAMES}
-    if cl["E1-m1-K"] == "OVER":
+    z_regime = {}
+    for L in ("m1", "rc", "p1"):
+        d = rows["E1-%s-Z" % L]["b_releases_in_block"]
+        z_regime[L] = "RECURRING" if all(x == 200 for x in d) else "NONE" if all(x == 0 for x in d) else "MIXED"
+    if e1_failures:
+        h1 = "UNRESOLVED (E1 not established)"
+    elif cl["E1-m1-K"] == "OVER":
         h1 = "REJECTED"
-    elif cl["E1-m1-Z"] == "OVER" and cl["E1-m1-K"] == "UNDER":
+    elif cl["E1-m1-K"] == "UNDER" and cl["E1-m1-Z"] == "OVER" and z_regime["m1"] == "RECURRING":
         h1 = "SUPPORTED"
     else:
         h1 = "UNRESOLVED"
     if cl["E2-m1-P1"] == "OVER" and cl["E2-m1-P0"] == "UNDER":
         h2 = "SUPPORTED"
     elif cl["E2-m1-P1"] == "OVER" and cl["E2-m1-P0"] == "OVER":
-        h2 = "BOUNDARY"
+        h2 = "REJECTED_PRELUDE (cause unresolved)"
     else:
         h2 = "UNRESOLVED"
     h3 = not any(cl[c] == "OVER" for c in ("E1-m1-K", "E1-m1-Z", "E2-m1-P0", "E2-m1-P1"))
-    doc = {"py_a": py_a, "py_b": py_b, "rounds": rounds, "rows": rows, "raw": raw, "invalid": invalid,
-           "decision": None if invalid else {"H1": h1, "H2": h2, "H3_not_reproduced": h3}, "gating": False}
+    doc = {"py_a": py_a, "py_b": py_b, "rounds": rounds, "rows": rows, "raw": raw, "e1_failures": e1_failures,
+           "z_regime": z_regime, "decision": {"H1": h1, "H2": h2, "H3_not_reproduced": h3}, "gating": False}
     with open(out_path, "w") as f:
         json.dump(doc, f, indent=1)
     for c in NAMES:
@@ -235,10 +248,9 @@ def main():
         print("%-10s B/A median %.4f [%.4f, %.4f]  B/A1 %.4f  B/A2 %.4f  A %.6f  B %.6f  B releases/block %s  %s" % (
             c, r["median"], min(r["ratios"]), max(r["ratios"]), r["median_b_a1"], r["median_b_a2"], r["a_median"],
             r["b_median"], r["b_releases_in_block"], r["class"]))
-    if invalid:
-        for e in invalid:
-            print("INVALID: " + e)
-        sys.exit(9)
+    for e in e1_failures:
+        print("E1 NOT ESTABLISHED: " + e)
+    print("Z regime (B release delta per block, every sample): %s" % json.dumps(z_regime))
     print("DECISION (diagnostic, non-gating): H1 %s  H2 %s  H3 not reproduced: %s" % (h1, h2, h3))
 
 

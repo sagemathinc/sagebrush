@@ -1,12 +1,12 @@
 name: prb-windows-diag
 
-# PR B's Windows RC-1 boundary diagnostic (plan r2; daybreak2's and astra's r1 reviews of run 40643092091's req_rc_m1
+# PR B's Windows RC-1 boundary diagnostic (plan r3; daybreak2's and astra's r1 reviews of run 40643092091's req_rc_m1
 # OVER): causal-only and NON-GATING.  It never amends that run's FAIL and selects no fix by itself.  Only on the throwaway
 # branch prb-windows-evidence (never on master); nothing is published.
 # It builds nothing: it takes run 40643092091's own wheels artifact, the MANIFEST pinned (MANIFEST_SHA), verifies each
 # wheel against it, installs them, and checks each installed .pyd (exactly one, basename and hash) before and after.
 # The diagnostic is .github/prb-boundary-diag.py from HEAD's git blob, hashed from stdin (DIAG_SHA), and run A/B/A x 5.
-# Any failed check fails the job; so does an INVALID diagnostic (exit 9: a reader regime not established).
+# Any failed check fails the job, as does a diagnostic that can't complete; E1's regime checks are reported, not fatal.
 
 on:
   push:
@@ -19,7 +19,7 @@ permissions:
 env:
   SRC_RUN: "40643092091"
   MANIFEST_SHA: "0f511215c7b31cf339d8154fd8ef5e618fae4ec8fcc4fd81250a3ca54ec64d7d"
-  DIAG_SHA: "cd1adaecb9e2fef8d16b916796b61dbb122014c18f6cb2df87beba8220418ca6"
+  DIAG_SHA: "f8b086ea410f7cd77d610e16963b32c9bdbbcceb2ef55d49749c2e16bfa779b0"
 
 jobs:
   diag:
