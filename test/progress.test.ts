@@ -250,14 +250,16 @@ test("Python routines report through _progress; the engine's self-test call show
   );
 });
 
-test("capabilities(): progress only in this build; the later pieces refuse before running", () => {
+test("capabilities(): progress and estimates in this build; the later pieces refuse before running", () => {
   const code = [
     "import sagebrush",
     "from sagebrush import records",
     "c = sagebrush.capabilities()",
     "print(c['progress'], sorted(k for k, v in c.items() if v is False))",
     "print(sagebrush.stop_points('factor'))",
-    "for name in ('estimate', 'run', 'resume'):",
+    "e = sagebrush.estimate(factor, 2^64 + 1)",
+    "print(e['op'], e['total_time'], e['schema'])",
+    "for name in ('run', 'resume'):",
     "    try:",
     "        getattr(sagebrush, name)(1)",
     "    except TypeError as e:",
@@ -274,9 +276,9 @@ test("capabilities(): progress only in this build; the later pieces refuse befor
   assert.equal(
     r.stdout,
     [
-      "True ['cancel_with_partial', 'checkpoints', 'deadline', 'estimate', 'request_stop', 'resume', 'run', 'work']",
+      "True ['cancel_with_partial', 'checkpoints', 'deadline', 'request_stop', 'resume', 'run', 'work']",
       "[]",
-      "sagebrush.estimate is not available in this build",
+      "factor None sagebrush.estimate/1",
       "sagebrush.run is not available in this build",
       "sagebrush.resume is not available in this build",
       "factor(): deadline= is not available in this build",
