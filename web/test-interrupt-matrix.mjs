@@ -151,13 +151,28 @@ if (args.includes("--print-driver")) {
   process.exit(0);
 }
 
+// (whether the target is exiting: its /proc/PID/stat state Z or X, or the kernel's PF_EXITING flag (0x4) set; or gone)
+function exitingNow(pid) {
+  try {
+    const s = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const f = s.slice(s.lastIndexOf(")") + 2).split(" ");
+    return f[0] === "Z" || f[0] === "X" || (Number(f[6]) & 0x4) !== 0;
+  } catch {
+    return true;
+  }
+}
+// (the target's rss and threads at a DONE: read between two exiting checks, and marked exiting if either says so, as
+// a target that prints its last DONE and exits at once is read with its threads already going; python's report on
+// #251's fake. leakCheck drops a final exiting sample and says so; an exiting sample anywhere else is invalid)
 function procStatus(pid) {
+  const before = exitingNow(pid);
   try {
     const t = readFileSync(`/proc/${pid}/status`, "utf8");
     const g = (k) => Number((t.match(new RegExp(`^${k}:\\s+(\\d+)`, "m")) ?? [])[1]);
-    return { rss_kb: g("VmRSS"), threads: g("Threads") };
+    const r = { rss_kb: g("VmRSS"), threads: g("Threads") };
+    return before || exitingNow(pid) ? { ...r, exiting: true } : r;
   } catch {
-    return null;
+    return { exiting: true };
   }
 }
 // the launcher under `script` (the prompt host): the node process among script's children

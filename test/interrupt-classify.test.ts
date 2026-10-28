@@ -74,6 +74,16 @@ test("leak check: growth past max(64 MiB, 10%) from repeat 3, or a thread change
   assert.equal(run(`leakCheck(${ser([300e3, 300e3, 300e3, 300e3, 300e3], [9, 9, 9, 10, 10])})`).ok, false);
   assert.equal(run(`leakCheck(${ser(Array(20).fill(1e6), Array(20).fill(9))})`).check, "full");
   assert.equal(run(`leakCheck(${ser([1, 2], [9, 9])})`), null);
+  // (a final sample read while the target was exiting: dropped and said, so its low thread count is no "change";
+  // an exiting sample before the last is invalid; python's report on #251's fake)
+  const ex = (rss: number[], thr: number[], at: number) => JSON.stringify(rss.map((r, k) => ({ i: k + 1, rss_kb: r, threads: thr[k], ...(k === at ? { exiting: true } : {}) })));
+  const last = run(`leakCheck(${ex([300e3, 300e3, 300e3, 300e3, 300e3], [7, 7, 7, 7, 4], 4)})`);
+  assert.ok(last.ok === true && last.threads_same === true && last.last_exiting === true && last.to === 4, JSON.stringify(last));
+  const early = run(`leakCheck(${ex([300e3, 300e3, 300e3, 300e3, 300e3], [7, 7, 7, 7, 7], 2)})`);
+  assert.ok(early.ok === false && early.invalid === true, JSON.stringify(early));
+  assert.ok(run(`leakCheck(${ex([300e3, 300e3, 300e3, 300e3, 300e3], [7, 7, 7, 4, 4], 4)})`).ok === false, "a thread change before the exiting sample still fails");
+  assert.ok(run(`leakCheck(${ex([300e3, 300e3, 300e3, 300e3, 400e3], [7, 7, 7, 7, 7], 9)})`).ok === false, "growth without any exiting sample still fails");
+  assert.equal(run(`leakCheck(${ex([1, 2, 3], [7, 7, 4], 2)})`), null, "too few live repeats once the exiting one is dropped: unmeasured");
   assert.equal(run(`rowOutcome([{ outcome: "PASS" }], null)`), "INCOMPLETE");
   assert.equal(run(`rowOutcome([{ outcome: "PASS" }], false)`), "FAIL");
   // a leak is never KNOWN, even on a baseline row

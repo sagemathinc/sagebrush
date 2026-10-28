@@ -165,6 +165,19 @@ export const HEAP_EXTERNAL_SAMPLE = `    _m = ""
 // garbage of the trials before it; P2a, leak follow-up): growth from repeat 3 against max(16 MiB,
 // 10%) of it.  A host without that figure (the browser) is measured by RSS, and says so.
 export function leakCheck(samples, full = 20, measure = "rss") {
+  // (a final sample read while the target was exiting is dropped, and the result says so; an exiting sample before
+  // the last is invalid evidence: the target was going while trials still ran)
+  const exitingAt = samples.findIndex((x) => x.exiting);
+  if (exitingAt >= 0 && exitingAt < samples.length - 1) {
+    return { ok: false, invalid: true, why: `the target was exiting at repeat ${samples[exitingAt].i}, before the last`, from: 3, to: samples.at(-1)?.i ?? 0, threads_same: false };
+  }
+  const lastExiting = exitingAt >= 0;
+  if (lastExiting) samples = samples.slice(0, -1);
+  const r = leakCheckLive(samples, full, measure);
+  return r && lastExiting ? { ...r, last_exiting: true } : r;
+}
+
+function leakCheckLive(samples, full, measure) {
   const from = samples.find((x) => x.i === 3), last = samples.at(-1);
   if (!from || !last || last.i <= 3) return null;
   const tail = samples.filter((x) => x.i >= 3);
