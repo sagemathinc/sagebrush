@@ -46,8 +46,8 @@ jobs:
           for t in test_ctrlc_native test_ctrlc_cleanup test_session_ctrl test_runs; do
             c=0; (cd engine/py && python $t.py) > logs/$t.log 2>&1 || c=$?
             echo "$t exit $c: $(grep -c '^ok' logs/$t.log) ok, $(grep -c '^FAIL' logs/$t.log) FAIL, $(grep -c '^XFAIL' logs/$t.log) XFAIL"
-            grep -E '^(FAIL|XFAIL|XPASS)' logs/$t.log | head -20
-            [ $c -ne 0 ] && status=1
+            grep -E '^(FAIL|XFAIL|XPASS)' logs/$t.log | head -20 || true
+            if [ $c -ne 0 ]; then status=1; fi
           done
           exit $status
       - uses: actions/upload-artifact@v5
