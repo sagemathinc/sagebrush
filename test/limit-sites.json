@@ -4,6 +4,36 @@
   "owner": "magma",
   "reason": "dense-mul outline (#241a): the product's existing i128-eligibility bit test and batch bound, the outlined max-bits scan, and their reference copies and boundary values in tests; nothing is refused"
  },
+ "engine/arith/src/zmat.rs :: failed_conversion_keeps_masters_allocation :: assert!(cap < r * k, \"never a whole-operand buffer\"); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul outline (#241a): a test's capacity variable (cap) and bound for the failed i64 conversion's allocation control (astra2 OUTLINE-CONVERSION-PEAK); nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: failed_conversion_keeps_masters_allocation :: assert!(cap <= max_cap && cap < k * r, \"B fails at {at}: the failed conversion held {cap} entries\"); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul outline (#241a): a test's capacity variable (cap) and bound for the failed i64 conversion's allocation control (astra2 OUTLINE-CONVERSION-PEAK); nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: failed_conversion_keeps_masters_allocation :: assert!(cap <= max_cap, \"A fails at {at}: the failed conversion held {cap} entries, at most {max_cap} allowed\"); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul outline (#241a): a test's capacity variable (cap) and bound for the failed i64 conversion's allocation control (astra2 OUTLINE-CONVERSION-PEAK); nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: failed_conversion_keeps_masters_allocation :: for (at, max_cap) in [(0usize, 0usize), (5, 8), (4095, 4096), (4096, 4096)] { #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul outline (#241a): a test's capacity variable (cap) and bound for the failed i64 conversion's allocation control (astra2 OUTLINE-CONVERSION-PEAK); nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: failed_conversion_keeps_masters_allocation :: let cap = probe().expect(\"A's conversion failed\"); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul outline (#241a): a test's capacity variable (cap) and bound for the failed i64 conversion's allocation control (astra2 OUTLINE-CONVERSION-PEAK); nothing is refused"
+ },
+ "engine/arith/src/zmat.rs :: failed_conversion_keeps_masters_allocation :: let cap = probe().expect(\"B's conversion failed\"); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul outline (#241a): a test's capacity variable (cap) and bound for the failed i64 conversion's allocation control (astra2 OUTLINE-CONVERSION-PEAK); nothing is refused"
+ },
  "engine/arith/src/zmat.rs :: max_bits_scanned :: fn max_bits_scanned(&self) -> u64 { #0": {
   "class": "none",
   "owner": "magma",

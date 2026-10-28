@@ -47,6 +47,13 @@ fn bits(x: &BigInt) -> u64 {
 
 /// The entries per call of the pre-scans' helpers.
 const SCAN_CHUNK: usize = 1 << 12;
+
+#[cfg(test)]
+thread_local! {
+    /// Tests only: the capacity of the last failed i64 conversion's vector
+    /// when it gave up (the allocation control for a non-i64 entry).
+    static FAILED_CONVERSION_CAPACITY: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
 /// The inner dimension from which [`ZMat::mul`]'s dot products are made
 /// one output at a time (each by [`dot_run_i64`] or [`dot_run_big`]).
 const MUL_STEP: usize = 1 << 16;
@@ -131,8 +138,8 @@ fn scan_max_bits(chunk: &[BigInt]) -> u64 {
     chunk.iter().map(bits).max().unwrap_or(0)
 }
 
-/// Each entry of a chunk as an i64, pushed in order; false at the first
-/// that is not one.  `out` is sized by the caller, so it never grows here.
+/// Each entry of a chunk as an i64, pushed in order (growing `out` as
+/// pushes do); false at the first that is not one.
 #[inline(never)]
 fn scan_to_i64(chunk: &[BigInt], out: &mut Vec<i64>) -> bool {
     for x in chunk {
@@ -280,12 +287,18 @@ impl ZMat {
         m
     }
 
-    /// [`as_i64`](ZMat::as_i64) in chunks of SCAN_CHUNK entries, into one
-    /// vector sized once.
+    /// [`as_i64`](ZMat::as_i64) in chunks of SCAN_CHUNK entries, growing
+    /// as it converts, as master's collect into `Option<Vec<i64>>` does:
+    /// nothing is reserved before an entry is known to fit, so a failing
+    /// conversion holds no more than the entries before its failure
+    /// (astra2's OUTLINE-CONVERSION-PEAK: never a whole-operand buffer for
+    /// an operand that then takes the Big path).
     fn as_i64_scanned(&self) -> Option<Vec<i64>> {
-        let mut v = Vec::with_capacity(self.d.len());
+        let mut v = Vec::new();
         for chunk in self.d.chunks(SCAN_CHUNK) {
             if !scan_to_i64(black_box(chunk), &mut v) {
+                #[cfg(test)]
+                FAILED_CONVERSION_CAPACITY.with(|c| c.set(Some(v.capacity())));
                 return None;
             }
         }
@@ -1021,6 +1034,43 @@ mod tests {
         assert!(matches!(z.prepare_product(&one), Prepared::Big(_)));
         z.d[0] = BigInt::from(5);
         assert!(matches!(z.prepare_product(&one), Prepared::Small(_)));
+    }
+
+    /// astra2's OUTLINE-CONVERSION-PEAK control: a first or early non-i64
+    /// entry, in either operand, with the bit test still passing and a tall
+    /// A over a small result.  The exact Big result, and the failed
+    /// conversion holds at most what master's collect would have (nothing
+    /// when the first entry fails; the doubling capacity of the entries
+    /// before the failure otherwise), never a whole-operand buffer.
+    #[test]
+    fn failed_conversion_keeps_masters_allocation() {
+        let probe = || FAILED_CONVERSION_CAPACITY.with(|c| c.take());
+        let (r, k) = (512, 512);
+        let big = BigInt::from(1u64 << 63);
+        for (at, max_cap) in [(0usize, 0usize), (5, 8), (4095, 4096), (4096, 4096)] {
+            // A: tall, zeros but one 2^63 at `at`; B: k x 1 zeros (64 + 0 + 10 bits < 126)
+            let mut a = ZMat::zero(r, k);
+            a.d[at] = big.clone();
+            let b = ZMat::zero(k, 1);
+            probe();
+            assert_eq!(a.mul(&b), mul_reference(&a, &b), "A fails at {at}");
+            let cap = probe().expect("A's conversion failed");
+            assert!(cap <= max_cap, "A fails at {at}: the failed conversion held {cap} entries, at most {max_cap} allowed");
+            assert!(cap < r * k, "never a whole-operand buffer");
+            // B fails instead (A converts, as master's tuple converts both)
+            let a2 = ZMat::zero(1, k);
+            let mut b2 = ZMat::zero(k, r);
+            b2.d[at] = big.clone();
+            probe();
+            assert_eq!(a2.mul(&b2), mul_reference(&a2, &b2), "B fails at {at}");
+            let cap = probe().expect("B's conversion failed");
+            assert!(cap <= max_cap && cap < k * r, "B fails at {at}: the failed conversion held {cap} entries");
+        }
+        // a successful conversion still converts everything (the Small path)
+        let (a, b) = (ZMat::zero(r, k), ZMat::zero(k, 1));
+        probe();
+        assert!(matches!(a.prepare_product(&b), Prepared::Small(_)));
+        assert_eq!(probe(), None);
     }
 
     #[test]
