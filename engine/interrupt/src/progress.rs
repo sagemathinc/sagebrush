@@ -691,6 +691,9 @@ mod wasm {
     static mut AREA: [u32; AREA_WORDS] = [0; AREA_WORDS];
     static SERIAL: AtomicU32 = AtomicU32::new(0);
 
+    // SAFETY: wasm is single-threaded (one engine instance per thread), and callers
+    // use the returned reference before calling area() again.
+    #[allow(unsafe_code)]
     fn area() -> &'static mut [u32; AREA_WORDS] {
         unsafe { &mut *std::ptr::addr_of_mut!(AREA) }
     }

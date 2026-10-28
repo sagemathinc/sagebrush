@@ -3,7 +3,7 @@
 // Node and Deno too), linked boxes end nearer than others, and past its caps
 // it refuses. With bun:
 //   bun web/graph/test-spring.mjs
-import { springLayout, springSteps, gapViolations, springWork, WORK, MAX_NODES, MAX_EDGES, MAX_FRAMES, MIN_LENGTH, MAX_LENGTH } from "./spring.ts";
+import { springLayout, springSteps, gapViolations, springWork, WORK, MAX_NODES, MAX_EDGES, MAX_FRAMES, MIN_LENGTH, MAX_LENGTH, packRows, placeRows, TRANSITION_FRAMES } from "./spring.ts";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -159,6 +159,139 @@ check(springLayout([], [], { seed: 1 }).size === 0, "no nodes: an empty layout")
   check(Date.now() - t < 30000, `200 two-node parts: bounded (${Date.now() - t} ms)`);
 }
 check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }).size === 1, "a loop and an unknown end are ignored");
+
+// every frame of the animation places each node once, and the connected
+// parts side by side, never drawn over each other (William's X3: two parts
+// iterated in the same place looked like one graph drawn twice until the
+// last frame)
+{
+  const house = (o) => [[0, 1], [1, 2], [2, 0], [2, 3], [3, 4], [4, 0]].map(([a, b]) => ["v" + (a + o), "v" + (b + o)]);
+  const pinnedOne = pts(10).map((n, i) => (i === 0 ? { ...n, fixed: { x: 40, y: -30 } } : n));
+  const cases = {
+    "two houses": [pts(10), [...house(0), ...house(5)]],
+    parts: GRAPHS.parts,
+    "pairs and a triangle": [pts(9, 20, 20), [["v0", "v1"], ["v2", "v3"], ["v4", "v5"], ["v6", "v7"], ["v7", "v8"], ["v8", "v6"]]],
+    // (python's note: a part with a fixed node; the free parts go below it)
+    "two houses, one with a fixed node": [pinnedOne, [...house(0), ...house(5)]],
+    // (board's: two houses and a Petersen graph, 24 px boxes)
+    "two houses and a Petersen graph": [pts(20, 24, 24), [...house(0), ...house(5), ...GRAPHS.petersen[1].map(([a, b]) => ["v" + (10 + +a.slice(1)), "v" + (10 + +b.slice(1))])]],
+  };
+  for (const [name, [nodes, edges]] of Object.entries(cases)) {
+    // (the parts: union-find over the edges)
+    const up = new Map(nodes.map((n) => [n.id, n.id]));
+    const find = (x) => { while (up.get(x) !== x) x = up.get(x); return x; };
+    for (const [a, b] of edges) up.set(find(a), find(b));
+    const partOf = new Map(nodes.map((n) => [n.id, find(n.id)]));
+    const frames = [...springSteps(nodes, edges, { seed: 3 }, 1)];
+    let counted = true, apart = true, where = "", rowsKept = true, rowsWhere = "", glides = true, glideWhere = "";
+    let prev = null;
+    // (the animation's frames, then TRANSITION_FRAMES gliding to the layout, which is the last)
+    const animated = frames.length - TRANSITION_FRAMES - 1;
+    const pinnedParts = new Set(nodes.filter((n) => n.fixed).map((n) => partOf.get(n.id)));
+    let rows0 = null;
+    frames.forEach((f, k) => {
+      if (f.size !== nodes.length || nodes.some((n) => !f.has(n.id))) counted = false;
+      const bb = new Map();
+      for (const n of nodes) {
+        const p = f.get(n.id), r = partOf.get(n.id), b = bb.get(r) ?? [Infinity, Infinity, -Infinity, -Infinity];
+        bb.set(r, [Math.min(b[0], p.x), Math.min(b[1], p.y), Math.max(b[2], p.x + n.w), Math.max(b[3], p.y + n.h)]);
+      }
+      const boxes = [...bb.values()];
+      if (k < animated) for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+        const [a, b] = [boxes[i], boxes[j]];
+        if (a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3] && apart) { apart = false; where = `frame ${k} of ${frames.length}`; }
+      }
+      // (board's bound: from one frame to the next no part moves more than
+      // its own size, through the glide and onto the layout; from the second
+      // frame on: the first step leaves the random start, where every part
+      // expands at once)
+      if (prev && k >= 2) for (const [r, b] of bb) {
+        const a = prev.get(r), move = Math.hypot(b[0] - a[0], b[1] - a[1]), size = Math.max(b[2] - b[0], b[3] - b[1], 1);
+        if (move > size && glides) { glides = false; glideWhere = `frame ${k} of ${frames.length}: ${move.toFixed(1)} > ${size.toFixed(1)}`; }
+      }
+      prev = bb;
+      // (the free parts' rows: parts of a row share their box's top; the
+      // rows, and each row's order left to right, kept until the last frame)
+      if (k < animated) {
+        const free = [...bb.entries()].filter(([r]) => !pinnedParts.has(r)).sort((a, b) => a[1][1] - b[1][1] || a[1][0] - b[1][0]);
+        const rows = [];
+        for (const [r, b] of free) {
+          const last = rows.at(-1);
+          if (last && Math.abs(last.top - b[1]) < 1e-3) last.parts.push(r);
+          else rows.push({ top: b[1], parts: [r] });
+        }
+        const shape = JSON.stringify(rows.map((x) => x.parts));
+        if (rows0 === null) rows0 = shape;
+        else if (shape !== rows0 && rowsKept) { rowsKept = false; rowsWhere = `frame ${k}: ${shape} after ${rows0}`; }
+      }
+    });
+    check(counted, `${name}: every frame places each node exactly once`);
+    check(apart, `${name}: in every frame the parts' boxes are apart (${where})`);
+    check(rowsKept, `${name}: no part changes row, nor its place in it, while it settles (${rowsWhere})`);
+    check(glides, `${name}: from frame to frame no part moves more than its own size, to the last frame (${glideWhere})`);
+    check(animated > 0 && JSON.stringify([...frames.at(-1)]) === JSON.stringify([...springLayout(nodes, edges, { seed: 3 })]), `${name}: the animation, then ${TRANSITION_FRAMES} gliding frames, end on the layout`);
+  }
+}
+
+// the animation's packing slides, never jumps (astra2's review of #240):
+// two parts of 100 x h; between h = 148.22 and 148.23 the packing's own row
+// break moves the second part to the other row, but with the rows kept, as
+// the animation keeps them, its offset moves by about the 0.01 of growth, in
+// both directions
+{
+  const free = (h) => [0, 1].map(() => ({ boxes: 2, bb: { x0: 0, y0: 0, x1: 100, y1: h } }));
+  const bbs = (h) => free(h).map((f) => f.bb);
+  const [lo, hi] = [148.22, 148.23];
+  check(JSON.stringify(packRows(free(lo), 24)) !== JSON.stringify(packRows(free(hi), 24)), `the control crosses the packing's row break (${JSON.stringify(packRows(free(lo), 24))} vs ${JSON.stringify(packRows(free(hi), 24))})`);
+  for (const [from, to] of [[lo, hi], [hi, lo]]) {
+    const rows = packRows(free(from), 24);
+    const a = placeRows(bbs(from), rows, 24, null), b = placeRows(bbs(to), rows, 24, null);
+    const jump = Math.max(...a.flatMap((p, i) => [Math.abs(p[0] - b[i][0]), Math.abs(p[1] - b[i][1])]));
+    check(jump <= Math.abs(to - from) + 1e-9, `h ${from} -> ${to} with ${from}'s rows: each part moves by at most the growth (${jump.toFixed(4)})`);
+  }
+}
+
+// the packing is exactly the one finish() always did (astra2's review of
+// #240 r2): master's packing, verbatim below as the oracle, sorts the parts
+// before summing their area, and one ulp of that sum decides whether a part
+// fits its row.  Three parts on such a threshold (astra2's counterexample:
+// summed in input order, part 2 wraps), and seeded random ones
+{
+  const masterPacking = (parts, gap) => {
+    const free = parts.map((pt, i) => ({ pt, i, bb: pt.bb }));
+    free.sort((a, b) => b.pt.boxes - a.pt.boxes || a.i - b.i);
+    let total = 0;
+    for (const f of free) total += (f.bb.x1 - f.bb.x0 + gap) * (f.bb.y1 - f.bb.y0 + gap);
+    const width = Math.max(Math.sqrt(total) * 1.2, ...free.map((f) => f.bb.x1 - f.bb.x0), 0);
+    let x = 0, y = 0, rowH = 0;
+    const out = parts.map(() => null);
+    for (const f of free) {
+      const w = f.bb.x1 - f.bb.x0, h = f.bb.y1 - f.bb.y0;
+      if (x > 0 && x + w > width) { x = 0; y += rowH + gap * 2; rowH = 0; }
+      out[f.i] = [x - f.bb.x0, y - f.bb.y0];
+      x += w + gap * 2;
+      rowH = Math.max(rowH, h);
+    }
+    return out;
+  };
+  const ours = (parts, gap) => placeRows(parts.map((p) => p.bb), packRows(parts, gap), gap, null);
+  const ws = [76.89682551566193, 120.25662880371895, 168.30429545468735], hs = [54.827157211541056, 62.697630934738044, 278.65504534137085];
+  const edge = [1, 3, 2].map((boxes, i) => ({ boxes, bb: { x0: 0, y0: 0, x1: ws[i], y1: hs[i] } }));
+  const want = masterPacking(edge, 24);
+  check(JSON.stringify(want) === JSON.stringify([[0, 326.65504534137085], [0, 0], [168.25662880371897, 0]]), `the oracle is master's packing of the counterexample (${JSON.stringify(want)})`);
+  check(JSON.stringify(ours(edge, 24)) === JSON.stringify(want), `on a row threshold the packing is master's, exactly (${JSON.stringify(ours(edge, 24))})`);
+  let seed = 12345, same = 0, n = 0;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  for (let k = 0; k < 2000; k++) {
+    const parts = Array.from({ length: 2 + Math.floor(rand() * 6) }, () => {
+      const x0 = rand() * 50, y0 = rand() * 50;
+      return { boxes: 1 + Math.floor(rand() * 5), bb: { x0, y0, x1: x0 + 10 + rand() * 200, y1: y0 + 10 + rand() * 300 } };
+    });
+    n++;
+    if (JSON.stringify(ours(parts, 24)) === JSON.stringify(masterPacking(parts, 24))) same++;
+  }
+  check(same === n, `2000 random packings equal master's exactly (${same}/${n})`);
+}
 
 // the same on Node and Deno as here (Bun)
 {

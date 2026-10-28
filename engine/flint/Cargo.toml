@@ -7,3 +7,6 @@ description = "Minimal FLINT bindings for Sagebrush tests (factoring in Z[x]); F
 
 [dependencies]
 sagebrush-bigint = { path = "../bigint" }
+
+[lints]
+workspace = true
