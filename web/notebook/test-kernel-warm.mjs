@@ -110,6 +110,38 @@ answer(w, { id: comp.id, matches: ["graphs.PetersenGraph"], prefix: "graphs.", m
 check((await pc).matches.length === 1 && k.modeState.get("sage").state === "ready", "Tab's answer: ready");
 check(events.filter(([e]) => e === "execute").length === 3, "the journal saw only the three runs");
 
+// 6. a start that fails (onStart rejects, e.g. the package set): the queued
+// warm-up and run are stopped, their entries and claims gone, nothing asked
+// by itself; the next user warm-up, even in a storm, makes exactly one
+// request in the new interpreter, ready on its answer; the failed one's late
+// messages settle nothing (astra2's X1-CODE-START)
+{
+  let reject = null;
+  const starts = [];
+  const k2 = new WorkerKernel({ createWorker: make, onStart: () => new Promise((res, rej) => { starts.push(res); reject = rej; }) });
+  k2.start();
+  const w1 = workers.at(-1);
+  const pw = k2.warm("sage");
+  k2.execute("1", { mode: "sage" }, sink());
+  check(w1.sent.filter((m) => m.warm || m.code).length === 0 && k2.modeState.get("sage")?.state === "pending", "start held: the warm-up and run queued, pending");
+  reject(new Error("the package set could not be resolved"));
+  check((await pw)?.warmed === null, "the failed start answers the queued warm-up with its fallback");
+  check(k2.modeState.size === 0 && k2.modeClaims.size === 0, "its entries and claims are gone");
+  await new Promise((r) => setTimeout(r, 20));
+  check(workers.at(-1) === w1, "nothing restarts or asks by itself");
+  for (let i = 0; i < 50; i++) k2.warm("sage");
+  const w2 = workers.at(-1);
+  check(w2 !== w1, "the next user warm-up starts a new interpreter");
+  check(k2.modeState.get("sage")?.gen === k2.generation, "its entry is the new interpreter's");
+  starts.at(-1)();
+  await new Promise((r) => setTimeout(r, 0));
+  check(warms(w2).length === 1 && warms(w1).length === 0, `a storm of 50 after it: exactly one warm-up, in the new interpreter (${warms(w2).length})`);
+  answer(w1, { id: 1, warmed: "sage", mode: "sage", modeReady: true });
+  check(k2.modeState.get("sage").state === "pending", "the failed interpreter's late message settles nothing");
+  answer(w2, { id: warms(w2)[0].id, warmed: "sage", mode: "sage", modeReady: true });
+  check(k2.modeState.get("sage").state === "ready", "its answer: ready");
+}
+
 k.close?.();
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);
