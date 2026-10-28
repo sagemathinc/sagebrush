@@ -44,7 +44,7 @@ export async function latexBoot(ws: Workspace | null) {
     if (!isTex(e)) return;
     const b = el("button", "Open in LaTeX editor") as HTMLButtonElement;
     if (e.fid) b.onclick = () => g.__sbTex(e);
-    else box.append(el("div", (b.disabled = true, b.title = "This file can't open in the LaTeX editor yet: it hasn't been given a stable id.")));
+    else { b.disabled = true; box.append(el("div", "This file can't open in the LaTeX editor yet: it hasn't been given a stable id.")); }
     box.append(b);
   };
   if (tex === null || !ws) return false;

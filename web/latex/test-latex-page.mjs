@@ -1,12 +1,15 @@
 // The LaTeX editor's page end to end, in headless Chrome against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test
 // (the page also on loopback hosts), served by web/serve.py (cross-origin isolated, as the site):
 //   - the flag: off, no editor and no LaTeX file fetched; on, nothing fetched before a .tex is opened;
-//   - opening by fid, the banner, Save gated on edits, Ctrl/Cmd+S, "Saved" / "No changes to save";
+//   - a middle-click on a file row: a new tab of the editor only for a .tex it takes; otherwise nothing, as before;
+//   - opening by fid, the banner, Save gated on edits, Ctrl/Cmd+S, "Saved" / "No changes to save", cleared by an edit;
 //   - the byte rules: the fixtures saved and read back; mixed endings and NUL open without Save;
 //   - the save target: a rename followed; the file in Trash, refused; another tab's save overwritten (and kept as a
 //     version); beforeunload with unsaved edits;
-//   - images: one in the folder shown from a blob: URL; one outside refused with its reason;
-//   - a 1.5 MiB paragraph and list shown as pieces of at most 128 KiB, never two versions at once.
+//   - images: one in the folder shown from a blob: URL; one outside refused with its reason; a held read under a
+//     second render: each name read and kept once, within the count bound;
+//   - a 1.5 MiB paragraph and list shown as pieces of at most 128 KiB, never two versions at once;
+//   - non-ASCII HTML: no patch step over 512 KiB of UTF-8.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-page.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -68,6 +71,31 @@ try {
   check(await ev(`!document.querySelector(".tex-page") && document.body.innerText.includes("The LaTeX editor isn't enabled here.")`), "flag off: the note, no editor");
   check(latexFetches().length === 0, "flag off: no LaTeX file fetched", latexFetches());
   check(await ev(`[...document.querySelectorAll("button")].some((b) => b.textContent === "Preview it")`), "flag off: the note offers the file's preview");
+  // ---- a middle-click on a file row (board i1c01 U1): a new tab of the editor only for a .tex file it takes; any
+  // other file (or the flag off), nothing, as before the editor: no preview here, no tab
+  await mk("/mid.txt", enc("plain\n")); const midFid = await mk("/mid.tex", enc(DOC));
+  const middle = async (q) => {
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
+    await go(base + q); await until(`!!${W}`, 60000);
+    const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
+    const rows = await until(`!!document.querySelector(${sel("/mid.txt")}) && !!document.querySelector(${sel("/mid.tex")})`, 20000);
+    const out = { rows };
+    for (const p of ["/mid.txt", "/mid.tex"]) out[p] = rows && await ev(`(async () => {
+      window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; };
+      const before = location.href;
+      document.querySelector(${sel(p)}).dispatchEvent(new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
+      await new Promise((s) => setTimeout(s, 800));
+      return { opened: window.__opened, preview: !!document.querySelector(".sbfprev"), here: location.href === before };
+    })()`);
+    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+    return out;
+  };
+  const nothing = (r) => r && r.opened.length === 0 && !r.preview && r.here;
+  const mOff = await middle("");
+  check(mOff.rows && nothing(mOff["/mid.txt"]) && nothing(mOff["/mid.tex"]), "flag off: a middle-click on a file does nothing (no preview here, no tab)", mOff);
+  const mOn = await middle("?latex=1");
+  check(mOn.rows && nothing(mOn["/mid.txt"]), "flag on: a middle-click on a non-.tex file does nothing (no preview here, no tab)", mOn);
+  check(mOn.rows && mOn["/mid.tex"] && mOn["/mid.tex"].opened.length === 1 && mOn["/mid.tex"].opened[0].includes("?tex=" + midFid) && !mOn["/mid.tex"].preview && mOn["/mid.tex"].here, "flag on: a middle-click on a .tex file opens the editor in a new tab only", mOn);
   // on, by the URL: no LaTeX file fetched before a .tex is opened
   requests.length = 0;
   await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
@@ -93,6 +121,11 @@ try {
   check(await statusIs(/^Saved$/), "Ctrl+S: Saved");
   check(JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Edited text"))), "…the bytes written are the text");
   check(await page(`P.querySelector(".tex-dirty").hidden === true && P.querySelector(".tex-save").disabled === true`), "…and nothing unsaved after");
+  // the next keystroke after "Saved": the old message goes, beside "Unsaved changes" (board i1c01 U2)
+  await typeInto(DOC.replace("Some text", "Edited again"));
+  check(await page(`P.querySelector(".tex-status").textContent === "" && P.querySelector(".tex-dirty").hidden === false`), "an edit after Saved: the status cleared, Unsaved changes shown", await page(`P.querySelector(".tex-status").textContent`));
+  await typeInto(DOC.replace("Some text", "Edited text"));
+  check(await page(`P.querySelector(".tex-dirty").hidden === true`), "…typed back to the saved text: nothing unsaved");
 
   // ---- the byte rules, through the page: the fixtures saved after an edit and read back
   const BOM = [0xef, 0xbb, 0xbf];
@@ -149,6 +182,41 @@ try {
   await open(fi);
   check(await until(`[...document.querySelectorAll(".tex-preview img.graphic")].some((i) => i.src.startsWith("blob:"))`, 15000), "an image in the folder: shown from a blob: URL");
   check(await until(`document.querySelector(".tex-preview").textContent.includes("[image: ../other.png: outside this folder]")`, 15000), "an image outside the folder: refused, with its reason");
+
+  // ---- images under overlapping renders (astra3 i1c01 A3-1): the first image read held (the test build's hook),
+  // then an edit makes a second current render, which asks for the same names again; released, each name is read
+  // once and kept once, and the count bound (64) holds: 66 names, one of them twice, give 64 blobs and 2 refusals
+  const N = 66;
+  for (let i = 0; i < N; i++) await mk(`/many/f${i}.png`, png);
+  const manyDoc = "\\documentclass{article}\n\\begin{document}\n\\includegraphics{f0}\n" + Array.from({ length: N }, (_, i) => `\\includegraphics{f${i}}\n`).join("") + "\\end{document}\n";
+  const fm = await mk("/many/doc.tex", enc(manyDoc));
+  const hook = await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+    window.__reads = []; window.__holds = []; window.__released = false; window.__blobs = 0;
+    const make = URL.createObjectURL.bind(URL); URL.createObjectURL = (b) => { window.__blobs++; return make(b); };
+    window.__sbTexImageRead = (p) => { window.__reads.push(p); if (!window.__released) return new Promise((r) => window.__holds.push(r)); };
+  })()` });
+  await open(fm);
+  const held = await until(`window.__holds.length === 1`, 20000);
+  await typeInto(manyDoc.replace("\\end{document}", "% a second render\n\\end{document}"));
+  await sleep(2000);
+  const whileHeld = await ev(`({ reads: window.__reads.length, holds: window.__holds.length, blobs: window.__blobs })`);
+  check(held && whileHeld.reads === 1 && whileHeld.holds === 1 && whileHeld.blobs === 0, "a held image read and a second current render: no second resolution starts (one read, no blob)", whileHeld);
+  await ev(`(() => { window.__released = true; for (const r of window.__holds.splice(0)) r(); return true; })()`);
+  const settled = await until(`document.querySelectorAll(".tex-preview img.graphic").length >= 64 && (document.querySelector(".tex-preview").textContent.match(/: too many images\\]/g) || []).length >= 2`, 30000);
+  await sleep(1000);
+  const after = await ev(`({ reads: window.__reads.length, unique: new Set(window.__reads).size, blobs: window.__blobs, imgs: new Set([...document.querySelectorAll(".tex-preview img.graphic")].map((i) => i.src)).size, refused: (document.querySelector(".tex-preview").textContent.match(/: too many images\\]/g) || []).length })`);
+  check(settled && after.reads === 64 && after.unique === 64 && after.blobs === 64 && after.imgs === 64 && after.refused === 2, "released: each name read once, 64 blobs (the count bound), the 2 over it refused, no duplicate blob", after);
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: hook.identifier });
+
+  // ---- non-ASCII HTML (daybreak2 i1c01): the patch budget's 512 KiB is UTF-8 bytes, split.ts's measure: a 1.95 MB
+  // (UTF-8) paragraph of three-byte characters is patched with no step over 512 KiB, the byte stop seen ending steps
+  const cjk = "\\documentclass{article}\n\\begin{document}\n" + "中文字体 ".repeat(150000) + "\n\\end{document}\n";
+  const fc = await mk("/t/cjk.tex", enc(cjk));
+  await open(fc);
+  const cjkOk = await until(`document.querySelectorAll(".tex-preview .pc").length > 10 && !!document.querySelector(".tex-preview").dataset.stops`, 60000);
+  const cj = await ev(`(() => { const d = document.querySelector(".tex-preview").dataset; const pcs = [...document.querySelectorAll(".tex-preview .pc")]; const enc = new TextEncoder(); return { pcs: pcs.length, utf8: pcs.reduce((a, p) => a + enc.encode(p.innerHTML).length, 0), units: pcs.reduce((a, p) => a + p.innerHTML.length, 0), stepBytesMax: +d.stepBytesMax, stops: JSON.parse(d.stops) }; })()`);
+  console.log("non-ASCII patch (UTF-8 bytes, UTF-16 units, the most bytes in one step, the stops):", JSON.stringify(cj));
+  check(cjkOk && cj.utf8 > 3 * 512 * 1024 && cj.utf8 > 2 * cj.units && cj.stepBytesMax > 0 && cj.stepBytesMax <= 512 * 1024 && cj.stops.bytes > 0, "non-ASCII: no patch step over 512 KiB of UTF-8, the byte stop ending steps", cj);
 
   // ---- a large paragraph and list: pieces of at most 128 KiB, never two versions at once
   const para = "\\documentclass{article}\n\\begin{document}\n" + "word ".repeat(200000) + "\n\n\\begin{itemize}\n" + "\\item list item text\n".repeat(22000) + "\\end{itemize}\n\\end{document}\n";

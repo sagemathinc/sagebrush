@@ -9,16 +9,20 @@
 import type { Workspace, Entry } from "../workspace/api";
 import { nameOf, parentOf } from "../workspace/paths";
 import { openBytes, encodeText, EDIT_MAX } from "./save";
-import { imageCandidates, sniffImage, IMAGE_BOUNDS } from "./images";
+import { imageCandidates, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images";
 import { RenderGate, type Token } from "./gate";
 import { Highlighter } from "./highlight";
 import { PAGE_CSS } from "./style";
 
 export const PATCH_BUDGET = { items: 200, bytes: 512 * 1024, ms: 8 };
-const BANNER = "LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file. If the file changed elsewhere since you opened it (another tab, Python, a collaborator), those changes are lost. Nothing is saved automatically. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
+const BANNER = "LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file. If the file changed elsewhere since you opened it (another tab, Python, a collaborator), Save replaces those changes; the file's versions keep the bytes it replaced. Nothing is saved automatically. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 const BANNER_NO_SAVE = (why: string) => "LaTeX editor: an early prototype. This file can't be saved here: " + why + ". It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 
 type Host = { ws: Workspace; fid: string; back(): void };
+// (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
+declare const __SB_LATEX_TEST__: boolean | undefined;
+// (a reply's piece: its group, its HTML and, from the worker, its UTF-8 size)
+type Item = { g: number; h: string; b?: number };
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e;
 };
@@ -117,18 +121,21 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const ok = gate.accept(r);
     if (!ok.patch) return;
     if (!r.ok) { say("the preview failed: " + String(r.error).slice(0, 200)); return; }
-    schedulePatch(r.items as { g: number; h: string }[], r.groups as number);
+    schedulePatch(r.items as Item[], r.groups as number);
     preview.dataset.replyMs = String(Math.round(performance.now() - tReply));
     if (ok.current) resolveImages(r.imageRefs as string[], gate.token());
   };
 
   // patching: one wrapper per chunk (group); changed groups are built hidden across frames under the budget, then
   // swapped in one step (old removed, new shown): never two versions of a group at once
-  let patchSeq = 0, stepMax = 0, swapMs = 0;   // (the patch loop's own longest step and swap: preview.dataset)
-  const schedulePatch = (items: { g: number; h: string }[], ng: number) => {
+  // (the patch loop's own longest step and swap, and the most UTF-8 bytes parsed in one step: preview.dataset)
+  let patchSeq = 0, stepMax = 0, swapMs = 0, stepBytesMax = 0;
+  const stops = { items: 0, bytes: 0, ms: 0 };   // (which stop ended each step, all patches: preview.dataset.stops)
+  const schedulePatch = (items: Item[], ng: number) => {
     const seq = ++patchSeq;
-    const html: string[][] = Array.from({ length: ng }, () => []);
-    for (const it of items) html[it.g]?.push(it.h);
+    const html: string[][] = Array.from({ length: ng }, () => []), sizes: number[][] = Array.from({ length: ng }, () => []);
+    // (a piece's UTF-8 size from the worker; without one, 3 bytes per UTF-16 unit, UTF-8's most)
+    for (const it of items) { html[it.g]?.push(it.h); sizes[it.g]?.push(Number.isFinite(it.b) ? it.b! : 3 * it.h.length); }
     const next = html.map((a) => a.join("\u0000"));
     let p = 0; const n = Math.min(groupHtml.length, next.length);
     while (p < n && groupHtml[p] === next[p]) p++;
@@ -139,20 +146,22 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const step = () => {
       if (seq !== patchSeq) { for (const w of staged) w.remove(); return; }
       const t0 = performance.now(); let count = 0, bytesIn = 0;
-      const yieldNow = () => { stepMax = Math.max(stepMax, performance.now() - t0); requestAnimationFrame(step); };
+      const yieldNow = () => { stepMax = Math.max(stepMax, performance.now() - t0); stepBytesMax = Math.max(stepBytesMax, bytesIn); requestAnimationFrame(step); };
       while (g < next.length - s) {
         if (k === 0) { const w = el("div", "ch"); w.hidden = true; staged.push(w); preview.appendChild(w); }
         const pieces = html[g], w = staged[staged.length - 1];
         while (k < pieces.length) {
-          const h = pieces[k];
-          if (count >= PATCH_BUDGET.items || bytesIn + h.length > PATCH_BUDGET.bytes && count > 0 || performance.now() - t0 > PATCH_BUDGET.ms) return yieldNow();
+          const h = pieces[k], b = sizes[g][k];
+          const stop = count >= PATCH_BUDGET.items ? "items" : bytesIn + b > PATCH_BUDGET.bytes && count > 0 ? "bytes" : performance.now() - t0 > PATCH_BUDGET.ms ? "ms" : "";
+          if (stop) { stops[stop]++; return yieldNow(); }
           const piece = document.createElement("div"); piece.className = "pc"; piece.innerHTML = h; w.appendChild(piece);
-          count++; bytesIn += h.length; k++;
+          count++; bytesIn += b; k++;
         }
         k = 0; g++;
       }
       // all new groups ready: swap them in, in one step (old ones hidden, new ones moved and shown: no parsing);
       // the old ones are removed afterwards, one per frame, while hidden, so they are never shown with the new
+      stepBytesMax = Math.max(stepBytesMax, bytesIn);
       const tSwap = performance.now();
       const kids = groups;
       const before = kids[groupHtml.length - s] ?? null;
@@ -172,37 +181,53 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         requestAnimationFrame(drop);
       };
       requestAnimationFrame(drop);
-      preview.dataset.patchMaxMs = String(Math.round(stepMax)); preview.dataset.swapMaxMs = String(Math.round(swapMs));
+      preview.dataset.patchMaxMs = String(Math.round(stepMax)); preview.dataset.swapMaxMs = String(Math.round(swapMs)); preview.dataset.stepBytesMax = String(stepBytesMax); preview.dataset.stops = JSON.stringify(stops);
     };
     step();
   };
 
   // ---- images (r5 §3): resolved inside the file's folder, read by identity, checked, shown from blob: URLs
+  // One resolver at a time (i1c01 A3-1): a reply's names join the queue, and only the running loop reads, counts and
+  // keeps images, so no two resolutions are admitted against the same count or bytes, and a name is read once.
+  const wanted = new Set<string>();
+  let resolving = false;
   const resolveImages = async (refs: string[], tok: Token) => {
+    for (const name of refs) if (!Object.hasOwn(images, name)) wanted.add(name);
+    if (resolving) return;
+    resolving = true;
     let changed = false;
-    for (const name of refs) {
-      if (Object.hasOwn(images, name)) continue;
-      if (Object.keys(images).length >= IMAGE_BOUNDS.perDocument) { images[name] = { why: "too many images" }; changed = true; continue; }
-      const c = imageCandidates(name, where.path);
-      if (!c.ok) { images[name] = { why: c.why }; changed = true; continue; }
-      let found: Entry | undefined;
-      for (const p of c.paths) { const e = await host.ws.stat(p).catch(() => undefined); if (e && e.kind === "file" && !e.trashed) { found = e; break; } }
-      if (!gate.sameDoc(tok)) return;
-      if (!found) { images[name] = { why: "not found" }; changed = true; continue; }
-      if ((found.size ?? 0) > IMAGE_BOUNDS.perImage || imageBytes + (found.size ?? 0) > IMAGE_BOUNDS.total) { images[name] = { why: "too large" }; changed = true; continue; }
-      let r: { entry: Entry; content: Uint8Array };
-      try { r = await host.ws.readUpTo(found.path, IMAGE_BOUNDS.perImage); } catch { if (gate.sameDoc(tok)) { images[name] = { why: "not readable" }; changed = true; } continue; }
-      // (the same file, by identity, when the read completes; else dropped)
-      const now = await host.ws.stat(found.path).catch(() => undefined);
-      if (!gate.sameDoc(tok)) return;
-      if (!now || now.fid !== found.fid || r.entry.fid !== found.fid || now.updated !== found.updated) { images[name] = { why: "changed while it was read" }; changed = true; continue; }
-      const sn = sniffImage(r.content);
-      if (!sn.ok) { images[name] = { why: sn.why }; changed = true; continue; }
-      if (sn.pixels !== null && sn.pixels > IMAGE_BOUNDS.megapixels * 1e6) { images[name] = { why: "too large" }; changed = true; continue; }
-      imageBytes += r.content.length;
-      const url = URL.createObjectURL(new Blob([r.content as BlobPart], { type: sn.mime }));
-      blobs.add(url); images[name] = url; changed = true;
-    }
+    try {
+      // (a Set visits names added while it is iterated: those from replies that came during an await)
+      for (const name of wanted) {
+        wanted.delete(name);
+        if (Object.hasOwn(images, name)) continue;
+        if (Object.keys(images).length >= IMAGE_BOUNDS.perDocument) { images[name] = { why: "too many images" }; changed = true; continue; }
+        const c = imageCandidates(name, where.path);
+        if (!c.ok) { images[name] = { why: c.why }; changed = true; continue; }
+        let found: Entry | undefined;
+        for (const p of c.paths) { const e = await host.ws.stat(p).catch(() => undefined); if (e && e.kind === "file" && !e.trashed) { found = e; break; } }
+        if (!gate.sameDoc(tok)) { wanted.clear(); return; }
+        if (!found) { images[name] = { why: "not found" }; changed = true; continue; }
+        if ((found.size ?? 0) > IMAGE_BOUNDS.perImage || imageBytes + (found.size ?? 0) > IMAGE_BOUNDS.total) { images[name] = { why: "too large" }; changed = true; continue; }
+        let r: { entry: Entry; content: Uint8Array };
+        // (the test build only: the page test can hold an image read here; elsewhere this folds away)
+        if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexImageRead?.(found.path);
+        try { r = await host.ws.readUpTo(found.path, IMAGE_BOUNDS.perImage); } catch { if (gate.sameDoc(tok)) { images[name] = { why: "not readable" }; changed = true; } continue; }
+        // (the same file, by identity, when the read completes; else dropped)
+        const now = await host.ws.stat(found.path).catch(() => undefined);
+        if (!gate.sameDoc(tok)) { wanted.clear(); return; }
+        if (!now || now.fid !== found.fid || r.entry.fid !== found.fid || now.updated !== found.updated) { images[name] = { why: "changed while it was read" }; changed = true; continue; }
+        // (the bytes actually read, against the size admitted and what is kept, before any blob is made)
+        const why = admitImageBytes(r.content.length, found.size, imageBytes);
+        if (why) { images[name] = { why }; changed = true; continue; }
+        const sn = sniffImage(r.content);
+        if (!sn.ok) { images[name] = { why: sn.why }; changed = true; continue; }
+        if (sn.pixels !== null && sn.pixels > IMAGE_BOUNDS.megapixels * 1e6) { images[name] = { why: "too large" }; changed = true; continue; }
+        imageBytes += r.content.length;
+        const url = URL.createObjectURL(new Blob([r.content as BlobPart], { type: sn.mime }));
+        blobs.add(url); images[name] = url; changed = true;
+      }
+    } finally { resolving = false; }
     if (changed && gate.sameDoc(tok)) request();
   };
   const dropImages = () => { for (const u of blobs) URL.revokeObjectURL(u); blobs.clear(); };
@@ -213,6 +238,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const showDirty = () => { const d = isDirty(); dirty.hidden = !d; save.disabled = !d || !saveable || saving; };
   src.addEventListener("input", () => {
     gate.edit(); showDirty();
+    // (an edit makes the last message ("Saved", "No changes to save", …) stale; a save under way keeps its own)
+    if (!saving) say("");
     highlighter.update(src.value);
     clearTimeout(editTimer);
     request();
