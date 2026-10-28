@@ -1,69 +1,58 @@
-// The LaTeX editor's entry from the notebook page (index.html), built only when __SB_LATEX__ is true (plan sbspace
-// r5 §2; web/build.ts, SAGEBRUSH_LATEX_PREVIEW). It is on only on an allowed host (dev.sagebrush.space exactly; the
-// loopback hosts too in a "test" build), and then only with ?latex=1 or localStorage["sagebrush-latex-preview"] ===
-// "1". Nothing else (a document, its metadata, another URL parameter) can turn it on. On, it installs the two hooks
-// the file browser and the preview call (__sbLatexOpen, __sbLatexPreview) and, for /?tex=<fid>, mounts the page
-// (dist/sagebrush-latex.js, fetched only then). Off with ?tex=: a one-line note, never a blank page.
+// The LaTeX editor's entry from the notebook page (index.html), in a build with it only (__SB_LATEX__; web/build.ts,
+// SAGEBRUSH_LATEX_PREVIEW). Kept small: it is in the page's own script (plan sbspace r5 §5: the DEV bootstrap delta).
+// On only on an allowed host (dev.sagebrush.space exactly; the loopback hosts too in a "test" build), and then only
+// with ?latex=1 or localStorage["sagebrush-latex-preview"] === "1"; nothing else can turn it on. On, it installs the
+// hooks the file browser and the preview call (__sbLatexOpen, __sbLatexPreview) and, for /?tex=<fid>, fetches the page
+// (dist/sagebrush-latex.js) and mounts it. Off with ?tex=: a one-line note offering the file's preview.
 import type { Workspace, Entry } from "../workspace/api";
+import { openPreview } from "../workspace/preview";
 
 declare const __SB_LATEX_HOSTS__: string[];
-const HOSTS: readonly string[] = Object.freeze(typeof __SB_LATEX_HOSTS__ !== "undefined" ? __SB_LATEX_HOSTS__ : ["dev.sagebrush.space"]);
-const KEY = "sagebrush-latex-preview";
+const HOSTS: readonly string[] = typeof __SB_LATEX_HOSTS__ !== "undefined" ? __SB_LATEX_HOSTS__ : ["dev.sagebrush.space"];
 
 /** Whether the editor is on here: the host exactly, then the URL flag or the stored one. */
 export function latexOn(loc: { hostname: string; search: string }, read: () => string | null, hosts: readonly string[] = HOSTS): { on: boolean; byUrl: boolean } {
-  if (!hosts.includes(loc.hostname)) return { on: false, byUrl: false };
   const byUrl = new URLSearchParams(loc.search).get("latex") === "1";
   let stored = false;
-  try { stored = read() === "1"; } catch { /* no storage: off unless the URL says */ }
-  return { on: byUrl || stored, byUrl };
+  try { stored = read() === "1"; } catch { /* no storage */ }
+  return hosts.includes(loc.hostname) ? { on: byUrl || stored, byUrl } : { on: false, byUrl: false };
 }
 
-const isTex = (p: string) => /\.tex$/i.test(p);
-const note = (text: string) => {
-  const d = document.createElement("div");
-  d.setAttribute("role", "status");
-  d.style.cssText = "position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:20;background:#fff4d6;border:1px solid #e3c96b;padding:6px 12px;font:14px system-ui,sans-serif;border-radius:4px";
-  d.textContent = text;
-  document.body.appendChild(d);
-};
-
-/** Called once by the notebook page with its workspace; true if the LaTeX page took the page over. */
+/** Called once by the notebook page; true if the LaTeX page took the page over. */
 export async function latexBoot(ws: Workspace | null): Promise<boolean> {
-  const q = new URLSearchParams(location.search), tex = q.get("tex");
-  const st = latexOn(location, () => localStorage.getItem(KEY));
+  const tex = new URLSearchParams(location.search).get("tex");
+  const st = latexOn(location, () => localStorage.getItem("sagebrush-latex-preview"));
+  const g = globalThis as any, el = (t: string, s = "") => Object.assign(document.createElement(t), { textContent: s });
   if (!st.on) {
-    if (tex !== null) note("The LaTeX editor isn't enabled here.");
+    if (tex === null) return false;
+    // (r5 N2: the file's own preview, found by the same lookup; or why there is none)
+    const d = el("div", "The LaTeX editor isn't enabled here.");
+    d.className = "tex-note"; d.style.cssText = "position:fixed;top:8px;left:8px;z-index:20;background:#fff4d6;padding:6px";
+    document.body.append(d);
+    const at = ws && (await ws.pathOfFile(tex).catch(() => null));
+    if (!at || !at.ok) d.append(" This file isn't here any more.");
+    else { const b = el("button", "Preview it"); b.onclick = () => void openPreview(ws!, at.entry, { say: (t: string) => { d.textContent = t; }, fail: () => {} }); d.append(" ", b); }
     return false;
   }
-  const keep = st.byUrl ? "&latex=1" : "";
-  const g = globalThis as any;
-  // the file browser: a .tex row with a fid opens the editor (here, or in a tab); without one, its preview
-  g.__sbLatexOpen = (e: Entry, how: "here" | "tab"): boolean => {
-    if (!isTex(e.path) || !e.fid) return false;
-    const url = "/?tex=" + encodeURIComponent(e.fid) + keep;
-    if (how === "tab") window.open(url, "_blank", "noopener");
-    else location.assign(url);
+  const q = st.byUrl ? "&latex=1" : "";
+  // the file browser: a .tex row with a fid opens the editor; without one, its preview (which says why)
+  g.__sbLatexOpen = (e: Entry, how: string) => {
+    if (!/\.tex$/i.test(e.path) || !e.fid) return false;
+    const url = "/?tex=" + encodeURIComponent(e.fid) + q;
+    how === "tab" ? window.open(url, "_blank", "noopener") : location.assign(url);
     return true;
   };
-  // a .tex file's preview: the editor's button (disabled, saying why, for a file without a stable id)
-  g.__sbLatexPreview = (e: Entry, box: HTMLElement): void => {
-    if (!isTex(e.path)) return;
-    const b = document.createElement("button");
-    b.textContent = "Open in LaTeX editor";
+  // a .tex file's preview: the editor's button; disabled, saying why, for a file without a stable id
+  g.__sbLatexPreview = (e: Entry, box: HTMLElement) => {
+    if (!/\.tex$/i.test(e.path)) return;
+    const b = el("button", "Open in LaTeX editor") as HTMLButtonElement;
     if (e.fid) b.onclick = () => g.__sbLatexOpen(e, "here");
-    else {
-      b.disabled = true;
-      b.title = "This file can't open in the LaTeX editor yet: it hasn't been given a stable id.";
-      const p = document.createElement("div"); p.textContent = b.title; box.appendChild(p);
-    }
-    box.appendChild(b);
+    else { b.disabled = true; b.title = "This file can't open in the LaTeX editor yet: it hasn't been given a stable id."; box.append(el("div", b.title)); }
+    box.append(b);
   };
-  if (tex === null) return false;
-  if (!ws) { note("The LaTeX editor needs this browser's workspace, which isn't open."); return true; }
-  const root = document.createElement("div");
-  document.body.appendChild(root);
-  const m = await import(/* the page module, fetched only now */ new URL("sagebrush-latex.js", location.href).href);
-  await m.mount(root, { ws, fid: tex, back: () => location.assign("/" + (st.byUrl ? "?latex=1" : "")) });
+  if (tex === null || !ws) return false;
+  const root = el("div");
+  document.body.append(root);
+  await (await import(new URL("sagebrush-latex.js", location.href).href)).mount(root, { ws, fid: tex, back: () => location.assign("/" + q.replace("&", "?")) });
   return true;
 }
