@@ -22,7 +22,7 @@ function run(body: string): any {
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 const TAG = "sb-procs-" + "test-" + ${JSON.stringify(id)};
-import { killTree, procTable, sessionTree, survivors } from ${JSON.stringify(mod)};
+import { killTree, procStatus, procTable, selectTarget, sessionTree, survivors } from ${JSON.stringify(mod)};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ARM = mkdtempSync(tmpdir() + "/sb-procs-arm-");
 // the fake: a shell that ignores TERM, HUP and INT, and only then writes its pid to ARM/armed
@@ -122,4 +122,47 @@ test("the session tree comes from the table it is given: a pid missing from it i
     const known = new Map([[102, "7"]]);
     return { tree: sessionTree(100, known, t).sort((a, b) => a - b) };`);
   assert.deepEqual(r.tree, [100, 101]);
+});
+
+// The prompt host's target (selectTarget, #267 r3): `script` runs its command under `$SHELL -c`, so the launcher can
+// be below script's child; master's E2/prompt leak check, looking only at script's children, sampled script itself
+// (ci 40623842094 to 40657095581).  Fake tables, so the topology is exact: the unique nearest process named exactly
+// "node" below root by current parent links, with its start time; none, or a tie, is no target, with the tree.
+test("the prompt host's target: the unique nearest exact node below script, by current parent links only", () => {
+  const r = run(`
+    const row = (ppid, pgid, comm, start = "7") => ({ ppid, pgid, start, comm });
+    // script 100 -> bash 101 -> node 102 (start 9) -> node 103; a node in script's group that isn't below it (105,
+    // reparented to 1) and a node outside (200); a "nodejs" at depth 1 isn't exactly node
+    const deep = new Map([[100, row(1, 100, "script")], [101, row(100, 100, "bash")], [102, row(101, 100, "node", "9")], [103, row(102, 100, "node")], [105, row(1, 100, "node")], [200, row(1, 200, "node")], [106, row(100, 100, "nodejs")]]);
+    const none = new Map([[100, row(1, 100, "script")], [101, row(100, 100, "bash")], [105, row(1, 100, "node")]]);
+    const nearer = new Map([[100, row(1, 100, "script")], [101, row(100, 100, "bash")], [104, row(101, 100, "node")], [102, row(100, 100, "node")]]);
+    const tie = new Map([[100, row(1, 100, "script")], [101, row(100, 100, "bash")], [102, row(101, 100, "node")], [103, row(101, 100, "node")]]);
+    const alone = new Map([[100, row(1, 100, "node")]]);
+    return { deep: selectTarget(100, deep), none: selectTarget(100, none), nearer: selectTarget(100, nearer), tie: selectTarget(100, tie), alone: selectTarget(100, alone) };`);
+  assert.deepEqual(r.deep, { pid: 102, comm: "node", depth: 2, start: "9" }, "two levels down; not its own child node, a group member not below script, one outside, or a nodejs");
+  assert.equal(r.none.pid, null);
+  assert.match(r.none.why, /no node process below 100/);
+  assert.deepEqual(r.none.tree, [{ pid: 100, ppid: 1, comm: "script", depth: 0 }, { pid: 101, ppid: 100, comm: "bash", depth: 1 }], "the current tree only: the reparented group member is not in it");
+  assert.equal(r.nearer.pid, 102, "a unique nearer node wins over a deeper one");
+  assert.equal(r.nearer.depth, 1);
+  assert.equal(r.tie.pid, null, "two nodes at the nearest depth: no target, never an arbitrary pid");
+  assert.equal(r.tie.ambiguous, true);
+  assert.match(r.tie.why, /2 node processes at depth 2: 102, 103/);
+  assert.equal(r.alone.pid, null, "root is never its own target");
+});
+
+test("a target read with another start time than it was selected with is a sample error; no target is exiting", () => {
+  const r = run(`
+    const c = spawn("sleep", ["10"], { stdio: "ignore" });
+    try {
+      let st;
+      for (let k = 0; k < 100 && !(st = procTable().get(c.pid)?.start); k++) await sleep(20);
+      return { same: procStatus(c.pid, st), changed: procStatus(c.pid, String(Number(st) + 1)), none: procStatus(null) };
+    } finally {
+      c.kill("SIGKILL");
+    }`);
+  assert.equal(r.same.sample_error, undefined, JSON.stringify(r.same));
+  assert.ok(r.same.rss_kb > 0 && r.same.threads === 1, JSON.stringify(r.same));
+  assert.match(r.changed.sample_error, /start time changed/);
+  assert.deepEqual(r.none, { exiting: true, why: "no target process" });
 });
