@@ -56,9 +56,11 @@ has its control thread and pipe by design).  One JSON document out.
 
 import json
 import os
+import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -76,7 +78,7 @@ def proc(pid, key):
 
 s = S.Session()
 pid = s.proc.pid
-out = {}
+out = {"cwd": os.getcwd(), "executable": sys.executable}
 RC = 1 << 16  # (serve.rs's READ_CHUNK)
 s.run("1", mode="python")
 for _ in range(500):  # (the untimed warm-up batch)
@@ -161,10 +163,27 @@ GATED = ["noop", "noop_tput", "req_1mib", "req_32mib", "req_rc_m1", "req_rc", "r
 
 
 def sample(py):
-    r = subprocess.run([py, "-c", CHILD], capture_output=True, text=True, timeout=1800, cwd="/tmp")
-    if r.returncode != 0:
-        raise RuntimeError("%s: exit %d: %s" % (py, r.returncode, r.stderr[-800:]))
-    return json.loads(r.stdout.strip().splitlines()[-1])
+    # (each child runs in a fresh, empty directory, outside any checkout, so the installed wheel is what imports; no fixed
+    # path: Windows has no /tmp, run 40640158453.  The child reports its cwd, which must be that directory.)
+    with tempfile.TemporaryDirectory(prefix="ctrlc-perf-", ignore_cleanup_errors=True) as d:
+        r = subprocess.run([py, "-c", CHILD], capture_output=True, text=True, timeout=1800, cwd=d)
+        if r.returncode != 0:
+            raise RuntimeError("%s: exit %d: %s" % (py, r.returncode, r.stderr[-800:]))
+        v = json.loads(r.stdout.strip().splitlines()[-1])
+        cwd = v.pop("cwd")
+        if not (os.path.isdir(cwd) and os.path.samefile(cwd, d)):
+            raise RuntimeError("%s: the child ran in %r, not its fresh directory %r" % (py, cwd, d))
+        exe = v.pop("executable")
+        if not (exe and os.path.exists(exe) and os.path.samefile(exe, py)):
+            raise RuntimeError("%s: the child ran as %r, not that interpreter" % (py, exe))
+    return v
+
+
+def resolve(py):
+    found = shutil.which(py)
+    if found is None:
+        raise SystemExit("not an interpreter: %r" % py)
+    return os.path.abspath(found)
 
 
 def main():
@@ -176,6 +195,9 @@ def main():
     if args[:1] == ["--gate"]:
         gate, args = args[1].split(","), args[2:]
     py_a, py_b, out_path = args[:3]
+    # (resolved once, before any sample: each child runs in a fresh cwd, where a relative interpreter path such as the
+    # Windows job's venv-A/Scripts/python.exe would name nothing; the resolved paths are what the JSON records)
+    py_a, py_b = resolve(py_a), resolve(py_b)
     rounds = int(args[3]) if len(args) > 3 else 5
     raw = []
     for k in range(rounds):
