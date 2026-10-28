@@ -451,7 +451,7 @@ def test_gc_wall_time_smoke():
     clock's, above."""
     t1, t2, t3, (PER, BUDGET, ALIVE) = _gc_time_cases(False)
     bound = 4 * (BUDGET + PER + 0.03)
-    assert max(t1 + t2) <= bound, (max(t1), max(t2), bound)
+    assert max(t1 + t2 + t3) <= bound, (max(t1), max(t2), max(t3), bound)
     print("gc under real time (smoke): passes of at most %.3f s (4x bound %.3f; case 3 %.3f s), %d, %d and %d passes: ok"
           % (max(t1 + t2), bound, max(t3), len(t1), len(t2), len(t3)))
 
