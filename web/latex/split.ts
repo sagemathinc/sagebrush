@@ -89,12 +89,12 @@ export function splitChunk(h: string): string[] {
   }
   const first = o.open, later = contOpen(o.open, o.tag);
   // (byte counts kept as it goes: linear in the chunk)
-  const pieces: string[] = []; let cur: string[] = [], n = 0;
-  const flush = () => { if (cur.length) pieces.push((pieces.length ? later : first) + cur.join("") + o.close); cur = []; n = 0; };
+  const pieces: string[] = []; let cur: string[] = [], cn = 0;
+  const flush = () => { if (cur.length) pieces.push((pieces.length ? later : first) + cur.join("") + o.close); cur = []; cn = 0; };
   for (const s of parts) {
     const b = bytes(s);
-    if (cur.length && n + b + 256 > PIECE_MAX) flush();
-    cur.push(s); n += b;
+    if (cur.length && cn + b + 256 > PIECE_MAX) flush();
+    cur.push(s); cn += b;
   }
   flush();
   void para;

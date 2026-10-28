@@ -228,7 +228,7 @@ export async function openPreview(w: Workspace, e0: Entry, host: PreviewHost): P
   };
   actions.append(button("Download", download), h("span", { className: "sp" }));
   // (a .tex file: the LaTeX editor's button, in a build with it and when it is on; web/latex/boot.ts)
-  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__) (globalThis as any).__sbLatexPreview?.(e, actions);
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__) (globalThis as any).__sbTexP?.(e, actions);
   if (kind === "none") note("No preview for this kind of file: download it, or open it from code.");
   else if (kind === "image" && size > PREVIEW.imageBytes) note(`This picture is too large to preview here (${fmtSize(size)}): download it.`);
   else if (kind !== "image" && size > PREVIEW.readBytes) note(`This file is too large to preview here (${fmtSize(size)}): download it.`);
