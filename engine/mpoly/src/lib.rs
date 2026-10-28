@@ -551,6 +551,8 @@ impl W3 {
     /// row[ib[j]] += (or -=) c * y[j] for the magnitudes c = c1*2^32 + c0
     /// and y[j] = y1[j]*2^32 + y0[j].
     #[inline(always)]
+    // SAFETY: see the block below.
+    #[allow(unsafe_code)]
     fn addmul(row: &mut [W3], ib: &[u32], y0: &[u64], y1: &[u64], c0: u64, c1: u64, sub: bool) {
         for j in 0..ib.len() {
             // SAFETY: the indices are in the box, j < the common length
@@ -935,6 +937,8 @@ impl<'a, F: Fn(u64) -> u64 + Sync> DenseJob<'a, F> {
         out
     }
 
+    // SAFETY: see the block below.
+    #[allow(unsafe_code)]
     fn run_with<A: Accum>(&self, groups: &[(usize, usize, u64)]) -> Out {
         let mut out = Out::new(groups.iter().map(|g| g.1 - g.0).sum::<usize>() * 4);
         let mut acc = vec![A::default(); self.boxsize];

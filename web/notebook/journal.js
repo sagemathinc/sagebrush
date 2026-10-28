@@ -20,12 +20,20 @@
 //   An edit counts as saved only once both T1 and T2 have completed; the catch-up version is never a saved one.
 //
 // The journal's rows are sync's reserved rows (journal-rows.js; sync-rows.js, F1, F2), each charged (F8).  Recovery
-// writes no intent and no charged row, so it always progresses.  Not here: an entry for a save whose T1 can't be
-// written (2c-1d-iii).  Several tabs' outstanding saves are serialized by the replay, one legal order of their T2s.
+// writes no intent and no charged row, so it always progresses.  Several tabs' outstanding saves are serialized by the
+// replay, one legal order of their T2s.
+//
+// The mark (2c-1d-iii): every T2 writes `unjournaled` with the record, under its compare and swap: false (left out)
+// only when the history's head, read after the save's (or recovery's) version step, hashes to the value written,
+// which a version then holds; else true, or "too-large" for a value that can never be kept (TimeTravel's bound for one
+// version, or the pending budget).  A save whose T1 is refused for room (journal-rows.js roomRefused) is still
+// written by T2, its j kept, marked: saved in this browser, its versions coalesced into the latest, which recovery's
+// catch-up (ingestion) then makes a version of and unmarks.
 // It loads with the history (the sagebrush-history.js bundle, history.js), and is given the page's own stores
 // (journalClasses): one copy of stores.js, the page's, its gate and its queues, writes everything.
-import { bytesHash } from "./stores.js";
-import { t1Write, pruneIntents, dropRows, readJournal } from "./journal-rows.js";
+import { bytesHash, HISTORY_BACKLOG, ENTRY_OVERHEAD } from "./stores.js";
+import { t1Write, pruneIntents, dropRows, readJournal, roomRefused, intentCharge, JOURNAL_BUDGETS, syncedKey, acked, markSent, rotate } from "./journal-rows.js";
+import { makeClientId, decodePatchId } from "patchflow";
 export * from "./journal-rows.js";
 
 /** The part of a notebook document the history keeps (history.js toRecords: its kind and each cell's id, type,
@@ -48,7 +56,11 @@ export function journalClasses({ IdbStore, IdbPatchStore }) {
    * journal's hooks), and, while paused, a save's intent alone (F4). */
   function journalPatchStore(hdb, id) {
     // (nothing written but by the notebook's writer here: `writerOK`, set by its JournalStore)
-    const store = new IdbPatchStore(hdb, id, { journal: { t1: (st, row, intent) => (store.writerOK?.() === false ? Promise.resolve({ refused: NOT_WRITER }) : t1Write(st, id, { row, intent })), drop: (st) => dropRows(st, id) } });
+    // (`start`: a synced history's start, set by the store for its root's append (2c-2))
+    const store = new IdbPatchStore(hdb, id, { journal: { t1: (st, row, intent) => (store.writerOK?.() === false ? Promise.resolve({ refused: NOT_WRITER }) : t1Write(st, id, { row, intent, start: row && store.start?.time === row.time ? store.start : undefined })), drop: (st) => dropRows(st, id) } });
+    // (the notebook's journal identity, for good: `store.id` is its history's key, which a synced notebook's start
+    // changes to `<id>:s<n>`; every journal row is the notebook's (astra's CORR-2C2-1))
+    store.docId = id;
     // (F4: paused, a save's T1 is its intent alone; nothing to write for a version that isn't a save's)
     store.writePending = () => (store.intent ? writeIntent(store, store.intent) : Promise.resolve({ refused: "TimeTravel is paused for this notebook" }));
     return store;
@@ -60,12 +72,25 @@ export function journalClasses({ IdbStore, IdbPatchStore }) {
  * through its journalTx (the workspace's word and lock, the fence in the transaction). */
 export function writeIntent(store, intent) {
   if (store.writerOK?.() === false) return Promise.resolve({ refused: NOT_WRITER });
-  return store.queue(() => store.journalTx((st) => t1Write(st, store.id, { intent }))).catch((e) => ({ refused: e?.message ?? String(e) }));
+  return store.queue(() => store.journalTx((st) => t1Write(st, store.docId ?? store.id, { intent }))).catch((e) => ({ refused: e?.message ?? String(e) }));
 }
 /** The intents at or below j `upTo` pruned (after a record write holding it has committed), through journalTx. */
 export function prune(store, upTo) {
-  return store.queue(() => store.journalTx(async (st) => ({ j: upTo, pruned: await pruneIntents(st, store.id, upTo) }))).catch((e) => ({ refused: e?.message ?? String(e) }));
+  return store.queue(() => store.journalTx(async (st) => ({ j: upTo, pruned: await pruneIntents(st, store.docId ?? store.id, upTo) }))).catch((e) => ({ refused: e?.message ?? String(e) }));
 }
+
+/** Whether this page syncs notebooks' contents (DEV's docsync switch, set by the page once the journal is active): a
+ * writer's load then starts a notebook's synced history (2c-2). */
+export const DOC_SYNC = { on: false };
+// (a history's patches made by `client` from now on (a synced document's slot), each id after `last` (the slot's last
+// patch id, or null): ids keep rising across reloads and clock changes.  Here, not in patch-history.js, so the no-sync
+// board build doesn't grow (plan r4 F3))
+function useClient(history, client, last) {
+  history.clientId = client;
+  if (last) history.lastMs = Math.max(history.lastMs, decodePatchId(last).timeMs);
+  history.sessionOptions = function () { return { codec: this.codec, patchStore: this.guarded, clientId: client }; };
+}
+const NO_CLEAR_SYNCED = "TimeTravel's history can't be cleared while this notebook syncs (it will be, once conflicts are handled)";
 
 /** The one writer of a notebook on this device, for the milestone (William, Oct 27: "Yes, single writer per device for
  * the milestone"): the Web Lock a journal store holds while it may write the notebook.  Another tab's store waits for
@@ -92,6 +117,13 @@ export function switchJournal(prev, next) {
   return next?.journaled ? next : null;
 }
 const NOT_WRITER = "not saved: this notebook is open for editing in another tab of this browser";
+/** Said for a save whose T1 had no room, written all the same (2c-1d-iii §1): never a promise of each version. */
+export const SAVED_UNJOURNALED = "Saved in this browser. TimeTravel and sync can't keep versions right now (their storage is full): they'll keep the latest one when there's room.";
+/** Said for a save of a notebook too large ever to be kept as a version (2c-1d-iii §4). */
+export const SAVED_TOO_LARGE = "This notebook is too large to sync. It's saved in this browser.";
+/** A versioned value (the codec's text) that can never be kept: past TimeTravel's bound for one version (an append's
+ * JSON text alone, stores.js append), or an intent of it past the pending budget alone (2c-1d-iii §4). */
+export const neverFits = (text) => text.length > Math.floor((HISTORY_BACKLOG.bytes - ENTRY_OVERHEAD) / 2) || intentCharge(text) > JOURNAL_BUDGETS.pendingAll;
 
 /** Recovery's replay (design r4 §3.1), pure: from the record's revision `rev` (null: no record) and the intents above
  * its j in increasing j, the value chosen: the last one whose T2 would have won, in order, or null for the record's
@@ -119,7 +151,16 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     this.patches.mutateOK = () => this.writer && !this.released && this.ready;
     this.history = new mod.NotebookHistory(this.patches);
     this.recovered = null;
-    this.inflight = 0; this.released = false; this.opening = null;
+    this.inflight = 0; this.released = false; this.opening = null; this.idleWaiters = []; this.mutating = null;
+    // (a TimeTravel clear or a drop deletes the versions a mark's proof rests on (astra's CORR-229-1): it waits until no
+    // save is between its proof and its T2, marks the record first (durably, so a crash after it leaves the record
+    // marked), and saves asked for meanwhile wait for it; the next save, or recovery, unmarks it by the proof again)
+    for (const k of ["clear", "drop"]) {
+      const f = this.patches[k].bind(this.patches);
+      // (a started document's TimeTravel isn't cleared: its versions are what sync sends, and a clear's re-record would
+      // be a root the server can't take (astra's pin 1 on 2c-2); until 2c-4's clear)
+      this.patches[k] = (opts) => (k === "clear" && this.synced ? Promise.reject(new Error(NO_CLEAR_SYNCED)) : this.exclusive(() => f(opts)));
+    }
     // (the writer's lock: `writer` once held; `readOnly` why not (READ_ONLY's keys), while waiting for it)
     this.writer = false; this.readOnly = null; this.unlock = null; this.waiting = null; this.ontakeover = null;
     // (`ready`: a writer whose load (and recovery) has begun: only then does it write; `lockGen`: what a lock's grant
@@ -187,6 +228,58 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     this.writer = false; this.ready = false; this.takeoverDue = false;
     return Promise.resolve(this.lockDone).catch(() => {});
   }
+  // (2c-2: a started document's history is its synced history, under its own key, its patches from the slot's client)
+  async useSynced() {
+    const js = await readJournal(this.hdb, this.id);
+    if (!js.start) return;
+    const key = syncedKey(this.id, js.start.n);
+    if (this.patches.id !== key) { this.history.close(); this.patches.id = key; }
+    this.synced = js.start;
+    useClient(this.history, js.slot.client, js.slot.last);
+  }
+  // (the synced history started (William's D6(a)): a new key, the root the whole value `doc`, from a new client, all of
+  // it in the root's one T1 (journal-rows.js t1Write `start`); refused, the history as it was)
+  async startSynced(doc) {
+    if (this.synced) throw new Error("this notebook's synced history has already started");
+    const n = 1, key = syncedKey(this.id, n), client = makeClientId(), old = this.patches.id;
+    const was = { client: this.history.clientId, lastMs: this.history.lastMs };
+    this.history.close();
+    this.patches.id = key;
+    useClient(this.history, client, null);
+    await this.history.init();
+    const env = this.history.record(doc);
+    let r = { refused: "nothing to record" };
+    if (env && !env.pending) {
+      this.patches.start = { n, client, time: env.time };
+      try { r = await this.patches.appended(env.time); } finally { this.patches.start = undefined; }
+    }
+    if (r.j !== undefined) { this.synced = { n, from_j: r.j }; return true; }
+    this.history.close();
+    this.patches.id = old;
+    this.history.clientId = was.client; delete this.history.sessionOptions; this.history.lastMs = was.lastMs;
+    await this.history.init();
+    throw new Error(r.refused ?? "not kept");
+  }
+  /** A new client for this notebook's slot (2c-3, 2c-4: after a final refusal, an epoch move, `unknown_client`): the
+   * rotation's transaction, then the history's session made again with it, so every later patch is the new client's. */
+  async rotateClient() {
+    const r = await this.patches.queue(() => this.patches.journalTx(async (st) => ({ j: 0, slot: await rotate(st, this.id, makeClientId()) })));
+    if (!r?.slot) throw new Error(r?.refused ?? "not rotated");
+    useClient(this.history, r.slot.client, null);
+    await this.history.init();
+    return r.slot;
+  }
+  /** The server's acknowledgement of this notebook's client (gen, client) up to cseq `upTo` (2c-3): its l rows and debt
+   * released, in the history's queue; a history paused for want of room then resumes (astra's pin 3 on 2c-2). */
+  async ackedUpTo(which) {
+    const r = await this.patches.queue(() => this.patches.journalTx(async (st) => ({ j: 0, n: await acked(st, this.id, which) })));
+    if (r?.n && this.history.paused && this.writer && this.ready && !this.released) await this.history.init();
+    return r;
+  }
+  /** This notebook's client's l rows up to cseq `upTo`, marked sent with fence generation `fgen` (2c-3, before a send). */
+  markSentUpTo(which) {
+    return this.patches.queue(() => this.patches.journalTx(async (st) => ({ j: 0, n: await markSent(st, this.id, which) })));
+  }
   // (the history open; opened again when a save comes after it was let go)
   async open() {
     if (this.history.session) return;
@@ -205,10 +298,10 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
   // (T1, T2, prune) and its history's queue, each waited for until none is left (astra's CORR-215-5, CORR-215-6))
   async drain() {
     for (;;) {
-      const a = this.patches.appending, l = this.loading;
-      await Promise.allSettled([a, l]);
+      const a = this.patches.appending, l = this.loading, m = this.mutating;
+      await Promise.allSettled([a, l, m]);
       if (this.inflight) { await new Promise((r) => { this.whenIdle = r; }); continue; }
-      if (a === this.patches.appending && l === this.loading) break;
+      if (a === this.patches.appending && l === this.loading && m === this.mutating) break;
     }
     if (!this.released) return;
     this.history.close();
@@ -233,6 +326,26 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     this.history.refused(env.time);
     return again ? this.t1(doc, false) : r;
   }
+  // (`f`, a clear or a drop, alone: after the ones asked for before it, once no save is between its proof and its T2,
+  // the record marked first)
+  exclusive(f) {
+    const run = (this.mutating ?? Promise.resolve()).then(async () => {
+      while (this.inflight) await new Promise((r) => { this.idleWaiters.push(r); });
+      if (this.writer && this.ready && !this.released) await this.markRecord();
+      return f();
+    });
+    const tail = run.then(() => {}, () => {});
+    this.mutating = tail;
+    tail.then(() => { if (this.mutating === tail) this.mutating = null; });
+    return run;
+  }
+  // (the record marked, its value and revision as they are: no version need hold it until the proof says so again)
+  async markRecord() {
+    const rec = await super.loadRecord();
+    if (!rec || rec.unjournaled || typeof rec.hash !== "string") return;
+    const out = await super.save(rec, { journal: { keep: true, hash: rec.hash, unjournaled: true, markOnly: true } });
+    if (typeof out === "string") throw new Error(out);
+  }
   /** T1, then T2, then the intents it settles pruned. */
   async save(doc, opts = {}) {
     if (opts.journal) return super.save(doc, opts);
@@ -242,21 +355,41 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     if (!this.writer || !this.ready || this.released) return NOT_WRITER;
     return this.writeSave(doc, opts);
   }
+  // (the mark a T2 of `doc` (its hash `hash`) writes, the history's head read now, after its version step (§2))
+  async markOf(doc, hash) {
+    // (a version just refused is in the head until the session's rebuild without it is done: read after it)
+    while (this.history.rebuilding) await this.history.rebuilding.catch(() => {});
+    if ((await this.headHash()) === hash) return false;
+    return neverFits(this.textOf(doc)) ? "too-large" : true;
+  }
   // (a save's T1, T2 and prune, counted while they run: a release waits for them (drain))
   async writeSave(doc, opts = {}) {
+    // (not while a clear or a drop runs: its versions gone, this save's proof is read after it)
+    while (this.mutating) await this.mutating;
     this.inflight++;
     try {
-      const r = await this.t1(doc);
-      if (r.j === undefined) return `not saved: ${r.refused ?? "not kept"}`;
-      const out = await super.save(doc, { ...opts, journal: { j: r.j, hash: await docHash(doc) } });
-      if (out && typeof out === "object" && out.saved) await prune(this.patches, r.j);
+      const r = await this.t1(doc), hash = await docHash(doc);
+      if (r.j === undefined) {
+        if (!roomRefused(r)) return `not saved: ${r.refused ?? "not kept"}`;
+        // (no room for its T1: the record written all the same, its j kept, marked (§1); saved only if T2 commits)
+        const mark = neverFits(this.textOf(doc)) ? "too-large" : true;
+        const out = await super.save(doc, { ...opts, journal: { keep: true, hash, unjournaled: mark } });
+        return out && typeof out === "object" && out.saved ? { ...out, saved: mark === true ? SAVED_UNJOURNALED : SAVED_TOO_LARGE, unjournaled: mark } : out;
+      }
+      const mark = await this.markOf(doc, hash);
+      const out = await super.save(doc, { ...opts, journal: { j: r.j, hash, unjournaled: mark } });
+      if (out && typeof out === "object" && out.saved) {
+        await prune(this.patches, r.j);
+        if (mark === "too-large") return { ...out, saved: SAVED_TOO_LARGE, unjournaled: mark };
+      }
       return out;
     } finally {
-      if (!--this.inflight) { const r = this.whenIdle; this.whenIdle = null; r?.(); }
+      if (!--this.inflight) { for (const w of this.idleWaiters.splice(0)) w(); const r = this.whenIdle; this.whenIdle = null; r?.(); }
     }
   }
   async load() {
     this.released = false;
+    await this.useSynced();
     // (not the writer: shown as it is, read-only, with nothing written (no recovery: that is the writer's))
     if (!(await this.acquire())) {
       this.viewed = true;
@@ -275,12 +408,23 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     // CORR-215-5); the page then lets the lock go)
     this.recovering = true; this.ready = false;
     this.loading = (async () => {
-      if (this.viewed) { this.viewed = false; await this.history.init(); } else await this.open();
+      // (not while a clear or a drop runs (astra's CORR-229-2): recovery's T2 would unmark the record it marked before
+      // deleting; not ready now, so its turn refuses it if it hasn't deleted yet, and the mark stays until the proof
+      // below.  The load's own saves wait for nothing else: nothing can be running here when a store first loads)
+      while (this.mutating) await this.mutating;
+      // (the synced history's key and client read again now, under the writer's lock: a start or a rotation by the tab
+      // that held it before is adopted, never an earlier read's (astra's CORR-2C2-2)); the history made again from it
+      await this.useSynced();
+      this.viewed = false;
+      await this.history.init();
       for (let i = 0; ; i++) {
         const out = await this.recover(await super.loadRecord());
         if (out || i >= 4) { this.recovered = out ?? { row: "busy" }; break; }
       }
       if (this.recovered.row === "busy") throw new Error("the notebook kept changing while it was opened: reload this page");
+      // (2c-2: a notebook not yet synced starts its synced history now, from the value recovered; one that can't (no
+      // room, say) stays local this time, and tries again at its next load)
+      if (DOC_SYNC.on && !this.synced) await this.startSynced(this.recovered.doc).catch((e) => console.warn("sync: a notebook's synced history not started:", e));
       return this.recovered.doc;
     })();
     try {
@@ -320,25 +464,35 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     const base = rec ?? { ...(this.initial ?? { name: "Untitled", mode: "python", cells: [] }), id: this.id };
     const recText = this.textOf(base);
     const value = chosen ? chosen.value : recText, own = value === recText;
-    const doc = own ? (({ j: _j, hash: _h, rev: _r, ...d }) => d)(base) : this.withValue(base, this.history.codec.fromString(value));
-    const hash = await docHash(doc);
-    if (rec && own && rec.j === state.J && rec.hash === hash) {
+    const doc = own ? (({ j: _j, hash: _h, rev: _r, unjournaled: _u, ...d }) => d)(base) : this.withValue(base, this.history.codec.fromString(value));
+    const hash = await docHash(doc), big = neverFits(value);
+    // (consistent: its own value, j and hash right, and unmarked, or marked too large with nothing to try (§4))
+    const settled = (mark) => rec && own && rec.j === state.J && rec.hash === hash && (rec.unjournaled ?? false) === mark;
+    if (settled(false) || (big && settled("too-large"))) {
       if (state.intents.some((it) => it.j <= rec.j)) await prune(this.patches, rec.j);
       return { doc: rec, row: "consistent" };
     }
     // (TimeTravel's catch-up: the head made the chosen value by one version, with no intent, before T2; its committed
-    // j is the record's.  Refused, the record takes J, and TimeTravel's head waits for the next save)
+    // j is the record's.  Refused, the record takes J, and TimeTravel's head waits for the next save.  For a marked
+    // record it is the value's ingestion (§3); never tried for a value that can't be kept (§4))
     let j = state.J, catchUp = null;
-    if ((await this.headHash()) !== hash) {
+    if (!big && (await this.headHash()) !== hash) {
       const env = this.history.record(doc);
       const r = env && !env.pending ? await this.patches.appended(env.time) : { refused: "paused" };
       if (r.j !== undefined) { j = r.j; catchUp = r.j; } else if (env && !env.pending) this.history.refused(env.time);
     }
-    const out = await super.save({ ...doc, ...(rec ? { baseRev: rec.rev } : {}) }, { journal: { j, hash } });
+    // (the mark from the head read after the catch-up step (§2, §3); nothing to write if nothing differs (a marked
+    // record whose catch-up was refused again))
+    const mark = await this.markOf(doc, hash);
+    if (settled(mark) && j === state.J) {
+      if (state.intents.some((it) => it.j <= rec.j)) await prune(this.patches, rec.j);
+      return { doc: rec, row: "consistent" };
+    }
+    const out = await super.save({ ...doc, ...(rec ? { baseRev: rec.rev } : {}) }, { journal: { j, hash, unjournaled: mark } });
     if (typeof out === "string") throw new Error(out);
     if (out.conflict) return null;
     await prune(this.patches, j);
-    return { doc: { ...doc, rev: out.rev, j, hash }, row: own ? "stamped" : "rewritten", catchUp };
+    return { doc: { ...doc, rev: out.rev, j, hash, ...(mark ? { unjournaled: mark } : {}) }, row: own ? "stamped" : "rewritten", catchUp };
   }
   /** What the page asks of a store to know it is the journal's. */
   get journaled() { return true; }
