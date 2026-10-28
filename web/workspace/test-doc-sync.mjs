@@ -343,6 +343,41 @@ try {
   await sleep(700);
   const so9 = await A.call("fakeState");
   check(J(so9.sent) === J(["pull", "pull"]) && so9.held && so9.waiting.length === 0, "9: the rate hold's old timer doesn't lift the readonly hold after it: " + J({ sent: so9.sent, held: so9.held }));
+  // (r3, astra's r2 report on CORR-2C3-1: nothing an older connection's flight learns or fails at may act on the
+  // newer one.  (a) markSent's write held while the connection is replaced, then committed: no batch from the old flight)
+  const empty9 = { t: "batches", owner, doc: N9, epoch: 1, head: head9, items: [], more: false };
+  await A.call("fakeStart", ACCOUNT, N9);
+  await A.call("fakeGateTx");
+  await A.call("fakeConnect");
+  await A.call("fakeWait", "pull");
+  await A.call("fakeAnswer", "pull", empty9, 50);
+  const g9 = await A.call("fakeWaitGated");
+  await A.call("fakeConnect");
+  await A.call("fakeReleaseTx", false);
+  const sa9 = await A.call("fakeState");
+  check(g9 && J(sa9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "pull"]) && J(sa9.waiting) === J(["pull"]) && sa9.stopped === null, "9 (r3 a): a batch's write held while the connection is replaced: the old flight sends no batch after it; the new one pulls: " + J({ gated: g9, sent: sa9.sent, waiting: sa9.waiting, stopped: sa9.stopped }));
+  // ((b) an older connection's pull answered after the reconnect with what would stop the notebook: not stopped, and
+  // the new connection pulls)
+  for (const [what, frame] of [["a snapshot", { ...empty9, snapshot: { at_seq: 1 } }], ["another owner", { ...empty9, owner: "f".repeat(64) }]]) {
+    await A.call("fakeStart", ACCOUNT, N9);
+    await A.call("fakeConnect");
+    await A.call("fakeWait", "pull");
+    await A.call("fakeConnect");
+    await A.call("fakeAnswer", "pull", frame, 300);
+    const sb = await A.call("fakeState");
+    check(sb.stopped === null && J(sb.sent) === J(["pull", "pull"]) && J(sb.waiting) === J(["pull"]), `9 (r3 b): an older connection's pull answered with ${what} after a reconnect: no stop; the new connection pulls: ` + J({ sent: sb.sent, waiting: sb.waiting, stopped: sb.stopped }));
+  }
+  // ((b) an older connection's history write failing after the reconnect: no stop; the new connection pulls)
+  await A.call("fakeStart", ACCOUNT, N9);
+  await A.call("fakeGateTx");
+  await A.call("fakeConnect");
+  await A.call("fakeWait", "pull");
+  await A.call("fakeAnswer", "pull", empty9, 50);
+  const g9b = await A.call("fakeWaitGated");
+  await A.call("fakeConnect");
+  await A.call("fakeReleaseTx", true);
+  const sc9 = await A.call("fakeState");
+  check(g9b && sc9.stopped === null && J(sc9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "pull"]) && J(sc9.waiting) === J(["pull"]), "9 (r3 b): an older connection's history write failing after a reconnect: no stop; the new connection pulls: " + J({ sent: sc9.sent, waiting: sc9.waiting, stopped: sc9.stopped }));
   await A.call("connect", "A", ACCOUNT);
   await settle();
 

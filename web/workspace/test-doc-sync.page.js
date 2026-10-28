@@ -137,6 +137,28 @@ T.fakeDisconnect = async () => {
   await new Promise((r) => setTimeout(r, 150));
   return true;
 };
+/** The fake DocSync's next history transaction (markSent, recordClaim, applyPage...) held before it runs, until
+ * fakeReleaseTx: then run, or failed as a storage refusal would fail it (astra's r2 CORR-2C3-1 seam). */
+T.fakeGateTx = () => {
+  const ds = T.fake.ds, orig = ds.tx.bind(ds);
+  T.fake.gated = false;
+  T.fake.gate = new Promise((r) => { T.fake.release = r; });
+  ds.tx = async (...a) => {
+    if (T.fake.gate) {
+      const g = T.fake.gate;
+      T.fake.gate = null;
+      T.fake.gated = true;
+      if (await g) throw new Error("the history refused the write (the test's)");
+    }
+    return orig(...a);
+  };
+  return true;
+};
+T.fakeWaitGated = async (ms = 5000) => {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 10))) if (T.fake.gated) return true;
+  return false;
+};
+T.fakeReleaseTx = async (fail) => { T.fake.release(!!fail); await new Promise((r) => setTimeout(r, 300)); return true; };
 T.fakeState = () => ({ sent: T.fake.sent.slice(), waiting: T.fake.q.map((x) => x.msg.t), stopped: T.fake.ds.stopped.get(T.fake.only)?.code ?? null, held: !!T.fake.ds.held?.has?.(T.fake.only) });
 
 // ---- the notebook page itself (notebook.js createNotebook) on a notebook's store, as index.html attaches it
