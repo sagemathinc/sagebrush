@@ -27,6 +27,8 @@ import importlib.util as _util
 import os as _os
 import sys as _sys
 
+from . import _compat  # noqa: E402,F401  (first: Python 3.10/3.11 get what the Sage layer uses of 3.12's)
+
 __all__ = ["ap", "capabilities", "linalg", "mf", "modsym", "nf", "poly", "progress_snapshot", "set_limits", "stop_points"]
 
 
