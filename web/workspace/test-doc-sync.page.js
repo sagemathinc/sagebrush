@@ -118,6 +118,18 @@ T.fakeAnswer = async (t, frame, settle = 150) => {
   await new Promise((r) => setTimeout(r, settle));
   return true;
 };
+/** The waiting request of type `t` answered with `frame`, and the connection dropped in the same moment (before
+ * the flight goes on): what the flight asks next must wait for a new connection. */
+T.fakeAnswerDrop = async (t, frame) => {
+  const i = T.fake.q.findIndex((x) => x.msg.t === t);
+  if (i < 0) return false;
+  const [p] = T.fake.q.splice(i, 1);
+  p.answer({ ...frame, req: p.req });
+  for (const x of T.fake.q.splice(0)) x.answer({ t: "error", req: x.req, code: "busy", detail: { message: "the connection ended" } });
+  T.fake.ds.disconnected();
+  await new Promise((r) => setTimeout(r, 300));
+  return true;
+};
 /** The connection dropped as SyncClient drops it: its waiting requests answered `busy`, then DocSync told. */
 T.fakeDisconnect = async () => {
   for (const p of T.fake.q.splice(0)) p.answer({ t: "error", req: p.req, code: "busy", detail: { message: "the connection ended" } });
