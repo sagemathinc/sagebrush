@@ -525,69 +525,96 @@ try {
   check(br13b.codes === J([["a", "c3"], ["b", "d2"]]), "13: …then its own connection (the holder now) sends what was saved meanwhile: " + br13b.codes);
 
   progress("case 14");
-  // 14. (astra's DEVSW-1-R2, r5) The real owners: one device (D), two pages of one browser context, each with its own
-  // SyncOwner and SyncClient on the namespace's sender lock, against this reference server (device D's session, through
-  // the front).  The board page's owner already holds (sync turned on with the Sync panel's button, the journal active
-  // from an earlier load) and carries notebooks (followDocSync); the notebook page's owner waits while the switch turns
-  // on there (enableDocSync).  B (the minimal socket) gets the notebook and its edits, and B's edits reach the notebook
-  // page, all through the board's connection; then the board page closes (its owner suspended, as pagehide does) and the
-  // notebook page's owner takes the lock by itself: both directions again, nothing connected by hand
-  const { browserContextId: dctx } = await send("Target.createBrowserContext");
-  const D1 = await pageIn("D1", dctx), D2 = await pageIn("D2", dctx);
-  const ownerOf = (P) => P.ev("T.ownerState()");
-  const waitOwner = async (P, ok, ms = 20_000) => { let st; for (const end = Date.now() + ms; Date.now() < end; await sleep(100)) if (ok((st = await ownerOf(P)))) return st; return st; };
-  const N14 = "14141414-2222-4333-8444-555555555555";
-  check((await D1.call("ownerOpen", "D", true)) === true, "14: device D's journal active (an earlier load of the notebook page); the board page's owner started");
-  const on14 = await D1.call("turnOn");
-  check(on14.holder === true && on14.state === "synced", "14: sync turned on with the Sync panel's button: the board page's owner holds the sender lock and syncs: " + J(on14));
-  await D1.call("boardFollow");
-  const b14 = await waitOwner(D1, (st) => st.holder && st.state === "synced" && st.connected >= 1);
-  check(b14.holder && b14.connected >= 1, "14: the board page (followDocSync): its owner's client made again with a DocSync, connected, the holder still: " + J(b14));
-  check((await D2.call("ownerOpen", "D", false)) === true && (await D2.call("clientRunning", 15_000)) === true, "14: the notebook page's owner runs a client");
-  const w14 = await ownerOf(D2);
-  check(w14.holder === false && (await ownerOf(D1)).holder === true, "14: …that waits for the lock the board page holds: " + J(w14));
-  const en14 = await D2.call("nbEnable", N14, [["a", "d0"]]);
-  await sleep(1000);
-  const [d1a, d2a] = [await ownerOf(D1), await ownerOf(D2)];
-  check(en14.out === "on" && en14.on && en14.synced && en14.writer && d1a.holder && !d2a.holder && d2a.connected === 0, "14: the notebook page's switch on, its notebook the synced writer; the board still holds, the notebook page's owner still waits, its DocSync never connected: " + J({ en14, d1a, d2a }));
-  // (each wait bounded at 45 s, so a failing case prints its own checks well before the run's deadline; the product
-  // assertion is unchanged: B's pull is kicked too, but only a notebook the board's DocSync sent can arrive)
-  const settle14 = async () => { await Promise.all([D1.call("idle"), D2.call("idle"), B.call("idle")]); };
-  const until14 = async (f, ms = 45_000) => { let v; for (const end = Date.now() + ms; Date.now() < end; ) { await settle14(); if ((v = await f())) return v; } return v; };
-  // (#266 r5's case 14 failed here: the board's DocSync connected before this notebook's synced history started (in the
-  // switch's reopen, before any save was told), so nothing kicked it until an edit; r6: the notebook page's `on` makes
-  // the board's DocSync kick every notebook started.  Asserted before any edit and with no reconnect)
-  const got14 = await until14(async () => { await B.call("kick", N14, true); const j = await B.call("journal", N14); return j?.start ? j : null; });
-  check(!!got14?.start, "14: the notebook made in the notebook page reaches B before any edit and with no reconnect, sent on the board page's connection (the notebook page's owner waiting)");
-  const bo14 = await B.call("open", N14);
-  check(bo14.codes === J([["a", "d0"]]), "14: …B's record is it: " + J(bo14));
-  check((await D2.call("editOnly", N14, [["a", "d1"]])) === true, "14: the notebook page (its owner waiting) saves an edit");
-  const br14 = await until14(async () => { const r = await B.call("record", N14); return r?.codes === J([["a", "d1"]]) ? r : null; }) ?? (await B.call("record", N14));
-  check(br14?.codes === J([["a", "d1"]]) && (await ownerOf(D1)).holder && !(await ownerOf(D2)).holder, "14: …it reaches B through the board page's connection, the board still holding: " + br14?.codes);
-  await B.call("edit", N14, [["a", "d1"], ["b", "e1"]]);
-  const dr14 = await until14(async () => { const r = await D2.call("record", N14); return r?.codes === J([["a", "d1"], ["b", "e1"]]) ? r : null; }) ?? (await D2.call("record", N14));
-  check(dr14?.codes === J([["a", "d1"], ["b", "e1"]]) && dr14.mark === null, "14: B's edit arrives in the notebook page through the board page's connection: " + J(dr14));
-  // (another `on` (a notebook page reloaded): the holder kicks every started notebook again: nothing changes, nothing
-  // is stopped or sent twice over (a kick runs one flight per notebook, and an acked notebook has nothing unsent))
-  check((await D2.call("postOn")) === true, "14: a second notebook page's `on`");
-  await settle14();
-  await sleep(500);
-  await settle14();
-  const [rb14, rd14, st14] = [await B.call("record", N14), await D2.call("record", N14), await D1.call("stopped")];
-  check(rb14.codes === J([["a", "d1"], ["b", "e1"]]) && rd14.codes === rb14.codes && J(st14) === "{}", "14: …is safe: both records unchanged, nothing stopped on the board's DocSync: " + J({ B: rb14.codes, D2: rd14.codes, stopped: st14 }));
-  // (the board page closes: its owner suspended for good, its client and lock let go)
-  await D1.call("closeOwner");
-  const t14 = await waitOwner(D2, (st) => st.holder && st.state === "synced" && st.connected >= 1);
-  check(t14.holder && t14.connected >= 1 && t14.state === "synced", "14: the board page closed: the notebook page's owner takes the lock by itself, and its DocSync is connected: " + J(t14));
-  check((await D2.call("editOnly", N14, [["a", "d3"], ["b", "e1"]])) === true, "14: the notebook page saves an edit");
-  const br14b = await until14(async () => { const r = await B.call("record", N14); return r?.codes === J([["a", "d3"], ["b", "e1"]]) ? r : null; }) ?? (await B.call("record", N14));
-  check(br14b?.codes === J([["a", "d3"], ["b", "e1"]]), "14: …it reaches B on the notebook page's own connection: " + br14b?.codes);
-  await B.call("edit", N14, [["a", "d3"], ["b", "e4"]]);
-  const dr14b = await until14(async () => { const r = await D2.call("record", N14); return r?.codes === J([["a", "d3"], ["b", "e4"]]) ? r : null; }) ?? (await D2.call("record", N14));
-  check(dr14b?.codes === J([["a", "d3"], ["b", "e4"]]), "14: …and B's next edit arrives in it: " + dr14b?.codes);
-  const w14b = [...(await D1.call("warnings")), ...(await D2.call("warnings"))];
-  check(w14b.length === 0, "14: no warnings on either page: " + J(w14b).slice(0, 300));
+  // (the whole case within a budget that ends before the run's deadline: past it, or on a throw, this case records
+  // a failed check and the run goes on to print every verdict)
+  const budget14 = Math.min(240_000, (Number(process.env.DEADLINE_MS) || 480_000) - (Date.now() - t0) - 30_000);
+  const LATECASE = Symbol("late");
+  // (a failed check ends the case there (recorded first): the rest depends on it, and a mutant's run stays short)
+  const STOP14 = Symbol("stop");
+  const need14 = (ok, what) => { check(ok, what); if (!ok) throw STOP14; };
+  const case14 = async () => {
+    // 14. (astra's DEVSW-1-R2, r5) The real owners: one device (D), two pages of one browser context, each with its own
+    // SyncOwner and SyncClient on the namespace's sender lock, against this reference server (device D's session, through
+    // the front).  The board page's owner already holds (sync turned on with the Sync panel's button, the journal active
+    // from an earlier load) and carries notebooks (followDocSync); the notebook page's owner waits while the switch turns
+    // on there (enableDocSync).  B (the minimal socket) gets the notebook and its edits, and B's edits reach the notebook
+    // page, all through the board's connection; then the board page closes (its owner suspended, as pagehide does) and the
+    // notebook page's owner takes the lock by itself: both directions again, nothing connected by hand
+    const { browserContextId: dctx } = await send("Target.createBrowserContext");
+    const D1 = await pageIn("D1", dctx), D2 = await pageIn("D2", dctx);
+    // (every await of this case bounded (astra's DEVSW-R6-1): a hung page call ends as this case's failed check, its
+    // verdict printed, never as the run's deadline)
+    const LATE14 = Symbol("late");
+    const bound14 = (p, ms) => { p.catch(() => {}); return Promise.race([p, sleep(Math.max(1, ms)).then(() => LATE14)]); };
+    const read14 = async (p, what = "no answer in 10 s") => { const v = await bound14(p, 10_000).catch((e) => ({ error: String(e?.message ?? e).slice(0, 200) })); return v === LATE14 ? { codes: `(${what})` } : v; };
+    const ownerOf = async (P) => { const v = await bound14(P.ev("T.ownerState()"), 10_000); return v === LATE14 ? { late: true } : v; };
+    const waitOwner = async (P, ok, ms = 20_000) => { let st; for (const end = Date.now() + ms; Date.now() < end; await sleep(100)) if (ok((st = await ownerOf(P)))) return st; return st; };
+    const N14 = "14141414-2222-4333-8444-555555555555";
+    need14((await D1.call("ownerOpen", "D", true)) === true, "14: device D's journal active (an earlier load of the notebook page); the board page's owner started");
+    const on14 = await D1.call("turnOn");
+    need14(on14.holder === true && on14.state === "synced", "14: sync turned on with the Sync panel's button: the board page's owner holds the sender lock and syncs: " + J(on14));
+    await D1.call("boardFollow");
+    const b14 = await waitOwner(D1, (st) => st.holder && st.state === "synced" && st.connected >= 1);
+    need14(b14.holder && b14.connected >= 1, "14: the board page (followDocSync): its owner's client made again with a DocSync, connected, the holder still: " + J(b14));
+    need14((await D2.call("ownerOpen", "D", false)) === true && (await D2.call("clientRunning", 15_000)) === true, "14: the notebook page's owner runs a client");
+    const w14 = await ownerOf(D2);
+    need14(w14.holder === false && (await ownerOf(D1)).holder === true, "14: …that waits for the lock the board page holds: " + J(w14));
+    const en14 = await D2.call("nbEnable", N14, [["a", "d0"]]);
+    await sleep(1000);
+    const [d1a, d2a] = [await ownerOf(D1), await ownerOf(D2)];
+    need14(en14.out === "on" && en14.on && en14.synced && en14.writer && d1a.holder && !d2a.holder && d2a.connected === 0, "14: the notebook page's switch on, its notebook the synced writer; the board still holds, the notebook page's owner still waits, its DocSync never connected: " + J({ en14, d1a, d2a }));
+    // (each wait bounded at 45 s, so a failing case prints its own checks well before the run's deadline; the product
+    // assertion is unchanged: B's pull is kicked too, but only a notebook the board's DocSync sent can arrive)
+    const settle14 = async () => { await Promise.all([D1.call("idle"), D2.call("idle"), B.call("idle")]); };
+    const until14 = async (f, ms = 45_000) => {
+      for (const end = Date.now() + ms; Date.now() < end; ) {
+        // (one settle and one read, raced against what is left of the 45 s: a call that hangs ends the wait)
+        const v = await bound14((async () => { await settle14(); return f(); })(), end - Date.now()).catch(() => null);
+        if (v === LATE14) return null;
+        if (v) return v;
+      }
+      return null;
+    };
+    // (#266 r5's case 14 failed here: the board's DocSync connected before this notebook's synced history started (in the
+    // switch's reopen, before any save was told), so nothing kicked it until an edit; r6: the notebook page's `on` makes
+    // the board's DocSync kick every notebook started.  Asserted before any edit and with no reconnect)
+    const got14 = await until14(async () => { await B.call("kick", N14, true); const j = await B.call("journal", N14); return j?.start ? j : null; });
+    need14(!!got14?.start, "14: the notebook made in the notebook page reaches B before any edit and with no reconnect, sent on the board page's connection (the notebook page's owner waiting)");
+    const bo14 = await read14(B.call("open", N14));
+    need14(bo14.codes === J([["a", "d0"]]), "14: …B's record is it: " + J(bo14));
+    need14((await D2.call("editOnly", N14, [["a", "d1"]])) === true, "14: the notebook page (its owner waiting) saves an edit");
+    const br14 = await until14(async () => { const r = await B.call("record", N14); return r?.codes === J([["a", "d1"]]) ? r : null; }) ?? (await read14(B.call("record", N14)));
+    need14(br14?.codes === J([["a", "d1"]]) && (await ownerOf(D1)).holder && !(await ownerOf(D2)).holder, "14: …it reaches B through the board page's connection, the board still holding: " + br14?.codes);
+    await B.call("edit", N14, [["a", "d1"], ["b", "e1"]]);
+    const dr14 = await until14(async () => { const r = await D2.call("record", N14); return r?.codes === J([["a", "d1"], ["b", "e1"]]) ? r : null; }) ?? (await read14(D2.call("record", N14)));
+    need14(dr14?.codes === J([["a", "d1"], ["b", "e1"]]) && dr14.mark === null, "14: B's edit arrives in the notebook page through the board page's connection: " + J(dr14));
+    // (another `on` (a notebook page reloaded): the holder kicks every started notebook again: nothing changes, nothing
+    // is stopped or sent twice over (a kick runs one flight per notebook, and an acked notebook has nothing unsent))
+    need14((await D2.call("postOn")) === true, "14: a second notebook page's `on`");
+    await settle14();
+    await sleep(500);
+    await settle14();
+    const [rb14, rd14, st14] = [await read14(B.call("record", N14)), await read14(D2.call("record", N14)), await read14(D1.call("stopped"))];
+    need14(rb14.codes === J([["a", "d1"], ["b", "e1"]]) && rd14.codes === rb14.codes && J(st14) === "{}", "14: …is safe: both records unchanged, nothing stopped on the board's DocSync: " + J({ B: rb14.codes, D2: rd14.codes, stopped: st14 }));
+    // (the board page closes: its owner suspended for good, its client and lock let go)
+    await D1.call("closeOwner");
+    const t14 = await waitOwner(D2, (st) => st.holder && st.state === "synced" && st.connected >= 1);
+    need14(t14.holder && t14.connected >= 1 && t14.state === "synced", "14: the board page closed: the notebook page's owner takes the lock by itself, and its DocSync is connected: " + J(t14));
+    need14((await D2.call("editOnly", N14, [["a", "d3"], ["b", "e1"]])) === true, "14: the notebook page saves an edit");
+    const br14b = await until14(async () => { const r = await B.call("record", N14); return r?.codes === J([["a", "d3"], ["b", "e1"]]) ? r : null; }) ?? (await read14(B.call("record", N14)));
+    need14(br14b?.codes === J([["a", "d3"], ["b", "e1"]]), "14: …it reaches B on the notebook page's own connection: " + br14b?.codes);
+    await B.call("edit", N14, [["a", "d3"], ["b", "e4"]]);
+    const dr14b = await until14(async () => { const r = await D2.call("record", N14); return r?.codes === J([["a", "d3"], ["b", "e4"]]) ? r : null; }) ?? (await read14(D2.call("record", N14)));
+    need14(dr14b?.codes === J([["a", "d3"], ["b", "e4"]]), "14: …and B's next edit arrives in it: " + dr14b?.codes);
+    const w14b = [...(await D1.call("warnings")), ...(await D2.call("warnings"))];
+    need14(w14b.length === 0, "14: no warnings on either page: " + J(w14b).slice(0, 300));
 
+  };
+  const run14 = case14();
+  run14.catch(() => {});
+  const r14 = await Promise.race([run14.then(() => null, (e) => e ?? new Error("thrown")), sleep(Math.max(1, budget14)).then(() => LATECASE)]);
+  if (r14 === LATECASE) check(false, `14: the case didn't finish within its ${Math.round(budget14 / 1000)} s budget, at step: ${step}`);
+  else if (r14 && r14 !== STOP14) check(false, "14: the case stopped: " + String(r14?.message ?? r14).slice(0, 300));
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
