@@ -1295,6 +1295,38 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             }
             Ok(json!(sagebrush_classgroup::api::factor_integer(&n)?.iter().map(|(p, e)| json!([p.to_string(), e])).collect::<Vec<_>>()))
         }
+        // the cost model of factor_integer, from n's size alone (estimates
+        // plan r3 PR 2; nf/cost.rs): information only, it runs nothing
+        "factor_estimate" => {
+            use sagebrush_classgroup::nf::cost;
+            let e = cost::factor_estimate(u(v, "bits")?);
+            Ok(json!({
+                "bits": e.bits,
+                "total_known": e.total_known,
+                "notes": e.notes,
+                "stages": e.stages.iter().map(|s| json!({
+                    "name": s.name, "phase": s.phase, "limbs": s.limbs,
+                    // (exact decimal counts; null: beyond the model, "unknown")
+                    "units": s.units.map(|u| u.to_string()), "label": s.label.as_str(),
+                    "memory": s.memory.map(|m| m.to_string()), "memory_label": s.memory_label.as_str(),
+                    "condition": s.condition,
+                })).collect::<Vec<_>>(),
+                "levels": e.levels.iter().map(|l| json!({ "b1": l.b1, "b2": l.b2, "curves": l.curves, "fixed": l.fixed })).collect::<Vec<_>>(),
+                "ecm": e.ecm.iter().map(|t| json!({
+                    "digits": t.digits,
+                    "cumulative": t.cumulative,
+                    "milestones": t.milestone_units.iter().map(|(q, u)| json!([q, u.map(|u| u.to_string())])).collect::<Vec<_>>(),
+                    "end_chance": t.end_chance,
+                    "units_total": t.units_total.to_string(),
+                })).collect::<Vec<_>>(),
+                "rho_chances": e.rho_chances.iter().map(|(d, p)| json!([d, p])).collect::<Vec<_>>(),
+            }))
+        }
+        "cost_probe" => {
+            let kind = v.get("kind").and_then(Value::as_str).ok_or("cost_probe: kind")?;
+            let (units, bits) = sagebrush_classgroup::nf::cost::probe(kind, u(v, "limbs")?)?;
+            Ok(json!({ "units": units.to_string(), "bits": bits }))
+        }
         "is_prime" => Ok(json!(sagebrush_classgroup::api::is_prime(&big1(v.get("n"))?))),
         "nf_data" => {
             let d = sagebrush_classgroup::api::nf_data(&bigs(v.get("f"))?)?;
