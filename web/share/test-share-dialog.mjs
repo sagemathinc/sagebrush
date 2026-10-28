@@ -1100,6 +1100,17 @@ try {
     });
 
 
+    // (this device's records, through the page's own seams (#243's registry design r3 §8): read in a fresh
+    // transaction, key -> {attempt, at, tag}; written, replacing all, by a strict one; a fault set or cleared)
+    const ST = "window.sagebrush.shareTest";
+    const reg = async (P = { ev }) => JSON.parse(await P.ev(`(async () => JSON.stringify((await ${ST}.sent()) ?? null))()`));
+    const seed = (map, raw = "[]", P = { ev }) => P.ev(`(async () => { await ${ST}.seed(${map}, { raw: ${raw} }); return true; })()`);
+    const fault = (f, P = { ev }) => P.ev(`${ST}.fault = ${f ? JSON.stringify(f) : "null"}`);
+    // (the records' own operations, for the cases that order them: their tagged outcome, or "rejected: ...")
+    const op = (expr) => ev(`(async () => { const r = ${ST}.registry(); try { return await (${expr}); } catch (e) { return "rejected: " + (e?.message ?? e); } })()`);
+    const acct = () => ev(`${ST}.account()`);
+    const curId = () => ev("localStorage.getItem('sagebrush-current')");
+
     // D10 (daybreak3's r3 note 3): another account's record for this notebook is never used
     await block("D10", async () => {
       await fresh("D10");
@@ -1107,13 +1118,13 @@ try {
       await openDialog();
       await recordSent();
       const theirs = "9".repeat(32);
-      await ev(`(() => { const id = localStorage.getItem('sagebrush-current'); localStorage.setItem('sagebrush-share-sent', JSON.stringify({ ['someone-else|' + id]: { attempt: '${theirs}', at: Date.now() } })); })()`);
+      await seed(`{ ['someone-else|' + localStorage.getItem('sagebrush-current')]: { attempt: '${theirs}', at: Date.now() } }`);
       const l = await shareNow("D10");
       await restore();
       const sent = await ev("window.__attempts");
-      const left = await ev("JSON.stringify(window.sagebrush.shareTest.sent())");
+      const left = JSON.stringify(await reg());
       ok(/\/s\//.test(l) && sent.length === 1 && sent[0] !== theirs && (await mine()) === n + 1 && left.includes(theirs), `D10 another account's record for this notebook: not sent (sent ${sent.map((x) => x.slice(0, 6))}), left in place, one share`);
-      await ev("localStorage.removeItem('sagebrush-share-sent')");
+      await seed("{}");
       await closeDialog();
     });
     // D11 (daybreak3's r3 note 2): the registry stays bounded; records of browser notebooks no longer here go
@@ -1121,26 +1132,24 @@ try {
       await fresh("D11");
       await openDialog();
       // (120 records of browser notebooks that don't exist here, 30 of workspace files, the oldest first)
-      await ev(`(() => { const all = {}; for (let i = 0; i < 120; i++) all['acct|gone' + i] = { attempt: 'a'.repeat(32), at: i + 1 }; for (let i = 0; i < 30; i++) all['acct|file:/f' + i + '.ipynb'] = { attempt: 'b'.repeat(32), at: 1000 + i }; localStorage.setItem('sagebrush-share-sent', JSON.stringify(all)); })()`);
       // (and one of a browser notebook here that is durably shared: it never sends a first upload again)
       const sharedId = await ev(`(async () => { const db = await new Promise((ok, no) => { const r = indexedDB.open('sagebrush'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }); const all = await new Promise((ok, no) => { const q = db.transaction('notebooks').objectStore('notebooks').getAll(); q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); }); db.close(); return all.find((d) => d?.share_id && typeof d.id === 'string' && d.id !== localStorage.getItem('sagebrush-current'))?.id ?? null; })()`);
-      await ev(`(() => { const all = JSON.parse(localStorage.getItem('sagebrush-share-sent')); all['acct|' + ${JSON.stringify(sharedId)}] = { attempt: 'd'.repeat(32), at: 2000 }; localStorage.setItem('sagebrush-share-sent', JSON.stringify(all)); })()`);
+      await seed(`(() => { const all = {}; for (let i = 0; i < 120; i++) all['acct|gone' + i] = { attempt: 'a'.repeat(32), at: i + 1 }; for (let i = 0; i < 30; i++) all['acct|file:/f' + i + '.ipynb'] = { attempt: 'b'.repeat(32), at: 1000 + i }; all['acct|' + ${JSON.stringify(sharedId)}] = { attempt: 'd'.repeat(32), at: 2000 }; return all; })()`);
       const l1 = await shareNow("D11");
-      const after1 = await ev("Object.keys(window.sagebrush.shareTest.sent())");
+      const after1 = Object.keys((await reg()) ?? {});
       ok(!!sharedId && !after1.includes("acct|" + sharedId), `D11 a record of a browser notebook here that is durably shared (${sharedId}) is dropped as it never sends a first upload again`);
       ok(/\/s\//.test(l1) && after1.filter((k) => k.startsWith("acct|gone")).length === 0 && after1.filter((k) => k.startsWith("acct|file:")).length === 30, `D11 a record's write drops the records of browser notebooks no longer here (120 -> ${after1.filter((k) => k.startsWith("acct|gone")).length}) and keeps the workspace files' (${after1.filter((k) => k.startsWith("acct|file:")).length})`);
       await closeDialog();
-      await ev("localStorage.removeItem('sagebrush-share-sent')");
+      await seed("{}");
     });
     // R2 (daybreak3's CORR-UPLOAD-R4-2): 100 live records, none provably done (workspace files', which no prune
     // drops): a 101st first upload is refused before its request, and no record is evicted for it; at 100 with this
     // notebook's own record among them, its retry still goes and recovers its share
     await block("R2", async () => {
-      const reg = async () => JSON.parse((await ev("localStorage.getItem('sagebrush-share-sent')")) ?? "{}");
       await fresh("R2");
       const n = await mine();
       await openDialog();
-      await ev(`(() => { const all = {}; for (let i = 0; i < 100; i++) all['acct|file:/g' + i + '.ipynb'] = { attempt: 'c'.repeat(32), at: i + 1 }; localStorage.setItem('sagebrush-share-sent', JSON.stringify(all)); })()`);
+      await seed(`(() => { const all = {}; for (let i = 0; i < 100; i++) all['acct|file:/g' + i + '.ipynb'] = { attempt: 'c'.repeat(32), at: i + 1 }; return all; })()`);
       await recordSent();
       const l1 = await shareNow("R2");
       const sent1 = await ev("window.__attempts");
@@ -1148,7 +1157,7 @@ try {
       const k1 = Object.keys(await reg());
       ok(/failed/.test(l1) && /outcome it hasn't confirmed/.test(l1) && sent1.length === 0 && (await mine()) === n && k1.length === 100 && k1.includes("acct|file:/g0.ipynb"), `R2 100 live records: a 101st first upload is refused before its request (${sent1.length} sent), none evicted (${k1.length} kept, the oldest ${k1.includes("acct|file:/g0.ipynb") ? "there" : "GONE"}): ${l1}`);
       // (one slot freed: this notebook's upload is recorded, its answer lost; at 100 again, its retry goes)
-      await ev("(() => { const all = JSON.parse(localStorage.getItem('sagebrush-share-sent')); delete all['acct|file:/g0.ipynb']; localStorage.setItem('sagebrush-share-sent', JSON.stringify(all)); })()");
+      await seed(`(await (async () => { const all = await ${ST}.sent(); delete all['acct|file:/g0.ipynb']; return Object.fromEntries(Object.entries(all).map(([k, v]) => [k, { attempt: v.attempt, at: v.at }])); })())`);
       await intercept("lose");
       const l2 = await shareNow("R2");
       const made2 = await ev("window.__made");
@@ -1160,8 +1169,247 @@ try {
       await restore();
       const id3 = await snap("share_id");
       ok(/failed/.test(l2) && !!made2?.collection && k2.length === 100 && /\/s\//.test(l3) && sent3.length === 1 && id3 === made2.collection && (await mine()) === n + 1, `R2 ...at 100 with this notebook's own record among them (${k2.length}): its retry goes (${sent3.length} sent) and gets the share its lost answer made (${id3} vs ${made2?.collection}): ${l3}`);
-      await ev("localStorage.removeItem('sagebrush-share-sent')");
+      await seed("{}");
       await closeDialog();
+    });
+
+    // ---- the records in IndexedDB (#243's registry design r3 §8, CLEAR by astra3 and daybreak3)
+    // F1-F5b: each refused before the share request, the records exactly as seeded (nothing committed)
+    for (const [name, f, why] of [
+      ["F1", { open: true }, "the records' database can't be opened"],
+      ["F1b", { locks: true }, "no Web Locks"],
+      ["F2a", { plan: true }, "the change's plan throws, before any request"],
+      ["F2b", { afterWrite: true }, "an abort after the write request succeeded, before the commit"],
+      ["F2c", { requestFail: true }, "a request that fails after the write (an add of an existing key)"],
+      ["F3", { get: true }, "the records can't be read"],
+      ["F4", { quota: true }, "a quota-like abort after the write (simulated)"],
+      ["F5a", { txCreate: true }, "a strict transaction can't be made"],
+      ["F5b", { durability: true }, "the transaction doesn't report strict"],
+    ]) await block(name, async () => {
+      await fresh(name);
+      const n = await mine();
+      await openDialog();
+      await seed(`{ 'acct|file:/keep.ipynb': { attempt: 'cccccccccccccccccccccccccccccccc', at: 1 } }`);
+      const before = JSON.stringify(await reg());
+      await fault(f);
+      await recordSent();
+      const l = await shareNow(name);
+      const sent = await ev("window.__attempts");
+      await restore();
+      await fault(null);
+      const after = JSON.stringify(await reg());
+      ok(/failed/.test(l) && sent.length === 0 && (await mine()) === n && after === before, `${name} ${why}: refused before the request (${sent.length} sent), the records exactly as seeded (${after === before}): ${l}`);
+      await seed("{}");
+      await closeDialog();
+    });
+    // F5c: every change of the records is strict, each kind: put, drop and forget, with one entry each
+    await block("F5c", async () => {
+      await fresh("F5c");
+      await openDialog();
+      await seed("{}");
+      const a = await acct();
+      await ev(`${ST}.changeLog = []`);
+      const K = "file:/f5c.ipynb", x = "1".repeat(32);
+      const o1 = await op(`r.put(${JSON.stringify(a)}, '${K}', '${x}')`);
+      const o2 = await op(`r.drop(${JSON.stringify(a)}, '${K}', '${x}')`);
+      const o3 = await op(`r.put(${JSON.stringify(a)}, '${K}', '${x}')`);
+      const o4 = await op(`r.forget('${K}')`);
+      const log = await ev(`${ST}.changeLog.filter((e) => 'durability' in e)`);
+      await ev(`delete ${ST}.changeLog`);
+      const kinds = log.map((e) => e.kind).join(","), strict = log.every((e) => e.durability === "strict");
+      ok([o1, o2, o3, o4].join(",") === "recorded,dropped,recorded,forgotten" && kinds === "put,drop,put,forget" && strict, `F5c every change of the records is strict, one entry a change (${kinds}; strict: ${strict}; outcomes ${[o1, o2, o3, o4].join(",")})`);
+      // (and a whole upload's: its record and its settle)
+      await ev(`${ST}.changeLog = []`);
+      const l = await shareNow("F5c");
+      await until(`(async () => Object.keys((await ${ST}.sent()) ?? { x: 1 }).length === 0)()`, 15000).catch(() => {});
+      const log2 = await ev(`${ST}.changeLog.filter((e) => 'durability' in e)`);
+      await ev(`delete ${ST}.changeLog`);
+      ok(/\/s\//.test(l) && log2.map((e) => e.kind).join(",") === "put,drop" && log2.every((e) => e.durability === "strict"), `F5c ...an upload's record and settle: ${log2.map((e) => `${e.kind} ${e.durability}`).join(", ")}`);
+      await closeDialog();
+    });
+    // F6: a read-back that fails comes after the strict commit: nothing sent now, the receipt kept (never deleted
+    // to restore anything), and the retry sends that same attempt; the seam changes only what the read-back sees
+    for (const seen of ["reject", "missing", "mismatch"]) await block(`F6 ${seen}`, async () => {
+      await fresh(`F6 ${seen}`);
+      const n = await mine();
+      await openDialog();
+      await seed("{}");
+      const a = await acct(), id = await curId();
+      await fault({ readback: seen });
+      await recordSent();
+      const l1 = await shareNow(`F6 ${seen}`);
+      const sent1 = await ev("window.__attempts");
+      await restore();
+      await fault(null);
+      const att = await snap("share_attempt");
+      const kept = (await reg())?.[`${a}|${id}`];
+      ok(/failed/.test(l1) && sent1.length === 0 && (await mine()) === n && /^[0-9a-f]{32}$/.test(att ?? "") && kept?.attempt === att && kept?.tag === "attempt", `F6 ${seen}: a read-back failing after the commit: refused (${sent1.length} sent), the committed receipt kept with this attempt (${kept?.attempt?.slice(0, 6)} vs ${att?.slice(0, 6)}): ${l1}`);
+      await recordSent();
+      const l2 = await shareNow(`F6 ${seen}`);
+      const sent2 = await ev("window.__attempts");
+      await restore();
+      ok(/\/s\//.test(l2) && sent2.length === 1 && sent2[0] === att && (await mine()) === n + 1, `F6 ${seen} ...the retry sends that same attempt, once (${sent2.map((x) => x.slice(0, 6))}): ${l2}`);
+      await closeDialog();
+    });
+    // F6b (astra3's code r1 A3-1): the lock is held all through the read-back. The read-back is held pending; another
+    // holder's lock, asked for then, is queued and not granted; released, the read-back ends before that lock is had
+    // (astra3's code r2 A3-1, daybreak3's addendum: whatever fails in F6b or F6c, the cleanup opens the gate (which also
+    // expires by itself after 20 s, failing the read-back), drains the put and the other holder within bounds, clears
+    // the fault, and says whether the lock is let go; a failure is that case's, by name, and no later case waits)
+    const gateCleanup = async () => {
+      // (bounded: each step at most 5 s, a page that answers nothing included)
+      const step = (expr) => within(5000, ev(expr, 5000)).catch(() => null);
+      await step(`${ST}.fault = null; ${ST}.readbackGo?.()`);
+      await step("(async () => { const t = (p) => Promise.race([p, new Promise((go) => setTimeout(go, 4000))]); await t(window.__f6bP); await t(window.__f6bC); })()");
+      const held = await step("(async () => ((await navigator.locks.query()).held ?? []).some((l) => l.name === 'sagebrush-share-sent'))()");
+      // (and a later holder has it, within 5 s)
+      const later = await step("(async () => await Promise.race([navigator.locks.request('sagebrush-share-sent', async () => true), new Promise((go) => setTimeout(() => go(false), 4000))]))()");
+      await step(`delete ${ST}.changeLog; delete ${ST}.readbackGo; delete window.__f6bP; delete window.__f6bC; delete window.__f6b`);
+      await within(5000, seed("{}")).catch(() => {});
+      return { held, later };
+    };
+    const gateHeld = async (a) => {
+      await seed("{}");
+      await ev(`${ST}.changeLog = []`);
+      await fault({ readbackHold: true });
+      await ev(`(() => { window.__f6b = { got: false }; window.__f6bP = ${ST}.registry().put(${JSON.stringify(a)}, 'file:/f6b.ipynb', '${"2".repeat(32)}').catch(() => "rejected"); })()`);
+      await until(`typeof ${ST}.readbackGo === "function"`, 15000);
+    };
+    await block("F6b", async () => {
+      try {
+        await gateHeld(await acct());
+        await ev(`(() => { window.__f6bC = navigator.locks.request('sagebrush-share-sent', async () => { window.__f6b.got = true; ${ST}.changeLog.push({ kind: "other holder" }); }); })()`);
+        await sleep(500);
+        const gotWhileHeld = await ev("window.__f6b.got");
+        const queued = await ev("(async () => ((await navigator.locks.query()).pending ?? []).some((l) => l.name === 'sagebrush-share-sent'))()");
+        await ev(`${ST}.readbackGo()`);
+        const out = await ev("(async () => { const o = await window.__f6bP; await window.__f6bC; return o; })()", 15000);
+        const order = await ev(`${ST}.changeLog.map((e) => e.kind)`);
+        ok(!gotWhileHeld && queued && out === "recorded" && order.indexOf("readback") >= 0 && order.indexOf("readback") < order.indexOf("other holder"),
+          `F6b the lock is held all through the read-back: while it was held the other holder was queued (${queued}) and not granted (${!gotWhileHeld}); then ${order.join(" -> ")} (${out})`);
+      } finally {
+        const { held, later } = await gateCleanup();
+        ok(held === false && later === true, `F6b ...cleanup: the records' lock let go after the case (held: ${held}; a later holder had it: ${later})`);
+      }
+    });
+    // F6c (daybreak3's addendum): a failure forced while the read-back is held: the case says so by name, its cleanup
+    // lets the lock go, and a later holder has it
+    await block("F6c", async () => {
+      let forced = null;
+      try {
+        await gateHeld(await acct());
+        throw new Error("F6c: forced failure while the read-back is held");
+      } catch (e) {
+        forced = e.message;
+      } finally {
+        const { held, later } = await gateCleanup();
+        ok(/forced failure/.test(forced ?? "") && held === false && later === true, `F6c a failure forced while the read-back was held (${forced}): the cleanup let the lock go (held: ${held}), and a later holder had it (${later})`);
+      }
+    });
+    // F7 (astra3's code r1 A3-2, daybreak3's IDB-CODE-R1-1): a native abort of a read, after its request succeeded,
+    // settles that read; nothing waits on it, so the lock goes (a second holder then has it). get's: the upload
+    // refused, the records as seeded. The read-back's: refused, the committed receipt kept. Each of the prune's three
+    // reads (the notebooks' keys, the records, one notebook): unknown, so that row is kept, and the upload goes
+    for (const where of ["get", "readback", "prune-keys", "prune-rows", "prune-notebook"]) await block(`F7 ${where}`, async () => {
+      await fresh(`F7 ${where}`);
+      const n = await mine();
+      await openDialog();
+      const a = await acct(), id = await curId();
+      // (prune-keys and prune-rows: a row of a browser notebook not here, which a known read would prune;
+      // prune-notebook: a row of a notebook here that is durably shared, which a known read of it would prune)
+      const sharedHere = where === "prune-notebook" ? await ev(`(async () => { const db = await new Promise((ok, no) => { const r = indexedDB.open('sagebrush'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }); const all = await new Promise((ok, no) => { const q = db.transaction('notebooks').objectStore('notebooks').getAll(); q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); }); db.close(); return all.find((d) => d?.share_id && typeof d.id === 'string' && d.id !== localStorage.getItem('sagebrush-current'))?.id ?? null; })()`) : null;
+      const pruneRow = where === "prune-notebook" ? `acct|${sharedHere}` : "acct|ghost-f7";
+      await seed(where.startsWith("prune") ? `{ ${JSON.stringify(pruneRow)}: { attempt: 'cccccccccccccccccccccccccccccccc', at: 1 } }` : `{ 'acct|file:/keep.ipynb': { attempt: 'cccccccccccccccccccccccccccccccc', at: 1 } }`);
+      const before = JSON.stringify(await reg());
+      await fault({ readAbort: where });
+      await recordSent();
+      const l = await shareNow(`F7 ${where}`);
+      const sent = await ev("window.__attempts");
+      await restore();
+      await fault(null);
+      const after = await reg();
+      // (the lock was let go: a change after it ends)
+      const next = await op(`r.put(${JSON.stringify(a)}, 'file:/f7-next.ipynb', '${"6".repeat(32)}')`);
+      if (where === "get") ok(/failed/.test(l) && sent.length === 0 && (await mine()) === n && JSON.stringify(after) === before && next === "recorded", `F7 get: a native abort of the records' read: refused (${sent.length} sent), the records as seeded, the lock let go (${next}): ${l}`);
+      else if (where === "readback") {
+        const att = await snap("share_attempt");
+        ok(/failed/.test(l) && sent.length === 0 && (await mine()) === n && after?.[`${a}|${id}`]?.attempt === att && !!att && next === "recorded", `F7 readback: a native abort of the read-back: refused (${sent.length} sent), the committed receipt kept (${after?.[`${a}|${id}`]?.attempt?.slice(0, 6)}), the lock let go (${next}): ${l}`);
+      } else ok((where !== "prune-notebook" || !!sharedHere) && /\/s\//.test(l) && sent.length === 1 && (await mine()) === n + 1 && !!after?.[pruneRow] && next === "recorded", `F7 ${where}: a native abort of the prune's read: that row kept as unknown (${!!after?.[pruneRow]}), the upload sent (${sent.length}), the lock let go (${next}): ${l}`);
+      await seed("{}");
+      await closeDialog();
+    });
+    // M1: a malformed row is unknown, never absent: its notebook's upload is refused and the row stays; it counts
+    // towards the limit; it is never pruned
+    await block("M1", async () => {
+      await fresh("M1");
+      const n = await mine();
+      await openDialog();
+      const a = await acct(), id = await curId();
+      const bad = JSON.stringify({ key: `${a}|${id}`, account: a, notebook: id, attempt: "zz", at: 1 });
+      await seed("{}", `[${bad}]`);
+      await recordSent();
+      const l = await shareNow("M1");
+      const sent = await ev("window.__attempts");
+      await restore();
+      const row = (await reg())?.[`${a}|${id}`];
+      ok(/failed/.test(l) && sent.length === 0 && (await mine()) === n && row?.tag === "unreadable" && row?.attempt === "zz", `M1 a malformed row of this notebook: refused (${sent.length} sent), the row left as it was (${row?.tag}): ${l}`);
+      // (99 good rows and 1 malformed, of a browser notebook not here: nothing prunes it, so a new one is full)
+      await seed(`(() => { const all = {}; for (let i = 0; i < 99; i++) all['acct|file:/m' + i + '.ipynb'] = { attempt: 'cccccccccccccccccccccccccccccccc', at: i + 1 }; return all; })()`, `[{ key: 'acct|ghost-m1', account: 'acct', notebook: 'ghost-m1', attempt: 'bad', at: 1 }]`);
+      const o = await op(`r.put(${JSON.stringify(a)}, 'file:/m-new.ipynb', '${"3".repeat(32)}')`);
+      const rows = await reg();
+      ok(o === "full" && Object.keys(rows).length === 100 && rows["acct|ghost-m1"]?.tag === "unreadable", `M1 ...a malformed row counts towards the limit and is never pruned: ${o}, ${Object.keys(rows).length} rows, the malformed one ${rows["acct|ghost-m1"]?.tag ?? "GONE"}`);
+      await seed("{}");
+      await closeDialog();
+    });
+    // C1-C3: the records' changes ordered by the case (one page; R1 and R4 order them across tabs)
+    await block("C", async () => {
+      const a = JSON.stringify(await acct());
+      const A0 = "4".repeat(32), A1 = "5".repeat(32);
+      // C1: at 99, two new records at once from two pages of this browser: exactly one recorded, the other full
+      const P2 = await newPage();
+      await P2.send("Page.navigate", { url: dev.site + "/" });
+      await P2.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+      await seed(`(() => { const all = {}; for (let i = 0; i < 99; i++) all['acct|file:/c' + i + '.ipynb'] = { attempt: 'cccccccccccccccccccccccccccccccc', at: i + 1 }; return all; })()`);
+      const putIn = (P, nbk, att) => P.ev(`(async () => { try { return await ${ST}.registry().put(${a}, '${nbk}', '${att}'); } catch (e) { return "rejected"; } })()`);
+      const c1 = (await Promise.all([putIn({ ev }, "file:/c1a.ipynb", A0), putIn(P2, "file:/c1b.ipynb", A1)])).sort();
+      await raw("Target.closeTarget", { targetId: P2.targetId });
+      ok(c1.join(",") === "full,recorded" && Object.keys(await reg()).length === 100, `C1 at 99, two new records at once from two pages: ${c1.join(", ")}`);
+      // C1b: at 100, one of them a browser notebook no longer here: a new one prunes it and is recorded
+      await seed(`(() => { const all = {}; for (let i = 0; i < 99; i++) all['acct|file:/c' + i + '.ipynb'] = { attempt: 'cccccccccccccccccccccccccccccccc', at: i + 1 }; all['acct|ghost-c1b'] = { attempt: 'cccccccccccccccccccccccccccccccc', at: 0 }; return all; })()`);
+      const c1b = await op(`r.put(${a}, 'file:/c1b-new.ipynb', '${A0}')`);
+      const r1b = await reg();
+      ok(c1b === "recorded" && Object.keys(r1b).length === 100 && !r1b["acct|ghost-c1b"], `C1b at 100 with one prunable: the capacity is counted after pruning: ${c1b}, ${Object.keys(r1b).length} rows`);
+      // C2a: settle then put, the same key
+      const K = "file:/c2.ipynb", key = `${JSON.parse(a)}|${K}`;
+      await seed("{}");
+      const c2a = [await op(`r.put(${a}, '${K}', '${A0}')`), await op(`r.drop(${a}, '${K}', '${A0}')`), await op(`r.put(${a}, '${K}', '${A1}')`)];
+      ok(c2a.join(",") === "recorded,dropped,recorded" && (await reg())[key]?.attempt === A1, `C2a a settle, then a new attempt's record: ${c2a.join(", ")}`);
+      // C2b: an older settle after a newer record: A read a0; a0 retired by C's settle; a1 recorded; A's drop(a0) keeps a1
+      await seed("{}");
+      const c2b = [await op(`r.put(${a}, '${K}', '${A0}')`)];
+      const readA = await op(`r.get(${a}, '${K}')`);
+      c2b.push(await op(`r.drop(${a}, '${K}', '${A0}')`), await op(`r.put(${a}, '${K}', '${A1}')`), await op(`r.drop(${a}, '${K}', ${JSON.stringify(readA?.attempt ?? "?")})`));
+      ok(readA?.attempt === A0 && c2b.join(",") === "recorded,dropped,recorded,kept" && (await reg())[key]?.attempt === A1, `C2b an older settle (of ${readA?.attempt?.slice(0, 6)}) after a newer record: ${c2b.join(", ")}; the newer kept`);
+      // C2c: a new attempt while the first is live: other, nothing changed
+      await seed("{}");
+      const c2c = [await op(`r.put(${a}, '${K}', '${A0}')`), await op(`r.put(${a}, '${K}', '${A1}')`)];
+      ok(c2c.join(",") === "recorded,other" && (await reg())[key]?.attempt === A0, `C2c another attempt while one is live: ${c2c.join(", ")}`);
+      // C3a: a prune, then a record of the same key: the record stands
+      await seed(`{ ['acct|ghost-c3']: { attempt: '${A0}', at: 1 } }`);
+      const c3a = [await op(`r.put(${a}, 'file:/c3x.ipynb', '${A1}')`)];
+      const pruned = !(await reg())["acct|ghost-c3"];
+      c3a.push(await op(`r.put('acct', 'ghost-c3', '${A1}')`));
+      ok(pruned && c3a.join(",") === "recorded,recorded" && (await reg())["acct|ghost-c3"]?.attempt === A1, `C3a a prune (${pruned}), then a record of that key: ${c3a.join(", ")}; it stands`);
+      // C3b: a record of a notebook here, then another's prune: kept
+      const id = await curId();
+      await seed("{}");
+      const c3b = [await op(`r.put(${a}, ${JSON.stringify(id)}, '${A0}')`), await op(`r.put(${a}, 'file:/c3y.ipynb', '${A1}')`)];
+      ok(c3b.join(",") === "recorded,recorded" && (await reg())[`${JSON.parse(a)}|${id}`]?.attempt === A0, `C3b a record of a notebook here, then another's prune: ${c3b.join(", ")}; kept`);
+      // C3c: a refusal persists no prune
+      await seed(`{ ['acct|ghost-c3c']: { attempt: '${A0}', at: 1 }, [${a} + '|${K}']: { attempt: '${A0}', at: 2 } }`);
+      const c3c = await op(`r.put(${a}, '${K}', '${A1}')`);
+      ok(c3c === "other" && !!(await reg())["acct|ghost-c3c"], `C3c a refusal (${c3c}) persists no prune: the prunable row is still there`);
+      await seed("{}");
     });
     // D9 (astra3's r2 note 2): a store that can't be read stops the upload, at either re-read; it is never taken for no storage
     await block("D9a", async () => {
@@ -1419,9 +1667,8 @@ try {
       await uploadIn(q2, "L1a");
       await q2.until("!!window.__got && (!!document.querySelector('#shareresult a') || /failed/.test(document.querySelector('#shareresult').textContent))", 60000);
       const gotA = await q2.ev("window.__got");
-      // (this device's records, read from localStorage itself, in whatever form the page keeps them: so a page
-      // without the registry (r3's, one key per notebook) fails here on what it did, not on a missing helper)
-      const recA = await q2.ev("JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter((k) => k.startsWith('sagebrush-share-sent')).map((k) => [k, localStorage.getItem(k)])))");
+      // (this device's records, read in a fresh transaction)
+      const recA = await q2.ev("(async () => JSON.stringify((await window.sagebrush.shareTest.sent?.()) ?? null))()");
       const q3 = await reopen(q2);
       const storedA = await q3.ev("window.sagebrush.notebook.snapshot()");
       await recordSentIn(q3);
@@ -1467,7 +1714,7 @@ try {
         `L1b a 409 adoption whose save didn't land, another device's attempt stored meanwhile (${storedB.share_attempt?.slice(0, 6)}), a crash: the retry sent the recorded attempt again (${sentB.map((x) => x.slice(0, 6))} vs ${firstB?.sent?.slice(0, 6)}) and the notebook's share is the first one (${idB} vs ${firstB?.collection}); shares +${nB2 - nB}`);
 
       // (this device's records, raw)
-      const regIn = async (P) => JSON.stringify(JSON.parse((await P.ev("localStorage.getItem('sagebrush-share-sent')")) ?? "{}"));
+      const regIn = (P) => P.ev("(async () => JSON.stringify((await window.sagebrush.shareTest.sent()) ?? {}))()");
       chainAt("R3 starts");
       // R3 (daybreak3's CORR-UPLOAD-R4-3): a 200 whose share_id save the notebook's store refuses; the record's
       // settling held at its save, while the page switches notebooks and is held between them (no store
@@ -1556,7 +1803,7 @@ try {
       await A.ev("window.__pass = true");
       await uploadIn(A, "R1a");
       await A.until("!!document.querySelector('#shareresult a') || /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
-      await A.until(`!(localStorage.getItem('sagebrush-share-sent') ?? '').includes(${JSON.stringify(la?.sent ?? "?")})`, 15000).catch(() => {});
+      await A.until(`(async () => !JSON.stringify((await window.sagebrush.shareTest.sent()) ?? {}).includes(${JSON.stringify(la?.sent ?? "?")}))()`, 15000).catch(() => {});
       const afterA = await regIn(A);
       ok(bWaited && bWhileHeld === 0 && !!la?.sent && !!lb?.sent && la.sent !== lb.sent && both.includes(la.sent) && both.includes(lb.sent),
         `R1 two tabs, two notebooks, recorded at once: B reached its record while A was held, waiting for the lock (${bWaited}), and sent nothing then (${bWhileHeld}); both sent, both answers lost: both records kept (A ${both.includes(la?.sent ?? "?")}, B ${both.includes(lb?.sent ?? "?")})`);

@@ -419,6 +419,9 @@ export const openBoardHistoryDb = ({ onVersionChange } = {}) => open("sagebrush-
 // journal keeps only the hashes of the files a session read; replay and the
 // portable bundle find the bytes here.
 export const openBlobDb = ({ onVersionChange } = {}) => open("sagebrush-blobs", { blobs: null }, onVersionChange);
+// "sagebrush-share-sent": "records", this browser's records of first uploads whose share request it sent, by
+// account|notebook (web/index.html, shareSent): its own database, so that no other one needs a version change.
+export const openShareSentDb = ({ onVersionChange } = {}) => open("sagebrush-share-sent", { records: { keyPath: "key" } }, onVersionChange);
 
 /** The SHA-256 of bytes, in hex (a 53-bit hash, "c53:...", where there is no crypto.subtle: not a secure context). */
 export async function bytesHash(data) {
