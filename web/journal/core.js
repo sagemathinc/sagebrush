@@ -6,8 +6,8 @@
 //
 // A kind's part of the journal (2c-3's per-kind hook), given by its store: { kind, versionedOf, apply(lastSynced,
 // shown, remote, wins), conflictCopy }.  `versionedOf(doc)`: what its history keeps of a document (what the record's
-// hash is of); `apply`: the three-way merge of this device's value (`shown`) and the server's (`remote`) from the value
-// both last had (`lastSynced`), resolving {value, clashes}, a clash keeping the side `wins` names ("shown" or "remote")
+// hash is of); `apply`: the three-way merge, of documents, of this device's value (`shown`) and the server's (`remote`)
+// from the value both last had (`lastSynced`, or null: none), resolving {value, clashes}, a clash keeping the side `wins` names ("shown" or "remote")
 // whole; `conflictCopy`: 2c-4's, null until then.  Notebooks' is web/notebook/journal.js notebookKind.
 import { HISTORY_BACKLOG, ENTRY_OVERHEAD } from "../notebook/stores.js";
 import { t1Write, pruneIntents, intentCharge, JOURNAL_BUDGETS } from "./rows.js";
