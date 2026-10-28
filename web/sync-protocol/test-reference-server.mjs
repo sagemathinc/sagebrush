@@ -497,7 +497,11 @@ const C1 = "clientA1", C2 = "clientB1";
 {
   const AV = JSON.parse(readFileSync(new URL("./doc-vectors.json", import.meta.url), "utf8")).answers;
   const by = (f, w) => AV.find((x) => x.for === f && x.when.startsWith(w)).shape;
-  const s9 = await socket(server, A, "devA0099"), D9 = "0123456789ad", C9 = "clientS9";
+  // (an account of its own: earlier sections end A's session)
+  const A9 = await signedIn(server, "acct-answers");
+  const en9 = await (await A9.call("POST", "/api/sync/v1/enable")).json();
+  check(en9.state === "active", "answers: an account of their own, sync on: " + J(en9));
+  const s9 = await socket(server, A9, "devA0099"), D9 = "0123456789ad", C9 = "clientS9";
   const claim = await s9.ask({ t: "doc_claim", epoch: 1, doc: D9, client: C9 });
   check(claim.t === "ack", "answers: the claim: " + J(claim));
   const one = batch(D9, 1, { [C9]: 0 }, [{ cseq: 1, id: pid(1, C9) }], { kind: "notebook" });
