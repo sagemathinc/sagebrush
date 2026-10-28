@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReferenceServer, SESSION_COOKIE } from "../sync-protocol/reference-server.ts";
+import { accountHash } from "../sync-protocol/protocol.ts";
 import { devtoolsPort } from "../test-port.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -28,6 +29,7 @@ writeFileSync(join(src, "entry.js"), [
   `export * as H from ${J(join(here, "../notebook/history.js"))};`,
   `export * as DS from ${J(join(here, "doc-sync.ts"))};`,
   `export * as P from ${J(join(here, "../sync-protocol/protocol.ts"))};`,
+  `export * as NB from ${J(join(here, "../notebook/notebook.js"))};`,
 ].join("\n"));
 const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
 rmSync(src, { recursive: true, force: true });
@@ -95,7 +97,7 @@ const deadline = setTimeout(() => {
   try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   try { rmSync(profile, { recursive: true, force: true }); rmSync(site, { recursive: true, force: true }); } catch {}
   process.exit(2);
-}, Number(process.env.DEADLINE_MS) || 240_000);
+}, Number(process.env.DEADLINE_MS) || 480_000);
 try {
   if (!port) port = await devtoolsPort(profile);
   let version;
@@ -253,6 +255,144 @@ try {
   const bo8 = await B.call("open", N1);
   const after8 = await B.call("record", N1);
   check(before8.codes === J([["a", "Y7r"], ["b", "B3"]]) && bo8.row === "merged" && after8.codes === J([["a", "Y8"], ["b", "B3"]]), "8: a page stored with B's notebook closed (no T2): B's next load merges it, never reverting it: " + J({ before: before8.codes, row: bo8.row, after: after8.codes }));
+
+  const owner = await accountHash(ACCOUNT);
+
+  progress("case 9");
+  // 9. CORR-2C3-1 (astra): a flight sends nothing after a pull that waits or stops, nor on a connection that's gone.  A
+  // notebook claimed and sent, then edited offline (one row unsent); a DocSync of its own over a deferred link answers
+  // its pull, and nothing may follow it: no claim, no batch, the row kept, the notebook held or stopped as the answer says
+  const N9 = "99999999-1111-4222-8333-444444444444";
+  await A.call("open", N9, [["a", "n9"]]);
+  await A.call("kick", N9);
+  await settle();
+  const aj9 = await A.call("journal", N9);
+  check(aj9.slot?.claimed?.client === aj9.slot?.client && aj9.lrows === 0, "9: N9 claimed and sent: " + J({ claimed: aj9.slot?.claimed, lrows: aj9.lrows }));
+  await A.call("disconnect");
+  await A.call("edit", N9, [["a", "n9b"]]);
+  const after9 = (await A.call("journal", N9)).cursor?.after ?? 0, head9 = { epoch: 1, seq: after9, chain: null };
+  const pulls9 = [
+    ["readonly", { t: "error", code: "readonly", detail: { message: "m" } }, null],
+    ["rate", { t: "error", code: "rate", detail: { message: "m", retry_after: 1 } }, null],
+    ["a snapshot", { t: "batches", owner, doc: N9, epoch: 1, head: head9, items: [], more: false, snapshot: { at_seq: 1 } }, "snapshot"],
+    ["a chain that differs", { t: "batches", owner, doc: N9, epoch: 1, head: head9, items: [{ seq: after9 + 1, recv: 1, author: "person", writer: "session:x", device: "x", chain: "0".repeat(64), patches: [], body: "" }], more: false }, "chain"],
+    ["another owner", { t: "batches", owner: "f".repeat(64), doc: N9, epoch: 1, head: head9, items: [], more: false }, "invalid"],
+    ["a final refusal", { t: "error", code: "forbidden", detail: { message: "m" } }, "forbidden"],
+  ];
+  for (const [what, frame, stopCode] of pulls9) {
+    await A.call("fakeStart", ACCOUNT, N9);
+    await A.call("fakeConnect");
+    const p = await A.call("fakeWait", "pull");
+    await A.call("fakeAnswer", "pull", frame, 300);
+    const [st, j] = [await A.call("fakeState"), await A.call("journal", N9)];
+    const state = stopCode ? st.stopped === stopCode : st.held && st.stopped === null;
+    check(!!p && J(st.sent) === J(["pull"]) && j.lrows === 1 && state, `9: a pull answered with ${what}: no claim or batch after it, the row kept, ${stopCode ? "stopped " + stopCode : "held"}: ` + J({ sent: st.sent, lrows: j.lrows, stopped: st.stopped, held: st.held }));
+  }
+  // (the connection dropped while the pull waits: its answer busy, the link gone: a wait, never an invalid stop)
+  await A.call("fakeStart", ACCOUNT, N9);
+  await A.call("fakeConnect");
+  await A.call("fakeWait", "pull");
+  await A.call("fakeDisconnect");
+  const [sd9, jd9] = [await A.call("fakeState"), await A.call("journal", N9)];
+  check(sd9.stopped === null && J(sd9.sent) === J(["pull"]) && jd9.lrows === 1, "9: the connection dropped while a pull waits: nothing sent after it, not stopped: " + J({ sent: sd9.sent, stopped: sd9.stopped, lrows: jd9.lrows }));
+  // (D3-4c: a kick while the batch waits, then the batch refused (rate): held, no second lap)
+  await A.call("fakeStart", ACCOUNT, N9);
+  await A.call("fakeConnect");
+  await A.call("fakeWait", "pull");
+  await A.call("fakeAnswer", "pull", { t: "batches", owner, doc: N9, epoch: 1, head: head9, items: [], more: false }, 50);
+  const b9 = await A.call("fakeWait", "batch");
+  await A.call("fakeKick");
+  await A.call("fakeAnswer", "batch", { t: "error", code: "rate", detail: { message: "m", retry_after: 1 } }, 300);
+  const sk9 = await A.call("fakeState");
+  check(!!b9 && J(sk9.sent) === J(["pull", "batch"]) && sk9.held && sk9.waiting.length === 0, "9 (D3-4c): a kick during the flight, then the batch refused for a while: held, no second lap: " + J({ sent: sk9.sent, held: sk9.held, waiting: sk9.waiting }));
+  // (an older hold's timer never lifts a newer one: rate (its timer 400 ms), a new connection, readonly)
+  await A.call("fakeStart", ACCOUNT, N9, 400);
+  await A.call("fakeConnect");
+  await A.call("fakeWait", "pull");
+  await A.call("fakeAnswer", "pull", { t: "error", code: "rate", detail: { message: "m", retry_after: 1 } }, 50);
+  await A.call("fakeConnect");
+  await A.call("fakeWait", "pull");
+  await A.call("fakeAnswer", "pull", { t: "error", code: "readonly", detail: { message: "m" } }, 50);
+  await sleep(700);
+  const so9 = await A.call("fakeState");
+  check(J(so9.sent) === J(["pull", "pull"]) && so9.held && so9.waiting.length === 0, "9: the rate hold's old timer doesn't lift the readonly hold after it: " + J({ sent: so9.sent, held: so9.held }));
+  await A.call("connect", "A", ACCOUNT);
+  await settle();
+
+  progress("case 10");
+  // 10. CORR-2C3-2 (astra): a marked value (saved with no room for its version, so in no version) is never replaced by
+  // a later remote change: B's edit marked, A's later change to the same cell arrives: B's record keeps B's whole value
+  // (an unrelated cell too), still marked; and so after a reload
+  const N10 = "aaaaaaaa-1111-4222-8333-444444444444";
+  await A.call("open", N10, [["a", "a0"], ["u", "u0"]]);
+  await A.call("kick", N10);
+  await settle();
+  await B.call("kick", N10, true);
+  await settle();
+  await B.call("open", N10);
+  await B.call("setDebt", "docCount", 0);
+  await B.call("edit", N10, [["a", "B"], ["u", "Bu"]]);
+  const bm10 = await B.call("record", N10);
+  await sleep(20);
+  await A.call("edit", N10, [["a", "C"], ["u", "u0"]]);
+  await settle();
+  await settle();
+  const b10 = await B.call("record", N10);
+  await B.call("close", N10);
+  await B.call("open", N10);
+  const b10r = await B.call("record", N10);
+  await B.call("resetDebt");
+  const want10 = J([["a", "B"], ["u", "Bu"]]);
+  check(bm10.mark === true && b10.codes === want10 && b10.mark === true && b10r.codes === want10, "10: a marked value meets a later remote change of the same cell: kept whole, still marked, and after a reload: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes }));
+
+  progress("case 11");
+  // 11. CORR-2C3-3 (astra): an ack over the wire resumes a writer's history paused for want of room: the next save is a
+  // version again (unmarked, sent), with no reload; by a plain ack, and by `order` with next_cseq
+  for (const [k, how] of [["bbbbbbbb", "ack"], ["dddddddd", "order"]]) {
+    const id = `${k}-1111-4222-8333-444444444444`;
+    await A.call("open", id, [["a", "x0"]]);
+    await A.call("kick", id);
+    await settle();
+    await A.call("disconnect");
+    await A.call("edit", id, [["a", "x1"]]);
+    const d = (await A.call("journal", id)).slot.debt.count;
+    await A.call("setDebt", "docCount", d);
+    await A.call("edit", id, [["a", "x2"]]);
+    const m = await A.call("record", id);
+    await A.call("resetDebt");
+    if (how === "order") ref.controls.fake("batch", { error: { code: "order", detail: { client: (await A.call("journal", id)).slot.client, next_cseq: (await A.call("journal", id)).slot.cseq } } });
+    await A.call("connect", "A", ACCOUNT);
+    await settle();
+    await A.call("edit", id, [["a", "x3"]]);
+    await settle();
+    const [r, j] = [await A.call("record", id), await A.call("journal", id)];
+    check(m.mark === true && r.mark === null && r.codes === J([["a", "x3"]]) && j.lrows === 0, `11: the writer paused for want of room, then an ${how} over the wire: its next save a version again, sent, unmarked: ` + J({ paused: m.mark, mark: r.mark, codes: r.codes, lrows: j.lrows }));
+  }
+
+  progress("case 12");
+  // 12. CORR-2C3-5 (astra): the notebook page itself (notebook.js) on B: A's change reaches it with nothing typed here:
+  // shown, and saved (the record, its j and hash agree with what's shown); then a change from A while B types another
+  // cell: both kept, saved
+  const N12 = "cccccccc-1111-4222-8333-444444444444";
+  await A.call("open", N12, [["a", "p0"], ["b", "q0"]]);
+  await A.call("kick", N12);
+  await settle();
+  await B.call("kick", N12, true);
+  await settle();
+  const shown12 = await B.call("mount", N12);
+  await A.call("edit", N12, [["a", "p1"], ["b", "q0"]]);
+  await settle();
+  await sleep(900);
+  await settle();
+  const [bs12, br12] = [await B.call("shown"), await B.call("record", N12)];
+  check(shown12 === J([["a", "p0"], ["b", "q0"]]) && bs12 === J([["a", "p1"], ["b", "q0"]]) && br12.codes === bs12 && br12.hashOk && br12.mark === null, "12: the page shows a remote change and saves it (record, j and hash agree): " + J({ shown: bs12, record: br12.codes, hashOk: br12.hashOk, mark: br12.mark }));
+  await A.call("edit", N12, [["a", "p2"], ["b", "q0"]]);
+  await B.call("type", "b", "q-typed");
+  await settle();
+  await sleep(900);
+  await settle();
+  const [bs12b, br12b] = [await B.call("shown"), await B.call("record", N12)];
+  check(bs12b === J([["a", "p2"], ["b", "q-typed"]]) && br12b.codes === bs12b && br12b.hashOk, "12: a remote change while this page types another cell: both kept, saved: " + J({ shown: bs12b, record: br12b.codes, hashOk: br12b.hashOk }));
 
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);
