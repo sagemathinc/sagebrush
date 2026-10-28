@@ -87,10 +87,28 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
     log.files.push(req.url);
     return viaWorker(req, res, "https://files.test" + req.url);
   });
+  // (for a test that finds the browser stalled: the servers' open sockets, and each request not yet answered, by
+  // method, path and age; #243's CI. And the last 20 requests received, answered or not, with when each came and
+  // how long its answer took, so "the browser's request never came" tells itself apart from "it was answered")
+  const open = { site: new Set(), files: new Set() }, inflight = new Map(), recent = [];
+  let seq = 0;
+  for (const [name, srv] of [["site", siteServer], ["files", filesServer]]) {
+    srv.on("connection", (s) => { open[name].add(s); s.on("close", () => open[name].delete(s)); });
+    srv.on("request", (req, res) => {
+      const id = ++seq, x = { server: name, method: req.method, path: String(req.url).split("?")[0].slice(0, 120), at: Date.now() };
+      inflight.set(id, x);
+      const r = { ...x, answeredMs: null, closedUnanswered: false };
+      recent.push(r);
+      if (recent.length > 20) recent.shift();
+      res.on("finish", () => { r.answeredMs = Date.now() - r.at; });
+      res.on("close", () => { inflight.delete(id); if (r.answeredMs === null) r.closedUnanswered = true; });
+    });
+  }
   await new Promise((r) => siteServer.listen(sitePort, "127.0.0.1", r));
   await new Promise((r) => filesServer.listen(filesPort, "127.0.0.1", r));
   return {
     site, files, mf, db, log,
+    stats: () => ({ sockets: { site: open.site.size, files: open.files.size }, inflight: [...inflight.values()].map((x) => ({ ...x, at: undefined, ms: Date.now() - x.at })), recent: recent.map((x) => ({ ...x, at: undefined, agoMs: Date.now() - x.at })) }),
     bucket: await mf.getR2Bucket("SHARE_BUCKET"),
     async close() {
       siteServer.close();

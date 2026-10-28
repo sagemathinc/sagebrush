@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "share upload-leak fix (#243, plan-upload-leak r3, reviewed to r5e; the first-upload records in IndexedDB, registry design r3 and code r3): the Share dialog's first upload with its attempt and receipt, this device's record of the attempt it sent (one strict IndexedDB transaction a change, under one Web Lock), and its settling from the notebook's own store (web/index.html's upload, storedShare, settle and shareSent; web/notebook/stores.js's openShareSentDb; web/share-client/upload.ts), which cli/pyjs.cjs embeds with the page; measured by #243's PR ci 40720240636 size-gate row: cli/pyjs.cjs 29076686 -> 29089838, +13152, tested merge 4531b8da (head 4120d90d, base 6e7a0af1); no other bundle changes",
+ "bytes": {
+  "cli/pyjs.cjs": 13152
+ }
+}

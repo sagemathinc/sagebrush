@@ -6,7 +6,11 @@
 //   POST /auth/dev                     dev only: a session for a test account
 //   GET  /api/share/me                 who you are, your usage and limits
 //   GET  /api/share/mine               your collections
-//   POST /api/share/collections        {title} -> {id}
+//   POST /api/share/first-upload       {title, license, files, attempt} -> {collection, version}: a
+//                                      new share, created with its first version (its own path: a
+//                                      server from before it answers 404 and creates nothing)
+//   POST /api/share/collections        {title} -> {id}: an older page's empty collection, kept for
+//                                      now (it is left empty when its upload fails); with files: 400
 //   POST /api/share/check              {blobs: [{sha256, size}]} -> {missing}
 //   PUT  /api/share/blob/<sha256>      the bytes (R2 checks the hash)
 //   POST /api/share/collections/<id>/versions   {title, license, files} -> {version}
@@ -96,6 +100,16 @@ const SESSION_DAYS = 30;
 const SESSIONS_MAX = 20;
 /** records of finished deletions: how long (collections and self-deletions; account deletions), and at most how many collection records per account */
 const DELETION_RECORD_DAYS = 30, ADMIN_RECORD_DAYS = 365, DELETION_RECORDS_MAX = 1000;
+/**
+ * Deleted shares' receipts kept per account (beside its live ones), newest first: a retry of a deleted
+ * share's attempt gets 410 for DELETION_RECORD_DAYS, or until the account has deleted this many newer
+ * shares; after either, it makes a new share with a new id (the deleted link stays dead).  So the table
+ * holds at most MAX_COLLECTIONS + RETIRED_RECEIPTS_MAX rows per account, however fast shares are made
+ * and deleted (daybreak3's S1).
+ */
+const RETIRED_RECEIPTS_MAX = 1000;
+/** the deleted shares' receipts past their days, removed per scheduled run: pages of 500, until none is left or this many */
+const RETIRED_RECEIPT_PAGES = 20;
 const LIMITS_TTL = 600;
 /** how long an upload may take before its reservation is reclaimed */
 const RESERVE_SECONDS = 3600;
@@ -487,9 +501,8 @@ async function putBlob(req: Request, env: ShareEnv, who: Who, sha: string): Prom
   return json({ ok: true });
 }
 
-async function createCollection(req: Request, env: ShareEnv, who: Who): Promise<Response> {
+async function createCollection(env: ShareEnv, who: Who, body: { title?: unknown } | null): Promise<Response> {
   const id = who.id;
-  const body = (await req.json().catch(() => null)) as { title?: unknown } | null;
   const title = typeof body?.title === "string" ? body.title.trim().slice(0, 200) : "";
   if (!title) return err(400, "a title is required");
   if (!(await limits(env, who))) return err(403, "uploads need a CoCalc account in good standing");
@@ -508,14 +521,55 @@ async function createCollection(req: Request, env: ShareEnv, who: Who): Promise<
 
 const LICENSE = /^[A-Za-z0-9.+\- ()]{1,64}$/;
 
+const ATTEMPT = /^[0-9a-f]{32}$/;
+const shareUrls = (cid: string, version: string) => ({ url: `/s/${cid}`, frozen: `/s/${cid}@${version.slice(0, 16)}` });
+
+/** A new version of one of the account's collections. */
 async function commit(req: Request, env: ShareEnv, who: Who, cid: string): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as CommitBody | null;
+  return commitVersion(env, who, body, cid, null);
+}
+
+/**
+ * A new share: its collection and its first version, in one transaction, with
+ * the attempt's receipt (plan-upload-leak r3 §3b).  `attempt` is the page's
+ * random 128 bits, kept with the notebook until the share is made: a retry of
+ * it (its response lost, the page reloaded) is answered from the receipt.
+ */
+async function firstUpload(env: ShareEnv, who: Who, body: CommitBody & { attempt?: unknown }): Promise<Response> {
+  if (typeof body.title !== "string" || !body.title.trim()) return err(400, "a title is required");
+  if (typeof body.attempt !== "string" || !ATTEMPT.test(body.attempt)) return err(400, "attempt: 32 hex digits");
+  return commitVersion(env, who, body, null, body.attempt);
+}
+
+/**
+ * What a retry of an attempt gets, if the attempt made a share already: its
+ * own version (not the share's latest) when it asks for the same contents; a
+ * 409 naming that share when it asks for other contents (never a success:
+ * the share holds what the first request sent); a 410 once the share was
+ * deleted.  Null when the attempt made nothing yet.
+ */
+async function replay(env: ShareEnv, owner: string, attemptHash: string, digest: string): Promise<Response | null> {
+  const db = env.SHARE_DB!;
+  const r = await db.prepare("SELECT request_digest, collection, version, state FROM upload_receipts WHERE owner = ?1 AND attempt_hash = ?2").bind(owner, attemptHash).first<{ request_digest: string; collection: string; version: string; state: string }>();
+  if (!r) return null;
+  const live = r.state === "committed" && (await db.prepare("SELECT 1 AS x FROM collections WHERE id = ?1 AND owner = ?2").bind(r.collection, owner).first());
+  if (!live) return json({ error: "attempt_retired" }, 410);
+  if (r.request_digest !== digest) return json({ error: "attempt_used", collection: r.collection, version: r.version, ...shareUrls(r.collection, r.version) }, 409);
+  return json({ version: r.version, collection: r.collection, ...shareUrls(r.collection, r.version) }, 200);
+}
+
+type CommitBody = { title?: unknown; license?: unknown; files?: unknown };
+
+/** A version: of collection `cidIn`, or (cidIn null) of a new one, made by `attempt`. */
+async function commitVersion(env: ShareEnv, who: Who, body: CommitBody | null, cidIn: string | null, attempt: string | null): Promise<Response> {
   const id = who.id;
   const db = env.SHARE_DB!;
-  const col = await db.prepare("SELECT owner, latest, title FROM collections WHERE id = ?1").bind(cid).first<{ owner: string; latest: string | null; title: string }>();
-  if (!col || col.owner !== id) return err(404, "no such collection");
-  const lim = await limits(env, who);
-  if (!lim) return err(403, "uploads need a CoCalc account in good standing");
-  const body = (await req.json().catch(() => null)) as { title?: unknown; license?: unknown; files?: unknown } | null;
+  let col: { owner: string; latest: string | null; title: string } | null = null;
+  if (cidIn !== null) {
+    col = await db.prepare("SELECT owner, latest, title FROM collections WHERE id = ?1").bind(cidIn).first<{ owner: string; latest: string | null; title: string }>();
+    if (!col || col.owner !== id) return err(404, "no such collection");
+  }
   const files = body?.files;
   if (!Array.isArray(files) || files.length === 0 || files.length > MAX_FILES) return err(400, "files: 1 to 10000 entries");
   const seen = new Set<string>();
@@ -524,8 +578,20 @@ async function commit(req: Request, env: ShareEnv, who: Who, cid: string): Promi
     if (seen.has(f.path)) return err(400, `duplicate path ${f.path}`);
     seen.add(f.path);
   }
-  const title = typeof body?.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : col.title;
+  const title = typeof body?.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : col!.title;
   if (body?.license !== undefined && !(typeof body.license === "string" && LICENSE.test(body.license))) return err(400, "license: an SPDX identifier");
+  const listed = files.map((f: { path: string; sha256: string; size: number }) => ({ path: f.path, sha256: f.sha256, size: f.size })).sort((a, b) => (a.path < b.path ? -1 : 1));
+  // (a first upload's receipt: its attempt, and what it asked for, exactly the manifest's own fields)
+  let attemptHash: string | null = null, digest: string | null = null;
+  if (attempt !== null) {
+    attemptHash = await sha256Hex("sagebrush-attempt\n" + attempt);
+    digest = await sha256Hex(canonical({ title, license: body?.license ?? null, files: listed }));
+    const again = await replay(env, id, attemptHash, digest);
+    if (again) return again;
+  }
+  // (after the receipt: a retry's answer needs no limits, and what follows may wait on CoCalc's)
+  const lim = await limits(env, who);
+  if (!lim) return err(403, "uploads need a CoCalc account in good standing");
   // every file must be one this account has uploaded, at its stated size
   // (a held file's size can't change: it is the size of bytes with that hash)
   const shas = [...new Set(files.map((f: { sha256: string }) => f.sha256))];
@@ -537,6 +603,7 @@ async function commit(req: Request, env: ShareEnv, who: Who, cid: string): Promi
   }
   for (const f of files) if (sizes.get(f.sha256) !== f.size) return err(409, `not uploaded: ${f.path}`);
   const t = now();
+  const cid = cidIn ?? newId();
   const manifest = {
     format: "sagebrush-collection",
     version: 1,
@@ -544,8 +611,8 @@ async function commit(req: Request, env: ShareEnv, who: Who, cid: string): Promi
     created: new Date(t * 1000).toISOString(),
     title,
     license: body?.license,
-    parent: col.latest ?? undefined,
-    files: files.map((f: { path: string; sha256: string; size: number }) => ({ path: f.path, sha256: f.sha256, size: f.size })).sort((a, b) => (a.path < b.path ? -1 : 1)),
+    parent: col?.latest ?? undefined,
+    files: listed,
   };
   const text = canonical(manifest);
   const bytes = enc.encode(text).length;
@@ -565,6 +632,15 @@ async function commit(req: Request, env: ShareEnv, who: Who, cid: string): Promi
   const stmts: D1Stmt[] = [
     // (the same version committed twice: this copy of its manifest is not needed)
     db.prepare("INSERT INTO r2_deletes (key, created) SELECT ?2, ?3 WHERE EXISTS (SELECT 1 FROM versions WHERE hash = ?1)").bind(hash, key, t),
+    // (a new share: its collection, and its attempt's receipt, exist only if this version does; the
+    // receipt's plain INSERT fails the batch for an attempt already used, or retired by a deletion)
+    ...(attemptHash !== null
+      ? [
+          db.prepare("INSERT INTO collections (id, owner, title, created, updated, latest) VALUES (?1, ?2, ?3, ?4, ?4, NULL)").bind(cid, id, title, t),
+          db.prepare("INSERT INTO upload_receipts (owner, attempt_hash, request_digest, collection, version, state, created) VALUES (?1, ?2, ?3, ?4, ?5, 'committed', ?6)").bind(id, attemptHash, digest, cid, hash, t),
+          ...guard(db, "(SELECT COUNT(*) FROM collections WHERE owner = ?1) <= ?2", id, MAX_COLLECTIONS),
+        ]
+      : []),
     db.prepare("INSERT INTO versions (hash, collection, owner, created, size, manifest_key, manifest_bytes, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(hash) DO NOTHING").bind(hash, cid, id, t, size, key, bytes, title),
   ];
   for (let i = 0; i < shas.length; i += 500) {
@@ -586,9 +662,16 @@ async function commit(req: Request, env: ShareEnv, who: Who, cid: string): Promi
     await db.batch(stmts);
   } catch {
     await abandon(env, key, rid);
+    if (attemptHash !== null) {
+      // (the same attempt's twin, committed meanwhile, answers as a retry would; else the limit, or a change)
+      const again = await replay(env, id, attemptHash, digest!);
+      if (again) return again;
+      const n = await db.prepare("SELECT COUNT(*) AS n FROM collections WHERE owner = ?1").bind(id).first<{ n: number }>();
+      if ((n?.n ?? 0) >= MAX_COLLECTIONS) return err(403, `at most ${MAX_COLLECTIONS} collections`);
+    }
     return err(409, "the collection or its files changed; upload again");
   }
-  return json({ version: hash, collection: cid, url: `/s/${cid}`, frozen: `/s/${cid}@${hash.slice(0, 16)}` }, 201);
+  return json({ version: hash, collection: cid, ...shareUrls(cid, hash) }, 201);
 }
 
 // ---- reading
@@ -656,6 +739,10 @@ async function deleteCollection(env: ShareEnv, account: string, cid: string): Pr
     db.prepare("DELETE FROM version_blobs WHERE version IN (SELECT hash FROM versions WHERE collection = ?1)").bind(cid),
     db.prepare("DELETE FROM versions WHERE collection = ?1").bind(cid),
     db.prepare("DELETE FROM collections WHERE id = ?1").bind(cid),
+    // (its first upload's attempt can never make a share again: a retry of it gets 410)
+    db.prepare("UPDATE upload_receipts SET state = 'retired', retired = ?3 WHERE owner = ?1 AND collection = ?2 AND state = 'committed'").bind(account, cid, t),
+    // (and at most RETIRED_RECEIPTS_MAX of them per account, the newest)
+    db.prepare("DELETE FROM upload_receipts WHERE owner = ?1 AND state = 'retired' AND rowid NOT IN (SELECT rowid FROM upload_receipts WHERE owner = ?1 AND state = 'retired' ORDER BY retired DESC, rowid DESC LIMIT ?2)").bind(account, RETIRED_RECEIPTS_MAX),
   ]);
   return { bytes: b?.n ?? 0 };
 }
@@ -682,6 +769,12 @@ async function purgeAccount(env: ShareEnv, account: string, rid: string, admin: 
     db.prepare("DELETE FROM version_blobs WHERE version IN (SELECT hash FROM versions WHERE owner = ?1)").bind(account),
     db.prepare("DELETE FROM versions WHERE owner = ?1").bind(account),
     db.prepare("DELETE FROM collections WHERE owner = ?1").bind(account),
+    // (an account deleted in CoCalc never comes back: its receipts go; one deleting its own shares
+    // may sign in again, and a retry of an old attempt then gets 410, not a new share)
+    admin
+      ? db.prepare("DELETE FROM upload_receipts WHERE owner = ?1").bind(account)
+      : db.prepare("UPDATE upload_receipts SET state = 'retired', retired = ?2 WHERE owner = ?1 AND state = 'committed'").bind(account, t),
+    ...(admin ? [] : [db.prepare("DELETE FROM upload_receipts WHERE owner = ?1 AND state = 'retired' AND rowid NOT IN (SELECT rowid FROM upload_receipts WHERE owner = ?1 AND state = 'retired' ORDER BY retired DESC, rowid DESC LIMIT ?2)").bind(account, RETIRED_RECEIPTS_MAX)]),
     db.prepare("DELETE FROM holdings WHERE account_id = ?1").bind(account),
     db.prepare("DELETE FROM limits_cache WHERE account_id = ?1").bind(account),
     db.prepare("UPDATE purges SET status = 'files', collections = ?2, bytes = ?3, lease = NULL WHERE request_id = ?1").bind(rid, counts?.c ?? 0, counts?.b ?? 0),
@@ -845,6 +938,12 @@ export async function scheduled(env: ShareEnv): Promise<void> {
   // account deletion's (CoCalc may ask about it again by its request id)
   // after ADMIN_RECORD_DAYS.  Tombstones stay: they keep a deleted account out.
   await db.prepare("DELETE FROM purges WHERE status = 'done' AND ((kind IN ('collection', 'self') AND finished < ?1) OR (kind = 'admin' AND finished < ?2))").bind(t - DELETION_RECORD_DAYS * DAY, t - ADMIN_RECORD_DAYS * DAY).run();
+  // the receipts of deleted shares' attempts, after DELETION_RECORD_DAYS: a later request carrying
+  // such an attempt makes a new share, with a new id (the deleted one's link stays dead)
+  for (let page = 0; page < RETIRED_RECEIPT_PAGES; page++) {
+    const r = await db.prepare("DELETE FROM upload_receipts WHERE rowid IN (SELECT rowid FROM upload_receipts WHERE state = 'retired' AND retired < ?1 ORDER BY retired LIMIT 500)").bind(t - DELETION_RECORD_DAYS * DAY).run();
+    if ((r.meta?.changes ?? 0) < 500) break;
+  }
 }
 
 /**
@@ -909,7 +1008,16 @@ export async function handleShare(req: Request, env: ShareEnv, ctx: Ctx): Promis
   }
   if (p === "/api/share/mine" && m === "GET") return mine(env, id);
   if (m !== "GET" && m !== "PUT" && m !== "DELETE" && !/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
-  if (p === "/api/share/collections" && m === "POST") return createCollection(req, env, who);
+  if (p === "/api/share/first-upload" && m === "POST") {
+    const body = (await req.json().catch(() => null)) as (CommitBody & { attempt?: unknown }) | null;
+    return body && typeof body === "object" ? firstUpload(env, who, body) : err(400, "a JSON object is required");
+  }
+  if (p === "/api/share/collections" && m === "POST") {
+    const body = (await req.json().catch(() => null)) as (CommitBody & { attempt?: unknown }) | null;
+    // (an older page's empty collection; a first upload's form is never taken for it)
+    if (body && typeof body === "object" && (body.files !== undefined || body.attempt !== undefined)) return err(400, "a first upload goes to /api/share/first-upload");
+    return createCollection(env, who, body);
+  }
   if (p === "/api/share/check" && m === "POST") return check(req, env, who);
   g = p.match(/^\/api\/share\/blob\/([0-9a-f]{64})$/);
   if (g && m === "PUT") return putBlob(req, env, who, g[1]);

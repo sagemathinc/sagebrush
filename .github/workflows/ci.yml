@@ -435,7 +435,7 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: detect CI CPU quota
@@ -472,11 +472,12 @@ jobs:
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
-      # (the share dialog, in its own step with its own bound, in its place in the order: about 7 min on a healthy runner,
-      # 12 here. A hang fails this named step, not the whole job at its 35 min, and the steps before it keep their output.
+      # (the share dialog, in its own step with its own bound, in its place in the order: about 13 min on a healthy runner
+      # since #243's registry cases (it was about 7), 20 here. A hang fails this named step, not the whole job at its 40 min,
+      # and the steps before it keep their output.
       # The tests after it stay after it: test-no-site-build rebuilds web/dist without web/site/)
       - name: share dialog
-        timeout-minutes: 12
+        timeout-minutes: 20
         run: CHROME=google-chrome node web/share/test-share-dialog.mjs
       - name: sharing, sync, engines and PWA (after the share dialog)
         run: |
