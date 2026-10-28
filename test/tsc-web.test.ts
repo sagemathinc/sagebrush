@@ -181,6 +181,7 @@ function linearEnough(ms: number[]): boolean {
 
 test("the linearity rule: CI's noisy middle point passes; a real quadratic, or worse, fails", () => {
   assert.ok(linearEnough([46, 169.8, 265.9]), "master's ci 40617260405 (a slow 1 MiB point)");
+  assert.ok(linearEnough([26.3, 37.6, 114.9]), "#241's ci 40618056762 (a slow 2 MiB point: 4.4x over the span)");
   assert.ok(linearEnough([65.1, 118.2, 190.9]) && linearEnough([50.4, 114.8, 195.8]), "the r7 PR ci's own runs");
   assert.ok(linearEnough([5, 9, 21]), "under the 20 ms floor");
   assert.ok(!linearEnough([40, 160, 640]), "quadratic (16x over the span)");
