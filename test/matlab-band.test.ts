@@ -31,10 +31,15 @@ test("ruling d2's legacy bodies are master's, and reached only from the unmeasur
   assert.equal(r.stdout.trim().split("\n").filter((l) => l.startsWith("ok ")).length, 3, r.stdout);
 });
 
-test("ruling d2: master's full and band caps are registered to D0, and only the legacy lines and the constants are", () => {
+test("ruling d2: master's full and band caps are registered to D0, and only the legacy lines, the constants and the routing floor are", () => {
   const reg = JSON.parse(readFileSync(TEST + "limit-sites.json", "utf8"));
-  const caps = Object.entries(reg).filter(([k]) => k.startsWith("lib/_matlab_sparse.py") && /MAX_(FULL|BAND_WORK)\b/.test(k) && !/"""|full_arr :: master's/.test(k));
+  // (the routing floor, William's D-W1: master's predicate as a route, its own site and follow-up FU-B16-3)
+  const FLOOR = "lib/_matlab_sparse.py :: legacy_band_route :: return (2 * kl + ku + 1) * n <= MAX_FULL and n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK #0";
+  const caps = Object.entries(reg).filter(([k]) => k.startsWith("lib/_matlab_sparse.py") && /MAX_(FULL|BAND_WORK)\b/.test(k) && !/"""|full_arr :: master's/.test(k) && k !== FLOOR);
   assert.ok(caps.length >= 4, JSON.stringify(caps.map(([k]) => k)));
   for (const [k, v] of caps) assert.match((v as any).owner, /^D0 browser interim \(ruling d2\)/, k);
   assert.ok(caps.every(([k]) => /:: (_legacy_full_arr|_legacy_mldivide|) ::/.test(k)), JSON.stringify(caps.map(([k]) => k)));
+  const floor = reg[FLOOR] as any;
+  assert.ok(floor && /routing floor/.test(floor.owner), FLOOR);
+  assert.deepEqual(floor.disposition, { "2": { followup: "FU-B16-3" }, "3": { followup: "FU-B16-3" } });
 });
