@@ -1240,6 +1240,13 @@ try {
         preNav = await Q.send("Runtime.evaluate", { expression: "document.readyState", returnByValue: true }, 3000).then((x) => JSON.stringify(x?.result?.value ?? x), (x) => `no answer: ${x.message}`);
         mark("renderer probe ended");
         snapAt("new page");
+        // (NON-LANDING A/B probe, arm B (daybreak3): the new page's requests bypass the service worker, set on its
+        // own CDP session just before it navigates; the command's start and answer are logged. Removed before any
+        // landing; nothing else differs from diag4 0f5a9fa0)
+        mark("sw bypass sent");
+        const bypass = await Q.send("Network.setBypassServiceWorker", { bypass: true }, 3000).then((x) => JSON.stringify(x ?? null), (x) => `no answer: ${x.message}`);
+        mark("sw bypass answered");
+        console.log(`  (${what}: NON-LANDING arm B: Network.setBypassServiceWorker({bypass:true}) answered ${bypass})`);
         await Q.send("Page.navigate", { url: dev.site + "/" }, 20_000);
         mark("navigated");
         snapAt("navigated");
