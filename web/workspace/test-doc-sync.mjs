@@ -294,7 +294,19 @@ try {
   await A.call("fakeWait", "pull");
   await A.call("fakeDisconnect");
   const [sd9, jd9] = [await A.call("fakeState"), await A.call("journal", N9)];
-  check(sd9.stopped === null && J(sd9.sent) === J(["pull"]) && jd9.lrows === 1, "9: the connection dropped while a pull waits: nothing sent after it, not stopped: " + J({ sent: sd9.sent, stopped: sd9.stopped, lrows: jd9.lrows }));
+  check(sd9.stopped === null && !sd9.held && J(sd9.sent) === J(["pull"]) && jd9.lrows === 1, "9: the connection dropped while a pull waits: nothing sent after it, neither stopped nor held (the next connection asks again): " + J({ sent: sd9.sent, stopped: sd9.stopped, held: sd9.held, lrows: jd9.lrows }));
+  // (answers that go on to another request (order with next_cseq; unknown_client, a claim again), the connection
+  // dropped as they arrive: that next request waits for a new connection)
+  for (const [what, frame, next] of [["order", { t: "error", code: "order", detail: { message: "m", client: aj9.slot.client, next_cseq: aj9.slot.cseq } }, "batch"], ["unknown_client", { t: "error", code: "unknown_client", detail: { message: "m" } }, "doc_claim"]]) {
+    await A.call("fakeStart", ACCOUNT, N9);
+    await A.call("fakeConnect");
+    await A.call("fakeWait", "pull");
+    await A.call("fakeAnswer", "pull", { t: "batches", owner, doc: N9, epoch: 1, head: head9, items: [], more: false }, 50);
+    await A.call("fakeWait", "batch");
+    await A.call("fakeAnswerDrop", "batch", frame);
+    const sx = await A.call("fakeState");
+    check(J(sx.sent) === J(["pull", "batch"]) && sx.stopped === null, `9: ${what} answered as the connection drops: no ${next} on the connection that's gone: ` + J({ sent: sx.sent, stopped: sx.stopped }));
+  }
   // (D3-4c: a kick while the batch waits, then the batch refused (rate): held, no second lap)
   await A.call("fakeStart", ACCOUNT, N9);
   await A.call("fakeConnect");
