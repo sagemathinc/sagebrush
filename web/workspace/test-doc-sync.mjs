@@ -545,7 +545,12 @@ try {
     // (every await of this case bounded (astra's DEVSW-R6-1): a hung page call ends as this case's failed check, its
     // verdict printed, never as the run's deadline)
     const LATE14 = Symbol("late");
-    const bound14 = (p, ms) => { p.catch(() => {}); return Promise.race([p, sleep(Math.max(1, ms)).then(() => LATE14)]); };
+    const bound14 = (p, ms) => {
+    p.catch(() => {});
+    let timer;
+    const late = new Promise((r) => { timer = setTimeout(() => r(LATE14), Math.max(1, ms)); });
+    return Promise.race([p, late]).finally(() => clearTimeout(timer));
+  };
     const read14 = async (p, what = "no answer in 10 s") => { const v = await bound14(p, 10_000).catch((e) => ({ error: String(e?.message ?? e).slice(0, 200) })); return v === LATE14 ? { codes: `(${what})` } : v; };
     const ownerOf = async (P) => { const v = await bound14(P.ev("T.ownerState()"), 10_000); return v === LATE14 ? { late: true } : v; };
     const waitOwner = async (P, ok, ms = 20_000) => { let st; for (const end = Date.now() + ms; Date.now() < end; await sleep(100)) if (ok((st = await ownerOf(P)))) return st; return st; };
@@ -612,7 +617,8 @@ try {
   };
   const run14 = case14();
   run14.catch(() => {});
-  const r14 = await Promise.race([run14.then(() => null, (e) => e ?? new Error("thrown")), sleep(Math.max(1, budget14)).then(() => LATECASE)]);
+  let timer14;
+  const r14 = await Promise.race([run14.then(() => null, (e) => e ?? new Error("thrown")), new Promise((r) => { timer14 = setTimeout(() => r(LATECASE), Math.max(1, budget14)); })]).finally(() => clearTimeout(timer14));
   if (r14 === LATECASE) check(false, `14: the case didn't finish within its ${Math.round(budget14 / 1000)} s budget, at step: ${step}`);
   else if (r14 && r14 !== STOP14) check(false, "14: the case stopped: " + String(r14?.message ?? r14).slice(0, 300));
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
