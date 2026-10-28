@@ -169,24 +169,28 @@ test("r7: an unterminated /* fails closed (never outside every candidate); a // 
   assert.deepEqual(hatches("// a comment\nconst s = '@' + 'x'; const t = 1; // ok\nconst u = s + '@ts-ignore'.slice(0, 0);\n").findings, []);
 });
 
-/** The linearity rule (daybreak2's r7, made robust after master's ci 40617260405, where one slow middle point,
- *  46 / 169.8 / 265.9 ms, failed a per-doubling bound). Over sizes n/2, n, 2n the least-squares slope of
- *  log(time) on log(size) depends only on the two ends (the middle has x = 0), so the rule is on the 4x span:
- *  linear is 4x, n log n about 4.4x, quadratic 16x. Pass at most 8x (a slope of 1.5), with the small end floored at
- *  20 ms (timer and scheduler noise there). One slow point in the middle can't trip it; a real quadratic can't pass
- *  it. */
+/** The linearity rule (daybreak2's r7, made robust after master's ci 40617260405 and #241's 40618056762, each
+ *  failed by one slow point: 46 / 169.8 / 265.9 and 26.3 / 37.6 / 114.9 ms). ms are the times of the SAME batch
+ *  of calls at sizes n/2, n and 2n; the batch is long enough at n/2 (at least 20 ms) that no floor is needed.
+ *  - The span (2n against n/2): at most 8x. Over three log-spaced sizes, the least-squares slope of log time on
+ *    log size depends only on the two ends (the middle has x = 0), so a slow middle point can't trip it. Linear
+ *    is 4x, and a quadratic is 16x.
+ *  - The upper doubling (2n against n): under 3.5x, so a superlinearity that only starts above n (40 / 80 / 320:
+ *    exactly 8x over the span) is still caught. Linear is 2x and quadratic 4x.
+ *  Its honest scope: it rejects strong superlinearity (a slope above 1.5 over the span, or a last doubling of 3.5x
+ *  or more), not n log n, which is about 4.4x over the span and passes. */
 function linearEnough(ms: number[]): boolean {
-  return ms[2] <= 8 * Math.max(ms[0], 20);
+  return ms[2] <= 8 * ms[0] && ms[2] < 3.5 * ms[1];
 }
 
-test("the linearity rule: CI's noisy middle point passes; a real quadratic, or worse, fails", () => {
+test("the linearity rule: CI's noisy points pass; a quadratic, or one that starts late, fails", () => {
   assert.ok(linearEnough([46, 169.8, 265.9]), "master's ci 40617260405 (a slow 1 MiB point)");
-  assert.ok(linearEnough([26.3, 37.6, 114.9]), "#241's ci 40618056762 (a slow 2 MiB point: 4.4x over the span)");
-  assert.ok(linearEnough([65.1, 118.2, 190.9]) && linearEnough([50.4, 114.8, 195.8]), "the r7 PR ci's own runs");
-  assert.ok(linearEnough([5, 9, 21]), "under the 20 ms floor");
-  assert.ok(!linearEnough([40, 160, 640]), "quadratic (16x over the span)");
+  assert.ok(linearEnough([26.3, 37.6, 114.9]), "#241's ci 40618056762 (a slow 2 MiB point: 4.4x over the span, 3.06x at the top)");
+  assert.ok(linearEnough([65.1, 118.2, 190.9]) && linearEnough([50.4, 114.8, 195.8]), "the r7 PR ci's own rows");
+  assert.ok(linearEnough([20, 44.2, 88.4]), "n log n (about 4.4x over the span): passes, out of scope");
+  assert.ok(!linearEnough([10, 40, 160]) && !linearEnough([5, 20, 80]) && !linearEnough([40, 160, 640]), "exact quadratics fail at any scale (no floor)");
   assert.ok(!linearEnough([30, 100, 300]), "10x over the span");
-  assert.ok(!linearEnough([10, 40, 170]), "quadratic, small end under the floor");
+  assert.ok(!linearEnough([40, 80, 320]), "a superlinearity starting above 1 MiB (4x at the top, exactly 8x over the span)");
 });
 
 test("r7 linearity (daybreak2): pathological inputs at 0.5, 1 and 2 MiB scan in linear time (linearEnough)", () => {
@@ -199,18 +203,20 @@ test("r7 linearity (daybreak2): pathological inputs at 0.5, 1 and 2 MiB scan in 
     ["unmatched @type { in one block", (n) => "/**" + " @type {".repeat(Math.floor((n - 5) / 8)) + "*/"],
     ["// @ts-ignore lines", (n) => "// @ts-ignore\n".repeat(Math.floor(n / 14))],
   ];
-  const once = (s: string) => { const t0 = process.hrtime.bigint(); hatches(s); return Number(process.hrtime.bigint() - t0) / 1e6; };
+  const batch = (s: string, calls: number) => { const t0 = process.hrtime.bigint(); for (let c = 0; c < calls; c++) hatches(s); return Number(process.hrtime.bigint() - t0) / 1e6; };
   const rows: Record<string, number[]> = {};
   for (const [name, make] of kinds) {
     const inputs = [MiB / 2, MiB, 2 * MiB].map(make);
-    // (a warm-up, untimed; then 4 rounds that time each size in turn, the best per size kept: a slow patch of the
-    // runner lands on one try of each size, not on all of one size's)
-    once(inputs[0]);
+    // (a warm-up, untimed; then one batch size for all three sizes, chosen so the 0.5 MiB batch takes at least
+    // 20 ms; then 4 rounds that time each size's batch in turn, the best per size kept: a slow patch of the runner
+    // lands on one try of each size, not on all of one size's)
+    batch(inputs[0], 1);
+    const calls = Math.max(1, Math.ceil(20 / Math.max(batch(inputs[0], 1), 0.01)));
     const best = [Infinity, Infinity, Infinity];
-    for (let round = 0; round < 4; round++) for (let i = 0; i < 3; i++) best[i] = Math.min(best[i], once(inputs[i]));
-    rows[name] = best.map((x) => +x.toFixed(1));
-    assert.ok(linearEnough(best), `${name}: ${rows[name].join(" / ")} ms over 0.5 / 1 / 2 MiB is not linear (more than 8x over the 4x span)`);
-    assert.ok(best[2] < 4000, `${name}: 2 MiB took ${best[2]} ms`);
+    for (let round = 0; round < 4; round++) for (let i = 0; i < 3; i++) best[i] = Math.min(best[i], batch(inputs[i], calls));
+    rows[name] = best.map((x) => +(x / calls).toFixed(2));
+    assert.ok(linearEnough(best), `${name}: ${rows[name].join(" / ")} ms a call (batches of ${calls}) over 0.5 / 1 / 2 MiB is not linear (more than 8x over the span, or 3.5x at the top)`);
+    assert.ok(best[2] / calls < 4000, `${name}: 2 MiB took ${best[2] / calls} ms`);
   }
   console.log(JSON.stringify({ tsc_web_hatches_linearity_ms: rows }));
 });
