@@ -56,6 +56,10 @@ const { shellWorkerPolicy, pagePolicy } = await import(join(here, "csp-policy.mt
 // (step 3: the worker's one init, as ShellHost sends it with the default config; +Infinity crosses into the page as a
 // string, revived there)
 const Lm = await import(join(here, "shell", "limits.ts"));
+// (r3, astra5 B3R2-A5-1: limits.ts loads as a native ES module, under bun's own module semantics, not a bundle: a
+// const read before its declaration by a module-level call would have thrown at the import above)
+ok(Lm.MAPPED_LIMITS.includes("maxSourceBytes") && Lm.executionLimitsOf(Lm.validateBash()).maxSourceBytes === Lm.BASH_RANGES.source_bytes.def + Lm.WRAPPER_BYTES,
+  `limits.ts loads as a native ES module, its module-level census computed (${Lm.MAPPED_LIMITS.length} mapped limits; maxSourceBytes = source_bytes + ${Lm.WRAPPER_BYTES})`);
 const INIT_JSON = JSON.stringify({ limits: Lm.executionLimitsOf(Lm.validateBash()), pipelineWidth: Lm.validateBash().pipeline_width }, (k, v) => (v === Infinity ? "Infinity" : v));
 
 // the sets: the shell's, a copy whose shell needs a newer host level, one without the shell

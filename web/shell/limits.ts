@@ -67,6 +67,17 @@ export const BASH_RANGES: Readonly<Record<LimitKey, Range>> = Object.freeze({
 export const LIMIT_KEYS = Object.freeze(Object.keys(BASH_RANGES) as LimitKey[]);
 /** The config's largest serialized size (r3 §4.1). */
 export const CONFIG_MAX_BYTES = 4 * KiB;
+/**
+ * (r3, astra5 B3R2-A5-1: declared before any module-level call uses it: MAPPED_LIMITS below calls
+ * executionLimitsOf() at load, and a const read before its declaration is a TDZ ReferenceError in native ESM.)
+ * The host's wrapper around every script it sends (D8 point 1: `{ SCRIPT\n}`, web/shell/host.ts wrap()): its bytes.
+ * The page checks bash.source_bytes on the script itself; just-bash's maxSourceBytes, which checks what it parses
+ * (the wrapped script, and each file `source` or `.` reads), is the key plus these bytes, so a script at the key's
+ * value runs.  A sourced file is therefore checked by just-bash at source_bytes + WRAPPER_BYTES: that stop is its
+ * own, an ordinary outcome (astra2, step 3 r1).
+ */
+export const WRAPPER_BYTES = 4;
+export const wrap = (script: string) => `{ ${script}\n}`;
 /** just-bash's maxOutputSize: one invocation's output bound, and its result's largest copy (proposal C). */
 export const OUTPUT_BACKSTOP = 32 * MiB;
 
@@ -166,15 +177,6 @@ export const FIXED_LIMITS = Object.freeze([
 ]);
 export const MAPPED_LIMITS = Object.freeze(Object.keys(executionLimitsOf(validateBash(undefined))));
 
-/**
- * The host's wrapper around every script it sends (D8 point 1: `{ SCRIPT\n}`, web/shell/host.ts wrap()): its bytes.
- * The page checks bash.source_bytes on the script itself; just-bash's maxSourceBytes, which checks what it parses
- * (the wrapped script, and each file `source` or `.` reads), is the key plus these bytes, so a script at the key's
- * value runs.  A sourced file is therefore checked by just-bash at source_bytes + WRAPPER_BYTES: that stop is its
- * own, an ordinary outcome (astra2, step 3 r1).
- */
-export const WRAPPER_BYTES = 4;
-export const wrap = (script: string) => `{ ${script}\n}`;
 /** A limit reached: the outcome row 4 (r3 §4.1), with the words the script ends with. */
 export const limitWords = (key: LimitKey, value: number) => `bash: bash.${key} exceeded (${value})\n`;
 /** The exit status of a typed limit (r3 §4.1). */
