@@ -213,6 +213,7 @@ T.enable = async (id, cells) => {
     makeDocs: () => new DS.DocSync({ retryMs: 200, askMs: 5000 }),
     makeChannel: () => new BroadcastChannel(W.docSyncChannel(T.w.ws.name)),
     register: W.registerJournalWriter,
+    own: async () => () => {},
     setReadOnly: (ro) => T.ro.push(ro),
     readOnlyNow: () => !T.shownStore || !!T.shownStore.viewOnly,
     flush() {},

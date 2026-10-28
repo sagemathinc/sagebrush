@@ -2110,6 +2110,126 @@ async function s5Docs() {
   owner.destroy();
 }
 
+// (device B for s5DocsOwners: a page on the front's second origin, framed here and driven over postMessage
+// (sync-client-device-b.page.js): its own IndexedDB, Web Locks and channels, on this account)
+async function deviceB() {
+  const { origin } = await ctl("bOrigin");
+  const f = document.body.appendChild(document.createElement("iframe"));
+  const pending = new Map();
+  let n = 0, ready;
+  const isReady = new Promise((r) => { ready = r; });
+  const onMsg = (ev) => {
+    if (ev.source !== f.contentWindow) return;
+    if (ev.data?.ready) return ready(true);
+    const p = pending.get(ev.data?.id);
+    if (!p) return;
+    pending.delete(ev.data.id);
+    if (ev.data.ok) p.ok(ev.data.value); else p.no(new Error("B: " + ev.data.error));
+  };
+  addEventListener("message", onMsg);
+  f.src = origin + "/b.html";
+  if (!(await Promise.race([isReady, sleep(15_000).then(() => false)]))) throw new Error("device B's page didn't load");
+  const call = (fn, ...args) => new Promise((ok, no) => {
+    const id = ++n;
+    pending.set(id, { ok, no });
+    f.contentWindow.postMessage({ id, fn, args }, origin);
+    setTimeout(() => { if (pending.delete(id)) no(new Error(`B: ${fn} didn't answer in 60 s`)); }, 60_000);
+  });
+  call.remove = () => { removeEventListener("message", onMsg); f.remove(); };
+  return call;
+}
+
+async function s5DocsOwners() {
+  // (astra's DEVSW-1-R2: DEV's switch with the real owners and the namespace's sender lock.  Device A: two tabs of one
+  // workspace in this page (two Workspace objects: one set of Web Locks and channels), a board's, whose owner already
+  // holds the lock and carries notebooks (followDocSync), and a notebook's, whose owner waits while the switch turns on
+  // (enableDocSync); device B: a page on another origin, its own owner holding its own connection.  Edits both ways
+  // while the board holds; then the board's page closes and the notebook's owner takes the lock by itself and sends)
+  await account();
+  const nm = names();
+  const wb = await fresh(nm), wn = await fresh(nm);
+  const warns = [], warn = (...a) => warns.push(a.map(String).join(" "));
+  const codes = async (id) => J(((await new Promise((ok, no) => { const r = wn.main.transaction("notebooks").objectStore("notebooks").get(id); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }))?.cells ?? []).map((c) => [c.id, c.code]));
+  const spy = (d, count) => { const c = d.connected.bind(d); d.connected = (l) => { count(); return c(l); }; return d; };
+  W.registerJournalWriter("notebooks");
+  W.registerJournalWriter("boards");
+  // (the journal active from an earlier load of the notebook page: the board's page joins at its own load)
+  check((await wb.activateJournal()) === true, "owners: device A's journal active (an earlier load of the notebook page)");
+  const ob = W.SyncOwner.of(wb, { origin: location.origin });
+  ob.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(wb, el, hostOf(wb));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => ob.isHolder() && ob.view().s.state === "synced", 15_000), "owners: the board's owner holds the sender lock and syncs");
+  let boardConnected = 0, nbConnected = 0;
+  const unfollow = await W.followDocSync({
+    makeDocs: () => spy(new W.DocSync({ retryMs: 200, askMs: 5000 }), () => boardConnected++),
+    makeChannel: () => new BroadcastChannel(W.docSyncChannel(wb.ws.name)),
+    journalActive: () => wb.journalActive(),
+    setDocs: (d) => ob.setDocs(d),
+    warn,
+  });
+  check(await until(() => boardConnected >= 1 && ob.isHolder() && ob.view().s.state === "synced", 15_000), "owners: the board's page (followDocSync): its owner's client made again with a DocSync, connected, the holder still: " + J({ boardConnected, holder: ob.isHolder() }));
+  const on = W.SyncOwner.of(wn, { origin: location.origin });
+  on.start();
+  check((await on.clientRunning(15_000)) === true && !on.isHolder() && ob.isHolder(), "owners: the notebook's owner runs a client, waiting for the lock the board holds");
+  const H = await import("./nb.js");
+  const hdb = await W.openHistoryDb();
+  const KIT = H.journalClasses({ IdbStore: W.IdbStore, IdbPatchStore: W.IdbPatchStore });
+  const id = crypto.randomUUID();
+  let st = null;
+  const out = await W.enableDocSync({
+    loadHistory: async () => H,
+    makeDocs: () => spy(new W.DocSync({ retryMs: 200, askMs: 5000 }), () => nbConnected++),
+    makeChannel: () => new BroadcastChannel(W.docSyncChannel(wn.ws.name)),
+    register: W.registerJournalWriter,
+    own: async () => () => {},
+    setReadOnly() {},
+    readOnlyNow: () => !st || !!st.viewOnly,
+    flush() {},
+    saved: async () => {},
+    activate: () => wn.activateJournal(),
+    begun: () => wn.journalBegun(),
+    reopen: async () => { st = new KIT.JournalStore(wn.main, hdb, id, { name: "owners", mode: "python", cells: [{ id: "a", code: "x0" }] }, H); await st.load(); return !!st.journaled; },
+    setDocs: (d) => on.setDocs(d),
+    needReload() {},
+    warn,
+  });
+  await sleep(1000);
+  check(out === "on" && st?.writer && st?.synced && ob.isHolder() && !on.isHolder() && nbConnected === 0 && boardConnected === 1, "owners: the notebook page's switch on, its notebook the synced writer; the board still holds, the notebook's owner still waits (its DocSync never connected): " + J({ out, holder: ob.isHolder(), nbConnected, boardConnected }));
+  const B = await deviceB();
+  try {
+    const bi = await B("init", nm.name + "-b");
+    check(bi.held && bi.out === "on" && bi.on, "owners: device B: its own owner holds its connection, the switch on: " + J(bi));
+    check(await B("arrived", id, 20_000), "owners: A's new notebook reaches B, sent on the board's connection (the notebook's owner waiting)");
+    const bo = await B("open", id);
+    check(bo.codes === J([["a", "x0"]]) && bo.writer, "owners: …B's record is it: " + J(bo));
+    const r1 = await new Promise((ok, no) => { const r = wn.main.transaction("notebooks").objectStore("notebooks").get(id); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+    const e1 = await st.save({ name: r1.name, mode: r1.mode, id, cells: [{ id: "a", code: "x1" }], baseRev: r1.rev });
+    check(!!e1?.saved && (await B("waitRecord", id, J([["a", "x1"]]))) === J([["a", "x1"]]) && ob.isHolder() && !on.isHolder(), "owners: an edit in the notebook's tab (its owner waiting) reaches B through the board's connection");
+    check((await B("edit", id, [["a", "x1"], ["b", "y1"]])) === true, "owners: B edits");
+    check(await until(async () => (await codes(id)) === J([["a", "x1"], ["b", "y1"]]), 20_000) && ob.isHolder() && !on.isHolder(), "owners: …B's edit arrives in the notebook's tab through the board's connection: " + (await codes(id)));
+    // (the board's page closes: its owner suspended for good, as pagehide does, and its channel closed)
+    unfollow();
+    s.dispose();
+    ob.destroy();
+    check(await until(() => on.isHolder() && nbConnected >= 1 && on.view().s.state === "synced", 20_000), "owners: the board's page closed: the notebook's owner takes the lock by itself, and its DocSync is connected: " + J({ holder: on.isHolder(), nbConnected, state: on.view().s.state }));
+    const r3 = await new Promise((ok, no) => { const r = wn.main.transaction("notebooks").objectStore("notebooks").get(id); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+    const e3 = await st.save({ name: r3.name, mode: r3.mode, id, cells: [{ id: "a", code: "x3" }, { id: "b", code: "y1" }], baseRev: r3.rev });
+    check(!!e3?.saved && (await B("waitRecord", id, J([["a", "x3"], ["b", "y1"]]))) === J([["a", "x3"], ["b", "y1"]]), "owners: …an edit in the notebook's tab then reaches B on its own connection");
+    check((await B("edit", id, [["a", "x3"], ["b", "y4"]])) === true && (await until(async () => (await codes(id)) === J([["a", "x3"], ["b", "y4"]]), 20_000)), "owners: …and B's next edit arrives in it: " + (await codes(id)));
+    const bw = await B("warnings");
+    check(warns.length === 0 && bw.length === 0, "owners: no warnings on either device: " + J([...warns, ...bw]).slice(0, 300));
+  } finally {
+    await B("close").catch(() => {});
+    B.remove();
+    try { await st?.release(); } catch {}
+    on.destroy();
+    hdb.close();
+  }
+}
+
 async function s5Tabs() {
   // (status across tabs: only the holder publishes; a follower opened later gets it at once; a flood of status? costs
   // one bit and at most one message a slot; an old holder's messages dropped; nothing echoed)
@@ -3405,7 +3525,7 @@ async function docWire() {
   await stop(c);
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs };
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5DocsOwners };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

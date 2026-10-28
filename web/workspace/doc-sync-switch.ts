@@ -77,8 +77,11 @@ export interface EnableDeps {
   makeChannel(): Channel | null;
   /** the journal's writers registered (both kinds: activation needs them) */
   register(kind: "notebooks" | "boards"): void;
+  /** the notebook owned by the switch until it is done (it waits while the page recreates a session, which then
+   * waits for the switch): resolves the release */
+  own(): Promise<() => void>;
   /** the open notebook read-only, or not; what holds for it now (no store attached, another tab writing it, a
-   * quarantined workspace: read-only) */
+   * quarantined workspace, a session being recreated: read-only) */
   setReadOnly(ro: boolean): void;
   readOnlyNow(): boolean;
   /** the open notebook's pending saves written */
@@ -103,13 +106,14 @@ export type Enabled = "on" | "off" | "reload";
 /**
  * The switch turned on in the notebook page, once the gate allowed (astra's DEVSW-2, daybreak3's review of #266):
  *   1. what can fail and changes nothing (the history bundle, the DocSync, the channel): a failure, `off`;
- *   2. the notebook read-only, its saves written (a failure, `off`); then the journal's activation, the one lasting step:
+ *   2. the notebook owned (after a session's recreation, astra's DEVSW-2-R2), read-only, its saves written (a failure,
+ *      `off`); then the journal's activation, the one lasting step:
  *      refused or failed, `off` if it never began, else `reload`;
  *   3. DOC_SYNC on (the reopened notebook's load starts its synced history from it), the notebook reopened through the
  *      journal: a failure, DOC_SYNC off again and `reload`;
  *   4. only then the hooks, the channel's listener and the owner's DocSync, and the other tabs told (`on`).
  * The notebook's read-only is set back in a `finally` on every return and throw, from what holds then (never editable
- * with no store attached), and kept on for `reload`.  A throw anywhere after activation was asked is `reload` if it
+ * with no store attached), and kept on for `reload`; only then is the notebook released.  A throw anywhere after activation was asked is `reload` if it
  * began (asked again, and if that can't be told, assumed).
  */
 export async function enableDocSync(d: EnableDeps): Promise<Enabled> {
@@ -122,10 +126,11 @@ export async function enableDocSync(d: EnableDeps): Promise<Enabled> {
     d.warn("sync: notebooks' switch not ready:", e);
     return "off";
   }
-  let out: Enabled = "off", asked = false;
+  let out: Enabled = "off", asked = false, release: (() => void) | null = null;
   try {
     d.register("notebooks");
     d.register("boards");
+    release = await d.own();
     d.setReadOnly(true);
     d.flush();
     await d.saved();
@@ -150,8 +155,15 @@ export async function enableDocSync(d: EnableDeps): Promise<Enabled> {
     }
     return out;
   } finally {
-    d.setReadOnly(out === "reload" || d.readOnlyNow());
-    if (out === "reload") d.needReload();
+    // (only by the switch that owns the notebook; released after it, whatever happens)
+    if (release) {
+      try {
+        d.setReadOnly(out === "reload" || d.readOnlyNow());
+        if (out === "reload") d.needReload();
+      } finally {
+        release();
+      }
+    }
   }
 }
 
