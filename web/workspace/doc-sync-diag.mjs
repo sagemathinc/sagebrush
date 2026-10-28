@@ -6,11 +6,20 @@
 // - free text (a page's console, the Sync panel's text, an error message): only through scrub(), which drops, line by
 //   line, everything after a credential-like key (quoted, JSON-escaped, HTML- or %-encoded, any case: cookie,
 //   authorization, session, token, secret, password, auth, bearer, credential, api key, sid, jwt, signature), a bearer
-//   or basic value, a URL's userinfo, every query and fragment (absolute http/https/ws/wss, relative, %-encoded), and
-//   every opaque run of 24 or more token characters; control characters become spaces; lines are joined with " | ".
+//   or basic value to the end of its line, a URL's userinfo, every query and fragment (absolute http/https/ws/wss,
+//   relative, %- or entity-encoded) to the end of its line (r5, astra's R4-A1: never stopping at a quote or a
+//   backslash), and every opaque run of 24 or more token characters; control characters become spaces; lines are
+//   joined with " | ".  scrub() is idempotent on its own output, and every structured line passes it unchanged (no
+//   "#", no key, no query), so `--filter` can scrub everything again.
 // Nothing is printed raw.  `bun doc-sync-diag.mjs --controls` (the VM run's pre-step) sends sentinel secrets in each of
 // those forms and harmless method/path lines through these same emitters to stdout, then checks what they printed;
 // the VM judge checks the whole run.log too (no sentinel anywhere, every harmless marker kept).
+// r5 (daybreak3's R4-D3-1): every output of test-doc-sync.mjs is one of the formatters below (it has no console.* of
+// its own): the aggregate failures with the page errors, the SHOW lines, the ok line, a step, the deadline, the outer
+// catch, the bundle-build, harness-import and enable failures, a census hook's failure; and guardConsole() sends any
+// in-process console call (the reference server's warns, the cloud harness's JavaScript) through scrub().  The
+// printers are saved when this file loads, so a guarded console never loops back; the controls drive every formatter
+// and the guarded console with the shapes the test hands them.
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,29 +42,46 @@ const KEYED = new RegExp(String.raw`(^|[^A-Za-z0-9])(${QUOTE}${KEY}${QUOTE}${SEP
 /** Free text, made safe to print: see the header.  At most `n` characters. */
 export function scrub(text, n = 300) {
   const lines = String(text ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split(/\r\n|\r|\n|\u2028|\u2029|\\r\\n|\\n|\\r/);
-  const out = lines.map((s) => s
+  // (r5: the rules apply to the lines joined, so a redaction runs to the end of the text, across the lines after it,
+  // and scrub(scrub(x)) is scrub(x): --filter's second pass changes nothing it printed)
+  const r = rules(lines.join(" | "));
+  // (cut to n, then the rules once more: a cut through a marker ("<redac") is made whole again, never half a value)
+  return r.length <= n ? r : rules(r.slice(0, n));
+}
+// (scrub()'s rules, in order, on the joined text; idempotent on their own output)
+function rules(s) {
+  return s
     .replace(/[\x00-\x1f\x7f]/g, " ")
     .replace(KEYED, "$1$2<redacted>")
-    .replace(/\b(bearer|basic|digest|negotiate)\s+\S+/gi, "$1 <redacted>")
-    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*@/gi, "$1<redacted>@")
-    .replace(/(?:[?#]|%3f|%23|&#63;|&#35;)[^\s"'`<>\\]+/gi, "?<dropped>")
-    .replace(/[A-Za-z0-9+/_=-]{24,}/g, "<opaque>"));
-  return out.join(" | ").slice(0, n);
+    .replace(/\b(bearer|basic|digest|negotiate)\s+\S[\s\S]*$/i, "$1 <redacted>")
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/gi, "$1<redacted>@")
+    .replace(/(?:[?#]|%3f|%23|&#63;|&#35;)(?=\S)[\s\S]*$/i, "?<dropped>")
+    .replace(/[A-Za-z0-9+/_=-]{24,}/g, "<opaque>");
 }
 
 // (the last 60 structured front lines, for a stopped case)
 const recent = [];
-const out = (s) => console.log(s);
+// (the printers, saved now: guardConsole() replaces console's methods later; `tap` is the controls' copy of each line)
+const rawLog = console.log.bind(console), rawErr = console.error.bind(console);
+let tap = null;
+const out = (s) => { tap?.push(s); rawLog(s); };
+const err = (s) => { tap?.push(s); rawErr(s); };
+// (one console argument as text: an Error as its stack, a string as itself, anything else as JSON)
+const arg = (x) => {
+  if (x instanceof Error) return x.stack ?? String(x);
+  if (typeof x === "string") return x;
+  try { return JSON.stringify(x) ?? String(x); } catch { return String(x); }
+};
 const front = (s) => { recent.push(s); if (recent.length > 60) recent.shift(); out(s); };
 export const emit = {
-  syncStart: (k, m, p) => front(`front sync #${int(k)} start ${safeMethod(m)} ${safePath(p)}`),
-  syncEnd: (k, m, p, status, ms) => front(`front sync #${int(k)} end ${safeMethod(m)} ${safePath(p)} ${int(status)} ${int(ms)}ms`),
-  syncError: (k, m, p, name, ms) => front(`front sync #${int(k)} end ${safeMethod(m)} ${safePath(p)} error ${word(name, /^[A-Za-z]{1,40}$/, "Error")} ${int(ms)}ms`),
-  sockOpen: (k, dev) => front(`front socket #${int(k)} open (device ${word(dev, /^[A-D]$/, "?")})`),
-  sockUp: (k, ms) => front(`front socket #${int(k)} upstream open ${int(ms)}ms`),
-  sockNoUp: (k, ms) => front(`front socket #${int(k)} no upstream ${int(ms)}ms`),
-  sockServerClosed: (k, code) => front(`front socket #${int(k)} closed by the server ${int(code)}`),
-  sockClosed: (k, code) => front(`front socket #${int(k)} closed ${int(code)}`),
+  syncStart: (k, m, p) => front(`front sync ${int(k)} start ${safeMethod(m)} ${safePath(p)}`),
+  syncEnd: (k, m, p, status, ms) => front(`front sync ${int(k)} end ${safeMethod(m)} ${safePath(p)} ${int(status)} ${int(ms)}ms`),
+  syncError: (k, m, p, name, ms) => front(`front sync ${int(k)} end ${safeMethod(m)} ${safePath(p)} error ${word(name, /^[A-Za-z]{1,40}$/, "Error")} ${int(ms)}ms`),
+  sockOpen: (k, dev) => front(`front socket ${int(k)} open (device ${word(dev, /^[A-D]$/, "?")})`),
+  sockUp: (k, ms) => front(`front socket ${int(k)} upstream open ${int(ms)}ms`),
+  sockNoUp: (k, ms) => front(`front socket ${int(k)} no upstream ${int(ms)}ms`),
+  sockServerClosed: (k, code) => front(`front socket ${int(k)} closed by the server ${int(code)}`),
+  sockClosed: (k, code) => front(`front socket ${int(k)} closed ${int(code)}`),
   /** Free text, scrubbed. */
   text: (prefix, s, n = 300) => out(safePrefix(prefix) + scrub(s, n)),
   /** A page's turn-on phases, each from the fixed vocabulary. */
@@ -65,12 +91,45 @@ export const emit = {
     ? `holder ${st.holder === true} state ${word(st.state, /^[a-z_-]{1,24}$/, "?")} running ${st.running === true} connected ${int(st.connected)}`
     : "(none)")),
   /** The sync requests still waiting: number, method, path, age. */
-  waiting: (prefix, list) => out(safePrefix(prefix) + "sync requests still waiting: " + (list.map(({ k, method, path, ms }) => `#${int(k)} ${safeMethod(method)} ${safePath(path)} ${int(ms)}ms`).join("; ") || "none")),
+  waiting: (prefix, list) => out(safePrefix(prefix) + "sync requests still waiting: " + (list.map(({ k, method, path, ms }) => `${int(k)} ${safeMethod(method)} ${safePath(path)} ${int(ms)}ms`).join("; ") || "none")),
   /** The sockets open (their numbers) and the totals. */
   counts: (prefix, open, sockets, requests) => out(safePrefix(prefix) + `sockets open: ${open.map(int).join(" ") || "none"} of ${int(sockets)}; sync requests ${int(requests)}`),
   /** The last n structured front lines, as they were printed. */
   recent: (prefix, n = 60) => { const r = recent.slice(-n); out(safePrefix(prefix) + `the front's last ${r.length} line(s):`); for (const s of r) out(safePrefix(prefix) + "  " + s); },
+  // ---- r5: every other output of test-doc-sync.mjs
+  /** A step: its time and name (scrubbed). */
+  step: (secs, what) => out(`step ${Number.isFinite(secs) ? secs.toFixed(1) : "?"}s: ${scrub(what, 120)}`),
+  /** A census hook that failed: its checkpoint name and exit status. */
+  census: (name, rc) => out(`CENSUS AT ${word(name, /^[a-z0-9:-]{1,40}$/, "?")} FAILED (its script's rc ${int(rc)})`),
+  /** The suite's success line. */
+  ok: (n) => out(`ok: notebooks' contents between two devices, ${int(n)} checks`),
+  /** Every check's text (SHOW), scrubbed. */
+  show: (results) => { for (const [, what] of results) out("  " + scrub(what, 2000)); },
+  /** The failed checks and the page errors, as one FAIL block, each text scrubbed; returns how many. */
+  failures: (results, errors) => {
+    const fails = [...results.filter(([ok]) => !ok).map(([, what]) => what), ...errors.map((e) => "page error: " + e)];
+    if (fails.length) { err(`FAIL: ${int(fails.length)} of ${int(results.length)} checks`); for (const f of fails) err("  " + scrub(f, 2000)); }
+    return fails.length;
+  },
+  /** The run's deadline: where it was, and the page errors so far. */
+  deadline: (step, errors) => { err("FAIL: the run's deadline passed at step: " + scrub(step, 200)); for (const e of errors) err("page error: " + scrub(e, 2000)); },
+  /** The outer catch: the error's stack (or value), scrubbed. */
+  crash: (e) => err("FAIL: " + scrub(arg(e), 4000)),
+  /** The page bundle's build failed: its logs, scrubbed. */
+  buildFail: (logs) => err("FAIL: the page bundle didn't build: " + scrub((logs ?? []).map(arg).join("\n"), 4000)),
+  /** SERVER=cloud without cloud's harness: the import's error, scrubbed. */
+  harnessFail: (e) => err("FAIL: SERVER=cloud needs cloud's web/sync/test-harness.mjs (run under cloud's scripts/with-core.sh): " + scrub(e?.message ?? arg(e), 600)),
+  /** The account's enable didn't answer active: its answer, scrubbed. */
+  enableFail: (answer) => err("FAIL: enable: " + scrub(arg(answer), 600)),
 };
+/** Every in-process console call from here on (the reference server's warns, the cloud harness's JavaScript, anything
+ * else in this process) printed as "console: " + its scrubbed text; returns a function restoring the console. */
+export function guardConsole() {
+  const saved = Object.fromEntries(["log", "info", "debug", "warn", "error"].map((m) => [m, console[m]]));
+  for (const m of ["log", "info", "debug"]) console[m] = (...a) => out("console: " + scrub(a.map(arg).join(" "), 2000));
+  for (const m of ["warn", "error"]) console[m] = (...a) => err("console: " + scrub(a.map(arg).join(" "), 2000));
+  return () => Object.assign(console, saved);
+}
 
 // ---- the controls (the VM run's pre-step): sentinels through the emitters above, checked
 function controls() {
@@ -87,7 +146,7 @@ function controls() {
     `KEEP-08 WebSocket WSS://host/api/sync?sid=${S(11)}#${S(12)}`,
     `KEEP-09 relative /api/sync/v1/status?x=${S(13)} and v1/account?${S(14)} and page#${S(15)}`,
     `KEEP-10 mixed CoOkIe = ${S(16)}`,
-    `KEEP-11 first line\nAuThOrIzAtIoN: ${S(17)}\nKEEP-12 third line`,
+    `KEEP-11 first line\nAuThOrIzAtIoN: ${S(17)}\nthird line (redacted too: a redaction runs to the end of the text)`,
     `KEEP-13 /api/sync%3Fsid%3D${S(18)}`,
     `KEEP-14 wss://user:${S(19)}@host/x`,
     `KEEP-15 Bearer ${S(20)}`,
@@ -95,12 +154,28 @@ function controls() {
     `KEEP-17 &quot;authorization&quot;:&quot;${S(23)}&quot;`,
     `KEEP-18 Set-Cookie: sb_session=${S(24)}; Path=/`,
     `KEEP-19 'cookie': '${S(29)}' and \`token\`=${S(30)}`,
-    `KEEP-20 first\\nX-Auth-Token: ${S(31)}\\r\\nKEEP-21 after an escaped newline`,
+    `KEEP-12 first\\nX-Auth-Token: ${S(31)}\\r\\nafter an escaped newline (redacted too)`,
     `KEEP-22 the panel says Turn on sync? then Sync turned on (200 ms)`,
   ];
+  // (r5, R4-A1: quoted query and fragment values, plain and as said/warnings are printed: J of an array of strings)
+  const quoted = [
+    `KEEP-36 wss://host/api?x='${S(60)}' tail`,
+    `KEEP-37 https://host/a?x="${S(61)}" tail`,
+    `KEEP-38 /api/sync#"${S(62)}" tail`,
+    `KEEP-39 page#'${S(63)}'`,
+    JSON.stringify([`KEEP-40 say: panel wss://h/a?x="${S(64)}" more`, `warn: x#"${S(65)}"`]),
+    JSON.stringify([`KEEP-41 warn: panel https://h/b?y=\"${S(66)}\" more`]),
+  ];
   const printed = [];
-  const real = console.log;
-  console.log = (...a) => { const s = a.map(String).join(" "); printed.push(s); real(s); };
+  tap = printed;
+  const restore = guardConsole();
+  // (r5: each formatter and the guarded console, with the shapes test-doc-sync hands them)
+  const results = [
+    [true, "1: a passing check KEEP-23"],
+    [false, `14: the case stopped: KEEP-24 D1: {"exceptionDetails":{"text":"Uncaught","exception":{"description":"Error: GET wss://h/api/sync?sid=${S(40)}"}}}`],
+    [false, `13: the case stopped: KEEP-25 Error: Authorization: Bearer ${S(41)}`],
+  ];
+  const errors = [`TypeError: fetch failed KEEP-26 https://u:${S(42)}@x/y?token=${S(43)}`];
   try {
     for (const [i, t] of fixtures.entries()) emit.text(`diag-control ${i + 1}: `, t, 600);
     emit.syncStart(1, "GET", `/api/sync/v1/status?sid=${S(25)}`);
@@ -115,25 +190,54 @@ function controls() {
     emit.waiting("diag-control: ", [{ k: 5, method: "GET", path: `/api/sync/v1/x?${S(33)}`, ms: 900 }]);
     emit.counts("diag-control: ", [4], 4, 3);
     emit.recent("diag-control recent: ", 3);
+    for (const [i, q] of quoted.entries()) emit.text(`diag-control quoted ${i + 1}: `, q, 600);
+    emit.step(2.5, `D1.turnOn?x=${S(44)}`);
+    emit.ok(5);
+    emit.show(results);
+    emit.failures(results, errors);
+    emit.deadline(`D1.turnOn?x=${S(45)}`, [`KEEP-27 Error: secret=${S(46)}`]);
+    emit.crash(new Error(`boom KEEP-28 token: ${S(47)}`));
+    emit.buildFail([`KEEP-29 error: Could not resolve "x" at /tmp/x.js?v=${S(48)}`, "KEEP-30 a build log line"]);
+    emit.harnessFail(new Error(`KEEP-31 Cannot find module file:///x/test-harness.mjs#${S(49)} more`));
+    emit.enableFail({ note: "KEEP-32", state: "off", cookie: S(50) });
+    console.warn("reference server:", new Error(`KEEP-33 stale Authorization: Bearer ${S(51)}`));
+    console.log("KEEP-34 a harness note", { url: `ws://h/x?sid=${S(52)}` });
+    console.error(`KEEP-35 a product error with session=${S(53)}`);
   } finally {
-    console.log = real;
+    restore();
+    tap = null;
   }
   const stem = S(0).slice(0, 4);
-  const keeps = fixtures.flatMap((t) => t.match(/KEEP-\d\d/g));
+  const keeps = [...fixtures.flatMap((t) => t.match(/KEEP-\d\d/g)), ...keeps2, ...keeps3];
   const exact = [
-    "front sync #1 start GET /api/sync/v1/status",
-    "front sync #2 end POST /api/sync/v1/enable 200 12ms",
-    "front sync #3 end POST /api/sync/v1/enable error Error 7ms",
-    "front socket #4 open (device D)",
-    "front socket #4 upstream open 3ms",
-    "front socket #4 closed by the server 1006",
-    "front socket #4 closed 1000",
+    "front sync 1 start GET /api/sync/v1/status",
+    "front sync 2 end POST /api/sync/v1/enable 200 12ms",
+    "front sync 3 end POST /api/sync/v1/enable error Error 7ms",
+    "front socket 4 open (device D)",
+    "front socket 4 upstream open 3ms",
+    "front socket 4 closed by the server 1006",
+    "front socket 4 closed 1000",
     "diag-control phases: panel made (1 ms); clicked (5 ms); ?",
     "diag-control owner: holder true state ? running true connected 1",
-    "diag-control: sync requests still waiting: #5 GET /api/sync/v1/x 900ms",
+    "diag-control: sync requests still waiting: 5 GET /api/sync/v1/x 900ms",
     "diag-control: sockets open: 4 of 4; sync requests 3",
     `diag-control ${fixtures.length}: KEEP-22 the panel says Turn on sync? then Sync turned on (200 ms)`,
+    "step 2.5s: D1.turnOn?<dropped>",
+    "ok: notebooks' contents between two devices, 5 checks",
+    "  1: a passing check KEEP-23",
+    `FAIL: ${results.filter(([ok]) => !ok).length + errors.length} of ${results.length} checks`,
+    "FAIL: the run's deadline passed at step: D1.turnOn?<dropped>",
+    "  13: the case stopped: KEEP-25 Error: Authorization:<redacted>",
+    "console: KEEP-35 a product error with session=<redacted>",
+    "diag-control quoted 1: KEEP-36 wss://host/api?<dropped>",
+    "diag-control quoted 2: KEEP-37 https://host/a?<dropped>",
+    "diag-control quoted 3: KEEP-38 /api/sync?<dropped>",
+    "diag-control quoted 4: KEEP-39 page?<dropped>",
+    'diag-control quoted 5: ["KEEP-40 say: panel wss://h/a?<dropped>',
+    'diag-control quoted 6: ["KEEP-41 warn: panel https://h/b?<dropped>',
   ];
+  const keeps3 = quoted.flatMap((t) => t.match(/KEEP-\d\d/g));
+  const keeps2 = ["KEEP-23", "KEEP-24", "KEEP-25", "KEEP-26", "KEEP-27", "KEEP-28", "KEEP-29", "KEEP-30", "KEEP-31", "KEEP-32", "KEEP-33", "KEEP-34", "KEEP-35"];
   const cases = [
     ["no sentinel in any printed line", printed.every((l) => !l.includes(stem))],
     ...keeps.map((k) => [`${k} kept`, printed.some((l) => l.includes(k))]),
@@ -141,9 +245,40 @@ function controls() {
     ["one line per fixture", fixtures.every((_, i) => printed.filter((l) => l.startsWith(`diag-control ${i + 1}: `)).length === 1)],
   ];
   let k = 0;
-  for (const [i, [name, ok]] of cases.entries()) { if (ok) k++; real(`DIAG CONTROL ${i + 1} ${ok ? "PASS" : "FAIL"}: ${name}`); }
-  real(`DIAG CONTROL FIXTURES ${fixtures.length} KEEPS ${keeps.length}`);
-  real(`DIAG CONTROLS ${k} of ${cases.length} PASS`);
+  for (const [i, [name, ok]] of cases.entries()) { if (ok) k++; rawLog(`DIAG CONTROL ${i + 1} ${ok ? "PASS" : "FAIL"}: ${name}`); }
+  // (r5: raw lines with sentinels written straight to stdout, as Miniflare/workerd or Bun itself would: the runner pipes
+  // this run through --filter, and the judge requires every marker kept and no sentinel in run.log)
+  const top = Math.max(...keeps.map((m) => Number(m.slice(5))));
+  const external = [
+    `KEEP-${top + 1} workerd: GET /api/sync/v1/x?token=${S(70)} 200`,
+    `KEEP-${top + 2} error: Uncaught Error: Authorization: Bearer ${S(71)}`,
+    `KEEP-${top + 3} [mf] wss://u:${S(72)}@h/api?x='${S(73)}'`,
+    `KEEP-${top + 4} {"cookie":"sb_session=${S(74)}"}`,
+  ];
+  for (const x of external) rawLog(x);
+  // (every marker the run must keep, listed for the judge: these and the external ones, each in some other line)
+  const markers = [...keeps, ...external.map((x) => x.split(" ")[0])];
+  rawLog(`DIAG CONTROL MARKERS ${markers.join(" ")}`);
+  rawLog(`DIAG CONTROL FIXTURES ${fixtures.length} KEEPS ${markers.length}`);
+  rawLog(`DIAG CONTROLS ${k} of ${cases.length} PASS`);
   process.exit(k === cases.length ? 0 : 1);
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv.includes("--controls")) controls();
+// ---- --filter (r5, the runner's pipe for the suites and the controls): every line of stdin scrubbed to stdout, between
+// a start line and an end line counting them (the judge checks the section holds exactly those lines): whatever the
+// test process, Miniflare/workerd or Bun itself writes reaches run.log only through scrub()
+async function filter() {
+  rawLog("DIAG FILTER START");
+  let n = 0, buf = "";
+  const dec = new TextDecoder();
+  const line = (s) => { rawLog(scrub(s, 4000)); n++; };
+  for await (const chunk of process.stdin) {
+    buf += dec.decode(chunk, { stream: true });
+    for (let i; (i = buf.indexOf("\n")) >= 0; buf = buf.slice(i + 1)) line(buf.slice(0, i));
+  }
+  buf += dec.decode();
+  if (buf) line(buf);
+  rawLog(`DIAG FILTER END ${n} line(s)`);
+}
+const main = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (main && process.argv.includes("--controls")) controls();
+else if (main && process.argv.includes("--filter")) await filter();

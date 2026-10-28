@@ -16,7 +16,10 @@ import { fileURLToPath } from "node:url";
 import { ReferenceServer, SESSION_COOKIE } from "../sync-protocol/reference-server.ts";
 import { accountHash } from "../sync-protocol/protocol.ts";
 import { devtoolsPort } from "../test-port.mjs";
-import { emit } from "./doc-sync-diag.mjs";
+import { emit, guardConsole } from "./doc-sync-diag.mjs";
+// (r5: before anything that can print: every in-process console call from here on is scrubbed (doc-sync-diag.mjs
+// prints through its own printers, saved when it loaded, so this never loops back))
+guardConsole();
 
 const here = dirname(fileURLToPath(import.meta.url));
 const J = JSON.stringify;
@@ -37,15 +40,16 @@ writeFileSync(join(src, "entry.js"), [
 ].join("\n"));
 const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
 rmSync(src, { recursive: true, force: true });
-if (!b.success) { console.error(b.logs.join("\n")); process.exit(1); }
+if (!b.success) { emit.buildFail(b.logs); process.exit(1); }
 copyFileSync(join(here, "test-doc-sync.page.js"), join(site, "device.js"));
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>doc sync test</title><script type="module" src="./device.js"></script>`);
 
 // ---- the server, and the front
 const CLOUD = process.env.SERVER === "cloud";
-// (r4: every line this run prints about the sync API, the sockets, the pages and a stopped case 14 is emitted by
-// ./doc-sync-diag.mjs: structured lines from allow-listed fields, free text only through its scrub(); nothing raw, and
-// no stream of this process is wrapped)
+// (r4, r5: everything this run prints is emitted by ./doc-sync-diag.mjs: structured lines from allow-listed fields,
+// any dynamic text only through its scrub(); this file has no console call of its own, no stream of this process is
+// wrapped, and any in-process console call (the reference server's, the cloud harness's) is scrubbed (guardConsole,
+// above); the runner pipes this process's stdout and stderr through doc-sync-diag.mjs --filter as well)
 // (the front's sync requests and sockets: numbered; the open ones, for a stopped case)
 let proxyN = 0, sockN = 0;
 const proxyOpen = new Map(), sockOpen = new Set();
@@ -55,13 +59,13 @@ const SUITE = CLOUD ? "cloud" : "ref";
 const censusAt = (name) => {
   if (!process.env.FUDBUS_AT) return;
   const r = Bun.spawnSync(["bash", process.env.FUDBUS_AT, `${SUITE}:${name}`], { stdout: "inherit", stderr: "inherit" });
-  if (r.exitCode !== 0) console.log(`CENSUS AT ${SUITE}:${name} FAILED (its script's rc ${r.exitCode})`);
+  if (r.exitCode !== 0) emit.census(`${SUITE}:${name}`, r.exitCode);
 };
 const ACCOUNT = "d5d5d5d5-0000-4d5d-8d5d-d5d5d5d5d5d5";
 let ref = null, cloud = null;
 if (CLOUD) {
   const harness = await import("../sync/test-harness.mjs").catch((e) => {
-    console.error("FAIL: SERVER=cloud needs cloud's web/sync/test-harness.mjs (run under cloud's scripts/with-core.sh): " + e.message);
+    emit.harnessFail(e);
     process.exit(1);
   });
   cloud = await harness.startCloud({ accounts: [ACCOUNT] });
@@ -71,7 +75,7 @@ const signIn = async () => (CLOUD ? await cloud.signIn(ACCOUNT) : `${SESSION_COO
 const sessions = { A: await signIn(), B: await signIn(), C: await signIn(), D: await signIn() };
 // (sync on for the account, as its first device's enable does: off, the server refuses every hello `readonly`)
 const enabled = await (CLOUD ? cloud.enable(sessions.A) : ref.fetch(new Request("http://ref/api/sync/v1/enable", { method: "POST", headers: { cookie: sessions.A } }))).then((r) => r.json());
-if (enabled.state !== "active") { console.error("FAIL: enable: " + J(enabled)); process.exit(1); }
+if (enabled.state !== "active") { emit.enableFail(enabled); process.exit(1); }
 // (what the front does to the next `batches` sent to a device: rewrite its chain, its owner, or add a snapshot)
 const tamper = { A: null, B: null };
 // (the next request of a kind answered with a refusal instead: the request still goes to the server, which does what
@@ -192,10 +196,9 @@ const noteConsole = (s) => { pageConsole.push(String(s).slice(0, 2000)); if (pag
 // (its own deadline: a hang anywhere ends the run here, the browser killed, saying where it was)
 let step = "start";
 const t0 = Date.now();
-const progress = (what) => { step = what; console.log(`step ${((Date.now() - t0) / 1000).toFixed(1)}s: ${what}`); if (/^case \d+$/.test(what)) censusAt(what.replace(" ", "-")); };
+const progress = (what) => { step = what; emit.step((Date.now() - t0) / 1000, what); if (/^case \d+$/.test(what)) censusAt(what.replace(" ", "-")); };
 const deadline = setTimeout(() => {
-  console.error(`FAIL: the run's deadline passed at step: ${step}`);
-  for (const e of errors) console.error("page error: " + e);
+  emit.deadline(step, errors);
   try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   try { rmSync(profile, { recursive: true, force: true }); rmSync(site, { recursive: true, force: true }); } catch {}
   process.exit(2);
@@ -762,17 +765,14 @@ try {
     emit.recent("diag14: ", 60);
   }
   censusAt("cases-done");
-  const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
-  for (const e of errors) fails.push("page error: " + e);
-  if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
-  else {
-    console.log(`ok: notebooks' contents between two devices, ${results.length} checks`);
-    if (process.env.SHOW) for (const [, what] of results) console.log("  " + what);
+  if (!emit.failures(results, errors)) {
+    emit.ok(results.length);
+    if (process.env.SHOW) emit.show(results);
     code = 0;
   }
   ws.close();
 } catch (e) {
-  console.error("FAIL: " + (e?.stack ?? e));
+  emit.crash(e);
 } finally {
   try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   front.stop(true);
