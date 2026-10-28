@@ -370,14 +370,22 @@ export class Approvals {
   }
 
   /**
-   * The submit check, computed on one snapshot (approvals included: adding
-   * one meanwhile makes it stale too).  `request`: the run's
+   * The submit check, computed on one snapshot.  `request`: the run's
    * request id (one per submission; a batch's cells are its batch indexes).
-   * A send verdict must then be admit()ted, synchronously, right before the
-   * send.
+   * Whatever it finds, if anything it was computed on changed meanwhile the
+   * verdict is stale: skip (never send, nor wait).  A send verdict must then
+   * be admit()ted, synchronously, right before the send.
    */
   async check(frozen: Frozen, request: string): Promise<Verdict> {
     const s = this.snap(frozen.cells);
+    const v = await this.verdictIn(s, frozen, request);
+    // (stale takes precedence over every verdict reached after an await)
+    if (this.snap(frozen.cells).key !== s.key) return { send: false, skip: "something changed while it was being checked" };
+    return v.send ? { send: true, plan: v.plan, token: { cells: [...frozen.cells], key: s.key, consumed: false } } : v;
+  }
+
+  // The submit check's verdict on a snapshot (a send verdict without its token: check() adds it).
+  private async verdictIn(s: Snapshot, frozen: Frozen, request: string): Promise<{ send: true; plan: Planned[] } | { send: false; wait: string } | { send: false; skip: string }> {
     // 1. the approvals and the document it was queued under
     if (s.approvalEpoch !== frozen.approvalEpoch || s.doc !== frozen.doc) return { send: false, skip: "approvals were reset or the notebook was replaced" };
     // 5. the kernel it was queued for, still bound and ready
@@ -421,9 +429,7 @@ export class Approvals {
       planned.set(cell, vid);
       plan.push({ cell, eid, xi, pi, vid, attempt: 0, recordsGeneration: s.recordsGeneration, approvalEpoch: s.approvalEpoch, doc: s.doc });
     }
-    // (computed on the snapshot only if it is still the state now: anything changed while hashing, and it's stale)
-    if (this.snap(frozen.cells).key !== s.key) return { send: false, skip: "something changed while it was being checked" };
-    return { send: true, plan, token: { cells: [...frozen.cells], key: s.key, consumed: false } };
+    return { send: true, plan };
   }
 
   /**
