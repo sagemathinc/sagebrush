@@ -19,7 +19,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, ciFailing, waiverErrors, widenedPick, withWaiver, xkRowOutcome } from "./interrupt-classify.mjs";
 import { killTracked, killTree, onStop, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
-const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
+// (SB_BASELINE: another baseline, for checking the harness: its tests pin their fake rows there, never in the real one)
+const BASELINE = JSON.parse(readFileSync(process.env.SB_BASELINE ?? new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 // William's waivers of the Stop bound (only active records; a malformed registry fails the run, below)
 const WAIVERS = JSON.parse(readFileSync(new URL("./interrupt-waivers.json", import.meta.url), "utf8")).records;
 
