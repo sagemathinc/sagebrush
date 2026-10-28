@@ -186,8 +186,14 @@ def classify(rec, set_name):
                 out.append(("FAIL", "targeted: required phase %s has no row" % p))
         for p, u in sorted(ph["not_applicable"].items()):
             out.append(("N/A", "targeted %s: not applicable here (guaranteed work %d units < 2^16)" % (p, u)))
+    na = set((ph or {}).get("not_applicable", {}))
     for r in targeted:
-        out.append(("PASS" if targeted_ok(r) else "FAIL", "targeted " + json.dumps(r)))
+        if r["phase"] in na:
+            # (a row for a phase that cannot be required here, e.g. from r3's
+            # fixed phase list: reported, never judged)
+            out.append(("N/A", "targeted (not applicable, reported only) " + json.dumps(r)))
+        else:
+            out.append(("PASS" if targeted_ok(r) else "FAIL", "targeted " + json.dumps(r)))
     s = rec.get("sigint")
     if s is None:
         return out
@@ -319,6 +325,34 @@ def report(recs, set_name):
     return fails
 
 
+# per shape: (R, K, C) from n, and the fewest decimal digits of an entry of A
+# and of B (lower bounds, as the child's entry formulas give them), and BigInt
+DECLARED = {
+    "1xKx1": (lambda n: (1, n, 1), 9, 9, False), "1xKxM": (lambda n: (1, n, 64), 1, 1, False),
+    "square": (lambda n: (n, n, n), 1, 1, False), "wide": (lambda n: (n, 32, n), 1, 1, False),
+    "output-heavy": (lambda n: (n, 1, n), 9, 9, False), "big": (lambda n: (1, n, 1), 300, 300, True),
+    "big-square": (lambda n: (n, n, n), 300, 300, True), "big-1xKxM": (lambda n: (1, n, 16), 300, 300, True),
+    "huge": (lambda n: (1, n, 1), 4000, 4000, True),
+}
+
+
+def declared_phases(shape, n):
+    """The child's required/not-applicable phases, from the shape alone with
+    lower-bound entry lengths (for records from logs that carry none)."""
+    dims, da, db, big = DECLARED[shape]
+    r, k, c = dims(n)
+    wl = lambda d: max(1, (3 * (d - 1) + 1) // 64)
+    dot = "zmat-big-dot" if big else "zmat-dot"
+    units = {
+        "parse": max(r * k * (da + 1), k * c * (db + 1)),
+        "zmat-scan": (r * k + k * c) * (1 if big else 2),
+        dot: r * c * (k * (wl(da) * wl(db) if big else 1) + 1),
+        "reply": r * c * 3,
+    }
+    req = [p for p in ["parse", "zmat-scan", dot, "reply"] if units[p] >= 1 << 16]
+    return dict(required=req, not_applicable={p: units[p] for p in units if p not in req}, declared_from="shape, lower-bound entry lengths")
+
+
 def from_r3_logs(targeted_log, sigint_log):
     """Records from r3's two logs (bab9c8c5's harness printed them as text):
     the targeted log's transport and phase rows (no leading/trailing split:
@@ -345,6 +379,8 @@ def from_r3_logs(targeted_log, sigint_log):
         # output lines for those: they are judged as sent, so their correctness
         # cannot be shown and they FAIL unless the lines are there)
         rec["sigint"] = dict(T=float(m[3]), sent=True, dt_ms=float(m[4]), rc=None if m[5] == "None" else int(m[5]), first=parts[0] if parts else "", last=parts[-1] if parts else "", lines=rest)
+    for rec in recs.values():
+        rec["phases"] = declared_phases(rec["shape"], rec["n"])
     return list(recs.values())
 
 
