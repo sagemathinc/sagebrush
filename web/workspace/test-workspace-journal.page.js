@@ -362,11 +362,47 @@ async function boardsFollowPhase() {
   const fpBefore = new W.IdbPatchStore(bdb, before, { followPhase: true });
   await fpBefore.loadInitial();
   check(fpBefore.phase === "ok", "a phase-following board store bound before activation is in \"ok\": " + fpBefore.phase);
+  // (refused for another reason, before the activation: a reset in another tab (another generation) is not said as
+  // TimeTravel having stopped, board's N1 on 7e4ddd5b)
+  const reset = boardId() + ":r", heard = [], off0 = W.onHistoryRefused((m) => heard.push(m));
+  const fpReset = new W.IdbPatchStore(bdb, reset, { followPhase: true });
+  await fpReset.loadInitial();
+  const was = await rawGet(bdb, "history", [FENCE, ""]);
+  await rawPut(bdb, "history", { ...was, fence: { ...was.fence, generation: was.fence.generation + 1 } });
+  await Promise.resolve(fpReset.append({ time: "2026-10-27T00:00:00.500Z", id: "q0" })).catch(() => {});
+  await sleep(150);
+  await rawPut(bdb, "history", was);
+  off0();
+  check(was?.fence?.phase === "ok" && (await rows(bdb, reset)) === 0 && heard.length === 0, "…one refused for a reset, not its phase, writes nothing and doesn't say TimeTravel stopped: " + J(heard));
   await w.activateJournal();
-  // bound before: refused after, as any writer from before (a reload binds it again)
+  // bound before: refused after, as any writer from before (a reload binds it again); said once, however many
+  // appends are refused (the board page shows it: onHistoryRefused -> showBusyNotice)
+  const said = [], off = W.onHistoryRefused((m) => said.push(m));
   await Promise.resolve(fpBefore.append({ time: "2026-10-27T00:00:01.000Z", id: "q1" })).catch(() => {});
   await sleep(150);
   check((await rows(bdb, before)) === 0, "…and after the activation its append is refused, nothing written (reload to bind again)");
+  check(typeof S.HISTORY_STOPPED === "string" && J(said) === J([S.HISTORY_STOPPED]), "…and said, that TimeTravel stopped recording in this tab: " + J(said));
+  await Promise.resolve(fpBefore.append({ time: "2026-10-27T00:00:01.500Z", id: "q1b" })).catch(() => {});
+  await sleep(150);
+  check(said.length === 1 && (await rows(bdb, before)) === 0, "…once only: a second refused append writes nothing and says nothing more: " + said.length);
+  // (the board page's notice of it (showHistoryNotice): at the top with Reload, which a deletion's progress and its
+  // end (showBusyNotice, hideBusyNotice) neither replace nor hide; a pause is still a busy notice)
+  const top = () => document.getElementById("sagebrush-reload-notice"), busy = () => document.getElementById("sagebrush-busy-notice");
+  top()?.remove();
+  W.showHistoryNotice?.(said[0], S.HISTORY_STOPPED);
+  W.showBusyNotice("Deleting old versions… 50%");
+  W.hideBusyNotice();
+  check(!!top() && top().textContent.includes(S.HISTORY_STOPPED) && [...top().querySelectorAll("button")].some((x) => x.textContent === "Reload") && !busy(), "…shown at the top with Reload, kept through a deletion's progress and its end: " + J(top()?.textContent ?? null));
+  // (a newer tab closing the database after it: the page's "can't save" is said over it, in the one box; and said
+  // first, it isn't replaced by TimeTravel's: board's R1 on 65675b8e)
+  W.showReloadNotice();
+  check(top()?.textContent.includes(W.RELOAD_TEXT ?? "updated in another tab") && !top().textContent.includes(S.HISTORY_STOPPED) && document.querySelectorAll("#sagebrush-reload-notice").length === 1, "…and a later closing of the database (showReloadNotice()) says the page can't save, in its place: " + J(top()?.textContent ?? null));
+  W.showHistoryNotice?.(S.HISTORY_STOPPED, S.HISTORY_STOPPED);
+  check(top()?.textContent.includes(W.RELOAD_TEXT ?? "updated in another tab") && !top().textContent.includes(S.HISTORY_STOPPED), "…which TimeTravel's notice, after it, doesn't replace");
+  top()?.remove();
+  W.showHistoryNotice?.(S.HISTORY_REFUSED, S.HISTORY_STOPPED);
+  check(!top() && busy()?.textContent.includes(S.HISTORY_REFUSED), "…while TimeTravel's pause is still a busy notice");
+  W.hideBusyNotice();
   // bound after: in "journal", it appends and clears; a store that doesn't follow the phase is still refused
   const fp = new W.IdbPatchStore(bdb, after, { followPhase: true });
   await fp.loadInitial();
@@ -379,6 +415,8 @@ async function boardsFollowPhase() {
   await Promise.resolve(plain.append({ time: "2026-10-27T00:00:03.000Z", id: "q3" })).catch(() => {});
   await sleep(150);
   check((await rows(bdb, after)) === 1, "…while a store that doesn't follow the phase (the board page before this build) is still refused");
+  off();
+  check(said.length === 1, "…and nothing said by the store bound after, nor by one that doesn't follow the phase: " + J(said));
   const cleared = await fp.clear().then(() => "cleared", (e) => "refused: " + String(e?.message ?? e).slice(0, 80));
   check(cleared === "cleared" && (await rows(bdb, after)) === 0, "…and the phase-following store clears its history: " + cleared);
   bdb.close();

@@ -51,16 +51,18 @@ import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { EditChannel, EDIT_BOUNDS, inlinePictures, utf8Length, type Kept } from "./edit-channel";
 import { PictureChannel, byReference } from "./edit-pictures";
-import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistoryRefused } from "../notebook/stores.js";
+import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistoryRefused, HISTORY_STOPPED } from "../notebook/stores.js";
 // (each from its own module, never the workspace barrel: the barrel re-exports the sync client by value, which
 // would keep it in the frame's and exports' build without sync)
 import { Workspace, LIMITS, registerJournalWriter, type Entry } from "../workspace/api";
 import { migrate } from "../workspace/migrate";
 import { freePath, nameOf, splitExt, safeName } from "../workspace/paths";
 import { startMigrator } from "../workspace/migrator";
-import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice } from "../workspace/notice";
-// (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
-onHistoryRefused((m: string) => showBusyNotice(m));
+import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, showHistoryNotice } from "../workspace/notice";
+// (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG;
+// that it stopped in this tab, at the journal's activation: at the top with Reload, kept until then, which no busy
+// notice (a deletion's progress, its end) replaces or hides: board's N2 on 7e4ddd5b)
+onHistoryRefused((m: string) => showHistoryNotice(m, HISTORY_STOPPED));
 import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
