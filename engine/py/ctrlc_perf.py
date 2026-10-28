@@ -1,0 +1,121 @@
+"""Ctrl-C PR B's release A/B/A cost rows (daybreak2's PR B r1 #5), VM only:
+the session's request path on PR A's worker (A) and PR B's (B), each in its
+own venv with its release wheel.
+
+    python ctrlc_perf.py PY_A PY_B OUT.json [ROUNDS]
+
+ROUNDS (default 5) rounds, each A, B, A in turn on a fresh Session; per row,
+each round's B over the mean of its two A's.  Rows (time unless said):
+  noop        500 sequential tiny requests ("1"): per-request latency p50
+  noop_tput   the same 500: requests per second (as time per request)
+  req_1mib    a 1 MiB request (a string literal of 1 MiB), 20 times: median
+  req_32mib   a 32 MiB request, 3 times: median
+  reply_10mb  a 10 MB result (repr of a 10 MB string) encoded and written, 5 times: median
+  rss_peak    the worker's VmHWM after the rows above (bytes)
+  rss_idle    the worker's VmRSS after them and an idle second (bytes)
+  threads     the worker's thread count, idle
+  fds         the worker's open file descriptors, idle
+The gate: each row's B/A median <= 1.01, with every round's ratio and the
+spread listed (no pooling across rows).  threads and fds are reported (B
+has its control thread and pipe by design).  One JSON document out.
+"""
+
+import json
+import os
+import statistics
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+CHILD = r'''
+import json, os, sys, time
+import sagebrush.session as S
+
+def proc(pid, key):
+    for line in open("/proc/%d/status" % pid):
+        if line.startswith(key + ":"):
+            return int(line.split()[1]) * (1024 if line.rstrip().endswith("kB") else 1)
+
+s = S.Session()
+pid = s.proc.pid
+out = {}
+s.run("1", mode="python")
+t = []
+t0 = time.perf_counter()
+for _ in range(500):
+    a = time.perf_counter()
+    r = s.run("1", mode="python")
+    t.append(time.perf_counter() - a)
+    assert r["result"] == "1", r
+out["noop"] = sorted(t)[len(t) // 2]
+out["noop_tput"] = (time.perf_counter() - t0) / 500
+big1 = "x = '" + "a" * (1 << 20) + "'\nlen(x)"
+t = []
+for _ in range(20):
+    a = time.perf_counter(); r = s.run(big1, mode="python"); t.append(time.perf_counter() - a)
+    assert r["result"] == str(1 << 20), r["result"]
+out["req_1mib"] = sorted(t)[len(t) // 2]
+big32 = "x = '" + "a" * (32 << 20) + "'\nlen(x)"
+t = []
+for _ in range(3):
+    a = time.perf_counter(); r = s.run(big32, mode="python", timeout=120); t.append(time.perf_counter() - a)
+    assert r["result"] == str(32 << 20), r["result"]
+out["req_32mib"] = sorted(t)[len(t) // 2]
+t = []
+for _ in range(5):
+    a = time.perf_counter(); r = s.run("'b' * 10000000", mode="python", timeout=120); t.append(time.perf_counter() - a)
+    assert len(r["result"]) == 10000002, len(r["result"])
+out["reply_10mb"] = sorted(t)[len(t) // 2]
+s.run("x = None", mode="python")
+time.sleep(1.0)
+out["rss_peak"] = proc(pid, "VmHWM")
+out["rss_idle"] = proc(pid, "VmRSS")
+out["threads"] = proc(pid, "Threads")
+out["fds"] = len(os.listdir("/proc/%d/fd" % pid))
+s.close()
+print(json.dumps(out))
+'''
+
+ROWS = ["noop", "noop_tput", "req_1mib", "req_32mib", "reply_10mb", "rss_peak", "rss_idle", "threads", "fds"]
+GATED = ["noop", "noop_tput", "req_1mib", "req_32mib", "reply_10mb", "rss_peak", "rss_idle"]
+
+
+def sample(py):
+    r = subprocess.run([py, "-c", CHILD], capture_output=True, text=True, timeout=1800, cwd="/tmp")
+    if r.returncode != 0:
+        raise RuntimeError("%s: exit %d: %s" % (py, r.returncode, r.stderr[-800:]))
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+def main():
+    py_a, py_b, out_path = sys.argv[1:4]
+    rounds = int(sys.argv[4]) if len(sys.argv) > 4 else 5
+    raw = []
+    for k in range(rounds):
+        a1 = sample(py_a)
+        b = sample(py_b)
+        a2 = sample(py_a)
+        raw.append({"a1": a1, "b": b, "a2": a2})
+        print("round %d: %s" % (k, json.dumps({row: round(b[row] / ((a1[row] + a2[row]) / 2), 4) for row in ROWS})), flush=True)
+    rows = {}
+    for row in ROWS:
+        ratios = [r["b"][row] / ((r["a1"][row] + r["a2"][row]) / 2) for r in raw]
+        rows[row] = {"median": statistics.median(ratios), "min": min(ratios), "max": max(ratios), "ratios": ratios,
+                     "a_median": statistics.median([v for r in raw for v in (r["a1"][row], r["a2"][row])]),
+                     "b_median": statistics.median([r["b"][row] for r in raw]), "gated": row in GATED,
+                     "pass": (statistics.median(ratios) <= 1.01) if row in GATED else None}
+    doc = {"py_a": py_a, "py_b": py_b, "rounds": rounds, "rows": rows, "raw": raw,
+           "ok": all(r["pass"] for r in rows.values() if r["gated"])}
+    with open(out_path, "w") as f:
+        json.dump(doc, f, indent=1)
+    for row in ROWS:
+        r = rows[row]
+        print("%-11s B/A median %.4f [%.4f, %.4f]  A %s  B %s  %s" % (row, r["median"], r["min"], r["max"], r["a_median"], r["b_median"],
+                                                                     "" if r["pass"] is None else ("ok" if r["pass"] else "OVER 1.01")))
+    print("ok" if doc["ok"] else "over the gate")
+
+
+if __name__ == "__main__":
+    main()

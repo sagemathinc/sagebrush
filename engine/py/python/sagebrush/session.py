@@ -366,6 +366,14 @@ class _Capture:
     def stream(self, name):
         return _Stream(self, name)
 
+    def release(self):
+        """After its reply is encoded: the capture sealed and its text let go
+        (daybreak2's PR B r1 #2: no earlier run's output resident while the
+        next request is read, even for a thread that kept the run's stream)."""
+        with _HOLD, self.sender.lock:
+            self.sealed = True
+            self.head, self.tail, self.tail_n, self.buf, self.pending = "", [], 0, [], 0
+
     def write(self, text, stream="stdout"):
         if not isinstance(text, str):
             raise TypeError("write() argument must be str, not %s" % type(text).__name__)
@@ -496,13 +504,14 @@ class _Run:
     """One admitted request's state, kept by assignment so that the native
     loop's fallback finds what the run got to (Ctrl-C plan r2 §3a)."""
 
-    __slots__ = ("serial", "out", "reply", "t0")
+    __slots__ = ("serial", "out", "reply", "t0", "displays")
 
     def __init__(self, serial):
         self.serial, self.out, self.reply, self.t0 = serial, None, None, time.perf_counter()
+        self.displays = []  # (this request's own: astra's CORR-CTRLC-B-1)
 
 
-def _requests(sender, shared, displays, preparse):
+def _requests(sender, shared, preparse):
     """The native loop's three callbacks (sagebrush._native._serve_requests):
     run_request(line, serial), called once per admitted request: its setup,
     the user's code and its reply, the capture sealed under the sender's lock
@@ -511,12 +520,22 @@ def _requests(sender, shared, displays, preparse):
     anywhere, in setup or past a skipped handler): the reply run_request had
     recorded, or else what its capture has, sealed, with the error; it runs
     no user code, and the loop calls it again if it is interrupted; and
-    encode(reply), the reply's line."""
+    encode(reply), the reply's line, after which the run is let go (its
+    capture released, its streams kept: _Capture.release).  A request's
+    displays are its own _Run's, never an earlier one's (astra's
+    CORR-CTRLC-B-1): a request stopped before its _Run exists has none."""
     import ast
+    import builtins
     import contextlib
     import json
 
     cur = [None]
+
+    def display(obj):
+        run = cur[0]
+        return _show(run.displays if run is not None else [], obj)
+
+    builtins.__pyjs_display__ = display
 
     def run_request(line, serial):
         run = _Run(serial)
@@ -524,7 +543,6 @@ def _requests(sender, shared, displays, preparse):
         req = json.loads(line)
         code, mode, isolated, rid = req["code"], req.get("mode", "sage"), req.get("isolated", False), req.get("id")
         want_data = req.get("data", False)
-        del displays[:]
         run.out = out = _Capture(sender, rid)
         result = error = info = data = None
         try:
@@ -542,7 +560,7 @@ def _requests(sender, shared, displays, preparse):
                     v = eval(compile(ast.Expression(last.value), "<cell>", "eval"), ns)
                     if v is not None:
                         ns["_"] = v
-                        if not (hasattr(v, "_repr_svg_") and _show(displays, v)):
+                        if not (hasattr(v, "_repr_svg_") and _show(run.displays, v)):
                             result = repr(v)
                 if want_data:
                     data = ns.get("__sagebrush_data__")
@@ -560,7 +578,7 @@ def _requests(sender, shared, displays, preparse):
             out._flush()
             out.sealed = True
             run.reply = {"id": rid, "stdout": out.text(), "stdout_chars": out.total, "output_bytes": dict(out.bytes), "result": result, "error": error,
-                         "error_info": info, "data": data if info is None else None, "displays": list(displays),
+                         "error_info": info, "data": data if info is None else None, "displays": list(run.displays),
                          "seconds": time.perf_counter() - run.t0}
         return run.reply
 
@@ -582,11 +600,15 @@ def _requests(sender, shared, displays, preparse):
             error, info = _format_exception(exc, exc.__traceback__), _error_info(exc, exc.__traceback__)
         return {"id": rid, "stdout": out.text() if out else "", "stdout_chars": out.total if out else 0,
                 "output_bytes": dict(out.bytes) if out else {"stdout": 0, "stderr": 0}, "result": None, "error": error,
-                "error_info": info, "data": None, "displays": list(displays),
+                "error_info": info, "data": None, "displays": list(run.displays) if run else [],
                 "seconds": time.perf_counter() - run.t0 if run else 0.0}
 
     def encode(reply):
-        return json.dumps(reply) + "\n"  # (ASCII: \\u escapes, a lone surrogate included)
+        line = json.dumps(reply) + "\n"  # (ASCII: \\u escapes, a lone surrogate included)
+        run, cur[0] = cur[0], None
+        if run is not None and run.out is not None:
+            run.out.release()
+        return line
 
     return run_request, fallback_reply, encode
 
@@ -631,8 +653,7 @@ def _worker():
         pass
     ctl = os.environ.pop("SAGEBRUSH_CONTROL_FD", None)
     ctl_fd = int(ctl) if ctl and os.name != "nt" else None
-    displays = []
-    builtins.__pyjs_display__ = lambda obj: _show(displays, obj)
+    builtins.__pyjs_display__ = lambda obj: _show([], obj)  # (until the loop's own: _requests)
     from sagebrush.preparse import preparse
 
     _HOLD.install(_native)  # (the main thread: the only one that handles signals)
@@ -648,7 +669,7 @@ def _worker():
     else:
         def handle(fd):
             return fd
-    _native._serve_requests(handle(in_fd), handle(proto_fd), ctl_fd, *_requests(sender, shared, displays, preparse))
+    _native._serve_requests(handle(in_fd), handle(proto_fd), ctl_fd, *_requests(sender, shared, preparse))
 
 
 class Session:

@@ -464,6 +464,108 @@ def test_native():
             s.close()
 
 
+SVG = "class _Svg:\n    def _repr_svg_(self):\n        return '<svg>b1-marker</svg>'\n_Svg()"
+
+
+def test_displays_own():
+    """astra's CORR-CTRLC-B-1: a request stopped before its own state exists
+    (at admission, or in its JSON decoding) has no displays, never the
+    previous request's."""
+    s = S.Session()
+    try:
+        s.run("n = 0", mode="python")
+        # (the JSON decoding interrupted once, for the request carrying B1JSON)
+        inject(s, "import json as _j\n_real_loads = _j.loads\n"
+                  "def _once(t, *a, **k):\n"
+                  "    if 'B1JSON' in t:\n"
+                  "        _j.loads = _real_loads\n        raise KeyboardInterrupt\n"
+                  "    return _real_loads(t, *a, **k)\n"
+                  "_j.loads = _once")
+        r0 = s.run(SVG, mode="python")
+        check(any("b1-marker" in d[1] for d in r0["displays"]), "B-1: the display is its own request's (%r)" % (r0["displays"],))
+        r1 = s.run("n += 1  # B1JSON", mode="python")
+        check(r1["error_info"]["type"] == "interrupted" and r1["displays"] == [] and r1["id"] == s.last_id,
+              "B-1: interrupted in its JSON decoding: no displays, not the previous request's (%r)" % (r1["displays"],))
+        if HOOKS:
+            r0 = s.run("import sagebrush._native as _n\n_n._serve_test('admit_interrupt', 1)\n" + SVG, mode="python")
+            check(any("b1-marker" in d[1] for d in r0["displays"]), "B-1: the hook's request has its display")
+            rid = submit(s, "n += 1")
+            r1 = s._get(rid, 10)
+            check(bool(r1) and r1["id"] == rid and r1["error_info"]["type"] == "interrupted" and r1["displays"] == [],
+                  "B-1: interrupted at admission: its own id, no displays (%r)" % ((r1 or {}).get("displays"),))
+            time.sleep(0.2)
+            check(s.replies.empty(), "B-1: exactly one terminal reply")
+        check(s.run("n", mode="python")["result"] == "0", "B-1: no side effect, the namespace kept")
+        counts_match(s, "B-1")
+    finally:
+        s.close()
+
+
+def test_write_faults():
+    """astra's CORR-CTRLC-B-2 (a test-hooks build): a terminal reply that
+    can't be written whole is not committed, and no next request is read:
+    the worker ends, the parent sees its end, not a reply."""
+    if not HOOKS:
+        print("skip the write-fault controls: they need a test-hooks build")
+        return
+    for fault, what in ((1, "the reader gone before any byte"), (2, "part written, then an error")):
+        s = S.Session()
+        try:
+            rid = submit(s, "import sagebrush._native as _n\n_n._serve_test('write_fault', %d)\n7" % fault)
+            r = s._get(rid, 15)
+            check(r is None, "B-2, %s: no complete reply, the worker's end (%r)" % (what, r))
+            later = submit_safe(s, "1")
+            check(later is None or s._get(later, 3) in (None, False), "B-2, %s: no next request admitted" % what)
+            code = s.proc.wait(10)
+            check(code is not None, "B-2, %s: the worker ended (exit %r)" % (what, code))
+        finally:
+            s.close()
+
+
+def submit_safe(s, code):
+    try:
+        return submit(s, code)
+    except OSError:
+        return None
+
+
+def test_held_parse():
+    """daybreak2's PR B r1 #1 (a test-hooks build): a request is admitted
+    as soon as its line is complete, so a targeted interrupt that arrives
+    while the rest is still to be handled (the line held there) reaches it."""
+    if not HOOKS or WINDOWS:
+        print("skip the held-parse control: it needs a test-hooks build (POSIX)")
+        return
+    s = S.Session()
+    try:
+        s.run("n = 0", mode="python")
+        hook(s, "hold_ms", 600)
+        t0 = time.monotonic()
+        rid = submit(s, "n += 1\nimport time\ntime.sleep(10)")
+        time.sleep(0.15)  # (inside the hold: admitted, not yet run)
+        s.interrupt(rid)
+        r = s._get(rid, 15)
+        dt = time.monotonic() - t0
+        check(bool(r) and r["error_info"]["type"] == "interrupted" and dt < 3, "held parse: the targeted interrupt reaches the admitted request (%.1f s)" % dt)
+        check(s.run("n", mode="python")["result"] == "0", "held parse: stopped before its code")
+    finally:
+        s.close()
+
+
+def test_released():
+    """daybreak2's PR B r1 #2: an answered request's state is let go: no
+    earlier _Run stays, and the capture kept for its streams holds no text."""
+    s = S.Session()
+    try:
+        s.run("print('x' * 2000000)", mode="python")
+        r = s.run("import gc\n_runs = [o for o in gc.get_objects() if type(o).__name__ == '_Run']\n"
+                  "_caps = [o for o in gc.get_objects() if type(o).__name__ == '_Capture' and o.sealed]\n"
+                  "(len(_runs), max((len(c.head) + c.tail_n for c in _caps), default=0))", mode="python")
+        check(r["result"] == "(1, 0)", "released: one _Run (this request's), the kept capture empty (%s)" % r["result"])
+    finally:
+        s.close()
+
+
 def case(f, *a):
     # (a case that raises is a failure, and the rest still run: the fail-first control runs this file on PR A's worker)
     try:
@@ -485,6 +587,10 @@ if __name__ == "__main__":
         case(pty_case, False)
         case(pty_case, True)
     case(test_hooks)
+    case(test_displays_own)
+    case(test_write_faults)
+    case(test_held_parse)
+    case(test_released)
     case(test_native)
     if failed:
         print("ctrlc native: %d FAILED" % len(failed))

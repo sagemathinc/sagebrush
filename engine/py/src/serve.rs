@@ -30,7 +30,7 @@
 
 use pyo3::exceptions::{PyKeyboardInterrupt, PyOSError, PyRuntimeError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyString};
 use std::io::{ErrorKind, Read, Write};
 #[cfg(all(test, unix))]
 use std::os::unix::io::AsRawFd;
@@ -64,6 +64,9 @@ struct State {
     woken: u64,
     /// SIGUSR1 deliveries whose request had finished (take() false).
     late: u64,
+    /// Requests whose reply couldn't be written whole (the parent gone, or a
+    /// write error): ended without a commit, and the loop with them.
+    aborted: u64,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -75,6 +78,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     stale: 0,
     woken: 0,
     late: 0,
+    aborted: 0,
 });
 
 fn state() -> std::sync::MutexGuard<'static, State> {
@@ -130,12 +134,46 @@ fn close() {
     st.armed = None;
 }
 
-fn retire() {
+/// The reply was written whole: the request is committed.
+fn commit() {
     let mut st = state();
     st.phase = Phase::Idle;
     st.id = None;
     st.armed = None;
     st.replied += 1;
+}
+
+/// Its reply couldn't be written whole: the request ends uncommitted
+/// (astra's CORR-CTRLC-B-2), and no next one is read.
+fn abort() {
+    let mut st = state();
+    st.phase = Phase::Idle;
+    st.id = None;
+    st.armed = None;
+    st.aborted += 1;
+}
+
+/// The request's id, from its line's start: the parent writes it first,
+/// `{"id": N, ...}` (Session._send), so admission needs no parse of the rest
+/// (daybreak2's PR B r1 #1).  None if the line doesn't start so.
+fn request_id(line: &[u8]) -> Option<u64> {
+    let mut i = 0;
+    let ws = |i: &mut usize| while *i < line.len() && matches!(line[*i], b' ' | b'\t' | b'\r' | b'\n') { *i += 1 };
+    ws(&mut i);
+    if line.get(i) != Some(&b'{') { return None; }
+    i += 1;
+    ws(&mut i);
+    if !line[i..].starts_with(b"\"id\"") { return None; }
+    i += 4;
+    ws(&mut i);
+    if line.get(i) != Some(&b':') { return None; }
+    i += 1;
+    ws(&mut i);
+    let start = i;
+    while i < line.len() && line[i].is_ascii_digit() && i - start < 20 { i += 1; }
+    if i == start || (line[start] == b'0' && i - start > 1) { return None; }
+    if !matches!(line.get(i), Some(b',' | b'}' | b' ' | b'\t' | b'\r' | b'\n')) { return None; }
+    std::str::from_utf8(&line[start..i]).ok()?.parse().ok()
 }
 
 /// The SIGUSR1 handler's question: was a targeted interrupt armed for the
@@ -159,9 +197,9 @@ fn serve_busy() -> bool {
 /// The loop's counts (tests): admitted, replied, stale, woken, late.
 #[pyfunction(name = "_serve_stats")]
 fn serve_stats(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
-    let (admitted, replied, stale, woken, late) = {
+    let (admitted, replied, stale, woken, late, aborted) = {
         let st = state();
-        (st.serial, st.replied, st.stale, st.woken, st.late)
+        (st.serial, st.replied, st.stale, st.woken, st.late, st.aborted)
     };
     let d = PyDict::new(py);
     d.set_item("admitted", admitted)?;
@@ -169,6 +207,7 @@ fn serve_stats(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     d.set_item("stale", stale)?;
     d.set_item("woken", woken)?;
     d.set_item("late", late)?;
+    d.set_item("aborted", aborted)?;
     Ok(d)
 }
 
@@ -183,46 +222,90 @@ fn serve_native_stop() -> bool {
 
 // ---- raw I/O on inherited descriptors (never closed here)
 
+/// An inherited descriptor (POSIX) or handle (Windows), read and written
+/// here, never closed.
+struct Borrowed(ManuallyDrop<std::fs::File>);
+
+impl Read for Borrowed {
+    fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+        (*self.0).read(b)
+    }
+}
+
+impl Write for Borrowed {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        (*self.0).write(b)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        (*self.0).flush()
+    }
+}
+
 #[cfg(unix)]
-fn borrow_file(fd: i64) -> ManuallyDrop<std::fs::File> {
+fn borrow_file(fd: i64) -> Borrowed {
     use std::os::unix::io::FromRawFd;
-    ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(fd as i32) })
+    Borrowed(ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(fd as i32) }))
 }
 
 #[cfg(windows)]
-fn borrow_file(handle: i64) -> ManuallyDrop<std::fs::File> {
+fn borrow_file(handle: i64) -> Borrowed {
     use std::os::windows::io::FromRawHandle;
-    ManuallyDrop::new(unsafe { std::fs::File::from_raw_handle(handle as isize as _) })
+    Borrowed(ManuallyDrop::new(unsafe { std::fs::File::from_raw_handle(handle as isize as _) }))
 }
 
-/// Newline-framed lines from a descriptor, its own buffer kept across short
-/// reads, EINTR retried.
-struct Lines {
-    f: ManuallyDrop<std::fs::File>,
+/// Newline-framed lines from a reader (a descriptor), its own buffer kept
+/// across short reads, EINTR retried.  The lines taken are passed by a head
+/// cursor, not drained from the front each time; the buffer is compacted
+/// only when the taken part is most of it, so a backlog of many queued lines
+/// costs time linear in its bytes (daybreak2's PR B r1 #4).
+struct Lines<R: Read> {
+    f: R,
     buf: Vec<u8>,
+    head: usize,
+    scanned: usize,
     eof: bool,
 }
 
-impl Lines {
-    fn new(f: ManuallyDrop<std::fs::File>) -> Lines {
-        Lines { f, buf: Vec::new(), eof: false }
+impl<R: Read> Lines<R> {
+    fn new(f: R) -> Lines<R> {
+        Lines { f, buf: Vec::new(), head: 0, scanned: 0, eof: false }
+    }
+
+    fn compact(&mut self) {
+        if self.head == self.buf.len() {
+            self.buf.clear();
+            self.head = 0;
+        } else if self.head >= 1 << 16 && self.head * 2 >= self.buf.len() {
+            self.buf.drain(..self.head);
+            self.head = 0;
+        }
     }
 
     /// The next line without its newline; a last line without one is still
     /// a line; None at the end.
     fn next(&mut self) -> std::io::Result<Option<Vec<u8>>> {
-        let mut scanned = 0;
         loop {
-            if let Some(i) = self.buf[scanned..].iter().position(|&b| b == b'\n') {
-                let end = scanned + i;
-                let line = self.buf[..end].to_vec();
-                self.buf.drain(..=end);
+            let from = self.head + self.scanned;
+            if let Some(i) = self.buf[from..].iter().position(|&b| b == b'\n') {
+                let end = from + i;
+                let line = self.buf[self.head..end].to_vec();
+                self.head = end + 1;
+                self.scanned = 0;
+                self.compact();
                 return Ok(Some(line));
             }
-            scanned = self.buf.len();
+            self.scanned = self.buf.len() - self.head;
             if self.eof {
-                return Ok(if self.buf.is_empty() { None } else { Some(std::mem::take(&mut self.buf)) });
+                if self.head == self.buf.len() {
+                    return Ok(None);
+                }
+                let line = self.buf[self.head..].to_vec();
+                self.head = self.buf.len();
+                self.scanned = 0;
+                self.compact();
+                return Ok(Some(line));
             }
+            self.compact();
             let mut chunk = [0u8; 65536];
             match self.f.read(&mut chunk) {
                 Ok(0) => self.eof = true,
@@ -234,9 +317,10 @@ impl Lines {
     }
 }
 
-/// Every byte written, EINTR and EAGAIN retried; false if the reader is gone
-/// (EPIPE: the parent ended).
-fn write_all(f: &mut std::fs::File, mut bytes: &[u8]) -> std::io::Result<bool> {
+/// Every byte written, EINTR and EAGAIN retried: Ok(true) only then;
+/// Ok(false) if the reader is gone (EPIPE, or a write of nothing); Err for
+/// another error, perhaps after part of it was written.
+fn write_all<W: Write>(f: &mut W, mut bytes: &[u8]) -> std::io::Result<bool> {
     while !bytes.is_empty() {
         match f.write(bytes) {
             Ok(0) => return Ok(false),
@@ -277,8 +361,12 @@ fn control_loop(fd: i64, main: MainThread) {
 
 /// Wake the main thread for an armed request: SIGUSR1, thread-directed, so
 /// that a blocking call there (time.sleep, a read) returns with EINTR and
-/// Python runs the handler.  Not sent if SIGUSR1's action isn't a handler
-/// (a user's code reset it): the default action would end the worker.
+/// Python runs the handler.  SIGUSR1 is the worker's own signal: user code
+/// that replaces or resets its action is outside the session's no-restart
+/// guarantee.  The check below only avoids sending it to a SIG_DFL or
+/// SIG_IGN action seen just before; a reset between that check and the
+/// pthread_kill can still end the worker (astra's note), and the parent's
+/// restart then follows.
 #[cfg(unix)]
 fn wake(main: MainThread) {
     unsafe {
@@ -355,11 +443,17 @@ fn serve_requests(
         // (idle: whatever arrived while no request was admitted is handled
         // now, by handlers that find nothing running and ignore it)
         let _ = py.check_signals();
-        let id = serde_json::from_slice::<serde_json::Value>(&line).ok().and_then(|v| v.get("id").and_then(|x| x.as_u64()));
+        // (admitted at once: the id from the line's start, the rest parsed
+        // once, by run_request's json.loads)
+        let id = request_id(&line);
         let serial = admit(id);
         #[cfg(feature = "test-hooks")]
-        hooks::at_admission();
-        let text = String::from_utf8_lossy(&line).into_owned();
+        hooks::at_admission(py);
+        let text = match std::str::from_utf8(&line) {
+            Ok(t) => PyString::new(py, t),
+            Err(_) => PyString::new(py, &String::from_utf8_lossy(&line)),
+        };
+        drop(line);
         let ran = run_request.call1((text, serial));
         close();
         let reply = match ran {
@@ -382,12 +476,21 @@ fn serve_requests(
                 }
             },
         };
+        #[cfg(feature = "test-hooks")]
+        let written = py.detach(|| hooks::write_fault(&mut out, wire.as_bytes()).unwrap_or_else(|| write_all(&mut out, wire.as_bytes())));
+        #[cfg(not(feature = "test-hooks"))]
         let written = py.detach(|| write_all(&mut out, wire.as_bytes()));
-        retire();
+        drop(wire);
         match written {
-            Ok(true) => {}
-            Ok(false) => return Ok(()),
-            Err(e) => return Err(PyOSError::new_err(e.to_string())),
+            Ok(true) => commit(),
+            Ok(false) => {
+                abort();
+                return Ok(());
+            }
+            Err(e) => {
+                abort();
+                return Err(PyOSError::new_err(e.to_string()));
+            }
         }
     }
 }
@@ -413,9 +516,32 @@ mod hooks {
         }
     }
 
-    pub fn at_admission() {
+    /// After admission, the line held this long, GIL released, before
+    /// run_request (the held-parse control: a targeted interrupt during it
+    /// reaches the admitted request).
+    pub static HOLD_MS: AtomicU64 = AtomicU64::new(0);
+    /// The next reply's write fails: 1, the reader gone before any byte;
+    /// 2, part of it written, then an error.
+    pub static WRITE_FAULT: AtomicU64 = AtomicU64::new(0);
+
+    pub fn at_admission(py: pyo3::Python<'_>) {
         if ADMIT_INTERRUPT.swap(false, SeqCst) {
             unsafe { pyo3::ffi::PyErr_SetInterrupt() };
+        }
+        let ms = HOLD_MS.swap(0, SeqCst);
+        if ms > 0 {
+            py.detach(|| std::thread::sleep(std::time::Duration::from_millis(ms)));
+        }
+    }
+
+    pub fn write_fault<W: std::io::Write>(w: &mut W, bytes: &[u8]) -> Option<std::io::Result<bool>> {
+        match WRITE_FAULT.swap(0, SeqCst) {
+            1 => Some(Ok(false)),
+            2 => {
+                let _ = w.write_all(&bytes[..bytes.len() / 2]);
+                Some(Err(std::io::Error::other("an injected write error")))
+            }
+            _ => None,
         }
     }
 }
@@ -428,6 +554,8 @@ fn serve_test(name: &str, value: u64) -> PyResult<()> {
         "admit_interrupt" => hooks::ADMIT_INTERRUPT.store(value != 0, SeqCst),
         "arm_delay_ms" => hooks::ARM_DELAY_MS.store(value, SeqCst),
         "wake_delay_ms" => hooks::WAKE_DELAY_MS.store(value, SeqCst),
+        "hold_ms" => hooks::HOLD_MS.store(value, SeqCst),
+        "write_fault" => hooks::WRITE_FAULT.store(value, SeqCst),
         _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("no such hook: {name}"))),
     }
     Ok(())
@@ -460,12 +588,17 @@ mod tests {
         close();
         assert!(!serve_take(), "closing clears the armed mark");
         assert!(!arm(Target::Id(7)), "nothing to interrupt once its code is over");
-        retire();
+        let (r0, a0) = { let st = state(); (st.replied, st.aborted) };
+        commit();
+        assert_eq!({ let st = state(); (st.replied, st.aborted) }, (r0 + 1, a0), "a complete write is one commit");
         let t = admit(Some(8));
         assert_eq!(t, s + 1);
         assert!(!arm(Target::Id(7)), "the committed request's id never arms the next");
         assert!(serve_busy());
-        retire();
+        close();
+        let (r1, a1) = { let st = state(); (st.replied, st.aborted) };
+        abort();
+        assert_eq!({ let st = state(); (st.replied, st.aborted) }, (r1, a1 + 1), "an incomplete write is no commit (CORR-CTRLC-B-2)");
         assert!(!serve_busy() && !arm(Target::Any));
     }
 
@@ -475,6 +608,75 @@ mod tests {
         assert_eq!(parse_target(b" 12 "), Some(Target::Id(12)));
         assert_eq!(parse_target(b"x"), None);
         assert_eq!(parse_target(b"-1"), None);
+    }
+
+    #[test]
+    fn request_ids_from_the_line_start() {
+        assert_eq!(request_id(br#"{"id": 12, "code": "x"}"#), Some(12));
+        assert_eq!(request_id(br#"  {"id":7}"#), Some(7));
+        assert_eq!(request_id(br#"{"id": 0, "code": "x"}"#), Some(0));
+        for bad in [&br#"{"code": "x", "id": 3}"#[..], br#"{"id": "3"}"#, br#"{"id": 3.5}"#, br#"{"id": -1}"#, br#"{"id": 007}"#, br#"[1]"#, b"", br#"{"id": 123456789012345678901234}"#, br#"{"idx": 3}"#] {
+            assert_eq!(request_id(bad), None, "{}", String::from_utf8_lossy(bad));
+        }
+    }
+
+    /// A reader giving its bytes in the given chunk sizes, cycling, and EINTR between them.
+    struct Chunks { data: Vec<u8>, at: usize, sizes: Vec<usize>, k: usize, eintr: bool }
+    impl Read for Chunks {
+        fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+            self.eintr = !self.eintr;
+            if self.eintr { return Err(std::io::Error::from(ErrorKind::Interrupted)); }
+            let n = self.sizes[self.k % self.sizes.len()].min(b.len()).min(self.data.len() - self.at);
+            self.k += 1;
+            b[..n].copy_from_slice(&self.data[self.at..self.at + n]);
+            self.at += n;
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn lines_backlog_and_compaction() {
+        // (200,000 queued lines, in odd chunk sizes, across the compaction threshold, and a last line without a newline)
+        let mut data = Vec::new();
+        for i in 0..200_000u32 { data.extend_from_slice(format!("{{\"id\": {i}, \"code\": \"x\"}}\n").as_bytes()); }
+        data.extend_from_slice(b"tail");
+        let mut lines = Lines::new(Chunks { data, at: 0, sizes: vec![1, 7, 65536, 300, 4093], k: 0, eintr: false });
+        let t = std::time::Instant::now();
+        for i in 0..200_000u64 {
+            let l = lines.next().unwrap().unwrap();
+            assert_eq!(request_id(&l), Some(i));
+        }
+        assert_eq!(lines.next().unwrap().unwrap(), b"tail");
+        assert_eq!(lines.next().unwrap(), None);
+        assert!(lines.buf.len() < 1 << 18, "the buffer kept {} bytes", lines.buf.len());
+        assert!(t.elapsed() < std::time::Duration::from_secs(5), "{:?}", t.elapsed());
+    }
+
+    /// A writer taking at most `n` bytes a call, with EINTR between, then failing as told after `fail_after` bytes.
+    struct Sink { got: Vec<u8>, n: usize, eintr: bool, fail_after: Option<(usize, ErrorKind)> }
+    impl Write for Sink {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            if let Some((at, kind)) = self.fail_after { if self.got.len() >= at { return Err(std::io::Error::from(kind)); } }
+            self.eintr = !self.eintr;
+            if self.eintr { return Err(std::io::Error::from(ErrorKind::Interrupted)); }
+            let n = self.n.min(b.len());
+            self.got.extend_from_slice(&b[..n]);
+            Ok(n)
+        }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+
+    #[test]
+    fn writes_whole_or_says_not() {
+        let line = vec![b'x'; 10_000];
+        let mut s = Sink { got: vec![], n: 333, eintr: false, fail_after: None };
+        assert!(write_all(&mut s, &line).unwrap(), "short writes and EINTR: whole");
+        assert_eq!(s.got, line);
+        let mut s = Sink { got: vec![], n: 333, eintr: false, fail_after: Some((0, ErrorKind::BrokenPipe)) };
+        assert!(!write_all(&mut s, &line).unwrap(), "the reader gone before any byte: not written");
+        let mut s = Sink { got: vec![], n: 333, eintr: false, fail_after: Some((3000, ErrorKind::Other)) };
+        assert!(write_all(&mut s, &line).is_err(), "part written, then an error: an error");
+        assert!(s.got.len() < line.len());
     }
 
     #[cfg(unix)]
@@ -489,7 +691,7 @@ mod tests {
                 w.write_all(piece).unwrap();
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
-            unsafe { libc::close(w.as_raw_fd()) };
+            unsafe { libc::close(w.0.as_raw_fd()) };
         });
         let mut lines = Lines::new(borrow_file(fds[0] as i64));
         assert_eq!(lines.next().unwrap().unwrap(), b"{\"id\":1}");
