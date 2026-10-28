@@ -30,7 +30,8 @@ const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.no
 const ready = "window.sagebrush && document.querySelectorAll('#cells .cell').length > 0 && sagebrush.kernel?.ready";
 // (the warm-ups the page sent its workers, counted from the document's start: every
 // Worker's postMessage wrapped before any page script runs; a new document restarts it)
-const COUNTER = `(() => { const pm = Worker.prototype.postMessage; window.__warms = []; Worker.prototype.postMessage = function (m, ...a) { if (m && m.warm) window.__warms.push(m.sage ? "sage" : m.magma ? "magma" : m.matlab ? "matlab" : "python"); return pm.call(this, m, ...a); }; })();`;
+// (and every MessagePort's: a brokered worker is spoken to through one)
+const COUNTER = `(() => { window.__warms = []; const count = (m) => { if (m && m.warm) window.__warms.push(m.sage ? "sage" : m.magma ? "magma" : m.matlab ? "matlab" : "python"); }; for (const C of [Worker, MessagePort]) { const pm = C.prototype.postMessage; C.prototype.postMessage = function (m, ...a) { count(m); return pm.call(this, m, ...a); }; } })();`;
 const warms = () => ev("window.__warms.length");
 const warmsList = () => ev("window.__warms");
 // (long tasks on the page's main thread, from now)
