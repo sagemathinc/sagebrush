@@ -1750,6 +1750,11 @@ export class Workspace {
   /** What this browser's workspace holds, for the Storage panel (§6.3):
    * notebooks and boards (how many), data files (how many, their bytes),
    * old versions, and Trash (its entries, and its data files' bytes). */
+  /** How many entries the workspace holds: the logical count room() checks against maxEntries (every entry once,
+   * staged ones too, no control row).  For a caller's preflight, as the shell's cp -r (plan-bash-shell r3 §3.4). */
+  async entryCount(): Promise<number> {
+    return inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).count());
+  }
   async usage(): Promise<{ documents: number; files: { count: number; bytes: number }; versions: { count: number; bytes: number; maxId: number }; trash: { count: number; bytes: number }; migration: { left: number }; lookalikes: string[][]; lookalikesMore: { groups: number; members: number } }> {
     const all = await inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).all());
     const out = { documents: 0, files: { count: 0, bytes: 0 }, versions: await this.versionsUsage("/"), trash: { count: 0, bytes: 0 }, migration: { left: 0 }, lookalikes: [] as string[][], lookalikesMore: { groups: 0, members: 0 } };
