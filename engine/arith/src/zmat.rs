@@ -172,7 +172,10 @@ impl ZMat {
                     // (blocks of outputs: whole rows when a row is short, else
                     // runs inside a row; the loops inside a block are the
                     // plain ones, with no counting)
-                    let per = MUL_STEP.div_ceil(k + 1);
+                    // (a block is at most MUL_STEP units, so with the counter's
+                    // remainder (below MUL_STEP) two checks are under 2 MUL_STEP
+                    // units apart, row tails included)
+                    let per = (MUL_STEP / (k + 1)).max(1);
                     let dot = |i: usize, j: usize| {
                         let mut s = 0i128;
                         for l in 0..k {
@@ -181,7 +184,7 @@ impl ZMat {
                         s
                     };
                     if c < per {
-                        let rows_per = per.div_ceil(c);
+                        let rows_per = (per / c).max(1);
                         for i0 in (0..r).step_by(rows_per) {
                             let i1 = (i0 + rows_per).min(r);
                             for i in i0..i1 {

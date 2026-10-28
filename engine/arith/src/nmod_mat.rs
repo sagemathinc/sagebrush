@@ -525,6 +525,8 @@ impl Mat {
                         left = rows_per;
                     }
                 }
+                // (the unfinished last group, credited inside the phase)
+                poll.add((rows_per - left) * o.cols);
             }
             bt
         };
@@ -540,7 +542,10 @@ impl Mat {
             // (blocks of outputs: whole rows when a row is short, else runs
             // inside a row; the loops inside a block are the plain ones)
             let unit = k + 1;
-            let per = DOT_STEP.div_ceil(unit);
+            // (a block is at most DOT_STEP units, so with the counter's
+            // remainder two checks are under 2 DOT_STEP units apart, row tails
+            // included)
+            let per = (DOT_STEP / unit).max(1);
             let dot = |a: &[u64], b: &[u64]| {
                 let mut r = 0u64;
                 for (ca, cb) in a.chunks(batch).zip(b.chunks(batch)) {
@@ -554,7 +559,7 @@ impl Mat {
             };
             let cols = o.cols;
             if cols < per {
-                let rows_per = per.div_ceil(cols);
+                let rows_per = (per / cols).max(1);
                 for i0 in (0..self.rows).step_by(rows_per) {
                     let i1 = (i0 + rows_per).min(self.rows);
                     for i in i0..i1 {

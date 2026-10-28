@@ -127,6 +127,11 @@ fn dense_products_poll_in_every_kernel_phase() {
         ("zmat i64 square", 64, 64, 64),
         ("zmat i64 tall", 1 << 10, 16, 16),
         ("zmat i64 wide", 16, 16, 1 << 10),
+        // (astra2 DENSE-R6-REMAINDER: row tails of in-row runs, near the step)
+        ("zmat i64 tails 4x65534x3", 4, 65534, 3),
+        ("zmat i64 tails 4x65535x3", 4, 65535, 3),
+        ("zmat i64 tails 3x32767x5", 3, 32767, 5),
+        ("zmat i64 tails 2x21845x7", 2, 21845, 7),
     ] {
         let (a, b) = (zm(&mut s, r, k, 9), zm(&mut s, k, c, 9));
         let want = zref(&a, &b);
@@ -143,7 +148,17 @@ fn dense_products_poll_in_every_kernel_phase() {
     // before) and a 63-bit one
     for p in [7u64, 9223372036854775783] {
         let m = Modulus::new(p);
-        for (label, r, k, c) in [("nmod 1xKx1", 1, 1 << 18, 1), ("nmod 1xKxM", 1, 1 << 10, 1 << 8), ("nmod square", 64, 64, 64), ("nmod wide", 16, 16, 1 << 10)] {
+        for (label, r, k, c) in [
+            ("nmod 1xKx1", 1, 1 << 18, 1),
+            ("nmod 1xKxM", 1, 1 << 10, 1 << 8),
+            ("nmod square", 64, 64, 64),
+            ("nmod wide", 16, 16, 1 << 10),
+            // (astra2 DENSE-R6-REMAINDER: row tails of in-row runs, near the step)
+            ("nmod tails 4x65534x3", 4, 65534, 3),
+            ("nmod tails 4x65535x3", 4, 65535, 3),
+            ("nmod tails 3x32767x5", 3, 32767, 5),
+            ("nmod tails 2x21845x7", 2, 21845, 7),
+        ] {
             let (a, b) = (nm(&mut s, r, k, m), nm(&mut s, k, c, m));
             let want = nref(&a, &b, p);
             case(&mut bad, &format!("{} p={}", label, p), "nmod-dot", (r * k * c) as u64 >> 17, &want, || a.mul(&b).d);
@@ -158,6 +173,9 @@ fn dense_products_poll_in_every_kernel_phase() {
             ("nmod transpose Kx1 rows", 1, 1 << 18, 1),
             ("nmod transpose 2xC wide rows", 1, 2, 1 << 17),
             ("nmod transpose Kx2 narrow", 1, 1 << 17, 2),
+            // (astra2 DENSE-R6-TRANSPOSE-TAIL: a countdown whose last group is
+            // unfinished: B = 17 x 4095, groups of 2 rows, 69615 copies)
+            ("nmod transpose 17x4095 tail", 1, 17, 4095),
         ] {
             let (a, b) = (nm(&mut s, r, k, m), nm(&mut s, k, c, m));
             let want = nref(&a, &b, p);
