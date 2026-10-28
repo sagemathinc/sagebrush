@@ -550,31 +550,40 @@ try {
   await sleep(1000);
   const [d1a, d2a] = [await ownerOf(D1), await ownerOf(D2)];
   check(en14.out === "on" && en14.on && en14.synced && en14.writer && d1a.holder && !d2a.holder && d2a.connected === 0, "14: the notebook page's switch on, its notebook the synced writer; the board still holds, the notebook page's owner still waits, its DocSync never connected: " + J({ en14, d1a, d2a }));
-  const settle14 = async () => { for (let i = 0; i < 3; i++) await Promise.all([D1.call("idle"), D2.call("idle"), B.call("idle")]); };
-  let got14 = null;
-  for (let i = 0; i < 40 && !got14?.start; i++) { await settle14(); await B.call("kick", N14, true); got14 = await B.call("journal", N14); }
-  check(!!got14?.start, "14: the notebook made in the notebook page reaches B, sent on the board page's connection (the notebook page's owner waiting)");
+  // (each wait bounded at 45 s, so a failing case prints its own checks well before the run's deadline; the product
+  // assertion is unchanged: B's pull is kicked too, but only a notebook the board's DocSync sent can arrive)
+  const settle14 = async () => { await Promise.all([D1.call("idle"), D2.call("idle"), B.call("idle")]); };
+  const until14 = async (f, ms = 45_000) => { let v; for (const end = Date.now() + ms; Date.now() < end; ) { await settle14(); if ((v = await f())) return v; } return v; };
+  // (#266 r5's case 14 failed here: the board's DocSync connected before this notebook's synced history started (in the
+  // switch's reopen, before any save was told), so nothing kicked it until an edit; r6: the notebook page's `on` makes
+  // the board's DocSync kick every notebook started.  Asserted before any edit and with no reconnect)
+  const got14 = await until14(async () => { await B.call("kick", N14, true); const j = await B.call("journal", N14); return j?.start ? j : null; });
+  check(!!got14?.start, "14: the notebook made in the notebook page reaches B before any edit and with no reconnect, sent on the board page's connection (the notebook page's owner waiting)");
   const bo14 = await B.call("open", N14);
   check(bo14.codes === J([["a", "d0"]]), "14: …B's record is it: " + J(bo14));
   check((await D2.call("editOnly", N14, [["a", "d1"]])) === true, "14: the notebook page (its owner waiting) saves an edit");
-  let br14 = null;
-  for (let i = 0; i < 20 && br14?.codes !== J([["a", "d1"]]); i++) { await settle14(); br14 = await B.call("record", N14); }
+  const br14 = await until14(async () => { const r = await B.call("record", N14); return r?.codes === J([["a", "d1"]]) ? r : null; }) ?? (await B.call("record", N14));
   check(br14?.codes === J([["a", "d1"]]) && (await ownerOf(D1)).holder && !(await ownerOf(D2)).holder, "14: …it reaches B through the board page's connection, the board still holding: " + br14?.codes);
   await B.call("edit", N14, [["a", "d1"], ["b", "e1"]]);
-  let dr14 = null;
-  for (let i = 0; i < 20 && dr14?.codes !== J([["a", "d1"], ["b", "e1"]]); i++) { await settle14(); dr14 = await D2.call("record", N14); }
+  const dr14 = await until14(async () => { const r = await D2.call("record", N14); return r?.codes === J([["a", "d1"], ["b", "e1"]]) ? r : null; }) ?? (await D2.call("record", N14));
   check(dr14?.codes === J([["a", "d1"], ["b", "e1"]]) && dr14.mark === null, "14: B's edit arrives in the notebook page through the board page's connection: " + J(dr14));
+  // (another `on` (a notebook page reloaded): the holder kicks every started notebook again: nothing changes, nothing
+  // is stopped or sent twice over (a kick runs one flight per notebook, and an acked notebook has nothing unsent))
+  check((await D2.call("postOn")) === true, "14: a second notebook page's `on`");
+  await settle14();
+  await sleep(500);
+  await settle14();
+  const [rb14, rd14, st14] = [await B.call("record", N14), await D2.call("record", N14), await D1.call("stopped")];
+  check(rb14.codes === J([["a", "d1"], ["b", "e1"]]) && rd14.codes === rb14.codes && J(st14) === "{}", "14: …is safe: both records unchanged, nothing stopped on the board's DocSync: " + J({ B: rb14.codes, D2: rd14.codes, stopped: st14 }));
   // (the board page closes: its owner suspended for good, its client and lock let go)
   await D1.call("closeOwner");
   const t14 = await waitOwner(D2, (st) => st.holder && st.state === "synced" && st.connected >= 1);
   check(t14.holder && t14.connected >= 1 && t14.state === "synced", "14: the board page closed: the notebook page's owner takes the lock by itself, and its DocSync is connected: " + J(t14));
   check((await D2.call("editOnly", N14, [["a", "d3"], ["b", "e1"]])) === true, "14: the notebook page saves an edit");
-  let br14b = null;
-  for (let i = 0; i < 20 && br14b?.codes !== J([["a", "d3"], ["b", "e1"]]); i++) { await settle14(); br14b = await B.call("record", N14); }
+  const br14b = await until14(async () => { const r = await B.call("record", N14); return r?.codes === J([["a", "d3"], ["b", "e1"]]) ? r : null; }) ?? (await B.call("record", N14));
   check(br14b?.codes === J([["a", "d3"], ["b", "e1"]]), "14: …it reaches B on the notebook page's own connection: " + br14b?.codes);
   await B.call("edit", N14, [["a", "d3"], ["b", "e4"]]);
-  let dr14b = null;
-  for (let i = 0; i < 20 && dr14b?.codes !== J([["a", "d3"], ["b", "e4"]]); i++) { await settle14(); dr14b = await D2.call("record", N14); }
+  const dr14b = await until14(async () => { const r = await D2.call("record", N14); return r?.codes === J([["a", "d3"], ["b", "e4"]]) ? r : null; }) ?? (await D2.call("record", N14));
   check(dr14b?.codes === J([["a", "d3"], ["b", "e4"]]), "14: …and B's next edit arrives in it: " + dr14b?.codes);
   const w14b = [...(await D1.call("warnings")), ...(await D2.call("warnings"))];
   check(w14b.length === 0, "14: no warnings on either page: " + J(w14b).slice(0, 300));

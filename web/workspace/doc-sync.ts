@@ -76,6 +76,12 @@ export class DocSync {
     this.link = link;
     this.conn++;
     this.held.clear();
+    await this.kickStarted();
+  }
+  /** Every notebook whose synced history has started here kicked: a connect does it, and so does a page holding the
+   * connection when another page says it turned the switch on (a notebook's synced history may have started there
+   * since this connected, its start told to no one: doc-sync-switch.ts followDocSync, #266 r5's case 14). */
+  async kickStarted() {
     for (const id of await this.started()) this.kick(id);
   }
   disconnected() { this.link = null; this.conn++; }

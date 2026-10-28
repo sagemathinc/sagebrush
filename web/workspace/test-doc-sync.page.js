@@ -282,6 +282,8 @@ T.boardFollow = async () => {
   return true;
 };
 T.clientRunning = (ms) => T.owner.clientRunning(ms);
+/** A notebook page's `on` on the workspace's channel, as another notebook page that turned the switch on posts it. */
+T.postOn = () => { const ch = new BroadcastChannel(W.docSyncChannel(T.w.ws.name)); ch.postMessage({ on: true }); ch.close(); return true; };
 /** The notebook page's side: enableDocSync with this page's pieces and its owner, notebook `id` (made from `cells`)
  * the one shown. */
 T.nbEnable = async (id, cells) => {
