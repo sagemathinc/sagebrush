@@ -1,3 +1,4 @@
+// @ts-check
 // Ports for the browser tests, so that any number of test runs can share a
 // machine (the shared test VM runs several CI runs at once): a test's
 // Chrome is started with --remote-debugging-port=0, or CDP_PORT when it is
@@ -29,7 +30,8 @@ export function freePort() {
   return new Promise((resolve, reject) => {
     const s = createServer();
     s.on("error", reject);
-    s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
+    // (listening on a TCP host, address() is an AddressInfo, never the pipe name string)
+    s.listen(0, "127.0.0.1", () => { const { port } = /** @type {import("node:net").AddressInfo} */ (s.address()); s.close(() => resolve(port)); });
   });
 }
 

@@ -204,21 +204,28 @@ test("a reader racing a full-rate writer never sees a torn count (the seqlock re
       P.store(5, P.encode({ ...P.emptySlot(), inUse: true, done: v, total: v, work: v, stageCount: 0 }), buf);
     }`;
   const w = new Worker(src, { eval: true, workerData: [buf, stop] });
+  // the 400 ms window starts at the worker's first write, not at new Worker():
+  // on a slow runner the worker's startup alone can take 400 ms (train-25 ci
+  // 40626438054 saw nothing). Waiting for that first write is test
+  // infrastructure, bounded at 30 s.
   let seen = 0;
-  const t = Date.now();
-  while (Date.now() - t < 400) {
+  let start = 0;
+  let spins = 0;
+  const firstWriteBy = Date.now() + 30_000;
+  while (start ? Date.now() - start < 400 : Date.now() < firstWriteBy) {
+    if (++spins % 1000 === 0) await new Promise((r) => setImmediate(r));
     const words = P.read(5, buf);
     if (!words) continue;
     const d = P.decode(words);
     if (!d.inUse) continue;
+    if (!start) start = Date.now();
     assert.equal(d.total, d.done);
     assert.equal(d.work, d.done);
     seen++;
-    if (seen % 1000 === 0) await new Promise((r) => setImmediate(r));
   }
   Atomics.store(stop, 0, 1);
   await w.terminate();
-  assert.ok(seen > 0);
+  assert.ok(seen > 0, "the writer never wrote within 30 s");
 });
 
 test("Python routines report through _progress; the engine's self-test call shows nested frames", () => {
@@ -243,14 +250,16 @@ test("Python routines report through _progress; the engine's self-test call show
   );
 });
 
-test("capabilities(): progress only in this build; the later pieces refuse before running", () => {
+test("capabilities(): progress and estimates in this build; the later pieces refuse before running", () => {
   const code = [
     "import sagebrush",
     "from sagebrush import records",
     "c = sagebrush.capabilities()",
     "print(c['progress'], sorted(k for k, v in c.items() if v is False))",
     "print(sagebrush.stop_points('factor'))",
-    "for name in ('estimate', 'run', 'resume'):",
+    "e = sagebrush.estimate(factor, 2^64 + 1)",
+    "print(e['op'], e['total_time'], e['schema'])",
+    "for name in ('run', 'resume'):",
     "    try:",
     "        getattr(sagebrush, name)(1)",
     "    except TypeError as e:",
@@ -267,9 +276,9 @@ test("capabilities(): progress only in this build; the later pieces refuse befor
   assert.equal(
     r.stdout,
     [
-      "True ['cancel_with_partial', 'checkpoints', 'deadline', 'estimate', 'request_stop', 'resume', 'run', 'work']",
+      "True ['cancel_with_partial', 'checkpoints', 'deadline', 'request_stop', 'resume', 'run', 'work']",
       "[]",
-      "sagebrush.estimate is not available in this build",
+      "factor None sagebrush.estimate/1",
       "sagebrush.run is not available in this build",
       "sagebrush.resume is not available in this build",
       "factor(): deadline= is not available in this build",

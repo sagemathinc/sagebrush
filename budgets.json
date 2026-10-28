@@ -285,7 +285,7 @@
   },
   "engine/lib/mod-pyjs-magic.src": {
    "exact": false,
-   "ceiling": 23181,
+   "ceiling": 24994,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -432,7 +432,7 @@
   },
   "engine/lib/sage-more.src": {
    "exact": false,
-   "ceiling": 327320,
+   "ceiling": 357468,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

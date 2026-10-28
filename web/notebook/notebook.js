@@ -1176,7 +1176,17 @@ export function createNotebook(root, opts = {}) {
     active?.el.classList.add("active");
   }
   cellsEl.addEventListener("focusin", (e) => { const c = e.target.closest(".cell")?.cell; if (c) activate(c); });
-  cellsEl.addEventListener("pointerdown", (e) => { const c = e.target.closest(".cell")?.cell; if (c) activate(c); });
+  cellsEl.addEventListener("pointerdown", (e) => { const c = e.target.closest(".cell")?.cell; if (c) { activate(c); if (e.isTrusted && c.type === "code") warm(); } });
+  // X1: the language's environment loaded at the user's first action in a
+  // code cell (pointing at it, typing in it, moving onto it with the
+  // keyboard) or their choice of the language (nb.warm, index.html's menu),
+  // not at opening: never from focus (element.focus() makes trusted focus
+  // events) nor from load or restore.  The kernel sends one warm-up per
+  // language and interpreter while it is pending or done (worker-kernel.js
+  // warm), so this is a Map lookup for every later action.
+  function warm() {
+    if (kernel?.warm) kernel.warm(mode);
+  }
   // command mode on a cell, or edit mode in it
   function select(cell) {
     if (!cell) return;
@@ -1254,6 +1264,7 @@ export function createNotebook(root, opts = {}) {
 
   // Edit mode keys: run, leave, move between cells, indent, comment, split.
   function editKey(cell, e) {
+    if (e.isTrusted && cell.type === "code") warm();
     const ta = cell.ta, mod = e.ctrlKey || e.metaKey;
     if (comp?.cell === cell) {
       const n = comp.matches.length;
@@ -1370,6 +1381,8 @@ export function createNotebook(root, opts = {}) {
   cellsEl.addEventListener("keydown", (e) => {
     const cell = e.target.closest?.(".cell")?.cell;
     if (!cell || (e.target !== cell.el && e.target !== cell.md)) return;
+    // (command mode: a key that lands on a code cell, the one selected after it)
+    if (e.isTrusted) queueMicrotask(() => { if (active?.type === "code") warm(); });
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === "Enter" && (e.shiftKey || mod || e.altKey)) {
       e.preventDefault();
@@ -2224,6 +2237,8 @@ export function createNotebook(root, opts = {}) {
     runCells(ids, o = {}) { return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map(run)); },
     applyEdits, graph, verify, fixRedefinitions,
     setMode, setType, setInput, renderMd, select, edit,
+    /** X1: load the language's environment now, for the user's choice of it (index.html's menu). */
+    warm,
     /** Measure every editor again now (after the notebook was hidden). */
     resize() { cellsEl.querySelectorAll(".ed textarea").forEach(autosize); },
     load, snapshot, applyRemote, replace, flush, saved,

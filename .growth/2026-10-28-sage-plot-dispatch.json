@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "X2 (#237): plot(X) dispatches to X.plot(...) for an object with its own plot method (lib/sage_plot.py, with its doctests and astra2's controls). As measured by the size-gate of PR ci 40604379555 at 2593b3b7 (rule 2's figures): sage_plot.py in sage.src (+2173) and sage.pre (+3476), cli/lib.gen.js (+2173) and cli/pyjs.cjs, which embeds lib (+4181)",
+ "bytes": {
+  "cli/lib.gen.js": 2173,
+  "cli/pyjs.cjs": 4181,
+  "engine/lib/sage.pre": 3476,
+  "engine/lib/sage.src": 2173
+ }
+}
