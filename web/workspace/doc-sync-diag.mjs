@@ -197,7 +197,7 @@ function controls() {
     emit.failures(results, errors);
     emit.deadline(`D1.turnOn?x=${S(45)}`, [`KEEP-27 Error: secret=${S(46)}`]);
     emit.crash(new Error(`boom KEEP-28 token: ${S(47)}`));
-    emit.buildFail([`KEEP-29 error: Could not resolve "x" at /tmp/x.js?v=${S(48)}`, "KEEP-30 a build log line"]);
+    emit.buildFail(["KEEP-30 a build log line", `KEEP-29 error: Could not resolve "x" at /tmp/x.js?v=${S(48)}`]);
     emit.harnessFail(new Error(`KEEP-31 Cannot find module file:///x/test-harness.mjs#${S(49)} more`));
     emit.enableFail({ note: "KEEP-32", state: "off", cookie: S(50) });
     console.warn("reference server:", new Error(`KEEP-33 stale Authorization: Bearer ${S(51)}`));
@@ -208,6 +208,8 @@ function controls() {
     tap = null;
   }
   const stem = S(0).slice(0, 4);
+  const keeps3 = quoted.flatMap((t) => t.match(/KEEP-\d\d/g));
+  const keeps2 = ["KEEP-23", "KEEP-24", "KEEP-25", "KEEP-26", "KEEP-27", "KEEP-28", "KEEP-29", "KEEP-30", "KEEP-31", "KEEP-32", "KEEP-33", "KEEP-34", "KEEP-35"];
   const keeps = [...fixtures.flatMap((t) => t.match(/KEEP-\d\d/g)), ...keeps2, ...keeps3];
   const exact = [
     "front sync 1 start GET /api/sync/v1/status",
@@ -236,8 +238,6 @@ function controls() {
     'diag-control quoted 5: ["KEEP-40 say: panel wss://h/a?<dropped>',
     'diag-control quoted 6: ["KEEP-41 warn: panel https://h/b?<dropped>',
   ];
-  const keeps3 = quoted.flatMap((t) => t.match(/KEEP-\d\d/g));
-  const keeps2 = ["KEEP-23", "KEEP-24", "KEEP-25", "KEEP-26", "KEEP-27", "KEEP-28", "KEEP-29", "KEEP-30", "KEEP-31", "KEEP-32", "KEEP-33", "KEEP-34", "KEEP-35"];
   const cases = [
     ["no sentinel in any printed line", printed.every((l) => !l.includes(stem))],
     ...keeps.map((k) => [`${k} kept`, printed.some((l) => l.includes(k))]),
