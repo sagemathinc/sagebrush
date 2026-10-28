@@ -82,6 +82,11 @@ scripts/test-all.sh --only checks    # one job, or a comma-separated list
 scripts/test-all.sh --keep-going     # report every failing job, not just the first
 ```
 
+It starts by removing `build/cli` and `web/dist` (both generated), so every job builds them as in CI's fresh checkout
+(`--keep-builds` doesn't). The order matters: a CLI built while `web/dist` exists carries the page, and a bundle
+that carries its page runs `sagebrush board open` as an installed CLI does, with its engine from sagebrush.space
+rather than your checkout. `web/test-board-open.mjs` then waits for an engine that was never deployed.
+
 `build-all.sh` first isn't needed: each job builds what it needs, as in CI (the builds every job repeats run
 once). The jobs, in the order they run, with their times here:
 
