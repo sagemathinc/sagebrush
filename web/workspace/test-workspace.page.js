@@ -1671,21 +1671,23 @@ async function durabilityPurgeLocalSparse() {
   let removals = 0, pageRemovals = 0, stray = 0, cur = null;
   const L0 = localStorage.length;
   let last = performance.now(), openMs = 0;
-  W.RESET_HOOK.afterPage = (store, n) => { if (store === "localStorage") { const t = performance.now(); steps.push({ n, removed: pageRemovals, keyCalls: 0, ms: Math.round(t - last) }); pageRemovals = 0; last = t; } };
-  proto.key = function (i) {
-    if (this === localStorage) {
-      if (i === 0) scans.push((cur = { len: realLength(this), n: 0, removalsBefore: removals, pagesBefore: steps.length }));
-      if (cur && i === cur.n) cur.n++;
-      else stray++;
-      if (steps.length) steps[steps.length - 1].keyCalls++;
-    }
-    return realKey.call(this, i);
-  };
-  proto.removeItem = function (k) {
-    if (this === localStorage) { removals++; pageRemovals++; }
-    return realRemove.call(this, k);
-  };
+  // (installed inside the try, so a failure part way through still puts everything back; the put-back is checked at
+  // the end of finally, so it is checked whatever happened: daybreak2's #261 review)
   try {
+    W.RESET_HOOK.afterPage = (store, n) => { if (store === "localStorage") { const t = performance.now(); steps.push({ n, removed: pageRemovals, keyCalls: 0, ms: Math.round(t - last) }); pageRemovals = 0; last = t; } };
+    proto.key = function (i) {
+      if (this === localStorage) {
+        if (i === 0) scans.push((cur = { len: realLength(this), n: 0, removalsBefore: removals, pagesBefore: steps.length }));
+        if (cur && i === cur.n) cur.n++;
+        else stray++;
+        if (steps.length) steps[steps.length - 1].keyCalls++;
+      }
+      return realKey.call(this, i);
+    };
+    proto.removeItem = function (k) {
+      if (this === localStorage) { removals++; pageRemovals++; }
+      return realRemove.call(this, k);
+    };
     const t0 = performance.now();
     w = await openAs(o);
     openMs = performance.now() - t0;
@@ -1694,16 +1696,18 @@ async function durabilityPurgeLocalSparse() {
     W.RESET_HOOK.afterPage = undefined;
     proto.key = realKey;
     proto.removeItem = realRemove;
+    check(Storage.prototype.key === realKey && Storage.prototype.removeItem === realRemove, "the counters on Storage.prototype are put back");
   }
-  check(Storage.prototype.key === realKey && Storage.prototype.removeItem === realRemove, "the counters on Storage.prototype are put back");
   const left = Object.keys(localStorage).filter((k) => k.startsWith("sagebrush-board:local:")).length;
   const [first, terminal] = scans;
   // (key() calls after a page and before the next page's end: only the terminal scan may make them, after the last page)
   const between = steps.slice(0, -1).reduce((a, s) => a + s.keyCalls, 0);
   const scansOk = scans.length === 2 && stray === 0 && first.n === first.len && first.removalsBefore === 0 && first.pagesBefore === 0
     && terminal.n === terminal.len && terminal.pagesBefore === steps.length && terminal.removalsBefore === removals;
-  const pagesOk = steps.length === 3 && steps.every((s) => s.n <= W.LOCAL_PAGE && s.removed <= W.LOCAL_PAGE) && removals === 500 && between === 0;
-  check(left === 0 && scansOk && pagesOk, `500 keys purged among 20,000 others, ${W.LOCAL_PAGE} a step: two scans (the listing, then the terminal check), no scan between pages: ${JSON.stringify({ L0, scans, stray, removals, steps })}`);
+  // (every removal inside a page: none after the last page's hook, and the pages' removals are all of them)
+  const pagesOk = steps.length === 3 && steps.every((s) => s.n <= W.LOCAL_PAGE && s.removed <= W.LOCAL_PAGE) && removals === 500 && between === 0
+    && pageRemovals === 0 && steps.reduce((a, s) => a + s.removed, 0) === removals;
+  check(left === 0 && scansOk && pagesOk, `500 keys purged among 20,000 others, ${W.LOCAL_PAGE} a step: two scans (the listing, then the terminal check), no scan between pages: ${JSON.stringify({ L0, scans, stray, removals, afterLastPage: pageRemovals, steps })}`);
   check(openMs < 1000 && others.every((k) => localStorage.getItem(k) === "x"), `…the open within its budget (${Math.round(openMs)} ms), the other keys untouched`);
   for (const k of others) localStorage.removeItem(k);
   w.close();
