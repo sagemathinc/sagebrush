@@ -66,6 +66,7 @@ try {
   await sleep(1500);
   check(await ev(`!document.querySelector(".tex-page") && document.body.innerText.includes("The LaTeX editor isn't enabled here.")`), "flag off: the note, no editor");
   check(latexFetches().length === 0, "flag off: no LaTeX file fetched", latexFetches());
+  check(await ev(`[...document.querySelectorAll("button")].some((b) => b.textContent === "Preview it")`), "flag off: the note offers the file's preview");
   // on, by the URL: no LaTeX file fetched before a .tex is opened
   requests.length = 0;
   await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
@@ -157,6 +158,31 @@ try {
   await typeInto(para.replace("word word", "CHANGED word"));
   check(await until(`document.querySelector(".tex-preview").textContent.includes("CHANGED")`, 60000), "the edited large paragraph is re-patched");
   check((await ev(`window.__mixed`)) === 0, "…never an old and a new version of it at once");
+
+  // ---- the patch loop: no Long Task over 50 ms while a large paragraph and list are re-patched (correctness run,
+  // not a timing box: recorded and checked here, measured again under the TIMING protocol)
+  await ev(`(() => { window.__lt = []; new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }).observe({ type: "longtask", buffered: false }); return true; })()`);
+  await typeInto(para.replace("CHANGED word", "AGAIN word"));
+  await until(`document.querySelector(".tex-preview").textContent.includes("AGAIN")`, 60000);
+  await sleep(500);
+  const lts = await ev(`window.__lt`);
+  console.log("long tasks during the re-patch (ms):", JSON.stringify(lts));
+  check(lts.every((d) => d <= 50), "no Long Task over 50 ms while re-patching (VM2, not a timing box)", lts);
+
+  // ---- a 1.5 MiB enumerate and a 1.5 MiB plain theorem: pieces whose styles and labels continue; a large table: a placeholder
+  const thmDoc = "\\documentclass{article}\n\\newtheorem{theorem}{Theorem}\n\\begin{document}\n\\begin{theorem}\n" + "theorem words go on and on here. ".repeat(1500).split(". ").join(".\n\n") + "\n\\end{theorem}\n\n\\begin{enumerate}\n" + "\\item an item\n".repeat(16000) + "\\end{enumerate}\n\n\\begin{tabular}{ll}\n" + "aaaaaaaaaaaaaaaaaaaaaaaa & b \\\\\n".repeat(9000) + "\\end{tabular}\n\\end{document}\n";
+  const ft = await mk("/t/thm.tex", enc(thmDoc));
+  await open(ft);
+  await until(`document.querySelectorAll(".tex-preview .thm.cont").length > 0 && document.querySelectorAll(".tex-preview .list.cont").length > 0`, 60000);
+  const cont = await ev(`(() => {
+    const thms = [...document.querySelectorAll(".tex-preview .thm")], lists = [...document.querySelectorAll(".tex-preview ol.list")];
+    const fs = (e) => getComputedStyle(e).fontStyle, pl = (e) => getComputedStyle(e).paddingLeft, cls = (e) => [...e.classList].filter((c) => c !== "cont").join(".");
+    const labels = lists.flatMap((l) => [...l.querySelectorAll(":scope > li > .lbl")].map((x) => x.textContent));
+    const seq = labels.every((t, i) => t === (i + 1) + ".");
+    return { thms: thms.length, thmSame: thms.every((t) => fs(t) === fs(thms[0]) && cls(t) === cls(thms[0])), lists: lists.length, listSame: lists.every((l) => pl(l) === pl(lists[0]) && cls(l) === cls(lists[0])), labels: labels.length, seq, table: document.querySelector(".tex-preview").textContent.includes("this table is too large to display in the prototype") };
+  })()`);
+  check(cont.thms > 1 && cont.thmSame && cont.lists > 1 && cont.listSame && cont.labels === 16000 && cont.seq, "split theorem and list: the same classes and computed styles in every piece, labels 1..16000 in order", cont);
+  check(cont.table, "a table over 128 KiB: a placeholder with its reason, never split", cont);
 
   // ---- gone: an unknown fid
   await go(base + "?tex=ffffffffffffffff&latex=1"); await sleep(1500);
