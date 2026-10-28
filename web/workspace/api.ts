@@ -1243,7 +1243,7 @@ export class Workspace {
    * revision read() gave), only if nothing else wrote it since: otherwise a
    * WorkspaceError("conflict") with the current contents, nothing written. */
   /** `tag` (a board): who wrote it, kept on the record (a page's session, so that page can tell its own writes from others'). `keepEmpty: false` (a data file): no version of empty bytes (Python's open("w") empties a file before writing it); a version of an empty file is kept otherwise. */
-  /** `fid` (a data file): only if the file at `p` is still that one, its own id, not another put at its path since (a WorkspaceError("conflict")). */
+  /** `fid` (a data file): only if the file at `p` is still that one, its own id, not another put at its path since (a WorkspaceError("conflict")).  Checked holding the lock, before anything else is done: another file at `p`, not yet moved beside the index, isn't moved first (astra3 R6-A3-1). */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything is read or changed. */
   async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
     return this.writeLocked(p, owned(content, this.limits.maxFileBytes), opts).then((out) => { this.askToKeep(); return out; });
@@ -1254,6 +1254,7 @@ export class Workspace {
       await this.admitAt(admit, "write", "target", path(p));
       let e = await this.mustStat(p);
       if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
+      if (opts.fid !== undefined && (e.kind !== "file" || e.fid !== opts.fid)) throw new WorkspaceError("conflict", `${e.path} is another file now`);
       if (e.kind === "file") return this.writeFile(await this.migrateOne(e), content, opts);
       // (a document listed from the server: its content comes in slice 2, read-only until then)
       if (e.remote) throw new WorkspaceError("invalid", `${e.path}'s content is synced in the next step: open it on the device that made it`);
@@ -1937,6 +1938,26 @@ export class Workspace {
   }
 
   // ------------------------------------------------------------ for the pages
+
+  /** Where the data file with this fid is now, read-only (for a page bound to a file by its id, which may have been
+   * moved since): exactly one live entry (not in Trash) with that fid, found through the index byIdent and checked at
+   * its path in the same read.  Otherwise why not: "none" (no such file, or not that one at its path), "trashed"
+   * (only in Trash), "ambiguous" (more than one live entry: never the first of them).  Writes, moves and repairs
+   * nothing. */
+  async pathOfFile(fid: string): Promise<{ ok: true; path: string; entry: Entry } | { ok: false; why: "none" | "trashed" | "ambiguous" }> {
+    if (typeof fid !== "string" || fid === "") return { ok: false, why: "none" };
+    this.open();
+    return inTx(this.ws, "entries", "readonly", async (tx) => {
+      const v = await entriesOf(tx);
+      const all = (await v.byIdentAll(IDBKeyRange.only(fid), 64)).filter((e) => e.kind === "file" && e.fid === fid);
+      const live = all.filter((e) => !e.trashed && !within(e.path, TRASH));
+      if (live.length > 1) return { ok: false, why: "ambiguous" } as const;
+      if (live.length === 0) return { ok: false, why: all.length ? "trashed" : "none" } as const;
+      const cur = await v.get(live[0].path);
+      if (!cur || cur.kind !== "file" || cur.fid !== fid || cur.trashed) return { ok: false, why: "none" } as const;
+      return { ok: true, path: cur.path, entry: cur } as const;
+    });
+  }
 
   /** The path of the entry naming these contents (a board's or notebook's id, a data file's key), or undefined. */
   async pathOf(kind: Exclude<Kind, "folder">, ref: string): Promise<string | undefined> {
