@@ -785,3 +785,54 @@ export function checkSnapshotBlob(v: unknown): SnapshotBlob {
   if (typeof o.value !== "string") throw invalid("snapshot blob: value");
   return { format: "sb-sync-snapshot", v: 1, kind: o.kind, epoch: o.epoch, at_seq: o.at_seq, time: o.time, value: o.value };
 }
+
+// ---- answers' shapes (doc-vectors.json's `answers`: what the servers send, agreed by vector)
+
+/** A shape: an object has exactly its keys ({"*": s} a map whose every value is s); [s] an array whose every element
+ * is s; "number", "string", "boolean", "null", "string|null", "array" a value of that type; "=x" exactly the string x. */
+export type Shape = string | Shape[] | { [k: string]: Shape };
+const TYPES: Record<string, (v: unknown) => boolean> = {
+  number: (v) => typeof v === "number" && Number.isFinite(v),
+  string: (v) => typeof v === "string",
+  boolean: (v) => typeof v === "boolean",
+  null: (v) => v === null,
+  "string|null": (v) => v === null || typeof v === "string",
+  array: (v) => Array.isArray(v),
+};
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+// (a key of the object itself, never one its prototype has: a frame's extra "constructor", "toString" or "__proto__"
+// key, or a shape naming one, is not matched by Object.prototype's (astra's item 4 review, A1))
+const own = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+/** Where `v` differs from `shape` (a path and why), or null when it matches. */
+export function shapeMismatch(v: unknown, shape: Shape, at = "$"): string | null {
+  if (typeof shape === "string") {
+    if (shape.startsWith("=")) return v === shape.slice(1) ? null : `${at}: not ${JSON.stringify(shape.slice(1))}`;
+    const t = own(TYPES, shape) ? TYPES[shape] : undefined;
+    if (!t) return `${at}: the shape names no type (${shape})`;
+    return t(v) ? null : `${at}: not ${shape}`;
+  }
+  if (Array.isArray(shape)) {
+    if (!Array.isArray(v)) return `${at}: not an array`;
+    for (let i = 0; i < v.length; i++) {
+      const m = shapeMismatch(v[i], shape[0], `${at}[${i}]`);
+      if (m) return m;
+    }
+    return null;
+  }
+  if (!isObj(v)) return `${at}: not an object`;
+  const keys = Object.keys(shape);
+  if (keys.length === 1 && keys[0] === "*") {
+    for (const [k, x] of Object.entries(v)) {
+      const m = shapeMismatch(x, shape["*"], `${at}.${k}`);
+      if (m) return m;
+    }
+    return null;
+  }
+  for (const k of Object.keys(v)) if (!own(shape, k)) return `${at}.${k}: not in the shape`;
+  for (const k of keys) {
+    if (!own(v, k)) return `${at}.${k}: missing`;
+    const m = shapeMismatch(v[k], shape[k], `${at}.${k}`);
+    if (m) return m;
+  }
+  return null;
+}
