@@ -534,7 +534,6 @@ Sagebrush depends on very little (all MIT OR Apache-2.0):
 | (`engine/arith`, our own) | the FLINT-like layer: word-size moduli, NTTs, polynomials and matrices over Z/p, Z, Q |
 | `rayon` | data parallelism |
 | `pyo3` | Python bindings |
-| `wasm-bindgen` | WebAssembly bindings |
 | `serde_json` | the JSON request format of the engine dispatcher |
 
 **Which big integers?** The engines use `sagebrush_bigint::BigInt`

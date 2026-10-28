@@ -2,31 +2,52 @@
 // web/test-interrupt-matrix.mjs and its unit tests (test/interrupt-classify.test.ts).
 // A trial: { t_send (harness ms, or undefined), marks: { ENTER, RET, KI: { t, rest } }, stray, probe }.
 // Every time is on the harness's own monotonic clock; `rest` of ENTER and KI carry the driver's.
-export const SLOW_MS = 10_000;
+// The Stop bound (William, Oct 27 2026; plan-nocliffs S-delta Stop-250 r4 433ed0cf): a Stop is honoured
+// when the public caller's KeyboardInterrupt (or the exit) comes within 250 ms of the request, on the
+// harness's raw clock (never a rounded figure).  Later is "honoured late": a FAIL that a baseline entry never
+// pins; only one of William's waiver records (web/interrupt-waivers.json) covers it, as WAIVED.  Not at all
+// ("did not stop", "no KeyboardInterrupt") is "not honoured", which a baseline entry may pin, as before.
+export const STOP_BOUND_MS = 250;
 export const POLL_GAP_MS = 100; // §5: recognized this fast, the route polled
+// Evidence that can't be judged (a missing, null, string, NaN, infinite or negative time; a malformed XK
+// calibration) is INVALID with `malformed`: never a pass, never KNOWN under any baseline signature, never WAIVED
+// (astra2 #225 R1).  Every time is validated BEFORE a difference is taken, so nothing is coerced.
+export const validTime = (x) => typeof x === "number" && Number.isFinite(x) && x >= 0;
+export const malformed = (why) => ({ outcome: "INVALID", why: "invalid evidence: " + why, malformed: true });
+// a request's raw latency against the bound: null when honoured in time, else the cell's FAIL ("late": a finite
+// latency past the bound) or, for a latency that is no valid number, the cell's malformed INVALID
+export function stopGate(latency, what = "the KeyboardInterrupt") {
+  if (typeof latency !== "number" || !Number.isFinite(latency) || latency < 0) return malformed(`no valid latency for ${what} (${latency})`);
+  if (latency <= STOP_BOUND_MS) return null;
+  return { outcome: "FAIL", why: `honoured late: ${what} came ${latency.toFixed(1)} ms after the Stop, past the ${STOP_BOUND_MS} ms bound`, late: true, latency_raw_ms: latency };
+}
 
 // an XK case's cell (r5 §6.2).  xk: { kind: "window", R_ms } (the non-polling call is wrapped:
 // XSTART i before it, XEND i after it) or { kind: "bound", T_ms, f } (the Stop at f of T).
 export function classifyXK(t, xk) {
   const base = classify(t);
-  if (!xk) return base;
+  if (!xk || base.malformed) return base;
+  // (an XK calibration that isn't a valid window R or bound T, f can't bound anything: malformed, R1)
+  if (xk.kind === "window" && !(validTime(xk.R_ms) && xk.R_ms > 0)) return malformed(`XK window R_ms ${xk.R_ms}`);
+  if (xk.kind === "bound" && !(validTime(xk.T_ms) && xk.T_ms > 0 && typeof xk.f === "number" && xk.f >= 0 && xk.f <= 1)) return malformed(`XK bound T_ms ${xk.T_ms}, f ${xk.f}`);
   if (xk.kind === "window") {
     const x = t.marks.XSTART, e = t.marks.XEND;
-    const inside = t.t_send != null && x && x.t < t.t_send && !(e && e.t < t.t_send);
+    const inside = validTime(t.t_send) && x && validTime(x.t) && x.t < t.t_send && !(e && e.t < t.t_send);
     if (!inside) return { ...base, xk_inside: false };
     const bound = xk.R_ms + Math.max(1000, 0.25 * xk.R_ms);
-    if (base.outcome !== "PASS" && base.outcome !== "SLOW") return { ...base, xk_inside: true };
-    if (base.latency_ms > bound) return { ...base, outcome: "FAIL", why: `KI past the XK bound (${base.latency_ms} > ${Math.round(bound)} ms)`, xk_inside: true };
-    // (recognized within the poll gap inside the window: the call polls now)
-    return { ...base, outcome: base.latency_ms <= POLL_GAP_MS ? "PASS" : "EXCEPTION", exception: "XK", xk_inside: true, xk_bound_ms: Math.round(bound) };
+    // (past the window's own bound the call didn't end the wait: never waivable, whatever the latency)
+    if (base.late && base.latency_raw_ms > bound) return { ...base, why: `KI past the XK bound (${base.latency_ms} > ${Math.round(bound)} ms)`, past_xk_bound: true, xk_inside: true, xk_bound_ms: Math.round(bound) };
+    if (base.outcome !== "PASS") return { ...base, xk_inside: true, xk_bound_ms: Math.round(bound) };
+    // (recognized within the poll gap inside the window: the call polls now; past it, within the Stop bound: EXCEPTION)
+    return { ...base, outcome: base.latency_raw_ms <= POLL_GAP_MS ? "PASS" : "EXCEPTION", exception: "XK", xk_inside: true, xk_bound_ms: Math.round(bound) };
   }
   if (xk.kind === "bound") {
-    if (base.outcome !== "PASS" && base.outcome !== "SLOW") return base;
     const bound = (1 - xk.f) * xk.T_ms + Math.max(1000, 0.25 * xk.T_ms);
-    if (base.latency_ms > bound) return { ...base, outcome: "FAIL", why: `KI past the XK bound (${base.latency_ms} > ${Math.round(bound)} ms)` };
-    return { ...base, outcome: base.latency_ms <= POLL_GAP_MS ? "PASS" : "EXCEPTION", exception: "XK", xk_bound_ms: Math.round(bound) };
+    if (base.late && base.latency_raw_ms > bound) return { ...base, why: `KI past the XK bound (${base.latency_ms} > ${Math.round(bound)} ms)`, past_xk_bound: true, xk_bound_ms: Math.round(bound) };
+    if (base.outcome !== "PASS") return base;
+    return { ...base, outcome: base.latency_raw_ms <= POLL_GAP_MS ? "PASS" : "EXCEPTION", exception: "XK", xk_bound_ms: Math.round(bound) };
   }
-  return { ...base, outcome: "FAIL", why: "harness bug: unknown XK kind " + xk.kind };
+  return malformed("an unknown XK kind " + JSON.stringify(xk.kind));
 }
 
 // an XK row (r5 §6.2): FAIL / INCOMPLETE as rowOutcome; then EXCEPTION only if the exception was
@@ -54,11 +75,32 @@ export function xkRowOutcome(cells, leakOk, xk) {
   return { outcome: "FIXED", why: "stale exception: every cell PASS; remove the case's xk field" };
 }
 
+// a leak CONTROL row (a case with expect_leak: a deliberate retention per repeat): it PASSes only
+// when the heap+external leak check measured a finite growth ABOVE its allowance, with the thread
+// count unchanged, no worker outliving its kill, and every cell healthy.  Any other leak.ok = false
+// (a thread change alone, the RSS fallback when the host has no heap figure, a malformed result) is
+// not the control catching its leak and FAILs, as does a missing series (INCOMPLETE).  (#217,
+// astra2 K2: a thread-only failure must not pass the control)
+export function leakControlOutcome(cells, leak, xk) {
+  if (leak == null) return { outcome: "INCOMPLETE", why: "leak control: the leak series was not measured" };
+  if (leak.survived_kill) return { outcome: "FAIL", why: "leak control: a worker survived its kill" };
+  if (leak.measure !== "heap+external after gc") return { outcome: "FAIL", why: `leak control: measured by ${leak.measure ?? "nothing"}, not heap+external after gc` };
+  if (!Number.isFinite(leak.growth_kb) || !Number.isFinite(leak.allowed_kb)) return { outcome: "FAIL", why: "leak control: a malformed leak result (no finite growth or allowance)" };
+  if (leak.threads_same !== true) return { outcome: "FAIL", why: "leak control: the thread count changed (not the control's leak)" };
+  if (!(leak.growth_kb > leak.allowed_kb) || leak.ok !== false) return { outcome: "FAIL", why: `leak control: the deliberate leak was NOT caught (growth ${leak.growth_kb} KB, allowed ${leak.allowed_kb} KB)` };
+  const r = xkRowOutcome(cells, true, xk);
+  return { ...r, why: r.why ?? `leak control: caught (growth ${leak.growth_kb} KB > allowed ${leak.allowed_kb} KB)` };
+}
+
 export function classify(t) {
   // a Stop that could not be dispatched (the process gone, EPERM...): the cell is uncovered, never a
   // result, and the error is kept (astra CORR-168-R2-1)
   if (t.send_error) return { outcome: "INVALID", why: "the Stop could not be sent: " + (t.send_error.error ?? t.send_error), send_error: t.send_error };
-  if (t.t_send == null) return { outcome: "INVALID", why: t.marks.RET ? "returned before the Stop" : "no Stop sent" };
+  // (every marker present, detection diagnostics included, has a valid time before any difference is taken: R1)
+  for (const [k, v] of Object.entries(t.marks ?? {})) if (v != null && !validTime(v.t)) return malformed(`the ${k} marker's time ${JSON.stringify(v.t)}`);
+  // (the target started and wasn't done, yet no send time was recorded: the harness lost the request)
+  if (t.t_send == null) return t.marks.RET ? { outcome: "INVALID", why: "returned before the Stop" } : t.marks.ENTER ? malformed("the target started (ENTER) but no Stop send time was recorded") : { outcome: "INVALID", why: "no Stop sent" };
+  if (!validTime(t.t_send)) return malformed(`the Stop's send time ${JSON.stringify(t.t_send)}`);
   // (a KI from before the send is stale, another trial's or the setup's: never a tiny latency)
   if (t.marks.KI && t.marks.KI.t < t.t_send) return { outcome: "INVALID", why: "stale KI before the Stop" };
   if (t.marks.RET) {
@@ -72,20 +114,47 @@ export function classify(t) {
   const latency = t.marks.KI.t - t.t_send;
   if (!(latency >= 0)) return { outcome: "FAIL", why: "harness bug: negative latency" };
   const enter = Number(t.marks.ENTER?.rest), ki = Number(t.marks.KI.rest);
-  const r = { latency_ms: Math.round(latency), driver_elapsed_to_ki_s: Number.isFinite(enter) && Number.isFinite(ki) ? +(ki - enter).toFixed(3) : null };
+  // (latency_ms is for display; the gate reads latency_raw_ms)
+  const r = { latency_ms: Math.round(latency), latency_raw_ms: latency, driver_elapsed_to_ki_s: Number.isFinite(enter) && Number.isFinite(ki) ? +(ki - enter).toFixed(3) : null };
   if (!String(t.probe ?? "").startsWith("ok")) return { outcome: "FAIL", why: "probe " + t.probe, ...r };
-  return { outcome: latency > SLOW_MS ? "SLOW" : "PASS", ...r };
+  return { ...r, ...(stopGate(latency) ?? { outcome: "PASS" }) };
 }
 
-// a (case, host) row from its required cells (r4 §6.1): FAIL, INCOMPLETE, or the worst of
-// SLOW / EXCEPTION / PASS.  cells: [{ outcome }], with every required cell present.
-// leakOk: false fails the row; null (not measured) leaves it INCOMPLETE.
+// a (case, host) row from its required cells (r4 §6.1): FAIL, INCOMPLETE, EXCEPTION or PASS.
+// cells: [{ outcome }], with every required cell present.  leakOk: false fails the row; null (not
+// measured) leaves it INCOMPLETE.  A cell outcome it doesn't know (the retired SLOW, a typo) FAILs.
+const CELL_OUTCOMES = new Set(["PASS", "EXCEPTION", "FAIL", "INVALID", "UNCALIBRATED"]);
 export function rowOutcome(cells, leakOk = true) {
-  if (leakOk === false || cells.some((c) => c.outcome === "FAIL")) return "FAIL";
+  if (leakOk === false || cells.some((c) => c.outcome === "FAIL" || !CELL_OUTCOMES.has(c.outcome))) return "FAIL";
   if (leakOk == null || cells.length === 0 || cells.some((c) => c.outcome === "INVALID" || c.outcome === "UNCALIBRATED")) return "INCOMPLETE";
-  for (const o of ["SLOW", "EXCEPTION"]) if (cells.some((c) => c.outcome === o)) return o;
-  return "PASS";
+  return cells.some((c) => c.outcome === "EXCEPTION") ? "EXCEPTION" : "PASS";
 }
+
+// the heap+external sample (the DONE marker's figure), Python run in the session after each trial: the
+// live JS heap after a full collection plus its external memory, SETTLED.  One collection followed by
+// an immediate read can still count a previous trial's ArrayBuffer backing stores, which V8 frees after
+// the collection (their sweeping), so single readings swung by ~25 MB between two levels, and a series
+// whose repeat 3 fell at the lower one read as a 25-28 MB "leak" (M1o: 166.5, 145.5, 145.8, 146.0, 171.7
+// MB on master d1af1141; 166.7, 171.1, 143.4, 146.1, 171.8 on #196).  Garbage only ever adds to a
+// post-collection figure, so the sample is the least of up to 5 collected readings, 50 ms apart,
+// stopping once two agree within 1 MiB: live memory, a real leak included, can't read lower than it is.
+// (an indented block: _hu, _he and time come from the program around it; it sets _m)
+export const HEAP_EXTERNAL_SAMPLE = `    _m = ""
+    try:
+        _v = []
+        for _k in range(5):
+            _a = _hu() if _hu else None
+            _b = _he() if (_he and _a is not None) else None
+            if _a is None or _b is None:
+                break
+            _v.append(_a + _b)
+            if len(_v) >= 2 and abs(_v[-1] - _v[-2]) < 1048576:
+                break
+            time.sleep(0.05)
+        _m = "%d" % min(_v) if _v else ""
+    except Exception:
+        _m = ""
+`;
 
 // the leak criterion (r4 §6.1): from repeat 3 to the last, each metric grows at most
 // max(64 MiB, 10%) and the thread count does not change.  samples: [{ i, rss_kb, threads }], one
@@ -122,10 +191,50 @@ export function againstBaseline(row, baseline) {
   const bs = (baseline?.entries ?? []).filter((e) => e.case === row.case && e.host === row.host);
   // (a row with a failed Stop dispatch never matches a baseline: its cells say nothing about the route)
   if (!bs.length || row.leak?.ok === false || (row.trials ?? []).some((t) => t.send_error)) return row.outcome;
-  if (row.outcome === "PASS" || row.outcome === "SLOW" || row.outcome === "EXCEPTION") return "FIXED";
+  if (row.outcome === "PASS" || row.outcome === "EXCEPTION") return "FIXED";
+  // (a Stop honoured late is never KNOWN: only a waiver covers it, withWaiver; nor is a row with invalid evidence)
+  if ((row.trials ?? []).some((t) => (t.outcome === "FAIL" && t.late) || t.malformed)) return row.outcome;
   const res = bs.map((b) => new RegExp(b.signature));
   const whys = (row.trials ?? []).filter((t) => t.outcome === "FAIL").map((t) => t.why ?? "");
   return row.outcome === "FAIL" && whys.length > 0 && whys.every((w) => res.some((re) => re.test(w))) ? "KNOWN" : row.outcome;
+}
+
+// William's waiver records (web/interrupt-waivers.json): a record covers a FAIL row only when every failing
+// cell was honoured late (not past an XK window's own bound; nothing else failed, no leak), and its scope
+// is exactly the row's case, host and the case's declared call.  The row is then WAIVED (own_outcome FAIL,
+// never counted as a pass); a matching record that has ended leaves it FAIL, saying so.
+// the rows that fail a --ci run (the matrix's exit): WAIVED and KNOWN are not among them, INVALID and INCOMPLETE are
+export const CI_FAILING = ["FAIL", "FIXED", "INCOMPLETE", "INVALID", "PENDING-READY"];
+export const ciFailing = (rows) => rows.filter((r) => CI_FAILING.includes(r.outcome));
+export const WAIVER_FIELDS = ["id", "granted", "by", "words", "scope", "owner", "follow_up", "ends_when", "ended"];
+export function waiverErrors(records) {
+  const errs = [];
+  if (!Array.isArray(records)) return ["the registry is not an array"];
+  for (const [k, w] of records.entries()) {
+    for (const f of WAIVER_FIELDS) if (!w || !(f in w)) errs.push(`record ${k}: no ${f}`);
+    if (w && (typeof w.words !== "string" || !w.words.trim())) errs.push(`record ${k}: empty words`);
+    if (w && w.by !== "William") errs.push(`record ${k}: not William's (by ${w.by})`);
+    if (w && typeof w.ended !== "boolean") errs.push(`record ${k}: ended is not a boolean`);
+    if (w && !["case", "host", "call"].every((f) => typeof w.scope?.[f] === "string" && w.scope[f])) errs.push(`record ${k}: scope needs case, host and call`);
+  }
+  return errs;
+}
+// (astra2 #225 R2: every required cell present and eligible, PASS, EXCEPTION or the scoped late FAIL, with nothing
+// INVALID, UNCALIBRATED or unknown; the leak measured and ok; and each late Stop inside the declared call's window,
+// with a valid bound: a declared call binds the case, it doesn't waive another phase of it)
+const lateInWindow = (t) => t.outcome === "FAIL" && t.late === true && !t.past_xk_bound && !t.malformed && t.xk_inside === true && Number.isFinite(t.xk_bound_ms) && t.xk_bound_ms > 0 && validTime(t.latency_raw_ms);
+// (expected: the row's required cell count, from the caller; a shortened cells array is never inferred complete, S4)
+export function withWaiver(row, outcome, waivers, call, expected) {
+  if (outcome !== "FAIL" || call == null) return { outcome };
+  if (!Number.isInteger(expected) || (row.trials ?? []).length !== expected) return { outcome };
+  const w = (waivers ?? []).find((x) => x.scope?.case === row.case && x.scope?.host === row.host && x.scope?.call === call);
+  const cells = row.trials ?? [];
+  const fails = cells.filter((t) => t.outcome === "FAIL");
+  const eligible = cells.length > 0 && cells.every((t) => t.outcome === "PASS" || t.outcome === "EXCEPTION" || lateInWindow(t));
+  if (!w || !fails.length || row.leak?.ok !== true || !eligible) return { outcome };
+  if (w.ended !== false) return { outcome: "FAIL", why: `waiver ${w.id} ended: remove the record in the fixing change` };
+  const late = Math.max(...fails.map((t) => t.latency_raw_ms));
+  return { outcome: "WAIVED", waiver: w.id, why: `${fails.length} cell(s) honoured late, at most ${late.toFixed(1)} ms; waived by ${w.id} (William, ${w.granted})` };
 }
 
 // a performance cliff between two close calibration sizes (r5 §3; William, Oct 25), proven over

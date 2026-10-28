@@ -1,0 +1,22 @@
+[package]
+name = "sagebrush-par"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The Sagebrush engine's one parallel wrapper: every parallel closure runs under its parent's ledger context (chain and exclusive mode), sequentially in exclusive mode (no-cliffs C-2c)"
+
+[dependencies]
+sagebrush-ledger = { path = "../ledger" }
+rayon = { version = "1.10", optional = true }
+
+[features]
+# Rayon's pool (natively); without it every rayon-style entry is sequential,
+# as in WebAssembly
+parallel = ["dep:rayon"]
+
+[dev-dependencies]
+# (tests only: a real Stop in a closure, tests/stop_reuse.rs)
+sagebrush-interrupt = { path = "../interrupt" }
+
+[lints]
+workspace = true

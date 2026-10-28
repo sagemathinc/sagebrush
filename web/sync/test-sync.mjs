@@ -1115,6 +1115,24 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok(r.status === 411, "a notice with no Content-Length is refused before it is read (" + r.status + ")");
   r = await fetchAt(SITE, "/api/admin/purge", { method: "POST", headers: { "content-type": "application/json", "content-length": String(huge.length) }, body: huge });
   ok(r.status === 413, "so is an oversized purge, before sync or sharing read it");
+  // (share-purge-411: sync's gate answers as sharing's adminLength does, for both its admin POSTs; the lengths a
+  // client can actually send: none (a stream), 0 (no body), 4096, 4097, 5000. Those the runtime refuses or rewrites
+  // before the Worker ("+10", "0x10", ...) are adminLength's own cases, in web/share/test-share.mjs)
+  // (adminLength's answers for these, as CLEARed at core 2f058642; that the gate calls it is checked below)
+  const sent = [["none", () => ({ body: stream(), duplex: "half" }), 411], ["0", () => ({ body: "" }), 411], ["4096", () => ({ body: "x".repeat(4096) }), null],
+    ["4097", () => ({ body: "x".repeat(4097) }), 413], ["5000", () => ({ body: huge }), 413]];
+  const got = [];
+  for (const route of ["/api/admin/limits", "/api/admin/purge"])
+    for (const [name, init, want] of sent) {
+      const s = (await fetchAt(SITE, route, { method: "POST", headers: { "content-type": "application/json" }, ...init() })).status;
+      // (null: past the gate, so refused by its signature instead)
+      got.push({ route, name, s, want, same: want === null ? s === 401 : s === want });
+    }
+  ok(got.every((g) => g.same), "share-purge-411: both admin POSTs answer as sharing's adminLength: none and 0 are 411, 4096 passes the gate (401, its signature), 4097 and 5000 are 413: " + JSON.stringify(got.filter((g) => !g.same)));
+  const src = readFileSync(join(here, "server.ts"), "utf8");
+  const gateSrc = src.slice(src.indexOf("async function adminGate("), src.indexOf("\n}\n", src.indexOf("async function adminGate(")));
+  ok(/import \{[^}]*\badminLength\b[^}]*\} from "\.\.\/share\/server\.ts"/.test(src) && gateSrc.includes("adminLength(req.headers.get(\"content-length\"))") && !/content-length[^\n]*\/\^/.test(gateSrc),
+    "share-purge-411: adminGate judges the length with sharing's adminLength, imported, and keeps no check of its own");
   await clearOfMinuteEdge();
   const codes = [];
   for (let i = 0; i < 4; i++) codes.push((await fetchAt("https://tight.test", "/api/admin/limits", { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "192.0.2.5" }, body: "{}" })).status);

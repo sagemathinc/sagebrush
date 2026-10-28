@@ -230,7 +230,7 @@ impl Pivots<'_> {
             use std::sync::atomic::{AtomicUsize, Ordering};
             let next = AtomicUsize::new(0);
             let out: Vec<std::sync::Mutex<Vec<Row>>> = (0..blocks.len()).map(|_| std::sync::Mutex::new(vec![])).collect();
-            std::thread::scope(|sc| {
+            sagebrush_par::thread_scope(|sc| {
                 for _ in 0..threads {
                     sc.spawn(|| {
                         let mut acc = Acc { d: vec![0; ncols] };
@@ -278,7 +278,7 @@ impl Pivots<'_> {
             use std::sync::atomic::{AtomicUsize, Ordering};
             let next = AtomicUsize::new(0);
             let out: Vec<std::sync::Mutex<Row>> = (0..rows.len()).map(|_| std::sync::Mutex::new(Row::default())).collect();
-            std::thread::scope(|sc| {
+            sagebrush_par::thread_scope(|sc| {
                 for _ in 0..threads {
                     sc.spawn(|| {
                         let mut acc = Acc { d: vec![0; ncols] };
@@ -523,7 +523,7 @@ pub fn reduce_fl(piv: &Pivots, rows: &[Row], ncols: usize, threads: usize) -> Ve
     #[cfg(not(target_arch = "wasm32"))]
     {
         let bounds: Vec<(usize, usize)> = (0..t).map(|k| (k * nb / t, (k + 1) * nb / t)).collect();
-        let parts: Vec<Vec<Row>> = std::thread::scope(|sc| {
+        let parts: Vec<Vec<Row>> = sagebrush_par::thread_scope(|sc| {
             let hs: Vec<_> = bounds.iter().map(|&(lo, hi)| {
                 let f = &slice;
                 sc.spawn(move || f(lo, hi))
@@ -663,6 +663,11 @@ pub fn fl_parts(piv: &Pivots, rows: &[Row], ncols: usize) -> FlParts {
 /// unsigned 32 x 32 -> 64 bit product per entry, which vectorizes (AVX2
 /// chosen at run time where available).
 #[inline]
+// SAFETY: i64 and u64 have the same size and alignment, and every value the
+// accumulator holds is in [0, p^2), so viewing it as &mut [u64] (same pointer,
+// same length, the only borrow) changes no bits; dense_axpy_avx2 is called only
+// after is_x86_feature_detected!("avx2").
+#[allow(unsafe_code)]
 fn dense_axpy(acc: &mut [i64], c: i64, p2: i64, b: &[u32]) {
     if c == 0 {
         return;
@@ -691,6 +696,9 @@ fn dense_axpy_u64(acc: &mut [u64], c: u64, p2: u64, b: &[u32]) {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
+// SAFETY: the caller must have checked AVX2 (dense_axpy does); the body is the
+// safe generic kernel.
+#[allow(unsafe_code)]
 unsafe fn dense_axpy_avx2(acc: &mut [u64], c: u64, p2: u64, b: &[u32]) {
     dense_axpy_u64(acc, c, p2, b)
 }

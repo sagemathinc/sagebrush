@@ -89,6 +89,10 @@ impl From<&str> for Fail {
 static mut REPLY: Vec<u8> = Vec::new();
 
 #[no_mangle]
+// SAFETY: an export of the raster module's wasm ABI (no_mangle; the rs_ prefix keeps
+// the symbol unique); the block is leaked to the host, which returns it through rs_free
+// with its length.
+#[allow(unsafe_code)]
 pub extern "C" fn rs_alloc(len: usize) -> *mut u8 {
     let mut v = Vec::<u8>::with_capacity(len);
     let p = v.as_mut_ptr();
@@ -99,20 +103,35 @@ pub extern "C" fn rs_alloc(len: usize) -> *mut u8 {
 /// # Safety
 /// ptr must come from rs_alloc(len).
 #[no_mangle]
+// SAFETY: an export of the raster module's wasm ABI (no_mangle; the rs_ prefix keeps
+// the symbol unique); per `# Safety` the block came from rs_alloc(len), so rebuilding
+// the Vec (length 0, capacity len) and dropping it frees exactly that allocation.
+#[allow(unsafe_code)]
 pub unsafe extern "C" fn rs_free(ptr: *mut u8, len: usize) {
     drop(Vec::from_raw_parts(ptr, 0, len));
 }
 
 #[no_mangle]
+// SAFETY: an export of the raster module's wasm ABI (no_mangle; the rs_ prefix keeps
+// the symbol unique); reading REPLY's address: REPLY is used on one thread with no
+// other reference to it live (the module is single-threaded).
+#[allow(unsafe_code)]
 pub extern "C" fn rs_reply_ptr() -> *const u8 {
     unsafe { (*std::ptr::addr_of!(REPLY)).as_ptr() }
 }
 
 #[no_mangle]
+// SAFETY: an export of the raster module's wasm ABI (no_mangle; the rs_ prefix keeps
+// the symbol unique); reading REPLY's length: REPLY is used on one thread with no
+// other reference to it live (the module is single-threaded).
+#[allow(unsafe_code)]
 pub extern "C" fn rs_reply_len() -> usize {
     unsafe { (*std::ptr::addr_of!(REPLY)).len() }
 }
 
+// SAFETY: REPLY is replaced on one thread with no other reference to it live (the
+// module is single-threaded).
+#[allow(unsafe_code)]
 fn reply(r: Result<Vec<u8>, Fail>) -> u32 {
     let (code, bytes) = match r {
         Ok(b) => (0, b),
@@ -136,6 +155,10 @@ fn reply(r: Result<Vec<u8>, Fail>) -> u32 {
 /// The pointers and lengths must describe readable memory.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
+// SAFETY: an export of the raster module's wasm ABI (no_mangle; the rs_ prefix keeps
+// the symbol unique); the inputs are read per `# Safety` (each pointer and length
+// describes bytes the host wrote into this instance).
+#[allow(unsafe_code)]
 pub unsafe extern "C" fn rs_render(svg: *const u8, svg_len: usize, scale: f32, width: u32, height: u32, background: *const u8, background_len: usize, dpi: f32, text: *const u8, text_len: usize) -> u32 {
     #[cfg(target_arch = "wasm32")]
     wasm::clear_refusal();
@@ -191,6 +214,10 @@ pub fn decode_png(bytes: &[u8]) -> Result<(u32, u32, u32, Vec<f32>), Fail> {
 /// # Safety
 /// The pointer and length must describe readable memory.
 #[no_mangle]
+// SAFETY: an export of the raster module's wasm ABI (no_mangle; the rs_ prefix keeps
+// the symbol unique); the input is read per `# Safety` (the host wrote `len` bytes
+// at `png` into this instance).
+#[allow(unsafe_code)]
 pub unsafe extern "C" fn rs_decode(png: *const u8, len: usize) -> u32 {
     #[cfg(target_arch = "wasm32")]
     wasm::clear_refusal();

@@ -242,7 +242,7 @@ from Tavmjong Bah. For further information, contact: tavmjong @ free
 
 == Rust crates compiled into the engines (70) ==
 
-Sagebrush's own crates: sagebrush-ap, sagebrush-arith, sagebrush-ball, sagebrush-bigint, sagebrush-classgroup, sagebrush-galois, sagebrush-group, sagebrush-hmf, sagebrush-interrupt, sagebrush-ledger, sagebrush-modsym, sagebrush-mpoly, sagebrush-poly, sagebrush-py, sagebrush-raster, sagebrush-sym, sagebrush-web. The list includes dependencies on every platform and those used only while compiling (procedural macros), so it covers more than any one build contains.
+Sagebrush's own crates: sagebrush-ap, sagebrush-arith, sagebrush-ball, sagebrush-bigint, sagebrush-classgroup, sagebrush-galois, sagebrush-group, sagebrush-hmf, sagebrush-interrupt, sagebrush-ledger, sagebrush-modsym, sagebrush-mpoly, sagebrush-par, sagebrush-poly, sagebrush-py, sagebrush-raster, sagebrush-sym, sagebrush-web. The list includes dependencies on every platform and those used only while compiling (procedural macros), so it covers more than any one build contains.
 
 adler2 2.0.1: 0BSD OR MIT OR Apache-2.0
 arrayref 0.3.9: BSD-2-Clause

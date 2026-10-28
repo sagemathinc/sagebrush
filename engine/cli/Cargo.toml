@@ -12,4 +12,7 @@ path = "src/main.rs"
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-modsym = { path = "../modsym" }
 sagebrush-ap = { path = "../ap" }
-rayon = "1.10"
+sagebrush-par = { path = "../par", features = ["parallel"] }
+
+[lints]
+workspace = true

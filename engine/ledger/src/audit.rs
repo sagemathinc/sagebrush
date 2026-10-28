@@ -64,6 +64,11 @@ fn check_alloc(size: u64) {
     });
 }
 
+// SAFETY: every method forwards to the wrapped allocator with the caller's own
+// arguments, so its GlobalAlloc contract carries over unchanged; the bookkeeping
+// around it only updates atomics and reads the thread's chain and coverage cells
+// (it creates no ledger object).  Tests and CI only (feature `ledger-audit`).
+#[allow(unsafe_code)]
 unsafe impl<A: GlobalAlloc> GlobalAlloc for Audit<A> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let p = self.0.alloc(layout);

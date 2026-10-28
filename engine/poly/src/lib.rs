@@ -1238,6 +1238,10 @@ pub(crate) mod alloc_spy {
 
     pub struct Spy;
 
+    // SAFETY: every method forwards to `System` with the caller's own arguments,
+    // so System's GlobalAlloc contract carries over; the tagging around it only
+    // updates counters and the spy's own tables.  Tests only.
+    #[allow(unsafe_code)]
     unsafe impl GlobalAlloc for Spy {
         unsafe fn alloc(&self, l: Layout) -> *mut u8 {
             let _ = BYTES.try_with(|b| b.set(b.get() + l.size() as u64));
