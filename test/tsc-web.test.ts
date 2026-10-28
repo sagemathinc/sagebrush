@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { hatches } from "./tsc-web-hatches";
 
 // The browser code's type check (tooling plan r2, T1; William, Oct 27 2026): tsconfig.web.json's explicit roots,
@@ -169,32 +171,45 @@ test("r7: an unterminated /* fails closed (never outside every candidate); a // 
   assert.deepEqual(hatches("// a comment\nconst s = '@' + 'x'; const t = 1; // ok\nconst u = s + '@ts-ignore'.slice(0, 0);\n").findings, []);
 });
 
-/** The linearity rule (daybreak2's r7, made robust after master's ci 40617260405 and #241's 40618056762, each
- *  failed by one slow point: 46 / 169.8 / 265.9 and 26.3 / 37.6 / 114.9 ms). ms are the times of the SAME batch
- *  of calls at sizes n/2, n and 2n; the batch is long enough at n/2 (about 40 ms) that no floor is needed.
- *  - The span (2n against n/2): at most 8x. Over three log-spaced sizes, the least-squares slope of log time on
- *    log size depends only on the two ends (the middle has x = 0), so a slow middle point can't trip it. Linear
- *    is 4x, and a quadratic is 16x.
- *  - The upper doubling (2n against n): under 3.5x, so a superlinearity that only starts above n (40 / 80 / 320:
- *    exactly 8x over the span) is still caught. Linear is 2x and quadratic 4x.
- *  Its honest scope: it rejects strong superlinearity (a slope above 1.5 over the span, or a last doubling of 3.5x
- *  or more), not n log n, which is about 4.4x over the span and passes. */
-function linearEnough(ms: number[]): boolean {
-  return ms[2] <= 8 * ms[0] && ms[2] < 3.5 * ms[1];
+/** The linearity rule (daybreak2's r7, as recalibrated by wall-clock bounds r2): on PAIRED ratios. In each round the
+ *  hatch scanner (H) and a known-linear control (C) are timed back to back over the same input, and the round's
+ *  per-call ratio is q_i(n) = (H_i(n) / hCalls) / (C_i(n) / cCalls); q(n) is the median of the six rounds' q_i(n).
+ *  A shared-runner slowdown slows both and cancels; a scanner that isn't linear makes q grow with n. With q at the
+ *  sizes n/2, n and 2n (0.5, 1 and 2 MiB):
+ *  - over the span, q(2n) <= 2.5 q(n/2): linear keeps q flat (1x), a quadratic grows it 4x;
+ *  - at the top, q(2n) <= 1.6 q(n): a superlinearity that only starts above n (2x there) is caught.
+ *  n log n (about 1.1x over the span) passes: out of scope, as before. */
+function linearEnough(q: number[]): boolean {
+  return q[2] <= 2.5 * q[0] && q[2] <= 1.6 * q[1];
 }
 
-test("the linearity rule: CI's noisy points pass; a quadratic, or one that starts late, fails", () => {
-  assert.ok(linearEnough([46, 169.8, 265.9]), "master's ci 40617260405 (a slow 1 MiB point)");
-  assert.ok(linearEnough([26.3, 37.6, 114.9]), "#241's ci 40618056762 (a slow 2 MiB point: 4.4x over the span, 3.06x at the top)");
-  assert.ok(linearEnough([65.1, 118.2, 190.9]) && linearEnough([50.4, 114.8, 195.8]), "the r7 PR ci's own rows");
-  assert.ok(linearEnough([20, 44.2, 88.4]), "n log n (about 4.4x over the span): passes, out of scope");
-  assert.ok(!linearEnough([10, 40, 160]) && !linearEnough([5, 20, 80]) && !linearEnough([40, 160, 640]), "exact quadratics fail at any scale (no floor)");
-  assert.ok(!linearEnough([30, 100, 300]), "10x over the span");
-  assert.ok(!linearEnough([40, 80, 320]), "a superlinearity starting above 1 MiB (4x at the top, exactly 8x over the span)");
+test("the linearity rule, on paired ratios: flat passes; a quadratic, or one that starts late, fails", () => {
+  assert.ok(linearEnough([1, 1, 1]) && linearEnough([1, 1.05, 1.11]), "linear, and n log n (out of scope)");
+  assert.ok(!linearEnough([1, 2, 4]) && !linearEnough([3, 6, 12]), "a quadratic, at any scale");
+  assert.ok(!linearEnough([1, 1, 2]), "a quadratic that starts above 1 MiB (2x at the top)");
+  // (r7's raw rows over an ideal linear control, ms / [1, 2, 4]: CI's noisy rows pass as before)
+  assert.ok(linearEnough([46, 84.9, 66.5]) && linearEnough([26.3, 18.8, 28.7]), "master's ci 40617260405 and #241's 40618056762, as ratios");
+  assert.ok(!linearEnough([10, 20, 40]) && !linearEnough([40, 40, 80]), "r7's exact quadratic and late quadratic, as ratios");
+  // (r7's "10x over the span", 30 / 100 / 300 ms, is q = 30 / 50 / 75 here: exactly the span bound, so it passes
+  // the frozen rule (<= 2.5); the old raw rule failed it)
+  assert.ok(linearEnough([30, 50, 75]), "r7's 10x-over-the-span row sits on the span bound");
 });
 
-test("r7 linearity (daybreak2): pathological inputs at 0.5, 1 and 2 MiB scan in linear time (linearEnough)", () => {
+// (a known-linear control over the same string: every character folded into a checksum, then every "\n" found by
+// indexOf jumps. Its result is bound per input size, so its work can't be dropped)
+function control(s: string): number {
+  let h = 7;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
+  let k = 0;
+  for (let j = s.indexOf("\n"); j !== -1; j = s.indexOf("\n", j + 1)) k++;
+  return ((h ^ k) >>> 0) + 1;
+}
+
+test("r7 linearity (daybreak2): pathological inputs at 0.5, 1 and 2 MiB scan in linear time, paired against a linear control", () => {
   const MiB = 1 << 20;
+  // (gc() before each timed batch: a collection the last batch's garbage triggers lands outside the timing)
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
   const kinds: [string, (n: number) => string][] = [
     ["/*/*/*...", (n) => "/*".repeat(n / 2)],
     ["////...", (n) => "/".repeat(n)],
@@ -203,20 +218,42 @@ test("r7 linearity (daybreak2): pathological inputs at 0.5, 1 and 2 MiB scan in 
     ["unmatched @type { in one block", (n) => "/**" + " @type {".repeat(Math.floor((n - 5) / 8)) + "*/"],
     ["// @ts-ignore lines", (n) => "// @ts-ignore\n".repeat(Math.floor(n / 14))],
   ];
-  const batch = (s: string, calls: number) => { const t0 = process.hrtime.bigint(); for (let c = 0; c < calls; c++) hatches(s); return Number(process.hrtime.bigint() - t0) / 1e6; };
-  const rows: Record<string, number[]> = {};
+  const ms = (t0: bigint) => Number(process.hrtime.bigint() - t0) / 1e6;
+  const rows: Record<string, unknown> = {};
   for (const [name, make] of kinds) {
     const inputs = [MiB / 2, MiB, 2 * MiB].map(make);
-    // (a warm-up, untimed; then one batch size for all three sizes, chosen so the 0.5 MiB batch takes about 40 ms
-    // (daybreak2: a margin over the 20 ms the rule assumes); then 4 rounds that time each size's batch in turn, the best per size kept: a slow patch of the runner
-    // lands on one try of each size, not on all of one size's)
-    batch(inputs[0], 1);
-    const calls = Math.max(1, Math.ceil(40 / Math.max(batch(inputs[0], 1), 0.01)));
-    const best = [Infinity, Infinity, Infinity];
-    for (let round = 0; round < 4; round++) for (let i = 0; i < 3; i++) best[i] = Math.min(best[i], batch(inputs[i], calls));
-    rows[name] = best.map((x) => +(x / calls).toFixed(2));
-    assert.ok(linearEnough(best), `${name}: ${rows[name].join(" / ")} ms a call (batches of ${calls}) over 0.5 / 1 / 2 MiB is not linear (more than 8x over the span, or 3.5x at the top)`);
-    assert.ok(best[2] / calls < 4000, `${name}: 2 MiB took ${best[2] / calls} ms`);
+    const expected = inputs.map(control);
+    const H = (s: string, calls: number) => { gc(); const t0 = process.hrtime.bigint(); for (let c = 0; c < calls; c++) hatches(s); return ms(t0); };
+    const C = (i: number, calls: number) => {
+      gc();
+      let sum = 0;
+      const t0 = process.hrtime.bigint();
+      for (let c = 0; c < calls; c++) sum += control(inputs[i]);
+      const t = ms(t0);
+      assert.equal(sum, expected[i] * calls, `${name}: the control's checksum at size ${i}`);
+      return t;
+    };
+    // (calibrated separately at 0.5 MiB, after a warm-up: each at least 3 calls, about 120 ms a batch)
+    H(inputs[0], 1); C(0, 1);
+    const hCalls = Math.max(3, Math.ceil(120 / Math.max(H(inputs[0], 1), 0.01)));
+    const cCalls = Math.max(3, Math.ceil(120 / Math.max(C(0, 1), 0.01)));
+    const q: number[][] = [[], [], []], hb: number[][] = [[], [], []], cb: number[][] = [[], [], []];
+    // (six rounds; in each, every size's H and C batches back to back, H first in even rounds and C first in odd)
+    for (let round = 0; round < 6; round++) {
+      for (let i = 0; i < 3; i++) {
+        let h: number, c: number;
+        if (round % 2 === 0) { h = H(inputs[i], hCalls); c = C(i, cCalls); }
+        else { c = C(i, cCalls); h = H(inputs[i], hCalls); }
+        hb[i].push(+h.toFixed(2)); cb[i].push(+c.toFixed(2));
+        q[i].push((h / hCalls) / (c / cCalls));
+      }
+    }
+    const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return (s[2] + s[3]) / 2; };
+    const qm = q.map(median);
+    const hPerCall = hb.map((b) => median(b) / hCalls);
+    rows[name] = { q: qm.map((x) => +x.toFixed(3)), q_rounds: q.map((r) => r.map((x) => +x.toFixed(3))), h_batches_ms: hb, c_batches_ms: cb, hCalls, cCalls };
+    assert.ok(linearEnough(qm), `${name}: q ${qm.map((x) => x.toFixed(3)).join(" / ")} over 0.5 / 1 / 2 MiB is not linear (q(2)/q(0.5) > 2.5, or q(2)/q(1) > 1.6): ${JSON.stringify(rows[name])}`);
+    assert.ok(hPerCall[2] < 4000, `${name}: 2 MiB took ${hPerCall[2]} ms a call`);
   }
-  console.log(JSON.stringify({ tsc_web_hatches_linearity_ms: rows }));
+  console.log(JSON.stringify({ tsc_web_hatches_linearity: rows }));
 });
