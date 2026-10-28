@@ -628,6 +628,37 @@ def _show(displays, obj):
     return True
 
 
+def _print_borrows_stdout(version=None, implementation=None):
+    """Whether this interpreter's print() borrows sys.stdout for its whole
+    call (CPython gh-130163: a print() racing another thread's swap of
+    sys.stdout, as redirect_stdout's end does, can write to the freed file:
+    FU-WORKERTHREADS-312's segfault).  Fixed in 3.12.10 and 3.13.3; 3.10 and
+    3.11 (security fixes only) keep it."""
+    v = tuple((sys.version_info if version is None else version)[:3])
+    impl = sys.implementation.name if implementation is None else implementation
+    return impl == "cpython" and (v < (3, 12, 10) or (3, 13) <= v < (3, 13, 3))
+
+
+def _strong_print():
+    """Where print() borrows sys.stdout (above): builtins.print takes it
+    first, as a reference this frame owns, for the whole call; the rest is
+    the real print(), its arguments as given (file=None: sys.stdout, None
+    there: nothing printed).  C code that writes to sys.stdout or
+    sys.stderr itself (PySys_WriteStdout, a thread's uncaught exception,
+    input()) is not covered."""
+    import builtins
+
+    real = builtins.print
+
+    def print(*args, sep=" ", end="\n", file=None, flush=False):
+        if file is None:
+            file = sys.stdout
+        return real(*args, sep=sep, end=end, file=file, flush=flush)
+
+    print.__doc__, print.__wrapped__ = real.__doc__, real
+    builtins.print = print
+
+
 def _worker():
     """The child: JSON requests on stdin, JSON replies on the original
     stdout; everything else written to stdout goes to stderr.  The requests
@@ -658,6 +689,8 @@ def _worker():
 
     _HOLD.install(_native)  # (the main thread: the only one that handles signals)
     _break_as_sigint()
+    if _print_borrows_stdout():
+        _strong_print()
     sender = _Sender(proto)
     shared = {"__name__": "__main__"}
     exec("from sagebrush.sage import *", shared)
