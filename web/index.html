@@ -416,7 +416,7 @@ import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, docSyncOrigin, docSyncAllowed } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
@@ -2492,33 +2492,22 @@ const docSyncReady = (async () => {
   const owner = SyncOwner.of(w).start();
   const allowed = await docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning() });
   if (!allowed) return false;
-  registerJournalWriter("notebooks");
-  registerJournalWriter("boards");
-  let on = false;
-  const wasReadOnly = !!nb.store?.viewOnly || !!w.quarantined;
-  nb.setReadOnly(true);
-  try {
-    nb.flush();
-    await nb.saved();
-    on = await w.activateJournal();
-  } catch (e) {
-    console.warn("sync: the journal not turned on:", e);
-  }
-  if (!on) { nb.setReadOnly(wasReadOnly); return false; }
-  const mod = await loadHistory();
-  const docs = new DocSync();
-  // (a save is told to this tab's DocSync and, by a channel, to every other tab's: only the tab whose sync client holds
-  // the connection sends, and a kick where it doesn't is nothing)
-  const kicks = typeof BroadcastChannel === "function" ? new BroadcastChannel("sagebrush-docsync:" + w.ws.name) : null;
-  if (kicks) kicks.onmessage = (ev) => { if (typeof ev.data?.kick === "string") docs.kick(ev.data.kick); };
-  mod.DOC_SYNC.on = true;
-  mod.DOC_SYNC.saved = (id) => { docs.kick(id); try { kicks?.postMessage({ kick: id }); } catch {} };
-  owner.setDocs(docs);
-  // (the notebook shown, if it was opened before this: opened again, through the journal and with its synced history
-  // started (a load does that once DOC_SYNC is on), as the writer)
-  if (current.id && current.kind === "browser" && (!nb.store?.journaled || !nb.store.synced)) await openId(current.id).catch((e) => console.warn("sync: the notebook not reopened:", e));
-  nb.setReadOnly(!!nb.store?.viewOnly || !!w.quarantined);
-  return true;
+  return (await enableDocSync({
+    loadHistory,
+    makeDocs: () => new DocSync(),
+    makeChannel: () => (typeof BroadcastChannel === "function" ? new BroadcastChannel(docSyncChannel(w.ws.name)) : null),
+    register: registerJournalWriter,
+    setReadOnly: (ro) => nb.setReadOnly(ro),
+    readOnlyNow: shownReadOnly,
+    flush: () => nb.flush(),
+    saved: () => nb.saved(),
+    activate: () => w.activateJournal(),
+    begun: () => w.journalBegun(),
+    reopen: reopenJournaled,
+    setDocs: (docs) => owner.setDocs(docs),
+    needReload: docSyncReload,
+    warn: (...a) => console.warn(...a),
+  })) === "on";
 })().catch((e) => { console.warn("sync: notebooks' switch:", e); return false; });
 // (once this device's journal is activated (plan-sync-slice2-client r4 §1a, web/workspace/api.ts activateJournal), every
 // notebook is written through it: T1 in its history, then T2 (notebook/journal.js); before, as before.  Told by the
@@ -2575,6 +2564,45 @@ async function takeOver(store, id) {
   writerBar.textContent = journalPage.TAKEOVER;
   writerBarHeight();
   writerBarTimer = setTimeout(() => { if (!nb.store?.viewOnly) { writerBar.hidden = true; writerBar.textContent = ""; writerBarHeight(); } }, 6000);
+}
+// (DEV's switch, after the journal's activation: the notebook shown, if one was opened before it, opened again through
+// the journal, its synced history started (DOC_SYNC is on by then).  Whether it is: a failure lets go of the new store
+// and the old one (their writer locks: another tab, or this page reloaded, can take them), and leaves no store attached,
+// so nothing is editable with nowhere to save it (astra's DEVSW-2))
+async function reopenJournaled() {
+  if (!current.id || current.kind !== "browser" || (nb.store?.journaled && nb.store.synced)) return true;
+  const id = current.id, prev = nb.store;
+  let st = null;
+  try {
+    st = await storeFor(id);
+    await open(st, id);
+    if (nb.store === st && st.journaled) return true;
+    throw new Error("the notebook isn't open through the journal");
+  } catch (e) {
+    console.warn("sync: the notebook not reopened through the journal:", e);
+    if (nb.store && (nb.store === st || nb.store === prev)) nb.detach();
+    for (const x of new Set([st, prev])) if (x?.journaled) try { await x.release(); } catch {}
+    return false;
+  }
+}
+// (what holds for the notebook shown, the switch's read-only set back from it: read-only with no store attached (nowhere
+// to save), one another tab writes, or a quarantined workspace)
+function shownReadOnly() {
+  return !nb.store || !!nb.store.viewOnly || !!ws?.quarantined;
+}
+// (the switch's `reload`: the journal's activation began and this page couldn't go on with it: the notebook and the
+// page's controls for it read-only, and said, until a reload)
+function docSyncReload() {
+  clearTimeout(writerBarTimer);
+  nb.setReadOnly(true);
+  writerBar.hidden = false;
+  writerBar.textContent = DOC_SYNC_RELOAD;
+  writerBarHeight();
+  nbName.readOnly = true;
+  modeEl.disabled = true;
+  $("#ttrepro").disabled = true;
+  $("#ttclear").disabled = true;
+  $("#ttrevert").disabled = true;
 }
 let journalKit = null;
 async function storeFor(id, initial) {

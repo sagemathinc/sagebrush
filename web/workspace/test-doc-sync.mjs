@@ -40,7 +40,7 @@ writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><t
 // ---- the server, and the front
 const ref = new ReferenceServer();
 const ACCOUNT = "d5d5d5d5-0000-4d5d-8d5d-d5d5d5d5d5d5";
-const sessions = { A: ref.signIn(ACCOUNT), B: ref.signIn(ACCOUNT) };
+const sessions = { A: ref.signIn(ACCOUNT), B: ref.signIn(ACCOUNT), C: ref.signIn(ACCOUNT) };
 // (sync on for the account, as its first device's enable does: off, the server refuses every hello `readonly`)
 const enabled = await (await ref.fetch(new Request("http://ref/api/sync/v1/enable", { method: "POST", headers: { cookie: `${SESSION_COOKIE}=${sessions.A}` } }))).json();
 if (enabled.state !== "active") { console.error("FAIL: enable: " + J(enabled)); process.exit(1); }
@@ -455,6 +455,63 @@ try {
   await settle();
   const [bs12b, br12b] = [await B.call("shown"), await B.call("record", N12)];
   check(bs12b === J([["a", "p2"], ["b", "q-typed"]]) && br12b.codes === bs12b && br12b.hashOk, "12: a remote change while this page types another cell: both kept, saved: " + J({ shown: bs12b, record: br12b.codes, hashOk: br12b.hashOk }));
+
+  progress("case 13");
+  // 13. (astra's DEVSW-1) One device, two pages of one browser context (one IndexedDB, one set of Web Locks and
+  // channels): a board page that holds the account connection and the notebook page, a follower, that turns the switch
+  // on.  The board's page carries the notebook: what the notebook page saves reaches B (no kick of its own: the
+  // switch's DOC_SYNC.saved, on the channel), B's edit reaches the notebook page, the board never closed; then the
+  // board page closes and the notebook page's own connection sends what was saved meanwhile
+  const { browserContextId: cctx } = await send("Target.createBrowserContext");
+  async function pageIn(label) {
+    const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId: cctx });
+    const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
+    await send("Runtime.enable", {}, sessionId);
+    await send("Page.navigate", { url: `http://127.0.0.1:${front.port}/` }, sessionId);
+    const ev = async (expression) => {
+      const r = await Promise.race([send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId), sleep(45_000).then(() => ({ error: `timed out: ${expression.slice(0, 80)}` }))]);
+      if (r?.exceptionDetails || r?.error) throw new Error(`${label}: ` + J(r.exceptionDetails ?? r.error).slice(0, 600));
+      return r.result?.value;
+    };
+    for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
+    return { targetId, call: (f, ...args) => { progress(`${label}.${f}`); return ev(`T.${f}(${args.map((a) => J(a)).join(", ")})`); } };
+  }
+  const C1 = await pageIn("C1"), C2 = await pageIn("C2");
+  const act13 = await C1.call("openWs", "C"), f13 = await C1.call("follow");
+  check(act13 === false && f13 === 0, "13: a board page on a device whose journal isn't active yet: no DocSync of its own: " + J({ act13, f13 }));
+  await C2.call("openWs", "C");
+  const N13 = "13131313-2222-4333-8444-555555555555";
+  const en13 = await C2.call("enable", N13, [["a", "c0"], ["b", "d0"]]);
+  check(en13.out === "on" && en13.on === true && en13.saved === "function" && en13.synced && en13.writer && J(en13.ro) === J([true, false]), "13: the notebook page's switch: on, DOC_SYNC on with its save hook, the notebook reopened as its synced writer, read-only only meanwhile: " + J(en13));
+  let joined13 = 0;
+  for (let i = 0; i < 100 && !(joined13 = await C1.call("followedCount")); i++) await sleep(50);
+  check(joined13 === 1, "13: the board page, told the switch is on, hands one DocSync to its own connection: " + joined13);
+  await C1.call("connect", "C", ACCOUNT);
+  const settle13 = async () => { for (let i = 0; i < 3; i++) await Promise.all([C1.call("idle"), C2.call("idle"), B.call("idle")]); };
+  await settle13();
+  await B.call("kick", N13, true);
+  await settle13();
+  const bo13 = await B.call("open", N13);
+  check(bo13.codes === J([["a", "c0"], ["b", "d0"]]), "13: the notebook made in the notebook page reaches B through the board page's connection: " + J(bo13));
+  check((await C2.call("editOnly", N13, [["a", "c1"], ["b", "d0"]])) === true, "13: the notebook page (a follower) saves an edit");
+  await settle13();
+  const br13 = await B.call("record", N13);
+  check(br13.codes === J([["a", "c1"], ["b", "d0"]]), "13: …it reaches B, the board page still open and holding: " + br13.codes);
+  await B.call("edit", N13, [["a", "c1"], ["b", "d2"]]);
+  await settle13();
+  await sleep(300);
+  await settle13();
+  const cr13 = await C2.call("record", N13);
+  check(cr13.codes === J([["a", "c1"], ["b", "d2"]]) && cr13.mark === null, "13: B's edit arrives in the notebook page through the board page's connection: " + J(cr13));
+  const w13 = [...(await C1.call("warnings")), ...(await C2.call("warnings"))];
+  check(w13.length === 0, "13: no warnings on either page: " + J(w13).slice(0, 300));
+  await send("Target.closeTarget", { targetId: C1.targetId });
+  await sleep(300);
+  check((await C2.call("editOnly", N13, [["a", "c3"], ["b", "d2"]])) === true, "13: the board page closed: the notebook page saves with no page holding the connection");
+  await C2.call("connect", "C", ACCOUNT);
+  for (let i = 0; i < 3; i++) await Promise.all([C2.call("idle"), B.call("idle")]);
+  const br13b = await B.call("record", N13);
+  check(br13b.codes === J([["a", "c3"], ["b", "d2"]]), "13: …then its own connection (the holder now) sends what was saved meanwhile: " + br13b.codes);
 
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);

@@ -538,6 +538,12 @@ export class Workspace {
     const j = await inTx(this.ws, "meta", "readonly", async (tx) => (await req(tx.objectStore("meta").get("journal"))) as JournalState | undefined);
     return j?.active === true;
   }
+  /** Whether this device's journal activation has begun (or is done): one way, so a page that asked for it can't
+   * treat it as undone (DEV's switch, doc-sync-switch.ts enableDocSync). */
+  async journalBegun(): Promise<boolean> {
+    const j = await inTx(this.ws, "meta", "readonly", async (tx) => (await req(tx.objectStore("meta").get("journal"))) as JournalState | undefined);
+    return j?.active === true || j?.activating === true;
+  }
   /** The latest generation any of the editors' stores' fences names (0 if none). */
   private async fencesUpTo(): Promise<number> {
     const gen = async (db: IDBDatabase | null, store: string, key: IDBValidKey, f: (v: any) => any) => {

@@ -1547,7 +1547,134 @@ async function syncWireRows() {
   hdb.close();
 }
 
-const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows];
+// ---- DEV's switch on the notebook page (astra's DEVSW-2, daybreak3): the page's own reopenJournaled, shownReadOnly and
+// docSyncReload, as index.html has them, run with what they use given to them; and the switch over a real workspace
+async function switchFunctions(deps) {
+  const src = await (await fetch("./page-src.html")).text();
+  const a = src.indexOf("// (DEV's switch, after the journal's activation"), b = src.indexOf("let journalKit = null;", a);
+  if (a < 0 || b < 0) throw new Error("the page's switch functions weren't found");
+  const make = new Function("deps", `with (deps) {\n${src.slice(a, b)}\nreturn { reopenJournaled, shownReadOnly, docSyncReload };\n}`);
+  return make(deps);
+}
+const pageNb = (st) => ({ store: st, ro: [], detach() { this.store = null; }, setReadOnly(r) { this.ro.push(r); } });
+
+async function switchReopenFails() {
+  // the reopen after activation fails in the new store's open: no store attached (read-only: nowhere to save), the new
+  // store and the old one let go, so the next tab's store takes the writer lock; the old one writes nothing more
+  const { w, hdb } = await active();
+  const { id, st: prev, d } = await loadNew(w, hdb, [["a", "A"]]);
+  const x = store(w, hdb, id);
+  await x.load();
+  const xt = takeover(x, 3000);
+  const nb = pageNb(prev);
+  let made = null;
+  const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false },
+    storeFor: async (i) => (made = store(w, hdb, i)),
+    open: async (s) => { nb.detach(); await s.load(); throw new Error("the test's failed reopen"); } };
+  const f = await switchFunctions(deps);
+  const r = await f.reopenJournaled();
+  const got = await xt;
+  const said = await within(prev.save({ ...d, cells: [{ id: "a", code: "after the failed reopen" }], baseRev: d.rev }), 3000);
+  const rec = await rawGet(w.main, "notebooks", id);
+  check(r === false && nb.store === null && f.shownReadOnly() === true && got !== "timeout" && x.writer && !prev.writer && !made?.writer && prev.released && made?.released && !said?.v?.saved && rec.cells[0].code === "A",
+    "switch: a reopen that fails: false, no store attached (read-only), the new store and the old one let go, the next tab's store the writer, the old one saving nothing: " + J({ r, attached: !!nb.store, got: got === "timeout" ? got : "taken", x: x.writer, prev: prev.writer, made: made?.writer, said: said?.v ?? said?.e?.message ?? said, code: rec.cells[0].code }));
+  await close(prev, made, x, w);
+  hdb.close();
+}
+
+async function switchReopenOk() {
+  // the reopen after activation: a plain store shown (before activation) opened again through the journal: true, the
+  // journal's store attached, the writer, saving; nothing reopened when it already is, or for a file
+  const { w, hdb } = await active();
+  const { id, st: seed } = await loadNew(w, hdb, [["a", "A"]]);
+  await close(seed);
+  const plain = new W.IdbStore(w.main, id);
+  await plain.load();
+  const nb = pageNb(plain);
+  let made = null, asked = 0;
+  const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false },
+    storeFor: async (i) => { asked++; return (made = store(w, hdb, i)); },
+    open: async (s) => { nb.detach(); await s.load(); nb.store = s; } };
+  const f = await switchFunctions(deps);
+  const r = await f.reopenJournaled();
+  const rec0 = await rawGet(w.main, "notebooks", id);
+  const out = await made.save({ name: rec0.name, mode: rec0.mode, id, cells: [{ id: "a", code: "after the reopen" }], baseRev: rec0.rev });
+  const rec = await rawGet(w.main, "notebooks", id);
+  check(r === true && nb.store === made && made.journaled && made.writer && !!out?.saved && rec.cells[0].code === "after the reopen" && f.shownReadOnly() === false, "switch: a reopen that works: true, the journal's store attached, the writer, saving");
+  deps.ws.quarantined = true;
+  check(f.shownReadOnly() === true, "switch: shownReadOnly: a quarantined workspace, read-only");
+  deps.ws.quarantined = false;
+  nb.store = { journaled: true, synced: true, viewOnly: null };
+  const r2 = await f.reopenJournaled();
+  nb.store = { journaled: true, synced: true, viewOnly: "another tab" };
+  const ro2 = f.shownReadOnly();
+  deps.current = { id: "file:/x.ipynb", kind: "file" };
+  nb.store = plain;
+  const r3 = await f.reopenJournaled();
+  check(r2 === true && r3 === true && asked === 1 && ro2 === true, "switch: nothing reopened when the journal's synced store is shown, or for a file; shownReadOnly: another tab writing it, read-only");
+  await close(made, w);
+  hdb.close();
+}
+
+async function switchReopenNoStore() {
+  // the reopen after activation can't make the journal's store (its storage unavailable), or makes a plain one: false,
+  // the old store detached (read-only), nothing left editable
+  const { w, hdb } = await active();
+  const { id, st: seed } = await loadNew(w, hdb, [["a", "A"]]);
+  await close(seed);
+  for (const how of ["throws", "plain"]) {
+    const plain = new W.IdbStore(w.main, id);
+    await plain.load();
+    const nb = pageNb(plain);
+    const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false },
+      storeFor: async (i) => { if (how === "throws") throw new Error("the test's storage unavailable"); return new W.IdbStore(w.main, i); },
+      open: async (s) => { nb.detach(); await s.load(); nb.store = s; } };
+    const f = await switchFunctions(deps);
+    const r = await f.reopenJournaled();
+    check(r === false && nb.store === null && f.shownReadOnly() === true, `switch: a reopen whose store ${how === "throws" ? "can't be made" : "is a plain one"}: false, no store attached, read-only`);
+  }
+  await close(w);
+  hdb.close();
+}
+
+async function switchReloadState() {
+  // the switch's `reload`: the notebook and the page's controls for it read-only, and said
+  const els = { "#ttrepro": { disabled: false }, "#ttclear": { disabled: false }, "#ttrevert": { disabled: false } };
+  const nb = pageNb(null);
+  const deps = { nb, writerBar: { hidden: true, textContent: "" }, writerBarHeight() {}, writerBarTimer: null, nbName: { readOnly: false }, modeEl: { disabled: false }, $: (q) => els[q], DOC_SYNC_RELOAD: W.DOC_SYNC_RELOAD, current: {}, ws: null, storeFor() {}, open() {} };
+  const f = await switchFunctions(deps);
+  f.docSyncReload();
+  check(J(nb.ro) === J([true]) && !deps.writerBar.hidden && deps.writerBar.textContent === W.DOC_SYNC_RELOAD && deps.nbName.readOnly && deps.modeEl.disabled && Object.values(els).every((e) => e.disabled), "switch: reload: the notebook, its name, language, reproducibility and TimeTravel's changes read-only; said in the bar");
+}
+
+async function switchActivationFails() {
+  // the switch over a real workspace: (1) the history bundle's load rejects: `off`, the journal's activation never
+  // begun, DOC_SYNC off, nothing read-only; (2) the activation fails after its first durable write (a fence that can't be
+  // written): `reload`, begun and not active (never claimed undone), DOC_SYNC off, no DocSync, read-only and said; the
+  // next activation carries it on
+  const w = await W.Workspace.open(await named());
+  const DOC = { on: false, saved: null };
+  const rig = (over) => {
+    const t = { ro: [], docs: 0, reload: 0, reopened: 0 };
+    return { t, d: { loadHistory: async () => ({ DOC_SYNC: DOC }), makeDocs: () => ({ kick() {} }), makeChannel: () => null, register: W.registerJournalWriter, setReadOnly: (r) => t.ro.push(r), readOnlyNow: () => false, flush() {}, saved: async () => {}, activate: () => w.activateJournal(), begun: () => w.journalBegun(), reopen: async () => { t.reopened++; return true; }, setDocs: () => { t.docs++; }, needReload: () => { t.reload++; }, warn() {}, ...over } };
+  };
+  const a = rig({ loadHistory: async () => { throw new Error("the test's failed history load"); } });
+  const outA = await W.enableDocSync(a.d);
+  check(outA === "off" && !(await w.journalBegun()) && !(await w.journalActive()) && DOC.on === false && a.t.ro.length === 0 && a.t.docs === 0, "switch: the history bundle's load fails: off, the journal's activation never begun, DOC_SYNC off, nothing read-only: " + J({ outA, ro: a.t.ro }));
+  w.writeFence = async () => { throw new Error("the test's fence that can't be written"); };
+  const b = rig({});
+  const outB = await W.enableDocSync(b.d);
+  const begun = await w.journalBegun(), act = await w.journalActive();
+  check(outB === "reload" && begun && !act && DOC.on === false && DOC.saved === null && b.t.docs === 0 && b.t.reopened === 0 && J(b.t.ro) === J([true, true]) && b.t.reload === 1, "switch: the activation fails after its first durable write: reload (begun, not active, never claimed undone), DOC_SYNC off, no DocSync, read-only and said: " + J({ outB, begun, act, ro: b.t.ro }));
+  delete w.writeFence;
+  const c = rig({});
+  const outC = await W.enableDocSync(c.d);
+  check(outC === "on" && (await w.journalActive()) && DOC.on === true && c.t.docs === 1 && J(c.t.ro) === J([true, false]), "switch: …the next load's activation carries it on: on");
+  DOC.on = false;
+  w.close();
+}
+
+const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);

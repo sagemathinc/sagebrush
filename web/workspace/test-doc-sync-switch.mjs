@@ -2,12 +2,13 @@
 // three conditions (the origin, the server's `available`, a running sync client): on only for DEV's own origin with
 // both others true; PROD's origin never, whatever else holds; nothing asked past the first failing condition.  And,
 // read from the sources, no way for a page, a URL or storage to widen it: the allowed origins are a frozen constant,
-// the page calls the gate without an origins argument, and only the switch's own block turns DOC_SYNC on.
+// the pages call the gate without an origins argument, and only the switch's own block turns DOC_SYNC on.  Then the
+// switch's turning on (enableDocSync) with every failure injected, and a board page's following (followDocSync).
 //   bun web/workspace/test-doc-sync-switch.mjs
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, docSyncOrigin, docSyncAvailable, docSyncAllowed } from "./doc-sync-switch.ts";
+import { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, DOC_SYNC_RELOAD, docSyncOrigin, docSyncAvailable, docSyncAllowed, enableDocSync, followDocSync, docSyncChannel } from "./doc-sync-switch.ts";
 
 const here = dirname(fileURLToPath(import.meta.url)), web = join(here, "..");
 const results = [];
@@ -68,13 +69,147 @@ const using = (re) => files.filter((p) => re.test(src(p))).map((p) => relative(w
 check(J(using(/DOC_SYNC_ORIGINS/)) === J(["workspace/doc-sync-switch.ts", "workspace/index.ts"]), "DOC_SYNC_ORIGINS named only where it is defined and re-exported: " + J(using(/DOC_SYNC_ORIGINS/)));
 const sw = src(join(here, "doc-sync-switch.ts"));
 check(!/window\.|globalThis\.|localStorage|sessionStorage|URLSearchParams|location\.|document\./.test(sw), "the switch's module reads no window, global, storage, URL or location of its own");
-const page = src(join(web, "index.html"));
-const calls = [...page.matchAll(/docSyncAllowed\(/g)].length;
-const oneArg = page.includes("docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning() });");
-check(calls === 1 && oneArg, "the page calls the gate once, with no origins argument (the frozen default)");
-check([...page.matchAll(/docSyncOrigin\(([^)]*)\)/g)].every((m) => m[1] === "location.origin"), "the page's origin checks are of location.origin alone");
-check(J(using(/DOC_SYNC\.on = true/)) === J(["index.html"]) && /if \(!allowed\) return false;[\s\S]*mod\.DOC_SYNC\.on = true/.test(page), "only the page's switch turns DOC_SYNC on, after the gate");
-check(J(using(/activateJournal\(\)/).filter((p) => p !== "workspace/api.ts")) === J(["index.html"]) && /if \(!allowed\) return false;[\s\S]*w\.activateJournal\(\)/.test(page), "only the page's switch activates the journal, after the gate");
+const page = src(join(web, "index.html")), board = src(join(web, "board", "page.ts"));
+const GATE = "docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning() });";
+check(J(using(/docSyncAllowed\(/)) === J(["board/page.ts", "index.html", "workspace/doc-sync-switch.ts"]), "the gate called only by the notebook page and the board page: " + J(using(/docSyncAllowed\(/)));
+for (const [name, s] of [["the notebook page", page], ["the board page", board]]) {
+  check([...s.matchAll(/docSyncAllowed\(/g)].length === 1 && s.includes(GATE), `${name} calls the gate once, with no origins argument (the frozen default)`);
+  check([...s.matchAll(/docSyncOrigin\(([^)]*)\)/g)].every((m) => m[1] === "location.origin") && /docSyncOrigin\(location\.origin\)/.test(s), `${name}'s origin checks are of location.origin alone`);
+}
+check(J(using(/DOC_SYNC\.on = true/)) === J(["workspace/doc-sync-switch.ts"]) && J(using(/enableDocSync\(/)) === J(["index.html", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return false;\s*return \(await enableDocSync\(\{/.test(page), "only the switch's enableDocSync turns DOC_SYNC on, called only by the notebook page, right after the gate");
+check(["    readOnlyNow: shownReadOnly,", "    reopen: reopenJournaled,", "    needReload: docSyncReload,", "    begun: () => w.journalBegun(),", "    setDocs: (docs) => owner.setDocs(docs),"].every((l) => page.split(l).length === 2), "the notebook page's switch uses its own read-only rule, reopen and reload (tested in test-journal.mjs), and the workspace's journalBegun");
+check(J(using(/activateJournal\(\)/).filter((p) => p !== "workspace/api.ts")) === J(["index.html"]) && /if \(!allowed\) return false;[\s\S]*activate: \(\) => w\.activateJournal\(\)/.test(page), "only the page's switch activates the journal, after the gate");
+check(J(using(/followDocSync\(/)) === J(["board/page.ts", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return;\s*await followDocSync\(\{/.test(board) && /if \(!NO_SYNC && docSyncOrigin\(location\.origin\)\) void docSyncHere\(ws\)/.test(board), "the board page carries notebooks (followDocSync) only after the gate, on DEV's origin (astra's DEVSW-1)");
+
+// ---- enableDocSync (astra's DEVSW-2, daybreak3): every failure, injected; what it returns, DOC_SYNC, the owner, the
+// notebook's read-only, the order of the lasting step
+function enableRig(over = {}) {
+  const t = { log: [], ro: [], docs: [], kicks: [], posted: [], DOC: { on: false, saved: null }, begun: false, roNow: false, reload: 0, onAtReopen: null, warned: 0 };
+  const ch = { posted: t.posted, onmessage: null, postMessage(m) { this.posted.push(m); } };
+  t.ch = ch;
+  const d = {
+    loadHistory: async () => { t.log.push("history"); return { DOC_SYNC: t.DOC }; },
+    makeDocs: () => { t.log.push("docs"); return { kick: (id) => t.kicks.push(id) }; },
+    makeChannel: () => { t.log.push("channel"); return ch; },
+    register: (k) => t.log.push("register:" + k),
+    setReadOnly: (ro) => t.ro.push(ro),
+    readOnlyNow: () => t.roNow,
+    flush: () => t.log.push("flush"),
+    saved: async () => { t.log.push("saved"); },
+    activate: async () => { t.log.push("activate"); t.begun = true; return true; },
+    begun: async () => t.begun,
+    reopen: async () => { t.log.push("reopen"); t.onAtReopen = t.DOC.on; return true; },
+    setDocs: (docs) => { t.log.push("setDocs"); t.docs.push(docs); },
+    needReload: () => { t.reload++; },
+    warn: () => { t.warned++; },
+    ...over(t),
+  };
+  return { t, run: () => enableDocSync(d) };
+}
+const rig = (over) => enableRig(over ? (t) => over(t) : () => ({}));
+const lastRo = (t) => t.ro.at(-1);
+{
+  const { t, run } = rig();
+  const out = await run();
+  check(out === "on" && t.DOC.on === true && typeof t.DOC.saved === "function" && t.docs.length === 1 && t.onAtReopen === true && J(t.ro) === J([true, false]) && t.reload === 0 && J(t.posted) === J([{ on: true }]),
+    "enable: all well: on, DOC_SYNC on (before the reopen), one DocSync to the owner, the other tabs told, read-only only meanwhile: " + J({ out, ro: t.ro, posted: t.posted }));
+  check(J(t.log) === J(["history", "docs", "channel", "register:notebooks", "register:boards", "flush", "saved", "activate", "reopen", "setDocs"]), "enable: the order: what can fail and changes nothing, then the saves, the activation, the reopen, the owner: " + J(t.log));
+  t.DOC.saved("n1");
+  t.ch.onmessage({ data: { kick: "n2" } });
+  t.ch.onmessage({ data: { on: true } });
+  t.ch.onmessage({ data: { kick: 7 } });
+  t.ch.onmessage({ data: null });
+  check(J(t.kicks) === J(["n1", "n2"]) && J(t.posted) === J([{ on: true }, { kick: "n1" }]), "enable: a save here kicks this DocSync and is told on the channel; another tab's kick kicks it; anything else ignored: " + J({ kicks: t.kicks, posted: t.posted }));
+}
+{
+  const { t, run } = rig((t) => ({ readOnlyNow: () => t.roNow }));
+  t.roNow = true;
+  check((await run()) === "on" && lastRo(t) === true, "enable: on, the notebook read-only for its own reason then (another tab writes it, a quarantine): kept read-only");
+}
+// (each failure: what it returns, whether the journal's activation was asked, DOC_SYNC, the owner, the read-only)
+const failures = [
+  ["the history bundle's load rejects", (t) => ({ loadHistory: async () => { throw new Error("injected: history"); } }), "off", false],
+  ["the DocSync can't be made", (t) => ({ makeDocs: () => { throw new Error("injected: docs"); } }), "off", false],
+  ["the channel can't be made", (t) => ({ makeChannel: () => { throw new Error("injected: channel"); } }), "off", false],
+  ["the notebook's saves fail", (t) => ({ saved: async () => { throw new Error("injected: saved"); } }), "off", false],
+  ["the notebook's saves fail, the journal active from before", (t) => { t.begun = true; return { saved: async () => { throw new Error("injected: saved"); } }; }, "off", false],
+  ["the activation refused, never begun (a quarantine)", (t) => ({ activate: async () => { t.log.push("activate"); return false; } }), "off", true],
+  ["the activation refused after it began (a fence blocked)", (t) => ({ activate: async () => { t.log.push("activate"); t.begun = true; return false; } }), "reload", true],
+  ["the activation throws after the durable fence", (t) => ({ activate: async () => { t.log.push("activate"); t.begun = true; throw new Error("injected: fence"); } }), "reload", true],
+  ["the activation throws before anything was written", (t) => ({ activate: async () => { t.log.push("activate"); throw new Error("injected: before"); } }), "off", true],
+  ["the activation throws and whether it began can't be told", (t) => ({ activate: async () => { t.log.push("activate"); throw new Error("injected"); }, begun: async () => { throw new Error("injected: begun"); } }), "reload", true],
+  ["the activation refused and whether it began can't be told", (t) => ({ activate: async () => { t.log.push("activate"); return false; }, begun: async () => { throw new Error("injected: begun"); } }), "reload", true],
+  ["the reopen fails (said false: the store let go)", (t) => ({ reopen: async () => { t.log.push("reopen"); return false; } }), "reload", true],
+  ["the reopen throws", (t) => ({ reopen: async () => { t.log.push("reopen"); throw new Error("injected: reopen"); } }), "reload", true],
+  ["the owner's setDocs throws", (t) => ({ setDocs: () => { throw new Error("injected: setDocs"); } }), "reload", true],
+];
+for (const [what, over, want, asked] of failures) {
+  for (const roNow of [false, true]) {
+    const { t, run } = enableRig(over);
+    t.roNow = roNow;
+    let out, threw = null;
+    try { out = await run(); } catch (e) { threw = e; }
+    const pre = want === "off" && !asked && !t.log.includes("flush");
+    const ro = want === "reload" ? true : roNow;
+    const ok = !threw && out === want && t.log.includes("activate") === asked && t.DOC.on === false && (want !== "reload" || t.DOC.saved === null) && t.docs.length === 0 &&
+      (pre ? t.ro.length === 0 : t.ro[0] === true && lastRo(t) === ro) && t.reload === (want === "reload" ? 1 : 0) && !t.posted.some((m) => m.on);
+    check(ok, `enable: ${what} (read-only for its own reason: ${roNow}): ${want}${asked ? "" : ", the activation never asked"}, DOC_SYNC off, no DocSync to the owner, ${want === "reload" ? "read-only and said (reload)" : "the read-only set back"}: ` + J({ out, threw: threw && String(threw), log: t.log, ro: t.ro, on: t.DOC.on, docs: t.docs.length, reload: t.reload }));
+  }
+}
+check(typeof DOC_SYNC_RELOAD === "string" && /reload this page/.test(DOC_SYNC_RELOAD) && docSyncChannel("ws1") === "sagebrush-docsync:ws1", "enable: the reload text, and the channel's name");
+
+// ---- followDocSync (astra's DEVSW-1): a board page's connection carries notebooks once the journal is active
+function followRig(active) {
+  const t = { active, made: 0, set: [], kicks: [], warned: 0, asks: 0 };
+  const ch = { onmessage: null, postMessage() {} };
+  t.ch = ch;
+  const d = {
+    makeDocs: () => { t.made++; const id = t.made; return { id, kick: (k) => t.kicks.push(id + ":" + k) }; },
+    makeChannel: () => ch,
+    journalActive: async () => { t.asks++; await new Promise((r) => setTimeout(r, 5)); if (t.active === "throw") throw new Error("injected"); return t.active; },
+    setDocs: (docs) => t.set.push(docs.id),
+    warn: () => { t.warned++; },
+  };
+  return { t, run: () => followDocSync(d) };
+}
+{
+  const { t, run } = followRig(true);
+  const stop = await run();
+  t.ch.onmessage({ data: { kick: "n1" } });
+  t.ch.onmessage({ data: { on: true } });
+  await new Promise((r) => setTimeout(r, 30));
+  t.ch.onmessage({ data: { kick: "n2" } });
+  check(J(t.set) === J([1]) && t.made === 1 && J(t.kicks) === J(["1:n1", "1:n2"]), "follow: the journal active: one DocSync to the owner at once; notebook saves told on the channel kick it; a later `on` makes no second: " + J(t));
+  stop();
+  check(t.ch.onmessage === null, "follow: stopped: the channel no longer heard");
+}
+{
+  const { t, run } = followRig(false);
+  await run();
+  t.ch.onmessage({ data: { kick: "n0" } });
+  check(t.set.length === 0 && t.made === 0 && t.kicks.length === 0, "follow: the journal not active: no DocSync, a kick before it ignored");
+  t.ch.onmessage({ data: { on: true } });
+  await new Promise((r) => setTimeout(r, 30));
+  check(t.set.length === 0, "follow: told `on` while the journal still isn't active (the message isn't trusted): still none");
+  t.active = true;
+  t.ch.onmessage({ data: { on: true } });
+  t.ch.onmessage({ data: { on: true } });
+  t.ch.onmessage({ data: { on: true } });
+  await new Promise((r) => setTimeout(r, 40));
+  t.ch.onmessage({ data: { on: true } });
+  await new Promise((r) => setTimeout(r, 40));
+  t.ch.onmessage({ data: { kick: "n3" } });
+  check(J(t.set) === J([1]) && t.made === 1 && J(t.kicks) === J(["1:n3"]), "follow: told `on` (four times, three at once) once the journal is active: exactly one DocSync, then kicks reach it: " + J({ set: t.set, made: t.made, kicks: t.kicks }));
+}
+{
+  const { t, run } = followRig("throw");
+  await run();
+  check(t.set.length === 0 && t.warned === 1, "follow: whether the journal is active can't be told: none, said");
+  t.active = true;
+  t.ch.onmessage({ data: { on: true } });
+  await new Promise((r) => setTimeout(r, 30));
+  check(J(t.set) === J([1]), "follow: …and a later `on` still joins");
+}
 
 const fails = results.filter(([ok]) => !ok).map(([, w]) => w);
 if (fails.length) { console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  ")); process.exit(1); }
