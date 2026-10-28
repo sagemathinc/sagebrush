@@ -780,13 +780,47 @@ fn with_rounds<T>(v: &Value, f: impl FnOnce() -> Result<T, String>) -> Result<T,
     }
 }
 
+/// Asks for Stop (check_coarse) about every 2^16 units of text work: the
+/// wire parsers and formatters below count each entry's bytes, so a long
+/// row (a 1 x K matrix) is polled inside it, not once per row.
+struct TextPoll(u64);
+
+impl TextPoll {
+    fn new() -> TextPoll {
+        TextPoll(0)
+    }
+    #[inline]
+    fn add(&mut self, work: usize) {
+        self.0 += work as u64;
+        if self.0 >= 1 << 16 {
+            self.0 = 0;
+            sagebrush_interrupt::check_coarse();
+        }
+    }
+}
+
+/// The entries of one compact list "c0,c1,...", polled.
+fn bigs_text(s: &str, poll: &mut TextPoll) -> Result<Vec<BigInt>, String> {
+    if s.is_empty() {
+        return Ok(vec![]);
+    }
+    s.split(',')
+        .map(|t| {
+            poll.add(t.len() + 1);
+            t.parse::<BigInt>().map_err(|e| e.to_string())
+        })
+        .collect()
+}
+
+/// An entry's decimal digits, about (an upper bound): the formatters' unit.
+fn digits(x: &BigInt) -> usize {
+    usize::try_from(x.bits() / 3 + 2).unwrap_or(usize::MAX)
+}
+
 fn bigs(v: Option<&Value>) -> Result<Vec<BigInt>, String> {
     // the compact wire format: "c0,c1,..." (sagebrush.linalg and poly send it)
     if let Some(Value::String(s)) = v {
-        if s.is_empty() {
-            return Ok(vec![]);
-        }
-        return s.split(',').map(|t| t.parse::<BigInt>().map_err(|e| e.to_string())).collect();
+        return bigs_text(s, &mut TextPoll::new());
     }
     v.and_then(Value::as_array)
         .ok_or("missing integer list")?
@@ -822,7 +856,8 @@ fn matrix(v: Option<&Value>) -> Result<Vec<Vec<BigInt>>, String> {
         if s.is_empty() {
             return Ok(vec![]);
         }
-        return s.split(';').map(|r| bigs(Some(&Value::String(r.to_string())))).collect();
+        let mut poll = TextPoll::new();
+        return s.split(';').map(|r| bigs_text(r, &mut poll)).collect();
     }
     v.and_then(Value::as_array).ok_or("missing matrix (a list of rows)")?.iter().map(|r| bigs(Some(r))).collect()
 }
@@ -841,10 +876,15 @@ fn zmat(v: Option<&Value>) -> Result<sagebrush_arith::zmat::ZMat, String> {
 /// A matrix result: rows of decimal strings, or with "wire": "csv" one
 /// string "a,b;c,d".
 fn zrows(m: &sagebrush_arith::zmat::ZMat, v: &Value) -> Value {
+    let mut poll = TextPoll::new();
+    let mut text = |x: &BigInt| {
+        poll.add(digits(x));
+        x.to_string()
+    };
     if csv(v) {
-        return json!((0..m.rows).map(|i| m.row(i).iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")).collect::<Vec<_>>().join(";"));
+        return json!((0..m.rows).map(|i| m.row(i).iter().map(&mut text).collect::<Vec<_>>().join(",")).collect::<Vec<_>>().join(";"));
     }
-    json!((0..m.rows).map(|i| big(m.row(i))).collect::<Vec<_>>())
+    json!((0..m.rows).map(|i| m.row(i).iter().map(&mut text).collect::<Vec<_>>()).collect::<Vec<_>>())
 }
 
 /// A vector result in the requested wire format.
@@ -1422,11 +1462,18 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "mat_kernel" => Ok(zrows(&sagebrush_arith::zmat::kernel(&zmat(v.get("m"))?), v)),
         "mat_mul" => {
+            // (the phases name where a Stop lands, for the tests' hooks)
+            let parse = sagebrush_interrupt::enter("parse");
             let (a, b) = (zmat(v.get("a"))?, zmat(v.get("b"))?);
             if a.cols != b.rows {
                 return Err("mat_mul: matrices of incompatible sizes".into());
             }
-            Ok(zrows(&a.mul(&b), v))
+            drop(parse);
+            let product = sagebrush_interrupt::enter("product");
+            let c = a.mul(&b);
+            drop(product);
+            let _reply = sagebrush_interrupt::enter("reply");
+            Ok(zrows(&c, v))
         }
         // ---- sagebrush.poly: products and gcds in Z[x] ----
         "poly_mul" => Ok(zvec(

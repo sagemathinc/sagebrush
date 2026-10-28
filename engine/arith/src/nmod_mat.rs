@@ -479,6 +479,9 @@ impl Mat {
         let sq = (m.n as u128 - 1) * (m.n as u128 - 1);
         let batch = if sq == 0 { usize::MAX } else { (u128::MAX / sq).min(1 << 30) as usize };
         let mut c = Mat::zero(self.rows, o.cols, m);
+        // (polled inside each dot product too, so a 1 x K x C product asks
+        // about every 2^16 multiply-adds, not once per output row)
+        let batch = batch.min(1 << 16);
         let mut poll = Poll::new();
         for i in 0..self.rows {
             let a = self.row(i);
@@ -491,10 +494,11 @@ impl Mat {
                         acc += x as u128 * y as u128;
                     }
                     r = m.add(r, m.reduce_u128(acc));
+                    poll.add(ca.len());
                 }
                 c.d[i * o.cols + j] = r;
+                poll.add(1);
             }
-            poll.add(o.cols * self.cols);
         }
         c
     }

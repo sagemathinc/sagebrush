@@ -19,6 +19,7 @@
 
 use crate::nmod::{Modulus, Primes};
 use crate::nmod_mat::{Lu, Mat};
+use crate::nmod_poly::Poll;
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
@@ -38,6 +39,9 @@ pub fn mod_u64(x: &BigInt, m: &Modulus) -> u64 {
     }
     x.mod_floor(&BigInt::from(m.n)).to_u64().unwrap()
 }
+
+/// The multiply-adds between two polls in [`ZMat::mul`]'s inner loops.
+const MUL_STEP: usize = 1 << 16;
 
 fn bits(x: &BigInt) -> u64 {
     x.bits()
@@ -110,39 +114,80 @@ impl ZMat {
         ZMat { rows: rows.len(), cols: cols.len(), d }
     }
 
+    /// The product, asking for Stop about every 2^16 units of work whatever
+    /// the shape (a 1 x K x 1 dot product as much as a wide or tall one):
+    /// each entry scanned or converted, each output entry, and each
+    /// multiply-add, which the BigInt loop weighs by the word sizes of the
+    /// largest entries, so a poll is never more than about 2^16 word
+    /// products away.
     pub fn mul(&self, o: &ZMat) -> ZMat {
         assert_eq!(self.cols, o.rows, "matrix dimensions do not match");
         let (r, k, c) = (self.rows, self.cols, o.cols);
-        let small = self.max_bits() + o.max_bits() + (64 - (k as u64).leading_zeros() as u64) < 126;
+        let mut poll = Poll::new();
+        let (ba, bb) = (self.max_bits_polled(&mut poll), o.max_bits_polled(&mut poll));
+        let small = ba + bb + (64 - (k as u64).leading_zeros() as u64) < 126;
         if small {
-            if let (Some(a), Some(b)) = (self.as_i64(), o.as_i64()) {
+            if let (Some(a), Some(b)) = (self.as_i64_polled(&mut poll), o.as_i64_polled(&mut poll)) {
                 let mut d = Vec::with_capacity(r * c);
                 for i in 0..r {
                     for j in 0..c {
                         let mut s = 0i128;
-                        for l in 0..k {
-                            s += a[i * k + l] as i128 * b[l * c + j] as i128;
+                        for l0 in (0..k).step_by(MUL_STEP) {
+                            let l1 = (l0 + MUL_STEP).min(k);
+                            for l in l0..l1 {
+                                s += a[i * k + l] as i128 * b[l * c + j] as i128;
+                            }
+                            poll.add(l1 - l0);
                         }
                         d.push(BigInt::from(s));
+                        poll.add(1);
                     }
                 }
                 return ZMat { rows: r, cols: c, d };
             }
         }
+        // a multiply-add's weight: the word products of the largest entries
+        let words = |b: u64| b.div_ceil(64).max(1);
+        let w = usize::try_from(words(ba).saturating_mul(words(bb))).unwrap_or(usize::MAX);
+        let step = (MUL_STEP / w).max(1);
         let mut d = Vec::with_capacity(r * c);
         for i in 0..r {
             for j in 0..c {
                 let mut s = BigInt::zero();
-                for l in 0..k {
-                    if !self.d[i * k + l].is_zero() {
-                        s += &self.d[i * k + l] * &o.d[l * c + j];
+                for l0 in (0..k).step_by(step) {
+                    let l1 = (l0 + step).min(k);
+                    for l in l0..l1 {
+                        if !self.d[i * k + l].is_zero() {
+                            s += &self.d[i * k + l] * &o.d[l * c + j];
+                        }
                     }
+                    poll.add((l1 - l0).saturating_mul(w));
                 }
                 d.push(s);
+                poll.add(1);
             }
-            sagebrush_interrupt::check();
         }
         ZMat { rows: r, cols: c, d }
+    }
+
+    /// [`max_bits`](ZMat::max_bits), polling for Stop.
+    fn max_bits_polled(&self, poll: &mut Poll) -> u64 {
+        let mut m = 0;
+        for x in &self.d {
+            m = m.max(bits(x));
+            poll.add(1);
+        }
+        m
+    }
+
+    /// [`as_i64`](ZMat::as_i64), polling for Stop.
+    fn as_i64_polled(&self, poll: &mut Poll) -> Option<Vec<i64>> {
+        let mut v = Vec::with_capacity(self.d.len());
+        for x in &self.d {
+            v.push(x.to_i64()?);
+            poll.add(1);
+        }
+        Some(v)
     }
 
     pub fn scale(&self, s: &BigInt) -> ZMat {
