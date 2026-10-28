@@ -61,6 +61,32 @@ check(res.maxRSS > 0 && res.maxRSS < 96 * 1024, `jcs: 16 MiB of U+0001 refused b
   // (every vector's refusal is what a client of this build reads: its code kept, as is)
   for (const r of V.refusals ?? []) { const e = R.refusalOf({ ...r.error, message: "m" }); check(e.code === r.error.code && J(e.detail ?? null) === J(r.error.detail ?? null), `refusal ${r.error.code}: read as itself`); }
 }
+// ---- the answers' shapes (sync-docs and sync-client, Oct 28): each well formed, its codes Code's, and the checker
+// accepting a frame of the shape and refusing a key too many, one missing, a wrong type and a wrong literal
+{
+  const J = JSON.stringify;
+  const A = V.answers ?? [];
+  check(A.length === 6 && J(A.map((a) => a.for)) === J(["pull", "batch", "batch", "batch", "pull", "doc_claim"]), "the six answers' vectors: " + J(A.map((a) => a.for)));
+  const named = new Set(["number", "string", "boolean", "null", "string|null", "array"]);
+  const wellFormed = (s) => typeof s === "string" ? (s.startsWith("=") || named.has(s)) : Array.isArray(s) ? s.length === 1 && wellFormed(s[0]) : !!s && typeof s === "object" && Object.values(s).every(wellFormed);
+  for (const a of A) check(wellFormed(a.shape) && typeof a.when === "string", `answer ${a.for}, ${a.when}: a well-formed shape`);
+  for (const a of A.filter((x) => x.shape?.t === "=error")) check(R.isCode(a.shape.code.slice(1)) && "message" in a.shape.detail, `answer ${a.for}, ${a.when}: its code is Code's, and detail has message`);
+  const by = (f, w) => A.find((a) => a.for === f && a.when.startsWith(w))?.shape;
+  const head = { epoch: 1, seq: 2, chain: "ab".repeat(32) };
+  const ack = { t: "ack", req: 3, batch: { seq: 2, new: 1, resent: {}, head } };
+  check(P.shapeMismatch(ack, by("batch", "a new patch")) === null, "shapes: a new batch's ack matches");
+  check(P.shapeMismatch({ t: "ack", req: 4, batch: { new: 0, resent: { ["0".repeat(11) + "_c"]: 2 }, head } }, by("batch", "every patch a resend")) === null, "shapes: an all-resent ack (no seq) matches");
+  check(/seq: not in the shape/.test(P.shapeMismatch({ ...ack, batch: { ...ack.batch, new: 0 } }, by("batch", "every patch a resend")) ?? ""), "shapes: an all-resent ack with a seq is refused");
+  check(/resent: not an object/.test(P.shapeMismatch({ ...ack, batch: { ...ack.batch, resent: 1 } }, by("batch", "a new patch")) ?? ""), "shapes: resent as a count is refused");
+  check(/head\.chain: missing/.test(P.shapeMismatch({ ...ack, batch: { ...ack.batch, head: { epoch: 1, seq: 2 } } }, by("batch", "a new patch")) ?? ""), "shapes: a head without its chain is refused");
+  const page = { t: "batches", req: 5, owner: "f".repeat(64), doc: "0123456789ab", epoch: 1, head: { ...head, chain: null }, items: [{ seq: 1, author: "person", writer: "session:d", device: "d", recv: 1, chain: null, patches: [], body: "" }], more: false };
+  check(P.shapeMismatch(page, by("pull", "a page")) === null && P.shapeMismatch({ ...page, items: [] }, by("pull", "a page")) === null, "shapes: a page (and an empty one) matches, null chains too");
+  check(/snapshot: not in the shape/.test(P.shapeMismatch({ ...page, snapshot: { at_seq: 1 } }, by("pull", "a page")) ?? ""), "shapes: a page with a snapshot key is refused");
+  check(/items\[0\]\.device: missing/.test(P.shapeMismatch({ ...page, items: [{ ...page.items[0], device: undefined }].map(({ device, ...x }) => x) }, by("pull", "a page")) ?? ""), "shapes: an item without its device is refused");
+  const ep = { t: "error", req: 6, code: "epoch", detail: { message: "m", epoch: 2, head: { epoch: 2, seq: 1 } } };
+  check(P.shapeMismatch(ep, by("batch", "another epoch")) === null && P.shapeMismatch(ep, by("pull", "another epoch")) === null, "shapes: the cleared history's refusal matches, for batch and pull");
+  check(/code: not "stale_epoch"/.test(P.shapeMismatch(ep, by("doc_claim", "another epoch")) ?? ""), "shapes: a claim's other epoch is stale_epoch, not epoch");
+}
 // ---- a refusal with a code this build doesn't know fails closed: "invalid", final, its code kept (daybreak3's U2)
 {
   const J = JSON.stringify;

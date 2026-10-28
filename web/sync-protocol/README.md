@@ -17,3 +17,20 @@ exactly this). The client's `refusalOf` (protocol.ts) keeps `detail` as it arriv
 nothing there; the client decides on the code and the refusal's own fields.
 
 An accepted snapshot is acknowledged as `{t: "ack", req, snapshot: {}}`.
+
+## doc-vectors.json's `answers`: comparing an answer with its shape
+
+Each case of `answers` names a request (`for`), the situation (`when`) and the `shape` of the frame a server sends for it.
+`shapeMismatch(frame, shape)` (doc-protocol.ts) returns null when the frame matches, or the first path where it doesn't:
+- an object in a shape has exactly those keys, no more and no fewer;
+- `{"*": s}` is a map whose every value is `s` (a batch ack's `resent`, by patch id);
+- `[s]` is an array whose every element is `s`;
+- `"number"`, `"string"`, `"boolean"`, `"null"`, `"string|null"` and `"array"` are a value of that type;
+- `"=x"` is exactly the string `x`.
+
+Pinned so far:
+- pull's page: no `snapshot` key, and every item carries `device`;
+- a batch's ack: `seq` only when a patch was new, and `resent` as an object;
+- the cleared history's refusal on batch and pull (`epoch`), as against a claim's `stale_epoch`.
+
+The reference server is checked against them in test-reference-server.mjs, and cloud's server in its test-sync.
