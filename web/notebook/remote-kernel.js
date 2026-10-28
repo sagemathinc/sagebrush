@@ -7,8 +7,20 @@
 // gateway keeps none, and refuses a run while the kernel is busy), and each
 // request ends in exactly one terminal: done(ms, {error}), stopped(message)
 // or skipped().  Nothing is ever resubmitted automatically, except the one
-// identical resend of a run whose acknowledgement was lost (the gateway
-// admits a request at most once, by its id and digest).
+// identical resend of a run whose answer was lost (the gateway admits a
+// request at most once, by its id and digest).
+//
+// Lifecycle.  The kernel's state is one immutable record, `lc` (binding,
+// epoch, generation, incarnation, phase), replaced as a whole on every
+// change.  Every asynchronous step captures the record it started under and,
+// after each await, does nothing unless it is still current: a late answer
+// for an old binding, generation or epoch never changes, stops or replaces
+// what came after it.  Lifecycle operations (bind, restart, takeover,
+// replacement) run one at a time, and no run starts while one is pending.
+// When the binding or generation changes, or the kernel closes or moves to
+// another tab, the running request is told why and released at once, and
+// everything it was waiting for is aborted, so a reply that never comes can't
+// hold the queue.
 //
 //   const kernel = new RemoteKernel({ client, notebook: fid, path, kernel: "python3" });
 //   kernel.on("status", (text) => ...);
@@ -17,18 +29,21 @@
 // The wire shapes (the gateway implements the same):
 //   POST /bindings {notebook, kernel, path, client} -> {binding, epoch, incarnation, state}
 //   POST /bindings/{b}/runs {request, epoch, generation, incarnation, kind: "run", payload} -> {request, state}
-//     refused: 409 busy | epoch | fencing; 410 quarantined; 429/503 with Retry-After
+//     refused: 409 busy | epoch | fencing | conflict; 410 quarantined; 429/503 with Retry-After
 //   GET  /bindings/{b}/runs/{request}/events?after=<seq> -> a text/event-stream of
-//     {seq, type: "start" | "stream" | "display" | "clear" | "terminal", ...}
+//     {seq, type: "start" | "stream" | "display" | "clear" | "terminal", ...}, seq = 1, 2, 3, ...
 //   GET  /bindings/{b}/runs/{request} -> {request, state, outcome?}
-//   POST /bindings/{b}/interrupt | /restart {epoch, op_id}; /complete {epoch, op_id, code, cursor_pos}
-//   POST /bindings/{b}/takeover {client} -> {epoch, state, applied_before_takeover, in_flight}
+//   POST /bindings/{b}/interrupt | /restart {epoch, op_id} -> {outcome: {status: "done", incarnation} | {status: "refused", reason}}
+//   POST /bindings/{b}/complete {epoch, op_id, code, cursor_pos} -> {matches, prefix}
+//   POST /bindings/{b}/takeover {client} -> {epoch, state, incarnation?, applied_before_takeover: [{op_id, kind}], in_flight}
 // A terminal's outcome is {status, reason?, detail?, ms?, ename?, incarnation?}.
 
-import { GatewayError, StreamError } from "./remote-client.js";
+import { GatewayError, StreamError, NotSentError, AmbiguousError } from "./remote-client.js";
 
 const ENVELOPE_MIME = "application/vnd.sagebrush.envelope.v1+json";
 const clip = (s, n = 300) => String(s ?? "").slice(0, n);
+const ID_RE = /^[A-Za-z0-9._~-]{1,128}$/;
+const isInt = (n) => Number.isInteger(n) && n >= 0;
 
 /** What the page says when a request ends without running, or is stopped (the plan's §9.4 notes). */
 export const NOTES = {
@@ -42,7 +57,7 @@ export const NOTES = {
   beforeCode: "\nNot run: interrupted before your code ran.\n",
   stoppedRestart: "\nStopped: the kernel was restarted.\n",
   restartedBeforeRun: "\nNot run: the remote kernel restarted before your code ran; variables are gone. Run it again.\n",
-  kernelReplaced: "\nNot run: this notebook's kernel was replaced; variables are gone.\n",
+  kernelReplaced: "\nStopped: this notebook's kernel was replaced; variables are gone.\n",
   unknown: "\nThe connection to the remote kernel was lost; whether this ran is unknown.\n",
   unreachable: "\nNot run: the remote kernel could not be reached.\n",
   restarted: "\nInterpreter restarted.\n",
@@ -121,16 +136,15 @@ export class RemoteKernel {
     this.kernelName = kernel;
     this.clientId = clientId ?? Math.random().toString(36).slice(2, 10);
     this.sleep = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
-    this.generation = 0; // a new kernel (bind, restart, replacement): what an older one made is stale
-    this.binding = null;
-    this.epoch = null;
-    this.incarnation = null;
-    this.ready = false;
-    this.closed = false;
+    // phase: "idle" (no binding), "ready", "moved" (another tab took it), "closed"
+    this.lc = Object.freeze({ serial: 0, binding: null, epoch: null, generation: 0, incarnation: null, phase: "idle" });
+    // aborted whenever the binding, generation or phase changes: everything begun under the old one
+    this.abortCtl = new AbortController();
+    this.lifeChain = Promise.resolve();
+    this.lifeOps = 0;
     this.needsFence = false; // after an unknown outcome: take the binding over (fence) before more work
-    this.moved = false; // another tab took it over
     this.queue = []; // {code, opts, sink, generation}
-    this.current = null; // the job being run: {..., request, ctx, abort}
+    this.current = null; // the job being run: {..., lc, request}
     this.nextN = 1;
     this.nextOp = 1;
     this.recoveredAt = null; // the incarnation an observed restart was last recovered from (one recovery each)
@@ -138,31 +152,74 @@ export class RemoteKernel {
     this.targetSink = () => null;
   }
 
+  get generation() { return this.lc.generation; }
+  get binding() { return this.lc.binding; }
+  get epoch() { return this.lc.epoch; }
+  get incarnation() { return this.lc.incarnation; }
+  get ready() { return this.lc.phase === "ready"; }
+  get moved() { return this.lc.phase === "moved"; }
+  get closed() { return this.lc.phase === "closed"; }
+
   on(event, f) { (this.listeners[event] ??= []).push(f); return () => { this.listeners[event] = this.listeners[event].filter((g) => g !== f); }; }
   emit(event, ...args) { for (const f of this.listeners[event] ?? []) f(...args); }
 
-  /** Bind to a kernel in the compute project (a new binding): a new generation. */
-  async start() {
-    this.ready = false;
-    this.emit("status", "connecting…");
-    try {
-      const r = await this.client.request("POST", "/bindings", { notebook: this.notebook, kernel: this.kernelName, path: this.path, client: this.clientId });
-      this.binding = r.binding;
-      this.epoch = r.epoch;
-      this.incarnation = r.incarnation ?? null;
-      this.generation++;
-      this.needsFence = false;
-      this.moved = false;
-      this.ready = true;
-      this.emit("status", "ready (remote)");
-      this.emit("ready");
+  // A new lifecycle record.  If the binding, generation or phase changed:
+  // everything begun under the old one is aborted, and the running request
+  // is told `note` and released now (its late answers are stale).
+  setLc(patch, note) {
+    const old = this.lc;
+    const lc = Object.freeze({ ...old, ...patch, serial: old.serial + 1 });
+    this.lc = lc;
+    if (lc.binding !== old.binding || lc.generation !== old.generation || lc.phase !== old.phase) {
+      this.abortCtl.abort();
+      this.abortCtl = new AbortController();
+      const j = this.current;
+      this.current = null;
+      j?.sink.stopped(note ?? NOTES.restarted);
+    }
+    return lc;
+  }
+
+  // Lifecycle operations, one at a time; no run starts while one is pending.
+  lifecycle(fn) {
+    this.lifeOps++;
+    const p = this.lifeChain.then(() => fn());
+    this.lifeChain = p.catch(() => {});
+    return p.finally(() => {
+      this.lifeOps--;
       this.pump();
-      return true;
+    });
+  }
+
+  opId() { return `op.${this.clientId}.${this.nextOp++}`; }
+
+  /** Bind to a kernel in the compute project (a new binding): a new generation. */
+  start() { return this.lifecycle(() => this.bind()); }
+
+  async bind() {
+    const lc0 = this.lc;
+    if (lc0.phase === "closed" || lc0.phase === "moved") return false;
+    this.emit("status", "connecting…");
+    let r, err = null;
+    try {
+      r = await this.client.request("POST", "/bindings", { notebook: this.notebook, kernel: this.kernelName, path: this.path, client: this.clientId }, { signal: this.abortCtl.signal });
     } catch (e) {
-      this.emit("status", `error: the remote kernel did not start: ${clip(e?.message ?? e)}`);
-      for (const j of this.queue.splice(0)) j.sink.stopped(`\nThe remote kernel did not start: ${clip(e?.message ?? e)}\n`);
+      err = e;
+    }
+    if (this.lc !== lc0) return false; // (closed meanwhile: this answer is stale)
+    if (!err && !(typeof r.binding === "string" && ID_RE.test(r.binding) && isInt(r.epoch) && (r.incarnation == null || isInt(r.incarnation)))) {
+      err = new AmbiguousError("the gateway's answer to bind was not valid");
+    }
+    if (err) {
+      this.emit("status", `error: the remote kernel did not start: ${clip(err?.message ?? err)}`);
+      for (const j of this.queue.splice(0)) j.sink.stopped(`\nThe remote kernel did not start: ${clip(err?.message ?? err)}\n`);
       return false;
     }
+    this.needsFence = false;
+    this.setLc({ binding: r.binding, epoch: r.epoch, incarnation: r.incarnation ?? null, generation: lc0.generation + 1, phase: "ready" }, NOTES.kernelReplaced);
+    this.emit("status", "ready (remote)");
+    this.emit("ready");
+    return true;
   }
 
   /**
@@ -173,37 +230,36 @@ export class RemoteKernel {
     const s = once(sink);
     if (this.closed) return s.stopped(NOTES.closed);
     if (this.moved) return s.stopped(NOTES.moved);
-    this.queue.push({ code, opts: opts ?? {}, sink: s, generation: this.generation });
+    // (no binding, and none being made: nothing would ever run it)
+    if (this.lc.phase === "idle" && !this.lifeOps) return s.stopped(NOTES.unreachable);
+    this.queue.push({ code, opts: opts ?? {}, sink: s, generation: this.lc.generation });
     this.pump();
   }
 
-  // the next queued run, once the one before it has its terminal
+  // the next queued run, once the one before it has its terminal, and no lifecycle operation is pending
   pump() {
-    if (this.current || !this.ready || this.closed || !this.queue.length) return;
+    if (this.current || this.lifeOps || this.lc.phase !== "ready" || !this.queue.length) return;
     const job = this.queue.shift();
     this.current = job;
     this.runJob(job)
-      .catch((e) => job.sink.stopped(`\nThe remote kernel failed: ${clip(e?.message ?? e)}\n`))
+      .catch((e) => { if (this.current === job) job.sink.stopped(`\nThe remote kernel failed: ${clip(e?.message ?? e)}\n`); })
       .finally(() => {
         if (this.current === job) this.current = null;
         this.pump();
       });
   }
 
-  // (a callback for this request and kernel is current only if nothing changed since it was sent)
-  stale(ctx) {
-    return ctx.generation !== this.generation || ctx.binding !== this.binding;
-  }
-
   async runJob(job) {
     // (queued before a restart: its kernel is gone)
-    if (job.generation !== this.generation) return job.sink.stopped(NOTES.restarted);
-    if (this.needsFence && !(await this.takeover())) return;
-    if (job.generation !== this.generation) return job.sink.stopped(NOTES.kernelReplaced);
-    const request = `rq.${this.clientId}.${this.generation}.${this.nextN++}`;
-    const ctx = { binding: this.binding, epoch: this.epoch, generation: this.generation, request };
-    job.request = request;
-    job.ctx = ctx;
+    if (job.generation !== this.lc.generation) return job.sink.stopped(NOTES.restarted);
+    if (this.needsFence) {
+      const ok = await this.lifecycle(() => this.takeover(job));
+      if (!ok || this.current !== job) return;
+    }
+    if (job.generation !== this.lc.generation) return job.sink.stopped(NOTES.kernelReplaced);
+    const lc = (job.lc = this.lc);
+    const signal = this.abortCtl.signal;
+    const request = (job.request = `rq.${this.clientId}.${lc.generation}.${this.nextN++}`);
     const o = job.opts;
     const payload = {
       code: job.code,
@@ -214,166 +270,222 @@ export class RemoteKernel {
       ...(o.seed ? { seed: o.seed } : {}),
       ...(o.scoped && Object.keys(o.scoped).length ? { scoped: { ...o.scoped } } : {}),
     };
-    const body = { request, epoch: ctx.epoch, generation: ctx.generation, incarnation: this.incarnation, kind: "run", payload };
-    const admitted = await this.submit(job, body);
-    if (!admitted) return;
-    await this.follow(job, ctx);
+    const body = { request, epoch: lc.epoch, generation: lc.generation, incarnation: lc.incarnation, kind: "run", payload };
+    if (!(await this.submit(job, body, signal))) return;
+    if (this.current !== job) return;
+    await this.follow(job, signal);
   }
 
-  // POST the run; true once the gateway has it.  A lost answer is resent
-  // once, identically (the gateway's at-most-once admission returns the
-  // existing request); a second loss is an unknown outcome.
-  async submit(job, body) {
-    const path = `/bindings/${this.binding}/runs`;
+  // POST the run; true once the gateway has it.  Not sent: not run.  A typed
+  // refusal: not run (or moved, fenced, replaced).  Sent without a valid
+  // answer (lost, unreadable, oversized): resent once, identically (the
+  // gateway's at-most-once admission returns the existing request); a second
+  // such answer is an unknown outcome, and the binding is fenced first.
+  async submit(job, body, signal) {
+    const path = `/bindings/${job.lc.binding}/runs`;
     for (let attempt = 0; ; attempt++) {
+      let err = null;
       try {
-        await this.client.request("POST", path, body);
-        return true;
+        await this.client.request("POST", path, body, { signal });
       } catch (e) {
-        if (!(e instanceof GatewayError)) {
-          if (attempt === 0) continue;
-          this.needsFence = true;
-          job.sink.stopped(NOTES.unknown);
-          return false;
-        }
-        if (e.code === "busy") job.sink.stopped(NOTES.busy);
-        else if (e.code === "epoch") this.movedAway(job);
-        else if (e.code === "fencing") { this.needsFence = true; job.sink.stopped(NOTES.notHanded); }
-        else if (e.code === "quarantined") { await this.replace(); job.sink.stopped(NOTES.kernelReplaced); }
-        else job.sink.stopped(`\nNot run: ${clip(e.message)}\n`);
+        err = e;
+      }
+      if (this.current !== job) return false; // (stale: the job was already told why)
+      if (!err) return true;
+      if (err instanceof NotSentError) {
+        job.sink.stopped(`\nNot run: ${clip(err.message)}\n`);
         return false;
       }
+      if (err instanceof GatewayError) {
+        if (err.code === "busy") job.sink.stopped(NOTES.busy);
+        else if (err.code === "epoch") {
+          // (only an answer for the current record means another tab has it)
+          if (this.lc === job.lc) this.movedAway();
+          else job.sink.stopped(NOTES.notHanded);
+        } else if (err.code === "fencing") {
+          this.needsFence = true;
+          job.sink.stopped(NOTES.notHanded);
+        } else if (err.code === "quarantined") {
+          job.sink.stopped(NOTES.kernelReplaced);
+          const lc = job.lc;
+          await this.lifecycle(() => this.replace(lc));
+        } else if (err.code === "conflict") {
+          this.needsFence = true;
+          job.sink.stopped(NOTES.unknown);
+        } else job.sink.stopped(`\nNot run: ${clip(err.message)}\n`);
+        return false;
+      }
+      if (attempt === 0) continue;
+      this.needsFence = true;
+      job.sink.stopped(NOTES.unknown);
+      return false;
     }
   }
 
-  // The run's events until its terminal: reconnecting after a break, from
-  // the last event seen; if it can't, the run's recorded outcome; if that is
-  // unreachable too, unknown (and the binding is fenced before more work).
-  async follow(job, ctx) {
+  // The run's events until its terminal, each exactly once and in order
+  // (seq 1, 2, 3, ...; a replayed one is skipped, a gap reconnects from the
+  // last one seen); after a break, reconnecting; if it can't, the run's
+  // recorded outcome; if that is unreachable too, unknown (and fenced).
+  async follow(job, signal) {
     const sink = job.sink;
-    const path = `/bindings/${ctx.binding}/runs/${encodeURIComponent(ctx.request)}`;
+    const path = `/bindings/${job.lc.binding}/runs/${encodeURIComponent(job.request)}`;
     let after = 0, failures = 0, started = false;
-    const abort = new AbortController();
-    job.abort = abort;
-    while (!sink.ended && !this.stale(ctx)) {
+    while (this.current === job && !sink.ended) {
       try {
-        for await (const ev of this.client.events(`${path}/events`, after, abort.signal)) {
-          if (sink.ended || this.stale(ctx)) return;
+        for await (const ev of this.client.events(path, after, signal)) {
+          if (this.current !== job || sink.ended) return;
+          if (!Number.isInteger(ev.seq) || ev.seq <= after) continue; // (a replay or a duplicate)
+          if (ev.seq !== after + 1) break; // (a gap: reconnect from the last one seen)
+          after = ev.seq;
           failures = 0;
-          if (Number.isFinite(ev.seq)) after = Math.max(after, ev.seq);
           if (ev.type === "start") { if (!started) { started = true; sink.start(); } }
           else if (ev.type === "stream") sink.out(String(ev.text ?? ""), ev.name === "stderr");
           else if (ev.type === "display") {
             // (a hidden run's envelope is the gateway's, never output: refused if it appears)
-            if (ev.data && typeof ev.data === "object" && !(ENVELOPE_MIME in ev.data)) sink.display(ev.data);
+            if (ev.data && typeof ev.data === "object" && !Array.isArray(ev.data) && !(ENVELOPE_MIME in ev.data)) sink.display(ev.data);
           } else if (ev.type === "clear") sink.clear();
-          else if (ev.type === "terminal") return this.finish(job, ctx, ev.outcome);
+          else if (ev.type === "terminal") return this.finish(job, ev.outcome);
         }
-        // (the stream ended without a terminal: reconnect)
         failures++;
       } catch (e) {
-        if (sink.ended || this.stale(ctx)) return;
+        if (this.current !== job || sink.ended) return;
         if (e instanceof StreamError && e.tooLarge) {
           sink.out(NOTES.tooLarge, true);
-          return this.awaitOutcome(job, ctx);
+          return this.awaitOutcome(job, signal);
         }
-        if (e instanceof GatewayError && (e.status === 404 || e.status === 410)) return this.awaitOutcome(job, ctx);
+        if (e instanceof GatewayError && (e.status === 404 || e.status === 410)) return this.awaitOutcome(job, signal);
         failures++;
       }
-      if (failures > 5) return this.awaitOutcome(job, ctx);
+      if (failures > 5) return this.awaitOutcome(job, signal);
       await this.sleep(Math.min(8000, 500 * 2 ** (failures - 1)));
     }
   }
 
   // The run's outcome without its events: asked until it is terminal (the
   // run may still be going), giving up as unknown after repeated failures.
-  async awaitOutcome(job, ctx) {
-    const path = `/bindings/${ctx.binding}/runs/${encodeURIComponent(ctx.request)}`;
+  async awaitOutcome(job, signal) {
+    const path = `/bindings/${job.lc.binding}/runs/${encodeURIComponent(job.request)}`;
     let failures = 0, wait = 500;
-    while (!job.sink.ended && !this.stale(ctx)) {
+    while (this.current === job && !job.sink.ended) {
+      let r = null;
       try {
-        const r = await this.client.request("GET", path);
+        r = await this.client.request("GET", path, undefined, { signal });
         failures = 0;
-        if (r?.outcome) return this.finish(job, ctx, r.outcome);
-      } catch (e) {
-        if (++failures > 5) break;
+      } catch {
+        failures++;
       }
+      if (this.current !== job || job.sink.ended) return;
+      if (r?.outcome && typeof r.outcome === "object") return this.finish(job, r.outcome);
+      if (failures > 5) break;
       await this.sleep(wait);
       wait = Math.min(5000, wait * 2);
     }
-    if (job.sink.ended || this.stale(ctx)) return;
+    if (this.current !== job || job.sink.ended) return;
     this.needsFence = true;
     job.sink.stopped(NOTES.unknown);
   }
 
   // A terminal, to the cell: only a user-phase ok is a success (done without error).
-  finish(job, ctx, outcome) {
-    if (job.sink.ended || this.stale(ctx)) return;
-    const o = outcome && typeof outcome === "object" ? outcome : { status: "unknown" };
+  finish(job, outcome) {
+    if (this.current !== job || job.sink.ended) return;
+    const o = outcome && typeof outcome === "object" && !Array.isArray(outcome) ? outcome : { status: "unknown" };
     const ms = Number.isFinite(o.ms) ? o.ms : 0;
     if (o.status === "ok") return job.sink.done(ms, { error: false });
     if (o.status === "error") return job.sink.done(ms, { error: true, ...(o.ename === "KeyboardInterrupt" ? { interrupted: true } : {}) });
     job.sink.stopped(outcomeNote(o));
-    if (o.status === "unknown" || !["refused", "stopped", "setup-failed", "restarted-before-run"].includes(o.status)) this.needsFence = true;
-    if (o.status === "restarted-before-run") this.recover(o.incarnation);
+    if (!["refused", "stopped", "setup-failed", "restarted-before-run"].includes(o.status)) this.needsFence = true;
+    if (o.status === "restarted-before-run") this.recover(job.lc, isInt(o.incarnation) ? o.incarnation : null);
   }
 
   // An observed restart (the helper was missing, or another incarnation
   // answered): one recovery, a restart that bootstraps the helper; a second
   // in a row is left to the person (the status says so).
-  recover(incarnation) {
-    const key = `${this.binding}:${incarnation ?? this.incarnation}`;
+  recover(lc, incarnation) {
+    const key = `${lc.binding}:${incarnation ?? lc.incarnation}`;
     if (this.recoveredAt === key) {
       this.emit("status", "error: the remote kernel keeps restarting; restart it, or reconnect");
       return;
     }
     this.recoveredAt = key;
-    this.restart(NOTES.restartedBeforeRun);
+    this.lifecycle(() => this.restartOp(NOTES.restartedBeforeRun, lc));
   }
 
   /** Interrupt what is running (the gateway signals the kernel); queued runs are skipped. */
   interrupt() {
     for (const j of this.queue.splice(0)) j.sink.skipped();
-    if (!this.current || !this.binding) return;
-    this.control("interrupt").catch((e) => this.emit("status", `error: Stop failed: ${clip(e?.message ?? e)}`));
+    const job = this.current, lc = this.lc;
+    if (!job?.lc || lc.phase !== "ready") return;
+    this.client.request("POST", `/bindings/${lc.binding}/interrupt`, { epoch: lc.epoch, op_id: this.opId() }, { signal: this.abortCtl.signal })
+      .catch((e) => { if (this.lc === lc) this.emit("status", `error: Stop failed: ${clip(e?.message ?? e)}`); });
   }
 
   /**
    * A fresh kernel (the gateway restarts it and bootstraps its helper).
-   * Once the restart is done: a new generation, queued runs are told
-   * `message`, and the running one is told the kernel was restarted (the
-   * gateway settled it so).  If the restart fails, nothing changes but the status.
+   * Once the gateway reports the restart done: a new generation, queued runs
+   * are told `message`, and the running one is told the kernel was
+   * restarted.  A refusal changes nothing but the status; an invalid or lost
+   * answer is checked with the gateway (a takeover lists what was applied)
+   * before anything else runs.
    */
   restart(message = NOTES.restarted) {
-    if (!this.binding) return;
+    const lc = this.lc;
+    return this.lifecycle(() => this.restartOp(message, lc));
+  }
+
+  async restartOp(message, lcAsked) {
+    const lc0 = this.lc;
+    // (asked of a kernel that has changed since: already restarted, replaced or closed)
+    if (lc0.phase !== "ready" || lc0.binding !== lcAsked.binding || lc0.generation !== lcAsked.generation) return;
     this.emit("status", "restarting…");
-    this.control("restart")
-      .then((r) => {
-        const o = r?.outcome ?? r;
-        if (o?.status && o.status !== "done") throw new Error(outcomeNote(o)?.trim() || "the restart was refused");
-        const running = this.current;
-        this.generation++;
-        if (o?.incarnation !== undefined) this.incarnation = o.incarnation;
-        for (const j of this.queue.splice(0)) j.sink.stopped(message);
-        if (running) { running.abort?.abort(); running.sink.stopped(NOTES.stoppedRestart); }
-        this.emit("status", "ready (remote)");
-        this.emit("restart");
-      })
-      .catch((e) => this.emit("status", `error: the restart failed: ${clip(e?.message ?? e)}`));
+    const opId = this.opId();
+    let r, err = null;
+    try {
+      r = await this.client.request("POST", `/bindings/${lc0.binding}/restart`, { epoch: lc0.epoch, op_id: opId }, { signal: this.abortCtl.signal });
+    } catch (e) {
+      err = e;
+    }
+    if (this.lc !== lc0) return; // (stale: closed, moved or replaced meanwhile)
+    if (!err) {
+      const o = r.outcome;
+      if (o && o.status === "done" && isInt(o.incarnation)) return this.restarted(message, o.incarnation);
+      if (o && o.status === "refused" && typeof o.reason === "string") {
+        this.emit("status", `error: the restart failed: ${outcomeNote(o).trim()}`);
+        return;
+      }
+      err = new AmbiguousError("the gateway's answer to restart was not valid");
+    }
+    if (err instanceof NotSentError || err instanceof GatewayError) {
+      this.emit("status", `error: the restart failed: ${clip(err.message)}`);
+      return;
+    }
+    // (sent, without a valid answer: whether it restarted is found out first)
+    this.emit("status", "the restart's answer was lost; checking with the gateway…");
+    this.needsFence = true;
+    await this.takeover(null, { opId, message });
   }
 
-  // A control op (interrupt, restart): its own op id, the current epoch.
-  control(kind) {
-    return this.client.request("POST", `/bindings/${this.binding}/${kind}`, { epoch: this.epoch, op_id: `op.${this.clientId}.${this.nextOp++}` });
+  // The gateway reported the restart done.
+  restarted(message, incarnation) {
+    for (const j of this.queue.splice(0)) j.sink.stopped(message);
+    this.setLc({ generation: this.lc.generation + 1, incarnation }, NOTES.stoppedRestart);
+    this.emit("status", "ready (remote)");
+    this.emit("restart");
   }
 
-  /** Questions: {complete: text} -> {matches, prefix}; anything else, or a failure: `fallback`. */
+  // (a control op's request: the current epoch, its own op id)
+  control(kind, lc, opId) {
+    return this.client.request("POST", `/bindings/${lc.binding}/${kind}`, { epoch: lc.epoch, op_id: opId }, { signal: this.abortCtl.signal });
+  }
+
+  /** Questions: {complete: text} -> {matches, prefix}; anything else, a failure, or a kernel that changed meanwhile: `fallback`. */
   async ask(msg, mode, fallback) {
-    if (msg?.complete === undefined || !this.ready || !this.binding) return fallback;
+    const lc0 = this.lc;
+    if (msg?.complete === undefined || lc0.phase !== "ready") return fallback;
     try {
       const code = String(msg.complete);
-      const r = await this.client.request("POST", `/bindings/${this.binding}/complete`, { epoch: this.epoch, op_id: `op.${this.clientId}.${this.nextOp++}`, code, cursor_pos: code.length });
-      return { matches: Array.isArray(r?.matches) ? r.matches.slice(0, 500).map(String) : [], prefix: String(r?.prefix ?? "") };
+      const r = await this.client.request("POST", `/bindings/${lc0.binding}/complete`, { epoch: lc0.epoch, op_id: this.opId(), code, cursor_pos: code.length }, { signal: this.abortCtl.signal });
+      if (this.lc !== lc0) return fallback;
+      return { matches: Array.isArray(r.matches) ? r.matches.slice(0, 500).map(String) : [], prefix: String(r.prefix ?? "") };
     } catch {
       return fallback;
     }
@@ -385,79 +497,93 @@ export class RemoteKernel {
   }
 
   /**
-   * Take the binding over (fence): after an unknown outcome, or in a new
-   * tab.  true once the gateway's fence is acknowledged and nothing from
-   * before is still executing.
+   * Take the binding over (fence), as a lifecycle operation: after an
+   * unknown outcome, a lost restart answer, or in a new tab.  true once the
+   * gateway's fence is acknowledged, nothing applied meanwhile changed the
+   * kernel, and nothing from before is still executing.  `job`: the run
+   * waiting for it (told why if it can't go ahead); `lost`: a restart whose
+   * answer was lost, looked for among the applied control ops.
    */
-  async takeover() {
+  async takeover(job, lost = null) {
+    if (job && this.current !== job) return false;
     const deadline = Date.now() + 100_000; // (the gateway's own fence wait)
     let wait = 500;
     for (;;) {
-      let r;
+      const lc0 = this.lc;
+      if (lc0.phase !== "ready") return false;
+      let r, err = null;
       try {
-        r = await this.client.request("POST", `/bindings/${this.binding}/takeover`, { client: this.clientId });
+        r = await this.client.request("POST", `/bindings/${lc0.binding}/takeover`, { client: this.clientId }, { signal: this.abortCtl.signal });
       } catch (e) {
-        if (e instanceof GatewayError && e.code === "quarantined") return this.replaceFor();
-        this.emit("status", `error: the remote kernel could not be reached: ${clip(e?.message ?? e)}`);
-        this.failCurrent(NOTES.unreachable);
+        err = e;
+      }
+      if (this.lc !== lc0 || (job && this.current !== job)) return false;
+      if (err instanceof GatewayError && err.code === "quarantined") return this.replace(lc0);
+      const states = ["ready", "fencing", "quarantined"];
+      if (!err && !(states.includes(r.state) && (r.state !== "ready" || isInt(r.epoch)))) err = new AmbiguousError("the gateway's answer to takeover was not valid");
+      if (err) {
+        this.emit("status", `error: the remote kernel could not be reached: ${clip(err?.message ?? err)}`);
+        this.needsFence = true;
+        job?.sink.stopped(NOTES.unreachable);
         return false;
       }
-      if (r.state === "quarantined") return this.replaceFor();
+      if (r.state === "quarantined") return this.replace(lc0);
       if (r.state === "ready") {
-        this.epoch = r.epoch;
         this.needsFence = false;
+        this.setLc({ epoch: r.epoch });
         const applied = Array.isArray(r.applied_before_takeover) ? r.applied_before_takeover : [];
+        const inc = isInt(r.incarnation) ? r.incarnation : null;
+        if (lost && applied.some((a) => a?.op_id === lost.opId && a?.kind === "restart")) {
+          this.restarted(lost.message, inc);
+          return false;
+        }
         if (applied.some((a) => a?.kind === "restart" || a?.kind === "delete")) {
-          this.generation++;
+          for (const j of this.queue.splice(0)) j.sink.stopped(NOTES.kernelReplaced);
+          this.setLc({ generation: this.lc.generation + 1, incarnation: inc }, NOTES.kernelReplaced);
           this.emit("status", "the remote kernel was restarted before this tab took it over; variables are gone");
           this.emit("restart");
+          return false;
         }
         if (Array.isArray(r.in_flight) && r.in_flight.length) {
           this.emit("status", "a run from the previous tab is still executing");
-          this.failCurrent(NOTES.inFlight);
           this.needsFence = true; // (asked again before the next run)
+          job?.sink.stopped(NOTES.inFlight);
           return false;
         }
+        if (lost) this.emit("status", "ready (remote); the restart did not happen");
         return true;
       }
       // fencing: the gateway refuses new work until its fence is acknowledged
-      if (Date.now() + wait > deadline) return this.replaceFor();
+      if (Date.now() + wait > deadline) return this.replace(lc0);
       await this.sleep(wait);
+      if (this.lc !== lc0 || (job && this.current !== job)) return false;
       wait = Math.min(5000, wait * 2);
     }
   }
 
-  // (the current job, told why it did not run)
-  failCurrent(note) { this.current?.sink.stopped(note); }
-
-  // The binding could not be handed over safely: a new one (a fresh kernel, a new generation).
-  async replaceFor() {
-    await this.replace();
-    this.failCurrent(NOTES.kernelReplaced);
-    return false;
-  }
-  async replace() {
-    this.binding = null;
+  // The binding could not be handed over safely: a new one (a fresh kernel,
+  // a new generation), if `lc0`'s binding is still the current one.  Run
+  // inside a lifecycle operation.  Always false: nothing from before goes ahead.
+  async replace(lc0) {
+    if (this.lc.binding !== lc0.binding || this.lc.phase !== "ready") return false;
     this.emit("status", "This notebook's kernel couldn't be handed over safely; starting a fresh kernel");
-    // (the job that found this out is still current, so start() runs nothing else yet)
-    const ok = await this.start();
-    if (ok) this.emit("restart");
+    for (const j of this.queue.splice(0)) j.sink.stopped(NOTES.kernelReplaced);
+    this.setLc({ binding: null, phase: "idle" }, NOTES.kernelReplaced);
+    if (await this.bind()) this.emit("restart");
+    return false;
   }
 
   // Another tab owns the binding now: this one stops, its queue skipped.
-  movedAway(job) {
-    this.moved = true;
-    this.ready = false;
-    job?.sink.stopped(NOTES.moved);
+  movedAway() {
     for (const j of this.queue.splice(0)) j.sink.stopped(NOTES.moved);
+    this.setLc({ phase: "moved" }, NOTES.moved);
     this.emit("status", "this notebook's kernel is in use in another tab");
   }
 
   /** Disconnect: what was running or queued is told `message` (the kernel itself is the gateway's). */
   close(message = NOTES.closed) {
-    this.closed = true;
-    this.ready = false;
+    if (this.closed) return;
     for (const j of this.queue.splice(0)) j.sink.stopped(message);
-    if (this.current) { this.current.abort?.abort(); this.current.sink.stopped(message); }
+    this.setLc({ phase: "closed" }, message);
   }
 }

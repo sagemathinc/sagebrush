@@ -7,13 +7,16 @@
 // run (prep, then user) with the restart fence's checks (the pinned restart
 // version and incarnation at user allocation, the incarnation again where
 // the user phase is delivered), and streams events as text/event-stream.
+// Like fetch, it honours the request's AbortSignal at every wait, and it
+// refuses to follow a redirect unless asked to.
 //
 // What its "kernel" does is the test's: fake.kernel = async (code, run) =>
 // ({events, outcome}); returning null means the run was killed (run.killed
-// resolves on a restart).  Faults and pauses: fake.prep, fake.faults,
-// fake.pause(point) -> {reached, release}.
+// resolves on a restart).  Faults, pauses and interceptions: fake.prep,
+// fake.faults, fake.pause(point), fake.intercept(method, re, opts),
+// fake.raw(method, re, () => Response).
 
-import { b64url, jwkThumbprint, EVENT_MAX } from "./remote-client.js";
+import { b64url, jwkThumbprint } from "./remote-client.js";
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -23,6 +26,13 @@ const fromB64url = (s) => {
   return Uint8Array.from(bin, (c) => c.charCodeAt(0));
 };
 const sha256 = async (text) => new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(text)));
+const abortError = () => Object.assign(new Error("The operation was aborted."), { name: "AbortError" });
+// (a promise that rejects when `signal` aborts, never otherwise)
+const aborted = (signal) => new Promise((_, reject) => {
+  if (!signal) return;
+  if (signal.aborted) return reject(abortError());
+  signal.addEventListener("abort", () => reject(abortError()), { once: true });
+});
 
 // (a prep result -> the request's terminal, the plan's §2.3 table)
 const PREP = {
@@ -39,7 +49,6 @@ export class FakeGateway {
   constructor({ base = "https://cocalc.test/api/compute/v1", requireNonce = true } = {}) {
     this.base = base;
     this.basePath = new URL(base).pathname;
-    this.origin = new URL(base).origin;
     this.requireNonce = requireNonce;
     this.nonce = "nonce-1";
     this.tokens = new Map(); // token -> jkt
@@ -47,14 +56,20 @@ export class FakeGateway {
     this.bindings = new Map();
     this.runs = new Map();
     this.nextBinding = 1;
-    this.calls = []; // [method, path] of each accepted request
+    this.calls = []; // [method, path] of each request whose proof was accepted
+    this.fetches = []; // every URL fetch was called with (before any check)
+    this.insecure = []; // credential-bearing requests that followed a redirect (must stay empty)
     this.proofs = []; // the decoded {header, claims} of each proof seen
     this.executions = []; // user phases that reached the kernel: {request, incarnation, code}
     this.prep = () => "ok";
     this.kernel = async (code) => ({ events: [{ type: "stream", name: "stdout", text: `ran: ${code}\n` }], outcome: { status: "ok", ms: 1 } });
     this.complete = (code) => ({ matches: [code + "_x"], prefix: code });
-    this.faults = { loseReply: 0, breakStream: 0, bigEvent: false, staleNonceAlways: false, takeover: [], restartRefused: null };
+    this.faults = { loseReply: 0, oversizeAck: 0, breakStream: 0, bigEvent: false, staleNonceAlways: false, takeover: [], restartRefused: null, silentStream: false, redirectTo: null };
     this.pauses = new Map();
+    this.intercepts = [];
+    this.raws = [];
+    this.applied = null; // (a test's override of a takeover's applied_before_takeover)
+    this.inFlight = null;
     this.fetch = (url, init) => this.handle(String(url), init ?? {});
   }
 
@@ -80,6 +95,25 @@ export class FakeGateway {
     g.reached(run);
     await g.p;
   }
+
+  /**
+   * The next request matching (method, path re), once its proof is accepted:
+   *   respond: {status, body}  answer this instead (skip: true, the default, means it isn't processed at all)
+   *   skip: false              process it, then answer `respond` instead of the real answer
+   *   pause: true              hold the answer (late reply) until release(); an abort rejects it, as fetch does
+   *   ignoreAbort: true        (with pause) the held answer is delivered even after an abort: a late answer
+   *   lose: true               process it, then fail as if the reply were lost
+   * -> {reached, release}
+   */
+  intercept(method, re, opts = {}) {
+    let release, reached;
+    const gate = new Promise((r) => (release = r));
+    const hit = new Promise((r) => (reached = r));
+    this.intercepts.push({ method, re, opts, gate, reached });
+    return { reached: hit, release: () => release() };
+  }
+  /** The next request matching (method, path re) answers `make()`'s Response, unprocessed (proof still checked). */
+  raw(method, re, make) { this.raws.push({ method, re, make }); }
 
   json(status, data, extra = {}) {
     return new Response(data === undefined ? "" : JSON.stringify(data), { status, headers: { "Content-Type": "application/json", "DPoP-Nonce": this.nonce, ...extra } });
@@ -126,14 +160,48 @@ export class FakeGateway {
   }
 
   async handle(url, init) {
+    this.fetches.push(url);
+    const signal = init.signal;
+    if (signal?.aborted) throw abortError();
     const method = init.method ?? "GET";
     const headers = init.headers ?? {};
+    // (a redirect: followed only if the client allows it; then its credentials would go to the target)
+    if (this.faults.redirectTo) {
+      const to = this.faults.redirectTo;
+      this.faults.redirectTo = null;
+      if (init.redirect === "error") throw new TypeError("fetch failed: a redirect was refused");
+      this.insecure.push({ url: to, authorization: headers.Authorization, dpop: headers.DPoP });
+      return this.json(200, {});
+    }
     const refused = await this.verify(method, url, headers);
+    if (signal?.aborted) throw abortError();
     if (refused) return refused;
     const u = new URL(url);
     const path = u.pathname.slice(this.basePath.length);
-    const body = init.body ? JSON.parse(init.body) : null;
     this.calls.push([method, path]);
+    const raw = this.raws.findIndex((x) => x.method === method && x.re.test(path));
+    if (raw >= 0) return this.raws.splice(raw, 1)[0].make();
+    const i = this.intercepts.findIndex((x) => x.method === method && x.re.test(path));
+    const it = i >= 0 ? this.intercepts.splice(i, 1)[0] : null;
+    const skip = it?.opts.respond && it.opts.skip !== false;
+    const body = init.body ? JSON.parse(init.body) : null;
+    let res = skip ? null : await this.route(method, path, u, body, signal);
+    if (it?.opts.respond) res = this.json(it.opts.respond.status, it.opts.respond.body);
+    if (it?.opts.pause) {
+      it.reached();
+      // (ignoreAbort: the answer arrives anyway, as one already on its way does)
+      await (it.opts.ignoreAbort ? it.gate : Promise.race([it.gate, aborted(signal)]));
+    }
+    if (it?.opts.lose) throw new TypeError("network error (the fake lost this reply)");
+    // (a control op whose own answer was delivered is known to its sender: a later
+    // takeover lists only those whose answer was lost or replaced)
+    if (!it?.opts.respond && body?.op_id) {
+      for (const b of this.bindings.values()) b.applied = b.applied.filter((a) => a.op_id !== body.op_id);
+    }
+    return res;
+  }
+
+  async route(method, path, u, body, signal) {
     let m;
     if (method === "POST" && path === "/bindings") return this.bind(body);
     if ((m = path.match(/^\/bindings\/([^/]+)\/(runs|interrupt|restart|complete|takeover)$/)) && method === "POST") {
@@ -144,7 +212,7 @@ export class FakeGateway {
     if ((m = path.match(/^\/bindings\/([^/]+)\/runs\/([^/]+)(\/events)?$/)) && method === "GET") {
       const run = this.runs.get(decodeURIComponent(m[2]));
       if (!run || run.binding !== m[1]) return this.json(404, { error: "not-found" });
-      if (m[3]) return this.stream(run, Number(u.searchParams.get("after")) || 0);
+      if (m[3]) return this.stream(run, Number(u.searchParams.get("after")) || 0, signal);
       return this.json(200, { request: run.request, state: run.outcome ? "done" : "running", ...(run.outcome ? { outcome: run.outcome } : {}) });
     }
     return this.json(404, { error: "not-found" });
@@ -152,17 +220,20 @@ export class FakeGateway {
 
   bind(body) {
     const binding = `b${this.nextBinding++}`;
-    this.bindings.set(binding, { binding, epoch: 1, incarnation: 1, restartVersion: 0, state: "ready", busy: null, client: body?.client });
+    this.bindings.set(binding, { binding, epoch: 1, incarnation: 1, restartVersion: 0, state: "ready", busy: null, client: body?.client, applied: [] });
     return this.json(200, { binding, epoch: 1, incarnation: 1, state: "ready" });
   }
 
-  async post_runs(b, body) {
+  post_runs(b, body) {
     if (b.state === "quarantined") return this.json(410, { error: "quarantined" });
     if (b.state === "fencing") return this.json(409, { error: "fencing" });
     if (body.epoch !== b.epoch) return this.json(409, { error: "epoch" });
     const digest = JSON.stringify(body.payload);
     const had = this.runs.get(body.request);
-    if (had) return had.digest === digest ? this.json(202, { request: had.request, state: had.outcome ? "done" : "running" }) : this.json(409, { error: "conflict" });
+    if (had) {
+      if (had.digest !== digest) return this.json(409, { error: "conflict" });
+      return this.ack(had, had.outcome ? "done" : "running");
+    }
     if (b.busy) return this.json(409, { error: "busy" });
     let killed;
     const run = {
@@ -174,11 +245,19 @@ export class FakeGateway {
     this.runs.set(run.request, run);
     b.busy = run.request;
     this.process(b, run);
+    return this.ack(run, "admitted");
+  }
+  // (a run's acknowledgement, first or resent: lost, or over the client's 1 MiB cap, if asked)
+  ack(run, state) {
     if (this.faults.loseReply > 0) {
       this.faults.loseReply--;
       throw new TypeError("network error (the fake lost this reply)");
     }
-    return this.json(202, { request: run.request, state: "admitted" });
+    if (this.faults.oversizeAck > 0) {
+      this.faults.oversizeAck--;
+      return this.json(202, { request: run.request, state, pad: "x".repeat(1024 * 1024 + 10) });
+    }
+    return this.json(202, { request: run.request, state });
   }
 
   // a run's two phases, with the restart fence's checks ([G] §6.4, §6.2.4)
@@ -222,20 +301,22 @@ export class FakeGateway {
     if (b.busy === run.request) b.busy = null;
   }
 
-  stream(run, after) {
+  stream(run, after, signal) {
     const fake = this;
-    let sent = 0, listener = null;
+    let listener = null;
     const body = new ReadableStream({
       start(controller) {
+        signal?.addEventListener?.("abort", () => { run.listeners.delete(listener); try { controller.error(abortError()); } catch {} }, { once: true });
+        // (a body that never produces anything: only an abort or a cancel ends it)
+        if (fake.faults.silentStream) { fake.faults.silentStream = false; return; }
         const send = (e) => {
           if (e.seq <= after) return;
           if (fake.faults.bigEvent && e.type !== "terminal") {
             fake.faults.bigEvent = false;
-            controller.enqueue(enc.encode(`id: ${e.seq}\ndata: ${JSON.stringify({ seq: e.seq, type: "stream", name: "stdout", text: "x".repeat(EVENT_MAX + 10) })}\n\n`));
+            controller.enqueue(enc.encode(`id: ${e.seq}\ndata: ${JSON.stringify({ seq: e.seq, type: "stream", name: "stdout", text: "x".repeat(897 * 1024 + 10) })}\n\n`));
             return;
           }
           controller.enqueue(enc.encode(`id: ${e.seq}\ndata: ${JSON.stringify(e)}\n\n`));
-          sent++;
           if (fake.faults.breakStream > 0 && e.type !== "terminal") {
             fake.faults.breakStream--;
             run.listeners.delete(listener);
@@ -282,6 +363,7 @@ export class FakeGateway {
     }
     // (an allocated user phase not yet delivered stays: the receiver refuses it when it arrives)
     if (b.busy && this.runs.get(b.busy)?.outcome) b.busy = null;
+    b.applied.push({ op_id: body.op_id, kind: "restart" });
     return this.json(200, { outcome: { status: "done", incarnation: b.incarnation } });
   }
 
@@ -303,6 +385,7 @@ export class FakeGateway {
     b.state = "ready";
     b.epoch++;
     b.client = body?.client;
-    return this.json(200, { epoch: b.epoch, state: "ready", applied_before_takeover: this.applied ?? [], in_flight: this.inFlight ?? [] });
+    const applied = this.applied ?? b.applied.splice(0);
+    return this.json(200, { epoch: b.epoch, state: "ready", incarnation: b.incarnation, applied_before_takeover: applied, in_flight: this.inFlight ?? [] });
   }
 }
