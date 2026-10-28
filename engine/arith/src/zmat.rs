@@ -124,10 +124,14 @@ impl ZMat {
         assert_eq!(self.cols, o.rows, "matrix dimensions do not match");
         let (r, k, c) = (self.rows, self.cols, o.cols);
         let mut poll = Poll::new();
+        // (the phases name where a Stop lands, for the tests' hooks)
+        let scan = sagebrush_interrupt::enter("zmat-scan");
         let (ba, bb) = (self.max_bits_polled(&mut poll), o.max_bits_polled(&mut poll));
         let small = ba + bb + (64 - (k as u64).leading_zeros() as u64) < 126;
         if small {
             if let (Some(a), Some(b)) = (self.as_i64_polled(&mut poll), o.as_i64_polled(&mut poll)) {
+                drop(scan);
+                let _dot = sagebrush_interrupt::enter("zmat-dot");
                 let mut d = Vec::with_capacity(r * c);
                 for i in 0..r {
                     for j in 0..c {
@@ -146,6 +150,8 @@ impl ZMat {
                 return ZMat { rows: r, cols: c, d };
             }
         }
+        drop(scan);
+        let _dot = sagebrush_interrupt::enter("zmat-big-dot");
         // a multiply-add's weight: the word products of the largest entries
         let words = |b: u64| b.div_ceil(64).max(1);
         let w = usize::try_from(words(ba).saturating_mul(words(bb))).unwrap_or(usize::MAX);

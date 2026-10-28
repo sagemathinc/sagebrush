@@ -1,13 +1,18 @@
 //! The dense products ask for Stop about every 2^16 units of work whatever
-//! the shape (`ZMat::mul`'s i64/i128 and BigInt loops, `nmod_mat::Mat::mul`):
-//! a 1 x K x 1 dot product, a 1 x K x M row, square, tall and wide.
-//! - Density: a product of W units makes at least about W / 2^16 checks
-//!   (before, ZMat's i64/i128 loop made none, its BigInt loop and nmod's
-//!   one per output row).
-//! - A Stop requested beforehand unwinds the i64/i128 loop (before, it
-//!   returned Ok).
-//! - A Stop armed at a middle check unwinds, and the next product is exact.
-//! One test: the hooks and the flag are global to the process.
+//! the shape, in each kernel phase on its own (astra2's DENSE-1/DENSE-2):
+//! - `zmat-dot`: ZMat::mul's i64/i128 dot loop (before: no check at all);
+//! - `zmat-big-dot`: its BigInt loop, weighed by word products (before:
+//!   one check per output row);
+//! - `nmod-dot`: nmod_mat::Mat::mul's dot, in batches of at most 2^16
+//!   (before: one check per output row);
+//! - `nmod-transpose`: its transpose of B, polled by entry (a 1 x C B is
+//!   one row).
+//! For each case: the checks made **in that phase** (not in the scans
+//! before it) are at least its work / 2^16; a Stop armed at the phase's
+//! median check lands in that phase; the next product is exact.  Failures
+//! are collected per case and reported together, so a mutant that removes
+//! one kernel's polling fails exactly that kernel's cases.  One test: the
+//! hooks and the flag are global to the process.
 
 use sagebrush_arith::nmod::Modulus;
 use sagebrush_arith::nmod_mat::Mat;
@@ -45,26 +50,6 @@ fn nm(s: &mut u64, r: usize, c: usize, m: Modulus) -> Mat {
     Mat::from_rows(&rows, m)
 }
 
-/// The checks `f` makes, uninterrupted, and its result.
-fn traced<T>(f: impl FnOnce() -> T) -> (u64, T) {
-    hooks::reset();
-    hooks::trace();
-    let r = f();
-    let n = hooks::total();
-    hooks::reset();
-    (n, r)
-}
-
-/// `f` with a Stop armed at its middle check (out of `n`): it must unwind.
-fn stops_midway<T>(label: &str, n: u64, f: impl FnOnce() -> T) {
-    hooks::reset();
-    hooks::arm_at((n / 2).max(1));
-    let r = sagebrush_interrupt::catch(f);
-    hooks::reset();
-    sagebrush_interrupt::clear();
-    assert!(r.is_err(), "{}: a Stop armed at check {} of {} was not seen", label, n / 2, n);
-}
-
 /// The plain product, for reference (no polling involved).
 fn zref(a: &ZMat, b: &ZMat) -> Vec<BigInt> {
     let mut d = vec![];
@@ -80,10 +65,61 @@ fn zref(a: &ZMat, b: &ZMat) -> Vec<BigInt> {
     d
 }
 
+fn nref(a: &Mat, b: &Mat, p: u64) -> Vec<u64> {
+    let (r, k, c) = (a.rows, a.cols, b.cols);
+    let mut want = vec![];
+    for i in 0..r {
+        for j in 0..c {
+            let mut acc = 0u128;
+            for l in 0..k {
+                acc = (acc + a.d[i * k + l] as u128 * b.d[l * c + j] as u128) % p as u128;
+            }
+            want.push(acc as u64);
+        }
+    }
+    want
+}
+
+/// One case: `f` traced; the checks in `phase` at least `need`; a Stop at
+/// the phase's median check lands there; then `f` again equals `want`.
+/// Problems are pushed to `bad`, never panicking, so every case reports.
+fn case<T: PartialEq + std::fmt::Debug>(bad: &mut Vec<String>, label: &str, phase: &str, need: u64, want: &T, f: impl Fn() -> T) {
+    hooks::reset();
+    hooks::trace();
+    let got = f();
+    let idx = hooks::traced(phase);
+    let total = hooks::total();
+    hooks::reset();
+    eprintln!("{}: {} checks in {} (need {}), {} in all", label, idx.len(), phase, need, total);
+    if &got != want {
+        bad.push(format!("{}: the product differs from the reference", label));
+        return;
+    }
+    if (idx.len() as u64) < need.max(1) {
+        bad.push(format!("{}: {} checks in {}, want at least {}", label, idx.len(), phase, need.max(1)));
+        return;
+    }
+    hooks::reset();
+    hooks::arm_at(idx[idx.len() / 2]);
+    let r = sagebrush_interrupt::catch(&f);
+    let at = hooks::stopped_in();
+    hooks::reset();
+    sagebrush_interrupt::clear();
+    if r.is_ok() {
+        bad.push(format!("{}: a Stop armed at {}'s median check was not seen", label, phase));
+    } else if at != phase {
+        bad.push(format!("{}: the Stop landed in {} instead of {}", label, at, phase));
+    }
+    if &f() != want {
+        bad.push(format!("{}: the next product differs", label));
+    }
+}
+
 #[test]
-fn dense_products_poll_whatever_the_shape() {
+fn dense_products_poll_in_every_kernel_phase() {
     let mut s = 0x9e3779b97f4a7c15u64;
-    // ---- ZMat, the i64/i128 loop (entries of 9 digits, under 30 bits): (r, k, c)
+    let mut bad = vec![];
+    // ---- ZMat, the i64/i128 loop (9-digit entries): (r, k, c)
     for (label, r, k, c) in [
         ("zmat i64 1xKx1", 1, 1 << 16, 1),
         ("zmat i64 1xKxM", 1, 1 << 10, 1 << 8),
@@ -93,54 +129,30 @@ fn dense_products_poll_whatever_the_shape() {
     ] {
         let (a, b) = (zm(&mut s, r, k, 9), zm(&mut s, k, c, 9));
         let want = zref(&a, &b);
-        let (n, p) = traced(|| a.mul(&b));
-        assert_eq!(p.d, want, "{}: the product", label);
-        let work = (r * k * c) as u64;
-        eprintln!("{}: {} multiply-adds, {} checks", label, work, n);
-        assert!(n >= work >> 16, "{}: {} checks for {} multiply-adds, want at least {}", label, n, work, work >> 16);
-        // a Stop requested beforehand unwinds (the loop asked nothing before)
-        sagebrush_interrupt::request();
-        let r0 = sagebrush_interrupt::catch(|| a.mul(&b));
-        sagebrush_interrupt::clear();
-        assert!(r0.is_err(), "{}: a Stop requested beforehand was not seen", label);
-        stops_midway(label, n, || a.mul(&b));
-        assert_eq!(a.mul(&b).d, want, "{}: the next product", label);
+        case(&mut bad, label, "zmat-dot", (r * k * c) as u64 >> 16, &want, || a.mul(&b).d);
     }
-    // ---- ZMat, the BigInt loop: 1 x K x 1, 1 x K x M and square with
-    // 300-digit entries (997 bits: 16 x 16 word products each, weighed so)
+    // ---- ZMat, the BigInt loop: 300-digit entries (997 bits: 16 x 16 word
+    // products a multiply-add, weighed so)
     for (label, r, k, c) in [("zmat big 1xKx1", 1, 1 << 12, 1), ("zmat big 1xKxM", 1, 1 << 8, 1 << 4), ("zmat big square", 16, 16, 16)] {
         let (a, b) = (zm(&mut s, r, k, 300), zm(&mut s, k, c, 300));
         let want = zref(&a, &b);
-        let (n, p) = traced(|| a.mul(&b));
-        assert_eq!(p.d, want, "{}: the product", label);
-        let work = (r * k * c) as u64 * 16 * 16;
-        eprintln!("{}: {} weighted units, {} checks", label, work, n);
-        assert!(n >= work >> 16, "{}: {} checks for {} units, want at least {}", label, n, work, work >> 16);
-        stops_midway(label, n, || a.mul(&b));
-        assert_eq!(a.mul(&b).d, want, "{}: the next product", label);
+        case(&mut bad, label, "zmat-big-dot", (r * k * c * 256) as u64 >> 16, &want, || a.mul(&b).d);
     }
-    // ---- nmod_mat::Mat::mul: a small prime and a 63-bit one
+    // ---- nmod_mat::Mat::mul: a small prime (overflow-safe batch 2^30
+    // before) and a 63-bit one
     for p in [7u64, 9223372036854775783] {
         let m = Modulus::new(p);
         for (label, r, k, c) in [("nmod 1xKx1", 1, 1 << 18, 1), ("nmod 1xKxM", 1, 1 << 10, 1 << 8), ("nmod square", 64, 64, 64), ("nmod wide", 16, 16, 1 << 10)] {
             let (a, b) = (nm(&mut s, r, k, m), nm(&mut s, k, c, m));
-            let mut want = vec![];
-            for i in 0..r {
-                for j in 0..c {
-                    let mut acc = 0u128;
-                    for l in 0..k {
-                        acc = (acc + a.d[i * k + l] as u128 * b.d[l * c + j] as u128) % p as u128;
-                    }
-                    want.push(acc as u64);
-                }
-            }
-            let (n, prod) = traced(|| a.mul(&b));
-            assert_eq!(prod.d, want, "{} p={}: the product", label, p);
-            let work = (r * k * c) as u64;
-            eprintln!("{} p={}: {} multiply-adds, {} checks", label, p, work, n);
-            assert!(n >= work >> 16, "{} p={}: {} checks for {} multiply-adds, want at least {}", label, p, n, work, work >> 16);
-            stops_midway(label, n, || a.mul(&b));
-            assert_eq!(a.mul(&b).d, want, "{} p={}: the next product", label, p);
+            let want = nref(&a, &b, p);
+            case(&mut bad, &format!("{} p={}", label, p), "nmod-dot", (r * k * c) as u64 >> 16, &want, || a.mul(&b).d);
+        }
+        // the transpose: B = 1 x C is one row (1 x 1 x C), and R x 1 x C
+        for (label, r, c) in [("nmod transpose 1x1xC", 1, 1 << 18), ("nmod transpose Rx1xC", 4, 1 << 17)] {
+            let (a, b) = (nm(&mut s, r, 1, m), nm(&mut s, 1, c, m));
+            let want = nref(&a, &b, p);
+            case(&mut bad, &format!("{} p={}", label, p), "nmod-transpose", c as u64 >> 16, &want, || a.mul(&b).d);
         }
     }
+    assert!(bad.is_empty(), "{} problem(s):\n{}", bad.len(), bad.join("\n"));
 }

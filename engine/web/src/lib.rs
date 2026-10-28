@@ -822,12 +822,23 @@ fn bigs(v: Option<&Value>) -> Result<Vec<BigInt>, String> {
     if let Some(Value::String(s)) = v {
         return bigs_text(s, &mut TextPoll::new());
     }
+    bigs_array(v, &mut TextPoll::new())
+}
+
+/// The entries of a JSON integer list (numbers or decimal strings), polled.
+fn bigs_array(v: Option<&Value>, poll: &mut TextPoll) -> Result<Vec<BigInt>, String> {
     v.and_then(Value::as_array)
         .ok_or("missing integer list")?
         .iter()
         .map(|x| match x {
-            Value::String(s) => s.parse::<BigInt>().map_err(|e| e.to_string()),
-            Value::Number(n) => n.as_i64().map(BigInt::from).ok_or_else(|| "bad integer".to_string()),
+            Value::String(s) => {
+                poll.add(s.len() + 1);
+                s.parse::<BigInt>().map_err(|e| e.to_string())
+            }
+            Value::Number(n) => {
+                poll.add(20);
+                n.as_i64().map(BigInt::from).ok_or_else(|| "bad integer".to_string())
+            }
             _ => Err("integers are numbers or decimal strings".to_string()),
         })
         .collect()
@@ -859,7 +870,11 @@ fn matrix(v: Option<&Value>) -> Result<Vec<Vec<BigInt>>, String> {
         let mut poll = TextPoll::new();
         return s.split(';').map(|r| bigs_text(r, &mut poll)).collect();
     }
-    v.and_then(Value::as_array).ok_or("missing matrix (a list of rows)")?.iter().map(|r| bigs(Some(r))).collect()
+    let mut poll = TextPoll::new();
+    v.and_then(Value::as_array).ok_or("missing matrix (a list of rows)")?.iter().map(|r| match r {
+        Value::String(t) => bigs_text(t, &mut poll),
+        _ => bigs_array(Some(r), &mut poll),
+    }).collect()
 }
 
 /// A matrix argument (rows of integers) as a ZMat; every row the same length.
@@ -870,21 +885,54 @@ fn zmat(v: Option<&Value>) -> Result<sagebrush_arith::zmat::ZMat, String> {
         return Err("matrix rows of different lengths".into());
     }
     let r = rows.len();
-    Ok(sagebrush_arith::zmat::ZMat { rows: r, cols: c, d: rows.into_iter().flatten().collect() })
+    // (the flat copy, polled by entry: one row may hold every entry)
+    let mut poll = TextPoll::new();
+    let mut d = Vec::with_capacity(r * c);
+    for row in rows {
+        poll.add(1);
+        for x in row {
+            d.push(x);
+            poll.add(1);
+        }
+    }
+    Ok(sagebrush_arith::zmat::ZMat { rows: r, cols: c, d })
 }
 
 /// A matrix result: rows of decimal strings, or with "wire": "csv" one
 /// string "a,b;c,d".
 fn zrows(m: &sagebrush_arith::zmat::ZMat, v: &Value) -> Value {
     let mut poll = TextPoll::new();
+    if csv(v) {
+        // (written into one String, entry by entry: no row or whole-result
+        // joins, so no unpolled copy of a long row or of the result)
+        // (its exact bound first, so the String never reallocates: a
+        // doubling would copy the whole result unpolled)
+        let mut cap = m.rows;
+        for x in &m.d {
+            cap += digits(x) + 1;
+            poll.add(1);
+        }
+        let mut out = String::with_capacity(cap);
+        for i in 0..m.rows {
+            if i > 0 {
+                out.push(';');
+            }
+            for (j, x) in m.row(i).iter().enumerate() {
+                if j > 0 {
+                    out.push(',');
+                }
+                poll.add(digits(x));
+                let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{}", x));
+            }
+            poll.add(1);
+        }
+        return Value::String(out);
+    }
     let mut text = |x: &BigInt| {
         poll.add(digits(x));
-        x.to_string()
+        Value::String(x.to_string())
     };
-    if csv(v) {
-        return json!((0..m.rows).map(|i| m.row(i).iter().map(&mut text).collect::<Vec<_>>().join(",")).collect::<Vec<_>>().join(";"));
-    }
-    json!((0..m.rows).map(|i| m.row(i).iter().map(&mut text).collect::<Vec<_>>()).collect::<Vec<_>>())
+    Value::Array((0..m.rows).map(|i| Value::Array(m.row(i).iter().map(&mut text).collect())).collect())
 }
 
 /// A vector result in the requested wire format.

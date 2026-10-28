@@ -1753,6 +1753,21 @@
   "class": "3",
   "owner": "class group/number fields"
  },
+ "engine/web/src/lib.rs :: zrows :: cap += digits(x) + 1; #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: the reply String's exact byte bound (no reallocation), and a test hook; nothing is refused"
+ },
+ "engine/web/src/lib.rs :: zrows :: let mut cap = m.rows; #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: the reply String's exact byte bound (no reallocation), and a test hook; nothing is refused"
+ },
+ "engine/web/src/lib.rs :: zrows :: let mut out = String::with_capacity(cap); #0": {
+  "class": "none",
+  "owner": "magma",
+  "reason": "dense-mul Stop polling: the reply String's exact byte bound (no reallocation), and a test hook; nothing is refused"
+ },
  "engine/web/src/lib.rs :: zvec :: pub const NMOD_MAX_BYTES: usize = NMOD_MAX_N * NMOD_MAX_N * 20 + NMOD_MAX_N; #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
@@ -1843,10 +1858,10 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
- "engine/web/tests/mat_mul_stop.rs :: phases :: let gap = hooks::max_gap_ns(); #0": {
+ "engine/web/tests/mat_mul_stop.rs :: traced :: let gap = hooks::max_gap_ns(); #0": {
   "class": "none",
   "owner": "magma",
-  "reason": "dense-mul Stop polling: max_bits / usize::MAX / max_gap_ns name a bit count, a saturating conversion and a test hook; nothing is refused"
+  "reason": "dense-mul Stop polling: the reply String's exact byte bound (no reallocation), and a test hook; nothing is refused"
  },
  "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: assert!(req.len() > ECH_MAX_TEXT - ECH_MAX_DIM * ECH_MAX_DIM); #0": {
   "class": "none",

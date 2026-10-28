@@ -476,14 +476,17 @@ impl Mat {
         assert_eq!(self.cols, o.rows);
         let m = self.m;
         let mut poll = Poll::new();
-        // (the transpose, polled by row: a K x C copy)
+        // (the transpose, polled by entry: a 1 x C or K x C copy)
+        let transpose = sagebrush_interrupt::enter("nmod-transpose");
         let mut bt = Mat::zero(o.cols, o.rows, m);
         for i in 0..o.rows {
             for j in 0..o.cols {
                 bt.d[j * o.rows + i] = o.d[i * o.cols + j];
+                poll.add(1);
             }
-            poll.add(o.cols.max(1));
         }
+        drop(transpose);
+        let _dot = sagebrush_interrupt::enter("nmod-dot");
         let sq = (m.n as u128 - 1) * (m.n as u128 - 1);
         let batch = if sq == 0 { usize::MAX } else { (u128::MAX / sq).min(1 << 30) as usize };
         let mut c = Mat::zero(self.rows, o.cols, m);
