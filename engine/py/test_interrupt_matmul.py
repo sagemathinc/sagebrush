@@ -22,8 +22,12 @@ the verdicts below can be recomputed from frozen data by --reclassify):
 The verdicts (classify(), a pure function of a record):
 - every targeted row is STRICT in every set: interrupted, landed in its
   phase, latency < 250 ms, next product exactly "11", outstanding back;
-- a sigint row with T < 0.5 s is n/a (a signal at T/2 is no scheduling
-  evidence), never a pass;
+- every phase whose guaranteed work (from the shape, in the engine's poll
+  units) is at least 2^16 is REQUIRED and must have a strict row; the others
+  are reported N/A with their work, never silently skipped;
+- a sigint row with T < 0.5 s sends no signal and is N/A (no scheduling
+  evidence), never a pass; a row whose signal was sent always has its
+  correctness checked; each set needs at least 2 real-signal rows;
 - a sigint row passes when correct with latency < 250 ms.  Past 250 ms it
   is WAIVED only in the big set, only when the same record shows an
   authorized uninterruptible interval of at least 250 ms (json.dumps,
@@ -73,6 +77,11 @@ else:  # huge: 1 x n x 1, 4000-digit entries (under the 4300-digit int-str limit
     a, b = text(1, n, lambda i, j: 10**3999 + 7 * j), text(n, 1, lambda i, j: 10**3999 - 3 * i)
 def nxt():
     return json.dumps(call("mat_mul", a="1,2", b="3;4", wire="csv"))
+DIMS = {
+    "1xKx1": lambda n: (1, n, 1), "1xKxM": lambda n: (1, n, 64), "square": lambda n: (n, n, n),
+    "wide": lambda n: (n, 32, n), "output-heavy": lambda n: (n, 1, n), "big": lambda n: (1, n, 1),
+    "big-square": lambda n: (n, n, n), "big-1xKxM": lambda n: (1, n, 16), "huge": lambda n: (1, n, 1),
+}
 '''
 
 SIGINT_CHILD = COMMON + r'''
@@ -88,10 +97,32 @@ print("then: " + nxt(), flush=True)
 
 RECORD_CHILD = COMMON + r'''
 hooks = hasattr(_native, "_test_arm_at")
-dot = "zmat-big-dot" if shape.startswith(("big", "huge")) else "zmat-dot"
-# (the phases with at least 2^16 units of work at these shapes: the
-# output-heavy product's inputs are n entries each, below one poll interval)
-phases = ([dot] if shape == "output-heavy" else ["parse", "zmat-scan", dot]) + (["reply"] if shape in ("square", "wide", "output-heavy", "big-square") else [])
+big = shape.startswith(("big", "huge"))
+dot = "zmat-big-dot" if big else "zmat-dot"
+# Each phase's GUARANTEED work, in the engine's own poll units, from the shape
+# alone (never from the checks observed), and so whether it must make a check
+# (at least 2^16 units: the phase's counter starts at or below 2^16 - 1):
+# - parse: one matrix's text bytes (each operand parses with its own counter);
+# - zmat-scan: max bits of both operands, plus the i64 conversion of both on
+#   the i64 path (the BigInt path skips the conversion);
+# - the dot: R C (K + 1) (i64), or R C (K w + 1) (BigInt), w the word
+#   products of the largest entries, bounded below from their decimal length:
+#   L digits have at least 3 (L - 1) + 1 bits (log2 10 > 3);
+# - reply: R C (1 + 2): the sizing pass, and at least 2 digit units per entry.
+r_, k_, c_ = DIMS[shape](n)
+def words_lb(t):
+    digits = max(len(x.lstrip("-")) for x in t.replace(";", ",").split(","))
+    return max(1, (3 * (digits - 1) + 1) // 64)
+w_ = words_lb(a) * words_lb(b) if big else 1
+units = {
+    "parse": max(len(a), len(b)),
+    "zmat-scan": (r_ * k_ + k_ * c_) * (1 if big else 2),
+    dot: r_ * c_ * (k_ * w_ + 1),
+    "reply": r_ * c_ * 3,
+}
+required = [ph for ph in ["parse", "zmat-scan", dot, "reply"] if units[ph] >= 1 << 16]
+print(json.dumps(dict(phases=dict(required=required, not_applicable={ph: units[ph] for ph in units if ph not in required}))), flush=True)
+phases = required
 base = _native.ledger_snapshot()["outstanding"]
 t0 = time.monotonic(); req = json.dumps(dict(fn="mat_mul", a=a, b=b, wire="csv")); t1 = time.monotonic()
 if hooks:
@@ -147,6 +178,14 @@ def classify(rec, set_name):
     """[(verdict, text)] for one record; verdict in PASS, FAIL, WAIVED, N/A."""
     out = []
     targeted = rec.get("targeted") or []
+    ph = rec.get("phases")
+    if ph is not None:
+        seen = {r["phase"] for r in targeted}
+        for p in ph["required"]:
+            if p not in seen:
+                out.append(("FAIL", "targeted: required phase %s has no row" % p))
+        for p, u in sorted(ph["not_applicable"].items()):
+            out.append(("N/A", "targeted %s: not applicable here (guaranteed work %d units < 2^16)" % (p, u)))
     for r in targeted:
         out.append(("PASS" if targeted_ok(r) else "FAIL", "targeted " + json.dumps(r)))
     s = rec.get("sigint")
@@ -154,9 +193,9 @@ def classify(rec, set_name):
         return out
     if s.get("error"):
         return out + [("FAIL", "sigint " + s["error"])]
+    if s.get("sent") is False:
+        return out + [("N/A", "sigint: T=%.2f s < 0.5 s, no signal sent (no scheduling evidence)" % s["T"])]
     what = "T=%.2f s, KeyboardInterrupt %.0f ms after SIGINT, rc=%s, %s" % (s["T"], s["dt_ms"], s["rc"], s.get("lines", "")[:120])
-    if s["T"] < 0.5:
-        return out + [("N/A", "sigint (T < 0.5 s: no scheduling evidence) " + what)]
     correct = s.get("first") == "interrupted" and s["rc"] == 0 and s.get("last") == 'then: "11"'
     if correct and s["dt_ms"] < 250:
         return out + [("PASS", "sigint " + what)]
@@ -221,6 +260,8 @@ def record_part(shape, n):
         d = json.loads(line)
         if "transport" in d:
             rec["transport"] = d["transport"]
+        elif "phases" in d:
+            rec["phases"] = d["phases"]
         else:
             rec["targeted"].append(d["targeted"])
     out, err, rc = finish(c, 30)
@@ -238,6 +279,10 @@ def sigint_part(shape, n):
     if rc != 0 or not out.startswith("done "):
         return dict(error="calibration rc=%s: %s" % (rc, (out + err)[-300:]))
     T = float(out.split()[1])
+    if T < 0.5:
+        # (too short for a signal at T / 2 to be scheduling evidence: no
+        # signal is sent, and the row is N/A, never a pass)
+        return dict(T=T, sent=False)
     c = spawn(SIGINT_CHILD, shape, n)
     if readline(c, time.monotonic() + WAIT) != "ready\n":
         out, err, _ = finish(c, 5)
@@ -249,11 +294,19 @@ def sigint_part(shape, n):
     dt = time.monotonic() - ts
     out, err, rc = finish(c, 60)
     lines = ((first or "") + out).splitlines()
-    return dict(T=T, dt_ms=dt * 1000, rc=rc, first=(first or "").strip(), last=lines[-1] if lines else "", lines=" | ".join(lines) + err.strip()[-200:])
+    return dict(T=T, sent=True, dt_ms=dt * 1000, rc=rc, first=(first or "").strip(), last=lines[-1] if lines else "", lines=" | ".join(lines) + err.strip()[-200:])
+
+
+MIN_REAL_SIGNAL_ROWS = 2  # per set: rows where a signal was actually sent and judged
 
 
 def report(recs, set_name):
     fails = 0
+    real = sum(1 for r in recs if (r.get("sigint") or {}).get("sent") and not r["sigint"].get("error"))
+    print("real-signal rows: %d (at least %d required)" % (real, MIN_REAL_SIGNAL_ROWS))
+    if real < MIN_REAL_SIGNAL_ROWS:
+        print("FAIL real-signal coverage: %d < %d" % (real, MIN_REAL_SIGNAL_ROWS))
+        fails += 1
     for rec in recs:
         if rec.get("record_error"):
             print("%-12s n=%-9d FAIL record: %s" % (rec["shape"], rec["n"], rec["record_error"]))
@@ -288,7 +341,10 @@ def from_r3_logs(targeted_log, sigint_log):
         rec = recs.setdefault((m[1], int(m[2])), dict(shape=m[1], n=int(m[2]), targeted=[]))
         rest = m[6]
         parts = [p.strip() for p in rest.split("|")]
-        rec["sigint"] = dict(T=float(m[3]), dt_ms=float(m[4]), rc=None if m[5] == "None" else int(m[5]), first=parts[0] if parts else "", last=parts[-1] if parts else "", lines=rest)
+        # (r3 sent the signal in every row, also when T < 0.5 s, and printed no
+        # output lines for those: they are judged as sent, so their correctness
+        # cannot be shown and they FAIL unless the lines are there)
+        rec["sigint"] = dict(T=float(m[3]), sent=True, dt_ms=float(m[4]), rc=None if m[5] == "None" else int(m[5]), first=parts[0] if parts else "", last=parts[-1] if parts else "", lines=rest)
     return list(recs.values())
 
 
