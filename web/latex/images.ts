@@ -6,6 +6,14 @@ import { normPath, parentOf, join, within, PathError } from "../workspace/paths"
 export const IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"];
 export const IMAGE_BOUNDS = { perDocument: 64, perImage: 8 * 2 ** 20, total: 64 * 2 ** 20, megapixels: 40 };
 
+/** The bytes actually read (len), against the size the file was admitted with (its stat) and the bytes already kept:
+ * null if they may be kept, else why not. Checked after the read, before any blob is made. */
+export function admitImageBytes(len: number, statSize: number | undefined, kept: number, b = IMAGE_BOUNDS): string | null {
+  if (len !== (statSize ?? -1)) return "changed while it was read";
+  if (len > b.perImage || kept + len > b.total) return "too large";
+  return null;
+}
+
 /** The workspace paths an \includegraphics argument may name, in the order LaTeX tries them (as written, then with
  * each allowed extension), or why it names none: never outside the opened file's folder. */
 export function imageCandidates(arg: string, docPath: string): { ok: true; paths: string[] } | { ok: false; why: string } {

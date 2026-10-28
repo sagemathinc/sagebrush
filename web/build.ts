@@ -22,7 +22,7 @@ const LATEX_MODE = process.env.SAGEBRUSH_LATEX_PREVIEW ?? "";
 if (!["", "1", "test"].includes(LATEX_MODE)) throw new Error(`SAGEBRUSH_LATEX_PREVIEW must be unset, 1 or test, not ${JSON.stringify(LATEX_MODE)}`);
 const LATEX = LATEX_MODE !== "";
 const LATEX_DEFINE = LATEX
-  ? { __SB_LATEX__: "true", __SB_LATEX_HOSTS__: JSON.stringify(LATEX_MODE === "test" ? ["dev.sagebrush.space", "127.0.0.1", "localhost"] : ["dev.sagebrush.space"]) }
+  ? { __SB_LATEX__: "true", __SB_LATEX_TEST__: String(LATEX_MODE === "test"), __SB_LATEX_HOSTS__: JSON.stringify(LATEX_MODE === "test" ? ["dev.sagebrush.space", "127.0.0.1", "localhost"] : ["dev.sagebrush.space"]) }
   : { __SB_LATEX__: "false" };
 // (web/site/ when it is here; see web/site-dir.mts)
 const { siteDir, hasSite } = await import("./site-dir.mts");

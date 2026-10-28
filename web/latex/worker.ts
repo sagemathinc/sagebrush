@@ -23,17 +23,19 @@ self.onmessage = async (e: MessageEvent) => {
     if (!eng || m.reset) eng = new Engine({ images: m.images || {} });
     else eng.opts = Object.assign({}, eng.opts, { images: m.images || {} });
     const r = eng.update(String(m.text ?? ""), { cold: !!m.cold });
-    const items: { g: number; h: string }[] = [];
+    // (each piece with its UTF-8 size, b: the page's patch budget charges the same measure as split.ts)
+    const items: { g: number; h: string; b: number }[] = [];
     let total = 0, stopped = false;
     if (r.chunks.length > RENDER_BOUNDS.chunks) stopped = true;
     for (let g = 0; g < r.chunks.length && !stopped; g++) {
       for (const h of splitChunk(r.chunks[g])) {
-        total += bytes(h);
+        const b = bytes(h);
+        total += b;
         if (total > RENDER_BOUNDS.html) { stopped = true; break; }
-        items.push({ g, h });
+        items.push({ g, h, b });
       }
     }
-    if (stopped) { items.length = 0; items.push({ g: 0, h: TOO_LARGE }); }
+    if (stopped) { items.length = 0; items.push({ g: 0, h: TOO_LARGE, b: bytes(TOO_LARGE) }); }
     (self as any).postMessage(Object.assign(echo, { ok: true, items, groups: stopped ? 1 : r.chunks.length, imageRefs: r.imageRefs || [], stats: r.stats, tooLarge: stopped }));
   } catch (err: any) {
     eng = null;
