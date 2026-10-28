@@ -253,13 +253,19 @@ try {
     await u.ev(`${B}.load({ title: "after a failed clear", nodes: [{ id: "tj", x: 0, y: 0, text: "n1" }] }).then(() => true)`);
     const saidClear = await u.until(`document.body.innerText.includes("TimeTravel couldn't clear the previous document's versions")`, 10000);
     await u.ev(`(() => { IDBObjectStore.prototype.put = window.__put; return true; })()`);
+    // (board's N1-a on code r2: the mark kept in localStorage outlives a reload, the older versions still hidden; the
+    // next save tries the clear again, and done, forgets the mark)
+    const UNCLEAR = `sagebrush-board-journal-unclear:${id1}`;
+    const keyHeld = await u.ev(`localStorage.getItem(${J(UNCLEAR)}) !== null`);
+    await openBoard(u, id1);
+    const vd3 = await versionDocs(u);
     await u.ev(setTj("after the failed clear")).catch(() => {});
     await rowTj(u, id1, "after the failed clear");
-    await u.ev(setTj("after the failed clear, again")).catch(() => {});
-    await rowTj(u, id1, "after the failed clear, again");
+    const cleared = await u.until(`localStorage.getItem(${J(UNCLEAR)}) === null`, 10000);
     await u.until(`${B}.versions().then((v) => v.length >= 1)`);
-    const vd3 = await versionDocs(u);
-    check(saidClear && vd3.length >= 1 && vd3.every((x) => x.title === "after a failed clear"), "N1: a replacement's clear refused: said, and TimeTravel lists only the new document's versions: " + J(vd3.map((x) => [x.title, tjOf(x)])));
+    const vd4 = await versionDocs(u);
+    check(saidClear && keyHeld && vd3.every((x) => x.title === "after a failed clear"), "N1, N1-a: a replacement's clear refused: said; the mark kept; reloaded, TimeTravel lists none of the previous document's versions: " + J(vd3.map((x) => [x.title, tjOf(x)])));
+    check(cleared && vd4.length === 1 && tjOf(vd4[0]) === "after the failed clear", "N1-a: the next save clears them and forgets the mark: one version, the save's: " + J(vd4.map((x) => [x.title, tjOf(x)])));
     // …and a kill between T1 and T2 right after the replacement still replays
     const r2 = await row(u, id1), d2 = await doc(u);
     await u.ev(`window.sagebrush.boardJournal().t1({ ...${J(withTj(d2, "killed"))}, baseRev: ${r2.rev} }).then(() => true)`);

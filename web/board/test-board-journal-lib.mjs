@@ -41,6 +41,28 @@ export async function serve(roots) {
   return { origin: `http://127.0.0.1:${server.port}`, stop: () => { server.stop(true); rmSync(site, { recursive: true, force: true }); } };
 }
 
+/** Chrome ended gracefully (@sagebrush's ruling on the r3 VM packet): asked to close over its DevTools protocol
+ * (Browser.close), then its exit and its whole process group waited for, at most 10 s each; only if it is still there
+ * then, its group is killed (SIGKILL), and that fallback said in one line, "CHROME FALLBACK: …", so a run's judge sees
+ * it (the reaps it leaves are not benign exits). */
+export async function closeChrome(chrome, port, label = "chrome") {
+  const done = chrome.exitCode !== null || chrome.signalCode !== null ? Promise.resolve() : new Promise((r) => chrome.once("exit", r));
+  try {
+    const v = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
+    const ws = new WebSocket(v.webSocketDebuggerUrl);
+    await new Promise((ok, no) => { ws.onopen = ok; ws.onerror = no; setTimeout(no, 3000); });
+    ws.send(JSON.stringify({ id: 1, method: "Browser.close" }));
+  } catch {}
+  const exited = await Promise.race([done.then(() => true), sleep(10_000).then(() => false)]);
+  const gone = () => { try { process.kill(-chrome.pid, 0); return false; } catch { return true; } };
+  for (let i = 0; i < 100 && !gone(); i++) await sleep(100);
+  if (!exited || !gone()) {
+    console.log(`CHROME FALLBACK: ${label} (pid ${chrome.pid}) didn't close within the bound (exited ${exited}): SIGKILL to its group`);
+    try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
+    await sleep(200);
+  }
+}
+
 /** Headless Chromium in a profile of its own, its own process group: {tab(), close()}. */
 export async function browser() {
   let port = Number(process.env.CDP_PORT) || 0;
@@ -69,7 +91,7 @@ export async function browser() {
     const close = async () => { try { ws.close(); } catch {} await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`).catch(() => {}); await sleep(150); };
     return { ev, send, go, until, close };
   }
-  const close = async () => { try { process.kill(-chrome.pid, "SIGKILL"); } catch {} await sleep(200); rmSync(profile, { recursive: true, force: true }); };
+  const close = async () => { await closeChrome(chrome, port); rmSync(profile, { recursive: true, force: true }); };
   return { tab, close, errors };
 }
 
