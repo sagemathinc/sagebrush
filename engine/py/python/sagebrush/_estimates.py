@@ -498,10 +498,14 @@ _TRIAL_BITS_SMALL = 40   # sage_all.factor: below 2^40 the Python path runs
 def _factor_record(n, op):
     """The estimate of factor(n) for a nonzero integer n (sage_all.factor,
     sagebrush.nf.factor_integer): E4 §5.1."""
+    return _factor_record_bits(abs(int(n)).bit_length(), op)
+
+
+def _factor_record_bits(bits, op):
+    """_factor_record's estimate for an integer of `bits` bits (the record
+    reads only the size)."""
     cal = calibration()
     probe_s = cal.ensure()
-    n = abs(int(n))
-    bits = n.bit_length()
     stages, assumptions = [], []
     cap, guard = host_capacity()
     if bits <= _TRIAL_BITS_SMALL and op in ("factor", "Factorization"):
@@ -515,13 +519,16 @@ def _factor_record(n, op):
     e = _call("factor_estimate", bits=bits)
     k_of = {}
     for s in e["stages"]:
-        units = int(s["units"])
+        # (exact decimal counts; null is beyond the engine's model: unknown,
+        # with no time derived)
+        units = None if s["units"] is None else int(s["units"])
+        mem = None if s["memory"] is None else int(s["memory"])
         bb = bits if s["phase"] == "prp" else None
         stages.append({
             "name": s["name"],
-            "work": {"units": units, "label": s["label"]},
-            "time": cal.interval(s["phase"], s["limbs"], units, bb),
-            "memory": {"typical_bytes": None, "high_bytes": s["memory"], "label": s["memory_label"],
+            "work": None if units is None else {"units": units, "label": s["label"]},
+            "time": None if units is None else cal.interval(s["phase"], s["limbs"], units, bb),
+            "memory": {"typical_bytes": None, "high_bytes": mem, "label": s["memory_label"],
                        "assumptions": ["total live bytes above the input while this stage runs"]},
             "condition": s["condition"],
             "success": None,
@@ -536,7 +543,9 @@ def _factor_record(n, op):
     # ECM's milestones: per size d, the work until the modelled cumulative
     # chance reaches 50% and 95% (or the chance by the schedule's end)
     k = k_of.get("ecm", 1)
-    ecm_mem = max([int(s["memory"]) for s in e["stages"] if s["phase"] == "ecm"] or [0])
+    ecm_mems = [s["memory"] for s in e["stages"] if s["phase"] == "ecm"]
+    ecm_mem = None if None in ecm_mems else max([int(m) for m in ecm_mems] or [0])
+    ecm_label = "unknown" if ecm_mem is None else "bound"
     for t in e["ecm"]:
         d = t["digits"]
         for q, u in t["milestones"]:
@@ -547,7 +556,7 @@ def _factor_record(n, op):
                 "name": "ECM: a factor of at most %d digits, a modelled %d%% chance" % (d, round(q * 100)),
                 "work": {"units": units, "label": "known"},
                 "time": cal.interval("ecm", k, units),
-                "memory": {"typical_bytes": None, "high_bytes": ecm_mem, "label": "bound",
+                "memory": {"typical_bytes": None, "high_bytes": ecm_mem, "label": ecm_label,
                            "assumptions": ["the largest prime table and stage 2's buffers up to that level"]},
                 "condition": "if a factor of at most %d digits exists" % d,
                 "success": {"p_typical": q, "p_high": q, "label": "heuristic model"},
@@ -558,7 +567,7 @@ def _factor_record(n, op):
                 "name": "ECM: a factor of at most %d digits, by the end of the modelled schedule" % d,
                 "work": {"units": units, "label": "known"},
                 "time": cal.interval("ecm", k, units),
-                "memory": {"typical_bytes": None, "high_bytes": ecm_mem, "label": "bound", "assumptions": []},
+                "memory": {"typical_bytes": None, "high_bytes": ecm_mem, "label": ecm_label, "assumptions": []},
                 "condition": "if a factor of at most %d digits exists" % d,
                 "success": {"p_typical": float(t["end_chance"]), "p_high": float(t["end_chance"]),
                             "label": "heuristic model"},
@@ -582,7 +591,11 @@ def _factor_record(n, op):
     if probe_s:
         assumptions.append("this machine's rates were probed now (%.0f ms, once per build and machine)"
                            % (probe_s * 1000))
-    assumptions.append("high time figures need the validation corpus (a later change): unknown here")
+    if any(s["time"] is not None and s["time"]["high_s"] is None for s in stages):
+        assumptions.append("a stage's high time needs 20 timed samples of its kind and size on this machine or the "
+                           "validation corpus (a later change): unknown where none is shown")
+    if any(s["work"] is None for s in stages):
+        assumptions.append("a stage's work shown as unknown is beyond the model: no time is derived from it")
     # the total: known only when trial division alone factors n
     total = None
     if e["total_known"]:
@@ -590,16 +603,21 @@ def _factor_record(n, op):
         total = dict(s0["time"])
     # peak memory: the largest stage figure, with the weakest label of those
     # reaching it (every figure here is a bound)
-    peak = max([int(s["memory"]) for s in e["stages"]] or [0])
-    peak_mem = {"typical_bytes": None, "high_bytes": peak, "label": "bound",
-                "assumptions": ["the largest live allocation above the input, over the stages modelled",
-                                "the fit compares this bound with the capacity"]}
+    mems = [s["memory"] for s in e["stages"]]
+    if None in mems:
+        peak = None
+        peak_mem = _mem_unknown("a stage's memory is beyond the model")
+    else:
+        peak = max([int(m) for m in mems] or [0])
+        peak_mem = {"typical_bytes": None, "high_bytes": peak, "label": "bound",
+                    "assumptions": ["the largest live allocation above the input, over the stages modelled",
+                                    "the fit compares this bound with the capacity"]}
     rec = {
         "schema": "sagebrush.estimate/1", "op": op, "args_summary": "an integer of %d bits" % bits,
         "total_time": total, "peak_memory": peak_mem,
         # (a bound covers the typical figure too: E4 §1's "at most 6 MB
         # (counted bound); estimated to fit")
-        "fits": fits(peak, peak, "bound", cap, guard),
+        "fits": fits(peak, peak, peak_mem["label"], cap, guard),
         "stages": stages, "assumptions": assumptions, "calibration": cal.record(),
     }
     return rec
@@ -668,9 +686,13 @@ def format_text(rec):
         bits = ["  " + s["name"]]
         if w:
             bits.append("%s work %s units" % (w["label"], w["units"]))
+        else:
+            bits.append("work unknown")
         if t:
             bits.append("estimated %s" % _t(t["typical_s"])
                         + (" (up to %s)" % _t(t["high_s"]) if t["high_s"] is not None else ""))
+        else:
+            bits.append("time unknown")
         if s["condition"]:
             bits.append(s["condition"])
         lines.append(": ".join(bits[:1]) + (": " + "; ".join(bits[1:]) if len(bits) > 1 else ""))

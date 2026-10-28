@@ -532,6 +532,10 @@ def _estimate(line):
     for p in parts:
         k = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)\s*(.*)$", p, re.S)
         if k:
+            # (as Python's call: a keyword given twice is an error, never
+            # the last one silently)
+            if k.group(1) in kwds:
+                raise UsageError("%%estimate: keyword argument repeated: %s" % k.group(1))
             kwds[k.group(1)] = value(k.group(2).strip())
         elif kwds:
             raise decline

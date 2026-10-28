@@ -145,6 +145,47 @@ print("  no total made of the milestones:", rec["total_time"] is None)
 print("  the model stated:", any("no credit for the curves' torsion" in x for x in rec["assumptions"]),
       "| never added:", any("never add them" in x for x in rec["assumptions"]))
 
+# ---- exact counts and unknown ones (Astra's review of PR 2a, EST-BOUND): a
+# count beyond 2^64 stays exact; a null one (beyond the engine's u128) is
+# unknown, with no time and no fit derived from it
+print("exact or unknown")
+BIG = {
+    "bits": 10000000, "total_known": False, "notes": [],
+    "stages": [
+        {"name": "probable-prime test (Baillie-PSW) of the cofactor", "phase": "prp", "limbs": 156250,
+         "units": "25390952929725000000", "label": "bound", "memory": "20000000", "memory_label": "bound",
+         "condition": "if a cofactor remains after trial division"},
+        {"name": "perfect-power test", "phase": "roots", "limbs": 156250, "units": None, "label": "unknown",
+         "memory": "20000000", "memory_label": "bound", "condition": "if the cofactor is composite"},
+    ],
+    "levels": [], "ecm": [], "rho_chances": [],
+}
+E._call = lambda fn, **kw: BIG
+rec = E._factor_record_bits(10000000, "factor_integer")
+print("  valid estimate/1:", R.validate(rec) is rec)
+for s in rec["stages"]:
+    print("  %s | work %s | time %s" % (s["name"], s["work"], "unknown" if s["time"] is None else "estimated"))
+print("  exact beyond 2^64:", rec["stages"][0]["work"]["units"] == 25390952929725000000 > 2 ** 64)
+print("  stated:", [a for a in rec["assumptions"] if "beyond the model" in a])
+print(" ", E.format_text(rec).split("\n")[4])
+BIG["stages"][1]["memory"] = None
+rec = E._factor_record_bits(10000000, "factor_integer")
+print("  a memory beyond the model:", rec["peak_memory"]["high_bytes"], rec["peak_memory"]["label"], "|",
+      rec["fits"]["outcome"], "|", R.validate(rec) is rec)
+# the high-time assumption only where a high time is missing (after 20
+# samples of its bucket, high_s is set)
+cal5 = E.Calibration("native", "cpython", clock=lambda: now[0])
+for i in range(20):
+    cal5.add_sample("prp", 156250, 10 ** 6, 10 ** 6 * cal5.rate("prp", 156250, samples=False) * (1 + i % 3) * 1e-9)
+E.calibration = lambda: cal5
+rec = E._factor_record_bits(10000000, "factor_integer")
+print("  20 samples: high_s set:", rec["stages"][0]["time"]["high_s"] is not None,
+      "| high time called unknown:", any("high time" in a for a in rec["assumptions"]))
+E.calibration = lambda: E.Calibration("native", "cpython", clock=lambda: now[0])
+rec = E._factor_record_bits(10000000, "factor_integer")
+print("  no samples: high_s set:", rec["stages"][0]["time"]["high_s"] is not None,
+      "| high time called unknown:", any("high time" in a for a in rec["assumptions"]))
+
 # ---- an operation without an estimator
 print("unknown operation")
 u = E.estimate(len, [1, 2, 3])

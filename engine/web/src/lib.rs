@@ -1222,8 +1222,9 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                 "notes": e.notes,
                 "stages": e.stages.iter().map(|s| json!({
                     "name": s.name, "phase": s.phase, "limbs": s.limbs,
-                    "units": s.units.to_string(), "label": s.label.as_str(),
-                    "memory": s.memory, "memory_label": s.memory_label.as_str(),
+                    // (exact decimal counts; null: beyond the model, "unknown")
+                    "units": s.units.map(|u| u.to_string()), "label": s.label.as_str(),
+                    "memory": s.memory.map(|m| m.to_string()), "memory_label": s.memory_label.as_str(),
                     "condition": s.condition,
                 })).collect::<Vec<_>>(),
                 "levels": e.levels.iter().map(|l| json!({ "b1": l.b1, "b2": l.b2, "curves": l.curves, "fixed": l.fixed })).collect::<Vec<_>>(),
