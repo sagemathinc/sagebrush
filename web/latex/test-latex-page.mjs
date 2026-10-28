@@ -28,12 +28,13 @@ let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
-let n = 0; const waiting = new Map(); const errors = [], requests = [], dialogs = [];
+let n = 0; const waiting = new Map(); const errors = [], requests = [], dialogs = [], sizes = new Map(), reqUrl = new Map();
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-  if (m.method === "Network.requestWillBeSent") requests.push(m.params.request.url);
+  if (m.method === "Network.requestWillBeSent") { requests.push(m.params.request.url); reqUrl.set(m.params.requestId, m.params.request.url); }
+  if (m.method === "Network.loadingFinished") sizes.set(reqUrl.get(m.params.requestId) ?? m.params.requestId, m.params.encodedDataLength);
   if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params.type); send("Page.handleJavaScriptDialog", { accept: true }); }
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
@@ -72,9 +73,12 @@ try {
   await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
   check(latexFetches().length === 0, "flag on: nothing fetched before a .tex is opened (zero eager fetch)", latexFetches());
 
-  // ---- opening, the banner, Save gated on edits
+  // ---- opening, the banner, Save gated on edits (the first open's requests recorded: the cold first click)
+  requests.length = 0; sizes.clear();
   check(await open(fid), "the editor opens by fid");
   check(await until(`document.querySelector(".tex-preview h2, .tex-preview h1")?.textContent.includes("Hello")`, 20000), "the preview renders the section");
+  const cold = { requests: requests.length, bytes: [...sizes.values()].reduce((a, b) => a + b, 0), latex: [...sizes.entries()].filter(([u]) => /sagebrush-latex/.test(u)).reduce((a, [, b]) => a + b, 0) };
+  console.log("cold first click (loopback, uncompressed; the gated number is the TIMING protocol's against DEV):", JSON.stringify(cold));
   check(await page(`P.querySelector(".tex-banner").textContent.startsWith("LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file.")`), "the banner says save overwrites");
   check(await page(`P.querySelector(".tex-save").disabled === true && P.querySelector(".tex-dirty").hidden === true`), "Save disabled, nothing unsaved");
   check(latexFetches().some((u) => /sagebrush-latex\.js/.test(u)) && latexFetches().some((u) => /sagebrush-latex-worker\.js/.test(u)), "the page and its worker fetched now", latexFetches());
@@ -187,6 +191,24 @@ try {
   await open(ftab);
   check(await until(`document.querySelector(".tex-preview").textContent.includes("this table is too large to display in the prototype")`, 60000), "a table over 128 KiB: a placeholder with its reason, never split", await ev(`({ status: document.querySelector(".tex-status")?.textContent, tables: document.querySelectorAll(".tex-preview table").length })`));
 
+  // ---- r5 §4's worst cases: one line of 1 MiB - 1 (the plain path) edited at its end; a chunk over 2 MiB (a placeholder)
+  const oneLine = "\\documentclass{article}\\begin{document}" + "x".repeat(2 ** 20 - 1 - 60) + "\\end{document}";
+  const fl = await mk("/t/oneline.tex", enc(oneLine));
+  await open(fl); await sleep(1000);
+  await ev(`(() => { window.__lt2 = []; new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt2.push(Math.round(e.duration)); }).observe({ type: "longtask" }); return true; })()`);
+  await typeInto(oneLine.replace("\\end{document}", "y\\end{document}")); await sleep(2500);
+  const lt2 = await ev(`window.__lt2`);
+  console.log("long tasks after an edit of a 1 MiB line (ms):", JSON.stringify(lt2));
+  check(await ev(`document.querySelectorAll(".tex-hl .hl-line").length === 1 && !document.querySelector(".tex-hl .hl-line span")`), "a 1 MiB line: drawn plain, not highlighted");
+  const big3 = "\\documentclass{article}\n\\begin{document}\n" + "word ".repeat(460000) + "\n\\end{document}\n";
+  const f3m = await mk("/t/huge-chunk.tex", enc(big3));
+  await open(f3m);
+  check(await until(`document.querySelector(".tex-preview").textContent.includes("this block is too large to display in the prototype")`, 60000), "a chunk over 2 MiB: a placeholder with its size, nothing inserted", await ev(`({ status: document.querySelector(".tex-status")?.textContent, pcs: document.querySelectorAll(".tex-preview .pc").length })`));
+  // ---- a file in Trash, opened by its fid
+  const ftr = await mk("/t/trashme.tex", enc(DOC));
+  await ev(`${W}.remove("/t/trashme.tex").then(() => 1)`);
+  await go(base + "?tex=" + ftr + "&latex=1"); await sleep(1500);
+  check(await ev(`document.querySelector(".tex-page")?.textContent.includes("This file isn't here any more (it's in the Trash).")`), "a fid only in Trash: Gone, in the Trash");
   // ---- gone: an unknown fid
   await go(base + "?tex=ffffffffffffffff&latex=1"); await sleep(1500);
   check(await ev(`document.querySelector(".tex-page")?.textContent.includes("This file isn't here any more.")`), "an unknown fid: Gone");

@@ -193,6 +193,9 @@ if (LATEX) {
     builds.push([`the LaTeX editor (${name})`, r]);
     if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
   }
+  // (for the asset budget gate, scripts/site-asset-budget.mjs: every bundle's inputs, by output, outside dist)
+  mkdirSync(join(here, "..", "build"), { recursive: true });
+  writeFileSync(join(here, "..", "build", "latex-metafile.json"), JSON.stringify(Object.fromEntries(builds.map(([what, r]) => [what, Object.keys(r.metafile?.inputs ?? {})])), null, 0) + "\n");
 }
 copyFileSync(join(here, "llms.txt"), join(here, "dist", "llms.txt"));
 // the early-alpha notice, for the site's own pages only (web/alpha-banner.js, SECURITY.md)
