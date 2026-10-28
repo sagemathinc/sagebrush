@@ -31,11 +31,14 @@
 // catch-up (ingestion) then makes a version of and unmarks.
 // It loads with the history (the sagebrush-history.js bundle, history.js), and is given the page's own stores
 // (journalClasses): one copy of stores.js, the page's, its gate and its queues, writes everything.
-import { bytesHash, HISTORY_BACKLOG, ENTRY_OVERHEAD } from "./stores.js";
-import { t1Write, pruneIntents, dropRows, readJournal, roomRefused, intentCharge, JOURNAL_BUDGETS, syncedKey, acked, markSent, rotate } from "./journal-rows.js";
+import { bytesHash } from "./stores.js";
+import { t1Write, dropRows, readJournal, roomRefused, syncedKey, acked, markSent, rotate } from "./journal-rows.js";
+import { writeIntent, prune, neverFits, replay, NOT_WRITER } from "../journal/core.js";
 import { makeClientId, decodePatchId } from "patchflow";
 import { mergeRecords3 } from "./merge3.js";
 export * from "./journal-rows.js";
+// (the journal's store-level part, kind-neutral, moved to web/journal/core.js: here under the same names)
+export { writeIntent, prune, neverFits, replay } from "../journal/core.js";
 
 /** The part of a notebook document the history keeps (history.js toRecords: its kind and each cell's id, type,
  * code and a Markdown cell's attachments, in order): what the store's hash is of. */
@@ -49,6 +52,21 @@ export function versionedOf(doc) {
 const canonical = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
 /** The hash of what the history keeps of `doc` (SHA-256 of its canonical JSON). */
 export const docHash = (doc) => bytesHash(new TextEncoder().encode(canonical(versionedOf(doc))));
+
+/** Notebooks' part of the journal (web/journal/core.js's per-kind hook), over the history's module `mod` (history.js):
+ * `apply` merges by records (merge3.js mergeRecords3), the side `wins` names kept whole on a clash. */
+export function notebookKind(mod) {
+  return {
+    kind: "notebooks",
+    versionedOf,
+    apply(lastSynced, shown, remote, wins) {
+      const [a, b] = wins === "remote" ? [remote, shown] : [shown, remote];
+      const r = mergeRecords3(mod.SCHEMA, mod.recordsOf(lastSynced), mod.recordsOf(a), mod.recordsOf(b));
+      return { value: r.clashes.length ? a : mod.docOfRecords(r.value), clashes: r.clashes };
+    },
+    conflictCopy: null,
+  };
+}
 
 /** The journal's classes over the page's stores (stores.js: `{IdbStore, IdbPatchStore}`, the page's own copy):
  * {JournalStore, journalPatchStore}. */
@@ -67,17 +85,6 @@ export function journalClasses({ IdbStore, IdbPatchStore }) {
     return store;
   }
   return { JournalStore: makeJournalStore(IdbStore, journalPatchStore), journalPatchStore };
-}
-
-/** A save's intent alone (no version: its content unchanged, or TimeTravel paused), its T1 in the store's queue,
- * through its journalTx (the workspace's word and lock, the fence in the transaction). */
-export function writeIntent(store, intent) {
-  if (store.writerOK?.() === false) return Promise.resolve({ refused: NOT_WRITER });
-  return store.queue(() => store.journalTx((st) => t1Write(st, store.docId ?? store.id, { intent }))).catch((e) => ({ refused: e?.message ?? String(e) }));
-}
-/** The intents at or below j `upTo` pruned (after a record write holding it has committed), through journalTx. */
-export function prune(store, upTo) {
-  return store.queue(() => store.journalTx(async (st) => ({ j: upTo, pruned: await pruneIntents(st, store.docId ?? store.id, upTo) }))).catch((e) => ({ refused: e?.message ?? String(e) }));
 }
 
 /** Whether this page syncs notebooks' contents (DEV's docsync switch, set by the page once the journal is active): a
@@ -120,25 +127,10 @@ export function switchJournal(prev, next) {
   if (prev && prev !== next) prev.release();
   return next?.journaled ? next : null;
 }
-const NOT_WRITER = "not saved: this notebook is open for editing in another tab of this browser";
 /** Said for a save whose T1 had no room, written all the same (2c-1d-iii §1): never a promise of each version. */
 export const SAVED_UNJOURNALED = "Saved in this browser. TimeTravel and sync can't keep versions right now (their storage is full): they'll keep the latest one when there's room.";
 /** Said for a save of a notebook too large ever to be kept as a version (2c-1d-iii §4). */
 export const SAVED_TOO_LARGE = "This notebook is too large to sync. It's saved in this browser.";
-/** A versioned value (the codec's text) that can never be kept: past TimeTravel's bound for one version (an append's
- * JSON text alone, stores.js append), or an intent of it past the pending budget alone (2c-1d-iii §4). */
-export const neverFits = (text) => text.length > Math.floor((HISTORY_BACKLOG.bytes - ENTRY_OVERHEAD) / 2) || intentCharge(text) > JOURNAL_BUDGETS.pendingAll;
-
-/** Recovery's replay (design r4 §3.1), pure: from the record's revision `rev` (null: no record) and the intents above
- * its j in increasing j, the value chosen: the last one whose T2 would have won, in order, or null for the record's
- * own. */
-export function replay(rev, intents) {
-  let r = rev, chosen = null;
-  for (const it of intents) {
-    if (r === null || it.srev === null || it.srev === r) { chosen = it; r = r === null ? null : r + 1; }
-  }
-  return chosen;
-}
 
 /** The journal's notebook store: IdbStore's record with {j, hash} (T2), its saves made only after their T1, and its
  * load recovering per the table above.  `history`: a NotebookHistory over journalPatchStore(hdb, id), whose
@@ -291,10 +283,8 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
     const head = this.mod.fromRecords(session.value());
     // (which side a clash keeps: the later one, by patch id; this device's side is its last version's (the record's j))
     const theirsWin = !rec?.unjournaled && theirsLast > (baseTime ?? "");
-    const [a, b] = theirsWin ? [head, mine] : [mine, head];
-    const r = mergeRecords3(this.mod.SCHEMA, this.mod.recordsOf(base), this.mod.recordsOf(a), this.mod.recordsOf(b));
-    const value = r.clashes.length ? a : this.mod.docOfRecords(r.value);
-    return { doc: this.withValue(rec ?? mine, this.mod.toRecords(value)), clashes: r.clashes, kept: r.clashes.length ? (theirsWin ? "theirs" : "mine") : null };
+    const r = (this.kind ??= notebookKind(this.mod)).apply(base, mine, head, theirsWin ? "remote" : "shown");
+    return { doc: this.withValue(rec ?? mine, this.mod.toRecords(r.value)), clashes: r.clashes, kept: r.clashes.length ? (theirsWin ? "theirs" : "mine") : null };
   }
   // (the synced history started (William's D6(a)): a new key, the root the whole value `doc`, from a new client, all of
   // it in the root's one T1 (journal-rows.js t1Write `start`); refused, the history as it was)
