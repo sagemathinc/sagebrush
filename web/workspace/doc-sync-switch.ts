@@ -63,7 +63,7 @@ export const DOC_SYNC_RELOAD = "Notebook sync was turned on for this browser, bu
 /** The channel the pages of one workspace use for document sync (a notebook saved here; the switch on here). */
 export const docSyncChannel = (wsName: string) => "sagebrush-docsync:" + wsName;
 type Channel = { postMessage(m: unknown): void; onmessage: ((ev: { data: unknown }) => void) | null };
-type Docs = { kick(id: string): void };
+type Docs = { kick(id: string): void; kickStarted?(): Promise<void> };
 // (a message on the channel: a notebook saved in some tab (`kick`), or the switch turned on in some tab (`on`))
 const kickOf = (data: unknown) => { const k = (data as { kick?: unknown } | null)?.kick; return typeof k === "string" ? k : null; };
 const onOf = (data: unknown) => (data as { on?: unknown } | null)?.on === true;
@@ -142,7 +142,13 @@ export async function enableDocSync(d: EnableDeps): Promise<Enabled> {
       return (out = "reload");
     }
     mod.DOC_SYNC.saved = (id) => { docs.kick(id); try { ch?.postMessage({ kick: id }); } catch {} };
-    if (ch) ch.onmessage = (ev) => { const k = kickOf(ev.data); if (k !== null) docs.kick(k); };
+    // (another tab's save kicks this DocSync; another tab's switch turned on kicks every notebook started (its reopened
+    // notebook's start was told to no one), whichever tab's connection this is)
+    if (ch) ch.onmessage = (ev) => {
+      const k = kickOf(ev.data);
+      if (k !== null) docs.kick(k);
+      else if (onOf(ev.data)) void docs.kickStarted?.()?.catch((e) => d.warn("sync: notebooks' switch:", e));
+    };
     d.setDocs(docs);
     try { ch?.postMessage({ on: true }); } catch {}
     return (out = "on");
@@ -182,7 +188,8 @@ export interface FollowDeps<D extends Docs = Docs> {
  * Notebooks' contents on another page's connection, once the gate allowed there (astra's DEVSW-1): the namespace's
  * one connection is whichever tab holds its lock, a board's too, and a notebook page waiting for it would otherwise
  * never send or receive.  The board's owner gets a DocSync once this device's journal is active (now, or when a
- * notebook page says it turned the switch on); notebook saves told on the channel kick it.  Nothing of boards' own
+ * notebook page says it turned the switch on); notebook saves told on the channel kick it, and a notebook page's `on`
+ * kicks every notebook started, the one the switch just reopened among them.  Nothing of boards' own
  * contents: DocSync carries only the notebooks whose synced history started.  Resolves how to stop listening.
  */
 export async function followDocSync<D extends Docs>(d: FollowDeps<D>): Promise<() => void> {
@@ -200,7 +207,9 @@ export async function followDocSync<D extends Docs>(d: FollowDeps<D>): Promise<(
   if (ch) ch.onmessage = (ev) => {
     const k = kickOf(ev.data);
     if (k !== null) docs?.kick(k);
-    else if (onOf(ev.data)) void join();
+    // (the switch turned on in another page: this page's DocSync joins, or, if it already has, sends what started
+    // there since it connected: that notebook's synced history began in the reopen, before any save was told to it)
+    else if (onOf(ev.data)) void join().then(() => docs?.kickStarted?.()).catch((e) => d.warn("sync: notebooks on this page's connection:", e));
   };
   await join();
   return () => { if (ch) ch.onmessage = null; };

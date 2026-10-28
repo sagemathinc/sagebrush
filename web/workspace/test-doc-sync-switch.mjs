@@ -95,12 +95,12 @@ check(J(using(/followDocSync(<[^>]*>)?\(/)) === J(["board/page.ts", "workspace/d
 // ---- enableDocSync (astra's DEVSW-2, daybreak3): every failure, injected; what it returns, DOC_SYNC, the owner, the
 // notebook's read-only, the order of the lasting step
 function enableRig(over = {}) {
-  const t = { log: [], ro: [], docs: [], kicks: [], posted: [], DOC: { on: false, saved: null }, begun: false, roNow: false, reload: 0, onAtReopen: null, warned: 0, released: 0 };
+  const t = { log: [], ro: [], docs: [], kicks: [], all: 0, posted: [], DOC: { on: false, saved: null }, begun: false, roNow: false, reload: 0, onAtReopen: null, warned: 0, released: 0 };
   const ch = { posted: t.posted, onmessage: null, postMessage(m) { this.posted.push(m); } };
   t.ch = ch;
   const d = {
     loadHistory: async () => { t.log.push("history"); return { DOC_SYNC: t.DOC }; },
-    makeDocs: () => { t.log.push("docs"); return { kick: (id) => t.kicks.push(id) }; },
+    makeDocs: () => { t.log.push("docs"); return { kick: (id) => t.kicks.push(id), kickStarted: async () => { t.all++; } }; },
     makeChannel: () => { t.log.push("channel"); return ch; },
     register: (k) => t.log.push("register:" + k),
     own: async () => { t.log.push("own"); return () => { t.log.push("release"); t.released++; }; },
@@ -132,6 +132,7 @@ const lastRo = (t) => t.ro.at(-1);
   t.ch.onmessage({ data: { kick: 7 } });
   t.ch.onmessage({ data: null });
   check(J(t.kicks) === J(["n1", "n2"]) && J(t.posted) === J([{ on: true }, { kick: "n1" }]), "enable: a save here kicks this DocSync and is told on the channel; another tab's kick kicks it; anything else ignored: " + J({ kicks: t.kicks, posted: t.posted }));
+  check(t.all === 1, "enable: another tab's `on` kicks every notebook started on this DocSync (this tab may hold the connection: that tab's reopened notebook was told to no one, #266 r5's case 14): " + t.all);
 }
 {
   const { t, run } = rig((t) => ({ readOnlyNow: () => t.roNow }));
@@ -189,11 +190,11 @@ check(typeof DOC_SYNC_RELOAD === "string" && /reload this page/.test(DOC_SYNC_RE
 
 // ---- followDocSync (astra's DEVSW-1): a board page's connection carries notebooks once the journal is active
 function followRig(active) {
-  const t = { active, made: 0, set: [], kicks: [], warned: 0, asks: 0 };
+  const t = { active, made: 0, set: [], kicks: [], all: [], warned: 0, asks: 0 };
   const ch = { onmessage: null, postMessage() {} };
   t.ch = ch;
   const d = {
-    makeDocs: () => { t.made++; const id = t.made; return { id, kick: (k) => t.kicks.push(id + ":" + k) }; },
+    makeDocs: () => { t.made++; const id = t.made; return { id, kick: (k) => t.kicks.push(id + ":" + k), kickStarted: async () => { t.all.push(id); } }; },
     makeChannel: () => ch,
     journalActive: async () => { t.asks++; await new Promise((r) => setTimeout(r, 5)); if (t.active === "throw") throw new Error("injected"); return t.active; },
     setDocs: (docs) => t.set.push(docs.id),
@@ -209,6 +210,7 @@ function followRig(active) {
   await new Promise((r) => setTimeout(r, 30));
   t.ch.onmessage({ data: { kick: "n2" } });
   check(J(t.set) === J([1]) && t.made === 1 && J(t.kicks) === J(["1:n1", "1:n2"]), "follow: the journal active: one DocSync to the owner at once; notebook saves told on the channel kick it; a later `on` makes no second: " + J(t));
+  check(J(t.all) === J([1]), "follow: a notebook page's `on` when this page has already joined: every notebook started is kicked on its DocSync (the one the switch just reopened there was told to no one, #266 r5's case 14): " + J(t.all));
   stop();
   check(t.ch.onmessage === null, "follow: stopped: the channel no longer heard");
 }
@@ -229,6 +231,7 @@ function followRig(active) {
   await new Promise((r) => setTimeout(r, 40));
   t.ch.onmessage({ data: { kick: "n3" } });
   check(J(t.set) === J([1]) && t.made === 1 && J(t.kicks) === J(["1:n3"]), "follow: told `on` (four times, three at once) once the journal is active: exactly one DocSync, then kicks reach it: " + J({ set: t.set, made: t.made, kicks: t.kicks }));
+  check(J(t.all) === J([1, 1, 1, 1]), "follow: each of those four `on`s kicks every started notebook on the DocSync, after it joined (none before it existed, none for the `on` while the journal wasn't active): " + J(t.all));
 }
 {
   const { t, run } = followRig("throw");
