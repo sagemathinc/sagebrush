@@ -511,14 +511,14 @@ def main():
     # "array" a value of that type; "=x" exactly the string x)
     head = {"epoch": "number", "seq": "number"}
     chained = {"epoch": "number", "seq": "number", "chain": "string|null"}
-    refused = lambda code, detail: {"t": "=error", "req": "number", "code": "=" + code, "detail": detail}
+    refusal_shape = lambda code, detail: {"t": "=error", "req": "number", "code": "=" + code, "detail": detail}
     v["answers"] = [
         {"for": "pull", "when": "a page of batches (never a snapshot key)", "shape": {"t": "=batches", "req": "number", "owner": "string", "doc": "string", "epoch": "number", "head": chained, "items": [{"seq": "number", "author": "string", "writer": "string", "device": "string", "recv": "number", "chain": "string|null", "patches": "array", "body": "string"}], "more": "boolean"}},
         {"for": "batch", "when": "a new patch stored", "shape": {"t": "=ack", "req": "number", "batch": {"seq": "number", "new": "number", "resent": {"*": "number"}, "head": chained}}},
         {"for": "batch", "when": "every patch a resend: no seq", "shape": {"t": "=ack", "req": "number", "batch": {"new": "number", "resent": {"*": "number"}, "head": chained}}},
-        {"for": "batch", "when": "another epoch than the document's (its history was cleared)", "shape": refused("epoch", {"message": "string", "epoch": "number", "head": head})},
-        {"for": "pull", "when": "another epoch than the document's (its history was cleared)", "shape": refused("epoch", {"message": "string", "epoch": "number", "head": head})},
-        {"for": "doc_claim", "when": "another epoch than the document's", "shape": refused("stale_epoch", {"message": "string", "epoch": "number", "head": head})},
+        {"for": "batch", "when": "another epoch than the document's (its history was cleared)", "shape": refusal_shape("epoch", {"message": "string", "epoch": "number", "head": head})},
+        {"for": "pull", "when": "another epoch than the document's (its history was cleared)", "shape": refusal_shape("epoch", {"message": "string", "epoch": "number", "head": head})},
+        {"for": "doc_claim", "when": "another epoch than the document's", "shape": refusal_shape("stale_epoch", {"message": "string", "epoch": "number", "head": head})},
     ]
     json.dump(v, sys.stdout, ensure_ascii=False, indent=1)
     sys.stdout.write("\n")
