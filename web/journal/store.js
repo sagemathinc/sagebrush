@@ -18,7 +18,8 @@
 //   withValue(rec, records)  the record with its versioned part replaced by `records`, its other parts kept.  The law,
 //                      tested for each kind: withValue(rec, toRecords(rec)) is rec but for the store's own fields
 //   empty(id, initial) a new document: `initial` (the store's) with what it lacks, and its id
-//   apply(lastSynced, shown, remote, wins), conflictCopy   2c-3's merge (web/journal/core.js)
+//   apply(lastSynced, shown, remote, wins), conflictCopy   2c-3's merge (web/journal/core.js), of documents (the
+//                      store gives it fromRecords's documents, and makes the record from toRecords of its value)
 // The store's own fields of a record, the same for every kind, never a document's: rev, j, hash, unjournaled, and
 // baseRev on the way in.
 //
@@ -452,8 +453,8 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     if (!rec && !chosen && this.synced && state.jOf.size) {
       // (2c-3: a document this device has only from the server (its synced history pulled, no record yet): the record
       // is the history's head, its j the history's J, unmarked)
-      const head = this.kind.fromRecords(this.history.session.value());
-      const doc = { ...this.kind.empty(this.id, this.initial), ...head, id: this.id };
+      // (the kind's new document with the history's head as its versioned part: the store adds no field of its own)
+      const doc = this.kind.withValue(this.kind.empty(this.id, this.initial), this.history.session.value());
       const hash = await hashOf(this.kind, doc);
       const out = await super.save(doc, { journal: { j: state.J, hash } });
       if (typeof out === "string") throw new Error(out);

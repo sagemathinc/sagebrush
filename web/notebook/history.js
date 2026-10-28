@@ -34,6 +34,8 @@ export { decodePatchId };
 export { PatchHistory, createImmerDbCodec };
 // (and the notebook journal's, loaded with it: notebook/journal.js, given the page's stores)
 export { journalClasses, pageControls, switchJournal, TAKEOVER, TAKEOVER_FAILED, DOC_SYNC } from "./journal.js";
+// (the journal's store for any kind, for a board page, which loads this bundle lazily: web/journal/store.js)
+export { journalStoreClasses, hashOf } from "../journal/store.js";
 
 export const SCHEMA = { primaryKeys: ["type", "id"], stringCols: ["input"] };
 const codec = createImmerDbCodec(SCHEMA);
