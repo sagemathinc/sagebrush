@@ -456,7 +456,7 @@ _CAPABILITIES = {
     "records": ["sagebrush.estimate/1", "sagebrush.progress/1", "sagebrush.outcome/1",
                 "sagebrush.partial/1", "sagebrush.checkpoint/1"],
     "progress": True,
-    "estimate": False,
+    "estimate": True,
     "deadline": False,
     "work": False,
     "cancel_with_partial": False,

@@ -6,7 +6,7 @@ export { migrate, reconcile, adoptOld, signature, RECOVERED, EDITED_FOLDER, type
 export { normPath, kindOf, safeName, freePath, splitExt, parentOf, nameOf, join, within, TRASH, PathError, type Kind } from "./paths";
 export { WS_DB, WS_VERSION, openWorkspaceDb, type JournalState } from "./db";
 export { startMigrator, onMigration, migrationState, MIGRATE, STALE_NOTICE, STUCK_PATHS, STUCK_CHARS, type MigrationState } from "./migrator";
-export { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, staleText, STALE_DISMISSED } from "./notice";
+export { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, showHistoryNotice, staleText, STALE_DISMISSED } from "./notice";
 export { decide, best, newer, resolveReset, readLocal, readOpfs, writeLocal, writeOpfs, placeOf, isWitness, LOCAL_KEY, type Witness, type State, type Held, type Read } from "./witness";
 export { reserve, reserved, RESERVE_BYTES } from "./reserve";
 // (the notebooks' store and its save gate, which the page closes while the workspace is quarantined: for tests)

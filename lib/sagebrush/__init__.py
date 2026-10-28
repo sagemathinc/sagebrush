@@ -23,7 +23,7 @@ __all__ = ["modsym", "ap", "mf", "poly", "nf", "linalg", "capabilities", "stop_p
 
 def capabilities():
     """What this build of the agent API provides: {"progress": True,
-    "estimate": False, ...} (sagebrush.records.capabilities)."""
+    "estimate": True, "deadline": False, ...} (sagebrush.records.capabilities)."""
     from . import records
     return records.capabilities()
 
@@ -49,9 +49,10 @@ def _unavailable(name):
 # (their signatures are the designs': design-estimates-progress r4 §3,
 # design-agent-api-library r3 §5 and §6)
 def estimate(f, *args, **kwds):
-    """The time and memory estimate of f(*args, **kwds): not available in
-    this build (sagebrush.capabilities())."""
-    raise _unavailable("estimate")
+    """The time and memory estimate of f(*args, **kwds), a
+    sagebrush.estimate/1 record; f is never called (sagebrush._estimates)."""
+    from . import _estimates as _e
+    return _e.estimate(f, *args, **kwds)
 
 
 def run(f, *args, **kwds):
