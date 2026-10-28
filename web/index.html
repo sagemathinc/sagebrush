@@ -1278,7 +1278,7 @@ $("#restart").onclick = () => nb.restart();
 // changes it (search, an agent): only opening or receiving a document.
 const LANG_NAME = { python: "Python", sage: "Sage", matlab: "MATLAB", magma: "Magma" };
 const hasCode = () => cells().some((c) => c.type === "code" && c.ta.value.trim());
-modeEl.onchange = () => {
+modeEl.onchange = (e) => {
   const to = modeEl.value, from = nb.mode;
   if (to === from) return;
   if (hasCode() && !confirm(`Change this notebook's language from ${LANG_NAME[from] ?? from} to ${LANG_NAME[to] ?? to}?\n\nIts code is written in ${LANG_NAME[from] ?? from}: it won't run as ${LANG_NAME[to] ?? to} until it is rewritten.`)) {
@@ -1286,6 +1286,8 @@ modeEl.onchange = () => {
     return;
   }
   setMode(to);
+  // (the user chose it: its environment loads now, X1; never for an agent's or a document's mode)
+  if (e?.isTrusted) nb.warm();
   // (the search's results were the old language's)
   docInput.value = "";
   hideDocList();

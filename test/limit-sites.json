@@ -5665,10 +5665,13 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
- "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText> } = {}): Session { #0": {
+ "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks } = {}): Session { #0": {
   "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
   "owner": "notebook/kernel",
-  "row": "src-17"
+  "reason": "the session's output bound per item and run (limit: item, run, displays): protects the page that receives a run's streams and displays; refuses nothing and stops no computation (the rest of the output is cut, said once); the line changed only by X1's test hooks"
  },
  "src/notebook-session.ts :: room :: const room = () => (opts.limit ? Math.min(opts.limit.item - used.item, opts.limit.run - used.run) : Infinity); #0": {
   "class": "1",
