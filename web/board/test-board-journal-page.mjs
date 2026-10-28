@@ -6,12 +6,13 @@
 // itself is test-board-journal.mjs's.
 //   bun web/build.ts && CHROME=google-chrome bun web/board/test-board-journal-page.mjs
 import { join } from "node:path";
-import { serve, browser, sleep, rowExpr, historyRowsExpr, activateExpr, holdLockExpr } from "./test-board-journal-lib.mjs";
+import { serve, browser, sleep, rowExpr, historyRowsExpr, activateExpr } from "./test-board-journal-lib.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const J = JSON.stringify;
 const results = [];
-const check = (ok, what) => { results.push([!!ok, what]); if (process.env.PROGRESS) console.log((ok ? "  ok " : "  FAIL ") + what); };
+// (FAIL_FAST=1: the first failed check ends the run (the fail-first step on the base, which must fail, and quickly))
+const check = (ok, what) => { results.push([!!ok, what]); if (process.env.PROGRESS) console.log((ok ? "  ok " : "  FAIL ") + what); if (!ok && process.env.FAIL_FAST) throw new Error("FAIL_FAST: " + what); };
 const B = "window.sagebrush.board";
 const S0 = "0123456789abcdef";
 const PEND = (id) => "sagebrush-workspace-pending:" + id;
@@ -47,6 +48,32 @@ try {
   const notKept = (t) => t.until(`document.body.innerText.includes("Not kept in this browser")`, 5000);
   const boardsNamed = (part) => helper.ev(`(async () => { const w = await window.M.W.Workspace.open(); const l = (await w.list("/", { recursive: true })).filter((e) => e.kind === "board" && e.path.includes(${J(part)})); const out = []; for (const e of l) out.push({ path: e.path, doc: (await w.read(e.path)).content }); w.close(); return out; })()`);
   const writeAsAgent = (id, d) => helper.ev(`(async () => { const w = await window.M.W.Workspace.open(); const p = await w.pathOf("board", ${J(id)}); const out = await w.write(p, ${J(d)}, {}); w.close(); return out.rev; })()`);
+
+  // ---- r3's erratum 1 (astra's BJ-C1): boards and pending copies left with the journal OFF (made here, before test
+  // 15 activates it), brought in at the first journaled load (after test 15)
+  const cut = {};
+  {
+    const t = await br.tab();
+    // (a board saved by a journal-off page: its row's tag is that page's session and save number)
+    const mk = async () => { const id = await newBoard(t); await t.ev(setTj("A")); await rowTj(t, id, "A"); const r = await row(t, id); const [s, n] = String(r.tag).split(":"); return { id, r, s, n: Number(n), d: await doc(t) }; };
+    for (const k of ["earlier", "later", "raw", "intent"]) cut[k] = await mk();
+    await t.close();
+    // (a board with no tag (made, never saved by a page), and one to retitle (its title its file's name))
+    const hmk = (name) => helper.ev(`(async () => { const w = await window.M.W.Workspace.open(); const e = await w.create(${J("/" + name + ".board.json")}, { content: { title: ${J(name)}, nodes: [{ id: "tj", x: 0, y: 0, text: "A" }] } }); const r = await w.read(e.path); w.close(); return { id: e.ref, rev: r.rev, path: e.path, d: r.content }; })()`);
+    const tagOf = Math.floor(Math.random() * 1e6);
+    cut.notag = await hmk("cut-notag-" + tagOf);
+    cut.ret = await hmk("cut-ret-" + tagOf);
+    const e = cut.earlier, l = cut.later, w = cut.raw;
+    // the cases: a copy made on the record's revision by the same session's next save (S:n+1:R); with no tag (S0:1:R);
+    // a copy older than the record's own save (S:n-1:R-1); and the controls: an ordinary write, a retitle after the copy
+    await plant(helper, e.id, `${e.s}:${e.n + 1}:${e.r.rev}`, withTj(e.d, "B-earlier"));
+    await plant(helper, cut.notag.id, `${S0}:1:${cut.notag.rev}`, withTj(cut.notag.d, "B-notag"));
+    await plant(helper, l.id, `${l.s}:${l.n - 1}:${l.r.rev - 1}`, withTj(l.d, "C-later"));
+    await plant(helper, w.id, `${w.s}:${w.n + 1}:${w.r.rev}`, withTj(w.d, "B-raw"));
+    await writeAsAgent(w.id, withTj(w.d, "agent's"));
+    await plant(helper, cut.ret.id, `${S0}:1:${cut.ret.rev}`, withTj(cut.ret.d, "B-ret"));
+    await helper.ev(`(async () => { const w = await window.M.W.Workspace.open(); await w.rename(${J(cut.ret.path)}, ${J(cut.ret.path.replace(".board.json", "x.board.json"))}, { retitle: true }); w.close(); return true; })()`);
+  }
 
   // ---- test 15 (Q3): versions from before the journal, kept read-only (the journal still off here)
   {
@@ -85,6 +112,49 @@ try {
     const legacy1 = J((await t2.ev(historyRowsExpr(pre))).filter((r) => r.nb !== pre));
     check(reverted && (await versions(t2)) === n0 + 2 && legacy1 === legacy0, "test 15 (c): Revert to a version from before the journal: a new journaled version, the old rows byte for byte as they were");
     await t2.close();
+  }
+
+  // ---- r3's erratum 1 (astra's BJ-C1): the first journaled load of those boards (the journal active now)
+  {
+    const u = await br.tab();
+    const look = async (id) => { await openBoard(u, id); await u.until(`localStorage.getItem(${J(PEND(id))}) === null`, 15000); return { r: await row(u, id), d: await doc(u), v: await versionDocs(u), pend: await pending(u, id) }; };
+    const copiesOf = async (text) => (await boardsNamed("(unsaved changes from a closed page)")).filter((c) => tjOf(c.doc) === text);
+    for (const [k, text, header] of [["earlier", "B-earlier", `${cut.earlier.s}:${cut.earlier.n + 1}:${cut.earlier.r.rev}`], ["notag", "B-notag", `${S0}:1:${cut.notag.rev}`]]) {
+      const x = await look(cut[k].id);
+      const ok = await rowTj(u, cut[k].id, text);
+      const r = await row(u, cut[k].id), v = await versionDocs(u);
+      check(ok && tjOf(await doc(u)) === text && v.filter((y) => tjOf(y) === text).length === 1 && (await copiesOf(text)).length === 0 && x.pend === null && r.tag === header && !("stampOf" in r) && Number.isSafeInteger(r.j), `BJ-C1 (${k === "notag" ? "no tag" : "an earlier save of the same session"}): the copy made with the journal off is brought into the board, once, with its own header as the tag; the stamp's stampOf gone: ` + J({ tag: r.tag, stampOf: r.stampOf }));
+      // (and a load again: nothing more)
+      await openBoard(u, cut[k].id);
+      check(J(await row(u, cut[k].id)) === J(r) && (await versionDocs(u)).length === v.length, `BJ-C1 (${k}): loaded again, nothing written, no version added`);
+    }
+    {
+      const x = await look(cut.later.id);
+      check(tjOf(x.r.doc) === "A" && tjOf(x.d) === "A" && (await copiesOf("C-later")).length === 0 && x.pend === null && x.r.stampOf === x.r.rev - 1, "BJ-C1 (a later save of the session in the record): the older copy dropped, the board as recorded (stamped)");
+    }
+    {
+      const x = await look(cut.raw.id);
+      check(tjOf(x.r.doc) === "agent's" && (await copiesOf("B-raw")).length === 1 && x.pend === null, "BJ-C1 control (an ordinary write after the copy): the copy a board of its own, the board the writer's");
+    }
+    {
+      const x = await look(cut.ret.id);
+      check(x.r.doc.title === cut.ret.d.title + "x" && tjOf(x.r.doc) === "A" && (await copiesOf("B-ret")).length === 1 && x.pend === null, "BJ-C1 control (a retitle after the copy): the copy a board of its own, the board retitled");
+    }
+    {
+      // (a committed later intent: the stamped board's T1 alone, then a copy made on the revision before the stamp)
+      const c = cut.intent;
+      await openBoard(u, c.id);
+      const r = await row(u, c.id), d = await doc(u);
+      await u.ev(`window.sagebrush.boardJournal().t1({ ...${J(withTj(d, "I-later"))}, baseRev: ${r.rev} }).then(() => true)`);
+      await plant(u, c.id, `${S0}:5:${c.r.rev}`, withTj(d, "B-intent"));
+      await u.close();
+      const v = await br.tab();
+      await openBoard(v, c.id);
+      await v.until(`localStorage.getItem(${J(PEND(c.id))}) === null`, 15000);
+      const r2 = await row(v, c.id);
+      check(r.stampOf === c.r.rev && tjOf(r2.doc) === "I-later" && !("stampOf" in r2) && (await copiesOf("B-intent")).length === 1, "BJ-C1 control (a committed later intent): replayed (the stamp's stampOf gone), the copy a board of its own");
+      await v.close();
+    }
   }
 
   // ---- tests 1, 14 and B2's ground: a save journaled, no pending copy; a board with no row yet
@@ -158,16 +228,38 @@ try {
     await u.until(`${B}.versions().then((v) => v.length >= 1)`);
     const vd = await versionDocs(u), after = await row(u, id1);
     check(vd.length >= 1 && vd.every((x) => x.title === "replaced") && tjOf(vd.at(-1)) === "edited" && after.j > before.j && coherent(after), "test 6b: replaced in place: TimeTravel has the new document's versions only, the record's journal goes on: " + J(vd.map((x) => [x.title, tjOf(x)])));
-    // 6c: the replacement's clear and dropHistory held (the workspace's lock taken elsewhere) while an edit is saved
-    await helper.ev(holdLockExpr);
+    // 6c (board's R1 on code r1): mount's dropHistory (the end of its newHistory chain) held by the page's hook until
+    // the new document's versions are kept; then let go: they, and the journal's rows, all survive it
+    const pre = "board:local:" + id1;
+    await u.ev(`(() => { const h = window.sagebrush.boardJournalHook; window.__dropped = false; window.__dropHeld = false; h.beforeDropHistory = () => new Promise((r) => { window.__dropHeld = true; window.__dropGo = r; }); h.afterDropHistory = () => { window.__dropped = true; }; return true; })()`);
     await u.ev(`${B}.load({ title: "replaced again", nodes: [{ id: "tj", x: 0, y: 0, text: "v1" }] }).then(() => true)`);
+    const dropHeld = await u.until("window.__dropHeld === true", 10000);
     await u.ev(setTj("after the replacement"));
-    await sleep(500);
-    await helper.ev(`window.__release()`);
     await rowTj(u, id1, "after the replacement");
     await u.until(`${B}.versions().then((v) => v.length >= 1)`);
-    const vd2 = await versionDocs(u);
-    check(vd2.length >= 1 && vd2.every((x) => x.title === "replaced again") && tjOf(vd2.at(-1)) === "after the replacement", "test 6c: the replacement's clear ordered before the new document's saves: its versions only, its last the edit: " + J(vd2.map((x) => [x.title, tjOf(x)])));
+    const kept = await versionDocs(u), rowKept = await row(u, id1);
+    const journalRows = J((await u.ev(historyRowsExpr(pre))).filter((x) => x.nb === pre).map((x) => x.time));
+    await u.ev("window.__dropGo()");
+    const dropped = await u.until("window.__dropped === true", 10000);
+    await sleep(300);
+    const vd2 = await versionDocs(u), rowAfter = await row(u, id1);
+    const journalRowsAfter = J((await u.ev(historyRowsExpr(pre))).filter((x) => x.nb === pre).map((x) => x.time));
+    check(dropHeld && dropped && kept.length >= 1 && kept.every((x) => x.title === "replaced again") && tjOf(kept.at(-1)) === "after the replacement", "test 6c: dropHistory held until the new document's versions were kept: they are its only versions, the last the edit: " + J(kept.map((x) => [x.title, tjOf(x)])));
+    check(J(vd2) === J(kept) && J(rowAfter) === J(rowKept) && journalRowsAfter === journalRows, "test 6c: …dropHistory let go after them: every version, the row and the journal's rows survive it, exactly: " + J({ before: kept.length, after: vd2.length }));
+    await u.ev(`(() => { const h = window.sagebrush.boardJournalHook; delete h.beforeDropHistory; delete h.afterDropHistory; return true; })()`);
+    // (board's N1 on code r1) a replacement whose clear fails (the browser refusing its mark's write): said, and the
+    // versions from before it hidden, so no Revert brings the other document back
+    await u.ev(`(() => { window.__put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (...x) { if (this.name === "boards") throw new DOMException("out of room (the test's)", "QuotaExceededError"); return window.__put.apply(this, x); }; return true; })()`);
+    await u.ev(`${B}.load({ title: "after a failed clear", nodes: [{ id: "tj", x: 0, y: 0, text: "n1" }] }).then(() => true)`);
+    const saidClear = await u.until(`document.body.innerText.includes("TimeTravel couldn't clear the previous document's versions")`, 10000);
+    await u.ev(`(() => { IDBObjectStore.prototype.put = window.__put; return true; })()`);
+    await u.ev(setTj("after the failed clear")).catch(() => {});
+    await rowTj(u, id1, "after the failed clear");
+    await u.ev(setTj("after the failed clear, again")).catch(() => {});
+    await rowTj(u, id1, "after the failed clear, again");
+    await u.until(`${B}.versions().then((v) => v.length >= 1)`);
+    const vd3 = await versionDocs(u);
+    check(saidClear && vd3.length >= 1 && vd3.every((x) => x.title === "after a failed clear"), "N1: a replacement's clear refused: said, and TimeTravel lists only the new document's versions: " + J(vd3.map((x) => [x.title, tjOf(x)])));
     // …and a kill between T1 and T2 right after the replacement still replays
     const r2 = await row(u, id1), d2 = await doc(u);
     await u.ev(`window.sagebrush.boardJournal().t1({ ...${J(withTj(d2, "killed"))}, baseRev: ${r2.rev} }).then(() => true)`);
