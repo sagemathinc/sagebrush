@@ -3335,7 +3335,52 @@ async function t14Review3() {
     }
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified };
+// ---- 2c-3: the account connection carries document sync (doc-sync.ts) when given one: connected after a writable
+// welcome with the binding's owner, its requests answered to it alone (an answer or a refusal, the ops' sender
+// untouched), answered `busy` once the connection is gone, told of the end, connected again on the next welcome
+async function docWire() {
+  await account();
+  const w = await fresh();
+  const calls = [];
+  let link = null;
+  const docs = { connected(l) { calls.push("connected"); link = l; }, disconnected() { calls.push("disconnected"); }, changed(m) { calls.push("changed:" + m.doc); } };
+  const c = client(w, { docs });
+  check(await until(() => c.status.state === "synced" && link), "docWire: connected, and document sync handed the connection: " + J({ state: c.status.state, calls }));
+  check(typeof link?.owner === "string" && link.owner === nsOf(c).split(":")[0], "docWire: …with the binding's account as `owner`: " + J({ owner: link?.owner, ns: nsOf(c) }));
+  const id = crypto.randomUUID();
+  const r1 = link.reserve(), a1 = await link.ask(r1, { t: "pull", owner: link.owner, doc: id, epoch: 1, after: 0, limit: 10 });
+  check(a1.req === r1 && (a1.t === "batches" || a1.t === "error"), "docWire: a document request's answer comes back to it: " + J(a1).slice(0, 200));
+  const r2 = link.reserve(), a2 = await link.ask(r2, { t: "pull", owner: link.owner, doc: "not a document", epoch: 1, after: 0 });
+  check(r2 > r1 && a2.t === "error" && a2.req === r2, "docWire: a document request's refusal comes back to it too: " + J(a2).slice(0, 200));
+  // (an `ack` too: a new document's first batch, one patch; the ops' sender never sees it (its ack has no ops))
+  const askT = (r, m) => Promise.race([link.ask(r, m), sleep(5000).then(() => ({ t: "no answer in 5 s" }))]);
+  const body = new TextEncoder().encode(J({ v: 1 })), pid = Date.now().toString(36).padStart(11, "0") + "_docwire1";
+  const r4 = link.reserve(), a4 = await askT(r4, { t: "batch", owner: link.owner, doc: crypto.randomUUID(), epoch: 1, kind: "notebook", patches: [{ cseq: 1, id: pid, parents: [], size: body.length }], body: btoa(String.fromCharCode(...body)) });
+  check(a4.t === "ack" && a4.req === r4 && c.status.state === "synced", "docWire: a document request's `ack` comes back to it (not to the ops' sender): " + J({ a: a4, state: c.status.state }).slice(0, 200));
+  const from = await w.lastSeq();
+  await w.mkdir("/docwire");
+  check(await until(() => settled(w, c)), "docWire: the ops' sender untouched by them: an op sent and decided after: " + J(c.status));
+  await everyOnce(w, from, 0, "docWire", c);
+  await ctl("closeAll");
+  check(await until(() => calls.includes("disconnected")), "docWire: the connection's end told to document sync: " + J(calls));
+  const gone = link;
+  const a3 = await gone.ask(gone.reserve(), { t: "pull", owner: gone.owner, doc: id, epoch: 1, after: 0 });
+  check(a3.t === "error" && a3.code === "busy", "docWire: a request on a connection that's gone is answered `busy` (transient), never sent: " + J(a3));
+  check(await until(() => calls.filter((x) => x === "connected").length >= 2 && c.status.state === "synced"), "docWire: connected again on the next welcome: " + J(calls));
+  // (CORR-2C3-4: the server's own readonly notice (no req, as cloud's server pushes it when a plan lapses): document
+  // sync told the link is gone, and a request on it answered busy, never sent, until a writable welcome)
+  const link2 = link, nDisc = calls.filter((x) => x === "disconnected").length;
+  const before5 = (await ctl("log")).sent.length;
+  await ctl("frame", { frame: { t: "error", code: "readonly", detail: { message: "this account's plan doesn't include sync: read-only", purge_after: Date.now() + 86_400_000 } } });
+  check(await until(() => calls.filter((x) => x === "disconnected").length > nDisc, 3000), "docWire: an unasked readonly notice: document sync told the link is gone: " + J(calls));
+  const a5 = await Promise.race([link2.ask(link2.reserve(), { t: "pull", owner: link2.owner, doc: id, epoch: 1, after: 0 }), sleep(3000).then(() => ({ t: "no answer in 3 s" }))]);
+  await sleep(200);
+  const sent5 = (await ctl("log")).sent.slice(before5).filter((m) => m.t === "pull" || m.t === "batch" || m.t === "doc_claim");
+  check(a5.t === "error" && a5.code === "busy" && sent5.length === 0, "docWire: …and a document request after it answered busy, never sent: " + J({ a: a5, sent: sent5.map((m) => m.t) }));
+  await stop(c);
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified, docWire };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
