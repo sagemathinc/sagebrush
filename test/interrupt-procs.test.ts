@@ -158,7 +158,7 @@ test("the prompt host's target: the unique nearest descendant running exactly th
       found: s(t), none: s(others), nearer: s(deeper, { 102: ["sh"], 104: ARGV, 101: ARGV, 109: ARGV }), tie: s(tie, { 101: ARGV, 102: ARGV }),
       alone: s(new Map([[100, row(1, 100, "MainThread")]]), { 100: ARGV }),
     };`);
-  assert.deepEqual(r.found, { pid: 101, comm: "MainThread", depth: 1, start: "9" }, "the MainThread-named launcher, by its command line");
+  assert.deepEqual(r.found, { pid: 101, comm: "MainThread", depth: 1, start: "9", argv: ["/opt/node/bin/node", "/w/packages/sagebrush/bin/sagebrush.cjs"] }, "the MainThread-named launcher, by its command line");
   assert.equal(r.none.pid, null, "a node running another script, a path that only starts like the launcher's, a bare node, a group member not below script and one outside: none is the target");
   assert.match(r.none.why, /no process below 100 runs \/opt\/node\/bin\/node \/w\/packages\/sagebrush\/bin\/sagebrush\.cjs/);
   assert.deepEqual(r.none.tree.map((x: any) => [x.pid, x.depth]), [[100, 0], [106, 1], [107, 1], [108, 1]], "the current tree only");
@@ -214,7 +214,7 @@ test("the prompt sample fails closed: an unreadable table or command line, or a 
       emptyLiveFinal: final(sample(snap({}), { 100: ["script"], 101: "" })),
       missingStart: bad(undefined), malformedStart: bad("9x"), missingFinal: final(bad(undefined)),
     };`);
-  assert.deepEqual(r.whole, { pid: 101, comm: "MainThread", depth: 1, start: "9" }, "a whole table: the launcher");
+  assert.deepEqual(r.whole, { pid: 101, comm: "MainThread", depth: 1, start: "9", argv: ["/opt/node/bin/node", "/w/packages/sagebrush/bin/sagebrush.cjs"] }, "a whole table: the launcher");
   assert.deepEqual(r.racedErrors, [], "a process gone between the listing and its read is a race, not an error");
   assert.deepEqual(r.eaccesErrors, ["101: EACCES"]);
   assert.deepEqual(r.malformedErrors, ["101: a malformed stat line"]);
