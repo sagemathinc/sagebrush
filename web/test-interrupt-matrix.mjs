@@ -151,8 +151,9 @@ if (args.includes("--print-driver")) {
   process.exit(0);
 }
 
-// (the prompt host's sample is promptSample's (interrupt-procs.mjs): the launcher below `script`, never the wrapper in
-// its place, whose memory and threads aren't the target's)
+// (the prompt host's sample is promptSample's (interrupt-procs.mjs): the launcher below `script`, known by its command
+// line [process.execPath, LAUNCHER] (its comm is "MainThread" under Node 24), never the wrapper in its place, whose
+// memory and threads aren't the target's)
 // (every session is in interrupt-procs.mjs's one registry: killed, tree and all, if the harness is stopped)
 
 // ---- running one session (cli or prompt): delays[i] (ms after ENTER i, or null for none)
@@ -241,7 +242,7 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       if ((mk === "KI" || mk === "RET") && guard) { clearTimeout(guard); guard = null; }
       if (mk === "PROBE") t.probe = rest;
       if (mk === "STRAY") t.stray = rest;
-      if (mk === "DONE") samples.push({ i: t.i, ...(host === "cli" ? procStatus(p.pid) : promptSample(p.pid)), ...(/^\d+$/.test(rest.trim()) ? { mem_kb: Number(rest.trim()) / 1024 } : {}) });
+      if (mk === "DONE") samples.push({ i: t.i, ...(host === "cli" ? procStatus(p.pid) : promptSample(p.pid, [process.execPath, LAUNCHER])), ...(/^\d+$/.test(rest.trim()) ? { mem_kb: Number(rest.trim()) / 1024 } : {}) });
     };
     const feed = (d) => {
       buf += d;
