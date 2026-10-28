@@ -42,12 +42,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
-name = "bumpalo"
-version = "3.20.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
-
-[[package]]
 name = "bytemuck"
 version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -526,10 +520,10 @@ name = "sagebrush-ap"
 version = "0.1.0"
 dependencies = [
  "num-traits",
- "rayon",
  "sagebrush-ball",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-par",
 ]
 
 [[package]]
@@ -541,6 +535,7 @@ dependencies = [
  "num-traits",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-par",
 ]
 
 [[package]]
@@ -581,10 +576,10 @@ dependencies = [
 name = "sagebrush-cli"
 version = "0.1.0"
 dependencies = [
- "rayon",
  "sagebrush-ap",
  "sagebrush-bigint",
  "sagebrush-modsym",
+ "sagebrush-par",
 ]
 
 [[package]]
@@ -626,11 +621,11 @@ version = "0.1.0"
 dependencies = [
  "num-integer",
  "num-traits",
- "rayon",
  "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-classgroup",
  "sagebrush-interrupt",
+ "sagebrush-par",
  "sagebrush-poly",
 ]
 
@@ -654,6 +649,7 @@ dependencies = [
  "sagebrush-ap",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-par",
  "sagebrush-poly",
  "serde_json",
 ]
@@ -667,6 +663,7 @@ dependencies = [
  "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-par",
  "sagebrush-poly",
 ]
 
@@ -677,10 +674,10 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
- "rayon",
  "sagebrush-ap",
  "sagebrush-bigint",
  "sagebrush-modsym",
+ "sagebrush-par",
 ]
 
 [[package]]
@@ -694,6 +691,15 @@ dependencies = [
  "sagebrush-modsym",
  "sagebrush-poly",
  "serde_json",
+]
+
+[[package]]
+name = "sagebrush-par"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+ "sagebrush-interrupt",
+ "sagebrush-ledger",
 ]
 
 [[package]]
@@ -712,13 +718,13 @@ version = "0.1.0"
 dependencies = [
  "num-bigint",
  "pyo3",
- "rayon",
  "sagebrush-ap",
  "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-ledger",
  "sagebrush-modsym",
  "sagebrush-mpoly",
+ "sagebrush-par",
  "sagebrush-raster",
  "sagebrush-sym",
  "sagebrush-web",
@@ -746,15 +752,6 @@ dependencies = [
  "sagebrush-interrupt",
  "sagebrush-poly",
  "serde_json",
-]
-
-[[package]]
-name = "sagebrush-wasm"
-version = "0.1.0"
-dependencies = [
- "sagebrush-bigint",
- "sagebrush-modsym",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -914,65 +911,6 @@ name = "unindent"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7264e107f553ccae879d21fbea1d6724ac785e8c3bfc762137959b5802826ef3"
-
-[[package]]
-name = "wasm-bindgen"
-version = "0.2.104"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1da10c01ae9f1ae40cbfac0bac3b1e724b320abfcf52229f80b547c0d250e2d"
-dependencies = [
- "cfg-if",
- "once_cell",
- "rustversion",
- "wasm-bindgen-macro",
- "wasm-bindgen-shared",
-]
-
-[[package]]
-name = "wasm-bindgen-backend"
-version = "0.2.104"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "671c9a5a66f49d8a47345ab942e2cb93c7d1d0339065d4f8139c486121b43b19"
-dependencies = [
- "bumpalo",
- "log",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "wasm-bindgen-shared",
-]
-
-[[package]]
-name = "wasm-bindgen-macro"
-version = "0.2.104"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ca60477e4c59f5f2986c50191cd972e3a50d8a95603bc9434501cf156a9a119"
-dependencies = [
- "quote",
- "wasm-bindgen-macro-support",
-]
-
-[[package]]
-name = "wasm-bindgen-macro-support"
-version = "0.2.104"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f07d2f20d4da7b26400c9f4a0511e6e0345b040694e8a75bd41d578fa4421d7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "wasm-bindgen-backend",
- "wasm-bindgen-shared",
-]
-
-[[package]]
-name = "wasm-bindgen-shared"
-version = "0.2.104"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bad67dc8b2a1a6e5448428adec4c3e84c43e561d8c9ee8a9e5aabeb193ec41d1"
-dependencies = [
- "unicode-ident",
-]
 
 [[package]]
 name = "windows-link"

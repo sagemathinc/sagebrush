@@ -15,7 +15,7 @@
 // the bindings are the flag (§11).  Before authentication, an IP limit
 // (SYNC_PREAUTH, Cloudflare's rate-limiting binding) comes first (§2).
 
-import { bindPurge, sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
+import { adminLength, bindPurge, sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
 import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "../sync-protocol/protocol.ts";
 import { allowed, gate, testMode, type SyncEnv } from "./env.ts";
@@ -43,16 +43,18 @@ const ADMIN_BODY = 4096;
 /**
  * Before any work on an admin call (LIMIT-5E2-1): the per-IP admin limit
  * (mandatory: without it, sync's admin routes are off), then, for a POST,
- * a declared Content-Length of at most ADMIN_BODY.  A refusal here reads no
- * body and calls no object and no database.
+ * a declared Content-Length of at most ADMIN_BODY, judged by sharing's own
+ * adminLength, so a purge gets the same 411 or 413 whether or not sync is on
+ * (none, empty, not ASCII digits or 0: 411; over 4096: 413).  A refusal here
+ * reads no body and calls no object and no database.
  */
 async function adminGate(req: Request, env: Env): Promise<Response | null> {
   if (!env.SYNC_ADMIN_LIMIT || !env.SYNC_ACCOUNT) return err(404, "sync is not enabled here");
   if (!(await env.SYNC_ADMIN_LIMIT.limit({ key: req.headers.get("cf-connecting-ip") ?? "unknown" })).success) return err(429, "too many requests");
   if (req.method === "POST") {
-    const cl = req.headers.get("content-length");
-    if (cl === null) return err(411, "Content-Length is required");
-    if (!/^\d{1,6}$/.test(cl) || Number(cl) < 1 || Number(cl) > ADMIN_BODY) return err(413, "bad request");
+    const bad = adminLength(req.headers.get("content-length"));
+    if (bad === 411) return err(411, "a body with its Content-Length is required");
+    if (bad === 413) return err(413, "too large");
   }
   return null;
 }

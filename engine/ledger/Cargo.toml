@@ -15,3 +15,6 @@ test-hooks = []
 # Tests and CI only, never shipped: the auditing allocator (attribution and
 # the sum check on every allocation, plan C r12 section 4)
 ledger-audit = []
+
+[lints]
+workspace = true

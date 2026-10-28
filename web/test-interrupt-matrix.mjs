@@ -17,9 +17,11 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { againstBaseline, classify, classifyCell, cliffOf, leakCheck, widenedPick, xkRowOutcome } from "./interrupt-classify.mjs";
+import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, ciFailing, waiverErrors, widenedPick, withWaiver, xkRowOutcome } from "./interrupt-classify.mjs";
 import { killTracked, killTree, onStop, procTable, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
+// William's waivers of the Stop bound (only active records; a malformed registry fails the run, below)
+const WAIVERS = JSON.parse(readFileSync(new URL("./interrupt-waivers.json", import.meta.url), "utf8")).records;
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const LAUNCHER = process.env.SB_LAUNCHER ?? join(ROOT, "packages/sagebrush/bin/sagebrush.cjs"); // (SB_LAUNCHER: another build, for checking the harness)
@@ -67,7 +69,11 @@ const CASES = [
   // whole target, Stop counted only after its PHASE marker (pyjs Python loops, polled at back-edges)
   { id: "M1o", mode: "python", leak_measure: "heap+external", s0: 250, smin: 40, smax: 600, grow: (s, r) => Math.round(s * Math.sqrt(r)), phase: "ordering", hosts: ["cli"], setup: "import numpy as np\nimport _matlab_sparse as _sp, _matlab_colamd as _C, _matlab_lu as _L\n_L._phase_hook = lambda name: _p(\"PHASE\", _i, name)\nk = S\nn = k * k\n_pm = [(i * 1999) % n for i in range(n)]\n_r, _c, _v = [], [], []\nfor _x in range(k):\n    for _y in range(k):\n        _t = _x * k + _y\n        for _dx, _dy, _w in ((0, 0, 4.0), (1, 0, -1.0), (-1, 0, -1.0), (0, 1, -1.0), (0, -1, -1.0)):\n            _a, _b = _x + _dx, _y + _dy\n            if 0 <= _a < k and 0 <= _b < k:\n                _r.append(_pm[_a * k + _b]); _c.append(_pm[_t]); _v.append(_w)\nA = _sp.make(n, n, np.array(_r), np.array(_c), np.array(_v))", target: "_L._phase(\"ordering\")\n_q = _C.order_columns(A.m, A.n, A.jc, A.ir)", probe: "assert _L.factor(_sp.make(2, 2, np.array([0, 1]), np.array([0, 1]), np.array([2.0, 4.0])), \"p\").solve(np.ones((2, 1)))[1, 0] == 0.25" },
   { id: "M1l", mode: "python", leak_measure: "heap+external", s0: 70, smin: 20, smax: 160, grow: (s, r) => Math.round(s * Math.cbrt(r)), phase: "lu", hosts: ["cli"], setup: "import numpy as np\nimport _matlab_sparse as _sp, _matlab_colamd as _C, _matlab_lu as _L\n_L._phase_hook = lambda name: _p(\"PHASE\", _i, name)\nk = S\nn = k * k\n_pm = [(i * 1999) % n for i in range(n)]\n_r, _c, _v = [], [], []\nfor _x in range(k):\n    for _y in range(k):\n        _t = _x * k + _y\n        for _dx, _dy, _w in ((0, 0, 4.0), (1, 0, -1.0), (-1, 0, -1.0), (0, 1, -1.0), (0, -1, -1.0)):\n            _a, _b = _x + _dx, _y + _dy\n            if 0 <= _a < k and 0 <= _b < k:\n                _r.append(_pm[_a * k + _b]); _c.append(_pm[_t]); _v.append(_w)\nA = _sp.make(n, n, np.array(_r), np.array(_c), np.array(_v))\n_q = _C.order_columns(A.m, A.n, A.jc, A.ir)", target: "_F = _L.factor(A, \"m1l\", q=_q)", probe: "assert _L.factor(_sp.make(2, 2, np.array([0, 1]), np.array([0, 1]), np.array([2.0, 4.0])), \"p\").solve(np.ones((2, 1)))[1, 0] == 0.25" },
-  { id: "E13g", mode: "sage", s0: 40, smin: 4, smax: 4000, grow: (s, r) => Math.max(1, Math.round(s * r)), xk: { kind: "window", wrap: "_sbraster.render" }, hosts: ["cli"], setup: "import tempfile, os\n_d = tempfile.mkdtemp()\nP = sum(polygon([(0, 0), (1, 0.1 * (j % 10)), (1, 1), (0.1 * (j % 7), 1)], alpha=0.02) for j in range(S))", target: "P.save(os.path.join(_d, 'big.png'), figsize=40, dpi=100)", probe: "line([(0, 0), (1, 1)]).save(os.path.join(_d, 'small.png'), figsize=1, dpi=100)\nassert os.path.getsize(os.path.join(_d, 'small.png')) > 0" },
+  // the leak CONTROL (#217): each trial's setup retains 24 MB more (a float64 array of 3,000,000),
+  // so the heap+external series grows 48 MB from repeat 3 to 5: the leak check must FAIL it, every
+  // run (leakControlOutcome; the row PASSes only then).  Its Stops are a plain interruptible loop.
+  { id: "L1c", mode: "python", leak_measure: "heap+external", expect_leak: true, calibration: "nonterminating", hosts: ["cli"], setup: "import numpy as np\n_keep = globals().setdefault('_keep', [])\n_keep.append(np.ones(3_000_000))\nk = 0", target: "while True:\n    k += 1", probe: "assert len(_keep) >= 1 and float(_keep[-1][0]) == 1.0" },
+  { id: "E13g", mode: "sage", s0: 40, smin: 4, smax: 4000, grow: (s, r) => Math.max(1, Math.round(s * r)), xk: { kind: "window", wrap: "_sbraster.render" }, call: "_sbraster.render", hosts: ["cli"], setup: "import tempfile, os\n_d = tempfile.mkdtemp()\nP = sum(polygon([(0, 0), (1, 0.1 * (j % 10)), (1, 1), (0.1 * (j % 7), 1)], alpha=0.02) for j in range(S))", target: "P.save(os.path.join(_d, 'big.png'), figsize=40, dpi=100)", probe: "line([(0, 0), (1, 1)]).save(os.path.join(_d, 'small.png'), figsize=1, dpi=100)\nassert os.path.getsize(os.path.join(_d, 'small.png')) > 0" },
 ].filter((c) => !ROWS || ROWS.split(",").includes(c.id));
 const FLAGS = { python: [], sage: ["--sage"], magma: ["--magma"], matlab: ["--matlab"] };
 
@@ -91,15 +97,9 @@ _xm.${wf} = _xwrap
   // (a case with leak_measure "heap+external": after each trial's probe, between trials and outside
   // every timed window, a full collection and then the live JS heap plus its external memory,
   // in the DONE marker; nothing where the host has no such figure)
+  // (settled: the least of a few collected readings, web/interrupt-classify.mjs HEAP_EXTERNAL_SAMPLE)
   const measure = c.leak_measure === "heap+external"
-    ? `    _m = ""
-    try:
-        _a = _hu() if _hu else None
-        _b = _he() if (_he and _a is not None) else None
-        _m = "%d" % (_a + _b) if _a is not None and _b is not None else ""
-    except Exception:
-        _m = ""
-`
+    ? HEAP_EXTERNAL_SAMPLE
     : `    _m = ""
 `;
   return `import time
@@ -325,7 +325,7 @@ async function runHost(host) {
   for (const c of CASES) {
     if (c.hosts && !c.hosts.includes(host)) continue; // (a case's own hosts, e.g. E13g: the CLI)
     // the CI set (r5 §8): the CLI's five rows, the prompt's two; everything else is VM-only
-    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l"]).includes(c.id)) continue;
+    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l", "L1c"]).includes(c.id)) continue;
     if (overBudget()) {
       rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: "run budget spent" });
       record(rows.at(-1));
@@ -384,11 +384,20 @@ async function runHost(host) {
     const left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
     const leak0 = leakCheck(lr.samples, 20, c.leak_measure ?? "rss");
     const leak = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
-    let { outcome: own, why: rowWhy } = xkRowOutcome(cells, leak && leak.ok, c.xk);
+    let { outcome: own, why: rowWhy } = c.expect_leak ? leakControlOutcome(cells, leak, c.xk) : xkRowOutcome(cells, leak && leak.ok, c.xk);
     // (a session cut at the run's deadline leaves its cells unresolved: the row is INVALID-budget, unless it already failed)
-    if (overBudget() && sessions.some((x) => x.end === "budget") && own !== "FAIL") { own = "INVALID"; rowWhy = "run budget spent: a session was cut at the deadline"; }
-    const outcome = againstBaseline({ case: c.id, host, outcome: own, trials: cells, leak }, BASELINE);
-    rows.push({ case: c.id, host, mode: c.mode, run: MODE, outcome, ...(cal.label ? { label: cal.label } : {}), ...(outcome !== own ? { own_outcome: own } : {}), ...(rowWhy ? { why: rowWhy } : {}), ...(c.xk ? { xk: c.xk.kind } : {}), s: cal.s, T_ms: cal.T && Math.round(cal.T), ...(cal.R != null ? { R_ms: Math.round(cal.R) } : {}), calibration: cal, ...(c.leak_s != null ? { leak_s: leakAt ?? { s: c.leak_s, T_ms: null, why: "no calibration attempt at leak_s: the series ran at s" } } : {}), cells, leak, sessions });
+    if (overBudget() && sessions.some((x) => x.end === "budget") && own !== "FAIL") {
+      // (a malformed cell is named too, so the relabel doesn't hide the harness's evidence loss: magma N3)
+      const bad = cells.filter((x) => x.malformed).length;
+      own = "INVALID"; rowWhy = "run budget spent: a session was cut at the deadline" + (bad ? `; malformed evidence in ${bad} cell(s)` : "");
+    }
+    const known = againstBaseline({ case: c.id, host, outcome: own, trials: cells, leak }, BASELINE);
+    // (a Stop honoured late: FAIL unless one of William's records covers exactly this case, host and call)
+    // (the required cells: the phase offsets and the repeats; a session cut short leaves fewer, never waivable)
+    const waived = withWaiver({ case: c.id, host, trials: cells, leak }, known, WAIVERS, c.call, offsets.length + reps);
+    const outcome = waived.outcome;
+    if (waived.why) rowWhy = waived.why;
+    rows.push({ case: c.id, host, mode: c.mode, run: MODE, outcome, ...(cal.label ? { label: cal.label } : {}), ...(outcome !== own ? { own_outcome: own } : {}), ...(waived.waiver ? { waiver: waived.waiver } : {}), ...(rowWhy ? { why: rowWhy } : {}), ...(c.xk ? { xk: c.xk.kind } : {}), s: cal.s, T_ms: cal.T && Math.round(cal.T), ...(cal.R != null ? { R_ms: Math.round(cal.R) } : {}), calibration: cal, ...(c.leak_s != null ? { leak_s: leakAt ?? { s: c.leak_s, T_ms: null, why: "no calibration attempt at leak_s: the series ran at s" } } : {}), cells, leak, sessions });
     record(rows.at(-1));
   }
   return rows;
@@ -423,6 +432,21 @@ for (const h of HOSTS) {
     out.hosts[h] = overBudget() ? { skipped: "run budget spent" } : await browserPilot({ record, overBudget, remainingMs: workLeft, mode: MODE, baseline: BASELINE, onChild: (pid) => track(pid), onChildDone: (pid) => untrack(pid) }).catch((e) => ({ error: String(e?.stack ?? e).slice(0, 600), rows: [] }));
   } else out.hosts[h] = await runHost(h);
 }
+// the leak control must have run: in --ci on the CLI, a missing L1c row FAILs (never passes silently)
+if (MODE === "ci" && HOSTS.includes("cli") && (!ROWS || ROWS.split(",").includes("L1c")) && Array.isArray(out.hosts.cli) && !out.hosts.cli.some((r) => r.case === "L1c")) {
+  out.hosts.cli.push({ case: "L1c", host: "cli", outcome: "FAIL", why: "leak control: its row is missing from the CI run" });
+  record(out.hosts.cli.at(-1));
+}
+// the waiver registry: a malformed record fails the run; a record no row of this run matched, or whose row
+// now passes, is reported (a stale waiver never hides)
+out.waiver_rows = waiverErrors(WAIVERS).map((e) => ({ case: "*", host: "*", outcome: "FAIL", why: "waiver registry: " + e }));
+for (const r of out.waiver_rows) record(r);
+out.waivers = (Array.isArray(WAIVERS) ? WAIVERS : []).map((w) => {
+  const rs = Object.values(out.hosts).flatMap((v) => (Array.isArray(v) ? v : v?.rows ?? [])).filter((r) => r.case === w.scope?.case && r.host === w.scope?.host);
+  const use = !rs.length ? "unused: no row of this run is in its scope" : rs.some((r) => r.outcome === "WAIVED") ? "used" : "stale: its row ran and was not waived (" + rs.map((r) => r.outcome).join(",") + "); remove it with the fix";
+  console.log("WAIVER", w.id, use);
+  return { id: w.id, use };
+});
 if (SIGNALS !== "none") {
   const { runSignals } = await import("./interrupt-signals.mjs");
   out.signals = await runSignals({ hosts: HOSTS.filter((h) => h !== "browser"), mode: MODE, record, overBudget, remainingMs: workLeft, baseline: BASELINE, only: SIGNALS === "all" ? null : SIGNALS.split(",") });
@@ -435,6 +459,9 @@ console.log("wrote", OUT, "in", out.wall_ms, "ms");
 // row (INCOMPLETE; INVALID: uncalibrated or out of budget), or a FIXED baseline row (remove its
 // entry from web/interrupt-baseline.json in the same change)
 const rowsOf = (h, v) => (Array.isArray(v) ? v : v?.rows?.length ? v.rows : [{ case: "*", host: h, outcome: "INVALID", why: v?.skipped ?? v?.error ?? "no rows" }]);
-const bad = [...Object.entries(out.hosts).flatMap(([h, v]) => rowsOf(h, v)), ...(out.signals ?? [])].filter((r) => ["FAIL", "FIXED", "INCOMPLETE", "INVALID", "PENDING-READY"].includes(r.outcome));
+const all = [...Object.entries(out.hosts).flatMap(([h, v]) => rowsOf(h, v)), ...(out.signals ?? []), ...out.waiver_rows];
+// (WAIVED is not a pass: listed on its own, with its record)
+for (const r of all.filter((x) => x.outcome === "WAIVED")) console.log("WAIVED", r.case ?? r.trial, r.host ?? "", r.waiver, r.why ?? "");
+const bad = ciFailing(all);
 for (const r of bad) console.log(r.outcome, r.case ?? r.trial, r.host ?? "", r.outcome === "FIXED" ? "(remove its baseline entry)" : r.outcome === "PENDING-READY" ? "(its capability is present: make it required)" : r.why ?? "");
 process.exit(args.includes("--ci") && bad.length ? 1 : 0);

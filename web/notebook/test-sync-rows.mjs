@@ -44,7 +44,8 @@ check(throws(() => R.rowKey("a", "x", "é"), RangeError) && throws(() => R.rowKe
 // ---- the registry row
 check(J(R.registryKey("acct:dev-1", "0123456789ab")) === J(["\u0001s:", "d:acct:dev-1:0123456789ab"]), "registryKey: [SYNC_NB, d:ns:doc]");
 check(R.registryKey("n", "01234567-89ab-4cde-8f01-23456789abcd")[1].endsWith("cd"), "registryKey takes a uuid");
-for (const [ns, doc] of [["", "0123456789ab"], ["n s", "0123456789ab"], ["n", "nope"], ["n", "0123456789AB"], ["x".repeat(129), "0123456789ab"]]) check(throws(() => R.registryKey(ns, doc), RangeError), `registryKey refuses ${J([ns, doc])}`);
+check(R.registryKey("n", "lq3k2x9a0bcdefgh")[1] === "d:n:lq3k2x9a0bcdefgh" && R.registryKey("n", "x".repeat(96))[1].length === 100, "registryKey takes a notebook's base-36 id, and one of 96 characters");
+for (const [ns, doc] of [["", "0123456789ab"], ["n s", "0123456789ab"], ["n", ""], ["n", "a b"], ["n", "\u0001x"], ["n", "é"], ["n", "x".repeat(97)], ["x".repeat(129), "0123456789ab"]]) check(throws(() => R.registryKey(ns, doc), RangeError), `registryKey refuses ${J([ns, doc])}`);
 
 // ---- the charge (F8): key and value as inert JSON, two bytes a character, plus 64
 check(R.rowCharge(["a", "b"], { x: 1 }) === 2 * (J(["a", "b"]).length + J({ x: 1 }).length) + 64, "rowCharge: 2 × (key + value text) + 64");

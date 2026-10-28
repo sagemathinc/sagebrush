@@ -15,8 +15,8 @@
 //! to be the true one by the chain identity (F4) (by induction on r, from
 //! Phi_1 = x - 1), the outputs by a positional certificate, and the index
 //! set by its distinctness, membership and total degree.  Stage B (|a| !=
-//! |b|, both of at most BINOMIAL_MAX_BITS bits): -b/a = (p/q)^g for the
-//! largest g | m, by exact roots; then the pieces H_d = Phi_d(q x^h, p),
+//! |b|, of any size: plan rank 3 r3, 3.8): -b/a = (p/q)^g for the largest
+//! g | m, by exact roots; then the pieces H_d = Phi_d(q x^h, p),
 //! h = m/g, each proved coefficient by coefficient against the verified
 //! Phi_d; for h = 1 they are irreducible, else they go through the general
 //! square-free path with the same budget.
@@ -29,10 +29,6 @@
 use super::*;
 use num_integer::Roots;
 use sagebrush_interrupt::{check, enter};
-
-/// Stage B runs only when both coefficients have at most this many bits;
-/// above it today's general path runs (not a refusal).  Plan r3, 3.2.
-pub(crate) const BINOMIAL_MAX_BITS: u64 = 4096;
 
 /// The factors of f (primitive, positive leading coefficient, degree >= 1)
 /// with their multiplicities, when f = x^k (a x^m + b) is a binomial this
@@ -65,13 +61,11 @@ pub(crate) fn factor<'b>(b: &'b Budget, f: &[BigInt]) -> FResult<Option<Vec<(Hel
     let (a, c0) = (&f[top], &f[k]);
     let pieces = if a.is_one() && c0.abs().is_one() {
         stage_a(b, m, c0.is_positive())?
-    } else if a.bits() <= BINOMIAL_MAX_BITS && c0.bits() <= BINOMIAL_MAX_BITS {
+    } else {
         match stage_b(b, m, a, c0)? {
             Some(p) => p,
             None => return Ok(None),
         }
-    } else {
-        return Ok(None);
     };
     let mut out: Vec<(Held<'b>, u32)> = pieces.into_iter().map(|h| (h, 1)).collect();
     if k > 0 {
@@ -131,6 +125,54 @@ pub(crate) mod fault {
 }
 
 use fault::is as fault;
+
+/// Stage B's executable-ledger audit (plan rank 3 r3, 3.8): each preflight
+/// next to the units its section actually debited, from the last call on
+/// this thread.
+#[cfg(test)]
+pub(crate) mod audit {
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct Audit {
+        pub pp_preflight: u64,
+        pub pp_used: u64,
+        pub hom_preflight: u64,
+        pub hom_used: u64,
+        /// the residue prefilter: witnesses evaluated, numbers it proved
+        /// not a power, and the bisections (exact_root calls) still made
+        pub proof_preflight: u64,
+        pub prefilter_calls: u64,
+        /// fold passes over a coefficient (first and 2^64 + 1), and those
+        /// of the early residue proof alone
+        pub fold_passes: u64,
+        pub proof_folds: u64,
+        pub prefilter_evals: u64,
+        pub prefilter_rejects: u64,
+        pub bisections: u64,
+    }
+
+    thread_local! {
+        static LAST: std::cell::Cell<Audit> = const { std::cell::Cell::new(Audit { pp_preflight: 0, pp_used: 0, hom_preflight: 0, hom_used: 0, proof_preflight: 0, prefilter_calls: 0, fold_passes: 0, proof_folds: 0, prefilter_evals: 0, prefilter_rejects: 0, bisections: 0 }) };
+    }
+
+    pub fn set(f: impl FnOnce(&mut Audit)) {
+        LAST.with(|c| {
+            let mut a = c.get();
+            f(&mut a);
+            c.set(a)
+        })
+    }
+
+    pub fn get() -> Audit {
+        LAST.with(|c| c.get())
+    }
+
+    /// Clear, run, and return what the run recorded.
+    pub fn during<T>(run: impl FnOnce() -> T) -> (T, Audit) {
+        LAST.with(|c| c.set(Audit::default()));
+        let r = run();
+        (r, LAST.with(|c| c.get()))
+    }
+}
 
 // ------------------------------------------------------------------ small integers
 
@@ -532,6 +574,8 @@ fn plan_powers(bits: u64, m: u64, primes: &[u64]) -> Option<u64> {
         }
         let steps = bits.div_ceil(l - 1).checked_add(v)?.checked_add(1)?;
         u = u.checked_add(steps.checked_mul(2 * clog2(l) + 1)?.checked_mul(lb.checked_mul(lb)?)?)?;
+        // the residue prefilter on each root attempt (at most v + 1)
+        u = u.checked_add(v.checked_add(1)?.checked_mul(prefilter_plan(bits, l)?)?)?;
     }
     u.checked_mul(2)?.checked_add(m.sqrt().checked_mul(2)?)
 }
@@ -545,7 +589,7 @@ fn pow_cmp(b: &Budget, c: &BigInt, l: u64, n: &BigInt) -> FResult<Option<bool>> 
     let mut e = l;
     loop {
         if e & 1 == 1 {
-            b.debit(Some(limbs(result.bits()) * limbs(base.bits())))?;
+            b.debit(limbs(result.bits()).checked_mul(limbs(base.bits())))?;
             result *= &base;
             if &result > n {
                 return Ok(None);
@@ -555,13 +599,234 @@ fn pow_cmp(b: &Budget, c: &BigInt, l: u64, n: &BigInt) -> FResult<Option<bool>> 
         if e == 0 {
             return Ok(Some(&result == n));
         }
-        b.debit(Some(limbs(base.bits()) * limbs(base.bits())))?;
+        b.debit(limbs(base.bits()).checked_mul(limbs(base.bits())))?;
         base = &base * &base;
         if &base > n {
             // the remaining factors are at least base
             return Ok(None);
         }
     }
+}
+
+/// The residue prefilter before the bisection (rank-3 PR 5 perf ruling,
+/// daybreak2 option (ii)).  Tier 1: the prime factors of 2^48 - 1 and 2^64 -
+/// 1 (one pass of additions over the limbs: 2^48 = 1 on 48-bit chunks, 2^64 =
+/// 1 on limbs; a power of 2 plus a small number is not stuck at one residue
+/// for both), then of 2^64 + 1 (a second pass, only if needed); tier 2:
+/// primes p = k l + 1 < 2^32 (k <= WITNESS_K)
+/// outside tier 1, by rem_u64, until WITNESSES witnesses were tried.  A
+/// witness serves l when p = 1 mod l; fewer witnesses only weaken the filter:
+/// the exact search still runs, never a refusal.
+///
+/// Perf: the proof costs a few microseconds above 4096 bits, where master
+/// skipped Stage B and so omitted it.  William approved that as a waiver of
+/// the 1% gate (2026-10-27, waiver r2): native cold B/A up to 1.11, only on
+/// the frozen binom4097, binom16384 and binom65536 rows of harness r6c.
+#[cfg(test)]
+const FOLD_MINUS: [u64; 7] = [3, 5, 17, 257, 641, 65537, 6700417];
+/// The distinct prime factors of 2^48 - 1 = 3^2 5 7 13 17 97 241 257 673
+/// (residues from the same pass, re-cut into 48-bit chunks).
+#[cfg(test)]
+const FOLD_48: [u64; 9] = [3, 5, 7, 13, 17, 97, 241, 257, 673];
+/// Tier 1's witnesses in increasing size, each with the fold it is read from
+/// (false: 2^48 - 1, true: 2^64 - 1); all below 2^32 (u64 arithmetic).
+const TIER1: [(u64, bool); 12] = [(3, false), (5, false), (7, false), (13, false), (17, false), (97, false), (241, false), (257, false), (641, true), (673, false), (65537, true), (6700417, true)];
+const FOLD_PLUS: [u64; 2] = [274177, 67280421310721];
+const WITNESSES: u64 = 8;
+const WITNESS_K: u64 = 64;
+
+fn is_prime_trial(p: u64) -> bool {
+    p >= 2 && (2..).take_while(|d: &u64| d * d <= p).all(|d| !p.is_multiple_of(d))
+}
+
+/// x^e mod p for p < 2^63 (u128 products).
+fn powmod_w(x: u64, mut e: u64, p: u64) -> u64 {
+    let (mut r, mut x, p) = (1u128, x as u128 % p as u128, p as u128);
+    while e > 0 {
+        if e & 1 == 1 {
+            r = r * x % p;
+        }
+        x = x * x % p;
+        e >>= 1;
+    }
+    r as u64
+}
+
+/// |n| mod 2^64 - 1 and |n| mod 2^48 - 1, from one pass over its borrowed
+/// limbs: u64 additions with end-around carry (2^64 = 1, resp. 2^48 = 1 on
+/// the limbs re-cut into 48-bit chunks); no allocation, no division; a poll
+/// every 256 limbs.
+fn fold_minus(n: &BigInt) -> (u64, u64) {
+    const M48: u64 = (1 << 48) - 1;
+    let (mut s, mut s48, mut buf, mut nb, mut i) = (0u64, 0u64, 0u128, 0u32, 0u64);
+    sagebrush_bigint::for_each_u64_limb(n, |x| {
+        if i & 255 == 0 {
+            check();
+        }
+        let (t, c) = s.overflowing_add(x);
+        // on a wrap t < x <= 2^64 - 1, so t + 1 cannot overflow
+        s = t + c as u64;
+        buf |= (x as u128) << nb;
+        nb += 64;
+        while nb >= 48 {
+            // s48 < 2^48 + 1 before, < 2^49 + 1 after the add: no overflow
+            s48 += (buf as u64) & M48;
+            s48 = (s48 & M48) + (s48 >> 48);
+            buf >>= 48;
+            nb -= 48;
+        }
+        i += 1;
+    });
+    s48 += buf as u64;
+    s48 = (s48 & M48) + (s48 >> 48);
+    s48 = (s48 & M48) + (s48 >> 48);
+    (if s == u64::MAX { 0 } else { s }, if s48 == M48 { 0 } else { s48 })
+}
+
+/// |n| mod 2^64 + 1, from one more pass (2^64 = -1: the alternating sum);
+/// only when a 2^64 + 1 witness is still needed.  No allocation; a poll
+/// every 256 limbs.
+fn fold_plus(n: &BigInt) -> u128 {
+    let (mut e, mut o, mut i) = (0u128, 0u128, 0u64);
+    sagebrush_bigint::for_each_u64_limb(n, |x| {
+        if i & 255 == 0 {
+            check();
+        }
+        if i % 2 == 0 {
+            e += x as u128;
+        } else {
+            o += x as u128;
+        }
+        i += 1;
+    });
+    let mp = (1u128 << 64) + 1;
+    (e % mp + mp - o % mp) % mp
+}
+
+/// Whether the witness p proves r = n mod p is not an l-th power residue
+/// (p = 1 mod l): r != 0 and r^((p-1)/l) != 1 mod p.  Sound: n = t^l with p
+/// not dividing t gives r^((p-1)/l) = t^(p-1) = 1 (Fermat).  u64 arithmetic
+/// for p < 2^32 (powmod_u), u128 products only above.
+fn witness_rejects(r: u64, p: u64, l: u64) -> bool {
+    let e = (p - 1) / l;
+    r != 0 && (if p < 1 << 32 { powmod_u(r, e, p) } else { powmod_w(r, e, p) }) != 1
+}
+
+/// The work one not_a_power call may debit for an n of `bits` bits and the
+/// prime l, checked (None: overflow): the two folds, tier 1's 14 powerings, tier
+/// 2's WITNESS_K trial divisions (p <= WITNESS_K l + 1: sqrt(p) + 1 each) and
+/// WITNESSES reductions.
+fn prefilter_plan(bits: u64, l: u64) -> Option<u64> {
+    let lb = limbs(bits);
+    let pmax = WITNESS_K.checked_mul(l).and_then(|x| x.checked_add(1)).map_or(1 << 32, |p| p.min(1 << 32));
+    let trial = WITNESS_K.checked_mul(pmax.sqrt() + 1)?;
+    lb.checked_add(1)?.checked_mul(2)?.checked_add(14 * 130)?.checked_add(trial)?.checked_add(WITNESSES.checked_mul(lb.checked_add(66)?)?)
+}
+
+/// One number's residues for the prefilter, each pass made once: the 2^64 -
+/// 1 and 2^48 - 1 folds (the first pass), and the 2^64 + 1 fold (a second
+/// pass, on first need).  Both passes polled and debited (limbs(n) + 1).
+struct Folds {
+    m64: u64,
+    m48: u64,
+    p64: Option<u128>,
+}
+
+impl Folds {
+    fn of(b: &Budget, n: &BigInt) -> FResult<Folds> {
+        // the first pass
+        check();
+        b.debit(limbs(n.bits()).checked_add(1))?;
+        #[cfg(test)]
+        audit::set(|a| a.fold_passes += 1);
+        let (m64, m48) = fold_minus(n);
+        Ok(Folds { m64, m48, p64: None })
+    }
+
+    fn plus(&mut self, b: &Budget, n: &BigInt) -> FResult<u128> {
+        if let Some(r) = self.p64 {
+            return Ok(r);
+        }
+        // the second pass, once
+        check();
+        b.debit(limbs(n.bits()).checked_add(1))?;
+        #[cfg(test)]
+        audit::set(|a| a.fold_passes += 1);
+        let r = fold_plus(n);
+        self.p64 = Some(r);
+        Ok(r)
+    }
+}
+
+/// Whether n >= 1 is PROVED not an l-th power (false: not proved, and the
+/// exact search decides), with fresh folds of n (the root search's calls;
+/// the early proof reuses one Folds per coefficient for every l).
+fn not_a_power(b: &Budget, n: &BigInt, l: u64) -> FResult<bool> {
+    let mut f = Folds::of(b, n)?;
+    not_a_power_with(b, n, &mut f, l)
+}
+
+/// As not_a_power, from n's folds `f`.  Tier 1 cheapest first: the 2^48 - 1
+/// and 2^64 - 1 witnesses (the first pass), then, only if none rejected, the
+/// 2^64 + 1 ones (the second pass; the 46-bit witness last).  Every step
+/// debited: each witness's powering (130), each tier-2 candidate's trial
+/// division (sqrt(p) + 1) and reduction (limbs(n) + 66).
+fn not_a_power_with(b: &Budget, n: &BigInt, f: &mut Folds, l: u64) -> FResult<bool> {
+    check();
+    #[cfg(test)]
+    audit::set(|a| a.prefilter_calls += 1);
+    let mut tried = 0u64;
+    for &(p, wide) in TIER1.iter().filter(|&&(p, _)| p % l == 1) {
+        b.debit(Some(130))?;
+        tried += 1;
+        #[cfg(test)]
+        audit::set(|a| a.prefilter_evals += 1);
+        if witness_rejects(if wide { f.m64 % p } else { f.m48 % p }, p, l) {
+            #[cfg(test)]
+            audit::set(|a| a.prefilter_rejects += 1);
+            return Ok(true);
+        }
+    }
+    if FOLD_PLUS.iter().any(|&p| p % l == 1) {
+        let rp = f.plus(b, n)?;
+        for &p in FOLD_PLUS.iter().filter(|&&p| p % l == 1) {
+            b.debit(Some(130))?;
+            tried += 1;
+            #[cfg(test)]
+            audit::set(|a| a.prefilter_evals += 1);
+            if witness_rejects((rp % p as u128) as u64, p, l) {
+                #[cfg(test)]
+                audit::set(|a| a.prefilter_rejects += 1);
+                return Ok(true);
+            }
+        }
+    }
+    for k in 1..=WITNESS_K {
+        if tried >= WITNESSES {
+            break;
+        }
+        let Some(p) = l.checked_mul(k).and_then(|x| x.checked_add(1)).filter(|&p| p < 1 << 32) else { break };
+        if TIER1.iter().any(|&(q, _)| q == p) || FOLD_PLUS.contains(&p) {
+            continue;
+        }
+        check();
+        b.debit(Some(p.sqrt() + 1))?;
+        if !is_prime_trial(p) {
+            continue;
+        }
+        b.debit(limbs(n.bits()).checked_add(66))?;
+        tried += 1;
+        #[cfg(test)]
+        audit::set(|a| a.prefilter_evals += 1);
+        let r = sagebrush_bigint::rem_u64(n, p);
+        let r = if n.is_negative() && r != 0 { p - r } else { r };
+        if witness_rejects(r, p, l) {
+            #[cfg(test)]
+            audit::set(|a| a.prefilter_rejects += 1);
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The l-th root of n >= 1 when n is an l-th power: bisection over the
@@ -587,22 +852,109 @@ fn exact_root(b: &Budget, n: &BigInt, l: u64) -> FResult<Option<BigInt>> {
     Ok(if exact { Some(t) } else { None })
 }
 
+/// One piece's sizes and unit costs (plan r3, 4.4), every one in checked
+/// arithmetic: the ledger sums them, and the build and the certificate
+/// debit exactly these (a coefficient's c_i is at most the piece's c bits).
+/// None on overflow, which is a refusal, never a wrap (plan rank 3 r3, 3.8).
+struct PieceCost {
+    /// phi(d) beta: the bits of p^phi
+    fb: u64,
+    /// the bits of a piece coefficient: c + fb + 1
+    bh: u64,
+    /// the piece's length, phi h + 1
+    len: u64,
+    /// p^phi by square-and-multiply
+    pw: u64,
+    /// one coefficient of the build
+    build: u64,
+    /// one coefficient of the certificate
+    cert: u64,
+}
+
+fn piece_cost(ph: u64, c: u64, beta: u64, h: u64) -> Option<PieceCost> {
+    let fb = ph.checked_mul(beta)?;
+    let bh = c.checked_add(fb)?.checked_add(1)?;
+    let len = ph.checked_mul(h)?.checked_add(1)?;
+    let (lb, lfb) = (limbs(beta), limbs(fb));
+    let pw = clog2(ph.checked_add(1)?).checked_mul(2)?.checked_mul(lfb.checked_mul(lfb)?)?;
+    let build = limbs(c).checked_add(lb.checked_mul(3)?)?.checked_mul(limbs(bh))?;
+    let cert = [lb.checked_mul(2)?.checked_mul(lfb)?, limbs(bh).checked_mul(lfb)?, limbs(c).checked_mul(lfb)?, limbs(c.checked_add(fb)?).checked_mul(lfb)?, limbs(fb.checked_mul(2)?.checked_add(c)?.checked_add(1)?)]
+        .into_iter()
+        .try_fold(0u64, |s, x| s.checked_add(x))?;
+    Some(PieceCost { fb, bh, len, pw, build, cert })
+}
+
+/// p^phi for any u64 exponent: no u32 cutoff (plan rank 3 r3, 3.6); its
+/// work and room are the piece's, preflighted and reserved by the caller.
+fn phi_power(p: &BigInt, ph: u64) -> BigInt {
+    pow_u64(p, ph, 32)
+}
+
 /// a x^m + b with |a| != |b|: the pieces Phi_d(q x^h, p), proved, either
 /// final (h = 1) or factored by the general path (h > 1); None when g = 1.
 fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option<Vec<Held<'b>>>> {
     // the perfect-power search: the original a, b are not modified
+    #[cfg(test)]
+    let pp_start = b.work_left();
     let (g, p, q) = {
         let _p = b.enter(Phase::PerfectPower);
-        let (u0, v0) = (-c0.clone(), a.clone());
-        let bits = u0.bits().max(v0.bits());
+        // the coefficients stay borrowed until the residue proof is done
+        let bits = c0.bits().max(a.bits());
         let (_, primes) = divisors_and_primes(b, m)?;
+        // the residue proof first, under its own preflight (two calls per
+        // prime l | m): g = 1 when every l is excluded (l = 2 with c0 > 0,
+        // or |c0| or a proved not an l-th power); then the general path,
+        // without the root search's preflight, reservation or copies
+        {
+            let need = primes.iter().try_fold(0u64, |s, &l| s.checked_add(prefilter_plan(bits, l)?.checked_mul(2)?)).ok_or_else(|| b.refuse("work (overflow)", u64::MAX, b.work_left()))?;
+            if need > b.work_left() {
+                return Err(b.refuse("work", need, b.work_left()));
+            }
+            #[cfg(test)]
+            audit::set(|x| x.proof_preflight = need);
+            let _s = enter("residue prefilter S7a");
+            #[cfg(test)]
+            let folds0 = audit::get().fold_passes;
+            // each coefficient folded once, its residues reused for every l
+            let (mut fc, mut fa) = (None::<Folds>, None::<Folds>);
+            let mut excluded = true;
+            for &l in &primes {
+                if c0.is_positive() && l == 2 {
+                    continue;
+                }
+                if fc.is_none() {
+                    fc = Some(Folds::of(b, c0)?);
+                }
+                if not_a_power_with(b, c0, fc.as_mut().unwrap(), l)? {
+                    continue;
+                }
+                if fa.is_none() {
+                    fa = Some(Folds::of(b, a)?);
+                }
+                if !not_a_power_with(b, a, fa.as_mut().unwrap(), l)? {
+                    excluded = false;
+                    break;
+                }
+            }
+            #[cfg(test)]
+            audit::set(|x| x.proof_folds = x.fold_passes - folds0);
+            if excluded {
+                #[cfg(test)]
+                audit::set(|x| x.pp_used = pp_start - b.work_left());
+                return Ok(None);
+            }
+        }
+        // not proved: the root search's own preflight, then its reservation,
+        // then the copies
         let need = plan_powers(bits, m, &primes).ok_or_else(|| b.refuse("work (overflow)", u64::MAX, b.work_left()))?;
         if need > b.work_left() {
             return Err(b.refuse("work", need, b.work_left()));
         }
+        #[cfg(test)]
+        audit::set(|a| a.pp_preflight = need);
         let _r = b.reserve(big_bytes(bits.checked_mul(2).and_then(|x| x.checked_add(64)).unwrap_or(u64::MAX)).and_then(|x| x.checked_mul(4)?.checked_add(big_bytes(bits)?.checked_mul(2)?)))?;
         let _s = enter("perfect power S7");
-        let (mut u, mut v, mut g) = (u0, v0, 1u64);
+        let (mut u, mut v, mut g) = (-c0.clone(), a.clone(), 1u64);
         for &l in &primes {
             let mut t = m;
             while t % l == 0 {
@@ -611,6 +963,12 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
                 if u.is_negative() && l == 2 {
                     break;
                 }
+                // a proved non-power ends the search before any bisection
+                if not_a_power(b, &u, l)? || not_a_power(b, &v, l)? {
+                    break;
+                }
+                #[cfg(test)]
+                audit::set(|a| a.bisections += 1);
                 let Some(ru) = exact_root(b, &u.abs(), l)? else { break };
                 let Some(rv) = exact_root(b, &v, l)? else { break };
                 u = if u.is_negative() { -ru } else { ru };
@@ -620,6 +978,8 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
         }
         (g, u, v)
     };
+    #[cfg(test)]
+    audit::set(|a| a.pp_used = pp_start - b.work_left());
     if g == 1 {
         return Ok(None);
     }
@@ -630,32 +990,41 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
     let _p = b.enter(Phase::Homogenize);
     let beta = p.bits().max(q.bits());
     // the ledger: build and certificate (plan r3, 4.4), from the actual Phi_d
-    let ledger = || -> Option<(u64, Vec<u64>, u64)> {
+    // the ledger's per-piece costs, one PieceCost per Phi_d at a known
+    // capacity: reserved before they are allocated and held until the
+    // certificate ends (CORR-R3-BIN5-1)
+    let costs_r = b.reserve_as("piece costs", (phis.len() as u64).checked_mul(std::mem::size_of::<PieceCost>() as u64))?;
+    let ledger = || -> Option<(u64, Vec<u64>, u64, Vec<PieceCost>)> {
         // (the build's scratch and the certificate's, both reserved: plan
         // r3, 4.4)
+        let mut costs = {
+            let _t = crate::budget::tag("piece costs");
+            Vec::with_capacity(phis.len())
+        };
         let (mut work, mut out, mut build, mut cert) = (0u64, vec![], 0u64, 0u64);
         for (_, f) in &phis {
             let ph = (f.len() - 1) as u64;
             let c = maxbits(f);
-            let fb = ph.checked_mul(beta)?;
-            let bh = c.checked_add(fb)?.checked_add(1)?;
-            let pw = (2 * clog2(ph + 1)).checked_mul(limbs(fb).checked_mul(limbs(fb))?)?;
+            let k = piece_cost(ph, c, beta, h as u64)?;
             // build: p^phi, then per coefficient
-            work = work.checked_add(pw)?.checked_add((ph + 1).checked_mul((limbs(c) + 3 * limbs(beta)).checked_mul(limbs(bh))?)?)?;
-            // certificate: p^phi, then per coefficient, then the zero scan
-            let per = 2 * limbs(beta) * limbs(fb) + limbs(bh) * limbs(fb) + limbs(c) * limbs(fb) + limbs(c.checked_add(fb)?) * limbs(fb) + limbs(fb.checked_mul(2)?.checked_add(c)?.checked_add(1)?);
-            let len = ph.checked_mul(h as u64)?.checked_add(1)?;
-            work = work.checked_add(pw)?.checked_add((ph + 1).checked_mul(per)?)?.checked_add(len)?;
-            out.push(poly_bytes(len, bh)?);
-            build = build.max(big_bytes(fb.checked_add(c)?.checked_add(64)?)?.checked_mul(3)?);
-            cert = cert.max(big_bytes(fb.checked_mul(2)?.checked_add(c)?.checked_add(64)?)?.checked_mul(6)?);
+            work = work.checked_add(k.pw)?.checked_add(ph.checked_add(1)?.checked_mul(k.build)?)?;
+            // certificate: the zero scan, p^phi, then per coefficient
+            work = work.checked_add(k.pw)?.checked_add(ph.checked_add(1)?.checked_mul(k.cert)?)?.checked_add(k.len)?;
+            out.push(poly_bytes(k.len, k.bh)?);
+            build = build.max(big_bytes(k.fb.checked_add(c)?.checked_add(64)?)?.checked_mul(3)?);
+            cert = cert.max(big_bytes(k.fb.checked_mul(2)?.checked_add(c)?.checked_add(64)?)?.checked_mul(6)?);
+            costs.push(k);
         }
-        Some((work, out, build.checked_add(cert)?))
+        Some((work, out, build.checked_add(cert)?, costs))
     };
-    let (work, out_bytes, scratch) = ledger().ok_or_else(|| b.refuse("work (overflow)", u64::MAX, b.work_left()))?;
+    let (work, out_bytes, scratch, costs) = ledger().ok_or_else(|| b.refuse("work (overflow)", u64::MAX, b.work_left()))?;
     if work > b.work_left() {
         return Err(b.refuse("work", work, b.work_left()));
     }
+    #[cfg(test)]
+    let hom_start = b.work_left();
+    #[cfg(test)]
+    audit::set(|a| a.hom_preflight = work);
     let _sr = b.reserve(Some(scratch))?;
     let mut out_r = Vec::with_capacity(out_bytes.len());
     for &x in &out_bytes {
@@ -667,14 +1036,15 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
     for (i, (_, f)) in phis.iter().enumerate() {
         let _s = enter("homogenize S8");
         let ph = f.len() - 1;
-        let c = maxbits(f);
-        let fb = ph as u64 * beta;
-        let bh = c + fb + 1;
-        b.debit(Some(2 * clog2(ph as u64 + 1) * limbs(fb) * limbs(fb)))?;
-        let mut t = p.pow(ph as u32);
-        let mut v = vec![BigInt::zero(); ph * h + 1];
+        let k = &costs[i];
+        b.debit(Some(k.pw))?;
+        let mut t = phi_power(&p, ph as u64);
+        // (the length's room is reserved: a size beyond the address space
+        // is refused, never narrowed)
+        let len = usize::try_from(k.len).map_err(|_| b.refuse("memory (overflow)", u64::MAX, 0))?;
+        let mut v = vec![BigInt::zero(); len];
         for (j, cj) in f.iter().enumerate() {
-            b.debit(Some((limbs(c) + 3 * limbs(beta)) * limbs(bh)))?;
+            b.debit(Some(k.build))?;
             v[j * h] = cj * &t;
             if j < ph {
                 t = &t / &p * &q;
@@ -688,7 +1058,11 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
         }
         pieces.push(Held { v, _r: out_r[i].take().unwrap() });
     }
-    phis_certify(b, &phis, &pieces, &p, &q, h, beta)?;
+    phis_certify(b, &phis, &pieces, &p, &q, h, &costs)?;
+    #[cfg(test)]
+    audit::set(|a| a.hom_used = hom_start - b.work_left());
+    drop(costs);
+    drop(costs_r);
     drop(phis);
     if h == 1 {
         return Ok(Some(pieces));
@@ -708,16 +1082,12 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
 /// zero, and eta_i p^i = c_i q^i p^phi for every i, with P_i = p^i and
 /// Q_i = q^i ascending (independent of the build's descending T).  As p !=
 /// 0 this forces H_d = Phi_d(q x^h, p) exactly.
-fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q: &BigInt, h: usize, beta: u64) -> FResult<()> {
+fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q: &BigInt, h: usize, costs: &[PieceCost]) -> FResult<()> {
     let _s = enter("homogenize S10 certificate");
-    for ((_, f), piece) in phis.iter().zip(pieces) {
+    for (((_, f), piece), k) in phis.iter().zip(pieces).zip(costs) {
         let ph = f.len() - 1;
-        let c = maxbits(f);
-        let fb = ph as u64 * beta;
-        let bh = c + fb + 1;
-        let len = ph * h + 1;
-        b.debit(Some(len as u64))?;
-        if piece.len() != len {
+        b.debit(Some(k.len))?;
+        if piece.len() as u64 != k.len {
             return Err(failed(b, "binomial verification"));
         }
         for (t, x) in piece.iter().enumerate() {
@@ -728,12 +1098,11 @@ fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q
                 return Err(failed(b, "binomial verification"));
             }
         }
-        b.debit(Some(2 * clog2(ph as u64 + 1) * limbs(fb) * limbs(fb)))?;
-        let pphi = p.pow(ph as u32);
+        b.debit(Some(k.pw))?;
+        let pphi = phi_power(p, ph as u64);
         let (mut pi, mut qi) = (BigInt::one(), BigInt::one());
-        let per = 2 * limbs(beta) * limbs(fb) + limbs(bh) * limbs(fb) + limbs(c) * limbs(fb) + limbs(c + fb) * limbs(fb) + limbs(2 * fb + c + 1);
         for (i, ci) in f.iter().enumerate() {
-            b.debit(Some(per))?;
+            b.debit(Some(k.cert))?;
             let lhs = &piece[i * h] * &pi;
             let rhs = ci * &qi * &pphi;
             if lhs != rhs {

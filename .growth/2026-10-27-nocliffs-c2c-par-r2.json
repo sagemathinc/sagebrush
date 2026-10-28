@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "no-cliffs C-2c-i (#196) r3, replacing this PR's own unmerged marker 2026-10-27-nocliffs-c2c-par.json (never on master; deleted, not edited): with the restore-base fix (d3957112) the engine wasm SHRINKS (CI's fresh wasm of d3957112, PR ci 40456361420, merge 961ca2ad with the head's tree: sha256 aea22089, 7199083 B against master d3617031's 7199449, -366), so the wasm and cli/pyjs.cjs entries are gone (no growth, and the old 435/619 would fail rule 2's tightness); cli/lib.gen.js +15 and engine/sagebrush-worker.js +15 as measured by that run's size-gate, the same +15 as in the earlier runs (not affected by the wasm, which these bundles do not embed)",
+ "bytes": {
+  "cli/lib.gen.js": 15,
+  "engine/sagebrush-worker.js": 15
+ }
+}

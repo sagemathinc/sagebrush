@@ -50,7 +50,7 @@ fn modsym(mut args: Vec<String>) {
     let n: u64 = args.first().map_or(389, |s| s.parse().unwrap());
     let q: u64 = args.get(1).map_or(2, |s| s.parse().unwrap());
     let p: u64 = args.get(2).map_or(67108859, |s| s.parse().unwrap());
-    let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+    let nthreads = sagebrush_par::install(threads, sagebrush_par::current_num_threads);
     let t = std::time::Instant::now();
     if level {
         let (psi, g, c, e, d) = sagebrush_modsym::exact::level_data(n);
@@ -58,12 +58,12 @@ fn modsym(mut args: Vec<String>) {
         return;
     }
     if let Some(r) = commute {
-        let ok = pool.install(|| sagebrush_modsym::hecke_commute(n, q, r, p)).unwrap_or_else(|e| fail(&e));
+        let ok = sagebrush_par::install(threads, || sagebrush_modsym::hecke_commute(n, q, r, p)).unwrap_or_else(|e| fail(&e));
         println!("N={} T_{} T_{} commute mod {}: {} ({:.0} ms)", n, q, r, p, ok, t.elapsed().as_secs_f64() * 1000.0);
         return;
     }
     if exact {
-        match pool.install(|| sagebrush_modsym::exact::exact_charpoly(n, q)) {
+        match sagebrush_par::install(threads, || sagebrush_modsym::exact::exact_charpoly(n, q)) {
             Err(e) => fail(&e),
             Ok(e) => {
                 let shown: Vec<String> = e.coeffs.iter().map(|c| c.to_string()).collect();
@@ -73,7 +73,7 @@ fn modsym(mut args: Vec<String>) {
                 // FNV-1a of the comma-joined decimal coefficients, to compare runs.
                 let h = shown.join(",").bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
                 println!("coefficients digest {:016x}", h);
-                println!("primes used {} (rejected {:?}), bound {:.0} bits; {:.0} ms on {} threads", e.primes_used.len(), e.primes_rejected, e.bound_bits, t.elapsed().as_secs_f64() * 1000.0, pool.current_num_threads());
+                println!("primes used {} (rejected {:?}), bound {:.0} bits; {:.0} ms on {} threads", e.primes_used.len(), e.primes_rejected, e.bound_bits, t.elapsed().as_secs_f64() * 1000.0, nthreads);
                 for c in &e.checks {
                     println!("  check: {}", c);
                 }
@@ -81,14 +81,14 @@ fn modsym(mut args: Vec<String>) {
         }
         return;
     }
-    let r = pool.install(|| sagebrush_modsym::hecke_charpoly(n, q, p)).unwrap_or_else(|e| fail(&e));
+    let r = sagebrush_par::install(threads, || sagebrush_modsym::hecke_charpoly(n, q, p)).unwrap_or_else(|e| fail(&e));
     println!(
         "N={} q={} p={} symbols={} gens={} dim={} eisenstein_root={} charpoly_hash={}",
         r.n, r.q, r.p, r.symbols, r.gens, r.dim, if r.eisenstein_root() { "True" } else { "False" }, r.hash()
     );
     println!(
         "times: symbols {:.0} ms, T_{} {:.0} ms, charpoly {:.0} ms, total {:.0} ms ({} threads)",
-        r.ms[0], q, r.ms[1], r.ms[2], r.ms.iter().sum::<f64>(), pool.current_num_threads()
+        r.ms[0], q, r.ms[1], r.ms[2], r.ms.iter().sum::<f64>(), nthreads
     );
 }
 
@@ -102,13 +102,13 @@ fn ap(mut args: Vec<String>) {
     let n: u64 = args[1].parse().unwrap_or_else(|_| fail(USAGE));
     let a: [i64; 5] = a.try_into().unwrap_or_else(|_| fail("a curve is [a1,a2,a3,a4,a6]"));
     let e = sagebrush_ap::EllipticCurve::new(a).unwrap_or_else(|e| fail(&e));
-    let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+    let nthreads = sagebrush_par::install(threads, sagebrush_par::current_num_threads);
     let t = std::time::Instant::now();
-    let r = pool.install(|| sagebrush_ap::aplist(&e, n));
+    let r = sagebrush_par::install(threads, || sagebrush_ap::aplist(&e, n));
     let secs = t.elapsed().as_secs_f64();
     let good: Vec<(u64, i64)> = r.iter().filter_map(|&(p, a)| a.map(|a| (p, a))).collect();
     let sum: i64 = good.iter().map(|g| g.1).sum();
     let m: Vec<String> = (1..=4).map(|k| format!("{:.3}", good.iter().map(|&(p, a)| ((a * a) as f64 / p as f64).powi(k)).sum::<f64>() / good.len() as f64)).collect();
     println!("{:?} p <= {}: {} good primes, sum of a_p {}, moments of a_p^2/p [{}]", a, n, good.len(), sum, m.join(", "));
-    println!("{:.3} s on {} threads", secs, pool.current_num_threads());
+    println!("{:.3} s on {} threads", secs, nthreads);
 }

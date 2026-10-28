@@ -45,7 +45,9 @@ export function docNb(h) {
  * than a family key's: it names the document; ns and doc are bounded by their own forms, checked here.) */
 export function registryKey(ns, doc) {
   if (typeof ns !== "string" || !/^[0-9A-Za-z_:-]{1,128}$/.test(ns)) throw new RangeError("sync rows: a namespace of 1 to 128 key characters");
-  if (typeof doc !== "string" || !/^[0-9a-f-]{12,36}$/.test(doc)) throw new RangeError("sync rows: a document id (12 hex, or a uuid)");
+  // (every form a document id takes here: a notebook's (a uuid, or where there is none a base-36 time and random part),
+  // a board's 12 hex; at most 96 word characters, "-" and ":")
+  if (typeof doc !== "string" || !/^[\w:-]{1,96}$/.test(doc)) throw new RangeError("sync rows: a document id of 1 to 96 word characters, - or :");
   return [SYNC_NB, "d:" + ns + ":" + doc];
 }
 

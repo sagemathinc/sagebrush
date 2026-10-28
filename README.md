@@ -166,7 +166,7 @@ The same functions are available from:
 | Node.js (`require("./engine/node").modsym`) | napi-rs | native addon; exact coefficients are `BigInt`s |
 | Rust (`sagebrush-modsym`) | - | the engine itself |
 | command line (`sagebrush`) | - | `sagebrush modsym N q [p] [--exact] [--threads T]` |
-| WebAssembly | wasm-bindgen | single-threaded; mod-p only for now |
+| WebAssembly (`engine/web`) | plain wasm32, JSON in and out | single-threaded |
 
 Every interface is multithreaded except WASM: `threads=0` means all cores.
 
@@ -190,7 +190,11 @@ With several GB of arrays in memory, Stop can lag about 0.1 s per GB: that is
 the JavaScript engine's own garbage collection, which can't be interrupted
 ("with several GB of arrays in memory, Stop can lag about 0.1 s per GB",
 William, Oct 25 2026). Sagebrush's own code still checks for Stop at least
-every 25 ms; the exception covers only the engine's garbage-collection pauses.
+every 250 ms; the exception covers only engine garbage-collection pauses
+longer than that.
+For now, rendering a plot to PNG in the command-line host can't be stopped
+mid-render: Stop takes effect once the render finishes. This lifts when
+interruptible rendering lands.
 
 Files: pyjs has no reference counting, so a file object isn't closed when
 its last reference goes. `with open(...)` or `.close()` is the portable form.
@@ -384,6 +388,20 @@ node scripts/build-engine.mjs         # the Rust engine as WebAssembly (about 20
 pnpm run build:cli                    # build/cli/pyjs.cjs, the single-file CLI (about 1 s)
 bun web/build.ts                      # the site in web/dist (about 1 s)
 pnpm test                             # about 30 s
+```
+
+The engine's Rust toolchain is pinned (`engine/rust-toolchain.toml`, 1.99.1;
+rustup installs it on the first `cargo` command under `engine/`), so that
+the committed `wasm/sagebrush-engine.wasm` is exactly what a fresh build
+gives: CI rebuilds it and fails on master pushes, dispatches and the
+schedule if they differ. Bumping the toolchain is a deliberate pull request
+that commits the rebuilt `wasm/` and `cdn/` files with their size marker.
+The module embeds the crate registry's paths, so a local build reproduces
+the committed bytes only with CI's path:
+
+```sh
+RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/home/runner/.cargo" node scripts/build-engine.mjs
+cmp wasm/sagebrush-engine.wasm <(git show HEAD:wasm/sagebrush-engine.wasm) && echo identical
 ```
 
 ### The notebook on your computer

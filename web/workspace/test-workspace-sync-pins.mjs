@@ -50,6 +50,8 @@ try {
   const results = await ev("window.run()");
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);
+  // (the long-task controls' rows, always printed, so every run's log carries their measured numbers: #219)
+  for (const [ok, what] of results) if (/^(the control:|the in-save task measure:)/.test(what)) console.log(`${ok ? "ok" : "FAIL"} (row): ${what}`);
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
   else {
     console.log(`ok: sync's pins, ${results.length} checks`);

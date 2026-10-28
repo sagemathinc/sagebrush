@@ -336,6 +336,187 @@ _a, _b = _two_callers(_exc_a, [_exc_b, None])
 check("two failing calls: B raises its own", _raised(_b or ("missing",), _exc_b), True)
 check("two failing calls: A raises its own", _raised(_a or ("missing",), _exc_a), True)
 
+# every native computation is an asking call (no-cliffs C-2c scope r2
+# section 2): guarded/run enter it on the calling thread before the handoff
+# and finish it there; a stale total is refreshed on that thread first, the
+# source never runs on a worker, and what it raises reaches that call
+_EC = [[0, 0, 1, -1, 0]]  # (an elliptic curve: aplist_many runs on a pool)
+
+
+def _native_calls():
+    return {
+        "call (guarded)": lambda: _native.call('{"fn": "progress_tables"}'),
+        "aplist_many (run, a pool)": lambda: _native.ap.aplist_many(_EC, 200, 4),
+    }
+
+
+def _outcome(f):
+    try:
+        return ("returned", f())
+    except BaseException as e:  # noqa: B902  (the point of the test)
+        return ("raised", e)
+
+
+for _name, _f in _native_calls().items():
+    _ran_on = []
+
+    def _recording(ran_on=_ran_on):
+        ran_on.append(threading.get_ident())
+        return _good
+    _stand_in(_recording)
+    _got = _outcome(_f)
+    check("%s: the source ran on the calling thread only" % _name, (_got[0], set(_ran_on)), ("returned", {threading.get_ident()}))
+    for _kind in (KeyboardInterrupt, SystemExit):
+        _exc = _kind()
+        _stand_in(_raising(_exc))
+        check("%s: a %s from the source reaches that call, the same object" % (_name, _kind.__name__), _raised(_outcome(_f), _exc), True)
+    # an ordinary failure leaves the total unreadable, so stale on every
+    # read: a worker's read would run the source if it could ask (it can't)
+    _failed_on = []
+
+    def _failing(failed_on=_failed_on):
+        failed_on.append(threading.get_ident())
+        raise OSError("unreadable")
+    _stand_in(_failing)
+    _got = _outcome(_f)
+    check("%s: an ordinary failure of the source is an unreadable total, not an error, and no worker asked" % _name, (_got[0], set(_failed_on)), ("returned", {threading.get_ident()}))
+
+
+def _two_native_callers(f):
+    """Two threads run the same native call at once, each with its own
+    control exception from the source: each raises its own."""
+    excs = {"A": KeyboardInterrupt(), "B": SystemExit()}
+    both_in = threading.Barrier(2)
+
+    def source():
+        who = threading.current_thread().name
+        try:
+            both_in.wait(5)
+        except threading.BrokenBarrierError:
+            pass
+        raise excs[who]
+
+    _stand_in(source)
+    out = {}
+    ts = [threading.Thread(target=lambda w=w: out.__setitem__(w, _outcome(f)), name=w) for w in ("A", "B")]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(20)
+    return all(_raised(out.get(w, ("missing",)), excs[w]) for w in ("A", "B"))
+
+
+for _name, _f in _native_calls().items():
+    check("%s: two simultaneous callers each get their own exception" % _name, _two_native_callers(_f), True)
+
+# a retained control exception is delivered on EVERY exit of the body: a
+# Rust panic and a Stop too (astra2's CORR-C2CI-3), and never to the next
+# call; without one, a body panic and a Stop raise as before.  The hook is
+# in wheels built with the test-hooks feature only (the VM runs; CI's
+# release-mode wheel skips these rows).
+if hasattr(_native, "_test_guarded"):
+    for _body in ("panic", "stop", "ok"):
+        _exc = SystemExit()
+        _stand_in(_raising(_exc))
+        check("_test_guarded(%s): the retained SystemExit is delivered, the same object" % _body, _raised(_outcome(lambda b=_body: _native._test_guarded(b)), _exc), True)
+        _stand_in(lambda: _good)
+        check("_test_guarded(%s): and not to the next call" % _body, _outcome(lambda: _native._test_guarded("ok")), ("returned", 1))
+    _got = _outcome(lambda: _native._test_guarded("panic"))
+    check("a body panic with no control exception still raises (PanicException)", (_got[0], type(_got[1]).__name__), ("raised", "PanicException"))
+    _got = _outcome(lambda: _native._test_guarded("stop"))
+    check("a Stop with no control exception raises KeyboardInterrupt", (_got[0], isinstance(_got[1], KeyboardInterrupt)), ("raised", True))
+    _stand_in(_raising(OSError("unreadable")))
+    _got = _outcome(lambda: _native._test_guarded("panic"))
+    check("an ordinary failure of the source is unreadable: the body's panic is what raises", (_got[0], type(_got[1]).__name__), ("raised", "PanicException"))
+    # C-2c-i hot path (scope r3): the outer entry always refreshes a stale
+    # total (guarded's own locked total(), whatever the wrapper's refresh does)
+    _exc = SystemExit()
+    _stand_in(_raising(_exc))
+    _t2.sleep(0.15)
+    check("the outer entry refreshes a stale total: the source's SystemExit is delivered", _raised(_outcome(lambda: _native._test_guarded("ok")), _exc), True)
+    # astra2's two-owner schedule, causally ordered (HP-E1): owner A
+    # refreshes at entry and is held at a gate; owner B, on another thread,
+    # then publishes Unreadable (the total is None), and only after B's call
+    # returned is A released into one wrapper entry on its own thread, with
+    # no admission after it.  The source trace must be A, B, A; A raises its
+    # own KeyboardInterrupt, once; B gets nothing of A's.
+    _excA, _trace2 = KeyboardInterrupt(), []
+
+    def _two_owner_source():
+        who = threading.current_thread().name
+        _trace2.append(who)
+        if who == "A":
+            if _trace2.count("A") == 1:
+                return _good
+            raise _excA
+        raise OSError("B's source is unreadable")
+
+    _stand_in(_two_owner_source)
+    _native._test_gate(False)
+    _t2.sleep(0.15)
+    _out, _a_in = {}, threading.Event()
+
+    def _owner_a():
+        _out["A"] = _outcome(lambda: _native._test_guarded("nested_gated"))
+
+    def _owner_b():
+        _deadline = _t2.time() + 10
+        while _trace2[:1] != ["A"] and _t2.time() < _deadline:  # A has refreshed at entry
+            _t2.sleep(0.001)
+        _t2.sleep(0.11)  # (so that B's own entry finds the total stale and asks)
+        _out["B"] = _outcome(lambda: _native._test_guarded("ok"))
+        _out["trace_at_release"] = list(_trace2)
+        _native._test_gate(True)  # only now may A make its nested entry
+
+    _ta = threading.Thread(target=_owner_a, name="A", daemon=True)
+    _tb = threading.Thread(target=_owner_b, name="B", daemon=True)
+    _ta.start()
+    _tb.start()
+    _ta.join(30)
+    _tb.join(30)
+    _native._test_gate(False)
+    check("two owners: B's Unreadable was published before A was released", _out.get("trace_at_release"), ["A", "B"])
+    check("two owners: the source trace is A, B, A (A's nested entry asked A's source)", _trace2, ["A", "B", "A"])
+    check("two owners: A raises its own KeyboardInterrupt, the same object", _raised(_out.get("A", ("missing",)), _excA), True)
+    check("two owners: B got nothing of A's", _out.get("B"), ("returned", 1))
+    _stand_in(lambda: _good)
+    check("two owners: A's exception is not delivered again", _outcome(lambda: _native._test_guarded("ok")), ("returned", 1))
+    # a real reentrant asking call (HP-E2): the outer guarded call's source
+    # (ASKING 1) itself makes a guarded call (ASKING 2), whose entry reads an
+    # unreadable total (None) and whose body makes one wrapper entry on this,
+    # the owner, thread: the predicate-backed refresh there asks the source
+    # (at ASKING 2), which raises SystemExit; the inner call doesn't raise it
+    # (not the outermost), the outer one does, once; nothing leaks to the
+    # next call or to a reused pool worker
+    _excS, _trace3, _depth = SystemExit(), [], [0]
+
+    def _reentrant_source():
+        if _depth[0] == 0:
+            _trace3.append("outer")
+            _depth[0] = 1
+            try:
+                _trace3.append(("inner call", _outcome(lambda: _native._test_guarded("nested_now"))))
+            finally:
+                _depth[0] = 0
+            return _good
+        if "inner entry" not in _trace3:
+            _trace3.append("inner entry")
+            raise OSError("unreadable inside the reentrant call")
+        _trace3.append("inner wrapper entry")
+        raise _excS
+
+    _stand_in(_reentrant_source)
+    _t2.sleep(0.15)
+    _got = _outcome(lambda: _native._test_guarded("ok"))
+    check("reentrant: the source ran at ASKING 1, then 2 (entry), then 2 (the wrapper entry)", _trace3, ["outer", "inner entry", "inner wrapper entry", ("inner call", ("returned", 2))])
+    check("reentrant: the outer call raises the SystemExit, the same object", _raised(_got, _excS), True)
+    _stand_in(lambda: _good)
+    check("reentrant: back at depth 0, the next call raises nothing", _outcome(lambda: _native._test_guarded("ok")), ("returned", 1))
+    _f = _native_calls().get("aplist_many (run, a pool)")
+    check("reentrant: a pool call afterwards (reused workers) raises nothing", _outcome(_f)[0] if _f else "missing", "returned")
+else:
+    print("test_capacity: the _test_guarded rows need a test-hooks build (skipped)")
+
 _stand_in(_source)
 _snap = _native.ledger_snapshot()
 check("the next read answers again", (_snap["total"], _snap["status"], _snap["certified"]), (16 * GiB, "observed", True))

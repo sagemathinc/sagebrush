@@ -1,0 +1,20 @@
+{
+ "comment": "William's waivers of the 250 ms Stop bound (S-delta Stop-250 r4 433ed0cf), used only by web/interrupt-classify.mjs withWaiver. A record covers only its exact scope (case, host, the case's declared call), and only cells honoured late; such a row is WAIVED, never a pass. Only active records live here: the fixing change REMOVES its record. Every record carries William's words verbatim.",
+ "records": [
+  {
+   "id": "e13g-cli-png-waiver-20261027",
+   "granted": "2026-10-27T13:08-07:00",
+   "by": "William",
+   "words": "Yes: scoped waiver for CLI PNG rendering only, until the interruptible-render fix lands (my recommendation; otherwise the Stop-limit update can't land until the fix does)",
+   "scope": {
+    "case": "E13g",
+    "host": "cli",
+    "call": "_sbraster.render"
+   },
+   "owner": "board/plot",
+   "follow_up": "plan-interruptible-raster r11 (70001ef90f8db28396c2e3e3f986be73bd63f305c096acd1c343be525708e37e), ALL CLEAR Oct 27",
+   "ends_when": "the interruptible-render fix (interruptible-raster) lands",
+   "ended": false
+  }
+ ]
+}
