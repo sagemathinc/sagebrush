@@ -337,6 +337,11 @@ trait Source: Read {
     }
 }
 
+/// The staging peak bound (see Lines): staged bytes, piece size.
+fn staging_bound(staged: usize, piece: usize) -> usize {
+    2 * staged + piece + 5 * READ_CHUNK + 96 + 72 * staged.div_ceil(piece)
+}
+
 /// Newline-framed lines from a source, its own buffer kept across short
 /// reads, EINTR retried.  The lines taken are passed by a head cursor, not
 /// drained from the front each time; the buffer is compacted only when the
@@ -346,10 +351,17 @@ trait Source: Read {
 /// any compaction or release, only at the next call (the borrow checker keeps
 /// a `get` slice from outliving it).
 ///
-/// Memory (daybreak2's PR B r5 ruling): a line that doesn't fit the buffer's
-/// capacity is read into READ_CHUNK pieces, and laid out once at its exact
-/// size when it ends, so a cold long line's live bytes stay within twice its
-/// length plus a few pieces, with no regrowth copies; the buffer is then kept
+/// Memory (daybreak2's PR B r5 ruling, the bound made exact for astra's
+/// R5-2): a line that doesn't fit the buffer's capacity is read into pieces
+/// of P = READ_CHUNK bytes, and laid out once at its exact size when it ends,
+/// with no regrowth copies.  For a cold line staging L' bytes (the line, its
+/// newline, and at most READ_CHUNK = C bytes read after it), every input
+/// allocation together (buffer, pieces, the piece list's own storage and the
+/// moments where old and new allocations coexist) stays within
+/// `staging_bound(L', P)` = 2 L' + P + 5 C + 96 + 72 ceil(L'/P): twice the
+/// line, plus a few quanta, plus 72 bytes per piece of list metadata (24 per
+/// list entry, a doubling list at most twice the pieces, and its old and new
+/// allocations once together), about 0.11% of L' when P is 64 KiB; the buffer is then kept
 /// for the requests that follow, and let go (to no capacity) only when it is
 /// all consumed and no input is readable for IDLE_RELEASE_LIMIT.  A partial
 /// line or a backlog is never let go.
@@ -362,11 +374,14 @@ struct Lines<R: Source> {
     scanned: usize,
     eof: bool,
     /// A long line's pieces, in order, until its newline (or the end) arrives:
-    /// each of READ_CHUNK capacity, filled before the next is begun (short
-    /// reads coalesce, so a line of L bytes takes at most L/READ_CHUNK + 1
-    /// pieces), and the bytes in them.
+    /// each of `piece` capacity (READ_CHUNK; smaller only in tests), filled
+    /// before the next is begun (short reads coalesce, so L staged bytes take
+    /// at most ceil(L/piece) pieces); the bytes in them, and the pieces'
+    /// capacities (kept as running totals, so no accounting scans the list).
     stage: Vec<Vec<u8>>,
     staged: usize,
+    stage_caps: usize,
+    piece: usize,
     /// Large buffers let go after an idle wait (reported in _serve_stats).
     releases: u64,
     /// Long lines laid out from pieces (tests: a warm buffer takes none).
@@ -377,7 +392,7 @@ struct Lines<R: Source> {
 
 impl<R: Source> Lines<R> {
     fn new(f: R) -> Lines<R> {
-        Lines { f, buf: Vec::new(), head: 0, taken: 0, scanned: 0, eof: false, stage: Vec::new(), staged: 0, releases: 0, flattens: 0, peak: 0 }
+        Lines { f, buf: Vec::new(), head: 0, taken: 0, scanned: 0, eof: false, stage: Vec::new(), staged: 0, stage_caps: 0, piece: READ_CHUNK, releases: 0, flattens: 0, peak: 0 }
     }
 
     /// The bytes of the range `next` returned last.
@@ -388,9 +403,7 @@ impl<R: Source> Lines<R> {
     /// Every byte of input storage held now: the buffer's capacity, the
     /// pieces' capacities and the piece list's own (reported in _serve_stats).
     fn capacity(&self) -> usize {
-        self.buf.capacity()
-            + self.stage.iter().map(Vec::capacity).sum::<usize>()
-            + self.stage.capacity() * std::mem::size_of::<Vec<u8>>()
+        self.buf.capacity() + self.stage_caps + self.stage.capacity() * std::mem::size_of::<Vec<u8>>()
     }
 
     fn note_peak(&mut self) {
@@ -398,15 +411,22 @@ impl<R: Source> Lines<R> {
     }
 
     /// Append to the staged line, filling the last piece before beginning
-    /// another (each of READ_CHUNK capacity).
+    /// another.  The piece list grows by doubling, explicitly, with the moment
+    /// its old and new allocations coexist counted first.
     fn stage_bytes(&mut self, mut bytes: &[u8]) {
         while !bytes.is_empty() {
-            if self.stage.last().is_none_or(|p| p.len() == READ_CHUNK) {
-                self.stage.push(Vec::with_capacity(READ_CHUNK));
+            if self.stage.last().is_none_or(|p| p.len() == self.piece) {
+                if self.stage.len() == self.stage.capacity() {
+                    let grown = (2 * self.stage.capacity()).max(4);
+                    self.peak = self.peak.max(self.capacity() + grown * std::mem::size_of::<Vec<u8>>());
+                    self.stage.reserve_exact(grown - self.stage.len());
+                }
+                self.stage.push(Vec::with_capacity(self.piece));
+                self.stage_caps += self.piece;
                 self.note_peak();
             }
             let last = self.stage.last_mut().expect("a piece");
-            let k = (READ_CHUNK - last.len()).min(bytes.len());
+            let k = (self.piece - last.len()).min(bytes.len());
             last.extend_from_slice(&bytes[..k]);
             self.staged += k;
             bytes = &bytes[k..];
@@ -462,8 +482,9 @@ impl<R: Source> Lines<R> {
         self.peak = self.peak.max(self.capacity() + flat.capacity());
         for p in std::mem::take(&mut self.stage) {
             flat.extend_from_slice(&p);
-        }  // (the pieces and the piece list itself are let go here, all of them)
+        }  // (each piece is let go as it is copied, and the piece list itself after the last)
         self.staged = 0;
+        self.stage_caps = 0;
         self.buf = flat;
         self.head = 0;
         self.flattens += 1;
@@ -1077,7 +1098,8 @@ mod tests {
         assert_eq!(r.len(), 32 << 20);
         assert!(lines.get(r).iter().all(|&b| b == b'x'));
         assert_eq!(lines.flattens, 1);
-        assert!(lines.peak <= 2 * (32 << 20) + 4 * READ_CHUNK, "a peak of {} bytes", lines.peak);
+        let staged = (32 << 20) + 1 + READ_CHUNK;  // (the line, its newline, at most one read after it)
+        assert!(lines.peak <= staging_bound(staged, READ_CHUNK), "a peak of {} bytes", lines.peak);
         assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 1}");
         assert_eq!(take(&mut lines).unwrap(), b"{\"id\": 2}");
         assert_eq!(take(&mut lines).unwrap(), b"last, no newline");
@@ -1171,11 +1193,28 @@ mod tests {
         data.extend_from_slice(&line(10, b'c'));
         let mut lines = Lines::new(NoWait(Chunks { data, at: 0, sizes: vec![1], k: 0, eintr: false }));
         assert_eq!(take(&mut lines).unwrap(), vec![b'a'; n]);
-        assert!(lines.peak <= 2 * n + 4 * READ_CHUNK, "a peak of {} bytes for a {} byte line", lines.peak, n);
+        assert!(lines.peak <= staging_bound(n + 1, READ_CHUNK), "a peak of {} bytes for a {} byte line", lines.peak, n);
         assert!(lines.stage.capacity() == 0 && lines.stage.is_empty(), "the piece list kept: {}", lines.stage.capacity());
         assert_eq!(take(&mut lines).unwrap(), vec![b'c'; 10]);
         assert_eq!(lines.releases, 1);
         assert!(lines.capacity() <= READ_CHUNK, "kept {} bytes of input storage", lines.capacity());
+    }
+
+    #[test]
+    fn lines_staging_bound_small_pieces() {
+        // (astra's R5-2: with 16-byte pieces a 1 MiB line takes 65 537 of them, so the piece list's metadata,
+        // 24 bytes a piece and a doubling list, is the largest term after the line itself: the full accounted
+        // peak stays within staging_bound, and the flatten's moment (flat, pieces and list together) is counted)
+        let n = 1 << 20;
+        let mut lines = Lines::new(Chunks { data: line(n, b'q'), at: 0, sizes: vec![1000, 7, 4096], k: 0, eintr: false });
+        lines.piece = 16;
+        assert_eq!(take(&mut lines).unwrap(), vec![b'q'; n]);
+        assert_eq!(lines.flattens, 1);
+        let pieces = (n + 1).div_ceil(16);
+        assert!(lines.peak <= staging_bound(n + 1, 16), "a peak of {} over {}", lines.peak, staging_bound(n + 1, 16));
+        let at_flatten = (n + 1 + READ_CHUNK) + pieces * 16 + pieces * std::mem::size_of::<Vec<u8>>();
+        assert!(lines.peak >= at_flatten, "the flatten's moment not counted: {} < {}", lines.peak, at_flatten);
+        assert!(lines.stage.capacity() == 0 && lines.stage_caps == 0);
     }
 
     #[test]
