@@ -37,13 +37,31 @@ const bws = new WebSocket(version.webSocketDebuggerUrl);
 await new Promise((r) => (bws.onopen = r));
 let n = 0;
 const waiting = new Map();
-bws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
-const raw = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); bws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+// (a JavaScript dialog a page opens (alert, confirm, beforeunload) would hold every later call to that page: said,
+// and dismissed, so the case fails or goes on instead of the run hanging; #243's CI)
+bws.onmessage = (e) => {
+  const m = JSON.parse(e.data);
+  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  else if (m.method === "Page.javascriptDialogOpening") {
+    console.log(`  (a page opened a JS ${m.params?.type} dialog: ${JSON.stringify(String(m.params?.message ?? "").slice(0, 200))}; dismissed)`);
+    raw("Page.handleJavaScriptDialog", { accept: true }, m.sessionId).catch(() => {});
+  }
+};
+// (every call has a deadline, 60 s unless given: a call the browser never answers (a wedged page, a browser gone)
+// fails its case, naming the method, instead of hanging the run until its CI job is cancelled; #243's CI)
+const raw = (method, params = {}, sessionId, ms = 60_000) => new Promise((r, no) => {
+  const id = ++n;
+  const t = setTimeout(() => { if (waiting.delete(id)) no(new Error(`CDP ${method} didn't answer within ${ms / 1000} s`)); }, ms);
+  waiting.set(id, (v) => { clearTimeout(t); r(v); });
+  bws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+});
 async function newPage(contextId) {
   const { targetId } = await raw("Target.createTarget", { url: "about:blank", ...(contextId ? { browserContextId: contextId } : {}) });
   const { sessionId } = await raw("Target.attachToTarget", { targetId, flatten: true });
-  const send = (method, params = {}) => raw(method, params, sessionId);
-  const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
+  const send = (method, params = {}, ms) => raw(method, params, sessionId, ms);
+  // (dialogs reported for this page: see bws.onmessage)
+  await send("Page.enable");
+  const ev = async (expression, ms) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
   const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } throw new Error("timeout: " + expr); };
   const key = async (k, modifiers = 0) => {
     const code = k === " " ? "Space" : k;
@@ -649,7 +667,7 @@ try {
         for (let k = i; k < Math.min(${N}, i + 500); k++) batch.push(w.putFile("/many/f" + k + ".txt", one));
         await Promise.all(batch);
       }
-    })()`);
+    })()`, 900_000);
     console.log(`  (100,000 files written in ${((Date.now() - t0) / 1000).toFixed(0)} s)`);
     await ev("(() => { const t = window.sagebrush.shareTest; t.reads = []; t.onRead = (p) => { t.reads.push(p); }; })()");
     const t1 = Date.now();
@@ -1159,7 +1177,10 @@ try {
 
     // D2 (last: it crashes the page): the answer lost, the page crashed at once, then a reload (with another
     // writer's attempt merged by the awaited save, astra3's L1: the kept attempt is the one sent and kept)
+    // (the crash chain says where it is, so a stall shows its step: #243's CI)
+    const chainAt = (step) => console.log(`  (crash chain: ${step}, ${new Date().toISOString().slice(11, 19)}Z)`);
     await block("D2", async () => {
+    chainAt("D2 starts");
     await ev("document.querySelector('#filemenu [data-f=new]').click()");
     await until("document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value && !window.sagebrush.notebook.snapshot().share_id");
     await setFirst(`T = 2  # D2 ${Date.now()}`);
@@ -1178,8 +1199,10 @@ try {
     await until("!!window.__made", 60000);
     const made2 = await ev("window.__made");
     // (a crashed page never answers Page.crash: not awaited, or the run hangs, as run 3 did)
-    void p.send("Page.crash");
+    chainAt("D2: the page crashes");
+    void p.send("Page.crash").catch(() => {});
     await sleep(1000);
+    chainAt("D2: a new page");
     const q = await newPage();
     await q.send("Page.navigate", { url: dev.site + "/" });
     await q.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
@@ -1192,6 +1215,7 @@ try {
     const id2 = await q.ev("window.sagebrush.notebook.snapshot().share_id ?? null");
     const n2b = await q.ev("(async () => (await (await fetch('/api/share/mine')).json()).collections.length)()");
     ok(made2?.collection && made2.sent === "dddddddddddddddddddddddddddddddd" && att2 === "dddddddddddddddddddddddddddddddd" && id2 === made2.collection && n2b === n2 + 1, `D2 (sent ${made2?.sent?.slice(0, 6)}…, kept ${att2?.slice(0, 6)}…) the answer lost, the page crashed at once, a reload, the same upload: one share, the one the lost answer made (attempt kept: ${!!att2}, share ${id2} vs ${made2?.collection}, shares +${n2b - n2})`);
+      chainAt("D8 starts");
       // D8 (astra3's r2 note 1), in the reloaded page: another device's attempt saved AFTER the final store read,
       // as the share request goes; the answer lost; a crash; a reload; the retry sends this device's recorded
       // attempt, so the share that request made is found, never a second one
@@ -1217,8 +1241,10 @@ try {
       await q.ev("document.querySelector('#sharetitlein').value = 'D8'; document.querySelector('#shareupload').click()");
       await q.until("!!window.__made", 60000);
       const made8 = await q.ev("window.__made");
-      void q.send("Page.crash");
+      chainAt("D8: the page crashes");
+      void q.send("Page.crash").catch(() => {});
       await sleep(1000);
+      chainAt("D8: a new page");
       const q2 = await newPage();
       await q2.send("Page.navigate", { url: dev.site + "/" });
       await q2.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
@@ -1251,7 +1277,8 @@ try {
       };
       const sharesIn = (P) => P.ev("(async () => (await (await fetch('/api/share/mine')).json()).collections.length)()");
       const reopen = async (P) => {
-        void P.send("Page.crash");
+        chainAt("reopen: the page crashes");
+        void P.send("Page.crash").catch(() => {});
         await sleep(1000);
         const Q = await newPage();
         await Q.send("Page.navigate", { url: dev.site + "/" });
@@ -1261,6 +1288,7 @@ try {
       const storeOther = (att) => `(async () => { const id = localStorage.getItem('sagebrush-current'); const db = await new Promise((ok, no) => { const r = indexedDB.open('sagebrush'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }); await new Promise((ok, no) => { const tx = db.transaction('notebooks', 'readwrite'), st = tx.objectStore('notebooks'); const g = st.get(id); g.onsuccess = () => st.put({ ...g.result, share_attempt: '${att}', rev: (g.result.rev ?? 0) + 1, updated: Date.now() }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); }); db.close(); })()`;
       const recordSentIn = (P) => P.ev(`(() => { const f = window.fetch; window.__attempts = []; window.fetch = async (u, o) => { if (String(u).endsWith("/api/share/first-upload") && o?.method === "POST") window.__attempts.push(JSON.parse(o.body).attempt); return f(u, o); }; })()`);
 
+      chainAt("L1a starts");
       // L1a (astra3's and daybreak3's r3 note 1): the answer delivered (200), another device's attempt stored during
       // the request, then the share's save fails, a crash, a reload: the retry sends the recorded attempt: one share
       await nbIn(q2, "L1a");
@@ -1295,6 +1323,7 @@ try {
       ok(gotA?.collection && recA.includes(gotA.sent) && !storedA.share_id && storedA.share_attempt === otherA && sentA.length === 1 && sentA[0] === gotA.sent && idA === gotA.collection && nA2 === nA + 1,
         `L1a a delivered 200 whose share couldn't be saved, another device's attempt stored meanwhile, a crash: the record was kept (${recA.includes(gotA?.sent ?? "?")}), the retry sent it (${sentA.map((x) => x.slice(0, 6))} vs ${gotA?.sent?.slice(0, 6)}) and found its share (${idA} vs ${gotA?.collection}); shares +${nA2 - nA}`);
 
+      chainAt("L1b starts");
       // L1b: a 409 adoption, another device's attempt stored during that request, a crash before its save: the
       // retry recovers that share (without the other device's attempt, the notebook's own still names the first
       // share, so a page that dropped its record would pass too)
@@ -1328,6 +1357,7 @@ try {
 
       // (this device's records, raw)
       const regIn = async (P) => JSON.stringify(JSON.parse((await P.ev("localStorage.getItem('sagebrush-share-sent')")) ?? "{}"));
+      chainAt("R3 starts");
       // R3 (daybreak3's CORR-UPLOAD-R4-3): a 200 whose share_id save the notebook's store refuses; the record's
       // settling held at its save, while the page switches notebooks and is held between them (no store
       // attached); released there: the record is kept, as only the origin's own store can prove the share saved.
@@ -1367,6 +1397,7 @@ try {
             : `R3b the share saved, its settling released while the page had no notebook attached: the record goes (${!reg3.includes(r3?.sent ?? "?")}), proved by the notebook's own store`);
       }
 
+      chainAt("R1 starts");
       // R1 (astra3's CORR-UPLOAD-IMPL-ASTRA-3, daybreak3's CORR-UPLOAD-R4-1): two tabs, two notebooks recording at
       // once: tab A held inside its record's change (its read of the notebooks' keys), tab B's record waits for it
       // (no request until A's is written); both sent, both answers lost: both records kept; A settled: B's kept
@@ -1422,6 +1453,7 @@ try {
       await A.ev("window.fetch = window.__f0 ?? window.fetch");
       await raw("Target.closeTarget", { targetId: B.targetId });
 
+      chainAt("R4 starts");
       // R4 (daybreak3's CORR-UPLOAD-R5-4): ONE notebook in two tabs of this browser, one account. A is held inside
       // its record's change, past its last store check; B, which looked for a record before A wrote one, stores
       // another attempt and reaches its record after A's: B must neither replace A's record nor send its attempt.
