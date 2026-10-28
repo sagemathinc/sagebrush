@@ -416,7 +416,7 @@ import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, docSyncOrigin, docSyncAllowed } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
@@ -2479,6 +2479,42 @@ const wsReady = (async () => {
   }
   finally { wsSettled = true; }
 })();
+// (sync 2c-3, DEV's switch for notebooks' contents (web/workspace/doc-sync-switch.ts): on any origin but DEV's own,
+// nothing at all is asked or started here.  On DEV: this page's sync owner started; then, only if the server lets this
+// account sync and its client runs, evaluated afresh on every load: the journal turned on (lasting for this browser;
+// the Sync panel says so), notebooks and boards registered as its writers, DOC_SYNC on, and a DocSync handed to the
+// sync owner.  The open notebook is kept read-only while its saves finish and the journal turns on, then opened again
+// through it.  Any doubt, any failure: off, nothing more done)
+const docSyncReady = (async () => {
+  if (!docSyncOrigin(location.origin)) return false;
+  const w = await wsReady;
+  if (!w) return false;
+  const owner = SyncOwner.of(w).start();
+  const allowed = await docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning() });
+  if (!allowed) return false;
+  registerJournalWriter("notebooks");
+  registerJournalWriter("boards");
+  let on = false;
+  const wasReadOnly = !!nb.store?.viewOnly || !!w.quarantined;
+  nb.setReadOnly(true);
+  try {
+    nb.flush();
+    await nb.saved();
+    on = await w.activateJournal();
+  } catch (e) {
+    console.warn("sync: the journal not turned on:", e);
+  }
+  if (!on) { nb.setReadOnly(wasReadOnly); return false; }
+  const mod = await loadHistory();
+  const docs = new DocSync();
+  mod.DOC_SYNC.on = true;
+  mod.DOC_SYNC.saved = (id) => docs.kick(id);
+  owner.setDocs(docs);
+  // (the notebook shown, if it was opened before the journal turned on: opened again through it, as the writer)
+  if (current.id && current.kind === "browser" && !nb.store?.journaled) await openId(current.id).catch((e) => console.warn("sync: the notebook not reopened:", e));
+  nb.setReadOnly(!!nb.store?.viewOnly || !!w.quarantined);
+  return true;
+})().catch((e) => { console.warn("sync: notebooks' switch:", e); return false; });
 // (once this device's journal is activated (plan-sync-slice2-client r4 §1a, web/workspace/api.ts activateJournal), every
 // notebook is written through it: T1 in its history, then T2 (notebook/journal.js); before, as before.  Told by the
 // notebooks' fence, read as each store is made: its phase "journal" is what refuses every other writer, so a store

@@ -82,7 +82,10 @@ export function prune(store, upTo) {
 
 /** Whether this page syncs notebooks' contents (DEV's docsync switch, set by the page once the journal is active): a
  * writer's load then starts a notebook's synced history (2c-2). */
-export const DOC_SYNC = { on: false };
+export const DOC_SYNC = { on: false, saved: null };
+// (`saved(id)`: told after a synced notebook's save is kept, and after its synced history starts, so the page's DocSync
+// sends it (DEV's switch, web/workspace/doc-sync-switch.ts); null: nobody to tell)
+const toldSaved = (id) => { try { DOC_SYNC.saved?.(id); } catch (e) { console.warn("sync: a notebook's save not told:", e); } };
 // (a history's patches made by `client` from now on (a synced document's slot), each id after `last` (the slot's last
 // patch id, or null): ids keep rising across reloads and clock changes.  Here, not in patch-history.js, so the no-sync
 // board build doesn't grow (plan r4 F3))
@@ -309,7 +312,7 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
       this.patches.start = { n, client, time: env.time };
       try { r = await this.patches.appended(env.time); } finally { this.patches.start = undefined; }
     }
-    if (r.j !== undefined) { this.synced = { n, from_j: r.j }; this.watchRemote(client); return true; }
+    if (r.j !== undefined) { this.synced = { n, from_j: r.j }; this.watchRemote(client); toldSaved(this.id); return true; }
     this.history.close();
     this.patches.id = old;
     this.history.clientId = was.client; delete this.history.sessionOptions; this.history.lastMs = was.lastMs;
@@ -437,6 +440,7 @@ const makeJournalStore = (IdbStore, journalPatchStore) => class JournalStore ext
       const out = await super.save(doc, { ...opts, journal: { j: r.j, hash, unjournaled: mark } });
       if (out && typeof out === "object" && out.saved) {
         await prune(this.patches, r.j);
+        if (this.synced) toldSaved(this.id);
         if (mark === "too-large") return { ...out, saved: SAVED_TOO_LARGE, unjournaled: mark };
       }
       return out;
