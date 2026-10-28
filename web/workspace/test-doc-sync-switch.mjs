@@ -56,15 +56,24 @@ check(DOC_SYNC_NOTE.some((t) => /lasting for this browser/.test(t)) && DOC_SYNC_
 
 // ---- from the sources: no reachable override
 const files = [];
+// (the authored sources only.  Skipped by name: dependencies (node_modules) and dot-directories anywhere, and these
+// GENERATED roots of web/, each gitignored build output, never authored: dist (the built site, root .gitignore) and
+// site/public (the site's built copy of the page and bundles, web/site/.gitignore): a build before this test (CI's
+// checks line) leaves copies there that would count as callers.  Nothing else is skipped, so an activation path added
+// anywhere else, site/ included, is counted)
+const GENERATED = ["dist", "site/public"];
+const skipped = [];
 (function walk(d) {
   for (const n of readdirSync(d)) {
-    if (n === "node_modules" || n === "dist" || n.startsWith(".")) continue;
+    if (n === "node_modules" || n.startsWith(".")) continue;
     const p = join(d, n);
+    if (GENERATED.includes(relative(web, p))) { skipped.push(relative(web, p)); continue; }
     if (statSync(p).isDirectory()) walk(p);
     else if (/\.(ts|js|mjs|html)$/.test(n) && !/^test-|\.page\.js$|-cases\.js$/.test(n)) files.push(p);
   }
 })(web);
 const src = (p) => readFileSync(p, "utf8");
+check(J(GENERATED) === J(["dist", "site/public"]) && /^public\/$/m.test(readFileSync(join(web, "site", ".gitignore"), "utf8")) && skipped.every((r) => GENERATED.includes(r)), "the census skips exactly the two generated roots it names, web/dist and web/site/public (gitignored build output), nothing else: skipped " + J(skipped));
 const using = (re) => files.filter((p) => re.test(src(p))).map((p) => relative(web, p)).sort();
 check(J(using(/DOC_SYNC_ORIGINS/)) === J(["workspace/doc-sync-switch.ts", "workspace/index.ts"]), "DOC_SYNC_ORIGINS named only where it is defined and re-exported: " + J(using(/DOC_SYNC_ORIGINS/)));
 const sw = src(join(here, "doc-sync-switch.ts"));

@@ -38,11 +38,6 @@ const site = mkdtempSync(join(tmpdir(), "sb-sc-site-"));
 const script = execFileSync("bun", ["build", join(here, "../sync/test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8", maxBuffer: 64 << 20 });
 execFileSync("bun", ["build", join(here, "index.ts"), "--outdir", site, "--entry-naming", "ws.js", "--target", "browser", "--format", "esm"], { stdio: "inherit" });
 copyFileSync(join(here, "sync-client-cases.js"), join(site, "cases.js"));
-// (DEV's switch, s5DocsOwners: the notebook's history bundle, as the notebook page loads it (sagebrush-history.js),
-// and device B's page, served on a second origin (its own IndexedDB, Web Locks and channels))
-execFileSync("bun", ["build", join(here, "../notebook/history.js"), "--outdir", site, "--entry-naming", "nb.js", "--target", "browser", "--format", "esm"], { stdio: "inherit" });
-copyFileSync(join(here, "sync-client-device-b.page.js"), join(site, "b.js"));
-writeFileSync(join(site, "b.html"), `<!doctype html><meta charset="utf-8"><title>sync client test: device B</title><script type="module" src="./b.js"></script>`);
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>sync client test</title><script>window.ACCOUNTS = ${JSON.stringify(ACCOUNTS)}; window.FULL = ${JSON.stringify(FULL)}; window.SMALL = ${JSON.stringify(SMALL)};</script><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
 
 const mf = new Miniflare(convertV4MiniflareOptions({
@@ -173,7 +168,6 @@ async function control(body) {
     case "closeAll": { const n = closers.size; for (const f of [...closers]) f(1000); return { closed: n }; }
     case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
     case "probe": return probe(body);
-    case "bOrigin": return { origin: bOrigin };
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
     // open socket: the client's side is tested by injecting them here; the server's own are dropped unless
     // ctl.serverNotices)
@@ -190,7 +184,7 @@ const server = createServer(async (req, res) => {
   const u = new URL(req.url, "http://x");
   const p = u.pathname;
   try {
-    if (p === "/" || p === "/ws.js" || p === "/cases.js" || p === "/nb.js" || p === "/b.js" || p === "/b.html") {
+    if (p === "/" || p === "/ws.js" || p === "/cases.js") {
       res.writeHead(200, { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" });
       return res.end(readFileSync(join(site, p === "/" ? "index.html" : p.slice(1))));
     }
@@ -387,11 +381,6 @@ server.on("upgrade", async (req, socket, head) => {
 });
 await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
 const origin = `http://127.0.0.1:${server.address().port}`;
-// (the same front on a second loopback address: device B's origin (s5DocsOwners))
-const serverB = createServer((req, res) => server.emit("request", req, res));
-serverB.on("upgrade", (req, socket, head) => server.emit("upgrade", req, socket, head));
-await new Promise((ok) => serverB.listen(0, "127.0.0.2", ok));
-const bOrigin = `http://127.0.0.2:${serverB.address().port}`;
 
 // ---- Chrome, driven over the DevTools protocol, as the other workspace tests are
 
@@ -450,7 +439,6 @@ try {
   chrome.kill();
   await Promise.race([exited, new Promise((ok) => setTimeout(ok, 5000))]);
   server.close();
-  serverB.close();
   await mf.dispose().catch(() => {});
   await sleep(200);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

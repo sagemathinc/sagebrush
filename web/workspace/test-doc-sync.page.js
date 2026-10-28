@@ -234,4 +234,83 @@ T.editOnly = async (id, cells) => {
   return typeof out === "string" ? out : !!out?.saved;
 };
 T.warnings = () => T.log.filter((x) => typeof x === "string" && x.startsWith("warn: "));
+
+// ---- the real owners (astra's DEVSW-1-R2, case 14): this page's SyncOwner and its SyncClient, on the namespace's
+// sender lock (shared by the pages of this browser context), against the reference server through the front (its
+// session for this device; /api/share/me answered by the front).  A board page carries notebooks with
+// followDocSync; the notebook page turns the switch on with enableDocSync; each page's DocSync is the one its owner's
+// client connects, and T.connected counts its connections
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const counted = (d) => { const c = d.connected.bind(d); d.connected = (l) => { T.connected++; return c(l); }; return d; };
+/** The workspace `name` and this page's owner, started; `activate`: the journal turned on first (an earlier load of the
+ * notebook page). */
+T.ownerOpen = async (name, activate) => {
+  T.w = await W.Workspace.open({ name: `ds-${name}`, mainName: `dsmain-${name}` });
+  T.hdb = await W.openHistoryDb();
+  T.kit = N.journalClasses({ IdbStore: W.IdbStore, IdbPatchStore: W.IdbPatchStore });
+  if (activate) {
+    W.registerJournalWriter("notebooks");
+    W.registerJournalWriter("boards");
+    await T.w.activateJournal();
+  }
+  T.connected = 0;
+  T.owner = W.SyncOwner.of(T.w, { origin: location.origin });
+  T.owner.start();
+  return await T.w.journalActive();
+};
+T.ownerState = () => ({ holder: T.owner.isHolder(), state: T.owner.view().s.state, running: !!T.owner.client, connected: T.connected });
+/** Sync turned on in this browser, as a person does it: the Sync panel's button; then this page's owner the holder. */
+T.turnOn = async () => {
+  const el = document.body.appendChild(document.createElement("div"));
+  T.section = W.syncSection(T.w, el, { say() {}, fail: (e) => T.log.push("warn: panel " + e), usage: () => T.w.usage(), confirm: () => true, prompt: () => "delete" });
+  const button = () => [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent));
+  for (let i = 0; i < 200 && !button(); i++) await pause(50);
+  if (!button()) return { error: "no Turn on sync: " + el.textContent.slice(0, 200) };
+  button().click();
+  for (let i = 0; i < 400 && !(T.owner.isHolder() && T.owner.view().s.state === "synced"); i++) await pause(50);
+  return T.ownerState();
+};
+/** The board page's side: followDocSync, its DocSync handed to this page's owner. */
+T.boardFollow = async () => {
+  T.unfollow = await W.followDocSync({
+    makeDocs: () => counted(new DS.DocSync({ retryMs: 200, askMs: 5000 })),
+    makeChannel: () => new BroadcastChannel(W.docSyncChannel(T.w.ws.name)),
+    journalActive: () => T.w.journalActive(),
+    setDocs: (d) => { T.ds = d; T.owner.setDocs(d); },
+    warn: (...a) => T.log.push("warn: " + a.map(String).join(" ")),
+  });
+  return true;
+};
+T.clientRunning = (ms) => T.owner.clientRunning(ms);
+/** The notebook page's side: enableDocSync with this page's pieces and its owner, notebook `id` (made from `cells`)
+ * the one shown. */
+T.nbEnable = async (id, cells) => {
+  T.ro = [];
+  T.shownStore = null;
+  const out = await W.enableDocSync({
+    loadHistory: async () => H,
+    makeDocs: () => counted(new DS.DocSync({ retryMs: 200, askMs: 5000 })),
+    makeChannel: () => new BroadcastChannel(W.docSyncChannel(T.w.ws.name)),
+    register: W.registerJournalWriter,
+    own: async () => () => {},
+    setReadOnly: (ro) => T.ro.push(ro),
+    readOnlyNow: () => !T.shownStore || !!T.shownStore.viewOnly,
+    flush() {},
+    saved: async () => {},
+    activate: () => T.w.activateJournal(),
+    begun: () => T.w.journalBegun(),
+    reopen: async () => { await T.open(id, cells); T.shownStore = T.stores.get(id); return !!T.shownStore.journaled; },
+    setDocs: (d) => { T.ds = d; T.owner.setDocs(d); },
+    needReload: () => { T.reload = true; },
+    warn: (...a) => T.log.push("warn: " + a.map(String).join(" ")),
+  });
+  return { out, ro: T.ro, on: H.DOC_SYNC.on, synced: !!T.shownStore?.synced, writer: !!T.shownStore?.writer };
+};
+/** This page closing, as pagehide does it: its owner suspended for good (its client and lock let go), its listeners gone. */
+T.closeOwner = () => {
+  T.unfollow?.();
+  T.section?.dispose();
+  T.owner.destroy();
+  return true;
+};
 window.ready = true;
