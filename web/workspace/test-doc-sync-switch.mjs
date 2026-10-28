@@ -28,6 +28,8 @@ const statuses = {
   "200 not JSON": () => new Response("<html>", { status: 200 }),
   "404 (no sync route: PROD's site)": () => new Response("not found", { status: 404 }),
   "401": () => new Response(J({ error: "sign in first" }), { status: 401 }),
+  "503 whose body says available": () => new Response(J({ available: true }), { status: 503 }),
+  "202 whose body says available": () => new Response(J({ available: true }), { status: 202 }),
   "a network failure": () => { throw new TypeError("failed to fetch"); },
 };
 const clients = { running: async () => true, "not running": async () => false, "a failure": async () => { throw new Error("x"); }, "a truthy non-true": async () => "yes" };
