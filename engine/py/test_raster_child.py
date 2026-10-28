@@ -255,7 +255,7 @@ def test_a_startup_under_a_tiny_limit_claims_memory_only_with_evidence():
         _sbraster._child = None
         _memledger._ledger = None
         try:
-            c = _sbraster._start(mb << 20, "enforced", rc.launch_plan("enforced"))
+            c = _sbraster._start(rc._Owner(), mb << 20, "enforced", rc.launch_plan("enforced"))
             seen.add("started")
             c.kill()
         except MemoryError as e:
@@ -313,7 +313,9 @@ def test_frames_past_their_bound_are_refused_before_anything_is_allocated():
     out = ok('''
     import tracemalloc
     r, w = os.pipe()
-    c = rc.Child(0, -1, r, None, False)
+    class C:
+        rfd, wfd = r, -1
+    c = C()
     os.write(w, struct.pack("<IIQ", rc.MAGIC, rc.OK_RENDER, 1 << 40))
     tracemalloc.start()
     try:
@@ -340,10 +342,8 @@ def test_ctrl_c_ends_a_wait_under_back_pressure_at_once():
     # a child that reads nothing: the request blocks on the full pipe, and
     # Ctrl-C (here a timer's KeyboardInterrupt) ends the wait within a wake
     out = ok('''
-    import signal, subprocess
-    p = subprocess.Popen(["sleep", "30"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    c = rc.Child(p.pid, p.stdin.fileno(), p.stdout.fileno(), None, False, p)
-    os.set_blocking(c.wfd, False)
+    import signal
+    c = rc.spawn(1 << 30, rc.Plan(None, 0, [sys.executable, "-c", "import time; time.sleep(30)"], dict(os.environ)))
     def stop(*a):
         raise KeyboardInterrupt
     signal.signal(signal.SIGALRM, stop)
@@ -353,7 +353,7 @@ def test_ctrl_c_ends_a_wait_under_back_pressure_at_once():
         rc.write_all(c, [bytes(16 << 20)])
     except KeyboardInterrupt:
         print("interrupted", round(time.monotonic() - t, 1) <= 0.5)
-    p.kill()
+    c.kill()
     ''')
     assert out.split("\n")[0] == "interrupted True", out
 
@@ -607,72 +607,63 @@ def test_r2_CORR_157_3_a_footprint_refusal_starts_a_contained_child_whose_ready_
 
 
 def test_r2_CORR_157_3_stop_before_during_and_after_a_spawn_leaves_no_child():
-    # astra2: Ctrl-C (interrupt_main) while the spawner is busy (f never
-    # runs), during f (the spawner undoes its child), and after f before the
-    # handoff (undone here): exactly one cleanup each, no pid left, and the
-    # next spawn works (no extension needed: /bin/sleep children)
+    # astra2, as #157 r5 R3 made it native: Ctrl-C (interrupt_main) while the
+    # spawner is busy (the task never runs), then at spread moments through
+    # a whole render with a cold start (in the queue, in the creation, after
+    # it, in the handshake, in the exchange): after each, no child of this
+    # process is left unreaped but the warm engine (when the call finished),
+    # the lock is free, no host or engine record is left; the next render
+    # works
     out = ok(R2 + """
-    def sleeper():
-        return os.posix_spawn("/bin/sleep", ["sleep", "30"], {})
-    log = []
-    def undo(pid):
-        log.append(("undo", pid))
-        os.kill(pid, 9); os.waitpid(pid, 0)
-    def discard():
-        log.append(("discard",))
-    def alive(pid):
-        try:
-            os.kill(pid, 0)
-            return True
-        except OSError:
-            return False
+    led, cap = EXACT(1 << 30)
     def stop_after(t):
         threading.Timer(t, _thread.interrupt_main).start()
-    # (before: the spawner busy with another start)
+    def children():
+        # (this process's children: /proc's per-thread lists)
+        out = set()
+        for t in os.listdir("/proc/self/task"):
+            try:
+                out |= {int(x) for x in open("/proc/self/task/%%s/children" %% t).read().split()}
+            except OSError:
+                pass
+        return out
+    # (before: the spawner busy with another job; the task never runs)
     busy = threading.Event()
-    blocker = threading.Thread(target=lambda: rc._from_spawner(lambda: busy.wait() and 0, lambda v: None, lambda: None))
-    blocker.start()
-    time.sleep(0.1)
-    ran = []
+    rc._spawner_queue().put(busy.wait)
+    ob = rc._Owner()
+    plan = rc.Plan(None, 0, [sys.executable, "-c", "import time; time.sleep(30)"], dict(os.environ))
     stop_after(0.2)
     try:
-        rc._from_spawner(lambda: ran.append(1) or sleeper(), undo, discard)
+        rc.spawn_into(ob, 1 << 30, plan)
+        print("before", "spawned")
     except KeyboardInterrupt:
-        pass
-    busy.set(); blocker.join(); time.sleep(0.3)
-    print("before", ran == [], log == [("discard",)])
-    # (during: f is running when Stop comes)
-    log.clear()
-    started, go = threading.Event(), threading.Event()
-    def slow():
-        started.set(); go.wait()
-        return sleeper()
-    threading.Thread(target=lambda: (started.wait(), time.sleep(0.1), _thread.interrupt_main())).start()
-    try:
-        rc._from_spawner(slow, undo, discard)
-    except KeyboardInterrupt:
-        pass
-    go.set(); time.sleep(0.5)
-    print("during", len(log) == 1 and log[0][0] == "undo" and not alive(log[0][1]))
-    # (after: f done, Stop before the handoff)
-    log.clear()
-    def then_stop():
-        pid = sleeper()
-        _thread.interrupt_main()
-        time.sleep(0.2)
-        return pid
-    try:
-        pid = rc._from_spawner(then_stop, undo, discard)
-        log.append(("taken", pid)); undo(pid)
-    except KeyboardInterrupt:
-        pass
-    time.sleep(0.3)
-    print("after", len(log) in (1, 2) and [x[0] for x in log].count("undo") == 1 and not alive(log[-1][1]))
-    pid = rc._from_spawner(sleeper, undo, discard)
-    print("next", alive(pid))
-    os.kill(pid, 9); os.waitpid(pid, 0)
-    """)
-    assert out.split("\n")[:4] == ["before True True", "during True", "after True", "next True"], out
+        ob.spawn.cancel_and_clean()
+        busy.set()
+        time.sleep(0.3)
+        print("before", getattr(ob, "handle", None) is None and children() == set())
+    # (through a whole call: a cold start each time)
+    bad = []
+    for i in range(20):
+        _sbraster._reap()
+        t = threading.Timer(0.01 + 0.03 * i, _thread.interrupt_main)
+        t.start()
+        try:
+            _sbraster.render(%r, 1.0, 40, 30, None, 72.0, [])
+            # (a render done before the timer: its interrupt lands here)
+            t.join()
+            time.sleep(0.05)
+        except KeyboardInterrupt:
+            t.join()
+            time.sleep(0.05)
+        warm = {_sbraster._child.pid} if _sbraster._child is not None else set()
+        left = [r.kind for r in led.records if r.kind in ("host", "engine")]
+        if children() != warm or led.call_lock.locked() or left:
+            bad.append((i, sorted(children() - warm), left))
+    print("through", bad == [] or bad)
+    png, _ = _sbraster.render(%r, 1.0, 40, 30, None, 72.0, [])
+    print("next", png[:4] == b"\\x89PNG")
+    """ % (SVG, SVG))
+    assert out.split("\n")[:3] == ["before True", "through True", "next True"], out
 
 
 def test_r2_CORR_157_3_refusals_and_failed_starts_leak_no_descriptor():
@@ -928,6 +919,69 @@ def test_r2_CORR_157_4_render_and_decode_over_the_thread_transport_portable():
     assert out.split("\n")[0] == "True (40, 30, 4) True", out
 
 
+def test_r4_the_settled_frame_keeps_the_exception_and_fails_closed():
+    # #157 r4 section A.2, through the native frame (guard.rs settled_call):
+    # - the body's own exception comes out as the same object, the call's
+    #   records gone, the lock free;
+    # - KeyboardInterrupts during the settlement (a second and a third
+    #   Ctrl-C) are retried: it completes, the outputs of a body that
+    #   returned are recorded, and the first interrupt is raised after;
+    # - a settlement that fails otherwise is kept (_unsettled), its charges
+    #   held; the next call is refused before it spawns or reserves while it
+    #   still fails, and settles it and proceeds once it doesn't
+    out = ok(R2 + """
+    led, cap = EXACT(1 << 30)
+    _sbraster.render(%r, 1.0, 40, 30, None, 72.0, [])
+    E = RuntimeError("boom")
+    def boom():
+        raise E
+    _sbraster._after_reply = boom
+    try:
+        _sbraster.render(%r, 1.0, 40, 30, None, 72.0, [])
+    except RuntimeError as e:
+        print("same", e is E, not led.call_lock.locked(), not any(r.kind in ("host", "engine") for r in led.records))
+    _sbraster._after_reply = None
+    # (two Ctrl-Cs in the settlement's close, then it works)
+    real_close = led.close
+    left = [2]
+    def close(txns):
+        if left[0]:
+            left[0] -= 1
+            raise KeyboardInterrupt
+        return real_close(txns)
+    led.close = close
+    mx = max(r.id for r in led.records)
+    try:
+        _sbraster.render(%r, 1.0, 40, 30, None, 72.0, [])
+        print("ki", "returned")
+    except KeyboardInterrupt:
+        res = [r for r in led.records if r.kind == "resident" and r.id > mx]
+        print("ki", left[0] == 0, len(res) == 2, not led.call_lock.locked(), not any(r.kind in ("host", "engine") for r in led.records))
+    led.close = real_close
+    # (a settlement failing: kept, refused, then settled)
+    real_end = led.end_call
+    def broken(*a, **k):
+        raise OSError(5, "injected")
+    led.end_call = broken
+    try:
+        _sbraster.render(%r, 1.0, 40, 30, None, 72.0, [])
+    except rc.SagebrushEngineError as e:
+        kept = _sbraster._unsettled
+        print("kept", kept is not None, isinstance(e.__cause__, OSError), sorted(r.kind for r in led.records if r.kind in ("host", "engine")) == ["engine", "host"], not led.call_lock.locked())
+    pid = _sbraster._child.pid
+    calls = cap.calls
+    try:
+        _sbraster.render(%r, 1.0, 40, 30, None, 72.0, [])
+    except rc.SagebrushEngineError as e:
+        print("refused", _sbraster._unsettled is kept, cap.calls == calls, _sbraster._child.pid == pid, "refused" in str(e))
+    led.end_call = real_end
+    png, _ = _sbraster.render(%r, 1.0, 40, 30, None, 72.0, [])
+    print("settled", _sbraster._unsettled is None, png[:4] == b"\\x89PNG", not any(r.kind in ("host", "engine") for r in led.records), led.held() <= led.f0)
+    """ % (SVG, SVG, SVG, SVG, SVG, SVG))
+    assert out.split("\n")[:5] == ["same True True True", "ki True True True True", "kept True True True True",
+                                   "refused True True True True", "settled True True True True"], out
+
+
 def test_r2_CORR_157_5_the_launchers_footprint_is_in_the_minimum_need():
     # astra2: with no child, the call needs the pre-limit footprint bound
     # too: one byte short, refused before anything is launched; at it, the
@@ -939,10 +993,10 @@ def test_r2_CORR_157_5_the_launchers_footprint_is_in_the_minimum_need():
     spawned = []
     class Stop(Exception):
         pass
-    def spawn(limit, plan):
+    def spawn(ob, limit, plan):
         spawned.append(limit)
         raise Stop()
-    rc.spawn = spawn
+    rc.spawn_into = spawn
     os.environ["SAGEBRUSH_RASTER_ISOLATION"] = "contained"
     host, need = render_need(%r, 40, 30)
     led, cap = EXACT(host + need + PRE_B - 1)

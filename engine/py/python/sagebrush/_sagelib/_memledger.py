@@ -490,6 +490,11 @@ class Ledger:
     def applied(self, txn):
         return txn in self._state.applied
 
+    def get(self, key):
+        """The record charged under key now, or None (a value: no image
+        escapes)."""
+        return self._read(lambda st: _get(st.records, key))
+
     def pending_releases(self):
         return self._log.pending()
 

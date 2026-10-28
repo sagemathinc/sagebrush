@@ -4,7 +4,9 @@ browser runtime's interface (src/runtime/raster.ts), which lib/_png.py uses.
 Each call runs in the PNG engine's own process (_raster_child: PNG plan r8
 section 2.3), with memory admitted by the ledger (lib/_memledger.py, r8
 section 2.1): one call at a time, under the call lock, which is held from
-before the first reservation until the call's end:
+before the first reservation until the call's end, by one native frame
+(settled_call, engine/py/src/guard.rs; #157 r4 section A): the call's body,
+then _settle until it is done, whatever ended the body:
 
 1. the lock taken; the memory observed (the re-base);
 2. the call's sizes computed from its inputs, without materialising them;
@@ -16,7 +18,12 @@ before the first reservation until the call's end:
    reservation;
 5. the end, in one ledger step (end_call): the grant replaced by the engine's
    standing charge, the outputs made resident records, the rest refunded;
-   then the lock released.
+   or, if the call failed before its reply was read, the engine process
+   ended and reaped, then the admission rolled back; then the lock released.
+
+No cleanup is left to a `finally` or an `except` here (CPython can skip
+them under a KeyboardInterrupt: #157's findings); test_stop_path_ast.py
+holds these modules to that.
 
 SAGEBRUSH_RASTER_ISOLATION=in-process runs the engine inside Python instead,
 admitted the same way (no protection against crashes or memory exhaustion:
@@ -31,6 +38,11 @@ import _raster_child as rc
 
 _child = None
 _last_grant = 0
+# (a call whose settlement failed (not a KeyboardInterrupt): its obligation,
+# still charged, settled first by the next call, which is refused while that
+# fails; written by the native frame)
+_unsettled = None
+SagebrushEngineError = rc.SagebrushEngineError
 # (CPython object headers, measured once: a bytes object's, a bytearray's, a
 # memoryview's; an ndarray's, at the first decode)
 _H_BYTES = sys.getsizeof(b"")
@@ -169,25 +181,27 @@ def png_bound(w, h, text_len, pairs):
     return 8 + 25 + 21 + 12 + text_len + 18 * pairs + z + 12 * (-(-z // 1024))
 
 
-def _acquire(lock):
-    # (a wait that Ctrl-C ends, holding nothing)
-    while not lock.acquire(True, rc._WAKE):
-        pass
+def _native():
+    from sagebrush._native import raster
+    return raster
 
 
 def _reap():
+    """The warm engine ended and reaped (natively), forgotten, its standing
+    charge dropped: each step idempotent, and a call that finds the engine
+    already reaped repeats what is left (_admit)."""
     global _child
-    c, _child = _child, None
+    c = _child
     if c is not None:
         c.kill()
-    # (its charge drops only now, after waitpid)
+        _child = None
     _memledger.ledger().set_standing(None)
 
 
 def _handshake(c, grant):
     """READY read from a new child, which is returned; or the startup's
     outcome raised, the child reaped (FootprintRefused for the launcher's
-    footprint check)."""
+    footprint check).  Interrupted, the call's settle ends it."""
     frames = []
     try:
         while True:
@@ -203,15 +217,13 @@ def _handshake(c, grant):
         if isinstance(e, rc.ProtocolError) and not frames and not isinstance(err, rc.FootprintRefused):
             raise rc.SagebrushEngineError("the PNG engine sent an invalid reply at its start (%s), a Sagebrush bug" % e) from None
         raise err from None
-    except BaseException:
-        c.kill()
-        raise
 
 
-def _start(grant, want, plan):
-    """A child started under the grant, by the plan rc.launch_plan made; its
-    READY read (for a replacement too), or the startup's outcome raised."""
-    c = rc.spawn(grant, plan)
+def _start(ob, grant, want, plan):
+    """A child started under the grant, by the plan rc.launch_plan made, into
+    ob; its READY read (for a replacement too), or the startup's outcome
+    raised."""
+    c = rc.spawn_into(ob, grant, plan)
     try:
         return _handshake(c, grant)
     except rc.FootprintRefused as err:
@@ -219,93 +231,146 @@ def _start(grant, want, plan):
             raise rc.SagebrushEngineError("SAGEBRUSH_RASTER_ISOLATION=enforced: the PNG engine's launcher used %d bytes "
                                           "before its limit, more than this host's bound" % err.observed) from None
         rc._warn("its launcher's footprint, %d bytes, is past the bound computed for this host" % err.observed)
-        # (the same startup, handshake included, for the replacement)
-        return _handshake(rc.spawn(grant, rc.contained(plan)), grant)
+        # (the same startup, handshake included, for the replacement; the
+        # refused one was reaped by _handshake)
+        return _handshake(rc.spawn_into(ob, grant, rc.contained(plan)), grant)
 
 
-class _Call:
-    """The admitted call: its records, its grant, and what its end does."""
+class _Ob:
+    """A call's obligation (r4 section A.1, r7 T2, r9 W2): its ids, chosen
+    before anything is published, and each step's record, written only by
+    the step that owns it.  _settle reads them to finish the call, whatever
+    ended its body."""
 
-    __slots__ = ("led", "host", "engine", "grant", "standing", "outputs")
+    __slots__ = ("led", "txn", "host_key", "engine_key", "out_ids", "grant", "spawn", "handle", "child", "err",
+                 "exchanged", "standing", "outputs", "admission", "done")
+
+    def __init__(self, led, engine_domain):
+        self.led = led
+        # (admit, success, rollback, close: distinct, so no stage is taken for another)
+        self.txn = (led.new_id(), led.new_id(), led.new_id(), led.new_id())
+        self.host_key = ("host", "cpython-heap", led.new_id())
+        self.engine_key = ("engine", engine_domain, led.new_id())
+        self.out_ids = (led.new_id(), led.new_id(), led.new_id())
+        self.grant = 0
+        self.spawn = self.handle = self.child = self.err = None
+        self.exchanged = False
+        self.standing = _memledger.Ledger.KEEP
+        self.outputs = ()
+        self.admission = None
+        self.done = False
 
 
-def _admit(host_need, observed=(), engine=True):
-    """Steps 1 to 3: the call lock taken (and kept, until _finish), the
-    re-base, then host_need() -> (host bytes, the engine's least need,
-    anything the caller keeps), computed only now; the minimum need checked; the host reserved, the rest
-    granted.  observed: the domains the outputs live in, each of which this
-    observation must cover (UntrackedOutput before anything is computed, if
-    not).  engine: whether a child process is used (not in-process).
-    Returns (the call, what host_need kept)."""
-    global _child, _last_grant
-    led = _memledger.ledger()
-    _acquire(led.call_lock)
-    try:
-        want = rc.mode()
-        for attempt in (0, 1):
-            child = _child if engine else None
-            try:
-                room = led.rebase(child=(lambda: (child.charge(), child.rss())) if child is not None else None)
-            except _memledger.NeedReap:
-                _reap()
-                continue
-            seen = set((led.last or {}).get("domains") or ())
-            for d in observed:
-                if d not in seen:
-                    raise UntrackedOutput(UNTRACKED)
-            host, need, kept = host_need()
-            # (a new engine process's footprint before its limit, r8 section
-            # 2.3: charged in its startup grant, so in the minimum need)
-            plan = rc.launch_plan(want) if engine and _child is None else None
-            pre = plan.bound if plan is not None else 0
-            if room < host + need + pre and engine and _child is not None and attempt == 0:
-                # (a warm engine whose memory the call needs: ended, and the
-                # memory observed again, once)
-                _reap()
-                continue
-            break
-        if room < host + need + pre:
-            import _memguard
-            raise _memguard.memory_guard("This PNG", host + need + pre, room, "PNG work")
-        c = _Call()
-        c.led, c.standing, c.outputs = led, _memledger.Ledger.KEEP, ()
-        c.host = led.reserve("host", "cpython-heap", host)
+def _admit(ob, host_need, observed=(), engine=True):
+    """Steps 1 to 3, the call lock held (by the native frame): the re-base,
+    then host_need() -> (host bytes, the engine's least need, anything the
+    caller keeps), computed only now; the minimum need checked; the host
+    reserved and the rest granted, in one commit under ob's ids.  observed:
+    the domains the outputs live in, each of which this observation must
+    cover (UntrackedOutput before anything is computed, if not).  engine:
+    whether a child process is used (not in-process).  Returns (what
+    host_need kept, the launch plan, the mode)."""
+    global _last_grant
+    led = ob.led
+    want = rc.mode()
+    for attempt in (0, 1):
+        if _child is not None and _child.h.state in ("reaped", "lost"):
+            # (an engine ended by an interrupted _reap: the rest of it)
+            _reap()
+        child = _child if engine else None
         try:
-            c.engine = led.grant("child" if engine else "cpython-heap")
-        except BaseException:
-            led.end_call(c.host, None)
-            raise
-        c.grant = c.engine.bytes
-        _last_grant = c.grant
-        return c, (kept, plan, want)
-    except BaseException:
-        led.call_lock.release()
-        raise
+            room = led.rebase(child=(lambda: (child.charge(), child.rss())) if child is not None else None)
+        except _memledger.NeedReap:
+            _reap()
+            continue
+        seen = set((led.last or {}).get("domains") or ())
+        for d in observed:
+            if d not in seen:
+                raise UntrackedOutput(UNTRACKED)
+        host, need, kept = host_need()
+        # (a new engine process's footprint before its limit, r8 section
+        # 2.3: charged in its startup grant, so in the minimum need)
+        plan = rc.launch_plan(want) if engine and _child is None else None
+        pre = plan.bound if plan is not None else 0
+        if room < host + need + pre and engine and _child is not None and attempt == 0:
+            # (a warm engine whose memory the call needs: ended, and the
+            # memory observed again, once)
+            _reap()
+            continue
+        break
+    if room < host + need + pre:
+        import _memguard
+        raise _memguard.memory_guard("This PNG", host + need + pre, room, "PNG work")
+    _, e = led.admit(ob.txn[0], ob.host_key[2], host, ob.engine_key[2], ob.engine_key[1])
+    ob.grant = e.bytes
+    _last_grant = ob.grant
+    return kept, plan, want
 
 
-def _finish(c):
-    """Step 5: the end, in one ledger step, then the call lock released."""
-    try:
-        c.led.end_call(c.host, c.engine, c.standing, c.outputs)
-    finally:
-        c.led.call_lock.release()
+def _settle(ob, ok):
+    """The call's end, whatever ended its body (r4 section A.2; called by
+    the native frame until it returns, a KeyboardInterrupt retried): each
+    step tests its own record and is idempotent, so a retry resumes where
+    the last one stopped.  ok: whether the body returned.
+
+    - The reply read whole (ob.exchanged): the engine kept warm; end_call
+      (the grant replaced by its standing charge, the outputs (if the body
+      returned) made residents, the host's rest refunded).
+    - Else: the creation cancelled, the engine this call started or used
+      ended and reaped, and only then the admission rolled back (no credit
+      for an unreaped process).
+    - Then the call's ids closed, its references dropped, done."""
+    global _child
+    if ob.done:
+        return
+    led = ob.led
+    if ob.admission is None:
+        # (from the image, never from Python-side flags: r9 W2)
+        ob.admission = "committed" if led.applied(ob.txn[0]) else "never"
+    if ob.exchanged:
+        led.end_call(led.get(ob.host_key), led.get(ob.engine_key), ob.standing, ob.outputs if ok else (),
+                     txn=ob.txn[1], out_ids=ob.out_ids)
+    else:
+        if ob.spawn is not None:
+            ob.spawn.cancel_and_clean(rc._WAKE)
+        h = ob.handle
+        if h is not None:
+            h.kill_and_reap(rc._WAKE)
+            h.close_io()
+            if _child is not None and _child.h is h:
+                _child = None
+        if ob.admission == "committed":
+            led.rollback(ob.txn[2], led.get(ob.host_key), led.get(ob.engine_key), h is not None)
+    led.close(ob.txn)
+    ob.spawn = ob.handle = ob.child = ob.err = None
+    ob.outputs = ()
+    ob.done = True
 
 
-def _exchange(c, kind, parts, bounds, plan, want):
+def _call(ob, body):
+    """body(ob) under the call lock, settled (the native frame)."""
+    return _native().settled_call(ob.led.call_lock, rc._WAKE, ob, body, _settle, sys.modules[__name__])
+
+
+def _exchange(ob, kind, parts, bounds, plan, want):
     """The request sent to the child (started now if there is none) and its
-    reply's (kind, payload) read; c.standing set from the child as it is
-    after (None: ended)."""
+    reply's (kind, payload) read; ob.standing set from the child as it is
+    after, and ob.exchanged.  Failing before that, the call's settle ends
+    the child."""
     global _child
     child = _child
     if child is None:
-        child = _child = _start(c.grant, want, plan)
+        child = _start(ob, ob.grant, want, plan)
+        _child = child
         rss0 = 0
     else:
-        rss0 = c.led.child_rss
+        # (this call's from here: before any request is written)
+        ob.handle, ob.child = child.h, child
+        rss0 = ob.led.child_rss
         if child.enforced:
             # (the idle limit is its VmSize after the last call, and the idle
             # loop allocates nothing: the base of this call's)
-            child.set_limit(child.limit + c.grant)
+            child.set_limit(child.limit + ob.grant)
     oom0 = rc._oom_kills()
     total = sum(len(memoryview(p).cast("B")) for p in parts)
     try:
@@ -314,25 +379,16 @@ def _exchange(c, kind, parts, bounds, plan, want):
         payload = _Buf(n)
         rc.read_into(child, payload)
     except rc.ProtocolError as e:
-        _reap()
-        c.standing = None
         raise rc.SagebrushEngineError("the PNG engine sent an invalid reply (%s), a Sagebrush bug" % e) from None
     except rc._Exited:
         status = child.reap()
-        _child = None
-        c.standing = None
-        raise rc.classify(child, status, [], c.grant, False, oom0, False) from None
-    except BaseException:
-        # (Ctrl-C, or anything else, during the exchange: the child ended at
-        # once, its memory with it)
-        _reap()
-        c.standing = None
-        raise
+        raise rc.classify(child, status, [], ob.grant, False, oom0, False) from None
     if child.enforced:
         child.set_limit(child.vmsize() or child.limit)
     # (its new standing charge: its limit (or, contained, what is resident)
     # less what the re-base already observed resident)
-    c.standing = max(0, child.charge() - rss0)
+    ob.standing = max(0, child.charge() - rss0)
+    ob.exchanged = True
     if _after_reply is not None:
         _after_reply()
     return k, payload
@@ -389,13 +445,14 @@ def render(svg, scale, width, height, background, dpi, text):
         # (the engine's least: the picture's pixels)
         return render_host(b, t, g, pmax), 4 * pw * ph, (pw, ph, b, t, pmax)
 
-    # (the returned PNG is a plain bytes, which nothing can follow to its
-    # release: only an observation that covers CPython's heap accounts for it,
-    # so without one this refuses, before anything is computed)
-    c, ((pw, ph, b, t, pmax), plan, want) = _admit(sizes, observed=("cpython-heap",), engine=not inproc)
-    try:
+    def body(ob):
+        # (the returned PNG is a plain bytes, which nothing can follow to its
+        # release: only an observation that covers CPython's heap accounts for
+        # it, so without one this refuses, before anything is computed)
+        (pw, ph, b, t, pmax), plan, want = _admit(ob, sizes, observed=("cpython-heap",), engine=not inproc)
         if inproc:
             png, missing = _in_process().raster_render(svg, scale, w, h, bg, dpi, text)
+            ob.exchanged = True
             missing = _missing(missing.encode("utf-8")) if missing else _Str()
         else:
             s = svg.encode("utf-8")
@@ -403,8 +460,8 @@ def render(svg, scale, width, height, background, dpi, text):
             g = bg.encode("utf-8")
             head = struct.pack("<fIIfQQQ", scale, w, h, dpi, len(s), len(tb), len(g))
             msg = len(s) + len(tb) + len(g) + 256
-            k, payload = _exchange(c, rc.RENDER, [head, s, tb, g], {rc.OK_RENDER: 16 + pmax + len(s), rc.ERR_INPUT: msg,
-                                                                     rc.ERR_BACKEND: msg, rc.ERR_MEMORY: 8 + 256}, plan, want)
+            k, payload = _exchange(ob, rc.RENDER, [head, s, tb, g], {rc.OK_RENDER: 16 + pmax + len(s), rc.ERR_INPUT: msg,
+                                                                      rc.ERR_BACKEND: msg, rc.ERR_MEMORY: 8 + 256}, plan, want)
             del s, tb, g
             if k != rc.OK_RENDER:
                 _outcome(k, payload)
@@ -415,12 +472,12 @@ def render(svg, scale, width, height, background, dpi, text):
             missing = _missing(memoryview(payload)[16 + n:].tobytes())
             del payload
         # (the outputs, at their actual sizes, carved out of the host
-        # reservation by _finish: the PNG absorbed by the next observation,
-        # the str released by its finalizer)
-        c.outputs = [(sys.getsizeof(png), "cpython-heap", None), (sys.getsizeof(missing), "cpython-heap", missing)]
+        # reservation by the settle's end_call: the PNG absorbed by the next
+        # observation, the str released by its finalizer)
+        ob.outputs = [(sys.getsizeof(png), "cpython-heap", None), (sys.getsizeof(missing), "cpython-heap", missing)]
         return png, missing
-    finally:
-        _finish(c)
+
+    return _call(_Ob(_memledger.ledger(), "cpython-heap" if inproc else "child"), body)
 
 
 _CHANNELS = {0: 1, 2: 3, 3: 4, 4: 4, 6: 4}   # (color type -> the values a pixel, as imread returns them)
@@ -463,18 +520,19 @@ def decode(png):
             host += values + _H_BYTES + (0 if isinstance(png, bytes) else len(view) + _H_BYTES)
         return host, values, values
 
-    # (the values' buffer, released by its own finalizer: any observation)
-    c, (values, plan, want) = _admit(sizes, engine=not inproc)
-    try:
+    def body(ob):
+        # (the values' buffer, released by its own finalizer: any observation)
+        values, plan, want = _admit(ob, sizes, engine=not inproc)
         if inproc:
             w, h, ch, raw = _in_process().raster_decode(view.tobytes() if not isinstance(png, bytes) else png)
+            ob.exchanged = True
             payload = _Buf(16 + len(raw))
             payload[16:] = raw
             del raw
         else:
             msg = 4096
-            k, payload = _exchange(c, rc.DECODE, [view], {rc.OK_DECODE: 16 + values, rc.ERR_INPUT: msg, rc.ERR_BACKEND: msg,
-                                                          rc.ERR_MEMORY: 8 + 256}, plan, want)
+            k, payload = _exchange(ob, rc.DECODE, [view], {rc.OK_DECODE: 16 + values, rc.ERR_INPUT: msg, rc.ERR_BACKEND: msg,
+                                                           rc.ERR_MEMORY: 8 + 256}, plan, want)
             if k != rc.OK_DECODE:
                 _outcome(k, payload)
             w, h, ch, _ = struct.unpack_from("<IIII", payload)
@@ -486,11 +544,11 @@ def decode(png):
         # array or view of it (a reshape, a memoryview) is gone; the array's
         # header by the array's, and the memoryview NumPy holds the buffer
         # through, if any, by its own)
-        c.outputs = [(sys.getsizeof(payload), "cpython-heap", payload), (sys.getsizeof(arr), "cpython-heap", arr)]
+        outputs = [(sys.getsizeof(payload), "cpython-heap", payload), (sys.getsizeof(arr), "cpython-heap", arr)]
         if isinstance(arr.base, memoryview):
-            c.outputs.append((sys.getsizeof(arr.base), "cpython-heap", arr.base))
+            outputs.append((sys.getsizeof(arr.base), "cpython-heap", arr.base))
+        ob.outputs = outputs
         del payload
         return w, h, ch, arr
-    finally:
-        _finish(c)
 
+    return _call(_Ob(_memledger.ledger(), "cpython-heap" if inproc else "child"), body)

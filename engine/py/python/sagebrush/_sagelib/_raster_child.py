@@ -201,14 +201,12 @@ _PAGE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
 
 
 def _small_read(path, n=512):
-    """A small /proc or cgroup file's first n bytes, read with one os.read
-    (no buffered file object: a call's bookkeeping allocates next to nothing,
-    _sbraster.BOOKKEEPING)."""
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        return os.read(fd, n)
-    finally:
-        os.close(fd)
+    """A small /proc or cgroup file's first n bytes, read (and closed)
+    natively: no descriptor for Python code to close, so an interruption
+    can't leave one open; no buffered file object either (a call's
+    bookkeeping allocates next to nothing, _sbraster.BOOKKEEPING)."""
+    from sagebrush._native import raster
+    return raster.read_prefix(path, n)
 
 
 def _statm(pid):
@@ -221,14 +219,30 @@ def _statm(pid):
 
 
 class Child:
-    """A running raster child: its pid, its pipes, its standard error (an
+    """A running raster child: the native handle that owns its process and
+    the parent's ends of its pipes (child.rs: every state change recorded in
+    the same native step as its system call), its standard error (an
     unlinked file), whether its limit is enforced, and its limit."""
 
-    def __init__(self, pid, wfd, rfd, err, enforced, proc=None):
-        self.pid, self.wfd, self.rfd, self.err, self.enforced, self.proc = pid, wfd, rfd, err, enforced, proc
+    def __init__(self, h, err, enforced):
+        self.h, self.err, self.enforced = h, err, enforced
         self.limit = None
         self.hard = None
         self.frames = []
+
+    # (read from the handle each time: a closed end is -1 there, never a
+    # number that another file may have been given since)
+    @property
+    def pid(self):
+        return self.h.pid
+
+    @property
+    def wfd(self):
+        return self.h.wfd
+
+    @property
+    def rfd(self):
+        return self.h.rfd
 
     def vmsize(self):
         m = _statm(self.pid)
@@ -259,35 +273,18 @@ class Child:
         return self.rss()
 
     def kill(self):
-        import signal
-        try:
-            if self.proc is not None:
-                self.proc.kill()
-            else:
-                os.kill(self.pid, signal.SIGKILL)
-        except OSError:
-            pass
-        return self.reap()
+        """Ended and reaped (the kill pipe, SIGKILL only as its fallback:
+        child.rs), its pipes closed: its exit status as
+        os.waitstatus_to_exitcode gives it (None if lost).  Idempotent."""
+        code = self.h.kill_and_reap(_WAKE)
+        self.h.close_io()
+        return code
 
     def reap(self):
-        """Waits for the process (after it exited or was killed): its exit
-        status as os.waitstatus_to_exitcode gives it."""
-        for fd in (self.wfd, self.rfd):
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-        self.wfd = self.rfd = -1
-        if self.proc is not None:
-            return self.proc.wait()
-        while True:
-            try:
-                _, st = os.waitpid(self.pid, 0)
-                return os.waitstatus_to_exitcode(st)
-            except InterruptedError:
-                continue
-            except ChildProcessError:
-                return None
+        """Its pipes closed and its exit waited for, without ending it (its
+        output ended: its own status, not a kill's)."""
+        self.h.close_io()
+        return self.h.wait(_WAKE)
 
     def stderr_tail(self):
         try:
@@ -306,72 +303,24 @@ def _set_nonblocking(fd):
 _spawner = None
 
 
-def _from_spawner(f, undo, discard):
-    """f() run on the one thread that starts raster children, which lives
-    as long as the process: the launcher's parent-death signal follows the
-    thread that started the child (prctl(2)), so a child started by a
-    thread that then ends would be killed with it.
+def _spawn_loop(q):
+    while True:
+        q.get()()
 
-    The wait is interruptible (Ctrl-C, Stop), and whatever f's outcome,
-    exactly one side cleans it up: undo(result) for a child nobody will
-    take, discard() for the resources f was given when it never ran or
-    failed.  Interrupted before f runs: f never runs (discard here).
-    During f: the spawner thread undoes its result (or discards).  After
-    f, before the handoff: undone here."""
+
+def _spawner_queue():
+    """The one thread that starts raster children, which lives as long as
+    the process: the launcher's parent-death signal follows the thread that
+    started the child (prctl(2)), so a child started by a thread that then
+    ends would be killed with it."""
     global _spawner
-    import threading
     if _spawner is None:
         import queue
+        import threading
         q = queue.Queue()
-
-        def loop():
-            while True:
-                q.get()()
-        threading.Thread(target=loop, name="sagebrush-raster-spawner", daemon=True).start()
+        threading.Thread(target=_spawn_loop, args=(q,), name="sagebrush-raster-spawner", daemon=True).start()
         _spawner = q
-    lock, done = threading.Lock(), threading.Event()
-    task = {"state": "queued"}
-
-    def run():
-        with lock:
-            if task["state"] == "cancelled":
-                done.set()
-                return
-            task["state"] = "running"
-        try:
-            out = (True, f())
-        except BaseException as e:  # (handed back to the caller)
-            out = (False, e)
-        with lock:
-            if task["state"] == "cancelled":
-                # (the caller is gone: this thread cleans up)
-                try:
-                    undo(out[1]) if out[0] else discard()
-                finally:
-                    done.set()
-                return
-            task["state"], task["out"] = "done", out
-        done.set()
-    _spawner.put(run)
-    try:
-        while not done.wait(_WAKE):
-            pass
-    except BaseException:
-        with lock:
-            state = task["state"]
-            if state != "done":
-                task["state"] = "cancelled"
-        if state == "queued":
-            discard()
-        elif state == "done":
-            good, v = task["out"]
-            undo(v) if good else discard()
-        raise
-    good, v = task["out"]
-    if good:
-        return v
-    discard()
-    raise v
+    return _spawner
 
 
 class Plan:
@@ -434,91 +383,66 @@ def _threads():
 _FORCE_THREADS = False
 
 
-def spawn(limit, plan):
+def spawn_into(ob, limit, plan):
     """A raster child under `limit` bytes of address space (enforced when
-    the plan has the launcher), or under none (contained).  Raises
-    SagebrushEngineError if it can't be started.  Every descriptor and file
-    made on the way is closed on every early return, error and
-    cancellation (CORR-157-3)."""
+    the plan has the launcher), or under none (contained); raises
+    SagebrushEngineError if it can't be started.
+
+    The creation is native (child.rs, #157 r5 R3): a SpawnTask, published in
+    ob.spawn before it is queued, run on the spawner thread, and moved into
+    ob.handle in one native step (take_into), so no bytecode separates a
+    process from its owner.  Whatever ends the call settles both
+    (_sbraster's settle: ob.spawn.cancel_and_clean(), ob.handle's
+    kill_and_reap); a failed creation has closed everything it made.
+    Returns the Child (ob.child too)."""
     import tempfile
+    from sagebrush._native import raster
     err = tempfile.TemporaryFile()
-    fds = []
-
-    def close_all():
-        while fds:
-            try:
-                os.close(fds.pop())
-            except OSError:
-                pass
+    ob.err = err
+    if plan.launcher is None:
+        path, argv = sys.executable, plan.prog
+    else:
+        path, argv = plan.launcher, _launch_argv(plan.launcher, limit, plan.bound, plan.prog)
+    ob.spawn = raster.SpawnTask(path, argv, plan.env, err.fileno())
+    _spawner_queue().put(ob.spawn.run)
+    while not ob.spawn.wait_done(_WAKE):
+        pass
+    failed = None
     try:
-        if sys.platform == "win32" or not hasattr(os, "posix_spawn"):
-            import subprocess
-            proc = subprocess.Popen(plan.prog, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, env=plan.env, bufsize=0)
-            try:
-                wfd, rfd = os.dup(proc.stdin.fileno()), os.dup(proc.stdout.fileno())
-            except BaseException:
-                proc.kill()
-                proc.wait()
-                raise
-            finally:
-                proc.stdin.close()
-                proc.stdout.close()
-            return Child(proc.pid, wfd, rfd, err, False, proc)
-        r_in, w_in = os.pipe()
-        fds += [r_in, w_in]
-        r_out, w_out = os.pipe()
-        fds += [r_out, w_out]
-        actions = [(os.POSIX_SPAWN_DUP2, r_in, 0), (os.POSIX_SPAWN_DUP2, w_out, 1), (os.POSIX_SPAWN_DUP2, err.fileno(), 2)]
-        if plan.launcher is None:
-            path, argv = sys.executable, plan.prog
-        else:
-            path, argv = plan.launcher, _launch_argv(plan.launcher, limit, plan.bound, plan.prog)
+        ob.spawn.take_into(ob, "handle")
+    except OSError as e:
+        # (the creation's own error: nothing of it is left.  Only its text
+        # kept, and acted on after the handler: raised in it, the error's
+        # traceback and this frame would hold each other (and the stderr
+        # file) until a collection)
+        failed = str(e)
+    if failed is not None:
+        if plan.launcher is not None and mode() == "enforced":
+            raise SagebrushEngineError("SAGEBRUSH_RASTER_ISOLATION=enforced: the PNG engine's launcher can't be run (%s)" % failed)
+        if plan.launcher is not None:
+            # (the launcher can't run, a noexec mount: the contained mode)
+            _warn("its launcher can't be run: %s" % failed)
+            return spawn_into(ob, limit, contained(plan))
+        raise SagebrushEngineError("Sagebrush could not start its PNG engine process (%s). Set "
+                                   "SAGEBRUSH_RASTER_ISOLATION=in-process to run it inside Python, without "
+                                   "protection against crashes and memory exhaustion." % failed)
+    if not _threads():
+        _set_nonblocking(ob.handle.wfd)
+        _set_nonblocking(ob.handle.rfd)
+    c = Child(ob.handle, err, plan.launcher is not None)
+    c.limit = limit if plan.launcher is not None else None
+    ob.child = c
+    return c
 
-        def undo(pid):
-            # (a child nobody will take: killed, reaped, its pipes closed)
-            import signal
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
-            try:
-                os.waitpid(pid, 0)
-            except (ChildProcessError, OSError):
-                pass
-            close_all()
-        mine = list(fds)
-        fds.clear()  # (from here, _from_spawner's: undo or discard closes them)
-        try:
-            pid = _from_spawner(lambda: os.posix_spawn(path, argv, plan.env, file_actions=actions),
-                                lambda pid: (fds.extend(mine), undo(pid)), lambda: (fds.extend(mine), close_all()))
-        except OSError as e:
-            if plan.launcher is not None and mode() == "enforced":
-                raise SagebrushEngineError("SAGEBRUSH_RASTER_ISOLATION=enforced: the PNG engine's launcher can't be run (%s)" % e) from None
-            if plan.launcher is not None:
-                # (the launcher can't run, a noexec mount: the contained mode)
-                _warn("its launcher can't be run: %s" % e)
-                err.close()
-                return spawn(limit, contained(plan))
-            raise SagebrushEngineError("Sagebrush could not start its PNG engine process (%s). Set "
-                                       "SAGEBRUSH_RASTER_ISOLATION=in-process to run it inside Python, without "
-                                       "protection against crashes and memory exhaustion." % e) from None
-        fds.extend(mine)
-        os.close(r_in)
-        os.close(w_out)
-        fds.clear()
-        if not _threads():
-            _set_nonblocking(w_in)
-            _set_nonblocking(r_out)
-        c = Child(pid, w_in, r_out, err, plan.launcher is not None)
-        c.limit = limit if plan.launcher is not None else None
-        return c
-    except BaseException:
-        close_all()
-        try:
-            err.close()
-        except OSError:
-            pass
-        raise
+
+class _Owner:
+    """What spawn() gives spawn_into: an owner of its own."""
+
+
+def spawn(limit, plan):
+    """spawn_into with an owner of its own (tools and tests: an unsettled
+    child is ended when its handle is collected)."""
+    return spawn_into(_Owner(), limit, plan)
 
 
 # ------------------------------------------------------------ I/O
@@ -625,15 +549,9 @@ def read_into(child, buf):
 
 
 def _exited(child):
-    if child.proc is not None:
-        return child.proc.poll() is not None
-    try:
-        pid, _ = os.waitpid(child.pid, os.WNOHANG)
-    except ChildProcessError:
-        return True
-    if pid:
-        child.proc_status_lost = True
-    return bool(pid)
+    """Whether the child has ended (reaped or lost), after one non-blocking
+    look (native: the reap and its record are one step)."""
+    return child.h.poll_exit()
 
 
 def read_frame(child, bounds):

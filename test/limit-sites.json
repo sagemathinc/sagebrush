@@ -1341,6 +1341,70 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
+ "engine/py/src/child.rs :: _close :: const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9; #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: _close :: const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000; #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: active_process_limit: u32, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: basic: BasicLimitInformation, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: if unsafe { ResumeThread(pi.thread) } == u32::MAX { #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: if unsafe { SetInformationJobObject(job, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, &limits as *const _ as *const c_void, std::mem::size_of::<ExtendedLimitInformation>() as u32) } == 0 { #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: job_memory_limit: usize, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: let mut limits: ExtendedLimitInformation = unsafe { std::mem::zeroed() }; #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: limit_flags: u32, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: limits.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE; #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: maximum_working_set_size: usize, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: per_job_user_time_limit: i64, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: per_process_user_time_limit: i64, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: process_memory_limit: usize, #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: struct BasicLimitInformation { #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
+ "engine/py/src/child.rs :: create :: struct ExtendedLimitInformation { #0": {
+  "class": "none",
+  "owner": "PNG raster child (@sagebrush-board)"
+ },
  "engine/py/src/lib.rs :: raster_render :: const RASTER_MAX_FILE_BYTES: usize = 256 << 20; #0": {
   "class": "1+2",
   "owner": "raster/image I/O",

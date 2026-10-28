@@ -117,6 +117,8 @@ mod sys {
         pub(super) state: State,
         status: Option<i32>,
         pub(super) signals: u64,
+        // (slices waited since the life pipe's EOF without our wait seeing the exit)
+        exited_waits: u32,
     }
 
     impl Proc {
@@ -146,7 +148,19 @@ mod sys {
         }
 
         /// The life pipe (or the pidfd) shows the exit: Running -> Exited.
+        /// Exited and not yet reaped: a slice's wait (on the pidfd if there is
+        /// one), counted.
         pub(super) fn observe(&mut self, timeout_ms: i32) {
+            if self.state == State::Exited {
+                if self.pidfd >= 0 {
+                    let mut p = libc::pollfd { fd: self.pidfd, events: libc::POLLIN, revents: 0 };
+                    unsafe { libc::poll(&mut p, 1, timeout_ms) };
+                } else if timeout_ms > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(timeout_ms as u64));
+                }
+                self.exited_waits = self.exited_waits.saturating_add(1);
+                return;
+            }
             if self.state != State::Running {
                 return;
             }
@@ -208,21 +222,28 @@ mod sys {
                 return;
             }
             if self.killfd >= 0 {
-                let b = [b'k'];
-                unsafe { libc::write(self.killfd, b.as_ptr() as *const libc::c_void, 1) };
+                write_without_sigpipe(self.killfd, b"k");
                 close(&mut self.killfd);
             }
             self.observe(wake_ms);
-            if self.state == State::Running {
+            if !self.terminal() {
                 self.try_wait();
             }
-            if self.state == State::Running {
+            if !self.terminal() {
                 self.signal_kill();
             }
         }
 
+        /// SIGKILL is allowed while the child is ours and unreaped: running,
+        /// or past its life pipe's EOF by a whole slice with our wait still
+        /// not seeing its exit (a child that closed fd 4 itself: still ours,
+        /// as our WNOHANG wait just showed).
+        fn may_signal(&self) -> bool {
+            self.state == State::Running || (self.state == State::Exited && self.exited_waits >= 1)
+        }
+
         pub(super) fn signal_kill(&mut self) {
-            if self.state != State::Running {
+            if !self.may_signal() {
                 return;
             }
             #[cfg(target_os = "linux")]
@@ -259,6 +280,32 @@ mod sys {
                 }
             }
             self.release_identity();
+        }
+    }
+
+    /// A byte written to a pipe whose reader may be gone, without SIGPIPE
+    /// reaching the process (an application may have restored its default
+    /// action): SIGPIPE blocked in this thread for the write, and the one
+    /// the write raised, if any, consumed before the mask is restored.
+    fn write_without_sigpipe(fd: i32, b: &[u8]) {
+        unsafe {
+            let mut set: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut set);
+            libc::sigaddset(&mut set, libc::SIGPIPE);
+            let mut old: libc::sigset_t = std::mem::zeroed();
+            libc::pthread_sigmask(libc::SIG_BLOCK, &set, &mut old);
+            let mut pending: libc::sigset_t = std::mem::zeroed();
+            libc::sigpending(&mut pending);
+            let already = libc::sigismember(&pending, libc::SIGPIPE) == 1;
+            let r = libc::write(fd, b.as_ptr() as *const libc::c_void, b.len());
+            if r < 0 && errno() == libc::EPIPE && !already {
+                libc::sigpending(&mut pending);
+                if libc::sigismember(&pending, libc::SIGPIPE) == 1 {
+                    let mut sig: libc::c_int = 0;
+                    libc::sigwait(&set, &mut sig);
+                }
+            }
+            libc::pthread_sigmask(libc::SIG_SETMASK, &old, std::ptr::null_mut());
         }
     }
 
@@ -320,6 +367,27 @@ mod sys {
         -1
     }
 
+    /// glibc 2.39's pidfd_spawn leaks its pidfd when the exec fails (it
+    /// returns the error and -1; measured on Ubuntu's 2.39-0ubuntu8.9: one
+    /// descriptor per failed start): the descriptor number that was the
+    /// lowest free one just before the call, closed if it is now a pidfd of
+    /// an ended process.  (Another thread opening a pidfd of an ended
+    /// process at that number in that window would lose it: not done in
+    /// this process's PNG paths, and disclosed.)
+    #[cfg(target_os = "linux")]
+    fn close_leaked_pidfd(fd: i32) {
+        if fd < 0 {
+            return;
+        }
+        let link = std::fs::read_link(format!("/proc/self/fd/{}", fd)).ok();
+        if link.as_deref().and_then(|p| p.to_str()) != Some("anon_inode:[pidfd]") {
+            return;
+        }
+        if pidfd_pid(fd) == -1 {
+            unsafe { libc::close(fd) };
+        }
+    }
+
     /// The creation itself (no lock held): the four pipes, the file actions,
     /// an empty signal mask, then pidfd_spawn or posix_spawn; on any error
     /// every descriptor made is closed.
@@ -373,11 +441,25 @@ mod sys {
         let envp: Vec<*mut libc::c_char> = spec.envp.iter().map(|a| a.as_ptr() as *mut libc::c_char).chain(std::iter::once(std::ptr::null_mut())).collect();
         let mut pid: libc::pid_t = -1;
         let mut pidfd: i32 = -1;
+        if r == 0 && unsafe { libc::access(spec.path.as_ptr(), libc::X_OK) } != 0 {
+            // (not executable, or missing: refused before any start, so the
+            // failed-exec path below, and its leak, aren't reached for it)
+            r = errno();
+        }
         if r == 0 {
             let mut done = false;
             if let Some(f) = pidfd_spawn_fn() {
                 let mut fd: libc::c_int = -1;
+                // (the lowest free descriptor now: where a leaked pidfd would go)
+                let probe = unsafe { libc::fcntl(req.0, libc::F_DUPFD_CLOEXEC, 0) };
+                if probe >= 0 {
+                    unsafe { libc::close(probe) };
+                }
                 let e = unsafe { f(&mut fd, spec.path.as_ptr(), &fa, &at, argv.as_ptr(), envp.as_ptr()) };
+                #[cfg(target_os = "linux")]
+                if e != 0 {
+                    close_leaked_pidfd(probe);
+                }
                 if e == 0 {
                     pidfd = fd;
                     #[cfg(target_os = "linux")]
@@ -418,7 +500,7 @@ mod sys {
         for fd in [req.0, rep.1, kil.0, life.1] {
             unsafe { libc::close(fd) };
         }
-        Ok(Proc { pid, pidfd, wfd: req.1, rfd: rep.0, killfd: kil.1, lifefd: life.0, state: State::Running, status: None, signals: 0 })
+        Ok(Proc { pid, pidfd, wfd: req.1, rfd: rep.0, killfd: kil.1, lifefd: life.0, state: State::Running, status: None, signals: 0, exited_waits: 0 })
     }
 }
 
@@ -1062,7 +1144,7 @@ mod api {
                 let done = self.with(py, |p| {
                     p.observe(ms);
                     p.try_wait();
-                    if p.state == State::Running {
+                    if !p.terminal() {
                         p.signal_kill();
                     }
                     p.terminal()
@@ -1073,6 +1155,28 @@ mod api {
                 if done {
                     break;
                 }
+            }
+            Ok(self.with(py, |p| p.code()))
+        }
+
+        /// The exit waited for, without ending it (a child whose reply ended:
+        /// its own status, not a kill's), in slices of `wake` seconds with
+        /// signals checked between them.  Returns the exit code (None if
+        /// lost).
+        #[pyo3(signature = (wake=0.025))]
+        fn wait(&self, py: Python<'_>, wake: f64) -> PyResult<Option<i32>> {
+            let _b = self.enter()?;
+            let ms = (wake * 1000.0).max(1.0) as i32;
+            loop {
+                let done = self.with(py, |p| {
+                    p.observe(ms);
+                    p.try_wait();
+                    p.terminal()
+                });
+                if done {
+                    break;
+                }
+                py.check_signals()?;
             }
             Ok(self.with(py, |p| p.code()))
         }
@@ -1166,6 +1270,21 @@ mod api {
             matches!(g.state, TaskState::Done | TaskState::Cancelled | TaskState::Taken)
         }
 
+        /// done(), after waiting up to `timeout` seconds for it (without the
+        /// GIL; woken at once when run() finishes).
+        fn wait_done(&self, py: Python<'_>, timeout: f64) -> bool {
+            let d = std::time::Duration::from_secs_f64(timeout.max(0.0));
+            py.detach(|| {
+                let g = self.m.lock().unwrap_or_else(|e| e.into_inner());
+                let fin = |g: &TaskInner| matches!(g.state, TaskState::Done | TaskState::Cancelled | TaskState::Taken);
+                if fin(&g) {
+                    return true;
+                }
+                let (g, _) = self.cv.wait_timeout_while(g, d, |g| !fin(g)).unwrap_or_else(|e| e.into_inner());
+                fin(&g)
+            })
+        }
+
         /// The child moved into `ob.<name>` in one native step (or the
         /// creation's error raised as OSError, nothing left behind).
         #[pyo3(signature = (ob, name="child"))]
@@ -1240,7 +1359,27 @@ mod api {
         }
     }
 
+    /// Up to n bytes from the start of the file at path, read and closed
+    /// natively (a /proc or cgroup file: no descriptor for Python to close,
+    /// so an interruption can't leave one open).
+    #[pyfunction]
+    pub fn read_prefix(py: Python<'_>, path: std::path::PathBuf, n: usize) -> PyResult<pyo3::Bound<'_, pyo3::types::PyBytes>> {
+        let out = py.detach(|| -> std::io::Result<Vec<u8>> {
+            use std::io::Read;
+            let mut f = std::fs::File::open(&path)?;
+            let mut buf = vec![0u8; n];
+            let k = f.read(&mut buf)?;
+            buf.truncate(k);
+            Ok(buf)
+        });
+        match out {
+            Ok(b) => Ok(pyo3::types::PyBytes::new(py, &b)),
+            Err(e) => Err(PyOSError::new_err((e.raw_os_error().unwrap_or(0), e.to_string()))),
+        }
+    }
+
     pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+        m.add_function(wrap_pyfunction!(read_prefix, m)?)?;
         m.add_class::<Child>()?;
         m.add_class::<SpawnTask>()?;
         m.add_function(wrap_pyfunction!(sigchld_check, m)?)?;

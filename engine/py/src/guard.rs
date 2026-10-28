@@ -11,13 +11,21 @@
 //! every exit of the callable (a return, any exception, a KeyboardInterrupt),
 //! leaving the callable's exception as it was.
 //!
+//! `settled_call` is the PNG call's frame (r4 §A.1-A.2): the call lock held
+//! as in `locked_call`, then `body(ob)`, then `settle(ob, ok)` run until it
+//! returns: a KeyboardInterrupt in it is retried (each retry resumes where
+//! the last one stopped, `ob`'s flags recording each step), any other
+//! failure leaves `ob` as the module's `_unsettled` obligation, refused at
+//! the next call until it settles.  The body's own exception comes out as
+//! the same object.
+//!
 //! `ReleaseLog` is the ledger's release log (lib/_memledger.py): a weak
 //! reference per tracked owner whose callback is native, appending
 //! (sequence, key) to a queue whose room was reserved when the owner was
 //! tracked, so a release is never lost to an allocation failure and no
 //! Python code runs in the callback.
 
-use pyo3::exceptions::PyTypeError;
+use pyo3::exceptions::{PyKeyboardInterrupt, PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple, PyWeakrefReference};
 use std::collections::{HashMap, VecDeque};
@@ -32,13 +40,13 @@ thread_local! {
 
 /// The release obligation: `release()` called once when dropped, and the
 /// lock's entry in HELD removed (if it was recorded).
-struct Release<'a, 'py> {
-    release: &'a Bound<'py, PyAny>,
+struct Release<'py> {
+    release: Bound<'py, PyAny>,
     addr: usize,
     recorded: bool,
 }
 
-impl Drop for Release<'_, '_> {
+impl Drop for Release<'_> {
     fn drop(&mut self) {
         if self.recorded {
             HELD.with(|h| {
@@ -51,6 +59,7 @@ impl Drop for Release<'_, '_> {
         // (the lock is ours: its release can't fail; were it to, the
         // callable's own outcome is what the caller sees)
         let _ = self.release.call0();
+        RELEASED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -59,21 +68,17 @@ impl Drop for Release<'_, '_> {
 static ACQUIRED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static RELEASED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// `fn()` with `lock` held: acquired here (blocking, or in slices of `wake`
-/// seconds with signals checked between them, so a Stop while waiting
-/// raises holding nothing), released when `fn` returns or raises.  `lock`
-/// must be a `_thread` lock (TypeError otherwise: an object with a Python
-/// `acquire` could run code between the acquire and the guard).
-#[pyfunction]
-#[pyo3(signature = (lock, f, wake=None))]
-pub fn locked_call<'py>(py: Python<'py>, lock: &Bound<'py, PyAny>, f: &Bound<'py, PyAny>, wake: Option<f64>) -> PyResult<Bound<'py, PyAny>> {
+/// `lock` held, its release armed (see the module comment): acquired
+/// blocking, or in slices of `wake` seconds with signals checked between
+/// them, so a Stop while waiting raises holding nothing.
+fn hold<'py>(py: Python<'py>, lock: &Bound<'py, PyAny>, wake: Option<f64>) -> PyResult<Release<'py>> {
     let lock_type = py.import("_thread")?.getattr("LockType")?;
     if !lock.get_type().is(&lock_type) {
         return Err(PyTypeError::new_err("locked_call needs a _thread lock"));
     }
     let addr = lock.as_ptr() as usize;
     if HELD.with(|h| h.borrow().contains(&addr)) {
-        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+        return Err(PyRuntimeError::new_err(
             "PNG work can't nest: this thread already holds the PNG engine's lock (a signal handler's call?)"));
     }
     // (the bound methods are made before anything is held)
@@ -96,14 +101,110 @@ pub fn locked_call<'py>(py: Python<'py>, lock: &Bound<'py, PyAny>, f: &Bound<'py
     }
     // (armed first, with nothing between the acquire and here; only then
     // anything that may allocate)
-    let mut guard = Release { release: &release, addr, recorded: false };
+    let mut guard = Release { release, addr, recorded: false };
     ACQUIRED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     HELD.with(|h| h.borrow_mut().push(addr));
     guard.recorded = true;
+    Ok(guard)
+}
+
+/// `fn()` with `lock` held: acquired here (blocking, or in slices of `wake`
+/// seconds with signals checked between them, so a Stop while waiting
+/// raises holding nothing), released when `fn` returns or raises.  `lock`
+/// must be a `_thread` lock (TypeError otherwise: an object with a Python
+/// `acquire` could run code between the acquire and the guard).
+#[pyfunction]
+#[pyo3(signature = (lock, f, wake=None))]
+pub fn locked_call<'py>(py: Python<'py>, lock: &Bound<'py, PyAny>, f: &Bound<'py, PyAny>, wake: Option<f64>) -> PyResult<Bound<'py, PyAny>> {
+    let guard = hold(py, lock, wake)?;
     let out = f.call0();
-    RELEASED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     drop(guard);
     out
+}
+
+/// settle(ob, ok) until it returns: a KeyboardInterrupt retried (the first
+/// one kept), any other exception returned as the failure.
+fn settle_all<'py>(py: Python<'py>, settle: &Bound<'py, PyAny>, ob: &Bound<'py, PyAny>, ok: bool) -> Result<Option<PyErr>, PyErr> {
+    let mut first: Option<PyErr> = None;
+    loop {
+        match settle.call1((ob, ok)) {
+            Ok(_) => return Ok(first),
+            Err(e) if e.is_instance_of::<PyKeyboardInterrupt>(py) => {
+                if first.is_none() {
+                    first = Some(e);
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// The error a failed settlement raises: holder.SagebrushEngineError, its
+/// cause the settlement's own exception.
+fn unsettled_error<'py>(py: Python<'py>, holder: &Bound<'py, PyAny>, what: &str, cause: PyErr) -> PyErr {
+    let err = match holder.getattr("SagebrushEngineError").and_then(|t| t.call1((what,))) {
+        Ok(e) => PyErr::from_value(e),
+        Err(e) => e,
+    };
+    err.set_cause(py, Some(cause));
+    err
+}
+
+/// The PNG call's frame (see the module comment): `lock` held throughout;
+/// an earlier unsettled obligation (`holder._unsettled`) settled first, or
+/// the call refused; `body(ob)`; `settle(ob, ok)` to its end; the lock
+/// released once.  Returns body's value, or raises its exception (the same
+/// object), or the first KeyboardInterrupt settlement absorbed after a body
+/// that returned.
+#[pyfunction]
+pub fn settled_call<'py>(
+    py: Python<'py>,
+    lock: &Bound<'py, PyAny>,
+    wake: f64,
+    ob: &Bound<'py, PyAny>,
+    body: &Bound<'py, PyAny>,
+    settle: &Bound<'py, PyAny>,
+    holder: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let guard = hold(py, lock, Some(wake))?;
+    let pending = holder.getattr("_unsettled")?;
+    if !pending.is_none() {
+        match settle_all(py, settle, &pending, false) {
+            Err(e) => {
+                drop(guard);
+                return Err(unsettled_error(py, holder, "an earlier PNG call's cleanup still fails, so PNG work is refused until it succeeds", e));
+            }
+            Ok(ki) => {
+                holder.setattr("_unsettled", py.None())?;
+                if let Some(k) = ki {
+                    drop(guard);
+                    return Err(k);
+                }
+            }
+        }
+    }
+    let out = body.call1((ob,));
+    let ok = out.is_ok();
+    match settle_all(py, settle, ob, ok) {
+        Err(e) => {
+            // (kept, still charged; the next call settles it first)
+            let kept = holder.setattr("_unsettled", ob);
+            drop(guard);
+            let err = unsettled_error(py, holder, "the PNG call's cleanup failed; its memory stays charged and PNG work is refused until the cleanup succeeds", e);
+            if let Err(k) = kept {
+                return Err(k);
+            }
+            Err(err)
+        }
+        Ok(ki) => {
+            drop(guard);
+            match (out, ki) {
+                (Err(e), _) => Err(e),
+                (Ok(_), Some(k)) => Err(k),
+                (Ok(v), None) => Ok(v),
+            }
+        }
+    }
 }
 
 /// (acquired, released) counts of locked_call's guarded sections.

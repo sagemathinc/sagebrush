@@ -229,6 +229,33 @@ def test_the_job_ends_what_the_child_started():
             os.kill(g, signal.SIGKILL)
 
 
+@posix_only
+def test_a_start_whose_exec_fails_leaks_no_descriptor():
+    # (glibc 2.39's pidfd_spawn leaks its pidfd when the exec fails:
+    # child.rs closes it; a missing or non-executable program is refused
+    # before any start)
+    d = tempfile.mkdtemp()
+    junk = os.path.join(d, "not-a-program")
+    with open(junk, "wb") as f:
+        f.write(b"\x00\x01\x02 not an executable format")
+    os.chmod(junk, 0o755)
+    base = fds()
+    seen = set()
+    for path in [junk] * 20 + [os.path.join(d, "missing")] * 5:
+        err = tempfile.TemporaryFile()
+        t = raster.SpawnTask(path, [path], {}, err.fileno())
+        t.run()
+        ob = Ob()
+        try:
+            t.take_into(ob)
+            raise AssertionError("started")
+        except OSError as e:
+            seen.add(e.args[0])
+        err.close()
+    assert fds() == base, (fds(), base)
+    print("  errors: %s" % sorted(seen))
+
+
 def test_fifty_children_leave_no_descriptor():
     base = fds()
     for i in range(50):

@@ -796,6 +796,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     raster.add_function(wrap_pyfunction!(raster_child_main, &raster)?)?;
     raster.add_function(wrap_pyfunction!(guard::locked_call, &raster)?)?;
     raster.add_function(wrap_pyfunction!(guard::locked_call_counts, &raster)?)?;
+    raster.add_function(wrap_pyfunction!(guard::settled_call, &raster)?)?;
     raster.add_class::<guard::ReleaseLog>()?;
     #[cfg(any(unix, windows))]
     child::register(&raster)?;
