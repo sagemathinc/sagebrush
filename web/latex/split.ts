@@ -9,6 +9,8 @@
 //    any chunk over CHUNK_MAX, is a placeholder saying so, with its size.
 // The input is the renderer's own HTML: well formed, every text escaped (no raw "<" in text), attributes quoted.
 export const PIECE_MAX = 128 * 1024, CHUNK_MAX = 2 * 2 ** 20;
+// (the size aimed for: smaller pieces parse in less time each; PIECE_MAX stays the most any piece may be)
+export const PIECE_TARGET = 32 * 1024;
 const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
 const enc = new TextEncoder();
 export const bytes = (s: string) => enc.encode(s).length;
@@ -71,21 +73,24 @@ function splitText(t: string, max: number): string[] | null {
 /** One chunk as pieces, each at most PIECE_MAX bytes (or one placeholder). */
 export function splitChunk(h: string): string[] {
   const n = bytes(h);
-  if (n <= PIECE_MAX) return [h];
+  if (n <= PIECE_TARGET) return [h];
   if (n > CHUNK_MAX) return [placeholder("this block is too large to display in the prototype", n)];
   const o = outer(h);
   if (!o) return [placeholder("this block is too large to display in the prototype", n)];
   const cls = (/\sclass="([^"]*)"/.exec(o.open) || [])[1] || "";
   if (o.tag === "table" || /\btabular\b/.test(cls) || o.kids.some((k) => /^<table\b/.test(h.slice(k.start, k.end)) && bytes(h.slice(k.start, k.end)) > PIECE_MAX))
-    return [placeholder("this table is too large to display in the prototype", n)];
+    return n <= PIECE_MAX ? [h] : [placeholder("this table is too large to display in the prototype", n)];
   const para = o.tag === "div" && /(^|\s)p(\s|$)/.test(cls);
   // the children, a text run split further where it is itself too large (a paragraph's long text)
   const parts: string[] = [];
   for (const k of o.kids) {
     const s = h.slice(k.start, k.end);
-    if (bytes(s) <= PIECE_MAX - 256) { parts.push(s); continue; }
-    if (!s.startsWith("<")) { const t = splitText(s, PIECE_MAX - 256); if (!t) return [placeholder("this block is too large to display in the prototype", n)]; parts.push(...t); continue; }
-    return [placeholder("this block is too large to display in the prototype", n)];
+    const b = bytes(s);
+    if (b <= PIECE_TARGET - 256) { parts.push(s); continue; }
+    if (!s.startsWith("<")) { const t = splitText(s, PIECE_TARGET - 256); if (!t) return [placeholder("this block is too large to display in the prototype", n)]; parts.push(...t); continue; }
+    // (one element over the target: a piece of its own, if it fits the maximum)
+    if (b <= PIECE_MAX - 256) { parts.push(s); continue; }
+    return [n <= PIECE_MAX ? h : placeholder("this block is too large to display in the prototype", n)].filter(Boolean) as string[];
   }
   const first = o.open, later = contOpen(o.open, o.tag);
   // (byte counts kept as it goes: linear in the chunk)
@@ -93,7 +98,7 @@ export function splitChunk(h: string): string[] {
   const flush = () => { if (cur.length) pieces.push((pieces.length ? later : first) + cur.join("") + o.close); cur = []; cn = 0; };
   for (const s of parts) {
     const b = bytes(s);
-    if (cur.length && cn + b + 256 > PIECE_MAX) flush();
+    if (cur.length && cn + b + 256 > PIECE_TARGET) flush();
     cur.push(s); cn += b;
   }
   flush();

@@ -418,7 +418,7 @@ import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-
 import { createShareDialog } from "./share-client/dialog.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
-// (the LaTeX editor's entry; a build without it resolves this to an empty module: web/build.ts, web/latex/boot-off.ts)
+// (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot } from "./latex/boot.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
