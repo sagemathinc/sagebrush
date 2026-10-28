@@ -53,6 +53,23 @@ def posix_only(f):
     return f
 
 
+def linux_only(f):
+    f.linux_only = True
+    return f
+
+
+def children():
+    """This process's child processes (Linux: /proc's per-thread lists)."""
+    out = set()
+    for t in os.listdir("/proc/self/task"):
+        try:
+            with open("/proc/self/task/%s/children" % t) as f:
+                out |= {int(x) for x in f.read().split()}
+        except OSError:
+            pass
+    return out
+
+
 class Ob:
     pass
 
@@ -231,9 +248,9 @@ def test_the_job_ends_what_the_child_started():
 
 @posix_only
 def test_a_start_whose_exec_fails_leaks_no_descriptor():
-    # (glibc 2.39's pidfd_spawn leaks its pidfd when the exec fails:
-    # child.rs closes it; a missing or non-executable program is refused
-    # before any start)
+    # (glibc 2.39's pidfd_spawn leaked its pidfd when the exec failed, on the
+    # measured Ubuntu libc; the creation is now posix_spawn, which makes no
+    # pidfd, then our own pidfd_open: kept as the regression check)
     d = tempfile.mkdtemp()
     junk = os.path.join(d, "not-a-program")
     with open(junk, "wb") as f:
@@ -254,6 +271,116 @@ def test_a_start_whose_exec_fails_leaks_no_descriptor():
         err.close()
     assert fds() == base, (fds(), base)
     print("  errors: %s" % sorted(seen))
+
+
+LOW_FD = r'''
+import os, sys, tempfile, threading, time
+import sagebrush
+from sagebrush._native import raster
+# (fds 0, 1 and 2 closed: the stderr file and the pipes take the low numbers,
+# so a mapping applied in place would overwrite a later source)
+for fd in (0, 1, 2):
+    os.close(fd)
+err = tempfile.TemporaryFile()
+CHILD = "import os\nos.write(2, b'E')\nfds = sorted(int(x) for x in os.listdir('/proc/self/fd'))\nos.write(1, repr(fds).encode() + b'\\n')\nd = os.read(0, 5)\nos.write(1, d)\n"
+t = raster.SpawnTask(sys.executable, [sys.executable, "-I", "-S", "-c", CHILD], {"LC_ALL": "C"}, err.fileno())
+t.run()
+class Ob: pass
+ob = Ob()
+t.take_into(ob)
+c = ob.child
+os.write(c.wfd, b"hello")
+got = b""
+while not got.endswith(b"hello"):
+    b = os.read(c.rfd, 64)
+    if not b:
+        break
+    got += b
+c.kill_and_reap()
+err.seek(0)
+r = (err.fileno(), got, err.read())
+with open(sys.argv[1], "w") as f:
+    f.write(repr(r))
+'''
+
+
+@linux_only
+def test_a_parent_without_its_standard_descriptors_gives_the_child_exactly_its_five():
+    # (astra2's low-fd gate: the child's 0, 1, 2, 3, 4 are the request pipe,
+    # the reply pipe, the stderr file, the kill and life pipes, and nothing
+    # else of ours; its stderr is the file, not a pipe)
+    import subprocess
+    d = tempfile.mkdtemp()
+    out = os.path.join(d, "r")
+    script = os.path.join(d, "low.py")
+    with open(script, "w") as f:
+        f.write(LOW_FD)
+    p = subprocess.run([sys.executable, script, out], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=60)
+    assert p.returncode == 0, p.stderr.decode()[-2000:]
+    errfd, got, errtext = eval(open(out).read())
+    lines = got.split(b"\n")
+    fds_seen = eval(lines[0].decode())
+    # (the child's listing opened one more descriptor for itself: 5)
+    assert fds_seen in ([0, 1, 2, 3, 4], [0, 1, 2, 3, 4, 5]), fds_seen
+    assert lines[1] == b"hello" and errtext == b"E", (got, errtext)
+    print("  stderr file was fd %d in the parent; the child's fds %s" % (errfd, fds_seen))
+
+
+@linux_only
+def test_a_pidfd_that_cant_be_opened_keeps_the_pid_owner():
+    base = fds()
+    c = start(WATCHED, fail_after=10)
+    assert not c.has_pidfd and c.state == "running"
+    assert c.kill_and_reap(0.2) == 137 and c.state == "reaped" and c.signals_sent == 0
+    c.close_io()
+    del c
+    assert children() == set() and fds() == base, (children(), fds(), base)
+
+
+@linux_only
+def test_waitid_without_p_pidfd_keeps_the_pidfd_for_the_rest():
+    c = start(DEAF, fail_after=12)
+    assert c.has_pidfd and c.state == "running"
+    assert c.kill_and_reap() == -signal.SIGKILL and c.state == "reaped"
+    assert children() == set()
+
+
+@linux_only
+def test_a_fault_after_the_creation_ends_and_reaps_the_child():
+    base = fds()
+    for _ in range(5):
+        try:
+            start(WATCHED, fail_after=11)
+            raise AssertionError("not refused")
+        except OSError as e:
+            assert "test fault" in str(e)
+    assert children() == set() and fds() == base, (children(), fds(), base)
+
+
+@linux_only
+def test_a_child_reaped_before_its_pidfd_is_lost_never_signalled():
+    # (the negative control: an outside reap between the creation and
+    # pidfd_open; the pid is no longer ours, and nothing is sent to it)
+    c = start(QUICK, fail_after=13)
+    assert c.poll_exit() and c.state == "lost" and c.returncode is None
+    assert c.kill_and_reap() is None and c.signals_sent == 0
+
+
+@posix_only
+def test_a_child_that_exits_at_once_is_reaped_with_its_status():
+    err = tempfile.TemporaryFile()
+    t = raster.SpawnTask("/bin/sh", ["/bin/sh", "-c", "exit 7"], {}, err.fileno())
+    t.run()
+    ob = Ob()
+    t.take_into(ob)
+    c = ob.child
+    t0 = time.monotonic()
+    while not c.poll_exit():
+        assert time.monotonic() - t0 < 10
+        time.sleep(0.01)
+    assert c.state == "reaped" and c.returncode == 7 and c.signals_sent == 0
+    if sys.platform.startswith("linux"):
+        assert children() == set()
 
 
 def test_fifty_children_leave_no_descriptor():
@@ -322,6 +449,8 @@ if __name__ == "__main__":
     names = [n for n in list(globals()) if n.startswith("test_")]
     if WINDOWS:
         names = [n for n in names if not getattr(globals()[n], "posix_only", False)]
+    if not sys.platform.startswith("linux"):
+        names = [n for n in names if not getattr(globals()[n], "linux_only", False)]
     if "-k" in sys.argv:
         names = [n for n in names if sys.argv[sys.argv.index("-k") + 1] in n]
     for n in names:

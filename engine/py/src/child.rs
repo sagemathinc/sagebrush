@@ -25,10 +25,10 @@
 //! exits at once; SIGKILL is only a fallback, after one slice, while the life
 //! pipe shows no exit, through the pidfd where there is one (identity-bound)
 //! and otherwise by pid (safe only under the exclusive-reaper contract, which
-//! `sigchld_refusal` checks at spawn).  Identity (T4): with glibc's
-//! `pidfd_spawn` (found at run time) the pidfd comes from the creation
-//! itself; it falls back to `posix_spawn` only when `pidfd_spawn` reports
-//! ENOSYS (no child created then: H-4).
+//! `sigchld_refusal` checks at spawn).  Identity (#157 PIDFD note r2,
+//! option B): glibc's posix_spawn, then pidfd_open of the child's pid while
+//! it is ours and unreaped.  That is plan T4's I-2, conditional on the
+//! reaper contract, NOT creation-atomic (I-1): see own_pidfd.
 //!
 //! Windows (`sys` below, r5 R3.4): created suspended, assigned to a job
 //! object that kills it when the job's handle closes, then resumed; any
@@ -330,69 +330,87 @@ mod sys {
         }
     }
 
-    type SpawnFn = unsafe extern "C" fn(
-        *mut libc::c_int,
-        *const libc::c_char,
-        *const libc::posix_spawn_file_actions_t,
-        *const libc::posix_spawnattr_t,
-        *const *mut libc::c_char,
-        *const *mut libc::c_char,
-    ) -> libc::c_int;
-
-    fn pidfd_spawn_fn() -> Option<SpawnFn> {
-        #[cfg(target_os = "linux")]
-        {
-            let name = b"pidfd_spawn\0";
-            let f = unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr() as *const libc::c_char) };
-            if !f.is_null() {
-                return Some(unsafe { std::mem::transmute::<*mut libc::c_void, SpawnFn>(f) });
-            }
-        }
-        None
-    }
-
+    /// Test stages past the creation (`fail_after`, tests only): 10 the
+    /// pidfd_open failing, 11 a fault after the creation, 12 waitid(P_PIDFD)
+    /// unsupported, 13 the child reaped by "someone else" before pidfd_open.
     #[cfg(target_os = "linux")]
-    fn pidfd_pid(pidfd: i32) -> libc::pid_t {
-        // (/proc/self/fdinfo's "Pid:" line: the pid the pidfd refers to)
-        let path = format!("/proc/self/fdinfo/{}", pidfd);
-        if let Ok(s) = std::fs::read_to_string(path) {
-            for line in s.lines() {
-                if let Some(v) = line.strip_prefix("Pid:") {
-                    if let Ok(p) = v.trim().parse() {
-                        return p;
-                    }
-                }
-            }
-        }
-        -1
-    }
-
-    /// glibc 2.39's pidfd_spawn leaks its pidfd when the exec fails (it
-    /// returns the error and -1; measured on Ubuntu's 2.39-0ubuntu8.9: one
-    /// descriptor per failed start): the descriptor number that was the
-    /// lowest free one just before the call, closed if it is now a pidfd of
-    /// an ended process.  (Another thread opening a pidfd of an ended
-    /// process at that number in that window would lose it: not done in
-    /// this process's PNG paths, and disclosed.)
+    const T_NO_PIDFD: u32 = 10;
+    const T_FAULT_AFTER: u32 = 11;
     #[cfg(target_os = "linux")]
-    fn close_leaked_pidfd(fd: i32) {
+    const T_NO_P_PIDFD: u32 = 12;
+    #[cfg(target_os = "linux")]
+    const T_FOREIGN_REAP: u32 = 13;
+
+    /// Linux: a pidfd for our child `pid`, opened right after its creation,
+    /// while it is ours and unreaped (#157 PIDFD note r2, option B; astra2's
+    /// and daybreak2's CLEAR).  **Identity here is conditional (plan T4's
+    /// I-2), not creation-atomic:** under the reaper contract (no SIG_IGN or
+    /// SA_NOCLDWAIT for SIGCHLD, nobody else reaping our children) the pid
+    /// stays ours until our own wait, even if the child has already exited,
+    /// so the pidfd names our child.  A violation is detected only where it
+    /// is observable: waitid(P_PIDFD, WNOHANG|WNOWAIT) failing with ECHILD
+    /// (a process that isn't our child, or one already reaped) makes the
+    /// handle Lost, and that identity is never signalled or waited on.  A
+    /// recycled pid that is another child of this process passes the check,
+    /// and a foreign reap after it isn't seen: both are outside the
+    /// contract, and nothing is promised for them.
+    /// Returns (the pidfd or -1, lost).
+    #[cfg(target_os = "linux")]
+    fn own_pidfd(pid: libc::pid_t, test: Option<u32>) -> (i32, bool) {
+        if test == Some(T_FOREIGN_REAP) {
+            // (the negative control: reaped here as an outside reaper would)
+            let mut st = 0;
+            unsafe { libc::waitpid(pid, &mut st, 0) };
+        }
+        let fd = if test == Some(T_NO_PIDFD) { -1 } else { unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as i32 } };
         if fd < 0 {
-            return;
+            // (no pidfd: ENOSYS before 5.3, EMFILE, seccomp, or the pid gone
+            // (ESRCH: a foreign reap).  The numeric pid stays the obligation,
+            // under I-2: our own wait decides, and ECHILD there is Lost)
+            return (-1, false);
         }
-        let link = std::fs::read_link(format!("/proc/self/fd/{}", fd)).ok();
-        if link.as_deref().and_then(|p| p.to_str()) != Some("anon_inode:[pidfd]") {
-            return;
-        }
-        if pidfd_pid(fd) == -1 {
-            unsafe { libc::close(fd) };
+        loop {
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let r = if test == Some(T_NO_P_PIDFD) {
+                unsafe { *libc::__errno_location() = libc::EINVAL };
+                -1
+            } else {
+                unsafe { libc::waitid(libc::P_PIDFD, fd as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) }
+            };
+            if r == 0 {
+                // (si_pid 0: alive; else exited and waiting for OUR reap
+                // (WNOWAIT): ours either way)
+                return (fd, false);
+            }
+            match errno() {
+                libc::EINTR => continue,
+                libc::ECHILD => {
+                    // (not our child: Lost.  The pidfd closed, nothing sent)
+                    unsafe { libc::close(fd) };
+                    return (-1, true);
+                }
+                // (EINVAL: waitid has no P_PIDFD before 5.4.  The pidfd is
+                // kept for poll and pidfd_send_signal; waits go by pid)
+                _ => return (fd, false),
+            }
         }
     }
 
-    /// The creation itself (no lock held): the four pipes, the file actions,
-    /// an empty signal mask, then pidfd_spawn or posix_spawn; on any error
-    /// every descriptor made is closed.
+    /// The creation itself (no lock held): the four pipes; safe duplicates of
+    /// the five descriptors the child gets; the file actions; an empty signal
+    /// mask; glibc's posix_spawn (which handles its internal signals,
+    /// cancellation and stack itself, and creates no pidfd: nothing of it can
+    /// leak); then, on Linux, a pidfd of the child (own_pidfd).  On any error
+    /// before the process exists every descriptor made is closed; after it
+    /// exists, the Proc owns it, and an error drops the Proc, whose Drop
+    /// ends and reaps it before this returns.
     pub(super) fn create(spec: &Spec) -> Result<Proc, (i32, String)> {
         let mut made: Vec<i32> = Vec::new();
+        let close_all = |v: &mut Vec<i32>| {
+            for fd in v.drain(..) {
+                unsafe { libc::close(fd) };
+            }
+        };
         let fail = |made: &mut Vec<i32>, e: i32, what: &str| {
             for fd in made.drain(..) {
                 unsafe { libc::close(fd) };
@@ -417,6 +435,20 @@ mod sys {
             }
         }
         let (req, rep, kil, life) = (pipes[0], pipes[1], pipes[2], pipes[3]);
+        // (every source duplicated above the five targets first, close-on-exec,
+        // before any action can overwrite a target: a source that is itself
+        // 0..4 (a parent whose standard descriptors were closed) can't be
+        // clobbered by an earlier dup2.  Each duplicate closed once, below)
+        let mut dups: Vec<i32> = Vec::new();
+        for from in [req.0, rep.1, spec.err_fd, kil.0, life.1] {
+            let d = unsafe { libc::fcntl(from, libc::F_DUPFD_CLOEXEC, 5) };
+            if d < 0 {
+                let e = errno();
+                close_all(&mut dups);
+                return fail(&mut made, e, "a descriptor for the PNG engine's process");
+            }
+            dups.push(d);
+        }
         let mut fa: libc::posix_spawn_file_actions_t = unsafe { std::mem::zeroed() };
         let mut at: libc::posix_spawnattr_t = unsafe { std::mem::zeroed() };
         unsafe {
@@ -424,9 +456,9 @@ mod sys {
             libc::posix_spawnattr_init(&mut at);
         }
         let mut r = 0;
-        for (from, to) in [(req.0, 0), (rep.1, 1), (spec.err_fd, 2), (kil.0, 3), (life.1, 4)] {
+        for (to, from) in dups.iter().enumerate() {
             if r == 0 {
-                r = unsafe { libc::posix_spawn_file_actions_adddup2(&mut fa, from, to) };
+                r = unsafe { libc::posix_spawn_file_actions_adddup2(&mut fa, *from, to as i32) };
             }
         }
         if r == 0 {
@@ -440,67 +472,41 @@ mod sys {
         let argv: Vec<*mut libc::c_char> = spec.argv.iter().map(|a| a.as_ptr() as *mut libc::c_char).chain(std::iter::once(std::ptr::null_mut())).collect();
         let envp: Vec<*mut libc::c_char> = spec.envp.iter().map(|a| a.as_ptr() as *mut libc::c_char).chain(std::iter::once(std::ptr::null_mut())).collect();
         let mut pid: libc::pid_t = -1;
-        let mut pidfd: i32 = -1;
-        if r == 0 && unsafe { libc::access(spec.path.as_ptr(), libc::X_OK) } != 0 {
-            // (not executable, or missing: refused before any start, so the
-            // failed-exec path below, and its leak, aren't reached for it)
-            r = errno();
-        }
         if r == 0 {
-            let mut done = false;
-            if let Some(f) = pidfd_spawn_fn() {
-                let mut fd: libc::c_int = -1;
-                // (the lowest free descriptor now: where a leaked pidfd would go)
-                let probe = unsafe { libc::fcntl(req.0, libc::F_DUPFD_CLOEXEC, 0) };
-                if probe >= 0 {
-                    unsafe { libc::close(probe) };
-                }
-                let e = unsafe { f(&mut fd, spec.path.as_ptr(), &fa, &at, argv.as_ptr(), envp.as_ptr()) };
-                #[cfg(target_os = "linux")]
-                if e != 0 {
-                    close_leaked_pidfd(probe);
-                }
-                if e == 0 {
-                    pidfd = fd;
-                    #[cfg(target_os = "linux")]
-                    {
-                        pid = pidfd_pid(fd);
-                    }
-                    done = true;
-                } else if e != libc::ENOSYS {
-                    // (no fallback on any other error: H-4)
-                    r = e;
-                    done = true;
-                }
-            }
-            if !done {
-                r = unsafe { libc::posix_spawn(&mut pid, spec.path.as_ptr(), &fa, &at, argv.as_ptr(), envp.as_ptr()) };
-            }
+            r = unsafe { libc::posix_spawn(&mut pid, spec.path.as_ptr(), &fa, &at, argv.as_ptr(), envp.as_ptr()) };
         }
         unsafe {
             libc::posix_spawn_file_actions_destroy(&mut fa);
             libc::posix_spawnattr_destroy(&mut at);
         }
+        close_all(&mut dups);
         if r != 0 {
+            // (no child exists: glibc reaped its own failed one)
             return fail(&mut made, r, "starting the PNG engine's process");
         }
-        if pid <= 0 {
-            // (a pidfd whose pid can't be read: the child is killed through
-            // it and reaped through its pid... which we don't have; refuse)
-            if pidfd >= 0 {
-                #[cfg(target_os = "linux")]
-                unsafe {
-                    libc::syscall(libc::SYS_pidfd_send_signal, pidfd, libc::SIGKILL, std::ptr::null::<libc::c_void>(), 0)
-                };
-                unsafe { libc::close(pidfd) };
-            }
-            return fail(&mut made, libc::ESRCH, "reading the PNG engine process's pid from its pidfd");
-        }
-        // (the child's ends closed in the parent)
+        // (the child's ends closed in the parent; the process is the Proc's from here)
         for fd in [req.0, rep.1, kil.0, life.1] {
             unsafe { libc::close(fd) };
         }
-        Ok(Proc { pid, pidfd, wfd: req.1, rfd: rep.0, killfd: kil.1, lifefd: life.0, state: State::Running, status: None, signals: 0, exited_waits: 0 })
+        made.clear();
+        #[allow(unused_mut)]
+        let mut p = Proc { pid, pidfd: -1, wfd: req.1, rfd: rep.0, killfd: kil.1, lifefd: life.0, state: State::Running, status: None, signals: 0, exited_waits: 0 };
+        #[cfg(target_os = "linux")]
+        {
+            let (fd, lost) = own_pidfd(pid, spec.fail_after);
+            p.pidfd = fd;
+            if lost {
+                p.state = State::Lost;
+                p.release_identity();
+            }
+        }
+        if spec.fail_after == Some(T_FAULT_AFTER) {
+            // (an error after the creation: the Proc dropped here ends and
+            // reaps the child before the error is returned)
+            drop(p);
+            return Err((libc::EIO, "after starting the PNG engine's process (test fault)".into()));
+        }
+        Ok(p)
     }
 }
 
