@@ -8,12 +8,17 @@ const ID = "sagebrush-reload-notice";
 
 export const RELOAD_TEXT = "Sagebrush was updated in another tab, so this page can't read or save your files any more. Reload it to go on; what you see here stays until you do.";
 
-/** The notice (once per page): `text`, and Reload. */
+/** The notice (once per page): `text`, and Reload.  Already there, it keeps its text, unless this is RELOAD_TEXT:
+ * that this page can't save at all is said over any other reason to reload (TimeTravel's having stopped), board's R1. */
 export function showReloadNotice(text = RELOAD_TEXT): HTMLElement | null {
   const doc = (globalThis as any).document as Document | undefined;
   if (!doc?.body) return null;
   const had = doc.getElementById(ID);
-  if (had) return had;
+  if (had) {
+    const said = had.querySelector("span");
+    if (text === RELOAD_TEXT && said) said.textContent = text;
+    return had;
+  }
   const box = doc.createElement("div");
   box.id = ID;
   box.setAttribute("role", "alert");
@@ -54,6 +59,13 @@ export function showBusyNotice(text: string): HTMLElement | null {
   box.append(msg, btn);
   doc.body.append(box);
   return box;
+}
+
+/** TimeTravel's word from the history stores (onHistoryRefused): a pause, as a busy notice; `stopped` (that it
+ * stopped recording in this tab, notebook/stores.js HISTORY_STOPPED), at the top with Reload, once, which no busy
+ * notice replaces or hides. */
+export function showHistoryNotice(text: string, stopped?: string): HTMLElement | null {
+  return stopped !== undefined && text === stopped ? showReloadNotice(text) : showBusyNotice(text);
 }
 
 const LOSS_ID = "sagebrush-loss-notice";

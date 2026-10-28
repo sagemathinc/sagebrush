@@ -174,6 +174,7 @@
   "lib:lib.es2020.bigint.d.ts :: DataView.setBigInt64": {"class":"no-new-store","reason":"every call's result type is store-free and opaque-free, and it takes no function: it makes no new JS store this realm can see (reviewed member by member)","returns":"no-store"},
   "lib:lib.es2020.bigint.d.ts :: DataView.setBigUint64": {"class":"no-new-store","reason":"every call's result type is store-free and opaque-free, and it takes no function: it makes no new JS store this realm can see (reviewed member by member)","returns":"no-store"},
   "lib:lib.es2020.intl.d.ts :: DateTimeFormatConstructor.call": {"class":"no-new-store","reason":"every call's result type is store-free and opaque-free, and it takes no function: it makes no new JS store this realm can see (reviewed member by member)","returns":"no-store"},
+  "lib:lib.es2020.sharedmemory.d.ts :: Atomics.load": {"class":"no-new-store","reason":"the es2020 overload (an Int32Array or BigInt64Array): it reads one element of an existing typed array and returns a number or bigint, taking no function: it makes no new JS store (X1's admission handshake reads the interrupt cutoff from the runtime's existing Int32Array)","returns":"no-store"},
   "lib:lib.es2020.string.d.ts :: String.localeCompare": {"class":"no-new-store","reason":"every call's result type is store-free and opaque-free, and it takes no function: it makes no new JS store this realm can see (reviewed member by member)","returns":"no-store"},
   "lib:lib.es2020.string.d.ts :: String.matchAll": {"class":"no-new-store","reason":"every call's result type is store-free and opaque-free, and it takes no function: it makes no new JS store this realm can see (reviewed member by member)","returns":"no-store"},
   "lib:lib.es2021.string.d.ts :: String.replaceAll": {"class":"no-new-store","reason":"every call's result type is store-free and opaque-free, and it takes no function: it makes no new JS store this realm can see (reviewed member by member)","returns":"no-store"},
@@ -375,7 +376,9 @@
   "web/shims/fs.ts :: fetchRemote :: read x . response #0": {"decl":"187bac34b1f7cbc7","class":"allocates","reason":"x.response after x.responseType = \"arraybuffer\" in the same function: a new ArrayBuffer"}
  },
 "deltas": [
-
+  {"key":"src/notebook-session.ts :: handle :: post ( { id , done : true , ms : performance . now ( ) - t0 , ... ( ok ? { } : { error : true } ) , ... ( changedNames . size ? { names : [ ... changedNames ] }… 9e04ba46 #0","before":"delegating","after":"absent","replacement":["src/notebook-session.ts :: handle :: post ( { id , done : true , ms : performance . now ( ) - t0 , ... ( ok ? { } : { error : true } ) , ... ( changedNames . size ? { names : [ ... changedNames ] }… e970c84a #0"],"reason":"X1 (#247): every reply now carries the session's mode and whether it is ready (mode, modeReady), so the post's text and key changed; the same delegating post, signature-only"},
+  {"key":"src/notebook-session.ts :: handle :: post ( { id , matches , prefix } ) #0","before":"delegating","after":"absent","replacement":["src/notebook-session.ts :: handle :: post ( { id , matches , prefix , mode , modeReady : true } ) #0"],"reason":"X1 (#247): every reply now carries the session's mode and whether it is ready (mode, modeReady), so the post's text and key changed; the same delegating post, signature-only"},
+  {"key":"src/notebook-session.ts :: handle :: post ( { id , more : m . magma ? false : m . matlab ? matlabIsIncomplete ( m . check ) : needsMore ( m . check , { sage : ! ! m . sage } ) } ) #0","before":"delegating","after":"absent","replacement":["src/notebook-session.ts :: handle :: post ( { id , more : m . magma ? false : m . matlab ? matlabIsIncomplete ( m . check ) : needsMore ( m . check , { sage : ! ! m . sage } ) , mode , modeReady : … 146a1166 #0"],"reason":"X1 (#247): every reply now carries the session's mode and whether it is ready (mode, modeReady), so the post's text and key changed; the same delegating post, signature-only"}
 ],
 "parity": {
   "src/compile.ts :: compile :: analyze ( mod ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
@@ -1126,7 +1129,7 @@
   "ec730a7e9c6b7eda": {"decl":"src/notebook-session.ts :: LimitsError.class","class":"no-new-store"},
   "c6407727d142d472": {"decl":"src/notebook-session.ts :: moduleNames","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "8c81c3206a470a50": {"decl":"src/notebook-session.ts :: nm","class":"allocates","via":"src/limits.ts :: plain"},
-  "0101bbce86467f54": {"decl":"src/notebook-session.ts :: notebookSession","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
+  "3756cf68deb86e08": {"decl":"src/notebook-session.ts :: notebookSession","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "96ca16dbff73f0c6": {"decl":"src/notebook-session.ts :: of","class":"allocates","via":"src/limits.ts :: plain"},
   "7c7767d1546f9e3d": {"decl":"src/notebook-session.ts :: str","class":"allocates","via":"src/limits.ts :: plain"},
   "849fd15500b28db8": {"decl":"src/pkgset.ts :: PkgsetError.class","class":"no-new-store"},

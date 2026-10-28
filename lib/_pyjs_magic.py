@@ -467,7 +467,90 @@ def _no_install(line):
                      "with the modules it comes with")
 
 
+def _estimate(line):
+    """%estimate f(args): sagebrush.estimate(f, args) for the outermost call
+    only, when its arguments are names or literals (design-estimates-progress
+    r4 §3); it never runs a nested call, so anything else is declined.  (A
+    small parser of its own: the runtime has no ast module.)"""
+    import re
+    code = line.strip()
+    m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\((.*)\)$", code, re.S)
+    if not m:
+        raise UsageError("%estimate needs a call, f(args)")
+    func, inner = m.group(1), m.group(2)
+    decline = UsageError("%estimate estimates only the outermost call, with names or literals as its "
+                         "arguments: evaluate the arguments first")
+    # the top-level arguments: split at commas outside string literals; any
+    # bracket outside one is a nested expression, declined
+    parts, cur, quote = [], "", None
+    for ch in inner:
+        if quote:
+            cur += ch
+            if ch == "\\":
+                raise decline
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+            cur += ch
+        elif ch in "()[]{}":
+            raise decline
+        elif ch == ",":
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    if quote:
+        raise decline
+    parts.append(cur)
+    parts = [p.strip() for p in parts]
+    if parts == [""]:
+        parts = []
+    elif parts and parts[-1] == "":
+        parts.pop()
+    ns = _user_ns()
+
+    def value(t):
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", t):
+            if t in ("True", "False", "None"):
+                return {"True": True, "False": False, "None": None}[t]
+            if t in ns:
+                return ns[t]
+            import builtins
+            if hasattr(builtins, t):
+                return getattr(builtins, t)
+            raise NameError("name '%s' is not defined" % t)
+        if re.match(r"^-?[0-9]+$", t):
+            return int(t)
+        if re.match(r"^-?([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+)([eE][-+]?[0-9]+)?$", t):
+            return float(t)
+        if len(t) >= 2 and t[0] == t[-1] and t[0] in "'\"" and t[0] not in t[1:-1]:
+            return t[1:-1]
+        raise decline
+
+    args, kwds = [], {}
+    for p in parts:
+        k = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)\s*(.*)$", p, re.S)
+        if k:
+            # (as Python's call: a keyword given twice is an error, never
+            # the last one silently)
+            if k.group(1) in kwds:
+                raise UsageError("%%estimate: keyword argument repeated: %s" % k.group(1))
+            kwds[k.group(1)] = value(k.group(2).strip())
+        elif kwds:
+            raise decline
+        else:
+            args.append(value(p))
+    names = func.split(".")
+    f = value(names[0])
+    for n in names[1:]:
+        f = getattr(f, n)
+    import sagebrush
+    return sagebrush.estimate(f, *args, **kwds)
+
+
 _LINE = {
+    "estimate": _estimate,
     "matplotlib": _matplotlib,
     "load_ext": _load_ext,
     "reload_ext": lambda line: _load_ext(line, True),
