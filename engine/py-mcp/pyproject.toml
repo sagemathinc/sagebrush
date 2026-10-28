@@ -15,7 +15,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
     "Programming Language :: Python :: 3",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT OR Apache-2.0"
 license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
 dependencies = ["sagebrush>=0.7.0"]
