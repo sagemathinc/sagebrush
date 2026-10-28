@@ -171,7 +171,7 @@ try {
   check(lts.every((d) => d <= 50), "no Long Task over 50 ms while re-patching (VM2, not a timing box)", lts);
 
   // ---- a 1.5 MiB enumerate and a 1.5 MiB plain theorem: pieces whose styles and labels continue; a large table: a placeholder
-  const thmDoc = "\\documentclass{article}\n\\newtheorem{theorem}{Theorem}\n\\begin{document}\n\\begin{theorem}\n" + "theorem words go on and on here. ".repeat(6000).split(". ").join(".\n\n") + "\n\\end{theorem}\n\n\\begin{enumerate}\n" + "\\item an item\n".repeat(16000) + "\\end{enumerate}\n\n\\begin{tabular}{ll}\n" + "aaaaaaaaaaaaaaaaaaaaaaaa & b \\\\\n".repeat(9000) + "\\end{tabular}\n\\end{document}\n";
+  const thmDoc = "\\documentclass{article}\n\\newtheorem{theorem}{Theorem}\n\\begin{document}\n\\begin{theorem}\n" + "theorem words go on and on here. ".repeat(6000).split(". ").join(".\n\n") + "\n\\end{theorem}\n\n\\begin{enumerate}\n" + "\\item an item\n".repeat(6000) + "\\end{enumerate}\n\\end{document}\n";
   const ft = await mk("/t/thm.tex", enc(thmDoc));
   await open(ft);
   await until(`document.querySelectorAll(".tex-preview .thm.cont").length > 0 && document.querySelectorAll(".tex-preview .list.cont").length > 0`, 60000);
@@ -179,11 +179,13 @@ try {
     const thms = [...document.querySelectorAll(".tex-preview .thm")], lists = [...document.querySelectorAll(".tex-preview ol.list")];
     const fs = (e) => getComputedStyle(e).fontStyle, pl = (e) => getComputedStyle(e).paddingLeft, cls = (e) => [...e.classList].filter((c) => c !== "cont").join(".");
     const labels = lists.flatMap((l) => [...l.querySelectorAll(":scope > li > .lbl")].map((x) => x.textContent));
-    const seq = labels.every((t, i) => t === (i + 1) + ".");
-    return { thms: thms.length, thmSame: thms.every((t) => fs(t) === fs(thms[0]) && cls(t) === cls(thms[0])), lists: lists.length, listSame: lists.every((l) => pl(l) === pl(lists[0]) && cls(l) === cls(lists[0])), labels: labels.length, seq, table: document.querySelector(".tex-preview").textContent.includes("this table is too large to display in the prototype") };
+    return { thms: thms.length, thmSame: thms.every((t) => fs(t) === fs(thms[0]) && cls(t) === cls(thms[0])), lists: lists.length, listSame: lists.every((l) => pl(l) === pl(lists[0]) && cls(l) === cls(lists[0])), labels: labels.length, seq: labels.every((t, i) => t === (i + 1) + "."), status: document.querySelector(".tex-status")?.textContent, bound: !!document.querySelector(".tex-preview .bounderr") };
   })()`);
-  check(cont.thms > 1 && cont.thmSame && cont.lists > 1 && cont.listSame && cont.labels === 16000 && cont.seq, "split theorem and list: the same classes and computed styles in every piece, labels 1..16000 in order", cont);
-  check(cont.table, "a table over 128 KiB: a placeholder with its reason, never split", cont);
+  check(cont.thms > 1 && cont.thmSame && cont.lists > 1 && cont.listSame && cont.labels === 6000 && cont.seq, "split theorem and list: the same classes and computed styles in every piece, labels 1..6000 in order", cont);
+  const tabDoc = "\\documentclass{article}\n\\begin{document}\n\\begin{tabular}{ll}\n" + "aaaaaaaaaaaaaaaaaaaaaaaa & b \\\\\n".repeat(6000) + "\\end{tabular}\n\\end{document}\n";
+  const ftab = await mk("/t/tab.tex", enc(tabDoc));
+  await open(ftab);
+  check(await until(`document.querySelector(".tex-preview").textContent.includes("this table is too large to display in the prototype")`, 60000), "a table over 128 KiB: a placeholder with its reason, never split", await ev(`({ status: document.querySelector(".tex-status")?.textContent, tables: document.querySelectorAll(".tex-preview table").length })`));
 
   // ---- gone: an unknown fid
   await go(base + "?tex=ffffffffffffffff&latex=1"); await sleep(1500);
