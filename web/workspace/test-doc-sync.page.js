@@ -261,15 +261,29 @@ T.ownerOpen = async (name, activate) => {
 T.ownerState = () => ({ holder: T.owner.isHolder(), state: T.owner.view().s.state, running: !!T.owner.client, connected: T.connected });
 /** Sync turned on in this browser, as a person does it: the Sync panel's button; then this page's owner the holder. */
 T.turnOn = async () => {
-  const el = document.body.appendChild(document.createElement("div"));
-  T.section = W.syncSection(T.w, el, { say() {}, fail: (e) => T.log.push("warn: panel " + e), usage: () => T.w.usage(), confirm: () => true, prompt: () => "delete" });
+  // (r3: each phase recorded as it completes, with its time, for the harness's diagnostics (T.turnInfo); what the
+  // panel says is kept in T.log as "say: ...", which T.warnings doesn't count)
+  const t = Date.now(), done = (what) => T.turnPhases.push(`${what} (${Date.now() - t} ms)`);
+  T.turnPhases = [];
+  const el = (T.turnEl = document.body.appendChild(document.createElement("div")));
+  T.section = W.syncSection(T.w, el, { say: (m) => T.log.push("say: panel " + String(m).slice(0, 200)), fail: (e) => T.log.push("warn: panel " + e), usage: () => T.w.usage(), confirm: () => true, prompt: () => "delete" });
+  done("panel made");
   const button = () => [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent));
   for (let i = 0; i < 200 && !button(); i++) await pause(50);
   if (!button()) return { error: "no Turn on sync: " + el.textContent.slice(0, 200) };
+  done("its Turn on sync button shown");
   button().click();
+  done("clicked");
   for (let i = 0; i < 400 && !(T.owner.isHolder() && T.owner.view().s.state === "synced"); i++) await pause(50);
+  done(T.owner.isHolder() && T.owner.view().s.state === "synced" ? "the holder, synced" : "the wait for the holder, synced, ended without it");
   return T.ownerState();
 };
+/** The turn-on so far (the harness's diagnostics): its completed phases, the panel's text, what it said or warned. */
+T.turnInfo = () => ({
+  phases: T.turnPhases ?? null,
+  panel: T.turnEl ? T.turnEl.textContent.replace(/\s+/g, " ").slice(0, 300) : null,
+  said: T.log.filter((x) => typeof x === "string" && /^(say|warn): /.test(x)).slice(-10),
+});
 /** The board page's side: followDocSync, its DocSync handed to this page's owner. */
 T.boardFollow = async () => {
   T.unfollow = await W.followDocSync({
