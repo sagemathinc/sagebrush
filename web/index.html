@@ -2507,11 +2507,16 @@ const docSyncReady = (async () => {
   if (!on) { nb.setReadOnly(wasReadOnly); return false; }
   const mod = await loadHistory();
   const docs = new DocSync();
+  // (a save is told to this tab's DocSync and, by a channel, to every other tab's: only the tab whose sync client holds
+  // the connection sends, and a kick where it doesn't is nothing)
+  const kicks = typeof BroadcastChannel === "function" ? new BroadcastChannel("sagebrush-docsync:" + w.ws.name) : null;
+  if (kicks) kicks.onmessage = (ev) => { if (typeof ev.data?.kick === "string") docs.kick(ev.data.kick); };
   mod.DOC_SYNC.on = true;
-  mod.DOC_SYNC.saved = (id) => docs.kick(id);
+  mod.DOC_SYNC.saved = (id) => { docs.kick(id); try { kicks?.postMessage({ kick: id }); } catch {} };
   owner.setDocs(docs);
-  // (the notebook shown, if it was opened before the journal turned on: opened again through it, as the writer)
-  if (current.id && current.kind === "browser" && !nb.store?.journaled) await openId(current.id).catch((e) => console.warn("sync: the notebook not reopened:", e));
+  // (the notebook shown, if it was opened before this: opened again, through the journal and with its synced history
+  // started (a load does that once DOC_SYNC is on), as the writer)
+  if (current.id && current.kind === "browser" && (!nb.store?.journaled || !nb.store.synced)) await openId(current.id).catch((e) => console.warn("sync: the notebook not reopened:", e));
   nb.setReadOnly(!!nb.store?.viewOnly || !!w.quarantined);
   return true;
 })().catch((e) => { console.warn("sync: notebooks' switch:", e); return false; });
