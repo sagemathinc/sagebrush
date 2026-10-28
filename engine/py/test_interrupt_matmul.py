@@ -66,7 +66,9 @@ print("then: " + nxt(), flush=True)
 
 TARGETED_CHILD = COMMON + r'''
 dot = "zmat-big-dot" if shape == "big" else "zmat-dot"
-phases = ["parse", "zmat-scan", dot] + (["reply"] if shape in ("square", "wide", "output-heavy") else [])
+# (the phases with at least 2^16 units of work at these shapes: the
+# output-heavy product's inputs are n entries each, below one poll interval)
+phases = ([dot] if shape == "output-heavy" else ["parse", "zmat-scan", dot]) + (["reply"] if shape in ("square", "wide", "output-heavy") else [])
 base = _native.ledger_snapshot()["outstanding"]
 req = json.dumps(dict(fn="mat_mul", a=a, b=b, wire="csv"))
 t0 = time.monotonic(); req2 = json.dumps(dict(fn="mat_mul", a=a, b=b, wire="csv")); t1 = time.monotonic()
