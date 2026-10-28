@@ -1,0 +1,84 @@
+name: prb-windows-diag
+
+# PR B's Windows RC-1 boundary diagnostic (plan r2; daybreak2's and astra's r1 reviews of run 40643092091's req_rc_m1
+# OVER): causal-only and NON-GATING.  It never amends that run's FAIL and selects no fix by itself.  Only on the throwaway
+# branch prb-windows-evidence (never on master); nothing is published.
+# It builds nothing: it takes run 40643092091's own wheels artifact, the MANIFEST pinned (MANIFEST_SHA), verifies each
+# wheel against it, installs them, and checks each installed .pyd (exactly one, basename and hash) before and after.
+# The diagnostic is .github/prb-boundary-diag.py from HEAD's git blob, hashed from stdin (DIAG_SHA), and run A/B/A x 5.
+# Any failed check fails the job; so does an INVALID diagnostic (exit 9: a reader regime not established).
+
+on:
+  push:
+    branches: ["prb-windows-evidence"]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SRC_RUN: "40643092091"
+  MANIFEST_SHA: "0f511215c7b31cf339d8154fd8ef5e618fae4ec8fcc4fd81250a3ca54ec64d7d"
+  DIAG_SHA: "cd1adaecb9e2fef8d16b916796b61dbb122014c18f6cb2df87beba8220418ca6"
+
+jobs:
+  diag:
+    if: github.repository == 'sagemathinc/sagebrush'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v5
+        with:
+          name: prb-windows-perf-wheels
+          path: artifacts
+          run-id: ${{ env.SRC_RUN }}
+          github-token: ${{ github.token }}
+      - name: verify, install, diagnose
+        shell: bash
+        timeout-minutes: 110
+        run: |
+          P=$RUNNER_TEMP/prb-boundary-diag.py
+          git show HEAD:.github/prb-boundary-diag.py > "$P"
+          H=$(sha256sum < "$P" | cut -c1-64)
+          [ "$H" = "$DIAG_SHA" ] || { echo "INVALID: the diagnostic differs (got $H, want $DIAG_SHA)"; exit 9; }
+          M=artifacts/MANIFEST
+          H=$(sha256sum < $M | cut -c1-64)
+          [ "$H" = "$MANIFEST_SHA" ] || { echo "INVALID: MANIFEST differs (got $H, want $MANIFEST_SHA)"; exit 9; }
+          [ "$(cut -d' ' -f1 $M | tr '\n' ' ')" = "A B " ] && [ "$(awk 'NF != 5' $M | wc -l)" = 0 ] || { echo "INVALID: MANIFEST malformed"; exit 9; }
+          echo "HEAD $(git rev-parse HEAD)  diagnostic $DIAG_SHA  MANIFEST $MANIFEST_SHA (run $SRC_RUN's wheels)"
+          field() { awk -v k="$1" -v i="$2" '$1 == k { print $i }' $M; }
+          cat $M
+          for K in A B; do
+            WH=artifacts/$K/$(field $K 2)
+            [ $(ls artifacts/$K/*.whl | wc -l) = 1 ] && [ -f "$WH" ] || { echo "INVALID: $K wheel"; exit 9; }
+            [ "$(sha256sum $WH | cut -c1-64)" = "$(field $K 3)" ] || { echo "INVALID: $K wheel hash"; exit 9; }
+            python -m venv venv-$K
+            venv-$K/Scripts/python.exe -m pip install -q "$WH"
+          done
+          check() {
+            for K in A B; do
+              [ $(ls venv-$K/Lib/site-packages/sagebrush/_native*.pyd | wc -l) = 1 ] || { echo "INVALID: $K payload count ($1)"; exit 9; }
+              PYD=$(ls venv-$K/Lib/site-packages/sagebrush/_native*.pyd)
+              [ "$(basename $PYD)" = "$(field $K 4)" ] && [ "$(sha256sum $PYD | cut -c1-64)" = "$(field $K 5)" ] || { echo "INVALID: $K payload ($1)"; exit 9; }
+            done
+            echo "payloads verified ($1)"
+          }
+          check "before round 0"
+          mkdir -p logs
+          c=0; venv-B/Scripts/python.exe "$P" venv-A/Scripts/python.exe venv-B/Scripts/python.exe logs/diag.json 5 > logs/diag.log 2>&1 || c=$?
+          tail -30 logs/diag.log
+          check "after the run"
+          [ $c = 0 ] || { echo "the diagnostic did not complete validly (exit $c)"; exit 1; }
+          echo "DIAGNOSTIC COMPLETE (non-gating)"
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: prb-windows-diag-logs
+          path: logs/
+          retention-days: 7

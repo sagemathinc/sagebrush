@@ -12,9 +12,10 @@ name: prb-windows-perf
 #   noop, noop_tput, req_rc_m1, req_rc, req_rc_p1, req_1mib and req_32mib gated (<= 1.01, no straddle).  Any failure fails
 #   the job (bash -eo pipefail, and every check exits nonzero).
 
+# Its run is done (40643092091, VALID, FAIL on req_rc_m1; daybreak2's ruling): dispatch-only now, so a push for
+# prb-windows-diag can't rerun it.  workflow_dispatch works only for workflows on the default branch: it never runs from here.
 on:
-  push:
-    branches: ["prb-windows-evidence"]
+  workflow_dispatch:
 
 permissions:
   contents: read
