@@ -82,3 +82,46 @@ What differs from bash, besides just-bash's own differences (D1–D8,
   "No such file or directory" for it, since asking whether it exists tells
   nothing. `rm` says the host's refusal.
 - **`rm` is silent**, as GNU rm is, though what it removes goes to Trash.
+
+## Limits (0.3.0, host level 3)
+
+From 0.3.0 the page fixes the shell's limits once, in the worker's init,
+before any script runs, and refuses a second init. The page validates its
+`bash` config against `BASH_RANGES` (`web/shell/limits.ts`) first, and refuses
+an older shell on the workspace, since it would run with just-bash's own
+defaults.
+
+- **Own computation** (`script_ms`, `commands`, `loop_iterations`,
+  `work_units`, `invocations`) is off by default. Off is exactly `+Infinity`
+  in just-bash, so its own defaults (1 hour, 100,000 commands, 100,000 loop
+  iterations, 100,000,000 work units) never apply.
+- **A typed limit** ends the run with exit 125 and
+  `bash: bash.<key> exceeded (<value>)`. This holds for the 12 keys the page
+  or this module enforces: `script_ms`, `invocations`, `output_bytes`,
+  `source_bytes`, `pipeline_width`, `list_entries`, `read_bytes`,
+  `write_bytes`, `ops`, `cp_entries`, `cp_bytes` and `written_bytes`.
+- **The 6 keys just-bash enforces itself** are `commands`, `loop_iterations`,
+  `work_units`, `memory_bytes`, `call_depth` and `glob_paths`. They keep
+  just-bash's own scope and command behaviour, and are ordinary outcomes:
+  - they are not promised to stop the whole invocation (sed and awk turn the
+    error into their own; the script can go on, even to exit 0);
+  - no limit key is ever inferred from their words;
+  - `glob_paths` sets both just-bash's glob operations and its brace
+    expansion results. Only the brace side has a measured boundary in the
+    tests; the glob side (`maxGlobOperations`) is still unmeasured.
+- **Output:** `output_bytes` (default 64 MiB) is cumulative across a run's
+  invocations, and each invocation delivers at most 32 MiB:
+  - this module counts each result in UTF-8, stdout then stderr, and sends
+    only what fits in the run's remaining allowance, cut at a scalar boundary,
+    with `{producedBytes, deliveredBytes, exceeded}` beside it;
+  - past the allowance, the run ends typed and stays ended;
+  - a single result past just-bash's fixed 32 MiB output bound is just-bash's
+    own stop: an ordinary exit 126, never classified (the output-backstop
+    exception).
+- **`pipeline_width`** is checked by this module before anything runs, from
+  just-bash's own parse of the script: a longer pipeline is refused whole.
+  A pipeline inside `eval` or a sourced file isn't seen there.
+- **`source_bytes`** is checked by the page on the script it sends, and bounds
+  only that script. A sourced file (`source` or `.`) is a read, bounded by
+  `read_bytes` (typed): the pinned just-bash checks `maxSourceBytes` only on
+  what `exec()` is given, not on what `source` reads.
