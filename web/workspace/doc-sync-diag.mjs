@@ -51,6 +51,42 @@ const netCode = (c) => { const m = /^net::(ERR(?:_[A-Z0-9]{1,23}){1,8})$/.exec(S
 const shaGroups = (h) => (/^[0-9a-f]{64}$/.test(String(h)) ? String(h).match(/.{16}/g).join(" ") : "?");
 const STAGE = /^(fetch-rejected|fetched|body-read-failed|json-parse-failed|parsed)$/;
 const stageDetail = (d) => (d === undefined ? "" : " " + (typeof d === "number" ? int(d) : word(d, /^[A-Za-z]{1,40}$/, "other")));
+// (r17a, I3R17R2-C1: case R's R4.  The relay control's pairs, the k-th old call with the k-th new one (case R issues
+// them in that order, old then new, k = 1..n), are its comparison groups: each member must have EXACTLY ONE upstream
+// receipt, of its own route, status 200, its transport tuple (te, ce, mfce as known words; content-length absent or its
+// value, 1 to 10 digits (r17b, I3R17A-C1: the declared length is compared, not only its presence)) without an "other",
+// and a byte receipt (not failed); the two
+// members' tuples must be equal and their bytes the same (length and sha256); under cloud the tuple must carry a
+// transport header (te, ce or mfce), under the reference server none.  Anything else fails the group, with its word.)
+/** Case R's matched pairs: `pairs` [{old, new}], each member {route, ups: [{route, status, h}], relay: {n, sha} | {failed}}; `n` pairs wanted. */
+export function pairCheck(pairs, cloud, n) {
+  const clWord = (v) => (v === null || v === undefined ? "absent" : /^\d{1,10}$/.test(String(v)) ? String(Number(v)) : "other");
+  const tuple = (h) => `te=${hv(h?.te, TE)} ce=${hv(h?.ce, CE)} mfce=${hv(h?.mfce, CE)} cl=${clWord(h?.cl)}`;
+  const member = (m, route) => {
+    const ups = m?.ups ?? [];
+    if (ups.length === 0) return ["missing"];
+    if (ups.length > 1) return ["duplicate"];
+    if (ups[0].route !== route) return ["unmatched-route"];
+    if (ups[0].status !== 200) return ["status"];
+    const t = tuple(ups[0].h);
+    if (t.includes("other")) return ["other-variant"];
+    if (!m.relay) return ["no-receipt"];
+    if (m.relay.failed !== undefined || !/^[0-9a-f]{64}$/.test(String(m.relay.sha)) || !Number.isInteger(m.relay.n)) return ["receipt-failed"];
+    return [null, t];
+  };
+  const words = (pairs ?? []).map((p) => {
+    const [ow, ot] = member(p?.old, "old"), [nw, nt] = member(p?.new, "new");
+    if (ow) return `old-${ow}`;
+    if (nw) return `new-${nw}`;
+    if (ot !== nt) return "unmatched";
+    if (p.old.relay.n !== p.new.relay.n || p.old.relay.sha !== p.new.relay.sha) return "bytes-differ";
+    const carries = !/^te=- ce=- mfce=- /.test(ot);
+    if (cloud && !carries) return "no-transport";
+    if (!cloud && carries) return "transport";
+    return `ok ${ot}`;
+  });
+  return { ok: words.length === n && words.every((w) => w.startsWith("ok ")), words: words.length === n ? words : [...words, `pairs ${int(words.length)} of ${int(n)}`] };
+}
 
 const KEY = String.raw`[\w-]*(?:cookie|authori[sz]ation|session|token|secret|passw(?:or)?d|auth|bearer|credential|api[-_]?key|apikey|sid|jwt|signature)[\w-]*`;
 const QUOTE = String.raw`(?:\\*["'\x60]|&quot;|&#34;|&#x22;|%22)*`;
@@ -167,6 +203,40 @@ export function guardConsole() {
 }
 
 // ---- the controls (the VM run's pre-step): sentinels through the emitters above, checked
+// (r17a: pairCheck's controls, case R's R4 rule on fixed receipts: a matched cloud group and a matched reference group
+// pass; each way a group can be incomplete, duplicated, unmatched or unknown fails, with its word)
+function pairControls() {
+  const A = "a".repeat(64), B = "b".repeat(64);
+  const CH = { te: "chunked", ce: null, mfce: "br", cl: null }, PL = { te: null, ce: null, mfce: null, cl: "17" };
+  const m = (route, h, relay = { n: 17, sha: A }, status = 200) => ({ ups: [{ route, status, h }], relay });
+  const pair = (h, o = {}, nw = {}) => ({ old: { ...m("old", h), ...o }, new: { ...m("new", h), ...nw } });
+  const three = (p) => [pair(CH), p, pair(CH)];
+  const fails = (name, pairs, cloud, want) => {
+    const r = pairCheck(pairs, cloud, 3);
+    return [`r17a pairs: ${name} fails (${want})`, !r.ok && r.words.some((w) => w === want)];
+  };
+  return [
+    ["r17a pairs: three matched cloud groups pass", pairCheck([pair(CH), pair(CH), pair(CH)], true, 3).ok],
+    ["r17a pairs: three matched reference groups pass", pairCheck([pair(PL), pair(PL), pair(PL)], false, 3).ok],
+    fails("an unmatched receipt (old chunked, new not)", three(pair(CH, {}, m("new", PL))), true, "unmatched"),
+    fails("a new-header-only mutation (only the new answer loses mf-content-encoding)", three(pair(CH, {}, m("new", { ...CH, mfce: null }))), true, "unmatched"),
+    fails("a new-header-only mutation under the reference server (only the new answer chunked)", [pair(PL), pair(PL, {}, m("new", { ...PL, te: "chunked" })), pair(PL)], false, "unmatched"),
+    fails("a new-content-length-value-only mutation (17 and 1, both present, the same 17 bytes)", [pair(PL), pair(PL, {}, m("new", { ...PL, cl: "1" })), pair(PL)], false, "unmatched"),
+    fails("an old-content-length-value-only mutation under cloud (1 and 17, both present, the same 17 bytes)", three(pair({ ...CH, cl: "17" }, m("old", { ...CH, cl: "1" }))), true, "unmatched"),
+    fails("a content-length that isn't one decimal number", three(pair({ ...CH, cl: "17, 17" })), true, "old-other-variant"),
+    fails("a different status", three(pair(CH, {}, m("new", CH, undefined, 503))), true, "new-status"),
+    fails("a missing upstream receipt", three(pair(CH, { ups: [] })), true, "old-missing"),
+    fails("a duplicate upstream receipt", three(pair(CH, {}, { ups: [m("new", CH).ups[0], m("new", CH).ups[0]] })), true, "new-duplicate"),
+    fails("a receipt of the other route", three(pair(CH, { ups: m("new", CH).ups })), true, "old-unmatched-route"),
+    fails("an unknown variant", three(pair({ ...CH, mfce: "x-gzip2" })), true, "old-other-variant"),
+    fails("no byte receipt", three(pair(CH, { relay: undefined })), true, "old-no-receipt"),
+    fails("a failed byte receipt", three(pair(CH, { relay: { failed: "TimeoutError" } })), true, "old-receipt-failed"),
+    fails("different bytes", three(pair(CH, {}, { relay: { n: 17, sha: B } })), true, "bytes-differ"),
+    fails("no transport header under cloud", [pair(PL), pair(PL), pair(PL)], true, "no-transport"),
+    fails("a transport header under the reference server", [pair(CH), pair(CH), pair(CH)], false, "transport"),
+    fails("two groups of three", [pair(CH), pair(CH)], true, "pairs 2 of 3"),
+  ];
+}
 function controls() {
   // (each sentinel is made here, never written whole in this file; the judge looks for its stem in the whole run.log)
   const S = (i) => ["SN", "TL", String(i).padStart(2, "0")].join("");
@@ -320,6 +390,7 @@ function controls() {
     ["r17: every network receipt line passes scrub() unchanged (so --filter keeps it)", r17.every((l) => scrub(l, 4000) === l)],
     ["r17: a whole net:: code and a whole sha256 would be scrubbed (why they are printed as words and groups)",
       scrub("net::ERR_INCOMPLETE_CHUNKED_ENCODING").includes("<opaque>") && scrub(SHA17) === "<opaque>"],
+    ...pairControls(),
   ];
   let k = 0;
   for (const [i, [name, ok]] of cases.entries()) { if (ok) k++; rawLog(`DIAG CONTROL ${i + 1} ${ok ? "PASS" : "FAIL"}: ${name}`); }
