@@ -1,6 +1,6 @@
 // The remote kernel's UI, as a preview (sagebrush-remote.js, loaded only by
-// a page opened with ?remote=1; web/build.ts builds it for the web site, not
-// for the CLI or the app).  It joins what P1a and P1b built: a RemoteKernel
+// a page opened with ?remote=1; web/build.ts builds it, and it is served
+// wherever the page is: the site, `sagebrush notebook`, the app).  It joins what P1a and P1b built: a RemoteKernel
 // (remote-kernel.js) on a RemoteClient (remote-client.js, DPoP), with every
 // run approved by a RemoteGate (remote-gate.js), to a gateway.
 //
