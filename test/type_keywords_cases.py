@@ -41,3 +41,45 @@ t("kw name=", lambda: type(name="a", bases=(), dict={}))
 t("module in ns", lambda: type("Z", (S,), {"__module__": "mm"}, k=1).__module__)
 t("qualname", lambda: type("Z", (S,), {}, k=1).__qualname__)
 t("M subclass type kw", lambda: M2("N", (), {}, k=1))
+
+
+# As type_new: the winner's own __new__ is called directly (never through
+# its metaclass's __call__) with the caller's dict, unchanged, and the
+# keywords; then the result's type's __init__, if the result is a class.
+class MM(type):
+    def __call__(cls, *a, **k):
+        print("MM.__call__ (must not run for type())")
+        return 17
+class N(type, metaclass=MM):
+    def __new__(mcls, name, bases, ns, **kw):
+        print("N.__new__", name, sorted(kw), "same dict:", ns is NS, sorted(ns))
+        return type.__new__(mcls, name, bases, ns)
+    def __init__(cls, name, bases, ns, **kw):
+        print("N.__init__", name, sorted(kw), "same dict:", ns is NS)
+NS = None
+NA = type.__call__(N, "NA", (), {})
+NS = {"x": 1}
+t("winner's __new__ directly", lambda: (type("NB", (NA,), NS, flag=1).__name__, sorted(k for k in NS)))
+NS = {}
+t("empty dict", lambda: type(type("NC", (NA,), NS, flag=2)).__name__)
+class InitOnly(type):
+    def __init__(cls, name, bases, ns, **kw):
+        print("InitOnly.__init__", name, sorted(kw))
+class IA(metaclass=InitOnly): pass
+t("winner with only __init__", lambda: type("IB", (IA,), {}, k=3).__name__)
+class NonClass(type):
+    def __new__(mcls, name, bases, ns, **kw):
+        print("NonClass.__new__", name, sorted(kw))
+        return 5
+    def __init__(cls, *a, **kw):
+        print("NonClass.__init__ (must not run on 5)")
+NCA = type.__new__(NonClass, "NCA", (), {})
+t("__new__ returning a non-class", lambda: type("NCB", (NCA,), {}, k=4))
+class Other(type):
+    def __init__(cls, *a, **kw):
+        print("Other.__init__", a[0], sorted(kw))
+class OtherNew(type):
+    def __new__(mcls, name, bases, ns, **kw):
+        return Other(name + "X", (), {})
+ONA = type.__new__(OtherNew, "ONA", (), {})
+t("__new__ returning another metaclass's class", lambda: type(type("ONB", (ONA,), {}, k=5)).__name__)
