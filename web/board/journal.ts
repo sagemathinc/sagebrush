@@ -1,14 +1,14 @@
-// The board journal (2c-1b-i, DEV-only: design-2c1b-i r3): a board of the workspace saved through the journal's
+// The board journal (DEV-only): a board of the workspace saved through the journal's
 // store (web/journal/store.js), as notebooks are once the workspace's journal is active: each save its T1 (an intent
 // and its version, in sagebrush-board-history), then its T2 (the board's row with the journal's envelope), so a page
 // closed mid-write loses nothing and TimeTravel and the row can't disagree.  Here:
 //
-//   BoardRecordStore   the store's Base, the T2 side: the board's row through Workspace.journalWrite (§2.2), never
+//   BoardRecordStore   the store's Base, the T2 side: the board's row through Workspace.journalWrite, never
 //                      the workspace's database itself
-//   boardKind(mod)     the store's kind (§2.5): its history (a PatchHistory subclass, history.ts's records), the
+//   boardKind(mod)     the store's kind: its history (a PatchHistory subclass, history.ts's records), the
 //                      record/document boundary (the store's own fields never in a version), and 2c-3's merge
 //
-// The store's id is the board's history key without a document name, "board:local:<ref>" (§2: one journal per
+// The store's id is the board's history key without a document name, "board:local:<ref>" (one journal per
 // board, whatever document it shows): its versions and journal rows are where a board's deletion drops them
 // (api.ts).  Loaded with sagebrush-history.js, never in the board page's own bundle: only types are imported here
 // but for history.ts's codec-free functions and merge.ts.
@@ -83,11 +83,11 @@ export function boardKind(mod: HistoryModule) {
     kind: "boards",
     noun: "board",
     lockPrefix: "sagebrush-board-writer:",
-    // (boards don't sync in 2c-1b-i: 2c-2's rows, then 2c-3's wiring)
+    // (boards don't sync yet: that needs the server's rows first, then the page's wiring)
     sync: { on: false, saved: () => {} },
     versionedOf: versioned,
     history: (patchStore: unknown) => new History(patchStore, codec),
-    // (§2.5's boundary: the store's own fields dropped before the records, wherever the store asks for them)
+    // (the record/document boundary: the store's own fields dropped before the records, wherever the store asks for them)
     toRecords: (doc: BoardDoc): Records => asDoc(toRecords(stripBoard(doc)).map(keptRecord)),
     fromRecords: (records: Records): BoardDoc => fromRecords(records),
     // (the record's versioned part replaced by `value`; what its records don't keep, the record's own: the law,

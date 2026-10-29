@@ -1,5 +1,5 @@
 // The cases of web/board/test-board-journal.mjs, run in the page (real IndexedDB and Web Locks): the board journal
-// (journal.ts, Workspace.journalWrite; design-2c1b-i r3 §2.1, §2.2, §2.5).  W the workspace, A its api.ts, BJ the
+// (journal.ts, Workspace.journalWrite).  W the workspace, A its api.ts, BJ the
 // board journal, BH the board's history, H the history's bundle (web/notebook/history.js), R the journal's rows,
 // S the stores.  Each case has a workspace of its own and boards of its own; the boards' history is one database for
 // the whole origin, its fence dropped before each case (in a browser there is only ever one workspace).
@@ -42,7 +42,7 @@ const row = (w, ref) => rawGet(w.ws, "boards", ref);
 const jState = (hdb, ref) => R.readJournal(hdb, BJ.journalId(ref));
 const STORE = ["rev", "j", "hash", "unjournaled", "stampOf", "baseRev"];
 const ENV = ["j", "hash", "unjournaled", "stampOf"];
-// (§2.1's invariant: an old-style row, or a whole envelope; the journal's fields never in the document)
+// (the row's invariant: an old-style row, or a whole envelope; the journal's fields never in the document)
 const coherent = (r) => !!r && !STORE.some((f) => r.doc && f in r.doc) && (ENV.every((f) => !(f in r)) || (Number.isSafeInteger(r.j) && r.j >= 0 && typeof r.hash === "string" && (!("unjournaled" in r) || r.unjournaled === true || r.unjournaled === "too-large") && (!("stampOf" in r) || (Number.isSafeInteger(r.stampOf) && r.stampOf === r.rev - 1))));
 const oldStyle = (r) => !!r && ENV.every((f) => !(f in r));
 const close = async (...xs) => { for (const x of xs) try { if (x?.release) await x.release(); else x?.close?.(); } catch {} };
@@ -69,7 +69,7 @@ async function saves() {
   const st = store(w, hdb, ref);
   const d = await st.load();
   const r0 = await row(w, ref);
-  // test 4 (D-2): stamped by the load, before any edit
+  // test 4: stamped by the load, before any edit
   check(st.recovered.row === "stamped" && Number.isSafeInteger(r0.j) && r0.j > 0 && r0.hash === (await hashOf(r0.doc)) && !("unjournaled" in r0) && textOf(r0.doc) === "A" && coherent(r0) && (await jState(hdb, ref)).intents.length === 0, "test 4: an old-style row is stamped by the first journaled load, before any edit: " + J({ row: st.recovered.row, j: r0.j }));
   check(textOf(d) === "A" && st.history.versions().length === 1, "…its value kept as one version (the load's catch-up)");
   // test 1: T1, then T2, then the prune
@@ -110,10 +110,10 @@ async function conflicts() {
   const { w, hdb } = await active();
   const { ref, path } = await made(w);
   const st = store(w, hdb, ref), d = await st.load();
-  // §2.1: an ordinary write (an agent's) drops the envelope
+  // an ordinary write (an agent's) drops the envelope
   await w.write(path, board("other"), {});
   const r0 = await row(w, ref);
-  check(oldStyle(r0) && textOf(r0.doc) === "other" && r0.rev === d.rev + 1, "§2.1: an ordinary write leaves an old-style row (its envelope dropped)");
+  check(oldStyle(r0) && textOf(r0.doc) === "other" && r0.rev === d.rev + 1, "an ordinary write leaves an old-style row (its envelope dropped)");
   // test 3: a stale base
   const out = await st.save({ ...board("mine"), baseRev: d.rev });
   check(!!out?.conflict && textOf(out.conflict) === "other" && out.conflict.rev === r0.rev && J(await row(w, ref)) === J(r0), "test 3: a stale base: {conflict} with the record as it is, nothing written: " + J(out));
@@ -291,7 +291,7 @@ async function law() {
 }
 
 async function stamps() {
-  // r3's erratum 1 (astra's BJ-C1, daybreak3's contract): a pure stamp keeps the old row's tag and records the
+  // a pure stamp keeps the old row's tag and records the
   // revision whose exact value it wraps; nothing else makes, keeps or advances it
   const { w, hdb } = await active();
   const { ref, path } = await made(w);
@@ -338,13 +338,13 @@ async function stamps() {
     const after = await row(w, e.ref);
     check(before.stampOf === before.rev - 1 && !("stampOf" in after) && (how === "intent" ? textOf(after.doc) === "I" && !("tag" in after) : oldStyle(after)), `stampOf: ${how === "intent" ? "a recovered later intent" : "an ordinary " + how} drops it: ` + J({ before: before.stampOf, after: after.stampOf, tag: after.tag }));
   }
-  // daybreak3's BJ-D3-1: adopt writes an old-style row whatever it is given; a plain row as given
+  // adopt writes an old-style row whatever it is given; a plain row as given
   for (const env of [true, false]) {
     const id = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, "0")).join("");
     const given = { id, doc: board("adopted"), rev: 1, updated: 1, ...(env ? { j: 5, hash: "forged", unjournaled: true, stampOf: 0 } : {}) };
     await w.locked(() => w.adopt("/", "adopted-" + id, ".board.json", { kind: "board", ref: id, mode: "python" }, { at: `/adopted-${id}.board.json`, board: given }));
     const r = await row(w, id);
-    check(env ? oldStyle(r) && textOf(r.doc) === "adopted" : J(r) === J(given), `BJ-D3-1: adopt ${env ? "of a row carrying an envelope: written old-style" : "of a plain row: written as given"}: ` + J(r));
+    check(env ? oldStyle(r) && textOf(r.doc) === "adopted" : J(r) === J(given), `adopt ${env ? "of a row carrying an envelope: written old-style" : "of a plain row: written as given"}: ` + J(r));
   }
   w.close();
   hdb.close();

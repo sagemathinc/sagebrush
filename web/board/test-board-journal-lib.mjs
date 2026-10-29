@@ -12,9 +12,9 @@ import { devtoolsPort } from "../test-port.mjs";
 const here = new URL(".", import.meta.url).pathname;
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = JSON.stringify;
-// (test-only faults, for the VM run's controls (r6, daybreak3's R5-D3-2): BJ_FAULT=build-throw or build-false makes
+// (test-only faults, for a run's controls of these failure paths: BJ_FAULT=build-throw or build-false makes
 // buildFailure's bundle fail the one way or the other; BJ_FAULT=browser makes browser() fail right after Chrome
-// started; BJ_FAULT=hold (r7) holds one DevTools call open (held(), below); BJ_BOUND_S lowers bounded()'s bound (never
+// started; BJ_FAULT=hold holds one DevTools call open (held(), below); BJ_BOUND_S lowers bounded()'s bound (never
 // raises it).  The real steps run with none of them set, and any that is set is said on its own line, "BJ TEST
 // SWITCH: …", so a run's judge can require that no real step's output has one)
 const FAULT = process.env.BJ_FAULT ?? "";
@@ -46,7 +46,7 @@ export async function serve(roots) {
   const built = await buildFailure(() => Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" }));
   rmSync(src, { recursive: true, force: true });
   if (built !== null) { rmSync(site, { recursive: true, force: true }); throw new Error("the helper page's bundle didn't build (" + built + ")"); }
-  // (r6, astra's BJ5-C2: a failure after the bundle (its page, a root's sha, the server's start) removes its dir too)
+  // (a failure after the bundle (its page, a root's sha, the server's start) removes its dir too)
   let server, stats;
   try {
     writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>board journal helper</title><script type="module">import * as M from "./all.js"; window.M = M; window.ready = true;</script>`);
@@ -83,7 +83,7 @@ export async function serve(roots) {
         stats.scripts.set(p, sha);
         console.log(`server board.js: ${p} sha256 ${sha} (root ${J(pre)})`);
       }
-      // (fix 4: a build under the cutover's /old/ or /new/: its pages' absolute src="/…" and href="/…" attributes (its
+      // (a build under the cutover's /old/ or /new/: its pages' absolute src="/…" and href="/…" attributes (its
       // board/index.html loads /board/board.js) moved under that prefix, "//" left alone; board.js's own imports are
       // relative to its URL, so they follow.  Each such page's count said, once per path)
       if ((pre === "/old" || pre === "/new") && headers["content-type"] === "text/html") {
@@ -98,13 +98,13 @@ export async function serve(roots) {
   return { origin: `http://127.0.0.1:${server.port}`, stats, stop: () => { server.stop(true); rmSync(site, { recursive: true, force: true }); } };
 }
 
-/** Chrome ended gracefully (@sagebrush's ruling on the r3 VM packet): asked to close over its DevTools protocol
+/** Chrome ended gracefully: asked to close over its DevTools protocol
  * (Browser.close), then its exit and its whole process group waited for, at most 10 s each; only if it is still there
  * then, its group is killed (SIGKILL), and that fallback said in one line, "CHROME FALLBACK: …", so a run's judge sees
  * it (the reaps it leaves are not benign exits). */
 export async function closeChrome(chrome, port, label = "chrome", ms = 10_000) {
   const done = chrome.exitCode !== null || chrome.signalCode !== null ? Promise.resolve() : new Promise((r) => chrome.once("exit", r));
-  // (r7, board's r6 n2: its DevTools port not known yet (a kill during its start), so no Browser.close can be asked:
+  // (its DevTools port not known yet (a kill during its start), so no Browser.close can be asked:
   // its group is asked to end with SIGTERM instead, and SIGKILL stays the said fallback)
   if (!port) { try { process.kill(-chrome.pid, "SIGTERM"); } catch {} }
   else try {
@@ -123,10 +123,10 @@ export async function closeChrome(chrome, port, label = "chrome", ms = 10_000) {
   }
 }
 
-/** Where a run is (r5: a hang or a kill names its place): the section (`section(name)`, said as it starts), the last
+/** Where a run is (so a hang or a kill names its place): the section (`section(name)`, said as it starts), the last
  * check done, and the DevTools calls in flight. */
 const place = { section: "setup", checks: 0, last: "(none yet)", calls: new Map() };
-// (r6, daybreak3's R5-D3-1: the ONE termination state.  Once bounded()'s end has begun it owns the run: its FAIL line,
+// (the ONE termination state.  Once bounded()'s end has begun it owns the run: its FAIL line,
 // the cleanup and the exit (124, 128 + n).  The runner's ordinary path awaits `unlessEnding()` before its own FAIL
 // line, its summary, its cleanup and its exit, and that never settles once the end has begun; checks are no longer said)
 const term = { ending: false };
@@ -135,8 +135,8 @@ export const unlessEnding = () => (term.ending ? new Promise(() => {}) : Promise
 const live = new Set();
 let callIds = 0;
 export function section(name) { if (term.ending) return; place.section = name; console.log(`  section: ${name} (${place.checks} checks so far)`); }
-/** A check done, said at once on its own indented line ("  ok …" / "  FAIL …"; before the summary, so mut-6c's list
- * after it is the summary's own). */
+/** A check done, said at once on its own indented line ("  ok …" / "  FAIL …"; before the summary, so a classifier's list of the
+ * failures after it is the summary's own). */
 export function checked(ok, what) {
   if (term.ending) return;
   place.checks++; place.last = String(what).replace(/\s*\n\s*/g, " | ");
@@ -155,11 +155,11 @@ export function where() {
 // (each DevTools call's bound: no answer within it fails the call, naming it)
 const CDP_MS = 60_000;
 
-/** The runner's own bounds (r5): `ms`, below the VM step's (its supervisor's SIGTERM, then SIGKILL 10 s later), and
+/** The runner's own bounds: `ms`, below the VM step's (its supervisor's SIGTERM, then SIGKILL 10 s later), and
  * SIGTERM/SIGINT/SIGHUP.  Either ends the run with one line, "FAIL: <label>: … during <where()>"; then every Chrome
  * this process started closed (Browser.close, then its group killed after at most 6 s, said as CHROME FALLBACK), then
  * `cleanup()` (the server stopped), then the exit a timeout or that kill would have had (124 for the bound; 128 + the
- * signal's number, 143 for SIGTERM), so fail-first and mut-6c still see a timed-out or killed run as one, never as a
+ * signal's number, 143 for SIGTERM), so a run's classifiers still see a timed-out or killed run as one, never as a
  * check's failure.  At 8 s, before the supervisor's SIGKILL, any Chrome group still there is killed and the process
  * exits so regardless. */
 export function bounded(label, ms, cleanup) {
@@ -168,7 +168,7 @@ export function bounded(label, ms, cleanup) {
   const end = async (why, rc) => {
     if (term.ending) return;
     term.ending = true;
-    // (board's B5 n1: the status set first, so an event loop that drains before the exit below can't end it 0)
+    // (the status set first, so an event loop that drains before the exit below can't end it 0)
     process.exitCode = rc;
     console.log(`FAIL: ${label}: ${why}, during ${where()}`);
     setTimeout(() => {
@@ -184,7 +184,7 @@ export function bounded(label, ms, cleanup) {
   return () => clearTimeout(t);
 }
 
-/** r7's barrier, for the VM run's 124/143 controls: under BJ_FAULT=hold, one Runtime.evaluate that never settles is
+/** A barrier, for a run's 124/143 controls: under BJ_FAULT=hold, one Runtime.evaluate that never settles is
  * sent on `tab` (bounded only by the runner's own bound), then "  hold: a DevTools call held open (<tab> Runtime.evaluate)"
  * is said, so a control signals only after that line and the FAIL line's where() names the call.  Without the switch,
  * nothing. */
@@ -212,7 +212,7 @@ export async function browser() {
   // (the kill path's close: short (2 s per wait), its group killed after, said as CHROME FALLBACK if it comes to that)
   const me = { pid: chrome.pid, quick: async () => { await closeChrome(chrome, port, "the killed run's Chrome", 2000); live.delete(me); rmSync(profile, { recursive: true, force: true }); } };
   live.add(me);
-  // (r6, R5-D3-2: a setup failure closes this Chrome before it is thrown on, so the caller (whose `br` is still
+  // (a setup failure closes this Chrome before it is thrown on, so the caller (whose `br` is still
   // null) leaves nothing behind)
   try {
     if (FAULT === "browser") throw new Error("BJ_FAULT browser: browser() fails right after Chrome started");
