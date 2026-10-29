@@ -30,6 +30,8 @@ Bugs found in pyjs while making the suite pass, all now fixed:
 - **`type(name, bases, ns)`:** classes got `__module__ = "__main__"`, which broke pickling of `mpf`.
 - **`re`:** escapes inside a character class (`[\+\-]`) were mistranslated, and `\z` was missing.
 
+**How the runner reports.** `run_tests.py` seeds `random` before each test with a fixed seed derived from the module and test names. Several mpmath tests draw unseeded inputs with `random.random()`, so this way CPython and pyjs test the same values, and a failure records the seed it ran with. Failures are formatted with the one-argument `traceback.format_exception(e)`, which both interpreters support. Before the real modules, `compare.py` runs `harness_control.py`, which has one passing test and two deliberate failures. Both interpreters must report it as JSON with the failure text and the same seeded draw; otherwise the run fails.
+
 ## How does it compare to CPython in performance?
 
 Measured on the same machine with Node 26 and CPython 3.14, without gmpy (both use pure-Python integers).
