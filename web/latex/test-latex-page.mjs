@@ -15,7 +15,7 @@
 //     zoom kept; a notebook from the files opened by URL; an unclosed $$ ended at a blank line.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-page.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
@@ -80,6 +80,8 @@ const open = async (fid, q = "&latex=1") => { await go(base + "?tex=" + encodeUR
 const page = (expr) => ev(`(() => { const P = document.querySelector(".tex-page"); return ${expr}; })()`);
 const typeInto = (text) => ev(`(() => { const t = document.querySelector(".tex-src"); t.value = ${JSON.stringify(text)}; t.dispatchEvent(new Event("input")); return true; })()`);
 const ctrlS = () => send("Input.dispatchKeyEvent", { type: "keyDown", key: "s", code: "KeyS", modifiers: 2, windowsVirtualKeyCode: 83 });
+// (LATEX_SHOTS=dir: screenshots at a few moments, for a look; nothing is checked from them)
+const shot = async (name) => { if (!process.env.LATEX_SHOTS) return; const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(process.env.LATEX_SHOTS, name + ".png"), Buffer.from(r.data, "base64")); };
 const statusIs = (re, ms = 10000) => until(`${re}.test(document.querySelector(".tex-status")?.textContent ?? "")`, ms);
 
 try {
@@ -225,6 +227,65 @@ try {
     check(c5.both && c5.rTop > c5.lTop && c5.lW >= 340 && c5.rW >= 340, "component: on a phone the source and the preview are stacked, both shown", c5);
     await send("Emulation.clearDeviceMetricsOverride");
     await ev(`(window.__ed.destroy(), true)`);
+  }
+  // ---- comments on the preview (comments.ts cut 1, for grading): a grader's read-only, preview-only editor in a wide
+  // box: "Then" selected, c opens the composer (focused), Ctrl+Enter posts; saved once, a margin bubble with the text,
+  // the word highlighted (CSS Highlight API); the student's view (mode view): the bubble shown, c does nothing; a
+  // narrow box: a badge, tapped, opens a sheet; the Comment button by a selection opens the composer too
+  {
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    const PROOF = "\\documentclass{article}\n\\begin{document}\n\\section*{Proof}\nLet $n$ be even, say $n = 2k$.\n\nThen $n^2 = 4k^2$ is even.\n\n\\end{document}\n";
+    const mountC = (id, w, mode, threads) => ev(`(async () => {
+      const box = document.createElement("div"); box.id = ${JSON.stringify(id)}; box.style.cssText = "width:${w}px;height:420px"; document.body.prepend(box);
+      const x = await import("/sagebrush-latex.js");
+      const ed = x.mountEditor(box, { text: ${JSON.stringify(PROOF)}, readOnly: true, layout: "preview" });
+      await Promise.race([ed.rendered(), new Promise((r) => setTimeout(r, 20000))]);
+      window.__saves = window.__saves || {}; window.__saves[${JSON.stringify(id)}] = [];
+      const store = ${JSON.stringify(threads)};
+      window["__cm_" + ${JSON.stringify(id)}] = x.attachComments(ed, { load: () => store, save: (t) => window.__saves[${JSON.stringify(id)}].push(t), mode: ${JSON.stringify(mode)}, author: "instructor", single: true });
+      window["__ed_" + ${JSON.stringify(id)}] = ed;
+      return true;
+    })()`);
+    const selectThen = (id) => ev(`(() => { const P = document.querySelector("#${id} .tex-preview"); const tw = document.createTreeWalker(P, NodeFilter.SHOW_TEXT); let n; while ((n = tw.nextNode()) && !n.data.includes("Then")) {}
+      if (!n) return false; const r = document.createRange(), i = n.data.indexOf("Then"); r.setStart(n, i); r.setEnd(n, i + 4); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return true; })()`);
+    await mountC("cmg", 900, "comment", []);
+    const sel1 = await selectThen("cmg");
+    const k1 = await ev(`(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true })); await new Promise((r) => setTimeout(r, 50));
+      const a = document.activeElement; const focused = !!a && a.tagName === "TEXTAREA" && !!a.closest(".sb-cm-compose");
+      if (focused) { a.value = "Say why n^2 is even here."; a.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true })); }
+      await new Promise((r) => setTimeout(r, 100));
+      const saves = window.__saves.cmg, last = saves[saves.length - 1] || [], b = document.querySelectorAll("#cmg .sb-cm-bubble");
+      return { focused, saves: saves.length, n: last.length, quote: last[0]?.anchor.quote, author: last[0]?.messages[0]?.author, bubbles: b.length, text: b[0]?.textContent ?? "", hl: CSS.highlights?.get("sb-comments")?.size ?? -1, count: window.__cm_cmg.count() }; })()`);
+    check(sel1 && k1.focused && k1.saves === 1 && k1.n === 1 && k1.quote === "Then" && k1.author === "instructor" && k1.bubbles === 1 && k1.text.includes("Say why") && k1.hl === 1 && k1.count === 1,
+      "comments: a grader selects 'Then', presses c, types, Ctrl+Enter: saved once, a margin bubble with the text, the word highlighted", k1);
+    await ev(`(document.getElementById("cmg").scrollIntoView(), true)`); await shot("comments-wide");
+    const saved = await ev(`window.__saves.cmg[window.__saves.cmg.length - 1]`);
+    await ev(`(window.__cm_cmg.destroy(), window.__ed_cmg.destroy(), document.getElementById("cmg").remove(), true)`);
+    await mountC("cmv", 900, "view", saved);
+    const v1 = await ev(`(async () => { await new Promise((r) => setTimeout(r, 100)); const b = document.querySelectorAll("#cmv .sb-cm-bubble");
+      const P = document.querySelector("#cmv .tex-preview"); const tw = document.createTreeWalker(P, NodeFilter.SHOW_TEXT); let n; while ((n = tw.nextNode()) && !n.data.includes("Then")) {}
+      const r = document.createRange(), i = n.data.indexOf("Then"); r.setStart(n, i); r.setEnd(n, i + 4); getSelection().removeAllRanges(); getSelection().addRange(r);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true })); await new Promise((r) => setTimeout(r, 50));
+      return { bubbles: b.length, text: b[0]?.textContent ?? "", composer: !!document.querySelector(".sb-cm-compose"), hl: CSS.highlights?.get("sb-comments")?.size ?? -1, saves: window.__saves.cmv.length }; })()`);
+    check(v1.bubbles === 1 && v1.text.includes("Say why") && !v1.composer && v1.hl === 1 && v1.saves === 0, "comments: the student's view shows the bubble and the highlight; c makes no composer, nothing saved", v1);
+    await ev(`(window.__cm_cmv.destroy(), window.__ed_cmv.destroy(), document.getElementById("cmv").remove(), true)`);
+    await mountC("cmn", 360, "view", saved);
+    const n1 = await ev(`(async () => { await new Promise((r) => setTimeout(r, 100)); const g = document.querySelector("#cmn .sb-cm-badge");
+      if (!g) return { badge: false, bubbles: document.querySelectorAll("#cmn .sb-cm-bubble").length };
+      g.click(); await new Promise((r) => setTimeout(r, 50)); const sh = document.querySelector(".sb-cm-sheet");
+      window.__shotNow = true;
+      return { badge: true, bubbles: document.querySelectorAll("#cmn .sb-cm-bubble").length, sheet: !!sh, text: sh?.textContent ?? "", edit: !!sh && [...sh.querySelectorAll("button")].some((b) => b.textContent === "Edit") }; })()`);
+    await ev(`(document.getElementById("cmn").scrollIntoView(), true)`); await shot("comments-narrow-sheet");
+    check(n1.badge && n1.bubbles === 0 && n1.sheet && n1.text.includes("Say why") && !n1.edit, "comments: in a narrow box a badge, not a bubble; tapped, a sheet with the comment (view: no Edit)", n1);
+    await ev(`(document.querySelector(".sb-cm-sheet")?.remove(), window.__cm_cmn.destroy(), window.__ed_cmn.destroy(), document.getElementById("cmn").remove(), true)`);
+    await mountC("cmb", 900, "comment", []);
+    await selectThen("cmb");
+    const b1 = await ev(`(async () => { document.querySelector("#cmb .tex-preview").dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); await new Promise((r) => setTimeout(r, 50));
+      const go = document.querySelector("#cmb .sb-cm-go"); if (!go) return { go: false };
+      go.click(); await new Promise((r) => setTimeout(r, 50)); const a = document.activeElement;
+      return { go: true, composer: !!a && !!a.closest(".sb-cm-compose") }; })()`);
+    check(b1.go && b1.composer, "comments: a selection shows a Comment button; it opens the composer, focused", b1);
+    await ev(`(window.__cm_cmb.destroy(), window.__ed_cmb.destroy(), document.getElementById("cmb").remove(), true)`);
   }
   const fid = await mk("/t/doc.tex", enc(DOC));
   requests.length = 0;
