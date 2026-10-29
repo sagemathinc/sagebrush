@@ -791,7 +791,7 @@ mod tests {
         for p in [2u64, 7, 1_000_000_007, (1 << 62) - 57, 18446744073709551557] {
             let m = Modulus::new(p);
             // B a row, a column, wide (a row at a time), narrow; K on both
-            // sides of DOT_STEP; empty dimensions; r7's tails
+            // sides of DOT_STEP; empty dimensions; the row-tail shapes
             for (r, k, c) in [(1, 1, 1), (3, 1, 5), (4, 6, 1), (2, 3, TRANSPOSE_WIDE), (2, 3, TRANSPOSE_WIDE + 1), (1, 17, 4095), (5, 7, 9),
                               (1, DOT_STEP - 1, 2), (2, DOT_STEP, 1), (1, DOT_STEP + 3, 3), (0, 3, 4), (3, 0, 4), (3, 4, 0), (4, 65534, 3), (2, 21845, 7)] {
                 let (a, b) = (rand_mat(r, k, m, &mut s), rand_mat(k, c, m, &mut s));

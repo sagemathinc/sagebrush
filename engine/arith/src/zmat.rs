@@ -291,8 +291,8 @@ impl ZMat {
     /// as it converts, as master's collect into `Option<Vec<i64>>` does:
     /// nothing is reserved before an entry is known to fit, so a failing
     /// conversion holds no more than the entries before its failure
-    /// (astra2's OUTLINE-CONVERSION-PEAK: never a whole-operand buffer for
-    /// an operand that then takes the Big path).
+    /// (never a whole-operand buffer for an operand that then takes the Big
+    /// path).
     fn as_i64_scanned(&self) -> Option<Vec<i64>> {
         let mut v = Vec::new();
         for chunk in self.d.chunks(SCAN_CHUNK) {
@@ -1036,7 +1036,7 @@ mod tests {
         assert!(matches!(z.prepare_product(&one), Prepared::Small(_)));
     }
 
-    /// astra2's OUTLINE-CONVERSION-PEAK control: a first or early non-i64
+    /// The failed conversion's allocation control: a first or early non-i64
     /// entry, in either operand, with the bit test still passing and a tall
     /// A over a small result.  The exact Big result, and the failed
     /// conversion holds at most what master's collect would have (nothing
