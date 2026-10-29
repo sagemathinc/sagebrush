@@ -47,7 +47,7 @@ interface Node {
   id: string;
   code: string;
   // undefined when the cell could not be analyzed (its error says why)
-  analysis?: CellAnalysis;
+  analysis?: AnalysisView;
   error?: CellError;
 }
 
@@ -62,21 +62,134 @@ export interface GraphOptions {
 export interface GraphCell {
   id: string;
   code: string;
-  analysis?: CellAnalysis;
+  analysis?: CellAnalysis | AnalysisView;
   error?: CellError;
+}
+
+/**
+ * A read-only view of a set: it can be read and iterated, and has no
+ * mutator (calling one is a TypeError).  What it shows is private to it.
+ */
+export class SetView<T> {
+  readonly #s: Set<T>;
+  constructor(items: Iterable<T> = []) {
+    this.#s = new Set(items);
+    Object.freeze(this);
+  }
+  get size(): number {
+    return this.#s.size;
+  }
+  has(x: T): boolean {
+    return this.#s.has(x);
+  }
+  keys() {
+    return this.#s.keys();
+  }
+  values() {
+    return this.#s.values();
+  }
+  entries() {
+    return this.#s.entries();
+  }
+  forEach(f: (value: T, key: T, set: SetView<T>) => void, thisArg?: unknown): void {
+    for (const x of this.#s) f.call(thisArg, x, x, this);
+  }
+  [Symbol.iterator]() {
+    return this.#s.values();
+  }
+}
+
+/** A read-only view of a map, as SetView is of a set (its values are frozen by whoever makes it). */
+export class MapView<K, V> {
+  readonly #m: Map<K, V>;
+  /** `live`: instead of a copy of `entries`, a map its owner holds privately and never writes (it replaces it) */
+  constructor(entries: Iterable<readonly [K, V]> = [], live?: Map<K, V>) {
+    this.#m = live ?? new Map(entries);
+    Object.freeze(this);
+  }
+  get size(): number {
+    return this.#m.size;
+  }
+  has(k: K): boolean {
+    return this.#m.has(k);
+  }
+  get(k: K): V | undefined {
+    return this.#m.get(k);
+  }
+  keys() {
+    return this.#m.keys();
+  }
+  values() {
+    return this.#m.values();
+  }
+  entries() {
+    return this.#m.entries();
+  }
+  forEach(f: (value: V, key: K, map: MapView<K, V>) => void, thisArg?: unknown): void {
+    for (const [k, v] of this.#m) f.call(thisArg, v, k, this);
+  }
+  [Symbol.iterator]() {
+    return this.#m.entries();
+  }
+}
+
+/** A cell's analysis, read-only: its sets and maps are views, and the object is frozen. */
+export interface AnalysisView {
+  readonly defs: SetView<string>;
+  readonly refs: SetView<string>;
+  readonly deleted: SetView<string>;
+  readonly mutations?: SetView<string>;
+  readonly imports?: MapView<string, string>;
+  readonly unbinds?: SetView<string>;
+}
+const analysisViews = new WeakSet<object>();
+/** A private, read-only copy of an analysis (one already made is itself). */
+export function analysisView(a: CellAnalysis | AnalysisView): AnalysisView {
+  if (analysisViews.has(a)) return a as AnalysisView;
+  const v: AnalysisView = Object.freeze({
+    defs: new SetView(a.defs),
+    refs: new SetView(a.refs),
+    deleted: new SetView(a.deleted),
+    ...(a.mutations ? { mutations: new SetView(a.mutations) } : {}),
+    ...(a.imports ? { imports: new MapView<string, string>(a.imports) } : {}),
+    ...(a.unbinds ? { unbinds: new SetView(a.unbinds) } : {}),
+  });
+  analysisViews.add(v);
+  return v;
+}
+/** An error, copied and frozen (with its list of cells). */
+export const frozenError = (e: CellError): CellError => Object.freeze("cells" in e ? { ...e, cells: Object.freeze([...e.cells]) as string[] } : { ...e });
+// Lists by key, each frozen, in a view.
+const listsView = (m: Map<string, string[]>) => new MapView<string, string[]>([...m].map(([k, l]) => [k, Object.freeze(l) as string[]] as const));
+
+// (no parents, or no children)
+const NONE = new SetView<string>();
+// Whether `to` is `from` or below it, over build()'s edges.
+function reaches(childrenOf: Map<string, Set<string>>, from: string, to: string): boolean {
+  const seen = new Set([from]);
+  const queue = [from];
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (id === to) return true;
+    for (const c of childrenOf.get(id) ?? []) if (!seen.has(c)) {
+      seen.add(c);
+      queue.push(c);
+    }
+  }
+  return false;
 }
 
 export class NotebookGraph {
   private nodes = new Map<string, Node>();
-  private parentsOf = new Map<string, Set<string>>();
-  private childrenOf = new Map<string, Set<string>>();
-  private errorsOf = new Map<string, CellError[]>();
-  /** each name's defining cells, in page order */
-  readonly definers = new Map<string, string[]>();
-  /** each name's updaters: the cells mutating its object, in page order (not when strict) */
-  readonly updatersOf = new Map<string, string[]>();
-  /** each name's deleters: the cells deleting it (`del x`), in page order */
-  readonly deletersOf = new Map<string, string[]>();
+  // (each is replaced, never written, and only in build(): the views have no mutators, their lists are frozen)
+  private parentsOf = new Map<string, SetView<string>>();
+  private childrenOf = new Map<string, SetView<string>>();
+  private errorsOf = new MapView<string, CellError[]>();
+  private definersOf = new MapView<string, string[]>();
+  private updaters = new MapView<string, string[]>();
+  private deleters = new MapView<string, string[]>();
+  /** replaced by a new frozen object at the end of every build(): while it is the same object, so is everything in the graph */
+  private versionNow: object = Object.freeze({});
   private files = new Map<string, { reads: string[]; writes: string[] }>();
   private readonly strict: boolean;
   private readonly analyze?: (code: string, id: string) => CellAnalysis;
@@ -94,7 +207,8 @@ export class NotebookGraph {
     for (const c of cells) {
       const prev = old.get(c.id);
       let node: Node;
-      if (c.analysis || c.error) node = { id: c.id, code: c.code, analysis: c.analysis, error: c.error };
+      // (the graph keeps its own read-only copies: nothing the caller holds can change them)
+      if (c.analysis || c.error) node = { id: c.id, code: c.code, analysis: c.analysis ? analysisView(c.analysis) : undefined, error: c.error ? frozenError(c.error) : undefined };
       else if (prev && prev.code === c.code) node = prev;
       else node = this.analyzeNode(c.id, c.code);
       this.nodes.set(c.id, node);
@@ -105,7 +219,7 @@ export class NotebookGraph {
   private analyzeNode(id: string, code: string): Node {
     if (!this.analyze) throw new Error(`cell ${id}: no analysis`);
     try {
-      return { id, code, analysis: this.analyze(code, id) };
+      return { id, code, analysis: analysisView(this.analyze(code, id)) };
     } catch (e: any) {
       const kind = e?.name === "ImportStarError" ? "import-star" : "syntax";
       return { id, code, error: { kind, message: String(e?.message ?? e) } };
@@ -115,79 +229,104 @@ export class NotebookGraph {
   get ids(): string[] {
     return [...this.nodes.keys()];
   }
-  analysis(id: string): CellAnalysis | undefined {
+  /** a cell's analysis: a read-only view */
+  analysis(id: string): AnalysisView | undefined {
     return this.nodes.get(id)?.analysis;
   }
-  parents(id: string): Set<string> {
-    return this.parentsOf.get(id) ?? new Set();
+  /** a cell's parents (read-only) */
+  parents(id: string): SetView<string> {
+    return this.parentsOf.get(id) ?? NONE;
   }
-  children(id: string): Set<string> {
-    return this.childrenOf.get(id) ?? new Set();
+  /** a cell's children (read-only) */
+  children(id: string): SetView<string> {
+    return this.childrenOf.get(id) ?? NONE;
   }
-  /** each cell's errors (cells without errors are absent) */
-  get errors(): Map<string, CellError[]> {
+  /** each cell's errors (cells without errors are absent; read-only, the lists frozen) */
+  get errors(): MapView<string, CellError[]> {
     return this.errorsOf;
   }
+  /** each name's defining cells, in page order (read-only) */
+  get definers(): MapView<string, string[]> {
+    return this.definersOf;
+  }
+  /** each name's updaters: the cells mutating its object, in page order (not when strict; read-only) */
+  get updatersOf(): MapView<string, string[]> {
+    return this.updaters;
+  }
+  /** each name's deleters: the cells deleting it (`del x`), in page order (read-only) */
+  get deletersOf(): MapView<string, string[]> {
+    return this.deleters;
+  }
+  /** a new frozen object whenever anything in the graph changed (every change ends in build()) */
+  get version(): object {
+    return this.versionNow;
+  }
 
+  // Everything is computed in local collections, then published as read-only views, and the version
+  // replaced: the one place the graph changes.
   private build(): void {
     const ids = this.ids;
-    this.parentsOf = new Map(ids.map((id) => [id, new Set()]));
-    this.childrenOf = new Map(ids.map((id) => [id, new Set()]));
-    this.errorsOf = new Map();
-    this.definers.clear();
+    const parentsOf = new Map<string, Set<string>>(ids.map((id) => [id, new Set<string>()]));
+    const childrenOf = new Map<string, Set<string>>(ids.map((id) => [id, new Set<string>()]));
+    const errorsOf = new Map<string, CellError[]>();
+    const definers = new Map<string, string[]>();
     const readers = new Map<string, string[]>();
-    const deleters = this.deletersOf;
-    deleters.clear();
+    const deleters = new Map<string, string[]>();
+    const updatersOf = new Map<string, string[]>();
+    const addError = (id: string, e: CellError) => {
+      const l = errorsOf.get(id);
+      if (l) l.push(e);
+      else errorsOf.set(id, [e]);
+    };
     const push = (m: Map<string, string[]>, k: string, v: string) => {
       const l = m.get(k);
       if (l) l.push(v);
       else m.set(k, [v]);
     };
     for (const [id, node] of this.nodes) {
-      if (node.error) this.errorsOf.set(id, [node.error]);
+      if (node.error) errorsOf.set(id, [node.error]);
       const a = node.analysis;
       if (!a) continue;
-      for (const n of a.defs) push(this.definers, n, id);
+      for (const n of a.defs) push(definers, n, id);
       // (ours: `except E as x` binds x, then deletes it: a definition, after
       // which x is gone, as in plain Python)
-      if (!this.strict) for (const n of a.unbinds ?? []) if (!a.defs.has(n)) push(this.definers, n, id);
+      if (!this.strict) for (const n of a.unbinds ?? []) if (!a.defs.has(n)) push(definers, n, id);
       for (const n of a.refs) push(readers, n, id);
       for (const n of a.deleted) push(deleters, n, id);
     }
     const edge = (p: string, c: string) => {
       if (p === c) return;
-      this.childrenOf.get(p)!.add(c);
-      this.parentsOf.get(c)!.add(p);
+      childrenOf.get(p)!.add(c);
+      parentsOf.get(c)!.add(p);
     };
-    for (const [name, ds] of this.definers) {
+    for (const [name, ds] of definers) {
       const rs = readers.get(name);
       // (ours: the same import in several cells defines the same thing)
       const what = ds.map((d) => this.nodes.get(d)!.analysis?.imports?.get(name));
       const sameImport = !this.strict && what[0] !== undefined && what.every((w) => w === what[0]);
       if (ds.length > 1 && (this.strict || rs) && !sameImport) {
-        for (const d of ds) this.addError(d, { kind: "multiple-definition", name, cells: ds.filter((x) => x !== d) });
+        for (const d of ds) addError(d, { kind: "multiple-definition", name, cells: ds.filter((x) => x !== d) });
         // #1477: and on the cells reading it, which may be the ones that made it an error
-        if (!this.strict) for (const r of rs ?? []) if (!ds.includes(r)) this.addError(r, { kind: "multiple-definition", name, cells: ds, reading: true });
+        if (!this.strict) for (const r of rs ?? []) if (!ds.includes(r)) addError(r, { kind: "multiple-definition", name, cells: ds, reading: true });
       }
       for (const r of rs ?? []) for (const d of ds) edge(d, r);
     }
     // a cell deleting a name runs after the others reading it (and, ours,
     // after the cell defining it: there is nothing to delete before)
     for (const [name, xs] of deleters) for (const r of readers.get(name) ?? []) for (const x of xs) edge(r, x);
-    if (!this.strict) for (const [name, xs] of deleters) for (const d of this.definers.get(name) ?? []) for (const x of xs) edge(d, x);
+    if (!this.strict) for (const [name, xs] of deleters) for (const d of definers.get(name) ?? []) for (const x of xs) edge(d, x);
     // Mutation tracking (ours, unless strict): the cells mutating a name's
     // object (its updaters) run after its definer, in page order, and before
     // the cells reading it.
-    this.updatersOf.clear();
     if (!this.strict) {
-      for (const [id, node] of this.nodes) for (const n of node.analysis?.mutations ?? []) if (this.definers.has(n)) push(this.updatersOf, n, id);
-      for (const [name, us] of this.updatersOf) {
+      for (const [id, node] of this.nodes) for (const n of node.analysis?.mutations ?? []) if (definers.has(n)) push(updatersOf, n, id);
+      for (const [name, us] of updatersOf) {
         for (let i = 0; i + 1 < us.length; i++) edge(us[i], us[i + 1]);
         for (const r of readers.get(name) ?? []) if (!us.includes(r)) for (const u of us) edge(u, r);
       }
     }
-    for (const scc of this.components()) {
-      if (scc.length > 1) for (const id of scc) this.addError(id, { kind: "cycle", cells: scc });
+    for (const scc of this.components((v) => childrenOf.get(v)!)) {
+      if (scc.length > 1) for (const id of scc) addError(id, { kind: "cycle", cells: scc });
     }
     // Files (ours): a cell that wrote a file in its last run, before one that
     // read it.  Edges found by running, so never made into cycles: one that
@@ -197,14 +336,22 @@ export class NotebookGraph {
     for (const [id, io] of this.files) {
       if (!this.nodes.has(id)) continue;
       for (const f of io.writes) for (const r of fileReaders.get(f) ?? []) {
-        if (r !== id && !this.childrenOf.get(id)!.has(r) && !this.closure([r]).has(id)) edge(id, r);
+        if (r !== id && !childrenOf.get(id)!.has(r) && !reaches(childrenOf, r, id)) edge(id, r);
       }
     }
+    // published: read-only views, the lists frozen
+    this.parentsOf = new Map(ids.map((id) => [id, new SetView(parentsOf.get(id)!)]));
+    this.childrenOf = new Map(ids.map((id) => [id, new SetView(childrenOf.get(id)!)]));
+    this.errorsOf = new MapView<string, CellError[]>([...errorsOf].map(([id, es]) => [id, Object.freeze(es.map(frozenError)) as CellError[]] as const));
+    this.definersOf = listsView(definers);
+    this.updaters = listsView(updatersOf);
+    this.deleters = listsView(deleters);
+    this.versionNow = Object.freeze({});
   }
 
-  /** The files each cell read and wrote in its last run (a page's writer-to-reader edges). */
+  /** The files each cell read and wrote in its last run (a page's writer-to-reader edges): copied, so the caller's map can't change the graph. */
   setFiles(files: Map<string, { reads: string[]; writes: string[] }>): void {
-    this.files = files;
+    this.files = new Map([...files].map(([id, io]) => [id, Object.freeze({ reads: Object.freeze([...io.reads]) as string[], writes: Object.freeze([...io.writes]) as string[] })]));
     this.build();
   }
   /** The cells that read a file in their last run. */
@@ -212,14 +359,8 @@ export class NotebookGraph {
     return this.ids.filter((id) => this.files.get(id)?.reads.includes(path));
   }
 
-  private addError(id: string, e: CellError): void {
-    const l = this.errorsOf.get(id);
-    if (l) l.push(e);
-    else this.errorsOf.set(id, [e]);
-  }
-
-  /** the strongly connected components (Tarjan), each in page order */
-  private components(): string[][] {
+  /** the strongly connected components (Tarjan), each in page order, over `children` (build()'s edges) */
+  private components(children: (id: string) => Set<string>): string[][] {
     const index = new Map<string, number>(), low = new Map<string, number>();
     const stack: string[] = [], on = new Set<string>(), out: string[][] = [];
     const page = new Map(this.ids.map((id, i) => [id, i]));
@@ -233,7 +374,7 @@ export class NotebookGraph {
         low.set(v, n++);
         stack.push(v);
         on.add(v);
-        work.push([v, this.children(v)[Symbol.iterator]()]);
+        work.push([v, children(v)[Symbol.iterator]()]);
       };
       open(start);
       while (work.length) {

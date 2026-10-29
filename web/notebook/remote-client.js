@@ -55,11 +55,12 @@ export async function jwkThumbprint(jwk) {
   return b64url(await sha256(JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y })));
 }
 
-/** Never sent: no effect anywhere. */
+/** Never sent: no effect anywhere.  `stale`: a send guard refused it (what it was checked against changed). */
 export class NotSentError extends Error {
-  constructor(message, { aborted = false } = {}) {
+  constructor(message, { aborted = false, stale = false } = {}) {
     super(message);
     this.aborted = aborted;
+    this.stale = stale;
   }
 }
 /** The gateway's typed refusal: `status` (HTTP), `code` (its error), `retryAfter` (seconds, if given). */
@@ -88,6 +89,14 @@ export class StreamError extends Error {
     this.tooLarge = tooLarge;
     this.aborted = aborted;
   }
+}
+
+// Test-only fault: an await between a send's guard and its fetch (a test shows the same-turn probe sees it).
+// Never set outside tests (a census test checks that).
+let testHooks = null;
+/** Tests only: set (or clear, with null) the fault above ({awaitAfterGuard: async () => {}}). */
+export function setTestHooks(h) {
+  testHooks = h;
 }
 
 const notSentIfAborted = (signal) => {
@@ -189,7 +198,10 @@ export class RemoteClient {
   // One request with its proof; a 401 asking for a fresh nonce is retried
   // once with the nonce it gave.  Resolves to the Response; throws
   // NotSentError before anything was sent, AmbiguousError after.
-  async send(method, path, body, { accept = "application/json", signal, query = "" } = {}) {
+  // `guard(attempt)`, if given, is called synchronously right before each
+  // fetch (after the token and the proof are ready): anything but true, and
+  // that fetch is not made (NotSentError, stale).
+  async send(method, path, body, { accept = "application/json", signal, query = "", guard } = {}) {
     const p = checkPath(path);
     const url = this.base + p + query;
     const text = body === undefined ? undefined : JSON.stringify(body);
@@ -219,6 +231,9 @@ export class RemoteClient {
       notSentIfAborted(signal);
       const headers = { Authorization: `DPoP ${accessToken}`, DPoP: proof, Accept: accept };
       if (text !== undefined) headers["Content-Type"] = "application/json";
+      // (the same turn as the fetch: nothing can change between the guard and the send)
+      if (guard && guard(attempt) !== true) throw new NotSentError("not sent: changed since it was checked", { stale: true });
+      if (testHooks?.awaitAfterGuard) await testHooks.awaitAfterGuard();
       let res;
       try {
         res = await this.fetch(url, { method, headers, redirect: "error", credentials: "omit", cache: "no-store", signal, ...(text !== undefined ? { body: text } : {}) });
@@ -243,8 +258,8 @@ export class RemoteClient {
    * (no valid answer: a 2xx that isn't a JSON object, an untyped error, an
    * answer over RESPONSE_MAX, a broken or aborted read).
    */
-  async request(method, path, body, { signal } = {}) {
-    const res = await this.send(method, path, body, { signal });
+  async request(method, path, body, { signal, guard } = {}) {
+    const res = await this.send(method, path, body, { signal, guard });
     let data;
     try {
       data = await readJson(res, signal);
