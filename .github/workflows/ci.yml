@@ -538,6 +538,8 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-crash-v4.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-journal.mjs
           CHROME=google-chrome bun web/notebook/test-journal.mjs
+          # (the board journal's store, Workspace.journalWrite and the kind)
+          CHROME=google-chrome bun web/board/test-board-journal.mjs
           CHROME=google-chrome bun web/workspace/test-doc-sync.mjs
           bun web/workspace/test-doc-sync-switch.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops.mjs
@@ -835,6 +837,8 @@ jobs:
               node web/board/test-blocks.mjs
               node web/board/test-history.mjs
               node web/board/test-history-order.mjs
+              # (the board page under the board journal; its own server, one origin)
+              bun web/board/test-board-journal-page.mjs
               node web/board/test-cocalc.mjs
               node web/board/test-mount.mjs
               node web/board/test-xss.mjs
