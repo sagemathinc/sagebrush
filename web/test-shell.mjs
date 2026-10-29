@@ -336,8 +336,8 @@ try {
     await cdp.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
     const used = () => evaluate("(gc(), performance.memory.usedJSHeapSize)");
     // (a warm-up shell first: from one start to the next, the page's used heap after a GC swings by a few MB
-    // either way, while its heap snapshot holds no object near b (so not a copy of the module); after a
-    // warm-up, the next start's figure is steady.  The snapshot below checks the copies themselves.)
+    // either way, while its heap snapshot holds no object near b (so not a copy of the module).  That aggregate
+    // figure is therefore reported only, never gated: the heap snapshot below is the check.)
     const cold = await used();
     await evaluate(`(async () => { const { shell } = await startShell(${JSON.stringify(S)}, "/"); await shell.configure(INIT); await shell.exec("true", EMPTY_FS); shell.terminate(); })()`);
     const before = await used();
@@ -364,9 +364,54 @@ try {
     const moduleBytes = Buffer.byteLength(JSON.parse(readFileSync(join(dir, "pkg", chunkSha + ".json"), "utf8")).modules["shell.js"]);
     console.log(`info N1: module b = ${moduleBytes} bytes, 4b = ${4 * moduleBytes}; page keeps ${pageAfter - before} bytes after a GC; the shell worker's heap ${wheap?.usedSize} bytes (of ${wheap?.totalSize})`);
     console.log(`info N1: the page's largest live object, with the shell running: ${largest} bytes`);
-    ok(pageAfter - before <= moduleBytes, "the page keeps less than b once the module is posted: its copies are released (N1, page realm)");
-    ok(largest > 0 && largest < moduleBytes / 4, "and no object in the page's heap snapshot comes near b: no copy of the module, its chunk's JSON or its bytes is kept (N1, page realm)");
+    // (diagnostic only: one post-GC sample of the whole page heap against another swings by more than b, an object's size)
+    console.log(`info N1: the page's used heap after the module is posted moved ${pageAfter - before} bytes (diagnostic only, not gated: an aggregate heap delta after one GC, not a retention proof)`);
+    // (the gate is per node: it shows no single object of b/4 or more is live.  A copy split across smaller strings
+    // or buffers, held through a rope or an object graph, or alive only transiently, is outside it; the controls
+    // below show its sensitivity to a flat string and a flat byte array in this browser, not every representation)
+    ok(largest > 0 && largest < moduleBytes / 4, "no single node in the page's heap snapshot reaches b/4 while the shell runs (a per-node check: a copy split across smaller strings or buffers, held through a rope or object graph, or alive only transiently, is outside it) (N1, page realm)");
     ok(wheap && wheap.usedSize > 0 && wheap.usedSize <= 4 * moduleBytes + 16 * 2 ** 20, "the shell worker's heap is within 4b plus the shell's live set (16 MiB measured allowance) (N1, worker realm)");
+    // (fail-first controls for the per-node gate: each keeps one copy of the module in the page, from an isolated
+    // scope that returns only its length; a fresh snapshot must catch it; it is deleted in a finally; then a fresh
+    // snapshot must pass the gate's own predicate again, before the next control and before N3, which reuses this page)
+    const largestLive = async () => {
+      const parts = [];
+      const onPart = (e) => {
+        const m = JSON.parse(e.data);
+        if (m.method === "HeapProfiler.addHeapSnapshotChunk") parts.push(m.params.chunk);
+      };
+      cdp.ws.addEventListener("message", onPart);
+      try {
+        const r = await cdp.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
+        if (r.error) return -1;
+        const s = JSON.parse(parts.join(""));
+        const n = s.snapshot.meta.node_fields.length, k = s.snapshot.meta.node_fields.indexOf("self_size");
+        if (k < 0) return -1;
+        let max = 0;
+        for (let i = k; i < s.nodes.length; i += n) max = Math.max(max, s.nodes[i]);
+        return max;
+      } catch {
+        return -1;
+      } finally {
+        cdp.ws.removeEventListener("message", onPart);
+      }
+    };
+    const moduleChars = JSON.parse(readFileSync(join(dir, "pkg", chunkSha + ".json"), "utf8")).modules["shell.js"].length;
+    const control = async (name, global, keep, want) => {
+      try {
+        const got = await evaluate(`(async () => { const t = await (await fetch("/pkg/${chunkSha}.json")).text(); const s = JSON.parse(t).modules["shell.js"]; window.${global} = ${keep}; return window.${global}.length; })()`);
+        ok(got === want, `control ${name}: installed in the page, length ${JSON.stringify(got)} (want ${want}) (N1)`);
+        const caught = await largestLive();
+        ok(caught >= moduleBytes / 4, `control ${name}: the per-node gate catches it (largest ${caught} bytes) (N1)`);
+      } finally {
+        const gone = await evaluate(`(delete window.${global}, gc(), typeof window.${global})`);
+        ok(gone === "undefined", `control ${name}: its global is deleted (N1)`);
+      }
+      const after = await largestLive();
+      ok(after > 0 && after < moduleBytes / 4, `after control ${name}: a fresh snapshot passes the gate's own predicate again (largest ${after} bytes) (N1)`);
+    };
+    await control("a retained string copy of the module", "__n1str", "s", moduleChars);
+    await control("a retained byte copy of the module", "__n1bytes", "new TextEncoder().encode(s)", moduleBytes);
     await evaluate("sh2.terminate()");
   }
   // the shell, and every registered command under the worker's policy (N3)
