@@ -1464,7 +1464,7 @@
   "9a38cebb86fdbd40": {"decl":"src/runtime/ops.ts :: inplace","class":"allocates","via":"src/limits.ts :: plain"},
   "2e68750042bca6af": {"decl":"src/runtime/ops.ts :: invert","class":"allocates","via":"src/runtime/ops.ts :: unaryDunder"},
   "362a028e7a55f9e0": {"decl":"src/runtime/ops.ts :: ipow","class":"allocates","via":"src/runtime/ops.ts :: inplace"},
-  "419196c53a3c7c3b": {"decl":"src/runtime/ops.ts :: iter","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
+  "ece5be4818fdb794": {"decl":"src/runtime/ops.ts :: iter","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "169bde5c228df1d2": {"decl":"src/runtime/ops.ts :: itruediv","class":"allocates","via":"src/runtime/ops.ts :: inplace"},
   "1551ba814ff0811d": {"decl":"src/runtime/ops.ts :: le","class":"allocates","via":"src/runtime/ops.ts :: richCompare"},
   "246b7e11c43db6f8": {"decl":"src/runtime/ops.ts :: left","class":"allocates","via":"src/runtime/ops.ts :: typeDunder"},
