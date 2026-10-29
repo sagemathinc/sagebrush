@@ -70,6 +70,9 @@
   .sbnb.fig figure.plot, .sbnb.fbfig figure.plot { margin: 0; }
   .proofbox { height: 420px; margin-bottom: 8px; }
   .proofbox.grading { height: 360px; }
+  .annhead { font-size: 13px; font-weight: 600; margin: 4px 0 2px; }
+  ol.anncomments { margin: 0 0 8px; padding-left: 22px; font-size: 14px; }
+  ol.anncomments q { color: var(--muted); font-style: italic; }
   body.gfocus .proofbox.grading { height: max(320px, calc(100vh - 400px)); } /* (the rubric stays in view) */
   @media (max-width: 700px) { .proofbox { height: 560px; } .proofbox.grading { height: 420px; } }
   .proof-fallback { display: flex; gap: 8px; height: 100%; }
@@ -521,7 +524,22 @@ function renderItem(item, n, student) {
     });
     studentEditors.push(ed);
     const g = course.grade(student, item.id);
-    if (prev && g?.annotations?.length) studentComments.push(attachAnnotations(ed, { mode: "view", load: () => g.annotations }));
+    if (prev && g?.annotations?.length) {
+      studentComments.push(attachAnnotations(ed, { mode: "view", load: () => g.annotations }));
+      // the comments as a list under the proof too, numbered as the badges are: readable without a tap,
+      // whatever the card's width (text nodes only: the instructor's text is never parsed as HTML)
+      const list = document.createElement("ol"); list.className = "anncomments";
+      const live = g.annotations.filter((t) => !t.resolved);
+      for (const t of live) {
+        const li = document.createElement("li"), qd = document.createElement("q"), tx = document.createElement("span");
+        const quote = (t.anchor?.shown ?? t.anchor?.quote ?? "").replace(/\s+/g, " ").trim();
+        qd.textContent = quote.length > 80 ? quote.slice(0, 79) + "…" : quote;
+        tx.textContent = t.messages?.[0]?.text ?? "";
+        li.append(qd, " ", tx); list.append(li);
+      }
+      const head = document.createElement("div"); head.className = "annhead"; head.textContent = `Your instructor's ${live.length === 1 ? "comment" : "comments"} on your proof`;
+      ans.querySelector(".proofbox").after(head, list);
+    }
     ed.then((e) => {
       if (prev) return;
       btn.disabled = false;
