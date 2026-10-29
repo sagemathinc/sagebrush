@@ -91,6 +91,14 @@ export class StreamError extends Error {
   }
 }
 
+// Test-only fault (the remote-compute plan's P1b-int I5b): an await between a send's guard and its fetch.
+// Never set outside tests (a census test checks that).
+let testHooks = null;
+/** Tests only: set (or clear, with null) the fault above ({awaitAfterGuard: async () => {}}). */
+export function setTestHooks(h) {
+  testHooks = h;
+}
+
 const notSentIfAborted = (signal) => {
   if (signal?.aborted) throw new NotSentError("aborted before it was sent", { aborted: true });
 };
@@ -225,6 +233,7 @@ export class RemoteClient {
       if (text !== undefined) headers["Content-Type"] = "application/json";
       // (the same turn as the fetch: nothing can change between the guard and the send)
       if (guard && guard(attempt) !== true) throw new NotSentError("not sent: changed since it was checked", { stale: true });
+      if (testHooks?.awaitAfterGuard) await testHooks.awaitAfterGuard();
       let res;
       try {
         res = await this.fetch(url, { method, headers, redirect: "error", credentials: "omit", cache: "no-store", signal, ...(text !== undefined ? { body: text } : {}) });

@@ -546,6 +546,26 @@ test("the errors are deep read-only: a filtered list (an unsubmitted cell's cycl
   assert.throws(() => e.cells.push("q"), TypeError);
 });
 
+test("the run outputs are bounded: when full, what no action in progress uses goes; if all are in use, an output isn't kept (its identity then isn't stable: fail-closed)", async () => {
+  // (lookups made in an action, from its prepare hook: each twice, to see whether the object is kept)
+  let inAction: string[] = [];
+  const seen: unknown[][] = [];
+  const g = hooked(["a = 1", "b = 2", "c = 3", "d = 4"], { prepare: async () => { seen.push(inAction.map((id) => g.r.runOutput(id)), inAction.map((id) => g.r.runOutput(id))); return undefined; } });
+  await g.r.load();
+  g.r.outputsMax = 3;
+  inAction = ["c0", "c1", "c2", "c3"];
+  await g.r.runAll();
+  const [first, second] = seen;
+  assert.equal(g.r.outputsSize(), 3, "bounded");
+  assert.ok(first.slice(0, 3).every((o, i) => o === second[i]), "the first three, kept: the same objects within the action");
+  assert.notEqual(first[3], second[3], "the fourth, past the bound with every entry in use: not kept, a new object each time");
+  inAction = ["c3"];
+  seen.length = 0;
+  await g.r.run(["c3"]);
+  assert.equal(seen[0][0], seen[1][0], "the next action: entries it doesn't use make room, and c3 is kept");
+  assert.ok(g.r.outputsSize() <= 3);
+});
+
 test("rekeyUnits: exactly at the limit, the output is kept; one unit more, a new output (never a refusal)", async () => {
   for (const over of [0, 1]) {
     const budget = new Budget();

@@ -72,8 +72,10 @@ export class RemoteGate {
     this.kernel = kernel;
     this.page = page;
     this.seeds = new Map(); // `${namespace}\0${id}` -> {seed} (frozen: its identity keys the spec)
-    this.specs = new Map(); // id -> {out, cfg, lc, entry, spec}
-    this.parentsMemo = new Map(); // id -> {version, parents}
+    this.specs = new Map(); // id -> {out, cfg, lc, entry, spec, action}
+    this.parentsMemo = new Map(); // id -> {version, parents, action}
+    // (the action now: an entry used by it is never dropped to make room; see keep())
+    this.action = 0;
     this.approvals = new Approvals(hash, { spec: (id) => this.spec(id), parents: (id) => this.parents(id) }, () => this.context(), newDoc);
     this.off = kernel.on("lifecycle", (old, lc) => this.lifecycle(old, lc));
   }
@@ -98,10 +100,12 @@ export class RemoteGate {
     const entry = this.seeds.get(`${cfg.seedNamespace}\0${id}`);
     if (!entry) return undefined;
     const prev = this.specs.get(id);
-    if (prev && prev.out === out && prev.cfg === cfg && prev.lc === lc && prev.entry === entry) return prev.spec;
+    if (prev && prev.out === out && prev.cfg === cfg && prev.lc === lc && prev.entry === entry) {
+      prev.action = this.action;
+      return prev.spec;
+    }
     const spec = makeSpec(id, out.code, cfg.mode, { seed: entry.seed, forget: out.forget, mangle: cfg.reactive ? mangleOf(id) : null, scoped: out.scoped }, lc.binding);
-    if (!this.specs.has(id) && this.specs.size >= CAPS.maps) this.prune();
-    if (this.specs.has(id) || this.specs.size < CAPS.maps) this.specs.set(id, { out, cfg, lc, entry, spec });
+    this.keep(this.specs, id, { out, cfg, lc, entry, spec });
     return spec;
   }
 
@@ -112,7 +116,10 @@ export class RemoteGate {
     if (!r) return NO_PARENTS;
     const version = r.graph.version;
     const prev = this.parentsMemo.get(id);
-    if (prev && (prev.version === version || testHooks?.parentsSkip)) return prev.parents;
+    if (prev && (prev.version === version || testHooks?.parentsSkip)) {
+      prev.action = this.action;
+      return prev.parents;
+    }
     const now = [...r.graph.parents(id)].sort();
     let same = false;
     if (prev && prev.parents.length === now.length) {
@@ -120,8 +127,21 @@ export class RemoteGate {
       same = prev.parents.every((p, i) => p === now[i]);
     }
     const parents = same ? prev.parents : Object.freeze(now);
-    if (prev || this.parentsMemo.size < CAPS.maps) this.parentsMemo.set(id, { version, parents });
+    this.keep(this.parentsMemo, id, { version, parents });
     return parents;
+  }
+
+  // Keep an adapter entry, within CAPS.maps: when full, what is gone from the notebook goes, then what
+  // the action in progress doesn't use; if that is not enough, it isn't kept (its object is then made
+  // anew on the next lookup, so a check against it skips: fail-closed).
+  keep(map, id, entry) {
+    entry.action = this.action;
+    if (!map.has(id) && map.size >= CAPS.maps) {
+      this.prune();
+      if (map.size >= CAPS.maps) for (const [k, e] of map) if (e.action !== this.action) map.delete(k);
+      if (map.size >= CAPS.maps) return;
+    }
+    map.set(id, entry);
   }
 
   // What is kept for cells no longer in the notebook goes.
@@ -203,7 +223,10 @@ export class RemoteGate {
     const a = this.approvals;
     return {
       ...base,
-      beginAction: () => a.beginAction(),
+      beginAction: () => {
+        gate.action++;
+        a.beginAction();
+      },
       endAction: () => a.endAction(),
       rekey: (units) => a.rekey(units),
       consent(stage, cap) {
