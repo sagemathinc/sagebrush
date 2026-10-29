@@ -321,13 +321,15 @@ class Renderer {
       if (c === CAT.MATH) {
         const display = this.isMathTok(nodes[i + 1]);
         if (display) {
-          const [m, j] = this.until(nodes, i + 1, (x, jj) => this.isMathTok(x) && this.isMathTok(nodes[jj + 1]));
-          this.displayMath(this.mathStr(m), flow, ctx);
-          return Math.min(nodes.length - 1, j + 1);
+          const r = this.mathUntil(nodes, i + 1, (x, jj) => this.isMathTok(x) && this.isMathTok(nodes[jj + 1]));
+          if (!r.closed) { this.unclosedMath("$$", r.m, true, flow, ctx); return r.j; }
+          this.displayMath(this.mathStr(r.m), flow, ctx);
+          return Math.min(nodes.length - 1, r.j + 1);
         }
-        const [m, j] = this.until(nodes, i, (x) => this.isMathTok(x));
-        flow.html(this.math(this.mathStr(m), false), st);
-        return j;
+        const r = this.mathUntil(nodes, i, (x) => this.isMathTok(x));
+        if (!r.closed) { this.unclosedMath("$", r.m, false, flow, ctx); return r.j; }
+        flow.html(this.math(this.mathStr(r.m), false), st);
+        return r.j;
       }
       flow.text(String.fromCodePoint(k), st);
       return i;
@@ -335,8 +337,8 @@ class Renderer {
     const name = this.I.name(n.v);
     if (name.startsWith("\u0001")) { flow.text(name === "\u0001~" ? " " : name.slice(1), st); return i; }
     if (name === "par") { if (!flow.runs && flow.afterDisplay) flow.noindent = false; flow.afterDisplay = false; flow.par(); return i; }
-    if (name === "[") { const [m, j] = this.until(nodes, i, (x) => this.csName(x) === "]"); this.displayMath(this.mathStr(m), flow, ctx); return j; }
-    if (name === "(") { const [m, j] = this.until(nodes, i, (x) => this.csName(x) === ")"); flow.html(this.math(this.mathStr(m), false), st); return j; }
+    if (name === "[") { const r = this.mathUntil(nodes, i, (x) => this.csName(x) === "]"); if (!r.closed) this.unclosedMath("\\[", r.m, true, flow, ctx); else this.displayMath(this.mathStr(r.m), flow, ctx); return r.j; }
+    if (name === "(") { const r = this.mathUntil(nodes, i, (x) => this.csName(x) === ")"); if (!r.closed) this.unclosedMath("\\(", r.m, false, flow, ctx); else flow.html(this.math(this.mathStr(r.m), false), st); return r.j; }
     if (Object.hasOwn(CMDS, name)) return CMDS[name].call(this, nodes, i, ctx, flow);
     if (Object.hasOwn(SIZES, name)) { st.size = SIZES[name]; return i; }
     if (Object.hasOwn(TEXT_SYMBOLS, name)) { flow.text(TEXT_SYMBOLS[name], st); return i; }
@@ -354,6 +356,27 @@ class Renderer {
     return i;
   }
   isMathTok(n) { return n && n.t === "x" && !isCs(n.v) && catOf(n.v) === CAT.MATH; }
+  // math between delimiters at this sibling level, as TeX reads it: it can't go past a \par (a blank line) or the end
+  // of the list; then it is unclosed ({closed: false}, j the node before the \par, which the walk then takes)
+  mathUntil(nodes, i, pred) {
+    const m = [];
+    for (let j = i + 1; j < nodes.length; j++) {
+      if (pred(nodes[j], j)) return { m, j, closed: true };
+      if (this.csName(nodes[j]) === "par") return { m, j: j - 1, closed: false };
+      m.push(nodes[j]);
+    }
+    return { m, j: nodes.length - 1, closed: false };
+  }
+  // an unclosed formula (being typed, say): what there is of it, and a note; the rest of the document renders as text
+  unclosedMath(open, m, display, flow, ctx) {
+    this.stats.unclosedMath = (this.stats.unclosedMath || 0) + 1;
+    const src = this.mathStr(m);
+    const h = (src.trim() ? this.math(src, display) : "") + '<span class="mathopen" title="Math can\'t continue past a blank line or the end of a group">' + esc(open) + " not closed</span>";
+    if (!display) { flow.html(h, ctx.st); return; }
+    flow.par();
+    flow.block('<div class="dmath">' + h + "</div>");
+    flow.noindent = true; flow.afterDisplay = true;
+  }
   displayMath(src, flow, ctx, num) {
     flow.par();
     const tag = num ? "\\tag{" + num + "}" : "";

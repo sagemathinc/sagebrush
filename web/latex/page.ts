@@ -16,6 +16,9 @@ import { PAGE_CSS } from "./style";
 import { mark } from "./marks";
 
 export const PATCH_BUDGET = { items: 200, bytes: 512 * 1024, ms: 8 };
+// the source's font size (px) and the preview's zoom (%): their ranges, defaults and keys in localStorage
+export const FONT = { key: "sagebrush-latex-font", min: 9, max: 28, def: 13 };
+export const ZOOM = { key: "sagebrush-latex-zoom", min: 50, max: 200, def: 100, step: 10 };
 const BANNER = "LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file. If the file changed elsewhere since you opened it (another tab, Python, a collaborator), Save replaces those changes; the file's versions keep the bytes it replaced. Nothing is saved automatically. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 const BANNER_NO_SAVE = (why: string) => "LaTeX editor: an early prototype. This file can't be saved here: " + why + ". It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 
@@ -39,13 +42,24 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const page = el("div", "tex-page"); root.appendChild(page);
   const banner = el("div", "tex-banner"); banner.setAttribute("role", "note");
   const head = el("div", "tex-head");
-  const back = el("button", "tex-back", "← Files"); back.onclick = () => host.back();
+  // Files: the notebook page's own Files button (index.html's #wsfilesbtn) clicked, so the files show and hide beside
+  // this page as they do beside a notebook, the document staying open; pressed while they are shown (body.wsfiles)
+  const back = el("button", "tex-back", "Files"); back.setAttribute("aria-controls", "wssidebar");
+  back.onclick = () => { const b = document.getElementById("wsfilesbtn"); if (b) b.click(); else host.back(); };
+  const pressed = () => back.setAttribute("aria-pressed", String(document.body.classList.contains("wsfiles")));
+  new MutationObserver(pressed).observe(document.body, { attributes: true, attributeFilter: ["class"] }); pressed();
   const title = el("span", "tex-title");
   const dirty = el("span", "tex-dirty", "Unsaved changes"); dirty.hidden = true;
   const save = el("button", "tex-save", "Save"); save.disabled = true;
   const toggle = el("button", "tex-toggle", "Preview");
   const status = el("span", "tex-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
-  head.append(back, title, dirty, save, toggle, status);
+  // the source's font size and the preview's zoom, each remembered in this browser
+  const tools = el("span", "tex-tools");
+  const btn = (text: string, label: string) => { const b = el("button", "", text); b.title = label; b.setAttribute("aria-label", label); return b; };
+  const fsDown = btn("A−", "Smaller source text"), fsUp = btn("A+", "Larger source text");
+  const zOut = btn("−", "Zoom the preview out"), zIn = btn("+", "Zoom the preview in"), zShow = el("span", "tex-zoomv");
+  tools.append(el("span", "tex-tl", "Source"), fsDown, fsUp, el("span", "tex-tl", "Preview"), zOut, zShow, zIn);
+  head.append(back, title, dirty, save, toggle, status, tools);
   const main = el("div", "tex-main");
   const left = el("div", "tex-left"), right = el("div", "tex-right");
   const preview = el("div", "page tex-preview");
@@ -54,7 +68,33 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   page.append(banner, head, main);
   banner.textContent = BANNER;
   const say = (t: string) => { status.textContent = t; };
-  const gone = (t: string) => { main.textContent = ""; const m = el("div", "tex-gone", t); main.appendChild(m); save.hidden = true; toggle.hidden = true; };
+  const pref = (k: string, lo: number, hi: number, d: number) => { let v = d; try { v = Number(localStorage.getItem(k) ?? d); } catch {} return Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
+  const keep = (k: string, v: number) => { try { localStorage.setItem(k, String(v)); } catch {} };
+  let fontPx = pref(FONT.key, FONT.min, FONT.max, FONT.def), zoomPct = pref(ZOOM.key, ZOOM.min, ZOOM.max, ZOOM.def);
+  const applyView = () => {
+    page.style.setProperty("--tex-src-fs", fontPx + "px");
+    preview.style.setProperty("zoom", String(zoomPct / 100));
+    zShow.textContent = zoomPct + "%";
+    fsDown.disabled = fontPx <= FONT.min; fsUp.disabled = fontPx >= FONT.max; zOut.disabled = zoomPct <= ZOOM.min; zIn.disabled = zoomPct >= ZOOM.max;
+  };
+  const font = (d: number) => { fontPx = Math.min(FONT.max, Math.max(FONT.min, fontPx + d)); keep(FONT.key, fontPx); applyView(); };
+  const zoom = (d: number) => { zoomPct = Math.min(ZOOM.max, Math.max(ZOOM.min, zoomPct + d)); keep(ZOOM.key, zoomPct); applyView(); };
+  fsDown.onclick = () => font(-1); fsUp.onclick = () => font(1); zOut.onclick = () => zoom(-ZOOM.step); zIn.onclick = () => zoom(ZOOM.step);
+  applyView();
+
+  // ---- the files beside this page: a notebook row clicked (or Enter) opens that notebook's page by its URL, the way
+  // a board's does; the notebook page's own open() would load it under this page, unseen. A click on a row's button or
+  // name field, a Ctrl/Cmd-click (a new tab) or a middle click: left to the file browser, as before; a row in Trash
+  // (its open() does nothing there): nothing.
+  document.getElementById("wssidebar")?.addEventListener("click", (ev) => {
+    const t = ev.target as HTMLElement, r = t.closest<HTMLElement>(".frow"), p = r?.dataset.path;
+    if (!p || !/\.ipynb$/i.test(p) || t.closest("button, input") || ev.button !== 0 || ev.ctrlKey || ev.metaKey) return;
+    ev.stopPropagation(); ev.preventDefault();
+    void host.ws.stat(p).then((e) => {
+      if (e && e.kind === "notebook" && e.ref && !e.trashed) location.assign("/?nb=" + encodeURIComponent(e.ref));
+    }, () => {});
+  }, true);
+  const gone = (t: string) => { main.textContent = ""; const m = el("div", "tex-gone", t); main.appendChild(m); save.hidden = true; toggle.hidden = true; tools.hidden = true; };
 
   // ---- binding and reading (r5 §1a, §4)
   const where = await host.ws.pathOfFile(host.fid);
@@ -82,11 +122,23 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // ---- the editor (a textarea, with the highlighter's lines drawn behind it)
   const ed = el("div", "tex-ed");
   const hl = el("div", "tex-hl"); hl.setAttribute("aria-hidden", "true");
-  const src = el("textarea", "tex-src"); src.spellcheck = false; src.wrap = "off"; src.setAttribute("aria-label", "LaTeX source");
+  const src = el("textarea", "tex-src"); src.spellcheck = false; src.setAttribute("aria-label", "LaTeX source");
   src.value = opened.text;
   ed.append(hl, src); left.appendChild(ed);
   const highlighter = new Highlighter(hl, opened.text, (read.content.length > 2 ** 20));
   src.addEventListener("scroll", () => { hl.scrollTop = src.scrollTop; hl.scrollLeft = src.scrollLeft; });
+  // long lines wrap (the textarea and the lines behind it alike), unless a line is over the highlighter's LONG_LINE
+  // (16 KiB): then neither wraps, as before (a wrapped line of a MiB is laid out again on every keystroke)
+  let wrapped: boolean | null = null;
+  const setWrap = () => {
+    const w = highlighter.longLines === 0;
+    if (w === wrapped) return;
+    wrapped = w; src.wrap = w ? "soft" : "off"; ed.classList.toggle("nowrap", !w);
+  };
+  setWrap();
+  // (the lines behind are as wide and tall as the textarea's text, inside its scrollbars, so they wrap at the same width)
+  const fit = () => { hl.style.right = src.offsetWidth - src.clientWidth + "px"; hl.style.bottom = src.offsetHeight - src.clientHeight + "px"; };
+  new ResizeObserver(fit).observe(src);
 
   // ---- the preview: engine worker, gate, patching
   const gate = new RenderGate();
@@ -249,6 +301,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     // (an edit makes the last message ("Saved", "No changes to save", …) stale; a save under way keeps its own)
     if (!saving) say("");
     highlighter.update(src.value);
+    setWrap();
     clearTimeout(editTimer);
     request();
   });

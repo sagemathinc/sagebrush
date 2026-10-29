@@ -10,6 +10,9 @@
 //     second render: each name read and kept once, within the count bound;
 //   - a 1.5 MiB paragraph and list shown as pieces of at most 128 KiB, never two versions at once;
 //   - non-ASCII HTML: no patch step over 512 KiB of UTF-8.
+//   - the layout and controls: New offers a LaTeX file only with the editor on; the files beside the page, not over
+//     it, Files hiding and showing them with the document open; long lines wrapped (not over 16 KiB); the font size and
+//     zoom kept; a notebook from the files opened by URL; an unclosed $$ ended at a blank line.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-page.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -277,10 +280,70 @@ try {
   const lt2 = await ev(`window.__lt2`);
   console.log("long tasks after an edit of a 1 MiB line (ms):", JSON.stringify(lt2));
   check(await ev(`document.querySelectorAll(".tex-hl .hl-line").length === 1 && !document.querySelector(".tex-hl .hl-line span")`), "a 1 MiB line: drawn plain, not highlighted");
+  check(await ev(`document.querySelector(".tex-ed").classList.contains("nowrap") && document.querySelector(".tex-src").wrap === "off"`), "a 1 MiB line: the source not wrapped (a line over 16 KiB)");
   const big3 = "\\documentclass{article}\n\\begin{document}\n" + "word ".repeat(460000) + "\n\\end{document}\n";
   const f3m = await mk("/t/huge-chunk.tex", enc(big3));
   await open(f3m);
   check(await until(`document.querySelector(".tex-preview").textContent.includes("this block is too large to display in the prototype")`, 60000), "a chunk over 2 MiB: a placeholder with its size, nothing inserted", await ev(`({ status: document.querySelector(".tex-status")?.textContent, pcs: document.querySelectorAll(".tex-preview .pc").length })`));
+  // ---- the editor's layout and controls (William's feedback on the first prototype, batch 1)
+  // A0: the file browser's New offers a LaTeX file when the editor is on (and only then): made, with a short document
+  const newMenu = async (q) => {
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
+    await go(base + q); await until(`!!${W}`, 60000);
+    await until(`!!document.querySelector('.sbfiles .fh button[aria-label="New"]')`, 20000);
+    return ev(`(() => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
+  };
+  const offItems = await newMenu("");
+  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "Folder"]), "A0: the editor off: New offers no LaTeX file", offItems);
+  const onItems = await newMenu("?latex=1");
+  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX file", "Folder"]), "A0: the editor on: New offers a LaTeX file", onItems);
+  await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "LaTeX file").click(), true)`);
+  const made = await until(`!!document.querySelector('.frow[data-path="/Untitled.tex"]')`, 10000);
+  const newTex = made && await ev(`${W}.stat("/Untitled.tex").then((e) => ({ kind: e.kind, fid: !!e.fid }))`);
+  check(made && newTex.kind === "file" && newTex.fid && JSON.stringify(await bytesOf("/Untitled.tex")) === JSON.stringify(enc("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n")), "A0: New, LaTeX file: /Untitled.tex made, with a stable id and a short document", newTex);
+  // A1, A7: the files shown beside the page, not over it; Files hides and shows them, the document staying open
+  const UXDOC = "\\documentclass{article}\n\\begin{document}\n\\section{Hello}\nSome text " + "long words ".repeat(60) + "\n\\end{document}\n";
+  const fu = await mk("/t/ux.tex", enc(UXDOC));
+  await open(fu);
+  await until(`!document.getElementById("wssidebar").hidden && !!document.querySelector(".tex-src")`, 20000);
+  const lay = () => ev(`(() => { const s = document.getElementById("wssidebar"), P = document.querySelector(".tex-page"), fb = P.querySelector(".tex-back"), b = fb.getBoundingClientRect();
+    return { shown: !s.hidden, sideRight: s.hidden ? 0 : Math.round(s.getBoundingClientRect().right), left: Math.round(P.getBoundingClientRect().left), top: document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2) === fb, pressed: fb.getAttribute("aria-pressed"), text: P.querySelector(".tex-src")?.value }; })()`);
+  const l1 = await lay();
+  check(l1.shown && l1.left >= l1.sideRight - 1 && l1.top && l1.pressed === "true", "A1: files shown: the page starts right of them, its Files button not covered and pressed", l1);
+  await page(`(P.querySelector(".tex-back").click(), true)`); await sleep(300);
+  const l2 = await lay();
+  check(!l2.shown && l2.left === 0 && l2.pressed === "false" && l2.text === UXDOC, "A7: Files: the files hidden, the page full width, the same document open", { ...l2, text: l2.text?.length });
+  await page(`(P.querySelector(".tex-back").click(), true)`); await sleep(300);
+  const l3 = await lay();
+  check(l3.shown && l3.left >= l3.sideRight - 1 && l3.pressed === "true" && l3.text === UXDOC, "A7: Files again: the files shown beside it, the document still open", { ...l3, text: l3.text?.length });
+  // A5: a long line wraps, in the textarea and in the lines drawn behind it alike (no part of it cut off at the right)
+  const wrap = await ev(`(() => { const s = document.querySelector(".tex-src"), hl = document.querySelector(".tex-hl"), lh = parseFloat(getComputedStyle(s).lineHeight), line = hl.querySelectorAll(".hl-line")[3];
+    return { nowrap: document.querySelector(".tex-ed").classList.contains("nowrap"), wrapAttr: s.wrap, over: s.scrollWidth - s.clientWidth, rows: Math.round(line.getBoundingClientRect().height / lh), heights: [s.scrollHeight, hl.scrollHeight], widths: [s.clientWidth, hl.clientWidth] }; })()`);
+  check(!wrap.nowrap && wrap.wrapAttr === "soft" && wrap.over <= 1 && wrap.rows >= 3 && Math.abs(wrap.heights[0] - wrap.heights[1]) <= 2 && Math.abs(wrap.widths[0] - wrap.widths[1]) <= 1, "A5: a long line wraps, nothing to scroll sideways; the lines behind wrap the same (same width, same height)", wrap);
+  // A4: the source's font size and the preview's zoom, by their buttons, remembered across a reload
+  const fs0 = await ev(`parseFloat(getComputedStyle(document.querySelector(".tex-src")).fontSize)`);
+  await page(`(P.querySelector('[aria-label="Larger source text"]').click(), P.querySelector('[aria-label="Larger source text"]').click(), P.querySelector('[aria-label="Zoom the preview in"]').click(), true)`);
+  const view = () => ev(`(() => { const s = document.querySelector(".tex-src"), hl = document.querySelector(".tex-hl"); return { src: parseFloat(getComputedStyle(s).fontSize), hl: parseFloat(getComputedStyle(hl).fontSize), zoom: document.querySelector(".tex-preview").style.zoom, shown: document.querySelector(".tex-zoomv").textContent, kept: [localStorage.getItem("sagebrush-latex-font"), localStorage.getItem("sagebrush-latex-zoom")] }; })()`);
+  const v1 = await view();
+  check(v1.src === fs0 + 2 && v1.hl === v1.src && v1.zoom === "1.1" && v1.shown === "110%" && v1.kept[0] === String(fs0 + 2) && v1.kept[1] === "110", "A4: larger source text (twice) and the preview zoomed in: applied to the source and the lines behind it, kept", { fs0, v1 });
+  await open(fu); await until(`!!document.querySelector(".tex-src")`, 20000);
+  const v2 = await view();
+  check(v2.src === fs0 + 2 && v2.hl === v2.src && v2.zoom === "1.1" && v2.shown === "110%", "A4: after a reload, the same font size and zoom", v2);
+  await ev(`localStorage.removeItem("sagebrush-latex-font"); localStorage.removeItem("sagebrush-latex-zoom"); true`);
+  // A7: a notebook in the files beside the page opens by its URL (not loaded unseen under the editor)
+  const nbRef = await ev(`${W}.create("/uxnb.ipynb").then((e) => e.ref)`);
+  const row = await until(`!!document.querySelector('.frow[data-path="/uxnb.ipynb"]')`, 15000);
+  requests.length = 0;
+  if (row) await ev(`(document.querySelector('.frow[data-path="/uxnb.ipynb"]').click(), true)`);
+  const left = await until(`!document.querySelector(".tex-page")`, 15000);
+  check(row && left && requests.some((u) => u.includes("?nb=" + nbRef)), "A7: a notebook clicked in the files beside the editor: its page opened by URL", { row, left, nbRef, reqs: requests.slice(0, 5) });
+  await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+  // A2: an unclosed formula ends at a blank line: shown with a note, the rest of the document rendered as text
+  const fa2 = await mk("/t/open-math.tex", enc("\\documentclass{article}\n\\begin{document}\n$$x^\n\nAfter words here.\n\n\\section{Later}\n\\end{document}\n"));
+  await open(fa2);
+  const a2 = await until(`!!document.querySelector(".tex-preview .mathopen") && document.querySelector(".tex-preview").textContent.includes("After words here.")`, 20000);
+  check(a2 && await ev(`[...document.querySelectorAll(".tex-preview .katex")].every((k) => !k.textContent.includes("After")) && document.querySelector(".tex-preview h2")?.textContent.includes("Later")`), "A2: $$ not closed: a note, the text after the blank line not math, the section after it rendered", await ev(`document.querySelector(".tex-preview").textContent.slice(0, 300)`));
+
   // ---- a file in Trash, opened by its fid
   const ftr = await mk("/t/trashme.tex", enc(DOC));
   await ev(`${W}.remove("/t/trashme.tex").then(() => 1)`);
