@@ -5,9 +5,10 @@
 // what the server sends one device (a chain, an owner, a snapshot), as a broken server would.  The cases are below:
 // each drives the two devices (test-doc-sync.page.js) and checks the server and both devices.
 //   CHROME=chromium bun web/workspace/test-doc-sync.mjs
-// SERVER=cloud runs the same cases against cloud's server (what DEV answers): under cloud's scripts/with-core.sh,
-// whose web/sync/test-harness.mjs (startCloud) it imports; the server-side figures only the reference server keeps
-// (a document's claimed clients) are then not checked.
+// SERVER=cloud runs the same cases against cloud's server (what DEV answers), started by the cloud checkout's own
+// entry for this test (beside its harness, run under cloud's with-core.sh), which gives this module startCloud
+// before loading it: core imports no server code (plan-cloud-split-r1 §2).  The server-side figures only the
+// reference server keeps (a document's claimed clients) are then not checked.
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,11 +65,14 @@ const censusAt = (name) => {
 const ACCOUNT = "d5d5d5d5-0000-4d5d-8d5d-d5d5d5d5d5d5";
 let ref = null, cloud = null;
 if (CLOUD) {
-  const harness = await import("../sync/test-harness.mjs").catch((e) => {
-    emit.harnessFail(e);
+  // (r18: the cloud checkout's entry gives startCloud as globalThis.__docSyncCloud before it loads this module; without
+  // it (this module run directly) the run stops, as without the harness)
+  const startCloud = globalThis.__docSyncCloud?.startCloud;
+  if (typeof startCloud !== "function") {
+    emit.harnessFail(new Error("no startCloud given: run SERVER=cloud through the cloud checkout's entry"));
     process.exit(1);
-  });
-  cloud = await harness.startCloud({ accounts: [ACCOUNT] });
+  }
+  cloud = await startCloud({ accounts: [ACCOUNT] });
 } else ref = new ReferenceServer();
 // (each device's session, as its Cookie header's name=value)
 const signIn = async () => (CLOUD ? await cloud.signIn(ACCOUNT) : `${SESSION_COOKIE}=${ref.signIn(ACCOUNT)}`);
@@ -317,9 +321,9 @@ try {
 
   progress("case R");
   // R. (r17, item 3's case 14 under cloud) The relay control: the real server's status, through this front's two relays,
-  // fetched by a real page in a context of its own with its tracing fetch: /relay-old/ (the relay as it was through r16:
-  // the upstream Response as is) three times, then /relay-new/ (the rebuilt relay every other answer now gets) three
-  // times.  Under cloud the old relay must fail as case 14 did in r16 (the upstream's 200 at the front, then a named
+  // fetched by a real page in a context of its own with its tracing fetch, in three old/new pairs (r17a): /relay-old/
+  // (the relay as it was through r16: the upstream Response as is), then /relay-new/ (the rebuilt relay every other
+  // answer now gets), three times.  Under cloud the old relay must fail as case 14 did in r16 (the upstream's 200 at the front, then a named
   // net:: failure in the browser, at the fetch or the body read: the stage is recorded) and the new one load the bytes
   // the front relayed; under the reference server (no transport headers) both load.  Exactly 4 checks on either
   // server (the judge compares the servers' counts); a mechanism that doesn't reproduce fails R1
