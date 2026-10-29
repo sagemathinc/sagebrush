@@ -14,7 +14,8 @@ From then on messages go page <-> this frame <-> the worker.  A file the
 worker needs (the engine, a shared collection's file) is fetched by the page
 and copied to the worker through a SharedArrayBuffer while it waits (its
 reads are synchronous).  The interrupt flag stays here: the page asks for
-Stop by message.
+Stop by message.  So does the buffer an input() waits on: the page answers
+by message (runnerInput) and the line is written here.
 -->
 <script>
 (() => {
@@ -54,8 +55,34 @@ Stop by message.
         Atomics.notify(ctrl, 0);
       };
       let flag = null;
+      // input(): the buffer a run waits on stays here too (a SharedArrayBuffer
+      // can't cross to the page); the page answers by message, runnerInput,
+      // and the line is written here (web/worker.ts's stdin: Int32 [0] the
+      // state, 1 a line, 2 end of input; [1] its length; then its UTF-8 bytes)
+      const inputs = new Map();
+      const giveInput = (buffer, text) => {
+        const ctl = new Int32Array(buffer, 0, 2);
+        if (Atomics.load(ctl, 0) !== 0) return;
+        if (typeof text !== "string") {
+          Atomics.store(ctl, 0, 2);
+        } else {
+          const max = buffer.byteLength - 8, enc = new TextEncoder();
+          let s = text, bytes = enc.encode(s);
+          while (bytes.length > max) bytes = enc.encode((s = Array.from(s).slice(0, -Math.max(1, Math.ceil((bytes.length - max) / 4))).join("")));
+          new Uint8Array(buffer, 8, bytes.length).set(bytes);
+          Atomics.store(ctl, 1, bytes.length);
+          Atomics.store(ctl, 0, 1);
+        }
+        Atomics.notify(ctl, 0);
+      };
       w.onmessage = (m) => {
         let d = m.data;
+        if (d && d.input && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength >= 8) {
+          inputs.set(d.id, d.buffer);
+          d = { ...d, buffer: null };
+        }
+        // (a run's end: its input buffer, if it was never answered, is let go)
+        if (d && (d.done || d.skipped) && inputs.has(d.id)) inputs.delete(d.id);
         if (d && typeof d.brokerFetch === "string") {
           const off = Number(d.offset) || 0;
           const have = files.get(d.brokerFetch);
@@ -84,6 +111,12 @@ Stop by message.
             Atomics.or(flag, 0, 1);
             Atomics.notify(flag, 0);
           }
+          return;
+        }
+        if (d && typeof d.runnerInput === "number") {
+          const buffer = inputs.get(d.runnerInput);
+          inputs.delete(d.runnerInput);
+          if (buffer) giveInput(buffer, d.text);
           return;
         }
         if (d && typeof d.runnerFetched === "number" && waiting.has(d.runnerFetched)) {

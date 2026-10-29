@@ -13,6 +13,8 @@
 //                                       accepted once; never from a document, a URL
 //                                       or user code (plan-ff-limits r3)
 // Also out: {fsChanged: path, data}   Python wrote (data) or deleted (null) a file
+//           {id, target, input: {prompt, max}, buffer}  input() waits for a line
+//                                       (stdin below: the page answers in `buffer`)
 //           {initFailed: message}      the limits are invalid: this worker is done
 //                                       (each run then answers with the message)
 //           {ready, version, interrupt, progress, seeded, startup}  started (interrupt: the
@@ -65,7 +67,29 @@ let gate: "awaiting-init" | "validating" | "ready" | "failed" = "awaiting-init";
 let failure = "";
 let giveLimits: (l: LimitsText) => void = () => {}, refuseLimits: (e: Error) => void = () => {};
 const limits = new Promise<LimitsText>((ok, no) => ((giveLimits = ok), (refuseLimits = no)));
+// input(): a line typed in the page.  This run posts {input, buffer} and waits
+// on the buffer, which the page fills: Int32 [0] the state (0 waiting, 1 a
+// line, 2 end of input), [1] the line's length in bytes, then its UTF-8 bytes.
+// It waits in slices, so a Stop (the shared interrupt flag) still ends it.
+// Only in a cross-origin isolated page, where memory can be shared; elsewhere
+// input() reads end of input.
+const INPUT_MAX = 1 << 16;
+function stdin(req: { id: number; target: number | null; prompt: string }) {
+  if (typeof SharedArrayBuffer !== "function" || !(R.INTR.buffer instanceof SharedArrayBuffer)) return null;
+  const buffer = new SharedArrayBuffer(8 + INPUT_MAX);
+  const ctl = new Int32Array(buffer, 0, 2);
+  postMessage({ id: req.id, target: req.target, input: { prompt: req.prompt.slice(0, 4096), max: INPUT_MAX }, buffer });
+  while (Atomics.load(ctl, 0) === 0) {
+    if (Atomics.load(R.INTR, 0) & 1) return { interrupted: true as const };
+    Atomics.wait(ctl, 0, 0, 100);
+  }
+  if (Atomics.load(ctl, 0) !== 1) return null;
+  const n = Math.min(Math.max(0, Atomics.load(ctl, 1)), INPUT_MAX);
+  // (copied out of shared memory first: TextDecoder refuses a shared view)
+  return new TextDecoder().decode(new Uint8Array(buffer, 8, n).slice());
+}
 const session = notebookSession((m) => postMessage(m), {
+  stdin,
   limits,
   runs: {
     begin: (m) => {

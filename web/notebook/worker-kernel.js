@@ -32,6 +32,34 @@ function hashEnd(h) {
 // (a display bundle with its keys in order)
 const canon = (o) => JSON.stringify(o, Object.keys(o ?? {}).sort());
 
+// input(): the answer to a worker's {input, buffer} (web/worker.ts's stdin),
+// given at most once: reply(text) writes the line, reply(null) end of input.
+// Int32 [0] the state (1 a line, 2 end of input), [1] its length in bytes,
+// then its UTF-8 bytes, cut to fit at a character's boundary.  When the
+// buffer isn't here (the runner's frame keeps it, web/runner/index.html),
+// send(text) asks the frame to write it.
+function answerInput(buffer, send) {
+  let done = false;
+  return (text) => {
+    if (done) return;
+    done = true;
+    if (!(typeof SharedArrayBuffer === "function" && buffer instanceof SharedArrayBuffer) || buffer.byteLength < 8) return send(text == null ? null : String(text));
+    const ctl = new Int32Array(buffer, 0, 2);
+    if (Atomics.load(ctl, 0) !== 0) return;
+    if (text == null) {
+      Atomics.store(ctl, 0, 2);
+    } else {
+      const max = buffer.byteLength - 8, enc = new TextEncoder();
+      let s = String(text), bytes = enc.encode(s);
+      while (bytes.length > max) bytes = enc.encode((s = Array.from(s).slice(0, -Math.max(1, Math.ceil((bytes.length - max) / 4))).join("")));
+      new Uint8Array(buffer, 8, bytes.length).set(bytes);
+      Atomics.store(ctl, 1, bytes.length);
+      Atomics.store(ctl, 0, 1);
+    }
+    Atomics.notify(ctl, 0);
+  };
+}
+
 // (how long a check may wait for the interpreter to take it up: what runs
 // before it is the board's code, which has its own bounds)
 // (a test may set less: globalThis.__sbEvaluateStartMs)
@@ -234,6 +262,12 @@ export class WorkerKernel {
       if (m.start) p.start?.();
       // output of an @interact's function goes to that interact's area
       const dest = m.target != null ? this.targetSink(m.target) : p;
+      // input(): the worker waits on m.buffer for a line (web/worker.ts's stdin)
+      if (m.input) {
+        const reply = answerInput(m.buffer, (text) => w.postMessage({ runnerInput: m.id, text }));
+        if (dest?.input) dest.input(String(m.input.prompt ?? ""), reply);
+        else reply(null);
+      }
       if (dest) {
         if (m.stream) dest.out(m.text, m.stream === "stderr");
         if (m.display) dest.display(m.display);

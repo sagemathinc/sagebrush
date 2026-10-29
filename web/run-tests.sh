@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 LOGS=${LOGS:-/tmp/sagebrush-web-tests}
 mkdir -p "$LOGS"
 tests=("$@")
-[ ${#tests[@]} -eq 0 ] && tests=(kernels reactive warm widgets replay timetravel notebook notebook-component jupyter-ui)
+[ ${#tests[@]} -eq 0 ] && tests=(kernels reactive warm widgets input replay timetravel notebook notebook-component jupyter-ui)
 python3 web/serve.py 8765 > /dev/null 2>&1 &
 srv=$!
 sleep 1
