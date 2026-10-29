@@ -45,6 +45,54 @@ export class Machine extends CoreMachine {
     this.pushList(toks);
   }
 
+  // ---- half-typed arguments (William, Oct 29: "\begin{" typed in the middle of a document blanked everything after
+  // it). LaTeX's commands that take a name (\begin, \end, \label, \ref, counters, packages, ...), an optional [...] or a
+  // section title are not \long: a \par (a blank line) inside the argument ends it ("Runaway argument? ... Paragraph
+  // ended before \begin was complete"), the \par is read again, and LaTeX goes on. These readers do the same (the core's
+  // own readers, which run to the end of the input, are unchanged): the \par goes back, and this.runaway records where
+  // the argument stopped, so the command can say so and drop itself, as TeX drops the call, instead of swallowing the
+  // rest of the document. A demo primitive clears this.runaway before it reads.
+  readShortGroup(open) {    // after "{": to the matching "}", or up to a \par or the end of the input (this.runaway set)
+    const out = []; let depth = 1;
+    for (;;) {
+      const t = this.nextRaw();
+      if (t === null) { this.d("E-RUNAWAY"); this.runaway = { open, text: this.toks2str(out) }; return out; }
+      if (isCs(t) && this.intern.name(t) === "par") { this.d("E-RUNAWAY-PAR"); this.back(t); this.runaway = { open, text: this.toks2str(out) }; return out; }
+      if (!isCs(t)) { const c = catOf(t); if (c === CAT.BGROUP) depth++; else if (c === CAT.EGROUP && --depth === 0) return out; }
+      out.push(t); this.charge(1);
+      if (out.length > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
+    }
+  }
+  readArgShortRaw() {       // an undelimited argument, short: a group as readShortGroup reads it, else one token
+    const t = this.skipSpacesRaw();
+    if (t === null) return [];
+    if (!isCs(t) && catOf(t) === CAT.BGROUP) return this.readShortGroup("{");
+    return [t];
+  }
+  readArgString() { return this.toks2str(this.readArgShortRaw()).trim(); }
+  readOptRaw() {            // [ ... ] if present (else null), short: it ends at a \par or the end of the input too
+    const t = this.skipSpacesRaw();
+    if (t === null) return null;
+    if (t !== mkChar(CAT.OTHER, 91)) { this.back(t); return null; }
+    const out = []; let depth = 0;
+    for (;;) {
+      const u = this.nextRaw();
+      if (u === null) { this.runaway = { open: "[", text: this.toks2str(out) }; return out; }
+      if (isCs(u) && this.intern.name(u) === "par") { this.d("E-RUNAWAY-PAR"); this.back(u); this.runaway = { open: "[", text: this.toks2str(out) }; return out; }
+      if (!isCs(u)) { const c = catOf(u); if (c === CAT.BGROUP) depth++; else if (c === CAT.EGROUP) depth--; }
+      if (depth === 0 && u === mkChar(CAT.OTHER, 93)) return out;
+      out.push(u); this.charge(1);
+      if (out.length > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
+    }
+  }
+  // the note for a command whose argument ran away (it is then dropped, as TeX drops the call); true if one was made
+  ranAway(name) {
+    const r = this.runaway; this.runaway = null;
+    if (!r) return false;
+    this.mark({ k: "err", code: "runaway", name, text: r.open + r.text });
+    return true;
+  }
+
   // verbatim text: the core skips it; here it is captured (bounded) first, then the core's own skip runs
   // (the demo's own skip: like the core's, but "\end{env}" may have spaces or a line break before its brace, as
   //  LaTeX.js's showcase writes it; the text in between is captured, bounded)
@@ -118,7 +166,9 @@ export class Machine extends CoreMachine {
     const isVerb = (env) => VERBATIM.has(env);
     // \begin / \end: the core's behaviour, plus markers (the name is read here, then pushed back for the core)
     P.prim("begin", function (t) {
+      this.runaway = null;
       const env = this.readArgString();
+      if (this.ranAway("begin")) return;
       // verbatim: exactly the core's branch (its reader must be the file on top of the stack, not a pushed list)
       if (isVerb(env)) { this.charge(env.length); this.skipVerbatim(env); return; }
       if (env === "document") this.mark({ k: "doc" });
@@ -127,7 +177,9 @@ export class Machine extends CoreMachine {
       coreBegin.call(this, t);
     });
     P.prim("end", function (t) {
+      this.runaway = null;
       const env = this.readArgString();
+      if (this.ranAway("end")) return;
       if (env !== "document" && this.getS("m:end" + env) === undefined) this.mark({ k: "ee", env });
       this.pushArg(env);
       coreEnd.call(this, t);
@@ -136,20 +188,26 @@ export class Machine extends CoreMachine {
     P.prim("sb@endgroup", function () { const g = this.groups[this.groups.length - 1]; this.mark({ k: "ee", env: g ? g.env : "?" }); this.endGroup("env"); });
     // the document class (the core reads and drops it)
     P.prim("documentclass", function (t) {
-      const opt = this.readOptRaw(); const cls = this.readArgString();
+      this.runaway = null;
+      const opt = this.readOptRaw(); if (this.ranAway("documentclass")) return;
+      const cls = this.readArgString(); if (this.ranAway("documentclass")) return;
       this.mark({ k: "cls", cls, opt: opt ? this.toks2str(opt) : "" });
       this.pushArg(cls);
       coreClass.call(this, t);
     });
     // labels and references: the key is kept as a marker
     P.prim("label", function (t) {
+      this.runaway = null;
       const key = this.readArgString();
+      if (this.ranAway("label")) return;
       this.mark({ k: "label", key });
       this.pushArg(key);
       coreLabel.call(this, t);
     });
     for (const nm of ["ref", "eqref", "pageref", "cite", "cref", "Cref", "autoref", "citep", "citet", "nameref"]) P.prim(nm, function () {
-      const opt = this.readOptRaw(); const key = this.readArgString();
+      this.runaway = null;
+      const opt = this.readOptRaw(); if (this.ranAway(nm)) return;
+      const key = this.readArgString(); if (this.ranAway(nm)) return;
       this.mark({ k: "ref", cmd: nm, key, opt: opt ? this.toks2str(opt) : null });
     });
     // \newcommand (and \newcommand*) on a name that already has a meaning: LaTeX's "already defined" error, and the old
@@ -192,7 +250,9 @@ export class Machine extends CoreMachine {
       ["paragraph", "paragraph"], ["subparagraph", null], ["caption", null], ["footnote", "footnote"], ["thanks", null]]) {
       P.prim(nm, function () {
         const s = this.skipSpacesRaw(); const star = s === mkChar(CAT.OTHER, 42); if (!star && s !== null) this.back(s);
-        this.readOptRaw(); const arg = this.readArgRaw();
+        this.runaway = null;
+        this.readOptRaw(); if (this.ranAway(nm)) return;
+        const arg = this.readArgShortRaw(); if (this.ranAway(nm)) return;
         if (ctr && !star && this.counterReg(ctr) >= 0) this.stepCounterRef(ctr);
         this.mark({ k: "sec", cmd: nm, star });
         this.pushList(arg.concat([this.csTok("sb@eot")]));
