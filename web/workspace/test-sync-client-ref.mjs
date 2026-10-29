@@ -77,7 +77,7 @@ const CONTROL_PAGES = [
 ];
 /** the runner's own resource controls, each row enforced as a bound */
 /** each row is enforced: its work under a real deadline, then a drain of what it acquired within ROW_DRAIN_S */
-const SELF_TEST_ROWS = [["the control account's setup, then K-U2 to K-U5", 5], ["K-MSG1", 5], ["the row owner's negative", 2], ["the row owner's late-scope negative", 2]];
+const SELF_TEST_ROWS = [["the control account's setup, then K-U2 to K-U5", 5], ["K-MSG1", 5], ["the row owner's negative", 2], ["the row owner's late-scope negative", 2], ["the rows' late sweep", 1]];
 const ROW_DRAIN_S = 1;
 const pageAllowanceS = (p) => T_PAGE_S + p.cases.reduce((s, [, c]) => s + c + CONTROL_BUDGETS.CLEANUP_MS / 1000, 0) + LATE_OBS_MS / 1000;
 const CONTROLS_S = CONTROL_PAGES.reduce((s, p) => s + pageAllowanceS(p), 0) + SELF_TEST_ROWS.reduce((s, [, r]) => s + r, 0);
@@ -275,6 +275,10 @@ const signInAs = (account_id) => frontOp("signInAs", () => upstream("POST", "/au
  * RefSocket (its messages and its close as callbacks, onmessage(text) and onclose(code, reason)), or its refusal.
  * Registered in `ups` (or `own.reg`) under `owner` the moment it's acquired. */
 const connectUp = (owner, own = {}) => frontOp("ref.connect", async () => {
+  // (an ended self-test row's scope acquires nothing: refused before the connect; own.connectDelayMs is row 3's
+  // harness-only delay, so its connect can straddle the row's end)
+  if (own.ended) throw new Error("the self-test row had ended");
+  if (own.connectDelayMs) await sleep(own.connectDelayMs);
   const s = await ref.connect(own.cookie ?? (jar || null));
   if (typeof s.send !== "function") return { refused: s };
   const entry = { id: ++upSeq, up: s, owner };
@@ -860,8 +864,12 @@ async function resourceControls() {
     const drainEnd = performance.now() + ROW_DRAIN_S * 1000, undrained = [];
     for (const o of row.owns) { const c = await confirmClosed(stateOf(o), Math.max(0, drainEnd - performance.now())); undrained.push(...c.unconfirmed, ...c.busy); }
     const ms = Math.round(performance.now() - t0);
+    allRows.push(row);
     return { outcome, undrained, ms, inTime: ms <= allowanceS * 1000, row };
   };
+  /** every row run, for the late sweep: a socket that a losing body's connect acquired after its row's drain is closed
+   * by connectUp (own.ended) onto its scope's closed list; the sweep confirms every such socket closed and idle */
+  const allRows = [];
   /** A normal row's line; a row that didn't end ok, in time and drained stops the WHOLE test here: its losing work isn't
    * proved safe (only the negatives, which prove it, may time out) */
   const rowLine = (r, [name, s]) => {
@@ -991,7 +999,7 @@ async function resourceControls() {
   // on its ended scope, a hold on its ended holds.  Each is refused; nothing reaches the run's own state.
   {
     const z = runCounts();
-    let sock = null, holds = null, lateDone;
+    let sock = null, holds = null, lateDone, scope3 = null;
     const lateSaid = [], late = new Promise((ok) => { lateDone = ok; });
     const r = enabled
       ? await runRow(SELF_TEST_ROWS[2][0], SELF_TEST_ROWS[2][1], async (row) => {
@@ -1000,7 +1008,16 @@ async function resourceControls() {
           const c = await connectUp("probe", own);
           sock = c.up ?? null;
           armRefHold(crypto.randomUUID(), "ctlneg1", own.refHolds);
+          // (a second connect started now (0 s + its acquisition), delayed 700 ms inside connectUp, so it completes after
+          // the row's end and drain: connectUp closes it and throws; the sweep below must find it closed and idle)
+          // (the delay is read synchronously by connectUp's first statements, then cleared: the call sees the live scope,
+          // so its check after the connect finds it ended)
+          own.connectDelayMs = 700;
+          const straddle = connectUp("probe", own).then(() => "acquired (WRONG)", (e) => `refused: ${e?.message ?? e}`);
+          own.connectDelayMs = 0;
+          scope3 = own;
           await sleep(800);
+          lateSaid.push(`straddling socket: ${await straddle}`);
           for (const [what, f] of [["scope", () => row.scope(cookie)], ["socket", () => connectUp("probe", own)], ["hold", () => armRefHold(crypto.randomUUID(), "ctlneg1b", own.refHolds)]]) {
             try { await f(); lateSaid.push(`${what}: acquired (WRONG)`); } catch (e) { lateSaid.push(`${what}: refused`); }
           }
@@ -1009,7 +1026,11 @@ async function resourceControls() {
       : null;
     if (r) await bounded(late, "the negative's resumption", 1000).catch(() => lateSaid.push("never resumed"));
     zeroDelta("the row owner's negative", z);
-    control1(r !== null && J(lateSaid) === J(["scope: refused", "socket: refused", "hold: refused"]) && r.outcome === "timed out" && !r.undrained.length && r.inTime && sock?.closed === true && sock.inflight === 0 && holds?.size === 0 && r.row.owns.length === 1 && r.row.owns.every((o) => o.reg.size === 0 && o.ended), `(control) row "${SELF_TEST_ROWS[2][0]}": a row that stalls past its deadline ends, named, is drained, and its resumption after the drain is refused everything: ` + J({ outcome: r?.outcome, undrained: r?.undrained, ms: r?.ms, closed: sock?.closed, inflight: sock?.inflight, holds: holds?.size, late: lateSaid }));
+    // (the straddling socket: acquired after the drain, closed by connectUp onto the scope's closed list; confirmed
+    // here closed and idle, bounded, and again by the late sweep)
+    const straddled = scope3?.closed[1] ?? null;
+    const st = scope3 ? await confirmClosed(stateOf(scope3), 1000) : null;
+    control1(r !== null && J(lateSaid) === J(["straddling socket: refused: the self-test row had ended", "scope: refused", "socket: refused", "hold: refused"]) && scope3.closed.length === 2 && straddled?.closed === true && straddled.inflight === 0 && !st.unconfirmed.length && !st.busy.length && r.outcome === "timed out" && !r.undrained.length && r.inTime && sock?.closed === true && sock.inflight === 0 && holds?.size === 0 && r.row.owns.length === 1 && r.row.owns.every((o) => o.reg.size === 0 && o.ended), `(control) row "${SELF_TEST_ROWS[2][0]}": a row that stalls past its deadline ends, named, is drained, and its resumption after the drain is refused everything: ` + J({ outcome: r?.outcome, undrained: r?.undrained, ms: r?.ms, closed: sock?.closed, inflight: sock?.inflight, holds: holds?.size, late: lateSaid }));
   }
   // (row 4: the late-scope negative) a row whose body stalls BEFORE it takes any scope, past its 0.5 s deadline, then
   // asks for a scope, a socket and a hold, and installs a restore: the scope is refused (the row has ended), so nothing
@@ -1034,6 +1055,15 @@ async function resourceControls() {
     if (r) await bounded(late, "the late-scope negative's continuation", 1000).catch(() => { lateSaid ??= "never came"; });
     zeroDelta("the row owner's late-scope negative", z);
     control1(r !== null && r.outcome === "timed out" && !r.undrained.length && r.inTime && r.row.owns.length === 0 && restored && J(r.row.late) === J(["onDrain", "scope"]) && lateSaid === "refused: the self-test row had ended", `(control) row "${SELF_TEST_ROWS[3][0]}": a body that goes on past its row's end gets no scope, acquires nothing, and its late restore runs at once: ` + J({ outcome: r?.outcome, ms: r?.ms, owns: r?.row.owns.length, late: r?.row.late, restored, said: lateSaid }));
+  }
+  // (row 5: the rows' late sweep) every socket any row's scope ever closed, late ones included, confirmed closed and
+  // idle within 1 s; anything not stops the WHOLE test (a losing body's work not proved safe)
+  {
+    const t = performance.now(), end = t + SELF_TEST_ROWS[4][1] * 1000, left = [];
+    for (const row of allRows) for (const o of row.owns) { const c = await confirmClosed(stateOf(o), Math.max(0, end - performance.now())); left.push(...c.unconfirmed, ...c.busy); }
+    const what = `(control) row "${SELF_TEST_ROWS[4][0]}": every row's sockets, late ones included, closed and idle: ${left.length ? "NOT " + J(left) : "all"}, ${Math.round(performance.now() - t)} ms`;
+    control1(!left.length, what);
+    if (left.length) throw new Error("a self-test row left work running; the whole test stops: " + what);
   }
   control1(runCounts() === before, "(control) the resource controls left the run's own state exactly as it was (ups, closeFailures, closedUps, refHolds): " + before + " -> " + runCounts());
   // the verdict's pure fixtures, B1-B9

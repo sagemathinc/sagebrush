@@ -3795,11 +3795,7 @@ async function cleanupCase(n, q0) {
         at = "cleanup: owner's detached stopClient";
         await step(at, () => x.p);
         stages.push(`${at} ok`);
-        if (x.c) {
-          at = "cleanup: owner's client stop";
-          await step(at, () => x.c.stop());
-          stages.push(`${at} ok`);
-        }
+        // (the client's stop is what stopClient itself awaited: not called again)
         if (x.run) {
           at = "cleanup: owner's client loop";
           try { await step(at, () => x.run); stages.push(`${at} ok`); } catch (e) { if (e instanceof StepTimeout) throw e; stages.push(`${at} rejected (${e?.message ?? e})`); }
