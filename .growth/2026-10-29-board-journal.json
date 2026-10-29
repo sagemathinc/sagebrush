@@ -1,0 +1,1 @@
+{"v": 1, "reason": "sync 2c-1b-i (the board journal, DEV-only). Exact, from the size-gate row measured by PR ci run 40818585199 on e7701a7e merged into master: cli/pyjs.cjs +14088.", "bytes": {"cli/pyjs.cjs": 14088}}
