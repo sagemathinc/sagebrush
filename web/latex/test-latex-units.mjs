@@ -8,6 +8,7 @@ import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes } from "./split.ts";
 import { tokenizeLine } from "./highlight.ts";
 import { latexOn } from "./boot.ts";
 import { RenderGate } from "./gate.ts";
+import { boxClass } from "./boxclass.mjs";
 import { Engine } from "./engine/pipeline.mjs";
 import { setKatex } from "./engine/render.mjs";
 
@@ -113,6 +114,14 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   ];
   for (const [name, body, ok] of cases) { const h = html(body); check(name, ok(h), h.slice(0, 600)); }
 }
+
+// ---- boxclass.mjs: the page test's box class; the packet's frozen BOXCLASS wins over an inherited LATEX_BOX_CLASS
+check("box-file-wins-timing", boxClass("build", "timing\n").box === "timing" && /ignored/.test(boxClass("build", "timing\n").note), boxClass("build", "timing\n"));
+check("box-file-wins-build", boxClass("timing", "build\n").box === "build" && /ignored/.test(boxClass("timing", "build\n").note), boxClass("timing", "build\n"));
+check("box-file-same-env", boxClass("timing", "timing").box === "timing" && boxClass("timing", "timing").note === "", null);
+check("box-file-bad-refused-even-with-env", !!boxClass("timing", "fast\n").error && !boxClass("timing", "fast\n").box, boxClass("timing", "fast\n"));
+check("box-no-file-env", boxClass("build", null).box === "build" && boxClass("timing", null).box === "timing", null);
+check("box-none-refused", !!boxClass(undefined, null).error && !!boxClass("", null).error && !!boxClass("fast", null).error, null);
 
 // ---- boot.ts: the flag
 const DEV = ["dev.sagebrush.space"];   // (the DEV build's hosts, as web/build.ts defines them)
