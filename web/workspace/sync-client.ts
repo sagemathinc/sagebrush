@@ -146,6 +146,8 @@ const UNTRUSTED = "sync:bytes-untrusted";
 /** a narrow upload read in progress (cleared in the transaction that reads; left by a page killed in it) */
 const READING = "sync:bytes-reading";
 const META = "meta";
+/** why sync is off when another page's upgrade closed the workspace here (Workspace.closed) */
+const CLOSED_ELSEWHERE = "your files were upgraded by a newer Sagebrush page: reload this page to sync";
 const isNat = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
 // (the fields of an op that make it this op: what an echo must repeat of its record)
 const SAME = ["dseq", "t", "by", "op", "path", "to", "kind", "ref", "fid", "sha256", "size", "base", "parent"] as const;
@@ -258,6 +260,11 @@ export class SyncClient {
 
   /** Runs until stop(), or until the server says sync is off for this account, or the session ends. */
   async start(): Promise<void> {
+    // (the workspace's database closed here by a newer page's upgrade (another tab): nothing more can be read or
+    // written from this page, so the client stops, said, instead of failing on the closed database)
+    const closed = () => { void this.stop().then(() => this.offWith(CLOSED_ELSEWHERE)); };
+    if (this.w.closed) return void closed();
+    const unclosed = this.w.onClosed(closed);
     this.unwatch = this.w.watch(() => this.kick());
     // (other namespaces' ledgers, queued for deletion, deleted a page at a time while this client runs: task #14)
     void driveObsolete(this.w, (ms) => new Promise<void>((ok) => {
@@ -278,6 +285,7 @@ export class SyncClient {
         if (end === "revoked" || end === "fenced" || end === "stopped") return;
       }
     } finally {
+      unclosed();
       this.unwatch?.();
       this.unwatch = null;
     }
@@ -450,11 +458,18 @@ export class SyncClient {
           hubOf(this.w.ws).reset(c.ns, c.epoch, c.ob.lease.gen);
           try { ws.close(1000, why); } catch {}
           void (async () => {
-            if (why === "closed" && !this.stopped) {
-              const at = await this.timerFail(ns, "connect");
-              this.say({ state: "offline", ns, reason: "disconnected", resumesAt: at, waiting: this.status.waiting });
+            // (the connection's end is always reported, even when its timer can't be kept (the database failing or
+            // closing): an end never said would leave the loop waiting on this connection for good)
+            try {
+              if (why === "closed" && !this.stopped) {
+                const at = await this.timerFail(ns, "connect");
+                this.say({ state: "offline", ns, reason: "disconnected", resumesAt: at, waiting: this.status.waiting });
+              }
+            } catch (e) {
+              console.warn("sync: the connection's end:", e);
+            } finally {
+              done(why);
             }
-            done(why);
           })();
         },
       };
