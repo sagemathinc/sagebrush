@@ -23,6 +23,11 @@ body.sb-term-open { padding-bottom: var(--sb-term-h, 280px); }
 .sb-term-pl { white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 600; }
 .sb-term-out { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 8; }
 .sb-term-out:empty { display: none; }
+.sb-term-loading { opacity: .75; font-style: italic; }
+.sb-term-loading::after { content: ""; display: inline-block; width: .8em; height: .8em; margin-left: .5em; vertical-align: -1px;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sb-term-spin .8s linear infinite; }
+@keyframes sb-term-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sb-term-loading::after { animation: none; } }
 .sb-term-exit, .sb-term-drop, .sb-omit { opacity: .7; font-style: italic; }
 .sb-term-err, .sb-err { color: var(--sb-term-c1); }
 .sb-term-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
