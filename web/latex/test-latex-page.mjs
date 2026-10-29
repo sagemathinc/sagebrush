@@ -59,8 +59,14 @@ const ev = async (expression) => { const r = await send("Runtime.evaluate", { ex
 const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
 // (navigation by document identity: the outgoing document is marked first, and a navigation is done only once a
 // document WITHOUT the mark is loaded, so a check can never pass on the page being left)
-const mark = () => ev(`window.__sbOld = true; true`).catch(() => false);
-const fresh = (expr = "true", ms = 30000) => until(`!window.__sbOld && document.readyState !== "loading" && (${expr})`, ms);
+// Both THROW on failure (the mark not acknowledged by the page; no new document in time), so nothing that depends on
+// the new document (a file made, read or stat'ed there) ever runs after a failed navigation: the test stops, failed.
+const markWith = async (expr) => { const r = await ev(expr); if (r !== true) throw new Error("navigation mark not acknowledged: " + JSON.stringify(r)); };
+const mark = () => markWith(`window.__sbOld = true; true`);
+const fresh = async (expr = "true", ms = 30000) => {
+  if (!(await until(`!window.__sbOld && document.readyState !== "loading" && (${expr})`, ms))) throw new Error("no new document with (" + expr + ") within " + ms + " ms");
+  return true;
+};
 const go = async (url) => { await mark(); await send("Page.navigate", { url }); await fresh(); };
 const fails = []; let checks = 0;
 const check = (ok, what, detail) => { checks++; if (!ok) { fails.push(what); console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 500)); } };
@@ -128,6 +134,11 @@ try {
     const okNav = await fresh(`!!${W}`, 30000);
     const nav = { oldWouldPass, okNav, waited: Date.now() - t0, newDoc: await ev(`performance.timeOrigin`) - t0 };
     check(oldWouldPass && okNav && nav.waited >= 1400 && nav.newDoc >= 1000, "a delayed navigation: the old check would pass on the outgoing document; fresh() waits for the new one", nav);
+    // (negatives: an unacknowledged mark and a navigation that never comes both throw, so the step after can't run)
+    const throws = async (f) => { try { await f(); return false; } catch { return true; } };
+    const neg = { markFalse: await throws(() => markWith(`false`)), markThrows: await throws(() => markWith(`(() => { throw new Error("x"); })()`)), freshNone: await (async () => { await mark(); return throws(() => fresh(`true`, 1500)); })() };
+    await ev(`delete window.__sbOld; true`);
+    check(neg.markFalse && neg.markThrows && neg.freshNone, "a failed mark and a missing new document each throw (nothing after them runs)", neg);
   }
 
   // ---- opening, the banner, Save gated on edits (the first open's requests recorded: the cold first click)
