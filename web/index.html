@@ -803,34 +803,42 @@ const analyzer = {
 // The GPU kernel, as a preview (web/notebook/remote-ui.js, its own bundle sagebrush-remote.js, loaded on
 // first use): offered only in a page opened with ?remote=1.  Its gateway is simulated in the page, and its
 // runs execute on a second interpreter in this browser; every run is still approved by the page's gate.
+// One attempt at a time is current (remoteSwitch): choosing This browser, opening another notebook (useKernel)
+// or choosing GPU again ends whatever is pending or installed.  The module's own load is fenced the same way:
+// `remoteGen` is taken before its await, and changed by every leave.
 const REMOTE_PREVIEW = new URLSearchParams(location.search).get("remote") === "1";
 const kernelPick = $("#kernelpick");
-let remoteMod = null, remoteOn = null; // remoteOn: {id, r} while the shown notebook runs on the GPU kernel
+let remoteMod = null, remoteLoad = null, remoteSw = null, remoteGen = 0;
 function leaveRemote() {
-  if (!remoteOn) return;
-  const { r } = remoteOn;
-  remoteOn = null;
+  remoteGen++;
+  remoteSw?.leave();
   kernelPick.value = "local";
-  r.close();
 }
 async function useRemote() {
-  if (kernelPick.value !== "gpu") {
-    if (remoteOn) useKernel(current.id);
-    return;
-  }
-  const back = (why) => { kernelPick.value = "local"; if (why) statusEl.textContent = why; };
-  if (!REACTIVE) return back("the GPU kernel runs only in the reactive notebook");
+  // (This browser: the notebook's own interpreter; useKernel ends the GPU kernel and any pending attempt)
+  if (kernelPick.value !== "gpu") return useKernel(current.id);
+  const gen = ++remoteGen, id = current.id;
+  remoteSw?.leave(); // (an attempt begun before this one ends now, even while this one loads)
   try {
-    remoteMod ??= await import(new URL("sagebrush-remote.js", location.href).href);
-    if (!(await remoteMod.connectSheet())) return back();
-    const id = current.id;
-    const r = await remoteMod.startPreview({ notebook: id, local: makeKernel(null).kernel, onStatus: (t) => { if (kernelPick.value === "gpu") statusEl.textContent = t; } });
-    // (the person went elsewhere meanwhile: this kernel isn't used)
-    if (current.id !== id || kernelPick.value !== "gpu" || remoteOn) return r.close();
-    remoteOn = { id, r };
-    nb.setKernel(r.kernel); // (another interpreter: every output is stale)
+    remoteLoad ??= import(new URL("sagebrush-remote.js", location.href).href);
+    const mod = await remoteLoad;
+    if (gen !== remoteGen || current.id !== id || kernelPick.value !== "gpu") return;
+    remoteMod = mod;
+    remoteSw ??= mod.remoteSwitch({
+      currentId: () => current.id,
+      picked: () => kernelPick.value,
+      pickLocal: () => { kernelPick.value = "local"; },
+      status: (t) => { statusEl.textContent = t; },
+      reactive: () => REACTIVE,
+      makeLocal: () => makeKernel(null).kernel,
+      setKernel: (k) => nb.setKernel(k), // (another interpreter: every output is stale)
+    });
+    await remoteSw.connect(id);
   } catch (e) {
-    back(`GPU kernel (preview): ${e?.message ?? e}`);
+    remoteLoad = null; // (a failed load is tried again next time)
+    if (gen !== remoteGen) return;
+    kernelPick.value = "local";
+    statusEl.textContent = `GPU kernel (preview): ${e?.message ?? e}`;
   }
 }
 if (REMOTE_PREVIEW) {

@@ -13,10 +13,10 @@
 // event stream and the notes.  Nothing leaves the page, and nothing is billed.
 //
 //   const remote = await import("sagebrush-remote.js");
-//   if (await remote.connectSheet()) {
-//     const r = await remote.startPreview({ notebook: id, local: makeLocalKernel(), onStatus });
-//     nb.setKernel(r.kernel);   // the page's createNotebook({remoteGate: remote.gateFor})
-//   }
+//   const sw = remote.remoteSwitch(page);    // the page: see remoteSwitch
+//   await sw.connect(notebookId);            // the Connect sheet, then the kernel, installed on that notebook
+//   sw.leave();                              // on any switch: whatever is pending or installed ends
+//   (createNotebook({remoteGate: remote.gateFor}) gives each remote kernel the page's gate)
 
 import { RemoteClient } from "./remote-client.js";
 import { RemoteKernel } from "./remote-kernel.js";
@@ -144,6 +144,90 @@ export function statusText(text) {
   return /^ready \(remote\)/.test(t) ? `GPU kernel (preview, simulated) · ${t.replace(/^ready \(remote\)/, "ready")}` : `GPU kernel (preview): ${t}`;
 }
 
+// ------------------------------------------------------------- the switch
+
+/**
+ * The page's switch to and from the GPU kernel: at most one connection
+ * attempt is current, and only the current one may change anything.  Every
+ * attempt takes a new token, with its notebook, before its first await;
+ * leave() (the person chose This browser, opened another notebook, or the
+ * page replaced the kernel) and every newer attempt end it, pending or not:
+ * its sheet is settled as cancelled, and a kernel it binds afterwards is
+ * closed, never installed.  After each await, and in its status callback,
+ * an attempt does nothing unless it is still current.
+ *
+ *   page: {
+ *     currentId()       the notebook shown
+ *     picked()          the picker's value ("local" | "gpu")
+ *     pickLocal()       set the picker to This browser (nothing else)
+ *     status(text)      the status line
+ *     reactive()        whether the notebook is reactive (a remote kernel runs only there)
+ *     makeLocal()       a fresh interpreter for the simulated gateway
+ *     setKernel(k)      make k the shown notebook's kernel
+ *   }
+ * `deps` replaces the sheet, its cancellation and startPreview (tests).
+ */
+export function remoteSwitch(page, deps = {}) {
+  const sheet = deps.sheet ?? (() => connectSheet());
+  const cancelSheet = deps.cancelSheet ?? closeSheet;
+  const start = deps.start ?? startPreview;
+  let attempt = 0; // (the current attempt's token; every leave and every new attempt changes it)
+  let on = null; // {id, r}: the kernel installed now
+  const sw = {
+    get attempt() { return attempt; },
+    active: () => on !== null,
+    installed: () => on,
+    /** End the current attempt and the installed kernel, whatever their state. */
+    leave() {
+      attempt++;
+      cancelSheet();
+      if (on) {
+        const { r } = on;
+        on = null;
+        r.close();
+      }
+    },
+    /** Connect the notebook `id`: resolves to the installed {kernel, close} or null (cancelled, superseded, failed). */
+    async connect(id) {
+      sw.leave(); // (a newer attempt supersedes any other)
+      const mine = attempt;
+      const current = () => mine === attempt;
+      const live = () => current() && page.currentId() === id && page.picked() === "gpu";
+      // (only the current attempt may touch the picker or the status line)
+      const back = (why) => {
+        if (!current()) return null;
+        attempt++;
+        page.pickLocal();
+        if (why) page.status(why);
+        return null;
+      };
+      if (!page.reactive()) return back("the GPU kernel runs only in the reactive notebook");
+      let answer;
+      try {
+        answer = await sheet();
+      } catch (e) {
+        return back(`GPU kernel (preview): ${e?.message ?? e}`);
+      }
+      if (!current()) return null; // (superseded: whoever did it settled this sheet and owns the picker)
+      if (!answer || !live()) return back();
+      let r;
+      try {
+        r = await start({ notebook: id, local: page.makeLocal(), onStatus: (t) => { if (current()) page.status(t); } });
+      } catch (e) {
+        return back(`GPU kernel (preview): ${e?.message ?? e}`);
+      }
+      if (!live()) {
+        r.close(); // (a stale bind: closed, never installed)
+        return back();
+      }
+      on = { id, r };
+      page.setKernel(r.kernel);
+      return r;
+    },
+  };
+  return sw;
+}
+
 // ------------------------------------------------------------- the Connect sheet
 
 const CSS = `
@@ -176,18 +260,27 @@ export const SHEET = {
   cancel: "Cancel",
 };
 
+// (the sheet shown now: {settle}; a newer sheet, or closeSheet, settles it with null)
+let openSheet = null;
+
+/** Settle the Connect sheet shown now, if any, as cancelled (it closes, and its promise resolves to null). */
+export function closeSheet() {
+  openSheet?.settle(null);
+}
+
 /**
- * Show the Connect sheet; resolves to {cap} if the person connects, or null.
+ * Show the Connect sheet; resolves to {cap} if the person connects, or null
+ * (Cancel, Escape, or a newer sheet or closeSheet() settled it).
  * `doc` is the page's document (tests give their own).
  */
 export function connectSheet(doc = document) {
+  closeSheet();
   if (!doc.getElementById("remotedlgcss")) {
     const st = doc.createElement("style");
     st.id = "remotedlgcss";
     st.textContent = CSS;
     doc.head.append(st);
   }
-  doc.getElementById("remotedlg")?.remove();
   const el = (tag, text, props = {}) => Object.assign(doc.createElement(tag), text == null ? {} : { textContent: text }, props);
   const dlg = el("dialog", null, { id: "remotedlg" });
   dlg.setAttribute("aria-labelledby", "remotetitle");
@@ -204,17 +297,25 @@ export function connectSheet(doc = document) {
   dlg.append(el("h2", SHEET.title, { id: "remotetitle" }), el("p", SHEET.preview, { className: "preview" }), el("div", SHEET.intro), ul, el("p", SHEET.approve), cap, el("p", SHEET.capNote, { className: "note" }), acts);
   doc.body.append(dlg);
   return new Promise((resolve) => {
-    let answer = null;
+    // (exactly once: the dialog goes, and the answer is given; a later click or close does nothing)
+    let settled = false;
+    const sheet = {
+      settle(answer) {
+        if (settled) return;
+        settled = true;
+        if (openSheet === sheet) openSheet = null;
+        if (dlg.open) dlg.close();
+        dlg.remove();
+        resolve(answer);
+      },
+    };
+    openSheet = sheet;
     ok.addEventListener("click", () => {
       const n = Number(capIn.value);
-      answer = { cap: Number.isFinite(n) && n >= 1 ? Math.min(1000, Math.floor(n)) : 10 };
-      dlg.close();
+      sheet.settle({ cap: Number.isFinite(n) && n >= 1 ? Math.min(1000, Math.floor(n)) : 10 });
     });
-    no.addEventListener("click", () => dlg.close());
-    dlg.addEventListener("close", () => {
-      dlg.remove();
-      resolve(answer);
-    });
+    no.addEventListener("click", () => sheet.settle(null));
+    dlg.addEventListener("close", () => sheet.settle(null));
     if (typeof dlg.showModal === "function") dlg.showModal();
     else dlg.setAttribute("open", "");
     // (focus on the text first, not on Connect: Enter doesn't connect)
