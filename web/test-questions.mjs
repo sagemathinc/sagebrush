@@ -100,6 +100,25 @@ try {
   ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /14 \\/ 14/.test(r.textContent))`), "instructor: the graded total, 14 / 14, reaches the gradebook");
   await a.ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))`);
   ok(await a.ev(`document.querySelector('#grader .roster button.on').textContent.includes('Emmy Noether')`), "instructor: j goes to the next student");
+  // the pager stays in one place whatever the answer's length (William, Oct 29), on a desktop and on a phone
+  const pagerAt = async (i) => {
+    await a.ev(`document.querySelectorAll('#grader .roster button')[${i}].click()`);
+    return a.ev(`JSON.stringify(['button[data-d="-1"]', 'button[data-d="1"]', '.save'].map((sel) => { const r = document.querySelector('#grader .pager ' + sel).getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round); }))`);
+  };
+  for (const [w, h, label] of [[1400, 1000, "desktop"], [390, 844, "phone"]]) {
+    await a.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: w < 600 });
+    await a.ev(`window.scrollTo(0, 0)`);
+    const at = [];
+    for (const i of [0, 1, 2, 3]) at.push(await pagerAt(i));
+    ok(at.every((x) => x === at[0]), `${label}: the pager's buttons are in the same place for answers of different lengths (${at[0]})`);
+    ok(await a.ev(`(() => { const r = document.querySelector('#grader .pager').getBoundingClientRect(); return r.left >= 0 && r.right <= ${w} + 1; })()`), `${label}: the pager fits the width`);
+    await a.ev(`document.querySelectorAll('#grader .roster button')[1].click()`);
+    await a.ev(`window.scrollTo(0, document.documentElement.scrollHeight)`);
+    await sleep(100);
+    ok(await a.ev(`(() => { const g = document.getElementById('grader').getBoundingClientRect(), r = document.querySelector('#grader .pager').getBoundingClientRect(); return g.top < 0 ? Math.abs(r.top) <= 1 : r.top >= g.top; })()`), `${label}: scrolled down, the pager stays at the top of the view`);
+  }
+  await a.send("Emulation.clearDeviceMetricsOverride");
+  await a.ev(`window.scrollTo(0, 0)`);
   await a.ev(`document.querySelector('#grader .tabs button[data-q="1"]').click()`);
   ok(await a.ev(`!!document.querySelector('#grader .work .chip.ok')`), "instructor: an auto-graded question shows its stored verdicts");
   await a.ev(`document.getElementById('as-student').click()`);
