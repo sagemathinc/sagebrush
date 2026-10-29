@@ -300,9 +300,11 @@ const okCode = (c) => (c === 1000 || (c >= 3000 && c <= 4999) ? c : 1000);
 /** every proxied pair's close failure over the run, whoever called the closer (the cases' paths ignore what it returns;
  * the cleanup reports these, so a failure before the cleanup still fails the run) */
 const closeFailures = [];
+/** over the run: page sockets already closing or closed when their pair was closed, so not closed again (reported) */
+const closeSkips = { n: 0 };
 /** One proxied pair's closer: both sides closed, once (`first` runs then); says what failed, each side tried whatever
  * the other did (empty when both closed, or when it had already closed them), and keeps each failure in `ledger` */
-const pairCloser = (up, client, first, ledger = closeFailures) => {
+const pairCloser = (up, client, first, ledger = closeFailures, skips = closeSkips) => {
   let closed = false;
   return (code = 1000) => {
     if (closed) return [];
@@ -312,7 +314,8 @@ const pairCloser = (up, client, first, ledger = closeFailures) => {
     try { up.close(1000, "proxy"); } catch (e) { bad.push(`the server's side (${why(e)})`); }
     // (a page socket already closing or closed (readyState 2 or 3), as when the page closed first, isn't closed again:
     // a benign double close is not a failure)
-    if (client.readyState !== 2 && client.readyState !== 3) try { client.close(okCode(code), "proxy"); } catch (e) { bad.push(`the page's side (${why(e)})`); }
+    if (client.readyState === 2 || client.readyState === 3) skips.n++;
+    else try { client.close(okCode(code), "proxy"); } catch (e) { bad.push(`the page's side (${why(e)})`); }
     ledger.push(...bad);
     return bad;
   };
@@ -527,9 +530,9 @@ try {
     const receipt = await runStages([["proxied sockets", () => proxiedStage(reg, led)], ["a directory", () => removeDir(d3)]], 200);
     control1(pageClosed && pcAgain.length === 0 && reg.size === 0 && J(led) === J(["the server's side (EPIPE)"]) && !receipt.ok && receipt.line === "cleanup: proxied sockets NOT all closed (the server's side (EPIPE)); a directory removed" && !existsSync(d3), "(control) a proxied pair's close that fails before the cleanup fails the final receipt, naming it, and the stages after it still run: " + receipt.line);
     // (a benign double close: the page's side already closed (readyState 3) isn't closed again, and nothing is recorded)
-    const led2 = [];
-    const pc2 = pairCloser({ close() {} }, { readyState: 3, close() { throw new Error("injected: closed twice"); } }, () => {}, led2);
-    control1(pc2(1000).length === 0 && led2.length === 0, "(control) a page socket already closed is not closed again, and its pair records no failure: " + J(led2));
+    const led2 = [], skips2 = { n: 0 };
+    const pc2 = pairCloser({ close() {} }, { readyState: 3, close() { throw new Error("injected: closed twice"); } }, () => {}, led2, skips2);
+    control1(pc2(1000).length === 0 && led2.length === 0 && skips2.n === 1, "(control) a page socket already closed is not closed again, and its pair records no failure: " + J({ failures: led2, skipped: skips2.n }));
     const d2 = mkdtempSync(join(tmpdir(), "sb-scr-ctl-"));
     const t0 = Date.now(), c2 = await runStages([["a front stop that never settles", () => new Promise(() => {})], ["a directory", () => removeDir(d2)]], 200);
     control1(!c2.ok && c2.line === "cleanup: a front stop that never settles threw (no answer within 200 ms: a front stop that never settles); a directory removed" && !existsSync(d2) && Date.now() - t0 < 5000, "(control) a stage that never ends fails within its bound, and the stages after it still run: " + c2.line);
@@ -599,6 +602,8 @@ try {
     console.log(`  front: downloads through /__files/: ${front.files200}`);
     if (front.files200 === 0) fails.push("no download went through /__files/ (the blob GET's redirect)");
   } else console.log("  front: downloads through /__files/: not required (ONLY names no download case)");
+  // (the proxied pairs' closes over the run, for the gate's behaviour on real data; any failure also fails the cleanup)
+  console.log(`  front: proxied close failures recorded: ${closeFailures.length}; page sockets already closed, not closed again: ${closeSkips.n}`);
   if (front.leaks.length) fails.push(`the internal origin leaked to the page: ${front.leaks.length} responses: ${front.leaks.slice(0, 5).join("; ")}`);
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
