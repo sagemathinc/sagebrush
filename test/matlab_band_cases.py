@@ -7,6 +7,11 @@
 import numpy as np
 import _matlab_sparse as sp
 import _matlab_lu as L
+import _matlab_ledger as LG
+
+# (the first-use fix: these cases test the admission itself, as reviewed (no floor, delta s1 r3), so they run with the
+# small-need floor off through its seam; test/matlab_firstuse_cases.py tests the floor)
+sp.SMALL_NEED = 0
 import _matlab as M
 
 seed = [4242]
@@ -61,18 +66,19 @@ class Cap:
         return self.g
 
 
-real_L, real_sp = L._capacity, sp._capacity
+real_L, real_sp, real_LG = L._capacity, sp._capacity, LG._capacity
 
 
 def use(cap):
     L._capacity = cap
     sp._capacity = cap
+    LG._capacity = cap
 
 
 def restore():
-    L._capacity, sp._capacity = real_L, real_sp
+    L._capacity, sp._capacity, LG._capacity = real_L, real_sp, real_LG
     L._routes = None
-    L._recorder = None
+    LG._recorder = None
     L.E, L.A_SAFE = sp.E, sp.A_SAFE
 
 
@@ -188,14 +194,14 @@ try:
                         continue
                     if e2:
                         L.E, L.A_SAFE = e2, asafe
-                    L._recorder = []
+                    LG._recorder = []
                     W = L.Work("t")
                     try:
                         X1, sing = L.band_solve(S, B.copy(), kl, ku, L.Ledger("t"), W)
-                        kern = [r[1] for r in L._recorder if r[0] == "kernel"]
-                        allocs = [r[2] for r in L._recorder if r[0] == "alloc"]
+                        kern = [r[1] for r in LG._recorder if r[0] == "kernel"]
+                        allocs = [r[2] for r in LG._recorder if r[0] == "alloc"]
                     finally:
-                        L._recorder = None
+                        LG._recorder = None
                         L.E, L.A_SAFE = sp.E, sp.A_SAFE
                     assert float(np.max(np.abs(X1 - X0))) <= 1e-10 * max(1.0, float(np.max(np.abs(X0)))), (n, kl, ku, k, e2, cplx)
                     assert not sing
@@ -258,9 +264,9 @@ try:
     L.E, L.A_SAFE = 8, 256
     S = band_matrix(40, 3, 2, True)
     nb = L.band_need(40, 3, 2, 2, True)
-    L._recorder = []
+    LG._recorder = []
     L.band_solve(S, np.ones((40, 2)), 3, 2, L.Ledger("t"), L.Work("t"))
-    res = [(r[3], r[2]) for r in L._recorder if r[0] == "reserve"]
+    res = [(r[3], r[2]) for r in LG._recorder if r[0] == "reserve"]
 finally:
     restore()
 assert res == [("band", nb["persistent"] + nb["setup"]), ("band-step", nb["step"])], res
@@ -277,12 +283,12 @@ saved_floor = sp.legacy_band_route
 try:
     L._routes = []
     use(Cap(m_band))
-    L._recorder = []
+    LG._recorder = []
     try:
         X, s = L.solve(T, b, "t")
-        tags = [r[3] for r in L._recorder if r[0] == "reserve"]
+        tags = [r[3] for r in LG._recorder if r[0] == "reserve"]
     finally:
-        L._recorder = None
+        LG._recorder = None
     # (master's route takes band here, (2 kl + ku + 1) n = 24006 <= 2^28 and n (kl + 1)(kl + ku + 1) = 48012 <= 2^29,
     # so the amendment r1 floor takes it at once, though T_band = 0.4087 is over c_ord nnz = 9.2e-6 * 16000 = 0.1472:
     # no ordering)
@@ -323,12 +329,12 @@ b = np.ones((n, 1))
 try:
     use(Cap(10 ** 12))
     L._routes = []
-    L._recorder = []
+    LG._recorder = []
     try:
         X, s = L.solve(T8, b, "t")
-        tags = [r[3] for r in L._recorder if r[0] == "reserve"]
+        tags = [r[3] for r in LG._recorder if r[0] == "reserve"]
     finally:
-        L._recorder = None
+        LG._recorder = None
     assert L._routes == ["band"] and tags == ["discovery", "band", "band-step"], (L._routes, tags)
     X0 = sp._legacy_band_solve(T8, b.copy())
     assert float(np.max(np.abs(X - X0))) == 0.0
@@ -351,12 +357,12 @@ b = np.ones((n, 1))
 try:
     use(Cap(10 ** 12))
     L._routes = []
-    L._recorder = []
+    LG._recorder = []
     try:
         X, s = L.solve(W, b, "t")
-        tags = [r[3] for r in L._recorder if r[0] == "reserve"]
+        tags = [r[3] for r in LG._recorder if r[0] == "reserve"]
     finally:
-        L._recorder = None
+        LG._recorder = None
     assert not sp.legacy_band_route(n, n - 1, n - 1)
     assert L._routes == ["lu"] and "ordering" in tags and "band" not in tags, (L._routes, tags)
     # (the residual through the runtime's own sparse product: its numpy has no ufunc .at)
@@ -369,12 +375,12 @@ finally:
 
 # -- 4. the fallback table (r6 section 2.4a)
 def peak_of(fn):
-    L._recorder = []
+    LG._recorder = []
     try:
         fn()
-        ev = L._recorder
+        ev = LG._recorder
     finally:
-        L._recorder = None
+        LG._recorder = None
     return max(r[1] for r in ev if r[0] == "reserve")
 
 
@@ -416,12 +422,12 @@ try:
     L.COSTS["cli"]["ord"] = 1e-12
     use(Cap(mT))
     L._routes = []
-    L._recorder = []
+    LG._recorder = []
     try:
         L.solve(Tb, b, "t")
-        ev = L._recorder
+        ev = LG._recorder
     finally:
-        L._recorder = None
+        LG._recorder = None
     assert L._routes == ["band"], L._routes
     tags = [r[3] for r in ev if r[0] == "reserve"]
     assert "ordering" in tags and tags.index("ordering") < tags.index("band"), tags
@@ -442,20 +448,20 @@ try:
     L.factor = watched
     # (G: the ordering fits, the LU's factor doesn't, band does)
     use(Cap(10 ** 12))
-    L._recorder = []
+    LG._recorder = []
     try:
         L.ordering(Tb, L.Ledger("t"), L.Work("t"))
-        ord_peak = max(r[1] for r in L._recorder if r[0] == "reserve")
+        ord_peak = max(r[1] for r in LG._recorder if r[0] == "reserve")
     finally:
-        L._recorder = None
+        LG._recorder = None
     G = max(ord_peak, mT) + 1
-    L._recorder = []
+    LG._recorder = []
     try:
         use(Cap(G))
         X, s = L.solve(Tb, b, "t")
-        ev = L._recorder
+        ev = LG._recorder
     finally:
-        L._recorder = None
+        LG._recorder = None
         L.factor = real_factor
     assert L._routes == ["band"], L._routes
     assert len(led_seen) == 2, led_seen

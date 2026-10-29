@@ -41,6 +41,14 @@ A_SAFE = 1 << 31
 E = min(E_TIME, A_SAFE // 32)
 assert A_SAFE >= 32 * E
 
+# (the first-use fix, plan r3 section 2; @sagebrush's ruling of Oct 29: an authorized admission exemption for
+# unmanaged allocations, NOT a safety guarantee) full() and the not-big dense solve whose whole peak need, counted as
+# their admitted routes count it plus each fill's chunk transients, is at most SMALL_NEED bytes run the same chunked
+# code with no capacity record, Ledger or _matlab_lu import (master never checked them either).  Larger needs, and
+# the diagonal, band and LU routes, keep full admission.  No aggregate bound at this layer, as on master: the
+# engine's heap limit is the backstop.  A test seam
+SMALL_NEED = 1 << 22
+
 
 # ------------------------------------------------------------------ storage
 
@@ -173,12 +181,15 @@ def full_arr(S):
     memory (no figure, or one without the JS domains: the browser today),
     master's MAX_FULL check and fill, verbatim (ruling d2)"""
     need = _full_need(S)
+    if need <= SMALL_NEED:
+        # (exempt: the chunked fill _full_need counts, unadmitted; nothing imported, no capacity read)
+        return _fill_full(S)
     rec = _capacity_record()
     if unmeasured_reason(rec) is not None:
         return _legacy_full_arr(S)
-    import _matlab_lu as L
+    import _matlab_ledger as LG
 
-    led = L.Ledger("A %dx%d full matrix" % (S.m, S.n), "one array", rec=rec)
+    led = LG.Ledger("A %dx%d full matrix" % (S.m, S.n), "one array", rec=rec)
     try:
         led.reserve(need, "full")
     except MemoryError as g:
@@ -1559,23 +1570,28 @@ def mldivide(a, b):
     big = A.m == A.n and A.n > MAX_DENSE_SOLVE
     k = _m._dims(b)[1] if len(_m._dims(b)) > 1 else 1
     cv = 16 if A.pr.dtype.kind == "c" or not isreal(b) else 8
+    dense_need = (DENSE_A_COPIES * A.m * A.n + DENSE_B_COPIES * A.m * k) * cv
+    if not big and dense_need + 3 * E * 8 * (2 if type(b) is Sparse else 1) <= SMALL_NEED:
+        # (exempt: the dense route below, unadmitted; its fills' chunk transients counted; no capacity read)
+        return _dense_solve(a, b)
     rec = _capacity_record()
     if unmeasured_reason(rec) is not None:
         return _legacy_mldivide(a, b)
-    import _matlab_lu as L
+    import _matlab_ledger as LG
 
     if not big:
         # (the dense route: every simultaneous copy admitted before the first)
-        led = L.Ledger("Solving this %dx%d system" % (A.m, A.n), "this solve", rec=rec)
-        led.reserve((DENSE_A_COPIES * A.m * A.n + DENSE_B_COPIES * A.m * k) * cv, "dense")
-        r = _m.mldivide(_m._box(_fill_full(a)), _m._box(_fill_full(b)) if type(b) is Sparse else b)
-        return from_full(r) if type(b) is Sparse and _m._isnumlike(r) else r
+        led = LG.Ledger("Solving this %dx%d system" % (A.m, A.n), "this solve", rec=rec)
+        led.reserve(dense_need, "dense")
+        return _dense_solve(a, b)
+    import _matlab_lu as L
+
     Bm = _m._mat(full(b) if type(b) is Sparse else b)
     what = "Solving this %dx%d sparse system" % (A.n, A.n)
     out = L.solve(A, Bm, what, rec=rec)
     if out is None:
         # (diagonal: each row divided by its element; its arrays admitted)
-        led = L.Ledger(what, rec=rec)
+        led = LG.Ledger(what, rec=rec)
         led.reserve(A.n * cv + 2 * A.n * Bm.shape[1] * cv, "diagonal")
         dvals = np.zeros(A.n, dtype=np.complex128 if A.pr.dtype.kind == "c" else np.float64)
         dvals[A.ir] = _fvals(A)
@@ -1589,6 +1605,12 @@ def mldivide(a, b):
             _m.warning_("Matrix is singular to working precision.")
     r = _m._unmat(X)
     return from_full(r) if type(b) is Sparse else r
+
+
+def _dense_solve(a, b):
+    """the dense route of mldivide: a's and a sparse b's chunked fills, then _matlab's solve"""
+    r = _m.mldivide(_m._box(_fill_full(a)), _m._box(_fill_full(b)) if type(b) is Sparse else b)
+    return from_full(r) if type(b) is Sparse and _m._isnumlike(r) else r
 
 
 # MASTER'S mldivide, kept verbatim as an interim (ruling d2, Oct 27 2026):
