@@ -51,6 +51,7 @@ import { onChunkInstalled, prefetchMode } from "./lib-lazy";
 import { __hooks, load as loadFiles, mount, put as putFile } from "./shims/fs";
 import { R } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
+import { waitForLine } from "../src/stdin-wait";
 import { LIMITS_MAX_BYTES, utf8Bytes, type LimitsText } from "../src/limits";
 import { useSet, prefetchFor, onPkgUse } from "./pkgset-browser";
 
@@ -77,16 +78,9 @@ const INPUT_MAX = 1 << 16;
 function stdin(req: { id: number; target: number | null; prompt: string }) {
   if (typeof SharedArrayBuffer !== "function" || !(R.INTR.buffer instanceof SharedArrayBuffer)) return null;
   const buffer = new SharedArrayBuffer(8 + INPUT_MAX);
-  const ctl = new Int32Array(buffer, 0, 2);
   postMessage({ id: req.id, target: req.target, input: { prompt: req.prompt.slice(0, 4096), max: INPUT_MAX }, buffer });
-  while (Atomics.load(ctl, 0) === 0) {
-    if (Atomics.load(R.INTR, 0) & 1) return { interrupted: true as const };
-    Atomics.wait(ctl, 0, 0, 100);
-  }
-  if (Atomics.load(ctl, 0) !== 1) return null;
-  const n = Math.min(Math.max(0, Atomics.load(ctl, 1)), INPUT_MAX);
-  // (copied out of shared memory first: TextDecoder refuses a shared view)
-  return new TextDecoder().decode(new Uint8Array(buffer, 8, n).slice());
+  // (a Stop wins over an answer, even one landing during the same wait: src/stdin-wait.ts)
+  return waitForLine(buffer, R.INTR);
 }
 const session = notebookSession((m) => postMessage(m), {
   stdin,
