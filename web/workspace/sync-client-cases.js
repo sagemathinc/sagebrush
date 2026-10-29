@@ -1,6 +1,8 @@
-// The cases of web/workspace/test-workspace-sync-client.mjs (sync client step 3, design/sync-client.md §3, C1,
-// L2, L3, L4): the sender against the sync service in Miniflare, through the test's front (/__ctl), which can
-// drop acks, fake the server's errors, close sockets and hold uploads.
+// The cases of sync client step 3 (design/sync-client.md §3, C1, L2, L3, L4): the sender against a sync server,
+// through a test's front (/__ctl), which can drop acks, fake the server's errors, close sockets and hold uploads.  Two
+// runners, with the same front: core's web/workspace/test-sync-client-ref.mjs, against core's reference server
+// (web/sync-protocol/reference-server.ts), and the cloud repository's web/sync/test-workspace-sync-client.mjs, against
+// the cloud's server in Miniflare.
 import * as W from "./ws.js";
 
 const results = [];
@@ -3642,10 +3644,12 @@ async function scaleRebuild() {
 }
 const SCALE = { scaleRebuild };
 
-export async function run(only = "") {
-  // (the scale cases run only when named)
+export async function run(only = "", skip = "") {
+  // (the scale cases run only when named; the cases named in `skip` never run: the runner says why, for each)
+  const skipped = skip ? skip.split(",") : [];
   for (const [name, f] of Object.entries({ ...CASES, ...(only ? SCALE : {}) })) {
     if (only && !only.split(",").includes(name)) continue;
+    if (skipped.includes(name)) continue;
     window.progress = { name, checks: results.length };
     try {
       await f();
