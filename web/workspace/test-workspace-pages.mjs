@@ -13,6 +13,9 @@
 //   the Files panel's ✕ puts a file in Trash.
 // Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/workspace/test-workspace-pages.mjs
+// Every DevTools call is bounded (PAGES_CALL_MS, default 30 s): a page promise that never settles, or a browser that
+// stops answering, fails that call, naming the method and the expression, instead of hanging the run.  A watchdog
+// (PAGES_RUN_S, default 300 s) ends an overrunning run, naming the last check and the call it was waiting on.
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,20 +39,37 @@ ws.onmessage = (ev) => {
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
   // (Delete's confirm: yes)
-  if (m.method === "Page.javascriptDialogOpening") send("Page.handleJavaScriptDialog", { accept: true, ...(m.params.type === "prompt" ? { promptText: m.params.defaultPrompt ?? "" } : {}) });
+  if (m.method === "Page.javascriptDialogOpening") send("Page.handleJavaScriptDialog", { accept: true, ...(m.params.type === "prompt" ? { promptText: m.params.defaultPrompt ?? "" } : {}) }).catch(() => {});
 };
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
-const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
+const CALL_MS = Number(process.env.PAGES_CALL_MS) || 30_000;
+const RUN_S = Number(process.env.PAGES_RUN_S) || 300;
+let lastCheck = "(none yet)", waitingOn = "(nothing)";
+const describe = (method, params) => method + (params?.expression ? ": " + String(params.expression).replace(/\s+/g, " ").slice(0, 160) : "");
+/** `p`, or a rejection naming `what` once `ms` pass without an answer. */
+const bounded = (p, what, ms = CALL_MS) => { let t; return Promise.race([p, new Promise((_, no) => { t = setTimeout(() => no(new Error(`no answer within ${ms} ms: ${what}`)), ms); })]).finally(() => clearTimeout(t)); };
+const send = (method, params = {}, ms = CALL_MS) => { const id = ++n, what = describe(method, params); waitingOn = what; return bounded(new Promise((r) => { waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); }), what, ms).finally(() => waiting.delete(id)); };
+const ev = async (expression, ms) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
+const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr, Math.max(1000, Math.min(CALL_MS, ms - (Date.now() - t)))).catch(() => false)) return true; await sleep(100); } return false; };
 const go = async (url) => { await send("Page.navigate", { url }); await sleep(300); };
 const fails = [];
 let checks = 0;
-const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
+const check = (ok, what) => { checks++; lastCheck = what; if (!ok) fails.push(what); };
+// (the watchdog: a run past RUN_S says where it was, cleans up, and fails, rather than being cancelled silently)
+setTimeout(() => {
+  console.error(`FAIL: the run didn't end within ${RUN_S} s; the last check was "${lastCheck}"; waiting on: ${waitingOn}`);
+  try { chrome.kill(); } catch {}
+  rmSync(profile, { recursive: true, force: true });
+  rmSync(files, { recursive: true, force: true });
+  process.exit(1);
+}, RUN_S * 1000).unref();
 const W = "window.sagebrush?.workspace";
 const B = "window.sagebrush?.board";
 
 try {
   for (const m of ["Page.enable", "Runtime.enable", "DOM.enable"]) await send(m);
+  // (control: a page promise that never settles fails its call within its deadline, named, instead of hanging the run)
+  const t0 = Date.now(), hung = await ev("new Promise(() => {})", 2000).then(() => "answered", (e) => String(e?.message));
+  check(hung === "no answer within 2000 ms: Runtime.evaluate: new Promise(() => {})" && Date.now() - t0 < 10_000, "(a page promise that never settles fails its call within its deadline, naming it): " + hung);
   // ---------------------------------------------------------------- the board page
   await go(base + "board/");
   await until(`${B}?.snapshot()`, 60000);
@@ -416,7 +436,7 @@ try {
   await new Promise((r) => (wsU.onopen = r));
   let nU = 0; const waitingU = new Map();
   wsU.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && waitingU.has(d.id)) { waitingU.get(d.id)(d.result ?? d.error); waitingU.delete(d.id); } };
-  const evU = async (expression) => { const id = ++nU; const r = await new Promise((ok) => { waitingU.set(id, ok); wsU.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }); return r?.result?.value; };
+  const evU = async (expression, ms = CALL_MS) => { const id = ++nU, what = "the other tab: " + describe("Runtime.evaluate", { expression }); waitingOn = what; const r = await bounded(new Promise((ok) => { waitingU.set(id, ok); wsU.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }), what, ms).finally(() => waitingU.delete(id)); return r?.result?.value; };
   for (let i = 0; i < 600 && !(await evU(`!!window.sagebrush?.workspace`).catch(() => false)); i++) await sleep(100);
   check(await evU(`!!window.sagebrush?.workspace`), "(a board page open in another tab, with the workspace)");
   await ev(`new Promise((ok, no) => { const r = indexedDB.open("sagebrush-workspace", 99); r.onsuccess = () => { r.result.close(); ok(1); }; r.onerror = () => no(r.error); r.onblocked = () => no(new Error("blocked")); })`);
