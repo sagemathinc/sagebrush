@@ -53,7 +53,11 @@ ws.onmessage = (ev) => {
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
 const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
-const go = async (url) => { await send("Page.navigate", { url }); await sleep(400); };
+// (navigation by document identity: the outgoing document is marked first, and a navigation is done only once a
+// document WITHOUT the mark is loaded, so a check can never pass on the page being left)
+const mark = () => ev(`window.__sbOld = true; true`).catch(() => false);
+const fresh = (expr = "true", ms = 30000) => until(`!window.__sbOld && document.readyState !== "loading" && (${expr})`, ms);
+const go = async (url) => { await mark(); await send("Page.navigate", { url }); await fresh(); };
 const fails = []; let checks = 0;
 const check = (ok, what, detail) => { checks++; if (!ok) { fails.push(what); console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 500)); } };
 const W = "window.sagebrush?.workspace";
@@ -307,8 +311,9 @@ try {
   check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "Folder"]), "A0: the editor off: New offers no LaTeX file", offItems);
   const onItems = await newMenu("?latex=1");
   check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX file", "Folder"]), "A0: the editor on: New offers a LaTeX file", onItems);
+  await mark();
   await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "LaTeX file").click(), true)`);
-  const made = await until(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000);
+  const made = await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000);
   const newTex = made && await ev(`${W}.stat("/Untitled.tex").then((e) => ({ kind: e?.kind, fid: e?.fid ?? "", here: !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid }))`);
   check(made && newTex.kind === "file" && newTex.fid && newTex.here && JSON.stringify(await bytesOf("/Untitled.tex")) === JSON.stringify(enc("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n")), "A0: New, LaTeX file: /Untitled.tex made (a stable id, a short document) and opened in the editor", newTex);
   // A1, A7: the files shown beside the page, not over it; Files hides and shows them, the document staying open
@@ -332,6 +337,7 @@ try {
   check(!wrap.nowrap && wrap.wrapAttr === "soft" && wrap.over <= 1 && wrap.rows >= 3 && Math.abs(wrap.heights[0] - wrap.heights[1]) <= 2 && Math.abs(wrap.widths[0] - wrap.widths[1]) <= 1, "A5: a long line wraps, nothing to scroll sideways; the lines behind wrap the same (same width, same height)", wrap);
   // A4: the source's font size and the preview's zoom, by their buttons, remembered across a reload
   const fs0 = await ev(`parseFloat(getComputedStyle(document.querySelector(".tex-src")).fontSize)`);
+  check(await ev(`document.querySelector(".tex-preview").style.zoom === "" && document.querySelector(".tex-zoomv").textContent === "100%"`), "A4: at the default 100%, no inline zoom on the preview");
   await page(`(P.querySelector('[aria-label="Larger source text"]').click(), P.querySelector('[aria-label="Larger source text"]').click(), P.querySelector('[aria-label="Zoom the preview in"]').click(), true)`);
   const view = () => ev(`(() => { const s = document.querySelector(".tex-src"), hl = document.querySelector(".tex-hl"); return { src: parseFloat(getComputedStyle(s).fontSize), hl: parseFloat(getComputedStyle(hl).fontSize), zoom: document.querySelector(".tex-preview").style.zoom, shown: document.querySelector(".tex-zoomv").textContent, kept: [localStorage.getItem("sagebrush-latex-font"), localStorage.getItem("sagebrush-latex-zoom")] }; })()`);
   const v1 = await view();
@@ -351,16 +357,17 @@ try {
   const folderOk = rows && await until(`!!${rowOf("/notes.ipynb/inside.txt")}`, 5000) && await ev(`!!document.querySelector(".tex-page") && !document.querySelector(".tex-page .tex-gone")`);
   check(folderOk, "A7: a folder named notes.ipynb, clicked beside the editor: opened as a folder, the editor still here", { rows, folderOk });
   requests.length = 0;
+  await mark();
   if (rows) await ev(`(${rowOf("/uxnb.ipynb")}.querySelector(".more").click(), [...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "Open").click(), true)`);
-  const leftByMenu = await until(`!document.querySelector(".tex-page")`, 15000);
+  const leftByMenu = await fresh(`!document.querySelector(".tex-page") && !!${W}`, 30000);
   check(rows && leftByMenu && requests.some((u) => u.includes("?nb=" + nbRef)), "A7: a notebook's menu, Open, beside the editor: its page opened by URL", { leftByMenu, nbRef, reqs: requests.slice(0, 5) });
   await open(fu); await until(`!!${rowOf("/uxnb.ipynb")}`, 15000);
   requests.length = 0;
+  await mark();
   await ev(`(${rowOf("/uxnb.ipynb")}.click(), true)`);
-  const leftByRow = await until(`!document.querySelector(".tex-page")`, 15000);
+  // (the notebook's own page, a new document, with its workspace up: the next file is made there)
+  const leftByRow = await fresh(`!document.querySelector(".tex-page") && !!${W}`, 30000);
   check(leftByRow && requests.some((u) => u.includes("?nb=" + nbRef)), "A7: a notebook clicked in the files beside the editor: its page opened by URL", { leftByRow, nbRef, reqs: requests.slice(0, 5) });
-  // (the notebook page fully up again before the next file is made: a workspace call during that navigation is lost)
-  await go(base + "?latex=1"); await until(`!!${W}`, 60000);
   await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
   // A2: an unclosed formula ends at a blank line: shown with a note, the rest of the document rendered as text
   const fa2 = await mk("/t/open-math.tex", enc("\\documentclass{article}\n\\begin{document}\n$$x^\n\nAfter words here.\n\n\\section{Later}\nThen $$y=1$$ shown.\n\\end{document}\n"));
