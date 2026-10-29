@@ -216,6 +216,8 @@ export class SyncClient {
   private fetch: typeof fetch;
   private WS: typeof WebSocket;
   private stopped = false;
+  /** the workspace's database was closed here by another page's upgrade: stopped for good, and said (start()) */
+  private closedHere = false;
   private abort = new AbortController();
   private cancels = new Set<() => void>();
   /** the wake-ups scheduled, at most one per kind (daybreak3's LIMIT-PR58-1) */
@@ -254,6 +256,9 @@ export class SyncClient {
     return () => this.subs.delete(f);
   }
   private say(s: SyncStatus) {
+    // (closed by another page's upgrade: that status is the last; work still in flight then (a retry's write, a
+    // namespace request) ends without saying anything over it)
+    if (this.closedHere) return;
     this.status = s;
     for (const f of this.subs) try { f(s); } catch (e) { console.warn("sync status:", e); }
   }
@@ -262,7 +267,12 @@ export class SyncClient {
   async start(): Promise<void> {
     // (the workspace's database closed here by a newer page's upgrade (another tab): nothing more can be read or
     // written from this page, so the client stops, said, instead of failing on the closed database)
-    const closed = () => { void this.stop().then(() => this.offWith(CLOSED_ELSEWHERE)); };
+    const closed = () => {
+      if (this.closedHere) return;
+      this.say({ state: "off", reason: CLOSED_ELSEWHERE });
+      this.closedHere = true;
+      void this.stop();
+    };
     if (this.w.closed) return void closed();
     const unclosed = this.w.onClosed(closed);
     this.unwatch = this.w.watch(() => this.kick());
