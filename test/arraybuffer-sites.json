@@ -1131,7 +1131,7 @@
   "ec730a7e9c6b7eda": {"decl":"src/notebook-session.ts :: LimitsError.class","class":"no-new-store"},
   "c6407727d142d472": {"decl":"src/notebook-session.ts :: moduleNames","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "8c81c3206a470a50": {"decl":"src/notebook-session.ts :: nm","class":"allocates","via":"src/limits.ts :: plain"},
-  "79012b2c8ae4834c": {"decl":"src/notebook-session.ts :: notebookSession","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
+  "74f76da8b8b4975b": {"decl":"src/notebook-session.ts :: notebookSession","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "96ca16dbff73f0c6": {"decl":"src/notebook-session.ts :: of","class":"allocates","via":"src/limits.ts :: plain"},
   "7c7767d1546f9e3d": {"decl":"src/notebook-session.ts :: str","class":"allocates","via":"src/limits.ts :: plain"},
   "849fd15500b28db8": {"decl":"src/pkgset.ts :: PkgsetError.class","class":"no-new-store"},
