@@ -489,10 +489,12 @@ export function createNotebook(root, opts = {}) {
   }
   // input(): a text field under the cell, as in Jupyter.  Enter sends the
   // line; the run then writes the prompt and the line as its output.  A Stop
-  // ends the wait in the worker, and the run's end removes the field (settle).
+  // ends the wait in the worker and removes the field at once (the kernel
+  // retires the question: reply.onretire); so does the run's end (settle).
   function askInput(box, prompt, reply) {
     if (opts.readOnly) return reply(null);
     const row = h("div", "stdin");
+    reply.onretire = () => row.remove();
     const field = h("input", "stdin-field", { type: "text", spellcheck: false, autocomplete: "off" });
     field.setAttribute("aria-label", prompt ? `input: ${prompt}` : "input");
     row.append(h("span", "stdin-prompt", { textContent: prompt }), field);

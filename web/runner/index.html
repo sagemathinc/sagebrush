@@ -14,8 +14,7 @@ From then on messages go page <-> this frame <-> the worker.  A file the
 worker needs (the engine, a shared collection's file) is fetched by the page
 and copied to the worker through a SharedArrayBuffer while it waits (its
 reads are synchronous).  The interrupt flag stays here: the page asks for
-Stop by message.  So does the buffer an input() waits on: the page answers
-by message (runnerInput) and the line is written here.
+Stop by message, and input()'s answers too (design/runner.md, How 7).
 -->
 <script>
 (() => {
@@ -55,11 +54,13 @@ by message (runnerInput) and the line is written here.
         Atomics.notify(ctrl, 0);
       };
       let flag = null;
-      // input(): the buffer a run waits on stays here too (a SharedArrayBuffer
-      // can't cross to the page); the page answers by message, runnerInput,
-      // and the line is written here (web/worker.ts's stdin: Int32 [0] the
-      // state, 1 a line, 2 end of input; [1] its length; then its UTF-8 bytes)
+      // input() (design/runner.md, How 7): open requests by key, {id: the run,
+      // buffer}; an answer writes only to the one its key and run name.  A
+      // request is over at its answer, its run's next question or end, a Stop.
       const inputs = new Map();
+      const retire = (id) => {
+        for (const [key, e] of inputs) if (id === undefined || e.id === id) inputs.delete(key);
+      };
       const giveInput = (buffer, text) => {
         const ctl = new Int32Array(buffer, 0, 2);
         if (Atomics.load(ctl, 0) !== 0) return;
@@ -78,11 +79,11 @@ by message (runnerInput) and the line is written here.
       w.onmessage = (m) => {
         let d = m.data;
         if (d && d.input && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength >= 8) {
-          inputs.set(d.id, d.buffer);
+          retire(d.id);
+          if (typeof d.input.key === "string") inputs.set(d.input.key, { id: d.id, buffer: d.buffer });
           d = { ...d, buffer: null };
         }
-        // (a run's end: its input buffer, if it was never answered, is let go)
-        if (d && (d.done || d.skipped) && inputs.has(d.id)) inputs.delete(d.id);
+        if (d && (d.done || d.skipped)) retire(d.id);
         if (d && typeof d.brokerFetch === "string") {
           const off = Number(d.offset) || 0;
           const have = files.get(d.brokerFetch);
@@ -105,6 +106,7 @@ by message (runnerInput) and the line is written here.
       port.onmessage = (m) => {
         const d = m.data;
         if (d && typeof d.runnerInterrupt === "number") {
+          retire(); // (every open input() request is over)
           if (flag) {
             Atomics.store(flag, 1, d.runnerInterrupt);
             // (bit 0, and the word notified: a time.sleep waits on it, src/runtime/interrupt.ts requestCtrlC)
@@ -114,9 +116,11 @@ by message (runnerInput) and the line is written here.
           return;
         }
         if (d && typeof d.runnerInput === "number") {
-          const buffer = inputs.get(d.runnerInput);
-          inputs.delete(d.runnerInput);
-          if (buffer) giveInput(buffer, d.text);
+          const e = typeof d.key === "string" ? inputs.get(d.key) : undefined;
+          if (e && e.id === d.runnerInput) {
+            inputs.delete(d.key);
+            giveInput(e.buffer, d.text);
+          }
           return;
         }
         if (d && typeof d.runnerFetched === "number" && waiting.has(d.runnerFetched)) {
