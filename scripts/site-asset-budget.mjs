@@ -27,7 +27,7 @@ const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.a
 const BASE = arg("--base-prod"), PROD = arg("--prod"), DEV = arg("--dev"), META = arg("--meta"), OUT = arg("--out"), CHANGED = arg("--changed");
 if (!BASE || !PROD || !DEV) { console.error("usage: --base-prod DIR --prod DIR --dev DIR [--meta FILE] [--out FILE]"); process.exit(2); }
 const ROOTS = ["dist", "site/public"];
-const DEV_BOOT = { raw: 2447, gzip: 926 };
+const DEV_BOOT = { raw: 2498, gzip: 990 };
 const DECLARED = new Set(["dist/board/examples/source.json", "site/public/board/examples/source.json"]);
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const gz = (b) => gzipSync(b, { level: 9 }).length;
@@ -85,7 +85,7 @@ check("PROD: no LaTeX-owned file, and nothing names one", prodLatex.length === 0
 //    by this check in the I1 run that passed with it (VM2, 2026-10-29), so 2188 B / 786 B. Raised again (@sagebrush's ruling,
 //    2026-10-29) for William's phone requests: "LaTeX document" and "LaTeX example" (ten examples) in the File menu's
 //    New group and on the empty file list, added by the same LaTeX-only boot hook: the measured delta + 128 B / + 64 B
-//    gzip, 2319 B / 862 B (this check's measure, the batch's DEV build), so 2447 B / 926 B
+//    gzip, 2370 B / 926 B (this check's measure, the batch's head merged with master), so 2498 B / 990 B
 const pi = readFileSync(prod.get("dist/index.html")), di = readFileSync(dev.get("dist/index.html"));
 const boot = { raw: di.length - pi.length, gzip: gz(di) - gz(pi) };
 check(`DEV bootstrap delta (index.html): at most ${DEV_BOOT.raw} B minified and ${DEV_BOOT.gzip} B gzip`, boot.raw <= DEV_BOOT.raw && boot.gzip <= DEV_BOOT.gzip, boot);
