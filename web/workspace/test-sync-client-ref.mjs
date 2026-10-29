@@ -88,8 +88,12 @@ const SETUP_S = 120 + 60 + 300 * 5.1 + 10 + CALL_MS / 1000;
  * (LIMIT_S - BACKSTOP_S) the cleanup has TEARDOWN_S, and the process exits at LIMIT_S at the latest */
 const TEARDOWN_S = 7 * 15;
 const BACKSTOP_S = TEARDOWN_S + 15;
+/** r8 (daybreak2's DB2-R7-T1): the disposal's fixtures D1-D8 in the self-test: D3-D5 each spend their 300 ms slot on
+ * the real clock (0.9 s); D1, D2, D6, D7 return at once; D8 runs on a controlled clock (no waits). With scheduling
+ * overhead: an explicit 2 s */
+const DISPOSAL_FIXTURES_S = 2;
 /** the whole test, start to exit: every margin is inside it */
-const REQUIRED_S = Math.ceil(SETUP_S + CONTROLS_S + (CONTROL_PAGES.length + 1) * FETCH_S + T_PAGE_S + PILOT_MAIN_S + LATE_OBS_MS / 1000 + REPORT_S + BACKSTOP_S);
+const REQUIRED_S = Math.ceil(SETUP_S + CONTROLS_S + DISPOSAL_FIXTURES_S + (CONTROL_PAGES.length + 1) * FETCH_S + T_PAGE_S + PILOT_MAIN_S + LATE_OBS_MS / 1000 + REPORT_S + BACKSTOP_S);
 if (process.env.RUN_LIMIT_S !== undefined && !(Number(process.env.RUN_LIMIT_S) >= REQUIRED_S)) {
   console.error(`FAIL: RUN_LIMIT_S=${process.env.RUN_LIMIT_S} is under the whole test's bound, ${REQUIRED_S} s (controls ${CONTROLS_S} s, the pilot's main run ${PILOT_MAIN_S} s)`);
   process.exit(1);
@@ -1165,6 +1169,31 @@ async function resourceControls() {
       try { requireDisposed(name, d); sentinel = true; } catch { stopped = true; }
       control1(d.ok === proves && stopped === !proves && sentinel === proves, `(control) ${name}: a failed control page's disposal on ${J(x)}: ${d.ok ? "proved, the work after it runs" : "unproved, the test stops, the work after it undone"} (${d.said})`);
     }
+    // (r8, astra's D2 r7 REVISE: D8, LATE observations, on a controlled clock (no timer races): each answer is valid-
+    // looking, but the call that returns it moves the clock to the slot's exact end (300 of 300 ms). (a) the probe's true
+    // at the end; (b) the frame read before the navigation at the end: no navigation may be sent; (c) the committed-
+    // looking frame at the end: no probe may be sent. Each must be unproved, stop the test through requireDisposed and
+    // leave the work after it undone (its sentinel unset). One control line, so the ok line's count is 74)
+    const lateAt = { a: "probe", b: "frame0", c: "frame1" }, d8 = [];
+    let d8ok = true;
+    for (const [k, at] of Object.entries(lateAt)) {
+      let t = 0, reads = 0;
+      const calls = { frame: 0, navigate: 0, probe: 0 };
+      const clock = () => t;
+      const lio = {
+        frame: async () => { calls.frame++; const r = reads++ === 0 ? old : { loaderId: "L2", url: "about:blank" }; if ((at === "frame0" && reads === 1) || (at === "frame1" && reads === 2)) t += 300; return r; },
+        navigate: async () => { calls.navigate++; return ack; },
+        probe: async () => { calls.probe++; if (at === "probe") t += 300; return true; },
+      };
+      const d = await disposePage(lio, 300, clock);
+      let stopped = false, sentinel = false;
+      try { requireDisposed(`D8${k}`, d); sentinel = true; } catch { stopped = true; }
+      const noMore = at === "frame0" ? calls.navigate === 0 && calls.probe === 0 : at === "frame1" ? calls.probe === 0 : calls.probe === 1;
+      const ok = !d.ok && /the slot of 300 ms ran out/.test(d.said) && stopped && !sentinel && noMore;
+      d8ok &&= ok;
+      d8.push(`(${k}) late ${at}: ${ok ? "" : "WRONG: "}${d.ok ? "proved" : "unproved"}, ${stopped ? "the test stops" : "NOT stopped"}, the work after it ${sentinel ? "RAN" : "undone"}, calls ${J(calls)} (${d.said})`);
+    }
+    control1(d8ok, "(control) D8: a valid-looking observation at the slot's end is unproved and stops the test: " + d8.join("; "));
   }
   return enabled ? cookie : null;
 }
@@ -1177,26 +1206,35 @@ async function resourceControls() {
  * resolves m.error as the answer) or an errorText is a failure at once. Proved only when the root frame's loader has
  * changed from the one before the navigation (the old document gone), to the navigation's own loader, at about:blank,
  * and the page then evaluates with none of the cases' globals (the blank document committed). `io` is the CDP side:
- * frame(ms), navigate(ms), probe(ms) */
-async function disposePage(io, ms) {
-  const end = performance.now() + ms, left = () => Math.max(0, end - performance.now());
+ * frame(ms), navigate(ms), probe(ms).
+ * r8 (astra's D2 r7 REVISE): the ONE deadline is checked on the clock (`now`, performance.now unless a fixture's) after
+ * every await, before any further CDP work, and at the success decision: an answer, or a proof, that arrives with no
+ * time left is unproved ("the slot ran out"), whatever it says; a call's own timer winning its race is never taken for
+ * that check */
+async function disposePage(io, ms, now = () => performance.now()) {
+  const end = now() + ms, left = () => Math.max(0, end - now());
   const settle = (p) => Promise.resolve().then(p).then((v) => ({ v }), (e) => ({ e: why(e) }));
+  const late = (after) => ({ ok: false, said: `the slot of ${ms} ms ran out ${after}` });
   const before = await settle(() => io.frame(left()));
   if (before.e !== undefined || typeof before.v?.loaderId !== "string") return { ok: false, said: `the frame before the navigation unread: ${before.e ?? J(before.v)}` };
+  if (!(left() > 0)) return late("after the frame read before the navigation (no navigation sent)");
   const nav = await settle(() => io.navigate(left()));
   if (nav.e !== undefined) return { ok: false, said: `the navigation unanswered: ${nav.e}` };
   const a = nav.v;
   if (!a || typeof a !== "object" || a.code !== undefined || a.message !== undefined) return { ok: false, said: `the navigation answered a protocol error: ${J(a)}` };
   if (a.errorText !== undefined) return { ok: false, said: `the navigation failed: errorText ${J(a.errorText)}` };
+  if (!(left() > 0)) return late("at the navigation's answer");
   let last = { loaderBefore: before.v.loaderId, navLoader: a.loaderId ?? null };
   while (left() > 0) {
     const f = await settle(() => io.frame(Math.min(1000, left())));
+    if (!(left() > 0)) return late(`at a frame read (no probe sent): ${J(f.v ?? f.e)}`);
     if (f.e === undefined && typeof f.v?.loaderId === "string") {
       const gone = f.v.loaderId !== before.v.loaderId, ours = a.loaderId === undefined || f.v.loaderId === a.loaderId, blank = f.v.url === "about:blank";
       last = { loaderBefore: before.v.loaderId, navLoader: a.loaderId ?? null, loader: f.v.loaderId, url: f.v.url };
       if (gone && ours && blank) {
         const p = await settle(() => io.probe(Math.min(1000, left())));
         last.empty = p.e ?? p.v;
+        if (!(left() > 0)) return late(`at the probe's answer (${J(last)})`);
         if (p.v === true) return { ok: true, said: `the old document gone (loader ${before.v.loaderId} -> ${f.v.loaderId}), about:blank committed with none of the cases' globals` };
       }
     } else last = { ...last, frame: f.e ?? J(f.v) };
