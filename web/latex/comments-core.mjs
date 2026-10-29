@@ -174,7 +174,8 @@ export function resolver(text, budget = LIMITS.workBudget) {
     }
     if (over()) return { status: "unresolved", reason: "budget" };
     // changed: every pair (an occurrence of the prefix, an occurrence of the suffix after it, within the window); an
-    // empty prefix means the file's start only, an empty suffix the file's end only; one pair: changed; more: ambiguous
+    // empty prefix means the file's start only, an empty suffix the file's end only; one pair with text between them:
+    // changed; more: ambiguous; only white space between them: orphaned (the text was deleted)
     const starts = a.prefix ? find(a.prefix).map((i) => i + a.prefix.length) : a.start === 0 ? [0] : [];
     if (starts.length > LIMITS.candidates) return { status: "ambiguous", reason: "too many", candidates: [] };
     const pairs = [];
@@ -184,9 +185,11 @@ export function resolver(text, budget = LIMITS.workBudget) {
       work += ends.length;
       for (const e of ends) { if (e - s <= LIMITS.changedWindow) pairs.push({ start: s, end: e }); if (pairs.length > LIMITS.candidates) return { status: "ambiguous", reason: "too many", candidates: [] }; }
     }
-    if (pairs.length === 1) return { status: "changed", ...pairs[0] };
-    if (pairs.length > 1) return { status: "ambiguous", candidates: pairs };
-    return { status: "orphaned" };
+    // (nothing but white space left between them: the commented text was deleted, not rewritten: removed)
+    const kept = pairs.filter((p) => { work += p.end - p.start; return text.slice(p.start, p.end).trim() !== ""; });
+    if (kept.length === 1) return { status: "changed", ...kept[0] };
+    if (kept.length > 1) return { status: "ambiguous", candidates: kept };
+    return pairs.length ? { status: "orphaned", reason: "removed" } : { status: "orphaned" };
   };
   // a span's lines around it (the units copied charged)
   const context = (s, e) => {

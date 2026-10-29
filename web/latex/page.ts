@@ -18,12 +18,16 @@ import { EXAMPLES, type Example } from "./examples";
 export { EXAMPLES };
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
+import { viewOf } from "./component";
 // (comments on the preview: comments.ts, its own chunk, /sagebrush-latex-comments.js, fetched on the first call;
 // a document without comments never loads it)
 export type { Thread } from "./comments";
 const commentsUrl = new URL("sagebrush-latex-comments.js", import.meta.url).href;
 export const loadComments = (): Promise<typeof import("./comments")> => import(commentsUrl);
 export async function attachComments(...a: Parameters<typeof import("./comments").attachComments>) { return (await loadComments()).attachComments(...a); }
+// (a document's live comments in this page: comments-doc.ts, a chunk of its own, /sagebrush-latex-comments-doc.js)
+const docCommentsUrl = new URL("sagebrush-latex-comments-doc.js", import.meta.url).href;
+const loadDocComments = (): Promise<typeof import("./comments-doc")> => import(docCommentsUrl);
 
 export { PATCH_BUDGET, FOLLOW_KEY } from "./editor";
 // the source's font size (px) and the preview's zoom (%): their ranges, defaults and keys in localStorage
@@ -181,7 +185,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     page.appendChild(m);
     document.addEventListener("click", () => m.remove(), { once: true });
   };
-  head.append(back, newBtn, title, dirty, save, toggle, status, tools);
+  // Comments (comments-doc.ts, in the comments' chunk: fetched when this file has a comments file, or on first use)
+  const cmBtn = el("button", "tex-comments", "Comments");
+  head.append(back, newBtn, title, dirty, save, toggle, cmBtn, status, tools);
   const main = el("div", "tex-main");
   const left = el("div", "tex-left"), right = el("div", "tex-right");
   const preview = el("div", "page tex-preview");
@@ -355,7 +361,33 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   toggle.onclick = () => { const p = page.classList.toggle("show-preview"); toggle.textContent = p ? "Source" : "Preview"; };
   window.addEventListener("beforeunload", (ev) => { if (isDirty()) { ev.preventDefault(); ev.returnValue = ""; } }, on);
   window.addEventListener("pagehide", dropImages, on);
-  dispose = () => { life.abort(); E.destroy(); dropImages(); };
+  // ---- comments: paper.tex's in paper.tex.comments.json beside it, read and written with the workspace's base
+  // (compare-and-swap: a conflict is merged and retried, comments-core.mjs)
+  const cmPath = () => where.path + ".comments.json";
+  const cmIo = {
+    read: async () => {
+      const e = await host.ws.stat(cmPath());
+      if (!e || e.trashed) return { content: null, base: null };
+      const r = await host.ws.readUpTo(cmPath(), (2 << 20) + 1);
+      return { content: new TextDecoder().decode(r.content), base: r.entry.rev ?? 0 };
+    },
+    write: async (content: string, base: unknown) => {
+      // (the test build only: the page test can write as an agent here, between this write's read and itself)
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexCommentsWrite?.();
+      const bytes = new TextEncoder().encode(content);
+      if (base !== null) return host.ws.write(cmPath(), bytes, { base: base as number });
+      try { return await host.ws.createByPerson(cmPath(), { content: bytes }); } catch (e: any) { throw e?.code === "exists" ? Object.assign(new Error("made meanwhile"), { code: "conflict" }) : e; }
+    },
+  };
+  let cm: any = null, cmLoading: Promise<any> | null = null;
+  const comments = () => (cmLoading ??= loadDocComments().then((m) => {
+    if (!live()) return null;
+    return (cm = m.attachDocComments(viewOf(E), { io: cmIo, file: { fid: host.fid, path: cmPath() }, author: "person:me", src, hl: E.hl, button: cmBtn }));
+  }));
+  cmBtn.onclick = () => void comments().then((c) => c?.openList());
+  src.addEventListener("keydown", (ev) => { if (!cm && (ev.ctrlKey || ev.metaKey) && ev.altKey && ev.code === "KeyM") { ev.preventDefault(); void comments().then((c) => c?.commentSelection()); } });
+  void host.ws.stat(cmPath()).then((e) => { if (e && !e.trashed && live()) void comments(); }, () => {});
+  dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); };
   current = { dispose: () => dispose(), dirty: isDirty };
 
   // ---- saving (r6b E5): the opened file only, last write wins
@@ -374,6 +406,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (at.entry.remote) { say("Not saved: this file is in the cloud"); return; }
       await host.ws.write(at.path, bytes, { fid: host.fid });
       savedText = text;
+      void cm?.saved(text);
       if (at.path !== where.path) { title.textContent = nameOf(at.path); title.title = at.path; }
       say("Saved");
     } catch (err) {
