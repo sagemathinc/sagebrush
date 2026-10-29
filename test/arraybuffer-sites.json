@@ -1631,6 +1631,7 @@
   "b2151f79950f37bf": {"decl":"src/runtime/types.ts :: superChecked","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "e975b9e7b7259458": {"decl":"src/runtime/types.ts :: throwable","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "1fd7544480854e6e": {"decl":"src/runtime/types.ts :: toBytes","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
+  "11bbce6048b14091": {"decl":"src/runtime/types.ts :: typeCall","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "f99023df55a8e156": {"decl":"src/runtime/types.ts :: typeNewImpl","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "f864b7a72bed908b": {"decl":"src/runtime/types.ts :: unboxing","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "8f9d1e8c32739c55": {"decl":"src/runtime/types.ts :: unionArg","class":"allocates","via":"web/lib-lazy.ts :: get"},

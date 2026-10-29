@@ -959,7 +959,7 @@ export function createNotebook(root, opts = {}) {
       case "import-star":
         return `${e.message} Import the names you use (from m import a, b), or the module (import m).`;
       default:
-        return `SyntaxError: ${e.message}`;
+        return /^SyntaxError\b/.test(e.message ?? "") ? e.message : `SyntaxError: ${e.message}`;
     }
   }
   function showStatus(cell, st) {
@@ -1004,8 +1004,10 @@ export function createNotebook(root, opts = {}) {
       cls.remove("cancelled");
       cls.add("error");
       // a syntax error in a cell just run: the interpreter shows it (where, and in
-      // its language's words); such a cell defines nothing, so running it is harmless
-      if (st.submitted && st.errors.every((e) => e.kind === "syntax")) {
+      // its language's words); such a cell defines nothing, so running it is harmless.
+      // (Not on a remote kernel: it runs only what a person's Run approved, through the gate, so the
+      // analyzer's own message is shown, below, and nothing is sent.)
+      if (st.submitted && st.errors.every((e) => e.kind === "syntax") && !kernel?.remote) {
         execCell(cell, cell.ta.value).then(() => cls.add("error"));
         markEdited(cell);
         return;
