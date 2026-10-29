@@ -230,10 +230,20 @@ try {
   // the instructor grades it: question 7, each student's proof as its preview
   await a.ev(`document.getElementById('as-instructor').click()`);
   await a.ev(`document.querySelector('#grader .tabs button[data-q="6"]').click()`);
+  // switching to a proof (William, Oct 29): a "Rendering…" state at once, "No answer submitted" distinct from it,
+  // and the next and previous students' proofs rendered in the background, so j/k shows them at once
+  await a.ev(`demo.dropProofPool()`);
+  ok(await a.ev(`(document.querySelectorAll('#grader .roster button')[1].click(), !!document.querySelector('#grader .work .proofbox .proofwait') && /Rendering/.test(document.querySelector('#grader .work .proofwait').textContent))`), "proof switch: a Rendering… state shows in the same frame as the click");
+  await a.until(`!document.querySelector('#grader .work .proofwait') && /both sides are/.test(document.querySelector('#grader .work .tex-preview')?.textContent || '')`, 60000);
+  ok(await a.ev(`(document.querySelectorAll('#grader .roster button')[3].click(), /No answer submitted/.test(document.querySelector('#grader .work .proofbox.noanswer')?.textContent || '') && !document.querySelector('#grader .work .proofwait'))`), "proof switch: no answer says No answer submitted, distinct from Rendering…");
+  await a.ev(`document.querySelectorAll('#grader .roster button')[1].click()`);
+  await a.until(`!document.querySelector('#grader .work .proofwait') && /both sides are/.test(document.querySelector('#grader .work .tex-preview')?.textContent || '')`, 60000);
+  await a.until(`demo.proofPoolReady('Emmy Noether', 'q7')`, 60000);
+  ok(await a.ev(`(document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true })), !document.querySelector('#grader .work .proofwait') && /Inductive step/.test(document.querySelector('#grader .work .tex-preview')?.textContent || '') && !!document.querySelector('#grader .work .tex-preview .ch'))`), "proof switch: j to a prefetched student shows the rendered proof at once (no placeholder)");
   await a.ev(`document.querySelectorAll('#grader .roster button')[2].click()`);
   await a.until(`/Noether/.test(document.querySelector('#grader .work h2').textContent) && !!document.querySelector('#grader .work .proofbox .tex-only-preview .tex-preview .ch')`, 60000);
   ok(await a.ev(`/Inductive step/.test(document.querySelector('#grader .work .tex-preview').textContent) && !!document.querySelector('#grader .work .tex-preview .katex')`), "instructor: a classmate's proof is shown as its typeset preview, read only");
-  ok(await a.ev(`document.querySelectorAll('.tex-page.tex-embed').length === 1`), "instructor: one editor at a time (the student's was closed)");
+  ok(await a.ev(`!document.querySelector('#items .tex-page') && document.querySelectorAll('#grader .tex-page.tex-embed').length === 1`), "instructor: the student's editor was closed, one proof shown");
   // on a phone, in focus, the proof's preview stays within the width (the grid column doesn't grow with it)
   await a.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   for (const f of [false, true]) {
@@ -246,7 +256,7 @@ try {
   await a.ev(`document.querySelectorAll('#grader .rubric input').forEach((c) => { if (!c.checked) { c.checked = true; c.dispatchEvent(new Event('change')); } })`);
   await a.ev(`document.querySelectorAll('#grader .roster button')[0].click()`);
   await a.until(`/AdaInductiveStep/.test(document.querySelector('#grader .work .tex-preview')?.textContent || '')`, 60000);
-  ok(await a.ev(`document.querySelectorAll('.tex-page.tex-embed').length === 1`), "instructor: moving to the next proof replaces the editor (no leak)");
+  ok(await a.ev(`document.querySelectorAll('#grader .tex-page.tex-embed').length === 1 && document.querySelectorAll('.tex-page.tex-embed').length <= 3`), "instructor: one proof shown, at most three kept (the shown one and its neighbours: no leak)");
   await a.ev(`(document.querySelectorAll('#grader .rubric input').forEach((c) => { if (!c.checked) { c.checked = true; c.dispatchEvent(new Event('change')); } }), (() => { const t = document.querySelector('#grader .comment'); t.value = 'Clear and complete.'; t.dispatchEvent(new Event('input')); })(), document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true })))`);
   ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /23 \\/ 23/.test(r.textContent)) && [...document.querySelectorAll('#gb tr')].some((r) => /Emmy Noether/.test(r.textContent) && /14 \\/ 23/.test(r.textContent))`), `instructor: the proof grades reach the gradebook (Ada 23 / 23, Emmy 10 + 4 = 14 / 23): ${await a.ev(`[...document.querySelectorAll('#gb tr')].map((r) => r.textContent).join(" | ")`)}`);
   await a.ev(`document.getElementById('as-student').click()`);
