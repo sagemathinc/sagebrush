@@ -58,8 +58,8 @@ check(DOC_SYNC_NOTE.some((t) => /lasting for this browser/.test(t)) && DOC_SYNC_
 // ---- from the sources: no reachable override
 const files = [];
 // (core's authored sources only.  Skipped by name: dependencies (node_modules) and dot-directories anywhere; the
-// server directories directly under web/ (SERVER: the cloud repository's code, which core never reads; server code
-// naming DOC_SYNC_ORIGINS would be a boundary violation for the import checker anyway); and these GENERATED roots of
+// server directories directly under web/ (SERVER: the cloud repository's code, which core never reads; this census
+// and its claim below are about core's own sources); and these GENERATED roots of
 // web/, build output, never authored: dist (the built site) and the site's generated roots as core lists them
 // (SITE_GENERATED_ROOTS in web/site-dir.mts; the site repository checks its own .gitignore against that list).  A
 // build before this test (CI's checks line) leaves copies there that would count as callers.  The site's roots sit
