@@ -3377,11 +3377,36 @@ async function docWire() {
   check(a1.req === r1 && (a1.t === "batches" || a1.t === "error"), "docWire: a document request's answer comes back to it: " + J(a1).slice(0, 200));
   const r2 = link.reserve(), a2 = await link.ask(r2, { t: "pull", owner: link.owner, doc: "not a document", epoch: 1, after: 0 });
   check(r2 > r1 && a2.t === "error" && a2.req === r2, "docWire: a document request's refusal comes back to it too: " + J(a2).slice(0, 200));
-  // (an `ack` too: a new document's first batch, one patch; the ops' sender never sees it (its ack has no ops))
+  // (an `ack` too, as the protocol has it (§5.8): the client claimed first (doc_claim), then a new document's first
+  // batch, one patch, with the claim's fgen and cseq; the ops' sender never sees it (its ack has no ops).  Core's own
+  // test server predates claims: only its exact refusal of an unknown message takes the named fallback (the ack routing
+  // not exercised), and never with SYNC_REQUIRE_CLAIM=1 (cloud's CI, window.REQUIRE_CLAIM); any other answer, no
+  // answer, a malformed claim, or a claim followed by a refused batch fails.  The claim branch counts two checks, the
+  // fallback one, so the total shows which branch ran)
   const askT = (r, m) => Promise.race([link.ask(r, m), sleep(5000).then(() => ({ t: "no answer in 5 s" }))]);
-  const body = new TextEncoder().encode(J({ v: 1 })), pid = Date.now().toString(36).padStart(11, "0") + "_docwire1";
-  const r4 = link.reserve(), a4 = await askT(r4, { t: "batch", owner: link.owner, doc: crypto.randomUUID(), epoch: 1, kind: "notebook", patches: [{ cseq: 1, id: pid, parents: [], size: body.length }], body: btoa(String.fromCharCode(...body)) });
-  check(a4.t === "ack" && a4.req === r4 && c.status.state === "synced", "docWire: a document request's `ack` comes back to it (not to the ops' sender): " + J({ a: a4, state: c.status.state }).slice(0, 200));
+  const client1 = "docwire1", doc4 = crypto.randomUUID();
+  const body = new TextEncoder().encode(J({ v: 1 })), pid = Date.now().toString(36).padStart(11, "0") + "_" + client1;
+  const b64 = btoa(String.fromCharCode(...body));
+  // (the control: a batch without fgen, through this page and the front, is refused (by the front's canonical check),
+  // routed to its request, and never forwarded)
+  const l0 = await ctl("log");
+  const r0 = link.reserve(), a0 = await askT(r0, { t: "batch", owner: link.owner, doc: doc4, epoch: 1, kind: "notebook", patches: [{ cseq: 1, id: pid, parents: [], size: body.length }], body: b64 });
+  await sleep(200);
+  const l1 = await ctl("log");
+  check(a0.t === "error" && a0.req === r0 && a0.code === "invalid" && /^batch fgen/.test(a0.detail?.message ?? "") && l1.fgenRefused === l0.fgenRefused + 1 && l1.batchesUp === l0.batchesUp,
+    "docWire: a batch without fgen is refused (invalid, batch fgen), routed to its request, never forwarded (no batch went upstream): " + J({ a: a0, refused: l1.fgenRefused - l0.fgenRefused, up: l1.batchesUp - l0.batchesUp }).slice(0, 200));
+  const rc = link.reserve(), ac = await askT(rc, { t: "doc_claim", owner: link.owner, doc: doc4, epoch: 1, client: client1 });
+  const claimed = ac.t === "ack" && ac.req === rc && ac.claim?.client === client1 && Number.isSafeInteger(ac.claim?.fgen) && ac.claim.fgen >= 0 && Number.isSafeInteger(ac.claim?.next_cseq) && ac.claim.next_cseq >= 1;
+  const legacy = ac.t === "error" && ac.req === rc && ac.code === "invalid" && ac.detail?.message === "unknown message";
+  if (claimed || window.REQUIRE_CLAIM || !legacy) {
+    check(claimed, "docWire: the client claimed (doc_claim answered with its client, fgen and next_cseq, to its request)" + (window.REQUIRE_CLAIM ? " (SYNC_REQUIRE_CLAIM)" : "") + ": " + J(ac).slice(0, 200));
+    const u4 = (await ctl("log")).batchesUp;
+    const r4 = link.reserve(), a4 = claimed
+      ? await askT(r4, { t: "batch", owner: link.owner, doc: doc4, epoch: 1, kind: "notebook", fgen: { [client1]: ac.claim.fgen }, patches: [{ cseq: ac.claim.next_cseq, id: pid, parents: [], size: body.length }], body: b64 })
+      : { t: "not sent: no claim" };
+    const u5 = (await ctl("log")).batchesUp;
+    check(a4.t === "ack" && a4.req === r4 && c.status.state === "synced" && u5 === u4 + 1, "docWire: …its batch (the claim's fgen and cseq), forwarded once: the document request's `ack` comes back to it (not to the ops' sender): " + J({ a: a4, state: c.status.state, up: u5 - u4 }).slice(0, 200));
+  } else check(legacy, "docWire: ack routing not exercised: server has no claim protocol (doc_claim refused as an unknown message, code invalid, routed to its request)");
   const from = await w.lastSeq();
   await w.mkdir("/docwire");
   check(await until(() => settled(w, c)), "docWire: the ops' sender untouched by them: an op sent and decided after: " + J(c.status));
@@ -3405,7 +3430,101 @@ async function docWire() {
   await stop(c);
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs };
+/** what a client closed by another page's upgrade says (sync-client.ts CLOSED_ELSEWHERE) */
+const CLOSED_REASON = "your files were upgraded by a newer Sagebrush page: reload this page to sync";
+/** Another page (a newer build) upgrades `w`'s database: its version + 1, opened and closed from this page. */
+const upgradeElsewhere = (w) => new Promise((ok, no) => { const r = indexedDB.open(w.ws.name, w.ws.version + 1); r.onsuccess = () => { r.result.close(); ok(); }; r.onerror = () => no(r.error); });
+/** `p` settled within `ms`: "ended", "rejected: …", or "hung" */
+const settledWithin = (p, ms) => Promise.race([p.then(() => "ended", (e) => "rejected: " + (e?.message ?? e)), sleep(ms).then(() => "hung")]);
+const closedOff = (c) => c.status.state === "off" && c.status.reason === CLOSED_REASON;
+
+/** A newer page upgrades the workspace's database while this page's client runs (another tab, a newer build): the
+ * database closes here; the client stops itself (sync off, said), its loop ends, and nothing it was doing throws. */
+async function closedByUpgrade() {
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => settled(w, c)), "closed by upgrade: synced first");
+  await upgradeElsewhere(w);
+  check(w.closed === true, "closed by upgrade: the workspace says it was closed by another page");
+  // (the socket drops, as a network would: the client must not write to the closed database, nor hang)
+  await ctl("closeAll");
+  const ended = await settledWithin(c.run, 5000);
+  check(ended === "ended" && closedOff(c), "closed by upgrade: the client stopped, its loop ended, the reload said: " + J({ ended, status: c.status }));
+  await c.stop();
+}
+/** The database closed under a running client with no notice (no onClosed: a caller's close()): the socket then
+ * drops, so the connection's end can't keep its timer.  Its end is still said and its loop settles (ended or
+ * rejected, never waiting for good), and nothing throws unhandled (the runner fails on any page error). */
+async function closedUnderClient() {
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => settled(w, c)), "closed under the client: synced first");
+  // (settled or rejected, observed from now: its rejection is handled here, so only the client's own can be unhandled)
+  const settledAs = c.run.then(() => "ended", (e) => "rejected: " + (e?.message ?? e));
+  w.ws.close();
+  await ctl("closeAll");
+  const ended = await Promise.race([settledAs, sleep(10_000).then(() => "hung")]);
+  check(ended !== "hung", "closed under the client: its loop settled, not waiting for good: " + J({ ended, status: c.status }));
+  await c.stop();
+}
+/** The upgrade lands while the connection's end is keeping its retry timer (its write in flight, held here until
+ * after the upgrade): the write then completes, and the reload stays the last thing said. */
+async function closedDuringRetry() {
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => settled(w, c)), "closed during a retry: synced first");
+  let hit, release;
+  const inFlight = new Promise((ok) => { hit = ok; }), gate = new Promise((ok) => { release = ok; });
+  const put0 = c["metaPut"];
+  c["metaPut"] = function (k, v) {
+    const p = put0.call(this, k, v);
+    if (!/:retry:connect$/.test(k)) return p;
+    p.catch(() => {});
+    hit();
+    return gate.then(() => p);
+  };
+  await ctl("closeAll");
+  check(await settledWithin(inFlight, 5000) === "ended", "closed during a retry: the retry's write in flight, held");
+  await upgradeElsewhere(w);
+  check(w.closed === true && closedOff(c), "closed during a retry: the reload said at the upgrade: " + J(c.status));
+  release();
+  const ended = await settledWithin(c.run, 5000);
+  check(ended === "ended" && closedOff(c), "closed during a retry: the held write completed after, and the reload is still the last thing said: " + J({ ended, status: c.status }));
+  c["metaPut"] = put0;
+  await c.stop();
+}
+/** The upgrade lands while the client is asking who is signed in (its namespace request held here until after the
+ * upgrade, then answered 401): the late answer says nothing over the reload. */
+async function closedDuringNamespace() {
+  await account();
+  const w = await fresh();
+  let armed = false, hit, release;
+  const asked = new Promise((ok) => { hit = ok; }), gate = new Promise((ok) => { release = ok; });
+  const c = client(w, { fetch: async (u, init) => {
+    if (armed && /\/api\/share\/me$/.test(String(u))) {
+      armed = false;
+      hit();
+      await gate;
+      return new Response("{}", { status: 401, headers: { "content-type": "application/json" } });
+    }
+    return fetch(u, init);
+  } });
+  check(await until(() => settled(w, c)), "closed during the namespace request: synced first");
+  armed = true;
+  await ctl("closeAll");
+  check(await settledWithin(asked, 10_000) === "ended", "closed during the namespace request: the reconnect's request in flight, held");
+  await upgradeElsewhere(w);
+  check(w.closed === true && closedOff(c), "closed during the namespace request: the reload said at the upgrade: " + J(c.status));
+  release();
+  const ended = await settledWithin(c.run, 5000);
+  check(ended === "ended" && closedOff(c), "closed during the namespace request: its late 401 said nothing over the reload: " + J({ ended, status: c.status }));
+  await c.stop();
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

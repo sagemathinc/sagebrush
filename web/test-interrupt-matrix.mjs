@@ -17,7 +17,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, leakRowOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, ciFailing, waiverErrors, widenedPick, withWaiver, xkRowOutcome } from "./interrupt-classify.mjs";
+import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, leakRowOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, ciFailing, waiverErrors, widenedPick, withWaiver, xkRowOutcome, sessionEnd, finalDropCandidate, markFinalShutdown } from "./interrupt-classify.mjs";
 import { killTracked, killTree, onStop, procStatus, procTable, promptSample, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 // (SB_BASELINE: another baseline, for checking the harness: its tests pin their fake rows there, never in the real one)
 const BASELINE = JSON.parse(readFileSync(process.env.SB_BASELINE ?? new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
@@ -176,6 +176,11 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       p = spawn("script", ["-qfec", cmd, "/dev/null"], { detached: true, stdio: ["pipe", "pipe", "pipe"] });
       setTimeout(() => p.stdin.write(`exec(${JSON.stringify(src)})\n`), 1500);
     }
+    // (the target's own exit, from spawn on (astra2): on the cli host the child is the target itself, and its exit
+    // counts only while the harness has killed nothing.  An exit after an interrupt the matrix delivered is still the
+    // target's own (grader's N2): only killTree and the cleanup below are the harness ending it)
+    let killed = null, ownExitAt = null;
+    p.on("exit", () => { if (killed === null && ownExitAt === null) ownExitAt = now(); });
     const trials = Array.from({ length: n }, (_, k) => ({ i: k + 1, marks: {}, stray: null, probe: null }));
     const samples = [];
     let buf = "";
@@ -188,6 +193,44 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
     const remember = () => { const t = procTable(); for (const q of sessionTree(p.pid, known, t)) known.set(q, t.get(q).start); };
     const watch = setInterval(remember, 1000);
     let done = false;
+    // (a final-drop candidate's wait for the target's own exit (interrupt-classify.mjs sessionEnd): the cli host
+    // reads the child's exit, recorded above; the prompt host reads the final sample's target, bound by pid and start
+    // (a start that changed is a sample error, never an exit).  It ends at the deadline, and at most then is the tree
+    // killed; the run's watchdog still bounds the whole run)
+    const ownExit = (cand, deadline) => new Promise((res) => {
+      const tick = () => {
+        if (host === "cli") {
+          if (ownExitAt !== null) return res(ownExitAt);
+        } else {
+          const t = cand.target;
+          if (!t || t.pid == null || !/^\d+$/.test(String(t.start ?? ""))) return res(null);
+          const s = procStatus(t.pid, t.start);
+          if (s.sample_error) return res(null);
+          if (s.exiting) return res(now());
+        }
+        if (now() >= deadline) return res(null);
+        setTimeout(tick, 20);
+      };
+      tick();
+    });
+    // (the samples as they stood at the first finish are the ones judged: a late line during the wait is kept after
+    // them, so a marked sample is then no longer the last, and leakCheck calls that invalid)
+    let atFinish = 0;
+    const end = sessionEnd({
+      now,
+      candidate: () => finalDropCandidate(samples.slice(0, atFinish)),
+      ownExit,
+      kill: () => { killed = killTree(p.pid, known); },
+      settle: (why, t_finish, t_exit) => {
+        const m = markFinalShutdown(samples.slice(0, atFinish), { why, t_finish, t_exit });
+        setTimeout(() => {
+          const left = survivors(killed);
+          if (left.length === 0) untrack(p.pid);
+          resolve({ trials, samples: [...m.samples, ...samples.slice(atFinish)], ...(m.final_drop ? { final_drop: m.final_drop } : {}), end: why, wall_ms: now() - t0, left, tail: tail.slice(-1500) });
+        }, 500);
+      },
+    });
+    // (the session ends once: every sender stops at once, and a re-entry during the wait is a no-op)
     const finish = (why) => {
       if (done) return;
       done = true;
@@ -196,12 +239,8 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       for (const h of sends) clearTimeout(h);
       sends.clear();
       clearInterval(watch);
-      const killed = killTree(p.pid, known);
-      setTimeout(() => {
-        const left = survivors(killed);
-        if (left.length === 0) untrack(p.pid);
-        resolve({ trials, samples, end: why, wall_ms: now() - t0, left, tail: tail.slice(-1500) });
-      }, 500);
+      atFinish = samples.length;
+      end(why);
     };
     const onLine = (line) => {
       const m = line.replace(/\r/g, "").match(/^(SETUP|ENTER|RET|KI|PROBE|STRAY|DONE|END|XSTART|XEND|PHASE)\b ?(\d+)? ?(.*)$/);
@@ -242,7 +281,7 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       if ((mk === "KI" || mk === "RET") && guard) { clearTimeout(guard); guard = null; }
       if (mk === "PROBE") t.probe = rest;
       if (mk === "STRAY") t.stray = rest;
-      if (mk === "DONE") samples.push({ i: t.i, ...(host === "cli" ? procStatus(p.pid) : promptSample(p.pid, [process.execPath, LAUNCHER])), ...(/^\d+$/.test(rest.trim()) ? { mem_kb: Number(rest.trim()) / 1024 } : {}) });
+      if (mk === "DONE") samples.push({ i: t.i, t_done: now(), ...(host === "cli" ? procStatus(p.pid) : promptSample(p.pid, [process.execPath, LAUNCHER])), ...(/^\d+$/.test(rest.trim()) ? { mem_kb: Number(rest.trim()) / 1024 } : {}) });
     };
     const feed = (d) => {
       buf += d;
@@ -339,7 +378,7 @@ async function runHost(host) {
     const run = async (label, delays, s = cal.s) => {
       const r = await session(host, c, s, delays, CAL_CAP_MS + guard_ms * delays.length, guard_ms);
       if (r.end === "budget") for (const t of r.trials) t.budget_cut = true;
-      sessions.push({ label, end: r.end, wall_ms: Math.round(r.wall_ms), left: r.left, samples: r.samples, ...(r.trials.some((t) => classify(t).outcome !== "PASS") ? { tail: r.tail } : {}) });
+      sessions.push({ label, end: r.end, wall_ms: Math.round(r.wall_ms), left: r.left, samples: r.samples, ...(r.final_drop ? { final_drop: r.final_drop } : {}), ...(r.trials.some((t) => classify(t).outcome !== "PASS") ? { tail: r.tail } : {}) });
       return r;
     };
     // the required cells: early/middle/late (1/3/10 s without an end) in --full, else the middle
@@ -369,7 +408,11 @@ async function runHost(host) {
     // a process that outlived its session's kill is a leaked worker: the row fails (r4 §1)
     const left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
     const leak0 = leakCheck(lr.samples, 20, c.leak_measure ?? "rss");
-    const leak = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
+    const leak1 = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
+    // (a final-drop candidate of the leak series, marked or not, is recorded with a measured leak, and on the row
+    // itself (below) either way, so the report prints its end cause and its margin, grader's C1; an unmeasured leak
+    // stays null, judged as before)
+    const leak = lr.final_drop && leak1 ? { ...leak1, final_drop: lr.final_drop } : leak1;
     let { outcome: own, why: rowWhy } = leakRowOutcome(cells, leak, c);
     // (a session cut at the run's deadline leaves its cells unresolved: the row is INVALID-budget, unless it already failed)
     if (overBudget() && sessions.some((x) => x.end === "budget") && own !== "FAIL") {
@@ -383,7 +426,7 @@ async function runHost(host) {
     const waived = withWaiver({ case: c.id, host, trials: cells, leak }, known, WAIVERS, c.call, offsets.length + reps);
     const outcome = waived.outcome;
     if (waived.why) rowWhy = waived.why;
-    rows.push({ case: c.id, host, mode: c.mode, run: MODE, outcome, ...(cal.label ? { label: cal.label } : {}), ...(outcome !== own ? { own_outcome: own } : {}), ...(waived.waiver ? { waiver: waived.waiver } : {}), ...(rowWhy ? { why: rowWhy } : {}), ...(c.xk ? { xk: c.xk.kind } : {}), s: cal.s, T_ms: cal.T && Math.round(cal.T), ...(cal.R != null ? { R_ms: Math.round(cal.R) } : {}), calibration: cal, ...(c.leak_s != null ? { leak_s: leakAt ?? { s: c.leak_s, T_ms: null, why: "no calibration attempt at leak_s: the series ran at s" } } : {}), cells, leak, sessions });
+    rows.push({ case: c.id, host, mode: c.mode, run: MODE, outcome, ...(cal.label ? { label: cal.label } : {}), ...(outcome !== own ? { own_outcome: own } : {}), ...(waived.waiver ? { waiver: waived.waiver } : {}), ...(rowWhy ? { why: rowWhy } : {}), ...(c.xk ? { xk: c.xk.kind } : {}), s: cal.s, T_ms: cal.T && Math.round(cal.T), ...(cal.R != null ? { R_ms: Math.round(cal.R) } : {}), calibration: cal, ...(lr.final_drop ? { final_drop: lr.final_drop } : {}), ...(c.leak_s != null ? { leak_s: leakAt ?? { s: c.leak_s, T_ms: null, why: "no calibration attempt at leak_s: the series ran at s" } } : {}), cells, leak, sessions });
     record(rows.at(-1));
   }
   return rows;

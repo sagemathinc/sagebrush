@@ -8,6 +8,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hasSite, SITE_GENERATED_ROOTS } from "../site-dir.mts";
 import { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, DOC_SYNC_RELOAD, docSyncOrigin, docSyncAvailable, docSyncAllowed, enableDocSync, followDocSync, docSyncChannel } from "./doc-sync-switch.ts";
 
 const here = dirname(fileURLToPath(import.meta.url)), web = join(here, "..");
@@ -56,26 +57,31 @@ check(DOC_SYNC_NOTE.some((t) => /lasting for this browser/.test(t)) && DOC_SYNC_
 
 // ---- from the sources: no reachable override
 const files = [];
-// (the authored sources only.  Skipped by name: dependencies (node_modules) and dot-directories anywhere, and these
-// GENERATED roots of web/, each gitignored build output, never authored: dist (the built site, root .gitignore) and
-// site/public (the site's built copy of the page and bundles, web/site/.gitignore): a build before this test (CI's
-// checks line) leaves copies there that would count as callers.  Nothing else is skipped, so an activation path added
-// anywhere else, site/ included, is counted)
-const GENERATED = ["dist", "site/public"];
-const skipped = [];
+// (core's authored sources only.  Skipped by name: dependencies (node_modules) and dot-directories anywhere; the
+// server directories directly under web/ (SERVER: the cloud repository's code, which core never reads; this census
+// and its claim below are about core's own sources); and these GENERATED roots of
+// web/, build output, never authored: dist (the built site) and the site's generated roots as core lists them
+// (SITE_GENERATED_ROOTS in web/site-dir.mts; the site repository checks its own .gitignore against that list).  A
+// build before this test (CI's checks line) leaves copies there that would count as callers.  The site's roots sit
+// under site/, which SERVER skips whole; they stay listed so the census stays right if that skip ever changes.
+// Nothing else is skipped, so an activation path added anywhere else in core is counted)
+const SERVER = ["site", "files", "share", "sync", "lti"];
+const GENERATED = ["dist", ...(hasSite ? SITE_GENERATED_ROOTS.map((r) => "site/" + r) : [])];
+const skipped = [], skippedServer = [];
 (function walk(d) {
   for (const n of readdirSync(d)) {
     if (n === "node_modules" || n.startsWith(".")) continue;
     const p = join(d, n);
+    if (d === web && SERVER.includes(n)) { skippedServer.push(n); continue; }
     if (GENERATED.includes(relative(web, p))) { skipped.push(relative(web, p)); continue; }
     if (statSync(p).isDirectory()) walk(p);
     else if (/\.(ts|js|mjs|html)$/.test(n) && !/^test-|\.page\.js$|-cases\.js$/.test(n)) files.push(p);
   }
 })(web);
 const src = (p) => readFileSync(p, "utf8");
-check(J(GENERATED) === J(["dist", "site/public"]) && /^public\/$/m.test(readFileSync(join(web, "site", ".gitignore"), "utf8")) && skipped.every((r) => GENERATED.includes(r)), "the census skips exactly the two generated roots it names, web/dist and web/site/public (gitignored build output), nothing else: skipped " + J(skipped));
+check(skipped.every((r) => GENERATED.includes(r)) && skippedServer.every((r) => SERVER.includes(r)), "the census of core's sources skips only the generated roots it names (" + GENERATED.join(", ") + ") and the server directories under web/ (" + SERVER.join(", ") + "), by name: skipped " + J([...skipped, ...skippedServer]));
 const using = (re) => files.filter((p) => re.test(src(p))).map((p) => relative(web, p)).sort();
-check(J(using(/DOC_SYNC_ORIGINS/)) === J(["workspace/doc-sync-switch.ts", "workspace/index.ts"]), "DOC_SYNC_ORIGINS named only where it is defined and re-exported: " + J(using(/DOC_SYNC_ORIGINS/)));
+check(J(using(/DOC_SYNC_ORIGINS/)) === J(["workspace/doc-sync-switch.ts", "workspace/index.ts"]), "in core's sources, DOC_SYNC_ORIGINS named only where it is defined and re-exported: " + J(using(/DOC_SYNC_ORIGINS/)));
 const sw = src(join(here, "doc-sync-switch.ts"));
 check(!/window\.|globalThis\.|localStorage|sessionStorage|URLSearchParams|location\.|document\./.test(sw), "the switch's module reads no window, global, storage, URL or location of its own");
 const page = src(join(web, "index.html")), board = src(join(web, "board", "page.ts"));

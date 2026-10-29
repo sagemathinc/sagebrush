@@ -183,8 +183,12 @@ process.kill = (pid, sig) => { if (sig === "SIGINT") { const e = new Error("kill
 });
 
 // a fake launcher that ignores SIGINT and returns: each trial prints ENTER, runs trialMs, then RET, PROBE and DONE;
-// after the last DONE it stays up holdMs before END and its exit (0: it exits at once, as a fast launcher teardown does)
-function fakeIgnoring(dir: string, holdMs: number, trialMs: number): string {
+// after the last DONE it stays up holdMs before END and its exit (0: it exits at once, as a fast launcher teardown does).
+// dropWorker: a worker thread runs from the start and is ended just before the last trial's DONE, so the last sample
+// reads fewer threads than the ones before it (the leak final-drop design r2's end-to-end controls).  endThenStayMs:
+// END at once after the last DONE, then the process stays up that long (as the prompt's REPL stays up after END), so
+// only the harness's kill ends it.
+function fakeIgnoring(dir: string, holdMs: number, trialMs: number, opts: { dropWorker?: boolean; endThenStayMs?: number } = {}): string {
   const f = join(dir, "fake-ignoring.cjs");
   writeFileSync(f, `
 const fs = require("node:fs");
@@ -192,11 +196,22 @@ process.on("SIGINT", () => {});
 const src = fs.readFileSync(process.argv.at(-1), "utf8");
 const n = Number((src.match(/range\\(1, (\\d+) \\+ 1\\)/) ?? [])[1] ?? 1);
 const say = (s) => process.stdout.write(s + "\\n");
+const w = ${opts.dropWorker ? 'new (require("node:worker_threads").Worker)("setInterval(() => {}, 1000)", { eval: true })' : "null"};
 let i = 0;
 const next = () => {
-  if (++i > n) { setTimeout(() => { say("END"); process.exit(0); }, ${holdMs}); return; }
+  if (++i > n) {
+    if (${opts.endThenStayMs ?? 0} > 0) { say("END"); setTimeout(() => process.exit(0), ${opts.endThenStayMs ?? 0}); return; }
+    setTimeout(() => { say("END"); process.exit(0); }, ${holdMs}); return;
+  }
   say("SETUP " + i); say("ENTER " + i + " 0.1");
-  setTimeout(() => { say("RET " + i); say("PROBE " + i + " ok"); say("DONE " + i); next(); }, ${trialMs});
+  setTimeout(() => {
+    // (grader's P2: with a worker, the fake says its own thread count before each DONE, on a line the harness's
+    // marker parser ignores but keeps in the session's tail, so a missed drop shows whether it happened or the
+    // sampler missed it)
+    const own = () => { try { return (fs.readFileSync("/proc/self/status", "utf8").match(/^Threads:\\s+(\\d+)/m) ?? [])[1] ?? "?"; } catch { return "?"; } };
+    const done = () => { if (w) say("FAKE-THREADS " + i + " " + own()); say("RET " + i); say("PROBE " + i + " ok"); say("DONE " + i); next(); };
+    if (w && i === n) w.terminate().then(() => setTimeout(done, 300)); else done();
+  }, ${trialMs});
 };
 next();
 `);
@@ -215,7 +230,8 @@ async function e2OnFake(dir: string, f: string) {
   const e2 = rows.find((r) => r.case === "E2");
   assert.ok(e2, "E2's row");
   const cells = e2.cells.map((c: any) => [c.outcome, c.why]);
-  const row = JSON.stringify({ outcome: e2.outcome, own_outcome: e2.own_outcome, why: e2.why, leak: e2.leak, cells, samples: (e2.sessions ?? []).map((x: any) => [x.label, x.end, x.samples]) });
+  const row = JSON.stringify({ outcome: e2.outcome, own_outcome: e2.own_outcome, why: e2.why, leak: e2.leak, final_drop: e2.final_drop, cells, samples: (e2.sessions ?? []).map((x: any) => [x.label, x.end, x.samples]),
+    fake_threads: (e2.sessions ?? []).map((x: any) => [x.label, String(x.tail ?? "").match(/^FAKE-THREADS .*$/gm) ?? []]) });
   return { e2, code, err, row };
 }
 
@@ -236,17 +252,52 @@ test("a pinned row whose target ignores the Stop and returns: every trial is jud
   }
 });
 
-test("a target that exits at once after its last DONE: the last sample, read as it exits, is dropped and said, not a thread change (python's report on #251's fake)", async () => {
+test("a target that exits at once after its last DONE: the last sample, read as it exits, is dropped and said, not a thread change (python's report on #251's fake)", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
   try {
-    // (no hold: the last DONE's sample may catch the process with its threads going, 3 runs of 4 on VM2 before this
-    // fix; either it reads live, or it's marked exiting and dropped. Both pass; a lower thread count never fails)
+    // (no hold: the last DONE's sample may catch the process with its threads going, 3 runs of 4 on VM2 before #267,
+    // and in PR 279's ci 40765663082 with threads 7, 7, 7, 7, 3 and no exiting mark, which failed before this fix.
+    // Now it reads live, or it's dropped as exiting (the kernel's mark, or the target's own exit seen within 1000 ms
+    // of that DONE). Every shape passes, and the test says which; it never requires the drop)
     const { e2, code, err, row } = await e2OnFake(dir, fakeIgnoring(dir, 0, 3000));
     assert.equal(e2.cells.length, 5, row);
     assert.ok(e2.leak?.ok === true && e2.leak?.threads_same === true, row);
     assert.ok(e2.leak.last_exiting === true ? e2.leak.to === 4 : e2.leak.to === 5, row);
+    if (e2.final_drop) assert.equal(e2.final_drop.marked, true, row);
+    t.diagnostic(e2.final_drop ? `shape: a final drop, marked on the target's own exit (${JSON.stringify(e2.final_drop)})` : e2.leak.last_exiting ? `shape: the final sample read exiting (${e2.leak.last_exiting_why ?? "no reason"})` : "shape: no drop, every sample live");
     assert.equal(e2.outcome, "KNOWN", row);
     assert.equal(code, 0, err.slice(-600));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a final thread drop then the target's own exit: the drop is marked, dropped and said (the leak final-drop design r2's autonomous-exit control)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
+  try {
+    const { e2, code, err, row } = await e2OnFake(dir, fakeIgnoring(dir, 0, 3000, { dropWorker: true }));
+    assert.equal(e2.cells.length, 5, row);
+    assert.ok(e2.final_drop, "the worker's end must show as a final thread drop: " + row);
+    assert.ok(e2.final_drop.marked === true && e2.final_drop.end_after_done_ms >= 0 && e2.final_drop.end_after_done_ms <= 1000, row);
+    assert.ok(e2.leak?.ok === true && e2.leak.threads_same === true && e2.leak.last_exiting === true && e2.leak.to === 4, row);
+    assert.match(e2.leak.last_exiting_why, /^threads falling \(\d+ -> \d+\), the target exited on its own /, row);
+    assert.equal(e2.outcome, "KNOWN", row);
+    assert.equal(code, 0, err.slice(-600));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a final thread drop, END, and a target that stays up: only the harness's kill ends it, so nothing is marked and the row fails (@sagebrush's D1 control)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
+  try {
+    const { e2, code, row } = await e2OnFake(dir, fakeIgnoring(dir, 0, 3000, { dropWorker: true, endThenStayMs: 3000 }));
+    assert.equal(e2.cells.length, 5, row);
+    assert.ok(e2.final_drop, "the worker's end must show as a final thread drop: " + row);
+    assert.deepEqual([e2.final_drop.marked, e2.final_drop.end_cause, e2.final_drop.end_after_done_ms], [false, "end", null], row);
+    assert.ok(e2.leak?.ok === false && e2.leak.threads_same === false && e2.leak.last_exiting === undefined, row);
+    assert.equal(e2.outcome, "FAIL", row);
+    assert.notEqual(code, 0, "a failing row fails --ci");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
