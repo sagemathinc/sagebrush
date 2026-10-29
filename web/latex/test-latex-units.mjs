@@ -12,7 +12,7 @@ import { boxClass } from "./boxclass.mjs";
 import { previewHost } from "./preview-host.mjs";
 import { Engine } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
-import { setKatex } from "./engine/render.mjs";
+import { setKatex, render } from "./engine/render.mjs";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 600)); };
@@ -204,6 +204,36 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     const ck = r.stats.resumedFrom >= 0 ? c3.checkpoints[r.stats.resumedFrom] : null;
     check(name, r.stats.mode !== "full" && ck && mains(ck) === want && r.res.outcome === "ok" && cold.outcome === "ok" && dups(ai).length === 0 && sorted(ai) === sorted(ac),
       { mode: r.stats.mode, resumedFrom: r.stats.resumedFrom, mains: ck && mains(ck), outcome: r.res.outcome, dups: dups(ai).slice(0, 5), n: [ai.length, ac.length] });
+  }
+  // (astra4 POS-A4-2) the resume base must precede the END of the main file's consumed source, not the start of its
+  // last token. Two edits in the inner pass, each just before a checkpoint, compared by rendered HTML with a cold run:
+  //   - inside a control word (\oldname -> \olxname): astra4's case. In this core a line ending in a control word (or
+  //     a comment) loads the next line inside readTok, so no checkpoint follows it: the case is guarded but not
+  //     reachable, and the r3 guard passes it too (run-mutations.txt)
+  //   - inside a line's trailing spaces: loadLine trims them, so the line-end token's offset is before them and
+  //     before the newline; a space made "X" there passes seen < edit.start, and the r3 guard resumes after the line
+  //     was read (reachable: the r3-guard mutation fails this case)
+  {
+    const html = (res) => render(res.units.flatMap((u) => u.ev || []), res.intern, {}).chunks.join("");
+    const head = "\\ifx\\sbdone\\undefined\\documentclass{article}\\fi\n\\ifx\\sbdone\\undefined\\begin{document}\\fi\n" +
+      "\\ifx\\sbdone\\undefined\\def\\oldname{OLD}\\def\\olxname{NEW}\\fi\nOuter start.\n" +
+      "\\ifx\\sbdone\\undefined\\def\\sbnext{\\input{main.tex}}\\else\\def\\sbnext{}\\fi\\def\\sbdone{}\\sbnext\n";
+    const tail = "After word.\n\n\\ifx\\sbback\\undefined\\def\\sbback{}\\endinput\\fi\nOuter tail.\n\\end{document}\n";
+    for (const [name, mid, find, off, repl, want, gone] of [
+      ["pos-reread-edit-inside-control-word", "Inner para one.\n\nInner para two.\n\n\\oldname\n\n", "\\oldname\n\n", 3, "x", "NEW", "OLD"],
+      ["pos-reread-edit-in-trailing-spaces", "Inner para one.\n\nInner para two.   \n\n", "Inner para two.   \n", 16, "X", "two. X", null]]) {
+      const cw = head + mid + tail;
+      const c4 = coldRun(new Map([["main.tex", cw]]), "main.tex", { Tmin: 1 });
+      const at = cw.indexOf(find) + off;
+      const r = incremental(c4, { start: at, end: at + 1, text: repl });
+      const edited = cw.slice(0, at) + repl + cw.slice(at + 1);
+      const cold = coldRun(new Map([["main.tex", edited]]), "main.tex", { Tmin: 1, intern: c4.intern });
+      const ck = r.stats.resumedFrom >= 0 ? c4.checkpoints[r.stats.resumedFrom] : null;
+      const hi = html(r.res), hc = html(cold);
+      check(name, c4.outcome === "ok" && r.stats.mode !== "full" && ck && mains(ck) === 2 && r.res.outcome === "ok" && cold.outcome === "ok" &&
+        hi === hc && hc.split(want).length - 1 === 2 && (gone === null || !hc.includes(gone)) && dups(posAts(r.res)).length === 0,
+        { mode: r.stats.mode, resumedFrom: r.stats.resumedFrom, mains: ck && mains(ck), outcome: r.res.outcome, same: hi === hc, inc: hi.slice(0, 260), cold: hc.slice(0, 260) });
+    }
   }
 }
 {

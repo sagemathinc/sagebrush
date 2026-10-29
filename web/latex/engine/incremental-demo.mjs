@@ -79,12 +79,16 @@ export function applyEdit(prev, edit) {
 export function incremental(prev, edit) {
   const { files, delta } = applyEdit(prev, edit);
   const s = edit.start, e = edit.end;
+  const oldMain = prev.files.get(prev.main);
   const mapped = prev.checkpoints.map((ck, i) => {
-    // depends only on text before mainPos, and before the main file's high-water mark: when the main file read itself,
-    // the outer reader's place is behind text the inner read already took in (unchanged for any other document, where
-    // the high-water mark is behind mainPos)
+    // depends only on text before mainPos, and before the end of the main file's consumed source: when the main file
+    // read itself, the outer reader's place is behind text the inner read already took in. srcSeen holds where the
+    // last main token STARTS; lines are read whole and a checkpoint is at a line start, so the consumed source ends
+    // with that token's line (astra4 POS-A4-2: an edit inside a control word read just before the checkpoint).
+    // For any other document this is the same as mainPos <= s: the high-water line ends just before mainPos.
     const seen = ck.srcSeen.get(prev.main);
-    if (ck.mainPos <= s && (seen === undefined || seen < s)) return { ck, i, pos: ck.mainPos, state: "before" };
+    const nl = seen === undefined ? -1 : oldMain.indexOf("\n", seen), seenEnd = seen === undefined ? -1 : nl < 0 ? oldMain.length : nl;
+    if (ck.mainPos <= s && seenEnd < s) return { ck, i, pos: ck.mainPos, state: "before" };
     const mr = ck.readers.find((r) => r.path === prev.main);
     // a half-read main line depends on text from its line start: an edit touching or AT that start drops it
     const after = mr && mr.partial ? mr.lineStart > e : ck.mainKey >= e;
