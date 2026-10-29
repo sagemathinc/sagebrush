@@ -11,6 +11,7 @@ import { RenderGate } from "./gate.ts";
 import { boxClass } from "./boxclass.mjs";
 import { previewHost } from "./preview-host.mjs";
 import { EXAMPLES } from "./examples.ts";
+import { makeAnchor, locate } from "./comments.ts";
 import { Engine } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
 import { setKatex, render } from "./engine/render.mjs";
@@ -323,6 +324,21 @@ check("flag-test-hosts-only-in-list", latexOn("127.0.0.1", true, () => null, ["d
   }
   console.log("examples:", JSON.stringify(record));
   check("examples-ten", EXAMPLES.length === 10 && new Set(EXAMPLES.map((e) => e.id)).size === 10, EXAMPLES.map((e) => e.id));
+}
+
+// ---- comments.ts (cut 1): an anchor's quote and context; located at its offsets while they hold its quote, else at
+// the nearest occurrence of the quote, else nowhere (null)
+{
+  const T = "Let n be even. Then n squared is even. Then we are done.";
+  const a = makeAnchor(T, T.indexOf("Then"), T.indexOf("Then") + 4, "Then");
+  check("cm-anchor", a.quote === "Then" && a.prefix === T.slice(Math.max(0, a.start - 32), a.start) && a.suffix === T.slice(a.end, a.end + 32) && a.shown === undefined, a);
+  check("cm-anchor-shown", makeAnchor(T, 0, 3, "rendered math").shown === "rendered math" && makeAnchor("x".repeat(400), 0, 400).quote.length === 300);
+  check("cm-locate-frozen", JSON.stringify(locate(a, T)) === JSON.stringify({ start: a.start, end: a.end }));
+  const moved = "Intro. " + T;
+  check("cm-locate-nearest", JSON.stringify(locate(a, moved)) === JSON.stringify({ start: moved.indexOf("Then"), end: moved.indexOf("Then") + 4 }), locate(a, moved));
+  const far = makeAnchor(T, T.lastIndexOf("Then"), T.lastIndexOf("Then") + 4);
+  check("cm-locate-nearest-of-two", locate(far, "x" + T).start === ("x" + T).lastIndexOf("Then"), locate(far, "x" + T));
+  check("cm-locate-gone", locate(a, "Nothing of it here.") === null);
 }
 
 // ---- preview-host.mjs: the preview deploy's one extra host (web/build.ts), only under .sagebrush.cloud, only with =1
