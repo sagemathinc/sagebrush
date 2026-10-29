@@ -793,7 +793,14 @@ export function createNotebook(root, opts = {}) {
   function run(cell, gesture = false) {
     if (cell.type === "markdown") return renderMd(cell);
     if (cell.type === "raw") return Promise.resolve(); // raw text is not run
-    if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
+    if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) {
+      // (a Run of the same text again is a double click: nothing more.  On a remote kernel, where a run can be
+      // in flight for a round trip or more, a person's Run of text edited since it was submitted is their new
+      // run: it is queued behind the one in flight, with their consent to the text as it is now.)
+      const r = kernel?.remote && gesture && reactive() ? kernel.reactive : null;
+      const sub = r ? r.submitted(cell.id) : undefined;
+      if (!(r && sub !== undefined && sub !== cell.ta.value)) return Promise.resolve();
+    }
     // the reactive notebook: the cell, its stale ancestors, its descendants (within the budget)
     if (reactive()) return engine().run([cell.id], gesture ? consentFor([cell.id]) : {});
     if (kernel?.remote) { appendText(cell.out, REMOTE_NEEDS_REACTIVE, true); return Promise.resolve(); }
