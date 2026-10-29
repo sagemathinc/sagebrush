@@ -5922,6 +5922,50 @@
   "owner": "Magma translator",
   "row": "src-15"
  },
+ "src/notebook-reactive.ts ::  :: | { state: \"stale\"; why: \"budget\" | \"manual\" | \"ancestor\" | \"loaded\" | \"restart\" | \"interrupted\" | \"approval\"; note?: string } #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent; it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: mutateAndRun :: private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown): Promise<RunReport> { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent; it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: restarted :: return this.serial(() => this.mutateAndRun(ids, opts.remove ?? [], opts.budget ?? this.budget, !!opts.all, opts.consent)); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent; it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: restarted :: run(ids: string[], opts: { remove?: string[]; budget?: number; all?: boolean; consent?: unknown } = {}): Promise<RunReport> { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent; it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: runOutput :: if (!prev && this.outputs.size >= this.outputsMax) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's cache of run outputs: at most 5,000 entries. When it is full, the entries the action in progress doesn't use are dropped, and if every entry is in use a new output isn't kept (the remote check then refuses that send). It refuses no computation."
+ },
+ "src/notebook-reactive.ts :: runOutput :: if (this.outputs.size >= this.outputsMax) return output; // (not kept: fail-closed) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's cache of run outputs: at most 5,000 entries. When it is full, the entries the action in progress doesn't use are dropped, and if every entry is in use a new output isn't kept (the remote check then refuses that send). It refuses no computation."
+ },
+ "src/notebook-reactive.ts :: spellings :: outputsMax = 5000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's cache of run outputs: at most 5,000 entries. When it is full, the entries the action in progress doesn't use are dropped, and if every entry is in use a new output isn't kept (the remote check then refuses that send). It refuses no computation."
+ },
  "src/notebook-session.ts ::  :: export const STATUS_MAX = 4096; #0": {
   "class": "1",
   "owner": "notebook/kernel",
@@ -6046,6 +6090,484 @@
   "class": "1",
   "owner": "package runtime",
   "row": "src-19"
+ },
+ "src/remote-approval.ts :: beginAction :: beginAction(limits: Partial<Record<BudgetKind, number>> = BUDGET): Budget { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: beginAction :: return (this.budget = new Budget(limits)); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: captureConsent :: const cap: Consent = Object.freeze({ #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: captureConsent :: const over = units > BUDGET.clickUnits; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: captureConsent :: return cap; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: captureConsent :: this.consentCells.set(cap, { versions, texts }); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: captureConsent :: this.consentState.set(cap, over || missing ? \"void\" : \"issued\"); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: charge :: charge(kind: BudgetKind, n: number): void { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: charge :: export const UNLIMITED: Readonly<Record<BudgetKind, number>> = Object.freeze(Object.fromEntries(KINDS.map((k) => [k, Infinity])) as Record<BudgetKind, number>); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: check :: this.budget.charge(\"vids\", 1); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: committedOk :: const { texts } = this.consentCells.get(cap)!; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: committedOk :: for (const id of cap.ids) { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: committedOk :: for (let i = 0; i < cap.ids.length; i++) { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: committedOk :: if (!this.budget.fits(\"commitUnits\", units)) return false; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: committedOk :: if (mode.length !== cap.mode.length || ns.length !== cap.seedNamespace.length) return false; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: committedOk :: if (shown[i] !== texts.get(cap.ids[i])) return false; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: committedOk :: let units = cap.mode.length + cap.seedNamespace.length + 1; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: committedOk :: private committedOk(cap: Consent, env: ConsentEnv): boolean { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: committedOk :: return mode === cap.mode && ns === cap.seedNamespace && env.reactive() === cap.reactive; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: committedOk :: this.budget.charge(\"commitUnits\", units); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: consentOk :: const { versions } = this.consentCells.get(cap)!; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: consentOk :: for (const id of cap.ids) { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: consentOk :: for (const k of CTX_FIELDS) if (cap.ctx[k] !== now[k]) return false; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: consentOk :: if (cap.approvalEpoch !== this.approvalEpoch || cap.doc !== this.doc) return false; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: consentOk :: if (env.settings() !== cap.settings) return false; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: consentOk :: if (seeds && !env.seedReady(cap.seedNamespace, id)) return false; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: consentOk :: private consentOk(cap: Consent, env: ConsentEnv, registered: boolean, seeds: boolean): boolean { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: consentOk :: this.budget.charge(\"visits\", cap.ids.length); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: consentStage :: consentStage(cap: Consent, stage: ConsentStage, env: ConsentEnv): boolean { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: consentStage :: if (!ok) this.consentState.set(cap, \"void\"); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: consentStage :: if (!this.budget.fits(\"clickUnits\", cap.clickUnits)) return false; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: consentStage :: if (this.consentState.get(cap) !== \"issued\") return false; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: consentStage :: ok = this.consentOk(cap, env, stage !== \"beforeRegistration\", stage === \"seeded\"); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: consentStage :: this.budget.charge(\"clickUnits\", cap.clickUnits); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: consentStateOf :: consentStateOf(cap: Consent): \"issued\" | \"claimed\" | \"spent\" | \"void\" | \"unknown\" { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: consentStateOf :: const s = this.consentState.get(cap); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: constructor :: constructor(limits: Partial<Record<BudgetKind, number>> = BUDGET) { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: constructor :: export class Budget { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: constructor :: readonly limits: Record<BudgetKind, number>; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: constructor :: readonly used: Record<BudgetKind, number>; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: constructor :: this.limits = { ...BUDGET, ...limits }; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: constructor :: this.used = Object.fromEntries(KINDS.map((k) => [k, 0])) as Record<BudgetKind, number>; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: eidOf :: if (!this.budget.fits(\"buildBytes\", n)) throw new TooLarge(\"buildBytes\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: eidOf :: if (!this.budget.fits(\"eidHashes\", 1)) throw new TooLarge(\"eidHashes\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: eidOf :: this.budget.charge(\"buildBytes\", m.eidInputBytes); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: eidOf :: this.budget.charge(\"eidHashes\", 1); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: eidOf :: this.budget.made.add(spec); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: eidValue :: const KINDS = Object.keys(BUDGET) as BudgetKind[]; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: eidValue :: export const BUDGET = Object.freeze({ #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: eidValue :: export const TOO_LARGE = \"too large for one remote action; run a smaller selection\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: eidValue :: export type BudgetKind = keyof typeof BUDGET; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: endAction :: this.budget = new Budget(UNLIMITED); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: fits :: fits(kind: BudgetKind, n: number): boolean { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: fits :: return this.used[kind] + n <= this.limits[kind]; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: isApproved :: c = Math.min(cap, c + (cb.get(p) ?? 0)); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: isApproved :: const b = this.budget; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: isApproved :: const cap = b.limits.visits + 1; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: isApproved :: e = Math.min(cap, e + (eb.get(p) ?? 0)); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: isApproved :: for (const id of order) visits = Math.min(cap, visits + WALKS_PER_SUBMISSION * ((cb.get(id) ?? 1) + (eb.get(id) ?? 0))); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: isApproved :: for (const k of Object.keys(planned) as BudgetKind[]) if (!b.fits(k, planned[k]!)) return { ok: false, reason: TOO_LARGE, planned }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: isApproved :: let planned: Partial<Record<BudgetKind, number>> | undefined; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: isApproved :: precount(order: readonly string[], listed: readonly string[] = []): { ok: boolean; reason?: string; planned?: Partial<Record<BudgetKind, number>> } { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: rekey :: if (!this.budget.fits(\"rekeyUnits\", units)) return false; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: rekey :: this.budget.charge(\"rekeyUnits\", units); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: same :: this.budget.charge(\"visits\", x.parents.length); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: sameRun :: if (!this.budget.fits(\"sendUnits\", units)) return false; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: sameRun :: this.budget.charge(\"sendUnits\", units); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: sameSet :: budget: Budget = new Budget(UNLIMITED); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: scanLength :: this.budget.charge(\"scanBytes\", n); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: served :: const b = this.budget; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: snap :: this.budget.charge(\"visits\", cells.size + edges); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: voidConsent :: if (this.consentState.get(cap) === \"issued\") this.consentState.set(cap, \"void\"); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: voidConsent :: voidConsent(cap: Consent): void { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Matches the census vocabulary only through the variable `cap`, a consent capability; it limits and refuses nothing."
+ },
+ "src/remote-approval.ts :: witnessIn :: this.budget.charge(\"sNodes\", 1); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: witnessIn :: this.budget.charge(\"sNodes\", 1); #1": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: witnessIn :: this.budget.charge(\"visits\", s.cells.size + s.edges); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Remote approval's per-action budget: bounds the page's own work for one scheduler action (text scanned and built, hashes, snapshot visits, click, commit and send comparisons). Over it, the action's remote sends are refused (\"too large for one remote action\"); nothing else stops."
+ },
+ "src/remote-approval.ts :: witnessIn :: this.budget.made.add(node); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
  },
  "src/runtime/argconv.ts :: allocStr :: if (n > MAX_STR) raise(T.MemoryError); #0": {
   "class": "2",
