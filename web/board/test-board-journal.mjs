@@ -9,7 +9,7 @@ import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
-import { buildFailure, closeChrome } from "./test-board-journal-lib.mjs";
+import { buildFailure, closeChrome, bounded, track, unlessEnding } from "./test-board-journal-lib.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const J = JSON.stringify;
@@ -32,7 +32,10 @@ const statics = [];
   statics.push([bad.length === 0, "no example board has a top-level rev, j, hash, unjournaled, stampOf, baseRev or id: " + J(bad)]);
 }
 const site = mkdtempSync(join(tmpdir(), "sb-bj-site-")), src = mkdtempSync(join(here, ".test-board-journal-"));
-let code = 1;
+let code = 1, server = null, profile = null;
+// (r6, board's B5 n2: its own bound, 540 s, under the VM step's 600 s, and SIGTERM/SIGINT/SIGHUP: one FAIL line, its
+// Chrome closed (track, below), its server stopped and its dirs removed)
+bounded("the store test", 540_000, async () => { server?.stop(true); for (const d of [src, site, profile]) if (d) rmSync(d, { recursive: true, force: true }); });
 // (one bundle, so the workspace, the journal's store and the board's journal share one copy of the stores)
 writeFileSync(join(src, "entry.js"), [
   `export * as W from ${J(join(here, "../workspace/index.ts"))};`,
@@ -49,6 +52,7 @@ writeFileSync(join(src, "entry.js"), [
 const built = await buildFailure(() => Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" }));
 rmSync(src, { recursive: true, force: true });
 if (built !== null) {
+  await unlessEnding();
   console.error("FAIL: the cases' bundle didn't build (" + built + ")");
   rmSync(site, { recursive: true, force: true });
   process.exit(1);
@@ -58,7 +62,7 @@ copyFileSync(join(here, "test-board-journal.page.js"), join(site, "cases.js"));
 copyFileSync(join(here, "../notebook/merge3-vectors.json"), join(site, "vectors.json"));
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>board journal test</title><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
 const FILES = ["/all.js", "/cases.js", "/vectors.json"];
-const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
+server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
   if (p !== "/" && !FILES.includes(p)) return new Response("not found", { status: 404 });
   const f = Bun.file(join(site, p === "/" ? "index.html" : p.slice(1)));
@@ -67,9 +71,10 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
 
 let port = Number(process.env.CDP_PORT) || 0;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const profile = mkdtempSync(join(tmpdir(), "sb-bj-"));
+profile = mkdtempSync(join(tmpdir(), "sb-bj-"));
 // (its own process group, ended gracefully at the end, its helpers with it)
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
+const untrack = track(chrome, () => port, "the killed store test's Chrome");
 try {
   if (!port) port = await devtoolsPort(profile);
   let targets;
@@ -90,6 +95,7 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${server.port}/` });
   for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
   const results = [...statics, ...(await ev("window.run()"))];
+  await unlessEnding();
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);
   if (fails.length) {
@@ -101,12 +107,16 @@ try {
   }
   ws.close();
 } catch (e) {
+  await unlessEnding();
   console.error("FAIL: " + (e?.stack ?? e));
 } finally {
+  await unlessEnding();
   // (ended gracefully, its group killed only as a said fallback: test-board-journal-lib.mjs closeChrome)
   await closeChrome(chrome, port, "the store test's Chrome");
+  untrack();
   server.stop(true);
   await sleep(200);
   for (const d of [profile, site]) rmSync(d, { recursive: true, force: true });
 }
+await unlessEnding();
 process.exit(code);

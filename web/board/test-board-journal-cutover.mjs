@@ -7,7 +7,7 @@
 // server's own record: the rewrite counts, each board.js path's sha256 against its dist's, and no 404 under /board/).
 //   SB_DIST_OLD=<master's web/dist> SB_DIST=web/dist CHROME=google-chrome bun web/board/test-board-journal-cutover.mjs
 import { join } from "node:path";
-import { serve, browser, sleep, rowExpr, activateExpr, section, checked, bounded } from "./test-board-journal-lib.mjs";
+import { serve, browser, sleep, rowExpr, activateExpr, section, checked, bounded, unlessEnding } from "./test-board-journal-lib.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const J = JSON.stringify;
@@ -22,14 +22,15 @@ const dbVersion = `new Promise((ok) => { const r = indexedDB.open("sagebrush-wor
 
 // (r5: its own bound, 540 s, under the VM step's 600 s: a hang ends in one FAIL line naming its step, its last check
 // and the DevTools call in flight, Chrome closed; a SIGTERM the same)
-let stop = () => {};
+// (r6, R5-D3-2: the server and the browser set up inside the one try, so their failure is this run's one FAIL line
+// and whatever was set up is cleaned up)
+let stop = () => {}, br = null, code = 1;
 bounded("the cutover test", 540_000, async () => stop());
-const served = await serve({ "/old": process.env.SB_DIST_OLD, "/new": process.env.SB_DIST ?? join(here, "../dist") });
-stop = served.stop;
-const { origin, stats } = served;
-const br = await browser();
-let code = 1;
 try {
+  const served = await serve({ "/old": process.env.SB_DIST_OLD, "/new": process.env.SB_DIST ?? join(here, "../dist") });
+  stop = served.stop;
+  const { origin, stats } = served;
+  br = await browser();
   section("1. the old build's page makes a board, saves an edit, and stays open on it");
   const old = await br.tab("old");
   await old.go(`${origin}/old/board/?new=python`);
@@ -76,8 +77,11 @@ try {
   check(J(ranOld) === J(["/old/board/board.js"]) && J(ranNew) === J(["/new/board/board.js"]), "fix 4: the old page loaded /old/board/board.js and this build's /new/board/board.js, nothing else: " + J({ old: ranOld, new: ranNew }));
   check(stats.rewrites.get("/old/board/") > 0 && stats.rewrites.get("/new/board/") > 0, "fix 4: each build's board/index.html had its absolute src/href moved under its prefix: " + J(Object.fromEntries(stats.rewrites)));
   check(!!stats.roots["/old"] && !!stats.roots["/new"] && stats.roots["/old"] !== stats.roots["/new"] && stats.scripts.get("/old/board/board.js") === stats.roots["/old"] && stats.scripts.get("/new/board/board.js") === stats.roots["/new"], "fix 4: the board.js served under each prefix is that build's own (sha256 as its dist has it), the two builds' different: " + J({ roots: stats.roots, served: Object.fromEntries(stats.scripts) }));
-  const missingBoard = [...stats.missing].filter((p) => p.startsWith("/board/"));
-  check(missingBoard.length === 0, "fix 4: no 404 under /board/ (an absolute path left unmoved): " + J(missingBoard));
+  // (r6, board's B5-1: EVERY 404 against an explicit allowlist, so no absolute URL the rewrite didn't move (a
+  // single-quoted src, an import(), fetch() or Worker, a CSS url(), a path outside /board/) passes unread)
+  const allowed404 = ["/favicon.ico"], stray = [...stats.missing].filter((p) => !allowed404.includes(p));
+  check(stray.length === 0, "fix 4: no 404 but the allowlist's (" + J(allowed404) + "): every 404 path " + J([...stats.missing]));
+  await unlessEnding();
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
   else {
@@ -86,9 +90,12 @@ try {
     code = 0;
   }
 } catch (e) {
+  await unlessEnding();
   console.error("FAIL: " + (e?.stack ?? e));
 } finally {
-  await br.close();
+  await unlessEnding();
+  await br?.close();
   stop();
 }
+await unlessEnding();
 process.exit(code);
