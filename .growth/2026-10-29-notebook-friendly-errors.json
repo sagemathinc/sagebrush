@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "Notebook error messages: a magic's UsageError as one line, and a sentence for a module Sagebrush does not include. PR 307 first-attempt size gate (run 40949302777) measured cli/pyjs.cjs growth of 640 bytes and engine/sagebrush-worker.js growth of 587 bytes against its tested base.",
+  "bytes": {
+    "cli/pyjs.cjs": 640,
+    "engine/sagebrush-worker.js": 587
+  }
+}
