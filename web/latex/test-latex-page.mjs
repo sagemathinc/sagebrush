@@ -233,6 +233,9 @@ try {
   // the word highlighted (CSS Highlight API); the student's view (mode view): the bubble shown, c does nothing; a
   // narrow box: a badge, tapped, opens a sheet; the Comment button by a selection opens the composer too
   {
+    // (the comments' own chunk: not fetched by anything before this, then fetched by the first attachComments)
+    const commentsFetched = () => requests.filter((u) => /sagebrush-latex-comments\.js/.test(u)).length;
+    check(commentsFetched() === 0, "comments: their chunk not fetched by the editor, the examples or the component without comments", requests.filter((u) => /sagebrush-latex/.test(u)).slice(-5));
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
     const PROOF = "\\documentclass{article}\n\\begin{document}\n\\section*{Proof}\nLet $n$ be even, say $n = 2k$.\n\nThen $n^2 = 4k^2$ is even.\n\n\\end{document}\n";
     const mountC = (id, w, mode, threads) => ev(`(async () => {
@@ -242,13 +245,14 @@ try {
       await Promise.race([ed.rendered(), new Promise((r) => setTimeout(r, 20000))]);
       window.__saves = window.__saves || {}; window.__saves[${JSON.stringify(id)}] = [];
       const store = ${JSON.stringify(threads)};
-      window["__cm_" + ${JSON.stringify(id)}] = x.attachComments(ed, { load: () => store, save: (t) => window.__saves[${JSON.stringify(id)}].push(t), mode: ${JSON.stringify(mode)}, author: "instructor", single: true });
+      window["__cm_" + ${JSON.stringify(id)}] = await x.attachComments(ed, { load: () => store, save: (t) => window.__saves[${JSON.stringify(id)}].push(t), mode: ${JSON.stringify(mode)}, author: "instructor", single: true });
       window["__ed_" + ${JSON.stringify(id)}] = ed;
       return true;
     })()`);
     const selectThen = (id) => ev(`(() => { const P = document.querySelector("#${id} .tex-preview"); const tw = document.createTreeWalker(P, NodeFilter.SHOW_TEXT); let n; while ((n = tw.nextNode()) && !n.data.includes("Then")) {}
       if (!n) return false; const r = document.createRange(), i = n.data.indexOf("Then"); r.setStart(n, i); r.setEnd(n, i + 4); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return true; })()`);
     await mountC("cmg", 900, "comment", []);
+    check(commentsFetched() >= 1, "comments: their chunk fetched once comments are attached");
     const sel1 = await selectThen("cmg");
     const k1 = await ev(`(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true })); await new Promise((r) => setTimeout(r, 50));
       const a = document.activeElement; const focused = !!a && a.tagName === "TEXTAREA" && !!a.closest(".sb-cm-compose");
