@@ -257,8 +257,10 @@ try {
         history.go(-2); await until(() => shows("File A here.")); await wait(300);
         out.end = at();
         if (!${withNav}) delete window.navigation;
-        return out; })()`);
-      const ok = r.nav === withNav && r.hash.url === fa && r.hash.hash === "#section" && r.hash.at === 1 && r.b.url === fb && r.b.at === 2
+        return out; })()`).catch((e) => ({ threw: String(e?.message ?? e).slice(0, 300) })) ?? { threw: "no result: the page's context ended (a reload or a navigation away)" };
+      // (a reload or a lost page ends the evaluation: a failure, with what it was, not a crash of the whole test)
+      if (r.threw) await until(`!!document.querySelector(".tex-page")`, 20000);
+      const ok = !r.threw && r.nav === withNav && r.hash.url === fa && r.hash.hash === "#section" && r.hash.at === 1 && r.b.url === fb && r.b.at === 2
         && r.back1.asked === 1 && r.back1.url === fb && r.back1.hash === "" && r.back1.at === 2 && r.back1.title === "b.tex" && r.back1.src.includes("% unsaved in B") && r.back1.pages === 1
         && r.back2.asked === 1 && r.back2.url === fb && r.back2.hash === "" && r.back2.at === 2 && r.back2.title === "b.tex" && r.back2.src.includes("% unsaved in B")
         && r.back2yes.asked === 1 && r.back2yes.url === fa && r.back2yes.hash === "" && r.back2yes.at === 0 && r.back2yes.title === "a.tex"
