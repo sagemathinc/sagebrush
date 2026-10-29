@@ -69,7 +69,8 @@ async function main() {
     const lock = join(common, `preview-${name}.lock`);
     try { mkdirSync(lock); } catch { throw new Error('Preview publish lock exists; inspect the prior publisher before removing it'); }
     try {
-      const step = (command, args) => execFileSync(command, args, { cwd: root, env, stdio: 'inherit' });
+      // Only builds use ptest; preparation, credentials and R2 run in this parent.
+      const step = (command, args) => execFileSync('/home/user/sagebrush-coord/bin/ptest', ['-m', '30', '--', command, ...args], { cwd: root, env, stdio: 'inherit' });
       // Never reuse dist: removed files, old mock flags and a private site overlay must not leak.
       rmSync(join(root, 'web/dist'), { recursive: true, force: true });
       step('pnpm', ['run', 'build']);
