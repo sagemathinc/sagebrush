@@ -120,11 +120,11 @@ export type Version = { id?: number; fid: string; t: number; size: number; sha25
 /** A version not kept for sync, in the store `prunable` (db.ts, version 5). */
 type Prunable = { fid: string; id: number; t: number; size: number };
 /** A board's row as any write but the journal's makes it: no journal envelope (its absence explicit; every raw write
- * puts plainRow of what it is given, whatever it carries: daybreak3's BJ-D3-1 on code r1). */
+ * puts plainRow of what it is given, whatever it carries). */
 export type PlainBoardRecord = { id: string; doc: any; rev: number; updated: number; docId?: string; origin?: string; tag?: string; j?: never; hash?: never; unjournaled?: never; stampOf?: never };
-/** The board journal's envelope on a row (design-2c1b-i r3 §2.1; db.ts version 9): flat beside `doc`, never in it,
+/** The board journal's envelope on a row (db.ts version 9): flat beside `doc`, never in it,
  * all or none: `j` a safe integer ≥ 0, `hash` a string, `unjournaled` (true or "too-large") only beside them.
- * `stampOf` (r3's erratum 1, astra's BJ-C1 on code r1): the row is a pure stamp, its value that of revision `stampOf`
+ * `stampOf`: the row is a pure stamp, its value that of revision `stampOf`
  * (recovery's T2 of an unchanged document, written in that T2's transaction); any write that changes the document,
  * and every ordinary write, drops it. */
 export type BoardEnvelope = { j: number; hash: string; unjournaled?: true | "too-large"; stampOf?: number };
@@ -132,7 +132,7 @@ type NoEnvelope = { j?: undefined; hash?: undefined; unjournaled?: undefined; st
 export type BoardRecord = Omit<PlainBoardRecord, "j" | "hash" | "unjournaled" | "stampOf"> & (NoEnvelope | BoardEnvelope);
 /** The journal's own fields of a board record (web/journal/store.js): never a board document's. */
 export const BOARD_STORE_FIELDS = ["rev", "j", "hash", "unjournaled", "stampOf", "baseRev"] as const;
-/** A board document without the journal's own fields (§2.5's boundary: what a row's `doc` and a version hold). */
+/** A board document without the journal's own fields (the record/document boundary: what a row's `doc` and a version hold). */
 export function stripBoard<T extends object>(doc: T): T {
   const out: any = { ...doc };
   for (const k of BOARD_STORE_FIELDS) delete out[k];
@@ -140,7 +140,7 @@ export function stripBoard<T extends object>(doc: T): T {
 }
 /** Whether a row has a whole envelope (a safe integer j ≥ 0 and a string hash). */
 export const hasEnvelope = (r: { j?: unknown; hash?: unknown } | undefined): boolean => !!r && Number.isSafeInteger(r.j) && (r.j as number) >= 0 && typeof r.hash === "string";
-/** A row with its envelope dropped: what an ordinary write leaves (§2.1: no write but the journal's keeps one). */
+/** A row with its envelope dropped: what an ordinary write leaves (no write but the journal's keeps one). */
 function plainRow(r: BoardRecord | PlainBoardRecord): PlainBoardRecord {
   const { j: _j, hash: _h, unjournaled: _u, stampOf: _s, ...rest } = r as BoardRecord;
   return rest;
@@ -1318,8 +1318,8 @@ export class Workspace {
           const st = tx.objectStore("boards"), cur: BoardRecord | undefined = await req(st.get(e.ref!));
           if (!cur) throw new WorkspaceError("missing", `the contents of ${e.path} are not in this browser`);
           if (opts.base !== undefined && cur.rev !== opts.base) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, cur.doc);
-          // (not the journal's write: the row left without its envelope, which spoke of the value before, design-2c1b-i
-          // r3 §2.1; the next journaled load stamps it)
+          // (not the journal's write: the row left without its envelope, which spoke of the value before; the next
+          // journaled load stamps it)
           const { tag: _t, ...rest } = plainRow(cur);
           st.put({ ...rest, doc: content, rev: cur.rev + 1, updated: t, ...(opts.tag ? { tag: opts.tag } : {}) } satisfies PlainBoardRecord);
           return cur.rev + 1;
@@ -1341,7 +1341,7 @@ export class Workspace {
     }, undefined, collect);
   }
 
-  /** The board journal's T2 of the board `ref` (design-2c1b-i r3 §2.2: web/board/journal.ts's BoardRecordStore, the
+  /** The board journal's T2 of the board `ref` (web/board/journal.ts's BoardRecordStore, the
    * Base of web/journal/store.js): `doc` (its journal's own fields dropped) written with the journal's envelope, in
    * one transaction of `boards` and `meta`, holding the workspace's lock, as `write` writes a board: its path, admit,
    * Trash and quarantine checked under the same hold; then its entry and op, as `write`'s.
@@ -1390,7 +1390,7 @@ export class Workspace {
           // (a pure stamp, derived here, never from the caller: an OLD-STYLE row's own value again, with no tag given
           // (recovery's T2 of a row from before the journal): its tag kept, and `stampOf` the revision whose value it
           // wraps (so rev === stampOf + 1), for the load's bridge; any other T2 writes its own tag, or none, and no
-          // stampOf (r3's erratum 1: astra's BJ-C1, daybreak3's contract)
+          // stampOf)
           const stamp = !hasEnvelope(cur) && !opts.tag && canonJson(stripBoard(cur.doc ?? {})) === canonJson(body);
           const { tag: _t, ...rest } = plainRow(cur);
           const tag = stamp ? cur.tag : opts.tag;
@@ -2007,7 +2007,7 @@ export class Workspace {
           await inTx(this.ws, "boards", "readwrite", async (tx) => { tx.objectStore("boards").delete(e.ref!); });
           // (its TimeTravel: by the board's source, "board:local:<id>", with its name in this browser after it)
           const pre = "board:local:" + e.ref;
-          // (and its journal's rows, keyed by the same name, the board journal's store's id: design-2c1b-i r3 §2.1)
+          // (and its journal's rows, keyed by the same name, the board journal's store's id)
           if (bdb) await inTx(bdb, "history", "readwrite", async (tx) => { const st = tx.objectStore("history"); st.delete(IDBKeyRange.bound([pre, -Infinity], [pre + ":\uffff", Infinity])); await dropRows(st, pre); });
           // (and what the board page keeps of it in localStorage: the copy
           // from before the workspace, its mark as written here, a closed
@@ -2466,7 +2466,7 @@ export class Workspace {
     return e;
   }
 
-  /** The board journal's record of the board `ref` (design-2c1b-i r3 §2.2: its document, its revision and its
+  /** The board journal's record of the board `ref` (its document, its revision and its
    * envelope; web/board/journal.ts BoardRecordStore.loadRecord), or null: read under no lock, as a load reads. */
   async journalRecord(ref: string): Promise<any> {
     this.open();
@@ -2893,7 +2893,7 @@ export class Workspace {
         if (!p) throw new WorkspaceError("limit", `no free name in ${folder}`);
         await fenceCheck(tx, [p]);
         if (also.at && (await req(st.getKey(also.at))) !== undefined) throw new WorkspaceError("exists", `${also.at} is there already`);
-        // (an old-style row whatever it was given: its envelope dropped (daybreak3's BJ-D3-1 on code r1))
+        // (an old-style row whatever it was given: its envelope dropped)
         if (also.board) tx.objectStore("boards").put(plainRow(also.board));
         for (const [k, v] of also.meta ?? []) tx.objectStore("meta").put(v, k);
         for (const k of also.dropMeta ?? []) tx.objectStore("meta").delete(k);
@@ -3368,7 +3368,7 @@ export class Workspace {
     } else if (e.kind === "board") {
       await inTx(this.ws, "boards", "readwrite", async (tx) => {
         const st = tx.objectStore("boards"), rec: BoardRecord | undefined = await req(st.get(e.ref!));
-        // (an ordinary write: without the row's envelope, design-2c1b-i r3 §2.1)
+        // (an ordinary write: without the row's envelope)
         if (rec && String(rec.doc?.title ?? "") === oldName) st.put({ ...plainRow(rec), doc: { ...rec.doc, title: newName }, rev: rec.rev + 1, updated: this.now() } satisfies PlainBoardRecord);
       });
     }

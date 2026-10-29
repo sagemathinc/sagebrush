@@ -1,9 +1,9 @@
-// The board journal's cutover (2c-1b-i, design-2c1b-i r3 §2.1 D-1, test 16): two builds of the site served from ONE
+// The board journal's cutover (test 16): two builds of the site served from ONE
 // origin (one IndexedDB), the build from before the board journal under /old/ (SB_DIST_OLD) and this one under /new/
 // (SB_DIST): a page of the old build, open on a board, can't change its row once a page of this build has opened the
 // workspace (version 9's upgrade closes it), so the row's doc, rev, j, hash and mark stay one coherent set; and an old
 // build opening afresh is refused (a VersionError), writing nothing.  Each build's pages load their own build's
-// board.js (fix 4 on r5: serve() moves a prefixed build's absolute src/href under its prefix; checked here from the
+// board.js (serve() moves a prefixed build's absolute src/href under its prefix; checked here from the
 // server's own record: the rewrite counts, each board.js path's sha256 against its dist's, and no 404 under /board/).
 //   SB_DIST_OLD=<master's web/dist> SB_DIST=web/dist CHROME=google-chrome bun web/board/test-board-journal-cutover.mjs
 import { join } from "node:path";
@@ -12,7 +12,7 @@ import { serve, browser, sleep, rowExpr, activateExpr, section, checked, bounded
 const here = new URL(".", import.meta.url).pathname;
 const J = JSON.stringify;
 const results = [];
-// (each check said as it is done (r5))
+// (each check said as it is done)
 const check = (ok, what) => { results.push([!!ok, what]); checked(ok, what); };
 if (!process.env.SB_DIST_OLD) { console.error("FAIL: SB_DIST_OLD (the earlier build's web/dist) is needed"); process.exit(1); }
 const B = "window.sagebrush.board";
@@ -20,9 +20,9 @@ const setTj = (text) => `Promise.resolve(${B}.edit((d) => { const ns = d.pages ?
 const tjOf = (d) => (d ? (d.pages ? d.pages[0].nodes : d.nodes ?? []).find((n) => n.id === "tj")?.text : undefined);
 const dbVersion = `new Promise((ok) => { const r = indexedDB.open("sagebrush-workspace"); r.onsuccess = () => { const v = r.result.version; r.result.close(); ok(v); }; r.onerror = () => ok(null); })`;
 
-// (r5: its own bound, 540 s, under the VM step's 600 s: a hang ends in one FAIL line naming its step, its last check
+// (its own bound, 540 s, under the VM step's 600 s: a hang ends in one FAIL line naming its step, its last check
 // and the DevTools call in flight, Chrome closed; a SIGTERM the same)
-// (r6, R5-D3-2: the server and the browser set up inside the one try, so their failure is this run's one FAIL line
+// (the server and the browser set up inside the one try, so their failure is this run's one FAIL line
 // and whatever was set up is cleaned up)
 let stop = () => {}, br = null, code = 1;
 bounded("the cutover test", 540_000, async () => stop());
@@ -70,17 +70,17 @@ try {
   const hasWs = await again.ev(`!!window.sagebrush?.workspace`).catch(() => false);
   check(!hasWs && J(r3) === J(r1), "test 16: the old build opening afresh gets no workspace (VersionError), the row as it was");
   check(tjOf(r3.doc) === "new 1", "test 16: the row is this build's last save");
-  section("5. each build's pages ran their own build's board.js (fix 4)");
+  section("5. each build's pages ran their own build's board.js (the prefix rewrite)");
   // (each page's own record: the board.js its document loaded, by URL)
   const ran = async (t) => t.ev(`performance.getEntriesByType("resource").map((e) => new URL(e.name).pathname).filter((p) => p.endsWith("/board/board.js"))`, 5000).catch(() => null);
   const ranOld = await ran(old), ranNew = await ran(neu);
-  check(J(ranOld) === J(["/old/board/board.js"]) && J(ranNew) === J(["/new/board/board.js"]), "fix 4: the old page loaded /old/board/board.js and this build's /new/board/board.js, nothing else: " + J({ old: ranOld, new: ranNew }));
-  check(stats.rewrites.get("/old/board/") > 0 && stats.rewrites.get("/new/board/") > 0, "fix 4: each build's board/index.html had its absolute src/href moved under its prefix: " + J(Object.fromEntries(stats.rewrites)));
-  check(!!stats.roots["/old"] && !!stats.roots["/new"] && stats.roots["/old"] !== stats.roots["/new"] && stats.scripts.get("/old/board/board.js") === stats.roots["/old"] && stats.scripts.get("/new/board/board.js") === stats.roots["/new"], "fix 4: the board.js served under each prefix is that build's own (sha256 as its dist has it), the two builds' different: " + J({ roots: stats.roots, served: Object.fromEntries(stats.scripts) }));
-  // (r6, board's B5-1: EVERY 404 against an explicit allowlist, so no absolute URL the rewrite didn't move (a
+  check(J(ranOld) === J(["/old/board/board.js"]) && J(ranNew) === J(["/new/board/board.js"]), "the prefix rewrite: the old page loaded /old/board/board.js and this build's /new/board/board.js, nothing else: " + J({ old: ranOld, new: ranNew }));
+  check(stats.rewrites.get("/old/board/") > 0 && stats.rewrites.get("/new/board/") > 0, "the prefix rewrite: each build's board/index.html had its absolute src/href moved under its prefix: " + J(Object.fromEntries(stats.rewrites)));
+  check(!!stats.roots["/old"] && !!stats.roots["/new"] && stats.roots["/old"] !== stats.roots["/new"] && stats.scripts.get("/old/board/board.js") === stats.roots["/old"] && stats.scripts.get("/new/board/board.js") === stats.roots["/new"], "the prefix rewrite: the board.js served under each prefix is that build's own (sha256 as its dist has it), the two builds' different: " + J({ roots: stats.roots, served: Object.fromEntries(stats.scripts) }));
+  // (EVERY 404 against an explicit allowlist, so no absolute URL the rewrite didn't move (a
   // single-quoted src, an import(), fetch() or Worker, a CSS url(), a path outside /board/) passes unread)
   const allowed404 = ["/favicon.ico"], stray = [...stats.missing].filter((p) => !allowed404.includes(p));
-  check(stray.length === 0, "fix 4: no 404 but the allowlist's (" + J(allowed404) + "): every 404 path " + J([...stats.missing]));
+  check(stray.length === 0, "the prefix rewrite: no 404 but the allowlist's (" + J(allowed404) + "): every 404 path " + J([...stats.missing]));
   await unlessEnding();
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));

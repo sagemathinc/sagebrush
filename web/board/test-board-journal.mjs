@@ -1,4 +1,4 @@
-// The board journal (2c-1b-i: web/board/journal.ts, Workspace.journalWrite; design-2c1b-i r3) in headless Chromium,
+// The board journal (web/board/journal.ts, Workspace.journalWrite) in headless Chromium,
 // with real IndexedDB and Web Locks: a board's T1 then T2, its load's recovery (an old row stamped), the row's
 // envelope all or none whatever writes it, markOnly's races, the record/document boundary, the kind's law and merge,
 // and a board's deletion.  The cases are in test-board-journal.page.js.  The page's own wiring (page.ts) is
@@ -15,13 +15,13 @@ const here = new URL(".", import.meta.url).pathname;
 const J = JSON.stringify;
 const statics = [];
 {
-  // (§2.1's census of the raw paths that change a board's row (api.ts): each ordinary one drops the envelope; the only
+  // (the census of the raw paths that change a board's row (api.ts): each ordinary one drops the envelope; the only
   // transaction over boards and meta is the journal's T2.  A new raw path makes this fail, to be looked at)
   const api = readFileSync(join(here, "../workspace/api.ts"), "utf8");
   const plain = (api.match(/"boards", "readwrite"/g) ?? []).length, journal = (api.match(/\["boards", "meta"\], "readwrite"/g) ?? []).length;
   statics.push([plain === 5 && journal === 1, `the boards store is written in 5 ordinary transactions and 1 journal one (census): ${J({ plain, journal })}`]);
   statics.push([/const \{ tag: _t, \.\.\.rest \} = plainRow\(cur\);/.test(api) && /st\.put\(\{ \.\.\.plainRow\(rec\), doc: \{ \.\.\.rec\.doc, title: newName \}/.test(api), "write and retitle drop the row's envelope (plainRow)"]);
-  statics.push([/tx\.objectStore\("boards"\)\.put\(plainRow\(also\.board\)\)/.test(api) && /stampOf\?: never/.test(api), "adopt writes plainRow of the row it is given; PlainBoardRecord's envelope fields are never (BJ-D3-1)"]);
+  statics.push([/tx\.objectStore\("boards"\)\.put\(plainRow\(also\.board\)\)/.test(api) && /stampOf\?: never/.test(api), "adopt writes plainRow of the row it is given; PlainBoardRecord's envelope fields are never"]);
   statics.push([/await dropRows\(st, pre\)/.test(api), "a board's deletion drops its journal's rows"]);
   // (the field guard (test 7): no board the site ships has a field of the journal's own, or an id, at its top)
   const ex = join(here, "examples"), bad = [];
@@ -33,7 +33,7 @@ const statics = [];
 }
 const site = mkdtempSync(join(tmpdir(), "sb-bj-site-")), src = mkdtempSync(join(here, ".test-board-journal-"));
 let code = 1, server = null, profile = null;
-// (r6, board's B5 n2: its own bound, 540 s, under the VM step's 600 s, and SIGTERM/SIGINT/SIGHUP: one FAIL line, its
+// (its own bound, 540 s, under the VM step's 600 s, and SIGTERM/SIGINT/SIGHUP: one FAIL line, its
 // Chrome closed (track, below), its server stopped and its dirs removed)
 bounded("the store test", 540_000, async () => { server?.stop(true); for (const d of [src, site, profile]) if (d) rmSync(d, { recursive: true, force: true }); });
 // (one bundle, so the workspace, the journal's store and the board's journal share one copy of the stores)
@@ -89,7 +89,7 @@ try {
     if (process.env.PROGRESS && m.method === "Runtime.consoleAPICalled" && m.params.args?.[0]?.value?.startsWith?.("test: ")) console.log(m.params.args[0].value);
     if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
   };
-  // (r7, board's r6 n1: each call bounded (60 s, the cases' run 500 s, under the runner's 540) and named in where())
+  // (each call bounded (60 s, the cases' run 500 s, under the runner's 540) and named in where())
   const send = (method, params = {}, ms = 60_000) => new Promise((r, no) => {
     const id = ++n, what = `store ${method}` + (params.expression ? ` ${J(params.expression.slice(0, 160))}` : params.url ? ` ${params.url}` : "");
     const done = inFlight(what);

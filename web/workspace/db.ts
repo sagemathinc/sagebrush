@@ -94,7 +94,7 @@
 //   barrier: an open page of an earlier build is closed by this upgrade (versionchange), and an earlier build
 //   opening fresh asks for version 7 and gets a VersionError, so no earlier code writes the workspace again
 //
-// Version 9 (2c-1b-i, the board journal's cutover: design-2c1b-i r3 §2.1 D-1; schema only):
+// Version 9 (the board journal's cutover; schema only):
 //
 //   boards' rows may carry the journal's envelope, flat beside `doc`: `j`, `hash` and `unjournaled` (all or none:
 //   api.ts BoardRecord).  Nothing changes in the stores; the version is the barrier: a page of an earlier build, whose
