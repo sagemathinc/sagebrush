@@ -86,7 +86,8 @@ jobs:
       - name: strip the TIFF loader from the AppImage
         if: runner.os == 'Linux'
         run: |
-          curl -fsSL -o /tmp/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          curl -fsSL -o /tmp/appimagetool https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          printf '%s\n' 'ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  /tmp/appimagetool' | sha256sum -c -
           chmod +x /tmp/appimagetool
           export APPIMAGE_EXTRACT_AND_RUN=1
           APPIMAGETOOL=/tmp/appimagetool sh app/strip-appimage.sh app/src-tauri/target/release/bundle/appimage/*.AppImage

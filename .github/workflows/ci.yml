@@ -525,6 +525,8 @@ jobs:
           kill -0 "$server_pid"
           CHROME=google-chrome node web/test-runner.mjs
           CHROME=google-chrome node web/test-runner-files.mjs
+          CHROME=google-chrome node web/test-runner-pill.mjs
+          CHROME=google-chrome node --test web/preview/test-preview.mjs
           CHROME=google-chrome node web/test-catalog.mjs
           CHROME=google-chrome node web/board/test-frame.mjs
           CHROME=google-chrome bun web/board/test-submit.mjs
