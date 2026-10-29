@@ -17,7 +17,7 @@
   .lmsbar .who { margin-left: auto; font-size: 13px; display: flex; gap: 8px; align-items: center; }
   .lmsbar select, .lmsbar button { font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 4px; border: 1px solid #8794ad; background: #3b4a67; color: #fff; }
   .layout { display: grid; grid-template-columns: 180px minmax(0, 1fr) 300px; gap: 16px; padding: 16px; max-width: 1320px; margin: 0 auto; }
-  @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } nav.lmsnav { display: none; } }
+  @media (max-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr); } nav.lmsnav { display: none; } }
   nav.lmsnav { font-size: 14px; }
   nav.lmsnav a { display: block; padding: 6px 8px; color: var(--lms); text-decoration: none; border-radius: 4px; }
   nav.lmsnav a.on { background: #dfe5f0; font-weight: 600; }
@@ -66,7 +66,7 @@
   .tabs button { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid var(--line); background: #fff; border-radius: 14px; cursor: pointer; }
   .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
   .grid { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 14px; }
-  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  @media (max-width: 700px) { .grid { grid-template-columns: minmax(0, 1fr); } }
   .roster { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px; align-self: start; }
   .roster button { display: flex; width: 100%; gap: 6px; font: inherit; font-size: 14px; text-align: left; padding: 6px 8px; border: 0; background: none; border-radius: 5px; cursor: pointer; }
   .roster button.on { background: #e8efe6; font-weight: 600; }
@@ -87,7 +87,16 @@
   .pager button.check { background: var(--accent); color: #fff; border-color: var(--accent); }
   .pager button:disabled { opacity: .45; cursor: default; }
   .pager .where { margin-left: auto; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-  @media (max-width: 520px) { .pager button { padding: 5px 8px; font-size: 13px; } .pager .where { display: none; } }
+  @media (max-width: 520px) { .pager button { padding: 5px 8px; font-size: 13px; } .pager .where { display: none; } .pager .focusbtn { margin-left: auto; }
+    .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; } .tabs button { white-space: nowrap; flex: none; } }
+  /* focus (William, Oct 29): the grading card alone, on the whole window; Esc or the icon restores */
+  .pager .focusbtn { margin-left: 8px; display: inline-flex; align-items: center; padding: 5px 7px; }
+  .pager .focusbtn svg { width: 16px; height: 16px; }
+  body.gfocus { overflow: hidden; }
+  body.gfocus .tool { position: fixed; inset: 0; z-index: 50; border: 0; border-radius: 0; overflow: auto; }
+  body.gfocus .tool .toolhead, body.gfocus #grader > .meta, body.gfocus #grader .roster { display: none; }
+  body.gfocus #grader .grid { grid-template-columns: 1fr; }
+  body.gfocus #grader .work { max-width: 1100px; margin: 0 auto; width: 100%; }
   .nav button.check:disabled { opacity: .5; }
   .lmsbar .viewsw button { font-size: 13px; }
   .lmsbar .viewsw button.on { background: #fff; color: var(--lms); }
@@ -223,8 +232,8 @@ const ASSIGNMENT = {
   ],
 };
 function item6() { return ASSIGNMENT.items.find((it) => it.id === "q6"); }
-// Feature flags of this preview: ?plots=0 hides the plot questions.
-const FLAGS = { plots: new URLSearchParams(location.search).get("plots") !== "0" };
+// Feature flags of this preview: ?plots=0 hides the plot questions, ?focus=0 the grading focus icon.
+const FLAGS = Object.fromEntries(["plots", "focus"].map((f) => [f, new URLSearchParams(location.search).get(f) !== "0"]));
 ASSIGNMENT.items = ASSIGNMENT.items.filter((it) => !it.flag || FLAGS[it.flag]);
 const ROSTER = ["Ada Lovelace", "Alan Turing", "Emmy Noether", "Srinivasa Ramanujan"];
 
@@ -512,9 +521,12 @@ function renderGrader() {
   const item = ASSIGNMENT.items[gState.q], student = others()[gState.s];
   el.innerHTML = `<div class="meta">Grading by question: each student's answer to one question, one after another. The answers and Sage's checks are stored, so nothing is reopened or rerun. Keys: <code>j</code> next, <code>k</code> previous.</div>
     <div class="tabs">${ASSIGNMENT.items.map((it, i) => `<button data-q="${i}" class="${i === gState.q ? "on" : ""}">Question ${i + 1} · ${it.kind === "manual" ? "graded by you" : "auto-graded"}</button>`).join("")}</div>
-    <div class="pager" role="toolbar" aria-label="Grading pager"><button data-d="-1" title="Previous student (k)">‹ Previous</button><button data-d="1" title="Next student (j)">Next ›</button><button class="check save" disabled>Save grade &amp; next</button><span class="where"></span></div>
+    <div class="pager" role="toolbar" aria-label="Grading pager"><button data-d="-1" title="Previous student (k)">‹ Previous</button><button data-d="1" title="Next student (j)">Next ›</button><button class="check save" disabled>Save grade &amp; next</button><span class="where"></span>${FLAGS.focus ? focusButton() : ""}</div>
     <div class="grid"><div class="roster">${others().map((s, i) => `<button data-s="${i}" class="${i === gState.s ? "on" : ""}">${esc(s)}<span class="st">${chip(item, s)}</span></button>`).join("")}</div><div class="work"></div></div>`;
   for (const b of el.querySelectorAll(".tabs button")) b.onclick = () => { gState.q = Number(b.dataset.q); renderGrader(); };
+  // (on a phone the tabs are one scrolling row: the current one shown)
+  const tabs = el.querySelector(".tabs"), on = tabs.querySelector(".on");
+  if (tabs.scrollWidth > tabs.clientWidth) tabs.scrollLeft = on.offsetLeft - tabs.offsetLeft - 16;
   for (const b of el.querySelectorAll(".roster button")) b.onclick = () => { gState.s = Number(b.dataset.s); renderGrader(); };
   const work = el.querySelector(".work");
   const p = paramsFor(item, student), tries = course.attempts(student, item.id);
@@ -555,8 +567,31 @@ function renderGrader() {
     gr.innerHTML = `<p class="attempts">Auto-graded: ${itemScore(item, student)} / ${item.points} points${tries.length ? ` after ${tries.length} ${tries.length === 1 ? "try" : "tries"}` : ""}.</p>`;
   }
   for (const b of el.querySelectorAll(".pager button[data-d]")) b.onclick = () => { gState.s = (gState.s + Number(b.dataset.d) + others().length) % others().length; renderGrader(); };
+  const fb = el.querySelector(".pager .focusbtn");
+  if (fb) fb.onclick = () => setFocus(!document.body.classList.contains("gfocus"));
 }
+// ---------------------------------------------------------------- focus (flag "focus")
+// One click shows the grading card alone on the whole window (no roster, course
+// navigation or gradebook); the pager stays at its top, j/k still work, and Esc or the
+// icon restores the layout. The choice is kept for this browser session.
+const FOCUS_KEY = "sagebrush-questions-focus";
+function focusButton() {
+  const on = document.body.classList.contains("gfocus");
+  const icon = on
+    ? `<path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4"/>`   // shrink
+    : `<path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/>`;  // expand
+  const label = on ? "Restore the layout (Esc)" : "Focus: show only this answer, on the whole window";
+  return `<button class="focusbtn" aria-pressed="${on}" title="${label}" aria-label="${label}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">${icon}</svg></button>`;
+}
+function setFocus(on, remember = true) {
+  on = !!on && FLAGS.focus && !document.getElementById("grader").hidden;
+  document.body.classList.toggle("gfocus", on);
+  if (remember) { try { on ? sessionStorage.setItem(FOCUS_KEY, "1") : sessionStorage.removeItem(FOCUS_KEY); } catch {} }
+  if (!document.getElementById("grader").hidden) renderGrader();
+}
+const focusRemembered = () => { try { return sessionStorage.getItem(FOCUS_KEY) === "1"; } catch { return false; } };
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && document.body.classList.contains("gfocus")) { e.preventDefault(); setFocus(false); return; }
   if (document.getElementById("grader").hidden || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
   if (e.key === "j" || e.key === "k") { gState.s = (gState.s + (e.key === "j" ? 1 : -1) + others().length) % others().length; renderGrader(); }
 });
@@ -569,6 +604,8 @@ function setView(instructor) {
   document.getElementById("studentview").hidden = instructor;
   document.getElementById("grader").hidden = !instructor;
   document.getElementById("signed").hidden = instructor;
+  // (focus belongs to the grading view: off in the student's view, back as remembered here)
+  document.body.classList.toggle("gfocus", instructor && FLAGS.focus && focusRemembered());
   if (instructor) {
     // start at the first answer that still needs a grade on this question
     const item = ASSIGNMENT.items[gState.q];
