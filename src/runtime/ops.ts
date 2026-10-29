@@ -1314,7 +1314,8 @@ function truthSlow(x: any): boolean {
   if (Array.isArray(x) && ((x as any).$cls === undefined || layoutPlain((x as any).$cls))) return x.length !== 0;
   if (x instanceof PyDict && (x.$cls === T.dict || layoutPlain(x.$cls))) return x.$m.size !== 0;
   if (x instanceof PyBytes) return x.n !== 0;
-  if (typeof x === "function") return true;
+  // (a function or class is true unless its type says otherwise: a class's
+  // metaclass may define __bool__ or __len__)
   let f = special(x, "__bool__");
   if (f !== undefined) {
     const r = f(x);
@@ -2002,12 +2003,17 @@ const isGen = (x: any) => x !== null && typeof x === "object" && x[Symbol.toStri
 export function iter(x: any): any {
   if (Array.isArray(x) && ((x as any).$cls === undefined || layoutPlain((x as any).$cls))) return new ListIter(x);
   if (typeof x === "string") return new StrIter(x);
-  if (x !== null && typeof x === "object") {
+  const isObj = x !== null && typeof x === "object";
+  if (isObj) {
     if (typeof x.$next === "function") return x;
     if (x instanceof PyDict && x.$cls === T.dict) return new DictIter(x);
     if (x instanceof PySet && (x.$cls === T.set || x.$cls === T.frozenset)) return new SetIter(x.$d);
     if (x instanceof PyBytes) return new BytesIter(x);
     if (isGen(x)) return new GenIter(x);
+  }
+  // (a class iterates by its metaclass's __iter__ or __getitem__, as an
+  // Enum does: classes are functions here)
+  if (isObj || typeof x === "function") {
     const f = special(x, "__iter__");
     if (f !== undefined) {
       const it = f(x);
