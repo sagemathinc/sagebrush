@@ -77,7 +77,7 @@ const CONTROL_PAGES = [
 ];
 /** the runner's own resource controls, each row enforced as a bound */
 /** each row is enforced: its work under a real deadline, then a drain of what it acquired within ROW_DRAIN_S */
-const SELF_TEST_ROWS = [["the control account's setup, then K-U2 to K-U5", 5], ["K-MSG1", 5], ["the row owner's negative", 2], ["the row owner's late-scope negative", 2], ["the rows' late sweep", 1]];
+const SELF_TEST_ROWS = [["the control account's setup, then K-U2 to K-U5", 5], ["K-MSG1", 5], ["the row owner's negative", 4], ["the row owner's late-scope negative", 3], ["the rows' late sweep", 1]];
 const ROW_DRAIN_S = 1;
 const pageAllowanceS = (p) => T_PAGE_S + p.cases.reduce((s, [, c]) => s + c + CONTROL_BUDGETS.CLEANUP_MS / 1000, 0) + LATE_OBS_MS / 1000;
 const CONTROLS_S = CONTROL_PAGES.reduce((s, p) => s + pageAllowanceS(p), 0) + SELF_TEST_ROWS.reduce((s, [, r]) => s + r, 0);
@@ -278,8 +278,16 @@ const connectUp = (owner, own = {}) => frontOp("ref.connect", async () => {
   // (an ended self-test row's scope acquires nothing: refused before the connect; own.connectDelayMs is row 3's
   // harness-only delay, so its connect can straddle the row's end)
   if (own.ended) throw new Error("the self-test row had ended");
-  if (own.connectDelayMs) await sleep(own.connectDelayMs);
-  const s = await ref.connect(own.cookie ?? (jar || null));
+  // (a scoped acquisition in flight is counted on its scope until it ends, either way: the rows' late proof requires 0)
+  const scoped = own.reg !== undefined;
+  if (scoped) own.acquiring = (own.acquiring ?? 0) + 1;
+  let s;
+  try {
+    if (own.connectDelayMs) await sleep(own.connectDelayMs);
+    s = await ref.connect(own.cookie ?? (jar || null));
+  } finally {
+    if (scoped) own.acquiring--;
+  }
   if (typeof s.send !== "function") return { refused: s };
   const entry = { id: ++upSeq, up: s, owner };
   (own.reg ?? ups).set(entry.id, entry);
@@ -867,6 +875,30 @@ async function resourceControls() {
     allRows.push(row);
     return { outcome, undrained, ms, inTime: ms <= allowanceS * 1000, row };
   };
+  /** One absolute deadline across a WHOLE row (DB2-R4-1): `left()` bounds every wait after runRow (its continuation,
+   * its confirmations) by what remains, with ROW_MARGIN_MS kept back for the timers' own granularity; `end()` refuses
+   * a row that overran its allowance anyway, stopping the whole test */
+  const ROW_MARGIN_MS = 100;
+  const wholeRow = ([name, s]) => {
+    const t0 = performance.now(), last = t0 + s * 1000 - ROW_MARGIN_MS;
+    return {
+      left: () => Math.max(0, last - performance.now()),
+      end: () => {
+        const ms = Math.round(performance.now() - t0);
+        if (ms > s * 1000) throw new Error(`a self-test row overran its ${s} s allowance (${ms} ms); the whole test stops: ${name}`);
+        return ms;
+      },
+    };
+  };
+  /** The late proof's verdict (astra r4): a negative's continuation must have come, no scoped acquisition may still be
+   * in flight, and every socket closed and idle; anything else is unproved losing work */
+  const lateItems = (x) => [
+    ...(x.resumed === false ? ["its continuation never came"] : []),
+    ...(x.acquiring ? [`${x.acquiring} acquisition(s) still in flight`] : []),
+    ...(x.unconfirmed ?? []),
+  ];
+  /** Unproved late work stops the WHOLE test here, before any later row or the browser */
+  const proveLate = (name, x) => { const items = lateItems(x); if (items.length) throw new Error(`a self-test row's losing work is unproved; the whole test stops: ${name}: ${items.join("; ")}`); };
   /** every row run, for the late sweep: a socket that a losing body's connect acquired after its row's drain is closed
    * by connectUp (own.ended) onto its scope's closed list; the sweep confirms every such socket closed and idle */
   const allRows = [];
@@ -998,7 +1030,7 @@ async function resourceControls() {
   // the hold.  The body then RESUMES after the drain (at 0.8 s) and tries every capability again: a new scope, a socket
   // on its ended scope, a hold on its ended holds.  Each is refused; nothing reaches the run's own state.
   {
-    const z = runCounts();
+    const z = runCounts(), whole = wholeRow(SELF_TEST_ROWS[2]);
     let sock = null, holds = null, lateDone, scope3 = null;
     const lateSaid = [], late = new Promise((ok) => { lateDone = ok; });
     const r = enabled
@@ -1024,19 +1056,23 @@ async function resourceControls() {
           lateDone();
         }, 0.5)
       : null;
-    if (r) await bounded(late, "the negative's resumption", 1000).catch(() => lateSaid.push("never resumed"));
+    let resumed = true;
+    if (r) await bounded(late, "the negative's resumption", whole.left()).catch(() => { resumed = false; lateSaid.push("never resumed"); });
+    if (r) proveLate(SELF_TEST_ROWS[2][0], { resumed, acquiring: scope3?.acquiring ?? 0 });
     zeroDelta("the row owner's negative", z);
     // (the straddling socket: acquired after the drain, closed by connectUp onto the scope's closed list; confirmed
     // here closed and idle, bounded, and again by the late sweep)
     const straddled = scope3?.closed[1] ?? null;
-    const st = scope3 ? await confirmClosed(stateOf(scope3), 1000) : null;
-    control1(r !== null && J(lateSaid) === J(["straddling socket: refused: the self-test row had ended", "scope: refused", "socket: refused", "hold: refused"]) && scope3.closed.length === 2 && straddled?.closed === true && straddled.inflight === 0 && !st.unconfirmed.length && !st.busy.length && r.outcome === "timed out" && !r.undrained.length && r.inTime && sock?.closed === true && sock.inflight === 0 && holds?.size === 0 && r.row.owns.length === 1 && r.row.owns.every((o) => o.reg.size === 0 && o.ended), `(control) row "${SELF_TEST_ROWS[2][0]}": a row that stalls past its deadline ends, named, is drained, and its resumption after the drain is refused everything: ` + J({ outcome: r?.outcome, undrained: r?.undrained, ms: r?.ms, closed: sock?.closed, inflight: sock?.inflight, holds: holds?.size, late: lateSaid }));
+    const st = scope3 ? await confirmClosed(stateOf(scope3), whole.left()) : null;
+    if (st) proveLate(SELF_TEST_ROWS[2][0], { unconfirmed: [...st.unconfirmed, ...st.busy] });
+    const ms3 = whole.end();
+    control1(r !== null && J(lateSaid) === J(["straddling socket: refused: the self-test row had ended", "scope: refused", "socket: refused", "hold: refused"]) && scope3.closed.length === 2 && straddled?.closed === true && straddled.inflight === 0 && !st.unconfirmed.length && !st.busy.length && r.outcome === "timed out" && !r.undrained.length && r.inTime && ms3 <= SELF_TEST_ROWS[2][1] * 1000 && sock?.closed === true && sock.inflight === 0 && holds?.size === 0 && r.row.owns.length === 1 && r.row.owns.every((o) => o.reg.size === 0 && o.ended), `(control) row "${SELF_TEST_ROWS[2][0]}": a row that stalls past its deadline ends, named, is drained, and its resumption after the drain is refused everything: ` + J({ totalMs: ms3, allowanceS: SELF_TEST_ROWS[2][1], outcome: r?.outcome, undrained: r?.undrained, ms: r?.ms, closed: sock?.closed, inflight: sock?.inflight, holds: holds?.size, late: lateSaid }));
   }
   // (row 4: the late-scope negative) a row whose body stalls BEFORE it takes any scope, past its 0.5 s deadline, then
   // asks for a scope, a socket and a hold, and installs a restore: the scope is refused (the row has ended), so nothing
   // is acquired, and the late restore runs at once; the control waits (bounded) for that late continuation
   {
-    const z = runCounts();
+    const z = runCounts(), whole = wholeRow(SELF_TEST_ROWS[3]);
     let lateDone, lateSaid = null, restored = false;
     const late = new Promise((ok) => { lateDone = ok; });
     const r = enabled
@@ -1052,16 +1088,26 @@ async function resourceControls() {
           lateDone();
         }, 0.5)
       : null;
-    if (r) await bounded(late, "the late-scope negative's continuation", 1000).catch(() => { lateSaid ??= "never came"; });
+    let resumed = true;
+    if (r) await bounded(late, "the late-scope negative's continuation", whole.left()).catch(() => { resumed = false; lateSaid ??= "never came"; });
+    if (r) proveLate(SELF_TEST_ROWS[3][0], { resumed, acquiring: r.row.owns.reduce((n, o) => n + (o.acquiring ?? 0), 0) });
+    const ms4 = whole.end();
     zeroDelta("the row owner's late-scope negative", z);
-    control1(r !== null && r.outcome === "timed out" && !r.undrained.length && r.inTime && r.row.owns.length === 0 && restored && J(r.row.late) === J(["onDrain", "scope"]) && lateSaid === "refused: the self-test row had ended", `(control) row "${SELF_TEST_ROWS[3][0]}": a body that goes on past its row's end gets no scope, acquires nothing, and its late restore runs at once: ` + J({ outcome: r?.outcome, ms: r?.ms, owns: r?.row.owns.length, late: r?.row.late, restored, said: lateSaid }));
+    control1(r !== null && r.outcome === "timed out" && !r.undrained.length && r.inTime && ms4 <= SELF_TEST_ROWS[3][1] * 1000 && r.row.owns.length === 0 && restored && J(r.row.late) === J(["onDrain", "scope"]) && lateSaid === "refused: the self-test row had ended", `(control) row "${SELF_TEST_ROWS[3][0]}": a body that goes on past its row's end gets no scope, acquires nothing, and its late restore runs at once: ` + J({ totalMs: ms4, allowanceS: SELF_TEST_ROWS[3][1], outcome: r?.outcome, ms: r?.ms, owns: r?.row.owns.length, late: r?.row.late, restored, said: lateSaid }));
   }
   // (row 5: the rows' late sweep) every socket any row's scope ever closed, late ones included, confirmed closed and
   // idle within 1 s; anything not stops the WHOLE test (a losing body's work not proved safe)
   {
-    const t = performance.now(), end = t + SELF_TEST_ROWS[4][1] * 1000, left = [];
-    for (const row of allRows) for (const o of row.owns) { const c = await confirmClosed(stateOf(o), Math.max(0, end - performance.now())); left.push(...c.unconfirmed, ...c.busy); }
-    const what = `(control) row "${SELF_TEST_ROWS[4][0]}": every row's sockets, late ones included, closed and idle: ${left.length ? "NOT " + J(left) : "all"}, ${Math.round(performance.now() - t)} ms`;
+    const whole = wholeRow(SELF_TEST_ROWS[4]), left = [];
+    // (the front's own registry too: before the page starts, any operation still in flight is a row's)
+    if (reg.inflight.size) left.push(`front operations still in flight: ${[...reg.inflight.values()].map((e) => e.label).join(", ")}`);
+    for (const row of allRows) for (const o of row.owns) {
+      if (o.acquiring) left.push(`${o.acquiring} acquisition(s) still in flight`);
+      const c = await confirmClosed(stateOf(o), whole.left());
+      left.push(...c.unconfirmed, ...c.busy);
+    }
+    const ms5 = whole.end();
+    const what = `(control) row "${SELF_TEST_ROWS[4][0]}": every row's sockets, late ones included, closed and idle: ${left.length ? "NOT " + J(left) : "all"}, ${ms5} ms`;
     control1(!left.length, what);
     if (left.length) throw new Error("a self-test row left work running; the whole test stops: " + what);
   }
@@ -1079,6 +1125,14 @@ async function resourceControls() {
     ["B8", { unconfirmed: ["upstream close unconfirmed"] }, ["upstream close unconfirmed"]],
     ["B9", { busy: ["upstream socket busy after close (inflight 1)"] }, ["upstream socket busy after close (inflight 1)"]],
   ];
+  // the late proof's pure fixtures, L1-L4: an overdue continuation, a pending acquisition, an unconfirmed socket are
+  // each unproved; and a stop leaves the work after it undone (its sentinel unset)
+  for (const [name, x, n] of [["L1", { resumed: false }, 1], ["L2", { resumed: true, acquiring: 1 }, 1], ["L3", { resumed: true, unconfirmed: ["upstream close unconfirmed"] }, 1], ["L4", { resumed: true, acquiring: 0, unconfirmed: [] }, 0]]) {
+    const items = lateItems(x);
+    let stopped = false, sentinel = false;
+    try { proveLate(name, x); sentinel = true; } catch { stopped = true; }
+    control1(items.length === n && stopped === (n > 0) && sentinel === (n === 0), `(control) ${name}: the late proof on ${J(x)}: ${items.length ? "unproved, the test stops, the work after it undone: " + J(items) : "proved, the work after it runs"}`);
+  }
   for (const [name, x, items] of fx) {
     const v = barrierVerdict({ ...base, ...x });
     control1(v.ok === (items.length === 0) && J(v.items) === J(items), `(control) ${name}: the barrier's verdict on ${J(x)}: ${v.ok ? "pass" : "fail " + J(v.items)}`);
