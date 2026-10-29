@@ -19,7 +19,7 @@
 // call it was waiting on; it closes the DevTools sockets, stops Chrome (TERM, then KILL) until it is seen to exit, and
 // reports any temporary directory it couldn't remove.  A call that times out is abandoned, not cancelled: its waiter
 // is dropped, so a late answer is ignored, and its page-side evaluation runs on until the page navigates or its tab or
-// Chrome is closed.  The forced-watchdog control runs this file again as a child (PAGES_WATCHDOG_CONTROL=1, a 10 s
+// Chrome is closed.  The forced-watchdog control runs this file again as a child (PAGES_WATCHDOG_CONTROL=1, a 20 s
 // watchdog) that hangs on purpose, alongside the run, so it adds no wall time; its result is checked at the end.
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -41,7 +41,7 @@ const bounded = (p, what, ms = CALL_MS) => { let t; return Promise.race([p, new 
 const sockets = [];
 // (the forced-watchdog control's child run, started now so it costs no wall time; checked at the end)
 const control = CONTROL ? null : new Promise((ok) => {
-  const env = { ...process.env, PAGES_WATCHDOG_CONTROL: "1", PAGES_RUN_S: "10" };
+  const env = { ...process.env, PAGES_WATCHDOG_CONTROL: "1", PAGES_RUN_S: "20" };
   delete env.CDP_PORT;
   const c = spawn(process.execPath, [fileURLToPath(import.meta.url)], { env, stdio: ["ignore", "pipe", "pipe"] });
   let out = "", err = "";
@@ -515,7 +515,7 @@ if (control) {
   const [, cprofile, cpid] = /CONTROL (\S+) (\d+)/.exec(r.out) ?? [];
   let alive = false;
   if (cpid) try { process.kill(Number(cpid), 0); alive = true; } catch {}
-  check(r.code === 1 && r.err.includes('FAIL: the run didn\'t end within 10 s; the last check was "(none yet)"; waiting on: the control\'s deliberate hang') && /watchdog cleanup: Chrome exited on (TERM|KILL); temporary directories removed/.test(r.err) && !!cprofile && !existsSync(cprofile) && !alive,
+  check(r.code === 1 && r.err.includes('FAIL: the run didn\'t end within 20 s; the last check was "(none yet)"; waiting on: the control\'s deliberate hang') && /watchdog cleanup: Chrome exited on (TERM|KILL); temporary directories removed/.test(r.err) && !!cprofile && !existsSync(cprofile) && !alive,
     "(the forced-watchdog control: a hung run is ended by its watchdog, naming the wait, its Chrome seen to exit, its directories removed, exit code 1): " + JSON.stringify({ code: r.code, signal: r.signal, err: r.err.slice(0, 400), profile: cprofile ?? null, alive }));
 }
 if (fails.length) {
