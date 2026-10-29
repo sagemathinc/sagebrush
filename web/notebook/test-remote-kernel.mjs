@@ -793,5 +793,13 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
 }
 
 check(sinks.every((s) => s.terminals === 1), `every request had exactly one terminal (${sinks.length} requests)`);
+
+// ---- remote approval end to end: the scheduler, the gate, this kernel and client
+{
+  const { runGateTests } = await import("./test-remote-gate.mjs");
+  const ran = await runGateTests(check);
+  console.log(`remote-gate: ${ran} controls ran`);
+  check(ran === 32, `remote-gate: every control ran (${ran} of 32)`);
+}
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);
