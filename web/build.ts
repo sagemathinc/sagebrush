@@ -433,9 +433,12 @@ if (hasSite) {
 // the notebook component's demo page (web/embed)
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
 copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));
-// the questions preview (web/questions): auto-graded questions on the same component and kernel
-mkdirSync(join(here, "dist", "questions"), { recursive: true });
-copyFileSync(join(here, "questions", "index.html"), join(here, "dist", "questions", "index.html"));
+// the questions preview (web/questions): auto-graded questions on the same component and kernel. Flagged, off by
+// default: built only for a hosted preview (scripts/preview.sh sets SAGEBRUSH_PREVIEW_HOST) or with SAGEBRUSH_QUESTIONS=1
+if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_QUESTIONS === "1") {
+  mkdirSync(join(here, "dist", "questions"), { recursive: true });
+  copyFileSync(join(here, "questions", "index.html"), join(here, "dist", "questions", "index.html"));
+}
 if (hasSite) mkdirSync(join(siteDir, "public", "embed"), { recursive: true });
 if (hasSite) mkdirSync(join(siteDir, "public", "runner"), { recursive: true });
 // the shared collection page, served for /s/<id> by the site's Worker

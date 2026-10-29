@@ -2,9 +2,12 @@
 // render with typeset math; each student gets their own numbers; a right numeric
 // answer, a right symbolic answer (checked by Sage in the page's worker) and a
 // right choice are accepted, a wrong one is refused and costs a try, text Sage
-// can't read costs none; and the mock gradebook shows the posted total.
-// Builds nothing: run `bun web/build.ts` first. It serves web/dist itself.
+// can't read costs none; and the mock gradebook shows the posted total. The
+// instructor's view: question-major grading, the fixed pager, focus mode.
+// Builds nothing: the page is flagged off by default, so build it first with
+//   SAGEBRUSH_QUESTIONS=1 bun web/build.ts
 //   node web/test-questions.mjs
+// It serves web/dist itself.
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
