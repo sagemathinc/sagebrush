@@ -131,8 +131,10 @@ async function connectUp() {
   // (what the server sends before its user takes over (the page's socket opens a moment later) is kept, not dropped:
   // the user's onmessage replaces this, and then takes what was kept, in order)
   const buf = [];
+  let early = null;
   s.onmessage = (text) => buf.push(text);
-  return { up: s, buf };
+  s.onclose = (code, reason) => { early = [code, reason]; };
+  return { up: s, buf, early: () => early };
 }
 
 // a second device, from here: its own socket on the same account
@@ -227,7 +229,7 @@ async function serve(req, server) {
       const c = await connectUp().catch(() => null);
       if (!c || c.refused) return new Response("refused", { status: c?.refused.status ?? 502, headers: { connection: "close" } });
       // (the session's account when this socket was opened: the one it is authenticated as)
-      if (server.upgrade(req, { data: { up: c.up, buf: c.buf, socketSession: session, helloAccount: null } })) return undefined;
+      if (server.upgrade(req, { data: { up: c.up, buf: c.buf, early: c.early, socketSession: session, helloAccount: null } })) return undefined;
       c.up.close(1000, "no upgrade");
       return new Response("no upgrade", { status: 400 });
     }
@@ -358,6 +360,9 @@ const websocket = {
     };
     up.onclose = (code) => d.closeBoth(code);
     for (const text of d.buf.splice(0)) up.onmessage(text);
+    // (a close the server made before this socket opened, kept, then passed on)
+    const early = d.early();
+    if (early) up.onclose(...early);
   },
   message(client, data) {
     const d = client.data, up = d.up;
@@ -441,12 +446,14 @@ const stopChrome = async (p = chrome, ended = () => chromeEnded) => {
 /** Each closed; any that throws is said */
 const closeEach = (list, f) => { const bad = []; for (const s of list) try { f(s); } catch (e) { bad.push(why(e)); } return bad.length ? { ok: false, said: `NOT all closed (${bad.join(", ")})` } : { ok: true, said: `${list.length} closed` }; };
 const removeDir = (d) => { if (!d) return { ok: true, said: "never made" }; try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); return { ok: true, said: "removed" }; } catch (e) { return { ok: false, said: `NOT removed (${why(e)})` }; } };
-/** Stages run one after another, each whatever the ones before it did: a stage that throws, or says it failed, is a
- * failure, named; none is skipped.  Never rejects.  Says each stage, and whether all were done. */
-const runStages = async (stages) => {
+/** Stages run one after another, each whatever the ones before it did: a stage that throws, says it failed, or doesn't
+ * end within `ms`, is a failure, named; none is skipped.  Never rejects, and ends within (stages x ms).  Says each
+ * stage, and whether all were done. */
+const STAGE_MS = 15_000;
+const runStages = async (stages, ms = STAGE_MS) => {
   const out = [];
   for (const [name, f] of stages) {
-    try { const r = await f(); out.push({ name, ok: !!r?.ok, said: r?.said ?? "(said nothing)" }); }
+    try { const r = await bounded(Promise.resolve().then(f), name, ms); out.push({ name, ok: !!r?.ok, said: r?.said ?? "(said nothing)" }); }
     catch (e) { out.push({ name, ok: false, said: `threw (${why(e)})` }); }
   }
   return { line: "cleanup: " + out.map((s) => `${s.name} ${s.said}`).join("; "), ok: out.every((s) => s.ok) };
@@ -465,6 +472,8 @@ const cleanup = () => (cleaned ??= runStages([
 /** The run ended from outside its flow (the watchdog, SIGTERM): said, cleaned up, exit 1. */
 const endNow = async (why) => {
   console.error(`FAIL: ${why}; waiting on: ${waitingOn}`);
+  // (a backstop past the cleanup's own bound: the run ends even if the cleanup somehow doesn't)
+  setTimeout(() => { console.error("FAIL: the cleanup didn't end within 120 s"); process.exit(1); }, 120_000);
   console.error("  " + (await cleanup()).line);
   process.exit(1);
 };
@@ -487,6 +496,9 @@ try {
       ["a directory", () => removeDir(d)],
     ]);
     control1(!c.ok && c.line === "cleanup: a kill threw (EPERM); a front threw (injected stop failure); a directory removed" && !existsSync(d), "(control) the cleanup runs every stage after failures, names each and fails: " + c.line);
+    const d2 = mkdtempSync(join(tmpdir(), "sb-scr-ctl-"));
+    const t0 = Date.now(), c2 = await runStages([["a stop that never ends", () => new Promise(() => {})], ["a directory", () => removeDir(d2)]], 200);
+    control1(!c2.ok && c2.line === "cleanup: a stop that never ends threw (no answer within 200 ms: a stop that never ends); a directory removed" && !existsSync(d2) && Date.now() - t0 < 5000, "(control) a stage that never ends fails within its bound, and the stages after it still run: " + c2.line);
     const eperm = await stopChrome({ pid: 1, exitCode: null, signalCode: null, kill() { throw Object.assign(new Error("injected"), { code: "EPERM" }); } }, () => new Promise(() => {}));
     control1(!eperm.ok && eperm.said === "TERM failed (EPERM)", "(control) a kill refused (EPERM) is a failure, not a stop: " + eperm.said);
     const esrch = await stopChrome({ pid: 1, exitCode: null, signalCode: null, kill() { throw Object.assign(new Error("injected"), { code: "ESRCH" }); } }, async () => ({ exit: [0, null] }));
