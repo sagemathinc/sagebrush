@@ -19,15 +19,19 @@ import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { boxClass } from "./boxclass.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
-// the box class, an explicit input (never detected): LATEX_BOX_CLASS, else the run packet's BOXCLASS beside the trees
-// (trees/BOXCLASS, written by latex-freeze-pkt.sh). "timing" (VM3/VM4) gates the timing assertions; "build" records
-// them; anything else stops here, before the server or Chrome starts
-let BOX = process.env.LATEX_BOX_CLASS ?? "";
-if (!BOX) { try { BOX = readFileSync(join(here, "..", "..", "..", "BOXCLASS"), "utf8").trim(); } catch {} }
-if (BOX !== "build" && BOX !== "timing") { console.log("FAIL: no box class: LATEX_BOX_CLASS or ../BOXCLASS must be build or timing, not " + JSON.stringify(BOX)); process.exit(1); }
-console.log("box class:", BOX);
+// the box class, an explicit input (never detected): the run packet's frozen BOXCLASS beside the trees
+// (trees/BOXCLASS, written by latex-freeze-pkt.sh) wins whenever it exists; LATEX_BOX_CLASS only where there is no
+// packet file (boxclass.mjs). "timing" (VM3/VM4) gates the timing assertions; "build" records them; anything else
+// stops here, before the server or Chrome starts
+let boxFile = null;
+try { boxFile = readFileSync(join(here, "..", "..", "..", "BOXCLASS"), "utf8"); } catch {}
+const bc = boxClass(process.env.LATEX_BOX_CLASS, boxFile);
+if (bc.error) { console.log("FAIL: " + bc.error); process.exit(1); }
+const BOX = bc.box;
+console.log("box class:", BOX, boxFile !== null ? "(the packet's BOXCLASS)" : "(LATEX_BOX_CLASS)", bc.note);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // the server: web/serve.py on a port it picks, printed once it listens
 const server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "inherit"] });
@@ -114,6 +118,17 @@ try {
   requests.length = 0;
   await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
   check(latexFetches().length === 0, "flag on: nothing fetched before a .tex is opened (zero eager fetch)", latexFetches());
+  // (a control of the navigation helper itself: the page navigates by itself 1.5 s after the mark. The old check (a
+  // workspace present) passes at once on the outgoing document, which is the race; fresh() must not: it returns only on
+  // the new document, whose timeOrigin is after the mark, and only after the delay)
+  {
+    const t0 = Date.now();
+    await mark(); await ev(`setTimeout(() => location.assign(location.href), 1500); true`);
+    const oldWouldPass = await ev(`!!${W}`);
+    const okNav = await fresh(`!!${W}`, 30000);
+    const nav = { oldWouldPass, okNav, waited: Date.now() - t0, newDoc: await ev(`performance.timeOrigin`) - t0 };
+    check(oldWouldPass && okNav && nav.waited >= 1400 && nav.newDoc >= 1000, "a delayed navigation: the old check would pass on the outgoing document; fresh() waits for the new one", nav);
+  }
 
   // ---- opening, the banner, Save gated on edits (the first open's requests recorded: the cold first click)
   requests.length = 0; sizes.clear();
