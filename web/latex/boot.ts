@@ -61,7 +61,8 @@ export async function latexBoot(ws: Workspace | null) {
     if (!m || m.querySelector(`[data-tex="${fn}"]`)) return;
     const b = el("button", t);
     b.dataset.tex = fn; b.setAttribute("role", "menuitem");
-    b.onclick = (ev) => { ev.stopPropagation(); close && m.remove(); import(page).then((x) => x[fn](ws!, g.__sbTex), (r) => alert(r)); };
+    b.onclick = (ev) => { ev.stopPropagation(); close ? m.remove() : m.closest("[role=menu]")?.setAttribute("hidden", ""); import(page).then((x) => x[fn](ws!, g.__sbTex), (r) => alert(r)); };
+    // (the click closes its menu: the + menu removed, the File menu hidden, so neither stays over the examples' list)
     // (an undefined `at` is null to the DOM: the end)
     m.insertBefore(b, at as Element | null);
   };
