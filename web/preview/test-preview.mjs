@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import worker, { route, MIME } from './worker.mjs';
 import * as deployEntry from './entry.mjs';
 import { mockEnabled } from './mock.js';
+import { checkNoticeBrowser } from './browser-notice.mjs';
 import { prepare, MAX_OBJECTS, MAX_BYTES, MAX_FILE_BYTES, MAX_HTML_BYTES } from '../../scripts/preview/prepare.mjs';
 import { R2, MAX_PREVIOUS_OBJECTS } from '../../scripts/preview/r2.mjs';
 import { upload, UPLOAD_CONCURRENCY } from '../../scripts/preview/upload.mjs';
@@ -73,7 +74,9 @@ test('prepare preserves hashed engine HTML, injects banner/config and disables S
     writeFileSync(join(dir, '_headers'), "/index.html\n  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-fixture'; connect-src 'self' https:\n/engine/*\n  Content-Security-Policy: default-src 'none'; script-src 'unsafe-eval'; connect-src 'none'\n");
     const output = prepare(dir, 'latex.sagebrush.cloud', ['sagetex']);
     const bytes = p => output.files.get(p).bytes.toString();
-    assert.match(bytes('index.html'), /PREVIEW, not production/);
+    assert.match(bytes('index.html'), /id="sb-preview-notice"/);
+    assert.match(bytes('preview-config.js'), /PREVIEW, not production/);
+    assert.match(bytes('preview-config.js'), /Hide for this session/);
     assert.match(bytes('index.html'), /preview-config\.js/);
     assert.match(bytes('index.html'), /<script>example\(\)<\/script>/);
     assert.equal(bytes('engine/id/runner/index.html'), page);
@@ -365,4 +368,9 @@ test('eight 16 MiB non-HTML buffers bound active transport input to 128 MiB', as
   };
   assert.deepEqual(await upload(client, 'latex', { files }, new AbortController().signal), { uploaded: 8, skipped: 0 });
   assert.equal(peakBytes, 128 * 1024 * 1024); assert.equal(activeBytes, 0);
+});
+
+test('phone preview notice preserves controls, opens metadata modal and dismisses for this session under CSP', { timeout: 60000 }, async () => {
+  const geometry = await checkNoticeBrowser();
+  assert.ok(geometry.controlsBottom <= geometry.top);
 });
