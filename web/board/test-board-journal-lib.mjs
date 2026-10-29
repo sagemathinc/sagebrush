@@ -14,8 +14,11 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = JSON.stringify;
 // (test-only faults, for the VM run's controls (r6, daybreak3's R5-D3-2): BJ_FAULT=build-throw or build-false makes
 // buildFailure's bundle fail the one way or the other; BJ_FAULT=browser makes browser() fail right after Chrome
-// started; BJ_BOUND_S lowers bounded()'s bound (never raises it).  The real steps run with none of them set)
+// started; BJ_FAULT=hold (r7) holds one DevTools call open (held(), below); BJ_BOUND_S lowers bounded()'s bound (never
+// raises it).  The real steps run with none of them set, and any that is set is said on its own line, "BJ TEST
+// SWITCH: …", so a run's judge can require that no real step's output has one)
 const FAULT = process.env.BJ_FAULT ?? "";
+for (const k of ["BJ_FAULT", "BJ_BOUND_S"]) if (process.env[k] !== undefined) console.log(`BJ TEST SWITCH: ${k}=${J(process.env[k])}`);
 const TYPES = { ".js": "text/javascript", ".mjs": "text/javascript", ".html": "text/html", ".json": "application/json", ".css": "text/css", ".wasm": "application/wasm", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".png": "image/png", ".webmanifest": "application/manifest+json", ".txt": "text/plain", ".zip": "application/zip", ".gz": "application/gzip" };
 const typeOf = (p) => TYPES[Object.keys(TYPES).find((x) => p.endsWith(x)) ?? ""] ?? "application/octet-stream";
 
@@ -101,7 +104,10 @@ export async function serve(roots) {
  * it (the reaps it leaves are not benign exits). */
 export async function closeChrome(chrome, port, label = "chrome", ms = 10_000) {
   const done = chrome.exitCode !== null || chrome.signalCode !== null ? Promise.resolve() : new Promise((r) => chrome.once("exit", r));
-  try {
+  // (r7, board's r6 n2: its DevTools port not known yet (a kill during its start), so no Browser.close can be asked:
+  // its group is asked to end with SIGTERM instead, and SIGKILL stays the said fallback)
+  if (!port) { try { process.kill(-chrome.pid, "SIGTERM"); } catch {} }
+  else try {
     const v = await (await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(Math.min(3000, ms)) })).json();
     const ws = new WebSocket(v.webSocketDebuggerUrl);
     await new Promise((ok, no) => { ws.onopen = ok; ws.onerror = no; setTimeout(no, Math.min(3000, ms)); });
@@ -128,13 +134,19 @@ export const unlessEnding = () => (term.ending ? new Promise(() => {}) : Promise
 // (every Chrome this process started and hasn't closed: {pid, quick}, for the kill path)
 const live = new Set();
 let callIds = 0;
-export function section(name) { place.section = name; console.log(`  section: ${name} (${place.checks} checks so far)`); }
+export function section(name) { if (term.ending) return; place.section = name; console.log(`  section: ${name} (${place.checks} checks so far)`); }
 /** A check done, said at once on its own indented line ("  ok …" / "  FAIL …"; before the summary, so mut-6c's list
  * after it is the summary's own). */
 export function checked(ok, what) {
   if (term.ending) return;
   place.checks++; place.last = String(what).replace(/\s*\n\s*/g, " | ");
   console.log((ok ? "  ok " : "  FAIL ") + place.last);
+}
+/** A call of the runner's own DevTools client (the store test's) put in where()'s list; returns its removal. */
+export function inFlight(what) {
+  const c = ++callIds;
+  place.calls.set(c, { what, t0: Date.now() });
+  return () => place.calls.delete(c);
 }
 export function where() {
   const now = Date.now(), calls = [...place.calls.values()].map((c) => `${c.what} (${Math.round((now - c.t0) / 1000)} s)`);
@@ -170,6 +182,17 @@ export function bounded(label, ms, cleanup) {
   t.unref?.();
   for (const [s, n] of [["SIGTERM", 15], ["SIGINT", 2], ["SIGHUP", 1]]) process.on(s, () => end(`killed (${s})`, 128 + n));
   return () => clearTimeout(t);
+}
+
+/** r7's barrier, for the VM run's 124/143 controls: under BJ_FAULT=hold, one Runtime.evaluate that never settles is
+ * sent on `tab` (bounded only by the runner's own bound), then "  hold: a DevTools call held open (<tab> Runtime.evaluate)"
+ * is said, so a control signals only after that line and the FAIL line's where() names the call.  Without the switch,
+ * nothing. */
+export async function held(tab, name) {
+  if (FAULT !== "hold") return;
+  const p = tab.ev("new Promise(() => {})", 24 * 3600_000);
+  console.log(`  hold: a DevTools call held open (${name} Runtime.evaluate)`);
+  await p;
 }
 
 /** A Chrome started outside browser() (the store test's own) put under the kill path, closed by it as browser()'s
