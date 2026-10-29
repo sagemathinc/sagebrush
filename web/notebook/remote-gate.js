@@ -1,4 +1,4 @@
-// Remote approval in the page (the remote-compute plan's P1b-int): what
+// Remote approval in the page: what
 // joins the reactive scheduler (src/notebook-reactive.ts), the approvals
 // (src/remote-approval.ts) and a RemoteKernel (remote-kernel.js).
 //
@@ -33,7 +33,7 @@ const CHANGED = "\nNot run: it changed since you ran it.\n";
 const mangleOf = (id) => String(id).replace(/[^A-Za-z0-9]/g, "");
 const NO_PARENTS = Object.freeze([]);
 
-// Test-only fault (P1b-int I22.11, M-parents): a cell's parents array kept when the graph's version
+// Test-only fault: a cell's parents array kept when the graph's version
 // changes.  Never set outside tests (a census test checks that).
 let testHooks = null;
 /** Tests only: set (or clear, with null) the fault above ({parentsSkip: true}). */
@@ -243,13 +243,13 @@ export class RemoteGate {
         const listed = consent ? consent.ids : [];
         try {
           // every seed in one await: the listed cells' from the captured namespace, the others' from the
-          // current one (they run only by an approval they already have); then S2, once
+          // current one (they run only by an approval they already have); then the "seeded" stage, once
           const ns = gate.page.config().seedNamespace;
           const want = new Map();
           for (const id of listed) want.set(`${consent.seedNamespace}\0${id}`, [consent.seedNamespace, id]);
           for (const id of order) want.set(`${ns}\0${id}`, [ns, id]);
           await Promise.all([...want.values()].map(([space, id]) => gate.prepareSeed(space, id)));
-          if (consent) a.consentStage(consent, "S2", env);
+          if (consent) a.consentStage(consent, "seeded", env);
           const pc = a.precount(order, consent && a.consentStateOf(consent) === "issued" ? listed : []);
           if (!pc.ok) {
             if (consent) a.voidConsent(consent);

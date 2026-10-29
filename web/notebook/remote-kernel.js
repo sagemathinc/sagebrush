@@ -42,7 +42,7 @@
 //     required whenever a restart or delete was applied; anything less is not evidence of anything)
 // A terminal's outcome is {status, reason?, detail?, ms?, ename?, incarnation?}.
 //
-// Approval (the remote-compute plan's P1b-int, web/notebook/remote-gate.js):
+// Approval (web/notebook/remote-gate.js):
 // a run given `opts.gate` is checked when it is dispatched, and admitted by
 // a guard the client calls synchronously right before the fetch that sends
 // it (after the token and the proof are ready), so nothing can change

@@ -1,6 +1,6 @@
-// Approval and provenance for remote runs (the remote-compute plan, §3, and
-// its integration, P1b-int): what the page lets it send to a remote kernel,
-// and when.  The page is the only approval boundary: the gateway keeps no
+// Approval and provenance for remote runs, and their integration with the
+// reactive scheduler and the send path: what the page lets it send to a
+// remote kernel, and when.  The page is the only approval boundary: the gateway keeps no
 // queue, so every run it executes was checked here at the moment it was sent.
 //
 //   - A run spec: one frozen object per cell holding exactly what would run
@@ -300,9 +300,9 @@ export const CAPS = Object.freeze({
 
 /** One action's budget (every counter is cumulative over the action). */
 export const BUDGET = Object.freeze({
-  /** the click's comparison of each listed cell's displayed text with its text version (UTF-16 code units; checked at the click, charged at S0) */
+  /** the click's comparison of each listed cell's displayed text with its text version (UTF-16 code units; checked at the click, charged when the action begins) */
   clickUnits: 1 << 26,
-  /** the commit's (S4) comparison of the displayed text with the captured text, and of the settings values (UTF-16 code units) */
+  /** the commit's comparison of the displayed text with the captured text, and of the settings values (UTF-16 code units) */
   commitUnits: 1 << 26,
   /** sameRun: each sent cell's run against its checked spec (UTF-16 code units) */
   sendUnits: 1 << 26,
@@ -338,7 +338,7 @@ export class Budget {
   readonly limits: Record<BudgetKind, number>;
   readonly used: Record<BudgetKind, number>;
   /**
-   * What the controls count besides (P1b-int I17): the unique eid memo
+   * What the tests count besides: the unique eid memo
    * entries and S v2 nodes this action was served that it didn't make
    * itself (each once, however often it is looked up again).
    */
@@ -364,7 +364,7 @@ export const UNLIMITED: Readonly<Record<BudgetKind, number>> = Object.freeze(Obj
 
 /** The walks of one cell's closure in one submission: freeze (snapshot, S), check (snapshot, S, snapshot), admit (snapshot). */
 export const WALKS_PER_SUBMISSION = 6;
-/** The walks of a consent's listed cells after the precount (S0 to S2 come before it): S3 and S4. */
+/** The walks of a consent's listed cells after the precount (the earlier stages come before it): the claim and the commit. */
 export const COMMIT_WALKS = 2;
 
 /** sameRun's units for a spec: everything in it that runs, in UTF-16 code units (the precount plans exactly these). */
@@ -388,8 +388,8 @@ export interface JobRun {
 }
 
 /**
- * Test-only faults (P1b-int I18, I22.12): an S v2 node reused whatever its
- * key (M-node), or by comparing its parents' digests as strings.  Never
+ * Test-only faults: an S v2 node reused whatever its key, or by comparing
+ * its parents' digests as strings.  Never
  * set outside tests (a census test checks that).
  */
 export interface ApprovalTestHooks {
@@ -453,11 +453,12 @@ export interface Consent {
   readonly mode: string;
   readonly seedNamespace: string;
   readonly reactive: boolean;
-  /** the click's comparison (UTF-16 code units), charged to the action at S0 */
+  /** the click's comparison (UTF-16 code units), charged to the action when it begins */
   readonly clickUnits: number;
 }
 type ConsentState = "issued" | "spent" | "void" | { readonly claimed: object };
-export type ConsentStage = "S0" | "S1" | "S2";
+/** A consent's stages before its approval: the action's start (before registration), after registration, after the seeds are prepared. */
+export type ConsentStage = "beforeRegistration" | "registered" | "seeded";
 
 // An S v2 node: immutable; reused only while its spec, its parents array and every parent's node are the same objects.
 interface SNode {
@@ -873,10 +874,10 @@ export class Approvals {
   }
 
   /**
-   * A stage of a consent's checks before its approval: S0 at the serial
-   * step's start (before registration: the click's units are charged to the
-   * action here), S1 after registration, S2 after the seeds are prepared
-   * (one await, every listed cell's).  Only an issued consent passes; a
+   * A stage of a consent's checks before its approval: "beforeRegistration"
+   * at the serial step's start (the click's units are charged to the action
+   * here), "registered" after registration, "seeded" after the seeds are
+   * prepared (one await, every listed cell's).  Only an issued consent passes; a
    * consent in any other state is refused untouched (another call owns it,
    * or it is spent or void), and an issued one that fails is void.
    */
@@ -884,11 +885,11 @@ export class Approvals {
     if (this.consentState.get(cap) !== "issued") return false;
     let ok = false;
     try {
-      if (stage === "S0") {
+      if (stage === "beforeRegistration") {
         if (!this.budget.fits("clickUnits", cap.clickUnits)) return false;
         this.budget.charge("clickUnits", cap.clickUnits);
       }
-      ok = this.consentOk(cap, env, stage !== "S0", stage === "S2");
+      ok = this.consentOk(cap, env, stage !== "beforeRegistration", stage === "seeded");
     } finally {
       if (!ok) this.consentState.set(cap, "void");
     }
@@ -896,7 +897,7 @@ export class Approvals {
   }
 
   /**
-   * Approve exactly a consent's cells (S3, then S4): synchronously at the
+   * Approve exactly a consent's cells (the claim, then the commit): synchronously at the
    * start, every check (all seeds prepared) and then the claim; at the
    * commit, the claim still this call's, every check again, the cells'
    * specs the ones hashed, and the displayed text and the settings, by
@@ -913,7 +914,7 @@ export class Approvals {
       return typeof s === "object" && s.claimed === call;
     };
     try {
-      // S3
+      // the claim
       if (!this.consentOk(expected, env, true, true)) {
         this.consentState.set(expected, "void");
         return false;
@@ -926,7 +927,7 @@ export class Approvals {
       }
       const eids: string[] = [];
       for (const s of specs) eids.push(await this.eidOf(s!));
-      // S4 (the claim replaces the issued check)
+      // the commit (the claim replaces the issued check)
       if (!owned()) return false;
       if (!this.consentOk(expected, env, true, true) || ids.some((id, i) => this.graph.spec(id) !== specs[i]) || !this.committedOk(expected, env)) {
         this.consentState.set(expected, "void");

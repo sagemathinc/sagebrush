@@ -89,10 +89,11 @@ export interface ReactiveHost {
   rename?(request: { name: string; cells: { id: string; code: string; defines: boolean; reads: boolean }[]; taken: string[] }): Promise<[string, string][] | null>;
   /**
    * Remote approval (optional; web/notebook/remote-gate.js): a person's run
-   * carries their consent (opaque here), checked before registration ("S0")
-   * and after it ("S1"); the host keeps whether it still holds.
+   * carries their consent (opaque here), checked before registration
+   * ("beforeRegistration") and after it ("registered"); the host keeps
+   * whether it still holds.
    */
-  consent?(stage: "S0" | "S1", consent: unknown): void;
+  consent?(stage: "beforeRegistration" | "registered", consent: unknown): void;
   /**
    * Remote approval (optional): before cells run, the action's plan (in run
    * order; `consent`: the person's, as above, once per action).  `refuse`: none of them is
@@ -127,8 +128,8 @@ export interface Registration {
 }
 
 /**
- * Test-only faults (the remote-compute plan's P1b-int I22): each makes one
- * owner miss a replacement, so a control can show what catches it.  Never
+ * Test-only faults: each makes one owner miss a replacement, so a test can
+ * show what catches it.  Never
  * set outside tests (a census test checks that).
  */
 export interface ReactiveTestHooks {
@@ -608,7 +609,7 @@ export class Reactive {
   private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown): Promise<RunReport> {
     // (a person's consent: checked first, before anything is registered; the host keeps its state)
     this.consent = consent;
-    if (consent !== undefined) this.host.consent?.("S0", consent);
+    if (consent !== undefined) this.host.consent?.("beforeRegistration", consent);
     const cells = this.host.cells();
     const present = new Set(cells.map((c) => c.id));
     ids = ids.filter((id) => present.has(id));
@@ -666,7 +667,7 @@ export class Reactive {
     for (const id of ids) if (!this.registered.has(id)) changed.add(id);
     await this.registerAll(sources, cells.filter((c) => present.has(c.id)), eff, versions);
     // (and again once registered: what runs is what the person ran)
-    if (this.consent !== undefined) this.host.consent?.("S1", this.consent);
+    if (this.consent !== undefined) this.host.consent?.("registered", this.consent);
     const inGraph = new Set(this.graph.ids);
 
     // errors: kept on previously valid cells only downstream of a submitted

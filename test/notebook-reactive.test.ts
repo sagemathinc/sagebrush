@@ -394,7 +394,7 @@ test("cells run because a widget moved are marked, until a restart", async () =>
   assert.equal(nb.r.widgetDriven.size, 0);
 });
 
-// --- remote approval's hooks (the remote-compute plan's P1b-int): what the scheduler gives the host ---
+// --- remote approval's hooks: what the scheduler gives the host ---
 
 function hooked(codes: string[], over: { notRun?: Map<string, "skip" | "wait">; prepare?: (p: { order: string[]; consent?: unknown; followUp: boolean }) => Promise<{ refuse?: string; skip?: Map<string, string> } | undefined>; rekey?: (units: number) => boolean; consent?: (stage: string) => void; analyze?: (code: string) => any } = {}) {
   const cells: CellInfo[] = codes.map((code, i) => ({ id: `c${i}`, code }));
@@ -584,7 +584,7 @@ test("rekeyUnits: exactly at the limit, the output is kept; one unit more, a new
   }
 });
 
-test("I22.2 / I22.6 (scheduler): a registration taken for the old one, or a re-derive skipped: the output stays stale while runSpec is fresh", async () => {
+test("a registration taken for the old one, or a re-derive skipped: the output stays stale while runSpec is fresh", async () => {
   try {
     const h = hooked(["a = 1"]);
     await h.r.load();
@@ -606,7 +606,7 @@ test("I22.2 / I22.6 (scheduler): a registration taken for the old one, or a re-d
   }
 });
 
-test("I22.5 (scheduler): the errors written into the old map: a lookup between registration and the errors' replacement keeps a stale forget; unhooked, re-derived", async () => {
+test("the errors written into the old map: a lookup between registration and the errors' replacement keeps a stale forget; unhooked, re-derived", async () => {
   for (const hooked_ of [true, false]) {
     try {
       // c0 and c1 both define x (no reader: #1477), so c0's forget leaves x to c1; then a reader c2 is run
@@ -617,7 +617,7 @@ test("I22.5 (scheduler): the errors written into the old map: a lookup between r
       await h.r.run(["c0", "c1"]);
       assert.deepEqual(h.r.runSpec("c0")!.forget, []);
       if (hooked_) setTestHooks({ errorsInPlace: (old, fresh) => { old.clear(); for (const [k, v] of fresh) old.set(k, v); return old; } });
-      probe = () => { h.r.runOutput("c0"); }; // (at S1: registered, the errors not yet replaced)
+      probe = () => { h.r.runOutput("c0"); }; // (at the registered stage: registered, the errors not yet replaced)
       h.cells.push({ id: "c2", code: "y = x" });
       await h.r.run(["c1", "c2"], { consent: "cap" });
       assert.ok(h.r.errors.has("c1") && !h.r.errors.has("c0"), "(c1 has the error, c0 doesn't)");
@@ -660,12 +660,12 @@ test("prepare: before anything runs, once per round; refuse: nothing is sent and
   assert.ok(!skip.executed.some((e) => e.id === "c0"));
 });
 
-test("consent: S0 before registration, S1 after; prepare sees it once; each serial step is one action", async () => {
+test("consent: checked before registration and after it; prepare sees it once; each serial step is one action", async () => {
   const h = hooked(["a = 1", "b = a + 1"]);
   await h.r.load();
   h.events.length = 0;
   await h.r.run(["c0"], { consent: "cap1" });
-  assert.deepEqual(h.events, ["begin", "consent S0 cap1", "consent S1 cap1", "prepare c0,c1 consent=cap1 followUp=false", "end"]);
+  assert.deepEqual(h.events, ["begin", "consent beforeRegistration cap1", "consent registered cap1", "prepare c0,c1 consent=cap1 followUp=false", "end"]);
   h.events.length = 0;
   await h.r.run(["c0"]);
   assert.deepEqual(h.events, ["begin", "prepare c0,c1 consent=undefined followUp=false", "end"], "a run without consent (an agent's)");

@@ -91,7 +91,7 @@ export class StreamError extends Error {
   }
 }
 
-// Test-only fault (the remote-compute plan's P1b-int I5b): an await between a send's guard and its fetch.
+// Test-only fault: an await between a send's guard and its fetch (a test shows the same-turn probe sees it).
 // Never set outside tests (a census test checks that).
 let testHooks = null;
 /** Tests only: set (or clear, with null) the fault above ({awaitAfterGuard: async () => {}}). */

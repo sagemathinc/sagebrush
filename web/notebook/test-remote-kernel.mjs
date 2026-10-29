@@ -794,7 +794,7 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
 
 check(sinks.every((s) => s.terminals === 1), `every request had exactly one terminal (${sinks.length} requests)`);
 
-// ---- remote approval end to end (P1b-int): the scheduler, the gate, this kernel and client
+// ---- remote approval end to end: the scheduler, the gate, this kernel and client
 {
   const { runGateTests } = await import("./test-remote-gate.mjs");
   const ran = await runGateTests(check);
