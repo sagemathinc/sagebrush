@@ -2248,6 +2248,21 @@ async function s5Tabs() {
 /** The front has dropped an ack since its log was last reset: the op was sent and its answer withheld. */
 const ackDropped = async () => (await ctl("log")).got.some((g) => g.t === "ack" && g.dropped);
 
+/** What s5Rows saw, said only when one of its checks fails: the rows' icons, each identity's outbox records and pending
+ * state, the scan's watermark, the client, and what the front sent and answered since its log was reset */
+async function rowsWhy(w, owner, ids) {
+  const ns = (await metaGet(w.ws, "sync:current"))?.ns;
+  const outbox = await all(w.ws, "outbox"), pending = await all(w.ws, "pending");
+  return J({
+    up: [...(await W.rowIcons(w, ids, [])).up].map((id) => ids.indexOf(id)),
+    ids: ids.map((id) => ({ recs: outbox.filter((x) => x.id === id).map((x) => ({ dseq: x.dseq, lseq: x.lseq, op: x.op.op, accepted: x.accepted })), pending: pending.find((x) => x.id === id) })),
+    scanned: await metaGet(w.ws, `sync:${ns}:scanned`), last: await w.lastSeq(), status: owner.view(),
+    refused: await metaGet(w.ws, `sync:${ns}:refused`), rebuild: await metaGet(w.ws, `sync:${ns}:rebuild`),
+    client: owner.client?.debug(), stats: owner.client && { connects: owner.client.stats.connects, opsMessages: owner.client.stats.opsMessages },
+    front: await ctl("log").then((l) => ({ sockets: l.sockets, open: l.open, sent: l.sent.filter((m) => m.t === "ops" || m.t === "hello").map((m) => m.t === "ops" ? "ops:" + m.dseqs.join(",") : "hello"), acks: l.got.filter((g) => g.t === "ack" || g.t === "error").map((g) => g.t + (g.dropped ? "(dropped)" : "") + (g.code ? ":" + g.code : "") + (g.t === "ack" && Array.isArray(g.ops) ? "[" + g.ops.map((o) => o.dseq).join(",") + "]" : "")) })),
+  });
+}
+
 async function s5Rows() {
   // (↑ for every op kind until its own ack; one transaction; at most ROWICON.max identities)
   await account();
@@ -2260,23 +2275,38 @@ async function s5Rows() {
   [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
   check(await until(() => owner.view().s.state === "synced", 15_000), "rows: synced");
   await ctl("log", { reset: true });
-  await ctl("set", { set: { dropAcks: 1 } });
+  // (the client may send the two ops in one message or in two: EVERY ack they go up in is withheld, as one acked
+  // message would have the client pull the log, and the echo there decides both (the server decides in dseq order),
+  // which would clear both ↑ before they are looked at; at most two, and the hold is lifted before the resend)
+  await ctl("set", { set: { dropAcks: 2 } });
   const d = await w.mkdir("/r1");
   const f = await w.create("/r1/f.txt", { content: "x" });
-  // (closed only once the ack was really dropped: an ↑ shows as soon as the op is logged, before it is sent)
-  check(await until(ackDropped, 10_000), "rows: the ack withheld by the front");
-  check(await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 2, 5000), "rows: a mkdir and a create waiting (scanned, sent, ack withheld): ↑ on both");
+  // (closed only once both ops were sent and every ack they went up in was dropped: an ↑ shows as soon as the op is
+  // logged, before it is sent)
+  const allWithheld = async () => {
+    const l = await ctl("log");
+    const sent = l.sent.filter((m) => m.t === "ops");
+    return sent.flatMap((m) => m.dseqs).length >= 2 && l.got.filter((g) => g.t === "ack" && g.dropped).length === sent.length;
+  };
+  const withheld = await until(allWithheld, 10_000);
+  check(withheld, "rows: the acks withheld by the front" + (withheld ? "" : " " + (await rowsWhy(w, owner, [d.ident, f.ident]))));
+  const both = await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 2, 5000);
+  check(both, "rows: a mkdir and a create waiting (scanned, sent, ack withheld): ↑ on both" + (both ? "" : " " + (await rowsWhy(w, owner, [d.ident, f.ident]))));
+  // (the hold lifted (one ack of the two may be left, when they went in one message), then the resend)
+  await ctl("set", { set: { dropAcks: 0 } });
   await ctl("closeAll");
-  check(await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 0, 15_000), "rows: after the resend and its ack: cleared");
+  const resent = await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 0, 15_000);
+  check(resent, "rows: after the resend and its ack: cleared" + (resent ? "" : " " + (await rowsWhy(w, owner, [d.ident, f.ident]))));
   await ctl("log", { reset: true });
   await ctl("set", { set: { dropAcks: 1 } });
   await w.rename("/r1", "/r2");
-  check(await until(ackDropped, 10_000), "rows: the rename sent, its ack withheld by the front");
-  check(await until(async () => (await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 5000), "rows: an undecided rename on a folder whose mkdir was accepted: ↑");
+  const renameWithheld = await until(ackDropped, 10_000);
+  check(renameWithheld, "rows: the rename sent, its ack withheld by the front" + (renameWithheld ? "" : " " + (await rowsWhy(w, owner, [d.ident]))));
+  const renaming = await until(async () => (await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 5000);
+  check(renaming, "rows: an undecided rename on a folder whose mkdir was accepted: ↑" + (renaming ? "" : " " + (await rowsWhy(w, owner, [d.ident]))));
   await ctl("closeAll");
   const cleared = await until(async () => !(await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 15_000);
-  const ns = (await metaGet(w.ws, "sync:current"))?.ns;
-  const why = cleared ? "" : J({ recs: (await all(w.ws, "outbox")).filter((x) => x.id === d.ident).map((x) => ({ dseq: x.dseq, lseq: x.lseq, op: x.op.op, accepted: x.accepted })), pending: (await all(w.ws, "pending")).find((x) => x.id === d.ident), scanned: await metaGet(w.ws, `sync:${ns}:scanned`), last: await w.lastSeq(), status: owner.view(), refused: await metaGet(w.ws, `sync:${ns}:refused`), rebuild: await metaGet(w.ws, `sync:${ns}:rebuild`), client: owner.client?.debug(), stats: owner.client && { connects: owner.client.stats.connects, opsMessages: owner.client.stats.opsMessages }, front: await ctl("log").then((l) => ({ sockets: l.sockets, open: l.open, sent: l.sent.filter((m) => m.t === "ops" || m.t === "hello").map((m) => m.t === "ops" ? "ops:" + m.dseqs.join(",") : "hello"), acks: l.got.filter((g) => g.t === "ack" || g.t === "error").map((g) => g.t + (g.dropped ? "(dropped)" : "") + (g.code ? ":" + g.code : "")) })) });
+  const why = cleared ? "" : await rowsWhy(w, owner, [d.ident]);
   check(cleared, "rows: …cleared at its own ack " + why);
   const many = Array.from({ length: 1100 }, (_, i) => "0123456789abcd" + String(i).padStart(4, "0"));
   check((await W.rowIcons(w, many, [])).up.size === 0 && W.ROWICON.max === 1005, "rows: 1,100 identities asked: read at most 1,005, one transaction");
