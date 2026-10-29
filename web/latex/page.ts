@@ -73,7 +73,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let fontPx = pref(FONT.key, FONT.min, FONT.max, FONT.def), zoomPct = pref(ZOOM.key, ZOOM.min, ZOOM.max, ZOOM.def);
   const applyView = () => {
     page.style.setProperty("--tex-src-fs", fontPx + "px");
-    preview.style.setProperty("zoom", String(zoomPct / 100));
+    // (at 100% no zoom is set at all: the default view is the preview as it was)
+    if (zoomPct === ZOOM.def) preview.style.removeProperty("zoom"); else preview.style.setProperty("zoom", String(zoomPct / 100));
     zShow.textContent = zoomPct + "%";
     fsDown.disabled = fontPx <= FONT.min; fsUp.disabled = fontPx >= FONT.max; zOut.disabled = zoomPct <= ZOOM.min; zIn.disabled = zoomPct >= ZOOM.max;
   };

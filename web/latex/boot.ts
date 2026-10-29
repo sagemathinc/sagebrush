@@ -47,6 +47,29 @@ export async function latexBoot(ws: Workspace | null) {
     else { b.disabled = true; box.append(el("div", "This file can't open in the LaTeX editor yet: it hasn't been given a stable id.")); }
     box.append(b);
   };
+  // the file browser's New (+): "LaTeX file" too, added to its menu when it opens (this module is in a LaTeX build only,
+  // so the file browser's own code is the same as without the editor); it makes /Untitled.tex (or "Untitled (2).tex",
+  // ...) with a short document and opens it in the editor
+  const w = ws;
+  if (w) document.addEventListener("click", (ev) => {
+    const m = (ev.target as Element | null)?.closest?.('.sbfiles .fh button[aria-label="New"]') && document.querySelector(".sbfmenu");
+    if (!m || m.querySelector(".sb-tex-new")) return;
+    const b = el("button", "LaTeX file");
+    b.className = "sb-tex-new"; b.setAttribute("role", "menuitem");
+    b.onclick = async (e) => {
+      e.stopPropagation(); m.remove();
+      try {
+        for (let i = 1; i <= 1000; i++) {
+          const p = "/Untitled" + (i > 1 ? " (" + i + ")" : "") + ".tex";
+          if (await w.stat(p)) continue;
+          g.__sbTex(await w.createByPerson(p, { content: new TextEncoder().encode("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n") }));
+          return;
+        }
+        alert("No free name for a new LaTeX file");
+      } catch (err) { alert("The LaTeX file couldn't be made: " + String((err as Error)?.message ?? err)); }
+    };
+    m.insertBefore(b, [...m.querySelectorAll("button")].find((x) => x.textContent === "Folder") ?? null);
+  });
   if (tex === null || !ws) return false;
   const root = el("div");
   document.body.append(root);
