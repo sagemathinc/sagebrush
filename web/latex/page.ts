@@ -109,9 +109,17 @@ export async function newTex(ws: Workspace, open: (e: Entry) => unknown): Promis
   } catch (err) { alert("The LaTeX file couldn't be made: " + String((err as Error)?.message ?? err)); }
 }
 
+// the page mounted now: another .tex is opened in place (no reload: William's B2, the notebook no longer flashing by),
+// so the one shown is disposed of first (its worker, image blobs and listeners)
+let current: { dispose(): void; dirty(): boolean } | null = null;
+
 export async function mount(root: HTMLElement, host: Host): Promise<void> {
   mark("tex-mount", {});
-  const style = el("style"); style.textContent = PAGE_CSS; document.head.appendChild(style);
+  current?.dispose();
+  const life = new AbortController(), on = { signal: life.signal };
+  let dispose = () => { life.abort(); };
+  current = { dispose: () => dispose(), dirty: () => false };
+  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
   }
@@ -124,7 +132,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const back = el("button", "tex-back", "Files"); back.setAttribute("aria-controls", "wssidebar");
   back.onclick = () => { const b = document.getElementById("wsfilesbtn"); if (b) b.click(); else host.back(); };
   const pressed = () => back.setAttribute("aria-pressed", String(document.body.classList.contains("wsfiles")));
-  new MutationObserver(pressed).observe(document.body, { attributes: true, attributeFilter: ["class"] }); pressed();
+  const pressedObs = new MutationObserver(pressed); pressedObs.observe(document.body, { attributes: true, attributeFilter: ["class"] }); pressed();
+  life.signal.addEventListener("abort", () => pressedObs.disconnect());
   const title = el("span", "tex-title");
   const dirty = el("span", "tex-dirty", "Unsaved changes"); dirty.hidden = true;
   const save = el("button", "tex-save", "Save"); save.disabled = true;
@@ -139,7 +148,23 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // cursor's place in the preview now); a double-click in the preview puts the cursor at that place in the source
   const followBtn = btn("Follow", "The preview follows the cursor"), showBtn = btn("Show", "Show the cursor's place in the preview");
   tools.append(el("span", "tex-tl", "Source"), fsDown, fsUp, el("span", "tex-tl", "Preview"), zOut, zShow, zIn, followBtn, showBtn);
-  head.append(back, title, dirty, save, toggle, status, tools);
+  // New (William's B1: from a LaTeX file, a new document or an example without going through a notebook)
+  const newBtn = el("button", "tex-new", "New ▾"); newBtn.setAttribute("aria-haspopup", "menu");
+  newBtn.onclick = (ev) => {
+    ev.stopPropagation();
+    const old = page.querySelector(".tex-newmenu"); if (old) { old.remove(); return; }
+    const m = el("div", "tex-newmenu"); m.setAttribute("role", "menu");
+    m.style.cssText = "position:absolute;z-index:30;background:#fff;color:#222;border:1px solid #c8ccc9;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.2);padding:4px;display:grid;min-width:180px";
+    const item = (t: string, f: () => void) => { const b = el("button", "", t); b.setAttribute("role", "menuitem"); b.style.cssText = "text-align:left;padding:8px 10px;min-height:36px;border:0;background:none;cursor:pointer"; b.onclick = () => { m.remove(); f(); }; m.appendChild(b); };
+    const open = (e: Entry) => (globalThis as any).__sbTex(e);
+    item("LaTeX document", () => void newTex(host.ws, open));
+    item("LaTeX example", () => void texExamples(host.ws, open));
+    item("Notebooks", () => location.assign("/"));
+    const r = newBtn.getBoundingClientRect(); m.style.left = r.left + "px"; m.style.top = r.bottom + 2 + "px"; m.style.position = "fixed";
+    page.appendChild(m);
+    document.addEventListener("click", () => m.remove(), { once: true });
+  };
+  head.append(back, newBtn, title, dirty, save, toggle, status, tools);
   const main = el("div", "tex-main");
   const left = el("div", "tex-left"), right = el("div", "tex-right");
   const preview = el("div", "page tex-preview");
@@ -167,6 +192,20 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // upload): the notebook page's openId() asks here first (index.html, in a LaTeX build only) and its page is opened
   // by URL instead, as a board's is; without this it would be loaded unseen under the editor
   (globalThis as any).__sbTexOpen = (id: string) => { location.assign("/?nb=" + encodeURIComponent(id)); return true; };
+  // another .tex (from the files beside this page, New, an example): opened here, in place, its URL pushed; a new tab
+  // as before (boot.ts's hook); unsaved changes asked about first
+  const g: any = globalThis, bootHook = (g.__sbTexBoot ??= g.__sbTex);
+  const openHere = (fid: string) => { void mount(root, { ...host, fid }); };
+  g.__sbTex = (e: Entry, tab?: boolean) => {
+    if (tab || !/\.tex$/i.test(e.path) || !e.fid) return bootHook(e, tab);
+    if (e.fid === host.fid) return true;
+    if (current?.dirty() && !confirm("Leave this file without saving your changes?")) return true;
+    const q = new URLSearchParams(location.search); q.set("tex", e.fid);
+    history.pushState(null, "", "/?" + q.toString());
+    openHere(e.fid);
+    return true;
+  };
+  window.addEventListener("popstate", () => { const t = new URLSearchParams(location.search).get("tex"); if (t && t !== host.fid) openHere(t); else if (!t) location.reload(); }, on);
   const gone = (t: string) => { main.textContent = ""; const m = el("div", "tex-gone", t); main.appendChild(m); save.hidden = true; toggle.hidden = true; tools.hidden = true; };
 
   // ---- binding and reading (r5 §1a, §4)
@@ -259,11 +298,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   });
   document.addEventListener("keydown", (ev) => {
     if (ev.target !== src && (ev.ctrlKey || ev.metaKey) && !ev.altKey && ev.key.toLowerCase() === "s") { ev.preventDefault(); void doSave(); }
-  });
+  }, on);
   save.onclick = () => void doSave();
   toggle.onclick = () => { const p = page.classList.toggle("show-preview"); toggle.textContent = p ? "Source" : "Preview"; };
-  window.addEventListener("beforeunload", (ev) => { if (isDirty()) { ev.preventDefault(); ev.returnValue = ""; } });
-  window.addEventListener("pagehide", dropImages);
+  window.addEventListener("beforeunload", (ev) => { if (isDirty()) { ev.preventDefault(); ev.returnValue = ""; } }, on);
+  window.addEventListener("pagehide", dropImages, on);
+  dispose = () => { life.abort(); E.destroy(); dropImages(); };
+  current = { dispose: () => dispose(), dirty: isDirty };
 
   // ---- saving (r6b E5): the opened file only, last write wins
   let saving = false;
