@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { ReferenceServer, SESSION_COOKIE } from "../sync-protocol/reference-server.ts";
 import { accountHash } from "../sync-protocol/protocol.ts";
 import { devtoolsPort } from "../test-port.mjs";
-import { emit, guardConsole } from "./doc-sync-diag.mjs";
+import { emit, guardConsole, pairCheck } from "./doc-sync-diag.mjs";
 // (r5: before anything that can print: every in-process console call from here on is scrubbed (doc-sync-diag.mjs
 // prints through its own printers, saved when it loaded, so this never loops back))
 guardConsole();
@@ -99,7 +99,8 @@ async function relayRebuilt(r, method) {
 // (an answer's transport headers, as doc-sync-diag.mjs prints them)
 const transport = (h) => ({ te: h.get("transfer-encoding"), ce: h.get("content-encoding"), mfce: h.get("mf-content-encoding"), cl: h.get("content-length") });
 const sha256hex = async (b) => Buffer.from(await crypto.subtle.digest("SHA-256", b)).toString("hex");
-// (what case R checks, by traced call: the front's records (up: the upstream's status and headers by call and route;
+// (what case R checks, by traced call: the front's records (up: every upstream status and headers of the call, with its
+// route, as a list (r17a: a duplicate is seen, not overwritten);
 // relay: its byte receipt) and the browser's (net: the response's headers, its completion, its failure and code))
 const rec = { up: new Map(), relay: new Map(), net: new Map() };
 const netOf = (call) => { if (!rec.net.has(call)) rec.net.set(call, {}); return rec.net.get(call); };
@@ -152,7 +153,7 @@ const front = Bun.serve({
         const r = await (CLOUD ? fetch(cloud.url + path + u.search, { method: req.method, headers: h, body }) : ref.fetch(new Request("http://ref" + path + u.search, { method: req.method, headers: h, body })));
         emit.syncEnd(k, req.method, path, r.status, Date.now() - t);
         // (r17: a traced call's upstream status and transport headers, before any relay; then its relay and receipt)
-        if (call) { rec.up.set(`${call}:${route}`, { status: r.status, h: transport(r.headers) }); emit.upHdrs(call, route, r.status, transport(r.headers)); }
+        if (call) { if (!rec.up.has(call)) rec.up.set(call, []); rec.up.get(call).push({ route, status: r.status, h: transport(r.headers) }); emit.upHdrs(call, route, r.status, transport(r.headers)); }
         if (route === "old") {
           if (call) receiptOf(call, route, r.clone());
           return relayVerbatim(r);
@@ -329,8 +330,12 @@ try {
       const { browserContextId: rctx } = await send("Target.createBrowserContext");
       // (pageIn, declared below in this same block, is hoisted; its default context isn't used here)
       const Rp = await pageIn("R", rctx);
-      const oldCalls = await Rp.call("relayProbe", "/relay-old/api/sync/v1/status", 3);
-      const newCalls = await Rp.call("relayProbe", "/relay-new/api/sync/v1/status", 3);
+      // (r17a: the pairs, k = 1..3, each the k-th old call then the k-th new one, one after the other)
+      const oldCalls = [], newCalls = [];
+      for (let k = 0; k < 3; k++) {
+        oldCalls.push(...(await Rp.call("relayProbe", "/relay-old/api/sync/v1/status", 1)));
+        newCalls.push(...(await Rp.call("relayProbe", "/relay-new/api/sync/v1/status", 1)));
+      }
       const calls = [...oldCalls, ...newCalls];
       // (the old route's background receipts and the last network events: at most 12 s, their 10 s bound and a margin)
       for (const end = Date.now() + 12_000; Date.now() < end && !calls.every((c) => rec.relay.has(c) && (rec.net.get(c)?.done || rec.net.get(c)?.fail !== undefined)); ) await sleep(100);
@@ -338,9 +343,10 @@ try {
       for (const x of tr) if (x.kind) emit.stage(x.call, x.kind, x.detail); else emit.pageBytes(x.call, x.bytes, x.sha);
       const stages = (c) => tr.filter((x) => x.call === c && x.kind).map((x) => x.kind);
       const pageRec = (c) => tr.find((x) => x.call === c && x.sha);
-      const up = (c) => rec.up.get(`${c}:old`);
-      const transportSet = (c) => { const h = up(c)?.h; return !!h && [h.te, h.ce, h.mfce].some((v) => v !== null && v !== undefined && v !== ""); };
-      const said = (cs) => J(cs.map((c) => ({ c, up: up(c)?.status ?? rec.up.get(`${c}:new`)?.status, fail: rec.net.get(c)?.fail ?? null, done: !!rec.net.get(c)?.done, stages: stages(c) }))).slice(0, 900);
+      // (a call's one upstream receipt, of its route; none if it has none, more than one or another route's)
+      const one = (c, route) => { const a = rec.up.get(c) ?? []; return a.length === 1 && a[0].route === route ? a[0] : undefined; };
+      const up = (c) => one(c, "old");
+      const said = (cs) => J(cs.map((c) => ({ c, up: (rec.up.get(c) ?? []).map((x) => x.status), fail: rec.net.get(c)?.fail ?? null, done: !!rec.net.get(c)?.done, stages: stages(c) }))).slice(0, 900);
       if (CLOUD) check(oldCalls.length === 3 && oldCalls.every((c) => up(c)?.status === 200 && rec.relay.get(c)?.sha && named(rec.net.get(c)?.fail) && !rec.net.get(c)?.done && (stages(c).includes("fetch-rejected") || stages(c).includes("body-read-failed"))),
         "R1: cloud, the old relay (the upstream Response as is): each call's upstream 200 at the front and the front's receipt, then a named net:: failure in the browser, at the fetch or the body read: " + said(oldCalls));
       else check(oldCalls.length === 3 && oldCalls.every((c) => up(c)?.status === 200 && rec.net.get(c)?.done && stages(c).includes("parsed")),
@@ -349,8 +355,13 @@ try {
         "R2: the new relay (rebuilt, allow-listed headers): each call loads, 200, parsed: " + said(newCalls));
       check(newCalls.every((c) => { const p = pageRec(c), f = rec.relay.get(c); return !!p && !!f && p.bytes === f.n && p.sha === f.sha; }),
         "R3: the new relay: each call's bytes in the page (length and sha256) are the bytes the front relayed: " + J(newCalls.map((c) => ({ c, page: pageRec(c)?.bytes ?? null, front: rec.relay.get(c)?.n ?? null, same: pageRec(c)?.sha === rec.relay.get(c)?.sha }))));
-      if (CLOUD) check(oldCalls.every(transportSet), "R4: cloud, the upstream's answers carry transport headers (transfer-encoding, content-encoding or mf-content-encoding): " + J(oldCalls.map((c) => up(c)?.h ?? null)));
-      else check(oldCalls.every((c) => !!up(c) && !transportSet(c)), "R4: reference, the upstream's answers carry no transport headers: " + J(oldCalls.map((c) => up(c)?.h ?? null)));
+      // (r17a, I3R17R2-C1: R4 is the matched-pairs rule (doc-sync-diag.mjs's pairCheck, its controls in the diag step): each
+      // k-th old and new call, exactly one upstream receipt each, of its route, 200, the same transport tuple without an
+      // unknown variant, the same bytes; under cloud that tuple carries a transport header, under the reference none)
+      const member = (c) => ({ ups: rec.up.get(c) ?? [], relay: rec.relay.get(c) });
+      const pairs = oldCalls.map((c, k) => ({ old: member(c), new: member(newCalls[k]) }));
+      const R4 = pairCheck(oldCalls.length === newCalls.length ? pairs : [], CLOUD, 3);
+      check(R4.ok, `R4: ${CLOUD ? "cloud" : "reference"}, each old/new pair's upstream answers matched (one receipt each, 200, the same transport tuple and bytes; ${CLOUD ? "carrying" : "without"} a transport header): ` + R4.words.join("; "));
     } catch (e) {
       check(false, "R: the case stopped: " + String(e?.message ?? e).slice(0, 300));
     }
