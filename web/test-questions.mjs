@@ -138,6 +138,43 @@ try {
   }
   await a.send("Emulation.clearDeviceMetricsOverride");
   await a.ev(`window.scrollTo(0, 0)`);
+  // focus (William, Oct 29): one click shows the grading card alone on the whole window; Esc or the icon restores
+  const vis = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 10)) !== null && e.contains(document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 10))); })()`;
+  for (const [w, h, label] of [[1400, 1000, "desktop"], [390, 844, "phone"]]) {
+    await a.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: w < 600 });
+    await a.ev(`window.scrollTo(0, 0)`);
+    await a.ev(`document.querySelector('#grader .pager .focusbtn').click()`);
+    ok(await a.ev(`document.body.classList.contains('gfocus') && document.querySelector('#grader .pager .focusbtn').getAttribute('aria-pressed') === 'true'`), `${label} focus: one click turns it on`);
+    ok(await a.ev(`(() => { const r = document.querySelector('main.tool').getBoundingClientRect(); return r.left === 0 && r.top === 0 && Math.round(r.width) === innerWidth && Math.round(r.height) === innerHeight; })()`), `${label} focus: the grading card fills the window`);
+    ok(!(await a.ev(vis("#grader .roster"))) && !(await a.ev(vis("aside.gradebook"))) && !(await a.ev(vis("nav.lmsnav"))) && !(await a.ev(vis(".lmsbar"))), `${label} focus: the roster, course navigation, LMS bar and gradebook are hidden`);
+    const at = [];
+    for (const k of ["j", "j", "j", "j"]) {
+      await a.ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '${k}', bubbles: true }))`);
+      at.push(await a.ev(`JSON.stringify(['button[data-d="-1"]', 'button[data-d="1"]', '.save', '.focusbtn'].map((sel) => { const r = document.querySelector('#grader .pager ' + sel).getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round); }))`));
+    }
+    ok(at.every((x) => x === at[0]) && await a.ev(`document.body.classList.contains('gfocus')`), `${label} focus: j goes through all four students, focus kept, the pager in one place (${at[0]})`);
+    ok(await a.ev(`(() => { const r = document.querySelector('#grader .pager').getBoundingClientRect(); return r.left >= 0 && r.right <= ${w} + 1; })()`), `${label} focus: the pager fits the width`);
+    ok(await a.ev(`(() => { const t = document.querySelector('#grader .tabs').getBoundingClientRect(), r = document.querySelector('#grader .tabs .on').getBoundingClientRect(); return r.left >= t.left - 1 && r.right <= t.right + 1; })()`), `${label} focus: the current question's tab is in view`);
+    await a.ev(`(() => { const t = document.querySelector('main.tool'); t.scrollTop = t.scrollHeight; })()`);
+    await sleep(100);
+    ok(await a.ev(`(() => { const t = document.querySelector('main.tool'); const r = document.querySelector('#grader .pager').getBoundingClientRect(); return t.scrollTop > 0 ? Math.abs(r.top) <= 1 : r.top >= 0; })()`), `${label} focus: scrolled down, the pager stays at the top`);
+    await a.ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+    ok(await a.ev(`!document.body.classList.contains('gfocus') && getComputedStyle(document.querySelector('main.tool')).position !== 'fixed' && getComputedStyle(document.querySelector('#grader .roster')).display !== 'none'`), `${label} focus: Esc restores the layout`);
+  }
+  await a.ev(`document.querySelector('#grader .pager .focusbtn').click()`);
+  await a.ev(`document.querySelector('#grader .pager .focusbtn').click()`);
+  ok(await a.ev(`!document.body.classList.contains('gfocus') && document.querySelector('#grader .pager .focusbtn').getAttribute('aria-pressed') === 'false'`), "focus: the icon restores it too");
+  // remembered for the session: on, then the student's view (off there), then back
+  await a.ev(`document.querySelector('#grader .pager .focusbtn').click()`);
+  await a.ev(`document.getElementById('as-student').click()`);
+  ok(await a.ev(`!document.body.classList.contains('gfocus')`), "focus: not in the student's view");
+  await a.ev(`document.getElementById('as-instructor').click()`);
+  ok(await a.ev(`document.body.classList.contains('gfocus')`), "focus: remembered when the grading view comes back");
+  await a.send("Page.reload");
+  await a.until("window.demo && !document.getElementById('grader').hidden");
+  ok(await a.ev(`document.body.classList.contains('gfocus')`), "focus: remembered across a reload in this session");
+  await a.ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  ok(await a.ev(`!document.body.classList.contains('gfocus') && sessionStorage.getItem('sagebrush-questions-focus') === null`), "focus: Esc forgets it");
   await a.ev(`document.querySelector('#grader .tabs button[data-q="1"]').click()`);
   ok(await a.ev(`!!document.querySelector('#grader .work .chip.ok')`), "instructor: an auto-graded question shows its stored verdicts");
   await a.ev(`document.getElementById('as-student').click()`);
@@ -153,6 +190,9 @@ try {
   await a.send("Page.navigate", { url: new URL("questions/?plots=0", base).href });
   await a.until("window.demo && document.querySelectorAll('#items .q').length === 4");
   ok(await a.ev(`!document.querySelector('#items .fig figure')`), "?plots=0: the plot questions are hidden");
+  await a.send("Page.navigate", { url: new URL("questions/?focus=0#instructor", base).href });
+  await a.until("window.demo && !document.getElementById('grader').hidden && !!document.querySelector('#grader .pager')");
+  ok(await a.ev(`!document.querySelector('#grader .focusbtn')`), "?focus=0: no focus icon");
   ok(a.errors.length === 0, `no page errors${a.errors.length ? ": " + a.errors.slice(0, 3).join(" | ") : ""}`);
 } catch (e) {
   console.log("FAIL " + (e?.stack ?? e));
