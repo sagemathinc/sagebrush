@@ -18,6 +18,8 @@ import { EXAMPLES, type Example } from "./examples";
 export { EXAMPLES };
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
+// (comments on the preview, cut 1: the frozen text, for grading: comments.ts)
+export { attachComments, makeAnchor, locate, type Thread } from "./comments";
 
 export { PATCH_BUDGET, FOLLOW_KEY } from "./editor";
 // the source's font size (px) and the preview's zoom (%): their ranges, defaults and keys in localStorage
