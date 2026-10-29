@@ -235,6 +235,19 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
         { mode: r.stats.mode, resumedFrom: r.stats.resumedFrom, mains: ck && mains(ck), outcome: r.res.outcome, same: hi === hc, inc: hi.slice(0, 260), cold: hc.slice(0, 260) });
     }
   }
+  // (daybreak2 DB2-UX2-R4-1) many checkpoints whose high-water mark is on one long main line (an \input at its start
+  // reads a file with many paragraphs): the line's end is found once per edit, not once per checkpoint
+  {
+    const longLine = "\\input{b}" + " word".repeat(100000);
+    const sub2 = Array.from({ length: 300 }, (_, k) => "B para " + k + ".").join("\n\n") + "\n";
+    const doc = "\\documentclass{article}\n\\begin{document}\n" + longLine + "\nTail line.\n\\end{document}\n";
+    const c5 = coldRun(new Map([["main.tex", doc], ["b.tex", sub2]]), "main.tex", { Tmin: 1 });
+    const at = doc.indexOf("Tail line.");
+    const r = incremental(c5, { start: at, end: at + 4, text: "Tall" });
+    const shared = c5.checkpoints.filter((k) => { const v = k.srcSeen.get("main.tex"); return v !== undefined && v > doc.indexOf("\\input{b}") && v < at; }).length;
+    check("pos-guard-line-end-scanned-once", c5.outcome === "ok" && r.res.outcome === "ok" && shared >= 100 && r.stats.lineEndScans <= 3 && r.stats.lineEndScanned <= doc.length,
+      { ckpts: c5.checkpoints.length, shared, scans: r.stats.lineEndScans, scanned: r.stats.lineEndScanned, n: doc.length, mode: r.stats.mode });
+  }
 }
 {
   // source positions (sync): each chunk's pos is the offset of the line where it begins; after an edit above them
