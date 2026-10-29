@@ -8,6 +8,7 @@ import { NAME } from '../../web/preview/worker.mjs';
 import { MOCKS } from '../../web/preview/names.mjs';
 import { prepare } from './prepare.mjs';
 import { R2 } from './r2.mjs';
+import { upload } from './upload.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -82,13 +83,9 @@ async function main() {
       const remoteSignal = AbortSignal.timeout(20 * 60 * 1000);
       try {
         const client = new R2(credentials(), name, remoteSignal);
-        const previous = await client.list();
-        const keep = new Set([...output.files.keys()].map(p => `${name}/${p}`));
-        // Upload policy sidecars and assets before entry pages; stale deletions happen last.
-        const entries = [...output.files].sort(([a], [b]) => Number(a.endsWith('.html')) - Number(b.endsWith('.html')) || a.localeCompare(b));
-        for (const [path, file] of entries) await client.put(`${name}/${path}`, file.bytes, file.type);
-        for (const key of previous) if (!keep.has(key)) await client.delete(key);
+        const { uploaded, skipped } = await upload(client, name, output, remoteSignal);
         remoteSignal.throwIfAborted();
+        console.log(`Preview objects: ${uploaded} uploaded, ${skipped} unchanged`);
       } catch (error) {
         if (remoteSignal.aborted) throw new Error('Preview remote phase exceeded 20 minutes; publication may be partial and needs owner inspection');
         throw error;
