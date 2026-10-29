@@ -160,9 +160,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let groupPos: number[] = [];   // per group, the source offset where it begins (-1: unknown), from the shown reply
   // (the shown reply's positions sorted, as [offset, group] pairs, ties by group: built once per installed reply)
   let posIndex: [number, number][] = [];
-  // the source text the shown reply was made from: positions hold only while the source is that text (ux2 r2 #1)
-  let posText: string | null = null;
-  const sentText = new Map<number, string>();   // per revision sent, its text, until its reply comes
+  // the document and revision the shown reply was made for: positions hold only while the source is still that
+  // revision (ux2 r2 #1; every edit moves the gate's revision, so the check is O(1), never a comparison of the text)
+  let posTok: Token | null = null;
   const images: Record<string, string | { why: string }> = {};
   const blobs = new Set<string>();
   let imageBytes = 0;
@@ -189,7 +189,6 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       restartedAt = t.rev; startWorker(); request();
     }, 15000);
     mark("tex-request", { rev: t.rev });
-    sentText.set(t.rev, src.value);
     worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images });
   };
   const onReply = (r: any) => {
@@ -197,13 +196,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     mark("tex-parse-done", { rev: r.rev });
     clearTimeout(watchdog);
     inflight = null;
-    const text = sentText.get(r.rev);
-    for (const k of sentText.keys()) if (k <= r.rev) sentText.delete(k);
     if (queued) request();
     const ok = gate.accept(r);
     if (!ok.patch) return;
     if (!r.ok) { say("the preview failed: " + String(r.error).slice(0, 200)); return; }
-    schedulePatch(r.items as Item[], r.groups as number, r.rev as number, Array.isArray(r.pos) ? (r.pos as number[]) : [], text ?? null);
+    schedulePatch(r.items as Item[], r.groups as number, r.rev as number, Array.isArray(r.pos) ? (r.pos as number[]) : [], { doc: r.doc as number, rev: r.rev as number });
     preview.dataset.replyMs = String(Math.round(performance.now() - tReply));
     if (ok.current) resolveImages(r.imageRefs as string[], gate.token());
   };
@@ -213,7 +210,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the patch loop's own longest step and swap, and the most UTF-8 bytes parsed in one step: preview.dataset)
   let patchSeq = 0, stepMax = 0, swapMs = 0, stepBytesMax = 0;
   const stops = { items: 0, bytes: 0, ms: 0 };   // (which stop ended each step, all patches: preview.dataset.stops)
-  const schedulePatch = (items: Item[], ng: number, rev: number, pos: number[], text: string | null) => {
+  const schedulePatch = (items: Item[], ng: number, rev: number, pos: number[], tok: Token) => {
     const seq = ++patchSeq;
     const html: string[][] = Array.from({ length: ng }, () => []), sizes: number[][] = Array.from({ length: ng }, () => []);
     // (a piece's UTF-8 size from the worker; without one, 3 bytes per UTF-16 unit, UTF-8's most)
@@ -252,7 +249,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       for (const w of staged) { preview.insertBefore(w, before); w.hidden = false; }
       groups = kids.slice(0, p).concat(staged, kids.slice(groupHtml.length - s));
       groupHtml = next;
-      groupPos = pos; posText = text;
+      groupPos = pos; posTok = tok;
       posIndex = [];
       pos.forEach((q, i) => { if (q >= 0) posIndex.push([q, i]); });
       posIndex.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -380,9 +377,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const line = hl.children[lineOf(a)] as HTMLElement | undefined;
     if (line) src.scrollTop = Math.max(0, line.offsetTop - src.clientHeight / 3);
   };
-  // the positions are of the shown reply's text: while the source differs (a reply still to come, or one that failed),
-  // no sync either way (ux2 r2 #1)
-  const posCurrent = () => posText !== null && src.value === posText;
+  // the positions are of the shown reply's revision: after an edit since (its reply still to come, or one that
+  // failed), no sync either way (ux2 r2 #1)
+  const posCurrent = () => gate.current(posTok);
   let followPending = false;
   // the index of the first entry whose offset is above off (a binary search; preview.dataset.syncVisits: its probes)
   const above = (off: number) => {

@@ -488,6 +488,20 @@ try {
   check(caught, "A3: the held reply installed: the Follow put off is done (the cursor's place in view)");
   const inv3 = await dbl("word77x");
   check(inv3 && inv3.a === SYNC3.indexOf("word77x"), "A3: the held reply installed: a double-click lands on the word in the new text", { inv3, want: SYNC3.indexOf("word77x") });
+  // (DB2-UX2-R2-1) freshness is the revision, not the text: Follow and Show, installed, never read the source's value
+  const noRead = await ev(`(() => {
+    const s = document.querySelector(".tex-src"), i = s.value.indexOf("word20x"), j = s.value.indexOf("word90x");
+    const d = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value"); let reads = 0;
+    Object.defineProperty(s, "value", { configurable: true, get() { reads++; return d.get.call(this); }, set(v) { d.set.call(this, v); } });
+    try {
+      s.focus(); s.setSelectionRange(i, i); s.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowUp", bubbles: true }));
+      const R = document.querySelector(".tex-right").getBoundingClientRect(), r = [...document.querySelectorAll(".tex-preview .p")].find((x) => x.textContent.includes("word20x")).getBoundingClientRect();
+      s.setSelectionRange(j, j);
+      document.querySelector('[aria-label="Show the cursor\\'s place in the preview"]').click();
+      return { reads, followed: r.bottom > R.top && r.top < R.bottom, shown: !!document.querySelector(".tex-preview .ch.sync-flash")?.textContent.includes("word90x") };
+    } finally { delete s.value; }
+  })()`);
+  check(noRead.reads === 0 && noRead.followed && noRead.shown, "A3: Follow and Show check freshness by revision, without reading the source text", noRead);
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: holdHook.identifier });
 
   // duplicate positions kept (ux2 r2 #5): a heading and the paragraph after it on one line begin at the same offset;

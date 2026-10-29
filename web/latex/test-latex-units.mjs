@@ -137,13 +137,24 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     ["long-caption-two-paragraphs", "\\begin{figure}\\caption{Cap one.\n\nCap two.}\\end{figure}\nAfter.", (h) => !h.includes("not finished") && h.includes("Cap two.") && h.includes("After.")],
     ["long-thanks-two-paragraphs", "Text\\thanks{Th one.\n\nTh two.} After.", (h) => !h.includes("not finished") && h.includes("After.")],
     ["short-section-literal-par", "\\section{A \\par B}\nAfter.", (h) => h.includes("\\section{A") && h.includes("not finished") && h.includes("After.")],
-    // (a counter of the test's own, read with \the: the renderer keeps its own section numbers, and \arabic isn't
+    // (a counter of the test's own, read with \number: the renderer keeps its own section numbers, and \arabic and \the aren't
     // shown by this prototype; the two closed controls show the reading works)
-    ["counter-stepcounter-control", "\\stepcounter{foo}Value: \\the\\csname c@foo\\endcsname.", (h) => !h.includes("not finished") && h.includes("Value: 1.")],
-    ["counter-stepcounter-no-effect", "\\stepcounter{foo\n\nValue: \\the\\csname c@foo\\endcsname.", (h) => h.includes("\\stepcounter{foo not finished") && h.includes("Value: 0.")],
-    ["counter-setcounter-control", "\\setcounter{foo}{5}Value: \\the\\csname c@foo\\endcsname.", (h) => !h.includes("not finished") && h.includes("Value: 5.")],
-    ["counter-setcounter-multiarg-no-effect", "\\setcounter{foo\n\n{5}Value: \\the\\csname c@foo\\endcsname.", (h) => h.includes("\\setcounter{foo not finished") && h.includes("Value: 0.")],
+    ["counter-stepcounter-control", "\\stepcounter{foo}Value: \\number\\csname c@foo\\endcsname.", (h) => !h.includes("not finished") && h.includes("Value: 1.")],
+    ["counter-stepcounter-no-effect", "\\stepcounter{foo\n\nValue: \\number\\csname c@foo\\endcsname.", (h) => h.includes("\\stepcounter{foo not finished") && h.includes("Value: 0.")],
+    ["counter-setcounter-control", "\\setcounter{foo}{5}Value: \\number\\csname c@foo\\endcsname.", (h) => !h.includes("not finished") && h.includes("Value: 5.")],
+    ["counter-setcounter-multiarg-no-effect", "\\setcounter{foo\n\n{5}Value: \\number\\csname c@foo\\endcsname.", (h) => h.includes("\\setcounter{foo not finished") && h.includes("Value: 0.")],
     ["opt-newcounter-runaway", "\\newcounter{bar}[sec\n\nAfter opt.", (h) => h.includes("\\newcounter[sec") && h.includes("not finished") && h.includes("After opt.")],
+    // (per argument, as the kernel reads them: a footnote's [n] is short, its text long; a \newenvironment's name, [n]
+    // and [default] short, its bodies long; a \newcommand's name and [n] short, its [default] and body long)
+    ["opt-footnote-runaway", "Before.\\footnote[1\n\nAfter words.\n\\section{Later}\nEnd text. Fn: \\number\\csname c@footnote\\endcsname.", (h) => h.includes("\\footnote[1 not finished") && h.includes("After words.") && h.includes("Later") && h.includes("Fn: 0.")],
+    ["footnote-counter-control", "Before.\\footnote{Note.} Fn: \\number\\csname c@footnote\\endcsname.", (h) => !h.includes("not finished") && h.includes("Fn: 1.")],
+    ["newenv-name-runaway", "\\newenvironment{boxy\n\nAfter env.", (h) => h.includes("\\newenvironment{boxy not finished") && h.includes("After env.")],
+    ["newenv-default-runaway", "\\newenvironment{boxy}[1][x\n\nAfter env.", (h) => h.includes("\\newenvironment[x not finished") && h.includes("After env.")],
+    ["newenv-long-bodies", "\\newenvironment{boxy}{Begin one.\n\nBegin two.}{End mark.}\\begin{boxy}Inside.\\end{boxy} After env.", (h) => !h.includes("not finished") && h.includes("Begin two.") && h.includes("Inside.") && h.includes("End mark.") && h.includes("After env.")],
+    ["newcmd-name-runaway", "\\newcommand{\\foo\n\nAfter cmd.", (h) => h.includes("\\newcommand{\\foo") && h.includes("not finished") && h.includes("After cmd.")],
+    ["newcmd-count-runaway", "\\newcommand{\\foo}[1\n\nAfter cmd.", (h) => h.includes("\\newcommand[1 not finished") && h.includes("After cmd.")],
+    ["newcmd-long-default", "\\newcommand{\\foo}[1][Def one.\n\nDef two.]{(#1)}\\foo After cmd.", (h) => !h.includes("not finished") && h.includes("Def two.") && h.includes("After cmd.")],
+    ["caption-long-optional", "\\begin{figure}\\caption[Short one.\n\nShort two.]{Cap text.}\\end{figure}\nAfter.", (h) => !h.includes("not finished") && h.includes("Cap text.") && h.includes("After.")],
     ["opt-cite-runaway", "See \\cite[page\n\nNext para.", (h) => h.includes("\\cite[page") && h.includes("not finished") && h.includes("Next para.")],
   ];
   for (const [name, body, ok] of longs) { const h = doc("\\documentclass{article}\n\\newcounter{foo}\n", body); check(name, ok(h), h.slice(0, 700)); }
@@ -169,6 +180,31 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   const c2 = coldRun(new Map([["main.tex", reread]]), "main.tex", { Tmin: 100 });
   const a2 = posAts(c2);
   check("pos-unique-main-reread", dups(a2).length === 0, { outcome: c2.outcome, dups: dups(a2) });
+  // the combination (astra4 POS-A4-1): the main file reads itself once, the inner read takes in many lines and returns
+  // by \endinput (no \end{document} inside it), and the outer continuation reads those lines again. An edit then
+  // resumes (A) from a checkpoint in the outer second pass, behind the lines the inner read marked; (B) from a
+  // checkpoint inside the inner read. (Edits of the same length: offsets after them don't move, so reused events
+  // compare with a cold run's as they are.) Each: the resume reached (the checkpoint's main readers as named), ok, no line
+  // marked twice, and the same markers as a cold run of the edited text
+  const P = Array.from({ length: 200 }, (_, k) => "Para " + k + " with several words.").join("\n\n");
+  const self = "\\ifx\\sbdone\\undefined\\documentclass{article}\\fi\n\\ifx\\sbdone\\undefined\\begin{document}\\fi\nOuter start.\n" +
+    // (the \input runs after its \fi, as \sbnext: no conditional is open during the inner read, so it has checkpoints)
+    "\\ifx\\sbdone\\undefined\\def\\sbnext{\\input{main.tex}}\\else\\def\\sbnext{}\\fi\\def\\sbdone{}\\sbnext\n" + P + "\n\\ifx\\sbback\\undefined\\def\\sbback{}\\endinput\\fi\nOuter tail.\n\\end{document}\n";
+  const c3 = coldRun(new Map([["main.tex", self]]), "main.tex", { Tmin: 100 });
+  const a3 = posAts(c3);
+  check("pos-reread-cold", c3.outcome === "ok" && dups(a3).length === 0 && a3.includes(self.indexOf("Para 150 ")) && a3.includes(self.indexOf("Outer tail.")), { outcome: c3.outcome, dups: dups(a3).slice(0, 5), n: a3.length });
+  const mains = (ck) => ck.readers.filter((r) => r.path === "main.tex").length;
+  const sorted = (a) => a.slice().sort((x, y) => x - y).join(",");
+  for (const [name, word, repl, want] of [["pos-reread-resume-outer-pass", "Outer tail.", "Outer tall.", 1], ["pos-reread-resume-inner", "Para 150 ", "Pxra 150 ", 2]]) {
+    const at = self.indexOf(word);
+    const r = incremental(c3, { start: at, end: at + word.length, text: repl });
+    const edited = self.slice(0, at) + repl + self.slice(at + word.length);
+    const cold = coldRun(new Map([["main.tex", edited]]), "main.tex", { Tmin: 100 });
+    const ai = posAts(r.res), ac = posAts(cold);
+    const ck = r.stats.resumedFrom >= 0 ? c3.checkpoints[r.stats.resumedFrom] : null;
+    check(name, r.stats.mode !== "full" && ck && mains(ck) === want && r.res.outcome === "ok" && cold.outcome === "ok" && dups(ai).length === 0 && sorted(ai) === sorted(ac),
+      { mode: r.stats.mode, resumedFrom: r.stats.resumedFrom, mains: ck && mains(ck), outcome: r.res.outcome, dups: dups(ai).slice(0, 5), n: [ai.length, ac.length] });
+  }
 }
 {
   // source positions (sync): each chunk's pos is the offset of the line where it begins; after an edit above them

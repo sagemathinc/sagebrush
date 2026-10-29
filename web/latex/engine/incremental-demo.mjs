@@ -80,7 +80,11 @@ export function incremental(prev, edit) {
   const { files, delta } = applyEdit(prev, edit);
   const s = edit.start, e = edit.end;
   const mapped = prev.checkpoints.map((ck, i) => {
-    if (ck.mainPos <= s) return { ck, i, pos: ck.mainPos, state: "before" };          // depends only on text before mainPos
+    // depends only on text before mainPos, and before the main file's high-water mark: when the main file read itself,
+    // the outer reader's place is behind text the inner read already took in (unchanged for any other document, where
+    // the high-water mark is behind mainPos)
+    const seen = ck.srcSeen.get(prev.main);
+    if (ck.mainPos <= s && (seen === undefined || seen < s)) return { ck, i, pos: ck.mainPos, state: "before" };
     const mr = ck.readers.find((r) => r.path === prev.main);
     // a half-read main line depends on text from its line start: an edit touching or AT that start drops it
     const after = mr && mr.partial ? mr.lineStart > e : ck.mainKey >= e;
