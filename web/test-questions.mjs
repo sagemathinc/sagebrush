@@ -230,6 +230,47 @@ try {
   ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /23 \\/ 23/.test(r.textContent)) && [...document.querySelectorAll('#gb tr')].some((r) => /Emmy Noether/.test(r.textContent) && /14 \\/ 23/.test(r.textContent))`), `instructor: the proof grades reach the gradebook (Ada 23 / 23, Emmy 10 + 4 = 14 / 23): ${await a.ev(`[...document.querySelectorAll('#gb tr')].map((r) => r.textContent).join(" | ")`)}`);
   await a.ev(`document.getElementById('as-student').click()`);
   ok(await a.ev(`document.getElementById('score').textContent === '23 / 23' && /Graded by your instructor.*Clear and complete/.test(${q(6)}.querySelector('.attempts').textContent)`), "proof: the student sees the grade and the comment");
+  // annotations on a proof (William, Oct 29): the grader selects a passage of Alan's proof, presses c and comments;
+  // after Save grade, Alan sees the bubble with his grade. The comments UI is sagebrush-latex's attachComments
+  // (from /sagebrush-latex.js); its hooks: .sb-cm-bubble, .sb-cm-badge, [data-thread], CSS.highlights "sb-comments".
+  if (!(await a.ev(`import('/sagebrush-latex.js').then((m) => !!m.attachComments, () => false)`))) console.log("skip annotations: /sagebrush-latex.js has no attachComments yet");
+  else {
+    await a.send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await a.ev(`document.getElementById('as-instructor').click()`);
+    await a.ev(`document.querySelector('#grader .tabs button[data-q="6"]').click()`);
+    await a.ev(`document.querySelectorAll('#grader .roster button')[1].click()`);
+    await a.until(`/Turing/.test(document.querySelector('#grader .work h2').textContent) && /both sides are/.test(document.querySelector('#grader .work .tex-preview')?.textContent || '') && !document.querySelector('#grader .annhint').hidden`, 60000);
+    ok(true, "annotations: the grader's hint shows with the module present");
+    // select "both sides are" in the rendered proof, then c
+    await a.ev(`(() => {
+      const root = document.querySelector('#grader .work .tex-preview'), w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let n; while ((n = w.nextNode())) { const i = n.data.indexOf('both sides are'); if (i >= 0) { const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 14); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return true; } }
+      return false;
+    })()`);
+    await a.ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }))`);
+    await a.until(`/^(TEXTAREA|INPUT)$/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable`, 5000);
+    await a.ev(`(() => { const t = document.activeElement; if ('value' in t) t.value = 'Which sides? Say what you add to each.'; else t.textContent = 'Which sides? Say what you add to each.'; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true })); })()`);
+    await a.until(`[...document.querySelectorAll('#grader .sb-cm-bubble, #grader .sb-cm-badge')].length >= 1`, 5000);
+    ok(await a.ev(`(CSS.highlights?.get('sb-comments')?.size ?? 0) >= 1`), "annotations: the selected passage is highlighted");
+    ok(await a.ev(`(demo.course.annotations('Alan Turing', 'q7') || []).length === 1 && demo.course.annotations('Alan Turing', 'q7')[0].messages[0].text === 'Which sides? Say what you add to each.' && /both sides are/.test(JSON.stringify(demo.course.annotations('Alan Turing', 'q7')[0].anchor))`), "annotations: the comment is kept, one message, anchored to its passage");
+    // j away and back: the comment is loaded again (nothing rerun but the preview)
+    await a.ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))`);
+    await a.ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }))`);
+    await a.until(`/Turing/.test(document.querySelector('#grader .work h2').textContent) && document.querySelectorAll('#grader .sb-cm-bubble, #grader .sb-cm-badge').length >= 1`, 60000);
+    ok(await a.ev(`(CSS.highlights?.get('sb-comments')?.size ?? 0) >= 1`), "annotations: leaving and coming back shows the comment and its highlight again");
+    await a.ev(`(document.querySelectorAll('#grader .rubric input')[0].checked = true, document.querySelector('#grader .save').click())`);
+    ok(await a.ev(`(demo.course.grade('Alan Turing', 'q7')?.annotations || []).length === 1`), "annotations: Save grade stores them with the grade");
+    // Alan's view: his grade with the bubble, view only
+    await a.ev(`document.getElementById('as-student').click()`);
+    await a.ev(`(document.getElementById('student').value = 'Alan Turing', document.getElementById('student').dispatchEvent(new Event('change')))`);
+    await a.until(`!!${q(6)}.querySelector('.tex-only-preview .tex-preview .ch') && ${q(6)}.querySelectorAll('.sb-cm-bubble, .sb-cm-badge').length >= 1`, 60000);
+    ok(await a.ev(`/1 comment on your proof/.test(${q(6)}.querySelector('.attempts').textContent) && /Which sides\\?/.test(${q(6)}.textContent)`), "annotations: Alan sees the comment with his grade");
+    await a.ev(`(() => { const root = ${q(6)}.querySelector('.tex-preview'); const r = document.createRange(); r.selectNodeContents(root.querySelector('.ch')); getSelection().removeAllRanges(); getSelection().addRange(r); document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true })); })()`);
+    await sleep(300);
+    ok(await a.ev(`(demo.course.annotations('Alan Turing', 'q7') || []).length === 1 && !/^(TEXTAREA|INPUT)$/.test(document.activeElement?.tagName)`), "annotations: the student's view is view-only (c adds nothing)");
+    await a.ev(`(document.getElementById('student').value = 'Ada Lovelace', document.getElementById('student').dispatchEvent(new Event('change')))`);
+    await a.send("Emulation.clearDeviceMetricsOverride");
+  }
   // the fallback editor (?latex=0, or no LaTeX build): a textarea and a KaTeX preview, text never parsed as HTML
   await a.send("Page.navigate", { url: new URL("questions/?latex=0", base).href });
   await a.until(`window.demo && !!document.querySelectorAll('#items .q')[6]?.querySelector('.proof-fallback .proof-prev .katex')`, 60000);

@@ -283,6 +283,10 @@ class MockCourseService {
   grade(student, item) { return (this.state.grades ||= {})[`${student}|${item}`]; }
   setGrade(student, item, g) { (this.state.grades ||= {})[`${student}|${item}`] = { ...g, at: Date.now() }; this.save(); }
   gradebook() { return ROSTER.map((s) => ({ student: s, ...(this.state.scores[s] || {}) })); }
+  // a proof's annotations as the grader makes them (the comments adapter saves on each change); Save grade
+  // copies them into the grade record, which is what the student sees
+  annotations(student, item) { return (this.state.annotations ||= {})[`${student}|${item}`]; }
+  setAnnotations(student, item, threads) { (this.state.annotations ||= {})[`${student}|${item}`] = threads; this.save(); }
   draft(student, item) { return (this.state.drafts ||= {})[`${student}|${item}`]; }
   setDraft(student, item, text) { (this.state.drafts ||= {})[`${student}|${item}`] = text; this.save(); }
   reset() { this.state = { attempts: {}, scores: {}, grades: {} }; this.save(); }
@@ -384,6 +388,17 @@ async function proofEditor(root, opts) {
   show();
   return { kind: "fallback", getText: () => text, setText: (t) => { text = t; if (ta) ta.value = t; show(); }, rendered: async () => {}, previewRoot: () => prev, groups: () => [], sourceRangeOf: () => null, previewRangesOf: () => [], on: () => () => {}, destroy: () => { clearTimeout(timer); root.textContent = ""; } };
 }
+// Annotations on a proof (William, Oct 29): highlight a span of the rendered proof and add a comment bubble;
+// the student sees the bubbles with the grade. The comments UI is sagebrush-latex's shared module
+// (attachComments, web/latex/comments.ts); this is the grading adapter: the text is frozen (a submitted proof),
+// threads have one message by "instructor", the student's view is view-only, and c comments on a selection.
+// Resolves to the comments handle, or null without the module (or with the fallback editor).
+async function attachAnnotations(editor, { mode, load, save }) {
+  const [ed, m] = await Promise.all([editor, loadLatex()]);
+  if (!m?.attachComments || ed.kind !== "latex") return null;
+  return m.attachComments(ed, { load, save: save ?? (() => {}), mode, author: "instructor", single: true });
+}
+const threadCount = (threads) => (threads || []).filter((t) => !t.resolved).length;
 // Text with $...$ and $$...$$ math, built as nodes: the text is never parsed as HTML.
 function setMathText(el, s) {
   el.textContent = "";
@@ -430,7 +445,8 @@ function renderItem(item, n, student) {
     pts.textContent = `${itemScore(item, student)} / ${item.points} points`;
     if (isGraded(item)) {
       const g = course.grade(student, item.id);
-      at.textContent = g ? `Graded by your instructor.${g.comment ? " Comment: " + g.comment : ""}` : tries.length ? "Submitted; your instructor will grade it." : "Not submitted yet.";
+      const nc = threadCount(g?.annotations);
+      at.textContent = g ? `Graded by your instructor.${g.comment ? " Comment: " + g.comment : ""}${nc ? ` ${nc} ${nc === 1 ? "comment" : "comments"} on your proof.` : ""}` : tries.length ? "Submitted; your instructor will grade it." : "Not submitted yet.";
       return tries.length > 0;
     }
     at.textContent = tries.some((t) => t.correct) ? `Answered in ${tries.length} ${tries.length === 1 ? "try" : "tries"}.` : `${Math.max(0, item.attempts - tries.length)} of ${item.attempts} tries left.`;
@@ -496,6 +512,8 @@ function renderItem(item, n, student) {
       onChange: (t) => { course.setDraft(student, item.id, t); saved.textContent = "Draft kept in this browser."; },
     });
     studentEditors.push(ed);
+    const g = course.grade(student, item.id);
+    if (prev && g?.annotations?.length) studentComments.push(attachAnnotations(ed, { mode: "view", load: () => g.annotations }));
     ed.then((e) => {
       if (prev) return;
       btn.disabled = false;
@@ -563,9 +581,13 @@ function renderGradebook(changed) {
     gb.append(tr);
   }
 }
-const studentEditors = [];
-function render() {
+const studentEditors = [], studentComments = [];
+const closeStudentEditors = () => {
+  for (const c of studentComments.splice(0)) c.then((h) => h?.destroy());
   for (const ed of studentEditors.splice(0)) ed.then((e) => e.destroy());
+};
+function render() {
+  closeStudentEditors();
   const student = studentSel.value;
   document.getElementById("meta").textContent = `Due ${ASSIGNMENT.due} · ${ASSIGNMENT.items.length} questions · your numbers are your own: classmates get different ones.`;
   const items = document.getElementById("items");
@@ -648,9 +670,13 @@ function chip(item, s) {
   if (tries.some((t) => t.correct)) return `<span class="chip ok">${item.points}/${item.points}</span>`;
   return tries.length ? `<span class="chip bad">0/${item.points}</span>` : `<span class="chip">–</span>`;
 }
-let graderEditor = null;
-function renderGrader() {
+let graderEditor = null, graderComments = null;
+const closeGraderEditor = () => {
+  graderComments?.then((h) => h?.destroy()); graderComments = null;
   graderEditor?.then((ed) => ed.destroy()); graderEditor = null;
+};
+function renderGrader() {
+  closeGraderEditor();
   const el = document.getElementById("grader");
   const item = ASSIGNMENT.items[gState.q], student = others()[gState.s];
   el.innerHTML = `<div class="meta">Grading by question: each student's answer to one question, one after another. The answers and Sage's checks are stored, so nothing is reopened or rerun. Keys: <code>j</code> next, <code>k</code> previous.</div>
@@ -673,8 +699,15 @@ function renderGrader() {
   if (!tries.length) tl.innerHTML = `<p class="attempts">No answer yet.</p>`;
   else if (item.kind === "proof") {
     // the stored source, shown as its preview alone (read only): the proof as the student saw it
-    tl.innerHTML = `<div class="proofbox grading"></div>`;
+    tl.innerHTML = `<div class="proofbox grading"></div><div class="attempts annhint" hidden>Select a passage of the proof and press <code>c</code> to comment on it; the student sees your comments with the grade.</div>`;
     graderEditor = proofEditor(tl.querySelector(".proofbox"), { text: tries.at(-1).answer, readOnly: true, layout: "preview" });
+    const s0 = student, i0 = item.id;
+    graderComments = attachAnnotations(graderEditor, {
+      mode: "comment",
+      load: () => course.annotations(s0, i0) ?? course.grade(s0, i0)?.annotations ?? [],
+      save: (threads) => course.setAnnotations(s0, i0, threads),
+    });
+    graderComments.then((h) => { if (h) tl.querySelector(".annhint").hidden = false; });
   }
   else if (item.kind === "manual") tl.innerHTML = `<div class="answer"></div>`, (tl.querySelector(".answer").textContent = tries.at(-1).answer);
   else tries.forEach((t, i) => {
@@ -697,7 +730,10 @@ function renderGrader() {
     showSum();
     save.disabled = !tries.length;
     save.onclick = () => {
-      course.setGrade(student, item.id, { checks: item.rubric.map((_, i) => gr.querySelector(`[data-i="${i}"]`).checked), comment: gr.querySelector(".comment").value.trim() });
+      course.setGrade(student, item.id, {
+        checks: item.rubric.map((_, i) => gr.querySelector(`[data-i="${i}"]`).checked), comment: gr.querySelector(".comment").value.trim(),
+        ...(item.kind === "proof" ? { annotations: course.annotations(student, item.id) ?? course.grade(student, item.id)?.annotations ?? [] } : {}),
+      });
       updateTotal(student);
       gState.s = (gState.s + 1) % others().length;
       renderGrader();
@@ -746,8 +782,8 @@ function setView(instructor) {
   // (focus belongs to the grading view: off in the student's view, back as remembered here)
   document.body.classList.toggle("gfocus", instructor && FLAGS.focus && focusRemembered());
   // (one proof editor at a time: the hidden view's are closed)
-  if (instructor) for (const ed of studentEditors.splice(0)) ed.then((e) => e.destroy());
-  else { graderEditor?.then((e) => e.destroy()); graderEditor = null; }
+  if (instructor) closeStudentEditors();
+  else closeGraderEditor();
   if (instructor) {
     // start at the first answer that still needs a grade on this question
     const item = ASSIGNMENT.items[gState.q];
