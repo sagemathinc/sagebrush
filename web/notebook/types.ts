@@ -43,6 +43,8 @@ export interface OutputSink {
   /** Controls of an @interact (Sagebrush's protocol). */
   interact(spec: object): void;
   clear(): void;
+  /** Optional: input() asks for a line.  Call reply(text) once with what was typed (no newline), or reply(null) for end of input.  Without it, input() reads end of input. */
+  input?(prompt: string, reply: (text: string | null) => void): void;
   done(ms: number): void;
   /** Interrupted or restarted: `message` says which. */
   stopped(message: string): void;
