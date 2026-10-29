@@ -27,7 +27,7 @@ const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.a
 const BASE = arg("--base-prod"), PROD = arg("--prod"), DEV = arg("--dev"), META = arg("--meta"), OUT = arg("--out"), CHANGED = arg("--changed");
 if (!BASE || !PROD || !DEV) { console.error("usage: --base-prod DIR --prod DIR --dev DIR [--meta FILE] [--out FILE]"); process.exit(2); }
 const ROOTS = ["dist", "site/public"];
-const DEV_BOOT = { raw: 2304, gzip: 1024 };
+const DEV_BOOT = { raw: 2188, gzip: 786 };
 const DECLARED = new Set(["dist/board/examples/source.json", "site/public/board/examples/source.json"]);
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const gz = (b) => gzipSync(b, { level: 9 }).length;
@@ -81,9 +81,8 @@ const prodRefs = [...prod.entries()].filter(([n]) => /\.(html|js|mjs|json)$/.tes
 check("PROD: no LaTeX-owned file, and nothing names one", prodLatex.length === 0 && prodRefs.length === 0, { prodLatex, prodRefs });
 // 3. the DEV bootstrap. Its ceiling was 1536 B / 717 B gzip; raised for the file browser's "LaTeX file" in New (asked
 //    for by William: the only way to make a .tex was to upload one), whose code is in index.html's bundle in a LaTeX
-//    build only (PROD byte-identical, check 1). PROVISIONAL: the I1 run's measured delta + 128 B / + 64 B gzip replaces
-//    these numbers once measured (an estimate until then: 1520 B / 535 B by this check before it, about 560 B / 250 B
-//    for it)
+//    build only (PROD byte-identical, check 1). The ceiling is the measured delta + 128 B / + 64 B gzip: 2060 B / 722 B
+//    by this check in the I1 run that passed with it (VM2, 2026-10-29), so 2188 B / 786 B
 const pi = readFileSync(prod.get("dist/index.html")), di = readFileSync(dev.get("dist/index.html"));
 const boot = { raw: di.length - pi.length, gzip: gz(di) - gz(pi) };
 check(`DEV bootstrap delta (index.html): at most ${DEV_BOOT.raw} B minified and ${DEV_BOOT.gzip} B gzip`, boot.raw <= DEV_BOOT.raw && boot.gzip <= DEV_BOOT.gzip, boot);
