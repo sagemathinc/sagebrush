@@ -194,6 +194,56 @@ try {
     await ev(`(history.back(), true)`);
     const bk = await until(`window.__noReload === true && document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
     check(bk, "B2: Back returns to the first file, in place");
+    // ---- (astra B5-A1) Back and Forward with unsaved text ask first, as opening another file does: declined, the
+    // history goes back to the shown file's entry and its text stays; accepted, the other file opens; clean, nothing asked
+    const S = (x) => `(${x})`;
+    await ev(`(() => { window.__asked = 0; window.__answer = false; window.confirm = () => { window.__asked++; return window.__answer; }; return true; })()`);
+    const state = S(`{ asked: window.__asked, url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex, title: document.querySelector(".tex-title")?.textContent, src: document.querySelector(".tex-src")?.value, pages: document.querySelectorAll(".tex-page").length, kept: window.__noReload === true }`);
+    await ev(`(history.forward(), true)`);
+    const fw0 = await until(`document.querySelector(".tex-preview")?.textContent.includes("File B here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 20000);
+    const fw0s = await ev(state);
+    check(fw0 && fw0s.asked === 0 && fw0s.at === 1 && fw0s.kept, "B5-A1: Forward with nothing unsaved: the next file, nothing asked", fw0s);
+    await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% unsaved in B\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+    await ev(`(history.back(), true)`); await sleep(1500);
+    const db = await ev(state);
+    check(db.asked === 1 && db.url === fb && db.at === 1 && db.title === "b.tex" && db.src.includes("% unsaved in B") && db.pages === 1 && db.kept, "B5-A1: Back with unsaved text asks; declined, the file, its URL, its history entry and its text stay", db);
+    await ev(`(window.__answer = true, history.back(), true)`);
+    const ab = await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
+    const abs = await ev(state);
+    check(ab && abs.asked === 2 && abs.at === 0 && abs.title === "a.tex" && abs.kept, "B5-A1: Back with unsaved text, accepted: the first file opens", abs);
+    await ev(`(() => { window.__answer = false; const t = document.querySelector(".tex-src"); t.value += "% unsaved in A\\n"; t.dispatchEvent(new Event("input")); history.forward(); return true; })()`); await sleep(1500);
+    const df = await ev(state);
+    check(df.asked === 3 && df.url === fa && df.at === 0 && df.title === "a.tex" && df.src.includes("% unsaved in A") && df.pages === 1 && df.kept, "B5-A1: Forward with unsaved text asks; declined, the file, its URL, its history entry and its text stay", df);
+    await ev(`(window.__answer = true, history.forward(), true)`);
+    const af = await until(`document.querySelector(".tex-preview")?.textContent.includes("File B here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 20000);
+    const afs = await ev(state);
+    check(af && afs.asked === 4 && afs.at === 1 && !afs.src.includes("% unsaved") && afs.kept, "B5-A1: Forward with unsaved text, accepted: the next file opens, as saved", afs);
+    await ev(`(history.back(), true)`);
+    const cb = await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
+    const cbs = await ev(state);
+    check(cb && cbs.asked === 4 && cbs.at === 0 && cbs.kept, "B5-A1: Back with nothing unsaved: nothing asked", cbs);
+    // ---- (astra B5-A2) a mount replaced while it waits stops there: A's read held, B opened and shown, then A's read
+    // released: B's title stays, one live engine worker (B's), and the unsaved-text question is B's
+    const a2 = await ev(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const W0 = window.__W0 ??= window.Worker; const made = []; window.Worker = class extends W0 { constructor(...a) { super(...a); const w = { live: true }; made.push(w); const t = this.terminate.bind(this); this.terminate = () => { w.live = false; t(); }; } };
+      let release; window.__sbTexMountRead = (p) => p === "/sw/b.tex" ? new Promise((r) => { release = r; }) : undefined;
+      window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} });
+      for (let i = 0; i < 50 && !release; i++) await wait(100);
+      const held = !!release;
+      window.__sbTexMountRead = undefined;
+      window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} });
+      for (let i = 0; i < 100 && !document.querySelector(".tex-preview")?.textContent.includes("File A here."); i++) await wait(100);
+      const shownA = !!document.querySelector(".tex-preview")?.textContent.includes("File A here.");
+      release?.(); await wait(2000);
+      const out = { held, shownA, title: document.querySelector(".tex-title")?.textContent, doc: document.title, url: new URLSearchParams(location.search).get("tex"), pages: document.querySelectorAll(".tex-page").length, made: made.length, live: made.filter((w) => w.live).length };
+      const t = document.querySelector(".tex-src"); t.value += "% unsaved in A\\n"; t.dispatchEvent(new Event("input"));
+      const before = window.__asked; window.__answer = false;
+      window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }); await wait(300);
+      out.asked = window.__asked - before; out.stays = !!document.querySelector(".tex-preview")?.textContent.includes("File A here.") && document.querySelector(".tex-src").value.includes("% unsaved in A");
+      window.Worker = W0;
+      return out; })()`);
+    check(a2.held && a2.shownA && a2.title === "a.tex" && a2.doc.startsWith("a.tex") && a2.url === fa && a2.pages === 1 && a2.made === 1 && a2.live === 1 && a2.asked === 1 && a2.stays, "B5-A2: a mount replaced while its read waits stops: the newer file's title, one live worker, its unsaved text guarded", a2);
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
   }
   // ---- the embeddable editor (component.ts: mountEditor, for the questions site's LaTeX proof answers; exported by the
@@ -496,6 +546,27 @@ try {
   const after = await ev(`({ reads: window.__reads.length, unique: new Set(window.__reads).size, blobs: window.__blobs, imgs: new Set([...document.querySelectorAll(".tex-preview img.graphic")].map((i) => i.src)).size, refused: (document.querySelector(".tex-preview").textContent.match(/: too many images\\]/g) || []).length })`);
   check(settled && after.reads === 64 && after.unique === 64 && after.blobs === 64 && after.imgs === 64 && after.refused === 2, "released: each name read once, 64 blobs (the count bound), the 2 over it refused, no duplicate blob", after);
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: hook.identifier });
+  // ---- (astra B5-A2) an image read that completes after the page was disposed of keeps nothing: held, another file
+  // opened in place, then released: no blob made
+  {
+    await mk("/late/p.png", png);
+    const fl = await mk("/late/doc.tex", enc("\\documentclass{article}\n\\begin{document}\n\\includegraphics{p}\n\\end{document}\n"));
+    const fo = await mk("/late/other.tex", enc("\\documentclass{article}\n\\begin{document}\nThe other one.\n\\end{document}\n"));
+    const h2 = await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+      window.__holds = []; window.__blobs = 0;
+      const make = URL.createObjectURL.bind(URL); URL.createObjectURL = (b) => { window.__blobs++; return make(b); };
+      window.__sbTexImageRead = () => new Promise((r) => window.__holds.push(r));
+    })()` });
+    await open(fl);
+    const heldImg = await until(`window.__holds.length === 1`, 20000);
+    await ev(`(window.__sbTex({ path: "/late/other.tex", fid: ${JSON.stringify(fo)} }), true)`);
+    const other = await until(`document.querySelector(".tex-preview")?.textContent.includes("The other one.")`, 20000);
+    await ev(`(() => { for (const r of window.__holds.splice(0)) r(); return true; })()`);
+    await sleep(1500);
+    const late = await ev(`({ blobs: window.__blobs, imgs: document.querySelectorAll("img.graphic").length })`);
+    check(heldImg && other && late.blobs === 0 && late.imgs === 0, "B5-A2: an image read completing after its page was disposed of: no blob made", late);
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: h2.identifier });
+  }
 
   // ---- non-ASCII HTML (daybreak2 i1c01): the patch budget's 512 KiB is UTF-8 bytes, split.ts's measure: a 1.95 MB
   // (UTF-8) paragraph of three-byte characters is patched with no step over 512 KiB, the byte stop seen ending steps
@@ -677,6 +748,8 @@ try {
   const flash = await ev(`(() => { document.querySelector('[aria-label="Show the cursor\\'s place in the preview"]').click(); return !!document.querySelector(".tex-preview .ch.sync-flash"); })()`);
   check(flash, "A3: Show: the cursor's place in the preview flashed");
   await ev(`(document.querySelector('[aria-label="The preview follows the cursor"]').click(), true)`);
+  // (the last follow's smooth scroll settled first: under load it can still be moving when Follow is turned off)
+  for (let i = 0, last = -1; i < 50; i++) { const t = await ev(`document.querySelector(".tex-right").scrollTop`); if (t === last) break; last = t; await sleep(200); }
   const off0 = await ev(`document.querySelector(".tex-right").scrollTop`), off1 = await fwd("word2x");
   check(off1.scroll === off0, "A3: Follow off: moving the cursor leaves the preview where it is", { off0, off1 });
   check(await ev(`localStorage.getItem("sagebrush-latex-follow") === "0"`), "A3: Follow off is remembered");

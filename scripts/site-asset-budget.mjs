@@ -100,9 +100,9 @@ check("the LaTeX group's JS: at most 192 KiB minified, 64 KiB gzip", js.length >
 // 4b. the comments' chunk: at most 16 KiB minified, 6 KiB gzip (@sagebrush, 2026-10-29: comments in a lazy chunk of
 //     their own, so a document without comments never pays for them)
 if (dev.has(COMMENTS)) { const b = readFileSync(dev.get(COMMENTS)); check("the LaTeX comments' chunk: at most 16 KiB minified, 6 KiB gzip", b.length <= 16 * 1024 && gz(b) <= 6 * 1024, { raw: b.length, gzip: gz(b) }); }
-// (the test build's hold on image reads, web/latex/page.ts: folded away in the DEV build, so named in none of its files)
-const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && readFileSync(dev.get(n)).includes("__sbTexImageRead"));
-check("DEV: the test build's hook folded away (no file names __sbTexImageRead)", testHooks.length === 0, { testHooks });
+// (the test build's holds on image and file reads, web/latex/page.ts: folded away in the DEV build, so named in none of its files)
+const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && /__sbTex(ImageRead|MountRead)/.test(readFileSync(dev.get(n), "latin1")));
+check("DEV: the test build's hooks folded away (no file names __sbTexImageRead or __sbTexMountRead)", testHooks.length === 0, { testHooks });
 check("the LaTeX group: no CSS file over 8 KiB, no new font", css.every((n) => statSync(dev.get(n)).size <= 8192) && fonts.length === 0, { css, fonts });
 // 5. KaTeX: the same files, and in exactly one bundle
 const kp = [...prod.keys()].filter((n) => n.startsWith("dist/katex/")).sort(), kd = [...dev.keys()].filter((n) => n.startsWith("dist/katex/")).sort();
