@@ -15,24 +15,80 @@
 //   node web/workspace/test-workspace-pages.mjs
 // Every DevTools call is bounded (PAGES_CALL_MS, default 30 s): a page promise that never settles, or a browser that
 // stops answering, fails that call, naming the method and the expression, instead of hanging the run.  A watchdog
-// (PAGES_RUN_S, default 300 s) ends an overrunning run, naming the last check and the call it was waiting on.
+// (PAGES_RUN_S, default 300 s), armed before any startup wait, ends an overrunning run, naming the last check and the
+// call it was waiting on; it closes the DevTools sockets, stops Chrome (TERM, then KILL) until it is seen to exit, and
+// reports any temporary directory it couldn't remove.  A call that times out is abandoned, not cancelled: its waiter
+// is dropped, so a late answer is ignored, and its page-side evaluation runs on until the page navigates or its tab or
+// Chrome is closed.  The forced-watchdog control runs this file again as a child (PAGES_WATCHDOG_CONTROL=1, a 10 s
+// watchdog) that hangs on purpose, alongside the run, so it adds no wall time; its result is checked at the end.
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { devtoolsPort } from "../test-port.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 let port = Number(process.env.CDP_PORT) || 0;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const CONTROL = process.env.PAGES_WATCHDOG_CONTROL === "1";
+const CALL_MS = Number(process.env.PAGES_CALL_MS) || 30_000;
+const RUN_S = Number(process.env.PAGES_RUN_S) || 300;
+let lastCheck = "(none yet)", waitingOn = "(nothing)";
+const describe = (method, params) => method + (params?.expression ? ": " + String(params.expression).replace(/\s+/g, " ").slice(0, 160) : "");
+/** `p`, or a rejection naming `what` once `ms` pass without an answer. */
+const bounded = (p, what, ms = CALL_MS) => { let t; return Promise.race([p, new Promise((_, no) => { t = setTimeout(() => no(new Error(`no answer within ${ms} ms: ${what}`)), ms); })]).finally(() => clearTimeout(t)); };
+const sockets = [];
+// (the forced-watchdog control's child run, started now so it costs no wall time; checked at the end)
+const control = CONTROL ? null : new Promise((ok) => {
+  const env = { ...process.env, PAGES_WATCHDOG_CONTROL: "1", PAGES_RUN_S: "10" };
+  delete env.CDP_PORT;
+  const c = spawn(process.execPath, [fileURLToPath(import.meta.url)], { env, stdio: ["ignore", "pipe", "pipe"] });
+  let out = "", err = "";
+  c.stdout.on("data", (d) => (out += d));
+  c.stderr.on("data", (d) => (err += d));
+  const t = setTimeout(() => c.kill("SIGKILL"), 60_000);
+  c.on("exit", (code, signal) => { clearTimeout(t); ok({ code, signal, out, err }); });
+});
 const profile = mkdtempSync(join(tmpdir(), "sb-ws-pages-"));
 const files = mkdtempSync(join(tmpdir(), "sb-ws-up-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-if (!port) port = await devtoolsPort(profile);
+const chromeExited = new Promise((r) => chrome.once("exit", r));
+/** Chrome stopped and seen to exit: TERM, up to 5 s for its exit, then KILL and up to 5 s more; says which. */
+const stopChrome = async () => {
+  if (chrome.exitCode !== null || chrome.signalCode !== null) return "had exited";
+  chrome.kill("SIGTERM");
+  if (await Promise.race([chromeExited.then(() => true), sleep(5000).then(() => false)])) return "exited on TERM";
+  chrome.kill("SIGKILL");
+  return (await Promise.race([chromeExited.then(() => true), sleep(5000).then(() => false)])) ? "exited on KILL" : "NOT seen to exit";
+};
+/** The temporary directories removed; each one that couldn't be, with why. */
+const removeDirs = () => { const left = []; for (const d of [profile, files]) try { rmSync(d, { recursive: true, force: true }); } catch (e) { left.push(`${d}: ${e?.code ?? e}`); } return left; };
+// (the watchdog, armed before any startup wait: a run past RUN_S says where it was, closes its sockets, stops Chrome
+// until it is seen to exit, removes its directories (reporting any it can't) and fails)
+setTimeout(async () => {
+  console.error(`FAIL: the run didn't end within ${RUN_S} s; the last check was "${lastCheck}"; waiting on: ${waitingOn}`);
+  for (const s of sockets) try { s.close(); } catch {}
+  const how = await stopChrome(), left = removeDirs();
+  console.error(`  watchdog cleanup: Chrome ${how}; ${left.length ? "NOT removed: " + left.join(", ") : "temporary directories removed"}`);
+  process.exit(1);
+}, RUN_S * 1000).unref();
+waitingOn = "Chrome's DevTools port";
+if (!port) port = await bounded(devtoolsPort(profile), waitingOn, 60_000);
 let targets;
-for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
+waitingOn = "the page list (/json)";
+for (let i = 0; i < 300 && !targets; i++) { try { targets = await bounded(fetch(`http://127.0.0.1:${port}/json`).then((r) => r.json()), waitingOn, 5000); } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
-await new Promise((r) => (ws.onopen = r));
+sockets.push(ws);
+await bounded(new Promise((r) => (ws.onopen = r)), (waitingOn = "the page's DevTools socket to open"), 10_000);
+// (the forced-watchdog control's own run: hang here on purpose, for the watchdog to end)
+if (CONTROL) { console.log(`CONTROL ${profile} ${chrome.pid}`); waitingOn = "the control's deliberate hang"; await new Promise(() => {}); }
+/** Another DevTools connection (another tab): its calls bounded and named, like the main tab's. */
+const tab = (sock, label) => {
+  let k = 0; const w = new Map();
+  sock.addEventListener("message", (e) => { const m = JSON.parse(e.data); if (m.id && w.has(m.id)) { w.get(m.id)(m.result ?? m.error); w.delete(m.id); } });
+  return (method, params = {}, ms = CALL_MS) => { const id = ++k, what = label + describe(method, params); waitingOn = what; return bounded(new Promise((r) => { w.set(id, r); sock.send(JSON.stringify({ id, method, params })); }), what, ms).finally(() => w.delete(id)); };
+};
 let n = 0; const waiting = new Map(); const errors = [];
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
@@ -41,12 +97,6 @@ ws.onmessage = (ev) => {
   // (Delete's confirm: yes)
   if (m.method === "Page.javascriptDialogOpening") send("Page.handleJavaScriptDialog", { accept: true, ...(m.params.type === "prompt" ? { promptText: m.params.defaultPrompt ?? "" } : {}) }).catch(() => {});
 };
-const CALL_MS = Number(process.env.PAGES_CALL_MS) || 30_000;
-const RUN_S = Number(process.env.PAGES_RUN_S) || 300;
-let lastCheck = "(none yet)", waitingOn = "(nothing)";
-const describe = (method, params) => method + (params?.expression ? ": " + String(params.expression).replace(/\s+/g, " ").slice(0, 160) : "");
-/** `p`, or a rejection naming `what` once `ms` pass without an answer. */
-const bounded = (p, what, ms = CALL_MS) => { let t; return Promise.race([p, new Promise((_, no) => { t = setTimeout(() => no(new Error(`no answer within ${ms} ms: ${what}`)), ms); })]).finally(() => clearTimeout(t)); };
 const send = (method, params = {}, ms = CALL_MS) => { const id = ++n, what = describe(method, params); waitingOn = what; return bounded(new Promise((r) => { waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); }), what, ms).finally(() => waiting.delete(id)); };
 const ev = async (expression, ms) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
 const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr, Math.max(1000, Math.min(CALL_MS, ms - (Date.now() - t)))).catch(() => false)) return true; await sleep(100); } return false; };
@@ -54,14 +104,6 @@ const go = async (url) => { await send("Page.navigate", { url }); await sleep(30
 const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; lastCheck = what; if (!ok) fails.push(what); };
-// (the watchdog: a run past RUN_S says where it was, cleans up, and fails, rather than being cancelled silently)
-setTimeout(() => {
-  console.error(`FAIL: the run didn't end within ${RUN_S} s; the last check was "${lastCheck}"; waiting on: ${waitingOn}`);
-  try { chrome.kill(); } catch {}
-  rmSync(profile, { recursive: true, force: true });
-  rmSync(files, { recursive: true, force: true });
-  process.exit(1);
-}, RUN_S * 1000).unref();
 const W = "window.sagebrush?.workspace";
 const B = "window.sagebrush?.board";
 
@@ -70,6 +112,9 @@ try {
   // (control: a page promise that never settles fails its call within its deadline, named, instead of hanging the run)
   const t0 = Date.now(), hung = await ev("new Promise(() => {})", 2000).then(() => "answered", (e) => String(e?.message));
   check(hung === "no answer within 2000 ms: Runtime.evaluate: new Promise(() => {})" && Date.now() - t0 < 10_000, "(a page promise that never settles fails its call within its deadline, naming it): " + hung);
+  // (control: the same bound on a wait that isn't a DevTools call, as the startup waits are)
+  const hungWait = await bounded(new Promise(() => {}), "a wait that never ends", 200).then(() => "ended", (e) => String(e?.message));
+  check(hungWait === "no answer within 200 ms: a wait that never ends", "(a wait that never ends fails within its deadline, naming it): " + hungWait);
   // ---------------------------------------------------------------- the board page
   await go(base + "board/");
   await until(`${B}?.snapshot()`, 60000);
@@ -329,12 +374,15 @@ try {
   const legacy = "cccccccccccc";
   await ev(`localStorage.setItem("sagebrush-board:local:${legacy}", JSON.stringify({ title: "Legacy", nodes: [] })); 1`);
   // (the second tab: a board page with no workspace, the benchmark's, holding the workspace's lock)
-  const t2 = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(base + "board/?items=10&strokes=0")}`, { method: "PUT" })).json();
+  const t2 = await bounded(fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(base + "board/?items=10&strokes=0")}`, { method: "PUT" }).then((r) => r.json()), (waitingOn = "a second tab (/json/new)"));
   const ws2 = new WebSocket(t2.webSocketDebuggerUrl);
-  await new Promise((r) => (ws2.onopen = r));
-  let n2 = 0; const w2 = new Map();
-  ws2.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && w2.has(m.id)) { w2.get(m.id)(m.result); w2.delete(m.id); } };
-  const ev2 = (expression) => new Promise((r) => { const i = ++n2; w2.set(i, r); ws2.send(JSON.stringify({ id: i, method: "Runtime.evaluate", params: { expression, returnByValue: true } })); });
+  sockets.push(ws2);
+  await bounded(new Promise((r) => (ws2.onopen = r)), (waitingOn = "the second tab's DevTools socket to open"), 10_000);
+  const call2 = tab(ws2, "the lock tab: ");
+  const ev2 = (expression, ms) => call2("Runtime.evaluate", { expression, returnByValue: true }, ms);
+  // (control: the lock tab's calls are bounded too)
+  const hung2 = await call2("Runtime.evaluate", { expression: "new Promise(() => {})", awaitPromise: true }, 2000).then(() => "answered", (e) => String(e?.message));
+  check(hung2 === "no answer within 2000 ms: the lock tab: Runtime.evaluate: new Promise(() => {})", "(the lock tab: a call that gets no answer fails within its deadline, naming it): " + hung2);
   await sleep(1500);
   await ev2(`navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__held = r))); 1`);
   await go(base + "board/?doc=local:" + legacy);
@@ -431,12 +479,15 @@ try {
   check(await until(`${W}.list("/").then((l) => !l.some((e) => e.ref === ${JSON.stringify(nbId)}))`), "a deleted notebook is dropped from the workspace");
   // a newer Sagebrush page upgrading the workspace's database: this page and a board page in another
   // tab both lose it, and both say so, with Reload (capabilities step 1; last: nothing opens it after)
-  const tU = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(base + "board/")}`, { method: "PUT" })).json();
+  const tU = await bounded(fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(base + "board/")}`, { method: "PUT" }).then((r) => r.json()), (waitingOn = "the other tab (/json/new)"));
   const wsU = new WebSocket(tU.webSocketDebuggerUrl);
-  await new Promise((r) => (wsU.onopen = r));
-  let nU = 0; const waitingU = new Map();
-  wsU.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && waitingU.has(d.id)) { waitingU.get(d.id)(d.result ?? d.error); waitingU.delete(d.id); } };
-  const evU = async (expression, ms = CALL_MS) => { const id = ++nU, what = "the other tab: " + describe("Runtime.evaluate", { expression }); waitingOn = what; const r = await bounded(new Promise((ok) => { waitingU.set(id, ok); wsU.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }), what, ms).finally(() => waitingU.delete(id)); return r?.result?.value; };
+  sockets.push(wsU);
+  await bounded(new Promise((r) => (wsU.onopen = r)), (waitingOn = "the other tab's DevTools socket to open"), 10_000);
+  const callU = tab(wsU, "the other tab: ");
+  const evU = async (expression, ms) => (await callU("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms))?.result?.value;
+  // (control: the other tab's calls are bounded too)
+  const hungU = await callU("Runtime.evaluate", { expression: "new Promise(() => {})", awaitPromise: true }, 2000).then(() => "answered", (e) => String(e?.message));
+  check(hungU === "no answer within 2000 ms: the other tab: Runtime.evaluate: new Promise(() => {})", "(the other tab: a call that gets no answer fails within its deadline, naming it): " + hungU);
   for (let i = 0; i < 600 && !(await evU(`!!window.sagebrush?.workspace`).catch(() => false)); i++) await sleep(100);
   check(await evU(`!!window.sagebrush?.workspace`), "(a board page open in another tab, with the workspace)");
   await ev(`new Promise((ok, no) => { const r = indexedDB.open("sagebrush-workspace", 99); r.onsuccess = () => { r.result.close(); ok(1); }; r.onerror = () => no(r.error); r.onblocked = () => no(new Error("blocked")); })`);
@@ -452,10 +503,20 @@ try {
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
 } finally {
-  chrome.kill();
-  await sleep(200);
-  rmSync(profile, { recursive: true, force: true });
-  rmSync(files, { recursive: true, force: true });
+  for (const s of sockets) try { s.close(); } catch {}
+  const how = await stopChrome();
+  if (how === "NOT seen to exit") fails.push("Chrome was not seen to exit after TERM and KILL");
+  for (const l of removeDirs()) fails.push("a temporary directory not removed: " + l);
+}
+// (the forced-watchdog control: its child hung on purpose; its watchdog must have ended it, naming the wait, with its
+// Chrome seen to exit, its directories removed and exit code 1)
+if (control) {
+  const r = await bounded(control, "the forced-watchdog control's run", 70_000).catch((e) => ({ code: null, signal: null, out: "", err: String(e?.message) }));
+  const [, cprofile, cpid] = /CONTROL (\S+) (\d+)/.exec(r.out) ?? [];
+  let alive = false;
+  if (cpid) try { process.kill(Number(cpid), 0); alive = true; } catch {}
+  check(r.code === 1 && r.err.includes('FAIL: the run didn\'t end within 10 s; the last check was "(none yet)"; waiting on: the control\'s deliberate hang') && /watchdog cleanup: Chrome exited on (TERM|KILL); temporary directories removed/.test(r.err) && !!cprofile && !existsSync(cprofile) && !alive,
+    "(the forced-watchdog control: a hung run is ended by its watchdog, naming the wait, its Chrome seen to exit, its directories removed, exit code 1): " + JSON.stringify({ code: r.code, signal: r.signal, err: r.err.slice(0, 400), profile: cprofile ?? null, alive }));
 }
 if (fails.length) {
   console.error(`FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  "));
