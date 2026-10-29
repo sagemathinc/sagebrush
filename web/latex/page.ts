@@ -112,11 +112,24 @@ export async function newTex(ws: Workspace, open: (e: Entry) => unknown): Promis
 // the page mounted now: another .tex is opened in place (no reload: William's B2, the notebook no longer flashing by),
 // so the one shown is disposed of first (its worker, image blobs and listeners)
 let current: { dispose(): void; dirty(): boolean } | null = null;
+// each mount's number: a mount whose number is no longer the last one's was replaced while it waited (a read, a path
+// lookup), and stops at its next step, before it sets the title, makes an editor or becomes current
+let mounts = 0;
+// the history position of the file shown (history.state.sbTex, from 0 at the first file), so a declined Back or
+// Forward can go back to it; and that return's own popstate, which is ignored
+let shownAt = 0, returning = false;
+const LEAVE = "Leave this file without saving your changes?";
 
 export async function mount(root: HTMLElement, host: Host): Promise<void> {
   mark("tex-mount", {});
   current?.dispose();
+  const my = ++mounts;
   const life = new AbortController(), on = { signal: life.signal };
+  const live = () => my === mounts && !life.signal.aborted;
+  const st = history.state && typeof history.state === "object" ? history.state : {};
+  if (typeof st.sbTex !== "number") history.replaceState({ ...st, sbTex: 0 }, "");
+  shownAt = history.state.sbTex;
+  const here = location.href;
   let dispose = () => { life.abort(); };
   current = { dispose: () => dispose(), dirty: () => false };
   if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS; document.head.appendChild(style); }
@@ -199,17 +212,30 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   g.__sbTex = (e: Entry, tab?: boolean) => {
     if (tab || !/\.tex$/i.test(e.path) || !e.fid) return bootHook(e, tab);
     if (e.fid === host.fid) return true;
-    if (current?.dirty() && !confirm("Leave this file without saving your changes?")) return true;
+    if (current?.dirty() && !confirm(LEAVE)) return true;
     const q = new URLSearchParams(location.search); q.set("tex", e.fid);
-    history.pushState(null, "", "/?" + q.toString());
+    history.pushState({ sbTex: shownAt + 1 }, "", "/?" + q.toString());
     openHere(e.fid);
     return true;
   };
-  window.addEventListener("popstate", () => { const t = new URLSearchParams(location.search).get("tex"); if (t && t !== host.fid) openHere(t); else if (!t) location.reload(); }, on);
+  // Back and Forward among those entries: the same question first; declined, the history is taken back to this file's
+  // entry and the editor, its text unsaved, stays as it is
+  window.addEventListener("popstate", (ev) => {
+    if (returning) { returning = false; return; }
+    const t = new URLSearchParams(location.search).get("tex");
+    const to = typeof ev.state?.sbTex === "number" ? ev.state.sbTex : null;
+    if (t === host.fid) { if (to !== null) shownAt = to; return; }
+    if (current?.dirty() && !confirm(LEAVE)) {
+      if (to !== null && to !== shownAt) { returning = true; history.go(shownAt - to); } else history.pushState({ sbTex: shownAt }, "", here);
+      return;
+    }
+    if (t) openHere(t); else { current?.dispose(); location.reload(); }
+  }, on);
   const gone = (t: string) => { main.textContent = ""; const m = el("div", "tex-gone", t); main.appendChild(m); save.hidden = true; toggle.hidden = true; tools.hidden = true; };
 
   // ---- binding and reading (r5 §1a, §4)
   const where = await host.ws.pathOfFile(host.fid);
+  if (!live()) return;
   if (!where.ok) { gone(where.why === "trashed" ? "This file isn't here any more (it's in the Trash)." : "This file isn't here any more."); return; }
   const e0: Entry = where.entry;
   title.textContent = nameOf(where.path); title.title = where.path;
@@ -219,7 +245,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     return;
   }
   let read: { entry: Entry; content: Uint8Array };
-  try { read = await host.ws.readUpTo(where.path, EDIT_MAX); } catch (err) { gone("This file can't be read here: " + String((err as Error)?.message ?? err)); return; }
+  try {
+    // (the test build only: the page test can hold this read, to replace the mount while it waits; elsewhere this folds away)
+    if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexMountRead?.(where.path);
+    read = await host.ws.readUpTo(where.path, EDIT_MAX);
+  } catch (err) { if (!live()) return; gone("This file can't be read here: " + String((err as Error)?.message ?? err)); return; }
+  if (!live()) return;
   if (read.entry.fid !== host.fid) { gone("This file isn't here any more."); return; }
   mark("tex-read-done", { bytes: read.content.length });
   const opened = openBytes(read.content);
@@ -249,6 +280,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // keeps images, so no two resolutions are admitted against the same count or bytes, and a name is read once.
   const wanted = new Set<string>();
   let resolving = false;
+  // (a read that completes after this page was disposed of keeps nothing: E.destroy leaves the gate's document current)
+  const alive = (tok: Token) => !life.signal.aborted && gate.sameDoc(tok);
   const resolveImages = async (refs: string[], tok: Token) => {
     for (const name of refs) if (!Object.hasOwn(images, name)) wanted.add(name);
     if (resolving) return;
@@ -264,16 +297,16 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         if (!c.ok) { images[name] = { why: c.why }; changed = true; continue; }
         let found: Entry | undefined;
         for (const p of c.paths) { const e = await host.ws.stat(p).catch(() => undefined); if (e && e.kind === "file" && !e.trashed) { found = e; break; } }
-        if (!gate.sameDoc(tok)) { wanted.clear(); return; }
+        if (!alive(tok)) { wanted.clear(); return; }
         if (!found) { images[name] = { why: "not found" }; changed = true; continue; }
         if ((found.size ?? 0) > IMAGE_BOUNDS.perImage || imageBytes + (found.size ?? 0) > IMAGE_BOUNDS.total) { images[name] = { why: "too large" }; changed = true; continue; }
         let r: { entry: Entry; content: Uint8Array };
         // (the test build only: the page test can hold an image read here; elsewhere this folds away)
         if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexImageRead?.(found.path);
-        try { r = await host.ws.readUpTo(found.path, IMAGE_BOUNDS.perImage); } catch { if (gate.sameDoc(tok)) { images[name] = { why: "not readable" }; changed = true; } continue; }
+        try { r = await host.ws.readUpTo(found.path, IMAGE_BOUNDS.perImage); } catch { if (alive(tok)) { images[name] = { why: "not readable" }; changed = true; } continue; }
         // (the same file, by identity, when the read completes; else dropped)
         const now = await host.ws.stat(found.path).catch(() => undefined);
-        if (!gate.sameDoc(tok)) { wanted.clear(); return; }
+        if (!alive(tok)) { wanted.clear(); return; }
         if (!now || now.fid !== found.fid || r.entry.fid !== found.fid || now.updated !== found.updated) { images[name] = { why: "changed while it was read" }; changed = true; continue; }
         // (the bytes actually read, against the size admitted and what is kept, before any blob is made)
         const why = admitImageBytes(r.content.length, found.size, imageBytes);
@@ -286,7 +319,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         blobs.add(url); images[name] = url; changed = true;
       }
     } finally { resolving = false; }
-    if (changed && gate.sameDoc(tok)) request();
+    if (changed && alive(tok)) request();
   };
   const dropImages = () => { for (const u of blobs) URL.revokeObjectURL(u); blobs.clear(); };
 
