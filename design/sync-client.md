@@ -511,8 +511,9 @@ It holds that reservation until its last large reference is dropped. The same ho
     - the server's top-level `invalid` "rebuild" (`why: "invalid"`);
     - **a diverged log** (`why: "diverged"`): `welcome.next_dseq` above this namespace's next dseq, an echo that isn't its record's op, or an `order` naming a dseq this device has already decided. This is the case of a workspace restored, or reset with its device kept: step 4's rebuild must also take the server's `next_dseq` as the namespace's next dseq.
   - No top-level error and no closed socket removes an undecided record. The sender waits for what is in flight, then sends again from the lowest record not accepted, after its timer.
-- **D4. Tests:** web/workspace/test-workspace-sync-client.mjs.
-  - It runs the cases in headless Chrome against web/sync/test-entry.ts in Miniflare.
+- **D4. Tests:** the cases (web/workspace/sync-client-cases.js) have two runners, with the same front.
+  - Core's web/workspace/test-sync-client-ref.mjs runs them in headless Chrome against core's reference server (web/sync-protocol/reference-server.ts), in process. It skips by name the 2 cases that need the cloud's plan limits (storageFull, tooLarge), saying so for each.
+  - The cloud repository's web/sync/test-workspace-sync-client.mjs runs all of them against its server (web/sync/test-entry.ts) in Miniflare.
   - A front in the test serves the page and proxies the site's API (the socket too) on the page's origin. It keeps the session cookie, and it can drop acks, fake the server's errors, close sockets, rewrite `welcome` and hold uploads.
   - A fake clock drives pace and backoff.
   - It runs on the VMs (ci.yml's sync block).
