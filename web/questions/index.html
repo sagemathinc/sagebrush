@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sagebrush questions (preview)</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8C%BF%3C/text%3E%3C/svg%3E">
+<meta name="description" content="A preview of auto-graded questions in Sagebrush: randomized per student, checked in the browser by Sage, with the score sent to the course gradebook.">
+<style>
+  :root { --ink: #1f2421; --muted: #5d655f; --line: #d9dbd3; --bg: #fbfaf7; --card: #fff; --accent: #4a6b49; --ok: #2f7d3a; --bad: #b3412f; --lms: #2d3b55; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: #eef0f3; color: var(--ink); }
+  .banner { background: #fff7d6; border-bottom: 1px solid #e8dca0; font-size: 13px; padding: 6px 14px; color: #5a4b10; }
+  .lmsbar { background: var(--lms); color: #fff; padding: 10px 16px; display: flex; align-items: center; gap: 14px; }
+  .lmsbar b { font-size: 16px; }
+  .lmsbar .crumbs { opacity: .8; font-size: 13px; }
+  .lmsbar .who { margin-left: auto; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+  .lmsbar select, .lmsbar button { font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 4px; border: 1px solid #8794ad; background: #3b4a67; color: #fff; }
+  .layout { display: grid; grid-template-columns: 180px minmax(0, 1fr) 300px; gap: 16px; padding: 16px; max-width: 1320px; margin: 0 auto; }
+  @media (max-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr); } nav.lmsnav { display: none; } }
+  nav.lmsnav { font-size: 14px; }
+  nav.lmsnav a { display: block; padding: 6px 8px; color: var(--lms); text-decoration: none; border-radius: 4px; }
+  nav.lmsnav a.on { background: #dfe5f0; font-weight: 600; }
+  .tool { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; overflow: clip; }
+  .toolhead { display: flex; align-items: baseline; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: #fff; }
+  .toolhead h1 { font-size: 19px; margin: 0; }
+  .toolhead .by { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .toolbody { padding: 14px 18px 22px; }
+  .meta { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+  .q { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin: 12px 0; }
+  .q h2 { font-size: 15px; margin: 0 0 6px; display: flex; gap: 8px; align-items: baseline; }
+  .q h2 .pts { margin-left: auto; color: var(--muted); font-weight: 400; font-size: 13px; }
+  .q .prompt { margin: 4px 0 10px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input[type=text] { font: 15px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 6px 8px; border: 1px solid #b9bdb3; border-radius: 5px; min-width: 260px; }
+  button.check { font: inherit; padding: 6px 14px; border-radius: 5px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  button.check:disabled { opacity: .5; cursor: default; }
+  .choices label { display: block; padding: 5px 8px; border: 1px solid transparent; border-radius: 5px; cursor: pointer; }
+  .choices label:hover { background: #f3f2ec; }
+  .fb { margin-top: 8px; font-size: 14px; min-height: 1.4em; }
+  .fb.ok { color: var(--ok); } .fb.bad { color: var(--bad); } .fb.wait { color: var(--muted); }
+  .preview { color: var(--muted); font-size: 13px; min-height: 1.3em; }
+  .attempts { color: var(--muted); font-size: 12px; }
+  .total { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding: 12px 16px; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+  .total .score { font-size: 18px; font-weight: 600; }
+  details.scratch { margin-top: 16px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; }
+  details.scratch summary { cursor: pointer; color: var(--accent); }
+  aside.gradebook { background: #fff; border: 1px solid #c9cfda; border-radius: 8px; padding: 12px 14px; align-self: start; }
+  aside.gradebook h3 { margin: 0 0 4px; font-size: 15px; color: var(--lms); }
+  aside.gradebook .sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 5px 4px; border-bottom: 1px solid #eceef2; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.me td { background: #f1f6ee; font-weight: 600; }
+  tr.flash td { animation: flash 1.6s ease-out; }
+  @keyframes flash { from { background: #fff3b0; } to { background: transparent; } }
+  .log { font-size: 12px; color: var(--muted); margin-top: 10px; border-top: 1px dashed #d8dce4; padding-top: 6px; max-height: 160px; overflow: auto; }
+  .engine { font-size: 12px; color: var(--muted); }
+  code { font-size: 13px; background: #f3f2ec; padding: 0 3px; border-radius: 3px; }
+  .fig:empty, .fbfig:empty { display: none; }
+  .fig, .fbfig { margin: 6px 0 10px; max-width: 560px; }
+  .fig .wait { color: var(--muted); font-size: 13px; padding: 30px 0; text-align: center; background: #f6f6f2; border-radius: 6px; }
+  .sbnb.fig figure.plot, .sbnb.fbfig figure.plot { margin: 0; }
+  textarea { font: 14px/1.4 system-ui, sans-serif; width: 100%; min-height: 80px; padding: 6px 8px; border: 1px solid #b9bdb3; border-radius: 5px; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tabs button { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid var(--line); background: #fff; border-radius: 14px; cursor: pointer; }
+  .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 14px; }
+  @media (max-width: 700px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .roster { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px; align-self: start; }
+  .roster button { display: flex; width: 100%; gap: 6px; font: inherit; font-size: 14px; text-align: left; padding: 6px 8px; border: 0; background: none; border-radius: 5px; cursor: pointer; }
+  .roster button.on { background: #e8efe6; font-weight: 600; }
+  .roster .st { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .chip { display: inline-block; font-size: 12px; padding: 0 7px; border-radius: 9px; background: #eceee8; color: var(--muted); }
+  .chip.ok { background: #e1f0e2; color: var(--ok); } .chip.bad { background: #f7e3df; color: var(--bad); }
+  .work { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+  .work .answer { background: #f7f6f1; border-radius: 6px; padding: 8px 10px; margin: 6px 0 10px; white-space: pre-wrap; }
+  .rubric label { display: flex; gap: 8px; padding: 3px 0; }
+  .rubric .rp { margin-left: auto; color: var(--muted); }
+  .nav { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+  .nav button { font: inherit; padding: 5px 12px; border-radius: 5px; border: 1px solid #b9bdb3; background: #fff; cursor: pointer; }
+  .nav .hint { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .nav button.check { background: var(--accent); color: #fff; border-color: var(--accent); }
+  /* the grading pager: one fixed place, at the top, whatever the answer's length (William, Oct 29) */
+  .pager { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; align-items: center; background: var(--bg); padding: 8px 0; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
+  .pager button { font: inherit; font-size: 14px; padding: 5px 12px; border-radius: 5px; border: 1px solid #b9bdb3; background: #fff; cursor: pointer; white-space: nowrap; }
+  .pager button.check { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .pager button:disabled { opacity: .45; cursor: default; }
+  .pager .where { margin-left: auto; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  @media (max-width: 520px) { .pager button { padding: 5px 8px; font-size: 13px; } .pager .where { display: none; } .pager .focusbtn { margin-left: auto; }
+    .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; } .tabs button { white-space: nowrap; flex: none; } }
+  /* focus (William, Oct 29): the grading card alone, on the whole window; Esc or the icon restores */
+  .pager .focusbtn { margin-left: 8px; display: inline-flex; align-items: center; padding: 5px 7px; }
+  .pager .focusbtn svg { width: 16px; height: 16px; }
+  body.gfocus { overflow: hidden; }
+  body.gfocus .tool { position: fixed; inset: 0; z-index: 50; border: 0; border-radius: 0; overflow: auto; }
+  body.gfocus .tool .toolhead, body.gfocus #grader > .meta, body.gfocus #grader .roster { display: none; }
+  body.gfocus #grader .grid { grid-template-columns: 1fr; }
+  body.gfocus #grader .work { max-width: 1100px; margin: 0 auto; width: 100%; }
+  .nav button.check:disabled { opacity: .5; }
+  .lmsbar .viewsw button { font-size: 13px; }
+  .lmsbar .viewsw button.on { background: #fff; color: var(--lms); }
+</style>
+</head>
+<body>
+<div class="banner">Preview with mock data: there is no real course, LMS or account here, and nothing leaves this browser. The answer checks run in your browser, in Sagebrush's engine.</div>
+<header class="lmsbar">
+  <b>Demo University</b><span class="crumbs">MATH 101 · Calculus I › Assignments › Homework 3</span>
+  <span class="who"><span class="viewsw" role="group" aria-label="View"><button id="as-student" class="on">Student</button><button id="as-instructor">Instructor</button></span><span id="signed">Signed in as <select id="student" aria-label="Student"></select></span><button id="reset" title="Forget this browser's attempts">Reset demo</button></span>
+</header>
+<div class="layout">
+  <nav class="lmsnav" aria-label="Course">
+    <a href="#">Home</a><a href="#">Modules</a><a class="on" href="#">Assignments</a><a href="#">Grades</a><a href="#">People</a>
+  </nav>
+  <main class="tool" aria-label="Sagebrush assignment">
+    <div class="toolhead"><h1 id="title"></h1><span class="by">Sagebrush · launched from your course</span></div>
+    <div class="toolbody" id="grader" hidden></div>
+    <div class="toolbody" id="studentview">
+      <div class="meta" id="meta"></div>
+      <div id="items"></div>
+      <div class="total"><span>Score</span><span class="score" id="score"></span><span class="engine" id="engine">Starting Sage in this browser…</span></div>
+      <details class="scratch" id="scratch"><summary>Scratch work: a Sage notebook in this page</summary><div id="nb"></div></details>
+    </div>
+  </main>
+  <aside class="gradebook" aria-label="Course gradebook">
+    <h3>Gradebook</h3>
+    <div class="sub">What the LMS shows its instructor. Each score arrives as Sagebrush sends it (in the real tool, through LTI Assignment and Grade Services).</div>
+    <table><thead><tr><th>Student</th><th class="num">Homework 3</th></tr></thead><tbody id="gb"></tbody></table>
+    <div class="log" id="log"></div>
+  </aside>
+</div>
+<script type="module">
+import { WorkerKernel, createNotebook, MemoryStore, cellId } from "/sagebrush-notebook.js";
+import { typeset } from "/sagebrush-math.js";
+
+// ---------------------------------------------------------------- variants
+// Each student gets their own numbers: a seed from (assignment, student), as the
+// LTI plan's per-student variants derive one (there, server-side, from a course
+// secret; here, for the preview, from the names).
+function hash32(s) { let h = 2166136261; for (const c of s) { h ^= c.codePointAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+function rng(seed) {
+  let a = seed;
+  const next = () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  return {
+    int: (lo, hi) => lo + Math.floor(next() * (hi - lo + 1)),
+    perm: (n) => { const p = [...Array(n).keys()]; for (let i = n - 1; i > 0; i--) { const j = Math.floor(next() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; } return p; },
+  };
+}
+
+// ---------------------------------------------------------------- the assignment
+// An item is {id, kind, points, attempts, params(rng), prompt(p), ...kind's fields}.
+// The renderers below take items whatever their source: this list, or (later) a
+// notebook's cells marked as questions, which is the LTI grading spec's model
+// (grading.json: a question owns template cells). Only this list would change.
+const ASSIGNMENT = {
+  id: "hw3", title: "Homework 3 · Derivatives and antiderivatives", due: "Friday 11:59 PM",
+  items: [
+    {
+      id: "q1", kind: "numeric", points: 3, attempts: 3, tol: 0.01, unit: "m",
+      params: (r) => ({ v: r.int(8, 25) }),
+      prompt: (p) => `A ball is thrown straight up at $v_0 = ${p.v}\\ \\mathrm{m/s}$. With $g = 9.8\\ \\mathrm{m/s^2}$ and no air resistance, how high does it rise? Give the height in meters.`,
+      answer: (p) => (p.v * p.v) / (2 * 9.8),
+      explain: (p, h) => `The height is $h = v_0^2/(2g) \\approx ${h.toFixed(2)}\\ \\mathrm{m}$.`,
+      hint: "At the top the velocity is $0$, so $v_0^2 = 2 g h$.",
+    },
+    {
+      id: "q2", kind: "symbolic", points: 4, attempts: 3, variable: "x",
+      params: (r) => ({ a: r.int(2, 5), b: r.int(2, 6) }),
+      prompt: (p) => `Find $\\dfrac{d}{dx}\\left( x^{${p.a}} \\sin(${p.b}x) \\right)$. Type an expression in $x$, such as <code>3*x^2*cos(x)</code>.`,
+      expected: (p) => `x^${p.a}*sin(${p.b}*x)`, // checked against the derivative of this, in Sage
+      check: "derivative",
+      hint: "Use the product rule: $(uv)' = u'v + uv'$.",
+    },
+    {
+      id: "q3", kind: "choice", points: 3, attempts: 2,
+      params: (r) => ({ c: [3, 5, 7, 9][r.int(0, 3)], order: r.perm(4) }), // odd, so c/2 stays a fraction
+      prompt: (p) => `Which function is an antiderivative of $f(x) = ${p.c}\\,x\\,e^{x^2}$?`,
+      choices: (p) => [
+        { tex: `F(x) = \\frac{${p.c}}{2}\\, e^{x^2}`, right: true },
+        { tex: `F(x) = ${p.c}\\, e^{x^2}` },
+        { tex: `F(x) = \\frac{${p.c}}{2}\\, x^2 e^{x^2}` },
+        { tex: `F(x) = ${2 * p.c}\\, x^2 e^{x^2}` },
+      ],
+      hint: "Differentiate each choice and compare with $f$.",
+    },
+    {
+      id: "q4", kind: "manual", points: 4, attempts: 1,
+      params: () => ({}),
+      prompt: () => "In two or three sentences: why does the derivative in Question 2 have two terms? (Your instructor grades this one.)",
+      rubric: [
+        { text: "Names the product rule", points: 2 },
+        { text: "Says which factor each term differentiates", points: 1 },
+        { text: "Clear and complete", points: 1 },
+      ],
+    },
+    // Plots (flag "plots"): `figure` is Sage code drawn in the prompt, `feedbackFigure`
+    // is drawn with the feedback once the question is answered or out of tries. Both run
+    // in the page's Sage, and the notebook's own output renderer draws them.
+    {
+      id: "q5", kind: "numeric", points: 3, attempts: 3, tol: 0.01, flag: "plots",
+      params: (r) => ({ k: r.int(2, 6) }), // c = 3k, so the minimum is at sqrt(k)
+      prompt: (p) => `The graph shows $f(x) = x^3 - ${3 * p.k}x$. At what $x > 0$ does $f$ have its local minimum? Give $x$ to two decimal places.`,
+      // (the range: a little past the roots 0 and +-sqrt(3k))
+      figure: (p) => `x = var("x")\nf = x^3 - ${3 * p.k}*x\nR = ${(Math.sqrt(3 * p.k) + 0.6).toFixed(1)}\nplot(f, (x, -R, R), thickness=2, figsize=[5, 3.2])`,
+      feedbackFigure: (p) => [
+        `x = var("x")`,
+        `f = x^3 - ${3 * p.k}*x`,
+        `R = ${(Math.sqrt(3 * p.k) + 0.6).toFixed(1)}`,
+        `m = sqrt(${p.k}); fm = f(x=m)`,
+        `plot(f, (x, -R, R), thickness=2, figsize=[5, 3.2]) + line([(m - 1.5, fm), (m + 1.5, fm)], color="red", linestyle="--") + point((m, fm), color="red", size=60)`,
+      ].join("\n"),
+      answer: (p) => Math.sqrt(p.k),
+      explain: (p, m) => `There $f'(x) = 3x^2 - ${3 * p.k} = 0$, so $x = \\sqrt{${p.k}} \\approx ${m.toFixed(2)}$, and the tangent line is horizontal (red).`,
+      hint: "At a local minimum the tangent line is horizontal: solve $f'(x) = 0$.",
+    },
+    {
+      id: "q6", kind: "choice", points: 2, attempts: 2, flag: "plots",
+      params: (r) => ({ which: r.int(0, 3), order: r.perm(4) }),
+      surfaces: ["x^2 + y^2", "x^2 - y^2", "x*y", "sin(x)*cos(y)"],
+      prompt: () => "The surface below is the graph of $z = f(x, y)$ for $-2 \\le x, y \\le 2$. Which function $f$ is it? (Drag the surface to turn it.)",
+      figure: (p) => `x, y = var("x y")\nplot3d(${item6().surfaces[p.which]}, (x, -2, 2), (y, -2, 2))`,
+      feedbackFigure: (p) => `x, y = var("x y")\ncontour_plot(${item6().surfaces[p.which]}, (x, -2, 2), (y, -2, 2), fill=False, labels=True, figsize=[3.6, 3.6])`,
+      choices: (p) => [
+        { tex: "f(x, y) = x^2 + y^2" },
+        { tex: "f(x, y) = x^2 - y^2" },
+        { tex: "f(x, y) = xy" },
+        { tex: "f(x, y) = \\sin x \\cos y" },
+      ].map((c, i) => ({ ...c, right: i === p.which })),
+      explain: () => "Its contour lines, below, show the same shape from above.",
+      hint: "Look at the heights along the $x$-axis ($y = 0$) and along the $y$-axis ($x = 0$).",
+    },
+  ],
+};
+function item6() { return ASSIGNMENT.items.find((it) => it.id === "q6"); }
+// Feature flags of this preview: ?plots=0 hides the plot questions, ?focus=0 the grading focus icon.
+const FLAGS = Object.fromEntries(["plots", "focus"].map((f) => [f, new URLSearchParams(location.search).get(f) !== "0"]));
+ASSIGNMENT.items = ASSIGNMENT.items.filter((it) => !it.flag || FLAGS[it.flag]);
+const ROSTER = ["Ada Lovelace", "Alan Turing", "Emmy Noether", "Srinivasa Ramanujan"];
+
+// ---------------------------------------------------------------- the course service
+// The one interface the page needs from a course. This mock keeps everything in
+// localStorage; the real one is the LTI tool's Course and Gradebook (plan-lti-r5,
+// grading G1/G2), with the total sent to the LMS by AGS. The page doesn't change.
+class MockCourseService {
+  constructor(key) { this.key = key; this.state = JSON.parse(localStorage.getItem(key) || "null") || { attempts: {}, scores: {} }; }
+  save() { localStorage.setItem(this.key, JSON.stringify(this.state)); }
+  attempts(student, item) { return this.state.attempts[`${student}|${item}`] || []; }
+  recordAttempt(student, item, a) { (this.state.attempts[`${student}|${item}`] ||= []).push({ ...a, at: Date.now() }); this.save(); }
+  postScore(student, score, max) { this.state.scores[student] = { score, max, at: Date.now() }; this.save(); }
+  grade(student, item) { return (this.state.grades ||= {})[`${student}|${item}`]; }
+  setGrade(student, item, g) { (this.state.grades ||= {})[`${student}|${item}`] = { ...g, at: Date.now() }; this.save(); }
+  gradebook() { return ROSTER.map((s) => ({ student: s, ...(this.state.scores[s] || {}) })); }
+  reset() { this.state = { attempts: {}, scores: {}, grades: {} }; this.save(); }
+}
+const course = new MockCourseService("sagebrush-questions-preview-v1");
+
+// ---------------------------------------------------------------- math text
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+// Prompts are trusted (they are the assignment's); $...$ becomes typeset math.
+function mathHtml(s) {
+  return s.replace(/\$\$([^$]+)\$\$|\$([^$]+)\$/g, (_, d, i) => `<span class="math${d ? " display" : ""}" data-tex="${esc(d ?? i)}"></span>`);
+}
+function setMath(el, s) { el.innerHTML = mathHtml(s); typeset(el); }
+
+// ---------------------------------------------------------------- the engine
+const kernel = new WorkerKernel({ createWorker: () => new Worker("/sagebrush-worker.js", { type: "module" }) });
+kernel.start();
+const engineEl = document.getElementById("engine");
+kernel.on("ready", () => { engineEl.textContent = "Answers are checked by Sage, running in this browser."; });
+function runSage(code) {
+  return new Promise((resolve) => {
+    let out = "", err = "";
+    kernel.execute(code, { mode: "sage" }, {
+      start() {}, out(t, isErr) { if (isErr) err += t; else out += t; }, display(b) { if (b["text/plain"]) out += b["text/plain"] + "\n"; },
+      interact() {}, clear() {}, done() { resolve({ out, err }); }, stopped(m) { resolve({ out, err: err + m }); }, skipped() { resolve({ out, err: "skipped" }); },
+    });
+  });
+}
+// Figures: Sage code run once per variant (cached), its display outputs drawn by the
+// notebook component's own renderer (SVG plots, and 3D scenes in its viewer).
+const figNb = createNotebook(document.createElement("div"), { kernel, mode: "sage", assetBase: "/" });
+const figCache = new Map();
+function figureBundles(code) {
+  if (!figCache.has(code)) figCache.set(code, new Promise((resolve) => {
+    const bundles = []; let err = "";
+    kernel.execute(code, { mode: "sage" }, {
+      start() {}, out(t, isErr) { if (isErr) err += t; }, display(b) { bundles.push(b); },
+      interact() {}, clear() {}, done() { resolve({ bundles, err }); }, stopped(m) { resolve({ bundles, err: err + m }); }, skipped() { resolve({ bundles, err: "skipped" }); },
+    });
+  }));
+  return figCache.get(code);
+}
+async function drawFigure(el, code) {
+  el.className = `${el.className.split(" ")[0]} sbnb`;
+  el.innerHTML = `<div class="wait">${kernel.ready ? "Drawing the figure…" : "Starting Sage to draw the figure…"}</div>`;
+  const { bundles, err } = await figureBundles(code);
+  el.textContent = "";
+  for (const b of bundles) figNb.output.display(el, b);
+  if (!bundles.length) {
+    figCache.delete(code); // (not kept: a later render tries again)
+    el.innerHTML = `<div class="wait">The figure couldn't be drawn${err ? `: ${esc(err.trim().split("\n").at(-1).slice(0, 200))}` : ""}.</div>`;
+  }
+}
+// A Python string literal for any text (JSON's escapes are Python's too).
+const pyStr = (s) => JSON.stringify(String(s));
+async function checkSymbolic(item, p, answer) {
+  // The student's text is parsed by Sage's own parser, never pasted into code.
+  const target = item.check === "derivative" ? `diff(${item.expected(p)}, x)` : item.expected(p);
+  const code = [
+    `x = var("x")`,
+    `try:`,
+    `    _a = SR(${pyStr(answer.replace(/\*\*/g, "^"))})`,
+    `    _d = (_a - (${target})).simplify_full()`,
+    `    print("RESULT", "right" if bool(_d == 0) else "wrong", latex(_a))`,
+    `except Exception as e:`,
+    `    print("RESULT", "unparsed", type(e).__name__)`,
+  ].join("\n");
+  const { out, err } = await runSage(code);
+  const line = out.split("\n").find((l) => l.startsWith("RESULT "));
+  if (!line) return { verdict: "error", detail: (err || out).trim().slice(0, 300) };
+  const [, verdict, ...rest] = line.split(" ");
+  return { verdict, tex: verdict === "unparsed" ? "" : rest.join(" ") };
+}
+
+// ---------------------------------------------------------------- rendering
+const studentSel = document.getElementById("student");
+for (const s of ROSTER) studentSel.append(new Option(s, s));
+studentSel.value = ROSTER[0];
+document.getElementById("title").textContent = ASSIGNMENT.title;
+
+function itemScore(item, student) {
+  if (item.kind === "manual") {
+    const g = course.grade(student, item.id);
+    return g ? item.rubric.reduce((n, r, i) => n + (g.checks[i] ? r.points : 0), 0) : 0;
+  }
+  return course.attempts(student, item.id).some((t) => t.correct) ? item.points : 0;
+}
+function feedback(el, kind, html) { el.className = `fb ${kind}`; el.innerHTML = mathHtml(html); typeset(el); }
+
+const paramsFor = (item, student) => item.params(rng(hash32(`${ASSIGNMENT.id}|${item.id}|${student}`)));
+function renderItem(item, n, student) {
+  const p = paramsFor(item, student);
+  const box = document.createElement("section");
+  box.className = "q";
+  box.innerHTML = `<h2>Question ${n}<span class="pts"></span></h2><div class="prompt"></div><div class="fig"></div><div class="ans"></div><div class="fb"></div><div class="fbfig"></div><div class="attempts"></div>`;
+  setMath(box.querySelector(".prompt"), item.prompt(p));
+  if (item.figure) drawFigure(box.querySelector(".fig"), item.figure(p));
+  const ans = box.querySelector(".ans"), fb = box.querySelector(".fb"), at = box.querySelector(".attempts"), pts = box.querySelector(".pts");
+  // the feedback figure, once the question is settled (answered, or out of tries)
+  const settled = () => { const t = course.attempts(student, item.id); return t.some((a) => a.correct) || t.length >= item.attempts; };
+  const showFeedbackFigure = () => { const f = box.querySelector(".fbfig"); if (item.feedbackFigure && settled() && !f.childElementCount) drawFigure(f, item.feedbackFigure(p)); };
+  const status = () => {
+    const tries = course.attempts(student, item.id);
+    const done = tries.some((t) => t.correct) || tries.length >= item.attempts;
+    pts.textContent = `${itemScore(item, student)} / ${item.points} points`;
+    if (item.kind === "manual") {
+      const g = course.grade(student, item.id);
+      at.textContent = g ? `Graded by your instructor.${g.comment ? " Comment: " + g.comment : ""}` : tries.length ? "Submitted; your instructor will grade it." : "Not submitted yet.";
+      return tries.length > 0;
+    }
+    at.textContent = tries.some((t) => t.correct) ? `Answered in ${tries.length} ${tries.length === 1 ? "try" : "tries"}.` : `${Math.max(0, item.attempts - tries.length)} of ${item.attempts} tries left.`;
+    return done;
+  };
+  const finish = () => { if (status()) for (const c of box.querySelectorAll("input, button")) c.disabled = true; updateTotal(student); };
+  const record = (answer, correct, show, extra = {}) => {
+    course.recordAttempt(student, item.id, { answer, correct, ...extra });
+    const left = item.attempts - course.attempts(student, item.id).length;
+    feedback(fb, correct ? "ok" : "bad", correct ? `Correct. ${show ?? ""}` : left > 0 ? `Not quite. ${item.hint}` : `Not quite, and no tries are left. ${item.hint}${item.explain ? " " + item.explain(p, item.answer?.(p)) : ""}`);
+    finish();
+    showFeedbackFigure();
+  };
+
+  if (item.kind === "numeric") {
+    ans.innerHTML = `<div class="row"><input type="text" inputmode="decimal" aria-label="Answer"><span>${esc(item.unit || "")}</span><button class="check">Check</button></div>`;
+    const input = ans.querySelector("input");
+    ans.querySelector("button").onclick = () => {
+      const v = Number(input.value.trim().replace(",", "."));
+      if (!input.value.trim() || !Number.isFinite(v)) return feedback(fb, "bad", "Enter a number, such as 12.5.");
+      const want = item.answer(p);
+      record(input.value.trim(), Math.abs(v - want) <= item.tol * Math.abs(want), item.explain ? item.explain(p, want) : "");
+    };
+  } else if (item.kind === "symbolic") {
+    ans.innerHTML = `<div class="row"><input type="text" spellcheck="false" autocomplete="off" aria-label="Answer"><button class="check">Check</button></div><div class="preview"></div>`;
+    const input = ans.querySelector("input"), button = ans.querySelector("button"), prev = ans.querySelector(".preview");
+    button.onclick = async () => {
+      const text = input.value.trim();
+      if (!text) return feedback(fb, "bad", "Type an expression in $x$.");
+      button.disabled = true;
+      feedback(fb, "wait", kernel.ready ? "Checking with Sage…" : "Starting Sage in this browser (the first time takes a few seconds)…");
+      const res = await checkSymbolic(item, p, text);
+      button.disabled = false;
+      if (res.verdict === "unparsed") return feedback(fb, "bad", "Sage couldn't read that expression. Use <code>*</code> for products and <code>^</code> for powers. This didn't count as a try.");
+      if (res.verdict === "error") return feedback(fb, "bad", `The check didn't run (${esc(res.detail || "no result")}). This didn't count as a try.`);
+      if (res.tex) setMath(prev, `You entered $${res.tex}$`);
+      record(text, res.verdict === "right", "Sage confirms that your answer equals the derivative.", { tex: res.tex });
+    };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") button.click(); });
+  } else if (item.kind === "choice") {
+    const choices = item.choices(p);
+    ans.innerHTML = `<div class="choices"></div><div class="row"><button class="check">Submit</button></div>`;
+    const list = ans.querySelector(".choices");
+    p.order.forEach((k, i) => {
+      const lab = document.createElement("label");
+      lab.innerHTML = `<input type="radio" name="${item.id}-${esc(student)}" value="${k}"> ${String.fromCharCode(65 + i)}. `;
+      const span = document.createElement("span"); lab.append(span); setMath(span, `$${choices[k].tex}$`);
+      list.append(lab);
+    });
+    ans.querySelector("button").onclick = () => {
+      const sel = list.querySelector("input:checked");
+      if (!sel) return feedback(fb, "bad", "Choose one of the answers.");
+      record(sel.value, !!choices[Number(sel.value)].right, item.explain ? item.explain(p) : "");
+    };
+  } else if (item.kind === "manual") {
+    ans.innerHTML = `<textarea aria-label="Your answer"></textarea><div class="row"><button class="check">Submit</button></div>`;
+    const ta = ans.querySelector("textarea");
+    const prev = course.attempts(student, item.id).at(-1);
+    if (prev) ta.value = prev.answer;
+    ans.querySelector("button").onclick = () => {
+      if (!ta.value.trim()) return feedback(fb, "bad", "Write your answer first.");
+      course.recordAttempt(student, item.id, { answer: ta.value.trim(), correct: null });
+      feedback(fb, "wait", "Submitted.");
+      finish();
+    };
+  }
+  if (item.kind === "manual") { finish(); return box; }
+  // Restore what this student already did.
+  const tries = course.attempts(student, item.id);
+  if (tries.length) feedback(fb, tries.some((t) => t.correct) ? "ok" : "bad", tries.some((t) => t.correct) ? "Correct." : `Last answer: <code>${esc(tries.at(-1).answer)}</code>, not quite.`);
+  finish();
+  showFeedbackFigure();
+  return box;
+}
+
+const log = document.getElementById("log");
+function totals(student) {
+  let score = 0, max = 0;
+  for (const it of ASSIGNMENT.items) { score += itemScore(it, student); max += it.points; }
+  return { score, max };
+}
+function updateTotal(student) {
+  const { score, max } = totals(student);
+  if (student === studentSel.value) document.getElementById("score").textContent = `${score} / ${max}`;
+  postTotal(student);
+  renderGradebook(student);
+}
+function postTotal(student) {
+  const { score, max } = totals(student);
+  // A score goes to the gradebook once the student has tried something, and again when it changes.
+  const tried = ASSIGNMENT.items.some((it) => course.attempts(student, it.id).length);
+  const before = course.state.scores[student];
+  if (tried && (!before || before.score !== score)) {
+    course.postScore(student, score, max);
+    const line = document.createElement("div");
+    line.textContent = `${new Date().toLocaleTimeString()}: sent ${student}'s score ${score}/${max} to the gradebook`;
+    log.prepend(line);
+  }
+}
+function renderGradebook(changed) {
+  const gb = document.getElementById("gb");
+  gb.textContent = "";
+  for (const row of course.gradebook()) {
+    const tr = document.createElement("tr");
+    if (row.student === studentSel.value) tr.className = "me";
+    if (row.student === changed) tr.classList.add("flash");
+    tr.innerHTML = `<td>${esc(row.student)}</td><td class="num">${row.score === undefined ? "–" : `${row.score} / ${row.max}`}</td>`;
+    gb.append(tr);
+  }
+}
+function render() {
+  const student = studentSel.value;
+  document.getElementById("meta").textContent = `Due ${ASSIGNMENT.due} · ${ASSIGNMENT.items.length} questions · your numbers are your own: classmates get different ones.`;
+  const items = document.getElementById("items");
+  items.textContent = "";
+  ASSIGNMENT.items.forEach((it, i) => items.append(renderItem(it, i + 1, student)));
+  updateTotal(student);
+}
+// ---------------------------------------------------------------- classmates
+// The other students' work, made once (mock data), so the instructor has a class to grade.
+function seedClassmates() {
+  if (course.state.seeded) return;
+  const [q1, q2, q3, q4] = ASSIGNMENT.items;
+  const num = (s, ok) => { const p = paramsFor(q1, s), v = q1.answer(p); return { answer: (ok ? v : v * 2).toFixed(2), correct: ok }; };
+  const sym = (s, ok) => { const { a, b } = paramsFor(q2, s); return ok ? { answer: `${a}*x^${a - 1}*sin(${b}*x) + ${b}*x^${a}*cos(${b}*x)`, correct: true } : { answer: `${a * b}*x^${a - 1}*cos(${b}*x)`, correct: false }; };
+  const pick = (s, ok) => ({ answer: String(ok ? 0 : 1), correct: ok });
+  const plan = {
+    "Alan Turing": { q1: [num("Alan Turing", false), num("Alan Turing", true)], q2: [sym("Alan Turing", false), sym("Alan Turing", true)], q3: [pick("Alan Turing", false)],
+      q4: "The function is a product, so the product rule gives one term where x^a is differentiated and one where sin(bx) is." },
+    "Emmy Noether": { q1: [num("Emmy Noether", true)], q2: [sym("Emmy Noether", true)], q3: [pick("Emmy Noether", true)],
+      q4: "By the product rule (uv)' = u'v + uv': the first term differentiates the power x^a with sin(bx) kept, the second differentiates sin(bx), which brings out b cos(bx), with x^a kept. Two factors, so two terms." },
+    "Srinivasa Ramanujan": { q1: [num("Srinivasa Ramanujan", false), num("Srinivasa Ramanujan", false), num("Srinivasa Ramanujan", false)], q3: [pick("Srinivasa Ramanujan", true)],
+      q4: "Because there are two parts." },
+  };
+  for (const [s, work] of Object.entries(plan)) {
+    for (const [id, tries] of Object.entries(work)) {
+      if (id === "q4") course.recordAttempt(s, id, { answer: tries, correct: null });
+      else for (const t of tries) course.recordAttempt(s, id, t);
+    }
+    postTotal(s);
+  }
+  course.state.seeded = true;
+  course.save();
+}
+
+// ---------------------------------------------------------------- the instructor's grading view
+// Question-major (William, Oct 22): one question, every student's answer, with
+// instant next and previous; auto scores beside the rubric; stored answers and
+// stored checks only, so nothing is reopened or rerun.
+const gState = { q: 3, s: 0 };
+const others = () => ROSTER;
+function chip(item, s) {
+  const tries = course.attempts(s, item.id);
+  if (item.kind === "manual") {
+    const g = course.grade(s, item.id);
+    return g ? `<span class="chip ok">${itemScore(item, s)}/${item.points}</span>` : tries.length ? `<span class="chip">to grade</span>` : `<span class="chip">–</span>`;
+  }
+  if (tries.some((t) => t.correct)) return `<span class="chip ok">${item.points}/${item.points}</span>`;
+  return tries.length ? `<span class="chip bad">0/${item.points}</span>` : `<span class="chip">–</span>`;
+}
+function renderGrader() {
+  const el = document.getElementById("grader");
+  const item = ASSIGNMENT.items[gState.q], student = others()[gState.s];
+  el.innerHTML = `<div class="meta">Grading by question: each student's answer to one question, one after another. The answers and Sage's checks are stored, so nothing is reopened or rerun. Keys: <code>j</code> next, <code>k</code> previous.</div>
+    <div class="tabs">${ASSIGNMENT.items.map((it, i) => `<button data-q="${i}" class="${i === gState.q ? "on" : ""}">Question ${i + 1} · ${it.kind === "manual" ? "graded by you" : "auto-graded"}</button>`).join("")}</div>
+    <div class="pager" role="toolbar" aria-label="Grading pager"><button data-d="-1" title="Previous student (k)">‹ Previous</button><button data-d="1" title="Next student (j)">Next ›</button><button class="check save" disabled>Save grade &amp; next</button><span class="where"></span>${FLAGS.focus ? focusButton() : ""}</div>
+    <div class="grid"><div class="roster">${others().map((s, i) => `<button data-s="${i}" class="${i === gState.s ? "on" : ""}">${esc(s)}<span class="st">${chip(item, s)}</span></button>`).join("")}</div><div class="work"></div></div>`;
+  for (const b of el.querySelectorAll(".tabs button")) b.onclick = () => { gState.q = Number(b.dataset.q); renderGrader(); };
+  // (on a phone the tabs are one scrolling row: the current one shown)
+  const tabs = el.querySelector(".tabs"), on = tabs.querySelector(".on");
+  if (tabs.scrollWidth > tabs.clientWidth) tabs.scrollLeft = on.offsetLeft - tabs.offsetLeft - 16;
+  for (const b of el.querySelectorAll(".roster button")) b.onclick = () => { gState.s = Number(b.dataset.s); renderGrader(); };
+  const work = el.querySelector(".work");
+  const p = paramsFor(item, student), tries = course.attempts(student, item.id);
+  work.innerHTML = `<h2 style="font-size:15px;margin:0 0 4px">${esc(student)} · Question ${gState.q + 1}</h2><div class="prompt"></div><div class="fig"></div><div class="tries"></div><div class="grade"></div>`;
+  if (item.figure) drawFigure(work.querySelector(".fig"), item.figure(p));
+  el.querySelector(".pager .where").textContent = `${student} · ${gState.s + 1} of ${others().length}`;
+  const save = el.querySelector(".pager .save");
+  setMath(work.querySelector(".prompt"), item.prompt(p));
+  const tl = work.querySelector(".tries");
+  if (!tries.length) tl.innerHTML = `<p class="attempts">No answer yet.</p>`;
+  else if (item.kind === "manual") tl.innerHTML = `<div class="answer"></div>`, (tl.querySelector(".answer").textContent = tries.at(-1).answer);
+  else tries.forEach((t, i) => {
+    const d = document.createElement("div");
+    d.className = "row";
+    const shown = item.kind === "choice" ? `$${item.choices(p)[Number(t.answer)].tex}$` : t.tex ? `$${t.tex}$` : `<code>${esc(t.answer)}</code>`;
+    d.innerHTML = `<span class="attempts">Try ${i + 1}</span> <span class="v"></span> <span class="chip ${t.correct ? "ok" : "bad"}">${t.correct ? "right" : "wrong"}</span>`;
+    setMath(d.querySelector(".v"), shown);
+    tl.append(d);
+  });
+  const gr = work.querySelector(".grade");
+  if (item.kind === "manual") {
+    const g = course.grade(student, item.id) || { checks: item.rubric.map(() => false), comment: "" };
+    gr.innerHTML = `<div class="rubric">${item.rubric.map((r, i) => `<label><input type="checkbox" data-i="${i}" ${g.checks[i] ? "checked" : ""} ${tries.length ? "" : "disabled"}> ${esc(r.text)}<span class="rp">+${r.points}</span></label>`).join("")}</div>
+      <input type="text" class="comment" placeholder="A comment for the student (optional)" value="${esc(g.comment)}" ${tries.length ? "" : "disabled"} style="width:100%;font-family:inherit">
+      <div class="pts attempts"></div>`;
+    const sum = () => item.rubric.reduce((n, r, i) => n + (gr.querySelector(`[data-i="${i}"]`).checked ? r.points : 0), 0);
+    const showSum = () => (gr.querySelector(".pts").textContent = `${sum()} / ${item.points} points`);
+    for (const c of gr.querySelectorAll("input[type=checkbox]")) c.onchange = showSum;
+    showSum();
+    save.disabled = !tries.length;
+    save.onclick = () => {
+      course.setGrade(student, item.id, { checks: item.rubric.map((_, i) => gr.querySelector(`[data-i="${i}"]`).checked), comment: gr.querySelector(".comment").value.trim() });
+      updateTotal(student);
+      gState.s = (gState.s + 1) % others().length;
+      renderGrader();
+    };
+  } else {
+    gr.innerHTML = `<p class="attempts">Auto-graded: ${itemScore(item, student)} / ${item.points} points${tries.length ? ` after ${tries.length} ${tries.length === 1 ? "try" : "tries"}` : ""}.</p>`;
+  }
+  for (const b of el.querySelectorAll(".pager button[data-d]")) b.onclick = () => { gState.s = (gState.s + Number(b.dataset.d) + others().length) % others().length; renderGrader(); };
+  const fb = el.querySelector(".pager .focusbtn");
+  if (fb) fb.onclick = () => setFocus(!document.body.classList.contains("gfocus"));
+}
+// ---------------------------------------------------------------- focus (flag "focus")
+// One click shows the grading card alone on the whole window (no roster, course
+// navigation or gradebook); the pager stays at its top, j/k still work, and Esc or the
+// icon restores the layout. The choice is kept for this browser session.
+const FOCUS_KEY = "sagebrush-questions-focus";
+function focusButton() {
+  const on = document.body.classList.contains("gfocus");
+  const icon = on
+    ? `<path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4"/>`   // shrink
+    : `<path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/>`;  // expand
+  const label = on ? "Restore the layout (Esc)" : "Focus: show only this answer, on the whole window";
+  return `<button class="focusbtn" aria-pressed="${on}" title="${label}" aria-label="${label}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">${icon}</svg></button>`;
+}
+function setFocus(on, remember = true) {
+  on = !!on && FLAGS.focus && !document.getElementById("grader").hidden;
+  document.body.classList.toggle("gfocus", on);
+  if (remember) { try { on ? sessionStorage.setItem(FOCUS_KEY, "1") : sessionStorage.removeItem(FOCUS_KEY); } catch {} }
+  if (!document.getElementById("grader").hidden) renderGrader();
+}
+const focusRemembered = () => { try { return sessionStorage.getItem(FOCUS_KEY) === "1"; } catch { return false; } };
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && document.body.classList.contains("gfocus")) { e.preventDefault(); setFocus(false); return; }
+  if (document.getElementById("grader").hidden || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  if (e.key === "j" || e.key === "k") { gState.s = (gState.s + (e.key === "j" ? 1 : -1) + others().length) % others().length; renderGrader(); }
+});
+
+// ---------------------------------------------------------------- views
+function setView(instructor) {
+  if ((location.hash === "#instructor") !== instructor) history.replaceState(null, "", instructor ? "#instructor" : location.pathname);
+  document.getElementById("as-student").classList.toggle("on", !instructor);
+  document.getElementById("as-instructor").classList.toggle("on", instructor);
+  document.getElementById("studentview").hidden = instructor;
+  document.getElementById("grader").hidden = !instructor;
+  document.getElementById("signed").hidden = instructor;
+  // (focus belongs to the grading view: off in the student's view, back as remembered here)
+  document.body.classList.toggle("gfocus", instructor && FLAGS.focus && focusRemembered());
+  if (instructor) {
+    // start at the first answer that still needs a grade on this question
+    const item = ASSIGNMENT.items[gState.q];
+    const todo = others().findIndex((s) => course.attempts(s, item.id).length && !course.grade(s, item.id));
+    if (item.kind === "manual" && todo >= 0) gState.s = todo;
+    renderGrader();
+    renderGradebook();
+  } else render();
+}
+document.getElementById("as-student").onclick = () => setView(false);
+document.getElementById("as-instructor").onclick = () => setView(true);
+studentSel.onchange = render;
+document.getElementById("reset").onclick = () => { course.reset(); log.textContent = ""; seedClassmates(); setView(false); };
+seedClassmates();
+setView(location.hash === "#instructor");
+addEventListener("hashchange", () => setView(location.hash === "#instructor"));
+
+// ---------------------------------------------------------------- scratch notebook
+// The same notebook component and kernel as the full notebook (web/embed).
+let nbDone = false;
+document.getElementById("scratch").addEventListener("toggle", async (e) => {
+  if (!e.target.open || nbDone) return;
+  nbDone = true;
+  const nb = createNotebook(document.getElementById("nb"), { kernel, mode: "sage", assetBase: "/" });
+  await nb.attach(new MemoryStore({ mode: "sage", cells: [{ id: cellId(), code: "f = x^3*sin(2*x)\ndiff(f, x)" }, { id: cellId(), code: "plot(f, (x, -2, 2))" }] }));
+});
+window.demo = { ASSIGNMENT, course, kernel, checkSymbolic, paramsFor, FLAGS };
+</script>
+</body>
+</html>
