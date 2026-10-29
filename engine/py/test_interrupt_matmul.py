@@ -417,7 +417,7 @@ def declared_phases(shape, n):
     return dict(required=req, not_applicable={p: units[p] for p in units if p not in req}, declared_from="shape, lower-bound entry lengths")
 
 
-def from_r3_logs(targeted_log, sigint_log, set_name, quick):
+def from_legacy_logs(targeted_log, sigint_log, set_name, quick):
     """(records, errors) from the earlier harness's two text logs (bab9c8c5's
     harness), for `set_name` (required; written into every record).  Fails
     closed: every non-blank line must parse, as a row, a known duplicate FAIL
@@ -431,7 +431,7 @@ def from_r3_logs(targeted_log, sigint_log, set_name, quick):
     def rec_for(shape, n):
         if shape not in DECLARED:
             errors.append("unknown shape %r" % shape)
-        return recs.setdefault((shape, n), dict(shape=shape, n=n, set=set_name, quick=quick, targeted=[], source="r3 logs"))
+        return recs.setdefault((shape, n), dict(shape=shape, n=n, set=set_name, quick=quick, targeted=[], source="legacy logs"))
 
     for no, line in enumerate(open(targeted_log), 1):
         line = line.rstrip("\n")
@@ -506,7 +506,7 @@ def selftest(good_targeted, good_sigint):
         print("%s  %s %s" % ("ok  " if cond else "BAD ", name, detail))
         bad += not cond
 
-    good, errs = from_r3_logs(good_targeted, good_sigint, "big", True)
+    good, errs = from_legacy_logs(good_targeted, good_sigint, "big", True)
     n, out = run(good, errs)
     expect("good frozen logs: no conversion error", not errs, str(errs)[:200])
     expect("good frozen logs: the 454 ms row is 'FAIL, waived' via an authorized interval", "FAIL, waived" in out and "dumps_ms" in out)
@@ -523,25 +523,25 @@ def selftest(good_targeted, good_sigint):
     # no ready line / calibration failure in place of the big row's SIGINT line
     for label, repl in [("no-ready", "big          n=200000    FAIL  no ready line: Traceback (most recent call last)"), ("calibration failure", "big          n=200000    FAIL  calibration rc=1: MemoryError")]:
         lines = [repl if l.startswith("big ") else l for l in sig.splitlines()]
-        recs, errs = from_r3_logs(good_targeted, write("s.log", "\n".join(lines) + "\n"), "big", True)
+        recs, errs = from_legacy_logs(good_targeted, write("s.log", "\n".join(lines) + "\n"), "big", True)
         n, out = run(recs, errs)
         expect("%s: FAILs, the error kept on the record" % label, n > 0 and repl.split("FAIL  ")[1][:20] in out)
     # an omitted shape (no lines at all for 'wide')
-    recs, errs = from_r3_logs(write("t.log", "\n".join(l for l in tgt.splitlines() if not l.startswith("wide ")) + "\n"), write("s.log", "\n".join(l for l in sig.splitlines() if not l.startswith("wide ")) + "\n"), "big", True)
+    recs, errs = from_legacy_logs(write("t.log", "\n".join(l for l in tgt.splitlines() if not l.startswith("wide ")) + "\n"), write("s.log", "\n".join(l for l in sig.splitlines() if not l.startswith("wide ")) + "\n"), "big", True)
     n, out = run(recs, errs)
     expect("omitted shape: FAILs on completeness", n > 0 and "completeness: wide" in out)
     # a missing SIGINT line for one shape
-    recs, errs = from_r3_logs(good_targeted, write("s.log", "\n".join(l for l in sig.splitlines() if not l.startswith("square ")) + "\n"), "big", True)
+    recs, errs = from_legacy_logs(good_targeted, write("s.log", "\n".join(l for l in sig.splitlines() if not l.startswith("square ")) + "\n"), "big", True)
     n, out = run(recs, errs)
     expect("missing sigint: FAILs", n > 0 and "no sigint" in out)
     # a truncated targeted log (cut inside the square shape's rows)
     lines = tgt.splitlines()
     cut = next(i for i, l in enumerate(lines) if l.startswith("square ") and '"phase": "zmat-scan"' in l)
-    recs, errs = from_r3_logs(write("t.log", "\n".join(lines[:cut]) + "\n"), good_sigint, "big", True)
+    recs, errs = from_legacy_logs(write("t.log", "\n".join(lines[:cut]) + "\n"), good_sigint, "big", True)
     n, out = run(recs, errs)
     expect("truncated record: FAILs", n > 0 and ("required phase zmat-scan has no row" in out or "not complete" in out))
     # an unparsed line
-    recs, errs = from_r3_logs(write("t.log", tgt + "Traceback (most recent call last):\n"), good_sigint, "big", True)
+    recs, errs = from_legacy_logs(write("t.log", tgt + "Traceback (most recent call last):\n"), good_sigint, "big", True)
     n, out = run(recs, errs)
     expect("unparsed line: FAILs", n > 0 and "unparsed" in out)
     # provenance: the same record as small-set cannot be waived, whatever the CLI says
@@ -569,12 +569,12 @@ if __name__ == "__main__":
         recs = [d for d in lines if "conversion_error" not in d]
         errors = [d["conversion_error"] for d in lines if "conversion_error" in d]
         sys.exit(1 if report(recs, cli_set, errors) else 0)
-    if "--from-r3-logs" in args:
+    if "--from-legacy-logs" in args:
         if cli_set not in SETS:
-            print("--from-r3-logs needs --set small|big (written into every record)")
+            print("--from-legacy-logs needs --set small|big (written into every record)")
             sys.exit(2)
-        i = args.index("--from-r3-logs")
-        recs, errors = from_r3_logs(args[i + 1], args[i + 2], cli_set, quick)
+        i = args.index("--from-legacy-logs")
+        recs, errors = from_legacy_logs(args[i + 1], args[i + 2], cli_set, quick)
         for r in recs:
             print(json.dumps(r))
         for e in errors:
