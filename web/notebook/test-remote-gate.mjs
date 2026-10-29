@@ -426,21 +426,41 @@ export async function runGateTests(check) {
   });
 
   await control("I11", async () => {
-    const p = await page([["a", "x = 1"], ["b", "y = x + 1"], ["u", "v = 1"]]);
-    await p.gesture(["a", "b", "u"]);
-    check(!!p.a.record("a") && !!p.a.record("u"), "I11: (a, u recorded)");
-    p.del("a");
-    await p.kernel.reactive.remove(["a"]);
-    const forgets = p.runPosts().filter((f) => JSON.parse(f.body).payload.code === "");
-    check(forgets.length === 1 && !p.a.record("a"), "I11: deleting A sends one forget (ungated, empty code) and fences A's record");
-    check(!!p.a.record("u"), "I11: an unrelated cell's record stays");
-    // (serial order: the forget's dispatch comes before B's run in that action, B's earlier terminal before it)
-    const posts = p.runPosts().map((f) => JSON.parse(f.body).payload);
-    const iForget = posts.findIndex((x) => x.code === "");
-    check(posts.slice(iForget + 1).every((x) => x.cell !== "a") && posts.slice(0, iForget).filter((x) => x.cell === "b").length === 1, "I11: one job at a time: B's run before the forget had its terminal first; nothing of A after it");
-    p.edit("a", "x = 1");
-    await p.gesture(["a"]);
-    check(!!p.a.record("a"), "I11: A reruns after the forget and is recorded");
+    // A admitted and paused before its terminal; the forget of A's names queued behind it (the kernel runs
+    // one job at a time); A's terminal released; then the forget is dispatched: no record for A, and B,
+    // computed from it, waits (no POST, stale).  With a late success, and with a late failure.
+    for (const late of ["success", "failure"]) {
+      const p = await page([["a", "x = 1"], ["b", "y = x + 1"], ["u", "v = 1"]]);
+      await p.gesture(["a", "b", "u"]);
+      check(!!p.a.record("a") && !!p.a.record("b") && !!p.a.record("u"), "I11: (a, b, u recorded)");
+      if (late === "failure") p.fake.kernel = async () => ({ events: [], outcome: { status: "error", ename: "ValueError", ms: 1 } });
+      const held = p.fake.pause("before-terminal");
+      const before = postsFor(p, ["b"]);
+      const run = p.agent(["a"]);
+      await held.reached;
+      const forgot = p.r().host.forget(["x"], ["a"]);
+      held.release();
+      await run;
+      await forgot;
+      p.fake.kernel = async () => ({ events: [], outcome: { status: "ok", ms: 1 } });
+      const posts = p.payloads();
+      const iForget = posts.findIndex((x) => x.code === "");
+      const iA = posts.map((x) => x.cell).lastIndexOf("a");
+      check(!p.a.record("a") && iForget > iA, `I11 (${late}): A's late ${late} after the forget was queued: no record; the forget dispatched after A's terminal`);
+      await p.agent(["b"]); // (after a late failure the scheduler cancels B itself; run it again either way)
+      const waited = late === "success" ? p.results.get("b")?.notRun === "wait" && why(p, "b") === "ancestor" : p.states.get("b")?.state === "cancelled";
+      check(postsFor(p, ["b"]) === before && waited, `I11 (${late}): B, computed from A: no POST (${late === "success" ? "stale: it waits" : "cancelled: A raised"})`);
+      check(!!p.a.record("u"), `I11 (${late}): an unrelated cell's record stays`);
+      await p.gesture(["a"]);
+      check(!!p.a.record("a"), `I11 (${late}): A reruns after the forget and is recorded`);
+    }
+    // deleting a cell: one forget (ungated, empty code) with its guard, and the cell's record fenced
+    const q = await page([["a", "x = 1"], ["u", "v = 1"]]);
+    await q.gesture(["a", "u"]);
+    q.del("a");
+    await q.kernel.reactive.remove(["a"]);
+    const forgets = q.runPosts().filter((f) => JSON.parse(f.body).payload.code === "");
+    check(forgets.length === 1 && !q.a.record("a") && !!q.a.record("u"), "I11: deleting A sends one forget and fences A's record; an unrelated record stays");
   });
 
   await control("I12", async () => {
