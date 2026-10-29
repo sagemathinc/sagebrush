@@ -406,6 +406,55 @@ try {
     const TEX3 = await texNow(), after = C.list(await sideDoc(), TEX3, { all: true }).threads.find((t) => t.id === t3.id);
     const a3 = (await sideDoc()).threads.find((t) => t.id === t3.id).anchor.value;
     check(before.status === "exact" && after?.status === "exact" && after.range.start.line === before.range.start.line + 2 && a3.textSha === C.sha256(TEX3) && TEX3.slice(a3.start, a3.end) === "unique phrase", "comments: an edit above moves the anchors with it, and Save writes them for the saved text (exact again)", { before: before?.range?.start, after: after?.range?.start, status: after?.status });
+    // (6) LC-T5: an invalid comments file is refused, end to end: shown as unreadable, a new comment not saved over it
+    {
+      const fbad = await mk("/cm/bad.tex", enc("\\documentclass{article}\n\\begin{document}\nSome words to comment on.\n\\end{document}\n"));
+      await mk("/cm/bad.tex.comments.json", enc("{ this is not json"));
+      await open(fbad);
+      await until(`document.querySelector(".tex-preview")?.textContent.includes("Some words")`, 20000);
+      await ev(`(document.querySelector(".tex-comments").click(), true)`);
+      const shownErr = await until(`/can't be read/.test(document.querySelector(".sb-cm-list .sb-cm-err")?.textContent ?? "")`, 15000);
+      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("Some words"); t.focus(); t.setSelectionRange(i, i + 10); return true; })()`);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "m", code: "KeyM", modifiers: 3, windowsVirtualKeyCode: 77 });
+      await post("over a broken file");
+      const refused = await until(`/Not saved/.test(document.querySelector(".sb-cm-compose .sb-cm-err")?.textContent ?? "") && document.querySelector(".sb-cm-compose textarea")?.value === "over a broken file"`, 15000);
+      const still = new TextDecoder().decode(new Uint8Array(await bytesOf("/cm/bad.tex.comments.json")));
+      check(shownErr && refused && still === "{ this is not json", "comments: an invalid comments file is shown as unreadable, a comment over it refused with the draft kept, the file untouched", { shownErr, refused, still });
+    }
+    // (7) LC-T5 / LC-T2: retries exhausted end to end: another writer on every attempt; after 5 conflicts, "busy", the
+    // draft kept in the composer, nothing of it in the file
+    {
+      await open(ftex);
+      await until(`/Comments \\(\\d+\\)/.test(document.querySelector(".tex-comments")?.textContent ?? "")`, 20000);
+      await ev(`(() => { window.__writes = 0; window.__sbTexCommentsWrite = async () => { window.__writes++; const r = await ${W}.read(${J(SIDE)}); await ${W}.write(${J(SIDE)}, r.content, { base: r.entry.rev ?? 0 }); }; return true; })()`);
+      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("A middle"); t.focus(); t.setSelectionRange(i, i + 8); return true; })()`);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "m", code: "KeyM", modifiers: 3, windowsVirtualKeyCode: 77 });
+      await post("never lands");
+      const busy = await until(`/kept changing/.test(document.querySelector(".sb-cm-compose .sb-cm-err")?.textContent ?? "") && document.querySelector(".sb-cm-compose textarea")?.value === "never lands"`, 20000);
+      const writes = await ev(`window.__writes`);
+      await ev(`(delete window.__sbTexCommentsWrite, true)`);
+      const dx = await sideDoc();
+      check(busy && writes === 5 && !dx.threads.some((t) => t.messages.some((m) => m.text.value === "never lands")), "comments: on a conflict every attempt, five attempts then busy, the draft kept, nothing written", { busy, writes });
+    }
+    // (8) DB3-IMPL-3: re-finding a large document's anchors in slices: 2 MiB, 300 threads none exact (an agent's edit
+    // moved the text), placed with the main thread given back between slices of about 8 ms
+    {
+      const para = (i) => `Paragraph ${i}: some ordinary words for a long document, with a phrase numbered ${i}.\n\n`;
+      let big = "\\documentclass{article}\n\\begin{document}\n"; for (let i = 0; big.length < (2 << 20); i++) big += para(i); big += "\\end{document}\n";
+      const fbig = await mk("/cm/big.tex", enc(big));
+      let doc = C.emptyDoc({});
+      for (let i = 0; i < 300; i++) { const q = `a phrase numbered ${i * 50}.`, s = big.indexOf(q); doc = C.addThread(doc, { anchor: { ...C.makeAnchor(big, s, s + q.length, undefined, "x"), textSha: "stale" }, text: "t" + i, author: "agent:claude" }).doc; }
+      await mk("/cm/big.tex.comments.json", enc(C.serialize(doc)));
+      await open(fbig);
+      const placedMark = await until(`performance.getEntriesByName("tex-comments-placed").some((m) => m.detail.threads === 300)`, 60000);
+      const pm = await ev(`performance.getEntriesByName("tex-comments-placed").filter((m) => m.detail.threads === 300).at(-1)?.detail`);
+      console.log("comments placed in slices:", JSON.stringify(pm));
+      // (each moved anchor's search scans the whole text, so the 64 Mi-unit budget re-finds about 30 of them in 2 MiB:
+      // the rest are "unresolved", listed as such, never guessed; every placed one is at its own phrase)
+      const right = await ev(`(() => { const t = document.querySelector(".tex-src").value; return [...document.querySelectorAll(".sb-cm-bubble, .sb-cm-badge")].length; })()`);
+      const st = pm?.statuses ?? {};
+      check(placedMark && pm.slices > 1 && pm.maxSliceMs < 50 && pm.units > (2 << 20) && (st.moved ?? 0) > 0 && (st.moved ?? 0) + (st.unresolved ?? 0) === 300 && pm.work <= C.LIMITS.workBudget + 4 * pm.units, "comments: a 2 MiB document's 300 moved anchors placed in slices (no slice a long task), within the work budget: each moved or unresolved, none guessed", { ...pm, shown: right });
+    }
     check(errors.length === e0, "comments: no page errors", errors.slice(e0, e0 + 3));
     await ev(`(delete window.__sbTexCommentsWrite, true)`);
   }

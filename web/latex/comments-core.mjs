@@ -21,13 +21,13 @@ const fail = (code, msg, detail) => { throw new CommentsError(code, msg, detail)
 
 // ---- SHA-256 (synchronous, of a string's UTF-8 bytes), so anchors hash the same everywhere
 const K = new Uint32Array([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
-export function sha256(str) {
-  const msg = new TextEncoder().encode(str), n = msg.length, len = ((n + 9 + 63) >> 6) << 6;
-  const b = new Uint8Array(len); b.set(msg); b[n] = 0x80;
-  const bits = n * 8; for (let i = 0; i < 8; i++) b[len - 1 - i] = i < 4 ? (bits >>> (8 * i)) & 255 : Math.floor(bits / 2 ** (8 * i)) & 255;
+/** An incremental SHA-256 of a string's UTF-8 bytes: update(piece) any number of times (pieces never split a
+ * surrogate pair: the caller's slicing, sliceAt), then digest(). sha256(s) is the same in one call. */
+export function sha256Hasher() {
   const H = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]), W = new Uint32Array(64);
   const r = (x, k) => (x >>> k) | (x << (32 - k));
-  for (let o = 0; o < len; o += 64) {
+  const pend = new Uint8Array(64); let np = 0, total = 0;
+  const block = (b, o) => {
     for (let i = 0; i < 16; i++) W[i] = (b[o + 4 * i] << 24) | (b[o + 4 * i + 1] << 16) | (b[o + 4 * i + 2] << 8) | b[o + 4 * i + 3];
     for (let i = 16; i < 64; i++) { const s0 = r(W[i - 15], 7) ^ r(W[i - 15], 18) ^ (W[i - 15] >>> 3), s1 = r(W[i - 2], 17) ^ r(W[i - 2], 19) ^ (W[i - 2] >>> 10); W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0; }
     let [a, bb, c, d, e, f, g, h] = H;
@@ -36,16 +36,36 @@ export function sha256(str) {
       h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = bb; bb = a; a = (t1 + t2) | 0;
     }
     H[0] += a; H[1] += bb; H[2] += c; H[3] += d; H[4] += e; H[5] += f; H[6] += g; H[7] += h;
-  }
-  return [...H].map((x) => x.toString(16).padStart(8, "0")).join("");
+  };
+  const bytes = (b) => {
+    total += b.length; let i = 0;
+    if (np) { while (np < 64 && i < b.length) pend[np++] = b[i++]; if (np < 64) return; block(pend, 0); np = 0; }
+    for (; i + 64 <= b.length; i += 64) block(b, i);
+    while (i < b.length) pend[np++] = b[i++];
+  };
+  return {
+    update(piece) { bytes(new TextEncoder().encode(piece)); return this; },
+    digest() {
+      const bits = total * 8, tail = new Uint8Array(((np + 9 + 63) >> 6) << 6);
+      tail.set(pend.subarray(0, np)); tail[np] = 0x80;
+      for (let i = 0; i < 8; i++) tail[tail.length - 1 - i] = i < 4 ? (bits >>> (8 * i)) & 255 : Math.floor(bits / 2 ** (8 * i)) & 255;
+      for (let o = 0; o < tail.length; o += 64) block(tail, o);
+      return [...H].map((x) => x.toString(16).padStart(8, "0")).join("");
+    },
+  };
 }
+export const sha256 = (str) => sha256Hasher().update(str).digest();
+/** Where to cut a string near `i` for slicing (never inside a surrogate pair). */
+export const sliceAt = (s, i) => (i < s.length && i > 0 && (s.charCodeAt(i - 1) & 0xfc00) === 0xd800 ? i + 1 : Math.min(i, s.length));
 
 // ---- ids, times, registers (r3 §7.1, r4 §8.1): {value, rev, time, by, op}, merged by the greatest (rev, time, by, op);
 // op is a fresh random id per write, so two distinct writes never tie
 export const newId = (prefix) => prefix + "_" + Array.from({ length: 16 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)]).join("");
 export const now = () => new Date().toISOString();
 export const reg = (value, by, time = now(), rev = 0) => ({ value, rev, time, by, op: newId("o") });
-const later = (a, b) => (a.rev !== b.rev ? a.rev > b.rev : a.time !== b.time ? a.time > b.time : a.by !== b.by ? a.by > b.by : a.op > b.op);
+// (the value, by its JSON, last: two writes with one op id, which a fresh random id makes vanishingly rare, still
+// merge the same in either order)
+const later = (a, b) => (a.rev !== b.rev ? a.rev > b.rev : a.time !== b.time ? a.time > b.time : a.by !== b.by ? a.by > b.by : a.op !== b.op ? a.op > b.op : JSON.stringify(a.value) > JSON.stringify(b.value));
 const pick = (a, b) => (!a ? b : !b ? a : later(b, a) ? b : a);
 /** A register's next write: one rev above the one read. */
 export const bump = (r, value, by, time = now()) => ({ value, rev: (r?.rev ?? -1) + 1, time, by, op: newId("o") });
@@ -99,11 +119,12 @@ export function serialize(doc) {
 }
 
 // ---- anchors (r3 §7.3): a span of the text, with what is needed to find it again
-/** An anchor for [start, end) of `text`: the whole span (up to 600 units), or its head, tail, length and sha. */
-export function makeAnchor(text, start, end, shown) {
+/** An anchor for [start, end) of `text`: the whole span (up to 600 units), or its head, tail, length and sha
+ * (`textSha`: the text's, when the caller has it already). */
+export function makeAnchor(text, start, end, shown, textSha) {
   if (!(Number.isInteger(start) && Number.isInteger(end) && 0 <= start && start <= end && end <= text.length)) fail("invalid", "a range inside the text");
   const span = text.slice(start, end);
-  const a = { start, end, textSha: sha256(text), prefix: text.slice(Math.max(0, start - LIMITS.context), start), suffix: text.slice(end, end + LIMITS.context) };
+  const a = { start, end, textSha: textSha ?? sha256(text), prefix: text.slice(Math.max(0, start - LIMITS.context), start), suffix: text.slice(end, end + LIMITS.context) };
   if (span.length <= LIMITS.quoteFull) a.quote = span;
   else { a.quote = span.slice(0, LIMITS.quoteHead); a.tail = span.slice(-LIMITS.quoteHead); a.length = span.length; a.sha = sha256(span); }
   const sh = (shown ?? "").trim().slice(0, LIMITS.shown);
@@ -132,10 +153,11 @@ function dist(a, b) {
  * through it (r3 §7.6, r4 §8.5: every inspection of the source is charged: the hash, each search's span, each long
  * span's hash, each edit distance, each pairing step, each extraction). resolve(anchor) -> {status, start, end,
  * candidates?}; status: exact | moved | changed | ambiguous | orphaned | unresolved (out of budget: never a guess). */
-export function resolver(text, budget = LIMITS.workBudget) {
+export function resolver(text, budget = LIMITS.workBudget, { textSha: known } = {}) {
   if (text.length > LIMITS.sourceUnits) fail("limit", "the .tex is over 4 Mi units", { limit: "sourceUnits", max: LIMITS.sourceUnits, size: text.length });
   let work = text.length;
-  const textSha = sha256(text), lines = lineIndex(text);
+  // (the text's hash: the caller's, when it hashed the text already in slices, the page; charged the same either way)
+  const textSha = known ?? sha256(text), lines = lineIndex(text);
   work += text.length;
   const over = () => work >= budget;
   // every occurrence of s in [from, to) (up to the candidate cap + 1), the span scanned charged
@@ -287,7 +309,15 @@ export async function update(io, op, { file, draft, deadlineMs = LIMITS.deadline
       if (clock() >= end) busy(attempt - 1, "out of time");
       try { await io.write(text, base, { signal: ac?.signal }); return { doc: res.doc, id: res.id, attempts: attempt }; }
       catch (e) {
-        if (e?.code !== "conflict") throw e;
+        // (any failure but a conflict may have come after the write was done, a timeout or an abort: the file is read
+        // once more, and if it already holds everything this write had, it was saved; else the failure stands, and
+        // nothing of this write is there, so a retry by the caller can't duplicate it)
+        if (e?.code !== "conflict") {
+          const landed = await reconcile(io, res.doc, file);
+          if (landed) return { doc: landed, id: res.id, attempts: attempt, reconciled: true };
+          if (ac?.signal.aborted) busy(attempt, "out of time");
+          throw e;
+        }
         if (attempt >= LIMITS.attempts) busy(attempt, "the comments file kept changing (" + attempt + " attempts)");
         const ms = Math.round(LIMITS.backoffMs[attempt - 1] * (0.75 + Math.random() * 0.5));
         if (clock() + ms >= end) busy(attempt, "out of time");
@@ -295,6 +325,17 @@ export async function update(io, op, { file, draft, deadlineMs = LIMITS.deadline
       }
     }
   } finally { clearTimeout(timer); }
+}
+
+// the file now, if it holds everything `mine` has (merging mine into it changes nothing); else null. Read without the
+// operation's deadline (it may be what ended the write), bounded on its own.
+async function reconcile(io, mine, file) {
+  const ac = typeof AbortController !== "undefined" ? new AbortController() : null, timer = setTimeout(() => ac?.abort(), 2000);
+  try {
+    const { content } = await io.read({ signal: ac?.signal });
+    const cur = parse(content, file);
+    return JSON.stringify(merge(cur, mine)) === JSON.stringify(merge(cur, cur)) ? cur : null;
+  } catch { return null; } finally { clearTimeout(timer); }
 }
 
 // ---- reading, for people and agents (r4.1 §8.5): `list` gives thread summaries, `show` one whole thread

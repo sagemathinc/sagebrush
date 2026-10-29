@@ -148,6 +148,94 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
   check("DB3-IMPL-4-deadline-busy-fewer-attempts", de.code === "busy" && tries3 < 5, { code: de.code, tries3 });
 }
 
+// ---- LC-T1 / LC-T3 / LC-T4 / LC-T6 / LC-T7: the edge contracts named in the implementation review
+{
+  const anc = C.makeAnchor(TEX, 0, 5);
+  let d = C.addThread(C.emptyDoc({}), { anchor: anc, text: "one", ...H });
+  const id = d.id; d = d.doc;
+  // LC-T1: merge is idempotent; the same op id with different values (a collision) still merges one way
+  const r = C.reply(d, id, { text: "two", ...A }).doc, m = C.merge(d, r);
+  check("LC-T1-merge-idempotent", canon(C.merge(m, m)) === canon(m) && canon(C.merge(m, r)) === canon(m));
+  const t = "2026-10-29T20:00:00.000Z", same = (v) => { const x = C.setResolved(d, id, v, { author: "agent:a", time: t }).doc; x.threads[0].resolved.op = "o_samesamesamesame"; return x; };
+  const cx = same(true), cy = same(false);
+  check("LC-T1-op-collision-deterministic", canon(C.merge(cx, cy)) === canon(C.merge(cy, cx)));
+  // LC-T1: a register without its op id (no such legacy files exist: version 1 is the first) is refused, not guessed
+  const legacy = JSON.parse(C.serialize(d)); delete legacy.threads[0].resolved.op;
+  check("LC-T1-register-without-op-refused", throws(() => C.parse(JSON.stringify(legacy)))?.code === "invalid");
+  // LC-T4: a concurrent addition survives an unrelated deletion
+  const added = C.addThread(d, { anchor: anc, text: "added", ...A }).doc, deleted = C.deleteThread(d, id, H).doc;
+  const md = C.merge(added, deleted);
+  check("LC-T4-addition-survives-unrelated-deletion", md.threads.length === 2 && md.threads.find((x) => x.id === id).deleted.value === true && md.threads.some((x) => x.messages[0].text.value === "added") && canon(md) === canon(C.merge(deleted, added)));
+  // LC-T3: one prefix with two suffixes after it, two prefixes with one suffix, the empty boundary at the file's start,
+  // and over 64 candidates: ambiguous (or orphaned when nothing fits), never one picked
+  const R = (x) => C.resolver(x);
+  const base = { start: 10, end: 13, textSha: "stale", quote: "QQQ" };
+  check("LC-T3-one-prefix-two-suffixes-ambiguous", R("PRE-aaa-SUF-bbb-SUF").resolve({ ...base, prefix: "PRE-", suffix: "-SUF" }).status === "ambiguous");
+  check("LC-T3-two-prefixes-one-suffix-ambiguous", R("PRE-aaa-PRE-bbb-SUF").resolve({ ...base, prefix: "PRE-", suffix: "-SUF" }).status === "ambiguous");
+  const st0 = R("new opening words-SUF and more").resolve({ ...base, start: 0, end: 3, prefix: "", suffix: "-SUF" });
+  check("LC-T3-empty-prefix-is-file-start", st0.status === "changed" && st0.start === 0, st0);
+  check("LC-T3-empty-prefix-not-file-start-orphaned", R("xx").resolve({ ...base, start: 5, end: 8, prefix: "", suffix: "-SUF" }).status === "orphaned");
+  const many = R("QQQ ".repeat(70)).resolve({ ...base, prefix: "<", suffix: ">" });
+  check("LC-T3-candidate-overflow-ambiguous", many.status === "ambiguous" && many.reason === "too many", many);
+  // LC-T3: UTF-16 offsets: an anchor after astral characters is exact where it was made, and found again (moved)
+  const astral = "\u{1D4AA}\u{1F600} then the words", aa = C.makeAnchor(astral, astral.indexOf("the words"), astral.length);
+  const ra = R("\u{1F600}" + astral).resolve(aa);
+  check("LC-T3-utf16-offsets", R(astral).resolve(aa).status === "exact" && ra.status === "moved" && ("\u{1F600}" + astral).slice(ra.start, ra.end) === "the words", ra);
+  // the incremental hash: the same digest in slices (never inside a surrogate pair) as in one call
+  const big = ("a\u{1F600}b ").repeat(50000), h = C.sha256Hasher();
+  for (let i = 0; i < big.length;) { const j = C.sliceAt(big, i + 4097); h.update(big.slice(i, j)); i = j; }
+  check("sha256-sliced-same", h.digest() === C.sha256(big));
+}
+// LC-T6 / LC-T7: writes at their boundaries
+{
+  const anc = C.makeAnchor(TEX, 0, 5), nosleep = { sleep: async () => {} };
+  const store = (init = null) => { let content = init, base = 0, writes = 0; return { get: () => content, writes: () => writes, io: { read: async () => ({ content, base }), write: async (c, b) => { if (b !== base) { const e = new Error("conflict"); e.code = "conflict"; throw e; } content = c; base++; writes++; } } }; };
+  // LC-T6: a write that lands but whose answer is lost (a timeout after it was issued): reconciled as saved, once
+  const S = store(); let lost = 0;
+  const flaky = { read: S.io.read, write: async (c, b) => { await S.io.write(c, b); if (!lost++) { const e = new Error("timed out"); e.code = "timeout"; throw e; } } };
+  const ok = await C.update(flaky, (doc) => C.addThread(doc, { anchor: anc, text: "once", ...H }), nosleep);
+  check("LC-T6-uncertain-write-reconciled", ok.reconciled === true && C.parse(S.get()).threads.length === 1 && S.writes() === 1, ok);
+  // LC-T6: one that didn't land: the error stands, nothing written
+  const S2 = store(); const failing = { read: S2.io.read, write: async () => { const e = new Error("timed out"); e.code = "timeout"; throw e; } };
+  const fe = await C.update(failing, (doc) => C.addThread(doc, { anchor: anc, text: "x", ...H }), nosleep).catch((e) => e);
+  check("LC-T6-uncertain-write-not-landed", fe.code === "timeout" && S2.get() === null);
+  // LC-T4: a refused admission writes nothing (the op throws before any write)
+  const S3 = store(C.serialize(C.emptyDoc({})));
+  const ae = await C.update(S3.io, (doc) => C.addThread(doc, { anchor: anc, text: "x".repeat(C.LIMITS.text + 1), ...H }), nosleep).catch((e) => e);
+  check("LC-T4-refused-admission-writes-nothing", ae.code === "limit" && S3.writes() === 0);
+  // LC-T7: the 256 KiB thread bound counts the encoded bytes: escaped quotes take twice the room
+  let q = C.addThread(C.emptyDoc({}), { anchor: anc, text: '"'.repeat(8000), ...H }), qe = null, qn = 1;
+  while (!qe) { try { q = C.reply(q.doc, q.id, { text: '"'.repeat(8000), ...A }); qn++; } catch (x) { qe = x; } }
+  const qb = new TextEncoder().encode(JSON.stringify(q.doc.threads[0])).length;
+  check("LC-T7-thread-bound-encoded-bytes", qe.code === "full" && qb <= C.LIMITS.threadBytes && qn < 18, { qn, qb });
+  // LC-T7: the new-thread threshold exactly: a file of exactly 1.75 MiB still takes a new thread, one byte over doesn't
+  const size = (doc) => new TextEncoder().encode(JSON.stringify(doc, null, 1)).length + 1;
+  const T = C.LIMITS.newThreadBytes;
+  let b = C.emptyDoc({});
+  // (large fillers, then small ones, so the last thread's text lands it exactly: within the 8,000-unit text limit)
+  while (size(b) < T - 20000) b = C.addThread(b, { anchor: anc, text: "z".repeat(7900), ...H }).doc;
+  while (size(b) + 4000 < T) b = C.addThread(b, { anchor: anc, text: "z".repeat(1000), ...H }).doc;
+  const probe = C.addThread(b, { anchor: anc, text: "", ...H }).doc, k = T - size(probe);
+  const atT = C.addThread(b, { anchor: anc, text: "z".repeat(k), ...H }).doc, overT = C.addThread(b, { anchor: anc, text: "z".repeat(k + 1), ...H }).doc;
+  check("LC-T7-new-thread-at-exactly-1.75MiB-accepted", size(atT) === T && !throws(() => C.addThread(atT, { anchor: anc, text: "n", ...H })), { at: size(atT), T });
+  check("LC-T7-new-thread-one-byte-over-refused", size(overT) === T + 1 && throws(() => C.addThread(overT, { anchor: anc, text: "n", ...H }))?.detail?.limit === "newThreadBytes");
+  // LC-T7: the cap re-checked after a conflict: at exactly 1.75 MiB a new thread is admitted, but a contender's thread
+  // landed first, so the retry, re-read and re-checked, is "full" (the contender's kept, nothing of mine written)
+  const S4 = store(C.serialize(atT)); let once = true;
+  const race = { read: S4.io.read, write: async (c, b) => { if (once) { once = false; await S4.io.write(C.serialize(C.addThread(C.parse(S4.get()), { anchor: anc, text: "theirs", ...A }).doc), b); } return S4.io.write(c, b); } };
+  const re = await C.update(race, (doc) => C.addThread(doc, { anchor: anc, text: "mine", ...H }), nosleep).catch((e) => e);
+  const after4 = C.parse(S4.get());
+  check("LC-T7-cap-revalidated-after-conflict", re.code === "full" && re.detail?.limit === "newThreadBytes" && after4.threads.some((x) => x.messages[0].text.value === "theirs") && !after4.threads.some((x) => x.messages[0].text.value === "mine"), { code: re.code });
+  // LC-T7: replies past 1.75 MiB are taken until the hard 2 MiB limit, which refuses atomically (the file unchanged)
+  const S5 = store(C.serialize(atT)); let re5 = null, replies = 0;
+  for (let i = 0; !re5 && i < 200; i++) {
+    const cur = C.parse(S5.get()), tid = cur.threads[i % cur.threads.length].id, before = S5.get();
+    re5 = await C.update(S5.io, (doc) => C.reply(doc, tid, { text: "r".repeat(8000), ...A }), nosleep).then(() => null, (e) => e);
+    if (re5) check("LC-T7-2MiB-refusal-atomic", re5.code === "limit" && S5.get() === before && new TextEncoder().encode(before).length <= C.LIMITS.sidecarBytes, { code: re5.code }); else replies++;
+  }
+  check("LC-T7-replies-until-2MiB", re5 && replies > 20, { replies });
+}
+
 // ---- DB3-IMPL-1: list summaries, paged by id, stale on change
 {
   let d = C.emptyDoc({});

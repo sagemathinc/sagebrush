@@ -9,6 +9,7 @@
 import type { LatexEditor } from "./component";
 import * as C from "./comments-core.mjs";
 import { MARGIN_MIN, ensureStyle, regs, paint, el, rangeIn } from "./comments-ui";
+import { mark } from "./marks";
 
 type View = Omit<LatexEditor, "setText" | "destroy">;
 type Io = { read(o: { signal?: AbortSignal }): Promise<{ content: string | null; base: unknown }>; write(content: string, base: unknown, o: { signal?: AbortSignal }): Promise<unknown> };
@@ -47,21 +48,44 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
   // ---- the threads and their places in the text now
   const live = () => doc.threads.filter((t: any) => !t.deleted.value);
   const msgs = (t: any) => t.messages.filter((m: any) => !m.deleted.value);
-  // (a thread is placed once per anchor write: later, its offsets are mapped through the edits made here)
-  const placeAll = () => {
-    const text = ed.getText();
-    let R: ReturnType<typeof C.resolver> | null = null;
-    const seen = new Set<string>();
-    for (const t of live()) {
-      seen.add(t.id);
-      const p = places.get(t.id);
-      if (p && p.op === t.anchor.op) continue;
-      R ??= C.resolver(text);
-      const r: any = R.resolve(t.anchor.value);
-      places.set(t.id, { op: t.anchor.op, status: r.status, s: r.start ?? -1, e: r.end ?? -1, candidates: r.candidates });
-    }
+  // (a thread is placed once per anchor write: later, its offsets are mapped through the edits made here). The work
+  // runs in slices of at most SLICE_MS, a frame given back between them (r3 §7.6): the text hashed in pieces (once
+  // per text: kept for new anchors), then the threads resolved a few at a time; an edit meanwhile starts it again
+  const SLICE_MS = 8, HASH_PIECE = 1 << 16;
+  let placing = 0, shaFor = { text: null as string | null, sha: "" };
+  const frame = () => new Promise<void>((r) => setTimeout(r, 0));
+  const placeAll = async () => {
+    const gen = ++placing, text = ed.getText(), stale = () => gen !== placing || life.signal.aborted;
+    const seen = new Set(live().map((t: any) => t.id));
     for (const id of [...places.keys()]) if (!seen.has(id)) places.delete(id);
+    const todo = live().filter((t: any) => places.get(t.id)?.op !== t.anchor.op);
+    if (todo.length) {
+      let t0 = performance.now(), slices = 1, maxSlice = 0;
+      const pause = async () => { const d = performance.now() - t0; if (d < SLICE_MS) return false; maxSlice = Math.max(maxSlice, d); slices++; await frame(); t0 = performance.now(); return stale(); };
+      if ((await hashOf(text, pause)) === null) return;
+      if (await pause()) return;
+      const R = C.resolver(text, undefined, { textSha: shaFor.sha });
+      for (const t of todo) {
+        if (await pause()) return;
+        const r: any = R.resolve(t.anchor.value);
+        places.set(t.id, { op: t.anchor.op, status: r.status, s: r.start ?? -1, e: r.end ?? -1, candidates: r.candidates });
+      }
+      maxSlice = Math.max(maxSlice, performance.now() - t0);
+      const statuses: Record<string, number> = {}; for (const t of todo) { const st = places.get(t.id)!.status; statuses[st] = (statuses[st] ?? 0) + 1; }
+      mark("tex-comments-placed", { threads: todo.length, slices, maxSliceMs: Math.round(maxSlice * 10) / 10, work: R.work(), units: text.length, statuses });
+    }
+    if (!stale()) { draw(); showList(); }
   };
+  // the text's hash, in pieces, `pause` between them (true: stop, null returned); kept for the text it was taken of
+  async function hashOf(text: string, pause: () => Promise<boolean>): Promise<string | null> {
+    if (shaFor.text === text) return shaFor.sha;
+    const h = C.sha256Hasher();
+    for (let i = 0; i < text.length;) { const j = C.sliceAt(text, i + HASH_PIECE); h.update(text.slice(i, j)); i = j; if (await pause()) return null; }
+    shaFor = { text, sha: h.digest() };
+    return shaFor.sha;
+  }
+  // (an anchor for a span of the text now: its hash reused when it was taken for this text)
+  const anchorAt = (s: number, e: number, shown?: string) => { const text = ed.getText(); return C.makeAnchor(text, s, e, shown, shaFor.text === text ? shaFor.sha : undefined); };
   const placed = (p?: Place) => !!p && p.s >= 0 && (p.status === "exact" || p.status === "moved" || p.status === "changed");
 
   // ---- reading and writing the comments file (each write: the file re-read, the operation applied to it, merged by
@@ -74,7 +98,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
       if (loaded && r.base === base) return;
       doc = C.parse(r.content, o.file); base = r.base; loaded = true; error = "";
     } catch (e: any) { if (life.signal.aborted) return; error = "The comments file can't be read: " + String(e?.message ?? e); loaded = true; }
-    placeAll(); draw(); showList();
+    await placeAll();
   };
   const write = async (op: (d: any) => { doc: any; id?: string }, draft = ""): Promise<string | undefined> => {
     try {
@@ -82,7 +106,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
       if (life.signal.aborted) return;
       // (the next reload reads the file again: its base after this write isn't known here)
       doc = res.doc; base = undefined; error = "";
-      placeAll(); draw(); showList();
+      await placeAll();
       return res.id ?? "";
     } catch (e: any) {
       if (life.signal.aborted) return;
@@ -105,6 +129,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     const map = (x: number, right: boolean) => (x < a || (x === a && !right) ? x : x >= oldEnd ? x + delta : right ? a + (next.length - z - a) : a);
     for (const p of places.values()) if (placed(p)) { p.s = map(p.s, true); p.e = Math.max(p.s, map(p.e, false)); }
     prev = next;
+    if (live().some((t: any) => places.get(t.id)?.op !== t.anchor.op)) void placeAll();
     scheduleMarks();
   };
   o.src.addEventListener("input", onInput, on);
@@ -228,8 +253,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
 
   // ---- new threads: on the preview's selection (the Comment button) or the source's (Ctrl/Cmd+Alt+M)
   const compose = (s: number, e: number, shown?: string) => {
-    const text = ed.getText();
-    const anchor = C.makeAnchor(text, s, e, shown);
+    const anchor = anchorAt(s, e, shown);
     const g = ed.previewRangesOf(s, Math.max(s, e))[0];
     const p = box(null, "sb-cm-compose");
     if (g && p.classList.contains("sb-cm-pop")) { const b0 = right.getBoundingClientRect(); p.style.top = g.getBoundingClientRect().top - b0.top + right.scrollTop + "px"; }
@@ -237,8 +261,6 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     const { ta, row } = composerIn(p, "Comment", async (body) => {
       const id = await write((d) => C.addThread(d, { anchor, text: body, author: o.author }), body);
       if (id === undefined) return false;
-      // (placed where it was made: its offsets hold for the text as it is now)
-      places.set(id, { op: live().find((t: any) => t.id === id)?.anchor.op ?? "", status: "exact", s, e });
       closeAll(); active = id; draw(); return true;
     });
     const no = el("button", "", "Cancel"); no.onclick = () => { closeAll(); draw(); };
@@ -273,7 +295,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
   const attachToSelection = async (id: string) => {
     const a = fromSource() ?? (() => { const p = fromPreview(); return p ? { s: p.s, e: p.e } : null; })();
     if (!a) { error = "Select the text to attach it to first (in the source or the preview)."; openThread(id, null); return; }
-    const anchor = C.makeAnchor(ed.getText(), a.s, a.e);
+    const anchor = anchorAt(a.s, a.e);
     if ((await write((d) => C.reattach(d, id, anchor, { author: o.author }))) !== undefined) openThread(id, null);
   };
 
@@ -308,7 +330,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
       if (!cs.length) d.append(el("div", "sb-cm-note", "too many places: select the text and use Attach to selection"));
       cs.forEach((c, k) => {
         const b = el("button", "sb-cm-cand", "Place " + (k + 1) + ": line " + L.at(c.start).line);
-        b.onclick = async (ev) => { ev.stopPropagation(); const anchor = C.makeAnchor(ed.getText(), c.start, c.end); await write((x) => C.reattach(x, t.id, anchor, { author: o.author })); };
+        b.onclick = async (ev) => { ev.stopPropagation(); const anchor = anchorAt(c.start, c.end); await write((x) => C.reattach(x, t.id, anchor, { author: o.author })); };
         d.append(b);
       });
     });
@@ -337,13 +359,15 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     commentSelection,
     /** The .tex was saved with `text`: the placed anchors written again for it (their offsets and its hash). */
     saved: async (text: string) => {
-      const sha = C.sha256(text);
+      let t0 = performance.now();
+      const sha = await hashOf(text, async () => { if (performance.now() - t0 < SLICE_MS) return false; await frame(); t0 = performance.now(); return life.signal.aborted; });
+      if (sha === null) return;
       const todo = live().filter((t: any) => placed(places.get(t.id)) && (t.anchor.value.textSha !== sha || places.get(t.id)!.s !== t.anchor.value.start || places.get(t.id)!.e !== t.anchor.value.end));
       if (!todo.length) return;
       const at = new Map(todo.map((t: any) => [t.id, places.get(t.id)!]));
       await write((d) => {
         let x = d;
-        for (const [id, p] of at) { if (!x.threads.some((t: any) => t.id === id && !t.deleted.value)) continue; x = C.reattach(x, id, C.makeAnchor(text, p.s, p.e, x.threads.find((t: any) => t.id === id).anchor.value.shown), { author: o.author }).doc; }
+        for (const [id, p] of at) { if (!x.threads.some((t: any) => t.id === id && !t.deleted.value)) continue; x = C.reattach(x, id, C.makeAnchor(text, p.s, p.e, x.threads.find((t: any) => t.id === id).anchor.value.shown, sha), { author: o.author }).doc; }
         return { doc: x };
       });
     },
