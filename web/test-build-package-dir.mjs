@@ -4,7 +4,7 @@ import { bundledPackageDir } from './build-package-dir.mjs';
 
 test('normal checkout handles absolute/relative, scoped and nested vendored dependencies', () => {
   const root = '/home/user/sagebrush-normal';
-  const dir = input => bundledPackageDir(input, root, root, root + '/node_modules');
+  const dir = input => bundledPackageDir(input, root);
   assert.equal(dir('node_modules/@xterm/xterm/lib/xterm.js'), 'node_modules/@xterm/xterm');
   assert.equal(dir(root + '/node_modules/katex/dist/katex.mjs'), 'node_modules/katex');
   const store = 'node_modules/.pnpm/patchflow@0.16.0/node_modules/patchflow/node_modules/@cocalc/diff-match-patch';
@@ -16,8 +16,8 @@ test('symlinked node_modules is independent of worktree path length and preserve
   const modules = '/home/user/sagebrush/node_modules';
   const suffix = '.pnpm/@xterm+xterm@6.0.0/node_modules/@xterm/xterm';
   for (const root of ['/home/user/sb', '/home/user/sagebrush-remote-preview', '/different/very-long-checkout-name']) {
-    assert.equal(bundledPackageDir(modules + '/' + suffix + '/lib/xterm.js', root, root, modules), 'node_modules/' + suffix);
-    assert.equal(bundledPackageDir(root + '/node_modules/katex/dist/katex.mjs', root, root, modules), 'node_modules/katex');
+    assert.equal(bundledPackageDir(modules + '/' + suffix + '/lib/xterm.js', root), 'node_modules/' + suffix);
+    assert.equal(bundledPackageDir(root + '/node_modules/katex/dist/katex.mjs', root), 'node_modules/katex');
   }
-  assert.throws(() => bundledPackageDir('/unrelated/node_modules/katex/index.js', '/', '/checkout', modules), /outside/);
+  assert.equal(bundledPackageDir('/unrelated/node_modules/katex/index.js', '/checkout'), 'node_modules/katex');
 });
