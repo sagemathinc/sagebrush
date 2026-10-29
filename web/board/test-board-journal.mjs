@@ -9,7 +9,7 @@ import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
-import { closeChrome } from "./test-board-journal-lib.mjs";
+import { buildFailure, closeChrome } from "./test-board-journal-lib.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const J = JSON.stringify;
@@ -42,11 +42,14 @@ writeFileSync(join(src, "entry.js"), [
   `export * as H from ${J(join(here, "../notebook/history.js"))};`,
   `export * as R from ${J(join(here, "../journal/rows.js"))};`,
   `export * as S from ${J(join(here, "../notebook/stores.js"))};`,
+  // (SYNC_NB from the module that exports it: journal/rows.js imports it, doesn't export it)
+  `export * as SR from ${J(join(here, "../notebook/sync-rows.js"))};`,
 ].join("\n"));
-const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
+// (a failed build is one FAIL line whether Bun.build throws or returns success: false; its dirs removed either way)
+const built = await buildFailure(() => Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" }));
 rmSync(src, { recursive: true, force: true });
-if (!b.success) {
-  console.error("FAIL: the cases' bundle didn't build\n" + b.logs.join("\n"));
+if (built !== null) {
+  console.error("FAIL: the cases' bundle didn't build (" + built + ")");
   rmSync(site, { recursive: true, force: true });
   process.exit(1);
 }

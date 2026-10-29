@@ -26,7 +26,7 @@
 //   gone is marked missing, never removed.
 import { inTx, req } from "./db";
 import { TRASH, nameOf, normPath, parentOf, safeName, splitExt, within } from "./paths";
-import { COPIES, LEGACY_MAX, WorkspaceError, type BoardRecord, type Entry, type OldBytes, type Workspace } from "./api";
+import { COPIES, LEGACY_MAX, WorkspaceError, type BoardRecord, type Entry, type OldBytes, type PlainBoardRecord, type Workspace } from "./api";
 import { reserve, type Release } from "./reserve";
 import { rewriting } from "./sync-rewrite";
 import { bytesHash, FENCE } from "../notebook/stores.js";
@@ -144,7 +144,7 @@ async function migrateBoards(w: Workspace, storage: KeyValue, r: MigrateReport) 
     let id = local && !later ? local[1] : null;
     if (id !== null && (await inTx(w.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").getKey(id!)))) !== undefined) id = null;
     id ??= await freeBoardId(w);
-    const board: BoardRecord = { id, doc, rev: 1, updated: when, ...(docId && !later ? { docId } : {}), ...(source ? { origin: source } : {}) };
+    const board: PlainBoardRecord = { id, doc, rev: 1, updated: when, ...(docId && !later ? { docId } : {}), ...(source ? { origin: source } : {}) };
     // (the record of what came from k, kept to the latest 100)
     const record: [string, unknown] = [IMPORT + k, { sigs: [...sigs, sig].slice(-100), id: prov?.id ?? id }];
     await w.adopt(local ? "/" : EDITED_FOLDER, later ? `${title} (from an older tab)` : title, BOARD_EXT,
