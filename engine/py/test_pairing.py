@@ -612,6 +612,42 @@ def test_dev_origin():
         del os.environ[P.DEV_ORIGIN_ENV]
 
 
+def test_dev_origin_preview_site():
+    """SAGEBRUSH_MCP_DEV_ORIGIN may name one hosted preview,
+    https://<name>.sagebrush.cloud, matched exactly: not a sibling, not
+    http, not a lookalike, not with a slash or a port; and the server says
+    so on stderr when it starts."""
+    import contextlib
+    import io
+    dev = "https://latex.sagebrush.cloud"
+    os.environ[P.DEV_ORIGIN_ENV] = dev
+    try:
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            p, port, code = new()
+        assert "also accepting pages from https://latex.sagebrush.cloud" in err.getvalue(), err.getvalue()
+        assert Client(port, origin=dev).status == 101
+        assert Client(port, origin=ORIGIN).status == 101
+        for other in ("https://board.sagebrush.cloud", "http://latex.sagebrush.cloud", "https://latex.sagebrush.cloud.evil.com",
+                      "https://latex.sagebrush.cloud/", "https://latex.sagebrush.cloud:443", "https://evil.latex.sagebrush.cloud",
+                      "https://LATEX.sagebrush.cloud", "https://sagebrush.cloud"):
+            assert Client(port, origin=other).status == 403, other
+        p.close()
+        for bad in ("http://latex.sagebrush.cloud", "https://latex.sagebrush.cloud/", "https://latex.sagebrush.cloud:443",
+                    "https://latex.sagebrush.cloud.evil.com", "https://a.b.sagebrush.cloud", "https://*.sagebrush.cloud",
+                    "https://sagebrush.cloud", "https://-x.sagebrush.cloud", "https://x-.sagebrush.cloud", "https://Latex.sagebrush.cloud",
+                    "https://latex.sagebrush.cloud\n", "https://evil.example", "https://latexsagebrush.cloud"):
+            os.environ[P.DEV_ORIGIN_ENV] = bad
+            try:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    P.Pairing({"name": "t"})
+            except ValueError:
+                continue
+            raise AssertionError("accepted %r" % bad)
+    finally:
+        del os.environ[P.DEV_ORIGIN_ENV]
+
+
 if __name__ == "__main__":
     for name, f in list(globals().items()):
         if name.startswith("test_") and callable(f):

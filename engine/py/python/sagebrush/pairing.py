@@ -8,7 +8,8 @@ What guards it (any program on this computer can reach the port, so the
 port is not the guard; the code is):
 - it listens on 127.0.0.1 only, never on another interface;
 - the handshake must come from an allowed origin, exactly (Origin:
-  https://sagebrush.space, and SAGEBRUSH_MCP_DEV_ORIGIN when set), to
+  https://sagebrush.space, and SAGEBRUSH_MCP_DEV_ORIGIN when set: a
+  local development server or one https://<name>.sagebrush.cloud), to
   this port at 127.0.0.1 or localhost (Host, against DNS rebinding), at
   the path /sagebrush, as WebSocket version 13; anything else gets 403;
 - the page's first message is "hello" with the code: 128 random bits,
@@ -44,6 +45,7 @@ import re
 import secrets
 import socket
 import struct
+import sys
 import threading
 import time
 
@@ -52,8 +54,12 @@ from sagebrush.workspace_tools import LIMITS, NotConnected, PageError, loads_str
 PATH = "/sagebrush"
 #: SAGEBRUSH_MCP_DEV_ORIGIN: one more origin allowed, exactly, for a
 #: development server of the page (http://localhost:<port> or
-#: http://127.0.0.1:<port>); off by default
+#: http://127.0.0.1:<port>) or one hosted preview of it
+#: (https://<name>.sagebrush.cloud); off by default, said on stderr when on
 DEV_ORIGIN_ENV = "SAGEBRUSH_MCP_DEV_ORIGIN"
+#: a preview site's origin: one DNS label under sagebrush.cloud, https, no
+#: port (the Origin header must then equal it exactly, as every origin here)
+PREVIEW_ORIGIN = r"https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.sagebrush\.cloud"
 PROTOCOL = 1
 ORIGINS = ("https://sagebrush.space",)
 #: a frame's payload (and a fragmented message's) at most this many bytes:
@@ -94,9 +100,11 @@ class Pairing:
         self.agent = agent  # {name, client, version}: what the hello's reply says
         dev = os.environ.get(DEV_ORIGIN_ENV, "")
         if dev:
-            if not re.fullmatch(r"http://(localhost|127\.0\.0\.1):[1-9][0-9]{0,4}", dev):
-                raise ValueError("%s must be exactly http://localhost:<port> or http://127.0.0.1:<port>" % DEV_ORIGIN_ENV)
+            if not (re.fullmatch(r"http://(localhost|127\.0\.0\.1):[1-9][0-9]{0,4}", dev) or re.fullmatch(PREVIEW_ORIGIN, dev)):
+                raise ValueError("%s must be exactly http://localhost:<port>, http://127.0.0.1:<port> or https://<name>.sagebrush.cloud" % DEV_ORIGIN_ENV)
             origins = tuple(origins) + (dev,)
+            # (whoever runs this server set it: said where they will see it)
+            sys.stderr.write("sagebrush-mcp: also accepting pages from %s (%s)\n" % (dev, DEV_ORIGIN_ENV))
         self.origins = tuple(origins)
         self.on_notify = on_notify or (lambda method, params: None)
         self.now = now
