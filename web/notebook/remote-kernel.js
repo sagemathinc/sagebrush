@@ -296,7 +296,8 @@ export class RemoteKernel {
   execute(code, opts, sink) {
     const s = once(sink);
     const o = opts ?? {};
-    if (this.requireGate && (code !== "" ? !o.gate : !o.forgetGuard)) return s.stopped(NOTES.noGate);
+    // (a gated run may have any code, an empty cell's too; without a gate, only a forget's empty code with its guard)
+    if (this.requireGate && !o.gate && !(code === "" && o.forgetGuard)) return s.stopped(NOTES.noGate);
     if (o.gate) {
       // (a gated run is checked against the kernel it is queued for: only a ready one)
       if (!this.ready) return s.skipped({ notRun: "skip", note: NOTES.notReady });

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Reactive, SCOPE_SEP, setTestHooks, type CellInfo, type CellState } from "../src/notebook-reactive";
+import type { CellError } from "../src/notebook-graph";
 import { Budget, BUDGET } from "../src/remote-approval";
 import { analyzeCell } from "../src/dataflow";
 import { renameRedefinitions } from "../src/rename";
@@ -395,7 +396,7 @@ test("cells run because a widget moved are marked, until a restart", async () =>
 
 // --- remote approval's hooks (the remote-compute plan's P1b-int): what the scheduler gives the host ---
 
-function hooked(codes: string[], over: { notRun?: Map<string, "skip" | "wait">; prepare?: (p: { order: string[]; consent?: unknown; followUp: boolean }) => Promise<{ refuse?: string; skip?: Map<string, string> } | undefined>; rekey?: (units: number) => boolean; consent?: (stage: string) => void } = {}) {
+function hooked(codes: string[], over: { notRun?: Map<string, "skip" | "wait">; prepare?: (p: { order: string[]; consent?: unknown; followUp: boolean }) => Promise<{ refuse?: string; skip?: Map<string, string> } | undefined>; rekey?: (units: number) => boolean; consent?: (stage: string) => void; analyze?: (code: string) => any } = {}) {
   const cells: CellInfo[] = codes.map((code, i) => ({ id: `c${i}`, code }));
   const states = new Map<string, CellState>();
   const events: string[] = [];
@@ -403,7 +404,7 @@ function hooked(codes: string[], over: { notRun?: Map<string, "skip" | "wait">; 
   const forgot: { names: string[]; cells?: string[] }[] = [];
   const r = new Reactive({
     cells: () => cells,
-    analyze: async (code) => analyzeCell(code),
+    analyze: async (code) => over.analyze?.(code) ?? analyzeCell(code),
     execute: async (id, code, forget, scoped) => {
       executed.push({ id, code, forget: [...forget], scoped });
       const nr = over.notRun?.get(id);
@@ -508,6 +509,41 @@ test("the graph's views: no mutators, frozen lists; setFiles copies; every chang
   files.delete("c0");
   assert.equal(g.version, v1);
   assert.deepEqual(g.readersOf("f"), ["c1"], "the graph kept its own copy");
+});
+
+test("the errors are deep read-only: a filtered list (an unsubmitted cell's cycle), its entries, the status alias, and a registration's error with cells", async () => {
+  const h = hooked(["x = 1", "y = x"]);
+  await h.r.load();
+  await h.r.run(["c0", "c1"]);
+  h.cells[0] = { ...h.cells[0], code: "x = y" }; // (c0 now reads c1: a cycle, and c1 is not submitted)
+  const rep = await h.r.run(["c0"]);
+  const es = h.r.errors.get("c1")!;
+  assert.ok(es && es.length > 0 && es.some((e) => e.kind === "cycle"), "(c1 has the cycle error)");
+  const before = h.r.errors;
+  const out = h.r.runOutput("c0");
+  const writes: [string, () => unknown][] = [
+    ["get", () => (h.r.errors.get("c1") as CellError[]).push({ kind: "syntax", message: "x" })],
+    ["get, an entry", () => { (h.r.errors.get("c1")![0] as any).kind = "syntax"; }],
+    ["get, an entry's cells", () => ((h.r.errors.get("c1")!.find((e) => e.kind === "cycle") as any).cells as string[]).push("q")],
+    ["iteration", () => { for (const [, l] of h.r.errors) (l as CellError[]).splice(0, 1); }],
+    ["values", () => { for (const l of h.r.errors.values()) (l as CellError[]).length = 0; }],
+    ["forEach", () => h.r.errors.forEach((l) => (l as CellError[]).pop())],
+    ["the status", () => ((h.states.get("c1") as { errors: CellError[] }).errors).push({ kind: "syntax", message: "x" })],
+    ["the report", () => (rep.errors.c1 as CellError[]).push({ kind: "syntax", message: "x" })],
+  ];
+  for (const [what, w] of writes) assert.throws(w, TypeError, what);
+  assert.equal(h.r.errors, before, "the errors view is the same");
+  assert.deepEqual(h.r.errors.get("c1"), es, "and so is what it holds");
+  assert.equal(h.r.runOutput("c0"), out, "the epoch is unchanged");
+  // a registration's error with cells: a frozen copy, not the analyzer's object
+  const cells = ["z"];
+  const g = hooked(["BAD"], { analyze: (code) => (code === "BAD" ? { error: { kind: "cycle", cells } } : undefined) });
+  await g.r.load();
+  const e = g.r.registration("c0")!.error as { kind: "cycle"; cells: string[] };
+  assert.ok(Object.isFrozen(e) && Object.isFrozen(e.cells) && e.cells !== cells);
+  cells.push("q");
+  assert.deepEqual(g.r.registration("c0")!.error, { kind: "cycle", cells: ["z"] }, "the analyzer's later change doesn't reach it");
+  assert.throws(() => e.cells.push("q"), TypeError);
 });
 
 test("rekeyUnits: exactly at the limit, the output is kept; one unit more, a new output (never a refusal)", async () => {

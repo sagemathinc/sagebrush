@@ -153,6 +153,11 @@ async function page(codes, { scoping = false, keepBodies = true } = {}) {
 }
 const kind = (k, cell) => (t) => { try { const v = JSON.parse(t); return v[0] === k && (cell === undefined || v[3] === cell); } catch { return false; } };
 const why = (p, id) => p.states.get(id)?.why;
+// A cell's spec as the adapter would make it now, from nothing cached (the page's settings, the kernel's binding, the seed entry).
+const makeSpecFor = (p, id) => {
+  const out = p.r().runOutput(id), cfg = p.gate.page.config(), entry = p.gate.seeds.get(`${cfg.seedNamespace}\0${id}`);
+  return { source: out.code, binding: p.kernel.lc.binding, options: { seed: entry.seed } };
+};
 const postsFor = (p, ids) => p.payloads().filter((x) => ids.includes(x.cell)).length;
 
 // The mutations of I2, each applied at a stage of a person's Run of [a, b] (b: a later listed cell).
@@ -477,6 +482,16 @@ export async function runGateTests(check) {
     check(!p.a.record("a"), "I12: closed: records cleared");
   });
 
+  await control("an empty code cell", async () => {
+    // a person's Run of an empty cell is a gated run like any other; without a gate, empty code is only a forget's, with its guard
+    const p = await page([["e", ""]]);
+    await p.gesture(["e"]);
+    const sent = p.payloads().filter((x) => x.cell === "e");
+    check(sent.length === 1 && sent[0].code === "" && !!p.a.record("e"), "an empty cell: approved, sent through its gate (code \"\"), recorded");
+    const r = await new Promise((resolve) => p.kernel.execute("", { mode: "python", cell: "e" }, { start() {}, out() {}, display() {}, clear() {}, done: () => resolve("done"), stopped: (m) => resolve(m), skipped: () => resolve("skipped") }));
+    check(r === NOTES.noGate && p.payloads().filter((x) => x.cell === "e").length === 1, "an empty-code request with neither a gate nor a forget guard: no POST");
+  });
+
   await control("I14", async () => {
     const p = await page([["a", "x = 1"]]);
     const before = p.runPosts().length;
@@ -545,6 +560,13 @@ export async function runGateTests(check) {
       if (!hooked) check(p.r().graph.version !== v0 && sent === 0 && p.results.get("b")?.notRun === "skip", "I22.3: an ancestry-only change: a new graph version, a new parents array, the check skips, no fetch");
       else check(sent === 1, "I22.11 (M-parents): with the parents array kept across the new graph version, the same change is sent: the control sees the mutant");
     }
+    // (in place: the adapter's parents array is frozen; a write throws and changes nothing)
+    const pp = await page([["a", "x = 1"], ["b", "y = x + 1"]]);
+    await pp.gesture(["a", "b"]);
+    const ps = pp.gate.parents("b");
+    let wrote = 0;
+    for (const f of [() => ps.push("z"), () => { ps[0] = "z"; }, () => ps.splice(0, 1)]) { try { f(); } catch (e) { if (e instanceof TypeError) wrote++; } }
+    check(wrote === 3 && pp.gate.parents("b") === ps && ps.join() === "a", "I22.11: (in place) the adapter's parents array is frozen: writes throw, it is unchanged and still the one in use");
     const g = (await page([["a", "x = 1"]])).r().graph;
     let threw = 0;
     for (const f of [() => g.parents("a").add("q"), () => g.errors.clear(), () => g.definers.get("x").push("q")]) { try { f(); } catch (e) { if (e instanceof TypeError) threw++; } }
@@ -657,13 +679,26 @@ export async function runGateTests(check) {
     q.gate.prepareSeed = async () => {};
     await q.gesture(["a"]);
     check(q.runPosts().length === 0, "I22.9: a missed prepare: no spec, not run, no fetch");
-    // a missed prune is bounded: a deleted cell's entry goes at the next action
+    // a missed prune: an entry retained for a deleted cell (planted) is unused, since that cell has no
+    // registration and so no spec; the next action's prune removes it; churn keeps the maps bounded
     const r = await page([["a", "x = 1"], ["b", "y = 2"]]);
     await r.gesture(["a", "b"]);
     r.del("b");
     await r.kernel.reactive.remove(["b"]);
+    r.gate.seeds.set(`${NS}\0b`, Object.freeze({ seed: "0".repeat(64) }));
+    const unused = r.gate.spec("b") === undefined;
+    const before9 = r.runPosts().length;
     await r.gesture(["a"]);
-    check(![...r.gate.seeds.keys()].some((k) => k.endsWith("\0b")), "I22.9: a deleted cell's seed entry is pruned");
+    check(unused && r.payloads().slice(before9).every((x) => x.cell !== "b"), "I22.9: a retained entry for a deleted cell is unused (no registration, no spec, nothing sent for it)");
+    check(![...r.gate.seeds.keys()].some((k) => k.endsWith("\0b")), "I22.9: and the next action's prune removes it");
+    for (let i = 0; i < 20; i++) {
+      r.edit(`d${i}`, `z${i} = ${i}`);
+      await r.gesture([`d${i}`]);
+      r.del(`d${i}`);
+      await r.kernel.reactive.remove([`d${i}`]);
+    }
+    await r.gesture(["a"]);
+    check(r.gate.seeds.size <= 1 && r.gate.specs.size <= 1 && r.gate.parentsMemo.size <= 1 && r.a.sizes().nodes <= 1, `I22.9: 20 cells added, run and deleted: the maps hold only the notebook's cells (${r.gate.seeds.size}, ${r.gate.specs.size}, ${r.gate.parentsMemo.size})`);
     let threw = false;
     try { r.gate.seeds.get(`${NS}\0a`).seed = "0"; } catch { threw = true; }
     check(threw, "I22.9: (in place) a seed entry is frozen");
@@ -686,7 +721,17 @@ export async function runGateTests(check) {
     q.kernel.setLc({ epoch: q.kernel.epoch + 1 });
     q.gate.specs.set("a", { ...old, lc: q.kernel.lc });
     await q.agent(["a"]);
-    check(q.runPosts().length === 1 && q.results.get("a")?.notRun === "skip", "I22.10: an old spec reused after a rebind: not approved in the new epoch, no fetch");
+    check(q.runPosts().length === 1 && q.results.get("a")?.notRun === "skip", "I22.10 (r8c): an old spec reused after a rebind (a new epoch): approvals reset, not approved, no fetch");
+    // (r8c) a generation change only: lc contributes only its binding, so the old spec's bytes are the checked bytes
+    const w = await page([["a", "x = 1"]]);
+    await w.gesture(["a"]);
+    const keptW = w.gate.specs.get("a");
+    w.kernel.setLc({ generation: w.kernel.lc.generation + 1 });
+    w.gate.specs.set("a", { ...keptW, lc: w.kernel.lc });
+    const fresh = makeSpecFor(w, "a");
+    await w.agent(["a"]);
+    const last = w.payloads().at(-1);
+    check(w.runPosts().length === 2 && last.code === fresh.source && last.seed === fresh.options.seed && keptW.spec.source === fresh.source && keptW.spec.binding === fresh.binding, "I22.10 (r8c): an old spec reused after a generation change only: its bytes are a fresh spec's, and they are what is sent");
     let threw = false;
     try { old.spec.source = "x = 2"; } catch { threw = true; }
     check(threw, "I22.10: (in place) a spec is frozen");

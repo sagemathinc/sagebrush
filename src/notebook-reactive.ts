@@ -42,7 +42,7 @@
 //     Jupyter notebook is read from the top.  The code that runs is renamed
 //     (x, xʹ2, xʹ3, ...: SCOPE_SEP), so each definition is its own variable
 //     and the graph stays exact; the page shows the code as written.
-import { NotebookGraph, MapView, analysisView, type AnalysisView, type CellError, type GraphCell } from "./notebook-graph";
+import { NotebookGraph, MapView, analysisView, frozenError, type AnalysisView, type CellError, type GraphCell } from "./notebook-graph";
 import type { CellAnalysis } from "./dataflow";
 
 export type Analysis = CellAnalysis | { error: CellError };
@@ -507,7 +507,7 @@ export class Reactive {
         continue;
       }
       const a = await this.host.analyze(code);
-      this.registered.set(id, Object.freeze("error" in a ? { source, code, version, error: Object.freeze({ ...a.error }) } : { source, code, version, analysis: analysisView(a) }));
+      this.registered.set(id, Object.freeze("error" in a ? { source, code, version, error: frozenError(a.error) } : { source, code, version, analysis: analysisView(a) }));
     }
     this.graph.set(cells.filter((c) => this.registered.has(c.id)).map((c) => this.graphCell(c.id)));
     for (const id of [...this.outputs.keys()]) if (!this.registered.has(id)) this.outputs.delete(id);
@@ -658,7 +658,8 @@ export class Reactive {
     const keepAlive = new Set<string>();
     for (let [id, es] of this.graph.errors) {
       // reading a name another cell made ambiguous is an error only for a cell just run
-      if (!submitted.has(id) && !errorsBefore.has(id)) es = es.filter((e) => !(e.kind === "multiple-definition" && e.reading));
+      // (a filtered list is a new array: frozen like the graph's own, before it is published)
+      if (!submitted.has(id) && !errorsBefore.has(id)) es = Object.freeze(es.filter((e) => !(e.kind === "multiple-definition" && e.reading))) as CellError[];
       if (!es.length) continue;
       const previouslyValid = before.has(id) && !submitted.has(id) && !rescoped.has(id) && !errorsBefore.has(id);
       if (previouslyValid && !downstream.has(id)) {
