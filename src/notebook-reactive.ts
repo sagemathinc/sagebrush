@@ -213,7 +213,14 @@ export class Reactive {
   private consent: unknown = undefined;
   // each cell's run output, with the epoch it was derived in (its registration, the graph's version,
   // the scoping map and the errors map: each owner-private, frozen or never written, replaced on change)
-  private outputs = new Map<string, { reg: Registered; graph: object; scoped: Map<string, string>; errors: Map<string, CellError[]>; output: RunOutput }>();
+  // (bounded: `action` is the serial step that last used it; when the map is full, entries no action
+  // in progress uses are dropped, and if none is, an output is not kept: its identity then isn't
+  // stable, so remote approval's checks skip it: fail-closed)
+  private outputs = new Map<string, { reg: Registered; graph: object; scoped: Map<string, string>; errors: Map<string, CellError[]>; output: RunOutput; action: number }>();
+  /** the most run outputs kept */
+  outputsMax = 5000;
+  // (the serial step running now)
+  private action = 0;
   /** in the running action: run outputs derived again (a new epoch), and of those, kept (remote approval's controls) */
   readonly counts = { rederives: 0, outputsKept: 0 };
 
@@ -263,7 +270,10 @@ export class Reactive {
     const prev = this.outputs.get(id);
     const graph = this.graph.version, scoped = this.scoped, errors = this.errorMap;
     const sameReg = !!prev && (prev.reg === reg || !!testHooks?.sameRegistration?.(id));
-    if (prev && sameReg && prev.graph === graph && prev.scoped === scoped && prev.errors === errors) return prev.output;
+    if (prev && sameReg && prev.graph === graph && prev.scoped === scoped && prev.errors === errors) {
+      prev.action = this.action;
+      return prev.output;
+    }
     if (prev && testHooks?.skipRederive?.(id)) return prev.output;
     this.counts.rederives++;
     const r = this.runSpec(id)!;
@@ -272,8 +282,17 @@ export class Reactive {
       output = prev.output;
       this.counts.outputsKept++;
     } else output = Object.freeze({ code: r.code, forget: Object.freeze(r.forget), scoped: Object.freeze(r.scoped) });
-    this.outputs.set(id, { reg, graph, scoped, errors, output });
+    if (!prev && this.outputs.size >= this.outputsMax) {
+      for (const [k, e] of this.outputs) if (e.action !== this.action) this.outputs.delete(k);
+      if (this.outputs.size >= this.outputsMax) return output; // (not kept: fail-closed)
+    }
+    this.outputs.set(id, { reg, graph, scoped, errors, output, action: this.action });
     return output;
+  }
+
+  /** How many run outputs are kept (remote approval's controls: the bound). */
+  outputsSize(): number {
+    return this.outputs.size;
   }
 
   // A kept output's forget and scoped against a fresh derivation's, by value: the lengths summed first
@@ -467,6 +486,7 @@ export class Reactive {
     // (each serial step is one action: remote approval's budget is per action)
     const g = async () => {
       this.counts.rederives = this.counts.outputsKept = 0;
+      this.action++;
       this.host.beginAction?.();
       try {
         return await f();

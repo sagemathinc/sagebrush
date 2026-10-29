@@ -6,12 +6,13 @@
 // Run by test-remote-kernel.mjs (CI's board-unit job): runGateTests(check)
 // returns how many controls ran.
 
-import { RemoteClient, NotSentError } from "./remote-client.js";
+import { RemoteClient, NotSentError, setTestHooks as setClientHooks } from "./remote-client.js";
 import { RemoteKernel, NOTES } from "./remote-kernel.js";
 import { FakeGateway } from "./remote-fake.js";
 import { RemoteGate, setTestHooks as setGateHooks } from "./remote-gate.js";
 import { Reactive, SCOPE_SEP, setTestHooks as setReactiveHooks } from "../../src/notebook-reactive.ts";
 import { analyzeCell } from "../../src/dataflow.ts";
+import { makeSpec } from "../../src/remote-approval.ts";
 import { renameRedefinitions } from "../../src/rename.ts";
 
 const enc = new TextEncoder();
@@ -200,7 +201,7 @@ export async function runGateTests(check) {
   let n = 0;
   const control = async (name, f) => {
     n++;
-    try { await f(); } catch (e) { check(false, `${name}: threw ${e?.stack ?? e}`); } finally { setGateHooks(null); setReactiveHooks(null); }
+    try { await f(); } catch (e) { check(false, `${name}: threw ${e?.stack ?? e}`); } finally { setGateHooks(null); setReactiveHooks(null); setClientHooks(null); }
   };
 
   await control("I1", async () => {
@@ -291,21 +292,28 @@ export async function runGateTests(check) {
     check(p.runPosts().length === 2, "I3: changed bytes, by an agent: no POST");
   });
 
+  // I4's mutations: each a change the check, and the admission at the fetch, depend on (shared by I5's barriers)
+  const I4_MUTATIONS = [
+    ["a reset", (p) => p.a.reset()],
+    ["a replaced document", (p) => p.gate.documentReplaced()],
+    ["clearRecords", (p) => p.a.clearRecords()],
+    ["a rebind (a new epoch)", (p) => p.kernel.setLc({ epoch: p.kernel.epoch + 1 })],
+    ["a restart (a new generation)", (p) => p.kernel.setLc({ generation: p.kernel.lc.generation + 1 })],
+    ["moved", (p) => p.kernel.movedAway()],
+    ["a file edge added", (p) => p.r().graph.setFiles(new Map([["z", { reads: [], writes: ["f"] }], ["b", { reads: ["f"], writes: [] }]]))],
+    // (an ancestor run again: its new record; an ancestor edited: a new spec for it, other bytes)
+    ["an ancestor rerun", async (p) => { const v = await p.a.check(await p.a.freeze(["a"]), "rq-ancestor"); if (v.send && p.a.admit(v)) p.a.succeeded(v.plan[0]); }],
+    ["an ancestor edit", (p) => { const e = p.gate.specs.get("a"); p.gate.specs.set("a", { ...e, spec: makeSpec("a", "x = 2", e.spec.mode, e.spec.options, e.spec.binding) }); }],
+  ];
+  // (a barrier, reached within 10 s, or reported)
+  const reached = (l) => Promise.race([l.e.then(() => true), new Promise((r) => setTimeout(() => r(false), 10_000))]);
+
   await control("I4", async () => {
-    const muts = [
-      ["a reset", (p) => p.a.reset()],
-      ["a replaced document", (p) => p.gate.documentReplaced()],
-      ["clearRecords", (p) => p.a.clearRecords()],
-      ["a rebind (a new epoch)", (p) => p.kernel.setLc({ epoch: p.kernel.epoch + 1 })],
-      ["a restart (a new generation)", (p) => p.kernel.setLc({ generation: p.kernel.lc.generation + 1 })],
-      ["moved", (p) => p.kernel.movedAway()],
-      ["a file edge added", (p) => p.r().graph.setFiles(new Map([["z", { reads: [], writes: ["f"] }], ["b", { reads: ["f"], writes: [] }]]))],
-    ];
-    // (the vid hash: in the check of b, run again; the S hash: b's node, made in its first run's freeze, so
-    // clearRecords there is a genuine wait, not a change it was checked against)
+    // (the vid hash: in the check of b, run again; the S hash: b's node, made in its first run's freeze,
+    // where clearRecords and an ancestor's rerun are a genuine wait or send, not a change it was checked against)
     for (const hashKind of ["vid", "S"]) {
-      for (const [what, mut] of muts) {
-        if (hashKind === "S" && what === "clearRecords") continue;
+      for (const [what, mut] of [...I4_MUTATIONS, ["nothing (the positive)", null]]) {
+        if (hashKind === "S" && (what === "clearRecords" || what === "an ancestor rerun")) continue;
         const p = await page([["a", "x = 1"], ["b", "y = x + 1"], ["z", "w = 0"]]);
         await p.gesture(["a"]);
         await p.gesture(["z"]);
@@ -313,49 +321,57 @@ export async function runGateTests(check) {
         const before = p.runPosts().length;
         const g = p.pauseHash(hashKind === "vid" ? kind("vid") : (t) => { try { const v = JSON.parse(t); return v[0] === "S" && v[2] === "b"; } catch { return false; } });
         const done = hashKind === "vid" ? p.agent(["b"]) : p.gesture(["b"]);
-        await g.e;
-        mut(p);
+        const at = await reached(g);
+        if (mut) await mut(p);
         g.release();
         await done;
-        check(p.runPosts().length === before && p.results.get("b")?.notRun === "skip", `I4: paused in the ${hashKind} hash, then ${what}: no POST, not run`);
+        if (mut) check(at && p.runPosts().length === before && p.results.get("b")?.notRun === "skip", `I4: paused in the ${hashKind} hash, then ${what}: no POST, not run`);
+        else check(at && p.runPosts().length === before + 1, `I4: paused in the ${hashKind} hash, nothing changes: sent (positive)`);
       }
     }
   });
 
   await control("I5", async () => {
+    // the whole I4 matrix at each of the client's waits before the first fetch: the token, the proof
     for (const at of ["token", "proof"]) {
-      for (const [what, mut] of [["a reset", (p) => p.a.reset()], ["clearRecords", (p) => p.a.clearRecords()], ["a replaced document", (p) => p.gate.documentReplaced()]]) {
-        const p = await page([["a", "x = 1"], ["b", "y = x + 1"]]);
+      for (const [what, mut] of [...I4_MUTATIONS, ["nothing (the positive)", null]]) {
+        const p = await page([["a", "x = 1"], ["b", "y = x + 1"], ["z", "w = 0"]]);
         await p.gesture(["a"]);
+        await p.gesture(["z"]);
         await p.gesture(["b"]);
         const before = p.runPosts().length;
         const g = at === "token" ? p.pauseToken() : p.pauseProof();
         const done = p.agent(["b"]);
-        await g.e;
-        mut(p);
+        const hit = await reached(g);
+        if (mut) await mut(p);
         g.release();
         await done;
-        check(p.runPosts().length === before && p.results.get("b")?.notRun === "skip", `I5: paused waiting for the ${at}, then ${what}: no POST, not run`);
+        if (mut) check(hit && p.runPosts().length === before && p.results.get("b")?.notRun === "skip", `I5: paused waiting for the ${at}, then ${what}: no first POST, not run`);
+        else check(hit && p.runPosts().length === before + 1 && !!p.a.record("b"), `I5: paused waiting for the ${at}, nothing changes: sent (positive)`);
       }
     }
-    // I5b: the guard and the fetch in one turn
-    const p = await page([["a", "x = 1"]]);
-    const admit = p.a.admit.bind(p.a);
-    let probe = null;
-    p.a.admit = (v) => {
-      const ok = admit(v);
-      probe = { ran: false };
-      queueMicrotask(() => (probe.ran = true));
-      p.setProbe(probe);
-      return ok;
-    };
-    await p.gesture(["a"]);
-    const post = p.runPosts().at(-1);
-    check(post && post.probeRan === false, "I5b: the run's fetch is entered before a microtask queued by its admission runs (same turn)");
-    const m = { ran: false };
-    queueMicrotask(() => (m.ran = true));
-    await Promise.resolve();
-    check(m.ran === true, "I5b: (the probe does detect a turn boundary)");
+    // I5b: the guard and the fetch in one turn; and the mutant, an await planted between them, detected
+    for (const planted of [false, true]) {
+      const p = await page([["a", "x = 1"]]);
+      const admit = p.a.admit.bind(p.a);
+      let probe = null;
+      p.a.admit = (v) => {
+        const ok = admit(v);
+        probe = { ran: false };
+        queueMicrotask(() => (probe.ran = true));
+        p.setProbe(probe);
+        return ok;
+      };
+      if (planted) setClientHooks({ awaitAfterGuard: () => Promise.resolve() });
+      try {
+        await p.gesture(["a"]);
+      } finally {
+        setClientHooks(null);
+      }
+      const post = p.runPosts().at(-1);
+      if (!planted) check(post && post.probeRan === false, "I5b: the run's fetch is entered before a microtask queued by its admission runs (same turn)");
+      else check(post && post.probeRan === true, "I5b: with an await planted between the guard and the fetch (the mutant), the probe sees it");
+    }
   });
 
   await control("I6", async () => {
@@ -458,6 +474,28 @@ export async function runGateTests(check) {
       check(!!p.a.record("u"), `I11 (${late}): an unrelated cell's record stays`);
       await p.gesture(["a"]);
       check(!!p.a.record("a"), `I11 (${late}): A reruns after the forget and is recorded`);
+    }
+    // a lifecycle interruption (a restart: a new generation) between the queued forget and its dispatch
+    {
+      const p = await page([["a", "x = 1"], ["b", "y = x + 1"]]);
+      await p.gesture(["a", "b"]);
+      const held = p.fake.pause("before-terminal");
+      const before = postsFor(p, ["b"]);
+      const forgetsBefore = p.payloads().filter((x) => x.code === "").length;
+      const run = p.agent(["a"]);
+      await held.reached;
+      const forgot = p.r().host.forget(["x"], ["a"]);
+      const queued = p.kernel.queue.length; // (the forget waits behind A)
+      p.kernel.setLc({ generation: p.kernel.lc.generation + 1 });
+      held.release();
+      await run;
+      await forgot;
+      const forgets = p.payloads().filter((x) => x.code === "").length - forgetsBefore;
+      check(queued === 1 && !p.a.record("a") && forgets === 0, `I11 (an interruption): the forget queued behind A, then a restart: A's late terminal leaves no record, and the forget, queued for the old kernel, is refused unsent (${forgets})`);
+      await p.agent(["b"]);
+      check(postsFor(p, ["b"]) === before && p.results.get("b")?.notRun === "wait", "I11 (an interruption): B, computed from A: no POST, it waits");
+      await p.gesture(["a"]);
+      check(!!p.a.record("a"), "I11 (an interruption): A reruns on the new kernel and is recorded");
     }
     // deleting a cell: one forget (ungated, empty code) with its guard, and the cell's record fenced
     const q = await page([["a", "x = 1"], ["u", "v = 1"]]);
@@ -764,7 +802,7 @@ export async function runGateTests(check) {
     await p.gestureAll();
     exact(p.last(), { clickUnits: 61_440_000, commitUnits: 61_440_071, sendUnits: 61_518_000, scanBytes: 61_593, buildBytes: 61_593, eidHashes: 1, sNodes: 1, rekeyUnits: 0, memoHits: 999, nodeReuses: 999 }, "I17: one unrelated edit, exact");
     check(JSON.stringify(p.r().counts) === JSON.stringify({ rederives: 1000, outputsKept: 999 }), `I17: one edit: ${JSON.stringify(p.r().counts)}`);
-    // over the bound: 1,100 cells of 64 Ki units (72,089,600 click units), and 2,000 (131,072,000), each twice
+    // over the bound, cold: 1,100 cells of 64 Ki units (72,089,600 click units), and 2,000 (131,072,000), each twice
     for (const k of [1100, 2000]) {
       const big = "#" + "a".repeat(65_535);
       const q = await page(Array.from({ length: k }, (_, i) => [`d${i}`, big]), { keepBodies: false });
@@ -776,6 +814,41 @@ export async function runGateTests(check) {
         check(q.a.consentStateOf(cap) === "void" && q.a.stats.compares === c0 && b.used.buildBytes === 0 && b.used.eidHashes === 0 && q.runPosts().length === 0 && /too large/.test(q.states.get("d0")?.note ?? ""), `I17: ${k} x 64 Ki: refused at the click's preflight, nothing compared, built, hashed or sent, the standard note (try ${rep + 1})`);
       }
     }
+  });
+
+  await control("I17 (warm, over the bound)", async () => {
+    // the 2,000 x 64 Ki cells warmed first, in admitted chunks of 900, 900 and 200 (specs, eids, nodes), then
+    // a Run all of them: refused at the click's preflight, nothing compared, scanned, built, hashed or sent
+    const big = "#" + "a".repeat(65_535);
+    const ids = Array.from({ length: 2000 }, (_, i) => `w${i}`);
+    const q = await page(ids.map((id) => [id, big]), { keepBodies: false });
+    q.fake.kernel = async () => ({ events: [], outcome: { status: "ok", ms: 1 } });
+    for (const chunk of [ids.slice(0, 900), ids.slice(900, 1800), ids.slice(1800)]) await q.gesture(chunk);
+    check(q.runPosts().length === 2000, `I17 (warm): the three chunks admitted, every cell sent (${q.runPosts().length})`);
+    const memo = ids.every((id) => { const s = q.gate.spec(id); return s && q.a.memoState(s) === "eid"; });
+    for (let rep = 0; rep < 2; rep++) {
+      const c0 = q.a.stats.compares;
+      const cap = q.gate.capture(ids);
+      await q.kernel.reactive.runAll({ consent: cap });
+      const b = q.last();
+      check(memo && q.a.consentStateOf(cap) === "void" && q.a.stats.compares === c0 && b.used.scanBytes === 0 && b.used.buildBytes === 0 && b.used.eidHashes === 0 && b.used.sNodes === 0 && q.runPosts().length === 2000 && /too large/.test(q.states.get("w0")?.note ?? ""), `I17 (warm): 2,000 x 64 Ki, every eid in the memo: refused, nothing compared, scanned, built, hashed or sent, the standard note (try ${rep + 1})`);
+    }
+  });
+
+  await control("the run output cache's bound", async () => {
+    // 5,200 live cells, run by a person in chunks of 1,000 (each below every cap): the caches never hold more
+    // than 5,000 entries; the last chunk's cells can't be admitted (the attempts' fence holds 5,000): no POST
+    const ids = Array.from({ length: 5200 }, (_, i) => `k${i}`);
+    const p = await page(ids.map((id, i) => [id, `v${i} = ${i}`]), { keepBodies: false });
+    p.fake.kernel = async () => ({ events: [], outcome: { status: "ok", ms: 1 } });
+    let most = 0;
+    for (let i = 0; i < ids.length; i += 1000) {
+      await p.gesture(ids.slice(i, i + 1000));
+      most = Math.max(most, p.r().outputsSize(), p.gate.specs.size, p.gate.parentsMemo.size);
+    }
+    const lastChunk = ids.slice(5000);
+    check(most <= 5000 && p.r().outputsSize() <= 5000, `the run outputs (and the adapter's specs and parents) never exceed 5,000 (${most})`);
+    check(p.runPosts().length === 5000 && lastChunk.every((id) => p.results.get(id)?.notRun === "skip"), `the chunk past 5,000 live attempts: no POST, not run (${p.runPosts().length})`);
   });
 
   return n;
