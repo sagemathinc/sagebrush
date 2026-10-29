@@ -508,8 +508,8 @@ try {
     const pcBad = pc(1000), pcAgain = pc(1000);
     control1(J(pcBad) === J(["the server's side (EPIPE)"]) && pageClosed && pcAgain.length === 0, "(control) a proxied pair whose close fails says so, and still closes its other side: " + J(pcBad));
     const d2 = mkdtempSync(join(tmpdir(), "sb-scr-ctl-"));
-    const t0 = Date.now(), c2 = await runStages([["a stop that never ends", () => new Promise(() => {})], ["a directory", () => removeDir(d2)]], 200);
-    control1(!c2.ok && c2.line === "cleanup: a stop that never ends threw (no answer within 200 ms: a stop that never ends); a directory removed" && !existsSync(d2) && Date.now() - t0 < 5000, "(control) a stage that never ends fails within its bound, and the stages after it still run: " + c2.line);
+    const t0 = Date.now(), c2 = await runStages([["a front stop that never settles", () => new Promise(() => {})], ["a directory", () => removeDir(d2)]], 200);
+    control1(!c2.ok && c2.line === "cleanup: a front stop that never settles threw (no answer within 200 ms: a front stop that never settles); a directory removed" && !existsSync(d2) && Date.now() - t0 < 5000, "(control) a stage that never ends fails within its bound, and the stages after it still run: " + c2.line);
     const eperm = await stopChrome({ pid: 1, exitCode: null, signalCode: null, kill() { throw Object.assign(new Error("injected"), { code: "EPERM" }); } }, () => new Promise(() => {}));
     control1(!eperm.ok && eperm.said === "TERM failed (EPERM)", "(control) a kill refused (EPERM) is a failure, not a stop: " + eperm.said);
     const esrch = await stopChrome({ pid: 1, exitCode: null, signalCode: null, kill() { throw Object.assign(new Error("injected"), { code: "ESRCH" }); } }, async () => ({ exit: [0, null] }));
