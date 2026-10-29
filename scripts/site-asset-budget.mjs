@@ -12,7 +12,8 @@
 //      touches (--changed FILE: one repository path per line, made from the two trees' manifests), every other field
 //      equal;
 //   2. PROD holds no LaTeX-owned file (named sagebrush-latex*) and no page or script names one;
-//   3. the DEV bootstrap: index.html's growth over PROD, at most 1536 bytes minified and 717 gzip (level 9);
+//   3. the DEV bootstrap: index.html's growth over PROD, at most DEV_BOOT.raw bytes minified and DEV_BOOT.gzip gzip
+//      (level 9);
 //   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most 180 KiB minified and 60 KiB gzip; no CSS
 //      file over 8 KiB; no font file; and the test build's hook on image reads folded away (no DEV file names it);
 //   5. no new KaTeX bytes: DEV's katex/ files the same as PROD's, and (with --meta) no node_modules/katex input in a
@@ -26,6 +27,7 @@ const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.a
 const BASE = arg("--base-prod"), PROD = arg("--prod"), DEV = arg("--dev"), META = arg("--meta"), OUT = arg("--out"), CHANGED = arg("--changed");
 if (!BASE || !PROD || !DEV) { console.error("usage: --base-prod DIR --prod DIR --dev DIR [--meta FILE] [--out FILE]"); process.exit(2); }
 const ROOTS = ["dist", "site/public"];
+const DEV_BOOT = { raw: 2304, gzip: 1024 };
 const DECLARED = new Set(["dist/board/examples/source.json", "site/public/board/examples/source.json"]);
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const gz = (b) => gzipSync(b, { level: 9 }).length;
@@ -77,10 +79,14 @@ for (const n of differing.filter((x) => DECLARED.has(x))) {
 const prodLatex = [...prod.keys()].filter((n) => /(^|\/)sagebrush-latex/.test(n));
 const prodRefs = [...prod.entries()].filter(([n]) => /\.(html|js|mjs|json)$/.test(n) || n.endsWith("_headers")).filter(([, p]) => readFileSync(p).includes("sagebrush-latex")).map(([n]) => n);
 check("PROD: no LaTeX-owned file, and nothing names one", prodLatex.length === 0 && prodRefs.length === 0, { prodLatex, prodRefs });
-// 3. the DEV bootstrap
+// 3. the DEV bootstrap. Its ceiling was 1536 B / 717 B gzip; raised for the file browser's "LaTeX file" in New (asked
+//    for by William: the only way to make a .tex was to upload one), whose code is in index.html's bundle in a LaTeX
+//    build only (PROD byte-identical, check 1). PROVISIONAL: the I1 run's measured delta + 128 B / + 64 B gzip replaces
+//    these numbers once measured (an estimate until then: 1520 B / 535 B by this check before it, about 560 B / 250 B
+//    for it)
 const pi = readFileSync(prod.get("dist/index.html")), di = readFileSync(dev.get("dist/index.html"));
 const boot = { raw: di.length - pi.length, gzip: gz(di) - gz(pi) };
-check("DEV bootstrap delta (index.html): at most 1536 B minified and 717 B gzip", boot.raw <= 1536 && boot.gzip <= 717, boot);
+check(`DEV bootstrap delta (index.html): at most ${DEV_BOOT.raw} B minified and ${DEV_BOOT.gzip} B gzip`, boot.raw <= DEV_BOOT.raw && boot.gzip <= DEV_BOOT.gzip, boot);
 // 4. the LaTeX group
 const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n));
 const js = group.filter((n) => n.endsWith(".js")), css = group.filter((n) => n.endsWith(".css")), fonts = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(woff2?|ttf|otf)$/.test(n) && !prod.has(n));
