@@ -164,6 +164,23 @@ try {
   if (CONTROL === "hang") { waitingOn = "the control's deliberate hang"; await new Promise(() => {}); }
   // (the startup-failure control's child, started once this run is up)
   if (!CONTROL) spawnKid("startup", 60);
+  /** A page promise that never settles, kept reachable from the page's global: an unreachable one can be collected,
+   * and Chrome then answers the call waiting on it with an error ("Promise was collected"), which is an answer */
+  const NEVER = "globalThis.__neverSettles ??= new Promise(() => {})";
+  /** What a control's call came back with, if it came back at all (an error answer is an answer too: say which) */
+  const answered = (v) => "answered: " + String(JSON.stringify(v)).slice(0, 300);
+  /** A new tab's page loaded at its own URL (its first navigation, from the blank page it opens with, done): a call made
+   * before that waits in a context the navigation destroys, and Chrome answers it with an error */
+  const loaded = async (call, label, path) => {
+    waitingOn = label + "its page to finish loading " + path;
+    const end = Date.now() + 60_000;
+    while (Date.now() < end) {
+      const r = await call("Runtime.evaluate", { expression: `document.readyState === "complete" && location.pathname.endsWith(${JSON.stringify(path)})`, returnByValue: true }, 5000).catch(() => null);
+      if (r?.result?.value === true) return;
+      await sleep(100);
+    }
+    throw new Error(label + "its page didn't finish loading " + path + " within 60 s");
+  };
   /** Another DevTools connection (another tab): its calls bounded and named, like the main tab's. */
   const tab = (sock, label) => {
     let k = 0; const w = new Map();
@@ -187,8 +204,8 @@ try {
 
   for (const m of ["Page.enable", "Runtime.enable", "DOM.enable"]) await send(m);
   // (control: a page promise that never settles fails its call within its deadline, named, instead of hanging the run)
-  const t0 = Date.now(), hung = await ev("new Promise(() => {})", 2000).then(() => "answered", (e) => String(e?.message));
-  check(hung === "no answer within 2000 ms: Runtime.evaluate: new Promise(() => {})" && Date.now() - t0 < 10_000, "(a page promise that never settles fails its call within its deadline, naming it): " + hung);
+  const t0 = Date.now(), hung = await send("Runtime.evaluate", { expression: NEVER, awaitPromise: true, returnByValue: true }, 2000).then(answered, (e) => String(e?.message));
+  check(hung === "no answer within 2000 ms: Runtime.evaluate: " + NEVER && Date.now() - t0 < 10_000, "(a page promise that never settles fails its call within its deadline, naming it): " + hung);
   // (control: the same bound on a wait that isn't a DevTools call, as the startup waits are)
   const hungWait = await bounded(new Promise(() => {}), "a wait that never ends", 200).then(() => "ended", (e) => String(e?.message));
   check(hungWait === "no answer within 200 ms: a wait that never ends", "(a wait that never ends fails within its deadline, naming it): " + hungWait);
@@ -457,9 +474,10 @@ try {
   await bounded(new Promise((r) => (ws2.onopen = r)), (waitingOn = "the second tab's DevTools socket to open"), 10_000);
   const call2 = tab(ws2, "the lock tab: ");
   const ev2 = (expression, ms) => call2("Runtime.evaluate", { expression, returnByValue: true }, ms);
-  // (control: the lock tab's calls are bounded too)
-  const hung2 = await call2("Runtime.evaluate", { expression: "new Promise(() => {})", awaitPromise: true }, 2000).then(() => "answered", (e) => String(e?.message));
-  check(hung2 === "no answer within 2000 ms: the lock tab: Runtime.evaluate: new Promise(() => {})", "(the lock tab: a call that gets no answer fails within its deadline, naming it): " + hung2);
+  // (control: the lock tab's calls are bounded too; made once its page has loaded, so no navigation ends the wait)
+  await loaded(call2, "the lock tab: ", "/board/");
+  const hung2 = await call2("Runtime.evaluate", { expression: NEVER, awaitPromise: true }, 2000).then(answered, (e) => String(e?.message));
+  check(hung2 === "no answer within 2000 ms: the lock tab: Runtime.evaluate: " + NEVER, "(the lock tab: a call that gets no answer fails within its deadline, naming it): " + hung2);
   await sleep(1500);
   await ev2(`navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__held = r))); 1`);
   await go(base + "board/?doc=local:" + legacy);
@@ -562,9 +580,10 @@ try {
   await bounded(new Promise((r) => (wsU.onopen = r)), (waitingOn = "the other tab's DevTools socket to open"), 10_000);
   const callU = tab(wsU, "the other tab: ");
   const evU = async (expression, ms) => (await callU("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms))?.result?.value;
-  // (control: the other tab's calls are bounded too)
-  const hungU = await callU("Runtime.evaluate", { expression: "new Promise(() => {})", awaitPromise: true }, 2000).then(() => "answered", (e) => String(e?.message));
-  check(hungU === "no answer within 2000 ms: the other tab: Runtime.evaluate: new Promise(() => {})", "(the other tab: a call that gets no answer fails within its deadline, naming it): " + hungU);
+  // (control: the other tab's calls are bounded too; made once its page has loaded, so no navigation ends the wait)
+  await loaded(callU, "the other tab: ", "/board/");
+  const hungU = await callU("Runtime.evaluate", { expression: NEVER, awaitPromise: true }, 2000).then(answered, (e) => String(e?.message));
+  check(hungU === "no answer within 2000 ms: the other tab: Runtime.evaluate: " + NEVER, "(the other tab: a call that gets no answer fails within its deadline, naming it): " + hungU);
   for (let i = 0; i < 600 && !(await evU(`!!window.sagebrush?.workspace`).catch(() => false)); i++) await sleep(100);
   check(await evU(`!!window.sagebrush?.workspace`), "(a board page open in another tab, with the workspace)");
   await ev(`new Promise((ok, no) => { const r = indexedDB.open("sagebrush-workspace", 99); r.onsuccess = () => { r.result.close(); ok(1); }; r.onerror = () => no(r.error); r.onblocked = () => no(new Error("blocked")); })`);
