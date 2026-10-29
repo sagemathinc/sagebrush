@@ -420,6 +420,7 @@ A client's `blobs/check` and `PUT` carry `x-sync-account` (the account's hash) a
 **Reading, and what it costs** (LIMIT-D817-3). Uploaded bytes are never served from sagebrush.space (sharing.md, "Serving"). A read is a signed URL on the user-content Worker, and **what is metered is the bytes authorized, at the moment a URL is issued**:
 - **Issuing a URL debits the blob's whole size from a daily read budget** in SQLite: the account's (for the person's devices, `sync.read_bytes_per_day`), or the grant's (design/agent-endpoint.md §7). If it doesn't fit, it is refused with `rate`.
 - **A device's URL** (HMAC, key `SYNC_URL_KEY`) is good for 5 minutes and for ranges, so code that reads part of a large file downloads only that part. Fetching it again within those 5 minutes is deliberately outside the budget. The files Worker bounds it by IP (rate-limiting binding, 600 requests a minute) and by the URL's expiry.
+  - **The URL carries its expiry** as the query parameter `exp`, in milliseconds since the epoch. The client reads it from the followed redirect's final URL and reuses that URL for the item's retries until then, less a margin (design/sync-client.md, "A signed URL is kept, with its expiry"). A URL without `exp` is never reused: the client asks for a fresh one at each attempt.
 - **A grant's URL is used once:**
   - it carries a random nonce, which the files Worker redeems from the account object (one call) before serving;
   - one request, which may be a range;
