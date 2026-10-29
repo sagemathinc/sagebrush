@@ -121,12 +121,50 @@ try {
     await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);
     const items = await ev(`[...document.querySelectorAll('.fmgroup[aria-label="New"] button')].map((b) => b.dataset.item ?? b.firstChild?.textContent)`);
     const mr = await reach('.fmgroup[aria-label="New"] button', "LaTeX document");
-    check(fb.found && fb.inView && fb.top && items.indexOf("LaTeX document") >= 0 && items.indexOf("LaTeX document") === items.indexOf("newFolder") - 1 && mr.found && mr.inView && mr.top,
-      "phone: File > New offers LaTeX document (before Folder), File and the item in view and not covered", { fb, items, mr });
+    check(fb.found && fb.inView && fb.top && items.indexOf("LaTeX document") >= 0 && items.indexOf("LaTeX document") === items.indexOf("newFolder") - 2 && items.indexOf("LaTeX example") === items.indexOf("newFolder") - 1 && mr.found && mr.inView && mr.top,
+      "phone: File > New offers LaTeX document and LaTeX example (before Folder), File and the item in view and not covered", { fb, items, mr });
     await mark(); await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX document").click(), true)`);
     check(await madeAs("/Untitled (2).tex"), "phone: File > New > LaTeX document: /Untitled (2).tex made and opened in the editor");
+    // File > New > LaTeX example: the examples' list fits the phone (10 large buttons, the dialog within the width,
+    // each button reachable), and the figure example opens with its image (a folder of its own, plot.png beside it)
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    await ev(`(document.getElementById("filebtn").click(), true)`);
+    await until(`!!document.querySelector('.fmgroup[aria-label="New"]')`, 10000);
+    await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);
+    const exItem = await reach('.fmgroup[aria-label="New"] button', "LaTeX example");
+    await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX example").click(), true)`);
+    const listed2 = await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000);
+    const dlg = listed2 && await ev(`(() => { const d = document.querySelector("dialog.sb-tex-examples"), r = d.getBoundingClientRect(), bs = [...d.querySelectorAll("button[data-example]")];
+      const last = bs[bs.length - 1]; last.scrollIntoView({ block: "center" }); const lr = last.getBoundingClientRect(), at = document.elementFromPoint(lr.left + lr.width / 2, lr.top + lr.height / 2);
+      return { left: r.left, right: r.right, w: innerWidth, n: bs.length, minH: Math.min(...bs.map((b) => b.getBoundingClientRect().height)), lastReach: at === last || last.contains(at) }; })()`);
+    check(exItem.found && exItem.inView && exItem.top && listed2 && dlg.left >= 0 && dlg.right <= dlg.w && dlg.n === 10 && dlg.minH >= 44 && dlg.lastReach,
+      "phone: File > New > LaTeX example: the list of 10 fits the screen, every button at least 44 px and reachable", { exItem, dlg });
+    await mark(); await ev(`(document.querySelector('dialog.sb-tex-examples button[data-example="figure"]').click(), true)`);
+    const figOk = await madeAs("/LaTeX examples/Figure with an image/figure.tex");
+    const figImg = figOk && await until(`[...document.querySelectorAll(".tex-preview img.graphic")].some((i) => i.src.startsWith("blob:"))`, 20000);
+    check(figOk && figImg && await ev(`${W}.stat("/LaTeX examples/Figure with an image/plot.png").then((e) => e?.kind === "file")`), "phone: the figure example: its folder made, figure.tex opened, plot.png beside it and shown in the preview");
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
     await send("Emulation.clearDeviceMetricsOverride");
+  }
+  // ---- every example opened in the editor (made by the page module's makeExample, as the list does; the test's
+  // workspace handle has create, not the page's createByPerson): each renders in the preview,
+  // with nothing shown as unsupported (gray tags; the SageTeX and PythonTeX "not run" chips are expected), recorded
+  {
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    const ids = await ev(`import("/sagebrush-latex.js").then((x) => x.EXAMPLES.map((e) => e.id))`);
+    const rec = [];
+    for (const id of ids) {
+      const fidEx = await ev(`import("/sagebrush-latex.js").then(async (x) => (await x.makeExample({ stat: (p) => ${W}.stat(p), mkdir: (p) => ${W}.mkdir(p), createByPerson: (p, o) => ${W}.create(p, o) }, x.EXAMPLES.find((e) => e.id === ${JSON.stringify(id)}))).fid)`);
+      await open(fidEx);
+      const shown = await until(`(() => { const P = document.querySelector(".tex-preview"); return !!P && P.textContent.length > 80; })()`, 30000);
+      await sleep(400);
+      const r = await ev(`(() => { const P = document.querySelector(".tex-preview");
+        return { len: P.textContent.length, unk: [...P.querySelectorAll(".unk:not(.errchip)")].map((x) => x.textContent), chips: P.querySelectorAll(".sagechip").length, bound: !!P.querySelector(".bounderr"), imgs: [...P.querySelectorAll("img.graphic")].filter((i) => i.src.startsWith("blob:")).length }; })()`);
+      rec.push({ id, shown, ...r });
+    }
+    console.log("examples in the page:", JSON.stringify(rec));
+    const bad = rec.filter((r) => !r.shown || r.bound || r.unk.length || (r.id === "figure" && r.imgs !== 1));
+    check(ids.length === 10 && bad.length === 0, "every example opens in the editor and renders, nothing unsupported shown (the figure's image shown)", bad);
   }
   const fid = await mk("/t/doc.tex", enc(DOC));
   requests.length = 0;

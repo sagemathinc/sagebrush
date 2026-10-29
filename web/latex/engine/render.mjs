@@ -173,7 +173,8 @@ const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy
   "ignorespaces", "leavevmode", "null", "vfill", "vfil", "clearpage", "cleardoublepage", "newpage", "pagebreak", "nopagebreak", "nolinebreak", "indent",
   "makeindex", "makeglossary", "maketitle@", "frontmatter", "mainmatter", "backmatter", "normalsize", "selectfont", "onecolumn", "twocolumn",
   "flushbottom", "raggedbottom", "strut", "unskip", "hss", "hfilneg", "break", "filbreak", "goodbreak", "noindent@", "centerline@", "displaystyle", "textstyle", "boldmath", "unboldmath",
-  "thicklines@", "listoffigures", "listoftables", "FloatBarrier", "vss", "smallskipamount", "ifhmode", "fi", "else"]);
+  "thicklines@", "listoffigures", "listoftables", "FloatBarrier", "vss", "smallskipamount", "ifhmode", "fi", "else",
+  "pause"]);   // (beamer's \pause: every step of a slide is shown at once)
 // commands whose arguments are consumed silently: name -> [optional count, mandatory count]
 const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markboth: [0, 2], markright: [0, 1], pagestyle: [0, 1], thispagestyle: [0, 1],
   pagenumbering: [0, 1], hypersetup: [0, 1], lstset: [0, 1], bibliographystyle: [0, 1], nocite: [0, 1], addtolength: [0, 2], settowidth: [0, 2],
@@ -220,6 +221,13 @@ class Renderer {
     const n = nodes[j];
     if (n.t === "g") return [n.kids, j];
     return [[n], j];
+  }
+  // a beamer overlay specification <..> right after i (spaces skipped): its last index, else i (all steps are shown)
+  spec(nodes, i) {
+    let j = i + 1; while (j < nodes.length && this.isSp(nodes[j])) j++;
+    if (!this.isChar(nodes[j], 60)) return i;
+    for (let k = j + 1; k < nodes.length && k < j + 40; k++) { if (this.isChar(nodes[k], 62)) return k; if (nodes[k].t !== "x") return i; }
+    return i;
   }
   opt(nodes, i) {        // -> [kids|null, newIndex]: a [..] optional argument right after i (spaces skipped)
     let j = i + 1; while (j < nodes.length && this.isSp(nodes[j])) j++;
@@ -495,6 +503,9 @@ class Renderer {
         if (o) this.walk(o, c2, flow);
         const b = flow.open("div", ' class="multicols" style="column-count:' + k + '"'); this.walk(n.kids.slice((o ? j2 : j) + 1), c2, flow); flow.close(b); return;
       }
+      // (beamer: columns side by side, each a minipage of its width)
+      case "columns": { const b = flow.open("div", ' class="bcols" style="display:flex;gap:1em;align-items:flex-start"'); this.walk(n.kids, c2, flow); flow.close(b); return; }
+      case "column":
       case "minipage": {
         let j = -1; let pos = "c"; let o;
         [o, j] = this.opt(n.kids, j); if (o) pos = this.str(o).trim()[0] || "c";
@@ -582,8 +593,8 @@ class Renderer {
     this.walk(kids.slice(0, first), ctx, flow);
     i = first;
     while (i < kids.length) {
-      // \item[label]
-      const [o, j] = this.opt(kids, i);
+      // \item[label] (and beamer's \item<2->[label])
+      const [o, j] = this.opt(kids, this.spec(kids, i));
       if (L.li) flow.close(L.li);
       let lbl;
       if (o) lbl = this.inline(o, ctx);
@@ -808,6 +819,7 @@ const CMDS = {
   },
   date: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); this.meta.date = this.inline(a, ctx); return j; },
   maketitle: function (nodes, i, ctx, flow) { flow.block("\u0001TITLE\u0002"); return i; },
+  titlepage: function (nodes, i, ctx, flow) { flow.block("\u0001TITLE\u0002"); return i; },   // (beamer's title frame)
   tableofcontents: function (nodes, i, ctx, flow) { flow.block("\u0001TOC\u0002"); return i; },
   appendix: function (nodes, i) { this.appendix = true; if (this.book) this.ctr.chapter = 0; else this.ctr.section = 0; return i; },
   url: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); const u = this.str(a).replace(/\\([#%&_~$])/g, "$1"); const s = safeUrl(u); flow.html(s ? '<a class="url" href="' + esc(s) + '" target="_blank" rel="noopener noreferrer">' + esc(u) + "</a>" : '<span class="url">' + esc(u) + "</span>", ctx.st); return j; },

@@ -290,7 +290,9 @@ export class Machine extends CoreMachine {
     });
     // SageTeX commands this preview doesn't support: their arguments are consumed RAW here, never expanded, so a
     // \sage inside them can't become a hidden item (astra4 S1E01-A3); a chip shows each one
-    for (const [nm, nargs] of [["sagestr", 1], ["sagetexpause", 0], ["sagetexunpause", 0], ["sagetexindent", 1]]) P.prim(nm, function () {
+    for (const [nm, nargs] of [["sagestr", 1], ["sagetexpause", 0], ["sagetexunpause", 0], ["sagetexindent", 1],
+      // (PythonTeX's inline commands: the same "not run" chip; its code environments are shown as code)
+      ["py", 1], ["pyc", 1], ["pys", 1], ["pyb", 1]]) P.prim(nm, function () {
       for (let k = 0; k < nargs; k++) this.readArgRaw();
       this.mark({ k: "sageunsup", name: nm });
     });
