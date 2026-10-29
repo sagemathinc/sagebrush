@@ -57,6 +57,7 @@ async function main() {
   if (!['git@github.com:sagemathinc/sagebrush.git', 'https://github.com/sagemathinc/sagebrush.git', 'https://github.com/sagemathinc/sagebrush'].includes(origin) ||
       /cloud-private|sagebrush-private/i.test(root + '\n' + common)) throw new Error('Only the public sagemathinc/sagebrush repository may be previewed');
   const host = `${name}.sagebrush.cloud`;
+  const source = { branch: git('branch', '--show-current') || '(detached)', commit: git('rev-parse', 'HEAD'), dirty: !!git('status', '--porcelain') };
   if (options.SAGEBRUSH_LATEX_PREVIEW && !readFileSync(join(root, 'web/build.ts'), 'utf8').includes('SAGEBRUSH_PREVIEW_HOST')) {
     throw new Error('This branch lacks the LaTeX lane hosted-preview host gate; obtain its reviewed change first');
   }
@@ -78,7 +79,7 @@ async function main() {
       step(join(root, 'node_modules', '.bin', 'tsc'), ['-p', '.']);
       step('node', ['scripts/build-cli.mjs']);
       step('bun', ['web/build.ts']);
-      const output = prepare(join(root, 'web/dist'), host, mocks);
+      const output = prepare(join(root, 'web/dist'), host, mocks, source);
       // A single remote deadline covers listing, every PUT/DELETE, and body consumption.
       const remoteSignal = AbortSignal.timeout(20 * 60 * 1000);
       try {
