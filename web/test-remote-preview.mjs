@@ -179,6 +179,9 @@ try {
       while (Date.now() - t < ms) { if (re.test(await cellOut())) return true; await sleep(100); }
       return false;
     };
+    // (what the simulated gateway actually executed: each run's code, in order)
+    const execs = (code) => ev(`sagebrush.notebook.kernel.gateway.executions.filter((x) => x.code === ${JSON.stringify(code)}).length`);
+    const execList = () => ev("sagebrush.notebook.kernel.gateway.executions.map((x) => x.code)");
     const idleNow = () => until(`(() => { const el = sagebrush.notebook.cells()[${L2}].el; return !el.classList.contains('running') && !el.classList.contains('queued'); })()`, 60000);
     // (a) double-click Run: never two runs' output
     await setCode(L2, "print('ran once')");
@@ -187,7 +190,7 @@ try {
     await sleep(2 * lat + 500);
     await idleNow();
     const oa = await cellOut();
-    ok((oa.match(/ran once/g) ?? []).length <= 1, `${lat} ms: a double-clicked Run shows at most one run's output (${JSON.stringify(oa.slice(0, 120))})`);
+    ok((await execs("print('ran once')")) <= 1, `${lat} ms: a double-clicked Run executes at most once at the gateway (${await execs("print('ran once')")}; output ${JSON.stringify(oa.slice(0, 80))})`);
     // (b) a quick edit and run again: the newest run's output is what stays
     await setCode(L2, "print('first')");
     await ctrlEnter();
@@ -225,6 +228,37 @@ try {
     await ctrlEnter();
     ok(await waitFor(/typed meanwhile/), `${lat} ms: and the typed text is what runs next (${JSON.stringify((await cellOut()).slice(0, 120))})`);
     await idleNow();
+    // (e) A held in flight, then B Run twice: B is queued once and executes exactly once (astra LAT-A1)
+    const tag = `${lat}`;
+    const A = `import time\ntime.sleep(1.5)\nprint('A${tag}')`, B = `print('B${tag}')`, Cc = `print('C${tag}')`;
+    await setCode(L2, A);
+    await ctrlEnter();
+    await sleep(lat / 2 + 200);
+    await setCode(L2, B);
+    await ctrlEnter();
+    await ctrlEnter();
+    ok(await waitFor(new RegExp(`B${tag}`)), `${lat} ms: B's output arrives after A`);
+    await sleep(2 * lat + 800);
+    await idleNow();
+    ok((await execs(A)) === 1 && (await execs(B)) === 1, `${lat} ms: A held, B Run twice: A executed once, B exactly once (A ${await execs(A)}, B ${await execs(B)})`);
+    // (f) distinct A, B, C while A is in flight: each executes at most once, in order, and C (the newest) last
+    const before = (await execList()).length;
+    const A2 = A.replace(`A${tag}`, `A2${tag}`);
+    await setCode(L2, A2);
+    await ctrlEnter();
+    await sleep(lat / 2 + 200);
+    await setCode(L2, B.replace(`B${tag}`, `B2${tag}`));
+    await ctrlEnter();
+    await sleep(50);
+    await setCode(L2, Cc);
+    await ctrlEnter();
+    ok(await waitFor(new RegExp(`C${tag}`)), `${lat} ms: C's output arrives`);
+    await sleep(2 * lat + 800);
+    await idleNow();
+    const ran = (await execList()).slice(before);
+    const counts = [A2, B.replace(`B${tag}`, `B2${tag}`), Cc].map((x) => ran.filter((y) => y === x).length);
+    ok(counts.every((n) => n <= 1) && ran[0] === A2 && ran.at(-1) === Cc && /C/.test(await cellOut()) && !/B2/.test(await cellOut()),
+      `${lat} ms: A, B, C in turn: each executed at most once, A first, C last, C's output shown (${JSON.stringify(ran)})`);
     if (lat === 1000) await shot("remote-latency-1000.png");
   }
 } catch (e) {
