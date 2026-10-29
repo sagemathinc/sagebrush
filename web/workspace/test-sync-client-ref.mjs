@@ -9,7 +9,7 @@
 // The 2 cases that need the cloud's plan limits (storageFull, tooLarge) are skipped by name, each saying so.
 //   SYNC_REQUIRE_CLAIM=1 CHROME=google-chrome bun web/workspace/test-sync-client-ref.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -127,7 +127,12 @@ const signInAs = (account_id) => upstream("POST", "/auth/dev", { "content-type":
  * RefSocket (its messages and its close as callbacks, onmessage(text) and onclose(code, reason)), or its refusal. */
 async function connectUp() {
   const s = await ref.connect(jar || null);
-  return typeof s.send === "function" ? { up: s } : { refused: s };
+  if (typeof s.send !== "function") return { refused: s };
+  // (what the server sends before its user takes over (the page's socket opens a moment later) is kept, not dropped:
+  // the user's onmessage replaces this, and then takes what was kept, in order)
+  const buf = [];
+  s.onmessage = (text) => buf.push(text);
+  return { up: s, buf };
 }
 
 // a second device, from here: its own socket on the same account
@@ -138,6 +143,7 @@ async function probe({ ops = [], device = "0f0f0f0f0f0f0f0f" } = {}) {
   const got = [];
   let wake = null;
   ws.onmessage = (text) => { got.push(JSON.parse(text)); wake?.(); };
+  for (const text of c.buf.splice(0)) ws.onmessage(text);
   const next = async (f, ms = 5000) => {
     const t = Date.now();
     for (;;) {
@@ -194,6 +200,13 @@ function pageHeaders(r, path) {
   return h;
 }
 
+/** A status that carries no body (the Fetch rule: a body there is a TypeError), as /auth/dev's 204 */
+const NULL_BODY = [101, 103, 204, 205, 304];
+/** An answer to the page: `body`, unless the status, or a HEAD, carries none */
+const respond = (status, body, headers, method) => new Response(NULL_BODY.includes(status) || method === "HEAD" ? null : body, { status, headers });
+/** The reference server's answer passed on: its body read only when it may have one */
+const passOn = async (r, path, method) => respond(r.status, NULL_BODY.includes(r.status) || method === "HEAD" ? null : await r.arrayBuffer(), pageHeaders(r, path), method);
+
 let site = "";
 async function serve(req, server) {
   const u = new URL(req.url);
@@ -204,7 +217,7 @@ async function serve(req, server) {
     }
     if (p === "/__ctl") return Response.json(await control(JSON.parse((await req.text()) || "{}")));
     // the account socket, proxied message by message (websocket, below), so the cases can drop, fake or close
-    if (p === "/api/sync/v1/account") {
+    if (p === "/api/sync/v1/account" && (req.headers.get("upgrade") ?? "").toLowerCase() === "websocket") {
       log.sockets++;
       if (ctl.switchOnUpgrade) {
         await signInAs(ctl.switchOnUpgrade);
@@ -214,7 +227,7 @@ async function serve(req, server) {
       const c = await connectUp().catch(() => null);
       if (!c || c.refused) return new Response("refused", { status: c?.refused.status ?? 502, headers: { connection: "close" } });
       // (the session's account when this socket was opened: the one it is authenticated as)
-      if (server.upgrade(req, { data: { up: c.up, socketSession: session, helloAccount: null } })) return undefined;
+      if (server.upgrade(req, { data: { up: c.up, buf: c.buf, socketSession: session, helloAccount: null } })) return undefined;
       c.up.close(1000, "no upgrade");
       return new Response("no upgrade", { status: 400 });
     }
@@ -231,7 +244,7 @@ async function serve(req, server) {
       const r = await ref.fetch(new Request(origin + p, { method: req.method, headers: h }));
       entry.status = r.status;
       if (r.status === 200) front.files200++;
-      return new Response(await r.arrayBuffer(), { status: r.status, headers: pageHeaders(r, p) });
+      return passOn(r, p, req.method);
     }
     if (!p.startsWith("/api/") && !p.startsWith("/auth/")) return new Response(null, { status: 404 });
     const body = req.method === "GET" || req.method === "HEAD" ? undefined : Buffer.from(await req.arrayBuffer());
@@ -243,7 +256,7 @@ async function serve(req, server) {
       fake.times--;
       entry.status = fake.status;
       entry.faked = true;
-      return new Response(JSON.stringify(fake.body ?? {}), { status: fake.status, headers: { "content-type": "application/json" } });
+      return respond(fake.status, JSON.stringify(fake.body ?? {}), { "content-type": "application/json" }, req.method);
     }
     if (isPut && ctl.delayFakePut) {
       const f = ctl.delayFakePut;
@@ -251,7 +264,7 @@ async function serve(req, server) {
       entry.faked = true;
       await new Promise((r) => setTimeout(r, f.ms));
       entry.status = f.status;
-      return new Response(JSON.stringify(f.body ?? {}), { status: f.status, headers: { "content-type": "application/json" } });
+      return respond(f.status, JSON.stringify(f.body ?? {}), { "content-type": "application/json" }, req.method);
     }
     if (isPut && ctl.switchOnPut) {
       await signInAs(ctl.switchOnPut);
@@ -275,7 +288,7 @@ async function serve(req, server) {
       if (isPut) log.putsNow--;
     }
     entry.status = r.status;
-    return new Response(await r.arrayBuffer(), { status: r.status, headers: pageHeaders(r, p) });
+    return passOn(r, p, req.method);
   } catch (e) {
     return new Response(String(e), { status: 500 });
   }
@@ -344,6 +357,7 @@ const websocket = {
       d.send(text);
     };
     up.onclose = (code) => d.closeBoth(code);
+    for (const text of d.buf.splice(0)) up.onmessage(text);
   },
   message(client, data) {
     const d = client.data, up = d.up;
@@ -402,31 +416,52 @@ const websocket = {
 // cleanup however the run ends
 
 const fails = [];
+/** the runner's own controls (of its cleanup), beside the page's checks */
+const controls = [];
+const control1 = (ok, what) => { controls.push(what); if (!ok) fails.push(what); };
 const sockets = [];
-let server = null, chrome = null, chromeError = null, chromeExited = Promise.resolve();
-const profile = mkdtempSync(join(tmpdir(), "sb-scr-"));
-try { site = mkdtempSync(join(tmpdir(), "sb-scr-site-")); } catch (e) { rmSync(profile, { recursive: true, force: true }); throw e; }
-/** Chrome stopped and seen to exit: TERM, up to 5 s for its exit, then KILL and up to 5 s more; says which. */
-const stopChrome = async () => {
-  if (!chrome?.pid) return chromeError ? `never started (${chromeError?.code ?? chromeError})` : "never started";
-  if (chrome.exitCode !== null || chrome.signalCode !== null) return "had exited";
-  chrome.kill("SIGTERM");
-  if (await Promise.race([chromeExited.then(() => true), sleep(5000).then(() => false)])) return "exited on TERM";
-  chrome.kill("SIGKILL");
-  return (await Promise.race([chromeExited.then(() => true), sleep(5000).then(() => false)])) ? "exited on KILL" : "NOT seen to exit";
+let server = null, chrome = null, profile = null;
+/** how Chrome ended, once it has: {exit: [code, signal]}, or {error} for a spawn that failed (never an observed exit) */
+let chromeEnded = Promise.resolve(null);
+const why = (e) => String(e?.code ?? e?.message ?? e);
+/** A process stopped and seen to end: TERM, up to 5 s for its end, then KILL and up to 5 s more; says which.  A kill
+ * that throws is a stop only on ESRCH (it had gone); any other error is a failure, said.  An `error` end (a spawn that
+ * failed) is never taken for an exit. */
+const stopChrome = async (p = chrome, ended = () => chromeEnded) => {
+  if (!p?.pid) return { ok: true, said: "never started" };
+  if (p.exitCode !== null || p.signalCode !== null) return { ok: true, said: "had exited" };
+  for (const [sig, name] of [["SIGTERM", "TERM"], ["SIGKILL", "KILL"]]) {
+    try { p.kill(sig); } catch (e) { if (e?.code !== "ESRCH") return { ok: false, said: `${name} failed (${why(e)})` }; }
+    const end = await Promise.race([ended(), sleep(5000).then(() => undefined)]);
+    if (end?.exit) return { ok: true, said: `exited on ${name}` };
+    if (end?.error) return { ok: false, said: `ended with an error (${why(end.error)})` };
+  }
+  return { ok: false, said: "NOT seen to exit" };
+};
+/** Each closed; any that throws is said */
+const closeEach = (list, f) => { const bad = []; for (const s of list) try { f(s); } catch (e) { bad.push(why(e)); } return bad.length ? { ok: false, said: `NOT all closed (${bad.join(", ")})` } : { ok: true, said: `${list.length} closed` }; };
+const removeDir = (d) => { if (!d) return { ok: true, said: "never made" }; try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); return { ok: true, said: "removed" }; } catch (e) { return { ok: false, said: `NOT removed (${why(e)})` }; } };
+/** Stages run one after another, each whatever the ones before it did: a stage that throws, or says it failed, is a
+ * failure, named; none is skipped.  Never rejects.  Says each stage, and whether all were done. */
+const runStages = async (stages) => {
+  const out = [];
+  for (const [name, f] of stages) {
+    try { const r = await f(); out.push({ name, ok: !!r?.ok, said: r?.said ?? "(said nothing)" }); }
+    catch (e) { out.push({ name, ok: false, said: `threw (${why(e)})` }); }
+  }
+  return { line: "cleanup: " + out.map((s) => `${s.name} ${s.said}`).join("; "), ok: out.every((s) => s.ok) };
 };
 let cleaned = null;
 /** Everything this run started, ended, and what it made, removed: once, however the run ends (its end, a failure, the
- * watchdog or SIGTERM).  Says what was seen, and whether all of it was done. */
-const cleanup = () => (cleaned ??= (async () => {
-  for (const s of sockets) try { s.close(); } catch {}
-  for (const f of [...closers]) f(1000);
-  const how = await stopChrome();
-  try { server?.stop(true); } catch {}
-  const left = [];
-  for (const d of [profile, site]) try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch (e) { left.push(`${d}: ${e?.code ?? e}`); }
-  return { line: `cleanup: Chrome ${how}; ${left.length ? "temporary directories NOT removed: " + left.join(", ") : "temporary directories removed"}`, ok: how !== "NOT seen to exit" && !left.length };
-})());
+ * watchdog or SIGTERM), every stage attempted. */
+const cleanup = () => (cleaned ??= runStages([
+  ["DevTools sockets", () => closeEach(sockets, (s) => s.close())],
+  ["proxied sockets", () => closeEach([...closers], (f) => f(1000))],
+  ["Chrome", () => stopChrome()],
+  ["front", async () => { if (!server) return { ok: true, said: "never started" }; await server.stop(true); return { ok: true, said: "stopped" }; }],
+  ["profile", () => removeDir(profile)],
+  ["site", () => removeDir(site)],
+]).catch((e) => ({ line: `cleanup: rejected (${why(e)})`, ok: false })));
 /** The run ended from outside its flow (the watchdog, SIGTERM): said, cleaned up, exit 1. */
 const endNow = async (why) => {
   console.error(`FAIL: ${why}; waiting on: ${waitingOn}`);
@@ -439,6 +474,26 @@ process.once("SIGTERM", () => endNow("ended by SIGTERM"));
 
 let results = [];
 try {
+  // (the temporary directories, made inside the try: if the second can't be, the cleanup still removes the first)
+  profile = mkdtempSync(join(tmpdir(), "sb-scr-"));
+  site = mkdtempSync(join(tmpdir(), "sb-scr-site-"));
+  // (controls of the cleanup itself, in this process, with faults injected: every stage still runs, each failure is
+  // named and the whole fails; a kill that throws other than ESRCH is not a stop; a spawn error is never an exit)
+  {
+    const d = mkdtempSync(join(tmpdir(), "sb-scr-ctl-"));
+    const c = await runStages([
+      ["a kill", () => { throw Object.assign(new Error("injected"), { code: "EPERM" }); }],
+      ["a front", async () => { throw new Error("injected stop failure"); }],
+      ["a directory", () => removeDir(d)],
+    ]);
+    control1(!c.ok && c.line === "cleanup: a kill threw (EPERM); a front threw (injected stop failure); a directory removed" && !existsSync(d), "(control) the cleanup runs every stage after failures, names each and fails: " + c.line);
+    const eperm = await stopChrome({ pid: 1, exitCode: null, signalCode: null, kill() { throw Object.assign(new Error("injected"), { code: "EPERM" }); } }, () => new Promise(() => {}));
+    control1(!eperm.ok && eperm.said === "TERM failed (EPERM)", "(control) a kill refused (EPERM) is a failure, not a stop: " + eperm.said);
+    const esrch = await stopChrome({ pid: 1, exitCode: null, signalCode: null, kill() { throw Object.assign(new Error("injected"), { code: "ESRCH" }); } }, async () => ({ exit: [0, null] }));
+    control1(esrch.ok && esrch.said === "exited on TERM", "(control) a kill that finds the process gone (ESRCH), then its exit seen, is a stop: " + esrch.said);
+    const spawnError = await stopChrome({ pid: 1, exitCode: null, signalCode: null, kill() {} }, async () => ({ error: Object.assign(new Error("injected"), { code: "ENOENT" }) }));
+    control1(!spawnError.ok && spawnError.said === "ended with an error (ENOENT)", "(control) a spawn error is never taken for an observed exit: " + spawnError.said);
+  }
   // (the page: the workspace bundled in this process, and the cases beside it)
   waitingOn = "the page's bundle (Bun.build of index.ts)";
   const b = await bounded(Bun.build({ entrypoints: [join(here, "index.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" }), waitingOn, 120_000);
@@ -450,9 +505,9 @@ try {
 
   let port = Number(process.env.CDP_PORT) || 0;
   chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--js-flags=--expose-gc", "--enable-precise-memory-info", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-  chromeExited = new Promise((r) => { chrome.once("exit", r); chrome.once("error", (e) => { chromeError = e; r(); }); });
+  chromeEnded = new Promise((r) => { chrome.once("exit", (code, signal) => r({ exit: [code, signal] })); chrome.once("error", (error) => r({ error })); });
   waitingOn = "Chrome's DevTools port";
-  if (!port) port = await bounded(Promise.race([devtoolsPort(profile), chromeExited.then(() => { throw new Error(`Chrome ended before its DevTools port: ${chromeError?.code ?? chromeError ?? "exit " + (chrome.exitCode ?? chrome.signalCode)}`); })]), waitingOn, 60_000);
+  if (!port) port = await bounded(Promise.race([devtoolsPort(profile), chromeEnded.then((end) => { throw new Error(end?.error ? `Chrome didn't start: ${why(end.error)}` : `Chrome ended before its DevTools port: exit ${J(end?.exit)}`); })]), waitingOn, 60_000);
   let targets;
   waitingOn = "the page list (/json)";
   for (let i = 0; i < 300; i++) { try { targets = await bounded(fetch(`http://127.0.0.1:${port}/json`).then((r) => r.json()), waitingOn, 5000); if (targets.some((t) => t.type === "page")) break; } catch {} await sleep(100); }
@@ -512,6 +567,6 @@ if (fails.length) {
   process.exit(1);
 }
 const skipped = CLOUD_ONLY.filter(selected).length;
-console.log(`ok: sync's client against the reference server, ${results.length} checks, ${skipped} cloud-only cases skipped`);
+console.log(`ok: sync's client against the reference server, ${results.length} checks, ${controls.length} runner controls, ${skipped} cloud-only cases skipped`);
 if (process.env.SHOW) for (const [, what] of results) console.log("  " + what);
 process.exit(0);
