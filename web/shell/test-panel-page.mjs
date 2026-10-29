@@ -158,6 +158,101 @@ try {
   check(/^top - \d\d:\d\d:\d\d\s+\d+ tabs?, \d+ documents?, \d+ running/.test(t1 ?? "") && (await evaluate(`document.querySelector(".sb-term").classList.contains("running")`)) === true, `top shows a live listing and keeps running: ${JSON.stringify((t1 ?? "").slice(0, 120))}`);
   await evaluate(`document.querySelector(".sb-term-stop").click()`);
   check(!!(await until(`!document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent === "done"`, 5000)), "Stop ends top");
+  // ---- E5.8: keys, placement and the screen-reader order
+  const ta = `document.querySelector(".sb-term textarea")`;
+  const key = (k, mods = {}) => evaluate(`(() => { const e = new KeyboardEvent("keydown", { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true, ...${JSON.stringify(mods)} });
+    ${ta}.dispatchEvent(e); return e.defaultPrevented; })()`);
+  const setInput = (v) => evaluate(`(() => { ${ta}.value = ${JSON.stringify(v)}; ${ta}.selectionStart = ${ta}.selectionEnd = ${JSON.stringify(v)}.length; })()`);
+  const running = () => evaluate(`document.querySelector(".sb-term").classList.contains("running")`);
+  const cmdCount = () => evaluate(`document.querySelectorAll(".sb-term-cmd").length`);
+  const LOOP = "i=0; while true; do i=$((i+1)); done";
+  // (a multi-line paste is one run)
+  await run("clear");
+  n = 0;
+  r = await run("echo one\necho two");
+  check(r?.out === "one\ntwo\n" && (await cmdCount()) === 1, `a multi-line input runs as one command: ${JSON.stringify(r?.out)}`);
+  // (Enter while a command runs: no submit, no queue, the note)
+  await setInput(LOOP);
+  await key("Enter");
+  check(!!(await until(`document.querySelector(".sb-term").classList.contains("running")`, 10000)), "a long command runs");
+  const before = await cmdCount();
+  await setInput("echo queued");
+  await key("Enter");
+  check((await cmdCount()) === before && (await evaluate(`${ta}.value`)) === "echo queued" && (await evaluate(`document.querySelector(".sb-term-note").textContent`)) === "A command is running: Stop it first.",
+    "Enter while running: nothing submitted or queued, the input kept, the note shown");
+  // (Ctrl-C with a selection: copy, the command keeps running)
+  await evaluate(`getSelection().selectAllChildren(document.querySelector(".sb-term-pl"))`);
+  const copyPrevented = await key("c", { ctrlKey: true });
+  check(copyPrevented === false && (await running()) === true, "Ctrl-C with a selection is the copy (not prevented), and the command keeps running");
+  await evaluate(`getSelection().removeAllRanges()`);
+  // (Ctrl-L during a run: only the earlier commands are cleared)
+  await key("l", { ctrlKey: true });
+  check((await cmdCount()) === 1 && (await running()) === true, "Ctrl-L during a run clears the earlier commands and keeps the running one");
+  // (Ctrl-C with no selection: Stop)
+  await evaluate(`document.querySelector(".sb-term-status").textContent = ""`);
+  const stopPrevented = await key("c", { ctrlKey: true });
+  check(stopPrevented === true && !!(await until(`!document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent === "stopped"`, 10000)),
+    "Ctrl-C with no selection stops the command");
+  check((await evaluate(`[...document.querySelectorAll(".sb-term-cmd")].at(-1).querySelector(".sb-term-exit")?.textContent`)) === "^C (stopped)", "the stopped command says so");
+  // (Stop by the button)
+  await setInput(LOOP);
+  await key("Enter");
+  await until(`document.querySelector(".sb-term").classList.contains("running")`, 10000);
+  await evaluate(`document.querySelector(".sb-term-status").textContent = ""; document.querySelector(".sb-term-stop").click()`);
+  check(!!(await until(`!document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent === "stopped"`, 10000)), "Stop by the button");
+  r = await run("echo after-stop");
+  check(r?.out === "after-stop\n", "the shell runs again after Stop");
+  // (Ctrl-C when idle: ^C, the input cleared)
+  await setInput("half typed");
+  const c0 = await cmdCount();
+  await key("c", { ctrlKey: true });
+  check((await evaluate(`${ta}.value`)) === "" && (await cmdCount()) === c0 + 1 && (await evaluate(`[...document.querySelectorAll(".sb-term-cmd")].at(-1).textContent`)).endsWith("^C"), "Ctrl-C when idle: ^C and the input cleared");
+  // (history: Up from an edited input keeps the draft; Down past the newest restores it)
+  await run("echo hist-1");
+  await setInput("my draft");
+  await key("ArrowUp");
+  const up = await evaluate(`${ta}.value`);
+  await key("ArrowDown");
+  check(up === "echo hist-1" && (await evaluate(`${ta}.value`)) === "my draft", `history Up/Down keeps the draft: up=${JSON.stringify(up)}`);
+  await setInput("");
+  // (the screen-reader order: the polite status changes only after the last output has gone into the log)
+  await evaluate(`window.__order = []; window.__mo = new MutationObserver((ms) => { for (const m of ms) window.__order.push(m.target.closest?.(".sb-term-status") || m.target.parentElement?.closest?.(".sb-term-status") ? "status" : "log"); });
+    window.__mo.observe(document.querySelector(".sb-term"), { childList: true, subtree: true, characterData: true })`);
+  r = await run("seq 1 3000");
+  const order = await evaluate(`(() => { window.__mo.disconnect(); return window.__order; })()`);
+  const lastLog = order.lastIndexOf("log"), lastStatus = order.lastIndexOf("status");
+  check(r?.status === "done" && lastLog >= 0 && lastStatus > lastLog,
+    `the status is announced after the output: the last status change at ${lastStatus}, the last output at ${lastLog}, of ${order.length}`);
+  check((await evaluate(`document.querySelector(".sb-term-log").getAttribute("aria-live")`)) === "off" && (await evaluate(`document.querySelector(".sb-term-stop").tagName`)) === "BUTTON" && /\/ \$|in \//.test(await evaluate(`${ta}.getAttribute("aria-label")`)), "the log is never live; Stop is a button; the input's label names the cwd");
+  // (the scrollback, end to end: two commands of 4 999 lines cross its 6 000-line cap together: the older is dropped
+  // whole, and the marker says so; the DOM's lines stay within the cap, the marker included)
+  await run("clear");
+  n = 0;
+  await run("seq 1 4999");
+  r = await run("seq 5000 9998");
+  const sb = await evaluate(`(() => { const log = document.querySelector(".sb-term-log");
+    const lines = [...log.children].reduce((a, c) => a + (c.classList.contains("sb-term-cmd") ? 1 + (c.querySelector(".sb-term-out").textContent.match(/\\n/g) || []).length + c.querySelectorAll(".sb-term-exit").length : 1), 0);
+    return { cmds: log.querySelectorAll(".sb-term-cmd").length, drop: log.querySelector(".sb-term-drop")?.textContent ?? null, lines }; })()`);
+  check(sb && sb.cmds === 1 && sb.drop === "[1 earlier command dropped]" && sb.lines <= 6000 && r?.out.startsWith("5000\n") && r.out.endsWith("9998\n"),
+    `the scrollback drops the older command whole when the sum crosses its line cap: ${JSON.stringify(sb)}`);
+  // (hide keeps the session; ✕ ends it)
+  const kept = await cmdCount();
+  await evaluate(`document.querySelector(".sb-term-hide").click()`);
+  check((await evaluate(`document.querySelector(".sb-term").hidden`)) === true, "hide hides the dock");
+  await evaluate(`document.querySelector("#termbtn").click()`);
+  check((await evaluate(`document.querySelector(".sb-term").hidden`)) === false && (await cmdCount()) === kept, "⋯ ▸ Terminal again: the same session, its scrollback kept");
+  await evaluate(`document.querySelector(".sb-term-end").click()`);
+  check((await evaluate(`document.querySelectorAll(".sb-term").length`)) === 0, "✕ ends the session (the dock is gone)");
+  await evaluate(`document.querySelector("#termbtn").click()`);
+  await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden`, 10000);
+  await key("ArrowUp");
+  check((await cmdCount()) === 0 && (await evaluate(`${ta}.value`)) === "", "a new session after ✕: no scrollback and no history");
+  // (under 700 px: a full-height sheet)
+  await send("Emulation.setDeviceMetricsOverride", { width: 600, height: 800, deviceScaleFactor: 1, mobile: false });
+  await new Promise((res) => setTimeout(res, 300));
+  const sheet = await evaluate(`(() => { const r = document.querySelector(".sb-term").getBoundingClientRect(); return { top: r.top, h: r.height, ih: innerHeight }; })()`);
+  check(sheet && sheet.top <= 1 && sheet.h >= sheet.ih * 0.85, `under 700 px the dock is a full-height sheet: ${JSON.stringify(sheet)}`);
+  await send("Emulation.clearDeviceMetricsOverride");
   if (process.argv[2]) {
     const shot = await send("Page.captureScreenshot", { format: "png" });
     writeFileSync(process.argv[2], Buffer.from(shot.result.data, "base64"));

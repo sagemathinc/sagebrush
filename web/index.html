@@ -432,6 +432,7 @@ import { ShellHost } from "./shell/host.ts";
 import { startShell } from "./shell/loader.ts";
 import { TerminalPanel } from "./shell/panel.ts";
 import { answerPresence, gatherPresence, TAB } from "./shell/presence.ts";
+import { terminalCommands } from "./shell/panel-commands.ts";
 import { openPreview } from "./workspace/preview.ts";
 const EXAMPLES = {
   "Welcome": [
@@ -2189,7 +2190,7 @@ if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/
       const S = await shellSet();
       if (!S) { savedEl.textContent = "the terminal: this site has no shell package set"; return; }
       const host = new ShellHost(w, async (signal) => (await startShell(S, "./", { signal })).shell);
-      term = new TerminalPanel({ host, label: "bash \u00b7 " + S.slice(0, 8), open: openPath, ps: () => gatherPresence(here) });
+      term = new TerminalPanel({ host, label: "bash \u00b7 " + S.slice(0, 8), commands: terminalCommands({ open: openPath, ps: () => gatherPresence(here) }) });
       term.onEnd = () => { host.endShell("the terminal was ended"); term = null; };
     }
     term.toggle();

@@ -261,13 +261,14 @@ export class Render {
     // the end: the omission line, if anything wasn't shown (room for it was kept all along)
     this.flush(out);
     if (this.omitted > 0) {
-      if (this.units > 0 && !this.atLineStart(out)) {
-        out.push({ text: "\n", cls: "", err: false });
-        this.lines++;
-      }
-      out.push({ text: Render.marker(this.omitted), cls: "sb-omit", err: false });
+      // (the omission line, on a line of its own: one run, its line end included, charged to every cap; its room
+      // was kept all along: MARK_UNITS, one line, one run)
+      const nl = this.units > 0 && !this.atLineStart(out) ? "\n" : "";
+      const text = nl + Render.marker(this.omitted);
+      out.push({ text, cls: "sb-omit", err: false });
       this.spans++;
-      this.units += Render.marker(this.omitted).length;
+      this.units += text.length;
+      if (nl) this.lines++;
     }
     this.finished = true;
     return out;
@@ -281,7 +282,9 @@ export class Render {
 
   /** A line end, if a line is left after keeping the omission line's (S2 lines). */
   private newline(out: Run[], err: boolean): boolean {
-    if (this.lines + 1 > CAPS.lines - 1) return false;
+    // (a line end may lead onto the last line, CAPS.lines, which content never takes: it is kept for the omission
+    // line, so a command shows at most CAPS.lines - 1 content lines, then the marker: CAPS.lines in all)
+    if (this.lines + 1 > CAPS.lines) return false;
     if (this.units + 1 > CAPS.units - Render.MARK_UNITS) return false;
     const last = out[out.length - 1];
     if (last && last.err === err && (last.cls === "" || err)) last.text += "\n";
@@ -297,6 +300,7 @@ export class Render {
 
   /** Shown text, if it fits S2's code units and runs (the omission line's room kept). */
   private show(out: Run[], text: string, err: boolean): boolean {
+    if (this.lines >= CAPS.lines) return false;
     if (this.units + text.length > CAPS.units - Render.MARK_UNITS) return false;
     const cls = classOf(this.style);
     const last = this.line[this.line.length - 1];
@@ -318,4 +322,34 @@ export class Render {
   get totals() {
     return { units: this.units, spans: this.spans, lines: this.lines, consumed: this.consumed, omitted: this.omitted };
   }
+}
+
+// ---------------------------------------------------------------- the scrollback (E5.4: all commands)
+/** E5.4's scrollback caps: UTF-16 code units, lines, runs, over every command shown, the drop marker included. */
+export const SCROLLBACK = Object.freeze({ units: 4194304, lines: 6000, spans: 50000 });
+export type Totals = { units: number; lines: number; spans: number };
+/** The one line that says how many of the oldest commands were dropped. */
+export const dropMarker = (n: number) => `[${n} earlier command${n === 1 ? "" : "s"} dropped]`;
+/**
+ * How many of the oldest commands to drop, whole, before a slice goes into the newest (the last of `cmds`, never
+ * dropped), so that every kept command, the slice and the drop marker (charged to every cap: its code units, one
+ * line, one run) fit the caps.  `dropped`: how many were dropped before.  A command's own caps are below these
+ * (CAPS: 1 MiB, 5 000 lines, 20 000 runs), so the newest command always fits with its prompt, exit and the marker.
+ */
+export function evictCount(cmds: Totals[], slice: Totals, dropped: number, caps: Totals = SCROLLBACK): number {
+  let u = 0, l = 0, s = 0;
+  for (const c of cmds) (u += c.units), (l += c.lines), (s += c.spans);
+  let k = 0;
+  const fits = () => {
+    const d = dropped + k;
+    const mu = d ? dropMarker(d).length : 0, m1 = d ? 1 : 0;
+    return u + slice.units + mu <= caps.units && l + slice.lines + m1 <= caps.lines && s + slice.spans + m1 <= caps.spans;
+  };
+  while (k < cmds.length - 1 && !fits()) {
+    u -= cmds[k].units;
+    l -= cmds[k].lines;
+    s -= cmds[k].spans;
+    k++;
+  }
+  return k;
 }

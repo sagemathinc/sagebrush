@@ -1,9 +1,6 @@
 /* The terminal panel (plan-bash-shell r8c E5): a bottom dock; the 16 colours of E5.3, each >= 4.5:1 on its theme's
    background (min 4.91 light, 6.15 dark); a background-only style takes the theme's bg as its text colour (the higher
    contrast on every one of the 16, in both themes). */
-:root { --sb-term-c0: #1f2328; --sb-term-c1: #b3261e; --sb-term-c2: #116329; --sb-term-c3: #7a4a00; --sb-term-c4: #0550ae; --sb-term-c5: #8250df; --sb-term-c6: #0e6e74; --sb-term-c7: #59636e; --sb-term-c8: #424a53; --sb-term-c9: #c9271b; --sb-term-c10: #1a7f37; --sb-term-c11: #8a5300; --sb-term-c12: #0969da; --sb-term-c13: #9e45d6; --sb-term-c14: #0b7a80; --sb-term-c15: #59636e; --sb-term-fg: #1f2328; --sb-term-bg: #ffffff; }
-:root[data-theme="dark"] { --sb-term-c0: #c9d1d9; --sb-term-c1: #ff7b72; --sb-term-c2: #3fb950; --sb-term-c3: #d29922; --sb-term-c4: #58a6ff; --sb-term-c5: #bc8cff; --sb-term-c6: #39c5cf; --sb-term-c7: #b1bac4; --sb-term-c8: #8b949e; --sb-term-c9: #ffa198; --sb-term-c10: #56d364; --sb-term-c11: #e3b341; --sb-term-c12: #79c0ff; --sb-term-c13: #d2a8ff; --sb-term-c14: #56d4dd; --sb-term-c15: #f0f6fc; --sb-term-fg: #e6edf3; --sb-term-bg: #0d1117; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --sb-term-c0: #c9d1d9; --sb-term-c1: #ff7b72; --sb-term-c2: #3fb950; --sb-term-c3: #d29922; --sb-term-c4: #58a6ff; --sb-term-c5: #bc8cff; --sb-term-c6: #39c5cf; --sb-term-c7: #b1bac4; --sb-term-c8: #8b949e; --sb-term-c9: #ffa198; --sb-term-c10: #56d364; --sb-term-c11: #e3b341; --sb-term-c12: #79c0ff; --sb-term-c13: #d2a8ff; --sb-term-c14: #56d4dd; --sb-term-c15: #f0f6fc; --sb-term-fg: #e6edf3; --sb-term-bg: #0d1117; } }
 .sb-term { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: 280px; min-height: 120px; max-height: 80vh;
   display: flex; flex-direction: column; background: var(--sb-term-bg); color: var(--sb-term-fg);
   border-top: 1px solid var(--line, #d4d4cb); box-shadow: 0 -2px 8px rgba(0,0,0,.12); font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -38,20 +35,4 @@ body.sb-term-open { padding-bottom: var(--sb-term-h, 280px); }
 .sb-term-note[hidden] { display: none; }
 .sb-b { font-weight: 700; } .sb-i { font-style: italic; } .sb-u { text-decoration: underline; }
 .sb-fg-rev { color: var(--sb-term-bg); } .sb-bg-rev { background: var(--sb-term-fg); }
-.sb-fg-0 { color: var(--sb-term-c0); } .sb-bg-0 { background: var(--sb-term-c0); } .sb-fga-0 { color: var(--sb-term-bg); }
-.sb-fg-1 { color: var(--sb-term-c1); } .sb-bg-1 { background: var(--sb-term-c1); } .sb-fga-1 { color: var(--sb-term-bg); }
-.sb-fg-2 { color: var(--sb-term-c2); } .sb-bg-2 { background: var(--sb-term-c2); } .sb-fga-2 { color: var(--sb-term-bg); }
-.sb-fg-3 { color: var(--sb-term-c3); } .sb-bg-3 { background: var(--sb-term-c3); } .sb-fga-3 { color: var(--sb-term-bg); }
-.sb-fg-4 { color: var(--sb-term-c4); } .sb-bg-4 { background: var(--sb-term-c4); } .sb-fga-4 { color: var(--sb-term-bg); }
-.sb-fg-5 { color: var(--sb-term-c5); } .sb-bg-5 { background: var(--sb-term-c5); } .sb-fga-5 { color: var(--sb-term-bg); }
-.sb-fg-6 { color: var(--sb-term-c6); } .sb-bg-6 { background: var(--sb-term-c6); } .sb-fga-6 { color: var(--sb-term-bg); }
-.sb-fg-7 { color: var(--sb-term-c7); } .sb-bg-7 { background: var(--sb-term-c7); } .sb-fga-7 { color: var(--sb-term-bg); }
-.sb-fg-8 { color: var(--sb-term-c8); } .sb-bg-8 { background: var(--sb-term-c8); } .sb-fga-8 { color: var(--sb-term-bg); }
-.sb-fg-9 { color: var(--sb-term-c9); } .sb-bg-9 { background: var(--sb-term-c9); } .sb-fga-9 { color: var(--sb-term-bg); }
-.sb-fg-10 { color: var(--sb-term-c10); } .sb-bg-10 { background: var(--sb-term-c10); } .sb-fga-10 { color: var(--sb-term-bg); }
-.sb-fg-11 { color: var(--sb-term-c11); } .sb-bg-11 { background: var(--sb-term-c11); } .sb-fga-11 { color: var(--sb-term-bg); }
-.sb-fg-12 { color: var(--sb-term-c12); } .sb-bg-12 { background: var(--sb-term-c12); } .sb-fga-12 { color: var(--sb-term-bg); }
-.sb-fg-13 { color: var(--sb-term-c13); } .sb-bg-13 { background: var(--sb-term-c13); } .sb-fga-13 { color: var(--sb-term-bg); }
-.sb-fg-14 { color: var(--sb-term-c14); } .sb-bg-14 { background: var(--sb-term-c14); } .sb-fga-14 { color: var(--sb-term-bg); }
-.sb-fg-15 { color: var(--sb-term-c15); } .sb-bg-15 { background: var(--sb-term-c15); } .sb-fga-15 { color: var(--sb-term-bg); }
 @media (max-width: 700px) { .sb-term { top: 0; height: auto !important; max-height: none; } body.sb-term-open { overflow: hidden; } }
