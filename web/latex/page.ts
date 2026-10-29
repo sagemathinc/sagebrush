@@ -158,13 +158,22 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let worker: Worker | null = null, inflight: Token | null = null, queued = false, watchdog: any = null, restartedAt = -1;
   let groups: HTMLElement[] = [], groupHtml: string[] = [];
   let groupPos: number[] = [];   // per group, the source offset where it begins (-1: unknown), from the shown reply
+  // (the shown reply's positions sorted, as [offset, group] pairs, ties by group: built once per installed reply)
+  let posIndex: [number, number][] = [];
+  // the source text the shown reply was made from: positions hold only while the source is that text (ux2 r2 #1)
+  let posText: string | null = null;
+  const sentText = new Map<number, string>();   // per revision sent, its text, until its reply comes
   const images: Record<string, string | { why: string }> = {};
   const blobs = new Set<string>();
   let imageBytes = 0;
   const startWorker = () => {
     worker?.terminate();
     worker = new Worker(new URL("sagebrush-latex-worker.js", location.href), { type: "module", name: "sagebrush-latex" });
-    worker.onmessage = (m) => onReply(m.data);
+    worker.onmessage = (m) => {
+      // (the test build only: the page test can hold a reply here; elsewhere this folds away)
+      const held = typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__ ? (globalThis as any).__sbTexReplyHold?.(m.data?.rev) : undefined;
+      if (held) void held.then(() => onReply(m.data)); else onReply(m.data);
+    };
     worker.onerror = () => say("the preview's engine stopped");
   };
   const request = () => {
@@ -180,6 +189,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       restartedAt = t.rev; startWorker(); request();
     }, 15000);
     mark("tex-request", { rev: t.rev });
+    sentText.set(t.rev, src.value);
     worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images });
   };
   const onReply = (r: any) => {
@@ -187,11 +197,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     mark("tex-parse-done", { rev: r.rev });
     clearTimeout(watchdog);
     inflight = null;
+    const text = sentText.get(r.rev);
+    for (const k of sentText.keys()) if (k <= r.rev) sentText.delete(k);
     if (queued) request();
     const ok = gate.accept(r);
     if (!ok.patch) return;
     if (!r.ok) { say("the preview failed: " + String(r.error).slice(0, 200)); return; }
-    schedulePatch(r.items as Item[], r.groups as number, r.rev as number, Array.isArray(r.pos) ? (r.pos as number[]) : []);
+    schedulePatch(r.items as Item[], r.groups as number, r.rev as number, Array.isArray(r.pos) ? (r.pos as number[]) : [], text ?? null);
     preview.dataset.replyMs = String(Math.round(performance.now() - tReply));
     if (ok.current) resolveImages(r.imageRefs as string[], gate.token());
   };
@@ -201,7 +213,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the patch loop's own longest step and swap, and the most UTF-8 bytes parsed in one step: preview.dataset)
   let patchSeq = 0, stepMax = 0, swapMs = 0, stepBytesMax = 0;
   const stops = { items: 0, bytes: 0, ms: 0 };   // (which stop ended each step, all patches: preview.dataset.stops)
-  const schedulePatch = (items: Item[], ng: number, rev: number, pos: number[]) => {
+  const schedulePatch = (items: Item[], ng: number, rev: number, pos: number[], text: string | null) => {
     const seq = ++patchSeq;
     const html: string[][] = Array.from({ length: ng }, () => []), sizes: number[][] = Array.from({ length: ng }, () => []);
     // (a piece's UTF-8 size from the worker; without one, 3 bytes per UTF-16 unit, UTF-8's most)
@@ -240,7 +252,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       for (const w of staged) { preview.insertBefore(w, before); w.hidden = false; }
       groups = kids.slice(0, p).concat(staged, kids.slice(groupHtml.length - s));
       groupHtml = next;
-      groupPos = pos;
+      groupPos = pos; posText = text;
+      posIndex = [];
+      pos.forEach((q, i) => { if (q >= 0) posIndex.push([q, i]); });
+      posIndex.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
       swapMs = Math.max(swapMs, performance.now() - tSwap);
       // (a piece at a time: a large group's whole subtree is never torn down in one task)
       const drop = () => {
@@ -256,6 +271,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       // (§6: the patch of this revision done, then the frame after it: the preview's paint)
       mark("tex-patch-done", { rev });
       requestAnimationFrame(() => mark("tex-paint", { rev }));
+      // (a Follow put off while the preview was behind: done now, if this reply is of the source as it is)
+      if (followPending && follow && posCurrent()) { followPending = false; showCursor(false); }
     };
     step();
   };
@@ -363,8 +380,19 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const line = hl.children[lineOf(a)] as HTMLElement | undefined;
     if (line) src.scrollTop = Math.max(0, line.offsetTop - src.clientHeight / 3);
   };
-  // the group whose source starts last at or before an offset
-  const groupAt = (off: number) => { let k = -1, best = -1; groupPos.forEach((p, i) => { if (p >= 0 && p <= off && p >= best) { best = p; k = i; } }); return k; };
+  // the positions are of the shown reply's text: while the source differs (a reply still to come, or one that failed),
+  // no sync either way (ux2 r2 #1)
+  const posCurrent = () => posText !== null && src.value === posText;
+  let followPending = false;
+  // the index of the first entry whose offset is above off (a binary search; preview.dataset.syncVisits: its probes)
+  const above = (off: number) => {
+    let lo = 0, hi = posIndex.length, visits = 0;
+    while (lo < hi) { const m = (lo + hi) >> 1; visits++; if (posIndex[m][0] <= off) lo = m + 1; else hi = m; }
+    preview.dataset.syncVisits = String(visits);
+    return lo;
+  };
+  // the group whose source starts last at or before an offset (of groups starting at the same offset, the last)
+  const groupAt = (off: number) => { const i = above(off) - 1; return i >= 0 ? posIndex[i][1] : -1; };
   // inverse: a double-click in the preview puts the cursor at that place in the source (the word clicked, searched
   // from where its group begins to where the next one does; else the group's start)
   preview.addEventListener("dblclick", (ev) => {
@@ -372,8 +400,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const k = w ? groups.indexOf(w) : -1;
     const start = k >= 0 ? groupPos[k] : -1;
     if (start === undefined || start < 0) return;
-    let end = src.value.length;
-    for (const q of groupPos) if (q > start && q < end) end = q;
+    if (!posCurrent()) { say("the preview is behind the source: try again when it has caught up"); return; }
+    const nx = above(start), end = nx < posIndex.length ? posIndex[nx][0] : src.value.length;
     const word = (getSelection()?.toString() ?? "").trim();
     let at = start, to = start;
     if (word) { const i = src.value.indexOf(word, start); if (i >= 0 && i < end) { at = i; to = i + word.length; } }
@@ -381,6 +409,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   });
   // forward: the cursor's group shown in the preview (Follow: only when it is out of view; Show: always, and flashed)
   const showCursor = (force: boolean) => {
+    if (!posCurrent()) { if (force) say("the preview is behind the source: try again when it has caught up"); else followPending = true; return; }
     const k = groupAt(src.selectionStart);
     const g = k >= 0 ? groups[k] : undefined;
     if (!g) return;

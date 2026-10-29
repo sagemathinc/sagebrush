@@ -454,6 +454,54 @@ try {
   await sleep(300);
   const inv2 = await dbl("word77x");
   check(inv2 && inv2.a === SYNC2.indexOf("word77x"), "A3: after an edit above, a double-click still lands on the word (positions follow the edit)", { inv2, want: SYNC2.indexOf("word77x") });
+  // the position index (ux2 r2 #5): finding the cursor's group probes the sorted index by binary search, not every
+  // group (Show here: Follow is off in this page since the check above)
+  const sv = await ev(`(() => {
+    const s = document.querySelector(".tex-src"), i = s.value.indexOf("word60x"); s.focus(); s.setSelectionRange(i, i);
+    document.querySelector('[aria-label="Show the cursor\\'s place in the preview"]').click();
+    return { hit: !!document.querySelector(".tex-preview .ch.sync-flash")?.textContent.includes("word60x"), visits: Number(document.querySelector(".tex-preview").dataset.syncVisits), nG: document.querySelectorAll(".tex-preview .ch").length };
+  })()`);
+  check(sv.hit && sv.nG > 100 && sv.visits > 0 && sv.visits <= Math.ceil(Math.log2(sv.nG)) + 2, "A3: Show finds the cursor's group in at most log2(groups)+2 probes", sv);
+
+  // a reply held (ux2 r2 #1, the test build's hook): while the preview is of an older text, no sync either way (a
+  // double-click, Follow, Show), with a note for the asked ones; the reply installed, the Follow put off is done
+  const holdHook = await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+    window.__holdReplies = false; window.__replyHolds = [];
+    window.__sbTexReplyHold = () => { if (window.__holdReplies) return new Promise((r) => window.__replyHolds.push(r)); };
+  })()` });
+  const fs3 = await mk("/t/sync3.tex", enc(SYNC));
+  await open(fs3);
+  await until(`document.querySelector(".tex-preview").textContent.includes("word119x")`, 30000);
+  const SYNC3 = SYNC.replace("Para 0 ", "Held first paragraph here.\n\nPara 0 ");
+  await ev(`window.__holdReplies = true`);
+  await typeInto(SYNC3);
+  const heldR = await until(`window.__replyHolds.length === 1`, 20000);
+  await ev(`(() => { const s = document.querySelector(".tex-src"); s.setSelectionRange(0, 0); return true; })()`);
+  const stDbl = await dbl("word77x"), stSay = await ev(`document.querySelector(".tex-status")?.textContent ?? ""`);
+  check(heldR && stDbl && stDbl.a === 0 && stDbl.b === 0 && /behind the source/.test(stSay), "A3: a reply held: a double-click in the stale preview leaves the source cursor, with a note", { stDbl, stSay });
+  const st0 = await ev(`document.querySelector(".tex-right").scrollTop`), stF = await fwd("word110x");
+  check(stF.scroll === st0 && !stF.visible, "A3: a reply held: Follow leaves the stale preview where it is", { st0, stF });
+  const stShow = await ev(`(() => { document.querySelector('[aria-label="Show the cursor\\'s place in the preview"]').click(); return { flash: !!document.querySelector(".tex-preview .ch.sync-flash"), say: document.querySelector(".tex-status")?.textContent ?? "" }; })()`);
+  check(!stShow.flash && /behind the source/.test(stShow.say), "A3: a reply held: Show doesn't flash a stale place, with a note", stShow);
+  await ev(`(() => { window.__holdReplies = false; for (const r of window.__replyHolds.splice(0)) r(); return true; })()`);
+  const caught = await until(`document.querySelector(".tex-preview").textContent.includes("Held first paragraph") && (() => { const R = document.querySelector(".tex-right").getBoundingClientRect(), p = [...document.querySelectorAll(".tex-preview .p")].find((x) => x.textContent.includes("word110x")); const r = p?.getBoundingClientRect(); return !!r && r.bottom > R.top && r.top < R.bottom; })()`, 20000);
+  check(caught, "A3: the held reply installed: the Follow put off is done (the cursor's place in view)");
+  const inv3 = await dbl("word77x");
+  check(inv3 && inv3.a === SYNC3.indexOf("word77x"), "A3: the held reply installed: a double-click lands on the word in the new text", { inv3, want: SYNC3.indexOf("word77x") });
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: holdHook.identifier });
+
+  // duplicate positions kept (ux2 r2 #5): a heading and the paragraph after it on one line begin at the same offset;
+  // the cursor there shows the later group (the paragraph), as before the index
+  const fdup = await mk("/t/dup.tex", enc("\\documentclass{article}\n\\begin{document}\nIntro.\n\n\\section{Dup} After dup words.\n\nLast para.\n\\end{document}\n"));
+  await open(fdup);
+  await until(`document.querySelector(".tex-preview").textContent.includes("Last para.")`, 20000);
+  const dupShow = await ev(`(() => {
+    const s = document.querySelector(".tex-src"); s.focus(); s.setSelectionRange(s.value.indexOf("After dup"), s.value.indexOf("After dup"));
+    document.querySelector('[aria-label="Show the cursor\\'s place in the preview"]').click();
+    const f = document.querySelector(".tex-preview .ch.sync-flash");
+    return { text: f?.textContent ?? null, h2: !!f?.querySelector("h2") };
+  })()`);
+  check(dupShow.text?.includes("After dup words") && !dupShow.h2, "A3: two groups from one line: both kept in the index, the later one shown", dupShow);
 
   // half-typed: "\begin{" in the middle of a document (William, Oct 29): a note there, and the rest still renders
   const fh = await mk("/t/half-begin.tex", enc("\\documentclass{article}\n\\begin{document}\nBefore.\n\\begin{\n\nAfter words.\n\n\\section{Later}\nEnd text.\n\\end{document}\n"));
