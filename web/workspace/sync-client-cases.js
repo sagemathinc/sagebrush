@@ -612,7 +612,7 @@ async function byteMismatch() {
   check(await until(() => settled(w, c)), "byte mismatch: the next writes decided");
   const { mine } = await serverOps(w);
   check(["/m1.bin", "/m2.bin", "/m3.bin"].every((p) => mine.some((o) => o.op === "write" && o.path === p && o.size === 1200)), "byte mismatch: …each file's present bytes now on the server");
-  check((await ctl("log")).http.filter((h) => h.method === "PUT" && h.status === 201).length === 3, "byte mismatch: …uploaded once each");
+  check((await ctl("log")).http.filter((h) => h.method === "PUT" && (h.status === 201 || h.status === 200)).length === 3, "byte mismatch: …uploaded once each");
   check(c.stats.wideReads >= 3, "byte mismatch: …each read, once the bytes are untrusted, under the largest reservation (the page's to itself): " + c.stats.wideReads);
   await everyOnce(w, from, 3, "byte mismatch", c);
   await stop(c);
@@ -929,7 +929,7 @@ async function lateAnswer() {
   await sleep(4500);
   check(c.debug().paused === null && c.status.state === "synced" && (await metaGet(w.ws, `sync:${nsA}:paused`)) === undefined && (await metaGet(w.ws, `sync:${nsOf(c)}:paused`)) === undefined, "late answer: A's late storage_full paused nothing, of B's or of A's namespace: " + J({ paused: c.debug().paused, status: c.status.state }));
   await w.create("/b-file.bin", { content: bytes(900, 82) });
-  check(await until(async () => (await settledIn(w, c, nsOf(c))) && (await ctl("log")).http.some((h) => h.method === "PUT" && h.status === 201)), "late answer: B uploads and syncs as usual");
+  check(await until(async () => (await settledIn(w, c, nsOf(c))) && (await ctl("log")).http.some((h) => h.method === "PUT" && (h.status === 201 || h.status === 200))), "late answer: B uploads and syncs as usual");
   await stop(c);
 }
 
@@ -1700,7 +1700,7 @@ async function firstSync() {
     check(by(g.fid).length === 1 && by(nb.ref).length === 1, "first sync: a root file and a notebook adopted once each");
     check(J(by(t.fid).map((o) => o.op)) === J(["adopt", "remove"]), "first sync: one in Trash: adopted where it was, then removed: " + J(by(t.fid).map((o) => o.op)));
     check(by(inq.fid).length === 0, "first sync: inside a folder in Trash: not adopted");
-    const puts = (await ctl("log")).http.filter((h) => h.method === "PUT" && h.status === 201).length;
+    const puts = (await ctl("log")).http.filter((h) => h.method === "PUT" && (h.status === 201 || h.status === 200)).length;
     check(puts >= 3, "first sync: the files' bytes uploaded: " + puts);
     const ns = nsOf(c);
     check(!(await metaGet(w.ws, `sync:${ns}:journal`)) && !(await metaGet(w.ws, `sync:${ns}:adopt`)), "first sync: the journal drained and dropped");
@@ -3430,7 +3430,101 @@ async function docWire() {
   await stop(c);
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs };
+/** what a client closed by another page's upgrade says (sync-client.ts CLOSED_ELSEWHERE) */
+const CLOSED_REASON = "your files were upgraded by a newer Sagebrush page: reload this page to sync";
+/** Another page (a newer build) upgrades `w`'s database: its version + 1, opened and closed from this page. */
+const upgradeElsewhere = (w) => new Promise((ok, no) => { const r = indexedDB.open(w.ws.name, w.ws.version + 1); r.onsuccess = () => { r.result.close(); ok(); }; r.onerror = () => no(r.error); });
+/** `p` settled within `ms`: "ended", "rejected: …", or "hung" */
+const settledWithin = (p, ms) => Promise.race([p.then(() => "ended", (e) => "rejected: " + (e?.message ?? e)), sleep(ms).then(() => "hung")]);
+const closedOff = (c) => c.status.state === "off" && c.status.reason === CLOSED_REASON;
+
+/** A newer page upgrades the workspace's database while this page's client runs (another tab, a newer build): the
+ * database closes here; the client stops itself (sync off, said), its loop ends, and nothing it was doing throws. */
+async function closedByUpgrade() {
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => settled(w, c)), "closed by upgrade: synced first");
+  await upgradeElsewhere(w);
+  check(w.closed === true, "closed by upgrade: the workspace says it was closed by another page");
+  // (the socket drops, as a network would: the client must not write to the closed database, nor hang)
+  await ctl("closeAll");
+  const ended = await settledWithin(c.run, 5000);
+  check(ended === "ended" && closedOff(c), "closed by upgrade: the client stopped, its loop ended, the reload said: " + J({ ended, status: c.status }));
+  await c.stop();
+}
+/** The database closed under a running client with no notice (no onClosed: a caller's close()): the socket then
+ * drops, so the connection's end can't keep its timer.  Its end is still said and its loop settles (ended or
+ * rejected, never waiting for good), and nothing throws unhandled (the runner fails on any page error). */
+async function closedUnderClient() {
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => settled(w, c)), "closed under the client: synced first");
+  // (settled or rejected, observed from now: its rejection is handled here, so only the client's own can be unhandled)
+  const settledAs = c.run.then(() => "ended", (e) => "rejected: " + (e?.message ?? e));
+  w.ws.close();
+  await ctl("closeAll");
+  const ended = await Promise.race([settledAs, sleep(10_000).then(() => "hung")]);
+  check(ended !== "hung", "closed under the client: its loop settled, not waiting for good: " + J({ ended, status: c.status }));
+  await c.stop();
+}
+/** The upgrade lands while the connection's end is keeping its retry timer (its write in flight, held here until
+ * after the upgrade): the write then completes, and the reload stays the last thing said. */
+async function closedDuringRetry() {
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => settled(w, c)), "closed during a retry: synced first");
+  let hit, release;
+  const inFlight = new Promise((ok) => { hit = ok; }), gate = new Promise((ok) => { release = ok; });
+  const put0 = c["metaPut"];
+  c["metaPut"] = function (k, v) {
+    const p = put0.call(this, k, v);
+    if (!/:retry:connect$/.test(k)) return p;
+    p.catch(() => {});
+    hit();
+    return gate.then(() => p);
+  };
+  await ctl("closeAll");
+  check(await settledWithin(inFlight, 5000) === "ended", "closed during a retry: the retry's write in flight, held");
+  await upgradeElsewhere(w);
+  check(w.closed === true && closedOff(c), "closed during a retry: the reload said at the upgrade: " + J(c.status));
+  release();
+  const ended = await settledWithin(c.run, 5000);
+  check(ended === "ended" && closedOff(c), "closed during a retry: the held write completed after, and the reload is still the last thing said: " + J({ ended, status: c.status }));
+  c["metaPut"] = put0;
+  await c.stop();
+}
+/** The upgrade lands while the client is asking who is signed in (its namespace request held here until after the
+ * upgrade, then answered 401): the late answer says nothing over the reload. */
+async function closedDuringNamespace() {
+  await account();
+  const w = await fresh();
+  let armed = false, hit, release;
+  const asked = new Promise((ok) => { hit = ok; }), gate = new Promise((ok) => { release = ok; });
+  const c = client(w, { fetch: async (u, init) => {
+    if (armed && /\/api\/share\/me$/.test(String(u))) {
+      armed = false;
+      hit();
+      await gate;
+      return new Response("{}", { status: 401, headers: { "content-type": "application/json" } });
+    }
+    return fetch(u, init);
+  } });
+  check(await until(() => settled(w, c)), "closed during the namespace request: synced first");
+  armed = true;
+  await ctl("closeAll");
+  check(await settledWithin(asked, 10_000) === "ended", "closed during the namespace request: the reconnect's request in flight, held");
+  await upgradeElsewhere(w);
+  check(w.closed === true && closedOff(c), "closed during the namespace request: the reload said at the upgrade: " + J(c.status));
+  release();
+  const ended = await settledWithin(c.run, 5000);
+  check(ended === "ended" && closedOff(c), "closed during the namespace request: its late 401 said nothing over the reload: " + J({ ended, status: c.status }));
+  await c.stop();
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

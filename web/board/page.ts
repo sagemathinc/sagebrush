@@ -39,6 +39,7 @@
 import { synthetic } from "./board";
 import { anyCode, isBoard, type BoardDoc } from "./doc";
 import { BoardCode, siteEngine } from "./code";
+import { createRunnerPill } from "../notebook/runner-pill.js";
 import { OWN_ENGINE, chooseEngine, fileEngine } from "./engine";
 import { IdbOutputCache, MemoryOutputCache, carriedOutputs } from "./outcache";
 import { boardFromText, fromMermaid } from "./mermaid";
@@ -390,6 +391,7 @@ async function journalHistory(docId: string | null): Promise<BoardTimeTravel | n
 }
 const bench = q.has("items") || q.has("strokes");
 const file = !!embedded();
+const runnerPill = createRunnerPill({ enabled: !file && !(window as any).__TAURI__ && q.get("runner-info") === "1" });
 // (the frame other sites show a board in, /frame/board/ (export.ts
 // frameHtml, design/frame.md): an exported page whose document its parent
 // posts, its engine the one it was built with, from the site it is served
@@ -1222,7 +1224,7 @@ const host: BoardHost = {
   // the latest (engine.ts)
   // (?runner=0 only on a loopback host, for tests: elsewhere a link could add
   // it to someone else's code; only in Chromium, as on the notebook page)
-  code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !(window as any).__TAURI__))
+  code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !(window as any).__TAURI__), { observeRunner: (kernel, mod) => runnerPill.watch(kernel, (w: any) => w instanceof mod.RunnerWorker && !w.inner) })
     // (a frame's, always the engine it was built with: a posted board can't ask for another, DOC-A75-3)
     // (one for each language the board's items are in: Sage's with its library, item 16)
     : ref ? (d, mode) => new BoardCode(fileEngine(() => chooseEngine(ref, fromParent ? "pinned" : d.engine).then((e) => ((chosen = e.id), e)), { sage: mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
