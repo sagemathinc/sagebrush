@@ -339,10 +339,11 @@ export async function runUiTests(check) {
   }
   // 8. the simulated network (&latency, &jitter, &loss)
   {
-    const net = parseNetwork("?remote=1&latency=200&jitter=50&loss=0.1");
+    const net = parseNetwork("?remote=1&latency=200&jitter=50&loss=10");
     c(net.latency === 200 && net.jitter === 50 && net.loss === 0.1 && Object.isFrozen(net), "network: the address's latency, jitter and loss");
-    const bad = parseNetwork("?latency=-5&jitter=abc&loss=9");
+    const bad = parseNetwork("?latency=-5&jitter=abc&loss=90");
     const none = parseNetwork("?remote=1&latency=");
+    c(parseNetwork("?loss=0.5").loss === 0.005 && networkText(parseNetwork("?latency=400&loss=0.5")) === " · 400 ms · 0.5% loss" && parseNetwork("?loss=50").loss === 0.5, "network: loss is in percent (&loss=10 is 10%; &loss=0.5 is 0.5%), and the status line shows the rate used");
     c(bad.latency === 0 && bad.jitter === 0 && bad.loss === 0.5 && none.latency === 0 && parseNetwork("?latency=1e9").latency === 10000, "network: negative or malformed values are 0, the rest clamped (loss <= 0.5, latency <= 10 s)");
     c(networkText(none) === "" && networkText(net) === " · 200 ms ±25 · 10% loss" && statusText("ready (remote)", net) === "Remote compute (preview, simulated · 200 ms ±25 · 10% loss) · ready", "network: the status line says which network it simulates");
 

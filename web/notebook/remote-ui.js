@@ -15,7 +15,7 @@
 // The network between the page and the gateway is simulated too, from the
 // address (parseNetwork): &latency=MS (the round trip; each way gets half),
 // &jitter=MS (each one-way delay varies by up to +-half of it) and
-// &loss=P (0..0.5: each reply, and each streamed event, is lost with that
+// &loss=PERCENT (0..50: each reply, and each streamed event, is lost with that
 // chance; a lost reply was processed, a lost event breaks its stream).
 // Every request and every answer is delayed, interrupts and restarts too,
 // and a stream's events stay in order, as on one connection.
@@ -34,11 +34,13 @@ import { FakeGateway } from "./remote-fake.js";
 // (the simulated gateway's address: https, as the client requires; never fetched, its fetch is the fake's)
 const PREVIEW_BASE = "https://compute.preview.invalid/api/compute/v1";
 const NO_NETWORK = Object.freeze({ latency: 0, jitter: 0, loss: 0 });
+const BIND_TRIES = 4;
 const abortError = () => Object.assign(new Error("The operation was aborted."), { name: "AbortError" });
 
 /**
  * The simulated network, from the page's address: {latency, jitter} in ms (latency is the round trip) and
- * loss, a probability.  Missing, empty or malformed values are 0; each is clamped to its range.
+ * loss, a probability (the address gives it in percent: &loss=10 is 0.1).  Missing, empty or malformed
+ * values are 0; each is clamped to its range (loss to 0..50%).
  */
 export function parseNetwork(search) {
   const q = new URLSearchParams(search ?? "");
@@ -48,13 +50,13 @@ export function parseNetwork(search) {
     const n = Number(v);
     return Number.isFinite(n) ? Math.min(hi, Math.max(0, n)) : 0;
   };
-  return Object.freeze({ latency: num("latency", 10000), jitter: num("jitter", 5000), loss: num("loss", 0.5) });
+  return Object.freeze({ latency: num("latency", 10000), jitter: num("jitter", 5000), loss: num("loss", 50) / 100 });
 }
 
 /** The network's description for the status line: "", or " · 200 ms" (+ jitter, loss). */
 export function networkText(net) {
   if (!net || !(net.latency || net.jitter || net.loss)) return "";
-  return ` · ${net.latency} ms` + (net.jitter ? ` ±${net.jitter / 2}` : "") + (net.loss ? ` · ${Math.round(net.loss * 100)}% loss` : "");
+  return ` · ${net.latency} ms` + (net.jitter ? ` ±${net.jitter / 2}` : "") + (net.loss ? ` · ${+(net.loss * 100).toFixed(1)}% loss` : "");
 }
 const INTERACT_NOTE = "(interactive controls aren't shown from a remote kernel yet)\n";
 
@@ -220,7 +222,8 @@ export async function startPreview({ notebook, local, onStatus = () => {}, netwo
   kernel.preview = true;
   kernel.gateway = gateway; // (the simulated gateway, for the page's tests: what it was asked and ran)
   const off = kernel.on("status", (text) => onStatus(statusText(text, network)));
-  await kernel.start();
+  // (a bind whose answer the simulated network lost is asked again, a few times, before the page gives up)
+  for (let i = 0; i < BIND_TRIES && !kernel.ready && !kernel.closed; i++) await kernel.start();
   if (!kernel.ready) {
     off();
     kernel.close();
