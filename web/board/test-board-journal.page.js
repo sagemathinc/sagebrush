@@ -3,7 +3,7 @@
 // board journal, BH the board's history, H the history's bundle (web/notebook/history.js), R the journal's rows,
 // S the stores.  Each case has a workspace of its own and boards of its own; the boards' history is one database for
 // the whole origin, its fence dropped before each case (in a browser there is only ever one workspace).
-import { W, A, BJ, BH, H, R, S } from "./all.js";
+import { W, A, BJ, BH, H, R, S, SR } from "./all.js";
 
 const results = [];
 const check = (ok, what) => results.push([!!ok, what]);
@@ -58,7 +58,7 @@ async function noRoom(names, f) {
 }
 // (the pending budget's bytes as charged now)
 async function pendingBytes(hdb) {
-  const rows = await rawAll(hdb, "history", IDBKeyRange.bound([R.SYNC_NB, ""], [R.SYNC_NB, "￿"]));
+  const rows = await rawAll(hdb, "history", IDBKeyRange.bound([SR.SYNC_NB, ""], [SR.SYNC_NB, "￿"]));
   return rows.find((r) => r.time === "b:p:local")?.v?.bytes ?? 0;
 }
 

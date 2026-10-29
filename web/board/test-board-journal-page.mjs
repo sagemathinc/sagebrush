@@ -6,13 +6,14 @@
 // itself is test-board-journal.mjs's.
 //   bun web/build.ts && CHROME=google-chrome bun web/board/test-board-journal-page.mjs
 import { join } from "node:path";
-import { serve, browser, sleep, rowExpr, historyRowsExpr, activateExpr } from "./test-board-journal-lib.mjs";
+import { serve, browser, sleep, rowExpr, historyRowsExpr, activateExpr, section, checked, bounded } from "./test-board-journal-lib.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const J = JSON.stringify;
 const results = [];
-// (FAIL_FAST=1: the first failed check ends the run (the fail-first step on the base, which must fail, and quickly))
-const check = (ok, what) => { results.push([!!ok, what]); if (process.env.PROGRESS) console.log((ok ? "  ok " : "  FAIL ") + what); if (!ok && process.env.FAIL_FAST) throw new Error("FAIL_FAST: " + what); };
+// (each check said as it is done (r5), so a run that hangs or is killed shows how far it got; FAIL_FAST=1: the first
+// failed check ends the run (the fail-first step on the base, which must fail, and quickly))
+const check = (ok, what) => { results.push([!!ok, what]); checked(ok, what); if (!ok && process.env.FAIL_FAST) throw new Error("FAIL_FAST: " + what); };
 const B = "window.sagebrush.board";
 const S0 = "0123456789abcdef";
 const PEND = (id) => "sagebrush-workspace-pending:" + id;
@@ -22,18 +23,24 @@ const setTj = (text) => `Promise.resolve(${B}.edit((d) => { const ns = (${nodesO
 const tjOf = (d) => (d ? (d.pages ? d.pages[0].nodes : d.nodes ?? []).find((n) => n.id === "tj")?.text : undefined);
 const withTj = (d, text) => { const x = JSON.parse(JSON.stringify(d)); const ns = x.pages ? x.pages[0].nodes : (x.nodes ??= []); const n = ns.find((m) => m.id === "tj"); if (n) n.text = text; else ns.push({ id: "tj", x: 40, y: 40, text }); return x; };
 
-const { origin, stop } = await serve({ "": process.env.SB_DIST ?? join(here, "../dist") });
+// (r5: its own bound, 1100 s, under the VM step's 1200 s and mut-6c's: a hang ends in one FAIL line naming its
+// section, its last check and the DevTools call in flight, Chrome closed; a SIGTERM the same)
+let stop = () => {};
+bounded("the board page test", 1_100_000, async () => stop());
+const served = await serve({ "": process.env.SB_DIST ?? join(here, "../dist") });
+stop = served.stop;
+const { origin } = served;
 const br = await browser();
 let code = 1;
 try {
-  const helper = await br.tab();
+  const helper = await br.tab("helper");
   await helper.go(`${origin}/__bj/`);
-  if (!(await helper.until("window.ready === true"))) throw new Error("the helper page didn't load");
+  if (!(await helper.until("window.ready === true"))) throw new Error("the helper page didn't load: " + (await helper.state()));
   // (shown; and, under the journal, its store opened, when the board has a row: `store`)
   const opened = async (t, store = true) => (await t.until(`!!${B}?.snapshot?.().doc`, 30000)) && (!store || (await t.until(`!window.sagebrush.boardJournal || !!window.sagebrush.boardJournal()`, 15000)));
   async function newBoard(t) {
     await t.go(`${origin}/board/?new=python`);
-    if (!(await t.until(`location.search.includes("doc=local:")`)) || !(await opened(t))) throw new Error("no new board");
+    if (!(await t.until(`location.search.includes("doc=local:")`)) || !(await opened(t))) throw new Error("no new board: " + (await t.state()));
     return t.ev(`new URLSearchParams(location.search).get("doc").slice(6)`);
   }
   async function openBoard(t, id, store = true) { await t.go(`${origin}/board/?doc=local:${id}`); return opened(t, store); }
@@ -49,6 +56,7 @@ try {
   const boardsNamed = (part) => helper.ev(`(async () => { const w = await window.M.W.Workspace.open(); const l = (await w.list("/", { recursive: true })).filter((e) => e.kind === "board" && e.path.includes(${J(part)})); const out = []; for (const e of l) out.push({ path: e.path, doc: (await w.read(e.path)).content }); w.close(); return out; })()`);
   const writeAsAgent = (id, d) => helper.ev(`(async () => { const w = await window.M.W.Workspace.open(); const p = await w.pathOf("board", ${J(id)}); const out = await w.write(p, ${J(d)}, {}); w.close(); return out.rev; })()`);
 
+  section("erratum 1: boards and pending copies left with the journal off");
   // ---- r3's erratum 1 (astra's BJ-C1): boards and pending copies left with the journal OFF (made here, before test
   // 15 activates it), brought in at the first journaled load (after test 15)
   const cut = {};
@@ -75,6 +83,7 @@ try {
     await helper.ev(`(async () => { const w = await window.M.W.Workspace.open(); await w.rename(${J(cut.ret.path)}, ${J(cut.ret.path.replace(".board.json", "x.board.json"))}, { retitle: true }); w.close(); return true; })()`);
   }
 
+  section("test 15: versions from before the journal, read-only");
   // ---- test 15 (Q3): versions from before the journal, kept read-only (the journal still off here)
   {
     const t = await br.tab();
@@ -114,6 +123,7 @@ try {
     await t2.close();
   }
 
+  section("erratum 1: the first journaled load of those boards");
   // ---- r3's erratum 1 (astra's BJ-C1): the first journaled load of those boards (the journal active now)
   {
     const u = await br.tab();
@@ -157,6 +167,7 @@ try {
     }
   }
 
+  section("tests 1, 14: a save journaled, no pending copy");
   // ---- tests 1, 14 and B2's ground: a save journaled, no pending copy; a board with no row yet
   let id1;
   {
@@ -185,6 +196,7 @@ try {
     }
   }
 
+  section("test 11: a refusal said");
   // ---- test 11 (B2): a refusal said
   {
     const a = await br.tab(), b = await br.tab();
@@ -207,6 +219,7 @@ try {
     await a.close();
   }
 
+  section("test 12, 6b, 6c: TimeTravel and a document replaced");
   // ---- test 12 (B3) and 6b, 6c (B1)
   {
     const t = await br.tab();
@@ -336,6 +349,7 @@ try {
     await v.close();
   }
 
+  section("test 13: the conflict's one copy");
   // ---- test 13 (B4, B5): the conflict's one copy; the other version stamped and recorded
   {
     const t = await br.tab();
@@ -357,9 +371,11 @@ try {
     await t.close();
   }
 
+  section("test 10: the load's bridge");
   // ---- test 10: the load's bridge, each crash point and refusal, and what survives
   {
     const fresh = async () => { const t = await br.tab(); const id = await newBoard(t); const d = await doc(t), r = await row(t, id); return { t, id, d, r }; };
+    section("test 10 (a)");
     // (a) cut before T1: the copy brought in, once
     {
       const { t, id, d, r } = await fresh();
@@ -374,6 +390,7 @@ try {
       check(ok && (await pending(u, id)) === null && vd.filter((x) => tjOf(x) === "P-a").length === 1, "test 10 (a, cut before T1): the board is the copy, brought in once; no pending item left");
       await u.close();
     }
+    section("test 10 (b)");
     // (b) cut between T1 and T2: the intent replayed, the copy the record by hash (Rule 0)
     {
       const { t, id, d, r } = await fresh();
@@ -387,6 +404,7 @@ try {
       check(ok && (await pending(u, id)) === null && vd.filter((x) => tjOf(x) === "P-b").length === 1, "test 10 (b, cut between T1 and T2): the board is the copy (its intent replayed), dropped by Rule 0; one version of it");
       await u.close();
     }
+    section("test 10 (c)");
     // (c) cut after T2, before the drop: Rule 0, one import
     {
       const { t, id, d, r } = await fresh();
@@ -401,6 +419,7 @@ try {
       check(tjOf(r2.doc) === "P-c" && r2.rev === r.rev + 1 && vd.filter((x) => tjOf(x) === "P-c").length === 1, "test 10 (c, cut after T2 before the drop): dropped by Rule 0, a single import (no second save)");
       await u.close();
     }
+    section("test 10 (d)");
     // (d) refused (another tab is the writer): the copy shown, the pending item stays, the next edit says so
     {
       const { t: a, id, d, r } = await fresh();
@@ -413,6 +432,7 @@ try {
       await b.close();
       await a.close();
     }
+    section("test 10 (e)");
     // (e) another header written before the drop: it stays
     {
       const { t, id, d, r } = await fresh();
@@ -430,6 +450,7 @@ try {
       check(held && ok && (await pending(u, id))?.startsWith("fedcba9876543210:1:"), "test 10 (e): another page's pending item written before the drop: it stays (the drop matches the original header)");
       await u.close();
     }
+    section("test 10 (f)");
     // (f) a stale base: the copy a board of its own, the board the record
     {
       const { t, id, d, r } = await fresh();
@@ -444,6 +465,7 @@ try {
       check(copies.length === 1 && tjOf(await doc(u)) === "agent's" && tjOf((await row(u, id)).doc) === "agent's", "test 10 (f, a stale base): one \"(unsaved changes from a closed page)\" copy; the board is the record");
       await u.close();
     }
+    section("test 10 (g)");
     // (g) an interrupted T1, and an older pending copy: the board the intent's, the copy a board of its own
     {
       const { t, id, d, r } = await fresh();
