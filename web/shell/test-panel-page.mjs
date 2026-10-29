@@ -132,6 +132,11 @@ try {
   r = await run("ps");
   const nbRows = (r?.out ?? "").split("\n").filter((l) => /\snotebook\s/.test(l));
   check(nbRows.length >= 2 && nbRows.some((l) => !l.includes("[this tab]")), `ps lists another tab's notebook: ${JSON.stringify(r?.out)}`);
+  // (a board tab answers too: web/board/page.ts's answer handler)
+  await send("Target.createTarget", { url: url + "board/?new=python" });
+  await new Promise((res) => setTimeout(res, 8000));
+  r = await run("ps");
+  check(/\sboard\s+\S+\s+\d\d:\d\d:\d\d.*\.board\.json\s+\(python\)/.test(r?.out ?? ""), `ps lists a board tab, with its path and language: ${JSON.stringify(r?.out)}`);
   r = await run("open no-such-file.txt");
   check(/open: no-such-file.txt: No such file or directory/.test(r?.out ?? "") && r?.exit === "exit 1" && r?.status === "exit 1", `open: a missing path is an error: ${JSON.stringify(r)}`);
   r = await run("open");
