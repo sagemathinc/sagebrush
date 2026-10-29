@@ -19,6 +19,9 @@ const esc = (s: string) => s.replace(/[&<>]/g, (c) => ESC[c]);
 /** One line's tokens (yielded) and its end state (returned). */
 export function* tokenizeLine(line: string, state: State): Generator<Tok, State, void> {
   let i = 0;
+  // (a blank line ends $...$, $$...$$, \(...\) and \[...\] as it does for the renderer: an unclosed formula being typed
+  // doesn't color the rest of the file as math)
+  if ((state === "M" || state === "D") && /^[ \t]*$/.test(line)) return "N";
   if (state.startsWith("V:")) {
     const env = state.slice(2), end = line.indexOf("\\end{" + env + "}");
     if (end < 0) { yield ["c-verb", line]; return state; }
@@ -65,12 +68,16 @@ export class Highlighter {
   job: { at: number; state: State; until: number; gen: Generator<Tok, State, void> | null; html: string; t0: number; busy: number; plainShown: boolean } | null = null;
   timer: any = null;
   stats = { linesRescanned: 0, bytesRescanned: 0, maxSliceMs: 0 };
+  /** How many lines are over LONG_LINE now (the page doesn't wrap the source while there is one), kept per edit. */
+  longLines = 0;
   constructor(readonly root: HTMLElement, text: string, readonly off: boolean) {
     this.reset(text);
   }
   private lineEl(text: string) { const d = document.createElement("div"); d.className = "hl-line"; d.textContent = text || "​"; return d; }
+  private countLong(lines: string[]) { let n = 0; for (const l of lines) if (l.length > LONG_LINE) n++; return n; }
   reset(text: string) {
     this.lines = text.split("\n");
+    this.longLines = this.countLong(this.lines);
     this.start = this.lines.map(() => "?");
     this.root.textContent = "";
     this.els = this.lines.map((l) => this.lineEl(l));
@@ -89,6 +96,7 @@ export class Highlighter {
     while (s < n - p && this.lines[this.lines.length - 1 - s] === next[next.length - 1 - s]) s++;
     const oldMid = this.lines.length - s - p, newMid = next.length - s - p;
     const fresh = next.slice(p, p + newMid);
+    this.longLines += this.countLong(fresh) - this.countLong(this.lines.slice(p, p + oldMid));
     const els = fresh.map((l) => this.lineEl(l));
     for (let k = 0; k < oldMid; k++) this.els[p + k].remove();
     const before = this.els[p + oldMid] ?? null;
