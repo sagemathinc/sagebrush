@@ -168,6 +168,34 @@ try {
     const bad = rec.filter((r) => !r.shown || r.bound || r.unk.length || (r.id === "figure" && r.imgs !== 1));
     check(ids.length === 10 && bad.length === 0, "every example opens in the editor and renders, nothing unsupported shown (the figure's image shown)", bad);
   }
+  // ---- William's B1 and B2: from a LaTeX file, New offers a LaTeX document, an example and the notebooks; another .tex
+  // from the files beside the page opens in place (no reload: the notebook never shows), its URL pushed; Back returns
+  {
+    const fa = await mk("/sw/a.tex", enc("\\documentclass{article}\n\\begin{document}\nFile A here.\n\\end{document}\n"));
+    const fb = await mk("/sw/b.tex", enc("\\documentclass{article}\n\\begin{document}\nFile B here.\n\\end{document}\n"));
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
+    await open(fa);
+    await until(`document.querySelector(".tex-preview").textContent.includes("File A here.")`, 20000);
+    const nm = await ev(`(async () => { document.querySelector(".tex-new").click(); await new Promise((r) => setTimeout(r, 50)); const items = [...document.querySelectorAll(".tex-newmenu button")].map((b) => b.textContent);
+      [...document.querySelectorAll(".tex-newmenu button")].find((b) => b.textContent === "LaTeX example").click(); await new Promise((r) => setTimeout(r, 300));
+      const n = document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length; document.querySelector("dialog.sb-tex-examples")?.close(); return { items, n }; })()`);
+    check(JSON.stringify(nm.items) === JSON.stringify(["LaTeX document", "LaTeX example", "Notebooks"]) && nm.n === 10, "B1: from a LaTeX file, New offers a LaTeX document, an example (the list opens) and the notebooks", nm);
+    const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
+    await until(`!!document.querySelector(${sel("/sw/b.tex")}) || (document.querySelector('.frow[data-path="/sw"]')?.click(), false)`, 20000);
+    const sw = await ev(`(async () => {
+      window.__noReload = true; const seen = { notebook: false };
+      const obs = new MutationObserver(() => { if (!document.querySelector(".tex-page")) seen.notebook = true; }); obs.observe(document.body, { childList: true, subtree: true });
+      document.querySelector(${sel("/sw/b.tex")}).click();
+      for (let i = 0; i < 100 && !document.querySelector(".tex-preview")?.textContent.includes("File B here."); i++) await new Promise((r) => setTimeout(r, 100));
+      obs.disconnect();
+      return { kept: window.__noReload === true, b: !!document.querySelector(".tex-preview")?.textContent.includes("File B here."), url: new URLSearchParams(location.search).get("tex"), pages: document.querySelectorAll(".tex-page").length, notebook: seen.notebook, title: document.querySelector(".tex-title")?.textContent };
+    })()`);
+    check(sw.kept && sw.b && sw.url === fb && sw.pages === 1 && !sw.notebook && sw.title === "b.tex", "B2: another .tex from the files opens in place: no reload, no notebook shown, its URL, one page", sw);
+    await ev(`(history.back(), true)`);
+    const bk = await until(`window.__noReload === true && document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
+    check(bk, "B2: Back returns to the first file, in place");
+    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+  }
   // ---- the embeddable editor (component.ts: mountEditor, for the questions site's LaTeX proof answers; exported by the
   // page module): in a host's box, with no files; rendered() and groups() with source ranges (UTF-16 offsets into the
   // text); a preview selection mapped to its source (sourceRangeOf) and back (previewRangesOf); a person's edit
@@ -393,7 +421,8 @@ try {
   for (const [name, b, expect] of fixtures) {
     const f = await mk(`/t/${name}.tex`, b);
     await open(f);
-    await until(`document.querySelector(".tex-save") && !document.querySelector(".tex-save").hidden`, 10000);
+    // (the head, Save included, is drawn before the file is read; the source after it)
+    await until(`document.querySelector(".tex-save") && !document.querySelector(".tex-save").hidden && !!document.querySelector(".tex-src")`, 10000);
     const text = await ev(`document.querySelector(".tex-src").value`);
     await typeInto(text + "c\n"); await ctrlS();
     await statusIs(/^Saved$/);
@@ -510,7 +539,8 @@ try {
   const thmDoc = "\\documentclass{article}\n\\newtheorem{theorem}{Theorem}\n\\begin{document}\n\\begin{theorem}\n" + "theorem words go on and on here. ".repeat(6000).split(". ").join(".\n\n") + "\n\\end{theorem}\n\n\\begin{enumerate}\n" + "\\item an item\n".repeat(6000) + "\\end{enumerate}\n\\end{document}\n";
   const ft = await mk("/t/thm.tex", enc(thmDoc));
   await open(ft);
-  await until(`document.querySelectorAll(".tex-preview .thm.cont").length > 0 && document.querySelectorAll(".tex-preview .list.cont").length > 0`, 60000);
+  // (all 6000 labels: under load the read could come before the last patch was in; a lost label still fails below)
+  await until(`document.querySelectorAll(".tex-preview .thm.cont").length > 0 && document.querySelectorAll(".tex-preview .list.cont").length > 0 && document.querySelectorAll(".tex-preview ol.list > li > .lbl").length >= 6000`, 60000);
   const cont = await ev(`(() => {
     const thms = [...document.querySelectorAll(".tex-preview .thm")], lists = [...document.querySelectorAll(".tex-preview ol.list")];
     const fs = (e) => getComputedStyle(e).fontStyle, pl = (e) => getComputedStyle(e).paddingLeft, cls = (e) => [...e.classList].filter((c) => c !== "cont").join(".");
