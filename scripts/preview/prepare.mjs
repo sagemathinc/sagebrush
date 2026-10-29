@@ -2,12 +2,13 @@ import { constants, openSync, closeSync, fstatSync, readSync, readdirSync } from
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { MIME } from '../../web/preview/worker.mjs';
+import { installPreviewNotice } from '../../web/preview/notice.js';
 
 export const MAX_OBJECTS = 3000;
 export const MAX_BYTES = 200 * 1024 * 1024;
 export const MAX_FILE_BYTES = 16 * 1024 * 1024;
 export const MAX_HTML_BYTES = 8 * 1024 * 1024;
-const BANNER = '<aside role="status" style="position:fixed;top:0;right:0;z-index:2147483647;background:#ffe08a;color:#111;padding:6px 12px;font:14px sans-serif;pointer-events:none">PREVIEW, not production</aside>';
+const BANNER = '<div id="sb-preview-notice"></div>';
 // No fetch handler: a preview never caches a previous branch's shell.
 const NO_SERVICE_WORKER = `self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', event => event.waitUntil(self.registration.unregister()));\n`;
@@ -30,7 +31,7 @@ function readBounded(path, limit) {
   } finally { closeSync(fd); }
 }
 
-export function prepare(dir, host, mocks) {
+export function prepare(dir, host, mocks, source = { branch: 'unknown', commit: 'unknown', dirty: false }) {
   const files = new Map();
   let totalBytes = 0;
   function add(path, bytes, type = MIME[path.split('.').at(-1).toLowerCase()] ?? 'application/octet-stream') {
@@ -88,7 +89,7 @@ export function prepare(dir, host, mocks) {
     if (bytes.length > 32768) throw new Error('Preview policy exceeds 32 KiB');
     add(`.preview/headers/${path}.json`, bytes, MIME.json);
   }
-  const config = `globalThis.__SAGEBRUSH_PREVIEW__=Object.freeze(${JSON.stringify({ host, mocks })});\n`;
+  const config = `globalThis.__SAGEBRUSH_PREVIEW__=Object.freeze(${JSON.stringify({ host, mocks, source })});\n(${installPreviewNotice.toString()})(globalThis.__SAGEBRUSH_PREVIEW__);\n`;
   add('preview-config.js', Buffer.from(config), MIME.js);
   add('sw.js', Buffer.from(NO_SERVICE_WORKER), MIME.js);
   // The uploader uses only these exact, counted and hashed buffers. No path is reopened.
