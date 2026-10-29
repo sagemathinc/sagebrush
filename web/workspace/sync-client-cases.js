@@ -3966,7 +3966,11 @@ const CONTROL_CASES = {
       await account();
       const w = await fresh();
       const c = client(w);
-      check(await until(named("K-L1: settled", () => settled(w, c)), 3000), "K-L1: a client synced");
+      const ok = await until(named("K-L1: settled", () => settled(w, c)), 3000);
+      // (r6, evidence first: what the client was doing when the window ended, recorded whether it synced or not; the
+      // window itself is unchanged)
+      const at = { state: c.status.state, ns: (nsOf(c) ?? "").slice(0, 16), inflight: c.debug().inflight, outbox: await S("K-L1: the outbox at the window's end", () => outbox(w)) };
+      check(ok, "K-L1: a client synced: at the window's end " + J(at));
       await ctl("log");
     },
     // K-B: a ctl that never answers: StepTimeout naming it; cleanup's release frees it
@@ -4006,15 +4010,23 @@ const CONTROL_CASES = {
       await account();
       const w = await fresh();
       const o = W.SyncOwner.of(w, { origin: location.origin });
-      window.__kO1 = { o, stopDone: null, runDone: null, hadClient: false };
+      // (r6, evidence first: whether the Turn on button appeared, whether it was clicked, each clientRunning answer, the
+      // owner's view and the durable sync:current, all recorded; no window is changed)
+      const diag = { button: null, clicked: false, running: [], view: null, current: null };
+      window.__kO1 = { o, stopDone: null, runDone: null, hadClient: false, diag };
       o.start();
       const el = document.createElement("div");
       const s = W.syncSection(w, el, hostOf(w));
       try {
-        await until(named("K-O1: the Turn on button", () => /Turn on sync/.test(buttons(el).join())), 3000);
-        [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent))?.click();
-        // (each wait one step, inside STEP_MS; up to six of them)
-        for (let i = 0; i < 6 && !(await S("K-O1: the owner's client running", () => o.clientRunning(1500))); i++);
+        diag.button = await until(named("K-O1: the Turn on button", () => /Turn on sync/.test(buttons(el).join())), 3000);
+        const btn = [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent));
+        // (a missing button is a failed control with its own reason, never a silent skip)
+        if (!diag.button || !btn) check(false, "K-O1: the Turn on sync button didn't appear within 3 s, so nothing was clicked: the buttons were " + J(buttons(el)));
+        else { btn.click(); diag.clicked = true; }
+        // (each wait one step, inside STEP_MS; up to six of them; each answer kept)
+        for (let i = 0; i < 6; i++) { const r = await S("K-O1: the owner's client running", () => o.clientRunning(1500)); diag.running.push(r); if (r) break; }
+        diag.view = o.view();
+        diag.current = (await S("K-O1: the durable sync:current", () => metaGet(w.ws, "sync:current"))) ?? null;
         const c = o.client, run = o["run"];
         window.__kO1.hadClient = !!c && !!run;
         if (c) {
@@ -4079,7 +4091,7 @@ function controlLines(page, rep) {
     const wName = rep.lateOpened[0];
     add(cs("kW1")?.outcome === "timeout: fresh: Workspace.open" && clean("kW1") && rep.lateOpened.length === 1 && rep.closedAtEnd.includes(wName), "K-W1: a late open is kept, said, waited for, and closed at the run's end: " + J({ kW1: cs("kW1"), late: rep.lateOpened, closed: rep.closedAtEnd.includes(wName) }));
     const k = window.__kO1 ?? {}, o = k.o, ended = cs("kO1")?.cleanup?.stages ?? [];
-    add(cs("kO1")?.outcome?.startsWith("threw: K-O1 injected") && clean("kO1") && k.hadClient && k.stopDone !== null && k.runDone !== null && ended.includes("cleanup: owner's detached stopClient ok") && ended.includes("cleanup: owner's client loop ok") && o?.["suspended"] === true && o?.client === null && rep.cases.every((c) => c.name !== "kO1" || c.cleanupEndMs >= Math.max(k.stopDone, k.runDone)), "K-O1: a running owner destroyed early by a failed case: the cleanup awaited its detached (slow) stop and its loop: " + J({ outcome: cs("kO1")?.outcome, hadClient: k.hadClient, stopDone: k.stopDone, runDone: k.runDone, stages: ended }));
+    add(cs("kO1")?.outcome?.startsWith("threw: K-O1 injected") && clean("kO1") && k.hadClient && k.stopDone !== null && k.runDone !== null && ended.includes("cleanup: owner's detached stopClient ok") && ended.includes("cleanup: owner's client loop ok") && o?.["suspended"] === true && o?.client === null && rep.cases.every((c) => c.name !== "kO1" || c.cleanupEndMs >= Math.max(k.stopDone, k.runDone)), "K-O1: a running owner destroyed early by a failed case: the cleanup awaited its detached (slow) stop and its loop: " + J({ outcome: cs("kO1")?.outcome, hadClient: k.hadClient, stopDone: k.stopDone, runDone: k.runDone, stages: ended, diag: k.diag }));
   } else if (page === "P9") {
     add(rep.stopped?.case === "kS1" && rep.stopped.step === "cleanup: c.stop()" && /^rejected: K-S1 injected/.test(rep.stopped.why), "K-S1: a stop that rejects (its loop settled) is a named fail-stop: " + J(rep.stopped));
   } else if (page === "P2") {
@@ -4106,8 +4118,12 @@ export async function runControls(page) {
     const mode = await diagnosticMode();
     const out = [];
     if (page === "P7") {
-      const res = await run("basics");
-      out.push([!mode.on && window.__report?.mode === "legacy" && Array.isArray(res) && res.length > 0 && res.every((x) => Array.isArray(x) && x.length === 2 && typeof x[0] === "boolean" && typeof x[1] === "string"), "K-M1: no budgets: legacy, the old loop, the same results shape: " + J({ mode: window.__report?.mode, why: window.__report?.why, results: res?.length })]);
+      // (r6, a NAMED DEVIATION from plan r3/r4's "one trivial case", @sagebrush's (A): the empty selection, the legacy
+      // loop with zero iterations. No case in CASES is code-bounded in legacy (account(), :19-28, makes bare fetches);
+      // with a name no case has, every entry of the pinned loop continues before f() and before ctl("reset"). The
+      // runner proves from its own count that this page made no request at all while it ran.)
+      const res = await run("kM1-the-empty-selection");
+      out.push([!mode.on && window.__report?.mode === "legacy" && Array.isArray(res) && res.every((x) => Array.isArray(x) && x.length === 2 && typeof x[0] === "boolean" && typeof x[1] === "string") && window.progress === undefined, "K-M1: no budgets: legacy, the old loop with zero iterations (the empty selection), the results shape: " + J({ mode: window.__report?.mode, why: window.__report?.why, results: res?.length, progress: window.progress ?? null })]);
     } else out.push([!mode.on && /^quiet answered /.test(mode.why), "K-M2: budgets, but quiet unknown: legacy: " + mode.why]);
     window.__report = { mode: "legacy", why: mode.why, done: true };
     return out;
