@@ -89,7 +89,7 @@ preview's static files.
 
 The only remote API is R2's S3 endpoint, constructed from the account ID. Requests
 are SigV4 signed for region `auto`, bucket `sagebrush-preview`, never redirected,
-and never automatically retried. The full previous prefix listing is validated
+and never automatically retried. The full previous prefix listing (at most 6,000 objects) is validated
 before writes. All PUT/DELETE keys are revalidated under `<name>/`, including keys
 returned by R2: dot segments, backslashes and control characters cannot normalize
 an operation into another preview. Assets and CSP sidecars upload before HTML;
@@ -97,12 +97,32 @@ stale objects are deleted only after every PUT succeeds. Nothing outside the
 exact name plus slash prefix is listed for deletion. The final line is the URL.
 
 Publication is **not atomic**: users may see a temporary failed page while a name
-is being replaced, and an interrupted upload may leave a mixed version until the
-next successful publish. There is no stale deletion on a failed upload. A per-name
-lock directory in the Git common directory serializes local publishers; it is not
-a cross-machine lock. Use one publisher per name across machines. If killed with
-SIGKILL, inspect that publisher before removing its `preview-<name>.lock` directory.
-Do not reuse one worktree for simultaneous builds of different names.
+is being replaced. All final upload bodies (injected HTML, policies, config and SW
+included) are frozen in memory and SHA-256 recorded before remote work. Uploads
+use those exact buffers without rereading source paths. Final limits are 3,000
+objects, 200 MiB total and 8 MiB per object; admission counts actual body lengths.
+The remote phase has one 20-minute abort deadline shared by listing, all uploads
+and deletions, in addition to each request's 30-second limit. Deadline failure
+prints a loud partial-publication error and does not print a success URL.
+
+A successful generation contains at most 3,000 objects. One interrupted successor
+can leave at most 3,000 + 3,000 = 6,000 objects. The next successful publish admits
+that entire previous listing, can briefly reach 6,000 + 3,000 = 9,000 objects
+(below the former 50,000 listing ceiling), and deletes stale objects back to at
+most 3,000. Thus one interrupted publish can be repaired by the next successful
+publish without owner cleanup. There is no stale deletion on a failed upload.
+Repeated interrupted recoveries can exceed the 6,000 admission and then require
+owner inspection/cleanup or lifecycle expiry; no unconditional recovery from an
+arbitrary sequence of failed runs is promised.
+
+A per-name lock directory in the Git common directory serializes that name across
+local worktrees, and `preview-build.lock` in this checkout's absolute Git directory
+also serializes different-name publishers using the same worktree. Both are held
+through preparation and publication; neither is a cross-machine lock. Use one
+publisher per name across machines. SIGTERM, SIGINT and SIGKILL may leave either
+lock stale. Inspect the old publisher and its descendants before removing its
+`preview-<name>.lock` and/or `preview-build.lock` directory; never blindly break a
+live lock. A normal completion or thrown failure removes the locks it acquired.
 
 ## Runtime behavior
 
@@ -172,12 +192,13 @@ the lane's existing interface; the shared switch does not invent a new protocol.
 | --- | --- |
 | Worker storage operations | At most two file probes plus one policy read; assets stream without buffering |
 | HTML policy body | 32 KiB; otherwise 503 |
-| Local output | 20,000 input files, 1 GiB total, 128 MiB/file, HTML 8 MiB, depth 32; abort before network |
-| Build headers | Regular file, 1 MiB; exactly one CSP rule per HTML/shell bootstrap |
+| Final upload manifest | 3,000 objects including every sidecar/synthetic body, 200 MiB total, 8 MiB/object; buffers held in memory, each hashed once in preparation |
+| Source read/tree | One no-follow bounded read per source, at most 8 MiB, depth 32; concurrent growth refused |
+| Build headers | Regular file, 64 KiB, 200 rules including non-CSP slash records; exactly one CSP match per HTML/shell bootstrap; at most 600,000 rule visits |
 | Credential file | Owned regular mode-600 file, 16 KiB; fixed schema |
-| Listing | At most 50 pages of 1,000 keys, 8 MiB/page; all keys checked before uploads |
-| Each S3 request | 30-second timeout, including body consumption; no retries |
-| Upload/deletion | Sequential; one local file buffered; no multipart uploads |
+| Previous listing | At most 6,000 objects / 6 pages of 1,000 keys, 8 MiB/page; all keys checked before uploads |
+| Remote phase and requests | 20 minutes overall; each S3 request also 30 seconds including body consumption; no retries |
+| Upload/deletion | Sequential, at most 3,000 PUTs + 6,000 DELETEs; exact frozen manifest buffers, no source rereads or multipart uploads |
 
 The build commands use their normal lifecycle; this script is not a process-tree
 supervisor and sets no ad hoc kill deadline for build subprocesses. Use the
@@ -188,12 +209,19 @@ The present `test/limit_sites.py` census covers lib, engine, src and two named w
 files; it does not scan these scripts/web files. No baseline or registry entry was
 changed. The explicit bounds above are in the review scope for daybreak2.
 
-Only static checks were authorized in the project and performed for this packet:
-`node --check` on every new JS/MJS file, `bash -n scripts/preview.sh`, and
-`git diff --check`. No web build, runtime test, VM proof, R2 request, credential
-read or deployment has been performed. `web/preview/test-preview.mjs` is a deferred
-runtime suite covering routing, headers, fail-closed CSP, engine bytes, banner and
-service-worker handling, mock gating and upload prefix safety. After authorization,
-run `node --test web/preview/test-preview.mjs` on CI/a VM. A signed R2 smoke publish
-and real-browser cross-origin-isolation/LaTeX check remain rollout checks, not
-claimed evidence in this packet.
+Static checks performed: `node --check` on every JS/MJS file,
+`bash -n scripts/preview.sh`, and `git diff --check`. Under Ruling 6, the local
+runtime suite was also run through the project wrapper:
+
+```sh
+/home/user/sagebrush-coord/bin/ptest -m 3 -- node --test web/preview/test-preview.mjs
+```
+
+Result: 15 tests passed, 0 failed. Exact output is included in the review packet.
+This is information to catch bugs, not CI/VM merge evidence. The suite covers
+routing, headers, fail-closed CSP, preserved engine bytes, banner/SW handling,
+mock gating, prefix/empty-key safety, frozen bodies and hashes, final count/size
+boundaries, header rule/byte boundaries, previous-list admission and remote abort.
+Network requests are mocked. No build, real R2 request, credential read, VM proof
+or deployment has been performed. A signed R2 smoke publish and real-browser
+cross-origin-isolation/LaTeX check remain rollout checks.
