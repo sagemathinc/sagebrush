@@ -400,6 +400,8 @@ import { createNotebook, esc } from "./notebook/notebook.js";
 import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex } from "./docsearch.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
+import { createRunnerPill } from "./notebook/runner-pill.js";
+const runnerPill = createRunnerPill({ mount: document.getElementById("nbline") });
 // Python runs in the runner, an opaque-origin sandboxed frame (design/runner.md),
 // where the page is cross-origin isolated (the runner hands files to the
 // interpreter through a SharedArrayBuffer) and not the desktop app's (whose
@@ -716,7 +718,8 @@ function makeKernel(owner) {
       reproducible: () => !REACTIVE && (current.id !== owner || nb.meta.reproducible !== false),
     });
   }
-  return { kernel: k, journal: j, used: 0, started: false };
+  const stopRunnerInfo = LOCAL || window.__TAURI__ ? () => {} : runnerPill.watch(k, w => w instanceof RunnerWorker && !w.inner);
+  return { kernel: k, journal: j, used: 0, started: false, stopRunnerInfo };
 }
 // The interpreter of a notebook (made if needed); the least recently used
 // beyond MAX_KERNELS stop (their notebooks' outputs are stale when reopened).
@@ -728,6 +731,7 @@ function kernelFor(id) {
   for (const [oid, o] of byUse.slice(MAX_KERNELS)) {
     if (oid === id) continue;
     o.kernel.close();
+    o.stopRunnerInfo();
     kernels.delete(oid);
   }
   return e;
