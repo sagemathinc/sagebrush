@@ -12,6 +12,14 @@
 // checked and admitted right before it is sent, DPoP-signed requests, the
 // event stream and the notes.  Nothing leaves the page, and nothing is billed.
 //
+// The network between the page and the gateway is simulated too, from the
+// address (parseNetwork): &latency=MS (the round trip; each way gets half),
+// &jitter=MS (each one-way delay varies by up to +-half of it) and
+// &loss=P (0..0.5: each reply, and each streamed event, is lost with that
+// chance; a lost reply was processed, a lost event breaks its stream).
+// Every request and every answer is delayed, interrupts and restarts too,
+// and a stream's events stay in order, as on one connection.
+//
 //   const remote = await import("sagebrush-remote.js");
 //   const sw = remote.remoteSwitch(page);    // the page: see remoteSwitch
 //   await sw.connect(notebookId);            // the Connect sheet, then the kernel, installed on that notebook
@@ -25,6 +33,29 @@ import { FakeGateway } from "./remote-fake.js";
 
 // (the simulated gateway's address: https, as the client requires; never fetched, its fetch is the fake's)
 const PREVIEW_BASE = "https://compute.preview.invalid/api/compute/v1";
+const NO_NETWORK = Object.freeze({ latency: 0, jitter: 0, loss: 0 });
+const abortError = () => Object.assign(new Error("The operation was aborted."), { name: "AbortError" });
+
+/**
+ * The simulated network, from the page's address: {latency, jitter} in ms (latency is the round trip) and
+ * loss, a probability.  Missing, empty or malformed values are 0; each is clamped to its range.
+ */
+export function parseNetwork(search) {
+  const q = new URLSearchParams(search ?? "");
+  const num = (k, hi) => {
+    const v = q.get(k);
+    if (v === null || v.trim() === "") return 0;
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(hi, Math.max(0, n)) : 0;
+  };
+  return Object.freeze({ latency: num("latency", 10000), jitter: num("jitter", 5000), loss: num("loss", 0.5) });
+}
+
+/** The network's description for the status line: "", or " · 200 ms" (+ jitter, loss). */
+export function networkText(net) {
+  if (!net || !(net.latency || net.jitter || net.loss)) return "";
+  return ` · ${net.latency} ms` + (net.jitter ? ` ±${net.jitter / 2}` : "") + (net.loss ? ` · ${Math.round(net.loss * 100)}% loss` : "");
+}
 const INTERACT_NOTE = "(interactive controls aren't shown from a remote kernel yet)\n";
 
 /** SHA-256, hex: the approvals' hash (remote-approval.ts). */
@@ -47,11 +78,79 @@ export function gateFor(kernel, page) {
  * events while it runs.  Stop and Restart reach the local interpreter too.
  */
 export class PreviewGateway extends FakeGateway {
-  constructor(local, opts = {}) {
+  constructor(local, { network = NO_NETWORK, random = Math.random, ...opts } = {}) {
     super({ base: PREVIEW_BASE, ...opts });
     this.local = local;
     this.payloads = new Map(); // request -> its payload, until its run starts
     this.kernel = (code, run) => this.runLocal(code, run);
+    this.net = network;
+    this.random = random;
+    this.lost = 0; // (replies and stream events the simulated network lost)
+    if (network.latency || network.jitter || network.loss) this.fetch = (url, init) => this.netFetch(String(url), init ?? {});
+  }
+
+  // ---- the simulated network
+
+  // one way's delay, in ms
+  oneWay() {
+    const { latency, jitter } = this.net;
+    return Math.max(0, latency / 2 + (jitter ? (this.random() * 2 - 1) * (jitter / 2) : 0));
+  }
+  lose() {
+    if (!(this.net.loss > 0 && this.random() < this.net.loss)) return false;
+    this.lost++;
+    return true;
+  }
+  // (a wait that an abort ends at once, as a real request's would)
+  wait(ms, signal) {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) return reject(abortError());
+      const t = setTimeout(() => { signal?.removeEventListener?.("abort", onAbort); resolve(); }, ms);
+      const onAbort = () => { clearTimeout(t); reject(abortError()); };
+      signal?.addEventListener?.("abort", onAbort, { once: true });
+    });
+  }
+  async netFetch(url, init) {
+    await this.wait(this.oneWay(), init.signal); // (the request, on its way)
+    const res = await this.handle(url, init);
+    const stream = (res.headers.get("Content-Type") ?? "").startsWith("text/event-stream");
+    // (a lost reply: the gateway did the work; the page never hears of it)
+    if (!stream && this.lose()) {
+      await this.wait(this.oneWay(), init.signal);
+      throw new TypeError("network error (the simulated network lost this reply)");
+    }
+    await this.wait(this.oneWay(), init.signal); // (the answer's head, on its way back)
+    if (!stream || !res.body) return res;
+    return new Response(this.delayed(res.body, init.signal), { status: res.status, headers: res.headers });
+  }
+  // A stream's chunks, each delayed by its own one-way delay, delivered in order (one connection): a chunk
+  // is due at the later of its own arrival and the one before it.  A lost chunk breaks the stream.
+  delayed(body, signal) {
+    const net = this;
+    const reader = body.getReader();
+    let last = 0, chain = Promise.resolve(), stopped = false;
+    return new ReadableStream({
+      start(controller) {
+        const fail = (e) => { if (!stopped) { stopped = true; reader.cancel().catch(() => {}); controller.error(e); } };
+        signal?.addEventListener?.("abort", () => fail(abortError()), { once: true });
+        (async () => {
+          for (;;) {
+            const { value, done } = await reader.read();
+            const due = (last = Math.max(last, performance.now() + net.oneWay()));
+            chain = chain.then(async () => {
+              if (stopped) return;
+              await net.wait(Math.max(0, due - performance.now()), signal);
+              if (stopped) return;
+              if (done) { stopped = true; return controller.close(); }
+              if (net.lose()) return fail(new TypeError("network error (the simulated network broke this stream)"));
+              controller.enqueue(value);
+            }).catch(fail);
+            if (done) return;
+          }
+        })().catch((e) => { chain = chain.then(() => fail(e)); });
+      },
+      cancel(reason) { stopped = true; return reader.cancel(reason); },
+    });
   }
 
   post_runs(b, body) {
@@ -111,15 +210,16 @@ export class PreviewGateway extends FakeGateway {
  * remote kernel's).  Resolves to {kernel, gateway, close()} once it is bound,
  * or rejects with why.
  */
-export async function startPreview({ notebook, local, onStatus = () => {} }) {
-  const gateway = new PreviewGateway(local);
+export async function startPreview({ notebook, local, onStatus = () => {}, network = NO_NETWORK }) {
+  const gateway = new PreviewGateway(local, { network });
   let token = null;
   const client = await RemoteClient.create({ base: gateway.base, token: () => token, fetch: gateway.fetch });
   token = gateway.issueToken(client.jkt);
   local.start?.();
   const kernel = new RemoteKernel({ client, notebook: String(notebook ?? "notebook"), requireGate: true });
   kernel.preview = true;
-  const off = kernel.on("status", (text) => onStatus(statusText(text)));
+  kernel.gateway = gateway; // (the simulated gateway, for the page's tests: what it was asked and ran)
+  const off = kernel.on("status", (text) => onStatus(statusText(text, network)));
   await kernel.start();
   if (!kernel.ready) {
     off();
@@ -138,16 +238,18 @@ export async function startPreview({ notebook, local, onStatus = () => {} }) {
   };
 }
 
-/** The status line's text for a remote kernel's status (the preview says so). */
-export function statusText(text) {
+/** The status line's text for a remote kernel's status (the preview says so, and what network it simulates). */
+export function statusText(text, network = NO_NETWORK) {
   const t = String(text ?? "");
-  return /^ready \(remote\)/.test(t) ? `GPU kernel (preview, simulated) · ${t.replace(/^ready \(remote\)/, "ready")}` : `GPU kernel (preview): ${t}`;
+  return /^ready \(remote\)/.test(t)
+    ? `Remote compute (preview, simulated${networkText(network)}) · ${t.replace(/^ready \(remote\)/, "ready")}`
+    : `Remote compute (preview): ${t}`;
 }
 
 // ------------------------------------------------------------- the switch
 
 /**
- * The page's switch to and from the GPU kernel: at most one connection
+ * The page's switch to and from remote compute: at most one connection
  * attempt is current, and only the current one may change anything.  Every
  * attempt takes a new token, with its notebook, before its first await;
  * leave() (the person chose This browser, opened another notebook, or the
@@ -163,6 +265,7 @@ export function statusText(text) {
  *     status(text)      the status line
  *     reactive()        whether the notebook is reactive (a remote kernel runs only there)
  *     makeLocal()       a fresh interpreter for the simulated gateway
+ *     network()         (optional) the simulated network, parseNetwork's
  *     setKernel(k)      make k the shown notebook's kernel
  *   }
  * `deps` replaces the sheet, its cancellation and startPreview (tests).
@@ -201,20 +304,20 @@ export function remoteSwitch(page, deps = {}) {
         if (why) page.status(why);
         return null;
       };
-      if (!page.reactive()) return back("the GPU kernel runs only in the reactive notebook");
+      if (!page.reactive()) return back("remote compute runs only in the reactive notebook");
       let answer;
       try {
         answer = await sheet();
       } catch (e) {
-        return back(`GPU kernel (preview): ${e?.message ?? e}`);
+        return back(`Remote compute (preview): ${e?.message ?? e}`);
       }
       if (!current()) return null; // (superseded: whoever did it settled this sheet and owns the picker)
       if (!answer || !live()) return back();
       let r;
       try {
-        r = await start({ notebook: id, local: page.makeLocal(), onStatus: (t) => { if (current()) page.status(t); } });
+        r = await start({ notebook: id, local: page.makeLocal(), network: page.network?.() ?? NO_NETWORK, onStatus: (t) => { if (current()) page.status(t); } });
       } catch (e) {
-        return back(`GPU kernel (preview): ${e?.message ?? e}`);
+        return back(`Remote compute (preview): ${e?.message ?? e}`);
       }
       if (!live()) {
         r.close(); // (a stale bind: closed, never installed)
@@ -245,7 +348,8 @@ const CSS = `
 
 /** The Connect sheet's text (the plan's §5 consent copy and §9.1 cap field, marked as a preview). */
 export const SHEET = {
-  title: "Connect a GPU kernel",
+  title: "Connect remote compute",
+  backend: "Backend: simulated, in this browser (later: RunPod (GPU), an SSH host, a cluster)",
   preview: "Preview: this connects to a simulated gateway in this page. Your cells run through the remote kernel's path, approvals included, but execute in this browser. Nothing is sent anywhere, and nothing is billed.",
   intro: "When it is real, connecting gives Sagebrush:",
   points: [
@@ -294,7 +398,7 @@ export function connectSheet(doc = document) {
   const no = el("button", SHEET.cancel, { id: "remotecancel" });
   const acts = el("div", null, { className: "acts" });
   acts.append(no, ok);
-  dlg.append(el("h2", SHEET.title, { id: "remotetitle" }), el("p", SHEET.preview, { className: "preview" }), el("div", SHEET.intro), ul, el("p", SHEET.approve), cap, el("p", SHEET.capNote, { className: "note" }), acts);
+  dlg.append(el("h2", SHEET.title, { id: "remotetitle" }), el("p", SHEET.backend, { className: "note" }), el("p", SHEET.preview, { className: "preview" }), el("div", SHEET.intro), ul, el("p", SHEET.approve), cap, el("p", SHEET.capNote, { className: "note" }), acts);
   doc.body.append(dlg);
   return new Promise((resolve) => {
     // (exactly once: the dialog goes, and the answer is given; a later click or close does nothing)
