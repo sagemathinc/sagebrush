@@ -532,6 +532,15 @@ function renderItem(item, n, student) {
       onChange: (t) => { course.setDraft(student, item.id, t); saved.textContent = "Draft kept in this browser."; },
     });
     studentEditors.push(ed);
+    if (!prev) {
+      let live = null;
+      ed.then((e) => { live = e; });
+      draftFlushers.add(() => {
+        if (!live || course.attempts(student, item.id).length) return;   // (submitted: nothing to keep)
+        const t = live.getText();
+        if (t !== (course.draft(student, item.id) ?? item.starter)) course.setDraft(student, item.id, t);
+      });
+    }
     const g = course.grade(student, item.id);
     if (prev && g?.annotations?.length) {
       studentComments.push(attachAnnotations(ed, { mode: "view", load: () => g.annotations }));
@@ -619,7 +628,7 @@ function postTotal(student) {
   // points still waiting for the instructor (in LTI's AGS: gradingProgress "PendingManual" until none are left).
   const tried = ASSIGNMENT.items.some((it) => course.attempts(student, it.id).length);
   const before = course.state.scores[student];
-  if (tried && (!before || before.score !== score || (before.pending ?? 0) !== pending)) {
+  if (tried && (!before || before.score !== score || before.max !== max || (before.pending ?? 0) !== pending)) {
     course.postScore(student, score, max, pending);
     const line = document.createElement("div");
     line.textContent = `${new Date().toLocaleTimeString()}: sent ${student}'s score ${score}/${max}${pending ? ` (${pending} points need grading)` : ""} to the gradebook`;
@@ -638,7 +647,14 @@ function renderGradebook(changed) {
   }
 }
 const studentEditors = [], studentComments = [];
+// The open proof drafts' last text, kept on every exit (a switch of student or view, a reload): the editors'
+// onChange is debounced, and destroying an editor drops a pending one (astra QP-A2).
+const draftFlushers = new Set();
+const flushDrafts = () => { for (const f of draftFlushers) f(); };
+addEventListener("pagehide", () => flushDrafts());
+addEventListener("beforeunload", () => flushDrafts());
 const closeStudentEditors = () => {
+  flushDrafts(); draftFlushers.clear();
   for (const c of studentComments.splice(0)) c.then((h) => h?.destroy());
   for (const ed of studentEditors.splice(0)) ed.then((e) => e.destroy());
 };
@@ -728,7 +744,10 @@ function chip(item, s) {
 }
 let graderEditor = null, graderComments = null;
 // the open grade's pending save (the comment's debounce), flushed before anything else is shown
-let flushGrade = () => {}, writeGrade = null;
+let flushGrade = () => {}, writeGrade = null, cancelGrade = () => {};
+// (each grading view's writes carry its epoch: a reset, or a newer view, makes an older one's pending
+// write and the comments adapter's save do nothing; astra QP-A1)
+let gradeEpoch = 0;
 addEventListener("pagehide", () => flushGrade());
 addEventListener("beforeunload", () => flushGrade());
 // The grading view's proof editors, kept in a pool by student and question: the shown student's, and the next
@@ -764,7 +783,8 @@ const closeGraderEditor = (all = false) => {
   if (all) poolKeep([]);
 };
 function renderGrader() {
-  flushGrade(); flushGrade = () => {}; writeGrade = null;
+  flushGrade(); flushGrade = () => {}; writeGrade = null; cancelGrade = () => {};
+  gradeEpoch++;
   closeGraderEditor();
   const el = document.getElementById("grader");
   const item = ASSIGNMENT.items[gState.q], student = others()[gState.s];
@@ -800,11 +820,11 @@ function renderGrader() {
       e.done.then(() => w.remove());
     }
     graderEditor = e.ed;
-    const s0 = student, i0 = item.id;
+    const s0 = student, i0 = item.id, annEpoch = gradeEpoch;
     graderComments = attachAnnotations(graderEditor, {
       mode: "comment",
       load: () => course.annotations(s0, i0) ?? course.grade(s0, i0)?.annotations ?? [],
-      save: (threads) => { course.setAnnotations(s0, i0, threads); writeGrade?.(); },
+      save: (threads) => { if (annEpoch !== gradeEpoch) return; course.setAnnotations(s0, i0, threads); writeGrade?.(); },
     });
     graderComments.then((h) => { if (h) tl.querySelector(".annhint").hidden = false; });
   }
@@ -835,10 +855,11 @@ function renderGrader() {
     // Autosave (William, Oct 29: "Just save"): each tick saves at once, the comment shortly after typing stops,
     // and anything not yet saved is saved before moving on (Previous/Next, j/k, a tab, focus, leaving the page).
     // Nothing ticked, no comment and no annotations is no grade at all (back to "to grade").
-    const sIdx = gState.s;
+    const sIdx = gState.s, epoch = gradeEpoch;
     let timer = null;
     const write = () => {
       clearTimeout(timer); timer = null;
+      if (epoch !== gradeEpoch) return;
       const checks = item.rubric.map((_, i) => gr.querySelector(`[data-i="${i}"]`).checked), comment = gr.querySelector(".comment").value.trim();
       const ann = item.kind === "proof" ? course.annotations(student, item.id) ?? course.grade(student, item.id)?.annotations ?? [] : null;
       if (!checks.some(Boolean) && !comment && !ann?.length) course.clearGrade(student, item.id);
@@ -850,6 +871,7 @@ function renderGrader() {
     };
     writeGrade = write;
     flushGrade = () => { if (timer) write(); };
+    cancelGrade = () => { clearTimeout(timer); timer = null; };
     for (const c of gr.querySelectorAll("input[type=checkbox]")) c.onchange = () => { showSum(); write(); };
     gr.querySelector(".comment").oninput = () => { saveState.textContent = "Saving…"; saveState.className = "savestate"; clearTimeout(timer); timer = setTimeout(write, 500); };
     showSum();
@@ -915,7 +937,11 @@ function setView(instructor) {
 document.getElementById("as-student").onclick = () => setView(false);
 document.getElementById("as-instructor").onclick = () => setView(true);
 studentSel.onchange = render;
-document.getElementById("reset").onclick = () => { flushGrade = () => {}; course.reset(); log.textContent = ""; seedClassmates(); seedProofs(); setView(false); };
+document.getElementById("reset").onclick = () => {
+  // (a reset drops the open grade's pending write: cancelled and fenced, so nothing old comes back; QP-A1)
+  cancelGrade(); cancelGrade = () => {}; flushGrade = () => {}; writeGrade = null; gradeEpoch++;
+  draftFlushers.clear();   // (the old drafts' text is not written back over the reset)
+  course.reset(); log.textContent = ""; seedClassmates(); seedProofs(); setView(false); };
 seedClassmates();
 seedProofs();
 setView(location.hash === "#instructor");
@@ -930,7 +956,7 @@ document.getElementById("scratch").addEventListener("toggle", async (e) => {
   const nb = createNotebook(document.getElementById("nb"), { kernel, mode: "sage", assetBase: "/" });
   await nb.attach(new MemoryStore({ mode: "sage", cells: [{ id: cellId(), code: "f = x^3*sin(2*x)\ndiff(f, x)" }, { id: cellId(), code: "plot(f, (x, -2, 2))" }] }));
 });
-window.demo = { ASSIGNMENT, course, kernel, checkSymbolic, paramsFor, FLAGS, setFocus, dropProofPool: () => closeGraderEditor(true), proofPoolReady: (s, i) => !!proofPool.get(`${s}|${i}`)?.ready };
+window.demo = { ASSIGNMENT, course, totals, kernel, checkSymbolic, paramsFor, FLAGS, setFocus, dropProofPool: () => closeGraderEditor(true), proofPoolReady: (s, i) => !!proofPool.get(`${s}|${i}`)?.ready };
 </script>
 </body>
 </html>
