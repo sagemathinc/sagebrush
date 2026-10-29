@@ -45,9 +45,9 @@ try {
   const a = await tab(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
   await a.send("Runtime.enable"); await a.send("Log.enable");
   await a.send("Page.navigate", { url: new URL("questions/", base).href });
-  await a.until("window.demo && document.querySelectorAll('#items .q').length === 3");
+  await a.until("window.demo && document.querySelectorAll('#items .q').length === 4");
   await a.until("document.querySelectorAll('#items .katex').length >= 4");
-  ok(true, "three questions render, their math typeset");
+  ok(true, "four questions render, their math typeset");
   ok(await a.ev("document.querySelectorAll('#gb tr').length") === 4, "the mock gradebook lists the roster");
 
   // each student their own numbers
@@ -64,7 +64,7 @@ try {
   ok(v !== null, "numeric: the prompt carries this student's v0");
   await a.ev(`(${q(0)}.querySelector('input').value = '${((v * v) / 19.6).toFixed(3)}', ${q(0)}.querySelector('button').click())`);
   ok(await a.ev(`${q(0)}.querySelector('.fb').classList.contains('ok')`), "numeric: the right answer is accepted");
-  ok(await a.ev(`document.getElementById('score').textContent === '3 / 10'`), "the score counts it");
+  ok(await a.ev(`document.getElementById('score').textContent === '3 / 14'`), "the score counts it");
 
   // q2 symbolic, checked by Sage in the page's worker
   const tex = await a.ev(`${q(1)}.querySelector('.prompt [data-tex]').dataset.tex`);
@@ -83,14 +83,32 @@ try {
   // the right one is (c/2) e^{x^2}: the only choice with a fraction and no x^2 in front of e
   await a.ev(`(() => { const box = ${q(2)}; const right = [...box.querySelectorAll('label')].find((l) => { const t = l.querySelector('[data-tex]').dataset.tex; return t.includes('frac') && !t.includes('x^2 e'); }); right.querySelector('input').checked = true; box.querySelector('button').click(); })()`);
   ok(await a.ev(`${q(2)}.querySelector('.fb').classList.contains('ok')`), "choice: the right choice is accepted");
-  ok(await a.ev(`document.getElementById('score').textContent === '10 / 10'`), "the total is 10 / 10");
-  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /10 \\/ 10/.test(r.textContent))`), "the gradebook shows the posted total");
-  ok(await a.ev(`[...document.querySelectorAll('#items .q button')].every((b) => b.disabled)`), "answered questions are closed");
+  ok(await a.ev(`document.getElementById('score').textContent === '10 / 14'`), "the auto-graded total is 10 / 14");
+  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /10 \\/ 14/.test(r.textContent))`), "the gradebook shows the posted total");
+  ok(await a.ev(`[...document.querySelectorAll('#items .q')].slice(0, 3).every((q) => [...q.querySelectorAll('button')].every((b) => b.disabled))`), "answered questions are closed");
+  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].filter((r) => /\\d+ \\/ 14/.test(r.textContent)).length === 4`), "the classmates' (mock) scores are in the gradebook");
+
+  // q4, graded by the instructor
+  await a.ev(`(${q(3)}.querySelector('textarea').value = 'The product rule: one term differentiates each factor.', ${q(3)}.querySelector('button').click())`);
+  ok(await a.ev(`/instructor will grade/.test(${q(3)}.querySelector('.attempts').textContent)`), "manual: the answer is submitted for grading");
+  await a.ev(`document.getElementById('as-instructor').click()`);
+  await a.until(`!document.getElementById('grader').hidden && document.querySelectorAll('#grader .roster button').length === 4`);
+  ok(await a.ev(`document.querySelector('#grader .tabs button.on').textContent.includes('Question 4') && /to grade/.test(document.querySelector('#grader .roster button').textContent)`), "instructor: question-major view, Ada's answer to grade");
+  ok(await a.ev(`/product rule/.test(document.querySelector('#grader .work .answer').textContent)`), "instructor: the stored answer is shown, nothing rerun");
+  await a.ev(`(document.querySelectorAll('#grader .rubric input').forEach((c) => (c.checked = true)), document.querySelector('#grader .save').click())`);
+  ok(await a.ev(`document.querySelector('#grader .roster button.on').textContent.includes('Alan Turing')`), "instructor: save moves to the next student");
+  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /14 \\/ 14/.test(r.textContent))`), "instructor: the graded total, 14 / 14, reaches the gradebook");
+  await a.ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))`);
+  ok(await a.ev(`document.querySelector('#grader .roster button.on').textContent.includes('Emmy Noether')`), "instructor: j goes to the next student");
+  await a.ev(`document.querySelector('#grader .tabs button[data-q="1"]').click()`);
+  ok(await a.ev(`!!document.querySelector('#grader .work .chip.ok')`), "instructor: an auto-graded question shows its stored verdicts");
+  await a.ev(`document.getElementById('as-student').click()`);
+  ok(await a.ev(`document.getElementById('score').textContent === '14 / 14' && /Graded by your instructor/.test(${q(3)}.querySelector('.attempts').textContent)`), "the student sees the graded total");
 
   // a reload keeps the attempts (the mock course service's storage)
   await a.send("Page.reload");
-  await a.until("window.demo && document.querySelectorAll('#items .q').length === 3");
-  ok(await a.ev(`document.getElementById('score').textContent === '10 / 10'`), "a reload keeps this student's attempts");
+  await a.until("window.demo && document.querySelectorAll('#items .q').length === 4");
+  ok(await a.ev(`document.getElementById('score').textContent === '14 / 14'`), "a reload keeps this student's attempts and grades");
   ok(a.errors.length === 0, `no page errors${a.errors.length ? ": " + a.errors.slice(0, 3).join(" | ") : ""}`);
 } catch (e) {
   console.log("FAIL " + (e?.stack ?? e));
