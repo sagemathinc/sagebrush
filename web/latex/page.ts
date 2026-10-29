@@ -32,6 +32,21 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""):
 };
 const enc = new TextEncoder();
 
+/** The file browser's New, "LaTeX file" (boot.ts adds the item and loads this module on its click): /Untitled.tex, or
+ * "Untitled (2).tex", ... (the first name not taken), made by the person here with a short document, then opened in
+ * the editor by boot.ts's own hook (`open`). */
+export async function newTex(ws: Workspace, open: (e: Entry) => unknown): Promise<void> {
+  try {
+    for (let i = 1; i <= 1000; i++) {
+      const p = "/Untitled" + (i > 1 ? " (" + i + ")" : "") + ".tex";
+      if (await ws.stat(p)) continue;
+      open(await ws.createByPerson(p, { content: new TextEncoder().encode("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n") }));
+      return;
+    }
+    alert("No free name for a new LaTeX file");
+  } catch (err) { alert("The LaTeX file couldn't be made: " + String((err as Error)?.message ?? err)); }
+}
+
 export async function mount(root: HTMLElement, host: Host): Promise<void> {
   mark("tex-mount", {});
   const style = el("style"); style.textContent = PAGE_CSS; document.head.appendChild(style);
