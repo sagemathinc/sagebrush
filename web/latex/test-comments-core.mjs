@@ -60,6 +60,12 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
   const rewritten = TEX.replace("The sum of two odd numbers is even.", "Adding two odd numbers gives an even number.");
   const rc = R(rewritten).resolve(a);
   check("LC-T3-changed", rc.status === "changed" && rewritten.slice(rc.start, rc.end) === "Adding two odd numbers gives an even number.", rc);
+  // the agent deleted the sentence, its context kept: nothing (or only white space) between prefix and suffix is
+  // removed text (orphaned), not a rewrite
+  const deleted = TEX.replace("The sum of two odd numbers is even.", ""), rx = R(deleted).resolve(a);
+  check("LC-T3-deleted-between-context-orphaned", rx.status === "orphaned" && rx.reason === "removed", rx);
+  const blanked = TEX.replace("The sum of two odd numbers is even.", "  \n "), rb = R(blanked).resolve(a);
+  check("LC-T3-whitespace-between-context-orphaned", rb.status === "orphaned", rb);
   // gone with its context: orphaned
   check("LC-T3-orphaned", R("\\documentclass{article}\nnothing\n").resolve(a).status === "orphaned");
   // two prefix/suffix pairs fit: ambiguous
