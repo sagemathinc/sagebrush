@@ -21,11 +21,16 @@ const TIME_LIMIT_MS = 2500;
 const MAX_EVENTS = 3000000;
 const PMARK = 16;
 const SAGE_MAX_CODE = 65536;   // UTF-8 bytes of one \sage / \sageplot argument (plan r4 section 8: 64 KiB per item)
+// source positions, for keeping the source and the preview in sync: each line of the main file that yields a token
+// marks its start offset ({k: "pos", at, ep}). ep is the pipeline's run (setPosEpoch): the incremental layer reuses
+// events of unchanged units, and the pipeline shifts their offsets past the edit (pipeline.mjs)
+let POS_EPOCH = 0;
+export function setPosEpoch(n) { POS_EPOCH = n; }
 
 export class Machine extends CoreMachine {
   constructor(opts) {
     super(Object.assign({}, opts, { known: ALL_KNOWN }));
-    this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS;
+    this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS; this.posLine = -1;
     this.installDemoPrimitives();
   }
   emit(t) { if (++this.nev > MAX_EVENTS) throw new BoundError("E-BOUND-OUTPUT", "events"); this.ev.push(t); super.emit(t); }
@@ -38,7 +43,14 @@ export class Machine extends CoreMachine {
     this.units[this.units.length - 1].ev = this.ev;
     this.ev = [];
   }
-  restore(ck, files, delta = 0) { super.restore(ck, files, delta); this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS; }
+  restore(ck, files, delta = 0) { super.restore(ck, files, delta); this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS; this.posLine = -1; }
+  // (the core's count of a source token, then: the first token of a new main-file line marks that line's offset)
+  countSrc(f, i) {
+    super.countSrc(f, i);
+    if (f.path !== this.mainPath) return;
+    const ls = f.lineStart ?? 0;
+    if (ls !== this.posLine) { this.posLine = ls; this.mark({ k: "pos", at: ls, ep: POS_EPOCH }); }
+  }
   // push "{s}" back as an argument, for a core primitive that reads it again
   pushArg(s) {
     const toks = [mkChar(CAT.BGROUP, 123)].concat(this.str2toks(s), [mkChar(CAT.EGROUP, 125)]);

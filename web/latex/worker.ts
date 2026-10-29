@@ -1,8 +1,9 @@
 // The LaTeX editor's engine (a module Worker, dist/sagebrush-latex-worker.js; plan sbspace r5 §4): the source text
 // expanded and rendered off the page's thread, its chunks split into pieces (split.ts), bounded.
 // In:  {doc, rev, text, images, cold?, reset?}   (doc and rev: the page's request token, echoed back)
-// Out: {doc, rev, ok, items: [{g, h}], groups, imageRefs, stats} or {doc, rev, ok: false, error}
+// Out: {doc, rev, ok, items: [{g, h}], groups, pos, imageRefs, stats} or {doc, rev, ok: false, error}
 //   items: every piece in order; g: the index of the chunk it came from (a group is replaced as one unit).
+//   pos: per group, the source offset where it begins (-1: none known), for keeping source and preview in sync.
 // KaTeX's renderToString comes from the site's shared sagebrush-math.js, imported once (no copy of KaTeX here).
 import "./engine/shim.mjs";
 import { Engine } from "./engine/pipeline.mjs";
@@ -36,7 +37,7 @@ self.onmessage = async (e: MessageEvent) => {
       }
     }
     if (stopped) { items.length = 0; items.push({ g: 0, h: TOO_LARGE, b: bytes(TOO_LARGE) }); }
-    (self as any).postMessage(Object.assign(echo, { ok: true, items, groups: stopped ? 1 : r.chunks.length, imageRefs: r.imageRefs || [], stats: r.stats, tooLarge: stopped }));
+    (self as any).postMessage(Object.assign(echo, { ok: true, items, groups: stopped ? 1 : r.chunks.length, pos: stopped ? [-1] : r.chunkPos, imageRefs: r.imageRefs || [], stats: r.stats, tooLarge: stopped }));
   } catch (err: any) {
     eng = null;
     (self as any).postMessage(Object.assign(echo, { ok: false, error: String((err && err.message) || err).slice(0, 300) }));

@@ -38,11 +38,15 @@ const dimPt = (s) => { const m = /^\s*(-?(?:\d+\.?\d*|\.\d+))\s*(pt|mm|cm|in|em|
 // node: {t:"x",v} token | {t:"g",kids} brace group | {t:"e",env,user,kids} | {t:"s",cmd,star,kids} title/footnote/caption
 //       {t:"v",text} \verb | {t:"V",env,text} verbatim | {t:"L",key} | {t:"R",cmd,key,opt} | {t:"doc"} | {t:"cls",cls,opt}
 // items: SageTeX S1's code items, numbered here in expansion order (the order they run in)
+// (a source position marker, {k:"pos", at}, isn't a node: it goes on the next node as n.p, so arguments read past it)
 export function buildTree(events, items = []) {
   const root = { t: "g", kids: [] }; const st = [root];
+  let pos = -1;
   const top = () => st[st.length - 1];
   for (const e of events) {
-    if (typeof e === "number") { top().kids.push({ t: "x", v: e }); continue; }
+    const before = top().kids.length, at = top();
+    if (typeof e === "number") { top().kids.push({ t: "x", v: e }); if (pos >= 0) { at.kids[before].p = pos; pos = -1; } continue; }
+    if (e.k === "pos") { pos = e.at; continue; }
     switch (e.k) {
       case "o": { const g = { t: "g", kids: [] }; top().kids.push(g); st.push(g); break; }
       case "c": if (st.length > 1 && top().t === "g") st.pop(); break;
@@ -65,6 +69,7 @@ export function buildTree(events, items = []) {
       case "err": top().kids.push({ t: "err", code: e.code, name: e.name, text: e.text }); break;
       default: break;
     }
+    if (pos >= 0 && at.kids.length > before) { at.kids[before].p = pos; pos = -1; }
   }
   return root.kids;
 }
@@ -99,9 +104,11 @@ function serializeRuns(runs) {
   return out;
 }
 class Flow {
-  constructor(inline = false) { this.inline = inline; this.root = { items: [] }; this.stack = [this.root]; this.runs = null; this.noindent = false; this.pcls = ""; }
+  // (pos: the source offset of the latest node walked; rootPos[k]: the offset where top-level item k began, or -1)
+  constructor(inline = false) { this.inline = inline; this.root = { items: [] }; this.stack = [this.root]; this.runs = null; this.noindent = false; this.pcls = ""; this.pos = -1; this.parPos = -1; this.rootPos = []; }
+  atRoot(p) { if (this.cur() === this.root) this.rootPos[this.root.items.length - 1] = p; }
   cur() { return this.stack[this.stack.length - 1]; }
-  ensure(st) { if (!this.runs) { this.runs = []; this.pni = this.noindent; this.noindent = false; this.afterDisplay = false; this.pal = st ? st.al || "" : ""; } }
+  ensure(st) { if (!this.runs) { this.runs = []; this.pni = this.noindent; this.noindent = false; this.afterDisplay = false; this.pal = st ? st.al || "" : ""; this.parPos = this.pos; } }
   text(s, st) { if (!s) return; this.ensure(st); this.runs.push({ s, st, k: styleKey(st), tt: st.f === "tt", raw: false }); }
   space(st) {
     if (!this.runs || !this.runs.length) return;
@@ -119,15 +126,17 @@ class Flow {
     if (this.inline) { const it = this.cur().items; if (it.length) it.push(" "); it.push(h); return; }
     const cls = [this.pni ? "ni" : "", this.pal ? "al-" + this.pal : ""].filter(Boolean).join(" ");
     this.cur().items.push('<div class="p' + (cls ? " " + cls : "") + '">' + h + "</div>");
+    this.atRoot(this.parPos);
   }
-  block(h) { this.par(); this.cur().items.push(h); }
-  open(tag, attrs = "", head = "") { this.par(); const b = { tag, attrs, head, tail: "", items: [] }; this.stack.push(b); return b; }
+  block(h) { this.par(); this.cur().items.push(h); this.atRoot(this.pos); }
+  open(tag, attrs = "", head = "") { this.par(); const b = { tag, attrs, head, tail: "", items: [], pos: this.pos }; this.stack.push(b); return b; }
   close(b) {
     this.par();
     if (!this.stack.includes(b)) return;
     while (this.stack.length > 1) {
       const x = this.stack.pop();
       this.cur().items.push("<" + x.tag + x.attrs + ">" + x.head + x.items.join("") + x.tail + "</" + x.tag + ">");
+      this.atRoot(x.pos ?? -1);
       if (x === b) break;
     }
   }
@@ -289,6 +298,7 @@ class Renderer {
   walk(nodes, ctx, flow) {
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
+      if (n.p !== undefined && !flow.inline) flow.pos = n.p;
       switch (n.t) {
         case "x": i = this.tok(nodes, i, ctx, flow); break;
         case "g": this.walk(n.kids, Object.assign({}, ctx, { st: Object.assign({}, ctx.st) }), flow); break;
@@ -743,10 +753,12 @@ class Renderer {
     this.walk(body, { st: { al: "" } }, flow);
     this.flushFootnotes(flow);
     let chunks = flow.finish();
+    this.chunkPos = chunks.map((_, k) => flow.rootPos[k] ?? -1);
     // SageTeX S1 (astra4 S1E01-A3): an item the preview never showed (in an argument the renderer drops, the
     // preamble, ...) is never run: it becomes an error (so every later item is blocked), said once at the top
     const hidden = this.sageItems.filter((it, k) => !this.sageShown.has(k));
     for (const it of hidden) if (!it.err) it.err = "hidden";
+    if (hidden.length) this.chunkPos.unshift(-1);
     if (hidden.length) chunks.unshift('<div class="sagestate"><span class="sagechip s-error">' + esc(hidden.length + " Sage code item" + (hidden.length === 1 ? "" : "s") + " can't be run: " + whyRejected({ err: "hidden" })) + "</span></div>");
     // resolve references, the table of contents and the title block
     const toc = this.tocHtml(), title = this.titleHtml();
@@ -1046,5 +1058,5 @@ export function render(events, intern, opts) {
   const R = new Renderer(opts);
   const chunks = R.run(events, intern);
   const unknown = [...R.unknown].sort((a, b) => b[1] - a[1]).slice(0, 40);
-  return { chunks, sageItems: R.sageItems, imageRefs: [...R.imageRefs], stats: Object.assign({}, R.stats, { unknown, labels: R.labels.size, refs: R.refs.length, toc: R.toc.length, sageItems: R.sageItems.length }) };
+  return { chunks, chunkPos: R.chunkPos, sageItems: R.sageItems, imageRefs: [...R.imageRefs], stats: Object.assign({}, R.stats, { unknown, labels: R.labels.size, refs: R.refs.length, toc: R.toc.length, sageItems: R.sageItems.length }) };
 }

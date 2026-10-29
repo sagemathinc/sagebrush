@@ -411,6 +411,50 @@ try {
   const a2 = await until(`!!document.querySelector(".tex-preview .mathopen") && document.querySelector(".tex-preview").textContent.includes("After words here.")`, 20000);
   check(a2 && await ev(`[...document.querySelectorAll(".tex-preview .katex")].every((k) => !k.textContent.includes("After")) && document.querySelector(".tex-preview h2")?.textContent.includes("Later") && (() => { const d = [...document.querySelectorAll(".tex-preview .dmath")].pop(); return !!d && !!d.querySelector(".katex") && d.textContent.includes("y=1"); })()`), "A2: $$ not closed: a note, the text after the blank line not math, the section and a later display after it rendered", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
 
+  // ---- source and preview in sync (A3): a double-click in the preview puts the cursor on that word in the source;
+  // Follow (on by default) scrolls the preview to the cursor's place; Show flashes it; after an edit above, the
+  // double-click still lands on the right word
+  const SYNC = "\\documentclass{article}\n\\begin{document}\n" + Array.from({ length: 120 }, (_, k) => "Para " + k + " word" + k + "x text.").join("\n\n") + "\n\\end{document}\n";
+  const fsync = await mk("/t/sync.tex", enc(SYNC));
+  await ev(`localStorage.removeItem("sagebrush-latex-follow"); true`);
+  await open(fsync);
+  await until(`document.querySelector(".tex-preview").textContent.includes("word119x")`, 30000);
+  const dbl = (word) => ev(`(() => {
+    const P = document.querySelector(".tex-preview"), p = [...P.querySelectorAll(".p")].find((x) => x.textContent.includes(${JSON.stringify(word)}));
+    if (!p) return "no paragraph";
+    const tw = document.createTreeWalker(p, NodeFilter.SHOW_TEXT); let n; while ((n = tw.nextNode()) && !n.data.includes(${JSON.stringify(word)})) {}
+    if (!n) return "no text node";
+    const i = n.data.indexOf(${JSON.stringify(word)}), r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + ${word.length});
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    p.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    const s = document.querySelector(".tex-src");
+    return { a: s.selectionStart, b: s.selectionEnd, focused: document.activeElement === s, top: s.scrollTop };
+  })()`);
+  const inv = await dbl("word77x");
+  check(inv && inv.a === SYNC.indexOf("word77x") && inv.b === inv.a + 7 && inv.focused && inv.top > 0, "A3: a double-click on a word in the preview selects it in the source, scrolled into view", { inv, want: SYNC.indexOf("word77x") });
+  const fwd = (word) => ev(`(() => {
+    const s = document.querySelector(".tex-src"), i = s.value.indexOf(${JSON.stringify(word)});
+    s.focus(); s.setSelectionRange(i, i); s.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowDown", bubbles: true }));
+    const R = document.querySelector(".tex-right").getBoundingClientRect(), p = [...document.querySelectorAll(".tex-preview .p")].find((x) => x.textContent.includes(${JSON.stringify(word)}));
+    const r = p.getBoundingClientRect();
+    return { visible: r.bottom > R.top && r.top < R.bottom, scroll: document.querySelector(".tex-right").scrollTop };
+  })()`);
+  const sf1 = await fwd("word3x"), sf2 = await fwd("word110x");
+  check(await ev(`document.querySelector('[aria-label="The preview follows the cursor"]').getAttribute("aria-pressed") === "true"`) && sf1.visible && sf2.visible && sf2.scroll > sf1.scroll, "A3: Follow (on by default): moving the cursor brings its place in the preview into view", { sf1, sf2 });
+  const flash = await ev(`(() => { document.querySelector('[aria-label="Show the cursor\\'s place in the preview"]').click(); return !!document.querySelector(".tex-preview .ch.sync-flash"); })()`);
+  check(flash, "A3: Show: the cursor's place in the preview flashed");
+  await ev(`(document.querySelector('[aria-label="The preview follows the cursor"]').click(), true)`);
+  const off0 = await ev(`document.querySelector(".tex-right").scrollTop`), off1 = await fwd("word2x");
+  check(off1.scroll === off0, "A3: Follow off: moving the cursor leaves the preview where it is", { off0, off1 });
+  check(await ev(`localStorage.getItem("sagebrush-latex-follow") === "0"`), "A3: Follow off is remembered");
+  await ev(`localStorage.removeItem("sagebrush-latex-follow"); true`);
+  const SYNC2 = SYNC.replace("Para 0 ", "New first paragraph here.\n\nPara 0 ");
+  await typeInto(SYNC2);
+  await until(`document.querySelector(".tex-preview").textContent.includes("New first paragraph")`, 30000);
+  await sleep(300);
+  const inv2 = await dbl("word77x");
+  check(inv2 && inv2.a === SYNC2.indexOf("word77x"), "A3: after an edit above, a double-click still lands on the word (positions follow the edit)", { inv2, want: SYNC2.indexOf("word77x") });
+
   // half-typed: "\begin{" in the middle of a document (William, Oct 29): a note there, and the rest still renders
   const fh = await mk("/t/half-begin.tex", enc("\\documentclass{article}\n\\begin{document}\nBefore.\n\\begin{\n\nAfter words.\n\n\\section{Later}\nEnd text.\n\\end{document}\n"));
   await open(fh);

@@ -127,6 +127,28 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   ];
   for (const [name, body, ok] of half) { const h = doc("\\documentclass{article}\n", body); check(name, ok(h), h.slice(0, 600)); }
   { const h = doc("\\documentclass[a4paper\n\n", "Body survives."); check("half-documentclass-opt", h.includes("Body survives."), h.slice(0, 600)); }
+  // source positions (sync): each chunk's pos is the offset of the line where it begins; after an edit above them
+  // (incremental: the later units' events are reused), the positions follow the text
+  {
+    const paras = Array.from({ length: 400 }, (_, k) => "Paragraph number " + k + " with some words in it.");
+    const text = "\\documentclass{article}\n\\begin{document}\n\\section{Start}\n" + paras.join("\n\n") + "\n\\end{document}\n";
+    const eng = new Engine();
+    const where = (r, t, word) => { const k = r.chunks.findIndex((c) => c.includes(word)); return { k, pos: k >= 0 ? r.chunkPos[k] : -2, want: t.indexOf(word) }; };
+    const r1 = eng.update(text);
+    const a = where(r1, text, "Paragraph number 300 "), b = where(r1, text, "Start");
+    check("pos-aligned", Array.isArray(r1.chunkPos) && r1.chunkPos.length === r1.chunks.length, { n: r1.chunks.length, p: r1.chunkPos?.length });
+    check("pos-paragraph", a.k >= 0 && a.pos === a.want, a);
+    check("pos-heading", b.k >= 0 && b.pos === text.indexOf("\\section{Start}"), b);
+    const text2 = text.replace("Paragraph number 0 ", "Inserted words here.\n\nParagraph number 0 ");
+    const r2 = eng.update(text2);
+    const c = where(r2, text2, "Paragraph number 300 "), d = where(r2, text2, "Inserted words");
+    check("pos-after-edit", c.k >= 0 && c.pos === c.want && d.pos === d.want, { c, d, mode: r2.stats.mode, reused: r2.stats.reused });
+    check("pos-edit-reused-units", r2.stats.reused > 0, { mode: r2.stats.mode, reused: r2.stats.reused });
+    const text3 = text2.replace("Inserted words here.\n\n", "");
+    const r3 = eng.update(text3);
+    const e = where(r3, text3, "Paragraph number 300 ");
+    check("pos-after-delete", e.k >= 0 && e.pos === e.want, { e, mode: r3.stats.mode });
+  }
 }
 
 // ---- boxclass.mjs: the page test's box class; the packet's frozen BOXCLASS wins over an inherited LATEX_BOX_CLASS
