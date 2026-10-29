@@ -11,25 +11,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { CDPError, connectCDP, discoverPage } from "./find-test-cdp.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 let port = Number(process.env.CDP_PORT) || 0, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const profile = mkdtempSync(join(tmpdir(), "sb-find-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-if (!port) port = await devtoolsPort(profile);
-let targets;
-for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
-const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
-await new Promise((r) => (ws.onopen = r));
-let n = 0; const waiting = new Map(); const errors = [];
-ws.onmessage = (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
-  if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-};
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+let chrome, cdp, phase = "browser startup";
+const errors = [];
+const stage = (name) => { phase = name; console.log(`test-find: ${name}`); };
+const send = (method, params = {}) => cdp.send(method, params, phase);
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
-const until = async (expr, ms = 10000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(50); } return false; };
+const until = async (expr, ms = 10000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch((error) => { if (error instanceof CDPError) throw error; return false; })) return true; await sleep(50); } return false; };
 const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
@@ -77,15 +69,26 @@ const DOC = {
 };
 
 try {
+  stage("browser startup");
+  chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+  await new Promise((resolve, reject) => { chrome.once("spawn", resolve); chrome.once("error", reject); });
+  if (!port) port = await devtoolsPort(profile);
+  const url = await discoverPage(`http://127.0.0.1:${port}/json`);
+  cdp = await connectCDP(url, { onEvent: (message) => {
+    if (message.method === "Runtime.exceptionThrown") errors.push(message.params.exceptionDetails?.exception?.description ?? JSON.stringify(message.params.exceptionDetails));
+  } });
+  stage("board startup");
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Page.navigate", { url: `${base}board/` });
   if (!(await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000))) throw new Error("the page's board was not shown");
+  stage("example board and code output");
   await ev(`window.sagebrush.board.load(${JSON.stringify(DOC)}).then(() => 1)`);
   await until(`window.sagebrush.board.snapshot().doc?.title === "Find" && !!window.board.item("a")`, 20000);
   // (the item whose output says apple, its code not: run, its output shown)
   check(await until("window.sagebrush.board.outputs().then((os) => os.find((o) => o.id === 'd')?.output === 'apple\\n')", 60000), "the code item's output is shown");
   await ev("window.board.focus(undefined, true), 1");
 
+  stage("find navigation");
   await ctrlF();
   check(await until("!document.querySelector('[data-sbb=find]').hidden && document.activeElement === document.querySelector('[data-sbb=findq]')", 3000), "Ctrl+F opens the bar, ready to type in");
   await send("Input.insertText", { text: "apple" });
@@ -120,6 +123,7 @@ try {
   await ev("window.sagebrush.board.editing(false), 1");
   await escape();
 
+  stage("5,000 notes");
   // a large board: 5,000 notes, quickly
   const big = { title: "Big", nodes: Array.from({ length: 5000 }, (_, i) => ({ id: "n" + i, title: "Note " + i, text: `Some text of note ${i}${i === 4321 ? ", the needle" : ""}, and more words to search through`, x: (i % 100) * 300, y: Math.floor(i / 100) * 200, w: 260 })) };
   await ev(`window.sagebrush.board.load(${JSON.stringify(big)}).then(() => 1)`);
@@ -135,6 +139,7 @@ try {
   // step through every match by its page and id; a page changed by hand
   // leaves no other item outlined or marked (CORR-8CE-1)
   await escape();
+  stage("repeated item IDs across pages");
   const REP = { title: "Repeated", pages: [
     { title: "P1", nodes: [{ id: "a", title: "kiwi one", x: 0, y: 0, w: 260 }, { id: "z", title: "plain", x: 400, y: 0, w: 260 }] },
     { title: "P2", nodes: [{ id: "a", title: "plum", x: 0, y: 0, w: 260 }, { id: "b", title: "kiwi two", x: 400, y: 0, w: 260 }] },
@@ -162,6 +167,7 @@ try {
   check(st.says === "1 of 3" && st.page === 0, "...and Enter goes on from the match it left: " + JSON.stringify(st));
   await escape();
 
+  stage("document replacement");
   // another document loaded while Find is open: the old matches gone (no
   // stale count, no word of the new one marked), the query asked of the new
   // one (CORR-F33-1)
@@ -180,6 +186,7 @@ try {
   check(st.says === "1 of 1" && JSON.stringify(await marks()) === JSON.stringify(["apple"]), "...and one that says it: found in it: " + JSON.stringify([st, await marks()]));
   await escape();
 
+  stage("shared highlights and board cleanup");
   // two boards on one page: each its own marked words in the page's one
   // highlight; one destroyed takes its own, and only its own (CORR-8CE-2)
   await ev(`window.sagebrush.board.load(${JSON.stringify(DOC)}).then(() => 1)`);
@@ -202,7 +209,8 @@ try {
 } catch (e) {
   fails.push(String(e?.stack ?? e));
 } finally {
-  chrome.kill();
+  cdp?.close();
+  chrome?.kill();
   await sleep(200);
   rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

@@ -830,20 +830,22 @@ jobs:
               node web/board/test-ask.mjs
               ;;
             board-c)
-              node web/board/test-find.mjs
-              node web/board/test-titles.mjs
-              node web/board/test-fit.mjs
-              node web/board/test-local.mjs
-              node web/board/test-links.mjs
-              node web/board/test-version.mjs
-              node web/board/test-blocks.mjs
-              node web/board/test-history.mjs
-              node web/board/test-history-order.mjs
+              board_c_test() { printf 'START board-c: %s\n' "$*"; "$@"; }
+              board_c_test node web/board/test-find-cdp-unit.mjs
+              board_c_test node web/board/test-find.mjs
+              board_c_test node web/board/test-titles.mjs
+              board_c_test node web/board/test-fit.mjs
+              board_c_test node web/board/test-local.mjs
+              board_c_test node web/board/test-links.mjs
+              board_c_test node web/board/test-version.mjs
+              board_c_test node web/board/test-blocks.mjs
+              board_c_test node web/board/test-history.mjs
+              board_c_test node web/board/test-history-order.mjs
               # (the board page under the board journal; its own server, one origin)
-              bun web/board/test-board-journal-page.mjs
-              node web/board/test-cocalc.mjs
-              node web/board/test-mount.mjs
-              node web/board/test-xss.mjs
+              board_c_test bun web/board/test-board-journal-page.mjs
+              board_c_test node web/board/test-cocalc.mjs
+              board_c_test node web/board/test-mount.mjs
+              board_c_test node web/board/test-xss.mjs
               ;;
             board-unit)
               (cd packages/sagebrush-board && bun build.mjs && node test.mjs)
