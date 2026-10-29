@@ -34,6 +34,7 @@ export class R2 {
     const digest = sha(bytes);
     const headers = { host: this.host, 'x-amz-content-sha256': digest, 'x-amz-date': stamp };
     if (contentType) headers['content-type'] = contentType;
+    if (method === 'PUT') headers['x-amz-meta-preview-sha256'] = digest;
     const names = Object.keys(headers).sort();
     const signed = names.join(';');
     const canonical = [method, uri, qs, names.map(k => `${k}:${headers[k].trim()}\n`).join(''), signed, digest].join('\n');
@@ -48,7 +49,7 @@ export class R2 {
         redirect: 'error', signal: AbortSignal.any([this.remoteSignal, AbortSignal.timeout(30000)]),
       });
     } catch { throw new Error('R2 request failed or timed out (no automatic retry)'); }
-    if (!response.ok) {
+    if (!response.ok && !(method === 'HEAD' && response.status === 404)) {
       await response.body?.cancel();
       throw new Error(`R2 ${method} refused (HTTP ${response.status}); no automatic retry`);
     }
@@ -91,6 +92,15 @@ export class R2 {
   async put(key, bytes, type) {
     const response = await this.request('PUT', key, {}, bytes, type);
     await response.body?.cancel();
+  }
+  async matches(key, file) {
+    const response = await this.request('HEAD', key);
+    const same = response.status === 200 &&
+      response.headers.get('x-amz-meta-preview-sha256') === file.sha256 &&
+      response.headers.get('content-length') === String(file.bytes.length) &&
+      response.headers.get('content-type') === file.type;
+    await response.body?.cancel();
+    return same;
   }
   async delete(key) {
     const response = await this.request('DELETE', key);
