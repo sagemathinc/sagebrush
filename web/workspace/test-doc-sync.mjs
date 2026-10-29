@@ -82,6 +82,40 @@ const tamper = { A: null, B: null };
 // it does with it, and only its answer is replaced, as a lost answer and a refusal would look; on either server)
 const fakes = { batch: [] };
 const fake = (t, f) => fakes[t].push(f);
+// (r17, item 3's case 14 under cloud: the front's relays.  relayVerbatim is the relay as it was through r16, the
+// upstream Response returned as is (its transport headers too); it is kept ONLY behind /relay-old/, for the relay
+// control (case R).  Every other answer is rebuilt from its bytes with allow-listed headers, on either server; HEAD
+// and the bodyless statuses get no body.  WebSocket upgrades never reach here (/api/sync/v1/account is upgraded above))
+const relayVerbatim = (r) => r;
+const RELAY_HEADERS = ["content-type", "cache-control", "retry-after"];
+const NOBODY = new Set([204, 205, 304]);
+async function relayRebuilt(r, method) {
+  const bytes = method === "HEAD" || NOBODY.has(r.status) ? null : new Uint8Array(await r.arrayBuffer());
+  const h = new Headers();
+  for (const k of RELAY_HEADERS) { const v = r.headers.get(k); if (v !== null) h.set(k, v); }
+  for (const [k, v] of r.headers) if (/^x-sync-/.test(k)) h.set(k, v);
+  return { res: new Response(bytes, { status: r.status, statusText: r.statusText, headers: h }), bytes };
+}
+// (an answer's transport headers, as doc-sync-diag.mjs prints them)
+const transport = (h) => ({ te: h.get("transfer-encoding"), ce: h.get("content-encoding"), mfce: h.get("mf-content-encoding"), cl: h.get("content-length") });
+const sha256hex = async (b) => Buffer.from(await crypto.subtle.digest("SHA-256", b)).toString("hex");
+// (what case R checks, by traced call: the front's records (up: the upstream's status and headers by call and route;
+// relay: its byte receipt) and the browser's (net: the response's headers, its completion, its failure and code))
+const rec = { up: new Map(), relay: new Map(), net: new Map() };
+const netOf = (call) => { if (!rec.net.has(call)) rec.net.set(call, {}); return rec.net.get(call); };
+// (the old route's byte receipt: from a clone, read in the background and bounded at 10 s, so the Response returned
+// verbatim is neither consumed nor delayed)
+function receiptOf(call, route, c) {
+  let timer;
+  const read = c.arrayBuffer();
+  read.catch(() => {});
+  const late = new Promise((_, no) => { timer = setTimeout(() => no(Object.assign(new Error("timeout"), { name: "TimeoutError" })), 10_000); });
+  Promise.race([read, late]).then(async (b) => {
+    const r = { n: b.byteLength, sha: await sha256hex(b) };
+    rec.relay.set(call, r);
+    emit.relay(call, route, r.n, r.sha);
+  }, (e) => { rec.relay.set(call, { failed: String(e?.name) }); emit.relayFail(call, route, e?.name); }).finally(() => clearTimeout(timer));
+}
 // (a socket to cloud's server, as the reference server's connect gives one: send, close, onmessage, onclose)
 const cloudSocket = (cookie) => new Promise((ok) => {
   const w = new WebSocket(cloud.url.replace(/^http/, "ws") + "/api/sync/v1/account", { headers: { cookie, origin: cloud.url } });
@@ -100,21 +134,34 @@ const front = Bun.serve({
     // (case 14's real owners and Sync panel: the session's account, and the sync API with device D's session, as the
     // site serves them on its own origin)
     if (u.pathname === "/api/share/me") return Response.json({ account_id: ACCOUNT });
-    if (u.pathname.startsWith("/api/sync/")) {
+    // (r17: the relay control's two routes to the real server's status, differing only in the relay (case R))
+    const relayRoute = /^\/relay-(old|new)(\/api\/sync\/v1\/status)$/.exec(u.pathname);
+    if (u.pathname.startsWith("/api/sync/") || relayRoute) {
+      const route = relayRoute ? relayRoute[1] : "plain", path = relayRoute ? relayRoute[2] : u.pathname;
+      // (a traced call's id (the page's tracing fetch sends it); it is never passed on to the server)
+      const call = req.headers.get("x-test-call");
       // (logged as it starts, and as its answer's status arrives or it throws, with the time taken: the method, the
       // path's safe characters, the status or the error's name; a start without an end is a request still waiting)
       const k = ++proxyN, t = Date.now();
-      proxyOpen.set(k, { method: req.method, path: u.pathname, t });
-      emit.syncStart(k, req.method, u.pathname);
+      proxyOpen.set(k, { method: req.method, path, t });
+      emit.syncStart(k, req.method, path);
       try {
         const h = new Headers({ cookie: sessions.D, ...(CLOUD ? { origin: cloud.url } : {}) });
         for (const k of ["content-type", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
         const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
-        const r = await (CLOUD ? fetch(cloud.url + u.pathname + u.search, { method: req.method, headers: h, body }) : ref.fetch(new Request("http://ref" + u.pathname + u.search, { method: req.method, headers: h, body })));
-        emit.syncEnd(k, req.method, u.pathname, r.status, Date.now() - t);
-        return r;
+        const r = await (CLOUD ? fetch(cloud.url + path + u.search, { method: req.method, headers: h, body }) : ref.fetch(new Request("http://ref" + path + u.search, { method: req.method, headers: h, body })));
+        emit.syncEnd(k, req.method, path, r.status, Date.now() - t);
+        // (r17: a traced call's upstream status and transport headers, before any relay; then its relay and receipt)
+        if (call) { rec.up.set(`${call}:${route}`, { status: r.status, h: transport(r.headers) }); emit.upHdrs(call, route, r.status, transport(r.headers)); }
+        if (route === "old") {
+          if (call) receiptOf(call, route, r.clone());
+          return relayVerbatim(r);
+        }
+        const { res, bytes } = await relayRebuilt(r, req.method);
+        if (call && bytes) { const rr = { n: bytes.byteLength, sha: await sha256hex(bytes) }; rec.relay.set(call, rr); emit.relay(call, route, rr.n, rr.sha); }
+        return res;
       } catch (e) {
-        emit.syncError(k, req.method, u.pathname, e?.name, Date.now() - t);
+        emit.syncError(k, req.method, path, e?.name, Date.now() - t);
         throw e;
       } finally {
         proxyOpen.delete(k);
@@ -192,6 +239,8 @@ const errors = [];
 // (r3: the pages' own console warnings and errors and the browser's log entries for them, by the page's label, kept
 // here (the last 200) and printed only through emit.text)
 const labels = new Map(), pageConsole = [];
+// (r17: the traced requests in flight, by "<sessionId>:<requestId>": their page, call and route)
+const netReq = new Map();
 const noteConsole = (s) => { pageConsole.push(String(s).slice(0, 2000)); if (pageConsole.length > 200) pageConsole.shift(); };
 // (its own deadline: a hang anywhere ends the run here, the browser killed, saying where it was)
 let step = "start";
@@ -220,6 +269,26 @@ try {
       noteConsole(`${labels.get(m.sessionId)} console.${m.params.type}: ` + (m.params.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(" "));
     if (m.method === "Log.entryAdded" && labels.has(m.sessionId) && (m.params.entry?.level === "warning" || m.params.entry?.level === "error"))
       noteConsole(`${labels.get(m.sessionId)} log.${m.params.entry.level}: ${m.params.entry.text}${m.params.entry.url ? " (" + m.params.entry.url + ")" : ""}`);
+    // (r17: a traced request's network events (Network.enable on the pages made by pageIn), by session and requestId:
+    // requestWillBeSent maps it to its page, its call (its x-test-call header) and its route (plain, old, new); its
+    // response's headers, its completion or its failure (loadingFailed has no URL: hence the map) are then printed
+    // and recorded by call; the entry is retired when it finishes or fails)
+    if (m.method === "Network.requestWillBeSent" && labels.has(m.sessionId)) {
+      let p = "";
+      try { p = new URL(m.params.request?.url).pathname; } catch {}
+      const rm = /^\/(?:relay-(old|new)\/)?api\/(?:sync\/|share\/me$)/.exec(p);
+      const hh = Object.fromEntries(Object.entries(m.params.request?.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+      if (rm && hh["x-test-call"]) netReq.set(`${m.sessionId}:${m.params.requestId}`, { page: labels.get(m.sessionId), call: hh["x-test-call"], route: rm[1] ?? "plain" });
+    }
+    const nk = `${m.sessionId}:${m.params?.requestId}`, ne = netReq.get(nk);
+    if (ne && m.method === "Network.responseReceived") {
+      const hh = Object.fromEntries(Object.entries(m.params.response?.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+      const h = { te: hh["transfer-encoding"], ce: hh["content-encoding"], mfce: hh["mf-content-encoding"], cl: hh["content-length"] };
+      netOf(ne.call).resp = { status: m.params.response?.status, h };
+      emit.netResp(ne.page, ne.call, ne.route, m.params.response?.status, h);
+    }
+    if (ne && m.method === "Network.loadingFinished") { netOf(ne.call).done = true; emit.netDone(ne.page, ne.call, ne.route); netReq.delete(nk); }
+    if (ne && m.method === "Network.loadingFailed") { netOf(ne.call).fail = String(m.params.errorText ?? ""); emit.netFail(ne.page, ne.call, ne.route, m.params.errorText); netReq.delete(nk); }
   };
   const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(J({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
   // (a device: a browser context of its own, a page in it, its session for evaluating there)
@@ -244,6 +313,50 @@ try {
   const settle = async () => { for (let i = 0; i < 3; i++) await both("idle"); };
   await A.call("connect", "A", ACCOUNT);
   await B.call("connect", "B", ACCOUNT);
+
+  progress("case R");
+  // R. (r17, item 3's case 14 under cloud) The relay control: the real server's status, through this front's two relays,
+  // fetched by a real page in a context of its own with its tracing fetch: /relay-old/ (the relay as it was through r16:
+  // the upstream Response as is) three times, then /relay-new/ (the rebuilt relay every other answer now gets) three
+  // times.  Under cloud the old relay must fail as case 14 did in r16 (the upstream's 200 at the front, then a named
+  // net:: failure in the browser, at the fetch or the body read: the stage is recorded) and the new one load the bytes
+  // the front relayed; under the reference server (no transport headers) both load.  Exactly 4 checks on either
+  // server (the judge compares the servers' counts); a mechanism that doesn't reproduce fails R1
+  {
+    const before = results.length;
+    const named = (c) => /^net::ERR_[A-Z0-9_]{2,200}$/.test(String(c ?? ""));
+    try {
+      const { browserContextId: rctx } = await send("Target.createBrowserContext");
+      // (pageIn, declared below in this same block, is hoisted; its default context isn't used here)
+      const Rp = await pageIn("R", rctx);
+      const oldCalls = await Rp.call("relayProbe", "/relay-old/api/sync/v1/status", 3);
+      const newCalls = await Rp.call("relayProbe", "/relay-new/api/sync/v1/status", 3);
+      const calls = [...oldCalls, ...newCalls];
+      // (the old route's background receipts and the last network events: at most 12 s, their 10 s bound and a margin)
+      for (const end = Date.now() + 12_000; Date.now() < end && !calls.every((c) => rec.relay.has(c) && (rec.net.get(c)?.done || rec.net.get(c)?.fail !== undefined)); ) await sleep(100);
+      const tr = (await Rp.ev("T.traceDump()")) ?? [];
+      for (const x of tr) if (x.kind) emit.stage(x.call, x.kind, x.detail); else emit.pageBytes(x.call, x.bytes, x.sha);
+      const stages = (c) => tr.filter((x) => x.call === c && x.kind).map((x) => x.kind);
+      const pageRec = (c) => tr.find((x) => x.call === c && x.sha);
+      const up = (c) => rec.up.get(`${c}:old`);
+      const transportSet = (c) => { const h = up(c)?.h; return !!h && [h.te, h.ce, h.mfce].some((v) => v !== null && v !== undefined && v !== ""); };
+      const said = (cs) => J(cs.map((c) => ({ c, up: up(c)?.status ?? rec.up.get(`${c}:new`)?.status, fail: rec.net.get(c)?.fail ?? null, done: !!rec.net.get(c)?.done, stages: stages(c) }))).slice(0, 900);
+      if (CLOUD) check(oldCalls.length === 3 && oldCalls.every((c) => up(c)?.status === 200 && rec.relay.get(c)?.sha && named(rec.net.get(c)?.fail) && !rec.net.get(c)?.done && (stages(c).includes("fetch-rejected") || stages(c).includes("body-read-failed"))),
+        "R1: cloud, the old relay (the upstream Response as is): each call's upstream 200 at the front and the front's receipt, then a named net:: failure in the browser, at the fetch or the body read: " + said(oldCalls));
+      else check(oldCalls.length === 3 && oldCalls.every((c) => up(c)?.status === 200 && rec.net.get(c)?.done && stages(c).includes("parsed")),
+        "R1: reference, the old relay loads (the reference server sends no transport headers): " + said(oldCalls));
+      check(newCalls.length === 3 && newCalls.every((c) => rec.net.get(c)?.done && stages(c).includes("parsed") && tr.some((x) => x.call === c && x.kind === "fetched" && x.detail === 200)),
+        "R2: the new relay (rebuilt, allow-listed headers): each call loads, 200, parsed: " + said(newCalls));
+      check(newCalls.every((c) => { const p = pageRec(c), f = rec.relay.get(c); return !!p && !!f && p.bytes === f.n && p.sha === f.sha; }),
+        "R3: the new relay: each call's bytes in the page (length and sha256) are the bytes the front relayed: " + J(newCalls.map((c) => ({ c, page: pageRec(c)?.bytes ?? null, front: rec.relay.get(c)?.n ?? null, same: pageRec(c)?.sha === rec.relay.get(c)?.sha }))));
+      if (CLOUD) check(oldCalls.every(transportSet), "R4: cloud, the upstream's answers carry transport headers (transfer-encoding, content-encoding or mf-content-encoding): " + J(oldCalls.map((c) => up(c)?.h ?? null)));
+      else check(oldCalls.every((c) => !!up(c) && !transportSet(c)), "R4: reference, the upstream's answers carry no transport headers: " + J(oldCalls.map((c) => up(c)?.h ?? null)));
+    } catch (e) {
+      check(false, "R: the case stopped: " + String(e?.message ?? e).slice(0, 300));
+    }
+    // (exactly 4 checks on either server, whatever happened)
+    while (results.length < before + 4) check(false, "R: not reached");
+  }
 
   progress("case 1");
   // 1. A new notebook on A reaches B: claimed first, its root sent with kind and owner, pulled by B (changed), and B's
@@ -580,6 +693,8 @@ try {
     labels.set(sessionId, label);
     await send("Runtime.enable", {}, sessionId);
     await send("Log.enable", {}, sessionId);
+    // (r17: the page's network events, for its traced requests (the CDP handler above))
+    await send("Network.enable", {}, sessionId);
     await send("Page.navigate", { url: `http://127.0.0.1:${front.port}/` }, sessionId);
     const ev = async (expression) => {
       const r = await Promise.race([send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId), sleep(45_000).then(() => ({ error: `timed out: ${expression.slice(0, 80)}` }))]);
@@ -587,6 +702,8 @@ try {
       return r.result?.value;
     };
     for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
+    // (r17: the page's label, for its tracing fetch's call ids)
+    await ev(`T.pageLabel = ${J(label)}`);
     return { targetId, ev, call: (f, ...args) => { progress(`${label}.${f}`); return ev(`T.${f}(${args.map((a) => J(a)).join(", ")})`); } };
   }
   // (a failed check ends the case right after it is recorded (the rest depends on it), and a throw is recorded as this
@@ -763,6 +880,12 @@ try {
     emit.waiting("diag14: ", [...proxyOpen].map(([k, { method, path, t }]) => ({ k, method, path, ms: Date.now() - t })));
     emit.counts("diag14: ", [...sockOpen], sockN, proxyN);
     emit.recent("diag14: ", 60);
+  }
+  // (r17: case 14's traced calls (the Sync panel's status reads on its pages), whatever the outcome: each call's stages
+  // and byte receipt, every page question bounded at 10 s)
+  if (D14) for (const P of Object.values(D14)) {
+    const tr = await Promise.race([P.ev("T.traceDump ? T.traceDump() : []").catch(() => []), sleep(10_000).then(() => [])]);
+    for (const x of tr ?? []) if (x.kind) emit.stage(x.call, x.kind, x.detail); else emit.pageBytes(x.call, x.bytes, x.sha);
   }
   censusAt("cases-done");
   if (!emit.failures(results, errors)) {

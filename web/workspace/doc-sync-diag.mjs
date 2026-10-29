@@ -34,6 +34,23 @@ const safePrefix = (p) => word(p, /^[A-Za-z0-9 :_'-]{0,48}$/, "?: ");
 // (the page's turn-on phases (test-doc-sync.page.js's T.turnOn), each "<name> (<n> ms)"; anything else is "?")
 const PHASES = new Set(["panel made", "its Turn on sync button shown", "clicked", "the holder, synced", "the wait for the holder, synced, ended without it"]);
 const phase = (s) => { const m = /^(.*) \((\d{1,9}) ms\)$/.exec(String(s)); return m && PHASES.has(m[1]) ? `${m[1]} (${m[2]} ms)` : "?"; };
+// (r17, item 3's case 14 under cloud: the network receipts of the relay control (case R) and case 14, every field
+// allow-listed, and no printed token 24 characters or longer, so neither scrub() nor --filter changes a line: a net::
+// code is printed as its words ("ERR INCOMPLETE CHUNKED ENCODING"), a sha256 as four 16-hex groups)
+const pageWord = (p) => word(p, /^(D1|D2|R)$/, "other");
+const routeWord = (r) => word(r, /^(plain|old|new)$/, "other");
+/** A traced call's id, "<page>.<n>" (the page's tracing fetch numbers its calls; the page makes it unique), else "none". */
+const callId = (c) => { const m = /^(D1|D2|R)\.(\d{1,6})$/.exec(String(c ?? "")); return m ? `${m[1]}.${m[2]}` : "none"; };
+const TE = new Set(["chunked", "identity"]), CE = new Set(["br", "gzip", "deflate", "zstd", "identity"]);
+const hv = (v, set) => (v === null || v === undefined || v === "" ? "-" : set.has(String(v).trim().toLowerCase()) ? String(v).trim().toLowerCase() : "other");
+/** One answer's transport headers ({te, ce, mfce, cl}: transfer-encoding, content-encoding, mf-content-encoding, content-length). */
+const hdrs = (h) => `te=${hv(h?.te, TE)} ce=${hv(h?.ce, CE)} mfce=${hv(h?.mfce, CE)} cl=${h?.cl === null || h?.cl === undefined ? "absent" : "present"}`;
+/** A net:: error code as its words ("net::ERR_INCOMPLETE_CHUNKED_ENCODING" is "ERR INCOMPLETE CHUNKED ENCODING"), else "other". */
+const netCode = (c) => { const m = /^net::(ERR(?:_[A-Z0-9]{1,23}){1,8})$/.exec(String(c ?? "")); return m ? m[1].split("_").join(" ") : "other"; };
+/** A sha256 (64 hex) as four 16-hex groups, else "?". */
+const shaGroups = (h) => (/^[0-9a-f]{64}$/.test(String(h)) ? String(h).match(/.{16}/g).join(" ") : "?");
+const STAGE = /^(fetch-rejected|fetched|body-read-failed|json-parse-failed|parsed)$/;
+const stageDetail = (d) => (d === undefined ? "" : " " + (typeof d === "number" ? int(d) : word(d, /^[A-Za-z]{1,40}$/, "other")));
 
 const KEY = String.raw`[\w-]*(?:cookie|authori[sz]ation|session|token|secret|passw(?:or)?d|auth|bearer|credential|api[-_]?key|apikey|sid|jwt|signature)[\w-]*`;
 const QUOTE = String.raw`(?:\\*["'\x60]|&quot;|&#34;|&#x22;|%22)*`;
@@ -121,6 +138,24 @@ export const emit = {
   harnessFail: (e) => err("FAIL: SERVER=cloud needs cloud's web/sync/test-harness.mjs (run under cloud's scripts/with-core.sh): " + scrub(e?.message ?? arg(e), 600)),
   /** The account's enable didn't answer active: its answer, scrubbed. */
   enableFail: (answer) => err("FAIL: enable: " + scrub(arg(answer), 600)),
+  // ---- r17: the relay control's and case 14's network receipts (see the helpers above)
+  /** At the front, before any relay: the upstream answer's status and transport headers, for a traced call and route. */
+  upHdrs: (call, route, status, h) => front(`up-hdrs ${callId(call)} ${routeWord(route)} ${int(status)} ${hdrs(h)}`),
+  /** The front's byte receipt for one relayed answer: its length and sha256. */
+  relay: (call, route, n, sha) => front(`relay ${callId(call)} ${routeWord(route)} bytes ${int(n)} sha ${shaGroups(sha)}`),
+  /** The front's byte receipt couldn't be made (its bounded read failed or timed out): the error's name. */
+  relayFail: (call, route, name) => front(`relay ${callId(call)} ${routeWord(route)} receipt-failed ${word(name, /^[A-Za-z]{1,40}$/, "other")}`),
+  /** The browser's view of one traced request (CDP): its response's status and transport headers. */
+  netResp: (page, call, route, status, h) => out(`net-resp ${pageWord(page)} ${callId(call)} ${routeWord(route)} ${int(status)} ${hdrs(h)}`),
+  /** The browser's view: the request's body loaded completely. */
+  netDone: (page, call, route) => out(`net-done ${pageWord(page)} ${callId(call)} ${routeWord(route)}`),
+  /** The browser's view: the request failed, with its net:: code. */
+  netFail: (page, call, route, code) => out(`net-fail ${pageWord(page)} ${callId(call)} ${routeWord(route)} ${netCode(code)}`),
+  /** The page's tracing fetch: one stage of a call (fetch-rejected <name>, fetched <status>, body-read-failed <name>,
+   * json-parse-failed, parsed). */
+  stage: (call, kind, detail) => out(`stage ${callId(call)} ${word(kind, STAGE, "other")}${stageDetail(detail)}`),
+  /** The page's own byte receipt for a call it loaded: the length and sha256 of the bytes it received. */
+  pageBytes: (call, n, sha) => out(`page-bytes ${callId(call)} bytes ${int(n)} sha ${shaGroups(sha)}`),
 };
 /** Every in-process console call from here on (the reference server's warns, the cloud harness's JavaScript, anything
  * else in this process) printed as "console: " + its scrubbed text; returns a function restoring the console. */
@@ -135,6 +170,8 @@ export function guardConsole() {
 function controls() {
   // (each sentinel is made here, never written whole in this file; the judge looks for its stem in the whole run.log)
   const S = (i) => ["SN", "TL", String(i).padStart(2, "0")].join("");
+  // (r17: a full sha256's shape, 64 hex, for the byte receipts)
+  const SHA17 = "0123456789abcdef".repeat(4);
   const fixtures = [
     `KEEP-01 cookie: __Host-sb_session=${S(1)}; theme=${S(2)}`,
     `KEEP-02 Authorization: Bearer ${S(3)}`,
@@ -200,6 +237,22 @@ function controls() {
     emit.buildFail(["KEEP-30 a build log line", `KEEP-29 error: Could not resolve "x" at /tmp/x.js?v=${S(48)}`]);
     emit.harnessFail(new Error(`KEEP-31 Cannot find module file:///x/test-harness.mjs#${S(49)} more`));
     emit.enableFail({ note: "KEEP-32", state: "off", cookie: S(50) });
+    // (r17: the network receipts, with the longest net:: codes and a full sha256, and wrong values that must fall back)
+    emit.upHdrs("R.1", "old", 200, { te: "chunked", ce: null, mfce: "br", cl: null });
+    emit.upHdrs("R.2", "new", 200, { te: "Chunked ", ce: "x-evil", mfce: undefined, cl: "17" });
+    emit.relay("R.1", "old", 17, SHA17);
+    emit.relayFail("R.3", "old", "TimeoutError");
+    emit.netResp("R", "R.1", "old", 200, { te: "chunked", ce: null, mfce: "br", cl: null });
+    emit.netDone("D1", "D1.12", "plain");
+    emit.netFail("R", "R.1", "old", "net::ERR_INCOMPLETE_CHUNKED_ENCODING");
+    emit.netFail("R", "R.2", "old", "net::ERR_CONTENT_DECODING_FAILED");
+    emit.netFail("Q", "R.3", "bogus", `net::err ${S(80)}`);
+    emit.stage("R.1", "fetch-rejected", "TypeError");
+    emit.stage("R.2", "body-read-failed", `Type${S(81)}`);
+    emit.stage("R.4", "parsed");
+    emit.stage(`R.5?${S(82)}`, "fetched", 200);
+    emit.pageBytes("R.4", 17, SHA17);
+    emit.pageBytes("R.4", 17, `nothex${S(83)}`);
     console.warn("reference server:", new Error(`KEEP-33 stale Authorization: Bearer ${S(51)}`));
     console.log("KEEP-34 a harness note", { url: `ws://h/x?sid=${S(52)}` });
     console.error(`KEEP-35 a product error with session=${S(53)}`);
@@ -238,11 +291,35 @@ function controls() {
     'diag-control quoted 5: ["KEEP-40 say: panel wss://h/a?<dropped>',
     'diag-control quoted 6: ["KEEP-41 warn: panel https://h/b?<dropped>',
   ];
+  // (r17: the network receipts' exact lines; each must also pass scrub() unchanged (the runner's --filter scrubs every
+  // line again), and the forms they avoid must not: a whole net:: code and a whole sha256 are opaque runs)
+  const g = SHA17.match(/.{16}/g).join(" ");
+  const r17 = [
+    "up-hdrs R.1 old 200 te=chunked ce=- mfce=br cl=absent",
+    "up-hdrs R.2 new 200 te=chunked ce=other mfce=- cl=present",
+    `relay R.1 old bytes 17 sha ${g}`,
+    "relay R.3 old receipt-failed TimeoutError",
+    "net-resp R R.1 old 200 te=chunked ce=- mfce=br cl=absent",
+    "net-done D1 D1.12 plain",
+    "net-fail R R.1 old ERR INCOMPLETE CHUNKED ENCODING",
+    "net-fail R R.2 old ERR CONTENT DECODING FAILED",
+    "net-fail other R.3 other other",
+    "stage R.1 fetch-rejected TypeError",
+    "stage R.2 body-read-failed other",
+    "stage R.4 parsed",
+    "stage none fetched 200",
+    `page-bytes R.4 bytes 17 sha ${g}`,
+    "page-bytes R.4 bytes 17 sha ?",
+  ];
   const cases = [
     ["no sentinel in any printed line", printed.every((l) => !l.includes(stem))],
     ...keeps.map((k) => [`${k} kept`, printed.some((l) => l.includes(k))]),
     ...exact.map((e) => [`exact: ${e}`, printed.includes(e)]),
     ["one line per fixture", fixtures.every((_, i) => printed.filter((l) => l.startsWith(`diag-control ${i + 1}: `)).length === 1)],
+    ...r17.map((e) => [`r17 exact: ${e}`, printed.includes(e)]),
+    ["r17: every network receipt line passes scrub() unchanged (so --filter keeps it)", r17.every((l) => scrub(l, 4000) === l)],
+    ["r17: a whole net:: code and a whole sha256 would be scrubbed (why they are printed as words and groups)",
+      scrub("net::ERR_INCOMPLETE_CHUNKED_ENCODING").includes("<opaque>") && scrub(SHA17) === "<opaque>"],
   ];
   let k = 0;
   for (const [i, [name, ok]] of cases.entries()) { if (ok) k++; rawLog(`DIAG CONTROL ${i + 1} ${ok ? "PASS" : "FAIL"}: ${name}`); }
