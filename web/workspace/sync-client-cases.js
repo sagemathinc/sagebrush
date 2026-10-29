@@ -3786,17 +3786,24 @@ async function cleanupCase(n, q0) {
     // awaited; then each of the case's clients stopped, then its loop's end awaited.  A stop that rejects is a failure,
     // named (fail-stop); a loop (c.run) that rejected has ended: said, not a failure; anything that never ends is.
     for (const o of d.owners) {
-      // (what the owner runs, read before destroy() detaches it: its client, that client's loop, its reconcile)
-      const oc = o.client, orun = o["run"];
       at = "cleanup: owner.destroy()";
       await step(at, () => o.destroy());
       stages.push(`${at} ok`);
-      if (oc) {
-        at = "cleanup: owner's client stop";
-        await step(at, () => oc.stop());
+      // (every piece of work the owner ever detached, kept by the wrapped stopClient, its destroy()'s own included: the
+      // stopClient itself (a rejected stop is a failure, I-5), then its client's stop and loop)
+      for (const x of d.detached.get(o) ?? []) {
+        at = "cleanup: owner's detached stopClient";
+        await step(at, () => x.p);
         stages.push(`${at} ok`);
-        at = "cleanup: owner's client loop";
-        try { await step(at, () => orun); stages.push(`${at} ok`); } catch (e) { if (e instanceof StepTimeout) throw e; stages.push(`${at} rejected (${e?.message ?? e})`); }
+        if (x.c) {
+          at = "cleanup: owner's client stop";
+          await step(at, () => x.c.stop());
+          stages.push(`${at} ok`);
+        }
+        if (x.run) {
+          at = "cleanup: owner's client loop";
+          try { await step(at, () => x.run); stages.push(`${at} ok`); } catch (e) { if (e instanceof StepTimeout) throw e; stages.push(`${at} rejected (${e?.message ?? e})`); }
+        }
       }
       at = "cleanup: owner's reconcile";
       await step(at, () => o["reconciling"]);
@@ -3860,11 +3867,25 @@ async function cleanupCase(n, q0) {
 
 /** The run in diagnostic mode: the same selection as run(), the same results array */
 async function runDiagnostic(table, only, skip, budgets) {
-  const d = (D = { budgets, clients: [], owners: [], pending: new Set(), steps: [], late: [], lateOpened: [], names: new Map(), openDelayMs: 0, caseDeadline: null, cleanupDeadline: null, epoch: 0, failStopNow: false });
+  const d = (D = { budgets, clients: [], owners: [], pending: new Set(), steps: [], late: [], lateOpened: [], names: new Map(), detached: new Map(), openDelayMs: 0, caseDeadline: null, cleanupDeadline: null, epoch: 0, failStopNow: false });
   const rep = (window.__report = { mode: "diagnostic", why: null, startedMs: Math.round(now()), cases: [], steps: d.steps, late: d.late, lateOpened: d.lateOpened, closedAtEnd: [], stopped: null, notRun: [], progress: null, results, done: false });
   // (every SyncOwner a case makes registered for its cleanup: SyncOwner.of wrapped for this run only, restored after)
   const of0 = W.SyncOwner.of;
-  W.SyncOwner.of = function (w, opts) { const o = of0.call(this, w, opts); if (D === d && !d.owners.includes(o)) d.owners.push(o); return o; };
+  // (each registered owner's stopClient wrapped on the instance, for this run: what it detaches (its client and that
+  // client's loop) and its own promise are kept BEFORE the owner erases its fields, so C1 awaits work that an earlier
+  // destroy(), suspend() or setDocs() left running; unwrapped in the finally)
+  const wrapped = [];
+  W.SyncOwner.of = function (w, opts) {
+    const o = of0.call(this, w, opts);
+    if (D === d && !d.owners.includes(o)) d.owners.push(o);
+    if (D === d && !Object.hasOwn(o, "stopClient")) {
+      const sc0 = o["stopClient"], work = [];
+      d.detached.set(o, work);
+      o["stopClient"] = function () { const c = this.client, run = this["run"]; const p = sc0.call(this); work.push({ c, run, p }); return p; };
+      wrapped.push(o);
+    }
+    return o;
+  };
   try {
     const skipped = skip ? skip.split(",") : [];
     const list = Object.entries(table).filter(([name]) => !(only && !only.split(",").includes(name)) && !skipped.includes(name));
@@ -3892,6 +3913,7 @@ async function runDiagnostic(table, only, skip, budgets) {
       if (over > 0) cs.over = +over.toFixed(1);
       const cl = d.failStopNow ? { ok: false, step: "(control) failStopNow", why: "the page stops before its cleanup" } : await cleanupCase(n, q0);
       cs.cleanup = cl;
+      cs.cleanupEndMs = Math.round(now());
       if (!cl.ok) {
         // FAIL-STOP: the epoch abandoned, what was still in flight named, every remaining case not run
         let q = null;
@@ -3908,6 +3930,7 @@ async function runDiagnostic(table, only, skip, budgets) {
     d.over = true;
     for (const w of used) try { w.close(); rep.closedAtEnd.push(d.names.get(w) ?? null); } catch {}
     W.SyncOwner.of = of0;
+    for (const o of wrapped) delete o["stopClient"];
     rep.done = true;
     D = null;
   }
@@ -3980,13 +4003,32 @@ const CONTROL_CASES = {
       D.openDelayMs = 3000;
       try { await fresh(); } finally { D.openDelayMs = 0; }
     },
-    // K-O1: a case that starts a SyncOwner and fails before its destroy(): the cleanup destroys it and awaits its work
+    // K-O1: a real owner, sync turned on through the panel, its client running; its client's stop made slow (1.5 s);
+    // the case destroys the owner early (destroy() detaches the client and its loop, then erases its fields) and fails
+    // at once: the cleanup must await that detached stop and loop (sentinels), then the owner's reconcile
     async kO1() {
+      await account();
       const w = await fresh();
       const o = W.SyncOwner.of(w, { origin: location.origin });
-      window.__kO1 = o;
+      window.__kO1 = { o, stopDone: null, runDone: null, hadClient: false };
       o.start();
-      throw new Error("K-O1 injected: the case failed before its destroy()");
+      const el = document.createElement("div");
+      const s = W.syncSection(w, el, hostOf(w));
+      try {
+        await until(named("K-O1: the Turn on button", () => /Turn on sync/.test(buttons(el).join())), 3000);
+        [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent))?.click();
+        // (each wait one step, inside STEP_MS; up to six of them)
+        for (let i = 0; i < 6 && !(await S("K-O1: the owner's client running", () => o.clientRunning(1500))); i++);
+        const c = o.client, run = o["run"];
+        window.__kO1.hadClient = !!c && !!run;
+        if (c) {
+          const stop0 = c.stop.bind(c);
+          c.stop = async () => { await sleep(1500); await stop0(); window.__kO1.stopDone ??= now(); };
+          run.then(() => { window.__kO1.runDone = now(); }, () => { window.__kO1.runDone = now(); });
+        }
+      } finally { s.dispose(); }
+      o.destroy();
+      throw new Error("K-O1 injected: the case failed right after an early destroy()");
     },
   },
   // K-S1: a client whose stop rejects at once, its loop already settled: a named fail-stop at cleanup: c.stop()
@@ -4040,8 +4082,8 @@ function controlLines(page, rep) {
     add(cs("kU1")?.outcome === "ok" && clean("kU1") && own("kU1", "K-U1"), "K-U1: probe's failure after acquisition reaches the case, its socket closed: " + J(cs("kU1")));
     const wName = rep.lateOpened[0];
     add(cs("kW1")?.outcome === "timeout: fresh: Workspace.open" && clean("kW1") && rep.lateOpened.length === 1 && rep.closedAtEnd.includes(wName), "K-W1: a late open is kept, said, waited for, and closed at the run's end: " + J({ kW1: cs("kW1"), late: rep.lateOpened, closed: rep.closedAtEnd.includes(wName) }));
-    const o = window.__kO1;
-    add(cs("kO1")?.outcome?.startsWith("threw: K-O1 injected") && clean("kO1") && cs("kO1")?.cleanup?.stages?.includes("cleanup: owner.destroy() ok") && o?.["suspended"] === true && o?.["unhook"] === null && o?.client === null, "K-O1: an owner left by a failed case is destroyed by the cleanup, its work awaited: " + J({ kO1: cs("kO1"), suspended: o?.["suspended"], client: o?.client === null }));
+    const k = window.__kO1 ?? {}, o = k.o, ended = cs("kO1")?.cleanup?.stages ?? [];
+    add(cs("kO1")?.outcome?.startsWith("threw: K-O1 injected") && clean("kO1") && k.hadClient && k.stopDone !== null && k.runDone !== null && ended.includes("cleanup: owner's detached stopClient ok") && ended.includes("cleanup: owner's client loop ok") && o?.["suspended"] === true && o?.client === null && rep.cases.every((c) => c.name !== "kO1" || c.cleanupEndMs >= Math.max(k.stopDone, k.runDone)), "K-O1: a running owner destroyed early by a failed case: the cleanup awaited its detached (slow) stop and its loop: " + J({ outcome: cs("kO1")?.outcome, hadClient: k.hadClient, stopDone: k.stopDone, runDone: k.runDone, stages: ended }));
   } else if (page === "P9") {
     add(rep.stopped?.case === "kS1" && rep.stopped.step === "cleanup: c.stop()" && /^rejected: K-S1 injected/.test(rep.stopped.why), "K-S1: a stop that rejects (its loop settled) is a named fail-stop: " + J(rep.stopped));
   } else if (page === "P2") {
