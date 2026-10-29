@@ -309,7 +309,7 @@ bindClass(GetSet, getsetType);
 // (the owner optional, as CPython's wrap_descr_get; __get__(None, None) refused)
 method(getsetType, "__get__", (d: GetSet, o: any = undefined, t: any = null) => {
   if (o === undefined) raise(T.TypeError, "__get__ expected at least 1 argument, got 0");
-  if (o === null) return t === null ? raise(T.TypeError, "__get__(None, None) is invalid") : d;
+  if (o === null) return t === null ? raise(T.TypeError, "__get__(None, None) is invalid") : ((d as any).$orig ?? d);
   descrReceiver(d, o);
   return d.get(o);
 });
@@ -3698,6 +3698,7 @@ function unboxing(f: any): any {
   (w as any).$owner = f.$owner; // (the base type's: a str subclass's upper is str's, checked as str's)
   (w as any).__qualname__ = f.__qualname__;
   (w as any).$unboxing = true;
+  (w as any).$orig = f; // (as Python sees it: the base's own, selfChecked)
   return w;
 }
 hooks.primProxy = (base: PyType): PyType => {
@@ -3707,7 +3708,7 @@ hooks.primProxy = (base: PyType): PyType => {
   for (const [k, v] of base.$dict) {
     if (k === "__new__" || k === "__init__") continue;
     if (typeof v === "function" && v.$builtinMethod === true) d.set(k, unboxing(v));
-    else if (v instanceof GetSet) d.set(k, new GetSet(v.owner, v.name, (o) => v.get(unbox(o)), v.set));
+    else if (v instanceof GetSet) d.set(k, Object.assign(new GetSet(v.owner, v.name, (o) => v.get(unbox(o)), v.set), { $orig: v }));
   }
   // int.__format__ with a float presentation type goes through float(self),
   // which a subclass may override.
@@ -3722,6 +3723,7 @@ hooks.primProxy = (base: PyType): PyType => {
     (fmtW as any).$builtinMethod = true;
     (fmtW as any).$owner = int;
     (fmtW as any).$unboxing = true;
+    (fmtW as any).$orig = f0.$orig;
     d.set("__format__", fmtW);
   }
   px = { $name: base.$name, $qualname: base.$name, $module: "builtins", $dict: d, $bases: [], $mro: [], $subclasses: [], $ver: 0, $hidden: true } as any;
