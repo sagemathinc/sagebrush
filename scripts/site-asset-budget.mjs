@@ -90,11 +90,16 @@ const pi = readFileSync(prod.get("dist/index.html")), di = readFileSync(dev.get(
 const boot = { raw: di.length - pi.length, gzip: gz(di) - gz(pi) };
 check(`DEV bootstrap delta (index.html): at most ${DEV_BOOT.raw} B minified and ${DEV_BOOT.gzip} B gzip`, boot.raw <= DEV_BOOT.raw && boot.gzip <= DEV_BOOT.gzip, boot);
 // 4. the LaTeX group
-const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n));
+// (the comments' chunk, sagebrush-latex-comments.js, loaded only for comments: its own line below, not in the group)
+const COMMENTS = "dist/sagebrush-latex-comments.js";
+const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n) && n !== COMMENTS);
 const js = group.filter((n) => n.endsWith(".js")), css = group.filter((n) => n.endsWith(".css")), fonts = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(woff2?|ttf|otf)$/.test(n) && !prod.has(n));
 const jsRaw = js.reduce((s, n) => s + statSync(dev.get(n)).size, 0), jsGz = js.reduce((s, n) => s + gz(readFileSync(dev.get(n))), 0);
 // (192 KiB / 64 KiB: @sagebrush's ruling of 2026-10-29, for the ten examples and the embeddable editor; was 180 / 60)
 check("the LaTeX group's JS: at most 192 KiB minified, 64 KiB gzip", js.length > 0 && jsRaw <= 192 * 1024 && jsGz <= 64 * 1024, { files: js, raw: jsRaw, gzip: jsGz });
+// 4b. the comments' chunk: at most 16 KiB minified, 6 KiB gzip (@sagebrush, 2026-10-29: comments in a lazy chunk of
+//     their own, so a document without comments never pays for them)
+if (dev.has(COMMENTS)) { const b = readFileSync(dev.get(COMMENTS)); check("the LaTeX comments' chunk: at most 16 KiB minified, 6 KiB gzip", b.length <= 16 * 1024 && gz(b) <= 6 * 1024, { raw: b.length, gzip: gz(b) }); }
 // (the test build's hold on image reads, web/latex/page.ts: folded away in the DEV build, so named in none of its files)
 const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && readFileSync(dev.get(n)).includes("__sbTexImageRead"));
 check("DEV: the test build's hook folded away (no file names __sbTexImageRead)", testHooks.length === 0, { testHooks });
