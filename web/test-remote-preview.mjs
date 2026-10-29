@@ -31,7 +31,12 @@ try {
   await new Promise((r) => (ws.onopen = r));
   let n = 0;
   const waiting = new Map();
-  ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
+  const paused = []; // (Fetch.requestPaused events: a request held until the test continues it)
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+    else if (m.method === "Fetch.requestPaused") paused.push(m.params);
+  };
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
   const ev = async (expression) => {
     const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
@@ -79,6 +84,20 @@ try {
   const C = await ev("(() => { const nb = sagebrush.notebook; nb.addCell('', null, false, 'code'); return nb.cells().length - 1; })()");
   ok(Number.isInteger(L) && C === L + 1 && (await ev(`sagebrush.notebook.cells()[${C}].type === 'code'`)), `two code cells to run (${L}, ${C})`);
   await runCode(L, "secret = 'local only'");
+
+  // 2b. the module's load held (the first GPU choice imports sagebrush-remote.js): This browser is chosen meanwhile;
+  // when the load finishes, nothing is shown or connected (astra P1D-A1)
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-remote.js*", requestStage: "Request" }] });
+  const pick = (v) => ev(`(() => { const p = document.querySelector('#kernelpick'); p.value = ${JSON.stringify(v)}; p.dispatchEvent(new Event('change')); return true; })()`);
+  await pick("gpu");
+  for (let i = 0; i < 100 && !paused.length; i++) await sleep(50);
+  ok(paused.length === 1, "the module's load is held");
+  await pick("local");
+  await send("Fetch.continueRequest", { requestId: paused[0].requestId });
+  await send("Fetch.disable");
+  await sleep(800);
+  ok(await ev("!document.querySelector('#remotedlg') && document.querySelector('#kernelpick').value === 'local' && !/GPU kernel/.test(document.querySelector('#status').textContent)"),
+    "the load finishing after This browser was chosen shows no sheet and connects nothing");
 
   // 3. GPU: the Connect sheet
   await ev("(() => { const p = document.querySelector('#kernelpick'); p.value = 'gpu'; p.dispatchEvent(new Event('change')); return true; })()");
@@ -130,6 +149,14 @@ try {
   await until("/ready \\(sagebrush/.test(document.querySelector('#status').textContent) || !/GPU kernel/.test(document.querySelector('#status').textContent)");
   const o7 = await runCode(C, "print(secret)");
   ok(/local only/.test(o7), `This browser again: the browser's interpreter, with its own variables (${JSON.stringify(o7.slice(0, 80))})`);
+  // 8. another notebook opened while the Connect sheet is up: the sheet is settled, nothing connects, the picker is This browser
+  await pick("gpu");
+  await until("!!document.querySelector('#remotedlg') && document.querySelector('#remotedlg').open");
+  await ev(`document.querySelector('#filebtn').click(); document.querySelector('[data-f="new"]').click(); true`);
+  await until("!document.querySelector('#remotedlg')", 15000);
+  await sleep(500);
+  ok(await ev("document.querySelector('#kernelpick').value === 'local' && !/GPU kernel/.test(document.querySelector('#status').textContent)"),
+    "opening another notebook while the sheet is up: the sheet goes, nothing connects, the picker is This browser");
 } catch (e) {
   ok(false, `the test ran to its end: ${e?.message ?? e}`);
   try {
