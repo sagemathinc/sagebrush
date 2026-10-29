@@ -1140,8 +1140,72 @@ async function resourceControls() {
     const v = barrierVerdict({ ...base, ...x });
     control1(v.ok === (items.length === 0) && J(v.items) === J(items), `(control) ${name}: the barrier's verdict on ${J(x)}: ${v.ok ? "pass" : "fail " + J(v.items)}`);
   }
+  // (r7, the disposal's pure fixtures D1-D7, one control line each (the ok line's count 66 -> 73): a protocol error, an
+  // errorText, an acknowledged navigation whose document never changes (a delayed disposal), a changed loader whose
+  // page still has the cases' globals, another loader than the navigation's, an unanswered navigation each stop the
+  // test with the work after it undone (its sentinel unset); only D7, all observed, lets the work after it run)
+  {
+    const old = { loaderId: "L1", url: "http://127.0.0.1/ctl.html?p=P7" }, ack = { frameId: "F", loaderId: "L2" };
+    const io = ({ nav = ack, after = { loaderId: "L2", url: "about:blank" }, empty = true }) => {
+      let reads = 0;
+      return { frame: async () => (reads++ === 0 ? old : after), navigate: async () => { if (nav instanceof Error) throw nav; return nav; }, probe: async () => empty };
+    };
+    const dx = [
+      ["D1", { nav: { code: -32000, message: "Cannot navigate to invalid URL" } }, false],
+      ["D2", { nav: { frameId: "F", loaderId: "L2", errorText: "net::ERR_ABORTED" } }, false],
+      ["D3", { after: old }, false],
+      ["D4", { empty: false }, false],
+      ["D5", { after: { loaderId: "L3", url: "about:blank" } }, false],
+      ["D6", { nav: new Error("no answer within 300 ms: Page.navigate") }, false],
+      ["D7", {}, true],
+    ];
+    for (const [name, x, proves] of dx) {
+      const d = await disposePage(io(x), 300);
+      let stopped = false, sentinel = false;
+      try { requireDisposed(name, d); sentinel = true; } catch { stopped = true; }
+      control1(d.ok === proves && stopped === !proves && sentinel === proves, `(control) ${name}: a failed control page's disposal on ${J(x)}: ${d.ok ? "proved, the work after it runs" : "unproved, the test stops, the work after it undone"} (${d.said})`);
+    }
+  }
   return enabled ? cookie : null;
 }
+
+/** r7 (astra's and astra5's D2 r6 REVISE): a control page that didn't end, disposed of by navigating it to about:blank,
+ * the disposal PROVED inside one slot of `ms` from the start, or not at all. From the CDP Page domain (devtools-protocol
+ * pdl/domains/Page.pdl at dfad77069330a9188771bb64a32d18853a10b012): navigate returns frameId, loaderId ("omitted in
+ * case of same-document navigation") and errorText ("present if and only if navigation has failed"); getFrameTree's
+ * Frame has loaderId ("Identifier of the loader associated with this frame") and url. A protocol error (the dispatcher
+ * resolves m.error as the answer) or an errorText is a failure at once. Proved only when the root frame's loader has
+ * changed from the one before the navigation (the old document gone), to the navigation's own loader, at about:blank,
+ * and the page then evaluates with none of the cases' globals (the blank document committed). `io` is the CDP side:
+ * frame(ms), navigate(ms), probe(ms) */
+async function disposePage(io, ms) {
+  const end = performance.now() + ms, left = () => Math.max(0, end - performance.now());
+  const settle = (p) => Promise.resolve().then(p).then((v) => ({ v }), (e) => ({ e: why(e) }));
+  const before = await settle(() => io.frame(left()));
+  if (before.e !== undefined || typeof before.v?.loaderId !== "string") return { ok: false, said: `the frame before the navigation unread: ${before.e ?? J(before.v)}` };
+  const nav = await settle(() => io.navigate(left()));
+  if (nav.e !== undefined) return { ok: false, said: `the navigation unanswered: ${nav.e}` };
+  const a = nav.v;
+  if (!a || typeof a !== "object" || a.code !== undefined || a.message !== undefined) return { ok: false, said: `the navigation answered a protocol error: ${J(a)}` };
+  if (a.errorText !== undefined) return { ok: false, said: `the navigation failed: errorText ${J(a.errorText)}` };
+  let last = { loaderBefore: before.v.loaderId, navLoader: a.loaderId ?? null };
+  while (left() > 0) {
+    const f = await settle(() => io.frame(Math.min(1000, left())));
+    if (f.e === undefined && typeof f.v?.loaderId === "string") {
+      const gone = f.v.loaderId !== before.v.loaderId, ours = a.loaderId === undefined || f.v.loaderId === a.loaderId, blank = f.v.url === "about:blank";
+      last = { loaderBefore: before.v.loaderId, navLoader: a.loaderId ?? null, loader: f.v.loaderId, url: f.v.url };
+      if (gone && ours && blank) {
+        const p = await settle(() => io.probe(Math.min(1000, left())));
+        last.empty = p.e ?? p.v;
+        if (p.v === true) return { ok: true, said: `the old document gone (loader ${before.v.loaderId} -> ${f.v.loaderId}), about:blank committed with none of the cases' globals` };
+      }
+    } else last = { ...last, frame: f.e ?? J(f.v) };
+    await sleep(Math.min(50, left()));
+  }
+  return { ok: false, said: `not observed within ${ms} ms: ${J(last)}` };
+}
+/** The gate after disposePage: unproved, the whole test stops, before the barrier and before any later page */
+const requireDisposed = (page, d, more = "") => { if (!d.ok) throw new Error(`the control page ${page} didn't end, and its disposal wasn't proved, so the whole test stops before the barrier: ${d.said}${more}`); };
 
 /** r6 §4's stop-path run (CONTROL_STOP=upstreamCloseFailure, read once at startup; absent in the main run): K-U4's
  * setup on the run's OWN registry and ledger, then the between-page barrier once, which must stop the whole test (exit 1,
@@ -1289,15 +1353,24 @@ try {
     let lines;
     if (r.done) lines = await answer();
     else {
-      // (r6, @sagebrush's (3): a page that doesn't end is a failed control, recorded with its receipt; the page is closed
-      // (about:blank, bounded by the answer's FETCH_S slot, which it then doesn't use), and the barrier below must still
-      // prove the front quiet, or the whole test stops as before. The pages after it, and the main run, then go on, the
-      // main run as DIAGNOSTIC ONLY)
+      // (r6, @sagebrush's (3): a page that doesn't end is a failed control, recorded with its receipt; r7: its disposal
+      // is then proved below (or the whole test stops), and the barrier must still prove the front quiet, or the whole
+      // test stops as before. The pages after it, and the main run, then go on, the main run as DIAGNOSTIC ONLY)
       lines = [[false, `didn't end within ${allowance} s (elapsed ${r.elapsedS} s): ${receipt(r)}`]];
-      await send("Page.navigate", { url: "about:blank" }, FETCH_S * 1000);
-      console.log(`  page ${cp.page} closed after it didn't end; ${receipt(r)}`);
     }
     for (const [ok, what] of Array.isArray(lines) ? lines : [[false, `${cp.page}: no control lines: ${J(lines)}`]]) control1(ok, `(control) ${cp.page} ${what}`);
+    if (!r.done) {
+      // (r7: the disposal PROVED (disposePage), inside the answer's unused FETCH_S slot, and recorded as a control
+      // either way; unproved, the whole test stops here, before the barrier and before any later page or the main run)
+      const d = await disposePage({
+        frame: (ms) => send("Page.getFrameTree", {}, ms).then((t) => { if (!t?.frameTree?.frame) throw new Error("no frame tree: " + J(t).slice(0, 300)); return t.frameTree.frame; }),
+        navigate: (ms) => send("Page.navigate", { url: "about:blank" }, ms),
+        probe: (ms) => ev('location.href === "about:blank" && typeof window.runControls === "undefined" && typeof window.run === "undefined" && typeof window.__report === "undefined" && typeof window.__runP === "undefined"', ms),
+      }, FETCH_S * 1000);
+      control1(d.ok, `(control) ${cp.page} disposed of after it didn't end (about:blank, within ${FETCH_S} s): ${d.said}`);
+      requireDisposed(cp.page, d, `; ${receipt(r)}`);
+      console.log(`  page ${cp.page} closed (proved: ${d.said}) after it didn't end; ${receipt(r)}`);
+    }
     const proofs = reg.proofs - proofs0;
     const b = await barrier(cp.page);
     // (the harness's side of the terminal controls: what only the front or the barrier saw)
