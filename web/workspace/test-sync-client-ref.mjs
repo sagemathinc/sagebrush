@@ -310,7 +310,9 @@ const pairCloser = (up, client, first, ledger = closeFailures) => {
     first();
     const bad = [];
     try { up.close(1000, "proxy"); } catch (e) { bad.push(`the server's side (${why(e)})`); }
-    try { client.close(okCode(code), "proxy"); } catch (e) { bad.push(`the page's side (${why(e)})`); }
+    // (a page socket already closing or closed (readyState 2 or 3), as when the page closed first, isn't closed again:
+    // a benign double close is not a failure)
+    if (client.readyState !== 2 && client.readyState !== 3) try { client.close(okCode(code), "proxy"); } catch (e) { bad.push(`the page's side (${why(e)})`); }
     ledger.push(...bad);
     return bad;
   };
@@ -521,8 +523,13 @@ try {
     const pc = pairCloser({ close() { throw Object.assign(new Error("injected"), { code: "EPIPE" }); } }, { close() { pageClosed = true; } }, () => reg.delete(pc), led);
     reg.add(pc);
     pc(1000);
-    const pcAgain = pc(1000), stage = proxiedStage(reg, led);
-    control1(pageClosed && pcAgain.length === 0 && reg.size === 0 && J(led) === J(["the server's side (EPIPE)"]) && !stage.ok && stage.said === "NOT all closed (the server's side (EPIPE))", "(control) a proxied pair's close that fails before the cleanup still fails the cleanup's stage: " + J(stage));
+    const pcAgain = pc(1000), d3 = mkdtempSync(join(tmpdir(), "sb-scr-ctl-"));
+    const receipt = await runStages([["proxied sockets", () => proxiedStage(reg, led)], ["a directory", () => removeDir(d3)]], 200);
+    control1(pageClosed && pcAgain.length === 0 && reg.size === 0 && J(led) === J(["the server's side (EPIPE)"]) && !receipt.ok && receipt.line === "cleanup: proxied sockets NOT all closed (the server's side (EPIPE)); a directory removed" && !existsSync(d3), "(control) a proxied pair's close that fails before the cleanup fails the final receipt, naming it, and the stages after it still run: " + receipt.line);
+    // (a benign double close: the page's side already closed (readyState 3) isn't closed again, and nothing is recorded)
+    const led2 = [];
+    const pc2 = pairCloser({ close() {} }, { readyState: 3, close() { throw new Error("injected: closed twice"); } }, () => {}, led2);
+    control1(pc2(1000).length === 0 && led2.length === 0, "(control) a page socket already closed is not closed again, and its pair records no failure: " + J(led2));
     const d2 = mkdtempSync(join(tmpdir(), "sb-scr-ctl-"));
     const t0 = Date.now(), c2 = await runStages([["a front stop that never settles", () => new Promise(() => {})], ["a directory", () => removeDir(d2)]], 200);
     control1(!c2.ok && c2.line === "cleanup: a front stop that never settles threw (no answer within 200 ms: a front stop that never settles); a directory removed" && !existsSync(d2) && Date.now() - t0 < 5000, "(control) a stage that never ends fails within its bound, and the stages after it still run: " + c2.line);
