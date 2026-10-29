@@ -2133,7 +2133,7 @@ async function durabilityAstraProbes0ee(){
  {
   const o=await named();let a=await openAs(o);const e=await a.create('/b.board.json'),doc=(await a.read(e.path)).content;await a.flushOpfs();a.close();
   const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+10});a=await openAs(o);
-  const {WS_SAVE}=await import('./wssave.js');const result=await new Function('ws','id','d',"let wsRefused=null,wsSeq=0,wsRev=1,wsEpoch=0,wsCopy=null,wsWriting=Promise.resolve();const wsLatest=new Map(),PENDING_MAX=8*2**20,PENDING=\"sagebrush-workspace-pending:\",SESSION=\"a\".repeat(16);const logSave=()=>{};\n"+WS_SAVE+"\n\ntry{wsSave(id,d)}catch(e){wsRefused=e}return wsWriting.then(()=>({pending:!!localStorage.getItem(PENDING+id),refused:wsRefused?.code??wsRefused?.message}));")(a,e.ref,doc);
+  const {WS_SAVE}=await import('./wssave.js');const result=await new Function('ws','id','d',"let wsRefused=null,wsSeq=0,wsRev=1,wsEpoch=0,wsCopy=null,wsWriting=Promise.resolve();const wsLatest=new Map(),PENDING_MAX=8*2**20,PENDING=\"sagebrush-workspace-pending:\",SESSION=\"a\".repeat(16);const logSave=()=>{};const journalOn=false,jstore=null;let wsBridge=null;\n"+WS_SAVE+"\n\ntry{wsSave(id,d)}catch(e){wsRefused=e}return wsWriting.then(()=>({pending:!!localStorage.getItem(PENDING+id),refused:wsRefused?.code??wsRefused?.message}));")(a,e.ref,doc);
   out(!result.pending,'board-pending-through-quarantine',{quarantined:a.quarantined,...result});a.close();localStorage.removeItem('sagebrush-workspace-pending:'+e.ref);
  }
  // A purge-only resumed open sets an unquarantined fence before deleting main data.
@@ -2474,7 +2474,7 @@ async function currentPending(){
  const marker=await rawGet(a.ws,'meta','purgeLocal'),e=await a.create('/new.board.json');
  const {WS_SAVE}=await import('./wssave.js');let enter,release;const entered=new Promise(r=>enter=r),held=new Promise(r=>release=r),orig=a.write;
  a.write=async function(...args){enter();await held;throw Error('simulated shutdown before IndexedDB commit')};
- const save=new Function('ws','id','d',`let wsRefused=null,wsSeq=0,wsRev=1,wsEpoch=0,wsCopy=null,wsWriting=Promise.resolve();const wsLatest=new Map(),PENDING_MAX=8*2**20,PENDING='sagebrush-workspace-pending:',SESSION='aaaaaaaaaaaaaaaa';const logSave=()=>{};const dropPending=()=>{};${WS_SAVE};wsSave(id,d);return wsWriting;`);
+ const save=new Function('ws','id','d',`let wsRefused=null,wsSeq=0,wsRev=1,wsEpoch=0,wsCopy=null,wsWriting=Promise.resolve();const wsLatest=new Map(),PENDING_MAX=8*2**20,PENDING='sagebrush-workspace-pending:',SESSION='aaaaaaaaaaaaaaaa';const logSave=()=>{};const dropPending=()=>{};const journalOn=false,jstore=null;let wsBridge=null;${WS_SAVE};wsSave(id,d);return wsWriting;`);
  const saving=save(a,e.ref,{title:'NEW UNSAVED EDIT',nodes:[]});await entered;
  const pendingKey='sagebrush-workspace-pending:'+e.ref,before=localStorage.getItem(pendingKey);await a.cleanUp(true);const after=localStorage.getItem(pendingKey);
  release();await saving;a.write=orig;
