@@ -464,6 +464,8 @@ mkdirSync(join(here, "dist", "embed"), { recursive: true });
 copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));
 // the questions preview (web/questions): auto-graded questions on the same component and kernel. Flagged, off by
 // default: built only for a hosted preview (scripts/preview.sh sets SAGEBRUSH_PREVIEW_HOST) or with SAGEBRUSH_QUESTIONS=1
+// (dist isn't cleared between builds: the directory is removed either way, so a flagged build's page never outlives it)
+rmSync(join(here, "dist", "questions"), { recursive: true, force: true });
 if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_QUESTIONS === "1") {
   mkdirSync(join(here, "dist", "questions"), { recursive: true });
   copyFileSync(join(here, "questions", "index.html"), join(here, "dist", "questions", "index.html"));
