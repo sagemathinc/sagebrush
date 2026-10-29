@@ -134,11 +134,21 @@ try {
     const okNav = await fresh(`!!${W}`, 30000);
     const nav = { oldWouldPass, okNav, waited: Date.now() - t0, newDoc: await ev(`performance.timeOrigin`) - t0 };
     check(oldWouldPass && okNav && nav.waited >= 1400 && nav.newDoc >= 1000, "a delayed navigation: the old check would pass on the outgoing document; fresh() waits for the new one", nav);
-    // (negatives: an unacknowledged mark and a navigation that never comes both throw, so the step after can't run)
-    const throws = async (f) => { try { await f(); return false; } catch { return true; } };
-    const neg = { markFalse: await throws(() => markWith(`false`)), markThrows: await throws(() => markWith(`(() => { throw new Error("x"); })()`)), freshNone: await (async () => { await mark(); return throws(() => fresh(`true`, 1500)); })() };
+    // (negatives: each failed navigation is run the way the fixtures run one, the navigation awaited and THEN the step
+    // that depends on it (a stand-in for mk/stat/read, counting its calls): an unacknowledged mark (false, or throwing),
+    // a fresh() whose condition never holds, and a timeout (marked, no navigation) must each throw, the step never run)
+    let depCalls = 0;
+    const dependent = async () => { depCalls++; };
+    const stops = async (nav) => { try { await nav(); await dependent(); return false; } catch { return true; } };
+    const neg = {
+      markFalse: await stops(() => markWith(`false`)),
+      markThrows: await stops(() => markWith(`(() => { throw new Error("x"); })()`)),
+      freshFalse: await stops(() => fresh(`false`, 1500)),
+      freshTimeout: await stops(async () => { await mark(); await fresh(`true`, 1500); }),
+    };
     await ev(`delete window.__sbOld; true`);
-    check(neg.markFalse && neg.markThrows && neg.freshNone, "a failed mark and a missing new document each throw (nothing after them runs)", neg);
+    neg.depCalls = depCalls;
+    check(neg.markFalse && neg.markThrows && neg.freshFalse && neg.freshTimeout && depCalls === 0, "a failed mark, a false fresh() and a navigation timeout each throw; the dependent step never runs", neg);
   }
 
   // ---- opening, the banner, Save gated on edits (the first open's requests recorded: the cold first click)
