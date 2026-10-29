@@ -10,6 +10,8 @@ import type { HostOutcome, ShellHost } from "./host.ts";
 export const SCROLLBACK = Object.freeze({ units: 4194304, lines: 6000, spans: 50000 });
 const HISTORY_MAX = 500;
 const MIN_H = 120;
+// (the page's fixed bottom overlays: web/alpha-banner.js, and a hosted preview's notice gutter, web/preview/notice.js)
+const OVERLAYS = ["sb-alpha-banner", "sb-preview-notice"];
 // (the command's last line: its exit status, then its final directory after a record separator, so `cd` carries to
 // the next command; a script that exits early keeps the directory it started in)
 const TRAILER = "\n__sb_s=$?; printf '\\036'; pwd; exit $__sb_s";
@@ -116,12 +118,24 @@ export class TerminalPanel {
     this.place = this.place.bind(this);
     addEventListener("resize", this.place);
     this.watch = new MutationObserver(this.place);
-    this.watch.observe(document.body, { childList: true });
+    this.watch.observe(document.body, { childList: true, subtree: false, attributes: true, attributeFilter: ["style", "class"] });
   }
   private watch: MutationObserver;
+  /** Stacks the dock above the page's fixed bottom overlays (the alpha notice, a preview's notice and its pill), so
+   * none covers the prompt: the dock's bottom is the highest top edge among them. */
   private place() {
-    const b = document.getElementById("sb-alpha-banner");
-    this.root.style.bottom = b ? `${b.getBoundingClientRect().height}px` : "0px";
+    let lift = 0;
+    for (const id of OVERLAYS) {
+      const e = document.getElementById(id);
+      if (!e || e.hidden || getComputedStyle(e).display === "none") continue;
+      const r = e.getBoundingClientRect();
+      // (fixed in the window's lower half; a stacked one, like the alpha notice above a preview's gutter, counts too)
+      if (r.height > 0 && r.top > innerHeight / 2 && r.top < innerHeight) lift = Math.max(lift, innerHeight - r.top);
+    }
+    const b = Math.max(0, Math.round(lift));
+    this.root.style.bottom = `${b}px`;
+    // (the page keeps its last lines reachable above the dock)
+    if (!this.root.hidden) document.body.style.setProperty("--sb-term-h", `${Math.round(this.root.getBoundingClientRect().height) + b}px`);
   }
 
   get shown() {
@@ -131,6 +145,8 @@ export class TerminalPanel {
     if (this.ended) return;
     this.root.hidden = false;
     this.place();
+    requestAnimationFrame(() => this.place());
+    this.warm();
     document.body.classList.add("sb-term-open");
     this.input.focus();
   }
@@ -183,6 +199,39 @@ export class TerminalPanel {
     addEventListener("pointerup", up);
   }
 
+  // ---------------------------------------------------------------- the shell's start (William: "show something
+  // during the first load since that can be a few seconds")
+  private ready = false;
+  private starting: Promise<void> | null = null;
+  private loadingEl: HTMLElement | null = null;
+  /** Starts the shell worker if it isn't running, showing "Starting the shell…" in the dock until it is. */
+  private warm(): Promise<void> {
+    if (this.ready) return Promise.resolve();
+    if (this.starting) return this.starting;
+    this.loadingEl ??= this.log.appendChild(el("div", "sb-term-loading", "Starting the shell\u2026"));
+    this.root.classList.add("loading");
+    const t0 = performance.now();
+    this.starting = this.opts.host.shellFor().then(
+      () => {
+        this.ready = true;
+        this.loadingEl?.remove();
+        this.loadingEl = null;
+        this.root.classList.remove("loading");
+        this.root.dataset.startMs = String(Math.round(performance.now() - t0));
+      },
+      (e) => {
+        if (this.loadingEl) {
+          this.loadingEl.textContent = `The shell didn't start: ${String((e as Error)?.message ?? e)}`;
+          this.loadingEl.classList.add("sb-term-err");
+          this.loadingEl = null;
+        }
+        this.root.classList.remove("loading");
+        this.starting = null;
+      },
+    );
+    return this.starting;
+  }
+
   private say(text: string) {
     this.note.textContent = text;
     this.note.hidden = !text;
@@ -217,6 +266,23 @@ export class TerminalPanel {
       const s = ta.value;
       if (s.trim() === "") {
         this.echo(`${this.cwd} $`, "");
+        return;
+      }
+      const word = s.trim();
+      if (word === "clear" || word === "reset") {
+        // (the panel's own: clear = Ctrl-L; reset also drops the input and starts a fresh shell, keeping the cwd
+        // and the history, for when something was pasted by mistake)
+        this.remember(s);
+        ta.value = "";
+        this.grow();
+        this.clear();
+        this.say("");
+        if (word === "reset") {
+          this.opts.host.endShell("reset");
+          this.ready = false;
+          this.starting = null;
+          void this.warm();
+        }
         return;
       }
       void this.submit(s);
@@ -303,6 +369,12 @@ export class TerminalPanel {
     this.input.value = "";
     this.grow();
     const cmd = this.newCmd(`${this.cwd} $ ${script}`);
+    if (!this.ready) {
+      // (the first command while bash loads: says so, under its prompt, until the shell is up)
+      const wait = cmd.el.appendChild(el("div", "sb-term-loading", "Starting the shell\u2026"));
+      await this.warm();
+      wait.remove();
+    }
     const ctl = new AbortController();
     const t0 = performance.now();
     const timer = window.setInterval(() => (this.timeEl.textContent = `${((performance.now() - t0) / 1000).toFixed(1)} s`), 100);

@@ -56,14 +56,32 @@ try {
   };
   await send("Page.navigate", { url });
   check(!!(await until(`(() => { const b = document.querySelector("#termbtn"); return b && !b.hidden; })()`)), "⋯ ▸ Terminal shows on a local host");
+  // (a preview host's notice gutter and the alpha notice lifted above it, as web/preview/notice.js lays them out:
+  // the dock must stack above both, so neither covers the prompt; William's first finding)
+  await evaluate(`(() => {
+    const g = document.createElement("div"); g.id = "sb-preview-notice";
+    g.style.cssText = "position:fixed;left:0;right:0;bottom:0;height:44px;background:#eee;z-index:2147483001";
+    document.body.append(g);
+    const a = document.getElementById("sb-alpha-banner");
+    if (a) a.style.bottom = "44px";
+  })()`);
   await evaluate(`document.querySelector("#termbtn").click()`);
   check(!!(await until(`(() => { const t = document.querySelector(".sb-term"); return t && !t.hidden; })()`, 15000)), "the dock opens");
+  check(!!(await until(`!!document.querySelector(".sb-term-loading") || document.querySelector(".sb-term").dataset.startMs !== undefined`, 5000)), "opening shows 'Starting the shell…' while bash loads (or it was already up)");
+  check(!!(await until(`document.querySelector(".sb-term").dataset.startMs !== undefined && !document.querySelector(".sb-term-loading")`, 30000)), "the loading line goes once the shell is up");
+  const covered = await evaluate(`(() => {
+    const ta = document.querySelector(".sb-term textarea").getBoundingClientRect();
+    const tops = ["sb-alpha-banner", "sb-preview-notice"].map((id) => document.getElementById(id)).filter(Boolean).map((e) => e.getBoundingClientRect().top);
+    return { taBottom: ta.bottom, tops, focused: document.activeElement === document.querySelector(".sb-term textarea") };
+  })()`);
+  check(covered && covered.tops.every((t) => covered.taBottom <= t) && covered.focused, `the prompt is above every bottom overlay, and focused: ${JSON.stringify(covered)}`);
   // one command: type, Enter, wait for the polite status after its output
   let n = 0;
   const run = async (cmd) => {
     n++;
     await evaluate(`(() => {
       const ta = document.querySelector(".sb-term textarea");
+      document.querySelector(".sb-term-status").textContent = "";
       ta.value = ${JSON.stringify(cmd)};
       ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     })()`);
@@ -90,6 +108,19 @@ try {
   r = await run("printf '<b>x</b>\\n'");
   check(r?.out === "<b>x</b>\n" && !/<b>/.test(r?.html ?? ""), "markup from data stays text");
   check((await evaluate(`document.querySelector(".sb-term-log").getAttribute("aria-live")`)) === "off", "the log is never live");
+  // clear and reset: the panel's own (William: both said "command not found")
+  const typeEnter = (cmd) => evaluate(`(() => { const ta = document.querySelector(".sb-term textarea"); ta.value = ${JSON.stringify(cmd)};
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); })()`);
+  await typeEnter("clear");
+  check((await evaluate(`document.querySelectorAll(".sb-term-cmd").length`)) === 0, "clear empties the scrollback");
+  n = 0;
+  r = await run("echo after-clear");
+  check(r?.out === "after-clear\n", "commands run after clear");
+  await typeEnter("reset");
+  check((await evaluate(`document.querySelectorAll(".sb-term-cmd").length`)) === 0, "reset empties the scrollback");
+  n = 0;
+  r = await run("pwd");
+  check(r?.out === "/tdir\n" && r?.status === "done", `after reset a fresh shell runs, in the same directory: ${JSON.stringify(r)}`);
   if (process.argv[2]) {
     const shot = await send("Page.captureScreenshot", { format: "png" });
     writeFileSync(process.argv[2], Buffer.from(shot.result.data, "base64"));
