@@ -22,6 +22,8 @@ shutil.rmtree(work, ignore_errors=True)
 shutil.copytree(os.path.dirname(mpmath.__file__), os.path.join(work, "mpmath"), ignore=shutil.ignore_patterns("__pycache__"))
 for f in ("pytest.py", "run_tests.py"):
     shutil.copy(os.path.join(HERE, f), work)
+# (a control of the harness: not named test_*, so it isn't in mods)
+shutil.copy(os.path.join(HERE, "harness_control.py"), os.path.join(work, "mpmath", "tests", "harness_control.py"))
 mods = sorted(f[:-3] for f in os.listdir(os.path.join(work, "mpmath", "tests")) if f.startswith("test_") and f.endswith(".py"))
 if args.only:
     mods = [m for m in mods if any(o in m for o in args.only)]
@@ -48,6 +50,30 @@ def both(mod):
     return mod, run([sys.executable], mod), run(["node", "--stack-size=8000", CLI], mod)
 
 
+def control_problems(cp, pj):
+    """The harness control's expected outcome on both sides, or what differs."""
+    bad = []
+    seeded = {}
+    for side, r in (("cpython", cp), ("pyjs", pj)):
+        if "passed" not in r:
+            bad.append("%s: no result (%s)" % (side, (r.get("crash") or r.get("tail") or r.get("import_error") or "")[-300:]))
+            continue
+        fails = {f["test"]: f for f in r.get("failures", [])}
+        if r["passed"] != 1 or r["failed"] != 2 or sorted(fails) != ["test_fails", "test_seeded"]:
+            bad.append("%s: passed %s, failed %s, failures %s" % (side, r["passed"], r["failed"], sorted(fails)))
+            continue
+        f = fails["test_fails"]
+        if "an injected failing assert" not in f["error"] or not f["where"].strip() or "seed" not in f:
+            bad.append("%s: the injected failure's text, location or seed is missing: %r" % (side, f))
+        seeded[side] = fails["test_seeded"]["error"]
+    if len(seeded) == 2 and seeded["cpython"] != seeded["pyjs"]:
+        bad.append("the seeded draws differ: %r vs %r" % (seeded["cpython"], seeded["pyjs"]))
+    return bad
+
+
+_, ccp, cpj = both("harness_control")
+cbad = control_problems(ccp, cpj)
+print("harness control: " + ("ok (a pass and two reported failures on both interpreters; the same seeded draw)" if not cbad else "FAILED: " + "; ".join(cbad)))
 results = {}
 with cf.ThreadPoolExecutor(args.j) as ex:
     for mod, cp, pj in ex.map(both, mods):
@@ -81,5 +107,5 @@ for mod in mods:
         elif "timeout" in r:
             print("\n%s, %s: timeout after %d s; the output's last 600 characters:\n%s"
                   % (mod, side, r["timeout"], r.get("tail", "")))
-# Fail (for CI) if pyjs passes fewer tests than CPython.
-sys.exit(1 if tp < tc else 0)
+# Fail (for CI) if the harness control failed, or pyjs passes fewer tests than CPython.
+sys.exit(1 if cbad or tp < tc else 0)
