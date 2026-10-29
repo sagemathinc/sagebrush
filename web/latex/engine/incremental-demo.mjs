@@ -80,6 +80,16 @@ export function incremental(prev, edit) {
   const { files, delta } = applyEdit(prev, edit);
   const s = edit.start, e = edit.end;
   const oldMain = prev.files.get(prev.main);
+  // (the line end of a high-water offset, cached: checkpoints come in run order and srcSeen only grows, so while it
+  //  stays on the cached line the end is reused; each part of the text is scanned at most once per edit, O(N + C),
+  //  not once per checkpoint (daybreak2 DB2-UX2-R4-1). Counted: lineEndScans, lineEndScanned (characters))
+  let lnLo = -1, lnEnd = -1, lineEndScans = 0, lineEndScanned = 0;
+  const lineEnd = (seen) => {
+    if (seen >= lnLo && seen <= lnEnd) return lnEnd;
+    const nl = oldMain.indexOf("\n", seen); lnLo = seen; lnEnd = nl < 0 ? oldMain.length : nl;
+    lineEndScans++; lineEndScanned += lnEnd - seen;
+    return lnEnd;
+  };
   const mapped = prev.checkpoints.map((ck, i) => {
     // depends only on text before mainPos, and before the end of the main file's consumed source: when the main file
     // read itself, the outer reader's place is behind text the inner read already took in. srcSeen holds where the
@@ -87,8 +97,7 @@ export function incremental(prev, edit) {
     // with that token's line (astra4 POS-A4-2: an edit inside a control word read just before the checkpoint).
     // For any other document this is the same as mainPos <= s: the high-water line ends just before mainPos.
     const seen = ck.srcSeen.get(prev.main);
-    const nl = seen === undefined ? -1 : oldMain.indexOf("\n", seen), seenEnd = seen === undefined ? -1 : nl < 0 ? oldMain.length : nl;
-    if (ck.mainPos <= s && seenEnd < s) return { ck, i, pos: ck.mainPos, state: "before" };
+    if (ck.mainPos <= s && (seen === undefined || lineEnd(seen) < s)) return { ck, i, pos: ck.mainPos, state: "before" };
     const mr = ck.readers.find((r) => r.path === prev.main);
     // a half-read main line depends on text from its line start: an edit touching or AT that start drops it
     const after = mr && mr.partial ? mr.lineStart > e : ck.mainKey >= e;
@@ -99,7 +108,7 @@ export function incremental(prev, edit) {
   const t0 = process.hrtime.bigint();
   if (r < 0) {
     const res = coldRun(files, prev.main, Object.assign({}, prev.opts, { intern: prev.intern }));
-    return { res, stats: { mode: "full", ms: res.ms, reexpandedUnits: res.units.length, reusedUnits: 0, patchedKeys: 0 } };
+    return { res, stats: { mode: "full", ms: res.ms, reexpandedUnits: res.units.length, reusedUnits: 0, patchedKeys: 0, lineEndScans, lineEndScanned } };
   }
   const nU = prev.units.length;
   const after = new Array(nU + 1); after[nU] = new Set();
@@ -193,7 +202,7 @@ export function incremental(prev, edit) {
   }
   const res = { m, intern: prev.intern, files, main: prev.main, ms, outcome, err, checkpoints, units, finalA, finalC,
     final: finalA.hashString() + "/" + finalC.hashString(), unitDigests: units.map(unitDigest), opts: prev.opts, counters };
-  return { res, stats: { declined, mode: conv ? "converged" : "to-end", ms, reexpandedUnits: m.units.length, reusedUnits: conv ? prev.units.length - conv.oldIndex - 1 : 0, resumedFrom: r, patchedKeys } };
+  return { res, stats: { declined, mode: conv ? "converged" : "to-end", ms, reexpandedUnits: m.units.length, reusedUnits: conv ? prev.units.length - conv.oldIndex - 1 : 0, resumedFrom: r, patchedKeys, lineEndScans, lineEndScanned } };
 }
 
 // The oracle: an incremental (or replayed) result against a cold reference that may use a DIFFERENT intern.
