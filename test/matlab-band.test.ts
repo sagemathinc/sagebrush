@@ -25,6 +25,15 @@ test("bandwidths, the band path, the route, the fallback table and ruling d2 (te
   assert.equal(lines.length, 26, r.stdout);
 });
 
+test("the first-use fix: small full() and dense solves exempt below SMALL_NEED, cold, chunked; admitted above (test/matlab_firstuse_cases.py)", () => {
+  const r = spawnSync(process.execPath, [CLI, TEST + "matlab_firstuse_cases.py"], { encoding: "utf8", timeout: WALL(300000) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "");
+  const lines = r.stdout.trim().split("\n");
+  assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
+  assert.equal(lines.length, 9, r.stdout);
+});
+
 test("ruling d2's legacy bodies are master's, and reached only from the unmeasured branches (test/matlab_legacy_pin.py)", () => {
   const r = spawnSync("python3", [TEST + "matlab_legacy_pin.py", LIB + "_matlab_sparse.py"], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stdout + r.stderr);

@@ -38,6 +38,9 @@ from _matlab_sparse import unmeasured_reason
 # defined once, in _matlab_sparse, whose bandwidth scan uses E too; these
 # copies are this module's, which the tests lower)
 from _matlab_sparse import E_TIME, A_SAFE, E
+# (the first-use fix, plan r3 section 3: Ledger and the one recorder are _matlab_ledger's, so the full and dense
+# routes need not import this module; both re-exported here, as before)
+from _matlab_ledger import Ledger, _record
 
 # bytes per entry (r6 section 2.2's c_idx, c_bool, c_val, c_re, c_ptr,
 # c_pyint, and the per-array and per-list objects): the typed arrays' are
@@ -56,7 +59,6 @@ _I = np.int64
 # work categories, and a recorder of every allocation and kernel size
 _phase_hook = None
 _categories = None
-_recorder = None
 
 
 def _phase(name):
@@ -66,35 +68,6 @@ def _phase(name):
 
 def _cval(dt):
     return C_CPLX if np.dtype(dt).kind == "c" else C_RE
-
-
-class Ledger:
-    """one operation's memory: the fresh capacity record, the allowance G,
-    and the bytes it owns (reserve before each growth, release after)"""
-
-    def __init__(self, what, allowance_for="this sparse solve", rec=None):
-        self.what, self.allowance_for = what, allowance_for
-        rec = rec if rec is not None else _capacity.capacity()
-        self.rec = rec
-        self.unmeasured = unmeasured_reason(rec)
-        g = None if self.unmeasured else _capacity.effective_guard_bytes(rec)
-        self.G = int(g) if g is not None else 0
-        self.owned = 0
-        self.peak = 0
-
-    def reserve(self, nbytes, tag=None, parts=None):
-        nbytes = max(0, int(nbytes))
-        need = self.owned + nbytes
-        _record("reserve", need, nbytes, tag, parts)
-        if self.unmeasured is not None:
-            raise memory_guard(self.what, need, 0, self.allowance_for, record=self.rec, unmeasured=self.unmeasured)
-        if need > self.G:
-            raise memory_guard(self.what, need, self.G, self.allowance_for, record=self.rec)
-        self.owned = need
-        self.peak = max(self.peak, need)
-
-    def release(self, nbytes):
-        self.owned = max(0, self.owned - max(0, int(nbytes)))
 
 
 class Work:
@@ -116,9 +89,6 @@ class Work:
             _categories[cat] = _categories.get(cat, 0) + units
 
 
-def _record(kind, n, nbytes=0, tag=None, extra=None):
-    if _recorder is not None:
-        _recorder.append((kind, int(n), int(nbytes), tag, extra))
 
 
 def chunks(n, step=None):
