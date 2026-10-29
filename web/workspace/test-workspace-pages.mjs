@@ -14,13 +14,16 @@
 // Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/workspace/test-workspace-pages.mjs
 // Every DevTools call is bounded (PAGES_CALL_MS, default 30 s): a page promise that never settles, or a browser that
-// stops answering, fails that call, naming the method and the expression, instead of hanging the run.  A watchdog
-// (PAGES_RUN_S, default 300 s), armed before any startup wait, ends an overrunning run, naming the last check and the
-// call it was waiting on; it closes the DevTools sockets, stops Chrome (TERM, then KILL) until it is seen to exit, and
-// reports any temporary directory it couldn't remove.  A call that times out is abandoned, not cancelled: its waiter
-// is dropped, so a late answer is ignored, and its page-side evaluation runs on until the page navigates or its tab or
-// Chrome is closed.  The forced-watchdog control runs this file again as a child (PAGES_WATCHDOG_CONTROL=1, a 20 s
-// watchdog) that hangs on purpose, alongside the run, so it adds no wall time; its result is checked at the end.
+// stops answering, fails that call, naming the method and the expression, instead of hanging the run; so is every
+// startup wait.  A watchdog (PAGES_RUN_S, default 300 s), armed before anything starts, ends an overrunning run, naming
+// the last check and the call it was waiting on.  However the run ends (its end, a failure anywhere, the watchdog or
+// SIGTERM), one cleanup runs, once: the DevTools sockets closed, Chrome stopped (TERM, then KILL) until it is seen to
+// exit, the control children ended with their process groups, and the temporary directories removed (any it couldn't,
+// said).  A call that times out is abandoned, not cancelled: its waiter is dropped, so a late answer is ignored, and
+// its page-side evaluation runs on until the page navigates or its tab or Chrome is closed.  Two controls run this file
+// again as children, each in its own process group, alongside the run, so they add no wall time:
+// PAGES_WATCHDOG_CONTROL=hang hangs on purpose under a 20 s watchdog; PAGES_WATCHDOG_CONTROL=startup starts a hanging
+// child of its own, then fails at its first startup wait.  Their results are checked at the end.
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,31 +34,73 @@ import { devtoolsPort } from "../test-port.mjs";
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 let port = Number(process.env.CDP_PORT) || 0;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const CONTROL = process.env.PAGES_WATCHDOG_CONTROL === "1";
+const CONTROL = process.env.PAGES_WATCHDOG_CONTROL ?? "";
 const CALL_MS = Number(process.env.PAGES_CALL_MS) || 30_000;
 const RUN_S = Number(process.env.PAGES_RUN_S) || 300;
 let lastCheck = "(none yet)", waitingOn = "(nothing)";
 const describe = (method, params) => method + (params?.expression ? ": " + String(params.expression).replace(/\s+/g, " ").slice(0, 160) : "");
 /** `p`, or a rejection naming `what` once `ms` pass without an answer. */
 const bounded = (p, what, ms = CALL_MS) => { let t; return Promise.race([p, new Promise((_, no) => { t = setTimeout(() => no(new Error(`no answer within ${ms} ms: ${what}`)), ms); })]).finally(() => clearTimeout(t)); };
+/** True once `f()` is, polled for up to `ms`. */
+const within = async (f, ms) => { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; await sleep(50); } return !!f(); };
+/** Whether `pid` (negative: its process group) is gone.  Only ESRCH says so; any other error is said, never taken for gone. */
+const goneOf = (pid) => { try { process.kill(pid, 0); return "alive"; } catch (e) { return e?.code === "ESRCH" ? "gone" : `unknown (${e?.code ?? e})`; } };
+const fails = [];
+let checks = 0;
+const check = (ok, what) => { checks++; lastCheck = what; if (!ok) fails.push(what); };
 const sockets = [];
-// (the forced-watchdog control's child run, started now so it costs no wall time; checked at the end)
-const control = CONTROL ? null : new Promise((ok) => {
-  const env = { ...process.env, PAGES_WATCHDOG_CONTROL: "1", PAGES_RUN_S: "20" };
+/** The control children this run started: each leads its own process group, its Chrome in it. */
+const kids = [];
+/** A control child: this file run again as `mode`, with a `runS` watchdog, in its own process group; all it writes is
+ * kept until it ends ("close": it has exited and its output has ended).  A backstop ends it at 120 s. */
+const spawnKid = (mode, runS) => {
+  const env = { ...process.env, PAGES_WATCHDOG_CONTROL: mode, PAGES_RUN_S: String(runS) };
   delete env.CDP_PORT;
-  const c = spawn(process.execPath, [fileURLToPath(import.meta.url)], { env, stdio: ["ignore", "pipe", "pipe"] });
-  let out = "", err = "";
-  c.stdout.on("data", (d) => (out += d));
-  c.stderr.on("data", (d) => (err += d));
-  const t = setTimeout(() => c.kill("SIGKILL"), 60_000);
-  c.on("exit", (code, signal) => { clearTimeout(t); ok({ code, signal, out, err }); });
-});
+  const k = { mode, out: "", err: "", ended: false, code: null, signal: null };
+  k.c = spawn(process.execPath, [fileURLToPath(import.meta.url)], { env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+  k.c.stdout.on("data", (d) => (k.out += d));
+  k.c.stderr.on("data", (d) => (k.err += d));
+  k.done = new Promise((ok) => {
+    k.c.once("close", (code, signal) => { Object.assign(k, { ended: true, code, signal }); ok(); });
+    k.c.once("error", (e) => { k.err += `spawn error: ${e?.code ?? e}\n`; if (!k.c.pid) { k.ended = true; ok(); } });
+  });
+  kids.push(k);
+  setTimeout(() => endKid(k), 120_000).unref();
+  return k;
+};
+/** The first match of `re` in what a child wrote, or null once it ends without one (the caller bounds the wait). */
+const outMatch = (k, re) => new Promise((ok) => { const t = setInterval(() => { const m = re.exec(k.out); if (m || k.ended) { clearInterval(t); ok(m); } }, 50); t.unref(); });
+/** A control child ended, with all it started: its group TERMed (a child cleans up on TERM), up to 5 s for its observed
+ * end, then the group KILLed and up to 5 s more; then anything left in its group, and each process it reported (its
+ * Chrome; its own child's group and Chrome) still there, KILLed here and said.  Once per child; says what was seen. */
+const endKid = (k) => (k.ending ??= (async () => {
+  if (!k.c.pid) return "never started: " + k.err.trim();
+  const g = -k.c.pid;
+  let how = k.ended ? "had ended" : null;
+  if (!how) {
+    try { process.kill(g, "SIGTERM"); } catch {}
+    if (await within(() => k.ended, 5000)) how = "ended on TERM";
+  }
+  if (!how) {
+    try { process.kill(g, "SIGKILL"); } catch {}
+    how = (await within(() => k.ended, 5000)) ? "ended on KILL" : "NOT seen to end";
+  }
+  const seen = [how];
+  const c = /CONTROL \S+ (\d+)/.exec(k.out), kid = /CONTROL-KID (\d+) \S+ (\d+)/.exec(k.out);
+  for (const [what, pid] of [["its group", g], ["its Chrome", c ? +c[1] : 0], ["its child's group", kid ? -kid[1] : 0], ["its child's Chrome", kid ? +kid[2] : 0]]) {
+    if (!pid) continue;
+    let s = goneOf(pid);
+    if (s !== "gone") { try { process.kill(pid, "SIGKILL"); } catch {} await within(() => goneOf(pid) === "gone", 5000); s += `, KILLed here: ${goneOf(pid)}`; }
+    seen.push(`${what} ${s}`);
+  }
+  return seen.join("; ");
+})());
 const profile = mkdtempSync(join(tmpdir(), "sb-ws-pages-"));
 const files = mkdtempSync(join(tmpdir(), "sb-ws-up-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-const chromeExited = new Promise((r) => chrome.once("exit", r));
+let chrome = null, chromeError = null, chromeExited = Promise.resolve();
 /** Chrome stopped and seen to exit: TERM, up to 5 s for its exit, then KILL and up to 5 s more; says which. */
 const stopChrome = async () => {
+  if (!chrome?.pid) return chromeError ? `never started (${chromeError?.code ?? chromeError})` : "never started";
   if (chrome.exitCode !== null || chrome.signalCode !== null) return "had exited";
   chrome.kill("SIGTERM");
   if (await Promise.race([chromeExited.then(() => true), sleep(5000).then(() => false)])) return "exited on TERM";
@@ -64,50 +109,78 @@ const stopChrome = async () => {
 };
 /** The temporary directories removed; each one that couldn't be, with why. */
 const removeDirs = () => { const left = []; for (const d of [profile, files]) try { rmSync(d, { recursive: true, force: true }); } catch (e) { left.push(`${d}: ${e?.code ?? e}`); } return left; };
-// (the watchdog, armed before any startup wait: a run past RUN_S says where it was, closes its sockets, stops Chrome
-// until it is seen to exit, removes its directories (reporting any it can't) and fails)
-setTimeout(async () => {
-  console.error(`FAIL: the run didn't end within ${RUN_S} s; the last check was "${lastCheck}"; waiting on: ${waitingOn}`);
+let cleaned = null;
+/** Everything this run started, ended, and everything it made, removed: once, however the run ends (its end, a failure,
+ * the watchdog or SIGTERM).  Says what was seen, and whether all of it was done. */
+const cleanup = () => (cleaned ??= (async () => {
   for (const s of sockets) try { s.close(); } catch {}
-  const how = await stopChrome(), left = removeDirs();
-  console.error(`  watchdog cleanup: Chrome ${how}; ${left.length ? "NOT removed: " + left.join(", ") : "temporary directories removed"}`);
+  const how = await stopChrome();
+  const kidsSeen = [];
+  for (const k of kids) kidsSeen.push(`${k.mode} ${await endKid(k)}`);
+  const left = removeDirs();
+  const line = `cleanup: Chrome ${how}; ${left.length ? "temporary directories NOT removed: " + left.join(", ") : "temporary directories removed"}${kids.length ? "; control children: " + kidsSeen.join(" | ") : ""}`;
+  return { line, ok: how !== "NOT seen to exit" && !left.length && kidsSeen.every((s) => !/alive|unknown|NOT|never started/.test(s)) };
+})());
+/** The run ended from outside its flow (the watchdog, SIGTERM): said, cleaned up, exit 1. */
+const endNow = async (why) => {
+  console.error(`FAIL: ${why}; the last check was "${lastCheck}"; waiting on: ${waitingOn}`);
+  console.error("  " + (await cleanup()).line);
   process.exit(1);
-}, RUN_S * 1000).unref();
-waitingOn = "Chrome's DevTools port";
-if (!port) port = await bounded(devtoolsPort(profile), waitingOn, 60_000);
-let targets;
-waitingOn = "the page list (/json)";
-for (let i = 0; i < 300 && !targets; i++) { try { targets = await bounded(fetch(`http://127.0.0.1:${port}/json`).then((r) => r.json()), waitingOn, 5000); } catch { await sleep(100); } }
-const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
-sockets.push(ws);
-await bounded(new Promise((r) => (ws.onopen = r)), (waitingOn = "the page's DevTools socket to open"), 10_000);
-// (the forced-watchdog control's own run: hang here on purpose, for the watchdog to end)
-if (CONTROL) { console.log(`CONTROL ${profile} ${chrome.pid}`); waitingOn = "the control's deliberate hang"; await new Promise(() => {}); }
-/** Another DevTools connection (another tab): its calls bounded and named, like the main tab's. */
-const tab = (sock, label) => {
-  let k = 0; const w = new Map();
-  sock.addEventListener("message", (e) => { const m = JSON.parse(e.data); if (m.id && w.has(m.id)) { w.get(m.id)(m.result ?? m.error); w.delete(m.id); } });
-  return (method, params = {}, ms = CALL_MS) => { const id = ++k, what = label + describe(method, params); waitingOn = what; return bounded(new Promise((r) => { w.set(id, r); sock.send(JSON.stringify({ id, method, params })); }), what, ms).finally(() => w.delete(id)); };
 };
-let n = 0; const waiting = new Map(); const errors = [];
-ws.onmessage = (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
-  if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-  // (Delete's confirm: yes)
-  if (m.method === "Page.javascriptDialogOpening") send("Page.handleJavaScriptDialog", { accept: true, ...(m.params.type === "prompt" ? { promptText: m.params.defaultPrompt ?? "" } : {}) }).catch(() => {});
-};
-const send = (method, params = {}, ms = CALL_MS) => { const id = ++n, what = describe(method, params); waitingOn = what; return bounded(new Promise((r) => { waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); }), what, ms).finally(() => waiting.delete(id)); };
-const ev = async (expression, ms) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
-const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr, Math.max(1000, Math.min(CALL_MS, ms - (Date.now() - t)))).catch(() => false)) return true; await sleep(100); } return false; };
-const go = async (url) => { await send("Page.navigate", { url }); await sleep(300); };
-const fails = [];
-let checks = 0;
-const check = (ok, what) => { checks++; lastCheck = what; if (!ok) fails.push(what); };
-const W = "window.sagebrush?.workspace";
-const B = "window.sagebrush?.board";
+// (the watchdog, armed before anything starts)
+setTimeout(() => endNow(`the run didn't end within ${RUN_S} s`), RUN_S * 1000).unref();
+process.once("SIGTERM", () => endNow("ended by SIGTERM"));
 
 try {
+  // (the forced-watchdog control's child, started first, so it costs no wall time)
+  if (!CONTROL) spawnKid("hang", 20);
+  chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+  chromeExited = new Promise((r) => { chrome.once("exit", r); chrome.once("error", (e) => { chromeError = e; r(); }); });
+  if (CONTROL && chrome.pid) console.log(`CONTROL ${profile} ${chrome.pid}`);
+  // (the early-failure control: a run holding a child of its own (one that would hang for 120 s) fails at its first
+  // startup wait; its cleanup must still end that child, with the child's Chrome)
+  if (CONTROL === "startup") {
+    const k = spawnKid("hang", 120);
+    const m = await bounded(outMatch(k, /CONTROL (\S+) (\d+)/), (waitingOn = "the early-failure control's own child to start"), 30_000);
+    if (!m) throw new Error("the early-failure control's own child ended before it started: " + k.err.slice(0, 300));
+    console.log(`CONTROL-KID ${k.c.pid} ${m[1]} ${m[2]}`);
+  }
+  waitingOn = "Chrome's DevTools port";
+  const portUp = CONTROL === "startup" ? new Promise(() => {}) : Promise.race([devtoolsPort(profile), chromeExited.then(() => { throw new Error(`Chrome ended before its DevTools port: ${chromeError?.code ?? chromeError ?? "exit " + (chrome.exitCode ?? chrome.signalCode)}`); })]);
+  if (!port) port = await bounded(portUp, waitingOn, CONTROL === "startup" ? 1 : 60_000);
+  let targets;
+  waitingOn = "the page list (/json)";
+  for (let i = 0; i < 300; i++) { try { targets = await bounded(fetch(`http://127.0.0.1:${port}/json`).then((r) => r.json()), waitingOn, 5000); if (targets.some((x) => x.type === "page")) break; } catch {} await sleep(100); }
+  const pageTarget = Array.isArray(targets) ? targets.find((x) => x.type === "page") : undefined;
+  if (!pageTarget) throw new Error("no page target in /json after 300 tries");
+  const ws = new WebSocket(pageTarget.webSocketDebuggerUrl);
+  sockets.push(ws);
+  await bounded(new Promise((r) => (ws.onopen = r)), (waitingOn = "the page's DevTools socket to open"), 10_000);
+  // (the forced-watchdog control's own run: hang here on purpose, for its watchdog to end)
+  if (CONTROL === "hang") { waitingOn = "the control's deliberate hang"; await new Promise(() => {}); }
+  // (the early-failure control's child, started once this run is up)
+  if (!CONTROL) spawnKid("startup", 60);
+  /** Another DevTools connection (another tab): its calls bounded and named, like the main tab's. */
+  const tab = (sock, label) => {
+    let k = 0; const w = new Map();
+    sock.addEventListener("message", (e) => { const m = JSON.parse(e.data); if (m.id && w.has(m.id)) { w.get(m.id)(m.result ?? m.error); w.delete(m.id); } });
+    return (method, params = {}, ms = CALL_MS) => { const id = ++k, what = label + describe(method, params); waitingOn = what; return bounded(new Promise((r) => { w.set(id, r); sock.send(JSON.stringify({ id, method, params })); }), what, ms).finally(() => w.delete(id)); };
+  };
+  let n = 0; const waiting = new Map(); const errors = [];
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+    if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
+    // (Delete's confirm: yes)
+    if (m.method === "Page.javascriptDialogOpening") send("Page.handleJavaScriptDialog", { accept: true, ...(m.params.type === "prompt" ? { promptText: m.params.defaultPrompt ?? "" } : {}) }).catch(() => {});
+  };
+  const send = (method, params = {}, ms = CALL_MS) => { const id = ++n, what = describe(method, params); waitingOn = what; return bounded(new Promise((r) => { waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); }), what, ms).finally(() => waiting.delete(id)); };
+  const ev = async (expression, ms) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
+  const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr, Math.max(1000, Math.min(CALL_MS, ms - (Date.now() - t)))).catch(() => false)) return true; await sleep(100); } return false; };
+  const go = async (url) => { await send("Page.navigate", { url }); await sleep(300); };
+  const W = "window.sagebrush?.workspace";
+  const B = "window.sagebrush?.board";
+
   for (const m of ["Page.enable", "Runtime.enable", "DOM.enable"]) await send(m);
   // (control: a page promise that never settles fails its call within its deadline, named, instead of hanging the run)
   const t0 = Date.now(), hung = await ev("new Promise(() => {})", 2000).then(() => "answered", (e) => String(e?.message));
@@ -499,24 +572,30 @@ try {
   check(/reload/.test(await ev(`${W}.read("/py.txt").then(() => "", (e) => String(e.message))`)), "…reading the files then says to reload");
   wsU.close();
   await send("Target.closeTarget", { targetId: tU.id });
+
+  // ---------------------------------------------------------------- the controls' children (started at the beginning)
+  waitingOn = "the control children to end";
+  await bounded(Promise.all(kids.map((k) => k.done)), waitingOn, 90_000).catch(() => {});
+  const hk = kids.find((k) => k.mode === "hang"), sk = kids.find((k) => k.mode === "startup");
+  // (the forced-watchdog control: its child hung on purpose; its watchdog must have ended it, naming the wait, with its
+  // Chrome seen to exit and gone, its directories removed and exit code 1)
+  const [, hProfile, hChrome] = /CONTROL (\S+) (\d+)/.exec(hk.out) ?? [];
+  const hGone = hChrome ? goneOf(+hChrome) : "not reported";
+  check(hk.code === 1 && hk.err.includes('FAIL: the run didn\'t end within 20 s; the last check was "(none yet)"; waiting on: the control\'s deliberate hang') && /cleanup: Chrome exited on (TERM|KILL); temporary directories removed/.test(hk.err) && !!hProfile && !existsSync(hProfile) && hGone === "gone",
+    "(the forced-watchdog control: a hung run is ended by its watchdog, naming the wait, its Chrome seen to exit and gone, its directories removed, exit code 1): " + JSON.stringify({ code: hk.code, signal: hk.signal, err: hk.err.slice(0, 400), profile: hProfile ?? null, chrome: hGone }));
+  // (the early-failure control: its run failed at its first startup wait, holding a child of its own; its cleanup must
+  // have stopped its Chrome and removed its directories, and ended that child with the child's Chrome and directories)
+  const [, sProfile, sChrome] = /CONTROL (\S+) (\d+)/.exec(sk.out) ?? [], [, gPid, gProfile, gChrome] = /CONTROL-KID (\d+) (\S+) (\d+)/.exec(sk.out) ?? [];
+  const sGone = { chrome: sChrome ? goneOf(+sChrome) : "not reported", childGroup: gPid ? goneOf(-gPid) : "not reported", childChrome: gChrome ? goneOf(+gChrome) : "not reported" };
+  check(sk.code === 1 && sk.err.includes("threw: Error: no answer within 1 ms: Chrome's DevTools port") && /cleanup: Chrome exited on (TERM|KILL); temporary directories removed; control children: hang ended on (TERM|KILL); its group gone; its Chrome gone/.test(sk.out) && !!sProfile && !existsSync(sProfile) && !!gProfile && !existsSync(gProfile) && Object.values(sGone).every((s) => s === "gone"),
+    "(the early-failure control: a run failing at startup still stops its Chrome, removes its directories, and ends its own child, the child's Chrome and directories too, exit code 1): " + JSON.stringify({ code: sk.code, signal: sk.signal, out: sk.out.slice(-400), err: sk.err.slice(0, 400), profile: sProfile ?? null, childProfile: gProfile ?? null, ...sGone }));
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
-  fails.push("threw: " + (e?.stack ?? e));
+  fails.push(`threw: ${e?.stack ?? e} (waiting on: ${waitingOn})`);
 } finally {
-  for (const s of sockets) try { s.close(); } catch {}
-  const how = await stopChrome();
-  if (how === "NOT seen to exit") fails.push("Chrome was not seen to exit after TERM and KILL");
-  for (const l of removeDirs()) fails.push("a temporary directory not removed: " + l);
-}
-// (the forced-watchdog control: its child hung on purpose; its watchdog must have ended it, naming the wait, with its
-// Chrome seen to exit, its directories removed and exit code 1)
-if (control) {
-  const r = await bounded(control, "the forced-watchdog control's run", 70_000).catch((e) => ({ code: null, signal: null, out: "", err: String(e?.message) }));
-  const [, cprofile, cpid] = /CONTROL (\S+) (\d+)/.exec(r.out) ?? [];
-  let alive = false;
-  if (cpid) try { process.kill(Number(cpid), 0); alive = true; } catch {}
-  check(r.code === 1 && r.err.includes('FAIL: the run didn\'t end within 20 s; the last check was "(none yet)"; waiting on: the control\'s deliberate hang') && /watchdog cleanup: Chrome exited on (TERM|KILL); temporary directories removed/.test(r.err) && !!cprofile && !existsSync(cprofile) && !alive,
-    "(the forced-watchdog control: a hung run is ended by its watchdog, naming the wait, its Chrome seen to exit, its directories removed, exit code 1): " + JSON.stringify({ code: r.code, signal: r.signal, err: r.err.slice(0, 400), profile: cprofile ?? null, alive }));
+  const c = await cleanup();
+  console.log("  " + c.line);
+  if (!c.ok) fails.push("not everything was cleaned up: " + c.line);
 }
 if (fails.length) {
   console.error(`FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  "));
