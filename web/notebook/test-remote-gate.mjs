@@ -492,8 +492,12 @@ export async function runGateTests(check) {
       await forgot;
       const forgets = p.payloads().filter((x) => x.code === "").length - forgetsBefore;
       check(queued === 1 && !p.a.record("a") && forgets === 0, `I11 (an interruption): the forget queued behind A, then a restart: A's late terminal leaves no record, and the forget, queued for the old kernel, is refused unsent (${forgets})`);
-      await p.agent(["b"]);
-      check(postsFor(p, ["b"]) === before && p.results.get("b")?.notRun === "wait", "I11 (an interruption): B, computed from A: no POST, it waits");
+      // B, observed before anything recovers A: in the interrupted action itself (not run, not sent), and
+      // by the gate's own check outside the scheduler (A has no record: B waits, nothing to admit)
+      check(postsFor(p, ["b"]) === before && p.states.get("b")?.state === "stale", `I11 (an interruption): in the interrupted action, B is not sent (${p.states.get("b")?.state}/${why(p, "b")})`);
+      const vb = await p.a.check(await p.a.freeze(["b"]), "rq-b-isolated");
+      check(!vb.send && "wait" in vb && postsFor(p, ["b"]) === before, "I11 (an interruption): the gate's check of B alone: it waits for A, no POST");
+      // (then A is recovered, explicitly: run again on the new kernel, and recorded; B may follow it)
       await p.gesture(["a"]);
       check(!!p.a.record("a"), "I11 (an interruption): A reruns on the new kernel and is recorded");
     }
