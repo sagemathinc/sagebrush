@@ -1,6 +1,8 @@
-// The cases of web/workspace/test-workspace-sync-client.mjs (sync client step 3, design/sync-client.md §3, C1,
-// L2, L3, L4): the sender against the sync service in Miniflare, through the test's front (/__ctl), which can
-// drop acks, fake the server's errors, close sockets and hold uploads.
+// The cases of sync client step 3 (design/sync-client.md §3, C1, L2, L3, L4): the sender against a sync server,
+// through a test's front (/__ctl), which can drop acks, fake the server's errors, close sockets and hold uploads.  Two
+// runners, with the same front: core's web/workspace/test-sync-client-ref.mjs, against core's reference server
+// (web/sync-protocol/reference-server.ts), and the cloud repository's web/sync/test-workspace-sync-client.mjs, against
+// the cloud's server in Miniflare.
 import * as W from "./ws.js";
 
 const results = [];
@@ -9,10 +11,102 @@ const J = (x) => JSON.stringify(x);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let n = 0, acct = 0;
 const names = () => { n++; return { name: `ws-sc-${n}-${Math.random().toString(36).slice(2, 8)}`, mainName: `main-sc-${n}` }; };
-const fresh = async (nm = names()) => { localStorage.clear(); const w = await W.Workspace.open(nm); used.push(w); return w; };
+const fresh = async (nm = names()) => { if (D) return freshD(nm); localStorage.clear(); const w = await W.Workspace.open(nm); used.push(w); return w; };
 const used = [];
-const ctl = async (cmd, extra = {}) => (await fetch("/__ctl", { method: "POST", body: J({ cmd, ...extra }) })).json();
-const post = (path, body) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: J(body ?? {}) });
+const ctl = async (cmd, extra = {}) => (D ? ctlD(cmd, extra) : (await fetch("/__ctl", { method: "POST", body: J({ cmd, ...extra }) })).json());
+const post = (path, body) => (D ? postD(path, body) : fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: J(body ?? {}) }));
+
+// ---- 3b's diagnostic mode (plan csp3b-accountswitch-diag r2-r8).  Only when the page has window.__budgets AND the
+// front answers its proof route's quiet with the registry's shape; otherwise (the cloud's runner: no budgets, a front
+// with no /__proof route) every helper here behaves exactly as before, and run() is the old loop.  In diagnostic mode:
+// every awaited helper is a labelled, bounded step; a case's clients, workspaces and timed-out work are registered; after
+// each case a bounded cleanup proves the page and the front quiet before the next one, else the run fail-stops.
+
+/** the diagnostic run's state; null in legacy mode (and outside a run) */
+let D = null;
+const now = () => performance.now();
+class StepTimeout extends Error {
+  constructor(step, ms) { super(`step timed out: ${step} (${Math.round(ms)} ms)`); this.name = "StepTimeout"; this.step = step; }
+}
+/** A label for a predicate's until() steps (legacy until ignores it) */
+const named = (label, f) => Object.assign(f, { label });
+/** One awaited step, labelled and bounded: the label and the deadline are set before `thunk(ms)` runs; a synchronous
+ * throw is a rejection; a rejection passes through unchanged; past the bound, StepTimeout, and the losing promise stays
+ * in the pending set until it settles (a late settlement is recorded).  The bound: min(ms, STEP_MS), cut by the
+ * cleanup's deadline in cleanup, else by the case's only when enforceCase. */
+function step(label, thunk, ms) {
+  const d = D, b = d.budgets;
+  let lim = Math.min(ms ?? b.STEP_MS, b.STEP_MS);
+  if (d.cleanupDeadline !== null) lim = Math.min(lim, d.cleanupDeadline - now());
+  else if (b.enforceCase && d.caseDeadline !== null) lim = Math.min(lim, d.caseDeadline - now());
+  const rec = { label, startMs: Math.round(now()) };
+  d.steps.push(rec);
+  const done = () => { const i = d.steps.indexOf(rec); if (i >= 0) d.steps.splice(i, 1); };
+  if (lim <= 0) { done(); return Promise.reject(new StepTimeout(label, 0)); }
+  let p;
+  try { p = Promise.resolve(thunk(lim)); } catch (e) { p = Promise.reject(e); }
+  let timer;
+  const expired = new Promise((_, no) => { timer = setTimeout(() => {
+    const pend = { label, since: now() };
+    d.pending.add(pend);
+    p.then(() => {}, () => {}).then(() => { d.pending.delete(pend); d.late.push(`late: ${label} settled after ${((now() - pend.since) / 1000).toFixed(1)} s past its bound`); });
+    no(new StepTimeout(label, lim));
+  }, lim); });
+  return Promise.race([p, expired]).finally(() => { clearTimeout(timer); done(); });
+}
+/** A step at a case's own call site (accountSwitch's A-rows); legacy: the thunk, as written */
+const S = (label, thunk, ms) => (D ? step(label, thunk, ms) : thunk());
+const ctlD = (cmd, extra = {}, ms) => step(`ctl ${cmd}`, (lim) => fetch("/__ctl", { method: "POST", body: J({ cmd, ...extra }), signal: AbortSignal.timeout(lim + 100) }).then((r) => r.json()), ms);
+const postD = (path, body) => step(`post ${path}`, (lim) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: J(body ?? {}), signal: AbortSignal.timeout(lim + 100) }));
+/** fresh() in diagnostic mode: the workspace is registered (in `used`, closed when the run ends however it ends) inside
+ * the open's own fulfilment, so an open that ends after its step timed out is still kept, and said (late) */
+const freshD = (nm) => {
+  localStorage.clear();
+  const d = D;
+  let timedOut = false;
+  const delay = d.openDelayMs;
+  const opened = (delay ? sleep(delay) : Promise.resolve()).then(() => W.Workspace.open(nm)).then((w) => {
+    used.push(w);
+    d.names.set(w, nm.name);
+    if (timedOut) d.lateOpened.push(nm.name);
+    // (an open that ends after the run's own end, a fail-stop's: closed at once, never left open)
+    if (d.over) try { w.close(); } catch {}
+    return w;
+  });
+  return step("fresh: Workspace.open", () => opened).catch((e) => { if (e instanceof StepTimeout) timedOut = true; throw e; });
+};
+/** A proof command (GET /__proof/<cmd>), bounded */
+const proofD = (cmd, n, phase) => step(`proof ${cmd}`, (lim) => fetch(`/__proof/${cmd}${n === undefined ? "" : `?n=${n}${phase ? `&phase=${phase}` : ""}`}`, { signal: AbortSignal.timeout(lim + 100) }).then((r) => r.json()));
+/** until() in diagnostic mode (r3 §3.2): the window is checked between calls and its expiry is false, as before; each
+ * call is one step, whose StepTimeout (a call that hangs past its own bound) is the only one; a predicate that throws
+ * is false, as before */
+async function untilD(f, ms) {
+  const label = `until: ${f.label ?? (f.name || "predicate")}`;
+  const w0 = now();
+  for (;;) {
+    if (now() - w0 >= ms) return false;
+    let r = false;
+    try { r = await step(label, () => f()); } catch (e) { if (e instanceof StepTimeout) throw e; }
+    if (r) return true;
+    await sleep(20);
+  }
+}
+async function stopD(c) {
+  await step("stop: c.stop()", () => c.stop());
+  await step("stop: c.run", () => c.run);
+}
+const wellFormedBudgets = (b) => !!b && typeof b === "object" && [b.STEP_MS, b.CLEANUP_MS, b.CASE_FLOOR_MS].every((x) => Number.isFinite(x) && x > 0) && typeof b.CASE_MS === "object" && b.CASE_MS !== null && typeof b.enforceCase === "boolean";
+const quietShape = (q) => !!q && Array.isArray(q.inflight) && Array.isArray(q.pendingLate) && Array.isArray(q.late) && [q.closers, q.held, q.closeFailures, q.untrackedReads, q.ups].every(Number.isInteger) && typeof q.epoch === "string";
+/** Diagnostic, or why not: the budgets are read FIRST, and only with them is the front asked (one quiet, 5 s) */
+async function diagnosticMode() {
+  const b = window.__budgets;
+  if (b === undefined) return { on: false, why: "no window.__budgets" };
+  if (!wellFormedBudgets(b)) return { on: false, why: "window.__budgets malformed" };
+  let q;
+  try { q = await (await fetch("/__proof/quiet", { signal: AbortSignal.timeout(5000) })).json(); } catch (e) { return { on: false, why: `quiet: ${e?.name ?? e}` }; }
+  if (!quietShape(q)) return { on: false, why: `quiet answered ${J(q).slice(0, 200)}` };
+  return { on: true, budgets: b };
+}
 /** A new account, signed in, sync on: its own log. */
 async function account(given) {
   const id = given ?? window.ACCOUNTS[acct++];
@@ -25,6 +119,7 @@ async function account(given) {
   return id;
 }
 async function until(f, ms = 10_000) {
+  if (D) return untilD(f, ms);
   const t = Date.now();
   for (;;) {
     try { if (await f()) return true; } catch {}
@@ -94,9 +189,11 @@ function fakeClock(t0 = 1_900_000_000_000) {
 function client(w, opts = {}) {
   const c = new W.SyncClient(w, { origin: location.origin, ...opts });
   c.run = c.start();
+  if (D) D.clients.push(c);
   return c;
 }
 async function stop(c) {
+  if (D) return stopD(c);
   await c.stop();
   await c.run;
 }
@@ -112,7 +209,7 @@ async function nothingApplied(w, what) {
 
 /** The server's log as another device reads it, and this device's ops in it. */
 async function serverOps(w) {
-  const p = await ctl("probe");
+  const p = await S("serverOps: ctl probe", () => ctl("probe"));
   return { all: p.index, mine: p.index.filter((o) => o.device === w.device) };
 }
 
@@ -612,7 +709,7 @@ async function byteMismatch() {
   check(await until(() => settled(w, c)), "byte mismatch: the next writes decided");
   const { mine } = await serverOps(w);
   check(["/m1.bin", "/m2.bin", "/m3.bin"].every((p) => mine.some((o) => o.op === "write" && o.path === p && o.size === 1200)), "byte mismatch: …each file's present bytes now on the server");
-  check((await ctl("log")).http.filter((h) => h.method === "PUT" && h.status === 201).length === 3, "byte mismatch: …uploaded once each");
+  check((await ctl("log")).http.filter((h) => h.method === "PUT" && (h.status === 201 || h.status === 200)).length === 3, "byte mismatch: …uploaded once each");
   check(c.stats.wideReads >= 3, "byte mismatch: …each read, once the bytes are untrusted, under the largest reservation (the page's to itself): " + c.stats.wideReads);
   await everyOnce(w, from, 3, "byte mismatch", c);
   await stop(c);
@@ -725,42 +822,44 @@ async function accountSwitch() {
   // and during a PUT.  The invariant, checked on every message and request the proxy saw: nothing is sent on a
   // socket, or PUT, under one account's session for another account's namespace; A's records stay A's, and go to A
   // once A is signed in again.  (B's own namespace syncing this same local workspace is C1's rule, not a leak.))
-  const A = await account(), B = await account();
-  await signInOnly(A);
+  // (3b: each await at its call site is a labelled step in diagnostic mode (plan r2 §2's A-rows); in legacy, S runs
+  // the thunk and named() only labels the predicate, so this case runs as before)
+  const A = await S("accountSwitch A1: account() A", () => account()), B = await S("accountSwitch A1: account() B", () => account());
+  await S("accountSwitch A2: signInOnly(A)", () => signInOnly(A));
   await ctl("reset");
   const w = await fresh();
   const c0 = client(w);
-  check(await until(() => settled(w, c0)), "account switch: synced as A");
+  check(await until(named("accountSwitch A5: settled(w, c0)", () => settled(w, c0))), "account switch: synced as A");
   const nsA = nsOf(c0);
-  const from = await w.lastSeq();
+  const from = await S("accountSwitch A6: w.lastSeq()", () => w.lastSeq());
   await stop(c0);
-  await w.mkdir("/a-only");
+  await S("accountSwitch A8: w.mkdir", () => w.mkdir("/a-only"));
   // (B signs in just before the socket opens: discovery said A, the socket is B's)
   await ctl("set", { set: { switchOnUpgrade: B } });
   const c = client(w);
-  const hB = await hashOf(B), hA = await hashOf(A);
-  check(await until(() => (nsOf(c) ?? "").startsWith(hB) && c.status.state === "synced", 15_000), "account switch: the socket opened under B's session is refused (its hello names A), and the client goes on as B: " + J({ ns: (nsOf(c) ?? "").slice(0, 8), state: c.status.state }));
+  const hB = await S("accountSwitch A9: hashOf(B)", () => hashOf(B)), hA = await S("accountSwitch A9: hashOf(A)", () => hashOf(A));
+  check(await until(named("accountSwitch A10: ns is B's, synced", () => (nsOf(c) ?? "").startsWith(hB) && c.status.state === "synced"), 15_000), "account switch: the socket opened under B's session is refused (its hello names A), and the client goes on as B: " + J({ ns: (nsOf(c) ?? "").slice(0, 8), state: c.status.state }));
   const l1 = await ctl("log");
   const refusedHello = l1.got.some((g) => g.t === "error" && g.code === "forbidden");
   check(l1.switchedUpgrade === 1 && refusedHello && !l1.bindings.some((b) => b.hello === hA), "account switch: nothing of A's namespace sent on B's socket: " + J(l1.bindings));
-  await unlost(w, nsA, "/a-only", "account switch");
+  await S("accountSwitch A11: unlost", () => unlost(w, nsA, "/a-only", "account switch"));
   await stop(c);
   // (back to A; then B signs in during one of A's PUTs: refused by its binding)
-  await signInOnly(A);
+  await S("accountSwitch A2: signInOnly(A) again", () => signInOnly(A));
   const c2 = client(w);
-  check(await until(async () => nsOf(c2) === nsA && (await settledIn(w, c2, nsA))), "account switch: A signed in again: A's namespace resumes and its records are decided");
+  check(await until(named("accountSwitch A12: settledIn(w, c2, nsA)", async () => nsOf(c2) === nsA && (await settledIn(w, c2, nsA)))), "account switch: A signed in again: A's namespace resumes and its records are decided");
   await ctl("set", { set: { switchOnPut: B } });
-  const f = await w.create("/a-file.bin", { content: bytes(2000, 41) });
-  check(await until(async () => (await ctl("log")).http.some((h) => h.switched)), "account switch: B signed in during A's PUT");
-  check(await until(() => (nsOf(c2) ?? "").startsWith(hB), 15_000), "account switch: the PUT refused (A's binding, B's session), and the client goes on as B");
+  const f = await S("accountSwitch A8: w.create", () => w.create("/a-file.bin", { content: bytes(2000, 41) }));
+  check(await until(named("accountSwitch A13: ctl log, switched", async () => (await ctl("log")).http.some((h) => h.switched))), "account switch: B signed in during A's PUT");
+  check(await until(named("accountSwitch A10: ns is B's", () => (nsOf(c2) ?? "").startsWith(hB)), 15_000), "account switch: the PUT refused (A's binding, B's session), and the client goes on as B");
   const put = (await ctl("log")).http.find((h) => h.switched);
   check(put.status === 403 && put.bind === hA && put.session === hB, "account switch: …refused 403, before anything was stored: " + J({ status: put.status }));
   await stop(c2);
   // (explicitly back to A: A's file goes to A)
-  await signInOnly(A);
+  await S("accountSwitch A2: signInOnly(A) once more", () => signInOnly(A));
   const c3 = client(w);
-  check(await until(async () => nsOf(c3) === nsA && (await settledIn(w, c3, nsA)), 15_000), "account switch: back as A, every record of A's decided");
-  const { mine: inA } = await serverOps(w);
+  check(await until(named("accountSwitch A12: settledIn(w, c3, nsA)", async () => nsOf(c3) === nsA && (await settledIn(w, c3, nsA))), 15_000), "account switch: back as A, every record of A's decided");
+  const { mine: inA } = await S("accountSwitch A14: serverOps", () => serverOps(w));
   check(inA.some((o) => o.path === "/a-only") && inA.some((o) => o.path === "/a-file.bin" && o.sha256 === f.sha256), "account switch: A's log has A's ops: " + J(inA.map((o) => o.path)));
   const l = await ctl("log");
   const opsOk = l.bindings.every((b) => b.session === b.hello);
@@ -929,7 +1028,7 @@ async function lateAnswer() {
   await sleep(4500);
   check(c.debug().paused === null && c.status.state === "synced" && (await metaGet(w.ws, `sync:${nsA}:paused`)) === undefined && (await metaGet(w.ws, `sync:${nsOf(c)}:paused`)) === undefined, "late answer: A's late storage_full paused nothing, of B's or of A's namespace: " + J({ paused: c.debug().paused, status: c.status.state }));
   await w.create("/b-file.bin", { content: bytes(900, 82) });
-  check(await until(async () => (await settledIn(w, c, nsOf(c))) && (await ctl("log")).http.some((h) => h.method === "PUT" && h.status === 201)), "late answer: B uploads and syncs as usual");
+  check(await until(async () => (await settledIn(w, c, nsOf(c))) && (await ctl("log")).http.some((h) => h.method === "PUT" && (h.status === 201 || h.status === 200))), "late answer: B uploads and syncs as usual");
   await stop(c);
 }
 
@@ -1700,7 +1799,7 @@ async function firstSync() {
     check(by(g.fid).length === 1 && by(nb.ref).length === 1, "first sync: a root file and a notebook adopted once each");
     check(J(by(t.fid).map((o) => o.op)) === J(["adopt", "remove"]), "first sync: one in Trash: adopted where it was, then removed: " + J(by(t.fid).map((o) => o.op)));
     check(by(inq.fid).length === 0, "first sync: inside a folder in Trash: not adopted");
-    const puts = (await ctl("log")).http.filter((h) => h.method === "PUT" && h.status === 201).length;
+    const puts = (await ctl("log")).http.filter((h) => h.method === "PUT" && (h.status === 201 || h.status === 200)).length;
     check(puts >= 3, "first sync: the files' bytes uploaded: " + puts);
     const ns = nsOf(c);
     check(!(await metaGet(w.ws, `sync:${ns}:journal`)) && !(await metaGet(w.ws, `sync:${ns}:adopt`)), "first sync: the journal drained and dropped");
@@ -2085,6 +2184,31 @@ async function s5Lifecycle() {
   owner.destroy();
 }
 
+async function s5Docs() {
+  // (DEV's switch for notebooks' contents (doc-sync-switch.ts): the owner says whether its client runs, waiting up to a
+  // bound; and a DocSync handed to it (setDocs) goes on its client's connection: a running client made again with it)
+  await account();
+  const w = await fresh();
+  const owner = W.SyncOwner.of(w, { origin: location.origin });
+  owner.start();
+  const t0 = Date.now(), none = await owner.clientRunning(400);
+  check(none === false && Date.now() - t0 >= 350, "docs: sync off here: clientRunning false, after its wait");
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check((await owner.clientRunning(15_000)) === true, "docs: sync on: clientRunning true");
+  await until(() => owner.view().s.state === "synced", 15_000);
+  const calls = [];
+  const docs = { connected(l) { calls.push("connected:" + typeof l.ask); }, disconnected() { calls.push("disconnected"); }, changed() {} };
+  const c1 = owner.client;
+  owner.setDocs(docs);
+  check(await until(() => calls.includes("connected:function") && !!owner.client && owner.client !== c1, 15_000), "docs: setDocs: the client made again with it, and its welcome connects document sync: " + J(calls));
+  check(!el.textContent.includes("Notebooks sync between your devices"), "docs: the Sync panel's notebooks note isn't shown on this test origin (DEV's only)");
+  s.dispose();
+  owner.destroy();
+}
+
 async function s5Tabs() {
   // (status across tabs: only the holder publishes; a follower opened later gets it at once; a flood of status? costs
   // one bit and at most one message a slot; an old holder's messages dropped; nothing echoed)
@@ -2124,6 +2248,21 @@ async function s5Tabs() {
 /** The front has dropped an ack since its log was last reset: the op was sent and its answer withheld. */
 const ackDropped = async () => (await ctl("log")).got.some((g) => g.t === "ack" && g.dropped);
 
+/** What s5Rows saw, said only when one of its checks fails: the rows' icons, each identity's outbox records and pending
+ * state, the scan's watermark, the client, and what the front sent and answered since its log was reset */
+async function rowsWhy(w, owner, ids) {
+  const ns = (await metaGet(w.ws, "sync:current"))?.ns;
+  const outbox = await all(w.ws, "outbox"), pending = await all(w.ws, "pending");
+  return J({
+    up: [...(await W.rowIcons(w, ids, [])).up].map((id) => ids.indexOf(id)),
+    ids: ids.map((id) => ({ recs: outbox.filter((x) => x.id === id).map((x) => ({ dseq: x.dseq, lseq: x.lseq, op: x.op.op, accepted: x.accepted })), pending: pending.find((x) => x.id === id) })),
+    scanned: await metaGet(w.ws, `sync:${ns}:scanned`), last: await w.lastSeq(), status: owner.view(),
+    refused: await metaGet(w.ws, `sync:${ns}:refused`), rebuild: await metaGet(w.ws, `sync:${ns}:rebuild`),
+    client: owner.client?.debug(), stats: owner.client && { connects: owner.client.stats.connects, opsMessages: owner.client.stats.opsMessages },
+    front: await ctl("log").then((l) => ({ sockets: l.sockets, open: l.open, sent: l.sent.filter((m) => m.t === "ops" || m.t === "hello").map((m) => m.t === "ops" ? "ops:" + m.dseqs.join(",") : "hello"), acks: l.got.filter((g) => g.t === "ack" || g.t === "error").map((g) => g.t + (g.dropped ? "(dropped)" : "") + (g.code ? ":" + g.code : "") + (g.t === "ack" && Array.isArray(g.ops) ? "[" + g.ops.map((o) => o.dseq).join(",") + "]" : "")) })),
+  });
+}
+
 async function s5Rows() {
   // (↑ for every op kind until its own ack; one transaction; at most ROWICON.max identities)
   await account();
@@ -2136,23 +2275,35 @@ async function s5Rows() {
   [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
   check(await until(() => owner.view().s.state === "synced", 15_000), "rows: synced");
   await ctl("log", { reset: true });
-  await ctl("set", { set: { dropAcks: 1 } });
+  // (the client may send the two ops in one message or in two: EVERY ack they go up in is withheld, as one acked
+  // message would have the client pull the log, and the echo there decides both (the server decides in dseq order),
+  // which would clear both ↑ before they are looked at; at most two, and the hold is lifted before the resend)
+  await ctl("set", { set: { dropAcks: 2 } });
   const d = await w.mkdir("/r1");
   const f = await w.create("/r1/f.txt", { content: "x" });
-  // (closed only once the ack was really dropped: an ↑ shows as soon as the op is logged, before it is sent)
-  check(await until(ackDropped, 10_000), "rows: the ack withheld by the front");
-  check(await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 2, 5000), "rows: a mkdir and a create waiting (scanned, sent, ack withheld): ↑ on both");
+  // (closed only once both ops were sent and every ack they went up in was dropped: an ↑ shows as soon as the op is
+  // logged, before it is sent)
+  const allWithheld = async () => {
+    const l = await ctl("log");
+    const sent = l.sent.filter((m) => m.t === "ops");
+    return sent.flatMap((m) => m.dseqs).length >= 2 && l.got.filter((g) => g.t === "ack" && g.dropped).length === sent.length;
+  };
+  check(await until(allWithheld, 10_000), "rows: the acks withheld by the front");
+  const both = await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 2, 5000);
+  check(both, "rows: a mkdir and a create waiting (scanned, sent, ack withheld): ↑ on both" + (both ? "" : " " + (await rowsWhy(w, owner, [d.ident, f.ident]))));
+  // (the hold lifted (one ack of the two may be left, when they went in one message), then the resend)
+  await ctl("set", { set: { dropAcks: 0 } });
   await ctl("closeAll");
   check(await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 0, 15_000), "rows: after the resend and its ack: cleared");
   await ctl("log", { reset: true });
   await ctl("set", { set: { dropAcks: 1 } });
   await w.rename("/r1", "/r2");
   check(await until(ackDropped, 10_000), "rows: the rename sent, its ack withheld by the front");
-  check(await until(async () => (await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 5000), "rows: an undecided rename on a folder whose mkdir was accepted: ↑");
+  const renaming = await until(async () => (await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 5000);
+  check(renaming, "rows: an undecided rename on a folder whose mkdir was accepted: ↑" + (renaming ? "" : " " + (await rowsWhy(w, owner, [d.ident]))));
   await ctl("closeAll");
   const cleared = await until(async () => !(await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 15_000);
-  const ns = (await metaGet(w.ws, "sync:current"))?.ns;
-  const why = cleared ? "" : J({ recs: (await all(w.ws, "outbox")).filter((x) => x.id === d.ident).map((x) => ({ dseq: x.dseq, lseq: x.lseq, op: x.op.op, accepted: x.accepted })), pending: (await all(w.ws, "pending")).find((x) => x.id === d.ident), scanned: await metaGet(w.ws, `sync:${ns}:scanned`), last: await w.lastSeq(), status: owner.view(), refused: await metaGet(w.ws, `sync:${ns}:refused`), rebuild: await metaGet(w.ws, `sync:${ns}:rebuild`), client: owner.client?.debug(), stats: owner.client && { connects: owner.client.stats.connects, opsMessages: owner.client.stats.opsMessages }, front: await ctl("log").then((l) => ({ sockets: l.sockets, open: l.open, sent: l.sent.filter((m) => m.t === "ops" || m.t === "hello").map((m) => m.t === "ops" ? "ops:" + m.dseqs.join(",") : "hello"), acks: l.got.filter((g) => g.t === "ack" || g.t === "error").map((g) => g.t + (g.dropped ? "(dropped)" : "") + (g.code ? ":" + g.code : "")) })) });
+  const why = cleared ? "" : await rowsWhy(w, owner, [d.ident]);
   check(cleared, "rows: …cleared at its own ack " + why);
   const many = Array.from({ length: 1100 }, (_, i) => "0123456789abcd" + String(i).padStart(4, "0"));
   check((await W.rowIcons(w, many, [])).up.size === 0 && W.ROWICON.max === 1005, "rows: 1,100 identities asked: read at most 1,005, one transaction");
@@ -3352,11 +3503,36 @@ async function docWire() {
   check(a1.req === r1 && (a1.t === "batches" || a1.t === "error"), "docWire: a document request's answer comes back to it: " + J(a1).slice(0, 200));
   const r2 = link.reserve(), a2 = await link.ask(r2, { t: "pull", owner: link.owner, doc: "not a document", epoch: 1, after: 0 });
   check(r2 > r1 && a2.t === "error" && a2.req === r2, "docWire: a document request's refusal comes back to it too: " + J(a2).slice(0, 200));
-  // (an `ack` too: a new document's first batch, one patch; the ops' sender never sees it (its ack has no ops))
+  // (an `ack` too, as the protocol has it (§5.8): the client claimed first (doc_claim), then a new document's first
+  // batch, one patch, with the claim's fgen and cseq; the ops' sender never sees it (its ack has no ops).  Core's own
+  // test server predates claims: only its exact refusal of an unknown message takes the named fallback (the ack routing
+  // not exercised), and never with SYNC_REQUIRE_CLAIM=1 (cloud's CI, window.REQUIRE_CLAIM); any other answer, no
+  // answer, a malformed claim, or a claim followed by a refused batch fails.  The claim branch counts two checks, the
+  // fallback one, so the total shows which branch ran)
   const askT = (r, m) => Promise.race([link.ask(r, m), sleep(5000).then(() => ({ t: "no answer in 5 s" }))]);
-  const body = new TextEncoder().encode(J({ v: 1 })), pid = Date.now().toString(36).padStart(11, "0") + "_docwire1";
-  const r4 = link.reserve(), a4 = await askT(r4, { t: "batch", owner: link.owner, doc: crypto.randomUUID(), epoch: 1, kind: "notebook", patches: [{ cseq: 1, id: pid, parents: [], size: body.length }], body: btoa(String.fromCharCode(...body)) });
-  check(a4.t === "ack" && a4.req === r4 && c.status.state === "synced", "docWire: a document request's `ack` comes back to it (not to the ops' sender): " + J({ a: a4, state: c.status.state }).slice(0, 200));
+  const client1 = "docwire1", doc4 = crypto.randomUUID();
+  const body = new TextEncoder().encode(J({ v: 1 })), pid = Date.now().toString(36).padStart(11, "0") + "_" + client1;
+  const b64 = btoa(String.fromCharCode(...body));
+  // (the control: a batch without fgen, through this page and the front, is refused (by the front's canonical check),
+  // routed to its request, and never forwarded)
+  const l0 = await ctl("log");
+  const r0 = link.reserve(), a0 = await askT(r0, { t: "batch", owner: link.owner, doc: doc4, epoch: 1, kind: "notebook", patches: [{ cseq: 1, id: pid, parents: [], size: body.length }], body: b64 });
+  await sleep(200);
+  const l1 = await ctl("log");
+  check(a0.t === "error" && a0.req === r0 && a0.code === "invalid" && /^batch fgen/.test(a0.detail?.message ?? "") && l1.fgenRefused === l0.fgenRefused + 1 && l1.batchesUp === l0.batchesUp,
+    "docWire: a batch without fgen is refused (invalid, batch fgen), routed to its request, never forwarded (no batch went upstream): " + J({ a: a0, refused: l1.fgenRefused - l0.fgenRefused, up: l1.batchesUp - l0.batchesUp }).slice(0, 200));
+  const rc = link.reserve(), ac = await askT(rc, { t: "doc_claim", owner: link.owner, doc: doc4, epoch: 1, client: client1 });
+  const claimed = ac.t === "ack" && ac.req === rc && ac.claim?.client === client1 && Number.isSafeInteger(ac.claim?.fgen) && ac.claim.fgen >= 0 && Number.isSafeInteger(ac.claim?.next_cseq) && ac.claim.next_cseq >= 1;
+  const legacy = ac.t === "error" && ac.req === rc && ac.code === "invalid" && ac.detail?.message === "unknown message";
+  if (claimed || window.REQUIRE_CLAIM || !legacy) {
+    check(claimed, "docWire: the client claimed (doc_claim answered with its client, fgen and next_cseq, to its request)" + (window.REQUIRE_CLAIM ? " (SYNC_REQUIRE_CLAIM)" : "") + ": " + J(ac).slice(0, 200));
+    const u4 = (await ctl("log")).batchesUp;
+    const r4 = link.reserve(), a4 = claimed
+      ? await askT(r4, { t: "batch", owner: link.owner, doc: doc4, epoch: 1, kind: "notebook", fgen: { [client1]: ac.claim.fgen }, patches: [{ cseq: ac.claim.next_cseq, id: pid, parents: [], size: body.length }], body: b64 })
+      : { t: "not sent: no claim" };
+    const u5 = (await ctl("log")).batchesUp;
+    check(a4.t === "ack" && a4.req === r4 && c.status.state === "synced" && u5 === u4 + 1, "docWire: …its batch (the claim's fgen and cseq), forwarded once: the document request's `ack` comes back to it (not to the ops' sender): " + J({ a: a4, state: c.status.state, up: u5 - u4 }).slice(0, 200));
+  } else check(legacy, "docWire: ack routing not exercised: server has no claim protocol (doc_claim refused as an unknown message, code invalid, routed to its request)");
   const from = await w.lastSeq();
   await w.mkdir("/docwire");
   check(await until(() => settled(w, c)), "docWire: the ops' sender untouched by them: an op sent and decided after: " + J(c.status));
@@ -3380,7 +3556,101 @@ async function docWire() {
   await stop(c);
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified, docWire };
+/** what a client closed by another page's upgrade says (sync-client.ts CLOSED_ELSEWHERE) */
+const CLOSED_REASON = "your files were upgraded by a newer Sagebrush page: reload this page to sync";
+/** Another page (a newer build) upgrades `w`'s database: its version + 1, opened and closed from this page. */
+const upgradeElsewhere = (w) => new Promise((ok, no) => { const r = indexedDB.open(w.ws.name, w.ws.version + 1); r.onsuccess = () => { r.result.close(); ok(); }; r.onerror = () => no(r.error); });
+/** `p` settled within `ms`: "ended", "rejected: …", or "hung" */
+const settledWithin = (p, ms) => Promise.race([p.then(() => "ended", (e) => "rejected: " + (e?.message ?? e)), sleep(ms).then(() => "hung")]);
+const closedOff = (c) => c.status.state === "off" && c.status.reason === CLOSED_REASON;
+
+/** A newer page upgrades the workspace's database while this page's client runs (another tab, a newer build): the
+ * database closes here; the client stops itself (sync off, said), its loop ends, and nothing it was doing throws. */
+async function closedByUpgrade() {
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => settled(w, c)), "closed by upgrade: synced first");
+  await upgradeElsewhere(w);
+  check(w.closed === true, "closed by upgrade: the workspace says it was closed by another page");
+  // (the socket drops, as a network would: the client must not write to the closed database, nor hang)
+  await ctl("closeAll");
+  const ended = await settledWithin(c.run, 5000);
+  check(ended === "ended" && closedOff(c), "closed by upgrade: the client stopped, its loop ended, the reload said: " + J({ ended, status: c.status }));
+  await c.stop();
+}
+/** The database closed under a running client with no notice (no onClosed: a caller's close()): the socket then
+ * drops, so the connection's end can't keep its timer.  Its end is still said and its loop settles (ended or
+ * rejected, never waiting for good), and nothing throws unhandled (the runner fails on any page error). */
+async function closedUnderClient() {
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => settled(w, c)), "closed under the client: synced first");
+  // (settled or rejected, observed from now: its rejection is handled here, so only the client's own can be unhandled)
+  const settledAs = c.run.then(() => "ended", (e) => "rejected: " + (e?.message ?? e));
+  w.ws.close();
+  await ctl("closeAll");
+  const ended = await Promise.race([settledAs, sleep(10_000).then(() => "hung")]);
+  check(ended !== "hung", "closed under the client: its loop settled, not waiting for good: " + J({ ended, status: c.status }));
+  await c.stop();
+}
+/** The upgrade lands while the connection's end is keeping its retry timer (its write in flight, held here until
+ * after the upgrade): the write then completes, and the reload stays the last thing said. */
+async function closedDuringRetry() {
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => settled(w, c)), "closed during a retry: synced first");
+  let hit, release;
+  const inFlight = new Promise((ok) => { hit = ok; }), gate = new Promise((ok) => { release = ok; });
+  const put0 = c["metaPut"];
+  c["metaPut"] = function (k, v) {
+    const p = put0.call(this, k, v);
+    if (!/:retry:connect$/.test(k)) return p;
+    p.catch(() => {});
+    hit();
+    return gate.then(() => p);
+  };
+  await ctl("closeAll");
+  check(await settledWithin(inFlight, 5000) === "ended", "closed during a retry: the retry's write in flight, held");
+  await upgradeElsewhere(w);
+  check(w.closed === true && closedOff(c), "closed during a retry: the reload said at the upgrade: " + J(c.status));
+  release();
+  const ended = await settledWithin(c.run, 5000);
+  check(ended === "ended" && closedOff(c), "closed during a retry: the held write completed after, and the reload is still the last thing said: " + J({ ended, status: c.status }));
+  c["metaPut"] = put0;
+  await c.stop();
+}
+/** The upgrade lands while the client is asking who is signed in (its namespace request held here until after the
+ * upgrade, then answered 401): the late answer says nothing over the reload. */
+async function closedDuringNamespace() {
+  await account();
+  const w = await fresh();
+  let armed = false, hit, release;
+  const asked = new Promise((ok) => { hit = ok; }), gate = new Promise((ok) => { release = ok; });
+  const c = client(w, { fetch: async (u, init) => {
+    if (armed && /\/api\/share\/me$/.test(String(u))) {
+      armed = false;
+      hit();
+      await gate;
+      return new Response("{}", { status: 401, headers: { "content-type": "application/json" } });
+    }
+    return fetch(u, init);
+  } });
+  check(await until(() => settled(w, c)), "closed during the namespace request: synced first");
+  armed = true;
+  await ctl("closeAll");
+  check(await settledWithin(asked, 10_000) === "ended", "closed during the namespace request: the reconnect's request in flight, held");
+  await upgradeElsewhere(w);
+  check(w.closed === true && closedOff(c), "closed during the namespace request: the reload said at the upgrade: " + J(c.status));
+  release();
+  const ended = await settledWithin(c.run, 5000);
+  check(ended === "ended" && closedOff(c), "closed during the namespace request: its late 401 said nothing over the reload: " + J({ ended, status: c.status }));
+  await c.stop();
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
@@ -3498,10 +3768,17 @@ async function scaleRebuild() {
 }
 const SCALE = { scaleRebuild };
 
-export async function run(only = "") {
-  // (the scale cases run only when named)
+export async function run(only = "", skip = "") {
+  // (3b: diagnostic only when the page has budgets and the front answers the proof route's quiet; otherwise the loop
+  // below, as it was, with only window.__report.mode added)
+  const mode = await diagnosticMode();
+  if (mode.on) return runDiagnostic({ ...CASES, ...(only ? SCALE : {}) }, only, skip, mode.budgets);
+  window.__report = { mode: "legacy", why: mode.why };
+  // (the scale cases run only when named; the cases named in `skip` never run: the runner says why, for each)
+  const skipped = skip ? skip.split(",") : [];
   for (const [name, f] of Object.entries({ ...CASES, ...(only ? SCALE : {}) })) {
     if (only && !only.split(",").includes(name)) continue;
+    if (skipped.includes(name)) continue;
     window.progress = { name, checks: results.length };
     try {
       await f();
@@ -3512,4 +3789,376 @@ export async function run(only = "") {
   }
   for (const w of used) try { w.close(); } catch {}
   return results;
+}
+
+// ---- 3b's diagnostic run (plan r2 §3, r3 §3, r4 §1): epochs, steps, a bounded cleanup after every case that proves the
+// page and the front quiet (else fail-stop: nothing more runs on state that isn't proved clean), and window.__report kept
+// current at every boundary, in memory, for the runner's polls
+
+const caseBound = (b, name) => b.CASE_MS[name] ?? b.CASE_FLOOR_MS;
+/** A quiet that answers with the registry's shape, else a rejection (never taken for quiescence) */
+const quietD = async () => { const q = await proofD("quiet"); if (!quietShape(q)) throw new Error(`quiet answered ${J(q).slice(0, 200)}`); return q; };
+
+/** After case n: C1-C6 within CLEANUP_MS from its start (r4 §1); ok, or where and why not.  `q0`: the quiet at the
+ * case's start (its close failures and untracked reads must be unchanged at the end, r5 §2). */
+async function cleanupCase(n, q0) {
+  const d = D;
+  d.cleanupDeadline = now() + d.budgets.CLEANUP_MS;
+  const stages = [];
+  let at = "C1";
+  const fail = (why, quiet) => ({ ok: false, step: at, why, quiet, stages });
+  const left = () => d.cleanupDeadline - now();
+  try {
+    // C1: each SyncOwner the case made destroyed, and its owned work (its client's stop and loop, its reconcile)
+    // awaited; then each of the case's clients stopped, then its loop's end awaited.  A stop that rejects is a failure,
+    // named (fail-stop); a loop (c.run) that rejected has ended: said, not a failure; anything that never ends is.
+    for (const o of d.owners) {
+      at = "cleanup: owner.destroy()";
+      await step(at, () => o.destroy());
+      stages.push(`${at} ok`);
+      // (every piece of work the owner ever detached, kept by the wrapped stopClient, its destroy()'s own included: the
+      // stopClient itself (a rejected stop is a failure, I-5), then its client's stop and loop)
+      for (const x of d.detached.get(o) ?? []) {
+        at = "cleanup: owner's detached stopClient";
+        await step(at, () => x.p);
+        stages.push(`${at} ok`);
+        // (the client's stop is what stopClient itself awaited: not called again)
+        if (x.run) {
+          at = "cleanup: owner's client loop";
+          try { await step(at, () => x.run); stages.push(`${at} ok`); } catch (e) { if (e instanceof StepTimeout) throw e; stages.push(`${at} rejected (${e?.message ?? e})`); }
+        }
+      }
+      at = "cleanup: owner's reconcile";
+      await step(at, () => o["reconciling"]);
+      stages.push(`${at} ok`);
+    }
+    for (const c of d.clients) {
+      at = "cleanup: c.stop()";
+      await step(at, () => c.stop());
+      stages.push(`${at} ok`);
+      at = "cleanup: c.run";
+      try { await step(at, () => c.run); stages.push(`${at} ok`); } catch (e) { if (e instanceof StepTimeout) throw e; stages.push(`${at} rejected (${e?.message ?? e})`); }
+    }
+    // C2, C3: the front's held waiters released, its proxied sockets closed (a rejection here is a failure)
+    at = "cleanup: release";
+    await ctlD("release");
+    at = "cleanup: closeAll";
+    const ca = await ctlD("closeAll");
+    if (ca?.error) return fail(`closeAll answered ${J(ca)}`);
+    // C4: drain: nothing in flight on the front (any tag), no proxied socket, no held waiter, nothing pending here
+    at = "C4 drain";
+    let q;
+    for (;;) {
+      q = await quietD();
+      if (q.inflight.length === 0 && q.closers === 0 && q.held === 0 && d.pending.size === 0) break;
+      if (left() <= 100) return fail(`not drained: ${J({ inflight: q.inflight, closers: q.closers, held: q.held, pending: [...d.pending].map((p) => p.label) })}`, q);
+      await sleep(100);
+    }
+    at = "C4 drained(n)";
+    await proofD("drained", n);
+    // C5: the log's cross-check, read before the reset (tagged c<n> now)
+    at = "C5 log";
+    const l = await ctlD("log");
+    if (!(l.open === 0 && l.putsNow === 0)) return fail(`log: open ${l.open}, putsNow ${l.putsNow}`);
+    at = "C5 reset";
+    await ctlD("reset");
+    // C6: cleanup's own operations ended, c<n> drained, then nothing late or pending-late for n or c<n>, no new close
+    // failure, no untracked read
+    at = "C6 c(n) drain";
+    for (;;) {
+      q = await quietD();
+      if (!q.inflight.some((e) => e.tag === `c${n}`)) break;
+      if (left() <= 100) return fail(`cleanup's own operations still in flight: ${J(q.inflight)}`, q);
+      await sleep(100);
+    }
+    at = "C6 drained(c(n))";
+    await proofD("drained", n, "cleanup");
+    at = "C6 final quiet";
+    q = await quietD();
+    const mine = (e) => e.tag === String(n) || e.tag === `c${n}`;
+    const late = q.late.filter(mine), pendingLate = q.pendingLate.filter(mine);
+    if (late.length || pendingLate.length) return fail(`late ${J(late)}, pending-late ${J(pendingLate)}`, q);
+    if (q.closeFailures !== q0.closeFailures) return fail(`close failures ${q0.closeFailures} -> ${q.closeFailures}`, q);
+    if (q.untrackedReads !== q0.untrackedReads) return fail(`untracked reads ${q0.untrackedReads} -> ${q.untrackedReads}`, q);
+    return { ok: true, stages };
+  } catch (e) {
+    return fail(e instanceof StepTimeout ? `timed out: ${e.step}` : `rejected: ${e?.message ?? e}`);
+  } finally {
+    d.cleanupDeadline = null;
+  }
+}
+
+/** The run in diagnostic mode: the same selection as run(), the same results array */
+async function runDiagnostic(table, only, skip, budgets) {
+  const d = (D = { budgets, clients: [], owners: [], pending: new Set(), steps: [], late: [], lateOpened: [], names: new Map(), detached: new Map(), openDelayMs: 0, caseDeadline: null, cleanupDeadline: null, epoch: 0, failStopNow: false });
+  const rep = (window.__report = { mode: "diagnostic", why: null, startedMs: Math.round(now()), cases: [], steps: d.steps, late: d.late, lateOpened: d.lateOpened, closedAtEnd: [], stopped: null, notRun: [], progress: null, results, done: false });
+  // (every SyncOwner a case makes registered for its cleanup: SyncOwner.of wrapped for this run only, restored after)
+  const of0 = W.SyncOwner.of;
+  // (each registered owner's stopClient wrapped on the instance, for this run: what it detaches (its client and that
+  // client's loop) and its own promise are kept BEFORE the owner erases its fields, so C1 awaits work that an earlier
+  // destroy(), suspend() or setDocs() left running; unwrapped in the finally)
+  const wrapped = [];
+  W.SyncOwner.of = function (w, opts) {
+    const o = of0.call(this, w, opts);
+    if (D === d && !d.owners.includes(o)) d.owners.push(o);
+    if (D === d && !Object.hasOwn(o, "stopClient")) {
+      const sc0 = o["stopClient"], work = [];
+      d.detached.set(o, work);
+      o["stopClient"] = function () { const c = this.client, run = this["run"]; const p = sc0.call(this); work.push({ c, run, p }); return p; };
+      wrapped.push(o);
+    }
+    return o;
+  };
+  try {
+    const skipped = skip ? skip.split(",") : [];
+    const list = Object.entries(table).filter(([name]) => !(only && !only.split(",").includes(name)) && !skipped.includes(name));
+    for (let i = 0; i < list.length; i++) {
+      const [name, f] = list[i];
+      const n = ++d.epoch;
+      let q0;
+      try { await proofD("epoch", n); q0 = await quietD(); } catch (e) { rep.stopped = { case: name, step: "epoch", why: e?.message ?? String(e) }; break; }
+      const cs = { name, startMs: Math.round(now()), checks: results.length, outcome: null };
+      rep.cases.push(cs);
+      window.progress = rep.progress = { name, checks: results.length, startMs: cs.startMs };
+      d.clients = [];
+      d.owners = [];
+      d.caseDeadline = now() + caseBound(budgets, name);
+      try {
+        await f();
+        cs.outcome = "ok";
+      } catch (e) {
+        cs.outcome = e instanceof StepTimeout ? `timeout: ${e.step}` : `threw: ${e?.message ?? e}`;
+        check(false, `${name}: threw ${e?.stack ?? e}`);
+      }
+      d.caseDeadline = null;
+      cs.endMs = Math.round(now());
+      const over = (cs.endMs - cs.startMs - caseBound(budgets, name)) / 1000;
+      if (over > 0) cs.over = +over.toFixed(1);
+      const cl = d.failStopNow ? { ok: false, step: "(control) failStopNow", why: "the page stops before its cleanup" } : await cleanupCase(n, q0);
+      cs.cleanup = cl;
+      cs.cleanupEndMs = Math.round(now());
+      if (!cl.ok) {
+        // FAIL-STOP: the epoch abandoned, what was still in flight named, every remaining case not run
+        let q = null;
+        try { await proofD("abandon", n); q = await quietD(); } catch {}
+        rep.stopped = { case: name, step: cl.step, why: cl.why, pending: [...d.pending].map((p) => p.label), pendingLate: (q?.pendingLate ?? []).map((e) => `${e.label}@${e.tag}`), late: (q?.late ?? []).map((e) => `${e.label}@${e.tag}`) };
+        for (const [rest] of list.slice(i + 1)) { rep.notRun.push(rest); check(false, `${rest}: not run (fail-stop after ${name})`); }
+        break;
+      }
+    }
+    return results;
+  } finally {
+    // (every workspace the run opened closed, however it ended, a late-opened one included; one that opens later still
+    // is closed by its own fulfilment, d.over)
+    d.over = true;
+    // (a page that stops before its cleanup (K-RES1's failStopNow) leaves its workspaces open as well: closing one under
+    // its still-running client would end that client, and its socket, before the runner's barrier can close it)
+    if (!d.failStopNow) for (const w of used) try { w.close(); rep.closedAtEnd.push(d.names.get(w) ?? null); } catch {}
+    W.SyncOwner.of = of0;
+    for (const o of wrapped) delete o["stopClient"];
+    rep.done = true;
+    D = null;
+  }
+}
+
+// ---- 3b's controls (plan r3 §4, r4 §3, r5 §1-§2, r6 §3): each would fail against 7777f20b's code.  The runner loads
+// them on its control pages (each a fresh navigation, with small budgets) and requires every line ok.  They use their
+// own accounts (ctl.html's window.ACCOUNTS).
+
+const ctlWithin = (cmd, extra, ms) => ctlD(cmd, extra, ms);
+const quietNow = () => quietD();
+/** K-G's dependent work: never done after K-C's fail-stop */
+let kGRuns = 0;
+const CONTROL_CASES = {
+  P1: {
+    // K-R1: a quiet during a pending ctl sees that op, never itself
+    async kR1() {
+      const p = ctl("hang").catch(() => {});
+      await sleep(200);
+      const q = await quietNow();
+      check(q.inflight.length === 1 && q.inflight[0].label === "ctl hang" && !q.inflight.some((e) => /proof|quiet/.test(e.label)), "K-R1: quiet sees the pending ctl hang and never itself: " + J(q.inflight));
+      await ctl("release");
+      await p;
+    },
+    // K-R2: a body read outside any operation is counted; then reset, the exact one only
+    async kR2() {
+      const q0 = await quietNow();
+      const r = await S("K-R2: untracked read", (lim) => fetch("/__untracked", { method: "POST", body: "x", signal: AbortSignal.timeout(lim + 100) }).then((x) => x.json()));
+      const q1 = await quietNow();
+      check(q1.untrackedReads === q0.untrackedReads + 1 && r.untrackedReads === q1.untrackedReads, "K-R2: an untracked read is detected: " + J({ before: q0.untrackedReads, after: q1.untrackedReads }));
+      const z = await ctl("untrackedReset", { to: q0.untrackedReads });
+      const q2 = await quietNow();
+      check(z.ok === true && q2.untrackedReads === q0.untrackedReads, "K-R2: …and reset, exactly that one: " + J({ reset: z, now: q2.untrackedReads }));
+    },
+    // K-L1: a healthy case: no late, no pending-late, c(n) closes (the runner checks its cleanup)
+    async kL1() {
+      await account();
+      const w = await fresh();
+      const c = client(w);
+      const ok = await until(named("K-L1: settled", () => settled(w, c)), 3000);
+      // (r6, evidence first: what the client was doing when the window ended, recorded whether it synced or not; the
+      // window itself is unchanged)
+      const at = { state: c.status.state, ns: (nsOf(c) ?? "").slice(0, 16), inflight: c.debug().inflight, outbox: await S("K-L1: the outbox at the window's end", () => outbox(w)) };
+      check(ok, "K-L1: a client synced: at the window's end " + J(at));
+      await ctl("log");
+    },
+    // K-B: a ctl that never answers: StepTimeout naming it; cleanup's release frees it
+    async kB() { await ctl("hang"); },
+    // K-D: a step that times out, then settles 1 s later: a late record, and the next case starts after it
+    async kD() { await S("K-D: a slow page step", () => sleep(CONTROL_D_MS).then(() => { window.__kDSettled = now(); })); },
+    // K-F: a rejection passes through as itself
+    async kF() { await S("K-F: rejects at once", () => Promise.reject(new Error("K-F injected"))); },
+    // K-H: until's window expiring is false, never a StepTimeout
+    async kH() {
+      const t0 = now();
+      const r = await until(named("K-H: false after 300 ms", async () => { await sleep(300); return false; }), 1000);
+      check(r === false && now() - t0 < 2000, "K-H: until's window expired: false, no StepTimeout: " + J({ r, ms: Math.round(now() - t0) }));
+    },
+    // K-I: a front op the page abandons at 0.5 s: cleanup waits for it (2 s), with no late
+    async kI() { await ctlWithin("slow", { ms: 2000 }, 500); },
+    // K-U1: probe failing after its socket is acquired: the error reaches the case; the socket closed; nothing kept
+    async kU1() {
+      await account();
+      await ctl("set", { set: { probeFailAfterConnect: true } });
+      const q0 = await quietNow();
+      const r = await S("K-U1: ctl probe", (lim) => fetch("/__ctl", { method: "POST", body: J({ cmd: "probe" }), signal: AbortSignal.timeout(lim + 100) }).then(async (x) => ({ status: x.status, text: await x.text() })));
+      let q1 = await quietNow();
+      for (let i = 0; i < 20 && q1.unconfirmed; i++) { await sleep(20); q1 = await quietNow(); }
+      check(r.status === 500 && r.text.includes("injected: probe failed after connect") && q1.armed.probeFailAfterConnect === false && q1.ups === q0.ups && q1.closeFailures === q0.closeFailures && q1.unconfirmed === 0, "K-U1: probe's error reaches the case; its socket closed and idle, nothing kept, the flag consumed: " + J({ status: r.status, text: r.text.slice(0, 80), armed: q1.armed, ups: [q0.ups, q1.ups], closeFailures: [q0.closeFailures, q1.closeFailures], unconfirmed: q1.unconfirmed }));
+    },
+    // K-W1: a workspace open that ends after its step timed out (2 s; it ends at 3 s): kept (registered in its own
+    // fulfilment), said late, the cleanup waits for it, and the run's end closes it
+    async kW1() {
+      D.openDelayMs = 3000;
+      try { await fresh(); } finally { D.openDelayMs = 0; }
+    },
+    // K-O1: a real owner, sync turned on through the panel, its client running; its client's stop made slow (1.5 s);
+    // the case destroys the owner early (destroy() detaches the client and its loop, then erases its fields) and fails
+    // at once: the cleanup must await that detached stop and loop (sentinels), then the owner's reconcile
+    async kO1() {
+      await account();
+      const w = await fresh();
+      const o = W.SyncOwner.of(w, { origin: location.origin });
+      // (r6, evidence first: whether the Turn on button appeared, whether it was clicked, each clientRunning answer, the
+      // owner's view and the durable sync:current, all recorded; no window is changed)
+      const diag = { button: null, clicked: false, running: [], view: null, current: null };
+      window.__kO1 = { o, stopDone: null, runDone: null, hadClient: false, diag };
+      o.start();
+      const el = document.createElement("div");
+      const s = W.syncSection(w, el, hostOf(w));
+      try {
+        diag.button = await until(named("K-O1: the Turn on button", () => /Turn on sync/.test(buttons(el).join())), 3000);
+        const btn = [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent));
+        // (a missing button is a failed control with its own reason, never a silent skip)
+        if (!diag.button || !btn) check(false, "K-O1: the Turn on sync button didn't appear within 3 s, so nothing was clicked: the buttons were " + J(buttons(el)));
+        else { btn.click(); diag.clicked = true; }
+        // (each wait one step, inside STEP_MS; up to six of them; each answer kept)
+        for (let i = 0; i < 6; i++) { const r = await S("K-O1: the owner's client running", () => o.clientRunning(1500)); diag.running.push(r); if (r) break; }
+        diag.view = o.view();
+        diag.current = (await S("K-O1: the durable sync:current", () => metaGet(w.ws, "sync:current"))) ?? null;
+        const c = o.client, run = o["run"];
+        window.__kO1.hadClient = !!c && !!run;
+        if (c) {
+          const stop0 = c.stop.bind(c);
+          c.stop = async () => { await sleep(1500); await stop0(); window.__kO1.stopDone ??= now(); };
+          run.then(() => { window.__kO1.runDone = now(); }, () => { window.__kO1.runDone = now(); });
+        }
+      } finally { s.dispose(); }
+      o.destroy();
+      throw new Error("K-O1 injected: the case failed right after an early destroy()");
+    },
+  },
+  // K-S1: a client whose stop rejects at once, its loop already settled: a named fail-stop at cleanup: c.stop()
+  P9: { async kS1() { D.clients.push({ stop: () => Promise.reject(new Error("K-S1 injected")), run: Promise.resolve() }); } },
+  // K-A: a predicate that never settles: StepTimeout, the pending set never empties, fail-stop naming it
+  P2: { async kA() { await until(named("K-A: never settles", () => new Promise(() => {})), 10_000); } },
+  // K-C: a client whose stop never settles: fail-stop at cleanup's c.stop(); then K-G never runs
+  P3: {
+    async kC() { D.clients.push({ stop: () => new Promise(() => {}), run: Promise.resolve() }); },
+    async kG() { kGRuns++; },
+  },
+  // K-E: closeAll rejects: a cleanup failure, fail-stop
+  P4: { async kE() { await ctl("set", { set: { closeAllReject: true } }); } },
+  // K-J: a front op longer than the cleanup: fail-stop, abandoned, pending-late; the runner's barrier sees it end late
+  P5: { async kJ() { await ctlWithin("slow", { ms: 10_000 }, 500); } },
+  // K-L2: an op tagged n that starts at drained(n) and ends 1 s later: late or pending-late for n, fail-stop
+  P6: { async kL2() { await ctl("armLate"); } },
+  // K-RES1: a proxied socket left open with nothing in flight: the page stops before its cleanup; the runner's barrier
+  // must close it itself
+  RES1: {
+    async kRES1() {
+      await account();
+      const w = await fresh();
+      client(w);
+      check(await until(named("K-RES1: a proxied socket open", async () => (await quietNow()).closers === 1), 3000), "K-RES1: a proxied socket open");
+      await ctl("set", { set: { refuseUpgrades: true } });
+      D.failStopNow = true;
+    },
+  },
+};
+/** K-D's step settles this long after its start: past the step's 2 s, inside the cleanup's 5 s */
+const CONTROL_D_MS = 3000;
+
+/** What each control page's run must show (beyond its cases' own checks) */
+function controlLines(page, rep) {
+  const cs = (name) => rep.cases.find((c) => c.name === name);
+  const lines = [];
+  const add = (ok, what) => lines.push([!!ok, what]);
+  const clean = (name) => cs(name)?.cleanup?.ok === true;
+  const own = (name, re) => results.filter(([ok, what]) => what.startsWith(re)).every(([ok]) => ok) && results.some(([, what]) => what.startsWith(re));
+  if (page === "P1") {
+    add(!rep.stopped && rep.cases.length === 11, "P1 ran every control, with no fail-stop: " + J({ stopped: rep.stopped, cases: rep.cases.map((c) => c.name) }));
+    add(cs("kR1")?.outcome === "ok" && clean("kR1") && own("kR1", "K-R1"), "K-R1: quiet never sees itself: " + J(cs("kR1")));
+    add(cs("kR2")?.outcome === "ok" && clean("kR2") && own("kR2", "K-R2"), "K-R2: an untracked read is detected, then reset exactly: " + J(cs("kR2")));
+    add(cs("kL1")?.outcome === "ok" && clean("kL1") && own("kL1", "K-L1"), "K-L1: a healthy case: c(n) closes, zero late, zero pending-late: " + J(cs("kL1")));
+    add(cs("kB")?.outcome === "timeout: ctl hang" && clean("kB"), "K-B: a ctl that never answers times out, named; cleanup's release frees it: " + J(cs("kB")));
+    add(cs("kD")?.outcome === "timeout: K-D: a slow page step" && clean("kD") && rep.late.some((l) => l.startsWith("late: K-D: a slow page step")) && window.__kDSettled !== undefined && cs("kF")?.startMs > window.__kDSettled, "K-D: a late page record, and the next case started after it settled: " + J({ kD: cs("kD"), late: rep.late, settled: window.__kDSettled, next: cs("kF")?.startMs }));
+    add(cs("kF")?.outcome === "threw: K-F injected" && clean("kF"), "K-F: a rejection passes through as itself: " + J(cs("kF")));
+    add(cs("kH")?.outcome === "ok" && clean("kH") && own("kH", "K-H"), "K-H: until's window expiring is false, no StepTimeout: " + J(cs("kH")));
+    add(cs("kI")?.outcome === "timeout: ctl slow" && clean("kI"), "K-I: the front op outlives the page's 0.5 s; cleanup waits for it, no late: " + J(cs("kI")));
+    add(cs("kU1")?.outcome === "ok" && clean("kU1") && own("kU1", "K-U1"), "K-U1: probe's failure after acquisition reaches the case, its socket closed: " + J(cs("kU1")));
+    const wName = rep.lateOpened[0];
+    add(cs("kW1")?.outcome === "timeout: fresh: Workspace.open" && clean("kW1") && rep.lateOpened.length === 1 && rep.closedAtEnd.includes(wName), "K-W1: a late open is kept, said, waited for, and closed at the run's end: " + J({ kW1: cs("kW1"), late: rep.lateOpened, closed: rep.closedAtEnd.includes(wName) }));
+    const k = window.__kO1 ?? {}, o = k.o, ended = cs("kO1")?.cleanup?.stages ?? [];
+    add(cs("kO1")?.outcome?.startsWith("threw: K-O1 injected") && clean("kO1") && k.hadClient && k.stopDone !== null && k.runDone !== null && ended.includes("cleanup: owner's detached stopClient ok") && ended.includes("cleanup: owner's client loop ok") && o?.["suspended"] === true && o?.client === null && rep.cases.every((c) => c.name !== "kO1" || c.cleanupEndMs >= Math.max(k.stopDone, k.runDone)), "K-O1: a running owner destroyed early by a failed case: the cleanup awaited its detached (slow) stop and its loop: " + J({ outcome: cs("kO1")?.outcome, hadClient: k.hadClient, stopDone: k.stopDone, runDone: k.runDone, stages: ended, diag: k.diag }));
+  } else if (page === "P9") {
+    add(rep.stopped?.case === "kS1" && rep.stopped.step === "cleanup: c.stop()" && /^rejected: K-S1 injected/.test(rep.stopped.why), "K-S1: a stop that rejects (its loop settled) is a named fail-stop: " + J(rep.stopped));
+  } else if (page === "P2") {
+    add(rep.stopped?.case === "kA" && rep.stopped.step === "C4 drain" && rep.stopped.pending.includes("until: K-A: never settles") && cs("kA")?.outcome === "timeout: until: K-A: never settles", "K-A: a predicate that never settles: StepTimeout, then fail-stop naming it: " + J(rep.stopped));
+  } else if (page === "P3") {
+    add(rep.stopped?.case === "kC" && rep.stopped.step === "cleanup: c.stop()", "K-C: a stop that never settles: fail-stop at cleanup: c.stop(): " + J(rep.stopped));
+    add(rep.notRun.includes("kG") && kGRuns === 0 && !cs("kG"), "K-G: after the fail-stop, the next case never runs (its counter 0): " + J({ notRun: rep.notRun, kGRuns }));
+  } else if (page === "P4") {
+    add(rep.stopped?.case === "kE" && rep.stopped.step === "cleanup: closeAll", "K-E: closeAll rejects: a cleanup failure, fail-stop: " + J(rep.stopped));
+  } else if (page === "P5") {
+    add(rep.stopped?.case === "kJ" && rep.stopped.step === "C4 drain" && rep.stopped.pendingLate.some((x) => /^ctl slow@/.test(x)), "K-J: a front op past the cleanup: fail-stop, abandoned, pending-late ctl slow: " + J(rep.stopped));
+  } else if (page === "P6") {
+    add(rep.stopped?.case === "kL2" && rep.stopped.step === "C6 final quiet" && [...rep.stopped.pendingLate, ...rep.stopped.late].some((x) => /^armed late@/.test(x)), "K-L2: an op of epoch n ending after drained(n): late or pending-late, fail-stop: " + J(rep.stopped));
+  } else if (page === "RES1") {
+    add(rep.stopped?.case === "kRES1" && rep.stopped.step === "(control) failStopNow" && own("kRES1", "K-RES1"), "K-RES1: the page stopped with its proxied socket open: " + J(rep.stopped));
+  }
+  return lines;
+}
+
+/** A control page's run: diagnostic for every page but P7 (no budgets: legacy, the old loop over one real case) and P8
+ * (budgets, but a front whose quiet is unknown: legacy, which the runner must refuse) */
+export async function runControls(page) {
+  if (page === "P7" || page === "P8") {
+    const mode = await diagnosticMode();
+    const out = [];
+    if (page === "P7") {
+      // (r6, a NAMED DEVIATION from plan r3/r4's "one trivial case", @sagebrush's (A): the empty selection, the legacy
+      // loop with zero iterations. No case in CASES is code-bounded in legacy (account(), :19-28, makes bare fetches);
+      // with a name no case has, every entry of the pinned loop continues before f() and before ctl("reset"). The
+      // runner proves from its own count that this page made no request at all while it ran.)
+      const res = await run("kM1-the-empty-selection");
+      out.push([!mode.on && window.__report?.mode === "legacy" && Array.isArray(res) && res.every((x) => Array.isArray(x) && x.length === 2 && typeof x[0] === "boolean" && typeof x[1] === "string") && window.progress === undefined, "K-M1: no budgets: legacy, the old loop with zero iterations (the empty selection), the results shape: " + J({ mode: window.__report?.mode, why: window.__report?.why, results: res?.length, progress: window.progress ?? null })]);
+    } else out.push([!mode.on && /^quiet answered /.test(mode.why), "K-M2: budgets, but quiet unknown: legacy: " + mode.why]);
+    window.__report = { mode: "legacy", why: mode.why, done: true };
+    return out;
+  }
+  const mode = await diagnosticMode();
+  if (!mode.on) { window.__report = { mode: "legacy", why: mode.why, done: true }; return [[false, `${page}: diagnostic mode not active: ${mode.why}`]]; }
+  await runDiagnostic(CONTROL_CASES[page], "", "", mode.budgets);
+  return controlLines(page, window.__report);
 }

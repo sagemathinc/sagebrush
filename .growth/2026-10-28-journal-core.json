@@ -1,0 +1,1 @@
+{"v": 1, "reason": "sync: the journal's kind-neutral core moved to web/journal (#272): the notebook page embeds the moved journal modules (index.html), +296 B in cli/pyjs.cjs", "bytes": {"cli/pyjs.cjs": 296}}

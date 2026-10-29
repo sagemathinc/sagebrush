@@ -81,6 +81,14 @@ export function xkRowOutcome(cells, leakOk, xk) {
 // (a thread change alone, the RSS fallback when the host has no heap figure, a malformed result) is
 // not the control catching its leak and FAILs, as does a missing series (INCOMPLETE).  (#217,
 // astra2 K2: a thread-only failure must not pass the control)
+// a row's outcome from its cells and its leak check: an invalid leak result (a sample read from a target already
+// exiting before the last repeat, or a sample that couldn't be read) makes the row INVALID, normal or control row
+// alike, with the leak's reason; otherwise the control or the normal rule
+export function leakRowOutcome(cells, leak, c) {
+  if (leak?.invalid) return { outcome: "INVALID", why: leak.why };
+  return c.expect_leak ? leakControlOutcome(cells, leak, c.xk) : xkRowOutcome(cells, leak && leak.ok, c.xk);
+}
+
 export function leakControlOutcome(cells, leak, xk) {
   if (leak == null) return { outcome: "INCOMPLETE", why: "leak control: the leak series was not measured" };
   if (leak.survived_kill) return { outcome: "FAIL", why: "leak control: a worker survived its kill" };
@@ -165,6 +173,88 @@ export const HEAP_EXTERNAL_SAMPLE = `    _m = ""
 // garbage of the trials before it; P2a, leak follow-up): growth from repeat 3 against max(16 MiB,
 // 10%) of it.  A host without that figure (the browser) is measured by RSS, and says so.
 export function leakCheck(samples, full = 20, measure = "rss") {
+  // (a final sample read while the target was exiting is dropped, and the result says so; an exiting sample before
+  // the last is invalid evidence: the target was going while trials still ran; and so is a sample error)
+  const bad = samples.find((x) => x.sample_error);
+  if (bad) return { ok: false, invalid: true, why: `the leak sample at repeat ${bad.i} couldn't be read: ${bad.sample_error}`, from: 3, to: samples.at(-1)?.i ?? 0, threads_same: false };
+  const exitingAt = samples.findIndex((x) => x.exiting);
+  if (exitingAt >= 0 && exitingAt < samples.length - 1) {
+    return { ok: false, invalid: true, why: `the target was exiting at repeat ${samples[exitingAt].i}, before the last`, from: 3, to: samples.at(-1)?.i ?? 0, threads_same: false };
+  }
+  const lastExiting = exitingAt >= 0;
+  const dropped = lastExiting ? samples.at(-1) : null;
+  if (lastExiting) samples = samples.slice(0, -1);
+  const r = leakCheckLive(samples, full, measure);
+  return r && lastExiting ? { ...r, last_exiting: true, ...(dropped.why ? { last_exiting_why: dropped.why } : {}) } : r;
+}
+
+// A final sample read while the target was shutting down in user space, before the kernel's exit starts: its threads
+// already going, with no Z, X or PF_EXITING yet (#251's fake; PR 279's ci 40765663082: threads 7, 7, 7, 7, 3).  The
+// final sample is dropped as exiting only if the target itself, bound by its identity, is seen to exit on its own
+// within WAIT_SELF_EXIT_MS of that DONE, before any harness kill (the leak final-drop design r2; @sagebrush's D1
+// ruling: no END-boundary heuristic, END alone proves nothing).
+export const WAIT_SELF_EXIT_MS = 1000;
+const posInt = (x) => Number.isSafeInteger(x) && x > 0;
+// The final sample is a candidate when every sample is readable and none is exiting (else the rules above apply
+// unchanged), the earlier tail (repeats 3 to n-1) is non-empty, and the final thread count is below every count in
+// it; all of them positive integers.  null otherwise.
+export function finalDropCandidate(samples) {
+  if (!Array.isArray(samples) || samples.length < 2) return null;
+  if (samples.some((x) => !x || typeof x !== "object" || x.sample_error || x.exiting)) return null;
+  const last = samples.at(-1);
+  const tail = samples.slice(0, -1).filter((x) => x.i >= 3);
+  if (!tail.length || !tail.every((x) => posInt(x.threads)) || !posInt(last.threads)) return null;
+  const min = Math.min(...tail.map((x) => x.threads));
+  if (!(last.threads < min)) return null;
+  return { i: last.i, from: min, to: last.threads, t_done: last.t_done, target: last.target ?? null };
+}
+// The mark: obs = { why: the session's end cause, t_finish: the first finish (before any kill), t_exit: the target's
+// own exit as observed before the kill, or null }.  Every candidate gets its final_drop record, marked or not; the
+// final sample is marked exiting only for an end of "end" or "exit", an observed own exit, and a valid DONE time with
+// 0 <= t_exit - t_done <= WAIT_SELF_EXIT_MS (inclusive; a NaN, an infinity or a negative interval is malformed timing).
+export function markFinalShutdown(samples, obs) {
+  const c = finalDropCandidate(samples);
+  if (!c) return { samples, final_drop: null };
+  const why = obs?.why ?? null;
+  const dt = validTime(c.t_done) && validTime(obs?.t_exit) ? obs.t_exit - c.t_done : null;
+  const fin = validTime(c.t_done) && validTime(obs?.t_finish) ? obs.t_finish - c.t_done : null;
+  const marked = (why === "end" || why === "exit") && dt !== null && dt >= 0 && dt <= WAIT_SELF_EXIT_MS;
+  const r1 = (x) => (x === null ? null : Math.round(x * 10) / 10);
+  const final_drop = { i: c.i, from: c.from, to: c.to, end_cause: why, end_after_done_ms: r1(dt), finish_after_done_ms: r1(fin), marked };
+  if (!marked) return { samples, final_drop };
+  const said = `threads falling (${c.from} -> ${c.to}), the target exited on its own ${r1(dt)} ms after its final DONE (end: ${why})`;
+  return { samples: [...samples.slice(0, -1), { ...samples.at(-1), exiting: true, why: said }], final_drop };
+}
+// A session's end, once (grader's N1): a second call while the own-exit wait runs is a no-op that returns false, and
+// the kill runs exactly once, after the wait.  deps: now(), candidate() (finalDropCandidate of the samples so far),
+// ownExit(candidate, deadline) -> a promise of the own exit's time or null, kill(), settle(why, t_finish, t_exit).
+// The wait runs only for a candidate and an end of "end" or "exit", at most until the final DONE + WAIT_SELF_EXIT_MS;
+// every other end kills at once, as before.
+export function sessionEnd(deps) {
+  let done = false;
+  return (why) => {
+    if (done) return false;
+    done = true;
+    const t_finish = deps.now();
+    const cand = why === "end" || why === "exit" ? deps.candidate() : null;
+    if (!cand) {
+      // (no candidate: the kill at once, synchronously, exactly as before this change)
+      deps.kill();
+      deps.settle(why, t_finish, null);
+      return true;
+    }
+    const deadline = validTime(cand.t_done) ? cand.t_done + WAIT_SELF_EXIT_MS : t_finish;
+    // (ownExit is asked for every candidate: an own exit already observed counts even when the deadline has passed,
+    // and it polls only while the deadline is ahead)
+    Promise.resolve().then(() => deps.ownExit(cand, deadline)).catch(() => null).then((t_exit) => {
+      deps.kill();
+      deps.settle(why, t_finish, validTime(t_exit) ? t_exit : null);
+    });
+    return true;
+  };
+}
+
+function leakCheckLive(samples, full, measure) {
   const from = samples.find((x) => x.i === 3), last = samples.at(-1);
   if (!from || !last || last.i <= 3) return null;
   const tail = samples.filter((x) => x.i >= 3);

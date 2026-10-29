@@ -1,6 +1,6 @@
 {
   "name": "@sagebrush/bash",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "kind": "optional",
   "sagebrush": ">=0.6.1",
   "js": {
@@ -12,12 +12,12 @@
       "turndown": "vendor/turndown-7.2.4/turndown.browser.es.js",
       "node:zlib": "src/zlib-stub.js"
     },
-    "banner": "/*! @sagebrush/bash 0.2.0: just-bash 3.6.0 (Apache-2.0) and bundled packages; full notices in this chunk's \"notices\" */",
+    "banner": "/*! @sagebrush/bash 0.3.0: just-bash 3.6.0 (Apache-2.0) and bundled packages; full notices in this chunk's \"notices\" */",
     "notices": "THIRD-PARTY-NOTICES.txt"
   },
   "files": {
     "THIRD-PARTY-NOTICES.txt": "616a6503fb3691d1e2b80923c5940d2708b4540484b2bf750e7edb2a221ddef0",
-    "src/shell.js": "2ded45e0e9a32045687bda5dd84dbe22bed425452a733f6dabb42cc5698f16ee",
+    "src/shell.js": "9a577e4dfa4d0ceef68eff3cf64ef2c35e36ff0715ca9fd5dda21c758a1c3f22",
     "src/zlib-stub.js": "3ceb61b4b2776141cec40e8073fb6e295fe86b821b84652a90dc063e18606fdc",
     "vendor/diff-8.0.4/diff.js": "e4553a1cd7ac8a2e88bb27580afb8df6018a0c6a028eb2b2f5f3a5a36f40f338",
     "vendor/just-bash-3.6.0/browser.js": "38f1ad1e3283980ecdf68cede8a4eed028c6dff6e8c31793dec1e0af529c446e",

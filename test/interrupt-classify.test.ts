@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 const mod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 
 function run(js: string): any {
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { leakControlOutcome, classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, stopGate, withWaiver, waiverErrors, ciFailing, STOP_BOUND_MS, POLL_GAP_MS, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { leakControlOutcome, leakRowOutcome, classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, stopGate, withWaiver, waiverErrors, ciFailing, STOP_BOUND_MS, POLL_GAP_MS, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles, finalDropCandidate, markFinalShutdown, sessionEnd, WAIT_SELF_EXIT_MS } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -74,10 +74,123 @@ test("leak check: growth past max(64 MiB, 10%) from repeat 3, or a thread change
   assert.equal(run(`leakCheck(${ser([300e3, 300e3, 300e3, 300e3, 300e3], [9, 9, 9, 10, 10])})`).ok, false);
   assert.equal(run(`leakCheck(${ser(Array(20).fill(1e6), Array(20).fill(9))})`).check, "full");
   assert.equal(run(`leakCheck(${ser([1, 2], [9, 9])})`), null);
+  // (a final sample read while the target was exiting: dropped and said, so its low thread count is no "change";
+  // an exiting sample before the last is invalid; python's report on #251's fake)
+  const ex = (rss: number[], thr: number[], at: number) => JSON.stringify(rss.map((r, k) => ({ i: k + 1, rss_kb: r, threads: thr[k], ...(k === at ? { exiting: true } : {}) })));
+  const last = run(`leakCheck(${ex([300e3, 300e3, 300e3, 300e3, 300e3], [7, 7, 7, 7, 4], 4)})`);
+  assert.ok(last.ok === true && last.threads_same === true && last.last_exiting === true && last.to === 4, JSON.stringify(last));
+  const early = run(`leakCheck(${ex([300e3, 300e3, 300e3, 300e3, 300e3], [7, 7, 7, 7, 7], 2)})`);
+  assert.ok(early.ok === false && early.invalid === true, JSON.stringify(early));
+  assert.ok(run(`leakCheck(${ex([300e3, 300e3, 300e3, 300e3, 300e3], [7, 7, 7, 4, 4], 4)})`).ok === false, "a thread change before the exiting sample still fails");
+  assert.ok(run(`leakCheck(${ex([300e3, 300e3, 300e3, 300e3, 400e3], [7, 7, 7, 7, 7], 9)})`).ok === false, "growth without any exiting sample still fails");
+  assert.equal(run(`leakCheck(${ex([1, 2, 3], [7, 7, 4], 2)})`), null, "too few live repeats once the exiting one is dropped: unmeasured");
+  // (a sample that couldn't be read is invalid evidence, wherever it is)
+  const err = JSON.stringify([1, 2, 3, 4, 5].map((i) => (i === 5 ? { i, sample_error: "another process under the pid" } : { i, rss_kb: 300e3, threads: 7 })));
+  const se = run(`leakCheck(${err})`);
+  assert.ok(se.ok === false && se.invalid === true && /another process/.test(se.why), JSON.stringify(se));
+});
+
+test("a row whose leak check is invalid is INVALID, normal and control rows alike, with the leak's reason (daybreak2's review)", () => {
+  const cells = JSON.stringify([{ outcome: "PASS" }, { outcome: "PASS" }]);
+  const inv = `{ ok: false, invalid: true, why: "the target was exiting at repeat 3, before the last" }`;
+  const n = run(`leakRowOutcome(${cells}, ${inv}, { id: "E2" })`);
+  assert.ok(n.outcome === "INVALID" && /exiting at repeat 3/.test(n.why), JSON.stringify(n));
+  const k = run(`leakRowOutcome(${cells}, ${inv}, { id: "M1c", expect_leak: true })`);
+  assert.ok(k.outcome === "INVALID" && /exiting at repeat 3/.test(k.why), JSON.stringify(k));
+  // (a valid result keeps the rules as they were: an ordinary leak fails a normal row; ok passes it)
+  assert.equal(run(`leakRowOutcome(${cells}, { ok: false, threads_same: true }, { id: "E2" })`).outcome, "FAIL");
+  assert.equal(run(`leakRowOutcome(${cells}, { ok: true, threads_same: true }, { id: "E2" })`).outcome, "PASS");
   assert.equal(run(`rowOutcome([{ outcome: "PASS" }], null)`), "INCOMPLETE");
   assert.equal(run(`rowOutcome([{ outcome: "PASS" }], false)`), "FAIL");
   // a leak is never KNOWN, even on a baseline row
   assert.equal(run(`againstBaseline({ case: "P1", host: "prompt", outcome: "FAIL", leak: { ok: false }, trials: [{ outcome: "FAIL", why: "no KeyboardInterrupt" }] }, { entries: [{ case: "P1", host: "prompt", signature: "no KeyboardInterrupt" }] })`), "FAIL");
+});
+
+// The final sample read while the target shut down in user space (PR 279's ci 40765663082, node-tests (6): threads
+// 7, 7, 7, 7, 3, none marked exiting).  Leak final-drop design r2: it is dropped only on the target's own exit within
+// WAIT_SELF_EXIT_MS of its final DONE, observed before any harness kill; END alone never counts.
+const shape = (thr: number[], extra: (k: number) => object = () => ({})) =>
+  JSON.stringify(thr.map((t, k) => ({ i: k + 1, t_done: 1000 * (k + 1), rss_kb: 45000 + k, threads: t, ...extra(k) })));
+const real = shape([7, 7, 7, 7, 3]);
+
+test("the final-drop candidate: a final thread count below every earlier tail count, all readable, none exiting", () => {
+  const c = run(`finalDropCandidate(${real})`);
+  assert.deepEqual({ i: c.i, from: c.from, to: c.to, t_done: c.t_done }, { i: 5, from: 7, to: 3, t_done: 5000 });
+  assert.equal(run(`finalDropCandidate(${shape([7, 7, 7, 7, 7])})`), null, "no drop");
+  assert.equal(run(`finalDropCandidate(${shape([7, 7, 7, 7, 9])})`), null, "a final rise is never a candidate");
+  assert.equal(run(`finalDropCandidate(${shape([7, 7, 7, 3, 3])})`), null, "an earlier drop: no candidate (the row fails as before)");
+  assert.equal(run(`finalDropCandidate(${shape([7, 7, 3])})`), null, "an empty earlier tail (3..n-1)");
+  assert.equal(run(`finalDropCandidate(${shape([7, 7, 7, 7, 3], (k) => (k === 1 ? { sample_error: "x" } : {}))})`), null, "a sample error anywhere");
+  assert.equal(run(`finalDropCandidate(${shape([7, 7, 7, 7, 3], (k) => (k === 2 ? { exiting: true } : {}))})`), null, "an exiting sample before the final one");
+  assert.equal(run(`finalDropCandidate(${shape([7, 7, 7, 7, 3], (k) => (k === 4 ? { exiting: true } : {}))})`), null, "a final sample already exiting: the rule as before");
+  assert.equal(run(`finalDropCandidate(${shape([7, 7, 7, 7, 0])})`), null, "a final count of 0 is not a positive thread count");
+  assert.equal(run(`finalDropCandidate(${shape([7, 7, 7.5, 7, 3])})`), null, "a non-integer count in the tail");
+  assert.equal(run(`finalDropCandidate(${shape([7, 7, 7, 7, 3], (k) => (k === 3 ? { threads: null } : {}))})`), null, "an unreadable count in the tail");
+  // (and the existing rules are unchanged: the earlier drop still fails, a sample error is still invalid)
+  assert.equal(run(`leakCheck(${shape([7, 7, 7, 3, 3])})`).ok, false);
+  assert.equal(run(`leakCheck(${shape([7, 7, 7, 7, 3], (k) => (k === 1 ? { sample_error: "x" } : {}))})`).invalid, true);
+});
+
+test("the mark: only the target's own exit, 0 to 1000 ms after its final DONE inclusive, with an end of end or exit; every candidate recorded", () => {
+  const mk = (obs: string) => run(`markFinalShutdown(${real}, ${obs})`);
+  for (const [dt, why, marked] of [[0, "end", true], [900, "end", true], [1000, "end", true], [1100, "end", false], [40, "exit", true], [1000, "exit", true], [1001, "exit", false]] as const) {
+    const r = mk(`{ why: "${why}", t_finish: 5010, t_exit: ${5000 + dt} }`);
+    assert.equal(r.final_drop.marked, marked, `${why} at ${dt} ms`);
+    assert.deepEqual([r.final_drop.from, r.final_drop.to, r.final_drop.end_cause, r.final_drop.end_after_done_ms, r.final_drop.finish_after_done_ms], [7, 3, why, dt, 10], `${why} at ${dt} ms: recorded`);
+    assert.equal(r.samples[4].exiting === true, marked, `${why} at ${dt} ms`);
+  }
+  // (END with the harness's kill: no own exit was seen before it, so nothing qualifies, whatever the end cause)
+  for (const why of ["end", "exit"]) {
+    const r = mk(`{ why: "${why}", t_finish: 5010, t_exit: null }`);
+    assert.ok(r.final_drop.marked === false && r.final_drop.end_after_done_ms === null && !r.samples[4].exiting, JSON.stringify(r.final_drop));
+  }
+  // (any other end: a guard, the budget, the overall timer or a Stop, never qualifies)
+  for (const why of ["guard", "budget", "overall", "stop"]) assert.equal(mk(`{ why: "${why}", t_finish: 5010, t_exit: 5040 }`).final_drop.marked, false, why);
+  // (malformed timing: an exit before the DONE, NaN, an infinity, a missing DONE time)
+  for (const t of ["4999", "NaN", "Infinity", "-Infinity", "undefined"]) assert.equal(mk(`{ why: "end", t_finish: 5010, t_exit: ${t} }`).final_drop.marked, false, `t_exit ${t}`);
+  const noDone = run(`markFinalShutdown(${shape([7, 7, 7, 7, 3], (k) => (k === 4 ? { t_done: null } : {}))}, { why: "exit", t_finish: 5010, t_exit: 5040 })`);
+  assert.ok(noDone.final_drop.marked === false && noDone.final_drop.end_after_done_ms === null, JSON.stringify(noDone.final_drop));
+  // (not a candidate: no record, the samples untouched)
+  assert.deepEqual(run(`markFinalShutdown(${shape([7, 7, 7, 7, 7])}, { why: "exit", t_finish: 5010, t_exit: 5040 })`).final_drop, null);
+});
+
+test("the real failing shape: marked, leakCheck drops it and says why; unmarked, it still fails as a thread change", () => {
+  const marked = run(`markFinalShutdown(${real}, { why: "exit", t_finish: 5010, t_exit: 5040 }).samples`);
+  const r = run(`leakCheck(${JSON.stringify(marked)})`);
+  assert.ok(r.ok === true && r.threads_same === true && r.last_exiting === true && r.to === 4, JSON.stringify(r));
+  assert.match(r.last_exiting_why, /^threads falling \(7 -> 3\), the target exited on its own 40 ms after its final DONE \(end: exit\)$/);
+  const unmarked = run(`leakCheck(${real})`);
+  assert.ok(unmarked.ok === false && unmarked.threads_same === false && unmarked.last_exiting === undefined, JSON.stringify(unmarked));
+  // (an exiting sample the kernel showed keeps its own reason)
+  const gone = run(`leakCheck(${shape([7, 7, 7, 7, 3], (k) => (k === 4 ? { exiting: true, why: "gone" } : {}))})`);
+  assert.equal(gone.last_exiting_why, "gone");
+  assert.equal(run(`WAIT_SELF_EXIT_MS`), 1000);
+});
+
+test("the session's end, once: a re-entry during the own-exit wait is a no-op, the kill runs exactly once after the wait; no candidate kills at once", () => {
+  const r = run(`await (async () => {
+    const log = []; let t = 0;
+    const end = sessionEnd({ now: () => (t += 10), candidate: () => ({ t_done: 5 }), ownExit: (c, d) => { log.push(["wait", d]); return new Promise((res) => setTimeout(() => res(40), 30)); }, kill: () => log.push("kill"), settle: (w, f, e) => log.push(["settle", w, f, e]) });
+    const first = end("end"); const again = [end("exit"), end("end"), end("guard")]; const before = log.slice();
+    await new Promise((res) => setTimeout(res, 100));
+    const sync = []; let u = 0;
+    const end2 = sessionEnd({ now: () => (u += 1), candidate: () => null, ownExit: () => { sync.push("waited"); return 1; }, kill: () => sync.push("kill"), settle: (w, f, e) => sync.push(["settle", w, f, e]) });
+    end2("end"); const syncNow = sync.slice();
+    const bad = []; let v = 0;
+    const end3 = sessionEnd({ now: () => (v += 1), candidate: () => ({ t_done: 0 }), ownExit: () => Promise.reject(new Error("x")), kill: () => bad.push("kill"), settle: (w, f, e) => bad.push(["settle", w, e]) });
+    end3("exit");
+    const nan = []; const end4 = sessionEnd({ now: () => 1, candidate: () => ({ t_done: 0 }), ownExit: () => NaN, kill: () => nan.push("kill"), settle: (w, f, e) => nan.push(["settle", w, e]) });
+    end4("exit");
+    await new Promise((res) => setTimeout(res, 20));
+    return { first, again, before, log, syncNow, bad, nan };
+  })()`);
+  assert.equal(r.first, true);
+  assert.deepEqual(r.again, [false, false, false], "every re-entry is a no-op");
+  assert.ok(!r.before.includes("kill"), "no kill before the wait ends");
+  assert.deepEqual(r.log, [["wait", 1005], "kill", ["settle", "end", 10, 40]], "one wait (to the DONE + 1000), then one kill and one settle");
+  assert.deepEqual(r.syncNow, ["kill", ["settle", "end", 1, null]], "no candidate: killed at once, synchronously, no wait");
+  assert.deepEqual(r.bad, ["kill", ["settle", "exit", null]], "a failed observation is no own exit");
+  assert.deepEqual(r.nan, ["kill", ["settle", "exit", null]], "a malformed time is no own exit");
 });
 
 test("leak check, heap+external (P2a): the post-GC JS heap plus external memory from repeat 3 against max(16 MiB, 10%), named in the row; RSS where the host has no figure", () => {

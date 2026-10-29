@@ -17,6 +17,8 @@ import { rowIcons, ROWICON } from "./sync-rows";
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
 // copy; elsewhere the define is absent or false, and everything is as before)
 declare const __SB_NO_SYNC__: boolean | undefined;
+// (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hooks fold away)
+declare const __SB_LATEX__: boolean | undefined;
 const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
 
 export type BrowserHost = {
@@ -293,10 +295,16 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       if ((ev.target as HTMLElement).closest("input")) return;
       if (e.kind === "folder") { toggle(e.path); return; }
       if (trashView) return;
+      // (a .tex file: the LaTeX editor, in a build with it and when it is on; web/latex/boot.ts)
+      if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && e.kind === "file" && (globalThis as any).__sbTex?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
       if (e.kind === "file") { preview(e); return; }
       host.open(e, ev.ctrlKey || ev.metaKey || ev.button === 1 ? "tab" : "here");
     };
-    r.onauxclick = (ev) => { if (ev.button === 1 && e.kind !== "folder" && e.kind !== "file") host.open(e, "tab"); };
+    r.onauxclick = (ev) => {
+      // (a middle-click on a .tex file: the editor in a new tab when it takes the file; any other file, nothing, as before)
+      if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && ev.button === 1 && e.kind === "file") { if (!trashView) (globalThis as any).__sbTex?.(e, true); return; }
+      if (ev.button === 1 && e.kind !== "folder" && e.kind !== "file") host.open(e, "tab");
+    };
     r.onkeydown = (ev) => {
       if (ev.target !== r) return;
       if (ev.key === "Enter") r.click();

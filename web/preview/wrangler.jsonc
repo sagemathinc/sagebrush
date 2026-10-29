@@ -1,0 +1,9 @@
+{
+  "name": "sagebrush-preview",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "*.sagebrush.cloud/*", "zone_name": "sagebrush.cloud" }],
+  "r2_buckets": [{ "binding": "PREVIEWS", "bucket_name": "sagebrush-preview" }]
+}

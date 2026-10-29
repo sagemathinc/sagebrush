@@ -16,6 +16,7 @@ import { req } from "./db";
 import { switchToIf } from "./sync-outbox";
 import { readLife, sameLife, syncOffIf, type LifeMark } from "./sync-pins";
 import { SyncOwner } from "./sync-owner";
+import { DOC_SYNC_NOTE, docSyncOrigin } from "./doc-sync-switch";
 import { accountHash } from "../sync-protocol/protocol";
 import type { Refusal } from "./sync-client";
 
@@ -240,7 +241,11 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     if (!on || !here) {
       sec.append(btn("Turn on sync…", () => void enable()));
       if (on) sec.append(h("p", { className: "note", textContent: "Sync is on for your account, not in this browser." }));
-    } else sec.append(h("p", { textContent: `Sync is on: ${foot(v.s)}` }), btn("Turn off sync here", () => void off()));
+    } else {
+      sec.append(h("p", { textContent: `Sync is on: ${foot(v.s)}` }), btn("Turn off sync here", () => void off()));
+      // (DEV's switch for notebooks' contents: what it does and doesn't do yet, and that it lasts in this browser)
+      if (docSyncOrigin(location.origin)) sec.append(h("ul", { className: "note" }, ...DOC_SYNC_NOTE.map((t) => h("li", { textContent: t }))));
+    }
     const lim = owner.limit;
     if (lim && lim.limit_bytes !== null) sec.append(h("p", { className: "note", textContent: `Your plan's storage: ${fmt(lim.used_bytes)} of ${fmt(lim.limit_bytes)} used` }));
     if (on) {

@@ -1,6 +1,6 @@
 // ShellHost's cases (plan-bash-shell r3 §9 step 2, addendum D8 r3's step-2 tests), run in the page by
 // test-shell-host.mjs: the real shell module in its worker, a real Workspace, and ShellHost between them.
-import { startShell, ShellHost, MAX_PENDING, STOP_GRACE_MS as HOST_GRACE, boundedJson, TooLarge, W } from "/host-bundle.js";
+import { startShell, ShellHost, MAX_PENDING, STOP_GRACE_MS as HOST_GRACE, WATCHDOG_SLACK_MS, boundedJson, TooLarge, W, L } from "/host-bundle.js";
 // (r3 §4.3's grace, as the plan says it: the host's constant is checked against it, never taken as the truth)
 const STOP_GRACE_MS = 2000;
 
@@ -21,10 +21,10 @@ let D;
 let nth = 0;
 // A workspace of its own for a group of cases, and a host over it.  `wrap(ws)` lets a case put a view of the
 // workspace between the host and it (a hook before a verb: a concurrent change, a fault).
-async function fresh(name, { start, wrap, limits, readBytes } = {}) {
+async function fresh(name, { start, wrap, limits, readBytes, bash } = {}) {
   localStorage.clear();
   const ws = await W.Workspace.open({ name: `host-${name}-${++nth}`, mainName: `host-${name}-main-${nth}`, ...(limits ? { limits } : {}) });
-  const host = new ShellHost(wrap ? wrap(ws) : ws, start ?? ((signal) => startShell(D.S, "/", { signal }).then((x) => x.shell)), readBytes ? { readBytes } : {});
+  const host = new ShellHost(wrap ? wrap(ws) : ws, start ?? ((signal) => startShell(D.S, "/", { signal }).then((x) => x.shell)), { ...(readBytes ? { readBytes } : {}), ...(bash ? { bash } : {}) });
   return { ws, host };
 }
 // A view of `ws` for the host whose verbs first run `hooks[verb](...args)` if one is set: only for the host's
@@ -61,7 +61,7 @@ export async function run(only) {
   D = await (await fetch("/data.json")).json();
   const out = [];
   const check = (ok, what) => out.push([!!ok, what]);
-  const groups = { oracle, lexical, basics, identity, grants, classify, provenance, conformance, pending, stop, startup, fence, documents, liveness, listing, actors, boundary, oldShell, frozen, census };
+  const groups = { oracle, lexical, basics, identity, grants, classify, provenance, conformance, pending, stop, startup, fence, documents, liveness, listing, actors, boundary, oldShell, frozen, census, limits, upstream, output };
   for (const [name, g] of Object.entries(groups)) {
     if (only && !only.split(",").includes(name)) continue;
     try {
@@ -433,22 +433,21 @@ async function stop(check) {
   let ms = performance.now() - (t0 ?? NaN);
   // (the module sees the abort only when its worker takes a message, between macrotasks: in a run, only while it waits
   // for a file call's answer, which the fence refuses after a Stop anyway.  The pinned just-bash itself checks its signal
-  // only there.  So a CPU-only loop is ended by just-bash's own default of 100,000 commands in this step, and by the
-  // 2 s grace once step 3 passes +Infinity for every own-computation key that is off, plan r3 §5 A; probe in packet r3)
+  // only there.  From step 3, with every own-computation key off passed as +Infinity, nothing but Stop's 2 s grace
+  // ends a CPU-only loop: the page ends the worker (erratum r8c E2 item 7).  Structural on CI (G1): the outcome, the
+  // grace's own ending, and a fresh worker next; the time only within a generous bound)
   check(loop.at() !== null && tAbort !== null && tAbort > loop.at(),
     `the CPU-only loop's Stop came after its file call had answered (stat of /m answered at ${loop.at()?.toFixed(1)} ms, Stop at ${tAbort?.toFixed(1)} ms): otherwise it landed during the file call`);
-  check(r.kind === "interrupted" && ms < STOP_GRACE_MS + 600,
-    `Stop during a CPU-only loop, ${LOOP_STOP_MS} ms into it: interrupted, by the cap or the grace (${JSON.stringify(r)}, ${Math.round(ms)} ms after the Stop)`);
+  // (G1-c: the time is reported, not gated: the web-browser job has no SAGEBRUSH_TIME_SCALE)
+  check(r.kind === "interrupted" && host.endings.filter((x) => x === "it didn't stop within 2 s").length === 1,
+    `Stop during a CPU-only loop, ${LOOP_STOP_MS} ms into it: interrupted by the 2 s grace, its worker ended, and no 100,000-command cap relied on (${JSON.stringify(r)}, ${Math.round(ms)} ms after the Stop; the host's endings ${JSON.stringify(host.endings)})`);
   {
-    const { wrap, at: tc } = loopStart({});
-    const { host: hc } = await fresh("stop-control", { wrap });
-    const rc = await hc.exec(PERSON, LOOP);
-    const loopMs = performance.now() - (tc() ?? NaN);
-    check(rc.kind === "exit" && rc.code === 126 && /too many commands executed \(>100000\)/.test(rc.stderr),
-      `known until step 3: an unstopped CPU-only loop ends at just-bash's default 100,000 commands (${JSON.stringify(rc).slice(0, 200)})`);
-    // (the margin the case above needs: the loop must outlast its Stop by far, or the cap could end it first)
-    check(loopMs >= 5 * LOOP_STOP_MS,
-      `the runner is too fast for the CPU-only Stop case's margin: the loop reached the cap ${Math.round(loopMs)} ms after it started, under ${5 * LOOP_STOP_MS} ms (5x its Stop at ${LOOP_STOP_MS} ms)`);
+    // (G3: past just-bash's own defaults of 100,000 commands and 100,000 loop iterations, with both keys off: not stopped)
+    const { host: hc } = await fresh("stop-control");
+    const t1 = performance.now();
+    const rc = await hc.exec(PERSON, "i=0; while [ $i -lt 100001 ]; do i=$((i+1)); done; echo past $i");
+    check(rc.kind === "exit" && rc.code === 0 && rc.stdout === "past 100001\n",
+      `with bash.commands and bash.loop_iterations off, a run past just-bash's 100,000-command and 100,000-iteration defaults isn't stopped (G3: ${Math.round(performance.now() - t1)} ms on this runner) (${JSON.stringify(rc).slice(0, 200)})`);
   }
   r = await host.exec(PERSON, "echo fresh");
   check(r.kind === "exit" && r.stdout === "fresh\n", `and the next run works (${JSON.stringify(r)})`);
@@ -490,6 +489,7 @@ function counted(delay) {
       S: shell.S, version: shell.version, hostReq: shell.hostReq,
       get state() { return shell.state; },
       exec: (...a) => { c.dispatched++; return shell.exec(...a); },
+      configure: (i) => shell.configure(i),
       terminate: () => { c.ended++; shell.terminate(); },
     };
     c.shells.push(w);
@@ -638,7 +638,7 @@ async function documents(check) {
   let err = null;
   try { boundedJson({ cells: counting }, 2000); } catch (e) { err = e; }
   check(err instanceof TooLarge && reads > 0 && reads < 50, `over the cap, the walk stops there: ${reads} of 2000 cells read before TooLarge`);
-  // a document over the shell's read cap is refused (EFBIG), never read out whole
+  // a document over the shell's read cap is a limit (step 3: bash.read_bytes, row 4), never read out whole
   const { ws, host } = await fresh("documents", { readBytes: 2000 });
   await ws.create("/nb.ipynb", { content: big });
   // (and its whole text is never made: no JSON.stringify in the page produces more than a cell's worth meanwhile)
@@ -651,12 +651,12 @@ async function documents(check) {
   } finally {
     JSON.stringify = stringify;
   }
-  check(r.kind === "exit" && r.code === 1 && r.stdout === "" && longest < 2000, `a notebook over the read cap isn't read, nor serialized whole (the longest JSON text made meanwhile: ${longest} chars) (${JSON.stringify(r).slice(0, 200)})`);
-  // (just-bash words every input error as missing; the host's own answer, through the stand-in, is EFBIG)
+  check(r.kind === "limit" && r.key === "read_bytes" && r.value === 2000 && r.code === 125 && longest < 2000, `a notebook over the read cap isn't read, nor serialized whole: bash.read_bytes, typed (the longest JSON text made meanwhile: ${longest} chars) (${JSON.stringify(r).slice(0, 200)})`);
+  // (the host's own answer to the read, through the stand-in: EDQUOT, the run latched at row 4)
   const { ws: w1, host: h1 } = await fresh("documents-cap", { readBytes: 2000, start: (signal) => startShell(D.STAND, "/", { signal }).then((x) => x.shell) });
   await w1.create("/nb.ipynb", { content: big });
   r = await h1.run(PERSON).invoke(JSON.stringify({ steps: [{ op: "read", args: ["/nb.ipynb"] }], report: "exit" }));
-  check(r.kind === "exit" && r.stdout === '["EFBIG"]', `the host answers a read of it EFBIG (${JSON.stringify(r)})`);
+  check(r.kind === "limit" && r.key === "read_bytes", `the host answers a read of it with the limit, and the run ends typed (${JSON.stringify(r)})`);
   await ws.create("/small.board.json", { content: { title: "s", nodes: [] } });
   r = await host.exec(PERSON, "cat small.board.json");
   check(r.code === 0 && r.stdout === JSON.stringify((await ws.read("/small.board.json")).content, null, 1) + "\n", `a board under the cap reads as its JSON text (${JSON.stringify(r).slice(0, 160)})`);
@@ -804,8 +804,16 @@ async function oldShell(check) {
   const { shell } = await startShell(D.OLD, "/");
   check(shell.hostReq === 1 && shell.version === "0.1.0", `the loader still starts it standalone (host_req ${shell.hostReq}, ${shell.version})`);
   shell.terminate();
+  // (step 3: step 2's 0.2.0 shell (host_req 2) can't take the limits, so it would run with just-bash's own: refused
+  // too, before dispatch and before any init)
+  {
+    let sent = 0;
+    const { ws: w2, host: h2 } = await fresh("old-shell-2", { start: (signal) => startShell(D.OLD2, "/", { signal }).then(({ shell }) => ({ S: shell.S, version: shell.version, hostReq: shell.hostReq, get state() { return shell.state; }, exec: (...a) => { sent++; return shell.exec(...a); }, configure: (...a) => { sent++; return shell.configure(...a); }, terminate: () => shell.terminate() })) });
+    const r2 = await h2.exec(PERSON, "echo x > n");
+    check(r2.kind === "unavailable" && r2.row === 2 && /older shell; update the set/.test(r2.reason) && sent === 0 && !(await w2.stat("/n")), `a 0.2.0 shell (host_req 2) is refused before its init and before dispatch (${JSON.stringify(r2)})`);
+  }
   const { shell: cur } = await startShell(D.S, "/");
-  check(cur.hostReq === 2, `the current shell's verified host_req is 2 (${cur.hostReq})`);
+  check(cur.hostReq === 3 && cur.version === "0.3.0", `the current shell's verified host_req is 3, its version 0.3.0 (${cur.hostReq}, ${cur.version})`);
   cur.terminate();
 }
 
@@ -874,4 +882,426 @@ async function census(check) {
   const gone = recorded.get("rm /B/nosuch"), there = recorded.get("rm /B/secret");
   check(!!gone && !!there && gone.exit === there.exit && gone.stderr === there.stderr.replaceAll("/B/secret", "/B/nosuch"),
     `rm of an absent and an existing path outside the grant: the same words and status (${JSON.stringify(gone)}, ${JSON.stringify(there)})`);
+}
+
+// ---------------------------------------------------------------- step 3: the config, the init, and the 12 typed keys (r8c E2)
+// Expectations are computed from the inputs (G8); nothing is timed on CI beyond generous bounds (G1).
+const u8 = (s) => new TextEncoder().encode(s).length;
+const typed = (r, key) => r.kind === "limit" && r.row === 4 && r.key === key && r.code === 125 && r.stderr === `bash: bash.${key} exceeded (${r.value})\n`;
+const show = (r) => JSON.stringify(r).slice(0, 240);
+async function limits(check) {
+  // the config's five refusals, each naming its key (r3 §4.1), before any worker starts
+  {
+    const { ws } = await fresh("config");
+    let starts = 0;
+    const start = (signal) => (starts++, startShell(D.S, "/", { signal }).then((x) => x.shell));
+    const cases = [[{ nope: 1 }, "nope", "unknown key"], [{ ops: 1.5 }, "ops", "not an integer"], [{ ops: 100_001 }, "ops", "outside"], [{ ops: 0 }, "ops", "outside"], [{ ops: null }, "ops", "only for own-computation keys"], [{ script_ms: 999 }, "script_ms", "outside"], [{ x: "y".repeat(L.CONFIG_MAX_BYTES) }, "bash", "over 4096 bytes"]];
+    for (const [cfg, key, words] of cases) {
+      let err = null;
+      try { new ShellHost(ws, start, { bash: cfg }); } catch (e) { err = e; }
+      check(err instanceof L.BashConfigError && err.key === key && err.message.includes(words), `the config ${JSON.stringify(cfg).slice(0, 60)} is refused, naming ${key} (${err?.message})`);
+    }
+    const ok = new ShellHost(ws, start, { bash: { commands: null, script_ms: 1000, ops: 1 } });
+    check(ok.limits.commands === null && ok.limits.script_ms === 1000 && ok.limits.ops === 1 && ok.limits.output_bytes === L.BASH_RANGES.output_bytes.def && starts === 0, `a valid config resolves, its absent keys at their defaults, and starts nothing (${JSON.stringify(ok.limits).slice(0, 200)})`);
+    check(L.LIMIT_KEYS.length === 18 && Object.isFrozen(L.BASH_RANGES) && L.LIMIT_KEYS.every((k) => Object.isFrozen(L.BASH_RANGES[k])), `BASH_RANGES: exactly the 18 keys, immutable`);
+    check(L.MAX_FILE_BYTES === W.LIMITS.maxFileBytes && L.BASH_RANGES.read_bytes.max === W.LIMITS.maxFileBytes && L.BASH_RANGES.write_bytes.max === W.LIMITS.maxFileBytes, `read_bytes' and write_bytes' upper bound is the workspace's maxFileBytes (${L.MAX_FILE_BYTES})`);
+  }
+  // the init: one per worker, before any exec (r3 §4.1)
+  {
+    const init = { limits: L.executionLimitsOf(L.validateBash()), pipelineWidth: 16 };
+    const { shell } = await startShell(D.S, "/");
+    const before = await shell.exec("echo hi", { allowance: 100 });
+    const first = await shell.configure(init).then((v) => ({ v }), (e) => ({ e: String(e.message) }));
+    const second = await shell.configure(init).then((v) => ({ v }), (e) => ({ e: String(e.message) }));
+    check("rejected" in before && /isn't configured/.test(before.rejected.message), `an exec before the init is refused by the module (${show(before)})`);
+    check(first.v && /already configured/.test(second.e ?? ""), `the first init is taken, a second refused (${show(second)})`);
+    // the census (r3 §4.2 "Fixed, not keys"): the names just-bash resolved are exactly the mapped and the fixed
+    const names = Object.keys(first.v ?? {}).sort(), want = [...L.MAPPED_LIMITS, ...L.FIXED_LIMITS].sort();
+    const differ = L.MAPPED_LIMITS.filter((k) => first.v?.[k] !== init.limits[k]);
+    check(same(names, want) && !differ.length, `the pinned just-bash's limits are exactly the mapped and the fixed ones, the mapped as sent (${names.length} names; differ: ${differ.join(", ") || "none"}; extra ${names.filter((k) => !want.includes(k))}; missing ${want.filter((k) => !names.includes(k))})`);
+    check(first.v?.maxCommandCount === Infinity && first.v?.maxLoopIterations === Infinity && first.v?.maxWorkUnits === Infinity && first.v?.maxExecutionTimeMs === Infinity && first.v?.maxOutputSize === L.OUTPUT_BACKSTOP,
+      `class A off is exactly +Infinity in just-bash, and its output bound is the fixed backstop (${show({ c: first.v?.maxCommandCount, l: first.v?.maxLoopIterations, w: first.v?.maxWorkUnits, t: first.v?.maxExecutionTimeMs, o: first.v?.maxOutputSize })})`);
+    shell.terminate();
+  }
+  // (r2, astra5 B3-A5-1: an init answered malformed ends the start, settled, nothing dispatched; an init never answered is
+  // ended by Stop's grace, its worker with it)
+  {
+    const { host } = await fresh("init-bad", { start: (signal) => startShell(D.CONF_BAD, "/", { signal }).then((x) => x.shell) });
+    const r = await host.exec(PERSON, "echo x");
+    check(r.kind === "unavailable" && r.row === 2 && /broke the shell protocol/.test(r.reason), `a malformed init answer: the start fails, settled, at row 2 (${show(r)})`);
+  }
+  {
+    const live0 = window.workers.live;
+    const { host } = await fresh("init-never", { start: (signal) => startShell(D.CONF_NEVER, "/", { signal }).then((x) => x.shell) });
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 300);
+    const r = await host.exec(PERSON, "echo x", { signal: ac.signal });
+    await sleep(200);
+    check(r.kind === "interrupted" && host.endings.includes("it didn't stop within 2 s") && window.workers.live === live0, `Stop during an init that never answers: interrupted at the grace, and the worker taking its init is ended (${show(r)}; live workers ${live0} -> ${window.workers.live}; endings ${JSON.stringify(host.endings)})`);
+  }
+  // invocations: charged before dispatch, a refused one too; the next is never dispatched
+  {
+    const c = counted(0);
+    const { host } = await fresh("invocations", { start: c.start, bash: { invocations: 2 } });
+    const run = host.run(PERSON);
+    const a = await run.invoke("echo 1"), b = await run.invoke("echo 2"), x = await run.invoke("echo 3");
+    check(a.code === 0 && b.code === 0 && typed(x, "invocations") && x.value === 2 && c.dispatched === 2 && run.ledger().invocations === 3, `bash.invocations 2: two run, the third is refused before dispatch, typed, and still counted (${show(x)}; dispatched ${c.dispatched}; ledger ${JSON.stringify(run.ledger())})`);
+    check(typed(await run.invoke("echo 4"), "invocations"), `and the run stays latched`);
+  }
+  // source_bytes: the script's UTF-8, before dispatch
+  {
+    const c = counted(0);
+    const { host } = await fresh("source", { start: c.start, bash: { source_bytes: 1024 } });
+    const at = ": " + "é".repeat(511), past = at + "a";
+    const r1 = await host.exec(PERSON, at), r2 = await host.exec(PERSON, past);
+    check(u8(at) === 1024 && r1.kind === "exit" && r1.code === 0 && typed(r2, "source_bytes") && c.dispatched === 1, `bash.source_bytes 1024: a script of ${u8(at)} UTF-8 bytes runs, one of ${u8(past)} is refused before dispatch (${show(r1)}; ${show(r2)})`);
+    check(u8(L.wrap("")) === L.WRAPPER_BYTES && u8(L.wrap(at)) === u8(at) + L.WRAPPER_BYTES, `the host's wrapper adds exactly ${L.WRAPPER_BYTES} bytes, which just-bash's maxSourceBytes allows for`);
+  }
+  // a sourced file is a read, bounded by bash.read_bytes (typed), not by source_bytes: the pinned just-bash checks
+  // maxSourceBytes in exec() and transform() only, and its `source`/`.` parses what it read with no size check
+  // (PR 279's first CI, run 40757814227 job 123062107940: a sourced file past source_bytes + the wrapper ran)
+  {
+    const { ws, host } = await fresh("source-file", { readBytes: 2000, bash: { source_bytes: 1024 } });
+    const body = (n) => ": " + "a".repeat(n - 3) + "\n";
+    await ws.create("/over-source.sh", { content: enc(body(1500)) });
+    await ws.create("/at-read.sh", { content: enc(body(2000)) });
+    await ws.create("/over-read.sh", { content: enc(body(2001)) });
+    const r1 = await host.exec(PERSON, ". ./over-source.sh; echo SENTINEL"), r2 = await host.exec(PERSON, ". ./at-read.sh; echo SENTINEL");
+    check(u8(body(1500)) === 1500 && r1.kind === "exit" && r1.code === 0 && r1.stdout === "SENTINEL\n", `a sourced file of 1500 bytes, over bash.source_bytes 1024, runs: source_bytes bounds only the script the page sends (${show(r1)})`);
+    check(u8(body(2000)) === 2000 && r2.kind === "exit" && r2.code === 0 && r2.stdout === "SENTINEL\n", `a sourced file of exactly bash.read_bytes (2000 bytes) runs (${show(r2)})`);
+    const r3 = await host.exec(PERSON, ". ./over-read.sh; echo SENTINEL");
+    check(u8(body(2001)) === 2001 && typed(r3, "read_bytes") && r3.value === 2000, `one of 2001 bytes is bash.read_bytes, typed: the read is refused before just-bash parses it (${show(r3)})`);
+  }
+  // pipeline_width: the module's own pre-parse, before anything runs
+  {
+    const { ws, host } = await fresh("pipeline", { bash: { pipeline_width: 2 } });
+    const r1 = await host.exec(PERSON, "echo a | cat"), r2 = await host.exec(PERSON, "echo x > wide; echo a | cat | cat");
+    check(r1.code === 0 && r1.stdout === "a\n" && typed(r2, "pipeline_width") && r2.value === 2 && !(await ws.stat("/wide")), `bash.pipeline_width 2: a 2-stage pipeline runs; a 3-stage one is refused whole, before anything runs (${show(r2)})`);
+    const forged = await host.exec(PERSON, `echo "bash: bash.pipeline_width exceeded (2)" >&2; exit 125`);
+    check(forged.kind === "exit" && forged.code === 125, `a script's own matching words and status stay an ordinary exit (${show(forged)})`);
+  }
+  // list_entries
+  {
+    const { ws, host } = await fresh("list", { bash: { list_entries: 100 } });
+    await ws.mkdir("/d");
+    for (let i = 0; i < 100; i++) await ws.create(`/d/f${i}`, { content: enc("") });
+    const r1 = await host.exec(PERSON, "ls d | wc -l");
+    await ws.create("/d/f100", { content: enc("") });
+    const r2 = await host.exec(PERSON, "ls d > /dev/null; echo after > after");
+    check(r1.code === 0 && r1.stdout.trim() === "100" && typed(r2, "list_entries") && !(await ws.stat("/after")), `bash.list_entries 100: 100 entries list, 101 are a limit and nothing after runs (${show(r2)})`);
+  }
+  // read_bytes and write_bytes (64 KiB, their minimum)
+  {
+    const K = 65536;
+    const { ws, host } = await fresh("rw", { bash: { read_bytes: K, write_bytes: K } });
+    await ws.create("/at", { content: new Uint8Array(K).fill(97) });
+    await ws.create("/past", { content: new Uint8Array(K + 1).fill(97) });
+    const r1 = await host.exec(PERSON, "wc -c < at"), r2 = await host.exec(PERSON, "wc -c < past");
+    check(r1.code === 0 && r1.stdout.trim() === String(K) && typed(r2, "read_bytes") && r2.value === K, `bash.read_bytes ${K}: a file of ${K} bytes reads, one of ${K + 1} is a limit (${show(r2)})`);
+    const w1 = await host.exec(PERSON, `printf '%${K}s' > w1`), w2 = await host.exec(PERSON, `printf '%${K + 1}s' > w2`);
+    check(w1.code === 0 && (await ws.stat("/w1"))?.size === K && typed(w2, "write_bytes") && !(await ws.stat("/w2")), `bash.write_bytes ${K}: a commit of ${K} bytes is made, one of ${K + 1} is a limit and nothing is written (${show(w2)}; w2 ${JSON.stringify(await ws.stat("/w2"))})`);
+  }
+  // ops and written_bytes: each mutating transaction at its own admit; reads and probes charge nothing
+  {
+    const { ws, host } = await fresh("ops", { bash: { ops: 3, written_bytes: 10 } });
+    await ws.create("/a", { content: enc("aaa") });
+    let run = host.run(PERSON);
+    const reads = await run.invoke("cat a; ls; stat a > /dev/null; test -e a; echo *; wc -c < a");
+    check(reads.code === 0 && run.ledger().ops === 0 && run.ledger().written_bytes === 0, `reads, listings, stats, probes and globs charge neither ops nor written_bytes (${JSON.stringify(run.ledger())})`);
+    const made = await run.invoke("printf 12345 > b; printf 12345 > c; mkdir m");
+    check(made.code === 0 && run.ledger().ops === 3 && run.ledger().written_bytes === 10, `three mutations, ten bytes: charged exactly (${JSON.stringify(run.ledger())})`);
+    const over = await run.invoke("touch d");
+    check(typed(over, "ops") && over.value === 3 && !(await ws.stat("/d")) && run.ledger().ops === 3, `the fourth mutation is refused at its admit, typed, before anything changes (${show(over)}; ledger ${JSON.stringify(run.ledger())})`);
+    run = host.run(PERSON);
+    const bytes = await run.invoke("printf 1234567890 > e; printf x > f");
+    check(typed(bytes, "written_bytes") && (await read(ws, "/e")) === "1234567890" && !(await ws.stat("/f")) && run.ledger().written_bytes === 10, `bash.written_bytes 10: ten bytes written, the eleventh refused before its commit (${show(bytes)}; ${JSON.stringify(run.ledger())})`);
+  }
+  // a mutation refused after its admit (a concurrent change) still consumed its charge: never refunded
+  {
+    const hooks = {};
+    const { ws, host } = await fresh("ops-refused", { wrap: hookable(hooks) });
+    await ws.create("/g", { content: enc("old") });
+    const run = host.run(PERSON);
+    hooks.write = async () => { delete hooks.write; const e = await ws.stat("/g"); await ws.write("/g", enc("theirs"), { base: e.rev, fid: e.fid }); };
+    const r = await run.invoke("echo mine > g");
+    check(r.kind === "exit" && r.code !== 0 && (await read(ws, "/g")) === "theirs" && run.ledger().ops === 1, `a write refused after its admit (changed elsewhere) keeps its ops charge (${show(r)}; ${JSON.stringify(run.ledger())})`);
+  }
+  // cp -r's limit-dependent preflight: before the first mutation; refused, nothing copied (r3 §3.4, §9)
+  {
+    const setup = async (ws) => {
+      await ws.mkdir("/src");
+      await ws.mkdir("/src/sub");
+      await ws.create("/src/a", { content: enc("abc") });
+      await ws.create("/src/sub/b", { content: enc("defg") });
+    };
+    // (F = 2 files, D = 1 folder inside + the copy itself = 2; bytes = 3 + 4)
+    const F = 2, D = 2, B = 7;
+    for (const [cfg, key] of [[{ cp_entries: F + D }, null], [{ cp_entries: F + D - 1 }, "cp_entries"], [{ cp_bytes: B }, null], [{ cp_bytes: B - 1 }, "cp_bytes"], [{ ops: F + D }, null], [{ ops: F + D - 1 }, "ops"], [{ written_bytes: B }, null], [{ written_bytes: B - 1 }, "written_bytes"]]) {
+      const { ws, host } = await fresh("cp-" + Object.keys(cfg)[0], { bash: cfg });
+      await setup(ws);
+      const run = host.run(PERSON);
+      const n0 = (await opsOf(ws)).length;
+      const r = await run.invoke("cp -r src dst");
+      const after = (await opsOf(ws)).length - n0;
+      if (key === null) check(r.kind === "exit" && r.code === 0 && (await read(ws, "/dst/sub/b")) === "defg" && after === F + D && run.ledger().ops === F + D && run.ledger().written_bytes === B && run.ledger().cp_entries === F + D && run.ledger().cp_bytes === B, `cp -r at ${JSON.stringify(cfg)}: copied, F + D = ${F + D} ops, ${B} bytes, cp_entries ${F + D} and cp_bytes ${B} reserved (${show(r)}; ${JSON.stringify(run.ledger())})`);
+      else check(typed(r, key) && !(await ws.stat("/dst")) && after === 0 && run.ledger().ops === 0 && run.ledger().cp_entries === 0, `cp -r one past ${JSON.stringify(cfg)}: refused by the preflight, typed ${key}, nothing copied (${show(r)}; ops logged ${after}; ${JSON.stringify(run.ledger())})`);
+    }
+  }
+  // (r2, daybreak3 BASH3-D3-1: a source grown between the walk and its duplicate is refused at the duplicate's own admit,
+  // so no byte past the reservation is copied; the copy stops there, and what was copied is what the result lists)
+  {
+    const hooks = {};
+    const { ws, host } = await fresh("cp-grow", { wrap: hookable(hooks), bash: { cp_bytes: 7 } });
+    await ws.mkdir("/src");
+    await ws.create("/src/a", { content: enc("abc") });
+    await ws.create("/src/b", { content: enc("defg") });
+    let grown = 0;
+    hooks.duplicate = async (p) => { if (p === "/src/a" && !grown++) { const e = await ws.stat("/src/a"); await ws.write("/src/a", enc("abc".repeat(100)), { base: e.rev, fid: e.fid }); } };
+    const run = host.run(PERSON);
+    const r = await run.invoke("cp -r src dst");
+    // (r3, daybreak3 BASH3-D3-2: the exact ledger: F = 2, D = 1 (the copy itself) reserved; one op (its mkdir), nothing written)
+    const led = run.ledger();
+    check(grown === 1 && r.kind === "exit" && r.code !== 0 && (await ws.stat("/dst")) && !(await ws.stat("/dst/a")) && !(await ws.stat("/dst/b")) && led.cp_entries === 3 && led.cp_bytes === 7 && led.ops === 1 && led.written_bytes === 0 && same(r.ops.map((o) => o.verb + " " + o.path), ["mkdir /dst"]),
+      `a source grown after cp -r's walk is refused at its duplicate's admit: nothing past the 7 reserved bytes copied (${show(r)}; ${JSON.stringify(run.ledger())})`);
+  }
+  // script_ms: G2's three cases, and the watchdog's own (structural on CI, G1)
+  {
+    // (G2 (a), G1-a: a cap no runner stall reaches, so only the structure is asserted)
+    const BIG = 600_000;
+    const { host: hq } = await fresh("script-ms-a", { bash: { script_ms: BIG } });
+    const qrun = hq.run(PERSON);
+    const quick = await qrun.invoke("echo quick");
+    check(quick.code === 0 && qrun.watchdogFired === 0 && qrun.ledger().script_ms > 0 && qrun.ledger().script_ms < BIG, `G2 (a): an invocation that ends in time: the watchdog doesn't fire, its time is debited from the page's clock (${qrun.ledger().script_ms.toFixed(1)} ms of ${BIG})`);
+    const { host } = await fresh("script-ms", { bash: { script_ms: 1000 } });
+    let run = host.run(PERSON);
+    const cpu = await run.invoke("while true; do :; done");
+    check(typed(cpu, "script_ms") && run.ledger().script_ms >= 1000, `G2 (b): a CPU-only loop is stopped at the run's time, typed bash.script_ms, by just-bash's deadline or the watchdog (watchdog fired ${run.watchdogFired}; debited ${run.ledger().script_ms.toFixed(0)} ms, never refunded) (${show(cpu)})`);
+    // (a latched run admits nothing and so charges nothing: invoke() returns the typed outcome before the invocations
+    // charge, so the ledger keeps the one invocation that ran (PR 279's first CI, run 40757814227 job 123062107940))
+    const again = await run.invoke("echo again");
+    check(typed(again, "script_ms") && run.ledger().invocations === 1, `nothing more is admitted once the time is spent, nor charged (${show(again)}; ${JSON.stringify(run.ledger())})`);
+    // (G2 (c), G1-b: a cap far past Stop and its grace, so only Stop ends it)
+    const { host: hc } = await fresh("script-ms-c", { bash: { script_ms: BIG } });
+    const crun = hc.run(PERSON);
+    setTimeout(() => crun.stop(), 200);
+    const stopped = await crun.invoke("while true; do :; done");
+    check(stopped.kind === "interrupted" && crun.watchdogFired === 0, `G2 (c): Stop during an invocation with script_ms set: one terminal outcome, interrupted, the watchdog not fired (${show(stopped)}; watchdog ${crun.watchdogFired})`);
+  }
+  // (r3, astra2: a run out of time commits nothing more.  (1) the shell stopped by its deadline with a redirection
+  // pending: the pending creation is dropped, typed script_ms.)
+  {
+    const { ws, host } = await fresh("script-ms-pending", { bash: { script_ms: 1000 } });
+    const r = await host.exec(PERSON, "true > late; while true; do :; done");
+    check(typed(r, "script_ms") && !(await ws.stat("/late")), `out of time with a redirection pending: typed bash.script_ms, and the pending creation is never committed (${show(r)})`);
+  }
+  // ((2a) the time runs out BEFORE a pending commit is admitted: the seam holds /a's create, before its admission, past
+  // the remaining time (script_ms 5000, held 6000: grader's G1 margin), so out of time is the fence at /a's own admission:
+  // neither /a nor /b is made)
+  {
+    const hooks = {};
+    const { ws, host } = await fresh("script-ms-before-admit", { wrap: hookable(hooks), bash: { script_ms: 5000 } });
+    let held = 0;
+    hooks.create = async (p) => { if (p === "/a") { held++; await sleep(6000); } };
+    const r = await host.exec(PERSON, "true > a; true > b");
+    check(held === 1 && typed(r, "script_ms") && !(await ws.stat("/a")) && !(await ws.stat("/b")), `out of time before /a's admission: neither /a nor /b is made, typed bash.script_ms (held ${held}; ${show(r)})`);
+  }
+  // ((2b) the time runs out INSIDE an admitted verb: the seam holds /a's create after its admission passed (in the
+  // admit, within the workspace's locked section), past the remaining time.  The admitted verb finishes (D8's one
+  // allowance): /a IS made; the next pending commit is refused: /b is not)
+  {
+    let held = 0;
+    const holdInside = (ws) => {
+      const v = Object.create(ws);
+      v.create = function (p, o = {}) {
+        if (p === "/a" && typeof o.admit === "function") {
+          const inner = o.admit;
+          o = { ...o, admit: (c) => {
+            inner(c);
+            if (c.role === "target") { held++; const end = performance.now() + 6000; while (performance.now() < end) {} }
+          } };
+        }
+        return ws.create.call(this, p, o);
+      };
+      return v;
+    };
+    const { ws, host } = await fresh("script-ms-inside-admit", { wrap: holdInside, bash: { script_ms: 5000 } });
+    const r = await host.exec(PERSON, "true > a; true > b");
+    check(held === 1 && typed(r, "script_ms") && (await ws.stat("/a")) && !(await ws.stat("/b")), `out of time inside /a's admitted create: /a is made (the admitted verb finishes), /b is not, typed bash.script_ms (held ${held}; ${show(r)})`);
+  }
+  // (r2, astra2 R2: one debit from dispatch through finalization: a pending commit held 300 ms by the seam is charged,
+  // and the next invocation is sent only what is left)
+  {
+    const hooks = {}, sent = [];
+    const c = counted(0);
+    const start = (signal) => c.start(signal).then((w) => ({ ...w, get state() { return w.state; }, exec: (script, o) => (sent.push(o?.limits?.maxExecutionTimeMs), w.exec(script, o)) }));
+    const BIG = 600_000;
+    const { host } = await fresh("script-ms-final", { wrap: hookable(hooks), start, bash: { script_ms: BIG } });
+    const run = host.run(PERSON);
+    let held = 0;
+    hooks.create = async (p) => { if (p === "/late") { delete hooks.create; held++; await sleep(300); } };
+    const r1 = await run.invoke("true > late");
+    const after1 = run.ledger().script_ms;
+    const r2 = await run.invoke("true");
+    check(r1.code === 0 && held === 1 && after1 >= 300 && sent.length === 2 && sent[0] === BIG + 1 && sent[1] <= Math.ceil(BIG - after1) + 1,
+      `the pending commit's 300 ms (held by the seam) is in the invocation's debit (${after1.toFixed(0)} ms), and the next invocation is sent only the rest (${JSON.stringify(sent)})`);
+  }
+  {
+    // (a shell that never answers: only the watchdog can end it, at the time + WATCHDOG_SLACK_MS; a fresh worker next)
+    const { host } = await fresh("watchdog", { bash: { script_ms: 1000 }, start: (signal) => startShell(D.STAND, "/", { signal }).then((x) => x.shell) });
+    const run = host.run(PERSON);
+    const r = await run.invoke(JSON.stringify({ steps: [], report: "hang" }));
+    check(typed(r, "script_ms") && run.watchdogFired === 1 && host.endings.includes("its script_ms ran out"), `the watchdog ends a worker that doesn't stop: typed, its counter 1 (${show(r)}; endings ${JSON.stringify(host.endings)})`);
+    const next = await host.exec(PERSON, JSON.stringify({ steps: [], report: "exit" }));
+    check(next.kind === "exit" && next.stdout === "[]", `and the next run gets a fresh worker (${show(next)})`);
+  }
+}
+
+// ---------------------------------------------------------------- step 3: the 6 upstream keys, the explicit exception
+// (@sagebrush's amended ruling, astra2's wording): commands, loop_iterations, work_units, memory_bytes, call_depth and
+// glob_paths keep the pinned just-bash's own scope and command behaviour and are ORDINARY outcomes, never typed and
+// never classified from their text.  The non-vacuous pattern (grader): a script with its own observable end (SENTINEL);
+// the boundary found from the inputs; at it, SENTINEL; one past, exit 126 and no SENTINEL; the same one-past script
+// with the key off, SENTINEL (past just-bash's own default where there is one).
+// (G8-a: just-bash's own boundary for each script below, exact: frozen from the first CI run, which records them while
+// these are null.  They aren't derivable from the minified vendor code alone: its counters also count what the
+// host's wrapper and the script's own commands consume.  Frozen from PR 279's first CI (run 40757814227, job
+// 123062107940, web-browser (notebook)): "RECORD BOUNDARIES.commands = 48 (bash.commands 50)", "RECORD
+// BOUNDARIES.loop_iterations = 49 (bash.loop_iterations 50)", "RECORD BOUNDARIES.call_depth = 7 (bash.call_depth 8)",
+// "RECORD BOUNDARIES.glob_paths = 50 (bash.glob_paths 100)".)
+// (glob_paths maps to both maxGlobOperations and maxBraceExpansionResults (limits.ts executionLimitsOf); its probe
+// below is brace expansion, and its stop is just-bash's "brace expansion: brace_operations work limit exceeded", so
+// the 50 is the BRACE side only.  The glob side (maxGlobOperations) has no probe: an open measurement, not measured.)
+const BOUNDARIES = { commands: 48, loop_iterations: 49, call_depth: 7, glob_paths: 50 };
+async function upstream(check) {
+  // the boundary of `script(k)` under `bash`: the largest k (lo..hi) whose run ends with SENTINEL
+  const boundary = async (name, bash, script, lo, hi) => {
+    const { host } = await fresh("up-" + name, { bash });
+    const ends = async (k) => (await host.exec(PERSON, script(k))).stdout?.endsWith("SENTINEL\n") ?? false;
+    if (!(await ends(lo)) || (await ends(hi))) return { host, k: null };
+    while (hi - lo > 1) {
+      const m = (lo + hi) >> 1;
+      if (await ends(m)) lo = m;
+      else hi = m;
+    }
+    return { host, k: lo };
+  };
+  const cases = [
+    ["commands", { commands: 50 }, (k) => `${"true; ".repeat(k)}echo SENTINEL`, 1, 100, 50],
+    ["loop_iterations", { loop_iterations: 50 }, (k) => `i=0; while [ $i -lt ${k} ]; do i=$((i+1)); done; echo SENTINEL`, 1, 100, 50],
+    ["call_depth", { call_depth: 8 }, (k) => `f() { if [ $1 -lt ${k} ]; then f $(( $1 + 1 )); fi; }; f 0; echo SENTINEL`, 1, 40, 8],
+    ["glob_paths", { glob_paths: 100 }, (k) => `echo {1..${k}} > /dev/null; echo SENTINEL`, 1, 400, 100],
+  ];
+  for (const [key, bash, script, lo, hi, value] of cases) {
+    const { host, k } = await boundary(key, bash, script, lo, hi);
+    const past = k === null ? null : await host.exec(PERSON, script(k + 1));
+    // (the boundary is just-bash's own count of what the script does: within a few of the configured value)
+    // (one past: just-bash's own stop, an ordinary exit, usually 126; its exact status and words are just-bash's)
+    if (BOUNDARIES[key] === null) check(false, `RECORD BOUNDARIES.${key} = ${k} (bash.${key} ${value})`);
+    check(k !== null && k === BOUNDARIES[key] && past.kind === "exit" && past.code !== 0 && !past.stdout.includes("SENTINEL"),
+      `bash.${key} ${value}: just-bash's own boundary at ${k}, exactly the frozen ${BOUNDARIES[key]} (SENTINEL there); one past, an ORDINARY exit (${past?.code}), no SENTINEL, never typed (${show(past)})`);
+    const { host: off } = await fresh("up-off-" + key);
+    const free = k === null ? null : await off.exec(PERSON, script(k + 1));
+    check(free?.code === 0 && free.stdout.endsWith("SENTINEL\n"), `bash.${key} at its default: the same script ends with SENTINEL (${show(free)})`);
+  }
+  // work_units and memory_bytes: their counts aren't the script's to state; the contract only: ordinary, never typed
+  for (const [key, bash, script] of [["work_units", { work_units: 1 }, "seq 1000 | sort -n | tail -1; echo SENTINEL"], ["memory_bytes", { memory_bytes: 16 * 2 ** 20 }, `x=$(printf '%${16 * 2 ** 20 + 1}s'); echo SENTINEL`]]) {
+    const { host } = await fresh("up-" + key, { bash });
+    const r = await host.exec(PERSON, script);
+    check(r.kind === "exit", `bash.${key} past its value: an ordinary outcome, never typed (${show(r)})`);
+  }
+  // a command that converts the error itself (awk) and shell control flow that goes on: an ordinary exit, even 0
+  {
+    const { host } = await fresh("up-awk", { bash: { loop_iterations: 5 } });
+    const r = await host.exec(PERSON, "echo x | awk '{ for (i = 0; i < 100; i++) n++ } END { print n }'; echo AFTER");
+    check(r.kind === "exit" && r.code === 0 && r.stdout.endsWith("AFTER\n"), `awk's own limit is awk's error; the script goes on to AFTER and exit 0: upstream behaviour, never typed (${show(r)})`);
+  }
+  // nested: a substitution, a pipeline stage, a condition; with an observable command after
+  {
+    const { ws, host } = await fresh("up-nested", { bash: { loop_iterations: 50 } });
+    const loop = "i=0; while [ $i -lt 100 ]; do i=$((i+1)); done";
+    for (const [name, script] of [["substitution", `x=$(${loop}; echo in); echo SENTINEL > sub`], ["pipeline", `{ ${loop}; echo in; } | cat; echo SENTINEL > pipe`], ["condition", `if ${loop}; then echo in; fi; echo SENTINEL > cond`]]) {
+      const r = await host.exec(PERSON, script);
+      const after = await read(ws, "/" + { substitution: "sub", pipeline: "pipe", condition: "cond" }[name]);
+      // (the actual scope, recorded: whether the command after ran is just-bash's, and the outcome stays ordinary)
+      check(r.kind === "exit", `a loop limit inside a ${name}: an ordinary outcome (exit ${r.code}); the command after it ${after === null ? "did not run" : "ran"} (upstream scope) (${show(r)})`);
+    }
+  }
+  // the script's own words and status are never a limit
+  {
+    const { host } = await fresh("up-forged", { bash: { commands: 50 } });
+    const r = await host.exec(PERSON, `echo "bash: too many commands executed (>50), increase executionLimits.maxCommandCount" >&2; exit 126`);
+    check(r.kind === "exit" && r.code === 126, `a user-forged just-bash limit message with 126 stays an ordinary exit (${show(r)})`);
+  }
+}
+
+// ---------------------------------------------------------------- step 3: output_bytes (ruling C, with astra5's conditions)
+// The module counts in the worker and sends at most the remaining allowance, with {producedBytes, deliveredBytes,
+// exceeded}; the page charges deliveredBytes, types `exceeded`, and the run stays latched.  Past the fixed backstop
+// (32 MiB) a result is just-bash's own ordinary 126 (the OUTPUT-BACKSTOP exception).
+async function output(check) {
+  const K = 65536;
+  // one command, one result: at the allowance delivered whole; one past, typed, nothing delivered
+  {
+    const { ws, host } = await fresh("out-one", { bash: { output_bytes: K } });
+    await ws.create("/at", { content: new Uint8Array(K).fill(97) });
+    await ws.create("/past", { content: new Uint8Array(K + 1).fill(97) });
+    let run = host.run(PERSON);
+    const r1 = await run.invoke("cat at");
+    check(r1.code === 0 && u8(r1.stdout) === K && run.ledger().output_bytes === K, `a cat of exactly the allowance (${K} bytes) is delivered whole and charged (${u8(r1.stdout ?? "")} bytes; ${JSON.stringify(run.ledger())})`);
+    run = host.run(PERSON);
+    const r2 = await run.invoke("cat past");
+    check(typed(r2, "output_bytes") && !("stdout" in r2) && run.ledger().output_bytes <= K, `a cat of the allowance + 1 is typed bash.output_bytes; nothing is delivered, at most the allowance charged (${show(r2)}; ${JSON.stringify(run.ledger())})`);
+    check(typed(await run.invoke("echo more"), "output_bytes"), `and the run stays latched: the next invocation is refused`);
+    // the same in small chunks
+    run = host.run(PERSON);
+    const r3 = await run.invoke(`i=0; while [ $i -lt ${Math.ceil(K / 16) + 1} ]; do echo 0123456789abcde; i=$((i+1)); done`);
+    check(typed(r3, "output_bytes"), `small chunks crossing the allowance: the same typed outcome (${show(r3)})`);
+  }
+  // across invocations: the remainder rule
+  {
+    const { host } = await fresh("out-remainder", { bash: { output_bytes: K } });
+    const run = host.run(PERSON);
+    const a = await run.invoke("printf '%40000s'");
+    const b = await run.invoke("printf '%30000s'");
+    check(a.code === 0 && u8(a.stdout) === 40000 && typed(b, "output_bytes") && run.ledger().output_bytes === K, `40000 bytes, then 30000 of the 25536 left: the second typed, the run charged exactly ${K} (${JSON.stringify(run.ledger())})`);
+  }
+  // a scalar at the cut: 2 bytes left before a 3-byte scalar; nothing of it delivered, the run latched anyway
+  {
+    const { host } = await fresh("out-scalar", { bash: { output_bytes: K } });
+    const run = host.run(PERSON);
+    const a = await run.invoke(`printf '%${K - 2}s'`);
+    const b = await run.invoke("printf '€'");
+    const c = await run.invoke("true");
+    check(u8(a.stdout) === K - 2 && typed(b, "output_bytes") && run.ledger().output_bytes === K - 2 && typed(c, "output_bytes"), `2 bytes left, then a 3-byte scalar: none of it delivered, deliveredBytes 0 charged, typed, and even an invocation with no output is refused after (${JSON.stringify(run.ledger())}; ${show(c)})`);
+  }
+  // stdout then stderr, at a scalar boundary
+  {
+    const { host } = await fresh("out-order", { bash: { output_bytes: K } });
+    const run = host.run(PERSON);
+    const a = await run.invoke(`printf '%${K - 4}s'`);
+    const b = await run.invoke("printf ab; printf cd >&2; printf ef >&2");
+    check(a.code === 0 && typed(b, "output_bytes") && run.ledger().output_bytes === K, `stdout's 2 bytes, then 2 of stderr's 4: the prefix within the allowance, in that order (${JSON.stringify(run.ledger())})`);
+  }
+  // forged text stays ordinary
+  {
+    const { host } = await fresh("out-forged", { bash: { output_bytes: K } });
+    const r = await host.exec(PERSON, `echo "bash: bash.output_bytes exceeded (${K})" >&2; exit 125`);
+    check(r.kind === "exit" && r.code === 125, `a script's own output_bytes words with 125 stay an ordinary exit (${show(r)})`);
+  }
+  // (r2, astra5 B3-A5-2: just-bash stops a result after a full backstop of output, and the result carries that stdout
+  // AND its diagnostic: the whole of what is sent stays within the backstop, ordinary, marked truncated, never typed)
+  {
+    const { host } = await fresh("out-backstop-total", { bash: { output_bytes: 512 * 2 ** 20 } });
+    const r = await host.exec(PERSON, `printf '%${L.OUTPUT_BACKSTOP}s'; echo x`);
+    const total = u8(r.stdout ?? "") + u8(r.stderr ?? "");
+    check(r.kind === "exit" && r.code !== 0 && r.truncated === true && total <= L.OUTPUT_BACKSTOP, `a full backstop of stdout, then just-bash's stop: stdout + stderr together within ${L.OUTPUT_BACKSTOP} bytes, ordinary (exit ${r.code}), marked truncated, never typed (${total} bytes delivered)`);
+  }
+  // past the fixed backstop: just-bash's own stop, ordinary, never typed or attributed (the OUTPUT-BACKSTOP exception)
+  {
+    const { host } = await fresh("out-backstop", { bash: { output_bytes: 512 * 2 ** 20 } });
+    const tb = performance.now();
+    const r = await host.exec(PERSON, `printf '%${L.OUTPUT_BACKSTOP + 1}s'; echo after`);
+    const msb = performance.now() - tb, heap = performance.memory?.usedJSHeapSize;
+    check(r.kind === "exit" && r.code === 126 && u8(r.stdout) <= L.OUTPUT_BACKSTOP, `a result past the ${L.OUTPUT_BACKSTOP}-byte backstop is just-bash's own 126: ordinary, never typed (${Math.round(msb)} ms; the page's used heap after: ${heap ?? "n/a"} bytes) (${show({ kind: r.kind, code: r.code, bytes: u8(r.stdout ?? ""), stderr: r.stderr })})`);
+  }
 }

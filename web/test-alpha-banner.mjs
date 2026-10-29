@@ -10,6 +10,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import { hasSite, siteDir } from "./site-dir.mts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -92,7 +93,10 @@ if (!existsSync(join(dist, "index.html"))) {
     ["embed/index.html", "the notebook component's page"],
     ["runner/index.html", "the runner"],
   ]) ok(read(join(dist, p)) !== null && !loads(read(join(dist, p))), `${what} (${p}) has no notice`);
-  ok(read(join(dist, "alpha-banner.js")) === script && read(join(here, "site", "public", "alpha-banner.js")) === script, "the script is served from the site's root");
+  ok(read(join(dist, "alpha-banner.js")) === script, "the script is in web/dist's root");
+  // (the site's copy, which web/build.ts writes only when web/site/ is here: a core-only checkout skips it, saying so)
+  if (hasSite) ok(read(join(siteDir, "public", "alpha-banner.js")) === script, "the script is served from the site's root");
+  else console.log("site absent: the site copy of alpha-banner.js is not checked");
 }
 // a board made from the site's board page (exportHtml fetches the page beside it, /board/index.html, which
 // carries the notice), the frame, and a file exported again: assemble() takes the notice out (astra on #41)

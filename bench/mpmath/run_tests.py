@@ -2,8 +2,21 @@
 one line: JSON with counts, failures and the time spent in the tests.
 
     python3 run_tests.py test_basic_ops      (cwd: a dir containing mpmath/)
+
+Each test starts from random.seed(seed_for(module, test)), so CPython and pyjs
+draw the same random inputs (several mpmath tests use unseeded
+random.random()) and a failure can be reproduced from the seed it reports.
 """
-import sys, time, json, traceback
+import sys, time, json, traceback, random
+
+
+def seed_for(module, test):
+    """A deterministic 64-bit seed for one test: FNV-1a of "module:test"."""
+    h = 0xcbf29ce484222325
+    for b in ("%s:%s" % (module, test)).encode():
+        h = ((h ^ b) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
 
 name = sys.argv[1]
 t0 = time.perf_counter()
@@ -40,6 +53,8 @@ for fname in sorted(vars(mod)):
     for kw in cases:
         mp.dps = 15
         mp.pretty = False
+        seed = seed_for(name, fname)
+        random.seed(seed)
         try:
             f(**kw)
             passed += 1
@@ -50,7 +65,8 @@ for fname in sorted(vars(mod)):
                 skipped += 1
                 continue
             failed += 1
-            tb = traceback.format_exception(type(e), e, e.__traceback__)
-            failures.append({"test": fname, "error": ("%s: %s" % (type(e).__name__, e))[:300], "where": "".join(tb[-3:])[-400:]})
+            # (the one-argument form: pyjs refuses an explicit traceback object)
+            tb = traceback.format_exception(e)
+            failures.append({"test": fname, "seed": seed, "error": ("%s: %s" % (type(e).__name__, e))[:300], "where": "".join(tb[-3:])[-400:]})
 print(json.dumps({"module": name, "passed": passed, "failed": failed, "skipped": skipped,
                   "import_s": round(t_import, 3), "test_s": round(time.perf_counter() - t1, 3), "failures": failures}))

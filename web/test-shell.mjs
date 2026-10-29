@@ -53,6 +53,14 @@ setTimeout(() => {
   process.exit(1);
 }, 240_000).unref();
 const { shellWorkerPolicy, pagePolicy } = await import(join(here, "csp-policy.mts"));
+// (step 3: the worker's one init, as ShellHost sends it with the default config; +Infinity crosses into the page as a
+// string, revived there)
+const Lm = await import(join(here, "shell", "limits.ts"));
+// (r3, astra5 B3R2-A5-1: limits.ts loads as a native ES module, under bun's own module semantics, not a bundle: a
+// const read before its declaration by a module-level call would have thrown at the import above)
+ok(Lm.MAPPED_LIMITS.includes("maxSourceBytes") && Lm.executionLimitsOf(Lm.validateBash()).maxSourceBytes === Lm.BASH_RANGES.source_bytes.def + Lm.WRAPPER_BYTES,
+  `limits.ts loads as a native ES module, its module-level census computed (${Lm.MAPPED_LIMITS.length} mapped limits; maxSourceBytes = source_bytes + ${Lm.WRAPPER_BYTES})`);
+const INIT_JSON = JSON.stringify({ limits: Lm.executionLimitsOf(Lm.validateBash()), pipelineWidth: Lm.validateBash().pipeline_width }, (k, v) => (v === Infinity ? "Infinity" : v));
 
 // the sets: the shell's, a copy whose shell needs a newer host level, one without the shell
 const dir = mkdtempSync(join(tmpdir(), "sb-test-shell-"));
@@ -147,6 +155,7 @@ window.portsClosed = () => closes;
 // (only whether each message carried the notices: keeping the messages would keep each module's text in the page, against N1)
 window.noticesPosted = () => posted.some(Boolean);
 window.startShell = startShell;
+window.INIT = JSON.parse(${JSON.stringify(INIT_JSON)}, (k, v) => (v === "Infinity" ? Infinity : v));
 // (the module's runs here go through a real ShellHost over a real Workspace; the lifecycle checks, which run
 // the module's exec() directly, give it an empty file system as its mediator: nothing exists)
 window.hostOver = async (sh) => {
@@ -327,13 +336,13 @@ try {
     await cdp.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
     const used = () => evaluate("(gc(), performance.memory.usedJSHeapSize)");
     // (a warm-up shell first: from one start to the next, the page's used heap after a GC swings by a few MB
-    // either way, while its heap snapshot holds no object near b (so not a copy of the module); after a
-    // warm-up, the next start's figure is steady.  The snapshot below checks the copies themselves.)
+    // either way, while its heap snapshot holds no object near b (so not a copy of the module).  That aggregate
+    // figure is therefore reported only, never gated: the heap snapshot below is the check.)
     const cold = await used();
-    await evaluate(`(async () => { const { shell } = await startShell(${JSON.stringify(S)}, "/"); await shell.exec("true", EMPTY_FS); shell.terminate(); })()`);
+    await evaluate(`(async () => { const { shell } = await startShell(${JSON.stringify(S)}, "/"); await shell.configure(INIT); await shell.exec("true", EMPTY_FS); shell.terminate(); })()`);
     const before = await used();
     console.log(`info N1: after the warm-up shell, the page's used heap moved ${before - cold} bytes`);
-    await evaluate(`(async () => { window.sh2 = (await startShell(${JSON.stringify(S)}, "/")).shell; return (await sh2.exec("echo ok", EMPTY_FS)).exit.stdout; })()`);
+    await evaluate(`(async () => { window.sh2 = (await startShell(${JSON.stringify(S)}, "/")).shell; await sh2.configure(INIT); return (await sh2.exec("echo ok", { ...EMPTY_FS, allowance: 100 })).exit.stdout; })()`);
     const pageAfter = await used();
     // the page's heap snapshot, with the shell running: its largest objects (a copy of the module, its chunk's
     // JSON or bytes would be one of b or more)
@@ -355,9 +364,54 @@ try {
     const moduleBytes = Buffer.byteLength(JSON.parse(readFileSync(join(dir, "pkg", chunkSha + ".json"), "utf8")).modules["shell.js"]);
     console.log(`info N1: module b = ${moduleBytes} bytes, 4b = ${4 * moduleBytes}; page keeps ${pageAfter - before} bytes after a GC; the shell worker's heap ${wheap?.usedSize} bytes (of ${wheap?.totalSize})`);
     console.log(`info N1: the page's largest live object, with the shell running: ${largest} bytes`);
-    ok(pageAfter - before <= moduleBytes, "the page keeps less than b once the module is posted: its copies are released (N1, page realm)");
-    ok(largest > 0 && largest < moduleBytes / 4, "and no object in the page's heap snapshot comes near b: no copy of the module, its chunk's JSON or its bytes is kept (N1, page realm)");
+    // (diagnostic only: one post-GC sample of the whole page heap against another swings by more than b, an object's size)
+    console.log(`info N1: the page's used heap after the module is posted moved ${pageAfter - before} bytes (diagnostic only, not gated: an aggregate heap delta after one GC, not a retention proof)`);
+    // (the gate is per node: it shows no single object of b/4 or more is live.  A copy split across smaller strings
+    // or buffers, held through a rope or an object graph, or alive only transiently, is outside it; the controls
+    // below show its sensitivity to a flat string and a flat byte array in this browser, not every representation)
+    ok(largest > 0 && largest < moduleBytes / 4, "no single node in the page's heap snapshot reaches b/4 while the shell runs (a per-node check: a copy split across smaller strings or buffers, held through a rope or object graph, or alive only transiently, is outside it) (N1, page realm)");
     ok(wheap && wheap.usedSize > 0 && wheap.usedSize <= 4 * moduleBytes + 16 * 2 ** 20, "the shell worker's heap is within 4b plus the shell's live set (16 MiB measured allowance) (N1, worker realm)");
+    // (fail-first controls for the per-node gate: each keeps one copy of the module in the page, from an isolated
+    // scope that returns only its length; a fresh snapshot must catch it; it is deleted in a finally; then a fresh
+    // snapshot must pass the gate's own predicate again, before the next control and before N3, which reuses this page)
+    const largestLive = async () => {
+      const parts = [];
+      const onPart = (e) => {
+        const m = JSON.parse(e.data);
+        if (m.method === "HeapProfiler.addHeapSnapshotChunk") parts.push(m.params.chunk);
+      };
+      cdp.ws.addEventListener("message", onPart);
+      try {
+        const r = await cdp.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
+        if (r.error) return -1;
+        const s = JSON.parse(parts.join(""));
+        const n = s.snapshot.meta.node_fields.length, k = s.snapshot.meta.node_fields.indexOf("self_size");
+        if (k < 0) return -1;
+        let max = 0;
+        for (let i = k; i < s.nodes.length; i += n) max = Math.max(max, s.nodes[i]);
+        return max;
+      } catch {
+        return -1;
+      } finally {
+        cdp.ws.removeEventListener("message", onPart);
+      }
+    };
+    const moduleChars = JSON.parse(readFileSync(join(dir, "pkg", chunkSha + ".json"), "utf8")).modules["shell.js"].length;
+    const control = async (name, global, keep, want) => {
+      try {
+        const got = await evaluate(`(async () => { const t = await (await fetch("/pkg/${chunkSha}.json")).text(); const s = JSON.parse(t).modules["shell.js"]; window.${global} = ${keep}; return window.${global}.length; })()`);
+        ok(got === want, `control ${name}: installed in the page, length ${JSON.stringify(got)} (want ${want}) (N1)`);
+        const caught = await largestLive();
+        ok(caught >= moduleBytes / 4, `control ${name}: the per-node gate catches it (largest ${caught} bytes) (N1)`);
+      } finally {
+        const gone = await evaluate(`(delete window.${global}, gc(), typeof window.${global})`);
+        ok(gone === "undefined", `control ${name}: its global is deleted (N1)`);
+      }
+      const after = await largestLive();
+      ok(after > 0 && after < moduleBytes / 4, `after control ${name}: a fresh snapshot passes the gate's own predicate again (largest ${after} bytes) (N1)`);
+    };
+    await control("a retained string copy of the module", "__n1str", "s", moduleChars);
+    await control("a retained byte copy of the module", "__n1bytes", "new TextEncoder().encode(s)", moduleBytes);
     await evaluate("sh2.terminate()");
   }
   // the shell, and every registered command under the worker's policy (N3)
@@ -385,7 +439,7 @@ try {
     }
     return { S: sh.S, version: sh.version, out, absent, runs, blobScripts: blobScripts(), notices: { length: notices.length, head: notices.slice(0, 80), hasJustBash: notices.includes("just-bash 3.6.0 (Apache-2.0"), onShell: Object.values(sh).some((v) => v === notices) } };
   })()`);
-  ok(run && !run.error && run.S === S && run.version === "0.2.0", `the shell starts from set ${S.slice(0, 12)} (${run?.error ?? run?.version})`);
+  ok(run && !run.error && run.S === S && run.version === "0.3.0", `the shell starts from set ${S.slice(0, 12)} (${run?.error ?? run?.version})`);
   const failed = Object.entries(run?.out ?? {}).filter(([, r]) => r.exit?.code !== 0 || /Content Security Policy|EvalError|unsafe-eval/.test(r.exit.stderr));
   ok(run?.out && Object.keys(run.out).length === 34 && !failed.length, `every registered command runs under the worker's policy (N3)${failed.length ? ": " + JSON.stringify(failed).slice(0, 600) : ""}`);
   ok(run?.out?.jq?.exit?.stdout === "2\n" && run?.out?.awk?.exit?.stdout === "3\n" && run?.out?.printf?.exit?.stdout === "00042\n" && run?.out?.diff?.exit?.stdout?.includes("rc=1"), "and they compute what they should (jq, awk, printf, diff)");
@@ -446,6 +500,37 @@ try {
   ok(/its notices are over 262144 bytes/.test(await refusal(BIG_NOTICES)), "notices one byte past 256 KiB, in a chunk within its declared size, are refused after the bounded body (stage 3)");
   ok((await evaluate("workersMade()")) === before, "and neither refusal starts a worker");
 
+  // step 3, the module's side (host level 3): the init, the output count, bash.pipeline_width
+  const m3 = await evaluate(`(async () => {
+    const out = {};
+    const { shell } = await startShell(${JSON.stringify(S)}, "/");
+    out.before = await shell.exec("echo hi", { ...EMPTY_FS, allowance: 100 });
+    out.resolved = await shell.configure(INIT).then((v) => Object.keys(v).length, (e) => "refused: " + e.message);
+    out.again = await shell.configure(INIT).then(() => "taken", (e) => e.message);
+    const run = (script, allowance) => shell.exec(script, { ...EMPTY_FS, allowance });
+    out.fits = await run("echo hello", 6);
+    out.cut = await run("echo hello", 3);
+    out.scalar = await run("printf 'a\\u00e9'", 2);
+    out.order = await run("printf ab; printf cd >&2", 3);
+    out.none = await run("printf x", 0);
+    shell.terminate();
+    const { shell: narrow } = await startShell(${JSON.stringify(S)}, "/");
+    await narrow.configure({ ...INIT, pipelineWidth: 2 });
+    out.two = await narrow.exec("echo a | cat", { ...EMPTY_FS, allowance: 100 });
+    out.three = await narrow.exec("echo a | cat | cat", { ...EMPTY_FS, allowance: 100 });
+    narrow.terminate();
+    return out;
+  })()`);
+  const cnt = (r) => JSON.stringify(r?.output);
+  ok(m3?.before?.rejected && /isn't configured/.test(m3.before.rejected.message), `an exec before the init is refused by the module (${JSON.stringify(m3?.before ?? m3).slice(0, 200)})`);
+  ok(typeof m3?.resolved === "number" && m3.resolved > 30 && /already configured/.test(m3.again), `one init per worker: the first resolves just-bash's limits (${m3?.resolved} names), a second is refused (${m3?.again})`);
+  ok(m3?.fits?.exit?.stdout === "hello\n" && cnt(m3.fits) === JSON.stringify({ producedBytes: 6, deliveredBytes: 6, exceeded: false, truncated: false }), `a result within the allowance is sent whole, with its count (${cnt(m3?.fits)})`);
+  ok(m3?.cut?.exit?.stdout === "hel" && cnt(m3.cut) === JSON.stringify({ producedBytes: 6, deliveredBytes: 3, exceeded: true, truncated: false }), `past it, only the prefix within the allowance is sent, and the module says exceeded (${JSON.stringify(m3?.cut)})`);
+  ok(m3?.scalar?.exit?.stdout === "a" && cnt(m3.scalar) === JSON.stringify({ producedBytes: 3, deliveredBytes: 1, exceeded: true, truncated: false }), `the cut is at a scalar boundary: never half of a 2-byte scalar (${JSON.stringify(m3?.scalar)})`);
+  ok(m3?.order?.exit?.stdout === "ab" && m3.order.exit.stderr === "c" && cnt(m3.order) === JSON.stringify({ producedBytes: 4, deliveredBytes: 3, exceeded: true, truncated: false }), `stdout first, then stderr in what is left (${JSON.stringify(m3?.order)})`);
+  ok(m3?.none?.exit?.stdout === "" && cnt(m3.none) === JSON.stringify({ producedBytes: 1, deliveredBytes: 0, exceeded: true, truncated: false }), `an allowance of 0 sends nothing (${JSON.stringify(m3?.none)})`);
+  ok(m3?.two?.exit?.stdout === "a\n" && JSON.stringify(m3?.three) === JSON.stringify({ limit: { key: "pipeline_width", value: 2 } }), `bash.pipeline_width 2: a 2-stage pipeline runs, a 3-stage one is refused by the module's own parse, structured (${JSON.stringify(m3?.three)})`);
+
   // the lifecycle: every end settles everything, and leaves no worker or channel
   const life = await evaluate(`(async () => {
     const BAD = ${JSON.stringify(BAD)}, S = ${JSON.stringify(S)};
@@ -464,8 +549,9 @@ try {
     res.never = await never;
     res.neverLive = workersLive() - live0;
     const { shell: real } = await startShell(BAD.reject, "/");
-    res.rejected = await within(real.exec("echo before; echo refuse-me > f; echo after"));
-    res.afterRejected = await within(real.exec("echo still here", EMPTY_FS));
+    await real.configure(INIT);
+    res.rejected = await within(real.exec("echo before; echo refuse-me > f; echo after", { allowance: 1000 }));
+    res.afterRejected = await within(real.exec("echo still here", { ...EMPTY_FS, allowance: 1000 }));
     real.terminate();
     const { shell: silent } = await startShell(BAD.silent, "/");
     const running = within(silent.exec("echo never answered"));

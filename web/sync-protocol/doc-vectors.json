@@ -1109,5 +1109,126 @@
    },
    "again": "only past latest_at_seq"
   }
+ ],
+ "answers": [
+  {
+   "for": "pull",
+   "when": "a page of batches (never a snapshot key)",
+   "shape": {
+    "t": "=batches",
+    "req": "number",
+    "owner": "string",
+    "doc": "string",
+    "epoch": "number",
+    "head": {
+     "epoch": "number",
+     "seq": "number",
+     "chain": "string|null"
+    },
+    "items": [
+     {
+      "seq": "number",
+      "author": "string",
+      "writer": "string",
+      "device": "string",
+      "recv": "number",
+      "chain": "string|null",
+      "patches": "array",
+      "body": "string"
+     }
+    ],
+    "more": "boolean"
+   }
+  },
+  {
+   "for": "batch",
+   "when": "a new patch stored",
+   "shape": {
+    "t": "=ack",
+    "req": "number",
+    "batch": {
+     "seq": "number",
+     "new": "number",
+     "resent": {
+      "*": "number"
+     },
+     "head": {
+      "epoch": "number",
+      "seq": "number",
+      "chain": "string|null"
+     }
+    }
+   }
+  },
+  {
+   "for": "batch",
+   "when": "every patch a resend: no seq",
+   "shape": {
+    "t": "=ack",
+    "req": "number",
+    "batch": {
+     "new": "number",
+     "resent": {
+      "*": "number"
+     },
+     "head": {
+      "epoch": "number",
+      "seq": "number",
+      "chain": "string|null"
+     }
+    }
+   }
+  },
+  {
+   "for": "batch",
+   "when": "another epoch than the document's (its history was cleared)",
+   "shape": {
+    "t": "=error",
+    "req": "number",
+    "code": "=epoch",
+    "detail": {
+     "message": "string",
+     "epoch": "number",
+     "head": {
+      "epoch": "number",
+      "seq": "number"
+     }
+    }
+   }
+  },
+  {
+   "for": "pull",
+   "when": "another epoch than the document's (its history was cleared)",
+   "shape": {
+    "t": "=error",
+    "req": "number",
+    "code": "=epoch",
+    "detail": {
+     "message": "string",
+     "epoch": "number",
+     "head": {
+      "epoch": "number",
+      "seq": "number"
+     }
+    }
+   }
+  },
+  {
+   "for": "doc_claim",
+   "when": "another epoch than the document's",
+   "shape": {
+    "t": "=error",
+    "req": "number",
+    "code": "=stale_epoch",
+    "detail": {
+     "message": "string",
+     "epoch": "number",
+     "head": {
+      "epoch": "number",
+      "seq": "number"
+     }
+    }
+   }
+  }
  ]
 }

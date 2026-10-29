@@ -31,3 +31,6 @@ export { syncSection, PanelPoll, PANEL, clampDelay, askStatus, foot } from "./sy
 export { renewLease } from "./sync-outbox";
 export { rowIcons, ROWICON } from "./sync-rows";
 export { LEDGER, WAIT, STATE, CODE, HUB, OBSOLETE, OBSOLETE_KEY, hubOf, waitCount, noteSkip, queueObsolete, cleanObsoleteStep, seedLedger, ledgerKeys, classOf as ledgerClass, isWire, type SyncAnswer, type WaitResult } from "./sync-ledger";
+// (sync 2c-3: notebooks' contents on the account connection, and DEV's switch for them)
+export { DocSync } from "./doc-sync";
+export { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, docSyncOrigin, docSyncAllowed, enableDocSync, followDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./doc-sync-switch";

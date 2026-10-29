@@ -15,8 +15,10 @@ const here = dirname(new URL(import.meta.url).pathname);
 const root = join(here, "..");
 const SITE = "https://sagebrush.space";
 const REPO = "https://github.com/sagemathinc/sagebrush/blob/master";
-// (web/build.ts imports this only when web/site/ is here: web/site-dir.mts)
-const { siteDir } = await import("./site-dir.mts");
+// (web/build.ts imports this only when web/site/ is here: web/site-dir.mts; run directly without it, it stops here,
+// not deep inside a write)
+const { siteDir, hasSite } = await import("./site-dir.mts");
+if (!hasSite) throw new Error("build-articles: web/site is absent; build.ts imports this only when it is present");
 const out = join(siteDir, "public");
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");

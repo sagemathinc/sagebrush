@@ -690,6 +690,36 @@ async function controls() {
 }
 
 
+// (B: notebooks' kind (web/journal/store.js): the store's law, withValue(rec, toRecords(rec)) is rec but for the store's
+// own fields (rev, j, hash, unjournaled, and baseRev on the way in), for a record of each cell type, outputs,
+// attachments and fields of its own;
+// its hash is docHash, its lock the writer lock's name, its texts the notebook's, a new notebook as before)
+async function kindLaw() {
+  const K = N.notebookKind(H), own = ["rev", "j", "hash", "unjournaled", "baseRev"];
+  const canon = (v) => J(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((y) => [y, x[y]])) : x));
+  const strip = (d) => Object.fromEntries(Object.entries(d).filter(([k]) => !own.includes(k)));
+  const recs = [
+    { id: "x", name: "t", mode: "python", cells: [] },
+    { id: "x", name: "t", mode: "sage", rev: 3, j: 7, hash: "h", unjournaled: true, baseRev: 2, cells: [{ id: "a", code: "1+1", outputs: [{ text: "2" }], collapsed: true }, { id: "b", type: "markdown", code: "# h", attachments: { "p.png": "AA==" } }, { id: "c", type: "raw", code: "r" }] },
+    { id: "x", name: "t", mode: "magma", repro: { k: 1 }, cells: [{ id: "a", code: "" }, { id: "b", type: "markdown", code: "no attachments" }] },
+  ];
+  for (const [i, rec] of recs.entries()) {
+    const got = K.withValue(rec, K.toRecords(rec));
+    check(canon(strip(got)) === canon(strip(rec)), `notebooks' kind keeps the law for record ${i}: ` + canon(strip(got)).slice(0, 300));
+    check((await N.hashOf(K, rec)) === (await N.docHash(rec)), `notebooks' kind hashes record ${i} as docHash`);
+  }
+  check(K.lockPrefix + "x" === N.writerLockName("x") && K.sync === N.DOC_SYNC && K.noun === "notebook" && K.kind === "notebooks", "notebooks' kind: the writer lock's name, the switch, the noun");
+  check(canon(K.empty("i", null)) === canon({ name: "Untitled", mode: "python", cells: [], id: "i" }) && canon(K.empty("i", { name: "n", mode: "sage", cells: [] })) === canon({ name: "n", mode: "sage", cells: [], id: "i" }), "notebooks' kind: a new notebook as before");
+  // (a store's texts are its kind's: a read-only store says the notebook's)
+  const { w, hdb } = await active();
+  const { id, st } = await loadNew(w, hdb, [["a", "A"]]);
+  const v = store(w, hdb, id);
+  await v.load();
+  check(st.kind.noun === "notebook" && v.viewOnly === N.READ_ONLY.other && (await v.save(doc([["a", "B"]]))) === st.T.NOT_WRITER, "a store's texts are its kind's");
+  await close(st, v, w);
+  hdb.close();
+}
+
 // (the notebook page's own functions, as index.html has them, run with what they use given to them: startHistory and
 // takeOver (astra's CORR-215-4, board's C))
 async function pageFunctions(deps) {
@@ -1547,7 +1577,230 @@ async function syncWireRows() {
   hdb.close();
 }
 
-const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows];
+// ---- DEV's switch on the notebook page (astra's DEVSW-2, daybreak3): the page's own reopenJournaled, shownReadOnly and
+// docSyncReload, as index.html has them, run with what they use given to them; and the switch over a real workspace
+async function switchFunctions(deps) {
+  const src = await (await fetch("./page-src.html")).text();
+  const a = src.indexOf("// (DEV's switch, after the journal's activation"), b = src.indexOf("let journalKit = null;", a);
+  if (a < 0 || b < 0) throw new Error("the page's switch functions weren't found");
+  const make = new Function("deps", `with (deps) {\n${src.slice(a, b)}\nreturn { reopenJournaled, shownReadOnly, docSyncReload, ownNotebook, recreating };\n}`);
+  return make(deps);
+}
+const pageNb = (st) => ({ store: st, ro: [], detach() { this.store = null; }, setReadOnly(r) { this.ro.push(r); } });
+
+async function switchReopenFails() {
+  // the reopen after activation fails in the new store's open: no store attached (read-only: nowhere to save), the new
+  // store and the old one let go, so the next tab's store takes the writer lock; the old one writes nothing more
+  const { w, hdb } = await active();
+  const { id, st: prev, d } = await loadNew(w, hdb, [["a", "A"]]);
+  const x = store(w, hdb, id);
+  await x.load();
+  const xt = takeover(x, 3000);
+  const nb = pageNb(prev);
+  let made = null;
+  const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: false, replayEnded: null, docSwitch: null, docSyncNeedsReload: false,
+    storeFor: async (i) => (made = store(w, hdb, i)),
+    open: async (s) => { nb.detach(); await s.load(); throw new Error("the test's failed reopen"); } };
+  const f = await switchFunctions(deps);
+  const r = await f.reopenJournaled();
+  const got = await xt;
+  const said = await within(prev.save({ ...d, cells: [{ id: "a", code: "after the failed reopen" }], baseRev: d.rev }), 3000);
+  const rec = await rawGet(w.main, "notebooks", id);
+  check(r === false && nb.store === null && f.shownReadOnly() === true && got !== "timeout" && x.writer && !prev.writer && !made?.writer && prev.released && made?.released && !said?.v?.saved && rec.cells[0].code === "A",
+    "switch: a reopen that fails: false, no store attached (read-only), the new store and the old one let go, the next tab's store the writer, the old one saving nothing: " + J({ r, attached: !!nb.store, got: got === "timeout" ? got : "taken", x: x.writer, prev: prev.writer, made: made?.writer, said: said?.v ?? said?.e?.message ?? said, code: rec.cells[0].code }));
+  await close(prev, made, x, w);
+  hdb.close();
+}
+
+async function switchReopenOk() {
+  // the reopen after activation: a plain store shown (before activation) opened again through the journal: true, the
+  // journal's store attached, the writer, saving; nothing reopened when it already is, or for a file
+  const { w, hdb } = await active();
+  const { id, st: seed } = await loadNew(w, hdb, [["a", "A"]]);
+  await close(seed);
+  const plain = new W.IdbStore(w.main, id);
+  await plain.load();
+  const nb = pageNb(plain);
+  let made = null, asked = 0;
+  const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: false, replayEnded: null, docSwitch: null, docSyncNeedsReload: false,
+    storeFor: async (i) => { asked++; return (made = store(w, hdb, i)); },
+    open: async (s) => { nb.detach(); await s.load(); nb.store = s; } };
+  const f = await switchFunctions(deps);
+  const r = await f.reopenJournaled();
+  const rec0 = await rawGet(w.main, "notebooks", id);
+  const out = await made.save({ name: rec0.name, mode: rec0.mode, id, cells: [{ id: "a", code: "after the reopen" }], baseRev: rec0.rev });
+  const rec = await rawGet(w.main, "notebooks", id);
+  check(r === true && nb.store === made && made.journaled && made.writer && !!out?.saved && rec.cells[0].code === "after the reopen" && f.shownReadOnly() === false, "switch: a reopen that works: true, the journal's store attached, the writer, saving");
+  deps.ws.quarantined = true;
+  check(f.shownReadOnly() === true, "switch: shownReadOnly: a quarantined workspace, read-only");
+  deps.ws.quarantined = false;
+  nb.store = { journaled: true, synced: true, viewOnly: null };
+  const r2 = await f.reopenJournaled();
+  nb.store = { journaled: true, synced: true, viewOnly: "another tab" };
+  const ro2 = f.shownReadOnly();
+  deps.current = { id: "file:/x.ipynb", kind: "file" };
+  nb.store = plain;
+  const r3 = await f.reopenJournaled();
+  check(r2 === true && r3 === true && asked === 1 && ro2 === true, "switch: nothing reopened when the journal's synced store is shown, or for a file; shownReadOnly: another tab writing it, read-only");
+  await close(made, w);
+  hdb.close();
+}
+
+async function switchReopenNoStore() {
+  // the reopen after activation can't make the journal's store (its storage unavailable), or makes a plain one: false,
+  // the old store detached (read-only), nothing left editable
+  const { w, hdb } = await active();
+  const { id, st: seed } = await loadNew(w, hdb, [["a", "A"]]);
+  await close(seed);
+  for (const how of ["throws", "plain"]) {
+    const plain = new W.IdbStore(w.main, id);
+    await plain.load();
+    const nb = pageNb(plain);
+    const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: false, replayEnded: null, docSwitch: null, docSyncNeedsReload: false, replaying: false, replayEnded: null, docSwitch: null, docSyncNeedsReload: false,
+      storeFor: async (i) => { if (how === "throws") throw new Error("the test's storage unavailable"); return new W.IdbStore(w.main, i); },
+      open: async (s) => { nb.detach(); await s.load(); nb.store = s; } };
+    const f = await switchFunctions(deps);
+    const r = await f.reopenJournaled();
+    check(r === false && nb.store === null && f.shownReadOnly() === true, `switch: a reopen whose store ${how === "throws" ? "can't be made" : "is a plain one"}: false, no store attached, read-only`);
+  }
+  await close(w);
+  hdb.close();
+}
+
+async function switchReloadState() {
+  // the switch's `reload`: the notebook and the page's controls for it read-only, and said
+  const els = { "#ttrepro": { disabled: false }, "#ttclear": { disabled: false }, "#ttrevert": { disabled: false } };
+  const nb = pageNb(null);
+  const deps = { nb, writerBar: { hidden: true, textContent: "" }, writerBarHeight() {}, writerBarTimer: null, nbName: { readOnly: false }, modeEl: { disabled: false }, $: (q) => els[q], DOC_SYNC_RELOAD: W.DOC_SYNC_RELOAD, current: {}, ws: null, storeFor() {}, open() {}, replaying: false, replayEnded: null, docSwitch: null, docSyncNeedsReload: false };
+  const f = await switchFunctions(deps);
+  f.docSyncReload();
+  check(J(nb.ro) === J([true]) && !deps.writerBar.hidden && deps.writerBar.textContent === W.DOC_SYNC_RELOAD && deps.nbName.readOnly && deps.modeEl.disabled && Object.values(els).every((e) => e.disabled), "switch: reload: the notebook, its name, language, reproducibility and TimeTravel's changes read-only; said in the bar");
+}
+
+async function switchReplayOwns() {
+  // astra's DEVSW-2-R2: the page's own shownReadOnly and ownNotebook, as index.html has them, with a session being
+  // recreated (replaying): read-only whatever else holds; the switch (enableDocSync with the page's functions) waits to
+  // own the notebook until the recreation ends: nothing read-only, flushed, activated or reopened meanwhile, and its
+  // restore never unlocks the recreation's read-only; a recreation asked while the switch owns it waits for the switch
+  const { w, hdb } = await active();
+  const { id, st } = await loadNew(w, hdb, [["a", "A"]]);
+  let endReplay;
+  const nb = pageNb(st);
+  const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: true, replayEnded: new Promise((r) => { endReplay = r; }), docSwitch: null, docSyncNeedsReload: false, statusEl: { textContent: "" }, journal: { session: null }, DOC_SYNC_RELOAD: W.DOC_SYNC_RELOAD, storeFor: async () => st, open: async () => {} };
+  const f = await switchFunctions(deps);
+  const ro1 = f.shownReadOnly();
+  const log = [];
+  const DOC = { on: false, saved: null };
+  const switched = W.enableDocSync({ loadHistory: async () => ({ DOC_SYNC: DOC }), makeDocs: () => ({ kick() {} }), makeChannel: () => null, register: W.registerJournalWriter, own: f.ownNotebook, setReadOnly: (r) => { log.push("ro:" + r); nb.setReadOnly(r); }, readOnlyNow: f.shownReadOnly, flush: () => log.push("flush"), saved: async () => {}, activate: async () => { log.push("activate"); return true; }, begun: async () => true, reopen: async () => { log.push("reopen"); return true; }, setDocs: () => log.push("setDocs"), needReload() {}, warn() {} });
+  await sleep(100);
+  const during = J(log);
+  // (the recreation ends as the page's does: replaying false, then its promise resolved)
+  deps.replaying = false;
+  endReplay();
+  const out = await switched;
+  check(ro1 === true && during === "[]" && out === "on" && J(log) === J(["ro:true", "flush", "activate", "reopen", "setDocs", "ro:false"]) && deps.docSwitch === null && DOC.on === true,
+    "switch: a session being recreated: shownReadOnly read-only; the switch waits for it to end (nothing done meanwhile), then on, and lets the notebook go: " + J({ ro1, during, out, log }));
+  // (the switch owning the notebook: the page's recreating (its replay's and recompute's) waits; released, it runs,
+  // read-only meanwhile, and sets the read-only back from what holds)
+  const release = await f.ownNotebook();
+  let replayStarted = false;
+  const ro0 = nb.ro.length;
+  const replayWaits = f.recreating(async () => { replayStarted = deps.replaying && nb.ro.at(-1) === true; return "ran"; });
+  await sleep(50);
+  const waited = !replayStarted && nb.ro.length === ro0;
+  release();
+  const ran = await replayWaits;
+  check(waited && replayStarted && ran === "ran" && deps.docSwitch === null && deps.replaying === false && nb.ro.at(-1) === false, "switch: while the switch owns the notebook, the page's recreating waits; released, it runs (read-only meanwhile) and sets the read-only back: " + J({ waited, replayStarted, ran, ro: nb.ro.slice(ro0) }));
+  // (a recreation that ends with no store attached: the page's recreating sets the read-only back from shownReadOnly:
+  // read-only, nowhere to save)
+  const keep = nb.store;
+  nb.store = null;
+  const ranNoStore = await f.recreating(async () => "ran");
+  const roNoStore = nb.ro.at(-1);
+  nb.store = keep;
+  check(ranNoStore === "ran" && roNoStore === true, "switch: a recreation that ends with no store attached leaves the notebook read-only");
+  // (the switch's restore while a recreation still runs (ownership bypassed): read-only kept)
+  deps.replaying = true;
+  check(f.shownReadOnly() === true, "switch: shownReadOnly with a store, no other tab and no quarantine, but a recreation running: read-only");
+  deps.replaying = false;
+  DOC.on = false;
+  await close(st, w);
+  hdb.close();
+}
+
+// (f() true within ms)
+const until = async (f, ms) => { for (const end = Date.now() + ms; ; await sleep(20)) { if (await f()) return true; if (Date.now() > end) return false; } };
+async function switchReloadQueued() {
+  // astra's DEVSW-2-R3: a recreation queued behind the switch while the switch ends in `reload` doesn't run, and can't
+  // unlock the notebook; the page's own ownNotebook, reopenJournaled, docSyncReload, shownReadOnly and recreating, with
+  // enableDocSync, over real stores.  Two ways to reload: (a) the activation done, the reopen failing (no store left
+  // attached); (b) the activation begun then refused (the old store kept attached)
+  for (const how of ["reopen fails", "activation refused after it began"]) {
+    const { w, hdb } = await active();
+    const { id, st: seed } = await loadNew(w, hdb, [["a", "A"]]);
+    await close(seed);
+    const plain = new W.IdbStore(w.main, id);
+    await plain.load();
+    const nb = pageNb(plain);
+    const els = { "#ttrepro": { disabled: false }, "#ttclear": { disabled: false }, "#ttrevert": { disabled: false } };
+    let gate, made = null;
+    const held = new Promise((r) => { gate = r; });
+    const deps = { current: { id, kind: "browser" }, nb, ws: { quarantined: false }, replaying: false, replayEnded: null, docSwitch: null, docSyncNeedsReload: false,
+      statusEl: { textContent: "" }, journal: { session: null }, DOC_SYNC_RELOAD: W.DOC_SYNC_RELOAD, writerBar: { hidden: true, textContent: "" }, writerBarHeight() {}, writerBarTimer: null, nbName: { readOnly: false }, modeEl: { disabled: false }, $: (q) => els[q],
+      storeFor: async (i) => (made = store(w, hdb, i)),
+      open: async (s2) => { nb.detach(); await s2.load(); throw new Error("the test's failed reopen"); } };
+    const f = await switchFunctions(deps);
+    const DOC = { on: false, saved: null };
+    const switched = W.enableDocSync({ loadHistory: async () => ({ DOC_SYNC: DOC }), makeDocs: () => ({ kick() {} }), makeChannel: () => null, register: W.registerJournalWriter, own: f.ownNotebook, setReadOnly: (r) => nb.setReadOnly(r), readOnlyNow: f.shownReadOnly, flush() {}, saved: async () => {},
+      activate: async () => { await held; return how === "reopen fails"; }, begun: async () => true, reopen: f.reopenJournaled, setDocs() {}, needReload: f.docSyncReload, warn() {} });
+    // (the switch owns the notebook and waits in its activation; a recreation is asked for meanwhile)
+    check(await until(() => deps.docSwitch !== null, 3000), `switch reload (${how}): the switch owns the notebook`);
+    let ran = false;
+    const queued = f.recreating(async () => { ran = true; return "ran"; });
+    await sleep(50);
+    gate();
+    const [out, rec] = await Promise.all([switched, queued]);
+    const attached = how === "reopen fails" ? nb.store === null : nb.store === plain;
+    check(out === "reload" && rec === null && !ran && deps.replaying === false && nb.ro.at(-1) === true && f.shownReadOnly() === true && deps.docSyncNeedsReload === true && attached && deps.statusEl.textContent === W.DOC_SYNC_RELOAD && deps.writerBar.textContent === W.DOC_SYNC_RELOAD && deps.nbName.readOnly && deps.docSwitch === null,
+      `switch reload (${how}): the queued recreation doesn't run; the notebook stays read-only (${how === "reopen fails" ? "no store attached" : "the old store attached"}), reload said: ` + J({ out, rec, ran, ro: nb.ro, attached, status: deps.statusEl.textContent.slice(0, 40) }));
+    // (and any recreation asked for later doesn't run either, nor does it unlock it)
+    let ran2 = false;
+    const rec2 = await f.recreating(async () => { ran2 = true; return "ran"; });
+    check(rec2 === null && !ran2 && nb.ro.at(-1) === true && f.shownReadOnly() === true, `switch reload (${how}): a later recreation doesn't run either; still read-only`);
+    if (made) await close(made);
+    await close(w);
+    hdb.close();
+  }
+}
+
+async function switchActivationFails() {
+  // the switch over a real workspace: (1) the history bundle's load rejects: `off`, the journal's activation never
+  // begun, DOC_SYNC off, nothing read-only; (2) the activation fails after its first durable write (a fence that can't be
+  // written): `reload`, begun and not active (never claimed undone), DOC_SYNC off, no DocSync, read-only and said; the
+  // next activation carries it on
+  const w = await W.Workspace.open(await named());
+  const DOC = { on: false, saved: null };
+  const rig = (over) => {
+    const t = { ro: [], docs: 0, reload: 0, reopened: 0 };
+    return { t, d: { loadHistory: async () => ({ DOC_SYNC: DOC }), makeDocs: () => ({ kick() {} }), makeChannel: () => null, register: W.registerJournalWriter, own: async () => () => {}, setReadOnly: (r) => t.ro.push(r), readOnlyNow: () => false, flush() {}, saved: async () => {}, activate: () => w.activateJournal(), begun: () => w.journalBegun(), reopen: async () => { t.reopened++; return true; }, setDocs: () => { t.docs++; }, needReload: () => { t.reload++; }, warn() {}, ...over } };
+  };
+  const a = rig({ loadHistory: async () => { throw new Error("the test's failed history load"); } });
+  const outA = await W.enableDocSync(a.d);
+  check(outA === "off" && !(await w.journalBegun()) && !(await w.journalActive()) && DOC.on === false && a.t.ro.length === 0 && a.t.docs === 0, "switch: the history bundle's load fails: off, the journal's activation never begun, DOC_SYNC off, nothing read-only: " + J({ outA, ro: a.t.ro }));
+  w.writeFence = async () => { throw new Error("the test's fence that can't be written"); };
+  const b = rig({});
+  const outB = await W.enableDocSync(b.d);
+  const begun = await w.journalBegun(), act = await w.journalActive();
+  check(outB === "reload" && begun && !act && DOC.on === false && DOC.saved === null && b.t.docs === 0 && b.t.reopened === 0 && J(b.t.ro) === J([true, true]) && b.t.reload === 1, "switch: the activation fails after its first durable write: reload (begun, not active, never claimed undone), DOC_SYNC off, no DocSync, read-only and said: " + J({ outB, begun, act, ro: b.t.ro }));
+  delete w.writeFence;
+  const c = rig({});
+  const outC = await W.enableDocSync(c.d);
+  check(outC === "on" && (await w.journalActive()) && DOC.on === true && c.t.docs === 1 && J(c.t.ro) === J([true, false]), "switch: …the next load's activation carries it on: on");
+  DOC.on = false;
+  w.close();
+}
+
+const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);

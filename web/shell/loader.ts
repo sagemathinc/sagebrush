@@ -26,8 +26,20 @@ export const SHELL_HOST_LEVEL: number = Math.max(...Object.values(HOST_LEVELS.na
  * web/shell/host.ts checks it against its own records.
  */
 export type ShellOutcome =
-  | { exit: { code: number; stdout: string; stderr: string } }
-  | { rejected: { message: string; refusal: string | null } };
+  | { exit: { code: number; stdout: string; stderr: string }; output?: OutputCount }
+  | { rejected: { message: string; refusal: string | null }; output?: OutputCount }
+  | { limit: { key: ModuleLimitKey; value: number } };
+/**
+ * Step 3 (host level 3): the module's own count of a result (r8c E2, @sagebrush's output_bytes ruling C with astra5's
+ * conditions): `producedBytes`, the whole result's UTF-8 size (stdout then stderr); `deliveredBytes`, the size of the
+ * prefix it sent, within the invocation's allowance and the fixed backstop; `exceeded`, its flag that the result
+ * passed the allowance; `truncated`, that it passed only the backstop (an ordinary result's prefix, never typed).
+ * Checked here for shape and its own bounds (delivered <= produced; not exceeded means all of it delivered); the host
+ * checks them against the allowance and the strings it got.
+ */
+export type OutputCount = { producedBytes: number; deliveredBytes: number; exceeded: boolean; truncated: boolean };
+/** The limits the module enforces itself and reports as a typed limit (only bash.pipeline_width). */
+export type ModuleLimitKey = "pipeline_width";
 
 /** One file call of an invocation's (fs.request), for its mediator to answer: `ok` with a value, or an
  * error `{code, message, refusal?}` (an errno code; `refusal`, the mediator's id for it, when it is one). */
@@ -42,7 +54,13 @@ export interface ExecOptions {
   onRequest?: (r: FsRequest) => Promise<FsAnswer>;
   /** Stop: aborts the invocation's signal in the module (it stops at the next statement boundary) */
   signal?: AbortSignal;
+  /** step 3: the invocation's own just-bash limits (only maxExecutionTimeMs, the run's remaining script_ms) */
+  limits?: { maxExecutionTimeMs?: number };
+  /** step 3: the run's remaining output_bytes, which the module never sends more than */
+  allowance?: number;
 }
+/** step 3's init (host level 3): just-bash's executionLimits and bash.pipeline_width (web/shell/limits.ts). */
+export type ShellInit = { limits: Readonly<Record<string, number>>; pipelineWidth: number };
 
 /**
  * The shell is gone (terminated, its worker failed, or its protocol broke):
@@ -65,6 +83,12 @@ export interface Shell {
   /** "closed" once terminated or failed; it doesn't reopen */
   readonly state: "open" | "closed";
   exec(script: string, opts?: string | ExecOptions): Promise<ShellOutcome>;
+  /**
+   * Step 3: the worker's one init (r3 §4.1), before any exec: resolves with the limits just-bash resolved, or
+   * rejects with the module's refusal (a second init, or limits just-bash refuses).  Only a host level 3 module
+   * answers it; the host refuses an older one before asking.
+   */
+  configure(init: ShellInit): Promise<Record<string, number>>;
   /** idempotent: ends the worker and its channel, and fails what is pending */
   terminate(): void;
 }
@@ -119,16 +143,31 @@ export function shellPackage(plan: SetPlan, level = SHELL_HOST_LEVEL) {
 }
 
 // A shell.result's payload, checked: exactly one of exit (a code in 0..255
-// and two strings) or rejected (a message); anything else is null.
+// and two strings), rejected (a message) or limit (step 3: bash.pipeline_width
+// and its value); exit and rejected with an optional output count (step 3),
+// itself checked; anything else is null.
+const count = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+function outputOf(o: any): OutputCount | undefined | null {
+  if (o === undefined) return undefined;
+  if (!o || typeof o !== "object" || !count(o.producedBytes) || !count(o.deliveredBytes) || typeof o.exceeded !== "boolean" || typeof o.truncated !== "boolean") return null;
+  if (o.deliveredBytes > o.producedBytes || (o.exceeded && o.truncated) || (!o.exceeded && !o.truncated && o.deliveredBytes !== o.producedBytes)) return null;
+  return { producedBytes: o.producedBytes, deliveredBytes: o.deliveredBytes, exceeded: o.exceeded, truncated: o.truncated };
+}
 function outcome(p: any): ShellOutcome | null {
-  if (!p || typeof p !== "object" || ("exit" in p) === ("rejected" in p)) return null;
+  if (!p || typeof p !== "object" || Number(Object.hasOwn(p, "exit")) + Number(Object.hasOwn(p, "rejected")) + Number(Object.hasOwn(p, "limit")) !== 1) return null;
+  if ("limit" in p) {
+    const { key, value } = p.limit ?? {};
+    return key === "pipeline_width" && count(value) && !("output" in p) ? { limit: { key, value } } : null;
+  }
+  const output = outputOf(p.output);
+  if (output === null) return null;
   if ("exit" in p) {
     const { code, stdout, stderr } = p.exit ?? {};
     if (!Number.isInteger(code) || code < 0 || code > 255 || typeof stdout !== "string" || typeof stderr !== "string") return null;
-    return { exit: { code, stdout, stderr } };
+    return { exit: { code, stdout, stderr }, ...(output ? { output } : {}) };
   }
   const message = p.rejected?.message, refusal = p.rejected?.refusal ?? null;
-  return typeof message === "string" && (refusal === null || typeof refusal === "string") ? { rejected: { message, refusal } } : null;
+  return typeof message === "string" && (refusal === null || typeof refusal === "string") ? { rejected: { message, refusal }, ...(output ? { output } : {}) } : null;
 }
 
 /**
@@ -168,6 +207,8 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
   let next = 1;
   let closed: ShellUnavailableError | null = null;
   let startup: { resolve: (version: string) => void; reject: (e: unknown) => void } | null = null;
+  // (step 3: an init's answer, while it is awaited; a second init goes to the module, which refuses it)
+  let configuring: { resolve: (l: Record<string, number>) => void; reject: (e: unknown) => void } | null = null;
   const ready = new Promise<string>((resolve, reject) => (startup = { resolve, reject }));
   const onAbort = () => close("aborted before it was ready", signal!.reason);
   function close(reason: string, startError: unknown = new PkgsetError(`the shell didn't start: ${reason}`)) {
@@ -180,6 +221,8 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
     port1.close();
     for (const p of pending.values()) p.reject(closed);
     pending.clear();
+    configuring?.reject(closed);
+    configuring = null;
     startup?.reject(startError);
     startup = null;
   }
@@ -205,6 +248,19 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
       // (a call from an invocation that has ended, or for another run: refused, never executed (r3 §2.2 step 1))
       if (!p || run !== p.run || !p.onRequest) return reply({ err: { code: "EBADF", message: "this run has ended, or has no file access" } });
       p.onRequest({ req, op, args }).then(reply, (err) => reply({ err: { code: "EIO", message: String((err as Error)?.message ?? err) } }));
+    }
+    else if (name === "shell.configured" && !startup && configuring) {
+      const c = configuring;
+      const lim = payload?.limits;
+      // (r2, astra5 B3-A5-1: the waiter is settled on every path; a malformed answer closes the shell, and close()
+      // rejects the waiter, which is still set then, so neither configure() nor the host's start is left waiting)
+      if (typeof payload?.error === "string") {
+        configuring = null;
+        c.reject(new Error(payload.error));
+      } else if (lim && typeof lim === "object" && Object.values(lim).every((v) => typeof v === "number")) {
+        configuring = null;
+        c.resolve({ ...lim });
+      } else close("it broke the shell protocol (a malformed shell.configured)");
     }
     else if (name === "shell.result" && !startup) {
       const o = outcome(payload);
@@ -236,8 +292,10 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
     exec(script: string, opts: string | ExecOptions = {}) {
       if (closed) return Promise.reject(closed);
       const o: ExecOptions = typeof opts === "string" ? { stdin: opts } : opts;
-      const { stdin, cwd = "/", run = "-", onRequest, signal } = o;
+      const { stdin, cwd = "/", run = "-", onRequest, signal, limits, allowance } = o;
       if (typeof script !== "string" || (stdin !== undefined && typeof stdin !== "string") || typeof cwd !== "string" || typeof run !== "string") return Promise.reject(new TypeError("exec(script, {stdin?, cwd?, run?}) takes strings"));
+      const t = limits?.maxExecutionTimeMs;
+      if ((t !== undefined && !(typeof t === "number" && t >= 0)) || (allowance !== undefined && !count(allowance))) return Promise.reject(new TypeError("exec's limits.maxExecutionTimeMs is a number >= 0 and its allowance a count of bytes"));
       const id = next++;
       return new Promise<ShellOutcome>((resolve, reject) => {
         const onAbort = () => {
@@ -246,13 +304,25 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
         const done = <T,>(f: (x: T) => void) => (x: T) => { signal?.removeEventListener("abort", onAbort); f(x); };
         pending.set(id, { resolve: done(resolve), reject: done(reject), run, onRequest });
         try {
-          port1.postMessage({ exec: { id, run, script, cwd, ...(stdin === undefined ? {} : { stdin }) } });
+          port1.postMessage({ exec: { id, run, script, cwd, ...(stdin === undefined ? {} : { stdin }), ...(t === undefined ? {} : { limits: { maxExecutionTimeMs: t } }), ...(allowance === undefined ? {} : { allowance }) } });
         } catch (err) {
           close(`an invocation couldn't be posted to it: ${(err as Error)?.message ?? err}`);
           return;
         }
         if (signal?.aborted) onAbort();
         else signal?.addEventListener("abort", onAbort, { once: true });
+      });
+    },
+    configure(init: ShellInit) {
+      if (closed) return Promise.reject(closed);
+      if (configuring) return Promise.reject(new Error("an init is already waiting for its answer"));
+      return new Promise<Record<string, number>>((resolve, reject) => {
+        configuring = { resolve, reject };
+        try {
+          port1.postMessage({ init: { limits: { ...init.limits }, pipelineWidth: init.pipelineWidth } });
+        } catch (err) {
+          close(`its init couldn't be posted to it: ${(err as Error)?.message ?? err}`);
+        }
       });
     },
     terminate() {

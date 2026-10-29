@@ -1,9 +1,9 @@
 // The journal's activation (plan-sync-slice2-client r4 §1a) in headless Chromium, with real IndexedDB and Web
-// Locks: the workspace's version 8 and meta's `journal`; activation writing "journal" into the three fences and
+// Locks: the workspace's version 9 (8 meta's `journal`, 9 the board journal's barrier) and meta's `journal`; activation writing "journal" into the three fences and
 // then `active`; the fences' counters and their mark kept by every later write (a reset's, a quarantine's, a
 // refresh's); a stop after each fence write carried on by the next open; a fence that can't be written leaving
 // it begun; and every writer from before the journal refused, this build's and the pinned pre-journal build's
-// (master f8976bfe's workspace and notebook stores, built beside this one: its open of a version-8 workspace
+// (master f8976bfe's workspace and notebook stores, built beside this one: its open of a current (version-9) workspace
 // fails, and its saves and history writes are refused before they change anything).
 // The cases are in test-workspace-journal.page.js.
 //   CHROME=google-chrome bun web/workspace/test-workspace-journal.mjs

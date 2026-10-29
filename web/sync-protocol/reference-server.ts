@@ -271,7 +271,7 @@ export class ReferenceServer {
     }
     if (g && m === "GET") {
       if (!a.blobs.has(g[1])) return err(404, "missing");
-      return new Response(null, { status: 303, headers: { location: new URL(`/__files/${g[1]}`, url).toString(), "cache-control": "no-store" } });
+      return new Response(null, { status: 303, headers: { location: new URL(`/__files/${g[1]}?exp=${this.now() + 5 * 60_000}`, url).toString(), "cache-control": "no-store" } });
     }
     return err(404, "not found");
   }

@@ -349,7 +349,11 @@ also directly available (`from sagebrush import nf, mf, ap, poly`); see
 [engine/py/README.md](engine/py/README.md). In the browser, open
 [sagebrush.space](https://sagebrush.space).
 
-To build from source you need Rust (stable), `uv` and Node.js.
+To build everything from source and run every test suite (the exact tool
+versions, `scripts/build-all.sh`, `scripts/test-all.sh` and their timings),
+see [DEVELOPMENT.md](DEVELOPMENT.md). For the engines in Python or Node
+alone, you need Rust (rustup: `engine/rust-toolchain.toml` pins the
+toolchain, and rustup installs it), `uv` and Node.js 24:
 
 ```sh
 cd engine
@@ -383,11 +387,11 @@ The CLI, the notebook and sagebrush.space are built with pnpm (the lock file
 is `pnpm-lock.yaml`; `npm ci` does not apply) and bun:
 
 ```sh
-pnpm install --frozen-lockfile        # about 1 s
-node scripts/build-engine.mjs         # the Rust engine as WebAssembly (about 20 s cold)
-pnpm run build:cli                    # build/cli/pyjs.cjs, the single-file CLI (about 1 s)
-bun web/build.ts                      # the site in web/dist (about 1 s)
-pnpm test                             # about 30 s
+pnpm install --frozen-lockfile        # seconds with a warm store
+node scripts/build-engine.mjs         # the Rust engine as WebAssembly (35 s on 16 cores)
+pnpm run build:cli                    # build/cli/pyjs.cjs, the single-file CLI (a few seconds)
+bun web/build.ts                      # the notebook page in web/dist (about 17 s)
+pnpm test                             # the Node tests (about 24 min one after another; CI runs them as 8 shards)
 ```
 
 The engine's Rust toolchain is pinned (`engine/rust-toolchain.toml`, 1.99.1;

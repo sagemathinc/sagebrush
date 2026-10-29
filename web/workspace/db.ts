@@ -93,11 +93,18 @@
 //   journal (sync 2c).  Activation is one way (Workspace.activateJournal); the version itself is half its
 //   barrier: an open page of an earlier build is closed by this upgrade (versionchange), and an earlier build
 //   opening fresh asks for version 7 and gets a VersionError, so no earlier code writes the workspace again
+//
+// Version 9 (the board journal's cutover; schema only):
+//
+//   boards' rows may carry the journal's envelope, flat beside `doc`: `j`, `hash` and `unjournaled` (all or none:
+//   api.ts BoardRecord).  Nothing changes in the stores; the version is the barrier: a page of an earlier build, whose
+//   board writes keep the rest of a row as it is, is closed by this upgrade (versionchange) before any row can have
+//   an envelope, and an earlier build opening fresh gets a VersionError, so no earlier code changes `boards` again
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
 
-export const WS_VERSION = 8;
+export const WS_VERSION = 9;
 /** meta's `journal` record (version 8): `activating` from activation's first write until every fence says
  * "journal", then `active` (plan-sync-slice2-client r4 §1a). */
 export type JournalState = { v: 1; active: boolean; activating?: true };
@@ -171,6 +178,7 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
     if (old < 7) db.createObjectStore("syncLedger", { keyPath: ["ns", "lseq"] }).createIndex("byDecided", ["ns", "d", "lseq"]);
     // (not activated: one write, whatever is in the workspace)
     if (old < 8) tx.objectStore("meta").put({ v: 1, active: false } satisfies JournalState, "journal");
+    // (version 9: nothing to change; the upgrade itself closes the pages of earlier builds)
   }, onClose, ms);
 }
 

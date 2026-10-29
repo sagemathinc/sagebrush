@@ -84,7 +84,7 @@ T.resetDebt = () => { if (T.debtKeep) Object.assign(N.SYNC_DEBT, T.debtKeep); re
 
 // ---- a DocSync of its own over a deferred link (no server): each request of the notebook `only` waits until the test
 // answers it (fakeAnswer); any other notebook's is answered `busy` at once.  Lets a case answer a pull, drop the
-// connection while a request waits, or kick during a flight, deterministically (astra's CORR-2C3-1, D3-4c)
+// connection while a request waits, or kick during a flight, deterministically
 T.fakeStart = async (account, only, retryMs = 60_000) => {
   const owner = await P.accountHash(account);
   T.fake = { q: [], sent: [], only, owner, ds: new DS.DocSync({ retryMs, askMs: 60_000 }) };
@@ -138,7 +138,7 @@ T.fakeDisconnect = async () => {
   return true;
 };
 /** The fake DocSync's next history transaction (markSent, recordClaim, applyPage...) held before it runs, until
- * fakeReleaseTx: then run, or failed as a storage refusal would fail it (astra's r2 CORR-2C3-1 seam). */
+ * fakeReleaseTx: then run, or failed as a storage refusal would fail it. */
 T.fakeGateTx = () => {
   const ds = T.fake.ds, orig = ds.tx.bind(ds);
   T.fake.gated = false;
@@ -177,6 +177,201 @@ T.type = (cid, text) => {
   if (!cell) return false;
   cell.ta.value = text;
   cell.ta.dispatchEvent(new Event("input", { bubbles: true }));
+  return true;
+};
+
+// ---- one device, two pages: a board page holding the account connection, carrying notebooks with
+// the switch's followDocSync, and the notebook page turning the switch on with enableDocSync, its saves told to the
+// board's DocSync on the workspace's channel
+/** The workspace, its journal not yet active (the notebook page's switch activates it). */
+T.openWs = async (name) => {
+  T.w = await W.Workspace.open({ name: `ds-${name}`, mainName: `dsmain-${name}` });
+  T.hdb = await W.openHistoryDb();
+  T.kit = N.journalClasses({ IdbStore: W.IdbStore, IdbPatchStore: W.IdbPatchStore });
+  return await T.w.journalActive();
+};
+/** The board page's side: followDocSync, its DocSync the one T.connect then connects. */
+T.follow = async () => {
+  T.followed = 0;
+  T.unfollow = await W.followDocSync({
+    makeDocs: () => new DS.DocSync({ retryMs: 200, askMs: 5000 }),
+    makeChannel: () => new BroadcastChannel(W.docSyncChannel(T.w.ws.name)),
+    journalActive: () => T.w.journalActive(),
+    setDocs: (d) => { T.ds = d; T.followed++; },
+    warn: (...a) => T.log.push("warn: " + a.map(String).join(" ")),
+  });
+  return T.followed;
+};
+T.followedCount = () => T.followed ?? 0;
+/** The notebook page's side: enableDocSync with this page's pieces, its notebook `id` (made from `cells`) the one shown,
+ * reopened through the journal; what it returned, and the read-only it set. */
+T.enable = async (id, cells) => {
+  T.ro = [];
+  T.shownStore = null;
+  const out = await W.enableDocSync({
+    loadHistory: async () => H,
+    makeDocs: () => new DS.DocSync({ retryMs: 200, askMs: 5000 }),
+    makeChannel: () => new BroadcastChannel(W.docSyncChannel(T.w.ws.name)),
+    register: W.registerJournalWriter,
+    own: async () => () => {},
+    setReadOnly: (ro) => T.ro.push(ro),
+    readOnlyNow: () => !T.shownStore || !!T.shownStore.viewOnly,
+    flush() {},
+    saved: async () => {},
+    activate: () => T.w.activateJournal(),
+    begun: () => T.w.journalBegun(),
+    reopen: async () => { await T.open(id, cells); T.shownStore = T.stores.get(id); return !!T.shownStore.journaled; },
+    setDocs: (d) => { T.ds = d; },
+    needReload: () => { T.reload = true; },
+    warn: (...a) => T.log.push("warn: " + a.map(String).join(" ")),
+  });
+  return { out, ro: T.ro, on: H.DOC_SYNC.on, saved: typeof H.DOC_SYNC.saved, synced: !!T.shownStore?.synced, writer: !!T.shownStore?.writer };
+};
+/** A save as the page makes it: no kick of its own (the switch's DOC_SYNC.saved tells the connection's DocSync). */
+T.editOnly = async (id, cells) => {
+  const st = T.stores.get(id), rec = await rawGet(T.w.main, "notebooks", id);
+  const out = await st.save({ name: rec.name, mode: rec.mode, id, cells: cells.map(([cid, code]) => ({ id: cid, code })), baseRev: rec.rev });
+  return typeof out === "string" ? out : !!out?.saved;
+};
+T.warnings = () => T.log.filter((x) => typeof x === "string" && x.startsWith("warn: "));
+
+// ---- the real owners (case 14): this page's SyncOwner and its SyncClient, on the namespace's
+// sender lock (shared by the pages of this browser context), against the reference server through the front (its
+// session for this device; /api/share/me answered by the front).  A board page carries notebooks with
+// followDocSync; the notebook page turns the switch on with enableDocSync; each page's DocSync is the one its owner's
+// client connects, and T.connected counts its connections
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const counted = (d) => { const c = d.connected.bind(d); d.connected = (l) => { T.connected++; return c(l); }; return d; };
+/** The workspace `name` and this page's owner, started; `activate`: the journal turned on first (an earlier load of the
+ * notebook page). */
+T.ownerOpen = async (name, activate) => {
+  T.w = await W.Workspace.open({ name: `ds-${name}`, mainName: `dsmain-${name}` });
+  T.hdb = await W.openHistoryDb();
+  T.kit = N.journalClasses({ IdbStore: W.IdbStore, IdbPatchStore: W.IdbPatchStore });
+  if (activate) {
+    W.registerJournalWriter("notebooks");
+    W.registerJournalWriter("boards");
+    await T.w.activateJournal();
+  }
+  T.connected = 0;
+  T.owner = W.SyncOwner.of(T.w, { origin: location.origin });
+  T.owner.start();
+  return await T.w.journalActive();
+};
+T.ownerState = () => ({ holder: T.owner.isHolder(), state: T.owner.view().s.state, running: !!T.owner.client, connected: T.connected });
+/** (case 14 under cloud) A tracing fetch for this page: each call is numbered "<page>.<n>" (unique: the
+ * page's label and this page's own count) and sends it as x-test-call (the harness's front reads it and never passes
+ * it on), and its stages go to T.trace: "fetch-rejected <name>" or "fetched <status>"; the body's byte receipt (length
+ * and sha256), read from a clone before anything else reads the body; and its json() staged as text() then
+ * JSON.parse ("body-read-failed <name>", "json-parse-failed", "parsed"), giving the same value and throwing the same
+ * error as the Response's own.  The product code is unchanged: the Sync panel takes it through its opts.fetch. */
+T.trace = [];
+let traceN = 0;
+T.traceFetch = (page) => async (input, init = {}) => {
+  const call = `${page}.${++traceN}`;
+  const headers = new Headers(init.headers ?? undefined);
+  headers.set("x-test-call", call);
+  let r;
+  try { r = await fetch(input, { ...init, headers }); }
+  catch (e) { T.trace.push({ call, kind: "fetch-rejected", detail: e?.name }); throw e; }
+  T.trace.push({ call, kind: "fetched", detail: r.status });
+  r.clone().arrayBuffer().then(async (b) => {
+    const sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
+    T.trace.push({ call, bytes: b.byteLength, sha });
+  }, () => {});
+  const read = (f) => async () => { try { return await f(); } catch (e) { T.trace.push({ call, kind: "body-read-failed", detail: e?.name }); throw e; } };
+  const text = read(r.text.bind(r)), bytes = read(r.arrayBuffer.bind(r));
+  r.text = text;
+  r.arrayBuffer = bytes;
+  r.json = async () => {
+    const t = await text();
+    let v;
+    try { v = JSON.parse(t); } catch (e) { T.trace.push({ call, kind: "json-parse-failed" }); throw e; }
+    T.trace.push({ call, kind: "parsed" });
+    return v;
+  };
+  return r;
+};
+/** The relay control's page side: n traced GETs of `path`, each read as JSON; the calls' ids. */
+T.relayProbe = async (path, n) => {
+  const f = T.traceFetch(T.pageLabel ?? "R"), calls = [];
+  for (let i = 0; i < n; i++) {
+    const before = traceN;
+    try { await (await f(path, { credentials: "same-origin" })).json(); } catch {}
+    calls.push(`${T.pageLabel ?? "R"}.${before + 1}`);
+  }
+  return calls;
+};
+/** The traced calls so far: stages and byte receipts. */
+T.traceDump = () => T.trace;
+/** Sync turned on in this browser, as a person does it: the Sync panel's button; then this page's owner the holder. */
+T.turnOn = async () => {
+  // (each phase recorded as it completes, with its time, for the harness's diagnostics (T.turnInfo); what the
+  // panel says is kept in T.log as "say: ...", which T.warnings doesn't count)
+  const t = Date.now(), done = (what) => T.turnPhases.push(`${what} (${Date.now() - t} ms)`);
+  T.turnPhases = [];
+  const el = (T.turnEl = document.body.appendChild(document.createElement("div")));
+  T.section = W.syncSection(T.w, el, { say: (m) => T.log.push("say: panel " + String(m).slice(0, 200)), fail: (e) => T.log.push("warn: panel " + e), usage: () => T.w.usage(), confirm: () => true, prompt: () => "delete" }, { fetch: T.traceFetch(T.pageLabel ?? "D1") });
+  done("panel made");
+  const button = () => [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent));
+  for (let i = 0; i < 200 && !button(); i++) await pause(50);
+  if (!button()) return { error: "no Turn on sync: " + el.textContent.slice(0, 200) };
+  done("its Turn on sync button shown");
+  button().click();
+  done("clicked");
+  for (let i = 0; i < 400 && !(T.owner.isHolder() && T.owner.view().s.state === "synced"); i++) await pause(50);
+  done(T.owner.isHolder() && T.owner.view().s.state === "synced" ? "the holder, synced" : "the wait for the holder, synced, ended without it");
+  return T.ownerState();
+};
+/** The turn-on so far (the harness's diagnostics): its completed phases, the panel's text, what it said or warned. */
+T.turnInfo = () => ({
+  phases: T.turnPhases ?? null,
+  panel: T.turnEl ? T.turnEl.textContent.replace(/\s+/g, " ").slice(0, 300) : null,
+  said: T.log.filter((x) => typeof x === "string" && /^(say|warn): /.test(x)).slice(-10),
+});
+/** The board page's side: followDocSync, its DocSync handed to this page's owner. */
+T.boardFollow = async () => {
+  T.unfollow = await W.followDocSync({
+    makeDocs: () => counted(new DS.DocSync({ retryMs: 200, askMs: 5000 })),
+    makeChannel: () => new BroadcastChannel(W.docSyncChannel(T.w.ws.name)),
+    journalActive: () => T.w.journalActive(),
+    setDocs: (d) => { T.ds = d; T.owner.setDocs(d); },
+    warn: (...a) => T.log.push("warn: " + a.map(String).join(" ")),
+  });
+  return true;
+};
+T.clientRunning = (ms) => T.owner.clientRunning(ms);
+/** A notebook page's `on` on the workspace's channel, as another notebook page that turned the switch on posts it. */
+T.postOn = () => { const ch = new BroadcastChannel(W.docSyncChannel(T.w.ws.name)); ch.postMessage({ on: true }); ch.close(); return true; };
+/** The notebook page's side: enableDocSync with this page's pieces and its owner, notebook `id` (made from `cells`)
+ * the one shown. */
+T.nbEnable = async (id, cells) => {
+  T.ro = [];
+  T.shownStore = null;
+  const out = await W.enableDocSync({
+    loadHistory: async () => H,
+    makeDocs: () => counted(new DS.DocSync({ retryMs: 200, askMs: 5000 })),
+    makeChannel: () => new BroadcastChannel(W.docSyncChannel(T.w.ws.name)),
+    register: W.registerJournalWriter,
+    own: async () => () => {},
+    setReadOnly: (ro) => T.ro.push(ro),
+    readOnlyNow: () => !T.shownStore || !!T.shownStore.viewOnly,
+    flush() {},
+    saved: async () => {},
+    activate: () => T.w.activateJournal(),
+    begun: () => T.w.journalBegun(),
+    reopen: async () => { await T.open(id, cells); T.shownStore = T.stores.get(id); return !!T.shownStore.journaled; },
+    setDocs: (d) => { T.ds = d; T.owner.setDocs(d); },
+    needReload: () => { T.reload = true; },
+    warn: (...a) => T.log.push("warn: " + a.map(String).join(" ")),
+  });
+  return { out, ro: T.ro, on: H.DOC_SYNC.on, synced: !!T.shownStore?.synced, writer: !!T.shownStore?.writer };
+};
+/** This page closing, as pagehide does it: its owner suspended for good (its client and lock let go), its listeners gone. */
+T.closeOwner = () => {
+  T.unfollow?.();
+  T.section?.dispose();
+  T.owner.destroy();
   return true;
 };
 window.ready = true;

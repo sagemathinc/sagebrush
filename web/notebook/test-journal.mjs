@@ -10,19 +10,19 @@ import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
-// (the producers' invariant, over the sources (design r4 §6, daybreak3): only journal-rows.js writes a save's intent
-// (a "p" row), only the journal's store asks for one, and every other writer of the notebooks' history (Resume's copy in
-// index.html, an import's keepBundle) writes rows of {nb, time, env} alone)
+// (the producers' invariant, over the sources (design r4 §6, daybreak3): only the journal's rows (web/journal/rows.js)
+// write a save's intent (a "p" row), only the journal asks for one, and every other writer of the notebooks' history
+// (Resume's copy in index.html, an import's keepBundle) writes rows of {nb, time, env} alone)
 const J = JSON.stringify;
 const statics = [];
 {
   const { readdirSync, readFileSync } = await import("node:fs");
-  const files = [...readdirSync(here).filter((f) => /\.(js|ts)$/.test(f) && !f.startsWith("test-")).map((f) => join(here, f)), join(here, "../index.html"), ...readdirSync(join(here, "../workspace")).filter((f) => /\.ts$/.test(f) && !f.startsWith("test-")).map((f) => join(here, "../workspace", f))];
+  const files = [...readdirSync(here).filter((f) => /\.(js|ts)$/.test(f) && !f.startsWith("test-")).map((f) => join(here, f)), join(here, "../index.html"), ...readdirSync(join(here, "../workspace")).filter((f) => /\.ts$/.test(f) && !f.startsWith("test-")).map((f) => join(here, "../workspace", f)), ...readdirSync(join(here, "../journal")).filter((f) => /\.(js|ts)$/.test(f) && !f.startsWith("test-")).map((f) => join(here, "../journal", f))];
   const src = Object.fromEntries(files.map((f) => [f.slice(here.length - "notebook/".length), readFileSync(f, "utf8")]));
   const writes = Object.keys(src).filter((f) => /seqKey\([^)]*"p"/.test(src[f]));
-  statics.push([J(writes) === J(["notebook/journal-rows.js"]), "only journal-rows.js writes an intent row: " + J(writes)]);
+  statics.push([J(writes) === J(["journal/rows.js"]), "only journal/rows.js writes an intent row: " + J(writes)]);
   const asks = Object.keys(src).filter((f) => /t1Write\(/.test(src[f]));
-  statics.push([J(asks.sort()) === J(["notebook/journal-rows.js", "notebook/journal.js"]), "only the journal asks for a T1 with an intent: " + J(asks)]);
+  statics.push([J(asks.sort()) === J(["journal/core.js", "journal/rows.js", "journal/store.js"]), "only the journal asks for a T1 with an intent: " + J(asks)]);
   const copy = /st\.put\(\{ nb: id, time: row\.time, env: row\.env \}\)/.test(src["index.html"] ?? ""), imp = /st\.put\(\{ nb: id, time: env\.time, env \}\)/.test(src["notebook/bundle.js"] ?? "");
   statics.push([copy && imp, "Resume's copy and an import write {nb, time, env} rows alone"]);
 }
