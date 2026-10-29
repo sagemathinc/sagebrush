@@ -173,7 +173,7 @@ const held = [];
 let serverNoticesDropped = 0;
 /** over the whole run: /__files/ GETs answered 200 (the downloads through the redirect), and answers that would have sent
  * the page to another origin (a Location, or a 3xx, not on the front's own) */
-const front = { files200: 0, leaks: [] };
+const front = { files200: 0, leaks: [], requests: 0 };
 const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0, fgenRefused: 0, batchesUp: 0 });
 
 // ---- 3b's front registry (plan r3 §2, r4 §1, r5 §1): every front await in flight, by label and epoch tag, so the page
@@ -438,6 +438,9 @@ let site = "";
  * or K-R2's untracked-read probe, else one registered front operation from its first statement, its body reads
  * included */
 function serve(req, server) {
+  // (r6: every request the front receives, counted first, whatever it is: K-M1 proves from this count that its page
+  // made none while its run ran)
+  front.requests++;
   const u = new URL(req.url);
   const p = u.pathname;
   if (p.startsWith("/__proof/")) return proof(req, u);
@@ -1246,17 +1249,19 @@ try {
   /** A run started in the page (never awaited in one evaluate), its report polled every 2 s, each poll bounded by what's
    * left; ends when the report says done, or the allowance is spent.  Says the last good snapshot and its age. */
   const runInPage = async (start, allowanceS, tell) => {
-    const end = performance.now() + allowanceS * 1000, left = () => Math.max(0, end - performance.now());
+    const t0 = performance.now(), end = t0 + allowanceS * 1000, left = () => Math.max(0, end - performance.now());
+    const req0 = front.requests;
     await ev(`(window.__runP = ${start}, true)`, Math.min(CALL_MS, left()));
-    let last = null, at = null;
+    let last = null, at = null, progress = null;
     while (left() > 0) {
-      const s = await ev("JSON.stringify(window.__report ?? null)", Math.min(5000, left())).catch(() => null);
-      if (s) { try { last = JSON.parse(s); at = performance.now(); } catch {} }
+      // (each poll reads the report and, r6, window.progress, in the same evaluate)
+      const s = await ev("JSON.stringify({ report: window.__report ?? null, progress: window.progress ?? null })", Math.min(5000, left())).catch(() => null);
+      if (s) { try { const o = JSON.parse(s); last = o.report; progress = o.progress; at = performance.now(); } catch {} }
       if (last) tell?.(last);
       if (last?.done) break;
       await sleep(Math.min(2000, left()));
     }
-    return { report: last, ageS: at === null ? null : Math.round((performance.now() - at) / 1000), done: !!last?.done };
+    return { report: last, progress, elapsedS: +((performance.now() - t0) / 1000).toFixed(1), requests: front.requests - req0, ageS: at === null ? null : Math.round((performance.now() - at) / 1000), done: !!last?.done };
   };
   /** The run's answer, once it's done */
   const answer = () => ev("window.__runP", FETCH_S * 1000);
@@ -1281,21 +1286,36 @@ try {
     const proofs0 = reg.proofs;
     await transition(`/ctl.html?p=${cp.page}`);
     const r = await runInPage(`window.runControls(${J(cp.page)})`, allowance);
-    if (!r.done) throw new Error(`the control page ${cp.page} didn't end within ${allowance} s: ${receipt(r)}`);
-    const lines = await answer();
+    let lines;
+    if (r.done) lines = await answer();
+    else {
+      // (r6, @sagebrush's (3): a page that doesn't end is a failed control, recorded with its receipt; the page is closed
+      // (about:blank, bounded by the answer's FETCH_S slot, which it then doesn't use), and the barrier below must still
+      // prove the front quiet, or the whole test stops as before. The pages after it, and the main run, then go on, the
+      // main run as DIAGNOSTIC ONLY)
+      lines = [[false, `didn't end within ${allowance} s (elapsed ${r.elapsedS} s): ${receipt(r)}`]];
+      await send("Page.navigate", { url: "about:blank" }, FETCH_S * 1000);
+      console.log(`  page ${cp.page} closed after it didn't end; ${receipt(r)}`);
+    }
     for (const [ok, what] of Array.isArray(lines) ? lines : [[false, `${cp.page}: no control lines: ${J(lines)}`]]) control1(ok, `(control) ${cp.page} ${what}`);
     const proofs = reg.proofs - proofs0;
     const b = await barrier(cp.page);
     // (the harness's side of the terminal controls: what only the front or the barrier saw)
     if (cp.page === "P5") control1(b.late.some((l) => /^ctl slow@/.test(l)), "(control) P5 K-J: the barrier saw the abandoned ctl slow complete, late: " + J(b.late));
     if (cp.page === "P6") control1(b.late.some((l) => /^armed late@/.test(l)) || r.report?.stopped?.late?.some?.((l) => /^armed late@/.test(l)), "(control) P6 K-L2: the armed op's late completion recorded: " + J({ barrier: b.late, page: r.report?.stopped?.late }));
-    if (cp.page === "P7") control1(r.report?.mode === "legacy" && proofs === 0, "(control) P7 K-M1: legacy, and no proof command reached the front: " + J({ mode: r.report?.mode, proofs }));
+    // (P7, r6: the empty selection made no request at all while its run ran (so no ctl("reset") and no proof
+    // command), from the front's own count; its elapsed time and window.progress (unset: no case started) recorded)
+    if (cp.page === "P7") control1(r.done && r.report?.mode === "legacy" && proofs === 0 && r.requests === 0 && r.progress === null, "(control) P7 K-M1: legacy, the empty selection made no request (no ctl reset, no proof command): " + J({ mode: r.report?.mode, proofs, requests: r.requests, progress: r.progress, elapsedS: r.elapsedS }));
     if (cp.page === "P8") { const no = requireDiagnostic(r.report); control1(no !== null && /quiet answered \{"error":"unknown"\}/.test(no), "(control) P8 K-M2: the runner refuses the run: " + no); }
     if (cp.page === "RES1") control1(b.before.closers === 1 && b.before.inflight === 0, "(control) RES1 K-RES1: a socket left open with nothing in flight: the barrier closed it and passed: " + J(b.before));
   }
 
   // (the main run: every case but the cloud-only ones, which are skipped by name; its report polled, so a run that
   // doesn't end within its bound still says its cases' times, the open steps and where it was)
+  // (r6: a control failed before the main run (its page's cleanup proved by the barrier): the main run still runs, for
+  // diagnosis only; G1 is unchanged (the failure fails the run), and this label marks the table)
+  const diagnosticOnly = fails.length > 0;
+  if (diagnosticOnly) console.log(`  DIAGNOSTIC ONLY: ${fails.length} control(s) failed before the main run; its table below can never count toward G1`);
   await transition("/");
   for (const name of CLOUD_ONLY) if (selected(name)) console.log(`skipped (cloud-only, the reference server has no quotas): ${name}`);
   let modeChecked = false;
@@ -1305,7 +1325,7 @@ try {
     const no = requireDiagnostic(rep);
     if (no) throw new Error(no);
   });
-  for (const c of main.report?.cases ?? []) console.log(`  case ${c.name}: ${c.outcome ?? "running"}, ${c.endMs !== undefined ? ((c.endMs - c.startMs) / 1000).toFixed(1) + " s" : "unended"}${c.over ? `, over its bound by ${c.over} s (report-only)` : ""}, checks from ${c.checks}${c.cleanup && !c.cleanup.ok ? `, cleanup FAILED at ${c.cleanup.step}` : ""}`);
+  for (const c of main.report?.cases ?? []) console.log(`  case${diagnosticOnly ? " (DIAGNOSTIC ONLY)" : ""} ${c.name}: ${c.outcome ?? "running"}, ${c.endMs !== undefined ? ((c.endMs - c.startMs) / 1000).toFixed(1) + " s" : "unended"}${c.over ? `, over its bound by ${c.over} s (report-only)` : ""}, checks from ${c.checks}${c.cleanup && !c.cleanup.ok ? `, cleanup FAILED at ${c.cleanup.step}` : ""}`);
   if (!main.done) throw new Error(`the run didn't end within ${PILOT_MAIN_S} s: ${receipt(main)}`);
   { const no = requireDiagnostic(main.report); if (no) throw new Error(no); }
   if (main.report.stopped) fails.push(`fail-stop: ${J(main.report.stopped).slice(0, 2000)}`);
