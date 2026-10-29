@@ -84,7 +84,7 @@ T.resetDebt = () => { if (T.debtKeep) Object.assign(N.SYNC_DEBT, T.debtKeep); re
 
 // ---- a DocSync of its own over a deferred link (no server): each request of the notebook `only` waits until the test
 // answers it (fakeAnswer); any other notebook's is answered `busy` at once.  Lets a case answer a pull, drop the
-// connection while a request waits, or kick during a flight, deterministically (astra's CORR-2C3-1, D3-4c)
+// connection while a request waits, or kick during a flight, deterministically
 T.fakeStart = async (account, only, retryMs = 60_000) => {
   const owner = await P.accountHash(account);
   T.fake = { q: [], sent: [], only, owner, ds: new DS.DocSync({ retryMs, askMs: 60_000 }) };
@@ -138,7 +138,7 @@ T.fakeDisconnect = async () => {
   return true;
 };
 /** The fake DocSync's next history transaction (markSent, recordClaim, applyPage...) held before it runs, until
- * fakeReleaseTx: then run, or failed as a storage refusal would fail it (astra's r2 CORR-2C3-1 seam). */
+ * fakeReleaseTx: then run, or failed as a storage refusal would fail it. */
 T.fakeGateTx = () => {
   const ds = T.fake.ds, orig = ds.tx.bind(ds);
   T.fake.gated = false;
@@ -180,7 +180,7 @@ T.type = (cid, text) => {
   return true;
 };
 
-// ---- one device, two pages (astra's DEVSW-1): a board page holding the account connection, carrying notebooks with
+// ---- one device, two pages: a board page holding the account connection, carrying notebooks with
 // the switch's followDocSync, and the notebook page turning the switch on with enableDocSync, its saves told to the
 // board's DocSync on the workspace's channel
 /** The workspace, its journal not yet active (the notebook page's switch activates it). */
@@ -235,7 +235,7 @@ T.editOnly = async (id, cells) => {
 };
 T.warnings = () => T.log.filter((x) => typeof x === "string" && x.startsWith("warn: "));
 
-// ---- the real owners (astra's DEVSW-1-R2, case 14): this page's SyncOwner and its SyncClient, on the namespace's
+// ---- the real owners (case 14): this page's SyncOwner and its SyncClient, on the namespace's
 // sender lock (shared by the pages of this browser context), against the reference server through the front (its
 // session for this device; /api/share/me answered by the front).  A board page carries notebooks with
 // followDocSync; the notebook page turns the switch on with enableDocSync; each page's DocSync is the one its owner's
@@ -259,7 +259,7 @@ T.ownerOpen = async (name, activate) => {
   return await T.w.journalActive();
 };
 T.ownerState = () => ({ holder: T.owner.isHolder(), state: T.owner.view().s.state, running: !!T.owner.client, connected: T.connected });
-/** (r17, item 3's case 14 under cloud) A tracing fetch for this page: each call is numbered "<page>.<n>" (unique: the
+/** (case 14 under cloud) A tracing fetch for this page: each call is numbered "<page>.<n>" (unique: the
  * page's label and this page's own count) and sends it as x-test-call (the harness's front reads it and never passes
  * it on), and its stages go to T.trace: "fetch-rejected <name>" or "fetched <status>"; the body's byte receipt (length
  * and sha256), read from a clone before anything else reads the body; and its json() staged as text() then
@@ -292,7 +292,7 @@ T.traceFetch = (page) => async (input, init = {}) => {
   };
   return r;
 };
-/** (r17) The relay control's page side: n traced GETs of `path`, each read as JSON; the calls' ids. */
+/** The relay control's page side: n traced GETs of `path`, each read as JSON; the calls' ids. */
 T.relayProbe = async (path, n) => {
   const f = T.traceFetch(T.pageLabel ?? "R"), calls = [];
   for (let i = 0; i < n; i++) {
@@ -302,11 +302,11 @@ T.relayProbe = async (path, n) => {
   }
   return calls;
 };
-/** (r17) The traced calls so far: stages and byte receipts. */
+/** The traced calls so far: stages and byte receipts. */
 T.traceDump = () => T.trace;
 /** Sync turned on in this browser, as a person does it: the Sync panel's button; then this page's owner the holder. */
 T.turnOn = async () => {
-  // (r3: each phase recorded as it completes, with its time, for the harness's diagnostics (T.turnInfo); what the
+  // (each phase recorded as it completes, with its time, for the harness's diagnostics (T.turnInfo); what the
   // panel says is kept in T.log as "say: ...", which T.warnings doesn't count)
   const t = Date.now(), done = (what) => T.turnPhases.push(`${what} (${Date.now() - t} ms)`);
   T.turnPhases = [];
