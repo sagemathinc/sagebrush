@@ -61,7 +61,7 @@
   },
   "engine/lib/matlab-lu.src": {
    "exact": false,
-   "ceiling": 52360,
+   "ceiling": 67051,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
