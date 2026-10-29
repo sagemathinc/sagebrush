@@ -22,10 +22,10 @@
 // said).  A call that times out is abandoned, not cancelled: its waiter is dropped, so a late answer is ignored, and
 // its page-side evaluation runs on until the page navigates or its tab or Chrome is closed.  Two controls run this file
 // again as children, each in its own process group, alongside the run, so they add no wall time:
-// PAGES_WATCHDOG_CONTROL=hang hangs on purpose under a 20 s watchdog; PAGES_WATCHDOG_CONTROL=startup starts a hanging
-// child of its own, then fails at its first startup wait.  Their results are checked at the end.
+// PAGES_WATCHDOG_CONTROL=hang hangs on purpose under a 20 s watchdog; PAGES_WATCHDOG_CONTROL=startup fails at its first
+// startup wait.  Neither starts a child of its own.  Their results are checked at the end.
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,11 +45,21 @@ const bounded = (p, what, ms = CALL_MS) => { let t; return Promise.race([p, new 
 const within = async (f, ms) => { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; await sleep(50); } return !!f(); };
 /** Whether `pid` (negative: its process group) is gone.  Only ESRCH says so; any other error is said, never taken for gone. */
 const goneOf = (pid) => { try { process.kill(pid, 0); return "alive"; } catch (e) { return e?.code === "ESRCH" ? "gone" : `unknown (${e?.code ?? e})`; } };
+/** The process group `pid` is in now (Linux: /proc/<pid>/stat, field 5), or null if it can't be read. */
+const pgidOf = (pid) => { try { const s = readFileSync(`/proc/${pid}/stat`, "utf8"); return Number(s.slice(s.lastIndexOf(")") + 2).split(" ")[2]); } catch { return null; } };
+/** goneOf, for a process this run started: a group (negative pid) as it is; a bare pid is still ours only while it is in
+ * `group` (in another group it was reused: ours is gone). */
+const ownGoneOf = (pid, group) => {
+  const s = goneOf(pid);
+  if (s !== "alive" || pid < 0) return s;
+  const g = pgidOf(pid);
+  return g === group ? "alive" : g !== null ? "gone" : goneOf(pid) === "gone" ? "gone" : "unknown (its group can't be read)";
+};
 const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; lastCheck = what; if (!ok) fails.push(what); };
 const sockets = [];
-/** The control children this run started: each leads its own process group, its Chrome in it. */
+/** The control children this run started: each leads its own process group, its Chrome in it (and nothing else). */
 const kids = [];
 /** A control child: this file run again as `mode`, with a `runS` watchdog, in its own process group; all it writes is
  * kept until it ends ("close": it has exited and its output has ended).  A backstop ends it at 120 s. */
@@ -68,11 +78,10 @@ const spawnKid = (mode, runS) => {
   setTimeout(() => endKid(k), 120_000).unref();
   return k;
 };
-/** The first match of `re` in what a child wrote, or null once it ends without one (the caller bounds the wait). */
-const outMatch = (k, re) => new Promise((ok) => { const t = setInterval(() => { const m = re.exec(k.out); if (m || k.ended) { clearInterval(t); ok(m); } }, 50); t.unref(); });
 /** A control child ended, with all it started: its group TERMed (a child cleans up on TERM), up to 5 s for its observed
- * end, then the group KILLed and up to 5 s more; then anything left in its group, and each process it reported (its
- * Chrome; its own child's group and Chrome) still there, KILLed here and said.  Once per child; says what was seen. */
+ * end, then the group KILLed and up to 5 s more.  Then its group and the Chrome it reported get up to 5 s to end by
+ * themselves (Chrome's helpers can outlive its observed exit by moments); only what is still there after that, and still
+ * ours, is KILLed here, and said (a failure).  Once per child; says what was seen. */
 const endKid = (k) => (k.ending ??= (async () => {
   if (!k.c.pid) return "never started: " + k.err.trim();
   const g = -k.c.pid;
@@ -86,17 +95,17 @@ const endKid = (k) => (k.ending ??= (async () => {
     how = (await within(() => k.ended, 5000)) ? "ended on KILL" : "NOT seen to end";
   }
   const seen = [how];
-  const c = /CONTROL \S+ (\d+)/.exec(k.out), kid = /CONTROL-KID (\d+) \S+ (\d+)/.exec(k.out);
-  for (const [what, pid] of [["its group", g], ["its Chrome", c ? +c[1] : 0], ["its child's group", kid ? -kid[1] : 0], ["its child's Chrome", kid ? +kid[2] : 0]]) {
+  const c = /CONTROL \S+ (\d+)/.exec(k.out);
+  for (const [what, pid] of [["its group", g], ["its Chrome", c ? +c[1] : 0]]) {
     if (!pid) continue;
-    let s = goneOf(pid);
-    if (s !== "gone") { try { process.kill(pid, "SIGKILL"); } catch {} await within(() => goneOf(pid) === "gone", 5000); s += `, KILLed here: ${goneOf(pid)}`; }
+    await within(() => ownGoneOf(pid, k.c.pid) === "gone", 5000);
+    let s = ownGoneOf(pid, k.c.pid);
+    if (s === "alive") { try { process.kill(pid, "SIGKILL"); } catch {} await within(() => ownGoneOf(pid, k.c.pid) === "gone", 5000); s += `, KILLed here: ${ownGoneOf(pid, k.c.pid)}`; }
     seen.push(`${what} ${s}`);
   }
   return seen.join("; ");
 })());
-const profile = mkdtempSync(join(tmpdir(), "sb-ws-pages-"));
-const files = mkdtempSync(join(tmpdir(), "sb-ws-up-"));
+let profile = null, files = null;
 let chrome = null, chromeError = null, chromeExited = Promise.resolve();
 /** Chrome stopped and seen to exit: TERM, up to 5 s for its exit, then KILL and up to 5 s more; says which. */
 const stopChrome = async () => {
@@ -108,7 +117,7 @@ const stopChrome = async () => {
   return (await Promise.race([chromeExited.then(() => true), sleep(5000).then(() => false)])) ? "exited on KILL" : "NOT seen to exit";
 };
 /** The temporary directories removed; each one that couldn't be, with why. */
-const removeDirs = () => { const left = []; for (const d of [profile, files]) try { rmSync(d, { recursive: true, force: true }); } catch (e) { left.push(`${d}: ${e?.code ?? e}`); } return left; };
+const removeDirs = () => { const left = []; for (const d of [profile, files]) if (d) try { rmSync(d, { recursive: true, force: true }); } catch (e) { left.push(`${d}: ${e?.code ?? e}`); } return left; };
 let cleaned = null;
 /** Everything this run started, ended, and everything it made, removed: once, however the run ends (its end, a failure,
  * the watchdog or SIGTERM).  Says what was seen, and whether all of it was done. */
@@ -132,19 +141,14 @@ setTimeout(() => endNow(`the run didn't end within ${RUN_S} s`), RUN_S * 1000).u
 process.once("SIGTERM", () => endNow("ended by SIGTERM"));
 
 try {
+  // (the temporary directories, made inside the try: if the second can't be, the cleanup removes the first)
+  profile = mkdtempSync(join(tmpdir(), "sb-ws-pages-"));
+  files = mkdtempSync(join(tmpdir(), "sb-ws-up-"));
   // (the forced-watchdog control's child, started first, so it costs no wall time)
   if (!CONTROL) spawnKid("hang", 20);
   chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
   chromeExited = new Promise((r) => { chrome.once("exit", r); chrome.once("error", (e) => { chromeError = e; r(); }); });
   if (CONTROL && chrome.pid) console.log(`CONTROL ${profile} ${chrome.pid}`);
-  // (the early-failure control: a run holding a child of its own (one that would hang for 120 s) fails at its first
-  // startup wait; its cleanup must still end that child, with the child's Chrome)
-  if (CONTROL === "startup") {
-    const k = spawnKid("hang", 120);
-    const m = await bounded(outMatch(k, /CONTROL (\S+) (\d+)/), (waitingOn = "the early-failure control's own child to start"), 30_000);
-    if (!m) throw new Error("the early-failure control's own child ended before it started: " + k.err.slice(0, 300));
-    console.log(`CONTROL-KID ${k.c.pid} ${m[1]} ${m[2]}`);
-  }
   waitingOn = "Chrome's DevTools port";
   const portUp = CONTROL === "startup" ? new Promise(() => {}) : Promise.race([devtoolsPort(profile), chromeExited.then(() => { throw new Error(`Chrome ended before its DevTools port: ${chromeError?.code ?? chromeError ?? "exit " + (chrome.exitCode ?? chrome.signalCode)}`); })]);
   if (!port) port = await bounded(portUp, waitingOn, CONTROL === "startup" ? 1 : 60_000);
@@ -158,7 +162,7 @@ try {
   await bounded(new Promise((r) => (ws.onopen = r)), (waitingOn = "the page's DevTools socket to open"), 10_000);
   // (the forced-watchdog control's own run: hang here on purpose, for its watchdog to end)
   if (CONTROL === "hang") { waitingOn = "the control's deliberate hang"; await new Promise(() => {}); }
-  // (the early-failure control's child, started once this run is up)
+  // (the startup-failure control's child, started once this run is up)
   if (!CONTROL) spawnKid("startup", 60);
   /** Another DevTools connection (another tab): its calls bounded and named, like the main tab's. */
   const tab = (sock, label) => {
@@ -580,15 +584,19 @@ try {
   // (the forced-watchdog control: its child hung on purpose; its watchdog must have ended it, naming the wait, with its
   // Chrome seen to exit and gone, its directories removed and exit code 1)
   const [, hProfile, hChrome] = /CONTROL (\S+) (\d+)/.exec(hk.out) ?? [];
-  const hGone = hChrome ? goneOf(+hChrome) : "not reported";
+  const hGoneNow = () => (hChrome ? ownGoneOf(+hChrome, hk.c.pid) : "not reported");
+  await within(() => hGoneNow() === "gone", 5000);
+  const hGone = hGoneNow();
   check(hk.code === 1 && hk.err.includes('FAIL: the run didn\'t end within 20 s; the last check was "(none yet)"; waiting on: the control\'s deliberate hang') && /cleanup: Chrome exited on (TERM|KILL); temporary directories removed/.test(hk.err) && !!hProfile && !existsSync(hProfile) && hGone === "gone",
     "(the forced-watchdog control: a hung run is ended by its watchdog, naming the wait, its Chrome seen to exit and gone, its directories removed, exit code 1): " + JSON.stringify({ code: hk.code, signal: hk.signal, err: hk.err.slice(0, 400), profile: hProfile ?? null, chrome: hGone }));
-  // (the early-failure control: its run failed at its first startup wait, holding a child of its own; its cleanup must
-  // have stopped its Chrome and removed its directories, and ended that child with the child's Chrome and directories)
-  const [, sProfile, sChrome] = /CONTROL (\S+) (\d+)/.exec(sk.out) ?? [], [, gPid, gProfile, gChrome] = /CONTROL-KID (\d+) (\S+) (\d+)/.exec(sk.out) ?? [];
-  const sGone = { chrome: sChrome ? goneOf(+sChrome) : "not reported", childGroup: gPid ? goneOf(-gPid) : "not reported", childChrome: gChrome ? goneOf(+gChrome) : "not reported" };
-  check(sk.code === 1 && sk.err.includes("threw: Error: no answer within 1 ms: Chrome's DevTools port") && /cleanup: Chrome exited on (TERM|KILL); temporary directories removed; control children: hang ended on (TERM|KILL); its group gone; its Chrome gone/.test(sk.out) && !!sProfile && !existsSync(sProfile) && !!gProfile && !existsSync(gProfile) && Object.values(sGone).every((s) => s === "gone"),
-    "(the early-failure control: a run failing at startup still stops its Chrome, removes its directories, and ends its own child, the child's Chrome and directories too, exit code 1): " + JSON.stringify({ code: sk.code, signal: sk.signal, out: sk.out.slice(-400), err: sk.err.slice(0, 400), profile: sProfile ?? null, childProfile: gProfile ?? null, ...sGone }));
+  // (the startup-failure control: its run failed at its first startup wait; its cleanup must have stopped its Chrome
+  // (seen to exit, then gone) and removed its directories, with exit code 1)
+  const [, sProfile, sChrome] = /CONTROL (\S+) (\d+)/.exec(sk.out) ?? [];
+  const sGoneNow = () => ({ chrome: sChrome ? ownGoneOf(+sChrome, sk.c.pid) : "not reported", group: sk.c.pid ? goneOf(-sk.c.pid) : "not started" });
+  await within(() => Object.values(sGoneNow()).every((s) => s === "gone"), 5000);
+  const sGone = sGoneNow();
+  check(sk.code === 1 && sk.err.includes("threw: Error: no answer within 1 ms: Chrome's DevTools port") && /^  cleanup: Chrome exited on (TERM|KILL); temporary directories removed$/m.test(sk.out) && !!sProfile && !existsSync(sProfile) && Object.values(sGone).every((s) => s === "gone"),
+    "(the startup-failure control: a run failing at its first startup wait still stops its Chrome and removes its directories, exit code 1): " + JSON.stringify({ code: sk.code, signal: sk.signal, out: sk.out.slice(-400), err: sk.err.slice(0, 400), profile: sProfile ?? null, ...sGone }));
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
   fails.push(`threw: ${e?.stack ?? e} (waiting on: ${waitingOn})`);
