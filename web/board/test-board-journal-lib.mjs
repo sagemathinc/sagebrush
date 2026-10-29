@@ -12,12 +12,18 @@ import { devtoolsPort } from "../test-port.mjs";
 const here = new URL(".", import.meta.url).pathname;
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = JSON.stringify;
+// (test-only faults, for the VM run's controls (r6, daybreak3's R5-D3-2): BJ_FAULT=build-throw or build-false makes
+// buildFailure's bundle fail the one way or the other; BJ_FAULT=browser makes browser() fail right after Chrome
+// started; BJ_BOUND_S lowers bounded()'s bound (never raises it).  The real steps run with none of them set)
+const FAULT = process.env.BJ_FAULT ?? "";
 const TYPES = { ".js": "text/javascript", ".mjs": "text/javascript", ".html": "text/html", ".json": "application/json", ".css": "text/css", ".wasm": "application/wasm", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".png": "image/png", ".webmanifest": "application/manifest+json", ".txt": "text/plain", ".zip": "application/zip", ".gz": "application/gzip" };
 const typeOf = (p) => TYPES[Object.keys(TYPES).find((x) => p.endsWith(x)) ?? ""] ?? "application/octet-stream";
 
 /** A bundle's failure as one line, or null when it built: Bun.build either throws (an AggregateError, its `errors`)
  * or returns success: false (its `logs`), by Bun's version; both are said, and the caller cleans up either way. */
 export async function buildFailure(build) {
+  if (FAULT === "build-throw") build = async () => { throw new AggregateError([new Error("BJ_FAULT build-throw")], "Bundle failed"); };
+  if (FAULT === "build-false") build = async () => ({ success: false, logs: ["BJ_FAULT build-false"] });
   let why = null;
   try {
     const b = await build();
@@ -31,57 +37,61 @@ export async function buildFailure(build) {
 /** The helper page's bundle (the workspace's module, this source's) and the server: `roots`, {prefix: dist dir}
  * ("" the site's root).  Resolves {origin, stop}. */
 export async function serve(roots) {
+  for (const d of Object.values(roots)) if (!d || !existsSync(join(d, "board", "index.html"))) throw new Error(`no built site at ${d} (web/dist: bun web/build.ts)`);
   const site = mkdtempSync(join(tmpdir(), "sb-bjp-site-")), src = mkdtempSync(join(here, ".test-board-journal-page-"));
   writeFileSync(join(src, "entry.js"), `export * as W from ${JSON.stringify(join(here, "../workspace/index.ts"))};\nexport * as A from ${JSON.stringify(join(here, "../workspace/api.ts"))};\n`);
   const built = await buildFailure(() => Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" }));
   rmSync(src, { recursive: true, force: true });
   if (built !== null) { rmSync(site, { recursive: true, force: true }); throw new Error("the helper page's bundle didn't build (" + built + ")"); }
-  writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>board journal helper</title><script type="module">import * as M from "./all.js"; window.M = M; window.ready = true;</script>`);
-  for (const d of Object.values(roots)) if (!existsSync(join(d, "board", "index.html"))) throw new Error(`no built site at ${d} (web/dist: bun web/build.ts)`);
-  const prefixes = Object.keys(roots).sort((a, b) => b.length - a.length);
-  // (what the server saw, for the cutover's checks: the 404s' paths, each prefixed page's rewrite count, each
-  // board.js path's sha256; and each root's own board.js sha256, said at the start)
-  const stats = { missing: new Set(), rewrites: new Map(), scripts: new Map(), roots: {} };
-  for (const [x, d] of Object.entries(roots)) {
-    const f = join(d, "board", "board.js");
-    stats.roots[x] = existsSync(f) ? createHash("sha256").update(readFileSync(f)).digest("hex") : null;
-    console.log(`server root ${J(x)}: board/board.js sha256 ${stats.roots[x]}`);
-  }
-  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
-    let p = decodeURIComponent(new URL(req.url).pathname);
-    if (p.includes("..")) return new Response("no", { status: 400 });
-    let file = null, pre = "";
-    if (p.startsWith("/__bj/")) file = join(site, p === "/__bj/" ? "index.html" : p.slice(6));
-    else {
-      pre = prefixes.find((x) => x === "" || p === x || p.startsWith(x + "/"));
-      if (pre === undefined) file = null;
+  // (r6, astra's BJ5-C2: a failure after the bundle (its page, a root's sha, the server's start) removes its dir too)
+  let server, stats;
+  try {
+    writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>board journal helper</title><script type="module">import * as M from "./all.js"; window.M = M; window.ready = true;</script>`);
+    const prefixes = Object.keys(roots).sort((a, b) => b.length - a.length);
+    // (what the server saw, for the cutover's checks: the 404s' paths, each prefixed page's rewrite count, each
+    // board.js path's sha256; and each root's own board.js sha256, said at the start)
+    stats = { missing: new Set(), rewrites: new Map(), scripts: new Map(), roots: {} };
+    for (const [x, d] of Object.entries(roots)) {
+      const f = join(d, "board", "board.js");
+      stats.roots[x] = existsSync(f) ? createHash("sha256").update(readFileSync(f)).digest("hex") : null;
+      console.log(`server root ${J(x)}: board/board.js sha256 ${stats.roots[x]}`);
+    }
+    server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
+      let p = decodeURIComponent(new URL(req.url).pathname);
+      if (p.includes("..")) return new Response("no", { status: 400 });
+      let file = null, pre = "";
+      if (p.startsWith("/__bj/")) file = join(site, p === "/__bj/" ? "index.html" : p.slice(6));
       else {
-        file = join(roots[pre], p.slice(pre.length) || "/");
-        if (existsSync(file) && statSync(file).isDirectory()) file = join(file, "index.html");
+        pre = prefixes.find((x) => x === "" || p === x || p.startsWith(x + "/"));
+        if (pre === undefined) file = null;
+        else {
+          file = join(roots[pre], p.slice(pre.length) || "/");
+          if (existsSync(file) && statSync(file).isDirectory()) file = join(file, "index.html");
+        }
       }
-    }
-    if (!file || !existsSync(file)) {
-      if (!stats.missing.has(p)) { stats.missing.add(p); console.log("server 404: " + p.slice(0, 200)); }
-      return new Response("not found", { status: 404 });
-    }
-    const headers = { "content-type": typeOf(file), "cache-control": "no-store", "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp", "Cross-Origin-Resource-Policy": "same-origin" };
-    // (the board's script, said once per path with the sha256 of the file served: which build's board.js each page ran)
-    if (p.endsWith("/board/board.js") && !stats.scripts.has(p)) {
-      const sha = createHash("sha256").update(readFileSync(file)).digest("hex");
-      stats.scripts.set(p, sha);
-      console.log(`server board.js: ${p} sha256 ${sha} (root ${J(pre)})`);
-    }
-    // (fix 4: a build under the cutover's /old/ or /new/: its pages' absolute src="/…" and href="/…" attributes (its
-    // board/index.html loads /board/board.js) moved under that prefix, "//" left alone; board.js's own imports are
-    // relative to its URL, so they follow.  Each such page's count said, once per path)
-    if ((pre === "/old" || pre === "/new") && headers["content-type"] === "text/html") {
-      let count = 0;
-      const html = readFileSync(file, "utf8").replace(/\b(src|href)="\/(?!\/)/g, (_, a) => { count++; return `${a}="${pre}/`; });
-      if (!stats.rewrites.has(p)) { stats.rewrites.set(p, count); console.log(`server rewrite: ${p}: ${count} attribute(s) under ${pre}/`); }
-      return new Response(html, { headers });
-    }
-    return new Response(Bun.file(file), { headers });
-  } });
+      if (!file || !existsSync(file)) {
+        if (!stats.missing.has(p)) { stats.missing.add(p); console.log("server 404: " + p.slice(0, 200)); }
+        return new Response("not found", { status: 404 });
+      }
+      const headers = { "content-type": typeOf(file), "cache-control": "no-store", "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp", "Cross-Origin-Resource-Policy": "same-origin" };
+      // (the board's script, said once per path with the sha256 of the file served: which build's board.js each page ran)
+      if (p.endsWith("/board/board.js") && !stats.scripts.has(p)) {
+        const sha = createHash("sha256").update(readFileSync(file)).digest("hex");
+        stats.scripts.set(p, sha);
+        console.log(`server board.js: ${p} sha256 ${sha} (root ${J(pre)})`);
+      }
+      // (fix 4: a build under the cutover's /old/ or /new/: its pages' absolute src="/…" and href="/…" attributes (its
+      // board/index.html loads /board/board.js) moved under that prefix, "//" left alone; board.js's own imports are
+      // relative to its URL, so they follow.  Each such page's count said, once per path)
+      if ((pre === "/old" || pre === "/new") && headers["content-type"] === "text/html") {
+        let count = 0;
+        const html = readFileSync(file, "utf8").replace(/\b(src|href)="\/(?!\/)/g, (_, a) => { count++; return `${a}="${pre}/`; });
+        if (!stats.rewrites.has(p)) { stats.rewrites.set(p, count); console.log(`server rewrite: ${p}: ${count} attribute(s) under ${pre}/`); }
+        return new Response(html, { headers });
+      }
+      return new Response(Bun.file(file), { headers });
+    } });
+  } catch (e) { rmSync(site, { recursive: true, force: true }); throw e; }
   return { origin: `http://127.0.0.1:${server.port}`, stats, stop: () => { server.stop(true); rmSync(site, { recursive: true, force: true }); } };
 }
 
@@ -110,6 +120,11 @@ export async function closeChrome(chrome, port, label = "chrome", ms = 10_000) {
 /** Where a run is (r5: a hang or a kill names its place): the section (`section(name)`, said as it starts), the last
  * check done, and the DevTools calls in flight. */
 const place = { section: "setup", checks: 0, last: "(none yet)", calls: new Map() };
+// (r6, daybreak3's R5-D3-1: the ONE termination state.  Once bounded()'s end has begun it owns the run: its FAIL line,
+// the cleanup and the exit (124, 128 + n).  The runner's ordinary path awaits `unlessEnding()` before its own FAIL
+// line, its summary, its cleanup and its exit, and that never settles once the end has begun; checks are no longer said)
+const term = { ending: false };
+export const unlessEnding = () => (term.ending ? new Promise(() => {}) : Promise.resolve());
 // (every Chrome this process started and hasn't closed: {pid, quick}, for the kill path)
 const live = new Set();
 let callIds = 0;
@@ -117,6 +132,7 @@ export function section(name) { place.section = name; console.log(`  section: ${
 /** A check done, said at once on its own indented line ("  ok …" / "  FAIL …"; before the summary, so mut-6c's list
  * after it is the summary's own). */
 export function checked(ok, what) {
+  if (term.ending) return;
   place.checks++; place.last = String(what).replace(/\s*\n\s*/g, " | ");
   console.log((ok ? "  ok " : "  FAIL ") + place.last);
 }
@@ -135,15 +151,18 @@ const CDP_MS = 60_000;
  * check's failure.  At 8 s, before the supervisor's SIGKILL, any Chrome group still there is killed and the process
  * exits so regardless. */
 export function bounded(label, ms, cleanup) {
-  let ending = false;
+  const cap = Number(process.env.BJ_BOUND_S);
+  if (cap > 0) ms = Math.min(ms, cap * 1000);
   const end = async (why, rc) => {
-    if (ending) return;
-    ending = true;
+    if (term.ending) return;
+    term.ending = true;
+    // (board's B5 n1: the status set first, so an event loop that drains before the exit below can't end it 0)
+    process.exitCode = rc;
     console.log(`FAIL: ${label}: ${why}, during ${where()}`);
     setTimeout(() => {
       for (const c of live) { console.log(`CHROME FALLBACK: ${label}'s Chrome (pid ${c.pid}) still there at the kill path's bound: SIGKILL to its group`); try { process.kill(-c.pid, "SIGKILL"); } catch {} }
       process.exit(rc);
-    }, 8000).unref?.();
+    }, 8000);
     try { await Promise.all([...live].map((c) => c.quick())); await cleanup(); } catch (e) { console.log(`${label}: its cleanup threw: ${String(e?.message ?? e).slice(0, 200)}`); }
     process.exit(rc);
   };
@@ -151,6 +170,14 @@ export function bounded(label, ms, cleanup) {
   t.unref?.();
   for (const [s, n] of [["SIGTERM", 15], ["SIGINT", 2], ["SIGHUP", 1]]) process.on(s, () => end(`killed (${s})`, 128 + n));
   return () => clearTimeout(t);
+}
+
+/** A Chrome started outside browser() (the store test's own) put under the kill path, closed by it as browser()'s
+ * are (`port()` its DevTools port, once known).  Returns its untrack, for after its normal close. */
+export function track(chrome, port, label) {
+  const me = { pid: chrome.pid, quick: async () => { await closeChrome(chrome, port(), label, 2000); live.delete(me); } };
+  live.add(me);
+  return () => live.delete(me);
 }
 
 /** Headless Chromium in a profile of its own, its own process group: {tab(), close()}. */
@@ -162,8 +189,20 @@ export async function browser() {
   // (the kill path's close: short (2 s per wait), its group killed after, said as CHROME FALLBACK if it comes to that)
   const me = { pid: chrome.pid, quick: async () => { await closeChrome(chrome, port, "the killed run's Chrome", 2000); live.delete(me); rmSync(profile, { recursive: true, force: true }); } };
   live.add(me);
-  if (!port) port = await devtoolsPort(profile);
-  for (let i = 0; i < 300; i++) { try { await (await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2000) })).json(); break; } catch { await sleep(100); } }
+  // (r6, R5-D3-2: a setup failure closes this Chrome before it is thrown on, so the caller (whose `br` is still
+  // null) leaves nothing behind)
+  try {
+    if (FAULT === "browser") throw new Error("BJ_FAULT browser: browser() fails right after Chrome started");
+    if (!port) port = await devtoolsPort(profile);
+    let up = false;
+    for (const t0 = Date.now(); !up && Date.now() - t0 < 30_000; ) { try { await (await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2000) })).json(); up = true; } catch { await sleep(100); } }
+    if (!up) throw new Error(`Chrome's DevTools (port ${port}) didn't answer within 30 s`);
+  } catch (e) {
+    await closeChrome(chrome, port, "the Chrome of a failed browser() setup", 2000);
+    live.delete(me);
+    rmSync(profile, { recursive: true, force: true });
+    throw e;
+  }
   const errors = [];
   /** A new tab: {ev, send, go(url), until(expr), state(), close()}; each call bounded (CDP_MS, or `ms`). */
   async function tab(name = "tab") {

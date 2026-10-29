@@ -6,7 +6,7 @@
 // itself is test-board-journal.mjs's.
 //   bun web/build.ts && CHROME=google-chrome bun web/board/test-board-journal-page.mjs
 import { join } from "node:path";
-import { serve, browser, sleep, rowExpr, historyRowsExpr, activateExpr, section, checked, bounded } from "./test-board-journal-lib.mjs";
+import { serve, browser, sleep, rowExpr, historyRowsExpr, activateExpr, section, checked, bounded, unlessEnding } from "./test-board-journal-lib.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const J = JSON.stringify;
@@ -25,14 +25,15 @@ const withTj = (d, text) => { const x = JSON.parse(JSON.stringify(d)); const ns 
 
 // (r5: its own bound, 1100 s, under the VM step's 1200 s and mut-6c's: a hang ends in one FAIL line naming its
 // section, its last check and the DevTools call in flight, Chrome closed; a SIGTERM the same)
-let stop = () => {};
+// (r6, R5-D3-2: the server and the browser set up inside the one try, so their failure is this run's one FAIL line
+// and whatever was set up is cleaned up)
+let stop = () => {}, br = null, code = 1;
 bounded("the board page test", 1_100_000, async () => stop());
-const served = await serve({ "": process.env.SB_DIST ?? join(here, "../dist") });
-stop = served.stop;
-const { origin } = served;
-const br = await browser();
-let code = 1;
 try {
+  const served = await serve({ "": process.env.SB_DIST ?? join(here, "../dist") });
+  stop = served.stop;
+  const { origin } = served;
+  br = await browser();
   const helper = await br.tab("helper");
   await helper.go(`${origin}/__bj/`);
   if (!(await helper.until("window.ready === true"))) throw new Error("the helper page didn't load: " + (await helper.state()));
@@ -481,6 +482,7 @@ try {
     }
   }
 
+  await unlessEnding();
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   // (each failure one line, so its summary's count is its list's: a page error's stack joined into one)
   for (const e of br.errors) fails.push("page error: " + String(e).replace(/\s*\n\s*/g, " | "));
@@ -492,9 +494,12 @@ try {
     code = 0;
   }
 } catch (e) {
+  await unlessEnding();
   console.error("FAIL: " + (e?.stack ?? e));
 } finally {
-  await br.close();
+  await unlessEnding();
+  await br?.close();
   stop();
 }
+await unlessEnding();
 process.exit(code);
