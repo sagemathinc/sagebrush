@@ -6,6 +6,7 @@
 import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync, mkdtempSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { bundledPackageDir } from "./build-package-dir.mjs";
 
 /** A site page with the early-alpha notice's script (web/alpha-banner.js), just before </head>. */
 // (the same tag that board/export.ts's assemble() takes out of every board it makes from a page)
@@ -350,12 +351,8 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   };
   for (const [what, r] of builds) {
     for (const input of Object.keys(r.metafile?.inputs ?? {})) {
-      const abs = input.startsWith("/") ? input : join(process.cwd(), input);
-      const i = abs.lastIndexOf("/node_modules/");
-      if (i < 0) continue;
-      const rest = abs.slice(i + "/node_modules/".length).split("/");
-      const name = rest[0].startsWith("@") ? rest[0] + "/" + rest[1] : rest[0];
-      add(abs.slice(root.length + 1, i + "/node_modules/".length) + name, what);
+      const dir = bundledPackageDir(input, process.cwd());
+      if (dir !== null) add(dir, what);
     }
   }
   add("node_modules/katex", "KaTeX's stylesheet and fonts (copied)");
