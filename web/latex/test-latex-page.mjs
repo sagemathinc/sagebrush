@@ -411,6 +411,12 @@ try {
   const a2 = await until(`!!document.querySelector(".tex-preview .mathopen") && document.querySelector(".tex-preview").textContent.includes("After words here.")`, 20000);
   check(a2 && await ev(`[...document.querySelectorAll(".tex-preview .katex")].every((k) => !k.textContent.includes("After")) && document.querySelector(".tex-preview h2")?.textContent.includes("Later") && (() => { const d = [...document.querySelectorAll(".tex-preview .dmath")].pop(); return !!d && !!d.querySelector(".katex") && d.textContent.includes("y=1"); })()`), "A2: $$ not closed: a note, the text after the blank line not math, the section and a later display after it rendered", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
 
+  // half-typed: "\begin{" in the middle of a document (William, Oct 29): a note there, and the rest still renders
+  const fh = await mk("/t/half-begin.tex", enc("\\documentclass{article}\n\\begin{document}\nBefore.\n\\begin{\n\nAfter words.\n\n\\section{Later}\nEnd text.\n\\end{document}\n"));
+  await open(fh);
+  const hb = await until(`!!document.querySelector(".tex-preview .errchip") && document.querySelector(".tex-preview").textContent.includes("End text.")`, 20000);
+  check(hb && await ev(`document.querySelector(".tex-preview .errchip").textContent.includes("not finished") && document.querySelector(".tex-preview h2")?.textContent.includes("Later")`), "a half-typed \\begin{: a note, and the document after it still renders", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
+
   // ---- a file in Trash, opened by its fid
   const ftr = await mk("/t/trashme.tex", enc(DOC));
   await ev(`${W}.remove("/t/trashme.tex").then(() => 1)`);

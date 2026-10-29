@@ -113,6 +113,20 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     ["math-closed-unchanged", "$a$ and $$b$$ and \\[c\\] \\(d\\) and $$\ne\n$$", (h) => !h.includes("mathopen") && count(h, 'class="KI"') === 2 && count(h, 'class="KD"') === 3],
   ];
   for (const [name, body, ok] of cases) { const h = html(body); check(name, ok(h), h.slice(0, 600)); }
+  // half-typed arguments (as TeX: a blank line ends a name, an optional [...] or a section title; the command is
+  // dropped with a note, and everything after the blank line renders)
+  const doc = (pre, body) => new Engine().update(pre + "\\begin{document}\n" + body + "\n\\end{document}\n").chunks.join("");
+  const half = [
+    ["half-begin", "\\begin{\n\nAfter text here.\n\n\\section{Later}\nMore.", (h) => h.includes("\\begin{ not finished") && h.includes("After text here.") && h.includes("Later") && h.includes("More.")],
+    ["half-begin-partial", "\\begin{itemiz\n\\item gone\n\nAfter text.", (h) => h.includes("\\begin{itemiz") && h.includes("not finished") && h.includes("After text.") && !h.includes("<li")],
+    ["half-section", "\\section{Half title\n\nBody text.", (h) => h.includes("\\section{Half title") && h.includes("not finished") && h.includes("Body text.") && !h.includes("<h2")],
+    ["half-label", "Text \\label{sec\n\nNext para.", (h) => h.includes("\\label{sec") && h.includes("Next para.")],
+    ["half-end", "\\begin{center}\nX\n\\end{cen\n\nAfter.", (h) => h.includes("\\end{cen") && h.includes("not finished") && h.includes("After.")],
+    ["closed-env-unchanged", "\\begin{itemize}\n\\item one\n\\end{itemize}\nAfter.", (h) => !h.includes("not finished") && h.includes("one") && h.includes("After.") && count(h, "<li") === 1],
+    ["open-env-still-shows", "\\begin{itemize}\n\\item one\n\nStill here.", (h) => !h.includes("not finished") && h.includes("one") && h.includes("Still here.")],
+  ];
+  for (const [name, body, ok] of half) { const h = doc("\\documentclass{article}\n", body); check(name, ok(h), h.slice(0, 600)); }
+  { const h = doc("\\documentclass[a4paper\n\n", "Body survives."); check("half-documentclass-opt", h.includes("Body survives."), h.slice(0, 600)); }
 }
 
 // ---- boxclass.mjs: the page test's box class; the packet's frozen BOXCLASS wins over an inherited LATEX_BOX_CLASS

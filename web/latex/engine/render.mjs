@@ -62,7 +62,7 @@ export function buildTree(events, items = []) {
       case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt }); break;
       case "doc": st.length = 1; root.kids.push({ t: "doc" }); break;
       case "cls": top().kids.push({ t: "cls", cls: e.cls, opt: e.opt }); break;
-      case "err": top().kids.push({ t: "err", code: e.code, name: e.name }); break;
+      case "err": top().kids.push({ t: "err", code: e.code, name: e.name, text: e.text }); break;
       default: break;
     }
   }
@@ -305,7 +305,10 @@ class Renderer {
         case "R": flow.html(this.refPh(n), ctx.st); break;
         case "S": if (!this.inPreamble) this.sageShown.add(n.n); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
         case "U": flow.html('<span class="sagechip s-notrun">\\' + esc(n.name) + " is not supported in this preview: not run</span>", ctx.st); break;
-        case "err": flow.html('<span class="unk errchip" title="LaTeX would stop here">\\newcommand: \\' + esc(n.name) + " is already defined</span>", ctx.st); break;
+        case "err":
+          // (a half-typed argument: what was read, then a note; LaTeX would say "Paragraph ended before \x was complete")
+          if (n.code === "runaway") { const tx = String(n.text || ""); flow.html('<span class="unk errchip" title="LaTeX: Paragraph ended before \\' + esc(n.name) + ' was complete">\\' + esc(n.name) + esc(tx.length > 40 ? tx.slice(0, 40) + "…" : tx) + " not finished</span>", ctx.st); break; }
+          flow.html('<span class="unk errchip" title="LaTeX would stop here">\\newcommand: \\' + esc(n.name) + " is already defined</span>", ctx.st); break;
         case "cls": this.cls = n.cls; this.book = /^(book|report|memoir|scrbook|scrreprt)$/.test(n.cls); this.secnumdepth = this.book ? 2 : 3; break;
         default: break;
       }
