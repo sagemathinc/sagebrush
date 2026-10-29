@@ -1,13 +1,14 @@
 // Deferred runtime checks: run on an authorized VM/CI, not the shared project.
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import worker, { route, MIME } from './worker.mjs';
 import { mockEnabled } from './mock.js';
-import { prepare } from '../../scripts/preview/prepare.mjs';
-import { R2 } from '../../scripts/preview/r2.mjs';
+import { prepare, MAX_OBJECTS, MAX_BYTES, MAX_FILE_BYTES } from '../../scripts/preview/prepare.mjs';
+import { R2, MAX_PREVIOUS_OBJECTS } from '../../scripts/preview/r2.mjs';
 
 function bucket(entries) {
   const calls = [];
@@ -69,7 +70,7 @@ test('prepare preserves hashed engine HTML, injects banner/config and disables S
     writeFileSync(join(dir, 'engine/id/runner/index.html'), page);
     writeFileSync(join(dir, '_headers'), "/index.html\n  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-fixture'; connect-src 'self' https:\n/engine/*\n  Content-Security-Policy: default-src 'none'; script-src 'unsafe-eval'; connect-src 'none'\n");
     const output = prepare(dir, 'latex.sagebrush.cloud', ['sagetex']);
-    const bytes = p => output.bytes(p, output.files.get(p)).toString();
+    const bytes = p => output.files.get(p).bytes.toString();
     assert.match(bytes('index.html'), /PREVIEW, not production/);
     assert.match(bytes('index.html'), /preview-config\.js/);
     assert.match(bytes('index.html'), /<script>example\(\)<\/script>/);
@@ -103,7 +104,7 @@ test('R2 client refuses prefix traversal before network and never follows redire
   const calls = [];
   globalThis.fetch = async (url, options) => { calls.push({ url, options }); return new Response('', { status: 200 }); };
   try {
-    for (const key of ['other/index.html', 'latex/../other/index.html', 'latex/./x', 'latex/\\x', 'latex//x']) await assert.rejects(client.delete(key), /unsafe|outside/);
+    for (const key of ['', 'other/index.html', 'latex/../other/index.html', 'latex/./x', 'latex/\\x', 'latex//x']) await assert.rejects(client.delete(key), /unsafe|outside|empty/);
     assert.equal(calls.length, 0);
     await client.put('latex/index.html', Buffer.from('hello'), MIME.html);
     assert.equal(calls.length, 1);
@@ -125,5 +126,118 @@ test('S3 listing validates every returned key before yielding a stale-delete set
     await assert.rejects(client.list(), /outside|unsafe/);
     globalThis.fetch = async () => new Response('secret response body fixture', { status: 403 });
     await assert.rejects(client.delete('latex/index.html'), error => /HTTP 403/.test(error.message) && !error.message.includes('secret'));
+  } finally { globalThis.fetch = original; }
+});
+
+function fixture() {
+  const dir = mkdtempSync(join(tmpdir(), 'preview-caps-'));
+  const page = '<html><head></head><body>page</body></html>';
+  writeFileSync(join(dir, 'index.html'), page);
+  writeFileSync(join(dir, '_headers'), "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'\n");
+  return { dir, page, build: () => prepare(dir, 'latex.sagebrush.cloud', []) };
+}
+test('final buffers survive changed/deleted sources and their exact sizes/hashes are recorded', () => {
+  const f = fixture();
+  try {
+    const output = f.build();
+    const before = Buffer.from(output.files.get('index.html').bytes);
+    writeFileSync(join(f.dir, 'index.html'), 'changed after preparation');
+    rmSync(join(f.dir, '_headers'));
+    assert.deepEqual(output.files.get('index.html').bytes, before);
+    assert.equal(output.totalBytes, [...output.files.values()].reduce((n, x) => n + x.bytes.length, 0));
+    assert.equal(output.files.size, 4); // HTML, its policy, injected config, replacement SW.
+    for (const file of output.files.values()) {
+      assert.equal(file.sha256, createHash('sha256').update(file.bytes).digest('hex'));
+    }
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+test('final object cap counts every policy and synthetic object at 3000 and 3001', () => {
+  const f = fixture();
+  try {
+    // 1499 HTML files + 1499 policies + config + SW = 3000.
+    for (let i = 1; i < 1499; i++) writeFileSync(join(f.dir, `p${i}.html`), f.page);
+    assert.equal(f.build().files.size, MAX_OBJECTS);
+    writeFileSync(join(f.dir, 'extra.txt'), '');
+    assert.throws(f.build, /final manifest exceeds 3000/);
+    assert.equal(MAX_PREVIOUS_OBJECTS, 2 * MAX_OBJECTS);
+    assert.equal(MAX_OBJECTS + MAX_OBJECTS, 6000); // Successful generation plus interrupted successor.
+    assert.equal(MAX_PREVIOUS_OBJECTS + MAX_OBJECTS, 9000); // Recovery publish's peak.
+    assert.ok(MAX_PREVIOUS_OBJECTS + MAX_OBJECTS < 50000);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+test('8 MiB cap applies after HTML injection, not just to its source', () => {
+  const f = fixture();
+  try {
+    const overhead = f.build().files.get('index.html').bytes.length - Buffer.byteLength(f.page);
+    const padding = MAX_FILE_BYTES - overhead - Buffer.byteLength(f.page);
+    writeFileSync(join(f.dir, 'index.html'), f.page + ' '.repeat(padding));
+    assert.equal(f.build().files.get('index.html').bytes.length, MAX_FILE_BYTES);
+    writeFileSync(join(f.dir, 'index.html'), f.page + ' '.repeat(padding + 1));
+    assert.throws(f.build, /final object exceeds 8 MiB/);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+test('200 MiB total includes transformed HTML, policy/config/SW and binary bodies', () => {
+  const f = fixture();
+  try {
+    const base = f.build().totalBytes;
+    const block = Buffer.alloc(MAX_FILE_BYTES);
+    let remaining = MAX_BYTES - base;
+    let i = 0;
+    while (remaining > 0) {
+      const size = Math.min(remaining, block.length);
+      writeFileSync(join(f.dir, `block${i++}.bin`), block.subarray(0, size));
+      remaining -= size;
+    }
+    assert.equal(f.build().totalBytes, MAX_BYTES);
+    writeFileSync(join(f.dir, 'extra.bin'), 'x');
+    assert.throws(f.build, /200 MiB/);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+test('_headers refuses 201 rules including non-CSP slash records, and 64 KiB plus one', () => {
+  const f = fixture();
+  try {
+    const policy = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'\n";
+    const rules = Array.from({ length: 199 }, (_, i) => `/unused${i}\n`).join('');
+    writeFileSync(join(f.dir, '_headers'), policy + rules);
+    assert.equal(f.build().files.size, 4);
+    writeFileSync(join(f.dir, '_headers'), policy + rules + '/one-too-many\n');
+    assert.throws(f.build, /200 rules/);
+    writeFileSync(join(f.dir, '_headers'), policy + '#' + ' '.repeat(64 * 1024 - policy.length - 1));
+    assert.equal(f.build().files.size, 4);
+    writeFileSync(join(f.dir, '_headers'), policy + '#' + ' '.repeat(64 * 1024 - policy.length));
+    assert.throws(f.build, /65536 bytes/);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+test('previous listing admits 6000 and refuses 6001 before any writes', async () => {
+  const original = globalThis.fetch;
+  const credentials = { accountId: '0'.repeat(32), accessKeyId: '1'.repeat(32), secretAccessKey: '2'.repeat(64) };
+  const pages = truncated => {
+    let page = 0;
+    return async (_url, options) => {
+      assert.equal(options.method, 'GET');
+      const keys = Array.from({ length: 1000 }, (_, i) => `<Contents><Key>latex%2Ffile${page * 1000 + i}</Key></Contents>`).join('');
+      page++;
+      return new Response(`<ListBucketResult><EncodingType>url</EncodingType>${keys}<IsTruncated>${page < 6 || truncated}</IsTruncated><NextContinuationToken>page${page}</NextContinuationToken></ListBucketResult>`);
+    };
+  };
+  try {
+    globalThis.fetch = pages(false);
+    assert.equal((await new R2(credentials, 'latex').list()).length, MAX_PREVIOUS_OBJECTS);
+    globalThis.fetch = pages(true);
+    await assert.rejects(new R2(credentials, 'latex').list(), /6000 objects or 6 pages/);
+  } finally { globalThis.fetch = original; }
+});
+test('remote-phase abort cancels an active request instead of granting another 30 seconds', async () => {
+  const original = globalThis.fetch;
+  const controller = new AbortController();
+  const client = new R2({ accountId: '0'.repeat(32), accessKeyId: '1'.repeat(32), secretAccessKey: '2'.repeat(64) }, 'latex', controller.signal);
+  globalThis.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    controller.abort(new Error('test remote deadline'));
+    assert.equal(options.signal.aborted, true);
+  });
+  try {
+    await assert.rejects(client.put('latex/index.html', Buffer.from('html'), MIME.html), /timed out/);
+    await assert.rejects(client.delete('latex/index.html'), /test remote deadline/);
   } finally { globalThis.fetch = original; }
 });

@@ -63,28 +63,37 @@ async function main() {
   // Credentials are read only AFTER every build process has exited.
   const env = Object.fromEntries(['PATH', 'HOME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR'].filter(k => process.env[k] !== undefined).map(k => [k, process.env[k]]));
   Object.assign(env, options, { NODE_ENV: 'development', SAGEBRUSH_NO_SITE: '1', SAGEBRUSH_PREVIEW_HOST: host });
-  const lock = join(common, `preview-${name}.lock`);
-  try { mkdirSync(lock); } catch { throw new Error('Preview publish lock exists; inspect the prior publisher before removing it'); }
+  const buildLock = join(git('rev-parse', '--absolute-git-dir'), 'preview-build.lock');
+  try { mkdirSync(buildLock); } catch { throw new Error('Preview worktree build lock exists; inspect the prior publisher before removing it'); }
   try {
-    const step = (command, args) => execFileSync(command, args, { cwd: root, env, stdio: 'inherit' });
-    // Never reuse dist: removed files, old mock flags and a private site overlay must not leak.
-    rmSync(join(root, 'web/dist'), { recursive: true, force: true });
-    step('pnpm', ['run', 'build']);
-    step('node', ['scripts/build-cli.mjs']);
-    step('bun', ['web/build.ts']);
-    const output = prepare(join(root, 'web/dist'), host, mocks);
-    // Materialize and validate ALL pages before the first network write. Only one file
-    // is held at a time; the second read below is in this same locked local build.
-    for (const [path, file] of output.files) output.bytes(path, file);
-    const client = new R2(credentials(), name);
-    const previous = await client.list();
-    const keep = new Set([...output.files.keys()].map(p => `${name}/${p}`));
-    // Upload policy sidecars and assets before entry pages; stale deletions happen last.
-    const entries = [...output.files].sort(([a], [b]) => Number(a.endsWith('.html')) - Number(b.endsWith('.html')) || a.localeCompare(b));
-    for (const [path, file] of entries) await client.put(`${name}/${path}`, output.bytes(path, file), output.type(path, file));
-    for (const key of previous) if (!keep.has(key)) await client.delete(key);
-    console.log(`https://${host}/${options.SAGEBRUSH_LATEX_PREVIEW ? '?latex=1' : ''}`);
-  } finally { rmSync(lock, { recursive: true, force: true }); }
+    const lock = join(common, `preview-${name}.lock`);
+    try { mkdirSync(lock); } catch { throw new Error('Preview publish lock exists; inspect the prior publisher before removing it'); }
+    try {
+      const step = (command, args) => execFileSync(command, args, { cwd: root, env, stdio: 'inherit' });
+      // Never reuse dist: removed files, old mock flags and a private site overlay must not leak.
+      rmSync(join(root, 'web/dist'), { recursive: true, force: true });
+      step('pnpm', ['run', 'build']);
+      step('node', ['scripts/build-cli.mjs']);
+      step('bun', ['web/build.ts']);
+      const output = prepare(join(root, 'web/dist'), host, mocks);
+      // A single remote deadline covers listing, every PUT/DELETE, and body consumption.
+      const remoteSignal = AbortSignal.timeout(20 * 60 * 1000);
+      try {
+        const client = new R2(credentials(), name, remoteSignal);
+        const previous = await client.list();
+        const keep = new Set([...output.files.keys()].map(p => `${name}/${p}`));
+        // Upload policy sidecars and assets before entry pages; stale deletions happen last.
+        const entries = [...output.files].sort(([a], [b]) => Number(a.endsWith('.html')) - Number(b.endsWith('.html')) || a.localeCompare(b));
+        for (const [path, file] of entries) await client.put(`${name}/${path}`, file.bytes, file.type);
+        for (const key of previous) if (!keep.has(key)) await client.delete(key);
+        remoteSignal.throwIfAborted();
+      } catch (error) {
+        if (remoteSignal.aborted) throw new Error('Preview remote phase exceeded 20 minutes; publication may be partial and needs owner inspection');
+        throw error;
+      }
+      console.log(`https://${host}/${options.SAGEBRUSH_LATEX_PREVIEW ? '?latex=1' : ''}`);
+    } finally { rmSync(lock, { recursive: true, force: true }); }
+  } finally { rmSync(buildLock, { recursive: true, force: true }); }
 }
 main().catch(error => {
   // Child stderr is build output only; S3 response bodies, fetch errors and JSON
