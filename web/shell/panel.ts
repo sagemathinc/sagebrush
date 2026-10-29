@@ -5,6 +5,7 @@
 import css from "./panel.css" with { type: "text" };
 import { Render, SLICE, type Run } from "./panel-render.ts";
 import type { HostOutcome, ShellHost } from "./host.ts";
+import { psTable, topText, type Proc } from "./presence.ts";
 
 /** E5.4's scrollback caps (all commands): code units, lines, runs. */
 export const SCROLLBACK = Object.freeze({ units: 4194304, lines: 6000, spans: 50000 });
@@ -33,6 +34,53 @@ export interface TerminalOptions {
   host: ShellHost;
   /** the package set the shell runs, shown in the header (r3 §1.6) */
   label: string;
+  /** `open PATH`: opens a workspace path in Sagebrush (the page's own way); resolves with a line to show, or rejects */
+  open?: (path: string) => Promise<string>;
+  /** `ps` and `top`: what is open in this browser (web/shell/presence.ts) */
+  ps?: () => Promise<{ procs: Proc[]; tabs: number }>;
+}
+
+/** The panel's own commands (William's P1 on the preview), run when typed alone (no pipe, list or redirection). */
+const BUILTINS = new Set(["open", "ps", "top"]);
+/** Words, with '…' and "…" quoting and backslash escapes; null if the line has shell syntax beyond that. */
+export function words(line: string): string[] | null {
+  const out: string[] = [];
+  let cur = "", any = false, q: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) {
+      if (c === q) q = null;
+      else if (c === "\\" && q === '"' && i + 1 < line.length) cur += line[++i];
+      else cur += c;
+    } else if (c === "'" || c === '"') {
+      q = c;
+      any = true;
+    } else if (c === "\\" && i + 1 < line.length) {
+      cur += line[++i];
+      any = true;
+    } else if (/\s/.test(c)) {
+      if (any) out.push(cur);
+      cur = "";
+      any = false;
+    } else if ("|;&<>()`$".includes(c)) return null;
+    else {
+      cur += c;
+      any = true;
+    }
+  }
+  if (q) return null;
+  if (any) out.push(cur);
+  return out;
+}
+/** An absolute workspace path: PATH against the directory `cwd`, with . and .. resolved. */
+export function absPath(cwd: string, p: string): string {
+  const parts: string[] = [];
+  for (const seg of ((p.startsWith("/") ? "" : cwd + "/") + p).split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") parts.pop();
+    else parts.push(seg);
+  }
+  return "/" + parts.join("/");
 }
 
 export class TerminalPanel {
@@ -285,6 +333,11 @@ export class TerminalPanel {
         }
         return;
       }
+      const argv = words(word);
+      if (argv && argv.length && BUILTINS.has(argv[0])) {
+        void this.builtin(s, argv);
+        return;
+      }
       void this.submit(s);
     } else if (e.key === "ArrowUp" && !e.shiftKey && !ta.value.slice(0, ta.selectionStart).includes("\n")) {
       if (this.hpos === 0) return;
@@ -334,10 +387,10 @@ export class TerminalPanel {
     c.appendChild(el("div", "sb-term-pl", prompt));
     const out = c.appendChild(el("pre", "sb-term-out"));
     const cmd = { el: c, out, units: prompt.length, lines: 1, spans: 1 };
-    const stick = this.atBottom();
     this.log.appendChild(c);
     this.cmds.push(cmd);
-    if (stick) this.log.scrollTop = this.log.scrollHeight;
+    // (a command just entered: the view goes to it, as a terminal's does; its output then sticks only if still there)
+    this.log.scrollTop = this.log.scrollHeight;
     return cmd;
   }
 
@@ -360,6 +413,85 @@ export class TerminalPanel {
     if (this.dropped) {
       if (!this.dropMark) this.dropMark = this.log.insertBefore(el("div", "sb-term-drop"), this.log.firstChild);
       this.dropMark.textContent = `[${this.dropped} earlier command${this.dropped === 1 ? "" : "s"} dropped]`;
+    }
+  }
+
+  /** this session, as `ps` lists it */
+  readonly since = Date.now();
+  get busy() {
+    return !!this.running;
+  }
+
+  /** open, ps and top: run in the page, shown like any command, Stop-able (top). */
+  private async builtin(line: string, argv: string[]) {
+    this.remember(line);
+    this.say("");
+    this.input.value = "";
+    this.grow();
+    const cmd = this.newCmd(`${this.cwd} $ ${line}`);
+    const ctl = new AbortController();
+    const t0 = performance.now();
+    const timer = window.setInterval(() => (this.timeEl.textContent = `${((performance.now() - t0) / 1000).toFixed(1)} s`), 100);
+    this.running = { ctl, t0, timer, cmd };
+    this.stopBtn.hidden = false;
+    this.root.classList.add("running");
+    const write = (text: string, err = false) => {
+      const stick = this.atBottom();
+      if (err) cmd.out.appendChild(el("span", "sb-err", text));
+      else cmd.out.appendChild(document.createTextNode(text));
+      if (stick) this.log.scrollTop = this.log.scrollHeight;
+    };
+    let code = 0;
+    try {
+      const [name, ...args] = argv;
+      if (name === "open") {
+        if (!args.length) {
+          write("usage: open FILE...  (opens it in Sagebrush: a notebook or board in a new tab, a data file in its preview)\n", true);
+          code = 2;
+        } else if (!this.opts.open) {
+          write("open: not available on this page\n", true);
+          code = 1;
+        } else {
+          for (const a of args) {
+            try {
+              write((await this.opts.open(absPath(this.cwd, a))) + "\n");
+            } catch (e) {
+              write(`open: ${a}: ${String((e as Error)?.message ?? e)}\n`, true);
+              code = 1;
+            }
+          }
+        }
+      } else if (!this.opts.ps) {
+        write(`${name}: not available on this page\n`, true);
+        code = 1;
+      } else if (name === "ps") {
+        const { procs } = await this.opts.ps();
+        write(psTable(procs));
+      } else {
+        // top: the same listing, refreshed every 2 s until Stop (or Ctrl-C)
+        cmd.out.classList.add("sb-term-top");
+        while (!ctl.signal.aborted) {
+          const { procs, tabs } = await this.opts.ps();
+          if (ctl.signal.aborted) break;
+          const stick = this.atBottom();
+          cmd.out.textContent = topText(procs, tabs);
+          if (stick) this.log.scrollTop = this.log.scrollHeight;
+          await new Promise<void>((r) => {
+            const t = setTimeout(r, 2000);
+            ctl.signal.addEventListener("abort", () => (clearTimeout(t), r()), { once: true });
+          });
+        }
+      }
+    } finally {
+      clearInterval(timer);
+      this.timeEl.textContent = "";
+      this.stopBtn.hidden = true;
+      this.root.classList.remove("running");
+      this.running = null;
+      if (code) cmd.el.appendChild(el("div", "sb-term-exit", `exit ${code}`));
+      this.status.textContent = "";
+      this.status.textContent = code ? `exit ${code}` : "done";
+      if (this.shown) this.input.focus();
     }
   }
 
