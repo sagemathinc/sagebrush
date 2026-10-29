@@ -259,6 +259,51 @@ T.ownerOpen = async (name, activate) => {
   return await T.w.journalActive();
 };
 T.ownerState = () => ({ holder: T.owner.isHolder(), state: T.owner.view().s.state, running: !!T.owner.client, connected: T.connected });
+/** (r17, item 3's case 14 under cloud) A tracing fetch for this page: each call is numbered "<page>.<n>" (unique: the
+ * page's label and this page's own count) and sends it as x-test-call (the harness's front reads it and never passes
+ * it on), and its stages go to T.trace: "fetch-rejected <name>" or "fetched <status>"; the body's byte receipt (length
+ * and sha256), read from a clone before anything else reads the body; and its json() staged as text() then
+ * JSON.parse ("body-read-failed <name>", "json-parse-failed", "parsed"), giving the same value and throwing the same
+ * error as the Response's own.  The product code is unchanged: the Sync panel takes it through its opts.fetch. */
+T.trace = [];
+let traceN = 0;
+T.traceFetch = (page) => async (input, init = {}) => {
+  const call = `${page}.${++traceN}`;
+  const headers = new Headers(init.headers ?? undefined);
+  headers.set("x-test-call", call);
+  let r;
+  try { r = await fetch(input, { ...init, headers }); }
+  catch (e) { T.trace.push({ call, kind: "fetch-rejected", detail: e?.name }); throw e; }
+  T.trace.push({ call, kind: "fetched", detail: r.status });
+  r.clone().arrayBuffer().then(async (b) => {
+    const sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
+    T.trace.push({ call, bytes: b.byteLength, sha });
+  }, () => {});
+  const read = (f) => async () => { try { return await f(); } catch (e) { T.trace.push({ call, kind: "body-read-failed", detail: e?.name }); throw e; } };
+  const text = read(r.text.bind(r)), bytes = read(r.arrayBuffer.bind(r));
+  r.text = text;
+  r.arrayBuffer = bytes;
+  r.json = async () => {
+    const t = await text();
+    let v;
+    try { v = JSON.parse(t); } catch (e) { T.trace.push({ call, kind: "json-parse-failed" }); throw e; }
+    T.trace.push({ call, kind: "parsed" });
+    return v;
+  };
+  return r;
+};
+/** (r17) The relay control's page side: n traced GETs of `path`, each read as JSON; the calls' ids. */
+T.relayProbe = async (path, n) => {
+  const f = T.traceFetch(T.pageLabel ?? "R"), calls = [];
+  for (let i = 0; i < n; i++) {
+    const before = traceN;
+    try { await (await f(path, { credentials: "same-origin" })).json(); } catch {}
+    calls.push(`${T.pageLabel ?? "R"}.${before + 1}`);
+  }
+  return calls;
+};
+/** (r17) The traced calls so far: stages and byte receipts. */
+T.traceDump = () => T.trace;
 /** Sync turned on in this browser, as a person does it: the Sync panel's button; then this page's owner the holder. */
 T.turnOn = async () => {
   // (r3: each phase recorded as it completes, with its time, for the harness's diagnostics (T.turnInfo); what the
@@ -266,7 +311,7 @@ T.turnOn = async () => {
   const t = Date.now(), done = (what) => T.turnPhases.push(`${what} (${Date.now() - t} ms)`);
   T.turnPhases = [];
   const el = (T.turnEl = document.body.appendChild(document.createElement("div")));
-  T.section = W.syncSection(T.w, el, { say: (m) => T.log.push("say: panel " + String(m).slice(0, 200)), fail: (e) => T.log.push("warn: panel " + e), usage: () => T.w.usage(), confirm: () => true, prompt: () => "delete" });
+  T.section = W.syncSection(T.w, el, { say: (m) => T.log.push("say: panel " + String(m).slice(0, 200)), fail: (e) => T.log.push("warn: panel " + e), usage: () => T.w.usage(), confirm: () => true, prompt: () => "delete" }, { fetch: T.traceFetch(T.pageLabel ?? "D1") });
   done("panel made");
   const button = () => [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent));
   for (let i = 0; i < 200 && !button(); i++) await pause(50);
