@@ -70,6 +70,7 @@
   .sbnb.fig figure.plot, .sbnb.fbfig figure.plot { margin: 0; }
   .proofbox { height: 420px; margin-bottom: 8px; }
   .proofbox.grading { height: 360px; }
+  .proofbox.done { height: 320px; }
   .annhead { font-size: 13px; font-weight: 600; margin: 4px 0 2px; }
   ol.anncomments { margin: 0 0 8px; padding-left: 22px; font-size: 14px; }
   ol.anncomments q { color: var(--muted); font-style: italic; }
@@ -516,7 +517,7 @@ function renderItem(item, n, student) {
     // sagebrush-latex's editor with its live preview; the draft is kept in this browser as it's typed,
     // and Submit stores the source (graded by the instructor, from the same source)
     const prev = course.attempts(student, item.id).at(-1);
-    ans.innerHTML = `<div class="proofbox"></div>${prev ? "" : `<div class="row"><button class="check" disabled>Submit proof</button><span class="attempts saved"></span></div>`}`;
+    ans.innerHTML = `<div class="proofbox${prev ? " done" : ""}"></div>${prev ? "" : `<div class="row"><button class="check" disabled>Submit proof</button><span class="attempts saved"></span></div>`}`;
     const btn = ans.querySelector("button"), saved = ans.querySelector(".saved");
     const ed = proofEditor(ans.querySelector(".proofbox"), {
       text: prev?.answer ?? course.draft(student, item.id) ?? item.starter, readOnly: !!prev, layout: prev ? "preview" : "split",
