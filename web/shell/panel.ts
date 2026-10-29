@@ -11,8 +11,8 @@ import { psTable, topText, type Proc } from "./presence.ts";
 export const SCROLLBACK = Object.freeze({ units: 4194304, lines: 6000, spans: 50000 });
 const HISTORY_MAX = 500;
 const MIN_H = 120;
-// (the page's fixed bottom overlays: web/alpha-banner.js, and a hosted preview's notice gutter, web/preview/notice.js)
-const OVERLAYS = ["sb-alpha-banner", "sb-preview-notice"];
+// (the page's fixed bottom overlays, found by layout, not by name: the site's early-alpha notice, a hosted preview's
+// notice gutter and its pill; any direct child of body fixed along the window's lower edge, wide or at the bottom)
 // (the command's last line: its exit status, then its final directory after a record separator, so `cd` carries to
 // the next command; a script that exits early keeps the directory it started in)
 const TRAILER = "\n__sb_s=$?; printf '\\036'; pwd; exit $__sb_s";
@@ -173,10 +173,12 @@ export class TerminalPanel {
    * none covers the prompt: the dock's bottom is the highest top edge among them. */
   private place() {
     let lift = 0;
-    for (const id of OVERLAYS) {
-      const e = document.getElementById(id);
-      if (!e || e.hidden || getComputedStyle(e).display === "none") continue;
+    for (const e of Array.from(document.body.children) as HTMLElement[]) {
+      if (e === this.root || e.hidden) continue;
+      const cs = getComputedStyle(e);
+      if (cs.position !== "fixed" || cs.display === "none" || cs.visibility === "hidden") continue;
       const r = e.getBoundingClientRect();
+      if (!(r.width >= innerWidth * 0.5 || r.bottom >= innerHeight - 1)) continue;
       // (fixed in the window's lower half; a stacked one, like the alpha notice above a preview's gutter, counts too)
       if (r.height > 0 && r.top > innerHeight / 2 && r.top < innerHeight) lift = Math.max(lift, innerHeight - r.top);
     }
