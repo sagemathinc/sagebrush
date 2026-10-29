@@ -1,5 +1,5 @@
 //! The dense products ask for Stop about every 2^16 units of work whatever
-//! the shape, in each kernel phase on its own (astra2's DENSE-1/DENSE-2):
+//! the shape, in each kernel phase on its own:
 //! - `zmat-dot`: ZMat::mul's i64/i128 dot loop (before: no check at all);
 //! - `zmat-big-dot`: its BigInt loop, weighed by word products (before:
 //!   one check per output row);
@@ -127,7 +127,7 @@ fn dense_products_poll_in_every_kernel_phase() {
         ("zmat i64 square", 64, 64, 64),
         ("zmat i64 tall", 1 << 10, 16, 16),
         ("zmat i64 wide", 16, 16, 1 << 10),
-        // (astra2 DENSE-R6-REMAINDER: row tails of in-row runs, near the step)
+        // (row tails of in-row runs, near the step)
         ("zmat i64 tails 4x65534x3", 4, 65534, 3),
         ("zmat i64 tails 4x65535x3", 4, 65535, 3),
         ("zmat i64 tails 3x32767x5", 3, 32767, 5),
@@ -153,7 +153,7 @@ fn dense_products_poll_in_every_kernel_phase() {
             ("nmod 1xKxM", 1, 1 << 10, 1 << 8),
             ("nmod square", 64, 64, 64),
             ("nmod wide", 16, 16, 1 << 10),
-            // (astra2 DENSE-R6-REMAINDER: row tails of in-row runs, near the step)
+            // (row tails of in-row runs, near the step)
             ("nmod tails 4x65534x3", 4, 65534, 3),
             ("nmod tails 4x65535x3", 4, 65535, 3),
             ("nmod tails 3x32767x5", 3, 32767, 5),
@@ -173,7 +173,7 @@ fn dense_products_poll_in_every_kernel_phase() {
             ("nmod transpose Kx1 rows", 1, 1 << 18, 1),
             ("nmod transpose 2xC wide rows", 1, 2, 1 << 17),
             ("nmod transpose Kx2 narrow", 1, 1 << 17, 2),
-            // (astra2 DENSE-R6-TRANSPOSE-TAIL: a countdown whose last group is
+            // (a transpose countdown whose last group is
             // unfinished: B = 17 x 4095, groups of 2 rows, 69615 copies)
             ("nmod transpose 17x4095 tail", 1, 17, 4095),
         ] {
@@ -182,7 +182,7 @@ fn dense_products_poll_in_every_kernel_phase() {
             case(&mut bad, &format!("{} p={}", label, p), "nmod-transpose", (k * c) as u64 >> 17, &want, || a.mul(&b).d);
         }
     }
-    // ---- empty dimensions (astra2 DENSE-R2-ZERO): R x 0 x C, R x K x 0,
+    // ---- empty dimensions: R x 0 x C, R x K x 0,
     // 0 x K x C, and a large R x 0 x C: the exact shape, all zeros, and a
     // Stop requested beforehand still seen
     for (r, k, c) in [(5usize, 0usize, 7usize), (5, 3, 0), (0, 3, 7), (1 << 12, 0, 1 << 6)] {

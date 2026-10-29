@@ -204,8 +204,8 @@ def classify(rec):
     na = set((ph or {}).get("not_applicable", {}))
     for r in targeted:
         if r["phase"] in na:
-            # (a row for a phase that cannot be required here, e.g. from r3's
-            # fixed phase list: reported, never judged)
+            # (a row for a phase that cannot be required here, e.g. from the
+            # earlier harness's fixed phase list: reported, never judged)
             out.append(("N/A", "targeted (not applicable, reported only) " + json.dumps(r)))
         else:
             out.append(("PASS" if targeted_ok(r) else "FAIL", "targeted " + json.dumps(r)))
@@ -418,11 +418,12 @@ def declared_phases(shape, n):
 
 
 def from_r3_logs(targeted_log, sigint_log, set_name, quick):
-    """(records, errors) from r3's two text logs (bab9c8c5's harness), for
-    `set_name` (required; written into every record).  Fails closed: every
-    non-blank line must parse, as a row, a known r3 duplicate FAIL line, a
-    SIGINT row or an r3 SIGINT failure (kept as that record's sigint error);
-    anything else is an error.  r3 printed no end status per shape, so a
+    """(records, errors) from the earlier harness's two text logs (bab9c8c5's
+    harness), for `set_name` (required; written into every record).  Fails
+    closed: every non-blank line must parse, as a row, a known duplicate FAIL
+    line, a SIGINT row or a SIGINT failure from those logs (kept as that
+    record's sigint error); anything else is an error.  That harness printed
+    no end status per shape, so a
     record has one when its transport row and every required phase row are
     there and its SIGINT line is."""
     recs, errors = {}, []
@@ -450,7 +451,7 @@ def from_r3_logs(targeted_log, sigint_log, set_name, quick):
                 rec["targeted"].append({k: v for k, v in d.items() if k != "waiver"})
             continue
         if re.match(r"^(\S+)\s+FAIL \{.*\}\s*$", line):
-            continue  # (r3 repeated each bad row as "<shape> FAIL {...}": the row above has it)
+            continue  # (the earlier harness repeated each bad row as "<shape> FAIL {...}": the row above has it)
         errors.append("targeted log line %d: unparsed: %s" % (no, line[:200]))
     for no, line in enumerate(open(sigint_log), 1):
         line = line.rstrip("\n")
@@ -467,13 +468,13 @@ def from_r3_logs(targeted_log, sigint_log, set_name, quick):
         m = re.match(r"^(?:.*?: )?T=([\d.]+) s(?:: too short.*?)?[,;] KeyboardInterrupt (\d+) ms(?: after SIGINT)?, rc=(\S+?),? ?(.*)$", what)
         if m:
             parts = [p.strip() for p in m[4].split("|")]
-            # (r3 sent the signal in every row, also when T < 0.5 s, and then
+            # (the earlier harness sent the signal in every row, also when T < 0.5 s, and then
             # printed no output lines: judged as sent, so they FAIL as unproven)
             rec["sigint"] = dict(T=float(m[1]), sent=True, dt_ms=float(m[2]), rc=None if m[3] == "None" else int(m[3]), first=parts[0] if parts else "", last=parts[-1] if parts else "", lines=m[4])
         elif what.startswith(("no ready line", "calibration rc=")):
             rec["sigint"] = dict(error=what[:300])
         else:
-            rec["sigint"] = dict(error="unparsed r3 SIGINT line: " + what[:300])
+            rec["sigint"] = dict(error="unparsed legacy SIGINT line: " + what[:300])
             errors.append("sigint log line %d: unparsed: %s" % (no, line[:200]))
     for rec in recs.values():
         if rec["shape"] in DECLARED:
