@@ -692,7 +692,7 @@ test("terminals, batch: an old batch's terminals after a newer single run, or af
   assert.equal(n.ap.record("c2"), undefined);
 });
 
-// --- P1b-int: the module's side of the integration (the remote-compute plan's P1b-int, r8b) ---
+// --- the module's side of the integration with the scheduler and the send path ---
 
 // A synthetic graph (no analysis): parents as given, each cell's code `x_<id> = 1` unless set, its
 // options as given; the hash counted.
@@ -727,11 +727,11 @@ function raw(parents: Record<string, string[]>, src: (id: string) => string = (i
   const approve = (ids: string[]) => ap.approveCells(ids, { expected: page.capture(ap, ids), env });
   return { ap, ctx, sources, adapter, calls, env, approve, page };
 }
-// The canonical eid input's length (as remote-approval.ts eidValue), and the I17 options: a 64-hex seed, mangle = the id.
+// The canonical eid input's length (as remote-approval.ts eidValue), and the large-notebook fixture's options: a 64-hex seed, mangle = the id.
 const eidInputOf = (id: string, source: string, binding = "b1", o: ExecOptions = {}) =>
   jcsBytes(["eid", 1, binding, id, "python", source, { seed: o.seed ?? null, forget: o.forget?.length ? o.forget : null, mangle: o.mangle ?? null, scoped: o.scoped && Object.keys(o.scoped).length ? o.scoped : null }]);
 const SEED = "5eed".repeat(16);
-const i17 = (id: string): ExecOptions => ({ seed: SEED, mangle: id });
+const bigOptions = (id: string): ExecOptions => ({ seed: SEED, mangle: id });
 // 4-character ids, as the plan's fixtures (c000 ... c999; past 1,000, hex: k000 ... k3ff)
 const id4 = (i: number) => `k${i.toString(16).padStart(3, "0")}`;
 const chr = (...cs: number[]) => String.fromCharCode(...cs);
@@ -742,10 +742,10 @@ test("jcsBytes: the exact UTF-8 length of the canonical text, without building i
     ["eid", 1, "b", "id", "python", "x = 1" + chr(10), { seed: null, forget: ["a", "b"], mangle: "m", scoped: { "yʹ2": "y" } }], { b: [1, { a: "z" }], a: {} }, [],
   ];
   for (const v of vs) assert.equal(jcsBytes(v), Buffer.byteLength(jcs(v), "utf8"), JSON.stringify(v));
-  assert.equal(eidInputOf("c000", "#" + "a".repeat(61_439), "b1", i17("c000")), 61_593, "the I17 fixture: 153 bytes of framing");
+  assert.equal(eidInputOf("c000", "#" + "a".repeat(61_439), "b1", bigOptions("c000")), 61_593, "the large-notebook fixture: 153 bytes of framing");
 });
 
-test("I21: eidHashes at its limit: 5,000 cells are admitted, 5,001 refused with nothing kept, and a repeat refuses alike", async () => {
+test("eidHashes at its limit: 5,000 cells are admitted, 5,001 refused with nothing kept, and a repeat refuses alike", async () => {
   for (const [n, ok] of [[5000, true], [5001, false]] as const) {
     const parents = Object.fromEntries(Array.from({ length: n }, (_, i) => [`c${i}`, [] as string[]]));
     const r = raw(parents);
@@ -775,14 +775,14 @@ test("I21: eidHashes at its limit: 5,000 cells are admitted, 5,001 refused with 
   }
 });
 
-test("I21: scanBytes and buildBytes at their limit: 1,024 cells of 65,383 units is exactly 67,108,864 canonical bytes, admitted; one more is refused with no memo entry", async () => {
+test("scanBytes and buildBytes at their limit: 1,024 cells of 65,383 units is exactly 67,108,864 canonical bytes, admitted; one more is refused with no memo entry", async () => {
   for (const extra of [0, 1]) {
     const ids = Array.from({ length: 1024 }, (_, i) => id4(i));
     const big = "a".repeat(65_383);
     const src = (id: string) => (extra && id === ids[1023] ? big + "a" : big);
-    const r = raw(Object.fromEntries(ids.map((id) => [id, [] as string[]])), src, sha, i17);
-    assert.equal(eidInputOf(ids[0], big, "b1", i17(ids[0])), 65_536);
-    assert.equal(ids.reduce((t, id) => t + eidInputOf(id, src(id), "b1", i17(id)), 0), BUDGET.buildBytes + extra);
+    const r = raw(Object.fromEntries(ids.map((id) => [id, [] as string[]])), src, sha, bigOptions);
+    assert.equal(eidInputOf(ids[0], big, "b1", bigOptions(ids[0])), 65_536);
+    assert.equal(ids.reduce((t, id) => t + eidInputOf(id, src(id), "b1", bigOptions(id)), 0), BUDGET.buildBytes + extra);
     r.ap.beginAction();
     const p = r.ap.precount(ids);
     if (!extra) {
@@ -803,12 +803,12 @@ test("I21: scanBytes and buildBytes at their limit: 1,024 cells of 65,383 units 
   }
 });
 
-test("I21: sendUnits at its limit: 1,024 cells of 65,458 units is exactly 67,108,864, admitted; one more is refused before any build or hash", async () => {
+test("sendUnits at its limit: 1,024 cells of 65,458 units is exactly 67,108,864, admitted; one more is refused before any build or hash", async () => {
   for (const extra of [0, 1]) {
     const ids = Array.from({ length: 1024 }, (_, i) => id4(i));
     const big = "a".repeat(65_458);
     const src = (id: string) => (extra && id === ids[1023] ? big + "a" : big);
-    const r = raw(Object.fromEntries(ids.map((id) => [id, [] as string[]])), src, sha, i17);
+    const r = raw(Object.fromEntries(ids.map((id) => [id, [] as string[]])), src, sha, bigOptions);
     assert.equal(ids.reduce((t, id) => t + sendUnits(r.adapter.spec(id)!), 0), BUDGET.sendUnits + extra, "(65,458 + 64 + 6 + 4 + 4 each)");
     r.ap.beginAction({ scanBytes: Infinity, buildBytes: Infinity });
     const p = r.ap.precount(ids);
@@ -827,7 +827,7 @@ test("sameRun: the job's run against the checked spec, by value: lengths first, 
   const spec = r.adapter.spec("a")!;
   const run = { code: "x = 1", mode: "python", cell: "a", seed: SEED, mangle: "a", forget: ["x"], scoped: { "yʹ2": "y" } };
   const units = sendUnits(spec);
-  assert.equal(units, 5 + 64 + 6 + 1 + 1 + 1 + 3);
+  assert.equal(units, 5 + 64 + 6 + 1 + 1 + 1 + (3 + 1), "(the code, the seed, the mode, the id, the mangle, the forget name, the scoped key and value)");
   r.ap.beginAction();
   const c0 = r.ap.stats.compares;
   assert.ok(r.ap.sameRun(run, spec));
@@ -849,7 +849,7 @@ test("sameRun: the job's run against the checked spec, by value: lengths first, 
   assert.equal(r.ap.stats.compares, c1);
 });
 
-test("I19: the same spec object before and after its first hash; scan, build and hash are three counted phases", async () => {
+test("the same spec object before and after its first hash; scan, build and hash are three counted phases", async () => {
   const r = raw({ a: [] });
   const spec = r.adapter.spec("a")!;
   r.ap.beginAction();
@@ -873,7 +873,7 @@ test("I19: the same spec object before and after its first hash; scan, build and
   assert.equal(r.ap.budget.counts.memoHits, 1, "the next action: one unique entry served, however often");
 });
 
-test("I20: the precount's planned visits equal the visits counted for a chain; a diamond-heavy DAG is refused before any hash, within its budget", async () => {
+test("the precount's planned visits equal the visits counted for a chain; a diamond-heavy DAG is refused before any hash, within its budget", async () => {
   for (const withConsent of [false, true]) {
     const parents: Record<string, string[]> = {};
     for (let i = 0; i < 30; i++) parents[`c${i}`] = i ? [`c${i - 1}`] : [];
@@ -891,7 +891,7 @@ test("I20: the precount's planned visits equal the visits counted for a chain; a
       assert.ok(v.send && r.ap.admit(v), id);
       if (v.send) r.ap.succeeded(v.plan[0]);
     }
-    assert.equal(r.ap.budget.used.visits - before, p.planned!.visits, withConsent ? "with a consent's S3 and S4" : "without");
+    assert.equal(r.ap.budget.used.visits - before, p.planned!.visits, withConsent ? "with a consent's claim and commit" : "without");
   }
   // a DAG of 40 layers of 2 cells, each reading both cells above: the bound doubles each layer, and saturates
   const parents: Record<string, string[]> = { l0a: [], l0b: [] };
@@ -943,35 +943,35 @@ function staged(codes: [string, string][], { ns = "ns", hash = sha as Hash } = {
   };
 }
 type Staged = ReturnType<typeof staged>;
-// S0 (charges the click), registration, S1, the seeds, S2: a consent ready for approveCells
+// the action's start (charges the click), registration, the registered stage, the seeds, the seeded stage: a consent ready for approveCells
 function through(t: Staged, cap: ReturnType<Staged["capture"]>, ids: string[]) {
-  assert.ok(t.ap.consentStage(cap, "S0", t.env), "S0");
+  assert.ok(t.ap.consentStage(cap, "beforeRegistration", t.env), "beforeRegistration");
   t.register(ids);
-  assert.ok(t.ap.consentStage(cap, "S1", t.env), "S1");
+  assert.ok(t.ap.consentStage(cap, "registered", t.env), "registered");
   t.seed(ids);
-  assert.ok(t.ap.consentStage(cap, "S2", t.env), "S2");
+  assert.ok(t.ap.consentStage(cap, "seeded", t.env), "seeded");
 }
 
-test("I2d / I2j: an unchanged consent passes S0 to S4 (a brand-new cell: nothing registered before S1)", async () => {
+test("an unchanged consent passes every stage through the commit (a brand-new cell: nothing is registered before the registered stage)", async () => {
   const t = staged([["a", "x = 1"]]);
   const cap = t.capture(["a"]);
   t.ap.beginAction();
-  assert.ok(t.ap.consentStage(cap, "S0", t.env), "S0: the text version, before registration");
-  assert.equal(t.ap.budget.used.clickUnits, "x = 1".length, "the click's units charged at S0");
+  assert.ok(t.ap.consentStage(cap, "beforeRegistration", t.env), "before registration: the text version");
+  assert.equal(t.ap.budget.used.clickUnits, "x = 1".length, "the click's units charged when the action begins");
   const early = t.capture(["a"]);
-  assert.equal(t.ap.consentStage(early, "S1", t.env), false, "(S1 before registration fails)");
+  assert.equal(t.ap.consentStage(early, "registered", t.env), false, "(the registered stage, before registration, fails)");
   t.register(["a"]);
-  assert.ok(t.ap.consentStage(cap, "S1", t.env));
-  assert.equal(t.ap.consentStage(t.capture(["a"]), "S2", t.env), false, "(S2 before the seed is prepared fails)");
+  assert.ok(t.ap.consentStage(cap, "registered", t.env));
+  assert.equal(t.ap.consentStage(t.capture(["a"]), "seeded", t.env), false, "(the seeded stage, before the seed is prepared, fails)");
   t.seed(["a"]);
-  assert.ok(t.ap.consentStage(cap, "S2", t.env));
+  assert.ok(t.ap.consentStage(cap, "seeded", t.env));
   assert.ok(await t.ap.approveCells(["a"], { expected: cap, env: t.env }));
   assert.equal(t.ap.consentStateOf(cap), "spent");
   assert.ok(t.ap.isApproved(await t.ap.eid("a")));
   assert.equal(t.ap.budget.used.commitUnits, 5 + 6 + 2 + 1, "the commit: the text and the settings values");
 });
 
-test("I2g / I22.1a: an edit, then the click: what was shown is approved, even when a writer missed the version (the click repairs it)", async () => {
+test("an edit, then the click: what was shown is approved, even when a writer missed the version (the click repairs it)", async () => {
   const n = nb([["a", "x = 1"]]);
   n.set("a", "x = 2");
   assert.ok(await n.approve(["a"]));
@@ -988,7 +988,7 @@ test("I2g / I22.1a: an edit, then the click: what was shown is approved, even wh
   assert.ok(t.ap.isApproved(await t.ap.eid("a")), "x = 2, as shown");
 });
 
-test("I21: clickUnits at its limit: 1,024 cells of 65,536 units is exactly 67,108,864, issued; one more unit is void, with no content compared", () => {
+test("clickUnits at its limit: 1,024 cells of 65,536 units is exactly 67,108,864, issued; one more unit is void, with no content compared", () => {
   for (const extra of [0, 1]) {
     const big = "a".repeat(65_536);
     const codes = Array.from({ length: 1024 }, (_, i): [string, string] => [id4(i), extra && i === 1023 ? big + "a" : big]);
@@ -999,15 +999,15 @@ test("I21: clickUnits at its limit: 1,024 cells of 65,536 units is exactly 67,10
     assert.equal(cap.clickUnits, extra ? 0 : BUDGET.clickUnits);
     assert.equal(t.ap.stats.compares - c0, extra ? 0 : 1024, "one compare a cell, or none");
   }
-  // the click's units are charged at S0: an action that can't take them refuses it
+  // the click's units are charged when the action begins: an action that can't take them refuses it
   const t = staged([["a", "x = 1"]]);
   const cap = t.capture(["a"]);
   t.ap.beginAction({ clickUnits: 4 });
-  assert.equal(t.ap.consentStage(cap, "S0", t.env), false);
+  assert.equal(t.ap.consentStage(cap, "beforeRegistration", t.env), false);
   assert.equal(t.ap.consentStateOf(cap), "void");
 });
 
-test("I21: commitUnits at its limit: 1,023 cells of 65,536 units, one of 65,465, plus the settings' 71 is exactly 67,108,864, approved; one more unit is void before any compare", async () => {
+test("commitUnits at its limit: 1,023 cells of 65,536 units, one of 65,465, plus the settings' 71 is exactly 67,108,864, approved; one more unit is void before any compare", async () => {
   const ns = "f".repeat(64);
   for (const extra of [0, 1]) {
     const big = "a".repeat(65_536);
@@ -1017,7 +1017,7 @@ test("I21: commitUnits at its limit: 1,023 cells of 65,536 units, one of 65,465,
     const cap = t.capture(ids);
     t.ap.beginAction({ scanBytes: Infinity, buildBytes: Infinity });
     through(t, cap, ids);
-    // (the stats when S4 reads the live settings, right after its preflight passed: nothing is compared later if it fails)
+    // (the stats when the commit reads the live settings, right after its preflight passed: nothing is compared later if it fails)
     let atPreflight = -1;
     const env: ConsentEnv = { ...t.env, seedNamespace: () => { atPreflight = t.ap.stats.compares; return t.env.seedNamespace(); } };
     const before = t.ap.stats.compares;
@@ -1032,26 +1032,26 @@ test("I21: commitUnits at its limit: 1,023 cells of 65,536 units, one of 65,465,
   }
 });
 
-test("I2h: a cold seed cache: the listed cells' seeds in one await, then S2 once; a seed missing voids", async () => {
+test("a cold seed cache: the listed cells' seeds in one await, then the seeded stage once; a seed missing voids", async () => {
   const t = staged([["a", "x = 1"], ["b", "y = 2"], ["c", "z = 3"]]);
   const ids = ["a", "b", "c"];
   const cap = t.capture(ids);
-  assert.ok(t.ap.consentStage(cap, "S0", t.env));
+  assert.ok(t.ap.consentStage(cap, "beforeRegistration", t.env));
   t.register(ids);
-  assert.ok(t.ap.consentStage(cap, "S1", t.env));
+  assert.ok(t.ap.consentStage(cap, "registered", t.env));
   t.seed(ids);
-  assert.ok(t.ap.consentStage(cap, "S2", t.env));
+  assert.ok(t.ap.consentStage(cap, "seeded", t.env));
   assert.ok(await t.ap.approveCells(ids, { expected: cap, env: t.env }));
   const u = staged([["a", "x = 1"], ["b", "y = 2"]]);
   const cap2 = u.capture(["a", "b"]);
-  assert.ok(u.ap.consentStage(cap2, "S0", u.env));
+  assert.ok(u.ap.consentStage(cap2, "beforeRegistration", u.env));
   u.register(["a", "b"]);
   u.seed(["a"]);
-  assert.equal(u.ap.consentStage(cap2, "S2", u.env), false, "b's seed not prepared");
+  assert.equal(u.ap.consentStage(cap2, "seeded", u.env), false, "b's seed not prepared");
   assert.equal(u.ap.consentStateOf(cap2), "void");
 });
 
-test("I2 (scope, by identity): a reset, replacement, rebind, generation change, settings change (mode, seed, reactive) or edit after the click: refused at S0, S1 and S2, and void", () => {
+test("a reset, replacement, rebind, generation change, settings change (mode, seed, reactive) or edit after the click: refused at each stage before the approval, and void", () => {
   const changes: [string, (t: Staged) => void][] = [
     ["a reset", (t) => t.ap.reset()],
     ["a replaced document", (t) => t.ap.reset({ newDocument: true })],
@@ -1062,27 +1062,27 @@ test("I2 (scope, by identity): a reset, replacement, rebind, generation change, 
     ["a reactive toggle", (t) => t.setting({ reactive: false })],
     ["an edit", (t) => t.edit("a", "x = 2")],
   ];
-  for (const stage of ["S0", "S1", "S2"] as const) {
+  for (const stage of ["beforeRegistration", "registered", "seeded"] as const) {
     for (const [what, change] of changes) {
       const t = staged([["a", "x = 1"]]);
       const cap = t.capture(["a"]);
       t.register(["a"]);
       t.seed(["a"]);
       change(t);
-      if (stage !== "S0") t.register(["a"]); // (registered from what is there now)
+      if (stage !== "beforeRegistration") t.register(["a"]); // (registered from what is there now)
       assert.equal(t.ap.consentStage(cap, stage, t.env), false, `${stage}: ${what}`);
       assert.equal(t.ap.consentStateOf(cap), "void", `${stage}: ${what}`);
     }
   }
 });
 
-test("I22.1b / I2k: the editor changes after S1 by a writer that missed the version (registration X, version X, shown Y): S4 voids, no approval", async () => {
-  for (const at of ["S2", "hash"] as const) {
+test("the editor changes after registration by a writer that missed the version (registration X, version X, shown Y): the commit voids, no approval", async () => {
+  for (const at of ["seeded", "hash"] as const) {
     const g = gated();
     const t = staged([["a", "x = 1"]], { hash: g.hash });
     const cap = t.capture(["a"]);
     through(t, cap, ["a"]);
-    if (at === "S2") t.missed("a", "x = 2");
+    if (at === "seeded") t.missed("a", "x = 2");
     const p = g.pause(kind("eid", "a"));
     const done = t.ap.approveCells(["a"], { expected: cap, env: t.env });
     await p.entered;
@@ -1092,7 +1092,7 @@ test("I22.1b / I2k: the editor changes after S1 by a writer that missed the vers
     assert.equal(t.ap.consentStateOf(cap), "void", at);
     assert.ok(!t.ap.isApproved(await t.ap.eid("a")), `${at}: nothing approved`);
   }
-  // (the same, the version replaced: refused earlier, by identity, at S3)
+  // (the same, the version replaced: refused earlier, by identity, at the claim)
   const t = staged([["a", "x = 1"]]);
   const cap = t.capture(["a"]);
   through(t, cap, ["a"]);
@@ -1100,7 +1100,7 @@ test("I22.1b / I2k: the editor changes after S1 by a writer that missed the vers
   assert.equal(await t.ap.approveCells(["a"], { expected: cap, env: t.env }), false);
 });
 
-test("I22.7 (module): the settings changed but their object not replaced (a missed gateCfg = null): S4's comparison of the live values voids", async () => {
+test("the settings changed but their object not replaced (a missed gateCfg = null): the commit's comparison of the live values voids", async () => {
   const patches: [string, { mode?: string; seedNamespace?: string; reactive?: boolean }][] = [["mode", { mode: "sage" }], ["seed", { seedNamespace: "nz" }], ["reactive", { reactive: false }]];
   for (const [what, patch] of patches) {
     const t = staged([["a", "x = 1"]]);
@@ -1112,7 +1112,7 @@ test("I22.7 (module): the settings changed but their object not replaced (a miss
   }
 });
 
-test("I22.1 / I22.13 (in place): a text version and a consent are frozen; the consent's state is not on it", () => {
+test("a text version and a consent are frozen; the consent's state is not on it", () => {
   const t = staged([["a", "x = 1"]]);
   const cap = t.capture(["a"]);
   assert.throws(() => { (t.versions.get("a") as any).text = "x = 2"; }, TypeError);
@@ -1121,7 +1121,7 @@ test("I22.1 / I22.13 (in place): a text version and a consent are frozen; the co
   assert.ok(!Object.keys(cap).some((k) => /state/i.test(k)), "no state on the capability");
 });
 
-test("I2i / I2e: replay: a spent, void or claimed consent is refused untouched; a concurrent second call is refused while the first commits", async () => {
+test("replay: a spent, void or claimed consent is refused untouched; a concurrent second call is refused while the first commits", async () => {
   const g = gated();
   const t = staged([["a", "x = 1"]], { hash: g.hash });
   const cap = t.capture(["a"]);
@@ -1131,23 +1131,23 @@ test("I2i / I2e: replay: a spent, void or claimed consent is refused untouched; 
   await p.entered;
   assert.equal(t.ap.consentStateOf(cap), "claimed");
   assert.equal(await t.ap.approveCells(["a"], { expected: cap, env: t.env }), false, "the second call");
-  assert.equal(t.ap.consentStage(cap, "S0", t.env), false, "S0 on a claimed consent");
+  assert.equal(t.ap.consentStage(cap, "beforeRegistration", t.env), false, "the first stage on a claimed consent");
   assert.equal(t.ap.consentStateOf(cap), "claimed", "untouched");
   p.release();
   assert.equal(await first, true);
   assert.equal(t.ap.consentStateOf(cap), "spent");
   assert.equal(await t.ap.approveCells(["a"], { expected: cap, env: t.env }), false, "replay of a spent consent");
-  assert.equal(t.ap.consentStage(cap, "S1", t.env), false);
+  assert.equal(t.ap.consentStage(cap, "registered", t.env), false);
   assert.equal(t.ap.consentStateOf(cap), "spent", "untouched");
   const other = t.capture(["a"]);
   assert.equal(await t.ap.approveCells(["b"] as string[], { expected: other, env: t.env }), false, "other cells than the consent's");
   assert.equal(t.ap.consentStateOf(other), "issued", "untouched");
   t.ap.voidConsent(other);
-  assert.equal(t.ap.consentStage(other, "S0", t.env), false, "a void consent");
+  assert.equal(t.ap.consentStage(other, "beforeRegistration", t.env), false, "a void consent");
   assert.equal(t.ap.consentStateOf(other), "void");
 });
 
-test("I2l: a rival during the owner's approval is refused, the owner keeps its claim and commits; with an edit, the owner voids", async () => {
+test("a rival during the owner's approval is refused, the owner keeps its claim and commits; with an edit, the owner voids", async () => {
   for (const edit of [false, true]) {
     const g = gated();
     const t = staged([["a", "x = 1"]], { hash: g.hash });
@@ -1167,7 +1167,7 @@ test("I2l: a rival during the owner's approval is refused, the owner keeps its c
 
 // --- the forget fence, the retry guard, S v2 ---
 
-test("I11 (module): forgotten fences a pending attempt: its late success or failure changes nothing; a rerun records", async () => {
+test("forgotten fences a pending attempt: its late success or failure changes nothing; a rerun records", async () => {
   for (const late of ["success", "failure"] as const) {
     const n = nb([["a", "x = 1"], ["b", "y = x + 1"]]);
     const [a0] = await n.send(["a"]);
@@ -1185,7 +1185,7 @@ test("I11 (module): forgotten fences a pending attempt: its late success or fail
   assert.equal(m.ap.record("p")!.vid, p0.vid, "an unrelated record stays");
 });
 
-test("I6 / I7 (module): stillAdmitted: only after admission, while the same attempt stands and nothing changed; never admits again", async () => {
+test("stillAdmitted: only after admission, while the same attempt stands and nothing changed; never admits again", async () => {
   const n = nb([["a", "x = 1"]]);
   assert.ok(await n.approve(["a"]));
   const v = await n.ap.check(await n.ap.freeze(["a"]), "rq-retry");
@@ -1204,7 +1204,7 @@ test("I6 / I7 (module): stillAdmitted: only after admission, while the same atte
   assert.equal(m.ap.stillAdmitted(w), false, "after its terminal");
 });
 
-test("I18: S v2 nodes are reused by identity (no digest compared; a planted digest compare is seen); a change rehashes its node and those below it; a cycle skips; a gone cell skips", async () => {
+test("S v2 nodes are reused by identity (no digest compared; a planted digest compare is seen); a change rehashes its node and those below it; a cycle skips; a gone cell skips", async () => {
   const n = nb(chain(5));
   for (let i = 0; i < 5; i++) assert.ok((await n.run(`c${i}`)).send);
   n.ap.beginAction();
@@ -1249,13 +1249,13 @@ test("I18: S v2 nodes are reused by identity (no digest compared; a planted dige
   assert.ok(skipped(await q.ap.check(fq, "rq-gone")), "a gone cell");
 });
 
-test("I22.12 (M-node): with any old node reused, AP2b and AP12 send and AP2 no longer skips (it waits); unhooked, all three skip", async () => {
-  // B's code never changes.  AP2b: P comes to define w, which B reads (an edge added); AP12: P stops
-  // defining it (an edge removed); P is approved and run either way.  AP2: an ancestor edited, not rerun.
+test("with any old node reused, an added or a removed edge is sent and an edited ancestor no longer skips (it waits); unhooked, all three skip", async () => {
+  // B's code never changes.  An added edge: P comes to define w, which B reads; a removed edge: P stops
+  // defining it; P is approved and run either way.  An edited ancestor, not rerun.
   const cases: [string, [string, string][], (n: N) => Promise<void>][] = [
-    ["AP2b", [["a", "x = 1"], ["p", "q = 1"], ["b", "y = x + w"]], async (n) => { n.set("p", "w = 1"); assert.ok((await n.run("p")).send); }],
-    ["AP12", [["a", "x = 1"], ["p", "w = 1"], ["b", "y = x + w"]], async (n) => { n.set("p", "q = 1"); assert.ok((await n.run("p")).send); }],
-    ["AP2", [["a", "x = 1"], ["b", "y = x + 1"]], async (n) => { n.set("a", "x = 2"); }],
+    ["an added edge", [["a", "x = 1"], ["p", "q = 1"], ["b", "y = x + w"]], async (n) => { n.set("p", "w = 1"); assert.ok((await n.run("p")).send); }],
+    ["a removed edge", [["a", "x = 1"], ["p", "w = 1"], ["b", "y = x + w"]], async (n) => { n.set("p", "q = 1"); assert.ok((await n.run("p")).send); }],
+    ["an edited ancestor", [["a", "x = 1"], ["b", "y = x + 1"]], async (n) => { n.set("a", "x = 2"); }],
   ];
   for (const hook of [true, false]) {
     for (const [what, codes, change] of cases) {
@@ -1268,7 +1268,7 @@ test("I22.12 (M-node): with any old node reused, AP2b and AP12 send and AP2 no l
         if (hook) setTestHooks({ reuseAnyNode: true });
         const v = await n.ap.check(f, `rq-${what}`);
         if (!hook) assert.ok(skipped(v), `${what}, unhooked: skip`);
-        else if (what === "AP2") assert.ok(waits(v), `${what}, hooked: the witness misses it; the ancestor's validity makes it wait`);
+        else if (what === "an edited ancestor") assert.ok(waits(v), `${what}, hooked: the witness misses it; the ancestor's validity makes it wait`);
         else assert.ok(v.send, `${what}, hooked: sent (only the witness saw the edge)`);
       } finally {
         setTestHooks(null);
@@ -1279,7 +1279,7 @@ test("I22.12 (M-node): with any old node reused, AP2b and AP12 send and AP2 no l
 
 // --- structural caps, and the maps' bounds ---
 
-test("I13: structural caps at the limit and one past it (cells, edges, an id, ids together, one cell's size, one node, a forget list, a scoped map), refused before building or hashing", async () => {
+test("structural caps at the limit and one past it (cells, edges, an id, ids together, one cell's size, one node, a forget list, a scoped map), refused before building or hashing", async () => {
   const all = { visits: Infinity, eidHashes: Infinity, sNodes: Infinity, buildBytes: Infinity, scanBytes: Infinity, sendUnits: Infinity };
   // cells: a chain of 5,000 passes the walk; 5,001 doesn't
   for (const [len, ok] of [[5000, true], [5001, false]] as const) {
@@ -1379,7 +1379,7 @@ test("I13: structural caps at the limit and one past it (cells, edges, an id, id
   }
 });
 
-test("I13: churn: 10,000 cells added, run and deleted keep the maps within the notebook's cells", async () => {
+test("churn: 10,000 cells added, run and deleted keep the maps within the notebook's cells", async () => {
   const parents: Record<string, string[]> = {};
   const r = raw(parents);
   for (let i = 0; i < 10_000; i++) {

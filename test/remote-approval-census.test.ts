@@ -3,11 +3,10 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 
-// The writer census of remote approval (the remote-compute plan's P1b-int,
-// I23), enforced on the sources: every key the approval checks by identity
+// The writer census of remote approval, enforced on the sources: every key the approval checks by identity
 // is replaced, never written, and only by its owner's writers.  Nothing is
 // executed from the sources: each rule is checked on the text, and then on
-// a copy with one planted fault (a named mutant), which the rule must reject.
+// a copy with one planted fault, which the rule must reject.
 
 const ROOT = join(__dirname, "..", "..");
 const read = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -27,14 +26,14 @@ function block(src: string, header: string): { start: number; end: number; text:
 const where = (src: string, re: RegExp) => src.split("\n").flatMap((l, i) => (re.test(l) ? [i] : []));
 const inside = (i: number, b: { start: number; end: number }) => i > b.start && i < b.end;
 
-// M-text: notebook.js assigns a cell's editor text only in setText (which makes its text version).
+// The editor text: notebook.js assigns a cell's editor text only in setText (which makes its text version).
 function textRule(src: string): string[] {
   const set = block(src, "function setText(");
   const bad = where(src, /\.ta\.value\s*=(?![=>])/).filter((i) => !inside(i, set));
   if (!/cell\.version = Object\.freeze\(\{ text: cell\.ta\.value \}\)/.test(set.text)) bad.push(-1);
   return bad.map((i) => `ta.value assigned outside setText (line ${i + 1})`);
 }
-// M-settings: every assignment of mode, meta or reactiveOn is followed (on its line, or the next) by gateCfg = null.
+// The settings: every assignment of mode, meta or reactiveOn is followed (on its line, or the next) by gateCfg = null.
 function settingsRule(src: string): string[] {
   const lines = src.split("\n");
   const out: string[] = [];
@@ -48,12 +47,12 @@ function settingsRule(src: string): string[] {
   });
   return out;
 }
-// M-lc: remote-kernel.js assigns this.lc only in the constructor and setLc.
+// The kernel record: remote-kernel.js assigns this.lc only in the constructor and setLc.
 function lcRule(src: string): string[] {
   const ctor = block(src, "constructor("), set = block(src, "setLc(");
   return where(src, /this\.lc\s*=(?![=>])/).filter((i) => !inside(i, ctor) && !inside(i, set)).map((i) => `this.lc assigned outside the constructor and setLc (line ${i + 1})`);
 }
-// M-scoped, M-errors: notebook-reactive.ts never writes the scoping or errors map after assigning it,
+// The scoping and errors maps, the registrations: notebook-reactive.ts never writes the scoping or errors map after assigning it,
 // assigns them only in their writers, and never writes a field of a registration or an analysis.
 function reactiveRule(src: string): string[] {
   const out: string[] = [];
@@ -62,11 +61,11 @@ function reactiveRule(src: string): string[] {
   for (const i of where(src, /this\.scoped\s*=(?![=>])/)) if (!inside(i, eff) && !inside(i, reset)) out.push(`the scoping map assigned outside its writers (line ${i + 1})`);
   for (const i of where(src, /this\.errorMap\s*=(?![=>])/)) if (!inside(i, setErrors)) out.push(`the errors map assigned outside setErrors (line ${i + 1})`);
   for (const i of where(src, /this\.errorsView\s*=(?![=>])/)) if (!inside(i, setErrors)) out.push(`the errors view assigned outside setErrors (line ${i + 1})`);
-  for (const i of where(src, /\b\w+\.(source|code|version|analysis|error)\s*=(?![=>])/)) out.push(`a registration's field written (line ${i + 1})`);
+  for (const i of where(src, /[\w)\]]\.(source|code|version|analysis|error)\s*=(?![=>])/)) out.push(`a registration's field written (line ${i + 1})`);
   for (const i of where(src, /\.(defs|refs|deleted|mutations|unbinds)\.(add|delete|clear)\(|\.imports\.(set|delete|clear)\(/)) out.push(`an analysis written (line ${i + 1})`);
   return out;
 }
-// M-graph: notebook-graph.ts writes its collections only in build() (and its files only in setFiles, a
+// The graph: notebook-graph.ts writes its collections only in build() (and its files only in setFiles, a
 // copy), and build() ends by replacing the version.
 function graphRule(src: string): string[] {
   const out: string[] = [];
@@ -97,19 +96,19 @@ function productionFiles(): string[] {
 }
 const hooksRule = (src: string) => where(src, /\bsetTestHooks\(/).filter((i) => !/export function setTestHooks\(/.test(src.split("\n")[i])).map((i) => `a test hook set (line ${i + 1})`);
 
-// Each rule, and a mutant it must reject: [the file, the rule, the mutant's name, the mutation].
+// Each rule, and a planted fault it must reject: [the file, the rule, the fault, the mutation].
 const rules: [string, (s: string) => string[], string, (s: string) => string][] = [
-  ["web/notebook/notebook.js", textRule, "M-text", (s) => s.replace("  function split(cell) {\n", "  function split(cell) {\n    cell.ta.value = \"\";\n")],
-  ["web/notebook/notebook.js", settingsRule, "M-settings", (s) => s.replace("    mode = [\"python\", \"sage\", \"magma\", \"matlab\"].includes(m) ? m : \"python\";\n    gateCfg = null;\n", "    mode = [\"python\", \"sage\", \"magma\", \"matlab\"].includes(m) ? m : \"python\";\n")],
-  ["web/notebook/remote-kernel.js", lcRule, "M-lc", (s) => s.replace("  notSent(job, note) {\n", "  notSent(job, note) {\n    this.lc = Object.freeze({ ...this.lc });\n")],
-  ["src/notebook-reactive.ts", reactiveRule, "M-scoped", (s) => s.replace("    const reg = this.registered.get(id);\n    if (!reg) return undefined;\n    const names", "    const reg = this.registered.get(id);\n    if (!reg) return undefined;\n    this.scoped.delete(\"x\");\n    const names")],
-  ["src/notebook-reactive.ts", reactiveRule, "M-errors", (s) => s.replace("  private defsOf(id: string): string[] {\n", "  private defsOf(id: string): string[] {\n    this.errorMap.clear();\n")],
-  ["src/notebook-reactive.ts", reactiveRule, "M-registration", (s) => s.replace("        if (prev.source !== source || prev.version !== version) this.registered.set(id, Object.freeze({ ...prev, source, version }));", "        if (prev.source !== source) (prev as any).source = source;")],
-  ["src/notebook-graph.ts", graphRule, "M-graph", (s) => s.replace("    this.versionNow = Object.freeze({});\n  }\n", "  }\n")],
+  ["web/notebook/notebook.js", textRule, "the editor text written outside setText", (s) => s.replace("  function split(cell) {\n", "  function split(cell) {\n    cell.ta.value = \"\";\n")],
+  ["web/notebook/notebook.js", settingsRule, "a settings write without gateCfg = null", (s) => s.replace("    mode = [\"python\", \"sage\", \"magma\", \"matlab\"].includes(m) ? m : \"python\";\n    gateCfg = null;\n", "    mode = [\"python\", \"sage\", \"magma\", \"matlab\"].includes(m) ? m : \"python\";\n")],
+  ["web/notebook/remote-kernel.js", lcRule, "the kernel record written outside setLc", (s) => s.replace("  notSent(job, note) {\n", "  notSent(job, note) {\n    this.lc = Object.freeze({ ...this.lc });\n")],
+  ["src/notebook-reactive.ts", reactiveRule, "the scoping map written in place", (s) => s.replace("    const reg = this.registered.get(id);\n    if (!reg) return undefined;\n    const names", "    const reg = this.registered.get(id);\n    if (!reg) return undefined;\n    this.scoped.delete(\"x\");\n    const names")],
+  ["src/notebook-reactive.ts", reactiveRule, "the errors map written in place", (s) => s.replace("  private defsOf(id: string): string[] {\n", "  private defsOf(id: string): string[] {\n    this.errorMap.clear();\n")],
+  ["src/notebook-reactive.ts", reactiveRule, "a registration's field written", (s) => s.replace("        if (prev.source !== source || prev.version !== version) this.registered.set(id, Object.freeze({ ...prev, source, version }));", "        if (prev.source !== source) (prev as any).source = source;")],
+  ["src/notebook-graph.ts", graphRule, "build() not replacing the version", (s) => s.replace("    this.versionNow = Object.freeze({});\n  }\n", "  }\n")],
 ];
 
 for (const [file, rule, mutant, mutate] of rules) {
-  test(`I23 ${mutant}: ${file} keeps its census, and the planted fault is rejected`, () => {
+  test(`the writer census: ${file} keeps it, and a planted fault (${mutant}) is rejected`, () => {
     const src = read(file);
     assert.deepEqual(rule(src), [], `${file}: the census`);
     const bad = mutate(src);
@@ -118,7 +117,7 @@ for (const [file, rule, mutant, mutate] of rules) {
   });
 }
 
-test("I23 hooks: the test-only faults (M-parents, M-node and the scheduler's) are set by no production file", () => {
+test("the test-only faults (the adapter's, approvals', the scheduler's and the client's) are set by no production file", () => {
   const files = productionFiles();
   assert.ok(files.includes(join("web", "notebook", "remote-gate.js")) && files.includes(join("src", "remote-approval.ts")), "(the scan sees the sources)");
   for (const f of files) assert.deepEqual(hooksRule(read(f)), [], f);
