@@ -157,8 +157,8 @@ export function analysisView(a: CellAnalysis | AnalysisView): AnalysisView {
   analysisViews.add(v);
   return v;
 }
-// An error, copied and frozen (with its list of cells).
-const frozenError = (e: CellError): CellError => Object.freeze("cells" in e ? { ...e, cells: Object.freeze([...e.cells]) as string[] } : { ...e });
+/** An error, copied and frozen (with its list of cells). */
+export const frozenError = (e: CellError): CellError => Object.freeze("cells" in e ? { ...e, cells: Object.freeze([...e.cells]) as string[] } : { ...e });
 // Lists by key, each frozen, in a view.
 const listsView = (m: Map<string, string[]>) => new MapView<string, string[]>([...m].map(([k, l]) => [k, Object.freeze(l) as string[]] as const));
 

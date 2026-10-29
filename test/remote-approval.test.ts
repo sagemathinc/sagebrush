@@ -1213,6 +1213,13 @@ test("I18: S v2 nodes are reused by identity (no digest compared; a planted dige
   assert.equal(n.ap.budget.used.sNodes, 0, "warm: every node reused");
   assert.equal(n.ap.budget.counts.nodeReuses, 5, "five unique nodes, however often");
   assert.equal(n.ap.stats.digestCompares, 0, "no digest compared");
+  // (in place: a node, and its parents' nodes, are frozen; a write throws and changes nothing)
+  const node = (n.ap as any).nodes.get("c4");
+  const h4 = node.h, pn = node.parentNodes[0];
+  assert.throws(() => { node.h = "0"; }, TypeError);
+  assert.throws(() => node.parentNodes.push(node), TypeError);
+  assert.throws(() => { node.parentNodes[0] = node; }, TypeError);
+  assert.ok(node.h === h4 && node.parentNodes.length === 1 && node.parentNodes[0] === pn && (n.ap as any).nodes.get("c4") === node);
   try {
     setTestHooks({ digestReuse: true });
     await n.ap.freeze(["c4"]);
