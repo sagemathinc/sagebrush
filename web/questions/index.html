@@ -61,6 +61,14 @@
   .fig, .fbfig { margin: 6px 0 10px; max-width: 560px; }
   .fig .wait { color: var(--muted); font-size: 13px; padding: 30px 0; text-align: center; background: #f6f6f2; border-radius: 6px; }
   .sbnb.fig figure.plot, .sbnb.fbfig figure.plot { margin: 0; }
+  .proofbox { height: 420px; margin-bottom: 8px; }
+  .proofbox.grading { height: 360px; }
+  body.gfocus .proofbox.grading { height: max(320px, calc(100vh - 400px)); } /* (the rubric stays in view) */
+  @media (max-width: 700px) { .proofbox { height: 560px; } .proofbox.grading { height: 420px; } }
+  .proof-fallback { display: flex; gap: 8px; height: 100%; }
+  .proof-fallback textarea { flex: 1; height: 100%; min-height: 0; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .proof-fallback .proof-prev { flex: 1; overflow: auto; background: #fff; border: 1px solid var(--line); border-radius: 5px; padding: 6px 12px; }
+  @media (max-width: 700px) { .proof-fallback { flex-direction: column; } }
   textarea { font: 14px/1.4 system-ui, sans-serif; width: 100%; min-height: 80px; padding: 6px 8px; border: 1px solid #b9bdb3; border-radius: 5px; }
   .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
   .tabs button { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid var(--line); background: #fff; border-radius: 14px; cursor: pointer; }
@@ -95,7 +103,8 @@
   body.gfocus { overflow: hidden; }
   body.gfocus .tool { position: fixed; inset: 0; z-index: 50; border: 0; border-radius: 0; overflow: auto; }
   body.gfocus .tool .toolhead, body.gfocus #grader > .meta, body.gfocus #grader .roster { display: none; }
-  body.gfocus #grader .grid { grid-template-columns: 1fr; }
+  body.gfocus #grader .grid { grid-template-columns: minmax(0, 1fr); }
+  #grader .work { min-width: 0; }
   body.gfocus #grader .work { max-width: 1100px; margin: 0 auto; width: 100%; }
   .nav button.check:disabled { opacity: .5; }
   .lmsbar .viewsw button { font-size: 13px; }
@@ -229,11 +238,35 @@ const ASSIGNMENT = {
       explain: () => "Its contour lines, below, show the same shape from above.",
       hint: "Look at the heights along the $x$-axis ($y = 0$) and along the $y$-axis ($x = 0$).",
     },
+    // A proof in LaTeX (flag "proof"), graded by the instructor with a rubric. The student writes it in
+    // sagebrush-latex's editor, with its live preview; the grader sees the same source's preview, read only.
+    {
+      id: "q7", kind: "proof", points: 4, attempts: 1, flag: "proof",
+      params: () => ({}),
+      prompt: () => "Prove by induction that $1 + 2 + \\cdots + n = \\dfrac{n(n+1)}{2}$ for every integer $n \\ge 1$. Write the proof in LaTeX; the preview shows how it reads. (Your instructor grades this one.)",
+      starter: String.raw`\documentclass{article}
+\begin{document}
+\section*{Proof}
+We use induction on $n$.
+
+\textbf{Base case.}
+
+\textbf{Inductive step.}
+
+\end{document}
+`,
+      rubric: [
+        { text: "Checks the base case, n = 1", points: 1 },
+        { text: "Uses the inductive hypothesis correctly", points: 2 },
+        { text: "States the conclusion clearly", points: 1 },
+      ],
+    },
   ],
 };
 function item6() { return ASSIGNMENT.items.find((it) => it.id === "q6"); }
-// Feature flags of this preview: ?plots=0 hides the plot questions, ?focus=0 the grading focus icon.
-const FLAGS = Object.fromEntries(["plots", "focus"].map((f) => [f, new URLSearchParams(location.search).get(f) !== "0"]));
+// Feature flags of this preview: ?plots=0 hides the plot questions, ?focus=0 the grading focus icon, ?proof=0 the
+// LaTeX proof question; ?latex=0 uses the plain fallback editor instead of sagebrush-latex's.
+const FLAGS = Object.fromEntries(["plots", "focus", "proof", "latex"].map((f) => [f, new URLSearchParams(location.search).get(f) !== "0"]));
 ASSIGNMENT.items = ASSIGNMENT.items.filter((it) => !it.flag || FLAGS[it.flag]);
 const ROSTER = ["Ada Lovelace", "Alan Turing", "Emmy Noether", "Srinivasa Ramanujan"];
 
@@ -250,6 +283,8 @@ class MockCourseService {
   grade(student, item) { return (this.state.grades ||= {})[`${student}|${item}`]; }
   setGrade(student, item, g) { (this.state.grades ||= {})[`${student}|${item}`] = { ...g, at: Date.now() }; this.save(); }
   gradebook() { return ROSTER.map((s) => ({ student: s, ...(this.state.scores[s] || {}) })); }
+  draft(student, item) { return (this.state.drafts ||= {})[`${student}|${item}`]; }
+  setDraft(student, item, text) { (this.state.drafts ||= {})[`${student}|${item}`] = text; this.save(); }
   reset() { this.state = { attempts: {}, scores: {}, grades: {} }; this.save(); }
 }
 const course = new MockCourseService("sagebrush-questions-preview-v1");
@@ -322,6 +357,46 @@ async function checkSymbolic(item, p, answer) {
   return { verdict, tex: verdict === "unparsed" ? "" : rest.join(" ") };
 }
 
+// ---------------------------------------------------------------- the proof editor
+// sagebrush-latex's component (mountEditor, exported by /sagebrush-latex.js in a LaTeX build:
+// its live preview, and the source <-> preview map that annotations will use), else a plain
+// textarea with a KaTeX preview behind the same small interface. Resolves to the editor.
+const isGraded = (it) => Array.isArray(it.rubric);
+let latexModule = null;
+const loadLatex = () => (latexModule ??= FLAGS.latex ? import("/sagebrush-latex.js").catch(() => null) : Promise.resolve(null));
+async function proofEditor(root, opts) {
+  const m = await loadLatex();
+  if (m?.mountEditor) return Object.assign(m.mountEditor(root, opts), { kind: "latex" });
+  // the fallback: paragraphs of text with $...$ math (the student's text as text nodes, never HTML)
+  let text = opts.text, timer;
+  root.innerHTML = `<div class="proof-fallback${opts.readOnly ? " ro" : ""}">${opts.readOnly ? "" : `<textarea spellcheck="false" aria-label="Your proof (LaTeX)"></textarea>`}<div class="proof-prev"></div></div>`;
+  const ta = root.querySelector("textarea"), prev = root.querySelector(".proof-prev");
+  const show = () => {
+    prev.textContent = "";
+    const body = text.replace(/^[\s\S]*?\\begin\{document\}/, "").replace(/\\end\{document\}[\s\S]*$/, "");
+    for (const para of body.split(/\n\s*\n/)) {
+      const t = para.trim().replace(/\\(?:section\*?|textbf|emph)\{([^{}]*)\}/g, "$1");
+      if (!t) continue;
+      const p = document.createElement("p"); setMathText(p, t); prev.append(p);
+    }
+  };
+  if (ta) { ta.value = text; ta.oninput = () => { text = ta.value; clearTimeout(timer); timer = setTimeout(() => { show(); opts.onChange?.(text); }, 300); }; }
+  show();
+  return { kind: "fallback", getText: () => text, setText: (t) => { text = t; if (ta) ta.value = t; show(); }, rendered: async () => {}, previewRoot: () => prev, groups: () => [], sourceRangeOf: () => null, previewRangesOf: () => [], on: () => () => {}, destroy: () => { clearTimeout(timer); root.textContent = ""; } };
+}
+// Text with $...$ and $$...$$ math, built as nodes: the text is never parsed as HTML.
+function setMathText(el, s) {
+  el.textContent = "";
+  let last = 0;
+  for (const m of s.matchAll(/\$\$([^$]+)\$\$|\$([^$]+)\$/g)) {
+    el.append(s.slice(last, m.index));
+    const sp = document.createElement("span"); sp.className = "math" + (m[1] ? " display" : ""); sp.dataset.tex = m[1] ?? m[2];
+    el.append(sp); last = m.index + m[0].length;
+  }
+  el.append(s.slice(last));
+  typeset(el);
+}
+
 // ---------------------------------------------------------------- rendering
 const studentSel = document.getElementById("student");
 for (const s of ROSTER) studentSel.append(new Option(s, s));
@@ -329,7 +404,7 @@ studentSel.value = ROSTER[0];
 document.getElementById("title").textContent = ASSIGNMENT.title;
 
 function itemScore(item, student) {
-  if (item.kind === "manual") {
+  if (isGraded(item)) {
     const g = course.grade(student, item.id);
     return g ? item.rubric.reduce((n, r, i) => n + (g.checks[i] ? r.points : 0), 0) : 0;
   }
@@ -353,7 +428,7 @@ function renderItem(item, n, student) {
     const tries = course.attempts(student, item.id);
     const done = tries.some((t) => t.correct) || tries.length >= item.attempts;
     pts.textContent = `${itemScore(item, student)} / ${item.points} points`;
-    if (item.kind === "manual") {
+    if (isGraded(item)) {
       const g = course.grade(student, item.id);
       at.textContent = g ? `Graded by your instructor.${g.comment ? " Comment: " + g.comment : ""}` : tries.length ? "Submitted; your instructor will grade it." : "Not submitted yet.";
       return tries.length > 0;
@@ -410,6 +485,28 @@ function renderItem(item, n, student) {
       if (!sel) return feedback(fb, "bad", "Choose one of the answers.");
       record(sel.value, !!choices[Number(sel.value)].right, item.explain ? item.explain(p) : "");
     };
+  } else if (item.kind === "proof") {
+    // sagebrush-latex's editor with its live preview; the draft is kept in this browser as it's typed,
+    // and Submit stores the source (graded by the instructor, from the same source)
+    const prev = course.attempts(student, item.id).at(-1);
+    ans.innerHTML = `<div class="proofbox"></div>${prev ? "" : `<div class="row"><button class="check" disabled>Submit proof</button><span class="attempts saved"></span></div>`}`;
+    const btn = ans.querySelector("button"), saved = ans.querySelector(".saved");
+    const ed = proofEditor(ans.querySelector(".proofbox"), {
+      text: prev?.answer ?? course.draft(student, item.id) ?? item.starter, readOnly: !!prev, layout: prev ? "preview" : "split",
+      onChange: (t) => { course.setDraft(student, item.id, t); saved.textContent = "Draft kept in this browser."; },
+    });
+    studentEditors.push(ed);
+    ed.then((e) => {
+      if (prev) return;
+      btn.disabled = false;
+      btn.onclick = () => {
+        const text = e.getText();
+        if (!text.trim() || text.trim() === item.starter.trim()) return feedback(fb, "bad", "Write your proof first.");
+        course.recordAttempt(student, item.id, { answer: text, correct: null });
+        e.destroy();
+        box.replaceWith(renderItem(item, n, student));
+      };
+    });
   } else if (item.kind === "manual") {
     ans.innerHTML = `<textarea aria-label="Your answer"></textarea><div class="row"><button class="check">Submit</button></div>`;
     const ta = ans.querySelector("textarea");
@@ -422,7 +519,7 @@ function renderItem(item, n, student) {
       finish();
     };
   }
-  if (item.kind === "manual") { finish(); return box; }
+  if (isGraded(item)) { finish(); return box; }
   // Restore what this student already did.
   const tries = course.attempts(student, item.id);
   if (tries.length) feedback(fb, tries.some((t) => t.correct) ? "ok" : "bad", tries.some((t) => t.correct) ? "Correct." : `Last answer: <code>${esc(tries.at(-1).answer)}</code>, not quite.`);
@@ -466,7 +563,9 @@ function renderGradebook(changed) {
     gb.append(tr);
   }
 }
+const studentEditors = [];
 function render() {
+  for (const ed of studentEditors.splice(0)) ed.then((e) => e.destroy());
   const student = studentSel.value;
   document.getElementById("meta").textContent = `Due ${ASSIGNMENT.due} · ${ASSIGNMENT.items.length} questions · your numbers are your own: classmates get different ones.`;
   const items = document.getElementById("items");
@@ -501,6 +600,39 @@ function seedClassmates() {
   course.save();
 }
 
+// The classmates' proofs (made once, separately: a browser seeded before the proof question gets them too).
+const PROOFS = {
+  "Emmy Noether": String.raw`\documentclass{article}
+\begin{document}
+\section*{Proof}
+We use induction on $n$. Write $S(n) = 1 + 2 + \cdots + n$.
+
+\textbf{Base case.} For $n = 1$, $S(1) = 1 = \frac{1 \cdot 2}{2}$.
+
+\textbf{Inductive step.} Suppose $S(k) = \frac{k(k+1)}{2}$ for some $k \ge 1$. Then
+$$S(k+1) = S(k) + (k+1) = \frac{k(k+1)}{2} + (k+1) = \frac{(k+1)(k+2)}{2},$$
+which is the formula for $n = k+1$.
+
+So $S(n) = \frac{n(n+1)}{2}$ for every $n \ge 1$, by induction.
+\end{document}
+`,
+  "Alan Turing": String.raw`\documentclass{article}
+\begin{document}
+\section*{Proof}
+For $n = 1$ both sides are $1$.
+
+If it holds for $n$, add $n + 1$ to both sides: $\frac{n(n+1)}{2} + n + 1$, and this is the formula for $n + 1$.
+\end{document}
+`,
+};
+function seedProofs() {
+  const q = ASSIGNMENT.items.find((it) => it.kind === "proof");
+  if (!q || course.state.seededProof) return;
+  for (const [s, text] of Object.entries(PROOFS)) { course.recordAttempt(s, q.id, { answer: text, correct: null }); postTotal(s); }
+  course.state.seededProof = true;
+  course.save();
+}
+
 // ---------------------------------------------------------------- the instructor's grading view
 // Question-major (William, Oct 22): one question, every student's answer, with
 // instant next and previous; auto scores beside the rubric; stored answers and
@@ -509,18 +641,20 @@ const gState = { q: 3, s: 0 };
 const others = () => ROSTER;
 function chip(item, s) {
   const tries = course.attempts(s, item.id);
-  if (item.kind === "manual") {
+  if (isGraded(item)) {
     const g = course.grade(s, item.id);
     return g ? `<span class="chip ok">${itemScore(item, s)}/${item.points}</span>` : tries.length ? `<span class="chip">to grade</span>` : `<span class="chip">–</span>`;
   }
   if (tries.some((t) => t.correct)) return `<span class="chip ok">${item.points}/${item.points}</span>`;
   return tries.length ? `<span class="chip bad">0/${item.points}</span>` : `<span class="chip">–</span>`;
 }
+let graderEditor = null;
 function renderGrader() {
+  graderEditor?.then((ed) => ed.destroy()); graderEditor = null;
   const el = document.getElementById("grader");
   const item = ASSIGNMENT.items[gState.q], student = others()[gState.s];
   el.innerHTML = `<div class="meta">Grading by question: each student's answer to one question, one after another. The answers and Sage's checks are stored, so nothing is reopened or rerun. Keys: <code>j</code> next, <code>k</code> previous.</div>
-    <div class="tabs">${ASSIGNMENT.items.map((it, i) => `<button data-q="${i}" class="${i === gState.q ? "on" : ""}">Question ${i + 1} · ${it.kind === "manual" ? "graded by you" : "auto-graded"}</button>`).join("")}</div>
+    <div class="tabs">${ASSIGNMENT.items.map((it, i) => `<button data-q="${i}" class="${i === gState.q ? "on" : ""}">Question ${i + 1} · ${isGraded(it) ? "graded by you" : "auto-graded"}</button>`).join("")}</div>
     <div class="pager" role="toolbar" aria-label="Grading pager"><button data-d="-1" title="Previous student (k)">‹ Previous</button><button data-d="1" title="Next student (j)">Next ›</button><button class="check save" disabled>Save grade &amp; next</button><span class="where"></span>${FLAGS.focus ? focusButton() : ""}</div>
     <div class="grid"><div class="roster">${others().map((s, i) => `<button data-s="${i}" class="${i === gState.s ? "on" : ""}">${esc(s)}<span class="st">${chip(item, s)}</span></button>`).join("")}</div><div class="work"></div></div>`;
   for (const b of el.querySelectorAll(".tabs button")) b.onclick = () => { gState.q = Number(b.dataset.q); renderGrader(); };
@@ -537,6 +671,11 @@ function renderGrader() {
   setMath(work.querySelector(".prompt"), item.prompt(p));
   const tl = work.querySelector(".tries");
   if (!tries.length) tl.innerHTML = `<p class="attempts">No answer yet.</p>`;
+  else if (item.kind === "proof") {
+    // the stored source, shown as its preview alone (read only): the proof as the student saw it
+    tl.innerHTML = `<div class="proofbox grading"></div>`;
+    graderEditor = proofEditor(tl.querySelector(".proofbox"), { text: tries.at(-1).answer, readOnly: true, layout: "preview" });
+  }
   else if (item.kind === "manual") tl.innerHTML = `<div class="answer"></div>`, (tl.querySelector(".answer").textContent = tries.at(-1).answer);
   else tries.forEach((t, i) => {
     const d = document.createElement("div");
@@ -547,7 +686,7 @@ function renderGrader() {
     tl.append(d);
   });
   const gr = work.querySelector(".grade");
-  if (item.kind === "manual") {
+  if (isGraded(item)) {
     const g = course.grade(student, item.id) || { checks: item.rubric.map(() => false), comment: "" };
     gr.innerHTML = `<div class="rubric">${item.rubric.map((r, i) => `<label><input type="checkbox" data-i="${i}" ${g.checks[i] ? "checked" : ""} ${tries.length ? "" : "disabled"}> ${esc(r.text)}<span class="rp">+${r.points}</span></label>`).join("")}</div>
       <input type="text" class="comment" placeholder="A comment for the student (optional)" value="${esc(g.comment)}" ${tries.length ? "" : "disabled"} style="width:100%;font-family:inherit">
@@ -606,11 +745,14 @@ function setView(instructor) {
   document.getElementById("signed").hidden = instructor;
   // (focus belongs to the grading view: off in the student's view, back as remembered here)
   document.body.classList.toggle("gfocus", instructor && FLAGS.focus && focusRemembered());
+  // (one proof editor at a time: the hidden view's are closed)
+  if (instructor) for (const ed of studentEditors.splice(0)) ed.then((e) => e.destroy());
+  else { graderEditor?.then((e) => e.destroy()); graderEditor = null; }
   if (instructor) {
     // start at the first answer that still needs a grade on this question
     const item = ASSIGNMENT.items[gState.q];
     const todo = others().findIndex((s) => course.attempts(s, item.id).length && !course.grade(s, item.id));
-    if (item.kind === "manual" && todo >= 0) gState.s = todo;
+    if (isGraded(item) && todo >= 0) gState.s = todo;
     renderGrader();
     renderGradebook();
   } else render();
@@ -618,8 +760,9 @@ function setView(instructor) {
 document.getElementById("as-student").onclick = () => setView(false);
 document.getElementById("as-instructor").onclick = () => setView(true);
 studentSel.onchange = render;
-document.getElementById("reset").onclick = () => { course.reset(); log.textContent = ""; seedClassmates(); setView(false); };
+document.getElementById("reset").onclick = () => { course.reset(); log.textContent = ""; seedClassmates(); seedProofs(); setView(false); };
 seedClassmates();
+seedProofs();
 setView(location.hash === "#instructor");
 addEventListener("hashchange", () => setView(location.hash === "#instructor"));
 
@@ -632,7 +775,7 @@ document.getElementById("scratch").addEventListener("toggle", async (e) => {
   const nb = createNotebook(document.getElementById("nb"), { kernel, mode: "sage", assetBase: "/" });
   await nb.attach(new MemoryStore({ mode: "sage", cells: [{ id: cellId(), code: "f = x^3*sin(2*x)\ndiff(f, x)" }, { id: cellId(), code: "plot(f, (x, -2, 2))" }] }));
 });
-window.demo = { ASSIGNMENT, course, kernel, checkSymbolic, paramsFor, FLAGS };
+window.demo = { ASSIGNMENT, course, kernel, checkSymbolic, paramsFor, FLAGS, setFocus };
 </script>
 </body>
 </html>

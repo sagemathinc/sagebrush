@@ -5,7 +5,7 @@
 // can't read costs none; and the mock gradebook shows the posted total. The
 // instructor's view: question-major grading, the fixed pager, focus mode.
 // Builds nothing: the page is flagged off by default, so build it first with
-//   SAGEBRUSH_QUESTIONS=1 bun web/build.ts
+//   SAGEBRUSH_QUESTIONS=1 SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts   (the proof question's editor needs a LaTeX build)
 //   node web/test-questions.mjs
 // It serves web/dist itself.
 import { spawn } from "node:child_process";
@@ -48,9 +48,9 @@ try {
   const a = await tab(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
   await a.send("Runtime.enable"); await a.send("Log.enable");
   await a.send("Page.navigate", { url: new URL("questions/", base).href });
-  await a.until("window.demo && document.querySelectorAll('#items .q').length === 6");
+  await a.until("window.demo && document.querySelectorAll('#items .q').length === 7");
   await a.until("document.querySelectorAll('#items .katex').length >= 4");
-  ok(true, "six questions render, their math typeset");
+  ok(true, "seven questions render, their math typeset");
   ok(await a.ev("document.querySelectorAll('#gb tr').length") === 4, "the mock gradebook lists the roster");
 
   // each student their own numbers
@@ -67,7 +67,7 @@ try {
   ok(v !== null, "numeric: the prompt carries this student's v0");
   await a.ev(`(${q(0)}.querySelector('input').value = '${((v * v) / 19.6).toFixed(3)}', ${q(0)}.querySelector('button').click())`);
   ok(await a.ev(`${q(0)}.querySelector('.fb').classList.contains('ok')`), "numeric: the right answer is accepted");
-  ok(await a.ev(`document.getElementById('score').textContent === '3 / 19'`), "the score counts it");
+  ok(await a.ev(`document.getElementById('score').textContent === '3 / 23'`), "the score counts it");
 
   // q2 symbolic, checked by Sage in the page's worker
   const tex = await a.ev(`${q(1)}.querySelector('.prompt [data-tex]').dataset.tex`);
@@ -86,10 +86,10 @@ try {
   // the right one is (c/2) e^{x^2}: the only choice with a fraction and no x^2 in front of e
   await a.ev(`(() => { const box = ${q(2)}; const right = [...box.querySelectorAll('label')].find((l) => { const t = l.querySelector('[data-tex]').dataset.tex; return t.includes('frac') && !t.includes('x^2 e'); }); right.querySelector('input').checked = true; box.querySelector('button').click(); })()`);
   ok(await a.ev(`${q(2)}.querySelector('.fb').classList.contains('ok')`), "choice: the right choice is accepted");
-  ok(await a.ev(`document.getElementById('score').textContent === '10 / 19'`), "the auto-graded total is 10 / 19 (questions 1-3)");
-  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /10 \\/ 19/.test(r.textContent))`), "the gradebook shows the posted total");
+  ok(await a.ev(`document.getElementById('score').textContent === '10 / 23'`), "the auto-graded total is 10 / 23 (questions 1-3)");
+  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /10 \\/ 23/.test(r.textContent))`), "the gradebook shows the posted total");
   ok(await a.ev(`[...document.querySelectorAll('#items .q')].slice(0, 3).every((q) => [...q.querySelectorAll('button')].every((b) => b.disabled))`), "answered questions are closed");
-  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].filter((r) => /\\d+ \\/ 19/.test(r.textContent)).length === 4`), "the classmates' (mock) scores are in the gradebook");
+  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].filter((r) => /\\d+ \\/ 23/.test(r.textContent)).length === 4`), "the classmates' (mock) scores are in the gradebook");
 
   // q5 and q6: plots drawn by Sage in the page (flag "plots"): a 2D graph and a 3D surface in the prompts
   await a.until(`!!${q(4)}.querySelector('.fig figure.plot svg')`, 120000);
@@ -101,12 +101,12 @@ try {
   ok(await a.ev(`!${q(4)}.querySelector('.fbfig').childElementCount && !${q(5)}.querySelector('.fbfig').childElementCount`), "plots: no feedback figure before an answer");
   const k = await a.ev(`demo.paramsFor(demo.ASSIGNMENT.items[4], 'Ada Lovelace').k`);
   await a.ev(`(${q(4)}.querySelector('input').value = '${Math.sqrt(k).toFixed(3)}', ${q(4)}.querySelector('button').click())`);
-  ok(await a.ev(`${q(4)}.querySelector('.fb').classList.contains('ok') && document.getElementById('score').textContent === '13 / 19'`), "plots: the 2D question's right answer scores (13 / 19)");
+  ok(await a.ev(`${q(4)}.querySelector('.fb').classList.contains('ok') && document.getElementById('score').textContent === '13 / 23'`), "plots: the 2D question's right answer scores (13 / 23)");
   await a.until(`${q(4)}.querySelectorAll('.fbfig figure.plot svg').length === 1`, 120000);
   ok(true, "plots: the feedback figure (the tangent at the minimum) is drawn after the answer");
   const which = await a.ev(`demo.paramsFor(demo.ASSIGNMENT.items[5], 'Ada Lovelace').which`);
   await a.ev(`(() => { const box = ${q(5)}; box.querySelector('input[value="${which}"]').checked = true; box.querySelector('button').click(); })()`);
-  ok(await a.ev(`${q(5)}.querySelector('.fb').classList.contains('ok') && document.getElementById('score').textContent === '15 / 19'`), "plots: the 3D question's right choice scores (15 / 19)");
+  ok(await a.ev(`${q(5)}.querySelector('.fb').classList.contains('ok') && document.getElementById('score').textContent === '15 / 23'`), "plots: the 3D question's right choice scores (15 / 23)");
   await a.until(`!!${q(5)}.querySelector('.fbfig figure.plot svg')`, 120000);
   ok(true, "plots: the feedback contour plot is drawn after the answer");
 
@@ -119,7 +119,7 @@ try {
   ok(await a.ev(`/product rule/.test(document.querySelector('#grader .work .answer').textContent)`), "instructor: the stored answer is shown, nothing rerun");
   await a.ev(`(document.querySelectorAll('#grader .rubric input').forEach((c) => (c.checked = true)), document.querySelector('#grader .save').click())`);
   ok(await a.ev(`document.querySelector('#grader .roster button.on').textContent.includes('Alan Turing')`), "instructor: save moves to the next student");
-  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /19 \\/ 19/.test(r.textContent))`), "instructor: the graded total, 19 / 19, reaches the gradebook");
+  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /19 \\/ 23/.test(r.textContent))`), "instructor: the graded total, 19 / 23, reaches the gradebook");
   await a.ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))`);
   ok(await a.ev(`document.querySelector('#grader .roster button.on').textContent.includes('Emmy Noether')`), "instructor: j goes to the next student");
   // the pager stays in one place whatever the answer's length (William, Oct 29), on a desktop and on a phone
@@ -181,18 +181,63 @@ try {
   await a.ev(`document.querySelector('#grader .tabs button[data-q="1"]').click()`);
   ok(await a.ev(`!!document.querySelector('#grader .work .chip.ok')`), "instructor: an auto-graded question shows its stored verdicts");
   await a.ev(`document.getElementById('as-student').click()`);
-  ok(await a.ev(`document.getElementById('score').textContent === '19 / 19' && /Graded by your instructor/.test(${q(3)}.querySelector('.attempts').textContent)`), "the student sees the graded total");
+  ok(await a.ev(`document.getElementById('score').textContent === '19 / 23' && /Graded by your instructor/.test(${q(3)}.querySelector('.attempts').textContent)`), "the student sees the graded total");
 
   // a reload keeps the attempts (the mock course service's storage)
   await a.send("Page.reload");
-  await a.until("window.demo && document.querySelectorAll('#items .q').length === 6");
-  ok(await a.ev(`document.getElementById('score').textContent === '19 / 19'`), "a reload keeps this student's attempts and grades");
+  await a.until("window.demo && document.querySelectorAll('#items .q').length === 7");
+  ok(await a.ev(`document.getElementById('score').textContent === '19 / 23'`), "a reload keeps this student's attempts and grades");
   await a.until(`${q(4)}.querySelectorAll('.fbfig figure.plot svg').length === 1`, 120000);
   ok(true, "a reload draws the settled question's feedback figure again");
+  // q7, a proof in LaTeX (flag "proof"): sagebrush-latex's editor with its live preview, a draft kept as it's typed,
+  // submitted for the instructor, who grades the same source's preview (read only) with a rubric
+  const P = q(6);
+  await a.until(`!!${P}.querySelector('.proofbox .tex-page.tex-embed .tex-preview .ch')`, 60000);
+  ok(await a.ev(`!${P}.querySelector('.tex-only-preview') && /Base case/.test(${P}.querySelector('.tex-preview').textContent)`), "proof: the LaTeX editor shows the starter with its live preview");
+  const MINE = "\\\\documentclass{article}\\n\\\\begin{document}\\n\\\\section*{Proof}\\nInduction on $n$. Base case $n = 1$: $1 = \\\\frac{1 \\\\cdot 2}{2}$.\\n\\nAdaInductiveStep: if it holds for $k$, then $\\\\frac{k(k+1)}{2} + k + 1 = \\\\frac{(k+1)(k+2)}{2}$.\\n\\\\end{document}\\n";
+  await a.ev(`(() => { const t = ${P}.querySelector('.tex-src'); t.value = "${MINE}"; t.dispatchEvent(new Event('input')); })()`);
+  await a.until(`/AdaInductiveStep/.test(${P}.querySelector('.tex-preview').textContent) && !!${P}.querySelector('.tex-preview .katex')`, 30000);
+  ok(true, "proof: the preview follows the typing, its math typeset");
+  await a.until(`/AdaInductiveStep/.test(demo.course.draft('Ada Lovelace', 'q7') || '')`, 5000);
+  ok(await a.ev(`/Draft kept/.test(${P}.querySelector('.saved').textContent)`), "proof: the draft is kept in this browser");
+  await a.send("Page.reload");
+  await a.until(`window.demo && !!document.querySelectorAll('#items .q')[6]?.querySelector('.tex-src')`, 60000);
+  ok(await a.ev(`/AdaInductiveStep/.test(${q(6)}.querySelector('.tex-src').value)`), "proof: a reload keeps the draft");
+  await a.ev(`${q(6)}.querySelector('button.check').click()`);
+  await a.until(`!!${q(6)}.querySelector('.tex-only-preview .tex-preview .ch')`, 60000);
+  ok(await a.ev(`/instructor will grade/.test(${q(6)}.querySelector('.attempts').textContent) && /AdaInductiveStep/.test(${q(6)}.querySelector('.tex-preview').textContent) && !${q(6)}.querySelector('button.check')`), "proof: submitted, it shows as a read-only preview");
+  // the instructor grades it: question 7, each student's proof as its preview
+  await a.ev(`document.getElementById('as-instructor').click()`);
+  await a.ev(`document.querySelector('#grader .tabs button[data-q="6"]').click()`);
+  await a.ev(`document.querySelectorAll('#grader .roster button')[2].click()`);
+  await a.until(`/Noether/.test(document.querySelector('#grader .work h2').textContent) && !!document.querySelector('#grader .work .proofbox .tex-only-preview .tex-preview .ch')`, 60000);
+  ok(await a.ev(`/Inductive step/.test(document.querySelector('#grader .work .tex-preview').textContent) && !!document.querySelector('#grader .work .tex-preview .katex')`), "instructor: a classmate's proof is shown as its typeset preview, read only");
+  ok(await a.ev(`document.querySelectorAll('.tex-page.tex-embed').length === 1`), "instructor: one editor at a time (the student's was closed)");
+  // on a phone, in focus, the proof's preview stays within the width (the grid column doesn't grow with it)
+  await a.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  for (const f of [false, true]) {
+    await a.ev(`demo.setFocus(${f})`);
+    await a.until(`!!document.querySelector('#grader .work .tex-preview .ch')`, 60000);
+    ok(await a.ev(`(() => { const r = document.querySelector('#grader .work').getBoundingClientRect(), b = document.querySelector('#grader .work .proofbox').getBoundingClientRect(); return r.right <= innerWidth + 1 && b.right <= innerWidth + 1; })()`), `phone${f ? " focus" : ""}: the proof's preview fits the width`);
+  }
+  await a.ev(`demo.setFocus(false)`);
+  await a.send("Emulation.clearDeviceMetricsOverride");
+  await a.ev(`(document.querySelectorAll('#grader .rubric input').forEach((c) => (c.checked = true)), document.querySelector('#grader .save').click())`);
+  await a.ev(`document.querySelectorAll('#grader .roster button')[0].click()`);
+  await a.until(`/AdaInductiveStep/.test(document.querySelector('#grader .work .tex-preview')?.textContent || '')`, 60000);
+  ok(await a.ev(`document.querySelectorAll('.tex-page.tex-embed').length === 1`), "instructor: moving to the next proof replaces the editor (no leak)");
+  await a.ev(`(document.querySelectorAll('#grader .rubric input').forEach((c) => (c.checked = true)), document.querySelector('#grader .comment').value = 'Clear and complete.', document.querySelector('#grader .save').click())`);
+  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /23 \\/ 23/.test(r.textContent)) && [...document.querySelectorAll('#gb tr')].some((r) => /Emmy Noether/.test(r.textContent) && /14 \\/ 23/.test(r.textContent))`), `instructor: the proof grades reach the gradebook (Ada 23 / 23, Emmy 10 + 4 = 14 / 23): ${await a.ev(`[...document.querySelectorAll('#gb tr')].map((r) => r.textContent).join(" | ")`)}`);
+  await a.ev(`document.getElementById('as-student').click()`);
+  ok(await a.ev(`document.getElementById('score').textContent === '23 / 23' && /Graded by your instructor.*Clear and complete/.test(${q(6)}.querySelector('.attempts').textContent)`), "proof: the student sees the grade and the comment");
+  // the fallback editor (?latex=0, or no LaTeX build): a textarea and a KaTeX preview, text never parsed as HTML
+  await a.send("Page.navigate", { url: new URL("questions/?latex=0", base).href });
+  await a.until(`window.demo && !!document.querySelectorAll('#items .q')[6]?.querySelector('.proof-fallback .proof-prev .katex')`, 60000);
+  ok(await a.ev(`/AdaInductiveStep/.test(${q(6)}.querySelector('.proof-prev').textContent) && !${q(6)}.querySelector('.tex-page')`), "proof fallback: the submitted proof shows as text with typeset math");
   // the flag off: no plot questions, the old 14-point assignment
-  await a.send("Page.navigate", { url: new URL("questions/?plots=0", base).href });
+  await a.send("Page.navigate", { url: new URL("questions/?plots=0&proof=0", base).href });
   await a.until("window.demo && document.querySelectorAll('#items .q').length === 4");
-  ok(await a.ev(`!document.querySelector('#items .fig figure')`), "?plots=0: the plot questions are hidden");
+  ok(await a.ev(`!document.querySelector('#items .fig figure')`), "?plots=0&proof=0: the plot and proof questions are hidden");
   await a.send("Page.navigate", { url: new URL("questions/?focus=0#instructor", base).href });
   await a.until("window.demo && !document.getElementById('grader').hidden && !!document.querySelector('#grader .pager')");
   ok(await a.ev(`!document.querySelector('#grader .focusbtn')`), "?focus=0: no focus icon");
