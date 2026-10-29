@@ -306,6 +306,42 @@ try {
   await a.send("Page.navigate", { url: new URL("questions/?latex=0", base).href });
   await a.until(`window.demo && !!document.querySelectorAll('#items .q')[6]?.querySelector('.proof-fallback .proof-prev .katex')`, 60000);
   ok(await a.ev(`/AdaInductiveStep/.test(${q(6)}.querySelector('.proof-prev').textContent) && !${q(6)}.querySelector('.tex-page')`), "proof fallback: the submitted proof shows as text with typeset math");
+  // QP-A2: the last text of a draft is kept on an immediate switch, view change or reload (no wait for the debounce)
+  const typeFallback = (text) => `(() => { const t = ${q(6)}.querySelector('.proof-fallback textarea'); t.value = ${JSON.stringify(text)}; t.dispatchEvent(new Event('input')); })()`;
+  await a.ev(`(document.getElementById('student').value = 'Srinivasa Ramanujan', document.getElementById('student').dispatchEvent(new Event('change')))`);
+  await a.until(`!!${q(6)}.querySelector('.proof-fallback textarea')`, 30000);
+  await a.ev(typeFallback("\\documentclass{article}\n\\begin{document}\nDraftOne at once.\n\\end{document}\n"));
+  await a.ev(`(document.getElementById('student').value = 'Ada Lovelace', document.getElementById('student').dispatchEvent(new Event('change')))`);
+  ok(await a.ev(`/DraftOne/.test(demo.course.draft('Srinivasa Ramanujan', 'q7') || '')`), "drafts (fallback): switching student at once keeps the last text");
+  await a.ev(`(document.getElementById('student').value = 'Srinivasa Ramanujan', document.getElementById('student').dispatchEvent(new Event('change')))`);
+  await a.until(`/DraftOne/.test(${q(6)}.querySelector('.proof-fallback textarea')?.value || '')`, 30000);
+  await a.ev(typeFallback("\\documentclass{article}\n\\begin{document}\nDraftTwo at once.\n\\end{document}\n"));
+  await a.ev(`document.getElementById('as-instructor').click()`);
+  ok(await a.ev(`/DraftTwo/.test(demo.course.draft('Srinivasa Ramanujan', 'q7') || '')`), "drafts (fallback): switching to the grading view at once keeps the last text");
+  await a.ev(`document.getElementById('as-student').click()`);
+  await a.until(`/DraftTwo/.test(${q(6)}.querySelector('.proof-fallback textarea')?.value || '')`, 30000);
+  await a.ev(typeFallback("\\documentclass{article}\n\\begin{document}\nDraftThree at once.\n\\end{document}\n"));
+  await reload();
+  ok(await a.ev(`/DraftThree/.test(demo.course.draft('Srinivasa Ramanujan', 'q7') || '')`), "drafts (fallback): a reload at once keeps the last text");
+  // the same with sagebrush-latex's editor: typed, then reloaded at once
+  await a.send("Page.navigate", { url: new URL("questions/", base).href });
+  await a.until(`window.demo && document.querySelectorAll('#items .q').length === 7`, 60000);
+  await a.ev(`(document.getElementById('student').value = 'Srinivasa Ramanujan', document.getElementById('student').dispatchEvent(new Event('change')))`);
+  await a.until(`!!document.querySelectorAll('#items .q')[6]?.querySelector('.tex-src') && !document.querySelectorAll('#items .q')[6].querySelector('.tex-src').readOnly`, 60000);
+  await a.ev(`(() => { const t = ${q(6)}.querySelector('.tex-src'); t.value = "\\\\documentclass{article}\\n\\\\begin{document}\\nDraftFour at once.\\n\\\\end{document}\\n"; t.dispatchEvent(new Event('input')); })()`);
+  await reload();
+  ok(await a.ev(`/DraftFour/.test(demo.course.draft('Srinivasa Ramanujan', 'q7') || '')`), "drafts (LaTeX editor): a reload at once keeps the last text");
+  // QP-A3: a total saved with an older maximum (say 14, before the proof question) is sent again over the new one
+  await a.ev(`(() => { const t = demo.totals('Ada Lovelace'); demo.course.state.scores['Ada Lovelace'] = { score: t.score, max: 14, pending: t.pending, at: 1 }; demo.course.save(); })()`);
+  await reload();
+  ok(await a.ev(`demo.course.state.scores['Ada Lovelace'].max === 23 && [...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /\\/ 23/.test(r.textContent))`), "gradebook: a total saved over an older maximum is sent again over the current one");
+  // QP-A1: Reset demo with a comment still waiting to save: nothing of the old grade comes back
+  await a.ev(`document.getElementById('as-instructor').click()`);
+  await a.ev(`document.querySelector('#grader .tabs button[data-q="3"]').click()`);
+  await a.ev(`document.querySelectorAll('#grader .roster button')[1].click()`);
+  await a.ev(`(() => { const t = document.querySelector('#grader .comment'); t.value = 'Written just before the reset.'; t.dispatchEvent(new Event('input')); document.getElementById('reset').click(); })()`);
+  await sleep(900);
+  ok(await a.ev(`!demo.course.grade('Alan Turing', 'q4') && Object.keys(demo.course.state.grades || {}).length === 0`), "reset: a comment's pending save doesn't bring the old grade back");
   // the flag off: no plot questions, the old 14-point assignment
   await a.send("Page.navigate", { url: new URL("questions/?plots=0&proof=0", base).href });
   await a.until("window.demo && document.querySelectorAll('#items .q').length === 4");
