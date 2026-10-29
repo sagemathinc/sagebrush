@@ -285,7 +285,7 @@ try {
     await a.ev(`document.getElementById('as-student').click()`);
     await a.ev(`(document.getElementById('student').value = 'Alan Turing', document.getElementById('student').dispatchEvent(new Event('change')))`);
     await a.until(`!!${q(6)}.querySelector('.tex-only-preview .tex-preview .ch') && ${q(6)}.querySelectorAll('.sb-cm-bubble, .sb-cm-badge').length >= 1`, 60000);
-    ok(await a.ev(`/1 comment on your proof/.test(${q(6)}.querySelector('.attempts').textContent) && /Which sides\\?/.test(${q(6)}.textContent)`), "annotations: Alan sees the comment with his grade");
+    ok(await a.ev(`/1 comment on your proof/.test(${q(6)}.querySelector('.attempts').textContent) && /Which sides\\?/.test(${q(6)}.textContent)`), "annotations: Alan sees the comment with his grade (a numbered list under the proof, and its badge or bubble)");
     await a.ev(`(() => { const root = ${q(6)}.querySelector('.tex-preview'); const r = document.createRange(); r.selectNodeContents(root.querySelector('.ch')); getSelection().removeAllRanges(); getSelection().addRange(r); document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true })); })()`);
     await sleep(300);
     ok(await a.ev(`(demo.course.annotations('Alan Turing', 'q7') || []).length === 1 && !/^(TEXTAREA|INPUT)$/.test(document.activeElement?.tagName)`), "annotations: the student's view is view-only (c adds nothing)");
