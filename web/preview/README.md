@@ -113,6 +113,9 @@ Remote work uses one pool of at most eight requests in flight. Assets and polici
 finish before HTML starts; every upload/skip finishes before stale deletion.
 The first error stops new work, drains the at-most-eight in-flight operations,
 and fails without printing a URL. The same 20-minute abort covers every phase.
+An admitted item checks for pool failure again after HEAD and before PUT, so
+draining after the first failure needs at most the already-running requests'
+30-second bound, rather than a new HEAD-plus-PUT chain.
 For an existing key, a HEAD compares the current object's signed
 `preview-sha256` metadata, content length and content type with the prepared body.
 Only exact matches skip PUT. PUT writes that digest as signed R2 metadata. Legacy
@@ -230,6 +233,7 @@ the lane's existing interface; the shared switch does not invent a new protocol.
 | Previous listing | At most 6,000 objects / 6 pages of 1,000 keys, 8 MiB/page; all keys checked before uploads |
 | Remote phase and requests | 20 minutes overall; each S3 request also 30 seconds including body consumption; no retries |
 | Upload/deletion | At most 8 requests in flight; at most 3,000 HEADs + 3,000 PUTs + 6,000 DELETEs, plus at most 6 listing GETs; exact frozen manifest buffers, no source rereads or multipart uploads |
+| Publisher memory planning envelope | 1 GiB/process: 200 MiB manifest + 128 MiB active transport input (8 x 16 MiB) + 256 MiB allowance for transport copies/buffers + 128 MiB listing/decoded-key transients + 312 MiB Node/TLS/preparation overhead. HTML transport input is at most 64 MiB. This is a conservative operational budget, not an enforced RSS limit or a claim about fetch's implementation; platform/runtime overhead is not proved by a mocked test. |
 
 The build commands use their normal lifecycle; this script is not a process-tree
 supervisor and sets no ad hoc kill deadline for build subprocesses. Use the
@@ -248,7 +252,7 @@ runtime suite was also run through the project wrapper:
 /home/user/sagebrush-coord/bin/ptest -m 3 -- node --test web/preview/test-preview.mjs
 ```
 
-The latest pre-freeze run passed all 20 tests with 0 failures, including the upload pool, hash skipping, failure drain, deployment-entry export shape and separate HTML/non-HTML byte boundaries. Exact output is included in the review packet.
+The latest pre-freeze run passed all 22 tests with 0 failures, including the upload pool, hash skipping, a peer failing while another request is in HEAD, the 8 x 16 MiB active-input control, deployment-entry export shape and separate HTML/non-HTML byte boundaries. Exact output is included in the review packet.
 This is information to catch bugs, not CI/VM merge evidence. The suite covers
 routing, headers, fail-closed CSP, preserved engine bytes, banner/SW handling,
 mock gating, prefix/empty-key safety, frozen bodies and hashes, final count/size

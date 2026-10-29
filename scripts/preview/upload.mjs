@@ -2,10 +2,11 @@
 export const UPLOAD_CONCURRENCY = 8;
 async function pool(items, operation, signal) {
   let cursor = 0, failure;
+  const check = () => { if (failure) throw failure; signal.throwIfAborted(); };
   await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, items.length) }, async () => {
     while (!failure && cursor < items.length) {
       const item = items[cursor++];
-      try { signal.throwIfAborted(); await operation(item); }
+      try { check(); await operation(item, check); }
       catch (error) { failure ??= error; }
     }
   }));
@@ -17,11 +18,13 @@ export async function upload(client, name, output, signal) {
   const entries = [...output.files];
   const keep = new Set(entries.map(([path]) => `${name}/${path}`));
   let uploaded = 0, skipped = 0;
-  const put = async ([path, file]) => {
+  const put = async ([path, file], check) => {
     const key = `${name}/${path}`;
     // Compare the CURRENT object's metadata, not a last-success manifest: an
     // interrupted publish may have replaced this key since that manifest.
-    if (previous.has(key) && await client.matches(key, file)) { skipped++; return; }
+    const same = previous.has(key) && await client.matches(key, file);
+    check(); // A peer can fail during HEAD: never start a successor PUT then.
+    if (same) { skipped++; return; }
     await client.put(key, file.bytes, file.type);
     uploaded++;
   };

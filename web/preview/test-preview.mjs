@@ -329,3 +329,40 @@ test('skip compares current signed object metadata, size and type; missing/legac
     status = 200; await client.put('latex/a.js', bytes, MIME.js);
   } finally { globalThis.fetch = original; }
 });
+
+test('peer failure while an item is in HEAD prevents its successor PUT', async () => {
+  const files = new Map(['fail.js', 'head.js', 'index.html'].map(path => [path, { bytes: Buffer.from('x'), type: MIME.js }]));
+  let releaseHead, releaseFailure, startedHead;
+  const headStarted = new Promise(resolve => { startedHead = resolve; });
+  const heldHead = new Promise(resolve => { releaseHead = resolve; });
+  const failNow = new Promise(resolve => { releaseFailure = resolve; });
+  const puts = [];
+  const client = {
+    async list() { return ['latex/head.js', 'latex/stale.js']; },
+    async matches() { startedHead(); await heldHead; return false; },
+    async put(key) { puts.push(key); await failNow; throw new Error('peer failed'); },
+    async delete() { assert.fail('no stale deletion after failure'); },
+  };
+  const result = upload(client, 'latex', { files }, new AbortController().signal);
+  await headStarted; releaseFailure();
+  await new Promise(resolve => setTimeout(resolve, 5)); // Failure reaches pool while HEAD stays held.
+  releaseHead();
+  await assert.rejects(result, /peer failed/);
+  assert.deepEqual(puts, ['latex/fail.js']);
+});
+
+test('eight 16 MiB non-HTML buffers bound active transport input to 128 MiB', async () => {
+  const files = new Map(Array.from({ length: UPLOAD_CONCURRENCY }, (_, i) => [`large${i}.bin`, { bytes: Buffer.alloc(MAX_FILE_BYTES), type: MIME.bin }]));
+  let activeBytes = 0, peakBytes = 0;
+  const client = {
+    async list() { return []; },
+    async put(key, bytes) {
+      assert.equal(bytes, files.get(key.slice('latex/'.length)).bytes);
+      activeBytes += bytes.length; peakBytes = Math.max(peakBytes, activeBytes);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      activeBytes -= bytes.length;
+    },
+  };
+  assert.deepEqual(await upload(client, 'latex', { files }, new AbortController().signal), { uploaded: 8, skipped: 0 });
+  assert.equal(peakBytes, 128 * 1024 * 1024); assert.equal(activeBytes, 0);
+});
