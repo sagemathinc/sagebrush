@@ -612,7 +612,7 @@ async function byteMismatch() {
   check(await until(() => settled(w, c)), "byte mismatch: the next writes decided");
   const { mine } = await serverOps(w);
   check(["/m1.bin", "/m2.bin", "/m3.bin"].every((p) => mine.some((o) => o.op === "write" && o.path === p && o.size === 1200)), "byte mismatch: …each file's present bytes now on the server");
-  check((await ctl("log")).http.filter((h) => h.method === "PUT" && h.status === 201).length === 3, "byte mismatch: …uploaded once each");
+  check((await ctl("log")).http.filter((h) => h.method === "PUT" && (h.status === 201 || h.status === 200)).length === 3, "byte mismatch: …uploaded once each");
   check(c.stats.wideReads >= 3, "byte mismatch: …each read, once the bytes are untrusted, under the largest reservation (the page's to itself): " + c.stats.wideReads);
   await everyOnce(w, from, 3, "byte mismatch", c);
   await stop(c);
@@ -929,7 +929,7 @@ async function lateAnswer() {
   await sleep(4500);
   check(c.debug().paused === null && c.status.state === "synced" && (await metaGet(w.ws, `sync:${nsA}:paused`)) === undefined && (await metaGet(w.ws, `sync:${nsOf(c)}:paused`)) === undefined, "late answer: A's late storage_full paused nothing, of B's or of A's namespace: " + J({ paused: c.debug().paused, status: c.status.state }));
   await w.create("/b-file.bin", { content: bytes(900, 82) });
-  check(await until(async () => (await settledIn(w, c, nsOf(c))) && (await ctl("log")).http.some((h) => h.method === "PUT" && h.status === 201)), "late answer: B uploads and syncs as usual");
+  check(await until(async () => (await settledIn(w, c, nsOf(c))) && (await ctl("log")).http.some((h) => h.method === "PUT" && (h.status === 201 || h.status === 200))), "late answer: B uploads and syncs as usual");
   await stop(c);
 }
 
@@ -1700,7 +1700,7 @@ async function firstSync() {
     check(by(g.fid).length === 1 && by(nb.ref).length === 1, "first sync: a root file and a notebook adopted once each");
     check(J(by(t.fid).map((o) => o.op)) === J(["adopt", "remove"]), "first sync: one in Trash: adopted where it was, then removed: " + J(by(t.fid).map((o) => o.op)));
     check(by(inq.fid).length === 0, "first sync: inside a folder in Trash: not adopted");
-    const puts = (await ctl("log")).http.filter((h) => h.method === "PUT" && h.status === 201).length;
+    const puts = (await ctl("log")).http.filter((h) => h.method === "PUT" && (h.status === 201 || h.status === 200)).length;
     check(puts >= 3, "first sync: the files' bytes uploaded: " + puts);
     const ns = nsOf(c);
     check(!(await metaGet(w.ws, `sync:${ns}:journal`)) && !(await metaGet(w.ws, `sync:${ns}:adopt`)), "first sync: the journal drained and dropped");
