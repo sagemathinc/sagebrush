@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "A class iterates and tests true by its metaclass's methods (iter() and truth in src/runtime/ops.ts). Measured locally with CI's bun 1.4.4 tool: master 295a937e against this branch merged; cli/pyjs.cjs grew 35 bytes, within its 64-byte jitter allowance.",
+  "bytes": {
+    "engine/sagebrush-worker.js": 3
+  }
+}
