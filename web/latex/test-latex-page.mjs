@@ -88,6 +88,46 @@ try {
   await go(base);
   await until(`!!${W}`, 60000);
   await ev(`localStorage.removeItem("sagebrush-latex-preview"); true`);
+  // ---- a new LaTeX document on a phone (William's phone test, Oct 29: the file panel's buttons were the only way, and
+  // could be covered): at 390 x 844, the empty file list (this profile has no files yet) offers "New LaTeX document",
+  // and the File menu's New group "LaTeX document" (before Folder); each in view, not covered (the element at its
+  // centre is the button itself), and each makes a .tex and opens it in the editor
+  {
+    await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    const reach = (sel, text) => ev(`(() => {
+      const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.firstChild?.textContent === ${JSON.stringify(text)});
+      if (!b) return { found: false, items: [...document.querySelectorAll(${JSON.stringify(sel)})].map((x) => x.textContent) };
+      b.scrollIntoView({ block: "center" });
+      const r = b.getBoundingClientRect(), at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { found: true, inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth, top: at === b || b.contains(at), at: at ? at.tagName + "#" + at.id + "." + at.className + " " + (at.textContent ?? "").slice(0, 40) : null, w: innerWidth, h: innerHeight };
+    })()`);
+    const madeAs = async (p) => (await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000)) && ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid)`);
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    // (a first visit has /Welcome.ipynb: removed, to the Trash, for the empty list)
+    await until(`!!document.querySelector('.sbfiles .frow[data-path="/Welcome.ipynb"]')`, 20000);
+    await ev(`${W}.remove("/Welcome.ipynb").then(() => true)`);
+    const listed = await until(`[...document.querySelectorAll(".sbfiles .fempty button")].some((b) => b.textContent === "New LaTeX document")`, 20000);
+    const er = listed ? await reach(".sbfiles .fempty button", "New LaTeX document") : await ev(`({ files: !!document.querySelector(".sbfiles"), hidden: document.getElementById("wssidebar")?.hidden, rows: [...document.querySelectorAll(".sbfiles .frow")].map((r) => r.dataset.path).slice(0, 8), empty: [...document.querySelectorAll(".sbfiles .fempty")].map((x) => x.textContent.slice(0, 60)) })`);
+    check(listed && er.found && er.inView && er.top && er.w === 390, "phone: the empty file list offers New LaTeX document, in view and not covered", er);
+    if (listed) { await mark(); await ev(`([...document.querySelectorAll(".sbfiles .fempty button")].find((b) => b.textContent === "New LaTeX document").click(), true)`); }
+    check(listed && await madeAs("/Untitled.tex"), "phone: New LaTeX document (the empty file list): /Untitled.tex made and opened in the editor");
+    // (the File menu with the files panel closed: on a phone the panel lies over the page, as it is meant to)
+    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    const fb = await reach("#filebtn", "File ▾");
+    await ev(`(document.getElementById("filebtn").click(), true)`);
+    await until(`!!document.querySelector('.fmgroup[aria-label="New"]')`, 10000);
+    await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);
+    const items = await ev(`[...document.querySelectorAll('.fmgroup[aria-label="New"] button')].map((b) => b.dataset.item ?? b.firstChild?.textContent)`);
+    const mr = await reach('.fmgroup[aria-label="New"] button', "LaTeX document");
+    check(fb.found && fb.inView && fb.top && items.indexOf("LaTeX document") >= 0 && items.indexOf("LaTeX document") === items.indexOf("newFolder") - 1 && mr.found && mr.inView && mr.top,
+      "phone: File > New offers LaTeX document (before Folder), File and the item in view and not covered", { fb, items, mr });
+    await mark(); await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX document").click(), true)`);
+    check(await madeAs("/Untitled (2).tex"), "phone: File > New > LaTeX document: /Untitled (2).tex made and opened in the editor");
+    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+    await send("Emulation.clearDeviceMetricsOverride");
+  }
   const fid = await mk("/t/doc.tex", enc(DOC));
   requests.length = 0;
   await go(base + "?tex=" + fid);
@@ -341,17 +381,17 @@ try {
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await go(base + q); await until(`!!${W}`, 60000);
     await until(`!!document.querySelector('.sbfiles .fh button[aria-label="New"]')`, 20000);
-    return ev(`(() => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
+    return ev(`(async () => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); await new Promise((r) => setTimeout(r, 0)); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
   };
   const offItems = await newMenu("");
   check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "Folder"]), "A0: the editor off: New offers no LaTeX file", offItems);
   const onItems = await newMenu("?latex=1");
-  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX file", "Folder"]), "A0: the editor on: New offers a LaTeX file", onItems);
+  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder"]), "A0: the editor on: New offers a LaTeX file", onItems);
   await mark();
-  await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "LaTeX file").click(), true)`);
+  await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "LaTeX document").click(), true)`);
   const made = await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000);
-  const newTex = made && await ev(`${W}.stat("/Untitled.tex").then((e) => ({ kind: e?.kind, fid: e?.fid ?? "", here: !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid }))`);
-  check(made && newTex.kind === "file" && newTex.fid && newTex.here && JSON.stringify(await bytesOf("/Untitled.tex")) === JSON.stringify(enc("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n")), "A0: New, LaTeX file: /Untitled.tex made (a stable id, a short document) and opened in the editor", newTex);
+  const newTex = made && await ev(`${W}.stat("/Untitled (3).tex").then((e) => ({ kind: e?.kind, fid: e?.fid ?? "", here: !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid }))`);
+  check(made && newTex.kind === "file" && newTex.fid && newTex.here && JSON.stringify(await bytesOf("/Untitled (3).tex")) === JSON.stringify(enc("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n")), "A0: New, LaTeX document: /Untitled (3).tex (the phone checks made the first two) made, with a short document, and opened in the editor", newTex);
   // A1, A7: the files shown beside the page, not over it; Files hides and shows them, the document staying open
   const UXDOC = "\\documentclass{article}\n\\begin{document}\n\\section{Hello}\nSome text " + "long words ".repeat(60) + "\n\\end{document}\n";
   const fu = await mk("/t/ux.tex", enc(UXDOC));
