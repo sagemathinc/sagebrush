@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "type() with keywords calls the winning metaclass's own __new__ directly with the caller's dict, then the new class's type's __init__ (PR 314 revision for TYPEKW-A1). A top-up over 2026-10-29-type-call-keywords.json: measured locally with CI's bun 1.4.4 tool, master 3038ddc2 against this branch merged, cli/pyjs.cjs +948 and engine/sagebrush-worker.js +658 in all.",
+  "bytes": {
+    "cli/pyjs.cjs": 131,
+    "engine/sagebrush-worker.js": 41
+  }
+}
