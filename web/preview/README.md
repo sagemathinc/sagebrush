@@ -156,11 +156,17 @@ shell worker's stricter policy stay intact. JS workers retain the eval/WebAssemb
 capability needed by the interpreter. External auth, sync and remote backends must
 be replaced by lane mocks; the preview Worker has no proxy endpoints.
 
-The publisher inserts a visible `PREVIEW, not production` banner and an external
-same-origin config script into user-facing HTML. Existing inline scripts are
-unchanged, so their CSP hashes remain valid. `engine/`, `runner/` and `frame/` HTML
+The publisher inserts a small bottom-left `PREVIEW, not production` button and a
+same-origin config script into user-facing HTML. A safe-area-aware bottom gutter
+keeps it below notebook, file-panel and LaTeX controls. Clicking it opens a native
+modal describing the unmerged branch, browser-only work, absence of accounts and
+cloud sync, and 14-day preview expiry. It shows the source branch and full commit
+captured before building, including a warning for uncommitted changes. “Hide for
+this session” removes the notice and its gutter, recording the choice in
+`sessionStorage` until the tab closes. No external service or inline script is
+added; the existing preview CSP and inline-script hashes remain unchanged. `engine/`, `runner/` and `frame/` HTML
 is preserved byte-for-byte: adding a banner there would break engine manifests,
-runner sizing or exported frames. The containing preview page carries the banner.
+runner sizing or exported frames. The containing preview page carries the notice.
 Those directories are for machine/embedded pages, not independent preview UIs.
 
 The regular app service worker's digest table describes the unmodified production
@@ -230,11 +236,13 @@ runtime suite was also run through the project wrapper:
 /home/user/sagebrush-coord/bin/ptest -m 3 -- node --test web/preview/test-preview.mjs
 ```
 
-The latest pre-publish run passed all 17 tests with 0 failures, including the deployment-entry export shape and separate HTML/non-HTML byte boundaries. Exact output is included in the review packet.
+The latest pre-publish run passed all 18 tests with 0 failures, including the deployment-entry export shape and separate HTML/non-HTML byte boundaries. Exact output is included in the review packet.
 This is information to catch bugs, not CI/VM merge evidence. The suite covers
-routing, headers, fail-closed CSP, preserved engine bytes, banner/SW handling,
+routing, headers, fail-closed CSP, preserved engine bytes, notice/SW handling,
 mock gating, prefix/empty-key safety, frozen bodies and hashes, final count/size
 boundaries, header rule/byte boundaries, previous-list admission and remote abort.
-Network requests are mocked. No build, real R2 request, credential read, VM proof
-or deployment has been performed. A signed R2 smoke publish and real-browser
-cross-origin-isolation/LaTeX check remain rollout checks.
+R2 requests are mocked. A localhost Chromium check at 390 x 844 verifies file-panel
+controls, the modal, CSP and session dismissal across reloads. The notice was also
+checked on a local build of the published LaTeX source: New -> LaTeX file remained
+reachable in both the notebook and editor file panels, and dismissal persisted on
+reload. These checks do not publish, read credentials or deploy a Worker.
