@@ -2288,17 +2288,20 @@ async function s5Rows() {
     const sent = l.sent.filter((m) => m.t === "ops");
     return sent.flatMap((m) => m.dseqs).length >= 2 && l.got.filter((g) => g.t === "ack" && g.dropped).length === sent.length;
   };
-  check(await until(allWithheld, 10_000), "rows: the acks withheld by the front");
+  const withheld = await until(allWithheld, 10_000);
+  check(withheld, "rows: the acks withheld by the front" + (withheld ? "" : " " + (await rowsWhy(w, owner, [d.ident, f.ident]))));
   const both = await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 2, 5000);
   check(both, "rows: a mkdir and a create waiting (scanned, sent, ack withheld): ↑ on both" + (both ? "" : " " + (await rowsWhy(w, owner, [d.ident, f.ident]))));
   // (the hold lifted (one ack of the two may be left, when they went in one message), then the resend)
   await ctl("set", { set: { dropAcks: 0 } });
   await ctl("closeAll");
-  check(await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 0, 15_000), "rows: after the resend and its ack: cleared");
+  const resent = await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 0, 15_000);
+  check(resent, "rows: after the resend and its ack: cleared" + (resent ? "" : " " + (await rowsWhy(w, owner, [d.ident, f.ident]))));
   await ctl("log", { reset: true });
   await ctl("set", { set: { dropAcks: 1 } });
   await w.rename("/r1", "/r2");
-  check(await until(ackDropped, 10_000), "rows: the rename sent, its ack withheld by the front");
+  const renameWithheld = await until(ackDropped, 10_000);
+  check(renameWithheld, "rows: the rename sent, its ack withheld by the front" + (renameWithheld ? "" : " " + (await rowsWhy(w, owner, [d.ident]))));
   const renaming = await until(async () => (await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 5000);
   check(renaming, "rows: an undecided rename on a folder whose mkdir was accepted: ↑" + (renaming ? "" : " " + (await rowsWhy(w, owner, [d.ident]))));
   await ctl("closeAll");
