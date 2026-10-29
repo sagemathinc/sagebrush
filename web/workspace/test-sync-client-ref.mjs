@@ -297,19 +297,25 @@ async function serve(req, server) {
 }
 
 const okCode = (c) => (c === 1000 || (c >= 3000 && c <= 4999) ? c : 1000);
+/** One proxied pair's closer: both sides closed, once (`first` runs then); says what failed, each side tried whatever
+ * the other did (empty when both closed, or when it had already closed them) */
+const pairCloser = (up, client, first) => {
+  let closed = false;
+  return (code = 1000) => {
+    if (closed) return [];
+    closed = true;
+    first();
+    const bad = [];
+    try { up.close(1000, "proxy"); } catch (e) { bad.push(`the server's side (${why(e)})`); }
+    try { client.close(okCode(code), "proxy"); } catch (e) { bad.push(`the page's side (${why(e)})`); }
+    return bad;
+  };
+};
 const websocket = {
   open(client) {
     const d = client.data, up = d.up;
     log.open++;
-    let closed = false;
-    d.closeBoth = (code = 1000) => {
-      if (closed) return;
-      closed = true;
-      closers.delete(d.closeBoth);
-      log.open--;
-      try { up.close(1000, "proxy"); } catch {}
-      try { client.close(okCode(code), "proxy"); } catch {}
-    };
+    d.closeBoth = pairCloser(up, client, () => { closers.delete(d.closeBoth); log.open--; });
     closers.add(d.closeBoth);
     d.send = (text) => { try { client.send(text); } catch {} };
     toPage.add(d.send);
@@ -463,7 +469,7 @@ let cleaned = null;
  * watchdog or SIGTERM), every stage attempted. */
 const cleanup = () => (cleaned ??= runStages([
   ["DevTools sockets", () => closeEach(sockets, (s) => s.close())],
-  ["proxied sockets", () => closeEach([...closers], (f) => f(1000))],
+  ["proxied sockets", () => { const bad = [], all = [...closers]; for (const f of all) try { bad.push(...f(1000)); } catch (e) { bad.push(why(e)); } return bad.length ? { ok: false, said: `NOT all closed (${bad.join(", ")})` } : { ok: true, said: `${all.length} closed` }; }],
   ["Chrome", () => stopChrome()],
   ["front", async () => { if (!server) return { ok: true, said: "never started" }; await server.stop(true); return { ok: true, said: "stopped" }; }],
   ["profile", () => removeDir(profile)],
@@ -496,6 +502,11 @@ try {
       ["a directory", () => removeDir(d)],
     ]);
     control1(!c.ok && c.line === "cleanup: a kill threw (EPERM); a front threw (injected stop failure); a directory removed" && !existsSync(d), "(control) the cleanup runs every stage after failures, names each and fails: " + c.line);
+    // (the real pair closer, its server side refusing: the failure is said, the page's side still closed, and once only)
+    let pageClosed = false;
+    const pc = pairCloser({ close() { throw Object.assign(new Error("injected"), { code: "EPIPE" }); } }, { close() { pageClosed = true; } }, () => {});
+    const pcBad = pc(1000), pcAgain = pc(1000);
+    control1(J(pcBad) === J(["the server's side (EPIPE)"]) && pageClosed && pcAgain.length === 0, "(control) a proxied pair whose close fails says so, and still closes its other side: " + J(pcBad));
     const d2 = mkdtempSync(join(tmpdir(), "sb-scr-ctl-"));
     const t0 = Date.now(), c2 = await runStages([["a stop that never ends", () => new Promise(() => {})], ["a directory", () => removeDir(d2)]], 200);
     control1(!c2.ok && c2.line === "cleanup: a stop that never ends threw (no answer within 200 ms: a stop that never ends); a directory removed" && !existsSync(d2) && Date.now() - t0 < 5000, "(control) a stage that never ends fails within its bound, and the stages after it still run: " + c2.line);
