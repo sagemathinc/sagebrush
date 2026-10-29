@@ -121,6 +121,38 @@ try {
   n = 0;
   r = await run("pwd");
   check(r?.out === "/tdir\n" && r?.status === "done", `after reset a fresh shell runs, in the same directory: ${JSON.stringify(r)}`);
+  // open, ps, top: the panel's own (William's P1)
+  r = await run("cd /");
+  r = await run("ps");
+  check(/^PID\s+TAB\s+KIND\s+STATE\s+TIME\s+MEM\s+NAME\n/.test(r?.out ?? "") && /notebook\s+\S+\s+\d\d:\d\d:\d\d.*\[this tab\]/.test(r.out) && /terminal\s+running/.test(r.out),
+    `ps lists this tab's notebook and its terminal (running ps itself): ${JSON.stringify(r?.out)}`);
+  // (a second tab of the page answers too)
+  await send("Target.createTarget", { url });
+  await new Promise((res) => setTimeout(res, 6000));
+  r = await run("ps");
+  const nbRows = (r?.out ?? "").split("\n").filter((l) => /\snotebook\s/.test(l));
+  check(nbRows.length >= 2 && nbRows.some((l) => !l.includes("[this tab]")), `ps lists another tab's notebook: ${JSON.stringify(r?.out)}`);
+  r = await run("open no-such-file.txt");
+  check(/open: no-such-file.txt: No such file or directory/.test(r?.out ?? "") && r?.exit === "exit 1" && r?.status === "exit 1", `open: a missing path is an error: ${JSON.stringify(r)}`);
+  r = await run("open");
+  check(/^usage: open FILE/.test(r?.out ?? "") && r?.exit === "exit 2", `open with no file: usage, exit 2: ${JSON.stringify(r)}`);
+  const ls = await run("ls");
+  const nbFile = (ls?.out ?? "").split("\n").find((l) => l.endsWith(".ipynb"));
+  if (nbFile) {
+    r = await run(`open '${nbFile}'`);
+    check(r?.out === `opened /${nbFile} (a notebook, in a new tab)\n` && r?.status === "done", `open a notebook: ${JSON.stringify(r)}`);
+  } else check(false, `ls shows a notebook to open: ${JSON.stringify(ls?.out)}`);
+  r = await run("echo 'ps | grep' | cat");
+  check(r?.out === "ps | grep\n", "a line with shell syntax goes to bash, not the panel's commands");
+  // top: refreshed until Stop
+  n++;
+  await evaluate(`(() => { const ta = document.querySelector(".sb-term textarea"); document.querySelector(".sb-term-status").textContent = "";
+    ta.value = "top"; ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); })()`);
+  await new Promise((res) => setTimeout(res, 2500));
+  const t1 = await evaluate(`[...document.querySelectorAll(".sb-term-cmd")].at(-1).querySelector(".sb-term-out").textContent`);
+  check(/^top - \d\d:\d\d:\d\d\s+\d+ tabs?, \d+ documents?, \d+ running/.test(t1 ?? "") && (await evaluate(`document.querySelector(".sb-term").classList.contains("running")`)) === true, `top shows a live listing and keeps running: ${JSON.stringify((t1 ?? "").slice(0, 120))}`);
+  await evaluate(`document.querySelector(".sb-term-stop").click()`);
+  check(!!(await until(`!document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent === "done"`, 5000)), "Stop ends top");
   if (process.argv[2]) {
     const shot = await send("Page.captureScreenshot", { format: "png" });
     writeFileSync(process.argv[2], Buffer.from(shot.result.data, "base64"));
