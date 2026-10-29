@@ -83,3 +83,13 @@ class OtherNew(type):
         return Other(name + "X", (), {})
 ONA = type.__new__(OtherNew, "ONA", (), {})
 t("__new__ returning another metaclass's class", lambda: type(type("ONB", (ONA,), {}, k=5)).__name__)
+
+
+# the result's __init__ must return None, as for any instance
+class R5(type):
+    def __new__(mcls, name, bases, ns, **kw):
+        return type.__new__(mcls, name, bases, ns)
+    def __init__(cls, *a, **kw):
+        return 5
+R5A = type.__new__(R5, "R5A", (), {})
+t("__init__ returning 5", lambda: type("R5B", (R5A,), {}, k=6))

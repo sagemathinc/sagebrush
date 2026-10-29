@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "type() with keywords: the new class's __init__ must return None (PR 314 revision for TYPEKW-R2-A1). A second top-up over the -r1 and -r2 markers: measured locally with CI's bun 1.4.4 tool, master bec7f56c against the merged head fc52b688, cli/pyjs.cjs +1009 and engine/sagebrush-worker.js +736 in all.",
+  "bytes": {
+    "cli/pyjs.cjs": 61,
+    "engine/sagebrush-worker.js": 78
+  }
+}
