@@ -3,9 +3,16 @@
   "names": {
     "shell.ready": 1,
     "shell.result": 1,
-    "fs.request": 2
+    "fs.request": 2,
+    "shell.configured": 3
   },
   "fields": {
-    "shell.result.rejected.refusal": 2
+    "shell.result.rejected.refusal": 2,
+    "shell.result.output.producedBytes": 3,
+    "shell.result.output.deliveredBytes": 3,
+    "shell.result.output.exceeded": 3,
+    "shell.result.output.truncated": 3,
+    "shell.result.limit.key": 3,
+    "shell.result.limit.value": 3
   }
 }

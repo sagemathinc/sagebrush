@@ -5,6 +5,10 @@
 // what the server sends one device (a chain, an owner, a snapshot), as a broken server would.  The cases are below:
 // each drives the two devices (test-doc-sync.page.js) and checks the server and both devices.
 //   CHROME=chromium bun web/workspace/test-doc-sync.mjs
+// SERVER=cloud runs the same cases against cloud's server (what DEV answers), started by the cloud checkout's own
+// entry for this test (beside its harness, run under cloud's with-core.sh), which gives this module startCloud
+// before loading it: core imports no server code.  The server-side figures only the
+// reference server keeps (a document's claimed clients) are then not checked.
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,6 +17,10 @@ import { fileURLToPath } from "node:url";
 import { ReferenceServer, SESSION_COOKIE } from "../sync-protocol/reference-server.ts";
 import { accountHash } from "../sync-protocol/protocol.ts";
 import { devtoolsPort } from "../test-port.mjs";
+import { emit, guardConsole, pairCheck } from "./doc-sync-diag.mjs";
+// (before anything that can print: every in-process console call from here on is scrubbed (doc-sync-diag.mjs
+// prints through its own printers, saved when it loaded, so this never loops back))
+guardConsole();
 
 const here = dirname(fileURLToPath(import.meta.url));
 const J = JSON.stringify;
@@ -33,19 +41,95 @@ writeFileSync(join(src, "entry.js"), [
 ].join("\n"));
 const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
 rmSync(src, { recursive: true, force: true });
-if (!b.success) { console.error(b.logs.join("\n")); process.exit(1); }
+if (!b.success) { emit.buildFail(b.logs); process.exit(1); }
 copyFileSync(join(here, "test-doc-sync.page.js"), join(site, "device.js"));
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>doc sync test</title><script type="module" src="./device.js"></script>`);
 
 // ---- the server, and the front
-const ref = new ReferenceServer();
+const CLOUD = process.env.SERVER === "cloud";
+// (everything this run prints is emitted by ./doc-sync-diag.mjs: structured lines from allow-listed fields,
+// any dynamic text only through its scrub(); this file has no console call of its own, no stream of this process is
+// wrapped, and any in-process console call (the reference server's, the cloud harness's) is scrubbed (guardConsole,
+// above); the runner pipes this process's stdout and stderr through doc-sync-diag.mjs --filter as well)
+// (the front's sync requests and sockets: numbered; the open ones, for a stopped case)
+let proxyN = 0, sockN = 0;
+const proxyOpen = new Map(), sockOpen = new Set();
+// (user-service cause pinning: with FUDBUS_AT, the VM runner's census script, run here at the
+// browser's seams and at every case, its lines in this run's output; a failure is its own line, which the judge fails)
+const SUITE = CLOUD ? "cloud" : "ref";
+const censusAt = (name) => {
+  if (!process.env.FUDBUS_AT) return;
+  const r = Bun.spawnSync(["bash", process.env.FUDBUS_AT, `${SUITE}:${name}`], { stdout: "inherit", stderr: "inherit" });
+  if (r.exitCode !== 0) emit.census(`${SUITE}:${name}`, r.exitCode);
+};
 const ACCOUNT = "d5d5d5d5-0000-4d5d-8d5d-d5d5d5d5d5d5";
-const sessions = { A: ref.signIn(ACCOUNT), B: ref.signIn(ACCOUNT), C: ref.signIn(ACCOUNT), D: ref.signIn(ACCOUNT) };
+let ref = null, cloud = null;
+if (CLOUD) {
+  // (the cloud checkout's entry gives startCloud as globalThis.__docSyncCloud before it loads this module; without
+  // it (this module run directly) the run stops, as without the harness)
+  const startCloud = globalThis.__docSyncCloud?.startCloud;
+  if (typeof startCloud !== "function") {
+    emit.harnessFail(new Error("no startCloud given: run SERVER=cloud through the cloud checkout's entry"));
+    process.exit(1);
+  }
+  cloud = await startCloud({ accounts: [ACCOUNT] });
+} else ref = new ReferenceServer();
+// (each device's session, as its Cookie header's name=value)
+const signIn = async () => (CLOUD ? await cloud.signIn(ACCOUNT) : `${SESSION_COOKIE}=${ref.signIn(ACCOUNT)}`);
+const sessions = { A: await signIn(), B: await signIn(), C: await signIn(), D: await signIn() };
 // (sync on for the account, as its first device's enable does: off, the server refuses every hello `readonly`)
-const enabled = await (await ref.fetch(new Request("http://ref/api/sync/v1/enable", { method: "POST", headers: { cookie: `${SESSION_COOKIE}=${sessions.A}` } }))).json();
-if (enabled.state !== "active") { console.error("FAIL: enable: " + J(enabled)); process.exit(1); }
+const enabled = await (CLOUD ? cloud.enable(sessions.A) : ref.fetch(new Request("http://ref/api/sync/v1/enable", { method: "POST", headers: { cookie: sessions.A } }))).then((r) => r.json());
+if (enabled.state !== "active") { emit.enableFail(enabled); process.exit(1); }
 // (what the front does to the next `batches` sent to a device: rewrite its chain, its owner, or add a snapshot)
 const tamper = { A: null, B: null };
+// (the next request of a kind answered with a refusal instead: the request still goes to the server, which does what
+// it does with it, and only its answer is replaced, as a lost answer and a refusal would look; on either server)
+const fakes = { batch: [] };
+const fake = (t, f) => fakes[t].push(f);
+// (case 14 under cloud: the front's relays.  relayVerbatim is the relay as it was before the rebuild, the
+// upstream Response returned as is (its transport headers too); it is kept ONLY behind /relay-old/, for the relay
+// control (case R).  Every other answer is rebuilt from its bytes with allow-listed headers, on either server; HEAD
+// and the bodyless statuses get no body.  WebSocket upgrades never reach here (/api/sync/v1/account is upgraded above))
+const relayVerbatim = (r) => r;
+const RELAY_HEADERS = ["content-type", "cache-control", "retry-after"];
+const NOBODY = new Set([204, 205, 304]);
+async function relayRebuilt(r, method) {
+  const bytes = method === "HEAD" || NOBODY.has(r.status) ? null : new Uint8Array(await r.arrayBuffer());
+  const h = new Headers();
+  for (const k of RELAY_HEADERS) { const v = r.headers.get(k); if (v !== null) h.set(k, v); }
+  for (const [k, v] of r.headers) if (/^x-sync-/.test(k)) h.set(k, v);
+  return { res: new Response(bytes, { status: r.status, statusText: r.statusText, headers: h }), bytes };
+}
+// (an answer's transport headers, as doc-sync-diag.mjs prints them)
+const transport = (h) => ({ te: h.get("transfer-encoding"), ce: h.get("content-encoding"), mfce: h.get("mf-content-encoding"), cl: h.get("content-length") });
+const sha256hex = async (b) => Buffer.from(await crypto.subtle.digest("SHA-256", b)).toString("hex");
+// (what case R checks, by traced call: the front's records (up: every upstream status and headers of the call, with its
+// route, as a list (a duplicate is seen, not overwritten);
+// relay: its byte receipt) and the browser's (net: the response's headers, its completion, its failure and code))
+const rec = { up: new Map(), relay: new Map(), net: new Map() };
+const netOf = (call) => { if (!rec.net.has(call)) rec.net.set(call, {}); return rec.net.get(call); };
+// (the old route's byte receipt: from a clone, read in the background and bounded at 10 s, so the Response returned
+// verbatim is neither consumed nor delayed)
+function receiptOf(call, route, c) {
+  let timer;
+  const read = c.arrayBuffer();
+  read.catch(() => {});
+  const late = new Promise((_, no) => { timer = setTimeout(() => no(Object.assign(new Error("timeout"), { name: "TimeoutError" })), 10_000); });
+  Promise.race([read, late]).then(async (b) => {
+    const r = { n: b.byteLength, sha: await sha256hex(b) };
+    rec.relay.set(call, r);
+    emit.relay(call, route, r.n, r.sha);
+  }, (e) => { rec.relay.set(call, { failed: String(e?.name) }); emit.relayFail(call, route, e?.name); }).finally(() => clearTimeout(timer));
+}
+// (a socket to cloud's server, as the reference server's connect gives one: send, close, onmessage, onclose)
+const cloudSocket = (cookie) => new Promise((ok) => {
+  const w = new WebSocket(cloud.url.replace(/^http/, "ws") + "/api/sync/v1/account", { headers: { cookie, origin: cloud.url } });
+  const s = { send: (m) => w.send(m), close: () => w.close(), onmessage: null, onclose: null };
+  w.onmessage = (e) => s.onmessage?.(String(e.data));
+  w.onclose = (e) => s.onclose?.(e.code);
+  w.onopen = () => ok(s);
+  w.onerror = () => ok({});
+});
 const front = Bun.serve({
   port: 0, hostname: "127.0.0.1",
   async fetch(req, server) {
@@ -55,11 +139,38 @@ const front = Bun.serve({
     // (case 14's real owners and Sync panel: the session's account, and the sync API with device D's session, as the
     // site serves them on its own origin)
     if (u.pathname === "/api/share/me") return Response.json({ account_id: ACCOUNT });
-    if (u.pathname.startsWith("/api/sync/")) {
-      const h = new Headers({ cookie: `${SESSION_COOKIE}=${sessions.D}` });
-      for (const k of ["content-type", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
-      const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
-      return ref.fetch(new Request("http://ref" + u.pathname + u.search, { method: req.method, headers: h, body }));
+    // (the relay control's two routes to the real server's status, differing only in the relay (case R))
+    const relayRoute = /^\/relay-(old|new)(\/api\/sync\/v1\/status)$/.exec(u.pathname);
+    if (u.pathname.startsWith("/api/sync/") || relayRoute) {
+      const route = relayRoute ? relayRoute[1] : "plain", path = relayRoute ? relayRoute[2] : u.pathname;
+      // (a traced call's id (the page's tracing fetch sends it); it is never passed on to the server)
+      const call = req.headers.get("x-test-call");
+      // (logged as it starts, and as its answer's status arrives or it throws, with the time taken: the method, the
+      // path's safe characters, the status or the error's name; a start without an end is a request still waiting)
+      const k = ++proxyN, t = Date.now();
+      proxyOpen.set(k, { method: req.method, path, t });
+      emit.syncStart(k, req.method, path);
+      try {
+        const h = new Headers({ cookie: sessions.D, ...(CLOUD ? { origin: cloud.url } : {}) });
+        for (const k of ["content-type", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
+        const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
+        const r = await (CLOUD ? fetch(cloud.url + path + u.search, { method: req.method, headers: h, body }) : ref.fetch(new Request("http://ref" + path + u.search, { method: req.method, headers: h, body })));
+        emit.syncEnd(k, req.method, path, r.status, Date.now() - t);
+        // (a traced call's upstream status and transport headers, before any relay; then its relay and receipt)
+        if (call) { if (!rec.up.has(call)) rec.up.set(call, []); rec.up.get(call).push({ route, status: r.status, h: transport(r.headers) }); emit.upHdrs(call, route, r.status, transport(r.headers)); }
+        if (route === "old") {
+          if (call) receiptOf(call, route, r.clone());
+          return relayVerbatim(r);
+        }
+        const { res, bytes } = await relayRebuilt(r, req.method);
+        if (call && bytes) { const rr = { n: bytes.byteLength, sha: await sha256hex(bytes) }; rec.relay.set(call, rr); emit.relay(call, route, rr.n, rr.sha); }
+        return res;
+      } catch (e) {
+        emit.syncError(k, req.method, path, e?.name, Date.now() - t);
+        throw e;
+      } finally {
+        proxyOpen.delete(k);
+      }
     }
     const f = { "/": "index.html", "/all.js": "all.js", "/device.js": "device.js" }[u.pathname];
     if (!f) return new Response("not found", { status: 404 });
@@ -67,13 +178,20 @@ const front = Bun.serve({
   },
   websocket: {
     async open(ws) {
-      const s = await ref.connect(`${SESSION_COOKIE}=${sessions[ws.data.dev]}`);
-      if (!s.send) return ws.close(4401, "no session");
+      const k = (ws.data.k = ++sockN), t = Date.now();
+      sockOpen.add(k);
+      emit.sockOpen(k, ws.data.dev);
+      const s = CLOUD ? await cloudSocket(sessions[ws.data.dev]) : await ref.connect(sessions[ws.data.dev]);
+      if (!s.send) { emit.sockNoUp(k, Date.now() - t); return ws.close(4401, "no session"); }
+      emit.sockUp(k, Date.now() - t);
       ws.data.s = s;
       s.onmessage = (text) => {
         const t = tamper[ws.data.dev];
-        if (t) {
-          const m = JSON.parse(text);
+        const m = JSON.parse(text), f = Number.isSafeInteger(m.req) ? ws.data.faked?.[m.req] : undefined;
+        if (f) {
+          delete ws.data.faked[m.req];
+          text = J({ t: "error", req: m.req, code: f.error.code, detail: { message: "faked", ...f.error.detail } });
+        } else if (t) {
           if (m.t === "batches" && m.items?.length) {
             tamper[ws.data.dev] = null;
             if (t === "chain") m.items[0].chain = "0".repeat(64);
@@ -84,26 +202,57 @@ const front = Bun.serve({
         }
         try { ws.send(text); } catch {}
       };
-      s.onclose = (c) => { try { ws.close(c); } catch {} };
+      s.onclose = (c) => { emit.sockServerClosed(k, c); try { ws.close(c); } catch {} };
       for (const m of ws.data.queue ?? []) s.send(m);
     },
-    message(ws, m) { if (ws.data.s) ws.data.s.send(String(m)); else (ws.data.queue ??= []).push(String(m)); },
-    close(ws) { ws.data.s?.close(); },
+    message(ws, m) {
+      const text = String(m);
+      try {
+        const x = JSON.parse(text);
+        if (fakes[x.t]?.length && Number.isSafeInteger(x.req)) (ws.data.faked ??= {})[x.req] = fakes[x.t].shift();
+      } catch {}
+      if (ws.data.s) ws.data.s.send(text); else (ws.data.queue ??= []).push(text);
+    },
+    close(ws, code) { if (sockOpen.delete(ws.data.k)) emit.sockClosed(ws.data.k, code); ws.data.s?.close(); },
   },
 });
+
+// (a document's head on cloud's server, read as another device would: a socket of A's session over the real port
+// (Bun's own WebSocket: the harness's Node-side socket needs ws's 'upgrade' event, which Bun doesn't have), hello,
+// then a pull; null after 10 s)
+async function cloudHead(id) {
+  const owner = await accountHash(ACCOUNT);
+  return new Promise((ok) => {
+    const w = new WebSocket(cloud.url.replace(/^http/, "ws") + "/api/sync/v1/account", { headers: { cookie: sessions.A, origin: cloud.url } });
+    const done = (v) => { clearTimeout(t); try { w.close(); } catch {} ok(v); };
+    const t = setTimeout(() => done(null), 10_000);
+    w.onopen = () => w.send(J({ t: "hello", v: 1, device: "probe-node-0000", name: "probe", index_after: 0 }));
+    w.onmessage = (e) => {
+      const m = JSON.parse(String(e.data));
+      if (m.t === "welcome") w.send(J({ t: "pull", req: 1, owner, doc: id, epoch: 1, after: 0, limit: 1 }));
+      else if (m.req === 1) done(m.t === "batches" ? { head: m.head?.seq } : null);
+    };
+    w.onerror = () => done(null);
+  });
+}
 
 // ---- Chromium: one browser, a context per device
 let port = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-ds-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
 const errors = [];
+// (the pages' own console warnings and errors and the browser's log entries for them, by the page's label, kept
+// here (the last 200) and printed only through emit.text)
+const labels = new Map(), pageConsole = [];
+// (the traced requests in flight, by "<sessionId>:<requestId>": their page, call and route)
+const netReq = new Map();
+const noteConsole = (s) => { pageConsole.push(String(s).slice(0, 2000)); if (pageConsole.length > 200) pageConsole.shift(); };
 // (its own deadline: a hang anywhere ends the run here, the browser killed, saying where it was)
 let step = "start";
 const t0 = Date.now();
-const progress = (what) => { step = what; console.log(`step ${((Date.now() - t0) / 1000).toFixed(1)}s: ${what}`); };
+const progress = (what) => { step = what; emit.step((Date.now() - t0) / 1000, what); if (/^case \d+$/.test(what)) censusAt(what.replace(" ", "-")); };
 const deadline = setTimeout(() => {
-  console.error(`FAIL: the run's deadline passed at step: ${step}`);
-  for (const e of errors) console.error("page error: " + e);
+  emit.deadline(step, errors);
   try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   try { rmSync(profile, { recursive: true, force: true }); rmSync(site, { recursive: true, force: true }); } catch {}
   process.exit(2);
@@ -112,6 +261,7 @@ try {
   if (!port) port = await devtoolsPort(profile);
   let version;
   for (let i = 0; i < 300; i++) { try { version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json(); break; } catch { await sleep(100); } }
+  censusAt("browser-up");
   const ws = new WebSocket(version.webSocketDebuggerUrl);
   await new Promise((r) => (ws.onopen = r));
   let n = 0;
@@ -120,6 +270,30 @@ try {
     const m = JSON.parse(ev.data);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.error ? { error: m.error } : m.result); waiting.delete(m.id); }
     if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? J(m.params.exceptionDetails));
+    if (m.method === "Runtime.consoleAPICalled" && labels.has(m.sessionId) && (m.params.type === "warning" || m.params.type === "error"))
+      noteConsole(`${labels.get(m.sessionId)} console.${m.params.type}: ` + (m.params.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(" "));
+    if (m.method === "Log.entryAdded" && labels.has(m.sessionId) && (m.params.entry?.level === "warning" || m.params.entry?.level === "error"))
+      noteConsole(`${labels.get(m.sessionId)} log.${m.params.entry.level}: ${m.params.entry.text}${m.params.entry.url ? " (" + m.params.entry.url + ")" : ""}`);
+    // (a traced request's network events (Network.enable on the pages made by pageIn), by session and requestId:
+    // requestWillBeSent maps it to its page, its call (its x-test-call header) and its route (plain, old, new); its
+    // response's headers, its completion or its failure (loadingFailed has no URL: hence the map) are then printed
+    // and recorded by call; the entry is retired when it finishes or fails)
+    if (m.method === "Network.requestWillBeSent" && labels.has(m.sessionId)) {
+      let p = "";
+      try { p = new URL(m.params.request?.url).pathname; } catch {}
+      const rm = /^\/(?:relay-(old|new)\/)?api\/(?:sync\/|share\/me$)/.exec(p);
+      const hh = Object.fromEntries(Object.entries(m.params.request?.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+      if (rm && hh["x-test-call"]) netReq.set(`${m.sessionId}:${m.params.requestId}`, { page: labels.get(m.sessionId), call: hh["x-test-call"], route: rm[1] ?? "plain" });
+    }
+    const nk = `${m.sessionId}:${m.params?.requestId}`, ne = netReq.get(nk);
+    if (ne && m.method === "Network.responseReceived") {
+      const hh = Object.fromEntries(Object.entries(m.params.response?.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+      const h = { te: hh["transfer-encoding"], ce: hh["content-encoding"], mfce: hh["mf-content-encoding"], cl: hh["content-length"] };
+      netOf(ne.call).resp = { status: m.params.response?.status, h };
+      emit.netResp(ne.page, ne.call, ne.route, m.params.response?.status, h);
+    }
+    if (ne && m.method === "Network.loadingFinished") { netOf(ne.call).done = true; emit.netDone(ne.page, ne.call, ne.route); netReq.delete(nk); }
+    if (ne && m.method === "Network.loadingFailed") { netOf(ne.call).fail = String(m.params.errorText ?? ""); emit.netFail(ne.page, ne.call, ne.route, m.params.errorText); netReq.delete(nk); }
   };
   const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(J({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
   // (a device: a browser context of its own, a page in it, its session for evaluating there)
@@ -145,6 +319,60 @@ try {
   await A.call("connect", "A", ACCOUNT);
   await B.call("connect", "B", ACCOUNT);
 
+  progress("case R");
+  // R. (case 14 under cloud) The relay control: the real server's status, through this front's two relays,
+  // fetched by a real page in a context of its own with its tracing fetch, in three old/new pairs: /relay-old/
+  // (the relay as it was before the rebuild: the upstream Response as is), then /relay-new/ (the rebuilt relay every other
+  // answer now gets), three times.  Under cloud the old relay must fail as case 14 did before the rebuild (the upstream's 200 at the front, then a named
+  // net:: failure in the browser, at the fetch or the body read: the stage is recorded) and the new one load the bytes
+  // the front relayed; under the reference server (no transport headers) both load.  Exactly 4 checks on either
+  // server (the judge compares the servers' counts); a mechanism that doesn't reproduce fails R1
+  {
+    const before = results.length;
+    const named = (c) => /^net::ERR_[A-Z0-9_]{2,200}$/.test(String(c ?? ""));
+    try {
+      const { browserContextId: rctx } = await send("Target.createBrowserContext");
+      // (pageIn, declared below in this same block, is hoisted; its default context isn't used here)
+      const Rp = await pageIn("R", rctx);
+      // (the pairs, k = 1..3, each the k-th old call then the k-th new one, one after the other)
+      const oldCalls = [], newCalls = [];
+      for (let k = 0; k < 3; k++) {
+        oldCalls.push(...(await Rp.call("relayProbe", "/relay-old/api/sync/v1/status", 1)));
+        newCalls.push(...(await Rp.call("relayProbe", "/relay-new/api/sync/v1/status", 1)));
+      }
+      const calls = [...oldCalls, ...newCalls];
+      // (the old route's background receipts and the last network events: at most 12 s, their 10 s bound and a margin)
+      for (const end = Date.now() + 12_000; Date.now() < end && !calls.every((c) => rec.relay.has(c) && (rec.net.get(c)?.done || rec.net.get(c)?.fail !== undefined)); ) await sleep(100);
+      const tr = (await Rp.ev("T.traceDump()")) ?? [];
+      for (const x of tr) if (x.kind) emit.stage(x.call, x.kind, x.detail); else emit.pageBytes(x.call, x.bytes, x.sha);
+      const stages = (c) => tr.filter((x) => x.call === c && x.kind).map((x) => x.kind);
+      const pageRec = (c) => tr.find((x) => x.call === c && x.sha);
+      // (a call's one upstream receipt, of its route; none if it has none, more than one or another route's)
+      const one = (c, route) => { const a = rec.up.get(c) ?? []; return a.length === 1 && a[0].route === route ? a[0] : undefined; };
+      const up = (c) => one(c, "old");
+      const said = (cs) => J(cs.map((c) => ({ c, up: (rec.up.get(c) ?? []).map((x) => x.status), fail: rec.net.get(c)?.fail ?? null, done: !!rec.net.get(c)?.done, stages: stages(c) }))).slice(0, 900);
+      if (CLOUD) check(oldCalls.length === 3 && oldCalls.every((c) => up(c)?.status === 200 && rec.relay.get(c)?.sha && named(rec.net.get(c)?.fail) && !rec.net.get(c)?.done && (stages(c).includes("fetch-rejected") || stages(c).includes("body-read-failed"))),
+        "R1: cloud, the old relay (the upstream Response as is): each call's upstream 200 at the front and the front's receipt, then a named net:: failure in the browser, at the fetch or the body read: " + said(oldCalls));
+      else check(oldCalls.length === 3 && oldCalls.every((c) => up(c)?.status === 200 && rec.net.get(c)?.done && stages(c).includes("parsed")),
+        "R1: reference, the old relay loads (the reference server sends no transport headers): " + said(oldCalls));
+      check(newCalls.length === 3 && newCalls.every((c) => rec.net.get(c)?.done && stages(c).includes("parsed") && tr.some((x) => x.call === c && x.kind === "fetched" && x.detail === 200)),
+        "R2: the new relay (rebuilt, allow-listed headers): each call loads, 200, parsed: " + said(newCalls));
+      check(newCalls.every((c) => { const p = pageRec(c), f = rec.relay.get(c); return !!p && !!f && p.bytes === f.n && p.sha === f.sha; }),
+        "R3: the new relay: each call's bytes in the page (length and sha256) are the bytes the front relayed: " + J(newCalls.map((c) => ({ c, page: pageRec(c)?.bytes ?? null, front: rec.relay.get(c)?.n ?? null, same: pageRec(c)?.sha === rec.relay.get(c)?.sha }))));
+      // (R4 is the matched-pairs rule (doc-sync-diag.mjs's pairCheck, its controls in the diag step): each
+      // k-th old and new call, exactly one upstream receipt each, of its route, 200, the same transport tuple without an
+      // unknown variant, the same bytes; under cloud that tuple carries a transport header, under the reference none)
+      const member = (c) => ({ ups: rec.up.get(c) ?? [], relay: rec.relay.get(c) });
+      const pairs = oldCalls.map((c, k) => ({ old: member(c), new: member(newCalls[k]) }));
+      const R4 = pairCheck(oldCalls.length === newCalls.length ? pairs : [], CLOUD, 3);
+      check(R4.ok, `R4: ${CLOUD ? "cloud" : "reference"}, each old/new pair's upstream answers matched (one receipt each, 200, the same transport tuple and bytes; ${CLOUD ? "carrying" : "without"} a transport header): ` + R4.words.join("; "));
+    } catch (e) {
+      check(false, "R: the case stopped: " + String(e?.message ?? e).slice(0, 300));
+    }
+    // (exactly 4 checks on either server, whatever happened)
+    while (results.length < before + 4) check(false, "R: not reached");
+  }
+
   progress("case 1");
   // 1. A new notebook on A reaches B: claimed first, its root sent with kind and owner, pulled by B (changed), and B's
   // record made from the history's head
@@ -152,8 +380,8 @@ try {
   await A.call("open", N1, [["a", "A1"], ["b", "B1"]]);
   await A.call("kick", N1);
   await settle();
-  const sd = ref.controls.doc(ACCOUNT, N1), clients = ref.controls.clients(ACCOUNT, N1), aj = await A.call("journal", N1);
-  check(sd && sd.head >= 1 && clients && Object.keys(clients).length === 1 && aj.lrows === 0 && aj.slot?.claimed?.client === aj.slot?.client, "1: A's new notebook: its client claimed before its batch, the batch acked, its l rows released: " + J({ head: sd?.head, clients: clients && Object.keys(clients).length, lrows: aj.lrows }));
+  const sd = CLOUD ? await cloudHead(N1) : ref.controls.doc(ACCOUNT, N1), clients = CLOUD ? null : ref.controls.clients(ACCOUNT, N1), aj = await A.call("journal", N1);
+  check(sd && sd.head >= 1 && (CLOUD || (clients && Object.keys(clients).length === 1)) && aj.lrows === 0 && aj.slot?.claimed?.client === aj.slot?.client, "1: A's new notebook: its client claimed before its batch, the batch acked, its l rows released: " + J({ head: sd?.head, clients: clients && Object.keys(clients).length, lrows: aj.lrows }));
   const bj = await B.call("journal", N1);
   const bo = await B.call("open", N1);
   check(bj.start && bj.cursor?.after === sd.head && bo.row === "from-server" && bo.codes === J([["a", "A1"], ["b", "B1"]]), "1: …B, told `changed`, pulls it (the chain checked), and its record is the history's head: " + J({ row: bo.row, codes: bo.codes, cursor: bj.cursor?.after }));
@@ -193,10 +421,10 @@ try {
   progress("case 5");
   // 5. order with next_cseq: the rows below it acknowledged, the rest sent again; then unknown_client: claimed again
   const aj5 = await A.call("journal", N1);
-  ref.controls.fake("batch", { error: { code: "order", detail: { client: aj5.slot.client, next_cseq: aj5.slot.cseq } } });
+  fake("batch", { error: { code: "order", detail: { client: aj5.slot.client, next_cseq: aj5.slot.cseq } } });
   await A.call("edit", N1, [["a", "Y5"], ["b", "B3"]]);
   await settle();
-  ref.controls.fake("batch", { error: { code: "unknown_client", detail: {} } });
+  fake("batch", { error: { code: "unknown_client", detail: {} } });
   await A.call("edit", N1, [["a", "Y6"], ["b", "B3"]]);
   await settle();
   const [aj6, br6] = [await A.call("journal", N1), await B.call("record", N1)];
@@ -204,7 +432,7 @@ try {
 
   progress("case 6");
   // 6. a transient refusal waits and sends again; a final one stops the notebook, its rows kept
-  ref.controls.fake("batch", { error: { code: "rate", detail: { retry_after: 1 } } });
+  fake("batch", { error: { code: "rate", detail: { retry_after: 1 } } });
   await A.call("edit", N1, [["a", "Y7"], ["b", "B3"]]);
   await settle();
   await sleep(400);
@@ -215,7 +443,7 @@ try {
   // sent again at the next connection.  The reference server's fake replaces the answer only, the batch stored: so
   // this is told by A's rows and events, not by B)
   await A.call("events");
-  ref.controls.fake("batch", { error: { code: "readonly", detail: {} } });
+  fake("batch", { error: { code: "readonly", detail: {} } });
   await A.call("edit", N1, [["a", "Y7r"], ["b", "B3"]]);
   await settle();
   await sleep(400);
@@ -230,7 +458,7 @@ try {
   const refusedR = evR.filter((e) => e.t === "refused" && e.code === "readonly").length, ackedR = evR.filter((e) => e.t === "ack").length;
   check(ajR.lrows >= 1 && refusedR === 1 && ackedR === 0 && ajR2.lrows === 0 && evR2.some((e) => e.t === "ack") && !stR[N1] && brR.codes === J([["a", "Y7r"], ["b", "B3"]]), "6: `readonly`: refused once, nothing resent on a timer or a kick, the rows kept; sent at the next connection and acknowledged; not stopped: " + J({ lrows: ajR.lrows, refused: refusedR, acked: ackedR, after: ajR2.lrows, stopped: stR[N1]?.code ?? null }));
   const N2 = "22222222-3333-4444-8555-666666666666";
-  ref.controls.fake("batch", { error: { code: "forbidden", detail: {} } });
+  fake("batch", { error: { code: "forbidden", detail: {} } });
   await A.call("open", N2, [["a", "Z"]]);
   await A.call("kick", N2);
   await settle();
@@ -256,7 +484,7 @@ try {
   }
 
   progress("case 8");
-  // 8. A1: B's notebook closed while A edits: B's pull stores the page and no record is written then; B's next open
+  // 8. B's notebook closed while A edits: B's pull stores the page and no record is written then; B's next open
   // merges it (recovery), never reverting it
   await B.call("close", N1);
   await A.call("edit", N1, [["a", "Y8"], ["b", "B3"]]);
@@ -269,7 +497,7 @@ try {
   const owner = await accountHash(ACCOUNT);
 
   progress("case 9");
-  // 9. CORR-2C3-1 (astra): a flight sends nothing after a pull that waits or stops, nor on a connection that's gone.  A
+  // 9. A flight sends nothing after a pull that waits or stops, nor on a connection that's gone.  A
   // notebook claimed and sent, then edited offline (one row unsent); a DocSync of its own over a deferred link answers
   // its pull, and nothing may follow it: no claim, no batch, the row kept, the notebook held or stopped as the answer says
   const N9 = "99999999-1111-4222-8333-444444444444";
@@ -329,7 +557,7 @@ try {
   await A.call("fakeAnswer", "pull", { t: "batches", owner, doc: N9, epoch: 1, head: head9, items: [], more: false }, 300);
   const sr9 = await A.call("fakeState");
   check(J(sr9.sent) === J(["pull", "pull"]) && J(sr9.waiting) === J(["pull"]), "9: a flight of an older connection asks nothing after its answer; the newer connection pulls again: " + J({ sent: sr9.sent, waiting: sr9.waiting }));
-  // (D3-4c: a kick while the batch waits, then the batch refused (rate): held, no second lap)
+  // (a kick while the batch waits, then the batch refused (rate): held, no second lap)
   await A.call("fakeStart", ACCOUNT, N9);
   await A.call("fakeConnect");
   await A.call("fakeWait", "pull");
@@ -341,7 +569,7 @@ try {
   await A.call("fakeKick");
   await A.call("fakeAnswer", "batch", { t: "error", code: "rate", detail: { message: "m", retry_after: 1 } }, 300);
   const sk9 = await A.call("fakeState");
-  check(!!b9 && J(sk9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "batch"]) && sk9.held && sk9.waiting.length === 0, "9 (D3-4c): a kick during the flight, then the batch refused for a while: held, no second lap: " + J({ sent: sk9.sent, held: sk9.held, waiting: sk9.waiting }));
+  check(!!b9 && J(sk9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "batch"]) && sk9.held && sk9.waiting.length === 0, "9 (d): a kick during the flight, then the batch refused for a while: held, no second lap: " + J({ sent: sk9.sent, held: sk9.held, waiting: sk9.waiting }));
   // (an older hold's timer never lifts a newer one: rate (its timer 400 ms), a new connection, readonly)
   await A.call("fakeStart", ACCOUNT, N9, 400);
   await A.call("fakeConnect");
@@ -353,7 +581,7 @@ try {
   await sleep(700);
   const so9 = await A.call("fakeState");
   check(J(so9.sent) === J(["pull", "pull"]) && so9.held && so9.waiting.length === 0, "9: the rate hold's old timer doesn't lift the readonly hold after it: " + J({ sent: so9.sent, held: so9.held }));
-  // (r3, astra's r2 report on CORR-2C3-1: nothing an older connection's flight learns or fails at may act on the
+  // (nothing an older connection's flight learns or fails at may act on the
   // newer one.  (a) markSent's write held while the connection is replaced, then committed: no batch from the old flight)
   const empty9 = { t: "batches", owner, doc: N9, epoch: 1, head: head9, items: [], more: false };
   await A.call("fakeStart", ACCOUNT, N9);
@@ -365,7 +593,7 @@ try {
   await A.call("fakeConnect");
   await A.call("fakeReleaseTx", false);
   const sa9 = await A.call("fakeState");
-  check(g9 && J(sa9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "pull"]) && J(sa9.waiting) === J(["pull"]) && sa9.stopped === null, "9 (r3 a): a batch's write held while the connection is replaced: the old flight sends no batch after it; the new one pulls: " + J({ gated: g9, sent: sa9.sent, waiting: sa9.waiting, stopped: sa9.stopped }));
+  check(g9 && J(sa9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "pull"]) && J(sa9.waiting) === J(["pull"]) && sa9.stopped === null, "9 (a): a batch's write held while the connection is replaced: the old flight sends no batch after it; the new one pulls: " + J({ gated: g9, sent: sa9.sent, waiting: sa9.waiting, stopped: sa9.stopped }));
   // ((b) an older connection's pull answered after the reconnect with what would stop the notebook: not stopped, and
   // the new connection pulls)
   for (const [what, frame] of [["a snapshot", { ...empty9, snapshot: { at_seq: 1 } }], ["another owner", { ...empty9, owner: "f".repeat(64) }]]) {
@@ -375,7 +603,7 @@ try {
     await A.call("fakeConnect");
     await A.call("fakeAnswer", "pull", frame, 300);
     const sb = await A.call("fakeState");
-    check(sb.stopped === null && J(sb.sent) === J(["pull", "pull"]) && J(sb.waiting) === J(["pull"]), `9 (r3 b): an older connection's pull answered with ${what} after a reconnect: no stop; the new connection pulls: ` + J({ sent: sb.sent, waiting: sb.waiting, stopped: sb.stopped }));
+    check(sb.stopped === null && J(sb.sent) === J(["pull", "pull"]) && J(sb.waiting) === J(["pull"]), `9 (b): an older connection's pull answered with ${what} after a reconnect: no stop; the new connection pulls: ` + J({ sent: sb.sent, waiting: sb.waiting, stopped: sb.stopped }));
   }
   // ((b) an older connection's history write failing after the reconnect: no stop; the new connection pulls)
   await A.call("fakeStart", ACCOUNT, N9);
@@ -387,12 +615,12 @@ try {
   await A.call("fakeConnect");
   await A.call("fakeReleaseTx", true);
   const sc9 = await A.call("fakeState");
-  check(g9b && sc9.stopped === null && J(sc9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "pull"]) && J(sc9.waiting) === J(["pull"]), "9 (r3 b): an older connection's history write failing after a reconnect: no stop; the new connection pulls: " + J({ sent: sc9.sent, waiting: sc9.waiting, stopped: sc9.stopped }));
+  check(g9b && sc9.stopped === null && J(sc9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "pull"]) && J(sc9.waiting) === J(["pull"]), "9 (c): an older connection's history write failing after a reconnect: no stop; the new connection pulls: " + J({ sent: sc9.sent, waiting: sc9.waiting, stopped: sc9.stopped }));
   await A.call("connect", "A", ACCOUNT);
   await settle();
 
   progress("case 10");
-  // 10. CORR-2C3-2 (astra): a marked value (saved with no room for its version, so in no version) is never replaced by
+  // 10. A marked value (saved with no room for its version, so in no version) is never replaced by
   // a later remote change: B's edit marked, A's later change to the same cell arrives: B's record keeps B's whole value
   // (an unrelated cell too), still marked; and so after a reload
   const N10 = "aaaaaaaa-1111-4222-8333-444444444444";
@@ -418,7 +646,7 @@ try {
   check(bm10.mark === true && b10.codes === want10 && b10.mark === true && b10r.codes === want10, "10: a marked value meets a later remote change of the same cell: kept whole, still marked, and after a reload: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes }));
 
   progress("case 11");
-  // 11. CORR-2C3-3 (astra): an ack over the wire resumes a writer's history paused for want of room: the next save is a
+  // 11. An ack over the wire resumes a writer's history paused for want of room: the next save is a
   // version again (unmarked, sent), with no reload; by a plain ack, and by `order` with next_cseq
   for (const [k, how] of [["bbbbbbbb", "ack"], ["dddddddd", "order"]]) {
     const id = `${k}-1111-4222-8333-444444444444`;
@@ -432,7 +660,7 @@ try {
     await A.call("edit", id, [["a", "x2"]]);
     const m = await A.call("record", id);
     await A.call("resetDebt");
-    if (how === "order") ref.controls.fake("batch", { error: { code: "order", detail: { client: (await A.call("journal", id)).slot.client, next_cseq: (await A.call("journal", id)).slot.cseq } } });
+    if (how === "order") fake("batch", { error: { code: "order", detail: { client: (await A.call("journal", id)).slot.client, next_cseq: (await A.call("journal", id)).slot.cseq } } });
     await A.call("connect", "A", ACCOUNT);
     await settle();
     await A.call("edit", id, [["a", "x3"]]);
@@ -442,7 +670,7 @@ try {
   }
 
   progress("case 12");
-  // 12. CORR-2C3-5 (astra): the notebook page itself (notebook.js) on B: A's change reaches it with nothing typed here:
+  // 12. The notebook page itself (notebook.js) on B: A's change reaches it with nothing typed here:
   // shown, and saved (the record, its j and hash agree with what's shown); then a change from A while B types another
   // cell: both kept, saved
   const N12 = "cccccccc-1111-4222-8333-444444444444";
@@ -467,17 +695,21 @@ try {
   check(bs12b === J([["a", "p2"], ["b", "q-typed"]]) && br12b.codes === bs12b && br12b.hashOk, "12: a remote change while this page types another cell: both kept, saved: " + J({ shown: bs12b, record: br12b.codes, hashOk: br12b.hashOk }));
 
   progress("case 13");
-  // 13. (astra's DEVSW-1) One device, two pages of one browser context (one IndexedDB, one set of Web Locks and
+  // 13. One device, two pages of one browser context (one IndexedDB, one set of Web Locks and
   // channels): a board page whose DocSync (followDocSync) is on this harness's minimal socket, and the notebook page,
   // a follower, that turns the switch on.  The board's page carries the notebook: what the notebook page saves reaches
   // B (no kick of its own: the switch's DOC_SYNC.saved, on the channel), B's edit reaches the notebook page, the board
   // never closed; then the board page closes and the harness connects the notebook page's DocSync.  The transport
-  // only: the real owners, their sender lock and the automatic takeover are case 14 (astra's DEVSW-1-R2)
+  // only: the real owners, their sender lock and the automatic takeover are case 14
   const { browserContextId: cctx } = await send("Target.createBrowserContext");
   async function pageIn(label, ctx = cctx) {
     const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId: ctx });
     const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
+    labels.set(sessionId, label);
     await send("Runtime.enable", {}, sessionId);
+    await send("Log.enable", {}, sessionId);
+    // (the page's network events, for its traced requests (the CDP handler above))
+    await send("Network.enable", {}, sessionId);
     await send("Page.navigate", { url: `http://127.0.0.1:${front.port}/` }, sessionId);
     const ev = async (expression) => {
       const r = await Promise.race([send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId), sleep(45_000).then(() => ({ error: `timed out: ${expression.slice(0, 80)}` }))]);
@@ -485,11 +717,13 @@ try {
       return r.result?.value;
     };
     for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
+    // (the page's label, for its tracing fetch's call ids)
+    await ev(`T.pageLabel = ${J(label)}`);
     return { targetId, ev, call: (f, ...args) => { progress(`${label}.${f}`); return ev(`T.${f}(${args.map((a) => J(a)).join(", ")})`); } };
   }
   // (a failed check ends the case right after it is recorded (the rest depends on it), and a throw is recorded as this
-  // case's failed check: the run goes on and prints every verdict (#266 r6b's run: R-14d and B-1o made case 13's
-  // C1.connect throw after its failed check, and the run ended with no verdict)
+  // case's failed check: the run goes on and prints every verdict (a run in which case 13's
+  // C1.connect threw after its failed check ended with no verdict)
   const STOP13 = Symbol("stop");
   const need13 = (ok, what) => { check(ok, what); if (!ok) throw STOP13; };
   const case13 = async () => {
@@ -530,7 +764,7 @@ try {
     const br13b = await B.call("record", N13);
     need13(br13b.codes === J([["a", "c3"], ["b", "d2"]]), "13: …then its own connection (the holder now) sends what was saved meanwhile: " + br13b.codes);
   };
-  // (the outcome tagged, never tested for truthiness: a throw of false, 0 or "" is recorded too (astra's DEVSW-R6C-1);
+  // (the outcome tagged, never tested for truthiness: a throw of false, 0 or "" is recorded too;
   // STOP13, already recorded as its failed check, is not counted again)
   const r13 = await case13().then(() => ({ ok: true }), (e) => ({ ok: false, e }));
   if (!r13.ok && r13.e !== STOP13) check(false, "13: the case stopped: " + String(r13.e?.message ?? r13.e).slice(0, 300));
@@ -543,8 +777,9 @@ try {
   // (a failed check ends the case there (recorded first): the rest depends on it, and a mutant's run stays short)
   const STOP14 = Symbol("stop");
   const need14 = (ok, what) => { check(ok, what); if (!ok) throw STOP14; };
+  let D14 = null;
   const case14 = async () => {
-    // 14. (astra's DEVSW-1-R2, r5) The real owners: one device (D), two pages of one browser context, each with its own
+    // 14. The real owners: one device (D), two pages of one browser context, each with its own
     // SyncOwner and SyncClient on the namespace's sender lock, against this reference server (device D's session, through
     // the front).  The board page's owner already holds (sync turned on with the Sync panel's button, the journal active
     // from an earlier load) and carries notebooks (followDocSync); the notebook page's owner waits while the switch turns
@@ -553,7 +788,8 @@ try {
     // notebook page's owner takes the lock by itself: both directions again, nothing connected by hand
     const { browserContextId: dctx } = await send("Target.createBrowserContext");
     const D1 = await pageIn("D1", dctx), D2 = await pageIn("D2", dctx);
-    // (every await of this case bounded (astra's DEVSW-R6-1): a hung page call ends as this case's failed check, its
+    D14 = { D1, D2 };
+    // (every await of this case bounded: a hung page call ends as this case's failed check, its
     // verdict printed, never as the run's deadline)
     const LATE14 = Symbol("late");
     const bound14 = (p, ms) => {
@@ -591,8 +827,8 @@ try {
       }
       return null;
     };
-    // (#266 r5's case 14 failed here: the board's DocSync connected before this notebook's synced history started (in the
-    // switch's reopen, before any save was told), so nothing kicked it until an edit; r6: the notebook page's `on` makes
+    // (case 14 once failed here: the board's DocSync connected before this notebook's synced history started (in the
+    // switch's reopen, before any save was told), so nothing kicked it until an edit; now the notebook page's `on` makes
     // the board's DocSync kick every notebook started.  Asserted before any edit and with no reconnect)
     const got14 = await until14(async () => { await B.call("kick", N14, true); const j = await B.call("journal", N14); return j?.start ? j : null; });
     need14(!!got14?.start, "14: the notebook made in the notebook page reaches B before any edit and with no reconnect, sent on the board page's connection (the notebook page's owner waiting)");
@@ -633,21 +869,60 @@ try {
   const r14 = await Promise.race([run14.then(() => ({ ok: true }), (e) => ({ ok: false, e })), new Promise((r) => { timer14 = setTimeout(() => r(LATECASE), Math.max(1, budget14)); })]).finally(() => clearTimeout(timer14));
   if (r14 === LATECASE) check(false, `14: the case didn't finish within its ${Math.round(budget14 / 1000)} s budget, at step: ${step}`);
   else if (!r14.ok && r14.e !== STOP14) check(false, "14: the case stopped: " + String(r14.e?.message ?? r14.e).slice(0, 300));
-  const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
-  for (const e of errors) fails.push("page error: " + e);
-  if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
-  else {
-    console.log(`ok: notebooks' contents between two devices, ${results.length} checks`);
-    if (process.env.SHOW) for (const [, what] of results) console.log("  " + what);
+  // (case 14 not finished (a failed check, a throw or its budget): what it needs to be diagnosed, every page question
+  // bounded at 10 s, every line through doc-sync-diag.mjs: each page's turn-on phases (the last one completed), owner
+  // state, panel text, what the panel said, and warnings; the pages' console; the sync requests still waiting, the
+  // sockets open, and the front's last 60 lines)
+  if (r14 === LATECASE || !r14.ok) {
+    const NO = Symbol("no answer");
+    const ask = async (P, expr) => Promise.race([P.ev(expr).catch((e) => ({ [NO]: String(e?.message ?? e) })), sleep(10_000).then(() => ({ [NO]: "no answer in 10 s" }))]);
+    if (!D14) emit.text("diag14: ", "the pages weren't made");
+    else for (const [n, P] of Object.entries(D14)) {
+      const info = await ask(P, "T.turnInfo ? T.turnInfo() : null");
+      if (info?.[NO]) emit.text(`diag14: ${n} turnOn: `, info[NO]);
+      else {
+        emit.phases(`diag14: ${n} turnOn phases: `, info?.phases);
+        emit.text(`diag14: ${n} panel: `, info?.panel ?? "(none)");
+        emit.text(`diag14: ${n} said: `, J(info?.said ?? []), 600);
+      }
+      const st = await ask(P, "T.owner ? T.ownerState() : null");
+      if (st?.[NO]) emit.text(`diag14: ${n} owner: `, st[NO]); else emit.owner(`diag14: ${n} owner: `, st);
+      const w = await ask(P, "T.warnings()");
+      emit.text(`diag14: ${n} warnings: `, w?.[NO] ?? J(w), 600);
+    }
+    emit.text("diag14: ", `the pages' console warnings and errors: ${pageConsole.length}${pageConsole.length > 40 ? " (the last 40)" : ""}`);
+    for (const l of pageConsole.slice(-40)) emit.text("diag14:   ", l);
+    emit.waiting("diag14: ", [...proxyOpen].map(([k, { method, path, t }]) => ({ k, method, path, ms: Date.now() - t })));
+    emit.counts("diag14: ", [...sockOpen], sockN, proxyN);
+    emit.recent("diag14: ", 60);
+  }
+  // (case 14's traced calls (the Sync panel's status reads on its pages), whatever the outcome: each call's stages
+  // and byte receipt, every page question bounded at 10 s)
+  if (D14) for (const P of Object.values(D14)) {
+    const tr = await Promise.race([P.ev("T.traceDump ? T.traceDump() : []").catch(() => []), sleep(10_000).then(() => [])]);
+    for (const x of tr ?? []) if (x.kind) emit.stage(x.call, x.kind, x.detail); else emit.pageBytes(x.call, x.bytes, x.sha);
+  }
+  censusAt("cases-done");
+  if (!emit.failures(results, errors)) {
+    emit.ok(results.length);
+    if (process.env.SHOW) emit.show(results);
     code = 0;
   }
+  // (Chrome closed through its own protocol: it ends its own processes, so none is left for a subreaper to adopt)
+  await Promise.race([send("Browser.close"), sleep(5000)]);
   ws.close();
 } catch (e) {
-  console.error("FAIL: " + (e?.stack ?? e));
+  emit.crash(e);
 } finally {
-  try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
+  // (Chrome's exit waited for, at most 15 s; only if it is still running is its process group killed, and said)
+  const exited = chrome.exitCode !== null || chrome.signalCode !== null
+    || (await Promise.race([new Promise((ok) => chrome.once("exit", () => ok(true))), sleep(15_000).then(() => false)]));
+  emit.text("browser: ", exited ? "exited by itself" : "still running after 15 s: its process group killed");
+  if (!exited) try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   front.stop(true);
+  try { await cloud?.stop(); } catch {}
   await sleep(200);
+  censusAt("browser-killed");
   for (const d of [profile, site]) rmSync(d, { recursive: true, force: true });
 }
 clearTimeout(deadline);

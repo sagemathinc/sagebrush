@@ -21,7 +21,7 @@
 //   finished `bash -c` keeps nothing open.
 // - **The outcome is the host's** (D8 point 5): when an invocation ends, before anything pending is
 //   committed or anything published, its outcome comes from what this host recorded and did: Stop (row 1),
-//   a lost worker (2), a revoked or expired grant (3), a limit (4, step 3), a fault (5), else ordinary (6).
+//   a lost worker (2), a revoked or expired grant (3), a limit (4), a fault (5), else ordinary (6).
 //   Rows 1–5 latch the run's terminal state and close its admission in the same step that records them.
 // - **The fence is per workspace verb** (CORR-BASH-S2-2): every verb this host calls is asked `admit`
 //   holding the workspace's lock before it changes anything, and the admit refuses once the run is latched.
@@ -29,13 +29,23 @@
 //   of D8), and every later one, a pending commit, a copy's next duplicate, a waiter on the lock, does
 //   nothing.  A rejection of the shell's exec() is ordinary only if it names one of this invocation's own
 //   refusals (provenance).
+// - **Limits and the run ledger** (step 3: r3 §4, erratum r8c E2; web/shell/limits.ts).  The config is validated
+//   when the host is made, sent once to each worker it starts (host level 3's init), and every run keeps a ledger
+//   the page charges at exactly one point per key, never refunded (r8c E2's table): `invocations` before dispatch;
+//   `ops` and `written_bytes` at each mutating transaction's own admit, inside its locked section; `cp_entries` and
+//   `cp_bytes` reserved by the cp -r preflight, before its first mutation; `output_bytes` with what the module
+//   delivers, by its own count (ruling C); `script_ms` from the page's clock, dispatch to end, on every path.  The
+//   12 page and module keys end the run typed (row 4, exit 125, `bash: bash.<key> exceeded (<value>)`); the 6 keys
+//   just-bash enforces, and its fixed output backstop, are ordinary outcomes, never classified from their text.
 // - **Stop covers startup** (CORR-BASH-S2-1): a Stop while the worker starts never dispatches the script;
 //   it settles at once if the start finishes within the 2 s grace (the worker that started for it is ended),
 //   else at the grace, the start abandoned and its worker ended when it comes.
 import { Workspace, WorkspaceError, OutOfScope, identOf, type AdmitCheck, type Entry } from "../workspace/api";
 import { normPath, parentOf, nameOf, within, TRASH, PathError } from "../workspace/paths";
 import { ShellUnavailableError, type Shell, type ShellOutcome, type FsRequest, type FsAnswer } from "./loader";
+export { BashConfigError, BASH_RANGES, OUTPUT_BACKSTOP } from "./limits";
 import { boundedJson, TooLarge } from "./bounded-json";
+import { validateBash, executionLimitsOf, limitWords, wrap, LIMIT_EXIT, OUTPUT_BACKSTOP, type BashLimits, type LimitKey } from "./limits";
 
 /** Who a run belongs to (r3 §2.1).  A grant names its actor, always: "person" (a document of the person's,
  * under its interpreter's grants) or "agent:<name>" (a paired agent); anything else is refused before work. */
@@ -61,20 +71,28 @@ export type OpRecord = { verb: "write" | "create" | "mkdir" | "rename" | "remove
  * committed.
  */
 export type HostOutcome =
-  | { kind: "exit"; code: number; stdout: string; stderr: string; ops: OpRecord[] }
+  | { kind: "exit"; code: number; stdout: string; stderr: string; ops: OpRecord[]; truncated?: true }
   | { kind: "interrupted"; row: 1; ops: OpRecord[] }
   | { kind: "unavailable"; row: 2 | 3 | 5; reason: string; ops: OpRecord[] }
-  | { kind: "limit"; row: 4; key: string; value: number; ops: OpRecord[] };
+  | { kind: "limit"; row: 4; key: LimitKey; value: number; code: 125; stderr: string; ops: OpRecord[] };
+
+/** A run's ledger (r3 §4.4, r8c E2): what it has been charged, by key; never refunded. */
+export type Ledger = { invocations: number; script_ms: number; output_bytes: number; ops: number; written_bytes: number; cp_entries: number; cp_bytes: number };
 
 /** The pending entries a run may hold at once (r3 §3.3 rule 2): past it, EMFILE. */
 export const MAX_PENDING = 64;
 /** How long Stop waits for the shell (or its start) to unwind before the worker is ended (r3 §4.3). */
 export const STOP_GRACE_MS = 2000;
-/** The bytes one read may return (bash.read_bytes's default, r3 §4.2 B; the key itself is step 3's). */
+/** The bytes one read may return by default (bash.read_bytes's default, r3 §4.2 B). */
 export const READ_BYTES = 64 * 2 ** 20;
 /** The host level whose shell reaches files through this mediator (fs.request, web/shell/host-levels.json):
  * a package that needs less is the in-memory shell of step 1, which a workspace surface never runs (F12). */
 export const MEDIATED_FS_LEVEL = 2;
+/** The host level whose shell takes the limits (step 3's init): a workspace run needs it, since an older shell
+ * would run with just-bash's own defaults, which r3 §4.2 A rules out. */
+export const CONFIGURED_LEVEL = 3;
+/** script_ms's watchdog: the page ends the worker this long after the run's remaining time (r3 §4.2 A). */
+export const WATCHDOG_SLACK_MS = 1000;
 /** The actors a grant may name (r3 §2.1). */
 const ACTOR = /^(person|agent:[\w.-]{1,64})$/;
 
@@ -92,6 +110,12 @@ class ScopeRefusal extends OutOfScope {
 class Revoked extends Error {}
 /** The run is latched: a verb asked after it does nothing (the fence). */
 class Fenced extends Error {}
+/** A limit reached at a charging point (row 4): thrown before the verb changes anything. */
+class LimitHit extends Error {
+  constructor(readonly key: LimitKey) {
+    super(`bash.${key} exceeded`);
+  }
+}
 
 // The words the workspace's refusals print with (r3 §3.1's table).
 const REASON: Record<string, string> = { ENOENT: "No such file or directory", EEXIST: "File exists", ECONFLICT: "changed elsewhere", ENOTDIR: "Not a directory", EISDIR: "Is a directory", EACCES: "Permission denied" };
@@ -121,7 +145,8 @@ const why = (err: unknown) => String((err as Error)?.message ?? err).slice(0, 20
 
 /** A redirection target's observation (§3.2): the file as this invocation saw it at the open, or after its own commit. */
 type Obs = { fid: string; rev: number; bytes?: Uint8Array };
-type Terminal = { row: 1 } | { row: 2 | 3 | 5; reason: string } | { row: 4; key: string; value: number };
+type Terminal = { row: 1 } | { row: 2 | 3 | 5; reason: string } | { row: 4; key: LimitKey; value: number };
+const utf8 = (s: string) => new TextEncoder().encode(s).length;
 
 /** One run (r3 §4.4): one execution request, with its own id, ledger and fence, and one or more invocations. */
 export class ShellRun {
@@ -138,6 +163,9 @@ export class ShellRun {
   private stopping: AbortController | null = null;
   private stopTimer: ReturnType<typeof setTimeout> | null = null;
   private onGrace: (() => void) | null = null;
+  private used: Ledger = { invocations: 0, script_ms: 0, output_bytes: 0, ops: 0, written_bytes: 0, cp_entries: 0, cp_bytes: 0 };
+  /** how many times script_ms's watchdog ended this run's worker (the tests' counter, G1) */
+  watchdogFired = 0;
 
   constructor(private host: ShellHost, readonly principal: Principal) {
     if (principal.kind === "grant" && !(typeof principal.actor === "string" && ACTOR.test(principal.actor))) throw new TypeError(`a grant names its actor, "person" or "agent:<name>" (not ${JSON.stringify(principal.actor)})`);
@@ -146,6 +174,16 @@ export class ShellRun {
   /** Latch a terminal condition and close admission, in this one step (the fence). */
   latch(t: Terminal) {
     if (!this.terminal) this.terminal = t;
+  }
+  /** What the run has been charged (a copy). */
+  ledger(): Readonly<Ledger> {
+    return { ...this.used };
+  }
+  private get limits(): BashLimits {
+    return this.host.limits;
+  }
+  private limitHit(key: LimitKey) {
+    this.latch({ row: 4, key, value: key === "read_bytes" ? this.host.readBytes : this.limits[key]! });
   }
 
   /** Stop (r3 §4.3, row 1): latched at once; the shell's signal aborted; the worker (or its start) ended if it hasn't unwound within 2 s. */
@@ -163,9 +201,38 @@ export class ShellRun {
   async invoke(script: string, opts: { stdin?: string; cwd?: string } = {}): Promise<HostOutcome> {
     const n = ++this.invocation;
     if (this.terminal) return this.typed();
+    const L = this.limits;
+    // (bash.invocations: charged at admission, before dispatch, a refused one included; never given back)
+    this.used.invocations++;
+    if (L.invocations !== null && this.used.invocations > L.invocations) {
+      this.limitHit("invocations");
+      return this.typed();
+    }
+    // (bash.source_bytes: the script's UTF-8, before it is sent.  It bounds only this script: a file it sources is a
+    // read, bounded by bash.read_bytes (typed); just-bash's maxSourceBytes doesn't check `source` or `.`)
+    if (utf8(script) > L.source_bytes!) {
+      this.limitHit("source_bytes");
+      return this.typed();
+    }
+    // (bash.script_ms: the run's remaining time; none left, nothing more is admitted)
+    const remainingMs = L.script_ms === null ? Number.POSITIVE_INFINITY : L.script_ms - this.used.script_ms;
+    if (remainingMs <= 0) {
+      this.limitHit("script_ms");
+      return this.typed();
+    }
+    const allowance = L.output_bytes! - this.used.output_bytes;
     const ctl = (this.stopping = new AbortController());
     const grace = new Promise<null>((res) => (this.onGrace = () => res(null)));
     let o: ShellOutcome | null = null;
+    // (script_ms, r2 (astra2 R2): ONE debit, from dispatch through finalization (the queue's last answer and the
+    // pending commits of ordinary()), and the watchdog armed for all of it; debited once, on every path)
+    let watchdog: ReturnType<typeof setTimeout> | null = null, t0: number | null = null;
+    const debit = () => {
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = null;
+      if (t0 !== null) this.used.script_ms += performance.now() - t0;
+      t0 = null;
+    };
     try {
       let shell: Shell | null;
       try {
@@ -180,27 +247,43 @@ export class ShellRun {
         this.host.endShell("stopped while it started");
         return this.typed();
       }
+      // (script_ms's watchdog: the worker ended at the remaining time + 1 s, whatever just-bash does by then)
+      watchdog = Number.isFinite(remainingMs)
+        ? setTimeout(() => {
+            this.watchdogFired++;
+            this.limitHit("script_ms");
+            this.host.endShell("its script_ms ran out");
+          }, Math.ceil(remainingMs) + WATCHDOG_SLACK_MS)
+        : null;
+      t0 = performance.now();
+      const started = t0, budget = remainingMs;
+      this.overTime = () => performance.now() - started >= budget;
       try {
-        o = await shell.exec(`{ ${script}\n}`, { stdin: opts.stdin, cwd: opts.cwd ?? "/", run: this.id, signal: ctl.signal, onRequest: (r) => this.admit(n, r) });
+        o = await shell.exec(wrap(script), {
+          stdin: opts.stdin, cwd: opts.cwd ?? "/", run: this.id, signal: ctl.signal, onRequest: (r) => this.admit(n, r),
+          // (just-bash takes a safe integer or +Infinity.  Rounded up, plus its clock's 1 ms grain: when just-bash's own
+          // deadline ends the invocation, the page's clock, which started first, has passed the remaining time too)
+          limits: { maxExecutionTimeMs: Number.isFinite(remainingMs) ? Math.ceil(remainingMs) + 1 : remainingMs }, allowance,
+        });
       } catch (err) {
-        // (the worker was lost, or ended by Stop's grace: row 2 unless Stop came first)
+        // (the worker was lost, or ended by Stop's grace or the watchdog: row 2 unless something came first)
         this.latch({ row: 2, reason: err instanceof ShellUnavailableError ? err.reason : why(err) });
       }
-      // (everything admitted has finished before the outcome is decided: the last request's answer may still be in the queue)
-      await this.queue.catch(() => {});
-      // (D8 point 5: the host's facts first; the shell's status never decides a typed outcome)
-      if (this.terminal) return this.typed();
-      if (o && "rejected" in o) {
-        const r = o.rejected.refusal;
-        // (provenance: only a refusal this host recorded for this very invocation; never inferred from what came last)
-        if (r === null || this.refusals.get(r) !== n) {
-          this.latch({ row: 5, reason: `internal error: the shell's run failed (${o.rejected.message.slice(0, 200)})` });
-          return this.typed();
-        }
-        return await this.ordinary({ code: 1, stdout: "", stderr: o.rejected.message.endsWith("\n") ? o.rejected.message : o.rejected.message + "\n" });
+      this.cut = false;
+      if (o) this.observe(o, allowance);
+      this.deadlineHit();
+      const out = await this.decide(n, o);
+      if (this.cut && out.kind === "exit") out.truncated = true;
+      // (the invocation has ended, its pending commits included: its time debited; reaching the run's time is typed)
+      debit();
+      if (L.script_ms !== null && this.used.script_ms >= L.script_ms) {
+        this.limitHit("script_ms");
+        return this.typed();
       }
-      return await this.ordinary(o!.exit);
+      return out;
     } finally {
+      this.overTime = () => false;
+      debit();
       // (the lifecycle ends with the outcome: finalization above ran inside it, Stop and its grace included)
       this.stopping = null;
       this.onGrace = null;
@@ -212,12 +295,66 @@ export class ShellRun {
     }
   }
 
+  // The outcome of a dispatched invocation, its finalization included (D8 point 5's rows, then an ordinary end).
+  private async decide(n: number, o: ShellOutcome | null): Promise<HostOutcome> {
+    // (everything admitted has finished before the outcome is decided: the last request's answer may still be in the queue)
+    await this.queue.catch(() => {});
+    this.deadlineHit();
+    // (D8 point 5: the host's facts first; the shell's status never decides a typed outcome)
+    if (this.terminal) return this.typed();
+    if (o && "limit" in o) return this.typed();
+    if (o && "rejected" in o) {
+      const r = o.rejected.refusal;
+      // (provenance: only a refusal this host recorded for this very invocation; never inferred from what came last)
+      if (r === null || this.refusals.get(r) !== n) {
+        this.latch({ row: 5, reason: `internal error: the shell's run failed (${o.rejected.message.slice(0, 200)})` });
+        return this.typed();
+      }
+      return await this.ordinary({ code: 1, stdout: "", stderr: o.rejected.message.endsWith("\n") ? o.rejected.message : o.rejected.message + "\n" });
+    }
+    return await this.ordinary(o!.exit);
+  }
+
+  // What the module says of a result (host level 3): a typed limit of its own (only bash.pipeline_width, at its
+  // configured value), or its output count, checked against what arrived and charged (ruling C).  Anything else
+  // is a broken protocol (row 5).
+  private observe(o: ShellOutcome, allowance: number) {
+    if ("limit" in o) {
+      if (o.limit.key === "pipeline_width" && o.limit.value === this.limits.pipeline_width) this.limitHit("pipeline_width");
+      else this.latch({ row: 5, reason: `internal error: the shell reported a limit it doesn't enforce (${JSON.stringify(o.limit).slice(0, 100)})` });
+      return;
+    }
+    const c = o.output;
+    // (the length bound only: a UTF-16 unit is 1 to 3 UTF-8 bytes; the exact count is the module's, in the worker.
+    // The cap is the allowance and the fixed backstop both (r2, astra5 B3-A5-2), and the two flags must agree with it)
+    const units = "exit" in o ? o.exit.stdout.length + o.exit.stderr.length : o.rejected.message.length;
+    const cap = Math.min(allowance, OUTPUT_BACKSTOP);
+    if (!c || c.deliveredBytes > cap || c.deliveredBytes < units || c.deliveredBytes > 3 * units || c.exceeded !== c.producedBytes > allowance || c.truncated !== (!c.exceeded && c.producedBytes > cap)) {
+      this.latch({ row: 5, reason: `internal error: the shell's output count doesn't hold (${JSON.stringify(c ?? null)}, ${units} units, allowance ${allowance})` });
+      return;
+    }
+    this.used.output_bytes += c.deliveredBytes;
+    if (c.exceeded) this.limitHit("output_bytes");
+    this.cut = c.truncated;
+  }
+  // (the last result was an ordinary one cut at the backstop: its outcome says so, never typed)
+  private cut = false;
+  // (r3, astra2: the run's time observed apart from its one debit: true once dispatch-to-now reaches the remaining
+  // script_ms; checked when the shell's result comes, after the queue's last answer, and before each pending commit,
+  // so a run out of time commits nothing more.  A verb already admitted finishes, D8's one allowance)
+  private overTime: () => boolean = () => false;
+  private deadlineHit(): boolean {
+    if (this.terminal || !this.overTime()) return false;
+    this.limitHit("script_ms");
+    return true;
+  }
+
   private typed(): HostOutcome {
     // (pending truncations and creations are dropped, unflushed: rule 7)
     this.pending.clear();
     const t = this.terminal!, ops = [...this.ops];
     if (t.row === 1) return { kind: "interrupted", row: 1, ops };
-    if (t.row === 4) return { kind: "limit", row: 4, key: t.key, value: t.value, ops };
+    if (t.row === 4) return { kind: "limit", row: 4, key: t.key, value: t.value, code: LIMIT_EXIT, stderr: limitWords(t.key, t.value), ops };
     return { kind: "unavailable", row: t.row, reason: t.reason, ops };
   }
 
@@ -228,11 +365,15 @@ export class ShellRun {
   private async ordinary(r: { code: number; stdout: string; stderr: string }): Promise<HostOutcome> {
     let { code, stderr } = r;
     for (const p of [...this.pending.keys()].sort()) {
-      if (this.terminal) return this.typed();
+      if (this.terminal || this.deadlineHit()) return this.typed();
       try {
         await this.commit(p, EMPTY);
       } catch (err) {
         if (err instanceof Fenced) return this.typed();
+        if (err instanceof LimitHit) {
+          this.limitHit(err.key);
+          return this.typed();
+        }
         if (err instanceof Revoked) {
           this.latch({ row: 3, reason: "access was revoked" });
           return this.typed();
@@ -265,6 +406,11 @@ export class ShellRun {
       return { ok: await this.verb(op, args) };
     } catch (err) {
       if (err instanceof Fenced) return { err: { code: "EBADF", message: "this run has ended" } };
+      if (err instanceof LimitHit) {
+        // (row 4: latched before the answer goes back; nothing of the verb was done)
+        this.limitHit(err.key);
+        return { err: { code: "EDQUOT", message: `bash.${err.key} exceeded` } };
+      }
       if (err instanceof Revoked) {
         // (row 3: latched before the answer goes back; the refusal is EACCES, but not an ordinary one)
         this.latch({ row: 3, reason: "access was revoked" });
@@ -300,7 +446,8 @@ export class ShellRun {
    * may change (data files, folders: never writes into a notebook or board, never copies one).
    */
   private readonly check = (c: AdmitCheck): void => {
-    if (this.terminal) throw new Fenced();
+    // (r3: out of time is the fence too, at the verb's own admission, inside its locked section)
+    if (this.terminal || this.deadlineHit()) throw new Fenced();
     const pr = this.principal;
     if (pr.kind === "grant") {
       if (pr.live() !== "ok") throw new Revoked();
@@ -312,6 +459,53 @@ export class ShellRun {
     if (c.op === "duplicate" && c.role === "source" && c.entry && c.entry.kind === "folder") throw refuse("EISDIR", c.path);
     if (c.op === "duplicate" && c.role === "source" && c.entry && c.entry.kind !== "file" && c.entry.kind !== "folder") throw refuse("EACCES", c.path, "a notebook or board: copy it in the file browser");
   };
+  /**
+   * The check at use with the charge of one mutating transaction (r8c E2, A1): `ops` by 1 and `written_bytes` by its
+   * bytes, at the transaction's own admit (a target's, or a rename's or duplicate's destination), inside the verb's
+   * locked section, before anything changes, once; refused (LimitHit) past either key.  A duplicate's bytes are its
+   * source's size, from the source's admit.  Never refunded, whatever the verb does after.  `snapshot` (cp -r's walk,
+   * r2, daybreak3 BASH3-D3-1): the source must still be the entry the preflight measured, by identity and rev, at its
+   * own admit under the lock; one changed since (grown, replaced) is refused, so no byte beyond the reservation is
+   * copied.
+   */
+  private charging(bytes: number | "source", snapshot?: Entry): (c: AdmitCheck) => void {
+    let charged = false, size = 0;
+    return (c) => {
+      this.check(c);
+      if (c.op === "duplicate" && c.role === "source") {
+        if (snapshot && (!c.entry || c.entry.fid !== snapshot.fid || (c.entry.rev ?? 0) !== (snapshot.rev ?? 0) || (c.entry.size ?? 0) !== (snapshot.size ?? 0)))
+          throw refuse("ECONFLICT", c.path, "changed during the copy (it is no longer what was measured)");
+        size = c.entry?.size ?? 0;
+      }
+      if (charged || !MUTATES(c) || !(c.role === "target" || c.role === "destination")) return;
+      charged = true;
+      this.charge(1, bytes === "source" ? size : bytes);
+    };
+  }
+  private charge(ops: number, bytes: number) {
+    const L = this.limits;
+    if (this.used.ops + ops > L.ops!) throw new LimitHit("ops");
+    if (this.used.written_bytes + bytes > L.written_bytes!) throw new LimitHit("written_bytes");
+    this.used.ops += ops;
+    this.used.written_bytes += bytes;
+  }
+  // (the cp -r preflight's room: the workspace's own limits for `n` more entries, b's folder getting one; refused as
+  // the workspace refuses, ENOSPC, nothing copied.  A copy can still stop partway for a reason outside the shell)
+  private async room(b: string, n: number) {
+    const lim = this.ws.limits;
+    if ((await this.ws.entryCount()) + n > lim.maxEntries) throw new Refusal("ENOSPC", `${b}: the workspace would hold more than ${lim.maxEntries} entries`);
+    const up = parentOf(b);
+    if ((await this.ws.list(up, { admit: () => this.gate() })).length + 1 > lim.maxFolderEntries) throw new Refusal("ENOSPC", `${b}: ${up} would hold more than ${lim.maxFolderEntries} entries`);
+  }
+  // (bash.read_bytes: a read over it is a limit, not an errno)
+  private async readCapped(p: string) {
+    try {
+      return await this.ws.readUpTo(p, this.host.readBytes, { admit: this.check });
+    } catch (err) {
+      if (err instanceof WorkspaceError && err.code === "limit" && /larger than/.test(err.message)) throw new LimitHit("read_bytes");
+      throw err;
+    }
+  }
   /** The fence and the grant's liveness, for an answer that calls no workspace verb (the top, what is pending). */
   private gate() {
     if (this.terminal) throw new Fenced();
@@ -350,16 +544,16 @@ export class ShellRun {
     const e = await this.ws.stat(p, { admit: this.check });
     if (!e) throw refuse("ENOENT", p);
     if (e.kind === "folder") throw refuse("EISDIR", p);
-    if (e.kind === "file") return (await this.ws.readUpTo(p, this.host.readBytes, { admit: this.check })).content;
+    if (e.kind === "file") return (await this.readCapped(p)).content;
     // (a notebook or board reads as its JSON text: admitted, entry and content in one locked read (F10), and
     // serialized only up to the cap, so one over it is refused before its whole text exists)
     const r = await this.ws.read(p, { admit: this.check });
     if (r.entry.kind === "folder") throw refuse("EISDIR", p);
-    if (r.entry.kind === "file") return (await this.ws.readUpTo(p, this.host.readBytes, { admit: this.check })).content;
+    if (r.entry.kind === "file") return (await this.readCapped(p)).content;
     try {
       return boundedJson(r.content, this.host.readBytes);
     } catch (err) {
-      if (err instanceof TooLarge) throw refuse("EFBIG", p, `larger than ${this.host.readBytes} bytes`);
+      if (err instanceof TooLarge) throw new LimitHit("read_bytes");
       throw err;
     }
   }
@@ -395,6 +589,8 @@ export class ShellRun {
     const out = (await this.ws.list(p, { admit: top })).map((x) => ({ name: nameOf(x.path), kind: x.kind === "folder" ? "folder" : "file" }));
     const have = new Set(out.map((x) => x.name));
     for (const q of this.pending.keys()) if (parentOf(q) === p && !have.has(nameOf(q))) out.push({ name: nameOf(q), kind: "file" });
+    // (bash.list_entries: a listing longer than it is a limit)
+    if (out.length > this.limits.list_entries!) throw new LimitHit("list_entries");
     return out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   }
 
@@ -413,7 +609,7 @@ export class ShellRun {
     if (!withBytes) return { fid: e.fid!, rev: e.rev ?? 0 };
     // (`>>`: the entry and its bytes from one readUpTo, never a stat and then a separate read)
     // (and it must be the file just stated: changed between the two, it is a conflict, never a mixed observation)
-    const r = await this.ws.readUpTo(p, this.host.readBytes, { admit: this.check });
+    const r = await this.readCapped(p);
     if (r.entry.fid !== e.fid || (r.entry.rev ?? 0) !== (e.rev ?? 0)) throw refuse("ECONFLICT", p);
     return { fid: r.entry.fid!, rev: r.entry.rev ?? 0, bytes: r.content };
   }
@@ -435,11 +631,13 @@ export class ShellRun {
     }
   }
   private async commitNow(p: string, b: Uint8Array) {
+    // (bash.write_bytes: one commit's whole content, before any verb)
+    if (b.length > this.limits.write_bytes!) throw new LimitHit("write_bytes");
     const pend = this.pending.get(p), o = this.obs.get(p);
     if (pend === "create" || (!o && pend === undefined)) {
       let e: Entry;
       try {
-        e = await this.ws.create(p, { content: b, admit: this.check });
+        e = await this.ws.create(p, { content: b, admit: this.charging(b.length) });
       } catch (err) {
         // (someone else made it meanwhile: of two creators exactly one wins, the newcomer untouched)
         if (err instanceof WorkspaceError && err.code === "exists") throw refuse("ECONFLICT", p);
@@ -453,7 +651,7 @@ export class ShellRun {
     if (!o) throw new Error(`${p}: a commit without its observation`);
     let out: { entry: Entry; rev: number };
     try {
-      out = await this.ws.write(p, b, { base: o.rev, fid: o.fid, keepEmpty: false, admit: this.check });
+      out = await this.ws.write(p, b, { base: o.rev, fid: o.fid, keepEmpty: false, admit: this.charging(b.length) });
     } catch (err) {
       if (err instanceof WorkspaceError && err.code === "missing") throw refuse("ECONFLICT", p);
       throw err;
@@ -517,13 +715,13 @@ export class ShellRun {
       if (up !== "/" && !f) throw refuse("ENOENT", p);
       if (f && f.kind !== "folder") throw refuse("ENOTDIR", p);
     }
-    await this.ws.mkdir(p, { admit: this.check });
+    await this.ws.mkdir(p, { admit: this.charging(0) });
     this.record({ verb: "mkdir", path: p, committed: "local" });
   }
   private async createEmpty(p: string) {
     this.mutating(p);
     if (this.pending.has(p)) throw refuse("EEXIST", p);
-    await this.ws.create(p, { content: EMPTY, admit: this.check });
+    await this.ws.create(p, { content: EMPTY, admit: this.charging(0) });
     this.record({ verb: "create", path: p, rev: 0, committed: "local" });
   }
   private forget(p: string) {
@@ -540,7 +738,7 @@ export class ShellRun {
     }
     if (e.kind === "folder" && !recursive) throw refuse("EISDIR", p);
     // (always to Trash, everything in it, as one op; a large folder's rewrite settled before the next request: §3.4)
-    await this.ws.remove(p, expectOf(e), undefined, { admit: this.check });
+    await this.ws.remove(p, expectOf(e), undefined, { admit: this.charging(0) });
     await this.ws.rewriteSettled();
     this.forget(p);
     this.record({ verb: "remove", path: p, committed: "local" });
@@ -551,7 +749,7 @@ export class ShellRun {
     const e = await this.ws.stat(a, { admit: this.check });
     if (!e) throw refuse("ENOENT", a);
     if (await this.ws.stat(b, { admit: this.check })) throw refuse("EEXIST", b);
-    await this.ws.rename(a, b, { expect: expectOf(e), admit: this.check });
+    await this.ws.rename(a, b, { expect: expectOf(e), admit: this.charging(0) });
     await this.ws.rewriteSettled();
     this.forget(a);
     this.record({ verb: "rename", path: a, to: b, committed: "local" });
@@ -568,7 +766,7 @@ export class ShellRun {
     if (await this.ws.stat(b, { admit: this.check })) throw refuse("EEXIST", b);
     if (e.kind !== "folder") {
       if (e.kind !== "file") throw refuse("EACCES", a, "a notebook or board: copy it in the file browser");
-      await this.ws.duplicate(a, b, { admit: this.check });
+      await this.ws.duplicate(a, b, { admit: this.charging("source") });
       this.record({ verb: "duplicate", path: a, to: b, committed: "local" });
       return;
     }
@@ -588,15 +786,29 @@ export class ShellRun {
     if (refused) throw refused;
     const doc = all.find((x) => x.kind !== "file" && x.kind !== "folder");
     if (doc) throw refuse("EACCES", doc.path, "a notebook or board: copy it in the file browser");
+    // (the limit-dependent preflight, r3 §3.4 and r8c E2 item 5, before the first mutation; refused, nothing copied:
+    // F + D <= bash.cp_entries, bytes <= bash.cp_bytes, F + D <= the remaining ops, bytes <= the remaining
+    // written_bytes, and the workspace's room for F + D more entries, b's folder's included.  cp_entries and cp_bytes
+    // are then reserved, never given back; each mkdir and duplicate also charges ops and written_bytes at its admit)
+    const F = all.filter((x) => x.kind === "file").length, D = all.length - F + 1;
+    const bytes = all.reduce((t, x) => t + (x.kind === "file" ? (x.size ?? 0) : 0), 0);
+    const L = this.limits;
+    if (this.used.cp_entries + F + D > L.cp_entries!) throw new LimitHit("cp_entries");
+    if (this.used.cp_bytes + bytes > L.cp_bytes!) throw new LimitHit("cp_bytes");
+    if (this.used.ops + F + D > L.ops!) throw new LimitHit("ops");
+    if (this.used.written_bytes + bytes > L.written_bytes!) throw new LimitHit("written_bytes");
+    await this.room(b, F + D);
+    this.used.cp_entries += F + D;
+    this.used.cp_bytes += bytes;
     const to = (q: string) => b + q.slice(a.length);
-    await this.ws.mkdir(b, { admit: this.check });
+    await this.ws.mkdir(b, { admit: this.charging(0) });
     this.record({ verb: "mkdir", path: b, committed: "local" });
     for (const x of all.sort((u, v) => (u.path < v.path ? -1 : 1))) {
       if (x.kind === "folder") {
-        await this.ws.mkdir(to(x.path), { admit: this.check });
+        await this.ws.mkdir(to(x.path), { admit: this.charging(0) });
         this.record({ verb: "mkdir", path: to(x.path), committed: "local" });
       } else {
-        await this.ws.duplicate(x.path, to(x.path), { admit: this.check });
+        await this.ws.duplicate(x.path, to(x.path), { admit: this.charging("source", x) });
         this.record({ verb: "duplicate", path: x.path, to: to(x.path), committed: "local" });
       }
     }
@@ -618,16 +830,27 @@ export class ShellHost {
   private starting: Promise<Shell> | null = null;
   // (the current start's own cancellation: one per start, shared by the runs waiting on it, aborted by endShell)
   private startCtl: AbortController | null = null;
+  // (a started shell taking its init: endShell ends it too, so an init that never answers can't leave a worker)
+  private configuring: Shell | null = null;
   private views = new Map<string, Workspace>();
-  /** the bytes one read may return (READ_BYTES; step 3's bash.read_bytes sets it) */
+  /** the config, validated when the host is made (r3 §4.1): every key resolved */
+  readonly limits: BashLimits;
+  /** the bytes one read may return: bash.read_bytes (`opts.readBytes`, the tests' smaller cap, overrides it) */
   readonly readBytes: number;
+  /** the limits the current worker's just-bash resolved at its init (the census: web/shell/limits.ts) */
+  resolved: Readonly<Record<string, number>> | null = null;
+  /** why each worker was ended by the host (Stop's grace, the watchdog), the last 100: the tests' record (G1) */
+  readonly endings: string[] = [];
 
   /**
    * `start(signal)` starts a shell worker (startShell(S, at, { signal })); an abort of `signal` must end what
-   * it has started (its fetches, its worker), ready or not (CORR-BASH-S2-R2-1).
+   * it has started (its fetches, its worker), ready or not (CORR-BASH-S2-R2-1).  `opts.bash`: the `bash` config
+   * (deployment config, a course policy record, a grading or shared-compute host; never a document, URL or user
+   * code), validated here, before any worker starts: a BashConfigError names its key.
    */
-  constructor(private ws: Workspace, private start: (signal: AbortSignal) => Promise<Shell>, opts: { readBytes?: number } = {}) {
-    this.readBytes = opts.readBytes ?? READ_BYTES;
+  constructor(private ws: Workspace, private start: (signal: AbortSignal) => Promise<Shell>, opts: { readBytes?: number; bash?: unknown } = {}) {
+    this.limits = validateBash(opts.bash);
+    this.readBytes = opts.readBytes ?? this.limits.read_bytes!;
   }
 
   /**
@@ -650,16 +873,35 @@ export class ShellHost {
         started = Promise.reject(err);
       }
       const p: Promise<Shell> = started.then(
-        (s) => {
+        async (s) => {
+          if (this.starting !== p) {
+            s.terminate();
+            throw new ShellUnavailableError("its start was abandoned");
+          }
+          // (a shell that can't take the limits would run with just-bash's own: refused, as an older one is)
+          if (!(s.hostReq >= CONFIGURED_LEVEL)) {
+            this.starting = this.startCtl = null;
+            s.terminate();
+            throw new ShellUnavailableError("this document's package set has an older shell; update the set");
+          }
+          // (the worker's one init, before anything is dispatched: r3 §4.1)
+          let resolved: Record<string, number>;
+          this.configuring = s;
+          try {
+            resolved = await s.configure({ limits: executionLimitsOf(this.limits), pipelineWidth: this.limits.pipeline_width! });
+          } catch (err) {
+            s.terminate();
+            if (this.starting === p) this.starting = this.startCtl = null;
+            throw err instanceof ShellUnavailableError ? err : new ShellUnavailableError(`its limits were refused: ${why(err)}`);
+          } finally {
+            if (this.configuring === s) this.configuring = null;
+          }
           if (this.starting !== p) {
             s.terminate();
             throw new ShellUnavailableError("its start was abandoned");
           }
           this.starting = this.startCtl = null;
-          if (!(s.hostReq >= MEDIATED_FS_LEVEL)) {
-            s.terminate();
-            throw new ShellUnavailableError("this document's package set has an older shell; update the set");
-          }
+          this.resolved = Object.freeze(resolved);
           this.shell = s;
           return s;
         },
@@ -675,8 +917,12 @@ export class ShellHost {
   }
   /** Ends the shell worker, or cancels its start (Stop's grace, r3 §4.3): what it was running fails, and the next run starts a fresh one. */
   endShell(why: string) {
+    this.endings.push(why);
+    if (this.endings.length > 100) this.endings.shift();
     this.shell?.terminate();
     this.shell = null;
+    this.configuring?.terminate();
+    this.configuring = null;
     this.starting = null;
     this.startCtl?.abort(new ShellUnavailableError(`its start was cancelled: ${why}`));
     this.startCtl = null;

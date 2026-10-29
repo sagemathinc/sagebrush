@@ -11,3 +11,9 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 export const siteDir = join(here, "site");
 export const hasSite = process.env.SAGEBRUSH_NO_SITE !== "1" && existsSync(siteDir);
+
+// The directories under web/site/ that web/build.ts writes whole, as generated output that git ignores
+// and that holds no authored source.  A single generated file beside authored sources (web/site/src/build-id.ts)
+// is not a root.  Tests that skip generated output, and the site repository's own check of its .gitignore,
+// read this list instead of reading files under web/site/.
+export const SITE_GENERATED_ROOTS = ["public"] as const;

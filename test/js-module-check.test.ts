@@ -100,7 +100,17 @@ test("host_req: a widened field sent raises it to the widening's level; a widene
   assert.deepEqual(C.hostRequirement(helper + 'hostCall("fs.request", payload);', table, fields).errors, []);
   // (the committed table: the shipped module's protocol)
   const levels = JSON.parse(readFileSync(join(__dirname, "..", "..", "web", "shell", "host-levels.json"), "utf8"));
-  assert.deepEqual(levels.fields, { "shell.result.rejected.refusal": 2 });
+  // (level 3, bash step 3: the result's output count and the module's own limit; PR 279's first CI, run 40757814227
+  // job 123062107758, failed here on the table's previous single field)
+  assert.deepEqual(levels.fields, {
+    "shell.result.rejected.refusal": 2,
+    "shell.result.output.producedBytes": 3,
+    "shell.result.output.deliveredBytes": 3,
+    "shell.result.output.exceeded": 3,
+    "shell.result.output.truncated": 3,
+    "shell.result.limit.key": 3,
+    "shell.result.limit.value": 3,
+  });
   assert.equal(levels.names["shell.result"], 1, "the message keeps the level that introduced it");
 });
 
