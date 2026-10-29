@@ -57,13 +57,35 @@
   .log { font-size: 12px; color: var(--muted); margin-top: 10px; border-top: 1px dashed #d8dce4; padding-top: 6px; max-height: 160px; overflow: auto; }
   .engine { font-size: 12px; color: var(--muted); }
   code { font-size: 13px; background: #f3f2ec; padding: 0 3px; border-radius: 3px; }
+  textarea { font: 14px/1.4 system-ui, sans-serif; width: 100%; min-height: 80px; padding: 6px 8px; border: 1px solid #b9bdb3; border-radius: 5px; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tabs button { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid var(--line); background: #fff; border-radius: 14px; cursor: pointer; }
+  .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 14px; }
+  .roster { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px; align-self: start; }
+  .roster button { display: flex; width: 100%; gap: 6px; font: inherit; font-size: 14px; text-align: left; padding: 6px 8px; border: 0; background: none; border-radius: 5px; cursor: pointer; }
+  .roster button.on { background: #e8efe6; font-weight: 600; }
+  .roster .st { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .chip { display: inline-block; font-size: 12px; padding: 0 7px; border-radius: 9px; background: #eceee8; color: var(--muted); }
+  .chip.ok { background: #e1f0e2; color: var(--ok); } .chip.bad { background: #f7e3df; color: var(--bad); }
+  .work { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+  .work .answer { background: #f7f6f1; border-radius: 6px; padding: 8px 10px; margin: 6px 0 10px; white-space: pre-wrap; }
+  .rubric label { display: flex; gap: 8px; padding: 3px 0; }
+  .rubric .rp { margin-left: auto; color: var(--muted); }
+  .nav { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+  .nav button { font: inherit; padding: 5px 12px; border-radius: 5px; border: 1px solid #b9bdb3; background: #fff; cursor: pointer; }
+  .nav .hint { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .nav button.check { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .nav button.check:disabled { opacity: .5; }
+  .lmsbar .viewsw button { font-size: 13px; }
+  .lmsbar .viewsw button.on { background: #fff; color: var(--lms); }
 </style>
 </head>
 <body>
 <div class="banner">Preview with mock data: there is no real course, LMS or account here, and nothing leaves this browser. The answer checks run in your browser, in Sagebrush's engine.</div>
 <header class="lmsbar">
   <b>Demo University</b><span class="crumbs">MATH 101 · Calculus I › Assignments › Homework 3</span>
-  <span class="who">Signed in as <select id="student" aria-label="Student"></select><button id="reset" title="Forget this browser's attempts">Reset demo</button></span>
+  <span class="who"><span class="viewsw" role="group" aria-label="View"><button id="as-student" class="on">Student</button><button id="as-instructor">Instructor</button></span><span id="signed">Signed in as <select id="student" aria-label="Student"></select></span><button id="reset" title="Forget this browser's attempts">Reset demo</button></span>
 </header>
 <div class="layout">
   <nav class="lmsnav" aria-label="Course">
@@ -71,7 +93,8 @@
   </nav>
   <main class="tool" aria-label="Sagebrush assignment">
     <div class="toolhead"><h1 id="title"></h1><span class="by">Sagebrush · launched from your course</span></div>
-    <div class="toolbody">
+    <div class="toolbody" id="grader" hidden></div>
+    <div class="toolbody" id="studentview">
       <div class="meta" id="meta"></div>
       <div id="items"></div>
       <div class="total"><span>Score</span><span class="score" id="score"></span><span class="engine" id="engine">Starting Sage in this browser…</span></div>
@@ -139,6 +162,16 @@ const ASSIGNMENT = {
       ],
       hint: "Differentiate each choice and compare with $f$.",
     },
+    {
+      id: "q4", kind: "manual", points: 4, attempts: 1,
+      params: () => ({}),
+      prompt: () => "In two or three sentences: why does the derivative in Question 2 have two terms? (Your instructor grades this one.)",
+      rubric: [
+        { text: "Names the product rule", points: 2 },
+        { text: "Says which factor each term differentiates", points: 1 },
+        { text: "Clear and complete", points: 1 },
+      ],
+    },
   ],
 };
 const ROSTER = ["Ada Lovelace", "Alan Turing", "Emmy Noether", "Srinivasa Ramanujan"];
@@ -153,8 +186,10 @@ class MockCourseService {
   attempts(student, item) { return this.state.attempts[`${student}|${item}`] || []; }
   recordAttempt(student, item, a) { (this.state.attempts[`${student}|${item}`] ||= []).push({ ...a, at: Date.now() }); this.save(); }
   postScore(student, score, max) { this.state.scores[student] = { score, max, at: Date.now() }; this.save(); }
+  grade(student, item) { return (this.state.grades ||= {})[`${student}|${item}`]; }
+  setGrade(student, item, g) { (this.state.grades ||= {})[`${student}|${item}`] = { ...g, at: Date.now() }; this.save(); }
   gradebook() { return ROSTER.map((s) => ({ student: s, ...(this.state.scores[s] || {}) })); }
-  reset() { this.state = { attempts: {}, scores: {} }; this.save(); }
+  reset() { this.state = { attempts: {}, scores: {}, grades: {} }; this.save(); }
 }
 const course = new MockCourseService("sagebrush-questions-preview-v1");
 
@@ -207,15 +242,18 @@ for (const s of ROSTER) studentSel.append(new Option(s, s));
 studentSel.value = ROSTER[0];
 document.getElementById("title").textContent = ASSIGNMENT.title;
 
-function itemScore(item, tries) {
-  const right = tries.find((t) => t.correct);
-  return right ? item.points : 0;
+function itemScore(item, student) {
+  if (item.kind === "manual") {
+    const g = course.grade(student, item.id);
+    return g ? item.rubric.reduce((n, r, i) => n + (g.checks[i] ? r.points : 0), 0) : 0;
+  }
+  return course.attempts(student, item.id).some((t) => t.correct) ? item.points : 0;
 }
 function feedback(el, kind, html) { el.className = `fb ${kind}`; el.innerHTML = mathHtml(html); typeset(el); }
 
+const paramsFor = (item, student) => item.params(rng(hash32(`${ASSIGNMENT.id}|${item.id}|${student}`)));
 function renderItem(item, n, student) {
-  const r = rng(hash32(`${ASSIGNMENT.id}|${item.id}|${student}`));
-  const p = item.params(r);
+  const p = paramsFor(item, student);
   const box = document.createElement("section");
   box.className = "q";
   box.innerHTML = `<h2>Question ${n}<span class="pts"></span></h2><div class="prompt"></div><div class="ans"></div><div class="fb"></div><div class="attempts"></div>`;
@@ -224,13 +262,18 @@ function renderItem(item, n, student) {
   const status = () => {
     const tries = course.attempts(student, item.id);
     const done = tries.some((t) => t.correct) || tries.length >= item.attempts;
-    pts.textContent = `${itemScore(item, tries)} / ${item.points} points`;
+    pts.textContent = `${itemScore(item, student)} / ${item.points} points`;
+    if (item.kind === "manual") {
+      const g = course.grade(student, item.id);
+      at.textContent = g ? `Graded by your instructor.${g.comment ? " Comment: " + g.comment : ""}` : tries.length ? "Submitted; your instructor will grade it." : "Not submitted yet.";
+      return tries.length > 0;
+    }
     at.textContent = tries.some((t) => t.correct) ? `Answered in ${tries.length} ${tries.length === 1 ? "try" : "tries"}.` : `${Math.max(0, item.attempts - tries.length)} of ${item.attempts} tries left.`;
     return done;
   };
   const finish = () => { if (status()) for (const c of box.querySelectorAll("input, button")) c.disabled = true; updateTotal(student); };
-  const record = (answer, correct, show) => {
-    course.recordAttempt(student, item.id, { answer, correct });
+  const record = (answer, correct, show, extra = {}) => {
+    course.recordAttempt(student, item.id, { answer, correct, ...extra });
     const left = item.attempts - course.attempts(student, item.id).length;
     feedback(fb, correct ? "ok" : "bad", correct ? `Correct. ${show ?? ""}` : left > 0 ? `Not quite. ${item.hint}` : `Not quite, and no tries are left. ${item.hint}`);
     finish();
@@ -258,7 +301,7 @@ function renderItem(item, n, student) {
       if (res.verdict === "unparsed") return feedback(fb, "bad", "Sage couldn't read that expression. Use <code>*</code> for products and <code>^</code> for powers. This didn't count as a try.");
       if (res.verdict === "error") return feedback(fb, "bad", `The check didn't run (${esc(res.detail || "no result")}). This didn't count as a try.`);
       if (res.tex) setMath(prev, `You entered $${res.tex}$`);
-      record(text, res.verdict === "right", "Sage confirms that your answer equals the derivative.");
+      record(text, res.verdict === "right", "Sage confirms that your answer equals the derivative.", { tex: res.tex });
     };
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") button.click(); });
   } else if (item.kind === "choice") {
@@ -276,7 +319,19 @@ function renderItem(item, n, student) {
       if (!sel) return feedback(fb, "bad", "Choose one of the answers.");
       record(sel.value, !!choices[Number(sel.value)].right);
     };
+  } else if (item.kind === "manual") {
+    ans.innerHTML = `<textarea aria-label="Your answer"></textarea><div class="row"><button class="check">Submit</button></div>`;
+    const ta = ans.querySelector("textarea");
+    const prev = course.attempts(student, item.id).at(-1);
+    if (prev) ta.value = prev.answer;
+    ans.querySelector("button").onclick = () => {
+      if (!ta.value.trim()) return feedback(fb, "bad", "Write your answer first.");
+      course.recordAttempt(student, item.id, { answer: ta.value.trim(), correct: null });
+      feedback(fb, "wait", "Submitted.");
+      finish();
+    };
   }
+  if (item.kind === "manual") { finish(); return box; }
   // Restore what this student already did.
   const tries = course.attempts(student, item.id);
   if (tries.length) feedback(fb, tries.some((t) => t.correct) ? "ok" : "bad", tries.some((t) => t.correct) ? "Correct." : `Last answer: <code>${esc(tries.at(-1).answer)}</code>, not quite.`);
@@ -285,10 +340,19 @@ function renderItem(item, n, student) {
 }
 
 const log = document.getElementById("log");
-function updateTotal(student) {
+function totals(student) {
   let score = 0, max = 0;
-  for (const it of ASSIGNMENT.items) { score += itemScore(it, course.attempts(student, it.id)); max += it.points; }
-  document.getElementById("score").textContent = `${score} / ${max}`;
+  for (const it of ASSIGNMENT.items) { score += itemScore(it, student); max += it.points; }
+  return { score, max };
+}
+function updateTotal(student) {
+  const { score, max } = totals(student);
+  if (student === studentSel.value) document.getElementById("score").textContent = `${score} / ${max}`;
+  postTotal(student);
+  renderGradebook(student);
+}
+function postTotal(student) {
+  const { score, max } = totals(student);
   // A score goes to the gradebook once the student has tried something, and again when it changes.
   const tried = ASSIGNMENT.items.some((it) => course.attempts(student, it.id).length);
   const before = course.state.scores[student];
@@ -298,7 +362,6 @@ function updateTotal(student) {
     line.textContent = `${new Date().toLocaleTimeString()}: sent ${student}'s score ${score}/${max} to the gradebook`;
     log.prepend(line);
   }
-  renderGradebook(student);
 }
 function renderGradebook(changed) {
   const gb = document.getElementById("gb");
@@ -319,9 +382,122 @@ function render() {
   ASSIGNMENT.items.forEach((it, i) => items.append(renderItem(it, i + 1, student)));
   updateTotal(student);
 }
+// ---------------------------------------------------------------- classmates
+// The other students' work, made once (mock data), so the instructor has a class to grade.
+function seedClassmates() {
+  if (course.state.seeded) return;
+  const [q1, q2, q3, q4] = ASSIGNMENT.items;
+  const num = (s, ok) => { const p = paramsFor(q1, s), v = q1.answer(p); return { answer: (ok ? v : v * 2).toFixed(2), correct: ok }; };
+  const sym = (s, ok) => { const { a, b } = paramsFor(q2, s); return ok ? { answer: `${a}*x^${a - 1}*sin(${b}*x) + ${b}*x^${a}*cos(${b}*x)`, correct: true } : { answer: `${a * b}*x^${a - 1}*cos(${b}*x)`, correct: false }; };
+  const pick = (s, ok) => ({ answer: String(ok ? 0 : 1), correct: ok });
+  const plan = {
+    "Alan Turing": { q1: [num("Alan Turing", false), num("Alan Turing", true)], q2: [sym("Alan Turing", false), sym("Alan Turing", true)], q3: [pick("Alan Turing", false)],
+      q4: "The function is a product, so the product rule gives one term where x^a is differentiated and one where sin(bx) is." },
+    "Emmy Noether": { q1: [num("Emmy Noether", true)], q2: [sym("Emmy Noether", true)], q3: [pick("Emmy Noether", true)],
+      q4: "By the product rule (uv)' = u'v + uv': the first term differentiates the power x^a with sin(bx) kept, the second differentiates sin(bx), which brings out b cos(bx), with x^a kept. Two factors, so two terms." },
+    "Srinivasa Ramanujan": { q1: [num("Srinivasa Ramanujan", false), num("Srinivasa Ramanujan", false), num("Srinivasa Ramanujan", false)], q3: [pick("Srinivasa Ramanujan", true)],
+      q4: "Because there are two parts." },
+  };
+  for (const [s, work] of Object.entries(plan)) {
+    for (const [id, tries] of Object.entries(work)) {
+      if (id === "q4") course.recordAttempt(s, id, { answer: tries, correct: null });
+      else for (const t of tries) course.recordAttempt(s, id, t);
+    }
+    postTotal(s);
+  }
+  course.state.seeded = true;
+  course.save();
+}
+
+// ---------------------------------------------------------------- the instructor's grading view
+// Question-major (William, Oct 22): one question, every student's answer, with
+// instant next and previous; auto scores beside the rubric; stored answers and
+// stored checks only, so nothing is reopened or rerun.
+const gState = { q: 3, s: 0 };
+const others = () => ROSTER;
+function chip(item, s) {
+  const tries = course.attempts(s, item.id);
+  if (item.kind === "manual") {
+    const g = course.grade(s, item.id);
+    return g ? `<span class="chip ok">${itemScore(item, s)}/${item.points}</span>` : tries.length ? `<span class="chip">to grade</span>` : `<span class="chip">–</span>`;
+  }
+  if (tries.some((t) => t.correct)) return `<span class="chip ok">${item.points}/${item.points}</span>`;
+  return tries.length ? `<span class="chip bad">0/${item.points}</span>` : `<span class="chip">–</span>`;
+}
+function renderGrader() {
+  const el = document.getElementById("grader");
+  const item = ASSIGNMENT.items[gState.q], student = others()[gState.s];
+  el.innerHTML = `<div class="meta">Grading by question: each student's answer to one question, one after another. The answers and Sage's checks are stored, so nothing is reopened or rerun. Keys: <code>j</code> next, <code>k</code> previous.</div>
+    <div class="tabs">${ASSIGNMENT.items.map((it, i) => `<button data-q="${i}" class="${i === gState.q ? "on" : ""}">Question ${i + 1} · ${it.kind === "manual" ? "graded by you" : "auto-graded"}</button>`).join("")}</div>
+    <div class="grid"><div class="roster">${others().map((s, i) => `<button data-s="${i}" class="${i === gState.s ? "on" : ""}">${esc(s)}<span class="st">${chip(item, s)}</span></button>`).join("")}</div><div class="work"></div></div>`;
+  for (const b of el.querySelectorAll(".tabs button")) b.onclick = () => { gState.q = Number(b.dataset.q); renderGrader(); };
+  for (const b of el.querySelectorAll(".roster button")) b.onclick = () => { gState.s = Number(b.dataset.s); renderGrader(); };
+  const work = el.querySelector(".work");
+  const p = paramsFor(item, student), tries = course.attempts(student, item.id);
+  work.innerHTML = `<h2 style="font-size:15px;margin:0 0 4px">${esc(student)} · Question ${gState.q + 1}</h2><div class="prompt"></div><div class="tries"></div><div class="grade"></div>
+    <div class="nav"><button data-d="-1">‹ Previous</button><button data-d="1">Next ›</button><span class="hint">${gState.s + 1} of ${others().length}</span></div>`;
+  setMath(work.querySelector(".prompt"), item.prompt(p));
+  const tl = work.querySelector(".tries");
+  if (!tries.length) tl.innerHTML = `<p class="attempts">No answer yet.</p>`;
+  else if (item.kind === "manual") tl.innerHTML = `<div class="answer"></div>`, (tl.querySelector(".answer").textContent = tries.at(-1).answer);
+  else tries.forEach((t, i) => {
+    const d = document.createElement("div");
+    d.className = "row";
+    const shown = item.kind === "choice" ? `$${item.choices(p)[Number(t.answer)].tex}$` : t.tex ? `$${t.tex}$` : `<code>${esc(t.answer)}</code>`;
+    d.innerHTML = `<span class="attempts">Try ${i + 1}</span> <span class="v"></span> <span class="chip ${t.correct ? "ok" : "bad"}">${t.correct ? "right" : "wrong"}</span>`;
+    setMath(d.querySelector(".v"), shown);
+    tl.append(d);
+  });
+  const gr = work.querySelector(".grade");
+  if (item.kind === "manual") {
+    const g = course.grade(student, item.id) || { checks: item.rubric.map(() => false), comment: "" };
+    gr.innerHTML = `<div class="rubric">${item.rubric.map((r, i) => `<label><input type="checkbox" data-i="${i}" ${g.checks[i] ? "checked" : ""} ${tries.length ? "" : "disabled"}> ${esc(r.text)}<span class="rp">+${r.points}</span></label>`).join("")}</div>
+      <input type="text" class="comment" placeholder="A comment for the student (optional)" value="${esc(g.comment)}" ${tries.length ? "" : "disabled"} style="width:100%;font-family:inherit">
+      <div class="nav"><button class="check save" ${tries.length ? "" : "disabled"}>Save grade and next</button><span class="pts attempts"></span></div>`;
+    const sum = () => item.rubric.reduce((n, r, i) => n + (gr.querySelector(`[data-i="${i}"]`).checked ? r.points : 0), 0);
+    const showSum = () => (gr.querySelector(".pts").textContent = `${sum()} / ${item.points} points`);
+    for (const c of gr.querySelectorAll("input[type=checkbox]")) c.onchange = showSum;
+    showSum();
+    gr.querySelector(".save").onclick = () => {
+      course.setGrade(student, item.id, { checks: item.rubric.map((_, i) => gr.querySelector(`[data-i="${i}"]`).checked), comment: gr.querySelector(".comment").value.trim() });
+      updateTotal(student);
+      gState.s = (gState.s + 1) % others().length;
+      renderGrader();
+    };
+  } else {
+    gr.innerHTML = `<p class="attempts">Auto-graded: ${itemScore(item, student)} / ${item.points} points${tries.length ? ` after ${tries.length} ${tries.length === 1 ? "try" : "tries"}` : ""}.</p>`;
+  }
+  for (const b of work.querySelectorAll(".nav button[data-d]")) b.onclick = () => { gState.s = (gState.s + Number(b.dataset.d) + others().length) % others().length; renderGrader(); };
+}
+document.addEventListener("keydown", (e) => {
+  if (document.getElementById("grader").hidden || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  if (e.key === "j" || e.key === "k") { gState.s = (gState.s + (e.key === "j" ? 1 : -1) + others().length) % others().length; renderGrader(); }
+});
+
+// ---------------------------------------------------------------- views
+function setView(instructor) {
+  if ((location.hash === "#instructor") !== instructor) history.replaceState(null, "", instructor ? "#instructor" : location.pathname);
+  document.getElementById("as-student").classList.toggle("on", !instructor);
+  document.getElementById("as-instructor").classList.toggle("on", instructor);
+  document.getElementById("studentview").hidden = instructor;
+  document.getElementById("grader").hidden = !instructor;
+  document.getElementById("signed").hidden = instructor;
+  if (instructor) {
+    // start at the first answer that still needs a grade on this question
+    const item = ASSIGNMENT.items[gState.q];
+    const todo = others().findIndex((s) => course.attempts(s, item.id).length && !course.grade(s, item.id));
+    if (item.kind === "manual" && todo >= 0) gState.s = todo;
+    renderGrader();
+    renderGradebook();
+  } else render();
+}
+document.getElementById("as-student").onclick = () => setView(false);
+document.getElementById("as-instructor").onclick = () => setView(true);
 studentSel.onchange = render;
-document.getElementById("reset").onclick = () => { course.reset(); log.textContent = ""; render(); };
-render();
+document.getElementById("reset").onclick = () => { course.reset(); log.textContent = ""; seedClassmates(); setView(false); };
+seedClassmates();
+setView(location.hash === "#instructor");
+addEventListener("hashchange", () => setView(location.hash === "#instructor"));
 
 // ---------------------------------------------------------------- scratch notebook
 // The same notebook component and kernel as the full notebook (web/embed).
