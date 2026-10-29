@@ -46,6 +46,8 @@ async function tab(wsUrl) {
 
 try {
   const a = await tab(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+  // (a reload, waited out: until then the old page, and its window.demo, is still there)
+  const reload = async () => { await a.ev(`window.__before = 1`); await a.send("Page.reload"); await a.until(`!window.__before && !!window.demo`, 60000); };
   await a.send("Runtime.enable"); await a.send("Log.enable");
   await a.send("Page.navigate", { url: new URL("questions/", base).href });
   await a.until("window.demo && document.querySelectorAll('#items .q').length === 7");
@@ -67,7 +69,7 @@ try {
   ok(v !== null, "numeric: the prompt carries this student's v0");
   await a.ev(`(${q(0)}.querySelector('input').value = '${((v * v) / 19.6).toFixed(3)}', ${q(0)}.querySelector('button').click())`);
   ok(await a.ev(`${q(0)}.querySelector('.fb').classList.contains('ok')`), "numeric: the right answer is accepted");
-  ok(await a.ev(`document.getElementById('score').textContent === '3 / 23'`), "the score counts it");
+  ok(await a.ev(`document.getElementById('score').textContent === '3 / 15'`), "the score counts it, over the points decided so far (3 / 15)");
 
   // q2 symbolic, checked by Sage in the page's worker
   const tex = await a.ev(`${q(1)}.querySelector('.prompt [data-tex]').dataset.tex`);
@@ -86,7 +88,9 @@ try {
   // the right one is (c/2) e^{x^2}: the only choice with a fraction and no x^2 in front of e
   await a.ev(`(() => { const box = ${q(2)}; const right = [...box.querySelectorAll('label')].find((l) => { const t = l.querySelector('[data-tex]').dataset.tex; return t.includes('frac') && !t.includes('x^2 e'); }); right.querySelector('input').checked = true; box.querySelector('button').click(); })()`);
   ok(await a.ev(`${q(2)}.querySelector('.fb').classList.contains('ok')`), "choice: the right choice is accepted");
-  ok(await a.ev(`document.getElementById('score').textContent === '10 / 23'`), "the auto-graded total is 10 / 23 (questions 1-3)");
+  ok(await a.ev(`document.getElementById('score').textContent === '10 / 15'`), "the auto-graded total is 10 / 15 (questions 1-3)");
+  // the score in parts (William, Oct 29): auto-graded, and the instructor's part shown separately until graded
+  ok(await a.ev(`document.getElementById('scorelabel').textContent === 'Score so far' && /Auto-graded: 10 \\/ 15/.test(document.getElementById('scoreparts').textContent) && /Not submitted yet: Q4, Q7/.test(document.getElementById('scoreparts').textContent)`), "score parts: auto-graded 10 / 15, Q4 and Q7 not submitted yet");
   ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /10 \\/ 23/.test(r.textContent))`), "the gradebook shows the posted total");
   ok(await a.ev(`[...document.querySelectorAll('#items .q')].slice(0, 3).every((q) => [...q.querySelectorAll('button')].every((b) => b.disabled))`), "answered questions are closed");
   ok(await a.ev(`[...document.querySelectorAll('#gb tr')].filter((r) => /\\d+ \\/ 23/.test(r.textContent)).length === 4`), "the classmates' (mock) scores are in the gradebook");
@@ -101,31 +105,48 @@ try {
   ok(await a.ev(`!${q(4)}.querySelector('.fbfig').childElementCount && !${q(5)}.querySelector('.fbfig').childElementCount`), "plots: no feedback figure before an answer");
   const k = await a.ev(`demo.paramsFor(demo.ASSIGNMENT.items[4], 'Ada Lovelace').k`);
   await a.ev(`(${q(4)}.querySelector('input').value = '${Math.sqrt(k).toFixed(3)}', ${q(4)}.querySelector('button').click())`);
-  ok(await a.ev(`${q(4)}.querySelector('.fb').classList.contains('ok') && document.getElementById('score').textContent === '13 / 23'`), "plots: the 2D question's right answer scores (13 / 23)");
+  ok(await a.ev(`${q(4)}.querySelector('.fb').classList.contains('ok') && document.getElementById('score').textContent === '13 / 15'`), "plots: the 2D question's right answer scores (13 / 15)");
   await a.until(`${q(4)}.querySelectorAll('.fbfig figure.plot svg').length === 1`, 120000);
   ok(true, "plots: the feedback figure (the tangent at the minimum) is drawn after the answer");
   const which = await a.ev(`demo.paramsFor(demo.ASSIGNMENT.items[5], 'Ada Lovelace').which`);
   await a.ev(`(() => { const box = ${q(5)}; box.querySelector('input[value="${which}"]').checked = true; box.querySelector('button').click(); })()`);
-  ok(await a.ev(`${q(5)}.querySelector('.fb').classList.contains('ok') && document.getElementById('score').textContent === '15 / 23'`), "plots: the 3D question's right choice scores (15 / 23)");
+  ok(await a.ev(`${q(5)}.querySelector('.fb').classList.contains('ok') && document.getElementById('score').textContent === '15 / 15'`), "plots: the 3D question's right choice scores (15 / 15)");
   await a.until(`!!${q(5)}.querySelector('.fbfig figure.plot svg')`, 120000);
   ok(true, "plots: the feedback contour plot is drawn after the answer");
 
   // q4, graded by the instructor
   await a.ev(`(${q(3)}.querySelector('textarea').value = 'The product rule: one term differentiates each factor.', ${q(3)}.querySelector('button').click())`);
   ok(await a.ev(`/instructor will grade/.test(${q(3)}.querySelector('.attempts').textContent)`), "manual: the answer is submitted for grading");
+  ok(await a.ev(`/Awaiting instructor: 4 points \\(Q4\\)/.test(document.getElementById('scoreparts').textContent) && document.getElementById('score').textContent === '15 / 15'`), "score parts: Q4's 4 points await the instructor, outside the score so far");
+  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /15 \\/ 23/.test(r.textContent) && /needs grading/.test(r.textContent))`), "gradebook: Ada's total is marked as needing grading");
   await a.ev(`document.getElementById('as-instructor').click()`);
   await a.until(`!document.getElementById('grader').hidden && document.querySelectorAll('#grader .roster button').length === 4`);
   ok(await a.ev(`document.querySelector('#grader .tabs button.on').textContent.includes('Question 4') && /to grade/.test(document.querySelector('#grader .roster button').textContent)`), "instructor: question-major view, Ada's answer to grade");
   ok(await a.ev(`/product rule/.test(document.querySelector('#grader .work .answer').textContent)`), "instructor: the stored answer is shown, nothing rerun");
-  await a.ev(`(document.querySelectorAll('#grader .rubric input').forEach((c) => (c.checked = true)), document.querySelector('#grader .save').click())`);
-  ok(await a.ev(`document.querySelector('#grader .roster button.on').textContent.includes('Alan Turing')`), "instructor: save moves to the next student");
-  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /19 \\/ 23/.test(r.textContent))`), "instructor: the graded total, 19 / 23, reaches the gradebook");
+  ok(await a.ev(`!document.querySelector('#grader .save') && !/Save grade/.test(document.getElementById('grader').textContent)`), "autosave: there is no Save button");
+  await a.ev(`document.querySelectorAll('#grader .rubric input').forEach((c) => { if (!c.checked) { c.checked = true; c.dispatchEvent(new Event('change')); } })`);
+  ok(await a.ev(`document.querySelector('#grader .savestate').textContent === 'Saved' && (demo.course.grade('Ada Lovelace', 'q4')?.checks || []).every(Boolean)`), "autosave: each tick saves at once (Saved)");
+  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /19 \\/ 23/.test(r.textContent) && !/needs grading/.test(r.textContent))`), "instructor: the graded total, 19 / 23, reaches the gradebook, no longer pending");
+  // a comment typed and j pressed at once (no wait): saved on the way out, and there when coming back
+  await a.ev(`(() => { const c = document.querySelector('#grader .comment'); c.value = 'Good: names the rule.'; c.dispatchEvent(new Event('input')); })()`);
+  ok(await a.ev(`document.querySelector('#grader .savestate').textContent === 'Saving…'`), "autosave: a comment being typed shows Saving…");
   await a.ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))`);
-  ok(await a.ev(`document.querySelector('#grader .roster button.on').textContent.includes('Emmy Noether')`), "instructor: j goes to the next student");
+  ok(await a.ev(`document.querySelector('#grader .roster button.on').textContent.includes('Alan Turing')`), "instructor: j goes to the next student");
+  ok(await a.ev(`demo.course.grade('Ada Lovelace', 'q4')?.comment === 'Good: names the rule.'`), "autosave: j at once still saves the comment");
+  await a.ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }))`);
+  ok(await a.ev(`document.querySelector('#grader .comment').value === 'Good: names the rule.' && [...document.querySelectorAll('#grader .rubric input')].every((c) => c.checked)`), "autosave: k back shows the grade and the comment");
+  // Alan's: a tick, then a reload before anything else
+  await a.ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))`);
+  await a.ev(`(() => { const c = document.querySelectorAll('#grader .rubric input')[0]; c.checked = true; c.dispatchEvent(new Event('change')); const t = document.querySelector('#grader .comment'); t.value = 'Which factor is which?'; t.dispatchEvent(new Event('input')); })()`);
+  await reload();
+  await a.until(`window.demo && !document.getElementById('grader').hidden && !!document.querySelector('#grader .roster')`);
+  ok(await a.ev(`demo.course.grade('Alan Turing', 'q4')?.checks?.[0] === true && demo.course.grade('Alan Turing', 'q4')?.comment === 'Which factor is which?'`), "autosave: a reload right after typing keeps the tick and the comment");
+  await a.ev(`document.querySelectorAll('#grader .roster button')[2].click()`);
+  ok(await a.ev(`document.querySelector('#grader .roster button.on').textContent.includes('Emmy Noether')`), "instructor: the roster still picks a student");
   // the pager stays in one place whatever the answer's length (William, Oct 29), on a desktop and on a phone
   const pagerAt = async (i) => {
     await a.ev(`document.querySelectorAll('#grader .roster button')[${i}].click()`);
-    return a.ev(`JSON.stringify(['button[data-d="-1"]', 'button[data-d="1"]', '.save'].map((sel) => { const r = document.querySelector('#grader .pager ' + sel).getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round); }))`);
+    return a.ev(`JSON.stringify(['button[data-d="-1"]', 'button[data-d="1"]'].map((sel) => { const r = document.querySelector('#grader .pager ' + sel).getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round); }))`);
   };
   for (const [w, h, label] of [[1400, 1000, "desktop"], [390, 844, "phone"]]) {
     await a.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: w < 600 });
@@ -153,7 +174,7 @@ try {
     const at = [];
     for (const k of ["j", "j", "j", "j"]) {
       await a.ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '${k}', bubbles: true }))`);
-      at.push(await a.ev(`JSON.stringify(['button[data-d="-1"]', 'button[data-d="1"]', '.save', '.focusbtn'].map((sel) => { const r = document.querySelector('#grader .pager ' + sel).getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round); }))`));
+      at.push(await a.ev(`JSON.stringify(['button[data-d="-1"]', 'button[data-d="1"]', '.focusbtn'].map((sel) => { const r = document.querySelector('#grader .pager ' + sel).getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round); }))`));
     }
     ok(at.every((x) => x === at[0]) && await a.ev(`document.body.classList.contains('gfocus')`), `${label} focus: j goes through all four students, focus kept, the pager in one place (${at[0]})`);
     ok(await a.ev(`(() => { const r = document.querySelector('#grader .pager').getBoundingClientRect(); return r.left >= 0 && r.right <= ${w} + 1; })()`), `${label} focus: the pager fits the width`);
@@ -173,7 +194,7 @@ try {
   ok(await a.ev(`!document.body.classList.contains('gfocus')`), "focus: not in the student's view");
   await a.ev(`document.getElementById('as-instructor').click()`);
   ok(await a.ev(`document.body.classList.contains('gfocus')`), "focus: remembered when the grading view comes back");
-  await a.send("Page.reload");
+  await reload();
   await a.until("window.demo && !document.getElementById('grader').hidden");
   ok(await a.ev(`document.body.classList.contains('gfocus')`), "focus: remembered across a reload in this session");
   await a.ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
@@ -181,12 +202,12 @@ try {
   await a.ev(`document.querySelector('#grader .tabs button[data-q="1"]').click()`);
   ok(await a.ev(`!!document.querySelector('#grader .work .chip.ok')`), "instructor: an auto-graded question shows its stored verdicts");
   await a.ev(`document.getElementById('as-student').click()`);
-  ok(await a.ev(`document.getElementById('score').textContent === '19 / 23' && /Graded by your instructor/.test(${q(3)}.querySelector('.attempts').textContent)`), "the student sees the graded total");
+  ok(await a.ev(`document.getElementById('score').textContent === '19 / 19' && /Graded by your instructor/.test(${q(3)}.querySelector('.attempts').textContent)`), "the student sees the graded total");
 
   // a reload keeps the attempts (the mock course service's storage)
-  await a.send("Page.reload");
+  await reload();
   await a.until("window.demo && document.querySelectorAll('#items .q').length === 7");
-  ok(await a.ev(`document.getElementById('score').textContent === '19 / 23'`), "a reload keeps this student's attempts and grades");
+  ok(await a.ev(`document.getElementById('score').textContent === '19 / 19'`), "a reload keeps this student's attempts and grades");
   await a.until(`${q(4)}.querySelectorAll('.fbfig figure.plot svg').length === 1`, 120000);
   ok(true, "a reload draws the settled question's feedback figure again");
   // q7, a proof in LaTeX (flag "proof"): sagebrush-latex's editor with its live preview, a draft kept as it's typed,
@@ -200,7 +221,7 @@ try {
   ok(true, "proof: the preview follows the typing, its math typeset");
   await a.until(`/AdaInductiveStep/.test(demo.course.draft('Ada Lovelace', 'q7') || '')`, 5000);
   ok(await a.ev(`/Draft kept/.test(${P}.querySelector('.saved').textContent)`), "proof: the draft is kept in this browser");
-  await a.send("Page.reload");
+  await reload();
   await a.until(`window.demo && !!document.querySelectorAll('#items .q')[6]?.querySelector('.tex-src')`, 60000);
   ok(await a.ev(`/AdaInductiveStep/.test(${q(6)}.querySelector('.tex-src').value)`), "proof: a reload keeps the draft");
   await a.ev(`${q(6)}.querySelector('button.check').click()`);
@@ -222,16 +243,16 @@ try {
   }
   await a.ev(`demo.setFocus(false)`);
   await a.send("Emulation.clearDeviceMetricsOverride");
-  await a.ev(`(document.querySelectorAll('#grader .rubric input').forEach((c) => (c.checked = true)), document.querySelector('#grader .save').click())`);
+  await a.ev(`document.querySelectorAll('#grader .rubric input').forEach((c) => { if (!c.checked) { c.checked = true; c.dispatchEvent(new Event('change')); } })`);
   await a.ev(`document.querySelectorAll('#grader .roster button')[0].click()`);
   await a.until(`/AdaInductiveStep/.test(document.querySelector('#grader .work .tex-preview')?.textContent || '')`, 60000);
   ok(await a.ev(`document.querySelectorAll('.tex-page.tex-embed').length === 1`), "instructor: moving to the next proof replaces the editor (no leak)");
-  await a.ev(`(document.querySelectorAll('#grader .rubric input').forEach((c) => (c.checked = true)), document.querySelector('#grader .comment').value = 'Clear and complete.', document.querySelector('#grader .save').click())`);
+  await a.ev(`(document.querySelectorAll('#grader .rubric input').forEach((c) => { if (!c.checked) { c.checked = true; c.dispatchEvent(new Event('change')); } }), (() => { const t = document.querySelector('#grader .comment'); t.value = 'Clear and complete.'; t.dispatchEvent(new Event('input')); })(), document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true })))`);
   ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /23 \\/ 23/.test(r.textContent)) && [...document.querySelectorAll('#gb tr')].some((r) => /Emmy Noether/.test(r.textContent) && /14 \\/ 23/.test(r.textContent))`), `instructor: the proof grades reach the gradebook (Ada 23 / 23, Emmy 10 + 4 = 14 / 23): ${await a.ev(`[...document.querySelectorAll('#gb tr')].map((r) => r.textContent).join(" | ")`)}`);
   await a.ev(`document.getElementById('as-student').click()`);
   ok(await a.ev(`document.getElementById('score').textContent === '23 / 23' && /Graded by your instructor.*Clear and complete/.test(${q(6)}.querySelector('.attempts').textContent)`), "proof: the student sees the grade and the comment");
   // annotations on a proof (William, Oct 29): the grader selects a passage of Alan's proof, presses c and comments;
-  // after Save grade, Alan sees the bubble with his grade. The comments UI is sagebrush-latex's attachComments
+  // once graded (autosaved), Alan sees the bubble with his grade. The comments UI is sagebrush-latex's attachComments
   // (from /sagebrush-latex.js); its hooks: .sb-cm-bubble, .sb-cm-badge, [data-thread], CSS.highlights "sb-comments".
   if (!(await a.ev(`import('/sagebrush-latex.js').then((m) => !!m.attachComments, () => false)`))) console.log("skip annotations: /sagebrush-latex.js has no attachComments yet");
   else {
@@ -258,8 +279,8 @@ try {
     await a.ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }))`);
     await a.until(`/Turing/.test(document.querySelector('#grader .work h2').textContent) && document.querySelectorAll('#grader .sb-cm-bubble, #grader .sb-cm-badge').length >= 1`, 60000);
     ok(await a.ev(`(CSS.highlights?.get('sb-comments')?.size ?? 0) >= 1`), "annotations: leaving and coming back shows the comment and its highlight again");
-    await a.ev(`(document.querySelectorAll('#grader .rubric input')[0].checked = true, document.querySelector('#grader .save').click())`);
-    ok(await a.ev(`(demo.course.grade('Alan Turing', 'q7')?.annotations || []).length === 1`), "annotations: Save grade stores them with the grade");
+    await a.ev(`(() => { const c = document.querySelectorAll('#grader .rubric input')[0]; c.checked = true; c.dispatchEvent(new Event('change')); })()`);
+    ok(await a.ev(`(demo.course.grade('Alan Turing', 'q7')?.annotations || []).length === 1`), "annotations: saved with the grade");
     // Alan's view: his grade with the bubble, view only
     await a.ev(`document.getElementById('as-student').click()`);
     await a.ev(`(document.getElementById('student').value = 'Alan Turing', document.getElementById('student').dispatchEvent(new Event('change')))`);

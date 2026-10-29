@@ -42,7 +42,14 @@
   .preview { color: var(--muted); font-size: 13px; min-height: 1.3em; }
   .attempts { color: var(--muted); font-size: 12px; }
   .total { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding: 12px 16px; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+  .total { flex-wrap: wrap; }
   .total .score { font-size: 18px; font-weight: 600; }
+  .total .parts { font-size: 13px; color: var(--muted); }
+  .total .parts b { color: var(--ink); font-weight: 600; }
+  .total .engine { flex-basis: 100%; }
+  .pager .savestate { font-size: 12px; color: var(--muted); width: 64px; flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pager .savestate.ok { color: var(--ok); }
+  td .chip.pend { margin-left: 4px; font-size: 11px; }
   details.scratch { margin-top: 16px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; }
   details.scratch summary { cursor: pointer; color: var(--accent); }
   aside.gradebook { background: #fff; border: 1px solid #c9cfda; border-radius: 8px; padding: 12px 14px; align-self: start; }
@@ -127,7 +134,7 @@
     <div class="toolbody" id="studentview">
       <div class="meta" id="meta"></div>
       <div id="items"></div>
-      <div class="total"><span>Score</span><span class="score" id="score"></span><span class="engine" id="engine">Starting Sage in this browser…</span></div>
+      <div class="total"><span id="scorelabel">Score</span><span class="score" id="score"></span><span class="parts" id="scoreparts"></span><span class="engine" id="engine">Starting Sage in this browser…</span></div>
       <details class="scratch" id="scratch"><summary>Scratch work: a Sage notebook in this page</summary><div id="nb"></div></details>
     </div>
   </main>
@@ -279,12 +286,13 @@ class MockCourseService {
   save() { localStorage.setItem(this.key, JSON.stringify(this.state)); }
   attempts(student, item) { return this.state.attempts[`${student}|${item}`] || []; }
   recordAttempt(student, item, a) { (this.state.attempts[`${student}|${item}`] ||= []).push({ ...a, at: Date.now() }); this.save(); }
-  postScore(student, score, max) { this.state.scores[student] = { score, max, at: Date.now() }; this.save(); }
+  postScore(student, score, max, pending = 0) { this.state.scores[student] = { score, max, pending, at: Date.now() }; this.save(); }
   grade(student, item) { return (this.state.grades ||= {})[`${student}|${item}`]; }
+  clearGrade(student, item) { delete (this.state.grades ||= {})[`${student}|${item}`]; this.save(); }
   setGrade(student, item, g) { (this.state.grades ||= {})[`${student}|${item}`] = { ...g, at: Date.now() }; this.save(); }
   gradebook() { return ROSTER.map((s) => ({ student: s, ...(this.state.scores[s] || {}) })); }
-  // a proof's annotations as the grader makes them (the comments adapter saves on each change); Save grade
-  // copies them into the grade record, which is what the student sees
+  // a proof's annotations as the grader makes them (the comments adapter saves on each change); each save
+  // also writes them into the grade record (autosaved), which is what the student sees
   annotations(student, item) { return (this.state.annotations ||= {})[`${student}|${item}`]; }
   setAnnotations(student, item, threads) { (this.state.annotations ||= {})[`${student}|${item}`] = threads; this.save(); }
   draft(student, item) { return (this.state.drafts ||= {})[`${student}|${item}`]; }
@@ -547,26 +555,47 @@ function renderItem(item, n, student) {
 }
 
 const log = document.getElementById("log");
+// The score in parts (William, Oct 29: a total over all 23 points while the instructor hasn't graded some of
+// them "feels unfair"): auto-graded, instructor-graded, and the points still waiting for the instructor (or not
+// submitted yet). The total is over the points decided so far, and over the full total once nothing is waiting.
 function totals(student) {
-  let score = 0, max = 0;
-  for (const it of ASSIGNMENT.items) { score += itemScore(it, student); max += it.points; }
-  return { score, max };
+  const r = { auto: 0, autoMax: 0, inst: 0, instMax: 0, awaiting: [], unsubmitted: [], max: 0 };
+  ASSIGNMENT.items.forEach((it, i) => {
+    r.max += it.points;
+    if (!isGraded(it)) { r.auto += itemScore(it, student); r.autoMax += it.points; }
+    else if (course.grade(student, it.id)) { r.inst += itemScore(it, student); r.instMax += it.points; }
+    else (course.attempts(student, it.id).length ? r.awaiting : r.unsubmitted).push({ n: i + 1, points: it.points });
+  });
+  const pts = (l) => l.reduce((n, x) => n + x.points, 0);
+  r.score = r.auto + r.inst; r.decided = r.autoMax + r.instMax;
+  r.pending = pts(r.awaiting); r.open = pts(r.awaiting) + pts(r.unsubmitted);
+  return r;
+}
+function showTotal(student) {
+  const t = totals(student), qs = (l) => l.map((x) => `Q${x.n}`).join(", ");
+  document.getElementById("scorelabel").textContent = t.open ? "Score so far" : "Score";
+  document.getElementById("score").textContent = `${t.score} / ${t.open ? t.decided : t.max}`;
+  const parts = [`Auto-graded: <b>${t.auto} / ${t.autoMax}</b>`];
+  if (t.instMax) parts.push(`Instructor-graded: <b>${t.inst} / ${t.instMax}</b>`);
+  if (t.awaiting.length) parts.push(`Awaiting instructor: ${t.pending} ${t.pending === 1 ? "point" : "points"} (${qs(t.awaiting)})`);
+  if (t.unsubmitted.length) parts.push(`Not submitted yet: ${qs(t.unsubmitted)}`);
+  document.getElementById("scoreparts").innerHTML = parts.join(" · ");
 }
 function updateTotal(student) {
-  const { score, max } = totals(student);
-  if (student === studentSel.value) document.getElementById("score").textContent = `${score} / ${max}`;
+  if (student === studentSel.value) showTotal(student);
   postTotal(student);
   renderGradebook(student);
 }
 function postTotal(student) {
-  const { score, max } = totals(student);
-  // A score goes to the gradebook once the student has tried something, and again when it changes.
+  const { score, max, pending } = totals(student);
+  // A score goes to the gradebook once the student has tried something, and again when it changes; with the
+  // points still waiting for the instructor (in LTI's AGS: gradingProgress "PendingManual" until none are left).
   const tried = ASSIGNMENT.items.some((it) => course.attempts(student, it.id).length);
   const before = course.state.scores[student];
-  if (tried && (!before || before.score !== score)) {
-    course.postScore(student, score, max);
+  if (tried && (!before || before.score !== score || (before.pending ?? 0) !== pending)) {
+    course.postScore(student, score, max, pending);
     const line = document.createElement("div");
-    line.textContent = `${new Date().toLocaleTimeString()}: sent ${student}'s score ${score}/${max} to the gradebook`;
+    line.textContent = `${new Date().toLocaleTimeString()}: sent ${student}'s score ${score}/${max}${pending ? ` (${pending} points need grading)` : ""} to the gradebook`;
     log.prepend(line);
   }
 }
@@ -577,7 +606,7 @@ function renderGradebook(changed) {
     const tr = document.createElement("tr");
     if (row.student === studentSel.value) tr.className = "me";
     if (row.student === changed) tr.classList.add("flash");
-    tr.innerHTML = `<td>${esc(row.student)}</td><td class="num">${row.score === undefined ? "–" : `${row.score} / ${row.max}`}</td>`;
+    tr.innerHTML = `<td>${esc(row.student)}</td><td class="num">${row.score === undefined ? "–" : `${row.score} / ${row.max}${row.pending ? `<span class="chip pend" title="${row.pending} points need grading">needs grading</span>` : ""}`}</td>`;
     gb.append(tr);
   }
 }
@@ -671,17 +700,22 @@ function chip(item, s) {
   return tries.length ? `<span class="chip bad">0/${item.points}</span>` : `<span class="chip">–</span>`;
 }
 let graderEditor = null, graderComments = null;
+// the open grade's pending save (the comment's debounce), flushed before anything else is shown
+let flushGrade = () => {}, writeGrade = null;
+addEventListener("pagehide", () => flushGrade());
+addEventListener("beforeunload", () => flushGrade());
 const closeGraderEditor = () => {
   graderComments?.then((h) => h?.destroy()); graderComments = null;
   graderEditor?.then((ed) => ed.destroy()); graderEditor = null;
 };
 function renderGrader() {
+  flushGrade(); flushGrade = () => {}; writeGrade = null;
   closeGraderEditor();
   const el = document.getElementById("grader");
   const item = ASSIGNMENT.items[gState.q], student = others()[gState.s];
   el.innerHTML = `<div class="meta">Grading by question: each student's answer to one question, one after another. The answers and Sage's checks are stored, so nothing is reopened or rerun. Keys: <code>j</code> next, <code>k</code> previous.</div>
     <div class="tabs">${ASSIGNMENT.items.map((it, i) => `<button data-q="${i}" class="${i === gState.q ? "on" : ""}">Question ${i + 1} · ${isGraded(it) ? "graded by you" : "auto-graded"}</button>`).join("")}</div>
-    <div class="pager" role="toolbar" aria-label="Grading pager"><button data-d="-1" title="Previous student (k)">‹ Previous</button><button data-d="1" title="Next student (j)">Next ›</button><button class="check save" disabled>Save grade &amp; next</button><span class="where"></span>${FLAGS.focus ? focusButton() : ""}</div>
+    <div class="pager" role="toolbar" aria-label="Grading pager"><button data-d="-1" title="Previous student (k)">‹ Previous</button><button data-d="1" title="Next student (j)">Next ›</button><span class="savestate" role="status" aria-live="polite"></span><span class="where"></span>${FLAGS.focus ? focusButton() : ""}</div>
     <div class="grid"><div class="roster">${others().map((s, i) => `<button data-s="${i}" class="${i === gState.s ? "on" : ""}">${esc(s)}<span class="st">${chip(item, s)}</span></button>`).join("")}</div><div class="work"></div></div>`;
   for (const b of el.querySelectorAll(".tabs button")) b.onclick = () => { gState.q = Number(b.dataset.q); renderGrader(); };
   // (on a phone the tabs are one scrolling row: the current one shown)
@@ -693,7 +727,7 @@ function renderGrader() {
   work.innerHTML = `<h2 style="font-size:15px;margin:0 0 4px">${esc(student)} · Question ${gState.q + 1}</h2><div class="prompt"></div><div class="fig"></div><div class="tries"></div><div class="grade"></div>`;
   if (item.figure) drawFigure(work.querySelector(".fig"), item.figure(p));
   el.querySelector(".pager .where").textContent = `${student} · ${gState.s + 1} of ${others().length}`;
-  const save = el.querySelector(".pager .save");
+  const saveState = el.querySelector(".pager .savestate");
   setMath(work.querySelector(".prompt"), item.prompt(p));
   const tl = work.querySelector(".tries");
   if (!tries.length) tl.innerHTML = `<p class="attempts">No answer yet.</p>`;
@@ -705,7 +739,7 @@ function renderGrader() {
     graderComments = attachAnnotations(graderEditor, {
       mode: "comment",
       load: () => course.annotations(s0, i0) ?? course.grade(s0, i0)?.annotations ?? [],
-      save: (threads) => course.setAnnotations(s0, i0, threads),
+      save: (threads) => { course.setAnnotations(s0, i0, threads); writeGrade?.(); },
     });
     graderComments.then((h) => { if (h) tl.querySelector(".annhint").hidden = false; });
   }
@@ -726,18 +760,30 @@ function renderGrader() {
       <div class="pts attempts"></div>`;
     const sum = () => item.rubric.reduce((n, r, i) => n + (gr.querySelector(`[data-i="${i}"]`).checked ? r.points : 0), 0);
     const showSum = () => (gr.querySelector(".pts").textContent = `${sum()} / ${item.points} points`);
-    for (const c of gr.querySelectorAll("input[type=checkbox]")) c.onchange = showSum;
-    showSum();
-    save.disabled = !tries.length;
-    save.onclick = () => {
-      course.setGrade(student, item.id, {
-        checks: item.rubric.map((_, i) => gr.querySelector(`[data-i="${i}"]`).checked), comment: gr.querySelector(".comment").value.trim(),
-        ...(item.kind === "proof" ? { annotations: course.annotations(student, item.id) ?? course.grade(student, item.id)?.annotations ?? [] } : {}),
-      });
+    // Autosave (William, Oct 29: "Just save"): each tick saves at once, the comment shortly after typing stops,
+    // and anything not yet saved is saved before moving on (Previous/Next, j/k, a tab, focus, leaving the page).
+    // Nothing ticked, no comment and no annotations is no grade at all (back to "to grade").
+    const sIdx = gState.s;
+    let timer = null;
+    const write = () => {
+      clearTimeout(timer); timer = null;
+      const checks = item.rubric.map((_, i) => gr.querySelector(`[data-i="${i}"]`).checked), comment = gr.querySelector(".comment").value.trim();
+      const ann = item.kind === "proof" ? course.annotations(student, item.id) ?? course.grade(student, item.id)?.annotations ?? [] : null;
+      if (!checks.some(Boolean) && !comment && !ann?.length) course.clearGrade(student, item.id);
+      else course.setGrade(student, item.id, { checks, comment, ...(ann ? { annotations: ann } : {}) });
       updateTotal(student);
-      gState.s = (gState.s + 1) % others().length;
-      renderGrader();
+      const st = el.querySelector(`.roster button[data-s="${sIdx}"] .st`);
+      if (st) st.innerHTML = chip(item, student);
+      saveState.textContent = "Saved"; saveState.className = "savestate ok";
     };
+    writeGrade = write;
+    flushGrade = () => { if (timer) write(); };
+    for (const c of gr.querySelectorAll("input[type=checkbox]")) c.onchange = () => { showSum(); write(); };
+    gr.querySelector(".comment").oninput = () => { saveState.textContent = "Saving…"; saveState.className = "savestate"; clearTimeout(timer); timer = setTimeout(write, 500); };
+    showSum();
+    saveState.textContent = course.grade(student, item.id) ? "Saved" : tries.length ? "Autosave" : "";
+    saveState.title = "Grades save as you go: nothing to click";
+    if (course.grade(student, item.id)) saveState.className = "savestate ok";
   } else {
     gr.innerHTML = `<p class="attempts">Auto-graded: ${itemScore(item, student)} / ${item.points} points${tries.length ? ` after ${tries.length} ${tries.length === 1 ? "try" : "tries"}` : ""}.</p>`;
   }
@@ -781,6 +827,7 @@ function setView(instructor) {
   document.getElementById("signed").hidden = instructor;
   // (focus belongs to the grading view: off in the student's view, back as remembered here)
   document.body.classList.toggle("gfocus", instructor && FLAGS.focus && focusRemembered());
+  flushGrade();
   // (one proof editor at a time: the hidden view's are closed)
   if (instructor) closeStudentEditors();
   else closeGraderEditor();
@@ -796,7 +843,7 @@ function setView(instructor) {
 document.getElementById("as-student").onclick = () => setView(false);
 document.getElementById("as-instructor").onclick = () => setView(true);
 studentSel.onchange = render;
-document.getElementById("reset").onclick = () => { course.reset(); log.textContent = ""; seedClassmates(); seedProofs(); setView(false); };
+document.getElementById("reset").onclick = () => { flushGrade = () => {}; course.reset(); log.textContent = ""; seedClassmates(); seedProofs(); setView(false); };
 seedClassmates();
 seedProofs();
 setView(location.hash === "#instructor");
