@@ -157,7 +157,27 @@ test("notebook session: the supported magics run; every other is an error", asyn
     assert.ok(r.failed, code);
     assert.match(r.err, msg);
     assert.equal(r.out, "");
+    // (one line, as IPython prints a UsageError: no frames of the magic's machinery)
+    assert.doesNotMatch(r.err, /Traceback|__pyjs_magic__|_pyjs_magic\.py/, code);
+    assert.equal(r.err.trimEnd().split("\n").length, 1, code);
   }
+});
+
+test("notebook session: importing a module Sagebrush does not include says so, after the traceback", async () => {
+  const s = await session();
+  const hint = /Sagebrush runs Python in this page, compiled to JavaScript: .*packages cannot be installed\. 'pandas' is not included \(yet\)\.\n$/;
+  const r = await s.run("import pandas as pd");
+  assert.ok(r.failed);
+  assert.match(r.err, /^Traceback \(most recent call last\):\n/);
+  assert.match(r.err, /ModuleNotFoundError: No module named 'pandas'\n/);
+  assert.match(r.err, hint);
+  // a submodule that is not included, of a package that is
+  assert.match((await s.run("import scipy.no_such_submodule")).err, /'scipy\.no_such_submodule' is not included \(yet\)\.\n$/);
+  // included modules import as before; a ModuleNotFoundError raised by the code itself, without a name, has no hint
+  assert.deepEqual(await s.run("import math, json, numpy\nprint(math.pi > 3)"), { out: "True\n", err: "", failed: false });
+  const own = await s.run("raise ModuleNotFoundError('mine')");
+  assert.match(own.err, /ModuleNotFoundError: mine\n$/);
+  assert.doesNotMatch(own.err, /Sagebrush runs Python/);
 });
 
 test("autoreload's check: which top-level classes may be updated (no __class__ cell), from the parsed source", () => {
