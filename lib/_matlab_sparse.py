@@ -30,6 +30,25 @@ _I = np.int64
 # the most elements a sparse matrix is expanded to as a full one (2 GB of doubles)
 MAX_FULL = 1 << 28
 
+# (class-1 runtime protection, plan-matlab-nocliffs r6 section 2.8, measured
+# by M1b: the largest uninterrupted NumPy element kernel, E elements, and the
+# largest single allocation, A_SAFE bytes; E = min(E_TIME, A_SAFE / 32) so
+# that every block holds whole chunks of every dtype and every kernel's
+# output, at most 2E elements of 16 bytes, fits one call.  _matlab_lu, the
+# sparse solves, imports them)
+E_TIME = 1 << 14
+A_SAFE = 1 << 31
+E = min(E_TIME, A_SAFE // 32)
+assert A_SAFE >= 32 * E
+
+# (the first-use fix, plan r3 section 2; @sagebrush's ruling of Oct 29: an authorized admission exemption for
+# unmanaged allocations, NOT a safety guarantee) full() and the not-big dense solve whose whole peak need, counted as
+# their admitted routes count it plus each fill's chunk transients, is at most SMALL_NEED bytes run the same chunked
+# code with no capacity record, Ledger or _matlab_lu import (master never checked them either).  Larger needs, and
+# the diagonal, band and LU routes, keep full admission.  No aggregate bound at this layer, as on master: the
+# engine's heap limit is the backstop.  A test seam
+SMALL_NEED = 1 << 22
+
 
 # ------------------------------------------------------------------ storage
 
@@ -149,8 +168,68 @@ def _too_big(m, n):
                 "MATLAB:array:SizeLimitExceeded")
 
 
+def _full_need(S, step=None):
+    """full_arr's bytes: the result, and the fill's chunk transients (a
+    chunk's column numbers: an arange, a diff and a repeat of E indices)"""
+    return S.m * S.n * S.pr.dtype.itemsize + 3 * (step or E) * 8
+
+
 def full_arr(S):
-    """the full matrix S stands for, stored as _matlab stores arrays (transposed)"""
+    """the full matrix S stands for, stored as _matlab stores arrays
+    (transposed): admitted against the capacity record (r6 section 2.5), its
+    copy made in chunks of at most E entries; where the record can't admit
+    memory (no figure, or one without the JS domains: the browser today),
+    master's MAX_FULL check and fill, verbatim (ruling d2)"""
+    need = _full_need(S)
+    if need <= SMALL_NEED:
+        # (exempt: the chunked fill _full_need counts, unadmitted; nothing imported, no capacity read)
+        return _fill_full(S)
+    rec = _capacity_record()
+    if unmeasured_reason(rec) is not None:
+        return _legacy_full_arr(S)
+    import _matlab_ledger as LG
+
+    led = LG.Ledger("A %dx%d full matrix" % (S.m, S.n), "one array", rec=rec)
+    try:
+        led.reserve(need, "full")
+    except MemoryError as g:
+        e = _too_big(S.m, S.n)
+        e.record, e.need_bytes, e.limit_bytes = g.record, g.need_bytes, g.limit_bytes
+        raise e
+    return _fill_full(S)
+
+
+def _fill_full(S):
+    """S's full array (transposed), filled by chunks of at most E columns and
+    E entries (as bandwidths): no call proportional to nnz"""
+    a = np.zeros((S.n, S.m), dtype=S.pr.dtype)
+    n, jc, ir, pr = S.n, S.jc, S.ir, S.pr
+    if not pr.size:
+        return a
+    c0 = 0
+    while c0 < n:
+        lo = int(jc[c0])
+        if int(jc[c0 + 1]) - lo > E:
+            hi = int(jc[c0 + 1])
+            for s in range(lo, hi, E):
+                t = min(hi, s + E)
+                a[c0, ir[s:t]] = pr[s:t]
+            c0 += 1
+            continue
+        p = int(np.searchsorted(jc[c0:c0 + E + 1], lo + E, "right"))
+        c1 = min(n, c0 + p - 1)
+        hi = int(jc[c1])
+        if hi > lo:
+            a[np.repeat(np.arange(c0, c1, dtype=_I), np.diff(jc[c0:c1 + 1])), ir[lo:hi]] = pr[lo:hi]
+        c0 = c1
+    return a
+
+
+# MASTER'S full_arr, kept verbatim as an interim (ruling d2, Oct 27 2026):
+# where the capacity record does not cover the js-heap and js-arraybuffer
+# domains, full() keeps master's fixed cap.  Registered to D0: removed, with
+# MAX_FULL, when every production browser's record covers both domains
+def _legacy_full_arr(S):
     if S.m * S.n > MAX_FULL:
         raise _too_big(S.m, S.n)
     a = np.zeros((S.n, S.m), dtype=S.pr.dtype)
@@ -1165,15 +1244,56 @@ _SPECIAL = {
 MAX_DENSE_SOLVE = 4000
 
 
-def bandwidths(S):
-    """(lower, upper) bandwidths"""
+def bandwidths(S, step=None, charge=None):
+    """(lower, upper) bandwidths, scanned in chunks bounded on both axes
+    (plan r6 section 2.4a, step 1): at most step (E) columns and at most E
+    stored entries per chunk, a column of more than E entries alone in entry
+    slices of E, so no call is proportional to n or nnz.  charge(units), if
+    given, is told each chunk's work before it is read: its jc entries and
+    its stored entries (columns + 1 + entries; a long column's first slice
+    counts its jc entry, each slice 1 more), n + K + nnz in all for K
+    chunks.  Its peak, four arrays of E indices, is the caller's to reserve"""
+    step = step or E
     if not S.pr.size:
         return 0, 0
-    d = _cols(S) - S.ir
-    return int(max(0, -int(np.min(d)))), int(max(0, int(np.max(d))))
+    n, jc, ir = S.n, S.jc, S.ir
+    lo = hi = 0
+    c0 = 0
+    while c0 < n:
+        a = int(jc[c0])
+        if int(jc[c0 + 1]) - a > step:
+            # (a long column, alone: its column index a scalar)
+            b = int(jc[c0 + 1])
+            extra = 1
+            for s in range(a, b, step):
+                t = min(b, s + step)
+                if charge is not None:
+                    charge((t - s) + 1 + extra)
+                extra = 0
+                r = ir[s:t]
+                lo = max(lo, int(np.max(r)) - c0)
+                hi = max(hi, c0 - int(np.min(r)))
+            c0 += 1
+            continue
+        # (the most columns, at most step, whose entries total at most step)
+        p = int(np.searchsorted(jc[c0:c0 + step + 1], a + step, "right"))
+        c1 = min(n, c0 + p - 1)
+        b = int(jc[c1])
+        if charge is not None:
+            charge((c1 - c0 + 1) + (b - a))
+        if b > a:
+            cols = np.repeat(np.arange(c0, c1, dtype=_I), np.diff(jc[c0:c1 + 1]))
+            d = cols - ir[a:b]
+            lo = max(lo, -int(np.min(d)))
+            hi = max(hi, int(np.max(d)))
+        c0 = c1
+    return int(max(0, lo)), int(max(0, hi))
 
 
-def _band_solve(S, B):
+# MASTER'S band solve, kept verbatim as an interim (ruling d2): taken, with
+# master's MAX_FULL and MAX_BAND_WORK route, only where the capacity record
+# can't admit memory.  Registered to D0, removed with them
+def _legacy_band_solve(S, B):
     """S \\ B for a square sparse S of small bandwidth: LU with partial pivoting
     in LAPACK's band storage (gbtrf, then the two triangular solves); B a
     MATLAB-oriented full matrix"""
@@ -1226,6 +1346,14 @@ def _band_solve(S, B):
 
 # the most multiply-adds a band solve may take (beyond, the sparse LU)
 MAX_BAND_WORK = 1 << 29
+
+
+# master's band route, PR 2's routing floor (the routing amendment r1, variant (d)): _matlab_lu.solve takes band
+# at once wherever master's mldivide took band, so no system master bands pays the ordering.  A route only,
+# never a refusal: the band path is still admitted by the ledger, and a refused band takes the other path
+def legacy_band_route(n, kl, ku):
+    return (2 * kl + ku + 1) * n <= MAX_FULL and n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK
+
 
 # MASTER'S LU, kept verbatim as an interim (@sagebrush's ruling (d) on M1b,
 # Oct 26 2026): where the capacity record does not cover the js-heap and
@@ -1375,6 +1503,14 @@ def _legacy_lu(S):
 _capacity = None
 
 
+def _capacity_record():
+    """a fresh capacity record (_capacity imported at the first need)"""
+    global _capacity
+    if _capacity is None:
+        import _capacity
+    return _capacity.capacity()
+
+
 def unmeasured_reason(rec=None):
     """why this host's capacity record can't admit the LU's memory, or None:
     no figure, or one that doesn't cover the js-heap and js-arraybuffer
@@ -1412,12 +1548,77 @@ def _sparse_lu(S, q=None):
     return _matlab_lu.factor(S, "Solving with this %d-by-%d sparse matrix" % (S.n, S.n), q=q)
 
 
+# the dense route's simultaneous copies, per element of A and of B (full(a),
+# full(b), and _matlab's solve's own: its transposed copies, the factored copy,
+# the result): A's from M2 (r6 section 2.2: VmHWM - VmRSS over A's bytes, 6.05
+# copies at most, real and complex, n = 2000-4000, times 1.25, rounded up); B's
+# still PROVISIONAL (M2 measured A's copies with k = 1)
+DENSE_A_COPIES = 8
+DENSE_B_COPIES = 4
+
+
 def mldivide(a, b):
     """a \\ b with a sparse a (not scalar): through the full matrix when small;
-    beyond, by its diagonal, its band, or its sparse LU factorization"""
+    beyond, by its diagonal, its band, or its sparse LU factorization, the
+    band and the LU chosen by their estimated cost and admitted memory
+    (plan-matlab-nocliffs r6 sections 2.4, 2.4a).  Where the capacity record
+    can't admit memory (the browser today), master's route and caps, verbatim
+    (ruling d2)"""
     A = a
     if A.m != _m._dims(b)[0]:
         raise _err("Matrix dimensions must agree.", "MATLAB:dimagree")
+    big = A.m == A.n and A.n > MAX_DENSE_SOLVE
+    k = _m._dims(b)[1] if len(_m._dims(b)) > 1 else 1
+    cv = 16 if A.pr.dtype.kind == "c" or not isreal(b) else 8
+    dense_need = (DENSE_A_COPIES * A.m * A.n + DENSE_B_COPIES * A.m * k) * cv
+    if not big and dense_need + 3 * E * 8 * (2 if type(b) is Sparse else 1) <= SMALL_NEED:
+        # (exempt: the dense route below, unadmitted; its fills' chunk transients counted; no capacity read)
+        return _dense_solve(a, b)
+    rec = _capacity_record()
+    if unmeasured_reason(rec) is not None:
+        return _legacy_mldivide(a, b)
+    import _matlab_ledger as LG
+
+    if not big:
+        # (the dense route: every simultaneous copy admitted before the first)
+        led = LG.Ledger("Solving this %dx%d system" % (A.m, A.n), "this solve", rec=rec)
+        led.reserve(dense_need, "dense")
+        return _dense_solve(a, b)
+    import _matlab_lu as L
+
+    Bm = _m._mat(full(b) if type(b) is Sparse else b)
+    what = "Solving this %dx%d sparse system" % (A.n, A.n)
+    out = L.solve(A, Bm, what, rec=rec)
+    if out is None:
+        # (diagonal: each row divided by its element; its arrays admitted)
+        led = LG.Ledger(what, rec=rec)
+        led.reserve(A.n * cv + 2 * A.n * Bm.shape[1] * cv, "diagonal")
+        dvals = np.zeros(A.n, dtype=np.complex128 if A.pr.dtype.kind == "c" else np.float64)
+        dvals[A.ir] = _fvals(A)
+        if np.any(dvals == 0):
+            _m.warning_("Matrix is singular to working precision.")
+        with np.errstate(divide="ignore", invalid="ignore"):
+            X = Bm / dvals.reshape((-1, 1))
+    else:
+        X, singular = out
+        if singular:
+            _m.warning_("Matrix is singular to working precision.")
+    r = _m._unmat(X)
+    return from_full(r) if type(b) is Sparse else r
+
+
+def _dense_solve(a, b):
+    """the dense route of mldivide: a's and a sparse b's chunked fills, then _matlab's solve"""
+    r = _m.mldivide(_m._box(_fill_full(a)), _m._box(_fill_full(b)) if type(b) is Sparse else b)
+    return from_full(r) if type(b) is Sparse and _m._isnumlike(r) else r
+
+
+# MASTER'S mldivide, kept verbatim as an interim (ruling d2, Oct 27 2026):
+# its route by MAX_FULL and MAX_BAND_WORK, its band solve and the dense
+# route, where the capacity record can't admit memory.  Registered to D0,
+# removed with the caps
+def _legacy_mldivide(a, b):
+    A = a
     if A.m == A.n and A.n > MAX_DENSE_SOLVE and bandwidths(A) == (0, 0):
         # (diagonal: each row divided by its element)
         dvals = np.zeros(A.n, dtype=np.complex128 if A.pr.dtype.kind == "c" else np.float64)
@@ -1433,7 +1634,7 @@ def mldivide(a, b):
         kl, ku = bandwidths(A)
         Bm = _m._mat(full(b) if type(b) is Sparse else b)
         if (2 * kl + ku + 1) * A.n <= MAX_FULL and A.n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK:
-            X = _band_solve(A, Bm)
+            X = _legacy_band_solve(A, Bm)
         else:
             F = _sparse_lu(A)
             if F.singular:

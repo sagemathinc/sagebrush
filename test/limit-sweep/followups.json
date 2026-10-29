@@ -10,6 +10,36 @@
    "owner": "magma",
    "status": "open",
    "what": "engine Budget overflow refusals (a cost or length not representable in u64/usize) have no reviewed route: decide a routes.json row for the engine Budget's refusals (daybreak2's lane; budget.rs is in B12), or a reclassification rule. Note wasm32: usize::try_from(k.len) refuses above 2^32, the 4 GiB address space, so that one is a real memory boundary, not unreachable."
+  },
+  {
+   "id": "FU-B16-1",
+   "keys": [
+    "lib/_matlab_sparse.py :: _legacy_full_arr :: if S.m * S.n > MAX_FULL: #0",
+    "lib/_matlab_sparse.py :: _legacy_mldivide :: if (2 * kl + ku + 1) * A.n <= MAX_FULL and A.n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK: #0",
+    "lib/_matlab_sparse.py :: _legacy_mldivide :: if A.m == A.n and A.n > MAX_DENSE_SOLVE and bandwidths(A) == (0, 0): #0",
+    "lib/_matlab_sparse.py :: _legacy_mldivide :: if A.m == A.n and A.n > MAX_DENSE_SOLVE: #0"
+   ],
+   "owner": "matlab",
+   "status": "open",
+   "what": "The legacy MATLAB sparse paths kept on unmeasured hosts (ruling d2: master's full and band caps and route, _legacy_full_arr and _legacy_mldivide) until every production browser's capacity covers js-heap and js-arraybuffer; removed with the D0 follow-up."
+  },
+  {
+   "id": "FU-B16-2",
+   "keys": [
+    "lib/_matlab_sparse.py :: mldivide :: big = A.m == A.n and A.n > MAX_DENSE_SOLVE #0"
+   ],
+   "owner": "matlab",
+   "status": "open",
+   "what": "mldivide's 4000/4001 dense-routing floor (big = n > MAX_DENSE_SOLVE): memory is bounded by memguard; the routing boundary itself (M2 finding 2: random3 at 4000 vs 4001, 93.4x) needs a measured routing rule, in the routing-model project after PR 2."
+  },
+  {
+   "id": "FU-B16-3",
+   "keys": [
+    "lib/_matlab_sparse.py :: legacy_band_route :: return (2 * kl + ku + 1) * n <= MAX_FULL and n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK #0"
+   ],
+   "owner": "matlab",
+   "status": "open",
+   "what": "MATLAB PR 2's routing floor (legacy_band_route: master's band predicate, MAX_FULL 2^28 and MAX_BAND_WORK 2^29, as a route, never a refusal), kept by William's decisions of Oct 27 2026 (D-W1, D-W2: its two inherited edge cliffs are known costs) until the routing-model project replaces it."
   }
  ],
  "note": "The sweep's follow-ups, the source of truth (plan-limit-sites-sweep-r3 section 2): {id FU-<batch>-<n>, status open|fixed|withdrawn, keys, what, owner, fixed_by {pr, commit}, withdrawn_because}. An open one has at least one active key, and its active keys and the entries pointing to it agree; no active key points to a fixed or withdrawn one.",

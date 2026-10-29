@@ -59,11 +59,16 @@ def dense_threshold(n):
     return max(16, int(_math.ceil(10 * _math.sqrt(n))))
 
 
-def order_columns(m, n, jc, ir, charge=None):
+def order_columns(m, n, jc, ir, charge=None, stats=None):
     """a permutation q (a list of n column indices) of the m-by-n sparse
     matrix with column starts jc and row indices ir (CSC, as Python lists or
     arrays), ordering A(:, q)'s columns by approximate minimum degree of
-    A'*A's structure"""
+    A'*A's structure.  stats, a dict, gets "fill": the elimination's own
+    estimate of nnz(L + U) (a routing heuristic, plan r6 section 2.4's s-hat):
+    each pivot's supervariable of s columns, with l the weight of its new
+    element, counts s^2 + 2 s l (its diagonal block and its rows and columns
+    of L and U, the approximate degrees being upper bounds); each empty
+    column 1; the d dense columns, ordered last, d (2n - d), as if dense"""
     charge = charge or (lambda units: None)
     jc = [int(v) for v in jc]
     nnz = jc[n]
@@ -126,6 +131,7 @@ def order_columns(m, n, jc, ir, charge=None):
     wstamp = [0] * N        # w's elements (stamped)
     w = [0] * N             # |L_e \ L_p| by weight, for the elements met
     stamp = 0
+    fill = 0
     remaining = live        # the live variables' total weight
     while remaining > 0:
         # the pivot: the smallest degree, then the smallest index (lazy heap)
@@ -152,9 +158,11 @@ def order_columns(m, n, jc, ir, charge=None):
                 Lp.append(i)
         order.extend(sorted(members[p]))
         remaining -= nv[p]
+        sp = nv[p]
         nv[p] = 0
         E[p] = Adj[p] = members[p] = None
         lp = sum(nv[i] for i in Lp)
+        fill += sp * sp + 2 * sp * lp
         L[p], lw[p], alive_e[p] = Lp, lp, True
         charge(sum(len(E[i]) + len(Adj[i]) for i in Lp))
         # |L_e \ L_p| for each element e met through L_p's variables
@@ -210,4 +218,7 @@ def order_columns(m, n, jc, ir, charge=None):
             heap = [(deg[j], j) for j in range(n) if nv[j]]
             _heapq.heapify(heap)
     q = first + order + last
+    if stats is not None:
+        d = len(last)
+        stats["fill"] = fill + len(first) + d * (2 * n - d)
     return q
