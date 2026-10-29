@@ -109,6 +109,18 @@ an operation into another preview. Assets and CSP sidecars upload before HTML;
 stale objects are deleted only after every PUT succeeds. Nothing outside the
 exact name plus slash prefix is listed for deletion. The final line is the URL.
 
+Remote work uses one pool of at most eight requests in flight. Assets and policies
+finish before HTML starts; every upload/skip finishes before stale deletion.
+The first error stops new work, drains the at-most-eight in-flight operations,
+and fails without printing a URL. The same 20-minute abort covers every phase.
+For an existing key, a HEAD compares the current object's signed
+`preview-sha256` metadata, content length and content type with the prepared body.
+Only exact matches skip PUT. PUT writes that digest as signed R2 metadata. Legacy
+objects without metadata are uploaded once. No extra manifest object is needed,
+and an interrupted publish cannot cause a last-success manifest to skip a key
+that was partially replaced. Lifecycle-deleted objects are uploaded again after
+HEAD 404. One publisher per name remains required; HEAD/PUT is not a transaction.
+
 Publication is **not atomic**: users may see a temporary failed page while a name
 is being replaced. All final upload bodies (injected HTML, policies, config and SW
 included) are frozen in memory and SHA-256 recorded before remote work. Uploads
@@ -144,6 +156,12 @@ serves exact files and directory `index.html` files; missing APIs do not become 
 SPA fallback. Only GET and HEAD are admitted. Dotfiles, `.preview` policy sidecars,
 `_headers` and `_redirects` are not public routes. There is no authentication; every
 served file is public.
+
+On the normal static notebook, two optional discovery requests return expected
+404s: `/api/share/me` means sharing is unavailable, and `/pkgset/latest.json`
+means no optional package set is installed. Browsers may log these two misses in
+the console. They do not prevent the engine starting or local code execution.
+Previews do not fabricate account/auth responses or proxy production services.
 
 All responses get COOP `same-origin`, COEP `require-corp`, CORP `cross-origin`,
 `nosniff`, `no-referrer`, `X-Robots-Tag: noindex, nofollow, noarchive`, and no-store /
@@ -211,7 +229,7 @@ the lane's existing interface; the shared switch does not invent a new protocol.
 | Credential file | Owned regular mode-600 file, 16 KiB; fixed schema |
 | Previous listing | At most 6,000 objects / 6 pages of 1,000 keys, 8 MiB/page; all keys checked before uploads |
 | Remote phase and requests | 20 minutes overall; each S3 request also 30 seconds including body consumption; no retries |
-| Upload/deletion | Sequential, at most 3,000 PUTs + 6,000 DELETEs; exact frozen manifest buffers, no source rereads or multipart uploads |
+| Upload/deletion | At most 8 requests in flight; at most 3,000 HEADs + 3,000 PUTs + 6,000 DELETEs, plus at most 6 listing GETs; exact frozen manifest buffers, no source rereads or multipart uploads |
 
 The build commands use their normal lifecycle; this script is not a process-tree
 supervisor and sets no ad hoc kill deadline for build subprocesses. Use the
@@ -230,7 +248,7 @@ runtime suite was also run through the project wrapper:
 /home/user/sagebrush-coord/bin/ptest -m 3 -- node --test web/preview/test-preview.mjs
 ```
 
-The latest pre-publish run passed all 17 tests with 0 failures, including the deployment-entry export shape and separate HTML/non-HTML byte boundaries. Exact output is included in the review packet.
+The latest pre-freeze run passed all 20 tests with 0 failures, including the upload pool, hash skipping, failure drain, deployment-entry export shape and separate HTML/non-HTML byte boundaries. Exact output is included in the review packet.
 This is information to catch bugs, not CI/VM merge evidence. The suite covers
 routing, headers, fail-closed CSP, preserved engine bytes, banner/SW handling,
 mock gating, prefix/empty-key safety, frozen bodies and hashes, final count/size

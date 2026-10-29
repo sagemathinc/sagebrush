@@ -10,6 +10,7 @@ import * as deployEntry from './entry.mjs';
 import { mockEnabled } from './mock.js';
 import { prepare, MAX_OBJECTS, MAX_BYTES, MAX_FILE_BYTES, MAX_HTML_BYTES } from '../../scripts/preview/prepare.mjs';
 import { R2, MAX_PREVIOUS_OBJECTS } from '../../scripts/preview/r2.mjs';
+import { upload, UPLOAD_CONCURRENCY } from '../../scripts/preview/upload.mjs';
 
 function bucket(entries) {
   const calls = [];
@@ -256,4 +257,75 @@ test('non-HTML files admit 16 MiB exactly and refuse one byte more', () => {
     writeFileSync(join(f.dir, 'compiled.json'), Buffer.alloc(MAX_FILE_BYTES + 1));
     assert.throws(f.build, /16777216 bytes/);
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('upload pool caps eight active operations, skips hashes, and retains phase barriers', async () => {
+  let active = 0, peak = 0;
+  const completed = [], files = new Map();
+  for (let i = 0; i < 24; i++) files.set(`asset${i}.js`, { bytes: Buffer.from('x'), type: MIME.js, sha256: 'a'.repeat(64) });
+  files.set('index.html', { bytes: Buffer.from('html'), type: MIME.html, sha256: 'b'.repeat(64) });
+  const work = async name => {
+    active++; peak = Math.max(peak, active);
+    await new Promise(resolve => setTimeout(resolve, 2));
+    active--; completed.push(name);
+  };
+  const client = {
+    async list() { return ['latex/asset0.js', 'latex/asset1.js', 'latex/stale.js']; },
+    async matches(key) { await work('head:' + key); return key === 'latex/asset0.js'; },
+    async put(key) {
+      if (key.endsWith('.html')) assert.equal(completed.filter(x => x.startsWith('put:latex/asset')).length, 23);
+      await work('put:' + key);
+    },
+    async delete(key) { assert.ok(completed.includes('put:latex/index.html')); await work('delete:' + key); },
+  };
+  assert.deepEqual(await upload(client, 'latex', { files }, new AbortController().signal), { uploaded: 24, skipped: 1 });
+  assert.equal(UPLOAD_CONCURRENCY, 8); assert.equal(peak, 8); assert.equal(active, 0);
+  assert.ok(!completed.includes('put:latex/asset0.js'));
+  assert.equal(completed.at(-1), 'delete:latex/stale.js');
+});
+
+test('failed pool drains in-flight work, admits no HTML or stale deletions, and honors abort', async () => {
+  const files = new Map(Array.from({ length: 30 }, (_, i) => [`asset${i}.js`, { bytes: Buffer.from('x'), type: MIME.js }]));
+  files.set('index.html', { bytes: Buffer.from('html'), type: MIME.html });
+  let started = 0, active = 0, deleted = false;
+  const client = {
+    async list() { return ['latex/stale.js']; },
+    async put(key) {
+      assert.ok(!key.endsWith('.html')); started++; active++;
+      try { if (key.endsWith('asset0.js')) throw new Error('controlled failure'); await new Promise(resolve => setTimeout(resolve, 5)); }
+      finally { active--; }
+    },
+    async delete() { deleted = true; },
+  };
+  await assert.rejects(upload(client, 'latex', { files }, new AbortController().signal), /controlled failure/);
+  assert.equal(started, 8); assert.equal(active, 0); assert.equal(deleted, false);
+  started = 0;
+  const controller = new AbortController(); controller.abort(new Error('deadline'));
+  await assert.rejects(upload(client, 'latex', { files }, controller.signal), /deadline/);
+  assert.equal(started, 0);
+});
+
+test('skip compares current signed object metadata, size and type; missing/legacy objects reupload', async () => {
+  const original = globalThis.fetch;
+  const client = new R2({ accountId: '0'.repeat(32), accessKeyId: '1'.repeat(32), secretAccessKey: '2'.repeat(64) }, 'latex');
+  const bytes = Buffer.from('same'), sha256 = createHash('sha256').update(bytes).digest('hex');
+  const file = { bytes, sha256, type: MIME.js };
+  let headers = { 'x-amz-meta-preview-sha256': sha256, 'content-length': '4', 'content-type': MIME.js }, status = 200;
+  globalThis.fetch = async (_url, options) => {
+    if (options.method === 'PUT') {
+      assert.equal(options.headers['x-amz-meta-preview-sha256'], sha256);
+      assert.match(options.headers.authorization, /SignedHeaders=[^,]*x-amz-meta-preview-sha256/);
+    } else assert.equal(options.method, 'HEAD');
+    return new Response(null, { headers, status });
+  };
+  try {
+    assert.equal(await client.matches('latex/a.js', file), true);
+    for (const field of Object.keys(headers)) {
+      const saved = headers[field]; headers[field] = 'different';
+      assert.equal(await client.matches('latex/a.js', file), false); headers[field] = saved;
+    }
+    headers = {}; assert.equal(await client.matches('latex/a.js', file), false);
+    status = 404; assert.equal(await client.matches('latex/a.js', file), false);
+    status = 200; await client.put('latex/a.js', bytes, MIME.js);
+  } finally { globalThis.fetch = original; }
 });
