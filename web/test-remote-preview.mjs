@@ -157,6 +157,61 @@ try {
   await sleep(500);
   ok(await ev("document.querySelector('#kernelpick').value === 'local' && !/GPU kernel/.test(document.querySelector('#status').textContent)"),
     "opening another notebook while the sheet is up: the sheet goes, nothing connects, the picker is This browser");
+  // 9. the same cell run again and again, and a syntax error (William, Oct 29: his cell, with a stray | typed at its
+  // end, ended with "Not run: a remote run must be approved first." on every Run: a syntax error's own path ran the
+  // cell without the approval gate).  Each Run completes; a syntax error shows the SyntaxError and sends nothing.
+  {
+    await goto(base + "?remote=1");
+    const W = await ev("(() => { const nb = sagebrush.notebook; nb.addCell('', null, false, 'code'); return nb.cells().length - 1; })()");
+    await pick("gpu");
+    await until("!!document.querySelector('#remotedlg') && document.querySelector('#remotedlg').open");
+    await ev("document.querySelector('#remoteallow').click(); true");
+    await until("/GPU kernel \\(preview, simulated\\) · ready/.test(document.querySelector('#status').textContent)");
+    // (each run of code the page submits: the remote client's POSTs of runs with code; a forget's, of the names
+    // a cell's old text defined, has none)
+    await ev(`(() => { window.__runs = 0; const cl = sagebrush.notebook.kernel.client, f = cl.fetch;
+      cl.fetch = (u, i) => { if (i?.method === 'POST' && /\\/runs$/.test(String(u))) { try { if (JSON.parse(i.body).payload.code) __runs++; } catch { __runs++; } } return f(u, i); }; return true; })()`);
+    const runs = () => ev("__runs");
+    const code = "import time; [print(i) or time.sleep(0.1) for i in range(8)]";
+    const all8 = /0\s+1\s+2\s+3\s+4\s+5\s+6\s+7/;
+    const doneW = `(() => { const el = sagebrush.notebook.cells()[${W}].el; return !el.classList.contains('running') && !el.classList.contains('queued'); })()`;
+    await setCode(W, code);
+    let good = 0, refused = 0;
+    for (let i = 0; i < 10; i++) {
+      const before = await runs();
+      await clickRun(W);
+      try { await until(`__runs > ${before}`, 20000); } catch {}
+      try { await until(doneW, 30000); } catch {}
+      const o = await out(W);
+      if (/approved first/.test(o)) refused++;
+      else if (all8.test(o)) good++;
+    }
+    ok(good === 10 && refused === 0, `the same cell, 10 Runs waited for: each completes (${good} of 10; refused as unapproved ${refused})`);
+    // (quickly: Ctrl+Enter, a person's Run that never means Stop, every 150 ms)
+    const ctrlEnter = () => ev(`(() => { const c = sagebrush.notebook.cells()[${W}]; c.ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()`);
+    const bq = await runs();
+    for (let i = 0; i < 10; i++) { await ctrlEnter(); await sleep(150); }
+    try { await until(`__runs > ${bq}`, 20000); } catch {}
+    await sleep(500);
+    try { await until(doneW, 60000); } catch {}
+    const oq = await out(W);
+    ok(all8.test(oq) && !/approved first/.test(oq), `the same cell, 10 quick Runs: it ends with its output, never refused as unapproved (${(await runs()) - bq} sent; ${JSON.stringify(oq.replace(/\s+/g, " ").slice(0, 80))})`);
+    // (his text, with the stray | at its end: the SyntaxError is shown, and nothing is sent)
+    const bs = await runs();
+    await setCode(W, code + "|");
+    await clickRun(W);
+    try { await until(`/SyntaxError/.test(sagebrush.notebook.cells()[${W}].el.querySelector('.out')?.textContent ?? '')`, 20000); } catch {}
+    await sleep(500);
+    const os = await out(W);
+    ok(/SyntaxError/.test(os) && !/approved first/.test(os) && !/SyntaxError: SyntaxError/.test(os) && (await runs()) === bs,
+      `a syntax error on the GPU kernel: the SyntaxError is shown, nothing is sent (${JSON.stringify(os.replace(/\s+/g, " ").slice(0, 100))})`);
+    // (fixed: the next Run runs it)
+    await setCode(W, code);
+    await clickRun(W);
+    try { await until(`__runs > ${bs}`, 20000); } catch {}
+    try { await until(doneW, 30000); } catch {}
+    ok(all8.test(await out(W)), `and once it's fixed, a Run runs it (${JSON.stringify((await out(W)).replace(/\s+/g, " ").slice(0, 80))})`);
+  }
 } catch (e) {
   ok(false, `the test ran to its end: ${e?.message ?? e}`);
   try {
