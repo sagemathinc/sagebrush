@@ -115,6 +115,8 @@ let origin = "";
 let jar = "";
 // (the account the session is now: its hash, for the binding checks)
 let session = null;
+/** the signed-in account's id (the session's), which the front's GET /api/share/me answers */
+let sessionAccount = null;
 const hashOf = (id) => createHash("sha256").update("sagebrush-account\n" + id).digest("hex");
 const ctl = {
   /** answers faked for the next `ops` messages, instead of the server's: [{code, detail}] */
@@ -268,7 +270,7 @@ const upstream = (method, path, headers, body) => frontOp(`upstream ${method} ${
   const c = r.headers.getSetCookie?.().map((x) => x.split(";")[0]).find((x) => x.startsWith("__Host-sb_session="));
   if (c) {
     jar = c;
-    if (path === "/auth/dev") try { session = hashOf(JSON.parse(String(body)).account_id); } catch {}
+    if (path === "/auth/dev") try { const a = JSON.parse(String(body)).account_id; session = hashOf(a); sessionAccount = a; } catch {}
   }
   return r;
 });
@@ -531,6 +533,13 @@ async function serveOp(req, server, u, p) {
       log.maxPuts = Math.max(log.maxPuts, log.putsNow);
       if (ctl.holdPut) await frontOp("held PUT", () => new Promise((ok) => held.push(ok)));
     }
+    // (the cloud's GET /api/share/me, which the client asks before every connection (sync-client.ts, connect): the
+    // reference server serves only /api/sync/ and /auth/dev, so the front answers it for the session it holds, as the
+    // cloud's site does; forwarded, it was a 404, and the client never connected)
+    if (p === "/api/share/me" && req.method === "GET") {
+      entry.status = sessionAccount ? 200 : 401;
+      return sessionAccount ? Response.json({ account_id: sessionAccount }) : Response.json({ error: "sign in first" }, { status: 401 });
+    }
     const headers = {};
     for (const k of ["content-type", "content-length", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v !== null) headers[k] = v; }
     // (the reference server reads a PUT's length from its header: the page's, forwarded; else the body's own)
@@ -572,8 +581,11 @@ const pairCloser = (up, client, first, ledger = closeFailures, skips = closeSkip
     return bad;
   };
 };
+/** the page's server-side sockets not yet seen closed (websocket.close): the front's stop ends any left first */
+const pageSockets = new Set();
 const websocket = {
   open(client) {
+    pageSockets.add(client);
     const d = client.data, up = d.up;
     // (the upstream socket handed to its pair in place: it never leaves `ups`; the pair's close takes it out, right
     // before pairCloser's own close of it, whose failure pairCloser keeps)
@@ -682,6 +694,7 @@ const websocket = {
     try { up.send(text); } catch {}
   },
   close(client, code) {
+    pageSockets.delete(client);
     toPage.delete(client.data.send);
     client.data.closeBoth?.(code);
   },
@@ -824,7 +837,20 @@ const cleanup = () => (cleaned ??= runStages([
   ["proxied sockets", () => proxiedStage(closers, closeFailures)],
   ["upstream sockets", () => upstreamStage()],
   ["Chrome", () => stopChrome()],
-  ["front", async () => { if (!server) return { ok: true, said: "never started" }; await server.stop(true); return { ok: true, said: "stopped" }; }],
+  // (r9: Bun 1.3.14's server.stop(true) stayed pending in local runs on a websocket count that never fell, though every
+  // page socket's open and close had been seen; so the stop is PROVED by what can be observed: it settles, or else no
+  // request is pending, no page socket is open, and the listener refuses a fresh connection; else it isn't proved)
+  ["front", async () => {
+    if (!server) return { ok: true, said: "never started" };
+    const stopping = server.stop(true);
+    if (await Promise.race([stopping.then(() => true), sleep(2000).then(() => false)])) return { ok: true, said: "stopped" };
+    const pend = { requests: server.pendingRequests, websockets: server.pendingWebSockets, open: pageSockets.size };
+    let probe = "answered";
+    try { await bounded(fetch(origin + "/", { signal: AbortSignal.timeout(2000) }), "the front's refusal probe", 3000); } catch (e) { probe = String(e?.code ?? e?.message ?? e).slice(0, 120); }
+    const refused = /ConnectionRefused|ECONNREFUSED/.test(probe);
+    const ok = refused && pend.requests === 0 && pend.open === 0;
+    return { ok, said: ok ? `stopped (proved: the listener refuses (${probe}); no request pending; no page socket open; Bun's pendingWebSockets ${pend.websockets} not awaited)` : `NOT proved stopped: ${J({ ...pend, probe })}` };
+  }],
   ["profile", () => removeDir(profile)],
   ["site", () => removeDir(site)],
 ]).catch((e) => ({ line: `cleanup: rejected (${why(e)})`, ok: false })));

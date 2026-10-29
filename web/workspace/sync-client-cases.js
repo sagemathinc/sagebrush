@@ -3924,7 +3924,9 @@ async function runDiagnostic(table, only, skip, budgets) {
     // (every workspace the run opened closed, however it ended, a late-opened one included; one that opens later still
     // is closed by its own fulfilment, d.over)
     d.over = true;
-    for (const w of used) try { w.close(); rep.closedAtEnd.push(d.names.get(w) ?? null); } catch {}
+    // (a page that stops before its cleanup (K-RES1's failStopNow) leaves its workspaces open as well: closing one under
+    // its still-running client would end that client, and its socket, before the runner's barrier can close it)
+    if (!d.failStopNow) for (const w of used) try { w.close(); rep.closedAtEnd.push(d.names.get(w) ?? null); } catch {}
     W.SyncOwner.of = of0;
     for (const o of wrapped) delete o["stopClient"];
     rep.done = true;
