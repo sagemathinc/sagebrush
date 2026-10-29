@@ -222,6 +222,50 @@ try {
     const cb = await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
     const cbs = await ev(state);
     check(cb && cbs.asked === 4 && cbs.at === 0 && cbs.kept, "B5-A1: Back with nothing unsaved: nothing asked", cbs);
+    // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
+    // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two
+    // steps, A; with unsaved A, Forward two steps declined stays on A. With the Navigation API and, hidden, without it
+    for (const withNav of [true, false]) {
+      const r = await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const until = async (f) => { for (let i = 0; i < 100 && !f(); i++) await wait(100); return f(); };
+        const shows = (s) => !!document.querySelector(".tex-preview")?.textContent.includes(s);
+        if (!${withNav}) Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined });
+        const at = () => ({ url: new URLSearchParams(location.search).get("tex"), hash: location.hash, at: history.state && history.state.sbTex, title: document.querySelector(".tex-title")?.textContent, src: document.querySelector(".tex-src")?.value ?? "", pages: document.querySelectorAll(".tex-page").length });
+        const edit = (m) => { const t = document.querySelector(".tex-src"); t.value += m; t.dispatchEvent(new Event("input")); };
+        const out = { nav: typeof window.navigation?.traverseTo === "function" };
+        location.hash = "section"; await wait(300);
+        out.hash = at();
+        window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }); await until(() => shows("File B here."));
+        out.b = at();
+        edit("% unsaved in B\\n");
+        let before = window.__asked; window.__answer = false;
+        history.back(); await wait(1500);
+        out.back1 = { asked: window.__asked - before, ...at() };
+        before = window.__asked;
+        history.go(-2); await wait(1500);
+        out.back2 = { asked: window.__asked - before, ...at() };
+        before = window.__asked; window.__answer = true;
+        history.go(-2); await until(() => shows("File A here.")); await wait(300);
+        out.back2yes = { asked: window.__asked - before, ...at() };
+        edit("% unsaved in A\\n");
+        before = window.__asked; window.__answer = false;
+        history.go(2); await wait(1500);
+        out.fwd2 = { asked: window.__asked - before, ...at() };
+        // (leave A as saved, at its first entry, for what follows)
+        window.__answer = true; history.go(2); await until(() => shows("File B here.")); await wait(300);
+        history.go(-2); await until(() => shows("File A here.")); await wait(300);
+        out.end = at();
+        if (!${withNav}) delete window.navigation;
+        return out; })()`);
+      const ok = r.nav === withNav && r.hash.url === fa && r.hash.hash === "#section" && r.hash.at === 1 && r.b.url === fb && r.b.at === 2
+        && r.back1.asked === 1 && r.back1.url === fb && r.back1.hash === "" && r.back1.at === 2 && r.back1.title === "b.tex" && r.back1.src.includes("% unsaved in B") && r.back1.pages === 1
+        && r.back2.asked === 1 && r.back2.url === fb && r.back2.hash === "" && r.back2.at === 2 && r.back2.title === "b.tex" && r.back2.src.includes("% unsaved in B")
+        && r.back2yes.asked === 1 && r.back2yes.url === fa && r.back2yes.hash === "" && r.back2yes.at === 0 && r.back2yes.title === "a.tex"
+        && r.fwd2.asked === 1 && r.fwd2.url === fa && r.fwd2.hash === "" && r.fwd2.at === 0 && r.fwd2.title === "a.tex" && r.fwd2.src.includes("% unsaved in A")
+        && r.end.url === fa && r.end.at === 0 && !r.end.src.includes("% unsaved");
+      check(ok, `B5-R1-A1 (${withNav ? "Navigation API" : "no Navigation API"}): a fragment's entry between; Back one and two steps and Forward two steps, declined, stay on the exact entry shown, its URL and text; accepted, the other file`, r);
+    }
     // ---- (astra B5-A2) a mount replaced while it waits stops there: A's read held, B opened and shown, then A's read
     // released: B's title stays, one live engine worker (B's), and the unsaved-text question is B's
     const a2 = await ev(`(async () => {
