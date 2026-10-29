@@ -153,8 +153,10 @@ async function chromeVersion() {
 // frame), never by URL, origin or a probe.
 function selectRunner(ts, runnerFrameId) {
   const all = [...ts.values()];
-  const workerSessions = new Set(all.filter((t) => t.type === "worker").map((t) => t.sessionId));
-  const cands = all.filter((t) => t.type === "worker" && !t.detached && !workerSessions.has(t.parentSession));
+  // (a candidate's direct parent must be shown to be the page or a live frame's target: not a worker, not a
+  // session we have no record of, not a detached frame)
+  const liveFrameSessions = new Set(all.filter((t) => t.type === "iframe" && !t.detached).map((t) => t.sessionId));
+  const cands = all.filter((t) => t.type === "worker" && !t.detached && (t.parentSession === undefined || liveFrameSessions.has(t.parentSession)));
   const frameTargets = all.filter((t) => t.type === "iframe" && !t.detached && t.targetId === runnerFrameId);
   if (all.some((t) => t.type === "worker" && t.parentFrameId !== undefined)) {
     const fs = new Set(frameTargets.map((t) => t.sessionId));
@@ -293,6 +295,14 @@ function selectorFixtures() {
   ok(id(sel(ts)) === "contradictory metadata", "fixture F11: the frame's own target attached a worker naming another frame: refused (contradictory)");
   ts = M(() => T("w", "worker", { pfi: R, detached: true }), () => T("x", "worker", { pfi: "RF2" }));
   ok(id(sel(ts)) === "0 bound", "fixture F12: the bound worker gone and another frame's present: refused (never a switch)");
+  ts = M(() => T("w", "worker", { pfi: R, parent: "nobody" }));
+  ok(id(sel(ts)) === "0 bound", "fixture F15: a worker whose parent session was never recorded is not bound");
+  ts = M(() => T("sw", "service_worker", {}), () => T("w", "worker", { pfi: R, parent: "sw" }));
+  ok(id(sel(ts)) === "0 bound", "fixture F16: a worker whose parent is neither the page nor a frame is not bound");
+  ts = M(() => T("f", "iframe", { targetId: R, detached: true }), () => T("w", "worker", { pfi: R, parent: "f" }));
+  ok(id(sel(ts)) === "0 bound", "fixture F17: a worker whose parent frame's target has detached is not bound");
+  ts = M(() => T("c", "worker", { pfi: "MAIN" }), () => T("f", "iframe", { targetId: R }), () => T("w", "worker", { pfi: R, parent: "f" }));
+  ok(id(sel(ts)) === "w" && sel(ts).binding === "P", "fixture F18: a worker the runner frame's live target attached, naming that frame, is bound (binding P)");
   const C = (id, x = {}) => ({ id, auxData: { isDefault: true, frameId: x.frameId ?? R }, gone: !!x.gone });
   ok(selectFrameContext([C(1, { gone: true }), C(2)], R).context?.id === 2, "fixture F13: the frame's destroyed context is passed over for its live one");
   ok(selectFrameContext([C(1), C(2)], R).refused === "2 live", "fixture F14: two live contexts for the frame: refused (2 live)");
