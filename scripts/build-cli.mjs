@@ -72,7 +72,7 @@ writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${J
 // there, so the page's worker and the wasm engines are not needed.
 const web = {};
 const webDir = join(root, "web", "dist");
-for (const f of ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt"]) {
+for (const f of ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt"]) {
   if (existsSync(join(webDir, f))) web[f] = readFileSync(join(webDir, f)).toString("base64");
 }
 // (the site's early-alpha notice is for sagebrush.space, not the page `sagebrush notebook` serves on this

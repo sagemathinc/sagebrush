@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "type(name, bases, ns, **kw) passes the keywords to the winning metaclass as CPython's type_new (src/runtime/types.ts). Measured locally with CI's bun 1.4.4 tool: master 3038ddc2 against this branch merged.",
+  "bytes": {
+    "cli/pyjs.cjs": 817,
+    "engine/sagebrush-worker.js": 617
+  }
+}
