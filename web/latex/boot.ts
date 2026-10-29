@@ -55,20 +55,22 @@ export async function latexBoot(ws: Workspace | null) {
   const page = "/sagebrush-latex.js";
   // (all three are redrawn as they change: checked after each change. The file browser's + menu is the .sbfmenu with a
   //  "Folder" item: a folder's own menu has "New folder here")
-  const qs = (s: string) => document.querySelector(s), t = "LaTeX document", add = (m: Element | null | undefined, t: string, at?: Element | null, close?: 1) => {
-    if (!m || m.querySelector(".sb-tex-new")) return;
+  // (fn: the page module's function: newTex, a blank document, or texExamples, the examples' list)
+  const qs = (s: string) => document.querySelector(s), t = "LaTeX document", e = "LaTeX example";
+  const add = (m: Element | null | undefined, t: string, at?: Element | null, close?: number, fn = "newTex") => {
+    if (!m || m.querySelector(`[data-tex="${fn}"]`)) return;
     const b = el("button", t);
-    b.className = "sb-tex-new"; b.setAttribute("role", "menuitem");
-    b.onclick = (e) => { e.stopPropagation(); close && m.remove(); import(page).then((x) => x.newTex(ws!, g.__sbTex), (r) => alert(r)); };
+    b.dataset.tex = fn; b.setAttribute("role", "menuitem");
+    b.onclick = (ev) => { ev.stopPropagation(); close && m.remove(); import(page).then((x) => x[fn](ws!, g.__sbTex), (r) => alert(r)); };
     // (an undefined `at` is null to the DOM: the end)
     m.insertBefore(b, at as Element | null);
   };
   if (ws) new MutationObserver(() => {
-    const m = qs(".sbfmenu"), f = qs(".fmgroup[aria-label=New]"), x = qs(".sbfiles .fempty");
+    const m = qs(".sbfmenu"), f = qs(".fmgroup[aria-label=New]"), x = qs(".sbfiles .fempty"), at = f?.querySelector("[data-item=newFolder]");
     const fo = [...(m?.querySelectorAll("button") ?? [])].find((b) => b.textContent == "Folder");
     if (fo) add(m, t, fo, 1);
-    add(f, t, f?.querySelector("[data-item=newFolder]"));
-    if (x?.textContent!.startsWith("Nothing")) add(x, "New " + t);
+    add(f, t, at); add(f, e, at, 0, "texExamples");
+    if (x?.textContent!.startsWith("Nothing")) { add(x, "New " + t); add(x, e, null, 0, "texExamples"); }
 }).observe(document.body, { childList: true, subtree: true });
   if (tex === null || !ws) return false;
   const root = el("div");

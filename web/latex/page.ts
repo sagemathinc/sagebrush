@@ -14,6 +14,8 @@ import { RenderGate, type Token } from "./gate";
 import { Highlighter } from "./highlight";
 import { PAGE_CSS } from "./style";
 import { mark } from "./marks";
+import { EXAMPLES, type Example } from "./examples";
+export { EXAMPLES };
 
 export const PATCH_BUDGET = { items: 200, bytes: 512 * 1024, ms: 8 };
 // the source's font size (px) and the preview's zoom (%): their ranges, defaults and keys in localStorage
@@ -32,6 +34,59 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""):
   const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e;
 };
 const enc = new TextEncoder();
+
+/** "From an example" (boot.ts adds the item and loads this module on its click): a list of the examples
+ * (examples.ts), as large buttons that fit a phone; the one chosen is made as a folder of its own,
+ * "/LaTeX examples/<title>" (or "<title> (2)", ...: the first name not taken), with its files, and its main .tex
+ * opened in the editor by boot.ts's hook (`open`). Escape, or the backdrop, closes it with nothing made. */
+export async function texExamples(ws: Workspace, open: (e: Entry) => unknown): Promise<void> {
+  const d = document.createElement("dialog");
+  d.className = "sb-tex-examples";
+  d.setAttribute("aria-label", "LaTeX examples");
+  d.style.cssText = "max-width:min(560px,calc(100vw - 16px));width:100%;max-height:calc(100dvh - 32px);padding:0;border:1px solid #c8ccc9;border-radius:10px;box-sizing:border-box";
+  const head = document.createElement("div");
+  head.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #e3e6e4;position:sticky;top:0;background:inherit";
+  const h = document.createElement("b"); h.textContent = "LaTeX examples";
+  const x = document.createElement("button"); x.textContent = "✕"; x.setAttribute("aria-label", "Close"); x.style.cssText = "min-width:44px;min-height:44px"; x.onclick = () => d.close();
+  head.append(h, x);
+  const list = document.createElement("div"); list.style.cssText = "display:grid;gap:8px;padding:12px";
+  for (const ex of EXAMPLES) {
+    const b = document.createElement("button");
+    b.dataset.example = ex.id;
+    b.style.cssText = "display:block;width:100%;text-align:left;padding:10px 12px;min-height:44px;border:1px solid #d5d9d6;border-radius:8px;background:transparent;cursor:pointer";
+    const t = document.createElement("b"); t.textContent = ex.title;
+    const a = document.createElement("div"); a.textContent = ex.about; a.style.cssText = "font-size:13px;opacity:.75;margin-top:2px";
+    b.append(t, a);
+    b.onclick = async () => {
+      d.close();
+      try { open(await makeExample(ws, ex)); }
+      catch (err) { alert("The example couldn't be made: " + String((err as Error)?.message ?? err)); }
+    };
+    list.append(b);
+  }
+  d.append(head, list);
+  d.addEventListener("click", (ev) => { if (ev.target === d) d.close(); });
+  d.addEventListener("close", () => d.remove());
+  document.body.append(d);
+  d.showModal();
+}
+
+/** An example's folder and files; its main .tex (the first file) returned. */
+export async function makeExample(ws: Workspace, ex: Example): Promise<Entry> {
+  for (let i = 1; i <= 1000; i++) {
+    const dir = "/LaTeX examples/" + ex.title + (i > 1 ? " (" + i + ")" : "");
+    if (await ws.stat(dir)) continue;
+    await ws.mkdir(dir);
+    let main: Entry | undefined;
+    for (const [name, text, b64] of ex.files) {
+      const content = b64 ? Uint8Array.from(atob(text), (c) => c.charCodeAt(0)) : new TextEncoder().encode(text);
+      const e = await ws.createByPerson(dir + "/" + name, { content });
+      main ??= e;
+    }
+    return main!;
+  }
+  throw new Error("no free folder name");
+}
 
 /** The file browser's New, "LaTeX file" (boot.ts adds the item and loads this module on its click): /Untitled.tex, or
  * "Untitled (2).tex", ... (the first name not taken), made by the person here with a short document, then opened in

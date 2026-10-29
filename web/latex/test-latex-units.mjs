@@ -10,6 +10,7 @@ import { latexOn } from "./boot.ts";
 import { RenderGate } from "./gate.ts";
 import { boxClass } from "./boxclass.mjs";
 import { previewHost } from "./preview-host.mjs";
+import { EXAMPLES } from "./examples.ts";
 import { Engine } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
 import { setKatex, render } from "./engine/render.mjs";
@@ -290,6 +291,39 @@ check("flag-off-without", !on("dev.sagebrush.space", "", null) && !on("dev.sageb
 check("flag-prod-never", !on("sagebrush.space", "?latex=1", "1"), null);
 check("flag-lookalike-hosts", !on("x.dev.sagebrush.space", "?latex=1", "1") && !on("dev.sagebrush.space.evil", "?latex=1", "1"), null);
 check("flag-test-hosts-only-in-list", latexOn("127.0.0.1", true, () => null, ["dev.sagebrush.space", "127.0.0.1"]) && !latexOn("127.0.0.1", true, () => null, ["dev.sagebrush.space"]), null);
+
+// ---- the examples (examples.ts; William, Oct 29: "good tests to illustrate the breadth of editor support"): each one
+// rendered by the pipeline the page uses, and its result recorded (one line each): it renders (outcome ok), with no
+// command unknown to the preview and no "not finished" note, its key text shown, and what it can't do said in the
+// document itself (sagetex: its code items found, not run; pythontex: the "not run" chip; tikz: the placeholder);
+// the figure's image named and a real PNG
+{
+  setKatex((src, o) => '<span class="K' + (o.displayMode ? "D" : "I") + '">' + src.replace(/[&<>]/g, "") + "</span>");
+  const want = {
+    article: ["Sums of Squares", "Contents", "Theorem", "Proof"], beamer: ["A Short Talk", "Overlays", "Two columns", "A math slide"],
+    sagetex: ["In this preview", "not connected"], pythontex: ["In this preview", "is not supported in this preview: not run"],
+    matlab: ["MATLAB in LaTeX", "eig(A)"], figure: ["Figure 1", "The function"], cv: ["Ada Example", "Education", "Publications"],
+    tikz: ["not rendered in this prototype"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
+  };
+  const record = [];
+  for (const ex of EXAMPLES) {
+    const r = new Engine().update(ex.files[0][1]);
+    const h = r.chunks.join(""), text = h.replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
+    const missing = (want[ex.id] ?? ["(no expectations)"]).filter((w) => !text.includes(w));
+    const res = { id: ex.id, outcome: r.stats.outcome, unknown: r.stats.unknownCommands, notFinished: (h.match(/not finished/g) || []).length, sage: r.sageItems.length, images: r.imageRefs, missing };
+    record.push(res);
+    let ok = res.outcome === "ok" && res.unknown === 0 && res.notFinished === 0 && missing.length === 0;
+    if (ex.id === "sagetex") ok &&= res.sage === 6;
+    if (ex.id === "figure") {
+      const png = ex.files.find(([n]) => n === "plot.png");
+      const sn = png && sniffImage(Uint8Array.from(atob(png[1]), (c) => c.charCodeAt(0)));
+      ok &&= JSON.stringify(res.images) === JSON.stringify(["plot.png"]) && !!png?.[2] && !!sn?.ok && sn.mime === "image/png";
+    }
+    check("example-" + ex.id, ok, res);
+  }
+  console.log("examples:", JSON.stringify(record));
+  check("examples-ten", EXAMPLES.length === 10 && new Set(EXAMPLES.map((e) => e.id)).size === 10, EXAMPLES.map((e) => e.id));
+}
 
 // ---- preview-host.mjs: the preview deploy's one extra host (web/build.ts), only under .sagebrush.cloud, only with =1
 {
