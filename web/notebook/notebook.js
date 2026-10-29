@@ -582,9 +582,47 @@ export function createNotebook(root, opts = {}) {
     cell.time.title = "Not computed by the current interpreter: run the cell to update it";
   }
   const freshen = (cell) => { cell.el.classList.remove("stale"); cell.time.title = ""; };
+  // Remote approval's view of this page (remote-gate.js): each cell's text and
+  // its text version (cell.version: a frozen {text}, replaced with the text:
+  // setText, the input listener), and the settings as one frozen object,
+  // replaced whenever one of them changes (gateCfg = null right after every
+  // write of mode, meta or reactiveOn).
+  let gateCfg = null;
+  const gatePage = (k) => ({
+    reactive: () => k.reactive,
+    displayed: (id) => cellById(id)?.ta.value,
+    version: (id) => cellById(id)?.version,
+    // (a version whose text isn't what is shown: a new one, from what is shown)
+    repair: (id, text) => {
+      const v = Object.freeze({ text });
+      const c = cellById(id);
+      if (c) c.version = v;
+      return v;
+    },
+    config: () => (gateCfg ??= Object.freeze({ mode, seedNamespace: meta.seed ?? "", reactive: reactive() })),
+    mode: () => mode,
+    seedNamespace: () => meta.seed ?? "",
+    reactiveFlag: () => reactive(),
+    seed: async (ns, id) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${ns}:${id}`)))].map((b) => b.toString(16).padStart(2, "0")).join(""),
+  });
+  // A person's run of these cells, on a remote kernel: their consent, captured now (the notebook's seed
+  // made first).  Only a Run gesture's handler calls it (run(cell, true), runAll(true)), synchronously.
+  function consentFor(ids) {
+    if (!kernel?.remoteGate) return {};
+    if (!/^[0-9a-f]{64}$/.test(meta.seed ?? "")) {
+      meta = { ...meta, seed: [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("") };
+      gateCfg = null;
+      schedule();
+    }
+    return { consent: kernel.remoteGate.capture(ids) };
+  }
+  // (a remote kernel runs only in the reactive notebook: there is nothing to check a run against otherwise)
+  const REMOTE_NEEDS_REACTIVE = "(a remote kernel runs cells only in the reactive notebook)\n";
   function bindKernel(k) {
     kernel = k;
     if (!k) return;
+    // (a remote kernel runs only what this page approved: web/notebook/remote-gate.js, given by the page that made the kernel)
+    if (k.remote && opts.remoteGate && !k.remoteGate) k.remoteGate = opts.remoteGate(k, gatePage(k));
     k.targetSink = (target) => areaSink(interactBox(target));
     k.execCount ??= 0;
     k.ran ??= new Set(); // the cells whose output this interpreter computed
@@ -751,17 +789,20 @@ export function createNotebook(root, opts = {}) {
     const r = kernel?.reactive;
     if (r) for (const c of cells()) if (c.type === "code" && c.ms != null && !r.times.has(c.id)) r.times.set(c.id, c.ms);
   }
-  function run(cell) {
+  // (`gesture`: a person's Run, from its handler: their consent to run the cell as shown is captured)
+  function run(cell, gesture = false) {
     if (cell.type === "markdown") return renderMd(cell);
     if (cell.type === "raw") return Promise.resolve(); // raw text is not run
     if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
     // the reactive notebook: the cell, its stale ancestors, its descendants (within the budget)
-    if (reactive()) return engine().run([cell.id]);
+    if (reactive()) return engine().run([cell.id], gesture ? consentFor([cell.id]) : {});
+    if (kernel?.remote) { appendText(cell.out, REMOTE_NEEDS_REACTIVE, true); return Promise.resolve(); }
     return execCell(cell, cell.ta.value);
   }
   // Run a cell's code (`forget`: global names to delete first); resolves to
   // {ok, ms, stopped} when it is done.
-  function execCell(cell, code, forget = [], scoped = null) {
+  // (`extra`: more for the kernel, a remote run's gate)
+  function execCell(cell, code, forget = [], scoped = null, extra = null) {
     forgetInteracts(cell.out);
     cell.out.textContent = "";
     cell.time.textContent = "";
@@ -774,7 +815,7 @@ export function createNotebook(root, opts = {}) {
     cell.runb.textContent = "■";
     let failed = false;
     const k = kernel;
-    return cellSeed(cell).then((seed) => new Promise((resolve) => k.execute(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}) }, {
+    return cellSeed(cell).then((seed) => new Promise((resolve) => k.execute(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
       start() {
         cell.el.classList.replace("queued", "running");
         const t0 = (cell.t0 = performance.now());
@@ -817,7 +858,16 @@ export function createNotebook(root, opts = {}) {
         if (message) appendText(cell.out, message, true);
         resolve({ ok: false, ms: 0, stopped: true });
       },
-      skipped() { settle(cell); cell.n.textContent = "[ ]"; resolve({ ok: false, ms: 0, stopped: true }); },
+      skipped(info) {
+        settle(cell);
+        cell.n.textContent = "[ ]";
+        // (not sent at all: a remote run that wasn't approved, or changed; the scheduler marks it stale)
+        if (info?.notRun) {
+          if (info.note) appendText(cell.out, info.note, true);
+          return resolve({ ok: false, ms: 0, notRun: info.notRun, ...(info.note ? { note: info.note } : {}) });
+        }
+        resolve({ ok: false, ms: 0, stopped: true });
+      },
     })));
   }
   // The reactive notebook's per-cell seed: SHA-256 of the notebook's seed (made
@@ -828,13 +878,15 @@ export function createNotebook(root, opts = {}) {
     if (!reactive() || !crypto.subtle) return null;
     if (!/^[0-9a-f]{64}$/.test(meta.seed ?? "")) {
       meta = { ...meta, seed: [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("") };
+      gateCfg = null;
       schedule();
     }
     const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${meta.seed}:${cell.id}`));
     return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
   // (the kernel runs them in order; the reactive notebook in graph order)
-  const runAll = () => (reactive() ? engine().runAll() : Promise.all(cells().map(run)));
+  // (`gesture`: a person's Run all: their consent to every code cell as shown)
+  const runAll = (gesture = false) => (reactive() ? engine().runAll(gesture ? consentFor(cells().filter((c) => c.type === "code").map((c) => c.id)) : {}) : Promise.all(cells().map((c) => run(c))));
 
   // ---------------------------------------------------------- the reactive notebook
   // (design/reactive-notebook.md; the scheduler is src/notebook-reactive.ts,
@@ -854,8 +906,9 @@ export function createNotebook(root, opts = {}) {
       const k = kernel;
       const shown = () => kernel === k;
       let lastCells = [];
-      const r = (kernel.reactive = new Reactive({
-        cells: () => (shown() ? (lastCells = cells().filter((c) => c.type === "code").map((c) => ({ id: c.id, code: c.ta.value, manual: !!c.metadata?.sagebrush?.manual }))) : lastCells),
+      const baseHost = {
+        // (a cell's code is its text version's text: what a consent captured is what is registered)
+        cells: () => (shown() ? (lastCells = cells().filter((c) => c.type === "code").map((c) => ({ id: c.id, code: c.version.text, version: c.version, manual: !!c.metadata?.sagebrush?.manual }))) : lastCells),
         analyze(code) {
           const key = mode + "\0" + code;
           if (!analyses.has(key)) {
@@ -868,12 +921,12 @@ export function createNotebook(root, opts = {}) {
           }
           return analyses.get(key);
         },
-        execute(id, code, forget, scoped) {
+        execute(id, code, forget, scoped, extra) {
           if (!shown()) return Promise.resolve({ ok: false, ms: 0, stopped: true });
           const cell = cellById(id);
-          return cell ? execCell(cell, code, forget, scoped).then((x) => { markEdited(cell); return x; }) : Promise.resolve({ ok: false, ms: 0, stopped: true });
+          return cell ? execCell(cell, code, forget, scoped, extra).then((x) => { markEdited(cell); return x; }) : Promise.resolve({ ok: false, ms: 0, stopped: true });
         },
-        forget: (names) => new Promise((resolve) => k.execute("", { mode, forget: names }, { start() {}, out() {}, display() {}, interact() {}, clear() {}, done: resolve, stopped: resolve, skipped: resolve })),
+        forget: (names, _cells, extra) => new Promise((resolve) => k.execute("", { mode, forget: names, ...(extra ?? {}) }, { start() {}, out() {}, display() {}, interact() {}, clear() {}, done: resolve, stopped: resolve, skipped: resolve })),
         // page-order scoping (src/rename.ts in the analyzer's worker)
         ...(opts.analyzer?.rename ? { rename: (q) => opts.analyzer.rename({ ...q, mode, sep: SCOPE_SEP }) } : {}),
         status(id, st) {
@@ -882,7 +935,9 @@ export function createNotebook(root, opts = {}) {
           if (cell) { showStatus(cell, st); markEdited(cell); }
           emit("status", id, st);
         },
-      }));
+      };
+      // (a remote kernel: every run is checked and admitted by its gate)
+      const r = (kernel.reactive = new Reactive(k.remoteGate ? k.remoteGate.host(baseHost) : baseHost));
       r.budget = budget;
     }
     return kernel.reactive;
@@ -921,7 +976,7 @@ export function createNotebook(root, opts = {}) {
     if (st.state === "stale") {
       cls.remove("cancelled", "error");
       const ms = kernel?.reactive?.times.get(cell.id);
-      const why = { budget: `not rerun automatically${ms ? ` (it takes about ${secs(ms)})` : ""}`, manual: "a manual cell: run it yourself", ancestor: "a cell it depends on is stale", interrupted: "interrupted", loaded: "not computed in this session", restart: "the interpreter restarted" }[st.why] ?? "";
+      const why = { budget: `not rerun automatically${ms ? ` (it takes about ${secs(ms)})` : ""}`, manual: "a manual cell: run it yourself", ancestor: "a cell it depends on is stale", interrupted: "interrupted", loaded: "not computed in this session", restart: "the interpreter restarted", approval: st.note?.trim() || "not run on the remote kernel: run it to approve it" }[st.why] ?? "";
       cls.add("stale");
       // (with how long it took last time, if known)
       const est = ms != null && ms > 0 && st.why !== "budget" ? ` (~${secs(ms)})` : "";
@@ -1127,6 +1182,12 @@ export function createNotebook(root, opts = {}) {
   // right of the active or hovered cell, + Code / + Text below it.  Edit mode is
   // the focus in the editor; command mode (Esc) is the focus on the cell, where
   // single keys act on cells as in Jupyter (A, B, D D, M, Y, ...).
+  // A cell's editor text: the only assignment of it, with its text version (remote approval's: a frozen
+  // object replaced with the text; the input listener replaces it for typing and execCommand).
+  function setText(cell, text) {
+    cell.ta.value = text;
+    cell.version = Object.freeze({ text: cell.ta.value });
+  }
   function addCell(code = "", where = null, focus = false, type = "code", id = null) {
     const el = h("div", "cell");
     el.tabIndex = -1;
@@ -1139,13 +1200,14 @@ export function createNotebook(root, opts = {}) {
     const cell = { id: id ?? cellId(), el, type: "code", ta: q("textarea"), hl: q(".ed pre"), out: q(".out"), md: q(".mdout"), time: q(".time"), n: q(".n"), runb: q(".runb"), typeSel: q('[data-a="type"]'), menuBtn: q('[data-a="menu"]'), attachments: null, metadata: null, blocks: null, blocksText: null };
     el.cell = cell;
     cell.md.addEventListener("dblclick", (e) => { if (!opts.readOnly) editMd(cell, { x: e.clientX, y: e.clientY }); });
-    cell.ta.value = code;
+    setText(cell, code);
     cell.ta.readOnly = !!opts.readOnly;
-    cell.ta.addEventListener("input", () => { autosize(cell.ta); paint(cell); refilter(cell); markEdited(cell); });
+    // (typing and execCommand edits: a new text version first)
+    cell.ta.addEventListener("input", () => { cell.version = Object.freeze({ text: cell.ta.value }); autosize(cell.ta); paint(cell); refilter(cell); markEdited(cell); });
     cell.ta.addEventListener("blur", () => { if (comp?.cell === cell) closeCompleter(); });
     cell.ta.addEventListener("click", () => { if (comp?.cell === cell) closeCompleter(); });
     cell.ta.addEventListener("keydown", (e) => editKey(cell, e));
-    cell.runb.onclick = () => (el.classList.contains("running") || el.classList.contains("queued") ? interrupt() : run(cell));
+    cell.runb.onclick = () => (el.classList.contains("running") || el.classList.contains("queued") ? interrupt() : run(cell, true));
     cell.menuBtn.onclick = () => openMenu(cell);
     cell.typeSel.onchange = () => { setType(cell, cell.typeSel.value); schedule(); edit(cell); };
     q('[data-a="up"]').onclick = () => move(cell, -1);
@@ -1242,7 +1304,7 @@ export function createNotebook(root, opts = {}) {
   function split(cell) {
     const v = cell.ta.value, s0 = cell.ta.selectionStart, s1 = cell.ta.selectionEnd;
     const parts = (s1 > s0 ? [v.slice(0, s0), v.slice(s0, s1), v.slice(s1)] : [v.slice(0, s0), v.slice(s0)]).map((p) => p.replace(/^\n/, "").replace(/\n$/, ""));
-    cell.ta.value = parts[0];
+    setText(cell, parts[0]);
     autosize(cell.ta); paint(cell);
     let last = cell, lastNew = null;
     for (const p of parts.slice(1)) lastNew = last = addCell(p, { after: last.el }, false, cell.type);
@@ -1253,7 +1315,7 @@ export function createNotebook(root, opts = {}) {
   function merge(cell) {
     const below = nextCell(cell);
     if (!below) return;
-    cell.ta.value = [cell.ta.value, below.ta.value].filter((s) => s.trim()).join("\n");
+    setText(cell, [cell.ta.value, below.ta.value].filter((s) => s.trim()).join("\n"));
     below.el.remove();
     forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = "";
     autosize(cell.ta); paint(cell); relabel();
@@ -1286,7 +1348,7 @@ export function createNotebook(root, opts = {}) {
     const done = () => e.preventDefault();
     if (e.key === "Enter" && (e.shiftKey || mod || e.altKey)) {
       done();
-      run(cell);
+      run(cell, true);
       if (e.shiftKey) advance(cell);
       else if (e.altKey && !opts.readOnly) addCell("", { after: cell.el }, true);
     } else if (e.key === "Escape" || (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "m")) {
@@ -1386,7 +1448,7 @@ export function createNotebook(root, opts = {}) {
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === "Enter" && (e.shiftKey || mod || e.altKey)) {
       e.preventDefault();
-      run(cell);
+      run(cell, true);
       if (e.shiftKey) advance(cell);
       else if (e.altKey && !opts.readOnly) addCell("", { after: cell.el }, true);
       return;
@@ -1521,7 +1583,7 @@ export function createNotebook(root, opts = {}) {
       typeset: (el) => { loadMath().then((m) => m.typeset(el)).catch(() => {}); },
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
-      onChange: (v) => { cell.blocksText = v; cell.ta.value = v; cell.ta.dispatchEvent(new Event("input")); },
+      onChange: (v) => { cell.blocksText = v; setText(cell, v); cell.ta.dispatchEvent(new Event("input")); },
       onKey: (e) => mdKey(cell, e),
       onEdge: (up) => { const to = up ? prevCell(cell) : nextCell(cell); if (!to) return false; edit(to, up ? "end" : "start"); return true; },
     });
@@ -1543,7 +1605,7 @@ export function createNotebook(root, opts = {}) {
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === "Enter" && (e.shiftKey || mod || e.altKey)) {
       e.preventDefault();
-      run(cell);
+      run(cell, true);
       if (e.shiftKey) advance(cell);
       else if (e.altKey && !opts.readOnly) addCell("", { after: cell.el }, true);
     } else if (e.key === "Escape" || (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "m")) {
@@ -1843,6 +1905,8 @@ export function createNotebook(root, opts = {}) {
     pixels = new PixelBudget();
     const { cells: list, mode: m, rev, baseRev: _b, ...rest } = doc;
     meta = rest;
+    gateCfg = null;
+    kernel?.remoteGate?.documentReplaced(); // (another document: approvals and records start over)
     setMode(m ?? mode, false);
     closeCompleter(); closeMenu(false); activate(null);
     cellsEl.textContent = "";
@@ -1886,6 +1950,8 @@ export function createNotebook(root, opts = {}) {
     const base = keepLocal ? shown.synced?.cells ?? null : null;
     let dirty = false;
     meta = { ...meta, ...rest };
+    gateCfg = null;
+    if (!keepLocal) kernel?.remoteGate?.documentReplaced(); // (a revert replaces the document)
     if (m && m !== mode) setMode(m, false);
     const order = cells().map((c) => c.id);
     const mine = new Map(cells().map((c) => [c.id, c]));
@@ -2000,7 +2066,7 @@ export function createNotebook(root, opts = {}) {
   // Set a cell's text, keeping the caret where it was if it is being edited.
   function setInput(cell, text) {
     const focused = document.activeElement === cell.ta, s0 = cell.ta.selectionStart, s1 = cell.ta.selectionEnd;
-    cell.ta.value = text;
+    setText(cell, text);
     if (focused) cell.ta.setSelectionRange(Math.min(s0, text.length), Math.min(s1, text.length));
     autosize(cell.ta);
     paint(cell);
@@ -2010,10 +2076,14 @@ export function createNotebook(root, opts = {}) {
   function setMode(m, notify = true) {
     const before = mode;
     mode = ["python", "sage", "magma", "matlab"].includes(m) ? m : "python";
+    gateCfg = null;
     for (const c of cells()) paint(c);
     if (notify) { emit("mode", mode); schedule(); }
     // (the reactive notebook: its cells are analyzed again in the new language, and stale)
-    if (mode !== before && reactive() && kernel.reactive) kernel.reactive.reset();
+    if (mode !== before && reactive() && kernel.reactive) {
+      kernel.reactive.reset();
+      kernel.remoteGate?.documentReplaced();
+    }
   }
 
   // ---------------------------------------------------------- for agents
@@ -2114,7 +2184,7 @@ export function createNotebook(root, opts = {}) {
     const ready = new Promise((resolve) => { const off = kernel.on("ready", () => { off(); resolve(); }); });
     kernel.restart();
     await ready;
-    const report = reactive() ? await engine().runAll() : (await Promise.all(cells().map(run)), null);
+    const report = reactive() ? await engine().runAll() : (await Promise.all(cells().map((c) => run(c))), null);
     const same = [], changed = [];
     for (const c of cells()) {
       if (c.type !== "code") continue;
@@ -2188,13 +2258,14 @@ export function createNotebook(root, opts = {}) {
     get mode() { return mode; },
     get meta() { return meta; },
     get active() { return active; },
-    cells, addCell, run, runAll, interrupt, clearOutputs,
+    // (run and runAll: programmatic, so with no person's consent; runAllGesture: only from a person's Run all handler)
+    cells, addCell, run: (cell) => run(cell), runAll: () => runAll(), runAllGesture: () => runAll(true), interrupt, clearOutputs,
     /** A fresh interpreter; the outputs stay, marked stale until their cells run again. */
     restart() { kernel?.restart(); },
     /** Use another interpreter (each notebook its own, on the full page): the outputs shown become stale unless it made them. */
     setKernel(k, { stale = true } = {}) { if (k === kernel) return; bindKernel(k); if (stale) for (const c of cells()) markStale(c); },
     /** The reactive notebook (design/reactive-notebook.md): on or off, and its budget (ms; Infinity: autorun, 0: lazy). */
-    setReactive(on) { reactiveOn = !!on; if (on) reactiveLoad(); else for (const c of cells()) c.el.classList.remove("edited", "cancelled", "error"); },
+    setReactive(on) { reactiveOn = !!on; gateCfg = null; if (on) reactiveLoad(); else for (const c of cells()) c.el.classList.remove("edited", "cancelled", "error"); },
     /** the scheduler (null until the document is loaded, or when off); reactiveOn: whether the notebook is reactive */
     get reactive() { return reactive() ? kernel.reactive ?? null : null; },
     get reactiveOn() { return reactive(); },
@@ -2203,7 +2274,7 @@ export function createNotebook(root, opts = {}) {
       budget = ms;
       if (kernel?.reactive) kernel.reactive.budget = ms;
       // (kept in the document: "always", "never" or milliseconds)
-      if (save) { meta = { ...meta, autorun: ms === Infinity ? "always" : ms <= 0 ? "never" : ms }; schedule(); }
+      if (save) { meta = { ...meta, autorun: ms === Infinity ? "always" : ms <= 0 ? "never" : ms }; gateCfg = null; schedule(); }
       emit("budget", ms);
     },
     setManual,
@@ -2234,7 +2305,8 @@ export function createNotebook(root, opts = {}) {
       }));
     },
     /** Run cells (ids) and delete others as one action, then what depends on them (the reactive notebook; resolves to its report). */
-    runCells(ids, o = {}) { return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map(run)); },
+    // (programmatic: never with a person's consent)
+    runCells(ids, { consent: _consent, ...o } = {}) { return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map((c) => run(c))); },
     applyEdits, graph, verify, fixRedefinitions,
     setMode, setType, setInput, renderMd, select, edit,
     /** X1: load the language's environment now, for the user's choice of it (index.html's menu). */
@@ -2242,7 +2314,7 @@ export function createNotebook(root, opts = {}) {
     /** Measure every editor again now (after the notebook was hidden). */
     resize() { cellsEl.querySelectorAll(".ed textarea").forEach(autosize); },
     load, snapshot, applyRemote, replace, flush, saved,
-    setMeta(patch) { meta = { ...meta, ...patch }; schedule(); },
+    setMeta(patch) { meta = { ...meta, ...patch }; gateCfg = null; schedule(); },
     /** Count this document's pictures in `budget` (a board's: shared by its
      * pictures, notes and code, afresh for each document shown, image-size.ts). */
     usePictures(budget) { pixels = budget; },

@@ -37,5 +37,8 @@ if find "$root" -name 'libjbig*' -o -name 'libtiff*' | grep -q .; then
   exit 1
 fi
 tool=${APPIMAGETOOL:-appimagetool}
+# Extracted AppDirs can inherit private modes; packaged files must be readable
+# and directories/existing executables traversable by every user.
+chmod -R a+rX "$root"
 ARCH=x86_64 "$tool" --no-appstream "$root" "$img"
 echo "stripped: $img"

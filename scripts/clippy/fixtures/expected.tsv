@@ -1,0 +1,11 @@
+# name	rc	exit	COLLECTION	SUMMARY	CLEAN	extra (an ERE that must match the output; empty: none)
+clean	0	0	complete	consistent	yes	default-warn|style
+classified-errors	101	0	complete	consistent	no	x2
+unclassified-error	101	1	complete	INCONSISTENT	no	UNCLASSIFIED
+rc-mismatch	0	1	complete	INCONSISTENT	no	rc 0 with 1 errors
+no-build-finished	0	1	INCOMPLETE	consistent	no	0 build-finished
+truncated	0	1	INCOMPLETE	consistent	no	isn't JSON
+finished-disagrees	0	1	INCOMPLETE	consistent	no	success=False but cargo rc 0
+two-groups	101	1	complete	INCONSISTENT	no	two groups
+dependency-warning	0	0	complete	consistent	yes	sagebrush-sym
+empty-message	101	0	complete	consistent	no	

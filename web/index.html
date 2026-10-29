@@ -400,6 +400,8 @@ import { createNotebook, esc } from "./notebook/notebook.js";
 import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex } from "./docsearch.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
+import { createRunnerPill } from "./notebook/runner-pill.js";
+const runnerPill = createRunnerPill({ mount: document.getElementById("nbline") });
 // Python runs in the runner, an opaque-origin sandboxed frame (design/runner.md),
 // where the page is cross-origin isolated (the runner hands files to the
 // interpreter through a SharedArrayBuffer) and not the desktop app's (whose
@@ -408,16 +410,18 @@ import { RunnerWorker } from "./notebook/runner-worker.js";
 // Only in Chromium (navigator.userAgentData), where it is tested: WebKit,
 // every browser on iOS, doesn't start its worker (design/runner.md, Next)
 const RUNNER = !(new URLSearchParams(location.search).get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !window.__TAURI__;
-import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT } from "./notebook/stores.js";
+import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSentDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT } from "./notebook/stores.js";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
 onHistoryRefused((m) => showBusyNotice(m));
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
-import { shareStatus, signInUrl, uploadCollection } from "./share-client/upload.ts";
+import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
+// (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
+import { latexBoot } from "./latex/boot.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { uploadFiles, openableAs, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
@@ -613,6 +617,10 @@ class RemoteWorker {
 // console has its own, a scratchpad apart from every notebook.  The notebook
 // is web/notebook.
 let db = null, replaying = false;
+// (a session's recreation and DEV's switch own the notebook one at a time: replayEnded resolves when the running
+// recreation ends, docSwitch while the switch holds it (ownNotebook, recreating); docSyncNeedsReload, once the switch
+// ended in `reload`: the notebook read-only, and no recreation run, until the page is reloaded (docSyncReload))
+let replayEnded = null, docSwitch = null, docSyncNeedsReload = false;
 const MAX_KERNELS = 4;
 const kernels = new Map(); // notebook id -> {kernel, journal, used, started}
 let kernel = null, journal = null; // the current notebook's
@@ -712,7 +720,8 @@ function makeKernel(owner) {
       reproducible: () => !REACTIVE && (current.id !== owner || nb.meta.reproducible !== false),
     });
   }
-  return { kernel: k, journal: j, used: 0, started: false };
+  const stopRunnerInfo = LOCAL || window.__TAURI__ ? () => {} : runnerPill.watch(k, w => w instanceof RunnerWorker && !w.inner);
+  return { kernel: k, journal: j, used: 0, started: false, stopRunnerInfo };
 }
 // The interpreter of a notebook (made if needed); the least recently used
 // beyond MAX_KERNELS stop (their notebooks' outputs are stale when reopened).
@@ -724,6 +733,7 @@ function kernelFor(id) {
   for (const [oid, o] of byUse.slice(MAX_KERNELS)) {
     if (oid === id) continue;
     o.kernel.close();
+    o.stopRunnerInfo();
     kernels.delete(oid);
   }
   return e;
@@ -824,7 +834,8 @@ nb.on("left", (n) => (n > 0 ? addEventListener : removeEventListener)("beforeunl
 const nbKept = new WeakMap();
 nb.onDetachedConflict(async (doc, theirs, key) => {
   if (!db) throw new Error("this browser has no storage to keep it in");
-  const { id: _i, rev: _r, updated: _u, baseRev: _b, share_id: _s, ...rest } = doc;
+  // (a copy is its own notebook: not the share, nor the share's pending attempt, of the one it copies)
+  const { id: _i, rev: _r, updated: _u, baseRev: _b, share_id: _s, share_attempt: _a, ...rest } = doc;
   const was = String(doc.name || "Untitled"), name = was + " (your changes, made while it changed elsewhere)";
   const copy = nbKept.get(key);
   if (copy && (await idb(db, "notebooks", "readonly", (st) => st.get(copy.id)))) {
@@ -1036,18 +1047,10 @@ async function replayResumed({ plan, version }) {
   }
   if (!plan.session || !plan.runs) { statusEl.textContent = `Version ${version}: no code had run then.`; return; }
   if (!kernel.ready) await new Promise((r) => { const off = kernel.on("ready", () => { off(); r(); }); });
-  replaying = true;
-  nb.setReadOnly(true);
-  let report;
-  try {
-    report = await journal.replay(plan, ({ done, total, left }) => {
-      statusEl.textContent = `recreating the session of version ${version}: run ${Math.min(done + 1, total)} of ${total} · ${fmtEstimate(left)} left`;
-    });
-  } finally {
-    replaying = false;
-    nb.setReadOnly(!!ws?.quarantined || !!nb.store?.viewOnly);
-    if (journal.session) journal.session.replay = false;
-  }
+  const report = await recreating(() => journal.replay(plan, ({ done, total, left }) => {
+    statusEl.textContent = `recreating the session of version ${version}: run ${Math.min(done + 1, total)} of ${total} · ${fmtEstimate(left)} left`;
+  }));
+  if (!report) return;
   nb.flush();
   const t = `${(report.ms / 1000).toFixed(1)} s`;
   statusEl.textContent = report.diverged.length
@@ -1121,18 +1124,13 @@ async function recompute(plan, what) {
   const ready = new Promise((r) => { const off = kernel.on("ready", () => { off(); r(); }); });
   kernel.restart();
   await ready;
-  replaying = true;
-  nb.setReadOnly(true);
-  let report, missing = [];
-  try {
+  let missing = [];
+  const report = await recreating(async () => {
     if (plan?.events?.some((e) => e.file)) missing = (await journal.replay({ ...plan, events: plan.events.filter((e) => e.file) })).diverged.map((d) => d.reason);
     statusEl.textContent = `computing ${what}…`;
-    report = await nb.runAll();
-  } finally {
-    replaying = false;
-    nb.setReadOnly(!!ws?.quarantined || !!nb.store?.viewOnly);
-    if (journal.session) journal.session.replay = false;
-  }
+    return nb.runAll();
+  });
+  if (!report) return null;
   nb.flush();
   statusEl.textContent = `Computed ${what}: ${report.ran.length} cell${report.ran.length === 1 ? "" : "s"} ran` +
     (report.failed.length ? `, ${report.failed.length} raised an error` : "") + (missing.length ? ` (${missing.join("; ")})` : "");
@@ -1447,6 +1445,9 @@ async function openDocument(doc, here = false, made = "elsewhere") {
 // (here: a new notebook, written in this browser; else examples and share links)
 const openNew = (name, mode, codes, here = false) => openDocument({ name, mode, cells: codes.map(asCell) }, here);
 async function openId(id) {
+  // (the LaTeX editor has this page, web/latex/page.ts: a notebook opened from it (its files, their menus, an
+  // upload) opens by its URL, never loaded unseen under the editor; a build without the editor drops this line)
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && globalThis.__sbTexOpen?.(id)) return true;
   const doc = await idb(db, "notebooks", "readonly", (st) => st.get(id));
   if (!doc) return false;
   await open(await storeFor(id), id);
@@ -1616,7 +1617,229 @@ async function storedFileMeta() {
 }
 // (tests: the Share dialog's seams, read at the moment they're used: a stand-in worker, shorter
 // fail-safes, a counter of the files the dialog reads, the interpreter's answer and the notebook's identity)
-const shareTest = { workspace: () => wsNow() };
+// This device's records of first uploads whose share request it sent, by account and notebook: one row each in
+// IndexedDB's "sagebrush-share-sent" (astra3's r2 note 1, daybreak3's r3 notes 2 and 3).  A record goes once its
+// outcome is durably the notebook's; a deleted notebook's, and a browser notebook's no longer here or durably shared,
+// are dropped.  A live record is never evicted: with SHARE_SENT_MAX of them, a new first upload is refused before
+// its request (CORR-UPLOAD-R4-2).  Every change is one strict readwrite transaction, under one origin-wide Web Lock,
+// read back before the lock goes (#243's registry design r3, CLEAR by astra3 and daybreak3): localStorage, which it
+// was, gave another tab's change late (#243's tracing r5b: R4's second tab read the records without the first's).
+const SHARE_SENT_MAX = 100, SHARE_SENT_LOCK = "sagebrush-share-sent";
+let shareSentDb = null;
+const shareSent = {
+  key: (account, notebook) => account + "|" + notebook,
+  /** A row that can be trusted: its own key, made of its account and notebook, and a 32-hex attempt.  Anything else
+   * is unknown, never absent: it refuses an upload of its notebook, counts towards SHARE_SENT_MAX, and is never
+   * pruned or compare-deleted; only forget removes it (design r3 §3a). */
+  wellFormed(row, key) {
+    return !!row && typeof row === "object" && row.key === key && typeof row.account === "string" && typeof row.notebook === "string"
+      && row.account + "|" + row.notebook === key && typeof row.attempt === "string" && /^[0-9a-f]{32}$/.test(row.attempt);
+  },
+  async db() {
+    if (shareTest.fault?.open) return null;
+    shareSentDb ??= await openShareSentDb({ onVersionChange: () => { shareSentDb = null; } });
+    return shareSentDb;
+  },
+  /** One readonly read, settled once, by its transaction's completion, error or abort (an abort may come with no
+   * error event at all): never left pending, so no read can keep the lock (astra3's code r1 A3-2).  Tests: a native
+   * abort after its request succeeded, for the read tagged as `fault.readAbort` says. */
+  read(dbx, store, f, tag) {
+    return new Promise((resolve, reject) => {
+      let settled = false, tx, r;
+      const done = (ok, v) => { if (!settled) { settled = true; (ok ? resolve : reject)(v); } };
+      try {
+        tx = dbx.transaction(store, "readonly");
+        r = f(tx.objectStore(store));
+      } catch (e) {
+        return done(false, e);
+      }
+      tx.oncomplete = () => done(true, r?.result);
+      tx.onerror = () => done(false, tx.error ?? new Error(`${store}: the read failed`));
+      tx.onabort = () => done(false, tx.error ?? new Error(`${store}: the read was aborted`));
+      if (tag && shareTest.fault?.readAbort === tag && r) r.onsuccess = () => { try { tx.abort(); } catch {} };
+    });
+  },
+  /** {tag: "none"} | {tag: "attempt", attempt} | {tag: "unreadable"}; rejects if it can't be read. */
+  async get(account, notebook) {
+    const d = await this.db();
+    if (!d) throw new Error("this browser's upload records couldn't be opened");
+    if (shareTest.fault?.get) throw new Error("test: the records can't be read");
+    const k = this.key(account, notebook);
+    const row = await this.read(d, "records", (st) => st.get(k), "get");
+    if (row === undefined) return { tag: "none" };
+    return this.wellFormed(row, k) ? { tag: "attempt", attempt: row.attempt } : { tag: "unreadable" };
+  },
+  /** One change (design r3 §2), all under the origin-wide lock: `inputs` read first (other databases), then ONE strict
+   * readwrite transaction whose rows go to `plan(rows, inputs)`, synchronously, for {outcome, ops}; settled once;
+   * then `after(outcome, db)`, the read-back.  Resolves to the outcome's tag; rejects if it can't be done so. */
+  async change(kind, plan, { inputs, after } = {}) {
+    const locks = shareTest.fault?.locks ? undefined : navigator.locks;
+    if (typeof locks?.request !== "function") throw new Error("this browser can't lock its records (no Web Locks)");
+    return locks.request(SHARE_SENT_LOCK, { mode: "exclusive" }, async () => {
+      const d = await this.db();
+      if (!d) throw new Error("this browser's upload records couldn't be opened");
+      const got = inputs ? await inputs(d) : null;
+      const outcome = await this.transact(d, kind, (rows) => plan(rows, got));
+      if (after) await after(outcome, d);
+      return outcome;
+    });
+  },
+  /** The transaction: strict, or not at all; no await inside it; the first of complete, abort or a caught exception
+   * settles it, and nothing after that. */
+  transact(d, kind, plan) {
+    return new Promise((resolve, reject) => {
+      let settled = false, outcome = null, tx;
+      const settle = (ok, v) => { if (!settled) { settled = true; (ok ? resolve : reject)(v); } };
+      const abort = (e) => { try { tx.abort(); } catch {} settle(false, e); };
+      try {
+        if (shareTest.fault?.txCreate) throw new Error("test: no strict transaction");
+        tx = d.transaction("records", "readwrite", { durability: "strict" });
+      } catch (e) {
+        return settle(false, e);
+      }
+      const durability = shareTest.fault?.durability ? "default" : tx.durability;
+      if (Array.isArray(shareTest.changeLog)) shareTest.changeLog.push({ kind, durability });
+      tx.oncomplete = () => settle(true, outcome);
+      // (a failed request isn't stopped (no preventDefault), so it aborts the whole transaction: onabort settles)
+      tx.onabort = () => settle(false, tx.error ?? new Error("the records' transaction was aborted"));
+      if (durability !== "strict") return abort(new Error(`the records' transaction isn't strict (${durability})`));
+      try {
+        const st = tx.objectStore("records");
+        const all = st.getAll();
+        all.onsuccess = () => {
+          try {
+            if (shareTest.fault?.plan) throw new Error("test: the plan fails");
+            const p = plan(all.result ?? []);
+            outcome = p.outcome;
+            for (const op of p.ops) {
+              if ("del" in op) { st.delete(op.del); continue; }
+              const w = st.put(op.put);
+              // (tests: an abort after the write succeeded, as a quota failure at commit would; or a failing request)
+              if (shareTest.fault?.afterWrite || shareTest.fault?.quota) w.onsuccess = () => { try { tx.abort(); } catch {} };
+              else if (shareTest.fault?.requestFail) w.onsuccess = () => { st.add(op.put); };
+            }
+          } catch (e) {
+            abort(e);
+          }
+        };
+      } catch (e) {
+        abort(e);
+      }
+    });
+  },
+  /** "recorded" (then read back, under the lock), "other" (another live attempt of it: never replaced, as it may
+   * have made a share, daybreak3's CORR-UPLOAD-R5-4), "full" (SHARE_SENT_MAX others, after pruning) or "unreadable"
+   * (its row can't be trusted); rejects if it couldn't be recorded: then the share request isn't sent. */
+  put(account, notebook, attempt) {
+    const k = this.key(account, notebook);
+    return this.change("put", (rows, inp) => {
+      // (pruning, in put only: the records of browser notebooks no longer here, or durably shared there (they never
+      // send a first upload again; a workspace's files' are kept), as read by `inputs`; unknown is kept)
+      const del = new Set();
+      if (inp) for (const row of rows) {
+        if (!this.wellFormed(row, row?.key) || /^[a-z]+:/.test(row.notebook)) continue;
+        if (!inp.ids.has(row.notebook) || inp.shared.has(row.notebook)) del.add(row.key);
+      }
+      const live = rows.filter((row) => !del.has(row?.key));
+      const mine = live.find((row) => row?.key === k);
+      // (a refusal changes nothing: neither its record nor the prunes found on the way)
+      if (mine !== undefined && !this.wellFormed(mine, k)) return { outcome: "unreadable", ops: [] };
+      if (mine !== undefined && mine.attempt !== attempt) return { outcome: "other", ops: [] };
+      if (mine === undefined && live.length >= SHARE_SENT_MAX) return { outcome: "full", ops: [] };
+      return { outcome: "recorded", ops: [...[...del].map((key) => ({ del: key })), { put: { key: k, account, notebook, attempt, at: Date.now() } }] };
+    }, {
+      inputs: (d) => this.pruneInputs(d),
+      // (the read-back, before the lock goes: a failure here is after the commit, so the record stays, and a retry
+      // sends this same attempt; tests change what it sees, never the store)
+      after: async (outcome, d) => {
+        if (outcome !== "recorded") return;
+        const seen = shareTest.fault?.readback;
+        // (tests: the read-back held until the test lets it go, to show the lock is held all through it; a gate not
+        // opened within 20 s fails the read-back, so it can never keep the lock, and never lets a request go)
+        if (shareTest.fault?.readbackHold) {
+          await new Promise((go, no) => {
+            const t = setTimeout(() => no(new Error("test: the read-back's gate expired")), 20_000);
+            shareTest.readbackGo = () => { clearTimeout(t); go(); };
+          });
+        }
+        let row, failed = false;
+        try {
+          if (seen === "reject") throw new Error("test: the read-back fails");
+          row = await this.read(d, "records", (st) => st.get(k), "readback");
+        } catch {
+          failed = true;
+        }
+        if (Array.isArray(shareTest.changeLog)) shareTest.changeLog.push({ kind: "readback" });
+        if (failed) throw new Error("not recorded");
+        if (seen === "missing") row = undefined;
+        else if (seen === "mismatch" && row) row = { ...row, attempt: (row.attempt?.[0] === "f" ? "e" : "f").repeat(32) };
+        if (!this.wellFormed(row, k) || row.attempt !== attempt) throw new Error("not recorded");
+      },
+    });
+  },
+  /** What put prunes by, read before its transaction: the browser's notebooks, and which of the recorded ones are
+   * durably shared; read raw, so no notebook is made by reading it; null (nothing pruned) if they can't be read. */
+  async pruneInputs(d) {
+    db ??= await dbReady;
+    if (!db) return null;
+    const keys = await this.read(db, "notebooks", (st) => st.getAllKeys(), "prune-keys").catch(() => null);
+    const rows = await this.read(d, "records", (st) => st.getAll(), "prune-rows").catch(() => null);
+    if (!Array.isArray(keys) || !Array.isArray(rows)) return null;
+    const ids = new Set(keys.map(String)), shared = new Set();
+    for (const row of rows) {
+      if (!this.wellFormed(row, row?.key) || /^[a-z]+:/.test(row.notebook) || !ids.has(row.notebook)) continue;
+      // (one that can't be read is unknown, so its record is kept)
+      if ((await this.read(db, "notebooks", (st) => st.get(row.notebook), "prune-notebook").catch(() => undefined))?.share_id) shared.add(row.notebook);
+    }
+    return { ids, shared };
+  },
+  /** Settled: the record of `attempt` goes, and only that one (compare-and-delete: an older settle never takes a newer
+   * record); a failed change keeps it (a record kept too long costs a slot, one dropped could cost a share). */
+  drop(account, notebook, attempt) {
+    const k = this.key(account, notebook);
+    return this.change("drop", (rows) => {
+      const row = rows.find((r) => r?.key === k);
+      return row !== undefined && this.wellFormed(row, k) && row.attempt === attempt ? { outcome: "dropped", ops: [{ del: k }] } : { outcome: "kept", ops: [] };
+    }).catch(() => "failed");
+  },
+  /** A notebook deleted for good: its records, every account's, whatever their state. */
+  forget(notebook) {
+    return this.change("forget", (rows) => ({ outcome: "forgotten", ops: rows.filter((r) => typeof r?.key === "string" && r.key.endsWith("|" + notebook)).map((r) => ({ del: r.key })) })).catch(() => "failed");
+  },
+};
+// (tests: the Share dialog's seams.  The records' own: `seed(map, {raw})` writes rows (map: key -> {attempt, at};
+// raw: rows as given, malformed ones included) through a strict transaction, replacing all; `sent()` reads them in a
+// fresh transaction, key -> {attempt, at, tag}; `registry()` and `account()` for the cases that order the records'
+// changes themselves; `fault` (see shareSent) and `changeLog` (each change's kind and durability, and each
+// read-back), set by a test)
+const shareTest = {
+  workspace: () => wsNow(),
+  async sent() {
+    const d = await shareSent.db();
+    if (!d) return null;
+    const rows = (await shareSent.read(d, "records", (st) => st.getAll())) ?? [];
+    return Object.fromEntries(rows.map((r) => [r.key, { attempt: r.attempt, at: r.at, tag: shareSent.wellFormed(r, r.key) ? "attempt" : "unreadable" }]));
+  },
+  registry: () => shareSent,
+  account: () => (sharing.enabled ? sharing.me?.account_id ?? null : null),
+  async seed(map = {}, { raw = [] } = {}) {
+    const d = await shareSent.db();
+    if (!d) throw new Error("no records database");
+    await new Promise((ok, no) => {
+      const tx = d.transaction("records", "readwrite", { durability: "strict" });
+      const st = tx.objectStore("records");
+      st.clear();
+      for (const [key, v] of Object.entries(map)) {
+        const i = key.indexOf("|");
+        st.put({ key, account: key.slice(0, i), notebook: key.slice(i + 1), attempt: v.attempt, at: v.at ?? 0 });
+      }
+      for (const r of raw) st.put(r);
+      tx.oncomplete = () => ok();
+      tx.onabort = () => no(tx.error);
+    });
+  },
+  exports: async () => ({ ipynb: toIpynb({ ...nb.snapshot(), name: docName() }), link: await shareLink() }),
+};
 // One file's bytes, as it is now; if it is no longer the file that was listed (another fid), it changed
 async function storedFileBytes(f) {
   await shareTest.onRead?.(f.path);
@@ -1661,11 +1884,151 @@ const shareDialog = createShareDialog({
   failsafe: () => shareTest.failsafe,
   bounds: () => ({ maxFiles: 10000, maxFileBytes: sharing.me?.limits?.max_file_bytes, bytesLeft: sharing.me?.limits ? sharing.me.limits.storage_bytes - sharing.me.usage : undefined }),
   upload: async ({ files, title, license }, progress) => {
+    // (the notebook's share and pending attempt as its store holds them now; null only where this page has no
+    // storage at all (no store, or the browser store without a database); a store that can't be read stops the
+    // upload, never read as "no storage", astra3's r2 note 2)
+    const storedShare = async () => {
+      const st = nb.store;
+      if (!st || ("db" in st && !st.db)) return null;
+      let d;
+      try {
+        d = await st.load();
+      } catch {
+        d = undefined;
+      }
+      if (!d || typeof d !== "object") throw new Error("this notebook's saved state couldn't be read, so nothing was uploaded; upload again");
+      return { share_id: d.share_id ?? null, share_attempt: d.share_attempt ?? null };
+    };
     const origin = current.id;
+    // (this device's record of the attempt whose share request it sent, by account and notebook: another writer's
+    // save, from another device, can replace the notebook's attempt, but not this; a retry after a lost answer or a
+    // crash sends it again, so the share that request may have made is found, never a second one, astra3's r2 note 1;
+    // another account's record is never used, daybreak3's r3 note 3)
+    const account = sharing.enabled ? sharing.me?.account_id ?? null : null;
+    if (!account) throw new Error("sign in to upload");
+    // (this device's attempt for it, if any; records that can't be read, or a row that can't be trusted, refuse the
+    // upload: a live record must never read as none, or a second share could be made beside it)
+    const sentAttempt = async () => {
+      let g;
+      try {
+        g = await shareSent.get(account, origin);
+      } catch {
+        g = null;
+      }
+      if (g?.tag === "attempt") return g.attempt;
+      if (g?.tag === "none") return null;
+      throw new Error("this browser couldn't read its upload records, so nothing was shared; upload again");
+    };
+    // (the record goes only once share `id` is durably the notebook's: a save that fails, or a crash before it ends,
+    // keeps it, so a retry recovers that share through its receipt, astra3's and daybreak3's r3 note 1; read from
+    // THIS notebook's own store, captured now, as the page may show another by then; no store, a failed read, or
+    // another share or none there (a detached conflict kept the other version) keep it, daybreak3's CORR-UPLOAD-R4-3)
+    const originStore = nb.store;
+    const settle = async (id) => {
+      try {
+        // (the record's attempt, read first: only that one goes, so an older settle never takes a newer record)
+        const g = await shareSent.get(account, origin);
+        if (g?.tag !== "attempt") return;
+        await nb.saved();
+        const st = originStore;
+        if (!st || ("db" in st && !st.db)) return;
+        // (a browser notebook's record read raw: loading a store makes its notebook if it is gone)
+        const d = st instanceof IdbStore ? await idb(st.db, "notebooks", "readonly", (o) => o.get(st.id)) : await st.load();
+        if (d && typeof d === "object" && d.share_id === id) await shareSent.drop(account, origin, g.attempt);
+      } catch {}
+    };
     const prev = nb.snapshot().share_id ?? null;
-    const r = await uploadCollection({ id: prev, title: title.trim() || docName(), license, files }, progress);
+    // (a new share's attempt (plan-upload-leak r3 §3c): kept with the notebook, and saved, before
+    // anything is read or sent, so a retry, even after a lost answer and a reload, gets that same
+    // share back, never a second one; a notebook that can't be saved isn't uploaded)
+    let attempt = null;
+    // (a notebook with its share, durably: any record of a sent first upload is settled)
+    if (prev) void settle(prev);
+    if (!prev) {
+      attempt = (await sentAttempt()) ?? nb.snapshot().share_attempt ?? [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      nb.setMeta({ share_attempt: attempt });
+      try {
+        await (shareTest.saved?.() ?? nb.saved());
+      } catch {
+        throw new Error("this notebook couldn't be saved, so it isn't uploaded (a retry could otherwise share it twice)");
+      }
+      if (current.id !== origin) throw new Error("the notebook changed; upload again");
+      // (what the store keeps is what this upload uses: another writer's save, merged by this one or made after it,
+      // may have replaced the attempt, or brought a share made elsewhere, astra3's L1; read from the store itself,
+      // as a save with nothing new to write meets no conflict; the kept attempt is adopted, a kept share stops it)
+      const kept = (await storedShare()) ?? nb.snapshot();
+      if (kept.share_id) throw new Error("this notebook was shared from elsewhere meanwhile. Upload again to make a new version of that share.");
+      if (!/^[0-9a-f]{32}$/.test(kept.share_attempt ?? "")) throw new Error("this notebook's upload changed elsewhere meanwhile; upload again");
+      // (an attempt this device already sent comes first: its share may exist; else the kept one is adopted)
+      const sent = await sentAttempt();
+      if (sent && kept.share_attempt !== sent) {
+        nb.setMeta({ share_attempt: sent });
+        try {
+          await nb.saved();
+        } catch {
+          throw new Error("this notebook couldn't be saved, so it isn't uploaded (a retry could otherwise share it twice)");
+        }
+        const again = await storedShare();
+        if (again && (again.share_id || again.share_attempt !== sent)) throw new Error("this notebook's upload changed elsewhere meanwhile; upload again");
+        attempt = sent;
+      } else {
+        attempt = kept.share_attempt;
+        if (nb.snapshot().share_attempt !== attempt) nb.setMeta({ share_attempt: attempt });
+      }
+    }
+    // (just before the request that makes the share: the notebook still holds this attempt, and no share)
+    let committing = false;
+    const beforeCommit = async () => {
+      const now = (await storedShare()) ?? nb.snapshot();
+      if (current.id !== origin || now.share_id || now.share_attempt !== attempt) throw new Error("this notebook's share changed elsewhere while uploading; nothing was shared. Upload again.");
+      // (recorded on this device before the request goes: unrecordable, it isn't sent)
+      let recorded;
+      try {
+        recorded = await shareSent.put(account, origin, attempt);
+      } catch {
+        recorded = "failed";
+      }
+      if (recorded !== "recorded") {
+        // (never a live record evicted for this one: the oldest's share would be lost to a retry, CORR-UPLOAD-R4-2)
+        if (recorded === "full") throw new Error(`this browser has ${SHARE_SENT_MAX} first uploads whose outcome it hasn't confirmed yet, so nothing was shared. Upload one of those notebooks again (that confirms it), then this one.`);
+        if (recorded === "other") throw new Error("another upload of this notebook from this browser hasn't finished, so nothing was shared. Upload again: that continues it.");
+        throw new Error("this browser couldn't record the upload, so nothing was shared; upload again");
+      }
+      committing = true;
+    };
+    let r;
+    try {
+      r = await uploadCollection({ id: prev, attempt, title: title.trim() || docName(), license, files }, progress, { beforeCommit });
+    } catch (e) {
+      // (an unknown outcome (no answer, a 5xx): the attempt sent is the one kept, so a retry gets its share back)
+      if (committing && !(e instanceof AttemptError) && current.id === origin && !nb.snapshot().share_id && nb.snapshot().share_attempt !== attempt) {
+        nb.setMeta({ share_attempt: attempt });
+        await nb.saved().catch(() => {});
+      }
+      // (the attempt made a share with other files, or its share was deleted: never a success, and the attempt is done)
+      if (!(e instanceof AttemptError)) throw e;
+      if (e.kind === "used") {
+        // (that share, adopted as the notebook's: the record stays until it is durably so)
+        if (current.id === origin) {
+          nb.setMeta({ share_id: e.share.id, share_attempt: null });
+          void settle(e.share.id);
+        }
+      } else {
+        // (this attempt's record, and only it, goes: its share is gone, so no retry could recover one)
+        void shareSent.drop(account, origin, attempt);
+        if (current.id === origin) nb.setMeta({ share_attempt: null });
+      }
+      throw new Error(e.kind === "used"
+        ? `an earlier upload of this notebook was shared with different files: ${e.share.url}. Nothing new was uploaded. Delete that share, or upload again to make a new version with your current selection.`
+        : "this notebook's earlier share was deleted. Upload again to make a new one.");
+    }
     // (its collection is its notebook's: never written onto another one attached meanwhile, CORR-172-ASTRA-2)
-    if (current.id === origin) nb.setMeta({ share_id: r.id });
+    if (current.id === origin) {
+      nb.setMeta({ share_id: r.id, share_attempt: null });
+      // (the record goes once this is durably saved; if the save fails, a retry sends the recorded attempt and gets
+      // this share back through its receipt)
+      void settle(r.id);
+    }
     return { url: r.url, again: !!prev };
   },
   fmtSize: (n) => fmtSize(n),
@@ -1809,7 +2172,7 @@ fileMenu.addEventListener("click", async (e) => {
       const d = nb.snapshot();
       // (a copy has its source's provenance; unknown stays unknown)
       const src = ws && current.id ? await ws.pathOf("notebook", current.id).then((p) => (p ? ws.stat(p) : undefined)).catch(() => undefined) : undefined;
-      await openDocument({ ...d, share_id: undefined, name: name.trim(), cells: d.cells.map((c) => ({ ...c, id: cellId() })) }, false, src?.made);
+      await openDocument({ ...d, share_id: undefined, share_attempt: undefined, name: name.trim(), cells: d.cells.map((c) => ({ ...c, id: cellId() })) }, false, src?.made);
       break;
     }
     case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
@@ -1880,6 +2243,7 @@ fileMenu.addEventListener("click", async (e) => {
       await nb.mayLeave();
       nb.detach();
       await idb(db, "notebooks", "readwrite", (st) => st.delete(current.id));
+      shareSent.forget(current.id);
       await wsForgetNotebook(current.id);
       const hdb = await historyDbReady;
       if (hdb) await new IdbPatchStore(hdb, current.id).drop();
@@ -1955,6 +2319,7 @@ async function showOpen() {
     del.onclick = async () => {
       if (d.id === current.id || !confirm(`Delete "${d.name}"?`)) return;
       await idb(db, "notebooks", "readwrite", (st) => st.delete(d.id));
+      shareSent.forget(d.id);
       await wsForgetNotebook(d.id);
       const hdb = await historyDbReady;
       if (hdb) await new IdbPatchStore(hdb, d.id).drop();
@@ -2479,6 +2844,37 @@ const wsReady = (async () => {
   }
   finally { wsSettled = true; }
 })();
+// (sync 2c-3, DEV's switch for notebooks' contents (web/workspace/doc-sync-switch.ts): on any origin but DEV's own,
+// nothing at all is asked or started here.  On DEV: this page's sync owner started; then, only if the server lets this
+// account sync and its client runs, evaluated afresh on every load: enableDocSync turns the journal on (lasting for
+// this browser; the Sync panel says so), DOC_SYNC on, reopens the open notebook through it, and hands a DocSync to the
+// sync owner.  It ends on, off (a doubt or a failure before anything lasting changed), or reload (the activation began
+// and this page couldn't go on: the notebook read-only, said, until a reload); see doc-sync-switch.ts)
+const docSyncReady = (async () => {
+  if (!docSyncOrigin(location.origin)) return false;
+  const w = await wsReady;
+  if (!w) return false;
+  const owner = SyncOwner.of(w).start();
+  const allowed = await docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning() });
+  if (!allowed) return false;
+  return (await enableDocSync({
+    loadHistory,
+    makeDocs: () => new DocSync(),
+    makeChannel: () => (typeof BroadcastChannel === "function" ? new BroadcastChannel(docSyncChannel(w.ws.name)) : null),
+    register: registerJournalWriter,
+    setReadOnly: (ro) => nb.setReadOnly(ro),
+    own: ownNotebook,
+    readOnlyNow: shownReadOnly,
+    flush: () => nb.flush(),
+    saved: () => nb.saved(),
+    activate: () => w.activateJournal(),
+    begun: () => w.journalBegun(),
+    reopen: reopenJournaled,
+    setDocs: (docs) => owner.setDocs(docs),
+    needReload: docSyncReload,
+    warn: (...a) => console.warn(...a),
+  })) === "on";
+})().catch((e) => { console.warn("sync: notebooks' switch:", e); return false; });
 // (once this device's journal is activated (plan-sync-slice2-client r4 §1a, web/workspace/api.ts activateJournal), every
 // notebook is written through it: T1 in its history, then T2 (notebook/journal.js); before, as before.  Told by the
 // notebooks' fence, read as each store is made: its phase "journal" is what refuses every other writer, so a store
@@ -2505,7 +2901,7 @@ function showWriter(store, id) {
   // (TimeTravel's own changes too: Revert and Clear history (daybreak3))
   $("#ttclear").disabled = !c.history;
   if (!c.history) $("#ttrevert").disabled = true;
-  nb.setReadOnly(c.readOnly || !!ws?.quarantined);
+  nb.setReadOnly(c.readOnly || !!ws?.quarantined || docSyncNeedsReload);
   // (the page's own controls too: the name (and with it the workspace file's), the language, reproducibility (board's 1))
   nbName.readOnly = !c.name;
   modeEl.disabled = !c.mode;
@@ -2534,6 +2930,79 @@ async function takeOver(store, id) {
   writerBar.textContent = journalPage.TAKEOVER;
   writerBarHeight();
   writerBarTimer = setTimeout(() => { if (!nb.store?.viewOnly) { writerBar.hidden = true; writerBar.textContent = ""; writerBarHeight(); } }, 6000);
+}
+// (DEV's switch, after the journal's activation: the notebook shown, if one was opened before it, opened again through
+// the journal, its synced history started (DOC_SYNC is on by then).  Whether it is: a failure lets go of the new store
+// and the old one (their writer locks: another tab, or this page reloaded, can take them), and leaves no store attached,
+// so nothing is editable with nowhere to save it (astra's DEVSW-2))
+async function reopenJournaled() {
+  if (!current.id || current.kind !== "browser" || (nb.store?.journaled && nb.store.synced)) return true;
+  const id = current.id, prev = nb.store;
+  let st = null;
+  try {
+    st = await storeFor(id);
+    await open(st, id);
+    if (nb.store === st && st.journaled) return true;
+    throw new Error("the notebook isn't open through the journal");
+  } catch (e) {
+    console.warn("sync: the notebook not reopened through the journal:", e);
+    if (nb.store && (nb.store === st || nb.store === prev)) nb.detach();
+    for (const x of new Set([st, prev])) if (x?.journaled) try { await x.release(); } catch {}
+    return false;
+  }
+}
+// (what holds for the notebook shown, the switch's read-only set back from it: read-only with no store attached (nowhere
+// to save), one another tab writes, a quarantined workspace, or a session being recreated)
+function shownReadOnly() {
+  return !nb.store || !!nb.store.viewOnly || !!ws?.quarantined || replaying || docSyncNeedsReload;
+}
+// (a session's recreation (TimeTravel's replay, the reactive recompute): `run` with the notebook owned and read-only,
+// after DEV's switch if it holds it (checked with no await before replaying is set), and never once the switch ended in
+// reload (astra's DEVSW-2-R3: a recreation queued behind it doesn't run, and can't unlock the notebook); the read-only
+// then set back from what holds (shownReadOnly: no store, another tab, quarantine, reload).  Resolves run's result, or
+// null if it didn't run)
+async function recreating(run) {
+  while (docSwitch) await docSwitch;
+  if (docSyncNeedsReload) {
+    statusEl.textContent = DOC_SYNC_RELOAD;
+    return null;
+  }
+  let endReplay;
+  replayEnded = new Promise((r) => { endReplay = r; });
+  replaying = true;
+  nb.setReadOnly(true);
+  try {
+    return await run();
+  } finally {
+    replaying = false;
+    endReplay();
+    nb.setReadOnly(shownReadOnly());
+    if (journal.session) journal.session.replay = false;
+  }
+}
+// (the notebook owned by DEV's switch from its read-only to its last restore (astra's DEVSW-2-R2): it waits for a
+// session's recreation to end, and a recreation asked meanwhile waits for the switch (before it sets `replaying`);
+// returns the release)
+async function ownNotebook() {
+  while (replaying || docSwitch) await (replaying ? replayEnded : docSwitch);
+  let end;
+  docSwitch = new Promise((r) => { end = r; });
+  return () => { docSwitch = null; end(); };
+}
+// (the switch's `reload`: the journal's activation began and this page couldn't go on with it: the notebook and the
+// page's controls for it read-only, and said, until a reload)
+function docSyncReload() {
+  docSyncNeedsReload = true;
+  clearTimeout(writerBarTimer);
+  nb.setReadOnly(true);
+  writerBar.hidden = false;
+  writerBar.textContent = DOC_SYNC_RELOAD;
+  writerBarHeight();
+  nbName.readOnly = true;
+  modeEl.disabled = true;
+  $("#ttrepro").disabled = true;
+  $("#ttclear").disabled = true;
+  $("#ttrevert").disabled = true;
 }
 let journalKit = null;
 async function storeFor(id, initial) {
@@ -2704,6 +3173,9 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (the workspace opened first, at most a few seconds: its fence in the notebooks' store is there before any
   // notebook is loaded, so each store is bound to it: design/workspace-durability.md A.3)
   await wsNow();
+  // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
+  // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws))) return;
   let mode = "python";
   try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
   // a shared link opens as a new notebook; else the last one; else the welcome

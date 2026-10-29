@@ -35,10 +35,26 @@ A **collection** is a directory of notebooks, boards and data files that someone
 2. It uploads those (`PUT /api/share/blob/<sha256>`, with its length).
    - The bytes are first **reserved** by one conditional INSERT that counts the account's files, manifests and running uploads. Concurrent uploads can't all pass one check.
    - R2 refuses bytes that don't hash to the SHA-256, and the stored size must equal the declared one.
-3. It commits the version (`POST /api/share/collections/<id>/versions`).
+3. It commits the version: a new version of a share (`POST /api/share/collections/<id>/versions`), or, for a new share, the request that makes its collection too (`POST /api/share/first-upload` with `{title, license, files, attempt}`: its own path, so a server from before it answers 404 and makes nothing).
    - Every file must be one the account uploaded, at its stated size, and every path a plain relative path.
    - The manifest's bytes count against the quota too.
    - Limits: 1,000 collections per account, 1,000 versions per collection, 10,000 files per version.
+
+**A new share's collection exists only with its first version** (plan-upload-leak r3).
+
+- **One transaction:** the collection, its first version and the attempt's *receipt* are written in a single D1 transaction, so an upload that fails anywhere leaves no empty collection.
+- **The attempt:** 128 random bits the page keeps with the notebook, saved before anything is read or sent, until the share is made.
+- **The receipt** (`upload_receipts`) records the attempt's hash, the digest of what the request asked for (title, license, files) and the exact version it made. A retry of the attempt (its answer lost, the page reloaded) is answered from it:
+  - the same contents: that version, never a second share;
+  - other contents: 409 `attempt_used`, naming the share. It is never a success; the page then treats that share as the notebook's.
+  - the share deleted meanwhile: 410 `attempt_retired`. A deletion retires the receipt in its own transaction. A retired receipt is kept 30 days, or until its account has deleted 1,000 newer shares, whichever comes first; after that, a retry makes a new share with a new id, and the deleted link stays dead. So the table holds at most 2,000 rows per account.
+- **The page keeps what the save kept:** if a remote update merged by that save replaced the attempt, the kept one is used; if it brought a share made elsewhere, the upload stops. Just before the share request, the notebook must still hold that attempt.
+- **This device's record of the attempt it sent** (a row of IndexedDB's own `sagebrush-share-sent` database, keyed by account and notebook) is written, and read back, before the share request goes, so another device's save replacing the notebook's attempt can't make a retry lose it.
+  - It goes only once the notebook's own store durably holds the returned share, or the share was deleted (410), and only that attempt's record (compare-and-delete). A failed save, a crash or a switch to another notebook keep it.
+  - Every change to it, in every tab, is made under one origin-wide Web Lock, as ONE readwrite transaction with strict durability, read back before the lock goes. A browser without Web Locks, or without a strict transaction, makes no first upload. (It was one localStorage entry: another tab's change could arrive late, and one tab's record was overwritten by another's.)
+  - Records that can't be read, or a row that can't be trusted, refuse the upload: a live record never reads as none. A read-back that fails after the commit keeps the record, and the retry sends the same attempt.
+  - It is bounded at 100 live records. Records of browser notebooks no longer in this browser, or durably shared in it, are dropped; one whose notebook can't be read is kept. A live one is never evicted: at 100, a new first upload is refused before its request.
+- **An older page** may still create an empty collection first (`POST /api/share/collections` with `{title}` alone). That form is kept only for pages loaded before this change, and will be removed. It refuses a first upload's form (400).
 
 **Each step that depends on an earlier check ends in one D1 transaction** whose guard re-checks it: the account isn't being deleted, the collection is still its own, every file is still held. An R2 write whose D1 write then fails is found from its expired reservation and deleted by the scheduled job.
 

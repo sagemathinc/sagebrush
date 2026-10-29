@@ -1,0 +1,2 @@
+{"reason": "compiler-message", "package_id": "path+file:///w/engine/sym#sagebrush-sym@0.1.0", "manifest_path": "/w/engine/sym/Cargo.toml", "target": {"kind": ["cdylib"], "name": "sagebrush_native"}, "message": {"level": "warning", "code": {"code": "unused_variables", "explanation": null}, "message": "unused variable: `x`", "spans": [{"file_name": "src/lib.rs", "line_start": 10, "column_start": 5, "is_primary": true}], "children": []}}
+{"reason": "build-finished", "success": true}

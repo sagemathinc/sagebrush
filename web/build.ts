@@ -6,6 +6,8 @@
 import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync, mkdtempSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { previewHost } from "./latex/preview-host.mjs";
+import { bundledPackageDir } from "./build-package-dir.mjs";
 
 /** A site page with the early-alpha notice's script (web/alpha-banner.js), just before </head>. */
 // (the same tag that board/export.ts's assemble() takes out of every board it makes from a page)
@@ -15,6 +17,17 @@ function withAlphaBanner(html: string): string {
   return html.replace("</head>", ALPHA_BANNER_TAG + "</head>");
 }
 const here = import.meta.dir;
+// The LaTeX editor (DEV only; web/latex/): built only with SAGEBRUSH_LATEX_PREVIEW=1 (the DEV deploy) or "test" (the
+// same, its page also on loopback hosts, for VM tests). Unset, __SB_LATEX__ is false in every bundle, its hooks fold
+// away, no LaTeX file is written, and the output is what it was without it. With =1, SAGEBRUSH_PREVIEW_HOST may name
+// one more host under .sagebrush.cloud for a preview deploy (web/latex/preview-host.mjs; else ignored).
+const LATEX_MODE = process.env.SAGEBRUSH_LATEX_PREVIEW ?? "";
+if (!["", "1", "test"].includes(LATEX_MODE)) throw new Error(`SAGEBRUSH_LATEX_PREVIEW must be unset, 1 or test, not ${JSON.stringify(LATEX_MODE)}`);
+const LATEX = LATEX_MODE !== "";
+const LATEX_PREVIEW_HOST = previewHost(LATEX_MODE, process.env.SAGEBRUSH_PREVIEW_HOST);
+const LATEX_DEFINE = LATEX
+  ? { __SB_LATEX__: "true", __SB_LATEX_TEST__: String(LATEX_MODE === "test"), __SB_LATEX_HOSTS__: JSON.stringify(LATEX_MODE === "test" ? ["dev.sagebrush.space", "127.0.0.1", "localhost"] : ["dev.sagebrush.space", ...(LATEX_PREVIEW_HOST ? [LATEX_PREVIEW_HOST] : [])]) }
+  : { __SB_LATEX__: "false" };
 // (web/site/ when it is here; see web/site-dir.mts)
 const { siteDir, hasSite } = await import("./site-dir.mts");
 const shims: Record<string, string> = {
@@ -116,7 +129,8 @@ const consoleResult = await Bun.build(<any>{
 });
 // Math in Markdown cells (KaTeX), loaded on first use.  (Markdown itself,
 // small and usually in the first cell, is part of the page script.)
-const mathResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "math.ts")], outdir: join(here, "dist"), naming: "sagebrush-math.js", target: "browser", format: "esm", minify: true });
+// (in a LaTeX build, the same module plus KaTeX's renderToString, for the LaTeX editor's worker: web/latex/math-dev.ts)
+const mathResult = await Bun.build(<any>{ metafile: true, entrypoints: [LATEX ? join(here, "latex", "math-dev.ts") : join(here, "math.ts")], outdir: join(here, "dist"), naming: "sagebrush-math.js", target: "browser", format: "esm", minify: true });
 // The canvas view of a graph's picture (web/graph/view.ts), loaded by the
 // notebook when Graph.plot's output first needs it
 const graphResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "graph", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-graphview.js", target: "browser", format: "esm", minify: true });
@@ -157,8 +171,11 @@ for (const r of [result, consoleResult, mathResult, graphResult, notebookResult,
   const html = readFileSync(join(here, "index.html"), "utf8");
   const m = /<script id="app">([\s\S]*?)<\/script>/.exec(html)!;
   const tmp = join(here, "app.tmp.js"); // beside index.html: its imports are relative to web/
-  writeFileSync(tmp, m[1] + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
-  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: true });
+  // (without the LaTeX editor, its entry's import line is taken out first: its one use is in a branch the build drops)
+  const LATEX_IMPORT = 'import { latexBoot } from "./latex/boot.ts";\n';
+  if (m[1].split(LATEX_IMPORT).length !== 2) throw new Error("index.html must import the LaTeX editor's entry exactly once");
+  writeFileSync(tmp, (LATEX ? m[1] : m[1].replace(LATEX_IMPORT, "")) + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
+  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: true, define: LATEX_DEFINE });
   builds.push(["the notebook page", app]);
   if (!app.success) {
     for (const l of app.logs) console.error(l);
@@ -170,6 +187,19 @@ for (const r of [result, consoleResult, mathResult, graphResult, notebookResult,
   // after a <!-- would make the parser skip its real end tag)
   if (/<\/?script/i.test(js)) throw new Error("the notebook page's script contains <script or </script, which breaks it inlined in index.html");
   writeFileSync(join(here, "dist", "index.html"), html.slice(0, m.index) + "<script>" + js + "</script>" + html.slice(m.index + m[0].length));
+}
+// The LaTeX editor's page and its engine worker (only in a LaTeX build): loaded only when a .tex file is opened.
+// Every LaTeX-owned output is named sagebrush-latex* (the deploy's PROD check relies on that name).
+for (const f of readdirSync(join(here, "dist"))) if (f.startsWith("sagebrush-latex")) rmSync(join(here, "dist", f));
+if (LATEX) {
+  for (const [entry, name] of [["page.ts", "sagebrush-latex.js"], ["worker.ts", "sagebrush-latex-worker.js"]]) {
+    const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "latex", entry)], outdir: join(here, "dist"), naming: name, target: "browser", format: "esm", minify: true, define: LATEX_DEFINE });
+    builds.push([`the LaTeX editor (${name})`, r]);
+    if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
+  }
+  // (for the asset budget gate, scripts/site-asset-budget.mjs: every bundle's inputs, by output, outside dist)
+  mkdirSync(join(here, "..", "build"), { recursive: true });
+  writeFileSync(join(here, "..", "build", "latex-metafile.json"), JSON.stringify(Object.fromEntries(builds.map(([what, r]) => [what, Object.keys(r.metafile?.inputs ?? {})])), null, 0) + "\n");
 }
 copyFileSync(join(here, "llms.txt"), join(here, "dist", "llms.txt"));
 // the early-alpha notice, for the site's own pages only (web/alpha-banner.js, SECURITY.md)
@@ -269,7 +299,7 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
 {
   const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: join(here, "dist", "board"), naming: "board.js", target: "browser", format: "esm", minify: true,
     // (the engine it was built with, by its files' SHA-256s: an exported board pins it, design/engines.md)
-    define: { __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "false" } });
+    define: { __SB_LATEX__: "false", __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "false" } });
   if (!r.success) {
     for (const l of r.logs) console.error(l);
     process.exit(1);
@@ -306,7 +336,7 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   // __SB_NO_SYNC__, never reached, and the stub keeps the modules themselves, and the client behind them, out of
   // this copy)
   const noSync = { name: "no-sync", setup(b: any) { b.onResolve({ filter: /(^|\/)sync-(owner|panel|rows)(\.ts)?$/ }, () => ({ path: join(here, "board", "no-sync-stub.ts") })); } };
-  const ns = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: nosyncDir, naming: "board.js", target: "browser", format: "esm", minify: true, plugins: [noSync], define: { __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "true" } });
+  const ns = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: nosyncDir, naming: "board.js", target: "browser", format: "esm", minify: true, plugins: [noSync], define: { __SB_LATEX__: "false", __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "true" } });
   if (!ns.success) { for (const l of ns.logs) console.error(l); process.exit(1); }
   // (its packages are the board build's: a subset, already listed in js-dependencies.json)
   const nosync = readFileSync(join(nosyncDir, "board.js"), "utf8");
@@ -350,12 +380,8 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   };
   for (const [what, r] of builds) {
     for (const input of Object.keys(r.metafile?.inputs ?? {})) {
-      const abs = input.startsWith("/") ? input : join(process.cwd(), input);
-      const i = abs.lastIndexOf("/node_modules/");
-      if (i < 0) continue;
-      const rest = abs.slice(i + "/node_modules/".length).split("/");
-      const name = rest[0].startsWith("@") ? rest[0] + "/" + rest[1] : rest[0];
-      add(abs.slice(root.length + 1, i + "/node_modules/".length) + name, what);
+      const dir = bundledPackageDir(input, process.cwd());
+      if (dir !== null) add(dir, what);
     }
   }
   add("node_modules/katex", "KaTeX's stylesheet and fonts (copied)");
@@ -436,6 +462,14 @@ if (hasSite) {
 // the notebook component's demo page (web/embed)
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
 copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));
+// the questions preview (web/questions): auto-graded questions on the same component and kernel. Flagged, off by
+// default: built only for a hosted preview (scripts/preview.sh sets SAGEBRUSH_PREVIEW_HOST) or with SAGEBRUSH_QUESTIONS=1
+// (dist isn't cleared between builds: the directory is removed either way, so a flagged build's page never outlives it)
+rmSync(join(here, "dist", "questions"), { recursive: true, force: true });
+if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_QUESTIONS === "1") {
+  mkdirSync(join(here, "dist", "questions"), { recursive: true });
+  copyFileSync(join(here, "questions", "index.html"), join(here, "dist", "questions", "index.html"));
+}
 if (hasSite) mkdirSync(join(siteDir, "public", "embed"), { recursive: true });
 if (hasSite) mkdirSync(join(siteDir, "public", "runner"), { recursive: true });
 // the shared collection page, served for /s/<id> by the site's Worker
@@ -446,6 +480,9 @@ copyFileSync(join(here, "share-client", "og.png"), join(here, "dist", "s", "og.p
 if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
 for (const f of ["index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "sagebrush-share-deps.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
   if (hasSite) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
+// (the LaTeX editor's files, in a LaTeX build only; a stale copy from an earlier one is removed either way)
+if (hasSite) for (const f of readdirSync(join(siteDir, "public"))) if (f.startsWith("sagebrush-latex")) rmSync(join(siteDir, "public", f));
+if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-worker.js"]) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the library's chunks)
 if (hasSite) rmSync(join(siteDir, "public", "lib"), { recursive: true, force: true });
 if (hasSite) cpSync(join(here, "dist", "lib"), join(siteDir, "public", "lib"), { recursive: true });

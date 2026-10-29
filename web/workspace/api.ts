@@ -119,7 +119,51 @@ export type OldBytes = { kind: "free" | "older" | "trash"; key: string; folder: 
 export type Version = { id?: number; fid: string; t: number; size: number; sha256: string; by: string; device: string; pinned?: boolean };
 /** A version not kept for sync, in the store `prunable` (db.ts, version 5). */
 type Prunable = { fid: string; id: number; t: number; size: number };
-export type BoardRecord = { id: string; doc: any; rev: number; updated: number; docId?: string; origin?: string; tag?: string };
+/** A board's row as any write but the journal's makes it: no journal envelope (its absence explicit; every raw write
+ * puts plainRow of what it is given, whatever it carries). */
+export type PlainBoardRecord = { id: string; doc: any; rev: number; updated: number; docId?: string; origin?: string; tag?: string; j?: never; hash?: never; unjournaled?: never; stampOf?: never };
+/** The board journal's envelope on a row (db.ts version 9): flat beside `doc`, never in it,
+ * all or none: `j` a safe integer ≥ 0, `hash` a string, `unjournaled` (true or "too-large") only beside them.
+ * `stampOf`: the row is a pure stamp, its value that of revision `stampOf`
+ * (recovery's T2 of an unchanged document, written in that T2's transaction); any write that changes the document,
+ * and every ordinary write, drops it. */
+export type BoardEnvelope = { j: number; hash: string; unjournaled?: true | "too-large"; stampOf?: number };
+type NoEnvelope = { j?: undefined; hash?: undefined; unjournaled?: undefined; stampOf?: undefined };
+export type BoardRecord = Omit<PlainBoardRecord, "j" | "hash" | "unjournaled" | "stampOf"> & (NoEnvelope | BoardEnvelope);
+/** The journal's own fields of a board record (web/journal/store.js): never a board document's. */
+export const BOARD_STORE_FIELDS = ["rev", "j", "hash", "unjournaled", "stampOf", "baseRev"] as const;
+/** A board document without the journal's own fields (the record/document boundary: what a row's `doc` and a version hold). */
+export function stripBoard<T extends object>(doc: T): T {
+  const out: any = { ...doc };
+  for (const k of BOARD_STORE_FIELDS) delete out[k];
+  return out;
+}
+/** Whether a row has a whole envelope (a safe integer j ≥ 0 and a string hash). */
+export const hasEnvelope = (r: { j?: unknown; hash?: unknown } | undefined): boolean => !!r && Number.isSafeInteger(r.j) && (r.j as number) >= 0 && typeof r.hash === "string";
+/** A row with its envelope dropped: what an ordinary write leaves (no write but the journal's keeps one). */
+function plainRow(r: BoardRecord | PlainBoardRecord): PlainBoardRecord {
+  const { j: _j, hash: _h, unjournaled: _u, stampOf: _s, ...rest } = r as BoardRecord;
+  return rest;
+}
+// (canonical JSON, object keys sorted: whether two board documents are the same value)
+const canonJson = (x: unknown): string => JSON.stringify(x, (_, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v));
+/** A board row's provenance for the board journal's load bridge (page.ts journalLoad): its revision, its tag, and, a
+ * pure stamp's, the revision whose value it stamped. */
+export type BoardProvenance = { rev: number; tag?: string; stampOf?: number };
+/** The board journal's record of a row (web/journal/store.js's Base): the document, its revision and its envelope. */
+export function boardRecordOf(r: BoardRecord): any {
+  return { ...stripBoard(r.doc ?? {}), rev: r.rev, ...(hasEnvelope(r) ? { j: r.j, hash: r.hash, ...(r.unjournaled ? { unjournaled: r.unjournaled } : {}), ...(Number.isSafeInteger(r.stampOf) ? { stampOf: r.stampOf } : {}) } : {}) };
+}
+/** The journal's word for a board's T2 (web/journal/store.js; as notebooks' IdbStore checks it, stores.js save). */
+export type BoardJournalWord = { j?: number; hash: string; unjournaled?: boolean | "too-large"; keep?: boolean; markOnly?: boolean };
+const journalWordOk = (w: BoardJournalWord | undefined): boolean => !!w && (w.keep === true || (Number.isSafeInteger(w.j) && w.j! >= 0)) && typeof w.hash === "string" && [undefined, false, true, "too-large"].includes(w.unjournaled as any) && (!w.markOnly || (w.keep === true && w.unjournaled === true));
+export const BOARD_NOT_JOURNALED = "not saved: this board's save didn't come through sync's journal: reload this page";
+export const BOARD_NOT_JOURNAL_PHASE = "not saved: this browser's workspace isn't saving through sync's journal yet: reload this page";
+export const BOARD_MARK_CHANGED = "not cleared: this board changed while its versions were being cleared: try again";
+/** For tests (web/board/test-board-journal.page.js): awaited in Workspace.journalWrite, `beforeLock` before it asks
+ * for the workspace's lock (another writer may run then), `afterBoards` once the board's transaction has committed,
+ * before its entry's (holding the lock). */
+export const BOARD_JOURNAL_HOOK: { beforeLock?: (ref: string, word: BoardJournalWord) => Promise<void> | void; afterBoards?: (ref: string) => Promise<void> | void } = {};
 export type Limits = { maxFileBytes: number; maxBoardBytes: number; maxEntries: number; maxFolderEntries: number; maxVersions: number; maxVersionAgeMs: number; maxVersionBytes: number };
 /** §6.3: one upload at most 200 MB; a board's JSON at most 64 MB; the
  * workspace at most 100,000 entries, a folder at most 10,000 of its own.  §2.5: a data file's latest 20
@@ -359,6 +403,9 @@ function path(p: unknown): string {
 // character, is in it: CORR-4A0-3)
 const subtree = (p: string) => (p === "/" ? undefined : IDBKeyRange.bound(p + "/", p + "0", false, true));
 
+/** pathOfFile reads at most this many entries with one identity (normally one); more is "ambiguous", unread. */
+export const PATH_OF_FILE_MAX = 64;
+
 export class Workspace {
   private subs = new Set<(c: Change) => void>();
   private channel: BroadcastChannel | null = null;
@@ -537,6 +584,12 @@ export class Workspace {
   async journalActive(): Promise<boolean> {
     const j = await inTx(this.ws, "meta", "readonly", async (tx) => (await req(tx.objectStore("meta").get("journal"))) as JournalState | undefined);
     return j?.active === true;
+  }
+  /** Whether this device's journal activation has begun (or is done): one way, so a page that asked for it can't
+   * treat it as undone (DEV's switch, doc-sync-switch.ts enableDocSync). */
+  async journalBegun(): Promise<boolean> {
+    const j = await inTx(this.ws, "meta", "readonly", async (tx) => (await req(tx.objectStore("meta").get("journal"))) as JournalState | undefined);
+    return j?.active === true || j?.activating === true;
   }
   /** The latest generation any of the editors' stores' fences names (0 if none). */
   private async fencesUpTo(): Promise<number> {
@@ -1237,7 +1290,7 @@ export class Workspace {
    * revision read() gave), only if nothing else wrote it since: otherwise a
    * WorkspaceError("conflict") with the current contents, nothing written. */
   /** `tag` (a board): who wrote it, kept on the record (a page's session, so that page can tell its own writes from others'). `keepEmpty: false` (a data file): no version of empty bytes (Python's open("w") empties a file before writing it); a version of an empty file is kept otherwise. */
-  /** `fid` (a data file): only if the file at `p` is still that one, its own id, not another put at its path since (a WorkspaceError("conflict")). */
+  /** `fid` (a data file): only if the file at `p` is still that one, its own id, not another put at its path since (a WorkspaceError("conflict")).  Checked holding the lock, before anything else is done: another file at `p`, not yet moved beside the index, isn't moved first (astra3 R6-A3-1). */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything is read or changed. */
   async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
     return this.writeLocked(p, owned(content, this.limits.maxFileBytes), opts).then((out) => { this.askToKeep(); return out; });
@@ -1248,6 +1301,7 @@ export class Workspace {
       await this.admitAt(admit, "write", "target", path(p));
       let e = await this.mustStat(p);
       if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
+      if (opts.fid !== undefined && (e.kind !== "file" || e.fid !== opts.fid)) throw new WorkspaceError("conflict", `${e.path} is another file now`);
       if (e.kind === "file") return this.writeFile(await this.migrateOne(e), content, opts);
       // (a document listed from the server: its content comes in slice 2, read-only until then)
       if (e.remote) throw new WorkspaceError("invalid", `${e.path}'s content is synced in the next step: open it on the device that made it`);
@@ -1268,8 +1322,10 @@ export class Workspace {
           const st = tx.objectStore("boards"), cur: BoardRecord | undefined = await req(st.get(e.ref!));
           if (!cur) throw new WorkspaceError("missing", `the contents of ${e.path} are not in this browser`);
           if (opts.base !== undefined && cur.rev !== opts.base) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, cur.doc);
-          const { tag: _t, ...rest } = cur;
-          st.put({ ...rest, doc: content, rev: cur.rev + 1, updated: t, ...(opts.tag ? { tag: opts.tag } : {}) });
+          // (not the journal's write: the row left without its envelope, which spoke of the value before; the next
+          // journaled load stamps it)
+          const { tag: _t, ...rest } = plainRow(cur);
+          st.put({ ...rest, doc: content, rev: cur.rev + 1, updated: t, ...(opts.tag ? { tag: opts.tag } : {}) } satisfies PlainBoardRecord);
           return cur.rev + 1;
         });
       } else throw new WorkspaceError("invalid", "a folder has no contents to write");
@@ -1287,6 +1343,90 @@ export class Workspace {
       this.tell({ ops });
       return { entry, rev };
     }, undefined, collect);
+  }
+
+  /** The board journal's T2 of the board `ref` (web/board/journal.ts's BoardRecordStore, the
+   * Base of web/journal/store.js): `doc` (its journal's own fields dropped) written with the journal's envelope, in
+   * one transaction of `boards` and `meta`, holding the workspace's lock, as `write` writes a board: its path, admit,
+   * Trash and quarantine checked under the same hold; then its entry and op, as `write`'s.
+   * - the journal's word checked first (as notebooks' IdbStore checks it); the journal active, in the transaction;
+   * - `markOnly`: the row marked, decided on the row read in the transaction: a whole envelope whose hash is the
+   *   caller's, unmarked, is marked; marked already, or without an envelope (an ordinary write came after the caller
+   *   read it), nothing is written; a whole envelope of another hash is refused (its proof changed: the caller's clear
+   *   must not run).  Never a revision, an entry or an op;
+   * - a compare and swap on `doc.baseRev`, and a stored j never moved back: `{conflict}` with the record as it is;
+   * - `keep`: the stored j kept.
+   * Resolves {saved: true, rev} (`late`: the entry's step failed after the board's committed: kept all the same),
+   * {conflict}, {marked: true}, or a refusal's text. */
+  async journalWrite(ref: string, doc: any, opts: { tag?: string; journal: BoardJournalWord } & Collect & Admitted): Promise<{ saved: true; rev: number; late?: string } | { conflict: any } | { marked: true } | string> {
+    const jw = opts.journal, admit = admitOf(opts.admit);
+    if (!journalWordOk(jw)) return BOARD_NOT_JOURNALED;
+    try {
+      await BOARD_JOURNAL_HOOK.beforeLock?.(ref, jw);
+      const p = await this.pathOf("board", ref);
+      if (!p) return "not saved: this board isn't in your files";
+      const out = await this.lockedFor(p, async () => {
+        // (its path read again holding the lock: where it is now, whatever moved it since)
+        const q = await this.pathOf("board", ref);
+        if (!q) return "not saved: this board isn't in your files";
+        await this.admitAt(admit, "write", "target", path(q));
+        const e = await this.mustStat(q);
+        if (e.kind !== "board" || e.ref !== ref) return "not saved: this board was moved while it was written: try again";
+        if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
+        if (e.remote) throw new WorkspaceError("invalid", `${e.path}'s content is synced in the next step: open it on the device that made it`);
+        const body = jw.markOnly ? null : stripBoard(doc ?? {});
+        if (body) this.checkBoard(body);
+        const t = this.now();
+        const r = await inTx(this.ws, ["boards", "meta"], "readwrite", async (tx) => {
+          const state = (await req(tx.objectStore("meta").get("journal"))) as JournalState | undefined;
+          if (state?.active !== true) return { refused: BOARD_NOT_JOURNAL_PHASE };
+          const st = tx.objectStore("boards"), cur: BoardRecord | undefined = await req(st.get(ref));
+          if (!cur) return { refused: `not saved: the contents of ${e.path} are not in this browser` };
+          if (jw.markOnly) {
+            if (!hasEnvelope(cur) || cur.unjournaled) return { marked: true as const };
+            if (cur.hash !== jw.hash) return { refused: BOARD_MARK_CHANGED };
+            st.put({ ...cur, unjournaled: true as const });
+            return { marked: true as const };
+          }
+          if (doc?.baseRev !== undefined && cur.rev !== doc.baseRev) return { conflict: boardRecordOf(cur) };
+          const have = hasEnvelope(cur) ? (cur.j as number) : 0, j = jw.keep ? have : (jw.j as number);
+          if (have > j) return { conflict: boardRecordOf(cur) };
+          // (a pure stamp, derived here, never from the caller: an OLD-STYLE row's own value again, with no tag given
+          // (recovery's T2 of a row from before the journal): its tag kept, and `stampOf` the revision whose value it
+          // wraps (so rev === stampOf + 1), for the load's bridge; any other T2 writes its own tag, or none, and no
+          // stampOf)
+          const stamp = !hasEnvelope(cur) && !opts.tag && canonJson(stripBoard(cur.doc ?? {})) === canonJson(body);
+          const { tag: _t, ...rest } = plainRow(cur);
+          const tag = stamp ? cur.tag : opts.tag;
+          st.put({ ...rest, doc: body!, rev: cur.rev + 1, updated: t, ...(tag ? { tag } : {}), j, hash: jw.hash, ...(jw.unjournaled ? { unjournaled: jw.unjournaled } : {}), ...(stamp ? { stampOf: cur.rev } : {}) });
+          return { rev: cur.rev + 1 };
+        });
+        if ("refused" in r) return r.refused as string;
+        if (!("rev" in r)) return r;
+        // (the entry and the op, as write's; the board's T2 is kept whatever happens here: said, never refused)
+        let late: string | undefined;
+        try {
+          await BOARD_JOURNAL_HOOK.afterBoards?.(ref);
+          const ops: Op[] = [];
+          await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+            await fenceCheck(tx, [e.path]);
+            const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
+            if (!cur || cur.ref !== e.ref) throw new WorkspaceError("conflict", `${e.path} was moved while it was written`);
+            const next: Entry = { ...cur, updated: t };
+            delete next.missing;
+            st.put(next);
+            await this.log(tx, ops, { op: "write", path: e.path, kind: e.kind }, next);
+          });
+          this.tell({ ops });
+        } catch (err) { late = String((err as Error)?.message ?? err); }
+        return { saved: true as const, rev: r.rev, ...(late ? { late } : {}) };
+      }, undefined, sinkOf(opts.collect));
+      if (typeof out === "object" && "saved" in out) this.askToKeep();
+      return out;
+    } catch (err) {
+      if (err instanceof WorkspaceError) return `not saved: ${err.message}`;
+      throw err;
+    }
   }
 
   /** A data file's new bytes (its entry migrated first, holding the lock):
@@ -1744,6 +1884,11 @@ export class Workspace {
   /** What this browser's workspace holds, for the Storage panel (§6.3):
    * notebooks and boards (how many), data files (how many, their bytes),
    * old versions, and Trash (its entries, and its data files' bytes). */
+  /** How many entries the workspace holds: the logical count room() checks against maxEntries (every entry once,
+   * staged ones too, no control row).  For a caller's preflight, as the shell's cp -r (plan-bash-shell r3 §3.4). */
+  async entryCount(): Promise<number> {
+    return inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).count());
+  }
   async usage(): Promise<{ documents: number; files: { count: number; bytes: number }; versions: { count: number; bytes: number; maxId: number }; trash: { count: number; bytes: number }; migration: { left: number }; lookalikes: string[][]; lookalikesMore: { groups: number; members: number } }> {
     const all = await inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).all());
     const out = { documents: 0, files: { count: 0, bytes: 0 }, versions: await this.versionsUsage("/"), trash: { count: 0, bytes: 0 }, migration: { left: 0 }, lookalikes: [] as string[][], lookalikesMore: { groups: 0, members: 0 } };
@@ -1871,7 +2016,8 @@ export class Workspace {
           await inTx(this.ws, "boards", "readwrite", async (tx) => { tx.objectStore("boards").delete(e.ref!); });
           // (its TimeTravel: by the board's source, "board:local:<id>", with its name in this browser after it)
           const pre = "board:local:" + e.ref;
-          if (bdb) await inTx(bdb, "history", "readwrite", async (tx) => { tx.objectStore("history").delete(IDBKeyRange.bound([pre, -Infinity], [pre + ":\uffff", Infinity])); });
+          // (and its journal's rows, keyed by the same name, the board journal's store's id)
+          if (bdb) await inTx(bdb, "history", "readwrite", async (tx) => { const st = tx.objectStore("history"); st.delete(IDBKeyRange.bound([pre, -Infinity], [pre + ":\uffff", Infinity])); await dropRows(st, pre); });
           // (and what the board page keeps of it in localStorage: the copy
           // from before the workspace, its mark as written here, a closed
           // page's changes; none of them bring it back, or vouch for a
@@ -1931,6 +2077,30 @@ export class Workspace {
   }
 
   // ------------------------------------------------------------ for the pages
+
+  /** Where the data file with this fid is now, read-only (for a page bound to a file by its id, which may have been
+   * moved since): exactly one live entry (not in Trash) with that fid, found through the index byIdent (every entry
+   * with it is read: none is left unseen) and checked at its path in the same read.  Otherwise why not: "none" (no
+   * such file, or not that one at its path), "trashed" (only in Trash), "ambiguous" (more than one live entry, never
+   * the first of them; or more than PATH_OF_FILE_MAX entries with that identity, which are not read).  Writes, moves
+   * and repairs nothing. */
+  async pathOfFile(fid: string): Promise<{ ok: true; path: string; entry: Entry } | { ok: false; why: "none" | "trashed" | "ambiguous" }> {
+    if (typeof fid !== "string" || fid === "") return { ok: false, why: "none" };
+    this.open();
+    return inTx(this.ws, "entries", "readonly", async (tx) => {
+      const v = await entriesOf(tx);
+      // (counted first: past the bound it fails closed, unread; under it, every entry with the identity is read)
+      const n = await v.byIdentCount(fid);
+      if (n > PATH_OF_FILE_MAX) return { ok: false, why: "ambiguous" } as const;
+      const all = (await v.byIdentAll(IDBKeyRange.only(fid))).filter((e) => e.kind === "file" && e.fid === fid);
+      const live = all.filter((e) => !e.trashed && !within(e.path, TRASH));
+      if (live.length > 1) return { ok: false, why: "ambiguous" } as const;
+      if (live.length === 0) return { ok: false, why: all.length ? "trashed" : "none" } as const;
+      const cur = await v.get(live[0].path);
+      if (!cur || cur.kind !== "file" || cur.fid !== fid || cur.trashed) return { ok: false, why: "none" } as const;
+      return { ok: true, path: cur.path, entry: cur } as const;
+    });
+  }
 
   /** The path of the entry naming these contents (a board's or notebook's id, a data file's key), or undefined. */
   async pathOf(kind: Exclude<Kind, "folder">, ref: string): Promise<string | undefined> {
@@ -2329,6 +2499,21 @@ export class Workspace {
     return e;
   }
 
+  /** The board journal's record of the board `ref` (its document, its revision and its
+   * envelope; web/board/journal.ts BoardRecordStore.loadRecord), or null: read under no lock, as a load reads. */
+  async journalRecord(ref: string): Promise<any> {
+    this.open();
+    const r: BoardRecord | undefined = await inTx(this.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").get(ref)));
+    return r ? boardRecordOf(r) : null;
+  }
+  /** The board `ref`'s row's provenance (BoardProvenance), or null: what the board journal's load bridge orders a
+   * pending copy by, read after the store's load settled the row (its rev then checked against the settled one). */
+  async boardProvenance(ref: string): Promise<BoardProvenance | null> {
+    this.open();
+    const r: BoardRecord | undefined = await inTx(this.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").get(ref)));
+    return r ? { rev: r.rev, ...(r.tag ? { tag: r.tag } : {}), ...(hasEnvelope(r) && Number.isSafeInteger(r.stampOf) && r.stampOf === r.rev - 1 ? { stampOf: r.stampOf } : {}) } : null;
+  }
+
   /** An entry's contents: a notebook's record, a board's record, a data file's bytes; undefined if not there. */
   async contents(e: Entry): Promise<any> {
     if (e.kind === "notebook") return this.mainTx("notebooks", "readonly", (st) => st.get(e.ref!));
@@ -2700,7 +2885,7 @@ export class Workspace {
    * wrote there since the read) kept as a file of its own, adopted in turn with its own hash.  Bytes larger than
    * LEGACY_MAX aren't moved: adopted marked unmoved, with their hash, as the migrator marks one (larger than
    * the 200 MiB file limit, so never synced).  Never a data file's op without its hash (CORR-9C2-2). */
-  async adopt(folder: string, base: string, ext: string, fields: Omit<Entry, "path" | "created" | "updated"> & { created?: number; updated?: number }, also: { at?: string; board?: BoardRecord; meta?: [string, unknown][]; dropMeta?: string[]; dropTrash?: string[]; bytes?: { bytes?: Uint8Array }; token?: Release; leaveOld?: boolean } = {}): Promise<Entry> {
+  async adopt(folder: string, base: string, ext: string, fields: Omit<Entry, "path" | "created" | "updated"> & { created?: number; updated?: number }, also: { at?: string; board?: PlainBoardRecord; meta?: [string, unknown][]; dropMeta?: string[]; dropTrash?: string[]; bytes?: { bytes?: Uint8Array }; token?: Release; leaveOld?: boolean } = {}): Promise<Entry> {
     // (with the entry, in its transaction: a board's record, records put in
     // or dropped from meta, bytes dropped from trash; all of it, or none)
     const ops: Op[] = [];
@@ -2741,7 +2926,8 @@ export class Workspace {
         if (!p) throw new WorkspaceError("limit", `no free name in ${folder}`);
         await fenceCheck(tx, [p]);
         if (also.at && (await req(st.getKey(also.at))) !== undefined) throw new WorkspaceError("exists", `${also.at} is there already`);
-        if (also.board) tx.objectStore("boards").put(also.board);
+        // (an old-style row whatever it was given: its envelope dropped)
+        if (also.board) tx.objectStore("boards").put(plainRow(also.board));
         for (const [k, v] of also.meta ?? []) tx.objectStore("meta").put(v, k);
         for (const k of also.dropMeta ?? []) tx.objectStore("meta").delete(k);
         for (const k of also.dropTrash ?? []) tx.objectStore("trash").delete(k);
@@ -3215,7 +3401,8 @@ export class Workspace {
     } else if (e.kind === "board") {
       await inTx(this.ws, "boards", "readwrite", async (tx) => {
         const st = tx.objectStore("boards"), rec: BoardRecord | undefined = await req(st.get(e.ref!));
-        if (rec && String(rec.doc?.title ?? "") === oldName) st.put({ ...rec, doc: { ...rec.doc, title: newName }, rev: rec.rev + 1, updated: this.now() });
+        // (an ordinary write: without the row's envelope)
+        if (rec && String(rec.doc?.title ?? "") === oldName) st.put({ ...plainRow(rec), doc: { ...rec.doc, title: newName }, rev: rec.rev + 1, updated: this.now() } satisfies PlainBoardRecord);
       });
     }
   }

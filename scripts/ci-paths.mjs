@@ -106,7 +106,7 @@ const enginePaths = [
 // file the job reads belongs here, with a case in test/ci-paths.test.ts.
 const cpythonPaths = [
   /^engine\//, /^lib\//, /^sage-tests\//, /^Cargo(?:\.lock|\.toml)$/,
-  /^scripts\/sync-python-package\.sh$/, /^scripts\/ci-cpus\.sh$/, /^test\/limit-sites\.json$/,
+  /^scripts\/sync-python-package\.sh$/, /^scripts\/ci-cpus\.sh$/, /^test\/limit-sites\.json$/, /^scripts\/clippy\//,
   /^web\/workspace\/schema\.json$/, /^web\/workspace\/paths\.ts$/,
 ];
 // The WebKit job's inputs (plan-kedlaya-webkit-ci r4: detection, the

@@ -534,6 +534,268 @@ async function purgeStatus(rid) {
   ok(row.n === 0 && sts.length === 2 && sts.every((s) => s === "done"), `a purge finishing with a tombstone present removes the account row: ${row.n} rows, ${JSON.stringify(sts)}`);
 }
 
+// ---- first uploads (plan-upload-leak r3): a share's collection is made by its first version's own
+// transaction, with its attempt's receipt; a failed upload leaves nothing, and a retry of the attempt
+// gets that share back (never another), or a refusal
+{
+  const { randomBytes } = await import("node:crypto");
+  // (accounts no block above uses)
+  const owner = (n) => `c0ffee0${n}-0000-4000-8000-00000000000${n}`;
+  const R = owner("1"), R2 = owner("2"), L = owner("3"), Q = owner("4"), D = owner("5"), P = owner("6");
+  for (const a of [R, R2, L, D, P]) fake.limits.set(a, { tier: "member", storage_bytes: 1_000_000, max_file_bytes: 50_000, private_links: false });
+  fake.limits.set(Q, { tier: "member", storage_bytes: 40, max_file_bytes: 50_000, private_links: false });
+  const rows = async (o) => (await db.prepare("SELECT COUNT(*) AS n FROM collections WHERE owner = ?1").bind(o).first()).n;
+  const receipts = async (o) => (await db.prepare("SELECT COUNT(*) AS n FROM upload_receipts WHERE owner = ?1").bind(o).first()).n;
+  const versions = async (cid) => (await db.prepare("SELECT COUNT(*) AS n FROM versions WHERE collection = ?1").bind(cid).first()).n;
+  const att = () => randomBytes(16).toString("hex");
+  const blob = async (c, path, text) => { const b = Buffer.from(text); await c.put(`/api/share/blob/${sha(b)}`, b); return { path, sha256: sha(b), size: b.length }; };
+  const first = (c, body) => c.post("/api/share/first-upload", body);
+  // (requests really at once: each held at CoCalc's limits, which a fresh cache asks for, then all let go
+  // together, so each passes its receipt check before any commits; without this the worker finishes one first)
+  const atOnce = async (who, reqs) => {
+    await db.prepare("DELETE FROM limits_cache WHERE account_id = ?1").bind(who).run();
+    let go;
+    fake.limitsGate = new Promise((res) => (go = res));
+    const out = reqs.map((f) => f());
+    await new Promise((res) => setTimeout(res, 300));
+    fake.limitsGate = null;
+    go();
+    return Promise.all(out);
+  };
+  const served = async (id, v) => { const r = await fetchSite(`/api/share/c/${id}${v ? `?at=${v}` : ""}`); return r.status === 200 ? (await r.json()).manifest.files.map((f) => f.path).sort().join() : r.status; };
+  const r = api((await signIn(R)).session);
+  const e1 = await blob(r, "a.txt", "first file"), e2 = await blob(r, "private.csv", "a private table"), e3 = await blob(r, "b.txt", "another file");
+
+  // S1
+  const a1 = att(), body1 = { title: "S1", license: "MIT", files: [e1, e2], attempt: a1 };
+  const s1 = await first(r, body1), j1 = await s1.json();
+  const rc1 = await db.prepare("SELECT state, version, collection FROM upload_receipts WHERE owner = ?1").bind(R).first();
+  const latest1 = (await db.prepare("SELECT latest FROM collections WHERE id = ?1").bind(j1.collection).first())?.latest;
+  ok(s1.status === 201 && j1.url === `/s/${j1.collection}` && latest1 === j1.version && (await rows(R)) === 1 && rc1?.state === "committed" && rc1.version === j1.version && rc1.collection === j1.collection && (await served(j1.collection)) === "a.txt,private.csv",
+    "S1 a first upload in one request: 201, one collection whose latest is its version, one committed receipt naming both: " + s1.status);
+
+  // S2: every failure leaves no collection and no receipt
+  {
+    const c = api((await signIn(R2)).session);
+    const f = await blob(c, "x.txt", "R2's file");
+    const codes = [];
+    codes.push((await first(c, { title: "t", files: [{ ...f, path: "../x" }], attempt: att() })).status);
+    codes.push((await first(c, { title: "t", files: [{ path: "y", sha256: sha("never uploaded"), size: 14 }], attempt: att() })).status);
+    codes.push((await first(c, { title: "t", files: [f], attempt: "not-hex" })).status);
+    codes.push((await first(c, { title: "t", files: [f] })).status);
+    codes.push((await first(c, { title: " ", files: [f], attempt: att() })).status);
+    codes.push((await first(c, { title: "t", files: [f], attempt: att(), license: "not a license!" })).status);
+    const q = api((await signIn(Q)).session);
+    const fq = await blob(q, "q.txt", "x".repeat(30));
+    codes.push((await first(q, { title: "a title long enough to be over", files: [fq], attempt: att() })).status);
+    fake.limits.delete(R2);
+    await db.prepare("DELETE FROM limits_cache WHERE account_id = ?1").bind(R2).run();
+    codes.push((await first(c, { title: "t", files: [f], attempt: att() })).status);
+    fake.limits.set(R2, { tier: "member", storage_bytes: 1_000_000, max_file_bytes: 50_000, private_links: false });
+    ok(codes.join() === "400,409,400,400,400,400,413,403" && (await rows(R2)) + (await receipts(R2)) + (await rows(Q)) + (await receipts(Q)) === 0,
+      "S2 a bad entry, a file not uploaded, a bad or missing attempt, no title, a bad license, a manifest over quota, no limits: refused, leaving no collection and no receipt: " + codes.join());
+  }
+
+  // S3: the collection limit inside the transaction
+  {
+    const c = api((await signIn(L)).session);
+    const f = await blob(c, "l.txt", "L's file");
+    const t = Math.floor(Date.now() / 1000);
+    await db.prepare("INSERT INTO collections (id, owner, title, created, updated) SELECT printf('l%011d', value), ?1, 'seed', ?2, ?2 FROM json_each(?3)").bind(L, t, JSON.stringify([...Array(999).keys()])).run();
+    const both = await atOnce(L, [() => first(c, { title: "x", files: [f], attempt: att() }), () => first(c, { title: "y", files: [f], attempt: att() })]);
+    const st = both.map((x) => x.status).sort().join();
+    const after = await rows(L);
+    const third = (await first(c, { title: "z", files: [f], attempt: att() })).status;
+    ok(st === "201,403" && after === 1000 && third === 403 && (await rows(L)) === 1000 && (await receipts(L)) === 1, `S3 at 999 collections, two first uploads at once: one made, one refused (${st}), 1000 collections; at 1000, refused (${third})`);
+  }
+
+  // S4: replays
+  {
+    const v1 = j1.version, c1 = j1.collection;
+    const again = await first(r, body1), ja = await again.json();
+    ok(again.status === 200 && ja.version === v1 && ja.collection === c1 && (await rows(R)) === 1 && (await versions(c1)) === 1, "S4a a lost response, then the same request: 200 with the receipt's version, still one collection and one version: " + again.status);
+    const changed = [{ ...body1, files: [e1] }, { ...body1, files: [e1, e2, e3] }, { ...body1, title: "S1 renamed" }, { ...body1, license: "CC0-1.0" }, { ...body1, license: undefined }];
+    const res = [];
+    for (const b of changed) { const x = await first(r, b); const j = await x.json(); res.push(x.status === 409 && j.error === "attempt_used" && j.collection === c1 && j.version === v1); }
+    ok(res.every(Boolean) && (await rows(R)) === 1 && (await versions(c1)) === 1 && (await served(c1)) === "a.txt,private.csv", "S4b the same attempt with other files, title or license: 409 attempt_used naming the first share, nothing written, and the share still holds the first request's files: " + res.join());
+    const a2 = att();
+    const race = await atOnce(R, [() => first(r, { title: "S4c", files: [e1], attempt: a2 }), () => first(r, { title: "S4c", files: [e3], attempt: a2 })]);
+    const rj = await Promise.all(race.map((x) => x.json()));
+    const win = rj.find((_, i) => race[i].status === 201), lose = rj.find((_, i) => race[i].status === 409);
+    ok(race.map((x) => x.status).sort().join() === "201,409" && lose?.error === "attempt_used" && lose.version === win?.version && (await served(win.collection)) === (race[0].status === 201 ? "a.txt" : "b.txt") && (await rows(R)) === 2,
+      "S4c one attempt, two payloads at once: one 201, one 409 naming the winner's version, and the share holds the winner's files: " + race.map((x) => x.status).join());
+    const a3 = att();
+    const twins = await atOnce(R, [() => first(r, { title: "S4d", files: [e3], attempt: a3 }), () => first(r, { title: "S4d", files: [e3], attempt: a3 })]);
+    const tj = await Promise.all(twins.map((x) => x.json()));
+    ok(twins.map((x) => x.status).sort().join() === "200,201" && tj[0].version === tj[1].version && tj[0].collection === tj[1].collection && (await rows(R)) === 3, "S4d one attempt, the same payload at once: one 201 and one 200, naming the same version: " + twins.map((x) => x.status).join());
+    const v2 = await r.post(`/api/share/collections/${c1}/versions`, { files: [e1, e3] });
+    const v2j = await v2.json();
+    const late = await first(r, body1), lj = await late.json();
+    ok(v2.status === 201 && v2j.version !== v1 && late.status === 200 && lj.version === v1 && (await served(c1, lj.version)) === "a.txt,private.csv", "S4e a replay after another version became latest: 200 with the first version, not the latest");
+    const o = api((await signIn(R2)).session);
+    const eo = await blob(o, "a.txt", "first file");
+    const other = await first(o, { ...body1, files: [eo, await blob(o, "private.csv", "a private table")] });
+    const oj = await other.json();
+    ok(other.status === 201 && oj.collection !== c1 && (await rows(R2)) === 1 && (await versions(c1)) === 2, "S4f the same attempt from another account: its own share, the first untouched");
+    const extra = await first(r, { ...body1, unknown: "anything" });
+    ok(extra.status === 200 && (await extra.json()).version === v1, "S5g the digest is the manifest's fields only: an unknown extra property changes nothing (200)");
+  }
+
+  // S5: deletion retires
+  {
+    const a4 = att(), b4 = { title: "S5", files: [e1], attempt: a4 };
+    const j4 = await (await first(r, b4)).json();
+    ok((await r.del(`/api/share/collections/${j4.collection}`)).status === 200, "(S5 the share is deleted)");
+    const re = await first(r, b4);
+    const st4 = (await db.prepare("SELECT state FROM upload_receipts WHERE owner = ?1 AND collection = ?2").bind(R, j4.collection).first())?.state;
+    ok(re.status === 410 && (await re.json()).error === "attempt_retired" && (await served(j4.collection)) === 404 && st4 === "retired" && !(await db.prepare("SELECT 1 AS x FROM collections WHERE id = ?1").bind(j4.collection).first()),
+      "S5a a lost response, a deletion, then the replay: 410 attempt_retired, the old link still 404, the receipt retired");
+    let raced = 0;
+    for (let i = 0; i < 20; i++) {
+      const a = att(), b = { title: "race", files: [e1], attempt: a };
+      const j = await (await first(r, b)).json();
+      await Promise.all([first(r, b), r.del(`/api/share/collections/${j.collection}`)]);
+      const after = await first(r, b);
+      const gone = !(await db.prepare("SELECT 1 AS x FROM collections WHERE id = ?1").bind(j.collection).first()) && (await served(j.collection)) === 404;
+      const st = (await db.prepare("SELECT state FROM upload_receipts WHERE owner = ?1 AND collection = ?2").bind(R, j.collection).first())?.state;
+      if (gone && st === "retired" && after.status === 410) raced++;
+    }
+    ok(raced === 20, `S5b a replay racing the deletion (20 times): after both settle, no collection, the link 404 and the receipt retired; a replay started after it gets 410 (${raced}/20)`);
+    const d = api((await signIn(D)).session);
+    const ed = await blob(d, "d.txt", "D's file");
+    const bd = { title: "D", files: [ed], attempt: att() };
+    ok((await first(d, bd)).status === 201, "(S5c D shares)");
+    const del = await d.post("/api/share/delete-everything", { confirm: "delete" });
+    for (let i = 0; i < 50 && (await db.prepare("SELECT 1 AS x FROM accounts WHERE account_id = ?1 AND deleting IS NOT NULL").bind(D).first()); i++) { await tick(); await new Promise((res) => setTimeout(res, 50)); }
+    const d2 = api((await signIn(D)).session);
+    const ed2 = await blob(d2, "d.txt", "D's file");
+    const rd = await first(d2, { ...bd, files: [ed2] });
+    ok(del.status === 200 && rd.status === 410 && (await rows(D)) === 0, "S5c after deleting everything and signing in again, an old attempt gets 410, not a new share: " + rd.status);
+    const p = api((await signIn(P)).session);
+    const ep = await blob(p, "p.txt", "P's file");
+    ok((await first(p, { title: "P", files: [ep], attempt: att() })).status === 201 && (await receipts(P)) === 1, "(S5d P shares)");
+    ok((await adminPurge(P, "9b2d6c1e-0000-4000-8000-0000000000c5")).status === 202, "(S5d CoCalc purges P)");
+    for (let i = 0; i < 50 && (await receipts(P)); i++) await new Promise((res) => setTimeout(res, 50));
+    ok((await receipts(P)) === 0, "S5d an account deleted in CoCalc: its receipts go with it");
+    await db.prepare("UPDATE upload_receipts SET retired = retired - 31 * 86400 WHERE owner = ?1 AND collection = ?2").bind(R, j4.collection).run();
+    await tick();
+    const left = await db.prepare("SELECT COUNT(*) AS n FROM upload_receipts WHERE owner = ?1 AND collection = ?2").bind(R, j4.collection).first();
+    const anew = await first(r, b4), jn = await anew.json();
+    ok(left.n === 0 && anew.status === 201 && jn.collection !== j4.collection && (await served(j4.collection)) === 404, "S5e a retired receipt goes after 30 days; a request carrying its attempt then makes a new share, with a new id, and the deleted link stays dead");
+  }
+
+  // S6: the older page's form still works, and still leaves an empty collection when its upload fails (the known leak, until it is removed)
+  {
+    const c = api((await signIn(R2)).session);
+    const before = await rows(R2);
+    const legacy = await (await c.post("/api/share/collections", { title: "legacy" })).json();
+    const f = await blob(c, "l.txt", "legacy file");
+    const v = await c.post(`/api/share/collections/${legacy.id}/versions`, { files: [f] });
+    const failed = await (await c.post("/api/share/collections", { title: "legacy, failed" })).json();
+    const empty = await db.prepare("SELECT latest FROM collections WHERE id = ?1").bind(failed.id).first();
+    ok(v.status === 201 && (await rows(R2)) === before + 2 && empty && empty.latest === null, "S6 the older {title} form: create then commit works; one never committed stays an empty collection (the known leak)");
+    // (the older form's path never takes a first upload's form for a {title}: no empty collection from it)
+    const n = await rows(R2);
+    const wrong = await c.post("/api/share/collections", { title: "t", files: [f], attempt: att() });
+    ok(wrong.status === 400 && (await rows(R2)) === n, "S6 a first upload's form sent to the older path is refused (400), making no collection: " + wrong.status);
+  }
+
+  // S9 (daybreak3's S1): deleted shares' receipts are bounded per account, however fast shares are made and deleted
+  {
+    const X = owner("7");
+    fake.limits.set(X, { tier: "member", storage_bytes: 1_000_000, max_file_bytes: 50_000, private_links: false });
+    const c = api((await signIn(X)).session);
+    const t = Math.floor(Date.now() / 1000);
+    // (1200 older deletions, seeded: more than the account keeps)
+    await db.prepare("INSERT INTO upload_receipts (owner, attempt_hash, request_digest, collection, version, state, created, retired) SELECT ?1, printf('h%06d', value), 'd', printf('x%011d', value), 'v', 'retired', ?2, ?2 + value FROM json_each(?3)").bind(X, t - 3600, JSON.stringify([...Array(1200).keys()])).run();
+    const f = await blob(c, "x.txt", "X's file");
+    const j = await (await first(c, { title: "X", files: [f], attempt: att() })).json();
+    ok((await c.del(`/api/share/collections/${j.collection}`)).status === 200, "(S9 X deletes a share)");
+    const kept = await db.prepare("SELECT COUNT(*) AS n, SUM(collection = ?2) AS mine, MIN(retired) AS oldest FROM upload_receipts WHERE owner = ?1 AND state = 'retired'").bind(X, j.collection).first();
+    ok(kept.n === 1000 && kept.mine === 1 && kept.oldest === t - 3600 + 201, `S9 at most 1000 deleted shares' receipts per account, the newest (the one just deleted included): ${JSON.stringify(kept)}`);
+  }
+  // S10: a backlog past its days, larger than a page, drains over scheduled runs; younger receipts stay
+  {
+    const t = Math.floor(Date.now() / 1000);
+    const ids = JSON.stringify([...Array(12_000).keys()]);
+    await db.prepare("INSERT INTO upload_receipts (owner, attempt_hash, request_digest, collection, version, state, created, retired) SELECT 'old-' || (value % 3), printf('a%06d', value), 'd', printf('y%011d', value), 'v', 'retired', ?1, ?1 FROM json_each(?2)").bind(t - 31 * 86400, ids).run();
+    await db.prepare("INSERT INTO upload_receipts (owner, attempt_hash, request_digest, collection, version, state, created, retired) SELECT 'old-0', printf('b%06d', value), 'd', printf('z%011d', value), 'v', 'retired', ?1, ?1 FROM json_each(?2)").bind(t - 86400, JSON.stringify([0, 1, 2, 3, 4])).run();
+    const aged = async () => (await db.prepare("SELECT COUNT(*) AS n FROM upload_receipts WHERE owner LIKE 'old-%' AND retired < ?1").bind(t - 30 * 86400).first()).n;
+    const a0 = await aged();
+    await tick();
+    const a1 = await aged();
+    await tick();
+    const a2 = await aged();
+    const young = (await db.prepare("SELECT COUNT(*) AS n FROM upload_receipts WHERE owner = 'old-0' AND retired >= ?1").bind(t - 30 * 86400).first()).n;
+    ok(a0 === 12_000 && a1 === 2000 && a2 === 0 && young === 5, `S10 12,000 receipts past their days: 10,000 removed by one run (20 pages of 500), the rest by the next; 5 younger ones stay (${a0} -> ${a1} -> ${a2}, young ${young})`);
+  }
+
+  // S11 (daybreak3's S2): a Worker rolled back to before this change (b06b01b7's share server, from git history),
+  // and this change's page client (uploadCollection, bundled as the page is): the upload fails, and the old server
+  // never makes an empty collection, as nothing reaches the path that would.  Without that history (a shallow
+  // clone, as in CI) it is skipped, saying so; test-upload.mjs's U5 checks the same against the old routes' answers.
+  {
+    let dir = null;
+    try {
+      execFileSync("git", ["cat-file", "-e", "b06b01b7^{commit}"], { cwd: here, stdio: "ignore" });
+      const { mkdtempSync, writeFileSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      dir = mkdtempSync(join(tmpdir(), "share-old-"));
+      for (const f of ["server.ts", "files.ts", "test-entry.ts"]) writeFileSync(join(dir, f), execFileSync("git", ["show", `b06b01b7:web/share/${f}`], { cwd: here }));
+    } catch { dir = null; }
+    // (and only with this change's page client: in a two-phase rollout's first phase, the page is still the older one)
+    const newClient = readFileSync(join(here, "../share-client/upload.ts"), "utf8").includes("/api/share/first-upload");
+    if (!newClient) console.log("SKIP S11: the page client here predates /api/share/first-upload (the rollout's server-first phase)");
+    else if (!dir) console.log("SKIP S11: no git history for b06b01b7 here (a shallow clone); U5 in test-upload.mjs covers the client against the old routes");
+    else {
+      const oldScript = execFileSync("bun", ["build", join(dir, "test-entry.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
+      const m3 = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "old-share", modules: true, script: oldScript, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"], bindings, outboundService: cocalc }] }));
+      const d3 = await m3.getD1Database("SHARE_DB");
+      for (const m of readdirSync(join(here, "migrations")).filter((f) => f.endsWith(".sql") && f < "0005").sort())
+        for (const st of readFileSync(join(here, "migrations", m), "utf8").replace(/--.*$/gm, "").split(";").map((x) => x.trim()).filter(Boolean)) await d3.prepare(st).run();
+      const O = owner("8");
+      fake.limits.set(O, { tier: "member", storage_bytes: 1_000_000, max_file_bytes: 50_000, private_links: false });
+      const dev = await m3.dispatchFetch(SITE + "/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "dev-token", account_id: O }) });
+      const cookie = (dev.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
+      const clientSrc = execFileSync("bun", ["build", join(here, "../share-client/upload.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
+      const { uploadCollection } = await import("data:text/javascript;base64," + Buffer.from(clientSrc).toString("base64"));
+      const realFetch = globalThis.fetch, realLocation = globalThis.location;
+      const paths = [];
+      globalThis.location = { href: SITE + "/" };
+      globalThis.fetch = async (u, init = {}) => { const url = new URL(String(u), SITE); paths.push(`${init.method ?? "GET"} ${url.pathname}`); return m3.dispatchFetch(url.href, { ...init, headers: { ...(init.headers ?? {}), cookie, origin: SITE } }); };
+      let e = null;
+      try { await uploadCollection({ id: null, attempt: "0".repeat(31) + "1", title: "rolled back", files: [{ path: "a.txt", size: 5, read: async () => new TextEncoder().encode("hello") }] }); } catch (x) { e = x; }
+      globalThis.fetch = realFetch;
+      globalThis.location = realLocation;
+      const n = (await d3.prepare("SELECT COUNT(*) AS n FROM collections WHERE owner = ?1").bind(O).first()).n;
+      await m3.dispose();
+      ok(dev.status === 200 && !!cookie && e instanceof Error && n === 0 && !paths.includes("POST /api/share/collections") && paths.includes("POST /api/share/first-upload"), `S11 this page's client against b06b01b7's server (a rolled-back Worker): the upload fails (${e?.message}), and no collection is made (${n}); requests: ${paths.join(", ")}`);
+    }
+  }
+
+  // S7: migration 0005, as the post-check reads it
+  {
+    const objs = (await db.prepare("SELECT type, name, tbl_name FROM sqlite_master WHERE name IN ('upload_receipts', 'upload_receipts_collection', 'upload_receipts_retired', 'collections_empty') ORDER BY name").all()).results.map((o) => `${o.type} ${o.name} ${o.tbl_name}`);
+    const cols = (await db.prepare("PRAGMA table_info(upload_receipts)").all()).results;
+    const colsOk = cols.map((c) => c.name).join() === "owner,attempt_hash,request_digest,collection,version,state,created,retired" && cols.slice(0, 7).every((c) => c.notnull === 1) && cols[7].notnull === 0 && cols[0].pk === 1 && cols[1].pk === 2;
+    const ix = (await db.prepare("PRAGMA index_list(upload_receipts)").all()).results.map((i) => `${i.name}:${i.origin}:${i.partial}`).sort();
+    const cx = (await db.prepare("PRAGMA index_list(collections)").all()).results.map((i) => `${i.name}:${i.origin}`).sort();
+    ok(objs.join() === "table upload_receipts upload_receipts,index upload_receipts_collection upload_receipts,index upload_receipts_retired upload_receipts" && colsOk && ix.join() === "sqlite_autoindex_upload_receipts_1:pk:0,upload_receipts_collection:c:0,upload_receipts_retired:c:1" && cx.join() === "collections_owner:c,sqlite_autoindex_collections_1:pk",
+      "S7a 0005's post-check: the table and its 2 indexes, its columns and key, and collections' indexes unchanged: " + JSON.stringify({ objs, ix, cx }));
+    const { Miniflare: M2 } = require("miniflare");
+    const m2 = new M2(convertV4MiniflareOptions({ workers: [{ name: "m", modules: true, script: "export default { fetch() { return new Response(null, { status: 404 }); } }", compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"] }] }));
+    const d2 = await m2.getD1Database("SHARE_DB");
+    const run = async (m) => { for (const s of readFileSync(join(here, "migrations", m), "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await d2.prepare(s).run(); };
+    for (const m of readdirSync(join(here, "migrations")).filter((f) => f.endsWith(".sql") && f < "0005").sort()) await run(m);
+    await d2.prepare("INSERT INTO collections (id, owner, title, created, updated, latest) VALUES ('aaaaaaaaaaaa', 'o', 't', 1, 2, 'h'), ('bbbbbbbbbbbb', 'o', 'u', 3, 4, NULL)").run();
+    const before = JSON.stringify((await d2.prepare("SELECT * FROM collections ORDER BY id").all()).results);
+    await run("0005_upload_receipts.sql");
+    const after = JSON.stringify((await d2.prepare("SELECT * FROM collections ORDER BY id").all()).results);
+    await m2.dispose();
+    ok(before === after && before.includes("bbbbbbbbbbbb"), "S7b a database at 0004 with collections, then 0005: the collections are unchanged");
+  }
+}
+
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);
 process.exit(failures ? 1 : 0);
