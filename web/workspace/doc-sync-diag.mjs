@@ -7,14 +7,14 @@
 //   line, everything after a credential-like key (quoted, JSON-escaped, HTML- or %-encoded, any case: cookie,
 //   authorization, session, token, secret, password, auth, bearer, credential, api key, sid, jwt, signature), a bearer
 //   or basic value to the end of its line, a URL's userinfo, every query and fragment (absolute http/https/ws/wss,
-//   relative, %- or entity-encoded) to the end of its line (r5, astra's R4-A1: never stopping at a quote or a
+//   relative, %- or entity-encoded) to the end of its line (never stopping at a quote or a
 //   backslash), and every opaque run of 24 or more token characters; control characters become spaces; lines are
 //   joined with " | ".  scrub() is idempotent on its own output, and every structured line passes it unchanged (no
 //   "#", no key, no query), so `--filter` can scrub everything again.
 // Nothing is printed raw.  `bun doc-sync-diag.mjs --controls` (the VM run's pre-step) sends sentinel secrets in each of
 // those forms and harmless method/path lines through these same emitters to stdout, then checks what they printed;
 // the VM judge checks the whole run.log too (no sentinel anywhere, every harmless marker kept).
-// r5 (daybreak3's R4-D3-1): every output of test-doc-sync.mjs is one of the formatters below (it has no console.* of
+// Every output of test-doc-sync.mjs is one of the formatters below (it has no console.* of
 // its own): the aggregate failures with the page errors, the SHOW lines, the ok line, a step, the deadline, the outer
 // catch, the bundle-build, harness-import and enable failures, a census hook's failure; and guardConsole() sends any
 // in-process console call (the reference server's warns, the cloud harness's JavaScript) through scrub().  The
@@ -34,7 +34,7 @@ const safePrefix = (p) => word(p, /^[A-Za-z0-9 :_'-]{0,48}$/, "?: ");
 // (the page's turn-on phases (test-doc-sync.page.js's T.turnOn), each "<name> (<n> ms)"; anything else is "?")
 const PHASES = new Set(["panel made", "its Turn on sync button shown", "clicked", "the holder, synced", "the wait for the holder, synced, ended without it"]);
 const phase = (s) => { const m = /^(.*) \((\d{1,9}) ms\)$/.exec(String(s)); return m && PHASES.has(m[1]) ? `${m[1]} (${m[2]} ms)` : "?"; };
-// (r17, item 3's case 14 under cloud: the network receipts of the relay control (case R) and case 14, every field
+// (case 14 under cloud: the network receipts of the relay control (case R) and case 14, every field
 // allow-listed, and no printed token 24 characters or longer, so neither scrub() nor --filter changes a line: a net::
 // code is printed as its words ("ERR INCOMPLETE CHUNKED ENCODING"), a sha256 as four 16-hex groups)
 const pageWord = (p) => word(p, /^(D1|D2|R)$/, "other");
@@ -51,10 +51,10 @@ const netCode = (c) => { const m = /^net::(ERR(?:_[A-Z0-9]{1,23}){1,8})$/.exec(S
 const shaGroups = (h) => (/^[0-9a-f]{64}$/.test(String(h)) ? String(h).match(/.{16}/g).join(" ") : "?");
 const STAGE = /^(fetch-rejected|fetched|body-read-failed|json-parse-failed|parsed)$/;
 const stageDetail = (d) => (d === undefined ? "" : " " + (typeof d === "number" ? int(d) : word(d, /^[A-Za-z]{1,40}$/, "other")));
-// (r17a, I3R17R2-C1: case R's R4.  The relay control's pairs, the k-th old call with the k-th new one (case R issues
+// (case R's R4.  The relay control's pairs, the k-th old call with the k-th new one (case R issues
 // them in that order, old then new, k = 1..n), are its comparison groups: each member must have EXACTLY ONE upstream
 // receipt, of its own route, status 200, its transport tuple (te, ce, mfce as known words; content-length absent or its
-// value, 1 to 10 digits (r17b, I3R17A-C1: the declared length is compared, not only its presence)) without an "other",
+// value, 1 to 10 digits (the declared length is compared, not only its presence)) without an "other",
 // and a byte receipt (not failed); the two
 // members' tuples must be equal and their bytes the same (length and sha256); under cloud the tuple must carry a
 // transport header (te, ce or mfce), under the reference server none.  Anything else fails the group, with its word.)
@@ -95,7 +95,7 @@ const KEYED = new RegExp(String.raw`(^|[^A-Za-z0-9])(${QUOTE}${KEY}${QUOTE}${SEP
 /** Free text, made safe to print: see the header.  At most `n` characters. */
 export function scrub(text, n = 300) {
   const lines = String(text ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split(/\r\n|\r|\n|\u2028|\u2029|\\r\\n|\\n|\\r/);
-  // (r5: the rules apply to the lines joined, so a redaction runs to the end of the text, across the lines after it,
+  // (the rules apply to the lines joined, so a redaction runs to the end of the text, across the lines after it,
   // and scrub(scrub(x)) is scrub(x): --filter's second pass changes nothing it printed)
   const r = rules(lines.join(" | "));
   // (cut to n, then the rules once more: a cut through a marker ("<redac") is made whole again, never half a value)
@@ -149,7 +149,7 @@ export const emit = {
   counts: (prefix, open, sockets, requests) => out(safePrefix(prefix) + `sockets open: ${open.map(int).join(" ") || "none"} of ${int(sockets)}; sync requests ${int(requests)}`),
   /** The last n structured front lines, as they were printed. */
   recent: (prefix, n = 60) => { const r = recent.slice(-n); out(safePrefix(prefix) + `the front's last ${r.length} line(s):`); for (const s of r) out(safePrefix(prefix) + "  " + s); },
-  // ---- r5: every other output of test-doc-sync.mjs
+  // ---- every other output of test-doc-sync.mjs
   /** A step: its time and name (scrubbed). */
   step: (secs, what) => out(`step ${Number.isFinite(secs) ? secs.toFixed(1) : "?"}s: ${scrub(what, 120)}`),
   /** A census hook that failed: its checkpoint name and exit status. */
@@ -174,7 +174,7 @@ export const emit = {
   harnessFail: (e) => err("FAIL: SERVER=cloud needs cloud's web/sync/test-harness.mjs (run under cloud's scripts/with-core.sh): " + scrub(e?.message ?? arg(e), 600)),
   /** The account's enable didn't answer active: its answer, scrubbed. */
   enableFail: (answer) => err("FAIL: enable: " + scrub(arg(answer), 600)),
-  // ---- r17: the relay control's and case 14's network receipts (see the helpers above)
+  // ---- the relay control's and case 14's network receipts (see the helpers above)
   /** At the front, before any relay: the upstream answer's status and transport headers, for a traced call and route. */
   upHdrs: (call, route, status, h) => front(`up-hdrs ${callId(call)} ${routeWord(route)} ${int(status)} ${hdrs(h)}`),
   /** The front's byte receipt for one relayed answer: its length and sha256. */
@@ -203,7 +203,7 @@ export function guardConsole() {
 }
 
 // ---- the controls (the VM run's pre-step): sentinels through the emitters above, checked
-// (r17a: pairCheck's controls, case R's R4 rule on fixed receipts: a matched cloud group and a matched reference group
+// (pairCheck's controls, case R's R4 rule on fixed receipts: a matched cloud group and a matched reference group
 // pass; each way a group can be incomplete, duplicated, unmatched or unknown fails, with its word)
 function pairControls() {
   const A = "a".repeat(64), B = "b".repeat(64);
@@ -213,11 +213,11 @@ function pairControls() {
   const three = (p) => [pair(CH), p, pair(CH)];
   const fails = (name, pairs, cloud, want) => {
     const r = pairCheck(pairs, cloud, 3);
-    return [`r17a pairs: ${name} fails (${want})`, !r.ok && r.words.some((w) => w === want)];
+    return [`pair rule: ${name} fails (${want})`, !r.ok && r.words.some((w) => w === want)];
   };
   return [
-    ["r17a pairs: three matched cloud groups pass", pairCheck([pair(CH), pair(CH), pair(CH)], true, 3).ok],
-    ["r17a pairs: three matched reference groups pass", pairCheck([pair(PL), pair(PL), pair(PL)], false, 3).ok],
+    ["pair rule: three matched cloud groups pass", pairCheck([pair(CH), pair(CH), pair(CH)], true, 3).ok],
+    ["pair rule: three matched reference groups pass", pairCheck([pair(PL), pair(PL), pair(PL)], false, 3).ok],
     fails("an unmatched receipt (old chunked, new not)", three(pair(CH, {}, m("new", PL))), true, "unmatched"),
     fails("a new-header-only mutation (only the new answer loses mf-content-encoding)", three(pair(CH, {}, m("new", { ...CH, mfce: null }))), true, "unmatched"),
     fails("a new-header-only mutation under the reference server (only the new answer chunked)", [pair(PL), pair(PL, {}, m("new", { ...PL, te: "chunked" })), pair(PL)], false, "unmatched"),
@@ -240,7 +240,7 @@ function pairControls() {
 function controls() {
   // (each sentinel is made here, never written whole in this file; the judge looks for its stem in the whole run.log)
   const S = (i) => ["SN", "TL", String(i).padStart(2, "0")].join("");
-  // (r17: a full sha256's shape, 64 hex, for the byte receipts)
+  // (a full sha256's shape, 64 hex, for the byte receipts)
   const SHA17 = "0123456789abcdef".repeat(4);
   const fixtures = [
     `KEEP-01 cookie: __Host-sb_session=${S(1)}; theme=${S(2)}`,
@@ -264,7 +264,7 @@ function controls() {
     `KEEP-12 first\\nX-Auth-Token: ${S(31)}\\r\\nafter an escaped newline (redacted too)`,
     `KEEP-22 the panel says Turn on sync? then Sync turned on (200 ms)`,
   ];
-  // (r5, R4-A1: quoted query and fragment values, plain and as said/warnings are printed: J of an array of strings)
+  // (quoted query and fragment values, plain and as said/warnings are printed: J of an array of strings)
   const quoted = [
     `KEEP-36 wss://host/api?x='${S(60)}' tail`,
     `KEEP-37 https://host/a?x="${S(61)}" tail`,
@@ -276,7 +276,7 @@ function controls() {
   const printed = [];
   tap = printed;
   const restore = guardConsole();
-  // (r5: each formatter and the guarded console, with the shapes test-doc-sync hands them)
+  // (each formatter and the guarded console, with the shapes test-doc-sync hands them)
   const results = [
     [true, "1: a passing check KEEP-23"],
     [false, `14: the case stopped: KEEP-24 D1: {"exceptionDetails":{"text":"Uncaught","exception":{"description":"Error: GET wss://h/api/sync?sid=${S(40)}"}}}`],
@@ -307,7 +307,7 @@ function controls() {
     emit.buildFail(["KEEP-30 a build log line", `KEEP-29 error: Could not resolve "x" at /tmp/x.js?v=${S(48)}`]);
     emit.harnessFail(new Error(`KEEP-31 Cannot find module file:///x/test-harness.mjs#${S(49)} more`));
     emit.enableFail({ note: "KEEP-32", state: "off", cookie: S(50) });
-    // (r17: the network receipts, with the longest net:: codes and a full sha256, and wrong values that must fall back)
+    // (the network receipts, with the longest net:: codes and a full sha256, and wrong values that must fall back)
     emit.upHdrs("R.1", "old", 200, { te: "chunked", ce: null, mfce: "br", cl: null });
     emit.upHdrs("R.2", "new", 200, { te: "Chunked ", ce: "x-evil", mfce: undefined, cl: "17" });
     emit.relay("R.1", "old", 17, SHA17);
@@ -361,10 +361,10 @@ function controls() {
     'diag-control quoted 5: ["KEEP-40 say: panel wss://h/a?<dropped>',
     'diag-control quoted 6: ["KEEP-41 warn: panel https://h/b?<dropped>',
   ];
-  // (r17: the network receipts' exact lines; each must also pass scrub() unchanged (the runner's --filter scrubs every
+  // (the network receipts' exact lines; each must also pass scrub() unchanged (the runner's --filter scrubs every
   // line again), and the forms they avoid must not: a whole net:: code and a whole sha256 are opaque runs)
   const g = SHA17.match(/.{16}/g).join(" ");
-  const r17 = [
+  const netLines = [
     "up-hdrs R.1 old 200 te=chunked ce=- mfce=br cl=absent",
     "up-hdrs R.2 new 200 te=chunked ce=other mfce=- cl=present",
     `relay R.1 old bytes 17 sha ${g}`,
@@ -386,15 +386,15 @@ function controls() {
     ...keeps.map((k) => [`${k} kept`, printed.some((l) => l.includes(k))]),
     ...exact.map((e) => [`exact: ${e}`, printed.includes(e)]),
     ["one line per fixture", fixtures.every((_, i) => printed.filter((l) => l.startsWith(`diag-control ${i + 1}: `)).length === 1)],
-    ...r17.map((e) => [`r17 exact: ${e}`, printed.includes(e)]),
-    ["r17: every network receipt line passes scrub() unchanged (so --filter keeps it)", r17.every((l) => scrub(l, 4000) === l)],
-    ["r17: a whole net:: code and a whole sha256 would be scrubbed (why they are printed as words and groups)",
+    ...netLines.map((e) => [`network receipt exact: ${e}`, printed.includes(e)]),
+    ["every network receipt line passes scrub() unchanged (so --filter keeps it)", netLines.every((l) => scrub(l, 4000) === l)],
+    ["a whole net:: code and a whole sha256 would be scrubbed (why they are printed as words and groups)",
       scrub("net::ERR_INCOMPLETE_CHUNKED_ENCODING").includes("<opaque>") && scrub(SHA17) === "<opaque>"],
     ...pairControls(),
   ];
   let k = 0;
   for (const [i, [name, ok]] of cases.entries()) { if (ok) k++; rawLog(`DIAG CONTROL ${i + 1} ${ok ? "PASS" : "FAIL"}: ${name}`); }
-  // (r5: raw lines with sentinels written straight to stdout, as Miniflare/workerd or Bun itself would: the runner pipes
+  // (raw lines with sentinels written straight to stdout, as Miniflare/workerd or Bun itself would: the runner pipes
   // this run through --filter, and the judge requires every marker kept and no sentinel in run.log)
   const top = Math.max(...keeps.map((m) => Number(m.slice(5))));
   const external = [
@@ -411,7 +411,7 @@ function controls() {
   rawLog(`DIAG CONTROLS ${k} of ${cases.length} PASS`);
   process.exit(k === cases.length ? 0 : 1);
 }
-// ---- --filter (r5, the runner's pipe for the suites and the controls): every line of stdin scrubbed to stdout, between
+// ---- --filter (the runner's pipe for the suites and the controls): every line of stdin scrubbed to stdout, between
 // a start line and an end line counting them (the judge checks the section holds exactly those lines): whatever the
 // test process, Miniflare/workerd or Bun itself writes reaches run.log only through scrub()
 async function filter() {

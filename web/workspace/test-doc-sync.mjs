@@ -7,7 +7,7 @@
 //   CHROME=chromium bun web/workspace/test-doc-sync.mjs
 // SERVER=cloud runs the same cases against cloud's server (what DEV answers), started by the cloud checkout's own
 // entry for this test (beside its harness, run under cloud's with-core.sh), which gives this module startCloud
-// before loading it: core imports no server code (plan-cloud-split-r1 §2).  The server-side figures only the
+// before loading it: core imports no server code.  The server-side figures only the
 // reference server keeps (a document's claimed clients) are then not checked.
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
@@ -18,7 +18,7 @@ import { ReferenceServer, SESSION_COOKIE } from "../sync-protocol/reference-serv
 import { accountHash } from "../sync-protocol/protocol.ts";
 import { devtoolsPort } from "../test-port.mjs";
 import { emit, guardConsole, pairCheck } from "./doc-sync-diag.mjs";
-// (r5: before anything that can print: every in-process console call from here on is scrubbed (doc-sync-diag.mjs
+// (before anything that can print: every in-process console call from here on is scrubbed (doc-sync-diag.mjs
 // prints through its own printers, saved when it loaded, so this never loops back))
 guardConsole();
 
@@ -47,14 +47,14 @@ writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><t
 
 // ---- the server, and the front
 const CLOUD = process.env.SERVER === "cloud";
-// (r4, r5: everything this run prints is emitted by ./doc-sync-diag.mjs: structured lines from allow-listed fields,
+// (everything this run prints is emitted by ./doc-sync-diag.mjs: structured lines from allow-listed fields,
 // any dynamic text only through its scrub(); this file has no console call of its own, no stream of this process is
 // wrapped, and any in-process console call (the reference server's, the cloud harness's) is scrubbed (guardConsole,
 // above); the runner pipes this process's stdout and stderr through doc-sync-diag.mjs --filter as well)
 // (the front's sync requests and sockets: numbered; the open ones, for a stopped case)
 let proxyN = 0, sockN = 0;
 const proxyOpen = new Map(), sockOpen = new Set();
-// (FU-DBUS cause pinning (@sagebrush's r3 ruling): with FUDBUS_AT, the VM runner's census script, run here at the
+// (user-service cause pinning: with FUDBUS_AT, the VM runner's census script, run here at the
 // browser's seams and at every case, its lines in this run's output; a failure is its own line, which the judge fails)
 const SUITE = CLOUD ? "cloud" : "ref";
 const censusAt = (name) => {
@@ -65,7 +65,7 @@ const censusAt = (name) => {
 const ACCOUNT = "d5d5d5d5-0000-4d5d-8d5d-d5d5d5d5d5d5";
 let ref = null, cloud = null;
 if (CLOUD) {
-  // (r18: the cloud checkout's entry gives startCloud as globalThis.__docSyncCloud before it loads this module; without
+  // (the cloud checkout's entry gives startCloud as globalThis.__docSyncCloud before it loads this module; without
   // it (this module run directly) the run stops, as without the harness)
   const startCloud = globalThis.__docSyncCloud?.startCloud;
   if (typeof startCloud !== "function") {
@@ -86,7 +86,7 @@ const tamper = { A: null, B: null };
 // it does with it, and only its answer is replaced, as a lost answer and a refusal would look; on either server)
 const fakes = { batch: [] };
 const fake = (t, f) => fakes[t].push(f);
-// (r17, item 3's case 14 under cloud: the front's relays.  relayVerbatim is the relay as it was through r16, the
+// (case 14 under cloud: the front's relays.  relayVerbatim is the relay as it was before the rebuild, the
 // upstream Response returned as is (its transport headers too); it is kept ONLY behind /relay-old/, for the relay
 // control (case R).  Every other answer is rebuilt from its bytes with allow-listed headers, on either server; HEAD
 // and the bodyless statuses get no body.  WebSocket upgrades never reach here (/api/sync/v1/account is upgraded above))
@@ -104,7 +104,7 @@ async function relayRebuilt(r, method) {
 const transport = (h) => ({ te: h.get("transfer-encoding"), ce: h.get("content-encoding"), mfce: h.get("mf-content-encoding"), cl: h.get("content-length") });
 const sha256hex = async (b) => Buffer.from(await crypto.subtle.digest("SHA-256", b)).toString("hex");
 // (what case R checks, by traced call: the front's records (up: every upstream status and headers of the call, with its
-// route, as a list (r17a: a duplicate is seen, not overwritten);
+// route, as a list (a duplicate is seen, not overwritten);
 // relay: its byte receipt) and the browser's (net: the response's headers, its completion, its failure and code))
 const rec = { up: new Map(), relay: new Map(), net: new Map() };
 const netOf = (call) => { if (!rec.net.has(call)) rec.net.set(call, {}); return rec.net.get(call); };
@@ -139,7 +139,7 @@ const front = Bun.serve({
     // (case 14's real owners and Sync panel: the session's account, and the sync API with device D's session, as the
     // site serves them on its own origin)
     if (u.pathname === "/api/share/me") return Response.json({ account_id: ACCOUNT });
-    // (r17: the relay control's two routes to the real server's status, differing only in the relay (case R))
+    // (the relay control's two routes to the real server's status, differing only in the relay (case R))
     const relayRoute = /^\/relay-(old|new)(\/api\/sync\/v1\/status)$/.exec(u.pathname);
     if (u.pathname.startsWith("/api/sync/") || relayRoute) {
       const route = relayRoute ? relayRoute[1] : "plain", path = relayRoute ? relayRoute[2] : u.pathname;
@@ -156,7 +156,7 @@ const front = Bun.serve({
         const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
         const r = await (CLOUD ? fetch(cloud.url + path + u.search, { method: req.method, headers: h, body }) : ref.fetch(new Request("http://ref" + path + u.search, { method: req.method, headers: h, body })));
         emit.syncEnd(k, req.method, path, r.status, Date.now() - t);
-        // (r17: a traced call's upstream status and transport headers, before any relay; then its relay and receipt)
+        // (a traced call's upstream status and transport headers, before any relay; then its relay and receipt)
         if (call) { if (!rec.up.has(call)) rec.up.set(call, []); rec.up.get(call).push({ route, status: r.status, h: transport(r.headers) }); emit.upHdrs(call, route, r.status, transport(r.headers)); }
         if (route === "old") {
           if (call) receiptOf(call, route, r.clone());
@@ -241,10 +241,10 @@ let port = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-ds-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
 const errors = [];
-// (r3: the pages' own console warnings and errors and the browser's log entries for them, by the page's label, kept
+// (the pages' own console warnings and errors and the browser's log entries for them, by the page's label, kept
 // here (the last 200) and printed only through emit.text)
 const labels = new Map(), pageConsole = [];
-// (r17: the traced requests in flight, by "<sessionId>:<requestId>": their page, call and route)
+// (the traced requests in flight, by "<sessionId>:<requestId>": their page, call and route)
 const netReq = new Map();
 const noteConsole = (s) => { pageConsole.push(String(s).slice(0, 2000)); if (pageConsole.length > 200) pageConsole.shift(); };
 // (its own deadline: a hang anywhere ends the run here, the browser killed, saying where it was)
@@ -274,7 +274,7 @@ try {
       noteConsole(`${labels.get(m.sessionId)} console.${m.params.type}: ` + (m.params.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(" "));
     if (m.method === "Log.entryAdded" && labels.has(m.sessionId) && (m.params.entry?.level === "warning" || m.params.entry?.level === "error"))
       noteConsole(`${labels.get(m.sessionId)} log.${m.params.entry.level}: ${m.params.entry.text}${m.params.entry.url ? " (" + m.params.entry.url + ")" : ""}`);
-    // (r17: a traced request's network events (Network.enable on the pages made by pageIn), by session and requestId:
+    // (a traced request's network events (Network.enable on the pages made by pageIn), by session and requestId:
     // requestWillBeSent maps it to its page, its call (its x-test-call header) and its route (plain, old, new); its
     // response's headers, its completion or its failure (loadingFailed has no URL: hence the map) are then printed
     // and recorded by call; the entry is retired when it finishes or fails)
@@ -320,10 +320,10 @@ try {
   await B.call("connect", "B", ACCOUNT);
 
   progress("case R");
-  // R. (r17, item 3's case 14 under cloud) The relay control: the real server's status, through this front's two relays,
-  // fetched by a real page in a context of its own with its tracing fetch, in three old/new pairs (r17a): /relay-old/
-  // (the relay as it was through r16: the upstream Response as is), then /relay-new/ (the rebuilt relay every other
-  // answer now gets), three times.  Under cloud the old relay must fail as case 14 did in r16 (the upstream's 200 at the front, then a named
+  // R. (case 14 under cloud) The relay control: the real server's status, through this front's two relays,
+  // fetched by a real page in a context of its own with its tracing fetch, in three old/new pairs: /relay-old/
+  // (the relay as it was before the rebuild: the upstream Response as is), then /relay-new/ (the rebuilt relay every other
+  // answer now gets), three times.  Under cloud the old relay must fail as case 14 did before the rebuild (the upstream's 200 at the front, then a named
   // net:: failure in the browser, at the fetch or the body read: the stage is recorded) and the new one load the bytes
   // the front relayed; under the reference server (no transport headers) both load.  Exactly 4 checks on either
   // server (the judge compares the servers' counts); a mechanism that doesn't reproduce fails R1
@@ -334,7 +334,7 @@ try {
       const { browserContextId: rctx } = await send("Target.createBrowserContext");
       // (pageIn, declared below in this same block, is hoisted; its default context isn't used here)
       const Rp = await pageIn("R", rctx);
-      // (r17a: the pairs, k = 1..3, each the k-th old call then the k-th new one, one after the other)
+      // (the pairs, k = 1..3, each the k-th old call then the k-th new one, one after the other)
       const oldCalls = [], newCalls = [];
       for (let k = 0; k < 3; k++) {
         oldCalls.push(...(await Rp.call("relayProbe", "/relay-old/api/sync/v1/status", 1)));
@@ -359,7 +359,7 @@ try {
         "R2: the new relay (rebuilt, allow-listed headers): each call loads, 200, parsed: " + said(newCalls));
       check(newCalls.every((c) => { const p = pageRec(c), f = rec.relay.get(c); return !!p && !!f && p.bytes === f.n && p.sha === f.sha; }),
         "R3: the new relay: each call's bytes in the page (length and sha256) are the bytes the front relayed: " + J(newCalls.map((c) => ({ c, page: pageRec(c)?.bytes ?? null, front: rec.relay.get(c)?.n ?? null, same: pageRec(c)?.sha === rec.relay.get(c)?.sha }))));
-      // (r17a, I3R17R2-C1: R4 is the matched-pairs rule (doc-sync-diag.mjs's pairCheck, its controls in the diag step): each
+      // (R4 is the matched-pairs rule (doc-sync-diag.mjs's pairCheck, its controls in the diag step): each
       // k-th old and new call, exactly one upstream receipt each, of its route, 200, the same transport tuple without an
       // unknown variant, the same bytes; under cloud that tuple carries a transport header, under the reference none)
       const member = (c) => ({ ups: rec.up.get(c) ?? [], relay: rec.relay.get(c) });
@@ -484,7 +484,7 @@ try {
   }
 
   progress("case 8");
-  // 8. A1: B's notebook closed while A edits: B's pull stores the page and no record is written then; B's next open
+  // 8. B's notebook closed while A edits: B's pull stores the page and no record is written then; B's next open
   // merges it (recovery), never reverting it
   await B.call("close", N1);
   await A.call("edit", N1, [["a", "Y8"], ["b", "B3"]]);
@@ -497,7 +497,7 @@ try {
   const owner = await accountHash(ACCOUNT);
 
   progress("case 9");
-  // 9. CORR-2C3-1 (astra): a flight sends nothing after a pull that waits or stops, nor on a connection that's gone.  A
+  // 9. A flight sends nothing after a pull that waits or stops, nor on a connection that's gone.  A
   // notebook claimed and sent, then edited offline (one row unsent); a DocSync of its own over a deferred link answers
   // its pull, and nothing may follow it: no claim, no batch, the row kept, the notebook held or stopped as the answer says
   const N9 = "99999999-1111-4222-8333-444444444444";
@@ -557,7 +557,7 @@ try {
   await A.call("fakeAnswer", "pull", { t: "batches", owner, doc: N9, epoch: 1, head: head9, items: [], more: false }, 300);
   const sr9 = await A.call("fakeState");
   check(J(sr9.sent) === J(["pull", "pull"]) && J(sr9.waiting) === J(["pull"]), "9: a flight of an older connection asks nothing after its answer; the newer connection pulls again: " + J({ sent: sr9.sent, waiting: sr9.waiting }));
-  // (D3-4c: a kick while the batch waits, then the batch refused (rate): held, no second lap)
+  // (a kick while the batch waits, then the batch refused (rate): held, no second lap)
   await A.call("fakeStart", ACCOUNT, N9);
   await A.call("fakeConnect");
   await A.call("fakeWait", "pull");
@@ -569,7 +569,7 @@ try {
   await A.call("fakeKick");
   await A.call("fakeAnswer", "batch", { t: "error", code: "rate", detail: { message: "m", retry_after: 1 } }, 300);
   const sk9 = await A.call("fakeState");
-  check(!!b9 && J(sk9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "batch"]) && sk9.held && sk9.waiting.length === 0, "9 (D3-4c): a kick during the flight, then the batch refused for a while: held, no second lap: " + J({ sent: sk9.sent, held: sk9.held, waiting: sk9.waiting }));
+  check(!!b9 && J(sk9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "batch"]) && sk9.held && sk9.waiting.length === 0, "9 (d): a kick during the flight, then the batch refused for a while: held, no second lap: " + J({ sent: sk9.sent, held: sk9.held, waiting: sk9.waiting }));
   // (an older hold's timer never lifts a newer one: rate (its timer 400 ms), a new connection, readonly)
   await A.call("fakeStart", ACCOUNT, N9, 400);
   await A.call("fakeConnect");
@@ -581,7 +581,7 @@ try {
   await sleep(700);
   const so9 = await A.call("fakeState");
   check(J(so9.sent) === J(["pull", "pull"]) && so9.held && so9.waiting.length === 0, "9: the rate hold's old timer doesn't lift the readonly hold after it: " + J({ sent: so9.sent, held: so9.held }));
-  // (r3, astra's r2 report on CORR-2C3-1: nothing an older connection's flight learns or fails at may act on the
+  // (nothing an older connection's flight learns or fails at may act on the
   // newer one.  (a) markSent's write held while the connection is replaced, then committed: no batch from the old flight)
   const empty9 = { t: "batches", owner, doc: N9, epoch: 1, head: head9, items: [], more: false };
   await A.call("fakeStart", ACCOUNT, N9);
@@ -593,7 +593,7 @@ try {
   await A.call("fakeConnect");
   await A.call("fakeReleaseTx", false);
   const sa9 = await A.call("fakeState");
-  check(g9 && J(sa9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "pull"]) && J(sa9.waiting) === J(["pull"]) && sa9.stopped === null, "9 (r3 a): a batch's write held while the connection is replaced: the old flight sends no batch after it; the new one pulls: " + J({ gated: g9, sent: sa9.sent, waiting: sa9.waiting, stopped: sa9.stopped }));
+  check(g9 && J(sa9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "pull"]) && J(sa9.waiting) === J(["pull"]) && sa9.stopped === null, "9 (a): a batch's write held while the connection is replaced: the old flight sends no batch after it; the new one pulls: " + J({ gated: g9, sent: sa9.sent, waiting: sa9.waiting, stopped: sa9.stopped }));
   // ((b) an older connection's pull answered after the reconnect with what would stop the notebook: not stopped, and
   // the new connection pulls)
   for (const [what, frame] of [["a snapshot", { ...empty9, snapshot: { at_seq: 1 } }], ["another owner", { ...empty9, owner: "f".repeat(64) }]]) {
@@ -603,7 +603,7 @@ try {
     await A.call("fakeConnect");
     await A.call("fakeAnswer", "pull", frame, 300);
     const sb = await A.call("fakeState");
-    check(sb.stopped === null && J(sb.sent) === J(["pull", "pull"]) && J(sb.waiting) === J(["pull"]), `9 (r3 b): an older connection's pull answered with ${what} after a reconnect: no stop; the new connection pulls: ` + J({ sent: sb.sent, waiting: sb.waiting, stopped: sb.stopped }));
+    check(sb.stopped === null && J(sb.sent) === J(["pull", "pull"]) && J(sb.waiting) === J(["pull"]), `9 (b): an older connection's pull answered with ${what} after a reconnect: no stop; the new connection pulls: ` + J({ sent: sb.sent, waiting: sb.waiting, stopped: sb.stopped }));
   }
   // ((b) an older connection's history write failing after the reconnect: no stop; the new connection pulls)
   await A.call("fakeStart", ACCOUNT, N9);
@@ -615,12 +615,12 @@ try {
   await A.call("fakeConnect");
   await A.call("fakeReleaseTx", true);
   const sc9 = await A.call("fakeState");
-  check(g9b && sc9.stopped === null && J(sc9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "pull"]) && J(sc9.waiting) === J(["pull"]), "9 (r3 b): an older connection's history write failing after a reconnect: no stop; the new connection pulls: " + J({ sent: sc9.sent, waiting: sc9.waiting, stopped: sc9.stopped }));
+  check(g9b && sc9.stopped === null && J(sc9.sent.filter((t) => t !== "doc_claim")) === J(["pull", "pull"]) && J(sc9.waiting) === J(["pull"]), "9 (c): an older connection's history write failing after a reconnect: no stop; the new connection pulls: " + J({ sent: sc9.sent, waiting: sc9.waiting, stopped: sc9.stopped }));
   await A.call("connect", "A", ACCOUNT);
   await settle();
 
   progress("case 10");
-  // 10. CORR-2C3-2 (astra): a marked value (saved with no room for its version, so in no version) is never replaced by
+  // 10. A marked value (saved with no room for its version, so in no version) is never replaced by
   // a later remote change: B's edit marked, A's later change to the same cell arrives: B's record keeps B's whole value
   // (an unrelated cell too), still marked; and so after a reload
   const N10 = "aaaaaaaa-1111-4222-8333-444444444444";
@@ -646,7 +646,7 @@ try {
   check(bm10.mark === true && b10.codes === want10 && b10.mark === true && b10r.codes === want10, "10: a marked value meets a later remote change of the same cell: kept whole, still marked, and after a reload: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes }));
 
   progress("case 11");
-  // 11. CORR-2C3-3 (astra): an ack over the wire resumes a writer's history paused for want of room: the next save is a
+  // 11. An ack over the wire resumes a writer's history paused for want of room: the next save is a
   // version again (unmarked, sent), with no reload; by a plain ack, and by `order` with next_cseq
   for (const [k, how] of [["bbbbbbbb", "ack"], ["dddddddd", "order"]]) {
     const id = `${k}-1111-4222-8333-444444444444`;
@@ -670,7 +670,7 @@ try {
   }
 
   progress("case 12");
-  // 12. CORR-2C3-5 (astra): the notebook page itself (notebook.js) on B: A's change reaches it with nothing typed here:
+  // 12. The notebook page itself (notebook.js) on B: A's change reaches it with nothing typed here:
   // shown, and saved (the record, its j and hash agree with what's shown); then a change from A while B types another
   // cell: both kept, saved
   const N12 = "cccccccc-1111-4222-8333-444444444444";
@@ -695,12 +695,12 @@ try {
   check(bs12b === J([["a", "p2"], ["b", "q-typed"]]) && br12b.codes === bs12b && br12b.hashOk, "12: a remote change while this page types another cell: both kept, saved: " + J({ shown: bs12b, record: br12b.codes, hashOk: br12b.hashOk }));
 
   progress("case 13");
-  // 13. (astra's DEVSW-1) One device, two pages of one browser context (one IndexedDB, one set of Web Locks and
+  // 13. One device, two pages of one browser context (one IndexedDB, one set of Web Locks and
   // channels): a board page whose DocSync (followDocSync) is on this harness's minimal socket, and the notebook page,
   // a follower, that turns the switch on.  The board's page carries the notebook: what the notebook page saves reaches
   // B (no kick of its own: the switch's DOC_SYNC.saved, on the channel), B's edit reaches the notebook page, the board
   // never closed; then the board page closes and the harness connects the notebook page's DocSync.  The transport
-  // only: the real owners, their sender lock and the automatic takeover are case 14 (astra's DEVSW-1-R2)
+  // only: the real owners, their sender lock and the automatic takeover are case 14
   const { browserContextId: cctx } = await send("Target.createBrowserContext");
   async function pageIn(label, ctx = cctx) {
     const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId: ctx });
@@ -708,7 +708,7 @@ try {
     labels.set(sessionId, label);
     await send("Runtime.enable", {}, sessionId);
     await send("Log.enable", {}, sessionId);
-    // (r17: the page's network events, for its traced requests (the CDP handler above))
+    // (the page's network events, for its traced requests (the CDP handler above))
     await send("Network.enable", {}, sessionId);
     await send("Page.navigate", { url: `http://127.0.0.1:${front.port}/` }, sessionId);
     const ev = async (expression) => {
@@ -717,13 +717,13 @@ try {
       return r.result?.value;
     };
     for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
-    // (r17: the page's label, for its tracing fetch's call ids)
+    // (the page's label, for its tracing fetch's call ids)
     await ev(`T.pageLabel = ${J(label)}`);
     return { targetId, ev, call: (f, ...args) => { progress(`${label}.${f}`); return ev(`T.${f}(${args.map((a) => J(a)).join(", ")})`); } };
   }
   // (a failed check ends the case right after it is recorded (the rest depends on it), and a throw is recorded as this
-  // case's failed check: the run goes on and prints every verdict (#266 r6b's run: R-14d and B-1o made case 13's
-  // C1.connect throw after its failed check, and the run ended with no verdict)
+  // case's failed check: the run goes on and prints every verdict (a run in which case 13's
+  // C1.connect threw after its failed check ended with no verdict)
   const STOP13 = Symbol("stop");
   const need13 = (ok, what) => { check(ok, what); if (!ok) throw STOP13; };
   const case13 = async () => {
@@ -764,7 +764,7 @@ try {
     const br13b = await B.call("record", N13);
     need13(br13b.codes === J([["a", "c3"], ["b", "d2"]]), "13: …then its own connection (the holder now) sends what was saved meanwhile: " + br13b.codes);
   };
-  // (the outcome tagged, never tested for truthiness: a throw of false, 0 or "" is recorded too (astra's DEVSW-R6C-1);
+  // (the outcome tagged, never tested for truthiness: a throw of false, 0 or "" is recorded too;
   // STOP13, already recorded as its failed check, is not counted again)
   const r13 = await case13().then(() => ({ ok: true }), (e) => ({ ok: false, e }));
   if (!r13.ok && r13.e !== STOP13) check(false, "13: the case stopped: " + String(r13.e?.message ?? r13.e).slice(0, 300));
@@ -779,7 +779,7 @@ try {
   const need14 = (ok, what) => { check(ok, what); if (!ok) throw STOP14; };
   let D14 = null;
   const case14 = async () => {
-    // 14. (astra's DEVSW-1-R2, r5) The real owners: one device (D), two pages of one browser context, each with its own
+    // 14. The real owners: one device (D), two pages of one browser context, each with its own
     // SyncOwner and SyncClient on the namespace's sender lock, against this reference server (device D's session, through
     // the front).  The board page's owner already holds (sync turned on with the Sync panel's button, the journal active
     // from an earlier load) and carries notebooks (followDocSync); the notebook page's owner waits while the switch turns
@@ -789,7 +789,7 @@ try {
     const { browserContextId: dctx } = await send("Target.createBrowserContext");
     const D1 = await pageIn("D1", dctx), D2 = await pageIn("D2", dctx);
     D14 = { D1, D2 };
-    // (every await of this case bounded (astra's DEVSW-R6-1): a hung page call ends as this case's failed check, its
+    // (every await of this case bounded: a hung page call ends as this case's failed check, its
     // verdict printed, never as the run's deadline)
     const LATE14 = Symbol("late");
     const bound14 = (p, ms) => {
@@ -827,8 +827,8 @@ try {
       }
       return null;
     };
-    // (#266 r5's case 14 failed here: the board's DocSync connected before this notebook's synced history started (in the
-    // switch's reopen, before any save was told), so nothing kicked it until an edit; r6: the notebook page's `on` makes
+    // (case 14 once failed here: the board's DocSync connected before this notebook's synced history started (in the
+    // switch's reopen, before any save was told), so nothing kicked it until an edit; now the notebook page's `on` makes
     // the board's DocSync kick every notebook started.  Asserted before any edit and with no reconnect)
     const got14 = await until14(async () => { await B.call("kick", N14, true); const j = await B.call("journal", N14); return j?.start ? j : null; });
     need14(!!got14?.start, "14: the notebook made in the notebook page reaches B before any edit and with no reconnect, sent on the board page's connection (the notebook page's owner waiting)");
@@ -896,7 +896,7 @@ try {
     emit.counts("diag14: ", [...sockOpen], sockN, proxyN);
     emit.recent("diag14: ", 60);
   }
-  // (r17: case 14's traced calls (the Sync panel's status reads on its pages), whatever the outcome: each call's stages
+  // (case 14's traced calls (the Sync panel's status reads on its pages), whatever the outcome: each call's stages
   // and byte receipt, every page question bounded at 10 s)
   if (D14) for (const P of Object.values(D14)) {
     const tr = await Promise.race([P.ev("T.traceDump ? T.traceDump() : []").catch(() => []), sleep(10_000).then(() => [])]);
