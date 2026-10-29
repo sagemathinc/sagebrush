@@ -9,6 +9,7 @@ import { tokenizeLine } from "./highlight.ts";
 import { latexOn } from "./boot.ts";
 import { RenderGate } from "./gate.ts";
 import { boxClass } from "./boxclass.mjs";
+import { previewHost } from "./preview-host.mjs";
 import { Engine } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
 import { setKatex } from "./engine/render.mjs";
@@ -210,6 +211,18 @@ check("flag-off-without", !on("dev.sagebrush.space", "", null) && !on("dev.sageb
 check("flag-prod-never", !on("sagebrush.space", "?latex=1", "1"), null);
 check("flag-lookalike-hosts", !on("x.dev.sagebrush.space", "?latex=1", "1") && !on("dev.sagebrush.space.evil", "?latex=1", "1"), null);
 check("flag-test-hosts-only-in-list", latexOn("127.0.0.1", true, () => null, ["dev.sagebrush.space", "127.0.0.1"]) && !latexOn("127.0.0.1", true, () => null, ["dev.sagebrush.space"]), null);
+
+// ---- preview-host.mjs: the preview deploy's one extra host (web/build.ts), only under .sagebrush.cloud, only with =1
+{
+  check("host-preview", previewHost("1", "latex.sagebrush.cloud") === "latex.sagebrush.cloud");
+  check("host-unset", previewHost("1", undefined) === null && previewHost("1", "") === null);
+  check("host-ignored-without-1", previewHost("", "latex.sagebrush.cloud") === null && previewHost("test", "latex.sagebrush.cloud") === null && previewHost("test", "evil.example") === null);
+  const bad = ["sagebrush.cloud", ".sagebrush.cloud", "dev.sagebrush.space", "latex.sagebrush.space", "cocalc.com", "x.cocalc.com", "*.sagebrush.cloud", "Latex.sagebrush.cloud",
+    "latex.sagebrush.cloud.", "latex.sagebrush.cloud:443", "https://latex.sagebrush.cloud", "latex.sagebrush.cloud/x", "a..sagebrush.cloud", "-a.sagebrush.cloud", "a-.sagebrush.cloud",
+    "latex.sagebrush.cloud,evil.com", "latex.sagebrush.cloud evil.com", "evilsagebrush.cloud", "latex.sagebrush.cloud.evil.com", "a".repeat(64) + ".sagebrush.cloud"];
+  const passed = bad.filter((h) => { try { previewHost("1", h); return true; } catch { return false; } });
+  check("host-refused", passed.length === 0, passed);
+}
 
 // ---- gate.ts
 {

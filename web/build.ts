@@ -6,6 +6,7 @@
 import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync, mkdtempSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { previewHost } from "./latex/preview-host.mjs";
 
 /** A site page with the early-alpha notice's script (web/alpha-banner.js), just before </head>. */
 // (the same tag that board/export.ts's assemble() takes out of every board it makes from a page)
@@ -17,12 +18,14 @@ function withAlphaBanner(html: string): string {
 const here = import.meta.dir;
 // The LaTeX editor (DEV only; web/latex/): built only with SAGEBRUSH_LATEX_PREVIEW=1 (the DEV deploy) or "test" (the
 // same, its page also on loopback hosts, for VM tests). Unset, __SB_LATEX__ is false in every bundle, its hooks fold
-// away, no LaTeX file is written, and the output is what it was without it.
+// away, no LaTeX file is written, and the output is what it was without it. With =1, SAGEBRUSH_PREVIEW_HOST may name
+// one more host under .sagebrush.cloud for a preview deploy (web/latex/preview-host.mjs; else ignored).
 const LATEX_MODE = process.env.SAGEBRUSH_LATEX_PREVIEW ?? "";
 if (!["", "1", "test"].includes(LATEX_MODE)) throw new Error(`SAGEBRUSH_LATEX_PREVIEW must be unset, 1 or test, not ${JSON.stringify(LATEX_MODE)}`);
 const LATEX = LATEX_MODE !== "";
+const LATEX_PREVIEW_HOST = previewHost(LATEX_MODE, process.env.SAGEBRUSH_PREVIEW_HOST);
 const LATEX_DEFINE = LATEX
-  ? { __SB_LATEX__: "true", __SB_LATEX_TEST__: String(LATEX_MODE === "test"), __SB_LATEX_HOSTS__: JSON.stringify(LATEX_MODE === "test" ? ["dev.sagebrush.space", "127.0.0.1", "localhost"] : ["dev.sagebrush.space"]) }
+  ? { __SB_LATEX__: "true", __SB_LATEX_TEST__: String(LATEX_MODE === "test"), __SB_LATEX_HOSTS__: JSON.stringify(LATEX_MODE === "test" ? ["dev.sagebrush.space", "127.0.0.1", "localhost"] : ["dev.sagebrush.space", ...(LATEX_PREVIEW_HOST ? [LATEX_PREVIEW_HOST] : [])]) }
   : { __SB_LATEX__: "false" };
 // (web/site/ when it is here; see web/site-dir.mts)
 const { siteDir, hasSite } = await import("./site-dir.mts");
