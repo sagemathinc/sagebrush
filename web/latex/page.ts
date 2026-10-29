@@ -115,9 +115,14 @@ let current: { dispose(): void; dirty(): boolean } | null = null;
 // each mount's number: a mount whose number is no longer the last one's was replaced while it waited (a read, a path
 // lookup), and stops at its next step, before it sets the title, makes an editor or becomes current
 let mounts = 0;
-// the history position of the file shown (history.state.sbTex, from 0 at the first file), so a declined Back or
-// Forward can go back to it; and that return's own popstate, which is ignored
-let shownAt = 0, returning = false;
+// the history entry shown, so a declined Back or Forward goes back to exactly it: its id (history.state.sbTexId), URL
+// and Navigation API key where there is one (traverseTo); else its position (history.state.sbTex: every entry this
+// page sees is numbered, from 0 at the first file, a fragment's entry too). Whether that return is under way: where it
+// lands is checked, and anywhere else the shown entry is pushed again, so the URL is always the file shown.
+let shownAt = 0, shownId = "", shownUrl = "", shownKey: string | undefined, returning = false;
+const navApi = (): any => (globalThis as any).navigation;
+const entryId = () => Math.random().toString(36).slice(2, 12);
+const noteShown = () => { const st = history.state; shownAt = st.sbTex; shownId = st.sbTexId; shownUrl = location.href; shownKey = navApi()?.currentEntry?.key; };
 const LEAVE = "Leave this file without saving your changes?";
 
 export async function mount(root: HTMLElement, host: Host): Promise<void> {
@@ -127,9 +132,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const life = new AbortController(), on = { signal: life.signal };
   const live = () => my === mounts && !life.signal.aborted;
   const st = history.state && typeof history.state === "object" ? history.state : {};
-  if (typeof st.sbTex !== "number") history.replaceState({ ...st, sbTex: 0 }, "");
-  shownAt = history.state.sbTex;
-  const here = location.href;
+  if (typeof st.sbTex !== "number" || typeof st.sbTexId !== "string") history.replaceState({ ...st, sbTex: typeof st.sbTex === "number" ? st.sbTex : 0, sbTexId: entryId() }, "");
+  noteShown();
   let dispose = () => { life.abort(); };
   current = { dispose: () => dispose(), dirty: () => false };
   if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS; document.head.appendChild(style); }
@@ -214,19 +218,34 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (e.fid === host.fid) return true;
     if (current?.dirty() && !confirm(LEAVE)) return true;
     const q = new URLSearchParams(location.search); q.set("tex", e.fid);
-    history.pushState({ sbTex: shownAt + 1 }, "", "/?" + q.toString());
+    history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", "/?" + q.toString());
     openHere(e.fid);
     return true;
   };
-  // Back and Forward among those entries: the same question first; declined, the history is taken back to this file's
-  // entry and the editor, its text unsaved, stays as it is
+  // Back and Forward among those entries: the same question first; declined, the history is taken back to the entry
+  // shown and the editor, its text unsaved, stays as it is
+  // (the shown entry again, as a new one after this: when going back to it isn't possible or didn't land on it)
+  const pushShown = () => { history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); };
+  const isShown = () => history.state?.sbTexId === shownId && location.href === shownUrl;
   window.addEventListener("popstate", (ev) => {
-    if (returning) { returning = false; return; }
     const t = new URLSearchParams(location.search).get("tex");
-    const to = typeof ev.state?.sbTex === "number" ? ev.state.sbTex : null;
-    if (t === host.fid) { if (to !== null) shownAt = to; return; }
+    const st = ev.state && typeof ev.state === "object" ? ev.state : null;
+    if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); return; }
+    if (t === host.fid) {
+      // (this file's own entries: a fragment's new entry, unnumbered, is the one after the shown one)
+      if (typeof st?.sbTex !== "number" || typeof st?.sbTexId !== "string") history.replaceState({ ...(st ?? {}), sbTex: shownAt + 1, sbTexId: entryId() }, "");
+      noteShown();
+      return;
+    }
     if (current?.dirty() && !confirm(LEAVE)) {
-      if (to !== null && to !== shownAt) { returning = true; history.go(shownAt - to); } else history.pushState({ sbTex: shownAt }, "", here);
+      const nav = navApi(), to = typeof st?.sbTex === "number" ? st.sbTex : null;
+      if (nav?.traverseTo && shownKey && nav.entries?.().some((e: any) => e.key === shownKey)) {
+        returning = true;
+        // (traverseTo's own failure: the entry pushed again, if the return didn't happen)
+        const failed = () => { if (returning) { returning = false; pushShown(); } };
+        try { nav.traverseTo(shownKey).finished?.catch(failed); } catch { failed(); }
+      } else if (to !== null && to !== shownAt) { returning = true; history.go(shownAt - to); }
+      else pushShown();
       return;
     }
     if (t) openHere(t); else { current?.dispose(); location.reload(); }
