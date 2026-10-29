@@ -37,10 +37,12 @@ const canon = (o) => JSON.stringify(o, Object.keys(o ?? {}).sort());
 // Int32 [0] the state (1 a line, 2 end of input), [1] its length in bytes,
 // then its UTF-8 bytes, cut to fit at a character's boundary.  When the
 // buffer isn't here (the runner's frame keeps it, web/runner/index.html),
-// send(text) asks the frame to write it.
+// send(text) asks the frame to write it.  reply.retire() closes it unanswered
+// (the question is over: its run asked another, was stopped or ended), and
+// calls reply.onretire, set by whoever shows the question.
 function answerInput(buffer, send) {
   let done = false;
-  return (text) => {
+  const reply = (text) => {
     if (done) return;
     done = true;
     if (!(typeof SharedArrayBuffer === "function" && buffer instanceof SharedArrayBuffer) || buffer.byteLength < 8) return send(text == null ? null : String(text));
@@ -58,6 +60,12 @@ function answerInput(buffer, send) {
     }
     Atomics.notify(ctl, 0);
   };
+  reply.retire = () => {
+    if (done) return;
+    done = true;
+    reply.onretire?.();
+  };
+  return reply;
 }
 
 // (how long a check may wait for the interpreter to take it up: what runs
@@ -155,6 +163,8 @@ export class WorkerKernel {
     this.modeClaims = new Map();
     this.modeToken = 0;
     this.readyInfo = null; // the worker's ready message (seeded, startup clock)
+    // input() questions shown and not yet answered: reply -> its run's id
+    this.inputs = new Map();
     // where output addressed to an @interact goes (set by the notebook)
     this.targetSink = () => null;
   }
@@ -262,9 +272,14 @@ export class WorkerKernel {
       if (m.start) p.start?.();
       // output of an @interact's function goes to that interact's area
       const dest = m.target != null ? this.targetSink(m.target) : p;
-      // input(): the worker waits on m.buffer for a line (web/worker.ts's stdin)
+      // input(): the worker waits on m.buffer for a line (web/worker.ts's stdin);
+      // the answer names this request (its key), and the run's earlier
+      // question, if still shown, is over
       if (m.input) {
-        const reply = answerInput(m.buffer, (text) => w.postMessage({ runnerInput: m.id, text }));
+        this.retireInputs(m.id);
+        const key = m.input.key;
+        const reply = answerInput(m.buffer, (text) => w.postMessage({ runnerInput: m.id, key, text }));
+        this.inputs.set(reply, m.id);
         if (dest?.input) dest.input(String(m.input.prompt ?? ""), reply);
         else reply(null);
       }
@@ -275,6 +290,7 @@ export class WorkerKernel {
         if (m.clear) dest.clear();
       }
       if (m.done) {
+        this.retireInputs(m.id);
         this.pending.delete(m.id);
         // (Stop: it ended with the KeyboardInterrupt it was sent)
         const interrupted = this.interrupted.has(m.id) && !!m.error;
@@ -468,6 +484,9 @@ export class WorkerKernel {
   // SharedArrayBuffer), or if the program does not stop within 2 s (a loop
   // that never checks), restart the interpreter.
   interrupt(message = STOPPED) {
+    // (a question shown before the Stop is over, answered or not: what the
+    // program asks after catching the KeyboardInterrupt is a new one)
+    this.retireInputs();
     if ((!this.interruptFlag && !this.worker.interrupt) || this.pending.size === 0) return this.restart(message);
     const waiting = [...this.pending.keys()];
     for (const id of waiting) if (this.runs.has(id)) this.interrupted.add(id); // (the journal: not exactly replayable)
@@ -485,9 +504,19 @@ export class WorkerKernel {
     }, 2000);
   }
 
+  // input() questions still shown, of run `id` or all, closed unanswered
+  retireInputs(id) {
+    for (const [reply, rid] of this.inputs) {
+      if (id !== undefined && rid !== id) continue;
+      this.inputs.delete(reply);
+      reply.retire();
+    }
+  }
+
   /** A fresh interpreter; what was running or queued is told `message`. */
   restart(message = "\nInterpreter restarted.\n") {
     this.worker?.terminate();
+    this.retireInputs();
     const pending = [...this.pending.values()];
     this.pending.clear();
     this.runs.clear();
@@ -501,6 +530,7 @@ export class WorkerKernel {
   close(message = "\nThe interpreter was stopped.\n") {
     this.worker?.terminate();
     this.worker = null;
+    this.retireInputs();
     pkgPins.delete(this.uid);
     const pending = [...this.pending.values()];
     this.pending.clear();

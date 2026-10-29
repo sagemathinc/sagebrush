@@ -43,6 +43,7 @@ const CELLS = [
   "total = 0\nfor i in range(3):\n    total += int(input(f'number {i + 1}: '))\nprint('sum', total)",
   "x = input('waiting: ')",
   "print(total, name)",
+  "try:\n    input('first: ')\nexcept KeyboardInterrupt:\n    print('caught')\nsecond = input('second: ')\nprint('got', second)",
 ];
 try {
   await send("Page.navigate", { url: base });
@@ -92,6 +93,29 @@ try {
   await ev("(async () => { await sagebrush.notebook.run(sagebrush.notebook.cells()[3]); return true; })()");
   const out3 = (await ev(cellOut(3))).trim();
   ok(out3 === "42 Adabdd Lovelace", "the variables are kept after the Stop: " + out3);
+
+  // a Stop the program catches, then another input(): the first field goes
+  // at once, and an answer to the first question (sent to the runner as the
+  // page would, naming its key) can't fill the second
+  await ev(`(() => { const w = sagebrush.notebook.kernel.worker, f = w.onmessage; window.__asked = [];
+    w.onmessage = (e) => { if (e.data?.input) __asked.push({ id: e.data.id, key: e.data.input.key }); return f.call(w, e); }; return true; })()`);
+  await ev("(() => { sagebrush.notebook.run(sagebrush.notebook.cells()[4]); return true; })()");
+  await until(`!!${field(4)}`);
+  await ev(`(() => { window.__first = ${field(4)}; return true; })()`);
+  await ev("(() => { [...document.querySelectorAll('button')].find((b) => /Stop/.test(b.textContent)).click(); return true; })()");
+  await until("!document.contains(window.__first)", 2000);
+  await until(`!!${field(4)} && sagebrush.notebook.cells()[4].out.querySelector('.stdin-prompt').textContent === 'second: '`);
+  const keys = await ev("__asked");
+  await ev(`(() => { const a = __asked[0]; sagebrush.notebook.kernel.worker.postMessage({ runnerInput: a.id, key: a.key, text: 'stale' }); return true; })()`);
+  await sleep(500);
+  const still = await ev(`${running(4)} && !!${field(4)} && sagebrush.notebook.cells()[4].out.querySelectorAll('.stdin').length === 1`);
+  ok(keys.length === 2 && keys[0].id === keys[1].id && keys[0].key !== keys[1].key && still, "a caught Stop: the first field is gone, and the first question's answer leaves the second waiting: " + JSON.stringify({ keys, still }));
+  await ev(`(() => { ${field(4)}.focus(); return true; })()`);
+  await typeText("Grace");
+  await enter();
+  await until(`!${running(4)}`);
+  const out4 = await ev(cellOut(4));
+  ok(/caught\n/.test(out4) && out4.endsWith("second: Grace\ngot Grace\n") && !/stale/.test(out4), "the second input() takes its own field's line: " + JSON.stringify(out4));
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {
