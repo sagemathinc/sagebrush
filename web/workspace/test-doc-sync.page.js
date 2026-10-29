@@ -84,7 +84,7 @@ T.resetDebt = () => { if (T.debtKeep) Object.assign(N.SYNC_DEBT, T.debtKeep); re
 
 // ---- a DocSync of its own over a deferred link (no server): each request of the notebook `only` waits until the test
 // answers it (fakeAnswer); any other notebook's is answered `busy` at once.  Lets a case answer a pull, drop the
-// connection while a request waits, or kick during a flight, deterministically (astra's CORR-2C3-1, D3-4c)
+// connection while a request waits, or kick during a flight, deterministically
 T.fakeStart = async (account, only, retryMs = 60_000) => {
   const owner = await P.accountHash(account);
   T.fake = { q: [], sent: [], only, owner, ds: new DS.DocSync({ retryMs, askMs: 60_000 }) };
@@ -138,7 +138,7 @@ T.fakeDisconnect = async () => {
   return true;
 };
 /** The fake DocSync's next history transaction (markSent, recordClaim, applyPage...) held before it runs, until
- * fakeReleaseTx: then run, or failed as a storage refusal would fail it (astra's r2 CORR-2C3-1 seam). */
+ * fakeReleaseTx: then run, or failed as a storage refusal would fail it. */
 T.fakeGateTx = () => {
   const ds = T.fake.ds, orig = ds.tx.bind(ds);
   T.fake.gated = false;
@@ -180,7 +180,7 @@ T.type = (cid, text) => {
   return true;
 };
 
-// ---- one device, two pages (astra's DEVSW-1): a board page holding the account connection, carrying notebooks with
+// ---- one device, two pages: a board page holding the account connection, carrying notebooks with
 // the switch's followDocSync, and the notebook page turning the switch on with enableDocSync, its saves told to the
 // board's DocSync on the workspace's channel
 /** The workspace, its journal not yet active (the notebook page's switch activates it). */
@@ -235,7 +235,7 @@ T.editOnly = async (id, cells) => {
 };
 T.warnings = () => T.log.filter((x) => typeof x === "string" && x.startsWith("warn: "));
 
-// ---- the real owners (astra's DEVSW-1-R2, case 14): this page's SyncOwner and its SyncClient, on the namespace's
+// ---- the real owners (case 14): this page's SyncOwner and its SyncClient, on the namespace's
 // sender lock (shared by the pages of this browser context), against the reference server through the front (its
 // session for this device; /api/share/me answered by the front).  A board page carries notebooks with
 // followDocSync; the notebook page turns the switch on with enableDocSync; each page's DocSync is the one its owner's
@@ -259,17 +259,76 @@ T.ownerOpen = async (name, activate) => {
   return await T.w.journalActive();
 };
 T.ownerState = () => ({ holder: T.owner.isHolder(), state: T.owner.view().s.state, running: !!T.owner.client, connected: T.connected });
+/** (case 14 under cloud) A tracing fetch for this page: each call is numbered "<page>.<n>" (unique: the
+ * page's label and this page's own count) and sends it as x-test-call (the harness's front reads it and never passes
+ * it on), and its stages go to T.trace: "fetch-rejected <name>" or "fetched <status>"; the body's byte receipt (length
+ * and sha256), read from a clone before anything else reads the body; and its json() staged as text() then
+ * JSON.parse ("body-read-failed <name>", "json-parse-failed", "parsed"), giving the same value and throwing the same
+ * error as the Response's own.  The product code is unchanged: the Sync panel takes it through its opts.fetch. */
+T.trace = [];
+let traceN = 0;
+T.traceFetch = (page) => async (input, init = {}) => {
+  const call = `${page}.${++traceN}`;
+  const headers = new Headers(init.headers ?? undefined);
+  headers.set("x-test-call", call);
+  let r;
+  try { r = await fetch(input, { ...init, headers }); }
+  catch (e) { T.trace.push({ call, kind: "fetch-rejected", detail: e?.name }); throw e; }
+  T.trace.push({ call, kind: "fetched", detail: r.status });
+  r.clone().arrayBuffer().then(async (b) => {
+    const sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
+    T.trace.push({ call, bytes: b.byteLength, sha });
+  }, () => {});
+  const read = (f) => async () => { try { return await f(); } catch (e) { T.trace.push({ call, kind: "body-read-failed", detail: e?.name }); throw e; } };
+  const text = read(r.text.bind(r)), bytes = read(r.arrayBuffer.bind(r));
+  r.text = text;
+  r.arrayBuffer = bytes;
+  r.json = async () => {
+    const t = await text();
+    let v;
+    try { v = JSON.parse(t); } catch (e) { T.trace.push({ call, kind: "json-parse-failed" }); throw e; }
+    T.trace.push({ call, kind: "parsed" });
+    return v;
+  };
+  return r;
+};
+/** The relay control's page side: n traced GETs of `path`, each read as JSON; the calls' ids. */
+T.relayProbe = async (path, n) => {
+  const f = T.traceFetch(T.pageLabel ?? "R"), calls = [];
+  for (let i = 0; i < n; i++) {
+    const before = traceN;
+    try { await (await f(path, { credentials: "same-origin" })).json(); } catch {}
+    calls.push(`${T.pageLabel ?? "R"}.${before + 1}`);
+  }
+  return calls;
+};
+/** The traced calls so far: stages and byte receipts. */
+T.traceDump = () => T.trace;
 /** Sync turned on in this browser, as a person does it: the Sync panel's button; then this page's owner the holder. */
 T.turnOn = async () => {
-  const el = document.body.appendChild(document.createElement("div"));
-  T.section = W.syncSection(T.w, el, { say() {}, fail: (e) => T.log.push("warn: panel " + e), usage: () => T.w.usage(), confirm: () => true, prompt: () => "delete" });
+  // (each phase recorded as it completes, with its time, for the harness's diagnostics (T.turnInfo); what the
+  // panel says is kept in T.log as "say: ...", which T.warnings doesn't count)
+  const t = Date.now(), done = (what) => T.turnPhases.push(`${what} (${Date.now() - t} ms)`);
+  T.turnPhases = [];
+  const el = (T.turnEl = document.body.appendChild(document.createElement("div")));
+  T.section = W.syncSection(T.w, el, { say: (m) => T.log.push("say: panel " + String(m).slice(0, 200)), fail: (e) => T.log.push("warn: panel " + e), usage: () => T.w.usage(), confirm: () => true, prompt: () => "delete" }, { fetch: T.traceFetch(T.pageLabel ?? "D1") });
+  done("panel made");
   const button = () => [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent));
   for (let i = 0; i < 200 && !button(); i++) await pause(50);
   if (!button()) return { error: "no Turn on sync: " + el.textContent.slice(0, 200) };
+  done("its Turn on sync button shown");
   button().click();
+  done("clicked");
   for (let i = 0; i < 400 && !(T.owner.isHolder() && T.owner.view().s.state === "synced"); i++) await pause(50);
+  done(T.owner.isHolder() && T.owner.view().s.state === "synced" ? "the holder, synced" : "the wait for the holder, synced, ended without it");
   return T.ownerState();
 };
+/** The turn-on so far (the harness's diagnostics): its completed phases, the panel's text, what it said or warned. */
+T.turnInfo = () => ({
+  phases: T.turnPhases ?? null,
+  panel: T.turnEl ? T.turnEl.textContent.replace(/\s+/g, " ").slice(0, 300) : null,
+  said: T.log.filter((x) => typeof x === "string" && /^(say|warn): /.test(x)).slice(-10),
+});
 /** The board page's side: followDocSync, its DocSync handed to this page's owner. */
 T.boardFollow = async () => {
   T.unfollow = await W.followDocSync({
