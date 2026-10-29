@@ -27,15 +27,25 @@ const SAGE_MAX_CODE = 65536;   // UTF-8 bytes of one \sage / \sageplot argument 
 // a short argument that ran away (a \par or the end of the input inside it): thrown by the demo readers, caught by
 // the innermost primitive's guard (guardRunaway), which drops the command and marks {k:"err", code:"runaway"}
 class RunawayArg extends Error { constructor(text) { super("runaway argument"); this.text = text; } }
-// the primitives LaTeX's kernel defines \long (their arguments may hold paragraphs): the core's readers serve them
-const LONG_PRIMS = new Set(["caption", "footnote", "thanks", "newcommand", "renewcommand", "providecommand", "newenvironment", "renewenvironment"]);
+// which arguments LaTeX's kernel reads \long (they may hold paragraphs; the core's readers serve them), per argument
+// in the order the primitive reads them (csArg, readArgString, readArgShortRaw, readOptRaw each take the next; an
+// optional argument that isn't there takes its place too); a primitive not here, and any argument past the list, is
+// short. (The core's readArgRaw, which reads bodies, is the core's own: long.)
+//   \footnote[n]{text}: \@xfootnote[#1] is short, \@footnotetext#1 long
+//   \caption[short]{text}: \long\def\@caption#1[#2]#3
+//   \thanks{text}: long (its [..], not the kernel's, read as long too)
+//   \newcommand{\cs}[n][default]{body}: \new@command#1 and \@newcommand#1[#2] are short, \@xargdef's [#3] long
+//   (\newenvironment{name}[n][default]{begin}{end}: name, [n] and [default] short (\@newenvb), so not listed)
+const L = true, S = false;
+const ARG_MODES = new Map([["footnote", [S, L]], ["caption", [L, L]], ["thanks", [L, L]],
+  ...["newcommand", "renewcommand", "providecommand", "DeclareRobustCommand"].map((n) => [n, [S, S, L]])]);
 function guardRunaway(name, fn) {
-  const long = LONG_PRIMS.has(name);
+  const modes = ARG_MODES.get(name) ?? null;
   return function (t) {
-    (this.primLong ??= []).push(long);
+    (this.argFrames ??= []).push({ modes, i: 0, long: false });
     try { return fn.call(this, t); }
     catch (e) { if (!(e instanceof RunawayArg)) throw e; this.mark({ k: "err", code: "runaway", name, text: e.text }); }
-    finally { this.primLong.pop(); }
+    finally { this.argFrames.pop(); }
   };
 }
 let POS_EPOCH = 0;
@@ -57,13 +67,14 @@ export class Machine extends CoreMachine {
     this.units[this.units.length - 1].ev = this.ev;
     this.ev = [];
   }
-  // (the marked-line frontier is restored from the checkpoint: a main line the checkpoint left half read (an \input
-  //  in the middle of it) was marked before the checkpoint, so its rest marks nothing; else the next line is unmarked;
-  //  the checkpoint precedes the edit, so its offsets need no shift)
+  // (the marked-line frontier, restored: it is always the start of the line holding the main file's source high-water
+  //  mark (the core's srcSeen, restored and shifted with the checkpoint): every counted main token marks its line
+  //  unless a line at or after it is marked, so the highest line marked is that of the highest offset counted. Not the
+  //  outer reader's place: after the main file read itself, that is behind lines already marked (astra4 POS-A4-1))
   restore(ck, files, delta = 0) {
     super.restore(ck, files, delta); this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS;
-    const mr = ck.readers.find((r) => r.path === this.mainPath);
-    this.posFrontier = mr ? (mr.partial ? mr.lineStart : mr.pos - 1) : -1;
+    const seen = this.srcSeen.get(this.mainPath), text = files.get(this.mainPath);
+    this.posFrontier = seen === undefined || typeof text !== "string" ? -1 : seen <= 0 ? 0 : text.lastIndexOf("\n", seen - 1) + 1;
   }
   // (the core's count of a source token, then: the first token of a main-file line past the marked frontier marks
   //  that line's offset, once: the frontier only moves forward, so a line read again (a reread of the file, the rest
@@ -86,14 +97,19 @@ export class Machine extends CoreMachine {
   // argument or an optional [...] is TeX's "Runaway argument? ... Paragraph ended before \x was complete": the
   // reader puts the \par back and throws RunawayArg; every primitive is wrapped (prim/xprim below), and the innermost
   // one drops the whole command before any effect (as TeX drops the call), with a "not finished" note, and the rest of
-  // the document goes on from the \par. In a \long command (LONG_PRIMS: captions, footnotes, \thanks, the \newcommand
-  // family) and outside any primitive (a \newcommand macro's optional argument) the core's own readers run, which read
-  // on to the closing brace or bracket.
+  // the document goes on from the \par. For a \long argument (ARG_MODES, per argument: a caption's or footnote's
+  // text, \thanks, a \newcommand default or body), in a \newcommand macro's call, and outside any primitive, the
+  // core's own readers run, which read on to the closing brace or bracket.
   prim(name, fn) { super.prim(name, guardRunaway(name, fn)); }
   xprim(name, fn, cond = false) { super.xprim(name, guardRunaway(name, fn), cond); }
   // (a \newcommand macro's optional argument is \long in the kernel, even read inside a short primitive's expansion)
-  callLMacro(cs, m) { (this.primLong ??= []).push(true); try { return super.callLMacro(cs, m); } finally { this.primLong.pop(); } }
-  shortNow() { const s = this.primLong; return !!s && s.length > 0 && !s[s.length - 1]; }
+  callLMacro(cs, m) { (this.argFrames ??= []).push({ modes: null, i: 0, long: true }); try { return super.callLMacro(cs, m); } finally { this.argFrames.pop(); } }
+  // (the mode of the argument about to be read, taken once per read: long outside any primitive or in a macro call)
+  nextLong() {
+    const s = this.argFrames; if (!s || s.length === 0) return true;
+    const f = s[s.length - 1]; if (f.long) return true;
+    return f.modes ? (f.modes[f.i++] ?? false) : false;
+  }
   readShortGroup(open) {    // after "{": to the matching "}"; a \par or the end of the input throws RunawayArg
     const out = []; let depth = 1;
     for (;;) {
@@ -105,16 +121,23 @@ export class Machine extends CoreMachine {
       if (out.length > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
     }
   }
-  readArgShortRaw() {       // an undelimited argument: short (readShortGroup) in a short primitive, else the core's
-    if (!this.shortNow()) return this.readArgRaw();
+  readArgShortRaw() { return this.nextLong() ? this.readArgRaw() : this.shortArg(); }
+  readArgString() { return this.nextLong() ? super.readArgString() : this.toks2str(this.shortArg()).trim(); }
+  csArg() {                 // \x or {\x}: the braces read short for a short argument (\newcommand{\x then a blank line)
+    if (this.nextLong()) return super.csArg();
+    let t = this.skipSpacesRaw();
+    if (t !== null && !isCs(t) && catOf(t) === CAT.BGROUP) { const g = this.readShortGroup("{"); t = g.find(isCs) ?? null; }
+    if (t === null || !isCs(t)) { this.d("E-MISSING-CS"); return null; }
+    return t;
+  }
+  shortArg() {              // an undelimited argument, short: a brace group by readShortGroup
     const t = this.skipSpacesRaw();
     if (t === null) return [];
     if (!isCs(t) && catOf(t) === CAT.BGROUP) return this.readShortGroup("{");
     return [t];
   }
-  readArgString() { return this.shortNow() ? this.toks2str(this.readArgShortRaw()).trim() : super.readArgString(); }
-  readOptRaw() {            // [ ... ] if present (else null): short in a short primitive, else the core's
-    if (!this.shortNow()) return super.readOptRaw();
+  readOptRaw() {            // [ ... ] if present (else null): short for a short argument, else the core's
+    if (this.nextLong()) return super.readOptRaw();
     const t = this.skipSpacesRaw();
     if (t === null) return null;
     if (t !== mkChar(CAT.OTHER, 91)) { this.back(t); return null; }
