@@ -11,10 +11,86 @@ const J = (x) => JSON.stringify(x);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let n = 0, acct = 0;
 const names = () => { n++; return { name: `ws-sc-${n}-${Math.random().toString(36).slice(2, 8)}`, mainName: `main-sc-${n}` }; };
-const fresh = async (nm = names()) => { localStorage.clear(); const w = await W.Workspace.open(nm); used.push(w); return w; };
+const fresh = async (nm = names()) => { if (D) return freshD(nm); localStorage.clear(); const w = await W.Workspace.open(nm); used.push(w); return w; };
 const used = [];
-const ctl = async (cmd, extra = {}) => (await fetch("/__ctl", { method: "POST", body: J({ cmd, ...extra }) })).json();
-const post = (path, body) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: J(body ?? {}) });
+const ctl = async (cmd, extra = {}) => (D ? ctlD(cmd, extra) : (await fetch("/__ctl", { method: "POST", body: J({ cmd, ...extra }) })).json());
+const post = (path, body) => (D ? postD(path, body) : fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: J(body ?? {}) }));
+
+// ---- 3b's diagnostic mode (plan csp3b-accountswitch-diag r2-r8).  Only when the page has window.__budgets AND the
+// front answers its proof route's quiet with the registry's shape; otherwise (the cloud's runner: no budgets, a front
+// with no /__proof route) every helper here behaves exactly as before, and run() is the old loop.  In diagnostic mode:
+// every awaited helper is a labelled, bounded step; a case's clients, workspaces and timed-out work are registered; after
+// each case a bounded cleanup proves the page and the front quiet before the next one, else the run fail-stops.
+
+/** the diagnostic run's state; null in legacy mode (and outside a run) */
+let D = null;
+const now = () => performance.now();
+class StepTimeout extends Error {
+  constructor(step, ms) { super(`step timed out: ${step} (${Math.round(ms)} ms)`); this.name = "StepTimeout"; this.step = step; }
+}
+/** A label for a predicate's until() steps (legacy until ignores it) */
+const named = (label, f) => Object.assign(f, { label });
+/** One awaited step, labelled and bounded: the label and the deadline are set before `thunk(ms)` runs; a synchronous
+ * throw is a rejection; a rejection passes through unchanged; past the bound, StepTimeout, and the losing promise stays
+ * in the pending set until it settles (a late settlement is recorded).  The bound: min(ms, STEP_MS), cut by the
+ * cleanup's deadline in cleanup, else by the case's only when enforceCase. */
+function step(label, thunk, ms) {
+  const d = D, b = d.budgets;
+  let lim = Math.min(ms ?? b.STEP_MS, b.STEP_MS);
+  if (d.cleanupDeadline !== null) lim = Math.min(lim, d.cleanupDeadline - now());
+  else if (b.enforceCase && d.caseDeadline !== null) lim = Math.min(lim, d.caseDeadline - now());
+  const rec = { label, startMs: Math.round(now()) };
+  d.steps.push(rec);
+  const done = () => { const i = d.steps.indexOf(rec); if (i >= 0) d.steps.splice(i, 1); };
+  if (lim <= 0) { done(); return Promise.reject(new StepTimeout(label, 0)); }
+  let p;
+  try { p = Promise.resolve(thunk(lim)); } catch (e) { p = Promise.reject(e); }
+  let timer;
+  const expired = new Promise((_, no) => { timer = setTimeout(() => {
+    const pend = { label, since: now() };
+    d.pending.add(pend);
+    p.then(() => {}, () => {}).then(() => { d.pending.delete(pend); d.late.push(`late: ${label} settled after ${((now() - pend.since) / 1000).toFixed(1)} s past its bound`); });
+    no(new StepTimeout(label, lim));
+  }, lim); });
+  return Promise.race([p, expired]).finally(() => { clearTimeout(timer); done(); });
+}
+/** A step at a case's own call site (accountSwitch's A-rows); legacy: the thunk, as written */
+const S = (label, thunk, ms) => (D ? step(label, thunk, ms) : thunk());
+const ctlD = (cmd, extra = {}, ms) => step(`ctl ${cmd}`, (lim) => fetch("/__ctl", { method: "POST", body: J({ cmd, ...extra }), signal: AbortSignal.timeout(lim + 100) }).then((r) => r.json()), ms);
+const postD = (path, body) => step(`post ${path}`, (lim) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: J(body ?? {}), signal: AbortSignal.timeout(lim + 100) }));
+const freshD = async (nm) => { localStorage.clear(); const w = await step("fresh: Workspace.open", () => W.Workspace.open(nm)); used.push(w); return w; };
+/** A proof command (GET /__proof/<cmd>), bounded */
+const proofD = (cmd, n, phase) => step(`proof ${cmd}`, (lim) => fetch(`/__proof/${cmd}${n === undefined ? "" : `?n=${n}${phase ? `&phase=${phase}` : ""}`}`, { signal: AbortSignal.timeout(lim + 100) }).then((r) => r.json()));
+/** until() in diagnostic mode (r3 §3.2): the window is checked between calls and its expiry is false, as before; each
+ * call is one step, whose StepTimeout (a call that hangs past its own bound) is the only one; a predicate that throws
+ * is false, as before */
+async function untilD(f, ms) {
+  const label = `until: ${f.label ?? (f.name || "predicate")}`;
+  const w0 = now();
+  for (;;) {
+    if (now() - w0 >= ms) return false;
+    let r = false;
+    try { r = await step(label, () => f()); } catch (e) { if (e instanceof StepTimeout) throw e; }
+    if (r) return true;
+    await sleep(20);
+  }
+}
+async function stopD(c) {
+  await step("stop: c.stop()", () => c.stop());
+  await step("stop: c.run", () => c.run);
+}
+const wellFormedBudgets = (b) => !!b && typeof b === "object" && [b.STEP_MS, b.CLEANUP_MS, b.CASE_FLOOR_MS].every((x) => Number.isFinite(x) && x > 0) && typeof b.CASE_MS === "object" && b.CASE_MS !== null && typeof b.enforceCase === "boolean";
+const quietShape = (q) => !!q && Array.isArray(q.inflight) && Array.isArray(q.pendingLate) && Array.isArray(q.late) && [q.closers, q.held, q.closeFailures, q.untrackedReads, q.ups].every(Number.isInteger) && typeof q.epoch === "string";
+/** Diagnostic, or why not: the budgets are read FIRST, and only with them is the front asked (one quiet, 5 s) */
+async function diagnosticMode() {
+  const b = window.__budgets;
+  if (b === undefined) return { on: false, why: "no window.__budgets" };
+  if (!wellFormedBudgets(b)) return { on: false, why: "window.__budgets malformed" };
+  let q;
+  try { q = await (await fetch("/__proof/quiet", { signal: AbortSignal.timeout(5000) })).json(); } catch (e) { return { on: false, why: `quiet: ${e?.name ?? e}` }; }
+  if (!quietShape(q)) return { on: false, why: `quiet answered ${J(q).slice(0, 200)}` };
+  return { on: true, budgets: b };
+}
 /** A new account, signed in, sync on: its own log. */
 async function account(given) {
   const id = given ?? window.ACCOUNTS[acct++];
@@ -27,6 +103,7 @@ async function account(given) {
   return id;
 }
 async function until(f, ms = 10_000) {
+  if (D) return untilD(f, ms);
   const t = Date.now();
   for (;;) {
     try { if (await f()) return true; } catch {}
@@ -96,9 +173,11 @@ function fakeClock(t0 = 1_900_000_000_000) {
 function client(w, opts = {}) {
   const c = new W.SyncClient(w, { origin: location.origin, ...opts });
   c.run = c.start();
+  if (D) D.clients.push(c);
   return c;
 }
 async function stop(c) {
+  if (D) return stopD(c);
   await c.stop();
   await c.run;
 }
@@ -114,7 +193,7 @@ async function nothingApplied(w, what) {
 
 /** The server's log as another device reads it, and this device's ops in it. */
 async function serverOps(w) {
-  const p = await ctl("probe");
+  const p = await S("serverOps: ctl probe", () => ctl("probe"));
   return { all: p.index, mine: p.index.filter((o) => o.device === w.device) };
 }
 
@@ -727,42 +806,44 @@ async function accountSwitch() {
   // and during a PUT.  The invariant, checked on every message and request the proxy saw: nothing is sent on a
   // socket, or PUT, under one account's session for another account's namespace; A's records stay A's, and go to A
   // once A is signed in again.  (B's own namespace syncing this same local workspace is C1's rule, not a leak.))
-  const A = await account(), B = await account();
-  await signInOnly(A);
+  // (3b: each await at its call site is a labelled step in diagnostic mode (plan r2 §2's A-rows); in legacy, S runs
+  // the thunk and named() only labels the predicate, so this case runs as before)
+  const A = await S("accountSwitch A1: account() A", () => account()), B = await S("accountSwitch A1: account() B", () => account());
+  await S("accountSwitch A2: signInOnly(A)", () => signInOnly(A));
   await ctl("reset");
   const w = await fresh();
   const c0 = client(w);
-  check(await until(() => settled(w, c0)), "account switch: synced as A");
+  check(await until(named("accountSwitch A5: settled(w, c0)", () => settled(w, c0))), "account switch: synced as A");
   const nsA = nsOf(c0);
-  const from = await w.lastSeq();
+  const from = await S("accountSwitch A6: w.lastSeq()", () => w.lastSeq());
   await stop(c0);
-  await w.mkdir("/a-only");
+  await S("accountSwitch A8: w.mkdir", () => w.mkdir("/a-only"));
   // (B signs in just before the socket opens: discovery said A, the socket is B's)
   await ctl("set", { set: { switchOnUpgrade: B } });
   const c = client(w);
-  const hB = await hashOf(B), hA = await hashOf(A);
-  check(await until(() => (nsOf(c) ?? "").startsWith(hB) && c.status.state === "synced", 15_000), "account switch: the socket opened under B's session is refused (its hello names A), and the client goes on as B: " + J({ ns: (nsOf(c) ?? "").slice(0, 8), state: c.status.state }));
+  const hB = await S("accountSwitch A9: hashOf(B)", () => hashOf(B)), hA = await S("accountSwitch A9: hashOf(A)", () => hashOf(A));
+  check(await until(named("accountSwitch A10: ns is B's, synced", () => (nsOf(c) ?? "").startsWith(hB) && c.status.state === "synced"), 15_000), "account switch: the socket opened under B's session is refused (its hello names A), and the client goes on as B: " + J({ ns: (nsOf(c) ?? "").slice(0, 8), state: c.status.state }));
   const l1 = await ctl("log");
   const refusedHello = l1.got.some((g) => g.t === "error" && g.code === "forbidden");
   check(l1.switchedUpgrade === 1 && refusedHello && !l1.bindings.some((b) => b.hello === hA), "account switch: nothing of A's namespace sent on B's socket: " + J(l1.bindings));
-  await unlost(w, nsA, "/a-only", "account switch");
+  await S("accountSwitch A11: unlost", () => unlost(w, nsA, "/a-only", "account switch"));
   await stop(c);
   // (back to A; then B signs in during one of A's PUTs: refused by its binding)
-  await signInOnly(A);
+  await S("accountSwitch A2: signInOnly(A) again", () => signInOnly(A));
   const c2 = client(w);
-  check(await until(async () => nsOf(c2) === nsA && (await settledIn(w, c2, nsA))), "account switch: A signed in again: A's namespace resumes and its records are decided");
+  check(await until(named("accountSwitch A12: settledIn(w, c2, nsA)", async () => nsOf(c2) === nsA && (await settledIn(w, c2, nsA)))), "account switch: A signed in again: A's namespace resumes and its records are decided");
   await ctl("set", { set: { switchOnPut: B } });
-  const f = await w.create("/a-file.bin", { content: bytes(2000, 41) });
-  check(await until(async () => (await ctl("log")).http.some((h) => h.switched)), "account switch: B signed in during A's PUT");
-  check(await until(() => (nsOf(c2) ?? "").startsWith(hB), 15_000), "account switch: the PUT refused (A's binding, B's session), and the client goes on as B");
+  const f = await S("accountSwitch A8: w.create", () => w.create("/a-file.bin", { content: bytes(2000, 41) }));
+  check(await until(named("accountSwitch A13: ctl log, switched", async () => (await ctl("log")).http.some((h) => h.switched))), "account switch: B signed in during A's PUT");
+  check(await until(named("accountSwitch A10: ns is B's", () => (nsOf(c2) ?? "").startsWith(hB)), 15_000), "account switch: the PUT refused (A's binding, B's session), and the client goes on as B");
   const put = (await ctl("log")).http.find((h) => h.switched);
   check(put.status === 403 && put.bind === hA && put.session === hB, "account switch: …refused 403, before anything was stored: " + J({ status: put.status }));
   await stop(c2);
   // (explicitly back to A: A's file goes to A)
-  await signInOnly(A);
+  await S("accountSwitch A2: signInOnly(A) once more", () => signInOnly(A));
   const c3 = client(w);
-  check(await until(async () => nsOf(c3) === nsA && (await settledIn(w, c3, nsA)), 15_000), "account switch: back as A, every record of A's decided");
-  const { mine: inA } = await serverOps(w);
+  check(await until(named("accountSwitch A12: settledIn(w, c3, nsA)", async () => nsOf(c3) === nsA && (await settledIn(w, c3, nsA))), 15_000), "account switch: back as A, every record of A's decided");
+  const { mine: inA } = await S("accountSwitch A14: serverOps", () => serverOps(w));
   check(inA.some((o) => o.path === "/a-only") && inA.some((o) => o.path === "/a-file.bin" && o.sha256 === f.sha256), "account switch: A's log has A's ops: " + J(inA.map((o) => o.path)));
   const l = await ctl("log");
   const opsOk = l.bindings.every((b) => b.session === b.hello);
@@ -3645,6 +3726,11 @@ async function scaleRebuild() {
 const SCALE = { scaleRebuild };
 
 export async function run(only = "", skip = "") {
+  // (3b: diagnostic only when the page has budgets and the front answers the proof route's quiet; otherwise the loop
+  // below, as it was, with only window.__report.mode added)
+  const mode = await diagnosticMode();
+  if (mode.on) return runDiagnostic({ ...CASES, ...(only ? SCALE : {}) }, only, skip, mode.budgets);
+  window.__report = { mode: "legacy", why: mode.why };
   // (the scale cases run only when named; the cases named in `skip` never run: the runner says why, for each)
   const skipped = skip ? skip.split(",") : [];
   for (const [name, f] of Object.entries({ ...CASES, ...(only ? SCALE : {}) })) {
@@ -3660,4 +3746,271 @@ export async function run(only = "", skip = "") {
   }
   for (const w of used) try { w.close(); } catch {}
   return results;
+}
+
+// ---- 3b's diagnostic run (plan r2 §3, r3 §3, r4 §1): epochs, steps, a bounded cleanup after every case that proves the
+// page and the front quiet (else fail-stop: nothing more runs on state that isn't proved clean), and window.__report kept
+// current at every boundary, in memory, for the runner's polls
+
+const caseBound = (b, name) => b.CASE_MS[name] ?? b.CASE_FLOOR_MS;
+/** A quiet that answers with the registry's shape, else a rejection (never taken for quiescence) */
+const quietD = async () => { const q = await proofD("quiet"); if (!quietShape(q)) throw new Error(`quiet answered ${J(q).slice(0, 200)}`); return q; };
+
+/** After case n: C1-C6 within CLEANUP_MS from its start (r4 §1); ok, or where and why not.  `q0`: the quiet at the
+ * case's start (its close failures and untracked reads must be unchanged at the end, r5 §2). */
+async function cleanupCase(n, q0) {
+  const d = D;
+  d.cleanupDeadline = now() + d.budgets.CLEANUP_MS;
+  const stages = [];
+  let at = "C1";
+  const fail = (why, quiet) => ({ ok: false, step: at, why, quiet, stages });
+  const left = () => d.cleanupDeadline - now();
+  try {
+    // C1: each of the case's clients stopped, then its loop's end awaited (a loop that rejected has ended: said, not
+    // a failure; one that never ends is)
+    for (const c of d.clients) {
+      for (const [label, f] of [["cleanup: c.stop()", () => c.stop()], ["cleanup: c.run", () => c.run]]) {
+        at = label;
+        try { await step(label, f); stages.push(`${label} ok`); } catch (e) { if (e instanceof StepTimeout) throw e; stages.push(`${label} rejected (${e?.message ?? e})`); }
+      }
+    }
+    // C2, C3: the front's held waiters released, its proxied sockets closed (a rejection here is a failure)
+    at = "cleanup: release";
+    await ctlD("release");
+    at = "cleanup: closeAll";
+    const ca = await ctlD("closeAll");
+    if (ca?.error) return fail(`closeAll answered ${J(ca)}`);
+    // C4: drain: nothing in flight on the front (any tag), no proxied socket, no held waiter, nothing pending here
+    at = "C4 drain";
+    let q;
+    for (;;) {
+      q = await quietD();
+      if (q.inflight.length === 0 && q.closers === 0 && q.held === 0 && d.pending.size === 0) break;
+      if (left() <= 100) return fail(`not drained: ${J({ inflight: q.inflight, closers: q.closers, held: q.held, pending: [...d.pending].map((p) => p.label) })}`, q);
+      await sleep(100);
+    }
+    at = "C4 drained(n)";
+    await proofD("drained", n);
+    // C5: the log's cross-check, read before the reset (tagged c<n> now)
+    at = "C5 log";
+    const l = await ctlD("log");
+    if (!(l.open === 0 && l.putsNow === 0)) return fail(`log: open ${l.open}, putsNow ${l.putsNow}`);
+    at = "C5 reset";
+    await ctlD("reset");
+    // C6: cleanup's own operations ended, c<n> drained, then nothing late or pending-late for n or c<n>, no new close
+    // failure, no untracked read
+    at = "C6 c(n) drain";
+    for (;;) {
+      q = await quietD();
+      if (!q.inflight.some((e) => e.tag === `c${n}`)) break;
+      if (left() <= 100) return fail(`cleanup's own operations still in flight: ${J(q.inflight)}`, q);
+      await sleep(100);
+    }
+    at = "C6 drained(c(n))";
+    await proofD("drained", n, "cleanup");
+    at = "C6 final quiet";
+    q = await quietD();
+    const mine = (e) => e.tag === String(n) || e.tag === `c${n}`;
+    const late = q.late.filter(mine), pendingLate = q.pendingLate.filter(mine);
+    if (late.length || pendingLate.length) return fail(`late ${J(late)}, pending-late ${J(pendingLate)}`, q);
+    if (q.closeFailures !== q0.closeFailures) return fail(`close failures ${q0.closeFailures} -> ${q.closeFailures}`, q);
+    if (q.untrackedReads !== q0.untrackedReads) return fail(`untracked reads ${q0.untrackedReads} -> ${q.untrackedReads}`, q);
+    return { ok: true, stages };
+  } catch (e) {
+    return fail(e instanceof StepTimeout ? `timed out: ${e.step}` : `threw: ${e?.message ?? e}`);
+  } finally {
+    d.cleanupDeadline = null;
+  }
+}
+
+/** The run in diagnostic mode: the same selection as run(), the same results array */
+async function runDiagnostic(table, only, skip, budgets) {
+  const d = (D = { budgets, clients: [], pending: new Set(), steps: [], late: [], caseDeadline: null, cleanupDeadline: null, epoch: 0, failStopNow: false });
+  const rep = (window.__report = { mode: "diagnostic", why: null, startedMs: Math.round(now()), cases: [], steps: d.steps, late: d.late, stopped: null, notRun: [], progress: null, results, done: false });
+  try {
+    const skipped = skip ? skip.split(",") : [];
+    const list = Object.entries(table).filter(([name]) => !(only && !only.split(",").includes(name)) && !skipped.includes(name));
+    for (let i = 0; i < list.length; i++) {
+      const [name, f] = list[i];
+      const n = ++d.epoch;
+      let q0;
+      try { await proofD("epoch", n); q0 = await quietD(); } catch (e) { rep.stopped = { case: name, step: "epoch", why: e?.message ?? String(e) }; break; }
+      const cs = { name, startMs: Math.round(now()), checks: results.length, outcome: null };
+      rep.cases.push(cs);
+      window.progress = rep.progress = { name, checks: results.length, startMs: cs.startMs };
+      d.clients = [];
+      d.caseDeadline = now() + caseBound(budgets, name);
+      try {
+        await f();
+        cs.outcome = "ok";
+      } catch (e) {
+        cs.outcome = e instanceof StepTimeout ? `timeout: ${e.step}` : `threw: ${e?.message ?? e}`;
+        check(false, `${name}: threw ${e?.stack ?? e}`);
+      }
+      d.caseDeadline = null;
+      cs.endMs = Math.round(now());
+      const over = (cs.endMs - cs.startMs - caseBound(budgets, name)) / 1000;
+      if (over > 0) cs.over = +over.toFixed(1);
+      const cl = d.failStopNow ? { ok: false, step: "(control) failStopNow", why: "the page stops before its cleanup" } : await cleanupCase(n, q0);
+      cs.cleanup = cl;
+      if (!cl.ok) {
+        // FAIL-STOP: the epoch abandoned, what was still in flight named, every remaining case not run
+        let q = null;
+        try { await proofD("abandon", n); q = await quietD(); } catch {}
+        rep.stopped = { case: name, step: cl.step, why: cl.why, pending: [...d.pending].map((p) => p.label), pendingLate: (q?.pendingLate ?? []).map((e) => `${e.label}@${e.tag}`), late: (q?.late ?? []).map((e) => `${e.label}@${e.tag}`) };
+        for (const [rest] of list.slice(i + 1)) { rep.notRun.push(rest); check(false, `${rest}: not run (fail-stop after ${name})`); }
+        break;
+      }
+    }
+    if (!rep.stopped) for (const w of used) try { w.close(); } catch {}
+    return results;
+  } finally {
+    rep.done = true;
+    D = null;
+  }
+}
+
+// ---- 3b's controls (plan r3 §4, r4 §3, r5 §1-§2, r6 §3): each would fail against 7777f20b's code.  The runner loads
+// them on its control pages (each a fresh navigation, with small budgets) and requires every line ok.  They use their
+// own accounts (ctl.html's window.ACCOUNTS).
+
+const ctlWithin = (cmd, extra, ms) => ctlD(cmd, extra, ms);
+const quietNow = () => quietD();
+/** K-G's dependent work: never done after K-C's fail-stop */
+let kGRuns = 0;
+const CONTROL_CASES = {
+  P1: {
+    // K-R1: a quiet during a pending ctl sees that op, never itself
+    async kR1() {
+      const p = ctl("hang").catch(() => {});
+      await sleep(200);
+      const q = await quietNow();
+      check(q.inflight.length === 1 && q.inflight[0].label === "ctl hang" && !q.inflight.some((e) => /proof|quiet/.test(e.label)), "K-R1: quiet sees the pending ctl hang and never itself: " + J(q.inflight));
+      await ctl("release");
+      await p;
+    },
+    // K-R2: a body read outside any operation is counted; then reset, the exact one only
+    async kR2() {
+      const q0 = await quietNow();
+      const r = await S("K-R2: untracked read", (lim) => fetch("/__untracked", { method: "POST", body: "x", signal: AbortSignal.timeout(lim + 100) }).then((x) => x.json()));
+      const q1 = await quietNow();
+      check(q1.untrackedReads === q0.untrackedReads + 1 && r.untrackedReads === q1.untrackedReads, "K-R2: an untracked read is detected: " + J({ before: q0.untrackedReads, after: q1.untrackedReads }));
+      const z = await ctl("untrackedReset", { to: q0.untrackedReads });
+      const q2 = await quietNow();
+      check(z.ok === true && q2.untrackedReads === q0.untrackedReads, "K-R2: …and reset, exactly that one: " + J({ reset: z, now: q2.untrackedReads }));
+    },
+    // K-L1: a healthy case: no late, no pending-late, c(n) closes (the runner checks its cleanup)
+    async kL1() {
+      await account();
+      const w = await fresh();
+      const c = client(w);
+      check(await until(named("K-L1: settled", () => settled(w, c)), 3000), "K-L1: a client synced");
+      await ctl("log");
+    },
+    // K-B: a ctl that never answers: StepTimeout naming it; cleanup's release frees it
+    async kB() { await ctl("hang"); },
+    // K-D: a step that times out, then settles 1 s later: a late record, and the next case starts after it
+    async kD() { await S("K-D: a slow page step", () => sleep(CONTROL_D_MS).then(() => { window.__kDSettled = now(); })); },
+    // K-F: a rejection passes through as itself
+    async kF() { await S("K-F: rejects at once", () => Promise.reject(new Error("K-F injected"))); },
+    // K-H: until's window expiring is false, never a StepTimeout
+    async kH() {
+      const t0 = now();
+      const r = await until(named("K-H: false after 300 ms", async () => { await sleep(300); return false; }), 1000);
+      check(r === false && now() - t0 < 2000, "K-H: until's window expired: false, no StepTimeout: " + J({ r, ms: Math.round(now() - t0) }));
+    },
+    // K-I: a front op the page abandons at 0.5 s: cleanup waits for it (2 s), with no late
+    async kI() { await ctlWithin("slow", { ms: 2000 }, 500); },
+    // K-U1: probe failing after its socket is acquired: the error reaches the case; the socket closed; nothing kept
+    async kU1() {
+      await account();
+      await ctl("set", { set: { probeFailAfterConnect: true } });
+      const q0 = await quietNow();
+      const r = await S("K-U1: ctl probe", (lim) => fetch("/__ctl", { method: "POST", body: J({ cmd: "probe" }), signal: AbortSignal.timeout(lim + 100) }).then(async (x) => ({ status: x.status, text: await x.text() })));
+      let q1 = await quietNow();
+      for (let i = 0; i < 20 && q1.unconfirmed; i++) { await sleep(20); q1 = await quietNow(); }
+      check(r.status === 500 && r.text.includes("injected: probe failed after connect") && q1.armed.probeFailAfterConnect === false && q1.ups === q0.ups && q1.closeFailures === q0.closeFailures && q1.unconfirmed === 0, "K-U1: probe's error reaches the case; its socket closed and idle, nothing kept, the flag consumed: " + J({ status: r.status, text: r.text.slice(0, 80), armed: q1.armed, ups: [q0.ups, q1.ups], closeFailures: [q0.closeFailures, q1.closeFailures], unconfirmed: q1.unconfirmed }));
+    },
+  },
+  // K-A: a predicate that never settles: StepTimeout, the pending set never empties, fail-stop naming it
+  P2: { async kA() { await until(named("K-A: never settles", () => new Promise(() => {})), 10_000); } },
+  // K-C: a client whose stop never settles: fail-stop at cleanup's c.stop(); then K-G never runs
+  P3: {
+    async kC() { D.clients.push({ stop: () => new Promise(() => {}), run: Promise.resolve() }); },
+    async kG() { kGRuns++; },
+  },
+  // K-E: closeAll rejects: a cleanup failure, fail-stop
+  P4: { async kE() { await ctl("set", { set: { closeAllReject: true } }); } },
+  // K-J: a front op longer than the cleanup: fail-stop, abandoned, pending-late; the runner's barrier sees it end late
+  P5: { async kJ() { await ctlWithin("slow", { ms: 10_000 }, 500); } },
+  // K-L2: an op tagged n that starts at drained(n) and ends 1 s later: late or pending-late for n, fail-stop
+  P6: { async kL2() { await ctl("armLate"); } },
+  // K-RES1: a proxied socket left open with nothing in flight: the page stops before its cleanup; the runner's barrier
+  // must close it itself
+  RES1: {
+    async kRES1() {
+      await account();
+      const w = await fresh();
+      client(w);
+      check(await until(named("K-RES1: a proxied socket open", async () => (await quietNow()).closers === 1), 3000), "K-RES1: a proxied socket open");
+      await ctl("set", { set: { refuseUpgrades: true } });
+      D.failStopNow = true;
+    },
+  },
+};
+/** K-D's step settles this long after its start: past the step's 2 s, inside the cleanup's 5 s */
+const CONTROL_D_MS = 3000;
+
+/** What each control page's run must show (beyond its cases' own checks) */
+function controlLines(page, rep) {
+  const cs = (name) => rep.cases.find((c) => c.name === name);
+  const lines = [];
+  const add = (ok, what) => lines.push([!!ok, what]);
+  const clean = (name) => cs(name)?.cleanup?.ok === true;
+  const own = (name, re) => results.filter(([ok, what]) => what.startsWith(re)).every(([ok]) => ok) && results.some(([, what]) => what.startsWith(re));
+  if (page === "P1") {
+    add(!rep.stopped && rep.cases.length === 9, "P1 ran every control, with no fail-stop: " + J({ stopped: rep.stopped, cases: rep.cases.map((c) => c.name) }));
+    add(cs("kR1")?.outcome === "ok" && clean("kR1") && own("kR1", "K-R1"), "K-R1: quiet never sees itself: " + J(cs("kR1")));
+    add(cs("kR2")?.outcome === "ok" && clean("kR2") && own("kR2", "K-R2"), "K-R2: an untracked read is detected, then reset exactly: " + J(cs("kR2")));
+    add(cs("kL1")?.outcome === "ok" && clean("kL1") && own("kL1", "K-L1"), "K-L1: a healthy case: c(n) closes, zero late, zero pending-late: " + J(cs("kL1")));
+    add(cs("kB")?.outcome === "timeout: ctl hang" && clean("kB"), "K-B: a ctl that never answers times out, named; cleanup's release frees it: " + J(cs("kB")));
+    add(cs("kD")?.outcome === "timeout: K-D: a slow page step" && clean("kD") && rep.late.some((l) => l.startsWith("late: K-D: a slow page step")) && window.__kDSettled !== undefined && cs("kF")?.startMs > window.__kDSettled, "K-D: a late page record, and the next case started after it settled: " + J({ kD: cs("kD"), late: rep.late, settled: window.__kDSettled, next: cs("kF")?.startMs }));
+    add(cs("kF")?.outcome === "threw: K-F injected" && clean("kF"), "K-F: a rejection passes through as itself: " + J(cs("kF")));
+    add(cs("kH")?.outcome === "ok" && clean("kH") && own("kH", "K-H"), "K-H: until's window expiring is false, no StepTimeout: " + J(cs("kH")));
+    add(cs("kI")?.outcome === "timeout: ctl slow" && clean("kI"), "K-I: the front op outlives the page's 0.5 s; cleanup waits for it, no late: " + J(cs("kI")));
+    add(cs("kU1")?.outcome === "ok" && clean("kU1") && own("kU1", "K-U1"), "K-U1: probe's failure after acquisition reaches the case, its socket closed: " + J(cs("kU1")));
+  } else if (page === "P2") {
+    add(rep.stopped?.case === "kA" && rep.stopped.step === "C4 drain" && rep.stopped.pending.includes("until: K-A: never settles") && cs("kA")?.outcome === "timeout: until: K-A: never settles", "K-A: a predicate that never settles: StepTimeout, then fail-stop naming it: " + J(rep.stopped));
+  } else if (page === "P3") {
+    add(rep.stopped?.case === "kC" && rep.stopped.step === "cleanup: c.stop()", "K-C: a stop that never settles: fail-stop at cleanup: c.stop(): " + J(rep.stopped));
+    add(rep.notRun.includes("kG") && kGRuns === 0 && !cs("kG"), "K-G: after the fail-stop, the next case never runs (its counter 0): " + J({ notRun: rep.notRun, kGRuns }));
+  } else if (page === "P4") {
+    add(rep.stopped?.case === "kE" && rep.stopped.step === "cleanup: closeAll", "K-E: closeAll rejects: a cleanup failure, fail-stop: " + J(rep.stopped));
+  } else if (page === "P5") {
+    add(rep.stopped?.case === "kJ" && rep.stopped.step === "C4 drain" && rep.stopped.pendingLate.some((x) => /^ctl slow@/.test(x)), "K-J: a front op past the cleanup: fail-stop, abandoned, pending-late ctl slow: " + J(rep.stopped));
+  } else if (page === "P6") {
+    add(rep.stopped?.case === "kL2" && rep.stopped.step === "C6 final quiet" && [...rep.stopped.pendingLate, ...rep.stopped.late].some((x) => /^armed late@/.test(x)), "K-L2: an op of epoch n ending after drained(n): late or pending-late, fail-stop: " + J(rep.stopped));
+  } else if (page === "RES1") {
+    add(rep.stopped?.case === "kRES1" && rep.stopped.step === "(control) failStopNow" && own("kRES1", "K-RES1"), "K-RES1: the page stopped with its proxied socket open: " + J(rep.stopped));
+  }
+  return lines;
+}
+
+/** A control page's run: diagnostic for every page but P7 (no budgets: legacy, the old loop over one real case) and P8
+ * (budgets, but a front whose quiet is unknown: legacy, which the runner must refuse) */
+export async function runControls(page) {
+  if (page === "P7" || page === "P8") {
+    const mode = await diagnosticMode();
+    const out = [];
+    if (page === "P7") {
+      const res = await run("basics");
+      out.push([!mode.on && window.__report?.mode === "legacy" && Array.isArray(res) && res.length > 0 && res.every((x) => Array.isArray(x) && x.length === 2 && typeof x[0] === "boolean" && typeof x[1] === "string"), "K-M1: no budgets: legacy, the old loop, the same results shape: " + J({ mode: window.__report?.mode, why: window.__report?.why, results: res?.length })]);
+    } else out.push([!mode.on && /^quiet answered /.test(mode.why), "K-M2: budgets, but quiet unknown: legacy: " + mode.why]);
+    window.__report = { mode: "legacy", why: mode.why, done: true };
+    return out;
+  }
+  const mode = await diagnosticMode();
+  if (!mode.on) { window.__report = { mode: "legacy", why: mode.why, done: true }; return [[false, `${page}: diagnostic mode not active: ${mode.why}`]]; }
+  await runDiagnostic(CONTROL_CASES[page], "", "", mode.budgets);
+  return controlLines(page, window.__report);
 }

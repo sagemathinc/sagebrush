@@ -9,6 +9,7 @@
 // The 2 cases that need the cloud's plan limits (storageFull, tooLarge) are skipped by name, each saying so.
 //   SYNC_REQUIRE_CLAIM=1 CHROME=google-chrome bun web/workspace/test-sync-client-ref.mjs
 import { spawn } from "node:child_process";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, mkdtempSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -17,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { devtoolsPort } from "../test-port.mjs";
 import { ReferenceServer } from "../sync-protocol/reference-server.ts";
 import { checkFgen } from "../sync-protocol/doc-protocol.ts";
-import { clientOf } from "../sync-protocol/protocol.ts";
+import { clientOf, toB64 } from "../sync-protocol/protocol.ts";
 
 // (the reference server has the claim protocol, so a refused doc_claim must be a failed check, never the legacy path:
 // this runner refuses to start without the flag rather than run the cases without it)
@@ -33,6 +34,9 @@ const ACCOUNTS = Array.from({ length: 89 }, (_, i) => `c1c1c1c1-${String(i).padS
 // (the cloud's fake CoCalc gives FULL a small storage and SMALL small files; the reference server has no plan limits,
 // so the two cases that use them are skipped here, by name)
 const FULL = ACCOUNTS[87], SMALL = ACCOUNTS[88];
+// (the control pages' accounts: their own, so no case of the main run sees a control's log)
+// (each control page takes its own 3 of them, by its place in CONTROL_PAGES)
+const CTL_ACCOUNTS = Array.from({ length: 30 }, (_, i) => `d0d0d0d0-${String(i).padStart(4, "0")}-4d0d-8d0d-d0d0d0d0d0${String(i).padStart(2, "0")}`);
 const CLOUD_ONLY = ["storageFull", "tooLarge"];
 // (the cases that download a blob through the redirect to /__files/: a full run must show such downloads)
 const DOWNLOADS = ["downloadBasic", "downloadChecks", "downloadStale", "downloadBudget", "downloadStale2"];
@@ -45,7 +49,52 @@ let waitingOn = "(nothing yet)";
 /** `p`, or a rejection naming `what` once `ms` pass without an answer. */
 const bounded = (p, what, ms) => { let t; return Promise.race([p, new Promise((_, no) => { t = setTimeout(() => no(new Error(`no answer within ${ms} ms: ${what}`)), ms); })]).finally(() => clearTimeout(t)); };
 const CALL_MS = 30_000;
-const LIMIT_S = Number(process.env.RUN_LIMIT_S ?? 720);
+
+// ---- 3b's diagnostic budgets (plan csp3b-accountswitch-diag r2-r8): the page's own bounds (window.__budgets, which
+// switch the cases into their diagnostic mode), the control pages' small ones, and the whole test's bound computed from
+// this table: RUN_LIMIT_S may raise it, never lower it (the runner refuses to start)
+/** the main page: a step 15 s, a case's cleanup 15 s; case bounds report-only in the pilot (enforceCase false) */
+const MAIN_BUDGETS = { STEP_MS: 15_000, CLEANUP_MS: 15_000, CASE_MS: {}, CASE_FLOOR_MS: 30_000, enforceCase: false };
+/** the control pages: they test mechanics, not magnitudes */
+const CONTROL_BUDGETS = { STEP_MS: 2_000, CLEANUP_MS: 5_000, CASE_MS: { kM1: 30_000 }, CASE_FLOOR_MS: 5_000, enforceCase: true };
+/** a page's transition (navigation and readiness), its barrier's late observation (the confirmation's share inside it),
+ * the main run in the pilot, and reporting */
+const T_PAGE_S = 30, LATE_OBS_MS = 15_000, CONFIRM_MS = 3_000, PILOT_MAIN_S = 3600, REPORT_S = 60;
+/** each page's run, after it ends: its answer read, once */
+const FETCH_S = 5;
+/** the control pages, in order, each control with its case allowance (s); every page is a fresh navigation */
+const CONTROL_PAGES = [
+  { page: "P1", cases: [["kR1", 5], ["kR2", 5], ["kL1", 5], ["kB", 5], ["kD", 5], ["kF", 5], ["kH", 5], ["kI", 5], ["kU1", 5]] },
+  { page: "P2", cases: [["kA", 5]] },
+  { page: "P3", cases: [["kC", 5], ["kG", 5]] },
+  { page: "P4", cases: [["kE", 5]] },
+  { page: "P5", cases: [["kJ", 5]] },
+  { page: "P6", cases: [["kL2", 5]] },
+  { page: "P7", cases: [["kM1", 30]] },
+  { page: "P8", cases: [["kM2", 5]] },
+  { page: "RES1", cases: [["kRES1", 5]] },
+];
+/** the runner's own resource controls, each row enforced as a bound */
+const SELF_TEST_ROWS = [["the control account's setup, then K-U2 to K-U5", 5], ["K-MSG1", 5]];
+const pageAllowanceS = (p) => T_PAGE_S + p.cases.reduce((s, [, c]) => s + c + CONTROL_BUDGETS.CLEANUP_MS / 1000, 0) + LATE_OBS_MS / 1000;
+const CONTROLS_S = CONTROL_PAGES.reduce((s, p) => s + pageAllowanceS(p), 0) + SELF_TEST_ROWS.reduce((s, [, r]) => s + r, 0);
+/** setup's existing bounds: the bundle, the DevTools port, the page list (300 tries of 5 s and 100 ms), the DevTools
+ * socket, Runtime.enable */
+const SETUP_S = 120 + 60 + 300 * 5.1 + 10 + CALL_MS / 1000;
+/** the final cleanup's stages (7, each STAGE_MS 15 s) */
+const TEARDOWN_S = 7 * 15;
+const REQUIRED_S = Math.ceil(SETUP_S + CONTROLS_S + (CONTROL_PAGES.length + 1) * FETCH_S + T_PAGE_S + PILOT_MAIN_S + LATE_OBS_MS / 1000 + REPORT_S + TEARDOWN_S);
+if (process.env.RUN_LIMIT_S !== undefined && !(Number(process.env.RUN_LIMIT_S) >= REQUIRED_S)) {
+  console.error(`FAIL: RUN_LIMIT_S=${process.env.RUN_LIMIT_S} is under the whole test's bound, ${REQUIRED_S} s (controls ${CONTROLS_S} s, the pilot's main run ${PILOT_MAIN_S} s)`);
+  process.exit(1);
+}
+const LIMIT_S = process.env.RUN_LIMIT_S !== undefined ? Number(process.env.RUN_LIMIT_S) : REQUIRED_S;
+/** r6 §4: the one stop-path run's switch, read once here; any other value is refused */
+const CONTROL_STOP = process.env.CONTROL_STOP ?? null;
+if (CONTROL_STOP !== null && CONTROL_STOP !== "upstreamCloseFailure") {
+  console.error(`FAIL: CONTROL_STOP=${CONTROL_STOP} is not a control this runner has (upstreamCloseFailure)`);
+  process.exit(1);
+}
 
 // ---- the front: the page, and the site's sync API proxied to the reference server, with what the cases ask of it (ctl)
 
@@ -95,6 +144,18 @@ const ctl = {
    * default, so each case decides when the page hears of a change (it injects notices with `notice`): the server's are
    * dropped and counted (log.serverNotices) */
   serverNotices: false,
+  // (3b's control-only faults, used only by the control pages (sync-client-cases.js, CONTROL_CASES); reset doesn't
+  // clear them, the between-page barrier's newPage() does, after a passing barrier)
+  /** closeAll rejects (K-E) */
+  closeAllReject: false,
+  /** the proof route's quiet answers {error: "unknown"}, as a front without the registry would (K-M2; set in process) */
+  quietUnknown: false,
+  /** the next drained(n) starts an op tagged n that completes 1 s later (K-L2) */
+  armLate: false,
+  /** the next probe fails right after its socket is acquired (K-U1; one-shot, consumed by probe) */
+  probeFailAfterConnect: false,
+  /** socket upgrades refused before anything is acquired (K-RES1: the stopped page's client can't reopen one) */
+  refuseUpgrades: false,
 };
 /** every open proxied socket's closer */
 const closers = new Set();
@@ -109,7 +170,82 @@ let serverNoticesDropped = 0;
 const front = { files200: 0, leaks: [] };
 const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0, fgenRefused: 0, batchesUp: 0 });
 
-async function upstream(method, path, headers, body) {
+// ---- 3b's front registry (plan r3 §2, r4 §1, r5 §1): every front await in flight, by label and epoch tag, so the page
+// can prove the front quiet before the next case, and late completions (after their epoch was drained or abandoned) are
+// seen.  Separate from `log`: reset and resetLog never clear it.  The proof commands have their own route (proof(),
+// below), answered synchronously and never registered, so a quiet never sees itself.
+
+/** the id of the front operation the current code runs in (undefined: none) */
+const opNow = new AsyncLocalStorage();
+const reg = {
+  /** id -> {id, label, tag, startMs} */
+  inflight: new Map(),
+  /** completions in a drained or abandoned tag: {label, tag, endMs} */
+  late: [],
+  seq: 0,
+  /** the tag new operations get: "pre" before the page's first epoch, then "<n>", then "c<n>" after drained(n) */
+  tag: "pre",
+  /** tag -> "drained" | "abandoned" */
+  done: new Map(),
+  /** request or answer bodies read outside any front operation (readBody) */
+  untrackedReads: 0,
+  /** proof commands answered on this page (K-M1: none in legacy) */
+  proofs: 0,
+};
+const lateTag = (tag) => reg.done.has(tag);
+/** One front operation ended: out of the registry, and late if its tag was drained or abandoned by then */
+const opEnded = (id) => {
+  const e = reg.inflight.get(id);
+  if (!e) return;
+  reg.inflight.delete(id);
+  if (lateTag(e.tag)) reg.late.push({ label: e.label, tag: e.tag, endMs: Math.round(performance.now()) });
+};
+/** `thunk()` as one registered front operation, tagged with the epoch current when it starts */
+async function frontOp(label, thunk) {
+  const id = ++reg.seq;
+  reg.inflight.set(id, { id, label, tag: reg.tag, startMs: performance.now() });
+  try {
+    return await opNow.run(id, thunk);
+  } finally {
+    opEnded(id);
+  }
+}
+/** the current operation's label, once it's known (a /__ctl request's command is known only after its body is read) */
+const relabel = (label) => { const e = reg.inflight.get(opNow.getStore()); if (e) e.label = label; };
+/** Every request or answer body the front reads: what `r.text()` or `r.arrayBuffer()` returns, unchanged; a read outside
+ * any front operation is counted (an untracked read, which the between-page barrier refuses) */
+const readBody = (r, kind) => {
+  if (opNow.getStore() === undefined) reg.untrackedReads++;
+  return kind === "text" ? r.text() : r.arrayBuffer();
+};
+
+// ---- 3b's upstream sockets (plan r6 §1, r7 §2-§4): every RefSocket the front acquires is in `ups` from the moment
+// ref.connect returns it until its one close; probe's and a failed upgrade's in a finally, a page socket's handed to its
+// pair in place (owner "pair"), never out of the registry.  Each close's socket is kept for the barrier's confirmation
+// (closed, and no message still running on it).  The harness's resource controls pass their own (scoped) registry,
+// ledger and list; nothing a request carries can.
+
+/** id -> {id, up, owner: "probe" | "preupgrade" | "pair"} */
+const ups = new Map();
+/** this page's closed upstream sockets, confirmed by the barrier, emptied by newPage() */
+const closedUps = [];
+/** the releases of the reference server's batch holds the run armed (armRefHold), released by the barrier */
+const refHolds = new Set();
+let upSeq = 0;
+/** One upstream socket closed, once: out of its registry, onto the confirmation list, and a close that throws kept in the
+ * ledger, naming its owner.  Never throws.  (A RefSocket already closing returns at once, ref :103-104: not a failure.) */
+function closeUp(entry, code, reason, own = {}) {
+  const registry = own.reg ?? ups, ledger = own.ledger ?? closeFailures, closed = own.closed ?? closedUps;
+  if (!registry.has(entry.id)) return;
+  registry.delete(entry.id);
+  closed.push(entry.up);
+  try { entry.up.close(code, reason); } catch (e) { ledger.push(`the upstream ${entry.owner} socket (${why(e)})`); }
+}
+/** A batch hold on the reference server (ref.controls.holdForward), its release kept for the barrier: the only caller */
+const armRefHold = (doc, client, holds = refHolds) => { const release = ref.controls.holdForward(doc, client); holds.add(release); return release; };
+const releaseRefHolds = (holds) => { for (const r of [...holds]) { holds.delete(r); try { r(); } catch {} } };
+
+const upstream = (method, path, headers, body) => frontOp(`upstream ${method} ${path}`, async () => {
   const h = new Headers({ origin, ...headers });
   if (jar) h.set("cookie", jar);
   const r = await ref.fetch(new Request(origin + path, { method, headers: h, body, redirect: "manual" }));
@@ -119,66 +255,118 @@ async function upstream(method, path, headers, body) {
     if (path === "/auth/dev") try { session = hashOf(JSON.parse(String(body)).account_id); } catch {}
   }
   return r;
-}
+});
 
-const signInAs = (account_id) => upstream("POST", "/auth/dev", { "content-type": "application/json" }, JSON.stringify({ token: "dev-token", account_id }));
+const signInAs = (account_id) => frontOp("signInAs", () => upstream("POST", "/auth/dev", { "content-type": "application/json" }, JSON.stringify({ token: "dev-token", account_id })));
 
 /** The account socket, for the front's two users (the page's proxied socket and probe): the reference server's
- * RefSocket (its messages and its close as callbacks, onmessage(text) and onclose(code, reason)), or its refusal. */
-async function connectUp() {
-  const s = await ref.connect(jar || null);
+ * RefSocket (its messages and its close as callbacks, onmessage(text) and onclose(code, reason)), or its refusal.
+ * Registered in `ups` (or `own.reg`) under `owner` the moment it's acquired. */
+const connectUp = (owner, own = {}) => frontOp("ref.connect", async () => {
+  const s = await ref.connect(own.cookie ?? (jar || null));
   if (typeof s.send !== "function") return { refused: s };
+  const entry = { id: ++upSeq, up: s, owner };
+  (own.reg ?? ups).set(entry.id, entry);
   // (what the server sends before its user takes over (the page's socket opens a moment later) is kept, not dropped:
   // the user's onmessage replaces this, and then takes what was kept, in order)
   const buf = [];
   let early = null;
   s.onmessage = (text) => buf.push(text);
   s.onclose = (code, reason) => { early = [code, reason]; };
-  return { up: s, buf, early: () => early };
-}
+  return { up: s, entry, buf, early: () => early };
+});
 
-// a second device, from here: its own socket on the same account
-async function probe({ ops = [], device = "0f0f0f0f0f0f0f0f" } = {}) {
-  const c = await connectUp();
+// a second device, from here: its own socket on the same account.  `own`: the harness's resource controls only (their
+// scoped registry, ledger, list and session); control() passes the request's body alone.
+const probe = (body, own = {}) => frontOp("probe", async () => {
+  const { ops = [], device = "0f0f0f0f0f0f0f0f" } = body ?? {};
+  const c = await connectUp("probe", own);
   if (c.refused) return { status: c.refused.status };
-  const ws = c.up;
-  const got = [];
-  let wake = null;
-  ws.onmessage = (text) => { got.push(JSON.parse(text)); wake?.(); };
-  for (const text of c.buf.splice(0)) ws.onmessage(text);
-  const next = async (f, ms = 5000) => {
-    const t = Date.now();
-    for (;;) {
-      const i = got.findIndex(f);
-      if (i >= 0) return got.splice(i, 1)[0];
-      if (Date.now() - t > ms) return null;
-      await new Promise((ok) => { wake = ok; setTimeout(ok, 50); });
+  try {
+    if (ctl.probeFailAfterConnect) { ctl.probeFailAfterConnect = false; throw new Error("injected: probe failed after connect"); }
+    const ws = c.up;
+    const got = [];
+    let wake = null;
+    ws.onmessage = (text) => { got.push(JSON.parse(text)); wake?.(); };
+    for (const text of c.buf.splice(0)) ws.onmessage(text);
+    const next = async (f, ms = 5000) => {
+      const t = Date.now();
+      for (;;) {
+        const i = got.findIndex(f);
+        if (i >= 0) return got.splice(i, 1)[0];
+        if (Date.now() - t > ms) return null;
+        await new Promise((ok) => { wake = ok; setTimeout(ok, 50); });
+      }
+    };
+    ws.send(JSON.stringify({ t: "hello", v: 1, device, name: "probe", index_after: 0 }));
+    const welcome = await next((m) => m.t === "welcome");
+    const index = [];
+    let page = await next((m) => m.t === "index");
+    for (let req = 1; page; req++) {
+      index.push(...page.ops);
+      if (!page.more) break;
+      ws.send(JSON.stringify({ t: "pull_index", req, after: index.at(-1).seq }));
+      page = await next((m) => m.t === "index" && m.req === req);
     }
+    let ack = null;
+    if (ops.length) {
+      ws.send(JSON.stringify({ t: "ops", req: 1000, ops }));
+      ack = await next((m) => m.req === 1000);
+    }
+    ws.close(1000, "done");
+    return { welcome, index, ack };
+  } finally {
+    // (after the normal path's own close, this one finds the socket closing: a no-op, nothing kept; on any other path it
+    // is the close)
+    closeUp(c.entry, 1000, "done", own);
+  }
+});
+
+/** The registry as the page's proof reads it */
+const quietNow = () => {
+  const inflight = [...reg.inflight.values()].map((e) => ({ label: e.label, tag: e.tag, ageMs: Math.round(performance.now() - e.startMs) }));
+  return {
+    inflight, pendingLate: inflight.filter((e) => lateTag(e.tag)), closers: closers.size, held: held.length, late: reg.late, epoch: reg.tag,
+    closeFailures: closeFailures.length, untrackedReads: reg.untrackedReads, ups: ups.size, refHolds: refHolds.size,
+    unconfirmed: closedUps.filter((u) => !(u.closed === true && u.inflight === 0)).length,
+    armed: { probeFailAfterConnect: !!ctl.probeFailAfterConnect }, open: log.open, putsNow: log.putsNow,
   };
-  ws.send(JSON.stringify({ t: "hello", v: 1, device, name: "probe", index_after: 0 }));
-  const welcome = await next((m) => m.t === "welcome");
-  const index = [];
-  let page = await next((m) => m.t === "index");
-  for (let req = 1; page; req++) {
-    index.push(...page.ops);
-    if (!page.more) break;
-    ws.send(JSON.stringify({ t: "pull_index", req, after: index.at(-1).seq }));
-    page = await next((m) => m.t === "index" && m.req === req);
+};
+/** the proof commands: a closed set, on their own route, GET /__proof/<cmd>?n=<int>[&phase=cleanup] */
+const PROOF_COMMANDS = ["quiet", "epoch", "drained", "abandon"];
+/** K-L2's armed op: tagged `tag` (it starts before the mark), registered as any operation, ended 1 s later */
+const armedLate = (tag) => { const id = ++reg.seq; reg.inflight.set(id, { id, label: "armed late", tag, startMs: performance.now() }); setTimeout(() => opEnded(id), 1000); };
+/** A proof command, answered synchronously: nothing on this path awaits, reads a body, or registers */
+function proof(req, u) {
+  const cmd = u.pathname.slice("/__proof/".length);
+  if (!PROOF_COMMANDS.includes(cmd)) return new Response(null, { status: 404 });
+  if (req.method !== "GET") return new Response(null, { status: 405 });
+  const ns = u.searchParams.get("n"), phase = u.searchParams.get("phase");
+  const n = Number(ns);
+  if (cmd !== "quiet" && !(ns !== null && /^(0|[1-9][0-9]{0,8})$/.test(ns))) return Response.json({ error: "invalid", detail: "n" }, { status: 400 });
+  if (phase !== null && !(cmd === "drained" && phase === "cleanup")) return Response.json({ error: "invalid", detail: "phase" }, { status: 400 });
+  reg.proofs++;
+  if (cmd === "quiet") return Response.json(ctl.quietUnknown ? { error: "unknown" } : quietNow());
+  if (cmd === "epoch") { reg.tag = String(n); return Response.json({ epoch: reg.tag }); }
+  if (cmd === "drained") {
+    if (phase === "cleanup") { reg.done.set(`c${n}`, "drained"); return Response.json({ drained: `c${n}`, epoch: reg.tag }); }
+    if (ctl.armLate) { ctl.armLate = false; armedLate(String(n)); }
+    // (drained(n): n drained, and from now on every new operation is cleanup's, tagged c<n>, never late for n)
+    reg.done.set(String(n), "drained");
+    reg.tag = `c${n}`;
+    return Response.json({ drained: String(n), epoch: reg.tag });
   }
-  let ack = null;
-  if (ops.length) {
-    ws.send(JSON.stringify({ t: "ops", req: 1000, ops }));
-    ack = await next((m) => m.req === 1000);
-  }
-  ws.close(1000, "done");
-  return { welcome, index, ack };
+  // abandon(n): n, and c<n> unless already drained, abandoned
+  reg.done.set(String(n), "abandoned");
+  if (reg.done.get(`c${n}`) !== "drained") reg.done.set(`c${n}`, "abandoned");
+  return Response.json({ abandoned: String(n), epoch: reg.tag });
 }
 
 async function control(body) {
   switch (body.cmd) {
     case "set": Object.assign(ctl, body.set); return { ok: true };
     case "log": { const out = JSON.parse(JSON.stringify(log)); if (body.reset) resetLog(); return out; }
-    case "closeAll": { const n = closers.size; for (const f of [...closers]) f(1000); return { closed: n }; }
+    case "closeAll": { if (ctl.closeAllReject) throw new Error("injected: closeAll rejected"); const n = closers.size; for (const f of [...closers]) f(1000); return { closed: n }; }
     case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
     case "probe": return probe(body);
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
@@ -188,6 +376,16 @@ async function control(body) {
     case "frame": { let sent = 0; for (const f of toPage) { f(JSON.stringify(body.frame)); sent++; } return { sent }; }
     case "notice": { let sent = 0; for (let i = 0; i < (body.times ?? 1); i++) for (const f of toPage) { f(JSON.stringify({ t: "index_changed", head: body.head })); sent++; } return { sent }; }
     case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], rebuiltReal: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null, serverNotices: false }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    // (3b's control-only commands: a held wait released only by release/reset or the barrier (K-B, K-R1); a timer
+    // (K-I, K-J); K-L2's armed late op; K-R2's reset of exactly its one untracked read)
+    case "hang": await new Promise((ok) => held.push(ok)); return { ok: true };
+    case "slow": await sleep(Number(body.ms) || 0); return { ok: true };
+    case "armLate": ctl.armLate = true; return { ok: true };
+    case "untrackedReset": {
+      if (!Number.isInteger(body.to) || reg.untrackedReads !== body.to + 1) return { error: "not exactly one untracked read since", to: body.to, now: reg.untrackedReads };
+      reg.untrackedReads = body.to;
+      return { ok: true };
+    }
     default: return { error: "unknown" };
   }
 }
@@ -207,30 +405,51 @@ const NULL_BODY = [101, 103, 204, 205, 304];
 /** An answer to the page: `body`, unless the status, or a HEAD, carries none */
 const respond = (status, body, headers, method) => new Response(NULL_BODY.includes(status) || method === "HEAD" ? null : body, { status, headers });
 /** The reference server's answer passed on: its body read only when it may have one */
-const passOn = async (r, path, method) => respond(r.status, NULL_BODY.includes(r.status) || method === "HEAD" ? null : await r.arrayBuffer(), pageHeaders(r, path), method);
+const passOn = async (r, path, method) => respond(r.status, NULL_BODY.includes(r.status) || method === "HEAD" ? null : await readBody(r, "arrayBuffer"), pageHeaders(r, path), method);
 
 let site = "";
-async function serve(req, server) {
+/** Every request: a proof command (its own route, classified from the URL alone, before anything is read or awaited)
+ * or K-R2's untracked-read probe, else one registered front operation from its first statement, its body reads
+ * included */
+function serve(req, server) {
   const u = new URL(req.url);
   const p = u.pathname;
+  if (p.startsWith("/__proof/")) return proof(req, u);
+  // (control-only, K-R2: a body read outside any operation, counted; never awaited here)
+  if (p === "/__untracked") { readBody(req, "text").catch(() => {}); return Response.json({ untrackedReads: reg.untrackedReads }); }
+  return frontOp(`http ${req.method} ${p}`, () => serveOp(req, server, u, p));
+}
+async function serveOp(req, server, u, p) {
   try {
-    if (p === "/" || p === "/ws.js" || p === "/cases.js") {
+    if (p === "/" || p === "/ws.js" || p === "/cases.js" || p === "/ctl.html") {
       return new Response(Bun.file(join(site, p === "/" ? "index.html" : p.slice(1))), { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
     }
-    if (p === "/__ctl") return Response.json(await control(JSON.parse((await req.text()) || "{}")));
+    if (p === "/__ctl") {
+      const body = JSON.parse((await readBody(req, "text")) || "{}");
+      relabel(`ctl ${body.cmd}`);
+      return Response.json(await control(body));
+    }
     // the account socket, proxied message by message (websocket, below), so the cases can drop, fake or close
     if (p === "/api/sync/v1/account" && (req.headers.get("upgrade") ?? "").toLowerCase() === "websocket") {
+      if (ctl.refuseUpgrades) return new Response("refused (control)", { status: 503, headers: { connection: "close" } });
       log.sockets++;
       if (ctl.switchOnUpgrade) {
         await signInAs(ctl.switchOnUpgrade);
         ctl.switchOnUpgrade = null;
         log.switchedUpgrade = (log.switchedUpgrade ?? 0) + 1;
       }
-      const c = await connectUp().catch(() => null);
+      const c = await connectUp("preupgrade").catch(() => null);
       if (!c || c.refused) return new Response("refused", { status: c?.refused.status ?? 502, headers: { connection: "close" } });
-      // (the session's account when this socket was opened: the one it is authenticated as)
-      if (server.upgrade(req, { data: { up: c.up, buf: c.buf, early: c.early, socketSession: session, helloAccount: null } })) return undefined;
-      c.up.close(1000, "no upgrade");
+      // (the socket stays in `ups` as "preupgrade" until its pair takes it (websocket.open); not handed, it's closed
+      // here, whatever happened)
+      let handed = false;
+      try {
+        // (the session's account when this socket was opened: the one it is authenticated as)
+        handed = server.upgrade(req, { data: { up: c.up, entry: c.entry, buf: c.buf, early: c.early, socketSession: session, helloAccount: null } });
+      } finally {
+        if (!handed) closeUp(c.entry, 1000, "no upgrade");
+      }
+      if (handed) return undefined;
       return new Response("no upgrade", { status: 400 });
     }
     // (the user-content files: the reference server's blob GET answers 303 to /__files/<sha> on the origin it was asked
@@ -240,16 +459,16 @@ async function serve(req, server) {
     if (p.startsWith("/__files/")) {
       const entry = { method: req.method, path: p, files: true };
       log.http.push(entry);
-      if (ctl.holdGet) await new Promise((ok) => held.push(ok));
+      if (ctl.holdGet) await frontOp("held GET", () => new Promise((ok) => held.push(ok)));
       const h = new Headers();
       if (jar) h.set("cookie", jar);
-      const r = await ref.fetch(new Request(origin + p, { method: req.method, headers: h }));
+      const r = await frontOp(`ref.fetch ${req.method} /__files`, () => ref.fetch(new Request(origin + p, { method: req.method, headers: h })));
       entry.status = r.status;
       if (r.status === 200) front.files200++;
       return passOn(r, p, req.method);
     }
     if (!p.startsWith("/api/") && !p.startsWith("/auth/")) return new Response(null, { status: 404 });
-    const body = req.method === "GET" || req.method === "HEAD" ? undefined : Buffer.from(await req.arrayBuffer());
+    const body = req.method === "GET" || req.method === "HEAD" ? undefined : Buffer.from(await readBody(req, "arrayBuffer"));
     const isPut = req.method === "PUT";
     const entry = { method: req.method, path: p, bytes: body?.length ?? 0, ...(p.endsWith("/blobs/check") ? { check: JSON.parse(body.toString()).blobs.length } : {}) };
     log.http.push(entry);
@@ -277,7 +496,7 @@ async function serve(req, server) {
     if (isPut) {
       log.putsNow++;
       log.maxPuts = Math.max(log.maxPuts, log.putsNow);
-      if (ctl.holdPut) await new Promise((ok) => held.push(ok));
+      if (ctl.holdPut) await frontOp("held PUT", () => new Promise((ok) => held.push(ok)));
     }
     const headers = {};
     for (const k of ["content-type", "content-length", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v !== null) headers[k] = v; }
@@ -323,8 +542,11 @@ const pairCloser = (up, client, first, ledger = closeFailures, skips = closeSkip
 const websocket = {
   open(client) {
     const d = client.data, up = d.up;
+    // (the upstream socket handed to its pair in place: it never leaves `ups`; the pair's close takes it out, right
+    // before pairCloser's own close of it, whose failure pairCloser keeps)
+    d.entry.owner = "pair";
     log.open++;
-    d.closeBoth = pairCloser(up, client, () => { closers.delete(d.closeBoth); log.open--; });
+    d.closeBoth = pairCloser(up, client, () => { closers.delete(d.closeBoth); log.open--; ups.delete(d.entry.id); closedUps.push(up); });
     closers.add(d.closeBoth);
     d.send = (text) => { try { client.send(text); } catch {} };
     toPage.add(d.send);
@@ -465,6 +687,87 @@ const proxiedStage = (registry, ledger) => {
   for (const f of all) try { f(1000); } catch (e) { ledger.push(why(e)); }
   return ledger.length ? { ok: false, said: `NOT all closed (${ledger.join(", ")})` } : { ok: true, said: `${all.length} closed` };
 };
+/** The upstream sockets still registered closed now; the stage fails if any was left, or a close failed */
+const upstreamStage = () => {
+  // (any batch hold still armed released first: the cleanup runs however the run ended)
+  releaseRefHolds(refHolds);
+  const left = [...ups.values()], n0 = closeFailures.length;
+  for (const e of left) closeUp(e, 1000, "cleanup");
+  const bad = closeFailures.slice(n0);
+  return left.length || bad.length ? { ok: false, said: `NOT clean (${left.length} left open${bad.length ? ": " + bad.join(", ") : ""})` } : { ok: true, said: "none left open" };
+};
+
+// ---- 3b's between-page barrier (plan r4 §2, r5 §2, r6 §2, r7 §1): in this process, after every page, before any
+// navigation: its own release and close, a bounded late observation, the upstream residue, the confirmation (each closed
+// upstream socket closed AND idle), then a pure verdict; a failing verdict stops the whole test
+
+/** the run's own barrier state; a resource control passes a scoped one of the same shape */
+const runState = () => ({
+  ups, ledger: closeFailures, closed: closedUps, refHolds, inflight: reg.inflight, held, closers,
+  open: () => log.open, untracked: () => reg.untrackedReads, armed: () => !!ctl.probeFailAfterConnect, snap: pageSnap,
+});
+/** the page's start: the ledger's length and the untracked reads (newPage()) */
+let pageSnap = { ledger: 0, untracked: 0 };
+/** Step 1: every held waiter and armed batch hold released, every proxied pair closed (what each says kept) */
+const releaseAndClose = (s) => {
+  for (const f of s.held.splice(0)) try { f(); } catch {}
+  releaseRefHolds(s.refHolds);
+  for (const f of [...s.closers]) try { f(1000); } catch (e) { s.ledger.push(why(e)); }
+};
+/** Step 4: up to `ms` for every closed upstream socket to be closed with no message still running on it (ref
+ * RefSocket.closed is a close timer, :107-110; inflight counts a message until its handler ends, :302-307) */
+const confirmClosed = async (s, ms) => {
+  const t = performance.now();
+  const open = () => s.closed.filter((u) => !(u.closed === true && u.inflight === 0));
+  while (open().length && performance.now() - t < ms) await sleep(20);
+  return { unconfirmed: open().filter((u) => u.closed !== true).map(() => "upstream close unconfirmed"), busy: open().filter((u) => u.closed === true).map((u) => `upstream socket busy after close (inflight ${u.inflight})`) };
+};
+/** What the verdict reads, now */
+const barrierInput = (s, extra = {}) => ({
+  inflight: [...s.inflight.values()].map((e) => `${e.label}@${e.tag}`), closers: s.closers.size, held: s.held.length, open: s.open(),
+  newCloseFailures: s.ledger.slice(s.snap.ledger), untrackedDelta: s.untracked() - s.snap.untracked, ups: s.ups.size, armed: s.armed(),
+  residue: [], unconfirmed: [], busy: [], ...extra,
+});
+/** The barrier's verdict: a pure function of what it read; passes only on operation AND resource quiescence */
+const barrierVerdict = (x) => {
+  const items = [];
+  if (x.inflight.length) items.push(`inflight ${x.inflight.length} (${x.inflight.join(", ")})`);
+  if (x.closers) items.push(`closers ${x.closers}`);
+  if (x.held) items.push(`held ${x.held}`);
+  if (x.open) items.push(`log.open ${x.open}`);
+  for (const f of x.newCloseFailures) items.push(`close failure: ${f}`);
+  if (x.untrackedDelta) items.push(`untracked reads ${x.untrackedDelta > 0 ? "+" : ""}${x.untrackedDelta}`);
+  items.push(...x.residue);
+  if (x.ups) items.push(`upstream registry ${x.ups}`);
+  items.push(...x.unconfirmed, ...x.busy);
+  if (x.armed) items.push("probe injection left armed");
+  return { ok: items.length === 0, items };
+};
+/** The whole barrier on `s`: release and close, the late observation (completions then are late: the page's epoch is
+ * abandoned first, for the run's own state), the residue closed and named, the confirmation, the input for the verdict */
+async function barrierSteps(s, { lateObsMs = LATE_OBS_MS, confirmMs = CONFIRM_MS, own = null } = {}) {
+  const before = { inflight: s.inflight.size, closers: s.closers.size, held: s.held.length, ups: s.ups.size, open: s.open() };
+  if (s.inflight === reg.inflight && !reg.done.has(reg.tag)) reg.done.set(reg.tag, "abandoned");
+  releaseAndClose(s);
+  const t = performance.now();
+  while (s.inflight.size && performance.now() - t < lateObsMs - confirmMs) await sleep(50);
+  const residue = [];
+  for (const e of [...s.ups.values()]) { residue.push(`upstream ${e.owner} ${e.id} left open`); closeUp(e, 1000, "barrier", own ?? {}); }
+  const c = await confirmClosed(s, confirmMs);
+  return { before, ...barrierInput(s, { residue, ...c }) };
+}
+/** The next page may start: the epoch states and the page's lists cleared, the snapshots taken, the control-only
+ * faults off (only after a passing barrier) */
+const newPage = () => {
+  reg.done.clear();
+  reg.late = [];
+  reg.tag = "pre";
+  reg.proofs = 0;
+  closedUps.length = 0;
+  pageSnap = { ledger: closeFailures.length, untracked: reg.untrackedReads };
+  Object.assign(ctl, { closeAllReject: false, quietUnknown: false, armLate: false, refuseUpgrades: false });
+};
+
 /** Each closed; any that throws is said */
 const closeEach = (list, f) => { const bad = []; for (const s of list) try { f(s); } catch (e) { bad.push(why(e)); } return bad.length ? { ok: false, said: `NOT all closed (${bad.join(", ")})` } : { ok: true, said: `${list.length} closed` }; };
 const removeDir = (d) => { if (!d) return { ok: true, said: "never made" }; try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); return { ok: true, said: "removed" }; } catch (e) { return { ok: false, said: `NOT removed (${why(e)})` }; } };
@@ -486,6 +789,7 @@ let cleaned = null;
 const cleanup = () => (cleaned ??= runStages([
   ["DevTools sockets", () => closeEach(sockets, (s) => s.close())],
   ["proxied sockets", () => proxiedStage(closers, closeFailures)],
+  ["upstream sockets", () => upstreamStage()],
   ["Chrome", () => stopChrome()],
   ["front", async () => { if (!server) return { ok: true, said: "never started" }; await server.stop(true); return { ok: true, said: "stopped" }; }],
   ["profile", () => removeDir(profile)],
@@ -502,6 +806,172 @@ const endNow = async (why) => {
 // (the watchdog, armed before anything starts: past the run's own limit and its cleanup, the run is ended, named)
 setTimeout(() => endNow(`the run didn't end within ${LIMIT_S + 120} s`), (LIMIT_S + 120) * 1000).unref();
 process.once("SIGTERM", () => endNow("ended by SIGTERM"));
+
+// ---- 3b's resource controls, in this process before the page (plan r6 §3, r7 §1-§4, r8 §1-§2): real RefSockets on a
+// control account of their own (signed in on the reference server itself and enabled: the front's jar and session are
+// never touched), each control on scoped state (registry, ledger, closed list, holds), the run's own state unchanged by
+// all of them, exactly; then the barrier verdict's pure fixtures
+
+async function resourceControls() {
+  const runCounts = () => J([ups.size, closeFailures.length, closedUps.length, refHolds.size]);
+  const before = runCounts();
+  const scoped = (cookie) => ({ reg: new Map(), ledger: [], closed: [], refHolds: new Set(), cookie });
+  const stateOf = (own) => ({
+    ups: own.reg, ledger: own.ledger, closed: own.closed, refHolds: own.refHolds, inflight: new Map(), held: [], closers: new Set(),
+    open: () => 0, untracked: () => 0, armed: () => false, snap: { ledger: 0, untracked: 0 },
+  });
+  const isSocket = (c) => typeof c?.up?.send === "function";
+  /** each control's own zero delta on the run's four structures */
+  const zeroDelta = (name, b0) => control1(runCounts() === b0, `(control) ${name}: the run's own ups, closeFailures, closedUps and refHolds unchanged: ${b0} -> ${runCounts()}`);
+  // (row 1: the setup, then K-U2 to K-U5, within 5 s)
+  const t1 = performance.now();
+  const account = "ctl-u-" + crypto.randomUUID();
+  const cookie = "__Host-sb_session=" + ref.signIn(account);
+  let enabled = false, said = "";
+  try {
+    const en = await bounded(ref.fetch(new Request("http://ref.control/api/sync/v1/enable", { method: "POST", headers: { cookie } })), "the control account's enable", 2000);
+    const text = await bounded(en.text(), "the control account's enable (its answer)", 2000);
+    said = `${en.status} ${text}`;
+    enabled = en.status === 200 && text === J({ state: "active", generation: 1 });
+  } catch (e) { said = `threw (${why(e)})`; }
+  control1(enabled, "(control) the control account enabled before any control socket: exactly {state: active, generation: 1}: " + said);
+  if (enabled) {
+    // K-U2: a probe-owned socket its owner never closed, nothing in flight: the barrier fails, naming it, and closes it
+    {
+      const z = runCounts(), own = scoped(cookie), c = await connectUp("probe", own);
+      const x = isSocket(c) ? await barrierSteps(stateOf(own), { lateObsMs: 1000, confirmMs: 1000, own }) : null;
+      const v = x && barrierVerdict(x);
+      zeroDelta("K-U2", z);
+      control1(isSocket(c) && !v.ok && J(v.items) === J([`upstream probe ${c.entry.id} left open`]) && c.up.closed === true && c.up.inflight === 0, "(control) K-U2: a probe socket left open with nothing in flight fails the barrier, named, and the barrier closes it: " + J({ socket: isSocket(c) ? "real" : c?.refused, items: v?.items }));
+    }
+    // K-U3: the same for a socket acquired for an upgrade whose pair never opened
+    {
+      const z = runCounts(), own = scoped(cookie), c = await connectUp("preupgrade", own);
+      const x = isSocket(c) ? await barrierSteps(stateOf(own), { lateObsMs: 1000, confirmMs: 1000, own }) : null;
+      const v = x && barrierVerdict(x);
+      zeroDelta("K-U3", z);
+      control1(isSocket(c) && !v.ok && J(v.items) === J([`upstream preupgrade ${c.entry.id} left open`]) && c.up.closed === true, "(control) K-U3: an upgrade's socket left unhanded fails the barrier, named, and is closed: " + J({ socket: isSocket(c) ? "real" : c?.refused, items: v?.items }));
+    }
+    // K-U4: a close that throws: one ledger entry naming the owner, the verdict fails on exactly that (the real socket,
+    // closed by the control itself, confirmed through the wrapper)
+    {
+      const z = runCounts(), own = scoped(cookie), c = await connectUp("probe", own);
+      let v = null;
+      if (isSocket(c)) {
+        const real = c.up;
+        c.entry.up = { send: (t) => real.send(t), close() { throw Object.assign(new Error("injected"), { code: "EPIPE" }); }, get closed() { return real.closed; }, get inflight() { return real.inflight; } };
+        closeUp(c.entry, 1000, "control", own);
+        real.close(1000, "control");
+        v = barrierVerdict(await barrierSteps(stateOf(own), { lateObsMs: 1000, confirmMs: 1000, own }));
+      }
+      zeroDelta("K-U4", z);
+      control1(isSocket(c) && J(own.ledger) === J(["the upstream probe socket (EPIPE)"]) && !v.ok && J(v.items) === J(["close failure: the upstream probe socket (EPIPE)"]) && c.up.closed === true, "(control) K-U4: an upstream close that throws is kept, naming its owner, and fails the barrier on exactly that: " + J({ ledger: own.ledger, items: v?.items }));
+    }
+    // K-U5: a normal probe on the enabled account: its two closes (its own, then the finally's no-op), nothing kept,
+    // nothing left, its answer's shape unchanged
+    {
+      const z = runCounts(), own = scoped(cookie);
+      // (RefSocket's prototype, from a socket closed at once, before the spy is installed)
+      const tmp = await ref.connect(cookie);
+      const RefSocket = Object.getPrototypeOf(tmp);
+      tmp.close(1000, "control");
+      const close0 = RefSocket.close;
+      let calls = 0, p = null;
+      RefSocket.close = function (...a) { if (this.account?.id === account) calls++; return close0.apply(this, a); };
+      try { p = await probe({}, own); } catch (e) { p = { threw: why(e) }; } finally { RefSocket.close = close0; }
+      const sock = own.closed[0];
+      const t = performance.now();
+      while (sock && !(sock.closed === true && sock.inflight === 0) && performance.now() - t < 1000) await sleep(20);
+      zeroDelta("K-U5", z);
+      control1(J(Object.keys(p ?? {})) === J(["welcome", "index", "ack"]) && p.welcome !== null && p.welcome?.state === "active" && calls === 2 && own.ledger.length === 0 && own.reg.size === 0 && own.closed.length === 1 && sock.closed === true && sock.inflight === 0, "(control) K-U5: a normal probe: an active welcome, two closes (its own, then the no-op), nothing kept or left: " + J({ keys: Object.keys(p ?? {}), state: p?.welcome?.state, threw: p?.threw, calls, ledger: own.ledger, left: own.reg.size }));
+    }
+  }
+  control1(performance.now() - t1 <= SELF_TEST_ROWS[0][1] * 1000, `(control) ${SELF_TEST_ROWS[0][0]}: within its ${SELF_TEST_ROWS[0][1]} s row: ${Math.round(performance.now() - t1)} ms`);
+  // (row 2: K-MSG1, within 5 s) a real batch admitted and held across its socket's close: closed is not quiescence
+  const t2 = performance.now();
+  if (enabled) {
+    const z = runCounts(), own = scoped(cookie), steps = [];
+    const c = await connectUp("probe", own);
+    let v1 = null, v2 = null, busyAfterClose = null;
+    try {
+      if (isSocket(c)) {
+        const ws = c.up, got = [];
+        ws.onmessage = (text) => got.push(JSON.parse(text));
+        for (const text of c.buf.splice(0)) ws.onmessage(text);
+        const next = async (f, ms = 1000) => { const t = performance.now(); for (;;) { const m = got.find(f); if (m) return m; if (performance.now() - t > ms) return null; await sleep(10); } };
+        const doc = crypto.randomUUID(), client = "ctlmsg1", id = "1".padStart(11, "0") + "_" + client;
+        ws.send(J({ t: "hello", v: 1, device: "c0c0c0c0c0c0c0c0", name: "ctl", index_after: 0, generation: 1 }));
+        const welcome = await next((m) => m.t === "welcome" || m.t === "error");
+        steps.push(["welcome", welcome?.t === "welcome" && welcome.state === "active" && welcome.generation === 1]);
+        ws.send(J({ t: "doc_claim", req: 1, epoch: 1, doc, client }));
+        const claim = await next((m) => m.req === 1);
+        const fgen = claim?.claim?.fgen;
+        steps.push(["claim", claim?.t === "ack" && Number.isInteger(fgen)]);
+        if (steps.every(([, ok]) => ok)) {
+          armRefHold(doc, client, own.refHolds);
+          const payload = new TextEncoder().encode(J({ patch: [id], userId: 0 }));
+          ws.send(J({ t: "batch", req: 2, doc, epoch: 1, fgen: { [client]: fgen }, patches: [{ cseq: 1, id, parents: [], size: payload.length }], body: toB64(payload) }));
+          const t = performance.now();
+          while (ws.inflight !== 1 && !got.some((m) => m.req === 2) && performance.now() - t < 1000) await sleep(10);
+          const refused = got.find((m) => m.req === 2);
+          steps.push([refused ? `the batch answered first (${refused.code ?? refused.t})` : "the batch held (inflight 1)", !refused && ws.inflight === 1]);
+        }
+        closeUp(c.entry, 1000, "control", own);
+        const t = performance.now();
+        while (ws.closed !== true && performance.now() - t < 1000) await sleep(10);
+        busyAfterClose = ws.closed === true ? ws.inflight : null;
+        const s = stateOf(own);
+        v1 = barrierVerdict(barrierInput(s, await confirmClosed(s, 1000)));
+        releaseAndClose(s);
+        v2 = barrierVerdict(barrierInput(s, await confirmClosed(s, 1000)));
+        steps.push(["after the release", ws.inflight === 0]);
+      }
+    } finally {
+      // (its hold released, and its socket closed, on any path out of the control)
+      releaseRefHolds(own.refHolds);
+      if (c?.entry) closeUp(c.entry, 1000, "control", own);
+    }
+    zeroDelta("K-MSG1", z);
+    control1(isSocket(c) && steps.every(([, ok]) => ok) && busyAfterClose === 1 && !v1.ok && J(v1.items) === J(["upstream socket busy after close (inflight 1)"]) && v2.ok && own.refHolds.size === 0, "(control) K-MSG1: a batch admitted and held across its socket's close: closed with inflight 1 fails the barrier as busy, exactly; released, it passes: " + J({ socket: isSocket(c) ? "real" : c?.refused, steps, busyAfterClose, first: v1?.items, then: v2?.items }));
+  }
+  control1(performance.now() - t2 <= SELF_TEST_ROWS[1][1] * 1000, `(control) ${SELF_TEST_ROWS[1][0]}: within its ${SELF_TEST_ROWS[1][1]} s row: ${Math.round(performance.now() - t2)} ms`);
+  control1(runCounts() === before, "(control) the resource controls left the run's own state exactly as it was (ups, closeFailures, closedUps, refHolds): " + before + " -> " + runCounts());
+  // the verdict's pure fixtures, B1-B9
+  const base = { inflight: [], closers: 0, held: 0, open: 0, newCloseFailures: [], untrackedDelta: 0, ups: 0, armed: false, residue: [], unconfirmed: [], busy: [] };
+  const fx = [
+    ["B1", { closers: 1 }, ["closers 1"]],
+    ["B2", { newCloseFailures: ["the server's side (EPIPE)"] }, ["close failure: the server's side (EPIPE)"]],
+    ["B3", { held: 1 }, ["held 1"]],
+    ["B4", { untrackedDelta: 1 }, ["untracked reads +1"]],
+    ["B5", {}, []],
+    ["B6", { ups: 1 }, ["upstream registry 1"]],
+    ["B7", { residue: ["upstream probe 7 left open"] }, ["upstream probe 7 left open"]],
+    ["B8", { unconfirmed: ["upstream close unconfirmed"] }, ["upstream close unconfirmed"]],
+    ["B9", { busy: ["upstream socket busy after close (inflight 1)"] }, ["upstream socket busy after close (inflight 1)"]],
+  ];
+  for (const [name, x, items] of fx) {
+    const v = barrierVerdict({ ...base, ...x });
+    control1(v.ok === (items.length === 0) && J(v.items) === J(items), `(control) ${name}: the barrier's verdict on ${J(x)}: ${v.ok ? "pass" : "fail " + J(v.items)}`);
+  }
+  return enabled ? cookie : null;
+}
+
+/** r6 §4's stop-path run (CONTROL_STOP=upstreamCloseFailure, read once at startup; absent in the main run): K-U4's
+ * setup on the run's OWN registry and ledger, then the between-page barrier once, which must stop the whole test (exit 1,
+ * "front not quiescent between pages", naming the upstream probe socket); the wrapped socket is closed by this code */
+async function controlStop(cookie) {
+  if (!cookie) throw new Error("CONTROL_STOP: the control account isn't enabled");
+  const c = await connectUp("probe", { cookie });
+  if (typeof c?.up?.send !== "function") throw new Error("CONTROL_STOP: no real socket: " + J(c?.refused));
+  const real = c.up;
+  c.entry.up = { send: (t) => real.send(t), close() { throw Object.assign(new Error("injected"), { code: "EPIPE" }); }, get closed() { return real.closed; }, get inflight() { return real.inflight; } };
+  closeUp(c.entry, 1000, "control stop");
+  real.close(1000, "control stop");
+  const x = await barrierSteps(runState());
+  const v = barrierVerdict(x);
+  if (!v.ok) throw new Error(`front not quiescent between pages (after CONTROL_STOP): ${v.items.join("; ")}`);
+  throw new Error("CONTROL_STOP: the barrier passed; it must not");
+}
 
 let results = [];
 try {
@@ -543,12 +1013,16 @@ try {
     const spawnError = await stopChrome({ pid: 1, exitCode: null, signalCode: null, kill() {} }, async () => ({ error: Object.assign(new Error("injected"), { code: "ENOENT" }) }));
     control1(!spawnError.ok && spawnError.said === "ended with an error (ENOENT)", "(control) a spawn error is never taken for an observed exit: " + spawnError.said);
   }
+  const controlCookie = await resourceControls();
+  if (CONTROL_STOP === "upstreamCloseFailure") await controlStop(controlCookie);
   // (the page: the workspace bundled in this process, and the cases beside it)
   waitingOn = "the page's bundle (Bun.build of index.ts)";
   const b = await bounded(Bun.build({ entrypoints: [join(here, "index.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" }), waitingOn, 120_000);
   if (!b.success) throw new Error("the page's bundle: " + b.logs.map(String).join("\n"));
   copyFileSync(join(here, "sync-client-cases.js"), join(site, "cases.js"));
-  writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>sync client test</title><script>window.ACCOUNTS = ${J(ACCOUNTS)}; window.FULL = ${J(FULL)}; window.SMALL = ${J(SMALL)}; window.REQUIRE_CLAIM = true;</script><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
+  writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>sync client test</title><script>window.ACCOUNTS = ${J(ACCOUNTS)}; window.FULL = ${J(FULL)}; window.SMALL = ${J(SMALL)}; window.REQUIRE_CLAIM = true; window.__budgets = ${J(MAIN_BUDGETS)};</script><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
+  // (the control pages: their own accounts, never the main run's, and their own budgets; P7 has none, so it's legacy)
+  writeFileSync(join(site, "ctl.html"), `<!doctype html><meta charset="utf-8"><title>sync client test: controls</title><script>const p = new URLSearchParams(location.search).get("p"); window.ACCOUNTS = ${J(CTL_ACCOUNTS)}.slice(3 * Math.max(0, ${J(CONTROL_PAGES.map((c) => c.page))}.indexOf(p))); window.FULL = null; window.SMALL = null; window.REQUIRE_CLAIM = true; if (p !== "P7") window.__budgets = ${J(CONTROL_BUDGETS)};</script><script type="module">import { run, runControls } from "./cases.js"; window.run = run; window.runControls = runControls; window.ready = true;</script>`);
   server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: serve, websocket });
   origin = `http://127.0.0.1:${server.port}`;
 
@@ -577,17 +1051,84 @@ try {
   const send = (method, params = {}, ms = CALL_MS) => { const id = ++n, what = describe(method, params); waitingOn = what; return bounded(new Promise((r) => { waiting.set(id, r); ws.send(J({ id, method, params })); }), what, ms).finally(() => waiting.delete(id)); };
   const ev = async (expression, ms) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms); if (r.exceptionDetails) throw new Error(J(r.exceptionDetails).slice(0, 2000)); return r.result?.value; };
   await send("Runtime.enable");
-  await send("Page.navigate", { url: `${origin}/` });
-  let ready = false;
-  for (let i = 0; i < 200 && !(ready = await ev("window.ready === true", 5000).catch(() => false)); i++) await sleep(50);
-  if (!ready) throw new Error("the page didn't become ready (window.ready)");
-  // (the run: every case but the cloud-only ones, which are skipped by name; a run that doesn't end within its limit
-  // says which case it was in)
+  /** A fresh page at `path`, ready, within T_PAGE_S from the navigation */
+  const transition = async (path) => {
+    const end = performance.now() + T_PAGE_S * 1000, left = () => Math.max(0, end - performance.now());
+    await send("Page.navigate", { url: `${origin}${path}` }, Math.min(CALL_MS, left()));
+    let ready = false;
+    while (left() > 0 && !(ready = await ev("window.ready === true", Math.min(5000, left())).catch(() => false))) await sleep(50);
+    if (!ready) throw new Error(`the page ${path} didn't become ready (window.ready) within ${T_PAGE_S} s`);
+  };
+  /** A run started in the page (never awaited in one evaluate), its report polled every 2 s, each poll bounded by what's
+   * left; ends when the report says done, or the allowance is spent.  Says the last good snapshot and its age. */
+  const runInPage = async (start, allowanceS, tell) => {
+    const end = performance.now() + allowanceS * 1000, left = () => Math.max(0, end - performance.now());
+    await ev(`(window.__runP = ${start}, true)`, Math.min(CALL_MS, left()));
+    let last = null, at = null;
+    while (left() > 0) {
+      const s = await ev("JSON.stringify(window.__report ?? null)", Math.min(5000, left())).catch(() => null);
+      if (s) { try { last = JSON.parse(s); at = performance.now(); } catch {} }
+      if (last) tell?.(last);
+      if (last?.done) break;
+      await sleep(Math.min(2000, left()));
+    }
+    return { report: last, ageS: at === null ? null : Math.round((performance.now() - at) / 1000), done: !!last?.done };
+  };
+  /** The run's answer, once it's done */
+  const answer = () => ev("window.__runP", FETCH_S * 1000);
+  const receipt = (r) => (r.report ? `receipt (${r.ageS} s old): ${J({ mode: r.report.mode, why: r.report.why, progress: r.report.progress, steps: r.report.steps, stopped: r.report.stopped, late: r.report.late }).slice(0, 4000)}` : "receipt: unavailable (no snapshot yet)");
+  /** The between-page barrier on the run's own state; failing, the whole test stops */
+  const barrier = async (page) => {
+    const x = await barrierSteps(runState());
+    const v = barrierVerdict(x);
+    const late = reg.late.map((l) => `${l.label}@${l.tag}`);
+    if (!v.ok) throw new Error(`front not quiescent between pages (after ${page}): ${v.items.join("; ")}`);
+    newPage();
+    return { before: x.before, late };
+  };
+  /** The core run must be in diagnostic mode (r3 §1): a legacy fallback here is a failure, never a pass */
+  const requireDiagnostic = (rep) => (rep?.mode === "diagnostic" ? null : `diagnostic mode not active: ${rep ? `${rep.mode} (${rep.why})` : "no report"}`);
+
+  // (the control pages, each a fresh navigation, before the main run: every control line must be ok)
+  newPage();
+  for (const cp of CONTROL_PAGES) {
+    const allowance = pageAllowanceS(cp) - T_PAGE_S - LATE_OBS_MS / 1000;
+    if (cp.page === "P8") ctl.quietUnknown = true;
+    const proofs0 = reg.proofs;
+    await transition(`/ctl.html?p=${cp.page}`);
+    const r = await runInPage(`window.runControls(${J(cp.page)})`, allowance);
+    if (!r.done) throw new Error(`the control page ${cp.page} didn't end within ${allowance} s: ${receipt(r)}`);
+    const lines = await answer();
+    for (const [ok, what] of Array.isArray(lines) ? lines : [[false, `${cp.page}: no control lines: ${J(lines)}`]]) control1(ok, `(control) ${cp.page} ${what}`);
+    const proofs = reg.proofs - proofs0;
+    const b = await barrier(cp.page);
+    // (the harness's side of the terminal controls: what only the front or the barrier saw)
+    if (cp.page === "P5") control1(b.late.some((l) => /^ctl slow@/.test(l)), "(control) P5 K-J: the barrier saw the abandoned ctl slow complete, late: " + J(b.late));
+    if (cp.page === "P6") control1(b.late.some((l) => /^armed late@/.test(l)) || r.report?.stopped?.late?.some?.((l) => /^armed late@/.test(l)), "(control) P6 K-L2: the armed op's late completion recorded: " + J({ barrier: b.late, page: r.report?.stopped?.late }));
+    if (cp.page === "P7") control1(r.report?.mode === "legacy" && proofs === 0, "(control) P7 K-M1: legacy, and no proof command reached the front: " + J({ mode: r.report?.mode, proofs }));
+    if (cp.page === "P8") { const no = requireDiagnostic(r.report); control1(no !== null && /quiet answered \{"error":"unknown"\}/.test(no), "(control) P8 K-M2: the runner refuses the run: " + no); }
+    if (cp.page === "RES1") control1(b.before.closers === 1 && b.before.inflight === 0, "(control) RES1 K-RES1: a socket left open with nothing in flight: the barrier closed it and passed: " + J(b.before));
+  }
+
+  // (the main run: every case but the cloud-only ones, which are skipped by name; its report polled, so a run that
+  // doesn't end within its bound still says its cases' times, the open steps and where it was)
+  await transition("/");
   for (const name of CLOUD_ONLY) if (selected(name)) console.log(`skipped (cloud-only, the reference server has no quotas): ${name}`);
-  results = await ev(`window.run(${J(ONLY)}, ${J(CLOUD_ONLY.join(","))})`, LIMIT_S * 1000).catch(async (e) => {
-    const where = await ev("JSON.stringify({ progress: window.progress })", 5000).catch(() => "(the page doesn't answer)");
-    throw new Error(`the run didn't end within ${LIMIT_S} s (${e.message}): ${where}`);
+  let modeChecked = false;
+  const main = await runInPage(`window.run(${J(ONLY)}, ${J(CLOUD_ONLY.join(","))})`, PILOT_MAIN_S, (rep) => {
+    if (modeChecked || !rep.mode) return;
+    modeChecked = true;
+    const no = requireDiagnostic(rep);
+    if (no) throw new Error(no);
   });
+  for (const c of main.report?.cases ?? []) console.log(`  case ${c.name}: ${c.outcome ?? "running"}, ${c.endMs !== undefined ? ((c.endMs - c.startMs) / 1000).toFixed(1) + " s" : "unended"}${c.over ? `, over its bound by ${c.over} s (report-only)` : ""}, checks from ${c.checks}${c.cleanup && !c.cleanup.ok ? `, cleanup FAILED at ${c.cleanup.step}` : ""}`);
+  if (!main.done) throw new Error(`the run didn't end within ${PILOT_MAIN_S} s: ${receipt(main)}`);
+  { const no = requireDiagnostic(main.report); if (no) throw new Error(no); }
+  if (main.report.stopped) fails.push(`fail-stop: ${J(main.report.stopped).slice(0, 2000)}`);
+  for (const l of main.report.late ?? []) console.log(`  late: ${l}`);
+  results = await answer();
+  const mb = await barrier("the main run");
+  for (const l of mb.late) console.log(`  late (the barrier): ${l}`);
   waitingOn = "(the run's results)";
   fails.push(...results.filter(([ok]) => !ok).map(([, what]) => what));
   // (claims: with SYNC_REQUIRE_CLAIM the legacy path is a failure, never a pass; its only result says "not exercised")
