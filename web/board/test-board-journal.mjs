@@ -9,7 +9,7 @@ import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
-import { buildFailure, closeChrome, bounded, track, unlessEnding } from "./test-board-journal-lib.mjs";
+import { buildFailure, closeChrome, bounded, track, unlessEnding, inFlight } from "./test-board-journal-lib.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const J = JSON.stringify;
@@ -89,12 +89,19 @@ try {
     if (process.env.PROGRESS && m.method === "Runtime.consoleAPICalled" && m.params.args?.[0]?.value?.startsWith?.("test: ")) console.log(m.params.args[0].value);
     if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
   };
-  const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-  const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 800)); return r.result?.value; };
+  // (r7, board's r6 n1: each call bounded (60 s, the cases' run 500 s, under the runner's 540) and named in where())
+  const send = (method, params = {}, ms = 60_000) => new Promise((r, no) => {
+    const id = ++n, what = `store ${method}` + (params.expression ? ` ${J(params.expression.slice(0, 160))}` : params.url ? ` ${params.url}` : "");
+    const done = inFlight(what);
+    const t = setTimeout(() => { waiting.delete(id); done(); no(new Error(`${what}: no answer within ${Math.round(ms / 1000)} s`)); }, ms);
+    waiting.set(id, (v) => { clearTimeout(t); done(); r(v); });
+    ws.send(JSON.stringify({ id, method, params }));
+  });
+  const ev = async (expression, ms) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 800)); return r.result?.value; };
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Page.navigate", { url: `http://127.0.0.1:${server.port}/` });
   for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
-  const results = [...statics, ...(await ev("window.run()"))];
+  const results = [...statics, ...(await ev("window.run()", 500_000))];
   await unlessEnding();
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);

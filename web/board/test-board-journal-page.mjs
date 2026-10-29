@@ -6,7 +6,7 @@
 // itself is test-board-journal.mjs's.
 //   bun web/build.ts && CHROME=google-chrome bun web/board/test-board-journal-page.mjs
 import { join } from "node:path";
-import { serve, browser, sleep, rowExpr, historyRowsExpr, activateExpr, section, checked, bounded, unlessEnding } from "./test-board-journal-lib.mjs";
+import { serve, browser, sleep, rowExpr, historyRowsExpr, activateExpr, section, checked, bounded, unlessEnding, held } from "./test-board-journal-lib.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const J = JSON.stringify;
@@ -37,6 +37,8 @@ try {
   const helper = await br.tab("helper");
   await helper.go(`${origin}/__bj/`);
   if (!(await helper.until("window.ready === true"))) throw new Error("the helper page didn't load: " + (await helper.state()));
+  // (r7: the VM run's barrier, under BJ_FAULT=hold only)
+  await held(helper, "helper");
   // (shown; and, under the journal, its store opened, when the board has a row: `store`)
   const opened = async (t, store = true) => (await t.until(`!!${B}?.snapshot?.().doc`, 30000)) && (!store || (await t.until(`!window.sagebrush.boardJournal || !!window.sagebrush.boardJournal()`, 15000)));
   async function newBoard(t) {
