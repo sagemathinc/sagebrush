@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Optional browser runner status pill and modal, including the notebook UI embedded in the CLI. PR 298 first-attempt size gate (run 40921265327) measured cli/pyjs.cjs growth of 3484 bytes against its tested base.",
+  "bytes": {
+    "cli/pyjs.cjs": 3484
+  }
+}
