@@ -5,7 +5,8 @@ import { MIME } from '../../web/preview/worker.mjs';
 
 export const MAX_OBJECTS = 3000;
 export const MAX_BYTES = 200 * 1024 * 1024;
-export const MAX_FILE_BYTES = 8 * 1024 * 1024;
+export const MAX_FILE_BYTES = 16 * 1024 * 1024;
+export const MAX_HTML_BYTES = 8 * 1024 * 1024;
 const BANNER = '<aside role="status" style="position:fixed;top:0;right:0;z-index:2147483647;background:#ffe08a;color:#111;padding:6px 12px;font:14px sans-serif;pointer-events:none">PREVIEW, not production</aside>';
 // No fetch handler: a preview never caches a previous branch's shell.
 const NO_SERVICE_WORKER = `self.addEventListener('install', () => self.skipWaiting());
@@ -33,7 +34,8 @@ export function prepare(dir, host, mocks) {
   const files = new Map();
   let totalBytes = 0;
   function add(path, bytes, type = MIME[path.split('.').at(-1).toLowerCase()] ?? 'application/octet-stream') {
-    if (bytes.length > MAX_FILE_BYTES) throw new Error('Preview final object exceeds 8 MiB');
+    if (path.endsWith('.html') && bytes.length > MAX_HTML_BYTES) throw new Error('Preview final HTML exceeds 8 MiB');
+    if (bytes.length > MAX_FILE_BYTES) throw new Error('Preview final object exceeds 16 MiB');
     const nextBytes = totalBytes - (files.get(path)?.bytes.length ?? 0) + bytes.length;
     if (files.size + Number(!files.has(path)) > MAX_OBJECTS || nextBytes > MAX_BYTES) throw new Error('Preview final manifest exceeds 3000 objects or 200 MiB');
     files.set(path, Object.freeze({ bytes, type, sha256: createHash('sha256').update(bytes).digest('hex') }));
@@ -49,7 +51,7 @@ export function prepare(dir, host, mocks) {
       if (e.isDirectory()) { walk(path, depth + 1); continue; }
       if (!e.isFile()) throw new Error('Preview output contains a symlink or special file');
       if (path === 'sw.js' || path === 'preview-config.js') continue; // Replaced below, never uploaded from disk.
-      let bytes = readBounded(join(dir, path), MAX_FILE_BYTES);
+      let bytes = readBounded(join(dir, path), path.endsWith('.html') ? MAX_HTML_BYTES : MAX_FILE_BYTES);
       if (path.endsWith('.html') && !/^(engine|runner|frame)\//.test(path)) {
         const html = bytes.toString('utf8');
         if (!/<head\b[^>]*>/i.test(html) || !/<body\b[^>]*>/i.test(html)) throw new Error('Preview page lacks head/body');

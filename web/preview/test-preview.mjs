@@ -6,8 +6,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import worker, { route, MIME } from './worker.mjs';
+import * as deployEntry from './entry.mjs';
 import { mockEnabled } from './mock.js';
-import { prepare, MAX_OBJECTS, MAX_BYTES, MAX_FILE_BYTES } from '../../scripts/preview/prepare.mjs';
+import { prepare, MAX_OBJECTS, MAX_BYTES, MAX_FILE_BYTES, MAX_HTML_BYTES } from '../../scripts/preview/prepare.mjs';
 import { R2, MAX_PREVIOUS_OBJECTS } from '../../scripts/preview/r2.mjs';
 
 function bucket(entries) {
@@ -169,11 +170,11 @@ test('8 MiB cap applies after HTML injection, not just to its source', () => {
   const f = fixture();
   try {
     const overhead = f.build().files.get('index.html').bytes.length - Buffer.byteLength(f.page);
-    const padding = MAX_FILE_BYTES - overhead - Buffer.byteLength(f.page);
+    const padding = MAX_HTML_BYTES - overhead - Buffer.byteLength(f.page);
     writeFileSync(join(f.dir, 'index.html'), f.page + ' '.repeat(padding));
-    assert.equal(f.build().files.get('index.html').bytes.length, MAX_FILE_BYTES);
+    assert.equal(f.build().files.get('index.html').bytes.length, MAX_HTML_BYTES);
     writeFileSync(join(f.dir, 'index.html'), f.page + ' '.repeat(padding + 1));
-    assert.throws(f.build, /final object exceeds 8 MiB/);
+    assert.throws(f.build, /final HTML exceeds 8 MiB/);
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });
 test('200 MiB total includes transformed HTML, policy/config/SW and binary bodies', () => {
@@ -240,4 +241,19 @@ test('remote-phase abort cancels an active request instead of granting another 3
     await assert.rejects(client.put('latex/index.html', Buffer.from('html'), MIME.html), /timed out/);
     await assert.rejects(client.delete('latex/index.html'), /test remote deadline/);
   } finally { globalThis.fetch = original; }
+});
+
+test('deploy entry exports only the default Worker, keeping helper objects out of the runtime API', () => {
+  assert.deepEqual(Object.keys(deployEntry), ['default']);
+  assert.equal(deployEntry.default, worker);
+});
+
+test('non-HTML files admit 16 MiB exactly and refuse one byte more', () => {
+  const f = fixture();
+  try {
+    writeFileSync(join(f.dir, 'compiled.json'), Buffer.alloc(MAX_FILE_BYTES));
+    assert.equal(f.build().files.get('compiled.json').bytes.length, MAX_FILE_BYTES);
+    writeFileSync(join(f.dir, 'compiled.json'), Buffer.alloc(MAX_FILE_BYTES + 1));
+    assert.throws(f.build, /16777216 bytes/);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });

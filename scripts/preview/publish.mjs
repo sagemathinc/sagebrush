@@ -73,7 +73,8 @@ async function main() {
       const step = (command, args) => execFileSync('/home/user/sagebrush-coord/bin/ptest', ['-m', '30', '--', command, ...args], { cwd: root, env, stdio: 'inherit' });
       // Never reuse dist: removed files, old mock flags and a private site overlay must not leak.
       rmSync(join(root, 'web/dist'), { recursive: true, force: true });
-      step('pnpm', ['run', 'build']);
+      // Avoid pnpm's implicit dependency installation in reused worktrees.
+      step(join(root, 'node_modules', '.bin', 'tsc'), ['-p', '.']);
       step('node', ['scripts/build-cli.mjs']);
       step('bun', ['web/build.ts']);
       const output = prepare(join(root, 'web/dist'), host, mocks);
