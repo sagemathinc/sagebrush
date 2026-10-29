@@ -172,6 +172,31 @@ test("r7: an unterminated /* fails closed (never outside every candidate); a // 
     [1, 2, 3],
     "the monotone line cursor handles CRLF and Unicode terminators",
   );
+  assert.match(hatches("x;\n\n/* @ts-ignore").problems[0], /^line 3:/, "the unterminated candidate uses the monotone line count");
+  assert.match(hatches("x;\r\n\u2028/* @ts-ignore").problems[0], /^line 3:/, "CRLF is one terminator and U+2028 another");
+});
+
+test("r7 work meter closed grammar: every scanner loop and direct src operation is pinned", () => {
+  const source = readFileSync(join(ROOT, "test", "tsc-web-hatches.ts"), "utf8");
+  const lines = source.split("\n").map((line) => line.trim()).filter(Boolean);
+  assert.deepEqual(lines.filter((line) => /\b(?:for|while)\s*\(/.test(line) || /\bdo\s*\{/.test(line)), [
+    "for (let i = 0; i < n; i++) if (isTerm(at(i)) && !(at(i) === 10 && at(i - 1) === 13)) terms.push(i);",
+    "for (let i = 0, blank = true; i < n; i++) {",
+    "for (let i = n - 1; i >= 0; i--) {",
+    "for (let i = 0; i < n; i++) {",
+    "{ const st: number[] = []; for (let i = 0; i < n; i++) { const c = at(i); if (c === 123) st.push(i); else if (c === 125 && st.length) braceMatch[st.pop()!] = i; } }",
+    "while (term < terms.length && terms[term] < p) { step(); term++; }",
+    "for (const m of src.matchAll(TOKEN)) {",
+    'for (const f of findings) counts[f.kind][f.permitted ? "permitted" : "refused"]++;',
+  ], "a new or changed loop must be charged by the work meter and reviewed here");
+  assert.deepEqual(lines.filter((line) => /\bsrc\./.test(line)), [
+    "const n = src.length;",
+    "? (i: number) => { work.steps++; return i < n ? src.charCodeAt(i) : -1; }",
+    ": (i: number) => i < n ? src.charCodeAt(i) : -1;",
+    'let open = -1, ls = src.startsWith("#!") ? 0 : -1, ll = ls, line = 1;',
+    'else if ((c === 47 && at(i + 1) === 47) || (c === 60 && src.startsWith("<!--", i)) || (c === 45 && src.startsWith("-->", i))) { if (ls < 0) ls = i; ll = i; }',
+    "for (const m of src.matchAll(TOKEN)) {",
+  ], "direct source operations are closed: new ones must be charged or proved constant-time");
 });
 
 test("r7 linearity (daybreak2): pathological inputs at 0.5, 1 and 2 MiB have linearly bounded scanner work", () => {
