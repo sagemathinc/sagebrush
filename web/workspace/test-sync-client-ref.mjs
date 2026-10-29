@@ -297,9 +297,12 @@ async function serve(req, server) {
 }
 
 const okCode = (c) => (c === 1000 || (c >= 3000 && c <= 4999) ? c : 1000);
+/** every proxied pair's close failure over the run, whoever called the closer (the cases' paths ignore what it returns;
+ * the cleanup reports these, so a failure before the cleanup still fails the run) */
+const closeFailures = [];
 /** One proxied pair's closer: both sides closed, once (`first` runs then); says what failed, each side tried whatever
- * the other did (empty when both closed, or when it had already closed them) */
-const pairCloser = (up, client, first) => {
+ * the other did (empty when both closed, or when it had already closed them), and keeps each failure in `ledger` */
+const pairCloser = (up, client, first, ledger = closeFailures) => {
   let closed = false;
   return (code = 1000) => {
     if (closed) return [];
@@ -308,6 +311,7 @@ const pairCloser = (up, client, first) => {
     const bad = [];
     try { up.close(1000, "proxy"); } catch (e) { bad.push(`the server's side (${why(e)})`); }
     try { client.close(okCode(code), "proxy"); } catch (e) { bad.push(`the page's side (${why(e)})`); }
+    ledger.push(...bad);
     return bad;
   };
 };
@@ -449,6 +453,13 @@ const stopChrome = async (p = chrome, ended = () => chromeEnded) => {
   }
   return { ok: false, said: "NOT seen to exit" };
 };
+/** The proxied pairs still open closed now; the stage fails on any close that failed, now or earlier in the run (the
+ * ledger keeps those after their closer has left the registry) */
+const proxiedStage = (registry, ledger) => {
+  const all = [...registry];
+  for (const f of all) try { f(1000); } catch (e) { ledger.push(why(e)); }
+  return ledger.length ? { ok: false, said: `NOT all closed (${ledger.join(", ")})` } : { ok: true, said: `${all.length} closed` };
+};
 /** Each closed; any that throws is said */
 const closeEach = (list, f) => { const bad = []; for (const s of list) try { f(s); } catch (e) { bad.push(why(e)); } return bad.length ? { ok: false, said: `NOT all closed (${bad.join(", ")})` } : { ok: true, said: `${list.length} closed` }; };
 const removeDir = (d) => { if (!d) return { ok: true, said: "never made" }; try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); return { ok: true, said: "removed" }; } catch (e) { return { ok: false, said: `NOT removed (${why(e)})` }; } };
@@ -469,7 +480,7 @@ let cleaned = null;
  * watchdog or SIGTERM), every stage attempted. */
 const cleanup = () => (cleaned ??= runStages([
   ["DevTools sockets", () => closeEach(sockets, (s) => s.close())],
-  ["proxied sockets", () => { const bad = [], all = [...closers]; for (const f of all) try { bad.push(...f(1000)); } catch (e) { bad.push(why(e)); } return bad.length ? { ok: false, said: `NOT all closed (${bad.join(", ")})` } : { ok: true, said: `${all.length} closed` }; }],
+  ["proxied sockets", () => proxiedStage(closers, closeFailures)],
   ["Chrome", () => stopChrome()],
   ["front", async () => { if (!server) return { ok: true, said: "never started" }; await server.stop(true); return { ok: true, said: "stopped" }; }],
   ["profile", () => removeDir(profile)],
@@ -502,11 +513,16 @@ try {
       ["a directory", () => removeDir(d)],
     ]);
     control1(!c.ok && c.line === "cleanup: a kill threw (EPERM); a front threw (injected stop failure); a directory removed" && !existsSync(d), "(control) the cleanup runs every stage after failures, names each and fails: " + c.line);
-    // (the real pair closer, its server side refusing: the failure is said, the page's side still closed, and once only)
+    // (the real pair closer, registered as the front registers one, its server side refusing, closed the way the cases'
+    // paths close it (its answer ignored) BEFORE the cleanup: the failure is kept, the page's side still closed, once
+    // only, and the cleanup's proxied-sockets stage, run on that registry and ledger, fails naming it)
     let pageClosed = false;
-    const pc = pairCloser({ close() { throw Object.assign(new Error("injected"), { code: "EPIPE" }); } }, { close() { pageClosed = true; } }, () => {});
-    const pcBad = pc(1000), pcAgain = pc(1000);
-    control1(J(pcBad) === J(["the server's side (EPIPE)"]) && pageClosed && pcAgain.length === 0, "(control) a proxied pair whose close fails says so, and still closes its other side: " + J(pcBad));
+    const reg = new Set(), led = [];
+    const pc = pairCloser({ close() { throw Object.assign(new Error("injected"), { code: "EPIPE" }); } }, { close() { pageClosed = true; } }, () => reg.delete(pc), led);
+    reg.add(pc);
+    pc(1000);
+    const pcAgain = pc(1000), stage = proxiedStage(reg, led);
+    control1(pageClosed && pcAgain.length === 0 && reg.size === 0 && J(led) === J(["the server's side (EPIPE)"]) && !stage.ok && stage.said === "NOT all closed (the server's side (EPIPE))", "(control) a proxied pair's close that fails before the cleanup still fails the cleanup's stage: " + J(stage));
     const d2 = mkdtempSync(join(tmpdir(), "sb-scr-ctl-"));
     const t0 = Date.now(), c2 = await runStages([["a front stop that never settles", () => new Promise(() => {})], ["a directory", () => removeDir(d2)]], 200);
     control1(!c2.ok && c2.line === "cleanup: a front stop that never settles threw (no answer within 200 ms: a front stop that never settles); a directory removed" && !existsSync(d2) && Date.now() - t0 < 5000, "(control) a stage that never ends fails within its bound, and the stages after it still run: " + c2.line);
