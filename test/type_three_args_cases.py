@@ -101,3 +101,13 @@ t("metaclass conflict", lambda: type("X", (NA, C2), {}))
 
 # one argument: the type, as before
 print("type(x)", type(1), type(C), type(NA), type(type))
+
+
+# the result's __init__ must return None, as for any instance
+class R5(type):
+    def __init__(cls, *a, **kw):
+        return 5
+
+
+R5A = type.__new__(R5, "R5A", (), {})
+t("__init__ returning 5", lambda: type("R5B", (R5A,), {}))
