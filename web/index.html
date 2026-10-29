@@ -259,6 +259,7 @@
     </div>
     <select id="autorun" hidden aria-label="Automatic reruns" title="When a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">Auto-run: 2 s</option><option value="10000">Auto-run: 10 s</option><option value="always">Auto-run: always</option><option value="never">Auto-run: never</option></select>
     <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
+    <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, or on a GPU kernel (a preview: simulated)"><option value="local">This browser</option><option value="gpu">GPU (preview)</option></select>
     <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
@@ -742,6 +743,7 @@ function startKernel(e) {
 // Make a notebook's interpreter the current one (before its document loads,
 // so that the outputs it computed are not marked stale).
 function useKernel(id) {
+  leaveRemote(); // (a notebook's own interpreter: the GPU kernel, if one was in use, is closed)
   const e = kernelFor(id);
   kernel = e.kernel;
   journal = e.journal;
@@ -798,7 +800,44 @@ const analyzer = {
     return new Promise((resolve) => { const id = ++analyzeId; analyzeWaiting.set(id, resolve); analyzeWorker.postMessage({ id, ...msg }); });
   },
 };
-const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE });
+// The GPU kernel, as a preview (web/notebook/remote-ui.js, its own bundle sagebrush-remote.js, loaded on
+// first use): offered only in a page opened with ?remote=1.  Its gateway is simulated in the page, and its
+// runs execute on a second interpreter in this browser; every run is still approved by the page's gate.
+const REMOTE_PREVIEW = new URLSearchParams(location.search).get("remote") === "1";
+const kernelPick = $("#kernelpick");
+let remoteMod = null, remoteOn = null; // remoteOn: {id, r} while the shown notebook runs on the GPU kernel
+function leaveRemote() {
+  if (!remoteOn) return;
+  const { r } = remoteOn;
+  remoteOn = null;
+  kernelPick.value = "local";
+  r.close();
+}
+async function useRemote() {
+  if (kernelPick.value !== "gpu") {
+    if (remoteOn) useKernel(current.id);
+    return;
+  }
+  const back = (why) => { kernelPick.value = "local"; if (why) statusEl.textContent = why; };
+  if (!REACTIVE) return back("the GPU kernel runs only in the reactive notebook");
+  try {
+    remoteMod ??= await import(new URL("sagebrush-remote.js", location.href).href);
+    if (!(await remoteMod.connectSheet())) return back();
+    const id = current.id;
+    const r = await remoteMod.startPreview({ notebook: id, local: makeKernel(null).kernel, onStatus: (t) => { if (kernelPick.value === "gpu") statusEl.textContent = t; } });
+    // (the person went elsewhere meanwhile: this kernel isn't used)
+    if (current.id !== id || kernelPick.value !== "gpu" || remoteOn) return r.close();
+    remoteOn = { id, r };
+    nb.setKernel(r.kernel); // (another interpreter: every output is stale)
+  } catch (e) {
+    back(`GPU kernel (preview): ${e?.message ?? e}`);
+  }
+}
+if (REMOTE_PREVIEW) {
+  kernelPick.hidden = false;
+  kernelPick.addEventListener("change", useRemote);
+}
+const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, remoteGate: (k, page) => remoteMod?.gateFor(k, page) });
 const blobDbReady = openBlobDb();
 let textHashFn = null;
 nb.on("dirty", () => (savedEl.textContent = ""));
