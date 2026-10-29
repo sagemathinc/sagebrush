@@ -564,22 +564,6 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   dropTarget(tree, "/");
 
   newBtn.onclick = () => popup(newBtn, [["Notebook", () => make("/", "notebook")], ["Board", () => make("/", "board")], ["Folder", () => make("/", "folder")]]);
-  // (a build with the LaTeX editor, and it on (web/latex/boot.ts's hook): "LaTeX file" too, a new .tex made by the
-  // person here, then named as the others are. Without it this whole statement folds away: the menu above, as before)
-  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__) {
-    const makeTex = async () => {
-      const taken = new Set(entries.map((x) => x.path));
-      const p = freePath("/", "Untitled", ".tex", (x) => taken.has(x));
-      if (!p) return say("No free name here");
-      try {
-        const e = await w.createByPerson(p, { content: new TextEncoder().encode("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n") });
-        await refresh();
-        const r = tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(e.path)}"]`);
-        if (r) startRename(r, e);
-      } catch (err) { fail(err); }
-    };
-    newBtn.onclick = () => popup(newBtn, [["Notebook", () => make("/", "notebook")], ["Board", () => make("/", "board")], ...((globalThis as any).__sbTex ? [["LaTeX file", () => void makeTex()] as [string, () => void]] : []), ["Folder", () => make("/", "folder")]]);
-  }
   upBtn.onclick = () => pick("/");
   moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], ["Storage…", () => storage()]]);
   // (the search drawn once typing pauses: LIMIT-0B0-2)

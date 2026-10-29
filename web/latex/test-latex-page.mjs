@@ -15,12 +15,19 @@
 //     zoom kept; a notebook from the files opened by URL; an unclosed $$ ended at a blank line.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-page.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
+// the box class, an explicit input (never detected): LATEX_BOX_CLASS, else the run packet's BOXCLASS beside the trees
+// (trees/BOXCLASS, written by latex-freeze-pkt.sh). "timing" (VM3/VM4) gates the timing assertions; "build" records
+// them; anything else stops here, before the server or Chrome starts
+let BOX = process.env.LATEX_BOX_CLASS ?? "";
+if (!BOX) { try { BOX = readFileSync(join(here, "..", "..", "..", "BOXCLASS"), "utf8").trim(); } catch {} }
+if (BOX !== "build" && BOX !== "timing") { console.log("FAIL: no box class: LATEX_BOX_CLASS or ../BOXCLASS must be build or timing, not " + JSON.stringify(BOX)); process.exit(1); }
+console.log("box class:", BOX);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // the server: web/serve.py on a port it picks, printed once it listens
 const server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "inherit"] });
@@ -242,8 +249,8 @@ try {
   check(await until(`document.querySelector(".tex-preview").textContent.includes("CHANGED")`, 60000), "the edited large paragraph is re-patched");
   check((await ev(`window.__mixed`)) === 0, "…never an old and a new version of it at once");
 
-  // ---- the patch loop: no Long Task over 50 ms while a large paragraph and list are re-patched (correctness run,
-  // not a timing box: recorded and checked here, measured again under the TIMING protocol)
+  // ---- the patch loop: no Long Task over 50 ms while a large paragraph and list are re-patched. Timing assertions
+  // gate only on a timing box (BOX "timing", VM3/VM4: @sagebrush's ruling, Oct 29); on a build box they are recorded
   await ev(`(() => { window.__lt = []; new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }).observe({ type: "longtask", buffered: false }); return true; })()`);
   await typeInto(para.replace("CHANGED word", "AGAIN word"));
   await until(`document.querySelector(".tex-preview").textContent.includes("AGAIN")`, 60000);
@@ -251,8 +258,10 @@ try {
   const lts = await ev(`window.__lt`);
   const own = await ev(`({ step: +document.querySelector(".tex-preview").dataset.patchMaxMs, swap: +document.querySelector(".tex-preview").dataset.swapMaxMs, reply: +document.querySelector(".tex-preview").dataset.replyMs })`);
   console.log("long tasks during the re-patch (ms):", JSON.stringify(lts), "patch loop's own longest step and swap (ms):", JSON.stringify(own));
-  check(own.step <= 50 && own.swap <= 50, "the patch loop's own steps and swap each under 50 ms", own);
-  check(lts.every((d) => d <= 50), "no Long Task over 50 ms while re-patching (VM2, not a timing box)", { lts, own });
+  if (BOX === "timing") {
+    check(own.step <= 50 && own.swap <= 50, "the patch loop's own steps and swap each under 50 ms (a timing box)", own);
+    check(lts.every((d) => d <= 50), "no Long Task over 50 ms while re-patching (a timing box)", { lts, own });
+  } else console.log("timing, reported, not gated (a build box): long tasks over 50 ms:", JSON.stringify(lts.filter((d) => d > 50)), "own step/swap over 50 ms:", own.step > 50 || own.swap > 50);
 
   // ---- a 1.5 MiB enumerate and a 1.5 MiB plain theorem: pieces whose styles and labels continue; a large table: a placeholder
   const thmDoc = "\\documentclass{article}\n\\newtheorem{theorem}{Theorem}\n\\begin{document}\n\\begin{theorem}\n" + "theorem words go on and on here. ".repeat(6000).split(". ").join(".\n\n") + "\n\\end{theorem}\n\n\\begin{enumerate}\n" + "\\item an item\n".repeat(6000) + "\\end{enumerate}\n\\end{document}\n";
@@ -286,7 +295,8 @@ try {
   await open(f3m);
   check(await until(`document.querySelector(".tex-preview").textContent.includes("this block is too large to display in the prototype")`, 60000), "a chunk over 2 MiB: a placeholder with its size, nothing inserted", await ev(`({ status: document.querySelector(".tex-status")?.textContent, pcs: document.querySelectorAll(".tex-preview .pc").length })`));
   // ---- the editor's layout and controls (William's feedback on the first prototype, batch 1)
-  // A0: the file browser's New offers a LaTeX file when the editor is on (and only then): made, with a short document
+  // A0: the file browser's New offers a LaTeX file when the editor is on (and only then): made, with a short document,
+  // and opened in the editor
   const newMenu = async (q) => {
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await go(base + q); await until(`!!${W}`, 60000);
@@ -298,9 +308,9 @@ try {
   const onItems = await newMenu("?latex=1");
   check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX file", "Folder"]), "A0: the editor on: New offers a LaTeX file", onItems);
   await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "LaTeX file").click(), true)`);
-  const made = await until(`!!document.querySelector('.frow[data-path="/Untitled.tex"]')`, 10000);
-  const newTex = made && await ev(`${W}.stat("/Untitled.tex").then((e) => ({ kind: e.kind, fid: !!e.fid }))`);
-  check(made && newTex.kind === "file" && newTex.fid && JSON.stringify(await bytesOf("/Untitled.tex")) === JSON.stringify(enc("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n")), "A0: New, LaTeX file: /Untitled.tex made, with a stable id and a short document", newTex);
+  const made = await until(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000);
+  const newTex = made && await ev(`${W}.stat("/Untitled.tex").then((e) => ({ kind: e?.kind, fid: e?.fid ?? "", here: !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid }))`);
+  check(made && newTex.kind === "file" && newTex.fid && newTex.here && JSON.stringify(await bytesOf("/Untitled.tex")) === JSON.stringify(enc("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n")), "A0: New, LaTeX file: /Untitled.tex made (a stable id, a short document) and opened in the editor", newTex);
   // A1, A7: the files shown beside the page, not over it; Files hides and shows them, the document staying open
   const UXDOC = "\\documentclass{article}\n\\begin{document}\n\\section{Hello}\nSome text " + "long words ".repeat(60) + "\n\\end{document}\n";
   const fu = await mk("/t/ux.tex", enc(UXDOC));
@@ -349,12 +359,14 @@ try {
   await ev(`(${rowOf("/uxnb.ipynb")}.click(), true)`);
   const leftByRow = await until(`!document.querySelector(".tex-page")`, 15000);
   check(leftByRow && requests.some((u) => u.includes("?nb=" + nbRef)), "A7: a notebook clicked in the files beside the editor: its page opened by URL", { leftByRow, nbRef, reqs: requests.slice(0, 5) });
+  // (the notebook page fully up again before the next file is made: a workspace call during that navigation is lost)
+  await go(base + "?latex=1"); await until(`!!${W}`, 60000);
   await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
   // A2: an unclosed formula ends at a blank line: shown with a note, the rest of the document rendered as text
   const fa2 = await mk("/t/open-math.tex", enc("\\documentclass{article}\n\\begin{document}\n$$x^\n\nAfter words here.\n\n\\section{Later}\nThen $$y=1$$ shown.\n\\end{document}\n"));
   await open(fa2);
   const a2 = await until(`!!document.querySelector(".tex-preview .mathopen") && document.querySelector(".tex-preview").textContent.includes("After words here.")`, 20000);
-  check(a2 && await ev(`[...document.querySelectorAll(".tex-preview .katex")].every((k) => !k.textContent.includes("After")) && document.querySelector(".tex-preview h2")?.textContent.includes("Later") && (() => { const d = [...document.querySelectorAll(".tex-preview .dmath")].pop(); return !!d && !!d.querySelector(".katex") && d.textContent.includes("y=1"); })()`), "A2: $$ not closed: a note, the text after the blank line not math, the section and a later display after it rendered", await ev(`document.querySelector(".tex-preview").textContent.slice(0, 300)`));
+  check(a2 && await ev(`[...document.querySelectorAll(".tex-preview .katex")].every((k) => !k.textContent.includes("After")) && document.querySelector(".tex-preview h2")?.textContent.includes("Later") && (() => { const d = [...document.querySelectorAll(".tex-preview .dmath")].pop(); return !!d && !!d.querySelector(".katex") && d.textContent.includes("y=1"); })()`), "A2: $$ not closed: a note, the text after the blank line not math, the section and a later display after it rendered", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
 
   // ---- a file in Trash, opened by its fid
   const ftr = await mk("/t/trashme.tex", enc(DOC));
