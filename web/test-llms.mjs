@@ -9,9 +9,12 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { hasSite, siteDir } from "./site-dir.mts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const pub = join(here, "site", "public");
+// (the site's built files, which web/build.ts writes only when web/site/ is here: a core-only checkout skips their
+// checks, saying so; the board format page's example below is checked either way)
+const pub = join(siteDir, "public");
 let failed = 0;
 const check = (ok, what) => {
   console.log(`${ok ? "ok  " : "FAIL"} ${what}`);
@@ -28,7 +31,8 @@ function served(path) {
   return existsSync(join(pub, p)) || existsSync(join(pub, p, "index.html"));
 }
 
-for (const file of ["llms.txt", "board-format.md"]) {
+if (!hasSite) console.log("site absent: llms.txt and board-format.md are not checked in the site");
+else for (const file of ["llms.txt", "board-format.md"]) {
   check(existsSync(join(pub, file)), `${file} is built into the site`);
   const text = readFileSync(join(here, file), "utf8");
   const links = new Set([...text.matchAll(/https:\/\/sagebrush\.space(\/[^\s)`"'<>]*)?/g)].map((m) => m[1] ?? "/"));
