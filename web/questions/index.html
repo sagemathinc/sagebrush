@@ -57,6 +57,10 @@
   .log { font-size: 12px; color: var(--muted); margin-top: 10px; border-top: 1px dashed #d8dce4; padding-top: 6px; max-height: 160px; overflow: auto; }
   .engine { font-size: 12px; color: var(--muted); }
   code { font-size: 13px; background: #f3f2ec; padding: 0 3px; border-radius: 3px; }
+  .fig:empty, .fbfig:empty { display: none; }
+  .fig, .fbfig { margin: 6px 0 10px; max-width: 560px; }
+  .fig .wait { color: var(--muted); font-size: 13px; padding: 30px 0; text-align: center; background: #f6f6f2; border-radius: 6px; }
+  .sbnb.fig figure.plot, .sbnb.fbfig figure.plot { margin: 0; }
   textarea { font: 14px/1.4 system-ui, sans-serif; width: 100%; min-height: 80px; padding: 6px 8px; border: 1px solid #b9bdb3; border-radius: 5px; }
   .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
   .tabs button { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid var(--line); background: #fff; border-radius: 14px; cursor: pointer; }
@@ -180,8 +184,48 @@ const ASSIGNMENT = {
         { text: "Clear and complete", points: 1 },
       ],
     },
+    // Plots (flag "plots"): `figure` is Sage code drawn in the prompt, `feedbackFigure`
+    // is drawn with the feedback once the question is answered or out of tries. Both run
+    // in the page's Sage, and the notebook's own output renderer draws them.
+    {
+      id: "q5", kind: "numeric", points: 3, attempts: 3, tol: 0.01, flag: "plots",
+      params: (r) => ({ k: r.int(2, 6) }), // c = 3k, so the minimum is at sqrt(k)
+      prompt: (p) => `The graph shows $f(x) = x^3 - ${3 * p.k}x$. At what $x > 0$ does $f$ have its local minimum? Give $x$ to two decimal places.`,
+      // (the range: a little past the roots 0 and +-sqrt(3k))
+      figure: (p) => `x = var("x")\nf = x^3 - ${3 * p.k}*x\nR = ${(Math.sqrt(3 * p.k) + 0.6).toFixed(1)}\nplot(f, (x, -R, R), thickness=2, figsize=[5, 3.2])`,
+      feedbackFigure: (p) => [
+        `x = var("x")`,
+        `f = x^3 - ${3 * p.k}*x`,
+        `R = ${(Math.sqrt(3 * p.k) + 0.6).toFixed(1)}`,
+        `m = sqrt(${p.k}); fm = f(x=m)`,
+        `plot(f, (x, -R, R), thickness=2, figsize=[5, 3.2]) + line([(m - 1.5, fm), (m + 1.5, fm)], color="red", linestyle="--") + point((m, fm), color="red", size=60)`,
+      ].join("\n"),
+      answer: (p) => Math.sqrt(p.k),
+      explain: (p, m) => `There $f'(x) = 3x^2 - ${3 * p.k} = 0$, so $x = \\sqrt{${p.k}} \\approx ${m.toFixed(2)}$, and the tangent line is horizontal (red).`,
+      hint: "At a local minimum the tangent line is horizontal: solve $f'(x) = 0$.",
+    },
+    {
+      id: "q6", kind: "choice", points: 2, attempts: 2, flag: "plots",
+      params: (r) => ({ which: r.int(0, 3), order: r.perm(4) }),
+      surfaces: ["x^2 + y^2", "x^2 - y^2", "x*y", "sin(x)*cos(y)"],
+      prompt: () => "The surface below is the graph of $z = f(x, y)$ for $-2 \\le x, y \\le 2$. Which function $f$ is it? (Drag the surface to turn it.)",
+      figure: (p) => `x, y = var("x y")\nplot3d(${item6().surfaces[p.which]}, (x, -2, 2), (y, -2, 2))`,
+      feedbackFigure: (p) => `x, y = var("x y")\ncontour_plot(${item6().surfaces[p.which]}, (x, -2, 2), (y, -2, 2), fill=False, labels=True, figsize=[3.6, 3.6])`,
+      choices: (p) => [
+        { tex: "f(x, y) = x^2 + y^2" },
+        { tex: "f(x, y) = x^2 - y^2" },
+        { tex: "f(x, y) = xy" },
+        { tex: "f(x, y) = \\sin x \\cos y" },
+      ].map((c, i) => ({ ...c, right: i === p.which })),
+      explain: () => "Its contour lines, below, show the same shape from above.",
+      hint: "Look at the heights along the $x$-axis ($y = 0$) and along the $y$-axis ($x = 0$).",
+    },
   ],
 };
+function item6() { return ASSIGNMENT.items.find((it) => it.id === "q6"); }
+// Feature flags of this preview: ?plots=0 hides the plot questions.
+const FLAGS = { plots: new URLSearchParams(location.search).get("plots") !== "0" };
+ASSIGNMENT.items = ASSIGNMENT.items.filter((it) => !it.flag || FLAGS[it.flag]);
 const ROSTER = ["Ada Lovelace", "Alan Turing", "Emmy Noether", "Srinivasa Ramanujan"];
 
 // ---------------------------------------------------------------- the course service
@@ -222,6 +266,31 @@ function runSage(code) {
       interact() {}, clear() {}, done() { resolve({ out, err }); }, stopped(m) { resolve({ out, err: err + m }); }, skipped() { resolve({ out, err: "skipped" }); },
     });
   });
+}
+// Figures: Sage code run once per variant (cached), its display outputs drawn by the
+// notebook component's own renderer (SVG plots, and 3D scenes in its viewer).
+const figNb = createNotebook(document.createElement("div"), { kernel, mode: "sage", assetBase: "/" });
+const figCache = new Map();
+function figureBundles(code) {
+  if (!figCache.has(code)) figCache.set(code, new Promise((resolve) => {
+    const bundles = []; let err = "";
+    kernel.execute(code, { mode: "sage" }, {
+      start() {}, out(t, isErr) { if (isErr) err += t; }, display(b) { bundles.push(b); },
+      interact() {}, clear() {}, done() { resolve({ bundles, err }); }, stopped(m) { resolve({ bundles, err: err + m }); }, skipped() { resolve({ bundles, err: "skipped" }); },
+    });
+  }));
+  return figCache.get(code);
+}
+async function drawFigure(el, code) {
+  el.className = `${el.className.split(" ")[0]} sbnb`;
+  el.innerHTML = `<div class="wait">${kernel.ready ? "Drawing the figure…" : "Starting Sage to draw the figure…"}</div>`;
+  const { bundles, err } = await figureBundles(code);
+  el.textContent = "";
+  for (const b of bundles) figNb.output.display(el, b);
+  if (!bundles.length) {
+    figCache.delete(code); // (not kept: a later render tries again)
+    el.innerHTML = `<div class="wait">The figure couldn't be drawn${err ? `: ${esc(err.trim().split("\n").at(-1).slice(0, 200))}` : ""}.</div>`;
+  }
 }
 // A Python string literal for any text (JSON's escapes are Python's too).
 const pyStr = (s) => JSON.stringify(String(s));
@@ -264,9 +333,13 @@ function renderItem(item, n, student) {
   const p = paramsFor(item, student);
   const box = document.createElement("section");
   box.className = "q";
-  box.innerHTML = `<h2>Question ${n}<span class="pts"></span></h2><div class="prompt"></div><div class="ans"></div><div class="fb"></div><div class="attempts"></div>`;
+  box.innerHTML = `<h2>Question ${n}<span class="pts"></span></h2><div class="prompt"></div><div class="fig"></div><div class="ans"></div><div class="fb"></div><div class="fbfig"></div><div class="attempts"></div>`;
   setMath(box.querySelector(".prompt"), item.prompt(p));
+  if (item.figure) drawFigure(box.querySelector(".fig"), item.figure(p));
   const ans = box.querySelector(".ans"), fb = box.querySelector(".fb"), at = box.querySelector(".attempts"), pts = box.querySelector(".pts");
+  // the feedback figure, once the question is settled (answered, or out of tries)
+  const settled = () => { const t = course.attempts(student, item.id); return t.some((a) => a.correct) || t.length >= item.attempts; };
+  const showFeedbackFigure = () => { const f = box.querySelector(".fbfig"); if (item.feedbackFigure && settled() && !f.childElementCount) drawFigure(f, item.feedbackFigure(p)); };
   const status = () => {
     const tries = course.attempts(student, item.id);
     const done = tries.some((t) => t.correct) || tries.length >= item.attempts;
@@ -283,8 +356,9 @@ function renderItem(item, n, student) {
   const record = (answer, correct, show, extra = {}) => {
     course.recordAttempt(student, item.id, { answer, correct, ...extra });
     const left = item.attempts - course.attempts(student, item.id).length;
-    feedback(fb, correct ? "ok" : "bad", correct ? `Correct. ${show ?? ""}` : left > 0 ? `Not quite. ${item.hint}` : `Not quite, and no tries are left. ${item.hint}`);
+    feedback(fb, correct ? "ok" : "bad", correct ? `Correct. ${show ?? ""}` : left > 0 ? `Not quite. ${item.hint}` : `Not quite, and no tries are left. ${item.hint}${item.explain ? " " + item.explain(p, item.answer?.(p)) : ""}`);
     finish();
+    showFeedbackFigure();
   };
 
   if (item.kind === "numeric") {
@@ -325,7 +399,7 @@ function renderItem(item, n, student) {
     ans.querySelector("button").onclick = () => {
       const sel = list.querySelector("input:checked");
       if (!sel) return feedback(fb, "bad", "Choose one of the answers.");
-      record(sel.value, !!choices[Number(sel.value)].right);
+      record(sel.value, !!choices[Number(sel.value)].right, item.explain ? item.explain(p) : "");
     };
   } else if (item.kind === "manual") {
     ans.innerHTML = `<textarea aria-label="Your answer"></textarea><div class="row"><button class="check">Submit</button></div>`;
@@ -344,6 +418,7 @@ function renderItem(item, n, student) {
   const tries = course.attempts(student, item.id);
   if (tries.length) feedback(fb, tries.some((t) => t.correct) ? "ok" : "bad", tries.some((t) => t.correct) ? "Correct." : `Last answer: <code>${esc(tries.at(-1).answer)}</code>, not quite.`);
   finish();
+  showFeedbackFigure();
   return box;
 }
 
@@ -443,7 +518,8 @@ function renderGrader() {
   for (const b of el.querySelectorAll(".roster button")) b.onclick = () => { gState.s = Number(b.dataset.s); renderGrader(); };
   const work = el.querySelector(".work");
   const p = paramsFor(item, student), tries = course.attempts(student, item.id);
-  work.innerHTML = `<h2 style="font-size:15px;margin:0 0 4px">${esc(student)} · Question ${gState.q + 1}</h2><div class="prompt"></div><div class="tries"></div><div class="grade"></div>`;
+  work.innerHTML = `<h2 style="font-size:15px;margin:0 0 4px">${esc(student)} · Question ${gState.q + 1}</h2><div class="prompt"></div><div class="fig"></div><div class="tries"></div><div class="grade"></div>`;
+  if (item.figure) drawFigure(work.querySelector(".fig"), item.figure(p));
   el.querySelector(".pager .where").textContent = `${student} · ${gState.s + 1} of ${others().length}`;
   const save = el.querySelector(".pager .save");
   setMath(work.querySelector(".prompt"), item.prompt(p));
@@ -519,7 +595,7 @@ document.getElementById("scratch").addEventListener("toggle", async (e) => {
   const nb = createNotebook(document.getElementById("nb"), { kernel, mode: "sage", assetBase: "/" });
   await nb.attach(new MemoryStore({ mode: "sage", cells: [{ id: cellId(), code: "f = x^3*sin(2*x)\ndiff(f, x)" }, { id: cellId(), code: "plot(f, (x, -2, 2))" }] }));
 });
-window.demo = { ASSIGNMENT, course, kernel, checkSymbolic };
+window.demo = { ASSIGNMENT, course, kernel, checkSymbolic, paramsFor, FLAGS };
 </script>
 </body>
 </html>
