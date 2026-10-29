@@ -136,9 +136,9 @@ try {
     const listed2 = await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000);
     const dlg = listed2 && await ev(`(() => { const d = document.querySelector("dialog.sb-tex-examples"), r = d.getBoundingClientRect(), bs = [...d.querySelectorAll("button[data-example]")];
       const last = bs[bs.length - 1]; last.scrollIntoView({ block: "center" }); const lr = last.getBoundingClientRect(), at = document.elementFromPoint(lr.left + lr.width / 2, lr.top + lr.height / 2);
-      return { left: r.left, right: r.right, w: innerWidth, n: bs.length, minH: Math.min(...bs.map((b) => b.getBoundingClientRect().height)), lastReach: at === last || last.contains(at) }; })()`);
-    check(exItem.found && exItem.inView && exItem.top && listed2 && dlg.left >= 0 && dlg.right <= dlg.w && dlg.n === 10 && dlg.minH >= 44 && dlg.lastReach,
-      "phone: File > New > LaTeX example: the list of 10 fits the screen, every button at least 44 px and reachable", { exItem, dlg });
+      return { menuHidden: document.getElementById("filemenu").hidden, left: r.left, right: r.right, w: innerWidth, n: bs.length, minH: Math.min(...bs.map((b) => b.getBoundingClientRect().height)), lastReach: at === last || last.contains(at) }; })()`);
+    check(exItem.found && exItem.inView && exItem.top && listed2 && dlg.menuHidden && dlg.left >= 0 && dlg.right <= dlg.w && dlg.n === 10 && dlg.minH >= 44 && dlg.lastReach,
+      "phone: File > New > LaTeX example: the File menu closed, the list of 10 fits the screen, every button at least 44 px and reachable", { exItem, dlg });
     await mark(); await ev(`(document.querySelector('dialog.sb-tex-examples button[data-example="figure"]').click(), true)`);
     const figOk = await madeAs("/LaTeX examples/Figure with an image/figure.tex");
     const figImg = figOk && await until(`[...document.querySelectorAll(".tex-preview img.graphic")].some((i) => i.src.startsWith("blob:"))`, 20000);
