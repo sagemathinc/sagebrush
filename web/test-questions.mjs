@@ -1,4 +1,4 @@
-// The questions preview (web/questions), in headless Chromium: three questions
+// The questions preview (web/questions), in headless Chromium: six questions (two with Sage plots)
 // render with typeset math; each student gets their own numbers; a right numeric
 // answer, a right symbolic answer (checked by Sage in the page's worker) and a
 // right choice are accepted, a wrong one is refused and costs a try, text Sage
@@ -45,9 +45,9 @@ try {
   const a = await tab(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
   await a.send("Runtime.enable"); await a.send("Log.enable");
   await a.send("Page.navigate", { url: new URL("questions/", base).href });
-  await a.until("window.demo && document.querySelectorAll('#items .q').length === 4");
+  await a.until("window.demo && document.querySelectorAll('#items .q').length === 6");
   await a.until("document.querySelectorAll('#items .katex').length >= 4");
-  ok(true, "four questions render, their math typeset");
+  ok(true, "six questions render, their math typeset");
   ok(await a.ev("document.querySelectorAll('#gb tr').length") === 4, "the mock gradebook lists the roster");
 
   // each student their own numbers
@@ -64,7 +64,7 @@ try {
   ok(v !== null, "numeric: the prompt carries this student's v0");
   await a.ev(`(${q(0)}.querySelector('input').value = '${((v * v) / 19.6).toFixed(3)}', ${q(0)}.querySelector('button').click())`);
   ok(await a.ev(`${q(0)}.querySelector('.fb').classList.contains('ok')`), "numeric: the right answer is accepted");
-  ok(await a.ev(`document.getElementById('score').textContent === '3 / 14'`), "the score counts it");
+  ok(await a.ev(`document.getElementById('score').textContent === '3 / 19'`), "the score counts it");
 
   // q2 symbolic, checked by Sage in the page's worker
   const tex = await a.ev(`${q(1)}.querySelector('.prompt [data-tex]').dataset.tex`);
@@ -83,10 +83,29 @@ try {
   // the right one is (c/2) e^{x^2}: the only choice with a fraction and no x^2 in front of e
   await a.ev(`(() => { const box = ${q(2)}; const right = [...box.querySelectorAll('label')].find((l) => { const t = l.querySelector('[data-tex]').dataset.tex; return t.includes('frac') && !t.includes('x^2 e'); }); right.querySelector('input').checked = true; box.querySelector('button').click(); })()`);
   ok(await a.ev(`${q(2)}.querySelector('.fb').classList.contains('ok')`), "choice: the right choice is accepted");
-  ok(await a.ev(`document.getElementById('score').textContent === '10 / 14'`), "the auto-graded total is 10 / 14");
-  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /10 \\/ 14/.test(r.textContent))`), "the gradebook shows the posted total");
+  ok(await a.ev(`document.getElementById('score').textContent === '10 / 19'`), "the auto-graded total is 10 / 19 (questions 1-3)");
+  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /10 \\/ 19/.test(r.textContent))`), "the gradebook shows the posted total");
   ok(await a.ev(`[...document.querySelectorAll('#items .q')].slice(0, 3).every((q) => [...q.querySelectorAll('button')].every((b) => b.disabled))`), "answered questions are closed");
-  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].filter((r) => /\\d+ \\/ 14/.test(r.textContent)).length === 4`), "the classmates' (mock) scores are in the gradebook");
+  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].filter((r) => /\\d+ \\/ 19/.test(r.textContent)).length === 4`), "the classmates' (mock) scores are in the gradebook");
+
+  // q5 and q6: plots drawn by Sage in the page (flag "plots"): a 2D graph and a 3D surface in the prompts
+  await a.until(`!!${q(4)}.querySelector('.fig figure.plot svg')`, 120000);
+  ok(true, "plots: the 2D question's graph is drawn (SVG)");
+  await a.until(`!!${q(5)}.querySelector('.fig figure.plot3d')`, 120000);
+  ok(true, "plots: the 3D question's surface is drawn (a 3D figure)");
+  await sleep(1500);
+  console.log("info 3D viewer canvas mounted: " + await a.ev(`!!${q(5)}.querySelector('.fig figure.plot3d canvas')`));
+  ok(await a.ev(`!${q(4)}.querySelector('.fbfig').childElementCount && !${q(5)}.querySelector('.fbfig').childElementCount`), "plots: no feedback figure before an answer");
+  const k = await a.ev(`demo.paramsFor(demo.ASSIGNMENT.items[4], 'Ada Lovelace').k`);
+  await a.ev(`(${q(4)}.querySelector('input').value = '${Math.sqrt(k).toFixed(3)}', ${q(4)}.querySelector('button').click())`);
+  ok(await a.ev(`${q(4)}.querySelector('.fb').classList.contains('ok') && document.getElementById('score').textContent === '13 / 19'`), "plots: the 2D question's right answer scores (13 / 19)");
+  await a.until(`${q(4)}.querySelectorAll('.fbfig figure.plot svg').length === 1`, 120000);
+  ok(true, "plots: the feedback figure (the tangent at the minimum) is drawn after the answer");
+  const which = await a.ev(`demo.paramsFor(demo.ASSIGNMENT.items[5], 'Ada Lovelace').which`);
+  await a.ev(`(() => { const box = ${q(5)}; box.querySelector('input[value="${which}"]').checked = true; box.querySelector('button').click(); })()`);
+  ok(await a.ev(`${q(5)}.querySelector('.fb').classList.contains('ok') && document.getElementById('score').textContent === '15 / 19'`), "plots: the 3D question's right choice scores (15 / 19)");
+  await a.until(`!!${q(5)}.querySelector('.fbfig figure.plot svg')`, 120000);
+  ok(true, "plots: the feedback contour plot is drawn after the answer");
 
   // q4, graded by the instructor
   await a.ev(`(${q(3)}.querySelector('textarea').value = 'The product rule: one term differentiates each factor.', ${q(3)}.querySelector('button').click())`);
@@ -97,7 +116,7 @@ try {
   ok(await a.ev(`/product rule/.test(document.querySelector('#grader .work .answer').textContent)`), "instructor: the stored answer is shown, nothing rerun");
   await a.ev(`(document.querySelectorAll('#grader .rubric input').forEach((c) => (c.checked = true)), document.querySelector('#grader .save').click())`);
   ok(await a.ev(`document.querySelector('#grader .roster button.on').textContent.includes('Alan Turing')`), "instructor: save moves to the next student");
-  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /14 \\/ 14/.test(r.textContent))`), "instructor: the graded total, 14 / 14, reaches the gradebook");
+  ok(await a.ev(`[...document.querySelectorAll('#gb tr')].some((r) => /Ada Lovelace/.test(r.textContent) && /19 \\/ 19/.test(r.textContent))`), "instructor: the graded total, 19 / 19, reaches the gradebook");
   await a.ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))`);
   ok(await a.ev(`document.querySelector('#grader .roster button.on').textContent.includes('Emmy Noether')`), "instructor: j goes to the next student");
   // the pager stays in one place whatever the answer's length (William, Oct 29), on a desktop and on a phone
@@ -122,12 +141,18 @@ try {
   await a.ev(`document.querySelector('#grader .tabs button[data-q="1"]').click()`);
   ok(await a.ev(`!!document.querySelector('#grader .work .chip.ok')`), "instructor: an auto-graded question shows its stored verdicts");
   await a.ev(`document.getElementById('as-student').click()`);
-  ok(await a.ev(`document.getElementById('score').textContent === '14 / 14' && /Graded by your instructor/.test(${q(3)}.querySelector('.attempts').textContent)`), "the student sees the graded total");
+  ok(await a.ev(`document.getElementById('score').textContent === '19 / 19' && /Graded by your instructor/.test(${q(3)}.querySelector('.attempts').textContent)`), "the student sees the graded total");
 
   // a reload keeps the attempts (the mock course service's storage)
   await a.send("Page.reload");
+  await a.until("window.demo && document.querySelectorAll('#items .q').length === 6");
+  ok(await a.ev(`document.getElementById('score').textContent === '19 / 19'`), "a reload keeps this student's attempts and grades");
+  await a.until(`${q(4)}.querySelectorAll('.fbfig figure.plot svg').length === 1`, 120000);
+  ok(true, "a reload draws the settled question's feedback figure again");
+  // the flag off: no plot questions, the old 14-point assignment
+  await a.send("Page.navigate", { url: new URL("questions/?plots=0", base).href });
   await a.until("window.demo && document.querySelectorAll('#items .q').length === 4");
-  ok(await a.ev(`document.getElementById('score').textContent === '14 / 14'`), "a reload keeps this student's attempts and grades");
+  ok(await a.ev(`!document.querySelector('#items .fig figure')`), "?plots=0: the plot questions are hidden");
   ok(a.errors.length === 0, `no page errors${a.errors.length ? ": " + a.errors.slice(0, 3).join(" | ") : ""}`);
 } catch (e) {
   console.log("FAIL " + (e?.stack ?? e));
