@@ -330,19 +330,31 @@ try {
   const v2 = await view();
   check(v2.src === fs0 + 2 && v2.hl === v2.src && v2.zoom === "1.1" && v2.shown === "110%", "A4: after a reload, the same font size and zoom", v2);
   await ev(`localStorage.removeItem("sagebrush-latex-font"); localStorage.removeItem("sagebrush-latex-zoom"); true`);
-  // A7: a notebook in the files beside the page opens by its URL (not loaded unseen under the editor)
+  // A7: a notebook opened from the files beside the page opens by its URL (not loaded unseen under the editor), by
+  // its row and by its menu's Open (both through the notebook page's openId); a folder named like a notebook still
+  // opens as a folder
   const nbRef = await ev(`${W}.create("/uxnb.ipynb").then((e) => e.ref)`);
-  const row = await until(`!!document.querySelector('.frow[data-path="/uxnb.ipynb"]')`, 15000);
+  await ev(`${W}.mkdir("/notes.ipynb").then(() => 1)`); await mk("/notes.ipynb/inside.txt", enc("x\n"));
+  const rowOf = (p) => `document.querySelector('.frow[data-path="${p}"]')`;
+  const rows = await until(`!!${rowOf("/uxnb.ipynb")} && !!${rowOf("/notes.ipynb")}`, 15000);
+  if (rows) await ev(`(${rowOf("/notes.ipynb")}.click(), true)`);
+  const folderOk = rows && await until(`!!${rowOf("/notes.ipynb/inside.txt")}`, 5000) && await ev(`!!document.querySelector(".tex-page") && !document.querySelector(".tex-page .tex-gone")`);
+  check(folderOk, "A7: a folder named notes.ipynb, clicked beside the editor: opened as a folder, the editor still here", { rows, folderOk });
   requests.length = 0;
-  if (row) await ev(`(document.querySelector('.frow[data-path="/uxnb.ipynb"]').click(), true)`);
-  const left = await until(`!document.querySelector(".tex-page")`, 15000);
-  check(row && left && requests.some((u) => u.includes("?nb=" + nbRef)), "A7: a notebook clicked in the files beside the editor: its page opened by URL", { row, left, nbRef, reqs: requests.slice(0, 5) });
+  if (rows) await ev(`(${rowOf("/uxnb.ipynb")}.querySelector(".more").click(), [...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "Open").click(), true)`);
+  const leftByMenu = await until(`!document.querySelector(".tex-page")`, 15000);
+  check(rows && leftByMenu && requests.some((u) => u.includes("?nb=" + nbRef)), "A7: a notebook's menu, Open, beside the editor: its page opened by URL", { leftByMenu, nbRef, reqs: requests.slice(0, 5) });
+  await open(fu); await until(`!!${rowOf("/uxnb.ipynb")}`, 15000);
+  requests.length = 0;
+  await ev(`(${rowOf("/uxnb.ipynb")}.click(), true)`);
+  const leftByRow = await until(`!document.querySelector(".tex-page")`, 15000);
+  check(leftByRow && requests.some((u) => u.includes("?nb=" + nbRef)), "A7: a notebook clicked in the files beside the editor: its page opened by URL", { leftByRow, nbRef, reqs: requests.slice(0, 5) });
   await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
   // A2: an unclosed formula ends at a blank line: shown with a note, the rest of the document rendered as text
-  const fa2 = await mk("/t/open-math.tex", enc("\\documentclass{article}\n\\begin{document}\n$$x^\n\nAfter words here.\n\n\\section{Later}\n\\end{document}\n"));
+  const fa2 = await mk("/t/open-math.tex", enc("\\documentclass{article}\n\\begin{document}\n$$x^\n\nAfter words here.\n\n\\section{Later}\nThen $$y=1$$ shown.\n\\end{document}\n"));
   await open(fa2);
   const a2 = await until(`!!document.querySelector(".tex-preview .mathopen") && document.querySelector(".tex-preview").textContent.includes("After words here.")`, 20000);
-  check(a2 && await ev(`[...document.querySelectorAll(".tex-preview .katex")].every((k) => !k.textContent.includes("After")) && document.querySelector(".tex-preview h2")?.textContent.includes("Later")`), "A2: $$ not closed: a note, the text after the blank line not math, the section after it rendered", await ev(`document.querySelector(".tex-preview").textContent.slice(0, 300)`));
+  check(a2 && await ev(`[...document.querySelectorAll(".tex-preview .katex")].every((k) => !k.textContent.includes("After")) && document.querySelector(".tex-preview h2")?.textContent.includes("Later") && (() => { const d = [...document.querySelectorAll(".tex-preview .dmath")].pop(); return !!d && !!d.querySelector(".katex") && d.textContent.includes("y=1"); })()`), "A2: $$ not closed: a note, the text after the blank line not math, the section and a later display after it rendered", await ev(`document.querySelector(".tex-preview").textContent.slice(0, 300)`));
 
   // ---- a file in Trash, opened by its fid
   const ftr = await mk("/t/trashme.tex", enc(DOC));
