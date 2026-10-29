@@ -24,13 +24,27 @@ const SAGE_MAX_CODE = 65536;   // UTF-8 bytes of one \sage / \sageplot argument 
 // source positions, for keeping the source and the preview in sync: each line of the main file that yields a token
 // marks its start offset ({k: "pos", at, ep}). ep is the pipeline's run (setPosEpoch): the incremental layer reuses
 // events of unchanged units, and the pipeline shifts their offsets past the edit (pipeline.mjs)
+// a short argument that ran away (a \par or the end of the input inside it): thrown by the demo readers, caught by
+// the innermost primitive's guard (guardRunaway), which drops the command and marks {k:"err", code:"runaway"}
+class RunawayArg extends Error { constructor(text) { super("runaway argument"); this.text = text; } }
+// the primitives LaTeX's kernel defines \long (their arguments may hold paragraphs): the core's readers serve them
+const LONG_PRIMS = new Set(["caption", "footnote", "thanks", "newcommand", "renewcommand", "providecommand", "newenvironment", "renewenvironment"]);
+function guardRunaway(name, fn) {
+  const long = LONG_PRIMS.has(name);
+  return function (t) {
+    (this.primLong ??= []).push(long);
+    try { return fn.call(this, t); }
+    catch (e) { if (!(e instanceof RunawayArg)) throw e; this.mark({ k: "err", code: "runaway", name, text: e.text }); }
+    finally { this.primLong.pop(); }
+  };
+}
 let POS_EPOCH = 0;
 export function setPosEpoch(n) { POS_EPOCH = n; }
 
 export class Machine extends CoreMachine {
   constructor(opts) {
     super(Object.assign({}, opts, { known: ALL_KNOWN }));
-    this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS; this.posLine = -1;
+    this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS; this.posFrontier = -1;
     this.installDemoPrimitives();
   }
   emit(t) { if (++this.nev > MAX_EVENTS) throw new BoundError("E-BOUND-OUTPUT", "events"); this.ev.push(t); super.emit(t); }
@@ -43,13 +57,22 @@ export class Machine extends CoreMachine {
     this.units[this.units.length - 1].ev = this.ev;
     this.ev = [];
   }
-  restore(ck, files, delta = 0) { super.restore(ck, files, delta); this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS; this.posLine = -1; }
-  // (the core's count of a source token, then: the first token of a new main-file line marks that line's offset)
+  // (the marked-line frontier is restored from the checkpoint: a main line the checkpoint left half read (an \input
+  //  in the middle of it) was marked before the checkpoint, so its rest marks nothing; else the next line is unmarked;
+  //  the checkpoint precedes the edit, so its offsets need no shift)
+  restore(ck, files, delta = 0) {
+    super.restore(ck, files, delta); this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS;
+    const mr = ck.readers.find((r) => r.path === this.mainPath);
+    this.posFrontier = mr ? (mr.partial ? mr.lineStart : mr.pos - 1) : -1;
+  }
+  // (the core's count of a source token, then: the first token of a main-file line past the marked frontier marks
+  //  that line's offset, once: the frontier only moves forward, so a line read again (a reread of the file, the rest
+  //  of a half-read line) is never marked twice)
   countSrc(f, i) {
     super.countSrc(f, i);
     if (f.path !== this.mainPath) return;
     const ls = f.lineStart ?? 0;
-    if (ls !== this.posLine) { this.posLine = ls; this.mark({ k: "pos", at: ls, ep: POS_EPOCH }); }
+    if (ls > this.posFrontier) { this.posFrontier = ls; this.mark({ k: "pos", at: ls, ep: POS_EPOCH }); }
   }
   // push "{s}" back as an argument, for a core primitive that reads it again
   pushArg(s) {
@@ -58,51 +81,53 @@ export class Machine extends CoreMachine {
   }
 
   // ---- half-typed arguments (William, Oct 29: "\begin{" typed in the middle of a document blanked everything after
-  // it). LaTeX's commands that take a name (\begin, \end, \label, \ref, counters, packages, ...), an optional [...] or a
-  // section title are not \long: a \par (a blank line) inside the argument ends it ("Runaway argument? ... Paragraph
-  // ended before \begin was complete"), the \par is read again, and LaTeX goes on. These readers do the same (the core's
-  // own readers, which run to the end of the input, are unchanged): the \par goes back, and this.runaway records where
-  // the argument stopped, so the command can say so and drop itself, as TeX drops the call, instead of swallowing the
-  // rest of the document. A demo primitive clears this.runaway before it reads.
-  readShortGroup(open) {    // after "{": to the matching "}", or up to a \par or the end of the input (this.runaway set)
+  // it). Inside a primitive that LaTeX's kernel defines without \long (\begin, \end, \label, \ref, \cite, the counter
+  // and package commands, section titles, ...), a \par (a blank line) or the end of the input inside a name, an
+  // argument or an optional [...] is TeX's "Runaway argument? ... Paragraph ended before \x was complete": the
+  // reader puts the \par back and throws RunawayArg; every primitive is wrapped (prim/xprim below), and the innermost
+  // one drops the whole command before any effect (as TeX drops the call), with a "not finished" note, and the rest of
+  // the document goes on from the \par. In a \long command (LONG_PRIMS: captions, footnotes, \thanks, the \newcommand
+  // family) and outside any primitive (a \newcommand macro's optional argument) the core's own readers run, which read
+  // on to the closing brace or bracket.
+  prim(name, fn) { super.prim(name, guardRunaway(name, fn)); }
+  xprim(name, fn, cond = false) { super.xprim(name, guardRunaway(name, fn), cond); }
+  // (a \newcommand macro's optional argument is \long in the kernel, even read inside a short primitive's expansion)
+  callLMacro(cs, m) { (this.primLong ??= []).push(true); try { return super.callLMacro(cs, m); } finally { this.primLong.pop(); } }
+  shortNow() { const s = this.primLong; return !!s && s.length > 0 && !s[s.length - 1]; }
+  readShortGroup(open) {    // after "{": to the matching "}"; a \par or the end of the input throws RunawayArg
     const out = []; let depth = 1;
     for (;;) {
       const t = this.nextRaw();
-      if (t === null) { this.d("E-RUNAWAY"); this.runaway = { open, text: this.toks2str(out) }; return out; }
-      if (isCs(t) && this.intern.name(t) === "par") { this.d("E-RUNAWAY-PAR"); this.back(t); this.runaway = { open, text: this.toks2str(out) }; return out; }
+      if (t === null) { this.d("E-RUNAWAY"); throw new RunawayArg(open + this.toks2str(out)); }
+      if (isCs(t) && this.intern.name(t) === "par") { this.d("E-RUNAWAY-PAR"); this.back(t); throw new RunawayArg(open + this.toks2str(out)); }
       if (!isCs(t)) { const c = catOf(t); if (c === CAT.BGROUP) depth++; else if (c === CAT.EGROUP && --depth === 0) return out; }
       out.push(t); this.charge(1);
       if (out.length > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
     }
   }
-  readArgShortRaw() {       // an undelimited argument, short: a group as readShortGroup reads it, else one token
+  readArgShortRaw() {       // an undelimited argument: short (readShortGroup) in a short primitive, else the core's
+    if (!this.shortNow()) return this.readArgRaw();
     const t = this.skipSpacesRaw();
     if (t === null) return [];
     if (!isCs(t) && catOf(t) === CAT.BGROUP) return this.readShortGroup("{");
     return [t];
   }
-  readArgString() { return this.toks2str(this.readArgShortRaw()).trim(); }
-  readOptRaw() {            // [ ... ] if present (else null), short: it ends at a \par or the end of the input too
+  readArgString() { return this.shortNow() ? this.toks2str(this.readArgShortRaw()).trim() : super.readArgString(); }
+  readOptRaw() {            // [ ... ] if present (else null): short in a short primitive, else the core's
+    if (!this.shortNow()) return super.readOptRaw();
     const t = this.skipSpacesRaw();
     if (t === null) return null;
     if (t !== mkChar(CAT.OTHER, 91)) { this.back(t); return null; }
     const out = []; let depth = 0;
     for (;;) {
       const u = this.nextRaw();
-      if (u === null) { this.runaway = { open: "[", text: this.toks2str(out) }; return out; }
-      if (isCs(u) && this.intern.name(u) === "par") { this.d("E-RUNAWAY-PAR"); this.back(u); this.runaway = { open: "[", text: this.toks2str(out) }; return out; }
+      if (u === null) { this.d("E-RUNAWAY"); throw new RunawayArg("[" + this.toks2str(out)); }
+      if (isCs(u) && this.intern.name(u) === "par") { this.d("E-RUNAWAY-PAR"); this.back(u); throw new RunawayArg("[" + this.toks2str(out)); }
       if (!isCs(u)) { const c = catOf(u); if (c === CAT.BGROUP) depth++; else if (c === CAT.EGROUP) depth--; }
       if (depth === 0 && u === mkChar(CAT.OTHER, 93)) return out;
       out.push(u); this.charge(1);
       if (out.length > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
     }
-  }
-  // the note for a command whose argument ran away (it is then dropped, as TeX drops the call); true if one was made
-  ranAway(name) {
-    const r = this.runaway; this.runaway = null;
-    if (!r) return false;
-    this.mark({ k: "err", code: "runaway", name, text: r.open + r.text });
-    return true;
   }
 
   // verbatim text: the core skips it; here it is captured (bounded) first, then the core's own skip runs
@@ -178,9 +203,7 @@ export class Machine extends CoreMachine {
     const isVerb = (env) => VERBATIM.has(env);
     // \begin / \end: the core's behaviour, plus markers (the name is read here, then pushed back for the core)
     P.prim("begin", function (t) {
-      this.runaway = null;
       const env = this.readArgString();
-      if (this.ranAway("begin")) return;
       // verbatim: exactly the core's branch (its reader must be the file on top of the stack, not a pushed list)
       if (isVerb(env)) { this.charge(env.length); this.skipVerbatim(env); return; }
       if (env === "document") this.mark({ k: "doc" });
@@ -189,9 +212,7 @@ export class Machine extends CoreMachine {
       coreBegin.call(this, t);
     });
     P.prim("end", function (t) {
-      this.runaway = null;
       const env = this.readArgString();
-      if (this.ranAway("end")) return;
       if (env !== "document" && this.getS("m:end" + env) === undefined) this.mark({ k: "ee", env });
       this.pushArg(env);
       coreEnd.call(this, t);
@@ -200,26 +221,20 @@ export class Machine extends CoreMachine {
     P.prim("sb@endgroup", function () { const g = this.groups[this.groups.length - 1]; this.mark({ k: "ee", env: g ? g.env : "?" }); this.endGroup("env"); });
     // the document class (the core reads and drops it)
     P.prim("documentclass", function (t) {
-      this.runaway = null;
-      const opt = this.readOptRaw(); if (this.ranAway("documentclass")) return;
-      const cls = this.readArgString(); if (this.ranAway("documentclass")) return;
+      const opt = this.readOptRaw(); const cls = this.readArgString();
       this.mark({ k: "cls", cls, opt: opt ? this.toks2str(opt) : "" });
       this.pushArg(cls);
       coreClass.call(this, t);
     });
     // labels and references: the key is kept as a marker
     P.prim("label", function (t) {
-      this.runaway = null;
       const key = this.readArgString();
-      if (this.ranAway("label")) return;
       this.mark({ k: "label", key });
       this.pushArg(key);
       coreLabel.call(this, t);
     });
     for (const nm of ["ref", "eqref", "pageref", "cite", "cref", "Cref", "autoref", "citep", "citet", "nameref"]) P.prim(nm, function () {
-      this.runaway = null;
-      const opt = this.readOptRaw(); if (this.ranAway(nm)) return;
-      const key = this.readArgString(); if (this.ranAway(nm)) return;
+      const opt = this.readOptRaw(); const key = this.readArgString();
       this.mark({ k: "ref", cmd: nm, key, opt: opt ? this.toks2str(opt) : null });
     });
     // \newcommand (and \newcommand*) on a name that already has a meaning: LaTeX's "already defined" error, and the old
@@ -262,9 +277,7 @@ export class Machine extends CoreMachine {
       ["paragraph", "paragraph"], ["subparagraph", null], ["caption", null], ["footnote", "footnote"], ["thanks", null]]) {
       P.prim(nm, function () {
         const s = this.skipSpacesRaw(); const star = s === mkChar(CAT.OTHER, 42); if (!star && s !== null) this.back(s);
-        this.runaway = null;
-        this.readOptRaw(); if (this.ranAway(nm)) return;
-        const arg = this.readArgShortRaw(); if (this.ranAway(nm)) return;
+        this.readOptRaw(); const arg = this.readArgShortRaw();
         if (ctr && !star && this.counterReg(ctr) >= 0) this.stepCounterRef(ctr);
         this.mark({ k: "sec", cmd: nm, star });
         this.pushList(arg.concat([this.csTok("sb@eot")]));

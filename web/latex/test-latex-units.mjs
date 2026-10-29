@@ -10,6 +10,7 @@ import { latexOn } from "./boot.ts";
 import { RenderGate } from "./gate.ts";
 import { boxClass } from "./boxclass.mjs";
 import { Engine } from "./engine/pipeline.mjs";
+import { coldRun, incremental } from "./engine/incremental-demo.mjs";
 import { setKatex } from "./engine/render.mjs";
 
 const results = [];
@@ -127,6 +128,48 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   ];
   for (const [name, body, ok] of half) { const h = doc("\\documentclass{article}\n", body); check(name, ok(h), h.slice(0, 600)); }
   { const h = doc("\\documentclass[a4paper\n\n", "Body survives."); check("half-documentclass-opt", h.includes("Body survives."), h.slice(0, 600)); }
+  // \long commands keep paragraphs (the kernel's \@footnotetext, \@caption, \thanks are \long); a short one with a
+  // literal \par is a runaway, as in TeX; a short command that runs away is dropped before any effect
+  const longs = [
+    ["long-footnote-two-paragraphs", "Text\\footnote{First fn para.\n\nSecond fn para.} after.", (h) => !h.includes("not finished") && h.includes("First fn para.") && h.includes("Second fn para.") && h.includes("after.")],
+    ["long-footnote-literal-par", "Text\\footnote{Alpha \\par Beta} after.", (h) => !h.includes("not finished") && h.includes("Beta") && h.includes("after.")],
+    ["long-caption-two-paragraphs", "\\begin{figure}\\caption{Cap one.\n\nCap two.}\\end{figure}\nAfter.", (h) => !h.includes("not finished") && h.includes("Cap two.") && h.includes("After.")],
+    ["long-thanks-two-paragraphs", "Text\\thanks{Th one.\n\nTh two.} After.", (h) => !h.includes("not finished") && h.includes("After.")],
+    ["short-section-literal-par", "\\section{A \\par B}\nAfter.", (h) => h.includes("\\section{A") && h.includes("not finished") && h.includes("After.")],
+    // (a counter of the test's own, read with \the: the renderer keeps its own section numbers, and \arabic isn't
+    // shown by this prototype; the two closed controls show the reading works)
+    ["counter-stepcounter-control", "\\stepcounter{foo}Value: \\the\\csname c@foo\\endcsname.", (h) => !h.includes("not finished") && h.includes("Value: 1.")],
+    ["counter-stepcounter-no-effect", "\\stepcounter{foo\n\nValue: \\the\\csname c@foo\\endcsname.", (h) => h.includes("\\stepcounter{foo not finished") && h.includes("Value: 0.")],
+    ["counter-setcounter-control", "\\setcounter{foo}{5}Value: \\the\\csname c@foo\\endcsname.", (h) => !h.includes("not finished") && h.includes("Value: 5.")],
+    ["counter-setcounter-multiarg-no-effect", "\\setcounter{foo\n\n{5}Value: \\the\\csname c@foo\\endcsname.", (h) => h.includes("\\setcounter{foo not finished") && h.includes("Value: 0.")],
+    ["opt-newcounter-runaway", "\\newcounter{bar}[sec\n\nAfter opt.", (h) => h.includes("\\newcounter[sec") && h.includes("not finished") && h.includes("After opt.")],
+    ["opt-cite-runaway", "See \\cite[page\n\nNext para.", (h) => h.includes("\\cite[page") && h.includes("not finished") && h.includes("Next para.")],
+  ];
+  for (const [name, body, ok] of longs) { const h = doc("\\documentclass{article}\n\\newcounter{foo}\n", body); check(name, ok(h), h.slice(0, 700)); }
+}
+
+// ---- source position markers: each main-file line is marked at most once (a resume inside an \input that a main
+// line started in the middle; the main file read again)
+{
+  const posAts = (res) => res.units.flatMap((u) => (u.ev || []).filter((e) => typeof e !== "number" && e.k === "pos").map((e) => e.at));
+  const dups = (a) => a.filter((x, i) => a.indexOf(x) !== i);
+  const sub = Array.from({ length: 120 }, (_, k) => "Sub paragraph " + k + " with several words here.").join("\n\n") + "\n";
+  const main = "\\documentclass{article}\n\\begin{document}\nBefore \\input{b} after on the same line.\n\nTail para.\n\\end{document}\n";
+  const files = new Map([["main.tex", main], ["b.tex", sub]]);
+  const c0 = coldRun(files, "main.tex", { Tmin: 100 });
+  const a0 = posAts(c0);
+  check("pos-unique-cold", c0.outcome === "ok" && dups(a0).length === 0 && a0.filter((x) => x === main.indexOf("Before")).length === 1, { outcome: c0.outcome, dups: dups(a0) });
+  const s = main.indexOf("Tail para.");
+  const r1 = incremental(c0, { start: s, end: s + 10, text: "Tail para changed." });
+  const main2 = main.slice(0, s) + "Tail para changed." + main.slice(s + 10);
+  const a1 = posAts(r1.res);
+  check("pos-unique-after-resume-in-input", r1.res.outcome === "ok" && dups(a1).length === 0 && a1.filter((x) => x === main2.indexOf("Before")).length === 1, { mode: r1.stats.mode, resumedFrom: r1.stats.resumedFrom, dups: dups(a1) });
+  const reread = "\\documentclass{article}\n\\begin{document}\n\\ifx\\sbdone\\undefined\\def\\sbdone{}\\input{main.tex}\\fi\nPara once.\n\\end{document}\n";
+  const c2 = coldRun(new Map([["main.tex", reread]]), "main.tex", { Tmin: 100 });
+  const a2 = posAts(c2);
+  check("pos-unique-main-reread", dups(a2).length === 0, { outcome: c2.outcome, dups: dups(a2) });
+}
+{
   // source positions (sync): each chunk's pos is the offset of the line where it begins; after an edit above them
   // (incremental: the later units' events are reused), the positions follow the text
   {
