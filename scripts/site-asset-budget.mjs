@@ -14,7 +14,7 @@
 //   2. PROD holds no LaTeX-owned file (named sagebrush-latex*) and no page or script names one;
 //   3. the DEV bootstrap: index.html's growth over PROD, at most DEV_BOOT.raw bytes minified and DEV_BOOT.gzip gzip
 //      (level 9);
-//   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most 180 KiB minified and 60 KiB gzip; no CSS
+//   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most 192 KiB minified and 64 KiB gzip; no CSS
 //      file over 8 KiB; no font file; and the test build's hook on image reads folded away (no DEV file names it);
 //   5. no new KaTeX bytes: DEV's katex/ files the same as PROD's, and (with --meta) no node_modules/katex input in a
 //      LaTeX bundle and KaTeX's inputs in exactly one output (the math module).
@@ -90,13 +90,19 @@ const pi = readFileSync(prod.get("dist/index.html")), di = readFileSync(dev.get(
 const boot = { raw: di.length - pi.length, gzip: gz(di) - gz(pi) };
 check(`DEV bootstrap delta (index.html): at most ${DEV_BOOT.raw} B minified and ${DEV_BOOT.gzip} B gzip`, boot.raw <= DEV_BOOT.raw && boot.gzip <= DEV_BOOT.gzip, boot);
 // 4. the LaTeX group
-const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n));
+// (the comments' chunk, sagebrush-latex-comments.js, loaded only for comments: its own line below, not in the group)
+const COMMENTS = "dist/sagebrush-latex-comments.js";
+const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n) && n !== COMMENTS);
 const js = group.filter((n) => n.endsWith(".js")), css = group.filter((n) => n.endsWith(".css")), fonts = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(woff2?|ttf|otf)$/.test(n) && !prod.has(n));
 const jsRaw = js.reduce((s, n) => s + statSync(dev.get(n)).size, 0), jsGz = js.reduce((s, n) => s + gz(readFileSync(dev.get(n))), 0);
-check("the LaTeX group's JS: at most 180 KiB minified, 60 KiB gzip", js.length > 0 && jsRaw <= 180 * 1024 && jsGz <= 60 * 1024, { files: js, raw: jsRaw, gzip: jsGz });
-// (the test build's hold on image reads, web/latex/page.ts: folded away in the DEV build, so named in none of its files)
-const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && readFileSync(dev.get(n)).includes("__sbTexImageRead"));
-check("DEV: the test build's hook folded away (no file names __sbTexImageRead)", testHooks.length === 0, { testHooks });
+// (192 KiB / 64 KiB: @sagebrush's ruling of 2026-10-29, for the ten examples and the embeddable editor; was 180 / 60)
+check("the LaTeX group's JS: at most 192 KiB minified, 64 KiB gzip", js.length > 0 && jsRaw <= 192 * 1024 && jsGz <= 64 * 1024, { files: js, raw: jsRaw, gzip: jsGz });
+// 4b. the comments' chunk: at most 16 KiB minified, 6 KiB gzip (@sagebrush, 2026-10-29: comments in a lazy chunk of
+//     their own, so a document without comments never pays for them)
+if (dev.has(COMMENTS)) { const b = readFileSync(dev.get(COMMENTS)); check("the LaTeX comments' chunk: at most 16 KiB minified, 6 KiB gzip", b.length <= 16 * 1024 && gz(b) <= 6 * 1024, { raw: b.length, gzip: gz(b) }); }
+// (the test build's holds on image and file reads, web/latex/page.ts: folded away in the DEV build, so named in none of its files)
+const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && /__sbTex(ImageRead|MountRead)/.test(readFileSync(dev.get(n), "latin1")));
+check("DEV: the test build's hooks folded away (no file names __sbTexImageRead or __sbTexMountRead)", testHooks.length === 0, { testHooks });
 check("the LaTeX group: no CSS file over 8 KiB, no new font", css.every((n) => statSync(dev.get(n)).size <= 8192) && fonts.length === 0, { css, fonts });
 // 5. KaTeX: the same files, and in exactly one bundle
 const kp = [...prod.keys()].filter((n) => n.startsWith("dist/katex/")).sort(), kd = [...dev.keys()].filter((n) => n.startsWith("dist/katex/")).sort();
