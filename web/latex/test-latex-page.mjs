@@ -166,6 +166,66 @@ try {
     const bad = rec.filter((r) => !r.shown || r.bound || r.unk.length || (r.id === "figure" && r.imgs !== 1));
     check(ids.length === 10 && bad.length === 0, "every example opens in the editor and renders, nothing unsupported shown (the figure's image shown)", bad);
   }
+  // ---- the embeddable editor (component.ts: mountEditor, for the questions site's LaTeX proof answers; exported by the
+  // page module): in a host's box, with no files; rendered() and groups() with source ranges (UTF-16 offsets into the
+  // text); a preview selection mapped to its source (sourceRangeOf) and back (previewRangesOf); a person's edit
+  // reported (onChange, debounced), the host's setText not; read only and preview alone; stacked on a phone; destroy
+  {
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    const PROOF = "\\documentclass{article}\n\\begin{document}\n\\section*{Proof}\nLet $n$ be even, say $n = 2k$.\n\nThen $n^2 = 4k^2$ is even.\n\n\\end{document}\n";
+    const c1 = await ev(`(async () => {
+      const box = document.createElement("div"); box.id = "embed1"; box.style.cssText = "width:640px;height:420px"; document.body.prepend(box);
+      window.__changes = [];
+      const x = await import("/sagebrush-latex.js");
+      window.__ed = x.mountEditor(box, { text: ${JSON.stringify(PROOF)}, onChange: (t) => window.__changes.push(t) });
+      const done = await Promise.race([window.__ed.rendered().then(() => true), new Promise((r) => setTimeout(() => r(false), 20000))]);
+      const g = window.__ed.groups(), t = window.__ed.getText(), r = box.getBoundingClientRect(), P = window.__ed.previewRoot();
+      return { done, n: g.length, ok: g.every((x) => x.start >= 0 && x.start <= x.end && x.end <= t.length && box.contains(x.el)), starts: g.map((x) => x.start),
+        h: Math.round(r.height), fixed: getComputedStyle(box.firstElementChild).position, text: P.textContent.includes("Then"), files: !!box.querySelector(".tex-head, .tex-save, .tex-back") };
+    })()`);
+    check(c1.done && c1.n >= 2 && c1.ok && c1.h === 420 && c1.fixed === "relative" && c1.text && !c1.files, "component: in a 640 x 420 box (not fixed, no file controls), rendered() resolves, groups() with source ranges in the text", c1);
+    const c2 = await ev(`(() => {
+      const t = window.__ed.getText(), P = window.__ed.previewRoot();
+      const tw = document.createTreeWalker(P, NodeFilter.SHOW_TEXT); let n; while ((n = tw.nextNode()) && !n.data.includes("Then")) {}
+      if (!n) return { err: "no Then in the preview" };
+      const r = document.createRange(), i = n.data.indexOf("Then"); r.setStart(n, i); r.setEnd(n, i + 4);
+      const src = window.__ed.sourceRangeOf(r), want = t.indexOf("Then");
+      const back = window.__ed.previewRangesOf(want, want + 4);
+      return { src, want, back: back.length, hasThen: back.some((g) => g.textContent.includes("Then")), none: window.__ed.previewRangesOf(t.length + 5, t.length + 9).length };
+    })()`);
+    check(c2.src && c2.src.start === c2.want && c2.src.end === c2.want + 4 && c2.back === 1 && c2.hasThen && c2.none === 0, "component: a selection of 'Then' in the preview maps to its source offsets, and those offsets back to its group", c2);
+    const c3 = await ev(`(async () => {
+      const ta = document.querySelector("#embed1 .tex-src"), t0 = ta.value;
+      ta.value = t0.replace("is even.", "is even, as required."); ta.dispatchEvent(new Event("input"));
+      await new Promise((r) => setTimeout(r, 450));
+      const afterEdit = window.__changes.slice();
+      await window.__ed.rendered();
+      const shown = window.__ed.previewRoot().textContent.includes("as required");
+      window.__ed.setText(window.__ed.getText().replace("Proof", "Proof (setText)"));
+      await new Promise((r) => setTimeout(r, 450));
+      await window.__ed.rendered();
+      return { afterEdit: afterEdit.length, last: (afterEdit[afterEdit.length - 1] ?? "").includes("as required"), shown, setTextShown: window.__ed.previewRoot().textContent.includes("Proof (setText)"), afterSet: window.__changes.length };
+    })()`);
+    check(c3.afterEdit === 1 && c3.last && c3.shown && c3.setTextShown && c3.afterSet === 1, "component: a person's edit reported once (debounced) and rendered; the host's setText rendered, not reported", c3);
+    const c4 = await ev(`(async () => {
+      const box = document.createElement("div"); box.id = "embed2"; box.style.cssText = "width:500px;height:300px"; document.body.prepend(box);
+      const x = await import("/sagebrush-latex.js");
+      const ed = x.mountEditor(box, { text: ${JSON.stringify(PROOF)}, readOnly: true, layout: "preview" });
+      await Promise.race([ed.rendered(), new Promise((r) => setTimeout(r, 20000))]);
+      const left = box.querySelector(".tex-left"), right = box.querySelector(".tex-right");
+      const out = { ro: box.querySelector(".tex-src").readOnly, leftShown: getComputedStyle(left).display !== "none", rightW: Math.round(right.getBoundingClientRect().width), text: ed.previewRoot().textContent.includes("Then") };
+      ed.destroy(); out.destroyed = box.childElementCount === 0;
+      return out;
+    })()`);
+    check(c4.ro && !c4.leftShown && c4.rightW >= 480 && c4.text && c4.destroyed, "component: readOnly with layout preview: the source read only and hidden, the preview the box's width; destroy empties the box", c4);
+    await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await sleep(300);
+    const c5 = await ev(`(() => { const box = document.getElementById("embed1"); box.style.width = "360px"; const l = box.querySelector(".tex-left").getBoundingClientRect(), r = box.querySelector(".tex-right").getBoundingClientRect();
+      return { lTop: Math.round(l.top), rTop: Math.round(r.top), lW: Math.round(l.width), rW: Math.round(r.width), both: l.height > 40 && r.height > 40 }; })()`);
+    check(c5.both && c5.rTop > c5.lTop && c5.lW >= 340 && c5.rW >= 340, "component: on a phone the source and the preview are stacked, both shown", c5);
+    await send("Emulation.clearDeviceMetricsOverride");
+    await ev(`(window.__ed.destroy(), true)`);
+  }
   const fid = await mk("/t/doc.tex", enc(DOC));
   requests.length = 0;
   await go(base + "?tex=" + fid);
