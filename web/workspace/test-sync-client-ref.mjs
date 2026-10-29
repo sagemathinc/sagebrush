@@ -64,7 +64,7 @@ const T_PAGE_S = 30, LATE_OBS_MS = 15_000, CONFIRM_MS = 3_000, PILOT_MAIN_S = 36
 const FETCH_S = 5;
 /** the control pages, in order, each control with its case allowance (s); every page is a fresh navigation */
 const CONTROL_PAGES = [
-  { page: "P1", cases: [["kR1", 5], ["kR2", 5], ["kL1", 5], ["kB", 5], ["kD", 5], ["kF", 5], ["kH", 5], ["kI", 5], ["kU1", 5]] },
+  { page: "P1", cases: [["kR1", 5], ["kR2", 5], ["kL1", 5], ["kB", 5], ["kD", 5], ["kF", 5], ["kH", 5], ["kI", 5], ["kU1", 5], ["kW1", 5], ["kO1", 5]] },
   { page: "P2", cases: [["kA", 5]] },
   { page: "P3", cases: [["kC", 5], ["kG", 5]] },
   { page: "P4", cases: [["kE", 5]] },
@@ -73,17 +73,23 @@ const CONTROL_PAGES = [
   { page: "P7", cases: [["kM1", 30]] },
   { page: "P8", cases: [["kM2", 5]] },
   { page: "RES1", cases: [["kRES1", 5]] },
+  { page: "P9", cases: [["kS1", 5]] },
 ];
 /** the runner's own resource controls, each row enforced as a bound */
-const SELF_TEST_ROWS = [["the control account's setup, then K-U2 to K-U5", 5], ["K-MSG1", 5]];
+/** each row is enforced: its work under a real deadline, then a drain of what it acquired within ROW_DRAIN_S */
+const SELF_TEST_ROWS = [["the control account's setup, then K-U2 to K-U5", 5], ["K-MSG1", 5], ["the row owner's negative", 2]];
+const ROW_DRAIN_S = 1;
 const pageAllowanceS = (p) => T_PAGE_S + p.cases.reduce((s, [, c]) => s + c + CONTROL_BUDGETS.CLEANUP_MS / 1000, 0) + LATE_OBS_MS / 1000;
 const CONTROLS_S = CONTROL_PAGES.reduce((s, p) => s + pageAllowanceS(p), 0) + SELF_TEST_ROWS.reduce((s, [, r]) => s + r, 0);
 /** setup's existing bounds: the bundle, the DevTools port, the page list (300 tries of 5 s and 100 ms), the DevTools
  * socket, Runtime.enable */
 const SETUP_S = 120 + 60 + 300 * 5.1 + 10 + CALL_MS / 1000;
-/** the final cleanup's stages (7, each STAGE_MS 15 s) */
+/** the final cleanup's stages (7, each STAGE_MS 15 s), and the backstop past them: from the work deadline
+ * (LIMIT_S - BACKSTOP_S) the cleanup has TEARDOWN_S, and the process exits at LIMIT_S at the latest */
 const TEARDOWN_S = 7 * 15;
-const REQUIRED_S = Math.ceil(SETUP_S + CONTROLS_S + (CONTROL_PAGES.length + 1) * FETCH_S + T_PAGE_S + PILOT_MAIN_S + LATE_OBS_MS / 1000 + REPORT_S + TEARDOWN_S);
+const BACKSTOP_S = TEARDOWN_S + 15;
+/** the whole test, start to exit: every margin is inside it */
+const REQUIRED_S = Math.ceil(SETUP_S + CONTROLS_S + (CONTROL_PAGES.length + 1) * FETCH_S + T_PAGE_S + PILOT_MAIN_S + LATE_OBS_MS / 1000 + REPORT_S + BACKSTOP_S);
 if (process.env.RUN_LIMIT_S !== undefined && !(Number(process.env.RUN_LIMIT_S) >= REQUIRED_S)) {
   console.error(`FAIL: RUN_LIMIT_S=${process.env.RUN_LIMIT_S} is under the whole test's bound, ${REQUIRED_S} s (controls ${CONTROLS_S} s, the pilot's main run ${PILOT_MAIN_S} s)`);
   process.exit(1);
@@ -267,6 +273,8 @@ const connectUp = (owner, own = {}) => frontOp("ref.connect", async () => {
   if (typeof s.send !== "function") return { refused: s };
   const entry = { id: ++upSeq, up: s, owner };
   (own.reg ?? ups).set(entry.id, entry);
+  // (a self-test row's scope that has ended (its row past its deadline) takes nothing more: closed, and refused)
+  if (own.ended) { closeUp(entry, 1000, "row ended", own); throw new Error("the self-test row had ended"); }
   // (what the server sends before its user takes over (the page's socket opens a moment later) is kept, not dropped:
   // the user's onmessage replaces this, and then takes what was kept, in order)
   const buf = [];
@@ -799,12 +807,13 @@ const cleanup = () => (cleaned ??= runStages([
 const endNow = async (why) => {
   console.error(`FAIL: ${why}; waiting on: ${waitingOn}`);
   // (a backstop past the cleanup's own bound: the run ends even if the cleanup somehow doesn't)
-  setTimeout(() => { console.error("FAIL: the cleanup didn't end within 120 s"); process.exit(1); }, 120_000);
+  setTimeout(() => { console.error(`FAIL: the cleanup didn't end within ${BACKSTOP_S} s`); process.exit(1); }, BACKSTOP_S * 1000);
   console.error("  " + (await cleanup()).line);
   process.exit(1);
 };
-// (the watchdog, armed before anything starts: past the run's own limit and its cleanup, the run is ended, named)
-setTimeout(() => endNow(`the run didn't end within ${LIMIT_S + 120} s`), (LIMIT_S + 120) * 1000).unref();
+// (the watchdog, armed before anything starts: at the work deadline, LIMIT_S - BACKSTOP_S, the run is ended, named, and
+// its cleanup and the backstop past it end inside LIMIT_S: RUN_LIMIT_S is the whole test's bound, start to exit)
+setTimeout(() => endNow(`the run didn't end by its work deadline, ${LIMIT_S - BACKSTOP_S} s (RUN_LIMIT_S ${LIMIT_S} s, with ${BACKSTOP_S} s for the cleanup)`), (LIMIT_S - BACKSTOP_S) * 1000).unref();
 process.once("SIGTERM", () => endNow("ended by SIGTERM"));
 
 // ---- 3b's resource controls, in this process before the page (plan r6 §3, r7 §1-§4, r8 §1-§2): real RefSockets on a
@@ -823,22 +832,41 @@ async function resourceControls() {
   const isSocket = (c) => typeof c?.up?.send === "function";
   /** each control's own zero delta on the run's four structures */
   const zeroDelta = (name, b0) => control1(runCounts() === b0, `(control) ${name}: the run's own ups, closeFailures, closedUps and refHolds unchanged: ${b0} -> ${runCounts()}`);
-  // (row 1: the setup, then K-U2 to K-U5, within 5 s)
-  const t1 = performance.now();
+  /** A self-test row (DB2-1): `body(row)` under a real work deadline (the row's allowance less ROW_DRAIN_S); then,
+   * however it ended, the row's drain: its restores run, every hold it armed released, every socket it acquired
+   * closed, all confirmed closed and idle within ROW_DRAIN_S.  A row that misses its deadline fails, named; whatever it
+   * still does afterwards acquires nothing (its scopes are ended: connectUp closes and refuses a late socket). */
+  const runRow = async (name, allowanceS, body, workS = allowanceS - ROW_DRAIN_S) => {
+    const row = { owns: [], restores: [], scope(c) { const o = scoped(c); this.owns.push(o); return o; }, onDrain(f) { this.restores.push(f); } };
+    const t0 = performance.now();
+    let outcome = "ok";
+    try { await bounded(Promise.resolve().then(() => body(row)), name, workS * 1000); }
+    catch (e) { outcome = /^no answer within /.test(e?.message ?? "") ? "timed out" : `threw (${why(e)})`; }
+    for (const f of row.restores.splice(0)) try { f(); } catch {}
+    for (const o of row.owns) { o.ended = true; releaseRefHolds(o.refHolds); for (const e of [...o.reg.values()]) closeUp(e, 1000, "row drain", o); }
+    const drainEnd = performance.now() + ROW_DRAIN_S * 1000, undrained = [];
+    for (const o of row.owns) { const c = await confirmClosed(stateOf(o), Math.max(0, drainEnd - performance.now())); undrained.push(...c.unconfirmed, ...c.busy); }
+    const ms = Math.round(performance.now() - t0);
+    return { outcome, undrained, ms, inTime: ms <= allowanceS * 1000, row };
+  };
+  const rowLine = (r, [name, s]) => control1(r.outcome === "ok" && !r.undrained.length && r.inTime, `(control) row "${name}": ${r.outcome}, drained${r.undrained.length ? " NOT: " + J(r.undrained) : ""}, ${r.ms} ms of its ${s} s`);
   const account = "ctl-u-" + crypto.randomUUID();
   const cookie = "__Host-sb_session=" + ref.signIn(account);
-  let enabled = false, said = "";
-  try {
-    const en = await bounded(ref.fetch(new Request("http://ref.control/api/sync/v1/enable", { method: "POST", headers: { cookie } })), "the control account's enable", 2000);
-    const text = await bounded(en.text(), "the control account's enable (its answer)", 2000);
-    said = `${en.status} ${text}`;
-    enabled = en.status === 200 && text === J({ state: "active", generation: 1 });
-  } catch (e) { said = `threw (${why(e)})`; }
-  control1(enabled, "(control) the control account enabled before any control socket: exactly {state: active, generation: 1}: " + said);
-  if (enabled) {
+  let enabled = false;
+  // (row 1: the setup, then K-U2 to K-U5)
+  rowLine(await runRow(SELF_TEST_ROWS[0][0], SELF_TEST_ROWS[0][1], async (row) => {
+    let said = "";
+    try {
+      const en = await bounded(ref.fetch(new Request("http://ref.control/api/sync/v1/enable", { method: "POST", headers: { cookie } })), "the control account's enable", 2000);
+      const text = await bounded(en.text(), "the control account's enable (its answer)", 2000);
+      said = `${en.status} ${text}`;
+      enabled = en.status === 200 && text === J({ state: "active", generation: 1 });
+    } catch (e) { said = `threw (${why(e)})`; }
+    control1(enabled, "(control) the control account enabled before any control socket: exactly {state: active, generation: 1}: " + said);
+    if (!enabled) return;
     // K-U2: a probe-owned socket its owner never closed, nothing in flight: the barrier fails, naming it, and closes it
     {
-      const z = runCounts(), own = scoped(cookie), c = await connectUp("probe", own);
+      const z = runCounts(), own = row.scope(cookie), c = await connectUp("probe", own);
       const x = isSocket(c) ? await barrierSteps(stateOf(own), { lateObsMs: 1000, confirmMs: 1000, own }) : null;
       const v = x && barrierVerdict(x);
       zeroDelta("K-U2", z);
@@ -846,7 +874,7 @@ async function resourceControls() {
     }
     // K-U3: the same for a socket acquired for an upgrade whose pair never opened
     {
-      const z = runCounts(), own = scoped(cookie), c = await connectUp("preupgrade", own);
+      const z = runCounts(), own = row.scope(cookie), c = await connectUp("preupgrade", own);
       const x = isSocket(c) ? await barrierSteps(stateOf(own), { lateObsMs: 1000, confirmMs: 1000, own }) : null;
       const v = x && barrierVerdict(x);
       zeroDelta("K-U3", z);
@@ -855,7 +883,7 @@ async function resourceControls() {
     // K-U4: a close that throws: one ledger entry naming the owner, the verdict fails on exactly that (the real socket,
     // closed by the control itself, confirmed through the wrapper)
     {
-      const z = runCounts(), own = scoped(cookie), c = await connectUp("probe", own);
+      const z = runCounts(), own = row.scope(cookie), c = await connectUp("probe", own);
       let v = null;
       if (isSocket(c)) {
         const real = c.up;
@@ -870,12 +898,14 @@ async function resourceControls() {
     // K-U5: a normal probe on the enabled account: its two closes (its own, then the finally's no-op), nothing kept,
     // nothing left, its answer's shape unchanged
     {
-      const z = runCounts(), own = scoped(cookie);
-      // (RefSocket's prototype, from a socket closed at once, before the spy is installed)
+      const z = runCounts(), own = row.scope(cookie);
+      // (RefSocket's prototype, from a socket closed at once, before the spy is installed; the spy is removed in the
+      // finally, and by the row's drain if the probe never ends)
       const tmp = await ref.connect(cookie);
       const RefSocket = Object.getPrototypeOf(tmp);
       tmp.close(1000, "control");
       const close0 = RefSocket.close;
+      row.onDrain(() => { RefSocket.close = close0; });
       let calls = 0, p = null;
       RefSocket.close = function (...a) { if (this.account?.id === account) calls++; return close0.apply(this, a); };
       try { p = await probe({}, own); } catch (e) { p = { threw: why(e) }; } finally { RefSocket.close = close0; }
@@ -885,12 +915,11 @@ async function resourceControls() {
       zeroDelta("K-U5", z);
       control1(J(Object.keys(p ?? {})) === J(["welcome", "index", "ack"]) && p.welcome !== null && p.welcome?.state === "active" && calls === 2 && own.ledger.length === 0 && own.reg.size === 0 && own.closed.length === 1 && sock.closed === true && sock.inflight === 0, "(control) K-U5: a normal probe: an active welcome, two closes (its own, then the no-op), nothing kept or left: " + J({ keys: Object.keys(p ?? {}), state: p?.welcome?.state, threw: p?.threw, calls, ledger: own.ledger, left: own.reg.size }));
     }
-  }
-  control1(performance.now() - t1 <= SELF_TEST_ROWS[0][1] * 1000, `(control) ${SELF_TEST_ROWS[0][0]}: within its ${SELF_TEST_ROWS[0][1]} s row: ${Math.round(performance.now() - t1)} ms`);
-  // (row 2: K-MSG1, within 5 s) a real batch admitted and held across its socket's close: closed is not quiescence
-  const t2 = performance.now();
-  if (enabled) {
-    const z = runCounts(), own = scoped(cookie), steps = [];
+  }), SELF_TEST_ROWS[0]);
+  // (row 2: K-MSG1) a real batch admitted and held across its socket's close: closed is not quiescence
+  rowLine(await runRow(SELF_TEST_ROWS[1][0], SELF_TEST_ROWS[1][1], async (row) => {
+    if (!enabled) return control1(false, "(control) K-MSG1: not run (the control account isn't enabled)");
+    const z = runCounts(), own = row.scope(cookie), steps = [];
     const c = await connectUp("probe", own);
     let v1 = null, v2 = null, busyAfterClose = null;
     try {
@@ -927,14 +956,33 @@ async function resourceControls() {
         steps.push(["after the release", ws.inflight === 0]);
       }
     } finally {
-      // (its hold released, and its socket closed, on any path out of the control)
+      // (its hold released, and its socket closed, on any path out of the control; the row's drain does the same if
+      // the control never gets here)
       releaseRefHolds(own.refHolds);
       if (c?.entry) closeUp(c.entry, 1000, "control", own);
     }
     zeroDelta("K-MSG1", z);
     control1(isSocket(c) && steps.every(([, ok]) => ok) && busyAfterClose === 1 && !v1.ok && J(v1.items) === J(["upstream socket busy after close (inflight 1)"]) && v2.ok && own.refHolds.size === 0, "(control) K-MSG1: a batch admitted and held across its socket's close: closed with inflight 1 fails the barrier as busy, exactly; released, it passes: " + J({ socket: isSocket(c) ? "real" : c?.refused, steps, busyAfterClose, first: v1?.items, then: v2?.items }));
+  }), SELF_TEST_ROWS[1]);
+  // (row 3: the row owner's own negative) a row whose body acquires a real socket and a batch hold, then never
+  // settles: the row ends at its work deadline (0.5 s), named "timed out", and its drain closes the socket (closed and
+  // idle) and releases the hold, within the row's allowance; nothing of it reaches the run's own state
+  {
+    const z = runCounts();
+    let sock = null, holds = null;
+    const r = enabled
+      ? await runRow(SELF_TEST_ROWS[2][0], SELF_TEST_ROWS[2][1], async (row) => {
+          const own = row.scope(cookie);
+          holds = own.refHolds;
+          const c = await connectUp("probe", own);
+          sock = c.up ?? null;
+          armRefHold(crypto.randomUUID(), "ctlneg1", own.refHolds);
+          await new Promise(() => {});
+        }, 0.5)
+      : null;
+    zeroDelta("the row owner's negative", z);
+    control1(r !== null && r.outcome === "timed out" && !r.undrained.length && r.inTime && sock?.closed === true && sock.inflight === 0 && holds?.size === 0 && r.row.owns.every((o) => o.reg.size === 0 && o.ended), `(control) row "${SELF_TEST_ROWS[2][0]}": a row that never settles ends at its deadline, named, and is drained: ` + J({ outcome: r?.outcome, undrained: r?.undrained, ms: r?.ms, closed: sock?.closed, inflight: sock?.inflight, holds: holds?.size }));
   }
-  control1(performance.now() - t2 <= SELF_TEST_ROWS[1][1] * 1000, `(control) ${SELF_TEST_ROWS[1][0]}: within its ${SELF_TEST_ROWS[1][1]} s row: ${Math.round(performance.now() - t2)} ms`);
   control1(runCounts() === before, "(control) the resource controls left the run's own state exactly as it was (ups, closeFailures, closedUps, refHolds): " + before + " -> " + runCounts());
   // the verdict's pure fixtures, B1-B9
   const base = { inflight: [], closers: 0, held: 0, open: 0, newCloseFailures: [], untrackedDelta: 0, ups: 0, armed: false, residue: [], unconfirmed: [], busy: [] };

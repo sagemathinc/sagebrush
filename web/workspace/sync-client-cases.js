@@ -58,7 +58,23 @@ function step(label, thunk, ms) {
 const S = (label, thunk, ms) => (D ? step(label, thunk, ms) : thunk());
 const ctlD = (cmd, extra = {}, ms) => step(`ctl ${cmd}`, (lim) => fetch("/__ctl", { method: "POST", body: J({ cmd, ...extra }), signal: AbortSignal.timeout(lim + 100) }).then((r) => r.json()), ms);
 const postD = (path, body) => step(`post ${path}`, (lim) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: J(body ?? {}), signal: AbortSignal.timeout(lim + 100) }));
-const freshD = async (nm) => { localStorage.clear(); const w = await step("fresh: Workspace.open", () => W.Workspace.open(nm)); used.push(w); return w; };
+/** fresh() in diagnostic mode: the workspace is registered (in `used`, closed when the run ends however it ends) inside
+ * the open's own fulfilment, so an open that ends after its step timed out is still kept, and said (late) */
+const freshD = (nm) => {
+  localStorage.clear();
+  const d = D;
+  let timedOut = false;
+  const delay = d.openDelayMs;
+  const opened = (delay ? sleep(delay) : Promise.resolve()).then(() => W.Workspace.open(nm)).then((w) => {
+    used.push(w);
+    d.names.set(w, nm.name);
+    if (timedOut) d.lateOpened.push(nm.name);
+    // (an open that ends after the run's own end, a fail-stop's: closed at once, never left open)
+    if (d.over) try { w.close(); } catch {}
+    return w;
+  });
+  return step("fresh: Workspace.open", () => opened).catch((e) => { if (e instanceof StepTimeout) timedOut = true; throw e; });
+};
 /** A proof command (GET /__proof/<cmd>), bounded */
 const proofD = (cmd, n, phase) => step(`proof ${cmd}`, (lim) => fetch(`/__proof/${cmd}${n === undefined ? "" : `?n=${n}${phase ? `&phase=${phase}` : ""}`}`, { signal: AbortSignal.timeout(lim + 100) }).then((r) => r.json()));
 /** until() in diagnostic mode (r3 §3.2): the window is checked between calls and its expiry is false, as before; each
@@ -3766,13 +3782,32 @@ async function cleanupCase(n, q0) {
   const fail = (why, quiet) => ({ ok: false, step: at, why, quiet, stages });
   const left = () => d.cleanupDeadline - now();
   try {
-    // C1: each of the case's clients stopped, then its loop's end awaited (a loop that rejected has ended: said, not
-    // a failure; one that never ends is)
-    for (const c of d.clients) {
-      for (const [label, f] of [["cleanup: c.stop()", () => c.stop()], ["cleanup: c.run", () => c.run]]) {
-        at = label;
-        try { await step(label, f); stages.push(`${label} ok`); } catch (e) { if (e instanceof StepTimeout) throw e; stages.push(`${label} rejected (${e?.message ?? e})`); }
+    // C1: each SyncOwner the case made destroyed, and its owned work (its client's stop and loop, its reconcile)
+    // awaited; then each of the case's clients stopped, then its loop's end awaited.  A stop that rejects is a failure,
+    // named (fail-stop); a loop (c.run) that rejected has ended: said, not a failure; anything that never ends is.
+    for (const o of d.owners) {
+      // (what the owner runs, read before destroy() detaches it: its client, that client's loop, its reconcile)
+      const oc = o.client, orun = o["run"];
+      at = "cleanup: owner.destroy()";
+      await step(at, () => o.destroy());
+      stages.push(`${at} ok`);
+      if (oc) {
+        at = "cleanup: owner's client stop";
+        await step(at, () => oc.stop());
+        stages.push(`${at} ok`);
+        at = "cleanup: owner's client loop";
+        try { await step(at, () => orun); stages.push(`${at} ok`); } catch (e) { if (e instanceof StepTimeout) throw e; stages.push(`${at} rejected (${e?.message ?? e})`); }
       }
+      at = "cleanup: owner's reconcile";
+      await step(at, () => o["reconciling"]);
+      stages.push(`${at} ok`);
+    }
+    for (const c of d.clients) {
+      at = "cleanup: c.stop()";
+      await step(at, () => c.stop());
+      stages.push(`${at} ok`);
+      at = "cleanup: c.run";
+      try { await step(at, () => c.run); stages.push(`${at} ok`); } catch (e) { if (e instanceof StepTimeout) throw e; stages.push(`${at} rejected (${e?.message ?? e})`); }
     }
     // C2, C3: the front's held waiters released, its proxied sockets closed (a rejection here is a failure)
     at = "cleanup: release";
@@ -3817,7 +3852,7 @@ async function cleanupCase(n, q0) {
     if (q.untrackedReads !== q0.untrackedReads) return fail(`untracked reads ${q0.untrackedReads} -> ${q.untrackedReads}`, q);
     return { ok: true, stages };
   } catch (e) {
-    return fail(e instanceof StepTimeout ? `timed out: ${e.step}` : `threw: ${e?.message ?? e}`);
+    return fail(e instanceof StepTimeout ? `timed out: ${e.step}` : `rejected: ${e?.message ?? e}`);
   } finally {
     d.cleanupDeadline = null;
   }
@@ -3825,8 +3860,11 @@ async function cleanupCase(n, q0) {
 
 /** The run in diagnostic mode: the same selection as run(), the same results array */
 async function runDiagnostic(table, only, skip, budgets) {
-  const d = (D = { budgets, clients: [], pending: new Set(), steps: [], late: [], caseDeadline: null, cleanupDeadline: null, epoch: 0, failStopNow: false });
-  const rep = (window.__report = { mode: "diagnostic", why: null, startedMs: Math.round(now()), cases: [], steps: d.steps, late: d.late, stopped: null, notRun: [], progress: null, results, done: false });
+  const d = (D = { budgets, clients: [], owners: [], pending: new Set(), steps: [], late: [], lateOpened: [], names: new Map(), openDelayMs: 0, caseDeadline: null, cleanupDeadline: null, epoch: 0, failStopNow: false });
+  const rep = (window.__report = { mode: "diagnostic", why: null, startedMs: Math.round(now()), cases: [], steps: d.steps, late: d.late, lateOpened: d.lateOpened, closedAtEnd: [], stopped: null, notRun: [], progress: null, results, done: false });
+  // (every SyncOwner a case makes registered for its cleanup: SyncOwner.of wrapped for this run only, restored after)
+  const of0 = W.SyncOwner.of;
+  W.SyncOwner.of = function (w, opts) { const o = of0.call(this, w, opts); if (D === d && !d.owners.includes(o)) d.owners.push(o); return o; };
   try {
     const skipped = skip ? skip.split(",") : [];
     const list = Object.entries(table).filter(([name]) => !(only && !only.split(",").includes(name)) && !skipped.includes(name));
@@ -3839,6 +3877,7 @@ async function runDiagnostic(table, only, skip, budgets) {
       rep.cases.push(cs);
       window.progress = rep.progress = { name, checks: results.length, startMs: cs.startMs };
       d.clients = [];
+      d.owners = [];
       d.caseDeadline = now() + caseBound(budgets, name);
       try {
         await f();
@@ -3862,9 +3901,13 @@ async function runDiagnostic(table, only, skip, budgets) {
         break;
       }
     }
-    if (!rep.stopped) for (const w of used) try { w.close(); } catch {}
     return results;
   } finally {
+    // (every workspace the run opened closed, however it ended, a late-opened one included; one that opens later still
+    // is closed by its own fulfilment, d.over)
+    d.over = true;
+    for (const w of used) try { w.close(); rep.closedAtEnd.push(d.names.get(w) ?? null); } catch {}
+    W.SyncOwner.of = of0;
     rep.done = true;
     D = null;
   }
@@ -3931,7 +3974,23 @@ const CONTROL_CASES = {
       for (let i = 0; i < 20 && q1.unconfirmed; i++) { await sleep(20); q1 = await quietNow(); }
       check(r.status === 500 && r.text.includes("injected: probe failed after connect") && q1.armed.probeFailAfterConnect === false && q1.ups === q0.ups && q1.closeFailures === q0.closeFailures && q1.unconfirmed === 0, "K-U1: probe's error reaches the case; its socket closed and idle, nothing kept, the flag consumed: " + J({ status: r.status, text: r.text.slice(0, 80), armed: q1.armed, ups: [q0.ups, q1.ups], closeFailures: [q0.closeFailures, q1.closeFailures], unconfirmed: q1.unconfirmed }));
     },
+    // K-W1: a workspace open that ends after its step timed out (2 s; it ends at 3 s): kept (registered in its own
+    // fulfilment), said late, the cleanup waits for it, and the run's end closes it
+    async kW1() {
+      D.openDelayMs = 3000;
+      try { await fresh(); } finally { D.openDelayMs = 0; }
+    },
+    // K-O1: a case that starts a SyncOwner and fails before its destroy(): the cleanup destroys it and awaits its work
+    async kO1() {
+      const w = await fresh();
+      const o = W.SyncOwner.of(w, { origin: location.origin });
+      window.__kO1 = o;
+      o.start();
+      throw new Error("K-O1 injected: the case failed before its destroy()");
+    },
   },
+  // K-S1: a client whose stop rejects at once, its loop already settled: a named fail-stop at cleanup: c.stop()
+  P9: { async kS1() { D.clients.push({ stop: () => Promise.reject(new Error("K-S1 injected")), run: Promise.resolve() }); } },
   // K-A: a predicate that never settles: StepTimeout, the pending set never empties, fail-stop naming it
   P2: { async kA() { await until(named("K-A: never settles", () => new Promise(() => {})), 10_000); } },
   // K-C: a client whose stop never settles: fail-stop at cleanup's c.stop(); then K-G never runs
@@ -3969,7 +4028,7 @@ function controlLines(page, rep) {
   const clean = (name) => cs(name)?.cleanup?.ok === true;
   const own = (name, re) => results.filter(([ok, what]) => what.startsWith(re)).every(([ok]) => ok) && results.some(([, what]) => what.startsWith(re));
   if (page === "P1") {
-    add(!rep.stopped && rep.cases.length === 9, "P1 ran every control, with no fail-stop: " + J({ stopped: rep.stopped, cases: rep.cases.map((c) => c.name) }));
+    add(!rep.stopped && rep.cases.length === 11, "P1 ran every control, with no fail-stop: " + J({ stopped: rep.stopped, cases: rep.cases.map((c) => c.name) }));
     add(cs("kR1")?.outcome === "ok" && clean("kR1") && own("kR1", "K-R1"), "K-R1: quiet never sees itself: " + J(cs("kR1")));
     add(cs("kR2")?.outcome === "ok" && clean("kR2") && own("kR2", "K-R2"), "K-R2: an untracked read is detected, then reset exactly: " + J(cs("kR2")));
     add(cs("kL1")?.outcome === "ok" && clean("kL1") && own("kL1", "K-L1"), "K-L1: a healthy case: c(n) closes, zero late, zero pending-late: " + J(cs("kL1")));
@@ -3979,6 +4038,12 @@ function controlLines(page, rep) {
     add(cs("kH")?.outcome === "ok" && clean("kH") && own("kH", "K-H"), "K-H: until's window expiring is false, no StepTimeout: " + J(cs("kH")));
     add(cs("kI")?.outcome === "timeout: ctl slow" && clean("kI"), "K-I: the front op outlives the page's 0.5 s; cleanup waits for it, no late: " + J(cs("kI")));
     add(cs("kU1")?.outcome === "ok" && clean("kU1") && own("kU1", "K-U1"), "K-U1: probe's failure after acquisition reaches the case, its socket closed: " + J(cs("kU1")));
+    const wName = rep.lateOpened[0];
+    add(cs("kW1")?.outcome === "timeout: fresh: Workspace.open" && clean("kW1") && rep.lateOpened.length === 1 && rep.closedAtEnd.includes(wName), "K-W1: a late open is kept, said, waited for, and closed at the run's end: " + J({ kW1: cs("kW1"), late: rep.lateOpened, closed: rep.closedAtEnd.includes(wName) }));
+    const o = window.__kO1;
+    add(cs("kO1")?.outcome?.startsWith("threw: K-O1 injected") && clean("kO1") && cs("kO1")?.cleanup?.stages?.includes("cleanup: owner.destroy() ok") && o?.["suspended"] === true && o?.["unhook"] === null && o?.client === null, "K-O1: an owner left by a failed case is destroyed by the cleanup, its work awaited: " + J({ kO1: cs("kO1"), suspended: o?.["suspended"], client: o?.client === null }));
+  } else if (page === "P9") {
+    add(rep.stopped?.case === "kS1" && rep.stopped.step === "cleanup: c.stop()" && /^rejected: K-S1 injected/.test(rep.stopped.why), "K-S1: a stop that rejects (its loop settled) is a named fail-stop: " + J(rep.stopped));
   } else if (page === "P2") {
     add(rep.stopped?.case === "kA" && rep.stopped.step === "C4 drain" && rep.stopped.pending.includes("until: K-A: never settles") && cs("kA")?.outcome === "timeout: until: K-A: never settles", "K-A: a predicate that never settles: StepTimeout, then fail-stop naming it: " + J(rep.stopped));
   } else if (page === "P3") {
