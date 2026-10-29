@@ -143,8 +143,9 @@ const shareResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(he
 // the Share dialog's analysis worker (web/share-client/deps-worker.ts, share-ux-plan r2 §3): its own
 // chunk with the parser, loaded only when Share opens
 const shareDepsResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "deps-worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-share-deps.js", target: "browser", format: "iife", minify: true });
-// The GPU kernel's preview (web/notebook/remote-ui.js): loaded only by a page opened with ?remote=1, from the
-// web site (not in the CLI or the app, nor precached by the service worker)
+// The GPU kernel's preview (web/notebook/remote-ui.js): loaded only by a page opened with ?remote=1.  Wherever
+// the page goes, it goes too (the site; the CLI's embedded page, scripts/build-cli.mjs and src/notebook.ts; the
+// app, app/build-frontend.mjs), but the service worker doesn't precache it.
 const remoteResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "remote-ui.js")], outdir: join(here, "dist"), naming: "sagebrush-remote.js", target: "browser", format: "esm", minify: true });
 const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult]];
 for (const r of [result, consoleResult, mathResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult]) {
