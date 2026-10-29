@@ -146,7 +146,8 @@ type.$kw = (pos: any[], names: string[], values: any[]) => {
     : typeNewImpl(type, name, bases, ns, new Map(names.map((n, i) => [n, values[i]])));
   if (isinstance(obj, type)) {
     const init = lookupType(typeOf(obj), "__init__");
-    if (init !== typeInit) callKw(init, [obj, name, bases, ns], names, values);
+    const r = init === typeInit ? null : callKw(init, [obj, name, bases, ns], names, values);
+    if (r !== null) raise(T.TypeError, `__init__() should return None, not '${typeName(r)}'`);
   }
   return obj;
 };
