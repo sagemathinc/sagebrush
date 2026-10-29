@@ -14,7 +14,7 @@
 //   2. PROD holds no LaTeX-owned file (named sagebrush-latex*) and no page or script names one;
 //   3. the DEV bootstrap: index.html's growth over PROD, at most DEV_BOOT.raw bytes minified and DEV_BOOT.gzip gzip
 //      (level 9);
-//   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most 180 KiB minified and 60 KiB gzip; no CSS
+//   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most 192 KiB minified and 64 KiB gzip; no CSS
 //      file over 8 KiB; no font file; and the test build's hook on image reads folded away (no DEV file names it);
 //   5. no new KaTeX bytes: DEV's katex/ files the same as PROD's, and (with --meta) no node_modules/katex input in a
 //      LaTeX bundle and KaTeX's inputs in exactly one output (the math module).
@@ -93,7 +93,8 @@ check(`DEV bootstrap delta (index.html): at most ${DEV_BOOT.raw} B minified and 
 const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n));
 const js = group.filter((n) => n.endsWith(".js")), css = group.filter((n) => n.endsWith(".css")), fonts = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(woff2?|ttf|otf)$/.test(n) && !prod.has(n));
 const jsRaw = js.reduce((s, n) => s + statSync(dev.get(n)).size, 0), jsGz = js.reduce((s, n) => s + gz(readFileSync(dev.get(n))), 0);
-check("the LaTeX group's JS: at most 180 KiB minified, 60 KiB gzip", js.length > 0 && jsRaw <= 180 * 1024 && jsGz <= 60 * 1024, { files: js, raw: jsRaw, gzip: jsGz });
+// (192 KiB / 64 KiB: @sagebrush's ruling of 2026-10-29, for the ten examples and the embeddable editor; was 180 / 60)
+check("the LaTeX group's JS: at most 192 KiB minified, 64 KiB gzip", js.length > 0 && jsRaw <= 192 * 1024 && jsGz <= 64 * 1024, { files: js, raw: jsRaw, gzip: jsGz });
 // (the test build's hold on image reads, web/latex/page.ts: folded away in the DEV build, so named in none of its files)
 const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && readFileSync(dev.get(n)).includes("__sbTexImageRead"));
 check("DEV: the test build's hook folded away (no file names __sbTexImageRead)", testHooks.length === 0, { testHooks });
