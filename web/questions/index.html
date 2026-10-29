@@ -21,7 +21,7 @@
   nav.lmsnav { font-size: 14px; }
   nav.lmsnav a { display: block; padding: 6px 8px; color: var(--lms); text-decoration: none; border-radius: 4px; }
   nav.lmsnav a.on { background: #dfe5f0; font-weight: 600; }
-  .tool { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .tool { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; overflow: clip; }
   .toolhead { display: flex; align-items: baseline; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: #fff; }
   .toolhead h1 { font-size: 19px; margin: 0; }
   .toolhead .by { color: var(--muted); font-size: 12px; margin-left: auto; }
@@ -62,6 +62,7 @@
   .tabs button { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid var(--line); background: #fff; border-radius: 14px; cursor: pointer; }
   .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
   .grid { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 14px; }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
   .roster { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px; align-self: start; }
   .roster button { display: flex; width: 100%; gap: 6px; font: inherit; font-size: 14px; text-align: left; padding: 6px 8px; border: 0; background: none; border-radius: 5px; cursor: pointer; }
   .roster button.on { background: #e8efe6; font-weight: 600; }
@@ -76,6 +77,13 @@
   .nav button { font: inherit; padding: 5px 12px; border-radius: 5px; border: 1px solid #b9bdb3; background: #fff; cursor: pointer; }
   .nav .hint { color: var(--muted); font-size: 12px; margin-left: auto; }
   .nav button.check { background: var(--accent); color: #fff; border-color: var(--accent); }
+  /* the grading pager: one fixed place, at the top, whatever the answer's length (William, Oct 29) */
+  .pager { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; align-items: center; background: var(--bg); padding: 8px 0; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
+  .pager button { font: inherit; font-size: 14px; padding: 5px 12px; border-radius: 5px; border: 1px solid #b9bdb3; background: #fff; cursor: pointer; white-space: nowrap; }
+  .pager button.check { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .pager button:disabled { opacity: .45; cursor: default; }
+  .pager .where { margin-left: auto; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  @media (max-width: 520px) { .pager button { padding: 5px 8px; font-size: 13px; } .pager .where { display: none; } }
   .nav button.check:disabled { opacity: .5; }
   .lmsbar .viewsw button { font-size: 13px; }
   .lmsbar .viewsw button.on { background: #fff; color: var(--lms); }
@@ -429,13 +437,15 @@ function renderGrader() {
   const item = ASSIGNMENT.items[gState.q], student = others()[gState.s];
   el.innerHTML = `<div class="meta">Grading by question: each student's answer to one question, one after another. The answers and Sage's checks are stored, so nothing is reopened or rerun. Keys: <code>j</code> next, <code>k</code> previous.</div>
     <div class="tabs">${ASSIGNMENT.items.map((it, i) => `<button data-q="${i}" class="${i === gState.q ? "on" : ""}">Question ${i + 1} · ${it.kind === "manual" ? "graded by you" : "auto-graded"}</button>`).join("")}</div>
+    <div class="pager" role="toolbar" aria-label="Grading pager"><button data-d="-1" title="Previous student (k)">‹ Previous</button><button data-d="1" title="Next student (j)">Next ›</button><button class="check save" disabled>Save grade &amp; next</button><span class="where"></span></div>
     <div class="grid"><div class="roster">${others().map((s, i) => `<button data-s="${i}" class="${i === gState.s ? "on" : ""}">${esc(s)}<span class="st">${chip(item, s)}</span></button>`).join("")}</div><div class="work"></div></div>`;
   for (const b of el.querySelectorAll(".tabs button")) b.onclick = () => { gState.q = Number(b.dataset.q); renderGrader(); };
   for (const b of el.querySelectorAll(".roster button")) b.onclick = () => { gState.s = Number(b.dataset.s); renderGrader(); };
   const work = el.querySelector(".work");
   const p = paramsFor(item, student), tries = course.attempts(student, item.id);
-  work.innerHTML = `<h2 style="font-size:15px;margin:0 0 4px">${esc(student)} · Question ${gState.q + 1}</h2><div class="prompt"></div><div class="tries"></div><div class="grade"></div>
-    <div class="nav"><button data-d="-1">‹ Previous</button><button data-d="1">Next ›</button><span class="hint">${gState.s + 1} of ${others().length}</span></div>`;
+  work.innerHTML = `<h2 style="font-size:15px;margin:0 0 4px">${esc(student)} · Question ${gState.q + 1}</h2><div class="prompt"></div><div class="tries"></div><div class="grade"></div>`;
+  el.querySelector(".pager .where").textContent = `${student} · ${gState.s + 1} of ${others().length}`;
+  const save = el.querySelector(".pager .save");
   setMath(work.querySelector(".prompt"), item.prompt(p));
   const tl = work.querySelector(".tries");
   if (!tries.length) tl.innerHTML = `<p class="attempts">No answer yet.</p>`;
@@ -453,12 +463,13 @@ function renderGrader() {
     const g = course.grade(student, item.id) || { checks: item.rubric.map(() => false), comment: "" };
     gr.innerHTML = `<div class="rubric">${item.rubric.map((r, i) => `<label><input type="checkbox" data-i="${i}" ${g.checks[i] ? "checked" : ""} ${tries.length ? "" : "disabled"}> ${esc(r.text)}<span class="rp">+${r.points}</span></label>`).join("")}</div>
       <input type="text" class="comment" placeholder="A comment for the student (optional)" value="${esc(g.comment)}" ${tries.length ? "" : "disabled"} style="width:100%;font-family:inherit">
-      <div class="nav"><button class="check save" ${tries.length ? "" : "disabled"}>Save grade and next</button><span class="pts attempts"></span></div>`;
+      <div class="pts attempts"></div>`;
     const sum = () => item.rubric.reduce((n, r, i) => n + (gr.querySelector(`[data-i="${i}"]`).checked ? r.points : 0), 0);
     const showSum = () => (gr.querySelector(".pts").textContent = `${sum()} / ${item.points} points`);
     for (const c of gr.querySelectorAll("input[type=checkbox]")) c.onchange = showSum;
     showSum();
-    gr.querySelector(".save").onclick = () => {
+    save.disabled = !tries.length;
+    save.onclick = () => {
       course.setGrade(student, item.id, { checks: item.rubric.map((_, i) => gr.querySelector(`[data-i="${i}"]`).checked), comment: gr.querySelector(".comment").value.trim() });
       updateTotal(student);
       gState.s = (gState.s + 1) % others().length;
@@ -467,7 +478,7 @@ function renderGrader() {
   } else {
     gr.innerHTML = `<p class="attempts">Auto-graded: ${itemScore(item, student)} / ${item.points} points${tries.length ? ` after ${tries.length} ${tries.length === 1 ? "try" : "tries"}` : ""}.</p>`;
   }
-  for (const b of work.querySelectorAll(".nav button[data-d]")) b.onclick = () => { gState.s = (gState.s + Number(b.dataset.d) + others().length) % others().length; renderGrader(); };
+  for (const b of el.querySelectorAll(".pager button[data-d]")) b.onclick = () => { gState.s = (gState.s + Number(b.dataset.d) + others().length) % others().length; renderGrader(); };
 }
 document.addEventListener("keydown", (e) => {
   if (document.getElementById("grader").hidden || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
