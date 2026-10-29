@@ -35,7 +35,7 @@ export function journalTexts(noun) {
     TAKEOVER: `You can edit this ${noun} here now (the other tab let go of it).`,
     TAKEOVER_FAILED: `This ${noun} couldn't be opened for editing here: reload this page to try again.`,
     NOT_WRITER: `not saved: this ${noun} is open for editing in another tab of this browser`,
-    SAVED_UNJOURNALED: "Saved in this browser. TimeTravel and sync can't keep versions right now (their storage is full): they'll keep the latest one when there's room.",
+    SAVED_UNJOURNALED: `This ${noun} is saved in this browser. TimeTravel and sync can't keep its versions right now (their storage is full): they'll keep the latest one when there's room.`,
     SAVED_TOO_LARGE: `This ${noun} is too large to sync. It's saved in this browser.`,
     NO_CLEAR_SYNCED: `TimeTravel's history can't be cleared while this ${noun} syncs (it will be, once conflicts are handled)`,
     BUSY: `the ${noun} kept changing while it was opened: reload this page`,

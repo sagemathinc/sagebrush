@@ -252,16 +252,23 @@ try {
     const dropHeld = await u.until("window.__dropHeld === true", 10000);
     await u.ev(setTj("after the replacement"));
     await rowTj(u, id1, "after the replacement");
-    await u.until(`${B}.versions().then((v) => v.length >= 1)`);
-    const kept = await versionDocs(u), rowKept = await row(u, id1);
+    // (code r8: during the hold, the journal store's own versions, read straight from it (boardJournal().history, what
+    // TimeTravel's facade reads): the facade itself can't be read here, since mount.ts opens a document's TimeTravel
+    // only after its newHistory chain, which ends with this very dropHistory)
+    // (only once its history's session is set, as page.ts's own() reads it; else null, and check 1 fails saying so)
+    const storeDocs = () => u.ev(`(async () => { const h = window.sagebrush.boardJournal()?.history; if (!h?.session) return null; const out = []; for (const v of h.versions()) out.push(JSON.parse(JSON.stringify(await h.docAt(v.time)))); return out; })()`);
+    await u.until(`(async () => { const h = window.sagebrush.boardJournal()?.history; if (!h?.session) return false; const v = h.versions(); return v.length > 0 && (${nodesOf})(await h.docAt(v[v.length - 1].time)).some((n) => n.id === "tj" && n.text === "after the replacement"); })()`);
+    const kept = await storeDocs(), rowKept = await row(u, id1);
     const journalRows = J((await u.ev(historyRowsExpr(pre))).filter((x) => x.nb === pre).map((x) => x.time));
     await u.ev("window.__dropGo()");
     const dropped = await u.until("window.__dropped === true", 10000);
     await sleep(300);
-    const vd2 = await versionDocs(u), rowAfter = await row(u, id1);
+    const keptAfter = await storeDocs(), rowAfter = await row(u, id1);
     const journalRowsAfter = J((await u.ev(historyRowsExpr(pre))).filter((x) => x.nb === pre).map((x) => x.time));
-    check(dropHeld && dropped && kept.length >= 1 && kept.every((x) => x.title === "replaced again") && tjOf(kept.at(-1)) === "after the replacement", "test 6c: dropHistory held until the new document's versions were kept: they are its only versions, the last the edit: " + J(kept.map((x) => [x.title, tjOf(x)])));
-    check(J(vd2) === J(kept) && J(rowAfter) === J(rowKept) && journalRowsAfter === journalRows, "test 6c: …dropHistory let go after them: every version, the row and the journal's rows survive it, exactly: " + J({ before: kept.length, after: vd2.length }));
+    // (and TimeTravel, open now the drop is done: the new document's versions only)
+    const vd2 = await versionDocs(u);
+    check(dropHeld && dropped && Array.isArray(kept) && kept.length >= 1 && kept.every((x) => x.title === "replaced again") && tjOf(kept.at(-1)) === "after the replacement", "test 6c: dropHistory held until the new document's versions were kept (read from the store, its session set): they are its only versions, the last the edit: " + (kept === null ? "the store's history has no session" : J(kept.map((x) => [x.title, tjOf(x)]))));
+    check(J(keptAfter) === J(kept) && J(rowAfter) === J(rowKept) && journalRowsAfter === journalRows && vd2.length >= 1 && vd2.every((x) => x.title === "replaced again") && tjOf(vd2.at(-1)) === "after the replacement", "test 6c: …dropHistory let go after them: every version, the row and the journal's rows survive it, exactly; TimeTravel shows the new document's only: " + J({ before: kept.length, after: keptAfter.length, shown: vd2.length }));
     await u.ev(`(() => { const h = window.sagebrush.boardJournalHook; delete h.beforeDropHistory; delete h.afterDropHistory; return true; })()`);
     // (board's N1 on code r1) a replacement whose clear fails (the browser refusing its mark's write): said, and the
     // versions from before it hidden, so no Revert brings the other document back
