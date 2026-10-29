@@ -778,8 +778,12 @@ export function typeGetattr(cls: PyType, name: string, dflt?: any): any {
 // class's __dict__, super(), function.__get__ and a bound method's __func__
 // all give this form.  One per function, made for its owner (never for the
 // class it happened to be reached through: bool.bit_length checks for int).
+const FORMATTING = new Set(["format", "format_map", "__mod__", "__rmod__"]);
 export function selfChecked(f: any): any {
   if (f.$selfChecked !== undefined) return f.$selfChecked;
+  // (a subclass's unboxing copy of int's, float's or str's method is that
+  // method as Python sees it: J.__repr__ is int.__repr__, as in CPython)
+  if (f.$orig !== undefined) return (f.$selfChecked = selfChecked(f.$orig));
   const cls: PyType = f.$owner;
   if (cls === undefined) throw new Error(`selfChecked: ${f.__name__} has no owner`);
   const check = (self: any) => {
@@ -788,11 +792,14 @@ export function selfChecked(f: any): any {
   };
   // (int's, float's and str's own methods take a subclass instance, a box,
   // by its value, as CPython's: str.__eq__(K('ab'), 'ab'), or a class
-  // body's __hash__ = str.__hash__)
+  // body's __hash__ = str.__hash__; and their other arguments too, as a
+  // subclass's own copies do, but where a box's own __repr__, __str__ or
+  // __format__ may be what is asked for: str.format('{!r}', K('a')))
   const prim = cls === T.int || cls === T.float || cls === T.str;
+  const unboxArgs = prim && !FORMATTING.has(f.__name__);
   const c: any = function (self: any, ...args: any[]) {
     check(self);
-    return f(prim && self instanceof PrimBox ? self.$v : self, ...args);
+    return f(prim && self instanceof PrimBox ? self.$v : self, ...(unboxArgs ? args.map(unbox) : args));
   };
   // (its name, signature, qualname, ...; not the raw function's own keyword
   // adapter, nor anything leading back to the raw function)
@@ -804,6 +811,7 @@ export function selfChecked(f: any): any {
     c.$kw = (pos: any[], names: string[], values: any[]) => {
       check(pos[0]);
       if (prim && pos[0] instanceof PrimBox) pos = [pos[0].$v, ...pos.slice(1)];
+      if (unboxArgs) pos = [pos[0], ...pos.slice(1).map(unbox)];
       return kw(pos, names, values);
     };
   } else if (f.$sig !== undefined) {
@@ -811,6 +819,7 @@ export function selfChecked(f: any): any {
       const a = bindArgs(f.__name__, f.$sig, pos, names, values);
       check(a[0]);
       if (prim && a[0] instanceof PrimBox) a[0] = a[0].$v;
+      if (unboxArgs) for (let i = 1; i < a.length; i++) a[i] = unbox(a[i]);
       return (f.$raw ?? f)(...a);
     };
     c.$kwPos = true;
