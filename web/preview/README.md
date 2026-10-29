@@ -6,11 +6,23 @@ lane's fake backend. The initial hosted target is `https://latex.sagebrush.cloud
 
 ## First preview and review gates
 
-The manager deploys `web/preview/wrangler.jsonc` only after security review by astra3
+The manager deploys `web/preview/cloudflare.config.ts` only after security review by astra3
 and astra5 and limits review by daybreak2. It has one native bucket binding,
 `PREVIEWS` -> `sagebrush-preview`, no secret bindings, and no origin server. Its
 route is `*.sagebrush.cloud/*`; the apex is not an app. The previously configured
 14-day R2 object lifecycle also expires policy sidecars.
+
+The deploy command is `cf deploy` from `web/preview/`. It uses
+`cloudflare.config.ts`, whose entry imports **only** the default Worker from
+`entry.mjs`. Directly using worker.mjs exposes helper exports; Cloudflare rejects
+its exported null-prototype MIME table. The wrapper preserves the reviewed Worker
+object without changing its serving behavior. `wrangler` 4.155.0 is pinned in this
+package and package-lock.json. The installed `cf` 1.0.0-beta.12 package must also
+resolve as `cf/config` from this directory (the deployment used a local
+node_modules/cf symlink to the installed CLI package). A global cf executable
+alone does not ensure ESM package resolution. No new install was run here.
+`wrangler.jsonc` remains an equivalent route/binding reference, not the cf deploy
+configuration.
 
 **Native binding limitation:** Cloudflare's R2 binding exposes read and write
 methods. Wrangler does not offer a read-only flag for this binding. This Worker
@@ -33,13 +45,14 @@ proof, and push authorization remain prerequisites for the first batch-2 preview
 
 ## Publishing after the pipeline is approved
 
-Use an authorized build machine with Node 22+, pnpm, Bun, installed repository
-packages and the normal pinned wasm inputs. Do not run builds in the shared CoCalc
-project under the current static-checks-only instruction. This script deliberately
+Use this project with Node 22+, Bun, installed repository
+packages and the normal pinned wasm inputs. Each of the three build subprocesses runs through the approved
+`/home/user/sagebrush-coord/bin/ptest -m 30 --` wrapper. Preparation, credential
+loading and R2 requests stay in the publisher parent, outside that wrapper. This script deliberately
 runs no tests, package install, Rust build or deployment tool. It invokes:
 
 ```sh
-pnpm run build
+node_modules/.bin/tsc -p .
 node scripts/build-cli.mjs
 bun web/build.ts
 ```
@@ -100,7 +113,7 @@ Publication is **not atomic**: users may see a temporary failed page while a nam
 is being replaced. All final upload bodies (injected HTML, policies, config and SW
 included) are frozen in memory and SHA-256 recorded before remote work. Uploads
 use those exact buffers without rereading source paths. Final limits are 3,000
-objects, 200 MiB total and 8 MiB per object; admission counts actual body lengths.
+objects, 200 MiB total, 16 MiB per non-HTML object and 8 MiB per HTML object; admission counts actual body lengths.
 The remote phase has one 20-minute abort deadline shared by listing, all uploads
 and deletions, in addition to each request's 30-second limit. Deadline failure
 prints a loud partial-publication error and does not print a success URL.
@@ -192,8 +205,8 @@ the lane's existing interface; the shared switch does not invent a new protocol.
 | --- | --- |
 | Worker storage operations | At most two file probes plus one policy read; assets stream without buffering |
 | HTML policy body | 32 KiB; otherwise 503 |
-| Final upload manifest | 3,000 objects including every sidecar/synthetic body, 200 MiB total, 8 MiB/object; buffers held in memory, each hashed once in preparation |
-| Source read/tree | One no-follow bounded read per source, at most 8 MiB, depth 32; concurrent growth refused |
+| Final upload manifest | 3,000 objects including every sidecar/synthetic body, 200 MiB total, 16 MiB/non-HTML and 8 MiB/HTML; buffers held in memory, each hashed once in preparation |
+| Source read/tree | One no-follow bounded read per source, at most 16 MiB (HTML 8 MiB), depth 32; concurrent growth refused |
 | Build headers | Regular file, 64 KiB, 200 rules including non-CSP slash records; exactly one CSP match per HTML/shell bootstrap; at most 600,000 rule visits |
 | Credential file | Owned regular mode-600 file, 16 KiB; fixed schema |
 | Previous listing | At most 6,000 objects / 6 pages of 1,000 keys, 8 MiB/page; all keys checked before uploads |
@@ -217,7 +230,7 @@ runtime suite was also run through the project wrapper:
 /home/user/sagebrush-coord/bin/ptest -m 3 -- node --test web/preview/test-preview.mjs
 ```
 
-Result: 15 tests passed, 0 failed. Exact output is included in the review packet.
+The latest pre-publish run passed all 17 tests with 0 failures, including the deployment-entry export shape and separate HTML/non-HTML byte boundaries. Exact output is included in the review packet.
 This is information to catch bugs, not CI/VM merge evidence. The suite covers
 routing, headers, fail-closed CSP, preserved engine bytes, banner/SW handling,
 mock gating, prefix/empty-key safety, frozen bodies and hashes, final count/size
