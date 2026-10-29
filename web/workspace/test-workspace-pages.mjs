@@ -173,11 +173,13 @@ try {
    * before that waits in a context the navigation destroys, and Chrome answers it with an error */
   const loaded = async (call, label, path) => {
     waitingOn = label + "its page to finish loading " + path;
-    const end = Date.now() + 60_000;
-    while (Date.now() < end) {
-      const r = await call("Runtime.evaluate", { expression: `document.readyState === "complete" && location.pathname.endsWith(${JSON.stringify(path)})`, returnByValue: true }, 5000).catch(() => null);
-      if (r?.result?.value === true) return;
-      await sleep(100);
+    // (60 s in all, on the monotonic clock: each call and each pause gets at most what is left, and a yes counts only
+    // within it)
+    const end = performance.now() + 60_000;
+    for (let left = end - performance.now(); left > 0; left = end - performance.now()) {
+      const r = await call("Runtime.evaluate", { expression: `document.readyState === "complete" && location.pathname.endsWith(${JSON.stringify(path)})`, returnByValue: true }, Math.min(5000, left)).catch(() => null);
+      if (r?.result?.value === true && performance.now() <= end) return;
+      await sleep(Math.min(100, Math.max(0, end - performance.now())));
     }
     throw new Error(label + "its page didn't finish loading " + path + " within 60 s");
   };
