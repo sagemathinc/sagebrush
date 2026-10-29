@@ -47,19 +47,29 @@ export async function latexBoot(ws: Workspace | null) {
     else { b.disabled = true; box.append(el("div", "This file can't open in the LaTeX editor yet: it hasn't been given a stable id.")); }
     box.append(b);
   };
-  // the file browser's New (+): "LaTeX file" too, added to its menu when it opens (this module is in a LaTeX build only,
-  // so the file browser's own code is the same as without the editor); the work is the page module's newTex, loaded on
+  // a new LaTeX document: an item in the file browser's New (+) menu, when it opens; in the File menu's New group; and on
+  // the empty file list (on a phone, where the file panel's buttons may be out of reach) (this module is in a LaTeX
+  // build only, so their own code is the same as without the editor); the work is the page module's newTex, loaded on
   // the click: /Untitled.tex (or "Untitled (2).tex", ...) with a short document, opened in the editor
   // (the page module, from the site's root, where this page is: a variable, so the bundler leaves it to the browser)
   const page = "/sagebrush-latex.js";
-  if (ws) document.addEventListener("click", (ev) => {
-    const m = (ev.target as Element | null)?.closest?.('.sbfiles .fh button[aria-label="New"]') && document.querySelector(".sbfmenu");
+  // (all three are redrawn as they change: checked after each change. The file browser's + menu is the .sbfmenu with a
+  //  "Folder" item: a folder's own menu has "New folder here")
+  const qs = (s: string) => document.querySelector(s), t = "LaTeX document", add = (m: Element | null | undefined, t: string, at?: Element | null, close?: 1) => {
     if (!m || m.querySelector(".sb-tex-new")) return;
-    const b = el("button", "LaTeX file");
+    const b = el("button", t);
     b.className = "sb-tex-new"; b.setAttribute("role", "menuitem");
-    b.onclick = (e) => { e.stopPropagation(); m.remove(); import(page).then((x) => x.newTex(ws, g.__sbTex), (err) => alert(String(err))); };
-    m.insertBefore(b, [...m.querySelectorAll("button")].find((x) => x.textContent === "Folder") ?? null);
-  });
+    b.onclick = (e) => { e.stopPropagation(); close && m.remove(); import(page).then((x) => x.newTex(ws!, g.__sbTex), (r) => alert(r)); };
+    // (an undefined `at` is null to the DOM: the end)
+    m.insertBefore(b, at as Element | null);
+  };
+  if (ws) new MutationObserver(() => {
+    const m = qs(".sbfmenu"), f = qs(".fmgroup[aria-label=New]"), x = qs(".sbfiles .fempty");
+    const fo = [...(m?.querySelectorAll("button") ?? [])].find((b) => b.textContent == "Folder");
+    if (fo) add(m, t, fo, 1);
+    add(f, t, f?.querySelector("[data-item=newFolder]"));
+    if (x?.textContent!.startsWith("Nothing")) add(x, "New " + t);
+}).observe(document.body, { childList: true, subtree: true });
   if (tex === null || !ws) return false;
   const root = el("div");
   document.body.append(root);
