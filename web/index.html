@@ -1441,6 +1441,9 @@ async function openDocument(doc, here = false, made = "elsewhere") {
 // (here: a new notebook, written in this browser; else examples and share links)
 const openNew = (name, mode, codes, here = false) => openDocument({ name, mode, cells: codes.map(asCell) }, here);
 async function openId(id) {
+  // (the LaTeX editor has this page, web/latex/page.ts: a notebook opened from it (its files, their menus, an
+  // upload) opens by its URL, never loaded unseen under the editor; a build without the editor drops this line)
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && globalThis.__sbTexOpen?.(id)) return true;
   const doc = await idb(db, "notebooks", "readonly", (st) => st.get(id));
   if (!doc) return false;
   await open(await storeFor(id), id);

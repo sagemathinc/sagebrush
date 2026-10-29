@@ -82,18 +82,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   fsDown.onclick = () => font(-1); fsUp.onclick = () => font(1); zOut.onclick = () => zoom(-ZOOM.step); zIn.onclick = () => zoom(ZOOM.step);
   applyView();
 
-  // ---- the files beside this page: a notebook row clicked (or Enter) opens that notebook's page by its URL, the way
-  // a board's does; the notebook page's own open() would load it under this page, unseen. A click on a row's button or
-  // name field, a Ctrl/Cmd-click (a new tab) or a middle click: left to the file browser, as before; a row in Trash
-  // (its open() does nothing there): nothing.
-  document.getElementById("wssidebar")?.addEventListener("click", (ev) => {
-    const t = ev.target as HTMLElement, r = t.closest<HTMLElement>(".frow"), p = r?.dataset.path;
-    if (!p || !/\.ipynb$/i.test(p) || t.closest("button, input") || ev.button !== 0 || ev.ctrlKey || ev.metaKey) return;
-    ev.stopPropagation(); ev.preventDefault();
-    void host.ws.stat(p).then((e) => {
-      if (e && e.kind === "notebook" && e.ref && !e.trashed) location.assign("/?nb=" + encodeURIComponent(e.ref));
-    }, () => {});
-  }, true);
+  // ---- a notebook opened while this page is up (from the files beside it, a row's menu, Open as a notebook, an
+  // upload): the notebook page's openId() asks here first (index.html, in a LaTeX build only) and its page is opened
+  // by URL instead, as a board's is; without this it would be loaded unseen under the editor
+  (globalThis as any).__sbTexOpen = (id: string) => { location.assign("/?nb=" + encodeURIComponent(id)); return true; };
   const gone = (t: string) => { main.textContent = ""; const m = el("div", "tex-gone", t); main.appendChild(m); save.hidden = true; toggle.hidden = true; tools.hidden = true; };
 
   // ---- binding and reading (r5 §1a, §4)
