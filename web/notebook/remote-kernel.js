@@ -41,6 +41,15 @@
 //     (when ready, both lists are required, every entry with string op_id and kind; incarnation is
 //     required whenever a restart or delete was applied; anything less is not evidence of anything)
 // A terminal's outcome is {status, reason?, detail?, ms?, ename?, incarnation?}.
+//
+// Approval (the remote-compute plan's P1b-int, web/notebook/remote-gate.js):
+// a run given `opts.gate` is checked when it is dispatched, and admitted by
+// a guard the client calls synchronously right before the fetch that sends
+// it (after the token and the proof are ready), so nothing can change
+// between its last check and its send.  Until it is admitted, anything that
+// ends it is "not run" (skipped with {notRun}), never a stopped run.  With
+// `requireGate`, code is never sent without a gate, and an empty-code request
+// (forgetting names) only with its `forgetGuard`.
 
 import { GatewayError, StreamError, NotSentError, AmbiguousError } from "./remote-client.js";
 
@@ -82,6 +91,10 @@ export const NOTES = {
   restarted: "\nInterpreter restarted.\n",
   closed: "\nThe remote kernel was disconnected.\n",
   tooLarge: "(an output message was over the size limit, so it was not shown; the rest of this run's output is not shown either)\n",
+  changed: "\nNot run: it changed since it was checked.\n",
+  checkFailed: "\nNot run: it couldn't be checked.\n",
+  noGate: "\nNot run: a remote run must be approved first.\n",
+  notReady: "\nNot run: the remote kernel isn't ready.\n",
 };
 
 // (a refusal's reason -> its note: the gateway's no-effect terminals, [G] §6.2.3)
@@ -138,6 +151,27 @@ function once(sink) {
   };
 }
 
+// The run payload of a checked spec (remote-approval.ts RunSpec): exactly its bytes.
+function payloadOf(spec) {
+  const op = spec.options;
+  return {
+    code: spec.source,
+    mode: spec.mode,
+    cell: spec.id,
+    ...(op.forget?.length ? { forget: [...op.forget] } : {}),
+    ...(op.mangle ? { mangle: op.mangle } : {}),
+    ...(op.seed ? { seed: op.seed } : {}),
+    ...(op.scoped && Object.keys(op.scoped).length ? { scoped: { ...op.scoped } } : {}),
+  };
+}
+function deepFreeze(o) {
+  if (o && typeof o === "object" && !Object.isFrozen(o)) {
+    Object.freeze(o);
+    for (const v of Object.values(o)) deepFreeze(v);
+  }
+  return o;
+}
+
 export class RemoteKernel {
   /**
    * @param {object} o
@@ -148,13 +182,14 @@ export class RemoteKernel {
    * @param {string} [o.clientId] this page's id in request ids (default: random)
    * @param {(ms: number) => Promise<void>} [o.sleep] (tests: a faster clock)
    */
-  constructor({ client, notebook, path = "", kernel = "python3", clientId, sleep }) {
+  constructor({ client, notebook, path = "", kernel = "python3", clientId, sleep, requireGate = false }) {
     this.client = client;
     this.notebook = notebook;
     this.path = path;
     this.kernelName = kernel;
     this.clientId = clientId ?? Math.random().toString(36).slice(2, 10);
     this.sleep = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.requireGate = !!requireGate;
     // phase: "idle" (no binding), "ready", "moved" (another tab took it), "closed"
     this.lc = Object.freeze({ serial: 0, binding: null, epoch: null, generation: 0, incarnation: null, phase: "idle" });
     // aborted whenever the binding, generation or phase changes: everything begun under the old one
@@ -167,7 +202,7 @@ export class RemoteKernel {
     this.nextN = 1;
     this.nextOp = 1;
     this.recoveredAt = null; // the incarnation an observed restart was last recovered from (one recovery each)
-    this.listeners = { status: [], restart: [], ready: [], loading: [] };
+    this.listeners = { status: [], restart: [], ready: [], loading: [], lifecycle: [] };
     this.targetSink = () => null;
   }
 
@@ -178,6 +213,8 @@ export class RemoteKernel {
   get ready() { return this.lc.phase === "ready"; }
   get moved() { return this.lc.phase === "moved"; }
   get closed() { return this.lc.phase === "closed"; }
+  /** A remote kernel: the notebook runs it only through a gate (remote-gate.js) and only in the reactive notebook. */
+  get remote() { return true; }
 
   on(event, f) { (this.listeners[event] ??= []).push(f); return () => { this.listeners[event] = this.listeners[event].filter((g) => g !== f); }; }
   emit(event, ...args) { for (const f of this.listeners[event] ?? []) f(...args); }
@@ -189,14 +226,23 @@ export class RemoteKernel {
     const old = this.lc;
     const lc = Object.freeze({ ...old, ...patch, serial: old.serial + 1 });
     this.lc = lc;
+    // (synchronously, before anything else: approvals and records follow the kernel)
+    this.emit("lifecycle", old, lc);
     if (lc.binding !== old.binding || lc.generation !== old.generation || lc.phase !== old.phase) {
       this.abortCtl.abort();
       this.abortCtl = new AbortController();
       const j = this.current;
       this.current = null;
-      j?.sink.stopped(note ?? NOTES.restarted);
+      if (j) this.notSent(j, note ?? NOTES.restarted);
     }
     return lc;
+  }
+
+  // A job ended before it ran: a gated job not yet admitted is not run (no attempt
+  // exists); anything else (ungated, or admitted) is stopped, as before.
+  notSent(job, note) {
+    if (job.opts.gate && !job.admitted) job.sink.skipped({ notRun: "skip", note });
+    else job.sink.stopped(note);
   }
 
   // Lifecycle operations, one at a time; no run starts while one is pending.
@@ -231,7 +277,7 @@ export class RemoteKernel {
     }
     if (err) {
       this.emit("status", `error: the remote kernel did not start: ${clip(err?.message ?? err)}`);
-      for (const j of this.queue.splice(0)) j.sink.stopped(`\nThe remote kernel did not start: ${clip(err?.message ?? err)}\n`);
+      for (const j of this.queue.splice(0)) this.notSent(j, `\nThe remote kernel did not start: ${clip(err?.message ?? err)}\n`);
       return false;
     }
     this.needsFence = false;
@@ -243,17 +289,25 @@ export class RemoteKernel {
 
   /**
    * Run code; `sink` receives what happens to it (types.ts OutputSink).
-   * opts: {mode, cell, forget, mangle, seed, scoped}, as for WorkerKernel.
+   * opts: {mode, cell, forget, mangle, seed, scoped}, as for WorkerKernel;
+   * `gate` (remote-gate.js) to check and admit it; `forgetGuard` for an
+   * empty-code request, called right before it is sent.
    */
   execute(code, opts, sink) {
     const s = once(sink);
+    const o = opts ?? {};
+    if (this.requireGate && (code !== "" ? !o.gate : !o.forgetGuard)) return s.stopped(NOTES.noGate);
+    if (o.gate) {
+      // (a gated run is checked against the kernel it is queued for: only a ready one)
+      if (!this.ready) return s.skipped({ notRun: "skip", note: NOTES.notReady });
+    }
     if (this.closed) return s.stopped(NOTES.closed);
     if (this.moved) return s.stopped(NOTES.moved);
     // (no binding, and none being made: nothing would ever run it)
     if (this.lc.phase === "idle" && !this.lifeOps) return s.stopped(NOTES.unreachable);
     // (asked while no binding exists, being made: it runs on the kernel that comes next, so its
     // generation is the one current when it is sent, not the one before the binding)
-    this.queue.push({ code, opts: opts ?? {}, sink: s, generation: this.lc.phase === "idle" ? null : this.lc.generation });
+    this.queue.push({ code, opts: o, sink: s, generation: this.lc.phase === "idle" ? null : this.lc.generation });
     this.pump();
   }
 
@@ -264,7 +318,7 @@ export class RemoteKernel {
     this.current = job;
     // (job.settled: the whole run, its finally included, settled; tests use it)
     job.settled = this.runJob(job)
-      .catch((e) => { if (this.current === job) job.sink.stopped(`\nThe remote kernel failed: ${clip(e?.message ?? e)}\n`); })
+      .catch((e) => { if (this.current === job) this.notSent(job, `\nThe remote kernel failed: ${clip(e?.message ?? e)}\n`); })
       .finally(() => {
         if (this.current === job) this.current = null;
         this.pump();
@@ -273,28 +327,58 @@ export class RemoteKernel {
 
   async runJob(job) {
     // (queued before a restart: its kernel is gone)
-    if (job.generation !== null && job.generation !== this.lc.generation) return job.sink.stopped(NOTES.restarted);
+    if (job.generation !== null && job.generation !== this.lc.generation) return this.notSent(job, NOTES.restarted);
     if (job.generation === null) job.generation = this.lc.generation;
     if (this.needsFence) {
       const ok = await this.lifecycle(() => this.takeover(job));
       if (!ok || this.current !== job) return;
     }
-    if (job.generation !== this.lc.generation) return job.sink.stopped(NOTES.kernelReplaced);
+    if (job.generation !== this.lc.generation) return this.notSent(job, NOTES.kernelReplaced);
     const lc = (job.lc = this.lc);
     const signal = this.abortCtl.signal;
     const request = (job.request = `rq.${this.clientId}.${lc.generation}.${this.nextN++}`);
     const o = job.opts;
-    const payload = {
-      code: job.code,
-      mode: o.mode ?? "python",
-      ...(o.cell ? { cell: String(o.cell) } : {}),
-      ...(o.forget?.length ? { forget: [...o.forget] } : {}),
-      ...(o.mangle && o.cell ? { mangle: String(o.cell).replace(/[^A-Za-z0-9]/g, "") } : {}),
-      ...(o.seed ? { seed: o.seed } : {}),
-      ...(o.scoped && Object.keys(o.scoped).length ? { scoped: { ...o.scoped } } : {}),
-    };
-    const body = { request, epoch: lc.epoch, generation: lc.generation, incarnation: lc.incarnation, kind: "run", payload };
-    if (!(await this.submit(job, body, signal))) return;
+    let payload, guard;
+    if (o.gate) {
+      // the check, on one snapshot (approvals, document, kernel, the cell and its ancestors)
+      let v;
+      try {
+        v = await o.gate.check(request);
+      } catch {
+        return this.current === job ? this.notSent(job, NOTES.checkFailed) : undefined;
+      }
+      if (this.current !== job) return; // (already told why)
+      if (this.lc !== lc) return this.notSent(job, NOTES.changed);
+      if (!v.send) return job.sink.skipped({ notRun: "wait" in v ? "wait" : "skip", note: `\nNot run: ${"wait" in v ? v.wait : v.skip}.\n` });
+      const planned = v.plan[0];
+      // the bytes sent are the bytes checked: the payload is the checked spec's, and the job's own must agree
+      if (!o.gate.sameRun(job.code, o, planned.run)) return this.notSent(job, NOTES.changed);
+      payload = payloadOf(planned.run);
+      // admitted at the first fetch, synchronously before it; a nonce retry or the identical
+      // resend only if that admission still holds (never admitted again)
+      guard = () => {
+        if (job.admitted) return o.gate.stillAdmitted(v);
+        if (!o.gate.admit(v)) return false;
+        job.admitted = true;
+        job.planned = planned;
+        o.gate.admitted?.(planned);
+        return true;
+      };
+    } else {
+      payload = {
+        code: job.code,
+        mode: o.mode ?? "python",
+        ...(o.cell ? { cell: String(o.cell) } : {}),
+        ...(o.forget?.length ? { forget: [...o.forget] } : {}),
+        ...(o.mangle && o.cell ? { mangle: String(o.cell).replace(/[^A-Za-z0-9]/g, "") } : {}),
+        ...(o.seed ? { seed: o.seed } : {}),
+        ...(o.scoped && Object.keys(o.scoped).length ? { scoped: { ...o.scoped } } : {}),
+      };
+      // (forgetting names: whatever was computed with them is invalidated right before they go)
+      if (o.forgetGuard) guard = () => { o.forgetGuard(); return true; };
+    }
+    const body = deepFreeze({ request, epoch: lc.epoch, generation: lc.generation, incarnation: lc.incarnation, kind: "run", payload });
+    if (!(await this.submit(job, body, signal, guard))) return;
     if (this.current !== job) return;
     await this.follow(job, signal);
   }
@@ -307,13 +391,14 @@ export class RemoteKernel {
   // a request at most once), and if that doesn't succeed, only the
   // request's own record decides; without it, the outcome is unknown and
   // the binding is fenced.
-  async submit(job, body, signal) {
+  // (`guard`: the client calls it right before each fetch; both attempts share it)
+  async submit(job, body, signal, guard) {
     const path = `/bindings/${job.lc.binding}/runs`;
     let mayBeAdmitted = false;
     for (let attempt = 0; attempt < 2; attempt++) {
       let err = null;
       try {
-        await this.client.request("POST", path, body, { signal });
+        await this.client.request("POST", path, body, { signal, ...(guard ? { guard } : {}) });
       } catch (e) {
         err = e;
       }
@@ -322,7 +407,9 @@ export class RemoteKernel {
       // (a retry's refusal, or a failure to send it, says nothing about the first attempt)
       if (mayBeAdmitted) return this.reconcileSubmit(job, err, signal);
       if (err instanceof NotSentError) {
-        job.sink.stopped(`\nNot run: ${clip(err.message)}\n`);
+        // (not admitted: not run; admitted, then refused before a retry was sent: stopped)
+        if (job.opts.gate && !job.admitted) job.sink.skipped({ notRun: "skip", note: err.stale ? NOTES.changed : `\nNot run: ${clip(err.message)}\n` });
+        else job.sink.stopped(err.stale ? NOTES.changed : `\nNot run: ${clip(err.message)}\n`);
         return false;
       }
       if (err instanceof GatewayError) {
@@ -521,7 +608,7 @@ export class RemoteKernel {
 
   // The gateway reported the restart done.
   restarted(message, incarnation) {
-    for (const j of this.queue.splice(0)) j.sink.stopped(message);
+    for (const j of this.queue.splice(0)) this.notSent(j, message);
     this.setLc({ generation: this.lc.generation + 1, incarnation }, NOTES.stoppedRestart);
     this.emit("status", "ready (remote)");
     this.emit("restart");
@@ -579,7 +666,7 @@ export class RemoteKernel {
         // (no complete evidence: nothing is concluded, and the fence stays)
         this.emit("status", `error: the remote kernel could not be checked: ${clip(err?.message ?? err)}`);
         this.needsFence = true;
-        job?.sink.stopped(NOTES.unreachable);
+        if (job) this.notSent(job, NOTES.unreachable);
         return false;
       }
       if (r.state === "quarantined") return this.replace(lc0);
@@ -592,7 +679,7 @@ export class RemoteKernel {
           return false;
         }
         if (applied.some((a) => a.kind === "restart" || a.kind === "delete")) {
-          for (const j of this.queue.splice(0)) j.sink.stopped(NOTES.kernelReplaced);
+          for (const j of this.queue.splice(0)) this.notSent(j, NOTES.kernelReplaced);
           this.setLc({ generation: this.lc.generation + 1, incarnation: r.incarnation }, NOTES.kernelReplaced);
           this.emit("status", "the remote kernel was restarted before this tab took it over; variables are gone");
           this.emit("restart");
@@ -601,7 +688,7 @@ export class RemoteKernel {
         if (r.in_flight.length) {
           this.emit("status", "a run from the previous tab is still executing");
           this.needsFence = true; // (asked again before the next run)
-          job?.sink.stopped(NOTES.inFlight);
+          if (job) this.notSent(job, NOTES.inFlight);
           return false;
         }
         if (lost) this.emit("status", "ready (remote); the restart did not happen");
@@ -623,7 +710,7 @@ export class RemoteKernel {
     // never replace the kernel that restart made, even on the same binding)
     if (this.lc !== lc0 || this.lc.phase !== "ready") return false;
     this.emit("status", "This notebook's kernel couldn't be handed over safely; starting a fresh kernel");
-    for (const j of this.queue.splice(0)) j.sink.stopped(NOTES.kernelReplaced);
+    for (const j of this.queue.splice(0)) this.notSent(j, NOTES.kernelReplaced);
     this.setLc({ binding: null, phase: "idle" }, NOTES.kernelReplaced);
     if (await this.bind()) this.emit("restart");
     return false;
@@ -632,7 +719,7 @@ export class RemoteKernel {
   // Another tab owns the binding now: this one stops, its queue skipped.
   // (`note`: what the running request is told; NOTES.moved unless its own outcome is unknown)
   movedAway(note = NOTES.moved) {
-    for (const j of this.queue.splice(0)) j.sink.stopped(NOTES.moved);
+    for (const j of this.queue.splice(0)) this.notSent(j, NOTES.moved);
     this.setLc({ phase: "moved" }, note);
     this.emit("status", "this notebook's kernel is in use in another tab");
   }
@@ -640,7 +727,7 @@ export class RemoteKernel {
   /** Disconnect: what was running or queued is told `message` (the kernel itself is the gateway's). */
   close(message = NOTES.closed) {
     if (this.closed) return;
-    for (const j of this.queue.splice(0)) j.sink.stopped(message);
+    for (const j of this.queue.splice(0)) this.notSent(j, message);
     this.setLc({ phase: "closed" }, message);
   }
 }
