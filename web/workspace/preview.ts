@@ -10,6 +10,8 @@ import { migrationState, type MigrationState } from "./migrator";
 import { WorkspaceError, type Entry, type Version, type Workspace } from "./api";
 import { nameOf, splitExt } from "./paths";
 import { syncSection } from "./sync-panel";
+// (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hook folds away)
+declare const __SB_LATEX__: boolean | undefined;
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
 // copy; elsewhere the define is absent or false, and everything is as before)
 declare const __SB_NO_SYNC__: boolean | undefined;
@@ -225,6 +227,8 @@ export async function openPreview(w: Workspace, e0: Entry, host: PreviewHost): P
     } catch (err) { host.fail(err); }
   };
   actions.append(button("Download", download), h("span", { className: "sp" }));
+  // (a .tex file: the LaTeX editor's button, in a build with it and when it is on; web/latex/boot.ts)
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__) (globalThis as any).__sbTexP?.(e, actions);
   if (kind === "none") note("No preview for this kind of file: download it, or open it from code.");
   else if (kind === "image" && size > PREVIEW.imageBytes) note(`This picture is too large to preview here (${fmtSize(size)}): download it.`);
   else if (kind !== "image" && size > PREVIEW.readBytes) note(`This file is too large to preview here (${fmtSize(size)}): download it.`);
