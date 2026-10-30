@@ -6,7 +6,7 @@
 // (web/test-remote-preview.mjs).
 import { RemoteClient } from "./remote-client.js";
 import { RemoteKernel, NOTES } from "./remote-kernel.js";
-import { PreviewGateway, startPreview, statusText, gateFor, sha256Hex, SHEET, remoteSwitch } from "./remote-ui.js";
+import { PreviewGateway, startPreview, statusText, gateFor, sha256Hex, SHEET, remoteSwitch, parseNetwork, networkText } from "./remote-ui.js";
 import { RemoteGate } from "./remote-gate.js";
 
 const fast = (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 5)));
@@ -63,8 +63,8 @@ function sink() {
   return s;
 }
 
-async function ungated(local) {
-  const gw = new PreviewGateway(local);
+async function ungated(local, gwOpts = {}) {
+  const gw = new PreviewGateway(local, gwOpts);
   let token = null;
   const client = await RemoteClient.create({ base: gw.base, token: () => token, fetch: gw.fetch });
   token = gw.issueToken(client.jkt);
@@ -162,7 +162,7 @@ export async function runUiTests(check) {
     const statuses = [];
     const r = await startPreview({ notebook: "nb-5", local, onStatus: (t) => statuses.push(t) });
     c(r.kernel.ready && r.kernel.remote && r.kernel.requireGate && r.kernel.preview === true && local.starts === 1, "startPreview: a ready remote kernel that requires a gate; the interpreter started");
-    c(statuses.includes("GPU kernel (preview, simulated) · ready"), `its status says it's the simulated preview (${JSON.stringify(statuses)})`);
+    c(statuses.includes("Remote compute (preview, simulated) · ready"), `its status says it's the simulated preview (${JSON.stringify(statuses)})`);
     const s = await runOn(r.kernel, "unapproved");
     c(s?.terminal?.[0] === "stopped" && s.terminal[1] === NOTES.noGate && local.executed.length === 0, "a run without the page's gate is never sent");
     const gate = gateFor(r.kernel, { reactive: () => null, config: () => Object.freeze({ mode: "python", seedNamespace: "", reactive: true }) });
@@ -173,7 +173,7 @@ export async function runUiTests(check) {
 
   // 6. text
   {
-    c(statusText("connecting…") === "GPU kernel (preview): connecting…" && statusText("ready (remote)") === "GPU kernel (preview, simulated) · ready", "status text");
+    c(statusText("connecting…") === "Remote compute (preview): connecting…" && statusText("ready (remote)") === "Remote compute (preview, simulated) · ready", "status text");
     c((await sha256Hex("abc")) === "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "the approvals' hash is SHA-256, hex");
     c(/simulated/.test(SHEET.preview) && /nothing is billed/i.test(SHEET.preview) && SHEET.capNote === "You'll confirm the cap on CoCalc's page; that's the one that counts.", "the Connect sheet says it's simulated, unbilled, and carries the plan's cap note");
   }
@@ -336,6 +336,51 @@ export async function runUiTests(check) {
       closeSheet();
       c((await p2) === null, "sheet: closeSheet settles the open one as cancelled");
     }
+  }
+  // 8. the simulated network (&latency, &jitter, &loss)
+  {
+    const net = parseNetwork("?remote=1&latency=200&jitter=50&loss=10");
+    c(net.latency === 200 && net.jitter === 50 && net.loss === 0.1 && Object.isFrozen(net), "network: the address's latency, jitter and loss");
+    const bad = parseNetwork("?latency=-5&jitter=abc&loss=90");
+    const none = parseNetwork("?remote=1&latency=");
+    c(parseNetwork("?loss=0.5").loss === 0.005 && networkText(parseNetwork("?latency=400&loss=0.5")) === " · 400 ms · 0.5% loss" && parseNetwork("?loss=50").loss === 0.5, "network: loss is in percent (&loss=10 is 10%; &loss=0.5 is 0.5%), and the status line shows the rate used");
+    c(bad.latency === 0 && bad.jitter === 0 && bad.loss === 0.5 && none.latency === 0 && parseNetwork("?latency=1e9").latency === 10000, "network: negative or malformed values are 0, the rest clamped (loss <= 0.5, latency <= 10 s)");
+    c(networkText(none) === "" && networkText(net) === " · 200 ms ±25 · 10% loss" && statusText("ready (remote)", net) === "Remote compute (preview, simulated · 200 ms ±25 · 10% loss) · ready", "network: the status line says which network it simulates");
+
+    // every request and answer is delayed: a run's round trips take at least the latency each
+    const local = stubLocal();
+    const { kernel } = await ungated(local, { network: parseNetwork("?latency=80") });
+    const t0 = performance.now();
+    const s = await runOn(kernel, "slow net");
+    const took = performance.now() - t0;
+    c(s?.terminal?.[0] === "done" && took >= 160, `network: a run (POST, then its event stream) takes >= two round trips (${Math.round(took)} ms)`);
+
+    // a stream's events stay in order under jitter, as on one connection
+    const local2 = stubLocal();
+    const { kernel: k2 } = await ungated(local2, { network: parseNetwork("?latency=20&jitter=40") });
+    local2.script = () => ({ out: Array.from({ length: 40 }, (_, i) => [`line ${i}\n`, false]), done: [1, { error: false }] });
+    const s2 = await runOn(k2, "many lines");
+    c(s2?.terminal?.[0] === "done" && s2.outs.map(([t]) => t).join("") === Array.from({ length: 40 }, (_, i) => `line ${i}\n`).join(""), "network: 40 events under jitter arrive in order, each once");
+
+    // loss: a lost reply (the run's POST answer) is resent once, identically; the gateway admits the run once
+    const seq = (xs) => { let i = 0; return () => (i < xs.length ? xs[i++] : 0.99); };
+    const local3 = stubLocal();
+    // (random draws in order: the bind's delays and loss draw, then the run POST's: lose its reply)
+    const { gw: gw3, kernel: k3 } = await ungated(local3, { network: { latency: 0, jitter: 0, loss: 0.5 }, random: seq([0.99]) });
+    gw3.random = seq([0.1]); // (with no jitter only loss draws: the run's POST reply is the first, lost)
+    const lost0 = gw3.lost;
+    const s3 = await runOn(k3, "lose my reply");
+    c(gw3.lost > lost0, `network: a reply was lost (${gw3.lost - lost0})`);
+    c(s3?.terminal?.[0] === "done" && local3.executed.filter((x) => x.code === "lose my reply").length === 1, `network: the run still completes, executed exactly once (${JSON.stringify(s3?.terminal)})`);
+
+    // loss in a stream: it breaks; the page reconnects after its last event and gets the rest, nothing twice
+    const local4 = stubLocal();
+    const { gw: gw4, kernel: k4 } = await ungated(local4, { network: { latency: 0, jitter: 0, loss: 0.5 }, random: () => 0.99 });
+    local4.script = () => ({ out: Array.from({ length: 10 }, (_, i) => [`e${i}\n`, false]), done: [1, { error: false }] });
+    let draws = 0;
+    gw4.random = () => (++draws === 6 ? 0.1 : 0.99); // (draws: the POST reply, then each stream event; the 5th event is lost)
+    const s4 = await runOn(k4, "break my stream");
+    c(gw4.lost >= 1 && s4?.terminal?.[0] === "done" && s4.outs.map(([t]) => t).join("") === Array.from({ length: 10 }, (_, i) => `e${i}\n`).join(""), `network: a broken stream resumes; every event once, in order (lost ${gw4.lost})`);
   }
   return n;
 }

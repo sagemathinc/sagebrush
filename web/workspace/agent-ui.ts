@@ -16,6 +16,11 @@ export type PairingWorkspace = GrantStore & {
 };
 
 export const SAFARI = "Safari doesn't let a web page reach a program on this computer. Use Chrome or Firefox, or the Sagebrush desktop app.";
+// (Chrome asks once, per site, before a page may reach a program on this computer (Chrome 149: its "loopback network"
+// permission); headless or blocked, the socket fails with ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS.  A paraphrase, not
+// Chrome's exact label, which hasn't been seen in a headed browser yet)
+export const CHROME_ALLOW = "Chrome may ask whether this site can access apps on this device. Choose Allow, then Connect again: that lets this site connect to programs on this computer, such as your agent's sagebrush-mcp. If it was blocked: click the icon at the left of the address bar, open Site settings, allow that permission, and reload this page.";
+export const isChromium = (ua = navigator.userAgent) => /chrome|chromium|crios|edg/i.test(ua);
 export const isSafari = (ua = navigator.userAgent) => /safari/i.test(ua) && !/chrome|chromium|crios|fxios|android|edg/i.test(ua);
 
 const CSS = `
@@ -166,7 +171,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
         } catch (e) {
           go.disabled = false;
           const m = String((e as Error).message ?? e);
-          err.textContent = (/^refused|^protocol/.test(String((e as any)?.code)) && !/^the agent refused/i.test(m) ? "The agent refused: " : "") + m + (/failed/.test(String((e as Error).message)) ? "\n\n" + SAFARI.replace(/^Safari/, "If this is Safari: Safari") : "");
+          const failed = /^the connection failed/.test(m); // (nothing answered: not a refusal by the agent)
+          err.textContent = (/^refused|^protocol/.test(String((e as any)?.code)) && !failed && !/^the agent refused/i.test(m) ? "The agent refused: " : "") + m + (/failed/.test(String((e as Error).message)) ? "\n\n" + (isChromium() ? CHROME_ALLOW : SAFARI.replace(/^Safari/, "If this is Safari: Safari")) : "");
         }
       };
       box.append(h("div", { className: "note", textContent: "In your agent (Claude Code, Codex, …) with sagebrush-mcp, ask it to connect to Sagebrush: it gives a code and a port." }),
