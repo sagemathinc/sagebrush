@@ -258,15 +258,35 @@ export class AgentPairing {
     this.emit();
   }
 
+  /** Send one message if it is within the frame bound; else false (nothing sent, nothing cut). */
+  private sendBounded(m: unknown): boolean {
+    const s = JSON.stringify(m);
+    if (frameBytes(s, AGENT_LIMITS.maxFrameBytes) > AGENT_LIMITS.maxFrameBytes) return false;
+    if (this.sock.readyState === 1) this.sock.send(s);
+    return true;
+  }
+  private tooBigFrame(id: string) {
+    this.sendBounded({ jsonrpc: "2.0", id, error: { code: -32000, message: "the answer would be over the frame bound", data: { code: "limit", message: `the answer would be over ${AGENT_LIMITS.maxFrameBytes} bytes as a message` } } });
+  }
   /** An answer, never over the frame bound: one that would be is replaced by a limit error (nothing cut). */
   private reply(id: string, result: unknown) {
-    const s = JSON.stringify({ jsonrpc: "2.0", id, result });
-    const n = frameBytes(s, AGENT_LIMITS.maxFrameBytes);
-    if (n > AGENT_LIMITS.maxFrameBytes) return this.fail(id, "limit", `the answer would be ${n} bytes as a message, over ${AGENT_LIMITS.maxFrameBytes}`);
-    if (this.sock.readyState === 1) this.sock.send(s);
+    if (!this.sendBounded({ jsonrpc: "2.0", id, result })) this.tooBigFrame(id);
   }
+  /** An error, never over the frame bound either: a conflict's current contents are dropped first (said why),
+   * and if it is still too big, a bare limit error. */
   private fail(id: string, code: string, message: string, extra: Record<string, unknown> = {}) {
-    this.send({ jsonrpc: "2.0", id, error: { code: -32000, message, data: { code, message, ...extra } } });
+    const msg = (x: Record<string, unknown>) => ({ jsonrpc: "2.0", id, error: { code: -32000, message, data: { code, message, ...x } } });
+    if (this.sendBounded(msg(extra))) return;
+    if ("current" in extra) {
+      const { current: _c, ...rest } = extra;
+      if (this.sendBounded(msg({ ...rest, currentOmitted: `its current contents would make the answer over ${AGENT_LIMITS.maxFrameBytes} bytes as a message: read it` }))) return;
+    }
+    this.tooBigFrame(id);
+  }
+  /** Whether `g` (and `verbs`) are still this pairing's grant, in force now: checked after every wait, before anything
+   * is said or done on it. */
+  private current(g: Grant | null, verbs: AgentVerbs | null) {
+    return this.state === "granted" && g !== null && this.grant === g && this.verbs === verbs && grantProblem(g, this.now()) === null;
   }
 
   /** One call from the server: checked, then done, then answered (never thrown). */
@@ -290,23 +310,24 @@ export class AgentPairing {
       if (no || !verbs) return this.fail(id, "invalid", no ?? "no grant");
       // (while it was authorized, the grant may have been revoked or have expired: it must be the same one, and
       // still in force now, before the workspace is touched)
-      if (this.grant !== g || this.verbs !== verbs) return this.fail(id, "invalid", "the grant changed while this was checked");
-      const late = grantProblem(this.grant, this.now());
-      if (late) return this.fail(id, "invalid", late);
-      const result = await this.run(verbs, method.slice("workspace.".length), params as any, auth.expect);
-      if (this.grant !== g) return this.fail(id, "invalid", "the grant changed while this ran"); // (revoked meanwhile: say nothing of what it read)
+      if (!this.current(g, verbs)) return this.fail(id, "invalid", grantProblem(this.grant, this.now()) ?? "the grant changed while this was checked");
+      const result = await this.run(verbs!, method.slice("workspace.".length), params as any, auth.expect);
+      // (after the last wait, before anything is said: the same grant, in force now, or nothing of what it read)
+      if (!this.current(g, verbs)) return this.fail(id, "invalid", "the grant changed or expired while this ran");
       g!.lastUsed = this.now();
       this.reply(id, result);
     } catch (err: any) {
+      // (the same check before any error is said: after a change, nothing more is read or said)
+      if (!this.current(g, verbs)) return this.fail(id, "invalid", "the grant changed or expired while this ran");
       if (err instanceof AgentError) return this.fail(id, err.code, err.message, err.extra);
       const code = typeof err?.code === "string" && ["invalid", "exists", "missing", "conflict", "limit", "storage"].includes(err.code) ? err.code : "invalid";
       const extra: Record<string, unknown> = {};
-      // (an error after the grant changed says nothing more, and reads nothing more)
-      if (this.grant !== g || this.verbs !== verbs || grantProblem(this.grant, this.now())) return this.fail(id, "invalid", "the grant changed while this ran");
       if (code === "conflict" && method === "workspace.write") {
         // (the current contents, if within the content bound: else the conflict is said without them, and why)
-        try { const r = await verbs.read((params as any).path); extra.current = { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, (params as any).path) }; }
+        try { const r = await verbs!.read((params as any).path); extra.current = { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, (params as any).path) }; }
         catch (e2: any) { if (e2 instanceof AgentError && e2.code === "limit") extra.currentOmitted = e2.message; }
+        // (that read was a wait too: checked again before it is said)
+        if (!this.current(g, verbs)) return this.fail(id, "invalid", "the grant changed or expired while this ran");
       }
       this.fail(id, code, String(err?.message ?? err).slice(0, 500), extra);
     } finally {

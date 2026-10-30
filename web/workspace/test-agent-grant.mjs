@@ -64,6 +64,20 @@ ok(SCHEMA_PROBLEM === null, "schema.json's own schema passes the whole-schema ch
 ok(schemaProblem({ type: "object", properties: { optional: { type: "string", format: "email" } }, additionalProperties: false }) !== null, "an unknown keyword under an optional property no request sends is found");
 ok(check({ type: "object", properties: { optional: { type: "string", format: "email" } }, additionalProperties: false }, {}) === null, "(that request alone would pass the per-request check: hence the whole-schema one)");
 ok(schemaProblem({ oneOf: [{ type: "string" }, { type: "object", properties: { x: { type: "string", if: {} } } }] }) !== null, "an unknown keyword in an unused oneOf alternative is found");
+{
+  const wrong = [
+    { maxLength: "1" }, { pattern: 12 }, { minLength: -1 }, { minLength: 1.5 }, { maxLength: Infinity }, { minLength: 3, maxLength: 2 },
+    { minimum: "0" }, { enum: [] }, { enum: [{}] }, { enum: "a" }, { required: ["a", "a"] }, { required: "a" }, { type: ["string"] },
+    { description: 1 }, { $schema: {} }, { properties: [] }, { oneOf: {} },
+  ];
+  for (const w of wrong) {
+    const nested = { type: "object", properties: { deep: { oneOf: [{ type: "string" }, { type: "string", ...w }] } }, additionalProperties: false };
+    ok(schemaProblem(w) !== null && schemaProblem(nested) !== null, `a known keyword with a wrong value is found, alone and nested in an unused alternative: ${JSON.stringify(w)}`);
+  }
+  let threw = 0;
+  for (const w of [{ type: "string", maxLength: "1" }, { type: "string", pattern: 12 }]) { try { check(w, "anything long"); } catch { threw++; } }
+  ok(threw === 2, "check() itself refuses (throws on) maxLength \"1\" and pattern 12 rather than ignoring them");
+}
 ok(schemaProblem({ type: "number" }) !== null && schemaProblem({ type: "object", additionalProperties: true }) !== null && schemaProblem({ oneOf: [] }) !== null && schemaProblem({ pattern: "(" }) !== null, "a type, additionalProperties, empty oneOf or bad pattern it can't keep is found");
 ok(badValue(new Date()) !== null && badValue(Object.create({ x: 1 })) !== null, "an object that isn't plain is refused");
 

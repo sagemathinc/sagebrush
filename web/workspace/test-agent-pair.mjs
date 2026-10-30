@@ -43,6 +43,7 @@ function fakeWs() {
   const files = new Map([["/A/x.txt", "hello"], ["/A/doc.ipynb", { cells: [] }], ["/B/y.txt", "secret"]]);
   const W = { calls: [], actor: null, hang: false, store: new Map(), trash: new Map([["/Trash/z.txt", { path: "/Trash/z.txt", trashed: { from: "/A/z.txt", at: 1, id: "t1" } }]]), trashHold: null, trashCalls: 0, restoreArgs: [], versionBytes: new Uint8Array([1, 2, 3]), conflictOn: new Set() };
   W.trashEntry = async (p) => { W.trashCalls++; const e = W.trash.get(p) ?? null; if (W.trashHold) await W.trashHold; return e; }; // (read, then held: what changes meanwhile happens after authorization saw it)
+  W.holdReads = () => { let r; W.readHold = new Promise((res) => (r = res)); return () => { W.readHold = null; r(); }; };
   W.hold = () => { let r; W.trashHold = new Promise((res) => (r = res)); return () => { W.trashHold = null; r(); }; };
   const entry = (p) => ({ path: p, kind: p.endsWith(".ipynb") ? "notebook" : "file", created: 1, updated: 2, ref: "INTERNAL", fid: "FID" });
   W.verbsFor = (actor) => {
@@ -50,7 +51,7 @@ function fakeWs() {
     const v = {
       list: async (f) => [...files.keys()].filter((p) => p.startsWith(f + "/")).map(entry),
       stat: async (p) => (files.has(p) ? entry(p) : null),
-      read: async (p) => { if (W.hang) await new Promise(() => {}); if (!files.has(p)) throw Object.assign(new Error("no such entry"), { code: "missing" }); return { entry: entry(p), content: files.get(p), rev: 1 }; },
+      read: async (p) => { if (W.hang) await new Promise(() => {}); W.reads = (W.reads ?? 0) + 1; if (W.readHold) await W.readHold; if (!files.has(p)) throw Object.assign(new Error("no such entry"), { code: "missing" }); return { entry: entry(p), content: files.get(p), rev: 1 }; },
       write: async (p, c) => { if (W.conflictOn.has(p)) throw Object.assign(new Error("changed elsewhere"), { code: "conflict" }); files.set(p, c); return { entry: entry(p), rev: 2 }; },
       create: async (p) => { files.set(p, ""); return entry(p); }, mkdir: async (p) => ({ path: p, kind: "folder" }),
       rename: async (a, b) => { files.set(b, files.get(a)); files.delete(a); return entry(b); }, duplicate: async (p) => entry(p),
@@ -301,6 +302,70 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(e7.error?.data?.code === "conflict" && e7.error.data.current?.content?.text === "hello", "a conflict within the bound carries the current contents");
   const e8 = await S.request("workspace.read", { path: "/A/ctl.txt" }, w);
   ok(e8.error?.data?.code === "limit" && /as a message/.test(e8.error.data.message), "an answer whose message would pass 12 MiB (escaping) is refused, not sent");
+  S.srv.stop(true);
+}
+// ---- after the LAST wait, before anything is said: the same grant, in force now
+{
+  const S = server(pairOk), W = fakeWs();
+  let t = 7_000_000;
+  const P = mk(S, W, { code: "x" }, () => t);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: t + 60_000 }, false);
+  const go = W.holdReads();
+  const r = S.request("workspace.read", { path: "/A/x.txt" }, { wait: 3000 });
+  await until(() => W.reads === 1);
+  t += 120_000; // (the grant ends while the read is held)
+  go();
+  const a = await r;
+  ok(a.error?.data?.code === "invalid" && !JSON.stringify(a).includes("hello"), `a read that finishes after the grant expired says nothing of what it read (${a.error?.data?.message})`);
+  S.srv.stop(true);
+}
+{
+  const S = server(pairOk), W = fakeWs(), P = mk(S, W);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  const go = W.holdReads();
+  const r = S.request("workspace.read", { path: "/A/x.txt" }, { wait: 1500 });
+  await until(() => W.reads === 1);
+  await P.revoke();
+  go();
+  const a = await r;
+  ok(!JSON.stringify(a).includes("hello"), "a read that finishes after revoke: its contents never sent");
+  S.srv.stop(true);
+}
+{
+  const S = server(pairOk), W = fakeWs(), P = mk(S, W);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  W.conflictOn.add("/A/x.txt");
+  const go = W.holdReads();
+  const r = S.request("workspace.write", { path: "/A/x.txt", content: { text: "mine" }, base: 1 }, { wait: 3000 });
+  await until(() => W.reads === 1); // (the conflict's recovery read, held)
+  await P.allow({ folders: ["/B"], write: true, expires: null }, false); // (the grant replaced: /A no longer)
+  go();
+  const a = await r;
+  ok(a.error?.data?.code === "invalid" && !JSON.stringify(a).includes("hello") && !("current" in (a.error?.data ?? {})), `a conflict's recovery read that finishes after the grant moved to /B: nothing of /A said (${a.error?.data?.message})`);
+  S.srv.stop(true);
+}
+{
+  const S = server(pairOk), W = fakeWs(), P = mk(S, W);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  W.files.set("/A/ctl.txt", "\u0001".repeat(2.2 * 2 ** 20));
+  W.conflictOn.add("/A/ctl.txt");
+  const a = await S.request("workspace.write", { path: "/A/ctl.txt", content: { text: "x" }, base: 1 }, { wait: 8000 });
+  const bytes = new TextEncoder().encode(JSON.stringify(a)).length;
+  ok(a.error?.data?.code === "conflict" && !("current" in a.error.data) && /frame|bytes/.test(a.error.data.currentOmitted ?? "") && bytes <= 12 * 2 ** 20, `a conflict whose current contents would pass the frame bound (escaping): said without them (${bytes} bytes)`);
+  S.srv.stop(true);
+}
+{
+  const S = server(pairOk), W = fakeWs(), P = mk(S, W);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  W.files.set("/A/big.txt", "\u0001".repeat(2.2 * 2 ** 20));
+  const a = await S.request("workspace.read", { path: "/A/big.txt" }, { wait: 8000 });
+  const bytes = new TextEncoder().encode(JSON.stringify(a)).length;
+  ok(a.error?.data?.code === "limit" && bytes <= 12 * 2 ** 20, `a read whose answer escapes past the frame bound: a limit error, not the frame (${bytes} bytes)`);
   S.srv.stop(true);
 }
 console.log(failures ? `${failures} failed` : "all passed");

@@ -70,10 +70,37 @@ const typeOk = (t: unknown, v: unknown) =>
   : t === "integer" ? typeof v === "number" && Number.isInteger(v)
   : false;
 
-/** Why `v` doesn't pass `s`, or null.  Throws if `s` uses a keyword this checker doesn't know. */
+const count = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+const primitive = (x: unknown) => x === null || typeof x === "string" || typeof x === "boolean" || (typeof x === "number" && Number.isFinite(x));
+
+/** Why the one node `o` (not its children) says something this checker can't keep, or null: a keyword it doesn't
+ * know, or a known keyword whose value has the wrong type or range (maxLength "1" or pattern 12 would otherwise
+ * be a rule silently not kept). */
+function nodeProblem(o: Schema, at: string): string | null {
+  for (const k of Object.keys(o)) if (!KNOWN.has(k)) return `${at}: keyword not understood: ${k}`;
+  if (o.$schema !== undefined && typeof o.$schema !== "string") return `${at}.$schema: not a string`;
+  if (o.description !== undefined && typeof o.description !== "string") return `${at}.description: not a string`;
+  if (o.additionalProperties !== undefined && o.additionalProperties !== false) return `${at}: additionalProperties other than false`;
+  if (o.type !== undefined && !(typeof o.type === "string" && ["object", "string", "boolean", "integer"].includes(o.type))) return `${at}: type ${JSON.stringify(o.type)} not understood`;
+  if (o.properties !== undefined && (!o.properties || typeof o.properties !== "object" || Array.isArray(o.properties))) return `${at}.properties: not an object`;
+  if (o.oneOf !== undefined && (!Array.isArray(o.oneOf) || o.oneOf.length === 0)) return `${at}.oneOf: not a list`;
+  if (o.required !== undefined && !(Array.isArray(o.required) && o.required.every((x) => typeof x === "string") && new Set(o.required).size === o.required.length)) return `${at}.required: not a list of distinct names`;
+  if (o.enum !== undefined && !(Array.isArray(o.enum) && o.enum.length > 0 && o.enum.every(primitive))) return `${at}.enum: not a list of plain values`;
+  if (o.minLength !== undefined && !count(o.minLength)) return `${at}.minLength: not a whole number ≥ 0`;
+  if (o.maxLength !== undefined && !count(o.maxLength)) return `${at}.maxLength: not a whole number ≥ 0`;
+  if (o.minLength !== undefined && o.maxLength !== undefined && (o.minLength as number) > (o.maxLength as number)) return `${at}: minLength over maxLength`;
+  if (o.minimum !== undefined && !(typeof o.minimum === "number" && Number.isFinite(o.minimum))) return `${at}.minimum: not a finite number`;
+  if (o.pattern !== undefined) {
+    if (typeof o.pattern !== "string") return `${at}.pattern: not a string`;
+    try { new RegExp(o.pattern, "u"); } catch { return `${at}.pattern: not a pattern`; }
+  }
+  return null;
+}
+
+/** Why `v` doesn't pass `s`, or null.  Throws if `s` says something this checker can't keep (nodeProblem). */
 export function check(s: Schema, v: unknown, at = "params"): string | null {
-  for (const k of Object.keys(s)) if (!KNOWN.has(k)) throw new Error(`schema keyword not understood: ${k}`);
-  if (s.additionalProperties !== undefined && s.additionalProperties !== false) throw new Error("schema keyword not understood: additionalProperties other than false");
+  const bad = !s || typeof s !== "object" || Array.isArray(s) ? `${at}: not a schema` : nodeProblem(s, at);
+  if (bad) throw new Error(`schema not understood: ${bad}`);
   if (s.oneOf !== undefined) {
     if (!Array.isArray(s.oneOf)) throw new Error("oneOf isn't a list");
     const n = s.oneOf.filter((alt) => check(alt as Schema, v, at) === null).length;
@@ -112,20 +139,14 @@ export function schemaProblem(s: unknown, at = "schema", depth = 0): string | nu
   if (depth > 32) return `${at}: nested too deep`;
   if (!s || typeof s !== "object" || Array.isArray(s)) return `${at}: not a schema`;
   const o = s as Schema;
-  for (const k of Object.keys(o)) if (!KNOWN.has(k)) return `${at}: keyword not understood: ${k}`;
-  if (o.additionalProperties !== undefined && o.additionalProperties !== false) return `${at}: additionalProperties other than false`;
-  if (o.type !== undefined && !["object", "string", "boolean", "integer"].includes(o.type as string)) return `${at}: type ${String(o.type)} not understood`;
+  const bad = nodeProblem(o, at);
+  if (bad) return bad;
   if (o.properties !== undefined) {
-    if (!o.properties || typeof o.properties !== "object" || Array.isArray(o.properties)) return `${at}.properties: not an object`;
     for (const [k, v] of Object.entries(o.properties as object)) { const r = schemaProblem(v, `${at}.properties.${k}`, depth + 1); if (r) return r; }
   }
   if (o.oneOf !== undefined) {
-    if (!Array.isArray(o.oneOf) || o.oneOf.length === 0) return `${at}.oneOf: not a list`;
-    for (let i = 0; i < o.oneOf.length; i++) { const r = schemaProblem(o.oneOf[i], `${at}.oneOf[${i}]`, depth + 1); if (r) return r; }
+    for (let i = 0; i < (o.oneOf as unknown[]).length; i++) { const r = schemaProblem((o.oneOf as unknown[])[i], `${at}.oneOf[${i}]`, depth + 1); if (r) return r; }
   }
-  if (o.required !== undefined && !(Array.isArray(o.required) && o.required.every((x) => typeof x === "string"))) return `${at}.required: not a list of names`;
-  if (o.enum !== undefined && !Array.isArray(o.enum)) return `${at}.enum: not a list`;
-  if (o.pattern !== undefined) { try { new RegExp(String(o.pattern), "u"); } catch { return `${at}.pattern: not a pattern`; } }
   return null;
 }
 /** The whole schema's problem, found once: while there is one, every call is refused (it fails closed). */
