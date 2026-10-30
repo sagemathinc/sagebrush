@@ -155,7 +155,14 @@ class Browser {
   send(method, params = {}) { return new Promise((r) => { const id = ++this.n; this.waiting.set(id, r); this.ws.send(J({ id, method, params })); setTimeout(() => { if (this.waiting.has(id)) { this.waiting.delete(id); r({ error: "timeout " + method }); } }, 30_000); }); }
   async ev(expression) { const r = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r?.exceptionDetails || r?.error) throw new Error(J(r.exceptionDetails?.exception?.description ?? r.exceptionDetails ?? r.error).slice(0, 300)); return r.result?.value; }
   async until(expr, ms = 15_000) { const t = Date.now(); while (Date.now() - t < ms) { if (await this.ev(expr).catch(() => false)) return true; await sleep(150); } return false; }
-  async go(url = ORIGIN + "/") { await this.send("Page.navigate", { url }); await sleep(300); return this.until("!!window.sagebrush?.workspace && document.querySelectorAll('#cells .cell').length > 0", 45_000); }
+  async go(url = ORIGIN + "/") {
+    const nav = await this.send("Page.navigate", { url });
+    await sleep(300);
+    const ok = await this.until("!!window.sagebrush?.workspace && document.querySelectorAll('#cells .cell').length > 0", 45_000);
+    // (a load that doesn't come up: what the page was, said, so a slow or stuck load can be told apart)
+    if (!ok) obs(`${this.name}: the load that didn't come up`, { nav, page: await this.ev(`({ href: location.href, ready: document.readyState, ws: !!window.sagebrush?.workspace, cells: document.querySelectorAll("#cells .cell").length, status: document.querySelector("#status")?.textContent ?? null, title: document.title })`).catch((e) => String(e).slice(0, 200)), errors: this.errors.slice(0, 3) });
+    return ok;
+  }
   syncLine() { return this.ev(`document.querySelector("#wssidebar .fsync")?.textContent ?? null`); }
   codes() { return this.ev(`[...document.querySelectorAll("#cells .cell textarea")].map((t) => t.value)`); }
   has(code) { return `[...document.querySelectorAll("#cells .cell textarea")].some((t) => t.value === ${J(code)})`; }
