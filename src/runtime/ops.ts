@@ -360,6 +360,18 @@ export function binaryDunder(a: any, b: any, op: string): any {
     if (seqRepeats(a)) return seqRepeat(a, b);
     if (seqRepeats(b)) return seqRepeat(b, a);
   }
+  // (then the left operand's sequence concat, if its type keeps the builtin
+  // sequence's __add__, as CPython's PyNumber_Add: what it can't add it
+  // refuses in its own words, naming str, list or tuple, or the bytes
+  // types' own name)
+  if (op === "add" && nativeSeqMethod(a, "__add__")) {
+    const base = seqBase(a)!;
+    if (base === T.bytes || base === T.bytearray) raise(T.TypeError, `can't concat ${tb.$name} to ${ta.$name}`);
+    raise(T.TypeError, `can only concatenate ${base.$name} (not "${tb.$name}") to ${base.$name}`);
+  }
+  // (array.array's, likewise, if its type keeps array's __add__)
+  const arrayType = (T as any).$arrayType;
+  if (op === "add" && arrayType !== undefined && lookupType(ta, "__add__") === lookupType(arrayType, "__add__")) raise(T.TypeError, `can only append array (not "${tb.$name}") to array`);
   raise(T.TypeError, `unsupported operand type(s) for ${sym}: '${ta.$name}' and '${tb.$name}'`);
 }
 // The numeric part of a binary operator: the methods, in CPython's order,
