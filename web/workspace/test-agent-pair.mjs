@@ -334,6 +334,23 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   S.srv.stop(true);
 }
 {
+  // (an error of the page's own, an AgentError, raised after the wait: the same check before it is said)
+  const S = server(pairOk), W = fakeWs();
+  let t = 7_000_000;
+  const P = mk(S, W, { code: "x" }, () => t);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: t + 60_000 }, false);
+  W.files.set("/A/huge.txt", "y".repeat(8 * 2 ** 20 + 1));
+  const go = W.holdReads();
+  const r = S.request("workspace.read", { path: "/A/huge.txt" }, { wait: 3000 });
+  await until(() => W.reads === 1);
+  t += 120_000;
+  go();
+  const a = await r;
+  ok(a.error?.data?.code === "invalid" && /grant changed or expired/.test(a.error.data.message), `an AgentError (over the content bound) raised after the grant expired: the grant's answer, not the error's (${a.error?.data?.code})`);
+  S.srv.stop(true);
+}
+{
   const S = server(pairOk), W = fakeWs(), P = mk(S, W);
   await P.paired();
   await P.allow({ folders: ["/A"], write: true, expires: null }, false);
