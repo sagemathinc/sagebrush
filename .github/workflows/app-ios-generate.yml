@@ -1,0 +1,165 @@
+# Generates the iOS Xcode project (app/src-tauri/gen/apple) with
+# `cargo tauri ios init`, on a macOS runner, and keeps it as an ARTIFACT: this
+# workflow only reads the repository (contents: read) and pushes nothing; a
+# person commits the tree in a normal PR (iOS v0 plan r1b, I-0a; G-iOS-1). The
+# artifact carries a sha256 manifest of every generated file and the versions
+# of every tool, so a reviewer can check the committed tree against it.
+#
+# No secrets, no signing, no upload. Pinned, each failing by name when absent
+# (never a fallback; G-iOS-2, G-iOS-3):
+# - runner macos-15 (arm64, asserted); Xcode 26.2 by path, asserted exactly;
+# - Rust 1.99.0 with the iOS targets (rustup checks the channel's SHA-256);
+# - the Tauri CLI: crate tauri-cli 2.12.4, --locked (as app-mobile.yml);
+# - XcodeGen 2.46.0 (`ios init` runs it): its release zip, by sha256.
+# `ios init` installs any of xcodegen, libimobiledevice (idevicesyslog) and
+# cocoapods (pod) it doesn't find, with Homebrew or gem. Nothing may be
+# installed that way here: XcodeGen comes pinned (above), CocoaPods is the
+# image's own (asserted), libimobiledevice is only for streaming a physical
+# device's log and gets a stub that refuses, and `brew` and `gem` are wrapped
+# so that any install/update REFUSES and fails the job (named).
+#
+# It runs by hand (workflow_dispatch) and on a PR that changes this file (so
+# the PR adding it produces the first artifact); it is never a required check.
+name: app-ios-generate
+
+on:
+  pull_request:
+    paths: [".github/workflows/app-ios-generate.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-ios-generate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    if: github.repository == 'sagemathinc/sagebrush'
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      XCODE_APP: /Applications/Xcode_26.2.app
+      XCODE_VERSION: "Xcode 26.2"
+      TAURI_CLI_VERSION: 2.12.4
+      XCODEGEN_VERSION: 2.46.0
+      XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: the runner, Xcode 26.2 and CocoaPods (the image's own)
+        run: |
+          set -euo pipefail
+          echo "runner image: ${ImageOS:-?} ${ImageVersion:-?}"
+          arch=$(uname -m)
+          [ "$arch" = arm64 ] || { echo "FAIL: the runner is '$arch', not arm64"; exit 1; }
+          [ -d "$XCODE_APP" ] || { echo "FAIL: $XCODE_APP is not on this runner image:"; ls -d /Applications/Xcode*; exit 1; }
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version | tee "$RUNNER_TEMP/xcodebuild-version.txt"
+          got=$(head -1 "$RUNNER_TEMP/xcodebuild-version.txt")
+          [ "$got" = "$XCODE_VERSION" ] || { echo "FAIL: xcodebuild says '$got', not '$XCODE_VERSION'"; exit 1; }
+          command -v pod > /dev/null || { echo "FAIL: no CocoaPods (pod) on this runner image"; exit 1; }
+          echo "pod $(pod --version)"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # branch master
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+      - name: the Tauri CLI (crate tauri-cli ${{ env.TAURI_CLI_VERSION }}, --locked)
+        run: |
+          cargo install tauri-cli --version "=$TAURI_CLI_VERSION" --locked
+          cargo tauri --version
+      - name: XcodeGen ${{ env.XCODEGEN_VERSION }} (its release zip, by sha256)
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/xcodegen-dl"; x="$RUNNER_TEMP/xcodegen"
+          mkdir "$d" "$x"
+          curl -fsSL --retry 3 -o "$d/xcodegen.zip" "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          echo "$XCODEGEN_SHA256  $d/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$d/xcodegen.zip" -d "$x"
+          "$x/xcodegen/bin/xcodegen" --version | tee "$RUNNER_TEMP/xcodegen-version.txt"
+          grep -q "$XCODEGEN_VERSION" "$RUNNER_TEMP/xcodegen-version.txt" || { echo "FAIL: not XcodeGen $XCODEGEN_VERSION"; exit 1; }
+          echo "$x/xcodegen/bin" >> "$GITHUB_PATH"
+      # (ahead of everything on PATH: brew and gem refuse to install or
+      # update anything, and log every call; idevicesyslog is a stub)
+      - name: no Homebrew or gem installs (wrappers), and the libimobiledevice stub
+        run: |
+          set -euo pipefail
+          g="$RUNNER_TEMP/guard"; mkdir "$g"
+          real_brew=$(command -v brew); real_gem=$(command -v gem)
+          for tool in brew gem; do
+            real=$real_brew; [ "$tool" = gem ] && real=$real_gem
+            cat > "$g/$tool" <<EOF
+          #!/bin/bash
+          echo "$tool \$*" >> "$RUNNER_TEMP/guard-calls.txt"
+          case "\${1:-}" in
+            install|reinstall|upgrade|update|tap|bundle|uninstall)
+              echo "app-ios-generate: REFUSED: $tool \$* (nothing is installed here; see the workflow's header)" >&2
+              echo "$tool \$*" >> "$RUNNER_TEMP/guard-refused.txt"
+              exit 1;;
+          esac
+          exec "$real" "\$@"
+          EOF
+            chmod 0755 "$g/$tool"
+          done
+          printf '%s\n' '#!/bin/bash' 'echo "idevicesyslog: a stub in app-ios-generate (no physical devices here)" >&2' 'exit 1' > "$g/idevicesyslog"
+          chmod 0755 "$g/idevicesyslog"
+          echo "$g" >> "$GITHUB_PATH"
+      - name: cargo tauri ios init
+        working-directory: app/src-tauri
+        run: |
+          set -euo pipefail
+          [ "$(command -v brew)" = "$RUNNER_TEMP/guard/brew" ] || { echo "FAIL: the brew wrapper is not first on PATH"; exit 1; }
+          [ ! -e gen/apple ] || { echo "FAIL: gen/apple exists already; this generates it from nothing"; exit 1; }
+          cargo tauri ios init --ci --skip-targets-install
+          [ ! -s "$RUNNER_TEMP/guard-refused.txt" ] || { echo "FAIL: ios init tried to install:"; cat "$RUNNER_TEMP/guard-refused.txt"; exit 1; }
+          echo "--- brew/gem calls (read-only)"; cat "$RUNNER_TEMP/guard-calls.txt" 2>/dev/null || echo "(none)"
+          test -f gen/apple/project.yml
+      # (into a scratch directory: `tauri icon` would otherwise rewrite the
+      # desktop icons; the PR that commits the tree places the iOS ones)
+      - name: the iOS icons (scratch output; the source is icons/icon.png)
+        working-directory: app/src-tauri
+        run: |
+          set -euo pipefail
+          sips -g pixelWidth -g pixelHeight -g hasAlpha icons/icon.png
+          cargo tauri icon icons/icon.png --ios-color '#ffffff' -o "$RUNNER_TEMP/out/icons"
+          find "$RUNNER_TEMP/out/icons" -type f | sort
+      - name: the manifest, the versions and what else init changed
+        run: |
+          set -euo pipefail
+          o="$RUNNER_TEMP/out"; mkdir -p "$o"
+          cp -R app/src-tauri/gen/apple "$o/apple"
+          (cd "$o/apple" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do shasum -a 256 "$f"; done) > "$o/apple-manifest.sha256"
+          wc -l < "$o/apple-manifest.sha256"
+          {
+            echo "runner image: ${ImageOS:-?} ${ImageVersion:-?}"
+            cat "$RUNNER_TEMP/xcodebuild-version.txt"
+            rustc --version; cargo --version; cargo tauri --version
+            echo "xcodegen $(cat "$RUNNER_TEMP/xcodegen-version.txt")"
+            echo "pod $(pod --version)"
+            echo "commit $GITHUB_SHA"
+          } > "$o/versions.txt"
+          cat "$o/versions.txt"
+          git status --porcelain --untracked-files=all -- . ':(exclude)app/src-tauri/gen/apple' > "$o/other-changes.txt"
+          git diff -- . ':(exclude)app/src-tauri/gen/apple' > "$o/other-changes.diff"
+          echo "--- changed outside gen/apple:"; cat "$o/other-changes.txt"
+          # (the App Store's 1024 px icon must have no alpha channel)
+          n=0
+          while IFS= read -r f; do
+            w=$(sips -g pixelWidth "$f" | awk '/pixelWidth/ {print $2}')
+            [ "$w" = 1024 ] || continue
+            n=$((n + 1)); a=$(sips -g hasAlpha "$f" | awk '/hasAlpha/ {print $2}')
+            echo "1024 px: $f hasAlpha=$a"
+            [ "$a" = no ] || { echo "FAIL: $f has an alpha channel"; exit 1; }
+          done < <(find "$o/icons/ios" -name '*.png' -type f | LC_ALL=C sort)
+          [ "$n" -ge 1 ] || { echo "FAIL: no 1024 px iOS icon in $o/icons/ios"; exit 1; }
+          {
+            echo "### iOS project generated (not committed)"
+            echo '```'; cat "$o/versions.txt"; echo '```'
+            echo "files in gen/apple: $(wc -l < "$o/apple-manifest.sha256"); changed outside it: $(wc -l < "$o/other-changes.txt")"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-gen-apple
+          path: ${{ runner.temp }}/out
+          if-no-files-found: error
