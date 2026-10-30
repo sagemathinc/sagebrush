@@ -74,6 +74,14 @@ checks the file Python wrote and saves the notebook. The app prints the
 report and exits. CI (`.github/workflows/app.yml`) builds the app and runs
 this self-test on macOS, Linux (under xvfb) and Windows.
 
+On Android, a debug build runs the same notebook when it finds it in the
+app's own files directory (`files/selftest/`, put there with `adb shell
+run-as`), and writes its report next to it:
+`bash app/selftest/android-selftest.sh <the debug APK>` does this on a
+connected emulator or device, and
+`.github/workflows/app-mobile-selftest.yml` runs it on an emulator (it
+reports whether the page is cross-origin isolated in Android's WebView).
+
 ## Next
 
 - Signing: an Apple Developer ID with notarization, and Windows code signing.

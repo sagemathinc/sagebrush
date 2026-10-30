@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "DEV sync bug #4, the board page (web/board/page.ts, embedded in the CLI bundle): a board that can't be written in this tab (its content not here yet, or its journal not opened at load) says so with Back to files and no Edit, and never holds the page; only an unkept edit does. Measured locally with CI's bun 1.4.4: master be246b80 against this branch's merge bb86917e, cli/pyjs.cjs +632 B; marker with headroom for the engine wasm's base64 rounding.",
+  "bytes": {
+    "cli/pyjs.cjs": 720
+  }
+}
