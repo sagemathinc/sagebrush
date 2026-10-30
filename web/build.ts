@@ -196,8 +196,9 @@ for (const r of [result, consoleResult, mathResult, graphResult, notebookResult,
 // Every LaTeX-owned output is named sagebrush-latex* (the deploy's PROD check relies on that name).
 for (const f of readdirSync(join(here, "dist"))) if (f.startsWith("sagebrush-latex")) rmSync(join(here, "dist", f));
 if (LATEX) {
-  // (the comments, comments.ts: a chunk of their own, fetched only when someone comments or a document has comments)
-  for (const [entry, name] of [["page.ts", "sagebrush-latex.js"], ["worker.ts", "sagebrush-latex-worker.js"], ["comments.ts", "sagebrush-latex-comments.js"]]) {
+  // (the comments, comments.ts: a chunk of their own, fetched only when someone comments or a document has comments;
+  // a document's live comments, comments-doc.ts with their core, another, so the frozen text's chunk stays small)
+  for (const [entry, name] of [["page.ts", "sagebrush-latex.js"], ["worker.ts", "sagebrush-latex-worker.js"], ["comments.ts", "sagebrush-latex-comments.js"], ["comments-doc.ts", "sagebrush-latex-comments-doc.js"]]) {
     const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "latex", entry)], outdir: join(here, "dist"), naming: name, target: "browser", format: "esm", minify: true, define: LATEX_DEFINE });
     builds.push([`the LaTeX editor (${name})`, r]);
     if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
@@ -475,6 +476,27 @@ if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_QUESTIONS === "1
   mkdirSync(join(here, "dist", "questions"), { recursive: true });
   copyFileSync(join(here, "questions", "index.html"), join(here, "dist", "questions", "index.html"));
 }
+// the terminal's module (plan-bash-shell r8c step 6, web/shell/terminal.ts): loaded by the notebook page only when
+// its ⋯ ▸ Terminal is first opened, so the page carries none of the shell's host, loader or panel
+{
+  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "shell", "terminal.ts")], outdir: join(here, "dist", "shell"), naming: "terminal.js", target: "browser", format: "esm", minify: true });
+  builds.push(["the terminal (shell/terminal.js)", r]);
+  if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
+  if (hasSite) copyFileSync(join(here, "dist", "shell", "terminal.js"), join(siteDir, "public", "shell", "terminal.js"));
+}
+// the terminal panel's preview (plan-bash-shell r8c step 6, web/shell/panel.ts): a hosted preview serves no pkgset/
+// or pkg/, so its build carries the bash package set itself (scripts/optional-packages.mjs, the same build the
+// optional tier publishes) and names it in shell/preview-set.json.  Flagged like the questions preview: only for a
+// hosted preview or with SAGEBRUSH_TERMINAL=1; removed otherwise, so a flagged build's set never outlives it.
+for (const d of ["pkg", "pkgset", "pkgmeta"]) rmSync(join(here, "dist", d), { recursive: true, force: true });
+rmSync(join(here, "dist", "shell", "preview-set.json"), { force: true });
+if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_TERMINAL === "1") {
+  const { execFileSync } = await import("node:child_process");
+  const S = execFileSync("node", [join(here, "..", "scripts", "optional-packages.mjs"), "build", "--out", join(here, "dist"), "bash"], { encoding: "utf8" }).trim().split("\n").pop()!;
+  if (!/^[0-9a-f]{64}$/.test(S)) throw new Error(`the terminal preview's package set: not an id: ${JSON.stringify(S)}`);
+  mkdirSync(join(here, "dist", "shell"), { recursive: true });
+  writeFileSync(join(here, "dist", "shell", "preview-set.json"), JSON.stringify({ S }) + "\n");
+}
 if (hasSite) mkdirSync(join(siteDir, "public", "embed"), { recursive: true });
 if (hasSite) mkdirSync(join(siteDir, "public", "runner"), { recursive: true });
 // the shared collection page, served for /s/<id> by the site's Worker
@@ -487,7 +509,7 @@ for (const f of ["index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "ll
   if (hasSite) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the LaTeX editor's files, in a LaTeX build only; a stale copy from an earlier one is removed either way)
 if (hasSite) for (const f of readdirSync(join(siteDir, "public"))) if (f.startsWith("sagebrush-latex")) rmSync(join(siteDir, "public", f));
-if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js"]) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
+if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js"]) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the library's chunks)
 if (hasSite) rmSync(join(siteDir, "public", "lib"), { recursive: true, force: true });
 if (hasSite) cpSync(join(here, "dist", "lib"), join(siteDir, "public", "lib"), { recursive: true });
