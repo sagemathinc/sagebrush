@@ -77,12 +77,13 @@ const literals = ["NaN", "Infinity", "-Infinity", "1e-7", "1.0", "1e21", "1E+2",
   .map((x) => plain.replace("{", `{"x":${x},`));
 literals.push(file.replace('"rev": 1', '"rev": 1.0'), file.replace('"rev": 0', '"rev": 0e0'), file.replace('"rev": 0', '"rev": 0.5'), file.replace('"start": ', '"start": 1e0 * '));
 // (the version a number equal to 1 only; JavaScript's property order, array indices first, in the text, the snapshot
-//  and the file; the format's types where merge and list rely on them; null fields read as JavaScript reads them)
+//  and the file, long digit keys included; the format's types where merge, list and resolve rely on them)
 const edit = (f) => { const d = JSON.parse(file); f(d); return JSON.stringify(d); };
 literals.push(...["true", '"1"', "null", "1.0", "[1]", "2"].map((v) => plain.replace('"version":1', `"version":${v}`)));
 literals.push(plain.replace("{", '{"x":{"b":1,"2":"two","1":"one","01":"lead","4294967295":"max","4294967294":"last","-1":"neg","1.5":"frac","a":{"10":0,"9":1}},'));
 for (const f of [
-  (d) => { d.threads[0].anchor.value.quote = null; d.threads[0].anchor.value.prefix = null; },
+  (d) => { d.threads[0].anchor.value.quote = null; }, (d) => { delete d.threads[0].anchor.value.prefix; }, (d) => { d.threads[0].anchor.value.suffix = 5; },
+  (d) => { d.threads[0].x = { ["9".repeat(5000)]: 1, ["1".repeat(11)]: 2, "4294967296": 3, "7": 4 }; },
   (d) => { d.threads.push(null); }, (d) => { d.threads.push(5); }, (d) => { d.threads.push([]); },
   (d) => { d.threads[0].messages.push(null); }, (d) => { d.threads[0].messages.push([]); }, (d) => { d.threads[0].messages = "abc"; },
   (d) => { delete d.threads[0].created; }, (d) => { d.threads[0].created = 5; }, (d) => { delete d.threads[0].messages[0].time; },

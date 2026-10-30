@@ -98,7 +98,7 @@ function checkAnchor(a) {
   if (!a || typeof a !== "object") fail("invalid", "anchor");
   for (const k of ["start", "end"]) if (!Number.isInteger(a[k]) || a[k] < 0) fail("invalid", "anchor." + k);
   if (a.end < a.start) fail("invalid", "anchor.end < start");
-  str(a.quote ?? "", LIMITS.quoteFull, "anchor.quote"); str(a.prefix ?? "", LIMITS.context, "anchor.prefix"); str(a.suffix ?? "", LIMITS.context, "anchor.suffix");
+  str(a.quote, LIMITS.quoteFull, "anchor.quote"); str(a.prefix, LIMITS.context, "anchor.prefix"); str(a.suffix, LIMITS.context, "anchor.suffix");
   if (a.tail !== undefined) { str(a.tail, LIMITS.quoteHead, "anchor.tail"); if (!Number.isInteger(a.length) || typeof a.sha !== "string") fail("invalid", "a long anchor needs length and sha"); }
   if (a.shown !== undefined) str(a.shown, LIMITS.shown, "anchor.shown");
 }

@@ -365,7 +365,7 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
   // (the fields merge and list rely on, of the format's types; a thread or message not an object: invalid, not a crash)
   const bad = (f) => { const x = structuredClone(d); f(x); const e = throws(() => C.parse(JSON.stringify(x))); return e?.code === "invalid" && e instanceof C.CommentsError; };
   check("format-types-refused", [(x) => { delete x.threads[0].created; }, (x) => { x.threads[0].messages[0].time = 5; }, (x) => { x.threads[0].deleted.value = 0; },
-    (x) => { x.threads[0].resolved.value = []; }, (x) => { x.threads[0].messages[0].deleted.value = "no"; }, (x) => { x.threads.push(null); }, (x) => { x.threads[0].messages.push(null); }].every(bad));
+    (x) => { x.threads[0].resolved.value = []; }, (x) => { x.threads[0].messages[0].deleted.value = "no"; }, (x) => { x.threads.push(null); }, (x) => { x.threads[0].messages.push(null); }, (x) => { x.threads[0].anchor.value.quote = null; }, (x) => { delete x.threads[0].anchor.value.prefix; }].every(bad));
   check("format-round-trip", canon(C.parse(C.serialize(d))) === canon(d));
   check("locate-ambiguous-quote", throws(() => C.locateSpan(TEX + "even.", { quote: "even." }))?.code === "ambiguous");
   check("locate-occurrence", C.locateSpan(TEX, { quote: "is even.", occurrence: 2 }).start === TEX.lastIndexOf("is even."));
