@@ -32,7 +32,12 @@ grep -q Success /tmp/adb-install.log || { cat /tmp/adb-install.log; fail "adb in
 
 adb shell run-as "$PKG" mkdir -p files/selftest || fail "run-as mkdir (is the APK debuggable?)"
 for f in selftest.ipynb data.csv; do
-  adb exec-in run-as "$PKG" sh -c "cat > files/selftest/$f" < "$HERE/$f" || fail "run-as copy of $f"
+  # adb joins its arguments into one device-shell line, so a "cat > file" piped
+  # through run-as gets its redirect applied by the shell user (first attempt:
+  # 0 bytes). Push to the world-readable /data/local/tmp, then copy as the app.
+  adb push "$HERE/$f" "/data/local/tmp/sagebrush-$f" > /dev/null || fail "adb push of $f"
+  adb shell run-as "$PKG" cp "/data/local/tmp/sagebrush-$f" "files/selftest/$f" || fail "run-as copy of $f"
+  adb shell rm -f "/data/local/tmp/sagebrush-$f"
   want=$(wc -c < "$HERE/$f" | tr -d ' ')
   got=$(adb shell run-as "$PKG" wc -c "files/selftest/$f" | tr -d '\r' | awk '{print $1}')
   [ "$got" = "$want" ] || fail "run-as copy of $f: $got bytes in the app, $want here"
