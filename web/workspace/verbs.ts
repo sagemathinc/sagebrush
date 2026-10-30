@@ -57,8 +57,12 @@ export function schema() {
 }
 export const schemaText = () => JSON.stringify(schema(), null, 2) + "\n";
 
-if (typeof process !== "undefined" && process.argv?.includes("--write") && import.meta.main) {
-  const { writeFileSync } = await import("node:fs");
-  writeFileSync(new URL("./schema.json", import.meta.url), schemaText());
-  console.log("wrote web/workspace/schema.json");
+// (only when run itself, `bun web/workspace/verbs.ts --write`: without import.meta or a top-level await, so this
+// file also type-checks where the page's agent modules are checked, tsconfig.web.json)
+const run = typeof process !== "undefined" ? process.argv?.[1] ?? "" : "";
+if (/(^|[\\/])verbs\.ts$/.test(run) && process.argv.includes("--write")) {
+  void import("node:fs").then(({ writeFileSync }) => {
+    writeFileSync(run.replace(/verbs\.ts$/, "schema.json"), schemaText());
+    console.log("wrote web/workspace/schema.json");
+  });
 }

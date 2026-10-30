@@ -535,6 +535,11 @@ jobs:
           CHROME=google-chrome node web/test-board-open.mjs
           CHROME=google-chrome node web/notebook/test-render-contain.mjs
           CHROME=google-chrome bun web/workspace/test-workspace.mjs
+          # (a paired agent: its calls checked against schema.json and the person's grant, the page's connection against
+          # a fake server, and end to end against the real pairing server, engine/py's pairing.py, through the page's UI)
+          bun web/workspace/test-agent-grant.mjs
+          bun web/workspace/test-agent-pair.mjs
+          CHROME=google-chrome bun web/workspace/test-agent-e2e.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-admit.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash-v4.mjs
