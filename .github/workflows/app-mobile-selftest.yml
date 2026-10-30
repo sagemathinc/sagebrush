@@ -147,7 +147,10 @@ jobs:
           emulator-boot-timeout: 600
           disable-animations: true
           # (one line: the action runs each line of `script` as its own shell)
-          script: bash app/selftest/android-selftest.sh "${{ steps.apk.outputs.path }}" "$GITHUB_STEP_SUMMARY"
+          # (android-image-info.sh first: the booted image must be API 34, and the
+          # summary records its revision and "WebView <ver>: current|old against
+          # threshold 145")
+          script: bash app/selftest/android-image-info.sh 34 "$GITHUB_STEP_SUMMARY" && bash app/selftest/android-selftest.sh "${{ steps.apk.outputs.path }}" "$GITHUB_STEP_SUMMARY"
 
   # The RELEASE APK (x86_64, for the emulator) starts: R8 or LTO removing
   # something reached only through JNI or reflection crashes it, which the
