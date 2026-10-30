@@ -98,18 +98,23 @@ try {
     // network connections; a module from this origin is still allowed (script-src 'self')
     const wsess = [...workers].find(([u]) => u === `http://127.0.0.1:${port}/shell/worker-boot.js`)?.[1];
     const probe = wsess && (await send("Runtime.evaluate", { awaitPromise: true, returnByValue: true, expression: `(async () => {
-      const seen = [];
-      self.addEventListener("securitypolicyviolation", (e) => seen.push(e.effectiveDirective));
+      const seen = [], onViolation = (e) => seen.push(e.effectiveDirective);
+      self.addEventListener("securitypolicyviolation", onViolation);
       const own = await fetch(location.origin + "/index.html", { cache: "no-store" }).then((r) => "fetched " + r.status, (e) => "refused");
       const other = await fetch("http://localhost:${port}/index.html", { mode: "no-cors", cache: "no-store" }).then((r) => "fetched", (e) => "refused");
       const mod = await import("http://localhost:${port}/shell/worker-boot.js").then(() => "imported", (e) => "refused");
       let worker;
+      const blob = URL.createObjectURL(new Blob(["postMessage(1)"], { type: "text/javascript" }));
       try {
-        const w = new Worker(URL.createObjectURL(new Blob(["postMessage(1)"], { type: "text/javascript" })));
-        worker = await new Promise((r) => { w.onmessage = () => r("ran"); w.onerror = () => r("refused"); setTimeout(() => r("no answer"), 5000); });
+        const w = new Worker(blob);
+        let timer;
+        worker = await new Promise((r) => { w.onmessage = () => r("ran"); w.onerror = () => r("refused"); timer = setTimeout(() => r("no answer"), 5000); });
+        clearTimeout(timer);
         w.terminate();
       } catch (e) { worker = "refused " + e.name; }
+      URL.revokeObjectURL(blob);
       await new Promise((r) => setTimeout(r, 500));
+      self.removeEventListener("securitypolicyviolation", onViolation);
       return { own, other, mod, worker, seen: seen.sort() };
     })()` }, wsess))?.result?.result?.value;
     check(!!probe && probe.own === "refused" && probe.other === "refused" && probe.mod === "refused" && /^refused/.test(probe.worker) &&

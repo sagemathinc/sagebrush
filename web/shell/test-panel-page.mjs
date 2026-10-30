@@ -450,6 +450,46 @@ try {
   const sheet = await evaluate(`(() => { const r = document.querySelector(".sb-term").getBoundingClientRect(); return { top: r.top, h: r.height, ih: innerHeight }; })()`);
   check(sheet && sheet.top <= 1 && sheet.h >= sheet.ih * 0.85, `under 700 px the dock is a full-height sheet: ${JSON.stringify(sheet)}`);
   await send("Emulation.clearDeviceMetricsOverride");
+  // ---- the ⋯ and File menus' last entries, pressable by a real hit test (board's B380-1..3): above the dock (the
+  // menus' z-index over the dock's), clear of what is fixed at the window's foot above them (the alpha notice and
+  // the preview gutter laid out at the start), and not shortened by what is below them (the console)
+  const MENUS = [["#morebtn", "#moremenu"], ["#filebtn", "#filemenu"]];
+  const lastEntry = async (btn, menu) => {
+    await evaluate(`scrollTo(0, 0), document.querySelector("${menu}").hidden && document.querySelector("${btn}").click(), 1`);
+    await new Promise((res) => setTimeout(res, 200));
+    const m = await evaluate(`(() => {
+      const m = document.querySelector("${menu}"), items = [...m.querySelectorAll("button:not([hidden]), a:not([hidden])")], l = items.at(-1);
+      l.scrollIntoView({ block: "nearest" });
+      const r = l.getBoundingClientRect(), at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return { open: !m.hidden, pressable: !!at && (at === l || l.contains(at)), at: at && (at.id || at.className || at.tagName), scrolls: m.scrollHeight > m.clientHeight + 1,
+        bottom: Math.round(m.getBoundingClientRect().bottom), h: innerHeight, dock: Math.round(document.querySelector(".sb-term:not([hidden])")?.getBoundingClientRect().top ?? -1) };
+    })()`);
+    await evaluate(`document.querySelector("${menu}").hidden || document.querySelector("${btn}").click(), 1`);
+    return m;
+  };
+  for (const [btn, menu] of MENUS) {
+    const m = await lastEntry(btn, menu);
+    // (above the dock, not shortened by it: whole, or reaching over the dock's top)
+    check(m?.open && m.pressable && m.dock > 0 && (!m.scrolls || m.bottom > m.dock),
+      `B380-2: the dock open, ${menu} is above it, not shortened by it, its last entry pressable: ${JSON.stringify(m)}`);
+  }
+  await evaluate(`document.querySelector(".sb-term-hide").click()`);
+  await send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 420, deviceScaleFactor: 1, mobile: false });
+  await new Promise((res) => setTimeout(res, 300));
+  for (const [btn, menu] of MENUS) {
+    const m = await lastEntry(btn, menu);
+    check(m?.open && m.pressable && m.bottom <= m.h, `B380-3: in a 420 px window, ${menu}'s last entry is clear of the foot's notices, pressable: ${JSON.stringify(m)}`);
+  }
+  await send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false });
+  await evaluate(`document.querySelector("#consolebtn").click()`);
+  await until(`!document.querySelector("#console").hidden`, 5000);
+  for (const [btn, menu] of MENUS) {
+    const m = await lastEntry(btn, menu);
+    check(m?.open && m.pressable && !m.scrolls, `B380-1: at 800 px with the console open, ${menu} fits whole (the console is below it), its last entry pressable: ${JSON.stringify(m)}`);
+  }
+  await evaluate(`document.querySelector("#consolebtn").click()`);
+  await send("Emulation.clearDeviceMetricsOverride");
+  await evaluate(`document.querySelector("#termbtn").click()`);
   // ---- the board page's dock (TP-5, #326's deferral; plan E5.1: "the notebook page and the board page"): ⋯ ▸ Terminal
   // there too, placed as on the notebook page (above the bottom overlays, the board ending above it, hide and ✕, the
   // sheet under 700 px), with ps listing the board

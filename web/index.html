@@ -129,7 +129,7 @@
   #opendlg li .open { flex: 1; text-align: left; display: flex; justify-content: space-between; gap: 12px; }
   #opendlg li .when { color: var(--muted); font-size: 12px; }
   #opendlg li.current .open { border-color: var(--accent); }
-  .menu { position: absolute; z-index: 10; min-width: 210px; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+  .menu { position: absolute; z-index: 41; min-width: 210px; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
   .menu button, .menu a { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 18px; border: 0; border-radius: 5px; background: none; padding: 5px 10px; text-align: left; font-size: 14px; color: var(--fg); text-decoration: none; }
   .menu button:hover, .menu button:focus, .menu a:hover, .menu a:focus { background: var(--code); outline: none; }
   .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
@@ -2201,19 +2201,33 @@ function menuOf(btn, menu) {
   };
   // (fixed, as its button is in the toolbar that stays in view: kept under it
   // as the page scrolls or the window changes, and no taller than the window
-  // leaves, scrolling within itself, astra's UI-CA2-2), above what is fixed at
-  // the window's foot: the alpha notice and a preview host's notice gutter (the
-  // ⋯ menu's last entry went under the alpha notice in a 420 px window once
-  // the Terminal made it an entry longer, #358)
+  // leaves, scrolling within itself, astra's UI-CA2-2), and clear of what is
+  // fixed at the window's foot ABOVE the menus: the alpha notice and a preview
+  // host's notice gutter (the ⋯ menu's last entry went under the alpha notice
+  // in a 420 px window once the Terminal made it an entry longer, #358).  The
+  // menus are above the console and the terminal's dock (z-index 41 > the
+  // dock's 40), so those take no height from them (board's B380-1/2)
   const place = () => {
     const r = btn.getBoundingClientRect();
-    // (what is fixed at the foot, under the window's bottom middle; not named here: build-cli strips the alpha
-    // notice by its name and refuses the page if the name is left anywhere else)
-    const foot = Math.max(0, ...document.elementsFromPoint(innerWidth / 2, innerHeight - 1)
-      .filter((e) => e !== menu && !menu.contains(e) && getComputedStyle(e).position === "fixed").map((e) => innerHeight - e.getBoundingClientRect().top));
+    // (what is fixed at the foot and painted above the menu, stacked: from the window's bottom middle up, each one's
+    // top, then what is just above it; a preview host lifts the alpha notice above its own.  Not named here:
+    // build-cli strips the alpha notice by its name and refuses the page if the name is left anywhere else)
+    const z = (e) => parseInt(getComputedStyle(e).zIndex) || 0;
+    let foot = 0;
+    for (let y = innerHeight - 1, i = 0; i < 4 && y > 0; i++) {
+      const top = Math.min(...document.elementsFromPoint(innerWidth / 2, y)
+        .filter((e) => e !== menu && !menu.contains(e) && getComputedStyle(e).position === "fixed" && z(e) > z(menu)).map((e) => e.getBoundingClientRect().top));
+      if (!(top <= y)) break;
+      foot = innerHeight - top;
+      y = top - 1;
+    }
+    // (under its button; above it instead when less than 120 px is left below and more is above: a short window
+    // with the toolbar low, which a floor of 120 px would have put over the foot's notices)
+    const below = innerHeight - r.bottom - 12 - foot, up = below < 120 && r.top - 12 > below;
     menu.style.position = "fixed";
-    menu.style.top = `${r.bottom + 4}px`;
-    menu.style.maxHeight = `${Math.max(120, innerHeight - r.bottom - 12 - foot)}px`;
+    menu.style.top = up ? "" : `${r.bottom + 4}px`;
+    menu.style.bottom = up ? `${innerHeight - r.top + 4}px` : "";
+    menu.style.maxHeight = `${up ? r.top - 12 : Math.max(120, below)}px`;
     menu.style.overflowY = "auto";
     menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
   };
