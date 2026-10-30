@@ -1078,7 +1078,8 @@ async function localTakeover() {
 // ---- the fixtures (run when named: FIXTURE=… / WIDE=…): maximum-width trees, measured and asserted
 
 const DEFAULTS = { ...W.D11 };
-/** `f` measured: its time, its longest task (Long Tasks API), the heap's growth over its start (sampled every 5 ms). */
+/** `f` measured: its time, its longest task (Long Tasks API) with how many there were and the three longest, the heap's
+ * growth over its start (sampled every 5 ms). */
 async function measured(f) {
   globalThis.gc?.();
   await sleep(200);
@@ -1095,7 +1096,13 @@ async function measured(f) {
     clearInterval(sampler);
     obs.disconnect();
   }
-  return { out, ms: Math.round(performance.now() - t0), longestTaskMs: Math.round(Math.max(0, ...longs)), heapMiB: +((heapMax - heap0) / 2 ** 20).toFixed(1) };
+  const top = longs.map(Math.round).sort((a, b) => b - a).slice(0, 3);
+  return { out, ms: Math.round(performance.now() - t0), longestTaskMs: Math.round(Math.max(0, ...longs)), longTasks: { count: longs.length, top }, heapMiB: +((heapMax - heap0) / 2 ** 20).toFixed(1) };
+}
+/** A measurement's long tasks, for a check's text: one sample, so a single spike shows as one. */
+function longsOf(m) {
+  const { count, top } = m.longTasks;
+  return count ? `${count} long task${count === 1 ? "" : "s"}, the longest ${J(top)} ms` : "no long task";
 }
 async function seedRows(db, store, values, n = 20_000) {
   for (let i = 0; i < values.length; i += n) await new Promise((ok, no) => { const tx = db.transaction(store, "readwrite"), st = tx.objectStore(store); for (const v of values.slice(i, i + n)) st.put(v); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
@@ -1139,7 +1146,7 @@ async function fixtureLocal(wide) {
   const what = `the workspace's own move of ${n} ${wide ? "maximum-width " : ""}entries`;
   check(!m.out && moved === n - 1, `${what}: all moved, the record drained (${moved})`);
   check(m.heapMiB < 256, `${what}: heap growth ${m.heapMiB} MiB (under 256 MiB)`);
-  check(m.longestTaskMs < 50, `${what}: longest task ${m.longestTaskMs} ms (under 50 ms)`);
+  check(m.longestTaskMs < 50, `${what}: longest task ${m.longestTaskMs} ms (under 50 ms; one sample: ${longsOf(m)})`);
   check(m.ms <= 300_000, `${what}: rewritten in ${Math.round(m.ms / 1000)} s (at most 300 s)`);
   check(true, `fixture figures (local${wide ? ", wide" : ""}): ` + J({ entries: n, publishMs: Math.round(published), totalMs: m.ms, longestTaskMs: m.longestTaskMs, heapGrowthMiB: m.heapMiB }));
   w.close();
@@ -1177,7 +1184,7 @@ async function fixtureConfirmed(wide, kind = "rename") {
   const what = `a server's ${forget ? "forget" : "move"} of ${n} ${wide ? "maximum-width " : ""}entries`;
   check((forget ? moved === 0 && !(await w.stat("/big")) : moved === n - 1) && !(await W.replayOf(w, ns)), `${what}: its view applied here, nothing pending (${moved} left under ${at})`);
   check(m.heapMiB < 256, `${what}: heap growth ${m.heapMiB} MiB (under 256 MiB)`);
-  check(m.longestTaskMs < 50, `${what}: longest task ${m.longestTaskMs} ms (under 50 ms)`);
+  check(m.longestTaskMs < 50, `${what}: longest task ${m.longestTaskMs} ms (under 50 ms; one sample: ${longsOf(m)})`);
   check(rewriteMs !== null && rewriteMs <= 300_000, `${what}: the confirmed rewrite ${Math.round((rewriteMs ?? 0) / 1000)} s (at most 300 s)`);
   const mv = marker?.moved ?? { D: 0, S: 0 }, bound = mv.D + mv.S ? 300_000 * (mv.D + 2 * mv.S) / (mv.D + mv.S) : 0;
   check((times.sweep ?? 0) <= bound || (!mv.D && !mv.S && !times.sweep), `${what}: the plan's sweeps ${Math.round((times.sweep ?? 0) / 1000)} s (at most ${Math.round(bound / 1000)} s: D ${mv.D}, S ${mv.S})`);
@@ -1204,7 +1211,7 @@ async function fixtureFlat() {
   const m = await measured(() => W.applyOps(w, ns, [op({ op: "create", path: "/flat/x.txt", kind: "file", fid: id, parent: flat, sha256: SHA("b"), size: 2 })]));
   const e = await W.confirmedEntry(w, ns, id);
   check(e?.path === "/flat/x (1501).txt", `a create into a flat folder of ${rows.length - 1}: named past its taken series, as the reducer names it (${e?.path})`);
-  check(m.heapMiB < 64 && m.longestTaskMs < 50, `…the folder never read whole: heap growth ${m.heapMiB} MiB, longest task ${m.longestTaskMs} ms`);
+  check(m.heapMiB < 64 && m.longestTaskMs < 50, `…the folder never read whole: heap growth ${m.heapMiB} MiB, longest task ${m.longestTaskMs} ms (one sample: ${longsOf(m)})`);
   check(true, "fixture figures (flat): " + J({ entries: rows.length, ms: m.ms, longestTaskMs: m.longestTaskMs, heapGrowthMiB: m.heapMiB }));
   w.close();
 }
@@ -1341,7 +1348,7 @@ async function reportPlan(w, ns, what, label, m, marker, maps, want, counts, lea
   check(wrong === 0 && !pending, `${what}: every identity where its view puts it, nothing pending (${wrong} wrong ${J(first ?? null)}, pending ${pending})`);
   check(maps >= least, `${what}: at least ${least} mappings`);
   check(m.heapMiB < 256, `${what}: heap growth ${m.heapMiB} MiB (under 256 MiB)`);
-  check(m.longestTaskMs < 50, `${what}: longest task ${m.longestTaskMs} ms (under 50 ms)`);
+  check(m.longestTaskMs < 50, `${what}: longest task ${m.longestTaskMs} ms (under 50 ms; one sample: ${longsOf(m)})`);
   check(rewriteMs !== null && rewriteMs <= 300_000, `${what}: the confirmed rewrite ${Math.round((rewriteMs ?? 0) / 1000)} s (at most 300 s)`);
   const mv = marker?.moved ?? { D: 0, S: 0 }, bound = mv.D + mv.S ? 300_000 * (mv.D + 2 * mv.S) / (mv.D + mv.S) : 0;
   check((times.sweep ?? 0) <= bound && (times.pause ?? 0) <= 150_000, `${what}: sweeps ${Math.round((times.sweep ?? 0) / 1000)} s (at most ${Math.round(bound / 1000)}: D ${mv.D}, S ${mv.S}), the sender's pause ${Math.round((times.pause ?? 0) / 1000)} s (at most 150)`);
