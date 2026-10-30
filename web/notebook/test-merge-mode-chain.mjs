@@ -6,7 +6,10 @@
 // to STEPS commits, and a wall-clock budget past which it stops and says how many ran.
 //   bun web/notebook/test-merge-mode-chain.mjs [first-seed] [count]
 import { Session, MemoryPatchStore } from "patchflow";
-import { codecFor } from "./history.js";
+// (exact merges compiled in for this test: run unbundled, the define merge-client.ts reads is absent, so it reads the
+// global of that name, set before history.js loads; a production build defines it false (test-merge-client-off.mjs))
+globalThis.__SB_EXACT_MERGE__ = true;
+const { codecFor } = await import("./history.js");
 
 const FIRST = Number(process.argv[2] ?? 20261030), SEEDS = Number(process.argv[3] ?? 300), STEPS = 40, BUDGET_MS = 60_000;
 const legacy = codecFor(null), exact = codecFor({ docId: "x", id: "x:s1", mergeMode: "exact-v1" });
@@ -87,6 +90,6 @@ for (let seed = FIRST; seed < FIRST + SEEDS; seed++) {
   check(seen.every((x) => x.concurrent) && seen.some((x) => x.legacy !== x.exact), "the control: concurrent heads on classic conflicts, at least one read differently by the two codecs: " + J(seen));
   console.log("control:", J(seen.map((x) => [x.name, x.legacy === x.exact ? "alike" : "differ"])));
 }
-check(ran >= Math.min(SEEDS, 50), `at least 50 histories ran within the budget (${ran})`);
+check(ran === SEEDS, `every one of the ${SEEDS} histories ran within the ${BUDGET_MS} ms budget (${ran} ran): a property check that stops early bounds nothing`);
 console.log(fails.length ? `FAIL: ${fails.length} of ${checks} checks (seeds from ${FIRST})\n  ` + fails.join("\n  ") : `ok: one line reads alike under the legacy and exact codecs: ${ran} seeded histories (from ${FIRST}) of ${STEPS} commits, ${checks} checks, ${Date.now() - started} ms`);
 process.exit(fails.length ? 1 : 0);

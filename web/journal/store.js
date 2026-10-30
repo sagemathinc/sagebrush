@@ -31,6 +31,7 @@ import { t1Write, dropRows, readJournal, readSync, roomRefused, syncedKey, acked
 import { writeIntent, prune, neverFits, replay, journalTexts } from "./core.js";
 import { makeClientId, decodePatchId } from "patchflow";
 import { LIMITS } from "../sync-protocol/protocol";
+import { EXACT_MERGE_CLIENT } from "../workspace/merge-client";
 
 const canonical = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
 /** The hash of what a kind's history keeps of `doc` (SHA-256 of the canonical JSON of its versionedOf). */
@@ -413,6 +414,7 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
   async load() {
     this.released = false;
     await this.useSynced();
+    await this.exactReadable();
     // (not the writer: shown as it is, read-only, with nothing written (no recovery: that is the writer's))
     if (!(await this.acquire())) {
       this.viewed = true;
@@ -438,6 +440,7 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       // (the synced history's key and client read again now, under the writer's lock: a start or a rotation by the tab
       // that held it before is adopted, never an earlier read's (astra's CORR-2C2-2)); the history made again from it
       await this.useSynced();
+      await this.exactReadable();
       this.viewed = false;
       await this.history.init();
       for (let i = 0; ; i++) {
@@ -466,6 +469,14 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     } finally {
       this.recovering = false;
     }
+  }
+  // (a synced history whose recorded mode this build can't read (exact-v1 without the exact reader, the define off):
+  // refused before its history is opened, read, recovered or written, here and again under the writer's lock (the
+  // grader's G-P2b-5; never the legacy codec in its place); nothing of it is touched)
+  async exactReadable() {
+    if (EXACT_MERGE_CLIENT) return;
+    const js = await readJournal(this.hdb, this.id);
+    if (js.start?.merge === "exact-v1") throw Object.assign(new Error(this.T.NO_EXACT), { noExact: true });
   }
   // (the record with the versioned part of `value` (the history's records): the kind's withValue)
   withValue(rec, value) { return this.kind.withValue(rec, value); }

@@ -138,9 +138,9 @@ const mathResult = await Bun.build(<any>{ metafile: true, entrypoints: [LATEX ? 
 // notebook when Graph.plot's output first needs it
 const graphResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "graph", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-graphview.js", target: "browser", format: "esm", minify: true });
 // The notebook as a component (web/notebook), for other pages: web/embed.
-const notebookResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "index.js")], outdir: join(here, "dist"), naming: "sagebrush-notebook.js", target: "browser", format: "esm", minify: true });
+const notebookResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "index.js")], outdir: join(here, "dist"), naming: "sagebrush-notebook.js", target: "browser", format: "esm", minify: true, define: MERGE_DEFINE });
 // TimeTravel's history (web/notebook/history.js, with patchflow), loaded after the notebook
-const historyResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "history.js")], outdir: join(here, "dist"), naming: "sagebrush-history.js", target: "browser", format: "esm", minify: true });
+const historyResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "history.js")], outdir: join(here, "dist"), naming: "sagebrush-history.js", target: "browser", format: "esm", minify: true, define: MERGE_DEFINE });
 // The reactive notebook's analyzer (web/analyze-worker.ts): pyparse and
 // src/dataflow.ts in a worker of their own
 const analyzeResult = await Bun.build(<any>{
@@ -163,7 +163,7 @@ const shareDepsResult = await Bun.build(<any>{ metafile: true, entrypoints: [joi
 // The GPU kernel's preview (web/notebook/remote-ui.js): loaded only by a page opened with ?remote=1.  Wherever
 // the page goes, it goes too (the site; the CLI's embedded page, scripts/build-cli.mjs and src/notebook.ts; the
 // app, app/build-frontend.mjs), but the service worker doesn't precache it.
-const remoteResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "remote-ui.js")], outdir: join(here, "dist"), naming: "sagebrush-remote.js", target: "browser", format: "esm", minify: true });
+const remoteResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "remote-ui.js")], outdir: join(here, "dist"), naming: "sagebrush-remote.js", target: "browser", format: "esm", minify: true, define: MERGE_DEFINE });
 const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult]];
 for (const r of [result, consoleResult, mathResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult]) {
   if (!r.success) {
