@@ -122,6 +122,9 @@ export class AgentError extends Error {
 }
 
 /** The pairing.  `verbsFor(actor)` gives the workspace's verbs credited to `actor` (Workspace.forAgent). */
+// (what is said when the grant changed under a call: nothing of what it read, and, for a change, no claim either way)
+const CHANGED_WHILE_RUNNING = "the grant changed or expired while this ran: nothing of it is said (a change may or may not have been made)";
+
 export class AgentPairing {
   state: PairState = "connecting";
   hello: Hello | null = null;
@@ -286,7 +289,7 @@ export class AgentPairing {
   /** Whether `g` (and `verbs`) are still this pairing's grant, in force now: checked after every wait, before anything
    * is said or done on it. */
   private current(g: Grant | null, verbs: AgentVerbs | null) {
-    return this.state === "granted" && g !== null && this.grant === g && this.verbs === verbs && grantProblem(g, this.now()) === null;
+    return this.state === "granted" && g !== null && verbs !== null && this.grant === g && this.verbs === verbs && grantProblem(g, this.now()) === null;
   }
 
   /** One call from the server: checked, then done, then answered (never thrown). */
@@ -307,18 +310,18 @@ export class AgentPairing {
     try {
       const auth: { expect?: TrashEntry } = {};
       const no = await authorize(method, params, g, now, this.opts.trashEntry, auth);
-      if (no || !verbs) return this.fail(id, "invalid", no ?? "no grant");
       // (while it was authorized, the grant may have been revoked or have expired: it must be the same one, and
-      // still in force now, before the workspace is touched)
+      // still in force now, before anything is said, the refusal too, and before the workspace is touched)
       if (!this.current(g, verbs)) return this.fail(id, "invalid", grantProblem(this.grant, this.now()) ?? "the grant changed while this was checked");
+      if (no) return this.fail(id, "invalid", no);
       const result = await this.run(verbs!, method.slice("workspace.".length), params as any, auth.expect);
       // (after the last wait, before anything is said: the same grant, in force now, or nothing of what it read)
-      if (!this.current(g, verbs)) return this.fail(id, "invalid", "the grant changed or expired while this ran");
+      if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
       g!.lastUsed = this.now();
       this.reply(id, result);
     } catch (err: any) {
       // (the same check before any error is said: after a change, nothing more is read or said)
-      if (!this.current(g, verbs)) return this.fail(id, "invalid", "the grant changed or expired while this ran");
+      if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
       if (err instanceof AgentError) return this.fail(id, err.code, err.message, err.extra);
       const code = typeof err?.code === "string" && ["invalid", "exists", "missing", "conflict", "limit", "storage"].includes(err.code) ? err.code : "invalid";
       const extra: Record<string, unknown> = {};
@@ -327,7 +330,7 @@ export class AgentPairing {
         try { const r = await verbs!.read((params as any).path); extra.current = { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, (params as any).path) }; }
         catch (e2: any) { if (e2 instanceof AgentError && e2.code === "limit") extra.currentOmitted = e2.message; }
         // (that read was a wait too: checked again before it is said)
-        if (!this.current(g, verbs)) return this.fail(id, "invalid", "the grant changed or expired while this ran");
+        if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
       }
       this.fail(id, code, String(err?.message ?? err).slice(0, 500), extra);
     } finally {
