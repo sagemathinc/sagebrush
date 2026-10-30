@@ -238,7 +238,7 @@ function turnNode(thread: Thread, turn: Turn): HTMLElement {
       if (a) parts.push(`<button class="artifact-card" data-artifact="${esc(a.id)}"><span class="ai">${artifactIcon(a)}</span><span><b>${esc(a.title)}</b><small>${artifactLabel(a)} · click to open</small></span></button>`);
     }
   }
-  if (turn.error) parts.push(`<div class="error">Error: ${esc(turn.error.message)}</div>`);
+  if (turn.error) parts.push(`<div class="turn-error">Error: ${esc(turn.error.message)}</div>`);
   const status =
     turn.outcome === "interrupted"
       ? `<div class="status">Interrupted</div>`
@@ -289,9 +289,10 @@ function diffHtml(before: string, after: string): string {
   const rows: string[] = [];
   let i = 0, j = 0;
   while (i < n || j < m) {
+    // (a removed line before an added one, as git shows them)
     if (i < n && j < m && a[i] === b[j]) rows.push(`<div class="dl"> ${esc(a[i++])}</div>`), j++;
-    else if (j < m && (i === n || L[i][j + 1] >= L[i + 1][j])) rows.push(`<div class="dl add">+${esc(b[j++])}</div>`);
-    else rows.push(`<div class="dl del">-${esc(a[i++])}</div>`);
+    else if (i < n && (j === m || L[i + 1][j] >= L[i][j + 1])) rows.push(`<div class="dl del">-${esc(a[i++])}</div>`);
+    else rows.push(`<div class="dl add">+${esc(b[j++])}</div>`);
   }
   return `<div class="diff">${rows.join("")}</div>`;
 }
