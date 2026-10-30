@@ -16,8 +16,11 @@ import { join, relative } from "node:path";
 // 9 344 by DB2-LL-337-3, terminal-longline-pr337-r3-daybreak2.md, 96f6bf15: bun 1.4.4, CI's pin, measures 9 281):
 // "DB2-LL-337-2 exact UAX regional-indicator parity across retained windows, plus scalar-safe slice hold."; raised to
 // 9 600 B by daybreak2's size ruling on #337 r4 (bun 1.4.4 measured 9 585 B, +304 over r3b): the E5.5 batching (the
-// first slice and frame pacing, chunk runs, PAGE_RUNS, content-visibility), DB2-LL-337-4 and board's R4-1
-const LIMIT = 9600;
+// first slice and frame pacing, chunk runs, PAGE_RUNS, content-visibility), DB2-LL-337-4 and board's R4-1; raised to
+// 9 728 B by daybreak2's ruling DB2-T358-3 on #358 (bun 1.4.4 measured 9 667 B, +68): the first-open notice, the
+// static aria-describedby line about what commands do to your files, required safety context for the terminal on
+// every host (its text in terminal.ts, outside these inputs)
+const LIMIT = 9728;
 const here = import.meta.dir;
 const root = join(here, "..", "..");
 const ALLOWED = new Set(["web/shell/panel.ts", "web/shell/panel-render.ts", "web/shell/panel.css"]);

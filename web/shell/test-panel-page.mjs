@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { devtoolsPort, startServe } from "../test-port.mjs";
 
 const here = join(import.meta.dir, "..");
-if (!existsSync(join(here, "dist", "shell", "preview-set.json"))) throw new Error("build web/dist with SAGEBRUSH_TERMINAL=1 first");
+if (!existsSync(join(here, "dist", "shell", "preview-set.json"))) throw new Error("build web/dist first (bun web/build.ts)");
 let checks = 0;
 const fails = [];
 const check = (ok, what) => {
@@ -67,6 +67,12 @@ try {
   })()`);
   await evaluate(`document.querySelector("#termbtn").click()`);
   check(!!(await until(`(() => { const t = document.querySelector(".sb-term"); return t && !t.hidden; })()`, 15000)), "the dock opens");
+  // (T358-2/3: the intro above the prompt, in the tab's first terminal: a static line, not live, named by the input)
+  const intro = await evaluate(`(() => { const i = document.querySelector(".sb-term-intro"); const t = document.querySelector(".sb-term textarea");
+    return i && { text: i.textContent, live: i.getAttribute("aria-live"), role: i.getAttribute("role"), described: (t.getAttribute("aria-describedby") || "").split(" "),
+      above: i.getBoundingClientRect().bottom <= t.getBoundingClientRect().top + 1 }; })()`);
+  check(intro && /Trash/.test(intro.text) && /other devices/.test(intro.text) && !intro.live && !intro.role && intro.described.includes("sb-term-intro") && intro.described.includes("sb-term-note") && intro.above,
+    `T358-3: the intro, above the prompt, static, named by the input: ${JSON.stringify(intro)}`);
   check(!!(await until(`!!document.querySelector(".sb-term-loading") || document.querySelector(".sb-term").dataset.startMs !== undefined`, 5000)), "opening shows 'Starting the shell…' while bash loads (or it was already up)");
   check(!!(await until(`document.querySelector(".sb-term").dataset.startMs !== undefined && !document.querySelector(".sb-term-loading")`, 30000)), "the loading line goes once the shell is up");
   const covered = await evaluate(`(() => {
@@ -325,7 +331,7 @@ try {
   await until(`document.querySelector(".sb-term").classList.contains("running")`, 10000);
   await setInput("echo later");
   await key("Enter");
-  const note = await evaluate(`(() => { const nt = document.querySelector(".sb-term-note"); return { shown: !nt.hidden, live: nt.getAttribute("aria-live"), described: ${ta}.getAttribute("aria-describedby") === nt.id }; })()`);
+  const note = await evaluate(`(() => { const nt = document.querySelector(".sb-term-note"); return { shown: !nt.hidden, live: nt.getAttribute("aria-live"), described: (${ta}.getAttribute("aria-describedby") || "").split(" ").includes(nt.id) }; })()`);
   await evaluate(`document.querySelector(".sb-term-stop").click()`);
   await until(`!document.querySelector(".sb-term").classList.contains("running")`, 10000);
   check(note.shown && note.live === "polite" && note.described && (await evaluate(`document.querySelector(".sb-term-note").hidden`)) === true, `TP-6: the note is polite and describes the input, and is gone after the run: ${JSON.stringify(note)}`);
@@ -436,6 +442,8 @@ try {
   await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden`, 10000);
   await key("ArrowUp");
   check((await cmdCount()) === 0 && (await evaluate(`${ta}.value`)) === "", "a new session after ✕: no scrollback and no history");
+  check((await evaluate(`document.querySelectorAll(".sb-term-intro").length`)) === 0 && (await evaluate(`${ta}.getAttribute("aria-describedby")`)) === "sb-term-note",
+    "T358-3: the intro once per tab: a new terminal in the same tab has none");
   // (under 700 px: a full-height sheet)
   await send("Emulation.setDeviceMetricsOverride", { width: 600, height: 800, deviceScaleFactor: 1, mobile: false });
   await new Promise((res) => setTimeout(res, 300));
@@ -488,6 +496,13 @@ try {
   await realClick(at.x, at.y);
   const k0 = await boardState();
   check(k0.ids === "a,b" && k0.selected === 1 && !k0.find, `board: two items, one selected, in Edit: ${JSON.stringify(k0)}`);
+  // (one real, undoable board edit first, an arrow nudge of the selected item, so that a Ctrl+Z or an arrow reaching
+  // the board from the dock would change its document: the loop below compares the whole document, board's B363-3)
+  const doc = () => evaluate(`JSON.stringify(window.sagebrush.board.snapshot().doc)`);
+  const d0 = await doc();
+  await rawKey("ArrowRight", "ArrowRight", 39);
+  const d1 = await doc();
+  check(d1 !== d0 && (await ids()) === "a,b", `board: a real arrow on the board nudges the selected item (an edit to undo): ${d0 === d1 ? "unchanged" : "changed"}`);
   const logAt = await evaluate(`(() => { const r = document.querySelector(".sb-term-log").getBoundingClientRect(); return { x: r.left + 40, y: r.top + 10 }; })()`);
   const KEYS = [["Delete", "Delete", 46], ["Backspace", "Backspace", 8], ["ArrowUp", "ArrowUp", 38], ["ArrowLeft", "ArrowLeft", 37], ["z", "KeyZ", 90, 2], ["y", "KeyY", 89, 2], ["f", "KeyF", 70, 2]];
   for (const [where, focus] of [["the log", null], ["the grip", ".sb-term-grip"], ["the Hide button", ".sb-term-hide"], ["the input", ".sb-term textarea"]]) {
@@ -495,13 +510,26 @@ try {
     else await realClick(logAt.x, logAt.y);
     const inDock = await evaluate(`!!document.activeElement?.closest(".sb-term")`);
     const h0 = await evaluate(`document.querySelector(".sb-term").getBoundingClientRect().height`);
-    for (const k of KEYS) await rawKey(...k);
+    // (the document compared after each key, not once at the end: a leaked Ctrl+Z then Ctrl+Y would come back to d1;
+    // board's B371-1)
+    let changedBy = null;
+    for (const k of KEYS) {
+      await rawKey(...k);
+      if (changedBy === null && (await doc()) !== d1) changedBy = (k[3] ? "Ctrl+" : "") + k[0];
+    }
     const s = await boardState();
+    const same = changedBy === null;
     const h1 = await evaluate(`document.querySelector(".sb-term").getBoundingClientRect().height`);
-    check(inDock && s.ids === "a,b" && s.selected === 1 && !s.find && (where !== "the grip" || h1 > h0),
-      `board: real keys with the focus on ${where} are the terminal's (Delete, Backspace, arrows, Ctrl+Z, Ctrl+Y, Ctrl+F): ${JSON.stringify({ inDock, ...s, h0, h1 })}`);
+    check(inDock && same && s.ids === "a,b" && s.selected === 1 && !s.find && (where !== "the grip" || h1 > h0),
+      `board: real keys with the focus on ${where} are the terminal's (Delete, Backspace, arrows, Ctrl+Z, Ctrl+Y, Ctrl+F; the board's document unchanged after each): ${JSON.stringify({ inDock, changedBy, ...s, h0, h1 })}`);
   }
   await evaluate(`document.querySelector(".sb-term textarea").value = ""`);
+  // (the control: with the board's keys back after a real click on item a, Ctrl+Z does undo the nudge, so the loop's
+  // Ctrl+Z had an edit to undo)
+  const atA = await evaluate(`(() => { const r = window.board.clientRect("a"); return { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 20) }; })()`);
+  await realClick(atA.x, atA.y);
+  await rawKey("z", "KeyZ", 90, 2);
+  check((await doc()) === d0, `board: Ctrl+Z with the board's keys undoes the nudge (the dock's Ctrl+Z had one to undo): ${(await doc()) === d0 ? "undone" : "not undone"}`);
   // (a click on the other, unselected item: selected by it, then Delete deletes it)
   const atB = await evaluate(`(() => { const r = window.board.clientRect("b"); return { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 20) }; })()`);
   await realClick(atB.x, atB.y);

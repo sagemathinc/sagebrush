@@ -346,7 +346,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   /** syncOff as a compare-and-set against the lifecycle the action saw (astra3's CORR-PR130-1): a late answer never
    * turns off a newer lifecycle.  Returns whether it applied; when it didn't, the note says so. */
   async function offIf(mark: LifeMark, kind: "off" | "deleting"): Promise<boolean> {
-    const applied = await syncOffIf(w, mark);
+    const applied = await syncOffIf(w, mark, kind === "deleting" ? "deleted" : undefined);
     if (applied) owner.nudge(kind);
     else note = (note ? note + ". " : "") + "This browser's sync changed meanwhile (another tab), so it was left as it is";
     return applied;
@@ -493,6 +493,12 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   return { dispose: () => { poll.close(); renderGen++; unsub(); }, poll, refresh: () => poll.request() };
 }
 
+/** The Files sidebar's sync line ("" hides it): the foot's words while sync is on; once sync was used here and is
+ * off, "Sync off" (and why: "Sync off: your synced data was deleted"); never used here, nothing. */
+export function sidebarLine(s: { state: string; waiting?: number; reason?: string; used?: boolean; lastSynced?: number; full?: boolean }, now = Date.now()): string {
+  if (s.state !== "off") return foot(s, now);
+  return s.reason ? `Sync off: ${s.reason}` : s.used ? "Sync off" : "";
+}
 /** Notebooks for the foot (2c-3): how many have edits waiting to go up, how many this page's document sync stopped
  * (they won't go up), and whether the waiting ones couldn't be counted (then said without a number). */
 export type Notebooks = { waiting: number; stopped: number; unknown?: boolean };
