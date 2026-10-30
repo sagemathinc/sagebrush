@@ -5,8 +5,11 @@
 import { W, N, H, DS, P, NB, ST } from "./all.js";
 
 const J = JSON.stringify;
-const T = { stores: new Map(), pending: new Map(), req: 0, log: [] };
+const T = { stores: new Map(), pending: new Map(), req: 0, log: [], warns: [] };
 window.T = T;
+// (this device's console warnings, as text: a remote change the store didn't merge says why there (store.js remoteArrived))
+const warn = console.warn.bind(console);
+console.warn = (...a) => { T.warns.push(a.map((x) => (x instanceof Error ? x.message : String(x))).join(" ")); warn(...a); };
 const rawGet = (db, store, key) => new Promise((ok, no) => { const r = db.transaction(store).objectStore(store).get(key); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
 const codesOf = (d) => J((d?.cells ?? []).map((c) => [c.id, c.code]));
 
@@ -72,6 +75,10 @@ T.idle = async () => {
   for (let i = 0; i < 5; i++) { await T.ds.idle(); await new Promise((r) => setTimeout(r, 150)); }
   return true;
 };
+/** This device's console warnings from the `from`th on. */
+T.warnsFrom = (from) => T.warns.slice(from);
+T.hiddenCount = () => T.hidden.length;
+T.warnCount = () => T.warns.length;
 T.record = async (id) => { const r = await rawGet(T.w.main, "notebooks", id); return r ? { codes: codesOf(r), mark: r.unjournaled ?? null, j: r.j, hashOk: r.hash === (await N.docHash(r)) } : null; };
 T.journal = async (id) => { const js = await N.readJournal(T.hdb, id); return { start: js.start, slot: js.slot, lrows: js.lrows, cursor: js.cursor, J: js.J }; };
 T.events = () => T.ds.events.splice(0);
@@ -207,14 +214,25 @@ T.everyJournalStoreMerges = () => {
   const out = [...T.stores.values()].map((s) => [s.id, !!s.journaled, typeof s.mergeText === "function" && s.mergeText === H.mergeTextAt]);
   return { all: out.length > 0 && out.every(([, j, m]) => j && m), stores: out };
 };
-/** A journal row for a version this device's live history doesn't hold (a version recorded but not here yet), in the
- * notebook's synced history (`add`), or that row removed: its time, j 1 (at or below every record's). */
-const PHANTOM = "0000000000z_phantomclient";
-T.phantom = async (id, add) => {
-  const start = (await N.readJournal(T.hdb, id)).start;
-  const tx = T.hdb.transaction("history", "readwrite"), st = tx.objectStore("history"), nb = `${id}:s${start.n}`;
-  if (add) st.put({ nb, time: PHANTOM, j: 1 }); else st.delete([nb, PHANTOM]);
-  await new Promise((ok, no) => { tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+/** While `on`, the notebook's merges with the history (the real store's mergeRemote) run with one version missing
+ * from its live history: the version its record's j names (its journal still records it), hidden from the graph's
+ * patches for that merge only, as a version recorded here but not held yet (BASE-1).  Each such merge's hidden time is
+ * kept in T.hidden. */
+T.hidden = [];
+T.hideVersion = (id, on) => {
+  const st = T.stores.get(id);
+  if (!on) { delete st.mergeRemote; return true; }
+  const merge = Object.getPrototypeOf(st).mergeRemote;
+  st.mergeRemote = async function (mine) {
+    const [rec, js] = [await rawGet(T.w.main, "notebooks", id), await N.readJournal(T.hdb, id)];
+    let hidden = null, best = -1;
+    for (const [t, j] of js.jOf) if (j <= (rec?.j ?? 0) && j > best) { best = j; hidden = t; }
+    const ps = this.history.session?.graph?.patches, has = ps?.has;
+    if (!hidden || !has) throw new Error(`hideVersion: nothing to hide (${hidden}, ${!!has})`);
+    ps.has = function (t) { return t === hidden ? false : has.call(this, t); };
+    T.hidden.push(hidden);
+    try { return await merge.call(this, mine); } finally { ps.has = has; }
+  };
   return true;
 };
 /** The history's head value of a notebook (its cells' [id, input], sorted). */
