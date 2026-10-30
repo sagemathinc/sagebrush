@@ -25,6 +25,18 @@ The page alone decides what runs. It takes only allowlisted verbs, with argument
 
 (Browser facts checked by @sagebrush-python on Oct 19; recheck them when a browser's policy changes.)
 
+**What Chrome 149 actually did (measured Oct 30 against a deployed https preview, by @sagebrush-latex):**
+- **The permission is "loopbackNetwork".**
+  - While it is not granted, the socket fails with `net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS`, and the page sees only a closed WebSocket.
+  - Granting `loopbackNetwork` lets pairing succeed. Granting `localNetworkAccess` or `localNetwork` does not.
+  - `--disable-features=LocalNetworkAccessChecks` also lets it through (test runs only).
+- **What the person sees:** the prompt reads "Chrome asks to let <site> access apps on this device". The page's failure copy should tell them to click Allow, and how to undo a Block in site settings.
+- **No preflight is involved.** The server needs no `Access-Control-Allow-Private-Network` header, because a WebSocket is gated by the permission alone.
+- **The page's own CSP must admit the socket.**
+  - `connect-src … https: http:` does not cover `ws:`, so the policy lists `ws://127.0.0.1:* ws://localhost:*` explicitly.
+  - Those are loopback only, in the page policy and the preview policy. The frame and runner policies are unchanged.
+  - A CSP block looks the same to the page as a refused permission, so check the console for which one it is.
+
 ## 2. The connection
 
 - **Address:** `ws://127.0.0.1:<port>/sagebrush`. The server binds 127.0.0.1 only.
