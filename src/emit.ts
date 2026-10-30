@@ -1227,7 +1227,8 @@ export class Emitter {
     this.indent++;
     if (cell) this.w(`$ns.set("__classcell__", ${cell});`);
     if (scope.classDictName) this.w(`$ns.set("__classdictcell__", ${scope.classDictName});`);
-    this.w(`return ${cell ?? "undefined"};`);
+    // (its cell, for classDef; none: undefined, as the function returns)
+    if (cell) this.w(`return ${cell};`);
     this.indent--;
     this.w(`})(${ns});`);
     this.w(`${c} = classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, ${ns}, [${kwNames.join(", ")}], ${kv}, ${c}, ${bc});`);
