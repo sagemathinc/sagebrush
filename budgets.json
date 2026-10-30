@@ -199,6 +199,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-hashlib.src": {
+   "exact": false,
+   "ceiling": 16225,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-heapq.src": {
    "exact": false,
    "ceiling": 26766,
@@ -590,6 +597,7 @@
    "engine/lib/mod-enum.src": 88257,
    "engine/lib/mod-future.src": 5652,
    "engine/lib/mod-graph-spring.src": 12473,
+   "engine/lib/mod-hashlib.src": 14750,
    "engine/lib/mod-heapq.src": 24333,
    "engine/lib/mod-html.src": 85615,
    "engine/lib/mod-importlib.src": 3604,
