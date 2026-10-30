@@ -451,6 +451,7 @@
 // and tools for agents.  web/build.ts bundles it, with web/notebook, into one
 // classic script, so the cells exist before the first paint.
 import { createNotebook, esc } from "./notebook/notebook.js";
+import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
 import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex } from "./docsearch.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
@@ -1194,39 +1195,6 @@ async function replayResumed({ plan, version }) {
   window.sagebrush.replayReport = report;
 }
 
-// The cell nearest the middle of the window, and where it is on the screen.
-function anchorOf(notebook) {
-  if (!notebook) return null;
-  const mid = innerHeight / 2;
-  let best = null;
-  notebook.cells().forEach((c, index) => {
-    const r = c.el.getBoundingClientRect();
-    if (!r.height || r.bottom < 0 || r.top > innerHeight) return;
-    const d = r.top <= mid && r.bottom >= mid ? 0 : Math.min(Math.abs(r.top - mid), Math.abs(r.bottom - mid));
-    if (!best || d < best.d) best = { id: c.id, index, top: r.top, d };
-  });
-  return best;
-}
-// Scroll so that the anchor's cell (or the one at its place) is where it was,
-// and keep it there while the page settles (math is typeset after a paint,
-// pictures load), unless you scroll.
-let unanchor = null;
-function restoreAnchor(notebook, at) {
-  unanchor?.();
-  if (!at) return;
-  const fix = () => {
-    const cs = notebook.cells(), c = cs.find((x) => x.id === at.id) ?? cs[Math.min(at.index, cs.length - 1)];
-    if (c) scrollBy(0, c.el.getBoundingClientRect().top - at.top);
-  };
-  fix();
-  if (typeof ResizeObserver !== "function") return;
-  const ro = new ResizeObserver(fix);
-  ro.observe(notebook.root);
-  const stop = () => { ro.disconnect(); clearTimeout(timer); for (const e of ["wheel", "touchstart", "keydown", "pointerdown"]) removeEventListener(e, stop, true); if (unanchor === stop) unanchor = null; };
-  const timer = setTimeout(stop, 2000);
-  for (const e of ["wheel", "touchstart", "keydown", "pointerdown"]) addEventListener(e, stop, true);
-  unanchor = stop;
-}
 let ttAnchor = null;
 ttBtn.onclick = () => { if (ttEl.hidden) nb.flush(); ttShow(ttEl.hidden); };
 $("#ttclose").onclick = () => ttShow(false);
