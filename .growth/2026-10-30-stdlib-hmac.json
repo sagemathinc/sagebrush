@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "reason": "hmac: CPython 3.14's Lib/hmac.py, unchanged (its own group mod-hmac, a new bundle authorized by its budgets.json entry), with bytes/bytearray translate and maketrans (src/runtime/types.ts) and _operator._compare_digest (lib/_operator.py, in core: _operator is imported at start). Measured locally with CI's bun 1.4.4 tool: master 1d16d765 against this branch merged; cli/pyjs.cjs +14034 marked 14076 (42 B for master's drift, within the 1024 B slack), the other rows exact.",
+  "bytes": {
+    "cli/lib.gen.js": 12556,
+    "cli/pyjs.cjs": 14076,
+    "engine/lib/core.pre": 10682,
+    "engine/lib/core.src": 2503,
+    "engine/sagebrush-worker.js": 1625
+  }
+}
