@@ -16,8 +16,8 @@ const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 // (the hello's field as a minifier writes it: `merge:` and the two names in a literal array.  The array alone isn't
 // enough: doc-protocol.ts's MERGE_MODES, a frozen array of the same two names, is in the page as a constant)
 const LIST = /merge:\["legacy","exact-v1"\]/;
-// (db-merge3.ts's own token pattern (commonText), as a minifier keeps a regular expression: the exact reader's marker)
-const READER = /\[\\p\{L\}\\p\{N\}_\]\+\|\[\^\\s\\p\{L\}\\p\{N\}_\]/;
+// (the exact reader: db-merge3.ts.  Its text has no marker of its own (patchflow's merge3, which ships anyway, has the
+// same token pattern), so it is found by the bundler's metafile: whether the module is in the output)
 
 const page = join(here, "../dist/index.html");
 check(existsSync(page), "the built page is there (run bun web/build.ts first): " + page);
@@ -25,7 +25,7 @@ if (existsSync(page)) {
   const html = readFileSync(page, "utf8");
   check(/SyncClient|sync\/v1\/account/.test(html), "the built page carries the sync client (so the check is about it)");
   check(!LIST.test(html), "the built page's hello says no merge: its list isn't in the page");
-  check(!READER.test(html), "the built page carries no exact reader (db-merge3.ts compiled out): its token pattern isn't in the page");
+
 }
 // (the control: the hello field built as the page is, the define false, then true)
 const dir = mkdtempSync(join(tmpdir(), "sb-merge-off-"));
@@ -39,10 +39,31 @@ try {
   };
   const off = await build(false), on = await build(true);
   check(!LIST.test(off) && LIST.test(on), "the control: built with the define false the list isn't there, with it true it is: " + JSON.stringify({ off: off.length, on: on.length }));
-  // (and the reader: history.js's codecFor built the same two ways, the reader's marker only in the true build)
+  // (the reader: the page's own script (index.html's, as web/build.ts bundles it) and history.js, each built with the
+  // define false (as production) and true; db-merge3.ts in the output only with it true)
+  const reader = async (file, on) => {
+    const r = await Bun.build({ entrypoints: [file], target: "browser", format: "iife", minify: true, metafile: true, define: { __SB_EXACT_MERGE__: on ? "true" : "false", __SB_LATEX__: "false" } });
+    if (!r.success) throw new Error(r.logs.join("\n"));
+    const out = Object.values(r.metafile.outputs)[0];
+    return Object.keys(out.inputs).some((k) => /db-merge3\.ts$/.test(k) && out.inputs[k].bytesInOutput > 0);
+  };
   writeFileSync(entry, `import { codecFor } from ${JSON.stringify(join(here, "../notebook/history.js"))};\nglobalThis.out = codecFor;\n`);
-  const roff = await build(false), ron = await build(true);
-  check(!READER.test(roff) && READER.test(ron), "the control: history.js built with the define false carries no exact reader, with it true it does: " + JSON.stringify({ off: roff.length, on: ron.length }));
+  const hOff = await reader(entry, false), hOn = await reader(entry, true);
+  check(!hOff && hOn, "history.js: the exact reader (db-merge3.ts) in the output only with the define true: " + JSON.stringify({ off: hOff, on: hOn }));
+  const html = readFileSync(join(here, "../index.html"), "utf8"), app = /<script id="app">([\s\S]*?)<\/script>/.exec(html)?.[1];
+  check(!!app, "the page's script is in web/index.html");
+  if (app) {
+    const appFile = join(here, "..", ".merge-off-app.tmp.js");
+    writeFileSync(appFile, app.replace('import { latexBoot } from "./latex/boot.ts";\n', "") + "\nexport {};\n");
+    try {
+      const pOff = await reader(appFile, false), pOn = await reader(appFile, true);
+      // (the page loads TimeTravel's history lazily, as its own bundle (sagebrush-history.js, built from history.js with the
+      // same define: checked above), so its script carries no reader either way)
+      check(!pOff && !pOn, "the page's script carries no exact reader (its history is the lazily loaded sagebrush-history.js, checked above): " + JSON.stringify({ off: pOff, on: pOn }));
+    } finally {
+      rmSync(appFile, { force: true });
+    }
+  }
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
