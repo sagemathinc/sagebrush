@@ -778,8 +778,27 @@ export function typeGetattr(cls: PyType, name: string, dflt?: any): any {
 // class's __dict__, super(), function.__get__ and a bound method's __func__
 // all give this form.  One per function, made for its owner (never for the
 // class it happened to be reached through: bool.bit_length checks for int).
+// The arguments str's own methods read as a str value, by position (self
+// being 0) and by keyword: there, and only there, a str subclass's
+// instance is taken by its value, as CPython's C methods take it.  Every
+// other argument is passed as it is, so its own protocol applies: join's
+// iterable is iterated, translate's table indexed, splitlines' keepends
+// tested for truth, an index or a width read through __index__, format's
+// and %'s arguments formatted with their own __repr__, __str__, __format__.
+const STR_VALUE_ARGS: Record<string, number[]> = {
+  split: [1], rsplit: [1], partition: [1], rpartition: [1], replace: [1, 2],
+  count: [1], find: [1], rfind: [1], index: [1], rindex: [1], startswith: [1], endswith: [1],
+  strip: [1], lstrip: [1], rstrip: [1], removeprefix: [1], removesuffix: [1],
+  center: [2], ljust: [2], rjust: [2], encode: [1, 2], __format__: [1],
+  __contains__: [1], __add__: [1], __eq__: [1], __ne__: [1], __lt__: [1], __le__: [1], __gt__: [1], __ge__: [1],
+};
+const STR_VALUE_KEYWORDS: Record<string, string[]> = { split: ["sep"], rsplit: ["sep"], encode: ["encoding", "errors"] };
+const strBox = (a: any) => a instanceof PrimBox && typeof a.$v === "string";
 export function selfChecked(f: any): any {
   if (f.$selfChecked !== undefined) return f.$selfChecked;
+  // (a subclass's unboxing copy of int's, float's or str's method is that
+  // method as Python sees it: J.__repr__ is int.__repr__, as in CPython)
+  if (f.$orig !== undefined) return (f.$selfChecked = selfChecked(f.$orig));
   const cls: PyType = f.$owner;
   if (cls === undefined) throw new Error(`selfChecked: ${f.__name__} has no owner`);
   const check = (self: any) => {
@@ -787,12 +806,17 @@ export function selfChecked(f: any): any {
     if (!isinstance(self, cls)) raise(T.TypeError, `descriptor '${f.__name__}' for '${cls.$name}' objects doesn't apply to a '${typeName(self)}' object`);
   };
   // (int's, float's and str's own methods take a subclass instance, a box,
-  // by its value, as CPython's: str.__eq__(K('ab'), 'ab'), or a class
-  // body's __hash__ = str.__hash__)
+  // as self by its value, as CPython's: str.__eq__(K('ab'), 'ab'), or a
+  // class body's __hash__ = str.__hash__; of the other arguments only the
+  // str values STR_VALUE_ARGS names, any other passed as it is)
   const prim = cls === T.int || cls === T.float || cls === T.str;
+  const valueArgs = cls === T.str ? STR_VALUE_ARGS[f.__name__] : undefined;
+  const valueKeywords = cls === T.str ? STR_VALUE_KEYWORDS[f.__name__] : undefined;
+  // (argument i, self being 0, as passed on)
+  const arg = (a: any, i: number) => (valueArgs?.includes(i) && strBox(a) ? a.$v : a);
   const c: any = function (self: any, ...args: any[]) {
     check(self);
-    return f(prim && self instanceof PrimBox ? self.$v : self, ...args);
+    return f(prim && self instanceof PrimBox ? self.$v : self, ...args.map((a, i) => arg(a, i + 1)));
   };
   // (its name, signature, qualname, ...; not the raw function's own keyword
   // adapter, nor anything leading back to the raw function)
@@ -804,6 +828,8 @@ export function selfChecked(f: any): any {
     c.$kw = (pos: any[], names: string[], values: any[]) => {
       check(pos[0]);
       if (prim && pos[0] instanceof PrimBox) pos = [pos[0].$v, ...pos.slice(1)];
+      if (valueArgs) pos = [pos[0], ...pos.slice(1).map((a, i) => arg(a, i + 1))];
+      if (valueKeywords) values = values.map((v, j) => (valueKeywords.includes(names[j]) && strBox(v) ? v.$v : v));
       return kw(pos, names, values);
     };
   } else if (f.$sig !== undefined) {
@@ -811,6 +837,7 @@ export function selfChecked(f: any): any {
       const a = bindArgs(f.__name__, f.$sig, pos, names, values);
       check(a[0]);
       if (prim && a[0] instanceof PrimBox) a[0] = a[0].$v;
+      if (valueArgs) for (let i = 1; i < a.length; i++) a[i] = arg(a[i], i);
       return (f.$raw ?? f)(...a);
     };
     c.$kwPos = true;
