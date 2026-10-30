@@ -154,8 +154,9 @@ def structured():
         return sc
 
     for name, t in tools.items():
-        if name.startswith(("workspace_", "chat_")):
-            # (the workspace and chat tools' results are {result, error}: test_workspace_tools.py, test_chat.py)
+        if name.startswith(("workspace_", "chat_", "latex_comments_")):
+            # (the workspace, chat and LaTeX comments tools' results are {result, error}: test_workspace_tools.py,
+            # test_chat.py, test_latex_comments.py)
             assert t["outputSchema"]["type"] == "object" and t["outputSchema"]["required"] == ["result", "error"], name
             continue
         assert t["outputSchema"]["type"] == "object" and "status" in t["outputSchema"]["required"], name

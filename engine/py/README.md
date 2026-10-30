@@ -90,6 +90,9 @@ Its tools:
 - `factor`, `number_field`, `newforms`: shortcuts.
 - `guide`: what is implemented. `reset`: clear the session.
 - `run_status`, `run_result`, `run_cancel`, `run_list`, `run_keep`: runs.
+- `latex_comments_list`, `_show`, `_add`, `_reply`, `_resolve`, `_reattach`:
+  comments on a `.tex` in the person's Sagebrush workspace, through the page
+  paired with `workspace_connect` (the format: `web/latex/COMMENTS-FORMAT.md`).
 
 A `sage` or `python` call is a run. The call waits up to `wait` seconds (60
 by default). If the computation hasn't ended by then, the call returns a
