@@ -176,10 +176,6 @@ M("tobytes", (m: PyMemoryView, _order: any = null) => new PyBytes(m.bytes()));
 M("tolist", (m: PyMemoryView) => m.items());
 M("hex", (m: PyMemoryView, sep: any = undefined, bps: any = undefined) => Ty.bytesHex(m.bytes(), sep, bps));
 M("toreadonly", (m: PyMemoryView) => new PyMemoryView(m.obj, m.fmt, m.itemsize, m.start, m.n, m.step, true));
-// (a one-dimensional view is contiguous, C and Fortran alike, as CPython's
-// PyBuffer_IsContiguous: a stride of one item, or a single item whatever its
-// stride; an empty view with another stride is not)
-const cContiguous = (m: PyMemoryView): boolean => m.step === 1 || m.n === 1;
 M("cast", (m: PyMemoryView, fmt: any, shape: any = null) => {
   if (typeof fmt !== "string" || !(fmt in FORMATS)) raise(T.ValueError, "memoryview: destination format must be a native single character format prefixed with an optional '@'");
   if (shape !== null) raise(T.NotImplementedError, "memoryview.cast with shape is not supported");
@@ -211,3 +207,11 @@ O.bufferViewHooks.push((x) => {
   if (x.released || !cContiguous(x)) return null;
   return x.raw().subarray(x.start, x.start + x.n * x.itemsize);
 });
+
+// A one-dimensional view is contiguous, C and Fortran alike, as CPython's
+// PyBuffer_IsContiguous: a stride of one item, or a single item whatever its
+// stride; an empty view with another stride is not.  (A hoisted function at
+// the end, so it re-scopes no line above it for test/limit_sites.py.)
+function cContiguous(m: PyMemoryView): boolean {
+  return m.step === 1 || m.n === 1;
+}
