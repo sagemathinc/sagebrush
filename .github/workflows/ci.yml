@@ -735,6 +735,9 @@ jobs:
       - name: detection, the production refusal and Stop in WebKit's worker
         timeout-minutes: 5
         run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/test-kedlaya-worker.mjs
+      - name: the terminal's long-line pages copy as one line in WebKit (board's B-LL-4)
+        timeout-minutes: 3
+        run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/shell/test-panel-pages-copy.mjs
 
   web-browser:
     needs: changes
@@ -813,6 +816,7 @@ jobs:
               # as a hosted preview has it)
               bun web/shell/test-panel-render.mjs
               bun web/shell/panel-size.mjs
+              node web/shell/test-panel-pages-copy.mjs
               SAGEBRUSH_TERMINAL=1 bun web/build.ts
               bun web/shell/test-panel-page.mjs
               ;;

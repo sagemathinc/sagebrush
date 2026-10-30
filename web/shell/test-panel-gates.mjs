@@ -2,14 +2,16 @@
 // SAGEBRUSH_TERMINAL=1: from "the command finished" (its outcome in) to the first and the last slice's paint (the
 // animation frame after it), over 20 runs of each control, with no Long Task over 50 ms and every slice <= 50 ms.
 //   C1: 1 MiB of alternating recognised SGR styles (reaches the 20 000-run cap)
-//   C2: 1 MiB of dense visible controls and unknown escapes
+//   C2: 1 MiB of dense visible controls and unknown escapes, as ONE line (no line end): its pages of 4 Ki units
 //   C3: 1 MiB of plain text in 5 000+ lines
 //   C4: a small command (the common case)
 // The controls are written into the workspace once, through the shell (untimed); each timed run is `cat` of one, with
 // `clear` between runs.  The parser (sb-term:parse), the patcher (sb-term:patch) and the paint path (first-paint,
 // last-paint) are reported separately: web/shell/panel.ts's performance measures.
 //   SAGEBRUSH_TERMINAL=1 bun web/build.ts && bun web/shell/test-panel-gates.mjs [--runs N]
-//   GATES=enforce: exit 1 on a gate miss (the granted timing box, recorded hardware); otherwise a report (CI).
+//   GATES=enforce: exit 1 on a gate miss (the granted timing box, recorded hardware); otherwise a report only.
+// CI does not run this script (N-326-1): shared runners' timings decide nothing, and E5.5's gates are judged on the
+// timing box.  CI runs the panel's behaviour (test-panel-render.mjs, test-panel-page.mjs, test-panel-pages-copy.mjs).
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { cpus, totalmem, tmpdir } from "node:os";
@@ -93,10 +95,12 @@ try {
   // the controls, written once (untimed)
   const MiB = 1048576;
   const controls = {
-    C1: `mkdir -p /gate && printf '\\033[31ma\\033[32mb%.0s' $(seq 1 ${Math.floor(MiB / 12)}) > /gate/c1.txt`,
+    C1: `printf '\\033[31ma\\033[32mb%.0s' $(seq 1 ${Math.floor(MiB / 12)}) > /gate/c1.txt`,
     C2: `printf '\\033[2J\\001\\033]0;t\\007%.0s' $(seq 1 ${Math.floor(MiB / 11)}) > /gate/c2.txt`,
     C3: `printf '%0199d\\n' $(seq 1 ${Math.ceil(MiB / 200)}) > /gate/c3.txt`,
   };
+  // (the directory for every control, so --only C2 or C3 works alone)
+  await run("mkdir -p /gate");
   for (const [c, cmd] of Object.entries(controls).filter(([c]) => !ONLY || c === ONLY)) {
     const st = await run(cmd);
     const size = await run(`wc -c < /gate/${c.toLowerCase()}.txt`).then(() => evaluate(`[...document.querySelectorAll(".sb-term-cmd")].at(-1).querySelector(".sb-term-out").textContent.trim()`));

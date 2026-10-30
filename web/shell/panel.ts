@@ -645,8 +645,11 @@ export class TerminalPanel {
     const t0 = performance.now();
     const r = new Render(stdout, stderr);
     let first = true;
-    // (the nodes of the line still open: what a later lone \r takes back)
+    // (the open line's top-level nodes, its page boxes included: what a later lone \r takes back; the line's current page)
     let open: Node[] = [];
+    let page: HTMLElement | null = null;
+    // (a page box's charge: itself, and each node in it)
+    const cost = (nd: Node) => [nd.textContent!.length, 1 + ((nd as HTMLElement).classList?.contains("sb-term-page") ? nd.childNodes.length : 0)];
     for (;;) {
       const p0 = performance.now();
       const runs = r.next(SLICE);
@@ -654,30 +657,62 @@ export class TerminalPanel {
       const p1 = performance.now();
       if (signal.aborted && this.running?.cmd !== cmd) return;
       const f = document.createDocumentFragment();
+      // (nodes for a page box already on screen: put in after the slice is charged, never before)
+      let pf: DocumentFragment | null = null, pfPage: HTMLElement | null = null;
       let units = 0, lines = 0, spans = 0;
       for (const run of runs) {
         if (run.restart) {
-          // (a lone \r over this line's earlier slices: their nodes go, uncharged: TP-2)
+          // (a lone \r over this line's earlier slices: their nodes and page boxes go, uncharged: TP-2, B-LL-3)
+          if (pf) (units -= pf.textContent!.length), (spans -= pf.childNodes.length), (pf = pfPage = null);
           for (const nd of open) {
-            if (nd.parentNode === f) continue;
-            cmd.units -= nd.textContent!.length, cmd.spans--;
-            nd.parentNode?.removeChild(nd);
+            const [u, n] = cost(nd);
+            if (nd.parentNode === f) (units -= u), (spans -= n), f.removeChild(nd);
+            else (cmd.units -= u), (cmd.spans -= n), nd.parentNode?.removeChild(nd);
           }
-          for (const nd of open) if (nd.parentNode === f) units -= nd.textContent!.length, spans--, f.removeChild(nd);
           open = [];
+          page = null;
+          continue;
+        }
+        if (run.page) {
+          // (a join: the line goes on in an inline-block box of its own, charged as a run)
+          page = el("span", "sb-term-page");
+          f.appendChild(page);
+          open.push(page);
+          spans++;
           continue;
         }
         units += run.text.length;
         spans++;
         for (let i = run.text.indexOf("\n"); i >= 0; i = run.text.indexOf("\n", i + 1)) lines++;
-        const nd = run.cls === "" && !run.err ? document.createTextNode(run.text) : el("span", (run.err ? "sb-err " : "") + run.cls, run.text);
-        f.appendChild(nd);
-        if (run.text.endsWith("\n")) open = [];
-        else open.push(nd);
+        // (in a page box, the line's end and anything after it go after the box, so the box holds no empty last row
+        // and no later line: the omission line's run starts with its line end)
+        const node = (s: string) => (run.cls === "" && !run.err ? document.createTextNode(s) : el("span", (run.err ? "sb-err " : "") + run.cls, s));
+        const nl = page ? run.text.indexOf("\n") : -1;
+        const end = nl >= 0;
+        const text = end ? run.text.slice(0, nl) : run.text;
+        if (text) {
+          const nd = node(text);
+          if (!page) {
+            f.appendChild(nd);
+            open.push(nd);
+          } else if (page.parentNode === f) page.appendChild(nd);
+          else {
+            if (pfPage !== page) (pf = document.createDocumentFragment()), (pfPage = page);
+            pf!.appendChild(nd);
+          }
+        }
+        if (end) {
+          if (text) spans++;
+          const rest = run.text.slice(nl);
+          f.appendChild(rest === "\n" ? document.createTextNode(rest) : node(rest));
+          (open = []), (page = null);
+        }
+        if (run.text.endsWith("\n")) (open = []), (page = null);
       }
       this.makeRoom(units, lines, spans);
       const stick = this.atBottom();
       cmd.out.appendChild(f);
+      if (pf && pfPage) pfPage.appendChild(pf);
       cmd.units += units;
       cmd.lines += lines;
       cmd.spans += spans;

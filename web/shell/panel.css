@@ -36,3 +36,6 @@ body.sb-term-open { padding-bottom: var(--sb-term-h, 280px); }
 .sb-b { font-weight: 700; } .sb-i { font-style: italic; } .sb-u { text-decoration: underline; }
 .sb-fg-rev { color: var(--sb-term-bg); } .sb-bg-rev { background: var(--sb-term-fg); }
 @media (max-width: 700px) { .sb-term { top: 0; height: auto !important; max-height: none; } body.sb-term-open { overflow: hidden; } }
+/* a long line's pages (panel-render.ts PAGE): each an inline-block box of the full width, so a slice lays out only its
+   own pages and a selection still copies the line as one */
+.sb-term-page { display: inline-block; width: 100%; vertical-align: top; }
