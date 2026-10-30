@@ -138,7 +138,7 @@ export async function switchTo(w: Workspace, ns: string): Promise<Lease> {
 export async function switchToIf(w: Workspace, ns: string, expect?: LifeMark): Promise<Lease | null> {
   checkNs(ns);
   const old = await detectOldSync(w);
-  if (old.old) throw new OldSyncError(old.why ?? "");
+  if (old.old) throw new OldSyncError(old.why ?? "", !!old.unreadable);
   await OLD_SYNC_HOOK.between?.();
   for (;;) {
     const r = await inTx(w.ws, "meta", "readwrite", async (tx) => {

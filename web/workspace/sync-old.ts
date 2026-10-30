@@ -28,25 +28,33 @@ export const SIGNAL_META = ["b:d:"] as const;
 export const LOCAL_META = ["d:", "n", "b:m:", "b:p:"] as const;
 /** Both history databases: notebooks' and boards'. */
 export const HISTORY_DBS = ["sagebrush-history", "sagebrush-board-history"] as const;
-/** A synced history's key: `<id>:s<n>`. */
+/** A synced history's key: `<id>:s<n>`.  (N-DET-1, accepted by @sagebrush: a never-synced document whose own id ends so,
+ * a notebook file named like "draft:s2", reads as old too: a false positive that fails closed, pinned by its case.) */
 const SYNCED_NB = /:s\d+$/;
 
 export const OLD_SYNC_REASON = "synced with an older Sagebrush";
 export const OLD_SYNC_MESSAGE = "This browser synced with an older version of Sagebrush, so sync is off here. To use sync again, clear this site's data in your browser's settings. Download anything you want to keep first, because clearing site data deletes this browser's copy of your files.";
+/** (R-DET-1) A read that failed, or a database of a shape no build makes: sync stays off (fail closed), but nothing is
+ * known to be old, so no advice to clear the site's data. */
+export const UNREADABLE_REASON = "couldn't read this browser's sync data";
+export const UNREADABLE_MESSAGE = "Sync is off here: couldn't read this browser's sync data; reload and try again.";
 
-/** The detector's answer: `old` with the first signal found (`why`), or clean. */
-export type OldSync = { old: boolean; why?: string };
-/** The detector refused an enable: this browser holds old sync state. */
+/** The detector's answer: `old` with the first signal found (`why`), or clean; `unreadable` when it is old only
+ * because something couldn't be read (R-DET-1). */
+export type OldSync = { old: boolean; why?: string; unreadable?: boolean };
+/** The detector refused an enable: this browser holds old sync state, or its sync data couldn't be read. */
 export class OldSyncError extends Error {
-  constructor(readonly why: string) { super(OLD_SYNC_MESSAGE); this.name = "OldSyncError"; }
+  constructor(readonly why: string, readonly unreadable = false) { super(unreadable ? UNREADABLE_MESSAGE : OLD_SYNC_MESSAGE); this.name = "OldSyncError"; }
 }
+/** (an unexpected shape: read as unreadable) */
+class SchemaError extends Error {}
 
 /** (tests) faults: a read that throws, by step (and switchToIf's lease transaction, "lease"); `between`, run between
  * switchToIf's detection and its transaction (a signal written late) */
 export const OLD_SYNC_HOOK: { fault?: (step: string) => void; between?: () => Promise<void> } = {};
 
-/** Whether this browser holds sync state from a build before the cutover.  Any read that fails: old (fail closed);
- * a history database that doesn't exist: clean. */
+/** Whether this browser holds sync state from a build before the cutover.  Any read that fails, or a history database
+ * of another shape: old and unreadable (fail closed, R-DET-1); a history database that doesn't exist: clean. */
 export async function detectOldSync(w: Workspace): Promise<OldSync> {
   try {
     const ws = w.ws;
@@ -65,7 +73,7 @@ export async function detectOldSync(w: Workspace): Promise<OldSync> {
     }
     return { old: false };
   } catch (e) {
-    return { old: true, why: "unreadable: " + ((e as Error)?.message ?? String(e)) };
+    return { old: true, unreadable: true, why: (e instanceof SchemaError ? "schema: " : "unreadable: ") + ((e as Error)?.message ?? String(e)) };
   }
 }
 
@@ -90,9 +98,13 @@ async function historySignal(name: string): Promise<string | null> {
   const db = await openAsIs(name);
   if (!db) return null;
   try {
-    if (!db.objectStoreNames.contains("history")) return null;
+    // (a database that exists has the shape stores.js makes it with: one store, "history", keyed [nb, time]; any other
+    // shape isn't one a build wrote, so it isn't read as clean but as unreadable (fail closed, no clear-data advice):
+    // astra3's note, @sagebrush's ruling)
+    if (!db.objectStoreNames.contains("history")) throw new SchemaError(`${name}: no history store`);
     const st = db.transaction("history", "readonly").objectStore("history");
-    const probe = async (nb: string, prefix: string) => ((await req(st.count(IDBKeyRange.bound([nb, prefix], [nb, prefix + "￿"])))) as number) > 0;
+    if (JSON.stringify(st.keyPath) !== JSON.stringify(["nb", "time"])) throw new SchemaError(`${name}: history keyed ${JSON.stringify(st.keyPath)}`);
+    const probe = async (nb: string, prefix: string) => ((await req(st.count(IDBKeyRange.bound([nb, prefix], [nb, prefix + "\uffff"])))) as number) > 0;
     return await new Promise<string | null>((ok, no) => {
       const c = st.openKeyCursor();
       c.onerror = () => no(c.error);
