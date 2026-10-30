@@ -87,5 +87,20 @@ const oneLine = (lines) => lines.every((l) => !/[\r\n]/.test(l));
   await new Promise((r) => setTimeout(r, 1500));
   check("no fetch starts after the deadline", starts === 1, `${starts} started; fetch-kernel-script ${info["fetch-kernel-script"]}`);
 }
+{
+  // (selftest()'s call in web/index.html: the module's load is bounded, so a
+  // stalled import still ends; and a failure's reason is logged)
+  const html = readFileSync(new URL("../../web/index.html", import.meta.url), "utf8");
+  const line = /^const bounded = .*$/m.exec(html)?.[0];
+  check("index.html has the bounded() helper", !!line);
+  const bounded = line && new Function(line + "\nreturn bounded;")();
+  if (bounded) {
+    const t0 = Date.now();
+    const stalled = await bounded(new Promise(() => {}), 300).then(() => "resolved", (e) => String(e));
+    check("a stalled load is rejected at its bound", stalled === "Error: timed out after 0.3 s" && Date.now() - t0 < 1000, `${stalled} after ${Date.now() - t0} ms`);
+    check("a load that answers passes through", (await bounded(Promise.resolve(42), 300)) === 42);
+  }
+  check("the module's import is bounded at 15 s, and its failure logged", /bounded\(import\(new URL\("sagebrush-selftest\.js", location\.href\)\.href\), 15000\)/.test(html) && html.includes('console.log("diagnose import: " + e)'));
+}
 if (bad) { console.log("FAIL: diagnose()"); process.exit(1); }
 console.log("ok: diagnose() fills every key with one bounded line");
