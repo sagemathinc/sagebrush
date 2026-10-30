@@ -27,7 +27,15 @@
 //   reactive.run(ids, { consent });
 
 import { Approvals, makeSpec, CAPS, TooLarge, TOO_LARGE } from "../../src/remote-approval.ts";
-import { NOTES } from "./remote-kernel.js";
+
+// (the gate of a run asked while its kernel wasn't ready: never sends; it carries no approval)
+const NOT_READY_GATE = Object.freeze({
+  check: () => ({ send: false, skip: "the remote kernel wasn't ready when this was asked" }),
+  sameRun: () => false,
+  admit: () => false,
+  stillAdmitted: () => false,
+  admitted: () => {},
+});
 
 const CHANGED = "\nNot run: it changed since you ran it.\n";
 const mangleOf = (id) => String(id).replace(/[^A-Za-z0-9]/g, "");
@@ -237,6 +245,12 @@ export class RemoteGate {
         }
       },
       async prepare({ order, consent }) {
+        // (a kernel that isn't ready runs nothing: the person's consent is spent here, never kept for later, nothing is
+        // approved, and each cell is asked so that it shows the kernel's note: execute, below)
+        if (!gate.kernel.ready) {
+          if (consent) a.voidConsent(consent);
+          return { skip: new Map() };
+        }
         gate.prune();
         const env = gate.env();
         const skip = new Map();
@@ -269,7 +283,9 @@ export class RemoteGate {
         return { skip };
       },
       async execute(id, code, forget, scoped) {
-        if (!gate.kernel.ready) return { ok: false, ms: 0, notRun: "skip", note: NOTES.notReady };
+        // (a kernel that isn't ready: asked through the page, so that the cell shows the kernel's note; the kernel refuses
+        // a gated run before it is queued, and this gate refuses everything, should the kernel be ready by then)
+        if (!gate.kernel.ready) return base.execute(id, code, forget, scoped, { gate: NOT_READY_GATE });
         let frozen;
         try {
           frozen = await a.freeze([id]);
