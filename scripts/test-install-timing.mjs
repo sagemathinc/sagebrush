@@ -153,7 +153,7 @@ try {
     const outer = Number(/\n    timeout-minutes: (\d+)/.exec(wf)?.[1]);
     const steps = [...wf.matchAll(/\n        timeout-minutes: (\d+)/g)].map((m) => Number(m[1]));
     check("contract: the step timeouts fit the job's", steps.length === 3 && steps.reduce((a, b) => a + b, 0) + 5 <= outer, `${steps} vs ${outer}`);
-    check("contract: the summary and upload always run", /name: the summary\n\s+if: always\(\)/.test(wf) && /upload-artifact@v4\n\s+if: always\(\)/.test(wf));
+    check("contract: the summary and upload always run", /name: the summary\n\s+if: always\(\)/.test(wf) && /upload-artifact@[0-9a-f]{40} # v4\.\d+\.\d+\n\s+if: always\(\)/.test(wf));
     check("contract: the same pins as checks", wf.includes('node-version: "24.21.0"') && wf.includes('bun-version: "1.4.4"'));
     const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
     check("contract: these tests run in checks", ci.includes("node scripts/test-install-timing.mjs"));

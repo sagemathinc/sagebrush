@@ -282,6 +282,37 @@ async function migration() {
   await rawPut(w.main, "notebooks", { id: "nb2", name: "Untitled", mode: "magma", cells: [], rev: 1, updated: 6 });
   await W.migrate(w, localStorage);
   check(!(await w.stat(gone.path)).missing, "…and unmarked when it's back");
+  const J = JSON.stringify;
+  // (P0 #1) another device's notebook (`remote`), its content not here: never marked missing, and a mark an older
+  // build wrote taken off
+  await rawDel(w.main, "notebooks", "nb2");
+  await rawPut(w.ws, "entries", { ...(await w.stat(gone.path)), remote: true, missing: true });
+  const r5 = await W.migrate(w, localStorage);
+  const remote = await w.stat(gone.path);
+  check(remote.remote === true && !remote.missing && r5.missing === 0, "another device's notebook, its content not here: not marked missing, an older mark taken off: " + J({ missing: remote.missing, r5: r5.missing }));
+  // (P0 #1, the defensive rule) the notebooks' store read empty (every record gone at once): this device's own
+  // notebooks are not marked missing, and that is said; one record back and one gone: marked as before
+  const said = [], warn = console.warn;
+  console.warn = (...a) => { said.push(String(a[0])); };
+  try {
+    const own = (await w.list("/")).filter((e) => e.kind === "notebook" && !e.remote && !e.missing);
+    const kept = [];
+    const FENCE = "__sagebrush-workspace__";
+    for (const id of await rawKeys(w.main, "notebooks")) if (id !== FENCE) kept.push([id, await rawGet(w.main, "notebooks", id)]);
+    for (const [id] of kept) await rawDel(w.main, "notebooks", id);
+    const left = (await rawKeys(w.main, "notebooks")).filter((k) => k !== FENCE);
+    const r6 = await W.migrate(w, localStorage);
+    const after = await Promise.all(own.map((e) => w.stat(e.path)));
+    check(own.length >= 2 && left.length === 0 && after.every((e) => !e.missing) && r6.missing === 0 && said.some((x) => /store reads empty: not marked missing/.test(x)), "the notebooks' store read empty: this device's own notebooks not marked missing, said: " + J({ own: own.length, left, marked: after.filter((e) => e.missing).length, said }));
+    for (const [id, rec] of kept.slice(1)) await rawPut(w.main, "notebooks", rec);
+    said.length = 0;
+    const r7 = await W.migrate(w, localStorage);
+    const firstGone = own.find((e) => e.ref === kept[0][0]);
+    check(!!firstGone && (await w.stat(firstGone.path)).missing === true && r7.missing === 1 && said.some((x) => /1 entries marked missing/.test(x)), "…with others' records there, the one gone is marked as before, and the mark said with the stores' counts: " + J({ r7: r7.missing, said }));
+    await rawPut(w.main, "notebooks", kept[0][1]);
+  } finally {
+    console.warn = warn;
+  }
   w.close();
 }
 
@@ -2809,8 +2840,35 @@ async function durabilityLockOrder() {
   }
 }
 
+// (P0 #1, the grader's G-AD-1: the Files list's words, gating here: another device's entry whose content isn't in this
+// browser reads "on another device", never "missing"; one whose content is here reads as usual; this device's own entry
+// placed at another name by the server's index reads "(renamed)" while it stays there)
+async function rowWords() {
+  const J = JSON.stringify;
+  const here = { notebook: new Set(["nb-here"]), board: new Set(["bd-here"]) };
+  const nb = { path: "/a.ipynb", kind: "notebook", ref: "nb-there", created: 1, updated: 1, mode: "sage" };
+  const words = {
+    remoteNotebook: W.fileRowMeta({ ...nb, remote: true }, here),
+    remoteNotebookHere: W.fileRowMeta({ ...nb, ref: "nb-here", remote: true }, here),
+    remoteBoard: W.fileRowMeta({ path: "/b.board.json", kind: "board", ref: "bd-there", created: 1, updated: 1, remote: true }, here),
+    remoteBoardHere: W.fileRowMeta({ path: "/b.board.json", kind: "board", ref: "bd-here", created: 1, updated: 1, remote: true }, here),
+    remoteFile: W.fileRowMeta({ path: "/f.txt", kind: "file", ref: "/f.txt", created: 1, updated: 1, size: 3, remote: true }, here),
+    ownFile: W.fileRowMeta({ path: "/f.txt", kind: "file", ref: "/f.txt", created: 1, updated: 1, size: 3 }, here),
+    ownMissing: W.fileRowMeta({ ...nb, missing: true }, here),
+    renamed: W.fileRowMeta({ ...nb, ref: "nb-here", path: "/a (2).ipynb", renamed: { from: "/a.ipynb", to: "/a (2).ipynb" } }, here),
+    renamedMovedOn: W.fileRowMeta({ ...nb, ref: "nb-here", path: "/c.ipynb", renamed: { from: "/a.ipynb", to: "/a (2).ipynb" } }, here),
+  };
+  check(words.remoteNotebook === "on another device" && words.remoteBoard === "on another device" && words.remoteFile === "on another device", "another device's notebook, board and file, their content not here: \"on another device\", never \"missing\": " + J(words));
+  check(words.remoteNotebookHere === "Sage" && words.remoteBoardHere === "" && words.ownFile === "3 B", "…with their content here (or this device's own): the usual words: " + J(words));
+  check(words.ownMissing === "missing", "this device's own whose contents aren't found: \"missing\" as before");
+  check(words.renamed === "(renamed)" && words.renamedMovedOn === "Sage", "this device's own renamed by the server's index: \"(renamed)\" while it stays at that name, not once it has moved on: " + J(words));
+  const sums = [W.listedSummary({ count: 3, renamed: 1, paths: [] }), W.listedSummary({ count: 1, renamed: 1, paths: [] }), W.listedSummary({ count: 2, paths: [] })];
+  check(sums[0] === "2 items sync kept aside; 1 item renamed (another device has one with the name)" && sums[1] === "1 item renamed (another device has one with the name)" && sums[2] === "2 items sync kept aside", "the Sync panel counts renamed ones apart from those kept aside (N-AD-2): " + J(sums));
+  check(W.isElsewhere({ ...nb, remote: true }, here) && !W.isElsewhere({ ...nb, ref: "nb-here", remote: true }, here) && !W.isElsewhere(nb, here), "isElsewhere: another device's whose content isn't here, only");
+}
+
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, writeGuard, pathOfFile_, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority, () => historyOrder("clear"), () => historyOrder("drop"), purgeMarks, durabilityLockOrder]) {
+  for (const t of [rowWords, storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, writeGuard, pathOfFile_, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority, () => historyOrder("clear"), () => historyOrder("drop"), purgeMarks, durabilityLockOrder]) {
     console.log(`test: ${t.name || t}`);
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
