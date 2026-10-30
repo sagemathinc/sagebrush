@@ -201,6 +201,8 @@ jobs:
           node web/test-llms.mjs
           node web/test-alpha-banner.mjs
           node web/test-ipynb.mjs
+          node web/latex/test-comments-core.mjs
+          node web/latex/test-latex-comments-cli.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
           node scripts/test-core-api-surface.mjs
@@ -472,6 +474,24 @@ jobs:
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
+      # (DEV's try-it flow on the real notebook page: two browsers, notebooks, files, offline; the reference server.
+      # REPORT-ONLY for now (@sagebrush, Oct 30, #330's G-ST-1): it passed 4 of 5 local runs, one first page load not coming
+      # up; its result and diagnostics go to the job summary and never fail the job.  Made gating in a later PR once it is
+      # green here 10 runs in a row, or once that first load is explained)
+      - name: DEV try-it flow (report-only)
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          c=0
+          CHROME=google-chrome bun web/workspace/test-dev-sync-tryit.mjs > tryit.log 2>&1 || c=$?
+          cat tryit.log
+          {
+            echo "### DEV try-it flow (report-only): exit $c"
+            echo '```'
+            grep -E "^(ok:|FAIL)|didn't come up" tryit.log | cut -c1-400 | head -40 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $c
       # (the share dialog, in its own step with its own bound, in its place in the order: about 13 min on a healthy runner
       # since #243's registry cases (it was about 7), 20 here. A hang fails this named step, not the whole job at its 40 min,
       # and the steps before it keep their output.
