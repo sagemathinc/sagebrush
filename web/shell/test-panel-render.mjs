@@ -404,6 +404,19 @@ check(CAPS.units + 2 * 256 + dropMarker(1e6).length <= SCROLLBACK.units && CAPS.
     for (let s; (s = r.next(FIRST)); ) raw.push(...s);
     check(!raw.some((x) => x.chunk), `${what}: no chunk run (${raw.filter((x) => x.chunk).length})`);
   }
+  // (the boundary, DB2-LL-337-5: a chunk starts only at a line flushed after more than FIRST.bytes of input; so exactly
+  // FIRST.bytes stays plain, one byte of text past it gets a chunk, and a last line whose line end is that byte (the
+  // line is flushed before its line end is read) stays plain), at both slicings
+  for (const [what, out, want] of [["exactly 8 192 bytes (128 lines of 63 and a line end)", "w".repeat(63).concat("\n").repeat(128), false],
+    ["8 193 bytes, one past", "w".repeat(63).concat("\n").repeat(128) + "v", true], ["8 193 bytes, the byte past a line end", "w".repeat(63).concat("\n").repeat(127) + "w".repeat(64) + "\n", false]]) {
+    for (const [how, b] of [["FIRST slices", FIRST], ["one slice", ALL]]) {
+      const r = new Render(out, "", () => 0);
+      const raw = [];
+      for (let s; (s = r.next(b)); ) raw.push(...s);
+      check(raw.some((x) => x.chunk) === want && raw.filter((x) => !x.chunk).map((x) => x.text).join("") === out,
+        `${what}, ${how}: ${want ? "a chunk" : "no chunk"} (${raw.filter((x) => x.chunk).length})`);
+    }
+  }
   // (a page holds at most PAGE_RUNS runs, so one on screen lays out quickly: a line of 2 000 one-unit style runs makes
   // pages of at most 512 runs, the text unchanged, every join at a cluster boundary, at four slicings)
   {
