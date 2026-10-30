@@ -549,6 +549,14 @@ const C1 = "clientA1", C2 = "clientB1";
   const c4 = await claim(no, D1, "cMerge4", { merge: "exact-v1" });
   check(c4.claim?.merge === "legacy", "merge: the switch off: made legacy whatever is asked: " + J(c4));
   no.s.close();
+  // (the creating claim's answer lost, then sent again: the same document, the same mode, made once)
+  on.controls.fake("doc_claim", { drop: true });
+  const D7 = "0000000000d7";
+  n.tell({ t: "doc_claim", epoch: 1, doc: D7, client: "cMergeL", merge: "exact-v1" });
+  await sleep(30);
+  const made7 = J(on.controls.doc(M.account, D7));
+  const re7 = await claim(n, D7, "cMergeL", { merge: "exact-v1" });
+  check(made7 !== "null" && re7.claim?.merge === "exact-v1" && re7.claim.next_cseq === 1 && J(on.controls.doc(M.account, D7)) === made7, "merge: a creating claim's answer lost, then resent: made once, exact-v1, as before: " + J(re7));
   // (never changed after: no upgrade, no downgrade)
   const up = await claim(n2, D2, "cMerge6", { merge: "exact-v1" }), down = await claim(n2, D1, "cMerge7", { merge: "legacy" });
   check(up.claim?.merge === "legacy" && down.claim?.merge === "exact-v1", "merge: a later claim's merge changes nothing: legacy stays legacy, exact-v1 stays exact-v1: " + J([up.claim, down.claim]));
