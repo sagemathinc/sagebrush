@@ -1,0 +1,2 @@
+10-30 09:46:00.500  1234  1234 I RustStdout: sagebrush app starting
+10-30 09:46:00.900  1234  1250 W System.err: java.lang.UnsatisfiedLinkError: dlopen failed: library "libsagebrush_app_lib.so" not found
