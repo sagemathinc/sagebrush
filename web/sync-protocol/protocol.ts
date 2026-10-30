@@ -75,8 +75,6 @@ export const CODES = Object.freeze([
   "invalid", "exists", "missing", "conflict", "order", "epoch", "unknown_doc", "forbidden",
   "limit", "storage_full", "rate", "readonly", "deleting", "busy",
   "unknown_client", "fenced", "stale_epoch", "unavailable",
-  // (a document whose merge mode this client doesn't run: doc-protocol.ts mergeAdmits; plan-merge-align r3.2 §3)
-  "merge_mode",
 ] as const);
 export type Code = (typeof CODES)[number];
 const KNOWN_CODES: ReadonlySet<string> = new Set(CODES);
@@ -247,9 +245,7 @@ export function checkOp(v: unknown): Op {
 /** A patch's checked envelope: its graph, beside its opaque payload. */
 export interface Env { cseq: number; id: string; parents: string[]; size: number; blobs?: string[] }
 export interface Head { epoch: number; seq: number }
-/** `merge`: the mode asked for if this batch creates the document (cloud creates a document with its first batch; the
- * reference server with its first claim): doc-protocol.ts checkMergeRequest and creationMode. */
-export interface Batch { owner?: string; doc: string; kind?: DocKind; epoch: number; expect_head?: Head; patches: Env[]; body: Uint8Array; merge?: "legacy" | "exact-v1" }
+export interface Batch { owner?: string; doc: string; kind?: DocKind; epoch: number; expect_head?: Head; patches: Env[]; body: Uint8Array }
 
 /** patchflow's PatchId: 11 base-36 characters of time, "_", the client's id (patch-id.js). */
 const PATCH_ID = /^[0-9a-z]{11}_[0-9A-Za-z_-]{1,64}$/;
@@ -314,10 +310,6 @@ export function checkBatch(v: Record<string, unknown>, opts: { bodyKey?: string 
   if (has(v, "owner")) b.owner = v.owner as string;
   if (has(v, "kind")) b.kind = v.kind as DocKind;
   if (has(v, "expect_head")) b.expect_head = checkHead(v.expect_head, "batch: expect_head");
-  if (has(v, "merge")) {
-    if (v.merge !== "legacy" && v.merge !== "exact-v1") throw invalid('batch: merge, "legacy" or "exact-v1"');
-    b.merge = v.merge;
-  }
   return b;
 }
 
