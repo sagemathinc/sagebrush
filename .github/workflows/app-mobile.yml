@@ -147,6 +147,10 @@ jobs:
           n=$(unzip -p "$apk" lib/arm64-v8a/libsagebrush_app_lib.so | grep -c -a -F 'files/selftest' || true)
           [ "${n:-0}" -gt 0 ] || { echo "FAIL: the debug .so has no 'files/selftest' (the release job's check would be vacuous)"; exit 1; }
           echo "ok: the debug .so has the self-test hook ($n matching lines)"
+          # (and the debug-only server log of the COI diagnosis, lib.rs log_request)
+          n=$(unzip -p "$apk" lib/arm64-v8a/libsagebrush_app_lib.so | grep -c -a -F '[localhost]' || true)
+          [ "${n:-0}" -gt 0 ] || { echo "FAIL: the debug .so has no '[localhost]' (the release job's check would be vacuous)"; exit 1; }
+          echo "ok: the debug .so has the server log ($n matching lines)"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sagebrush-android-debug
@@ -285,6 +289,8 @@ jobs:
           if grep -F '.debug_' /tmp/sections.txt; then echo "FAIL: the release .so has debug sections"; exit 1; fi
           n=$(grep -c -a -F 'files/selftest' /tmp/lib.so) || [ $? = 1 ]
           [ "$n" = 0 ] || { echo "FAIL: the release .so has the debug-only self-test hook (count '$n')"; exit 1; }
+          n=$(grep -c -a -F '[localhost]' /tmp/lib.so) || [ $? = 1 ]
+          [ "$n" = 0 ] || { echo "FAIL: the release .so has the debug-only server log (count '$n')"; exit 1; }
           {
             echo "ok: not debuggable; usesCleartextTraffic=false; $so stripped; no self-test hook"
             grep -m1 '^package:' /tmp/badging.txt
