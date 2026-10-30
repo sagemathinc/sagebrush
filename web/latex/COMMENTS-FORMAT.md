@@ -40,7 +40,12 @@ A thread whose status is `ambiguous` has its `candidates` (the places its text n
 }
 ```
 
-- A reader must refuse a `version` it doesn't know.
+- A reader must refuse a `version` it doesn't know (only the number 1 is version 1).
+- The file is strict JSON, read and written as JavaScript's `JSON.parse` and `JSON.stringify` do (numbers as doubles,
+  properties in JavaScript's order). A reader refuses a file whose threads and messages aren't objects, or whose
+  `created`, message `time` and an anchor's `quote`, `prefix` and `suffix` aren't strings, or whose `resolved` and
+  `deleted` values aren't booleans; other fields
+  it doesn't know are kept as they are.
 - Offsets are JavaScript string indices (UTF-16 code units) into the `.tex` text.
 - Authors are `person:<name>` or `agent:<name>`; an agent's messages are shown with an "agent" label.
 

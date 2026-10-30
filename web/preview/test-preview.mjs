@@ -83,6 +83,8 @@ test('prepare preserves hashed engine HTML, injects banner/config and disables S
     assert.match(bytes('sw.js'), /unregister/);
     assert.doesNotMatch(bytes('sw.js'), /fetch|caches/);
     assert.doesNotMatch(bytes('.preview/headers/index.html.json'), /https:/);
+    // (exactly: the page's origin, data: and blob:, and the agent pairing's loopback socket; no other ws: or wss:)
+    assert.equal(/connect-src [^;"]+/.exec(JSON.parse(bytes('.preview/headers/index.html.json')).csp)[0], "connect-src 'self' data: blob: ws://127.0.0.1:* ws://localhost:*");
     symlinkSync(join(dir, 'index.html'), join(dir, 'leak.txt'));
     assert.throws(() => prepare(dir, 'latex.sagebrush.cloud', []), /symlink/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -373,4 +375,8 @@ test('eight 16 MiB non-HTML buffers bound active transport input to 128 MiB', as
 test('phone preview notice preserves controls, opens metadata modal and dismisses for this session under CSP', { timeout: 60000 }, async () => {
   const geometry = await checkNoticeBrowser();
   assert.ok(geometry.controlsBottom <= geometry.top);
+});
+test("the site's page policy: connect-src exactly as stated, the agent pairing's loopback socket included", async () => {
+  const { pagePolicy } = await import('../csp-policy.mts');
+  assert.equal(/connect-src [^;]+/.exec(pagePolicy())[0], "connect-src 'self' data: blob: https: http: ws://127.0.0.1:* ws://localhost:*");
 });

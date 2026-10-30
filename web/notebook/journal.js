@@ -56,6 +56,18 @@ export const docHash = (doc) => bytesHash(new TextEncoder().encode(canonical(ver
 /** Whether this page syncs notebooks' contents (DEV's docsync switch, set by the page once the journal is active): a
  * writer's load then starts a notebook's synced history (2c-2). */
 export const DOC_SYNC = { on: false, saved: null, pull: null, stoppedOf: null };
+/** What a notebook that arrived by sync but has no history here yet says (2c-3), its pull asked for if this page can:
+ * why, if this page's doc sync stopped it (it won't arrive); that this page's notebook sync isn't on, if there is no
+ * pull to ask (the switch decided off, or failed); else that it is still arriving. */
+export const STILL_ARRIVING = "This notebook is still arriving from sync: try again in a moment";
+export const SYNC_NOT_ON = "Notebook sync isn't on in this page: reload it";
+export function arrivingSay(id, ds = DOC_SYNC) {
+  const stopped = ds.stoppedOf?.(id) ?? null;
+  if (stopped) return `This notebook can't sync here: ${stopped.code}`;
+  if (typeof ds.pull !== "function") return SYNC_NOT_ON;
+  try { ds.pull(id); } catch {}
+  return STILL_ARRIVING;
+}
 // (`saved(id)`: told after a synced notebook's save is kept, and after its synced history starts, so the page's DocSync
 // sends it (DEV's switch, web/workspace/doc-sync-switch.ts); null: nobody to tell)
 

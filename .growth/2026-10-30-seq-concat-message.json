@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "A sequence's concat refuses in CPython's words (src/runtime/ops.ts, binaryDunder): str/list/tuple, bytes/bytearray and array's messages after both operands' methods. Measured locally with CI's bun 1.4.4 tool: master 1d16d765 (with #344 and #348) against this branch merged; cli/pyjs.cjs +558 marked 600 (42 B for master's drift, within the 1024 B slack; it was +390 on f054a81c), engine/sagebrush-worker.js +356 exact.",
+  "bytes": {
+    "cli/pyjs.cjs": 600,
+    "engine/sagebrush-worker.js": 356
+  }
+}

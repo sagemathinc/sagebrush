@@ -10,7 +10,8 @@
 //      the DECLARED list: board/examples/source.json, the generated board of the repository's own sources (by folder:
 //      src, lib, web, scripts, ...), whose differing nodes may only be the groups of the source files this change
 //      touches (--changed FILE: one repository path per line, made from the two trees' manifests), every other field
-//      equal;
+//      equal; and the reviewed differences (normalizers(): the page policy's loopback WebSockets in _headers and sw.js,
+//      and the commit docs-index-python.json's source links name), each undone exactly before comparing;
 //   2. PROD holds no LaTeX-owned file (named sagebrush-latex*) and no page or script names one;
 //   3. the DEV bootstrap: index.html's growth over PROD, at most DEV_BOOT.raw bytes minified and DEV_BOOT.gzip gzip
 //      (level 9);
@@ -46,6 +47,52 @@ function inventory(web) {
   }
   return out;
 }
+// The reviewed differences of check 1: for each file, (base text, PROD text, base's file beside it, PROD's) -> true only
+// if undoing exactly the reviewed change in PROD's text gives base's bytes (scripts/test-site-asset-budget.mjs: each one, and what each must refuse)
+function normalizers() {
+  const PAGE = "connect-src 'self' data: blob: https: http:", LOOPBACK = " ws://127.0.0.1:* ws://localhost:*";
+  const PAGE_PATHS = new Set(["/", "/index.html", "/board/*", "/embed/*", "/s/*"]);
+  const once = (s, from, to) => s.split(from).length === 2 ? s.replace(from, to) : null;
+  const SOURCE = /"source":"https:\/\/github\.com\/sagemathinc\/sagebrush\/blob\/([0-9a-f]{40})\//g;
+  return {
+    // (each rule: a path line, then its indented headers; only a page path's Content-Security-Policy line, once)
+    "_headers": (a, b) => {
+      let path = null, n = 0;
+      const out = b.split("\n").map((l) => {
+        if (!/^\s/.test(l)) { path = l.startsWith("/") ? l.trim() : null; return l; }
+        if (!PAGE_PATHS.has(path) || !/^\s+Content-Security-Policy: /.test(l)) return l;
+        const u = once(l, PAGE + LOOPBACK + ";", PAGE + ";");
+        if (u === null) return l;
+        n++;
+        return u;
+      }).join("\n");
+      return n > 0 && out === a;
+    },
+    // (the one copy, inside the shell's "Content-Security-Policy" header value; VERSION; and the docs index's
+    //  SHA-256, only where each side's is that side's file's)
+    "sw.js": (a, b, baseFile, prodFile) => {
+      const at = b.indexOf(PAGE + LOOPBACK + ";"), key = b.lastIndexOf('"Content-Security-Policy":"', at);
+      if (at < 0 || key < 0 || b.slice(key + 27, at).includes('"')) return false;
+      let u = once(b, PAGE + LOOPBACK + ";", PAGE + ";");
+      const docs = (s) => [...s.matchAll(/"docs-index-python\.json":\{"sha256":"([0-9a-f]{64})"/g)];
+      const da = docs(a), db = docs(u ?? "");
+      if (da.length !== db.length || da.length > 1) return false;
+      if (db.length === 1 && db[0][1] !== da[0][1]) {
+        const fa = baseFile("docs-index-python.json"), fb = prodFile("docs-index-python.json");
+        if (!fa || !fb || da[0][1] !== sha(fa) || db[0][1] !== sha(fb)) return false;
+        u = u.replace(db[0][0], da[0][0]);
+      }
+      const v = (s) => s.replace(/^const VERSION = "[0-9a-f]{16}";$/m, 'const VERSION = "";');
+      return u !== null && v(u) === v(a);
+    },
+    // (the commit in "source" links only, one commit on each side)
+    "docs-index-python.json": (a, b) => {
+      const refs = (s) => new Set([...s.matchAll(SOURCE)].map((m) => m[1]));
+      const strip = (s) => s.replace(SOURCE, '"source":"https://github.com/sagemathinc/sagebrush/blob/COMMIT/');
+      return refs(a).size === 1 && refs(b).size === 1 && strip(a) === strip(b);
+    },
+  };
+}
 const results = [];
 const check = (name, ok, detail) => { results.push({ name, ok: !!ok, detail }); console.log((ok ? "ok   " : "FAIL ") + name + (detail === undefined ? "" : ": " + JSON.stringify(detail).slice(0, 600))); };
 
@@ -53,8 +100,17 @@ const check = (name, ok, detail) => { results.push({ name, ok: !!ok, detail }); 
 const base = inventory(BASE), prod = inventory(PROD), dev = inventory(DEV);
 const names = [...new Set([...base.keys(), ...prod.keys()])].sort();
 const differing = names.filter((n) => !base.has(n) || !prod.has(n) || sha(readFileSync(base.get(n))) !== sha(readFileSync(prod.get(n))));
-const undeclared = differing.filter((n) => !DECLARED.has(n));
-check("PROD files: the same names and bytes as before the editor, but for the declared ones", undeclared.length === 0, { files: names.length, differing, undeclared });
+// (reviewed differences, each undone exactly before the files are compared byte for byte; anything else fails:
+//  - the page policy's loopback WebSockets, for the paired agent (@sagebrush's ruling, 2026-10-29: loopback only, the
+//    page policy and the preview, the frame and runner policies unchanged): in _headers only in the page paths' rules,
+//    in sw.js only in its one copy of the shell's headers, and sw.js's VERSION (a hash of the shell's files, each of
+//    them compared here itself) and its SHA-256 of docs-index-python.json (that file's own, on each side);
+//  - docs-index-python.json: the commit its source links name (the commit a clean tree is built from), nothing else)
+const normalized = new Map(Object.entries(normalizers()).flatMap(([n, f]) => ROOTS.map((r) => [`${r}/${n}`, [r, f]])));
+const beside = (tree, r) => (rel) => (tree.has(`${r}/${rel}`) ? readFileSync(tree.get(`${r}/${rel}`)) : null);
+const reviewed = (n) => { const [r, f] = normalized.get(n); return f(readFileSync(base.get(n), "utf8"), readFileSync(prod.get(n), "utf8"), beside(base, r), beside(prod, r)); };
+const undeclared = differing.filter((n) => !DECLARED.has(n) && !(normalized.has(n) && base.has(n) && prod.has(n) && reviewed(n)));
+check("PROD files: the same names and bytes as before the editor, but for the declared ones and the reviewed differences", undeclared.length === 0, { files: names.length, differing, undeclared });
 for (const n of differing.filter((x) => DECLARED.has(x))) {
   const a = JSON.parse(readFileSync(base.get(n), "utf8")), b = JSON.parse(readFileSync(prod.get(n), "utf8"));
   const byId = (d) => new Map((d.nodes ?? []).map((x) => [x.id, JSON.stringify(x)]));
@@ -91,8 +147,8 @@ const boot = { raw: di.length - pi.length, gzip: gz(di) - gz(pi) };
 check(`DEV bootstrap delta (index.html): at most ${DEV_BOOT.raw} B minified and ${DEV_BOOT.gzip} B gzip`, boot.raw <= DEV_BOOT.raw && boot.gzip <= DEV_BOOT.gzip, boot);
 // 4. the LaTeX group
 // (the comments' chunk, sagebrush-latex-comments.js, loaded only for comments: its own line below, not in the group)
-const COMMENTS = "dist/sagebrush-latex-comments.js", COMMENTS_DOC = "dist/sagebrush-latex-comments-doc.js";
-const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n) && n !== COMMENTS && n !== COMMENTS_DOC);
+const COMMENTS = "dist/sagebrush-latex-comments.js", COMMENTS_DOC = "dist/sagebrush-latex-comments-doc.js", AGENT = "dist/sagebrush-latex-agent.js";
+const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n) && n !== COMMENTS && n !== COMMENTS_DOC && n !== AGENT);
 const js = group.filter((n) => n.endsWith(".js")), css = group.filter((n) => n.endsWith(".css")), fonts = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(woff2?|ttf|otf)$/.test(n) && !prod.has(n));
 const jsRaw = js.reduce((s, n) => s + statSync(dev.get(n)).size, 0), jsGz = js.reduce((s, n) => s + gz(readFileSync(dev.get(n))), 0);
 // (192 KiB / 64 KiB: @sagebrush's ruling of 2026-10-29, for the ten examples and the embeddable editor; was 180 / 60)
@@ -102,6 +158,9 @@ check("the LaTeX group's JS: at most 192 KiB minified, 64 KiB gzip", js.length >
 if (dev.has(COMMENTS)) { const b = readFileSync(dev.get(COMMENTS)); check("the LaTeX comments' chunk: at most 16 KiB minified, 6 KiB gzip", b.length <= 16 * 1024 && gz(b) <= 6 * 1024, { raw: b.length, gzip: gz(b) }); }
 // 4c. a document's live comments' chunk (comments-doc.ts and the format's core, comments-core.mjs): at most 40 KiB
 //     minified, 14 KiB gzip, fetched only when a .tex has a comments file or someone comments in it
+// 4d. the agent pairing's chunk (web/workspace/agent-ui.ts, the shared module, through web/latex/agent.ts): at most
+//     40 KiB minified, 14 KiB gzip, fetched only to connect an agent (the Agent button, a ?pair= link, a remembered one)
+if (dev.has(AGENT)) { const b = readFileSync(dev.get(AGENT)); check("the LaTeX agent pairing's chunk: at most 40 KiB minified, 14 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 14 * 1024, { raw: b.length, gzip: gz(b) }); }
 if (dev.has(COMMENTS_DOC)) { const b = readFileSync(dev.get(COMMENTS_DOC)); check("the LaTeX document comments' chunk: at most 40 KiB minified, 14 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 14 * 1024, { raw: b.length, gzip: gz(b) }); }
 // (the test build's holds on image and file reads and its comments write, web/latex/page.ts: folded away in the DEV build, so named in none of its files)
 const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && /__sbTex(ImageRead|MountRead|CommentsWrite|SaveWrite)/.test(readFileSync(dev.get(n), "latin1")));

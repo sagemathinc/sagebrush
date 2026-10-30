@@ -360,7 +360,12 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
 // ---- format: version refused, round trip, locateSpan
 {
   check("format-version-refused", throws(() => C.parse(JSON.stringify({ ...C.emptyDoc({}), version: 2 })))?.code === "version");
+  check("format-version-true-refused", throws(() => C.parse(JSON.stringify({ ...C.emptyDoc({}), version: true })))?.code === "version");
   const d = C.addThread(C.emptyDoc({ fid: "a", path: "/p.tex" }), { anchor: C.makeAnchor(TEX, 0, 5), text: "hi", ...H }).doc;
+  // (the fields merge and list rely on, of the format's types; a thread or message not an object: invalid, not a crash)
+  const bad = (f) => { const x = structuredClone(d); f(x); const e = throws(() => C.parse(JSON.stringify(x))); return e?.code === "invalid" && e instanceof C.CommentsError; };
+  check("format-types-refused", [(x) => { delete x.threads[0].created; }, (x) => { x.threads[0].messages[0].time = 5; }, (x) => { x.threads[0].deleted.value = 0; },
+    (x) => { x.threads[0].resolved.value = []; }, (x) => { x.threads[0].messages[0].deleted.value = "no"; }, (x) => { x.threads.push(null); }, (x) => { x.threads[0].messages.push(null); }, (x) => { x.threads[0].anchor.value.quote = null; }, (x) => { delete x.threads[0].anchor.value.prefix; }].every(bad));
   check("format-round-trip", canon(C.parse(C.serialize(d))) === canon(d));
   check("locate-ambiguous-quote", throws(() => C.locateSpan(TEX + "even.", { quote: "even." }))?.code === "ambiguous");
   check("locate-occurrence", C.locateSpan(TEX, { quote: "is even.", occurrence: 2 }).start === TEX.lastIndexOf("is even."));

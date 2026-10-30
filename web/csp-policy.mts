@@ -15,7 +15,9 @@ export function pagePolicy(scriptHashes: string[] = []): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https: http:",
     "font-src 'self' data:",
-    "connect-src 'self' data: blob: https: http:",
+    // (and the agent pairing's socket to sagebrush-mcp on this computer, design/workspace-agent-protocol.md §2: the
+    // loopback addresses only; `http:` doesn't admit ws:, so without these Chrome refuses the connection)
+    "connect-src 'self' data: blob: https: http: ws://127.0.0.1:* ws://localhost:*",
     "worker-src 'self' blob:",
     "media-src 'self' data: blob:",
     "frame-src 'self'",
