@@ -12,11 +12,15 @@
 # Android project, the app's Rust code, Cargo or tauri.conf.json, or the
 # self-test, nightly, and by hand.  Expected 20-30 min; bounded by the job's
 # 40 min, the emulator's 600 s boot timeout and the script's 300 s wait for
-# the report.  A second job, release-starts, checks that the RELEASE build
+# the report.  The emulator job has two legs on API 34: "image" (the image's
+# own WebView, every run) and "current" (a pinned current WebView build
+# sideloaded and selected; the nightly cron, by hand and pull requests, never
+# master pushes).  A second job, release-starts, checks that the RELEASE build
 # starts (see it below); its own 40 min, in parallel.
 #
 # Pinned: the runner image's Android SDK, NDK 27.3.13750724 and JDK 17 (no
-# downloads); Rust 1.99.0; tauri-cli 2.12.4 --locked; Gradle and its
+# downloads); the current leg's one download, Chromium's snapshot
+# AndroidDesktop_x64/1727419, by the sha256 of its zip and of its APK; Rust 1.99.0; tauri-cli 2.12.4 --locked; Gradle and its
 # dependencies through the committed checksums (app/src-tauri/gen/android);
 # reactivecircus/android-emulator-runner v2.38.0 by commit; the system image
 # system-images;android-34;google_apis;x86_64 and the stable emulator, which
