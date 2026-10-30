@@ -80,6 +80,13 @@ def test_vectors():
         same(err(lambda: LC.parse(c["in"], {"fid": "f9", "path": "/q.tex"})), c["out"], "parse %d" % i)
     for i, c in enumerate(V["serialize"]):
         same(LC.serialize(c["doc"]), c["out"], "serialize %d" % i)
+    # (a file's literal JSON: what JSON.parse refuses, and the exact text, snapshot hash and file written back)
+    def lit(s):
+        doc = LC.parse(s)
+        return {"json": LC.js_json(doc), "sha": LC.sha256(LC.js_json(doc)), "file": LC.serialize(doc)}
+    for i, c in enumerate(V["literal"]):
+        g, w = err(lambda: lit(c["in"])), c["out"]
+        assert (g.get("error") or {}).get("code") == (w.get("error") or {}).get("code") and g.get("ok") == w.get("ok"), "literal %d %r:\n got  %r\n want %r" % (i, c["in"][:60], g, w)
     return sum(len(V[k]) for k in V if k != "about")
 
 
@@ -92,6 +99,7 @@ class Page:
         self.files = {}
         self.before_write = None
         self.requests = []
+        self.timeouts = []
 
     def put(self, path, text):
         rev = self.files.get(path, (None, 0))[1] + 1
@@ -99,6 +107,7 @@ class Page:
 
     def request(self, method, params, timeout):
         self.requests.append(method)
+        self.timeouts.append((method, params.get("path"), timeout))
         verb, p = method.split(".", 1)[1], params.get("path")
         entry = lambda: {"path": p, "kind": "file"}
         if verb == "read":
@@ -233,9 +242,126 @@ def test_add_and_conflicts():
     assert c["offsets"]["start"] == TEX.index("The sum") and c["range"]["start"]["line"] == 5, c
 
 
+def test_arguments():
+    """Ranges and cursors checked whole before anything is read or written: line and col integers from 1 (not
+    booleans, fractions, zero or negative), no other keys; a cursor's snapshot and after both, in their forms. A
+    refusal is "invalid", with no request to the page and the comments file untouched."""
+    link = Link()
+    link.put(P, "aa\nbb\n")
+    d, tid = LC.add_thread(LC.empty_doc({"path": P}), LC.make_anchor("aa\nbb\n", 0, 2), "first", "person:me")
+    link.put(S, LC.serialize(d))
+    before = link.files[S]
+    pos = lambda line, col: {"line": line, "col": col}
+    bad_ranges = [
+        {"start": {}, "end": {}}, {"start": {"line": 2}, "end": pos(2, 2)}, {"start": pos(2, 1)},
+        {"start": pos(True, 1), "end": pos(2, 2)}, {"start": pos(2, 1), "end": pos(2, False)},
+        {"start": pos(1.5, 1), "end": pos(2, 2)}, {"start": pos(2, 1.0), "end": pos(2, 2)},
+        {"start": pos(2, 0), "end": pos(2, 1)}, {"start": pos(0, 1), "end": pos(2, 1)}, {"start": pos(-1, 1), "end": pos(2, 1)},
+        {"start": dict(pos(2, 1), x=1), "end": pos(2, 2)}, {"start": pos(2, 1), "end": pos(2, 2), "x": 1},
+        {"start": pos("2", 1), "end": pos(2, 2)}, {"start": [2, 1], "end": pos(2, 2)},
+    ]
+    for r in bad_ranges:
+        n = len(link.requests)
+        refused(link, "latex_comments_add", {"path": P, "range": r, "text": "x"}, "invalid")
+        refused(link, "latex_comments_reattach", {"path": P, "thread": tid, "range": r}, "invalid")
+        assert len(link.requests) == n and link.files[S] == before, (r, link.requests[n:])
+    snap = LC.sha256(LC.js_json(d)) + ":" + LC.sha256(LC.units("aa\nbb\n"))
+    for c in [{}, {"snapshot": snap}, {"after": tid}, {"snapshot": snap, "after": 5}, {"snapshot": snap, "after": ""},
+              {"snapshot": snap, "after": None}, {"snapshot": "x:y", "after": tid}, {"snapshot": snap, "after": tid, "x": 1}, "c"]:
+        n = len(link.requests)
+        refused(link, "latex_comments_list", {"path": P, "cursor": c}, "invalid")
+        assert len(link.requests) == n, c
+    # (in range: a column past the line's end is its end; a well-formed cursor of another snapshot is stale)
+    ok(link, "latex_comments_add", {"path": P, "range": {"start": pos(2, 1), "end": pos(2, 9)}, "text": "x"})
+    assert [t["anchor"]["value"]["quote"] for t in LC.parse(link.files[S][0])["threads"]] == ["aa", "bb"]
+    refused(link, "latex_comments_list", {"path": P, "cursor": {"snapshot": snap, "after": tid}}, "stale")
+
+
+class Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+class HeldIo:
+    """A comments file whose reads and writes each take `cost` seconds of a fake clock, recording the
+    timeout each was given; write_fails(n) -> an exception for the n-th write, or None."""
+
+    def __init__(self, clock, cost, write_fails=lambda n: None, lands=False):
+        self.clock, self.cost, self.write_fails, self.lands = clock, cost, write_fails, lands
+        self.content, self.rev, self.calls = None, 0, []
+
+    def read(self, timeout=None):
+        self.calls.append(("read", self.clock.t, timeout))
+        self.clock.t += self.cost
+        return self.content, (self.rev or None)
+
+    def write(self, content, base, timeout=None):
+        self.calls.append(("write", self.clock.t, timeout))
+        self.clock.t += self.cost
+        e = self.write_fails(sum(1 for c in self.calls if c[0] == "write"))
+        if e is None or self.lands:
+            self.content, self.rev = content, self.rev + 1
+        if e is not None:
+            raise e
+
+
+def test_deadline():
+    """One 10 s deadline over every step, as the JS core's: each read and write gets the time left, nothing
+    starts after it, and a write that failed uncertainly is reconciled by a read of its own 2 s bound."""
+    add = lambda d: LC.add_thread(d, LC.make_anchor(TEX, 0, 5), "x", "agent:a")
+    conflict = LC.CommentsError("conflict", "changed")
+    # conflicts every time, each step 1.5 s: the time left shrinks, and nothing starts once it is gone
+    clk = Clock()
+    io = HeldIo(clk, 1.5, lambda n: conflict)
+    e = err(lambda: LC.update(io, add, sleep=lambda s: setattr(clk, "t", clk.t + s), clock=clk))
+    assert e["error"]["code"] == "busy", e
+    assert all(t is not None and abs(t - (10.0 - at)) < 1e-9 for _, at, t in io.calls), io.calls
+    assert all(at < 10.0 for _, at, _ in io.calls), io.calls
+    # a write that times out but landed: reconciled, by a read bounded at 2 s
+    clk = Clock()
+    io = HeldIo(clk, 1.0, lambda n: TimeoutError("no answer"), lands=True)
+    r = LC.update(io, add, clock=clk)
+    assert r.get("reconciled") is True and io.calls[-1][0] == "read" and io.calls[-1][2] == LC.RECONCILE_S, (r, io.calls)
+    # a write that times out and didn't land: the failure stands; past the deadline, "busy"
+    clk = Clock()
+    io = HeldIo(clk, 1.0, lambda n: TimeoutError("no answer"))
+    try:
+        LC.update(io, add, clock=clk)
+        assert False, "a failed write that didn't land must not be reported saved"
+    except TimeoutError:
+        pass
+    assert io.content is None and [c[0] for c in io.calls] == ["read", "write", "read"], io.calls
+    clk = Clock()
+    io = HeldIo(clk, 6.0, lambda n: TimeoutError("no answer"))
+    e = err(lambda: LC.update(io, add, clock=clk))
+    assert e["error"]["code"] == "busy" and io.calls[-1] == ("read", 12.0, LC.RECONCILE_S), (e, io.calls)
+    # the tools: every request on the comments file is given the time left, never the 60 s default
+    link = Link()
+    link.put(P, TEX)
+    ok(link, "latex_comments_add", {"path": P, "quote": "Let $n$", "text": "x"})
+    side = [t for m, p, t in link.timeouts if p == S]
+    assert side and all(t <= 10.0 for t in side), link.timeouts
+
+
+def test_json():
+    """The file's JSON as JavaScript's: NaN and Infinity refused; 1.0 an integer; numbers written as
+    JSON.stringify writes them (the literal vectors cover the bytes)."""
+    plain = LC.js_json(LC.empty_doc({}))
+    for c in ("NaN", "Infinity", "-Infinity"):
+        assert err(lambda: LC.parse(plain.replace("{", '{"x":%s,' % c, 1)))["error"]["code"] == "invalid", c
+    assert LC.js_json({"x": 1.0, "y": 1e-7, "z": 1e21, "w": -0.0, "v": 1e20}) == '{"x":1,"y":1e-7,"z":1e+21,"w":0,"v":100000000000000000000}'
+    assert LC._is_int(LC.js_parse("1.0")) and LC._is_int(LC.js_parse("1e300")) and not LC._is_int(LC.js_parse("1.5")) and not LC._is_int(True)
+
+
 if __name__ == "__main__":
     n = test_vectors()
     test_tools()
     test_workflow()
     test_add_and_conflicts()
+    test_arguments()
+    test_deadline()
+    test_json()
     print("ok: LaTeX comments in Python (%d conformance vectors, the tools and the agent's workflow)" % n)
