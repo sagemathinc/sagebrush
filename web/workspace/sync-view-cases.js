@@ -106,10 +106,21 @@ async function collisions() {
   const theirs = await entry(w, "/x.txt"), ours = await byIdent(w, mine.fid);
   check(theirs?.fid === fid && theirs.remote, `the remote create has /x.txt (${J(theirs)})`);
   check(ours?.path === "/x (2).txt" && !ours.remote && (await w.contents(ours)) !== undefined, `the local one is /x (2).txt, its bytes its own (${ours?.path})`);
+  check(ours?.renamed?.from === "/x.txt" && ours.renamed.to === "/x (2).txt" && !theirs.renamed, `the local one reads as renamed by the index, from /x.txt; the remote one doesn't (${J(ours?.renamed)}, ${J(theirs?.renamed)})`);
   // (then its echo, as the server reduced it: at /x (2).txt there too; confirmed, and nothing moves)
   await apply([echo(rec)]);
   await ob.confirmed([rec.dseq]);
   check((await byIdent(w, mine.fid))?.path === "/x (2).txt" && (await entry(w, "/x.txt"))?.fid === fid, "its echo: both where they were");
+}
+
+async function theirRenameNotOurs() {
+  // (sync-docs' N-AD-1: another device's entry renamed by its owner to "y (2)" is no rename of ours by the index)
+  const { w, op, apply } = await setup();
+  const fid = hex(16);
+  await apply([op({ op: "create", path: "/y.txt", kind: "file", fid, sha256: SHA("d"), size: 1 })]);
+  await apply([op({ op: "rename", path: "/y.txt", to: "/y (2).txt", kind: "file", fid })]);
+  const e = await entry(w, "/y (2).txt");
+  check(e?.fid === fid && e.remote && !e.renamed && !(await entry(w, "/y.txt")), `another device's own rename to "/y (2).txt": moved, not marked renamed (${J(e)}; listed ${J((await w.list("/", { recursive: true })).map((x) => [x.path, x.fid === fid, x.remote, x.renamed]))})`);
 }
 
 async function intentsKept() {
@@ -409,7 +420,7 @@ export async function run(wide = "") {
     try { await bigForget(wide === "forget-wide"); } catch (e) { check(false, `bigForget: threw ${e?.stack ?? e}`); }
     return results;
   }
-  for (const t of [remoteCreate, remoteMoves, collisions, intentsKept, keptNotDeleted, traceA4, traceA3, nCasRestartPins, drainOrder, journalCursorReplaced, () => bigMove(wide)]) {
+  for (const t of [remoteCreate, remoteMoves, collisions, theirRenameNotOurs, intentsKept, keptNotDeleted, traceA4, traceA3, nCasRestartPins, drainOrder, journalCursorReplaced, () => bigMove(wide)]) {
     try { await t(); } catch (e) { check(false, `${t.name}: threw ${e?.stack ?? e}`); }
   }
   return results;
