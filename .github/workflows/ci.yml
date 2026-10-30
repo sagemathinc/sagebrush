@@ -784,6 +784,7 @@ jobs:
               node web/test-replay.mjs
               node web/test-timetravel.mjs
               node web/test-widgets.mjs
+              node web/test-input.mjs
               node web/test-graph-view.mjs
               node web/test-kernels.mjs
               node web/test-time.mjs

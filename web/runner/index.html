@@ -14,7 +14,7 @@ From then on messages go page <-> this frame <-> the worker.  A file the
 worker needs (the engine, a shared collection's file) is fetched by the page
 and copied to the worker through a SharedArrayBuffer while it waits (its
 reads are synchronous).  The interrupt flag stays here: the page asks for
-Stop by message.
+Stop by message, and input()'s answers too (design/runner.md, How 7).
 -->
 <script>
 (() => {
@@ -54,8 +54,36 @@ Stop by message.
         Atomics.notify(ctrl, 0);
       };
       let flag = null;
+      // input() (design/runner.md, How 7): open requests by key, {id: the run,
+      // buffer}; an answer writes only to the one its key and run name.  A
+      // request is over at its answer, its run's next question or end, a Stop.
+      const inputs = new Map();
+      const retire = (id) => {
+        for (const [key, e] of inputs) if (id === undefined || e.id === id) inputs.delete(key);
+      };
+      const giveInput = (buffer, text) => {
+        const ctl = new Int32Array(buffer, 0, 2);
+        if (Atomics.load(ctl, 0) !== 0) return;
+        if (typeof text !== "string") {
+          Atomics.store(ctl, 0, 2);
+        } else {
+          const max = buffer.byteLength - 8, enc = new TextEncoder();
+          let s = text, bytes = enc.encode(s);
+          while (bytes.length > max) bytes = enc.encode((s = Array.from(s).slice(0, -Math.max(1, Math.ceil((bytes.length - max) / 4))).join("")));
+          new Uint8Array(buffer, 8, bytes.length).set(bytes);
+          Atomics.store(ctl, 1, bytes.length);
+          Atomics.store(ctl, 0, 1);
+        }
+        Atomics.notify(ctl, 0);
+      };
       w.onmessage = (m) => {
         let d = m.data;
+        if (d && d.input && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength >= 8) {
+          retire(d.id);
+          if (typeof d.input.key === "string") inputs.set(d.input.key, { id: d.id, buffer: d.buffer });
+          d = { ...d, buffer: null };
+        }
+        if (d && (d.done || d.skipped)) retire(d.id);
         if (d && typeof d.brokerFetch === "string") {
           const off = Number(d.offset) || 0;
           const have = files.get(d.brokerFetch);
@@ -78,11 +106,20 @@ Stop by message.
       port.onmessage = (m) => {
         const d = m.data;
         if (d && typeof d.runnerInterrupt === "number") {
+          retire(); // (every open input() request is over)
           if (flag) {
             Atomics.store(flag, 1, d.runnerInterrupt);
             // (bit 0, and the word notified: a time.sleep waits on it, src/runtime/interrupt.ts requestCtrlC)
             Atomics.or(flag, 0, 1);
             Atomics.notify(flag, 0);
+          }
+          return;
+        }
+        if (d && typeof d.runnerInput === "number") {
+          const e = typeof d.key === "string" ? inputs.get(d.key) : undefined;
+          if (e && e.id === d.runnerInput) {
+            inputs.delete(d.key);
+            giveInput(e.buffer, d.text);
           }
           return;
         }
