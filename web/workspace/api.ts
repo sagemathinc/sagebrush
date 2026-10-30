@@ -2784,10 +2784,21 @@ export class Workspace {
   /** Every data file not in Trash, with its bytes (where they are): what a notebook's interpreter is given when it starts. */
   async dataFiles(): Promise<[string, Uint8Array][]> {
     const all = (await this.list("/", { recursive: true })).filter((e) => e.kind === "file");
+    // (the bytes kept beside the index read in one transaction, not one each: what a kernel's start waits for;
+    // any other, or all of them if that transaction fails, read one at a time as before)
+    const kept = all.filter((e) => e.migrated && !e.remote && e.fid !== undefined);
+    const got = new Map<Entry, unknown>();
+    if (kept.length) {
+      const read = await inTx(this.ws, "fileBytes", "readonly", (tx) => {
+        const st = tx.objectStore("fileBytes");
+        return Promise.all(kept.map((e) => req(st.get(e.fid!))));
+      }).catch(() => null);
+      if (read) kept.forEach((e, i) => got.set(e, read[i]));
+    }
     const out: [string, Uint8Array][] = [];
     for (const e of all) {
-      const b = await this.contents(e).catch(() => undefined);
-      if (b !== undefined) out.push([e.path, b]);
+      const b = got.has(e) ? got.get(e) : await this.contents(e).catch(() => undefined);
+      if (b !== undefined) out.push([e.path, b as Uint8Array]);
     }
     return out;
   }

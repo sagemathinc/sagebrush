@@ -1,0 +1,1 @@
+{"v": 1, "reason": "Workspace.dataFiles reads fileBytes in one transaction (the per-file path kept as the fallback) in web/workspace/api.ts, in the CLI bundle. Measured locally with CI's bun 1.4.4 (size-record.sh, under ptest) on master 1d668a00 and this commit: cli/pyjs.cjs 29249693 -> 29250193 = +500.", "bytes": {"cli/pyjs.cjs": 500}}
