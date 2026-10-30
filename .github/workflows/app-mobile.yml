@@ -121,14 +121,27 @@ jobs:
           name: sagebrush-android-debug
           path: app/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
-      # (the generated project, without its build outputs, for the follow-up
-      # that commits it with the Gradle checksums)
+      # (the checksums of everything Gradle downloads, for the follow-up that
+      # commits gen/android: the same build again, without the Rust step, whose
+      # library is in jniLibs already, with Gradle writing
+      # gradle/verification-metadata.xml as it resolves)
+      - name: Gradle's verification metadata (sha256)
+        working-directory: app/src-tauri/gen/android
+        run: |
+          ./gradlew --no-daemon --write-verification-metadata sha256 assembleUniversalDebug -x rustBuildUniversalDebug
+          ls -l gradle/verification-metadata.xml
+          sha256sum gradle/verification-metadata.xml gradle/wrapper/gradle-wrapper.jar
+      # (the generated project, with its dotfiles (the template's .gitignore
+      # files) and the metadata, without build outputs or the Rust library, for
+      # the follow-up that commits it with the Gradle checksums)
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: android-project-generated
+          include-hidden-files: true
           path: |
             app/src-tauri/gen/android
             !app/src-tauri/gen/android/**/build/**
             !app/src-tauri/gen/android/.gradle/**
+            !app/src-tauri/gen/android/app/src/main/jniLibs/**
           if-no-files-found: warn
