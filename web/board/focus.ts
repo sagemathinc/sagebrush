@@ -28,5 +28,8 @@ export function active(root: HTMLElement): boolean {
   if (a && a !== document.body && root.contains(a)) return true;
   // (the focus in another board: that one's)
   if (a && boards.some((b) => b !== root && b.contains(a))) return false;
+  // (the focus in a page panel that takes its own keys, the terminal's dock (web/shell/panel.ts): no board's, whichever
+  // was last pressed; anywhere in it, its log, grip and buttons as well as its input (board's B363-1))
+  if (a?.closest(".sb-term")) return false;
   return last === root;
 }

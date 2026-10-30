@@ -1427,6 +1427,11 @@ if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/
     // (the panel gives focus back to its opener, else to the page's ⋯ button, #morebtn, as on the notebook page: TP-7)
     const more = document.querySelector<HTMLElement>('#board [data-sbb="menubtn"]');
     if (more && !document.getElementById("morebtn")) more.id = "morebtn";
+    // (a press on the board takes the focus from the dock, so its keys are the board's again: board's B363-1)
+    document.getElementById("board")!.addEventListener("pointerdown", () => {
+      const a = document.activeElement as HTMLElement | null;
+      if (a?.closest(".sb-term")) a.blur();
+    }, true);
     // (open FILE: a notebook or board in a new tab, as the file browser's open in a new tab does)
     const open = async (p: string) => {
       const e = await ws.stat(p);
@@ -1451,7 +1456,7 @@ if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/
     termBtn.onclick = async () => {
       if (!term) {
         const S = await shellSet();
-        if (!S) return alert("The terminal: this site has no shell package set.");
+        if (!S) return alert("The terminal isn't available on this site: it has no shell package set.");
         // (the module, a directory up: a variable, so the bundler leaves it to the browser)
         const mod = "../shell/terminal.js";
         let openTerminal: any;

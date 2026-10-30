@@ -464,6 +464,51 @@ try {
     `board: the prompt above every bottom overlay, the board ending above the dock: ${JSON.stringify(bp)}`);
   r = await run("ps");
   check(/\bboard\b/.test(r?.out ?? "") && /\bterminal\b/.test(r?.out ?? ""), `board: ps lists this tab's board and its terminal: ${JSON.stringify(r?.out)}`);
+  // (B363-1: with the focus anywhere in the dock, its keys are the terminal's: real keys on the log, the grip, a head
+  // button and the input leave the board's document, its selection and its find bar as they were; the grip still
+  // resizes; a click on the board gives the board its keys back)
+  const pause = (ms) => new Promise((res) => setTimeout(res, ms));
+  const rawKey = async (key, code, vk, modifiers = 0) => {
+    for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key, code, windowsVirtualKeyCode: vk, modifiers });
+    await pause(150);
+  };
+  const realClick = async (x, y) => {
+    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 });
+    await pause(250);
+  };
+  const ids = () => evaluate(`window.sagebrush.board.snapshot().doc.nodes.map((nd) => nd.id).join(",")`);
+  const boardState = () => evaluate(`({ ids: window.sagebrush.board.snapshot().doc.nodes.map((nd) => nd.id).join(","),
+    selected: document.querySelectorAll("#board .board-item.selected").length, find: !!document.querySelector('#board [data-sbb="find"]:not([hidden])') })`);
+  await evaluate(`window.sagebrush.board.load({ title: "Keys", nodes: [{ id: "a", title: "Alpha", x: 0, y: 0 }, { id: "b", title: "Beta", x: 300, y: 0 }] })`);
+  await pause(800);
+  // (Edit on: a new board opens in it; turned on only if it isn't)
+  await evaluate(`(() => { const e = document.querySelector('#board [data-sbb="edit"]'); if (e.getAttribute("aria-pressed") !== "true") e.click(); })()`);
+  await pause(400);
+  const at = await evaluate(`(() => { const r = window.board.clientRect("a"); return { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 20) }; })()`);
+  await realClick(at.x, at.y);
+  const k0 = await boardState();
+  check(k0.ids === "a,b" && k0.selected === 1 && !k0.find, `board: two items, one selected, in Edit: ${JSON.stringify(k0)}`);
+  const logAt = await evaluate(`(() => { const r = document.querySelector(".sb-term-log").getBoundingClientRect(); return { x: r.left + 40, y: r.top + 10 }; })()`);
+  const KEYS = [["Delete", "Delete", 46], ["Backspace", "Backspace", 8], ["ArrowUp", "ArrowUp", 38], ["ArrowLeft", "ArrowLeft", 37], ["z", "KeyZ", 90, 2], ["y", "KeyY", 89, 2], ["f", "KeyF", 70, 2]];
+  for (const [where, focus] of [["the log", null], ["the grip", ".sb-term-grip"], ["the Hide button", ".sb-term-hide"], ["the input", ".sb-term textarea"]]) {
+    if (focus) await evaluate(`document.querySelector(${JSON.stringify(focus)}).focus()`);
+    else await realClick(logAt.x, logAt.y);
+    const inDock = await evaluate(`!!document.activeElement?.closest(".sb-term")`);
+    const h0 = await evaluate(`document.querySelector(".sb-term").getBoundingClientRect().height`);
+    for (const k of KEYS) await rawKey(...k);
+    const s = await boardState();
+    const h1 = await evaluate(`document.querySelector(".sb-term").getBoundingClientRect().height`);
+    check(inDock && s.ids === "a,b" && s.selected === 1 && !s.find && (where !== "the grip" || h1 > h0),
+      `board: real keys with the focus on ${where} are the terminal's (Delete, Backspace, arrows, Ctrl+Z, Ctrl+Y, Ctrl+F): ${JSON.stringify({ inDock, ...s, h0, h1 })}`);
+  }
+  await evaluate(`document.querySelector(".sb-term textarea").value = ""`);
+  // (a click on the other, unselected item: selected by it, then Delete deletes it)
+  const atB = await evaluate(`(() => { const r = window.board.clientRect("b"); return { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 20) }; })()`);
+  await realClick(atB.x, atB.y);
+  await rawKey("Delete", "Delete", 46);
+  check((await ids()) === "a", `board: a click on the board gives it its keys back (Delete deletes the item clicked): ${await ids()}, focus ${await evaluate(`document.activeElement?.className || document.activeElement?.tagName`)}`);
+  // (the focus back in the dock, where hide gives it back to the ⋯ button from)
+  await evaluate(`document.querySelector(".sb-term textarea").focus()`);
   await evaluate(`document.querySelector(".sb-term-hide").click()`);
   const bf = await evaluate(`({ hidden: document.querySelector(".sb-term").hidden, focus: document.activeElement?.dataset?.sbb ?? document.activeElement?.tagName,
     boardBottom: document.getElementById("board").getBoundingClientRect().bottom })`);
