@@ -152,6 +152,18 @@ jobs:
           sips -g pixelWidth -g pixelHeight -g hasAlpha icons/icon.png
           cargo tauri icon icons/icon.png --ios-color '#ffffff' -o "$RUNNER_TEMP/out/icons"
           find "$RUNNER_TEMP/out/icons" -type f | LC_ALL=C sort
+          # (`--ios-color` paints the background but the 1024 px icon keeps an
+          # alpha channel (first run of #379), which the App Store refuses: each
+          # 1024 px iOS icon goes through JPEG, which has no alpha, at its best
+          # quality, and back to PNG; the no-alpha check below is unchanged)
+          while IFS= read -r f; do
+            w=$(sips -g pixelWidth "$f" | awk '/pixelWidth/ {print $2}')
+            [ "$w" = 1024 ] || continue
+            sips -s format jpeg -s formatOptions best "$f" --out "$RUNNER_TEMP/flat.jpg" > /dev/null
+            sips -s format png "$RUNNER_TEMP/flat.jpg" --out "$f" > /dev/null
+            rm "$RUNNER_TEMP/flat.jpg"
+            echo "flattened (no alpha): $f $(sips -g pixelWidth -g pixelHeight -g hasAlpha "$f" | awk 'NR > 1 {printf "%s ", $0}')"
+          done < <(find "$RUNNER_TEMP/out/icons/ios" -name '*.png' -type f | LC_ALL=C sort)
           changed=$(git status --porcelain --untracked-files=all -- icons)
           [ -z "$changed" ] || { echo "FAIL: tauri icon changed the repo's own icons:"; echo "$changed"; exit 1; }
       - name: the tree (tar), its manifest, the versions and what else init changed
