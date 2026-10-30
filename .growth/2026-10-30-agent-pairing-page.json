@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "The page side of agent pairing (web/workspace/agent-*.ts, mounted on the board page behind ?agents): the board page is embedded in the CLI bundle. Measured locally with CI's bun 1.4.4: master 4abf94a0 +13322 B for this branch merged; marker with headroom for the engine wasm's base64 rounding.",
+  "reason": "The page side of agent pairing (web/workspace/agent-*.ts, mounted on the board page behind ?agents): the board page is embedded in the CLI bundle. Measured locally with CI's bun 1.4.4: master 4abf94a0 +13916 B for this branch (head b64cd968); marker with headroom for the engine wasm's base64 rounding.",
   "bytes": {
-    "cli/pyjs.cjs": 13500
+    "cli/pyjs.cjs": 14100
   }
 }
