@@ -11,10 +11,11 @@
 // applyPage), and told to the notebook's history in every tab; the writer then makes the record the merged value
 // (web/notebook/journal.js).  One flight per notebook: a pull and a send of one notebook never overlap here.
 import { applyPage, acked, markSent, readCursor, readJournal, recordClaim, syncedKey, unsent } from "../notebook/journal-rows.js";
-import { IdbPatchStore, openHistoryDb, tellHistory, tellAcked } from "../notebook/stores.js";
+import { IdbPatchStore, openHistoryDb, tellHistory, tellAcked, tellMerge } from "../notebook/stores.js";
 import { makeClientId } from "patchflow";
 import { chainStart, hex, fromHex, verifyChainPage, type ChainedBatch, type ChainState } from "../sync-protocol/doc-protocol";
 import { toB64, fromB64, LIMITS } from "../sync-protocol/protocol";
+import { EXACT_MERGE_CLIENT } from "./merge-client";
 
 /** What the account connection gives document sync: a request and its answer (an `ack`, a `batches`, or an `error`). */
 export interface DocLink {
@@ -154,11 +155,22 @@ export class DocSync {
       if (slot.claimed?.epoch !== epoch || slot.claimed?.client !== slot.client) {
         if (!this.live(id, conn)) return;
         const req = link.reserve();
-        const a = await this.ask(link, req, { t: "doc_claim", owner: link.owner, doc: id, epoch, client: slot.client });
+        // (a client that runs exact merges asks, for a document this claim may make, the mode its start asked (a
+        // .sbreplay restore's legacy), else exact-v1; the server's answer is the document's own mode, recorded once)
+        const ask = EXACT_MERGE_CLIENT ? { merge: (js.start as { asked?: string }).asked ?? "exact-v1" } : {};
+        const a = await this.ask(link, req, { t: "doc_claim", owner: link.owner, doc: id, epoch, client: slot.client, ...ask });
         if (a.t === "error") { this.refused(id, a, conn); return; }
-        const c = a.claim as { client?: string; fgen?: number; next_cseq?: number } | undefined;
+        const c = a.claim as { client?: string; fgen?: number; next_cseq?: number; merge?: unknown } | undefined;
         if (!c || c.client !== slot.client || !Number.isSafeInteger(c.fgen)) return this.stop(id, "invalid", "a claim's answer", conn);
-        await this.tx(id, js.start.n, (st) => recordClaim(st, id, { gen: slot.gen, client: slot.client, epoch, fgen: c.fgen }));
+        if (c.merge !== undefined && c.merge !== "legacy" && c.merge !== "exact-v1") return this.stop(id, "invalid", "a claim's merge mode", conn);
+        const merge = c.merge as "legacy" | "exact-v1" | undefined;
+        try {
+          await this.tx(id, js.start.n, (st) => recordClaim(st, id, { gen: slot.gen, client: slot.client, epoch, fgen: c.fgen, merge }));
+        } catch (e) {
+          return this.stop(id, "invalid", String((e as { refusal?: string; message?: string })?.refusal ?? (e as Error)?.message ?? e), conn);
+        }
+        // (the mode told to this document's open histories, with no patch: they read the next ones with it)
+        if (merge) tellMerge(syncedKey(id, js.start.n), merge);
         continue;
       }
       // (the batch: the patches' envelopes and their payloads, each the stored patch without its time and parents)
@@ -250,6 +262,8 @@ export class DocSync {
       // (a snapshot: keeping the local root, debt and mark across one needs 2c-4: stopped here on DEV (astra's A5))
       if (a.snapshot) return this.stop(id, "snapshot", "a snapshot start is 2c-4's", conn);
       const items = a.items as Record<string, unknown>[];
+      if (a.merge !== undefined && a.merge !== "legacy" && a.merge !== "exact-v1") return this.stop(id, "invalid", "a pull's merge mode", conn);
+      const merge = a.merge as "legacy" | "exact-v1" | undefined;
       if (!items.length) return true;
       const from: ChainState = cursor ? { seq: cursor.after, recv: cursor.recv, chain: fromHex(cursor.chain) } : chainStart(link.owner, id, epoch);
       const page: ChainedBatch[] = items.map((b) => ({ seq: b.seq as number, recv: b.recv as number, epoch, author: String(b.author), writer: String(b.writer), envs: JSON.stringify(b.patches), body: fromB64(b.body, LIMITS.batchBytes), chain: String(b.chain) }));
@@ -268,7 +282,18 @@ export class DocSync {
         }
       }
       const next = { epoch, after: v.state.seq, recv: v.state.recv, chain: hex(v.state.chain) };
-      const out = await this.tx(id, start?.n ?? 1, (st) => applyPage(st, id, { expect: cursor, next, rows, start: start ? undefined : { client: makeClientId() } }));
+      let out: { applied: number };
+      try {
+        out = await this.tx(id, start?.n ?? 1, (st) => applyPage(st, id, { expect: cursor, next, rows, merge, start: start ? undefined : { client: makeClientId() } }));
+      } catch (e) {
+        const why = String((e as { refusal?: string; message?: string })?.refusal ?? (e as Error)?.message ?? e);
+        // (a mode the server says that this history can't take (another than recorded, or exact-v1 over more than
+        // this device's one line): stopped, nothing of the page written; anything else as before)
+        if (/merge mode|exact merges/.test(why)) return this.stop(id, "invalid", why, conn);
+        throw e;
+      }
+      // (the mode first, then the patches: an open history reads them with the mode they were recorded with)
+      if (merge) tellMerge(syncedKey(id, start?.n ?? 1), merge);
       for (const r of rows) tellHistory(syncedKey(id, start?.n ?? 1), r.env);
       this.events.push({ t: "page", doc: id, through: next.after, applied: out.applied });
       if (!a.more) return true;
