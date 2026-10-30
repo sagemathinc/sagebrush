@@ -101,3 +101,70 @@ for label, f in [
         print(label, repr(f()))
     except Exception as e:
         print(label, "ERR", type(e).__name__, e)
+
+
+# arguments read through their truth, index or other protocol keep the
+# subclass's own: only str's methods take a str subclass's argument by value
+class Yes(int):
+    def __bool__(self):
+        return True
+class No(int):
+    def __bool__(self):
+        return False
+class Ix(int):
+    def __index__(self):
+        return 2
+for label, f in [
+    ("int.to_bytes signed=Yes(0)", lambda: int.to_bytes(-1, 1, "big", signed=Yes(0))),
+    ("int.to_bytes signed=No(1)", lambda: int.to_bytes(-1, 1, "big", signed=No(1))),
+    ("J.to_bytes signed=Yes(0)", lambda: J.to_bytes(J(-1), 1, "big", signed=Yes(0))),
+    ("int.from_bytes signed=Yes(0)", lambda: int.from_bytes(b"\xff", "big", signed=Yes(0))),
+    ("str.splitlines keepends=Yes(0)", lambda: str.splitlines(Q("a\nb"), keepends=Yes(0))),
+    ("str.splitlines No(1)", lambda: str.splitlines(Q("a\nb"), No(1))),
+    ("str.expandtabs Ix(5)", lambda: str.expandtabs(Q("a\tb"), Ix(5))),
+    ("str.__getitem__ Ix(5)", lambda: str.__getitem__(Q("abc"), Ix(5))),
+    ("int.__add__ J", lambda: int.__add__(J(1), J(2))),
+    ("float.__mul__ J", lambda: float.__mul__(2.0, J(3))),
+    ("str.center J", lambda: str.center(Q("x"), J(5), Q("*"))),
+]:
+    try:
+        print(label, repr(f()))
+    except Exception as e:
+        print(label, "ERR", type(e).__name__, e)
+
+
+# a str subclass's instance where str's method reads it through a protocol
+# (truth, __index__, formatting) keeps its own; where it reads a str value,
+# its value is taken
+class SB(str):
+    def __bool__(self):
+        return False
+class SI(str):
+    def __index__(self):
+        return 2
+class SF(str):
+    def __format__(self, spec):
+        return "<SF>"
+    def __str__(self):
+        return "<SF str>"
+for label, f in [
+    ("splitlines keepends=SB('x')", lambda: str.splitlines(Q("a\nb"), SB("x"))),
+    ("splitlines keepends=SB('x') kw", lambda: str.splitlines(Q("a\nb"), keepends=SB("x"))),
+    ("__getitem__ SI", lambda: str.__getitem__(Q("abc"), SI("z"))),
+    ("__mul__ SI", lambda: str.__mul__(Q("ab"), SI("z"))),
+    ("center width=SI", lambda: str.center(Q("x"), SI("z"), Q("*"))),
+    ("expandtabs SI", lambda: str.expandtabs(Q("a\tb"), SI("z"))),
+    ("split maxsplit=SI", lambda: str.split(Q("a,b,c,d"), Q(","), SI("z"))),
+    ("find start=SI", lambda: str.find(Q("abcabc"), Q("a"), SI("z"))),
+    ("format SF", lambda: str.format(Q("[{}|{!s}]"), SF("v"), SF("w"))),
+    ("mod SF", lambda: str.__mod__(Q("%s"), SF("v"))),
+    ("split sep= kw", lambda: str.split(Q("a,b"), sep=Q(","))),
+    ("encode encoding= kw", lambda: str.encode(Q("x"), encoding=Q("utf-8"))),
+    ("startswith tuple", lambda: str.startswith(Q("abc"), (Q("x"), Q("a")))),
+    ("__eq__ / __lt__", lambda: (str.__eq__(Q("a"), Q("a")), str.__lt__(Q("a"), Q("b")))),
+    ("__format__ spec", lambda: str.__format__(Q("ab"), Q(">4"))),
+]:
+    try:
+        print(label, repr(f()))
+    except Exception as e:
+        print(label, "ERR", type(e).__name__, e)
