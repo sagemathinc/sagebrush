@@ -1962,6 +1962,10 @@ async function mergeModes() {
     const rs = (await jState(hdb, rid)).start;
     check(rs?.asked === "legacy" && rs.merge === undefined, "merge: a replay restore asks legacy, kept with its start (no mode recorded yet): " + J(rs));
     await close(restored);
+  });
+  await close(w);
+  hdb.close();
+}
 // ---- astra3's A-SA-1 on #353: the root patch measured as doc-sync sends it, under the writer's lock.  Empty code cells:
 // what the history keeps (versionedOf) is under the bound, but the root patch's payload is over it, so the start is
 // refused as too large, the notebook kept and saved here; a small notebook still starts (the control).  The bound is
