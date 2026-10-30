@@ -15,7 +15,7 @@ shift 3
 [ -f "$file" ] || { echo "FAIL: no file $file"; exit 1; }
 # (an explicit status test: errexit ignores a `!` pipeline)
 if printf '%s  %s\n' "$want" "$file" | sha256sum -c --status; then
-  echo "ok: sha256 $want  $(basename "$file")"
+  echo "ok: sha256 $want  $(basename "$file")" >&2
 else
   echo "FAIL: $file's sha256 is $(sha256sum "$file" | cut -d' ' -f1), not $want; not using it"
   exit 1
