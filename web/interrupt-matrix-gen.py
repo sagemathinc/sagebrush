@@ -37,6 +37,12 @@ CASES = [
          setup='import numpy as np\nimport _matlab_sparse as _sp, _matlab_colamd as _C, _matlab_lu as _L\n_L._phase_hook = lambda name: _p("PHASE", _i, name)\nk = S\nn = k * k\n_pm = [(i * 1999) % n for i in range(n)]\n_r, _c, _v = [], [], []\nfor _x in range(k):\n    for _y in range(k):\n        _t = _x * k + _y\n        for _dx, _dy, _w in ((0, 0, 4.0), (1, 0, -1.0), (-1, 0, -1.0), (0, 1, -1.0), (0, -1, -1.0)):\n            _a, _b = _x + _dx, _y + _dy\n            if 0 <= _a < k and 0 <= _b < k:\n                _r.append(_pm[_a * k + _b]); _c.append(_pm[_t]); _v.append(_w)\nA = _sp.make(n, n, np.array(_r), np.array(_c), np.array(_v))\n_q = _C.order_columns(A.m, A.n, A.jc, A.ir)',
          target='_F = _L.factor(A, "m1l", q=_q)',
          probe='assert _L.factor(_sp.make(2, 2, np.array([0, 1]), np.array([0, 1]), np.array([2.0, 4.0])), "p").solve(np.ones((2, 1)))[1, 0] == 0.25'),
+    # rank-13 PR 2 (plan-matlab-nocliffs r6 section 3): the chunked band path, Stop after its PHASE
+    dict(id="M2b", transport="pyloop:matlab-band", owner="MATLAB sparse linear algebra", mode="python", s0=15000, smin=2000, smax=2000000,
+         grow=dict(kind="scale", p=1), phase="band", leak_measure="heap+external", hosts=["cli"],
+         setup='import numpy as np\nimport _matlab_sparse as _sp, _matlab_lu as _L\n_L._phase_hook = lambda name: _p("PHASE", _i, name)\nn = S\n_kl = _ku = 20\n_rs, _cs = [], []\nfor _d in range(-_kl, _ku + 1):\n    _ii = np.arange(max(0, -_d), min(n, n - _d), dtype=np.int64)\n    _rs.append(_ii); _cs.append(_ii + _d)\n_r = np.concatenate(_rs); _c = np.concatenate(_cs)\n_v = np.where(_r == _c, 50.0, 1.0 / (1.0 + np.abs(_r - _c)))\nA = _sp.make(n, n, _r, _c, _v)\n_B = np.ones((n, 1))',
+         target='_X, _sg = _L.band_solve(A, _B, _kl, _ku, _L.Ledger("m2b"), _L.Work("m2b"))',
+         probe='_T = _sp.make(3, 3, np.array([0, 1, 1, 2]), np.array([0, 0, 1, 2]), np.array([2.0, 1.0, 4.0, 8.0]))\n_Y, _s = _L.band_solve(_T, np.ones((3, 1)), 1, 0, _L.Ledger("p"), _L.Work("p"))\nassert _Y[0, 0] == 0.5 and _Y[1, 0] == 0.125 and _Y[2, 0] == 0.125'),
     # r5 §6.2: XK with the window signature; s_max at lib/_png.py's pixel cap (4000 x 4000 < 2^24)
     dict(id="E13g", transport="wasm:raster.ts", owner="board/plot", mode="sage", s0=40, smin=4, smax=4000,
          grow=dict(kind="scale", p=1), exception="XK", xk=dict(kind="window", wrap="_sbraster.render"), hosts=["cli"],

@@ -3934,6 +3934,22 @@ def _warn_enabled(ident):
     return _warn_ids.get(ident, _warn_all[0]) == "on" if ident else _warn_all[0] == "on"
 
 
+# (the warnings shown at most once per key until re-armed, {identifier: {key}}:
+# warning('on', id), warning('on', 'all') and a fresh session re-arm them)
+_warn_once = {}
+
+
+def warning_once(msg, ident, key):
+    """warning_(msg, ident), shown once per key: a repeat sets lastwarn only"""
+    seen = _warn_once.setdefault(ident, set())
+    if key in seen:
+        _lastwarn[0], _lastwarn[1] = msg, ident
+        return
+    if _warn_enabled(ident):
+        seen.add(key)
+    warning_(msg, ident)
+
+
 def warning_(msg, ident="", note=False):
     if note:
         # (a note of Sagebrush's own, which MATLAB would not print: on stderr, and not lastwarn's)
@@ -9632,10 +9648,14 @@ def _warn_set(st):
         if i == "all":
             _warn_all[0] = v
             _warn_ids.clear()
+            if v == "on":
+                _warn_once.clear()
         elif i.lower() in _warn_modes:
             _warn_mode(i.lower(), v)
         elif i:
             _warn_ids[i] = v
+            if v == "on":
+                _warn_once.pop(i, None)
 
 
 @_bi("warning")
@@ -9673,8 +9693,12 @@ def warning_b(nargout, *args):
         if ident == "all":
             _warn_all[0] = st
             _warn_ids.clear()
+            if st == "on":
+                _warn_once.clear()
         else:
             _warn_ids[ident] = st
+            if st == "on":
+                _warn_once.pop(ident, None)
         return prev if nargout >= 1 else NOVAL
     if _istext(args[0]) and _text(args[0]).lower() == "error":
         raise _err("warning: the \"error\" state (warnings as errors) is not supported in Sagebrush.")
@@ -12442,6 +12466,7 @@ def fresh_session():
     _lastwarn[:] = ["", ""]
     _warn_all[0] = "on"
     _warn_ids.clear()
+    _warn_once.clear()
     _cell_failed[0] = False
     _cell_error[0] = None
 

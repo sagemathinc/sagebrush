@@ -28,6 +28,12 @@ The runner moves the interpreter somewhere with **no storage, no page and no net
    - The worker still checks each file's SHA-256.
 5. **Relaying.** Other messages go page ↔ frame ↔ worker.
 6. **Stop.** The interrupt flag stays in the frame, which is cross-origin isolated (`allow="cross-origin-isolated"` and the site's COOP/COEP). The page asks for Stop by message. KeyboardInterrupt keeps the variables. The worker's shared progress slots (its `ready` message's `progress`) stay in the frame too: the frame forwards `ready` without them, since a SharedArrayBuffer can't cross to the page.
+7. **input().** A run that calls `input()` posts `{id, input: {prompt, max, key}, buffer}` and waits on `buffer` (web/worker.ts's `stdin`):
+   - **The buffer:** Int32 `[0]` is the state (0 waiting, 1 a line, 2 end of input) and `[1]` the line's length in bytes; the UTF-8 bytes follow. It is the answer's own SharedArrayBuffer, not the interrupt flag.
+   - **The buffer stays in the frame**, like the interrupt flag: the frame keeps it by the request's `key` with its run's id, and forwards the question to the page without it.
+   - **The page answers by message:** `{runnerInput: id, key, text}`, where `text` is the line, or null for end of input. The frame writes the line (cut to fit, at a character's boundary) only to the open request with that key and run, and only once.
+   - **A request is over** when it is answered, when its run asks another question or ends, and on a Stop. An answer to a request that is over writes nothing: a line typed into a field from before a caught KeyboardInterrupt can't fill the next `input()`. The key is the worker's random tag and a count, so an answer meant for a previous worker matches nothing either.
+   - **A Stop wins** over an answer that arrives during the same wait (src/stdin-wait.ts). The page's kernel retires the question's reply on the same events, and the notebook removes its field then.
 
 **Not a secure context.** The worker in the opaque frame has no `crypto.subtle`, so it checks hashes with the synchronous SHA-256 in src/runtime/sha256.ts.
 

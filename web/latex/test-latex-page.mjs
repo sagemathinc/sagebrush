@@ -15,7 +15,7 @@
 //     zoom kept; a notebook from the files opened by URL; an unclosed $$ ended at a blank line.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-page.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
@@ -80,6 +80,8 @@ const open = async (fid, q = "&latex=1") => { await go(base + "?tex=" + encodeUR
 const page = (expr) => ev(`(() => { const P = document.querySelector(".tex-page"); return ${expr}; })()`);
 const typeInto = (text) => ev(`(() => { const t = document.querySelector(".tex-src"); t.value = ${JSON.stringify(text)}; t.dispatchEvent(new Event("input")); return true; })()`);
 const ctrlS = () => send("Input.dispatchKeyEvent", { type: "keyDown", key: "s", code: "KeyS", modifiers: 2, windowsVirtualKeyCode: 83 });
+// (LATEX_SHOTS=dir: screenshots at a few moments, for a look; nothing is checked from them)
+const shot = async (name) => { if (!process.env.LATEX_SHOTS) return; const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(process.env.LATEX_SHOTS, name + ".png"), Buffer.from(r.data, "base64")); };
 const statusIs = (re, ms = 10000) => until(`${re}.test(document.querySelector(".tex-status")?.textContent ?? "")`, ms);
 
 try {
@@ -165,6 +167,253 @@ try {
     console.log("examples in the page:", JSON.stringify(rec));
     const bad = rec.filter((r) => !r.shown || r.bound || r.unk.length || (r.id === "figure" && r.imgs !== 1));
     check(ids.length === 10 && bad.length === 0, "every example opens in the editor and renders, nothing unsupported shown (the figure's image shown)", bad);
+  }
+  // ---- William's B1 and B2: from a LaTeX file, New offers a LaTeX document, an example and the notebooks; another .tex
+  // from the files beside the page opens in place (no reload: the notebook never shows), its URL pushed; Back returns
+  {
+    const fa = await mk("/sw/a.tex", enc("\\documentclass{article}\n\\begin{document}\nFile A here.\n\\end{document}\n"));
+    const fb = await mk("/sw/b.tex", enc("\\documentclass{article}\n\\begin{document}\nFile B here.\n\\end{document}\n"));
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
+    await open(fa);
+    await until(`document.querySelector(".tex-preview").textContent.includes("File A here.")`, 20000);
+    const nm = await ev(`(async () => { document.querySelector(".tex-new").click(); await new Promise((r) => setTimeout(r, 50)); const items = [...document.querySelectorAll(".tex-newmenu button")].map((b) => b.textContent);
+      [...document.querySelectorAll(".tex-newmenu button")].find((b) => b.textContent === "LaTeX example").click(); await new Promise((r) => setTimeout(r, 300));
+      const n = document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length; document.querySelector("dialog.sb-tex-examples")?.close(); return { items, n }; })()`);
+    check(JSON.stringify(nm.items) === JSON.stringify(["LaTeX document", "LaTeX example", "Notebooks"]) && nm.n === 10, "B1: from a LaTeX file, New offers a LaTeX document, an example (the list opens) and the notebooks", nm);
+    const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
+    await until(`!!document.querySelector(${sel("/sw/b.tex")}) || (document.querySelector('.frow[data-path="/sw"]')?.click(), false)`, 20000);
+    const sw = await ev(`(async () => {
+      window.__noReload = true; const seen = { notebook: false };
+      const obs = new MutationObserver(() => { if (!document.querySelector(".tex-page")) seen.notebook = true; }); obs.observe(document.body, { childList: true, subtree: true });
+      document.querySelector(${sel("/sw/b.tex")}).click();
+      for (let i = 0; i < 100 && !document.querySelector(".tex-preview")?.textContent.includes("File B here."); i++) await new Promise((r) => setTimeout(r, 100));
+      obs.disconnect();
+      return { kept: window.__noReload === true, b: !!document.querySelector(".tex-preview")?.textContent.includes("File B here."), url: new URLSearchParams(location.search).get("tex"), pages: document.querySelectorAll(".tex-page").length, notebook: seen.notebook, title: document.querySelector(".tex-title")?.textContent };
+    })()`);
+    check(sw.kept && sw.b && sw.url === fb && sw.pages === 1 && !sw.notebook && sw.title === "b.tex", "B2: another .tex from the files opens in place: no reload, no notebook shown, its URL, one page", sw);
+    await ev(`(history.back(), true)`);
+    const bk = await until(`window.__noReload === true && document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
+    check(bk, "B2: Back returns to the first file, in place");
+    // ---- (astra B5-A1) Back and Forward with unsaved text ask first, as opening another file does: declined, the
+    // history goes back to the shown file's entry and its text stays; accepted, the other file opens; clean, nothing asked
+    const S = (x) => `(${x})`;
+    await ev(`(() => { window.__asked = 0; window.__answer = false; window.confirm = () => { window.__asked++; return window.__answer; }; return true; })()`);
+    const state = S(`{ asked: window.__asked, url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex, title: document.querySelector(".tex-title")?.textContent, src: document.querySelector(".tex-src")?.value, pages: document.querySelectorAll(".tex-page").length, kept: window.__noReload === true }`);
+    await ev(`(history.forward(), true)`);
+    const fw0 = await until(`document.querySelector(".tex-preview")?.textContent.includes("File B here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 20000);
+    const fw0s = await ev(state);
+    check(fw0 && fw0s.asked === 0 && fw0s.at === 1 && fw0s.kept, "B5-A1: Forward with nothing unsaved: the next file, nothing asked", fw0s);
+    await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% unsaved in B\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+    await ev(`(history.back(), true)`); await sleep(1500);
+    const db = await ev(state);
+    check(db.asked === 1 && db.url === fb && db.at === 1 && db.title === "b.tex" && db.src.includes("% unsaved in B") && db.pages === 1 && db.kept, "B5-A1: Back with unsaved text asks; declined, the file, its URL, its history entry and its text stay", db);
+    await ev(`(window.__answer = true, history.back(), true)`);
+    const ab = await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
+    const abs = await ev(state);
+    check(ab && abs.asked === 2 && abs.at === 0 && abs.title === "a.tex" && abs.kept, "B5-A1: Back with unsaved text, accepted: the first file opens", abs);
+    await ev(`(() => { window.__answer = false; const t = document.querySelector(".tex-src"); t.value += "% unsaved in A\\n"; t.dispatchEvent(new Event("input")); history.forward(); return true; })()`); await sleep(1500);
+    const df = await ev(state);
+    check(df.asked === 3 && df.url === fa && df.at === 0 && df.title === "a.tex" && df.src.includes("% unsaved in A") && df.pages === 1 && df.kept, "B5-A1: Forward with unsaved text asks; declined, the file, its URL, its history entry and its text stay", df);
+    await ev(`(window.__answer = true, history.forward(), true)`);
+    const af = await until(`document.querySelector(".tex-preview")?.textContent.includes("File B here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 20000);
+    const afs = await ev(state);
+    check(af && afs.asked === 4 && afs.at === 1 && !afs.src.includes("% unsaved") && afs.kept, "B5-A1: Forward with unsaved text, accepted: the next file opens, as saved", afs);
+    await ev(`(history.back(), true)`);
+    const cb = await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
+    const cbs = await ev(state);
+    check(cb && cbs.asked === 4 && cbs.at === 0 && cbs.kept, "B5-A1: Back with nothing unsaved: nothing asked", cbs);
+    // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
+    // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two
+    // steps, A; with unsaved A, Forward two steps declined stays on A. With the Navigation API and, hidden, without it
+    for (const withNav of [true, false]) {
+      const r = await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const until = async (f) => { for (let i = 0; i < 100 && !f(); i++) await wait(100); return f(); };
+        const shows = (s) => !!document.querySelector(".tex-preview")?.textContent.includes(s);
+        if (!${withNav}) Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined });
+        const at = () => ({ url: new URLSearchParams(location.search).get("tex"), hash: location.hash, at: history.state && history.state.sbTex, title: document.querySelector(".tex-title")?.textContent, src: document.querySelector(".tex-src")?.value ?? "", pages: document.querySelectorAll(".tex-page").length });
+        const edit = (m) => { const t = document.querySelector(".tex-src"); t.value += m; t.dispatchEvent(new Event("input")); };
+        const out = { nav: typeof window.navigation?.traverseTo === "function" };
+        location.hash = "section"; await wait(300);
+        out.hash = at();
+        window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }); await until(() => shows("File B here."));
+        out.b = at();
+        edit("% unsaved in B\\n");
+        let before = window.__asked; window.__answer = false;
+        history.back(); await wait(1500);
+        out.back1 = { asked: window.__asked - before, ...at() };
+        before = window.__asked;
+        history.go(-2); await wait(1500);
+        out.back2 = { asked: window.__asked - before, ...at() };
+        before = window.__asked; window.__answer = true;
+        history.go(-2); await until(() => shows("File A here.")); await wait(300);
+        out.back2yes = { asked: window.__asked - before, ...at() };
+        edit("% unsaved in A\\n");
+        before = window.__asked; window.__answer = false;
+        history.go(2); await wait(1500);
+        out.fwd2 = { asked: window.__asked - before, ...at() };
+        // (leave A as saved, at its first entry, for what follows)
+        window.__answer = true; history.go(2); await until(() => shows("File B here.")); await wait(300);
+        history.go(-2); await until(() => shows("File A here.")); await wait(300);
+        out.end = at();
+        if (!${withNav}) delete window.navigation;
+        return out; })()`).catch((e) => ({ threw: String(e?.message ?? e).slice(0, 300) })) ?? { threw: "no result: the page's context ended (a reload or a navigation away)" };
+      // (a reload or a lost page ends the evaluation: a failure, with what it was, not a crash of the whole test)
+      if (r.threw) await until(`!!document.querySelector(".tex-page")`, 20000);
+      const ok = !r.threw && r.nav === withNav && r.hash.url === fa && r.hash.hash === "#section" && r.hash.at === 1 && r.b.url === fb && r.b.at === 2
+        && r.back1.asked === 1 && r.back1.url === fb && r.back1.hash === "" && r.back1.at === 2 && r.back1.title === "b.tex" && r.back1.src.includes("% unsaved in B") && r.back1.pages === 1
+        && r.back2.asked === 1 && r.back2.url === fb && r.back2.hash === "" && r.back2.at === 2 && r.back2.title === "b.tex" && r.back2.src.includes("% unsaved in B")
+        && r.back2yes.asked === 1 && r.back2yes.url === fa && r.back2yes.hash === "" && r.back2yes.at === 0 && r.back2yes.title === "a.tex"
+        && r.fwd2.asked === 1 && r.fwd2.url === fa && r.fwd2.hash === "" && r.fwd2.at === 0 && r.fwd2.title === "a.tex" && r.fwd2.src.includes("% unsaved in A")
+        && r.end.url === fa && r.end.at === 0 && !r.end.src.includes("% unsaved");
+      check(ok, `B5-R1-A1 (${withNav ? "Navigation API" : "no Navigation API"}): a fragment's entry between; Back one and two steps and Forward two steps, declined, stay on the exact entry shown, its URL and text; accepted, the other file`, r);
+    }
+    // ---- (astra B5-A2) a mount replaced while it waits stops there: A's read held, B opened and shown, then A's read
+    // released: B's title stays, one live engine worker (B's), and the unsaved-text question is B's
+    const a2 = await ev(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const W0 = window.__W0 ??= window.Worker; const made = []; window.Worker = class extends W0 { constructor(...a) { super(...a); const w = { live: true }; made.push(w); const t = this.terminate.bind(this); this.terminate = () => { w.live = false; t(); }; } };
+      let release; window.__sbTexMountRead = (p) => p === "/sw/b.tex" ? new Promise((r) => { release = r; }) : undefined;
+      window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} });
+      for (let i = 0; i < 50 && !release; i++) await wait(100);
+      const held = !!release;
+      window.__sbTexMountRead = undefined;
+      window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} });
+      for (let i = 0; i < 100 && !document.querySelector(".tex-preview")?.textContent.includes("File A here."); i++) await wait(100);
+      const shownA = !!document.querySelector(".tex-preview")?.textContent.includes("File A here.");
+      release?.(); await wait(2000);
+      const out = { held, shownA, title: document.querySelector(".tex-title")?.textContent, doc: document.title, url: new URLSearchParams(location.search).get("tex"), pages: document.querySelectorAll(".tex-page").length, made: made.length, live: made.filter((w) => w.live).length };
+      const t = document.querySelector(".tex-src"); t.value += "% unsaved in A\\n"; t.dispatchEvent(new Event("input"));
+      const before = window.__asked; window.__answer = false;
+      window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }); await wait(300);
+      out.asked = window.__asked - before; out.stays = !!document.querySelector(".tex-preview")?.textContent.includes("File A here.") && document.querySelector(".tex-src").value.includes("% unsaved in A");
+      window.Worker = W0;
+      return out; })()`);
+    check(a2.held && a2.shownA && a2.title === "a.tex" && a2.doc.startsWith("a.tex") && a2.url === fa && a2.pages === 1 && a2.made === 1 && a2.live === 1 && a2.asked === 1 && a2.stays, "B5-A2: a mount replaced while its read waits stops: the newer file's title, one live worker, its unsaved text guarded", a2);
+    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+  }
+  // ---- the embeddable editor (component.ts: mountEditor, for the questions site's LaTeX proof answers; exported by the
+  // page module): in a host's box, with no files; rendered() and groups() with source ranges (UTF-16 offsets into the
+  // text); a preview selection mapped to its source (sourceRangeOf) and back (previewRangesOf); a person's edit
+  // reported (onChange, debounced), the host's setText not; read only and preview alone; stacked on a phone; destroy
+  {
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    const PROOF = "\\documentclass{article}\n\\begin{document}\n\\section*{Proof}\nLet $n$ be even, say $n = 2k$.\n\nThen $n^2 = 4k^2$ is even.\n\n\\end{document}\n";
+    const c1 = await ev(`(async () => {
+      const box = document.createElement("div"); box.id = "embed1"; box.style.cssText = "width:640px;height:420px"; document.body.prepend(box);
+      window.__changes = [];
+      const x = await import("/sagebrush-latex.js");
+      window.__ed = x.mountEditor(box, { text: ${JSON.stringify(PROOF)}, onChange: (t) => window.__changes.push(t) });
+      const done = await Promise.race([window.__ed.rendered().then(() => true), new Promise((r) => setTimeout(() => r(false), 20000))]);
+      const g = window.__ed.groups(), t = window.__ed.getText(), r = box.getBoundingClientRect(), P = window.__ed.previewRoot();
+      return { done, n: g.length, ok: g.every((x) => x.start >= 0 && x.start <= x.end && x.end <= t.length && box.contains(x.el)), starts: g.map((x) => x.start),
+        h: Math.round(r.height), fixed: getComputedStyle(box.firstElementChild).position, text: P.textContent.includes("Then"), files: !!box.querySelector(".tex-head, .tex-save, .tex-back") };
+    })()`);
+    check(c1.done && c1.n >= 2 && c1.ok && c1.h === 420 && c1.fixed === "relative" && c1.text && !c1.files, "component: in a 640 x 420 box (not fixed, no file controls), rendered() resolves, groups() with source ranges in the text", c1);
+    const c2 = await ev(`(() => {
+      const t = window.__ed.getText(), P = window.__ed.previewRoot();
+      const tw = document.createTreeWalker(P, NodeFilter.SHOW_TEXT); let n; while ((n = tw.nextNode()) && !n.data.includes("Then")) {}
+      if (!n) return { err: "no Then in the preview" };
+      const r = document.createRange(), i = n.data.indexOf("Then"); r.setStart(n, i); r.setEnd(n, i + 4);
+      const src = window.__ed.sourceRangeOf(r), want = t.indexOf("Then");
+      const back = window.__ed.previewRangesOf(want, want + 4);
+      return { src, want, back: back.length, hasThen: back.some((g) => g.textContent.includes("Then")), none: window.__ed.previewRangesOf(t.length + 5, t.length + 9).length };
+    })()`);
+    check(c2.src && c2.src.start === c2.want && c2.src.end === c2.want + 4 && c2.back === 1 && c2.hasThen && c2.none === 0, "component: a selection of 'Then' in the preview maps to its source offsets, and those offsets back to its group", c2);
+    const c3 = await ev(`(async () => {
+      const ta = document.querySelector("#embed1 .tex-src"), t0 = ta.value;
+      ta.value = t0.replace("is even.", "is even, as required."); ta.dispatchEvent(new Event("input"));
+      await new Promise((r) => setTimeout(r, 450));
+      const afterEdit = window.__changes.slice();
+      await window.__ed.rendered();
+      const shown = window.__ed.previewRoot().textContent.includes("as required");
+      window.__ed.setText(window.__ed.getText().replace("Proof", "Proof (setText)"));
+      await new Promise((r) => setTimeout(r, 450));
+      await window.__ed.rendered();
+      return { afterEdit: afterEdit.length, last: (afterEdit[afterEdit.length - 1] ?? "").includes("as required"), shown, setTextShown: window.__ed.previewRoot().textContent.includes("Proof (setText)"), afterSet: window.__changes.length };
+    })()`);
+    check(c3.afterEdit === 1 && c3.last && c3.shown && c3.setTextShown && c3.afterSet === 1, "component: a person's edit reported once (debounced) and rendered; the host's setText rendered, not reported", c3);
+    const c4 = await ev(`(async () => {
+      const box = document.createElement("div"); box.id = "embed2"; box.style.cssText = "width:500px;height:300px"; document.body.prepend(box);
+      const x = await import("/sagebrush-latex.js");
+      const ed = x.mountEditor(box, { text: ${JSON.stringify(PROOF)}, readOnly: true, layout: "preview" });
+      await Promise.race([ed.rendered(), new Promise((r) => setTimeout(r, 20000))]);
+      const left = box.querySelector(".tex-left"), right = box.querySelector(".tex-right");
+      const out = { ro: box.querySelector(".tex-src").readOnly, leftShown: getComputedStyle(left).display !== "none", rightW: Math.round(right.getBoundingClientRect().width), text: ed.previewRoot().textContent.includes("Then") };
+      ed.destroy(); out.destroyed = box.childElementCount === 0;
+      return out;
+    })()`);
+    check(c4.ro && !c4.leftShown && c4.rightW >= 480 && c4.text && c4.destroyed, "component: readOnly with layout preview: the source read only and hidden, the preview the box's width; destroy empties the box", c4);
+    await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await sleep(300);
+    const c5 = await ev(`(() => { const box = document.getElementById("embed1"); box.style.width = "360px"; const l = box.querySelector(".tex-left").getBoundingClientRect(), r = box.querySelector(".tex-right").getBoundingClientRect();
+      return { lTop: Math.round(l.top), rTop: Math.round(r.top), lW: Math.round(l.width), rW: Math.round(r.width), both: l.height > 40 && r.height > 40 }; })()`);
+    check(c5.both && c5.rTop > c5.lTop && c5.lW >= 340 && c5.rW >= 340, "component: on a phone the source and the preview are stacked, both shown", c5);
+    await send("Emulation.clearDeviceMetricsOverride");
+    await ev(`(window.__ed.destroy(), true)`);
+  }
+  // ---- comments on the preview (comments.ts cut 1, for grading): a grader's read-only, preview-only editor in a wide
+  // box: "Then" selected, c opens the composer (focused), Ctrl+Enter posts; saved once, a margin bubble with the text,
+  // the word highlighted (CSS Highlight API); the student's view (mode view): the bubble shown, c does nothing; a
+  // narrow box: a badge, tapped, opens a sheet; the Comment button by a selection opens the composer too
+  {
+    // (the comments' own chunk: not fetched by anything before this, then fetched by the first attachComments)
+    const commentsFetched = () => requests.filter((u) => /sagebrush-latex-comments\.js/.test(u)).length;
+    check(commentsFetched() === 0, "comments: their chunk not fetched by the editor, the examples or the component without comments", requests.filter((u) => /sagebrush-latex/.test(u)).slice(-5));
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    const PROOF = "\\documentclass{article}\n\\begin{document}\n\\section*{Proof}\nLet $n$ be even, say $n = 2k$.\n\nThen $n^2 = 4k^2$ is even.\n\n\\end{document}\n";
+    const mountC = (id, w, mode, threads) => ev(`(async () => {
+      const box = document.createElement("div"); box.id = ${JSON.stringify(id)}; box.style.cssText = "width:${w}px;height:420px"; document.body.prepend(box);
+      const x = await import("/sagebrush-latex.js");
+      const ed = x.mountEditor(box, { text: ${JSON.stringify(PROOF)}, readOnly: true, layout: "preview" });
+      await Promise.race([ed.rendered(), new Promise((r) => setTimeout(r, 20000))]);
+      window.__saves = window.__saves || {}; window.__saves[${JSON.stringify(id)}] = [];
+      const store = ${JSON.stringify(threads)};
+      window["__cm_" + ${JSON.stringify(id)}] = await x.attachComments(ed, { load: () => store, save: (t) => window.__saves[${JSON.stringify(id)}].push(t), mode: ${JSON.stringify(mode)}, author: "instructor", single: true });
+      window["__ed_" + ${JSON.stringify(id)}] = ed;
+      return true;
+    })()`);
+    const selectThen = (id) => ev(`(() => { const P = document.querySelector("#${id} .tex-preview"); const tw = document.createTreeWalker(P, NodeFilter.SHOW_TEXT); let n; while ((n = tw.nextNode()) && !n.data.includes("Then")) {}
+      if (!n) return false; const r = document.createRange(), i = n.data.indexOf("Then"); r.setStart(n, i); r.setEnd(n, i + 4); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return true; })()`);
+    await mountC("cmg", 900, "comment", []);
+    check(commentsFetched() >= 1, "comments: their chunk fetched once comments are attached");
+    const sel1 = await selectThen("cmg");
+    const k1 = await ev(`(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true })); await new Promise((r) => setTimeout(r, 50));
+      const a = document.activeElement; const focused = !!a && a.tagName === "TEXTAREA" && !!a.closest(".sb-cm-compose");
+      if (focused) { a.value = "Say why n^2 is even here."; a.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true })); }
+      await new Promise((r) => setTimeout(r, 100));
+      const saves = window.__saves.cmg, last = saves[saves.length - 1] || [], b = document.querySelectorAll("#cmg .sb-cm-bubble");
+      return { focused, saves: saves.length, n: last.length, quote: last[0]?.anchor.quote, author: last[0]?.messages[0]?.author, bubbles: b.length, text: b[0]?.textContent ?? "", hl: CSS.highlights?.get("sb-comments")?.size ?? -1, count: window.__cm_cmg.count() }; })()`);
+    check(sel1 && k1.focused && k1.saves === 1 && k1.n === 1 && k1.quote === "Then" && k1.author === "instructor" && k1.bubbles === 1 && k1.text.includes("Say why") && k1.hl === 1 && k1.count === 1,
+      "comments: a grader selects 'Then', presses c, types, Ctrl+Enter: saved once, a margin bubble with the text, the word highlighted", k1);
+    await ev(`(document.getElementById("cmg").scrollIntoView(), true)`); await shot("comments-wide");
+    const saved = await ev(`window.__saves.cmg[window.__saves.cmg.length - 1]`);
+    await ev(`(window.__cm_cmg.destroy(), window.__ed_cmg.destroy(), document.getElementById("cmg").remove(), true)`);
+    await mountC("cmv", 900, "view", saved);
+    const v1 = await ev(`(async () => { await new Promise((r) => setTimeout(r, 100)); const b = document.querySelectorAll("#cmv .sb-cm-bubble");
+      const P = document.querySelector("#cmv .tex-preview"); const tw = document.createTreeWalker(P, NodeFilter.SHOW_TEXT); let n; while ((n = tw.nextNode()) && !n.data.includes("Then")) {}
+      const r = document.createRange(), i = n.data.indexOf("Then"); r.setStart(n, i); r.setEnd(n, i + 4); getSelection().removeAllRanges(); getSelection().addRange(r);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true })); await new Promise((r) => setTimeout(r, 50));
+      return { bubbles: b.length, text: b[0]?.textContent ?? "", composer: !!document.querySelector(".sb-cm-compose"), hl: CSS.highlights?.get("sb-comments")?.size ?? -1, saves: window.__saves.cmv.length }; })()`);
+    check(v1.bubbles === 1 && v1.text.includes("Say why") && !v1.composer && v1.hl === 1 && v1.saves === 0, "comments: the student's view shows the bubble and the highlight; c makes no composer, nothing saved", v1);
+    await ev(`(window.__cm_cmv.destroy(), window.__ed_cmv.destroy(), document.getElementById("cmv").remove(), true)`);
+    await mountC("cmn", 360, "view", saved);
+    const n1 = await ev(`(async () => { await new Promise((r) => setTimeout(r, 100)); const g = document.querySelector("#cmn .sb-cm-badge");
+      if (!g) return { badge: false, bubbles: document.querySelectorAll("#cmn .sb-cm-bubble").length };
+      g.click(); await new Promise((r) => setTimeout(r, 50)); const sh = document.querySelector(".sb-cm-sheet");
+      window.__shotNow = true;
+      return { badge: true, bubbles: document.querySelectorAll("#cmn .sb-cm-bubble").length, sheet: !!sh, text: sh?.textContent ?? "", edit: !!sh && [...sh.querySelectorAll("button")].some((b) => b.textContent === "Edit") }; })()`);
+    await ev(`(document.getElementById("cmn").scrollIntoView(), true)`); await shot("comments-narrow-sheet");
+    check(n1.badge && n1.bubbles === 0 && n1.sheet && n1.text.includes("Say why") && !n1.edit, "comments: in a narrow box a badge, not a bubble; tapped, a sheet with the comment (view: no Edit)", n1);
+    await ev(`(document.querySelector(".sb-cm-sheet")?.remove(), window.__cm_cmn.destroy(), window.__ed_cmn.destroy(), document.getElementById("cmn").remove(), true)`);
+    await mountC("cmb", 900, "comment", []);
+    await selectThen("cmb");
+    const b1 = await ev(`(async () => { document.querySelector("#cmb .tex-preview").dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); await new Promise((r) => setTimeout(r, 50));
+      const go = document.querySelector("#cmb .sb-cm-go"); if (!go) return { go: false };
+      go.click(); await new Promise((r) => setTimeout(r, 50)); const a = document.activeElement;
+      return { go: true, composer: !!a && !!a.closest(".sb-cm-compose") }; })()`);
+    check(b1.go && b1.composer, "comments: a selection shows a Comment button; it opens the composer, focused", b1);
+    await ev(`(window.__cm_cmb.destroy(), window.__ed_cmb.destroy(), document.getElementById("cmb").remove(), true)`);
   }
   const fid = await mk("/t/doc.tex", enc(DOC));
   requests.length = 0;
@@ -268,7 +517,8 @@ try {
   for (const [name, b, expect] of fixtures) {
     const f = await mk(`/t/${name}.tex`, b);
     await open(f);
-    await until(`document.querySelector(".tex-save") && !document.querySelector(".tex-save").hidden`, 10000);
+    // (the head, Save included, is drawn before the file is read; the source after it)
+    await until(`document.querySelector(".tex-save") && !document.querySelector(".tex-save").hidden && !!document.querySelector(".tex-src")`, 10000);
     const text = await ev(`document.querySelector(".tex-src").value`);
     await typeInto(text + "c\n"); await ctrlS();
     await statusIs(/^Saved$/);
@@ -342,6 +592,27 @@ try {
   const after = await ev(`({ reads: window.__reads.length, unique: new Set(window.__reads).size, blobs: window.__blobs, imgs: new Set([...document.querySelectorAll(".tex-preview img.graphic")].map((i) => i.src)).size, refused: (document.querySelector(".tex-preview").textContent.match(/: too many images\\]/g) || []).length })`);
   check(settled && after.reads === 64 && after.unique === 64 && after.blobs === 64 && after.imgs === 64 && after.refused === 2, "released: each name read once, 64 blobs (the count bound), the 2 over it refused, no duplicate blob", after);
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: hook.identifier });
+  // ---- (astra B5-A2) an image read that completes after the page was disposed of keeps nothing: held, another file
+  // opened in place, then released: no blob made
+  {
+    await mk("/late/p.png", png);
+    const fl = await mk("/late/doc.tex", enc("\\documentclass{article}\n\\begin{document}\n\\includegraphics{p}\n\\end{document}\n"));
+    const fo = await mk("/late/other.tex", enc("\\documentclass{article}\n\\begin{document}\nThe other one.\n\\end{document}\n"));
+    const h2 = await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+      window.__holds = []; window.__blobs = 0;
+      const make = URL.createObjectURL.bind(URL); URL.createObjectURL = (b) => { window.__blobs++; return make(b); };
+      window.__sbTexImageRead = () => new Promise((r) => window.__holds.push(r));
+    })()` });
+    await open(fl);
+    const heldImg = await until(`window.__holds.length === 1`, 20000);
+    await ev(`(window.__sbTex({ path: "/late/other.tex", fid: ${JSON.stringify(fo)} }), true)`);
+    const other = await until(`document.querySelector(".tex-preview")?.textContent.includes("The other one.")`, 20000);
+    await ev(`(() => { for (const r of window.__holds.splice(0)) r(); return true; })()`);
+    await sleep(1500);
+    const late = await ev(`({ blobs: window.__blobs, imgs: document.querySelectorAll("img.graphic").length })`);
+    check(heldImg && other && late.blobs === 0 && late.imgs === 0, "B5-A2: an image read completing after its page was disposed of: no blob made", late);
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: h2.identifier });
+  }
 
   // ---- non-ASCII HTML (daybreak2 i1c01): the patch budget's 512 KiB is UTF-8 bytes, split.ts's measure: a 1.95 MB
   // (UTF-8) paragraph of three-byte characters is patched with no step over 512 KiB, the byte stop seen ending steps
@@ -385,7 +656,8 @@ try {
   const thmDoc = "\\documentclass{article}\n\\newtheorem{theorem}{Theorem}\n\\begin{document}\n\\begin{theorem}\n" + "theorem words go on and on here. ".repeat(6000).split(". ").join(".\n\n") + "\n\\end{theorem}\n\n\\begin{enumerate}\n" + "\\item an item\n".repeat(6000) + "\\end{enumerate}\n\\end{document}\n";
   const ft = await mk("/t/thm.tex", enc(thmDoc));
   await open(ft);
-  await until(`document.querySelectorAll(".tex-preview .thm.cont").length > 0 && document.querySelectorAll(".tex-preview .list.cont").length > 0`, 60000);
+  // (all 6000 labels: under load the read could come before the last patch was in; a lost label still fails below)
+  await until(`document.querySelectorAll(".tex-preview .thm.cont").length > 0 && document.querySelectorAll(".tex-preview .list.cont").length > 0 && document.querySelectorAll(".tex-preview ol.list > li > .lbl").length >= 6000`, 60000);
   const cont = await ev(`(() => {
     const thms = [...document.querySelectorAll(".tex-preview .thm")], lists = [...document.querySelectorAll(".tex-preview ol.list")];
     const fs = (e) => getComputedStyle(e).fontStyle, pl = (e) => getComputedStyle(e).paddingLeft, cls = (e) => [...e.classList].filter((c) => c !== "cont").join(".");
@@ -522,6 +794,8 @@ try {
   const flash = await ev(`(() => { document.querySelector('[aria-label="Show the cursor\\'s place in the preview"]').click(); return !!document.querySelector(".tex-preview .ch.sync-flash"); })()`);
   check(flash, "A3: Show: the cursor's place in the preview flashed");
   await ev(`(document.querySelector('[aria-label="The preview follows the cursor"]').click(), true)`);
+  // (the last follow's smooth scroll settled first: under load it can still be moving when Follow is turned off)
+  for (let i = 0, last = -1; i < 50; i++) { const t = await ev(`document.querySelector(".tex-right").scrollTop`); if (t === last) break; last = t; await sleep(200); }
   const off0 = await ev(`document.querySelector(".tex-right").scrollTop`), off1 = await fwd("word2x");
   check(off1.scroll === off0, "A3: Follow off: moving the cursor leaves the preview where it is", { off0, off1 });
   check(await ev(`localStorage.getItem("sagebrush-latex-follow") === "0"`), "A3: Follow off is remembered");

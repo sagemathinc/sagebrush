@@ -34,9 +34,13 @@ test("no source stores to INTR[0]: producers or, consumers and (the census)", ()
   const esc = [...names].map((n) => n.replace(/[.$]/g, "\\$&")).join("|");
   const plain = new RegExp(`(?<![\\w$.])(?:${esc})\\[0\\]\\s*(?:=(?!=)|[-+*/%&|^]=|<<=|>>>?=)`);
   // Any atomic write of index 0 but or/and, whatever the receiver is called;
-  // the one other word-0 user is the fetch broker's channel, \`ctrl\`.
+  // the other word-0 users are the fetch broker's channel, \`ctrl\`, and an
+  // input() answer's state word, \`ctl\`, exactly these two receivers: ctl is a
+  // view of the answer's own SharedArrayBuffer (web/worker.ts's stdin makes
+  // one per question), never of the interrupt word, which an embedding binds
+  // only through \`new Int32Array(...interrupt)\` (the aliases found above).
   const atomic = /Atomics\.(?:store|exchange|compareExchange|add|sub|xor)\(\s*([^,()]+?)\s*,\s*0\s*,/;
-  const OTHER = new Set(["web/worker.ts ctrl", "web/runner/index.html ctrl"]);
+  const OTHER = new Set(["web/worker.ts ctrl", "web/runner/index.html ctrl", "web/notebook/worker-kernel.js ctl", "web/runner/index.html ctl"]);
   const bad: string[] = [];
   for (const [f, t] of text)
     t.split("\n").forEach((line, i) => {
