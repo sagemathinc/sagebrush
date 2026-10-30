@@ -145,6 +145,7 @@ export class WorkerKernel {
     this.started = Promise.resolve();
     this.startError = null;
     this.interruptFlag = null;
+    this.context = null;
     // id -> a sink {start(), out(text, isErr), display(bundle), interact(spec),
     // clear(), done(ms), stopped(message), skipped()} for running code, or
     // {reply(message)} for a question
@@ -233,6 +234,7 @@ export class WorkerKernel {
         this.readyInfo = { seeded: !!m.seeded, startup: m.startup?.clock ?? [], ms: performance.now() - t0, version: m.version || "" };
         this.version = m.version || "";
         this.interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
+        this.context = m.context ?? null;
         this.ready = true;
         this.readyText = `ready (sagebrush ${this.version}, ${Math.round(performance.now() - t0)} ms)`;
         this.emit("status", this.readyText);

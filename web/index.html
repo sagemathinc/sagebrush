@@ -2966,15 +2966,77 @@ try {
   console.warn("WebMCP:", e);
 }
 
+// The self-test's diagnosis of cross-origin isolation (app/selftest/coi-reading.py
+// reads it): what this page and its kernel see, and what the app's server
+// answers to two marked same-origin fetches (?sb-diag=, which the debug
+// app's server log tells apart from the page's own loads).  Bounded: 5 s per
+// fetch, 15 s in all; a key not reached keeps 'error: "not reached"'.
+const SELFTEST_INFO_KEYS = ["origin", "secure-context", "top-level", "isolated-document", "sab-document", "coi-policy", "kernel-interrupt-shared", "kernel-isolated", "kernel-sab", "fetch-page", "fetch-kernel-script", "user-agent"];
+async function diagnose(info) {
+  const cap = (s) => (s.length > 200 ? s.slice(0, 200) + "...(truncated " + (s.length - 200) + ")" : s);
+  const str = (v) => cap(JSON.stringify(String(v)));
+  const err = (e) => "error: " + str((e?.name ?? "Error") + ": " + (e?.message ?? e));
+  const bool = (v) => (v === true ? "true" : v === false ? "false" : "error: " + str("not a boolean: " + v));
+  const probe = async (url, corp) => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 5000);
+    try {
+      const r = await fetch(url, { cache: "no-store", signal: ac.signal });
+      const u = new URL(r.url);
+      const o = { status: r.status, ok: r.ok, url: u.pathname + u.search, redirected: r.redirected, COOP: r.headers.get("cross-origin-opener-policy"), COEP: r.headers.get("cross-origin-embedder-policy") };
+      if (corp) o.CORP = r.headers.get("cross-origin-resource-policy");
+      await r.body?.cancel().catch(() => {});
+      return cap(JSON.stringify(o));
+    } catch (e) {
+      return ac.signal.aborted ? "timeout" : err(e);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const facts = async () => {
+    info.origin = str(location.origin);
+    info["secure-context"] = bool(window.isSecureContext);
+    info["top-level"] = bool(window.top === window);
+    info["isolated-document"] = bool(window.crossOriginIsolated);
+    info["sab-document"] = str(typeof SharedArrayBuffer);
+    // (the permission policy, where it can be asked, and only for a feature
+    // name it knows)
+    try {
+      const pp = document.permissionsPolicy ?? document.featurePolicy;
+      info["coi-policy"] = !pp ? "unsupported" : !pp.features().includes("cross-origin-isolated") ? "unrecognized" : bool(pp.allowsFeature("cross-origin-isolated"));
+    } catch (e) { info["coi-policy"] = err(e); }
+    info["kernel-interrupt-shared"] = bool(!!kernel.interruptFlag);
+    const c = kernel.context;
+    info["kernel-isolated"] = c ? bool(c.isolated) : 'error: "the kernel sent no context"';
+    info["kernel-sab"] = c ? str(c.sab) : 'error: "the kernel sent no context"';
+    info["user-agent"] = str(navigator.userAgent);
+    info["fetch-page"] = await probe(new URL(location.pathname + "?sb-diag=1", location.href).href, false);
+    info["fetch-kernel-script"] = await probe(new URL("sagebrush-worker.js?sb-diag=2", location.href).href, true);
+  };
+  let timer;
+  try {
+    await Promise.race([facts(), new Promise((r) => { timer = setTimeout(r, 15000); })]);
+  } catch (e) {
+    console.log("diagnose: " + (e?.stack ?? e));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // SAGEBRUSH_APP_SELFTEST=<notebook> (app/): open the notebook, run it, check
 // its outputs and the computer's files, save, and report to the app
 async function selftest(path) {
   const checks = [];
+  const info = Object.fromEntries(SELFTEST_INFO_KEYS.map((k) => [k, 'error: "not reached"']));
   const check = (name, okv, detail = "") => { const line = (okv ? "ok   " : "FAIL ") + name + (detail ? ": " + detail : ""); checks.push(line); console.log(line); };
   const until = async (f, ms = 60000) => { for (let i = 0; i < ms / 100; i++) { if (await f()) return true; await new Promise((r) => setTimeout(r, 100)); } return false; };
   try {
     check("ready", await until(() => statusEl.textContent.startsWith("ready")), statusEl.textContent);
     check("cross-origin isolated (Stop keeps variables)", window.crossOriginIsolated === true);
+    // (the diagnosis lines, app/selftest/coi-reading.py: facts, never pass or
+    // fail; each key once, one line each: true/false, unsupported, timeout,
+    // error: "<message>", or a JSON string or object, at most 200 characters)
+    await diagnose(info);
     await openDiskFile(path);
     check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
     await nb.runAll();
@@ -3005,7 +3067,9 @@ async function selftest(path) {
     check("saved the notebook with its outputs", saved.cells.some((c) => (c.outputs ?? []).some((o) => JSON.stringify(o).includes("274177"))));
   } catch (e) { check("no exception", false, String(e?.stack ?? e)); }
   const ok = checks.every((c) => c.startsWith("ok"));
-  await TAURI.core.invoke("selftest_report", { report: checks.join("\n") + (ok ? "\nall passed" : ""), ok });
+  const infoLines = SELFTEST_INFO_KEYS.map((k) => "info " + k + ": " + info[k]);
+  for (const l of infoLines) console.log(l);
+  await TAURI.core.invoke("selftest_report", { report: [...checks, ...infoLines].join("\n") + (ok ? "\nall passed" : ""), ok });
 }
 
 // The app: offline (web/sw.js) and installable; not under `sagebrush notebook`,
