@@ -115,9 +115,18 @@ export function notebookKind(mod) {
       return { ...rest, mode: v.mode, cells: v.cells.map(cell) };
     },
     empty: (id, initial) => ({ ...(initial ?? { name: "Untitled", mode: "python", cells: [] }), id }),
-    apply(lastSynced, shown, remote, wins) {
+    // (`merge`: the document's recorded mode (the store's mergeMode).  exact-v1: dbMerge3's rules (history.js
+    // exactRecords3), the side `wins` names as `b`, the later one, never a clash (plan-p2c r0 S1); in a build without
+    // them, refused, never merged the older way.  Else mergeRecords3, a clash keeping the side `wins` names whole)
+    apply(lastSynced, shown, remote, wins, merge) {
+      const base = mod.recordsOf(lastSynced ?? { mode: shown.mode, cells: [] });
+      if (merge === "exact-v1") {
+        if (!mod.exactRecords3) throw Object.assign(new Error(T.NO_EXACT), { noExact: true });
+        const [a, b] = wins === "remote" ? [shown, remote] : [remote, shown];
+        return { value: mod.docOfRecords(mod.exactRecords3(base, mod.recordsOf(a), mod.recordsOf(b))), clashes: [] };
+      }
       const [a, b] = wins === "remote" ? [remote, shown] : [shown, remote];
-      const r = mergeRecords3(mod.SCHEMA, mod.recordsOf(lastSynced ?? { mode: shown.mode, cells: [] }), mod.recordsOf(a), mod.recordsOf(b));
+      const r = mergeRecords3(mod.SCHEMA, base, mod.recordsOf(a), mod.recordsOf(b));
       return { value: r.clashes.length ? a : mod.docOfRecords(r.value), clashes: r.clashes };
     },
     conflictCopy: null,

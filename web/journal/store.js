@@ -242,7 +242,7 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     const head = this.kind.fromRecords(session.value());
     // (which side a clash keeps: the later one, by patch id; this device's side is its last version's (the record's j))
     const theirsWin = !rec?.unjournaled && theirsLast > (baseTime ?? "");
-    const r = this.kind.apply(base, mine, head, theirsWin ? "remote" : "shown");
+    const r = this.kind.apply(base, mine, head, theirsWin ? "remote" : "shown", this.mergeMode);
     return { doc: this.withValue(rec ?? mine, this.kind.toRecords(r.value)), clashes: r.clashes, kept: r.clashes.length ? (theirsWin ? "theirs" : "mine") : null };
   }
   // (the synced history started (William's D6(a)): a new key, the root the whole value `doc`, from a new client, all of
@@ -477,6 +477,16 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     if (EXACT_MERGE_CLIENT) return;
     const js = await readJournal(this.hdb, this.id);
     if (js.start?.merge === "exact-v1") throw Object.assign(new Error(this.T.NO_EXACT), { noExact: true });
+  }
+  /** The recorded merge mode of this document's synced history, or undefined (none recorded yet, or the document's own
+   * history): the patch store's, so always current (read with its patches, and told before the next ones). */
+  get mergeMode() { return this.patches.id !== this.id ? this.patches.mergeMode : undefined; }
+  /** The editor's merge of an unsaved edit (history.js mergeTextAt), for an exact-v1 document only; else undefined.
+   * An exact-v1 document in a build without it is refused (NO_EXACT), never merged the older way (plan-p2c r0 S2). */
+  get mergeText() {
+    if (this.mergeMode !== "exact-v1") return undefined;
+    if (!this.mod?.mergeTextAt) throw Object.assign(new Error(this.T.NO_EXACT), { noExact: true });
+    return this.mod.mergeTextAt;
   }
   // (the record with the versioned part of `value` (the history's records): the kind's withValue)
   withValue(rec, value) { return this.kind.withValue(rec, value); }
