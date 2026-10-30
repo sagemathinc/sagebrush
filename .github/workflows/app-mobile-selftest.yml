@@ -47,15 +47,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 11
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: pnpm
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
       - run: pnpm install --frozen-lockfile
@@ -63,7 +63,7 @@ jobs:
       - run: node scripts/build-cli.mjs
       - run: bun web/build.ts
       - run: node app/build-frontend.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: app-page
           path: app/dist
@@ -77,11 +77,11 @@ jobs:
       NDK_VERSION: 27.3.13750724
       TAURI_CLI_VERSION: 2.12.4
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # (the report's judge on fixed reports, before anything slow)
       - name: the self-test report judge
         run: bash app/selftest/test-android-report.sh
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: app-page
           path: app/dist
@@ -97,11 +97,11 @@ jobs:
           echo "runner image: ${ImageOS:-?} ${ImageVersion:-?}"
           grep Pkg.Revision "$ndk/source.properties"
           "$JAVA_HOME_17_X64/bin/java" -version
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # branch master
         with:
           toolchain: 1.99.0
           targets: x86_64-linux-android
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: app/src-tauri
           key: android-x86_64
@@ -166,11 +166,11 @@ jobs:
       BUILD_TOOLS_VERSION: 35.0.0
       TAURI_CLI_VERSION: 2.12.4
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # (the logcat judge on fixed dumps, before anything slow)
       - name: the logcat judge
         run: bash app/selftest/test-logcat-crash.sh
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: app-page
           path: app/dist
@@ -189,11 +189,11 @@ jobs:
           echo "runner image: ${ImageOS:-?} ${ImageVersion:-?}"
           grep Pkg.Revision "$ndk/source.properties"
           "$JAVA_HOME_17_X64/bin/java" -version
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # branch master
         with:
           toolchain: 1.99.0
           targets: x86_64-linux-android
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: app/src-tauri
           key: android-release-x86_64
