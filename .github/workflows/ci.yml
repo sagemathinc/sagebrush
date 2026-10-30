@@ -203,6 +203,7 @@ jobs:
           node web/test-ipynb.mjs
           node web/latex/test-comments-core.mjs
           node web/latex/test-latex-comments-cli.mjs
+          node scripts/test-site-asset-budget.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
           node scripts/test-core-api-surface.mjs
@@ -1253,6 +1254,7 @@ jobs:
           python3 engine/py/test_runs.py
           python3 engine/py/test_runs_sweep.py
           python3 engine/py/test_workspace_tools.py
+          python3 engine/py/test_latex_comments.py
           python3 engine/py/test_pairing.py
           python3 engine/py/test_chat.py
           python3 engine/py/test_limits.py
