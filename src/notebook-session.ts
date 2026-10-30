@@ -39,6 +39,9 @@
 //      {id, target, display: {mime: data}}   rich output (Jupyter MIME bundle)
 //      {id, target, interact: spec}           controls to draw
 //      {id, target, clear: true}              clear_output()
+//      {id, target, input: {prompt, max}, buffer}  input() waits for a line (the
+//                                 browser worker, web/worker.ts: `buffer` is the
+//                                 SharedArrayBuffer the page answers in)
 //      then {id, done, ms, error?} (or {id, skipped} for a run queued before an
 //      interrupt); `error`: the code raised (a traceback was written); `names`:
 //      global names whose widgets changed (an interact update: the reactive
@@ -127,8 +130,14 @@ export function exitStatus(code: unknown): { ok: boolean; text: string | null } 
 // browser worker's init message); the session's runtime is given them before
 // anything else runs, and is never ready if they are invalid (ready rejects
 // with a LimitsError).  None: the defaults.
+// stdin: how input() asks the person for a line, synchronously (the browser
+// worker waits on shared memory the page fills, web/worker.ts): the line
+// typed, null for end of input, or {interrupted: true} if a Stop came while
+// it waited.  None: input() reads end of input, as CPython with no stdin.
+export type StdinRequest = { id: number; target: number | null; prompt: string };
+export type StdinAnswer = string | null | { interrupted: true };
 export class LimitsError extends Error {}
-export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks } = {}): Session {
+export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer } = {}): Session {
   let current: number | null = null;
   let target: number | null = null;
   const write = (fd: number, text: string) => {
@@ -245,6 +254,17 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       for (const n of JSON.parse(spec)) changedNames.add(String(n));
       return true;
     },
+    // input(): a line the page asks the person for (opts.stdin), when the
+    // host gives a way to ask; otherwise input() reads end of input
+    ...(opts.stdin
+      ? {
+          input(prompt: string) {
+            if (current === null) return null;
+            flush();
+            return opts.stdin!({ id: current, target, prompt });
+          },
+        }
+      : {}),
   };
   let changedNames = new Set<string>();
   let seededBefore = false;
