@@ -65,15 +65,34 @@ function useClient(history, client, last) {
   history.sessionOptions = function () { return { codec: this.codec, patchStore: this.guarded, clientId: client }; };
 }
 
-// (the exact merged value of a set of a history's versions: its maximal ones, merged from their common ancestors as
-// patchflow merges heads (PatchGraph.exactValueOfSet); undefined for a codec without merge3 (a board's) or a history
-// that can't give it exactly (a version not held here), and the caller falls back to one version's value)
-function valueOfSet(session, times) {
+/** The base of a merge with the history (mergeRemote): the history as a record whose j is `recJ` had it, from the
+ * journal's `jOf` (patch time -> j), the document's sync `start` and the history's `session`.  {time, value}: `time` the
+ * version with the highest j at or below recJ (null: none), `value` the base's value (null: none); or {refuse} when it
+ * can't be given completely.
+ * - A codec without merge3 (a board's): that version's value, as always.
+ * - With merge3 (a notebook's: exact merges, plan-exact-only r1):
+ *   - (a) a record not saved since this device started the synced history keeps its j from before, below the synced
+ *     root's (start.from_j): its base is the synced root, its value when it started;
+ *   - (b) the merged value of every version at or below recJ (their maximal ones), by patchflow's exactValueOf: a record
+ *     stamped with a merge that made no new version has both sides' versions at or below its j, and the highest alone
+ *     would read that merge as an edit of its own and keep the other side's text twice;
+ *   - refused, never a partial or one-version value in its place, when a version it needs isn't held here or the
+ *     history can't merge them exactly (astra3's BASE-1). */
+export function mergeBaseOf(jOf, recJ, start, session) {
+  let time = null, best = -1;
+  for (const [t, j] of jOf) if (j <= recJ && j > best) { best = j; time = t; }
   const g = session?.graph;
-  if (!g?.codec?.merge3 || typeof g.exactValueOfSet !== "function") return undefined;
-  const set = new Set(times.filter((t) => g.patches?.has(t)));
-  for (const t of [...set]) for (const p of g.getParents?.(t) ?? []) set.delete(p);
-  return set.size ? g.exactValueOfSet([...set]) ?? undefined : undefined;
+  if (!g?.codec?.merge3) return { time, value: time ? session.value({ time }) : null };
+  let times = [...jOf].filter(([, j]) => j <= recJ).map(([t]) => t);
+  if (!times.length && Number.isSafeInteger(start?.from_j)) for (const [t, j] of jOf) if (j === start.from_j) { time = t; times = [t]; }
+  if (!times.length) return { time: null, value: null };
+  const missing = times.filter((t) => !g.patches?.has(t));
+  if (missing.length) return { refuse: `${missing.length} of the versions it merges from aren't here yet` };
+  const top = new Set(times);
+  for (const t of times) for (const p of g.getParents?.(t) ?? []) top.delete(p);
+  const value = typeof g.exactValueOf === "function" ? g.exactValueOf([...top]) : undefined;
+  if (value == null) return { refuse: "the history here can't merge the versions it merges from yet" };
+  return { time, value };
 }
 
 /** The one writer of a document on this device, for the milestone (William, Oct 27: "Yes, single writer per device for
@@ -239,24 +258,14 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
    * which then reaches the other devices (astra's CORR-2C3-2).  Resolves {doc, clashes, kept}. */
   async mergeRemote(mine) {
     const rec = await super.loadRecord(), js = await readJournal(this.hdb, this.id);
-    let baseTime = null, best = -1, theirsLast = "";
-    for (const [time, j] of js.jOf) {
-      if (j <= (rec?.j ?? 0) && j > best) { best = j; baseTime = time; }
-      if (j > (rec?.j ?? 0) && time.slice(12) !== js.slot?.client && time > theirsLast) theirsLast = time;
-    }
-    // (a record not saved since this device started the synced history keeps its j from before (a version of its own
-    // key's history, below the synced root's): its base is the synced root, the record's value when it started.  With no
-    // base at all, the exact merge would read every cell as added on both sides and keep both texts; the clash merge
-    // before it kept the later side whole instead, losing this device's edits to other cells)
-    if (baseTime === null && Number.isSafeInteger(js.start?.from_j)) for (const [time, j] of js.jOf) if (j === js.start.from_j) baseTime = time;
+    let theirsLast = "";
+    for (const [time, j] of js.jOf) if (j > (rec?.j ?? 0) && time.slice(12) !== js.slot?.client && time > theirsLast) theirsLast = time;
     const session = this.history.session;
-    // (with exact merges (a notebook's codec has merge3), the base is the history as the record had it: the merged value
-    // of every version at or below its j, not the one with the highest j.  A record stamped with a merge that made no new
-    // version (its value already the merged head) has the other device's version and its own both at or below its j;
-    // the highest alone would read its merge as an edit of its own and keep the other side's text twice)
-    const seen = [...js.jOf].filter(([, j]) => j <= (rec?.j ?? 0)).map(([time]) => time);
-    const merged = baseTime && seen.length > 1 ? valueOfSet(session, seen) : undefined;
-    const base = merged ? this.kind.fromRecords(merged) : baseTime ? this.kind.fromRecords(session.value({ time: baseTime })) : null;
+    const mb = mergeBaseOf(js.jOf, rec?.j ?? 0, js.start, session);
+    // (a base the history here can't give completely: no merge now (nothing saved, nothing sent); the next arrival tries
+    // again, once the versions it needs are here (astra3's BASE-1))
+    if (mb.refuse) throw Object.assign(new Error(`sync: a change from elsewhere waits: ${mb.refuse}`), { deferMerge: true });
+    const baseTime = mb.time, base = mb.value ? this.kind.fromRecords(mb.value) : null;
     const head = this.kind.fromRecords(session.value());
     // (which side a clash keeps: the later one, by patch id; this device's side is its last version's (the record's j))
     const theirsWin = !rec?.unjournaled && theirsLast > (baseTime ?? "");
@@ -492,7 +501,8 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
   get mergeText() { return this.mod?.mergeTextAt; }
   // (the record with the versioned part of `value` (the history's records): the kind's withValue)
   withValue(rec, value) { return this.kind.withValue(rec, value); }
-  /** Recovery (design r4 §3): {doc, row: "consistent" | "stamped" | "rewritten" | "new" | "from-server", catchUp?},
+  /** Recovery (design r4 §3): {doc, row: "consistent" | "stamped" | "rewritten" | "new" | "from-server" | "deferred" (a
+   * merge waiting for versions not here yet: nothing written), catchUp?},
    * {row: "arriving"} (nothing written), or null when the record changed under its compare and swap (load reads it
    * again and replays again). */
   async recover(rec) {
@@ -531,7 +541,11 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     // with the chosen value, never reverted by the catch-up below (astra's A1 on 2c-3))
     const slotClient = state.slot?.client;
     const merged = !!rec && !!slotClient && [...state.jOf].some(([time, j]) => j > (rec.j ?? 0) && time.slice(12) !== slotClient);
-    if (merged) doc = (await this.mergeRemote(doc)).doc;
+    if (merged) {
+      // (a merge whose base this history can't give yet (mergeBaseOf's refusal): nothing written now, the record shown as
+      // it is; its intents stay, and the next load or arrival tries again (astra3's BASE-1))
+      try { doc = (await this.mergeRemote(doc)).doc; } catch (e) { if (e?.deferMerge) return { doc: rec, row: "deferred" }; throw e; }
+    }
     const hash = await hashOf(this.kind, doc), big = neverFits(merged ? this.textOf(doc) : value);
     // (consistent: its own value, j and hash right, and unmarked, or marked too large with nothing to try (§4))
     const settled = (mark) => rec && own && rec.j === state.J && rec.hash === hash && (rec.unjournaled ?? false) === mark;
