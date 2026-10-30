@@ -35,6 +35,8 @@ jobs:
         with:
           deno-version: v2.x
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       # The Jupyter release smoke test uses Python 3.14, as in CI.
       - uses: actions/setup-python@v5
         with:

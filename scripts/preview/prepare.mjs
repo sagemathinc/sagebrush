@@ -83,7 +83,8 @@ export function prepare(dir, host, mocks, source = { branch: 'unknown', commit: 
     const policies = rules.filter(r => r.csp && (r.pattern === url || (r.pattern.endsWith('*') && url.startsWith(r.pattern.slice(0, -1)))));
     if (policies.length !== 1) throw new Error('Preview HTML/script lacks exactly one built CSP');
     const csp = policies[0].csp.replace(/connect-src [^;]+/, directive =>
-      directive.includes("'none'") ? directive : "connect-src 'self' data: blob:")
+      // (a preview page reaches only its own origin, and the agent pairing's loopback socket to sagebrush-mcp: no other)
+      directive.includes("'none'") ? directive : "connect-src 'self' data: blob: ws://127.0.0.1:* ws://localhost:*")
       .replace(' https://static.cloudflareinsights.com', '');
     const bytes = Buffer.from(JSON.stringify({ csp }));
     if (bytes.length > 32768) throw new Error('Preview policy exceeds 32 KiB');

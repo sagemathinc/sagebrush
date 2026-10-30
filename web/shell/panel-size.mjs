@@ -1,7 +1,7 @@
 // The terminal panel's size (plan-bash-shell r8c E5.6): the panel's own code (web/shell/panel.ts and what it alone
 // brings: panel-render.ts and panel.css, which it imports as text; the page's commands, panel-commands.ts and
 // presence.ts, are the page's, charged by the size gate's marker) bundled and minified as ESM, then gzipped
-// at level 9 with a fixed mtime; fails above 8 192 bytes.  The bundler is bun's (the repository builds with bun,
+// at level 9 with a fixed mtime; fails above LIMIT (below).  The bundler is bun's (the repository builds with bun,
 // pinned in CI and budgets.json; it has no esbuild), with the options E5.6 names: --bundle --minify --format=esm.
 // Conservative: the CSS is counted as panel.ts embeds it (unminified text).
 // The dependency census: every bundled input is one of the panel's own files (relative, in web/shell/), and no
@@ -11,8 +11,13 @@ import { gzipSync } from "node:zlib";
 import { join, relative } from "node:path";
 
 // (E5.6's 8 192 B, raised to 9 216 B by daybreak2's ruling on #326 r2 (terminal-panel-pr326-r2-daybreak2.md,
-// 3b9176e9): the 274 B over the old ceiling are the r1 reviews' required fixes only, no new features)
-const LIMIT = 9216;
+// 3b9176e9): the 274 B over the old ceiling are the r1 reviews' required fixes only, no new features); raised to
+// 9 344 B by daybreak2's rulings on #337 r3 (terminal-longline-pr337-r3-size-ruling-daybreak2.md, 423988e6; set at
+// 9 344 by DB2-LL-337-3, terminal-longline-pr337-r3-daybreak2.md, 96f6bf15: bun 1.4.4, CI's pin, measures 9 281):
+// "DB2-LL-337-2 exact UAX regional-indicator parity across retained windows, plus scalar-safe slice hold."; raised to
+// 9 600 B by daybreak2's size ruling on #337 r4 (bun 1.4.4 measured 9 585 B, +304 over r3b): the E5.5 batching (the
+// first slice and frame pacing, chunk runs, PAGE_RUNS, content-visibility), DB2-LL-337-4 and board's R4-1
+const LIMIT = 9600;
 const here = import.meta.dir;
 const root = join(here, "..", "..");
 const ALLOWED = new Set(["web/shell/panel.ts", "web/shell/panel-render.ts", "web/shell/panel.css"]);

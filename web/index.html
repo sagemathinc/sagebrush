@@ -1591,7 +1591,6 @@ async function openId(id) {
 // only when this device has its synced history (recover's own "from-server" condition: a start and its rows, sync-docs'
 // answer), whose load makes the record from the history's head.  Otherwise it is still arriving: said, its pull asked,
 // and never opened, as a fresh empty one would fork it.  Not the journal's, or not listed: false, as before)
-const STILL_ARRIVING = "This notebook is still arriving from sync: try again in a moment";
 async function openArrived(id) {
   const w = await wsNow();
   const at = w && !w.closed && (await w.journalActive().catch(() => false)) ? await w.pathOf("notebook", id).catch(() => undefined) : undefined;
@@ -1599,11 +1598,10 @@ async function openArrived(id) {
   const [hdb, mod] = await Promise.all([historyDbReady, loadHistory()]);
   const s = hdb ? await readJournal(hdb, id).catch(() => null) : null;
   // (still arriving: its pull asked for, which starts it here once the server has it (sync-docs: as a received
-  // `changed` does; nothing made if there is nothing); or, if this page's sync stopped it, why, as it won't arrive)
+  // `changed` does; nothing made if there is nothing); if this page's sync stopped it, why, as it won't arrive; with no
+  // pull to ask (this page's notebook sync is off), that, as it won't arrive here either: journal.js's arrivingSay)
   const arriving = () => {
-    const stopped = mod.DOC_SYNC?.stoppedOf?.(id) ?? null;
-    if (!stopped) try { mod.DOC_SYNC?.pull?.(id); } catch {}
-    const msg = stopped ? `This notebook can't sync here: ${stopped.code}` : STILL_ARRIVING;
+    const msg = mod.arrivingSay(id);
     statusEl.textContent = msg;
     wsBrowser?.say(msg);
     return false;
