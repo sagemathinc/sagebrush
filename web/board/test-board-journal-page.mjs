@@ -491,6 +491,92 @@ try {
     }
   }
 
+  section("bug #4: a board that can't be written here never holds the page");
+  // ---- DEV sync bug #4: a board whose content isn't here yet (listed from another device), or whose journal couldn't
+  // be opened, says so plainly with the way back to the files, offers no Edit, and never keeps the page from going
+  // elsewhere; only an edit that wasn't kept does (the control)
+  {
+    // (the alerts a page says, recorded instead of shown: a refusal to leave is one)
+    const recordAlerts = (t) => t.ev(`(() => { window.__alerts = []; window.alert = (m) => { window.__alerts.push(String(m)); }; return true; })()`);
+    const alerts = (t) => t.ev(`window.__alerts`);
+    const pathOf = (id) => helper.ev(`(async () => { const w = await window.M.W.Workspace.open(); const p = await w.pathOf("board", ${J(id)}); w.close(); return p; })()`);
+    const editOff = (t) => t.until(`document.querySelector('[data-sbb="edit"]')?.disabled === true`, 10000);
+    const barSays = (t, text) => t.until(`(document.getElementById("sbb-blocked")?.innerText ?? "").includes(${J(text)})`, 15000);
+    // (go elsewhere from the Files sidebar, as a person does: the row of another board, clicked)
+    const openFromFiles = async (t, path) => {
+      await t.ev(`(() => { const b = document.querySelector('[data-sbb="files"]'); if (b.getAttribute("aria-pressed") !== "true") b.click(); return true; })()`);
+      await t.until(`!!document.querySelector(${J(`#wssidebar .frow[data-path="${path}"]`)})`, 15000);
+      await t.ev(`(document.querySelector(${J(`#wssidebar .frow[data-path="${path}"]`)}).click(), true)`);
+    };
+    const setup = await br.tab();
+    const target = await newBoard(setup);
+    const targetPath = await pathOf(target);
+    await setup.close();
+    const at = (t, id) => t.until(`location.search.includes(${J("doc=local:" + id)})`, 15000);
+
+    // (a) listed from another device: its entry remote (as sync lists it), its content not here
+    section("bug #4 (a): a remote board");
+    {
+      const t = await br.tab();
+      const id = await newBoard(t);
+      await t.ev(setTj("R"));
+      await rowTj(t, id, "R");
+      await t.close();
+      const path = await pathOf(id);
+      await helper.ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush-workspace"); r.onsuccess = () => { const tx = r.result.transaction("entries", "readwrite"), st = tx.objectStore("entries"); const q = st.get(${J(path)}); q.onsuccess = () => { st.put({ ...q.result, remote: true }); }; tx.oncomplete = () => { r.result.close(); ok(true); }; }; })`);
+      const r0 = await row(helper, id);
+      const u = await br.tab();
+      await u.go(`${origin}/board/?doc=local:${id}`);
+      const shown = await u.until(`!!${B}?.snapshot?.().doc`, 30000);
+      await recordAlerts(u);
+      const said = await barSays(u, "isn't in this browser yet");
+      check(shown && said && (await editOff(u)), "bug #4 (a): a remote board opens saying its content isn't here yet, with Back to files, and no Edit");
+      const nodes = await u.ev(`(${nodesOf})(${B}.snapshot().doc).length`);
+      check(nodes === 0 && J(await row(helper, id)) === J(r0), "bug #4 (a): nothing of it shown, and nothing written over it: " + J({ nodes }));
+      await openFromFiles(u, targetPath);
+      const went = await at(u, target);
+      check(went, "bug #4 (a): another board opened from Files: the page goes there, nothing asked");
+      await u.close();
+    }
+
+    // (b) its journal not opened at the load (the board history's database refused), and no edit: the page goes
+    section("bug #4 (b, c): a journal not opened");
+    const refuseHistory = `(() => { const o = IDBFactory.prototype.open; IDBFactory.prototype.open = function (name, ...rest) { if (name === "sagebrush-board-history") throw new DOMException("refused by the test", "SecurityError"); return o.call(this, name, ...rest); }; })();`;
+    for (const edited of [false, true]) {
+      const t = await br.tab();
+      const id = await newBoard(t);
+      await t.close();
+      const u = await br.tab();
+      const added = await u.send("Page.addScriptToEvaluateOnNewDocument", { source: refuseHistory });
+      await u.go(`${origin}/board/?doc=local:${id}`);
+      const shown = await u.until(`!!${B}?.snapshot?.().doc`, 30000);
+      await recordAlerts(u);
+      const said = await barSays(u, "can't be changed in this browser now");
+      if (!edited) {
+        check(shown && said && (await editOff(u)), "bug #4 (b): a board whose journal couldn't be opened says so, with Back to files, and no Edit");
+        await openFromFiles(u, targetPath);
+        // (gone to the other board: a refusal would have kept it here, saying why)
+        check(await at(u, target), "bug #4 (b): no edit: the page goes elsewhere, nothing asked");
+      } else {
+        // (c) the control: an edit made anyway (the agent's way, which Edit doesn't gate) isn't kept, and then
+        // leaving is held back, saying why, as an unkept edit always was
+        await u.ev(setTj("not kept")).catch(() => {});
+        await sleep(500);
+        await openFromFiles(u, targetPath);
+        await sleep(1500);
+        const stayed = await u.ev(`location.search.includes(${J("doc=local:" + id)})`);
+        const why = await alerts(u);
+        check(stayed && why.length === 1 && /isn't opened: this board's last changes aren't kept/.test(why[0]), "bug #4 (c, the control): an edit that wasn't kept: leaving is held back, saying why: " + J(why));
+        // (d) Back to files: the Files sidebar shown
+        await u.ev(`(() => { const b = document.querySelector('[data-sbb="files"]'); if (b.getAttribute("aria-pressed") === "true") b.click(); return true; })()`);
+        await u.ev(`(document.querySelector("#sbb-blocked button").click(), true)`);
+        check(await u.until(`document.getElementById("wssidebar")?.hidden === false`, 5000), "bug #4 (d): Back to files shows the Files sidebar");
+      }
+      await u.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: added.identifier });
+      await u.close();
+    }
+  }
+
   await unlessEnding();
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   // (each failure one line, so its summary's count is its list's: a page error's stack joined into one)
