@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
 # After an iOS simulator build (.github/workflows/app-ios-selftest.yml):
-# 1. gen/apple changed in the one allowed way only (ios-judge.py tree: the
-#    Tauri CLI's merge of Info.ios.plist into sagebrush-app_iOS/Info.plist);
+# 1. gen/apple is exactly as committed, with no change and no new file
+#    (ios-judge.py tree): the committed tree is what the Tauri CLI's build
+#    leaves, its project sync and Info.plist merge included;
 # 2. exactly one .app was built by it for this configuration, for the
 #    simulator (its path says <debug|release>-iphonesimulator), and the Rust
 #    library Xcode linked was built for this configuration, not the other
 #    (gen/apple/Externals/<arch>/<debug|release>/libapp.a newer than the
 #    build's start): the two independent signs of which build this is;
 # 3. the built app's own Info.plist has Info.ios.plist's settings exactly
-#    (typed, nested) and no encryption declaration (ios-judge.py bundle):
+#    (typed, nested), tauri.conf.json's file types as CFBundleDocumentTypes,
+#    and no encryption declaration (ios-judge.py bundle):
 #    what the app runs with, not only the source;
 # 4. it is unsigned: no embedded.mobileprovision, and codesign shows either
 #    "not signed at all" alone or an ad hoc signature without a team or
 #    certificate (ios-judge.py codesign).
 # Writes the .app's path to OUT.  When step 1 fails, it prints what changed
-# (git diff --stat, and each changed file's diff, cut at 20000 bytes) and
-# leaves the whole diff in $DIFF_DIR/gen-apple-<mode>.diff (DIFF_DIR, default
-# $RUNNER_TEMP), which the workflow keeps as an artifact.
+# (git diff --stat, each changed file's diff cut at 20000 bytes, and each new
+# file's name, size and first 4000 bytes) and leaves it all in
+# $DIFF_DIR/gen-apple-<mode>.diff (DIFF_DIR, default $RUNNER_TEMP), which the
+# workflow keeps as an artifact.
 #   bash app/selftest/ios-built-app.sh debug|release <start stamp file> <out>
 set -euo pipefail
 MODE=${1:?usage: ios-built-app.sh debug|release <start stamp> <out>}
@@ -32,20 +35,25 @@ T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 cd "$ROOT"
 
-# 1. the tree
+# 1. the tree: exactly as committed (the commit is what the build leaves)
 git status --porcelain --untracked-files=all -- "$GEN" > "$T/status.txt"
 echo "--- gen/apple after the build:"; cat "$T/status.txt"
-git show "HEAD:$GEN/sagebrush-app_iOS/Info.plist" > "$T/generated.plist"
-if ! python3 -I "$HERE/ios-judge.py" tree "$T/status.txt" "$T/generated.plist" "$GEN/sagebrush-app_iOS/Info.plist" app/src-tauri/Info.ios.plist; then
+if ! python3 -I "$HERE/ios-judge.py" tree "$T/status.txt"; then
   D=${DIFF_DIR:-${RUNNER_TEMP:-$T}}
   mkdir -p "$D"
-  git diff -- "$GEN" > "$D/gen-apple-$MODE.diff" || true
-  echo "--- what the build changed under gen/apple (the whole diff: $D/gen-apple-$MODE.diff, $(wc -c < "$D/gen-apple-$MODE.diff") bytes)"
+  out="$D/gen-apple-$MODE.diff"
+  git diff -- "$GEN" > "$out" || true
+  echo "--- what the build changed under gen/apple (the whole dump: $out)"
   git diff --stat -- "$GEN" || true
   while IFS= read -r f; do
     echo "--- $f (at most 20000 bytes)"
     git diff -- "$f" | head -c 20000 || true
   done < <(git diff --name-only -- "$GEN")
+  # (new files: git diff doesn't show them; their names, sizes and contents, bounded)
+  while IFS= read -r f; do
+    n=$(wc -c < "$f" | tr -d ' ')
+    { echo "=== untracked: $f ($n bytes, at most 4000 shown)"; head -c 4000 "$f" || true; echo; } | tee -a "$out"
+  done < <(git ls-files --others --exclude-standard -- "$GEN")
   fail "gen/apple after the build (above)"
 fi
 
@@ -63,7 +71,7 @@ if grep -q -- "/$OTHER/libapp.a$" "$T/libs.txt"; then fail "a $OTHER libapp.a wa
 echo "ok: the $MODE simulator app: $APP"
 
 # 3. the built app's Info.plist
-python3 -I "$HERE/ios-judge.py" bundle "$APP/Info.plist" app/src-tauri/Info.ios.plist || fail "the built app's Info.plist (above)"
+python3 -I "$HERE/ios-judge.py" bundle "$APP/Info.plist" app/src-tauri/Info.ios.plist app/src-tauri/tauri.conf.json || fail "the built app's Info.plist (above)"
 
 # 4. unsigned
 [ ! -e "$APP/embedded.mobileprovision" ] || fail "the app has an embedded.mobileprovision"

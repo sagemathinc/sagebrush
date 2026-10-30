@@ -10,18 +10,18 @@ a closed grammar, fixture-tested (test-ios-judge.sh):
     python3 -I app/selftest/ios-judge.py running FILE BUNDLE_ID
         FILE is `simctl spawn <udid> launchctl list`: exit 0 if BUNDLE_ID's
         app has a running process (a PID), 1 if it has none.
-    python3 -I app/selftest/ios-judge.py tree STATUS GENERATED BUILT EXTRA
-        After the build, STATUS is `git status --porcelain
-        --untracked-files=all -- app/src-tauri/gen/apple`.  The one change
-        allowed is the Tauri CLI's merge of EXTRA (app/src-tauri/Info.ios.plist)
-        into gen/apple/sagebrush-app_iOS/Info.plist: BUILT (that file now)
-        must parse as exactly GENERATED (the committed one) with EXTRA's keys
-        set.  Any other change under gen/apple, or any other difference,
-        fails.  (It may also be unchanged.)
-    python3 -I app/selftest/ios-judge.py bundle PLIST EXTRA
+    python3 -I app/selftest/ios-judge.py tree STATUS
+        After a build, STATUS is `git status --porcelain --untracked-files=all
+        -- app/src-tauri/gen/apple`: it must be EMPTY.  The committed tree is
+        what the Tauri CLI's build leaves (its project sync and plist merge
+        included), so any change or new file fails.
+    python3 -I app/selftest/ios-judge.py bundle PLIST EXTRA CONF
         PLIST is the BUILT app's Info.plist (what the app will run with):
         every key of EXTRA (Info.ios.plist) must be in it with exactly
-        EXTRA's value (typed, nested), and it must not declare
+        EXTRA's value (typed, nested); CFBundleDocumentTypes must be exactly
+        the file types CONF (tauri.conf.json bundle.fileAssociations) declares,
+        as the Tauri CLI writes them (extensions, name, role, LSHandlerRank
+        Default), in order; and it must not declare
         ITSAppUsesNonExemptEncryption (William's answer at the first upload,
         not the simulator build's).
 Values are compared with their types (a boolean true is not the integer 1).
@@ -30,11 +30,11 @@ Each prints one outcome line, "ok: …", "FAIL: …" or "ERROR: …" (udid's
 "ok" is the UDID itself).  Exit 2: unreadable or malformed input; exit 3:
 the judge itself broke (an unexpected exception), never mistaken for a FAIL.
 """
+import json
 import plistlib
 import re
 import sys
 
-INFO_PLIST = "app/src-tauri/gen/apple/sagebrush-app_iOS/Info.plist"
 UDID = re.compile(r"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}")
 
 
@@ -116,31 +116,33 @@ def running(path, bundle):
     fail(1, f"{bundle} has no running process ({len(mine)} entries)")
 
 
-def tree(status_path, generated, built, extra):
+def tree(status_path):
     changed = [l for l in read(status_path).splitlines() if l.strip()]
-    other = [l for l in changed if l != f" M {INFO_PLIST}"]
-    if other:
-        fail(1, "the build changed gen/apple beyond Info.plist: " + "; ".join(other[:10]))
-    g, b, e = load_plist(generated), load_plist(built), load_plist(extra)
-    want = dict(g)
-    want.update(e)
-    if same(b, g) and not changed:
-        print("ok: gen/apple unchanged by the build")
-        return
-    if not same(b, want):
-        diffs = sorted(k for k in set(want) | set(b) if k not in want or k not in b or not same(want[k], b[k]))
-        fail(1, f"Info.plist after the build is not the generated one plus Info.ios.plist's keys; keys differing: {diffs}")
-    print(f"ok: the only change is Info.plist = generated + Info.ios.plist ({sorted(e)})")
+    if changed:
+        fail(1, f"the build changed gen/apple ({len(changed)}): " + "; ".join(changed[:10]))
+    print("ok: gen/apple is exactly as committed after the build")
 
 
-def bundle(plist, extra):
-    b, e = load_plist(plist), load_plist(extra)
+def doc_types(conf):
+    try:
+        with open(conf, encoding="utf-8") as f:
+            assoc = json.load(f)["bundle"]["fileAssociations"]
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        fail(2, f"no bundle.fileAssociations in {conf}: {e}")
+    return [{"CFBundleTypeExtensions": list(a["ext"]), "CFBundleTypeName": a["name"],
+             "CFBundleTypeRole": a["role"], "LSHandlerRank": "Default"} for a in assoc]
+
+
+def bundle(plist, extra, conf):
+    b, e, want = load_plist(plist), load_plist(extra), doc_types(conf)
     bad = [k for k in e if k not in b or not same(b[k], e[k])]
     if bad:
         fail(1, f"the built app's Info.plist lacks Info.ios.plist's {bad} (or has other values)")
+    if not same(b.get("CFBundleDocumentTypes"), want):
+        fail(1, f"the built app's CFBundleDocumentTypes is not tauri.conf.json's file types ({[t['CFBundleTypeExtensions'] for t in want]})")
     if "ITSAppUsesNonExemptEncryption" in b:
         fail(1, "the built app's Info.plist declares ITSAppUsesNonExemptEncryption")
-    print(f"ok: the built app's Info.plist has {sorted(e)} as in Info.ios.plist, and no encryption declaration")
+    print(f"ok: the built app's Info.plist has {sorted(e)} as in Info.ios.plist, the file types {[t['CFBundleTypeExtensions'][0] for t in want]}, and no encryption declaration")
 
 
 def main(argv):
@@ -150,12 +152,12 @@ def main(argv):
         codesign(argv[1])
     elif len(argv) == 3 and argv[0] == "running":
         running(argv[1], argv[2])
-    elif len(argv) == 5 and argv[0] == "tree":
-        tree(*argv[1:])
-    elif len(argv) == 3 and argv[0] == "bundle":
-        bundle(argv[1], argv[2])
+    elif len(argv) == 2 and argv[0] == "tree":
+        tree(argv[1])
+    elif len(argv) == 4 and argv[0] == "bundle":
+        bundle(argv[1], argv[2], argv[3])
     else:
-        fail(2, "usage: ios-judge.py udid TEXT | codesign FILE | running FILE BUNDLE_ID | tree STATUS GENERATED BUILT EXTRA | bundle PLIST EXTRA")
+        fail(2, "usage: ios-judge.py udid TEXT | codesign FILE | running FILE BUNDLE_ID | tree STATUS | bundle PLIST EXTRA CONF")
 
 
 try:
