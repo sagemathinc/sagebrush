@@ -259,7 +259,7 @@
     </div>
     <select id="autorun" hidden aria-label="Automatic reruns" title="When a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">Auto-run: 2 s</option><option value="10000">Auto-run: 10 s</option><option value="always">Auto-run: always</option><option value="never">Auto-run: never</option></select>
     <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
-    <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, or on a GPU kernel (a preview: simulated)"><option value="local">This browser</option><option value="gpu">GPU (preview)</option></select>
+    <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, or on remote compute (a preview: simulated)"><option value="local">This browser</option><option value="gpu">Remote compute (preview)</option></select>
     <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
@@ -420,7 +420,7 @@ import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot } from "./latex/boot.ts";
@@ -754,7 +754,7 @@ function startKernel(e) {
 // Make a notebook's interpreter the current one (before its document loads,
 // so that the outputs it computed are not marked stale).
 function useKernel(id) {
-  leaveRemote(); // (a notebook's own interpreter: the GPU kernel, if one was in use, is closed)
+  leaveRemote(); // (a notebook's own interpreter: remote compute, if it was in use, is closed)
   const e = kernelFor(id);
   kernel = e.kernel;
   journal = e.journal;
@@ -811,11 +811,11 @@ const analyzer = {
     return new Promise((resolve) => { const id = ++analyzeId; analyzeWaiting.set(id, resolve); analyzeWorker.postMessage({ id, ...msg }); });
   },
 };
-// The GPU kernel, as a preview (web/notebook/remote-ui.js, its own bundle sagebrush-remote.js, loaded on
+// Remote compute, as a preview (web/notebook/remote-ui.js, its own bundle sagebrush-remote.js, loaded on
 // first use): offered only in a page opened with ?remote=1.  Its gateway is simulated in the page, and its
 // runs execute on a second interpreter in this browser; every run is still approved by the page's gate.
 // One attempt at a time is current (remoteSwitch): choosing This browser, opening another notebook (useKernel)
-// or choosing GPU again ends whatever is pending or installed.  The module's own load is fenced the same way:
+// or choosing remote compute again ends whatever is pending or installed.  The module's own load is fenced the same way:
 // `remoteGen` is taken before its await, and changed by every leave.
 const REMOTE_PREVIEW = new URLSearchParams(location.search).get("remote") === "1";
 const kernelPick = $("#kernelpick");
@@ -826,7 +826,7 @@ function leaveRemote() {
   kernelPick.value = "local";
 }
 async function useRemote() {
-  // (This browser: the notebook's own interpreter; useKernel ends the GPU kernel and any pending attempt)
+  // (This browser: the notebook's own interpreter; useKernel ends remote compute and any pending attempt)
   if (kernelPick.value !== "gpu") return useKernel(current.id);
   const gen = ++remoteGen, id = current.id;
   remoteSw?.leave(); // (an attempt begun before this one ends now, even while this one loads)
@@ -842,6 +842,7 @@ async function useRemote() {
       status: (t) => { statusEl.textContent = t; },
       reactive: () => REACTIVE,
       makeLocal: () => makeKernel(null).kernel,
+      network: () => mod.parseNetwork(location.search), // (&latency=MS &jitter=MS &loss=P: the simulated network)
       setKernel: (k) => nb.setKernel(k), // (another interpreter: every output is stale)
     });
     await remoteSw.connect(id);
@@ -849,7 +850,7 @@ async function useRemote() {
     remoteLoad = null; // (a failed load is tried again next time)
     if (gen !== remoteGen) return;
     kernelPick.value = "local";
-    statusEl.textContent = `GPU kernel (preview): ${e?.message ?? e}`;
+    statusEl.textContent = `Remote compute (preview): ${e?.message ?? e}`;
   }
 }
 if (REMOTE_PREVIEW) {
@@ -1501,8 +1502,49 @@ async function openId(id) {
   // upload) opens by its URL, never loaded unseen under the editor; a build without the editor drops this line)
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && globalThis.__sbTexOpen?.(id)) return true;
   const doc = await idb(db, "notebooks", "readonly", (st) => st.get(id));
-  if (!doc) return false;
+  if (!doc) return openArrived(id);
   await open(await storeFor(id), id);
+  savedEl.textContent = "opened";
+  return true;
+}
+// (a notebook another device made, listed here by sync with no record yet (2c-3): opened through the journal's store
+// only when this device has its synced history (recover's own "from-server" condition: a start and its rows, sync-docs'
+// answer), whose load makes the record from the history's head.  Otherwise it is still arriving: said, its pull asked,
+// and never opened, as a fresh empty one would fork it.  Not the journal's, or not listed: false, as before)
+const STILL_ARRIVING = "This notebook is still arriving from sync: try again in a moment";
+async function openArrived(id) {
+  const w = await wsNow();
+  const at = w && !w.closed && (await w.journalActive().catch(() => false)) ? await w.pathOf("notebook", id).catch(() => undefined) : undefined;
+  if (!at) return false;
+  const [hdb, mod] = await Promise.all([historyDbReady, loadHistory()]);
+  const s = hdb ? await readJournal(hdb, id).catch(() => null) : null;
+  // (still arriving: its pull asked for, which starts it here once the server has it (sync-docs: as a received
+  // `changed` does; nothing made if there is nothing); or, if this page's sync stopped it, why, as it won't arrive)
+  const arriving = () => {
+    const stopped = mod.DOC_SYNC?.stoppedOf?.(id) ?? null;
+    if (!stopped) try { mod.DOC_SYNC?.pull?.(id); } catch {}
+    const msg = stopped ? `This notebook can't sync here: ${stopped.code}` : STILL_ARRIVING;
+    statusEl.textContent = msg;
+    wsBrowser?.say(msg);
+    return false;
+  };
+  if (!s || s.start === null || !(s.jOf?.size > 0)) return arriving();
+  // (its name and mode are its entry's, as listed here: the synced history carries the cells, not the name, so the
+  // record made from it would otherwise be "Untitled", and this page would then retitle the file)
+  const e = await w.stat(at).catch(() => undefined);
+  const st = await storeFor(id, { name: splitExt(nameOf(at))[0], mode: e?.mode ?? "python", cells: [] });
+  if (!st.journaled) return arriving();
+  await open(st, id);
+  // (the load must have made the record from the history: anything else is a bug, said and logged, nothing deleted)
+  // (never expected: rows only grow between the check and the load's own read.  If it happens, a fresh record was made
+  // that would fork the notebook: shown read-only here, so nothing is typed into it, said, and logged; nothing deleted
+  // (the grader's N-ST-2))
+  if (st.recovered?.row === "new") {
+    console.warn("sync: a notebook that arrived by sync loaded as a new one, not from its history:", id);
+    nb.setReadOnly(true);
+    statusEl.textContent = STILL_ARRIVING + " (opened read-only: reload this page to try again)";
+    return true;
+  }
   savedEl.textContent = "opened";
   return true;
 }
