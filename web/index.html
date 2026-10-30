@@ -427,12 +427,9 @@ import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { uploadFiles, openableAs, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
 import { BUNDLE, readBundle, keepBundle } from "./notebook/bundle.js";
-// (the terminal panel, plan-bash-shell r8c step 6: a preview, shown on preview/DEV hosts only, below)
-import { ShellHost } from "./shell/host.ts";
-import { startShell } from "./shell/loader.ts";
-import { TerminalPanel } from "./shell/panel.ts";
-import { answerPresence, gatherPresence, TAB } from "./shell/presence.ts";
-import { terminalCommands } from "./shell/panel-commands.ts";
+// (the terminal, plan-bash-shell r8c step 6: a preview, shown on preview/DEV hosts only, below; its module,
+// shell/terminal.js, is loaded at its first open: this page carries only the menu item and the ps answer)
+import { answerPresence, TAB } from "./shell/presence.ts";
 import { openPreview } from "./workspace/preview.ts";
 const EXAMPLES = {
   "Welcome": [
@@ -2189,9 +2186,13 @@ if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/
       if (!w) { savedEl.textContent = "the terminal needs this browser's workspace, which isn't open"; return; }
       const S = await shellSet();
       if (!S) { savedEl.textContent = "the terminal: this site has no shell package set"; return; }
-      const host = new ShellHost(w, async (signal) => (await startShell(S, "./", { signal })).shell);
-      term = new TerminalPanel({ host, label: "bash \u00b7 " + S.slice(0, 8), commands: terminalCommands({ open: openPath, ps: () => gatherPresence(here) }) });
-      term.onEnd = () => { host.endShell("the terminal was ended"); term = null; };
+      // (the module, from this page's directory: a variable, so the bundler leaves it to the browser)
+      const mod = "./shell/terminal.js";
+      let openTerminal;
+      try { ({ openTerminal } = await import(mod)); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
+      if (term) return term.toggle();
+      term = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
+      term.onEnd = () => { term = null; };
     }
     term.toggle();
   };

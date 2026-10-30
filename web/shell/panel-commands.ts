@@ -20,6 +20,8 @@ export interface PageHooks {
   open?: (path: string) => Promise<string>;
   /** what is open in this browser */
   ps?: () => Promise<{ procs: Proc[]; tabs: number }>;
+  /** this tab's id (the page's presence id), marked [this tab] */
+  tab?: string;
 }
 
 export function terminalCommands(page: PageHooks): Record<string, PanelCommand> {
@@ -46,7 +48,7 @@ export function terminalCommands(page: PageHooks): Record<string, PanelCommand> 
   if (page.ps) {
     const ps = page.ps;
     out.ps = async (_args, io) => {
-      io.write(psTable((await ps()).procs));
+      io.write(psTable((await ps()).procs, Date.now(), page.tab));
       return 0;
     };
     // top: the same listing, refreshed every 2 s until Stop (or Ctrl-C)
@@ -54,7 +56,7 @@ export function terminalCommands(page: PageHooks): Record<string, PanelCommand> 
       while (!io.signal.aborted) {
         const { procs, tabs } = await ps();
         if (io.signal.aborted) break;
-        io.replace(topText(procs, tabs));
+        io.replace(topText(procs, tabs, Date.now(), page.tab));
         await new Promise<void>((r) => {
           const t = setTimeout(r, 2000);
           io.signal.addEventListener("abort", () => (clearTimeout(t), r()), { once: true });

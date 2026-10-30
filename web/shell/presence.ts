@@ -38,10 +38,10 @@ export function answerPresence(describe: () => Proc[] | Promise<Proc[]>): () => 
   return () => ch.close();
 }
 
-/** This page's processes plus every answer within `ms`. */
-export async function gatherPresence(local: () => Proc[] | Promise<Proc[]>, ms = 300): Promise<{ procs: Proc[]; tabs: number }> {
+/** This page's processes plus every answer within `ms`; `self`: this tab's id (the page's, which answers for it). */
+export async function gatherPresence(local: () => Proc[] | Promise<Proc[]>, ms = 300, self = TAB): Promise<{ procs: Proc[]; tabs: number }> {
   const procs: Proc[] = [...(await local())];
-  const tabs = new Set([TAB]);
+  const tabs = new Set([self]);
   if (typeof BroadcastChannel !== "function") return { procs, tabs: 1 };
   const ch = new BroadcastChannel(CHANNEL);
   const q = Math.random().toString(36).slice(2);
@@ -51,7 +51,7 @@ export async function gatherPresence(local: () => Proc[] | Promise<Proc[]>, ms =
     tabs.add(m.from);
     for (const p of m.procs.slice(0, 64)) if (p && typeof p.name === "string" && typeof p.kind === "string") procs.push({ ...p, tab: m.from });
   };
-  ch.postMessage({ q, from: TAB });
+  ch.postMessage({ q, from: self });
   await new Promise((r) => setTimeout(r, ms));
   ch.close();
   return { procs, tabs: tabs.size };
