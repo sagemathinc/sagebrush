@@ -2,6 +2,7 @@
 // Named after the reviews' implementation tests (astra LC-T1..T7, daybreak3 DB3-IMPL-1..4).
 //   bun web/latex/test-comments-core.mjs
 import * as C from "./comments-core.mjs";
+import { createHash } from "node:crypto";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 600)); };
@@ -261,6 +262,22 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
   check("source-limit-exactly-2Mi-ok", !throws(() => C.resolver(at)) && !throws(() => C.makeAnchor(at, 0, 1)));
   const e1 = throws(() => C.resolver(over)), e2 = throws(() => C.makeAnchor(over, 0, 1));
   check("source-limit-one-over-refused", e1?.code === "limit" && e1.detail?.limit === "sourceUnits" && e2?.code === "limit" && /up to 2 MiB \(this one is 2\.0 MiB\)/.test(e1.message), e1?.message);
+}
+
+// ---- (#316 r4) the hasher's reused encode buffer: in 8 Ki-unit pieces (and pieces of every size, the buffer grown
+// and reused), the digest is the same as in one call and as node's own SHA-256 of the UTF-8 bytes, on each fixture
+{
+  const fixtures = [TEX, "", "\u00e9t\u00e9 \u{1F600} \u{1D4AA}", "\u{1F600}".repeat(9000) + "a", ("caf\u00e9 \u4e2d\u6587 ").repeat(5000), "x".repeat(70000)];
+  const node = (x) => createHash("sha256").update(Buffer.from(new TextEncoder().encode(x))).digest("hex");
+  let same = true;
+  for (const f of fixtures) {
+    for (const piece of [1 << 13, 1, 7, 64, 1 << 16]) {
+      const h = C.sha256Hasher();
+      for (let i = 0; i < f.length;) { const j = C.sliceAt(f, i + piece); h.update(f.slice(i, j)); i = j; }
+      if (h.digest() !== C.sha256(f) || C.sha256(f) !== node(f)) same = false;
+    }
+  }
+  check("r4-hasher-reused-buffer-same-digest", same);
 }
 
 // ---- (astra, #316 r2) the first pass over the text is admitted too: a budget below it reads nothing (no hash, no

@@ -51,9 +51,9 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
   // (a thread is placed once per anchor write: later, its offsets are mapped through the edits made here). The work
   // runs in slices of at most SLICE_MS, a frame given back between them (r3 §7.6): the text hashed in pieces (once
   // per text: kept for new anchors), then the threads resolved a few at a time; an edit meanwhile starts it again
-  // (a slice ends at the first pause past SLICE_MS: a step after it is at most a window of the text, about a
-  // millisecond, so slices stay within 8 ms)
-  const SLICE_MS = 5, HASH_PIECE = 1 << 14;
+  // (a slice ends at the first pause past SLICE_MS: a step after it is one native search or one hash piece of 8 Ki
+  // units (encoded into a reused buffer: no garbage per piece), so slices stay within 8 ms)
+  const SLICE_MS = 4, HASH_PIECE = 1 << 13;
   let placing = 0, shaFor = { text: null as string | null, sha: "" };
   // comments are for a .tex of at most 2 Mi UTF-16 units (the core's LIMITS.sourceUnits): above, the person is told so,
   // nothing is placed or written, and the comments file is left as it is
