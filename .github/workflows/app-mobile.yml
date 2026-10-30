@@ -279,9 +279,12 @@ jobs:
           grep 'usesCleartextTraffic' /tmp/manifest.txt || { echo "FAIL: no usesCleartextTraffic in the manifest"; exit 1; }
           grep -q 'usesCleartextTraffic([^)]*)=false' /tmp/manifest.txt || { echo "FAIL: usesCleartextTraffic is not false"; exit 1; }
           unzip -p "$APK" "$so" > /tmp/lib.so
-          if "$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -S -W /tmp/lib.so | grep -F '.debug_'; then echo "FAIL: the release .so has debug sections"; exit 1; fi
-          n=$(grep -c -a -F 'files/selftest' /tmp/lib.so || true)
-          [ "${n:-0}" = 0 ] || { echo "FAIL: the release .so has the debug-only self-test hook ($n matching lines)"; exit 1; }
+          [ -s /tmp/lib.so ] || { echo "FAIL: $so is empty"; exit 1; }
+          "$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -S -W /tmp/lib.so > /tmp/sections.txt
+          grep -q -F ' .text ' /tmp/sections.txt || { cat /tmp/sections.txt; echo "FAIL: readelf lists no .text (not a section table?)"; exit 1; }
+          if grep -F '.debug_' /tmp/sections.txt; then echo "FAIL: the release .so has debug sections"; exit 1; fi
+          n=$(grep -c -a -F 'files/selftest' /tmp/lib.so) || [ $? = 1 ]
+          [ "$n" = 0 ] || { echo "FAIL: the release .so has the debug-only self-test hook (count '$n')"; exit 1; }
           {
             echo "ok: not debuggable; usesCleartextTraffic=false; $so stripped; no self-test hook"
             grep -m1 '^package:' /tmp/badging.txt
@@ -299,8 +302,14 @@ jobs:
           echo "::add-mask::$KS_PASS"
           export KS_PASS
           "$JAVA_HOME/bin/keytool" -genkeypair -keystore "$kdir/test.p12" -storetype PKCS12 -alias test \
-            -keyalg RSA -keysize 4096 -validity 2 -dname "CN=sagebrush CI test key, NOT FOR DISTRIBUTION" \
+            -keyalg RSA -keysize 4096 -validity 2 -dname "CN=sagebrush CI test key (NOT FOR DISTRIBUTION), O=sagebrush CI" \
             -storepass:env KS_PASS -keypass:env KS_PASS > /dev/null
+          # (the new key's PUBLIC certificate, hashed before the keystore goes:
+          # the final APK must be signed by exactly this one certificate)
+          "$JAVA_HOME/bin/keytool" -exportcert -keystore "$kdir/test.p12" -storetype PKCS12 -alias test \
+            -storepass:env KS_PASS -file "$kdir/test.der" > /dev/null
+          want=$(sha256sum "$kdir/test.der" | cut -d' ' -f1)
+          [ "${#want}" = 64 ] || { echo "FAIL: no certificate hash"; exit 1; }
           out=build/release-testkey
           mkdir -p "$out"
           "$BT/zipalign" -P 16 -f 4 "$APK" "$kdir/aligned.apk"
@@ -312,7 +321,10 @@ jobs:
           signed="$out/sagebrush-release-TESTKEY-not-for-distribution.apk"
           "$BT/zipalign" -c -P 16 4 "$signed" > /dev/null || { echo "FAIL: the signed APK is not aligned"; exit 1; }
           "$BT/apksigner" verify --print-certs "$signed" > /tmp/certs.txt || { cat /tmp/certs.txt; echo "FAIL: apksigner verify"; exit 1; }
-          grep -q 'NOT FOR DISTRIBUTION' /tmp/certs.txt || { cat /tmp/certs.txt; echo "FAIL: not signed by the test key"; exit 1; }
+          signers=$(grep -c '^Signer #[0-9]* certificate SHA-256 digest: ' /tmp/certs.txt) || [ $? = 1 ]
+          got=$(sed -n 's/^Signer #1 certificate SHA-256 digest: \([0-9a-f]\{64\}\)$/\1/p' /tmp/certs.txt)
+          [ "$signers" = 1 ] && [ "$got" = "$want" ] || { cat /tmp/certs.txt; echo "FAIL: expected exactly one signer, this run's test certificate $want (signers $signers, #1 '$got')"; exit 1; }
+          grep -q '^Signer #1 certificate DN: .*NOT FOR DISTRIBUTION' /tmp/certs.txt || { cat /tmp/certs.txt; echo "FAIL: the signer's DN is not the test key's"; exit 1; }
           {
             echo "TESTKEY (made in this run, deleted; NOT FOR DISTRIBUTION): $(grep -m1 'certificate SHA-256 digest' /tmp/certs.txt)"
             echo "apksigner $("$BT/apksigner" --version), build-tools $BUILD_TOOLS_VERSION, $("$JAVA_HOME/bin/java" -version 2>&1 | head -1)"
