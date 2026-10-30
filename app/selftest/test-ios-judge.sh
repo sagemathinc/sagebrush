@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # ios-judge.py on fixed inputs (app/selftest/ios-fixtures): each must give its
-# exit code, so a judge that accepts a signed app, a stopped app, an extra
-# change after the build or a malformed UDID can't pass.
+# exit code, so a judge that accepts a signed (or contradictory) codesign
+# report, a stopped app, an extra change after the build, a built app without
+# Info.ios.plist's exact settings (typed: true is not 1) or with an encryption
+# declaration, or a malformed UDID can't pass.
 #   bash app/selftest/test-ios-judge.sh
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -24,6 +26,8 @@ check 1 udid "Invalid device type: com.apple.CoreSimulator.SimDeviceType.iPhone-
 check 0 codesign "$F/codesign-adhoc.txt"
 check 0 codesign "$F/codesign-unsigned.txt"
 check 1 codesign "$F/codesign-team.txt"
+check 1 codesign "$F/codesign-contradictory.txt"
+check 1 codesign "$F/codesign-adhoc-no-team-line.txt"
 check 2 codesign "$F/codesign-empty.txt"
 check 2 codesign "$F/no-such-file.txt"
 check 0 running "$F/launchctl-running.txt" "$B"
@@ -41,6 +45,15 @@ check 1 tree "$F/status-only-info-plist.txt" "$G" "$F/plist-changed-key.plist" "
 check 1 tree "$F/status-other-file.txt" "$G" "$F/plist-merged.plist" "$X"
 check 1 tree "$F/status-untracked.txt" "$G" "$F/plist-merged.plist" "$X"
 check 2 tree "$F/status-only-info-plist.txt" "$G" "$F/plist-not-a-plist.plist" "$X"
+check 1 tree "$F/status-only-info-plist.txt" "$G" "$F/plist-merged-int.plist" "$X"
+check 0 bundle "$F/plist-merged.plist" "$X"
+check 0 bundle "$F/plist-merged-binary.plist" "$X"
+check 1 bundle "$G" "$X"
+check 1 bundle "$F/plist-missing-key.plist" "$X"
+check 1 bundle "$F/plist-merged-int.plist" "$X"
+check 1 bundle "$F/plist-file-sharing-false.plist" "$X"
+check 1 bundle "$F/plist-encryption.plist" "$X"
+check 2 bundle "$F/plist-not-a-plist.plist" "$X"
 check 2 bogus
 [ "$bad" = 0 ] || { echo "FAIL: ios-judge.py"; exit 1; }
 echo "ok: ios-judge.py gives every fixture its expected result"
