@@ -1536,9 +1536,16 @@ async function openArrived(id) {
   if (!st.journaled) return arriving();
   // (the store itself refuses a started notebook with no history: it answers "arriving" with nothing written (N-2C3-1),
   // so the window between the check above and the load's own read (a remove's dropped rows) is said here, never a fork)
+  const prev = current;
   try {
     await open(st, id);
   } catch (e) {
+    // (a refused load, still arriving or any other: the store never became the page's (nb.attach installs it only after
+    // its load succeeds), so it is let go here, its writer lock with it; else a retry would queue read-only behind it and
+    // show an empty notebook (astra3's A-SAG-1, the grader's G-SAG-1).  And the notebook shown before is opened again,
+    // or nothing is left attached, as takeOver and reopenJournaled leave the page)
+    try { await st.release(); } catch {}
+    if (!nb.store && prev.id && prev.id !== id && prev.kind === "browser") await openId(prev.id).catch((x) => console.warn("notebook: the one shown before not reopened:", x));
     if (e?.arriving) return arriving();
     throw e;
   }
