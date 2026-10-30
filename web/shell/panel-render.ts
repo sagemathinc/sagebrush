@@ -33,16 +33,28 @@ export const PAGE = 4096;
 export const PAGE_BACK = 64;
 
 const graphemes = new Intl.Segmenter();
+/** The regional indicators ending at code unit n of t. */
+export const ris = (t: string, n = t.length) => {
+  let k = 0;
+  while (n > 1 && (t.codePointAt(n - 2)! - 0x1f1e6) >>> 0 < 26) (n -= 2), k++;
+  return k;
+};
 /** Where a page may start at the edge e of s (lo: the page's own start there, never reached): the last grapheme-cluster
  * boundary (UAX #29, Intl.Segmenter: marks, ZWJ sequences, flags, Hangul syllables...) at most PAGE_BACK units before
  * e; for a longer cluster, e itself, or e - 1 inside a surrogate pair: always a scalar boundary.  @sagebrush's ruling
  * on DB2-LL-337-1 (board's CONCUR, replacing B-LL-1's "never"). */
-export function cut(s: string, e: number, lo: number): number {
-  const a = Math.max(lo, e - PAGE_BACK - 2);
+export function cut(s: string, e: number, lo: number, ri = 0): number {
+  let a = Math.max(lo, e - PAGE_BACK - 2);
+  if (a > lo && s.charCodeAt(a) >> 10 === 55) a--;
+  // (flags pair regional indicators from the start of their run, which may lie before the window, even before s
+  // (ri: the run's length there): an odd count before the window is restored by one RI before it; DB2-LL-337-2)
+  let k = ris(s, a);
+  if (k * 2 === a) k += ri;
+  const pre = k & 1 ? "\u{1f1e6}" : "";
   let j = lo;
-  for (const g of graphemes.segment(s.slice(a, e + 2))) {
-    if (a + g.index > e) break;
-    j = a + g.index;
+  for (const g of graphemes.segment(pre + s.slice(a, e + 2))) {
+    if (a + g.index - pre.length > e) break;
+    j = a + g.index - pre.length;
   }
   if (j > lo && j >= e - PAGE_BACK) return j;
   const c = s.charCodeAt(e - 1);
@@ -154,6 +166,8 @@ export class Render {
   private lineUnits = 0;
   // (where the line's current page began, in its shown units: each page is at most PAGE from there)
   private pageStart = 0;
+  // (the regional indicators ending the line's text already returned: their parity decides a flag across a join)
+  private riOut = 0;
 
   /** Nothing is scanned here: every byte's work is inside a slice (next()). */
   constructor(private out: string, private err: string, private now: () => number = () => performance.now()) {}
@@ -189,11 +203,15 @@ export class Render {
       const hold = this.pageStart + PAGE - PAGE_BACK - 2;
       let at = this.lineUnits, i = this.line.length;
       while (i && at > hold) at -= this.line[--i].text.length;
-      if (at < hold && i < this.line.length) i = this.spans < CAPS.spans - 1 ? this.split(i, hold - at) : this.line.length;
+      // (the hold on a scalar boundary: never inside a surrogate pair)
+      const n = hold - at - +(this.line[i]?.text.charCodeAt(hold - at - 1) >> 10 === 54);
+      if (at < hold && n > 0 && i < this.line.length) i = this.spans < CAPS.spans - 1 ? this.split(i, n) : this.line.length;
       keep = this.line.splice(i);
     }
     for (const r of this.line) {
       out.push(r);
+      const k = ris(r.text);
+      this.riOut = k * 2 === r.text.length ? this.riOut + k : k;
       if (midLine) (this.lineOut.units += r.text.length), this.lineOut.spans++;
     }
     this.line = keep;
@@ -368,7 +386,7 @@ export class Render {
         for (const r of this.line) this.units -= r.text.length;
         this.spans -= this.line.length;
         this.line = [];
-        this.lineUnits = this.pageStart = 0;
+        this.lineUnits = this.pageStart = this.riOut = 0;
         if (this.lineOut.spans) {
           this.units -= this.lineOut.units;
           this.spans -= this.lineOut.spans;
@@ -414,7 +432,7 @@ export class Render {
     if (merge) last.text += "\n";
     else out.push({ text: "\n", cls: "", err });
     this.spans += paged + (merge ? 0 : 1);
-    this.lineUnits = this.pageStart = 0;
+    this.lineUnits = this.pageStart = this.riOut = 0;
     this.units++;
     this.lines++;
     return true;
@@ -447,9 +465,17 @@ export class Render {
     while (text) {
       const edge = this.pageStart + PAGE;
       if (this.lineUnits + text.length <= edge) break;
-      let s = text, at = this.lineUnits;
-      for (let i = this.line.length; i-- && at > edge - PAGE_BACK - 2; ) (at -= this.line[i].text.length), (s = this.line[i].text + s);
-      text = this.join(out, text, err, at + cut(s, edge - at, Math.max(0, this.pageStart - at)));
+      let s = text, at = this.lineUnits, i = this.line.length, ri = 0, all = true;
+      while (i && at > edge - PAGE_BACK - 2) (at -= this.line[--i].text.length), (s = this.line[i].text + s);
+      // (the regional indicators just before s: in the held runs before it, then, if those are all RIs, in the
+      // returned text)
+      while (all && i) {
+        const t = this.line[--i].text, k = ris(t);
+        ri += k;
+        all = k * 2 === t.length;
+      }
+      if (all) ri += this.riOut;
+      text = this.join(out, text, err, at + cut(s, edge - at, Math.max(0, this.pageStart - at), ri));
     }
     this.push(out, text, err);
     return true;

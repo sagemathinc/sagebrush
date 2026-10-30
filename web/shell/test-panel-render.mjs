@@ -319,12 +319,12 @@ check(CAPS.units + 2 * 256 + dropMarker(1e6).length <= SCROLLBACK.units && CAPS.
     const slicings = [["one slice", ALL, () => 0], ["one byte", { bytes: 1, spans: Infinity, ms: Infinity }, () => 0],
       ["the shipped slice", { bytes: 65536, spans: 1000, ms: Infinity }, () => 0], ["an advancing clock", { bytes: Infinity, spans: Infinity, ms: 8 }, () => (tick += 0.37)]];
     const M = "\u0301";
-    const kept = (what, input, plain, firstLen, firstStart) => {
+    const kept = (what, input, plain, firstLen, firstStart, whole = true) => {
       for (const [how, b, now] of slicings) {
         const r = render(input + "\n", "", b, now);
         const ps = pagesOf(r.runs)[0];
         const ok = ps.join("") === plain && ps.every((p) => p.length <= PAGE) && ps[0].length === firstLen && ps[1]?.startsWith(firstStart) &&
-          ps.slice(1).every((p) => !/^[\udc00-\udfff]/.test(p)) && (firstLen === PAGE || firstLen === PAGE - 1 || atBounds(ps)) && r.totals.spans === r.runs.length + 1;
+          ps.slice(1).every((p) => !/^[\udc00-\udfff]/.test(p)) && (!whole || atBounds(ps)) && r.totals.spans === r.runs.length + 1;
         check(ok, `${what}, ${how}: pages ${ps.map((p) => p.length).join(", ")}, page 2 starts ${JSON.stringify(ps[1]?.slice(0, 3))}, spans ${r.totals.spans} for ${r.runs.length} runs`);
       }
     };
@@ -348,12 +348,25 @@ check(CAPS.units + 2 * 256 + dropMarker(1e6).length <= SCROLLBACK.units && CAPS.
     // (BLL1-R1 at every slicing: a flag and a Hangul syllable across the edge move whole to the next page)
     kept("a flag on the edge", "a".repeat(PAGE - 2) + "\u{1f1f8}\u{1f1ea}" + "b".repeat(20), "a".repeat(PAGE - 2) + "\u{1f1f8}\u{1f1ea}" + "b".repeat(20), PAGE - 2, "\u{1f1f8}\u{1f1ea}");
     kept("a Hangul L+V+T syllable on the edge", "a".repeat(PAGE - 2) + "\u1100\u1161\u11a8" + "b".repeat(20), "a".repeat(PAGE - 2) + "\u1100\u1161\u11a8" + "b".repeat(20), PAGE - 2, "\u1100\u1161\u11a8");
+    // (flags in a long run of regional indicators that starts far outside the window: they pair from the run's start,
+    // so the join keeps each pair whole whatever the slicing or the style runs: DB2-LL-337-2)
+    {
+      const A = "\u{1f1e6}", B = "\u{1f1e7}";
+      const ab = (n) => Array.from({ length: n }, (_, i) => (i % 2 ? B : A)).join("");
+      kept("2 050 alternating RIs (daybreak2's case)", ab(2050) + "b", ab(2050) + "b", PAGE, A + B);
+      kept("a, then 2 050 RIs: pairs from unit 1", "a" + ab(2050) + "b", "a" + ab(2050) + "b", PAGE - 3, A + B);
+      kept("a, then 6 000 RIs over three joins", "a" + ab(6000) + "b", "a" + ab(6000) + "b", PAGE - 3, A + B);
+      // (style runs of 3 RIs each, so pairs straddle the runs)
+      const styled = Array.from({ length: 700 }, (_, i) => `\x1b[3${1 + (i % 2)}m` + ab(3)).join("") + "\x1b[0mb";
+      const plainStyled = ab(3).repeat(700) + "b";
+      kept("2 100 RIs in style runs of 3", "a" + styled, "a" + plainStyled, PAGE - 3, ab(3).slice(0, 4));
+    }
     // (a cluster over PAGE_BACK: split at the edge, the defined behaviour; with astral marks, at a scalar boundary)
     {
       const line = "a".repeat(PAGE - 100) + "e" + M.repeat(200) + "b".repeat(20);
-      kept("a cluster over PAGE_BACK, split at the edge", line, line, PAGE, M);
+      kept("a cluster over PAGE_BACK, split at the edge", line, line, PAGE, M, false);
       const astral = "a".repeat(PAGE - 100) + "e" + "\u{1d167}".repeat(100) + "b".repeat(20);
-      kept("a cluster of astral marks over PAGE_BACK, split at a scalar boundary", astral, astral, PAGE - 1, "\u{1d167}");
+      kept("a cluster of astral marks over PAGE_BACK, split at a scalar boundary", astral, astral, PAGE - 1, "\u{1d167}", false);
     }
     // (a cluster at the page's own start needs no move: a line of marks after one base, two pages over)
     {
