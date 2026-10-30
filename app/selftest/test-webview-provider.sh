@@ -22,5 +22,15 @@ check 2 twice.txt
 check 2 no-such-file.txt
 rc=0; python3 -I "$HERE/webview-provider.py" "$F/selected.txt" com.android.webview 158 > /dev/null 2>&1 || rc=$?
 if [ "$rc" = 2 ]; then echo "ok   a malformed expected version -> 2"; else echo "FAIL a malformed expected version -> $rc, expected 2"; bad=1; fi
+# dumpsys-version-name.sh, the installed version read after `adb install`: the first
+# versionName wins, none gives an empty answer (rc 0; the caller's check FAILs it).
+P="$HERE/package-fixtures"
+vcheck() {
+  local want=$1 file=$2 got rc=0
+  got=$(bash "$HERE/dumpsys-version-name.sh" "$P/$file" 2>&1) || rc=$?
+  if [ "$rc" = 0 ] && [ "$got" = "$want" ]; then echo "ok   $file -> '$got'"; else echo "FAIL $file -> rc $rc '$got', expected '$want'"; bad=1; fi
+}
+vcheck 158.0.8127.0 two-versions.txt
+vcheck "" none.txt
 [ "$bad" = 0 ] || { echo "FAIL: the WebView provider checker"; exit 1; }
 echo "ok: the WebView provider checker gives every fixture its expected result"
