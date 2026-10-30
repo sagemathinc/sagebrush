@@ -311,6 +311,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-pyjs-digest.src": {
+   "exact": false,
+   "ceiling": 2939,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-pyjs-doctest.src": {
    "exact": false,
    "ceiling": 15528,
@@ -627,6 +634,7 @@
    "engine/lib/mod-png.src": 5970,
    "engine/lib/mod-pprint.src": 25584,
    "engine/lib/mod-pydatetime.src": 105793,
+   "engine/lib/mod-pyjs-digest.src": 2672,
    "engine/lib/mod-pyjs-doctest.src": 14117,
    "engine/lib/mod-pyjs-help.src": 8050,
    "engine/lib/mod-pyjs-magic.src": 21074,
