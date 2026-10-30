@@ -32,8 +32,18 @@ const listedKey = (ns: string) => `sync:${ns}:listed`;
 /** Paths listed in the Sync panel's list (in a transaction with meta). */
 export async function noteListed(meta: IDBObjectStore, ns: string, listed: [string, ListedWhy][]) {
   if (!listed.length) return;
-  const was = ((await req(meta.get(listedKey(ns)))) as { count: number; paths: [string, ListedWhy][] } | undefined) ?? { count: 0, paths: [] };
-  meta.put({ count: was.count + listed.length, paths: [...listed, ...was.paths].slice(0, LISTED_MAX) }, listedKey(ns));
+  const was = ((await req(meta.get(listedKey(ns)))) as Listed | undefined) ?? { count: 0, paths: [] };
+  const renamed = (was.renamed ?? 0) + listed.filter(([, why]) => why === "renamed").length;
+  meta.put({ count: was.count + listed.length, renamed, paths: [...listed, ...was.paths].slice(0, LISTED_MAX) }, listedKey(ns));
+}
+/** The Sync panel's list as kept in meta: `count` every one listed, `renamed` how many of those were renamed by the
+ * server's index (said apart from those kept aside, sync-docs' N-AD-2). */
+export type Listed = { count: number; renamed?: number; paths: [string, ListedWhy][] };
+/** The list's summary line. */
+export function listedSummary(l: Listed): string {
+  const renamed = l.renamed ?? 0, kept = l.count - renamed, s = (n: number) => (n === 1 ? "" : "s");
+  const parts = [kept > 0 ? `${kept} item${s(kept)} sync kept aside` : "", renamed > 0 ? `${renamed} item${s(renamed)} renamed (another device has one with the name)` : ""];
+  return parts.filter(Boolean).join("; ");
 }
 /** Paths kept in the Sync panel's list, at most. */
 const LISTED_MAX = 100;
@@ -43,7 +53,7 @@ export type JournalRecord = { ns: string; id: string; parent: string; name: stri
 type State = Pick<OpAfter, "parent" | "name" | "kind" | "sha256" | "size" | "trashed"> | null;
 type View = { kind: "entry"; e: SyncEntry } | { kind: "gone" } | { kind: "none" };
 /** Why an identity is in the Sync panel's list. */
-export type ListedWhy = "kept" | "conflict" | "no-room" | "no-folder" | "not-empty";
+export type ListedWhy = "kept" | "conflict" | "no-room" | "no-folder" | "not-empty" | "renamed";
 
 /** A page's identities read by range, five requests (the rebuild's view walks identities in key order): their
  * confirmed rows, entries, outbox records, journal records and pending states. */
@@ -117,6 +127,9 @@ async function intentsOf(tx: IDBTransaction, ns: string, scanned: number | undef
 
 export type ViewContext = {
   w: Workspace;
+  /** (P0 #1 (b1)) this device's own adopts and creates in the page: identity, the path it asked for.  One the view
+   * moves elsewhere (the reducer gave it `name (k)`: another device has that name) is marked renamed and listed */
+  ownPlaced?: Map<string, string>;
   tx: IDBTransaction;
   ns: string;
   /** the confirmed index the view is over (the active generation, or a rebuild's just committed) */
@@ -441,6 +454,19 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
     if (v.trashed) n.trashed = { from: v.trashed.from, at: v.trashed.at };
     else delete n.trashed;
     if (!item.intent) contentOf(n, v);
+    // (this device's own, asked for at `old`, placed at another name in the same folder: renamed by the shared reducer
+    // (another device has that name), said on the row and listed, P0 #1 (b1).  Known by this device's own adopt or
+    // create in the page; or, when the move comes in a later page, by its shape: the same folder
+    // and extension, and the name the reducer gives, `name (k)` (a person's rename to
+    // exactly that is said the same way))
+    const [ob, oe] = splitExt(nameOf(old)), [nb, ne] = splitExt(nameOf(to));
+    const suffixed = oe === ne && nb.startsWith(ob + " (") && /^ \(\d+\)$/.test(nb.slice(ob.length));
+    // (by shape only for this device's own entry: another device's (`remote`) renamed by its owner to `X (k)` is a
+    // rename, not this; sync-docs' N-AD-1)
+    if (to !== old && parentOf(to) === parentOf(old) && (c.ownPlaced?.get(item.id) === old || (suffixed && !n.remote))) {
+      n.renamed = { from: old, to };
+      list(to, "renamed");
+    }
     st.put(n);
     if (n.kind === "folder") folders.set(to, n);
     lifted.delete(old);
@@ -502,11 +528,7 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
     } else list(cur.path, "kept");
   }
 
-  if (listed.length) {
-    const was = ((await req(meta.get(listedKey(ns)))) as { count: number; paths: [string, ListedWhy][] } | undefined) ?? { count: 0, paths: [] };
-    const paths = [...listed, ...was.paths].slice(0, LISTED_MAX);
-    meta.put({ count: was.count + listed.length, paths }, listedKey(ns));
-  }
+  await noteListed(meta, ns, listed);
   return { ops, gone, listed };
 }
 
