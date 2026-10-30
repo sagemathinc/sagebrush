@@ -135,8 +135,6 @@ export class ReferenceServer {
   readonly controls = {
     /** The server's clock (ms); null: the real one. */
     setNow: (ms: number | null) => { this.nowMs = ms; },
-    /** The deployment's exact-merge switch (`exactMerge`), for a test that turns it on for its own documents. */
-    exactMerge: (on: boolean) => { this.opts.exactMerge = on; },
     /** Hold the next batch for `doc` (and `client`, if given) after its checks and before its commit; returns the release. */
     holdForward: (doc: string, client?: string): (() => void) => {
       let release!: () => void;
@@ -159,7 +157,7 @@ export class ReferenceServer {
     /** A document's head and stored batches, for assertions. */
     doc: (account: string, doc: string) => {
       const d = this.accounts.get(account)?.docs.get(doc);
-      return d ? { epoch: d.epoch, head: d.head, seq: d.seq, merge: d.merge, batches: d.batches.map((b) => ({ ...b })) } : null;
+      return d ? { epoch: d.epoch, head: d.head, seq: d.seq, batches: d.batches.map((b) => ({ ...b })) } : null;
     },
   };
 

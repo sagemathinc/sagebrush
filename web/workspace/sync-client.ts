@@ -45,7 +45,6 @@ import { queued, keepUrl, finalize, install, pauseKey, CANONICAL_LENGTH, type Fe
 import { reserve } from "./reserve";
 import { accountHash, Bucket } from "../sync-protocol/protocol";
 import type { DocSync } from "./doc-sync";
-import { helloMergeField } from "./merge-client";
 
 export const CLIENT = {
   /** ops in one `ops` message (the server's opsPerMessage) */
@@ -516,7 +515,7 @@ export class SyncClient {
       this.conn = c;
       this.cursor = start;
       ws.onopen = () => {
-        this.send(c, { t: "hello", v: 1, device: this.w.device, name: (this.opts.name ?? "browser").slice(0, 100), index_after: start, account: c.account, generation: c.generation, ...helloMergeField() });
+        this.send(c, { t: "hello", v: 1, device: this.w.device, name: (this.opts.name ?? "browser").slice(0, 100), index_after: start, account: c.account, generation: c.generation });
       };
       ws.onmessage = (ev) => {
         c.chain = c.chain.then(() => this.message(c, ev.data)).catch((e) => {

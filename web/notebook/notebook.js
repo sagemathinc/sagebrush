@@ -2016,9 +2016,10 @@ export function createNotebook(root, opts = {}) {
     const { cells: list, mode: m, rev, baseRev: _b, ...rest } = doc;
     // an older revision than the synced one (a late message) changes nothing
     if (keepLocal && rev !== undefined && shown.synced?.rev !== undefined && rev <= shown.synced.rev && !fromConflict) return;
-    // (an exact-v1 document's merge of an edit made here with one made there (plan-p2c r0 S2): the store's, cocalc-ai's
-    // mergeText; none for any other document, or a revert.  Asked before anything changes: a build that can't merge
-    // an exact-v1 document refuses it here (the store throws), never the older way)
+    // (an edit made here merged with one made there, as CoCalc's set_cell_input does (plan-exact-only r1): the journal
+    // store's mergeText (cocalc-ai's mergeText, from the lazily loaded history bundle).  None for a revert, nor for a
+    // store without it (a page's local store before the journal, the embed's memory store: no sync), which keeps the
+    // older rule: theirs, and this one in a copy)
     const merge = keepLocal ? store?.mergeText : undefined;
     shown.remoteSeen++;
     loading = true;
@@ -2035,8 +2036,8 @@ export function createNotebook(root, opts = {}) {
       const b = base?.get(rc.id);
       let c = mine.get(rc.id);
       if (!c) {
-        // deleted here and unchanged there: stays deleted (an exact-v1 document: unless its input changed there; new
-        // outputs alone don't bring a cell back, as in dbMerge3)
+        // deleted here and unchanged there: stays deleted (with the merge: unless its input changed there; new outputs
+        // alone don't bring a cell back, as in dbMerge3)
         if (b && b.code === (rc.code ?? "") && (merge || b.outputs === JSON.stringify(rc.outputs ?? []))) { dirty = true; continue; }
         c = addCell(rc.code ?? "", prev ? { after: prev } : { first: true }, false, rc.type, rc.id);
         fill(c, rc);
@@ -2075,7 +2076,7 @@ export function createNotebook(root, opts = {}) {
         else if (b && b.code !== L) { // changed on both sides
           dirty = true;
           if (merge) {
-            // (an exact-v1 document: the two merged, the selection mapped onto the result; no copy)
+            // (the two merged, the selection mapped onto the result; no copy)
             ({ text, sel } = merge({ base: b.code, local: L, remote: Rt, sel: [c.ta.selectionStart, c.ta.selectionEnd] }));
             textChanged = text !== L;
           } else { textChanged = true; conflictText = L; }
@@ -2419,14 +2420,14 @@ export function createNotebook(root, opts = {}) {
       store = s;
       unsubscribe = s.subscribe?.((d) => applyRemote(d)) ?? null;
       // (2c-3: another device's changes reached this notebook's history: merged with the record by the store, then with
-      // what this page shows, its unsaved edits kept cell by cell (applyRemote), and saved.  A clash keeps the later
-      // device's version on every device, and says so: the other is in TimeTravel)
+      // what this page shows, its unsaved edits merged cell by cell (applyRemote), and saved.  Every edit is kept, as in
+      // CoCalc's Jupyter (plan-exact-only r1): nothing to say)
       if (s.journaled) s.onremote = async () => {
         if (store !== s) return;
         const rec = await s.loadRecord();
         if (!rec || store !== s) return;
         const { j: _j, hash: _h, rev: _r, unjournaled: _u, ...mine } = rec;
-        const { doc: merged, kept } = await s.mergeRemote(mine);
+        const { doc: merged } = await s.mergeRemote(mine);
         if (store !== s) return;
         // (the merge is not yet the record: shown against the record's own revision, the base its save then needs (a
         // change typed meanwhile kept by applyRemote, cell by cell), and saved: after applyRemote's loading phase,
@@ -2434,7 +2435,6 @@ export function createNotebook(root, opts = {}) {
         // (fromConflict: past the check that drops a document no newer than the one shown: the record's revision is it)
         applyRemote({ ...merged, rev: rec.rev }, true, true);
         Promise.resolve().then(() => { if (store !== s) return; lastJson = null; schedule(); });
-        if (kept) emit("saved", kept === "theirs" ? "Another device changed the same cells later: its version is kept, this device's is in TimeTravel" : "Another device changed the same cells earlier: this device's version is kept, theirs is in TimeTravel");
       };
       return doc;
     },

@@ -10,12 +10,11 @@
 // binding's owner, then applied in one history transaction under a compare and swap of the cursor (journal-rows.js
 // applyPage), and told to the notebook's history in every tab; the writer then makes the record the merged value
 // (web/notebook/journal.js).  One flight per notebook: a pull and a send of one notebook never overlap here.
-import { applyPage, acked, markSent, readCursor, readJournal, recordClaim, recordMerge, syncedKey, unsent } from "../notebook/journal-rows.js";
-import { IdbPatchStore, openHistoryDb, tellHistory, tellAcked, tellMerge } from "../notebook/stores.js";
+import { applyPage, acked, markSent, readCursor, readJournal, recordClaim, syncedKey, unsent } from "../notebook/journal-rows.js";
+import { IdbPatchStore, openHistoryDb, tellHistory, tellAcked } from "../notebook/stores.js";
 import { makeClientId } from "patchflow";
 import { chainStart, hex, fromHex, verifyChainPage, type ChainedBatch, type ChainState } from "../sync-protocol/doc-protocol";
 import { toB64, fromB64, LIMITS } from "../sync-protocol/protocol";
-import { EXACT_MERGE_CLIENT } from "./merge-client";
 
 /** What the account connection gives document sync: a request and its answer (an `ack`, a `batches`, or an `error`). */
 export interface DocLink {
@@ -148,8 +147,6 @@ export class DocSync {
     for (let round = 0; round < 64; round++) {
       const js = await readJournal(await this.db(), id);
       if (!js.start || !js.slot) return;
-      // (a synced history recorded exact-v1, in a build without the exact reader: nothing sent, stopped (G-P2b-5))
-      if ((js.start as { merge?: string }).merge === "exact-v1" && !EXACT_MERGE_CLIENT) return void this.stop(id, "invalid", "exact merges aren't in this build: reload this page", conn);
       const slot = js.slot, epoch = js.cursor?.epoch ?? 1;
       const rows = (await unsent(await this.db(), id, { max: LIMITS.batchPatches, maxBytes: LIMITS.batchBytes })).filter((r: any) => r.gen === slot.gen && r.client === slot.client);
       if (!rows.length) return;
@@ -157,22 +154,11 @@ export class DocSync {
       if (slot.claimed?.epoch !== epoch || slot.claimed?.client !== slot.client) {
         if (!this.live(id, conn)) return;
         const req = link.reserve();
-        // (a client that runs exact merges asks, for a document this claim may make, the mode its start asked (a
-        // .sbreplay restore's legacy), else exact-v1; the server's answer is the document's own mode, recorded once)
-        const ask = EXACT_MERGE_CLIENT ? { merge: (js.start as { asked?: string }).asked ?? "exact-v1" } : {};
-        const a = await this.ask(link, req, { t: "doc_claim", owner: link.owner, doc: id, epoch, client: slot.client, ...ask });
+        const a = await this.ask(link, req, { t: "doc_claim", owner: link.owner, doc: id, epoch, client: slot.client });
         if (a.t === "error") { this.refused(id, a, conn); return; }
-        const c = a.claim as { client?: string; fgen?: number; next_cseq?: number; merge?: unknown } | undefined;
+        const c = a.claim as { client?: string; fgen?: number; next_cseq?: number } | undefined;
         if (!c || c.client !== slot.client || !Number.isSafeInteger(c.fgen)) return this.stop(id, "invalid", "a claim's answer", conn);
-        if (c.merge !== undefined && c.merge !== "legacy" && c.merge !== "exact-v1") return this.stop(id, "invalid", "a claim's merge mode", conn);
-        const merge = c.merge as "legacy" | "exact-v1" | undefined;
-        try {
-          await this.tx(id, js.start.n, (st) => recordClaim(st, id, { gen: slot.gen, client: slot.client, epoch, fgen: c.fgen, merge, canExact: EXACT_MERGE_CLIENT }));
-        } catch (e) {
-          return this.stop(id, "invalid", String((e as { refusal?: string; message?: string })?.refusal ?? (e as Error)?.message ?? e), conn);
-        }
-        // (the mode told to this document's open histories, with no patch: they read the next ones with it)
-        if (merge) tellMerge(syncedKey(id, js.start.n), merge);
+        await this.tx(id, js.start.n, (st) => recordClaim(st, id, { gen: slot.gen, client: slot.client, epoch, fgen: c.fgen }));
         continue;
       }
       // (the batch: the patches' envelopes and their payloads, each the stored patch without its time and parents)
@@ -250,7 +236,6 @@ export class DocSync {
     for (let page = 0; page < 1000; page++) {
       const { cursor, start } = await this.read(id);
       if (!start && !startHere) return true;
-      if ((start as { merge?: string } | null)?.merge === "exact-v1" && !EXACT_MERGE_CLIENT) return this.stop(id, "invalid", "exact merges aren't in this build: reload this page", conn);
       if (!this.live(id, conn)) return false;
       const epoch = cursor?.epoch ?? 1, after = cursor?.after ?? 0;
       const req = link.reserve();
@@ -265,21 +250,7 @@ export class DocSync {
       // (a snapshot: keeping the local root, debt and mark across one needs 2c-4: stopped here on DEV (astra's A5))
       if (a.snapshot) return this.stop(id, "snapshot", "a snapshot start is 2c-4's", conn);
       const items = a.items as Record<string, unknown>[];
-      if (a.merge !== undefined && a.merge !== "legacy" && a.merge !== "exact-v1") return this.stop(id, "invalid", "a pull's merge mode", conn);
-      const merge = a.merge as "legacy" | "exact-v1" | undefined;
-      if (!items.length) {
-        // (a page with no rows still says the document's mode: recorded, or checked against the one recorded, before
-        // anything is sent (astra3's R-MC-2); another mode stops the notebook, nothing written)
-        if (merge !== undefined && start) {
-          try {
-            await this.tx(id, start.n, (st) => recordMerge(st, id, { merge, canExact: EXACT_MERGE_CLIENT }));
-          } catch (e) {
-            return this.stop(id, "invalid", String((e as { refusal?: string; message?: string })?.refusal ?? (e as Error)?.message ?? e), conn);
-          }
-          tellMerge(syncedKey(id, start.n), merge);
-        }
-        return true;
-      }
+      if (!items.length) return true;
       const from: ChainState = cursor ? { seq: cursor.after, recv: cursor.recv, chain: fromHex(cursor.chain) } : chainStart(link.owner, id, epoch);
       const page: ChainedBatch[] = items.map((b) => ({ seq: b.seq as number, recv: b.recv as number, epoch, author: String(b.author), writer: String(b.writer), envs: JSON.stringify(b.patches), body: fromB64(b.body, LIMITS.batchBytes), chain: String(b.chain) }));
       const v = verifyChainPage({ epoch }, from, page);
@@ -297,18 +268,7 @@ export class DocSync {
         }
       }
       const next = { epoch, after: v.state.seq, recv: v.state.recv, chain: hex(v.state.chain) };
-      let out: { applied: number };
-      try {
-        out = await this.tx(id, start?.n ?? 1, (st) => applyPage(st, id, { expect: cursor, next, rows, merge, canExact: EXACT_MERGE_CLIENT, start: start ? undefined : { client: makeClientId() } }));
-      } catch (e) {
-        const why = String((e as { refusal?: string; message?: string })?.refusal ?? (e as Error)?.message ?? e);
-        // (a mode the server says that this history can't take (another than recorded, or exact-v1 over more than
-        // this device's one line): stopped, nothing of the page written; anything else as before)
-        if (/merge mode|exact merges/.test(why)) return this.stop(id, "invalid", why, conn);
-        throw e;
-      }
-      // (the mode first, then the patches: an open history reads them with the mode they were recorded with)
-      if (merge) tellMerge(syncedKey(id, start?.n ?? 1), merge);
+      const out = await this.tx(id, start?.n ?? 1, (st) => applyPage(st, id, { expect: cursor, next, rows, start: start ? undefined : { client: makeClientId() } }));
       for (const r of rows) tellHistory(syncedKey(id, start?.n ?? 1), r.env);
       this.events.push({ t: "page", doc: id, through: next.after, applied: out.applied });
       if (!a.more) return true;
