@@ -354,7 +354,7 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
   check("DB3-IMPL-1-list-pages", p1.threads.length === 200 && p1.more && p2.threads.length === 30 && !p2.more && p2.threads[0].id > p1.threads[199].id);
   const changed = C.addThread(d, { anchor: C.makeAnchor(TEX, 0, 5), text: "new", ...H }).doc;
   check("DB3-IMPL-1-list-stale", throws(() => C.list(changed, TEX, { cursor: p1.cursor }))?.code === "stale");
-  check("list-agent-flag", C.list(C.reply(d, d.threads[0].id, { text: "done", ...A }).doc, TEX).threads.find((t) => t.id === d.threads[0].id).last.agent === true);
+  check("list-agent-flag", C.list(C.reply(d, p1.threads[0].id, { text: "done", ...A }).doc, TEX).threads.find((t) => t.id === p1.threads[0].id)?.last.agent === true);
 }
 
 // ---- format: version refused, round trip, locateSpan

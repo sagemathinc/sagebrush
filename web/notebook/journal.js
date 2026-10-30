@@ -55,7 +55,7 @@ export const docHash = (doc) => bytesHash(new TextEncoder().encode(canonical(ver
 
 /** Whether this page syncs notebooks' contents (DEV's docsync switch, set by the page once the journal is active): a
  * writer's load then starts a notebook's synced history (2c-2). */
-export const DOC_SYNC = { on: false, saved: null };
+export const DOC_SYNC = { on: false, saved: null, pull: null, stoppedOf: null };
 // (`saved(id)`: told after a synced notebook's save is kept, and after its synced history starts, so the page's DocSync
 // sends it (DEV's switch, web/workspace/doc-sync-switch.ts); null: nobody to tell)
 

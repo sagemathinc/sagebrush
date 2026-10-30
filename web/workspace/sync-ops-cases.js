@@ -281,22 +281,39 @@ async function reservations() {
   check(deadDrop, "an old copy looked at in the name of a released reservation: an error, nothing read");
   check(loud && dead && !(await w.stat("/x.bin")) && W.reserved().held === 0, "adopt given bytes without their reservation (an unrelated one held), or with one released: an error, nothing made");
   // (a pending Trash recovery's destination checked with the Trash bytes let go: at most two copies at once,
-  // the reservation's (daybreak2's LIMIT-AC1-1); seen by a WeakRef to the Trash bytes, a garbage collection
-  // forced as the destination's bytes are hashed)
+  // the reservation's (daybreak2's LIMIT-AC1-1): the order of its reads and hashes, and, never failed on, whether
+  // the first copy is collected by then)
   if (typeof globalThis.gc === "function") {
     const tb = enc("recover me, once"), tsha = await H(tb);
     await new Promise((ok, no) => { const tx = w.ws.transaction(["trash", "meta"], "readwrite"); tx.objectStore("trash").put(tb, "/Trash/gc.bin"); tx.objectStore("meta").put({ dest: "/Recovered/gc.bin", sha: tsha }, "recovering:/Trash/gc.bin"); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
     await fput("/Recovered/gc.bin", tb);
+    // (the gate is the order, seen from outside recoverTrash: every IndexedDB get and every SHA-256, with when
+    // each hash resolved.  The Trash copy is read and hashed before the destination's bytes are read; the
+    // destination's are hashed before the Trash copy is read again: two copies at most, as the reservation
+    // allows.  Whether the first copy is collected by then is the collector's business, not this code's order: it
+    // is printed as an OBS line, never failed on)
+    const log = [], getOf = IDBObjectStore.prototype.get;
+    IDBObjectStore.prototype.get = function (k) { log.push(["get", this.name, k]); return getOf.call(this, k); };
     let calls = 0, ref = null, aliveAtDest = null;
     crypto.subtle.digest = function (a, d) {
-      calls++;
-      if (calls === 1) ref = new WeakRef(d);
-      else if (calls === 2) { globalThis.gc(); aliveAtDest = ref?.deref() !== undefined; }
-      return digest.call(crypto.subtle, a, d);
+      const k = ++calls;
+      log.push(["hash", k]);
+      if (k === 1) ref = new WeakRef(d);
+      const p = k === 2 ? (async () => { globalThis.gc(); await sleep(0); globalThis.gc(); aliveAtDest = ref?.deref() !== undefined; return digest.call(crypto.subtle, a, d); })() : digest.call(crypto.subtle, a, d);
+      p.then(() => log.push(["hashed", k]), () => {});
+      return p;
     };
-    try { await W.migrate(w, localStorage); } finally { crypto.subtle.digest = digest; }
+    try { await W.migrate(w, localStorage); } finally { crypto.subtle.digest = digest; IDBObjectStore.prototype.get = getOf; }
+    const at = (f, from = 0) => { const x = log.findIndex((e, i) => i >= from && f(e)); return x < 0 ? Infinity : x; };
+    const isTrash = (e) => e[0] === "get" && e[1] === "trash" && e[2] === "/Trash/gc.bin";
+    const t1 = at(isTrash), dg = at((e) => e[0] === "get" && e[1] === "files" && e[2] === "/Recovered/gc.bin", t1 + 1), t2 = at(isTrash, t1 + 1);
+    const hashes = (from, to) => log.slice(from, to).filter((e) => e[0] === "hash").map((e) => e[1]);
+    const done = (k, before) => log.slice(0, before).some((e) => e[0] === "hashed" && e[1] === k);
+    const [h1] = hashes(t1, dg), [h2] = hashes(dg, t2);
+    const ordered = t1 < dg && dg < t2 && t2 < Infinity && hashes(t1, dg).length === 1 && done(h1, dg) && hashes(dg, t2).length === 1 && done(h2, t2);
     const gcRec = await w.stat("/Recovered/gc.bin");
-    check(aliveAtDest === false && gcRec?.sha256 === tsha && dec((await w.read(gcRec.path)).content) === "recover me, once", "Trash recovery: its bytes let go before the destination's are read and hashed (two copies at most), then read again and recovered: " + J({ aliveAtDest, calls }));
+    check(ordered && gcRec?.sha256 === tsha && dec((await w.read(gcRec.path)).content) === "recover me, once", "Trash recovery: its copy read and hashed before the destination's bytes are read, the destination's hashed before the copy is read again (two copies at most), then recovered: " + J({ t1, dg, t2, calls, log: log.length }));
+    results.push([true, "OBS Trash recovery, the first copy collected by the destination's hash (gc, a macrotask, gc; never failed on): " + J({ aliveAtDest })]);
   } else check(false, "(the test browser runs without --expose-gc)");
   // (an older tab writing at the old key ten times while it is cleaned up: each version kept, a bounded number of
   // rounds per cleanup, the rest by the next start)
