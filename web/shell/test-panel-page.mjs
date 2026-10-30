@@ -385,6 +385,10 @@ try {
   await run("clear");
   n = 0;
   check((await evaluate(`document.querySelectorAll(".sb-term-page").length`)) === 0, "B-LL-6: no page element for lines of 4 Ki or less (all output so far)");
+  // (board's R4-1: ordinary output, echo, ls, ps, a 20-line listing, gets no chunk box; it stays plain lines, as in #326)
+  r = await run("seq 1 20");
+  check(r?.out.split("\n").length === 21 && (await evaluate(`document.querySelectorAll(".sb-term-chunk").length`)) === 0,
+    "R4-1: no chunk box for ordinary output (all output so far, a 20-line listing included)");
   await evaluate(`window.__lt = []; window.__lto = new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(e.duration); }); window.__lto.observe({ type: "longtask" })`);
   r = await run("seq 1 200000 | tr -d '\\n'; echo");
   const ll = await evaluate(`(() => {
@@ -403,6 +407,21 @@ try {
   const rp = await evaluate(`(() => { const out = [...document.querySelectorAll(".sb-term-cmd")].at(-1).querySelector(".sb-term-out");
     return { text: out.textContent, pages: out.querySelectorAll(".sb-term-page").length }; })()`);
   check(rp.text === "B".repeat(4500) + "\n" && rp.pages === 1, `\\r over a paged line (TP-2, B-LL-3): only the last text, with its one page (${rp.pages} pages, ${rp.text.length} units)`);
+  // (DB2-LL-337-4: stderr-only output, its 64 KiB reservation scanned in several empty slices first: first paint is
+  // measured only once output is in, and that first output is the first slice's, at most 8 KiB and a token.  The page
+  // brought to the front first: a hidden tab paints no frames, so it measures none)
+  await send("Page.bringToFront");
+  check((await evaluate(`document.visibilityState`)) === "visible", "the page is in front again (after the other tabs)");
+  await evaluate(`window.__fi = null; window.__mo = new MutationObserver(() => {
+    const o = [...document.querySelectorAll(".sb-term-out")].at(-1);
+    if (!window.__fi && o && o.textContent.length) window.__fi = { t: performance.now(), n: o.textContent.length };
+  }); window.__mo.observe(document.querySelector(".sb-term-log"), { childList: true, subtree: true, characterData: true });
+  performance.clearMeasures("sb-term:first-paint")`);
+  r = await run("printf 'e%.0s' $(seq 1 100000) >&2; echo");
+  const fp = await evaluate(`(() => { window.__mo.disconnect(); const m = performance.getEntriesByName("sb-term:first-paint").at(-1);
+    return { fi: window.__fi, fpEnd: m ? m.startTime + m.duration : null, n: performance.getEntriesByName("sb-term:first-paint").length }; })()`);
+  check(r?.status === "done" && fp.n === 1 && fp.fi && fp.fpEnd >= fp.fi.t && fp.fi.n <= 16384,
+    `DB2-LL-337-4: stderr-heavy output: first paint after the first output (${JSON.stringify(fp)}), that output a first slice's`);
   await invariant("long lines");
   // (hide keeps the session; ✕ ends it)
   const kept = await cmdCount();

@@ -14,8 +14,10 @@ import { join, relative } from "node:path";
 // 3b9176e9): the 274 B over the old ceiling are the r1 reviews' required fixes only, no new features); raised to
 // 9 344 B by daybreak2's rulings on #337 r3 (terminal-longline-pr337-r3-size-ruling-daybreak2.md, 423988e6; set at
 // 9 344 by DB2-LL-337-3, terminal-longline-pr337-r3-daybreak2.md, 96f6bf15: bun 1.4.4, CI's pin, measures 9 281):
-// "DB2-LL-337-2 exact UAX regional-indicator parity across retained windows, plus scalar-safe slice hold."
-const LIMIT = 9344;
+// "DB2-LL-337-2 exact UAX regional-indicator parity across retained windows, plus scalar-safe slice hold."; raised to
+// 9 600 B by daybreak2's size ruling on #337 r4 (bun 1.4.4 measured 9 585 B, +304 over r3b): the E5.5 batching (the
+// first slice and frame pacing, chunk runs, PAGE_RUNS, content-visibility), DB2-LL-337-4 and board's R4-1
+const LIMIT = 9600;
 const here = import.meta.dir;
 const root = join(here, "..", "..");
 const ALLOWED = new Set(["web/shell/panel.ts", "web/shell/panel-render.ts", "web/shell/panel.css"]);
