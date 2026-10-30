@@ -102,6 +102,19 @@ def js_num(x):
     return ("-" if sign else "") + s
 
 
+_INDEX = re.compile(r"(0|[1-9][0-9]*)\Z")
+
+
+def js_keys(d):
+    """A dict's keys in JavaScript's property order: array indices (canonical integers below 2^32 - 1) ascending,
+    then the other keys in insertion order."""
+    idx = [k for k in d if _INDEX.match(k) and int(k) < 4294967295]
+    if not idx:
+        return list(d)
+    seen = set(idx)
+    return sorted(idx, key=int) + [k for k in d if k not in seen]
+
+
 def js_json(v, indent=None):
     """JSON.stringify(v) (indent: JSON.stringify(v, null, indent)): the same text, numbers included."""
     def out(x, depth):
@@ -120,15 +133,16 @@ def js_json(v, indent=None):
             return "[" + ",".join(nl + out(e, depth + 1) for e in x) + end + "]" if x else "[]"
         if isinstance(x, dict):
             sep = ": " if indent else ":"
-            return "{" + ",".join(nl + _js_str(k) + sep + out(e, depth + 1) for k, e in x.items()) + end + "}" if x else "{}"
+            return "{" + ",".join(nl + _js_str(k) + sep + out(x[k], depth + 1) for k in js_keys(x)) + end + "}" if x else "{}"
         raise TypeError("not JSON: %r" % type(x))
     return out(v, 0)
 
 
 def _js_number(s):
-    """A JSON number literal as JSON.parse reads it: one double (an integral one as an int while it is exact)."""
+    """A JSON number literal as JSON.parse reads it: one double, an integral one as the int of that double (so it
+    indexes and compares as an integer; written back, js_num writes the double)."""
     f = float(s)
-    return int(f) if f.is_integer() and abs(f) < 1 << 53 else f
+    return int(f) if f.is_integer() else f
 
 
 def _no_constant(name):
@@ -206,6 +220,14 @@ def _is_int(v):
     return (isinstance(v, int) and not isinstance(v, bool)) or (isinstance(v, float) and v.is_integer())
 
 
+def _is_number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _is_bool(r):
+    return isinstance(r["value"], bool)
+
+
 def _str(v, mx, what):
     if not isinstance(v, str):
         fail("invalid", what + " must be a string")
@@ -220,6 +242,11 @@ def _is_reg(r):
             and isinstance(r.get("by"), str) and isinstance(r.get("op"), str))
 
 
+def _or_empty(v):
+    """v ?? "" (a missing or null field)."""
+    return "" if v is None else v
+
+
 def _check_anchor(a):
     if not isinstance(a, dict):
         fail("invalid", "anchor")
@@ -228,9 +255,9 @@ def _check_anchor(a):
             fail("invalid", "anchor." + k)
     if a["end"] < a["start"]:
         fail("invalid", "anchor.end < start")
-    _str(a.get("quote", ""), LIMITS["quoteFull"], "anchor.quote")
-    _str(a.get("prefix", ""), LIMITS["context"], "anchor.prefix")
-    _str(a.get("suffix", ""), LIMITS["context"], "anchor.suffix")
+    _str(_or_empty(a.get("quote")), LIMITS["quoteFull"], "anchor.quote")
+    _str(_or_empty(a.get("prefix")), LIMITS["context"], "anchor.prefix")
+    _str(_or_empty(a.get("suffix")), LIMITS["context"], "anchor.suffix")
     if "tail" in a:
         _str(a["tail"], LIMITS["quoteHead"], "anchor.tail")
         if not _is_int(a.get("length")) or not isinstance(a.get("sha"), str):
@@ -244,41 +271,50 @@ def _live(t):
 
 
 def validate(doc):
-    """The document checked against the format and every limit (CommentsError: invalid | limit | version)."""
+    """The document checked against the format and every limit (CommentsError: invalid | limit | version), in the
+    JS core's order."""
     if not isinstance(doc, dict) or doc.get("format") != FORMAT:
         fail("invalid", "not a " + FORMAT + " document")
-    if doc.get("version") != VERSION:
-        fail("version", "version %s is not supported (this reads %d)" % (doc.get("version"), VERSION))
+    v = doc.get("version")
+    if not (_is_number(v) and v == VERSION):
+        fail("version", "version %s is not supported (this reads %d)" % (js_json(v) if v is not None else "undefined", VERSION))
     ts = doc.get("threads")
     if not isinstance(ts, list):
         fail("invalid", "threads")
     if len(ts) > LIMITS["threads"]:
         fail("limit", "threads", {"limit": "threads", "max": LIMITS["threads"], "size": len(ts)})
-    if sum(1 for t in ts if not ((t.get("deleted") or {}).get("value") if isinstance(t, dict) else False)) > LIMITS["liveThreads"]:
-        fail("limit", "live threads", {"limit": "liveThreads", "max": LIMITS["liveThreads"]})
     ids = set()
     for t in ts:
-        if not isinstance(t, dict):
+        if not isinstance(t, (dict, list)):
             fail("invalid", "thread")
+        t = t if isinstance(t, dict) else {}
         _str(t.get("id"), LIMITS["id"], "thread.id")
         if t["id"] in ids:
             fail("invalid", "duplicate thread id " + t["id"])
         ids.add(t["id"])
-        if not (_is_reg(t.get("anchor")) and _is_reg(t.get("resolved")) and _is_reg(t.get("deleted"))):
+        _str(t.get("created"), LIMITS["id"], "thread.created")
+        if not (_is_reg(t.get("anchor")) and _is_reg(t.get("resolved")) and _is_reg(t.get("deleted"))
+                and _is_bool(t["resolved"]) and _is_bool(t["deleted"])):
             fail("invalid", "thread " + t["id"] + " registers")
         _check_anchor(t["anchor"]["value"])
         ms = t.get("messages")
         if not isinstance(ms, list) or len(ms) > LIMITS["messages"]:
             fail("limit", "messages", {"limit": "messages", "max": LIMITS["messages"], "size": len(ms) if isinstance(ms, list) else None})
         for m in ms:
+            if not isinstance(m, (dict, list)):
+                fail("invalid", "message")
+            m = m if isinstance(m, dict) else {}
             _str(m.get("id"), LIMITS["id"], "message.id")
             _str(m.get("author"), LIMITS["author"], "author")
-            if not (_is_reg(m.get("text")) and _is_reg(m.get("deleted"))):
+            _str(m.get("time"), LIMITS["id"], "message.time")
+            if not (_is_reg(m.get("text")) and _is_reg(m.get("deleted")) and _is_bool(m["deleted"])):
                 fail("invalid", "message registers")
             _str(m["text"]["value"], LIMITS["text"], "text")
         tb = len(utf8(js_json(t)))
         if tb > LIMITS["threadBytes"]:
             fail("limit", "thread " + t["id"] + " is over 256 KiB", {"limit": "threadBytes", "max": LIMITS["threadBytes"], "size": tb})
+    if sum(1 for t in ts if not t["deleted"]["value"]) > LIMITS["liveThreads"]:
+        fail("limit", "live threads", {"limit": "liveThreads", "max": LIMITS["liveThreads"]})
     return doc
 
 

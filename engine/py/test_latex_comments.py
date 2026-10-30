@@ -86,7 +86,10 @@ def test_vectors():
         return {"json": LC.js_json(doc), "sha": LC.sha256(LC.js_json(doc)), "file": LC.serialize(doc)}
     for i, c in enumerate(V["literal"]):
         g, w = err(lambda: lit(c["in"])), c["out"]
-        assert (g.get("error") or {}).get("code") == (w.get("error") or {}).get("code") and g.get("ok") == w.get("ok"), "literal %d %r:\n got  %r\n want %r" % (i, c["in"][:60], g, w)
+        assert g.get("error") == w.get("error") and g.get("ok") == w.get("ok"), "literal %d %r:\n got  %r\n want %r" % (i, c["in"][:60], g, w)
+    for i, c in enumerate(V["literalMerge"]):
+        g = LC.js_json(LC.merge(LC.parse(c["a"]), LC.parse(c["b"])))
+        assert g == c["out"], "literalMerge %d:\n got  %s\n want %s" % (i, g[:300], c["out"][:300])
     return sum(len(V[k]) for k in V if k != "about")
 
 
