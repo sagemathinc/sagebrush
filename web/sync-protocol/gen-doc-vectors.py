@@ -520,46 +520,6 @@ def main():
         {"for": "pull", "when": "another epoch than the document's (its history was cleared)", "shape": refusal_shape("epoch", {"message": "string", "epoch": "number", "head": head})},
         {"for": "doc_claim", "when": "another epoch than the document's", "shape": refusal_shape("stale_epoch", {"message": "string", "epoch": "number", "head": head})},
     ]
-    # (merge modes, plan-merge-align r3.2 §2-§3 (CLEAR Oct 30): hello's `merge` (absent: legacy only; unknown names passed
-    # over), the mode a document is made in (exact-v1 only with the switch on, a socket that runs it and a creating
-    # operation that asks for it), a claim's `merge`, merge_mode's refusal, and the answers that carry `merge` (only to a
-    # socket whose hello said `merge`, so an older client's answers keep their shapes))
-    MODES = ["legacy", "exact-v1"]
-
-    def hello_merge(x):
-        if not isinstance(x, list) or not (1 <= len(x) <= 8):
-            return "invalid"
-        for n in x:
-            if not isinstance(n, str) or not (1 <= len(n) <= 32) or not all(c in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in n) or n[0] == "-":
-                return "invalid"
-        return sorted({n for n in x if n in MODES})
-
-    def creation(exact_on, runs, asked):
-        return "exact-v1" if exact_on and asked == "exact-v1" and "exact-v1" in runs else "legacy"
-
-    hello_cases = [["legacy"], ["legacy", "exact-v1"], ["exact-v1", "legacy", "exact-v2"], ["exact-v2"], ["exact-v1"],
-                   [], "legacy", ["Legacy"], ["-x"], ["a" * 33], ["a" * 32], [1], [None], ["legacy"] * 9, ["legacy"] * 8]
-    runs_cases = [["legacy"], ["exact-v1", "legacy"], ["exact-v1"], []]
-    claim_base = {"t": "doc_claim", "req": 1, "doc": "0123456789ab", "epoch": 1, "client": "c1"}
-    v["merge"] = {
-        "modes": MODES,
-        "hello": [{"absent": True, "out": ["legacy"]}] + [{"in": x, "out": hello_merge(x)} for x in hello_cases],
-        "creation": [{"exact_on": e, "runs": r, **({} if a is None else {"asked": a}), "out": creation(e, r, a)}
-                     for e in (False, True) for r in runs_cases for a in (None, "legacy", "exact-v1")],
-        "admits": [{"mode": m, "runs": r, "out": m in r} for m in MODES for r in runs_cases],
-        "claims": [{"in": {**claim_base, "merge": m}, "ok": m in MODES} for m in ("legacy", "exact-v1", "exact-v2", None, 1, "")],
-        "refusals": [
-            {"for": "doc_claim, doc_fence, batch, pull, clear", "when": "the document's mode isn't one the socket runs", "error": {"code": "merge_mode", "detail": {"merge": "exact-v1"}}, "again": "never on this socket"},
-        ],
-        "answers": [
-            {"for": "doc_claim", "when": "to a socket whose hello said merge", "shape": {"t": "=ack", "req": "number", "claim": {"client": "string", "fgen": "number", "next_cseq": "number", "merge": "string"}}},
-            {"for": "doc_claim", "when": "to a socket whose hello didn't say merge", "shape": {"t": "=ack", "req": "number", "claim": {"client": "string", "fgen": "number", "next_cseq": "number"}}},
-            {"for": "pull", "when": "a page, to a socket whose hello said merge", "shape": {"t": "=batches", "req": "number", "owner": "string", "doc": "string", "epoch": "number", "head": chained, "items": [{"seq": "number", "author": "string", "writer": "string", "device": "string", "recv": "number", "chain": "string|null", "patches": "array", "body": "string"}], "more": "boolean", "merge": "string"}},
-            {"for": "doc_claim", "when": "the document's mode isn't one the socket runs", "shape": refusal_shape("merge_mode", {"message": "string", "merge": "string"})},
-            {"for": "pull", "when": "the document's mode isn't one the socket runs", "shape": refusal_shape("merge_mode", {"message": "string", "merge": "string"})},
-            {"for": "batch", "when": "the document's mode isn't one the socket runs", "shape": refusal_shape("merge_mode", {"message": "string", "merge": "string"})},
-        ],
-    }
     json.dump(v, sys.stdout, ensure_ascii=False, indent=1)
     sys.stdout.write("\n")
 

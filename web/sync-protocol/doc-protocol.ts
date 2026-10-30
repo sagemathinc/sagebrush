@@ -536,45 +536,9 @@ const isDocId = (s: unknown): s is string =>
   typeof s === "string" && (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s) || /^[0-9a-f]{12}$/.test(s));
 const U32 = 0xffffffff;
 
-// ---- merge modes (plan-merge-align r3.2 §2-§5, CLEAR Oct 30)
-
-/** How a document's concurrent edits are merged: "legacy" (patchflow's apply-all: every document until now) or
- * "exact-v1" (patchflow's merge3, with web/notebook/db-merge3.ts).  A document's mode is fixed when the server creates
- * it, kept by every later epoch (a clear keeps it), and never changes. */
-export const MERGE_MODES = Object.freeze(["legacy", "exact-v1"] as const);
-export type MergeMode = (typeof MERGE_MODES)[number];
-export const isMergeMode = (v: unknown): v is MergeMode => v === "legacy" || v === "exact-v1";
-/** hello's `merge`: the modes the client runs.  Absent, ["legacy"]: every client before merge modes.  Each entry a
- * short name; a name this build doesn't know (a newer client's) is passed over, so a client that runs none this build
- * knows is refused every document (merge_mode). */
-export function helloMerge(v: unknown): ReadonlySet<MergeMode> {
-  if (v === undefined) return new Set<MergeMode>(["legacy"]);
-  if (!Array.isArray(v) || v.length === 0 || v.length > 8 || !v.every((x) => typeof x === "string" && /^[a-z0-9][a-z0-9-]{0,31}$/.test(x)))
-    throw invalid("hello: merge, the merge modes the client runs (1 to 8 short names)");
-  return new Set(v.filter(isMergeMode));
-}
-/** A creating operation's `merge` (the reference server's doc_claim; cloud's first batch): the mode it asks for.  Only
- * the operation that creates the document reads it; on a document that exists it changes nothing (never a downgrade
- * or an upgrade: the answer says the document's own mode). */
-export function checkMergeRequest(v: unknown, what: string): MergeMode {
-  if (!isMergeMode(v)) throw invalid(`${what}: merge, "legacy" or "exact-v1"`);
-  return v;
-}
-/** The mode a document is created in: "exact-v1" only when the deployment's switch is on AND the creating socket runs
- * it AND the creating operation asked for it; else "legacy" (an operation that asks for nothing, or for "legacy", a
- * socket that doesn't run exact-v1, the switch off). */
-export function creationMode(a: { exactOn: boolean; runs: ReadonlySet<MergeMode>; asked?: MergeMode }): MergeMode {
-  return a.exactOn && a.asked === "exact-v1" && a.runs.has("exact-v1") ? "exact-v1" : "legacy";
-}
-/** Whether a socket that runs `runs` may touch a document in `mode`: checked on every document operation (claim, fence,
- * batch, pull, clear, and the `changed` told to it), not once per claim; else the server refuses merge_mode, detail
- * {merge: mode}, and nothing changes. */
-export const mergeAdmits = (mode: MergeMode, runs: ReadonlySet<MergeMode>): boolean => runs.has(mode);
-
 /** A claim and a fence name the document's epoch they are for (plan-sync-slice2-2b-r4 §2.4): one for another epoch
- * than the document's is refused (stale_epoch) and changes nothing, so a delayed one can't land in a later epoch.  A
- * claim may carry `merge`, the mode asked for if it creates the document (checkMergeRequest). */
-export interface DocClaim { t: "doc_claim"; req: number; doc: string; epoch: number; client: string; owner?: string; merge?: MergeMode }
+ * than the document's is refused (stale_epoch) and changes nothing, so a delayed one can't land in a later epoch. */
+export interface DocClaim { t: "doc_claim"; req: number; doc: string; epoch: number; client: string; owner?: string }
 export interface DocFence { t: "doc_fence"; req: number; doc: string; epoch: number; clients: { client: string; target: number }[]; owner?: string }
 export interface Snapshot { t: "snapshot"; req: number; doc: string; at_seq: number; sha256: string; bytes: number; owner?: string }
 export interface Progress { t: "progress"; claims: Uint8Array }
@@ -602,11 +566,10 @@ function docFields(v: unknown, own: readonly string[], via: Via, what: string): 
 }
 const withDoc = <T extends object>(m: T, d: { doc: string; owner?: string }) => ({ ...m, doc: d.doc, ...(d.owner !== undefined ? { owner: d.owner } : {}) });
 export function checkDocClaim(v: unknown, via: Via = ACCOUNT): DocClaim {
-  const d = docFields(v, ["t", "req", "epoch", "client", "merge"], via, "doc_claim"), o = d.o;
+  const d = docFields(v, ["t", "req", "epoch", "client"], via, "doc_claim"), o = d.o;
   if (o.t !== "doc_claim" || !isNat(o.req) || !isClient(o.client)) throw invalid("doc_claim: t, req and client");
   if (!isNat(o.epoch) || o.epoch < 1) throw invalid("doc_claim: epoch, the document's (from 1)");
-  const merge = has(o, "merge") ? { merge: checkMergeRequest(o.merge, "doc_claim") } : {};
-  return withDoc({ t: "doc_claim" as const, req: o.req, epoch: o.epoch, client: o.client, ...merge }, d);
+  return withDoc({ t: "doc_claim" as const, req: o.req, epoch: o.epoch, client: o.client }, d);
 }
 export function checkDocFence(v: unknown, via: Via = ACCOUNT): DocFence {
   const d = docFields(v, ["t", "req", "epoch", "clients"], via, "doc_fence"), o = d.o;
