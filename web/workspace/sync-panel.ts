@@ -18,6 +18,8 @@ import { readLife, sameLife, syncOffIf, type LifeMark } from "./sync-pins";
 import { SyncOwner } from "./sync-owner";
 import { DOC_SYNC_NOTE, docSyncOrigin } from "./doc-sync-switch";
 import { accountHash } from "../sync-protocol/protocol";
+import { openHistoryDb } from "../notebook/stores.js";
+import { readDebt, unackedDocs } from "../journal/rows.js";
 import { CLIENT, type Refusal } from "./sync-client";
 
 export const PANEL = {
@@ -152,9 +154,12 @@ export type SectionHost = { say(text: string): void; fail(e: unknown): void; usa
 /** What the details read gives: the listed paths and the refusals of namespace `ns` (a seam for tests). */
 /** (and the refusals' seen mark: the n of the newest one shown when their list was last opened, 0 if never) */
 type DetailsRead = (ns: string) => Promise<[{ count: number; paths: [string, string][] } | undefined, Refusal[] | undefined, number?]>;
+/** The notebooks with edits the server hasn't acknowledged (their ids), or `over` when there are too many to count
+ * (a seam for tests). */
+type ReadUnacked = () => Promise<{ ids: string[]; over: boolean }>;
 /** Records that this device's refusals up to number `n` were looked at (a seam for tests). */
 type MarkSeen = (ns: string, n: number) => Promise<void>;
-export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, opts: { fetch?: Fetch; random?: () => number; after?: (ms: number, f: () => void) => () => void; readDetails?: DetailsRead; markSeen?: MarkSeen } = {}): { dispose: () => void; poll: PanelPoll; refresh: () => void } {
+export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, opts: { fetch?: Fetch; random?: () => number; after?: (ms: number, f: () => void) => () => void; readDetails?: DetailsRead; markSeen?: MarkSeen; readUnacked?: ReadUnacked } = {}): { dispose: () => void; poll: PanelPoll; refresh: () => void } {
   const f: Fetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const confirmFn = host.confirm ?? ((t: string) => confirm(t)), promptFn = host.prompt ?? ((t: string) => prompt(t));
   const owner = SyncOwner.of(w);
@@ -173,6 +178,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     Promise.all([req(meta.get(`sync:${ns}:listed`)), req(meta.get(`sync:${ns}:refused`)), req(meta.get(`sync:${ns}:refusedSeen`))]).then((v) => ok(v as any), no);
   }));
   const markSeen: MarkSeen = opts.markSeen ?? ((ns, n) => raiseSeen(w.ws, ns, n));
+  const readUnacked: ReadUnacked = opts.readUnacked ?? unackedNotebooks;
   // (every status read bound to the lifecycle it started under: one that a lifecycle change overtook is dropped and
   // asked again, never applied (astra3's CORR-PR130-3))
   const boundStatus = async (signal: AbortSignal): Promise<Answer> => {
@@ -288,6 +294,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       // (changes the server refused that nobody has looked at yet: counted in the foot, which points here; opening
       // this list, which shows every one kept (the last 100), marks them looked at, and the count goes)
       const seen = Number.isSafeInteger(seenMark) ? seenMark! : 0;
+      // (the notebooks' words as last read, for the foot redrawn when the refusals are marked seen)
+      let lastNb: Notebooks | undefined;
       const unseen = unseenRefusals(refused, seen);
       if (refused?.length) {
         const shown = refused.slice(-CLIENT.refusalsKept);
@@ -306,14 +314,30 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
             if (!current()) return;
             summary.textContent = what + ")";
             const f = sec.querySelector(".sync-foot");
-            if (f) f.textContent = `Sync is on: ${foot(owner.view().s)}`;
+            if (f) f.textContent = `Sync is on: ${foot(owner.view().s, Date.now(), 0, lastNb)}`;
           }, () => {});
         });
         parts.push(list);
       }
       box.replaceChildren(...parts);
+      // (notebooks (2c-3): those this page's document sync stopped, which won't send, and, while offline or syncing,
+      // those with edits waiting; the count read never holds the foot back: a failed or too large one says less)
+      const s0 = owner.view().s, stopped = owner.stoppedDocs();
+      let nb: Notebooks | undefined = stopped.length ? { waiting: 0, stopped: stopped.length } : undefined;
+      if (s0.state === "offline" || s0.state === "syncing") {
+        try {
+          const u = await readUnacked();
+          if (!current()) return;
+          const halted = new Set(stopped);
+          nb = u.over ? { waiting: 0, stopped: stopped.length, unknown: true } : { waiting: u.ids.filter((id) => !halted.has(id)).length, stopped: stopped.length };
+        } catch {
+          if (!current()) return;
+          nb = { waiting: 0, stopped: stopped.length, unknown: true };
+        }
+      }
+      lastNb = nb;
       const footEl = sec.querySelector(".sync-foot");
-      if (unseen && footEl) footEl.textContent = `Sync is on: ${foot(owner.view().s, Date.now(), unseen)}`;
+      if ((unseen || nb) && footEl) footEl.textContent = `Sync is on: ${foot(owner.view().s, Date.now(), unseen, nb)}`;
     } catch {
       if (current()) box.replaceChildren(h("p", { className: "note", textContent: "This browser's sync details can't be read now" }));
     }
@@ -468,24 +492,55 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   return { dispose: () => { poll.close(); renderGen++; unsub(); }, poll, refresh: () => poll.request() };
 }
 
-/** The foot's words for a snapshot (r2 §2.3), and, while sync is on, how many changes the server refused that nobody
- * has looked at yet, pointing to their list (the panel's "changes the server refused", below the foot). */
-export function foot(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now = Date.now(), refused = 0): string {
-  const base = footOf(s, now);
-  if (!(refused > 0) || s.state === "off" || base === "Sync off") return base;
-  return `${base} · ${refused} change${refused === 1 ? "" : "s"} couldn't sync (see "the server refused" below)`;
+/** Notebooks for the foot (2c-3): how many have edits waiting to go up, how many this page's document sync stopped
+ * (they won't go up), and whether the waiting ones couldn't be counted (then said without a number). */
+export type Notebooks = { waiting: number; stopped: number; unknown?: boolean };
+/** The foot's words for a snapshot (r2 §2.3); while sync is on, the notebooks' (`nb`: edits waiting, said while
+ * offline or syncing, and those that can't sync), and how many changes the server refused that nobody has looked at
+ * yet, pointing to their list (the panel's "changes the server refused", below the foot). */
+export function foot(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now = Date.now(), refused = 0, nb?: Notebooks): string {
+  let base = footOf(s, now, nb);
+  if (s.state === "off" || base === "Sync off") return base;
+  const k = nb?.stopped ?? 0;
+  if (k > 0) base += ` · ${k} notebook${k === 1 ? "" : "s"} can't sync`;
+  if (refused > 0) base += ` · ${refused} change${refused === 1 ? "" : "s"} couldn't sync (see "the server refused" below)`;
+  return base;
 }
-function footOf(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now: number): string {
+// (what waits, files' changes and notebooks' edits, in words: "2 changes and edits in 3 notebooks"; "" for nothing)
+function waitingWords(n: number, nb?: Notebooks): string {
+  const parts: string[] = [];
+  if (n > 0) parts.push(`${n} change${n === 1 ? "" : "s"}`);
+  if (nb?.unknown) parts.push("notebook edits");
+  else if ((nb?.waiting ?? 0) > 0) parts.push(`edits in ${nb!.waiting} notebook${nb!.waiting === 1 ? "" : "s"}`);
+  return parts.join(" and ");
+}
+function footOf(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now: number, nb?: Notebooks): string {
   const n = s.waiting ?? 0;
   if (s.full) return "too many changes waiting to sync";
   switch (s.state) {
     case "synced": return s.lastSynced ? `Synced · ${ago(now - s.lastSynced)}` : "Synced";
-    case "syncing": return `Syncing ${n} change${n === 1 ? "" : "s"}…`;
-    case "offline": return `Offline: ${n} change${n === 1 ? "" : "s"} wait`;
+    case "syncing": return `Syncing ${waitingWords(n, nb) || `${n} changes`}…`;
+    case "offline": return `Offline: ${waitingWords(n, nb) || `${n} changes`} wait`;
     case "paused": return `Paused: ${s.reason ?? "waiting"}`;
     case "connecting": case "waiting": return "Connecting…";
     default: return "Sync off";
   }
+}
+// (the history database, kept open for the count, closed if another page upgrades it; and the last count, kept until
+// the namespace's debt row changes: a T1's charge, an acknowledgement or a dropped notebook changes it)
+let unackedDb: Promise<IDBDatabase> | null = null;
+let unackedLast: { key: string; ids: string[]; over: boolean } | null = null;
+/** The notebooks with edits the server hasn't acknowledged: the debt row read first (cheap), the registry and slots
+ * (one transaction) only when it changed since the last count. */
+async function unackedNotebooks(): Promise<{ ids: string[]; over: boolean }> {
+  unackedDb ??= openHistoryDb({ onVersionChange: () => { void unackedDb?.then((db) => db.close()); unackedDb = null; } }).catch((e: unknown) => { unackedDb = null; throw e; });
+  const db = await unackedDb;
+  const d = await readDebt(db);
+  if (!d.count) return { ids: [], over: false };
+  if (unackedLast?.key === `${d.count}:${d.bytes}`) return unackedLast;
+  const r = await unackedDocs(db);
+  unackedLast = { key: `${r.debt.count}:${r.debt.bytes}`, ids: r.ids, over: r.over };
+  return unackedLast;
 }
 /** Raises namespace `ns`'s refusals' seen mark to `n` in the workspace database `db`; never lowers it: read and raised in
  * one transaction, so a panel that read an older list, in this tab or another, never takes it back. */
