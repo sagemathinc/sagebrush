@@ -178,10 +178,23 @@ def _no_constant(name):
     raise ValueError("%s is not JSON" % name)
 
 
+def _no_duplicates(pairs):
+    """An object's members, refused if a key repeats: Python's json keeps
+    the last, a browser's JSON.parse too, but another reader may keep the
+    first, so the page and this server must never disagree on a value."""
+    d = {}
+    for k, v in pairs:
+        if k in d:
+            raise ValueError("a JSON object repeats the key %r" % k[:64])
+        d[k] = v
+    return d
+
+
 def loads_strict(data):
     """JSON from bytes, strictly: UTF-8, no NaN or Infinity, no lone
-    surrogates (an escaped \\ud800 included).  ValueError otherwise."""
-    v = json.loads(data.decode("utf-8") if isinstance(data, (bytes, bytearray)) else data, parse_constant=_no_constant)
+    surrogates (an escaped \\ud800 included), no key twice in an object.
+    ValueError otherwise."""
+    v = json.loads(data.decode("utf-8") if isinstance(data, (bytes, bytearray)) else data, parse_constant=_no_constant, object_pairs_hook=_no_duplicates)
     strict_json(v)
     return v
 

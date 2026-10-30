@@ -385,7 +385,8 @@
   {"key":"src/runtime/types.ts :: typeCall :: m . get ( \"__module__\" ) #0","before":"opaque","after":"absent","replacement":"none","reason":"type(name, bases, ns) now goes through typeMake, the keyword path's implementation (CPython's type_call and type_new); the dict is copied by typeNewImpl's existing records, so this typeCall record is gone"},
   {"key":"src/runtime/types.ts :: typeCall :: m . set ( dictKeyOf ( ns , k ) , v ) #0","before":"opaque","after":"absent","replacement":"none","reason":"type(name, bases, ns) now goes through typeMake, the keyword path's implementation (CPython's type_call and type_new); the dict is copied by typeNewImpl's existing records, so this typeCall record is gone"},
   {"key":"src/runtime/types.ts :: typeCall :: makeClass ( name , O . toArray ( bases ) , m , m . get ( \"__module__\" ) ?? hooks . callerModule ( ) , name , [ ] , [ ] ) #0","before":"opaque","after":"absent","replacement":"none","reason":"type(name, bases, ns) now goes through typeMake, the keyword path's implementation (CPython's type_call and type_new); the dict is copied by typeNewImpl's existing records, so this typeCall record is gone"},
-  {"key":"src/runtime/types.ts :: typeCall :: new Map < string , any > ( ) #0","before":"opaque","after":"absent","replacement":"none","reason":"type(name, bases, ns) now goes through typeMake, the keyword path's implementation (CPython's type_call and type_new); the dict is copied by typeNewImpl's existing records, so this typeCall record is gone"}
+  {"key":"src/runtime/types.ts :: typeCall :: new Map < string , any > ( ) #0","before":"opaque","after":"absent","replacement":"none","reason":"type(name, bases, ns) now goes through typeMake, the keyword path's implementation (CPython's type_call and type_new); the dict is copied by typeNewImpl's existing records, so this typeCall record is gone"},
+  {"key":"web/worker.ts :: <module> :: notebookSession ( ( m ) => postMessage ( m ) , { limits , runs : { begin : ( m ) => { reads = new Set ( ) ; writes = new Set ( ) ; replayEnv . begin ( m . clock… 3f67d945 #0","before":"opaque","after":"absent","replacement":["web/worker.ts :: <module> :: notebookSession ( ( m ) => postMessage ( m ) , { stdin , limits , runs : { begin : ( m ) => { reads = new Set ( ) ; writes = new Set ( ) ; replayEnv . begin ( m… ff89d828 #0"],"reason":"input() (#308): the worker passes the session its stdin option, so the call's text and key changed; the same opaque notebookSession call, signature-only"}
 ],
 "parity": {
   "src/compile.ts :: compile :: analyze ( mod ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
@@ -485,6 +486,7 @@
   "src/scope.ts :: resolve :: resolveFree ( scope . parent ! , name ) #2": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
   "src/scope.ts :: resolveFree :: findEnclosing ( scope , name ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
   "web/lib-lazy.ts :: fetchSync :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"},
+  "web/pkgset-browser.ts :: syncChunk :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"},
   "web/shims/fs.ts :: fetchRemote :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"}
  },
 "derived": {
@@ -1136,7 +1138,7 @@
   "ec730a7e9c6b7eda": {"decl":"src/notebook-session.ts :: LimitsError.class","class":"no-new-store"},
   "c6407727d142d472": {"decl":"src/notebook-session.ts :: moduleNames","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "8c81c3206a470a50": {"decl":"src/notebook-session.ts :: nm","class":"allocates","via":"src/limits.ts :: plain"},
-  "8a2dddae72461384": {"decl":"src/notebook-session.ts :: notebookSession","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
+  "74f76da8b8b4975b": {"decl":"src/notebook-session.ts :: notebookSession","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "96ca16dbff73f0c6": {"decl":"src/notebook-session.ts :: of","class":"allocates","via":"src/limits.ts :: plain"},
   "7c7767d1546f9e3d": {"decl":"src/notebook-session.ts :: str","class":"allocates","via":"src/limits.ts :: plain"},
   "849fd15500b28db8": {"decl":"src/pkgset.ts :: PkgsetError.class","class":"no-new-store"},
