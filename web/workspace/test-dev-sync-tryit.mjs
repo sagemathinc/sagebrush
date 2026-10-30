@@ -29,7 +29,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const DIST = process.env.SITE ?? join(here, "..", "dist");
 const ORIGIN = "https://dev.sagebrush.space";
 const ACCOUNT = "7e57d5d5-0000-4ccc-8ccc-7e57d5d5d5d5";
-const RUN_S = Number(process.env.TRYIT_RUN_S ?? 540);
+const RUN_S = Number(process.env.TRYIT_RUN_S ?? 570);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
 const fails = [];
@@ -324,9 +324,17 @@ try {
   await sleep(2000);
   check(!(await A.ev(A.has("x = offline"))), "…which A doesn't have yet");
   obs("B's sync line while offline, after typing", await B.syncLine());
+  // (offline long enough for the connection's backoff to grow (1, 2, 4, 8, 16 s: the next try ~32 s on), as William's
+  // wifi off did: back online, it reconnects at once (P0 #3), not when that wait ends)
+  await sleep(35_000);
+  obs("B's sync line after 35 s offline", await B.syncLine());
   cut.delete(B.session);
   await B.offline(false);
-  check(await A.until(A.has("x = offline"), 45_000), "B back online: its edit reaches A within 45 s");
+  const back = Date.now();
+  const reached = await A.until(A.has("x = offline"), 45_000);
+  const took = Date.now() - back;
+  obs("B back online: its edit reached A after (ms)", took);
+  check(reached && took < 10_000, `B back online after 35 s offline: its edit reaches A within 10 s (${reached ? took + " ms" : "not within 45 s"})`);
   check(await B.until(`/^Synced/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 45_000), `…and B says Synced again (${J(await B.syncLine())})`);
   // ---- 7. a second tab of B (B's first tab holds the account connection) clicking a notebook still arriving: said,
   // then, with nothing more from A, opened once its history is here (a regression guard of today's behaviour:
