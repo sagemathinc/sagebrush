@@ -98,6 +98,8 @@ export interface Turn {
   usage?: { input_tokens: number; output_tokens: number };
   started: number;
   finished?: number;
+  // set for a turn of an agent on the person's computer (else the scripted demo's)
+  agent?: string;
 }
 
 export interface Thread {

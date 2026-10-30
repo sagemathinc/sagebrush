@@ -151,6 +151,8 @@ function onAgent(method: string, params: unknown) {
   const thread = state.threads.find((t) => t.id === p?.conversation);
   if (!thread || typeof p?.turn_id !== "string" || !p.event || typeof p.event.type !== "string") return;
   emitTo(thread, p.turn_id, p.event as Draft);
+  const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === p.turn_id);
+  if (turn && !turn.agent) turn.agent = pairing?.hello?.agent.name ?? "agent";
   if (p.event.type === "turn_finished") {
     liveRunning.delete(thread.id);
     next(thread);
@@ -299,7 +301,8 @@ function turnNode(thread: Thread, turn: Turn): HTMLElement {
         : turn.usage
           ? `<div class="status done">${((turn.finished ?? 0) - turn.started) / 1000 > 0 ? (((turn.finished ?? 0) - turn.started) / 1000).toFixed(1) + " s · " : ""}${turn.usage.output_tokens} tokens</div>`
           : "";
-  div.innerHTML = `<div class="who"><span class="avatar">✳</span>Claude <span class="demo">demo</span></div>${parts.join("")}${status}`;
+  const tag = turn.agent ? `<span class="demo live">on your computer</span>` : `<span class="demo">demo</span>`;
+  div.innerHTML = `<div class="who"><span class="avatar">✳</span>Claude ${tag}</div>${parts.join("")}${status}`;
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-approve]")) {
     b.onclick = () => {
       const att = b.closest<HTMLElement>("[data-attention]")!.dataset.attention!;
@@ -547,7 +550,7 @@ $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
 function renderHeader() {
   const who = $("#who");
   if (live()) {
-    who.innerHTML = `<span class="conn on"></span>Claude <small>on your computer · ${esc(pairing!.hello?.agent.name ?? "")}</small>`;
+    who.innerHTML = `<span class="conn on"></span>Claude <small>on your computer</small>`;
   } else if (pairing && pairing.state === "paired") {
     who.innerHTML = `<span class="conn wait"></span>Claude <small>connected: allow it in the dialog</small>`;
   } else {
@@ -555,6 +558,9 @@ function renderHeader() {
   }
   $("#connect").textContent = live() ? "Connected" : "Connect Claude";
   $("#connect").toggleAttribute("disabled", live());
+  $("#banner").innerHTML = live()
+    ? "Connected to Claude on your computer (your own Claude login). Its files are in this browser's workspace; chats are kept in this browser."
+    : "Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own (\"Use your own Claude\"). Chats are kept in this browser only.";
 }
 
 renderHeader();
