@@ -201,6 +201,22 @@ T.typeUnsaved = (cid, text, start, end = start, dir = "none") => {
   c.ta.setSelectionRange(start, end, dir);
   return true;
 };
+/** Whether every journal store open here has the editor's merge (the store's mergeText, history.js mergeTextAt): the
+ * conflict-copy fallback (notebook.js applyRemote, a store without it) is then never taken while a notebook syncs. */
+T.everyJournalStoreMerges = () => {
+  const out = [...T.stores.values()].map((s) => [s.id, !!s.journaled, typeof s.mergeText === "function" && s.mergeText === H.mergeTextAt]);
+  return { all: out.length > 0 && out.every(([, j, m]) => j && m), stores: out };
+};
+/** A journal row for a version this device's live history doesn't hold (a version recorded but not here yet), in the
+ * notebook's synced history (`add`), or that row removed: its time, j 1 (at or below every record's). */
+const PHANTOM = "0000000000z_phantomclient";
+T.phantom = async (id, add) => {
+  const start = (await N.readJournal(T.hdb, id)).start;
+  const tx = T.hdb.transaction("history", "readwrite"), st = tx.objectStore("history"), nb = `${id}:s${start.n}`;
+  if (add) st.put({ nb, time: PHANTOM, j: 1 }); else st.delete([nb, PHANTOM]);
+  await new Promise((ok, no) => { tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  return true;
+};
 /** The history's head value of a notebook (its cells' [id, input], sorted). */
 T.head = (id) => { const s = T.stores.get(id)?.history?.session; return s ? J(s.value().get({ type: "cell" }).map((r) => [r.id, r.input]).sort()) : null; };
 
