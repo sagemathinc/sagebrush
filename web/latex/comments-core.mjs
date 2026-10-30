@@ -64,6 +64,14 @@ export function sha256Hasher() {
   };
 }
 export const sha256 = (str) => sha256Hasher().update(str).digest();
+/** A text's SHA-256 a piece at a time, yielding after each piece ({size}) and returning the digest: the first piece
+ * `first` units, each next one twice the last, up to `max` (the code is cold for the first pieces: short ones keep
+ * those steps short); never cut inside a surrogate pair. */
+export function* sha256Steps(text, first = 256, max = 1 << 13) {
+  const h = sha256Hasher();
+  for (let i = 0, n = first; i < text.length; n = Math.min(2 * n, max)) { const j = sliceAt(text, i + n); h.update(text.slice(i, j)); yield { size: j - i }; i = j; }
+  return h.digest();
+}
 /** Where to cut a string near `i` for slicing (never inside a surrogate pair). */
 export const sliceAt = (s, i) => (i < s.length && i > 0 && (s.charCodeAt(i - 1) & 0xfc00) === 0xd800 ? i + 1 : Math.min(i, s.length));
 

@@ -53,7 +53,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
   // per text: kept for new anchors), then the threads resolved a few at a time; an edit meanwhile starts it again
   // (a slice ends at the first pause past SLICE_MS: a step after it is one native search or one hash piece of 8 Ki
   // units (encoded into a reused buffer: no garbage per piece), so slices stay within 8 ms)
-  const SLICE_MS = 4, HASH_PIECE = 1 << 13;
+  const SLICE_MS = 4, HASH_FIRST = 256, HASH_PIECE = 1 << 13;
   let placing = 0, shaFor = { text: null as string | null, sha: "" };
   // comments are for a .tex of at most 2 Mi UTF-16 units (the core's LIMITS.sourceUnits): above, the person is told so,
   // nothing is placed or written, and the comments file is left as it is
@@ -99,9 +99,11 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
   // the text's hash, in pieces, `pause` between them (true: stop, null returned); kept for the text it was taken of
   async function hashOf(text: string, pause: () => Promise<boolean>, stepped?: (ms: number, kind: string, size: number) => void): Promise<string | null> {
     if (shaFor.text === text) return shaFor.sha;
-    const h = C.sha256Hasher();
-    for (let i = 0; i < text.length;) { const s0 = performance.now(), j = C.sliceAt(text, i + HASH_PIECE); h.update(text.slice(i, j)); stepped?.(performance.now() - s0, "text hash", j - i); i = j; if (await pause()) return null; }
-    shaFor = { text, sha: h.digest() };
+    // (pieces of 256 units first, doubling up to 8 Ki: comments-core.mjs sha256Steps)
+    const g = C.sha256Steps(text, HASH_FIRST, HASH_PIECE);
+    let sha = "";
+    for (;;) { const s0 = performance.now(), x = g.next(); if (x.done) { sha = x.value; break; } stepped?.(performance.now() - s0, "text hash", x.value.size); if (await pause()) return null; }
+    shaFor = { text, sha };
     return shaFor.sha;
   }
   // (an anchor for a span of the text now: its hash reused when it was taken for this text)
