@@ -553,8 +553,6 @@ jobs:
           CHROME=google-chrome bun web/board/test-submit-ids.mjs
           CHROME=google-chrome bun web/board/test-frame-edit.mjs
           CHROME=google-chrome node web/test-board-open.mjs
-          # (the notebook page's phone layout at 390 px: nothing covered, toolbar and menus placed, ?phone=0 off)
-          CHROME=google-chrome node web/test-phone-layout.mjs
           CHROME=google-chrome node web/notebook/test-render-contain.mjs
           CHROME=google-chrome bun web/workspace/test-workspace.mjs
           # (a paired agent: its calls checked against schema.json and the person's grant, the page's connection against
@@ -818,6 +816,7 @@ jobs:
               node web/test-big-pictures.mjs
               node web/test-png.mjs
               node web/test-pkgset.mjs
+              node web/test-phone-layout.mjs
               node web/test-kernel-start.mjs
               node web/test-pkgset-pin.mjs
               node web/test-pkgset-page.mjs

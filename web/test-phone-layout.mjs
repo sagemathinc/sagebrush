@@ -10,6 +10,9 @@
 // - the same with a preview site's notice (its band at the bottom,
 //   --sb-preview-gutter: web/preview/notice.js), as a stand-in;
 // - ?phone=0 turns it off.
+// Bounded: every DevTools call times out naming its method (SEND_MS), every
+// wait for the page is a bounded until(), and a watchdog (WATCHDOG_MS) ends the
+// whole run with the phase it was in.
 // Run after `bun web/build.ts`:
 //   CHROME=google-chrome node web/test-phone-layout.mjs
 import { spawn } from "node:child_process";
@@ -29,6 +32,8 @@ const ok = (cond, what) => {
   if (!cond) fails.push(what);
 };
 const W = 390, H = 844;
+const SEND_MS = 30_000, WATCHDOG_MS = 240_000;
+let phase = "start";
 
 // The overlap check, run in the page: every visible control whose centre is
 // covered by something that isn't itself (or inside it), and every two visible
@@ -78,22 +83,36 @@ const PREVIEW_NOTICE = `(() => {
   return true;
 })()`;
 
+let cleanup = async () => {};
+const watchdog = setTimeout(async () => {
+  console.log(`FAIL the whole run took more than ${WATCHDOG_MS / 1000} s (phase: ${phase})`);
+  await cleanup();
+  process.exit(1);
+}, WATCHDOG_MS);
+phase = "serve.py";
 const serve = startServe(() => spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }));
 const port = await serve.port;
 const profile = mkdtempSync(join(tmpdir(), "sb-phone-layout-chrome-"));
 let cdpPort = Number(process.env.CDP_PORT) || 0;
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--hide-scrollbars", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+phase = "Chrome";
 if (!cdpPort) cdpPort = await devtoolsPort(profile);
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); if (targets.some((t) => t.type === "page")) break; } catch {} await sleep(100); }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
-await new Promise((r) => (ws.onopen = r));
+await new Promise((r, j) => { ws.onopen = r; setTimeout(() => j(new Error("the DevTools socket didn't open within 30 s")), 30_000); });
 let n = 0; const waiting = new Map();
 ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+// (each call bounded: one that never answers fails the run naming its method)
+const send = (method, params = {}) => new Promise((r, j) => {
+  const id = ++n;
+  const t = setTimeout(() => { waiting.delete(id); j(new Error(`DevTools ${method} didn't answer within ${SEND_MS / 1000} s (phase: ${phase})`)); }, SEND_MS);
+  waiting.set(id, (v) => { clearTimeout(t); r(v); });
+  ws.send(JSON.stringify({ id, method, params }));
+});
 const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
-const until = async (expr, ms = 60000) => { for (let i = 0; i < ms / 100; i++) { if (await ev(expr)) return true; await sleep(100); } return false; };
-const cleanup = async () => {
+const until = async (expr, ms = 5000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(100); } return false; };
+cleanup = async () => {
   try { ws.close(); } catch {}
   const gone = chrome.exitCode !== null ? Promise.resolve() : new Promise((r) => chrome.once("exit", r));
   chrome.kill();
@@ -105,8 +124,7 @@ process.on("uncaughtException", async (e) => { console.log("FAIL " + (e?.stack ?
 
 const open = async (query) => {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/${query}` });
-  await sleep(500);
-  return until(`(document.getElementById("status")?.textContent ?? "").startsWith("ready")`);
+  return until(`(document.getElementById("status")?.textContent ?? "").startsWith("ready")`, 60_000);
 };
 const rect = (sel) => `(() => { const r = document.querySelector(${JSON.stringify(sel)})?.getBoundingClientRect(); return r && { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; })()`;
 const report = (list, what) => { ok(Array.isArray(list) && list.length === 0, what + (Array.isArray(list) && list.length ? ": " + list.slice(0, 6).join("; ") : "")); };
@@ -119,6 +137,7 @@ try {
   // (headless Chromium's page never has the focus otherwise, so focus events would not fire)
   await send("Emulation.setFocusEmulationEnabled", { enabled: true });
 
+  phase = "?phone=1";
   ok(await open("?phone=1"), "the page is ready with ?phone=1");
   ok(await ev(`document.documentElement.classList.contains("phone")`), "?phone=1 turns the phone layout on");
   ok(await ev(`document.documentElement.scrollWidth <= innerWidth`), "no horizontal scroll at 390 px");
@@ -132,54 +151,58 @@ try {
   ok(await ev(`getComputedStyle(document.querySelector("#cells .ed textarea")).fontSize === "16px"`), "code is 16px (no zoom on iOS)");
   report(await ev(OVERLAPS), "no covered or overlapping controls (the top of the page)");
 
+  phase = "the active cell";
   // the active cell: its toolbar on its own row, above its editor, inside the cell
   ok(await ev(`(() => { const c = [...document.querySelectorAll("#cells .cell")].find((c) => !c.classList.contains("markdown")); c.querySelector(".gutter").click(); c.scrollIntoView({ block: "center" }); return c.classList.contains("active"); })()`), "a code cell is active");
-  await sleep(300);
+  ok(await until(`(() => { const h = document.querySelector("#cells .cell.active .head"); return !!h && h.getBoundingClientRect().height > 0; })()`), "its toolbar shows");
   ok(await ev(`(() => { const c = document.querySelector("#cells .cell.active"), h = c.querySelector(".head").getBoundingClientRect(), e = c.querySelector(".ed").getBoundingClientRect(), r = c.getBoundingClientRect(); return h.height > 0 && h.bottom <= e.top + 0.5 && h.top >= r.top - 0.5; })()`), "the active cell's toolbar is on its own row above its editor");
   report(await ev(OVERLAPS), "no covered or overlapping controls (an active cell)");
 
+  phase = "the menus";
   // the menus: sheets above the toolbar
   for (const [btn, menu] of [["morebtn", "moremenu"], ["filebtn", "filemenu"]]) {
     await ev(`document.getElementById(${JSON.stringify(btn)}).click()`);
-    await sleep(300);
+    ok(await until(`!document.getElementById(${JSON.stringify(menu)}).hidden`), `#${menu} opens`);
     const m = await ev(rect("#" + menu)), b = await ev(rect(".bar"));
     ok(m && b && m.bottom <= b.top + 0.5 && m.left >= 0 && m.right <= W, `#${menu} opens as a sheet above the toolbar`);
     await ev(`document.getElementById(${JSON.stringify(btn)}).click()`);
-    await sleep(200);
+    ok(await until(`document.getElementById(${JSON.stringify(menu)}).hidden`), `#${menu} closes`);
   }
 
+  phase = "typing";
   // typing: the toolbar steps aside while a field has the focus
   await ev(`document.querySelector("#cells .cell.active textarea").focus()`);
-  await sleep(200);
-  ok(await ev(`document.documentElement.classList.contains("typing") && getComputedStyle(document.querySelector(".bar")).display === "none"`), "the toolbar hides while a cell is being edited");
+  ok(await until(`document.documentElement.classList.contains("typing") && getComputedStyle(document.querySelector(".bar")).display === "none"`), "the toolbar hides while a cell is being edited");
   await ev(`document.activeElement.blur()`);
-  await sleep(200);
-  ok(await ev(`!document.documentElement.classList.contains("typing") && getComputedStyle(document.querySelector(".bar")).display !== "none"`), "and comes back on blur");
+  ok(await until(`!document.documentElement.classList.contains("typing") && getComputedStyle(document.querySelector(".bar")).display !== "none"`), "and comes back on blur");
 
+  phase = "TimeTravel";
   // TimeTravel's header sticks at the top
   await ev(`document.getElementById("ttbtn").click()`);
-  await sleep(500);
-  ok(await ev(`getComputedStyle(document.querySelector("#timetravel .tthead")).top === "0px"`), "TimeTravel's header sticks at the top");
+  ok(await until(`!document.getElementById("timetravel").hidden && getComputedStyle(document.querySelector("#timetravel .tthead")).top === "0px"`), "TimeTravel's header sticks at the top");
   await ev(`document.getElementById("ttclose").click()`);
-  await sleep(200);
+  ok(await until(`document.getElementById("timetravel").hidden`), "TimeTravel closes");
 
+  phase = "a preview notice";
   // a preview site's notice: the toolbar above its band
   ok(await ev(PREVIEW_NOTICE), "a preview notice is added");
-  await sleep(300);
+  ok(await until(`Math.abs(document.querySelector(".bar").getBoundingClientRect().bottom - (innerHeight - 44)) < 1`), "the toolbar moves up for it");
   const bar2 = await ev(rect(".bar")), pill = await ev(rect("#sb-preview-pill"));
   ok(bar2 && pill && bar2.bottom <= pill.top + 0.5 && Math.abs(bar2.bottom - (H - 44)) < 1, `with a preview notice, the toolbar is above its band (${JSON.stringify({ bar: bar2, pill })})`);
   await ev(`window.scrollTo(0, 0)`);
-  await sleep(200);
+  ok(await until(`scrollY === 0`), "back at the top");
   report(await ev(OVERLAPS), "no covered or overlapping controls (with a preview notice)");
   await ev(`document.getElementById("morebtn").click()`);
-  await sleep(300);
+  ok(await until(`!document.getElementById("moremenu").hidden`), "the ⋯ menu opens again");
   const m2 = await ev(rect("#moremenu"));
   ok(m2 && m2.bottom <= bar2.top + 0.5, "with a preview notice, the menu is above the toolbar");
 
+  phase = "?phone=0";
   // ?phone=0: off
   ok(await open("?phone=0"), "the page is ready with ?phone=0");
   ok(await ev(`!document.documentElement.classList.contains("phone") && getComputedStyle(document.querySelector(".bar")).position !== "fixed"`), "?phone=0 turns it off");
 } finally {
+  clearTimeout(watchdog);
   await cleanup();
 }
 console.log(fails.length ? `${fails.length} of ${checks} failed` : `${checks}/${checks} passed`);
