@@ -407,7 +407,8 @@ try {
   check(ar3.codes === J([["a", "A3"], ["b", "B3"]]) && br3.codes === ar3.codes, "3: edits of separate cells made apart: both kept, the two devices the same: " + J({ A: ar3.codes, B: br3.codes }));
 
   progress("case 4");
-  // 4. A clash (the same cell, apart): the later patch is kept on both devices
+  // 4. The same cell changed apart: both edits kept, merged as CoCalc's Jupyter merges them (plan-exact-only r1), the
+  // same on both devices
   await B.call("disconnect");
   await A.call("edit", N1, [["a", "X"], ["b", "B3"]]);
   await sleep(20);
@@ -417,7 +418,8 @@ try {
   await settle();
   await settle();
   const [ar4, br4] = [await A.call("record", N1), await B.call("record", N1)];
-  check(ar4.codes === J([["a", "Y"], ["b", "B3"]]) && br4.codes === ar4.codes, "4: the same cell changed apart: the later patch kept, the same on both devices: " + J({ A: ar4.codes, B: br4.codes }));
+  const a4 = JSON.parse(ar4.codes).find(([id]) => id === "a")?.[1] ?? "";
+  check(a4.includes("X") && a4.includes("Y") && br4.codes === ar4.codes && JSON.parse(ar4.codes).length === 2, "4: the same cell changed apart: both edits kept, the same on both devices: " + J({ A: ar4.codes, B: br4.codes }));
 
   progress("case 5");
   // 5. order with next_cseq: the rows below it acknowledged, the rest sent again; then unknown_client: claimed again
@@ -622,8 +624,8 @@ try {
 
   progress("case 10");
   // 10. A marked value (saved with no room for its version, so in no version) is never replaced by
-  // a later remote change: B's edit marked, A's later change to the same cell arrives: B's record keeps B's whole value
-  // (an unrelated cell too), still marked; and so after a reload
+  // a later remote change: B's edit marked, A's later change to the same cell arrives: B's record keeps B's edits, merged
+  // with A's (plan-exact-only r1: both kept), its unrelated cell its own, still marked; and so after a reload
   const N10 = "aaaaaaaa-1111-4222-8333-444444444444";
   await A.call("open", N10, [["a", "a0"], ["u", "u0"]]);
   await A.call("kick", N10);
@@ -643,8 +645,8 @@ try {
   await B.call("open", N10);
   const b10r = await B.call("record", N10);
   await B.call("resetDebt");
-  const want10 = J([["a", "B"], ["u", "Bu"]]);
-  check(bm10.mark === true && b10.codes === want10 && b10.mark === true && b10r.codes === want10, "10: a marked value meets a later remote change of the same cell: kept whole, still marked, and after a reload: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes }));
+  const a10 = JSON.parse(b10.codes).find(([id]) => id === "a")?.[1] ?? "", u10 = JSON.parse(b10.codes).find(([id]) => id === "u")?.[1];
+  check(bm10.mark === true && a10.includes("B") && a10.includes("C") && u10 === "Bu" && b10.mark === true && b10r.codes === b10.codes, "10: a marked value meets a later remote change of the same cell: both edits kept, its other cell its own, still marked, and after a reload: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes }));
 
   progress("case 11");
   // 11. An ack over the wire resumes a writer's history paused for want of room: the next save is a
@@ -830,6 +832,9 @@ try {
         await settle();
         const ea2 = await ed(A);
         const tb = ea2.texts.find(([id]) => id === "xb")?.[1];
+        // (the merged text saved by the page's own save (its 500 ms), then sent: a kick, as T.edit's)
+        await sleep(900);
+        await A.call("kick", NX);
         for (let i = 0; i < 4; i++) await settle();
         const [ea3, eb3, ra3] = [await ed(A), await ed(B), await A.call("record", NX)];
         const want2 = "B0\nkeep!";
