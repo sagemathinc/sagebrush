@@ -16,15 +16,23 @@
 # properties and uploads the generated project, so that a follow-up can
 # commit gen/android with distributionSha256Sum and Gradle dependency
 # verification.
+#
+# Until that follow-up lands, this job must not be able to break anyone
+# else's CI (@sagebrush's ruling, after the unpinned appimagetool of #304):
+# it runs only when this file changes, or by hand (workflow_dispatch), and is
+# never a required check or a need of ci.yml's aggregate.
 name: app-mobile
 
 on:
   push:
     branches: [master]
-    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/**", ".github/workflows/app-mobile.yml"]
+    paths: [".github/workflows/app-mobile.yml"]
   pull_request:
-    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/**", ".github/workflows/app-mobile.yml"]
+    paths: [".github/workflows/app-mobile.yml"]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: app-mobile-${{ github.event.pull_request.number || github.ref }}
