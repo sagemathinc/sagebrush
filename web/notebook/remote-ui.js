@@ -35,6 +35,8 @@ import { FakeGateway } from "./remote-fake.js";
 const PREVIEW_BASE = "https://compute.preview.invalid/api/compute/v1";
 const NO_NETWORK = Object.freeze({ latency: 0, jitter: 0, loss: 0 });
 const BIND_TRIES = 4;
+/** A remote kernel whose connect failed: what a Run is told (the shared NOTES constant is not changed). */
+export const NOT_CONNECTED = "\nNot run: remote compute isn't connected. Retry, or switch to This browser.\n";
 const abortError = () => Object.assign(new Error("The operation was aborted."), { name: "AbortError" });
 
 /**
@@ -80,6 +82,9 @@ export function gateFor(kernel, page) {
  * events while it runs.  Stop and Restart reach the local interpreter too.
  */
 export class PreviewGateway extends FakeGateway {
+  /** (tests) how many binds the next gateway made refuses */
+  static failNextBinds = 0;
+
   constructor(local, { network = NO_NETWORK, random = Math.random, ...opts } = {}) {
     super({ base: PREVIEW_BASE, ...opts });
     this.local = local;
@@ -88,6 +93,9 @@ export class PreviewGateway extends FakeGateway {
     this.net = network;
     this.random = random;
     this.lost = 0; // (replies and stream events the simulated network lost)
+    // (the page's tests: the next gateway made refuses its first N binds, as an unavailable gateway would)
+    this.failBinds = PreviewGateway.failNextBinds;
+    PreviewGateway.failNextBinds = 0;
     if (network.latency || network.jitter || network.loss) this.fetch = (url, init) => this.netFetch(String(url), init ?? {});
   }
 
@@ -155,6 +163,14 @@ export class PreviewGateway extends FakeGateway {
     });
   }
 
+  bind(body) {
+    if (this.failBinds > 0) {
+      this.failBinds--;
+      return this.json(503, { error: "unavailable" });
+    }
+    return super.bind(body);
+  }
+
   post_runs(b, body) {
     if (body && typeof body.request === "string" && !this.runs.has(body.request) && body.payload) this.payloads.set(body.request, body.payload);
     const res = super.post_runs(b, body);
@@ -209,8 +225,11 @@ export class PreviewGateway extends FakeGateway {
 /**
  * Start a remote kernel on the simulated gateway, for the notebook `notebook`
  * (its id), running on `local` (a fresh interpreter: its variables are the
- * remote kernel's).  Resolves to {kernel, gateway, close()} once it is bound,
- * or rejects with why.
+ * remote kernel's).  Resolves to {kernel, gateway, close(), retry(), failed}:
+ * `failed` is null once it is bound, or why it could not bind (a few binds
+ * asked); then the kernel stays unbound, runs nothing (a Run is told
+ * NOT_CONNECTED), and retry() asks again.  Rejects only if it could not be
+ * made at all (the caller closes `local` then).
  */
 export async function startPreview({ notebook, local, onStatus = () => {}, network = NO_NETWORK }) {
   const gateway = new PreviewGateway(local, { network });
@@ -221,24 +240,44 @@ export async function startPreview({ notebook, local, onStatus = () => {}, netwo
   const kernel = new RemoteKernel({ client, notebook: String(notebook ?? "notebook"), requireGate: true });
   kernel.preview = true;
   kernel.gateway = gateway; // (the simulated gateway, for the page's tests: what it was asked and ran)
-  const off = kernel.on("status", (text) => onStatus(statusText(text, network)));
-  // (a bind whose answer the simulated network lost is asked again, a few times, before the page gives up)
-  for (let i = 0; i < BIND_TRIES && !kernel.ready && !kernel.closed; i++) await kernel.start();
-  if (!kernel.ready) {
-    off();
-    kernel.close();
-    local.close?.();
-    throw new Error("the remote kernel did not start");
-  }
-  return {
+  let why = "";
+  const off = kernel.on("status", (text) => {
+    const m = /^error: the remote kernel did not start: (.*)$/.exec(String(text));
+    if (m) why = m[1];
+    onStatus(statusText(text, network));
+  });
+  // (a bind whose answer was lost, or refused, is asked again a few times)
+  const bind = async () => {
+    for (let i = 0; i < BIND_TRIES && !kernel.ready && !kernel.closed; i++) await kernel.start();
+    kernel.notReadyNote = kernel.ready ? null : NOT_CONNECTED;
+    r.failed = kernel.ready ? null : why || "the remote kernel did not start";
+    return kernel.ready;
+  };
+  const r = {
     kernel,
     gateway,
+    failed: null,
+    retry: bind,
     close() {
       off();
       kernel.close();
       local.close?.();
     },
   };
+  await bind();
+  return r;
+}
+
+/**
+ * A remote kernel that could not be made at all (the preview's client, gateway or interpreter failed): installed
+ * so that the person's choice stands and nothing runs anywhere else; every Run is told NOT_CONNECTED.
+ */
+export function unboundPreview(notebook, why) {
+  const fail = () => Promise.reject(new Error(why));
+  const kernel = new RemoteKernel({ client: { request: fail, async *events() { await fail(); } }, notebook: String(notebook ?? "notebook"), requireGate: true });
+  kernel.preview = true;
+  kernel.notReadyNote = NOT_CONNECTED;
+  return { kernel, gateway: null, failed: why, retry: null, close() { kernel.close(); } };
 }
 
 /** The status line's text for a remote kernel's status (the preview says so, and what network it simulates). */
@@ -261,40 +300,115 @@ export function statusText(text, network = NO_NETWORK) {
  * closed, never installed.  After each await, and in its status callback,
  * an attempt does nothing unless it is still current.
  *
+ * A connect that fails never switches kernels by itself: the remote kernel
+ * is installed unbound (a Run is told NOT_CONNECTED; nothing runs anywhere
+ * else), and the status line offers Retry and Switch to browser.  A kernel
+ * another tab took over offers Reconnect (a fresh kernel, without the sheet:
+ * only for a notebook the person connected in this page) and Switch to
+ * browser.  Each offered action belongs to its owner (the attempt, the
+ * notebook, the kernel installed) and to that offer: it does nothing unless
+ * all of them are still current, checked before it starts anything and
+ * again after each await; Retry, Reconnect and Switch are taken once (the
+ * offer's actions are disabled while one is pending).
+ *
  *   page: {
  *     currentId()       the notebook shown
  *     picked()          the picker's value ("local" | "gpu")
  *     pickLocal()       set the picker to This browser (nothing else)
  *     status(text)      the status line
+ *     actions(list)     (optional) the status line's actions: [{label, run, disabled}], [] for none
+ *     switchLocal()     (optional) the person's choice of This browser, as the picker does it
  *     reactive()        whether the notebook is reactive (a remote kernel runs only there)
  *     makeLocal()       a fresh interpreter for the simulated gateway
  *     network()         (optional) the simulated network, parseNetwork's
  *     setKernel(k)      make k the shown notebook's kernel
  *   }
- * `deps` replaces the sheet, its cancellation and startPreview (tests).
+ * `deps` replaces the sheet, its cancellation, startPreview and unboundPreview (tests).
  */
 export function remoteSwitch(page, deps = {}) {
   const sheet = deps.sheet ?? (() => connectSheet());
   const cancelSheet = deps.cancelSheet ?? closeSheet;
   const start = deps.start ?? startPreview;
+  const unbound = deps.unbound ?? unboundPreview;
   let attempt = 0; // (the current attempt's token; every leave and every new attempt changes it)
   let on = null; // {id, r}: the kernel installed now
+  let offerGen = 0; // (the current offer of actions; every offer and every clear changes it)
+  const connected = new Set(); // (notebooks the person connected in this page, by the sheet: memory only)
+  const network = () => page.network?.() ?? NO_NETWORK;
+  const clearActions = () => {
+    offerGen++;
+    page.actions?.([]);
+  };
+  // the owner's actions, for as long as the owner and this offer are current
+  const offer = (owner, kinds) => {
+    const owned = () => owner.attempt === attempt && on?.r === owner.r && page.currentId() === owner.id;
+    if (!owned()) return;
+    const gen = ++offerGen;
+    let pending = false;
+    const live = () => gen === offerGen && owned();
+    const show = (disabled) => page.actions?.(list.map((a) => ({ ...a, disabled })));
+    const act = (label, work) => ({
+      label,
+      run() {
+        // (checked synchronously, before anything starts; taken once)
+        if (pending || !live()) return false;
+        pending = true;
+        show(true);
+        work(live).catch(() => {});
+        return true;
+      },
+    });
+    const kinds2 = {
+      retry: () => act("Retry", async (live) => {
+        if (!owner.r.retry) {
+          // (a kernel that could not be made: made again, as the person already connected this notebook)
+          await sw.connect(owner.id, { again: true });
+          return;
+        }
+        const ok = await owner.r.retry();
+        if (!live()) return; // (stale meanwhile: changes nothing)
+        if (ok) clearActions();
+        else {
+          page.status(`Remote compute (preview): couldn't connect (${owner.r.failed}).`);
+          offer(owner, ["retry", "switch"]);
+        }
+      }),
+      reconnect: () => act("Reconnect (a fresh kernel: its variables are lost)", async () => {
+        await sw.connect(owner.id, { again: true });
+      }),
+      switch: () => act("Switch to browser", async () => {
+        clearActions();
+        if (page.switchLocal) page.switchLocal();
+        else {
+          sw.leave();
+          page.pickLocal();
+        }
+      }),
+    };
+    const list = kinds.map((k) => kinds2[k]());
+    show(false);
+  };
   const sw = {
     get attempt() { return attempt; },
     active: () => on !== null,
     installed: () => on,
-    /** End the current attempt and the installed kernel, whatever their state. */
+    /** End the current attempt and the installed kernel, whatever their state; its actions go. */
     leave() {
       attempt++;
       cancelSheet();
+      clearActions();
       if (on) {
         const { r } = on;
         on = null;
         r.close();
       }
     },
-    /** Connect the notebook `id`: resolves to the installed {kernel, close} or null (cancelled, superseded, failed). */
-    async connect(id) {
+    /**
+     * Connect the notebook `id`: resolves to the installed {kernel, close, failed} (failed: why it isn't bound,
+     * or null) or null (cancelled, superseded).  `again`: Reconnect or Retry, without the sheet, only for a
+     * notebook connected by the sheet in this page.
+     */
+    async connect(id, { again = false } = {}) {
       sw.leave(); // (a newer attempt supersedes any other)
       const mine = attempt;
       const current = () => mine === attempt;
@@ -308,19 +422,27 @@ export function remoteSwitch(page, deps = {}) {
         return null;
       };
       if (!page.reactive()) return back("remote compute runs only in the reactive notebook");
-      let answer;
+      const skipSheet = again && connected.has(id);
+      if (!skipSheet) {
+        let answer;
+        try {
+          answer = await sheet();
+        } catch (e) {
+          return back(`Remote compute (preview): ${e?.message ?? e}`);
+        }
+        if (!current()) return null; // (superseded: whoever did it settled this sheet and owns the picker)
+        if (!answer || !live()) return back();
+        connected.add(id); // (the person's Connect, for this notebook, in this page)
+      } else if (!live()) return back();
+      let r, local = null;
       try {
-        answer = await sheet();
+        local = page.makeLocal();
+        r = await start({ notebook: id, local, network: network(), onStatus: (t) => { if (current()) page.status(t); } });
       } catch (e) {
-        return back(`Remote compute (preview): ${e?.message ?? e}`);
-      }
-      if (!current()) return null; // (superseded: whoever did it settled this sheet and owns the picker)
-      if (!answer || !live()) return back();
-      let r;
-      try {
-        r = await start({ notebook: id, local: page.makeLocal(), network: page.network?.() ?? NO_NETWORK, onStatus: (t) => { if (current()) page.status(t); } });
-      } catch (e) {
-        return back(`Remote compute (preview): ${e?.message ?? e}`);
+        local?.close?.(); // (the preview interpreter made for it is not leaked)
+        if (!live()) return back();
+        // (it could not be made at all: installed unbound, so the choice stands and nothing runs elsewhere)
+        r = unbound(id, String(e?.message ?? e));
       }
       if (!live()) {
         r.close(); // (a stale bind: closed, never installed)
@@ -328,6 +450,15 @@ export function remoteSwitch(page, deps = {}) {
       }
       on = { id, r };
       page.setKernel(r.kernel);
+      const owner = { attempt: mine, id, r };
+      // (another tab took this notebook's kernel: Reconnect, or This browser)
+      r.kernel.on?.("lifecycle", (_old, lc) => { if (lc.phase === "moved") offer(owner, ["reconnect", "switch"]); });
+      if (r.failed) {
+        page.status(`Remote compute (preview): couldn't connect (${r.failed}).`);
+        offer(owner, ["retry", "switch"]);
+      } else if (skipSheet) {
+        page.status(`${statusText("ready (remote)", network())} · a fresh kernel: earlier variables are gone`);
+      }
       return r;
     },
   };
