@@ -1800,7 +1800,36 @@ async function switchActivationFails() {
   w.close();
 }
 
-const CASES = [inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued];
+// ---- a notebook the workspace makes with the journal active (the Files' New, create, an upload's, duplicate: all
+// Workspace.make): its record written marked unjournaled with no j, never a plain save (which the fence refuses); its
+// first writer load takes it into the journal; then it saves through it as any other
+async function workspaceMade() {
+  const { w, hdb } = await active();
+  const tried = async (f) => { try { return await f(); } catch (e) { return "refused: " + (e?.message ?? e); } };
+  const made = await tried(() => w.create("/Made.ipynb", { content: doc([["c1", "x = 1"]]) }));
+  const person = await tried(() => w.createByPerson("/Untitled.ipynb"));
+  check(typeof made === "object" && typeof person === "object", "the journal active: the workspace makes notebooks (create, the Files' New): " + J({ create: made?.path ?? made, person: person?.path ?? person }));
+  if (typeof made !== "object") return;
+  const rec0 = await rawGet(w.main, "notebooks", made.ref);
+  check(rec0?.unjournaled === true && (rec0.j ?? 0) === 0 && rec0.hash === "" && codes(rec0) === J([["c1", "x = 1"]]), "…its record marked unjournaled, with no j, its cells as given: " + J({ u: rec0?.unjournaled, j: rec0?.j, hash: rec0?.hash }));
+  const dup = await tried(() => w.duplicate("/Made.ipynb"));
+  const recD = typeof dup === "object" ? await rawGet(w.main, "notebooks", dup.ref) : null;
+  check(typeof dup === "object" && recD?.unjournaled === true && codes(recD) === J([["c1", "x = 1"]]), "…a duplicate of it too, the same way: " + J(dup?.path ?? dup));
+  // (its first writer load: taken into the journal, its value as made)
+  const st = store(w, hdb, made.ref);
+  const d = await st.load();
+  const rec1 = await rawGet(w.main, "notebooks", made.ref);
+  check(codes(d) === J([["c1", "x = 1"]]) && !rec1.unjournaled && Number.isSafeInteger(rec1.j) && rec1.j > 0 && typeof rec1.hash === "string" && rec1.hash.length > 0, "its first writer load takes it into the journal: " + J({ row: st.recovered?.row, j: rec1.j, u: rec1.unjournaled ?? null, rows: (await histRows(hdb, made.ref)).length }));
+  const out = await st.save({ ...d, cells: [{ id: "c1", code: "x = 2" }], baseRev: rec1.rev });
+  const rec2 = await rawGet(w.main, "notebooks", made.ref);
+  check(!!out && typeof out === "object" && !out.conflict && rec2.j > rec1.j && codes(rec2) === J([["c1", "x = 2"]]), "…and saves through it after: " + J({ saved: out?.saved, j: rec2.j }));
+  await st.release();
+  // (unchanged: a plain store's own save stays refused under the journal)
+  const plain = await new W.IdbStore(w.main, newId()).save(doc([["p", "plain"]]));
+  check(typeof plain === "string" && /journal/.test(plain), "a plain store's save stays refused under the journal: " + J(plain));
+  w.close();
+}
+const CASES = [workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
