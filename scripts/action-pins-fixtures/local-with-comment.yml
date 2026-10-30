@@ -1,0 +1,6 @@
+on: push
+jobs:
+  a:
+    runs-on: x
+    steps:
+      - uses: ./local # v1.0.0
