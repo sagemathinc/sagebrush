@@ -579,6 +579,14 @@ function getHistoryChannel() {
 }
 /** A patch received from the server and stored (sync 2c-3) told to this notebook's history in every tab, this one's
  * too (the sender may be the writer's tab): `id` is the history key, `env` the patch. */
+/** A synced history's merge mode, recorded by sync (doc-sync.ts: a claim's or a page's answer, plan-merge-align r3.2
+ * §5), told to the stores that read history `id`, in this tab and the others, before any patch it came with: each
+ * store keeps it (mergeMode), so its history reads the patches after it with that mode.  No `env`. */
+export function tellMerge(id, merge) {
+  const m = { from: tabId, id, merge };
+  getHistoryChannel()?.postMessage(m);
+  for (const f of historySubs) try { f(m); } catch (e) { console.warn("history:", e); }
+}
 export function tellHistory(id, env) {
   const m = { from: tabId, id, env };
   getHistoryChannel()?.postMessage(m);
@@ -650,12 +658,17 @@ export class IdbPatchStore {
   range() { return IDBKeyRange.bound([this.id, ""], [this.id, "\uffff"]); }
   async loadInitial() {
     // (the rows and the fence they belong with, in one transaction)
+    // (and, for a synced history, its merge mode (readMerge, the journal's), read in the same transaction: the mode the
+    // patches were recorded with, never a later one; plan-merge-align r3.2 §5)
     const both = this.db ? await new Promise((ok, no) => {
       const tx = this.db.transaction("history", "readonly"), st = tx.objectStore("history"), r = st.getAll(this.range()), f = st.get([FENCE, ""]);
-      tx.oncomplete = () => ok({ rows: r.result, fence: f.result?.fence });
+      let merge;
+      if (this.readMerge) this.readMerge(st).then((m) => { merge = m; }, () => {});
+      tx.oncomplete = () => ok({ rows: r.result, fence: f.result?.fence, merge });
       tx.onerror = () => no(tx.error);
     }) : { rows: [], fence: undefined };
     if (this.fence === undefined) this.bindFence(both.fence);
+    if (both.merge === "legacy" || both.merge === "exact-v1") this.mergeMode = both.merge;
     const rows = both.rows ?? [];
     return { patches: rows.map((r) => r.env), hasMore: false };
   }
@@ -768,7 +781,8 @@ export class IdbPatchStore {
     });
   }
   subscribe(f) {
-    const g = (m) => { if (m.id === this.id && m.env) f(m.env); };
+    // (a merge mode told before the patches it came with: kept first, so they're read with it)
+    const g = (m) => { if (m.id !== this.id) return; if (m.merge === "legacy" || m.merge === "exact-v1") this.mergeMode = m.merge; if (m.env) f(m.env); };
     getHistoryChannel();
     historySubs.add(g);
     return () => historySubs.delete(g);
