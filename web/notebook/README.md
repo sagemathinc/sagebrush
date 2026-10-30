@@ -5,6 +5,7 @@
 - cells as in Jupyter: prompts `[n]:`, command and edit modes, Jupyter's keys, dragging to reorder, `+ Code` / `+ Text` between cells;
 - outputs: text, SVG and PNG pictures, typeset math, interactive 3D views, animations, `@interact` controls and ipywidgets' widgets (a slider, dropdown, button, ... or a `VBox` of them, as a cell's value or with `display()`: `.observe`, `Button.on_click` and `interactive_output` work);
 - Markdown cells with math, written as blocks as in Notion (web/board/blocks.ts), and Tab completion;
+- `input()`: a field under the cell takes the line, as in Jupyter (Enter sends it; Stop raises KeyboardInterrupt). It needs a cross-origin-isolated page, as Stop does: elsewhere `input()` reads end of input (EOFError). The kernel's sink gets `input(prompt, reply)` (types.ts);
 - printing to PDF.
 
 It is plain DOM with no framework, MIT or Apache-2.0, and `web/build.ts` bundles it as `sagebrush-notebook.js` (about 110 kB minified, Markdown rendering included). [sagebrush.space/embed](https://sagebrush.space/embed/) is a whole page made with it.

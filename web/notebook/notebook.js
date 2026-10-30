@@ -484,7 +484,30 @@ export function createNotebook(root, opts = {}) {
       display: (b) => appendDisplay(box, b),
       interact: (spec) => renderInteract(box, spec),
       clear: () => box.replaceChildren(),
+      input: (prompt, reply) => askInput(box, prompt, reply),
     };
+  }
+  // input(): a text field under the cell, as in Jupyter.  Enter sends the
+  // line; the run then writes the prompt and the line as its output.  A Stop
+  // ends the wait in the worker and removes the field at once (the kernel
+  // retires the question: reply.onretire); so does the run's end (settle).
+  function askInput(box, prompt, reply) {
+    if (opts.readOnly) return reply(null);
+    const row = h("div", "stdin");
+    reply.onretire = () => row.remove();
+    const field = h("input", "stdin-field", { type: "text", spellcheck: false, autocomplete: "off" });
+    field.setAttribute("aria-label", prompt ? `input: ${prompt}` : "input");
+    row.append(h("span", "stdin-prompt", { textContent: prompt }), field);
+    field.addEventListener("keydown", (e) => {
+      // (the notebook's own keys don't act while typing an answer)
+      e.stopPropagation();
+      if (e.key !== "Enter" || e.isComposing) return;
+      e.preventDefault();
+      row.remove();
+      reply(field.value);
+    });
+    box.appendChild(row);
+    field.focus({ preventScroll: true });
   }
 
   // A cell's output as Jupyter outputs (stream and display_data).
@@ -775,6 +798,8 @@ export function createNotebook(root, opts = {}) {
     clearInterval(cell.timer);
     cell.runb.textContent = "▶";
     cell.el.classList.remove("queued", "running");
+    // (an input() field still waiting: its run ended, by a Stop or a restart)
+    for (const row of cell.out.querySelectorAll(".stdin")) row.remove();
   }
   // A code cell's last run time, kept in the document (for the estimates of
   // stale cells, and the time limit's choices, after a reload): two
@@ -959,7 +984,7 @@ export function createNotebook(root, opts = {}) {
       case "import-star":
         return `${e.message} Import the names you use (from m import a, b), or the module (import m).`;
       default:
-        return `SyntaxError: ${e.message}`;
+        return /^SyntaxError\b/.test(e.message ?? "") ? e.message : `SyntaxError: ${e.message}`;
     }
   }
   function showStatus(cell, st) {
@@ -1004,8 +1029,10 @@ export function createNotebook(root, opts = {}) {
       cls.remove("cancelled");
       cls.add("error");
       // a syntax error in a cell just run: the interpreter shows it (where, and in
-      // its language's words); such a cell defines nothing, so running it is harmless
-      if (st.submitted && st.errors.every((e) => e.kind === "syntax")) {
+      // its language's words); such a cell defines nothing, so running it is harmless.
+      // (Not on a remote kernel: it runs only what a person's Run approved, through the gate, so the
+      // analyzer's own message is shown, below, and nothing is sent.)
+      if (st.submitted && st.errors.every((e) => e.kind === "syntax") && !kernel?.remote) {
         execCell(cell, cell.ta.value).then(() => cls.add("error"));
         markEdited(cell);
         return;

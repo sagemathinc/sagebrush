@@ -8,6 +8,7 @@ import numpy as np
 import _matlab_sparse as sp
 import _matlab_colamd as C
 import _matlab_lu as L
+import _matlab_ledger as LG  # (the first-use fix: Ledger, its _capacity seam and the recorder are _matlab_ledger's)
 import _limits
 
 EPS = 2.0 ** -52
@@ -225,14 +226,14 @@ S = rand_matrix(60, 3)
 try:
     for cap, reason in ((FakeCap(None, [], None), "no memory figure"),
                         (FakeCap(10 ** 9, ["js-heap"], 10 ** 8), "the figure doesn't cover js-arraybuffer")):
-        L._capacity = cap
+        L._capacity = LG._capacity = cap
         try:
             L.factor(S, "Solving with this 60-by-60 sparse matrix")
             raise AssertionError("no refusal")
         except MemoryError as e:
             assert e.unmeasured == reason and e.limit_bytes == 0 and e.record == cap.rec, (e.unmeasured, e.record)
             assert "can't measure the memory available here (%s)" % reason in str(e), str(e)
-    L._capacity = FakeCap(10 ** 9, ["js-heap", "js-arraybuffer"], 0)
+    L._capacity = LG._capacity = FakeCap(10 ** 9, ["js-heap", "js-arraybuffer"], 0)
     try:
         L.factor(S, "t")
         raise AssertionError("no refusal")
@@ -243,7 +244,7 @@ try:
     # browser worker's does today, _sparse_lu keeps master's LU and its caps;
     # _matlab_sparse holds the check, unmeasured_reason, and _matlab_lu imports it)
     assert L.unmeasured_reason is sp.unmeasured_reason
-    L._capacity = sp._capacity = FakeCap(4 << 30, ["wasm-engine"], 3 << 30)
+    L._capacity = LG._capacity = sp._capacity = FakeCap(4 << 30, ["wasm-engine"], 3 << 30)
     F = sp._sparse_lu(S)
     assert isinstance(F, sp._LU) and not isinstance(F, L.LU)
     B = np.ones((60, 1))
@@ -277,23 +278,23 @@ try:
     except MemoryError as e:
         assert e.unmeasured == "the figure doesn't cover js-heap or js-arraybuffer", e.unmeasured
     # (a measured zero is not unmeasured: the new LU's ordinary refusal)
-    L._capacity = sp._capacity = FakeCap(10 ** 9, ["js-heap", "js-arraybuffer"], 0)
+    L._capacity = LG._capacity = sp._capacity = FakeCap(10 ** 9, ["js-heap", "js-arraybuffer"], 0)
     try:
         sp._sparse_lu(S)
         raise AssertionError("no refusal")
     except MemoryError as e:
         assert e.unmeasured is None and "allows almost no memory" in str(e)
-    L._capacity = sp._capacity = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], 10 ** 12)
+    L._capacity = LG._capacity = sp._capacity = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], 10 ** 12)
     assert isinstance(sp._sparse_lu(S), L.LU)
     sp._capacity = real
     ok("interim: a browser-like record (wasm-engine only) keeps master's LU, its solves and its refusal; an explicit q, a measured zero and a measured figure get the new LU")
     big = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], 10 ** 12)
-    L._capacity = big
+    L._capacity = LG._capacity = big
     F = L.factor(S, "t")
     peak = F.ledger.peak
-    L._capacity = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], peak)
+    L._capacity = LG._capacity = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], peak)
     L.factor(S, "t")
-    L._capacity = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], peak - 1)
+    L._capacity = LG._capacity = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], peak - 1)
     try:
         L.factor(S, "t")
         raise AssertionError("no refusal")
@@ -303,11 +304,11 @@ try:
     # (each column's peak is reserved before anything of that column is allocated:
     # in the segmented mode every allocation is seen)
     L.E, L.A_SAFE = 8, 256
-    L._capacity = big
-    L._recorder = []
+    L._capacity = LG._capacity = big
+    LG._recorder = []
     F = L.factor(D, "t", q=list(range(2 * m)))
-    ev = L._recorder
-    L._recorder = None
+    ev = LG._recorder
+    LG._recorder = None
     cols = 0
     state = "free"
     last = max(i for i, e in enumerate(ev) if e[0] == "reserve" and e[3] == "retain")
@@ -327,10 +328,10 @@ try:
     # allocations it reserves for: each column's arrays, by type, against
     # that type's part of its reservation; the values' part also covers np.abs's reals)
     def covered():
-        L._recorder = []
+        LG._recorder = []
         L.factor(D, "t", q=list(range(2 * m)))
-        ev = L._recorder
-        L._recorder = None
+        ev = LG._recorder
+        LG._recorder = None
         parts, used, bad = None, {}, 0
         for e in ev:
             if e[0] == "reserve" and e[3] == "column":
@@ -352,8 +353,8 @@ try:
             setattr(L, name, keep)
     ok("admission: each column's arrays fit their type's part of its reservation; mutants dropping c_idx, c_val or c_bool do not")
 finally:
-    L._capacity = sp._capacity = real
-    L._recorder = None
+    L._capacity = LG._capacity = sp._capacity = real
+    LG._recorder = None
     L.E, L.A_SAFE = min(L.E_TIME, (1 << 31) // 32), 1 << 31
 
 # -- the solve's two-axis chunks (daybreak2, LIMIT-MATLAB-PR1-1): k = E and
@@ -372,19 +373,19 @@ class LogWork(L.Work):
 def solve_bounded(F, B, trans):
     W = LogWork("t")
     F.work = W
-    L._recorder = []
+    LG._recorder = []
     try:
         X = F.solve(B, trans=trans)
-        kern = [e[1] for e in L._recorder if e[0] == "kernel"]
+        kern = [e[1] for e in LG._recorder if e[0] == "kernel"]
     finally:
-        L._recorder = None
+        LG._recorder = None
     return X, max(kern), max(W.log), W.used
 
 
 big = FakeCap(10 ** 12, ["js-heap", "js-arraybuffer"], 10 ** 12)
 keep_blk = L._col_block
 try:
-    L._capacity = big
+    L._capacity = LG._capacity = big
     L.E, L.A_SAFE = 8, 256
     for cplx in (False, True):
         S = rand_matrix(20, 3, cplx, diag=0.05)
@@ -419,7 +420,7 @@ try:
                 assert (kmax > L.E) == (k > L.E), ("the mutant", k, trans, kmax)
 finally:
     L._col_block = keep_blk
-    L._capacity = real
+    L._capacity = LG._capacity = real
     L.E, L.A_SAFE = min(L.E_TIME, (1 << 31) // 32), 1 << 31
 ok("solve: k = E, E + 1 and 2E + 1 in blocks of E columns, both directions, no kernel or charge over E; the one-block mutant fails")
 
@@ -428,7 +429,7 @@ ok("solve: k = E, E + 1 and 2E + 1 in blocks of E columns, both directions, no k
 # array; the old condition, the factor's flatness alone, fails)
 keep_ok = L._scalar_ok
 try:
-    L._capacity = big
+    L._capacity = LG._capacity = big
     L.E, L.A_SAFE = 8, 256
     n = 17
     I = make(n, [(i, i, 1.0) for i in range(n)])
@@ -450,7 +451,7 @@ try:
             pass
 finally:
     L._scalar_ok = keep_ok
-    L._capacity = real
+    L._capacity = LG._capacity = real
     L.E, L.A_SAFE = min(L.E_TIME, (1 << 31) // 32), 1 << 31
 ok("solve: a real factor, a segmented complex right-hand side, both directions; the mutant guarding on the factor alone fails")
 
@@ -462,12 +463,12 @@ assert (L.C_PTR, L.C_ENT, L.C_LIST, L.C_IDX, L.C_HDR) == (C_PTR0, C_ENT0, C_LIST
 
 
 def lists_ok(S, **kw):
-    L._recorder = []
+    LG._recorder = []
     try:
         L.factor(S, "t", **kw)
-        ev = L._recorder
+        ev = LG._recorder
     finally:
-        L._recorder = None
+        LG._recorder = None
     n = S.n
     q_list = [e for e in ev if e[0] == "list" and e[3] == "q"]
     held = [e for e in ev if e[0] == "held" and e[3] == "q"]
@@ -484,7 +485,7 @@ def lists_ok(S, **kw):
 
 
 try:
-    L._capacity = big
+    L._capacity = LG._capacity = big
     S = rand_matrix(40, 3)
     for kw in ({}, {"q": list(range(40))}, {"order": False}):
         assert lists_ok(S, **kw), kw
@@ -496,7 +497,7 @@ try:
         finally:
             setattr(L, name, keep)
 finally:
-    L._capacity = real
+    L._capacity = LG._capacity = real
 ok("admission: q's list held from before the ordering until qa, the nine outer lists in B_0 exactly; mutants of each charge fail")
 
 # -- segmented and chunked results agree with the default path

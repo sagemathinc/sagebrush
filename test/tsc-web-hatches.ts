@@ -35,23 +35,29 @@
 export type Kind = "ts-nocheck" | "ts-ignore" | "ts-expect-error" | "jsdoc-any";
 export type Finding = { kind: Kind; at: number; line: number; reasoned: boolean; permitted: boolean; why?: string };
 export type Scan = { findings: Finding[]; problems: string[]; counts: Record<Kind, { permitted: number; refused: number }> };
+/** Deterministic scanner work, for the linearity gate.  One step is one source read or one character charged to an
+ *  engine operation that scans without going through `at` (the token regexp and typed-array initialization). */
+export type HatchWork = { steps: number };
 
 const isTerm = (c: number) => c === 10 || c === 13 || c === 0x2028 || c === 0x2029;
 const isLetter = (c: number) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
 const isWord = (c: number) => isLetter(c) || (c >= 48 && c <= 57) || c === 95 || c === 36;
 
-export function hatches(src: string): Scan {
+export function hatches(src: string, work?: HatchWork): Scan {
   const n = src.length;
-  const at = (i: number) => (i < n ? src.charCodeAt(i) : -1);
+  const step = work ? (k = 1) => { work.steps += k; } : (_k = 1) => {};
+  const at = work
+    ? (i: number) => { work.steps++; return i < n ? src.charCodeAt(i) : -1; }
+    : (i: number) => i < n ? src.charCodeAt(i) : -1;
   const NONE = n + 1;
-  // (line numbers by binary search over the terminators' positions)
   const terms: number[] = [];
   for (let i = 0; i < n; i++) if (isTerm(at(i)) && !(at(i) === 10 && at(i - 1) === 13)) terms.push(i);
-  const lineOf = (p: number) => { let lo = 0, hi = terms.length; while (lo < hi) { const m = (lo + hi) >> 1; if (terms[m] < p) lo = m + 1; else hi = m; } return lo + 1; };
   // backward passes
+  step(5 * (n + 2)); // zero-initialize five Int32Arrays
   const nextClose = new Int32Array(n + 2), nextEnd = new Int32Array(n + 2), next3 = new Int32Array(n + 2), nextAnyColon = new Int32Array(n + 2), nextAnyStar = new Int32Array(n + 2);
   nextClose[n] = nextClose[n + 1] = NONE; nextEnd[n] = nextEnd[n + 1] = n; next3[n] = next3[n + 1] = NONE; nextAnyColon[n] = nextAnyColon[n + 1] = NONE; nextAnyStar[n] = nextAnyStar[n + 1] = NONE;
   // (a "*" that is the first non-blank character on its line is a JSDoc line prefix, not a wildcard: forward pass)
+  step(n + 1); // zero-initialize the Uint8Array
   const prefixStar = new Uint8Array(n + 1);
   for (let i = 0, blank = true; i < n; i++) {
     const c = at(i);
@@ -72,22 +78,25 @@ export function hatches(src: string): Scan {
   // forward passes: the latest block start, the latest line-comment start since the last terminator
   // (lineStart: the EARLIEST line opener since the last terminator, for containment (the longest line candidate);
   // lineLast: the LATEST, for reasons (the shortest candidate holding the token, as for blocks))
+  step(3 * (n + 1)); // zero-initialize three Int32Arrays
   const lastOpen = new Int32Array(n + 1), lineStart = new Int32Array(n + 1), lineLast = new Int32Array(n + 1);
   const problems: string[] = [];
-  let open = -1, ls = src.startsWith("#!") ? 0 : -1, ll = ls;
+  let open = -1, ls = src.startsWith("#!") ? 0 : -1, ll = ls, line = 1;
   for (let i = 0; i < n; i++) {
     const c = at(i);
     if (c === 47 && at(i + 1) === 42) {
       open = i;
-      if (nextClose[i + 2] === NONE && problems.length === 0) problems.push(`line ${lineOf(i)}: a "/*" with no "*/" after it (unterminated, or hatch-like text the scan can't place): fails closed`);
+      if (nextClose[i + 2] === NONE && problems.length === 0) problems.push(`line ${line}: a "/*" with no "*/" after it (unterminated, or hatch-like text the scan can't place): fails closed`);
     }
     if (isTerm(c)) ls = ll = -1;
     else if ((c === 47 && at(i + 1) === 47) || (c === 60 && src.startsWith("<!--", i)) || (c === 45 && src.startsWith("-->", i))) { if (ls < 0) ls = i; ll = i; }
     lastOpen[i] = open;
     lineStart[i] = ls;
     lineLast[i] = ll;
+    if (isTerm(c) && !(c === 10 && at(i - 1) === 13)) line++;
   }
   // every "{"'s matching "}" (unmatched: none), one stack pass
+  step(2 * (n + 1)); // zero-initialize, then fill, the Int32Array
   const braceMatch = new Int32Array(n + 1).fill(-1);
   { const st: number[] = []; for (let i = 0; i < n; i++) { const c = at(i); if (c === 123) st.push(i); else if (c === 125 && st.length) braceMatch[st.pop()!] = i; } }
   /** the candidates holding [p, p + len): the block one's start (latest) and end, the line one's end; null if none */
@@ -101,8 +110,14 @@ export function hatches(src: string): Scan {
   const reasonIn = (from: number, end: number) => next3[from] <= end;
   const anyReasonIn = (start: number, end: number) => { const q = nextAnyColon[start]; return q < end && next3[q + 4] <= end; };
   const findings: Finding[] = [];
-  const add = (kind: Kind, p: number, permitted: boolean, why?: string) => findings.push({ kind, at: p, line: lineOf(p), reasoned: permitted, permitted, ...(why ? { why } : {}) });
+  // TOKEN reports positions in increasing order, so one monotone cursor assigns all line numbers in O(n + findings).
+  let term = 0;
+  const add = (kind: Kind, p: number, permitted: boolean, why?: string) => {
+    while (term < terms.length && terms[term] < p) { step(); term++; }
+    findings.push({ kind, at: p, line: term + 1, reasoned: permitted, permitted, ...(why ? { why } : {}) });
+  };
   const TOKEN = /@ts-(nocheck|ignore|expect-error)\b|@(?:type|param|returns?|typedef|property|prop|template|this|enum|satisfies|callback|arg|argument)\b[\s*]*\{/g;
+  step(n); // matchAll's regexp scan reads the source without going through at()
   for (const m of src.matchAll(TOKEN)) {
     const p = m.index!, len = m[0].length;
     const { block, line } = holders(p, len);
