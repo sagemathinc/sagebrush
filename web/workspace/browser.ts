@@ -12,7 +12,7 @@ import { Workspace, WorkspaceError, LIMITS, type Entry } from "./api";
 import { TRASH, freePath, join, nameOf, openableAs, parentOf, splitExt, within, type DocKind } from "./paths";
 import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from "./preview";
 import { SyncOwner } from "./sync-owner";
-import { foot as footText } from "./sync-panel";
+import { sidebarLine } from "./sync-panel";
 import { rowIcons, ROWICON } from "./sync-rows";
 import { fileRowMeta, fmtSize, isElsewhere } from "./row-meta";
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
@@ -217,8 +217,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   function showSync() {
     if (!NO_SYNC) {
       const v = SyncOwner.of(w).view().s;
-      syncEl.hidden = v.state === "off" && !v.reason;
-      syncEl.textContent = v.state === "off" ? (v.reason ? `Sync off: ${v.reason}` : "") : footText(v);
+      syncEl.textContent = sidebarLine(v);
+      syncEl.hidden = !syncEl.textContent;
     } else syncEl.hidden = true;
   }
   // (the rows drawn by the last render, and that render's icons: an older read never paints a newer render's rows)

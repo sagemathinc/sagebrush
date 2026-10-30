@@ -27,7 +27,7 @@ export { reduceAll, SyncIndex } from "./sync-reduce";
 export { SyncOwner, startSync, STATUS_PUB, OWNER, statusMessage, type Snapshot, type StatusMsg } from "./sync-owner";
 export { readLife, syncOffIf, sameLife, type LifeMark } from "./sync-pins";
 export { switchToIf } from "./sync-outbox";
-export { syncSection, PanelPoll, PANEL, clampDelay, askStatus, foot, unseenRefusals, raiseSeen } from "./sync-panel";
+export { syncSection, PanelPoll, PANEL, clampDelay, askStatus, foot, sidebarLine, unseenRefusals, raiseSeen } from "./sync-panel";
 export { fileRowMeta, isElsewhere, type ContentHere } from "./row-meta";
 export { renewLease } from "./sync-outbox";
 export { rowIcons, ROWICON } from "./sync-rows";
