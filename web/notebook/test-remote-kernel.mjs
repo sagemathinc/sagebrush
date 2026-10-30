@@ -333,18 +333,22 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
   check((await kernel.ask({ check: "x" }, "python", "fallback")) === "fallback", "other questions: the fallback");
 }
 
-// ---- interrupt: the running run is interrupted, the queued one skipped
+// ---- interrupt: the running run is interrupted; each queued one is stopped before it ran, with a note
 {
   const { fake, kernel } = await setup();
   fake.kernel = () => new Promise(() => {}); // (runs until interrupted)
-  const s1 = sink(), s2 = sink();
+  const s1 = sink(), s2 = sink(), s3 = sink();
   kernel.execute("loop", { mode: "python" }, s1);
   kernel.execute("next", { mode: "python" }, s2);
+  kernel.execute("after", { mode: "python" }, s3);
   check(await until(() => fake.executions.length === 1), "the first run reaches the kernel");
   kernel.interrupt();
-  await within(Promise.all([s1.ended, s2.ended]));
+  await within(Promise.all([s1.ended, s2.ended, s3.ended]));
+  await new Promise((r) => setTimeout(r, 50));
   check(s1.terminal?.[0] === "done" && s1.terminal[1].error && s1.terminal[1].interrupted, "interrupted: KeyboardInterrupt, an error, marked interrupted");
-  check(s2.terminal?.[0] === "skipped" && fake.executions.length === 1, "the queued run: skipped, never sent");
+  check(s1.outs.some(([t, e]) => t === "KeyboardInterrupt\n" && e), "interrupted with no error text from the gateway: the cell says KeyboardInterrupt");
+  check([s2, s3].every((s) => s.terminal?.[0] === "stopped" && s.terminal[1] === NOTES.stoppedBeforeStart && s.terminals === 1) && fake.executions.length === 1,
+    "each queued run: stopped before it ran, with that note, exactly one terminal, never sent");
 }
 
 // ---- restart: the running run is stopped, a new generation; and the restart fence in each order
@@ -799,14 +803,14 @@ check(sinks.every((s) => s.terminals === 1), `every request had exactly one term
   const { runGateTests } = await import("./test-remote-gate.mjs");
   const ran = await runGateTests(check);
   console.log(`remote-gate: ${ran} controls ran`);
-  check(ran === 32, `remote-gate: every control ran (${ran} of 32)`);
+  check(ran === 33, `remote-gate: every control ran (${ran} of 33)`);
 }
 // ---- the GPU kernel's preview (remote-ui.js): its simulated gateway and startPreview
 {
   const { runUiTests } = await import("./test-remote-ui.mjs");
   const ran = await runUiTests(check);
   console.log(`remote-ui: ${ran} controls ran`);
-  check(ran === 50, `remote-ui: every control ran (${ran} of 50)`);
+  check(ran === 72, `remote-ui: every control ran (${ran} of 72)`);
 }
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);

@@ -30,6 +30,7 @@ const STOP_MESSAGE = "\nStopped: it did not stop when interrupted, so the interp
 // (web/notebook/highlight.js, which the board's editor uses too)
 import { esc, highlight, highlightMarkdown } from "./highlight.js";
 import { highlightMatlab } from "./highlight-matlab.js";
+import { armStop, disarmStop, stopIgnored } from "./stop-guard.js";
 export { esc, highlight, highlightMarkdown };
 
 // ------------------------------------------------------------ page-wide pieces
@@ -805,7 +806,7 @@ export function createNotebook(root, opts = {}) {
   // ---------------------------------------------------------- running cells
   function settle(cell) {
     clearInterval(cell.timer);
-    cell.runb.textContent = "▶";
+    disarmStop(cell);
     cell.el.classList.remove("queued", "running");
     // (an input() field still waiting: its run ended, by a Stop or a restart)
     for (const row of cell.out.querySelectorAll(".stdin")) row.remove();
@@ -857,7 +858,7 @@ export function createNotebook(root, opts = {}) {
     if (!kernel) { appendText(cell.out, "(no kernel: this notebook cannot run code)\n", true); return Promise.resolve({ ok: false, ms: 0, stopped: true }); }
     cell.el.classList.add("queued");
     cell.n.textContent = "[*]";
-    cell.runb.textContent = "■";
+    armStop(cell);
     let failed = false;
     let waited = 0, waitFrom = null;
     const k = kernel;
@@ -1031,7 +1032,7 @@ export function createNotebook(root, opts = {}) {
       cls.remove("stale", "cancelled", "error");
       cls.add("queued");
       cell.n.textContent = "[*]";
-      cell.runb.textContent = "■";
+      armStop(cell);
       return;
     }
     if (st.state === "running" || st.state === "done") return; // (execCell's sink)
@@ -1272,7 +1273,12 @@ export function createNotebook(root, opts = {}) {
     cell.ta.addEventListener("blur", () => { if (comp?.cell === cell) closeCompleter(); });
     cell.ta.addEventListener("click", () => { if (comp?.cell === cell) closeCompleter(); });
     cell.ta.addEventListener("keydown", (e) => editKey(cell, e));
-    cell.runb.onclick = () => (el.classList.contains("running") || el.classList.contains("queued") ? interrupt() : run(cell, true));
+    // (Stop, while the cell is queued or running; not the second click of a double click, nor one just after the
+    // button turned into Stop: stop-guard.js)
+    cell.runb.onclick = (e) => {
+      if (!(el.classList.contains("running") || el.classList.contains("queued"))) return run(cell, true);
+      if (!stopIgnored(cell.stopArmedAt, performance.now(), e?.detail ?? 0)) interrupt();
+    };
     cell.menuBtn.onclick = () => openMenu(cell);
     cell.typeSel.onchange = () => { setType(cell, cell.typeSel.value); schedule(); edit(cell); };
     q('[data-a="up"]').onclick = () => move(cell, -1);

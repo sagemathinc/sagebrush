@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "reason": "hashlib: md5, sha1, sha224, sha256, sha384 and sha512 written in Python (lib/hashlib.py), in its own group mod-hashlib, a new bundle authorized by its budgets.json entry (lazy: loaded on import, nothing joins core). Measured locally with CI's bun 1.4.4 tool: master 6e74889b against this branch merged, cli/pyjs.cjs +13258 marked 13300 (42 B for master's drift, within the 1024 B slack), the other rows exact.",
+  "bytes": {
+    "cli/lib.gen.js": 13608,
+    "cli/pyjs.cjs": 13300,
+    "engine/sagebrush-worker.js": 183
+  }
+}
