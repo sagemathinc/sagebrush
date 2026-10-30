@@ -122,23 +122,29 @@ async function union() {
   check(W.LOCAL_FAMILIES.includes("a") && !W.SIGNAL_FAMILIES.includes("a") && W.RETIRED_FAMILIES.includes("a"), "union: `a` is local and retired");
 }
 
-/** OLD1: each signal alone fires it (generated from the exported lists), seen by the owner, the sidebar and the panel. */
+// (OLD1's signals, the test's own copies of the agreed lists (sync-docs' classification, `a` local by its ruling), so a
+// signal dropped from the detector's constants fails its case instead of dropping it)
+const SIGNALS = { families: ["l", "m", "s", "k", "c", "o", "x", "z"], meta: ["b:d:"], stores: ["outbox", "syncIndex", "adoptJournal", "pins", "pending", "syncLedger"] };
+
+/** OLD1: each signal alone fires it (one case per entry of the agreed lists), seen by the owner, the sidebar and the
+ * panel. */
 async function old1() {
+  check(J(SIGNALS.families) === J([...W.SIGNAL_FAMILIES]) && J(SIGNALS.meta) === J([...W.SIGNAL_META]) && J(SIGNALS.stores) === J([...W.SYNC_ONLY_STORES]), "OLD1: the detector's lists are the agreed ones: " + J([W.SIGNAL_FAMILIES, W.SIGNAL_META, W.SYNC_ONLY_STORES]));
   const signals = [
     ["meta: the lease", (w) => putMeta(w, "sync:current", { ns: NS(w), gen: 1 })],
     ["meta: a lease turned off", (w) => putMeta(w, "sync:current", { ns: NS(w), gen: 1, off: true })],
     ["meta: sync:<ns>:cursor", (w) => putMeta(w, `sync:${NS(w)}:cursor`, 3)],
     ["meta: sync:epoch", (w) => putMeta(w, "sync:epoch", 1)],
-    ...W.SYNC_ONLY_STORES.map((s) => [`store: ${s}`, (w) => putStore(w, s, STORE_ROW[s])]),
+    ...SIGNALS.stores.map((s) => [`store: ${s}`, (w) => putStore(w, s, STORE_ROW[s])]),
   ];
   for (const which of ["nb", "board"]) {
-    for (const L of W.SIGNAL_FAMILIES) signals.push([`${which} history: family ${L}`, async () => {
+    for (const L of SIGNALS.families) signals.push([`${which} history: family ${L}`, async () => {
       const id = ID(1);
       await localSave(which, id);
       const h = await handleOf(which, id);
       await putRow(which, { nb: W.SYNC_NB + h, time: L === "l" || L === "o" ? W.seqKey(h, L, 1)[1] : L, v: { x: 1 } });
     }]);
-    for (const p of W.SIGNAL_META) signals.push([`${which} history: ${p}`, () => putRow(which, { nb: W.SYNC_NB, time: p + "local", v: { count: 1, bytes: 9 } })]);
+    for (const p of SIGNALS.meta) signals.push([`${which} history: ${p}`, () => putRow(which, { nb: W.SYNC_NB, time: p + "local", v: { count: 1, bytes: 9 } })]);
     signals.push([`${which} history: a synced key`, () => putRow(which, { nb: W.syncedKey(ID(2), 1), time: "0000000000a_cl1", env: {} })]);
   }
   for (const [name, write] of signals) {
