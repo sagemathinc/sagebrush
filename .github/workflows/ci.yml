@@ -599,6 +599,8 @@ jobs:
           bun web/notebook/test-text-overlap.mjs
           bun web/notebook/test-merge3.mjs
           bun web/notebook/test-db-merge3.mjs
+          bun web/notebook/test-merge-mode-chain.mjs
+          bun web/workspace/test-merge-client-off.mjs
           bun web/notebook/test-sync-rows.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-migrate-time.mjs
           CHROME=google-chrome node web/workspace/test-workspace-pages.mjs

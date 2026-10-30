@@ -13,8 +13,9 @@ const here = new URL(".", import.meta.url).pathname;
 let checks = 0;
 const fails = [];
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
-// (the hello's list as a minifier writes it: the two names in a literal array, in this order)
-const LIST = /\["legacy","exact-v1"\]/;
+// (the hello's field as a minifier writes it: `merge:` and the two names in a literal array.  The array alone isn't
+// enough: doc-protocol.ts's MERGE_MODES, a frozen array of the same two names, is in the page as a constant)
+const LIST = /merge:\["legacy","exact-v1"\]/;
 
 const page = join(here, "../dist/index.html");
 check(existsSync(page), "the built page is there (run bun web/build.ts first): " + page);
