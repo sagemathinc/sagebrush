@@ -31,6 +31,8 @@ export function sha256Hasher() {
   const H = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]), W = new Uint32Array(64);
   const r = (x, k) => (x >>> k) | (x << (32 - k));
   const pend = new Uint8Array(64); let np = 0, total = 0;
+  // (one encode buffer, grown when a piece needs more and reused: hashing in pieces allocates nothing per piece)
+  const enc = new TextEncoder(); let buf = new Uint8Array(0);
   const block = (b, o) => {
     for (let i = 0; i < 16; i++) W[i] = (b[o + 4 * i] << 24) | (b[o + 4 * i + 1] << 16) | (b[o + 4 * i + 2] << 8) | b[o + 4 * i + 3];
     for (let i = 16; i < 64; i++) { const s0 = r(W[i - 15], 7) ^ r(W[i - 15], 18) ^ (W[i - 15] >>> 3), s1 = r(W[i - 2], 17) ^ r(W[i - 2], 19) ^ (W[i - 2] >>> 10); W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0; }
@@ -48,7 +50,10 @@ export function sha256Hasher() {
     while (i < b.length) pend[np++] = b[i++];
   };
   return {
-    update(piece) { bytes(new TextEncoder().encode(piece)); return this; },
+    update(piece) {
+      if (buf.length < piece.length * 3) buf = new Uint8Array(piece.length * 3);
+      bytes(buf.subarray(0, enc.encodeInto(piece, buf).written)); return this;
+    },
     digest() {
       const bits = total * 8, tail = new Uint8Array(((np + 9 + 63) >> 6) << 6);
       tail.set(pend.subarray(0, np)); tail[np] = 0x80;
