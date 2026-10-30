@@ -45,6 +45,8 @@ jobs:
           node-version: 24
       - run: git diff --check
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - name: core imports no server code (plan-cloud-split-r1)
         run: bun scripts/test-check-no-server-imports.mjs && bun scripts/check-no-server-imports.mjs
       - id: paths
@@ -104,6 +106,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       # (test/kedlaya.test.ts checks the JavaScript engine detection under Deno too)
       - uses: denoland/setup-deno@v2
       - uses: actions/setup-python@v5
@@ -451,6 +455,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
@@ -527,6 +533,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
@@ -631,6 +639,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
@@ -691,6 +701,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
       # (WebKit's apt dependencies, about 180 packages and 117 MB, dominate the install, and the Azure apt
       # mirror has stalled their download past this step's 10 minutes: #189's dispatch, twice, Oct 26.
@@ -782,6 +794,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - uses: denoland/setup-deno@v2
         if: matrix.group == 'board-unit'
       - uses: actions/setup-python@v5
@@ -944,6 +958,8 @@ jobs:
           cache: pnpm
       - uses: denoland/setup-deno@v2
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
@@ -978,6 +994,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
@@ -1075,6 +1093,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
@@ -1132,6 +1152,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       # (test/kedlaya.test.ts checks the JavaScript engine detection under Deno too)
       - uses: denoland/setup-deno@v2
       - uses: actions/setup-python@v5
@@ -1174,6 +1196,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
@@ -1210,6 +1234,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
