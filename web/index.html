@@ -64,6 +64,8 @@
   button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
   /* (after the name: it takes what room there is, so the toolbar below never moves) */
   #status { color: var(--muted); font-size: 12px; flex: 1 1 0; min-width: 0; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #remoteacts { display: inline-flex; gap: 6px; margin-left: 6px; }
+  #remoteacts button { font-size: 12px; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   /* until the notebook is read from IndexedDB, nothing below it shows (no layout shift) */
   body.opening .about, body.opening footer { display: none; }
@@ -870,6 +872,32 @@ const analyzer = {
 const REMOTE_PREVIEW = new URLSearchParams(location.search).get("remote") === "1";
 const kernelPick = $("#kernelpick");
 let remoteMod = null, remoteLoad = null, remoteSw = null, remoteGen = 0;
+// The status line's actions for remote compute ([{label, run, disabled}]; [] removes them).  Real buttons, reachable by
+// keyboard; when one that has the focus goes, the focus goes to the notebook's active cell, not to the page.
+function remoteActions(list) {
+  let box = document.getElementById("remoteacts");
+  const hadFocus = !!box && box.contains(document.activeElement);
+  if (!list.length) {
+    box?.remove();
+    if (hadFocus) (document.querySelector("#cells .cell.active") ?? document.querySelector("#cells .cell"))?.focus({ preventScroll: true });
+    return;
+  }
+  if (!box) {
+    box = Object.assign(document.createElement("span"), { id: "remoteacts" });
+    statusEl.after(box);
+  }
+  const focused = hadFocus ? document.activeElement.textContent : null;
+  box.replaceChildren(...list.map((a) => {
+    const b = Object.assign(document.createElement("button"), { type: "button", textContent: a.label, disabled: !!a.disabled });
+    b.addEventListener("click", () => a.run());
+    return b;
+  }));
+  // (the same action, re-rendered, keeps the focus; a disabled one hands it to the active cell)
+  if (hadFocus) {
+    const same = [...box.children].find((b) => b.textContent === focused && !b.disabled);
+    (same ?? document.querySelector("#cells .cell.active") ?? document.querySelector("#cells .cell"))?.focus({ preventScroll: true });
+  }
+}
 function leaveRemote() {
   remoteGen++;
   remoteSw?.leave();
@@ -894,6 +922,8 @@ async function useRemote() {
       makeLocal: () => makeKernel(null).kernel,
       network: () => mod.parseNetwork(location.search), // (&latency=MS &jitter=MS &loss=P: the simulated network)
       setKernel: (k) => nb.setKernel(k), // (another interpreter: every output is stale)
+      actions: remoteActions, // (Retry, Reconnect, Switch to browser: beside the status line)
+      switchLocal: () => { kernelPick.value = "local"; kernelPick.dispatchEvent(new Event("change")); }, // (as the picker does it)
     });
     await remoteSw.connect(id);
   } catch (e) {

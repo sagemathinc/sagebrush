@@ -95,6 +95,7 @@ export const NOTES = {
   checkFailed: "\nNot run: it couldn't be checked.\n",
   noGate: "\nNot run: a remote run must be approved first.\n",
   notReady: "\nNot run: the remote kernel isn't ready.\n",
+  stoppedBeforeStart: "\nStopped before it ran.\n",
 };
 
 // (a refusal's reason -> its note: the gateway's no-effect terminals, [G] §6.2.3)
@@ -204,6 +205,9 @@ export class RemoteKernel {
     this.recoveredAt = null; // the incarnation an observed restart was last recovered from (one recovery each)
     this.listeners = { status: [], restart: [], ready: [], loading: [], lifecycle: [] };
     this.targetSink = () => null;
+    // (what a run asked of this kernel while it is not ready is told: its own note when the page set one, e.g.
+    // a preview whose connect failed; NOTES.notReady otherwise)
+    this.notReadyNote = null;
   }
 
   get generation() { return this.lc.generation; }
@@ -300,7 +304,7 @@ export class RemoteKernel {
     if (this.requireGate && !o.gate && !(code === "" && o.forgetGuard)) return s.stopped(NOTES.noGate);
     if (o.gate) {
       // (a gated run is checked against the kernel it is queued for: only a ready one)
-      if (!this.ready) return s.skipped({ notRun: "skip", note: NOTES.notReady });
+      if (!this.ready) return s.skipped({ notRun: "skip", note: this.notReadyNote ?? NOTES.notReady });
     }
     if (this.closed) return s.stopped(NOTES.closed);
     if (this.moved) return s.stopped(NOTES.moved);
@@ -481,7 +485,10 @@ export class RemoteKernel {
           after = ev.seq;
           failures = 0;
           if (ev.type === "start") { if (!started) { started = true; sink.start(); } }
-          else if (ev.type === "stream") sink.out(String(ev.text ?? ""), ev.name === "stderr");
+          else if (ev.type === "stream") {
+            if (ev.name === "stderr") job.sawErrorText = true;
+            sink.out(String(ev.text ?? ""), ev.name === "stderr");
+          }
           else if (ev.type === "display") {
             // (a hidden run's envelope is the gateway's, never output: refused if it appears)
             if (ev.data && typeof ev.data === "object" && !Array.isArray(ev.data) && !(ENVELOPE_MIME in ev.data)) sink.display(ev.data);
@@ -533,7 +540,11 @@ export class RemoteKernel {
     const o = outcome && typeof outcome === "object" && !Array.isArray(outcome) ? outcome : { status: "unknown" };
     const ms = Number.isFinite(o.ms) ? o.ms : 0;
     if (o.status === "ok") return job.sink.done(ms, { error: false });
-    if (o.status === "error") return job.sink.done(ms, { error: true, ...(o.ename === "KeyboardInterrupt" ? { interrupted: true } : {}) });
+    if (o.status === "error") {
+      // (an interrupted run whose stream carried no error text says so, as an interpreter's traceback would)
+      if (o.ename === "KeyboardInterrupt" && !job.sawErrorText) job.sink.out("KeyboardInterrupt\n", true);
+      return job.sink.done(ms, { error: true, ...(o.ename === "KeyboardInterrupt" ? { interrupted: true } : {}) });
+    }
     job.sink.stopped(outcomeNote(o));
     if (!["refused", "stopped", "setup-failed", "restarted-before-run"].includes(o.status)) this.needsFence = true;
     if (o.status === "restarted-before-run") this.recover(job.lc, isInt(o.incarnation) ? o.incarnation : null);
@@ -553,9 +564,9 @@ export class RemoteKernel {
     this.lifecycle(() => (this.lc === lc ? this.restartOp(NOTES.restartedBeforeRun, lc) : undefined));
   }
 
-  /** Interrupt what is running (the gateway signals the kernel); queued runs are skipped. */
+  /** Interrupt what is running (the gateway signals the kernel); queued runs, never sent, are stopped before they ran. */
   interrupt() {
-    for (const j of this.queue.splice(0)) j.sink.skipped();
+    for (const j of this.queue.splice(0)) j.sink.stopped(NOTES.stoppedBeforeStart);
     const job = this.current, lc = this.lc;
     if (!job?.lc || lc.phase !== "ready") return;
     this.client.request("POST", `/bindings/${lc.binding}/interrupt`, { epoch: lc.epoch, op_id: this.opId() }, { signal: this.abortCtl.signal })
