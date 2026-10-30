@@ -101,6 +101,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-calendar.src": {
+   "exact": false,
+   "ceiling": 34710,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-capability-map.src": {
    "exact": false,
    "ceiling": 16954,
@@ -160,6 +167,13 @@
   "engine/lib/mod-datetime.src": {
    "exact": false,
    "ceiling": 1538,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-encodings.src": {
+   "exact": false,
+   "ceiling": 19995,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -230,6 +244,13 @@
   "engine/lib/mod-json.src": {
    "exact": false,
    "ceiling": 5423,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-locale.src": {
+   "exact": false,
+   "ceiling": 93549,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -562,6 +583,7 @@
    "engine/lib/matlab.src": 1069005,
    "engine/lib/mod-bisect.src": 1699,
    "engine/lib/mod-board-checks.src": 35237,
+   "engine/lib/mod-calendar.src": 31555,
    "engine/lib/mod-capability-map.src": 15413,
    "engine/lib/mod-catalog.src": 24270,
    "engine/lib/mod-colorsys.src": 4437,
@@ -571,6 +593,7 @@
    "engine/lib/mod-copyreg.src": 8446,
    "engine/lib/mod-ctypes.src": 8274,
    "engine/lib/mod-datetime.src": 1399,
+   "engine/lib/mod-encodings.src": 18178,
    "engine/lib/mod-enum.src": 88257,
    "engine/lib/mod-future.src": 5652,
    "engine/lib/mod-graph-spring.src": 12473,
@@ -581,6 +604,7 @@
    "engine/lib/mod-io.src": 13519,
    "engine/lib/mod-ipython.src": 6801,
    "engine/lib/mod-json.src": 4930,
+   "engine/lib/mod-locale.src": 85045,
    "engine/lib/mod-marimo.src": 6464,
    "engine/lib/mod-matplotlib.src": 24036,
    "engine/lib/mod-pickle.src": 73650,
