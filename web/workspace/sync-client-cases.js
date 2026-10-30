@@ -2605,6 +2605,43 @@ async function s5Refused() {
   }
 }
 
+async function s5SidebarLine() {
+  // (sync-docs' follow-up on #375: the Files sidebar's line says the notebooks too, as the panel's foot does: those this
+  // page's document sync stopped, and, while offline or syncing, those with edits waiting (readNotebooks, shared))
+  const now = Date.now();
+  const line = W.sidebarLine({ state: "offline", waiting: 2 }, now, { waiting: 3, stopped: 1 });
+  check(line === "Offline: 2 changes and edits in 3 notebooks wait · 1 notebook can't sync" && W.sidebarLine({ state: "off", used: true }, now, { waiting: 3, stopped: 1 }) === "Sync off", "sidebar line: the notebooks' words while on, none when off: " + J(line));
+  let state = "offline", reads = 0, answer = { ids: ["n1", "n2", "n3"], over: false };
+  const fake = { view: () => ({ s: { state } }), stoppedDocs: () => ["n3"] };
+  const read = async () => { reads++; if (answer === "fail") throw new Error("x"); return answer; };
+  const r = {};
+  r.offline = await W.readNotebooks(fake, read);
+  state = "synced"; const r0 = reads; r.synced = await W.readNotebooks(fake, read); r.syncedReads = reads - r0;
+  state = "syncing"; answer = { ids: [], over: true }; r.over = await W.readNotebooks(fake, read);
+  answer = "fail"; r.failed = await W.readNotebooks(fake, read);
+  r.none = await W.readNotebooks({ view: () => ({ s: { state: "synced" } }), stoppedDocs: () => [] }, read);
+  check(J(r.offline) === J({ waiting: 2, stopped: 1 }) && J(r.synced) === J({ waiting: 0, stopped: 1 }) && r.syncedReads === 0 && J(r.over) === J({ waiting: 0, stopped: 1, unknown: true }) && J(r.failed) === J({ waiting: 0, stopped: 1, unknown: true }) && r.none === undefined, "readNotebooks: offline counted less the stopped; synced reads nothing, the stopped said; over and failed unknown; nothing to say, none: " + J(r));
+  // (the Files sidebar, mounted: its line reads the owner's view and the notebooks; a stopped notebook is said there)
+  const w = await fresh();
+  await W.switchTo(w, nsFor(w, "e"));
+  const owner = W.SyncOwner.of(w), view = owner.view, stoppedDocs = owner.stoppedDocs;
+  owner.view = () => ({ from: "own", s: { state: "offline", waiting: 2 } });
+  owner.stoppedDocs = () => ["n3"];
+  const el = document.body.appendChild(document.createElement("div"));
+  let b = null;
+  try {
+    b = W.mountBrowser(el, { ws: w, open: () => {} });
+    const fsync = () => el.querySelector(".fsync")?.textContent ?? "";
+    const said = await until(() => /can't sync/.test(fsync()), 3000);
+    check(said && /^Offline: 2 changes.* wait · 1 notebook can't sync$/.test(fsync()), "sidebar line, mounted: the stopped notebook said: " + J(fsync()));
+  } finally {
+    b?.destroy();
+    el.remove();
+    owner.view = view;
+    owner.stoppedDocs = stoppedDocs;
+  }
+}
+
 async function s5Notebooks() {
   // (follow-up 3, @sagebrush's (C): the foot counts notebooks with edits waiting while offline or syncing, says those
   // this page's document sync stopped as "can't sync", says "notebook edits" when they can't be counted, and nothing for
@@ -3854,7 +3891,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5SidebarLine, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
