@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "The notebook page's phone layout behind ?phone=1 (web/index.html: CSS under html.phone and a few lines of script that move the search and the language picker up and hide the toolbar while typing). The CLI embeds the page. Measured locally with CI's bun 1.4.4 (size-record.sh) on master c990eba7 and this branch's merge 11e8fc75 of it: cli/pyjs.cjs 29363324 -> 29370200 = +6876, the same as CI's row for head 447f2046; no other bundle changes. Allowance 6960 = +6876 + 84 B margin (pyjs.cjs's few-byte wobble).",
+  "bytes": {
+    "cli/pyjs.cjs": 6960
+  }
+}
