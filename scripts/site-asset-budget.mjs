@@ -104,8 +104,8 @@ if (dev.has(COMMENTS)) { const b = readFileSync(dev.get(COMMENTS)); check("the L
 //     minified, 14 KiB gzip, fetched only when a .tex has a comments file or someone comments in it
 if (dev.has(COMMENTS_DOC)) { const b = readFileSync(dev.get(COMMENTS_DOC)); check("the LaTeX document comments' chunk: at most 40 KiB minified, 14 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 14 * 1024, { raw: b.length, gzip: gz(b) }); }
 // (the test build's holds on image and file reads and its comments write, web/latex/page.ts: folded away in the DEV build, so named in none of its files)
-const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && /__sbTex(ImageRead|MountRead|CommentsWrite)/.test(readFileSync(dev.get(n), "latin1")));
-check("DEV: the test build's hooks folded away (no file names __sbTexImageRead, __sbTexMountRead or __sbTexCommentsWrite)", testHooks.length === 0, { testHooks });
+const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && /__sbTex(ImageRead|MountRead|CommentsWrite|SaveWrite)/.test(readFileSync(dev.get(n), "latin1")));
+check("DEV: the test build's hooks folded away (no file names __sbTexImageRead, __sbTexMountRead, __sbTexCommentsWrite or __sbTexSaveWrite)", testHooks.length === 0, { testHooks });
 check("the LaTeX group: no CSS file over 8 KiB, no new font", css.every((n) => statSync(dev.get(n)).size <= 8192) && fonts.length === 0, { css, fonts });
 // 5. KaTeX: the same files, and in exactly one bundle
 const kp = [...prod.keys()].filter((n) => n.startsWith("dist/katex/")).sort(), kd = [...dev.keys()].filter((n) => n.startsWith("dist/katex/")).sort();

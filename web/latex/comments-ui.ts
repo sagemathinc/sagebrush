@@ -63,4 +63,3 @@ export function rangeIn(el: HTMLElement, want: string): Range | null {
   r.setStart(sn, so); r.setEnd(en, Math.min(eo, en.data.length));
   return r;
 }
-

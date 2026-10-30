@@ -51,30 +51,41 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
   // (a thread is placed once per anchor write: later, its offsets are mapped through the edits made here). The work
   // runs in slices of at most SLICE_MS, a frame given back between them (r3 §7.6): the text hashed in pieces (once
   // per text: kept for new anchors), then the threads resolved a few at a time; an edit meanwhile starts it again
-  const SLICE_MS = 8, HASH_PIECE = 1 << 16;
+  // (a slice ends at the first pause past SLICE_MS: a step after it is at most a window of the text, about a
+  // millisecond, so slices stay within 8 ms)
+  const SLICE_MS = 5, HASH_PIECE = 1 << 14;
   let placing = 0, shaFor = { text: null as string | null, sha: "" };
+  // comments are for a .tex of at most 2 Mi UTF-16 units (the core's LIMITS.sourceUnits): above, the person is told so,
+  // nothing is placed or written, and the comments file is left as it is
+  let refused = "";
+  const sizeOk = (text: string) => { refused = text.length > C.LIMITS.sourceUnits ? "Comments are available for documents up to 2 MiB (this one is " + (text.length / (1 << 20)).toFixed(1) + " MiB)" : ""; return !refused; };
   const frame = () => new Promise<void>((r) => setTimeout(r, 0));
   const placeAll = async () => {
     const gen = ++placing, text = ed.getText(), stale = () => gen !== placing || life.signal.aborted;
+    if (!sizeOk(text)) { places.clear(); queueDraw(); showList(); return; }
     const seen = new Set(live().map((t: any) => t.id));
     for (const id of [...places.keys()]) if (!seen.has(id)) places.delete(id);
     const todo = live().filter((t: any) => places.get(t.id)?.op !== t.anchor.op);
     if (todo.length) {
-      let t0 = performance.now(), slices = 1, maxSlice = 0;
-      const pause = async () => { const d = performance.now() - t0; if (d < SLICE_MS) return false; maxSlice = Math.max(maxSlice, d); slices++; await frame(); t0 = performance.now(); return stale(); };
+      let t0 = performance.now(), slices = 1, maxSlice = 0, phase = "hash", maxPhase = "";
+      const pause = async () => { const d = performance.now() - t0; if (d < SLICE_MS) return false; if (d > maxSlice) { maxSlice = d; maxPhase = phase; } slices++; await frame(); t0 = performance.now(); return stale(); };
       if ((await hashOf(text, pause)) === null) return;
+      phase = "resolve";
       if (await pause()) return;
       const R = C.resolver(text, undefined, { textSha: shaFor.sha });
       for (const t of todo) {
+        // (each anchor's search, a step at a time: a window of the text searched, or a piece of a long span hashed)
+        const g = R.steps(t.anchor.value);
+        let r: any;
+        for (;;) { const x = g.next(); if (x.done) { r = x.value; break; } if (await pause()) return; }
         if (await pause()) return;
-        const r: any = R.resolve(t.anchor.value);
         places.set(t.id, { op: t.anchor.op, status: r.status, s: r.start ?? -1, e: r.end ?? -1, candidates: r.candidates });
       }
-      maxSlice = Math.max(maxSlice, performance.now() - t0);
+      if (performance.now() - t0 > maxSlice) { maxSlice = performance.now() - t0; maxPhase = phase; }
       const statuses: Record<string, number> = {}; for (const t of todo) { const st = places.get(t.id)!.status; statuses[st] = (statuses[st] ?? 0) + 1; }
-      mark("tex-comments-placed", { threads: todo.length, slices, maxSliceMs: Math.round(maxSlice * 10) / 10, work: R.work(), units: text.length, statuses });
+      mark("tex-comments-placed", { threads: todo.length, slices, maxSliceMs: Math.round(maxSlice * 10) / 10, maxSlicePhase: maxPhase, work: R.work(), units: text.length, statuses });
     }
-    if (!stale()) { draw(); showList(); }
+    if (!stale()) { queueDraw(); showList(); }
   };
   // the text's hash, in pieces, `pause` between them (true: stop, null returned); kept for the text it was taken of
   async function hashOf(text: string, pause: () => Promise<boolean>): Promise<string | null> {
@@ -101,6 +112,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     await placeAll();
   };
   const write = async (op: (d: any) => { doc: any; id?: string }, draft = ""): Promise<string | undefined> => {
+    if (!sizeOk(ed.getText())) { error = refused; queueDraw(); showList(); return undefined; }
     try {
       const res = await C.update(o.io, op, { file: o.file, draft });
       if (life.signal.aborted) return;
@@ -111,14 +123,14 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     } catch (e: any) {
       if (life.signal.aborted) return;
       error = e?.code === "busy" ? "Not saved: the comments file kept changing. Your text is kept: try again." : "Not saved: " + String(e?.message ?? e);
-      draw(); showList();
+      queueDraw(); showList();
       return undefined;
     }
   };
 
   // ---- the person's edits: every placed anchor mapped (the start sticks right, the end sticks left), from the edit's
   // first and last differing units
-  let prev = ed.getText();
+  let prev = ed.getText(), version = 0;
   const onInput = () => {
     const next = o.src.value;
     if (next === prev) return;
@@ -128,8 +140,8 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     const oldEnd = prev.length - z, delta = next.length - prev.length;
     const map = (x: number, right: boolean) => (x < a || (x === a && !right) ? x : x >= oldEnd ? x + delta : right ? a + (next.length - z - a) : a);
     for (const p of places.values()) if (placed(p)) { p.s = map(p.s, true); p.e = Math.max(p.s, map(p.e, false)); }
-    prev = next;
-    if (live().some((t: any) => places.get(t.id)?.op !== t.anchor.op)) void placeAll();
+    prev = next; version++;
+    if ((next.length > C.LIMITS.sourceUnits) !== !!refused || live().some((t: any) => places.get(t.id)?.op !== t.anchor.op)) void placeAll();
     scheduleMarks();
   };
   o.src.addEventListener("input", onInput, on);
@@ -137,10 +149,16 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
   // ---- the source's marks: the placed ranges over the highlighter's lines (redrawn after its rescans settle)
   let srcRanges: Range[] = [], marksTimer: any = null;
   const scheduleMarks = () => { clearTimeout(marksTimer); marksTimer = setTimeout(() => { srcRanges = sourceRanges(); setRegs(); }, 120); };
+  let lineCache: { v: number; L: ReturnType<typeof C.lineIndex> } | null = null;
+  // (the marks of the lines in and next to the source's view only: found by their boxes, a binary search)
   const sourceRanges = () => {
     const out: Range[] = [], lines = o.hl.children;
-    if (!lines.length) return out;
-    const text = ed.getText(), L = C.lineIndex(text);
+    if (!lines.length || refused) return out;
+    const text = ed.getText();
+    if (lineCache?.v !== version) lineCache = { v: version, L: C.lineIndex(text) };
+    const L = lineCache.L, sr = o.src.getBoundingClientRect(), lo = sr.top - sr.height, hi = sr.bottom + sr.height;
+    const firstAt = (y: number) => { let a = 0, b = lines.length; while (a < b) { const m = (a + b) >> 1; if ((lines[m] as HTMLElement).getBoundingClientRect().bottom < y) a = m + 1; else b = m; } return a + 1; };
+    const l0 = firstAt(lo), l1 = firstAt(hi);
     const point = (off: number): [Node, number] | null => {
       const { line, col } = L.at(off), lineEl = lines[line - 1] as HTMLElement | undefined;
       if (!lineEl) return null;
@@ -152,6 +170,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     };
     for (const t of live()) {
       const p = places.get(t.id); if (!placed(p) || t.resolved.value || p!.e <= p!.s) continue;
+      if (L.at(p!.e).line < l0 || L.at(p!.s).line > l1) continue;
       const a = point(p!.s), b = point(p!.e); if (!a || !b) continue;
       try { const r = document.createRange(); r.setStart(a[0], a[1]); r.setEnd(b[0], b[1]); out.push(r); } catch {}
     }
@@ -171,19 +190,42 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     const rr = r.getBoundingClientRect(), b0 = right.getBoundingClientRect();
     return { r, top: rr.top - b0.top + right.scrollTop };
   };
+  // Drawn for the threads near the preview's view only (a screen above and below), so the work is bounded by what
+  // can be seen, not by the number of threads; redrawn on scroll. All the reads (boxes) come before the writes, and the
+  // bubbles' heights are read once, after they are all in: two layouts, whatever the count.
+  let drawQueued = false;
+  // (after the frame is painted: the preview laid out already, so the boxes read are cheap, not a layout of a freshly
+  // patched preview charged to the comments)
+  const queueDraw = () => { if (drawQueued) return; drawQueued = true; requestAnimationFrame(() => setTimeout(() => { drawQueued = false; if (!life.signal.aborted) draw(); }, 0)); };
   const draw = () => {
-    layer.replaceChildren();
+    const t0 = performance.now();
     const open = live().filter((t: any) => !t.resolved.value);
-    o.button.textContent = "Comments" + (open.length ? " (" + open.length + ")" : "");
-    o.button.classList.toggle("has", open.length > 0);
+    o.button.textContent = refused ? "Comments: over 2 MiB" : "Comments" + (open.length ? " (" + open.length + ")" : "");
+    o.button.title = refused;
+    o.button.classList.toggle("has", !refused && open.length > 0);
     const wide = right.getBoundingClientRect().width >= MARGIN_MIN;
-    const shown = open.map((t: any) => ({ t, p: places.get(t.id)! })).filter((x: any) => placed(x.p)).map((x: any) => ({ ...x, at: rangeFor(x.t, x.p) })).filter((x: any) => x.at).sort((a: any, b: any) => a.at.top - b.at.top);
-    right.classList.toggle("sb-cm-margin", wide && shown.length > 0);
+    // (the open placed threads in source order: their numbers; the preview's groups, once, by start)
+    const items = refused ? [] : open.map((t: any) => ({ t, p: places.get(t.id)! })).filter((x: any) => placed(x.p)).sort((x: any, y: any) => x.p.s - y.p.s || (x.t.id < y.t.id ? -1 : 1));
+    const groups = items.length ? ed.groups() : [];
+    const groupAt = (off: number) => { let a = 0, b = groups.length - 1, k = -1; while (a <= b) { const m = (a + b) >> 1; if (groups[m].start <= off) { k = m; a = m + 1; } else b = m - 1; } return k >= 0 && off < groups[k].end ? groups[k] : groups.find((g) => g.start >= off) ?? null; };
+    // reads
+    const b0 = right.getBoundingClientRect(), H = right.clientHeight;
+    const near: any[] = [];
+    items.forEach((x: any, i: number) => {
+      const g = groupAt(x.p.s); if (!g) return;
+      const gr = g.el.getBoundingClientRect();
+      if (gr.bottom < b0.top - H || gr.top > b0.bottom + H) return;
+      const at = rangeFor(x.t, x.p); if (!at) return;
+      near.push({ ...x, n: i + 1, at, rect: wide ? null : at.r.getClientRects()[0] ?? at.r.getBoundingClientRect() });
+    });
+    near.sort((x, y) => x.at.top - y.at.top);
+    // writes
+    layer.replaceChildren();
+    right.classList.toggle("sb-cm-margin", wide && items.length > 0);
     right.classList.toggle("sb-cm-narrow", !wide);
-    pvAll = []; pvAct = [];
-    let below = 0;
-    shown.forEach(({ t, at }: any, i: number) => {
-      pvAll.push(at.r); if (t.id === active) pvAct.push(at.r);
+    pvAll = near.map((x) => x.at.r); pvAct = near.filter((x) => x.t.id === active).map((x) => x.at.r);
+    const made: HTMLElement[] = [], frag = document.createDocumentFragment();
+    for (const { t, n, rect } of near) {
       const ms = msgs(t), last = ms[ms.length - 1], agent = ms.some((m: any) => isAgent(m.author));
       if (wide) {
         const b = el("div", "sb-cm-bubble" + (t.id === active ? " active" : "") + (agent ? " agent" : ""));
@@ -191,21 +233,28 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
         const w = el("div", "sb-cm-who", who(last?.author ?? "", o.author)); if (last && isAgent(last.author)) w.append(el("span", "sb-cm-agent", "agent"));
         b.append(w, el("div", "sb-cm-text", last?.text.value ?? ""));
         if (ms.length > 1) b.append(el("div", "sb-cm-who", ms.length + " messages"));
-        const top = Math.max(at.top, below); b.style.top = top + "px";
         b.onclick = (ev) => { ev.stopPropagation(); openThread(t.id, b); };
-        layer.appendChild(b); below = top + b.offsetHeight + 6;
+        made.push(b); frag.appendChild(b);
       } else {
-        const r = at.r.getClientRects()[0] ?? at.r.getBoundingClientRect(), b0 = right.getBoundingClientRect();
-        const g = el("button", "sb-cm-badge", String(i + 1)) as HTMLButtonElement;
-        g.dataset.thread = t.id; g.setAttribute("aria-label", "Comment " + (i + 1));
-        g.style.top = (r.top - b0.top + right.scrollTop - 11) + "px";
-        g.style.left = Math.max(0, Math.min(right.clientWidth - 30, r.right - b0.left + 1)) + "px";
+        const g = el("button", "sb-cm-badge", String(n)) as HTMLButtonElement;
+        g.dataset.thread = t.id; g.setAttribute("aria-label", "Comment " + n);
+        g.style.top = (rect.top - b0.top + right.scrollTop - 11) + "px";
+        g.style.left = Math.max(0, Math.min(right.clientWidth - 30, rect.right - b0.left + 1)) + "px";
         g.onclick = (ev) => { ev.stopPropagation(); openThread(t.id, null); };
-        layer.appendChild(g);
+        frag.appendChild(g);
       }
-    });
+    }
+    layer.appendChild(frag);
+    if (made.length) {
+      const hs = made.map((b) => b.offsetHeight);
+      let below = -Infinity;
+      made.forEach((b, i) => { const top = Math.max(near[i].at.top, below); b.style.top = top + "px"; below = top + hs[i] + 6; });
+    }
     setRegs(); scheduleMarks();
+    mark("tex-comments-drawn", { ms: Math.round((performance.now() - t0) * 10) / 10, threads: open.length, placed: items.length, drawn: near.length, groups: groups.length, wide });
   };
+  right.addEventListener("scroll", queueDraw, { passive: true, signal: life.signal });
+  o.src.addEventListener("scroll", scheduleMarks, { passive: true, signal: life.signal });
 
   // ---- a thread: its quote, status, messages, a reply, resolve or reopen, delete
   const box = (at: HTMLElement | null, cls: string) => {
@@ -253,6 +302,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
 
   // ---- new threads: on the preview's selection (the Comment button) or the source's (Ctrl/Cmd+Alt+M)
   const compose = (s: number, e: number, shown?: string) => {
+    if (!sizeOk(ed.getText())) { if (!list) openList(); return; }
     const anchor = anchorAt(s, e, shown);
     const g = ed.previewRangesOf(s, Math.max(s, e))[0];
     const p = box(null, "sb-cm-compose");
@@ -306,10 +356,17 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     const head = el("div", "sb-cm-row"), x = el("button", "", "Close"); x.onclick = () => { list?.remove(); list = null; };
     head.append(x); list.append(head);
     if (error) list.append(el("div", "sb-cm-err", error));
+    const t0 = performance.now(); let shown = 0;
+    if (refused) list.append(el("div", "sb-cm-note sb-cm-refused", refused));
+    // (each section shows its first PER_SECTION, then "Show all": a document's 2,000 threads aren't all drawn at once)
     const ts = live(), sec = (title: string, items: any[], extra?: (t: any, d: HTMLElement) => void) => {
       if (!items.length) return;
       list!.append(el("h3", "", title + " (" + items.length + ")"));
-      for (const t of items) {
+      const cut = showAll.has(title) ? items : items.slice(0, PER_SECTION);
+      shown += cut.length;
+      if (cut.length < items.length) queueMicrotask(() => { const more = el("button", "sb-cm-more", "Show all " + items.length); more.onclick = () => { showAll.add(title); showList(); }; list?.querySelector(`h3[data-sec="${title}"]`)?.after(more); });
+      (list!.lastChild as HTMLElement).dataset.sec = title;
+      for (const t of cut) {
         const ms = msgs(t), last = ms[ms.length - 1], a = t.anchor.value;
         const d = el("div", "sb-cm-item" + (ms.some((m: any) => isAgent(m.author)) ? " agent" : "")); d.dataset.thread = t.id;
         d.append(el("div", "sb-cm-quote", a.quote));
@@ -336,8 +393,10 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     });
     sec("Comments on text that was removed", open.filter((t: any) => st(t) === "orphaned" || st(t) === "unresolved"));
     sec("Resolved", ts.filter((t: any) => t.resolved.value));
+    mark("tex-comments-list", { ms: Math.round((performance.now() - t0) * 10) / 10, threads: ts.length, shown });
     if (!ts.length) list.append(el("div", "sb-cm-note", loaded ? "No comments yet. Select text in the preview or the source (Ctrl/Cmd+Alt+M) to comment." : "Loading…"));
   };
+  const PER_SECTION = 100, showAll = new Set<string>();
   const openList = () => {
     if (list) { list.remove(); list = null; return; }
     list = el("div", "sb-cm-list"); list.setAttribute("role", "dialog"); list.setAttribute("aria-label", "Comments");
@@ -348,8 +407,8 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void reload(); }, on);
   window.addEventListener("focus", () => void reload(), on);
 
-  const offRendered = ed.on("rendered", () => draw());
-  const ro = new ResizeObserver(() => draw()); ro.observe(right);
+  const offRendered = ed.on("rendered", () => queueDraw());
+  const ro = new ResizeObserver(() => queueDraw()); ro.observe(right);
   const ready = reload();
 
   return {
@@ -357,17 +416,26 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     reload,
     openList,
     commentSelection,
-    /** The .tex was saved with `text`: the placed anchors written again for it (their offsets and its hash). */
-    saved: async (text: string) => {
+    /** The anchors as they are now, with the text they are offsets in: taken when the .tex save starts, before
+     * anything waits, so the offsets and the text are of one moment (an edit during the save can't mix them). */
+    snapshot: () => ({ text: ed.getText(), at: new Map(live().filter((t: any) => placed(places.get(t.id))).map((t: any) => { const p = places.get(t.id)!; return [t.id as string, { s: p.s, e: p.e, op: p.op }]; })) }),
+    /** The .tex was saved as `snap.text`: its placed anchors written again for it (their offsets and its hash). A thread
+     * whose anchor was written since the snapshot (an agent reattached it) is left as it is, checked against the file
+     * as each attempt re-reads it. */
+    saved: async (snap: { text: string; at: Map<string, { s: number; e: number; op: string }> } | null | undefined) => {
+      if (!snap || snap.text.length > C.LIMITS.sourceUnits) return;
       let t0 = performance.now();
-      const sha = await hashOf(text, async () => { if (performance.now() - t0 < SLICE_MS) return false; await frame(); t0 = performance.now(); return life.signal.aborted; });
+      const sha = await hashOf(snap.text, async () => { if (performance.now() - t0 < SLICE_MS) return false; await frame(); t0 = performance.now(); return life.signal.aborted; });
       if (sha === null) return;
-      const todo = live().filter((t: any) => placed(places.get(t.id)) && (t.anchor.value.textSha !== sha || places.get(t.id)!.s !== t.anchor.value.start || places.get(t.id)!.e !== t.anchor.value.end));
+      const todo = [...snap.at].filter(([id, p]) => { const a = live().find((t: any) => t.id === id)?.anchor.value; return a && (a.textSha !== sha || a.start !== p.s || a.end !== p.e); });
       if (!todo.length) return;
-      const at = new Map(todo.map((t: any) => [t.id, places.get(t.id)!]));
       await write((d) => {
         let x = d;
-        for (const [id, p] of at) { if (!x.threads.some((t: any) => t.id === id && !t.deleted.value)) continue; x = C.reattach(x, id, C.makeAnchor(text, p.s, p.e, x.threads.find((t: any) => t.id === id).anchor.value.shown, sha), { author: o.author }).doc; }
+        for (const [id, p] of todo) {
+          const t = x.threads.find((y: any) => y.id === id);
+          if (!t || t.deleted.value || t.anchor.op !== p.op) continue;
+          x = C.reattach(x, id, C.makeAnchor(snap.text, p.s, p.e, t.anchor.value.shown, sha), { author: o.author }).doc;
+        }
         return { doc: x };
       });
     },

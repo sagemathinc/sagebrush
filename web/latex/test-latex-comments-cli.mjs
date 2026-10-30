@@ -51,6 +51,16 @@ try {
   // two CLI processes adding at once: both comments kept
   const [a, b] = await Promise.all([run("add", tex, "--quote", "documentclass", "--text", "A", "--author", "agent:a"), run("add", tex, "--quote", "begin{document}", "--text", "B", "--author", "agent:b")]);
   const l4 = await run("list", tex);
+  // a .tex with CRLF line endings: offsets in the text as the editor has it (LF), so they agree with the page's
+  const crlf = join(dir, "crlf.tex"); writeFileSync(crlf, TEX.replace(/\n/g, "\r\n"));
+  const cr1 = await run("add", crlf, "--quote", "The sum of two odd", "--text", "c", "--author", "agent:a");
+  check("cli-crlf-offsets-as-the-editor", cr1.code === 0 && cr1.json.offsets?.start === TEX.indexOf("The sum of two odd") && cr1.json.range.start.line === 5 && cr1.json.status === "exact", cr1.json ?? cr1.err);
+  // LC316-A1: a comments file over 2 MiB in UTF-8 (multibyte text, under 2 Mi UTF-16 units) is refused on reading
+  const big = JSON.parse(readFileSync(side, "utf8")), m0 = big.threads[0];
+  for (let i = 0; i < 95; i++) big.threads.push({ ...JSON.parse(JSON.stringify(m0)), id: "t_" + String(i).padStart(16, "0"), messages: [{ ...JSON.parse(JSON.stringify(m0.messages[0])), text: { ...m0.messages[0].text, value: "中".repeat(8000) } }] });
+  const bigText = JSON.stringify(big, null, 1) + "\n"; writeFileSync(side, bigText);
+  const lr = await run("list", tex);
+  check("LC316-A1-cli-reader-multibyte-over-2MiB-refused", Buffer.byteLength(bigText) > (2 << 20) && bigText.length < (2 << 20) && lr.code === 1 && lr.error?.code === "limit", { bytes: Buffer.byteLength(bigText), code: lr.error?.code });
   check("LC-T2-cli-two-processes-both-kept", a.code === 0 && b.code === 0 && l4.json.threads.length === 3 && !existsSync(side + ".lock"), { a: a.error, b: b.error, n: l4.json?.threads.length });
 } finally { rmSync(dir, { recursive: true, force: true }); }
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
