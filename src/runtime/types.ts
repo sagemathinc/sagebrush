@@ -3019,15 +3019,15 @@ for (const bt of [bytesType, bytearray]) {
   const tr: any = (b: PyBytes, ...a: any[]) => (arity(a.length), translate(b, a[0], a[1]));
   tr.$kw = (pos: any[], names: string[], values: any[]) => {
     const [b, ...a] = pos;
-    // (the positional count first, then the keywords' names, as CPython's
-    // argument clinic)
+    // (as CPython's argument clinic: no positional argument, then too many
+    // arguments in all, then the keywords' names)
     if (a.length === 0) arity(0);
+    arity(a.length + names.length);
     let del: any = a[1];
     for (let i = 0; i < names.length; i++) {
       if (names[i] !== "delete") raise(T.TypeError, `translate() got an unexpected keyword argument '${names[i]}'`);
       del = values[i];
     }
-    arity(a.length + names.length);
     return translate(b, a[0], del);
   };
   method(bt, "translate", tr);
