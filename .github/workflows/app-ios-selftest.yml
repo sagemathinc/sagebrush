@@ -190,6 +190,14 @@ jobs:
         run: bash app/selftest/ios-built-app.sh release "$RUNNER_TEMP/release-start" "$RUNNER_TEMP/release-app.txt"
       - name: the release build doesn't pick up the self-test notebook
         run: bash app/selftest/ios-selftest.sh release "$(cat "$RUNNER_TEMP/release-app.txt")" "$GITHUB_STEP_SUMMARY"
+      # (when a build changed gen/apple beyond the allowed Info.plist merge,
+      # the whole diff, for deciding what to do about it)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: gen-apple-diff
+          path: ${{ runner.temp }}/gen-apple-*.diff
+          if-no-files-found: ignore
       - name: nothing was installed (brew, gem, pod)
         if: always()
         run: |
