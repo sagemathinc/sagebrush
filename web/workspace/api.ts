@@ -2847,7 +2847,12 @@ export class Workspace {
       const { id: _i, rev: _r, updated: _u, baseRev: _b, ...doc } = given;
       ref = crypto.randomUUID();
       mode = mode ?? doc.mode ?? "python";
-      const out = await new IdbStore(this.main, ref).save({ ...doc, cells: doc.cells ?? [], mode, name: splitExt(nameOf(q))[0], id: ref }, { lockHeld: true });
+      // (with the journal active (the notebooks' fence says "journal": plan-sync-slice2-client r4 §1a), the record is
+      // written as the journal's own store leaves a save whose T1 isn't made yet: marked unjournaled, with no j, so the
+      // notebook's first writer load takes it into the journal (recovery's catch-up, 2c-1d-iii §3); a plain store's
+      // save is refused there, and so was every notebook made here: the Files' New, create, duplicate, an upload)
+      const journaled = (await this.mainTx("notebooks", "readonly", (st) => st.get(FENCE)))?.phase === "journal";
+      const out = await new IdbStore(this.main, ref, null, { journal: journaled }).save({ ...doc, cells: doc.cells ?? [], mode, name: splitExt(nameOf(q))[0], id: ref }, { lockHeld: true, ...(journaled ? { journal: { keep: true, hash: "", unjournaled: true } } : {}) });
       if (typeof out === "string") throw new WorkspaceError("storage", out);
       undo = () => this.mainTx("notebooks", "readwrite", (st) => st.delete(ref));
     } else if (kind === "board") {
