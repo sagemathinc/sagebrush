@@ -47,7 +47,10 @@ try {
   await send("Runtime.enable");
   await send("Page.navigate", { url: `http://127.0.0.1:${server.port}/` });
   for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
-  const results = await ev("window.run()");
+  const all = await ev("window.run()");
+  // (OBS lines: observations printed, never failed on, not counted as checks)
+  const obs = all.filter(([, what]) => what.startsWith("OBS ")).map(([, what]) => what), results = all.filter(([, what]) => !what.startsWith("OBS "));
+  for (const o of obs) console.log(o);
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
