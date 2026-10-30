@@ -1402,10 +1402,10 @@ const mounted = mountBoard(document.getElementById("board")!, host);
 // workspace/agent-ui.ts)
 if (ws && (q.has("agents") || q.has("pair"))) mountAgentPairing(ws, { button: floatingButton() });
 // ⋯ ▸ Terminal (plan-bash-shell r8c E5.1, TP-5's follow-up to #326): the notebook page's bottom dock, on the board page
-// too, on the same preview and DEV hosts; and the terminal's ps and top (web/shell/presence.ts): this tab's board, by
-// name, path, language and visibility only, and its terminal.  The shell's module and set are the site's, a directory
+// too, on every host as the terminal is (T358-1); and the terminal's ps and top (web/shell/presence.ts): this tab's board,
+// by name, path, language and visibility only, and its terminal.  The shell's module and set are the site's, a directory
 // up (this page is /board/).  One ShellHost per page tab, made at the first open, with the person principal.
-if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/.test(location.hostname)) {
+{
   let term: any = null;
   const here = async () => {
     let path: string | undefined, mode: string | undefined;
@@ -1464,7 +1464,7 @@ if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/
         if (term) return term.toggle();
         term = openTerminal({ ws, S, base: "../", open, here, tab: TAB });
         term.onEnd = () => { term = null; (window as any).__sbTerm = null; };
-        (window as any).__sbTerm = term; // (the tests' handle, on these hosts only: web/shell/test-panel-page.mjs)
+        if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) (window as any).__sbTerm = term; // (the tests' handle, on a loopback host only: web/shell/test-panel-page.mjs)
       }
       term.toggle();
     };
