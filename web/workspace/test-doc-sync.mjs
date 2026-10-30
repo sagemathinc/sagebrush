@@ -930,24 +930,30 @@ try {
         await settle();
         const brD2 = await B.call("record", ND);
         check(brD1.codes === brD0.codes && brD1.j === brD0.j && bjD1.lrows === bjD0.lrows && headD1 === headD && brD2.codes === J([["da", "D2"], ["db", "E0"]]), "X10: a merge whose base isn't all here waits: B's record and journal unchanged, nothing sent; once it is, the next arrival merges: " + J({ before: brD0.codes, waiting: brD1.codes, lrows: [bjD0.lrows, bjD1.lrows], head: [headD, headD1], after: brD2.codes }));
-        // X11: a record not saved since the synced history started (its j below the root's), an unsaved edit here, the
-        // other device's change to another cell: both kept (fix (a): the root as the base)
+        // X11: the notebook open in A's page when its synced history starts, an unsaved edit in that page, the other device's
+        // change to another cell: both kept, once each, on both.  (Starting on an open page stamps the record at the synced
+        // root (its j the root's), so this isn't fix (a)'s shape: that shape, a record whose j predates the root, comes from a
+        // store started with no page and no save since, and is case 2, which fails without the root as the base)
         const NR = "33333333-2222-4333-8444-5555555555fb";
-        await mountBoth(NR, [["ra", "r0"], ["rb", "s0"]]);
-        await A.call("disconnect");
-        await B.call("type", "rb", "s1");
-        await sleep(900);
-        await B.call("kick", NR);
-        await settle();
+        await A.call("open", NR, [["ra", "r0"], ["rb", "s0"]]);
+        await A.call("close", NR);
+        await A.call("mount", NR);
+        await A.call("mountWatch");
         await A.call("typeUnsaved", "ra", "r0!", 3, 3);
-        await A.call("connect", "A", ACCOUNT);
         await A.call("kick", NR);
         await settle();
+        const rj = await A.call("journal", NR), rr = await A.call("record", NR);
+        await B.call("kick", NR, true);
+        await settle();
+        await B.call("open", NR);
+        await B.call("edit", NR, [["ra", "r0"], ["rb", "s1"]]);
+        for (let i = 0; i < 3; i++) await settle();
+        const er = await ed(A);
         await sleep(900);
         await A.call("kick", NR);
         for (let i = 0; i < 4; i++) await settle();
-        const [er, fr] = [await ed(A), await ed(B)];
-        check(J(er.texts) === J([["ra", "r0!"], ["rb", "s1"]]) && J(fr.texts) === J(er.texts) && er.copies === 0, "X11: a record not saved since the start, an unsaved edit here and the other device's change to another cell: both kept, once each, on both: " + J({ A: er.texts, B: fr.texts }));
+        const brR = await B.call("record", NR);
+        check(rj.start && J(er.texts) === J([["ra", "r0!"], ["rb", "s1"]]) && er.copies === 0 && brR.codes === J([["ra", "r0!"], ["rb", "s1"]]), "X11: a notebook open in A's page when its sync starts, an unsaved edit there and B's change to another cell: both kept, once each, on both: " + J({ recordJ: rr.j, from_j: rj.start?.from_j, A: er.texts, B: brR.codes }));
         // X12: every journal store open on both devices has the editor's merge, so the conflict-copy fallback is never
         // taken while a notebook syncs
         const [ma, mb2] = [await A.call("everyJournalStoreMerges"), await B.call("everyJournalStoreMerges")];
