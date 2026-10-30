@@ -38,6 +38,7 @@ writeFileSync(join(src, "entry.js"), [
   `export * as DS from ${J(join(here, "doc-sync.ts"))};`,
   `export * as P from ${J(join(here, "../sync-protocol/protocol.ts"))};`,
   `export * as NB from ${J(join(here, "../notebook/notebook.js"))};`,
+  `export * as MC from ${J(join(here, "merge-client.ts"))};`,
 ].join("\n"));
 // (built with exact merges on (web/workspace/merge-client.ts): the devices' hellos say merge and their claims ask
 // exact-v1; a server whose switch is off makes every document legacy, as before, so every case but M is unchanged)
