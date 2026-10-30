@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "Builtin method identity, revision for P327-A1 (str.join's iterable and str.translate's table keep a str subclass's own protocol). A top-up over 2026-10-30-builtin-method-identity.json: measured locally with CI's bun 1.4.4 tool, master ae02160b against this head, cli/pyjs.cjs +447 and engine/sagebrush-worker.js +415 in all.",
+  "bytes": {
+    "cli/pyjs.cjs": 132,
+    "engine/sagebrush-worker.js": 121
+  }
+}
