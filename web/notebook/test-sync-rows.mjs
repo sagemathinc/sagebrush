@@ -28,7 +28,8 @@ for (const bad of ["", "A", "a b", "x".repeat(13), "a\u0001", 7]) check(throws((
 
 // ---- row keys: families, bounds
 check(J(R.rowKey("a", "j")) === J(["\u0001s:a", "j"]), "rowKey: [nb, letter + rest]");
-check(Object.values(R.FAMILIES).join("") === "lojprgcmxskz" && new Set(Object.values(R.FAMILIES)).size === 12, "twelve families, each its own letter (F2)");
+// (thirteen since P2b: "a", the merge mode a synced history asks for (a replay restore's legacy), plan-merge-align r3.2)
+check(Object.values(R.FAMILIES).join("") === "lojprgcmxskza" && new Set(Object.values(R.FAMILIES)).size === 13, "thirteen families, each its own letter (F2)");
 for (const [name, l] of Object.entries(R.FAMILIES)) check(R.rowKey("b", l, "q")[1] === l + "q", `family ${name}: ${l}`);
 check(throws(() => R.rowKey("a", "q"), RangeError) && throws(() => R.rowKey("a", "ll"), RangeError), "an unknown family refused");
 check(R.rowKey("a", "x", "y".repeat(39))[1].length === 40 && throws(() => R.rowKey("a", "x", "y".repeat(40)), RangeError), "a time of 40 characters is kept, 41 refused");

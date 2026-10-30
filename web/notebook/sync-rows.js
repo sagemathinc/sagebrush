@@ -7,7 +7,7 @@
 //   - the registry row (SYNC_NB, "d:" + ns + ":" + doc) gives a document its short handle h, a base-36 counter;
 //   - a document's rows are under nb = SYNC_NB + h, their time a family letter and its key:
 //       l lseq · o outbox · j jseq · p pending · r recovery · g recgen, reconciling · c receipts · m mode · x op
-//       s slots, claims · k cursors · z the collapse marker
+//       s slots, claims · k cursors · z the collapse marker · a the merge mode a synced history asks for (a replay's)
 //     (lseq-ordered rows zero-padded to 16 digits, so string order is numeric order).
 // Every key is bounded before it is built: a handle at most 12 characters, a time at most 40 ASCII characters.
 // Every row is charged (F8): its key and value as the store measures them (inert JSON, two bytes a character), plus
@@ -22,7 +22,7 @@ export const SYNC_KEY_BOUNDS = { handle: 12, time: 40 };
 /** The fixed overhead a sync row is charged beside its key and value (F8). */
 export const SYNC_ROW_OVERHEAD = 64;
 /** The key families: a row's time begins with its family's letter (F2). */
-export const FAMILIES = Object.freeze({ lseq: "l", outbox: "o", jseq: "j", pending: "p", recovery: "r", recgen: "g", receipt: "c", mode: "m", op: "x", slot: "s", cursor: "k", collapse: "z" });
+export const FAMILIES = Object.freeze({ lseq: "l", outbox: "o", jseq: "j", pending: "p", recovery: "r", recgen: "g", receipt: "c", mode: "m", op: "x", slot: "s", cursor: "k", collapse: "z", asked: "a" });
 const LETTERS = new Set(Object.values(FAMILIES));
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
 
