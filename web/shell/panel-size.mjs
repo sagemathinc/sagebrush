@@ -10,7 +10,9 @@
 import { gzipSync } from "node:zlib";
 import { join, relative } from "node:path";
 
-const LIMIT = 8192;
+// (E5.6's 8 192 B, raised to 9 216 B by daybreak2's ruling on #326 r2 (terminal-panel-pr326-r2-daybreak2.md,
+// 3b9176e9): the 274 B over the old ceiling are the r1 reviews' required fixes only, no new features)
+const LIMIT = 9216;
 const here = import.meta.dir;
 const root = join(here, "..", "..");
 const ALLOWED = new Set(["web/shell/panel.ts", "web/shell/panel-render.ts", "web/shell/panel.css"]);

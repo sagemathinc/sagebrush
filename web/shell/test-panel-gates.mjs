@@ -19,6 +19,8 @@ import { devtoolsPort, startServe } from "../test-port.mjs";
 const here = join(import.meta.dir, "..");
 if (!existsSync(join(here, "dist", "shell", "preview-set.json"))) throw new Error("build web/dist with SAGEBRUSH_TERMINAL=1 first");
 const RUNS = Number(process.argv[process.argv.indexOf("--runs") + 1]) || 20;
+// (--only C2: one control, for a diagnostic run)
+const ONLY = process.argv.includes("--only") ? process.argv[process.argv.indexOf("--only") + 1] : null;
 const ENFORCE = process.env.GATES === "enforce";
 // (a hard bound on the whole run, so a stuck page can't hold a test slot: what was measured is still reported)
 const DEADLINE = Date.now() + (Number(process.env.GATES_MS) || 20 * 60 * 1000);
@@ -28,9 +30,17 @@ const GATES = { first: [16, 33, 50], last: [400, 800, 1500], slice: 50, longtask
 let server = null, chrome = null;
 const profile = mkdtempSync(join(tmpdir(), "sb-test-gates-"));
 const fails = [];
+const rows = [];
+let browser = "";
+// (the whole run, startup, every CDP call and every wait included, races the deadline: past it, the finally below
+// kills the browser and the server and the report says what was measured; DB2-TERM-326-R2-1)
+let deadlineTimer;
+const deadline = new Promise((_, reject) => (deadlineTimer = setTimeout(() => reject(new Error("STUCK: the run's deadline passed (GATES_MS)")), Math.max(0, DEADLINE - Date.now()))));
+const t0Run = Date.now();
 try {
+  await Promise.race([deadline, (async () => {
   const port = await startServe(() => (server = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }))).port;
-  chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", "--window-size=1100,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+  chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", "--window-size=1100,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
   const dport = await devtoolsPort(profile);
   const target = (await (await fetch(`http://127.0.0.1:${dport}/json/list`)).json()).find((t) => t.type === "page");
   const ws = new WebSocket(target.webSocketDebuggerUrl);
@@ -59,7 +69,7 @@ try {
       await new Promise((r) => setTimeout(r, 50));
     }
   };
-  const browser = (await send("Browser.getVersion")).result?.product;
+  browser = (await send("Browser.getVersion")).result?.product;
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   if (!(await until(`(() => { const b = document.querySelector("#termbtn"); return !!b && !b.hidden; })()`))) throw new Error("no ⋯ ▸ Terminal");
   await evaluate(`document.querySelector("#termbtn").click()`);
@@ -74,8 +84,12 @@ try {
     for (let i = 0; i < 1200 && !(document.querySelector(".sb-term-status").textContent && performance.getEntriesByName("sb-term:last-paint").length > n0); i++) await new Promise((r) => setTimeout(r, 50));
     return performance.getEntriesByName("sb-term:last-paint").length > n0 ? document.querySelector(".sb-term-status").textContent : "timeout (no last paint in 60 s)";
   })()`);
-  const clear = () => evaluate(`(() => { const ta = document.querySelector(".sb-term textarea"); ta.value = "clear";
-    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); })()`);
+  // (clear, and wait until it has: no command shown and none running, so a timed run never collides with it)
+  const clear = async () => {
+    await evaluate(`(() => { const ta = document.querySelector(".sb-term textarea"); ta.value = "clear";
+      ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); })()`);
+    if (!(await until(`document.querySelectorAll(".sb-term-cmd").length === 0 && !document.querySelector(".sb-term").classList.contains("running")`, 10000))) throw new Error("clear didn't clear");
+  };
   // the controls, written once (untimed)
   const MiB = 1048576;
   const controls = {
@@ -83,7 +97,7 @@ try {
     C2: `printf '\\033[2J\\001\\033]0;t\\007%.0s' $(seq 1 ${Math.floor(MiB / 11)}) > /gate/c2.txt`,
     C3: `printf '%0199d\\n' $(seq 1 ${Math.ceil(MiB / 200)}) > /gate/c3.txt`,
   };
-  for (const [c, cmd] of Object.entries(controls)) {
+  for (const [c, cmd] of Object.entries(controls).filter(([c]) => !ONLY || c === ONLY)) {
     const st = await run(cmd);
     const size = await run(`wc -c < /gate/${c.toLowerCase()}.txt`).then(() => evaluate(`[...document.querySelectorAll(".sb-term-cmd")].at(-1).querySelector(".sb-term-out").textContent.trim()`));
     console.log(`control ${c}: written (${st}), ${size} bytes`);
@@ -91,8 +105,7 @@ try {
   }
   await evaluate(`window.__long = []; new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__long.push([e.startTime, e.duration]); }).observe({ type: "longtask", buffered: false })`);
   const pct = (xs, p) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)]; };
-  const rows = [];
-  for (const [c, cmd] of [["C1", "cat /gate/c1.txt"], ["C2", "cat /gate/c2.txt"], ["C3", "cat /gate/c3.txt"], ["C4", "echo hi"]]) {
+  for (const [c, cmd] of [["C1", "cat /gate/c1.txt"], ["C2", "cat /gate/c2.txt"], ["C3", "cat /gate/c3.txt"], ["C4", "echo hi"]].filter(([c]) => !ONLY || c === ONLY)) {
     const first = [], last = [], parse = [], patch = [], longs = [];
     for (let i = 0; i < RUNS; i++) {
       if (Date.now() > DEADLINE) {
@@ -132,19 +145,29 @@ try {
     if (row.sliceMax > GATES.slice) fails.push(`${c}: a slice took ${row.sliceMax.toFixed(1)} ms (> ${GATES.slice})`);
     if (row.longMax > GATES.longtask) fails.push(`${c}: a Long Task of ${row.longMax.toFixed(1)} ms during the run`);
   }
+  ws.close();
+  })()]);
+} catch (e) {
+  fails.push(String(e?.message ?? e));
+} finally {
+  clearTimeout(deadlineTimer);
+  // (its whole process group: the renderer and GPU processes too, not only the main one)
+  try { if (chrome?.pid) process.kill(-chrome.pid, "SIGKILL"); } catch {}
+  server?.kill("SIGKILL");
+  rmSync(profile, { recursive: true, force: true });
+}
+{
   console.log(`\nE5.5 gates, ${RUNS} runs per control; ${browser}; ${cpus().length} x ${cpus()[0]?.model}, ${(totalmem() / 2 ** 30).toFixed(0)} GiB`);
   console.log("control | first paint p50/p95/max ms | last paint p50/p95/max ms | slices/run | parse max | patch max | slice max | long tasks (max ms)");
   for (const r of rows) {
     const f = (a) => a.map((v) => v.toFixed(1)).join(" / ");
     console.log(`${r.control} | ${f(r.first)} | ${f(r.last)} | ${r.slicesPerRun.toFixed(1)} | ${r.parseMax.toFixed(1)} | ${r.patchMax.toFixed(1)} | ${r.sliceMax.toFixed(1)} | ${r.longtasks} (${r.longMax.toFixed(1)})`);
   }
-  ws.close();
-} finally {
-  chrome?.kill("SIGKILL");
-  server?.kill("SIGKILL");
-  rmSync(profile, { recursive: true, force: true });
+  console.log(`(${((Date.now() - t0Run) / 1000).toFixed(1)} s)`);
 }
 if (fails.length) {
   console.log(`\ntest-panel-gates: ${fails.length} gate miss${fails.length === 1 ? "" : "es"}${ENFORCE ? "" : " (report only: GATES=enforce fails on them)"}:\n  ` + fails.join("\n  "));
   if (ENFORCE) process.exit(1);
 } else console.log("\ntest-panel-gates: every gate met");
+// (a stuck run is a failed measurement, not a gate result: exit 2 either way; nothing left to keep the process up)
+process.exit(fails.some((f) => f.startsWith("STUCK")) ? 2 : 0);

@@ -168,6 +168,25 @@ for (const [what, out] of [
   check(t.omitted === 32 * MiB + MiB - t.consumed, `a large omitted tail: the omitted count exact (${t.omitted})`);
 }
 
+// DB2-TERM-326-1 r2: the scans look at the clock too: on a clock that advances 1 ms per look and an 8 ms budget (no
+// byte limit), the stderr reservation and the omitted tail each end their slice within a bounded number of scalars,
+// and the result is the same
+{
+  const MiB = 1048576;
+  const tail = "\u00e9".repeat(4 * MiB), err = "e".repeat(MiB);
+  let clock = 0;
+  const r = new Render(tail, err, () => clock++);
+  let calls = 0, maxStep = 0, prev = 0;
+  for (let sl; (sl = r.next({ bytes: Infinity, spans: Infinity, ms: 8 })); calls++) {
+    const t = r.totals, done = t.consumed + t.work;
+    maxStep = Math.max(maxStep, done - prev);
+    prev = done;
+  }
+  const t = r.totals;
+  check(maxStep <= 8 * 4 * 4096 + 16384 && calls > 100, `an advancing clock: every slice's scan bounded by its clock checks (max ${maxStep} B, ${calls} slices)`);
+  check(t.omitted === 8 * MiB + MiB - t.consumed, `an advancing clock: the omitted count exact (${t.omitted})`);
+}
+
 // the scrollback (E5.4): evictCount at each cap's value and one past, several commands whose sum crosses each cap,
 // the marker charged to every cap (its digits growing), the newest command never dropped
 const sum = (cs) => cs.reduce((a, c) => ({ units: a.units + c.units, lines: a.lines + c.lines, spans: a.spans + c.spans }), { units: 0, lines: 0, spans: 0 });

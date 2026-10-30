@@ -24,7 +24,7 @@ const profile = mkdtempSync(join(tmpdir(), "sb-test-panel-"));
 try {
   const port = await startServe(() => (server = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }))).port;
   const url = `http://127.0.0.1:${port}/`;
-  chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", "--window-size=1100,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+  chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", "--window-size=1100,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
   const dport = await devtoolsPort(profile);
   const target = (await (await fetch(`http://127.0.0.1:${dport}/json/list`)).json()).find((t) => t.type === "page");
   const ws = new WebSocket(target.webSocketDebuggerUrl);
@@ -386,7 +386,8 @@ try {
   }
   ws.close();
 } finally {
-  chrome?.kill("SIGKILL");
+  // (its whole process group: the renderer and GPU processes too, not only the main one)
+  try { if (chrome?.pid) process.kill(-chrome.pid, "SIGKILL"); } catch {}
   server?.kill("SIGKILL");
   rmSync(profile, { recursive: true, force: true });
 }
