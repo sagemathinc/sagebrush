@@ -449,6 +449,90 @@ try {
     try { await until(doneW, 30000); } catch {}
     ok(/0\s+1\s+2\s+3\s+4\s+5\s+6\s+7/.test(await out(W)), `and once it's fixed, a Run runs it (${JSON.stringify((await out(W)).replace(/\s+/g, " ").slice(0, 80))})`);
   }
+  // 14. recovery without a reload, never a silent switch (Reconnect/Switch plan r2): a connect that fails offers
+  // Retry and Switch to browser; the Run/Stop guard; queued runs stopped before they ran; another tab takes the kernel
+  {
+    const lat = 400;
+    const acts = () => ev("[...(document.querySelector('#remoteacts')?.children ?? [])].map((b) => b.textContent + (b.disabled ? ' (off)' : '')).join('|')");
+    const clickAct = (label) => ev(`(() => { const b = [...(document.querySelector('#remoteacts')?.children ?? [])].find((b) => b.textContent.startsWith(${JSON.stringify(label)})); if (!b) return false; b.click(); return true; })()`);
+    // (a) every bind refused: the picker stays, Retry and Switch to browser are offered, a Run says not connected; Retry connects
+    await goto(base + `?remote=1&latency=${lat}`);
+    const F = await newCell();
+    await ev(`(async () => { const m = await import(new URL("sagebrush-remote.js", location.href).href); m.PreviewGateway.failNextBinds = 4; return true; })()`);
+    await pick("gpu");
+    await until("!!document.querySelector('#remotedlg') && document.querySelector('#remotedlg').open");
+    await ev("document.querySelector('#remoteallow').click(); true");
+    await until("!!document.querySelector('#remoteacts')", 60000);
+    ok((await acts()) === "Retry|Switch to browser" && (await ev("document.querySelector('#kernelpick').value")) === "gpu" && /couldn't connect/.test(await status()),
+      `a connect that fails: the picker stays on Remote compute, Retry and Switch to browser offered (${JSON.stringify(await status())})`);
+    ok(await ev("sagebrush.notebook.kernel.remote === true && !sagebrush.notebook.kernel.ready"), "and the notebook's kernel is the remote one, unbound: nothing runs in this browser instead");
+    await setCode(F, "print('ran somewhere')");
+    await clickRun(F);
+    await until(`/connected/.test(sagebrush.notebook.cells()[${F}].el.querySelector('.out')?.textContent ?? '')`, 20000);
+    ok(/remote compute isn't connected/.test(await out(F)) && !/ran somewhere/.test(await out(F)), `a Run while not connected: told so, not run (${JSON.stringify((await out(F)).trim())})`);
+    await clickAct("Retry");
+    await until(`/Remote compute \\(preview, simulated · ${lat} ms[^)]*\\) · ready/.test(document.querySelector('#status').textContent) && !document.querySelector('#remoteacts')`, 30000);
+    ok(true, `Retry connects, and the actions go: ${await status()}`);
+    await clickRun(F);
+    await until(`/ran somewhere/.test(sagebrush.notebook.cells()[${F}].el.querySelector('.out')?.textContent ?? '')`, 30000);
+    ok(true, "and the cell runs on the remote kernel");
+    // (b) the Run/Stop guard: a click just after the button turned into Stop, and a double click's second click, don't stop;
+    // a deliberate click later does
+    const S = await newCell();
+    await setCode(S, "import time\ntime.sleep(4)\nprint('slept')");
+    const guard = await ev(`(async () => {
+      const c = sagebrush.notebook.cells()[${S}];
+      c.runb.click();
+      for (let i = 0; i < 400 && !(c.el.classList.contains('queued') || c.el.classList.contains('running')); i++) await new Promise((r) => setTimeout(r, 5));
+      const armed = c.stopArmedAt, t = performance.now() - armed;
+      c.runb.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); // (within the guard)
+      await new Promise((r) => setTimeout(r, 450));
+      c.runb.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })); // (a double click's second click)
+      await new Promise((r) => setTimeout(r, 200));
+      const busy = c.el.classList.contains('queued') || c.el.classList.contains('running');
+      return { t, busy, armedSame: c.stopArmedAt === armed };
+    })()`);
+    ok(guard.busy && guard.armedSame && guard.t < 400, `a click ${Math.round(guard.t)} ms after the button turned into Stop, and a double click's second click: ignored, the cell still running`);
+    await ev(`(() => { sagebrush.notebook.cells()[${S}].runb.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); return true; })()`);
+    await until(`(() => { const el = sagebrush.notebook.cells()[${S}].el; return !el.classList.contains('running') && !el.classList.contains('queued'); })()`, 30000);
+    ok(!/slept/.test(await out(S)), `a deliberate click after the guard stops it (${JSON.stringify((await out(S)).trim().slice(-60))})`);
+    // (c) three Runs, the first slow, then the toolbar's Stop: the running one is interrupted and says so; the Runs asked
+    // after it are each their own action and run then, as on This browser's interpreter (stopped before it ran is the
+    // remote kernel's own queue: test-remote-kernel.mjs)
+    const Q = [await newCell(), await newCell(), await newCell()];
+    await setCode(Q[0], "import time\ntime.sleep(3)\nprint('first')");
+    await setCode(Q[1], "print('second')");
+    await setCode(Q[2], "print('third')");
+    for (const i of Q) await clickRun(i);
+    await until(`sagebrush.notebook.kernel.gateway.executions.some((x) => x.code.includes("print('first')"))`, 30000);
+    await sleep(300);
+    await ev("document.querySelector('#stop').click(); true");
+    await until(`/third/.test(sagebrush.notebook.cells()[${Q[2]}].el.querySelector('.out')?.textContent ?? '')`, 30000);
+    const qo = [];
+    for (const i of Q) qo.push((await out(i)).trim());
+    ok(/KeyboardInterrupt/.test(qo[0]) && !/first/.test(qo[0]) && qo[1] === "second" && qo[2] === "third",
+      `Stop while the first of three Runs runs: it is interrupted and says KeyboardInterrupt; the two asked after it run, as locally (${JSON.stringify(qo)})`);
+    // (d) another tab takes this notebook's kernel: Reconnect (a fresh kernel, without the sheet) and Switch to browser
+    const X = await newCell();
+    await setCode(X, "kept = 5\nprint('kept set')");
+    await clickRun(X);
+    await until(`/kept set/.test(sagebrush.notebook.cells()[${X}].el.querySelector('.out')?.textContent ?? '')`, 30000);
+    await ev("(() => { for (const b of sagebrush.notebook.kernel.gateway.bindings.values()) b.epoch++; return true; })()"); // (another tab's takeover)
+    const Y = await newCell();
+    await setCode(Y, "print('kept' in globals())");
+    await clickRun(Y);
+    await until("!!document.querySelector('#remoteacts')", 30000);
+    ok((await acts()) === "Reconnect (a fresh kernel: its variables are lost)|Switch to browser" && /another tab/.test(await status()),
+      `another tab took the kernel: Reconnect (saying the kernel will be fresh) and Switch to browser (${JSON.stringify(await status())})`);
+    await clickAct("Reconnect");
+    await sleep(200);
+    ok(!(await ev("!!document.querySelector('#remotedlg')")), "Reconnect doesn't ask the Connect sheet again (this notebook was connected in this page)");
+    await until("/a fresh kernel: earlier variables are gone/.test(document.querySelector('#status').textContent)", 30000);
+    await setCode(Y, "print('kept' in globals(), 'after reconnect')");
+    await clickRun(Y);
+    await until(`/after reconnect/.test(sagebrush.notebook.cells()[${Y}].el.querySelector('.out')?.textContent ?? '')`, 30000);
+    ok(/False after reconnect/.test(await out(Y)), `Reconnect: a fresh kernel, its variables gone, and it runs (${JSON.stringify((await out(Y)).trim())})`);
+  }
 } catch (e) {
   ok(false, `the test ran to its end: ${e?.message ?? e}`);
   try {
