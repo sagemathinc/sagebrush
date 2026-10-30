@@ -34,7 +34,12 @@ fn selftest_file(app: tauri::AppHandle) -> Option<String> {
     if let Some(path) = std::env::var("SAGEBRUSH_APP_SELFTEST").ok().filter(|s| !s.is_empty()) {
         return Some(path);
     }
-    android_selftest_dir(&app).map(|d| d.join("selftest.ipynb").to_string_lossy().into_owned())
+    mobile_selftest_dir(&app).map(|d| d.join("selftest.ipynb").to_string_lossy().into_owned())
+}
+
+// the self-test directory on a phone (debug builds only; see below), or None
+fn mobile_selftest_dir(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    android_selftest_dir(app).or_else(|| ios_selftest_dir(app))
 }
 
 // Android has no environment for SAGEBRUSH_APP_SELFTEST: in a DEBUG build
@@ -54,6 +59,23 @@ fn android_selftest_dir(_app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     None
 }
 
+// iOS, the same: in a DEBUG build only, a self-test notebook placed in the
+// app's own Documents/selftest (by `xcrun simctl get_app_container <udid>
+// space.sagebrush.notebook data` in CI) is run, and its report is written
+// next to it.  A release build has none of it: Documents is the user's
+// (shared with the Files app), so a release build must never pick up a
+// notebook from there by itself.
+#[cfg(all(target_os = "ios", debug_assertions))]
+fn ios_selftest_dir(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    let dir = app.path().document_dir().ok()?.join("selftest");
+    dir.join("selftest.ipynb").is_file().then_some(dir)
+}
+
+#[cfg(not(all(target_os = "ios", debug_assertions)))]
+fn ios_selftest_dir(_app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    None
+}
+
 // the page's console during a self-test (it has no other window to the outside)
 #[tauri::command]
 fn app_log(message: String) {
@@ -65,7 +87,7 @@ fn selftest_report(app: tauri::AppHandle, report: String, ok: bool) {
     println!("{report}");
     // (written whole, then renamed into place: a reader polling for
     // report.txt never sees half of it)
-    if let Some(dir) = android_selftest_dir(&app) {
+    if let Some(dir) = mobile_selftest_dir(&app) {
         let tmp = dir.join("report.txt.tmp");
         if std::fs::write(&tmp, format!("{report}\n")).is_ok() {
             let _ = std::fs::rename(&tmp, dir.join("report.txt"));
