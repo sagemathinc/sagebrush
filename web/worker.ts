@@ -254,7 +254,8 @@ session.ready.then(
   () => {
     if (gate === "failed") return;
     gate = "ready";
-    postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt, progress: progressSlots, seeded: replayEnv.seeded, startup: replayEnv.endStartup() });
+    // (context: what this worker itself sees, for the app's self-test report)
+    postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt, progress: progressSlots, seeded: replayEnv.seeded, startup: replayEnv.endStartup(), context: { isolated: (self as any).crossOriginIsolated, sab: typeof SharedArrayBuffer } });
   },
   (e) => gate !== "failed" && failed(String(e?.message ?? e).slice(0, 1024)),
 );
