@@ -465,6 +465,8 @@ jobs:
           # (the view, and D11's large moves in chunks: here, beside the sync client, as their 100,000-entry moves take minutes)
           CHROME=google-chrome bun web/workspace/test-workspace-sync-view.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-d11.mjs
+          # (DEV's try-it flow on the real notebook page: two browsers, notebooks, files, offline; the reference server)
+          CHROME=google-chrome bun web/workspace/test-dev-sync-tryit.mjs
           bun web/sync-protocol/test-doc-protocol.mjs
           bun web/sync-protocol/test-reference-server.mjs
           python3 -I web/sync-protocol/gen-doc-vectors.py | diff - web/sync-protocol/doc-vectors.json
