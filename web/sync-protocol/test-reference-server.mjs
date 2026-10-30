@@ -118,7 +118,14 @@ try {
   check(ref.code === "forbidden" && ref.detail.reason === "account", "hello bound to another account: forbidden, reason account");
   const early = await s3.ask({ t: "pull_index", after: 0 });
   check(early.code === "invalid", "a message before hello: invalid");
-  for (const x of [a1, a2, s3]) x.s.close();
+  // (B1a, plan-exact-only r1 §3: a version 1 client merged concurrent edits by the older rule, so its hello is refused
+  // and it never reaches the index or a document; the server says the version it takes)
+  const s4 = await socket(server, A, null);
+  s4.s.send(J({ t: "hello", v: 1, device: "devA0004", name: "old", index_after: 0 }));
+  const v1 = await s4.next((m) => m.t === "error" || m.t === "welcome");
+  const after = await s4.ask({ t: "pull_index", after: 0 });
+  check(v1.t === "error" && v1.code === "invalid" && /protocol version 2 only/.test(v1.detail?.message ?? "") && after.code === "invalid", "B1a: a version 1 hello is refused (invalid, \"protocol version 2 only\"), and the socket gets no index: " + J({ v1, after }));
+  for (const x of [a1, a2, s3, s4]) x.s.close();
 }
 
 // ---- slice 2: claims and fences (r9 §5.8's shared vectors)
