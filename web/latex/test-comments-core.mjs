@@ -278,6 +278,14 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
     }
   }
   check("r4-hasher-reused-buffer-same-digest", same);
+  // (r6) the page's schedule, sha256Steps: 256 units, doubling to 8 Ki; a text across several doublings, a lone high
+  // and a lone low surrogate at piece edges, and pairs across them: the same digest as one call and as node's (the
+  // lone high surrogate at the first edge makes that piece 257 units: a piece never ends on a high surrogate)
+  const run = (t, first, max) => { const g = C.sha256Steps(t, first, max), sizes = []; for (;;) { const x = g.next(); if (x.done) return { d: x.value, sizes }; sizes.push(x.value.size); } };
+  const edgy = "a".repeat(255) + "\uD800" + "b".repeat(255) + "\uDC00" + "c".repeat(1022) + "\u{1F600}" + "d".repeat(2046) + "\uD83D" + "e".repeat(20000) + "\u{1D4AA}".repeat(5000);
+  const e = run(edgy, 256, 1 << 13);
+  check("r6-hash-steps-same-digest", e.d === C.sha256(edgy) && e.d === node(edgy) && e.sizes[0] === 257 && e.sizes.slice(0, 6).every((n, k) => Math.abs(n - 256 * 2 ** k) <= 1) && Math.max(...e.sizes) <= (1 << 13) + 1 && e.sizes.reduce((a, b) => a + b, 0) === edgy.length, { sizes: e.sizes.slice(0, 8) });
+  check("r6-hash-steps-fixtures", fixtures.every((f) => run(f, 256, 1 << 13).d === node(f)));
 }
 
 // ---- (astra, #316 r2) the first pass over the text is admitted too: a budget below it reads nothing (no hash, no
