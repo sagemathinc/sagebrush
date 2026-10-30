@@ -18,11 +18,13 @@ export interface OpenTerminal {
   here: () => Promise<Proc[]>;
   /** this page's presence id (its own presence module's TAB: this module has a copy of its own) */
   tab: string;
+  /** where the site's pkgset/ and pkg/ are, relative to this page (default "./"; the board page, under /board/: "../") */
+  base?: string;
 }
 
 /** A terminal panel on a new ShellHost; ✕ ends its shell too. */
 export function openTerminal(o: OpenTerminal): TerminalPanel {
-  const host = new ShellHost(o.ws, async (signal) => (await startShell(o.S, "./", { signal })).shell);
+  const host = new ShellHost(o.ws, async (signal) => (await startShell(o.S, o.base ?? "./", { signal })).shell);
   const term = new TerminalPanel({ host, label: "bash · " + o.S.slice(0, 8), commands: terminalCommands({ open: o.open, ps: () => gatherPresence(o.here, 300, o.tab), tab: o.tab }) });
   return term; // (✕ ends its host's shell itself: TerminalPanel.end)
 }
