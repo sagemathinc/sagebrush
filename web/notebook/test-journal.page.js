@@ -1901,6 +1901,18 @@ async function mergeModes() {
     const before = await snapHistory(hdb);
     const same = await claim("exact-v1"), other = await claim("legacy"), unknown = await claim("exact-v9");
     check(same.out === true && /another merge mode/.test(other.refused ?? "") && /doesn't know/.test(unknown.refused ?? "") && (await snapHistory(hdb)) === before, "merge: the same mode again changes nothing; another (or an unknown one) is refused and nothing is written: " + J({ same, other, unknown }));
+    // (astra3's R-MC-2: an empty page's mode, recorded or checked as a page's: mismatched in both directions refused,
+    // nothing written; a first answer on an empty page recorded; a document not started here records nothing)
+    const em = (id, st, merge) => jtx(st, (s) => N.recordMerge(s, id, { merge }));
+    const bEm = await snapHistory(hdb);
+    const emDown = await em(one.id, one.st, "legacy");
+    check(/another merge mode/.test(emDown.refused ?? "") && (await snapHistory(hdb)) === bEm, "merge: an empty page saying legacy for an exact-v1 document: refused, nothing written: " + J(emDown));
+    const fresh = await loadNew(w, hdb, [["c", "1"]]);
+    const emFirst = await em(fresh.id, fresh.st, "legacy"), emUp = await em(fresh.id, fresh.st, "exact-v1"), bUp = await snapHistory(hdb), emUp2 = await em(fresh.id, fresh.st, "exact-v1");
+    check(emFirst.out === true && (await jState(hdb, fresh.id)).start.merge === "legacy" && /another merge mode/.test(emUp.refused ?? "") && /another merge mode/.test(emUp2.refused ?? "") && (await snapHistory(hdb)) === bUp, "merge: an empty page's first answer recorded (legacy); one saying exact-v1 after: refused, nothing written: " + J({ emFirst, emUp: emUp.refused }));
+    const emNone = await em(newId(), fresh.st, "exact-v1");
+    check(emNone.out === false, "merge: an empty page for a document not started here records nothing: " + J(emNone));
+    await close(fresh.st);
     const none = await claim(undefined);
     check(none.out === true && (await jState(hdb, one.id)).start.merge === "exact-v1", "merge: an answer that says no mode (an older server) records nothing and changes nothing");
     // (the codec: exact only for a journal store's synced key with exact-v1 recorded)
