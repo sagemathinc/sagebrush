@@ -70,6 +70,7 @@ import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, ca
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
+import { mountAgentPairing, floatingButton } from "../workspace/agent-ui";
 import { SyncOwner } from "../workspace/sync-owner";
 import { DocSync } from "../workspace/doc-sync";
 import { answerPresence, TAB } from "../shell/presence";
@@ -1347,6 +1348,9 @@ if (openAsFailed && host.store) {
   host.store.load = async () => { const r = await load0(); return r ? { ...r, notice: openAsFailed + (r.notice ? "\n\n" + r.notice : "") } : r; };
 }
 const mounted = mountBoard(document.getElementById("board")!, host);
+// (an agent on this computer, paired with this page: behind ?agents (or a ?pair= link) until it's on for everyone;
+// workspace/agent-ui.ts)
+if (ws && (q.has("agents") || q.has("pair"))) mountAgentPairing(ws, { button: floatingButton() });
 // (the terminal's ps and top, web/shell/presence.ts: this tab's board, by name, path, language and visibility only;
 // a preview of the terminal, so on the hosts its menu item shows on)
 if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/.test(location.hostname)) answerPresence(async () => {
