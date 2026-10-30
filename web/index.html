@@ -480,6 +480,7 @@ import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { uploadFiles, openableAs, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
 import { BUNDLE, readBundle, keepBundle } from "./notebook/bundle.js";
+import { startAll, startAllSummary } from "./notebook/start-all.js";
 // (the terminal, plan-bash-shell r8c step 6: a preview, shown on preview/DEV hosts only, below; its module,
 // shell/terminal.js, is loaded at its first open: this page carries only the menu item and the ps answer)
 import { answerPresence, TAB } from "./shell/presence.ts";
@@ -3124,6 +3125,34 @@ const docSyncReady = (async () => {
     warn: (...a) => console.warn(...a),
   })) === "on";
 })().catch((e) => { console.warn("sync: notebooks' switch:", e); return false; });
+// (sync-docs, #1 (a) of the first DEV sync try: with the switch on, on this load and every later one, each of this device's
+// notebooks whose synced history hasn't started is loaded as its writer and let go (notebook/start-all.js), so its
+// contents go up without anyone opening it.  In idle time, one at a time; ended when the page leaves (the next load goes
+// on); said in the Files sidebar while it runs, and, kept until closed, what it couldn't start)
+let startAllLeaving = false;
+addEventListener("pagehide", () => { startAllLeaving = true; });
+docSyncReady.then(async (on) => {
+  if (!on) return;
+  const w = await wsReady, hdb = await historyDbReady, mod = await loadHistory();
+  if (!w || w.closed || !hdb || !db) return;
+  const enc = new TextEncoder();
+  const r = await startAll({
+    list: async () => (await w.list("/", { recursive: true })).filter((e) => e.kind === "notebook" && e.ref && !e.remote && !e.missing && !e.trashed).map((e) => ({ ref: e.ref, path: e.path })),
+    startOf: async (ref) => (await readJournal(hdb, ref).catch(() => ({ start: undefined }))).start,
+    sizeOf: async (ref) => { const rec = await idb(db, "notebooks", "readonly", (st) => st.get(ref)); return rec ? enc.encode(JSON.stringify(mod.versionedOf(rec))).length : null; },
+    // (doc-sync stops a patch over the batch bound (1 MiB); a root patch's JSON is a little larger than the value it holds)
+    maxBytes: Math.floor((1 << 20) * 0.9),
+    storeFor: (ref) => storeFor(ref),
+    current: () => (current.kind === "browser" ? current.id : null),
+    idle: () => new Promise((ok) => (typeof requestIdleCallback === "function" ? requestIdleCallback(() => ok(), { timeout: 1000 }) : setTimeout(ok, 50))),
+    stopped: () => startAllLeaving || w.closed,
+    progress: (done, total) => { if (total > 0 && done < total) wsBrowser?.say(`Starting sync: ${done} of ${total} notebooks`); },
+  });
+  const said = startAllSummary(r);
+  if (said) { console.warn("sync:", said, r); wsBrowser?.say(said, true); }
+  else if (r.started) wsBrowser?.say(`Sync started for ${r.started} notebook${r.started === 1 ? "" : "s"}`);
+  (window.sagebrush ??= {}).startAll = r;
+}).catch((e) => console.warn("sync: starting notebooks' synced histories:", e));
 // (once this device's journal is activated (plan-sync-slice2-client r4 §1a, web/workspace/api.ts activateJournal), every
 // notebook is written through it: T1 in its history, then T2 (notebook/journal.js); before, as before.  Told by the
 // notebooks' fence, read as each store is made: its phase "journal" is what refuses every other writer, so a store
