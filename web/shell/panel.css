@@ -33,6 +33,7 @@ body.sb-term-open { padding-bottom: var(--sb-term-h, 280px); }
 .sb-term-in textarea { flex: 1; resize: none; border: none; outline: none; background: transparent; color: inherit; font: inherit; padding: 2px 0; max-height: 240px; }
 .sb-term-note { padding: 0 8px 4px; font-size: 12px; color: var(--sb-term-c3); }
 .sb-term-note[hidden] { display: none; }
+.sb-term-intro { padding: 4px 8px 0; font-size: 12px; opacity: .85; flex: none; }
 .sb-b { font-weight: 700; } .sb-i { font-style: italic; } .sb-u { text-decoration: underline; }
 .sb-fg-rev { color: var(--sb-term-bg); } .sb-bg-rev { background: var(--sb-term-fg); }
 @media (max-width: 700px) { .sb-term { top: 0; height: auto !important; max-height: none; } body.sb-term-open { overflow: hidden; } }

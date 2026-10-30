@@ -1352,8 +1352,8 @@ const mounted = mountBoard(document.getElementById("board")!, host);
 // workspace/agent-ui.ts)
 if (ws && (q.has("agents") || q.has("pair"))) mountAgentPairing(ws, { button: floatingButton() });
 // (the terminal's ps and top, web/shell/presence.ts: this tab's board, by name, path, language and visibility only;
-// a preview of the terminal, so on the hosts its menu item shows on)
-if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/.test(location.hostname)) answerPresence(async () => {
+// on every host, as the terminal is: T358-1)
+answerPresence(async () => {
   let path: string | undefined, mode: string | undefined;
   try {
     if (ws && local) {
