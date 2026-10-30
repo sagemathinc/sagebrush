@@ -1401,19 +1401,75 @@ const mounted = mountBoard(document.getElementById("board")!, host);
 // (an agent on this computer, paired with this page: behind ?agents (or a ?pair= link) until it's on for everyone;
 // workspace/agent-ui.ts)
 if (ws && (q.has("agents") || q.has("pair"))) mountAgentPairing(ws, { button: floatingButton() });
-// (the terminal's ps and top, web/shell/presence.ts: this tab's board, by name, path, language and visibility only;
-// a preview of the terminal, so on the hosts its menu item shows on)
-if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/.test(location.hostname)) answerPresence(async () => {
-  let path: string | undefined, mode: string | undefined;
-  try {
-    if (ws && local) {
-      path = await ws.pathOf("board", source.slice("local:".length));
-      if (path) mode = (await ws.stat(path))?.mode;
-    }
-  } catch {}
-  return [{ tab: TAB, kind: "board" as const, name: document.title.replace(/\s*[\u00b7\u2014-]\s*Sagebrush$/, "") || "board", path, mode,
-    state: document.hidden ? "hidden" : "idle", since: Math.round(performance.timeOrigin), heap: (performance as any).memory?.usedJSHeapSize }];
-});
+// ⋯ ▸ Terminal (plan-bash-shell r8c E5.1, TP-5's follow-up to #326): the notebook page's bottom dock, on the board page
+// too, on the same preview and DEV hosts; and the terminal's ps and top (web/shell/presence.ts): this tab's board, by
+// name, path, language and visibility only, and its terminal.  The shell's module and set are the site's, a directory
+// up (this page is /board/).  One ShellHost per page tab, made at the first open, with the person principal.
+if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/.test(location.hostname)) {
+  let term: any = null;
+  const here = async () => {
+    let path: string | undefined, mode: string | undefined;
+    try {
+      if (ws && local) {
+        path = await ws.pathOf("board", source.slice("local:".length));
+        if (path) mode = (await ws.stat(path))?.mode;
+      }
+    } catch {}
+    const procs: any[] = [{ tab: TAB, kind: "board" as const, name: document.title.replace(/\s*[\u00b7\u2014-]\s*Sagebrush$/, "") || "board", path, mode,
+      state: document.hidden ? "hidden" : "idle", since: Math.round(performance.timeOrigin), heap: (performance as any).memory?.usedJSHeapSize }];
+    if (term) procs.push({ tab: TAB, kind: "terminal", name: "bash", mode: "bash", state: term.busy ? "running" : "idle", since: term.since });
+    return procs;
+  };
+  answerPresence(here);
+  const termBtn = document.querySelector<HTMLButtonElement>('#board [data-sbb="term"]');
+  if (termBtn && ws) {
+    termBtn.hidden = false;
+    // (the panel gives focus back to its opener, else to the page's ⋯ button, #morebtn, as on the notebook page: TP-7)
+    const more = document.querySelector<HTMLElement>('#board [data-sbb="menubtn"]');
+    if (more && !document.getElementById("morebtn")) more.id = "morebtn";
+    // (a press on the board takes the focus from the dock, so its keys are the board's again: board's B363-1)
+    document.getElementById("board")!.addEventListener("pointerdown", () => {
+      const a = document.activeElement as HTMLElement | null;
+      if (a?.closest(".sb-term")) a.blur();
+    }, true);
+    // (open FILE: a notebook or board in a new tab, as the file browser's open in a new tab does)
+    const open = async (p: string) => {
+      const e = await ws.stat(p);
+      if (!e) throw new Error("No such file or directory");
+      if (e.kind === "folder") throw new Error("Is a directory");
+      if (e.kind !== "notebook" && e.kind !== "board") throw new Error("only a notebook or a board opens from here (a data file opens in the notebook page's preview)");
+      openEntry(e, "tab");
+      return `opened ${p} (a ${e.kind}, in a new tab)`;
+    };
+    const shellSet = async () => {
+      for (const url of ["../shell/preview-set.json", "../pkgset/latest.json"]) {
+        try {
+          const r = await fetch(url, { cache: "no-store", redirect: "error" });
+          if (!r.ok) continue;
+          const j = await r.json();
+          const S = j?.S ?? j?.id ?? (typeof j === "string" ? j : null);
+          if (typeof S === "string" && /^[0-9a-f]{64}$/.test(S)) return S;
+        } catch {}
+      }
+      return null;
+    };
+    termBtn.onclick = async () => {
+      if (!term) {
+        const S = await shellSet();
+        if (!S) return alert("The terminal isn't available on this site: it has no shell package set.");
+        // (the module, a directory up: a variable, so the bundler leaves it to the browser)
+        const mod = "../shell/terminal.js";
+        let openTerminal: any;
+        try { ({ openTerminal } = await import(mod)); } catch (e) { return alert("The terminal didn't load: " + String((e as Error)?.message ?? e)); }
+        if (term) return term.toggle();
+        term = openTerminal({ ws, S, base: "../", open, here, tab: TAB });
+        term.onEnd = () => { term = null; (window as any).__sbTerm = null; };
+        (window as any).__sbTerm = term; // (the tests' handle, on these hosts only: web/shell/test-panel-page.mjs)
+      }
+      term.toggle();
+    };
+  }
+}
 if (bench) {
   mounted.board.setItems(synthetic(Number(q.get("items") ?? 2000), Number(q.get("strokes") ?? 20000)));
   mounted.board.setCamera({ x: 0, y: 0, z: 1 });
