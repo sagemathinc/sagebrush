@@ -106,9 +106,38 @@ export function check(s: Schema, v: unknown, at = "params"): string | null {
   return null;
 }
 
+/** Why the schema `s` (every node of it: each property's, each oneOf alternative's, whether a request reaches
+ * it or not) uses something this checker doesn't keep, or null: checked once, as a whole. */
+export function schemaProblem(s: unknown, at = "schema", depth = 0): string | null {
+  if (depth > 32) return `${at}: nested too deep`;
+  if (!s || typeof s !== "object" || Array.isArray(s)) return `${at}: not a schema`;
+  const o = s as Schema;
+  for (const k of Object.keys(o)) if (!KNOWN.has(k)) return `${at}: keyword not understood: ${k}`;
+  if (o.additionalProperties !== undefined && o.additionalProperties !== false) return `${at}: additionalProperties other than false`;
+  if (o.type !== undefined && !["object", "string", "boolean", "integer"].includes(o.type as string)) return `${at}: type ${String(o.type)} not understood`;
+  if (o.properties !== undefined) {
+    if (!o.properties || typeof o.properties !== "object" || Array.isArray(o.properties)) return `${at}.properties: not an object`;
+    for (const [k, v] of Object.entries(o.properties as object)) { const r = schemaProblem(v, `${at}.properties.${k}`, depth + 1); if (r) return r; }
+  }
+  if (o.oneOf !== undefined) {
+    if (!Array.isArray(o.oneOf) || o.oneOf.length === 0) return `${at}.oneOf: not a list`;
+    for (let i = 0; i < o.oneOf.length; i++) { const r = schemaProblem(o.oneOf[i], `${at}.oneOf[${i}]`, depth + 1); if (r) return r; }
+  }
+  if (o.required !== undefined && !(Array.isArray(o.required) && o.required.every((x) => typeof x === "string"))) return `${at}.required: not a list of names`;
+  if (o.enum !== undefined && !Array.isArray(o.enum)) return `${at}.enum: not a list`;
+  if (o.pattern !== undefined) { try { new RegExp(String(o.pattern), "u"); } catch { return `${at}.pattern: not a pattern`; } }
+  return null;
+}
+/** The whole schema's problem, found once: while there is one, every call is refused (it fails closed). */
+export const SCHEMA_PROBLEM: string | null = (() => {
+  for (const [v, d] of Object.entries((SCHEMA as any).verbs ?? {})) { const r = schemaProblem((d as any)?.params, v); if (r) return r; }
+  return null;
+})();
+
 /** Why the call `method(params)` isn't one the page takes, or null: an unknown verb, params that break its
  * schema, or a value no verb takes. */
 export function checkCall(method: unknown, params: unknown): string | null {
+  if (SCHEMA_PROBLEM) return "the page can't check calls against its schema: " + SCHEMA_PROBLEM;
   if (typeof method !== "string" || !AGENT_VERBS.has(method)) return `not a verb: ${JSON.stringify(String(method)).slice(0, 80)}`;
   const bad = badValue(params);
   if (bad) return bad;

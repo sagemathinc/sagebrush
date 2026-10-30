@@ -56,10 +56,10 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   style();
   let pairing: AgentPairing | null = null;
   let bar: HTMLElement | null = null;
-  const trashedFrom = async (p: string) => (await ws.stat(p))?.trashed?.from ?? null;
+  const trashEntry = async (p: string) => (await ws.stat(p)) as any;
   const page = { origin: location.origin, path: location.pathname };
   const make = (port: number, how: { code: string } | { session: string; pairingId: string }) =>
-    new AgentPairing(port, how, { verbsFor: (actor) => ws.forAgent(actor), store: ws, trashedFrom, page });
+    new AgentPairing(port, how, { verbsFor: (actor) => ws.forAgent(actor), store: ws, trashEntry, page });
 
   function dialog(title: string, body: (box: HTMLElement, close: () => void) => void) {
     const box = h("div", { className: "sbag-box" }, h("h2", { textContent: title }));

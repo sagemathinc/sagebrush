@@ -11,7 +11,8 @@
 //   rename, duplicate, remove, restore) needs it with write.
 // - The granted folders themselves stay: an agent may change what's in them, never remove or move them.
 // - Trash: an entry in Trash is reached only through "/" (everything), except restore, which is checked against
-//   where the entry came from (its `trashed.from`) and needs write there.
+//   where the entry came from (its `trashed.from`): that folder, the one it goes back into (under another name if
+//   that one is taken), must be granted, with write.
 // - An expired grant, or one with no folders, allows nothing.
 
 import { TRASH, normPath, parentOf, within } from "./paths";
@@ -67,9 +68,14 @@ export function inGrant(p: string | null, folders: string[]): boolean {
 /** Whether `p` is itself one of the granted folders (which an agent may not remove or move). */
 const isGrantRoot = (p: string | null, folders: string[]) => p !== null && folders.includes(p);
 
-/** Why the call isn't allowed under `g` at `now`, or null.  `trashedFrom(p)` gives, for an entry in Trash, the
- * path it was removed from (restore's check), or null if there's no such entry. */
-export async function authorize(method: string, params: any, g: Grant | null, now: number, trashedFrom: (p: string) => Promise<string | null>): Promise<string | null> {
+/** An entry in Trash, as the workspace's stat gives it: `trashed.from` is where it was removed from. */
+export type TrashEntry = { trashed?: { from: string } } & Record<string, unknown>;
+
+/** Why the call isn't allowed under `g` at `now`, or null.  `trashEntry(p)` gives the entry at `p` (restore's
+ * check: where it came from), or null.  For restore, `out.expect` is set to that very entry: the restore must be
+ * of it and no other (Workspace.restore's `expect`, checked holding its lock), so an entry put in its place in
+ * the meantime is never restored on this authorization. */
+export async function authorize(method: string, params: any, g: Grant | null, now: number, trashEntry: (p: string) => Promise<TrashEntry | null | undefined>, outArg: { expect?: TrashEntry } = {}): Promise<string | null> {
   const no = grantProblem(g, now);
   if (no) return no;
   const folders = g!.folders;
@@ -104,9 +110,15 @@ export async function authorize(method: string, params: any, g: Grant | null, no
     case "workspace.restore": {
       const p = norm(params.path);
       if (p === null || !within(p, TRASH) || p === TRASH) return "restore takes an entry in Trash";
-      const from = norm(await trashedFrom(p));
-      if (from === null) return "no such entry in Trash";
-      return inGrant(from, folders) ? null : out(from);
+      const e = await trashEntry(p);
+      const from = norm(e?.trashed?.from);
+      if (!e || from === null) return "no such entry in Trash";
+      if (!inGrant(from, folders)) return out(from);
+      // (it goes back into the folder it came from, under another name if that one is taken (Workspace.restore):
+      // so that folder must be in the grant, whatever name it ends up with, now or by the time it runs)
+      if (!inGrant(parentOf(from), folders)) return `restoring ${JSON.stringify(from)} would put it in ${JSON.stringify(parentOf(from))}, outside the folders this agent may change`;
+      outArg.expect = e;
+      return null;
     }
     default: {
       // stat, read, history, version, write, create, mkdir: one path
