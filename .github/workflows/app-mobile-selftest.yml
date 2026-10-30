@@ -68,9 +68,10 @@ jobs:
           name: app-page
           path: app/dist
 
-  # (one job, one leg per system image: API 34, and the newest stable image,
-  # 37.0, which asks whether a CURRENT WebView makes the page cross-origin
-  # isolated. 37.0 runs on the nightly cron, by hand and on pull requests, not
+  # (one job, one leg per system image: API 34, and a recent stable image,
+  # 36.1, which asks whether a CURRENT WebView makes the page cross-origin
+  # isolated (37.0, the newest, did not boot on this runner: #373, run 41064752177).
+  # 36.1 runs on the nightly cron, by hand and on pull requests, not
   # on master pushes; app/selftest/android-image-info.sh records each leg's
   # image and WebView, and "current|old against threshold 145")
   emulator:
@@ -82,7 +83,7 @@ jobs:
       fail-fast: false
       matrix:
         # (keep in sync with LEGS in "the legs of this run" below)
-        api-level: ${{ fromJSON(github.event_name == 'push' && '["34"]' || '["34", "37.0"]') }}
+        api-level: ${{ fromJSON(github.event_name == 'push' && '["34"]' || '["34", "36.1"]') }}
     env:
       NDK_VERSION: 27.3.13750724
       TAURI_CLI_VERSION: 2.12.4
@@ -92,7 +93,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           # (keep in sync with the matrix's api-level list above)
-          LEGS: ${{ github.event_name == 'push' && '34' || '34, 37.0' }}
+          LEGS: ${{ github.event_name == 'push' && '34' || '34, 36.1' }}
           LEG: ${{ matrix.api-level }}
         run: |
           echo "event $EVENT: system images (api-level) $LEGS; this leg: $LEG" | tee -a "$GITHUB_STEP_SUMMARY"
