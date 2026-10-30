@@ -322,6 +322,14 @@ def test_strict_json_and_unicode():
             continue
         raise AssertionError("accepted %r" % raw)
     assert WS.loads_strict(b'{"a": "\\ud83d\\ude00"}') == {"a": "\U0001F600"}  # (a pair is fine)
+    # a key twice in an object, at any depth, is refused (P319-B1); the same key in two objects is fine
+    for raw in (b'{"a": 1, "a": 2}', b'{"x": [{"b": 1, "b": 1}]}', b'[{"k": {"k": 1, "k": 2}}]'):
+        try:
+            WS.loads_strict(raw)
+        except ValueError:
+            continue
+        raise AssertionError("accepted %r" % raw)
+    assert WS.loads_strict(b'[{"a": 1}, {"a": 2}, {"a": {"a": 3}}]') == [{"a": 1}, {"a": 2}, {"a": {"a": 3}}]
 
 
 def test_path_bounds():

@@ -70,6 +70,39 @@ It then sends the notification `grant.changed` with the grant: `{agent, client, 
 
 **Where the grant lives:** the page keeps it in `sagebrush-workspace`/meta under `grant:<pairing id>` (`{agent, client, folders, write, run, expires, created, lastUsed}`), and lists it in Agents with access (§8.4). The server never sends a grant, and never holds an authoritative one.
 
+### 2.3 What the server also enforces
+
+`sagebrush-mcp` (engine/py/python/sagebrush/pairing.py) is stricter than the steps above say. A page must respect these:
+
+1. **One page at a time.** While a page is paired, another hello is refused: "another page is paired with this agent".
+2. **A hello carries exactly one of `code` and `session`.** Both, or neither, is refused.
+3. **Wrong guesses are limited:**
+   - 5 wrong codes retire the code, and the agent must issue a new one;
+   - 5 wrong session secrets make the server forget the session, and a new code is needed.
+4. **After the hello, the page sends only notifications.** A page-to-server message with an `id` (a request) drops the connection. Notifications with other methods than those in this document are ignored.
+5. **The handshake** must be `GET /sagebrush HTTP/1.1`, WebSocket version 13, with a valid 16-byte `Sec-WebSocket-Key`:
+   - a repeated header (`Origin`, `Host`, …) gets a 400, and anything else wrong a 403, before any WebSocket;
+   - the hello must arrive within 30 s of connecting;
+   - at most 8 connections may be in their handshake or hello at once.
+6. **Error codes the server makes itself,** besides the workspace's (`invalid`, `exists`, `missing`, `conflict`, `limit`, `storage`):
+   - `timeout`: the page didn't answer a verb within 60 s;
+   - `limit` with `retryAfterMs: 250`: 8 requests are already in flight;
+   - `protocol`: the page's answer breaks the schema or the limits (over `maxList` or `maxHistory`, say).
+7. **The grant is opaque to the server.** Any non-empty object counts as granted, and `{}` revokes. Folders, write, run and expiry are enforced by the page alone (§2.2, §3). So the page's grant-scoping is the only guard on what an agent may touch, and its tests carry that security.
+8. **Frames** must follow RFC 6455 for clients:
+   - masked;
+   - no reserved bits or opcodes;
+   - valid fragmentation;
+   - strict JSON in UTF-8: no NaN or Infinity, no lone surrogates, no duplicate keys.
+
+   A frame that breaks these closes the connection: 1002 for the framing, 1007 for the JSON, and 1009 for a message over the size caps (§2).
+
+**Developing a page against the server:**
+- **The server** is `sagebrush-mcp` (`sagebrush.mcp_server:main`).
+- **`SAGEBRUSH_MCP_DEV_ORIGIN=http://localhost:<port>`** (or `http://127.0.0.1:<port>`) admits a page from that exact development origin, besides `https://sagebrush.space`. The server serves no page itself.
+- **The code** comes from the agent's `workspace_connect` tool and is also printed on the server's stderr.
+- **A reference fake page,** and the refusals above, are in engine/py/test_pairing.py.
+
 ## 3. The workspace verbs
 
 **Server to page:** `{"id":"s<n>","method":"workspace.<verb>","params":{…}}`.
