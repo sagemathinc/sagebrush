@@ -28,6 +28,9 @@ const LATEX_PREVIEW_HOST = previewHost(LATEX_MODE, process.env.SAGEBRUSH_PREVIEW
 const LATEX_DEFINE = LATEX
   ? { __SB_LATEX__: "true", __SB_LATEX_TEST__: String(LATEX_MODE === "test"), __SB_LATEX_HOSTS__: JSON.stringify(LATEX_MODE === "test" ? ["dev.sagebrush.space", "127.0.0.1", "localhost"] : ["dev.sagebrush.space", ...(LATEX_PREVIEW_HOST ? [LATEX_PREVIEW_HOST] : [])]) }
   : { __SB_LATEX__: "false" };
+// (exact merges: off in every production build, a literal false nothing at run time can change (web/workspace/
+// merge-client.ts); only a test's own build turns it on.  Every build that can carry the sync client says it)
+const MERGE_DEFINE = { __SB_EXACT_MERGE__: "false" };
 // (web/site/ when it is here; see web/site-dir.mts)
 const { siteDir, hasSite } = await import("./site-dir.mts");
 const shims: Record<string, string> = {
@@ -179,7 +182,7 @@ for (const r of [result, consoleResult, mathResult, graphResult, notebookResult,
   const LATEX_IMPORT = 'import { latexBoot } from "./latex/boot.ts";\n';
   if (m[1].split(LATEX_IMPORT).length !== 2) throw new Error("index.html must import the LaTeX editor's entry exactly once");
   writeFileSync(tmp, (LATEX ? m[1] : m[1].replace(LATEX_IMPORT, "")) + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
-  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: true, define: LATEX_DEFINE });
+  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: true, define: { ...LATEX_DEFINE, ...MERGE_DEFINE } });
   builds.push(["the notebook page", app]);
   if (!app.success) {
     for (const l of app.logs) console.error(l);
@@ -199,7 +202,7 @@ if (LATEX) {
   // (the comments, comments.ts: a chunk of their own, fetched only when someone comments or a document has comments;
   // a document's live comments, comments-doc.ts with their core, another, so the frozen text's chunk stays small)
   for (const [entry, name] of [["page.ts", "sagebrush-latex.js"], ["worker.ts", "sagebrush-latex-worker.js"], ["comments.ts", "sagebrush-latex-comments.js"], ["comments-doc.ts", "sagebrush-latex-comments-doc.js"], ["agent.ts", "sagebrush-latex-agent.js"]]) {
-    const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "latex", entry)], outdir: join(here, "dist"), naming: name, target: "browser", format: "esm", minify: true, define: LATEX_DEFINE });
+    const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "latex", entry)], outdir: join(here, "dist"), naming: name, target: "browser", format: "esm", minify: true, define: { ...LATEX_DEFINE, ...MERGE_DEFINE } });
     builds.push([`the LaTeX editor (${name})`, r]);
     if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
   }
@@ -305,7 +308,7 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
 {
   const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: join(here, "dist", "board"), naming: "board.js", target: "browser", format: "esm", minify: true,
     // (the engine it was built with, by its files' SHA-256s: an exported board pins it, design/engines.md)
-    define: { __SB_LATEX__: "false", __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "false" } });
+    define: { __SB_LATEX__: "false", __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "false", ...MERGE_DEFINE } });
   if (!r.success) {
     for (const l of r.logs) console.error(l);
     process.exit(1);
@@ -342,7 +345,7 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   // __SB_NO_SYNC__, never reached, and the stub keeps the modules themselves, and the client behind them, out of
   // this copy)
   const noSync = { name: "no-sync", setup(b: any) { b.onResolve({ filter: /(^|\/)sync-(owner|panel|rows)(\.ts)?$/ }, () => ({ path: join(here, "board", "no-sync-stub.ts") })); } };
-  const ns = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: nosyncDir, naming: "board.js", target: "browser", format: "esm", minify: true, plugins: [noSync], define: { __SB_LATEX__: "false", __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "true" } });
+  const ns = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: nosyncDir, naming: "board.js", target: "browser", format: "esm", minify: true, plugins: [noSync], define: { __SB_LATEX__: "false", __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "true", ...MERGE_DEFINE } });
   if (!ns.success) { for (const l of ns.logs) console.error(l); process.exit(1); }
   // (its packages are the board build's: a subset, already listed in js-dependencies.json)
   const nosync = readFileSync(join(nosyncDir, "board.js"), "utf8");

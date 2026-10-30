@@ -217,7 +217,7 @@ export async function acked(st, id, { gen, client, upTo, epoch, req }) {
 
 /** A claim's answer (`doc_claim`, r9 §5.8), recorded in `st` only for the client it was sent for, its generation and
  * id: a delayed answer for an earlier client marks nothing.  Resolves whether it was recorded. */
-export async function recordClaim(st, id, { gen, client, epoch, fgen, merge, noun = "notebook" }) {
+export async function recordClaim(st, id, { gen, client, epoch, fgen, merge = undefined, noun = "notebook" }) {
   const reg = await registered(st, id), slot = reg && (await rq(st.get(rowKey(reg.h, "s"))))?.v;
   if (!slot || slot.gen !== gen || slot.client !== client) return false;
   const changes = { s: { ...slot, claimed: { epoch, client }, fgen } };

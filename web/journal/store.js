@@ -27,7 +27,7 @@
 // loadRecord(), the record or null; save(doc, {journal: {j, hash, unjournaled, keep?, markOnly?}}), a compare and swap
 // on doc.baseRev, resolving {saved, rev}, {conflict}, or a refusal's text (web/notebook/stores.js IdbStore's).
 import { bytesHash } from "../notebook/stores.js";
-import { t1Write, dropRows, readJournal, roomRefused, syncedKey, acked, markSent, rotate } from "./rows.js";
+import { t1Write, dropRows, readJournal, readSync, roomRefused, syncedKey, acked, markSent, rotate } from "./rows.js";
 import { writeIntent, prune, neverFits, replay, journalTexts } from "./core.js";
 import { makeClientId, decodePatchId } from "patchflow";
 
@@ -48,6 +48,9 @@ export function journalStoreClasses({ IdbStore, IdbPatchStore }, kindOf) {
     // (the document's journal identity, for good: `store.id` is its history's key, which a synced document's start
     // changes to `<id>:s<n>`; every journal row is the document's (astra's CORR-2C2-1))
     store.docId = id; store.noun = kind.noun;
+    // (a synced history's merge mode, read with its patches (IdbPatchStore.loadInitial): its start row's, for the
+    // synced key only; the document's own key never has one, plan-merge-align r3.2 §5)
+    store.readMerge = (st) => readSync(st, id).then(({ start }) => (start && syncedKey(id, start.n) === store.id ? start.merge : undefined));
     // (F4: paused, a save's T1 is its intent alone; nothing to write for a version that isn't a save's)
     store.writePending = () => (store.intent ? writeIntent(store, store.intent) : Promise.resolve({ refused: journalTexts(kind.noun).PAUSED }));
     return store;
