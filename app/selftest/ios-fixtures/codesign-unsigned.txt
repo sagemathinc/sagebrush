@@ -1,0 +1,1 @@
+/Users/runner/work/sagebrush/sagebrush/app/src-tauri/gen/apple/build/Sagebrush.app: code object is not signed at all
