@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "hashlib top-up for astra's H345-A1..A5 (C-contiguous buffers, given/not-given arguments, a name's own characters, one-store state, the narrowed docstring): measured with CI's bun 1.4.4 tool on master d3961d2d (with #341) against this branch's merge 059cccc7: cli/lib.gen.js +14677 and cli/pyjs.cjs +14241 against the first marker's 13608 and 13300; this adds lib.gen 1069 (exact) and pyjs 983 (42 B for master's drift, as the first), worker unchanged.",
+  "bytes": {
+    "cli/lib.gen.js": 1069,
+    "cli/pyjs.cjs": 983
+  }
+}
