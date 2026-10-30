@@ -39,7 +39,20 @@ async function tab(wsUrl) {
     if (m.method === "Log.entryAdded" && m.params.entry.level === "error") errors.push(`${m.params.entry.text} ${m.params.entry.url ?? ""}`);
   };
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-  const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text); return r.result.value; };
+  // (a reply without a result is a protocol error, not the page's: "the execution context was destroyed" by a
+  // navigation or reload in flight. It is tried again for up to 5 s, then reported, instead of failing on
+  // r.result being undefined: @sagebrush-latex's #316 run, Oct 29)
+  const ev = async (expression) => {
+    for (let i = 0; ; i++) {
+      const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+      if (r && "result" in r) {
+        if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
+        return r.result.value;
+      }
+      if (i >= 50) throw new Error(`Runtime.evaluate failed (${JSON.stringify(r).slice(0, 200)}): ${expression.slice(0, 120)}`);
+      await sleep(100);
+    }
+  };
   const until = async (expr, ms = 60000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(100); } throw new Error("timed out: " + expr); };
   return { ws, send, ev, until, errors };
 }
@@ -53,6 +66,13 @@ try {
   await a.until("window.demo && document.querySelectorAll('#items .q').length === 7");
   await a.until("document.querySelectorAll('#items .katex').length >= 4");
   ok(true, "seven questions render, their math typeset");
+  // the harness itself: an evaluation still pending when the page reloads (its context destroyed) gets a protocol
+  // error with no result; ev tries it again on the new page instead of failing on r.result
+  const pending = a.ev("new Promise((r) => setTimeout(() => r(7), 400))");
+  await sleep(50);
+  await a.send("Page.reload");
+  ok(await pending === 7, "harness: an evaluation cut off by a reload is tried again and answers");
+  await a.until("window.demo && document.querySelectorAll('#items .q').length === 7");
   ok(await a.ev("document.querySelectorAll('#gb tr').length") === 4, "the mock gradebook lists the roster");
 
   // each student their own numbers

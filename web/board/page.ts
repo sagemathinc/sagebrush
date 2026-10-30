@@ -70,6 +70,7 @@ import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, ca
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
+import { mountAgentPairing, floatingButton } from "../workspace/agent-ui";
 import { SyncOwner } from "../workspace/sync-owner";
 import { DocSync } from "../workspace/doc-sync";
 import { docSyncOrigin, docSyncAllowed, followDocSync, docSyncChannel } from "../workspace/doc-sync-switch";
@@ -1346,6 +1347,9 @@ if (openAsFailed && host.store) {
   host.store.load = async () => { const r = await load0(); return r ? { ...r, notice: openAsFailed + (r.notice ? "\n\n" + r.notice : "") } : r; };
 }
 const mounted = mountBoard(document.getElementById("board")!, host);
+// (an agent on this computer, paired with this page: behind ?agents (or a ?pair= link) until it's on for everyone;
+// workspace/agent-ui.ts)
+if (ws && (q.has("agents") || q.has("pair"))) mountAgentPairing(ws, { button: floatingButton() });
 if (bench) {
   mounted.board.setItems(synthetic(Number(q.get("items") ?? 2000), Number(q.get("strokes") ?? 20000)));
   mounted.board.setCamera({ x: 0, y: 0, z: 1 });

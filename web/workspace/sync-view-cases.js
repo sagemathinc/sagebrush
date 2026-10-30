@@ -336,7 +336,7 @@ async function moveMeasured(dirs, per, wide = false, kind = "rename") {
   obs.disconnect();
   const moved = kind === "forget" ? n - 1 - (await w.list("/big", { recursive: true })).length - ((await w.stat("/big")) ? 0 : -1) : (await w.list(wide ? "/bag" : "/big2", { recursive: true })).length;
   const logged = (await w.ops()).filter((o) => o.origin === "server").length;
-  const out = { n, ms, longest: Math.max(0, ...longs), heapMiB: (heapMax - heap0) / 2 ** 20, moved, logged, cursor: r.cursor };
+  const out = { n, ms, longest: Math.max(0, ...longs), longs, heapMiB: (heapMax - heap0) / 2 ** 20, moved, logged, cursor: r.cursor };
   // (the baseline: the workspace's own move of the same tree back (api.ts move, one transaction), measured alike)
   if (wide && kind !== "forget") {
     globalThis.gc?.();
@@ -357,9 +357,14 @@ async function moveMeasured(dirs, per, wide = false, kind = "rename") {
 }
 
 async function bigMove(wide) {
-  // (the 1,000-entry move first: measured before the large one's garbage is about)
-  const s = await moveMeasured(1, 999);
-  check(s.moved === s.n - 1 && s.longest < 50, `a 1,000-entry remote move: no long task over 50 ms (longest ${Math.round(s.longest)} ms)`);
+  // (the 1,000-entry move first: measured before the large one's garbage is about.  Three samples, each in a fresh
+  // workspace, checked on their median: a move that blocks the main thread does so in every sample, while one runner
+  // stall (the page's thread descheduled, which the browser reports as a long task) lands in one; every sample is said)
+  const smalls = [];
+  for (let k = 0; k < 3; k++) smalls.push(await moveMeasured(1, 999));
+  const samples = smalls.map((x) => ({ longest: Math.round(x.longest), longs: x.longs.map(Math.round), ms: Math.round(x.ms) }));
+  const median = samples.map((x) => x.longest).sort((a, b) => a - b)[1];
+  check(smalls.every((x) => x.moved === x.n - 1) && median < 50, `a 1,000-entry remote move: no long task over 50 ms (median of 3 samples ${median} ms): ` + J(samples));
   // (short rows: asserted.  The maximum legal rows (1,024-character paths at depth 32, D10 r3) are measured with
   // WIDE=1 and reported, not asserted, until D11 (plan-pr65-d11-chunked-moves-r1) applies large moves in chunks: no
   // single-transaction move of that tree fits 256 MiB, the workspace's own move included)
@@ -369,7 +374,7 @@ async function bigMove(wide) {
     check(m.longest < 1000, `…its longest task ${Math.round(m.longest)} ms (under 1 s, D10 r2's measured exception)`);
     check(m.heapMiB < 256, `…the heap's growth ${m.heapMiB.toFixed(1)} MiB (under 256 MiB)`);
   }
-  check(true, "big move figures: " + J({ entries: m.n, ms: Math.round(m.ms), longestTaskMs: Math.round(m.longest), heapGrowthMiB: +m.heapMiB.toFixed(1), smallMoveLongestMs: Math.round(s.longest), workspaceOwnMove: m.local }));
+  check(true, "big move figures: " + J({ entries: m.n, ms: Math.round(m.ms), longestTaskMs: Math.round(m.longest), heapGrowthMiB: +m.heapMiB.toFixed(1), smallMoveLongestMs: samples.map((x) => x.longest), workspaceOwnMove: m.local }));
 }
 
 async function journalCursorReplaced() {
