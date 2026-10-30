@@ -126,11 +126,20 @@ export class PatchHistory {
   /** Keep `next` (records) as a version, or, with `meta`, as a patch so marked; null if nothing changed. */
   commit(next, meta) {
     if (!this.session) return null;
-    // (paused, or the session not yet caught up after a root: stored by itself, never through the session)
-    if (this.paused || this.tail) return this.commitDetached(next, meta);
+    // (paused, or the session not yet caught up after a root: stored by itself, never through the session; never
+    // with an admission check, which only the session's preview serves)
+    if (this.paused || this.tail) return this.admit ? { notAdmitted: { refused: "the history is paused" } } : this.commitDetached(next, meta);
     if (next.isEqual(this.committed())) return null;
+    // (an admission check (the journal store's startSynced: the root's size): the envelope previewed, checked, and
+    // committed as previewed, or nothing committed or appended: {time, notAdmitted} (astra3's A-SA-2 on #353))
+    let preview;
+    if (this.admit) {
+      preview = this.session.previewCommit(next, meta ? { meta } : {});
+      const no = this.admit(preview);
+      if (no) { this.session.cancelPreview(preview); return { time: preview.time, notAdmitted: no }; }
+    }
     this.edits = null;
-    const env = meta ? this.session.commit(next, { meta }) : this.session.commit(next);
+    const env = this.session.commit(next, { ...(meta ? { meta } : {}), ...(preview ? { preview } : {}) });
     this.emit();
     return env;
   }
