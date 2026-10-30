@@ -502,12 +502,18 @@ try {
     else await realClick(logAt.x, logAt.y);
     const inDock = await evaluate(`!!document.activeElement?.closest(".sb-term")`);
     const h0 = await evaluate(`document.querySelector(".sb-term").getBoundingClientRect().height`);
-    for (const k of KEYS) await rawKey(...k);
+    // (the document compared after each key, not once at the end: a leaked Ctrl+Z then Ctrl+Y would come back to d1;
+    // board's B371-1)
+    let changedBy = null;
+    for (const k of KEYS) {
+      await rawKey(...k);
+      if (changedBy === null && (await doc()) !== d1) changedBy = (k[3] ? "Ctrl+" : "") + k[0];
+    }
     const s = await boardState();
-    const same = (await doc()) === d1;
+    const same = changedBy === null;
     const h1 = await evaluate(`document.querySelector(".sb-term").getBoundingClientRect().height`);
     check(inDock && same && s.ids === "a,b" && s.selected === 1 && !s.find && (where !== "the grip" || h1 > h0),
-      `board: real keys with the focus on ${where} are the terminal's (Delete, Backspace, arrows, Ctrl+Z, Ctrl+Y, Ctrl+F; the board's document unchanged): ${JSON.stringify({ inDock, same, ...s, h0, h1 })}`);
+      `board: real keys with the focus on ${where} are the terminal's (Delete, Backspace, arrows, Ctrl+Z, Ctrl+Y, Ctrl+F; the board's document unchanged after each): ${JSON.stringify({ inDock, changedBy, ...s, h0, h1 })}`);
   }
   await evaluate(`document.querySelector(".sb-term textarea").value = ""`);
   // (the control: with the board's keys back after a real click on item a, Ctrl+Z does undo the nudge, so the loop's
