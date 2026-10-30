@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "Notebook input(): the cell's timer pauses and reads \"waiting for input\" while input() waits for a person, and the wait is left out of the time shown and remembered (William's request). Measured locally with CI's bun 1.4.4 tool: master 851719b7 against this head.",
+  "bytes": {
+    "cli/pyjs.cjs": 380,
+    "engine/sagebrush-notebook.js": 246
+  }
+}

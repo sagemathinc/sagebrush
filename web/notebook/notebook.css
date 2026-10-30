@@ -193,3 +193,8 @@
 .sbnb .cell.manual .runb { outline: 1px dashed currentColor; outline-offset: -3px; }
 .sbnb .out .fixes { display: flex; flex-wrap: wrap; gap: .4em; margin: .3em 0; }
 .sbnb .out .fixes button { font: inherit; font-size: .9em; }
+/* input(): the line asked for, under the cell */
+.sbnb .stdin { display: flex; align-items: baseline; gap: .5em; padding: 3px 11px; font: 13.5px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.sbnb .stdin-prompt { white-space: pre-wrap; }
+.sbnb .stdin-field { flex: 1; min-width: 8em; font: inherit; padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); color: var(--fg); }
+.sbnb .stdin-field:focus { outline: 2px solid var(--accent); outline-offset: 0; }
