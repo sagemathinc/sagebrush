@@ -246,6 +246,12 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport):
   }
   // entries whose contents are gone, or back
   const have = { notebook: new Set(notebookIds), board: new Set(boardIds), file: new Set(fileKeys), trash: new Set(trashKeys) };
+  // (P0 #1: a store that reads empty here is a read that found nothing (the main database not open, or not yet
+  // written), never proof that this device's own documents are gone: its entries are not marked missing, and that is
+  // said; and every mark written is said with the stores' counts, so a report carries its own evidence)
+  const counts = { entries: entries.length, notebooks: notebookIds.length, files: fileKeys.length, fileBytes: fileBytesIds.size, boards: boardIds.length, trash: trashKeys.length, main: !!w.main };
+  const emptyStore = (e: Entry) => e.kind === "notebook" ? !w.main || notebookIds.length === 0 : e.kind === "board" ? boardIds.length === 0 : e.kind === "file" && e.migrated ? fileBytesIds.size === 0 : e.kind === "file" ? !w.main || fileKeys.length === 0 : false;
+  const marked: string[] = [], spared: string[] = [];
   for (const e of entries) {
     if (e.kind === "folder") continue;
     if (e.ref === null) {
@@ -261,6 +267,22 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport):
     }
     const set = e.kind === "file" && (e.trashed || within(e.path, TRASH)) ? have.trash : have[e.kind];
     const gone = e.kind === "file" && e.migrated ? !fileBytesIds.has(e.fid!) : !set.has(e.ref);
+    // (another device's (`remote`): its content not here yet is on that device, never "missing" (the Files list says
+    // so); a mark an earlier build wrote on it is taken off)
+    if (e.remote) {
+      if (!e.missing) continue;
+      await inTx(w.ws, "entries", "readwrite", async (tx) => {
+        const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
+        if (!cur || cur.ref !== e.ref || !cur.remote) return;
+        const { missing: _m, ...rest } = cur;
+        st.put(rest);
+      });
+      continue;
+    }
+    if (gone && !e.missing && emptyStore(e)) {
+      spared.push(e.path);
+      continue;
+    }
     if (gone === !!e.missing) continue;
     await inTx(w.ws, "entries", "readwrite", async (tx) => {
       const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
@@ -271,8 +293,13 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport):
         st.put(rest);
       }
     });
-    if (gone) r.missing++;
+    if (gone) {
+      r.missing++;
+      marked.push(e.path);
+    }
   }
+  if (spared.length) console.warn(`workspace: ${spared.length} of this device's entries found no contents, but their store reads empty: not marked missing`, { counts, sample: spared.slice(0, 20) });
+  if (marked.length) console.warn(`workspace: ${marked.length} entries marked missing (their contents not found)`, { counts, sample: marked.slice(0, 20) });
   return old;
 }
 
