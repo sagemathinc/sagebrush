@@ -1,0 +1,6 @@
+10-30 16:24:01.100  4242  4260 W RustStderr: [localhost] logger start port=41234 cap=40 (debug build; ...)
+10-30 16:24:01.300  4242  4261 W RustStderr: [localhost] #1 url="/" diag=no dest=unavailable mode=unavailable status=200(served) set: COOP=same-origin COEP=require-corp
+10-30 16:24:01.400  4242  4261 W RustStderr: [localhost] #2 url="/sagebrush-worker.js" diag=no dest=unavailable mode=unavailable status=200(served) set: COOP=same-origin COEP=require-corp
+10-30 16:24:02.000  4242  4260 W RustStderr: [page] start http://127.0.0.1:41234/ isolated=false secure=true
+10-30 16:24:09.000  4242  4261 W RustStderr: [localhost] #3 url="/?sb-diag=1" diag=yes dest=unavailable mode=unavailable status=200(served) set: COOP=same-origin COEP=require-corp
+10-30 16:24:01.500  4242  4261 W RustStderr: [localhost] #9 url="/" diag=no dest=document mode=navigate set: COOP=same-origin COEP=require-corp
