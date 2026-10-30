@@ -176,6 +176,8 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
   let lineIdx = null;
   const lines = () => (lineIdx ??= lineIndex(text));
   const can = (n) => work + n <= budget;
+  // (the last bounded step a generator yielded after: its kind and size, for the page's slice record)
+  let last = null;
   // every copy of the source goes through here, after its length was checked against the budget and charged
   // (onCopy: the tests' seam, told each copy's span)
   const copy = (a, b) => { onCopy?.(a, b); return text.slice(a, b); };
@@ -203,7 +205,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
       const i = text.indexOf(s, at);
       work += i < 0 ? rest : i - at + s.length;
       if (i < 0 || i >= end) break;
-      out.push(i); at = i + 1;
+      out.push(i); last = { kind: "search", size: i - at + s.length }; at = i + 1;
       yield;
     }
     return out;
@@ -211,7 +213,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
   // the SHA-256 of [a, b), a piece at a time, each charged before it is hashed
   function* sha(a, b) {
     const h = sha256Hasher();
-    for (let i = a; i < b;) { const j = Math.min(b, sliceAt(text, i + WINDOW)); if (!can(j - i)) return OUT; work += j - i; h.update(copy(i, j)); i = j; yield; }
+    for (let i = a; i < b;) { const j = Math.min(b, sliceAt(text, i + WINDOW)); if (!can(j - i)) return OUT; work += j - i; h.update(copy(i, j)); last = { kind: "span hash", size: j - i }; i = j; yield; }
     return h.digest();
   }
   // the whole span at i, if the anchor's quote (head; and for a long one tail, length and sha) is there
@@ -280,7 +282,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
     }
     return out.join("\n");
   };
-  return { textSha, get lines() { return lines(); }, resolve, steps, context, work: () => work };
+  return { textSha, get lines() { return lines(); }, resolve, steps, context, work: () => work, lastStep: () => last };
 }
 
 // ---- the operations: each returns a new document (the input is never changed) and checks admission first
