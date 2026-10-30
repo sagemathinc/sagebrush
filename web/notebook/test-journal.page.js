@@ -1934,9 +1934,18 @@ async function mergeModes() {
     const changed = base.set({ ...base.getOne({ type: "cell", id: "a" }), input: "x = 2" });
     const rt = (Date.now() + 60_000).toString(36).padStart(11, "0") + "_otherdevice01";
     const renv = { time: rt, wall: Date.now(), patch: codec.makePatch(base, changed), parents: [root.time], userId: 0, version: 1 };
+    // (and a second view of it, read-only (the writer holds the lock), loaded before the mode was recorded: its session
+    // takes the remote patch live, with no reload from the database, so only the mode told first makes it read exact)
+    const ro = store(w, hdb, three.id);
+    await ro.load();
     const pg = await jtx(three.st, (s) => N.applyPage(s, three.id, { expect: null, next: k1, rows: [{ time: rt, env: renv }], merge: "exact-v1" }));
+    const roBefore = ro.patches.mergeMode;
     S.tellMerge(key3, "exact-v1");
     S.tellHistory(key3, renv);
+    const roHas = ro.history.session?.versions().includes(rt);
+    const roCells = roHas ? J(ro.history.session.value().get({ type: "cell" }).map((r) => [r.id, r.input]).sort()) : null;
+    check(ro.writer === false && roBefore === undefined && roHas && roCells === J([["a", "x = 2"], ["b", "keep"]]), "merge: a read-only view loaded before the mode, given the remote patch live (no reload), reads it exact, as the mode is told first: " + J({ writer: ro.writer, roBefore, roHas, roCells }));
+    await close(ro);
     let cells = null;
     for (let i = 0; i < 100 && !cells; i++) {
       await new Promise((r) => setTimeout(r, 50));
