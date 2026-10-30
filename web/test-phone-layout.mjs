@@ -182,6 +182,16 @@ try {
   ok(await until(`!document.getElementById("timetravel").hidden && getComputedStyle(document.querySelector("#timetravel .tthead")).top === "0px"`), "TimeTravel's header sticks at the top");
   await ev(`document.getElementById("ttclose").click()`);
   ok(await until(`document.getElementById("timetravel").hidden`), "TimeTravel closes");
+  // (closing TimeTravel keeps the cell you were at in place while the page
+  // settles, until you scroll, restoreAnchor in web/index.html; a scroll that
+  // isn't a wheel, touch, key or click, as a scrollbar drag or a script's, must
+  // end that too: a resize just after it must not pull the page back)
+  await ev(`window.scrollTo(0, 0)`);
+  ok(await until(`scrollY === 0`), "a scroll to the top just after closing TimeTravel");
+  await ev(`(() => { const d = document.createElement("div"); d.id = "anchor-probe"; d.style.height = "40px"; document.querySelector("#cells .cell").append(d); })()`);
+  await sleep(400);
+  ok(await ev(`scrollY === 0`), "...stays there when the notebook then resizes (the anchor let go)");
+  await ev(`document.getElementById("anchor-probe").remove()`);
 
   phase = "a preview notice";
   // a preview site's notice: the toolbar above its band

@@ -1208,22 +1208,29 @@ function anchorOf(notebook) {
 }
 // Scroll so that the anchor's cell (or the one at its place) is where it was,
 // and keep it there while the page settles (math is typeset after a paint,
-// pictures load), unless you scroll.
+// pictures load), unless you scroll: with the wheel, a touch, a key, a click,
+// or any other scroll that moves the cell from its place (dragging the
+// scrollbar fires none of those events, and neither does a script's scrollTo).
 let unanchor = null;
 function restoreAnchor(notebook, at) {
   unanchor?.();
   if (!at) return;
+  const cell = () => { const cs = notebook.cells(); return cs.find((x) => x.id === at.id) ?? cs[Math.min(at.index, cs.length - 1)]; };
   const fix = () => {
-    const cs = notebook.cells(), c = cs.find((x) => x.id === at.id) ?? cs[Math.min(at.index, cs.length - 1)];
+    const c = cell();
     if (c) scrollBy(0, c.el.getBoundingClientRect().top - at.top);
   };
   fix();
   if (typeof ResizeObserver !== "function") return;
   const ro = new ResizeObserver(fix);
   ro.observe(notebook.root);
-  const stop = () => { ro.disconnect(); clearTimeout(timer); for (const e of ["wheel", "touchstart", "keydown", "pointerdown"]) removeEventListener(e, stop, true); if (unanchor === stop) unanchor = null; };
+  // (a scroll that leaves the cell where it is: this anchor's own, or the
+  // browser's scroll anchoring; one that moves it away: you, or a script)
+  const moved = () => { const c = cell(); if (c && Math.abs(c.el.getBoundingClientRect().top - at.top) > 1) stop(); };
+  const stop = () => { ro.disconnect(); clearTimeout(timer); for (const e of ["wheel", "touchstart", "keydown", "pointerdown"]) removeEventListener(e, stop, true); removeEventListener("scroll", moved); if (unanchor === stop) unanchor = null; };
   const timer = setTimeout(stop, 2000);
   for (const e of ["wheel", "touchstart", "keydown", "pointerdown"]) addEventListener(e, stop, true);
+  addEventListener("scroll", moved, { passive: true });
   unanchor = stop;
 }
 let ttAnchor = null;
