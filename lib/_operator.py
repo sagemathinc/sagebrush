@@ -44,19 +44,16 @@ def _buffer_bytes(x):
 def _compare_digest(*args, **kwargs):
     """Return 'a == b'.
 
-    This function uses an approach designed to prevent
-    timing analysis, making it appropriate for cryptography.
-
     a and b must both be of the same type: either str (ASCII only),
     or any bytes-like object.
 
-    Note: If a and b are of different lengths, or if an error occurs,
-    a timing attack could theoretically reveal information about the
-    types and lengths of a and b--but not their values.
+    In Sagebrush this gives NO protection against timing analysis.
+    CPython's version is written in C to reduce the risk of timing
+    attacks; this one has CPython's checks and errors, and reads every
+    byte without stopping at the first difference, but it runs as Python
+    on a JavaScript engine, whose timing nothing here controls.  Don't
+    rely on it where an attacker can measure how long a comparison takes.
     """
-    # (Sagebrush: CPython's checks and errors; the comparison looks at every
-    # byte without stopping at the first difference, but it runs in Python
-    # on a JavaScript engine, which gives no constant-time guarantee)
     if kwargs:
         raise TypeError("_operator._compare_digest() takes no keyword arguments")
     if len(args) != 2:
