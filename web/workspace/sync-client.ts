@@ -114,7 +114,9 @@ export type SyncStatus = {
 export type IndexOp = WireOp & { seq: number; device: string };
 /** A page of the server's log: step 4's confirmed index takes it (C3); step 3 gives it to no one. */
 export type IndexPage = { ns: string; ops: IndexOp[]; more: boolean };
-export type Refusal = { dseq: number; code: string; path: string; at: number };
+/** A refusal kept for the Sync panel; `n` counts them, 1, 2, 3, … in the order they came (the panel's "seen" mark is
+ * an n: neither a clock nor a dseq, which a rebuild may start again).  Older entries have none. */
+export type Refusal = { dseq: number; code: string; path: string; at: number; n?: number };
 
 export type ClientOptions = {
   /** the site's origin (the page's) */
@@ -796,7 +798,9 @@ export class SyncClient {
       // (a refusal is final: the record is gone; the index is rebuilt from the server's log and what is queued, step 4)
       const now = this.clock.now();
       const list = (await this.metaGet<Refusal[]>(key(c.ns, "refused"))) ?? [];
-      for (const d of refused) list.push({ dseq: d.dseq, code: String(d.code).slice(0, 64), path: byDseq.get(d.dseq)?.op.path ?? "", at: now });
+      // (numbered on from the newest kept: the list is cut to its last refusalsKept, which keeps the newest n)
+      let n = list.reduce((m, r) => (Number.isSafeInteger(r?.n) && r.n! > m ? r.n! : m), 0);
+      for (const d of refused) list.push({ dseq: d.dseq, code: String(d.code).slice(0, 64), path: byDseq.get(d.dseq)?.op.path ?? "", at: now, n: ++n });
       await this.metaPut(key(c.ns, "refused"), list.slice(-CLIENT.refusalsKept));
       // (the rebuild's obligation was recorded with the refusal itself, in Outbox.acked's transaction: D7)
     }
