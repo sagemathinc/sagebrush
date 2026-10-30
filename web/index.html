@@ -12,6 +12,8 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8C%BF%3C/text%3E%3C/svg%3E">
 <script>try { const t = localStorage.getItem("sagebrush-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
+<!-- the phone layout (a flag while it is new): ?phone=1 turns it on in this browser, ?phone=0 off -->
+<script>try { const q = new URLSearchParams(location.search).get("phone"); if (q === "1" || q === "0") localStorage.setItem("sagebrush-phone", q); if (localStorage.getItem("sagebrush-phone") === "1") document.documentElement.classList.add("phone"); } catch {}</script>
 <style>
   :root {
     --scheme: light; color-scheme: light;
@@ -211,6 +213,54 @@
     header, main, footer { padding-left: 14px; padding-right: 14px; }
   }
   kbd { font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--code); }
+  /* The phone layout (html.phone, the ?phone=1 flag): the notebook gets the screen. The name
+     and the search on one line at the top; the toolbar at the bottom, in reach of a thumb (and
+     hidden while the keyboard is up, html.phone.typing); menus as sheets above it; wider
+     cells; 16px code, so that iOS doesn't zoom into a cell when it's tapped. */
+  html.phone { scroll-padding-top: 8px; }
+  html.phone header { flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px 0; }
+  html.phone header .title { flex: 1 1 auto; }
+  html.phone h1 { font-size: 0; }
+  html.phone h1 span { font-size: 18px; }
+  html.phone .tag, html.phone nav.links { display: none; }
+  html.phone header .tools { display: contents; }
+  html.phone header #docsearchbox { order: 9; flex: 1 1 100%; min-width: 0; margin: 0; }
+  html.phone header #docsearch { width: 100%; max-width: none; font-size: 16px; padding: 5px 8px; }
+  html.phone #theme { flex: none; width: 2.6em; padding: 4px 2px; }
+  html.phone header #mode { flex: none; max-width: 6.5em; padding: 4px 4px; font-size: 15px; }
+  html.phone main, html.phone footer { padding-left: 10px; padding-right: 10px; }
+  html.phone main { padding-bottom: calc(var(--bar-h, 56px) + 16px); }
+  html.phone footer { padding-bottom: calc(var(--bar-h, 56px) + 48px); }
+  /* (--sb-preview-gutter: the band a preview site's notice keeps at the bottom, web/preview/notice.js; 0 elsewhere) */
+  html.phone .bar { position: fixed; top: auto; left: 0; right: 0; bottom: var(--sb-preview-gutter, 0px); z-index: 30; margin: 0; flex-wrap: nowrap; gap: 6px; overflow-x: auto;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); box-shadow: 0 -4px 12px rgba(0, 0, 0, .08); }
+  html.phone .bar.stuck { box-shadow: 0 -4px 12px rgba(0, 0, 0, .08); }
+  html.phone .bar .sp, html.phone .bar #autorun { display: none; }
+  html.phone .bar button, html.phone .bar select { flex: none; padding: 8px 12px; font-size: 15px; }
+  html.phone .bar #runall, html.phone .bar #stop { flex: 1 0 auto; }
+  /* (File and ⋯ always in view; what doesn't fit scrolls: the stale-cells button last) */
+  html.phone .bar #add { order: 1; } html.phone .bar #filebtn { order: 2; } html.phone .bar #morebtn { order: 3; }
+  html.phone .bar #wsfilesbtn { order: 4; } html.phone .bar #runstale { order: 5; }
+  html.phone.typing .bar { display: none; }
+  html.phone #writerbar, html.phone #timetravel .tthead { top: 0; }
+  html.phone .bar button, html.phone .bar select { padding: 8px 10px; }
+  /* (over the early-alpha notice, whose z-index is 2147483000; its script's name isn't written here,
+     as scripts/build-cli.mjs takes the notice out of the CLI's page by that name) */
+  html.phone .menu { position: fixed !important; top: auto !important; left: 8px !important; right: 8px !important; bottom: calc(var(--bar-h, 56px) + var(--sb-preview-gutter, 0px) + 8px) !important; max-height: 65vh !important; min-width: 0; z-index: 2147483001; }
+  html.phone .menu button, html.phone .menu a { padding: 11px 12px; font-size: 16px; }
+  html.phone #console { bottom: calc(var(--bar-h, 56px) + var(--sb-preview-gutter, 0px)); height: 45vh; }
+  /* (an escaped id: as specific as the preview notice's own rule for it, which comes later) */
+  html.phone #sb-alpha\-banner { bottom: calc(var(--bar-h, 56px) + var(--sb-preview-gutter, 0px)) !important; }
+  html.phone .sbnb { --gutter: 40px; }
+  html.phone .sbnb .cell { padding-right: 2px; }
+  html.phone .sbnb .cell .runb { width: 34px; height: 34px; right: 3px; font-size: 13px; }
+  html.phone .sbnb .ed textarea, html.phone .sbnb .ed pre { font-size: 16px; padding: 7px 8px; }
+  /* (the cell's toolbar: on its own row above the active cell's editor, not floating over the line above) */
+  html.phone .sbnb .cell .gutter { grid-row: 1 / span 2; }
+  html.phone .sbnb .cell .body { grid-column: 2; grid-row: 2; }
+  html.phone .sbnb .cell .head { display: none; position: static; grid-column: 2; grid-row: 1; justify-self: end; margin: 0 0 4px; flex-wrap: wrap; max-width: 100%; }
+  html.phone .sbnb .cell.active .head { display: flex; }
+  html.phone .sbnb .cell .head button, html.phone .sbnb .cell .head select { padding: 4px 9px; font-size: 14px; }
   #printhead { display: none; }
   /* File > Print: the notebook alone, light, with its prompts; code without the editor's textarea */
   @media print {
@@ -2177,6 +2227,15 @@ function menuOf(btn, menu) {
   const stuck = () => bar.classList.toggle("stuck", bar.getBoundingClientRect().top <= 0 && scrollY > 0);
   addEventListener("scroll", stuck, { passive: true });
   stuck();
+}
+// The phone layout (html.phone, set in <head>): the search moves up beside the name, and the
+// bottom toolbar steps aside while the on-screen keyboard is up (a field has the focus)
+if (document.documentElement.classList.contains("phone")) {
+  $("header .tools").prepend($("#docsearchbox"), $("#mode"));
+  const typing = () => { const a = document.activeElement; return !!a && (a.tagName === "TEXTAREA" || a.isContentEditable || (a.tagName === "INPUT" && /^(text|search|number|email|url)$/.test(a.type))); };
+  const update = () => document.documentElement.classList.toggle("typing", typing());
+  document.addEventListener("focusin", update);
+  document.addEventListener("focusout", () => setTimeout(update, 0));
 }
 const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
 // The one File menu (design/workspace-files.md §3, web/workspace/filemenu.ts):
