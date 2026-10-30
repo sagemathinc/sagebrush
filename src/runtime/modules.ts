@@ -1527,6 +1527,9 @@ newBuiltinModule("types", (m) => {
   m.MappingProxyType = Ty.mappingproxy;
   m.GetSetDescriptorType = T.getset_descriptor;
   m.CellType = typeOf(Ty.newCell());
+  // (CPython's own Python class, from lib/_pytypes.py; enum.py imports it)
+  m.DynamicClassAttribute = importModule("_pytypes").DynamicClassAttribute;
+  setattr(m.DynamicClassAttribute, "__module__", "types");
   for (const n of ["MemberDescriptorType", "WrapperDescriptorType", "MethodWrapperType", "MethodDescriptorType", "ClassMethodDescriptorType", "FrameType", "TracebackType", "AsyncGeneratorType", "CapsuleType"]) {
     m[n] = Ty.builtinTypeFor(n, class {}, "types", () => raise(T.TypeError, `cannot create '${n}' instances`));
   }
