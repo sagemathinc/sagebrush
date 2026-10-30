@@ -263,6 +263,17 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
   check("source-limit-one-over-refused", e1?.code === "limit" && e1.detail?.limit === "sourceUnits" && e2?.code === "limit" && /up to 2 MiB \(this one is 2\.0 MiB\)/.test(e1.message), e1?.message);
 }
 
+// ---- (astra, #316 r2) the first pass over the text is admitted too: a budget below it reads nothing (no hash, no
+// copy), and every anchor is unresolved, the work 0; at exactly it, the text is read
+{
+  const big = "x".repeat(2 << 20), copies = [];
+  const R = C.resolver(big, 3 << 20, { onCopy: (x, y) => copies.push([x, y]) });
+  const r = R.resolve({ start: 0, end: 1, textSha: "nope", quote: "x", prefix: "", suffix: "" });
+  check("budget-initial-pass-admitted", R.work() === 0 && R.work() <= (3 << 20) && R.textSha === null && r.status === "unresolved" && copies.length === 0 && R.context(0, 1) === "", { work: R.work(), r, copies: copies.length });
+  const R2 = C.resolver("abc", 6), a2 = C.makeAnchor("abc", 0, 1);
+  check("budget-initial-pass-exactly", R2.work() === 6 && R2.resolve(a2).status === "exact");
+}
+
 // ---- DB3-BUDGET-1-R1: no copy of the source before its charge: with less budget left than the next step needs (a
 // short range's piece; a context line), the step is refused without copying anything (the onCopy seam sees every copy)
 {
