@@ -12,7 +12,7 @@ import { Workspace, WorkspaceError, LIMITS, type Entry } from "./api";
 import { TRASH, freePath, join, nameOf, openableAs, parentOf, splitExt, within, type DocKind } from "./paths";
 import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from "./preview";
 import { SyncOwner } from "./sync-owner";
-import { sidebarLine } from "./sync-panel";
+import { readNotebooks, sidebarLine, type Notebooks, type ReadUnacked } from "./sync-panel";
 import { rowIcons, ROWICON } from "./sync-rows";
 import { fileRowMeta, fmtSize, isElsewhere } from "./row-meta";
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
@@ -39,6 +39,8 @@ export type BrowserHost = {
   retitles?(e: Entry): boolean;
   /** An entry renamed or moved here, from `was` (the page retitles what it has open). */
   renamed?(e: Entry, was: string): void;
+  /** (tests) the notebooks' count the sync line reads (readNotebooks), else the history database's */
+  readUnacked?: ReadUnacked;
   /** Hide the file browser (its ✕); none: no ✕. */
   close?(): void;
 };
@@ -214,12 +216,23 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const syncEl = h("button", { className: "ib fsync", title: "Sync: opens the Storage panel" });
   syncEl.setAttribute("role", "status");
   syncEl.onclick = () => storage();
+  // (the notebooks' words (readNotebooks) as last read, kept while the state is the same, so the line doesn't flicker;
+  // a read is drawn only if no newer draw began meanwhile)
+  let syncGen = 0, sideNb: { state: string; nb: Notebooks | undefined } | null = null;
   function showSync() {
-    if (!NO_SYNC) {
-      const v = SyncOwner.of(w).view().s;
-      syncEl.textContent = sidebarLine(v);
+    if (NO_SYNC) { syncEl.hidden = true; return; }
+    const o = SyncOwner.of(w), v = o.view().s, gen = ++syncGen;
+    const draw = (nb: Notebooks | undefined) => {
+      syncEl.textContent = sidebarLine(v, Date.now(), nb);
       syncEl.hidden = !syncEl.textContent;
-    } else syncEl.hidden = true;
+    };
+    draw(sideNb?.state === v.state ? sideNb.nb : undefined);
+    if (v.state === "off") return;
+    readNotebooks(o, host.readUnacked).then((nb) => {
+      if (gen !== syncGen) return;
+      sideNb = { state: v.state, nb };
+      draw(nb);
+    }, () => {});
   }
   // (the rows drawn by the last render, and that render's icons: an older read never paints a newer render's rows)
   let drawnRows: { e: Entry; si: HTMLElement }[] = [], iconGen = 0;

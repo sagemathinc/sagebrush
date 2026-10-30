@@ -584,6 +584,8 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox-855.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-pins.mjs
+          # (EXACT-ONLY's old-sync detector; OLD8's old builds run locally only, with OLD_TREES)
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-old.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-9c2.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-fef.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-12e.mjs
