@@ -25,7 +25,7 @@ This is @sagebrush's ruling on DB2-LL-337-1, with board's CONCUR; it replaces B-
 
 ### Size
 
-E5.6's limit for the panel's code is 9 472 B gzipped. daybreak2 raised it from 9 216 B on #337 r3 for one reason: "DB2-LL-337-2 exact UAX regional-indicator parity across retained windows, plus scalar-safe slice hold."
+E5.6's limit for the panel's code is 9 344 B gzipped, measured with bun 1.4.4 (CI's pin). daybreak2 raised it from 9 216 B on #337 r3 (DB2-LL-337-3) for one reason: "DB2-LL-337-2 exact UAX regional-indicator parity across retained windows, plus scalar-safe slice hold."
 
 ### Caps
 
