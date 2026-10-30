@@ -20,7 +20,7 @@ import { sha256Hex } from "./runtime/sha256";
 
 /** The Core API contract (§6): the major version, and the feature level, which rises with every addition. */
 export const CORE_API = 1;
-export const CORE_API_LEVEL = 7;
+export const CORE_API_LEVEL = 10;
 
 const KiB = 1024, MiB = 1024 * KiB;
 /** Hard limits of set format v1 (§3.4), the same in every host and in the publisher. */
