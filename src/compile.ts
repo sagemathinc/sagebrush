@@ -10,7 +10,7 @@ import { TokState, decodeBytes } from "../pyparse/src/lexer";
 import * as TK from "../pyparse/src/tokens.gen";
 import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
-import { R } from "./runtime/index";
+import { R, ENTRY_FILE, ENTRY_NAME, frameState } from "./runtime/index";
 import { cwdPath, isBuiltinModule } from "./runtime/modules";
 import { dictDelete } from "./runtime/object";
 import { admitIndex, checkChunk, PkgsetError, type ChunkRef, type SetPlan, type SrcChunk, type PreChunk } from "./pkgset";
@@ -232,7 +232,17 @@ export function scriptName(path: string): string {
   return "py:" + path.replace(/[^\w/.~:@+,=-]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
 }
 
+// The entry marker every Python execution runs inside: it counts the
+// executions running, for sys._getframe's proof that a stack is complete
+// (src/runtime/index.ts).  Built from text, in a script of its own, so that
+// its name and script survive bundling and minification.
+const pyEntry: (code: any, g: any, R: any, state: typeof frameState) => any = runInThisContext(
+  `(function ${ENTRY_NAME}(code, g, R, state) { state.entryDepth++; try { return code(g, R); } finally { state.entryDepth--; } })`,
+  { filename: ENTRY_FILE },
+);
+
 // Execute `source` as module `name`, registering it in sys.modules first.
+let moduleRuns = 0;
 export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage")): any {
   const m = R.newModule(name);
   m.__file__ = filename;
@@ -240,7 +250,10 @@ export function execModule(source: string, filename: string, name: string, isPac
   if (isPackage) m.__path__ = [dirname(filename)];
   m.__builtins__ = R.builtins;
   R.dictSet(R.sysModules, name, m);
-  const jsName = scriptName(resolvePath(filename));
+  // (a file run again, by reload or imported under a second name, is a
+  // script of its own: the first run's functions keep their own globals)
+  let jsName = scriptName(resolvePath(filename));
+  if (R.scripts.has(jsName)) jsName += `%run${++moduleRuns}`;
   let compiled: Compiled;
   let script: Script;
   try {
@@ -249,11 +262,11 @@ export function execModule(source: string, filename: string, name: string, isPac
     if (e instanceof PySyntaxError) throw syntaxError(e);
     throw e;
   }
-  R.scripts.set(jsName, { filename, lines: source.split("\n"), lineMap: compiled.lineMap });
+  R.scripts.set(jsName, { filename, lines: source.split("\n"), lineMap: compiled.lineMap, globals: new WeakRef(m) });
   const fn = script.runInThisContext();
   try {
     if (sage) R.loader.exec("from sage_all import *\n", m, "exec", "<sage>");
-    fn(m, R);
+    pyEntry(fn, m, R, frameState);
   } catch (e) {
     dictDelete(R.sysModules, name);
     throw e;
@@ -337,8 +350,8 @@ R.loader.exec = (src: string, ns: any, mode: string, filename: string, opts: Com
   }
   if (mode === "check" || mode === "check-eval" || mode === "check-single") return null;
   const jsName = `py:<exec-${++execCounter}>`; // no spaces: it may become a //# sourceURL
-  R.scripts.set(jsName, { filename, lines: src.split("\n"), lineMap: compiled.lineMap });
-  return runInThisContext(compiled.code, { filename: jsName })(ns, R);
+  R.scripts.set(jsName, { filename, lines: src.split("\n"), lineMap: compiled.lineMap, globals: new WeakRef(ns) });
+  return pyEntry(runInThisContext(compiled.code, { filename: jsName }), ns, R, frameState);
 };
 
 // The pure-Python library (../lib) can be embedded in a single-file build:

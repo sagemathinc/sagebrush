@@ -727,12 +727,14 @@ export class Emitter {
       const decls2 = [...locals, ...this.fn.temps].filter((x) => x !== "$it0");
       const inner2 = `${decls2.length ? `let ${decls2.join(", ")}; ` : ""}${start}${loops.join(" ")} ${body} ${closes.reverse().join(" ")} ${fin[eager]}`;
       this.fn = saved;
-      return `(function genexpr$$($it0) { ${inner2} })(${first})`;
+      return `(function $genexpr$$($it0) { ${inner2} })(${first})`;
     }
     const inner = `${decls.length ? `let ${decls.join(", ")}; ` : ""}${e.kind === "gen" ? "" : `const ${r} = ${e.kind === "list" ? "[]" : e.kind === "set" ? "newSet()" : "newDict()"}; `}${loops.join(" ")} ${body} ${closes.reverse().join(" ")}${e.kind === "gen" ? "" : ` return ${r};`}`;
     this.fn = saved;
-    if (e.kind === "gen") return `(function* genexpr$$($it0) { ${inner} })(${first})`;
-    return `(function ${e.kind}comp$$($it0) { ${inner} })(${first})`;
+    // (compiler-only names: a leading $ no Python identifier can give, so
+    // frames tell these apart from a def of the same name: sys._getframe)
+    if (e.kind === "gen") return `(function* $genexpr$$($it0) { ${inner} })(${first})`;
+    return `(function $${e.kind}comp$$($it0) { ${inner} })(${first})`;
   }
 
   // An assignment's value, evaluated before its target's container and index
@@ -1205,13 +1207,19 @@ export class Emitter {
       }
     });
     this.line = st.line;
+    // (the namespace prepared, and the class made from it, in the frame the
+    // class statement runs in, as CPython's __build_class__: the body's own
+    // frame has returned before the metaclass, __init_subclass__ or
+    // __set_name__ run, so their tracebacks and sys._getframe don't show it)
+    const ns = this.temp();
+    this.w(`${ns} = R.classNamespace(${q(st.name)}, ${b}, [${kwNames.join(", ")}], ${kv}, ${bc});`);
     const c = this.temp();
-    this.w(`${c} = (function ${js(st.name)}$() {`);
+    this.w(`${c} = (function ${js(st.name)}$($ns) {`);
     this.indent++;
     // the class cell, when its functions use __class__ or super()
     const cell = scope.cellName;
     const cdc = scope.classDictName;
-    this.w(`const $ns = R.classNamespace(${q(st.name)}, ${b}, [${kwNames.join(", ")}], ${kv}, ${bc});${cell ? ` const ${cell} = newCell();` : ""}${cdc ? ` const ${cdc} = R.classDictCell($ns);` : ""}`);
+    if (cell || cdc) this.w(`${cell ? `const ${cell} = newCell();` : ""}${cell && cdc ? " " : ""}${cdc ? `const ${cdc} = R.classDictCell($ns);` : ""}`);
     if (decls.length) this.w(`let ${decls.join(", ")};`);
     this.indent--;
     this.splice(lines);
@@ -1219,10 +1227,11 @@ export class Emitter {
     this.indent++;
     if (cell) this.w(`$ns.set("__classcell__", ${cell});`);
     if (scope.classDictName) this.w(`$ns.set("__classdictcell__", ${scope.classDictName});`);
-    const made = `classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, $ns, [${kwNames.join(", ")}], ${kv}, ${cell ?? "undefined"}, ${bc})`;
-    this.w(`return ${made};`);
+    // (its cell, for classDef; none: undefined, as the function returns)
+    if (cell) this.w(`return ${cell};`);
     this.indent--;
-    this.w("})();");
+    this.w(`})(${ns});`);
+    this.w(`${c} = classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, ${ns}, [${kwNames.join(", ")}], ${kv}, ${c}, ${bc});`);
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, c)));
   }
 
@@ -1330,7 +1339,7 @@ export class Emitter {
   // ------------------------------------------------------------ module
 
   module(body: A.Stmt[], evalMode = false): Compiled {
-    this.fn = new Fn(this.top, null, "module$$", null);
+    this.fn = new Fn(this.top, null, "$module$$", null);
     if (evalMode) {
       if (body.length !== 1 || body[0].k !== "Expr") this.fail("invalid syntax", body[0]?.line ?? 1);
       this.line = body[0].line;
@@ -1352,7 +1361,7 @@ export class Emitter {
       for (const s of body) this.stmt(s);
     }
     const head = [
-      "(function module$$($g, R) {",
+      "(function $module$$($g, R) {",
       '"use strict";',
       `const {${RUNTIME_NAMES.join(", ")}} = R;`,
       "const $G = R.realGlobals($g);",

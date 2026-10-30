@@ -373,6 +373,7 @@ export function importStar(m: any, g: any) {
 
 export { heapLimit } from "./heap";
 
+export const sysExtras: Record<string, any> = Object.create(null);
 newBuiltinModule("sys", (m) => {
   m.argv = [];
   m.version = "3.14.0 (pyjs-spike)";
@@ -471,6 +472,8 @@ newBuiltinModule("sys", (m) => {
   fn(m, "exit", (code: any = undefined) => {
     throw markRaised(code === undefined ? T.SystemExit() : T.SystemExit(code));
   });
+  // (sys._getframe and _getframemodulename: index.ts)
+  Object.assign(m, sysExtras);
   fn(m, "intern", (s: string) => s);
   fn(m, "audit", (..._a: any[]) => null);
   fn(m, "addaudithook", (_f: any) => null);
