@@ -1,0 +1,13 @@
+on: push
+jobs:
+  a:
+    runs-on: x
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # branch master
+---
+on: push
+jobs:
+  b:
+    runs-on: x
+    steps:
+      - uses: actions/checkout@v4

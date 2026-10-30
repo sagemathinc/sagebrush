@@ -1,0 +1,4 @@
+on: push
+jobs:
+  a:
+    uses: owner/repo/.github/workflows/x.yml@main
