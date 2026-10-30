@@ -39,6 +39,10 @@ try {
   r = run("pnpm", ["install", "--frozen-lockfile", "--prefer-offline", "--silent"], other);
   ok(r.status === 0, `the second checkout's dependencies install (status ${r.status}): ${(r.stderr ?? "").split("\n").slice(-3).join(" | ")}`);
   if (existsSync(join(root, "build"))) cpSync(join(root, "build"), join(other, "build"), { recursive: true });
+  // (dist/, the TypeScript build, is the second checkout's own, as CI's first step makes it: web/build.ts builds the
+  // terminal's bash package set with scripts/optional-packages.mjs, which loads dist/src's parser and pkgset)
+  r = run("pnpm", ["run", "--silent", "build"], other);
+  ok(r.status === 0, `the second checkout's TypeScript build (pnpm run build) exits 0 (status ${r.status}): ${(r.stderr ?? "").split("\n").slice(-3).join(" | ")}`);
   r = run("bun", [join(other, "web", "build.ts")], other, { SAGEBRUSH_NO_SITE: "1" });
   ok(r.status === 0, `the second build exits 0 (status ${r.status}): ${(r.stderr ?? "").split("\n").slice(-5).join(" | ")}`);
   if (r.status !== 0) throw new Error("the second build failed; nothing to compare");
