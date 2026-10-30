@@ -229,6 +229,18 @@ try {
     check(await b.go(), `${b.name}: reloaded after turning sync on`);
     check(await b.until(`/^Synced/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 30_000), `${b.name}: the sidebar says Synced (${J(await b.syncLine())})`);
   }
+  // ---- 2b (P0 #1): each had its own /Welcome.ipynb before sync, and A turned sync on first: B's own is placed at
+  // "Welcome (2).ipynb" by the server's index (its shared reducer gives the later one the next free name, on every
+  // device), and says "(renamed)"; A's, at the name, has no content in B yet: "on another device", never "missing"
+  // (and B's in A the same)
+  const metaAt = (b, p) => b.ev(`[...document.querySelectorAll("#wssidebar .frow")].filter((r) => r.dataset.path === ${J(p)}).map((r) => r.querySelector(".m")?.textContent ?? "")`);
+  const rowSays = (p, t) => `[...document.querySelectorAll("#wssidebar .frow")].some((r) => r.dataset.path === ${J(p)} && r.querySelector(".m")?.textContent === ${J(t)})`;
+  check(await B.until(rowSays("/Welcome (2).ipynb", "(renamed)"), 30_000), `B: its own Welcome, placed at "Welcome (2).ipynb" by the server's index, says "(renamed)" (${J(await metaAt(B, "/Welcome (2).ipynb"))})`);
+  check(await B.until(rowSays("/Welcome.ipynb", "on another device"), 30_000), `B: A's Welcome, its content not here, says "on another device" (${J(await metaAt(B, "/Welcome.ipynb"))})`);
+  // (B's own Welcome was opened by its reload, so its synced history started and it reaches A: whether A's row says
+  // "on another device" depends on that timing; it is never "missing")
+  await sleep(2000);
+  check(!(await metaAt(A, "/Welcome (2).ipynb")).includes("missing"), `A: B's Welcome is never "missing" (${J(await metaAt(A, "/Welcome (2).ipynb"))})`);
   // ---- 3. a notebook made and typed in A appears, with its cell, in B; B's edit comes back
   // (the Files sidebar's New, Notebook, with the journal on: a notebook made, listed (it was refused before the fix))
   const notebooks = () => A.ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "notebook").map((e) => ({ path: e.path, ref: e.ref })))`);

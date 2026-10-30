@@ -282,6 +282,37 @@ async function migration() {
   await rawPut(w.main, "notebooks", { id: "nb2", name: "Untitled", mode: "magma", cells: [], rev: 1, updated: 6 });
   await W.migrate(w, localStorage);
   check(!(await w.stat(gone.path)).missing, "…and unmarked when it's back");
+  const J = JSON.stringify;
+  // (P0 #1) another device's notebook (`remote`), its content not here: never marked missing, and a mark an older
+  // build wrote taken off
+  await rawDel(w.main, "notebooks", "nb2");
+  await rawPut(w.ws, "entries", { ...(await w.stat(gone.path)), remote: true, missing: true });
+  const r5 = await W.migrate(w, localStorage);
+  const remote = await w.stat(gone.path);
+  check(remote.remote === true && !remote.missing && r5.missing === 0, "another device's notebook, its content not here: not marked missing, an older mark taken off: " + J({ missing: remote.missing, r5: r5.missing }));
+  // (P0 #1, the defensive rule) the notebooks' store read empty (every record gone at once): this device's own
+  // notebooks are not marked missing, and that is said; one record back and one gone: marked as before
+  const said = [], warn = console.warn;
+  console.warn = (...a) => { said.push(String(a[0])); };
+  try {
+    const own = (await w.list("/")).filter((e) => e.kind === "notebook" && !e.remote && !e.missing);
+    const kept = [];
+    const FENCE = "__sagebrush-workspace__";
+    for (const id of await rawKeys(w.main, "notebooks")) if (id !== FENCE) kept.push([id, await rawGet(w.main, "notebooks", id)]);
+    for (const [id] of kept) await rawDel(w.main, "notebooks", id);
+    const left = (await rawKeys(w.main, "notebooks")).filter((k) => k !== FENCE);
+    const r6 = await W.migrate(w, localStorage);
+    const after = await Promise.all(own.map((e) => w.stat(e.path)));
+    check(own.length >= 2 && left.length === 0 && after.every((e) => !e.missing) && r6.missing === 0 && said.some((x) => /store reads empty: not marked missing/.test(x)), "the notebooks' store read empty: this device's own notebooks not marked missing, said: " + J({ own: own.length, left, marked: after.filter((e) => e.missing).length, said }));
+    for (const [id, rec] of kept.slice(1)) await rawPut(w.main, "notebooks", rec);
+    said.length = 0;
+    const r7 = await W.migrate(w, localStorage);
+    const firstGone = own.find((e) => e.ref === kept[0][0]);
+    check(!!firstGone && (await w.stat(firstGone.path)).missing === true && r7.missing === 1 && said.some((x) => /1 entries marked missing/.test(x)), "…with others' records there, the one gone is marked as before, and the mark said with the stores' counts: " + J({ r7: r7.missing, said }));
+    await rawPut(w.main, "notebooks", kept[0][1]);
+  } finally {
+    console.warn = warn;
+  }
   w.close();
 }
 

@@ -86,7 +86,7 @@ const STYLE = `
 .sbfiles .frow:focus-visible { outline: 2px solid #4a6b49; outline-offset: -2px; }
 .sbfiles .frow.cur { background: #e6eedf; font-weight: 600; }
 .sbfiles .frow.drop { outline: 2px dashed #4a6b49; background: #eef4ea; }
-.sbfiles .frow.missing .n { color: #8a8f8b; font-style: italic; }
+.sbfiles .frow.missing .n, .sbfiles .frow.elsewhere .n { color: #8a8f8b; font-style: italic; }
 .sbfiles .frow .ic { width: 16px; height: 16px; flex: none; display: inline-flex; }
 .sbfiles .frow .ic svg { width: 16px; height: 16px; }
 .sbfiles .frow .chev { width: 10px; color: #8a8f8b; font-size: 10px; flex: none; }
@@ -246,8 +246,12 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
 
   // (each folder's entries, sorted, built once per refresh: LIMIT-0B0-2)
   let byParent = new Map<string, Entry[]>();
+  // (P0 #1: the documents whose content is in this browser, read at each refresh, so another device's that hasn't
+  // arrived reads "on another device", and stops as soon as it is here)
+  let here: { notebook: Set<string>; board: Set<string> } = { notebook: new Set(), board: new Set() };
   async function refresh() {
     try { entries = await w.list(trashView ? TRASH : "/", { recursive: true }); } catch (e) { fail(e); }
+    if (entries.some((e) => e.remote && (e.kind === "notebook" || e.kind === "board"))) here = await w.contentIds().catch(() => here);
     byParent = new Map();
     for (const e of entries) {
       const p = parentOf(e.path);
@@ -265,8 +269,17 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // (the open document's path, as of the latest refresh)
   let curPath: string | undefined;
 
+  /** Another device's, its content not here yet: a data file not fetched yet, or a document with no content here. */
+  function elsewhere(e: Entry) {
+    if (!e.remote) return false;
+    if (e.kind === "file") return true;
+    return (e.kind === "notebook" || e.kind === "board") && !!e.ref && !here[e.kind].has(e.ref);
+  }
   function metaOf(e: Entry) {
     if (e.missing) return "missing";
+    // (P0 #1: another device's, its content not here yet; and this device's own, renamed by the server's index)
+    if (elsewhere(e)) return "on another device";
+    if (e.renamed?.to === e.path) return "(renamed)";
     if (e.kind === "file") return fmtSize(e.size ?? 0);
     if (e.kind === "folder") return "";
     return LANG[e.mode ?? ""] ?? "";
@@ -279,11 +292,12 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     r.style.paddingLeft = 8 + depth * 16 + "px";
     if (curPath === e.path) r.classList.add("cur");
     if (e.missing) r.classList.add("missing");
+    if (elsewhere(e)) r.classList.add("elsewhere");
     const isOpen = e.kind === "folder" && (open.has(e.path) || query !== "");
     if (e.kind === "folder") r.setAttribute("aria-expanded", String(isOpen));
     const chev = h("span", { className: "chev", textContent: e.kind === "folder" ? (isOpen ? "▾" : "▸") : "" });
     const ic = h("span", { className: "ic", innerHTML: iconOf(e) });
-    const name = h("span", { className: "n", textContent: nameOf(e.path), title: e.path });
+    const name = h("span", { className: "n", textContent: nameOf(e.path), title: elsewhere(e) ? `${e.path}: on another device; its content arrives once that device syncs it` : e.renamed?.to === e.path ? `${e.path}: renamed from ${nameOf(e.renamed.from)}: another device has one with that name` : e.path });
     const meta = h("span", { className: "m", textContent: opts.recent ? fmtWhen(e.updated) : metaOf(e) });
     const more = h("button", { className: "ib more", textContent: "⋯", title: "More" });
     more.setAttribute("aria-label", `More: ${nameOf(e.path)}`);
