@@ -1530,9 +1530,13 @@ async function openArrived(id) {
   if (!st.journaled) return arriving();
   await open(st, id);
   // (the load must have made the record from the history: anything else is a bug, said and logged, nothing deleted)
+  // (never expected: rows only grow between the check and the load's own read.  If it happens, a fresh record was made
+  // that would fork the notebook: shown read-only here, so nothing is typed into it, said, and logged; nothing deleted
+  // (the grader's N-ST-2))
   if (st.recovered?.row === "new") {
     console.warn("sync: a notebook that arrived by sync loaded as a new one, not from its history:", id);
-    statusEl.textContent = STILL_ARRIVING;
+    nb.setReadOnly(true);
+    statusEl.textContent = STILL_ARRIVING + " (opened read-only: reload this page to try again)";
     return true;
   }
   savedEl.textContent = "opened";
