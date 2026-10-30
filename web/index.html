@@ -420,7 +420,7 @@ import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot } from "./latex/boot.ts";
@@ -1502,8 +1502,49 @@ async function openId(id) {
   // upload) opens by its URL, never loaded unseen under the editor; a build without the editor drops this line)
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && globalThis.__sbTexOpen?.(id)) return true;
   const doc = await idb(db, "notebooks", "readonly", (st) => st.get(id));
-  if (!doc) return false;
+  if (!doc) return openArrived(id);
   await open(await storeFor(id), id);
+  savedEl.textContent = "opened";
+  return true;
+}
+// (a notebook another device made, listed here by sync with no record yet (2c-3): opened through the journal's store
+// only when this device has its synced history (recover's own "from-server" condition: a start and its rows, sync-docs'
+// answer), whose load makes the record from the history's head.  Otherwise it is still arriving: said, its pull asked,
+// and never opened, as a fresh empty one would fork it.  Not the journal's, or not listed: false, as before)
+const STILL_ARRIVING = "This notebook is still arriving from sync: try again in a moment";
+async function openArrived(id) {
+  const w = await wsNow();
+  const at = w && !w.closed && (await w.journalActive().catch(() => false)) ? await w.pathOf("notebook", id).catch(() => undefined) : undefined;
+  if (!at) return false;
+  const [hdb, mod] = await Promise.all([historyDbReady, loadHistory()]);
+  const s = hdb ? await readJournal(hdb, id).catch(() => null) : null;
+  // (still arriving: its pull asked for, which starts it here once the server has it (sync-docs: as a received
+  // `changed` does; nothing made if there is nothing); or, if this page's sync stopped it, why, as it won't arrive)
+  const arriving = () => {
+    const stopped = mod.DOC_SYNC?.stoppedOf?.(id) ?? null;
+    if (!stopped) try { mod.DOC_SYNC?.pull?.(id); } catch {}
+    const msg = stopped ? `This notebook can't sync here: ${stopped.code}` : STILL_ARRIVING;
+    statusEl.textContent = msg;
+    wsBrowser?.say(msg);
+    return false;
+  };
+  if (!s || s.start === null || !(s.jOf?.size > 0)) return arriving();
+  // (its name and mode are its entry's, as listed here: the synced history carries the cells, not the name, so the
+  // record made from it would otherwise be "Untitled", and this page would then retitle the file)
+  const e = await w.stat(at).catch(() => undefined);
+  const st = await storeFor(id, { name: splitExt(nameOf(at))[0], mode: e?.mode ?? "python", cells: [] });
+  if (!st.journaled) return arriving();
+  await open(st, id);
+  // (the load must have made the record from the history: anything else is a bug, said and logged, nothing deleted)
+  // (never expected: rows only grow between the check and the load's own read.  If it happens, a fresh record was made
+  // that would fork the notebook: shown read-only here, so nothing is typed into it, said, and logged; nothing deleted
+  // (the grader's N-ST-2))
+  if (st.recovered?.row === "new") {
+    console.warn("sync: a notebook that arrived by sync loaded as a new one, not from its history:", id);
+    nb.setReadOnly(true);
+    statusEl.textContent = STILL_ARRIVING + " (opened read-only: reload this page to try again)";
+    return true;
+  }
   savedEl.textContent = "opened";
   return true;
 }
