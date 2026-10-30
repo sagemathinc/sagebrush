@@ -3,6 +3,10 @@ name: ci
 
 env:
   SAGEBRUSH_CPUS_OVERRIDE: ${{ vars.CI_CPUS }}
+  # (a stalled cache download (setup-* and actions/cache restores, @actions/cache's segment timeout) gives up as a
+  # cache miss after 2 minutes instead of the default 10: #381's attempts 1 and 2 lost 10 minutes of each job's budget
+  # to it while the account's cache egress was over its limit, and jobs hit their timeouts)
+  SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
 
 on:
   push:
