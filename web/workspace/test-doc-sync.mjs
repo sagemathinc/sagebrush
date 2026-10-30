@@ -908,7 +908,10 @@ try {
         const s10 = await A.ev(`(() => { T.edNb.replace({ ...structuredClone(T.edStore.doc), cells: [{ id: "p", code: "OLD" }] }); return T.edState(); })()`);
         check(s10.texts[0][1] === "OLD" && s10.copies === 0, "X9: the editor: a revert (TimeTravel) replaces the text, never merged with the unsaved edit: " + J(s10));
         // X10: a merge whose base this device can't give completely (a version its journal records that its live history
-        // doesn't hold) waits: nothing written, nothing sent; once the version is here, the next arrival merges (BASE-1)
+        // doesn't hold) waits: the real store's mergeRemote reaches mergeBaseOf's refusal and says so ("a change from
+        // elsewhere waits"); nothing written, nothing sent; once the version is here, the next arrival merges (BASE-1;
+        // the grader's R-XO-1: a phantom journal row stopped B's history before the merge, so this hides a held version
+        // from the graph for B's merges instead)
         const ND = "33333333-2222-4333-8444-5555555555fa";
         await A.call("open", ND, [["da", "D0"], ["db", "E0"]]);
         await A.call("kick", ND);
@@ -916,20 +919,23 @@ try {
         await B.call("kick", ND, true);
         await settle();
         await B.call("open", ND);
-        await B.call("phantom", ND, true);
+        await B.call("hideVersion", ND, true);
         const [brD0, bjD0] = [await B.call("record", ND), await B.call("journal", ND)];
+        const [bw0, bh0] = [await B.call("warnCount"), await B.call("hiddenCount")];
         await A.call("edit", ND, [["da", "D1"], ["db", "E0"]]);
         await settle();
         const headD = CLOUD ? null : ref.controls.doc(ACCOUNT, ND)?.head;
         await settle();
         const [brD1, bjD1] = [await B.call("record", ND), await B.call("journal", ND)];
         const headD1 = CLOUD ? null : ref.controls.doc(ACCOUNT, ND)?.head;
-        await B.call("phantom", ND, false);
+        const [bwD, bhD] = [await B.call("warnsFrom", bw0), (await B.call("hiddenCount")) - bh0];
+        const waited = bwD.filter((w) => w.includes("sync: a change from elsewhere waits:")).length;
+        await B.call("hideVersion", ND, false);
         await A.call("edit", ND, [["da", "D2"], ["db", "E0"]]);
         await settle();
         await settle();
         const brD2 = await B.call("record", ND);
-        check(brD1.codes === brD0.codes && brD1.j === brD0.j && bjD1.lrows === bjD0.lrows && headD1 === headD && brD2.codes === J([["da", "D2"], ["db", "E0"]]), "X10: a merge whose base isn't all here waits: B's record and journal unchanged, nothing sent; once it is, the next arrival merges: " + J({ before: brD0.codes, waiting: brD1.codes, lrows: [bjD0.lrows, bjD1.lrows], head: [headD, headD1], after: brD2.codes }));
+        check(bhD >= 1 && waited >= 1 && bwD.every((w) => !w.includes("not merged") || w.includes("a change from elsewhere waits:")) && brD1.codes === brD0.codes && brD1.j === brD0.j && bjD1.lrows === bjD0.lrows && headD1 === headD && brD2.codes === J([["da", "D2"], ["db", "E0"]]), "X10: a merge whose base isn't all here waits: B's merge refused by mergeBaseOf, saying so, B's record and journal unchanged, nothing sent; once it is, the next arrival merges: " + J({ hidden: bhD, waited, warns: bwD, before: brD0.codes, waiting: brD1.codes, lrows: [bjD0.lrows, bjD1.lrows], head: [headD, headD1], after: brD2.codes }));
         // X11: the notebook open in A's page when its synced history starts, an unsaved edit in that page, the other device's
         // change to another cell: both kept, once each, on both.  (Starting on an open page stamps the record at the synced
         // root (its j the root's), so this isn't fix (a)'s shape: that shape, a record whose j predates the root, comes from a
