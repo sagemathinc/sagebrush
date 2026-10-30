@@ -1,0 +1,6 @@
+on: push
+jobs:
+  a:
+    runs-on: x
+    steps:
+      - uses: actions/checkout@11d5960 # v4.4.0
