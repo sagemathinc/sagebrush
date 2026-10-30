@@ -34,6 +34,12 @@ export interface NotebookDoc {
   [key: string]: unknown;
 }
 
+/** The answer to one input() question: call it once with the line, or null for end of input.  The kernel calls onretire, if set, when the question is over unanswered (its run asked another, was stopped or ended). */
+export interface InputReply {
+  (text: string | null): void;
+  onretire?: () => void;
+}
+
 /** What happens to code that runs: the kernel calls these. */
 export interface OutputSink {
   start?(): void;
@@ -43,6 +49,8 @@ export interface OutputSink {
   /** Controls of an @interact (Sagebrush's protocol). */
   interact(spec: object): void;
   clear(): void;
+  /** Optional: input() asks for a line.  Call reply(text) once with what was typed (no newline), or reply(null) for end of input.  Without it, input() reads end of input. */
+  input?(prompt: string, reply: InputReply): void;
   done(ms: number): void;
   /** Interrupted or restarted: `message` says which. */
   stopped(message: string): void;

@@ -449,9 +449,14 @@ def test_pending_cleared_on_every_path():
 
 def test_strict_json_frames():
     """CORR-6DA-5 (astra): a frame of JSON with NaN or Infinity, a lone
-    surrogate, or bytes that aren't UTF-8 closes the connection (1007)."""
+    surrogate, bytes that aren't UTF-8, or a key twice in an object (which
+    another reader could take differently: P319-B1) closes the connection
+    (1007)."""
     for body in [b'{"jsonrpc": "2.0", "id": "h", "method": "hello", "params": {"protocol": 1, "code": NaN}}',
-                 b'[Infinity]', b'"\\ud800"', b'\xff\xfe']:
+                 b'[Infinity]', b'"\\ud800"', b'\xff\xfe',
+                 b'{"jsonrpc": "2.0", "id": "h", "method": "hello", "params": {"protocol": 1, "code": "A", "code": "B"}}',
+                 b'{"jsonrpc": "2.0", "jsonrpc": "2.0", "id": "h", "method": "hello", "params": {}}',
+                 b'[{"a": 1}, {"b": {"c": 1, "c": 2}}]']:
         p, port, code = new()
         c = Client(port)
         c.send_frame(0x1, body)
@@ -466,6 +471,18 @@ def test_strict_json_frames():
     t.start()
     m = c.recv()
     c.send_frame(0x1, ('{"jsonrpc":"2.0","id":"%s","result":{"entries":[{"path":"/\\udc00","kind":"file"}]}}' % m["id"]).encode())
+    t.join(10)
+    _, s, err = out["r"]
+    assert err and s["error"]["code"] == "not_connected", s
+    c.close()
+    p.close()
+    # and a result with a key twice: the same, the pairing ended, the duplicate never read
+    p, c = paired()
+    out = {}
+    t = threading.Thread(target=lambda: out.update(r=WS.call(p, "workspace_list", {"folder": "/"}, timeout=10)))
+    t.start()
+    m = c.recv()
+    c.send_frame(0x1, ('{"jsonrpc":"2.0","id":"%s","result":{"entries":[],"entries":[{"path":"/x","kind":"file"}]}}' % m["id"]).encode())
     t.join(10)
     _, s, err = out["r"]
     assert err and s["error"]["code"] == "not_connected", s
