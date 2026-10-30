@@ -1829,7 +1829,21 @@ async function workspaceMade() {
   check(typeof plain === "string" && /journal/.test(plain), "a plain store's save stays refused under the journal: " + J(plain));
   w.close();
 }
-const CASES = [workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued];
+// (a notebook still arriving by sync (2c-3): what the page says, and whether its pull is asked for.  With no pull to
+// ask (this page's notebook sync off: the switch decided off, or failed), it says so and asks nothing)
+async function arrivingSays() {
+  const asked = [];
+  const on = { pull: (id) => asked.push(id), stoppedOf: () => null };
+  check(N.arrivingSay("a", on) === N.STILL_ARRIVING && J(asked) === J(["a"]), "a notebook still arriving, sync on here: said so, its pull asked for: " + J(asked));
+  const stopped = { pull: (id) => asked.push(id), stoppedOf: (id) => (id === "b" ? { code: "too_large" } : null) };
+  check(N.arrivingSay("b", stopped) === "This notebook can't sync here: too_large" && J(asked) === J(["a"]), "…stopped by this page's sync: why, and no pull asked");
+  for (const off of [{ pull: null, stoppedOf: null }, {}]) check(N.arrivingSay("c", off) === "Notebook sync isn't on in this page: reload it" && N.SYNC_NOT_ON === "Notebook sync isn't on in this page: reload it", "…with no pull to ask (notebook sync off in this page): \"isn't on in this page: reload it\": " + J(off));
+  check(N.arrivingSay("d", { pull: () => { throw new Error("x"); }, stoppedOf: () => null }) === N.STILL_ARRIVING, "…a pull that throws: still \"still arriving\", nothing thrown");
+  check(N.DOC_SYNC.pull === null && N.arrivingSay("e") === N.SYNC_NOT_ON, "…the page's own DOC_SYNC, its pull not set: \"isn't on\"");
+  // (the page reads them from its history module, sagebrush-history.js)
+  check(H.arrivingSay === N.arrivingSay && H.STILL_ARRIVING === N.STILL_ARRIVING, "…the page's history module gives the same arrivingSay and words");
+}
+const CASES = [arrivingSays, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);

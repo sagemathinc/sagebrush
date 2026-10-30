@@ -2458,6 +2458,50 @@ async function s5DetailsGap() {
   }
 }
 
+async function s5Refused() {
+  // (sync-docs' follow-up, @sagebrush's call: a change the server refused never leaves the foot at "Synced" alone.  The
+  // foot counts the refusals nobody has looked at and points to their list; opening it marks them looked at, the
+  // count goes, the list stays open and keeps them all)
+  const now = Date.now();
+  check(W.foot({ state: "synced" }, now, 1) === `Synced · 1 change couldn't sync (see "the server refused" below)` && W.foot({ state: "synced" }, now, 0) === "Synced" && W.foot({ state: "off" }, now, 3) === "Sync off" && /· 2 changes couldn't sync/.test(W.foot({ state: "offline", waiting: 1 }, now, 2)), "refused: the foot's words with and without unseen refusals, never when sync is off");
+  const rs = [{ dseq: 1, code: "conflict", path: "/a.txt", at: 10 }, { dseq: 2, code: "too_large", path: "/b.bin", at: 20 }, { dseq: 3, code: "x", path: "", at: 30 }];
+  check(W.unseenRefusals(rs, 0) === 3 && W.unseenRefusals(rs, 20) === 1 && W.unseenRefusals(rs, 30) === 0 && W.unseenRefusals(undefined, 0) === 0, "refused: unseenRefusals counts those after the mark");
+  const w = await fresh();
+  const ns = nsFor(w, "e");
+  await W.switchTo(w, ns);
+  // (this browser's sync on and synced, as the owner's view says, with no client of its own: the panel draws the foot)
+  const owner = W.SyncOwner.of(w), view = owner.view;
+  owner.view = () => ({ from: "own", s: { state: "synced" } });
+  try {
+  const marks = [];
+  // (the mark as the meta would keep it: a redraw after opening reads the new one)
+  const readDetails = async () => [undefined, rs, marks.length ? marks.at(-1)[1] : 10];
+  const markSeen = async (n, at) => { marks.push([n, at]); };
+  const el = document.body.appendChild(document.createElement("div")), srv = fakeServer({ available: true, state: "active", generation: 2 });
+  const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch, readDetails, markSeen });
+  const seen = await until(() => /2 changes couldn't sync/.test(text(el)), 3000);
+  const first = el.querySelector("details.sync-refused");
+  check(seen && /Sync is on: Synced · 2 changes couldn't sync \(see "the server refused" below\)/.test(text(el)) && /3 changes the server refused \(2 new\)/.test(text(el)) && !!first && !first.open, "refused: the foot counts the 2 after the mark and points to the list, which says so: " + text(el).slice(0, 200));
+  // (opened as a person would, the list as drawn now: a poll's redraw may have replaced the one found first)
+  const opened = () => { const l = el.querySelector("details.sync-refused"); if (l && !l.open) l.open = true; return l; };
+  const cleared = await until(() => { opened(); return marks.length > 0 && !/couldn't sync/.test(text(el)); }, 3000);
+  const list = el.querySelector("details.sync-refused");
+  check(cleared && J(marks) === J([[ns, 30]]) && !!list?.open && /Sync is on: Synced/.test(text(el)) && /3 changes the server refused/.test(text(el)) && !/new\)/.test(text(el)), "refused: opening the list marks up to the newest (30), the foot's count goes, the list stays open with all 3: " + J(marks) + " " + text(el).slice(0, 200));
+  s.dispose();
+  // (nothing unseen: the foot as before, no mark written on opening)
+  const el2 = document.body.appendChild(document.createElement("div"));
+  const s2 = W.syncSection(w, el2, hostOf(w), { fetch: srv.fetch, readDetails: async () => [undefined, rs, 30], markSeen });
+  await until(() => !!el2.querySelector("details.sync-refused"), 3000);
+  for (let i = 0; i < 5; i++) { const l = el2.querySelector("details.sync-refused"); if (l) l.open = true; await sleep(100); }
+  check(!/couldn't sync/.test(text(el2)) && marks.length === 1 && /Sync is on/.test(text(el2)), "refused: all seen: the foot without a count, opening writes no mark: " + text(el2).slice(0, 160));
+  s2.dispose();
+  el.remove();
+  el2.remove();
+  } finally {
+    owner.view = view;
+  }
+}
+
 async function s5Wire() {
   // (daybreak3's TEST-PR130-2-R2: a status publication within STATUS_PUB.maxBytes, the whole serialized message
   // measured, UTF-8: a maximum-width namespace, the largest numbers, every optional field, and long reasons, of ASCII,
@@ -3653,7 +3697,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

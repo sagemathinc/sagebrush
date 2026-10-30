@@ -150,8 +150,11 @@ export type SectionHost = { say(text: string): void; fail(e: unknown): void; usa
 
 /** The Sync section, drawn into `into`; dispose() (the panel's close) ends its poll and its subscription. */
 /** What the details read gives: the listed paths and the refusals of namespace `ns` (a seam for tests). */
-type DetailsRead = (ns: string) => Promise<[{ count: number; paths: [string, string][] } | undefined, Refusal[] | undefined]>;
-export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, opts: { fetch?: Fetch; random?: () => number; after?: (ms: number, f: () => void) => () => void; readDetails?: DetailsRead } = {}): { dispose: () => void; poll: PanelPoll; refresh: () => void } {
+/** (and when the refusals were last looked at: the time of the newest one then shown, 0 if never) */
+type DetailsRead = (ns: string) => Promise<[{ count: number; paths: [string, string][] } | undefined, Refusal[] | undefined, number?]>;
+/** Records that this device's refusals up to `at` were looked at (a seam for tests). */
+type MarkSeen = (ns: string, at: number) => Promise<void>;
+export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, opts: { fetch?: Fetch; random?: () => number; after?: (ms: number, f: () => void) => () => void; readDetails?: DetailsRead; markSeen?: MarkSeen } = {}): { dispose: () => void; poll: PanelPoll; refresh: () => void } {
   const f: Fetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const confirmFn = host.confirm ?? ((t: string) => confirm(t)), promptFn = host.prompt ?? ((t: string) => prompt(t));
   const owner = SyncOwner.of(w);
@@ -167,7 +170,13 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   let renderGen = 0;
   const readDetails: DetailsRead = opts.readDetails ?? ((ns) => new Promise((ok, no) => {
     const meta = w.ws.transaction("meta").objectStore("meta");
-    Promise.all([req(meta.get(`sync:${ns}:listed`)), req(meta.get(`sync:${ns}:refused`))]).then((v) => ok(v as any), no);
+    Promise.all([req(meta.get(`sync:${ns}:listed`)), req(meta.get(`sync:${ns}:refused`)), req(meta.get(`sync:${ns}:refusedSeen`))]).then((v) => ok(v as any), no);
+  }));
+  const markSeen: MarkSeen = opts.markSeen ?? ((ns, at) => new Promise((ok, no) => {
+    const tx = w.ws.transaction("meta", "readwrite");
+    tx.objectStore("meta").put(at, `sync:${ns}:refusedSeen`);
+    tx.oncomplete = () => ok();
+    tx.onerror = tx.onabort = () => no(tx.error);
   }));
   // (every status read bound to the lifecycle it started under: one that a lifecycle change overtook is dropped and
   // asked again, never applied (astra3's CORR-PR130-3))
@@ -242,7 +251,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       sec.append(btn("Turn on sync…", () => void enable()));
       if (on) sec.append(h("p", { className: "note", textContent: "Sync is on for your account, not in this browser." }));
     } else {
-      sec.append(h("p", { textContent: `Sync is on: ${foot(v.s)}` }), btn("Turn off sync here", () => void off()));
+      // (the foot: its count of refused changes not yet looked at is added by the details' read, below)
+      sec.append(h("p", { className: "sync-foot", textContent: `Sync is on: ${foot(v.s)}` }), btn("Turn off sync here", () => void off()));
       // (DEV's switch for notebooks' contents: what it does and doesn't do yet, and that it lasts in this browser)
       if (docSyncOrigin(location.origin)) sec.append(h("ul", { className: "note" }, ...DOC_SYNC_NOTE.map((t) => h("li", { textContent: t }))));
     }
@@ -274,14 +284,35 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     try {
       const life = await owner.durable();
       if (!life || !current()) return;
-      const [listed, refused] = await readDetails(life.ns);
+      const [listed, refused, seenAt] = await readDetails(life.ns);
       if (!current()) return;
       const now = await owner.durable();
       if (!current() || !now || now.ns !== life.ns || now.epoch !== life.epoch) return;
       const parts: HTMLElement[] = [];
       if (listed?.count) parts.push(h("details", {}, h("summary", { textContent: `${listed.count} item${listed.count === 1 ? "" : "s"} sync kept aside` }), ...listed.paths.slice(0, 20).map(([p, why]) => h("div", { textContent: `${p} (${why})` }))));
-      if (refused?.length) parts.push(h("details", {}, h("summary", { textContent: `${refused.length} change${refused.length === 1 ? "" : "s"} the server refused` }), ...refused.slice(-20).map((r) => h("div", { textContent: `${r.path || "(no path)"}: ${r.code}` }))));
+      // (changes the server refused that nobody has looked at yet: counted in the foot, which points here; opening
+      // this list marks them looked at, and the count goes)
+      const unseen = unseenRefusals(refused, seenAt ?? 0);
+      if (refused?.length) {
+        const what = `${refused.length} change${refused.length === 1 ? "" : "s"} the server refused`;
+        const summary = h("summary", { textContent: what + (unseen ? ` (${unseen} new)` : "") });
+        const list = h("details", { className: "sync-refused" }, summary, ...refused.slice(-20).map((r) => h("div", { textContent: `${r.path || "(no path)"}: ${r.code}` })));
+        // (marked in place, the list left open: the foot and the summary lose the count once the mark is kept)
+        if (unseen) list.addEventListener("toggle", () => {
+          if (!list.open || !current()) return;
+          const newest = Math.max(...refused.map((r) => r.at));
+          markSeen(life.ns, newest).then(() => {
+            if (!current()) return;
+            summary.textContent = what;
+            const f = sec.querySelector(".sync-foot");
+            if (f) f.textContent = `Sync is on: ${foot(owner.view().s)}`;
+          }, () => {});
+        });
+        parts.push(list);
+      }
       box.replaceChildren(...parts);
+      const footEl = sec.querySelector(".sync-foot");
+      if (unseen && footEl) footEl.textContent = `Sync is on: ${foot(owner.view().s, Date.now(), unseen)}`;
     } catch {
       if (current()) box.replaceChildren(h("p", { className: "note", textContent: "This browser's sync details can't be read now" }));
     }
@@ -436,8 +467,14 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   return { dispose: () => { poll.close(); renderGen++; unsub(); }, poll, refresh: () => poll.request() };
 }
 
-/** The foot's words for a snapshot (r2 §2.3). */
-export function foot(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now = Date.now()): string {
+/** The foot's words for a snapshot (r2 §2.3), and, while sync is on, how many changes the server refused that nobody
+ * has looked at yet, pointing to their list (the panel's "changes the server refused", below the foot). */
+export function foot(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now = Date.now(), refused = 0): string {
+  const base = footOf(s, now);
+  if (!(refused > 0) || s.state === "off" || base === "Sync off") return base;
+  return `${base} · ${refused} change${refused === 1 ? "" : "s"} couldn't sync (see "the server refused" below)`;
+}
+function footOf(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now: number): string {
   const n = s.waiting ?? 0;
   if (s.full) return "too many changes waiting to sync";
   switch (s.state) {
@@ -448,6 +485,10 @@ export function foot(s: { state: string; waiting?: number; reason?: string; last
     case "connecting": case "waiting": return "Connecting…";
     default: return "Sync off";
   }
+}
+/** How many of `refused` came after `seenAt` (the newest refusal's time when the list was last opened). */
+export function unseenRefusals(refused: Refusal[] | undefined, seenAt: number): number {
+  return (refused ?? []).filter((r) => typeof r?.at === "number" && r.at > seenAt).length;
 }
 function ago(ms: number) {
   const m = Math.floor(ms / 60_000);
