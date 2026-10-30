@@ -28,3 +28,13 @@ def index(a):
     # (checked as every other __index__ result: numpy's scalar shims refused
     # as CPython refuses NumPy's, a strict subclass with a DeprecationWarning)
     return _pyjs_types.int_result("__index__", r)
+
+
+
+# (_compare_digest, which only hmac uses, lives in lib/_pyjs_digest.py and is
+# imported on first use, so it isn't part of every start: this module is)
+def __getattr__(name):
+    if name == "_compare_digest":
+        from _pyjs_digest import _compare_digest
+        return _compare_digest
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "reason": "hmac revision 2 (astra's H354-A1/A2, @sagebrush's core question): _compare_digest moved out of _operator into lib/_pyjs_digest.py (group mod-pyjs-digest, a new bundle with its budgets.json entry), imported on first use, so core grows only by _operator's module __getattr__; memoryview's contiguity getters. It replaces this PR's own unmerged first marker (2026-10-30-stdlib-hmac.json, deleted: it measured _compare_digest in core). Measured locally with CI's bun 1.4.4 tool: master ddd39d23 against this head; cli/pyjs.cjs +14440 marked 14482 (42 B for drift), the other rows exact.",
+  "bytes": {
+    "cli/lib.gen.js": 13029,
+    "cli/pyjs.cjs": 14482,
+    "engine/lib/core.pre": 1152,
+    "engine/lib/core.src": 381,
+    "engine/sagebrush-worker.js": 1807
+  }
+}
