@@ -127,6 +127,30 @@ function typeCall(...args: any[]): any {
   raise(T.TypeError, "type() takes 1 or 3 arguments");
 }
 const type = builtinType("type", [object], typeCall);
+// type(name, bases, ns, **kw), as CPython's type_call and type_new: the
+// most derived metaclass of the bases makes the class, its own __new__ (if
+// it has one) called directly, not through its metaclass's __call__, with
+// the caller's dict and the keywords; then the new class's type's __init__
+// gets them too.  type's own __new__ passes them to __init_subclass__, and
+// metaclass= is one of them here, not the class statement's.
+type.$kw = (pos: any[], names: string[], values: any[]) => {
+  if (names.length === 0) return typeCall(...pos);
+  if (pos.length !== 3) raise(T.TypeError, pos.length === 1 ? "type() takes no keyword arguments" : "type() takes 1 or 3 arguments");
+  const [name, bases, ns] = pos;
+  if (typeof name !== "string") raise(T.TypeError, `type.__new__() argument 1 must be str, not ${typeName(name)}`);
+  if (!isinstance(bases, T.tuple)) raise(T.TypeError, `type.__new__() argument 2 must be tuple, not ${typeName(bases)}`);
+  if (!(ns instanceof PyDict)) raise(T.TypeError, `type.__new__() argument 3 must be dict, not ${typeName(ns)}`);
+  const winner = classMetaclass(O.toArray(bases), [], []).meta;
+  const obj = winner !== type && lookupType(winner, "__new__") !== typeNew
+    ? callKw(getattr(winner, "__new__"), [winner, name, bases, ns], names, values)
+    : typeNewImpl(type, name, bases, ns, new Map(names.map((n, i) => [n, values[i]])));
+  if (isinstance(obj, type)) {
+    const init = lookupType(typeOf(obj), "__init__");
+    const r = init === typeInit ? null : callKw(init, [obj, name, bases, ns], names, values);
+    if (r !== null) raise(T.TypeError, `__init__() should return None, not '${typeName(r)}'`);
+  }
+  return obj;
+};
 type.$customGet = true;
 // type.__getattribute__: type's own lookup (CPython's type_getattro: the
 // metaclass's data descriptors, the class's MRO through __get__(None, cls),

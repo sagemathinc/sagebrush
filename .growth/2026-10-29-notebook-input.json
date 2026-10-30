@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "reason": "Notebook input(): the builtin and the session's stdin option, the worker's wait, the kernel's and the notebook's answer field, and the input() relay in the sandboxed run frame (PR 308; the relay's commentary is in design/runner.md). Measured locally with CI's bun 1.4.4 tool: master 00c7ddc5 against the merged head b5ff117b.",
+  "bytes": {
+    "cli/pyjs.cjs": 3554,
+    "engine/runner/index.html": 1832,
+    "engine/sagebrush-notebook.js": 2079,
+    "engine/sagebrush-worker.js": 1352
+  }
+}
