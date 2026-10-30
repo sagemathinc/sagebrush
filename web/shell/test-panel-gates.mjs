@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { devtoolsPort, startServe } from "../test-port.mjs";
 
 const here = join(import.meta.dir, "..");
-if (!existsSync(join(here, "dist", "shell", "preview-set.json"))) throw new Error("build web/dist with SAGEBRUSH_TERMINAL=1 first");
+if (!existsSync(join(here, "dist", "shell", "preview-set.json"))) throw new Error("build web/dist first (bun web/build.ts)");
 const RUNS = Number(process.argv[process.argv.indexOf("--runs") + 1]) || 20;
 // (--only C2: one control, for a diagnostic run)
 const ONLY = process.argv.includes("--only") ? process.argv[process.argv.indexOf("--only") + 1] : null;

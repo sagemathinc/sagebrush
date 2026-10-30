@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { devtoolsPort, startServe } from "../test-port.mjs";
 
 const here = join(import.meta.dir, "..");
-if (!existsSync(join(here, "dist", "shell", "preview-set.json"))) throw new Error("build web/dist with SAGEBRUSH_TERMINAL=1 first");
+if (!existsSync(join(here, "dist", "shell", "preview-set.json"))) throw new Error("build web/dist first (bun web/build.ts)");
 let checks = 0;
 const fails = [];
 const check = (ok, what) => {
@@ -67,6 +67,12 @@ try {
   })()`);
   await evaluate(`document.querySelector("#termbtn").click()`);
   check(!!(await until(`(() => { const t = document.querySelector(".sb-term"); return t && !t.hidden; })()`, 15000)), "the dock opens");
+  // (T358-2/3: the intro above the prompt, in the tab's first terminal: a static line, not live, named by the input)
+  const intro = await evaluate(`(() => { const i = document.querySelector(".sb-term-intro"); const t = document.querySelector(".sb-term textarea");
+    return i && { text: i.textContent, live: i.getAttribute("aria-live"), role: i.getAttribute("role"), described: (t.getAttribute("aria-describedby") || "").split(" "),
+      above: i.getBoundingClientRect().bottom <= t.getBoundingClientRect().top + 1 }; })()`);
+  check(intro && /Trash/.test(intro.text) && /other devices/.test(intro.text) && !intro.live && !intro.role && intro.described.includes("sb-term-intro") && intro.described.includes("sb-term-note") && intro.above,
+    `T358-3: the intro, above the prompt, static, named by the input: ${JSON.stringify(intro)}`);
   check(!!(await until(`!!document.querySelector(".sb-term-loading") || document.querySelector(".sb-term").dataset.startMs !== undefined`, 5000)), "opening shows 'Starting the shell…' while bash loads (or it was already up)");
   check(!!(await until(`document.querySelector(".sb-term").dataset.startMs !== undefined && !document.querySelector(".sb-term-loading")`, 30000)), "the loading line goes once the shell is up");
   const covered = await evaluate(`(() => {
@@ -325,7 +331,7 @@ try {
   await until(`document.querySelector(".sb-term").classList.contains("running")`, 10000);
   await setInput("echo later");
   await key("Enter");
-  const note = await evaluate(`(() => { const nt = document.querySelector(".sb-term-note"); return { shown: !nt.hidden, live: nt.getAttribute("aria-live"), described: ${ta}.getAttribute("aria-describedby") === nt.id }; })()`);
+  const note = await evaluate(`(() => { const nt = document.querySelector(".sb-term-note"); return { shown: !nt.hidden, live: nt.getAttribute("aria-live"), described: (${ta}.getAttribute("aria-describedby") || "").split(" ").includes(nt.id) }; })()`);
   await evaluate(`document.querySelector(".sb-term-stop").click()`);
   await until(`!document.querySelector(".sb-term").classList.contains("running")`, 10000);
   check(note.shown && note.live === "polite" && note.described && (await evaluate(`document.querySelector(".sb-term-note").hidden`)) === true, `TP-6: the note is polite and describes the input, and is gone after the run: ${JSON.stringify(note)}`);
@@ -436,6 +442,8 @@ try {
   await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden`, 10000);
   await key("ArrowUp");
   check((await cmdCount()) === 0 && (await evaluate(`${ta}.value`)) === "", "a new session after ✕: no scrollback and no history");
+  check((await evaluate(`document.querySelectorAll(".sb-term-intro").length`)) === 0 && (await evaluate(`${ta}.getAttribute("aria-describedby")`)) === "sb-term-note",
+    "T358-3: the intro once per tab: a new terminal in the same tab has none");
   // (under 700 px: a full-height sheet)
   await send("Emulation.setDeviceMetricsOverride", { width: 600, height: 800, deviceScaleFactor: 1, mobile: false });
   await new Promise((res) => setTimeout(res, 300));
