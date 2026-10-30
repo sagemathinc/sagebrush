@@ -24,7 +24,7 @@ async function signedIn(server, account) {
     server.fetch(new Request("https://ref.test" + path, { method, headers: { cookie, ...(body !== undefined && !(body instanceof Uint8Array) ? { "content-type": "application/json" } : {}), ...headers }, body: body === undefined ? undefined : body instanceof Uint8Array ? body : J(body) }));
   return { cookie, call, account };
 }
-async function socket(server, who, device) {
+async function socket(server, who, device, hello = {}) {
   const s = await server.connect(who.cookie);
   if (!s.send) throw new Error("connect refused: " + J(s));
   const got = [], waiters = [];
@@ -52,7 +52,7 @@ async function socket(server, who, device) {
   };
   const tell = (m) => { const r = ++req; s.send(J({ ...m, req: r })); return r; };
   if (device) {
-    s.send(J({ t: "hello", v: 1, device, name: device, index_after: 0 }));
+    s.send(J({ t: "hello", v: 1, device, name: device, index_after: 0, ...hello }));
     await next((m) => m.t === "welcome");
     await next((m) => m.t === "index");
   }
@@ -517,6 +517,88 @@ const C1 = "clientA1", C2 = "clientB1";
   check(shapeMismatch(ep, by("pull", "another epoch")) === null, "answers: a pull for another epoch, as the vector: " + (shapeMismatch(ep, by("pull", "another epoch")) ?? J(ep)));
   check(shapeMismatch(ec, by("doc_claim", "another epoch")) === null, "answers: a claim for another epoch, as the vector: " + (shapeMismatch(ec, by("doc_claim", "another epoch")) ?? J(ec)));
   s9.s.close();
+}
+
+// ---- merge modes (plan-merge-align r3.2 §2-§3): the mode fixed when a document is made (exact-v1 only with the switch
+// on, a socket that runs it and a claim that asks for it), never changed after (no upgrade, no downgrade, a clear keeps
+// it), merge_mode on every document operation from a socket that doesn't run it (nothing changed), no `changed` to it,
+// and `merge` in answers only to a socket whose hello said merge (an older client's answers keep their shapes)
+
+{
+  const MV = JSON.parse(readFileSync(new URL("./doc-vectors.json", import.meta.url), "utf8")).merge;
+  const by = (f, w) => MV.answers.find((x) => x.for === f && x.when.startsWith(w))?.shape;
+  const RUNS = { merge: ["legacy", "exact-v1"] };
+  const made = async (srv, who) => { const u = await signedIn(srv, who); await u.call("POST", "/api/sync/v1/enable"); return u; };
+  const on = new ReferenceServer({ exactMerge: true }), off = new ReferenceServer();
+  const M = await made(on, "acct-merge"), O = await made(off, "acct-merge-off");
+  const n = await socket(on, M, "devM0001", RUNS), old = await socket(on, M, "devM0002"), n2 = await socket(on, M, "devM0003", RUNS);
+  const D1 = "0000000000d1", D2 = "0000000000d2", D3 = "0000000000d3", D5 = "0000000000d5";
+  const claim = (x, doc, client, extra = {}) => x.ask({ t: "doc_claim", epoch: 1, doc, client, ...extra });
+  // (made: exact-v1 only when asked by a socket that runs it, with the switch on)
+  const c1 = await claim(n, D1, "cMerge1", { merge: "exact-v1" });
+  check(c1.t === "ack" && c1.claim.merge === "exact-v1" && shapeMismatch(c1, by("doc_claim", "to a socket whose hello said")) === null, "merge: a claim asking exact-v1, from a socket that runs it, switch on: made exact-v1, said in the ack: " + J(c1));
+  const c2 = await claim(n, D2, "cMerge2");
+  check(c2.claim?.merge === "legacy", "merge: a claim asking nothing: made legacy: " + J(c2));
+  const c3 = await claim(n, D3, "cMerge3", { merge: "legacy" });
+  check(c3.claim?.merge === "legacy", "merge: a claim asking legacy (a replay restore's): made legacy: " + J(c3));
+  const c5 = await claim(old, D5, "cMerge5", { merge: "exact-v1" });
+  check(c5.t === "ack" && !("merge" in c5.claim) && shapeMismatch(c5, by("doc_claim", "to a socket whose hello didn't")) === null, "merge: asked by a socket that doesn't run exact-v1: made legacy; its ack as before, no merge: " + J(c5));
+  const c5n = await claim(n, D5, "cMerge5b");
+  check(c5n.claim?.merge === "legacy", "merge: …and it is legacy: " + J(c5n));
+  const no = await socket(off, O, "devO0001", RUNS);
+  const c4 = await claim(no, D1, "cMerge4", { merge: "exact-v1" });
+  check(c4.claim?.merge === "legacy", "merge: the switch off: made legacy whatever is asked: " + J(c4));
+  no.s.close();
+  // (never changed after: no upgrade, no downgrade)
+  const up = await claim(n2, D2, "cMerge6", { merge: "exact-v1" }), down = await claim(n2, D1, "cMerge7", { merge: "legacy" });
+  check(up.claim?.merge === "legacy" && down.claim?.merge === "exact-v1", "merge: a later claim's merge changes nothing: legacy stays legacy, exact-v1 stays exact-v1: " + J([up.claim, down.claim]));
+  // (a batch on the exact document from the socket that runs it, then every operation from one that doesn't: merge_mode)
+  const ok = await n.ask(batch(D1, 1, { cMerge1: 0 }, [{ cseq: 1, id: pid(1, "cMerge1") }]));
+  check(ok.t === "ack" && ok.batch.new === 1, "merge: a batch on an exact-v1 document from a socket that runs it: stored: " + J(ok));
+  const before = J(on.controls.doc(M.account, D1));
+  const refused = (r, what) => check(r.t === "error" && r.code === "merge_mode" && r.detail?.merge === "exact-v1" && (what === "fence" || what === "clear" || shapeMismatch(r, by(what === "claim" ? "doc_claim" : what, "the document's mode")) === null), `merge: ${what} on an exact-v1 document from a socket that doesn't run it: merge_mode, detail.merge: ` + J(r));
+  refused(await claim(old, D1, "cOld1"), "claim");
+  refused(await old.ask({ t: "doc_fence", epoch: 1, doc: D1, clients: [{ client: "cMerge1", target: 1 }] }), "fence");
+  refused(await old.ask(batch(D1, 1, { cOld1: 0 }, [{ cseq: 1, id: pid(2, "cOld1") }])), "batch");
+  refused(await old.ask({ t: "pull", doc: D1, epoch: 1, after: 0 }), "pull");
+  refused(await old.ask({ t: "clear", doc: D1, expect_head: { epoch: 1, seq: 1 }, root: patches([{ cseq: 2, id: pid(3, "cMerge1") }]), fgen: { cMerge1: 0 } }), "clear");
+  check(J(on.controls.doc(M.account, D1)) === before, "merge: …and none of them changed the document");
+  // (`changed`: to a socket that runs the mode, never to one that doesn't; nor in hello's documents)
+  const n3 = await socket(on, M, "devM0004", RUNS);
+  await n.ask(batch(D1, 1, { cMerge1: 0 }, [{ cseq: 2, id: pid(4, "cMerge1"), parents: [pid(1, "cMerge1")] }]));
+  const told = await n3.next((m) => m.t === "changed" && m.doc === D1, 2000, "changed").catch(() => null);
+  await sleep(30);
+  check(!!told && !old.got.some((m) => m.t === "changed" && m.doc === D1), "merge: changed told to a socket that runs exact-v1, not to one that doesn't");
+  const late = await socket(on, M, null);
+  late.s.send(J({ t: "hello", v: 1, device: "devM0005", name: "x", index_after: 0, docs: [{ owner: (await (await M.call("GET", "/api/sync/v1/status")).json()).account, doc: D1, after: 0 }] }));
+  await late.next((m) => m.t === "welcome");
+  await sleep(30);
+  check(!late.got.some((m) => m.t === "changed" && m.doc === D1), "merge: hello's documents: no changed for one the socket doesn't run");
+  // (a pull: `merge` only to a socket that said merge)
+  const pn = await n.ask({ t: "pull", doc: D1, epoch: 1, after: 0 }), po = await old.ask({ t: "pull", doc: D2, epoch: 1, after: 0 });
+  check(pn.merge === "exact-v1" && shapeMismatch(pn, by("pull", "a page, to a socket whose hello said")) === null, "merge: a pull's page to a socket that said merge carries the document's mode: " + J(pn).slice(0, 200));
+  check(po.t === "batches" && !("merge" in po), "merge: a pull of a legacy document by an older socket: as before, no merge: " + J(po).slice(0, 200));
+  // (a cached claim gets no pass: the same device's next socket, its hello without merge, is refused)
+  const again = await socket(on, M, "devM0001");
+  refused(await again.ask(batch(D1, 1, { cMerge1: 0 }, [{ cseq: 3, id: pid(5, "cMerge1"), parents: [pid(4, "cMerge1")] }])), "batch");
+  check(on.controls.doc(M.account, D1).head === 2, "merge: …the claimed client's batch on a socket without merge stored nothing");
+  // (a clear keeps the mode: the new epoch is exact-v1, and an older socket still refused)
+  const head = on.controls.doc(M.account, D1);
+  const cl = await n.ask({ t: "clear", doc: D1, expect_head: { epoch: head.epoch, seq: head.head }, root: patches([{ cseq: 3, id: pid(6, "cMerge1") }]), fgen: { cMerge1: 0 } });
+  const after = await n.ask({ t: "doc_claim", epoch: 2, doc: D1, client: "cMerge1", merge: "legacy" });
+  check(cl.t === "ack" && after.claim?.merge === "exact-v1", "merge: a clear keeps the mode: epoch 2 is exact-v1 (a claim asking legacy changes nothing): " + J([cl.t, after]));
+  refused(await old.ask({ t: "pull", doc: D1, epoch: 2, after: 0 }), "pull");
+  // (hello's merge: checked; a socket that runs no mode this server knows is refused every document, and makes none)
+  const bad = await socket(on, M, null);
+  bad.s.send(J({ t: "hello", v: 1, device: "devM0006", name: "x", index_after: 0, merge: "legacy" }));
+  const be = await bad.next((m) => m.t === "error");
+  check(be.code === "invalid", "merge: hello with merge not a list: invalid: " + J(be));
+  const future = await socket(on, M, "devM0007", { merge: ["exact-v9"] });
+  const fr = await claim(future, "0000000000d9", "cMerge9", { merge: "exact-v1" });
+  check(fr.code === "merge_mode" && on.controls.doc(M.account, "0000000000d9") === null, "merge: a socket that runs no mode this server knows: merge_mode, no document made: " + J(fr));
+  const badClaim = await claim(n, "0000000000da", "cMergeA", { merge: "exact-v2" });
+  check(badClaim.code === "invalid" && on.controls.doc(M.account, "0000000000da") === null, "merge: a claim asking a mode that isn't one: invalid, nothing made: " + J(badClaim));
+  for (const x of [n, old, n2, n3, late, again, bad, future]) x.s.close();
 }
 
 } catch (e) {
