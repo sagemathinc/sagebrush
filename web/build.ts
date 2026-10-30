@@ -476,6 +476,27 @@ if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_QUESTIONS === "1
   mkdirSync(join(here, "dist", "questions"), { recursive: true });
   copyFileSync(join(here, "questions", "index.html"), join(here, "dist", "questions", "index.html"));
 }
+// the terminal's module (plan-bash-shell r8c step 6, web/shell/terminal.ts): loaded by the notebook page only when
+// its ⋯ ▸ Terminal is first opened, so the page carries none of the shell's host, loader or panel
+{
+  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "shell", "terminal.ts")], outdir: join(here, "dist", "shell"), naming: "terminal.js", target: "browser", format: "esm", minify: true });
+  builds.push(["the terminal (shell/terminal.js)", r]);
+  if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
+  if (hasSite) copyFileSync(join(here, "dist", "shell", "terminal.js"), join(siteDir, "public", "shell", "terminal.js"));
+}
+// the terminal panel's preview (plan-bash-shell r8c step 6, web/shell/panel.ts): a hosted preview serves no pkgset/
+// or pkg/, so its build carries the bash package set itself (scripts/optional-packages.mjs, the same build the
+// optional tier publishes) and names it in shell/preview-set.json.  Flagged like the questions preview: only for a
+// hosted preview or with SAGEBRUSH_TERMINAL=1; removed otherwise, so a flagged build's set never outlives it.
+for (const d of ["pkg", "pkgset", "pkgmeta"]) rmSync(join(here, "dist", d), { recursive: true, force: true });
+rmSync(join(here, "dist", "shell", "preview-set.json"), { force: true });
+if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_TERMINAL === "1") {
+  const { execFileSync } = await import("node:child_process");
+  const S = execFileSync("node", [join(here, "..", "scripts", "optional-packages.mjs"), "build", "--out", join(here, "dist"), "bash"], { encoding: "utf8" }).trim().split("\n").pop()!;
+  if (!/^[0-9a-f]{64}$/.test(S)) throw new Error(`the terminal preview's package set: not an id: ${JSON.stringify(S)}`);
+  mkdirSync(join(here, "dist", "shell"), { recursive: true });
+  writeFileSync(join(here, "dist", "shell", "preview-set.json"), JSON.stringify({ S }) + "\n");
+}
 if (hasSite) mkdirSync(join(siteDir, "public", "embed"), { recursive: true });
 if (hasSite) mkdirSync(join(siteDir, "public", "runner"), { recursive: true });
 // the shared collection page, served for /s/<id> by the site's Worker
