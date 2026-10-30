@@ -372,7 +372,19 @@ def sdk():
     print("official MCP client: ok")
 
 
+def version():
+    # --version: one line on stdout, both packages' versions, without starting the server
+    for flag in ("--version", "-V"):
+        p = subprocess.run([sys.executable, "-m", "sagebrush.mcp_server", flag], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+        assert p.returncode == 0, p
+        line = p.stdout
+        import re
+        assert re.fullmatch(r"sagebrush-mcp( [0-9][0-9a-z.+-]*| dev)? \(sagebrush ([0-9][0-9a-z.+-]*|dev)\)\n", line), repr(line)
+    print("--version: ok:", line.strip())
+
+
 if __name__ == "__main__":
+    version()
     raw()
     structured()
     cancelling()

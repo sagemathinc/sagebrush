@@ -2,6 +2,7 @@
 // Named after the reviews' implementation tests (astra LC-T1..T7, daybreak3 DB3-IMPL-1..4).
 //   bun web/latex/test-comments-core.mjs
 import * as C from "./comments-core.mjs";
+import { createHash } from "node:crypto";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 600)); };
@@ -261,6 +262,30 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
   check("source-limit-exactly-2Mi-ok", !throws(() => C.resolver(at)) && !throws(() => C.makeAnchor(at, 0, 1)));
   const e1 = throws(() => C.resolver(over)), e2 = throws(() => C.makeAnchor(over, 0, 1));
   check("source-limit-one-over-refused", e1?.code === "limit" && e1.detail?.limit === "sourceUnits" && e2?.code === "limit" && /up to 2 MiB \(this one is 2\.0 MiB\)/.test(e1.message), e1?.message);
+}
+
+// ---- (#316 r4) the hasher's reused encode buffer: in 8 Ki-unit pieces (and pieces of every size, the buffer grown
+// and reused), the digest is the same as in one call and as node's own SHA-256 of the UTF-8 bytes, on each fixture
+{
+  const fixtures = [TEX, "", "\u00e9t\u00e9 \u{1F600} \u{1D4AA}", "\u{1F600}".repeat(9000) + "a", ("caf\u00e9 \u4e2d\u6587 ").repeat(5000), "x".repeat(70000)];
+  const node = (x) => createHash("sha256").update(Buffer.from(new TextEncoder().encode(x))).digest("hex");
+  let same = true;
+  for (const f of fixtures) {
+    for (const piece of [1 << 13, 1, 7, 64, 1 << 16]) {
+      const h = C.sha256Hasher();
+      for (let i = 0; i < f.length;) { const j = C.sliceAt(f, i + piece); h.update(f.slice(i, j)); i = j; }
+      if (h.digest() !== C.sha256(f) || C.sha256(f) !== node(f)) same = false;
+    }
+  }
+  check("r4-hasher-reused-buffer-same-digest", same);
+  // (r6) the page's schedule, sha256Steps: 256 units, doubling to 8 Ki; a text across several doublings, a lone high
+  // and a lone low surrogate at piece edges, and pairs across them: the same digest as one call and as node's (the
+  // lone high surrogate at the first edge makes that piece 257 units: a piece never ends on a high surrogate)
+  const run = (t, first, max) => { const g = C.sha256Steps(t, first, max), sizes = []; for (;;) { const x = g.next(); if (x.done) return { d: x.value, sizes }; sizes.push(x.value.size); } };
+  const edgy = "a".repeat(255) + "\uD800" + "b".repeat(255) + "\uDC00" + "c".repeat(1022) + "\u{1F600}" + "d".repeat(2046) + "\uD83D" + "e".repeat(20000) + "\u{1D4AA}".repeat(5000);
+  const e = run(edgy, 256, 1 << 13);
+  check("r6-hash-steps-same-digest", e.d === C.sha256(edgy) && e.d === node(edgy) && e.sizes[0] === 257 && e.sizes.slice(0, 6).every((n, k) => Math.abs(n - 256 * 2 ** k) <= 1) && Math.max(...e.sizes) <= (1 << 13) + 1 && e.sizes.reduce((a, b) => a + b, 0) === edgy.length, { sizes: e.sizes.slice(0, 8) });
+  check("r6-hash-steps-fixtures", fixtures.every((f) => run(f, 256, 1 << 13).d === node(f)));
 }
 
 // ---- (astra, #316 r2) the first pass over the text is admitted too: a budget below it reads nothing (no hash, no

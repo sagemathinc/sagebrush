@@ -806,7 +806,7 @@ check(sinks.every((s) => s.terminals === 1), `every request had exactly one term
   const { runUiTests } = await import("./test-remote-ui.mjs");
   const ran = await runUiTests(check);
   console.log(`remote-ui: ${ran} controls ran`);
-  check(ran === 41, `remote-ui: every control ran (${ran} of 41)`);
+  check(ran === 50, `remote-ui: every control ran (${ran} of 50)`);
 }
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);
