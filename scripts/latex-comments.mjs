@@ -41,7 +41,8 @@ function readable(v) {
 if (!cmd || !tex || ["-h", "--help"].includes(cmd)) { process.stdout.write(readFileSync(new URL(import.meta.url), "utf8").split("\n").slice(1, 10).map((l) => l.replace(/^\/\/ ?/, "")).join("\n") + "\n"); process.exit(cmd ? 0 : 2); }
 const texPath = resolvePath(tex), side = texPath + ".comments.json", lock = side + ".lock";
 const file = { fid: null, path: texPath };
-const readText = () => { try { return readFileSync(texPath, "utf8"); } catch { die(new C.CommentsError("missing", "no file " + tex)); } };
+// (the text as the editor has it, so offsets agree with the page's: UTF-8, a BOM kept as U+FEFF, line endings as LF)
+const readText = () => { try { return readFileSync(texPath, "utf8").replace(/\r\n?/g, "\n"); } catch { die(new C.CommentsError("missing", "no file " + tex)); } };
 const readSide = () => (existsSync(side) ? readFileSync(side, "utf8") : null);
 const range = (s) => { const m = /^(\d+):(\d+)-(\d+):(\d+)$/.exec(s ?? ""); if (!m) die(new C.CommentsError("invalid", "a range is L:C-L:C")); return { start: { line: +m[1], col: +m[2] }, end: { line: +m[3], col: +m[4] } }; };
 const author = () => { const a = opt("author"); if (!a || !/^(person|agent):\S/.test(a)) die(new C.CommentsError("invalid", "--author person:<name> or agent:<name> is required to write")); return a; };

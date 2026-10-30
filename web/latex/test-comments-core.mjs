@@ -83,13 +83,14 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
 
 // ---- DB3-IMPL-3: the work budget, every inspection charged; the adversarial repeated quote
 {
-  const phrase = "the same words again ", big = phrase.repeat(Math.floor((4 << 20) / phrase.length));
+  // (at the largest source comments take: 2 Mi units; the plan's 4 MiB became 2 MiB with the source limit, PR 316)
+  const phrase = "the same words again ", big = phrase.repeat(Math.floor(C.LIMITS.sourceUnits / phrase.length));
   const R = C.resolver(big);
   const anchors = Array.from({ length: 2000 }, () => ({ start: 0, end: phrase.length, quote: phrase, prefix: "", suffix: "", textSha: "stale" }));
   const t0 = performance.now();
   const st = anchors.map((x) => R.resolve(x).status);
   const ms = performance.now() - t0, counts = st.reduce((m, x) => ((m[x] = (m[x] || 0) + 1), m), {});
-  check("DB3-IMPL-3-adversarial-bounded", R.work() <= C.LIMITS.workBudget + 4 * big.length && st.every((x) => x === "ambiguous" || x === "unresolved") && ms < 20000, { work: R.work(), ms: Math.round(ms), counts });
+  check("DB3-IMPL-3-adversarial-bounded", R.work() <= C.LIMITS.workBudget && st.every((x) => x === "ambiguous" || x === "unresolved") && ms < 20000, { work: R.work(), ms: Math.round(ms), counts });
   console.log("adversarial:", JSON.stringify({ work: R.work(), budget: C.LIMITS.workBudget, ms: Math.round(ms), counts }));
 }
 
@@ -234,6 +235,54 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
     if (re5) check("LC-T7-2MiB-refusal-atomic", re5.code === "limit" && S5.get() === before && new TextEncoder().encode(before).length <= C.LIMITS.sidecarBytes, { code: re5.code }); else replies++;
   }
   check("LC-T7-replies-until-2MiB", re5 && replies > 20, { replies });
+}
+
+// ---- DB3-BUDGET-1 / LC316-A3: the work budget is a hard bound (each step charged before it runs), and the steps a
+// page runs between frames give what resolve gives
+{
+  const para = (i) => `Paragraph ${i}: ordinary words with a phrase numbered ${i}.\n\n`;
+  let big = ""; for (let i = 0; big.length < (1 << 20); i++) big += para(i);
+  const anchors = Array.from({ length: 40 }, (_, k) => { const q = `a phrase numbered ${k * 97}.`, s = big.indexOf(q); return { ...C.makeAnchor(big, s, s + q.length, undefined, "x"), textSha: "stale" }; });
+  // (each of the 40 moved anchors scans the whole 1 MiB text: 3 and 5 Mi run out, the default 64 Mi doesn't)
+  for (const budget of [3 << 20, 5 << 20, C.LIMITS.workBudget]) {
+    const R = C.resolver(big, budget), st = anchors.map((a) => R.resolve(a).status);
+    check("DB3-BUDGET-1-hard-bound-" + (budget >> 20) + "Mi", R.work() <= budget && st.every((x) => x === "moved" || x === "unresolved") && st.includes("unresolved") === (budget < C.LIMITS.workBudget), { work: R.work(), budget, st: st.join(",").slice(0, 200) });
+  }
+  const R1 = C.resolver(big), R2 = C.resolver(big);
+  let yields = 0, same = true;
+  for (const a of anchors) { const g = R2.steps(a); let r; for (;;) { r = g.next(); if (r.done) break; yields++; } if (JSON.stringify(r.value) !== JSON.stringify(R1.resolve(a))) same = false; }
+  check("LC316-A3-steps-same-as-resolve", same && yields >= anchors.length && R1.work() === R2.work(), { yields, w1: R1.work(), w2: R2.work() });
+}
+
+// ---- PR 316's source limit: comments on a .tex of at most 2 Mi UTF-16 units; one more is refused, by the resolver and
+// by makeAnchor, with the size in the message
+{
+  const at = "x".repeat(C.LIMITS.sourceUnits), over = at + "y";
+  check("source-limit-exactly-2Mi-ok", !throws(() => C.resolver(at)) && !throws(() => C.makeAnchor(at, 0, 1)));
+  const e1 = throws(() => C.resolver(over)), e2 = throws(() => C.makeAnchor(over, 0, 1));
+  check("source-limit-one-over-refused", e1?.code === "limit" && e1.detail?.limit === "sourceUnits" && e2?.code === "limit" && /up to 2 MiB \(this one is 2\.0 MiB\)/.test(e1.message), e1?.message);
+}
+
+// ---- LC316-A1: the 2 MiB bound on reading is in UTF-8 bytes, as on writing: multibyte text at, and one byte over
+{
+  const enc = (x) => new TextEncoder().encode(x).length, LIM = C.LIMITS.sidecarBytes;
+  const anc = C.makeAnchor(TEX, 0, 5);
+  const one = C.addThread(C.emptyDoc({}), { anchor: anc, text: "中".repeat(2000), ...H }).doc.threads[0];
+  const doc = C.emptyDoc({}); let k = 0;
+  const file = (d) => JSON.stringify(d, null, 1) + "\n";
+  while (enc(file(doc)) < LIM - 12000) doc.threads.push({ ...JSON.parse(JSON.stringify(one)), id: "t_" + String(k++).padStart(16, "0") });
+  // the last thread's text set so the file is exactly 2 MiB: three-byte characters, then one-byte ones
+  const last = JSON.parse(JSON.stringify(one)); last.id = "t_last"; last.messages[0].text.value = ""; doc.threads.push(last);
+  const need = LIM - enc(file(doc)), cjk = Math.min(Math.floor(need / 3), 7000), ascii = need - 3 * cjk;
+  last.messages[0].text.value = "中".repeat(cjk) + "x".repeat(ascii);
+  const atLim = file(doc);
+  last.messages[0].text.value += "x";
+  const overLim = file(doc);
+  check("LC316-A1-multibyte-at-2MiB-read", enc(atLim) === LIM && atLim.length < LIM && !throws(() => C.parse(atLim)), { bytes: enc(atLim), units: atLim.length });
+  const oe = throws(() => C.parse(overLim));
+  check("LC316-A1-multibyte-one-over-refused", enc(overLim) === LIM + 1 && overLim.length < LIM && oe?.code === "limit" && oe.detail?.size === LIM + 1, { bytes: enc(overLim), code: oe?.code });
+  check("LC316-A1-read-and-write-agree", throws(() => C.serialize(C.parse(atLim))) === null || throws(() => C.serialize(C.parse(atLim)))?.code === "limit");
+  globalThis.__overLim = overLim;
 }
 
 // ---- DB3-IMPL-1: list summaries, paged by id, stale on change

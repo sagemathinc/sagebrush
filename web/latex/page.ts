@@ -397,6 +397,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (saving) { say("saving…"); return; }
     if (!isDirty()) { say("No changes to save"); return; }
     const text = src.value;
+    // (the comments' anchors with this text, taken now: before anything waits, an edit can't move them in between)
+    const snap = cm?.snapshot();
     const bytes = encodeText(text, eol);
     if (bytes.length > EDIT_MAX) { say("Not saved: over the prototype's 4 MiB limit"); return; }
     saving = true; showDirty(); say("saving…");
@@ -404,9 +406,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       const at = await host.ws.pathOfFile(host.fid);
       if (!at.ok) { say("Not saved: this file isn't here any more"); return; }
       if (at.entry.remote) { say("Not saved: this file is in the cloud"); return; }
+      // (the test build only: the page test can hold the .tex's write here; elsewhere this folds away)
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexSaveWrite?.();
       await host.ws.write(at.path, bytes, { fid: host.fid });
       savedText = text;
-      void cm?.saved(text);
+      void cm?.saved(snap);
       if (at.path !== where.path) { title.textContent = nameOf(at.path); title.title = at.path; }
       say("Saved");
     } catch (err) {

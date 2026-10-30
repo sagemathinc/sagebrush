@@ -5,9 +5,13 @@
 
 export const FORMAT = "sagebrush-latex-comments";
 export const VERSION = 1;
+/** A range the resolver searches in a copy (a short one), and the piece of a long span it hashes in one step. */
+const WINDOW = 1 << 17;
 /** r3 §7.4 and r4.1 §8: one admission and output contract. */
 export const LIMITS = {
-  sidecarBytes: 2 << 20, newThreadBytes: 1.75 * (1 << 20), threadBytes: 256 << 10, sourceUnits: 4 << 20,
+  // (sourceUnits: comments on a .tex of at most 2 Mi UTF-16 units, its length as a JS string; the editor opens files up
+  // to 4 MiB, and above this limit shows that comments aren't available for it: @sagebrush, PR 316)
+  sidecarBytes: 2 << 20, newThreadBytes: 1.75 * (1 << 20), threadBytes: 256 << 10, sourceUnits: 2 << 20,
   liveThreads: 2000, threads: 4000, messages: 200, text: 8000, author: 100, id: 64,
   quoteFull: 600, quoteHead: 300, context: 32, shown: 300, candidates: 64, workBudget: 64 << 20,
   listThreads: 200, listBytes: 1 << 20, summaryUnits: 500, contextLines: 3, contextLineUnits: 200, changedWindow: 2000,
@@ -106,7 +110,9 @@ export function validate(doc) {
 /** The file's text parsed and validated (a missing file: null gives an empty document). */
 export function parse(text, file) {
   if (text === null || text === undefined) return emptyDoc(file);
-  if (text.length * 3 > LIMITS.sidecarBytes * 3 && new TextEncoder().encode(text).length > LIMITS.sidecarBytes) fail("limit", "the comments file is over 2 MiB", { limit: "sidecarBytes", max: LIMITS.sidecarBytes });
+  // (its UTF-8 length, always: a file of multibyte text is over 2 MiB long before its UTF-16 length is)
+  const n = text.length > LIMITS.sidecarBytes ? text.length : utf8(text);
+  if (n > LIMITS.sidecarBytes) fail("limit", "the comments file is over 2 MiB", { limit: "sidecarBytes", max: LIMITS.sidecarBytes, size: n });
   let doc; try { doc = JSON.parse(text); } catch { fail("invalid", "the comments file isn't JSON"); }
   return validate(doc);
 }
@@ -119,9 +125,14 @@ export function serialize(doc) {
 }
 
 // ---- anchors (r3 §7.3): a span of the text, with what is needed to find it again
+/** Comments are for a .tex of at most 2 Mi UTF-16 units (LIMITS.sourceUnits): a longer one is refused, "limit". */
+export function sourceFits(text) {
+  if (text.length > LIMITS.sourceUnits) fail("limit", "comments are available for documents up to 2 MiB (this one is " + (text.length / (1 << 20)).toFixed(1) + " MiB)", { limit: "sourceUnits", max: LIMITS.sourceUnits, size: text.length });
+}
 /** An anchor for [start, end) of `text`: the whole span (up to 600 units), or its head, tail, length and sha
  * (`textSha`: the text's, when the caller has it already). */
 export function makeAnchor(text, start, end, shown, textSha) {
+  sourceFits(text);
   if (!(Number.isInteger(start) && Number.isInteger(end) && 0 <= start && start <= end && end <= text.length)) fail("invalid", "a range inside the text");
   const span = text.slice(start, end);
   const a = { start, end, textSha: textSha ?? sha256(text), prefix: text.slice(Math.max(0, start - LIMITS.context), start), suffix: text.slice(end, end + LIMITS.context) };
@@ -141,86 +152,121 @@ export function lineIndex(text) {
   return { starts, at, off, lines: starts.length };
 }
 
-// edit distance of two short strings (contexts, at most 32 units each)
-function dist(a, b) {
-  const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
-  let prev = Array.from({ length: n + 1 }, (_, j) => j);
-  for (let i = 1; i <= m; i++) { const cur = [i]; for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; }
-  return prev[n];
-}
-
 /** A resolver over one text: shared work (one hash, one line index) and one work budget for every anchor resolved
  * through it (r3 §7.6, r4 §8.5: every inspection of the source is charged: the hash, each search's span, each long
- * span's hash, each edit distance, each pairing step, each extraction). resolve(anchor) -> {status, start, end,
- * candidates?}; status: exact | moved | changed | ambiguous | orphaned | unresolved (out of budget: never a guess). */
+ * span's hash, each pairing step, each extraction), never exceeded: a step is charged before it runs, and an anchor
+ * whose next step doesn't fit is "unresolved" (budget). resolve(anchor) -> {status, start, end, candidates?}; status:
+ * exact | moved | changed | ambiguous | orphaned | unresolved (never a guess). steps(anchor) is the same as a generator
+ * that yields between bounded steps (a window of the text searched, a piece of a long span hashed), so the page can
+ * give the main thread back between them; its return value is resolve's. */
 export function resolver(text, budget = LIMITS.workBudget, { textSha: known } = {}) {
-  if (text.length > LIMITS.sourceUnits) fail("limit", "the .tex is over 4 Mi units", { limit: "sourceUnits", max: LIMITS.sourceUnits, size: text.length });
-  let work = text.length;
-  // (the text's hash: the caller's, when it hashed the text already in slices, the page; charged the same either way)
-  const textSha = known ?? sha256(text), lines = lineIndex(text);
-  work += text.length;
-  const over = () => work >= budget;
-  // every occurrence of s in [from, to) (up to the candidate cap + 1), the span scanned charged
-  const find = (s, from = 0, to = text.length) => {
+  sourceFits(text);
+  // (the text's hash, the caller's when it hashed the text already in slices (the page), and its line index, built
+  // when first needed: both charged here, the same either way)
+  let work = 2 * text.length;
+  const textSha = known ?? sha256(text);
+  let lineIdx = null;
+  const lines = () => (lineIdx ??= lineIndex(text));
+  const can = (n) => work + n <= budget;
+  const OUT = Symbol("budget");
+  // every occurrence of s starting in [from, to) (up to the candidate cap + 1). A short range (at most a window) is
+  // searched in a copy of it, charged first. A longer one is searched in place, one occurrence at a time (a step,
+  // yielded after): each search may run to the text's end, so that much must fit in the budget before it starts (else
+  // OUT), and what it scanned is charged. No copies of the text are made: a step is one native search, at most 2 Mi
+  // units (about a millisecond or two), and no garbage piles up between steps.
+  function* find(s, from = 0, to = text.length) {
     const out = [];
     if (!s) return out;
-    let i = text.indexOf(s, from), last = from;
-    for (; i >= 0 && i < to; i = text.indexOf(s, i + 1)) { out.push(i); last = i; if (out.length > LIMITS.candidates) break; }
-    work += Math.max(0, (out.length > LIMITS.candidates ? last : Math.min(to, text.length)) - from) + s.length * out.length;
+    const end = Math.min(to, text.length);
+    if (end - from <= WINDOW) {
+      const piece = text.slice(from, Math.min(text.length, end + s.length - 1));
+      if (!can(piece.length)) return OUT;
+      work += piece.length;
+      for (let i = piece.indexOf(s); i >= 0 && from + i < end; i = piece.indexOf(s, i + 1)) { out.push(from + i); if (out.length > LIMITS.candidates) break; }
+      return out;
+    }
+    for (let at = from; at < end && out.length <= LIMITS.candidates;) {
+      const rest = text.length - at;
+      if (!can(rest)) return OUT;
+      const i = text.indexOf(s, at);
+      work += i < 0 ? rest : i - at + s.length;
+      if (i < 0 || i >= end) break;
+      out.push(i); at = i + 1;
+      yield;
+    }
     return out;
-  };
-  const sha = (a, b) => { work += b - a; return sha256(text.slice(a, b)); };
+  }
+  // the SHA-256 of [a, b), a piece at a time, each charged before it is hashed
+  function* sha(a, b) {
+    const h = sha256Hasher();
+    for (let i = a; i < b;) { const j = Math.min(b, sliceAt(text, i + WINDOW)); if (!can(j - i)) return OUT; work += j - i; h.update(text.slice(i, j)); i = j; yield; }
+    return h.digest();
+  }
   // the whole span at i, if the anchor's quote (head; and for a long one tail, length and sha) is there
-  const spanAt = (a, i) => {
+  function* spanAt(a, i) {
     if (a.tail === undefined) return { start: i, end: i + a.quote.length };
     const e = i + a.length;
+    if (!can(a.tail.length)) return OUT;
     work += a.tail.length;
-    return e <= text.length && text.slice(e - a.tail.length, e) === a.tail && sha(i, e) === a.sha ? { start: i, end: e } : null;
-  };
+    if (!(e <= text.length && text.slice(e - a.tail.length, e) === a.tail)) return null;
+    const h = yield* sha(i, e);
+    return h === OUT ? OUT : h === a.sha ? { start: i, end: e } : null;
+  }
   const ctxExact = (a, s, e) => { work += a.prefix.length + a.suffix.length; return text.slice(Math.max(0, s - a.prefix.length), s) === a.prefix && text.slice(e, e + a.suffix.length) === a.suffix; };
-  const resolve = (a) => {
+  const UNRESOLVED = { status: "unresolved", reason: "budget" };
+  function* steps(a) {
     if (a.textSha === textSha && a.end <= text.length) return { status: "exact", start: a.start, end: a.end };
-    if (over()) return { status: "unresolved", reason: "budget" };
     // moved: one occurrence of the whole quote, or one whose prefix and suffix both still match; several: ambiguous
     if (a.quote) {
-      const occ = find(a.quote);
+      const occ = yield* find(a.quote);
+      if (occ === OUT) return UNRESOLVED;
       if (occ.length > LIMITS.candidates) return { status: "ambiguous", reason: "too many", candidates: [] };
       const spans = [];
-      for (const i of occ) { if (over()) return { status: "unresolved", reason: "budget" }; const sp = spanAt(a, i); if (sp) spans.push(sp); }
+      for (const i of occ) { const sp = yield* spanAt(a, i); if (sp === OUT) return UNRESOLVED; if (sp) spans.push(sp); }
       if (spans.length === 1) return { status: "moved", ...spans[0] };
       if (spans.length > 1) {
+        if (!can(spans.length * (a.prefix.length + a.suffix.length))) return UNRESOLVED;
         const fit = spans.filter((sp) => ctxExact(a, sp.start, sp.end));
         if (fit.length === 1) return { status: "moved", ...fit[0] };
         return { status: "ambiguous", candidates: (fit.length ? fit : spans).map(({ start, end }) => ({ start, end })) };
       }
     }
-    if (over()) return { status: "unresolved", reason: "budget" };
     // changed: every pair (an occurrence of the prefix, an occurrence of the suffix after it, within the window); an
     // empty prefix means the file's start only, an empty suffix the file's end only; one pair with text between them:
     // changed; more: ambiguous; only white space between them: orphaned (the text was deleted)
-    const starts = a.prefix ? find(a.prefix).map((i) => i + a.prefix.length) : a.start === 0 ? [0] : [];
+    let starts = [];
+    if (a.prefix) { const f = yield* find(a.prefix); if (f === OUT) return UNRESOLVED; starts = f.map((i) => i + a.prefix.length); }
+    else if (a.start === 0) starts = [0];
     if (starts.length > LIMITS.candidates) return { status: "ambiguous", reason: "too many", candidates: [] };
     const pairs = [];
     for (const s of starts) {
-      if (over()) return { status: "unresolved", reason: "budget" };
-      const ends = a.suffix ? find(a.suffix, s, s + LIMITS.changedWindow + 1) : a.end >= 0 && text.length - s <= LIMITS.changedWindow && (a.suffix === "") ? [text.length] : [];
+      let ends = [];
+      if (a.suffix) { const f = yield* find(a.suffix, s, s + LIMITS.changedWindow + 1); if (f === OUT) return UNRESOLVED; ends = f; }
+      else if (text.length - s <= LIMITS.changedWindow) ends = [text.length];
+      if (!can(ends.length)) return UNRESOLVED;
       work += ends.length;
       for (const e of ends) { if (e - s <= LIMITS.changedWindow) pairs.push({ start: s, end: e }); if (pairs.length > LIMITS.candidates) return { status: "ambiguous", reason: "too many", candidates: [] }; }
     }
     // (nothing but white space left between them: the commented text was deleted, not rewritten: removed)
+    if (!can(pairs.reduce((n, p) => n + p.end - p.start, 0))) return UNRESOLVED;
     const kept = pairs.filter((p) => { work += p.end - p.start; return text.slice(p.start, p.end).trim() !== ""; });
     if (kept.length === 1) return { status: "changed", ...kept[0] };
     if (kept.length > 1) return { status: "ambiguous", candidates: kept };
     return pairs.length ? { status: "orphaned", reason: "removed" } : { status: "orphaned" };
-  };
-  // a span's lines around it (the units copied charged)
+  }
+  const resolve = (a) => { const g = steps(a); for (;;) { const r = g.next(); if (r.done) return r.value; } };
+  // a span's lines around it (the units copied charged; cut short, never over the budget)
   const context = (s, e) => {
-    const l0 = lines.at(s).line, l1 = lines.at(e).line, from = Math.max(1, l0 - LIMITS.contextLines), to = Math.min(lines.lines, l1 + LIMITS.contextLines);
+    const L = lines(), l0 = L.at(s).line, l1 = L.at(e).line, from = Math.max(1, l0 - LIMITS.contextLines), to = Math.min(L.lines, l1 + LIMITS.contextLines);
     const out = [];
-    for (let l = from; l <= to; l++) { const a = lines.starts[l - 1], b = l < lines.lines ? lines.starts[l] - 1 : text.length, piece = text.slice(a, Math.min(b, a + LIMITS.contextLineUnits)); work += piece.length; out.push(b - a > LIMITS.contextLineUnits ? piece + "…" : piece); }
+    for (let l = from; l <= to; l++) {
+      const a = L.starts[l - 1], b = l < L.lines ? L.starts[l] - 1 : text.length, piece = text.slice(a, Math.min(b, a + LIMITS.contextLineUnits));
+      if (!can(piece.length)) break;
+      work += piece.length; out.push(b - a > LIMITS.contextLineUnits ? piece + "…" : piece);
+    }
     return out.join("\n");
   };
-  return { textSha, lines, resolve, context, work: () => work };
+  return { textSha, get lines() { return lines(); }, resolve, steps, context, work: () => work };
 }
 
 // ---- the operations: each returns a new document (the input is never changed) and checks admission first
