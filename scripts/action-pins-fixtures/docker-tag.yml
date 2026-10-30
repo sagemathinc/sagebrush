@@ -1,0 +1,6 @@
+on: push
+jobs:
+  a:
+    runs-on: x
+    steps:
+      - uses: docker://alpine:3.20
