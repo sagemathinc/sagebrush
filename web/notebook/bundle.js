@@ -4,7 +4,8 @@
 // pages read it (the notebook's openBundle, and Upload… on either page,
 // design/workspace-files.md §3), so a .sbreplay becomes a notebook with its
 // history wherever it is uploaded.
-import { bytesHash, putBlob, idb, docIdProblem } from "./stores.js";
+import { bytesHash, putBlob, docIdProblem } from "./stores.js";
+import { askMerge } from "../journal/rows.js";
 
 export const BUNDLE = "sagebrush-notebook-history";
 /** What a bundle may hold, checked before anything of it is kept (daybreak2's LIMIT-4B3-1): its
@@ -67,5 +68,15 @@ export async function keepBundle(b, id, { hdb, bdb }) {
     const data = dec64(data64);
     if ((await bytesHash(data)) === h || h.startsWith("c53:")) await putBlob(bdb, data);
   }
-  if (hdb) await idb(hdb, "history", "readwrite", (st) => { let r = null; for (const env of b.history) if (env?.time) r = st.put({ nb: id, time: env.time, env }); return r; });
+  // (the history and, in the same transaction, the merge mode its synced history will ask for: legacy, the mode the
+  // restored patches were written with, so its server document is made legacy and nothing restored is read another
+  // way (plan-merge-align r3.2 §9); either both are kept or neither)
+  if (hdb) await new Promise((ok, no) => {
+    const tx = hdb.transaction("history", "readwrite"), st = tx.objectStore("history");
+    let failed = null;
+    for (const env of b.history) if (env?.time) st.put({ nb: id, time: env.time, env });
+    askMerge(st, id, "legacy").catch((e) => { failed = e; try { tx.abort(); } catch {} });
+    tx.oncomplete = () => ok();
+    tx.onerror = tx.onabort = () => no(failed ?? tx.error ?? new Error("bundle: its history wasn't kept"));
+  });
 }

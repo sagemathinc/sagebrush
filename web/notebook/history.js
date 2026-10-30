@@ -29,6 +29,7 @@
 // A run's code is the cell's input at version `at` (or `code`, for the
 // console's).  Only hashes of files are kept; their bytes are elsewhere.
 import { PatchHistory, createImmerDbCodec, decodePatchId } from "./patch-history.js";
+import { dbMerge3 } from "./db-merge3.ts";
 export { decodePatchId };
 // (this module is the sagebrush-history.js bundle: boards load the shared history from it)
 export { PatchHistory, createImmerDbCodec };
@@ -39,6 +40,32 @@ export { journalStoreClasses, hashOf } from "../journal/store.js";
 
 export const SCHEMA = { primaryKeys: ["type", "id"], stringCols: ["input"] };
 const codec = createImmerDbCodec(SCHEMA);
+// (exact merges, plan-merge-align r3.2 §5: cocalc-ai's dbMerge3 (db-merge3.ts) as the codec's merge3, for a synced
+// history whose server document is exact-v1; patchflow reads codec.merge3 each time it computes a value)
+// (compiled in only with __SB_EXACT_MERGE__, as merge-client.ts reads it: a production build carries none of it until
+// activation.  The define tested here itself, inline in the condition: Bun folds a define where it is written, but not
+// through an imported constant or a const binding, and only a folded condition drops the reader (measured; the built
+// page is checked by test-merge-client-off.mjs))
+// eslint-disable-next-line no-undef
+const exactMerge3 = typeof __SB_EXACT_MERGE__ !== "undefined" && __SB_EXACT_MERGE__ === true ? dbMerge3((s) => codec.fromString(s), (d) => codec.toString(d), SCHEMA) : undefined;
+/** The codec of a notebook history kept by `store`: merge3 only while it is a journal store's synced history (its key
+ * isn't the document's own id) whose recorded mode is exact-v1 (the store's mergeMode, read with its patches or told
+ * before the next ones).  Every other history (a notebook's own, from before sync or restored from a replay; one with
+ * no mode recorded, or legacy) reads as it always has.  The mode only ever goes from none to a value, and before it the
+ * synced history is this device's one line, which both read alike (rows.js mergeRecorded). */
+export function codecFor(store) {
+  return Object.create(codec, {
+    merge3: {
+      get: () => {
+        if (!(store && store.docId && store.id !== store.docId && store.mergeMode === "exact-v1")) return undefined;
+        // (an exact-v1 history in a build without the reader (told live by a newer tab): fails, never read legacy; the
+        // store refuses such a history before it opens it, exactReadable)
+        if (!exactMerge3) throw new Error("exact merges aren't in this build: reload this page");
+        return exactMerge3;
+      },
+    },
+  });
+}
 const KERNEL = { python: "python3", sage: "sagemath", magma: "magma", matlab: "matlab" };
 const MODE = { python3: "python", sagemath: "sage", magma: "magma", matlab: "matlab" };
 
@@ -88,7 +115,7 @@ export function textHash(s) {
 
 export class NotebookHistory extends PatchHistory {
   /** @param store a patchflow PatchStore, with clear() */
-  constructor(store) { super(store, codec); }
+  constructor(store) { super(store, codecFor(store)); }
   /** Record the document as it is now (nothing if it has not changed). */
   record(doc) {
     if (!this.session) return null;
