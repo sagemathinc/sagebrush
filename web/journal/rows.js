@@ -399,3 +399,38 @@ export function readJournal(hdb, id) {
     tx.onerror = () => no(tx.error);
   });
 }
+
+/** The namespace's debt row ({count, bytes} of the local patches the server hasn't acknowledged, every document's), a
+ * cheap read that changes whenever any document's debt does (a T1's charge, an acknowledgement, a dropped document). */
+export function readDebt(hdb) {
+  return new Promise((ok, no) => {
+    const r = hdb.transaction("history", "readonly").objectStore("history").get(DEBT);
+    r.onsuccess = () => ok(r.result?.v ?? { count: 0, bytes: 0 });
+    r.onerror = () => no(r.error);
+  });
+}
+
+/** The documents with local patches the server hasn't acknowledged (their slot's debt above 0, which a new client's
+ * slot carries over: rotate), read in one transaction: the registry, then each registered document's slot, with the
+ * debt row they were read with.  More than `max` registered: `over`, and no ids (the caller says less). */
+export function unackedDocs(hdb, { max = 5000 } = {}) {
+  return new Promise((ok, no) => {
+    const tx = hdb.transaction("history", "readonly"), st = tx.objectStore("history");
+    const out = { ids: [], debt: { count: 0, bytes: 0 }, over: false };
+    const d = st.get(DEBT);
+    d.onsuccess = () => { out.debt = d.result?.v ?? { count: 0, bytes: 0 }; };
+    const pre = "d:" + JOURNAL_NS + ":";
+    const regs = st.getAll(IDBKeyRange.bound([SYNC_NB, pre], [SYNC_NB, pre + "￿"]), max + 1);
+    regs.onsuccess = () => {
+      if (regs.result.length > max) { out.over = true; return; }
+      for (const r of regs.result) {
+        const h = r?.v?.h;
+        if (typeof h !== "string") continue;
+        const s = st.get(rowKey(h, "s"));
+        s.onsuccess = () => { if ((s.result?.v?.debt?.count ?? 0) > 0) out.ids.push(r.time.slice(pre.length)); };
+      }
+    };
+    tx.oncomplete = () => ok(out);
+    tx.onerror = () => no(tx.error);
+  });
+}
