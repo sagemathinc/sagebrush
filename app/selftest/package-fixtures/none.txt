@@ -1,0 +1,5 @@
+Packages:
+  Package [com.android.webview] (5c0e1a2):
+    userId=10112
+    versionCode=812700007 minSdk=29 targetSdk=37
+    flags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ]
