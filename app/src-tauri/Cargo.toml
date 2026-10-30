@@ -6,6 +6,11 @@ authors = ["SageMath, Inc."]
 license = "MIT OR Apache-2.0"
 edition = "2021"
 
+# (a library too: Android loads it as a shared library, iOS links it statically)
+[lib]
+name = "sagebrush_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

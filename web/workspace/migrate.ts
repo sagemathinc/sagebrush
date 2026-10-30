@@ -283,6 +283,11 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport):
  * then, in one transaction, the entry naming them (the bytes moved beside the index, as any adopt's), the Trash
  * copy dropped and the record dropped.  A run that stops part way leaves the record, and the next run finishes
  * that same recovery: it knows its destination from the record, never from bytes that happen to be equal. */
+/** The size and SHA-256 of the bytes `read` gives (undefined if none); only those are returned, never the bytes. */
+async function sizeAndHash(read: () => Promise<Uint8Array | undefined>): Promise<{ size: number; sha: string } | undefined> {
+  const bytes = await read();
+  return bytes === undefined ? undefined : { size: bytes.byteLength, sha: await bytesHash(bytes) };
+}
 export async function recoverTrash(w: Workspace, key: string, r: MigrateReport, token: Release) {
   if (await w.isStale("trash", key)) return;
   const naming: Entry[] = await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").index("byRef").getAll(["file", key])));
@@ -291,10 +296,11 @@ export async function recoverTrash(w: Workspace, key: string, r: MigrateReport, 
   // let go; the destination checked (read, hashed, let go); then the Trash bytes read again, and moved only if
   // they are still the ones hashed (else left for the next run))
   const readTrash = () => inTx(w.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").get(key))) as Promise<Uint8Array | undefined>;
-  let first = await readTrash();
+  // (read and hashed in a frame of their own, which has returned before anything else is read: no local of this
+  // function holds the bytes)
+  const first = await sizeAndHash(readTrash);
   if (first === undefined) return;
-  const size = first.byteLength, sha = await bytesHash(first);
-  first = undefined;
+  const { size, sha } = first;
   const mark = RECOVERING + key;
   const rec = await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(mark)));
   let dest: string | undefined = rec && typeof rec.dest === "string" && rec.sha === sha ? rec.dest : undefined;
