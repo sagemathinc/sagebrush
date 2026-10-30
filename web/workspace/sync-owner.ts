@@ -21,7 +21,7 @@ import { req } from "./db";
 import { SyncClient, type ClientOptions, type SyncStatus } from "./sync-client";
 import { confirmedIndex } from "./sync-confirmed";
 import { accountHash } from "../sync-protocol/protocol";
-import { detectOldSync, OLD_SYNC_REASON, type OldSync } from "./sync-old";
+import { detectOldSync, OLD_SYNC_REASON, UNREADABLE_REASON, type OldSync } from "./sync-old";
 
 export const STATUS_PUB = {
   /** status messages at most this often (one slot) */
@@ -245,7 +245,7 @@ export class SyncOwner {
   // (an answer kept, except one from a read that failed (old, failing closed): read again next time)
   private async detectOld(): Promise<OldSync> {
     const o = await detectOldSync(this.w);
-    this.old = o.old && o.why?.startsWith("unreadable") ? null : o;
+    this.old = o.unreadable ? null : o;
     return o;
   }
   private async reconcileOnce() {
@@ -259,7 +259,7 @@ export class SyncOwner {
       this.life = null;
       this.limit = null;
       this.holder = null;
-      this.own = { state: "off", used: true, reason: OLD_SYNC_REASON };
+      this.own = { state: "off", used: true, reason: old.unreadable ? UNREADABLE_REASON : OLD_SYNC_REASON };
       this.changed();
       return;
     }
