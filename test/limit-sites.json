@@ -2688,6 +2688,46 @@
   "class": "1",
   "owner": "runtime/configuration"
  },
+ "lib/_locale.py ::  :: CHAR_MAX = 127 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
+ },
+ "lib/_locale.py ::  :: answers 'C'; any other name is locale.Error(\"unsupported locale setting\"), #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
+ },
+ "lib/_locale.py :: _c_int :: raise OverflowError(\"Python int too large to convert to C int\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython's own argument contract, not a Sagebrush cap: _locale.setlocale's category is a C int in CPython, and outside it CPython raises this same OverflowError (astra's CAL-A3); no size, memory or work bound"
+ },
+ "lib/_locale.py :: localeconv :: \"n_cs_precedes\": CHAR_MAX, \"n_sep_by_space\": CHAR_MAX, #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
+ },
+ "lib/_locale.py :: localeconv :: \"negative_sign\": \"\", \"int_frac_digits\": CHAR_MAX, \"frac_digits\": CHAR_MAX, #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
+ },
+ "lib/_locale.py :: localeconv :: \"p_cs_precedes\": CHAR_MAX, \"p_sep_by_space\": CHAR_MAX, #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
+ },
+ "lib/_locale.py :: localeconv :: \"p_sign_posn\": CHAR_MAX, \"n_sign_posn\": CHAR_MAX, #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
+ },
+ "lib/_locale.py :: setlocale :: raise Error(\"unsupported locale setting\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "Sagebrush has one locale, the C locale: _locale.setlocale refuses any other name with CPython's own locale.Error('unsupported locale setting'), as CPython does for a locale the host lacks; a missing feature, not a size cap"
+ },
  "lib/_magma.py ::  :: _CYCLO_CLASS_MAX = 12 #0": {
   "class": "3",
   "owner": "Magma compatibility",
@@ -4812,6 +4852,11 @@
   "owner": "board/MCP/workspace",
   "row": "inv-33"
  },
+ "lib/calendar.py :: weekday :: if not datetime.MINYEAR <= year <= datetime.MAXYEAR: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
+ },
  "lib/enum.py :: EnumType.__call__ :: `names` should be either a string of white-space/comma delimited names #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -4851,6 +4896,21 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/enum.py, copied unchanged: the census vocabulary matches max_bits (a padding width in enum.bin), \"unsupported operand\" (the TypeError CPython raises for a non-Flag in a Flag) and \"delimited\" (contains limit) in EnumType.__call__'s TypeError; none refuses for size"
+ },
+ "lib/locale.py ::  :: \"LC_NUMERIC\", \"LC_ALL\", \"CHAR_MAX\", \"getencoding\"] #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
+ },
+ "lib/locale.py ::  :: CHAR_MAX = 127 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
+ },
+ "lib/locale.py :: _grouping_intervals :: if interval == CHAR_MAX: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
  },
  "lib/sage_all.py ::  :: _CF_MAX_BITS = 10**6 #0": {
   "class": "2+3",
