@@ -9,9 +9,11 @@
 # Its own workflow, so a slow or failing emulator never blocks a merge: never
 # a required check, never a need of ci.yml's aggregate.  It runs on master
 # pushes that touch the app or the page, on PRs only when they touch the
-# Android project, the app's Rust code or the self-test, nightly, and by hand.
-# Expected 20-30 min; bounded by the job's 40 min, the emulator's 600 s boot
-# timeout and the script's 300 s wait for the report.
+# Android project, the app's Rust code, Cargo or tauri.conf.json, or the
+# self-test, nightly, and by hand.  Expected 20-30 min; bounded by the job's
+# 40 min, the emulator's 600 s boot timeout and the script's 300 s wait for
+# the report.  A second job, release-starts, checks that the RELEASE build
+# starts (see it below); its own 40 min, in parallel.
 #
 # Pinned: the runner image's Android SDK, NDK 27.3.13750724 and JDK 17 (no
 # downloads); Rust 1.99.0; tauri-cli 2.12.4 --locked; Gradle and its
@@ -26,7 +28,7 @@ on:
     branches: [master]
     paths: ["app/**", "web/index.html", ".github/workflows/app-mobile-selftest.yml"]
   pull_request:
-    paths: ["app/src-tauri/gen/android/**", "app/src-tauri/src/**", "app/selftest/**", ".github/workflows/app-mobile-selftest.yml"]
+    paths: ["app/src-tauri/gen/android/**", "app/src-tauri/src/**", "app/src-tauri/Cargo.toml", "app/src-tauri/Cargo.lock", "app/src-tauri/tauri.conf.json", "app/selftest/**", ".github/workflows/app-mobile-selftest.yml"]
   schedule:
     - cron: "17 10 * * *"
   workflow_dispatch:
@@ -146,3 +148,102 @@ jobs:
           disable-animations: true
           # (one line: the action runs each line of `script` as its own shell)
           script: bash app/selftest/android-selftest.sh "${{ steps.apk.outputs.path }}" "$GITHUB_STEP_SUMMARY"
+
+  # The RELEASE APK (x86_64, for the emulator) starts: R8 or LTO removing
+  # something reached only through JNI or reflection crashes it, which the
+  # debug self-test above can't see.  A copy signed with a throwaway key
+  # (app/selftest/sign-testkey.sh, as app-mobile.yml's release job) is installed
+  # on a clean emulator, started, and must keep running with a WebView renderer
+  # and no crash (app/selftest/android-release-start.sh).  Nothing is uploaded.
+  # In parallel with `emulator`, with its own 40 min.
+  release-starts:
+    if: github.repository == 'sagemathinc/sagebrush'
+    needs: page
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      NDK_VERSION: 27.3.13750724
+      BUILD_TOOLS_VERSION: 35.0.0
+      TAURI_CLI_VERSION: 2.12.4
+    steps:
+      - uses: actions/checkout@v4
+      # (the logcat judge on fixed dumps, before anything slow)
+      - name: the logcat judge
+        run: bash app/selftest/test-logcat-crash.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-page
+          path: app/dist
+      - name: the runner's Android SDK, NDK, build-tools and JDK 17 (no downloads)
+        run: |
+          set -euo pipefail
+          ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
+          bt="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"
+          if [ ! -f "$ndk/source.properties" ]; then echo "NDK $NDK_VERSION is not on this runner image:"; ls "$ANDROID_HOME/ndk"; exit 1; fi
+          for t in apksigner zipalign aapt2; do [ -x "$bt/$t" ] || { echo "build-tools $BUILD_TOOLS_VERSION has no $t on this runner image:"; ls "$ANDROID_HOME/build-tools"; exit 1; }; done
+          if [ -z "${JAVA_HOME_17_X64:-}" ] || [ ! -x "$JAVA_HOME_17_X64/bin/java" ]; then echo "no JDK 17 on this runner image"; exit 1; fi
+          echo "NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "BT=$bt" >> "$GITHUB_ENV"
+          echo "runner image: ${ImageOS:-?} ${ImageVersion:-?}"
+          grep Pkg.Revision "$ndk/source.properties"
+          "$JAVA_HOME_17_X64/bin/java" -version
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          targets: x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+          key: android-release-x86_64
+      - name: the Tauri CLI (crate tauri-cli ${{ env.TAURI_CLI_VERSION }}, --locked)
+        run: |
+          cargo install tauri-cli --version "=$TAURI_CLI_VERSION" --locked
+          cargo tauri --version
+      - name: the committed Android project and its wrapper jar
+        working-directory: app/src-tauri/gen/android
+        run: |
+          set -euo pipefail
+          printf '%s\n' '497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7  gradle/wrapper/gradle-wrapper.jar' | sha256sum -c -
+          grep -qx 'distributionSha256Sum=9c0f7faeeb306cb14e4279a3e084ca6b596894089a0638e68a07c945a32c9e14' gradle/wrapper/gradle-wrapper.properties
+          test -f gradle/verification-metadata.xml
+      - name: build (release APK, x86_64, for the emulator)
+        working-directory: app/src-tauri
+        run: |
+          set -euo pipefail
+          s=$(date +%s)
+          cargo tauri android build --apk --target x86_64
+          echo "release build (x86_64): $(( $(date +%s) - s )) s" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: exactly one APK, unsigned
+        id: apk
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(find app/src-tauri/gen/android/app/build/outputs/apk -name '*.apk')
+          [ "${#apks[@]}" = 1 ] || { echo "expected exactly one APK, found ${#apks[@]}: ${apks[*]}"; exit 1; }
+          case "${apks[0]}" in */app-universal-release-unsigned.apk) ;; *) echo "expected app-universal-release-unsigned.apk, found ${apks[0]}"; exit 1;; esac
+          echo "path=${apks[0]}" >> "$GITHUB_OUTPUT"
+      - name: the committed project is unchanged by the build
+        run: test -z "$(git status --porcelain -- app/src-tauri/gen/android)"
+      - name: a copy signed with a throwaway key (TESTKEY, not for distribution)
+        env:
+          APK: ${{ steps.apk.outputs.path }}
+        run: bash app/selftest/sign-testkey.sh "$APK" build/release-testkey/sagebrush-release-x86_64-TESTKEY.apk
+      # (KVM for the emulator: the action's documented udev rule)
+      - name: KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: the release APK starts on the emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          channel: stable
+          emulator-boot-timeout: 600
+          disable-animations: true
+          # (one line: the action runs each line of `script` as its own shell)
+          script: bash app/selftest/android-release-start.sh build/release-testkey/sagebrush-release-x86_64-TESTKEY.apk "$GITHUB_STEP_SUMMARY"

@@ -602,6 +602,7 @@ jobs:
           bun web/notebook/test-merge-mode-chain.mjs
           bun web/workspace/test-merge-client-off.mjs
           bun web/notebook/test-sync-rows.mjs
+          bun web/notebook/test-start-all.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-migrate-time.mjs
           CHROME=google-chrome node web/workspace/test-workspace-pages.mjs
           CHROME=google-chrome node web/workspace/test-workspace-browser.mjs
@@ -878,6 +879,7 @@ jobs:
               node web/test-png.mjs
               node web/test-pkgset.mjs
               node web/test-phone-layout.mjs
+              node web/notebook/test-anchor.mjs
               node web/test-kernel-start.mjs
               node web/test-pkgset-pin.mjs
               node web/test-pkgset-page.mjs
