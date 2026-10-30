@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged by the Tauri CLI into the iOS app's Info.plist when it builds
+     (gen/apple stays exactly as `cargo tauri ios init` generated it):
+     - NSAllowsLocalNetworking: the page is served by the app itself from
+       http://127.0.0.1 (the localhost plugin, lib.rs), which App Transport
+       Security blocks otherwise;
+     - UIFileSharingEnabled + LSSupportsOpeningDocumentsInPlace: the app's
+       Documents (where notebooks are saved) shows in the Files app.
+     No ITSAppUsesNonExemptEncryption here: that is the answer to Apple's
+     export-compliance questions, given at the first TestFlight upload. -->
+<plist version="1.0">
+<dict>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+</dict>
+</plist>
