@@ -91,8 +91,8 @@ const boot = { raw: di.length - pi.length, gzip: gz(di) - gz(pi) };
 check(`DEV bootstrap delta (index.html): at most ${DEV_BOOT.raw} B minified and ${DEV_BOOT.gzip} B gzip`, boot.raw <= DEV_BOOT.raw && boot.gzip <= DEV_BOOT.gzip, boot);
 // 4. the LaTeX group
 // (the comments' chunk, sagebrush-latex-comments.js, loaded only for comments: its own line below, not in the group)
-const COMMENTS = "dist/sagebrush-latex-comments.js", COMMENTS_DOC = "dist/sagebrush-latex-comments-doc.js";
-const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n) && n !== COMMENTS && n !== COMMENTS_DOC);
+const COMMENTS = "dist/sagebrush-latex-comments.js", COMMENTS_DOC = "dist/sagebrush-latex-comments-doc.js", AGENT = "dist/sagebrush-latex-agent.js";
+const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n) && n !== COMMENTS && n !== COMMENTS_DOC && n !== AGENT);
 const js = group.filter((n) => n.endsWith(".js")), css = group.filter((n) => n.endsWith(".css")), fonts = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(woff2?|ttf|otf)$/.test(n) && !prod.has(n));
 const jsRaw = js.reduce((s, n) => s + statSync(dev.get(n)).size, 0), jsGz = js.reduce((s, n) => s + gz(readFileSync(dev.get(n))), 0);
 // (192 KiB / 64 KiB: @sagebrush's ruling of 2026-10-29, for the ten examples and the embeddable editor; was 180 / 60)
@@ -102,6 +102,9 @@ check("the LaTeX group's JS: at most 192 KiB minified, 64 KiB gzip", js.length >
 if (dev.has(COMMENTS)) { const b = readFileSync(dev.get(COMMENTS)); check("the LaTeX comments' chunk: at most 16 KiB minified, 6 KiB gzip", b.length <= 16 * 1024 && gz(b) <= 6 * 1024, { raw: b.length, gzip: gz(b) }); }
 // 4c. a document's live comments' chunk (comments-doc.ts and the format's core, comments-core.mjs): at most 40 KiB
 //     minified, 14 KiB gzip, fetched only when a .tex has a comments file or someone comments in it
+// 4d. the agent pairing's chunk (web/workspace/agent-ui.ts, the shared module, through web/latex/agent.ts): at most
+//     40 KiB minified, 14 KiB gzip, fetched only to connect an agent (the Agent button, a ?pair= link, a remembered one)
+if (dev.has(AGENT)) { const b = readFileSync(dev.get(AGENT)); check("the LaTeX agent pairing's chunk: at most 40 KiB minified, 14 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 14 * 1024, { raw: b.length, gzip: gz(b) }); }
 if (dev.has(COMMENTS_DOC)) { const b = readFileSync(dev.get(COMMENTS_DOC)); check("the LaTeX document comments' chunk: at most 40 KiB minified, 14 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 14 * 1024, { raw: b.length, gzip: gz(b) }); }
 // (the test build's holds on image and file reads and its comments write, web/latex/page.ts: folded away in the DEV build, so named in none of its files)
 const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && /__sbTex(ImageRead|MountRead|CommentsWrite|SaveWrite)/.test(readFileSync(dev.get(n), "latin1")));
