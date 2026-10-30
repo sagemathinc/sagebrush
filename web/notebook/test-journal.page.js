@@ -54,7 +54,7 @@ async function recount(hdb) {
   for (const r of rows) if (r.nb === R.SYNC_NB && r.time.startsWith("d:")) {
     // (its j row, and a synced document's start and slot rows (2c-2))
     measured += R.rowCharge([r.nb, r.time], { h: r.v.h, meta: r.v.meta });
-    for (const L of ["j", "m", "s"]) { const x = rows.find((y) => y.nb === R.SYNC_NB + r.v.h && y.time === L); if (x) measured += R.rowCharge([x.nb, x.time], x.v); }
+    for (const L of ["j", "m", "s", "a"]) { const x = rows.find((y) => y.nb === R.SYNC_NB + r.v.h && y.time === L); if (x) measured += R.rowCharge([x.nb, x.time], x.v); }
   }
   return { meta, pend, counted, measured };
 }
@@ -1881,9 +1881,85 @@ async function arrivingStarted() {
   await close(w);
   hdb.close();
 }
+// ---- merge modes (plan-merge-align r3.2 §5, P2b): the server's word on a document's mode recorded once in its start
+// row (from a claim's answer or a page's, with the page's rows); another mode later, or exact-v1 over more than this
+// device's one line, refused with nothing written; the codec exact only for a synced history whose mode is exact-v1; a
+// live history told the mode before the remote patches it came with reads them with it; a replay restore asks legacy
+const snapHistory = async (hdb) => J(await rawAll(hdb, "history", IDBKeyRange.lowerBound([""])));
+async function mergeModes() {
+  const { w, hdb } = await active();
+  await synced(async () => {
+    // (recorded from a claim, once; the same again changes nothing; another refused, nothing written)
+    const one = await loadNew(w, hdb, [["a", "x = 1"], ["b", "keep"]]);
+    const jtx = (st, fn) => st.patches.queue(() => st.patches.journalTx(async (s) => ({ j: 0, out: await fn(s) }))).catch((e) => ({ refused: String(e?.message ?? e) }));
+    const slot = (await jState(hdb, one.id)).slot;
+    const claim = (merge) => jtx(one.st, (s) => N.recordClaim(s, one.id, { gen: slot.gen, client: slot.client, epoch: 1, fgen: 0, merge }));
+    const c1 = await claim("exact-v1"), m1 = (await jState(hdb, one.id)).start;
+    check(c1.out === true && m1.merge === "exact-v1", "merge: a claim's answer records the document's mode in its start: " + J({ c1, m1 }));
+    const before = await snapHistory(hdb);
+    const same = await claim("exact-v1"), other = await claim("legacy"), unknown = await claim("exact-v9");
+    check(same.out === true && /another merge mode/.test(other.refused ?? "") && /doesn't know/.test(unknown.refused ?? "") && (await snapHistory(hdb)) === before, "merge: the same mode again changes nothing; another (or an unknown one) is refused and nothing is written: " + J({ same, other, unknown }));
+    const none = await claim(undefined);
+    check(none.out === true && (await jState(hdb, one.id)).start.merge === "exact-v1", "merge: an answer that says no mode (an older server) records nothing and changes nothing");
+    // (the codec: exact only for a journal store's synced key with exact-v1 recorded)
+    const ex = (o) => typeof H.codecFor(o).merge3 === "function";
+    check(ex({ docId: "x", id: "x:s1", mergeMode: "exact-v1" }) && !ex({ docId: "x", id: "x", mergeMode: "exact-v1" }) && !ex({ docId: "x", id: "x:s1", mergeMode: "legacy" }) && !ex({ docId: "x", id: "x:s1" }) && !ex({ id: "x:s1", mergeMode: "exact-v1" }) && !ex(null), "merge: the codec is exact only for a synced history whose recorded mode is exact-v1 (never a notebook's own key, never with no mode)");
+    // (a store loaded after: its mode read with its patches, its codec exact)
+    await close(one.st);
+    const re = store(w, hdb, one.id);
+    await re.load();
+    check(re.patches.mergeMode === "exact-v1" && typeof re.history.codec.merge3 === "function", "merge: a store loaded later reads the mode with its patches: exact: " + J({ mode: re.patches.mergeMode }));
+    await close(re);
+    // (exact-v1 over more than this device's one line (an older server's page brought another root): refused, nothing
+    // written; the page that says legacy is taken)
+    const two = await loadNew(w, hdb, [["a", "A"]]);
+    const k1 = { epoch: 1, after: 1, recv: 10, chain: "a".repeat(64) }, k2 = { epoch: 1, after: 2, recv: 20, chain: "b".repeat(64) };
+    const fork = { time: "zz-remote-1", env: { time: "zz-remote-1", parents: [], v: 1 } }, next = { time: "zz-remote-2", env: { time: "zz-remote-2", parents: ["zz-remote-1"], v: 2 } };
+    const p1 = await jtx(two.st, (s) => N.applyPage(s, two.id, { expect: null, next: k1, rows: [fork] }));
+    const b2 = await snapHistory(hdb);
+    const p2 = await jtx(two.st, (s) => N.applyPage(s, two.id, { expect: k1, next: k2, rows: [next], merge: "exact-v1" }));
+    const slot2 = (await jState(hdb, two.id)).slot;
+    const c2 = await jtx(two.st, (s) => N.recordClaim(s, two.id, { gen: slot2.gen, client: slot2.client, epoch: 1, fgen: 0, merge: "exact-v1" }));
+    check(!p1.refused && /isn't one line/.test(p2.refused ?? "") && /isn't one line/.test(c2.refused ?? "") && (await snapHistory(hdb)) === b2 && (await jState(hdb, two.id)).start.merge === undefined, "merge: exact-v1 over more than this device's one line: refused (page and claim), nothing written, every row kept: " + J({ p2: p2.refused, c2: c2.refused }));
+    const p3 = await jtx(two.st, (s) => N.applyPage(s, two.id, { expect: k1, next: k2, rows: [next], merge: "legacy" }));
+    check(!p3.refused && (await jState(hdb, two.id)).start.merge === "legacy" && (await keyRows(hdb, N.syncedKey(two.id, 1))).some((r) => r.time === "zz-remote-2"), "merge: …a page that says legacy is taken, its mode recorded with its rows: " + J(p3));
+    await close(two.st);
+    // (a live history: the mode told before the remote patch it came with, so the session reads it exact.  This device
+    // deleted cell a; the other device (later) changed its text: exact keeps the cell whole, with the other's text)
+    const three = await loadNew(w, hdb, [["a", "x = 1"], ["b", "keep"]]);
+    const key3 = N.syncedKey(three.id, 1), root = (await keyRows(hdb, key3))[0];
+    let rec3 = await rawGet(w.main, "notebooks", three.id);
+    await three.st.save({ ...three.d, cells: [{ id: "b", code: "keep" }], baseRev: rec3.rev });
+    const codec = three.st.history.codec, base = three.st.history.valueAt(root.time);
+    const changed = base.set({ ...base.getOne({ type: "cell", id: "a" }), input: "x = 2" });
+    const rt = (Date.now() + 60_000).toString(36).padStart(11, "0") + "_otherdevice01";
+    const renv = { time: rt, wall: Date.now(), patch: codec.makePatch(base, changed), parents: [root.time], userId: 0, version: 1 };
+    const pg = await jtx(three.st, (s) => N.applyPage(s, three.id, { expect: null, next: k1, rows: [{ time: rt, env: renv }], merge: "exact-v1" }));
+    S.tellMerge(key3, "exact-v1");
+    S.tellHistory(key3, renv);
+    let cells = null;
+    for (let i = 0; i < 100 && !cells; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      const v = three.st.history.session?.value();
+      if (three.st.history.session?.versions().includes(rt)) cells = J(v.get({ type: "cell" }).map((r) => [r.id, r.input]).sort());
+    }
+    check(!pg.refused && three.st.patches.mergeMode === "exact-v1" && cells === J([["a", "x = 2"], ["b", "keep"]]), "merge: a live history told the mode before the remote patch reads it exact (a deleted cell another device edited is kept whole, with its text): " + J({ pg, mode: three.st.patches.mergeMode, cells }));
+    await close(three.st);
+    // (a replay restore asks legacy, in the restore's own transaction; its start keeps the ask)
+    const rid = newId();
+    await B.keepBundle({ notebook: {}, history: [], blobs: {} }, rid, { hdb, bdb: null });
+    const restored = store(w, hdb, rid, doc([["r", "1"]]));
+    await restored.load();
+    const rs = (await jState(hdb, rid)).start;
+    check(rs?.asked === "legacy" && rs.merge === undefined, "merge: a replay restore asks legacy, kept with its start (no mode recorded yet): " + J(rs));
+    await close(restored);
+  });
+  await close(w);
+  hdb.close();
+}
 const CASES = [arrivingSays, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
-  arrivingStarted];
+  arrivingStarted, mergeModes];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
