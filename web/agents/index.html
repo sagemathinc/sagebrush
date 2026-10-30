@@ -33,7 +33,19 @@
   .top { display: flex; align-items: center; gap: 10px; padding: 9px 16px; border-bottom: 1px solid var(--line); flex: none; }
   .top #menu { display: none; border: 0; background: none; font-size: 20px; cursor: pointer; }
   .agent { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-  .agent .conn { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .agent .conn { width: 8px; height: 8px; border-radius: 50%; background: #b8b4a8; }
+  .agent .conn.on { background: var(--ok); }
+  .agent .conn.wait { background: #e5b567; }
+  .top .spacer { flex: 1; }
+  .top button { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+  .top button.link { border: 0; background: none; color: var(--accent2); text-decoration: underline; }
+  .top button:disabled { opacity: .6; cursor: default; }
+  #help { flex: none; margin: 8px 16px 0; padding: 10px 14px; border: 1px solid var(--line); background: #fffdf6; border-radius: 10px; font-size: 14px; }
+  #help pre { background: var(--code); padding: 8px 10px; border-radius: 6px; overflow-x: auto; user-select: all; }
+  .file-path { font: 12px ui-monospace, monospace; color: var(--muted); padding: 8px 18px 0; display: flex; gap: 10px; }
+  .file-path .saved { margin-left: auto; }
+  .file-body .doc { padding: 12px 30px 30px; max-width: 820px; margin: 0 auto; }
+  .file-body .code-edit { width: 100%; min-height: 70vh; border: 0; outline: none; resize: none; padding: 14px 18px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: #fff; }
   .agent small { font-weight: 400; color: var(--muted); }
   #log { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 24px 16px 8px; }
   .msg, .doc { overflow-wrap: anywhere; }
@@ -154,7 +166,16 @@
   <main>
     <div class="top">
       <button id="menu" aria-label="Chats">☰</button>
-      <div class="agent"><span class="conn" title="connected"></span>Claude <small>scripted demo</small></div>
+      <div class="agent" id="who"><span class="conn demo"></span>Claude <small>scripted demo</small></div>
+      <span class="spacer"></span>
+      <button id="howto" class="link">Use your own Claude</button>
+      <button id="connect" hidden>Connect Claude</button>
+    </div>
+    <div id="help" hidden>
+      <b>Chat with Claude on your own computer.</b> In a terminal (Node 20 or later, and Claude Code logged in once with your Claude account):
+      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.1.0.tgz</pre>
+      It prints a link: open it in Chrome or Firefox (Safari can't reach a program on your computer), then allow the folders Claude may use.
+      Claude runs on your computer with your own Claude login; it sees only the files you allow here, in this browser's workspace, and nothing else on your computer.
     </div>
     <div id="log">
       <div id="empty">

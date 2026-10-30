@@ -57,7 +57,7 @@ export function floatingButton(): HTMLElement {
 }
 
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void } = {}) {
   style();
   let pairing: AgentPairing | null = null;
   let bar: HTMLElement | null = null;
@@ -127,6 +127,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
 
   function watch(p: AgentPairing) {
     pairing = p;
+    o.onPairing?.(p);
     let was = false;
     p.onChange(() => {
       showBar();
