@@ -394,7 +394,7 @@
   <button role="menuitem" id="consolebtn" aria-pressed="false" aria-controls="console" title="An interactive prompt: a scratchpad with its own interpreter, apart from the notebook">Console</button>
   <button role="menuitem" id="boardbtn" title="Your latest whiteboard in this notebook's language (a new one if there is none); this notebook stays saved">Whiteboard</button>
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
-  <button role="menuitem" id="termbtn" hidden title="A bash shell on your workspace's files (a preview)">Terminal</button>
+  <button role="menuitem" id="termbtn" title="A bash shell on your workspace's files">Terminal</button>
   <hr>
   <button role="menuitem" id="keysbtn" title="Keyboard shortcuts (H in command mode)">Keyboard shortcuts<kbd>H</kbd></button>
   <button role="menuitem" id="installbtn" hidden title="Sagebrush as an app on this computer: it opens in its own window and works offline">Install as an app…</button>
@@ -2316,12 +2316,11 @@ const moreMenu = $("#moremenu"), toggleMoreMenu = menuOf($("#morebtn"), moreMenu
 moreMenu.addEventListener("click", (e) => { if (e.target.closest("button, a")) toggleMoreMenu(false); });
 // ⋯ Whiteboard: the latest board in the notebook's language, or a new one (board/page.ts ?recent=); this notebook stays saved
 $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb.mode));
-// ⋯ Terminal (plan-bash-shell r8c E5, step 6): a bash shell on the workspace's files, in a bottom dock.  A preview:
-// the item shows only on preview and DEV hosts.  The shell's set: the preview's own (web/build.ts), else the site's
-// latest; one ShellHost per page tab, made at the first open, with the person principal.
-if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/.test(location.hostname)) {
+// ⋯ Terminal (plan-bash-shell r8c E5, step 6): a bash shell on the workspace's files, in a bottom dock, on every host
+// (the preview/DEV host gate removed once E5.5's timing box cleared, #337).  The shell's set: the build's own
+// (web/build.ts), else the site's latest; one ShellHost per page tab, made at the first open, with the person principal.
+{
   const termBtn = $("#termbtn");
-  termBtn.hidden = false;
   let term = null;
   // (ps and top: what this tab has open, answered to every tab's terminal too: web/shell/presence.ts)
   const here = async () => {
@@ -2373,7 +2372,8 @@ if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/
       if (term) return term.toggle();
       term = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
       term.onEnd = () => { term = null; window.__sbTerm = null; };
-      window.__sbTerm = term; // (the tests' handle, on these hosts only: web/shell/test-panel-page.mjs)
+      // (the tests' handle, on a local host only: web/shell/test-panel-page.mjs)
+      if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__sbTerm = term;
     }
     term.toggle();
   };

@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { devtoolsPort, startServe } from "../test-port.mjs";
 
 const here = join(import.meta.dir, "..");
-if (!existsSync(join(here, "dist", "shell", "preview-set.json"))) throw new Error("build web/dist with SAGEBRUSH_TERMINAL=1 first");
+if (!existsSync(join(here, "dist", "shell", "preview-set.json"))) throw new Error("build web/dist first (bun web/build.ts)");
 let checks = 0;
 const fails = [];
 const check = (ok, what) => {
