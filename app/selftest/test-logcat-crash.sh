@@ -17,6 +17,8 @@ check 0 other-fatal.txt
 check 0 other-pid-linkerror.txt
 check 1 our-fatal-restarted.txt
 check 1 our-linkerror.txt
+check 0 other-tombstone.txt
+check 1 our-tombstone.txt
 check 2 empty.txt
 check 2 missing.txt
 [ "$bad" = 0 ] || { echo "FAIL: the logcat judge"; exit 1; }
