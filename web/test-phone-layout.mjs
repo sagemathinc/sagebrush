@@ -183,7 +183,7 @@ try {
   await ev(`document.getElementById("ttclose").click()`);
   ok(await until(`document.getElementById("timetravel").hidden`), "TimeTravel closes");
   // (closing TimeTravel keeps the cell you were at in place while the page
-  // settles, until you scroll, restoreAnchor in web/index.html; a scroll that
+  // settles, until you scroll, restoreAnchor in web/notebook/anchor.js; a scroll that
   // isn't a wheel, touch, key or click, as a scrollbar drag or a script's, must
   // end that too: a resize just after it must not pull the page back)
   await ev(`window.scrollTo(0, 0)`);
