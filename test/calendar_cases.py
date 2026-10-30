@@ -107,3 +107,34 @@ print(_locale.strcoll("b", "a"), _locale.strcoll("a", "a"), repr(_locale.strxfrm
 print(sorted(n for n in dir(_locale) if n.startswith("LC_")), [getattr(_locale, n) for n in sorted(n for n in dir(_locale) if n.startswith("LC_"))])
 with calendar.different_locale("C"):
     print(locale.setlocale(locale.LC_TIME))
+
+# _locale reads a str subclass by its characters, never its hooks (CAL-A1);
+# a NUL is CPython's ValueError (CAL-A2); a category is a C int (CAL-A3)
+class S(str):
+    def __eq__(s, o): return True
+    def __ne__(s, o): return False
+    def __lt__(s, o): return True
+    def __gt__(s, o): return True
+    def __le__(s, o): return True
+    def __ge__(s, o): return True
+    def __str__(s): return "C"
+    def __contains__(s, x): return False
+    __hash__ = str.__hash__
+
+show(lambda: _locale.strcoll(S("z"), "a"))
+show(lambda: _locale.strcoll("a", S("z")))
+show(lambda: _locale.strcoll(S("a"), S("a")))
+show(lambda: (lambda r: (r, type(r) is str))(_locale.strxfrm(S("ab"))))
+show(lambda: _locale.setlocale(locale.LC_ALL, S("not-a-locale")))
+show(lambda: _locale.setlocale(locale.LC_ALL, S("C")))
+show(lambda: _locale.setlocale(locale.LC_ALL, S("C\0")))
+show(lambda: locale.setlocale(locale.LC_ALL, S("xx")))
+for f in (lambda: _locale.strcoll("a\0", "b"), lambda: _locale.strcoll("a", "b\0"), lambda: _locale.strxfrm("a\0b"),
+          lambda: _locale.setlocale(locale.LC_ALL, "C\0"), lambda: _locale.setlocale(locale.LC_ALL, "\0"), lambda: locale.strxfrm("\0")):
+    show(f)
+class I:
+    def __index__(self): return 2
+for c in (1 << 80, -(1 << 80), 2**31, 2**31 - 1, -2**31, -2**31 - 1, -1, 7, 12, 13, True, I(), 6.0, "6"):
+    show(lambda: _locale.setlocale(c))
+    show(lambda: _locale.setlocale(c, "C"))
+print(locale.setlocale(locale.LC_ALL))

@@ -243,7 +243,7 @@
   },
   "engine/lib/mod-locale.src": {
    "exact": false,
-   "ceiling": 92809,
+   "ceiling": 93549,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -596,7 +596,7 @@
    "engine/lib/mod-io.src": 13519,
    "engine/lib/mod-ipython.src": 6801,
    "engine/lib/mod-json.src": 4930,
-   "engine/lib/mod-locale.src": 84372,
+   "engine/lib/mod-locale.src": 85045,
    "engine/lib/mod-marimo.src": 6464,
    "engine/lib/mod-matplotlib.src": 24036,
    "engine/lib/mod-pickle.src": 73650,
