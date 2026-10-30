@@ -1449,7 +1449,7 @@
   "506cb0910a7fd9b5": {"decl":"src/runtime/ops.ts :: add","class":"allocates","via":"src/runtime/strpos.ts :: glue"},
   "8982ff54dc389ff7": {"decl":"src/runtime/ops.ts :: addSlow","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
   "c6c039de2b380455": {"decl":"src/runtime/ops.ts :: arrGet","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
-  "4795bbc251365be4": {"decl":"src/runtime/ops.ts :: binaryDunder","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
+  "7784d0c96668b35a": {"decl":"src/runtime/ops.ts :: binaryDunder","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "baf28889c33bed4f": {"decl":"src/runtime/ops.ts :: binaryNumeric","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "1567bbd303a2726c": {"decl":"src/runtime/ops.ts :: bufferOf","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
   "e57f550541c6c83a": {"decl":"src/runtime/ops.ts :: bufferViewOf","class":"allocates","via":"web/worker.ts :: obligation: ... ( reads . size || writes . size ? { files : { reads : [  #0"},
