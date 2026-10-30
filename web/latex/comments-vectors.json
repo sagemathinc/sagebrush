@@ -4681,6 +4681,1462 @@
      }
     ]
    }
+  },
+  {
+   "a": {
+    "format": "sagebrush-latex-comments",
+    "version": 1,
+    "file": {
+     "fid": "f1",
+     "path": "/p.tex"
+    },
+    "threads": [
+     {
+      "id": "t_3mrq0trz4hzo1ttx",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 58,
+        "end": 77,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": "egin{document}\nLet $n$ be even. ",
+        "suffix": "\n\nThe sum of two odd numbers is ",
+        "quote": "Then $n^2$ is even.",
+        "x": 1e-7
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_9w1w6rjtsmepb4xa"
+      },
+      "resolved": {
+       "value": true,
+       "rev": 1,
+       "time": "2026-10-29T20:05:00.000Z",
+       "by": "agent:claude",
+       "op": "o_mm3prxge2vz74ewx"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_mevipfsz44ghchap"
+      },
+      "messages": [
+       {
+        "id": "m_y471go4nvc14sqmj",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_b40hy5y09wdczg7d"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_f4topgoggr7l9bvh"
+        }
+       },
+       {
+        "id": "m_qmfu1wvqwm3eh4p2",
+        "author": "agent:claude",
+        "time": "2026-10-29T20:05:00.000Z",
+        "text": {
+         "value": "Done: rewritten.",
+         "rev": 0,
+         "time": "2026-10-29T20:05:00.000Z",
+         "by": "agent:claude",
+         "op": "o_ghsqnaf3evb3aevc"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:05:00.000Z",
+         "by": "agent:claude",
+         "op": "o_wv2jqq86t3t87je3"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_pdh056dob6a17mqp",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 94,
+        "end": 105,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": " $n^2$ is even.\n\nThe sum of two ",
+        "suffix": " is even.\nAnd the sum of two eve",
+        "quote": "odd numbers"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_clxmscmxmbpsvwcm"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_vqdcxq3yepbpidsf"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_bl3m8xe0x7ynzdku"
+      },
+      "messages": [
+       {
+        "id": "m_7xqnswp0e51rutzz",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_75ka4ptwoxv533qd"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_2ex2uaxk1a5vcyhx"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_g8963g3cy7lwwsih",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 52,
+        "end": 56,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": "le}\n\\begin{document}\nLet $n$ be ",
+        "suffix": ". Then $n^2$ is even.\n\nThe sum o",
+        "quote": "even"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_kms47sgbo4p0dmhl"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_o2zs16imaj4qz1lu"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_r1y79d0286ydynue"
+      },
+      "messages": [
+       {
+        "id": "m_qb43rpykpj3z4hld",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_7pvnnh2dh8ily6t9"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_fghoknbxfihzhvv3"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_at5rw4hpii5o41lr",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 83,
+        "end": 93,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": " even. Then $n^2$ is even.\n\nThe ",
+        "suffix": " odd numbers is even.\nAnd the su",
+        "quote": "sum of two"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_0jua0epd5u1lo6k6"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_ftb2aiur22qn2dd7"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_gwztzxd0m5p7yq4c"
+      },
+      "messages": [
+       {
+        "id": "m_hgksdq3t8yqxvhgp",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_tvt32f96bbbgjf9c"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_hofsd5dc9gki071z"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "b": {
+    "format": "sagebrush-latex-comments",
+    "version": 1,
+    "file": {
+     "fid": "f1",
+     "path": "/p.tex"
+    },
+    "threads": [
+     {
+      "id": "t_3mrq0trz4hzo1ttx",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 58,
+        "end": 77,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": "egin{document}\nLet $n$ be even. ",
+        "suffix": "\n\nThe sum of two odd numbers is ",
+        "quote": "Then $n^2$ is even.",
+        "x": 1e-70
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_9w1w6rjtsmepb4xa"
+      },
+      "resolved": {
+       "value": true,
+       "rev": 1,
+       "time": "2026-10-29T20:05:00.000Z",
+       "by": "agent:claude",
+       "op": "o_mm3prxge2vz74ewx"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_mevipfsz44ghchap"
+      },
+      "messages": [
+       {
+        "id": "m_y471go4nvc14sqmj",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_b40hy5y09wdczg7d"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_f4topgoggr7l9bvh"
+        }
+       },
+       {
+        "id": "m_qmfu1wvqwm3eh4p2",
+        "author": "agent:claude",
+        "time": "2026-10-29T20:05:00.000Z",
+        "text": {
+         "value": "Done: rewritten.",
+         "rev": 0,
+         "time": "2026-10-29T20:05:00.000Z",
+         "by": "agent:claude",
+         "op": "o_ghsqnaf3evb3aevc"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:05:00.000Z",
+         "by": "agent:claude",
+         "op": "o_wv2jqq86t3t87je3"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_pdh056dob6a17mqp",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 94,
+        "end": 105,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": " $n^2$ is even.\n\nThe sum of two ",
+        "suffix": " is even.\nAnd the sum of two eve",
+        "quote": "odd numbers"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_clxmscmxmbpsvwcm"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_vqdcxq3yepbpidsf"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_bl3m8xe0x7ynzdku"
+      },
+      "messages": [
+       {
+        "id": "m_7xqnswp0e51rutzz",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_75ka4ptwoxv533qd"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_2ex2uaxk1a5vcyhx"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_g8963g3cy7lwwsih",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 52,
+        "end": 56,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": "le}\n\\begin{document}\nLet $n$ be ",
+        "suffix": ". Then $n^2$ is even.\n\nThe sum o",
+        "quote": "even"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_kms47sgbo4p0dmhl"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_o2zs16imaj4qz1lu"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_r1y79d0286ydynue"
+      },
+      "messages": [
+       {
+        "id": "m_qb43rpykpj3z4hld",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_7pvnnh2dh8ily6t9"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_fghoknbxfihzhvv3"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_at5rw4hpii5o41lr",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 83,
+        "end": 93,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": " even. Then $n^2$ is even.\n\nThe ",
+        "suffix": " odd numbers is even.\nAnd the su",
+        "quote": "sum of two"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_0jua0epd5u1lo6k6"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_ftb2aiur22qn2dd7"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_gwztzxd0m5p7yq4c"
+      },
+      "messages": [
+       {
+        "id": "m_hgksdq3t8yqxvhgp",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_tvt32f96bbbgjf9c"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_hofsd5dc9gki071z"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "out": {
+    "format": "sagebrush-latex-comments",
+    "version": 1,
+    "file": {
+     "fid": "f1",
+     "path": "/p.tex"
+    },
+    "threads": [
+     {
+      "id": "t_3mrq0trz4hzo1ttx",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 58,
+        "end": 77,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": "egin{document}\nLet $n$ be even. ",
+        "suffix": "\n\nThe sum of two odd numbers is ",
+        "quote": "Then $n^2$ is even.",
+        "x": 1e-7
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_9w1w6rjtsmepb4xa"
+      },
+      "resolved": {
+       "value": true,
+       "rev": 1,
+       "time": "2026-10-29T20:05:00.000Z",
+       "by": "agent:claude",
+       "op": "o_mm3prxge2vz74ewx"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_mevipfsz44ghchap"
+      },
+      "messages": [
+       {
+        "id": "m_y471go4nvc14sqmj",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_b40hy5y09wdczg7d"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_f4topgoggr7l9bvh"
+        }
+       },
+       {
+        "id": "m_qmfu1wvqwm3eh4p2",
+        "author": "agent:claude",
+        "time": "2026-10-29T20:05:00.000Z",
+        "text": {
+         "value": "Done: rewritten.",
+         "rev": 0,
+         "time": "2026-10-29T20:05:00.000Z",
+         "by": "agent:claude",
+         "op": "o_ghsqnaf3evb3aevc"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:05:00.000Z",
+         "by": "agent:claude",
+         "op": "o_wv2jqq86t3t87je3"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_at5rw4hpii5o41lr",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 83,
+        "end": 93,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": " even. Then $n^2$ is even.\n\nThe ",
+        "suffix": " odd numbers is even.\nAnd the su",
+        "quote": "sum of two"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_0jua0epd5u1lo6k6"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_ftb2aiur22qn2dd7"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_gwztzxd0m5p7yq4c"
+      },
+      "messages": [
+       {
+        "id": "m_hgksdq3t8yqxvhgp",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_tvt32f96bbbgjf9c"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_hofsd5dc9gki071z"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_g8963g3cy7lwwsih",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 52,
+        "end": 56,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": "le}\n\\begin{document}\nLet $n$ be ",
+        "suffix": ". Then $n^2$ is even.\n\nThe sum o",
+        "quote": "even"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_kms47sgbo4p0dmhl"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_o2zs16imaj4qz1lu"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_r1y79d0286ydynue"
+      },
+      "messages": [
+       {
+        "id": "m_qb43rpykpj3z4hld",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_7pvnnh2dh8ily6t9"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_fghoknbxfihzhvv3"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_pdh056dob6a17mqp",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 94,
+        "end": 105,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": " $n^2$ is even.\n\nThe sum of two ",
+        "suffix": " is even.\nAnd the sum of two eve",
+        "quote": "odd numbers"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_clxmscmxmbpsvwcm"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_vqdcxq3yepbpidsf"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_bl3m8xe0x7ynzdku"
+      },
+      "messages": [
+       {
+        "id": "m_7xqnswp0e51rutzz",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_75ka4ptwoxv533qd"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_2ex2uaxk1a5vcyhx"
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "a": {
+    "format": "sagebrush-latex-comments",
+    "version": 1,
+    "file": {
+     "fid": "f1",
+     "path": "/p.tex"
+    },
+    "threads": [
+     {
+      "id": "t_3mrq0trz4hzo1ttx",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 58,
+        "end": 77,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": "egin{document}\nLet $n$ be even. ",
+        "suffix": "\n\nThe sum of two odd numbers is ",
+        "quote": "Then $n^2$ is even.",
+        "x": 1e-70
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_9w1w6rjtsmepb4xa"
+      },
+      "resolved": {
+       "value": true,
+       "rev": 1,
+       "time": "2026-10-29T20:05:00.000Z",
+       "by": "agent:claude",
+       "op": "o_mm3prxge2vz74ewx"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_mevipfsz44ghchap"
+      },
+      "messages": [
+       {
+        "id": "m_y471go4nvc14sqmj",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_b40hy5y09wdczg7d"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_f4topgoggr7l9bvh"
+        }
+       },
+       {
+        "id": "m_qmfu1wvqwm3eh4p2",
+        "author": "agent:claude",
+        "time": "2026-10-29T20:05:00.000Z",
+        "text": {
+         "value": "Done: rewritten.",
+         "rev": 0,
+         "time": "2026-10-29T20:05:00.000Z",
+         "by": "agent:claude",
+         "op": "o_ghsqnaf3evb3aevc"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:05:00.000Z",
+         "by": "agent:claude",
+         "op": "o_wv2jqq86t3t87je3"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_pdh056dob6a17mqp",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 94,
+        "end": 105,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": " $n^2$ is even.\n\nThe sum of two ",
+        "suffix": " is even.\nAnd the sum of two eve",
+        "quote": "odd numbers"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_clxmscmxmbpsvwcm"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_vqdcxq3yepbpidsf"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_bl3m8xe0x7ynzdku"
+      },
+      "messages": [
+       {
+        "id": "m_7xqnswp0e51rutzz",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_75ka4ptwoxv533qd"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_2ex2uaxk1a5vcyhx"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_g8963g3cy7lwwsih",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 52,
+        "end": 56,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": "le}\n\\begin{document}\nLet $n$ be ",
+        "suffix": ". Then $n^2$ is even.\n\nThe sum o",
+        "quote": "even"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_kms47sgbo4p0dmhl"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_o2zs16imaj4qz1lu"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_r1y79d0286ydynue"
+      },
+      "messages": [
+       {
+        "id": "m_qb43rpykpj3z4hld",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_7pvnnh2dh8ily6t9"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_fghoknbxfihzhvv3"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_at5rw4hpii5o41lr",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 83,
+        "end": 93,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": " even. Then $n^2$ is even.\n\nThe ",
+        "suffix": " odd numbers is even.\nAnd the su",
+        "quote": "sum of two"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_0jua0epd5u1lo6k6"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_ftb2aiur22qn2dd7"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_gwztzxd0m5p7yq4c"
+      },
+      "messages": [
+       {
+        "id": "m_hgksdq3t8yqxvhgp",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_tvt32f96bbbgjf9c"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_hofsd5dc9gki071z"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "b": {
+    "format": "sagebrush-latex-comments",
+    "version": 1,
+    "file": {
+     "fid": "f1",
+     "path": "/p.tex"
+    },
+    "threads": [
+     {
+      "id": "t_3mrq0trz4hzo1ttx",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 58,
+        "end": 77,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": "egin{document}\nLet $n$ be even. ",
+        "suffix": "\n\nThe sum of two odd numbers is ",
+        "quote": "Then $n^2$ is even.",
+        "x": 1e-7
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_9w1w6rjtsmepb4xa"
+      },
+      "resolved": {
+       "value": true,
+       "rev": 1,
+       "time": "2026-10-29T20:05:00.000Z",
+       "by": "agent:claude",
+       "op": "o_mm3prxge2vz74ewx"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_mevipfsz44ghchap"
+      },
+      "messages": [
+       {
+        "id": "m_y471go4nvc14sqmj",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_b40hy5y09wdczg7d"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_f4topgoggr7l9bvh"
+        }
+       },
+       {
+        "id": "m_qmfu1wvqwm3eh4p2",
+        "author": "agent:claude",
+        "time": "2026-10-29T20:05:00.000Z",
+        "text": {
+         "value": "Done: rewritten.",
+         "rev": 0,
+         "time": "2026-10-29T20:05:00.000Z",
+         "by": "agent:claude",
+         "op": "o_ghsqnaf3evb3aevc"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:05:00.000Z",
+         "by": "agent:claude",
+         "op": "o_wv2jqq86t3t87je3"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_pdh056dob6a17mqp",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 94,
+        "end": 105,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": " $n^2$ is even.\n\nThe sum of two ",
+        "suffix": " is even.\nAnd the sum of two eve",
+        "quote": "odd numbers"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_clxmscmxmbpsvwcm"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_vqdcxq3yepbpidsf"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_bl3m8xe0x7ynzdku"
+      },
+      "messages": [
+       {
+        "id": "m_7xqnswp0e51rutzz",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_75ka4ptwoxv533qd"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_2ex2uaxk1a5vcyhx"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_g8963g3cy7lwwsih",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 52,
+        "end": 56,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": "le}\n\\begin{document}\nLet $n$ be ",
+        "suffix": ". Then $n^2$ is even.\n\nThe sum o",
+        "quote": "even"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_kms47sgbo4p0dmhl"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_o2zs16imaj4qz1lu"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_r1y79d0286ydynue"
+      },
+      "messages": [
+       {
+        "id": "m_qb43rpykpj3z4hld",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_7pvnnh2dh8ily6t9"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_fghoknbxfihzhvv3"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_at5rw4hpii5o41lr",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 83,
+        "end": 93,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": " even. Then $n^2$ is even.\n\nThe ",
+        "suffix": " odd numbers is even.\nAnd the su",
+        "quote": "sum of two"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_0jua0epd5u1lo6k6"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_ftb2aiur22qn2dd7"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_gwztzxd0m5p7yq4c"
+      },
+      "messages": [
+       {
+        "id": "m_hgksdq3t8yqxvhgp",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_tvt32f96bbbgjf9c"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_hofsd5dc9gki071z"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "out": {
+    "format": "sagebrush-latex-comments",
+    "version": 1,
+    "file": {
+     "fid": "f1",
+     "path": "/p.tex"
+    },
+    "threads": [
+     {
+      "id": "t_3mrq0trz4hzo1ttx",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 58,
+        "end": 77,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": "egin{document}\nLet $n$ be even. ",
+        "suffix": "\n\nThe sum of two odd numbers is ",
+        "quote": "Then $n^2$ is even.",
+        "x": 1e-7
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_9w1w6rjtsmepb4xa"
+      },
+      "resolved": {
+       "value": true,
+       "rev": 1,
+       "time": "2026-10-29T20:05:00.000Z",
+       "by": "agent:claude",
+       "op": "o_mm3prxge2vz74ewx"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_mevipfsz44ghchap"
+      },
+      "messages": [
+       {
+        "id": "m_y471go4nvc14sqmj",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_b40hy5y09wdczg7d"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_f4topgoggr7l9bvh"
+        }
+       },
+       {
+        "id": "m_qmfu1wvqwm3eh4p2",
+        "author": "agent:claude",
+        "time": "2026-10-29T20:05:00.000Z",
+        "text": {
+         "value": "Done: rewritten.",
+         "rev": 0,
+         "time": "2026-10-29T20:05:00.000Z",
+         "by": "agent:claude",
+         "op": "o_ghsqnaf3evb3aevc"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:05:00.000Z",
+         "by": "agent:claude",
+         "op": "o_wv2jqq86t3t87je3"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_at5rw4hpii5o41lr",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 83,
+        "end": 93,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": " even. Then $n^2$ is even.\n\nThe ",
+        "suffix": " odd numbers is even.\nAnd the su",
+        "quote": "sum of two"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_0jua0epd5u1lo6k6"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_ftb2aiur22qn2dd7"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_gwztzxd0m5p7yq4c"
+      },
+      "messages": [
+       {
+        "id": "m_hgksdq3t8yqxvhgp",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_tvt32f96bbbgjf9c"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_hofsd5dc9gki071z"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_g8963g3cy7lwwsih",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 52,
+        "end": 56,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": "le}\n\\begin{document}\nLet $n$ be ",
+        "suffix": ". Then $n^2$ is even.\n\nThe sum o",
+        "quote": "even"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_kms47sgbo4p0dmhl"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_o2zs16imaj4qz1lu"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_r1y79d0286ydynue"
+      },
+      "messages": [
+       {
+        "id": "m_qb43rpykpj3z4hld",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_7pvnnh2dh8ily6t9"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_fghoknbxfihzhvv3"
+        }
+       }
+      ]
+     },
+     {
+      "id": "t_pdh056dob6a17mqp",
+      "created": "2026-10-29T20:00:00.000Z",
+      "anchor": {
+       "value": {
+        "start": 94,
+        "end": 105,
+        "textSha": "63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7",
+        "prefix": " $n^2$ is even.\n\nThe sum of two ",
+        "suffix": " is even.\nAnd the sum of two eve",
+        "quote": "odd numbers"
+       },
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_clxmscmxmbpsvwcm"
+      },
+      "resolved": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_vqdcxq3yepbpidsf"
+      },
+      "deleted": {
+       "value": false,
+       "rev": 0,
+       "time": "2026-10-29T20:00:00.000Z",
+       "by": "person:wstein",
+       "op": "o_bl3m8xe0x7ynzdku"
+      },
+      "messages": [
+       {
+        "id": "m_7xqnswp0e51rutzz",
+        "author": "person:wstein",
+        "time": "2026-10-29T20:00:00.000Z",
+        "text": {
+         "value": "why é 😀?",
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_75ka4ptwoxv533qd"
+        },
+        "deleted": {
+         "value": false,
+         "rev": 0,
+         "time": "2026-10-29T20:00:00.000Z",
+         "by": "person:wstein",
+         "op": "o_2ex2uaxk1a5vcyhx"
+        }
+       }
+      ]
+     }
+    ]
+   }
   }
  ],
  "list": [
@@ -12423,6 +13879,223 @@
     ]
    },
    "out": "{\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f1\",\n  \"path\": \"/p.tex\"\n },\n \"threads\": [\n  {\n   \"id\": \"t_nuw3fnkfvv5exi4h\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 58,\n     \"end\": 77,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"egin{document}\\nLet $n$ be even. \",\n     \"suffix\": \"\\n\\nThe sum of two odd numbers is \",\n     \"quote\": \"Then $n^2$ is even.\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_26ya2ftbnb6707ha\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_im8oqn1n6lw351ju\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_sjyvcc0ceghtq9gd\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_ygboyo3x5fvfnd7q\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_ysnfne4627hr4gg4\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_s1q3sd7agk5xiwc3\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_i4qvhwe35q6223xc\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 0,\n     \"end\": 0,\n     \"quote\": \"\",\n     \"prefix\": \"\",\n     \"suffix\": \"\"\n    },\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_4fszq3bjj0njbfwy\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_95dqx4cu55ztqp94\"\n   },\n   \"deleted\": {\n    \"value\": true,\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_s0rwomo5rlwwu540\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_98mqccnw762nxqz8\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"\",\n      \"rev\": 1,\n      \"time\": \"2026-10-29T20:05:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_zok21nehv42222sg\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_77nzx0tpt6xnyt6c\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_tvklh0elsd7x8tce\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 52,\n     \"end\": 56,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"le}\\n\\\\begin{document}\\nLet $n$ be \",\n     \"suffix\": \". Then $n^2$ is even.\\n\\nThe sum o\",\n     \"quote\": \"even\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_l1maefc9mlnuasl1\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_lkvbig54a9b8bdj9\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ed1rkz3938bu5qfm\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_1o66r6bqe7zz9s4a\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_q2yz0f9qbhwehxzn\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_6u3lby8ckfjuap16\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_h0jcx4b22rv76y5s\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 83,\n     \"end\": 93,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \" even. Then $n^2$ is even.\\n\\nThe \",\n     \"suffix\": \" odd numbers is even.\\nAnd the su\",\n     \"quote\": \"sum of two\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_goq7jmj3h4cdr9zd\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_xbk04cer8l4y2u3q\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_9hhcji6u0ydut7qy\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_so6tyoy9iu7g6kv7\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_wtv8an8m64psci57\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_6jg6gqwrzhsg51gf\"\n     }\n    }\n   ]\n  }\n ]\n}\n"
+  }
+ ],
+ "literal": [
+  {
+   "in": "{\"x\":NaN,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "error": {
+     "code": "invalid",
+     "detail": null
+    }
+   }
+  },
+  {
+   "in": "{\"x\":Infinity,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "error": {
+     "code": "invalid",
+     "detail": null
+    }
+   }
+  },
+  {
+   "in": "{\"x\":-Infinity,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "error": {
+     "code": "invalid",
+     "detail": null
+    }
+   }
+  },
+  {
+   "in": "{\"x\":1e-7,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":1e-7,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "29f2deb323d02e1259bed7348510fc657408090ab21a9dd33053776c04917477",
+     "file": "{\n \"x\": 1e-7,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":1.0,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":1,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "06f18626f512cc54ccd7bb00e0ffdac1c669ebbe7c38a87114ca632e32a60c79",
+     "file": "{\n \"x\": 1,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":1e21,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":1e+21,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "4bda4db45b106e2a127b7ed72e5a774707172ac777501839d7e38544fd91498f",
+     "file": "{\n \"x\": 1e+21,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":1E+2,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":100,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "81cd9bf20fa8d236a445deee6b1baf77839a4beb6b645df4c03a6081a0c5eacb",
+     "file": "{\n \"x\": 100,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":-0,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":0,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "c08a6af4043992b25d3ad121c62b079272ab744090aca402bd6832d673dc7dae",
+     "file": "{\n \"x\": 0,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":0.1,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":0.1,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "266a1f456362d484ea203e3859ce19225e0f93ac7a8abf78919b1b524f1d2f03",
+     "file": "{\n \"x\": 0.1,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":123456789012345678901234,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":1.2345678901234569e+23,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "e24edaad0c8b0ade140dcd749c17b7bc19ea9debad2abde26d7de62468a403cf",
+     "file": "{\n \"x\": 1.2345678901234569e+23,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":1e400,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":null,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "7af4067f0e0df72339f24e23d00d69cb750fa923109dce1267fc6a799e27bc08",
+     "file": "{\n \"x\": null,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":5e-324,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":5e-324,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "f8a6c438d6c9fbe4dfd8e61bddee5404552c45286b8959746f25f73fd702f243",
+     "file": "{\n \"x\": 5e-324,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":1.5e-7,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":1.5e-7,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "f44ee24a9793e866ce2414641f7c93beef74f4fb23f2e3d085c18fc6e63e98e3",
+     "file": "{\n \"x\": 1.5e-7,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":100,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":100,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "81cd9bf20fa8d236a445deee6b1baf77839a4beb6b645df4c03a6081a0c5eacb",
+     "file": "{\n \"x\": 100,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":-1.25e-10,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":-1.25e-10,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "32b93809ed1bce8866dee829f096716ad32077a52dc86064a7091525a58d873e",
+     "file": "{\n \"x\": -1.25e-10,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":0.000001,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":0.000001,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "6ab3719f9d4b0ec697ff5ded541d0d10c9a1d8cbaab2606e02eb956cedce14c9",
+     "file": "{\n \"x\": 0.000001,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":1e-6,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":0.000001,\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "6ab3719f9d4b0ec697ff5ded541d0d10c9a1d8cbaab2606e02eb956cedce14c9",
+     "file": "{\n \"x\": 0.000001,\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\"x\":[1.0, 2.50, 3e0],\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+   "out": {
+    "ok": {
+     "json": "{\"x\":[1,2.5,3],\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f9\",\"path\":\"/q.tex\"},\"threads\":[]}",
+     "sha": "a8e9e3197ba0751ea7ad4235255987fdb4268b4af952e16a3f65e4929e1bd299",
+     "file": "{\n \"x\": [\n  1,\n  2.5,\n  3\n ],\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f9\",\n  \"path\": \"/q.tex\"\n },\n \"threads\": []\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f1\",\n  \"path\": \"/p.tex\"\n },\n \"threads\": [\n  {\n   \"id\": \"t_3mrq0trz4hzo1ttx\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 58,\n     \"end\": 77,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"egin{document}\\nLet $n$ be even. \",\n     \"suffix\": \"\\n\\nThe sum of two odd numbers is \",\n     \"quote\": \"Then $n^2$ is even.\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_9w1w6rjtsmepb4xa\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_g878khlz38yfybbt\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_mevipfsz44ghchap\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_y471go4nvc14sqmj\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_b40hy5y09wdczg7d\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_f4topgoggr7l9bvh\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_pdh056dob6a17mqp\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 0,\n     \"end\": 0,\n     \"quote\": \"\",\n     \"prefix\": \"\",\n     \"suffix\": \"\"\n    },\n    \"rev\": 1.0,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ydjkg4qu72c87m5t\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_vqdcxq3yepbpidsf\"\n   },\n   \"deleted\": {\n    \"value\": true,\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_j7rc3jg34eiw1ka7\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_7xqnswp0e51rutzz\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"\",\n      \"rev\": 1,\n      \"time\": \"2026-10-29T20:05:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_29x44ptp9cametim\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_2ex2uaxk1a5vcyhx\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_g8963g3cy7lwwsih\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 52,\n     \"end\": 56,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"le}\\n\\\\begin{document}\\nLet $n$ be \",\n     \"suffix\": \". Then $n^2$ is even.\\n\\nThe sum o\",\n     \"quote\": \"even\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_kms47sgbo4p0dmhl\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_o2zs16imaj4qz1lu\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_r1y79d0286ydynue\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_qb43rpykpj3z4hld\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_7pvnnh2dh8ily6t9\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_fghoknbxfihzhvv3\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_at5rw4hpii5o41lr\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 83,\n     \"end\": 93,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \" even. Then $n^2$ is even.\\n\\nThe \",\n     \"suffix\": \" odd numbers is even.\\nAnd the su\",\n     \"quote\": \"sum of two\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_0jua0epd5u1lo6k6\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ftb2aiur22qn2dd7\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_gwztzxd0m5p7yq4c\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_hgksdq3t8yqxvhgp\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_tvt32f96bbbgjf9c\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_hofsd5dc9gki071z\"\n     }\n    }\n   ]\n  }\n ]\n}\n",
+   "out": {
+    "ok": {
+     "json": "{\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f1\",\"path\":\"/p.tex\"},\"threads\":[{\"id\":\"t_3mrq0trz4hzo1ttx\",\"created\":\"2026-10-29T20:00:00.000Z\",\"anchor\":{\"value\":{\"start\":58,\"end\":77,\"textSha\":\"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\"prefix\":\"egin{document}\\nLet $n$ be even. \",\"suffix\":\"\\n\\nThe sum of two odd numbers is \",\"quote\":\"Then $n^2$ is even.\"},\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_9w1w6rjtsmepb4xa\"},\"resolved\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_g878khlz38yfybbt\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_mevipfsz44ghchap\"},\"messages\":[{\"id\":\"m_y471go4nvc14sqmj\",\"author\":\"person:wstein\",\"time\":\"2026-10-29T20:00:00.000Z\",\"text\":{\"value\":\"why é 😀?\",\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_b40hy5y09wdczg7d\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_f4topgoggr7l9bvh\"}}]},{\"id\":\"t_pdh056dob6a17mqp\",\"created\":\"2026-10-29T20:00:00.000Z\",\"anchor\":{\"value\":{\"start\":0,\"end\":0,\"quote\":\"\",\"prefix\":\"\",\"suffix\":\"\"},\"rev\":1,\"time\":\"2026-10-29T20:05:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_ydjkg4qu72c87m5t\"},\"resolved\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_vqdcxq3yepbpidsf\"},\"deleted\":{\"value\":true,\"rev\":1,\"time\":\"2026-10-29T20:05:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_j7rc3jg34eiw1ka7\"},\"messages\":[{\"id\":\"m_7xqnswp0e51rutzz\",\"author\":\"person:wstein\",\"time\":\"2026-10-29T20:00:00.000Z\",\"text\":{\"value\":\"\",\"rev\":1,\"time\":\"2026-10-29T20:05:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_29x44ptp9cametim\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_2ex2uaxk1a5vcyhx\"}}]},{\"id\":\"t_g8963g3cy7lwwsih\",\"created\":\"2026-10-29T20:00:00.000Z\",\"anchor\":{\"value\":{\"start\":52,\"end\":56,\"textSha\":\"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\"prefix\":\"le}\\n\\\\begin{document}\\nLet $n$ be \",\"suffix\":\". Then $n^2$ is even.\\n\\nThe sum o\",\"quote\":\"even\"},\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_kms47sgbo4p0dmhl\"},\"resolved\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_o2zs16imaj4qz1lu\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_r1y79d0286ydynue\"},\"messages\":[{\"id\":\"m_qb43rpykpj3z4hld\",\"author\":\"person:wstein\",\"time\":\"2026-10-29T20:00:00.000Z\",\"text\":{\"value\":\"why é 😀?\",\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_7pvnnh2dh8ily6t9\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_fghoknbxfihzhvv3\"}}]},{\"id\":\"t_at5rw4hpii5o41lr\",\"created\":\"2026-10-29T20:00:00.000Z\",\"anchor\":{\"value\":{\"start\":83,\"end\":93,\"textSha\":\"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\"prefix\":\" even. Then $n^2$ is even.\\n\\nThe \",\"suffix\":\" odd numbers is even.\\nAnd the su\",\"quote\":\"sum of two\"},\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_0jua0epd5u1lo6k6\"},\"resolved\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_ftb2aiur22qn2dd7\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_gwztzxd0m5p7yq4c\"},\"messages\":[{\"id\":\"m_hgksdq3t8yqxvhgp\",\"author\":\"person:wstein\",\"time\":\"2026-10-29T20:00:00.000Z\",\"text\":{\"value\":\"why é 😀?\",\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_tvt32f96bbbgjf9c\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_hofsd5dc9gki071z\"}}]}]}",
+     "sha": "b5d128b5d204dcd6ae639ab0191a4443cbe12441109e6a76486eacc58bc20930",
+     "file": "{\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f1\",\n  \"path\": \"/p.tex\"\n },\n \"threads\": [\n  {\n   \"id\": \"t_3mrq0trz4hzo1ttx\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 58,\n     \"end\": 77,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"egin{document}\\nLet $n$ be even. \",\n     \"suffix\": \"\\n\\nThe sum of two odd numbers is \",\n     \"quote\": \"Then $n^2$ is even.\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_9w1w6rjtsmepb4xa\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_g878khlz38yfybbt\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_mevipfsz44ghchap\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_y471go4nvc14sqmj\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_b40hy5y09wdczg7d\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_f4topgoggr7l9bvh\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_pdh056dob6a17mqp\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 0,\n     \"end\": 0,\n     \"quote\": \"\",\n     \"prefix\": \"\",\n     \"suffix\": \"\"\n    },\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ydjkg4qu72c87m5t\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_vqdcxq3yepbpidsf\"\n   },\n   \"deleted\": {\n    \"value\": true,\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_j7rc3jg34eiw1ka7\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_7xqnswp0e51rutzz\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"\",\n      \"rev\": 1,\n      \"time\": \"2026-10-29T20:05:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_29x44ptp9cametim\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_2ex2uaxk1a5vcyhx\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_g8963g3cy7lwwsih\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 52,\n     \"end\": 56,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"le}\\n\\\\begin{document}\\nLet $n$ be \",\n     \"suffix\": \". Then $n^2$ is even.\\n\\nThe sum o\",\n     \"quote\": \"even\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_kms47sgbo4p0dmhl\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_o2zs16imaj4qz1lu\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_r1y79d0286ydynue\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_qb43rpykpj3z4hld\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_7pvnnh2dh8ily6t9\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_fghoknbxfihzhvv3\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_at5rw4hpii5o41lr\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 83,\n     \"end\": 93,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \" even. Then $n^2$ is even.\\n\\nThe \",\n     \"suffix\": \" odd numbers is even.\\nAnd the su\",\n     \"quote\": \"sum of two\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_0jua0epd5u1lo6k6\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ftb2aiur22qn2dd7\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_gwztzxd0m5p7yq4c\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_hgksdq3t8yqxvhgp\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_tvt32f96bbbgjf9c\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_hofsd5dc9gki071z\"\n     }\n    }\n   ]\n  }\n ]\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f1\",\n  \"path\": \"/p.tex\"\n },\n \"threads\": [\n  {\n   \"id\": \"t_3mrq0trz4hzo1ttx\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 58,\n     \"end\": 77,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"egin{document}\\nLet $n$ be even. \",\n     \"suffix\": \"\\n\\nThe sum of two odd numbers is \",\n     \"quote\": \"Then $n^2$ is even.\"\n    },\n    \"rev\": 0e0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_9w1w6rjtsmepb4xa\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_g878khlz38yfybbt\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_mevipfsz44ghchap\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_y471go4nvc14sqmj\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_b40hy5y09wdczg7d\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_f4topgoggr7l9bvh\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_pdh056dob6a17mqp\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 0,\n     \"end\": 0,\n     \"quote\": \"\",\n     \"prefix\": \"\",\n     \"suffix\": \"\"\n    },\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ydjkg4qu72c87m5t\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_vqdcxq3yepbpidsf\"\n   },\n   \"deleted\": {\n    \"value\": true,\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_j7rc3jg34eiw1ka7\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_7xqnswp0e51rutzz\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"\",\n      \"rev\": 1,\n      \"time\": \"2026-10-29T20:05:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_29x44ptp9cametim\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_2ex2uaxk1a5vcyhx\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_g8963g3cy7lwwsih\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 52,\n     \"end\": 56,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"le}\\n\\\\begin{document}\\nLet $n$ be \",\n     \"suffix\": \". Then $n^2$ is even.\\n\\nThe sum o\",\n     \"quote\": \"even\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_kms47sgbo4p0dmhl\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_o2zs16imaj4qz1lu\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_r1y79d0286ydynue\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_qb43rpykpj3z4hld\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_7pvnnh2dh8ily6t9\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_fghoknbxfihzhvv3\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_at5rw4hpii5o41lr\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 83,\n     \"end\": 93,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \" even. Then $n^2$ is even.\\n\\nThe \",\n     \"suffix\": \" odd numbers is even.\\nAnd the su\",\n     \"quote\": \"sum of two\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_0jua0epd5u1lo6k6\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ftb2aiur22qn2dd7\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_gwztzxd0m5p7yq4c\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_hgksdq3t8yqxvhgp\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_tvt32f96bbbgjf9c\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_hofsd5dc9gki071z\"\n     }\n    }\n   ]\n  }\n ]\n}\n",
+   "out": {
+    "ok": {
+     "json": "{\"format\":\"sagebrush-latex-comments\",\"version\":1,\"file\":{\"fid\":\"f1\",\"path\":\"/p.tex\"},\"threads\":[{\"id\":\"t_3mrq0trz4hzo1ttx\",\"created\":\"2026-10-29T20:00:00.000Z\",\"anchor\":{\"value\":{\"start\":58,\"end\":77,\"textSha\":\"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\"prefix\":\"egin{document}\\nLet $n$ be even. \",\"suffix\":\"\\n\\nThe sum of two odd numbers is \",\"quote\":\"Then $n^2$ is even.\"},\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_9w1w6rjtsmepb4xa\"},\"resolved\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_g878khlz38yfybbt\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_mevipfsz44ghchap\"},\"messages\":[{\"id\":\"m_y471go4nvc14sqmj\",\"author\":\"person:wstein\",\"time\":\"2026-10-29T20:00:00.000Z\",\"text\":{\"value\":\"why é 😀?\",\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_b40hy5y09wdczg7d\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_f4topgoggr7l9bvh\"}}]},{\"id\":\"t_pdh056dob6a17mqp\",\"created\":\"2026-10-29T20:00:00.000Z\",\"anchor\":{\"value\":{\"start\":0,\"end\":0,\"quote\":\"\",\"prefix\":\"\",\"suffix\":\"\"},\"rev\":1,\"time\":\"2026-10-29T20:05:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_ydjkg4qu72c87m5t\"},\"resolved\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_vqdcxq3yepbpidsf\"},\"deleted\":{\"value\":true,\"rev\":1,\"time\":\"2026-10-29T20:05:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_j7rc3jg34eiw1ka7\"},\"messages\":[{\"id\":\"m_7xqnswp0e51rutzz\",\"author\":\"person:wstein\",\"time\":\"2026-10-29T20:00:00.000Z\",\"text\":{\"value\":\"\",\"rev\":1,\"time\":\"2026-10-29T20:05:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_29x44ptp9cametim\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_2ex2uaxk1a5vcyhx\"}}]},{\"id\":\"t_g8963g3cy7lwwsih\",\"created\":\"2026-10-29T20:00:00.000Z\",\"anchor\":{\"value\":{\"start\":52,\"end\":56,\"textSha\":\"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\"prefix\":\"le}\\n\\\\begin{document}\\nLet $n$ be \",\"suffix\":\". Then $n^2$ is even.\\n\\nThe sum o\",\"quote\":\"even\"},\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_kms47sgbo4p0dmhl\"},\"resolved\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_o2zs16imaj4qz1lu\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_r1y79d0286ydynue\"},\"messages\":[{\"id\":\"m_qb43rpykpj3z4hld\",\"author\":\"person:wstein\",\"time\":\"2026-10-29T20:00:00.000Z\",\"text\":{\"value\":\"why é 😀?\",\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_7pvnnh2dh8ily6t9\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_fghoknbxfihzhvv3\"}}]},{\"id\":\"t_at5rw4hpii5o41lr\",\"created\":\"2026-10-29T20:00:00.000Z\",\"anchor\":{\"value\":{\"start\":83,\"end\":93,\"textSha\":\"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\"prefix\":\" even. Then $n^2$ is even.\\n\\nThe \",\"suffix\":\" odd numbers is even.\\nAnd the su\",\"quote\":\"sum of two\"},\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_0jua0epd5u1lo6k6\"},\"resolved\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_ftb2aiur22qn2dd7\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_gwztzxd0m5p7yq4c\"},\"messages\":[{\"id\":\"m_hgksdq3t8yqxvhgp\",\"author\":\"person:wstein\",\"time\":\"2026-10-29T20:00:00.000Z\",\"text\":{\"value\":\"why é 😀?\",\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_tvt32f96bbbgjf9c\"},\"deleted\":{\"value\":false,\"rev\":0,\"time\":\"2026-10-29T20:00:00.000Z\",\"by\":\"person:wstein\",\"op\":\"o_hofsd5dc9gki071z\"}}]}]}",
+     "sha": "b5d128b5d204dcd6ae639ab0191a4443cbe12441109e6a76486eacc58bc20930",
+     "file": "{\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f1\",\n  \"path\": \"/p.tex\"\n },\n \"threads\": [\n  {\n   \"id\": \"t_3mrq0trz4hzo1ttx\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 58,\n     \"end\": 77,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"egin{document}\\nLet $n$ be even. \",\n     \"suffix\": \"\\n\\nThe sum of two odd numbers is \",\n     \"quote\": \"Then $n^2$ is even.\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_9w1w6rjtsmepb4xa\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_g878khlz38yfybbt\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_mevipfsz44ghchap\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_y471go4nvc14sqmj\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_b40hy5y09wdczg7d\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_f4topgoggr7l9bvh\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_pdh056dob6a17mqp\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 0,\n     \"end\": 0,\n     \"quote\": \"\",\n     \"prefix\": \"\",\n     \"suffix\": \"\"\n    },\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ydjkg4qu72c87m5t\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_vqdcxq3yepbpidsf\"\n   },\n   \"deleted\": {\n    \"value\": true,\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_j7rc3jg34eiw1ka7\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_7xqnswp0e51rutzz\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"\",\n      \"rev\": 1,\n      \"time\": \"2026-10-29T20:05:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_29x44ptp9cametim\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_2ex2uaxk1a5vcyhx\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_g8963g3cy7lwwsih\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 52,\n     \"end\": 56,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"le}\\n\\\\begin{document}\\nLet $n$ be \",\n     \"suffix\": \". Then $n^2$ is even.\\n\\nThe sum o\",\n     \"quote\": \"even\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_kms47sgbo4p0dmhl\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_o2zs16imaj4qz1lu\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_r1y79d0286ydynue\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_qb43rpykpj3z4hld\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_7pvnnh2dh8ily6t9\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_fghoknbxfihzhvv3\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_at5rw4hpii5o41lr\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 83,\n     \"end\": 93,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \" even. Then $n^2$ is even.\\n\\nThe \",\n     \"suffix\": \" odd numbers is even.\\nAnd the su\",\n     \"quote\": \"sum of two\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_0jua0epd5u1lo6k6\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ftb2aiur22qn2dd7\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_gwztzxd0m5p7yq4c\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_hgksdq3t8yqxvhgp\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_tvt32f96bbbgjf9c\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_hofsd5dc9gki071z\"\n     }\n    }\n   ]\n  }\n ]\n}\n"
+    }
+   }
+  },
+  {
+   "in": "{\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f1\",\n  \"path\": \"/p.tex\"\n },\n \"threads\": [\n  {\n   \"id\": \"t_3mrq0trz4hzo1ttx\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 58,\n     \"end\": 77,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"egin{document}\\nLet $n$ be even. \",\n     \"suffix\": \"\\n\\nThe sum of two odd numbers is \",\n     \"quote\": \"Then $n^2$ is even.\"\n    },\n    \"rev\": 0.5,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_9w1w6rjtsmepb4xa\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_g878khlz38yfybbt\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_mevipfsz44ghchap\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_y471go4nvc14sqmj\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_b40hy5y09wdczg7d\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_f4topgoggr7l9bvh\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_pdh056dob6a17mqp\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 0,\n     \"end\": 0,\n     \"quote\": \"\",\n     \"prefix\": \"\",\n     \"suffix\": \"\"\n    },\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ydjkg4qu72c87m5t\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_vqdcxq3yepbpidsf\"\n   },\n   \"deleted\": {\n    \"value\": true,\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_j7rc3jg34eiw1ka7\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_7xqnswp0e51rutzz\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"\",\n      \"rev\": 1,\n      \"time\": \"2026-10-29T20:05:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_29x44ptp9cametim\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_2ex2uaxk1a5vcyhx\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_g8963g3cy7lwwsih\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 52,\n     \"end\": 56,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"le}\\n\\\\begin{document}\\nLet $n$ be \",\n     \"suffix\": \". Then $n^2$ is even.\\n\\nThe sum o\",\n     \"quote\": \"even\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_kms47sgbo4p0dmhl\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_o2zs16imaj4qz1lu\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_r1y79d0286ydynue\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_qb43rpykpj3z4hld\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_7pvnnh2dh8ily6t9\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_fghoknbxfihzhvv3\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_at5rw4hpii5o41lr\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 83,\n     \"end\": 93,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \" even. Then $n^2$ is even.\\n\\nThe \",\n     \"suffix\": \" odd numbers is even.\\nAnd the su\",\n     \"quote\": \"sum of two\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_0jua0epd5u1lo6k6\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ftb2aiur22qn2dd7\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_gwztzxd0m5p7yq4c\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_hgksdq3t8yqxvhgp\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_tvt32f96bbbgjf9c\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_hofsd5dc9gki071z\"\n     }\n    }\n   ]\n  }\n ]\n}\n",
+   "out": {
+    "error": {
+     "code": "invalid",
+     "detail": null
+    }
+   }
+  },
+  {
+   "in": "{\n \"format\": \"sagebrush-latex-comments\",\n \"version\": 1,\n \"file\": {\n  \"fid\": \"f1\",\n  \"path\": \"/p.tex\"\n },\n \"threads\": [\n  {\n   \"id\": \"t_3mrq0trz4hzo1ttx\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 1e0 * 58,\n     \"end\": 77,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"egin{document}\\nLet $n$ be even. \",\n     \"suffix\": \"\\n\\nThe sum of two odd numbers is \",\n     \"quote\": \"Then $n^2$ is even.\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_9w1w6rjtsmepb4xa\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_g878khlz38yfybbt\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_mevipfsz44ghchap\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_y471go4nvc14sqmj\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_b40hy5y09wdczg7d\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_f4topgoggr7l9bvh\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_pdh056dob6a17mqp\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 0,\n     \"end\": 0,\n     \"quote\": \"\",\n     \"prefix\": \"\",\n     \"suffix\": \"\"\n    },\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ydjkg4qu72c87m5t\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_vqdcxq3yepbpidsf\"\n   },\n   \"deleted\": {\n    \"value\": true,\n    \"rev\": 1,\n    \"time\": \"2026-10-29T20:05:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_j7rc3jg34eiw1ka7\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_7xqnswp0e51rutzz\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"\",\n      \"rev\": 1,\n      \"time\": \"2026-10-29T20:05:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_29x44ptp9cametim\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_2ex2uaxk1a5vcyhx\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_g8963g3cy7lwwsih\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 52,\n     \"end\": 56,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \"le}\\n\\\\begin{document}\\nLet $n$ be \",\n     \"suffix\": \". Then $n^2$ is even.\\n\\nThe sum o\",\n     \"quote\": \"even\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_kms47sgbo4p0dmhl\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_o2zs16imaj4qz1lu\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_r1y79d0286ydynue\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_qb43rpykpj3z4hld\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_7pvnnh2dh8ily6t9\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_fghoknbxfihzhvv3\"\n     }\n    }\n   ]\n  },\n  {\n   \"id\": \"t_at5rw4hpii5o41lr\",\n   \"created\": \"2026-10-29T20:00:00.000Z\",\n   \"anchor\": {\n    \"value\": {\n     \"start\": 83,\n     \"end\": 93,\n     \"textSha\": \"63406100a2e8cde5df4de8b0fb79c55bbfe1bcdc40292553b4ee04c5e1c836a7\",\n     \"prefix\": \" even. Then $n^2$ is even.\\n\\nThe \",\n     \"suffix\": \" odd numbers is even.\\nAnd the su\",\n     \"quote\": \"sum of two\"\n    },\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_0jua0epd5u1lo6k6\"\n   },\n   \"resolved\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_ftb2aiur22qn2dd7\"\n   },\n   \"deleted\": {\n    \"value\": false,\n    \"rev\": 0,\n    \"time\": \"2026-10-29T20:00:00.000Z\",\n    \"by\": \"person:wstein\",\n    \"op\": \"o_gwztzxd0m5p7yq4c\"\n   },\n   \"messages\": [\n    {\n     \"id\": \"m_hgksdq3t8yqxvhgp\",\n     \"author\": \"person:wstein\",\n     \"time\": \"2026-10-29T20:00:00.000Z\",\n     \"text\": {\n      \"value\": \"why é 😀?\",\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_tvt32f96bbbgjf9c\"\n     },\n     \"deleted\": {\n      \"value\": false,\n      \"rev\": 0,\n      \"time\": \"2026-10-29T20:00:00.000Z\",\n      \"by\": \"person:wstein\",\n      \"op\": \"o_hofsd5dc9gki071z\"\n     }\n    }\n   ]\n  }\n ]\n}\n",
+   "out": {
+    "error": {
+     "code": "invalid",
+     "detail": null
+    }
+   }
   }
  ]
 }

@@ -31,8 +31,11 @@ const loadDocComments = (): Promise<typeof import("./comments-doc")> => import(d
 // (an agent on this computer, paired with the page: agent.ts, a chunk of its own, /sagebrush-latex-agent.js; mounted
 // once per page, as the editor switches files in place)
 const agentUrl = new URL("sagebrush-latex-agent.js", import.meta.url).href;
-let agentPairing: Promise<{ connect(): unknown } | null> | null = null;
-const pairAgent = (ws: Workspace) => (agentPairing ??= (import(agentUrl) as Promise<typeof import("./agent")>).then((m) => m.mountAgentPairing(ws as any)).catch(() => null));
+// (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
+// module's result for its URL; each caller says the failure)
+let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;
+const pairAgent = (ws: Workspace) => (agentPairing ??= (import(agentTries++ ? `${agentUrl}?try=${agentTries}` : agentUrl) as Promise<typeof import("./agent")>).then((m) => m.mountAgentPairing(ws as any)))
+  .catch((e) => { agentPairing = null; throw e; });
 
 export { PATCH_BUDGET, FOLLOW_KEY } from "./editor";
 // the source's font size (px) and the preview's zoom (%): their ranges, defaults and keys in localStorage
@@ -195,11 +198,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // Agent: an agent on this computer (Claude Code, Codex, … with sagebrush-mcp) connected to this page, to read and
   // answer the comments and edit the .tex, under the person's grant
   const agentBtn = el("button", "tex-agent", "Agent"); agentBtn.title = "Connect an agent on this computer";
-  agentBtn.onclick = () => void pairAgent(host.ws).then((p) => p?.connect());
+  const agentFailed = () => { status.textContent = "Couldn't load the agent connection. Check the network, then click Agent to try again."; };
+  agentBtn.onclick = () => void pairAgent(host.ws).then((p) => p.connect(), agentFailed);
   head.append(back, newBtn, title, dirty, save, toggle, cmBtn, agentBtn, status, tools);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
-  if (new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws);
-  else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws); }, () => {});
+  if (new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
+  else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
   const main = el("div", "tex-main");
   const left = el("div", "tex-left"), right = el("div", "tex-right");
   const preview = el("div", "page tex-preview");

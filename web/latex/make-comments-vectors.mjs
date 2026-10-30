@@ -1,7 +1,7 @@
 // The comments core's conformance vectors (web/latex/comments-vectors.json): inputs and the outputs
 // comments-core.mjs gives for them, which the Python port (engine/py/python/sagebrush/latex_comments.py) must give
-// too. Both suites check them: test-comments-core.mjs that the JS core still gives these outputs, and
-// engine/py/test_latex_comments.py that the port does. Rewrite them after a deliberate change to the core:
+// too: engine/py/test_latex_comments.py checks that the port does. (Its documents have random ids, so a new run
+// gives other bytes: the file is data, not remade on each test.) Rewrite them after a deliberate change to the core:
 //   node web/latex/make-comments-vectors.mjs > web/latex/comments-vectors.json
 import * as C from "./comments-core.mjs";
 
@@ -68,4 +68,17 @@ out.show.push({ doc: dd, text: TEX, id: ids[1], out: err(() => C.show(dd, TEX, i
 for (const [t, q] of [[TEX, { quote: "is even." }], [TEX, { quote: "is even.", occurrence: 2 }], [TEX, { quote: "nowhere" }], [TEX, { range: { start: { line: 3, col: 5 }, end: { line: 3, col: 8 } } }], [ASTRAL, { quote: "\u{1F914}" }]]) out.locateSpan.push({ text: t, args: q, out: err(() => C.locateSpan(t, q)) });
 for (const s of [null, "{", JSON.stringify({ ...C.emptyDoc({}), version: 2 }), JSON.stringify({ format: "x" }), C.serialize(ds), "[]"]) out.parse.push({ in: s, out: err(() => C.parse(s, { fid: "f9", path: "/q.tex" })) });
 for (const doc of [C.emptyDoc({}), d, ds, dd]) out.serialize.push({ doc, out: C.serialize(doc) });
+// JSON as JSON.parse reads it and JSON.stringify writes it, in a file's literal text: no NaN or Infinity; every
+// number a double (1.0 an integer, a rev of 1.0 valid; 1e400 Infinity, written null); numbers written the shortest
+// way, plain from 1e-6 to 1e21 (the bytes a file is admitted by, the list's snapshot and register ties depend on)
+out.literal = [];
+const plain = JSON.stringify(C.emptyDoc({ fid: "f9", path: "/q.tex" })), file = C.serialize(dd);
+const literals = ["NaN", "Infinity", "-Infinity", "1e-7", "1.0", "1e21", "1E+2", "-0", "0.1", "123456789012345678901234", "1e400", "5e-324", "1.5e-7", "100", "-1.25e-10", "0.000001", "1e-6", "[1.0, 2.50, 3e0]"]
+  .map((x) => plain.replace("{", `{"x":${x},`));
+literals.push(file.replace('"rev": 1', '"rev": 1.0'), file.replace('"rev": 0', '"rev": 0e0'), file.replace('"rev": 0', '"rev": 0.5'), file.replace('"start": ', '"start": 1e0 * '));
+for (const s of literals) out.literal.push({ in: s, out: err(() => { const doc = C.parse(s); return { json: JSON.stringify(doc), sha: C.sha256(JSON.stringify(doc)), file: C.serialize(doc) }; }) });
+// (a tie between two writes of one register, broken by the value's JSON: 1e-7 against 1e-70 orders by "1e-7}" and
+//  "1e-70", not by Python's "1e-07" and "1e-70")
+const tie = (x) => { const c = structuredClone(ds); c.threads[0].anchor.value = { ...c.threads[0].anchor.value, x }; return c; };
+out.merge.push({ a: tie(1e-7), b: tie(1e-70), out: C.merge(tie(1e-7), tie(1e-70)) }, { a: tie(1e-70), b: tie(1e-7), out: C.merge(tie(1e-70), tie(1e-7)) });
 process.stdout.write(JSON.stringify(out, null, 1) + "\n");

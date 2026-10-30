@@ -86,7 +86,9 @@ try {
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
     if (m.method === "Network.requestWillBeSent") requests.push(m.params.request.url);
     if (m.method === "Log.entryAdded" || m.method === "Runtime.consoleAPICalled") console_.push(JSON.stringify(m.params).slice(0, 300));
+    if (m.method === "Fetch.requestPaused") send(failChunk ? "Fetch.failRequest" : "Fetch.continueRequest", failChunk ? { requestId: m.params.requestId, errorReason: "InternetDisconnected" } : { requestId: m.params.requestId });
   };
+  let failChunk = false;
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); sock.send(JSON.stringify({ id, method, params })); });
   // (a reply without a result, a page gone mid-navigation, is a failed evaluation, retried by until)
   const ev = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }); if (!r.result || r.result.exceptionDetails) throw new Error(JSON.stringify(r.result?.exceptionDetails ?? r.error ?? r).slice(0, 400)); return r.result.result?.value; };
@@ -114,6 +116,20 @@ try {
   // the agent: before it's connected, the tools say so
   const nc = await tool("latex_comments_list", { path: "/papers/paper.tex" });
   ok(nc.is_error && nc.structured.error.code === "not_connected", "before pairing, the tools say no page is connected", nc);
+  // the agent chunk's fetch failing (the network down): said, and the next try fetches it again; on the Agent button,
+  // then on a ?pair= link (its code unused: nothing connected)
+  const failedSaid = `/Couldn't load the agent connection/.test(document.querySelector(".tex-status")?.textContent ?? "")`;
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-agent.js*" }] });
+  failChunk = true;
+  await ev(`document.querySelector(".tex-agent").click()`);
+  ok(await until(failedSaid) && !(await ev(`!!document.querySelector(".sbag-box")`)), "the agent chunk's fetch failing: the page says so");
+  failChunk = false;
+  await ev(`document.querySelector(".tex-agent").click()`);
+  ok(await until(`!!document.querySelector(".sbag-box")`), "the next click fetches it again, and Connect opens", requests.filter((u) => /sagebrush-latex-agent/.test(u)));
+  failChunk = true;
+  ok(await go(`?tex=${encodeURIComponent(fid)}&latex=1&pair=${first.code}&port=${first.port}`) && await until(failedSaid), "a ?pair= link whose chunk fails: said too");
+  failChunk = false;
+  await send("Fetch.disable");
   // a ?pair= link: Connect, then the grant (the paper's folder, may change files, until the page closes)
   ok(await go(`?tex=${encodeURIComponent(fid)}&latex=1&pair=${first.code}&port=${first.port}`), "the ?pair= link opens the editor");
   ok(await until(`!!document.querySelector(".sbag-box button.primary")`), "the Connect dialog shows", console_.slice(-5));

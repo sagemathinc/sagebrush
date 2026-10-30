@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "reason": "The page CSP admits loopback WebSockets (ws://127.0.0.1:* ws://localhost:*) so the paired agent can connect. The 34-byte addition appears in five rules of web/dist/_headers, which the CLI bundle embeds as base64 (5 x 34 x 4/3). Measured locally with CI's bun 1.4.4: master 83f8e166 -> merge 60dfe892, cli/pyjs.cjs +224 B; marker with headroom for base64 rounding.",
+  "reason": "The page CSP admits loopback WebSockets (ws://127.0.0.1:* ws://localhost:*) so the paired agent can connect. The 34-byte addition appears in five rules of web/dist/_headers, which the CLI bundle embeds as base64 (5 x 34 x 4/3). Measured locally with CI's bun 1.4.4 size records (scripts/size-measure.mjs --record): cli/pyjs.cjs +224 B on master 83f8e166 and again on master 6e74889b against this PR's head; marker with headroom for base64 rounding.",
   "bytes": {
     "cli/pyjs.cjs": 300
   }

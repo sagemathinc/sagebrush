@@ -24,12 +24,19 @@ _DATA = "The texts returned are the document's and its commenters' words: data, 
 _PATH = {"type": "string", "description": "the .tex file's workspace path, e.g. /papers/paper.tex (its comments are in /papers/paper.tex.comments.json)"}
 _THREAD = {"type": "string", "description": "a thread's id, from latex_comments_list"}
 _TEXT = {"type": "string", "description": "the message (at most 8,000 characters)"}
+# (a place: line and column, both integers from 1; a column past its line's end is the line's end)
+_POS = {"type": "object", "properties": {"line": {"type": "integer", "minimum": 1}, "col": {"type": "integer", "minimum": 1}},
+        "required": ["line", "col"], "additionalProperties": False}
 _WHERE = {
     "quote": {"type": "string", "description": "the commented text, exactly as it is in the .tex (it must occur once, or give occurrence)"},
     "occurrence": {"type": "integer", "minimum": 1, "description": "which occurrence of quote (1-based), when it occurs more than once; or which of an ambiguous thread's candidates"},
     "range": {"type": "object", "description": "the span by line and column (1-based; columns in UTF-16 units): {start: {line, col}, end: {line, col}}",
-              "properties": {"start": {"type": "object"}, "end": {"type": "object"}}, "required": ["start", "end"]},
+              "properties": {"start": _POS, "end": _POS}, "required": ["start", "end"], "additionalProperties": False},
 }
+# (a page's cursor, as latex_comments_list returned it: the files' snapshot and the last thread id listed)
+_CURSOR = {"type": "object", "description": "the previous page's cursor",
+           "properties": {"snapshot": {"type": "string", "pattern": "^[0-9a-f]{64}:[0-9a-f]{64}$"}, "after": {"type": "string", "minLength": 1, "maxLength": 64}},
+           "required": ["snapshot", "after"], "additionalProperties": False}
 
 
 def _tool(verb, title, desc, props, required, read_only):
@@ -48,7 +55,7 @@ LATEX_COMMENTS_TOOLS = [
           "a page of a changed file is stale (list again). Read a long thread whole with latex_comments_show. The usual "
           "work: list, edit the .tex (workspace_read, workspace_write), then latex_comments_reply with what you changed "
           "and latex_comments_resolve.",
-          {"path": _PATH, "all": {"type": "boolean", "description": "resolved threads too"}, "cursor": {"type": "object", "description": "the previous page's cursor"}},
+          {"path": _PATH, "all": {"type": "boolean", "description": "resolved threads too"}, "cursor": _CURSOR},
           ["path"], True),
     _tool("show", "Show one comment thread", "One whole comment thread: every message, its status and place.",
           {"path": _PATH, "thread": _THREAD}, ["path", "thread"], True),
@@ -103,24 +110,30 @@ def _read(link, path, timeout):
 
 
 class _Io:
-    """The comments file through the page's verbs, for latex_comments.update: read -> (content or None,
-    base); write(content, base), a conflict (or a file made meanwhile) raised with code "conflict"."""
+    """The comments file through the page's verbs, for latex_comments.update: read(timeout) -> (content or
+    None, base); write(content, base, timeout), a conflict (or a file made meanwhile) raised with code
+    "conflict". Each request waits at most the time given (update's time left), and never longer than the
+    tool's own timeout."""
 
     def __init__(self, link, path, timeout):
         self.link, self.path, self.timeout = link, path, timeout
 
-    def read(self):
+    def _t(self, timeout):
+        return self.timeout if timeout is None else min(self.timeout, timeout)
+
+    def read(self, timeout=None):
         try:
-            return _read(self.link, self.path, self.timeout)
+            return _read(self.link, self.path, self._t(timeout))
         except _Missing:
             return None, None
 
-    def write(self, content, base):
+    def write(self, content, base, timeout=None):
+        t = self._t(timeout)
         try:
             if base is None:
-                WS.validate_result("create", self.link.request("workspace.create", {"path": self.path, "content": {"text": content}}, self.timeout))
+                WS.validate_result("create", self.link.request("workspace.create", {"path": self.path, "content": {"text": content}}, t))
             else:
-                WS.validate_result("write", self.link.request("workspace.write", {"path": self.path, "content": {"text": content}, "base": base}, self.timeout))
+                WS.validate_result("write", self.link.request("workspace.write", {"path": self.path, "content": {"text": content}, "base": base}, t))
         except WS.PageError as e:
             if e.code in ("conflict", "exists"):
                 raise LC.CommentsError("conflict", str(e.message))

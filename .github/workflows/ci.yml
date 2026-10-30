@@ -203,6 +203,7 @@ jobs:
           node web/test-ipynb.mjs
           node web/latex/test-comments-core.mjs
           node web/latex/test-latex-comments-cli.mjs
+          node scripts/test-site-asset-budget.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
           node scripts/test-core-api-surface.mjs

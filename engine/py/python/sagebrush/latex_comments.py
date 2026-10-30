@@ -1,7 +1,7 @@
 """Comments on a LaTeX document: the file format, its merge and the anchors, in Python, for the
 latex_comments_* MCP tools (sagebrush/latex_comments_tools.py).  A port of web/latex/comments-core.mjs,
-kept in step with it by the shared conformance vectors (web/latex/comments-vectors.json, checked by both
-suites); the format is web/latex/COMMENTS-FORMAT.md.
+kept in step with it by the shared conformance vectors (web/latex/comments-vectors.json, made from the JS
+core and checked by engine/py/test_latex_comments.py); the format is web/latex/COMMENTS-FORMAT.md.
 
 The comments of paper.tex live beside it in paper.tex.comments.json.  Offsets are JavaScript string
 indices: UTF-16 code units into the .tex text.  Internally a text is held as a str of its UTF-16 code
@@ -10,6 +10,7 @@ slicing and searching count exactly as the page and the command-line tool do; st
 file are ordinary str again.  The JSON written is the same, byte for byte, as JSON.stringify's.
 """
 
+import decimal
 import hashlib
 import json
 import random
@@ -68,10 +69,75 @@ def utf8(s):
     return _LONE.sub("�", s).encode("utf-8")
 
 
+def _js_str(s):
+    return _LONE.sub(lambda m: "\\u%04x" % ord(m.group()), json.dumps(s, ensure_ascii=False))
+
+
+def js_num(x):
+    """A number as JavaScript writes it (Number::toString, as JSON.stringify uses it): the shortest digits that
+    read back to the same double, plain from 1e-6 up to 1e21 and in exponent form outside; NaN and infinities
+    as null (JSON.stringify's)."""
+    if isinstance(x, int) and -(1 << 53) < x < 1 << 53:
+        return str(x)
+    f = float(x)
+    if f != f or f in (float("inf"), float("-inf")):
+        return "null"
+    if f == 0:
+        return "0"
+    sign, digits, exp = decimal.Decimal(repr(f)).as_tuple()
+    ds = "".join(map(str, digits))
+    stripped = ds.rstrip("0")
+    exp += len(ds) - len(stripped)
+    ds, k = stripped, len(stripped)
+    n = exp + k  # (the value is 0.ds x 10^n)
+    if k <= n <= 21:
+        s = ds + "0" * (n - k)
+    elif 0 < n <= 21:
+        s = ds[:n] + "." + ds[n:]
+    elif -6 < n <= 0:
+        s = "0." + "0" * -n + ds
+    else:
+        e = n - 1
+        s = ds[0] + ("." + ds[1:] if k > 1 else "") + "e" + ("+" if e >= 0 else "-") + str(abs(e))
+    return ("-" if sign else "") + s
+
+
 def js_json(v, indent=None):
-    """JSON.stringify(v) (indent: JSON.stringify(v, null, indent)): the same text."""
-    s = json.dumps(v, ensure_ascii=False, indent=indent, separators=(",", ":") if indent is None else (",", ": "))
-    return _LONE.sub(lambda m: "\\u%04x" % ord(m.group()), s)
+    """JSON.stringify(v) (indent: JSON.stringify(v, null, indent)): the same text, numbers included."""
+    def out(x, depth):
+        if x is None:
+            return "null"
+        if x is True:
+            return "true"
+        if x is False:
+            return "false"
+        if isinstance(x, str):
+            return _js_str(x)
+        if isinstance(x, (int, float)):
+            return js_num(x)
+        nl, end = ("\n" + " " * (indent * (depth + 1)), "\n" + " " * (indent * depth)) if indent else ("", "")
+        if isinstance(x, (list, tuple)):
+            return "[" + ",".join(nl + out(e, depth + 1) for e in x) + end + "]" if x else "[]"
+        if isinstance(x, dict):
+            sep = ": " if indent else ":"
+            return "{" + ",".join(nl + _js_str(k) + sep + out(e, depth + 1) for k, e in x.items()) + end + "}" if x else "{}"
+        raise TypeError("not JSON: %r" % type(x))
+    return out(v, 0)
+
+
+def _js_number(s):
+    """A JSON number literal as JSON.parse reads it: one double (an integral one as an int while it is exact)."""
+    f = float(s)
+    return int(f) if f.is_integer() and abs(f) < 1 << 53 else f
+
+
+def _no_constant(name):
+    raise ValueError("not JSON: " + name)
+
+
+def js_parse(text):
+    """JSON.parse(text): strict JSON (no NaN or Infinity), every number a double as JavaScript has it."""
+    return json.loads(text, parse_float=_js_number, parse_int=_js_number, parse_constant=_no_constant)
 
 
 def u16key(s):
@@ -136,7 +202,8 @@ def empty_doc(file=None):
 
 # ---- admission: checked before anything is written; a refusal names the limit and the size
 def _is_int(v):
-    return isinstance(v, int) and not isinstance(v, bool)
+    """Number.isInteger(v): an int, or a float with no fraction (past 2^53 a number is kept as a float)"""
+    return (isinstance(v, int) and not isinstance(v, bool)) or (isinstance(v, float) and v.is_integer())
 
 
 def _str(v, mx, what):
@@ -225,7 +292,7 @@ def parse(text, file=None):
     if n > LIMITS["sidecarBytes"]:
         fail("limit", "the comments file is over 2 MiB", {"limit": "sidecarBytes", "max": LIMITS["sidecarBytes"], "size": n})
     try:
-        doc = json.loads(text)
+        doc = js_parse(text)
     except ValueError:
         fail("invalid", "the comments file isn't JSON")
     return validate(doc)
@@ -495,7 +562,7 @@ def resolver(text, budget=None, text_sha=None):
 
 # ---- the operations: each returns a new document (the input never changed) and checks admission first
 def _clone(d):
-    return json.loads(js_json(d))
+    return js_parse(js_json(d))
 
 
 def _thread_of(doc, tid):
@@ -611,42 +678,57 @@ def merge(a, b):
 # retried, 5 attempts in all, each re-reading, re-validating and re-applying op (doc -> (doc, id)), within one
 # monotonic deadline; out of attempts or time: busy, the draft kept.  A failure that may have come after the
 # write was done is reconciled against the file.
-def update(io, op, file=None, draft=None, deadline_ms=None, sleep=time.sleep):
-    end = time.monotonic() + (deadline_ms or LIMITS["deadlineMs"]) / 1000.0
+def update(io, op, file=None, draft=None, deadline_ms=None, sleep=time.sleep, clock=time.monotonic):
+    """io: read(timeout) -> (content or None, base); write(content, base, timeout), raising an error with code
+    "conflict" on a compare-and-swap miss. One monotonic deadline (10 s) covers every step, as in the JS core: each
+    read and write is given the time left (the JS core's abort signal), so none can outlast it by more than its own
+    overrun; a failure after it is "busy"."""
+    end = clock() + (deadline_ms or LIMITS["deadlineMs"]) / 1000.0
 
     def busy(attempts, why):
         fail("busy", why + "; nothing was saved", {"draft": draft, "attempts": attempts})
 
+    def left(attempts):
+        t = end - clock()
+        if t <= 0:
+            busy(attempts, "out of time")
+        return t
+
     attempt = 1
     while True:
-        if time.monotonic() >= end:
-            busy(attempt - 1, "out of time")
-        content, base = io.read()
+        content, base = io.read(timeout=left(attempt - 1))
         doc, tid = op(parse(content, file))
         text = serialize(doc)
-        if time.monotonic() >= end:
-            busy(attempt - 1, "out of time")
         try:
-            io.write(text, base)
+            io.write(text, base, timeout=left(attempt - 1))
             return {"doc": doc, "id": tid, "attempts": attempt}
         except Exception as e:
+            if getattr(e, "code", None) == "busy":
+                raise
             if getattr(e, "code", None) != "conflict":
+                # (a failure but a conflict may have come after the write was done: the file is read once more, on
+                #  its own short bound, and if it already holds everything this write had, it was saved)
                 landed = _reconcile(io, doc, file)
                 if landed is not None:
                     return {"doc": landed, "id": tid, "attempts": attempt, "reconciled": True}
+                if clock() >= end:
+                    busy(attempt, "out of time")
                 raise
             if attempt >= LIMITS["attempts"]:
                 busy(attempt, "the comments file kept changing (%d attempts)" % attempt)
             ms = round(LIMITS["backoffMs"][attempt - 1] * (0.75 + random.random() * 0.5))
-            if time.monotonic() + ms / 1000.0 >= end:
+            if clock() + ms / 1000.0 >= end:
                 busy(attempt, "out of time")
             sleep(ms / 1000.0)
             attempt += 1
 
 
+RECONCILE_S = 2.0  # (the JS core's reconcile bound)
+
+
 def _reconcile(io, mine, file):
     try:
-        content, _ = io.read()
+        content, _ = io.read(timeout=RECONCILE_S)
         cur = parse(content, file)
         return cur if js_json(merge(cur, mine)) == js_json(merge(cur, cur)) else None
     except Exception:
