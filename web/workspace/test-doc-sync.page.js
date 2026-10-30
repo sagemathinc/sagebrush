@@ -40,7 +40,7 @@ T.connect = async (dev, account) => {
     ws.onclose = () => { for (const [, f] of T.pending) f({ t: "error", code: "busy" }); T.pending.clear(); T.ds.disconnected(); };
   });
   await new Promise((ok) => { ws.onopen = ok; });
-  ws.send(J({ t: "hello", v: 1, device: `device-${dev}-0000`, name: dev, index_after: 0 }));
+  ws.send(J({ t: "hello", v: 2, device: `device-${dev}-0000`, name: dev, index_after: 0 }));
   await Promise.race([welcome, new Promise((_, no) => setTimeout(() => no(new Error("no welcome: " + J(T.log))), 10_000))]);
   await T.ds.connected({
     owner,

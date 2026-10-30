@@ -52,7 +52,7 @@ async function socket(server, who, device) {
   };
   const tell = (m) => { const r = ++req; s.send(J({ ...m, req: r })); return r; };
   if (device) {
-    s.send(J({ t: "hello", v: 1, device, name: device, index_after: 0 }));
+    s.send(J({ t: "hello", v: 2, device, name: device, index_after: 0 }));
     await next((m) => m.t === "welcome");
     await next((m) => m.t === "index");
   }
@@ -113,7 +113,7 @@ try {
   const idx = await a1.ask({ t: "pull_index", after: 1 });
   check(idx.t === "index" && J(idx.ops.map((o) => o.seq)) === J([2, 3]) && idx.more === false, "pull_index after 1: seqs 2 and 3: " + J(idx.ops.map((o) => o.seq)));
   const s3 = await socket(server, A, null);
-  s3.s.send(J({ t: "hello", v: 1, device: "devA0003", name: "x", index_after: 0, account: "f".repeat(64) }));
+  s3.s.send(J({ t: "hello", v: 2, device: "devA0003", name: "x", index_after: 0, account: "f".repeat(64) }));
   const ref = await s3.next((m) => m.t === "error");
   check(ref.code === "forbidden" && ref.detail.reason === "account", "hello bound to another account: forbidden, reason account");
   const early = await s3.ask({ t: "pull_index", after: 0 });
@@ -383,7 +383,7 @@ const C1 = "clientA1", C2 = "clientB1";
     const [sock] = await Promise.all([server.connect(C.cookie), C.call("POST", "/api/sync/v1/enable")]);
     const got = [];
     sock.onmessage = (t) => got.push(JSON.parse(t));
-    sock.send(J({ t: "hello", v: 1, device: "devC0001", name: "c", index_after: 0 }));
+    sock.send(J({ t: "hello", v: 2, device: "devC0001", name: "c", index_after: 0 }));
     await sleep(30);
     check(got[0]?.t === "welcome" && got[0].state === "active" && got[0].generation === 1, "CORR-173-4: the socket made concurrently with enable says hello to the one, active account: " + J(got[0]));
     const other = await socket(server, C, "devC0002");
