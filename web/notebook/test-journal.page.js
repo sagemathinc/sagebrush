@@ -1881,9 +1881,29 @@ async function arrivingStarted() {
   await close(w);
   hdb.close();
 }
+// ---- astra3's A-SA-1 on #353: the root patch measured as doc-sync sends it, under the writer's lock.  16000 empty code
+// cells: what the history keeps (versionedOf) is under 1 MiB, but the root patch's payload is over it, so the start is
+// refused as too large, nothing written (no start row, no l row, no synced row), the notebook kept and saved here; a
+// small notebook still starts (the control)
+async function startTooLarge() {
+  const { w, hdb } = await active();
+  await synced(async () => {
+    const cells = Array.from({ length: 16000 }, (_, i) => ["c" + i, ""]);
+    const vbytes = new TextEncoder().encode(JSON.stringify(N.versionedOf(doc(cells)))).length;
+    const { id, st } = await loadNew(w, hdb, cells);
+    const js = await jState(hdb, id), l = await lrows(hdb, id), srows = await keyRows(hdb, N.syncedKey(id, 1)), rec = await rawGet(w.main, "notebooks", id);
+    check(vbytes < 2 ** 20 && !st.synced && st.startRefused?.tooLarge === true && st.startRefused?.room === false && js.start === null && l.length === 0 && srows.length === 0 && (rec?.cells ?? []).length === 16000, "16000 empty cells (versionedOf " + vbytes + " B): the start refused as too large, nothing of sync written, the notebook kept here: " + J({ synced: !!st.synced, refused: st.startRefused, start: js.start, l: l.length, synced_rows: srows.length, cells: (rec?.cells ?? []).length }));
+    await close(st);
+    const small = await loadNew(w, hdb, [["a", "A"]]);
+    check(!!small.st.synced && small.st.startRefused === null, "a small notebook still starts (the control): " + J({ synced: small.st.synced, refused: small.st.startRefused }));
+    await close(small.st);
+  });
+  await close(w);
+  hdb.close();
+}
 const CASES = [arrivingSays, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
-  arrivingStarted];
+  arrivingStarted, startTooLarge];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);

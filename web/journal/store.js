@@ -30,6 +30,7 @@ import { bytesHash } from "../notebook/stores.js";
 import { t1Write, dropRows, readJournal, roomRefused, syncedKey, acked, markSent, rotate } from "./rows.js";
 import { writeIntent, prune, neverFits, replay, journalTexts } from "./core.js";
 import { makeClientId, decodePatchId } from "patchflow";
+import { LIMITS } from "../sync-protocol/protocol";
 
 const canonical = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
 /** The hash of what a kind's history keeps of `doc` (SHA-256 of the canonical JSON of its versionedOf). */
@@ -253,15 +254,23 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     const env = this.history.record(doc);
     let r = { refused: "nothing to record" };
     if (env && !env.pending) {
-      this.patches.start = { n, client, time: env.time };
-      try { r = await this.patches.appended(env.time); } finally { this.patches.start = undefined; }
+      // (the root patch measured as doc-sync will send it, its payload without time and parents (doc-sync.ts send): one
+      // over the batch bound would be stopped there for good, so the history isn't started at all, nothing written; the
+      // value measured is the one recovered under the writer's lock (astra3's A-SA-1 on #353))
+      const { time: _t, parents: _p, ...payload } = env;
+      if (new TextEncoder().encode(JSON.stringify(payload)).length > LIMITS.batchBytes) r = { refused: this.T.TOO_LARGE_TO_SYNC, tooLarge: true };
+      else {
+        this.patches.start = { n, client, time: env.time };
+        try { r = await this.patches.appended(env.time); } finally { this.patches.start = undefined; }
+      }
     }
     if (r.j !== undefined) { this.synced = { n, from_j: r.j }; this.watchRemote(client); this.toldSaved(); return true; }
     this.history.close();
     this.patches.id = old;
     this.history.clientId = was.client; delete this.history.sessionOptions; this.history.lastMs = was.lastMs;
     await this.history.init();
-    throw new Error(r.refused ?? "not kept");
+    // (the refusal kept with the error: for room (roomRefused), too large, or another (the grader's R-SA-1 on #353))
+    throw Object.assign(new Error(r.refused ?? "not kept"), { refusal: r });
   }
   /** A new client for this document's slot (2c-3, 2c-4: after a final refusal, an epoch move, `unknown_client`): the
    * rotation's transaction, then the history's session made again with it, so every later patch is the new client's. */
@@ -434,7 +443,13 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       if (this.recovered.row === "arriving") throw Object.assign(new Error(this.T.ARRIVING), { arriving: true });
       // (2c-2: a document not yet synced starts its synced history now, from the value recovered; one that can't (no
       // room, say) stays local this time, and tries again at its next load)
-      if (this.kind.sync.on && !this.synced) await this.startSynced(this.recovered.doc).catch((e) => console.warn(`sync: a ${this.kind.noun}'s synced history not started:`, e));
+      // (why it didn't start, kept for a caller that walks many (notebook/start-all.js): too large, for room, or another)
+      this.startRefused = null;
+      if (this.kind.sync.on && !this.synced) await this.startSynced(this.recovered.doc).catch((e) => {
+        const r = e?.refusal ?? null;
+        this.startRefused = { message: String(e?.message ?? e), tooLarge: !!r?.tooLarge, room: !!r && roomRefused(r) };
+        console.warn(`sync: a ${this.kind.noun}'s synced history not started:`, e);
+      });
       return this.recovered.doc;
     })();
     try {

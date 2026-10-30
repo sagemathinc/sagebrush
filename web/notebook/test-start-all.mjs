@@ -1,7 +1,8 @@
 // web/notebook/start-all.js (sync-docs, #1 (a)): every notebook of this device whose synced history hasn't started is
-// loaded as its writer and let go; the open one, one started meanwhile, one with no record and one another tab writes
-// are left; one too large to send is counted, never started; a start refused for room ends the walk; a failure is
-// counted and the walk goes on; leaving the page ends it; every store loaded is let go.
+// loaded as its writer and let go; the open one, one started meanwhile and one another tab writes are left; one the
+// store refuses as too large is counted by name and the walk goes on; one refused for room ends the walk; any other
+// refusal or failure is counted and the walk goes on; sync turned off, or the page leaving, ends it; every store loaded
+// is let go.
 //   bun web/notebook/test-start-all.mjs
 import { startAll, startAllSummary } from "./start-all.js";
 
@@ -10,24 +11,29 @@ const fails = [];
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 const J = JSON.stringify;
 
-// (a world of notebooks: ref -> { path, started, size, held, noRoom, throws }; the fake store as the journal's does)
+// (a world of notebooks: ref -> { path, started, held, refuse: "tooLarge" | "room" | "other", throws, startThrows }; the
+// fake store as the journal's does: a refused start leaves `startRefused`, as store.js load keeps it)
 function world(spec, over = {}) {
   const nb = new Map(Object.entries(spec));
   const log = { loads: [], releases: [], progress: [] };
+  const sync = { on: true };
   const s = {
     list: async () => [...nb].map(([ref, n]) => ({ ref, path: n.path })),
-    startOf: async (ref) => (nb.get(ref).started ? { n: 1 } : null),
-    sizeOf: async (ref) => (nb.get(ref).size === undefined ? 100 : nb.get(ref).size),
-    maxBytes: 1000,
+    startOf: async (ref) => { if (nb.get(ref).startThrows) throw new Error("unreadable"); return nb.get(ref).started ? { n: 1 } : null; },
+    syncOn: () => sync.on,
     storeFor: async (ref) => {
       const n = nb.get(ref);
       return {
-        journaled: n.journaled !== false, writer: false, synced: null,
+        journaled: n.journaled !== false, writer: false, synced: null, startRefused: null,
         async load() {
           log.loads.push(ref);
           if (n.throws) throw new Error("load failed");
           this.writer = !n.held;
-          if (this.writer && !n.noRoom) { n.started = true; this.synced = { n: 1 }; }
+          if (n.offBeforeStart) sync.on = false;
+          if (!this.writer || !sync.on) return;
+          if (n.refuse) this.startRefused = { message: n.refuse, tooLarge: n.refuse === "tooLarge", room: n.refuse === "room" };
+          else { n.started = true; this.synced = { n: 1 }; }
+          if (n.turnsOff) sync.on = false;
         },
         async release() { log.releases.push(ref); },
       };
@@ -38,7 +44,7 @@ function world(spec, over = {}) {
     progress: (d, t) => log.progress.push([d, t]),
     ...over,
   };
-  return { s, nb, log };
+  return { s, nb, log, sync };
 }
 
 {
@@ -55,10 +61,10 @@ function world(spec, over = {}) {
   check(r2.total === 0 && log.loads.length === before, "a second walk finds nothing to start and loads nothing: " + J(r2));
 }
 {
-  // (the open one, one already started, one with no record: left)
-  const { s, log } = world({ open: { path: "/open.ipynb" }, done: { path: "/done.ipynb", started: true }, gone: { path: "/gone.ipynb", size: null }, x: { path: "/x.ipynb" } }, { current: () => "open" });
+  // (the open one and one already started: left)
+  const { s, log } = world({ open: { path: "/open.ipynb" }, done: { path: "/done.ipynb", started: true }, x: { path: "/x.ipynb" } }, { current: () => "open" });
   const r = await startAll(s);
-  check(r.started === 1 && J(log.loads) === J(["x"]), "the open notebook, one started, one with no record: left; only the other loaded: " + J({ r, loads: log.loads }));
+  check(r.started === 1 && J(log.loads) === J(["x"]), "the open notebook and one started: left; only the other loaded: " + J({ r, loads: log.loads }));
 }
 {
   // (another tab writes it: loaded read-only, counted as held, not started, let go)
@@ -67,18 +73,40 @@ function world(spec, over = {}) {
   check(r.held === 1 && r.started === 1 && !nb.get("h").started && log.releases.includes("h"), "one another tab writes: left (held), let go: " + J(r));
 }
 {
-  // (too large: counted by name, never loaded, and said)
-  const { s, log } = world({ big: { path: "/Big one.ipynb", size: 5000 }, z: { path: "/z.ipynb" } });
+  // (the store refuses it as too large: counted by name, let go, the walk goes on, and said)
+  const { s, log } = world({ big: { path: "/Big one.ipynb", refuse: "tooLarge" }, z: { path: "/z.ipynb" } });
   const r = await startAll(s);
-  check(J(r.tooLarge) === J(["/Big one.ipynb"]) && !log.loads.includes("big") && r.started === 1, "one too large to send: counted, never loaded: " + J(r));
+  check(J(r.tooLarge) === J(["/Big one.ipynb"]) && r.started === 1 && log.releases.includes("big") && r.noRoom.length === 0, "the store refuses one as too large: counted, let go, the walk goes on: " + J(r));
   check(/1 notebook is too large to sync yet \(Big one\.ipynb\)/.test(startAllSummary(r) ?? ""), "…and said by name: " + startAllSummary(r));
 }
 {
-  // (a start refused for room: the walk ends there; the rest untouched)
-  const { s, nb, log } = world({ p: { path: "/p.ipynb" }, q: { path: "/q.ipynb", noRoom: true }, r: { path: "/r.ipynb" } });
+  // (refused for room: the walk ends there; the rest untouched; said as storage full)
+  const { s, nb, log } = world({ p: { path: "/p.ipynb" }, q: { path: "/q.ipynb", refuse: "room" }, r: { path: "/r.ipynb" } });
   const r = await startAll(s);
   check(r.started === 1 && J(r.noRoom) === J(["/q.ipynb"]) && !nb.get("r").started && !log.loads.includes("r") && log.releases.includes("q"), "a start refused for room ends the walk, the rest untouched, the refused one let go: " + J({ r, loads: log.loads }));
   check(/storage for sync is full/.test(startAllSummary(r) ?? ""), "…and said: " + startAllSummary(r));
+}
+{
+  // (the grader's R-SA-1: a refusal that isn't for room: failed, the walk goes on, never said as storage full)
+  const { s, log } = world({ o: { path: "/o.ipynb", refuse: "other" }, w: { path: "/w.ipynb" } });
+  const r = await startAll(s);
+  check(J(r.failed) === J(["/o.ipynb"]) && r.noRoom.length === 0 && r.started === 1 && log.loads.includes("w") && !/storage/.test(startAllSummary(r) ?? ""), "a refusal not for room: failed, the walk goes on, not said as storage full: " + J({ r, said: startAllSummary(r) }));
+}
+{
+  // (sync turned off mid-walk: the walk ends, nothing counted against the notebook, nothing said)
+  const { s, log } = world({ t: { path: "/t.ipynb", turnsOff: true }, u2: { path: "/u2.ipynb" } });
+  const r = await startAll(s);
+  check(r.stopped === true && r.started === 1 && !log.loads.includes("u2") && startAllSummary(r) === null, "sync turned off mid-walk: the walk ends, nothing said: " + J(r));
+  // (and turned off during a load, before its start: the store doesn't start it, and that isn't a failure or a room refusal)
+  const { s: s2, log: log2, nb: nb2 } = world({ v: { path: "/v.ipynb", offBeforeStart: true } });
+  const r2 = await startAll(s2);
+  check(r2.stopped === true && r2.failed.length === 0 && r2.noRoom.length === 0 && !nb2.get("v").started && log2.releases.includes("v"), "sync off before a load's start: not counted as failed or room, let go: " + J(r2));
+}
+{
+  // (astra3's N-SA-1: a notebook whose start can't be read: failed, the walk goes on)
+  const { s } = world({ bad: { path: "/bad.ipynb", startThrows: true }, ok: { path: "/ok.ipynb" } });
+  const r = await startAll(s);
+  check(J(r.failed) === J(["/bad.ipynb"]) && r.started === 1, "a notebook whose start can't be read: failed, the others go on: " + J(r));
 }
 {
   // (a load that fails: counted, let go, the walk goes on)
