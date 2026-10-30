@@ -3605,6 +3605,11 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
+ "lib/_operator.py :: _compare_digest :: raise TypeError(\"unsupported operand types(s) or combination of types: '%s' and '%s'\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython's own code paths, no size bound: _operator._compare_digest's TypeError for operands that are neither two str nor buffers (CPython's message, its typo included); hmac.py's two except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib), where CPython falls back to the pure-Python HMAC"
+ },
  "lib/_png.py ::  :: MAX_AXIS = 16384 #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
@@ -4901,6 +4906,16 @@
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
   "reason": "hashlib has md5, sha1, sha224, sha256, sha384 and sha512; any other name is CPython's own ValueError('unsupported hash type ...'), as CPython says for an algorithm its build lacks: a missing feature (blake2, sha3, shake deferred), not a size cap"
+ },
+ "lib/hmac.py :: HMAC.__init :: except _hashopenssl.UnsupportedDigestmodError: # pragma: no cover #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython's own code paths, no size bound: _operator._compare_digest's TypeError for operands that are neither two str nor buffers (CPython's message, its typo included); hmac.py's two except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib), where CPython falls back to the pure-Python HMAC"
+ },
+ "lib/hmac.py :: digest :: except _hashopenssl.UnsupportedDigestmodError: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython's own code paths, no size bound: _operator._compare_digest's TypeError for operands that are neither two str nor buffers (CPython's message, its typo included); hmac.py's two except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib), where CPython falls back to the pure-Python HMAC"
  },
  "lib/locale.py ::  :: \"LC_NUMERIC\", \"LC_ALL\", \"CHAR_MAX\", \"getencoding\"] #0": {
   "class": "none",
