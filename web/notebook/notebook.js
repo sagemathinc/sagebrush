@@ -2016,6 +2016,10 @@ export function createNotebook(root, opts = {}) {
     const { cells: list, mode: m, rev, baseRev: _b, ...rest } = doc;
     // an older revision than the synced one (a late message) changes nothing
     if (keepLocal && rev !== undefined && shown.synced?.rev !== undefined && rev <= shown.synced.rev && !fromConflict) return;
+    // (an exact-v1 document's merge of an edit made here with one made there (plan-p2c r0 S2): the store's, cocalc-ai's
+    // mergeText; none for any other document, or a revert.  Asked before anything changes: a build that can't merge
+    // an exact-v1 document refuses it here (the store throws), never the older way)
+    const merge = keepLocal ? store?.mergeText : undefined;
     shown.remoteSeen++;
     loading = true;
     const base = keepLocal ? shown.synced?.cells ?? null : null;
@@ -2031,8 +2035,9 @@ export function createNotebook(root, opts = {}) {
       const b = base?.get(rc.id);
       let c = mine.get(rc.id);
       if (!c) {
-        // deleted here and unchanged there: stays deleted
-        if (b && b.code === (rc.code ?? "") && b.outputs === JSON.stringify(rc.outputs ?? [])) { dirty = true; continue; }
+        // deleted here and unchanged there: stays deleted (an exact-v1 document: unless its input changed there; new
+        // outputs alone don't bring a cell back, as in dbMerge3)
+        if (b && b.code === (rc.code ?? "") && (merge || b.outputs === JSON.stringify(rc.outputs ?? []))) { dirty = true; continue; }
         c = addCell(rc.code ?? "", prev ? { after: prev } : { first: true }, false, rc.type, rc.id);
         fill(c, rc);
         prev = c.el;
@@ -2064,13 +2069,23 @@ export function createNotebook(root, opts = {}) {
         }
       }
       const L = c.ta.value, Rt = rc.code ?? "";
-      let textChanged = false, conflictText = null;
+      let textChanged = false, conflictText = null, text = Rt, sel = null;
       if (L !== Rt) {
         if (b && b.code === Rt) dirty = true; // changed here only: kept
-        else if (b && b.code !== L) { textChanged = true; conflictText = L; dirty = true; } // changed on both sides
-        else textChanged = true; // changed there only
+        else if (b && b.code !== L) { // changed on both sides
+          dirty = true;
+          if (merge) {
+            // (an exact-v1 document: the two merged, the selection mapped onto the result; no copy)
+            ({ text, sel } = merge({ base: b.code, local: L, remote: Rt, sel: [c.ta.selectionStart, c.ta.selectionEnd] }));
+            textChanged = text !== L;
+          } else { textChanged = true; conflictText = L; }
+        } else textChanged = true; // changed there only
       }
-      if (textChanged) setInput(c, Rt);
+      if (textChanged) {
+        const dir = c.ta.selectionDirection;
+        setInput(c, text);
+        if (sel && document.activeElement === c.ta) c.ta.setSelectionRange(sel[0], sel[1], dir);
+      }
       if (c.type === "markdown") {
         c.attachments = rc.attachments ?? null;
         if (textChanged && c.el.classList.contains("rendered")) renderMd(c);

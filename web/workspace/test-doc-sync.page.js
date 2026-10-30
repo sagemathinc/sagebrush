@@ -2,7 +2,7 @@
 // Locks): a workspace with the journal active and DEV's docsync on, a notebook store per notebook, and doc-sync.ts's
 // DocSync on a minimal account socket to the reference server (hello, welcome, then the document requests).  The
 // harness drives two of these, as two devices of one account.
-import { W, N, H, DS, P, NB, MC } from "./all.js";
+import { W, N, H, DS, P, NB, MC, ST } from "./all.js";
 
 const J = JSON.stringify;
 const T = { stores: new Map(), pending: new Map(), req: 0, log: [] };
@@ -165,6 +165,7 @@ T.fakeState = () => ({ sent: T.fake.sent.slice(), waiting: T.fake.q.map((x) => x
 // ---- the notebook page itself (notebook.js createNotebook) on a notebook's store, as index.html attaches it
 T.mount = async (id) => {
   const div = document.body.appendChild(document.createElement("div"));
+  T.nbDiv = div;
   T.nb = NB.createNotebook(div, {});
   const st = new T.kit.JournalStore(T.w.main, T.hdb, id, null, H);
   await T.nb.attach(st);
@@ -172,6 +173,71 @@ T.mount = async (id) => {
   return codesOf(T.nb.snapshot());
 };
 T.shown = () => codesOf(T.nb.snapshot());
+// ---- P2c (plan-p2c r0): the mounted notebook's editor as a person sees it.  Its cells' texts from their textareas,
+// any copy tagged conflict, the notices it said (its "saved" and "conflict" events, from mountWatch on), and the
+// focused cell's selection
+T.mountWatch = () => {
+  T.said = [];
+  for (const e of ["saved", "conflict"]) T.nb.on(e, (x) => T.said.push([e, typeof x === "string" ? x : J(x)]));
+  return true;
+};
+const cellsOf = (root) => [...root.querySelectorAll(".sbnb .cells > *")].map((el) => el.cell).filter(Boolean);
+T.editor = () => {
+  const cs = cellsOf(T.nbDiv);
+  const f = cs.find((c) => document.activeElement === c.ta);
+  return {
+    texts: cs.map((c) => [c.id, c.ta.value]),
+    copies: cs.filter((c) => (c.metadata?.tags ?? []).includes("conflict")).length,
+    said: (T.said ?? []).slice(),
+    sel: f ? { id: f.id, start: f.ta.selectionStart, end: f.ta.selectionEnd, dir: f.ta.selectionDirection } : null,
+  };
+};
+/** A cell typed into but not yet saved: its text set, focused, the selection [start, end] in it, and no input event
+ * (the keystroke's save comes 500 ms later: this is the moment before it). */
+T.typeUnsaved = (cid, text, start, end = start, dir = "none") => {
+  const c = cellsOf(T.nbDiv).find((x) => x.id === cid);
+  if (!c) return false;
+  c.ta.value = text;
+  c.ta.focus();
+  c.ta.setSelectionRange(start, end, dir);
+  return true;
+};
+/** The history's head value of a notebook (its cells' [id, input], sorted). */
+T.head = (id) => { const s = T.stores.get(id)?.history?.session; return s ? J(s.value().get({ type: "cell" }).map((r) => [r.id, r.input]).sort()) : null; };
+
+// ---- the editor alone (notebook.js createNotebook) on a memory store whose document is exact-v1 or not: what
+// applyRemote does with an incoming document, as a journal store's merge would hand it on (plan-p2c r0 S2)
+T.edFake = async (exact, cells) => {
+  T.edDiv?.remove();
+  const store = new ST.MemoryStore({ name: "f", mode: "python", cells: cells.map(([id, code]) => ({ id, code })) });
+  Object.defineProperty(store, "mergeMode", { get: () => (exact ? "exact-v1" : "legacy") });
+  Object.defineProperty(store, "mergeText", { get: () => (exact ? H.mergeTextAt : undefined) });
+  T.edDiv = document.body.appendChild(document.createElement("div"));
+  T.edNb = NB.createNotebook(T.edDiv, {});
+  T.edStore = store;
+  T.edSaid = [];
+  T.edNb.on("conflict", (x) => T.edSaid.push(J(x)));
+  await T.edNb.attach(store);
+  return true;
+};
+/** The fake editor's cells, as T.editor says them, its own root only. */
+T.edState = () => {
+  const cs = cellsOf(T.edDiv), f = cs.find((c) => document.activeElement === c.ta);
+  return { texts: cs.map((c) => [c.id, c.ta.value]), copies: cs.filter((c) => (c.metadata?.tags ?? []).includes("conflict")).length, said: T.edSaid.slice(), sel: f ? { id: f.id, start: f.ta.selectionStart, end: f.ta.selectionEnd, dir: f.ta.selectionDirection } : null };
+};
+T.edType = (cid, text, start, end = start, dir = "none") => {
+  const c = cellsOf(T.edDiv).find((x) => x.id === cid);
+  if (!c) return false;
+  c.ta.value = text; c.ta.focus(); c.ta.setSelectionRange(start, end, dir);
+  return true;
+};
+/** A cell deleted in the fake editor (as its delete does), not yet saved. */
+T.edDelete = (cid) => { const c = cellsOf(T.edDiv).find((x) => x.id === cid); if (!c) return false; c.el.remove(); return true; };
+/** A document from elsewhere pushed to the fake editor: its cells, with outputs where given. */
+T.edPush = (cells) => {
+  T.edStore.push({ ...structuredClone(T.edStore.doc), cells: cells.map(([id, code, outputs]) => ({ id, code, ...(outputs ? { outputs } : {}) })) });
+  return true;
+};
 /** Typing in a cell of the mounted notebook: its text set, and the editor told (as a keystroke tells it). */
 T.type = (cid, text) => {
   const cell = [...document.querySelectorAll(".sbnb .cells > *")].map((el) => el.cell).find((c) => c?.id === cid);

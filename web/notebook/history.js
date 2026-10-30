@@ -29,7 +29,8 @@
 // A run's code is the cell's input at version `at` (or `code`, for the
 // console's).  Only hashes of files are kept; their bytes are elsewhere.
 import { PatchHistory, createImmerDbCodec, decodePatchId } from "./patch-history.js";
-import { dbMerge3 } from "./db-merge3.ts";
+import { dbMerge3, mergeDbStrings } from "./db-merge3.ts";
+import { diffMain, mergeStrings3 } from "patchflow";
 export { decodePatchId };
 // (this module is the sagebrush-history.js bundle: boards load the shared history from it)
 export { PatchHistory, createImmerDbCodec };
@@ -66,6 +67,54 @@ export function codecFor(store) {
     },
   });
 }
+// (P2c, plan-p2c r0: the merges outside the patch graph, for an exact-v1 document, CoCalc's way; compiled in only with
+// __SB_EXACT_MERGE__, tested inline as exactMerge3's is)
+/** The store's merge of an exact-v1 document's records (journal.js notebookKind.apply): db-merge3.ts's own
+ * mergeDbStrings over them, `b` the later side.  Never a clash. */
+// eslint-disable-next-line no-undef
+export const exactRecords3 = typeof __SB_EXACT_MERGE__ !== "undefined" && __SB_EXACT_MERGE__ === true ? (base, a, b) => {
+  const lines = (rs) => rs.map((r) => JSON.stringify(r)).join("\n");
+  return mergeDbStrings({ ...SCHEMA, base: lines(base), a: lines(a), b: lines(b) }).split("\n").filter((l) => l !== "").map((l) => JSON.parse(l));
+} : undefined;
+/** An edit of a text (base -> local) merged into a newer version of it (base -> remote), as cocalc-ai's mergeText
+ * (sync/editor/generic/string-merge3.ts at 0b8b7547, written here from its rules, not copied): nothing either side
+ * added is lost. */
+export function mergeText({ base, local, remote }) {
+  if (local === remote || base === remote) return local;
+  if (base === local) return remote;
+  return mergeStrings3({ base, a: remote, b: local });
+}
+// (a position in `from` as a position in `to`, by their diff (UTF-16 units, as a textarea's): kept within text both
+// have; at the start of a deleted run for a position inside it; for text inserted exactly at it, before that text if
+// `before`, else after it)
+function mapPos(diffs, pos, before) {
+  let x = 0, y = 0;
+  for (const [op, text] of diffs) {
+    if (op === 0) {
+      if (pos < x + text.length || (pos === x + text.length && before)) return y + pos - x;
+      x += text.length; y += text.length;
+    } else if (op === -1) {
+      if (pos < x + text.length) return y;
+      x += text.length;
+    } else {
+      if (pos === x && before) return y;
+      y += text.length;
+    }
+  }
+  return y + pos - x;
+}
+/** The editor's merge of an unsaved edit for an exact-v1 document (notebook.js applyRemote): mergeText's text, and
+ * the selection [start, end] in `local` mapped onto it.  Insertion affinity: a caret stays after the text it
+ * follows, with text inserted exactly at it after it; a selection's ends keep text inserted exactly at them outside
+ * it. */
+// eslint-disable-next-line no-undef
+export const mergeTextAt = typeof __SB_EXACT_MERGE__ !== "undefined" && __SB_EXACT_MERGE__ === true ? ({ base, local, remote, sel }) => {
+  const text = mergeText({ base, local, remote });
+  if (!sel || text === local) return { text, sel };
+  const d = diffMain(local, text);
+  const [s, e] = sel;
+  return { text, sel: s === e ? [mapPos(d, s, true), mapPos(d, s, true)] : [mapPos(d, s, false), mapPos(d, e, true)] };
+} : undefined;
 const KERNEL = { python: "python3", sage: "sagemath", magma: "magma", matlab: "matlab" };
 const MODE = { python3: "python", sagemath: "sage", magma: "magma", matlab: "matlab" };
 
