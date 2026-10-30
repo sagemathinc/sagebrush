@@ -227,7 +227,7 @@ async function cloudHead(id) {
     const w = new WebSocket(cloud.url.replace(/^http/, "ws") + "/api/sync/v1/account", { headers: { cookie: sessions.A, origin: cloud.url } });
     const done = (v) => { clearTimeout(t); try { w.close(); } catch {} ok(v); };
     const t = setTimeout(() => done(null), 10_000);
-    w.onopen = () => w.send(J({ t: "hello", v: 1, device: "probe-node-0000", name: "probe", index_after: 0 }));
+    w.onopen = () => w.send(J({ t: "hello", v: 2, device: "probe-node-0000", name: "probe", index_after: 0 }));
     w.onmessage = (e) => {
       const m = JSON.parse(String(e.data));
       if (m.t === "welcome") w.send(J({ t: "pull", req: 1, owner, doc: id, epoch: 1, after: 0, limit: 1 }));
