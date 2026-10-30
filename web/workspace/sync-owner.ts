@@ -163,6 +163,12 @@ export class SyncOwner {
     this.opts = { ...this.opts, docs };
     if (this.client) void this.stopClient().then(() => this.reconcile());
   }
+  /** The notebooks this page's document sync stopped (2c-3: they won't send until 2c-4), none if it has no document
+   * sync here (another tab's page holds it). */
+  stoppedDocs(): string[] {
+    const s = (this.opts.docs as { stopped?: ReadonlyMap<string, unknown> } | undefined)?.stopped;
+    return s instanceof Map ? [...s.keys()] : [];
+  }
   /** Whether this page's sync client runs, waiting up to `ms` for one to start (the switch's third condition). */
   clientRunning(ms = 20_000): Promise<boolean> {
     if (this.client) return Promise.resolve(true);

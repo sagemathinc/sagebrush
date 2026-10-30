@@ -28,6 +28,9 @@ export interface SyncEnv {
   /** the fence overflow's skew margin, ms (LIMIT-PR13-1): an admin-configurable default of 5 s */
   SYNC_FENCE_SKEW_MS?: string;
   SYNC_TEST_LOSE?: string;
+  /** exact merges (plan-merge-align r3.2): "1" lets a document be made exact-v1 (when its creating claim asks and its
+   * socket runs it); anything else, or unset (the default), makes every document legacy.  Off until @sagebrush's DEV GO */
+  SYNC_EXACT_MERGE?: string;
   /** comma-separated account ids that may sync; unset means nobody (§11) */
   SYNC_ACCOUNTS?: string;
   /** DEV only, a text binding in the reviewed config: comma-separated synthetic account ids that may sync too (the
