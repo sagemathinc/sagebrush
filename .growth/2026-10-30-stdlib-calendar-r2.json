@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "calendar top-up: cli/pyjs.cjs (which embeds the library) measured +130204 on master 6e74889b against this branch merged, 8 B over the first marker's 130196 (measured on c990eba7); +64 B covers it and master's usual drift of a few dozen bytes, within the 1024 B slack. Measured locally with CI's bun 1.4.4 tool.",
+  "bytes": {
+    "cli/pyjs.cjs": 64
+  }
+}
