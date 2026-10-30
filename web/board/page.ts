@@ -619,6 +619,39 @@ if (fromParent) {
 const SESSION = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
 let wsSeq = 0, wsRev = 0; // (the workspace record's revision this page last loaded or wrote)
 let wsWriting: Promise<void> = Promise.resolve(), wsRefused: Error | null = null;
+// (this board can't be written in this tab, as found when it was loaded: its content isn't in this browser yet (a
+// board listed from another device), or its journal couldn't be opened.  Edit isn't offered, so nothing is typed that
+// couldn't be kept, and the page says so, with the way back to the files.  Never, by itself, a reason to keep the
+// page from going elsewhere: that is wsRefused alone, an edit not kept (DEV sync bug #4: a board with no edits kept
+// the person on it))
+let wsBlocked: Error | null = null, wsBlockedWhy = "";
+const blockedSubs = new Set<(s: { allowed: boolean; why?: string }) => void>();
+function blockBoard(e: Error, why: string, bar: string) {
+  wsBlocked = e;
+  wsBlockedWhy = why;
+  for (const f of blockedSubs) f({ allowed: false, why });
+  blockedBar(bar);
+}
+/** The bar a board that can't be written here says so in, with the way back to the files (the Files sidebar). */
+function blockedBar(message: string) {
+  let bar = document.getElementById("sbb-blocked");
+  if (!bar) {
+    bar = Object.assign(document.createElement("div"), { id: "sbb-blocked" });
+    bar.setAttribute("role", "status");
+    bar.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);top:44px;z-index:60;max-width:min(720px,94vw);background:#fff8e1;color:#5d4200;border:1px solid #e0b84a;border-radius:6px;padding:6px 12px;font:14px/1.4 system-ui,sans-serif;display:flex;gap:10px;align-items:center";
+    const text = document.createElement("span");
+    const back = Object.assign(document.createElement("button"), { textContent: "Back to files" });
+    back.onclick = () => {
+      const files = document.querySelector<HTMLButtonElement>('[data-sbb="files"]');
+      if (!files) return location.assign("/");
+      if (files.getAttribute("aria-pressed") !== "true") files.click();
+      document.querySelector<HTMLElement>("#wssidebar .fsearch, #wssidebar")?.focus();
+    };
+    bar.append(text, back);
+    document.body.append(bar);
+  }
+  (bar.firstChild as HTMLElement).textContent = message;
+}
 // (the latest save of each view: a save is passed over only for a later
 // save of the same view; a save of a newer view never makes an older
 // view's save skipped, CORR-105-2)
@@ -639,6 +672,8 @@ let wsEpoch = 0, wsCopy: { epoch: number; ref: string; rev: number } | null = nu
 let wsBridge: { header: string; epoch: number } | null = null;
 /** `bridge`: the original header of the pending copy `d` is (the board journal's load bridge): the save's tag. */
 function wsSave(id: string, d: BoardDoc, bridge?: string) {
+  // (a board that can't be written here: this edit isn't kept, said, and so leaving is held back from now on)
+  if (wsBlocked) { wsRefused = wsBlocked; throw wsBlocked; }
   const w = ws!, refused = wsRefused;
   // (the workspace quarantined, being reset, or reset or upgraded elsewhere: nothing kept, not even the pending
   // copy in localStorage, and said: astra's CORR-2A4-2 on 0eefec71)
@@ -840,12 +875,14 @@ async function journalLoad(id: string, path: string, pend: ReturnType<typeof rea
   try {
     js = await openJournal(id);
   } catch (e) {
-    // (not opened: shown as kept, nothing written; each save says why until a reload opens it)
-    wsRefused = e instanceof Error ? e : new Error(String(e));
+    // (not opened: shown as kept, nothing written, Edit not offered, until a reload opens it; the page can still go
+    // elsewhere, as nothing here is unkept)
+    const err = e instanceof Error ? e : new Error(String(e));
+    const why = `**This board can't be changed in this browser now:** ${String(err.message).slice(0, 200)}. Reload the page to try again, or open something else from your files.`;
+    blockBoard(err, why, "This board can't be changed in this browser now.");
     const rec = await ws!.read(path).catch(() => null);
     wsEpoch++;
     if (rec) wsRev = rec.rev;
-    const why = `**This board can't be saved in this browser now:** ${String(wsRefused.message).slice(0, 200)}. Reload the page to try again.`;
     return rec && isBoard(rec.content) ? { doc: rec.content as BoardDoc, original: null, notice: say(why) } : { doc: blankBoard("python"), original: null, notice: say(why) };
   }
   const settled = js.recovered.doc;
@@ -1054,6 +1091,14 @@ const host: BoardHost = {
         const conv = [takeNotice(), takeConverted(id)].filter(Boolean).join("\n\n");
         if (conv) notice = conv + (notice ? "\n\n" + notice : "");
         const path = await ws.pathOf("board", id);
+        // (listed from another device, its content not here yet (sync brings it): nothing to show or write; said, with
+        // the way back to the files, Edit not offered; nothing here holds the page (DEV sync bug #4))
+        const entry = path ? await ws.stat(path).catch(() => undefined) : undefined;
+        if (path && entry?.remote) {
+          const why = "**This board's content isn't in this browser yet.** It's in your files from another device, and it appears here once sync brings it; until then it can't be shown or changed here.";
+          blockBoard(new Error(`${path}'s content isn't in this browser yet`), why, "This board's content isn't in this browser yet.");
+          return { doc: { ...blankBoard((entry as { mode?: string }).mode ?? "python"), title: splitExt(nameOf(path))[0] }, original: null, notice: why };
+        }
         // (the board journal: its store's load first, then the pending copy ordered against what it settled)
         if (path && journalOn) return journalLoad(id, path, pend, notice);
         if (path) {
@@ -1097,7 +1142,8 @@ const host: BoardHost = {
             dropPending(id, pend.header + "\n");
           } catch (e) {
             console.warn("workspace:", e);
-            if (journalOn) wsRefused = e instanceof Error ? e : new Error(String(e));
+            // (the copy stays in this browser (its pending copy isn't dropped), so nothing is lost by going elsewhere)
+            if (journalOn) blockBoard(e instanceof Error ? e : new Error(String(e)), `**This board can't be changed in this browser now:** ${String((e as Error)?.message ?? e).slice(0, 200)}. Reload the page to try again.`, "This board can't be changed in this browser now.");
           }
           return { doc: pend.doc, original: null };
         }
@@ -1143,7 +1189,11 @@ const host: BoardHost = {
       try { localStorage.removeItem(saveKey); } catch {}
     },
     // (a board of the workspace: its version from elsewhere, when this page's write met it: CORR-AA2-1)
-    ...(local && ws ? { subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { wsSubs.add(f); return () => { wsSubs.delete(f); }; } } : {}),
+    ...(local && ws ? {
+      subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { wsSubs.add(f); return () => { wsSubs.delete(f); }; },
+      // (Edit not offered while the board can't be written here: blockBoard)
+      editing(f: (s: { allowed: boolean; why?: string }) => void) { blockedSubs.add(f); f(wsBlocked ? { allowed: false, why: wsBlockedWhy } : { allowed: true }); return () => { blockedSubs.delete(f); }; },
+    } : {}),
     // (a frame: the host's changes, and whether Edit is offered at all)
     ...(fromParent ? {
       subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { editSubs.add(f); return () => { editSubs.delete(f); }; },
