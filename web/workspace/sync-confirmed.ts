@@ -437,6 +437,13 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
       listed.push(...last.listed);
       last = null;
     };
+    // (this device's own adopts and creates, by identity, with the path each asked for: the view says which the
+    // reducer put at another name, P0 #1 (b1))
+    const ownPlaced = new Map<string, string>();
+    for (const o of ops) if (o.device === w.device && (o.op === "adopt" || o.op === "create" || o.op === "mkdir")) {
+      const id = o.kind === "file" || o.kind === "folder" ? o.fid : o.ref;
+      if (typeof id === "string") ownPlaced.set(id, o.path);
+    }
     let r: Applied;
     try {
       r = await applyOps(w, ns, ops, {
@@ -450,7 +457,7 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
           // rest of the page's view applied as usual)
           if (large && hooks.onLarge) await hooks.onLarge(tx, large);
           const skip = new Set(large?.replay ?? []);
-          last = await applyView({ w, tx, ns, store: idbStore(tx, prefix), cap }, changed.filter((id) => !skip.has(id)));
+          last = await applyView({ w, tx, ns, store: idbStore(tx, prefix), cap, ownPlaced }, changed.filter((id) => !skip.has(id)));
         },
         afterLarge: hooks.afterLarge,
       });

@@ -43,7 +43,7 @@ export type JournalRecord = { ns: string; id: string; parent: string; name: stri
 type State = Pick<OpAfter, "parent" | "name" | "kind" | "sha256" | "size" | "trashed"> | null;
 type View = { kind: "entry"; e: SyncEntry } | { kind: "gone" } | { kind: "none" };
 /** Why an identity is in the Sync panel's list. */
-export type ListedWhy = "kept" | "conflict" | "no-room" | "no-folder" | "not-empty";
+export type ListedWhy = "kept" | "conflict" | "no-room" | "no-folder" | "not-empty" | "renamed";
 
 /** A page's identities read by range, five requests (the rebuild's view walks identities in key order): their
  * confirmed rows, entries, outbox records, journal records and pending states. */
@@ -117,6 +117,9 @@ async function intentsOf(tx: IDBTransaction, ns: string, scanned: number | undef
 
 export type ViewContext = {
   w: Workspace;
+  /** (P0 #1 (b1)) this device's own adopts and creates in the page: identity, the path it asked for.  One the view
+   * moves elsewhere (the reducer gave it `name (k)`: another device has that name) is marked renamed and listed */
+  ownPlaced?: Map<string, string>;
   tx: IDBTransaction;
   ns: string;
   /** the confirmed index the view is over (the active generation, or a rebuild's just committed) */
@@ -441,6 +444,17 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
     if (v.trashed) n.trashed = { from: v.trashed.from, at: v.trashed.at };
     else delete n.trashed;
     if (!item.intent) contentOf(n, v);
+    // (this device's own, asked for at `old`, placed at another name in the same folder: renamed by the shared reducer
+    // (another device has that name), said on the row and listed, P0 #1 (b1).  Known by this device's own adopt or
+    // create in the page; or, when the move comes in a later page, by its shape: the same folder
+    // and extension, and the name the reducer gives, `name (k)` (a person's rename to
+    // exactly that is said the same way))
+    const [ob, oe] = splitExt(nameOf(old)), [nb, ne] = splitExt(nameOf(to));
+    const suffixed = oe === ne && nb.startsWith(ob + " (") && /^ \(\d+\)$/.test(nb.slice(ob.length));
+    if (to !== old && parentOf(to) === parentOf(old) && (c.ownPlaced?.get(item.id) === old || suffixed)) {
+      n.renamed = { from: old, to };
+      list(to, "renamed");
+    }
     st.put(n);
     if (n.kind === "folder") folders.set(to, n);
     lifted.delete(old);

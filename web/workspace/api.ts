@@ -81,6 +81,10 @@ export type Entry = {
   recovered?: { from: string; sha: string };
   /** contents reconcile could not find (shown, never dropped) */
   missing?: boolean;
+  /** (P0 #1 (b1)) this device's own entry, placed by the server's index at another name than it had here (another
+   * device has one with its name: the shared reducer gives the later one `name (k)`, on every device): from where, to
+   * where; said while it is still at `to` */
+  renamed?: { from: string; to: string };
   /** listed from the server's index (design/sync-client.md C3): a data file whose bytes (its `sha256`) aren't
    * fetched yet, or a document whose content isn't here (slice 2); read-only until they are */
   remote?: boolean;
@@ -1155,6 +1159,36 @@ export class Workspace {
   /** `opts.admit` (the host's, AdmitCheck): asked about the folder, in the same read, then about each entry
    * listed (role "child"); an entry it refuses as out of scope (OutOfScope) is left out, a refused folder lists
    * nothing, and any other error is list's. */
+  /** (P0 #1) The documents whose content is in this browser: a notebook's record, or its synced history started here
+   * (arrived by sync: its record is made from that history at its first open); a board's record.  The Files list says
+   * "on another device" for another device's documents not among them. */
+  async contentIds(): Promise<{ notebook: Set<string>; board: Set<string> }> {
+    const notebook = new Set<string>(this.main ? ((await this.mainTx("notebooks", "readonly", (st) => st.getAllKeys())) as string[]).filter((k) => k !== FENCE) : []);
+    const board = new Set<string>((await inTx(this.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").getAllKeys()))) as string[]);
+    try {
+      const hdb: IDBDatabase = await openHistoryDb();
+      try {
+        // (the registry, then each registered notebook's start row, in one transaction)
+        await new Promise<void>((ok, no) => {
+          const tx = hdb.transaction("history", "readonly"), st = tx.objectStore("history"), pre = "d:local:";
+          const regs = st.getAll(IDBKeyRange.bound([SYNC_NB, pre], [SYNC_NB, pre + "\uffff"]));
+          regs.onsuccess = () => {
+            for (const r of regs.result as { time: string; v?: { h?: unknown } }[]) {
+              const h = r?.v?.h;
+              if (typeof h !== "string") continue;
+              const m = st.get([SYNC_NB + h, "m"]);
+              m.onsuccess = () => { if (m.result?.v) notebook.add(r.time.slice(pre.length)); };
+            }
+          };
+          tx.oncomplete = () => ok();
+          tx.onerror = tx.onabort = () => no(tx.error);
+        });
+      } finally {
+        hdb.close();
+      }
+    } catch {}
+    return { notebook, board };
+  }
   async list(folder: string = "/", opts: { recursive?: boolean } & Admitted = {}): Promise<Entry[]> {
     const f = path(folder), admit = admitOf(opts.admit);
     this.open();
