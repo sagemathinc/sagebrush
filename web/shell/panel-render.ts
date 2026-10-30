@@ -21,7 +21,7 @@ export const CAPS = Object.freeze({
 export const SLICE = Object.freeze({ bytes: 64 * 1024, spans: 1000, ms: 8 });
 // (the first slice small, so a command's first output paints within a frame (E5.5's first paint); output that fits in
 // it gets no chunk, so ordinary output is laid out, and exposed, as plain lines: board's R4-1)
-export const FIRST = { bytes: 8192, spans: 200, ms: 4 };
+export const FIRST = { bytes: 8192, spans: 200, ms: 4 } as const;
 // (how often a scan looks at the clock: every this many scalars, at most 16 KiB of UTF-8)
 const CHECK = 4096;
 
@@ -220,10 +220,11 @@ export class Render {
       if (at < hold && n > 0 && i < this.line.length) i = this.spans < CAPS.spans - 1 ? this.split(i, n) : this.line.length;
       keep = this.line.splice(i);
     }
-    // (past the first slice, a slice's lines from the first that starts in it go in chunks of their own: an inline-block box the painter lays
+    // (once more than FIRST.bytes of input is read, so never for output of at most that, a slice's lines from the first
+    // that starts in it go in chunks of their own: an inline-block box the painter lays
     // out on its own, so a frame lays out only its own slices, not the command's whole output; charged as a run)
     const c = this.units + 16 * this.spans;
-    if (this.consumed >= FIRST.bytes && this.chunked <= c - CHUNK && !this.lineOut.spans && this.line.length && this.spans < CAPS.spans - 1)
+    if (this.consumed > FIRST.bytes && this.chunked <= c - CHUNK && !this.lineOut.spans && this.line.length && this.spans < CAPS.spans - 1)
       out.push({ text: "", cls: "", err: false, chunk: true }), this.spans++, (this.chunked = c);
     for (const r of this.line) {
       out.push(r);
