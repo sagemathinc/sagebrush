@@ -26,7 +26,9 @@ a closed grammar, fixture-tested (test-ios-judge.sh):
         not the simulator build's).
 Values are compared with their types (a boolean true is not the integer 1).
 
-Exit 2: unreadable or malformed input.
+Each prints one outcome line, "ok: …", "FAIL: …" or "ERROR: …" (udid's
+"ok" is the UDID itself).  Exit 2: unreadable or malformed input; exit 3:
+the judge itself broke (an unexpected exception), never mistaken for a FAIL.
 """
 import plistlib
 import re
@@ -153,8 +155,13 @@ def main(argv):
     elif len(argv) == 3 and argv[0] == "bundle":
         bundle(argv[1], argv[2])
     else:
-        print("usage: ios-judge.py udid TEXT | codesign FILE | running FILE BUNDLE_ID | tree STATUS GENERATED BUILT EXTRA | bundle PLIST EXTRA", file=sys.stderr)
-        sys.exit(2)
+        fail(2, "usage: ios-judge.py udid TEXT | codesign FILE | running FILE BUNDLE_ID | tree STATUS GENERATED BUILT EXTRA | bundle PLIST EXTRA")
 
 
-main(sys.argv[1:])
+try:
+    main(sys.argv[1:])
+except SystemExit:
+    raise
+except Exception as e:  # (a bug in the judge, not a verdict)
+    print(f"ERROR: internal: {type(e).__name__}: {e}")
+    sys.exit(3)

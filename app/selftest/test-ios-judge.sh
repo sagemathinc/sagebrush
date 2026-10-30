@@ -1,18 +1,34 @@
 #!/usr/bin/env bash
 # ios-judge.py on fixed inputs (app/selftest/ios-fixtures): each must give its
-# exit code, so a judge that accepts a signed (or contradictory) codesign
-# report, a stopped app, an extra change after the build, a built app without
-# Info.ios.plist's exact settings (typed: true is not 1) or with an encryption
-# declaration, or a malformed UDID can't pass.
+# exit code AND its outcome line (ok: / FAIL: / ERROR:), so a judge that
+# accepts a signed (or contradictory) codesign report, a stopped app, an extra
+# change after the build, a built app without Info.ios.plist's exact settings
+# (typed: true is not 1) or with an encryption declaration, or a malformed
+# UDID can't pass, and a judge that crashes (exit 3) is never taken for a
+# FAIL.  Then the controls: with each rule undone in a copy of the judge, the
+# fixtures must catch it.
 #   bash app/selftest/test-ios-judge.sh
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 F="$here/ios-fixtures"
+JUDGE=${IOS_JUDGE:-$here/ios-judge.py}
+OUT=$(mktemp)
+trap 'rm -f "$OUT"' EXIT
 bad=0
 check() {  # want, then the judge's arguments
-  local want=$1 rc=0; shift
-  python3 -I "$here/ios-judge.py" "$@" > /tmp/ios-judge-test.out 2>&1 || rc=$?
-  if [ "$rc" = "$want" ]; then echo "ok   $* -> $rc"; else echo "FAIL $* -> $rc, expected $want:"; cat /tmp/ios-judge-test.out; bad=1; fi
+  local want=$1 rc=0 line prefix; shift
+  python3 -I "$JUDGE" "$@" > "$OUT" 2>&1 || rc=$?
+  line=$(head -1 "$OUT")
+  case "$want" in
+    0) prefix="ok: ";; 1) prefix="FAIL: ";; 2) prefix="ERROR: ";;
+  esac
+  # (udid's ok line is the UDID itself)
+  if [ "$1" = udid ] && [ "$want" = 0 ]; then prefix=""; fi
+  if [ "$rc" = "$want" ] && { [ -z "$prefix" ] || [ "${line#"$prefix"}" != "$line" ]; } && ! grep -q '^ERROR: internal' "$OUT"; then
+    echo "ok   $1 ${*: -1} -> $rc"
+  else
+    echo "FAIL $* -> rc $rc, expected $want; first line: $line"; bad=1
+  fi
 }
 B=space.sagebrush.notebook
 check 0 udid "0F3C9A1E-5B7D-4C2A-9E81-3D6F0A2B4C5D"
@@ -57,3 +73,22 @@ check 2 bundle "$F/plist-not-a-plist.plist" "$X"
 check 2 bogus
 [ "$bad" = 0 ] || { echo "FAIL: ios-judge.py"; exit 1; }
 echo "ok: ios-judge.py gives every fixture its expected result"
+if [ -z "${IOS_JUDGE:-}" ]; then
+  t=$(mktemp -d)
+  mutate() {  # name, then the exact text to replace once, and its replacement
+    python3 -I -c 'import sys; s=open(sys.argv[1]).read(); assert s.count(sys.argv[2])==1, sys.argv[2]; open(sys.argv[3],"w").write(s.replace(sys.argv[2], sys.argv[4]))' "$here/ios-judge.py" "$2" "$t/$1.py" "$3" || { echo "FAIL control $1: the rule to undo is not in ios-judge.py"; bad=1; return; }
+    if IOS_JUDGE="$t/$1.py" bash "$0" > "$t/$1.out" 2>&1; then echo "FAIL control $1: the fixtures still pass with it undone"; bad=1; else echo "ok   control $1: caught ($(grep -c '^FAIL ' "$t/$1.out") fixtures)"; fi
+  }
+  mutate running-any-entry 'if any(r[0].isdigit() for r in mine):' 'if mine:'
+  mutate tree-merge-unchecked 'if not same(b, want):' 'if False:'
+  mutate codesign-team-unchecked 'if authority or sig != ["Signature=adhoc"] or team != ["TeamIdentifier=not set"]:' 'if authority:'
+  mutate codesign-contradiction-ok '        if len(lines) == 1:' '        if True:'
+  mutate untyped-compare '    if type(a) is not type(b):
+        return False
+' ''
+  mutate bundle-presence-only 'bad = [k for k in e if k not in b or not same(b[k], e[k])]' 'bad = [k for k in e if k not in b]'
+  mutate bundle-encryption-unchecked 'if "ITSAppUsesNonExemptEncryption" in b:' 'if False:'
+  rm -rf "$t"
+  [ "$bad" = 0 ] || { echo "FAIL: ios-judge.py's controls"; exit 1; }
+  echo "ok: each control is caught"
+fi
