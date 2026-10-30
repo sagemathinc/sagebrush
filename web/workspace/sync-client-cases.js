@@ -2635,7 +2635,8 @@ async function s5Notebooks() {
     const el = document.body.appendChild(document.createElement("div"));
     const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch, readDetails: async () => [undefined, [], 0], readUnacked });
     await until(() => !!el.querySelector(".sync-details") && /Sync is on/.test(text(el)), 3000);
-    await sleep(300);
+    // (every draw here has a stopped notebook: the foot's final words, after the count, say it can't sync)
+    await until(() => /can't sync/.test(el.querySelector(".sync-foot")?.textContent ?? ""), 3000);
     const t = el.querySelector(".sync-foot")?.textContent ?? "";
     s.dispose();
     el.remove();
