@@ -24,11 +24,14 @@ const CHECK = 4096;
 
 /** A run of one style; `restart`: a lone \r over runs of the open line already returned in an earlier slice:
  * the painter removes what it put in for this line since its start (TP-2: the same text whatever the slicing). */
-export type Run = { text: string; cls: string; err: boolean; restart?: true; page?: true };
+export type Run = { text: string; cls: string; err: boolean; restart?: true; page?: true; chunk?: true };
 /** A shown line longer than this many code units is cut into pages of it: from the second page on, each in an
  * inline-block box of its own (the painter's), so no slice lays out more than its own pages whatever the line's length,
  * and a selection still copies the line as one (no break at a join). A page run is charged as a run. */
 export const PAGE = 4096;
+// (a slice's lines go in chunks of about this many units, a run counting 16: only the chunks on screen are laid out)
+const CHUNK = 8192;
+const PAGE_RUNS = 512;
 // (how far a join may move back to a cluster's start: a longer cluster is split, at a scalar boundary)
 export const PAGE_BACK = 64;
 
@@ -168,6 +171,10 @@ export class Render {
   private pageStart = 0;
   // (the regional indicators ending the line's text already returned: their parity decides a flag across a join)
   private riOut = 0;
+  // (the runs in the line's current page: a page holds at most PAGE_RUNS, so one on screen lays out quickly)
+  private pageRuns = 0;
+  // (where this slice's current chunk began, in shown units plus 16 per run: a new one at a line start every CHUNK)
+  private chunked = 0;
 
   /** Nothing is scanned here: every byte's work is inside a slice (next()). */
   constructor(private out: string, private err: string, private now: () => number = () => performance.now()) {}
@@ -187,6 +194,7 @@ export class Render {
     if (last && !last.page && last.cls === cls && last.err === err) last.text += text;
     else {
       this.line.push({ text, cls, err });
+      this.pageRuns++;
       this.spans++;
     }
     this.units += text.length;
@@ -197,10 +205,11 @@ export class Render {
   private flush(out: Run[], midLine = false) {
     let keep: Run[] = [];
     if (midLine) {
-      // (at a slice's end the units within PAGE_BACK + 2 of the next edge stay here, so the join there is decided on
+      // (an open line with no page yet stays here whole, so the next slice starts at a line start, in a chunk of its own;
+      // a paged line's units within PAGE_BACK + 2 of the next edge stay here, so the join there is decided on
       // the logical line, across this flush and any style runs (DB2-LL-337-1, BLL1-R2); a run across the hold is split
       // in two of its classes, the second charged, if a run is left, else all goes)
-      const hold = this.pageStart + PAGE - PAGE_BACK - 2;
+      const hold = this.pageStart && this.pageStart + PAGE - PAGE_BACK - 2;
       let at = this.lineUnits, i = this.line.length;
       while (i && at > hold) at -= this.line[--i].text.length;
       // (the hold on a scalar boundary: never inside a surrogate pair)
@@ -208,6 +217,11 @@ export class Render {
       if (at < hold && n > 0 && i < this.line.length) i = this.spans < CAPS.spans - 1 ? this.split(i, n) : this.line.length;
       keep = this.line.splice(i);
     }
+    // (a slice's lines from the first that starts in it go in chunks of their own: an inline-block box the painter lays
+    // out on its own, so a frame lays out only its own slices, not the command's whole output; charged as a run)
+    const c = this.units + 16 * this.spans;
+    if (this.chunked <= c - CHUNK && !this.lineOut.spans && this.line.length && this.spans < CAPS.spans - 1)
+      out.push({ text: "", cls: "", err: false, chunk: true }), this.spans++, (this.chunked = c);
     for (const r of this.line) {
       out.push(r);
       const k = ris(r.text);
@@ -234,6 +248,7 @@ export class Render {
     this.spans++;
     let at = this.lineUnits, i = this.line.length;
     this.pageStart = J;
+    this.pageRuns = 0;
     if (J >= at) {
       this.push(out, text.slice(0, J - at), err);
       this.line.push(page);
@@ -269,6 +284,7 @@ export class Render {
       if (j < this.err.length && this.resBytes < CAPS.errReserve) return out;
       this.budgets = [CAPS.inBytes - Math.min(this.resBytes, CAPS.errReserve), 0];
     }
+    this.chunked = -CHUNK;
     while (this.part < 2) {
       if (spent() >= budget.bytes || this.spans - s0 >= budget.spans || this.now() - t0 >= budget.ms) {
         this.flush(out, true);
@@ -386,7 +402,7 @@ export class Render {
         for (const r of this.line) this.units -= r.text.length;
         this.spans -= this.line.length;
         this.line = [];
-        this.lineUnits = this.pageStart = this.riOut = 0;
+        this.lineUnits = this.pageStart = this.riOut = this.pageRuns = 0;
         if (this.lineOut.spans) {
           this.units -= this.lineOut.units;
           this.spans -= this.lineOut.spans;
@@ -432,7 +448,7 @@ export class Render {
     if (merge) last.text += "\n";
     else out.push({ text: "\n", cls: "", err });
     this.spans += paged + (merge ? 0 : 1);
-    this.lineUnits = this.pageStart = this.riOut = 0;
+    this.lineUnits = this.pageStart = this.riOut = this.pageRuns = 0;
     this.units++;
     this.lines++;
     return true;
@@ -460,10 +476,12 @@ export class Render {
     // (the line's page boundaries: the runs they take are charged before any text goes in, or nothing is shown: each
     // join one run and the run it may split one more, a page short by up to PAGE_BACK + 1)
     const over = this.lineUnits + text.length - this.pageStart - PAGE;
-    if (over > 0 && this.spans + 2 * Math.ceil(over / (PAGE - PAGE_BACK - 1)) + 1 > CAPS.spans - 1) return false;
+    const full = +(newRun && this.pageRuns >= PAGE_RUNS && this.lineUnits > this.pageStart);
+    if ((over > 0 || full) && this.spans + 2 * (Math.max(0, Math.ceil(over / (PAGE - PAGE_BACK - 1))) + full) + 1 > CAPS.spans - 1) return false;
     // (each join decided on the logical line: the held runs back to PAGE_BACK + 2 before the edge, then this text)
     while (text) {
-      const edge = this.pageStart + PAGE;
+      // (a page's edge: PAGE units from its start, or here, before a new run, when it holds PAGE_RUNS runs)
+      const edge = full && this.pageRuns ? this.lineUnits : this.pageStart + PAGE;
       if (this.lineUnits + text.length <= edge) break;
       let s = text, at = this.lineUnits, i = this.line.length, ri = 0, all = true;
       while (i && at > edge - PAGE_BACK - 2) (at -= this.line[--i].text.length), (s = this.line[i].text + s);

@@ -31,6 +31,10 @@ export const wrap = (script: string) => `eval -- '${script.replace(/'/g, "'\\''"
 
 type Cmd = { el: HTMLElement; out: HTMLElement; units: number; lines: number; spans: number };
 
+// (the first slice small, so the command's first output paints within a frame: E5.5's first paint; then up to FRAME ms
+// of slices between frames)
+const FIRST = { bytes: 8192, spans: 200, ms: 4 };
+const FRAME = 12;
 const yieldNow = (): Promise<void> =>
   (globalThis as any).scheduler?.yield ? (globalThis as any).scheduler.yield() : new Promise((r) => setTimeout(r, 0));
 
@@ -645,18 +649,42 @@ export class TerminalPanel {
     const t0 = performance.now();
     const r = new Render(stdout, stderr);
     let first = true;
+    // (no layout is forced in a slice: the view follows the output once per frame, in the frame, while the person has
+    // not scrolled away from where it last put it; work goes on for at most FRAME ms, then the frame is painted)
+    let stick = this.atBottom(), top = -1, f0 = t0;
+    // (a hidden tab paints no frames: its slices only yield, and a frame awaited when the tab hides ends after 100 ms)
+    const frame = (m?: string) =>
+      document.hidden
+        ? yieldNow()
+        : new Promise((res) => {
+            let done = 0;
+            const go = () => {
+              if (done++) return;
+              if (m) performance.measure(m, { start: t0, end: performance.now() });
+              if (stick && (top < 0 || this.log.scrollTop >= top - 4)) {
+                this.log.scrollTop = this.log.scrollHeight;
+                top = this.log.scrollTop;
+              } else stick = false;
+              setTimeout(res);
+            };
+            requestAnimationFrame(go);
+            setTimeout(go, 100);
+          });
     // (the open line's top-level nodes, its page boxes included: what a later lone \r takes back; the line's current page)
     let open: Node[] = [];
     let page: HTMLElement | null = null;
+    // (the slice's chunk, from its first line start: the parent of its line-level nodes)
+    let box: HTMLElement | null = null;
     // (a page box's charge: itself, and each node in it)
     const cost = (nd: Node) => [nd.textContent!.length, 1 + ((nd as HTMLElement).classList?.contains("sb-term-page") ? nd.childNodes.length : 0)];
     for (;;) {
       const p0 = performance.now();
-      const runs = r.next(SLICE);
+      const runs = r.next(first ? FIRST : SLICE);
       if (!runs) break;
       const p1 = performance.now();
       if (signal.aborted && this.running?.cmd !== cmd) return;
       const f = document.createDocumentFragment();
+      box = null;
       // (nodes for a page box already on screen: put in after the slice is charged, never before)
       let pf: DocumentFragment | null = null, pfPage: HTMLElement | null = null;
       let units = 0, lines = 0, spans = 0;
@@ -666,7 +694,7 @@ export class TerminalPanel {
           if (pf) (units -= pf.textContent!.length), (spans -= pf.childNodes.length), (pf = pfPage = null);
           for (const nd of open) {
             const [u, n] = cost(nd);
-            if (nd.parentNode === f) (units -= u), (spans -= n);
+            if (f.contains(nd)) (units -= u), (spans -= n);
             else (cmd.units -= u), (cmd.spans -= n);
             (nd as ChildNode).remove();
           }
@@ -674,10 +702,15 @@ export class TerminalPanel {
           page = null;
           continue;
         }
+        if (run.chunk) {
+          box = f.appendChild(el("span", "sb-term-chunk"));
+          spans++;
+          continue;
+        }
         if (run.page) {
           // (a join: the line goes on in an inline-block box of its own, charged as a run)
           page = el("span", "sb-term-page");
-          f.appendChild(page);
+          (box ?? f).appendChild(page);
           open.push(page);
           spans++;
           continue;
@@ -693,9 +726,9 @@ export class TerminalPanel {
         if (text) {
           const nd = node(text);
           if (!page) {
-            f.appendChild(nd);
+            (box ?? f).appendChild(nd);
             open.push(nd);
-          } else if (page.parentNode === f) page.appendChild(nd);
+          } else if (f.contains(page)) page.appendChild(nd);
           else {
             if (pfPage !== page) (pf = document.createDocumentFragment()), (pfPage = page);
             pf!.appendChild(nd);
@@ -703,29 +736,27 @@ export class TerminalPanel {
         }
         if (nl >= 0) {
           if (text) spans++;
-          f.appendChild(node(run.text.slice(nl)));
+          (box ?? f).appendChild(node(run.text.slice(nl)));
         }
         // (a line end closes the line: only the omission line's run has text after its line end, and nothing follows it)
         if (run.text.includes("\n")) (open = []), (page = null);
       }
       this.makeRoom(units, lines, spans);
-      const stick = this.atBottom();
       cmd.out.appendChild(f);
       if (pf && pfPage) pfPage.appendChild(pf);
       cmd.units += units;
       cmd.lines += lines;
       cmd.spans += spans;
-      if (stick) this.log.scrollTop = this.log.scrollHeight;
       const p2 = performance.now();
       performance.measure("sb-term:parse", { start: p0, end: p1 });
       performance.measure("sb-term:patch", { start: p1, end: p2 });
-      if (first) {
+      if (first || p2 - f0 > FRAME) {
+        await frame(first ? "sb-term:first-paint" : "");
         first = false;
-        requestAnimationFrame(() => performance.measure("sb-term:first-paint", { start: t0, end: performance.now() }));
-      }
-      await yieldNow();
+        f0 = performance.now();
+      } else await yieldNow();
     }
-    requestAnimationFrame(() => performance.measure("sb-term:last-paint", { start: t0, end: performance.now() }));
+    await frame("sb-term:last-paint");
   }
 
 }
