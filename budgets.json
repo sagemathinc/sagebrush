@@ -416,6 +416,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-uuid.src": {
+   "exact": false,
+   "ceiling": 43520,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-viewer3d.src": {
    "exact": false,
    "ceiling": 104416,
@@ -628,6 +635,7 @@
    "engine/lib/mod-textwrap.src": 21233,
    "engine/lib/mod-tzdata.src": 802,
    "engine/lib/mod-unittest.src": 14236,
+   "engine/lib/mod-uuid.src": 39564,
    "engine/lib/mod-viewer3d.src": 94924,
    "engine/lib/mod-warnings.src": 5464,
    "engine/lib/mod-zoneinfo.src": 84951,

@@ -5185,6 +5185,31 @@
   "owner": "sagebrush-python",
   "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
  },
+ "lib/uuid.py ::  :: >>> uuid.MAX #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/uuid.py, copied unchanged: MAX and _UINT_128_MAX are the UUID value domain (the all-ones UUID, 2**128 - 1), and the 0 <= int <= _UINT_128_MAX checks are CPython's ValueError for an integer that isn't a 128-bit UUID; no size, memory or work bound"
+ },
+ "lib/uuid.py ::  :: MAX = UUID('ffffffff-ffff-ffff-ffff-ffffffffffff') #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/uuid.py, copied unchanged: MAX and _UINT_128_MAX are the UUID value domain (the all-ones UUID, 2**128 - 1), and the 0 <= int <= _UINT_128_MAX checks are CPython's ValueError for an integer that isn't a 128-bit UUID; no size, memory or work bound"
+ },
+ "lib/uuid.py ::  :: _UINT_128_MAX = (1 << 128) - 1 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/uuid.py, copied unchanged: MAX and _UINT_128_MAX are the UUID value domain (the all-ones UUID, 2**128 - 1), and the 0 <= int <= _UINT_128_MAX checks are CPython's ValueError for an integer that isn't a 128-bit UUID; no size, memory or work bound"
+ },
+ "lib/uuid.py :: UUID.__init__ :: if not 0 <= int <= _UINT_128_MAX: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/uuid.py, copied unchanged: MAX and _UINT_128_MAX are the UUID value domain (the all-ones UUID, 2**128 - 1), and the 0 <= int <= _UINT_128_MAX checks are CPython's ValueError for an integer that isn't a 128-bit UUID; no size, memory or work bound"
+ },
+ "lib/uuid.py :: UUID._from_int :: assert 0 <= value <= _UINT_128_MAX, repr(value) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/uuid.py, copied unchanged: MAX and _UINT_128_MAX are the UUID value domain (the all-ones UUID, 2**128 - 1), and the 0 <= int <= _UINT_128_MAX checks are CPython's ValueError for an integer that isn't a 128-bit UUID; no size, memory or work bound"
+ },
  "src/allowance-host.ts ::  :: budget: number; #0": {
   "class": "3",
   "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
