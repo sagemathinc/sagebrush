@@ -518,6 +518,8 @@ if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_AGENTS === "1") 
     process.exit(1);
   }
   copyFileSync(join(here, "agents", "index.html"), join(here, "dist", "agents", "index.html"));
+  // (the reviewed sagebrush-agent tarball the help box points to: not committed; placed in web/agents by the publisher)
+  for (const f of readdirSync(join(here, "agents"))) if (/^sagebrush-agent-\d+\.\d+\.\d+\.tgz$/.test(f)) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
 }
 if (hasSite) mkdirSync(join(siteDir, "public", "embed"), { recursive: true });
 if (hasSite) mkdirSync(join(siteDir, "public", "runner"), { recursive: true });
