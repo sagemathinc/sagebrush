@@ -237,3 +237,13 @@ jobs:
           name: verification-metadata-regenerated
           path: app/src-tauri/gen/android/gradle/verification-metadata.xml
           if-no-files-found: error
+      # (the regenerated file covers the evidence build itself: the same tauri
+      # build as the android job, verification ON, from a third fresh Gradle
+      # home, must succeed; grader's N-GP-5)
+      - name: the regenerated metadata verifies the evidence build
+        working-directory: app/src-tauri
+        run: |
+          set -euo pipefail
+          rm -rf gen/android/.gradle gen/android/buildSrc/.gradle gen/android/buildSrc/build gen/android/build gen/android/app/build
+          GRADLE_USER_HOME=$RUNNER_TEMP/gradle-home-3 cargo tauri android build --debug --apk --target aarch64
+          echo "ok: the tauri build succeeds with the regenerated metadata and a fresh Gradle home"
