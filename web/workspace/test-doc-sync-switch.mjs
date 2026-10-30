@@ -106,7 +106,7 @@ function enableRig(over = {}) {
   t.ch = ch;
   const d = {
     loadHistory: async () => { t.log.push("history"); return { DOC_SYNC: t.DOC }; },
-    makeDocs: () => { t.log.push("docs"); return { kick: (id) => t.kicks.push(id), kickStarted: async () => { t.all++; } }; },
+    makeDocs: () => { t.log.push("docs"); return { kick: (id, startHere) => t.kicks.push(startHere ? id + "!" : id), kickStarted: async () => { t.all++; }, stopped: new Map([["n9", { code: "chain" }]]) }; },
     makeChannel: () => { t.log.push("channel"); return ch; },
     register: (k) => t.log.push("register:" + k),
     own: async () => { t.log.push("own"); return () => { t.log.push("release"); t.released++; }; },
@@ -138,6 +138,12 @@ const lastRo = (t) => t.ro.at(-1);
   t.ch.onmessage({ data: { kick: 7 } });
   t.ch.onmessage({ data: null });
   check(J(t.kicks) === J(["n1", "n2"]) && J(t.posted) === J([{ on: true }, { kick: "n1" }]), "enable: a save here kicks this DocSync and is told on the channel; another tab's kick kicks it; anything else ignored: " + J({ kicks: t.kicks, posted: t.posted }));
+  // (a page's pull: a notebook listed by sync with none of its history here, started here as a received `changed` does)
+  t.DOC.pull("n3");
+  t.ch.onmessage({ data: { pull: "n4" } });
+  t.ch.onmessage({ data: { pull: 5 } });
+  check(J(t.kicks.slice(2)) === J(["n3!", "n4!"]) && J(t.posted.slice(2)) === J([{ pull: "n3" }]), "enable: a page's pull kicks this DocSync to start it here and is told on the channel; another tab's pull the same; anything else ignored: " + J({ kicks: t.kicks, posted: t.posted }));
+  check(t.DOC.stoppedOf("n9")?.code === "chain" && t.DOC.stoppedOf("n1") === null, "enable: what this DocSync stopped, by id (never said to be still arriving): " + J(t.DOC.stoppedOf("n9")));
   check(t.all === 1, "enable: another tab's `on` kicks every notebook started on this DocSync (this tab may hold the connection: that tab's reopened notebook was told to no one, #266 r5's case 14): " + t.all);
 }
 {
@@ -174,7 +180,7 @@ for (const [what, over, want, asked] of failures) {
     // (owned: restored, then released, last; never owned: nothing restored, nothing released)
     const tail = owned ? J(t.log.slice(-2)) === J(["ro:" + (want === "reload" ? true : roNow), "release"]) && t.released === 1 : t.released === 0 && t.ro.length === 0;
     const ro = want === "reload" ? true : roNow;
-    const ok = !threw && out === want && t.log.includes("activate") === asked && t.DOC.on === false && (want !== "reload" || t.DOC.saved === null) && t.docs.length === 0 &&
+    const ok = !threw && out === want && t.log.includes("activate") === asked && t.DOC.on === false && (want !== "reload" || (t.DOC.saved === null && (t.DOC.pull ?? null) === null && (t.DOC.stoppedOf ?? null) === null)) && t.docs.length === 0 &&
       (pre ? t.ro.length === 0 : t.ro[0] === true && lastRo(t) === ro) && t.reload === (want === "reload" ? 1 : 0) && !t.posted.some((m) => m.on) && tail;
     check(ok, `enable: ${what} (read-only for its own reason: ${roNow}): ${want}${asked ? "" : ", the activation never asked"}, DOC_SYNC off, no DocSync to the owner, ${want === "reload" ? "read-only and said (reload)" : "the read-only set back"}: ` + J({ out, threw: threw && String(threw), log: t.log, ro: t.ro, on: t.DOC.on, docs: t.docs.length, reload: t.reload }));
   }
@@ -200,7 +206,7 @@ function followRig(active) {
   const ch = { onmessage: null, postMessage() {} };
   t.ch = ch;
   const d = {
-    makeDocs: () => { t.made++; const id = t.made; return { id, kick: (k) => t.kicks.push(id + ":" + k), kickStarted: async () => { t.all.push(id); } }; },
+    makeDocs: () => { t.made++; const id = t.made; return { id, kick: (k, startHere) => t.kicks.push(id + ":" + k + (startHere ? "!" : "")), kickStarted: async () => { t.all.push(id); } }; },
     makeChannel: () => ch,
     journalActive: async () => { t.asks++; await new Promise((r) => setTimeout(r, 5)); if (t.active === "throw") throw new Error("injected"); return t.active; },
     setDocs: (docs) => t.set.push(docs.id),
@@ -216,6 +222,8 @@ function followRig(active) {
   await new Promise((r) => setTimeout(r, 30));
   t.ch.onmessage({ data: { kick: "n2" } });
   check(J(t.set) === J([1]) && t.made === 1 && J(t.kicks) === J(["1:n1", "1:n2"]), "follow: the journal active: one DocSync to the owner at once; notebook saves told on the channel kick it; a later `on` makes no second: " + J(t));
+  t.ch.onmessage({ data: { pull: "n3" } });
+  check(t.kicks.at(-1) === "1:n3!", "follow: a page's pull told on the channel: kicked here to start it (this page may hold the connection): " + J(t.kicks));
   check(J(t.all) === J([1]), "follow: a notebook page's `on` when this page has already joined: every notebook started is kicked on its DocSync (the one the switch just reopened there was told to no one, #266 r5's case 14): " + J(t.all));
   stop();
   check(t.ch.onmessage === null, "follow: stopped: the channel no longer heard");
