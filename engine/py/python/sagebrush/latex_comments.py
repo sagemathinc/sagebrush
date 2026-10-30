@@ -106,9 +106,9 @@ _INDEX = re.compile(r"(0|[1-9][0-9]*)\Z")
 
 
 def js_keys(d):
-    """A dict's keys in JavaScript's property order: array indices (canonical integers below 2^32 - 1) ascending,
-    then the other keys in insertion order."""
-    idx = [k for k in d if _INDEX.match(k) and int(k) < 4294967295]
+    """A dict's keys in JavaScript's property order: array indices (canonical integers below 2^32 - 1, so at most
+    10 digits: checked first, before any int()) ascending, then the other keys in insertion order."""
+    idx = [k for k in d if len(k) <= 10 and _INDEX.match(k) and int(k) < 4294967295]
     if not idx:
         return list(d)
     seen = set(idx)
@@ -242,11 +242,6 @@ def _is_reg(r):
             and isinstance(r.get("by"), str) and isinstance(r.get("op"), str))
 
 
-def _or_empty(v):
-    """v ?? "" (a missing or null field)."""
-    return "" if v is None else v
-
-
 def _check_anchor(a):
     if not isinstance(a, dict):
         fail("invalid", "anchor")
@@ -255,9 +250,9 @@ def _check_anchor(a):
             fail("invalid", "anchor." + k)
     if a["end"] < a["start"]:
         fail("invalid", "anchor.end < start")
-    _str(_or_empty(a.get("quote")), LIMITS["quoteFull"], "anchor.quote")
-    _str(_or_empty(a.get("prefix")), LIMITS["context"], "anchor.prefix")
-    _str(_or_empty(a.get("suffix")), LIMITS["context"], "anchor.suffix")
+    _str(a.get("quote"), LIMITS["quoteFull"], "anchor.quote")
+    _str(a.get("prefix"), LIMITS["context"], "anchor.prefix")
+    _str(a.get("suffix"), LIMITS["context"], "anchor.suffix")
     if "tail" in a:
         _str(a["tail"], LIMITS["quoteHead"], "anchor.tail")
         if not _is_int(a.get("length")) or not isinstance(a.get("sha"), str):
