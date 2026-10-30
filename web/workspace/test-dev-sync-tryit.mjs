@@ -12,7 +12,9 @@
 //   4. different cells edited in both at once: both kept, the two the same; the same cell in both: the two the same;
 //   5. a data file made, renamed and moved to Trash in one appears, follows and goes in the other;
 //   6. one browser offline (its network emulated off, and cut at the front): it says "Offline: …"; an edit made
-//      there reaches the other once it is back online, and it says "Synced" again.
+//      there reaches the other once it is back online, and it says "Synced" again;
+//   7, 8. second tabs (regression guards of today's behaviour): a second tab of the other browser opens a notebook
+//      still arriving once its history is here; a notebook made in a second tab of the first reaches the other.
 // Before the reload (step 2), whether a notebook typed in one browser reaches the other is said (OBS), not checked:
 // the switch is decided at a page's load.  Every wait is bounded; a watchdog ends an overrunning run.
 //   bun web/build.ts, then CHROME=chromium bun web/workspace/test-dev-sync-tryit.mjs
@@ -27,7 +29,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const DIST = process.env.SITE ?? join(here, "..", "dist");
 const ORIGIN = "https://dev.sagebrush.space";
 const ACCOUNT = "7e57d5d5-0000-4ccc-8ccc-7e57d5d5d5d5";
-const RUN_S = Number(process.env.TRYIT_RUN_S ?? 420);
+const RUN_S = Number(process.env.TRYIT_RUN_S ?? 540);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
 const fails = [];
@@ -131,9 +133,22 @@ class Browser {
       const t = setTimeout(() => no(new Error("no DevTools port")), 30_000);
       this.proc.stderr.on("data", (d) => { buf += d; const m = /DevTools listening on ws:\/\/[^:]+:(\d+)\//.exec(buf); if (m) { clearTimeout(t); ok(Number(m[1])); } });
     });
+    this.port = port;
     let targets;
     for (let i = 0; i < 300 && !targets; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); } catch { await sleep(100); } }
-    this.ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+    await this.attach(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+  }
+  /** Another tab of this browser (its profile, its storage): a page target of its own, driven as this one is. */
+  async newTab(name) {
+    let target;
+    for (let i = 0; i < 100 && !target; i++) { try { target = await (await fetch(`http://127.0.0.1:${this.port}/json/new?about:blank`, { method: "PUT" })).json(); } catch { await sleep(100); } }
+    const t = new Browser(name);
+    t.tabOf = this; t.port = this.port; t.targetId = target.id;
+    await t.attach(target.webSocketDebuggerUrl);
+    return t;
+  }
+  async attach(wsUrl) {
+    this.ws = new WebSocket(wsUrl);
     await new Promise((r) => (this.ws.onopen = r));
     this.n = 0; this.waiting = new Map();
     this.ws.onmessage = (ev) => {
@@ -146,6 +161,7 @@ class Browser {
   }
   async stop() {
     try { this.ws?.close(); } catch {}
+    if (this.tabOf) { try { await fetch(`http://127.0.0.1:${this.port}/json/close/${this.targetId}`); } catch {} return; }
     if (this.proc && this.proc.exitCode === null) {
       this.proc.kill("SIGTERM");
       await Promise.race([new Promise((r) => this.proc.once("exit", r)), sleep(5000)]);
@@ -296,8 +312,44 @@ try {
   await B.offline(false);
   check(await A.until(A.has("x = offline"), 45_000), "B back online: its edit reaches A within 45 s");
   check(await B.until(`/^Synced/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 45_000), `…and B says Synced again (${J(await B.syncLine())})`);
+  // ---- 7. a second tab of B (B's first tab holds the account connection) clicking a notebook still arriving: said,
+  // then, with nothing more from A, opened once its history is here (a regression guard of today's behaviour:
+  // sync-docs' N-2C3-2 asked whether a second tab gets its pull; it does)
+  const B2 = await B.newTab("B2");
+  check(await B2.go(), "B2: a second tab of B opens the notebook page");
+  await sleep(22_000); // (its switch decided: it waits up to 20 s for a client of its own)
+  holdChanged.add(B.session);
+  const nb7 = await notebooks();
+  await A.ev(`document.querySelector('[data-f="new"]').click()`);
+  let ref7 = null;
+  for (let i = 0; i < 60 && !ref7; i++) { const l = await notebooks(); ref7 = l.find((x) => !nb7.some((y) => y.ref === x.ref))?.ref ?? null; if (!ref7) await sleep(250); }
+  check(!!ref7 && (await A.type(0, "w = 7")) === "typed", "A: another notebook, made with File, New and typed into");
+  await sleep(1500);
+  const path7 = (await notebooks()).find((x) => x.ref === ref7)?.path;
+  check(await B2.until(row(path7), 20_000), `B2's Files list ${path7}`);
+  const click7 = () => B2.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(path7)})?.click()`);
+  await click7();
+  check(await B2.until(`/still arriving/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 10_000), "B2, with none of its history: \"still arriving\" said");
+  holdChanged.delete(B.session);
+  let opened7 = false;
+  for (let i = 0; i < 15 && !opened7; i++) { await click7(); opened7 = await B2.until(B2.has("w = 7"), 2000); }
+  check(opened7, `B2 opens it with A's cell, nothing more from A (within 30 s; ${J(await B2.codes())})`);
+  // ---- 8. a notebook made and typed in a second tab of A reaches B (a regression guard of today's behaviour)
+  const A2 = await A.newTab("A2");
+  await A2.go();
+  await sleep(22_000);
+  const nb8 = await notebooks();
+  await A2.ev(`document.querySelector('[data-f="new"]').click()`);
+  let ref8 = null;
+  for (let i = 0; i < 60 && !ref8; i++) { const l = await notebooks(); ref8 = l.find((x) => !nb8.some((y) => y.ref === x.ref))?.ref ?? null; if (!ref8) await sleep(250); }
+  const typed8 = ref8 ? await A2.type(0, "v = 8") : "no notebook";
+  await sleep(1500);
+  const path8 = ref8 ? (await notebooks()).find((x) => x.ref === ref8)?.path : null;
+  let reached8 = false;
+  if (path8) for (let i = 0; i < 15 && !reached8; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(path8)})?.click()`); reached8 = await B.until(B.has("v = 8"), 2000); }
+  check(typed8 === "typed" && !!path8 && reached8, `a notebook made and typed in A's second tab opens in B with its cell (within 30 s; ${J({ typed8, path8, reached8, server: [...(ref.accounts?.get(ACCOUNT)?.docs?.keys() ?? [])].includes(ref8) })})`);
   void pre;
-  for (const b of [A, B]) for (const e of b.errors) fails.push(`${b.name}: page error: ${e}`);
+  for (const b of browsers) for (const e of b.errors) fails.push(`${b.name}: page error: ${e}`);
 } catch (e) {
   fails.push("threw: " + String(e?.stack ?? e).slice(0, 600));
 }
