@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "reason": "uuid: CPython 3.14's Lib/uuid.py, copied unchanged into lib/, in its own group mod-uuid (a new bundle authorized by its budgets.json entry; lazy, loaded on import, nothing joins core). Measured locally with CI's bun 1.4.4 tool: master f054a81c (with #345) against this branch's merge 730c73ec; cli/pyjs.cjs +38353 marked 38395 (42 B for master's drift, within the 1024 B slack), the other rows exact.",
+  "bytes": {
+    "cli/lib.gen.js": 39494,
+    "cli/pyjs.cjs": 38395,
+    "engine/sagebrush-worker.js": 172
+  }
+}
