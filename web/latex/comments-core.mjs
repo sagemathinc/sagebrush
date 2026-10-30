@@ -159,7 +159,7 @@ export function lineIndex(text) {
  * exact | moved | changed | ambiguous | orphaned | unresolved (never a guess). steps(anchor) is the same as a generator
  * that yields between bounded steps (a window of the text searched, a piece of a long span hashed), so the page can
  * give the main thread back between them; its return value is resolve's. */
-export function resolver(text, budget = LIMITS.workBudget, { textSha: known } = {}) {
+export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onCopy } = {}) {
   sourceFits(text);
   // (the text's hash, the caller's when it hashed the text already in slices (the page), and its line index, built
   // when first needed: both charged here, the same either way)
@@ -168,6 +168,9 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known } = 
   let lineIdx = null;
   const lines = () => (lineIdx ??= lineIndex(text));
   const can = (n) => work + n <= budget;
+  // every copy of the source goes through here, after its length was checked against the budget and charged
+  // (onCopy: the tests' seam, told each copy's span)
+  const copy = (a, b) => { onCopy?.(a, b); return text.slice(a, b); };
   const OUT = Symbol("budget");
   // every occurrence of s starting in [from, to) (up to the candidate cap + 1). A short range (at most a window) is
   // searched in a copy of it, charged first. A longer one is searched in place, one occurrence at a time (a step,
@@ -179,9 +182,10 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known } = 
     if (!s) return out;
     const end = Math.min(to, text.length);
     if (end - from <= WINDOW) {
-      const piece = text.slice(from, Math.min(text.length, end + s.length - 1));
-      if (!can(piece.length)) return OUT;
-      work += piece.length;
+      const pe = Math.min(text.length, end + s.length - 1), n = Math.max(0, pe - from);
+      if (!can(n)) return OUT;
+      work += n;
+      const piece = copy(from, pe);
       for (let i = piece.indexOf(s); i >= 0 && from + i < end; i = piece.indexOf(s, i + 1)) { out.push(from + i); if (out.length > LIMITS.candidates) break; }
       return out;
     }
@@ -199,7 +203,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known } = 
   // the SHA-256 of [a, b), a piece at a time, each charged before it is hashed
   function* sha(a, b) {
     const h = sha256Hasher();
-    for (let i = a; i < b;) { const j = Math.min(b, sliceAt(text, i + WINDOW)); if (!can(j - i)) return OUT; work += j - i; h.update(text.slice(i, j)); i = j; yield; }
+    for (let i = a; i < b;) { const j = Math.min(b, sliceAt(text, i + WINDOW)); if (!can(j - i)) return OUT; work += j - i; h.update(copy(i, j)); i = j; yield; }
     return h.digest();
   }
   // the whole span at i, if the anchor's quote (head; and for a long one tail, length and sha) is there
@@ -208,11 +212,11 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known } = 
     const e = i + a.length;
     if (!can(a.tail.length)) return OUT;
     work += a.tail.length;
-    if (!(e <= text.length && text.slice(e - a.tail.length, e) === a.tail)) return null;
+    if (!(e <= text.length && copy(e - a.tail.length, e) === a.tail)) return null;
     const h = yield* sha(i, e);
     return h === OUT ? OUT : h === a.sha ? { start: i, end: e } : null;
   }
-  const ctxExact = (a, s, e) => { work += a.prefix.length + a.suffix.length; return text.slice(Math.max(0, s - a.prefix.length), s) === a.prefix && text.slice(e, e + a.suffix.length) === a.suffix; };
+  const ctxExact = (a, s, e) => { work += a.prefix.length + a.suffix.length; return copy(Math.max(0, s - a.prefix.length), s) === a.prefix && copy(e, Math.min(text.length, e + a.suffix.length)) === a.suffix; };
   const UNRESOLVED = { status: "unresolved", reason: "budget" };
   function* steps(a) {
     if (a.textSha === textSha && a.end <= text.length) return { status: "exact", start: a.start, end: a.end };
@@ -249,7 +253,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known } = 
     }
     // (nothing but white space left between them: the commented text was deleted, not rewritten: removed)
     if (!can(pairs.reduce((n, p) => n + p.end - p.start, 0))) return UNRESOLVED;
-    const kept = pairs.filter((p) => { work += p.end - p.start; return text.slice(p.start, p.end).trim() !== ""; });
+    const kept = pairs.filter((p) => { work += p.end - p.start; return copy(p.start, p.end).trim() !== ""; });
     if (kept.length === 1) return { status: "changed", ...kept[0] };
     if (kept.length > 1) return { status: "ambiguous", candidates: kept };
     return pairs.length ? { status: "orphaned", reason: "removed" } : { status: "orphaned" };
@@ -260,9 +264,9 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known } = 
     const L = lines(), l0 = L.at(s).line, l1 = L.at(e).line, from = Math.max(1, l0 - LIMITS.contextLines), to = Math.min(L.lines, l1 + LIMITS.contextLines);
     const out = [];
     for (let l = from; l <= to; l++) {
-      const a = L.starts[l - 1], b = l < L.lines ? L.starts[l] - 1 : text.length, piece = text.slice(a, Math.min(b, a + LIMITS.contextLineUnits));
-      if (!can(piece.length)) break;
-      work += piece.length; out.push(b - a > LIMITS.contextLineUnits ? piece + "…" : piece);
+      const a = L.starts[l - 1], b = l < L.lines ? L.starts[l] - 1 : text.length, pe = Math.min(b, a + LIMITS.contextLineUnits);
+      if (!can(pe - a)) break;
+      work += pe - a; out.push(copy(a, pe) + (b - a > LIMITS.contextLineUnits ? "…" : ""));
     }
     return out.join("\n");
   };
