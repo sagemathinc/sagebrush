@@ -164,8 +164,9 @@ async function old2() {
   try { await W.keepBundle({ history: [{ time: "00000000001_r", parents: [] }], blobs: {} }, restored, { hdb, bdb: null }); } finally { hdb.close(); }
   const rows = await inHist("nb", (st) => rq(st.getAll(IDBKeyRange.bound([W.SYNC_NB, ""], [W.SYNC_NB + "￿", "￿"]))));
   const times = rows.map((r) => (r.nb === W.SYNC_NB ? r.time.replace(/:.*/, ":") : r.time[0]));
-  const premise = ["d:", "n", "b:", "j", "p", "a"].every((t) => times.includes(t));
-  check(premise, "OLD2 premise: journaled saves and a restore write the registry, n, budgets, j, p and a rows: " + J([...new Set(times)]));
+  // (the restore's `a` row only while this tree still writes one: sync-docs' exact-only branch removes askMerge)
+  const premise = ["d:", "n", "b:", "j", "p", ...("asked" in W.FAMILIES ? ["a"] : [])].every((t) => times.includes(t));
+  check(premise, "OLD2 premise: journaled saves and a restore write the registry, n, budgets, j, p (and a, while written) rows: " + J([...new Set(times)]));
   const d = await W.detectOldSync(w), v = await shown(w);
   check(!d.old && isClean(v), `OLD2: never synced, journal rows and a restore's a row: not flagged (${J(d)}), Turn on offered: ${brief(v)}`);
   const e = await enableVia(w);
@@ -174,18 +175,34 @@ async function old2() {
 
 /** The `a` rows (sync-docs' ruling): a real keepBundle `a` row alone reads clean; `a` with a real `m` row reads old. */
 async function asked() {
+  // (the `a` row as master 78cf5353's keepBundle writes it: by that build itself when its tree is given (OLD_TREES), and
+  // checked the same as the row written here otherwise; this tree's keepBundle only while it still writes one)
+  const OLD = (window.OLD_BUILDS ?? []).includes("78cf") ? await import("./old-78cf.js") : null;
+  const ROW_A = { asked: "legacy" };
   await dropHistory();
-  const w = await fresh(), id = ID(20);
-  const hdb = await hist("nb");
-  try { await W.keepBundle({ history: [{ time: "00000000001_r", parents: [] }], blobs: {} }, id, { hdb, bdb: null }); } finally { hdb.close(); }
-  const h = await handleOf("nb", id), a = await inHist("nb", (st) => rq(st.get([W.SYNC_NB + h, "a"])));
-  check(a?.v?.asked === "legacy", "asked: keepBundle wrote the a row: " + J(a));
+  const w = await fresh(), id = ID(20), bundle = { history: [{ time: "00000000001_r", parents: [] }], blobs: {} };
+  const hdb = OLD ? await OLD.openHistoryDb() : await hist("nb");
+  try { await (OLD ?? W).keepBundle(bundle, id, { hdb, bdb: null }); } finally { hdb.close(); }
+  let h = await handleOf("nb", id), a = h === undefined ? undefined : await inHist("nb", (st) => rq(st.get([W.SYNC_NB + h, "a"])));
+  const by = OLD ? "78cf5353's keepBundle" : a ? "this tree's keepBundle" : "written as 78cf5353 writes it";
+  if (!OLD && !a) {
+    await localSave("nb", id);
+    h = await handleOf("nb", id);
+    await putRow("nb", { nb: W.SYNC_NB + h, time: "a", v: ROW_A });
+    a = await inHist("nb", (st) => rq(st.get([W.SYNC_NB + h, "a"])));
+  }
+  check(J(a?.v) === J(ROW_A), `asked: the a row (${by}): ` + J(a));
   const d1 = await W.detectOldSync(w);
   check(!d1.old, "asked: an a row alone is clean: " + J(d1));
+  // (the a row and a start row m alone, m as the journal writes it: old, by m)
+  await putRow("nb", { nb: W.SYNC_NB + h, time: "m", v: { n: 1, from_j: 1, asked: "legacy" } });
+  const dm = await W.detectOldSync(w);
+  check(dm.old && dm.why === "sagebrush-history:family:m", "asked: a with an m row alone is old, by m: " + J(dm));
+  await inHist("nb", async (st) => { st.delete([W.SYNC_NB + h, "m"]); });
   await syncedSave("nb", id);
   const m = await inHist("nb", (st) => rq(st.get([W.SYNC_NB + h, "m"])));
   const d2 = await W.detectOldSync(w), v = await shown(w);
-  check(m?.v?.asked === "legacy" && d2.old && isOld(v), `asked: a with a real m row is old (${J(d2)}): ${brief(v)}`);
+  check(m?.v?.n === 1 && d2.old && isOld(v), `asked: a with a real m row is old (${J(d2)}): ${brief(v)}`);
 }
 
 /** OLD3: a device turned on by this build (the marker with its lease) and off again is not flagged; its line "Sync off". */
