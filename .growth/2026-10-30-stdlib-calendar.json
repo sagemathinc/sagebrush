@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "reason": "calendar: CPython 3.14's Lib/calendar.py and Lib/locale.py, copied unchanged into lib/, over lib/_locale.py (the C locale) and lib/encodings (normalize_encoding and aliases.py); their groups mod-calendar, mod-locale (with _locale) and mod-encodings are new bundles authorized by their budgets.json entries. Nothing joins core (none is imported at start). Measured locally with CI's bun 1.4.4 tool: master c990eba7 (with #332) against this branch merged (the CAL-A1..A3 revision included).",
+  "bytes": {
+    "cli/lib.gen.js": 134557,
+    "cli/pyjs.cjs": 130196,
+    "engine/sagebrush-worker.js": 631
+  }
+}
