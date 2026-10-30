@@ -20,7 +20,9 @@ async function diagnose(info, kernel) {
   const bool = (v) => (v === true ? "true" : v === false ? "false" : "error: " + str("not a boolean: " + v));
   // (each fetch aborts after 5 s, or when the whole diagnosis runs out)
   const pending = new Set();
+  let retired = false;  // (set when the whole diagnosis runs out: no new fetch starts after it)
   const probe = async (url, corp) => {
+    if (retired) return "timeout";
     const ac = new AbortController();
     pending.add(ac);
     const timer = setTimeout(() => ac.abort(), 5000);
@@ -65,6 +67,7 @@ async function diagnose(info, kernel) {
     console.log("diagnose: " + (e?.stack ?? e));
   } finally {
     clearTimeout(timer);
+    retired = true;
     for (const ac of pending) ac.abort();
   }
 }
