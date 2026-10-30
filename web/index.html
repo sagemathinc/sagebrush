@@ -259,7 +259,7 @@
     </div>
     <select id="autorun" hidden aria-label="Automatic reruns" title="When a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">Auto-run: 2 s</option><option value="10000">Auto-run: 10 s</option><option value="always">Auto-run: always</option><option value="never">Auto-run: never</option></select>
     <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
-    <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, or on a GPU kernel (a preview: simulated)"><option value="local">This browser</option><option value="gpu">GPU (preview)</option></select>
+    <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, or on remote compute (a preview: simulated)"><option value="local">This browser</option><option value="gpu">Remote compute (preview)</option></select>
     <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
@@ -754,7 +754,7 @@ function startKernel(e) {
 // Make a notebook's interpreter the current one (before its document loads,
 // so that the outputs it computed are not marked stale).
 function useKernel(id) {
-  leaveRemote(); // (a notebook's own interpreter: the GPU kernel, if one was in use, is closed)
+  leaveRemote(); // (a notebook's own interpreter: remote compute, if it was in use, is closed)
   const e = kernelFor(id);
   kernel = e.kernel;
   journal = e.journal;
@@ -811,11 +811,11 @@ const analyzer = {
     return new Promise((resolve) => { const id = ++analyzeId; analyzeWaiting.set(id, resolve); analyzeWorker.postMessage({ id, ...msg }); });
   },
 };
-// The GPU kernel, as a preview (web/notebook/remote-ui.js, its own bundle sagebrush-remote.js, loaded on
+// Remote compute, as a preview (web/notebook/remote-ui.js, its own bundle sagebrush-remote.js, loaded on
 // first use): offered only in a page opened with ?remote=1.  Its gateway is simulated in the page, and its
 // runs execute on a second interpreter in this browser; every run is still approved by the page's gate.
 // One attempt at a time is current (remoteSwitch): choosing This browser, opening another notebook (useKernel)
-// or choosing GPU again ends whatever is pending or installed.  The module's own load is fenced the same way:
+// or choosing remote compute again ends whatever is pending or installed.  The module's own load is fenced the same way:
 // `remoteGen` is taken before its await, and changed by every leave.
 const REMOTE_PREVIEW = new URLSearchParams(location.search).get("remote") === "1";
 const kernelPick = $("#kernelpick");
@@ -826,7 +826,7 @@ function leaveRemote() {
   kernelPick.value = "local";
 }
 async function useRemote() {
-  // (This browser: the notebook's own interpreter; useKernel ends the GPU kernel and any pending attempt)
+  // (This browser: the notebook's own interpreter; useKernel ends remote compute and any pending attempt)
   if (kernelPick.value !== "gpu") return useKernel(current.id);
   const gen = ++remoteGen, id = current.id;
   remoteSw?.leave(); // (an attempt begun before this one ends now, even while this one loads)
@@ -842,6 +842,7 @@ async function useRemote() {
       status: (t) => { statusEl.textContent = t; },
       reactive: () => REACTIVE,
       makeLocal: () => makeKernel(null).kernel,
+      network: () => mod.parseNetwork(location.search), // (&latency=MS &jitter=MS &loss=P: the simulated network)
       setKernel: (k) => nb.setKernel(k), // (another interpreter: every output is stale)
     });
     await remoteSw.connect(id);
@@ -849,7 +850,7 @@ async function useRemote() {
     remoteLoad = null; // (a failed load is tried again next time)
     if (gen !== remoteGen) return;
     kernelPick.value = "local";
-    statusEl.textContent = `GPU kernel (preview): ${e?.message ?? e}`;
+    statusEl.textContent = `Remote compute (preview): ${e?.message ?? e}`;
   }
 }
 if (REMOTE_PREVIEW) {
