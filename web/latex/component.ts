@@ -60,11 +60,19 @@ export function mountEditor(root: HTMLElement, opts: { text: string; onChange?(t
     onEdit: () => { if (!opts.onChange) return; clearTimeout(timer); timer = setTimeout(() => opts.onChange!(E.getText()), 300); },
   });
   return {
-    getText: () => E.getText(),
+    ...viewOf(E),
     setText: (t) => E.setText(t),
+    destroy: () => { clearTimeout(timer); E.destroy(); root.textContent = ""; },
+  };
+}
+
+/** An editor's preview as the comments read it (and as mountEditor's host does): shared by the component and the page. */
+export function viewOf(E: ReturnType<typeof createEditor>): Omit<LatexEditor, "setText" | "destroy"> {
+  return {
+    getText: () => E.getText(),
     // (resolves once the preview shows the text as it is now: at once if it already does)
     rendered: () => new Promise<void>((res) => { if (E.posCurrent()) return res(); const off = E.onRendered(() => { off(); res(); }); }),
-    previewRoot: () => preview,
+    previewRoot: () => E.preview,
     groups: () => E.groups(),
     // a selection in the preview: its group's source range, narrowed to the selected text when that text is found in
     // it (as the double-click does); null while the preview is behind the source, or outside the groups
@@ -76,6 +84,5 @@ export function mountEditor(root: HTMLElement, opts: { text: string; onChange?(t
     // the groups whose source ranges meet [start, end) (a point, start === end, meets the group it falls in)
     previewRangesOf: (start, end) => E.groups().filter((g) => (start === end ? g.start <= start && start < g.end : g.start < end && start < g.end)).map((g) => g.el),
     on: (_ev, f) => E.onRendered(f),
-    destroy: () => { clearTimeout(timer); E.destroy(); root.textContent = ""; },
   };
 }
