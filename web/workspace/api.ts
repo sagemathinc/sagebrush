@@ -2167,6 +2167,27 @@ export class Workspace {
     });
   }
 
+  /** The grants the person gave paired agents (design/workspace-agent-protocol.md §2.2), by pairing id: kept in
+   * this browser's workspace (so per site and workspace), for the page's pairing alone, never offered to agents
+   * (forAgent). */
+  async agentGrants(): Promise<Record<string, unknown>> {
+    return inTx(this.ws, "meta", "readonly", async (tx) => {
+      const st = tx.objectStore("meta"), out: Record<string, unknown> = {};
+      const keys = (await req(st.getAllKeys(IDBKeyRange.bound("grant:", "grant:\uffff")))) as IDBValidKey[];
+      for (const k of keys) if (typeof k === "string") out[k.slice("grant:".length)] = await req(st.get(k));
+      return out;
+    });
+  }
+  /** Keep (or, with null, forget) the grant of pairing `id`: revoking a grant forgets it here too. */
+  async putAgentGrant(id: string, g: unknown | null): Promise<void> {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new WorkspaceError("invalid", "a pairing id is 1 to 64 letters, digits, _ or -");
+    await inTx(this.ws, "meta", "readwrite", async (tx) => {
+      const st = tx.objectStore("meta");
+      if (g === null) st.delete("grant:" + id);
+      else st.put(g, "grant:" + id);
+    });
+  }
+
   /** The workspace as an agent sees it (§8.2): the verbs, its changes
    * credited to `actor` ("agent:<name>"), and none of what only a person
    * does (dropVersions, forget). */

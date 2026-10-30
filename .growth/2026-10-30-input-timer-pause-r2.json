@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "Notebook input() timer pause, revision for DB3-INPUT-TIMER-1 (a restart while input() waits leaves the wait out). A top-up over 2026-10-30-input-timer-pause.json: measured locally with CI's bun 1.4.4 tool, master 851719b7 against this head, cli/pyjs.cjs +448 and engine/sagebrush-notebook.js +302 in all.",
+  "bytes": {
+    "cli/pyjs.cjs": 68,
+    "engine/sagebrush-notebook.js": 56
+  }
+}
