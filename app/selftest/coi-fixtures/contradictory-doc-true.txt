@@ -17,6 +17,6 @@ info coi-policy: unrecognized
 info kernel-interrupt-shared: false
 info kernel-isolated: true
 info kernel-sab: "undefined"
-info fetch-page: {"status":200,"ok":true,"url":"/?sb-diag=1","redirected":false,"COOP":"same-origin","COEP":"require-corp"}
-info fetch-kernel-script: {"status":200,"ok":true,"url":"/sagebrush-worker.js?sb-diag=2","redirected":false,"COOP":"same-origin","COEP":"require-corp","CORP":null}
+info fetch-page: {"status":200,"ok":true,"requested":"http://127.0.0.1:41234/?sb-diag=1","final":"http://127.0.0.1:41234/?sb-diag=1","redirected":false,"COOP":"same-origin","COEP":"require-corp"}
+info fetch-kernel-script: {"status":200,"ok":true,"requested":"http://127.0.0.1:41234/sagebrush-worker.js?sb-diag=2","final":"http://127.0.0.1:41234/sagebrush-worker.js?sb-diag=2","redirected":false,"COOP":"same-origin","COEP":"require-corp","CORP":null}
 info user-agent: "Mozilla/5.0 (Linux; Android 14; wv) Chrome/158.0.8127.0 Mobile Safari/537.36"

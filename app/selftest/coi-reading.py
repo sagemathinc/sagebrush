@@ -24,7 +24,7 @@ import sys
 COI_CHECK = "cross-origin isolated (Stop keeps variables)"
 CRITICAL = ["origin", "secure-context", "top-level", "isolated-document", "sab-document", "coi-policy",
             "kernel-interrupt-shared", "kernel-isolated", "kernel-sab", "fetch-page", "fetch-kernel-script"]
-FETCHES = {"fetch-page": "?sb-diag=1", "fetch-kernel-script": "/sagebrush-worker.js?sb-diag=2"}
+FETCHES = {"fetch-page": "/?sb-diag=1", "fetch-kernel-script": "/sagebrush-worker.js?sb-diag=2"}
 ORIGIN = re.compile(r'"http://127\.0\.0\.1:[0-9]+"')
 
 
@@ -79,28 +79,42 @@ def main():
             incomplete.append(f"{k} ({v[0][:80]})")
         else:
             val[k] = v[0]
-    # (a fetch is evidence about the resource asked for only if it answered
-    # 200, unredirected, at that URL)
+    # (a fetch is evidence about the resource asked for only if it asked for
+    # exactly that URL on the page's own origin and was answered 200, from
+    # that same URL, unredirected; anything else, or a value that isn't a
+    # JSON object, is incomplete, not header evidence)
     fetch = {}
-    for k, want in FETCHES.items():
+    try:
+        origin = json.loads(val["origin"]) if "origin" in val else None
+    except ValueError:
+        origin = None
+    for k, path in FETCHES.items():
         if k not in val:
             continue
         try:
             o = json.loads(val[k])
         except ValueError:
-            incomplete.append(f"{k} (not JSON)")
+            o = None
+        if not isinstance(o, dict):
+            incomplete.append(f"{k} (not a JSON object)")
             continue
-        path_ok = o.get("url", "").endswith(want) if want.startswith("?") else o.get("url") == want
-        if o.get("status") != 200 or o.get("ok") is not True or o.get("redirected") is not False or not path_ok:
-            incomplete.append(f"{k} (status {o.get('status')}, redirected {o.get('redirected')}, url {o.get('url')!r})")
+        want = f"{origin}{path}" if isinstance(origin, str) else None
+        if want is None or o.get("requested") != want or o.get("final") != want:
+            incomplete.append(f"{k} (requested {o.get('requested')!r}, final {o.get('final')!r}, expected {want!r})")
+        elif o.get("status") != 200 or o.get("ok") is not True or o.get("redirected") is not False:
+            incomplete.append(f"{k} (status {o.get('status')}, ok {o.get('ok')}, redirected {o.get('redirected')})")
         else:
             fetch[k] = o
     if incomplete:
         say("incomplete", "data incomplete for " + "; ".join(incomplete) + ": fix the instrumentation before reading those")
 
+    # (when the document's isolation fact and the check line disagree,
+    # neither feeds a reading: the rows that depend on them (isolated, H2,
+    # H4) are not given; the independent ones still are)
     doc = val.get("isolated-document")
     if doc in ("true", "false") and coi_check in ("ok", "FAIL") and (doc == "true") != (coi_check == "ok"):
         say("contradictory", f"isolated-document is {doc} but the check line says {coi_check}: no reading from them")
+        doc = None
 
     # the server's log (Android)
     log_ok, page_logged = False, None
