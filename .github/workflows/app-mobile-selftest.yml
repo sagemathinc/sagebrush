@@ -81,6 +81,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # (keep in sync with LEGS in "the legs of this run" below)
         api-level: ${{ fromJSON(github.event_name == 'push' && '["34"]' || '["34", "37.0"]') }}
     env:
       NDK_VERSION: 27.3.13750724
@@ -90,6 +91,7 @@ jobs:
       - name: the legs of this run
         env:
           EVENT: ${{ github.event_name }}
+          # (keep in sync with the matrix's api-level list above)
           LEGS: ${{ github.event_name == 'push' && '34' || '34, 37.0' }}
           LEG: ${{ matrix.api-level }}
         run: |
