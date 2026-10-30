@@ -2,7 +2,7 @@
 // Locks): a workspace with the journal active and DEV's docsync on, a notebook store per notebook, and doc-sync.ts's
 // DocSync on a minimal account socket to the reference server (hello, welcome, then the document requests).  The
 // harness drives two of these, as two devices of one account.
-import { W, N, H, DS, P, NB } from "./all.js";
+import { W, N, H, DS, P, NB, MC } from "./all.js";
 
 const J = JSON.stringify;
 const T = { stores: new Map(), pending: new Map(), req: 0, log: [] };
@@ -40,7 +40,8 @@ T.connect = async (dev, account) => {
     ws.onclose = () => { for (const [, f] of T.pending) f({ t: "error", code: "busy" }); T.pending.clear(); T.ds.disconnected(); };
   });
   await new Promise((ok) => { ws.onopen = ok; });
-  ws.send(J({ t: "hello", v: 1, device: `device-${dev}-0000`, name: dev, index_after: 0 }));
+  // (the build's own hello field: its merge modes, as SyncClient's hello says them (merge-client.ts))
+  ws.send(J({ t: "hello", v: 1, device: `device-${dev}-0000`, name: dev, index_after: 0, ...MC.helloMergeField() }));
   await Promise.race([welcome, new Promise((_, no) => setTimeout(() => no(new Error("no welcome: " + J(T.log))), 10_000))]);
   await T.ds.connected({
     owner,

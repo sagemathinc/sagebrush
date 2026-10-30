@@ -38,8 +38,11 @@ writeFileSync(join(src, "entry.js"), [
   `export * as DS from ${J(join(here, "doc-sync.ts"))};`,
   `export * as P from ${J(join(here, "../sync-protocol/protocol.ts"))};`,
   `export * as NB from ${J(join(here, "../notebook/notebook.js"))};`,
+  `export * as MC from ${J(join(here, "merge-client.ts"))};`,
 ].join("\n"));
-const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
+// (built with exact merges on (web/workspace/merge-client.ts): the devices' hellos say merge and their claims ask
+// exact-v1; a server whose switch is off makes every document legacy, as before, so every case but M is unchanged)
+const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm", define: { __SB_EXACT_MERGE__: "true" } });
 rmSync(src, { recursive: true, force: true });
 if (!b.success) { emit.buildFail(b.logs); process.exit(1); }
 copyFileSync(join(here, "test-doc-sync.page.js"), join(site, "device.js"));
@@ -191,6 +194,17 @@ const front = Bun.serve({
         if (f) {
           delete ws.data.faked[m.req];
           text = J({ t: "error", req: m.req, code: f.error.code, detail: { message: "faked", ...f.error.detail } });
+        } else if (t && typeof t === "object") {
+          // (case M: one document's next page made empty and saying `merge`; or the next claim's ack without its merge)
+          if (t.kind === "emptyPage" && m.t === "batches" && m.doc === t.doc) {
+            tamper[ws.data.dev] = null;
+            Object.assign(m, { items: [], more: false, merge: t.merge });
+            text = J(m);
+          } else if (t.kind === "claimNoMerge" && m.t === "ack" && m.claim) {
+            tamper[ws.data.dev] = null;
+            delete m.claim.merge;
+            text = J(m);
+          }
         } else if (t) {
           if (m.t === "batches" && m.items?.length) {
             tamper[ws.data.dev] = null;
@@ -768,6 +782,95 @@ try {
   // STOP13, already recorded as its failed check, is not counted again)
   const r13 = await case13().then(() => ({ ok: true }), (e) => ({ ok: false, e }));
   if (!r13.ok && r13.e !== STOP13) check(false, "13: the case stopped: " + String(r13.e?.message ?? r13.e).slice(0, 300));
+
+  progress("case M");
+  // M. Exact merges (plan-merge-align r3.2, P2b), on the reference server with its switch on for this case only: a new
+  // notebook's claim asks exact-v1 and the document is made so, recorded on A with the claim's answer and on B with its
+  // first page; a cell deleted on A and edited on B apart reads, in both histories, as the exact merge (the cell kept
+  // whole, with B's text); a document made with the switch off (case 1's) is legacy, recorded so.  Reference only (the
+  // switch is the reference server's test control): under cloud the same number of checks, each said as not run there
+  {
+    const MCHECKS = 7;
+    if (CLOUD) for (let i = 0; i < MCHECKS; i++) check(true, `M${i + 1}: (exact merges: the reference server's case; not run under cloud)`);
+    else {
+      const before = results.length;
+      ref.controls.exactMerge(true);
+      try {
+        const NM = "33333333-2222-4333-8444-555555555555";
+        await A.call("open", NM, [["a", "x = 1"], ["b", "keep"]]);
+        await A.call("kick", NM);
+        await settle();
+        const am = await A.call("journal", NM), sdm = ref.controls.doc(ACCOUNT, NM);
+        check(sdm?.merge === "exact-v1" && am.start?.merge === "exact-v1", "M1: a new notebook, its claim asking exact-v1, the switch on: made exact-v1, and A records so: " + J({ server: sdm?.merge, start: am.start }));
+        await B.call("open", NM);
+        await settle();
+        const bm = await B.call("journal", NM);
+        check(bm.start?.merge === "exact-v1", "M2: …B pulls it and records exact-v1 with its first page: " + J(bm.start));
+        await B.call("disconnect");
+        await A.call("edit", NM, [["b", "keep"]]);
+        await sleep(20);
+        await B.call("edit", NM, [["a", "x = 2"], ["b", "keep"]]);
+        await settle();
+        await B.call("connect", "B", ACCOUNT);
+        await settle();
+        await settle();
+        const head = (d) => d.ev(`(() => { const s = T.stores.get(${J(NM)})?.history?.session; return s ? JSON.stringify(s.value().get({ type: "cell" }).map((r) => [r.id, r.input]).sort()) : null; })()`);
+        const [ha, hb] = [await head(A), await head(B)];
+        check(ha === J([["a", "x = 2"], ["b", "keep"]]) && hb === ha, "M3: a cell deleted on A and edited on B apart: both histories read the exact merge, the cell kept whole with B's text: " + J({ A: ha, B: hb }));
+      } catch (e) {
+        check(false, "M: the case stopped: " + String(e?.message ?? e).slice(0, 300));
+      } finally {
+        ref.controls.exactMerge(false);
+      }
+      // (astra3's R-MC-2, through DocSync's own flight: a page with no rows still says the mode.  With this device's
+      // edits unsent, an empty page saying the other mode (each way) stops the notebook: nothing sent (the server's head
+      // as it was) and nothing written (A's whole history database as it was); and a first answer that is an empty page
+      // records its mode)
+      // (this document's every row in A's history database: its history keys (its own id and its synced key) and its
+      // journal rows (under its registry handle); A's other notebooks sync on the same reconnect, so their rows move)
+      const snapA = (id) => A.ev(`(async () => { const r = await new Promise((ok, no) => { const q = T.hdb.transaction("history").objectStore("history").getAll(); q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); }); const reg = r.find((x) => x.nb === "\\u0001s:" && x.time === "d:local:" + ${J(id)}); const h = reg?.v?.h; return JSON.stringify(r.filter((x) => x.nb === ${J(id)} || String(x.nb).startsWith(${J(id)} + ":s") || (h && x.nb === "\\u0001s:" + h) || x === reg)); })()`);
+      const mismatch = async (id, made, other, label) => {
+        if (made) ref.controls.exactMerge(true);
+        try {
+          await A.call("open", id, [["a", "1"]]);
+          await A.call("kick", id);
+          await settle();
+        } finally {
+          ref.controls.exactMerge(false);
+        }
+        const rec = (await A.call("journal", id)).start?.merge;
+        await A.call("disconnect");
+        await A.call("edit", id, [["a", "2"]]);
+        const head0 = J(ref.controls.doc(ACCOUNT, id)), db0 = await snapA(id), j0 = await A.call("journal", id);
+        tamper.A = { kind: "emptyPage", doc: id, merge: other };
+        await A.call("connect", "A", ACCOUNT);
+        await A.call("kick", id);
+        await settle();
+        const st = (await A.call("stopped"))[id], db1 = await snapA(id), j1 = await A.call("journal", id);
+        check(rec === (made ? "exact-v1" : "legacy") && st?.code === "invalid" && /merge mode/.test(st?.detail ?? "") && J(ref.controls.doc(ACCOUNT, id)) === head0 && db1 === db0 && j1.lrows === j0.lrows && j1.lrows >= 1 && j1.J === j0.J, `M${label}: an empty page saying ${other} for a ${rec} document, edits unsent: stopped (invalid), nothing sent, every row of it in A's history database unchanged: ` + J({ rec, stop: st, lrows: [j0.lrows, j1.lrows], J: [j0.J, j1.J], same: db1 === db0, rows: JSON.parse(db0).length }));
+        tamper.A = null;
+      };
+      await mismatch("33333333-2222-4333-8444-5555555555e1", true, "legacy", "5");
+      await mismatch("33333333-2222-4333-8444-5555555555e2", false, "exact-v1", "6");
+      // (a first answer that is an empty page: B's claim's ack without its merge (nothing recorded then), its next pull an
+      // empty page saying legacy: recorded from it, the cursor not moved)
+      const NE = "33333333-2222-4333-8444-5555555555e3";
+      tamper.B = { kind: "claimNoMerge" };
+      await B.call("open", NE, [["a", "e"]]);
+      await B.call("kick", NE);
+      await settle();
+      const be0 = await B.call("journal", NE);
+      tamper.B = { kind: "emptyPage", doc: NE, merge: "legacy" };
+      await B.call("kick", NE, true);
+      await settle();
+      const be1 = await B.call("journal", NE);
+      check(be0.start && be0.start.merge === undefined && be1.start?.merge === "legacy" && J(be1.cursor) === J(be0.cursor), "M7: a first answer that is an empty page records its mode (legacy), the cursor unmoved: " + J({ before: be0.start, after: be1.start, cursor: [be0.cursor, be1.cursor] }));
+      tamper.B = null;
+      const lj = await A.call("journal", N1);
+      check(lj.start?.merge === "legacy" && ref.controls.doc(ACCOUNT, N1)?.merge === "legacy", "M4: a document made with the switch off (case 1's) is legacy, and A records so: " + J(lj.start));
+      while (results.length < before + MCHECKS) check(false, "M: not reached");
+    }
+  }
 
   progress("case 14");
   // (the whole case within a budget that ends before the run's deadline: past it, or on a throw, this case records

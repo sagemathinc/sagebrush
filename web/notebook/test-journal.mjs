@@ -38,17 +38,20 @@ writeFileSync(join(src, "entry.js"), [
   `export * as S from ${JSON.stringify(join(here, "stores.js"))};`,
   `export * as P from ${JSON.stringify(join(here, "../sync-protocol/protocol.ts"))};`,
 ].join("\n"));
-const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
+// (two builds of the same modules: all.js with exact merges compiled in (the cases' own), off.js without (a production
+// build's define): the fail-closed case loads with off.js what all.js recorded (the grader's G-P2b-5))
+const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm", define: { __SB_EXACT_MERGE__: "true" } });
+const b2 = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "off.js", target: "browser", format: "esm", define: { __SB_EXACT_MERGE__: "false" } });
 rmSync(src, { recursive: true, force: true });
-if (!b.success) {
-  console.error(b.logs.join("\n"));
+if (!b.success || !b2.success) {
+  console.error([...b.logs, ...b2.logs].join("\n"));
   process.exit(1);
 }
 copyFileSync(join(here, "test-journal.page.js"), join(site, "cases.js"));
 // (the notebook page's source, for its journal functions, run as they are (the cases extract them))
 copyFileSync(join(here, "../index.html"), join(site, "page-src.html"));
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>notebook journal test</title><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
-const FILES = ["/all.js", "/cases.js", "/page-src.html"];
+const FILES = ["/all.js", "/off.js", "/cases.js", "/page-src.html"];
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
   if (p !== "/" && !FILES.includes(p)) return new Response("not found", { status: 404 });
