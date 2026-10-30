@@ -351,6 +351,25 @@ try {
   await evaluate(`document.querySelector(".sb-term textarea").focus(); document.querySelector(".sb-term-hide").click()`);
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === true && (await evaluate(`document.activeElement?.id`)) === "morebtn", `TP-7: the dock's own hide returns focus to the ⋯ button (${await evaluate(`document.activeElement?.id || document.activeElement?.tagName`)})`);
   await evaluate(`document.querySelector("#termbtn").click()`);
+  // (TP-7-R2: a keyboard reopen from the ⋯ menu, with real key events, then the dock's hide by keyboard: focus goes to
+  // the ⋯ button, not to body, though the recorded opener (the menu item) is hidden by then)
+  const realKey = async (key, code, vk, text) => {
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, ...(text ? { text, unmodifiedText: text } : {}) });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
+  };
+  await evaluate(`document.querySelector(".sb-term-hide").click()`);
+  await evaluate(`document.querySelector("#morebtn").focus()`);
+  await realKey("Enter", "Enter", 13, "\r");
+  await until(`!document.querySelector("#moremenu").hidden`, 5000);
+  await evaluate(`document.querySelector("#termbtn").focus()`);
+  await realKey("Enter", "Enter", 13, "\r");
+  const reopened = await until(`!document.querySelector(".sb-term").hidden`, 5000);
+  await evaluate(`document.querySelector(".sb-term-hide").focus()`);
+  await realKey("Enter", "Enter", 13, "\r");
+  const kb = await evaluate(`({ hidden: document.querySelector(".sb-term").hidden, focus: document.activeElement?.id || document.activeElement?.tagName })`);
+  check(reopened && kb.hidden === true && kb.focus === "morebtn", `TP-7-R2: reopened from the ⋯ menu by keyboard, hidden by keyboard: focus on the ⋯ button (${JSON.stringify(kb)})`);
+  await evaluate(`document.querySelector("#termbtn").click()`);
+  await until(`!document.querySelector(".sb-term").hidden`, 5000);
   // (TP-1: ✕ ends the shell's worker: counted, with reset as the control that fires)
   await evaluate(`window.__term = 0; const t0 = Worker.prototype.terminate; Worker.prototype.terminate = function () { window.__term++; return t0.call(this); }`);
   await run("echo before-reset");

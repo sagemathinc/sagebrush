@@ -231,8 +231,12 @@ export class TerminalPanel {
     this.root.hidden = true;
     document.body.classList.remove("sb-term-open");
     // (focus goes back where it came from: TP-7)
+    // (an opener that can't take focus (a menu item hidden since): the ⋯ button instead: TP-7-R2)
     const o = this.opener as HTMLElement | null;
-    if (back) (o?.isConnected && o !== document.body ? o : document.getElementById("morebtn"))?.focus();
+    if (back) {
+      if (o?.isConnected && o !== document.body) o.focus();
+      if (document.activeElement !== o) document.getElementById("morebtn")?.focus();
+    }
   }
   toggle() {
     if (this.shown) this.hide();
