@@ -175,9 +175,9 @@ test("a rename is classified by both of its names, from a real git history", () 
 // push, and always the nightly schedule and a dispatch, which have no file list.
 test("the WebKit job: its inputs on pull requests, never master pushes, always nightly and dispatch", () => {
   const wk = (files: string[]) => classify(files).webkit;
-  for (const f of ["src/compile.ts", "src/runtime/object.ts", "src/runtime/js-engine.ts", "lib/_sage_padic_lseries.py", "lib/_capacity.py", "lib/_limits.py", "lib/fractions.py", "lib/sage_all.py", "lib/sagebrush/progress.py", "lib/json/__init__.py", "wasm/sagebrush-engine.wasm", "web/worker.ts", "web/build.ts", "web/lib-lazy.ts", "web/lib-chunks.mts", "web/runner/index.html", "web/test-kedlaya-worker.mjs", "web/test-port.mjs", "test/kedlaya.test.ts", "scripts/build-cli.mjs", "scripts/ci-paths.mjs", "package.json", "pnpm-lock.yaml", "tsconfig.json", ".github/workflows/ci.yml", "an/unknown/path.txt"])
+  for (const f of ["src/compile.ts", "src/runtime/object.ts", "src/runtime/js-engine.ts", "lib/_sage_padic_lseries.py", "lib/_capacity.py", "lib/_limits.py", "lib/fractions.py", "lib/sage_all.py", "lib/sagebrush/progress.py", "lib/json/__init__.py", "wasm/sagebrush-engine.wasm", "web/worker.ts", "web/build.ts", "web/lib-lazy.ts", "web/lib-chunks.mts", "web/runner/index.html", "web/test-kedlaya-worker.mjs", "web/test-port.mjs", "test/kedlaya.test.ts", "scripts/build-cli.mjs", "scripts/ci-paths.mjs", "package.json", "pnpm-lock.yaml", "tsconfig.json", ".github/workflows/ci.yml", "web/shell/panel.ts", "web/shell/panel.css", "web/shell/test-panel-pages-copy.mjs", "an/unknown/path.txt"])
     assert.equal(wk([f]), "true", f);
-  for (const f of ["README.md", "design/runner.md", "web/board/test-merge.mjs", "engine/classgroup/src/api.rs", "app/src/main.ts", "sage-tests/test_numberfield.sage", ".github/workflows/optional.yml"])
+  for (const f of ["README.md", "design/runner.md", "web/board/test-merge.mjs", "web/shell/panel-render.ts", "web/shell/test-panel-page.mjs", "engine/classgroup/src/api.rs", "app/src/main.ts", "sage-tests/test_numberfield.sage", ".github/workflows/optional.yml"])
     assert.equal(wk([f]), "false", f);
   const run = (event: string, ref: string, files: string) => {
     const list = join(dir, "files.txt");

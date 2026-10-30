@@ -28,6 +28,14 @@ export async function attachComments(...a: Parameters<typeof import("./comments"
 // (a document's live comments in this page: comments-doc.ts, a chunk of its own, /sagebrush-latex-comments-doc.js)
 const docCommentsUrl = new URL("sagebrush-latex-comments-doc.js", import.meta.url).href;
 const loadDocComments = (): Promise<typeof import("./comments-doc")> => import(docCommentsUrl);
+// (an agent on this computer, paired with the page: agent.ts, a chunk of its own, /sagebrush-latex-agent.js; mounted
+// once per page, as the editor switches files in place)
+const agentUrl = new URL("sagebrush-latex-agent.js", import.meta.url).href;
+// (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
+// module's result for its URL; each caller says the failure)
+let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;
+const pairAgent = (ws: Workspace) => (agentPairing ??= (import(agentTries++ ? `${agentUrl}?try=${agentTries}` : agentUrl) as Promise<typeof import("./agent")>).then((m) => m.mountAgentPairing(ws as any)))
+  .catch((e) => { agentPairing = null; throw e; });
 
 export { PATCH_BUDGET, FOLLOW_KEY } from "./editor";
 // the source's font size (px) and the preview's zoom (%): their ranges, defaults and keys in localStorage
@@ -187,7 +195,15 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   };
   // Comments (comments-doc.ts, in the comments' chunk: fetched when this file has a comments file, or on first use)
   const cmBtn = el("button", "tex-comments", "Comments");
-  head.append(back, newBtn, title, dirty, save, toggle, cmBtn, status, tools);
+  // Agent: an agent on this computer (Claude Code, Codex, … with sagebrush-mcp) connected to this page, to read and
+  // answer the comments and edit the .tex, under the person's grant
+  const agentBtn = el("button", "tex-agent", "Agent"); agentBtn.title = "Connect an agent on this computer";
+  const agentFailed = () => { status.textContent = "Couldn't load the agent connection. Check the network, then click Agent to try again."; };
+  agentBtn.onclick = () => void pairAgent(host.ws).then((p) => p.connect(), agentFailed);
+  head.append(back, newBtn, title, dirty, save, toggle, cmBtn, agentBtn, status, tools);
+  // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
+  if (new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
+  else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
   const main = el("div", "tex-main");
   const left = el("div", "tex-left"), right = el("div", "tex-right");
   const preview = el("div", "page tex-preview");
