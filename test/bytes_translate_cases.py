@@ -58,3 +58,12 @@ t(lambda: bytes.maketrans(b"a", b"b", b"c"))
 t(lambda: bytes.maketrans(frm=b"a", to=b"b"))
 t(lambda: bytearray.maketrans(frm=b"a", to=b"b"))
 t(lambda: bytes.maketrans(memoryview(b"ab")[::2], b"x"))
+
+# the argument count before the keywords' names (astra's PR354 finding)
+for recv in (b"a", bytearray(b"a")):
+    t(lambda: recv.translate(None, b"", bogus=1))
+    t(lambda: recv.translate(None, b"", b"", bogus=1))
+    t(lambda: recv.translate(None, bogus=1))
+    t(lambda: recv.translate(None, b"", delete=b""))
+    t(lambda: recv.translate(bogus=1))
+    t(lambda: recv.translate(None, delete=b"a", bogus=1))
