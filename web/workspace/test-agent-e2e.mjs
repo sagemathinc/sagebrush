@@ -8,6 +8,7 @@
 //   - an agent's changes are credited to agent:<name> in the workspace's log;
 //   - Revoke cuts the agent off at once, and the grant is forgotten.
 //   CHROME=google-chrome bun web/workspace/test-agent-e2e.mjs
+import net from "node:net";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -123,6 +124,16 @@ try {
   await click(".sbag-box button.primary");
   ok(await until(`/refused/.test(document.querySelector(".sbag-box .err")?.textContent ?? "")`), "a wrong code: the refusal is shown");
   ok((await drive({ op: "status" })).ok.paired === false, "a wrong code: the server isn't paired");
+
+  // nothing listening on the port: the connection fails, and the dialog says what Chrome asks (its one-time permission
+  // for reaching programs on this computer) and how to undo a block
+  const closed = await new Promise((r) => { const sv = net.createServer(); sv.listen(0, "127.0.0.1", () => { const p = sv.address().port; sv.close(() => r(p)); }); });
+  ok(await open(`?pair=${CODE}&port=${closed}`), "a link to a port nothing listens on");
+  await click(".sbag-box button.primary");
+  ok(await until(`/connection failed/.test(document.querySelector(".sbag-box .err")?.textContent ?? "")`), "a failed connection is said in the dialog");
+  const failText = await ev(`document.querySelector(".sbag-box .err").textContent`);
+  ok(/access apps on this device/.test(failText) && /Click Allow/.test(failText) && /Site settings/.test(failText) && !/Safari/.test(failText) && /^the connection failed/.test(failText), `in Chrome, it says to Allow its prompt and how to undo a block (${failText.slice(0, 60)}…)`);
+  ok((await drive({ op: "status" })).ok.paired === false, "the code is still unused after the failed connection");
 
   // the right code, through the dialog, then the grant: /A, read and write, until the page closes
   ok(await open(`?pair=${CODE}&port=${PORT}`), "the right code's link");
