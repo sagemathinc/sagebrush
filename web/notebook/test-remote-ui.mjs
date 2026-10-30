@@ -182,26 +182,37 @@ export async function runUiTests(check) {
     const deferred = () => { let resolve, reject; const p = new Promise((a, b) => { resolve = a; reject = b; }); return { p, resolve, reject }; };
     // A page as index.html's: the notebook shown, the picker, the status line and the kernel installed.
     const world = () => {
-      const w = { id: "A", pick: "gpu", statuses: [], installs: [], sheets: [], starts: [], closed: [] };
+      const w = { id: "A", pick: "gpu", statuses: [], installs: [], sheets: [], starts: [], closed: [], acts: [], localSwitches: 0, locals: [] };
       w.page = {
         currentId: () => w.id,
         picked: () => w.pick,
         pickLocal: () => { w.pick = "local"; },
         status: (t) => w.statuses.push(t),
         reactive: () => true,
-        makeLocal: () => ({}),
+        makeLocal: () => { const l = { closed: false, close() { l.closed = true; } }; w.locals.push(l); return l; },
         setKernel: (k) => w.installs.push(k),
+        actions: (list) => w.acts.push(list),
+        switchLocal: () => { w.localSwitches++; w.leave(); },
       };
       // (each sheet and each bind is held until the test settles it; cancelSheet settles the open sheet with null, as closeSheet does)
       w.deps = {
         sheet: () => { const d = deferred(); w.sheets.push(d); return d.p; },
         cancelSheet: () => { for (const d of w.sheets) d.resolve(null); },
+        // (a start resolves with {failed} when the test says so; then its retry() is held until the test settles it)
         start: (o) => {
           const d = deferred();
-          const r = { kernel: { tag: `k${w.starts.length + 1}`, notebook: o.notebook }, onStatus: o.onStatus, close() { w.closed.push(r.kernel.tag); } };
+          const listeners = [];
+          const r = {
+            kernel: { tag: `k${w.starts.length + 1}`, notebook: o.notebook, on: (ev, f) => { if (ev === "lifecycle") listeners.push(f); return () => {}; } },
+            onStatus: o.onStatus, failed: null, retries: [],
+            retry: () => { const rd = deferred(); r.retries.push(rd); return rd.p; },
+            move: () => { for (const f of listeners) f({ phase: "ready" }, { phase: "moved" }); },
+            close() { w.closed.push(r.kernel.tag); },
+          };
           w.starts.push({ d, r, o });
-          return d.p.then(() => r);
+          return d.p.then((how) => { if (how?.failed) r.failed = how.failed; return r; });
         },
+        unbound: (id, why) => ({ kernel: { tag: `u${w.installs.length + 1}`, notebook: id }, failed: why, retry: null, close() { w.closed.push("unbound"); } }),
       };
       w.sw = remoteSwitch(w.page, w.deps);
       // (index.html's leave: the switch's, and the picker back to This browser)
@@ -313,7 +324,10 @@ export async function runUiTests(check) {
       w.sheets[1].resolve({ cap: 10 });
       await flush();
       w.starts[1].d.reject(new Error("the gateway said no"));
-      c((await fresh) === null && w.pick === "local" && /the gateway said no/.test(w.statuses.at(-1) ?? ""), "switch: the current attempt's failure puts the picker back and says why");
+      const rf = await fresh;
+      c(rf?.failed === "the gateway said no" && w.pick === "gpu" && w.installs.at(-1) === rf.kernel && /couldn't connect \(the gateway said no\)/.test(w.statuses.at(-1) ?? ""),
+        "switch: the current attempt's failure to make the kernel: installed unbound, the picker stays on Remote compute, and the status says why");
+      c(w.acts.at(-1)?.map((a) => a.label).join() === "Retry,Switch to browser" && w.locals[1].closed, "switch: and it offers Retry and Switch to browser; the preview interpreter made for it is closed");
     }
     // 7h. the real sheet: a newer sheet or closeSheet settles the older one as cancelled (no DOM needed beyond a stub)
     {
@@ -335,6 +349,101 @@ export async function runUiTests(check) {
       c((await p1) === null, "sheet: a newer sheet settles the older one as cancelled");
       closeSheet();
       c((await p2) === null, "sheet: closeSheet settles the open one as cancelled");
+    }
+    // (a connect whose sheet is answered and whose start resolves as told: `how` {failed} or nothing)
+    const connected = async (w, id = "A", how = undefined) => {
+      const done = w.sw.connect(id);
+      await flush();
+      w.sheets.at(-1).resolve({ cap: 10 });
+      await flush();
+      w.starts.at(-1).d.resolve(how);
+      return done;
+    };
+    const labels = (w) => (w.acts.at(-1) ?? []).map((a) => `${a.label}${a.disabled ? " (off)" : ""}`).join();
+    const act = (w, label, list = w.acts.at(-1)) => list.find((a) => a.label.startsWith(label));
+    // 7i. a bind that fails: installed unbound, the picker stays, Retry and Switch offered; Retry binds; then the actions go
+    {
+      const w = world();
+      const r = await connected(w, "A", { failed: "the gateway is unavailable" });
+      c(r.failed && w.installs.at(-1) === r.kernel && w.pick === "gpu" && labels(w) === "Retry,Switch to browser" && /couldn't connect/.test(w.statuses.at(-1)),
+        "switch: a failed bind: installed unbound, the picker stays, Retry and Switch to browser offered");
+      c(act(w, "Retry").run() === true && labels(w) === "Retry (off),Switch to browser (off)" && r.retries.length === 1, "switch: Retry is taken once; the offer is disabled while it is pending");
+      r.retries[0].resolve(true);
+      await flush();
+      c(w.acts.at(-1).length === 0 && w.installs.length === 1, "switch: Retry binds the same kernel; the actions go");
+    }
+    // 7j. RCPLAN-A1: an old action invoked after a newer attempt, a notebook change, or a newer offer does nothing
+    for (const label of ["Retry", "Switch to browser"]) {
+      for (const how of ["newer attempt", "notebook change", "newer offer"]) {
+        const w = world();
+        const r1 = await connected(w, "A", { failed: "down" });
+        const old = act(w, label);
+        const startsBefore = w.starts.length;
+        let r2 = null;
+        if (how === "newer attempt") r2 = await connected(w, "A");
+        else if (how === "notebook change") w.id = "B";
+        else {
+          act(w, "Retry").run(); // (a Retry, which fails and offers again: a newer offer)
+          r1.retries.at(-1).resolve(false);
+          await flush();
+        }
+        const snap = { statuses: w.statuses.length, acts: w.acts.length, closed: w.closed.length, installs: w.installs.length, retries: r1.retries.length, switches: w.localSwitches, starts: w.starts.length };
+        const ran = old.run();
+        await flush();
+        const same = ran === false && w.statuses.length === snap.statuses && w.acts.length === snap.acts && w.closed.length === snap.closed && w.installs.length === snap.installs
+          && r1.retries.length === snap.retries && w.localSwitches === snap.switches && w.starts.length === snap.starts;
+        c(same && (!r2 || (w.installs.at(-1) === r2.kernel && w.sw.installed()?.r === r2)) && startsBefore <= w.starts.length,
+          `switch: an old ${label} after a ${how}: no bind, no close, no switch, no status or action change${r2 ? "; the newer kernel stays installed" : ""}`);
+      }
+    }
+    // 7k. RCPLAN-A1: Retry activated twice while the first is held: one retry; Reconnect twice: one bind
+    {
+      const w = world();
+      const r = await connected(w, "A", { failed: "down" });
+      const retry = act(w, "Retry");
+      const first = retry.run(), second = retry.run(), again = act(w, "Retry").run();
+      c(first === true && second === false && again === false && r.retries.length === 1, "switch: Retry activated three times while held: exactly one retry");
+    }
+    {
+      const w = world();
+      const r = await connected(w, "A");
+      r.move(); // (another tab took this notebook's kernel)
+      c(labels(w) === "Reconnect (a fresh kernel: its variables are lost),Switch to browser", "switch: a kernel taken by another tab offers Reconnect (saying the kernel will be fresh) and Switch to browser");
+      const rc = act(w, "Reconnect");
+      const startsBefore = w.starts.length, sheetsBefore = w.sheets.length;
+      c(rc.run() === true && rc.run() === false, "switch: Reconnect is taken once");
+      await flush();
+      c(w.starts.length === startsBefore + 1 && w.sheets.length === sheetsBefore && w.closed.includes(r.kernel.tag), "switch: Reconnect activated twice: exactly one bind, without the sheet; the old kernel closed");
+      w.starts.at(-1).d.resolve();
+      await flush();
+      c(w.installs.at(-1) === w.starts.at(-1).r.kernel && /a fresh kernel: earlier variables are gone/.test(w.statuses.at(-1)), "switch: Reconnect installs a fresh kernel and says its variables are gone");
+    }
+    // 7l. Reconnect without the sheet only for a notebook connected by the sheet in this page
+    {
+      const w = world();
+      const done = w.sw.connect("Z", { again: true });
+      await flush();
+      c(w.sheets.length === 1 && w.starts.length === 0, "switch: again without a Connect in this page: the sheet is asked");
+      w.sheets[0].resolve(null);
+      c((await done) === null && w.pick === "local", "switch: and Cancel there connects nothing");
+    }
+    // 7m. Switch to browser: the page's own choice of This browser, after the owner check
+    {
+      const w = world();
+      await connected(w, "A", { failed: "down" });
+      c(act(w, "Switch").run() === true && w.localSwitches === 1 && w.pick === "local" && !w.sw.active(), "switch: Switch to browser is the page's own choice of This browser");
+    }
+    // 7n. the Stop guard (stop-guard.js): armed on the actual change to Stop, kept on repeats, cleared on settling
+    {
+      const { armStop, disarmStop, stopIgnored, STOP_GUARD_MS } = await import("./stop-guard.js");
+      const cell = { runb: { textContent: "▶" }, stopArmedAt: null };
+      armStop(cell, 1000);
+      armStop(cell, 1300); // (a repeated queued or running update: not re-armed)
+      c(cell.stopArmedAt === 1000 && cell.runb.textContent === "■", "stop guard: armed on the change to Stop, not re-armed by a repeated update");
+      c(STOP_GUARD_MS === 400 && stopIgnored(1000, 1399, 1) && !stopIgnored(1000, 1401, 1), "stop guard: a click at 399 ms is ignored, at 401 ms it stops");
+      c(stopIgnored(1000, 5000, 2) && !stopIgnored(1000, 5000, 0) && !stopIgnored(null, 0, 1), "stop guard: the second click of a double click is ignored; a keyboard activation or an unarmed button is not");
+      disarmStop(cell);
+      c(cell.stopArmedAt === null && cell.runb.textContent === "▶", "stop guard: settling clears it");
     }
   }
   // 8. the simulated network (&latency, &jitter, &loss)

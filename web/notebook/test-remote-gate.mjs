@@ -862,5 +862,20 @@ export async function runGateTests(check) {
     check(p.runPosts().length === 5000 && lastChunk.every((id) => p.results.get(id)?.notRun === "skip"), `the chunk past 5,000 live attempts: no POST, not run (${p.runPosts().length})`);
   });
 
+  await control("a kernel that isn't ready: a Run sends nothing, spends its consent, approves nothing, and says why; no replay", async () => {
+    const p = await page([["a", "x = 1"], ["b", "y = x + 1"]]);
+    const binding = p.kernel.binding;
+    p.kernel.setLc({ phase: "idle", binding: null }); // (as a preview whose connect failed)
+    p.kernel.notReadyNote = "\nNot run: remote compute isn't connected.\n";
+    const cap = p.gate.capture(["a"]);
+    await p.kernel.reactive.run(["a"], { consent: cap });
+    check(p.runPosts().length === 0 && p.a.consentStateOf(cap) === "void" && !p.a.record("a"), "not ready: no POST, the consent spent (void), nothing approved or recorded");
+    check(p.results.get("a")?.notRun === "skip" && p.results.get("a")?.note === p.kernel.notReadyNote, "not ready: the cell is asked through the page and told the kernel's own note");
+    p.kernel.setLc({ phase: "ready", binding }); // (the connect retried and bound)
+    await new Promise((r) => setTimeout(r, 20));
+    check(p.runPosts().length === 0, "bound again: nothing asked before is replayed");
+    await p.gesture(["a"]);
+    check(p.sentCodes().join("|") === "x = 1", "and a new Run, with its own consent, is sent once");
+  });
   return n;
 }
