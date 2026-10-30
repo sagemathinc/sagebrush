@@ -18,6 +18,13 @@ a closed grammar, fixture-tested (test-ios-judge.sh):
         must parse as exactly GENERATED (the committed one) with EXTRA's keys
         set.  Any other change under gen/apple, or any other difference,
         fails.  (It may also be unchanged.)
+    python3 -I app/selftest/ios-judge.py bundle PLIST EXTRA
+        PLIST is the BUILT app's Info.plist (what the app will run with):
+        every key of EXTRA (Info.ios.plist) must be in it with exactly
+        EXTRA's value (typed, nested), and it must not declare
+        ITSAppUsesNonExemptEncryption (William's answer at the first upload,
+        not the simulator build's).
+Values are compared with their types (a boolean true is not the integer 1).
 
 Exit 2: unreadable or malformed input.
 """
@@ -53,6 +60,18 @@ def load_plist(path):
     return d
 
 
+def same(a, b):
+    """Equal with the same types all the way down (plistlib gives True and 1
+    as bool and int, which == alone does not tell apart)."""
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        return a.keys() == b.keys() and all(same(a[k], b[k]) for k in a)
+    if isinstance(a, list):
+        return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
+    return a == b
+
+
 def udid(text):
     t = text.strip()
     if not UDID.fullmatch(t):
@@ -61,17 +80,24 @@ def udid(text):
 
 
 def codesign(path):
-    lines = read(path).splitlines()
+    """Closed alternatives: (a) unsigned: one line, "<path>: code object is
+    not signed at all", and nothing else; (b) ad hoc: "Signature=adhoc" and
+    "TeamIdentifier=not set" each exactly once, no "Authority=" line and no
+    "not signed" line.  Anything else, including a mix, fails."""
+    lines = [l for l in read(path).splitlines() if l.strip()]
     if not lines:
         fail(2, "empty codesign output")
-    if any("code object is not signed at all" in l for l in lines):
-        print("ok: not signed")
-        return
+    unsigned = [l for l in lines if l.endswith(": code object is not signed at all")]
+    if unsigned:
+        if len(lines) == 1:
+            print("ok: not signed")
+            return
+        fail(1, f"'not signed' together with {len(lines) - 1} other lines (contradictory)")
     authority = [l for l in lines if l.startswith("Authority=")]
-    team = [l.split("=", 1)[1] for l in lines if l.startswith("TeamIdentifier=")]
-    adhoc = any(l.strip() == "Signature=adhoc" for l in lines)
-    if authority or any(t != "not set" for t in team) or not adhoc:
-        fail(1, f"signed with an identity (adhoc={adhoc}, team={team}, authority={authority})")
+    sig = [l for l in lines if l.startswith("Signature=")]
+    team = [l for l in lines if l.startswith("TeamIdentifier=")]
+    if authority or sig != ["Signature=adhoc"] or team != ["TeamIdentifier=not set"]:
+        fail(1, f"not an ad hoc signature without a team (signature={sig}, team={team}, authority={authority})")
     print("ok: ad hoc signature, no team, no authority")
 
 
@@ -96,13 +122,23 @@ def tree(status_path, generated, built, extra):
     g, b, e = load_plist(generated), load_plist(built), load_plist(extra)
     want = dict(g)
     want.update(e)
-    if b == g and not changed:
+    if same(b, g) and not changed:
         print("ok: gen/apple unchanged by the build")
         return
-    if b != want:
-        diffs = sorted(k for k in set(want) | set(b) if want.get(k) != b.get(k))
+    if not same(b, want):
+        diffs = sorted(k for k in set(want) | set(b) if k not in want or k not in b or not same(want[k], b[k]))
         fail(1, f"Info.plist after the build is not the generated one plus Info.ios.plist's keys; keys differing: {diffs}")
     print(f"ok: the only change is Info.plist = generated + Info.ios.plist ({sorted(e)})")
+
+
+def bundle(plist, extra):
+    b, e = load_plist(plist), load_plist(extra)
+    bad = [k for k in e if k not in b or not same(b[k], e[k])]
+    if bad:
+        fail(1, f"the built app's Info.plist lacks Info.ios.plist's {bad} (or has other values)")
+    if "ITSAppUsesNonExemptEncryption" in b:
+        fail(1, "the built app's Info.plist declares ITSAppUsesNonExemptEncryption")
+    print(f"ok: the built app's Info.plist has {sorted(e)} as in Info.ios.plist, and no encryption declaration")
 
 
 def main(argv):
@@ -114,8 +150,10 @@ def main(argv):
         running(argv[1], argv[2])
     elif len(argv) == 5 and argv[0] == "tree":
         tree(*argv[1:])
+    elif len(argv) == 3 and argv[0] == "bundle":
+        bundle(argv[1], argv[2])
     else:
-        print("usage: ios-judge.py udid TEXT | codesign FILE | running FILE BUNDLE_ID | tree STATUS GENERATED BUILT EXTRA", file=sys.stderr)
+        print("usage: ios-judge.py udid TEXT | codesign FILE | running FILE BUNDLE_ID | tree STATUS GENERATED BUILT EXTRA | bundle PLIST EXTRA", file=sys.stderr)
         sys.exit(2)
 
 

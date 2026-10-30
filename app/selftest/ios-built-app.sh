@@ -7,8 +7,12 @@
 #    library Xcode linked was built for this configuration, not the other
 #    (gen/apple/Externals/<arch>/<debug|release>/libapp.a newer than the
 #    build's start): the two independent signs of which build this is;
-# 3. it is unsigned: no embedded.mobileprovision, and codesign shows no team
-#    or certificate (ios-judge.py codesign).
+# 3. the built app's own Info.plist has Info.ios.plist's settings exactly
+#    (typed, nested) and no encryption declaration (ios-judge.py bundle):
+#    what the app runs with, not only the source;
+# 4. it is unsigned: no embedded.mobileprovision, and codesign shows either
+#    "not signed at all" alone or an ad hoc signature without a team or
+#    certificate (ios-judge.py codesign).
 # Writes the .app's path to OUT.
 #   bash app/selftest/ios-built-app.sh debug|release <start stamp file> <out>
 set -euo pipefail
@@ -44,7 +48,10 @@ grep -q -- "/$MODE/libapp.a$" "$T/libs.txt" || fail "no $MODE libapp.a was built
 if grep -q -- "/$OTHER/libapp.a$" "$T/libs.txt"; then fail "a $OTHER libapp.a was built by this $MODE build"; fi
 echo "ok: the $MODE simulator app: $APP"
 
-# 3. unsigned
+# 3. the built app's Info.plist
+python3 -I "$HERE/ios-judge.py" bundle "$APP/Info.plist" app/src-tauri/Info.ios.plist || fail "the built app's Info.plist (above)"
+
+# 4. unsigned
 [ ! -e "$APP/embedded.mobileprovision" ] || fail "the app has an embedded.mobileprovision"
 codesign -dv "$APP" > "$T/codesign.txt" 2>&1 || true
 cat "$T/codesign.txt"

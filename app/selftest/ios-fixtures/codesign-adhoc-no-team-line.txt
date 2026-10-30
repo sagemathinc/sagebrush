@@ -1,0 +1,4 @@
+Executable=/x/Sagebrush.app/Sagebrush
+Identifier=space.sagebrush.notebook
+CodeDirectory v=20400 size=81329 flags=0x2(adhoc) hashes=2530+7 location=embedded
+Signature=adhoc
