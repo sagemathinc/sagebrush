@@ -253,6 +253,12 @@
   html.phone .sbnb .cell { padding-right: 2px; }
   html.phone .sbnb .cell .runb { width: 34px; height: 34px; right: 3px; font-size: 13px; }
   html.phone .sbnb .ed textarea, html.phone .sbnb .ed pre { font-size: 16px; padding: 7px 8px; }
+  /* (the cell's toolbar: on its own row above the active cell's editor, not floating over the line above) */
+  html.phone .sbnb .cell .gutter { grid-row: 1 / span 2; }
+  html.phone .sbnb .cell .body { grid-column: 2; grid-row: 2; }
+  html.phone .sbnb .cell .head { display: none; position: static; grid-column: 2; grid-row: 1; justify-self: end; margin: 0 0 4px; flex-wrap: wrap; max-width: 100%; }
+  html.phone .sbnb .cell.active .head { display: flex; }
+  html.phone .sbnb .cell .head button, html.phone .sbnb .cell .head select { padding: 4px 9px; font-size: 14px; }
   #printhead { display: none; }
   /* File > Print: the notebook alone, light, with its prompts; code without the editor's textarea */
   @media print {
