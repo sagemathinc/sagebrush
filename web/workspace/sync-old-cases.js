@@ -322,6 +322,33 @@ async function old9() {
   check(!d2.old && isClean(v) && !dbs2.includes(HIST.board), `OLD9: no board history database: clean (${J(d2)}): ${brief(v)}`);
 }
 
+/** The schema (astra3's note, @sagebrush's ruling): a history database that exists without the history store, or with
+ * one keyed otherwise, reads as old (fail closed), in each database; an empty one made as stores.js makes it, clean. */
+async function schema() {
+  const make = (name, store, keyPath) => new Promise((ok, no) => {
+    const r = indexedDB.open(name, 1);
+    r.onupgradeneeded = () => { if (store) r.result.createObjectStore(store, keyPath ? { keyPath } : undefined); };
+    r.onsuccess = () => { r.result.close(); ok(); };
+    r.onerror = () => no(r.error);
+  });
+  for (const [which, name] of Object.entries(HIST)) {
+    for (const [what, store, keyPath] of [["no store at all", null], ["another store only", "other"], ["history keyed otherwise", "history", "id"]]) {
+      await dropHistory();
+      const w = await fresh();
+      await dropHistory();
+      await make(name, store, keyPath);
+      const d = await W.detectOldSync(w), v = await shown(w);
+      check(d.old && /schema:/.test(d.why) && isOld(v), `schema ${which} ${what}: old (${J(d)}): ${brief(v)}`);
+    }
+    await dropHistory();
+    const w = await fresh();
+    await dropHistory();
+    await make(name, "history", ["nb", "time"]);
+    const d = await W.detectOldSync(w);
+    check(!d.old, `schema ${which}: as stores.js makes it, empty: clean (${J(d)})`);
+  }
+}
+
 /** OLD10: the marker's edges.  Malformed markers; a failed lease transaction; a stale one; an enable that committed and
  * failed after; a refused enable writes neither; the marker with old rows (the accepted risk) pinned as not flagged. */
 async function old10() {
@@ -495,7 +522,7 @@ async function old8() {
   }
 }
 
-const CASES = { union, old1, old2, asked, old3, old4, old5, old6, old7, old8, old9, old10, large };
+const CASES = { union, old1, old2, asked, old3, old4, old5, old6, old7, old8, old9, schema, old10, large };
 export async function run(only = "") {
   const pick = only ? only.split(",").filter(Boolean) : Object.keys(CASES);
   for (const name of pick) {

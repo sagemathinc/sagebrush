@@ -90,8 +90,12 @@ async function historySignal(name: string): Promise<string | null> {
   const db = await openAsIs(name);
   if (!db) return null;
   try {
-    if (!db.objectStoreNames.contains("history")) return null;
+    // (a database that exists has the shape stores.js makes it with: one store, "history", keyed [nb, time]; any other
+    // shape isn't one a build wrote, so it isn't read as clean (fail closed, as a malformed marker is): astra3's note,
+    // @sagebrush's ruling)
+    if (!db.objectStoreNames.contains("history")) return "schema: no history store";
     const st = db.transaction("history", "readonly").objectStore("history");
+    if (JSON.stringify(st.keyPath) !== JSON.stringify(["nb", "time"])) return "schema: history keyed " + JSON.stringify(st.keyPath);
     const probe = async (nb: string, prefix: string) => ((await req(st.count(IDBKeyRange.bound([nb, prefix], [nb, prefix + "￿"])))) as number) > 0;
     return await new Promise<string | null>((ok, no) => {
       const c = st.openKeyCursor();
