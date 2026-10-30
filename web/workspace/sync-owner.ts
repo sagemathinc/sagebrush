@@ -40,7 +40,7 @@ export function startSync(w: Workspace, opts: ClientOptions = {}): SyncClient {
 }
 
 /** What the foot shows: the holder's snapshot, or this page's own client's status. */
-export type Snapshot = { state: SyncStatus["state"]; waiting?: number; reason?: string; lastSynced?: number; resumesAt?: number; full?: boolean; limit?: { limit_bytes: number | null; used_bytes: number } };
+export type Snapshot = { state: SyncStatus["state"]; waiting?: number; reason?: string; used?: boolean; lastSynced?: number; resumesAt?: number; full?: boolean; limit?: { limit_bytes: number | null; used_bytes: number } };
 export type StatusMsg = { t: "status"; ns: string; epoch: number; gen: number; rev: number; snapshot: Snapshot };
 type HolderMsg = { t: "holder"; ns: string; epoch: number; gen: number };
 type AskMsg = { t: "status?"; ns: string; epoch: number };
@@ -199,6 +199,16 @@ export class SyncOwner {
       }, no);
     });
   }
+  /** Sync off here: whether it was used here (turned off, its lease kept), and why, for the sidebar's line. */
+  private async offView(): Promise<Snapshot> {
+    const cur = await new Promise<{ off?: boolean; why?: string } | undefined>((ok) => {
+      const r = this.w.ws.transaction("meta", "readonly").objectStore("meta").get("sync:current");
+      r.onsuccess = () => ok(r.result as { off?: boolean; why?: string } | undefined);
+      r.onerror = () => ok(undefined);
+    }).catch(() => undefined);
+    if (!cur?.off) return { state: "off" };
+    return { state: "off", used: true, ...(cur.why === "deleted" ? { reason: "your synced data was deleted" } : {}) };
+  }
   /** Whether `l` is still the durable lifecycle (the client's fence). */
   private async holds(l: Life): Promise<boolean> {
     if (this.suspended) return false;
@@ -237,7 +247,7 @@ export class SyncOwner {
     this.life = d;
     this.openStatus();
     if (!d || this.suspended) {
-      this.own = { state: "off" };
+      this.own = await this.offView();
       this.changed();
       return;
     }

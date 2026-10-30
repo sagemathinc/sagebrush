@@ -2867,8 +2867,35 @@ async function rowWords() {
   check(W.isElsewhere({ ...nb, remote: true }, here) && !W.isElsewhere({ ...nb, ref: "nb-here", remote: true }, here) && !W.isElsewhere(nb, here), "isElsewhere: another device's whose content isn't here, only");
 }
 
+// (@sagebrush's ruling on the delete-on repro's (2): the Files sidebar's sync line, once sync was used here, is never blank
+// after an off: "Turn off sync here" says "Sync off", "Delete my synced data" says "Sync off: your synced data was
+// deleted"; a device that never turned sync on says nothing.  The owner's view as the sidebar reads it (no session: no
+// client starts))
+async function syncLineOff() {
+  const J = JSON.stringify;
+  const lines = [W.sidebarLine({ state: "off" }), W.sidebarLine({ state: "off", used: true }), W.sidebarLine({ state: "off", used: true, reason: "your synced data was deleted" })];
+  check(J(lines) === J(["", "Sync off", "Sync off: your synced data was deleted"]), "the sidebar's line when off: nothing, never used; \"Sync off\"; and with why: " + J(lines));
+  const w = await fresh();
+  const owner = W.SyncOwner.of(w, { origin: location.origin, fetch: async () => new Response("{}", { status: 401 }) });
+  const line = async () => { await owner.reconcile(); return W.sidebarLine(owner.view().s); };
+  const ns = "a".repeat(32) + ":1:" + w.device;
+  const never = await line();
+  await W.switchTo(w, ns);
+  await W.syncOffIf(w);
+  const offHere = await line();
+  await W.switchTo(w, ns);
+  await W.syncOffIf(w, undefined, "deleted");
+  const deleted = await line();
+  // (on again, then off here: the deletion's words don't stay)
+  await W.switchTo(w, ns);
+  await W.syncOffIf(w);
+  const offAgain = await line();
+  check(never === "" && offHere === "Sync off" && deleted === "Sync off: your synced data was deleted" && offAgain === "Sync off", "the sidebar's sync line: never on, nothing; off here, \"Sync off\"; deleted, said so; on and off again, \"Sync off\": " + J({ never, offHere, deleted, offAgain }));
+  w.close();
+}
+
 export async function run() {
-  for (const t of [rowWords, storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, writeGuard, pathOfFile_, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority, () => historyOrder("clear"), () => historyOrder("drop"), purgeMarks, durabilityLockOrder]) {
+  for (const t of [rowWords, syncLineOff, storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, writeGuard, pathOfFile_, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority, () => historyOrder("clear"), () => historyOrder("drop"), purgeMarks, durabilityLockOrder]) {
     console.log(`test: ${t.name || t}`);
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
