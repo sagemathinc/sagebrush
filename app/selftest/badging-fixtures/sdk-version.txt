@@ -1,0 +1,4 @@
+package: name='com.android.webview' versionCode='812700007' versionName='158.0.8127.0' platformBuildVersionName='17' platformBuildVersionCode='37' compileSdkVersion='37' compileSdkVersionCodename='17'
+sdkVersion:'29'
+targetSdkVersion:'36'
+native-code: 'x86' 'x86_64'
