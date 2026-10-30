@@ -53,8 +53,10 @@ export const CLIENT = {
   inflight: 8,
   /** ops a minute, resends included (under the server's 2,000) */
   opsPerMinute: 1500,
-  /** the retry timers: from `min`, doubling to `max`, ±`jitter` */
-  backoff: { min: 1000, max: 60_000, jitter: 0.2 },
+  /** the retry timers: from `min`, doubling to `max`, ±`jitter`; the connection's own backoff no longer than
+   * `onlineMax` while the browser says it is online (it may be on a network that reaches nothing: no `online` event
+   * comes then, so the wait is shorter; offline, the event ends it: P0 #3) */
+  backoff: { min: 1000, max: 60_000, jitter: 0.2, onlineMax: 15_000 },
   /** hashes in one blobs/check */
   checkItems: 1000,
   /** uploads at once (a secondary cap: the reservation decides, L2) */
@@ -94,7 +96,25 @@ export const realClock: Clock = {
 
 /** The kinds of work with a retry timer each (L3). */
 export type Work = "ops" | "index" | "check" | "upload" | "url" | "fetch" | "enable" | "connect" | "rebuilt";
-type Timer = { at: number; n: number };
+/** A retry timer: when it ends, its step; `server` when the server set it (retry_after), which a network coming back
+ * never cuts short. */
+type Timer = { at: number; n: number; server?: true };
+/** The network as the browser sees it (P0 #3): whether it says it is online, and `f` told when it comes back or the
+ * page is shown again (a laptop waking), returning how to stop. */
+export type NetWatch = { online(): boolean; onBack(f: () => void): () => void };
+/** The browser's: `online`, and `visibilitychange` to visible. */
+export const browserNet: NetWatch = {
+  online: () => globalThis.navigator?.onLine !== false,
+  onBack(f) {
+    const vis = () => { if (globalThis.document?.visibilityState === "visible") f(); };
+    globalThis.addEventListener?.("online", f);
+    globalThis.document?.addEventListener?.("visibilitychange", vis);
+    return () => {
+      globalThis.removeEventListener?.("online", f);
+      globalThis.document?.removeEventListener?.("visibilitychange", vis);
+    };
+  },
+};
 type Paused = { why: "storage_full"; at: number; until?: number; generation: number; state: string };
 /** What the foot shows (step 5). */
 export type SyncStatus = {
@@ -139,6 +159,8 @@ export type ClientOptions = {
   onRelease?: () => void;
   /** (2c-3, DEV's docsync) notebooks' contents on this connection: doc-sync.ts */
   docs?: DocSync;
+  /** (P0 #3) the network's state and its return: the browser's unless given (tests) */
+  net?: NetWatch;
 };
 
 const key = (ns: string, what: string) => `sync:${ns}:${what}`;
@@ -222,6 +244,8 @@ export class SyncClient {
   private closedHere = false;
   private abort = new AbortController();
   private cancels = new Set<() => void>();
+  /** (P0 #3) the waits for the connection's timer: ended early when the network comes back (netBack) */
+  private netWaits = new Set<() => void>();
   /** the wake-ups scheduled, at most one per kind (daybreak3's LIMIT-PR58-1) */
   private wakes = new Map<string, { at: number; cancel: () => void }>();
   private pullBucket: Bucket;
@@ -277,6 +301,8 @@ export class SyncClient {
     };
     if (this.w.closed) return void closed();
     const unclosed = this.w.onClosed(closed);
+    // (the network back, or the page shown again: a connection waiting out its own backoff goes at once, P0 #3)
+    const unnet = (this.opts.net ?? browserNet).onBack(() => void this.netBack());
     this.unwatch = this.w.watch(() => this.kick());
     // (other namespaces' ledgers, queued for deletion, deleted a page at a time while this client runs: task #14)
     void driveObsolete(this.w, (ms) => new Promise<void>((ok) => {
@@ -298,6 +324,7 @@ export class SyncClient {
       }
     } finally {
       unclosed();
+      unnet();
       this.unwatch?.();
       this.unwatch = null;
     }
@@ -1656,16 +1683,48 @@ export class SyncClient {
   }
   private async waitTimer(ns: string, kind: Work) {
     const ms = this.left(ns, kind);
-    if (ms > 0) await this.sleep(ms);
+    if (ms <= 0) return;
+    if (kind !== "connect") return this.sleep(ms);
+    // (the connection's wait: ended by its time, by stop(), or by the network coming back (netBack); whichever ends it
+    // cancels its timer, so a wait woken early leaves nothing pending)
+    await new Promise<void>((ok) => {
+      const done = () => {
+        this.netWaits.delete(done);
+        this.cancels.delete(done);
+        cancel();
+        ok();
+      };
+      const cancel = this.clock.after(ms, done);
+      this.netWaits.add(done);
+      this.cancels.add(done);
+    });
+  }
+  /** (P0 #3) The network is back, or the page shown again: the connection's own wait ended at once (its timer due
+   * now, here and in meta) and woken.  Its step is kept: a try that fails again goes on doubling from where it was,
+   * so a server that is down isn't asked again at 1 s each time a tab is shown (sync-docs' RW-1); a welcome clears it
+   * (timerOk).  A timer the server set (retry_after: 429, 503, cocalc_unreachable) is kept: the server asked for that
+   * wait. */
+  private async netBack() {
+    if (this.stopped) return;
+    const t = this.timers.get("connect");
+    if (!t || t.server || t.at <= this.clock.now()) return;
+    const due = { ...t, at: this.clock.now() };
+    this.timers.set("connect", due);
+    // (written before the wait is woken: the connection about to start reads its timers from meta (loadDurable), and
+    // must find this one, not the wait it replaces)
+    if (this.timerNs !== "-") await this.metaPut(key(this.timerNs, "retry:connect"), due).catch(() => {});
+    for (const done of [...this.netWaits]) done();
   }
   /** `kind` failed: its timer set (retry_after, else the next step of its backoff), persisted; returns when it ends. */
   private async timerFail(ns: string, kind: Work, retryAfter?: number): Promise<number> {
     const prev = ns === this.timerNs ? this.timers.get(kind) : undefined;
     const n = (prev?.n ?? 0) + 1;
-    const { min, max, jitter } = CLIENT.backoff;
-    const base = Math.min(max, min * 2 ** (n - 1));
+    const { min, max, jitter, onlineMax } = CLIENT.backoff;
+    // (the connection's own backoff, while the browser says it is online: no longer than onlineMax, P0 #3)
+    const cap = kind === "connect" && (this.opts.net ?? browserNet).online() ? Math.min(max, onlineMax) : max;
+    const base = Math.min(cap, min * 2 ** (n - 1));
     const ms = retryAfter !== undefined ? retryAfter : Math.round(base * (1 + (this.clock.random() * 2 - 1) * jitter));
-    const t = { at: this.clock.now() + ms, n };
+    const t: Timer = { at: this.clock.now() + ms, n, ...(retryAfter !== undefined ? { server: true as const } : {}) };
     if (ns === this.timerNs) {
       this.timers.set(kind, t);
       if (ns !== "-") await this.metaPut(key(ns, "retry:" + kind), t);

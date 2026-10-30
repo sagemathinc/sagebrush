@@ -619,6 +619,39 @@ if (fromParent) {
 const SESSION = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
 let wsSeq = 0, wsRev = 0; // (the workspace record's revision this page last loaded or wrote)
 let wsWriting: Promise<void> = Promise.resolve(), wsRefused: Error | null = null;
+// (this board can't be written in this tab, as found when it was loaded: its content isn't in this browser yet (a
+// board listed from another device), or its journal couldn't be opened.  Edit isn't offered, so nothing is typed that
+// couldn't be kept, and the page says so, with the way back to the files.  Never, by itself, a reason to keep the
+// page from going elsewhere: that is wsRefused alone, an edit not kept (DEV sync bug #4: a board with no edits kept
+// the person on it))
+let wsBlocked: Error | null = null, wsBlockedWhy = "";
+const blockedSubs = new Set<(s: { allowed: boolean; why?: string }) => void>();
+function blockBoard(e: Error, why: string, bar: string) {
+  wsBlocked = e;
+  wsBlockedWhy = why;
+  for (const f of blockedSubs) f({ allowed: false, why });
+  blockedBar(bar);
+}
+/** The bar a board that can't be written here says so in, with the way back to the files (the Files sidebar). */
+function blockedBar(message: string) {
+  let bar = document.getElementById("sbb-blocked");
+  if (!bar) {
+    bar = Object.assign(document.createElement("div"), { id: "sbb-blocked" });
+    bar.setAttribute("role", "status");
+    bar.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);top:44px;z-index:60;max-width:min(720px,94vw);background:#fff8e1;color:#5d4200;border:1px solid #e0b84a;border-radius:6px;padding:6px 12px;font:14px/1.4 system-ui,sans-serif;display:flex;gap:10px;align-items:center";
+    const text = document.createElement("span");
+    const back = Object.assign(document.createElement("button"), { textContent: "Back to files" });
+    back.onclick = () => {
+      const files = document.querySelector<HTMLButtonElement>('[data-sbb="files"]');
+      if (!files) return location.assign("/");
+      if (files.getAttribute("aria-pressed") !== "true") files.click();
+      document.querySelector<HTMLElement>("#wssidebar .fsearch, #wssidebar")?.focus();
+    };
+    bar.append(text, back);
+    document.body.append(bar);
+  }
+  (bar.firstChild as HTMLElement).textContent = message;
+}
 // (the latest save of each view: a save is passed over only for a later
 // save of the same view; a save of a newer view never makes an older
 // view's save skipped, CORR-105-2)
@@ -639,6 +672,8 @@ let wsEpoch = 0, wsCopy: { epoch: number; ref: string; rev: number } | null = nu
 let wsBridge: { header: string; epoch: number } | null = null;
 /** `bridge`: the original header of the pending copy `d` is (the board journal's load bridge): the save's tag. */
 function wsSave(id: string, d: BoardDoc, bridge?: string) {
+  // (a board that can't be written here: this edit isn't kept, said, and so leaving is held back from now on)
+  if (wsBlocked) { wsRefused = wsBlocked; throw wsBlocked; }
   const w = ws!, refused = wsRefused;
   // (the workspace quarantined, being reset, or reset or upgraded elsewhere: nothing kept, not even the pending
   // copy in localStorage, and said: astra's CORR-2A4-2 on 0eefec71)
@@ -840,12 +875,14 @@ async function journalLoad(id: string, path: string, pend: ReturnType<typeof rea
   try {
     js = await openJournal(id);
   } catch (e) {
-    // (not opened: shown as kept, nothing written; each save says why until a reload opens it)
-    wsRefused = e instanceof Error ? e : new Error(String(e));
+    // (not opened: shown as kept, nothing written, Edit not offered, until a reload opens it; the page can still go
+    // elsewhere, as nothing here is unkept)
+    const err = e instanceof Error ? e : new Error(String(e));
+    const why = `**This board can't be changed in this browser now:** ${String(err.message).slice(0, 200)}. Reload the page to try again, or open something else from your files.`;
+    blockBoard(err, why, "This board can't be changed in this browser now.");
     const rec = await ws!.read(path).catch(() => null);
     wsEpoch++;
     if (rec) wsRev = rec.rev;
-    const why = `**This board can't be saved in this browser now:** ${String(wsRefused.message).slice(0, 200)}. Reload the page to try again.`;
     return rec && isBoard(rec.content) ? { doc: rec.content as BoardDoc, original: null, notice: say(why) } : { doc: blankBoard("python"), original: null, notice: say(why) };
   }
   const settled = js.recovered.doc;
@@ -1054,6 +1091,14 @@ const host: BoardHost = {
         const conv = [takeNotice(), takeConverted(id)].filter(Boolean).join("\n\n");
         if (conv) notice = conv + (notice ? "\n\n" + notice : "");
         const path = await ws.pathOf("board", id);
+        // (listed from another device, its content not here yet (sync brings it): nothing to show or write; said, with
+        // the way back to the files, Edit not offered; nothing here holds the page (DEV sync bug #4))
+        const entry = path ? await ws.stat(path).catch(() => undefined) : undefined;
+        if (path && entry?.remote) {
+          const why = "**This board's content isn't in this browser yet.** It's in your files from another device, and it appears here once sync brings it; until then it can't be shown or changed here.";
+          blockBoard(new Error(`${path}'s content isn't in this browser yet`), why, "This board's content isn't in this browser yet.");
+          return { doc: { ...blankBoard((entry as { mode?: string }).mode ?? "python"), title: splitExt(nameOf(path))[0] }, original: null, notice: why };
+        }
         // (the board journal: its store's load first, then the pending copy ordered against what it settled)
         if (path && journalOn) return journalLoad(id, path, pend, notice);
         if (path) {
@@ -1097,7 +1142,8 @@ const host: BoardHost = {
             dropPending(id, pend.header + "\n");
           } catch (e) {
             console.warn("workspace:", e);
-            if (journalOn) wsRefused = e instanceof Error ? e : new Error(String(e));
+            // (the copy stays in this browser (its pending copy isn't dropped), so nothing is lost by going elsewhere)
+            if (journalOn) blockBoard(e instanceof Error ? e : new Error(String(e)), `**This board can't be changed in this browser now:** ${String((e as Error)?.message ?? e).slice(0, 200)}. Reload the page to try again.`, "This board can't be changed in this browser now.");
           }
           return { doc: pend.doc, original: null };
         }
@@ -1143,7 +1189,11 @@ const host: BoardHost = {
       try { localStorage.removeItem(saveKey); } catch {}
     },
     // (a board of the workspace: its version from elsewhere, when this page's write met it: CORR-AA2-1)
-    ...(local && ws ? { subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { wsSubs.add(f); return () => { wsSubs.delete(f); }; } } : {}),
+    ...(local && ws ? {
+      subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { wsSubs.add(f); return () => { wsSubs.delete(f); }; },
+      // (Edit not offered while the board can't be written here: blockBoard)
+      editing(f: (s: { allowed: boolean; why?: string }) => void) { blockedSubs.add(f); f(wsBlocked ? { allowed: false, why: wsBlockedWhy } : { allowed: true }); return () => { blockedSubs.delete(f); }; },
+    } : {}),
     // (a frame: the host's changes, and whether Edit is offered at all)
     ...(fromParent ? {
       subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { editSubs.add(f); return () => { editSubs.delete(f); }; },
@@ -1351,19 +1401,75 @@ const mounted = mountBoard(document.getElementById("board")!, host);
 // (an agent on this computer, paired with this page: behind ?agents (or a ?pair= link) until it's on for everyone;
 // workspace/agent-ui.ts)
 if (ws && (q.has("agents") || q.has("pair"))) mountAgentPairing(ws, { button: floatingButton() });
-// (the terminal's ps and top, web/shell/presence.ts: this tab's board, by name, path, language and visibility only;
-// on every host, as the terminal is: T358-1)
-answerPresence(async () => {
-  let path: string | undefined, mode: string | undefined;
-  try {
-    if (ws && local) {
-      path = await ws.pathOf("board", source.slice("local:".length));
-      if (path) mode = (await ws.stat(path))?.mode;
-    }
-  } catch {}
-  return [{ tab: TAB, kind: "board" as const, name: document.title.replace(/\s*[\u00b7\u2014-]\s*Sagebrush$/, "") || "board", path, mode,
-    state: document.hidden ? "hidden" : "idle", since: Math.round(performance.timeOrigin), heap: (performance as any).memory?.usedJSHeapSize }];
-});
+// ⋯ ▸ Terminal (plan-bash-shell r8c E5.1, TP-5's follow-up to #326): the notebook page's bottom dock, on the board page
+// too, on every host as the terminal is (T358-1); and the terminal's ps and top (web/shell/presence.ts): this tab's board,
+// by name, path, language and visibility only, and its terminal.  The shell's module and set are the site's, a directory
+// up (this page is /board/).  One ShellHost per page tab, made at the first open, with the person principal.
+{
+  let term: any = null;
+  const here = async () => {
+    let path: string | undefined, mode: string | undefined;
+    try {
+      if (ws && local) {
+        path = await ws.pathOf("board", source.slice("local:".length));
+        if (path) mode = (await ws.stat(path))?.mode;
+      }
+    } catch {}
+    const procs: any[] = [{ tab: TAB, kind: "board" as const, name: document.title.replace(/\s*[\u00b7\u2014-]\s*Sagebrush$/, "") || "board", path, mode,
+      state: document.hidden ? "hidden" : "idle", since: Math.round(performance.timeOrigin), heap: (performance as any).memory?.usedJSHeapSize }];
+    if (term) procs.push({ tab: TAB, kind: "terminal", name: "bash", mode: "bash", state: term.busy ? "running" : "idle", since: term.since });
+    return procs;
+  };
+  answerPresence(here);
+  const termBtn = document.querySelector<HTMLButtonElement>('#board [data-sbb="term"]');
+  if (termBtn && ws) {
+    termBtn.hidden = false;
+    // (the panel gives focus back to its opener, else to the page's ⋯ button, #morebtn, as on the notebook page: TP-7)
+    const more = document.querySelector<HTMLElement>('#board [data-sbb="menubtn"]');
+    if (more && !document.getElementById("morebtn")) more.id = "morebtn";
+    // (a press on the board takes the focus from the dock, so its keys are the board's again: board's B363-1)
+    document.getElementById("board")!.addEventListener("pointerdown", () => {
+      const a = document.activeElement as HTMLElement | null;
+      if (a?.closest(".sb-term")) a.blur();
+    }, true);
+    // (open FILE: a notebook or board in a new tab, as the file browser's open in a new tab does)
+    const open = async (p: string) => {
+      const e = await ws.stat(p);
+      if (!e) throw new Error("No such file or directory");
+      if (e.kind === "folder") throw new Error("Is a directory");
+      if (e.kind !== "notebook" && e.kind !== "board") throw new Error("only a notebook or a board opens from here (a data file opens in the notebook page's preview)");
+      openEntry(e, "tab");
+      return `opened ${p} (a ${e.kind}, in a new tab)`;
+    };
+    const shellSet = async () => {
+      for (const url of ["../shell/preview-set.json", "../pkgset/latest.json"]) {
+        try {
+          const r = await fetch(url, { cache: "no-store", redirect: "error" });
+          if (!r.ok) continue;
+          const j = await r.json();
+          const S = j?.S ?? j?.id ?? (typeof j === "string" ? j : null);
+          if (typeof S === "string" && /^[0-9a-f]{64}$/.test(S)) return S;
+        } catch {}
+      }
+      return null;
+    };
+    termBtn.onclick = async () => {
+      if (!term) {
+        const S = await shellSet();
+        if (!S) return alert("The terminal isn't available on this site: it has no shell package set.");
+        // (the module, a directory up: a variable, so the bundler leaves it to the browser)
+        const mod = "../shell/terminal.js";
+        let openTerminal: any;
+        try { ({ openTerminal } = await import(mod)); } catch (e) { return alert("The terminal didn't load: " + String((e as Error)?.message ?? e)); }
+        if (term) return term.toggle();
+        term = openTerminal({ ws, S, base: "../", open, here, tab: TAB });
+        term.onEnd = () => { term = null; (window as any).__sbTerm = null; };
+        if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) (window as any).__sbTerm = term; // (the tests' handle, on a loopback host only: web/shell/test-panel-page.mjs)
+      }
+      term.toggle();
+    };
+  }
+}
 if (bench) {
   mounted.board.setItems(synthetic(Number(q.get("items") ?? 2000), Number(q.get("strokes") ?? 20000)));
   mounted.board.setCamera({ x: 0, y: 0, z: 1 });

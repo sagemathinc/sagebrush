@@ -19,6 +19,7 @@ import { SyncOwner } from "./sync-owner";
 import { DOC_SYNC_NOTE, docSyncOrigin } from "./doc-sync-switch";
 import { accountHash } from "../sync-protocol/protocol";
 import { CLIENT, type Refusal } from "./sync-client";
+import { listedSummary } from "./sync-view";
 
 export const PANEL = {
   /** the server's delay, clamped to this range */
@@ -284,7 +285,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       const now = await owner.durable();
       if (!current() || !now || now.ns !== life.ns || now.epoch !== life.epoch) return;
       const parts: HTMLElement[] = [];
-      if (listed?.count) parts.push(h("details", {}, h("summary", { textContent: `${listed.count} item${listed.count === 1 ? "" : "s"} sync kept aside` }), ...listed.paths.slice(0, 20).map(([p, why]) => h("div", { textContent: `${p} (${why})` }))));
+      if (listed?.count) parts.push(h("details", {}, h("summary", { textContent: listedSummary(listed) }), ...listed.paths.slice(0, 20).map(([p, why]) => h("div", { textContent: why === "renamed" ? `${p}: renamed: another device has one with this name` : `${p} (${why})` }))));
       // (changes the server refused that nobody has looked at yet: counted in the foot, which points here; opening
       // this list, which shows every one kept (the last 100), marks them looked at, and the count goes)
       const seen = Number.isSafeInteger(seenMark) ? seenMark! : 0;

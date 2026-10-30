@@ -589,9 +589,14 @@ const fnType = builtinType("function", [object], () => raise(T.TypeError, "canno
 for (const a of ["__name__", "__qualname__", "__module__", "__doc__"]) getset(fnType, a, (f) => f[a] ?? null, (f, v) => void (f[a] = v));
 getset(fnType, "__globals__", (f) => {
   if (f.$globals === undefined) raise(T.AttributeError, "'function' object has no attribute '__globals__'");
-  const g = f.$globals[NS_GLOBALS] ?? f.$globals;
-  return g[NS_DICT] ?? globalsDict(g);
+  return globalsOf(f.$globals);
 });
+// The globals dict of code run in namespace `ns` (a function's $globals, a
+// script's $g): a frame's f_globals too, the same object (index.ts)
+export function globalsOf(ns: any): PyDict {
+  const g = ns[NS_GLOBALS] ?? ns;
+  return g[NS_DICT] ?? globalsDict(g);
+}
 // (the builtins' namespace, as CPython 3.10's functions have it: page-order
 // scoping's initialization line reads it, src/rename.ts initLine)
 getset(fnType, "__builtins__", () => getattr(hooks.importModule("builtins"), "__dict__"));
@@ -2984,6 +2989,67 @@ bindClass(PyByteArray, bytearray);
 for (const bt of [bytesType, bytearray]) {
   method(bt, "decode", (b: PyBytes, encoding: any = "utf-8", errors: any = "strict") => decode(b, encoding, errors), sig(["self", "encoding", "errors"]));
   method(bt, "hex", (b: PyBytes, sep: any = undefined, bps: any = undefined) => bytesHex(b.a.subarray(0, b.n), sep, bps));
+  // translate(table, /, delete=b'') as CPython's: table a 256-byte buffer or
+  // None, delete a buffer, each C-contiguous (a strided memoryview is
+  // CPython's BufferError); the result the receiver's base type (an exact
+  // bytes left as it was is itself); CPython's argument messages
+  const contiguous = (x: any): Uint8Array => {
+    if (O.bufferViewOf(x) === undefined && O.bufferOf(x) !== undefined) raise(T.BufferError, "memoryview: underlying buffer is not C-contiguous");
+    return AC.bufferArg(x);
+  };
+  const translate = (b: PyBytes, table: any, del: any) => {
+    const t = table === null ? null : contiguous(table);
+    if (t !== null && t.length !== 256) raise(T.ValueError, "translation table must be 256 characters long");
+    const drop = new Uint8Array(256);
+    if (del !== undefined) for (const v of contiguous(del)) drop[v] = 1;
+    const src = b.a.subarray(0, b.n), out = new Uint8Array(b.n);
+    let n = 0, same = true;
+    for (let i = 0; i < src.length; i++) {
+      const v = src[i];
+      if (drop[v]) {
+        same = false;
+        continue;
+      }
+      const w = t === null ? v : t[v];
+      if (w !== v) same = false;
+      out[n++] = w;
+    }
+    if (same && typeOf(b) === bytesType) return b;
+    return bt === bytearray ? new PyByteArray(out.slice(0, n)) : new PyBytes(out.slice(0, n));
+  };
+  const arity = (k: number) => {
+    if (k === 0) raise(T.TypeError, "translate() takes at least 1 positional argument (0 given)");
+    if (k > 2) raise(T.TypeError, `translate() takes at most 2 arguments (${k} given)`);
+  };
+  const tr: any = (b: PyBytes, ...a: any[]) => (arity(a.length), translate(b, a[0], a[1]));
+  tr.$kw = (pos: any[], names: string[], values: any[]) => {
+    const [b, ...a] = pos;
+    // (as CPython's argument clinic: no positional argument, then too many
+    // arguments in all, then the keywords' names)
+    if (a.length === 0) arity(0);
+    arity(a.length + names.length);
+    let del: any = a[1];
+    for (let i = 0; i < names.length; i++) {
+      if (names[i] !== "delete") raise(T.TypeError, `translate() got an unexpected keyword argument '${names[i]}'`);
+      del = values[i];
+    }
+    return translate(b, a[0], del);
+  };
+  method(bt, "translate", tr);
+  // maketrans(frm, to, /), a static method: the 256-byte table that maps
+  // frm's bytes to to's, a bytes for either type
+  const mk: any = pyfn((...a: any[]) => {
+    if (a.length !== 2) raise(T.TypeError, `maketrans expected 2 arguments, got ${a.length}`);
+    const frm = contiguous(a[0]), to = contiguous(a[1]);
+    if (frm.length !== to.length) raise(T.ValueError, "maketrans arguments must have same length");
+    const out = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) out[i] = i;
+    for (let i = 0; i < frm.length; i++) out[frm[i]] = to[i];
+    return new PyBytes(out);
+  }, "maketrans");
+  mk.__qualname__ = `${bt.$name}.maketrans`;
+  mk.$builtinMethod = true;
+  bt.$dict.set("maketrans", new PyStaticMethod(mk));
   method(bt, "__len__", (b: PyBytes) => b.n);
   method(bt, "__mul__", (b: PyBytes, n: any) => O.repeatBytes(b, O.ssizeCount(n)));
   method(bt, "__rmul__", (b: PyBytes, n: any) => O.repeatBytes(b, O.ssizeCount(n)));

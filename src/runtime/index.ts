@@ -24,6 +24,7 @@ import * as Prog from "./progress";
 import "./raster";
 import * as Cx from "./complex";
 import * as FO from "./file-once";
+import { cIntArg } from "./argconv";
 O.complexHooks.pow = Cx.complexPow;
 
 O.arrayHooks.cls = Arr.PyArray;
@@ -528,14 +529,16 @@ export function delName(ns: any, k: string): void {
 }
 
 // sage: Sage source, which exec and eval compile in Sage mode
+// (mode "frame": a frame's f_code, sys._getframe's, which has no code to run)
 export class CodeObject {
-  constructor(public src: string, public filename: string, public mode: string, public sage = false) {}
+  constructor(public src: string, public filename: string, public mode: string, public sage = false, public name = "<module>") {}
 }
 const codeType = Ty.builtinTypeFor("code", CodeObject, "builtins", () => raise(T.TypeError, "cannot create 'code' objects"));
 Ty.getset(codeType, "co_filename", (c) => c.filename);
-Ty.getset(codeType, "co_name", () => "<module>");
+Ty.getset(codeType, "co_name", (c) => c.name);
 
 function sourceOf(src: any, fn: string): [string, string] {
+  if (src instanceof CodeObject && src.mode === "frame") raise(T.NotImplementedError, `${fn}() of a frame's code object: sys._getframe's frames have no code to run`);
   if (src instanceof CodeObject) return [src.src, src.filename];
   if (src instanceof Obj.PyBytes) return [Ty.decode(src), "<string>"];
   const buf = O.bufferOf(src);
@@ -895,6 +898,11 @@ export interface ScriptInfo {
   filename: string;
   lines: string[]; // Python source lines
   lineMap: number[]; // JS line (1-based) -> Python line
+  // (the namespace this script's one run executes in, its compiled code's $g:
+  // weakly, for sys._getframe's f_globals.  While a frame of the script runs,
+  // its code and its functions' $globals hold it strongly; once none is left
+  // it may be collected, as a dead exec's or cell's namespace should be)
+  globals?: WeakRef<any>;
 }
 export const scripts = new Map<string, ScriptInfo>();
 
@@ -904,6 +912,11 @@ interface Frame {
   name: string;
   text: string;
   fn: string; // which function: its compiled script and position there
+  // (a compiler-made function's kind: "module", "listcomp", "setcomp",
+  // "dictcomp" or "genexpr", from its reserved $-name, src/emit.ts; none for
+  // a def or lambda)
+  kind?: string;
+  info: ScriptInfo;
 }
 
 // The frames an exception was raised through, outermost first, and whether
@@ -951,15 +964,230 @@ function pyFrames(sites: any[]): Frame[] {
     const info = scripts.get(cs.getFileName?.() ?? "") ?? scripts.get(cs.getScriptNameOrSourceURL?.() ?? "");
     if (info === undefined) continue;
     const pyLine = info.lineMap[cs.getLineNumber()] ?? 0;
-    let name = String(cs.getFunctionName() ?? "");
-    name = name.endsWith("$$") ? name.slice(0, -2) : name === "module$$" || name === "" ? "<module>" : name;
-    if (name === "module") name = "<module>";
+    // (a leading $ is the compiler's own function: a module's top level or a
+    // comprehension, never a def, whose name comes from a Python identifier)
+    const raw = String(cs.getFunctionName() ?? "");
+    const kind = raw.startsWith("$") && raw.endsWith("$$") ? raw.slice(1, -2) : undefined;
+    let name = kind !== undefined ? kind : raw.endsWith("$$") ? raw.slice(0, -2) : raw;
+    if (kind === "module" || raw === "") name = "<module>";
     const at = cs.getEnclosingLineNumber?.();
     const fn = at === undefined ? `${info.filename}:${name}` : `${info.filename}:${at}:${cs.getEnclosingColumnNumber?.()}`;
-    frames.push({ file: info.filename, line: pyLine, name, text: (info.lines[pyLine - 1] ?? "").trim(), fn });
+    frames.push({ file: info.filename, line: pyLine, name, text: (info.lines[pyLine - 1] ?? "").trim(), fn, kind, info });
   }
   return frames.reverse();
 }
+
+// ------------------------------------------------------------------ frames
+
+// sys._getframe and sys._getframemodulename: the Python frames on the stack,
+// from a capture made when one is asked for (nothing is recorded per call).
+// Every Python execution (a module's run, exec, eval, a notebook cell) runs
+// inside the runtime's entry marker, ENTRY_NAME in the script ENTRY_FILE
+// (src/compile.ts), which counts the executions running: a capture is
+// complete when it holds every marker, as a cut removes the outermost frames
+// first.  Only V8's call sites are trusted: JavaScriptCore (Bun, Safari) has
+// proper tail calls, under which a frame can vanish from the middle of the
+// stack, which no count can tell.
+export const ENTRY_FILE = "py:$entry"; // (scriptName encodes $: no module's script)
+export const ENTRY_NAME = "$pyEntry$$";
+export const frameState = {
+  entryDepth: 0, // (the executions running: their markers on the stack)
+  v8: undefined as boolean | undefined, // (the engine's probe, once)
+  // (private test hooks: the capture's stack limit, a replacement for its
+  // call sites, and globals taken as collected)
+  captureLimit: Infinity,
+  testSites: undefined as ((sites: any) => any) | undefined,
+  testLostGlobals: false,
+};
+
+// A capture's Python frames, innermost first, and their globals: whether
+// every frame of the stack is among them
+interface Capture {
+  frames: Frame[];
+  globals: (Obj.PyDict | undefined)[];
+  complete: boolean;
+  made: PyFrame[];
+}
+
+// The call sites of the stack here, read by `read` while the capture's own
+// stack limit and site format are in force (both restored after, however
+// `read` ends)
+function withSites<X>(read: (sites: any) => X, hooked: boolean): X {
+  const limit = Error.stackTraceLimit;
+  const prev = (Error as any).prepareStackTrace;
+  Error.stackTraceLimit = frameState.captureLimit;
+  (Error as any).prepareStackTrace = (_: any, cs: any[]) => cs;
+  try {
+    const sites = new Error().stack as any;
+    return read(hooked && frameState.testSites !== undefined ? frameState.testSites(sites) : sites);
+  } finally {
+    Error.stackTraceLimit = limit;
+    (Error as any).prepareStackTrace = prev;
+  }
+}
+const SITE_METHODS = ["getFunctionName", "getFileName", "getScriptNameOrSourceURL", "getLineNumber", "isEval", "isAsync"];
+function isCallSites(sites: any): sites is any[] {
+  return Array.isArray(sites) && sites.every((cs) => cs !== null && typeof cs === "object" && SITE_METHODS.every((k) => typeof cs[k] === "function"));
+}
+
+// Is the stack V8's, every frame in it?  Call sites alone don't say (Bun
+// gives them too): a frame that returns a call must stay on the stack, as it
+// does without proper tail calls
+function engineVerified(): boolean {
+  if (frameState.v8 === undefined) {
+    try {
+      // (strict code, built from text: no bundler or minifier renames it)
+      const probe = new Function("capture", '"use strict"; function $probeInner$$() { const s = capture(); return s; } function $probeOuter$$() { return $probeInner$$(); } return $probeOuter$$();');
+      const names: string[] | null = probe(() => withSites((s) => (isCallSites(s) ? s.map((cs) => String(cs.getFunctionName() ?? "")) : null), false));
+      const inner = names === null ? -1 : names.indexOf("$probeInner$$");
+      frameState.v8 = inner >= 0 && names![inner + 1] === "$probeOuter$$";
+    } catch {
+      frameState.v8 = false;
+    }
+  }
+  return frameState.v8;
+}
+
+// (a site with no script that is still placed: code made by eval or new
+// Function, the runtime's call wrappers (checkArity), which V8 gives the
+// place it was made at; a V8 builtin's, Array.prototype.map's or sort's
+// calling a function back, with no position)
+const isPlacedSite = (cs: any) =>
+  cs.isEval() ? String(cs.getEvalOrigin?.() ?? "") !== "" : cs.getLineNumber() == null && String(cs.getFunctionName() ?? "") !== "";
+
+// The Python frames of the stack, innermost first, as CPython's frames: a
+// list, set or dict comprehension has none (PEP 709).  A site that can't be
+// placed (no script, not made by eval, not a builtin's) ends the known frames, as an await's
+// (an async frame is a continuation, not a caller) between markers does:
+// incomplete.  (Read while the capture is in force: withSites)
+function readFrames(sites: any): Capture {
+  const frames: Frame[] = [];
+  const globals: (Obj.PyDict | undefined)[] = [];
+  let markers = 0;
+  let known = true;
+  for (const cs of sites as any[]) {
+    const file = String(cs.getFileName() ?? "") || String(cs.getScriptNameOrSourceURL() ?? "");
+    const inside = markers < frameState.entryDepth;
+    if (cs.isAsync()) {
+      if (inside) known = false;
+      break;
+    }
+    if (file === ENTRY_FILE && cs.getFunctionName() === ENTRY_NAME) {
+      markers++;
+      continue;
+    }
+    if (file === "" && !isPlacedSite(cs)) {
+      known = false;
+      break;
+    }
+    const [f] = pyFrames([cs]);
+    if (f === undefined || f.kind === "listcomp" || f.kind === "setcomp" || f.kind === "dictcomp") continue;
+    // (an anonymous function of compiled code is the runtime's helper within
+    // the frame that made it, not a frame of its own)
+    if (f.kind === undefined && String(cs.getFunctionName() ?? "") === "") continue;
+    frames.push(f);
+    const ns = frameState.testLostGlobals ? undefined : f.info.globals?.deref();
+    globals.push(ns === undefined ? undefined : Ty.globalsOf(ns));
+  }
+  return { frames, globals, complete: known && frameState.entryDepth >= 1 && markers === frameState.entryDepth, made: [] };
+}
+
+function incomplete(fn: string, n: number): never {
+  return raise(T.RuntimeError, `sys.${fn}: the call stack is incomplete (the JavaScript engine cut it, it holds a frame that can't be verified, or this code runs outside a Python execution); frames past ${n} are unknown`);
+}
+
+// The frame `depth` calls out from the caller (sys._getframe's argument, a C
+// int: a negative one is 0), or null past a complete stack's last
+function frameAt(fn: string, depth: any): PyFrame | null {
+  if (!engineVerified()) raise(T.AttributeError, `sys.${fn} is not available on this JavaScript engine (frames can't be verified)`);
+  const d = Math.max(0, depth === undefined ? 0 : cIntArg(depth));
+  const c = withSites((s) => (isCallSites(s) ? readFrames(s) : null), true);
+  if (c === null) return raise(T.AttributeError, `sys.${fn} is not available on this JavaScript engine (frames can't be verified)`);
+  if (d < c.frames.length) return frameOf(c, d);
+  if (c.complete) return null;
+  return incomplete(fn, c.frames.length);
+}
+
+// A frame: a snapshot of where its code was when sys._getframe was called,
+// with no locals (f_locals is an AttributeError); its globals the live dict
+// (held, as a CPython frame holds them)
+class PyFrame {
+  code: CodeObject | undefined;
+  constructor(
+    public c: Capture,
+    public i: number,
+  ) {}
+}
+function frameOf(c: Capture, i: number): PyFrame {
+  return (c.made[i] ??= new PyFrame(c, i));
+}
+const frameType = Ty.builtinTypeFor("frame", PyFrame, "builtins", () => raise(T.TypeError, "cannot create 'frame' instances"));
+// (co_name, as CPython's: <module>, <lambda> and <genexpr> for those)
+function coName(f: Frame): string {
+  if (f.kind === "genexpr") return "<genexpr>";
+  return f.kind === undefined && f.name === "lambda" ? "<lambda>" : f.name;
+}
+Ty.getset(frameType, "f_code", (fr: PyFrame) => (fr.code ??= new CodeObject("", fr.c.frames[fr.i].file, "frame", false, coName(fr.c.frames[fr.i]))));
+Ty.getset(frameType, "f_lineno", (fr: PyFrame) => fr.c.frames[fr.i].line, () => raise(T.ValueError, "f_lineno can only be set in a trace function"));
+Ty.getset(frameType, "f_globals", (fr: PyFrame) => fr.c.globals[fr.i] ?? raise(T.RuntimeError, `sys._getframe: the globals of this frame (${coName(fr.c.frames[fr.i])}, in ${fr.c.frames[fr.i].file}) are unknown`));
+Ty.getset(frameType, "f_back", (fr: PyFrame) => {
+  if (fr.i + 1 < fr.c.frames.length) return frameOf(fr.c, fr.i + 1);
+  return fr.c.complete ? null : incomplete("_getframe", fr.c.frames.length);
+});
+Ty.method(frameType, "__repr__", (fr: PyFrame) => `<frame file ${F.repr(fr.c.frames[fr.i].file)}, line ${fr.c.frames[fr.i].line}, code ${coName(fr.c.frames[fr.i])}>`);
+
+const getframe = Obj.builtin((depth: any = undefined) => frameAt("_getframe", depth) ?? raise(T.ValueError, "call stack is not deep enough"), "_getframe");
+getframe.$kw = (pos: any[], names: string[]) => (names.length ? raise(T.TypeError, "sys._getframe() takes no keyword arguments") : getframe(...pos));
+getframe.__doc__ = `Return a frame object from the call stack.
+
+If optional integer depth is given, return the frame object that many calls
+below the top of the stack; 0 (the default) is the caller's frame.  Past the
+outermost frame, ValueError.
+
+Sagebrush: a frame is a snapshot of where its code was at this call, with
+f_code (co_name, co_filename), f_lineno, f_back and f_globals (the live
+dict); it has no f_locals.  List, set and dict comprehensions have no frame,
+as in CPython 3.12+.  Only on V8 (Node, Chrome, Edge) can the frames be
+verified: on other JavaScript engines this is an AttributeError, as for a
+Python without it.  Where the stack can't be shown complete (the engine cut
+it, or the code runs outside a Python execution, called back from
+JavaScript), a depth past the known frames, or the last one's f_back, is a
+RuntimeError rather than a guess.`;
+const getframemodulename = Obj.builtin((...a: any[]) => {
+  if (a.length > 1) raise(T.TypeError, `_getframemodulename() takes at most 1 argument (${a.length} given)`);
+  const fr = frameAt("_getframemodulename", a[0]);
+  if (fr === null) return null;
+  const g = fr.c.globals[fr.i];
+  if (g === undefined) Obj.getattr(fr, "f_globals");
+  const name = Obj.dictGet(g!, "__name__");
+  return name === undefined ? null : name;
+}, "_getframemodulename");
+// (its own count check, in CPython's words: checkModuleArity passes it by)
+getframemodulename.$argRange = [0, 1];
+getframemodulename.$kw = (pos: any[], names: string[], values: any[]) => {
+  const bad = names.find((k) => k !== "depth");
+  if (bad !== undefined) raise(T.TypeError, `_getframemodulename() got an unexpected keyword argument '${bad}'`);
+  if (pos.length + names.length > 1) raise(T.TypeError, `_getframemodulename() takes at most 1 argument (${pos.length + names.length} given)`);
+  return getframemodulename(...pos, ...values);
+};
+getframemodulename.__doc__ = `Return the name of the module for a calling frame.
+
+The default depth returns the module containing the call to this API.
+A more typical use in a library will pass a depth of 1 to get the user's
+module rather than the library module.
+
+If no frame, module, or name can be found, returns None.
+
+Sagebrush: the name is the frame's globals' __name__ now.  CPython's is the
+running function's __module__: the two differ only where a function's
+__module__ was reassigned after the def, or its globals' __name__ has
+changed since.  Only on V8 (Node, Chrome, Edge) can the frames be verified:
+on other JavaScript engines this is an AttributeError, as for a Python
+without it.  Where the stack can't be shown complete, a depth past the known
+frames is a RuntimeError rather than None (see sys._getframe).`;
+for (const f of [getframe, getframemodulename]) f.__module__ = "sys";
+M.sysExtras._getframe = getframe;
+M.sysExtras._getframemodulename = getframemodulename;
 
 // The frames of a handled exception's traceback, as CPython's: from the
 // frame that caught it (excEnter records which function that was) to where
