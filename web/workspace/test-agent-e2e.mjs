@@ -132,7 +132,7 @@ try {
   await click(".sbag-box button.primary");
   ok(await until(`/connection failed/.test(document.querySelector(".sbag-box .err")?.textContent ?? "")`), "a failed connection is said in the dialog");
   const failText = await ev(`document.querySelector(".sbag-box .err").textContent`);
-  ok(/access apps on this device/.test(failText) && /Click Allow/.test(failText) && /Site settings/.test(failText) && !/Safari/.test(failText) && /^the connection failed/.test(failText), `in Chrome, it says to Allow its prompt and how to undo a block (${failText.slice(0, 60)}…)`);
+  ok(/access apps on this device/.test(failText) && /Choose Allow/.test(failText) && !/[\u201c\u201d"]/.test(failText.slice(failText.indexOf("Chrome"))) && /Site settings/.test(failText) && !/Safari/.test(failText) && /^the connection failed/.test(failText), `in Chrome, it says to Allow its prompt and how to undo a block (${failText.slice(0, 60)}…)`);
   ok((await drive({ op: "status" })).ok.paired === false, "the code is still unused after the failed connection");
 
   // the right code, through the dialog, then the grant: /A, read and write, until the page closes
