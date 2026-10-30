@@ -157,7 +157,7 @@ export type SectionHost = { say(text: string): void; fail(e: unknown): void; usa
 type DetailsRead = (ns: string) => Promise<[{ count: number; paths: [string, string][] } | undefined, Refusal[] | undefined, number?]>;
 /** The notebooks with edits the server hasn't acknowledged (their ids), or `over` when there are too many to count
  * (a seam for tests). */
-type ReadUnacked = () => Promise<{ ids: string[]; over: boolean }>;
+export type ReadUnacked = () => Promise<{ ids: string[]; over: boolean }>;
 /** Records that this device's refusals up to number `n` were looked at (a seam for tests). */
 type MarkSeen = (ns: string, n: number) => Promise<void>;
 export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, opts: { fetch?: Fetch; random?: () => number; after?: (ms: number, f: () => void) => () => void; readDetails?: DetailsRead; markSeen?: MarkSeen; readUnacked?: ReadUnacked } = {}): { dispose: () => void; poll: PanelPoll; refresh: () => void } {
@@ -525,8 +525,6 @@ function footOf(s: { state: string; waiting?: number; reason?: string; lastSynce
 // the namespace's debt row changes: a T1's charge, an acknowledgement or a dropped notebook changes it)
 let unackedDb: Promise<IDBDatabase> | null = null;
 let unackedLast: { key: string; ids: string[]; over: boolean } | null = null;
-/** The notebooks with edits the server hasn't acknowledged: the debt row read first (cheap), the registry and slots
- * (one transaction) only when it changed since the last count. */
 /** The notebooks' words for the foot (2c-3), for `owner`'s view now: those its document sync stopped, which won't send,
  * and, while offline or syncing, those with edits waiting; the count read never holds the foot back: a failed or too
  * large one says "notebook edits".  Nothing to say: undefined.  Read by the panel's foot and the sidebar's line. */
@@ -541,6 +539,8 @@ export async function readNotebooks(owner: { view(): { s: { state: string } }; s
     return { waiting: 0, stopped: stopped.length, unknown: true };
   }
 }
+/** The notebooks with edits the server hasn't acknowledged: the debt row read first (cheap), the registry and slots
+ * (one transaction) only when it changed since the last count. */
 async function unackedNotebooks(): Promise<{ ids: string[]; over: boolean }> {
   unackedDb ??= openHistoryDb({ onVersionChange: () => { void unackedDb?.then((db) => db.close()); unackedDb = null; } }).catch((e: unknown) => { unackedDb = null; throw e; });
   const db = await unackedDb;
