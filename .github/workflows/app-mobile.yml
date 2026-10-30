@@ -11,24 +11,24 @@
 #   component against the channel manifest's SHA-256.
 # - The Tauri CLI: crate tauri-cli 2.12.4, installed --locked; crates.io
 #   packages are checked against the index's SHA-256.
-# Not yet pinned: the Gradle distribution and the Maven packages the
-# generated Android project downloads.  This job prints the wrapper's
-# properties and uploads the generated project, so that a follow-up can
-# commit gen/android with distributionSha256Sum and Gradle dependency
-# verification.
+# - Gradle: the Android project is committed (app/src-tauri/gen/android) with
+#   the wrapper jar's sha256 (checked below), the distribution's
+#   (distributionSha256Sum) and every dependency's
+#   (gradle/verification-metadata.xml); two negative controls show a tampered
+#   checksum fails.
 #
-# Until that follow-up lands, this job must not be able to break anyone
-# else's CI (@sagebrush's ruling, after the unpinned appimagetool of #304):
-# it runs only when this file changes, or by hand (workflow_dispatch), and is
-# never a required check or a need of ci.yml's aggregate.
+# It runs only when this file or the committed Android project changes, or by
+# hand (workflow_dispatch), and is
+# never a required check or a need of ci.yml's aggregate (@sagebrush's ruling
+# after #304); making it gate is a separate decision.
 name: app-mobile
 
 on:
   push:
     branches: [master]
-    paths: [".github/workflows/app-mobile.yml"]
+    paths: [".github/workflows/app-mobile.yml", "app/src-tauri/gen/android/**"]
   pull_request:
-    paths: [".github/workflows/app-mobile.yml"]
+    paths: [".github/workflows/app-mobile.yml", "app/src-tauri/gen/android/**"]
   workflow_dispatch:
 
 permissions:
@@ -102,15 +102,28 @@ jobs:
         run: |
           cargo install tauri-cli --version "=$TAURI_CLI_VERSION" --locked
           cargo tauri --version
-      - name: the Android project (generated)
-        working-directory: app/src-tauri
+      # (the Android project is committed, app/src-tauri/gen/android, with
+      # Gradle's checksums: the wrapper jar's sha256 is checked here, the
+      # wrapper checks the distribution's (distributionSha256Sum), and Gradle
+      # checks every dependency it downloads (gradle/verification-metadata.xml);
+      # see the PR that added them for where each sha came from)
+      - name: the committed Android project and its wrapper jar
+        working-directory: app/src-tauri/gen/android
         run: |
-          cargo tauri android init --ci
-          echo "--- gen/android/gradle/wrapper/gradle-wrapper.properties"
-          cat gen/android/gradle/wrapper/gradle-wrapper.properties
+          set -euo pipefail
+          printf '%s\n' '497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7  gradle/wrapper/gradle-wrapper.jar' | sha256sum -c -
+          grep -qx 'distributionSha256Sum=9c0f7faeeb306cb14e4279a3e084ca6b596894089a0638e68a07c945a32c9e14' gradle/wrapper/gradle-wrapper.properties
+          test -f gradle/verification-metadata.xml
       - name: build (debug APK, arm64)
         working-directory: app/src-tauri
         run: cargo tauri android build --debug --apk --target aarch64
+      # (the build changed nothing committed: what Tauri writes on every build
+      # is in gen/android's own .gitignore files)
+      - name: the committed project is unchanged by the build
+        run: |
+          set -euo pipefail
+          changed=$(git status --porcelain -- app/src-tauri/gen/android)
+          if [ -n "$changed" ]; then echo "the build changed the committed Android project:"; echo "$changed"; git diff --stat -- app/src-tauri/gen/android; exit 1; fi
       - name: the APK
         run: |
           set -euo pipefail
@@ -121,14 +134,37 @@ jobs:
           name: sagebrush-android-debug
           path: app/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
-      # (the generated project, without its build outputs, for the follow-up
-      # that commits it with the Gradle checksums)
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: android-project-generated
-          path: |
-            app/src-tauri/gen/android
-            !app/src-tauri/gen/android/**/build/**
-            !app/src-tauri/gen/android/.gradle/**
-          if-no-files-found: warn
+      # Negative controls: a tampered checksum fails the build.
+      # (1) one dependency's sha256 changed in verification-metadata.xml: the
+      # same Gradle build (without the Rust step) must fail its verification
+      - name: "negative control: a tampered dependency sha256 fails"
+        working-directory: app/src-tauri/gen/android
+        run: |
+          set -uo pipefail
+          meta=gradle/verification-metadata.xml
+          first=$(grep -m1 -o '<sha256 value="[0-9a-f]\{64\}"' "$meta" | grep -o '[0-9a-f]\{64\}')
+          echo "tampering $first"
+          sed -i "0,/$first/s//$(printf '0%.0s' $(seq 64))/" "$meta"
+          ! grep -q "$first" "$meta" || { echo "the tamper didn't apply"; exit 1; }
+          c=0; ./gradlew --no-daemon --no-configuration-cache assembleUniversalDebug -x rustBuildUniversalDebug > /tmp/tampered.log 2>&1 || c=$?
+          git checkout -- "$meta"
+          tail -20 /tmp/tampered.log
+          [ "$c" != 0 ] || { echo "FAIL: the build passed with a tampered sha256"; exit 1; }
+          grep -q 'Dependency verification failed' /tmp/tampered.log || { echo "FAIL: it failed, but not on dependency verification"; exit 1; }
+          echo "ok: a tampered dependency sha256 fails the build (exit $c)"
+      # (2) the distribution's sha256 changed: a fresh Gradle home (so the
+      # wrapper downloads the distribution again) must refuse it
+      - name: "negative control: a tampered distribution sha256 fails"
+        working-directory: app/src-tauri/gen/android
+        run: |
+          set -uo pipefail
+          props=gradle/wrapper/gradle-wrapper.properties
+          sed -i 's/^distributionSha256Sum=.*/distributionSha256Sum=0000000000000000000000000000000000000000000000000000000000000000/' "$props"
+          c=0; GRADLE_USER_HOME=$(mktemp -d) ./gradlew --no-daemon --version > /tmp/tampered-dist.log 2>&1 || c=$?
+          git checkout -- "$props"
+          tail -12 /tmp/tampered-dist.log
+          [ "$c" != 0 ] || { echo "FAIL: the wrapper accepted a tampered distribution sha256"; exit 1; }
+          grep -q 'Verification of Gradle distribution failed' /tmp/tampered-dist.log || { echo "FAIL: it failed, but not on the distribution's checksum"; exit 1; }
+          echo "ok: a tampered distribution sha256 fails (exit $c)"
+      - name: the committed project is unchanged after the controls
+        run: test -z "$(git status --porcelain -- app/src-tauri/gen/android)"
