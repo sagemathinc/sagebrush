@@ -3608,7 +3608,7 @@
  "lib/_operator.py :: _compare_digest :: raise TypeError(\"unsupported operand types(s) or combination of types: '%s' and '%s'\" #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
-  "reason": "CPython's own code paths, no size bound: _operator._compare_digest's TypeError for operands that are neither two str nor buffers (CPython's message, its typo included); hmac.py's two except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib), where CPython falls back to the pure-Python HMAC"
+  "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
  },
  "lib/_png.py ::  :: MAX_AXIS = 16384 #0": {
   "class": "1+2",
@@ -4910,12 +4910,12 @@
  "lib/hmac.py :: HMAC.__init :: except _hashopenssl.UnsupportedDigestmodError: # pragma: no cover #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
-  "reason": "CPython's own code paths, no size bound: _operator._compare_digest's TypeError for operands that are neither two str nor buffers (CPython's message, its typo included); hmac.py's two except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib), where CPython falls back to the pure-Python HMAC"
+  "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
  },
  "lib/hmac.py :: digest :: except _hashopenssl.UnsupportedDigestmodError: #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
-  "reason": "CPython's own code paths, no size bound: _operator._compare_digest's TypeError for operands that are neither two str nor buffers (CPython's message, its typo included); hmac.py's two except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib), where CPython falls back to the pure-Python HMAC"
+  "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
  },
  "lib/locale.py ::  :: \"LC_NUMERIC\", \"LC_ALL\", \"CHAR_MAX\", \"getencoding\"] #0": {
   "class": "none",
