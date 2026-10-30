@@ -27,10 +27,11 @@
 // loadRecord(), the record or null; save(doc, {journal: {j, hash, unjournaled, keep?, markOnly?}}), a compare and swap
 // on doc.baseRev, resolving {saved, rev}, {conflict}, or a refusal's text (web/notebook/stores.js IdbStore's).
 import { bytesHash } from "../notebook/stores.js";
-import { t1Write, dropRows, readJournal, roomRefused, syncedKey, acked, markSent, rotate } from "./rows.js";
+import { t1Write, dropRows, readJournal, readSync, roomRefused, syncedKey, acked, markSent, rotate } from "./rows.js";
 import { writeIntent, prune, neverFits, replay, journalTexts } from "./core.js";
 import { makeClientId, decodePatchId } from "patchflow";
 import { LIMITS } from "../sync-protocol/protocol";
+import { EXACT_MERGE_CLIENT } from "../workspace/merge-client";
 
 const canonical = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
 /** The hash of what a kind's history keeps of `doc` (SHA-256 of the canonical JSON of its versionedOf). */
@@ -49,6 +50,9 @@ export function journalStoreClasses({ IdbStore, IdbPatchStore }, kindOf) {
     // (the document's journal identity, for good: `store.id` is its history's key, which a synced document's start
     // changes to `<id>:s<n>`; every journal row is the document's (astra's CORR-2C2-1))
     store.docId = id; store.noun = kind.noun;
+    // (a synced history's merge mode, read with its patches (IdbPatchStore.loadInitial): its start row's, for the
+    // synced key only; the document's own key never has one, plan-merge-align r3.2 §5)
+    store.readMerge = (st) => readSync(st, id).then(({ start }) => (start && syncedKey(id, start.n) === store.id ? start.merge : undefined));
     // (F4: paused, a save's T1 is its intent alone; nothing to write for a version that isn't a save's)
     store.writePending = () => (store.intent ? writeIntent(store, store.intent) : Promise.resolve({ refused: journalTexts(kind.noun).PAUSED }));
     return store;
@@ -410,6 +414,7 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
   async load() {
     this.released = false;
     await this.useSynced();
+    await this.exactReadable();
     // (not the writer: shown as it is, read-only, with nothing written (no recovery: that is the writer's))
     if (!(await this.acquire())) {
       this.viewed = true;
@@ -435,6 +440,7 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       // (the synced history's key and client read again now, under the writer's lock: a start or a rotation by the tab
       // that held it before is adopted, never an earlier read's (astra's CORR-2C2-2)); the history made again from it
       await this.useSynced();
+      await this.exactReadable();
       this.viewed = false;
       await this.history.init();
       for (let i = 0; ; i++) {
@@ -463,6 +469,14 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     } finally {
       this.recovering = false;
     }
+  }
+  // (a synced history whose recorded mode this build can't read (exact-v1 without the exact reader, the define off):
+  // refused before its history is opened, read, recovered or written, here and again under the writer's lock (the
+  // grader's G-P2b-5; never the legacy codec in its place); nothing of it is touched)
+  async exactReadable() {
+    if (EXACT_MERGE_CLIENT) return;
+    const js = await readJournal(this.hdb, this.id);
+    if (js.start?.merge === "exact-v1") throw Object.assign(new Error(this.T.NO_EXACT), { noExact: true });
   }
   // (the record with the versioned part of `value` (the history's records): the kind's withValue)
   withValue(rec, value) { return this.kind.withValue(rec, value); }
