@@ -76,6 +76,27 @@ fn ios_selftest_dir(_app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     None
 }
 
+// A DEBUG build logs the first LOG_REQUESTS requests the page's server
+// answers, for the self-test's diagnosis of cross-origin isolation
+// (app/selftest/coi-reading.py): the plugin's hook sees only the URL (no
+// method or Sec-Fetch headers) and runs only for a file it serves, so each
+// line is that URL, whether it carries the self-test's ?sb-diag= marker, and
+// the two headers the hook set.  A release build has none of it.
+#[cfg(debug_assertions)]
+const LOG_REQUESTS: usize = 40;
+
+#[cfg(debug_assertions)]
+fn log_request(url: &str) {
+    static SEEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = SEEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    if n <= LOG_REQUESTS {
+        let diag = if url.contains("sb-diag=") { "yes" } else { "no" };
+        eprintln!("[localhost] #{n} url={url:?} diag={diag} dest=unavailable mode=unavailable status=200(served) set: COOP=same-origin COEP=require-corp");
+    } else if n == LOG_REQUESTS + 1 {
+        eprintln!("[localhost] cap reached; later requests not logged");
+    }
+}
+
 // the page's console during a self-test (it has no other window to the outside)
 #[tauri::command]
 fn app_log(message: String) {
@@ -116,6 +137,8 @@ pub fn run() {
     if std::env::var("SAGEBRUSH_APP_SELFTEST").is_ok() {
         eprintln!("[app] the page is at http://127.0.0.1:{port}/");
     }
+    #[cfg(debug_assertions)]
+    eprintln!("[localhost] logger start port={port} cap={LOG_REQUESTS} (debug build; \"set:\" is what this server's hook put on the response, not what the web view received)");
     tauri::Builder::default()
         .plugin(
             tauri_plugin_localhost::Builder::new(port)
@@ -123,6 +146,8 @@ pub fn run() {
                 .on_request(|_request, response| {
                     response.add_header("Cross-Origin-Opener-Policy", "same-origin");
                     response.add_header("Cross-Origin-Embedder-Policy", "require-corp");
+                    #[cfg(debug_assertions)]
+                    log_request(_request.url());
                 })
                 .build(),
         )

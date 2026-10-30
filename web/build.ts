@@ -141,6 +141,9 @@ const graphResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(he
 const notebookResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "index.js")], outdir: join(here, "dist"), naming: "sagebrush-notebook.js", target: "browser", format: "esm", minify: true, define: MERGE_DEFINE });
 // TimeTravel's history (web/notebook/history.js, with patchflow), loaded after the notebook
 const historyResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "history.js")], outdir: join(here, "dist"), naming: "sagebrush-history.js", target: "browser", format: "esm", minify: true, define: MERGE_DEFINE });
+// the app self-test's COI diagnosis (web/notebook/selftest-diagnose.js), imported by selftest() only when the
+// app's self-test runs; the app copies it (app/build-frontend.mjs), the CLI doesn't serve it
+const selftestResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "selftest-diagnose.js")], outdir: join(here, "dist"), naming: "sagebrush-selftest.js", target: "browser", format: "esm", minify: true });
 // The reactive notebook's analyzer (web/analyze-worker.ts): pyparse and
 // src/dataflow.ts in a worker of their own
 const analyzeResult = await Bun.build(<any>{
@@ -164,8 +167,8 @@ const shareDepsResult = await Bun.build(<any>{ metafile: true, entrypoints: [joi
 // the page goes, it goes too (the site; the CLI's embedded page, scripts/build-cli.mjs and src/notebook.ts; the
 // app, app/build-frontend.mjs), but the service worker doesn't precache it.
 const remoteResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "remote-ui.js")], outdir: join(here, "dist"), naming: "sagebrush-remote.js", target: "browser", format: "esm", minify: true, define: MERGE_DEFINE });
-const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult]];
-for (const r of [result, consoleResult, mathResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult]) {
+const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult], ["the app self-test's COI diagnosis", selftestResult]];
+for (const r of [result, consoleResult, mathResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult, selftestResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);
